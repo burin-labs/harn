@@ -414,7 +414,7 @@ pub(crate) const SIGNAL_HANDLER_OPTIONS: Ty = Ty::Shape(&[
 /// and `sub_agent_run` background mode. Mirrors `clone_worker_state` in
 /// `crates/harn-vm/src/stdlib/agents_workers/mod.rs`.
 pub(crate) const WORKER_SUMMARY: Ty = Ty::Shape(&[
-    ShapeFieldDescriptor::new("_type", TY_STRING),
+    ShapeFieldDescriptor::new("_type", Ty::LitString("agent_handle")),
     ShapeFieldDescriptor::new("id", TY_STRING),
     ShapeFieldDescriptor::new("name", TY_STRING),
     ShapeFieldDescriptor::new("task", TY_STRING),
@@ -440,6 +440,21 @@ pub(crate) const WORKER_SUMMARY: Ty = Ty::Shape(&[
     ShapeFieldDescriptor::new("audit", TY_DICT),
 ]);
 
+/// User-facing result returned by foreground `sub_agent_run`. Background mode
+/// returns [`WORKER_SUMMARY`] instead.
+pub(crate) const SUB_AGENT_RESULT: Ty = Ty::Shape(&[
+    ShapeFieldDescriptor::new("ok", TY_BOOL),
+    ShapeFieldDescriptor::new("summary", TY_STRING),
+    ShapeFieldDescriptor::new("artifacts", TY_LIST),
+    ShapeFieldDescriptor::new("evidence_added", TY_INT),
+    ShapeFieldDescriptor::new("tokens_used", TY_INT),
+    ShapeFieldDescriptor::new("budget_exceeded", TY_BOOL),
+    ShapeFieldDescriptor::new("data", TY_ANY),
+    ShapeFieldDescriptor::new("error", TY_ANY),
+    ShapeFieldDescriptor::new("session_id", TY_STRING),
+    ShapeFieldDescriptor::new("transcript", TRANSCRIPT),
+]);
+
 /// Return type of `daemon_spawn`, `daemon_snapshot`, `daemon_resume`,
 /// `daemon_stop`, `daemon_trigger`. Mirrors `daemon_summary` in
 /// `crates/harn-vm/src/stdlib/agents_daemon.rs`.
@@ -462,8 +477,111 @@ pub(crate) const DAEMON_SUMMARY: Ty = Ty::Shape(&[
 
 /// Result returned by `agent_session_ancestry`.
 pub(crate) const SESSION_ANCESTRY: Ty = Ty::Shape(&[
-    ShapeFieldDescriptor::optional("parent_id", TY_STRING_OR_NIL),
+    ShapeFieldDescriptor::new("parent_id", TY_STRING_OR_NIL),
     ShapeFieldDescriptor::new("child_ids", TY_LIST),
+    ShapeFieldDescriptor::new("root_id", TY_STRING),
+]);
+
+/// Canonical transcript dict returned by the transcript lifecycle builtins.
+pub(crate) const TRANSCRIPT: Ty = Ty::Shape(&[
+    ShapeFieldDescriptor::new("_type", Ty::LitString("transcript")),
+    ShapeFieldDescriptor::new("version", TY_INT),
+    ShapeFieldDescriptor::new("id", TY_STRING),
+    ShapeFieldDescriptor::new("messages", TY_LIST),
+    ShapeFieldDescriptor::new("events", TY_LIST),
+    ShapeFieldDescriptor::new("assets", TY_LIST),
+    ShapeFieldDescriptor::optional("summary", TY_STRING),
+    ShapeFieldDescriptor::optional("metadata", TY_DICT),
+    ShapeFieldDescriptor::optional("state", TY_STRING),
+    ShapeFieldDescriptor::optional("archived_messages", TY_INT),
+]);
+
+/// `agent_session_snapshot(id)` returns the transcript plus session lineage
+/// and prompt/tool metadata.
+pub(crate) const SESSION_SNAPSHOT: Ty = Ty::Shape(&[
+    ShapeFieldDescriptor::new("_type", Ty::LitString("transcript")),
+    ShapeFieldDescriptor::new("version", TY_INT),
+    ShapeFieldDescriptor::new("id", TY_STRING),
+    ShapeFieldDescriptor::new("length", TY_INT),
+    ShapeFieldDescriptor::new("messages", TY_LIST),
+    ShapeFieldDescriptor::new("events", TY_LIST),
+    ShapeFieldDescriptor::new("assets", TY_LIST),
+    ShapeFieldDescriptor::new("created_at", TY_STRING),
+    ShapeFieldDescriptor::new("parent_id", TY_STRING_OR_NIL),
+    ShapeFieldDescriptor::new("child_ids", TY_LIST),
+    ShapeFieldDescriptor::new("branched_at_event_index", Ty::Union(&[TY_INT, TY_NIL])),
+    ShapeFieldDescriptor::new("system_prompt", TY_STRING_OR_NIL),
+    ShapeFieldDescriptor::new("tool_format", TY_STRING_OR_NIL),
+    ShapeFieldDescriptor::optional("summary", TY_STRING),
+    ShapeFieldDescriptor::optional("metadata", TY_DICT),
+    ShapeFieldDescriptor::optional("state", TY_STRING),
+]);
+
+/// `tool_registry()` and related host-current registry lookups.
+pub(crate) const TOOL_REGISTRY: Ty = Ty::Shape(&[
+    ShapeFieldDescriptor::new("_type", Ty::LitString("tool_registry")),
+    ShapeFieldDescriptor::new("tools", TY_LIST),
+]);
+
+/// Token and provider-cache accounting embedded in `llm_call` results.
+pub(crate) const LLM_USAGE: Ty = Ty::Shape(&[
+    ShapeFieldDescriptor::new("input_tokens", TY_INT),
+    ShapeFieldDescriptor::new("output_tokens", TY_INT),
+    ShapeFieldDescriptor::new("cache_read_tokens", TY_INT),
+    ShapeFieldDescriptor::new("cache_write_tokens", TY_INT),
+    ShapeFieldDescriptor::new("cache_creation_input_tokens", TY_INT),
+    ShapeFieldDescriptor::new("cache_hit_ratio", TY_FLOAT),
+    ShapeFieldDescriptor::new("cache_savings_usd", TY_FLOAT),
+]);
+
+/// Harn-facing response dict assembled by `vm_build_llm_result` for
+/// `llm_call` and `llm_completion`.
+pub(crate) const LLM_CALL_RESULT: Ty = Ty::Shape(&[
+    ShapeFieldDescriptor::new("text", TY_STRING),
+    ShapeFieldDescriptor::new("model", TY_STRING),
+    ShapeFieldDescriptor::new("provider", TY_STRING),
+    ShapeFieldDescriptor::new("input_tokens", TY_INT),
+    ShapeFieldDescriptor::new("output_tokens", TY_INT),
+    ShapeFieldDescriptor::new("cache_read_tokens", TY_INT),
+    ShapeFieldDescriptor::new("cache_write_tokens", TY_INT),
+    ShapeFieldDescriptor::new("cache_creation_input_tokens", TY_INT),
+    ShapeFieldDescriptor::new("cache_hit_ratio", TY_FLOAT),
+    ShapeFieldDescriptor::new("cache_savings_usd", TY_FLOAT),
+    ShapeFieldDescriptor::new("usage", LLM_USAGE),
+    ShapeFieldDescriptor::new("native_tool_calls", TY_LIST),
+    ShapeFieldDescriptor::new("prose", TY_STRING),
+    ShapeFieldDescriptor::new("visible_text", TY_STRING),
+    ShapeFieldDescriptor::new("blocks", TY_LIST),
+    ShapeFieldDescriptor::optional("data", TY_ANY),
+    ShapeFieldDescriptor::new("tool_calls", TY_LIST),
+    ShapeFieldDescriptor::optional("protocol_violations", TY_LIST),
+    ShapeFieldDescriptor::optional("tool_parse_errors", TY_LIST),
+    ShapeFieldDescriptor::optional("done_marker", TY_STRING),
+    ShapeFieldDescriptor::optional("canonical_text", TY_STRING),
+    ShapeFieldDescriptor::optional("thinking", TY_STRING),
+    ShapeFieldDescriptor::optional("private_reasoning", TY_STRING),
+    ShapeFieldDescriptor::optional("thinking_summary", TY_STRING),
+    ShapeFieldDescriptor::optional("stop_reason", TY_STRING),
+    ShapeFieldDescriptor::new("transcript", TRANSCRIPT),
+    ShapeFieldDescriptor::optional("logprobs", TY_LIST),
+]);
+
+/// Error dict surfaced by `llm_call` throws and `llm_call_safe`.
+pub(crate) const LLM_CALL_ERROR: Ty = Ty::Shape(&[
+    ShapeFieldDescriptor::new("category", TY_STRING),
+    ShapeFieldDescriptor::new("kind", TY_STRING),
+    ShapeFieldDescriptor::new("reason", TY_STRING),
+    ShapeFieldDescriptor::new("message", TY_STRING),
+    ShapeFieldDescriptor::optional("retry_after_ms", TY_INT),
+    ShapeFieldDescriptor::optional("provider", TY_STRING),
+    ShapeFieldDescriptor::optional("model", TY_STRING),
+]);
+
+/// Non-throwing envelope returned by `llm_call_safe`.
+pub(crate) const LLM_CALL_SAFE_RESULT: Ty = Ty::Shape(&[
+    ShapeFieldDescriptor::new("ok", TY_BOOL),
+    ShapeFieldDescriptor::new("response", LLM_CALL_RESULT),
+    ShapeFieldDescriptor::new("error", LLM_CALL_ERROR),
 ]);
 
 /// Standard `{ ok, status, ...payload }` result envelope returned by I/O

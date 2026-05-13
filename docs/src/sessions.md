@@ -64,7 +64,7 @@ the "one-shot" call shape.
 | `agent_session_exists(id)` | `bool` | Safe on unknown ids. |
 | `agent_session_current_id()` | `string` or `nil` | Returns the innermost active session id for the current thread, or `nil` outside any active session. |
 | `agent_session_length(id)` | `int` | Message count. Errors if `id` doesn't exist. |
-| `agent_session_snapshot(id)` | `dict` or `nil` | Read-only transcript snapshot plus `parent_id`, `child_ids`, and `branched_at_event_index`. |
+| `agent_session_snapshot(id)` | `dict` or `nil` | Read-only transcript snapshot plus `length`, `created_at`, `system_prompt`, `tool_format`, `parent_id`, `child_ids`, and `branched_at_event_index`. |
 | `agent_session_ancestry(id)` | `dict` or `nil` | Returns `{parent_id, child_ids, root_id}` for the in-VM session graph. |
 | `agent_session_reset(id)` | `nil` | Wipes history; preserves id and subscribers. |
 | `agent_session_fork(src, dst?)` | `string` | Copies transcript, sets parent/child lineage, and does NOT copy subscribers. |

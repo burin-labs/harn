@@ -639,7 +639,7 @@ pub(super) async fn execute_sub_agent(
                     None,
                 ),
             };
-            let transcript = crate::agent_sessions::snapshot(&spec.session_id)
+            let transcript = crate::agent_sessions::transcript(&spec.session_id)
                 .unwrap_or_else(|| crate::stdlib::json_to_vm_value(&serde_json::json!({})));
             let tokens_used = transcript_tokens_used(&transcript);
             let envelope = wrap_sub_agent_error(

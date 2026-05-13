@@ -430,7 +430,7 @@ async fn host_agent_session_finalize(args: Vec<VmValue>) -> Result<VmValue, VmEr
         );
         let _ = crate::agent_sessions::append_event(&session_id, transcript_event);
     }
-    let snapshot = crate::agent_sessions::snapshot(&session_id);
+    let snapshot = crate::agent_sessions::transcript(&session_id);
     let transcript_json = snapshot
         .as_ref()
         .map(vm_to_json)
@@ -536,7 +536,7 @@ fn host_agent_session_messages_builtin(
     _out: &mut String,
 ) -> Result<VmValue, VmError> {
     let session_id = args.first().map(|v| v.display()).unwrap_or_default();
-    let snapshot = crate::agent_sessions::snapshot(&session_id);
+    let snapshot = crate::agent_sessions::transcript(&session_id);
     let messages = snapshot
         .as_ref()
         .and_then(|v| dict_get(v, "messages"))
@@ -1354,7 +1354,7 @@ fn host_agent_daemon_snapshot_builtin(
     let daemon_state = opt_str(&opts_map, "daemon_state").unwrap_or_else(|| "idle".to_string());
     let total_iterations = opt_int(&opts_map, "total_iterations").unwrap_or(0).max(0) as usize;
     let transcript_summary_override = opt_str(&opts_map, "transcript_summary");
-    let transcript = crate::agent_sessions::snapshot(&session_id).unwrap_or(VmValue::Nil);
+    let transcript = crate::agent_sessions::transcript(&session_id).unwrap_or(VmValue::Nil);
     let transcript_json = vm_to_json(&transcript);
     let visible_messages = transcript_json
         .get("messages")

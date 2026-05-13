@@ -33,7 +33,7 @@ pub struct SessionState {
     pub id: String,
     pub transcript: VmValue,
     pub subscribers: Vec<VmValue>,
-    pub created_at: Instant,
+    pub created_at: String,
     pub last_accessed: Instant,
     pub parent_id: Option<String>,
     pub child_ids: Vec<String>,
@@ -62,7 +62,7 @@ impl SessionState {
             id,
             transcript,
             subscribers: Vec::new(),
-            created_at: now,
+            created_at: crate::orchestration::now_rfc3339(),
             last_accessed: now,
             parent_id: None,
             child_ids: Vec::new(),
@@ -163,6 +163,16 @@ pub fn length(id: &str) -> Option<usize> {
 
 pub fn snapshot(id: &str) -> Option<VmValue> {
     SESSIONS.with(|s| s.borrow().get(id).map(session_snapshot))
+}
+
+/// Return the canonical transcript surface for APIs whose result field is
+/// named `transcript`. Session-only fields stay on `agent_session_snapshot`.
+pub fn transcript(id: &str) -> Option<VmValue> {
+    SESSIONS.with(|s| {
+        s.borrow()
+            .get(id)
+            .map(|state| transcript_with_session_metadata(state.transcript.clone(), state))
+    })
 }
 
 /// Open a session, or create it if missing. Returns the resolved id.
@@ -1015,6 +1025,18 @@ fn session_snapshot(state: &SessionState) -> VmValue {
         return state.transcript.clone();
     };
     let mut next = dict.clone();
+    let length = next
+        .get("messages")
+        .and_then(|value| match value {
+            VmValue::List(list) => Some(list.len() as i64),
+            _ => None,
+        })
+        .unwrap_or(0);
+    next.insert("length".to_string(), VmValue::Int(length));
+    next.insert(
+        "created_at".to_string(),
+        VmValue::String(Rc::from(state.created_at.clone())),
+    );
     next.insert(
         "parent_id".to_string(),
         state
@@ -1039,6 +1061,22 @@ fn session_snapshot(state: &SessionState) -> VmValue {
         state
             .branched_at_event_index
             .map(|index| VmValue::Int(index as i64))
+            .unwrap_or(VmValue::Nil),
+    );
+    next.insert(
+        "system_prompt".to_string(),
+        state
+            .system_prompt
+            .as_ref()
+            .map(|prompt| VmValue::String(Rc::from(prompt.clone())))
+            .unwrap_or(VmValue::Nil),
+    );
+    next.insert(
+        "tool_format".to_string(),
+        state
+            .tool_format
+            .as_ref()
+            .map(|format| VmValue::String(Rc::from(format.clone())))
             .unwrap_or(VmValue::Nil),
     );
     VmValue::Dict(Rc::new(next))
@@ -1172,9 +1210,9 @@ mod tests {
         inject_message(&id, make_msg("user", "hello")).unwrap();
 
         let snapshot = snapshot(&id).expect("session snapshot");
-        let metadata = snapshot
-            .as_dict()
-            .and_then(|dict| dict.get("metadata"))
+        let snapshot_dict = snapshot.as_dict().expect("session snapshot dict");
+        let metadata = snapshot_dict
+            .get("metadata")
             .and_then(VmValue::as_dict)
             .expect("metadata");
         let system_prompt = metadata
@@ -1188,6 +1226,19 @@ mod tests {
                 .as_deref(),
             Some("Follow the workflow.")
         );
+        assert!(
+            matches!(snapshot_dict.get("system_prompt"), Some(VmValue::String(value)) if value.as_ref() == "Follow the workflow.")
+        );
+        assert!(matches!(snapshot_dict.get("length"), Some(VmValue::Int(1))));
+
+        let transcript = transcript(&id).expect("canonical transcript");
+        let transcript_dict = transcript.as_dict().expect("canonical transcript dict");
+        assert!(!transcript_dict.contains_key("system_prompt"));
+        assert!(transcript_dict
+            .get("metadata")
+            .and_then(VmValue::as_dict)
+            .and_then(|metadata| metadata.get("system_prompt"))
+            .is_some());
         assert_eq!(message_count(&id), 1);
         assert_eq!(event_count_by_kind(&id, "system_prompt"), 1);
     }
@@ -1291,6 +1342,15 @@ mod tests {
         assert!(
             matches!(transcript.get("child_ids"), Some(VmValue::List(children)) if children.is_empty())
         );
+        assert!(matches!(transcript.get("length"), Some(VmValue::Int(0))));
+        assert!(
+            matches!(transcript.get("created_at"), Some(VmValue::String(value)) if !value.is_empty())
+        );
+        assert!(matches!(
+            transcript.get("system_prompt"),
+            Some(VmValue::Nil)
+        ));
+        assert!(matches!(transcript.get("tool_format"), Some(VmValue::Nil)));
         assert!(matches!(
             transcript.get("branched_at_event_index"),
             Some(VmValue::Nil)

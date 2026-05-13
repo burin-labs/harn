@@ -2,25 +2,29 @@
 
 use super::shapes::{
     AGENT_SESSION_COMPACT_OPTS, AGENT_SESSION_SEED_OPTS, AGENT_SPAWN_CONFIG, LLM_CALL_OPTIONS,
-    SESSION_ANCESTRY, SUB_AGENT_OPTIONS, WORKER_SUMMARY,
+    LLM_CALL_RESULT, LLM_CALL_SAFE_RESULT, SESSION_ANCESTRY, SESSION_SNAPSHOT, SUB_AGENT_OPTIONS,
+    SUB_AGENT_RESULT, TRANSCRIPT, WORKER_SUMMARY,
 };
 use super::{
     BuiltinSignature, Param, Ty, TY_ANY, TY_BOOL, TY_CLOSURE, TY_DICT, TY_DICT_OR_NIL, TY_FLOAT,
     TY_INT, TY_LIST, TY_NIL, TY_STRING, TY_STRING_OR_NIL,
 };
 
-/// `list | dict` — used for transcripts/message-lists arguments where
-/// either a raw `messages` list or a `transcript` dict is accepted, and
-/// for return values that mirror the input shape.
-const TY_LIST_OR_DICT: Ty = Ty::Union(&[TY_LIST, TY_DICT]);
+/// `list | dict | Transcript | SessionSnapshot` — used for
+/// transcripts/message-list arguments where either a raw `messages` list, a
+/// dynamic transcript dict, or one of the typed transcript shapes is accepted.
+const TY_MESSAGES_OR_TRANSCRIPT: Ty = Ty::Union(&[TY_LIST, TY_DICT, TRANSCRIPT, SESSION_SNAPSHOT]);
 
 /// `string | dict` — low-level LLM helpers accept raw text or an
 /// `llm_call` result dictionary.
 const TY_STRING_OR_DICT: Ty = Ty::Union(&[TY_STRING, TY_DICT]);
 
-/// `list | dict | nil` — transcript stats/event helpers intentionally
-/// tolerate nil/non-transcript inputs and produce empty results.
-const TY_LIST_OR_DICT_OR_NIL: Ty = Ty::Union(&[TY_LIST, TY_DICT, TY_NIL]);
+/// `list | dict | Transcript | SessionSnapshot | nil` — read-only transcript
+/// helpers are often fed values through optional chaining. Runtime validation
+/// still rejects nil for the core transcript readers; this keeps the static
+/// checker aligned with established call sites that know the value is present.
+const TY_MESSAGES_OR_TRANSCRIPT_OR_NIL: Ty =
+    Ty::Union(&[TY_LIST, TY_DICT, TRANSCRIPT, SESSION_SNAPSHOT, TY_NIL]);
 
 /// `dict | Schema<any>` — schema aliases type-check as `Schema<T>` but
 /// compile down to JSON-Schema dictionaries at runtime.
@@ -51,44 +55,44 @@ pub(crate) const SIGNATURES: &[BuiltinSignature] = &[
     BuiltinSignature::simple(
         "add_assistant",
         &[
-            Param::new("messages_or_transcript", TY_LIST_OR_DICT),
+            Param::new("messages_or_transcript", TY_MESSAGES_OR_TRANSCRIPT),
             Param::new("content", TY_ANY),
         ],
-        TY_LIST_OR_DICT,
+        TY_MESSAGES_OR_TRANSCRIPT,
     ),
     BuiltinSignature::simple(
         "add_message",
         &[
-            Param::new("messages_or_transcript", TY_LIST_OR_DICT),
+            Param::new("messages_or_transcript", TY_MESSAGES_OR_TRANSCRIPT),
             Param::new("role", TY_STRING),
             Param::new("content", TY_ANY),
         ],
-        TY_LIST_OR_DICT,
+        TY_MESSAGES_OR_TRANSCRIPT,
     ),
     BuiltinSignature::simple(
         "add_system",
         &[
-            Param::new("messages_or_transcript", TY_LIST_OR_DICT),
+            Param::new("messages_or_transcript", TY_MESSAGES_OR_TRANSCRIPT),
             Param::new("content", TY_ANY),
         ],
-        TY_LIST_OR_DICT,
+        TY_MESSAGES_OR_TRANSCRIPT,
     ),
     BuiltinSignature::simple(
         "add_tool_result",
         &[
-            Param::new("messages_or_transcript", TY_LIST_OR_DICT),
+            Param::new("messages_or_transcript", TY_MESSAGES_OR_TRANSCRIPT),
             Param::new("tool_use_id", TY_STRING),
             Param::new("content", TY_ANY),
         ],
-        TY_LIST_OR_DICT,
+        TY_MESSAGES_OR_TRANSCRIPT,
     ),
     BuiltinSignature::simple(
         "add_user",
         &[
-            Param::new("messages_or_transcript", TY_LIST_OR_DICT),
+            Param::new("messages_or_transcript", TY_MESSAGES_OR_TRANSCRIPT),
             Param::new("content", TY_ANY),
         ],
-        TY_LIST_OR_DICT,
+        TY_MESSAGES_OR_TRANSCRIPT,
     ),
     BuiltinSignature::simple(
         "agent",
@@ -175,7 +179,7 @@ pub(crate) const SIGNATURES: &[BuiltinSignature] = &[
             Param::optional("system", TY_STRING_OR_NIL),
             Param::optional("options", TY_DICT),
         ],
-        TY_DICT,
+        LLM_CALL_RESULT,
     ),
     BuiltinSignature::simple(
         "agent_loop",
@@ -370,7 +374,7 @@ pub(crate) const SIGNATURES: &[BuiltinSignature] = &[
     BuiltinSignature::simple(
         "agent_session_snapshot",
         &[Param::new("id", TY_STRING)],
-        TY_DICT_OR_NIL,
+        SESSION_SNAPSHOT,
     ),
     BuiltinSignature::simple(
         "agent_session_system_prompt",
@@ -456,7 +460,7 @@ pub(crate) const SIGNATURES: &[BuiltinSignature] = &[
             Param::optional("system", TY_STRING),
             Param::optional("options", LLM_CALL_OPTIONS),
         ],
-        TY_DICT,
+        LLM_CALL_RESULT,
     ),
     BuiltinSignature::simple(
         "llm_call_safe",
@@ -465,7 +469,7 @@ pub(crate) const SIGNATURES: &[BuiltinSignature] = &[
             Param::optional("system", TY_STRING),
             Param::optional("options", LLM_CALL_OPTIONS),
         ],
-        TY_DICT,
+        LLM_CALL_SAFE_RESULT,
     ),
     BuiltinSignature::simple(
         "llm_stream_call",
@@ -511,7 +515,7 @@ pub(crate) const SIGNATURES: &[BuiltinSignature] = &[
             Param::optional("system", TY_STRING),
             Param::optional("options", LLM_CALL_OPTIONS),
         ],
-        TY_DICT,
+        LLM_CALL_RESULT,
     ),
     BuiltinSignature::simple(
         "llm_config",
@@ -685,7 +689,7 @@ pub(crate) const SIGNATURES: &[BuiltinSignature] = &[
             Param::new("task", TY_STRING),
             Param::optional("options", SUB_AGENT_OPTIONS),
         ],
-        TY_DICT,
+        Ty::Union(&[SUB_AGENT_RESULT, WORKER_SUMMARY]),
     ),
     BuiltinSignature::simple(
         "sub_agent_request",
@@ -698,29 +702,29 @@ pub(crate) const SIGNATURES: &[BuiltinSignature] = &[
     BuiltinSignature::simple(
         "transcript",
         &[Param::optional("metadata", TY_DICT)],
-        TY_DICT,
+        TRANSCRIPT,
     ),
     BuiltinSignature::simple(
         "transcript_abandon",
-        &[Param::new("transcript", TY_LIST_OR_DICT)],
-        TY_DICT,
+        &[Param::new("transcript", TY_MESSAGES_OR_TRANSCRIPT)],
+        TRANSCRIPT,
     ),
     BuiltinSignature::simple(
         "transcript_add_asset",
         &[
-            Param::new("transcript", TY_LIST_OR_DICT),
+            Param::new("transcript", TY_MESSAGES_OR_TRANSCRIPT),
             Param::new("asset", TY_DICT),
         ],
-        TY_DICT,
+        TRANSCRIPT,
     ),
     BuiltinSignature::simple(
         "transcript_archive",
-        &[Param::new("transcript", TY_LIST_OR_DICT)],
-        TY_DICT,
+        &[Param::new("transcript", TY_MESSAGES_OR_TRANSCRIPT)],
+        TRANSCRIPT,
     ),
     BuiltinSignature::simple(
         "transcript_assets",
-        &[Param::new("transcript", TY_LIST_OR_DICT)],
+        &[Param::new("transcript", TY_MESSAGES_OR_TRANSCRIPT_OR_NIL)],
         TY_LIST,
     ),
     BuiltinSignature::simple(
@@ -734,45 +738,48 @@ pub(crate) const SIGNATURES: &[BuiltinSignature] = &[
     BuiltinSignature::simple(
         "transcript_compact",
         &[
-            Param::new("transcript", TY_LIST_OR_DICT),
+            Param::new("transcript", TY_MESSAGES_OR_TRANSCRIPT),
             Param::optional("options", TY_DICT),
         ],
-        TY_DICT,
+        TRANSCRIPT,
     ),
     BuiltinSignature::simple(
         "transcript_events",
-        &[Param::new("transcript", TY_LIST_OR_DICT)],
+        &[Param::new("transcript", TY_MESSAGES_OR_TRANSCRIPT_OR_NIL)],
         TY_LIST,
     ),
     BuiltinSignature::simple(
         "transcript_events_by_kind",
         &[
-            Param::new("transcript", TY_LIST_OR_DICT_OR_NIL),
+            Param::new("transcript", TY_MESSAGES_OR_TRANSCRIPT_OR_NIL),
             Param::new("kind", TY_STRING),
         ],
         TY_LIST,
     ),
     BuiltinSignature::simple(
         "transcript_export",
-        &[Param::new("transcript", TY_LIST_OR_DICT)],
+        &[Param::new("transcript", TY_MESSAGES_OR_TRANSCRIPT)],
         TY_STRING,
     ),
     BuiltinSignature::simple(
         "transcript_fork",
         &[
-            Param::new("transcript", TY_LIST_OR_DICT),
+            Param::new("transcript", TY_MESSAGES_OR_TRANSCRIPT),
             Param::optional("options", TY_DICT),
         ],
-        TY_DICT,
+        TRANSCRIPT,
     ),
     BuiltinSignature::simple(
         "transcript_from_messages",
-        &[Param::new("messages_or_transcript", TY_LIST_OR_DICT)],
-        TY_DICT,
+        &[Param::new(
+            "messages_or_transcript",
+            TY_MESSAGES_OR_TRANSCRIPT,
+        )],
+        TRANSCRIPT,
     ),
     BuiltinSignature::simple(
         "transcript_id",
-        &[Param::new("transcript", TY_LIST_OR_DICT)],
+        &[Param::new("transcript", TY_MESSAGES_OR_TRANSCRIPT_OR_NIL)],
         TY_STRING,
     ),
     BuiltinSignature::simple(
@@ -782,45 +789,45 @@ pub(crate) const SIGNATURES: &[BuiltinSignature] = &[
     ),
     BuiltinSignature::simple(
         "transcript_messages",
-        &[Param::new("transcript", TY_LIST_OR_DICT)],
+        &[Param::new("transcript", TY_MESSAGES_OR_TRANSCRIPT_OR_NIL)],
         TY_LIST,
     ),
     BuiltinSignature::simple(
         "transcript_render_full",
-        &[Param::new("transcript", TY_LIST_OR_DICT)],
+        &[Param::new("transcript", TY_MESSAGES_OR_TRANSCRIPT_OR_NIL)],
         TY_STRING,
     ),
     BuiltinSignature::simple(
         "transcript_render_visible",
-        &[Param::new("transcript", TY_LIST_OR_DICT)],
+        &[Param::new("transcript", TY_MESSAGES_OR_TRANSCRIPT_OR_NIL)],
         TY_STRING,
     ),
     BuiltinSignature::simple(
         "transcript_reset",
         &[Param::optional("opts", TY_DICT)],
-        TY_DICT,
+        TRANSCRIPT,
     ),
     BuiltinSignature::simple(
         "transcript_resume",
-        &[Param::new("transcript", TY_LIST_OR_DICT)],
-        TY_DICT,
+        &[Param::new("transcript", TY_MESSAGES_OR_TRANSCRIPT)],
+        TRANSCRIPT,
     ),
     BuiltinSignature::simple(
         "transcript_stats",
-        &[Param::new("transcript", TY_LIST_OR_DICT_OR_NIL)],
+        &[Param::new("transcript", TY_MESSAGES_OR_TRANSCRIPT_OR_NIL)],
         TY_DICT,
     ),
     BuiltinSignature::simple(
         "transcript_summarize",
         &[
-            Param::new("transcript", TY_LIST_OR_DICT),
+            Param::new("transcript", TY_MESSAGES_OR_TRANSCRIPT),
             Param::optional("options", TY_DICT),
         ],
-        TY_DICT,
+        TRANSCRIPT,
     ),
     BuiltinSignature::simple(
         "transcript_summary",
-        &[Param::new("transcript", TY_LIST_OR_DICT)],
+        &[Param::new("transcript", TY_MESSAGES_OR_TRANSCRIPT_OR_NIL)],
         TY_STRING_OR_NIL,
     ),
     BuiltinSignature::simple(
