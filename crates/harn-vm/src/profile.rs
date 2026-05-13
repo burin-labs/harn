@@ -69,9 +69,9 @@ pub fn build(spans: &[Span]) -> RunProfile {
         return RunProfile::default();
     }
 
-    // The pipeline root is conventionally the only top-level span. If a
-    // run somehow produced multiple, we sum them — accurate for total
-    // wall time, just unusual.
+    // The pipeline root is conventionally the only top-level VM span. Host
+    // adapters may add sibling setup spans, so top-level non-pipeline spans
+    // contribute to wall time and their own buckets.
     let total_wall_ms: u64 = spans
         .iter()
         .filter(|s| s.parent_id.is_none())
@@ -82,14 +82,16 @@ pub fn build(spans: &[Span]) -> RunProfile {
 
     // Residual = wall - sum of "real work" categories at the top level.
     // Imports/parallel/spawn count as work too; the category buckets cover
-    // them so we just subtract everything that was already accounted for
-    // at depth 1.
-    let depth1_total: u64 = spans
+    // them so we subtract depth-1 work plus any host setup sibling spans.
+    let accounted_total: u64 = spans
         .iter()
-        .filter(|s| matches!(s.parent_id, Some(pid) if is_pipeline_root(spans, pid)))
+        .filter(|s| {
+            (s.parent_id.is_none() && !is_profile_root_span(s))
+                || matches!(s.parent_id, Some(pid) if is_pipeline_root(spans, pid))
+        })
         .map(|s| s.duration_ms)
         .sum();
-    let residual_ms = total_wall_ms.saturating_sub(depth1_total);
+    let residual_ms = total_wall_ms.saturating_sub(accounted_total);
 
     let top_llm_calls = top_n_by_duration(spans, "llm_call");
     let top_tool_calls = top_n_by_duration(spans, "tool_call");
@@ -130,8 +132,12 @@ fn is_pipeline_root(spans: &[Span], id: u64) -> bool {
     spans
         .iter()
         .find(|s| s.span_id == id)
-        .map(|s| s.parent_id.is_none())
+        .map(is_profile_root_span)
         .unwrap_or(false)
+}
+
+fn is_profile_root_span(span: &Span) -> bool {
+    span.parent_id.is_none() && span.kind == crate::tracing::SpanKind::Pipeline
 }
 
 fn bucket_by_kind(spans: &[Span], total_wall_ms: u64) -> Vec<KindBucket> {
@@ -141,7 +147,7 @@ fn bucket_by_kind(spans: &[Span], total_wall_ms: u64) -> Vec<KindBucket> {
     // leaves.
     let mut totals: BTreeMap<String, (u64, u64)> = BTreeMap::new();
     for span in spans {
-        if span.parent_id.is_none() {
+        if is_profile_root_span(span) {
             // Skip the synthetic pipeline span; it's the wall-time
             // denominator, not a category bucket.
             continue;
@@ -399,6 +405,22 @@ mod tests {
         assert_eq!(profile.by_kind[1].count, 2);
         // 1000 wall - (600 + 300) depth-1 = 100 ms residual
         assert_eq!(profile.residual_ms, 100);
+    }
+
+    #[test]
+    fn top_level_vm_setup_span_gets_its_own_bucket() {
+        let spans = vec![
+            span(1, None, SpanKind::VmSetup, "acp_vm_setup", 20),
+            span(2, None, SpanKind::Pipeline, "main", 80),
+            span(3, Some(2), SpanKind::LlmCall, "llm_call", 50),
+        ];
+        let profile = build(&spans);
+        assert_eq!(profile.total_wall_ms, 100);
+        assert_eq!(profile.residual_ms, 30);
+        assert!(profile
+            .by_kind
+            .iter()
+            .any(|bucket| bucket.kind == "vm_setup" && bucket.total_ms == 20));
     }
 
     #[test]

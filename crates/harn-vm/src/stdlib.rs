@@ -172,6 +172,10 @@ pub fn register_vm_stdlib(vm: &mut Vm) {
     register_agent_stdlib(vm);
 }
 
+pub(crate) fn rebind_execution_state_builtins(vm: &mut Vm) {
+    concurrency::register_concurrency_builtins(vm);
+}
+
 fn stdlib_probe_vm() -> Vm {
     let mut vm = Vm::new();
     register_vm_stdlib(&mut vm);

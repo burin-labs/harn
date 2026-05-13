@@ -374,6 +374,81 @@ fn compile_pipeline_cached_does_not_cache_inline_prompts() {
     );
 }
 
+#[tokio::test(flavor = "current_thread")]
+async fn vm_baseline_cached_serves_file_backed_context_until_key_changes() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let pipeline_path = dir.path().join("baseline.harn");
+    let source = "pipeline main() { println(\"baseline\") }\n";
+    std::fs::write(&pipeline_path, source).expect("write pipeline");
+
+    let mut server = AcpServer::new(AcpServerConfig::new(Some(
+        pipeline_path.to_string_lossy().to_string(),
+    )));
+    let (_baseline, hit1, _ms1) = server
+        .prepare_vm_baseline_cached(
+            source,
+            Some(pipeline_path.as_path()),
+            None,
+            dir.path(),
+            "code",
+        )
+        .await
+        .expect("first prepare");
+    assert_eq!(hit1, Some(false), "first prepare must fill the cache");
+
+    let (_baseline, hit2, _ms2) = server
+        .prepare_vm_baseline_cached(
+            source,
+            Some(pipeline_path.as_path()),
+            None,
+            dir.path(),
+            "code",
+        )
+        .await
+        .expect("second prepare");
+    assert_eq!(hit2, Some(true), "unchanged file-backed context must hit");
+
+    let (_baseline, hit3, _ms3) = server
+        .prepare_vm_baseline_cached(
+            source,
+            Some(pipeline_path.as_path()),
+            Some("review"),
+            dir.path(),
+            "code",
+        )
+        .await
+        .expect("target prepare");
+    assert_eq!(
+        hit3,
+        Some(false),
+        "target pipeline is part of baseline invalidation"
+    );
+
+    let (_baseline, hit4, _ms4) = server
+        .prepare_vm_baseline_cached(
+            source,
+            Some(pipeline_path.as_path()),
+            Some("review"),
+            dir.path(),
+            "plan",
+        )
+        .await
+        .expect("mode prepare");
+    assert_eq!(
+        hit4,
+        Some(false),
+        "ACP mode is part of baseline invalidation"
+    );
+
+    let (baseline, hit5, ms5) = server
+        .prepare_vm_baseline_cached(source, None, None, dir.path(), "code")
+        .await
+        .expect("inline prepare");
+    assert!(baseline.is_none());
+    assert_eq!(hit5, None);
+    assert_eq!(ms5, 0);
+}
+
 mod commands;
 mod modes;
 mod sessions;

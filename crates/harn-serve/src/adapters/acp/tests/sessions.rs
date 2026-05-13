@@ -1,4 +1,70 @@
 use super::*;
+
+async fn run_prompt_with_project_capability(
+    request_tx: &mpsc::UnboundedSender<serde_json::Value>,
+    response_rx: &mut mpsc::UnboundedReceiver<String>,
+    session_id: &str,
+    id: i64,
+    prompt_text: &str,
+    project_read_capability: bool,
+) -> String {
+    request_tx
+        .send(serde_json::json!({
+            "jsonrpc": "2.0",
+            "id": id,
+            "method": "session/prompt",
+            "params": {
+                "sessionId": session_id,
+                "prompt": [{"type": "text", "text": prompt_text}],
+            },
+        }))
+        .expect("send session/prompt");
+
+    let host_capabilities = if project_read_capability {
+        serde_json::json!({"project": ["read_file"]})
+    } else {
+        serde_json::json!({})
+    };
+    let mut output = String::new();
+    let mut saw_completed = false;
+    for _ in 0..64 {
+        let message = recv_json(response_rx).await;
+        match message.get("method").and_then(|value| value.as_str()) {
+            Some("host/capabilities") => {
+                request_tx
+                    .send(serde_json::json!({
+                        "jsonrpc": "2.0",
+                        "id": message["id"].clone(),
+                        "result": host_capabilities.clone(),
+                    }))
+                    .expect("send host/capabilities response");
+            }
+            Some("session/update")
+                if message["params"]["update"]["sessionUpdate"] == "agent_message_chunk" =>
+            {
+                let content = &message["params"]["update"]["content"];
+                let text = content["text"].as_str().expect("chunk text");
+                let visible_delta = content["_meta"]["harn"]["visible_delta"]
+                    .as_str()
+                    .expect("visible_delta");
+                assert!(
+                    !visible_delta.contains(if prompt_text == "one" { "two" } else { "one" }),
+                    "each prompt turn gets a fresh bridge visible-text state"
+                );
+                output.push_str(text);
+            }
+            _ if message["id"] == id => {
+                assert_eq!(message["result"]["stopReason"], "end_turn");
+                saw_completed = true;
+                break;
+            }
+            _ => {}
+        }
+    }
+    assert!(saw_completed, "prompt {id} should complete successfully");
+    output
+}
+
 #[tokio::test(flavor = "current_thread")]
 async fn acp_server_handles_session_flow_and_prompt_updates() {
     let local = tokio::task::LocalSet::new();
@@ -224,6 +290,90 @@ async fn acp_profile_json_appends_one_line_per_prompt_turn() {
             assert_eq!(entries[0]["turn"], 1);
             assert_eq!(entries[1]["turn"], 2);
             assert!(entries[0]["rollup"]["by_kind"].is_array());
+
+            drop(request_tx);
+            server.await.expect("ACP channel server task");
+        })
+        .await;
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn acp_file_backed_vm_baseline_keeps_prompt_turns_isolated() {
+    let local = tokio::task::LocalSet::new();
+    local
+        .run_until(async {
+            let dir = tempfile::tempdir().expect("tempdir");
+            let pipeline_path = dir.path().join("isolation.harn");
+            let profile_path = dir.path().join("profile.ndjson");
+            std::fs::write(
+                &pipeline_path,
+                r#"
+pipeline default(task) {
+  let cell = shared_cell({scope: "task_group", key: "turn", initial: prompt})
+  println(prompt)
+  println(shared_get(cell))
+  shared_set(cell, "dirty")
+  let held = sync_gate_acquire("runner", 1)
+  let blocked = sync_gate_acquire("runner", 1, 0)
+  println(blocked == nil)
+  sync_release(held)
+  let metrics = sync_metrics("gate", "runner")
+  println(metrics.acquisition_count)
+  println(host_has("project", "read_file"))
+}"#,
+            )
+            .expect("write pipeline");
+            let config =
+                AcpServerConfig::for_pipeline(pipeline_path.to_string_lossy().to_string())
+                    .with_profile(AcpProfileConfig {
+                        text: false,
+                        json_path: Some(profile_path.clone()),
+                    });
+            let (request_tx, mut response_rx, server, session_id) =
+                start_acp_code_session_with_config(config, serde_json::json!(dir.path())).await;
+
+            let first = run_prompt_with_project_capability(
+                &request_tx,
+                &mut response_rx,
+                &session_id,
+                3,
+                "one",
+                true,
+            )
+            .await;
+            assert_eq!(first, "one\none\ntrue\n1\ntrue\n");
+
+            let second = run_prompt_with_project_capability(
+                &request_tx,
+                &mut response_rx,
+                &session_id,
+                4,
+                "two",
+                false,
+            )
+            .await;
+            assert_eq!(
+                second, "two\ntwo\ntrue\n1\nfalse\n",
+                "prompt globals, shared runtime state, sync metrics, and host capability cache must reset per turn"
+            );
+
+            let lines = std::fs::read_to_string(&profile_path).expect("read profile ndjson");
+            let entries = lines
+                .lines()
+                .map(|line| serde_json::from_str::<serde_json::Value>(line).expect("json line"))
+                .collect::<Vec<_>>();
+            assert_eq!(entries.len(), 2, "profile output:\n{lines}");
+            for entry in &entries {
+                let buckets = entry["rollup"]["by_kind"]
+                    .as_array()
+                    .expect("profile kind buckets");
+                assert!(
+                    buckets
+                        .iter()
+                        .any(|bucket| bucket["kind"] == "vm_setup" && bucket["count"] == 1),
+                    "ACP profile must expose vm_setup bucket: {entry}"
+                );
+            }
 
             drop(request_tx);
             server.await.expect("ACP channel server task");

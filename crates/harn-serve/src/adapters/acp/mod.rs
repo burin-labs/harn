@@ -195,6 +195,21 @@ struct CompileCacheEntry {
     chunk: harn_vm::Chunk,
 }
 
+/// Cached VM baseline for a file-backed ACP pipeline. This is intentionally
+/// separate from bytecode caching: source can compile from cache while VM
+/// setup is invalidated by cwd, project-root discovery, target pipeline, or
+/// ACP mode changes.
+struct VmBaselineCacheEntry {
+    path: PathBuf,
+    mtime: SystemTime,
+    target_pipeline: Option<String>,
+    source: String,
+    cwd: PathBuf,
+    project_root: Option<PathBuf>,
+    mode_id: String,
+    baseline: harn_vm::VmBaseline,
+}
+
 /// ACP server that reads JSON-RPC requests from a transport and writes
 /// responses / notifications back to that same transport.
 pub struct AcpServer {
@@ -221,6 +236,8 @@ pub struct AcpServer {
     /// Compiled-pipeline cache. One slot — the ACP server runs a single
     /// pipeline file for its lifetime, so we only ever cache one chunk.
     compile_cache: Option<CompileCacheEntry>,
+    /// Prepared VM baseline cache for the same file-backed pipeline.
+    vm_baseline_cache: Option<VmBaselineCacheEntry>,
     /// Per-turn profile emission settings.
     profile: AcpProfileConfig,
 }
@@ -251,6 +268,7 @@ impl AcpServer {
             session_cancellations: Arc::new(std::sync::Mutex::new(HashMap::new())),
             output,
             compile_cache: None,
+            vm_baseline_cache: None,
             profile: config.profile,
         }
     }
@@ -304,6 +322,76 @@ impl AcpServer {
             });
         }
         Ok((chunk, false))
+    }
+
+    async fn prepare_vm_baseline_cached(
+        &mut self,
+        source: &str,
+        source_path: Option<&Path>,
+        target_pipeline: Option<&str>,
+        cwd: &Path,
+        mode_id: &str,
+    ) -> Result<(Option<harn_vm::VmBaseline>, Option<bool>, u64), String> {
+        let Some(source_path) = source_path else {
+            return Ok((None, None, 0));
+        };
+
+        let prepare_started = Instant::now();
+        let target_owned = target_pipeline.map(str::to_string);
+        let cache_key = std::fs::metadata(source_path)
+            .and_then(|m| m.modified())
+            .ok()
+            .map(|mtime| (source_path.to_path_buf(), mtime));
+        let source_parent = source_path.parent().unwrap_or(cwd);
+        let project_root = harn_vm::stdlib::process::find_project_root(source_parent)
+            .or_else(|| harn_vm::stdlib::process::find_project_root(cwd));
+
+        if let Some((ref path, mtime)) = cache_key {
+            if let Some(entry) = self.vm_baseline_cache.as_ref() {
+                if entry.path == *path
+                    && entry.mtime == mtime
+                    && entry.target_pipeline == target_owned
+                    && entry.source == source
+                    && entry.cwd == cwd
+                    && entry.project_root == project_root
+                    && entry.mode_id == mode_id
+                {
+                    return Ok((
+                        Some(entry.baseline.clone()),
+                        Some(true),
+                        prepare_started.elapsed().as_millis() as u64,
+                    ));
+                }
+            }
+        }
+
+        let baseline = execute::prepare_vm_baseline(
+            source,
+            source_path,
+            cwd,
+            self.runtime_configurator.clone(),
+        )
+        .await?;
+        if let Some((path, mtime)) = cache_key {
+            self.vm_baseline_cache = Some(VmBaselineCacheEntry {
+                path,
+                mtime,
+                target_pipeline: target_owned,
+                source: source.to_string(),
+                cwd: cwd.to_path_buf(),
+                project_root,
+                mode_id: mode_id.to_string(),
+                baseline: baseline.clone(),
+            });
+        } else {
+            self.vm_baseline_cache = None;
+        }
+
+        Ok((
+            Some(baseline),
+            Some(false),
+            prepare_started.elapsed().as_millis() as u64,
+        ))
     }
 
     /// Write a complete JSON-RPC message to the current transport.
@@ -931,14 +1019,31 @@ impl AcpServer {
                     .unwrap_or_else(|| "<inline>".to_string()),
             })),
         );
+        let profile_turn = self.begin_profile_turn(&session_id);
+        let _mode_guard = modes::ModePolicyGuard::enter(&current_mode_id);
+        let (vm_baseline, vm_baseline_cache_hit, vm_baseline_prepare_ms) = match self
+            .prepare_vm_baseline_cached(
+                &source,
+                source_path.as_deref(),
+                target_pipeline.as_deref(),
+                &cwd,
+                &current_mode_id,
+            )
+            .await
+        {
+            Ok(value) => value,
+            Err(message) => {
+                self.finish_profile_turn(&session_id, profile_turn);
+                self.send_prompt_error(&session_id, id, &message);
+                return;
+            }
+        };
         if let Some(session) = self.sessions.get_mut(&session_id) {
             session.host_bridge = Some(host_bridge.clone());
         }
 
-        let profile_turn = self.begin_profile_turn(&session_id);
         let id_owned = id.clone();
         let send_output = self.output.clone();
-        let _mode_guard = modes::ModePolicyGuard::enter(&current_mode_id);
         let host_bridge_for_response = host_bridge.clone();
         let result = execute::execute_chunk(
             chunk,
@@ -949,9 +1054,15 @@ impl AcpServer {
                 content: &prompt.content,
                 messages: &prompt.messages,
             },
-            source_path.as_deref(),
-            &cwd,
-            self.runtime_configurator.clone(),
+            execute::VmSetup {
+                source: &source,
+                baseline: vm_baseline.as_ref(),
+                baseline_cache_hit: vm_baseline_cache_hit,
+                baseline_prepare_ms: vm_baseline_prepare_ms,
+                source_path: source_path.as_deref(),
+                cwd: &cwd,
+                runtime_configurator: self.runtime_configurator.clone(),
+            },
         )
         .await;
         self.finish_profile_turn(&session_id, profile_turn);
