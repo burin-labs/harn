@@ -172,6 +172,16 @@ pub(crate) const SIGNATURES: &[BuiltinSignature] = &[
         ],
         TY_STRING,
     ),
+    BuiltinSignature::simple("__select_list", &[Param::new("channels", TY_LIST)], TY_DICT),
+    BuiltinSignature::simple(
+        "__select_timeout",
+        &[
+            Param::new("channels", TY_LIST),
+            Param::new("timeout", TY_DURATION_OR_INT),
+        ],
+        TY_DICT,
+    ),
+    BuiltinSignature::simple("__select_try", &[Param::new("channels", TY_LIST)], TY_DICT),
     BuiltinSignature::simple("__signal_interrupted", &[], TY_BOOL),
     BuiltinSignature::simple(
         "__signal_off_interrupt",

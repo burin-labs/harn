@@ -8,8 +8,9 @@ use std::sync::Mutex;
 #[cfg(unix)]
 use std::time::Instant;
 
+use crate::stdlib::registration::{register_builtin_group, BuiltinGroup, SyncBuiltin};
 use crate::value::{VmError, VmValue};
-use crate::vm::Vm;
+use crate::vm::{Vm, VmBuiltinArity};
 
 use super::logging::{vm_build_log_line, vm_escape_json_str_quoted, VM_MIN_LOG_LEVEL};
 
@@ -77,6 +78,148 @@ thread_local! {
 }
 
 static STDIN_READ_LOCK: Mutex<()> = Mutex::new(());
+
+const IO_SYNC_PRIMITIVES: &[SyncBuiltin] = &[
+    SyncBuiltin::new("log", log_builtin)
+        .signature("log(message)")
+        .arity(VmBuiltinArity::Exact(1))
+        .doc("Write a Harn-prefixed message to stdout."),
+    SyncBuiltin::new("print", print_builtin)
+        .signature("print(args...)")
+        .arity(VmBuiltinArity::Variadic)
+        .doc("Write text to stdout without appending a newline."),
+    SyncBuiltin::new("println", println_builtin)
+        .signature("println(args...)")
+        .arity(VmBuiltinArity::Variadic)
+        .doc("Write text to stdout and append a newline."),
+    SyncBuiltin::new("color", color_builtin)
+        .signature("color(text, color)")
+        .arity(VmBuiltinArity::Exact(2))
+        .doc("Apply an ANSI foreground color when color output is enabled."),
+    SyncBuiltin::new("bold", bold_builtin)
+        .signature("bold(text)")
+        .arity(VmBuiltinArity::Exact(1))
+        .doc("Apply ANSI bold styling when color output is enabled."),
+    SyncBuiltin::new("dim", dim_builtin)
+        .signature("dim(text)")
+        .arity(VmBuiltinArity::Exact(1))
+        .doc("Apply ANSI dim styling when color output is enabled."),
+    SyncBuiltin::new("set_color_mode", set_color_mode_builtin)
+        .signature("set_color_mode(mode)")
+        .arity(VmBuiltinArity::Exact(1))
+        .doc("Set ANSI color handling to auto, always, or never."),
+    SyncBuiltin::new("eprint", eprint_builtin)
+        .signature("eprint(message)")
+        .arity(VmBuiltinArity::Exact(1))
+        .doc("Write text to stderr without appending a newline."),
+    SyncBuiltin::new("eprintln", eprintln_builtin)
+        .signature("eprintln(message)")
+        .arity(VmBuiltinArity::Exact(1))
+        .doc("Write text to stderr and append a newline."),
+    SyncBuiltin::new("read_stdin", read_stdin_builtin)
+        .signature("read_stdin()")
+        .arity(VmBuiltinArity::Exact(0))
+        .doc("Read all remaining stdin as a string."),
+    SyncBuiltin::new("read_line", read_line_builtin)
+        .signature("read_line()")
+        .arity(VmBuiltinArity::Exact(0))
+        .doc("Read one line from stdin or return nil at EOF."),
+    SyncBuiltin::new("__io_read_line", io_read_line_builtin)
+        .signature("__io_read_line(options?)")
+        .arity(VmBuiltinArity::Range { min: 0, max: 1 })
+        .doc("Read one line from stdin with structured status metadata."),
+    SyncBuiltin::new("is_stdin_tty", is_stdin_tty_builtin)
+        .signature("is_stdin_tty()")
+        .arity(VmBuiltinArity::Exact(0))
+        .doc("Return whether stdin is attached to a terminal."),
+    SyncBuiltin::new("is_stdout_tty", is_stdout_tty_builtin)
+        .signature("is_stdout_tty()")
+        .arity(VmBuiltinArity::Exact(0))
+        .doc("Return whether stdout is attached to a terminal."),
+    SyncBuiltin::new("is_stderr_tty", is_stderr_tty_builtin)
+        .signature("is_stderr_tty()")
+        .arity(VmBuiltinArity::Exact(0))
+        .doc("Return whether stderr is attached to a terminal."),
+    SyncBuiltin::new("mock_stdin", mock_stdin_builtin)
+        .signature("mock_stdin(text)")
+        .arity(VmBuiltinArity::Exact(1))
+        .doc("Install mocked stdin text for tests."),
+    SyncBuiltin::new("unmock_stdin", unmock_stdin_builtin)
+        .signature("unmock_stdin()")
+        .arity(VmBuiltinArity::Exact(0))
+        .doc("Clear mocked stdin text and line state."),
+    SyncBuiltin::new("mock_tty", mock_tty_builtin)
+        .signature("mock_tty(stream, is_tty)")
+        .arity(VmBuiltinArity::Exact(2))
+        .doc("Override terminal detection for stdin, stdout, or stderr."),
+    SyncBuiltin::new("unmock_tty", unmock_tty_builtin)
+        .signature("unmock_tty()")
+        .arity(VmBuiltinArity::Exact(0))
+        .doc("Clear terminal detection overrides."),
+    SyncBuiltin::new("capture_stderr_start", capture_stderr_start_builtin)
+        .signature("capture_stderr_start()")
+        .arity(VmBuiltinArity::Exact(0))
+        .doc("Start capturing stderr into an in-memory buffer."),
+    SyncBuiltin::new("capture_stderr_take", capture_stderr_take_builtin)
+        .signature("capture_stderr_take()")
+        .arity(VmBuiltinArity::Exact(0))
+        .doc("Stop stderr capture and return the buffered text."),
+    SyncBuiltin::new("uuid", uuid_builtin)
+        .signature("uuid()")
+        .arity(VmBuiltinArity::Exact(0))
+        .doc("Generate a random version 4 UUID."),
+    SyncBuiltin::new("uuid_parse", uuid_parse_builtin)
+        .signature("uuid_parse(value)")
+        .arity(VmBuiltinArity::Exact(1))
+        .doc("Parse and normalize a UUID string, or return nil."),
+    SyncBuiltin::new("uuid_v7", uuid_v7_builtin)
+        .signature("uuid_v7()")
+        .arity(VmBuiltinArity::Exact(0))
+        .doc("Generate a time-ordered version 7 UUID."),
+    SyncBuiltin::new("uuid_v5", uuid_v5_builtin)
+        .signature("uuid_v5(namespace, name)")
+        .arity(VmBuiltinArity::Exact(2))
+        .doc("Generate a deterministic version 5 UUID."),
+    SyncBuiltin::new("uuid_nil", uuid_nil_builtin)
+        .signature("uuid_nil()")
+        .arity(VmBuiltinArity::Exact(0))
+        .doc("Return the nil UUID."),
+    SyncBuiltin::new("prompt_user", prompt_user_builtin)
+        .signature("prompt_user(message?)")
+        .arity(VmBuiltinArity::Range { min: 0, max: 1 })
+        .doc("Prompt on stdout and read one line from stdin."),
+    SyncBuiltin::new("log_debug", log_debug_builtin)
+        .signature("log_debug(message, fields?)")
+        .arity(VmBuiltinArity::Range { min: 1, max: 2 })
+        .doc("Write a structured debug log line."),
+    SyncBuiltin::new("log_info", log_info_builtin)
+        .signature("log_info(message, fields?)")
+        .arity(VmBuiltinArity::Range { min: 1, max: 2 })
+        .doc("Write a structured info log line."),
+    SyncBuiltin::new("log_warn", log_warn_builtin)
+        .signature("log_warn(message, fields?)")
+        .arity(VmBuiltinArity::Range { min: 1, max: 2 })
+        .doc("Write a structured warning log line."),
+    SyncBuiltin::new("log_error", log_error_builtin)
+        .signature("log_error(message, fields?)")
+        .arity(VmBuiltinArity::Range { min: 1, max: 2 })
+        .doc("Write a structured error log line."),
+    SyncBuiltin::new("log_set_level", log_set_level_builtin)
+        .signature("log_set_level(level)")
+        .arity(VmBuiltinArity::Exact(1))
+        .doc("Set the minimum structured log level."),
+    SyncBuiltin::new("progress", progress_builtin)
+        .signature("progress(phase, message, progress_or_options?, total?)")
+        .arity(VmBuiltinArity::Range { min: 2, max: 4 })
+        .doc("Write a human-readable progress log line."),
+    SyncBuiltin::new("log_json", log_json_builtin)
+        .signature("log_json(key, value?)")
+        .arity(VmBuiltinArity::Range { min: 1, max: 2 })
+        .doc("Write a structured JSON log line."),
+];
+
+const IO_PRIMITIVES: BuiltinGroup<'static> =
+    BuiltinGroup::new().category("io").sync(IO_SYNC_PRIMITIVES);
 
 /// Reset all io thread-local state for test isolation.
 pub(crate) fn reset_io_state() {
@@ -516,277 +659,279 @@ fn ansi_enabled_for_stream(stream: &str) -> bool {
 }
 
 pub(crate) fn register_io_builtins(vm: &mut Vm) {
-    vm.register_builtin("log", |args, out| {
-        let msg = args.first().map(|a| a.display()).unwrap_or_default();
-        write_stdout(out, &format!("[harn] {msg}\n"));
-        Ok(VmValue::Nil)
-    });
-    vm.register_builtin("print", |args, out| {
-        let msg = args.first().map(|a| a.display()).unwrap_or_default();
-        write_stdout(out, &msg);
-        Ok(VmValue::Nil)
-    });
-    vm.register_builtin("println", |args, out| {
-        let msg = args.first().map(|a| a.display()).unwrap_or_default();
-        write_stdout(out, &format!("{msg}\n"));
-        Ok(VmValue::Nil)
-    });
+    register_builtin_group(vm, IO_PRIMITIVES);
+}
 
-    vm.register_builtin("color", |args, _out| {
-        let text = args.first().map(|a| a.display()).unwrap_or_default();
-        let name = args.get(1).map(|a| a.display()).unwrap_or_default();
-        if !ansi_enabled_for_stream("stdout") {
-            return Ok(VmValue::String(Rc::from(text)));
+fn log_builtin(args: &[VmValue], out: &mut String) -> Result<VmValue, VmError> {
+    let msg = args.first().map(|a| a.display()).unwrap_or_default();
+    write_stdout(out, &format!("[harn] {msg}\n"));
+    Ok(VmValue::Nil)
+}
+
+fn print_builtin(args: &[VmValue], out: &mut String) -> Result<VmValue, VmError> {
+    let msg = args.first().map(|a| a.display()).unwrap_or_default();
+    write_stdout(out, &msg);
+    Ok(VmValue::Nil)
+}
+
+fn println_builtin(args: &[VmValue], out: &mut String) -> Result<VmValue, VmError> {
+    let msg = args.first().map(|a| a.display()).unwrap_or_default();
+    write_stdout(out, &format!("{msg}\n"));
+    Ok(VmValue::Nil)
+}
+
+fn color_builtin(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
+    let text = args.first().map(|a| a.display()).unwrap_or_default();
+    let name = args.get(1).map(|a| a.display()).unwrap_or_default();
+    if !ansi_enabled_for_stream("stdout") {
+        return Ok(VmValue::String(Rc::from(text)));
+    }
+    Ok(VmValue::String(Rc::from(ansi_colorize(&text, &name))))
+}
+
+fn bold_builtin(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
+    let text = args.first().map(|a| a.display()).unwrap_or_default();
+    if !ansi_enabled_for_stream("stdout") {
+        return Ok(VmValue::String(Rc::from(text)));
+    }
+    Ok(VmValue::String(Rc::from(format!(
+        "\u{1b}[1m{text}\u{1b}[0m"
+    ))))
+}
+
+fn dim_builtin(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
+    let text = args.first().map(|a| a.display()).unwrap_or_default();
+    if !ansi_enabled_for_stream("stdout") {
+        return Ok(VmValue::String(Rc::from(text)));
+    }
+    Ok(VmValue::String(Rc::from(format!(
+        "\u{1b}[2m{text}\u{1b}[0m"
+    ))))
+}
+
+fn set_color_mode_builtin(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
+    let mode = args.first().map(|a| a.display()).unwrap_or_default();
+    let parsed = match mode.as_str() {
+        "auto" => ColorMode::Auto,
+        "always" => ColorMode::Always,
+        "never" => ColorMode::Never,
+        other => {
+            return Err(VmError::Thrown(VmValue::String(Rc::from(format!(
+                "set_color_mode: invalid mode '{other}'. Expected 'auto', 'always', or 'never'."
+            )))));
         }
-        Ok(VmValue::String(Rc::from(ansi_colorize(&text, &name))))
-    });
+    };
+    COLOR_MODE.with(|m| *m.borrow_mut() = parsed);
+    Ok(VmValue::Nil)
+}
 
-    vm.register_builtin("bold", |args, _out| {
-        let text = args.first().map(|a| a.display()).unwrap_or_default();
-        if !ansi_enabled_for_stream("stdout") {
-            return Ok(VmValue::String(Rc::from(text)));
-        }
-        Ok(VmValue::String(Rc::from(format!(
-            "\u{1b}[1m{text}\u{1b}[0m"
-        ))))
-    });
+fn eprint_builtin(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
+    let msg = args.first().map(|a| a.display()).unwrap_or_default();
+    write_stderr(&msg);
+    Ok(VmValue::Nil)
+}
 
-    vm.register_builtin("dim", |args, _out| {
-        let text = args.first().map(|a| a.display()).unwrap_or_default();
-        if !ansi_enabled_for_stream("stdout") {
-            return Ok(VmValue::String(Rc::from(text)));
-        }
-        Ok(VmValue::String(Rc::from(format!(
-            "\u{1b}[2m{text}\u{1b}[0m"
-        ))))
-    });
+fn eprintln_builtin(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
+    let msg = args.first().map(|a| a.display()).unwrap_or_default();
+    write_stderr(&format!("{msg}\n"));
+    Ok(VmValue::Nil)
+}
 
-    vm.register_builtin("set_color_mode", |args, _out| {
-        let mode = args.first().map(|a| a.display()).unwrap_or_default();
-        let parsed = match mode.as_str() {
-            "auto" => ColorMode::Auto,
-            "always" => ColorMode::Always,
-            "never" => ColorMode::Never,
+fn read_stdin_builtin(_args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
+    // Drain any remaining mocked stdin first.
+    let mocked = STDIN_MOCK.with(|s| s.borrow_mut().take());
+    if let Some(buf) = mocked {
+        // After read_stdin, future read_line calls return nil because stdin is consumed.
+        STDIN_LINES.with(|lines| *lines.borrow_mut() = Some(VecDeque::new()));
+        return Ok(VmValue::String(Rc::from(buf)));
+    }
+    match read_stdin_all_real() {
+        Some(s) => Ok(VmValue::String(Rc::from(s))),
+        None => Ok(VmValue::Nil),
+    }
+}
+
+fn read_line_builtin(_args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
+    let options = ReadLineOptions {
+        trim: false,
+        ..ReadLineOptions::default()
+    };
+    match read_line_from_mock_or_real(&options) {
+        ReadLineOutcome::Ok(line) => Ok(VmValue::String(Rc::from(line))),
+        ReadLineOutcome::Eof => Ok(VmValue::Nil),
+        #[cfg(unix)]
+        ReadLineOutcome::Timeout => Ok(VmValue::Nil),
+        #[cfg(unix)]
+        ReadLineOutcome::Interrupt => Ok(VmValue::Nil),
+        ReadLineOutcome::Error(_) => Ok(VmValue::Nil),
+    }
+}
+
+fn io_read_line_builtin(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
+    let options = parse_read_line_options(args)?;
+    Ok(read_line_result(read_line_from_mock_or_real(&options)))
+}
+
+fn is_stdin_tty_builtin(_args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
+    Ok(VmValue::Bool(is_tty_for("stdin")))
+}
+
+fn is_stdout_tty_builtin(_args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
+    Ok(VmValue::Bool(is_tty_for("stdout")))
+}
+
+fn is_stderr_tty_builtin(_args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
+    Ok(VmValue::Bool(is_tty_for("stderr")))
+}
+
+fn mock_stdin_builtin(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
+    let text = args.first().map(|a| a.display()).unwrap_or_default();
+    STDIN_MOCK.with(|s| *s.borrow_mut() = Some(text));
+    STDIN_LINES.with(|s| *s.borrow_mut() = None);
+    Ok(VmValue::Nil)
+}
+
+fn unmock_stdin_builtin(_args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
+    STDIN_MOCK.with(|s| *s.borrow_mut() = None);
+    STDIN_LINES.with(|s| *s.borrow_mut() = None);
+    Ok(VmValue::Nil)
+}
+
+fn mock_tty_builtin(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
+    let stream = args.first().map(|a| a.display()).unwrap_or_default();
+    let is_tty = matches!(args.get(1), Some(VmValue::Bool(true)));
+    TTY_MOCK.with(|t| {
+        let mut mock = t.borrow_mut();
+        match stream.as_str() {
+            "stdin" => mock.stdin = Some(is_tty),
+            "stdout" => mock.stdout = Some(is_tty),
+            "stderr" => mock.stderr = Some(is_tty),
             other => {
                 return Err(VmError::Thrown(VmValue::String(Rc::from(format!(
-                    "set_color_mode: invalid mode '{other}'. Expected 'auto', 'always', or 'never'."
+                    "mock_tty: invalid stream '{other}'. Expected 'stdin', 'stdout', or 'stderr'."
                 )))));
             }
-        };
-        COLOR_MODE.with(|m| *m.borrow_mut() = parsed);
-        Ok(VmValue::Nil)
-    });
-
-    vm.register_builtin("eprint", |args, _out| {
-        let msg = args.first().map(|a| a.display()).unwrap_or_default();
-        write_stderr(&msg);
-        Ok(VmValue::Nil)
-    });
-
-    vm.register_builtin("eprintln", |args, _out| {
-        let msg = args.first().map(|a| a.display()).unwrap_or_default();
-        write_stderr(&format!("{msg}\n"));
-        Ok(VmValue::Nil)
-    });
-
-    vm.register_builtin("read_stdin", |_args, _out| {
-        // Drain any remaining mocked stdin first.
-        let mocked = STDIN_MOCK.with(|s| s.borrow_mut().take());
-        if let Some(buf) = mocked {
-            // After read_stdin, future read_line calls return nil — stdin is consumed.
-            STDIN_LINES.with(|lines| *lines.borrow_mut() = Some(VecDeque::new()));
-            return Ok(VmValue::String(Rc::from(buf)));
         }
-        match read_stdin_all_real() {
-            Some(s) => Ok(VmValue::String(Rc::from(s))),
-            None => Ok(VmValue::Nil),
-        }
-    });
-
-    vm.register_builtin("read_line", |_args, _out| {
-        let options = ReadLineOptions {
-            trim: false,
-            ..ReadLineOptions::default()
-        };
-        match read_line_from_mock_or_real(&options) {
-            ReadLineOutcome::Ok(line) => Ok(VmValue::String(Rc::from(line))),
-            ReadLineOutcome::Eof => Ok(VmValue::Nil),
-            #[cfg(unix)]
-            ReadLineOutcome::Timeout => Ok(VmValue::Nil),
-            #[cfg(unix)]
-            ReadLineOutcome::Interrupt => Ok(VmValue::Nil),
-            ReadLineOutcome::Error(_) => Ok(VmValue::Nil),
-        }
-    });
-
-    vm.register_builtin("__io_read_line", |args, _out| {
-        let options = parse_read_line_options(args)?;
-        Ok(read_line_result(read_line_from_mock_or_real(&options)))
-    });
-
-    vm.register_builtin("is_stdin_tty", |_args, _out| {
-        Ok(VmValue::Bool(is_tty_for("stdin")))
-    });
-    vm.register_builtin("is_stdout_tty", |_args, _out| {
-        Ok(VmValue::Bool(is_tty_for("stdout")))
-    });
-    vm.register_builtin("is_stderr_tty", |_args, _out| {
-        Ok(VmValue::Bool(is_tty_for("stderr")))
-    });
-
-    vm.register_builtin("mock_stdin", |args, _out| {
-        let text = args.first().map(|a| a.display()).unwrap_or_default();
-        STDIN_MOCK.with(|s| *s.borrow_mut() = Some(text));
-        STDIN_LINES.with(|s| *s.borrow_mut() = None);
         Ok(VmValue::Nil)
-    });
+    })
+}
 
-    vm.register_builtin("unmock_stdin", |_args, _out| {
-        STDIN_MOCK.with(|s| *s.borrow_mut() = None);
-        STDIN_LINES.with(|s| *s.borrow_mut() = None);
+fn unmock_tty_builtin(_args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
+    TTY_MOCK.with(|t| *t.borrow_mut() = TtyMock::default());
+    Ok(VmValue::Nil)
+}
+
+fn capture_stderr_start_builtin(_args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
+    STDERR_CAPTURING.with(|c| *c.borrow_mut() = true);
+    STDERR_BUFFER.with(|s| s.borrow_mut().clear());
+    Ok(VmValue::Nil)
+}
+
+fn capture_stderr_take_builtin(_args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
+    let buf = STDERR_BUFFER.with(|s| std::mem::take(&mut *s.borrow_mut()));
+    STDERR_CAPTURING.with(|c| *c.borrow_mut() = false);
+    Ok(VmValue::String(Rc::from(buf)))
+}
+
+fn uuid_builtin(_args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
+    Ok(VmValue::String(Rc::from(uuid::Uuid::new_v4().to_string())))
+}
+
+fn uuid_parse_builtin(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
+    let raw = args.first().map(|a| a.display()).unwrap_or_default();
+    match uuid::Uuid::parse_str(&raw) {
+        Ok(uuid) => Ok(VmValue::String(Rc::from(uuid.to_string()))),
+        Err(_) => Ok(VmValue::Nil),
+    }
+}
+
+fn uuid_v7_builtin(_args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
+    Ok(VmValue::String(Rc::from(uuid::Uuid::now_v7().to_string())))
+}
+
+fn uuid_v5_builtin(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
+    if args.len() < 2 {
+        return Err(VmError::Runtime(
+            "uuid_v5(namespace, name): requires namespace and name".to_string(),
+        ));
+    }
+    let namespace_raw = args[0].display();
+    let namespace = uuid_v5_namespace(&namespace_raw).ok_or_else(|| {
+        VmError::Runtime("uuid_v5: namespace must be a UUID or one of dns/url/oid/x500".to_string())
+    })?;
+    let name = args[1].display();
+    Ok(VmValue::String(Rc::from(
+        uuid::Uuid::new_v5(&namespace, name.as_bytes()).to_string(),
+    )))
+}
+
+fn uuid_nil_builtin(_args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
+    Ok(VmValue::String(Rc::from(uuid::Uuid::nil().to_string())))
+}
+
+fn prompt_user_builtin(args: &[VmValue], out: &mut String) -> Result<VmValue, VmError> {
+    let msg = args.first().map(|a| a.display()).unwrap_or_default();
+    write_stdout(out, &msg);
+    let mut input = String::new();
+    if std::io::stdin().lock().read_line(&mut input).is_ok() {
+        Ok(VmValue::String(Rc::from(input.trim_end())))
+    } else {
         Ok(VmValue::Nil)
-    });
+    }
+}
 
-    vm.register_builtin("mock_tty", |args, _out| {
-        let stream = args.first().map(|a| a.display()).unwrap_or_default();
-        let is_tty = matches!(args.get(1), Some(VmValue::Bool(true)));
-        TTY_MOCK.with(|t| {
-            let mut mock = t.borrow_mut();
-            match stream.as_str() {
-                "stdin" => mock.stdin = Some(is_tty),
-                "stdout" => mock.stdout = Some(is_tty),
-                "stderr" => mock.stderr = Some(is_tty),
-                other => {
-                    return Err(VmError::Thrown(VmValue::String(Rc::from(format!(
-                        "mock_tty: invalid stream '{other}'. Expected 'stdin', 'stdout', or 'stderr'."
-                    )))));
-                }
-            }
-            Ok(VmValue::Nil)
-        })
-    });
+fn log_debug_builtin(args: &[VmValue], out: &mut String) -> Result<VmValue, VmError> {
+    vm_write_log("debug", 0, args, out);
+    Ok(VmValue::Nil)
+}
 
-    vm.register_builtin("unmock_tty", |_args, _out| {
-        TTY_MOCK.with(|t| *t.borrow_mut() = TtyMock::default());
-        Ok(VmValue::Nil)
-    });
+fn log_info_builtin(args: &[VmValue], out: &mut String) -> Result<VmValue, VmError> {
+    vm_write_log("info", 1, args, out);
+    Ok(VmValue::Nil)
+}
 
-    vm.register_builtin("capture_stderr_start", |_args, _out| {
-        STDERR_CAPTURING.with(|c| *c.borrow_mut() = true);
-        STDERR_BUFFER.with(|s| s.borrow_mut().clear());
-        Ok(VmValue::Nil)
-    });
+fn log_warn_builtin(args: &[VmValue], out: &mut String) -> Result<VmValue, VmError> {
+    vm_write_log("warn", 2, args, out);
+    Ok(VmValue::Nil)
+}
 
-    vm.register_builtin("capture_stderr_take", |_args, _out| {
-        let buf = STDERR_BUFFER.with(|s| std::mem::take(&mut *s.borrow_mut()));
-        STDERR_CAPTURING.with(|c| *c.borrow_mut() = false);
-        Ok(VmValue::String(Rc::from(buf)))
-    });
+fn log_error_builtin(args: &[VmValue], out: &mut String) -> Result<VmValue, VmError> {
+    vm_write_log("error", 3, args, out);
+    Ok(VmValue::Nil)
+}
 
-    vm.register_builtin("uuid", |_args, _out| {
-        Ok(VmValue::String(Rc::from(uuid::Uuid::new_v4().to_string())))
-    });
-
-    vm.register_builtin("uuid_parse", |args, _out| {
-        let raw = args.first().map(|a| a.display()).unwrap_or_default();
-        match uuid::Uuid::parse_str(&raw) {
-            Ok(uuid) => Ok(VmValue::String(Rc::from(uuid.to_string()))),
-            Err(_) => Ok(VmValue::Nil),
-        }
-    });
-
-    vm.register_builtin("uuid_v7", |_args, _out| {
-        Ok(VmValue::String(Rc::from(uuid::Uuid::now_v7().to_string())))
-    });
-
-    vm.register_builtin("uuid_v5", |args, _out| {
-        if args.len() < 2 {
-            return Err(VmError::Runtime(
-                "uuid_v5(namespace, name): requires namespace and name".to_string(),
-            ));
-        }
-        let namespace_raw = args[0].display();
-        let namespace = uuid_v5_namespace(&namespace_raw).ok_or_else(|| {
-            VmError::Runtime(
-                "uuid_v5: namespace must be a UUID or one of dns/url/oid/x500".to_string(),
-            )
-        })?;
-        let name = args[1].display();
-        Ok(VmValue::String(Rc::from(
-            uuid::Uuid::new_v5(&namespace, name.as_bytes()).to_string(),
-        )))
-    });
-
-    vm.register_builtin("uuid_nil", |_args, _out| {
-        Ok(VmValue::String(Rc::from(uuid::Uuid::nil().to_string())))
-    });
-
-    vm.register_builtin("prompt_user", |args, out| {
-        let msg = args.first().map(|a| a.display()).unwrap_or_default();
-        write_stdout(out, &msg);
-        let mut input = String::new();
-        if std::io::stdin().lock().read_line(&mut input).is_ok() {
-            Ok(VmValue::String(Rc::from(input.trim_end())))
-        } else {
+fn log_set_level_builtin(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
+    let level_str = args.first().map(|a| a.display()).unwrap_or_default();
+    match super::logging::vm_level_to_u8(&level_str) {
+        Some(n) => {
+            VM_MIN_LOG_LEVEL.store(n, Ordering::Relaxed);
             Ok(VmValue::Nil)
         }
-    });
+        None => Err(VmError::Thrown(VmValue::String(Rc::from(format!(
+            "log_set_level: invalid level '{}'. Expected debug, info, warn, or error",
+            level_str
+        ))))),
+    }
+}
 
-    vm.register_builtin("log_debug", |args, out| {
-        vm_write_log("debug", 0, args, out);
-        Ok(VmValue::Nil)
-    });
+fn progress_builtin(args: &[VmValue], out: &mut String) -> Result<VmValue, VmError> {
+    write_stdout(out, &render_progress_line(args));
+    Ok(VmValue::Nil)
+}
 
-    vm.register_builtin("log_info", |args, out| {
-        vm_write_log("info", 1, args, out);
-        Ok(VmValue::Nil)
-    });
-
-    vm.register_builtin("log_warn", |args, out| {
-        vm_write_log("warn", 2, args, out);
-        Ok(VmValue::Nil)
-    });
-
-    vm.register_builtin("log_error", |args, out| {
-        vm_write_log("error", 3, args, out);
-        Ok(VmValue::Nil)
-    });
-
-    vm.register_builtin("log_set_level", |args, _out| {
-        let level_str = args.first().map(|a| a.display()).unwrap_or_default();
-        match super::logging::vm_level_to_u8(&level_str) {
-            Some(n) => {
-                VM_MIN_LOG_LEVEL.store(n, Ordering::Relaxed);
-                Ok(VmValue::Nil)
-            }
-            None => Err(VmError::Thrown(VmValue::String(Rc::from(format!(
-                "log_set_level: invalid level '{}'. Expected debug, info, warn, or error",
-                level_str
-            ))))),
-        }
-    });
-
-    // Standalone mode writes a structured log line; bridge/ACP mode overrides
-    // this to emit structured notifications.
-    vm.register_builtin("progress", |args, out| {
-        write_stdout(out, &render_progress_line(args));
-        Ok(VmValue::Nil)
-    });
-
-    vm.register_builtin("log_json", |args, out| {
-        let key = args.first().map(|a| a.display()).unwrap_or_default();
-        let value = args.get(1).cloned().unwrap_or(VmValue::Nil);
-        let json_val = super::logging::vm_value_to_json_fragment(&value);
-        let ts = super::logging::vm_format_timestamp_utc();
-        let line = format!(
-            "{{\"ts\":{},\"key\":{},\"value\":{}}}\n",
-            vm_escape_json_str_quoted(&ts),
-            vm_escape_json_str_quoted(&key),
-            json_val,
-        );
-        write_stdout(out, &line);
-        Ok(VmValue::Nil)
-    });
+fn log_json_builtin(args: &[VmValue], out: &mut String) -> Result<VmValue, VmError> {
+    let key = args.first().map(|a| a.display()).unwrap_or_default();
+    let value = args.get(1).cloned().unwrap_or(VmValue::Nil);
+    let json_val = super::logging::vm_value_to_json_fragment(&value);
+    let ts = super::logging::vm_format_timestamp_utc();
+    let line = format!(
+        "{{\"ts\":{},\"key\":{},\"value\":{}}}\n",
+        vm_escape_json_str_quoted(&ts),
+        vm_escape_json_str_quoted(&key),
+        json_val,
+    );
+    write_stdout(out, &line);
+    Ok(VmValue::Nil)
 }
 
 fn uuid_v5_namespace(raw: &str) -> Option<uuid::Uuid> {

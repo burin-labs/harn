@@ -147,9 +147,6 @@ const RUNTIME_ONLY_EXCEPTIONS: &[&str] = &[
     "__range__",
     "__register_persona",
     "__register_step",
-    "__select_list",
-    "__select_timeout",
-    "__select_try",
     "__testing_call_body",
 ];
 
@@ -232,4 +229,60 @@ fn llm_config_builtins_publish_runtime_metadata() {
             .category(),
         Some("llm.rate_limit")
     );
+}
+
+#[test]
+fn migrated_stdlib_modules_publish_runtime_metadata() {
+    let metadata = harn_vm::stdlib::stdlib_builtin_metadata();
+    let migrated_categories = [
+        ("concurrency", 51usize),
+        ("fs", 18usize),
+        ("io", 34usize),
+        ("tui", 3usize),
+    ];
+
+    for (category, expected_count) in migrated_categories {
+        let entries = metadata
+            .iter()
+            .filter(|entry| entry.category() == Some(category))
+            .collect::<Vec<_>>();
+        assert_eq!(
+            entries.len(),
+            expected_count,
+            "unexpected builtin count for `{category}` category"
+        );
+
+        for entry in entries {
+            assert!(
+                entry.signature().is_some(),
+                "{} should carry signature metadata",
+                entry.name()
+            );
+            assert!(
+                entry.arity_metadata().is_some(),
+                "{} should carry arity metadata",
+                entry.name()
+            );
+            assert!(
+                entry.doc().is_some(),
+                "{} should carry doc metadata",
+                entry.name()
+            );
+        }
+    }
+
+    let names = metadata
+        .iter()
+        .map(|entry| entry.name())
+        .collect::<std::collections::BTreeSet<_>>();
+    for name in ["__select_list", "__select_timeout", "__select_try"] {
+        assert!(
+            harn_parser::is_known_builtin(name),
+            "{name} should have a parser signature"
+        );
+        assert!(
+            names.contains(name),
+            "{name} should be registered at runtime"
+        );
+    }
 }
