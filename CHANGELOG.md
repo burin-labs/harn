@@ -43,6 +43,60 @@ condensed series summaries instead of full per-patch history.
   `crates/harn-parser/src/builtin_signatures/signatures/shapes.rs` and
   documented; full enforcement on those slots is deferred until internal
   callers (`agent_loop`, `agent_turn`) converge on the documented shape.
+
+### Changed
+
+- **Optional shape fields treat explicit `nil` as "missing".** Both the
+  runtime type-check (`crates/harn-vm/src/typecheck.rs`) and the static
+  type-checker (`crates/harn-parser/src/typechecker/inference/subtyping.rs`)
+  now accept `{flag: nil}` against an optional shape field whose declared
+  type doesn't include `nil`. Previously an explicit `nil` value had to
+  match the declared field type; with this change, optional fields are
+  treated uniformly as "the caller may omit the key OR pass `nil`",
+  matching user intuition for option bags. Required fields still reject
+  `nil` unless the declared type permits it.
+
+### Internal
+
+- **Shared option-bag parsing helpers** at
+  `crates/harn-vm/src/stdlib/options.rs`. `OptionsParser` plus
+  `dict_arg`/`required_string_arg`/`optional_string_arg`/`required_int_arg`
+  let stdlib builtins extract option dicts without rebuilding
+  `dict.get().map().filter().ok_or_else()` chains, with strict
+  unknown-key detection available for closed-schema bags. `agents_daemon`
+  and `agent_sessions` consolidated onto these helpers; the previous
+  duplicate `require_dict_arg` / `required_string_arg` / `optional_string`
+  / `opt_string` / `arg_string_required` / `arg_int_required` helpers
+  with mismatched signatures and error kinds were removed.
+- **Shared structural-record `Ty::Shape` aliases** at
+  `crates/harn-parser/src/builtin_signatures/signatures/shapes.rs` for
+  agent / sub-agent / daemon / LLM / IO / TUI / signal option bags and
+  worker / daemon / session return contracts. See the "Added" entry above
+  for which slots are wired up today.
+- **Refactored `spawn_agent_builtin` and `sub_agent_run_builtin`** to share
+  a single `finalize_and_run_worker` helper that handles
+  persistence-snapshot, registry insertion, task spawn, optional terminal
+  wait, and summary emission. Replaces ~14 duplicated lines of
+  WorkerState lifecycle.
+
+## v0.8.12
+
+### Added
+
+- **Cooperative process signal handlers (#1547).** Added `std/signal`
+  with `on_interrupt`, `off_interrupt`, `interrupted`, and
+  `with_interrupt`. `harn run` now routes SIGINT/SIGTERM/SIGHUP into VM
+  interrupt dispatch with a graceful timeout, second-signal hard exit,
+  and LIFO handler stacking, so long-running harnesses (chat loops,
+  agent supervisors, polling jobs) can opt into clean shutdown without
+  losing the panic-on-stuck escape hatch.
+- **`std/dashboard/jobs` event envelopes (#1508).** Added
+  `std/dashboard/jobs` with typed dashboard job event envelopes,
+  validation, EventLog emission receipts, dedupe, and ordered Jobs view
+  reduction. Local and cloud fixture streams cover runs, approvals,
+  receipts, replay fixtures, and DLQ actions, and the host-facing
+  dashboard contract is documented and wired through stdlib
+  registration / conformance.
 - **`std/tui::select_from` picker (#1544).** Added
   `select_from(items, opts?)` to `std/tui` so harness scripts stop
   hand-rolling fzf detection plus numbered-menu fallbacks. The picker
@@ -85,41 +139,29 @@ condensed series summaries instead of full per-patch history.
 
 ### Changed
 
-- **Optional shape fields treat explicit `nil` as "missing".** Both the
-  runtime type-check (`crates/harn-vm/src/typecheck.rs`) and the static
-  type-checker (`crates/harn-parser/src/typechecker/inference/subtyping.rs`)
-  now accept `{flag: nil}` against an optional shape field whose declared
-  type doesn't include `nil`. Previously an explicit `nil` value had to
-  match the declared field type; with this change, optional fields are
-  treated uniformly as "the caller may omit the key OR pass `nil`",
-  matching user intuition for option bags. Required fields still reject
-  `nil` unless the declared type permits it.
-
-### Internal
-
-- **Shared option-bag parsing helpers** at
-  `crates/harn-vm/src/stdlib/options.rs`. `OptionsParser` plus
-  `dict_arg`/`required_string_arg`/`optional_string_arg`/`required_int_arg`
-  let stdlib builtins extract option dicts without rebuilding
-  `dict.get().map().filter().ok_or_else()` chains, with strict
-  unknown-key detection available for closed-schema bags. `agents_daemon`
-  and `agent_sessions` consolidated onto these helpers; the previous
-  duplicate `require_dict_arg` / `required_string_arg` / `optional_string`
-  / `opt_string` / `arg_string_required` / `arg_int_required` helpers
-  with mismatched signatures and error kinds were removed.
-- **Shared structural-record `Ty::Shape` aliases** at
-  `crates/harn-parser/src/builtin_signatures/signatures/shapes.rs` for
-  agent / sub-agent / daemon / LLM / IO / TUI / signal option bags and
-  worker / daemon / session return contracts. See the "Added" entry above
-  for which slots are wired up today.
-- **Refactored `spawn_agent_builtin` and `sub_agent_run_builtin`** to share
-  a single `finalize_and_run_worker` helper that handles
-  persistence-snapshot, registry insertion, task spawn, optional terminal
-  wait, and summary emission. Replaces ~14 duplicated lines of
-  WorkerState lifecycle.
+- **`command_run` shell mode defaults to the host shell (#1549).**
+  Shell-mode invocations of `command_run` (and downstream tools like
+  `std/command::command_step`) no longer error when the caller omits
+  both `shell` and `shell_id`. The host now resolves
+  `discover_shells().default_shell_id` automatically (`bash` on macOS /
+  Linux, `pwsh` on Windows). Malformed explicit `shell` / `shell_id`
+  fields still error rather than silently falling back. Simplifies the
+  common `mode: "shell"` call site to a single `command` field.
+- **Wasmtime bumped to 44.0.1 (#1539).** Internal: harn-vm's optional
+  Wasmtime/WASI stack moved from 29 to 44.0.1 with `wasmtime-wasi` on
+  the current p1 feature. Sync WASIp1 modules now run on a dedicated
+  host thread so testbench WASI subprocesses work from inside Harn's
+  Tokio runtime while preserving mock clock and overlay state.
 
 ### Fixed
 
+- **Escaped `${name}` in triple-quoted strings now passes through
+  literally (#1548).** Multi-line / triple-quoted strings used to
+  interpolate `${...}` even when escaped as `\${...}`, breaking any
+  harness that wanted to emit literal shell variable references inside
+  a multi-line script string. The lexer now treats `\${...}` as a
+  literal `${...}` (matching single-line behavior) and preserves
+  non-interpolation escapes like `\$PATH` unchanged.
 - **Tail-call inside `for` loops leaked iterator state across the
   caller.** `return f(...)` from inside a `for x in xs { ... }` body
   is tail-call-optimized, but the new frame was capturing the current
