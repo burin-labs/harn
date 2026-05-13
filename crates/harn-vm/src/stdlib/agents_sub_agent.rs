@@ -14,6 +14,13 @@ pub(super) struct ParsedSubAgentRequest {
     pub(super) worker_policy: Option<CapabilityPolicy>,
 }
 
+struct SubAgentPolicyResolution {
+    requested_policy: Option<CapabilityPolicy>,
+    worker_policy: Option<CapabilityPolicy>,
+    carry_policy: agents_workers::WorkerCarryPolicy,
+    execution: agents_workers::WorkerExecutionProfile,
+}
+
 fn parse_string_list(value: Option<&VmValue>, label: &str) -> Result<Vec<String>, VmError> {
     let Some(value) = value else {
         return Ok(Vec::new());
@@ -90,32 +97,72 @@ fn request_options(
 }
 
 pub(super) fn parse_sub_agent_request(args: &[VmValue]) -> Result<ParsedSubAgentRequest, VmError> {
+    let request = validate_sub_agent_request_envelope(args)?;
+    let task = request_string_field(&request, "task", None)
+        .ok_or_else(|| VmError::Runtime("sub_agent_run: task is required".to_string()))?;
+    let policies = resolve_sub_agent_policies(&request)?;
+    let session_id = request_string_field(&request, "session_id", None)
+        .unwrap_or_else(|| format!("sub_agent_session_{}", uuid::Uuid::now_v7()));
+    let options =
+        prepare_sub_agent_options(&request, &session_id, policies.requested_policy.as_ref())?;
+
+    Ok(ParsedSubAgentRequest {
+        spec: SubAgentRunSpec {
+            name: request_string_field(&request, "name", Some("sub-agent"))
+                .unwrap_or_else(|| "sub-agent".to_string()),
+            task,
+            system: request_string_field(&request, "system", None),
+            options,
+            returns_schema: sub_agent_returns_schema(&request),
+            session_id,
+            parent_session_id: crate::llm::current_agent_session_id(),
+        },
+        background: matches!(request.get("background"), Some(VmValue::Bool(true))),
+        carry_policy: policies.carry_policy,
+        execution: policies.execution,
+        worker_policy: policies.worker_policy,
+    })
+}
+
+fn validate_sub_agent_request_envelope(
+    args: &[VmValue],
+) -> Result<BTreeMap<String, VmValue>, VmError> {
     let request = match args.first() {
         Some(VmValue::Dict(map)) => map.as_ref().clone(),
-        _ => {
-            return Err(VmError::Runtime(
-                "sub_agent_run: expected a normalized sub_agent_request dict".to_string(),
-            ))
-        }
+        _ => return Err(invalid_sub_agent_request()),
     };
-    if !matches!(
+    if matches!(
         request.get("_type"),
         Some(VmValue::String(kind)) if kind.as_ref() == "sub_agent_request"
     ) {
-        return Err(VmError::Runtime(
-            "sub_agent_run: expected a normalized sub_agent_request dict".to_string(),
-        ));
+        return Ok(request);
     }
-    let task = request_string_field(&request, "task", None)
-        .ok_or_else(|| VmError::Runtime("sub_agent_run: task is required".to_string()))?;
-    let background = matches!(request.get("background"), Some(VmValue::Bool(true)));
+    Err(invalid_sub_agent_request())
+}
+
+fn invalid_sub_agent_request() -> VmError {
+    VmError::Runtime("sub_agent_run: expected a normalized sub_agent_request dict".to_string())
+}
+
+fn resolve_sub_agent_policies(
+    request: &BTreeMap<String, VmValue>,
+) -> Result<SubAgentPolicyResolution, VmError> {
     let allowed_tools =
         parse_string_list(request.get("allowed_tools"), "sub_agent_run.allowed_tools")?;
     let requested_policy = sub_agent_requested_policy(request.get("policy"), &allowed_tools)?;
     let worker_policy = agents_workers::resolve_inherited_worker_policy(requested_policy.clone())?;
-    let carry_policy = agents_workers::parse_worker_carry_policy(&request)?;
+    let carry_policy = agents_workers::parse_worker_carry_policy(request)?;
     let execution = agents_workers::parse_worker_execution_profile(request.get("execution"))?;
-    let returns_schema = request
+    Ok(SubAgentPolicyResolution {
+        requested_policy,
+        worker_policy,
+        carry_policy,
+        execution,
+    })
+}
+
+fn sub_agent_returns_schema(request: &BTreeMap<String, VmValue>) -> Option<VmValue> {
+    request
         .get("returns_schema")
         .filter(|value| !matches!(value, VmValue::Nil))
         .cloned()
@@ -125,53 +172,45 @@ pub(super) fn parse_sub_agent_request(args: &[VmValue]) -> Result<ParsedSubAgent
                 .and_then(|value| value.as_dict())
                 .and_then(|dict| dict.get("schema"))
                 .cloned()
-        });
-    let system = request_string_field(&request, "system", None);
-    let session_id = request_string_field(&request, "session_id", None)
-        .unwrap_or_else(|| format!("sub_agent_session_{}", uuid::Uuid::now_v7()));
+        })
+}
 
-    let mut options = request_options(&request)?;
-    if let Some(context) = crate::orchestration::current_workflow_skill_context() {
-        if !options.contains_key("skills") {
-            if let Some(registry) = context.registry {
-                options.insert("skills".to_string(), registry);
-            }
-        }
-        if !options.contains_key("skill_match") {
-            if let Some(match_config) = context.match_config {
-                options.insert("skill_match".to_string(), match_config);
-            }
-        }
-    }
+fn prepare_sub_agent_options(
+    request: &BTreeMap<String, VmValue>,
+    session_id: &str,
+    requested_policy: Option<&CapabilityPolicy>,
+) -> Result<BTreeMap<String, VmValue>, VmError> {
+    let mut options = request_options(request)?;
+    inject_sub_agent_skill_context(&mut options);
     options.insert(
         "session_id".to_string(),
-        VmValue::String(Rc::from(session_id.clone())),
+        VmValue::String(Rc::from(session_id.to_string())),
     );
     match requested_policy {
         Some(policy) => {
-            options.insert("policy".to_string(), super::to_vm(&policy)?);
+            options.insert("policy".to_string(), super::to_vm(policy)?);
         }
         None => {
             options.remove("policy");
         }
     }
+    Ok(options)
+}
 
-    Ok(ParsedSubAgentRequest {
-        spec: SubAgentRunSpec {
-            name: request_string_field(&request, "name", Some("sub-agent"))
-                .unwrap_or_else(|| "sub-agent".to_string()),
-            task,
-            system,
-            options,
-            returns_schema,
-            session_id,
-            parent_session_id: crate::llm::current_agent_session_id(),
-        },
-        background,
-        carry_policy,
-        execution,
-        worker_policy,
-    })
+fn inject_sub_agent_skill_context(options: &mut BTreeMap<String, VmValue>) {
+    let Some(context) = crate::orchestration::current_workflow_skill_context() else {
+        return;
+    };
+    if !options.contains_key("skills") {
+        if let Some(registry) = context.registry {
+            options.insert("skills".to_string(), registry);
+        }
+    }
+    if !options.contains_key("skill_match") {
+        if let Some(match_config) = context.match_config {
+            options.insert("skill_match".to_string(), match_config);
+        }
+    }
 }
 
 fn sub_agent_error_dict(
