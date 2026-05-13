@@ -149,6 +149,15 @@ pub use mcp_server::{
 };
 pub use metadata::{register_metadata_builtins, register_scan_builtins};
 pub use orchestration::{
+    benchmark_adapted_replay_pair, benchmark_replay_trace, build_replay_benchmark_report,
+    OpenCodeJsonlAdapter, ReplayBenchmarkCloudIngest, ReplayBenchmarkError,
+    ReplayBenchmarkFixtureReceipt, ReplayBenchmarkFixtureReport, ReplayBenchmarkMetrics,
+    ReplayBenchmarkReport, ReplayBenchmarkSuiteIdentity, ReplayBenchmarkSummary,
+    ReplayCategoryMetric, ReplayDebuggingProxyMetrics, ReplayRuntimeCostMetrics,
+    ReplayTraceAdapter, OPENCODE_JSONL_ADAPTER_ID, OPENCODE_JSONL_ADAPTER_SCHEMA_VERSION,
+    REPLAY_BENCHMARK_CLOUD_INGEST_KIND, REPLAY_BENCHMARK_REPORT_SCHEMA_VERSION,
+};
+pub use orchestration::{
     canonicalize_run, first_divergence, run_replay_oracle_trace, ReplayAllowlistRule,
     ReplayDivergence, ReplayExpectation, ReplayOracleError, ReplayOracleReport, ReplayOracleTrace,
     ReplayTraceRun, ReplayTraceRunCounts, REPLAY_TRACE_SCHEMA_VERSION,

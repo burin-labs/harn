@@ -54,7 +54,7 @@ mod viz;
 mod watch;
 mod workflow;
 
-pub(crate) use bench::BenchArgs;
+pub(crate) use bench::{BenchArgs, BenchCommand, BenchReplayArgs};
 pub(crate) use check::{CheckArgs, CheckOutputFormat};
 pub(crate) use completions::{CompletionShell, CompletionsArgs};
 pub(crate) use config_cmd::{ConfigArgs, ConfigCommand, ConfigInspectArgs, ConfigValidateArgs};

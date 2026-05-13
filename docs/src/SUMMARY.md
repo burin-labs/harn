@@ -134,6 +134,7 @@
 - [Debugging agent runs](./debugging.md)
 - [Trigger observability in the action graph](./observability/triggers-in-action-graph.md)
 - [Orchestrator observability](./orchestrator/observability.md)
+- [Replay benchmarks](./observability/replay-benchmarks.md)
 
 # Operations
 

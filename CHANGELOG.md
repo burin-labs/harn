@@ -17,6 +17,12 @@ condensed series summaries instead of full per-patch history.
   schemas, and remote `rejected` task states distinctly, with a new
   `examples/triggers/local-a2a-dispatch` reference flow and replay-oracle
   fixture proving local and A2A handlers can preserve logical output.
+- **Replay determinism benchmark harness (#1585).** Added
+  `harn bench replay`, a canonical replay benchmark suite, OpenCode-inspired
+  JSONL trace adapter, Harn Cloud ingest-shaped JSON report, replay benchmark
+  schema, and CI workflow template. The report includes replay-fidelity,
+  permission-preservation, tool-call drift, transcript drift, observed-cost,
+  and first-divergence triage metrics.
 
 ## v0.8.13
 

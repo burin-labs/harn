@@ -189,6 +189,11 @@ On meaningful drift the command exits non-zero and prints the first divergent
 canonical path with left/right values. `make replay-oracle` runs the default
 fixture set and is included in `make all`.
 
+Use `harn bench replay` when you need CI- and Cloud-ingestable replay
+benchmark artifacts rather than only oracle pass/fail output. The benchmark
+command reuses the same trace schema and adds replay-fidelity,
+permission-preservation, tool-drift, transcript-drift, and receipt metrics.
+
 ## HTTP Listener
 
 The orchestrator listener assembles routes from `[[triggers]]` entries

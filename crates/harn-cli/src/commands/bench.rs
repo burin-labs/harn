@@ -1,11 +1,12 @@
 use std::fs;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::process;
 use std::time::Instant;
 
 use harn_parser::DiagnosticSeverity;
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 
+use crate::cli::{BenchArgs, BenchCommand, BenchReplayArgs};
 use crate::commands::run::{connect_mcp_servers, RunProfileOptions};
 use crate::package;
 use crate::parse_source_file;
@@ -33,6 +34,29 @@ struct BenchStats {
     max_ms: f64,
     stddev_ms: f64,
     total_ms: f64,
+}
+
+pub(crate) async fn run(args: BenchArgs) {
+    match args.command {
+        Some(BenchCommand::Replay(replay)) => {
+            if let Err(error) = run_replay_bench(replay) {
+                eprintln!("error: {error}");
+                process::exit(1);
+            }
+        }
+        None => {
+            let Some(path) = args.file.as_deref() else {
+                eprintln!("error: `harn bench` requires a .harn file or a subcommand");
+                process::exit(1);
+            };
+            run_bench(
+                path,
+                args.iterations,
+                crate::run_profile_options(&args.profile),
+            )
+            .await;
+        }
+    }
 }
 
 pub(crate) async fn run_bench(path: &str, iterations: usize, profile: RunProfileOptions) {
@@ -324,11 +348,331 @@ fn write_bench_profile_json(
     fs::write(json_path, json).map_err(|error| format!("write {}: {error}", json_path.display()))
 }
 
+const REPLAY_BENCHMARK_SUITE_SCHEMA_VERSION: &str = "harn.replay_benchmark.suite.v1";
+
+#[derive(Debug, Deserialize)]
+struct ReplayBenchmarkSuiteManifest {
+    #[serde(default)]
+    schema_version: String,
+    #[serde(default)]
+    name: Option<String>,
+    fixtures: Vec<ReplayBenchmarkFixtureRef>,
+}
+
+#[derive(Debug, Deserialize)]
+struct ReplayBenchmarkFixtureRef {
+    path: String,
+}
+
+fn run_replay_bench(args: BenchReplayArgs) -> Result<(), String> {
+    let repo_root = discover_repo_root().unwrap_or_else(|| PathBuf::from("."));
+    let selection = resolve_replay_selection(args.selection.as_ref(), &repo_root);
+    let (suite_name, fixture_paths) =
+        resolve_replay_benchmark_selection(&selection, &repo_root, &args.suite_name)?;
+    let mut reports = Vec::new();
+
+    for fixture_path in fixture_paths {
+        let display_path = display_path(&fixture_path);
+        let trace = read_replay_trace_fixture(&fixture_path)?;
+        if !matches_replay_benchmark_filter(args.filter.as_deref(), &display_path, &trace.name) {
+            continue;
+        }
+        validate_protocol_fixture_refs(&repo_root, &trace.protocol_fixture_refs)?;
+        reports.push(
+            harn_vm::benchmark_replay_trace(display_path, &trace)
+                .map_err(|error| error.to_string())?,
+        );
+    }
+
+    if let Some(adapter_id) = args.adapter.as_deref() {
+        let adapter = replay_trace_adapter(adapter_id)?;
+        let first_path = args
+            .external_first
+            .as_ref()
+            .ok_or_else(|| "--external-first is required with --adapter".to_string())?;
+        let second_path = args
+            .external_second
+            .as_ref()
+            .ok_or_else(|| "--external-second is required with --adapter".to_string())?;
+        let first = fs::read_to_string(first_path)
+            .map_err(|error| format!("read {}: {error}", first_path.display()))?;
+        let second = fs::read_to_string(second_path)
+            .map_err(|error| format!("read {}: {error}", second_path.display()))?;
+        if matches_replay_benchmark_filter(
+            args.filter.as_deref(),
+            &format!("adapter:{adapter_id}:{}", args.external_name),
+            &args.external_name,
+        ) {
+            reports.push(
+                harn_vm::benchmark_adapted_replay_pair(
+                    adapter.as_ref(),
+                    args.external_name.clone(),
+                    &first,
+                    &second,
+                )
+                .map_err(|error| error.to_string())?,
+            );
+        }
+    }
+
+    if reports.is_empty() {
+        return Err(format!(
+            "no replay benchmark fixtures matched {}",
+            selection.display()
+        ));
+    }
+
+    let source_paths = reports
+        .iter()
+        .map(|report| report.path.clone())
+        .collect::<Vec<_>>();
+    let report = harn_vm::build_replay_benchmark_report(suite_name, source_paths, reports);
+    let json = serde_json::to_string_pretty(&report)
+        .map_err(|error| format!("serialize replay benchmark report: {error}"))?;
+
+    if let Some(output_path) = args.output.as_ref() {
+        write_replay_benchmark_report(output_path, &json)?;
+    }
+    if args.json {
+        println!("{json}");
+    } else {
+        print!("{}", render_replay_benchmark_report(&report));
+        if let Some(output_path) = args.output.as_ref() {
+            println!("Report JSON: {}", output_path.display());
+        }
+    }
+
+    if report.summary.failed > 0 {
+        return Err(format!(
+            "replay benchmark failed: {} passed, {} failed",
+            report.summary.passed, report.summary.failed
+        ));
+    }
+    Ok(())
+}
+
+fn resolve_replay_selection(selection: Option<&PathBuf>, repo_root: &Path) -> PathBuf {
+    match selection {
+        Some(selection) if selection.is_absolute() || selection.exists() => selection.clone(),
+        Some(selection) => repo_root.join(selection),
+        None => repo_root.join("benchmarks/replay/suite.json"),
+    }
+}
+
+fn resolve_replay_benchmark_selection(
+    selection: &Path,
+    repo_root: &Path,
+    fallback_suite_name: &str,
+) -> Result<(String, Vec<PathBuf>), String> {
+    if !selection.exists() {
+        return Err(format!(
+            "replay benchmark target not found: {}",
+            selection.display()
+        ));
+    }
+    if selection.is_file() {
+        let text = fs::read_to_string(selection)
+            .map_err(|error| format!("read {}: {error}", selection.display()))?;
+        let value: serde_json::Value = serde_json::from_str(&text)
+            .map_err(|error| format!("invalid JSON in {}: {error}", selection.display()))?;
+        if value.get("fixtures").is_some() {
+            let manifest: ReplayBenchmarkSuiteManifest =
+                serde_json::from_value(value).map_err(|error| {
+                    format!(
+                        "invalid replay benchmark suite {}: {error}",
+                        selection.display()
+                    )
+                })?;
+            if manifest.schema_version != REPLAY_BENCHMARK_SUITE_SCHEMA_VERSION {
+                return Err(format!(
+                    "unsupported replay benchmark suite schema_version {:?}; expected {REPLAY_BENCHMARK_SUITE_SCHEMA_VERSION}",
+                    manifest.schema_version
+                ));
+            }
+            let base = selection.parent().unwrap_or_else(|| Path::new("."));
+            let mut fixtures = Vec::with_capacity(manifest.fixtures.len());
+            for fixture in manifest.fixtures {
+                fixtures.push(resolve_suite_fixture_path(repo_root, base, &fixture.path));
+            }
+            return Ok((
+                manifest
+                    .name
+                    .unwrap_or_else(|| fallback_suite_name.to_string()),
+                fixtures,
+            ));
+        }
+        return Ok((
+            fallback_suite_name.to_string(),
+            vec![selection.to_path_buf()],
+        ));
+    }
+
+    let mut fixtures = Vec::new();
+    collect_json_files(selection, &mut fixtures);
+    if fixtures.is_empty() {
+        return Err(format!(
+            "no replay benchmark JSON fixtures found under {}",
+            selection.display()
+        ));
+    }
+    Ok((fallback_suite_name.to_string(), fixtures))
+}
+
+fn resolve_suite_fixture_path(repo_root: &Path, base: &Path, raw: &str) -> PathBuf {
+    let path = Path::new(raw);
+    if path.is_absolute() {
+        return path.to_path_buf();
+    }
+    let repo_relative = repo_root.join(path);
+    if repo_relative.exists() {
+        repo_relative
+    } else {
+        base.join(path)
+    }
+}
+
+fn collect_json_files(path: &Path, out: &mut Vec<PathBuf>) {
+    if path.is_file() {
+        if path.extension().is_some_and(|ext| ext == "json") {
+            out.push(path.to_path_buf());
+        }
+        return;
+    }
+    let Ok(entries) = fs::read_dir(path) else {
+        return;
+    };
+    let mut entries = entries.filter_map(Result::ok).collect::<Vec<_>>();
+    entries.sort_by_key(|entry| entry.path());
+    for entry in entries {
+        collect_json_files(&entry.path(), out);
+    }
+}
+
+fn read_replay_trace_fixture(path: &Path) -> Result<harn_vm::ReplayOracleTrace, String> {
+    let text =
+        fs::read_to_string(path).map_err(|error| format!("read {}: {error}", path.display()))?;
+    serde_json::from_str(&text)
+        .map_err(|error| format!("invalid replay trace JSON in {}: {error}", path.display()))
+}
+
+fn validate_protocol_fixture_refs(repo_root: &Path, refs: &[String]) -> Result<(), String> {
+    for fixture_ref in refs {
+        if !fixture_ref.starts_with("conformance/protocols/fixtures/") {
+            return Err(format!(
+                "protocol fixture ref must point under conformance/protocols/fixtures: {fixture_ref}"
+            ));
+        }
+        let path = Path::new(fixture_ref);
+        if path.is_absolute() {
+            return Err(format!(
+                "protocol fixture ref must be repo-relative: {fixture_ref}"
+            ));
+        }
+        let candidate = repo_root.join(path);
+        if !candidate.is_file() {
+            return Err(format!(
+                "protocol fixture ref not found: {}",
+                candidate.display()
+            ));
+        }
+    }
+    Ok(())
+}
+
+fn matches_replay_benchmark_filter(filter: Option<&str>, path: &str, name: &str) -> bool {
+    let Some(filter) = filter else {
+        return true;
+    };
+    path.contains(filter) || name.contains(filter)
+}
+
+fn replay_trace_adapter(adapter_id: &str) -> Result<Box<dyn harn_vm::ReplayTraceAdapter>, String> {
+    match adapter_id {
+        harn_vm::OPENCODE_JSONL_ADAPTER_ID | "opencode" => {
+            Ok(Box::new(harn_vm::OpenCodeJsonlAdapter))
+        }
+        other => Err(format!(
+            "unsupported replay trace adapter `{other}`; expected `{}`",
+            harn_vm::OPENCODE_JSONL_ADAPTER_ID
+        )),
+    }
+}
+
+fn write_replay_benchmark_report(path: &Path, json: &str) -> Result<(), String> {
+    if let Some(parent) = path.parent() {
+        if !parent.as_os_str().is_empty() {
+            fs::create_dir_all(parent)
+                .map_err(|error| format!("create {}: {error}", parent.display()))?;
+        }
+    }
+    fs::write(path, json).map_err(|error| format!("write {}: {error}", path.display()))
+}
+
+fn render_replay_benchmark_report(report: &harn_vm::ReplayBenchmarkReport) -> String {
+    let mut out = format!(
+        "\
+Replay benchmark: {}
+Fixtures: {} passed, {} failed
+Mean replay fidelity: {:.3}
+Permission preservation: {:.3}
+Tool-call drift count: {}
+Transcript drift count: {}
+Observed interactions: {}
+",
+        report.suite.name,
+        report.summary.passed,
+        report.summary.failed,
+        report.summary.mean_replay_fidelity_score,
+        report.summary.mean_permission_decision_preservation_score,
+        report.summary.tool_call_drift_count,
+        report.summary.transcript_drift_count,
+        report.summary.observed_interactions,
+    );
+    for fixture in &report.fixtures {
+        let status = if fixture.passed { "PASS" } else { "FAIL" };
+        out.push_str(&format!(
+            "  {status} {} fidelity={:.3} determinism={:.3} tool_drift={} transcript_drift={}\n",
+            fixture.name,
+            fixture.metrics.replay_fidelity_score,
+            fixture.metrics.determinism_score,
+            fixture.metrics.tool_call_drift_count,
+            fixture.metrics.transcript_drift_count,
+        ));
+        if let Some(divergence) = &fixture.first_divergence {
+            out.push_str(&format!("    first divergence: {}\n", divergence.path));
+        }
+    }
+    out
+}
+
+fn discover_repo_root() -> Option<PathBuf> {
+    let cwd = std::env::current_dir().ok()?;
+    for ancestor in cwd.ancestors() {
+        if ancestor.join("Cargo.toml").is_file() && ancestor.join("conformance").is_dir() {
+            return Some(ancestor.to_path_buf());
+        }
+    }
+    None
+}
+
+fn display_path(path: &Path) -> String {
+    discover_repo_root()
+        .and_then(|root| path.strip_prefix(root).ok().map(Path::to_path_buf))
+        .unwrap_or_else(|| path.to_path_buf())
+        .components()
+        .map(|component| component.as_os_str().to_string_lossy())
+        .collect::<Vec<_>>()
+        .join("/")
+}
+
 #[cfg(test)]
 mod tests {
     use super::{
-        bench_stats, percentile_sorted, render_bench_report, write_bench_profile_json, BenchRun,
+        bench_stats, percentile_sorted, read_replay_trace_fixture, render_bench_report,
+        render_replay_benchmark_report, resolve_replay_benchmark_selection,
+        validate_protocol_fixture_refs, write_bench_profile_json, BenchRun,
     };
+    use std::path::PathBuf;
 
     fn bench_run(iteration: usize, wall_time_ms: f64) -> BenchRun {
         BenchRun {
@@ -417,5 +761,50 @@ mod tests {
         assert_eq!(value["p95_ms"], 13.8);
         assert_eq!(value["stddev_ms"], 2.0);
         assert!(value["rollup"]["by_kind"].is_array());
+    }
+
+    #[test]
+    fn replay_benchmark_suite_manifest_runs_canonical_fixtures() {
+        let repo_root = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .parent()
+            .and_then(|path| path.parent())
+            .expect("repo root")
+            .to_path_buf();
+        let selection = repo_root.join("benchmarks/replay/suite.json");
+        let (suite_name, fixture_paths) =
+            resolve_replay_benchmark_selection(&selection, &repo_root, "fallback")
+                .expect("resolve replay benchmark suite");
+        assert_eq!(suite_name, "harn-canonical-replay-determinism");
+        assert_eq!(fixture_paths.len(), 3);
+
+        let reports = fixture_paths
+            .iter()
+            .map(|path| {
+                let trace = read_replay_trace_fixture(path).expect("read replay fixture");
+                validate_protocol_fixture_refs(&repo_root, &trace.protocol_fixture_refs)
+                    .expect("protocol refs valid");
+                harn_vm::benchmark_replay_trace(path.to_string_lossy(), &trace)
+                    .expect("benchmark replay trace")
+            })
+            .collect::<Vec<_>>();
+        let report = harn_vm::build_replay_benchmark_report(
+            suite_name,
+            reports.iter().map(|fixture| fixture.path.clone()).collect(),
+            reports,
+        );
+
+        assert_eq!(report.summary.passed, 3);
+        assert_eq!(report.summary.failed, 0);
+        assert_eq!(report.summary.deterministic_fixtures, 3);
+        assert_eq!(report.summary.tool_call_drift_count, 0);
+        assert_eq!(report.summary.transcript_drift_count, 0);
+        assert_eq!(report.summary.mean_replay_fidelity_score, 1.0);
+        assert_eq!(
+            report.summary.mean_permission_decision_preservation_score,
+            1.0
+        );
+        let text = render_replay_benchmark_report(&report);
+        assert!(text.contains("Replay benchmark: harn-canonical-replay-determinism"));
+        assert!(text.contains("PASS simple_tool_run"));
     }
 }

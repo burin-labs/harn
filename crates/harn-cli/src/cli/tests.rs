@@ -1917,13 +1917,63 @@ fn test_parses_bench_args() {
     let Command::Bench(args) = cli.command.unwrap() else {
         panic!("expected bench command");
     };
-    assert_eq!(args.file, "main.harn");
+    assert_eq!(args.file.as_deref(), Some("main.harn"));
     assert_eq!(args.iterations, 25);
     assert!(args.profile.text);
     assert_eq!(
         args.profile.json_path.as_deref(),
         Some(std::path::Path::new("bench.json"))
     );
+}
+
+#[test]
+fn test_parses_bench_replay_args() {
+    let cli = Cli::parse_from([
+        "harn",
+        "bench",
+        "replay",
+        "benchmarks/replay/suite.json",
+        "--json",
+        "--output",
+        "replay-benchmark.json",
+        "--filter",
+        "permission",
+        "--adapter",
+        "opencode-jsonl",
+        "--external-first",
+        "first.jsonl",
+        "--external-second",
+        "second.jsonl",
+        "--external-name",
+        "opencode-permission",
+    ]);
+
+    let Command::Bench(args) = cli.command.unwrap() else {
+        panic!("expected bench command");
+    };
+    let Some(crate::cli::BenchCommand::Replay(replay)) = args.command else {
+        panic!("expected bench replay command");
+    };
+    assert_eq!(
+        replay.selection.as_deref(),
+        Some(std::path::Path::new("benchmarks/replay/suite.json"))
+    );
+    assert!(replay.json);
+    assert_eq!(
+        replay.output.as_deref(),
+        Some(std::path::Path::new("replay-benchmark.json"))
+    );
+    assert_eq!(replay.filter.as_deref(), Some("permission"));
+    assert_eq!(replay.adapter.as_deref(), Some("opencode-jsonl"));
+    assert_eq!(
+        replay.external_first.as_deref(),
+        Some(std::path::Path::new("first.jsonl"))
+    );
+    assert_eq!(
+        replay.external_second.as_deref(),
+        Some(std::path::Path::new("second.jsonl"))
+    );
+    assert_eq!(replay.external_name, "opencode-permission");
 }
 
 #[test]

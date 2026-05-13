@@ -1,0 +1,78 @@
+{
+  "schema_version": "harn.orchestration.replay_trace.v1",
+  "name": "simple_tool_run",
+  "description": "A deterministic read-only tool call with matching protocol interaction, effect receipt, and policy decision.",
+  "expect": "match",
+  "allowlist": [
+    {
+      "path": "/run_id",
+      "reason": "run ids are allocated per execution"
+    }
+  ],
+  "first_run": {
+    "run_id": "run_live_simple_tool",
+    "protocol_interactions": [
+      {
+        "protocol": "mcp",
+        "boundary": "tools/call",
+        "request": {
+          "method": "tools/call",
+          "tool": "read_file",
+          "arguments_sha256": "sha256:8a1187230cc9589c8b559ca1ebf957c87b812f90d3a89bc37ad8e854dd54b9f4"
+        },
+        "response": {
+          "content_sha256": "sha256:5b6d2f2df85f9ce07666c51fdb2f4a974a8f5ae5f2fae9f26f4590dd4b383f19",
+          "status": "ok"
+        }
+      }
+    ],
+    "effect_receipts": [
+      {
+        "kind": "tool_call",
+        "tool": "read_file",
+        "status": "ok",
+        "result_sha256": "sha256:5b6d2f2df85f9ce07666c51fdb2f4a974a8f5ae5f2fae9f26f4590dd4b383f19"
+      }
+    ],
+    "policy_decisions": [
+      {
+        "capability": "fs.read",
+        "decision": "allow",
+        "reason": "read-only tool"
+      }
+    ]
+  },
+  "second_run": {
+    "run_id": "run_replay_simple_tool",
+    "protocol_interactions": [
+      {
+        "protocol": "mcp",
+        "boundary": "tools/call",
+        "request": {
+          "method": "tools/call",
+          "tool": "read_file",
+          "arguments_sha256": "sha256:8a1187230cc9589c8b559ca1ebf957c87b812f90d3a89bc37ad8e854dd54b9f4"
+        },
+        "response": {
+          "content_sha256": "sha256:5b6d2f2df85f9ce07666c51fdb2f4a974a8f5ae5f2fae9f26f4590dd4b383f19",
+          "status": "ok"
+        }
+      }
+    ],
+    "effect_receipts": [
+      {
+        "kind": "tool_call",
+        "tool": "read_file",
+        "status": "ok",
+        "result_sha256": "sha256:5b6d2f2df85f9ce07666c51fdb2f4a974a8f5ae5f2fae9f26f4590dd4b383f19"
+      }
+    ],
+    "policy_decisions": [
+      {
+        "capability": "fs.read",
+        "decision": "allow",
+        "reason": "read-only tool"
+      }
+    ]
+  }
+}
