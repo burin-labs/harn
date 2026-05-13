@@ -2300,6 +2300,9 @@ pub(crate) async fn execute(source: &str, source_path: Option<&Path>) -> Result<
         if let Some(imported) = graph.imported_type_declarations_for_file(path) {
             checker = checker.with_imported_type_decls(imported);
         }
+        if let Some(imported) = graph.imported_callable_declarations_for_file(path) {
+            checker = checker.with_imported_callable_decls(imported);
+        }
     }
     let type_diagnostics = checker.check(&program);
     let mut warning_lines = Vec::new();

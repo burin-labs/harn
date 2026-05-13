@@ -55,6 +55,9 @@ pub(crate) async fn run_bench(path: &str, iterations: usize, profile: RunProfile
     if let Some(imported) = graph.imported_type_declarations_for_file(file_path) {
         checker = checker.with_imported_type_decls(imported);
     }
+    if let Some(imported) = graph.imported_callable_declarations_for_file(file_path) {
+        checker = checker.with_imported_callable_decls(imported);
+    }
     let type_diagnostics = checker.check_with_source(&program, &source);
     let mut had_type_error = false;
     for diag in &type_diagnostics {

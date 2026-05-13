@@ -24,7 +24,7 @@ type PageOptions = {
 
 type PageResult = {ok: bool, paged: bool, error?: string}
 
-/** Optional dict passed to `select_from`. */
+/** Option bag passed to `select_from`; literal calls reject unknown keys. */
 type SelectFromOptions = {
   prompt?: string,
   display?: any,

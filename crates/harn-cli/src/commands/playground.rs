@@ -310,6 +310,9 @@ fn typecheck_program(
     if let Some(imported) = graph.imported_type_declarations_for_file(path) {
         checker = checker.with_imported_type_decls(imported);
     }
+    if let Some(imported) = graph.imported_callable_declarations_for_file(path) {
+        checker = checker.with_imported_callable_decls(imported);
+    }
 
     let diagnostics = checker.check(program);
     let mut rendered = String::new();

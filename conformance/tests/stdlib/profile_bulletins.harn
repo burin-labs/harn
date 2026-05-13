@@ -156,8 +156,9 @@ pipeline default() {
     bulletin_decide(second, "supersede", {})
   }
   println(is_err(supersede_missing))
+  let invalid_decision: any = {schema: "not.real.v1", bulletin_id: "x"}
   let bad_decision_schema = try {
-    bulletin_emit_decision({schema: "not.real.v1", bulletin_id: "x"})
+    bulletin_emit_decision(invalid_decision)
   }
   println(is_err(bad_decision_schema))
   let bad_sync = try {

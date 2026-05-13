@@ -3280,6 +3280,25 @@ fn greet(u: {name: string}) -> string {
 greet({name: "Bob", age: 25})  // OK — extra field allowed
 ```
 
+Option-bag parameters are stricter for literal calls. When a parameter is
+named like `opts`, `options`, or `config`, or its annotation is a type alias
+ending in `Options` or `Config`, a direct dict literal argument may only use
+fields declared by the option shape:
+
+```harn
+type PickOptions = {drop_nil?: bool}
+
+fn pick(_options: PickOptions = {}) {}
+
+pick({drop_nil: true})  // OK
+```
+
+A typo in a direct option literal is a type error:
+
+```harn,ignore
+pick({dropnil: true})   // type error — unknown option `dropnil`
+```
+
 Nested shapes:
 
 ```harn
@@ -3603,6 +3622,7 @@ fn add(a: int, b: int) -> int {
 - Dict literals with string keys infer a structural shape type.
 - Dict literals with computed keys infer as generic `dict`.
 - Shape-to-shape: all required fields in the expected type must exist with compatible types.
+- Option-bag literal calls reject keys that are not declared by the expected option shape.
 - Shape-to-`dict<K, V>`: all field values must be compatible with `V`.
 - Type errors are reported at compile time and halt execution.
 

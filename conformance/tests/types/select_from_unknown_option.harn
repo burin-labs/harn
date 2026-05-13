@@ -1,0 +1,8 @@
+// The pure-Harn std/tui::select_from signature owns its option-bag shape.
+// A misspelled option key should fail at check time instead of silently
+// flowing into the picker as an ignored runtime field.
+import { select_from } from "std/tui"
+
+pipeline default() {
+  select_from(["alpha"], {prompts: "Pick one"})
+}

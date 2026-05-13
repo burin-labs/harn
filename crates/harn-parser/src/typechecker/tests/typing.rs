@@ -575,6 +575,46 @@ add("hello", 2) }"#,
 }
 
 #[test]
+fn test_option_bag_literal_rejects_unknown_field() {
+    let errs = errors(
+        r#"type PickOptions = {drop_nil?: bool}
+
+fn pick(options: PickOptions = {}) -> nil {
+  return nil
+}
+
+pipeline t(task) {
+  pick({dropnil: true})
+}"#,
+    );
+    assert_eq!(errs.len(), 1, "expected 1 error, got: {errs:?}");
+    assert!(
+        errs[0].contains("argument 1 `options`: unknown option `dropnil`"),
+        "unexpected error: {}",
+        errs[0]
+    );
+    assert!(
+        errs[0].contains("did you mean `drop_nil`"),
+        "missing suggestion: {}",
+        errs[0]
+    );
+}
+
+#[test]
+fn test_non_option_shape_call_keeps_width_subtyping() {
+    let errs = errors(
+        r#"fn greet(u: {name: string}) -> string {
+  return "hi " + u.name
+}
+
+pipeline t(task) {
+  greet({name: "Bob", age: 25})
+}"#,
+    );
+    assert!(errs.is_empty(), "unexpected type errors: {errs:?}");
+}
+
+#[test]
 fn test_return_type_mismatch() {
     let errs = errors(r#"pipeline t(task) { fn get() -> int { return "hello" } }"#);
     assert_eq!(errs.len(), 1);

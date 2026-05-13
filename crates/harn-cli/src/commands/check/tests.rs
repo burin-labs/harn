@@ -801,6 +801,53 @@ fn handler() {
 }
 
 #[test]
+fn check_file_inner_uses_imported_callable_signatures() {
+    let dir = unique_temp_dir("harn-check-imported-callable");
+    std::fs::create_dir_all(&dir).unwrap();
+    let lib = dir.join("lib.harn");
+    let file = dir.join("main.harn");
+    std::fs::write(
+        &lib,
+        r#"
+type PickOptions = {drop_nil?: bool}
+
+pub fn pick(options: PickOptions = {}) -> nil {
+  return nil
+}
+"#,
+    )
+    .unwrap();
+    std::fs::write(
+        &file,
+        r#"
+import { pick } from "lib"
+
+pipeline main() {
+  pick({dropnil: true})
+}
+"#,
+    )
+    .unwrap();
+
+    let files = vec![file.clone()];
+    let module_graph = build_module_graph(&files);
+    let cross_file_imports = collect_cross_file_imports(&module_graph);
+    let outcome = check_file_inner(
+        &file,
+        &CheckConfig::default(),
+        &cross_file_imports,
+        &module_graph,
+        true,
+    );
+
+    assert!(
+        outcome.has_error,
+        "expected imported function option typo to fail check"
+    );
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
 fn check_file_inner_skips_invariants_when_disabled() {
     let dir = unique_temp_dir("harn-check-invariants-off");
     std::fs::create_dir_all(&dir).unwrap();

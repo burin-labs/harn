@@ -172,5 +172,8 @@ fn type_check_for_lint(
     if let Some(imported) = module_graph.imported_type_declarations_for_file(path) {
         checker = checker.with_imported_type_decls(imported);
     }
+    if let Some(imported) = module_graph.imported_callable_declarations_for_file(path) {
+        checker = checker.with_imported_callable_decls(imported);
+    }
     checker.check_with_source(program, source)
 }
