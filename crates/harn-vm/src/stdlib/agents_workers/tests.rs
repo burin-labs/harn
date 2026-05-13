@@ -9,6 +9,19 @@ use crate::orchestration::{
 
 use super::*;
 
+fn vm_string(value: &str) -> VmValue {
+    VmValue::String(Rc::from(value))
+}
+
+fn vm_dict(pairs: Vec<(&str, VmValue)>) -> VmValue {
+    VmValue::Dict(Rc::new(
+        pairs
+            .into_iter()
+            .map(|(key, value)| (key.to_string(), value))
+            .collect(),
+    ))
+}
+
 #[test]
 fn worker_snapshot_round_trip_preserves_resume_fields() {
     let dir = std::env::temp_dir().join(format!("harn-worker-test-{}", uuid::Uuid::now_v7()));
@@ -150,6 +163,44 @@ fn worker_snapshot_round_trip_preserves_resume_fields() {
 
     let _ = std::fs::remove_dir_all(&dir);
     unsafe { std::env::remove_var("HARN_WORKER_STATE_DIR") };
+}
+
+#[test]
+fn parse_worker_config_rejects_unknown_top_level_options() {
+    let config = vm_dict(vec![
+        ("task", vm_string("do work")),
+        ("node", vm_dict(vec![("kind", vm_string("stage"))])),
+        ("typo", VmValue::Bool(true)),
+    ]);
+
+    let err = match super::config::parse_worker_config(&config) {
+        Ok(_) => panic!("expected unknown option failure"),
+        Err(err) => err,
+    };
+
+    match err {
+        VmError::Runtime(message) => assert!(message.contains("typo"), "got: {message}"),
+        other => panic!("expected Runtime error, got {other:?}"),
+    }
+}
+
+#[test]
+fn parse_worker_config_rejects_unknown_carry_options() {
+    let config = vm_dict(vec![
+        ("task", vm_string("do work")),
+        ("node", vm_dict(vec![("kind", vm_string("stage"))])),
+        ("carry", vm_dict(vec![("transcritp", vm_string("fork"))])),
+    ]);
+
+    let err = match super::config::parse_worker_config(&config) {
+        Ok(_) => panic!("expected unknown carry option failure"),
+        Err(err) => err,
+    };
+
+    match err {
+        VmError::Runtime(message) => assert!(message.contains("transcritp"), "got: {message}"),
+        other => panic!("expected Runtime error, got {other:?}"),
+    }
 }
 
 #[test]

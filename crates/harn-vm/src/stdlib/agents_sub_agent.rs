@@ -4,7 +4,10 @@ use std::rc::Rc;
 use super::agents_workers;
 use super::{SubAgentExecutionResult, SubAgentRunSpec};
 use crate::orchestration::CapabilityPolicy;
+use crate::stdlib::options::{ErrorKind, OptionsParser};
 use crate::value::{VmError, VmValue};
+
+const SUB_AGENT_RUN_FN: &str = "sub_agent_run";
 
 pub(super) struct ParsedSubAgentRequest {
     pub(super) spec: SubAgentRunSpec,
@@ -53,7 +56,7 @@ fn sub_agent_requested_policy(
         .filter(|value| !matches!(value, VmValue::Nil))
         .map(|value| serde_json::from_value(crate::llm::vm_value_to_json(value)))
         .transpose()
-        .map_err(|e| VmError::Runtime(format!("sub_agent_run: policy parse error: {e}")))?;
+        .map_err(|e| VmError::Runtime(format!("{SUB_AGENT_RUN_FN}: policy parse error: {e}")))?;
     let tool_policy = if allowed_tools.is_empty() {
         None
     } else {
@@ -73,51 +76,40 @@ fn sub_agent_requested_policy(
     }
 }
 
-fn request_string_field(
-    request: &BTreeMap<String, VmValue>,
-    key: &str,
-    fallback: Option<&str>,
-) -> Option<String> {
-    request.get(key).and_then(|value| match value {
-        VmValue::String(text) if !text.trim().is_empty() => Some(text.to_string()),
-        _ => fallback.map(str::to_string),
-    })
-}
-
-fn request_options(
-    request: &BTreeMap<String, VmValue>,
-) -> Result<BTreeMap<String, VmValue>, VmError> {
-    match request.get("options") {
-        Some(VmValue::Dict(options)) => Ok(options.as_ref().clone()),
-        Some(VmValue::Nil) | None => Ok(BTreeMap::new()),
-        Some(_) => Err(VmError::Runtime(
-            "sub_agent_run: request.options must be a dict".to_string(),
-        )),
-    }
+fn non_empty_raw_string(value: Option<String>) -> Option<String> {
+    value.filter(|text| !text.trim().is_empty())
 }
 
 pub(super) fn parse_sub_agent_request(args: &[VmValue]) -> Result<ParsedSubAgentRequest, VmError> {
     let request = validate_sub_agent_request_envelope(args)?;
-    let task = request_string_field(&request, "task", None)
-        .ok_or_else(|| VmError::Runtime("sub_agent_run: task is required".to_string()))?;
-    let policies = resolve_sub_agent_policies(&request)?;
-    let session_id = request_string_field(&request, "session_id", None)
+    let mut parser = OptionsParser::new(SUB_AGENT_RUN_FN, request, ErrorKind::Runtime);
+    if parser.optional_string_raw("_type")?.as_deref() != Some("sub_agent_request") {
+        return Err(invalid_sub_agent_request());
+    }
+    let task = parser.required_string("task")?;
+    let background = parser.bool_or("background", false)?;
+    let policies = resolve_sub_agent_policies(request, &mut parser)?;
+    let returns_schema = sub_agent_returns_schema(&mut parser)?;
+    let system = non_empty_raw_string(parser.optional_string_raw("system")?);
+    let session_id = non_empty_raw_string(parser.optional_string_raw("session_id")?)
         .unwrap_or_else(|| format!("sub_agent_session_{}", uuid::Uuid::now_v7()));
     let options =
-        prepare_sub_agent_options(&request, &session_id, policies.requested_policy.as_ref())?;
+        prepare_sub_agent_options(&mut parser, &session_id, policies.requested_policy.as_ref())?;
+    let name = non_empty_raw_string(parser.optional_string_raw("name")?)
+        .unwrap_or_else(|| "sub-agent".to_string());
+    parser.finish_strict(&[])?;
 
     Ok(ParsedSubAgentRequest {
         spec: SubAgentRunSpec {
-            name: request_string_field(&request, "name", Some("sub-agent"))
-                .unwrap_or_else(|| "sub-agent".to_string()),
+            name,
             task,
-            system: request_string_field(&request, "system", None),
+            system,
             options,
-            returns_schema: sub_agent_returns_schema(&request),
+            returns_schema,
             session_id,
             parent_session_id: crate::llm::current_agent_session_id(),
         },
-        background: matches!(request.get("background"), Some(VmValue::Bool(true))),
+        background,
         carry_policy: policies.carry_policy,
         execution: policies.execution,
         worker_policy: policies.worker_policy,
@@ -126,33 +118,30 @@ pub(super) fn parse_sub_agent_request(args: &[VmValue]) -> Result<ParsedSubAgent
 
 fn validate_sub_agent_request_envelope(
     args: &[VmValue],
-) -> Result<BTreeMap<String, VmValue>, VmError> {
-    let request = match args.first() {
-        Some(VmValue::Dict(map)) => map.as_ref().clone(),
-        _ => return Err(invalid_sub_agent_request()),
-    };
-    if matches!(
-        request.get("_type"),
-        Some(VmValue::String(kind)) if kind.as_ref() == "sub_agent_request"
-    ) {
-        return Ok(request);
+) -> Result<&BTreeMap<String, VmValue>, VmError> {
+    match args.first() {
+        Some(VmValue::Dict(map)) => Ok(map.as_ref()),
+        _ => Err(invalid_sub_agent_request()),
     }
-    Err(invalid_sub_agent_request())
 }
 
 fn invalid_sub_agent_request() -> VmError {
-    VmError::Runtime("sub_agent_run: expected a normalized sub_agent_request dict".to_string())
+    VmError::Runtime(format!(
+        "{SUB_AGENT_RUN_FN}: expected a normalized sub_agent_request dict"
+    ))
 }
 
 fn resolve_sub_agent_policies(
     request: &BTreeMap<String, VmValue>,
+    parser: &mut OptionsParser<'_>,
 ) -> Result<SubAgentPolicyResolution, VmError> {
     let allowed_tools =
-        parse_string_list(request.get("allowed_tools"), "sub_agent_run.allowed_tools")?;
-    let requested_policy = sub_agent_requested_policy(request.get("policy"), &allowed_tools)?;
+        parse_string_list(parser.raw("allowed_tools"), "sub_agent_run.allowed_tools")?;
+    let requested_policy = sub_agent_requested_policy(parser.raw("policy"), &allowed_tools)?;
     let worker_policy = agents_workers::resolve_inherited_worker_policy(requested_policy.clone())?;
+    parser.allow("carry");
     let carry_policy = agents_workers::parse_worker_carry_policy(request)?;
-    let execution = agents_workers::parse_worker_execution_profile(request.get("execution"))?;
+    let execution = agents_workers::parse_worker_execution_profile(parser.raw("execution"))?;
     Ok(SubAgentPolicyResolution {
         requested_policy,
         worker_policy,
@@ -161,26 +150,24 @@ fn resolve_sub_agent_policies(
     })
 }
 
-fn sub_agent_returns_schema(request: &BTreeMap<String, VmValue>) -> Option<VmValue> {
-    request
-        .get("returns_schema")
+fn sub_agent_returns_schema(parser: &mut OptionsParser<'_>) -> Result<Option<VmValue>, VmError> {
+    let returns_schema_value = parser
+        .raw("returns_schema")
         .filter(|value| !matches!(value, VmValue::Nil))
-        .cloned()
-        .or_else(|| {
-            request
-                .get("returns")
-                .and_then(|value| value.as_dict())
-                .and_then(|dict| dict.get("schema"))
-                .cloned()
-        })
+        .cloned();
+    let returns = parser.optional_dict("returns")?;
+    Ok(returns_schema_value.or_else(|| returns.and_then(|dict| dict.get("schema")).cloned()))
 }
 
 fn prepare_sub_agent_options(
-    request: &BTreeMap<String, VmValue>,
+    parser: &mut OptionsParser<'_>,
     session_id: &str,
     requested_policy: Option<&CapabilityPolicy>,
 ) -> Result<BTreeMap<String, VmValue>, VmError> {
-    let mut options = request_options(request)?;
+    let mut options = parser
+        .optional_dict("options")?
+        .cloned()
+        .unwrap_or_default();
     inject_sub_agent_skill_context(&mut options);
     options.insert(
         "session_id".to_string(),
@@ -825,6 +812,47 @@ mod tests {
             ("role".to_string(), VmValue::String(Rc::from("assistant"))),
             ("content".to_string(), VmValue::String(Rc::from(text))),
         ])))
+    }
+
+    fn normalized_request(extra: Vec<(&str, VmValue)>) -> VmValue {
+        let mut request = BTreeMap::from([
+            (
+                "_type".to_string(),
+                VmValue::String(Rc::from("sub_agent_request")),
+            ),
+            ("task".to_string(), VmValue::String(Rc::from("summarize"))),
+        ]);
+        for (key, value) in extra {
+            request.insert(key.to_string(), value);
+        }
+        VmValue::Dict(Rc::new(request))
+    }
+
+    #[test]
+    fn parse_sub_agent_request_rejects_unknown_top_level_options() {
+        let request = normalized_request(vec![("backgrund", VmValue::Bool(true))]);
+
+        let err = match parse_sub_agent_request(&[request]) {
+            Ok(_) => panic!("expected unknown option failure"),
+            Err(err) => err,
+        };
+
+        match err {
+            VmError::Runtime(message) => assert!(message.contains("backgrund"), "got: {message}"),
+            other => panic!("expected Runtime error, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn parse_sub_agent_request_preserves_session_id_whitespace() {
+        let request = normalized_request(vec![(
+            "session_id",
+            VmValue::String(Rc::from("  child-session  ")),
+        )]);
+
+        let parsed = parse_sub_agent_request(&[request]).unwrap();
+
+        assert_eq!(parsed.spec.session_id, "  child-session  ");
     }
 
     #[test]
