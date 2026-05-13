@@ -37,6 +37,7 @@ mod quickstart;
 mod run;
 mod runs;
 mod serve;
+mod session;
 mod skill;
 mod skills;
 mod supervisor;
@@ -125,6 +126,10 @@ pub(crate) use runs::{EvalArgs, ReplayArgs, RunsArgs, RunsCommand};
 pub(crate) use serve::{
     A2aServeArgs, McpServeTransport, ServeAcpArgs, ServeArgs, ServeCommand, ServeMcpArgs,
     ServeTlsMode,
+};
+pub(crate) use session::{
+    SessionArgs, SessionCommand, SessionExportArgs, SessionImportArgs, SessionSchemaArgs,
+    SessionValidateArgs,
 };
 pub(crate) use skill::{
     SkillArgs, SkillCommand, SkillEndorseArgs, SkillKeyCommand, SkillKeyGenerateArgs,
@@ -280,6 +285,8 @@ SCRIPTING
     Playground(PlaygroundArgs),
     /// Inspect persisted workflow run records.
     Runs(RunsArgs),
+    /// Export, import, and validate portable Harn session bundles.
+    Session(SessionArgs),
     /// Replay a persisted workflow run record.
     Replay(ReplayArgs),
     /// Evaluate a run record, run directory, or eval manifest.

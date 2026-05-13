@@ -1,0 +1,182 @@
+{
+  "_type": "run_record",
+  "id": "run_fixture_session_bundle",
+  "workflow_id": "wf_fixture_session_bundle",
+  "workflow_name": "Session bundle fixture",
+  "task": "Summarize a deploy investigation and preserve replay evidence.",
+  "status": "completed",
+  "started_at": "2026-05-01T00:00:00Z",
+  "finished_at": "2026-05-01T00:00:30Z",
+  "stages": [
+    {
+      "id": "stage_fixture_answer",
+      "node_id": "answer",
+      "kind": "agent",
+      "status": "completed",
+      "outcome": "ok",
+      "started_at": "2026-05-01T00:00:01Z",
+      "finished_at": "2026-05-01T00:00:20Z",
+      "visible_text": "The deploy failed because the canary health check used stale config.",
+      "private_reasoning": "The local-only notes should not appear in replay-only shares.",
+      "transcript": {
+        "messages": [
+          {
+            "role": "assistant",
+            "content": "The deploy failed because the canary health check used stale config."
+          }
+        ],
+        "events": [],
+        "assets": [],
+        "metadata": {
+          "tool_schemas": [
+            {
+              "name": "read_file",
+              "input_schema": {
+                "type": "object",
+                "properties": {
+                  "path": {
+                    "type": "string"
+                  }
+                }
+              }
+            }
+          ]
+        }
+      }
+    }
+  ],
+  "transitions": [
+    {
+      "id": "transition_fixture_start",
+      "to_node_id": "answer",
+      "timestamp": "2026-05-01T00:00:01Z"
+    }
+  ],
+  "checkpoints": [
+    {
+      "id": "checkpoint_fixture_done",
+      "ready_nodes": [],
+      "completed_nodes": [
+        "answer"
+      ],
+      "last_stage_id": "stage_fixture_answer",
+      "persisted_at": "2026-05-01T00:00:30Z",
+      "reason": "completed"
+    }
+  ],
+  "completed_nodes": [
+    "answer"
+  ],
+  "artifacts": [
+    {
+      "id": "artifact_fixture_summary",
+      "kind": "summary",
+      "title": "Deploy investigation summary",
+      "stage": "stage_fixture_answer",
+      "text": "Canary health checks used stale config.",
+      "metadata": {
+        "classification": "shareable"
+      }
+    }
+  ],
+  "transcript": {
+    "_type": "transcript",
+    "messages": [
+      {
+        "role": "user",
+        "content": "Why did the canary deploy fail?"
+      },
+      {
+        "role": "assistant",
+        "content": "The canary health check used stale config."
+      }
+    ],
+    "events": [
+      {
+        "type": "tool_schemas",
+        "schemas": [
+          {
+            "name": "read_file"
+          }
+        ]
+      },
+      {
+        "kind": "permission_requested",
+        "request_id": "perm_fixture_1",
+        "agent": "deploy-investigator",
+        "arguments": {
+          "api_key": "fixture-local-key"
+        }
+      }
+    ],
+    "assets": [],
+    "summary": "Canary health check used stale config.",
+    "metadata": {
+      "system_prompt": "Use local logs and explain the deployment failure."
+    }
+  },
+  "usage": {
+    "input_tokens": 42,
+    "output_tokens": 17,
+    "total_duration_ms": 1200,
+    "call_count": 1,
+    "total_cost": 0.002,
+    "models": [
+      "mock/deploy-investigator"
+    ]
+  },
+  "replay_fixture": {
+    "_type": "replay_fixture",
+    "id": "replay_fixture_session_bundle",
+    "source_run_id": "run_fixture_session_bundle",
+    "workflow_id": "wf_fixture_session_bundle",
+    "workflow_name": "Session bundle fixture",
+    "created_at": "2026-05-01T00:00:31Z",
+    "expected_status": "completed",
+    "stage_assertions": [
+      {
+        "node_id": "answer",
+        "expected_status": "completed",
+        "expected_outcome": "ok",
+        "required_artifact_kinds": [
+          "summary"
+        ],
+        "visible_text_contains": "stale config"
+      }
+    ]
+  },
+  "trace_spans": [
+    {
+      "span_id": 1,
+      "kind": "stage",
+      "name": "answer",
+      "start_ms": 0,
+      "duration_ms": 1200
+    }
+  ],
+  "tool_recordings": [
+    {
+      "tool_name": "read_file",
+      "tool_use_id": "tool_fixture_1",
+      "args_hash": "fixture_args_hash",
+      "result": "Read deploy.log: stale config detected.",
+      "is_rejected": false,
+      "duration_ms": 8,
+      "iteration": 1,
+      "timestamp": "2026-05-01T00:00:10Z"
+    }
+  ],
+  "hitl_questions": [
+    {
+      "request_id": "hitl_fixture_1",
+      "prompt": "Approve reading deploy.log?",
+      "agent": "deploy-investigator",
+      "asked_at": "2026-05-01T00:00:05Z"
+    }
+  ],
+  "metadata": {
+    "workspace_id": "workspace_fixture",
+    "project_root": "/workspace/example"
+  },
+  "persisted_path": "spec/session-bundles/fixtures/sample-run-record.json"
+}

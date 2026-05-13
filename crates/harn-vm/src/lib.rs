@@ -48,6 +48,7 @@ pub mod runtime_context;
 pub mod runtime_paths;
 pub mod schema;
 pub mod secrets;
+pub mod session_bundle;
 pub mod sessions;
 pub(crate) mod shared_state;
 pub mod shells;
