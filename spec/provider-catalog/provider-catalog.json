@@ -1,0 +1,1902 @@
+{
+  "schema_version": 1,
+  "schema": "https://harnlang.com/schemas/provider-catalog.v1.json",
+  "generated_by": "harn providers export",
+  "providers": [
+    {
+      "id": "anthropic",
+      "display_name": "Anthropic",
+      "classification": "hosted",
+      "endpoint": {
+        "base_url": "https://api.anthropic.com/v1",
+        "chat_endpoint": "/messages"
+      },
+      "auth": {
+        "style": "header",
+        "header": "x-api-key",
+        "env": [
+          "ANTHROPIC_API_KEY"
+        ],
+        "required": true
+      },
+      "protocols": [
+        "anthropic_messages"
+      ],
+      "features": [
+        "prompt_caching",
+        "thinking"
+      ],
+      "caveats": [],
+      "latency_p50_ms": 2500
+    },
+    {
+      "id": "azure_openai",
+      "display_name": "Azure Openai",
+      "classification": "hosted",
+      "endpoint": {
+        "base_url": "https://{resource}.openai.azure.com",
+        "base_url_env": "AZURE_OPENAI_ENDPOINT",
+        "chat_endpoint": "/openai/deployments/{deployment}/chat/completions?api-version={api_version}"
+      },
+      "auth": {
+        "style": "azure_openai",
+        "env": [
+          "AZURE_OPENAI_API_KEY",
+          "AZURE_OPENAI_AD_TOKEN",
+          "AZURE_OPENAI_BEARER_TOKEN"
+        ],
+        "required": true
+      },
+      "protocols": [
+        "azure_openai_chat_completions"
+      ],
+      "features": [
+        "native_tools"
+      ],
+      "caveats": [
+        "The Harn model field names the Azure deployment."
+      ],
+      "latency_p50_ms": 1900
+    },
+    {
+      "id": "bedrock",
+      "display_name": "Bedrock",
+      "classification": "hosted",
+      "endpoint": {
+        "base_url": "",
+        "base_url_env": "BEDROCK_BASE_URL",
+        "chat_endpoint": "/model/{model}/converse"
+      },
+      "auth": {
+        "style": "aws_sigv4",
+        "env": [],
+        "required": true
+      },
+      "protocols": [
+        "bedrock_converse"
+      ],
+      "features": [
+        "native_tools"
+      ],
+      "caveats": [
+        "Credentials are resolved through the AWS SDK chain."
+      ],
+      "latency_p50_ms": 2600
+    },
+    {
+      "id": "dashscope",
+      "display_name": "Dashscope",
+      "classification": "hosted",
+      "endpoint": {
+        "base_url": "https://dashscope-intl.aliyuncs.com/compatible-mode/v1",
+        "base_url_env": "DASHSCOPE_BASE_URL",
+        "chat_endpoint": "/chat/completions",
+        "completion_endpoint": "/completions"
+      },
+      "auth": {
+        "style": "bearer",
+        "env": [
+          "DASHSCOPE_API_KEY"
+        ],
+        "required": true
+      },
+      "protocols": [
+        "openai_chat_completions"
+      ],
+      "features": [],
+      "caveats": [],
+      "latency_p50_ms": 1600
+    },
+    {
+      "id": "deepseek",
+      "display_name": "Deepseek",
+      "classification": "hosted",
+      "endpoint": {
+        "base_url": "https://api.deepseek.com/v1",
+        "base_url_env": "DEEPSEEK_BASE_URL",
+        "chat_endpoint": "/chat/completions",
+        "completion_endpoint": "/completions"
+      },
+      "auth": {
+        "style": "bearer",
+        "env": [
+          "DEEPSEEK_API_KEY"
+        ],
+        "required": true
+      },
+      "protocols": [
+        "openai_chat_completions"
+      ],
+      "features": [],
+      "caveats": [],
+      "latency_p50_ms": 1800
+    },
+    {
+      "id": "fireworks",
+      "display_name": "Fireworks",
+      "classification": "hosted",
+      "endpoint": {
+        "base_url": "https://api.fireworks.ai/inference/v1",
+        "base_url_env": "FIREWORKS_BASE_URL",
+        "chat_endpoint": "/chat/completions",
+        "completion_endpoint": "/completions"
+      },
+      "auth": {
+        "style": "bearer",
+        "env": [
+          "FIREWORKS_API_KEY"
+        ],
+        "required": true
+      },
+      "protocols": [
+        "openai_chat_completions"
+      ],
+      "features": [],
+      "caveats": [],
+      "latency_p50_ms": 1400
+    },
+    {
+      "id": "gemini",
+      "display_name": "Gemini",
+      "classification": "hosted",
+      "endpoint": {
+        "base_url": "https://generativelanguage.googleapis.com",
+        "base_url_env": "GEMINI_BASE_URL",
+        "chat_endpoint": "/v1beta/models"
+      },
+      "auth": {
+        "style": "header",
+        "header": "x-goog-api-key",
+        "env": [
+          "GEMINI_API_KEY",
+          "GOOGLE_API_KEY"
+        ],
+        "required": true
+      },
+      "protocols": [
+        "gemini_generate_content"
+      ],
+      "features": [],
+      "caveats": [],
+      "latency_p50_ms": 1800
+    },
+    {
+      "id": "groq",
+      "display_name": "Groq",
+      "classification": "hosted",
+      "endpoint": {
+        "base_url": "https://api.groq.com/openai/v1",
+        "base_url_env": "GROQ_BASE_URL",
+        "chat_endpoint": "/chat/completions",
+        "completion_endpoint": "/completions"
+      },
+      "auth": {
+        "style": "bearer",
+        "env": [
+          "GROQ_API_KEY"
+        ],
+        "required": true
+      },
+      "protocols": [
+        "openai_chat_completions"
+      ],
+      "features": [],
+      "caveats": [],
+      "latency_p50_ms": 450
+    },
+    {
+      "id": "huggingface",
+      "display_name": "Huggingface",
+      "classification": "hosted",
+      "endpoint": {
+        "base_url": "https://router.huggingface.co/v1",
+        "chat_endpoint": "/chat/completions",
+        "completion_endpoint": "/completions"
+      },
+      "auth": {
+        "style": "bearer",
+        "env": [
+          "HF_TOKEN",
+          "HUGGINGFACE_API_KEY"
+        ],
+        "required": true
+      },
+      "protocols": [
+        "openai_chat_completions"
+      ],
+      "features": [],
+      "caveats": [],
+      "latency_p50_ms": 2400
+    },
+    {
+      "id": "llamacpp",
+      "display_name": "Llamacpp",
+      "classification": "local",
+      "endpoint": {
+        "base_url": "http://127.0.0.1:8001",
+        "base_url_env": "LLAMACPP_BASE_URL",
+        "chat_endpoint": "/v1/chat/completions",
+        "completion_endpoint": "/v1/completions"
+      },
+      "auth": {
+        "style": "none",
+        "env": [],
+        "required": false
+      },
+      "protocols": [
+        "openai_chat_completions"
+      ],
+      "features": [],
+      "caveats": [],
+      "latency_p50_ms": 900
+    },
+    {
+      "id": "local",
+      "display_name": "Local",
+      "classification": "local",
+      "endpoint": {
+        "base_url": "http://localhost:8000",
+        "base_url_env": "LOCAL_LLM_BASE_URL",
+        "chat_endpoint": "/v1/chat/completions",
+        "completion_endpoint": "/v1/completions"
+      },
+      "auth": {
+        "style": "none",
+        "env": [],
+        "required": false
+      },
+      "protocols": [
+        "openai_chat_completions"
+      ],
+      "features": [],
+      "caveats": [],
+      "latency_p50_ms": 900
+    },
+    {
+      "id": "mlx",
+      "display_name": "Mlx",
+      "classification": "local",
+      "endpoint": {
+        "base_url": "http://127.0.0.1:8002",
+        "base_url_env": "MLX_BASE_URL",
+        "chat_endpoint": "/v1/chat/completions",
+        "completion_endpoint": "/v1/completions"
+      },
+      "auth": {
+        "style": "none",
+        "env": [],
+        "required": false
+      },
+      "protocols": [
+        "openai_chat_completions"
+      ],
+      "features": [],
+      "caveats": [],
+      "latency_p50_ms": 900
+    },
+    {
+      "id": "ollama",
+      "display_name": "Ollama",
+      "classification": "local",
+      "endpoint": {
+        "base_url": "http://localhost:11434",
+        "base_url_env": "OLLAMA_HOST",
+        "chat_endpoint": "/api/chat",
+        "completion_endpoint": "/api/generate"
+      },
+      "auth": {
+        "style": "none",
+        "env": [],
+        "required": false
+      },
+      "protocols": [
+        "ollama_native"
+      ],
+      "features": [],
+      "caveats": [
+        "Native Ollama chat returns NDJSON and can apply model-family parsers."
+      ],
+      "latency_p50_ms": 1200
+    },
+    {
+      "id": "openai",
+      "display_name": "Openai",
+      "classification": "hosted",
+      "endpoint": {
+        "base_url": "https://api.openai.com/v1",
+        "chat_endpoint": "/chat/completions",
+        "completion_endpoint": "/completions"
+      },
+      "auth": {
+        "style": "bearer",
+        "env": [
+          "OPENAI_API_KEY"
+        ],
+        "required": true
+      },
+      "protocols": [
+        "openai_chat_completions"
+      ],
+      "features": [],
+      "caveats": [],
+      "latency_p50_ms": 1800
+    },
+    {
+      "id": "openrouter",
+      "display_name": "Openrouter",
+      "classification": "hosted",
+      "endpoint": {
+        "base_url": "https://openrouter.ai/api/v1",
+        "chat_endpoint": "/chat/completions",
+        "completion_endpoint": "/completions"
+      },
+      "auth": {
+        "style": "bearer",
+        "env": [
+          "OPENROUTER_API_KEY"
+        ],
+        "required": true
+      },
+      "protocols": [
+        "openai_chat_completions"
+      ],
+      "features": [],
+      "caveats": [],
+      "latency_p50_ms": 2200
+    },
+    {
+      "id": "tgi",
+      "display_name": "Tgi",
+      "classification": "local",
+      "endpoint": {
+        "base_url": "http://localhost:8080",
+        "base_url_env": "TGI_BASE_URL",
+        "chat_endpoint": "/v1/chat/completions",
+        "completion_endpoint": "/v1/completions"
+      },
+      "auth": {
+        "style": "none",
+        "env": [],
+        "required": false
+      },
+      "protocols": [
+        "openai_chat_completions"
+      ],
+      "features": [],
+      "caveats": [],
+      "latency_p50_ms": 950
+    },
+    {
+      "id": "together",
+      "display_name": "Together",
+      "classification": "hosted",
+      "endpoint": {
+        "base_url": "https://api.together.xyz/v1",
+        "base_url_env": "TOGETHER_AI_BASE_URL",
+        "chat_endpoint": "/chat/completions",
+        "completion_endpoint": "/completions"
+      },
+      "auth": {
+        "style": "bearer",
+        "env": [
+          "TOGETHER_AI_API_KEY"
+        ],
+        "required": true
+      },
+      "protocols": [
+        "openai_chat_completions"
+      ],
+      "features": [],
+      "caveats": [],
+      "latency_p50_ms": 1600
+    },
+    {
+      "id": "vertex",
+      "display_name": "Vertex",
+      "classification": "hosted",
+      "endpoint": {
+        "base_url": "https://aiplatform.googleapis.com/v1",
+        "base_url_env": "VERTEX_AI_BASE_URL",
+        "chat_endpoint": "/projects/{project}/locations/{location}/publishers/google/models/{model}:generateContent"
+      },
+      "auth": {
+        "style": "bearer",
+        "env": [
+          "VERTEX_AI_ACCESS_TOKEN",
+          "GOOGLE_OAUTH_ACCESS_TOKEN",
+          "GOOGLE_APPLICATION_CREDENTIALS"
+        ],
+        "required": true
+      },
+      "protocols": [
+        "vertex_generate_content"
+      ],
+      "features": [
+        "native_tools"
+      ],
+      "caveats": [],
+      "latency_p50_ms": 2100
+    },
+    {
+      "id": "vllm",
+      "display_name": "Vllm",
+      "classification": "local",
+      "endpoint": {
+        "base_url": "http://localhost:8000",
+        "base_url_env": "VLLM_BASE_URL",
+        "chat_endpoint": "/v1/chat/completions",
+        "completion_endpoint": "/v1/completions"
+      },
+      "auth": {
+        "style": "none",
+        "env": [],
+        "required": false
+      },
+      "protocols": [
+        "openai_chat_completions"
+      ],
+      "features": [],
+      "caveats": [],
+      "latency_p50_ms": 800
+    }
+  ],
+  "models": [
+    {
+      "id": "claude-3-5-haiku-20241022",
+      "name": "Claude Haiku 3.5",
+      "provider": "anthropic",
+      "aliases": [],
+      "context_window": 200000,
+      "modalities": {
+        "input": [
+          "text",
+          "image",
+          "audio",
+          "pdf"
+        ],
+        "output": [
+          "text"
+        ]
+      },
+      "tool_support": {
+        "native": true,
+        "text": true,
+        "tool_search": []
+      },
+      "structured_output": "tool_use",
+      "reasoning": {
+        "modes": [
+          "enabled"
+        ],
+        "effort_supported": false,
+        "none_supported": false,
+        "interleaved_supported": false,
+        "preserve_thinking": false
+      },
+      "prompt_cache": true,
+      "pricing": {
+        "input_per_mtok": 0.8,
+        "output_per_mtok": 4.0,
+        "cache_read_per_mtok": 0.08,
+        "cache_write_per_mtok": 1.0
+      },
+      "deprecation": {
+        "status": "active"
+      },
+      "quality_tags": [],
+      "capability_tags": [
+        "streaming",
+        "tools",
+        "vision",
+        "audio",
+        "pdf",
+        "files",
+        "prompt_caching",
+        "thinking",
+        "structured_output"
+      ]
+    },
+    {
+      "id": "claude-3-5-sonnet-20240620",
+      "name": "Claude Sonnet 3.5 (2024-06-20)",
+      "provider": "anthropic",
+      "aliases": [],
+      "context_window": 200000,
+      "modalities": {
+        "input": [
+          "text",
+          "image",
+          "audio",
+          "pdf"
+        ],
+        "output": [
+          "text"
+        ]
+      },
+      "tool_support": {
+        "native": true,
+        "text": true,
+        "tool_search": []
+      },
+      "structured_output": "tool_use",
+      "reasoning": {
+        "modes": [
+          "enabled"
+        ],
+        "effort_supported": false,
+        "none_supported": false,
+        "interleaved_supported": false,
+        "preserve_thinking": false
+      },
+      "prompt_cache": true,
+      "pricing": {
+        "input_per_mtok": 3.0,
+        "output_per_mtok": 15.0,
+        "cache_read_per_mtok": 0.3,
+        "cache_write_per_mtok": 3.75
+      },
+      "deprecation": {
+        "status": "active"
+      },
+      "quality_tags": [],
+      "capability_tags": [
+        "streaming",
+        "tools",
+        "vision",
+        "audio",
+        "pdf",
+        "files",
+        "prompt_caching",
+        "thinking",
+        "structured_output"
+      ]
+    },
+    {
+      "id": "claude-3-5-sonnet-20241022",
+      "name": "Claude Sonnet 3.5 (2024-10-22)",
+      "provider": "anthropic",
+      "aliases": [],
+      "context_window": 200000,
+      "modalities": {
+        "input": [
+          "text",
+          "image",
+          "audio",
+          "pdf"
+        ],
+        "output": [
+          "text"
+        ]
+      },
+      "tool_support": {
+        "native": true,
+        "text": true,
+        "tool_search": []
+      },
+      "structured_output": "tool_use",
+      "reasoning": {
+        "modes": [
+          "enabled"
+        ],
+        "effort_supported": false,
+        "none_supported": false,
+        "interleaved_supported": false,
+        "preserve_thinking": false
+      },
+      "prompt_cache": true,
+      "pricing": {
+        "input_per_mtok": 3.0,
+        "output_per_mtok": 15.0,
+        "cache_read_per_mtok": 0.3,
+        "cache_write_per_mtok": 3.75
+      },
+      "deprecation": {
+        "status": "active"
+      },
+      "quality_tags": [],
+      "capability_tags": [
+        "streaming",
+        "tools",
+        "vision",
+        "audio",
+        "pdf",
+        "files",
+        "prompt_caching",
+        "thinking",
+        "structured_output"
+      ]
+    },
+    {
+      "id": "claude-3-opus-20240229",
+      "name": "Claude Opus 3",
+      "provider": "anthropic",
+      "aliases": [],
+      "context_window": 200000,
+      "modalities": {
+        "input": [
+          "text",
+          "image",
+          "audio",
+          "pdf"
+        ],
+        "output": [
+          "text"
+        ]
+      },
+      "tool_support": {
+        "native": true,
+        "text": true,
+        "tool_search": []
+      },
+      "structured_output": "tool_use",
+      "reasoning": {
+        "modes": [
+          "enabled"
+        ],
+        "effort_supported": false,
+        "none_supported": false,
+        "interleaved_supported": false,
+        "preserve_thinking": false
+      },
+      "prompt_cache": true,
+      "pricing": {
+        "input_per_mtok": 15.0,
+        "output_per_mtok": 75.0,
+        "cache_read_per_mtok": 1.5,
+        "cache_write_per_mtok": 18.75
+      },
+      "deprecation": {
+        "status": "active"
+      },
+      "quality_tags": [],
+      "capability_tags": [
+        "streaming",
+        "tools",
+        "vision",
+        "audio",
+        "pdf",
+        "files",
+        "prompt_caching",
+        "thinking",
+        "structured_output"
+      ]
+    },
+    {
+      "id": "claude-haiku-4-5-20251001",
+      "name": "Claude Haiku 4.5",
+      "provider": "anthropic",
+      "aliases": [],
+      "context_window": 200000,
+      "modalities": {
+        "input": [
+          "text",
+          "image",
+          "audio",
+          "pdf"
+        ],
+        "output": [
+          "text"
+        ]
+      },
+      "tool_support": {
+        "native": true,
+        "text": true,
+        "tool_search": [
+          "bm25",
+          "regex"
+        ],
+        "max_tools": 10000
+      },
+      "structured_output": "tool_use",
+      "reasoning": {
+        "modes": [
+          "enabled"
+        ],
+        "effort_supported": false,
+        "none_supported": false,
+        "interleaved_supported": false,
+        "preserve_thinking": false
+      },
+      "prompt_cache": true,
+      "pricing": {
+        "input_per_mtok": 1.0,
+        "output_per_mtok": 5.0,
+        "cache_read_per_mtok": 0.1,
+        "cache_write_per_mtok": 1.25
+      },
+      "deprecation": {
+        "status": "active"
+      },
+      "quality_tags": [],
+      "capability_tags": [
+        "streaming",
+        "tools",
+        "tool_search",
+        "vision",
+        "audio",
+        "pdf",
+        "files",
+        "prompt_caching",
+        "thinking",
+        "structured_output"
+      ]
+    },
+    {
+      "id": "claude-opus-4-1-20250805",
+      "name": "Claude Opus 4.1",
+      "provider": "anthropic",
+      "aliases": [],
+      "context_window": 200000,
+      "modalities": {
+        "input": [
+          "text",
+          "image",
+          "audio",
+          "pdf"
+        ],
+        "output": [
+          "text"
+        ]
+      },
+      "tool_support": {
+        "native": true,
+        "text": true,
+        "tool_search": [
+          "bm25",
+          "regex"
+        ],
+        "max_tools": 10000
+      },
+      "structured_output": "tool_use",
+      "reasoning": {
+        "modes": [
+          "enabled"
+        ],
+        "effort_supported": false,
+        "none_supported": false,
+        "interleaved_supported": false,
+        "preserve_thinking": false
+      },
+      "prompt_cache": true,
+      "pricing": {
+        "input_per_mtok": 15.0,
+        "output_per_mtok": 75.0,
+        "cache_read_per_mtok": 1.5,
+        "cache_write_per_mtok": 18.75
+      },
+      "deprecation": {
+        "status": "active"
+      },
+      "quality_tags": [],
+      "capability_tags": [
+        "streaming",
+        "tools",
+        "tool_search",
+        "vision",
+        "audio",
+        "pdf",
+        "files",
+        "prompt_caching",
+        "thinking",
+        "structured_output"
+      ]
+    },
+    {
+      "id": "claude-opus-4-20250514",
+      "name": "Claude Opus 4",
+      "provider": "anthropic",
+      "aliases": [],
+      "context_window": 200000,
+      "modalities": {
+        "input": [
+          "text",
+          "image",
+          "audio",
+          "pdf"
+        ],
+        "output": [
+          "text"
+        ]
+      },
+      "tool_support": {
+        "native": true,
+        "text": true,
+        "tool_search": [
+          "bm25",
+          "regex"
+        ],
+        "max_tools": 10000
+      },
+      "structured_output": "tool_use",
+      "reasoning": {
+        "modes": [
+          "enabled"
+        ],
+        "effort_supported": false,
+        "none_supported": false,
+        "interleaved_supported": false,
+        "preserve_thinking": false
+      },
+      "prompt_cache": true,
+      "pricing": {
+        "input_per_mtok": 15.0,
+        "output_per_mtok": 75.0,
+        "cache_read_per_mtok": 1.5,
+        "cache_write_per_mtok": 18.75
+      },
+      "deprecation": {
+        "status": "active"
+      },
+      "quality_tags": [],
+      "capability_tags": [
+        "streaming",
+        "tools",
+        "tool_search",
+        "vision",
+        "audio",
+        "pdf",
+        "files",
+        "prompt_caching",
+        "thinking",
+        "structured_output"
+      ]
+    },
+    {
+      "id": "claude-sonnet-4-20250514",
+      "name": "Claude Sonnet 4",
+      "provider": "anthropic",
+      "aliases": [
+        "frontier",
+        "tier/frontier"
+      ],
+      "context_window": 200000,
+      "modalities": {
+        "input": [
+          "text",
+          "image",
+          "audio",
+          "pdf"
+        ],
+        "output": [
+          "text"
+        ]
+      },
+      "tool_support": {
+        "native": true,
+        "text": true,
+        "tool_search": [
+          "bm25",
+          "regex"
+        ],
+        "max_tools": 10000
+      },
+      "structured_output": "tool_use",
+      "reasoning": {
+        "modes": [
+          "enabled"
+        ],
+        "effort_supported": false,
+        "none_supported": false,
+        "interleaved_supported": false,
+        "preserve_thinking": false
+      },
+      "prompt_cache": true,
+      "pricing": {
+        "input_per_mtok": 3.0,
+        "output_per_mtok": 15.0,
+        "cache_read_per_mtok": 0.3,
+        "cache_write_per_mtok": 3.75
+      },
+      "deprecation": {
+        "status": "active"
+      },
+      "quality_tags": [
+        "frontier"
+      ],
+      "capability_tags": [
+        "streaming",
+        "tools",
+        "tool_search",
+        "vision",
+        "audio",
+        "pdf",
+        "files",
+        "prompt_caching",
+        "thinking",
+        "structured_output"
+      ]
+    },
+    {
+      "id": "gemini-2.5-flash",
+      "name": "Gemini 2.5 Flash",
+      "provider": "gemini",
+      "aliases": [],
+      "context_window": 1048576,
+      "modalities": {
+        "input": [
+          "text",
+          "image",
+          "audio",
+          "pdf"
+        ],
+        "output": [
+          "text"
+        ]
+      },
+      "tool_support": {
+        "native": false,
+        "text": true,
+        "tool_search": []
+      },
+      "structured_output": "none",
+      "reasoning": {
+        "modes": [
+          "enabled",
+          "adaptive",
+          "effort"
+        ],
+        "effort_supported": false,
+        "none_supported": false,
+        "interleaved_supported": false,
+        "preserve_thinking": false
+      },
+      "prompt_cache": false,
+      "pricing": {
+        "input_per_mtok": 0.1,
+        "output_per_mtok": 0.4,
+        "cache_read_per_mtok": 0.025,
+        "cache_write_per_mtok": null
+      },
+      "deprecation": {
+        "status": "active"
+      },
+      "quality_tags": [],
+      "capability_tags": [
+        "streaming",
+        "vision",
+        "audio",
+        "pdf",
+        "files",
+        "thinking",
+        "extended_thinking"
+      ]
+    },
+    {
+      "id": "gemini-2.5-pro",
+      "name": "Gemini 2.5 Pro",
+      "provider": "gemini",
+      "aliases": [],
+      "context_window": 2097152,
+      "modalities": {
+        "input": [
+          "text",
+          "image",
+          "audio",
+          "pdf"
+        ],
+        "output": [
+          "text"
+        ]
+      },
+      "tool_support": {
+        "native": false,
+        "text": true,
+        "tool_search": []
+      },
+      "structured_output": "none",
+      "reasoning": {
+        "modes": [
+          "enabled",
+          "adaptive",
+          "effort"
+        ],
+        "effort_supported": false,
+        "none_supported": false,
+        "interleaved_supported": false,
+        "preserve_thinking": false
+      },
+      "prompt_cache": false,
+      "pricing": {
+        "input_per_mtok": 1.25,
+        "output_per_mtok": 5.0,
+        "cache_read_per_mtok": 0.3125,
+        "cache_write_per_mtok": null
+      },
+      "deprecation": {
+        "status": "active"
+      },
+      "quality_tags": [],
+      "capability_tags": [
+        "streaming",
+        "vision",
+        "audio",
+        "pdf",
+        "files",
+        "thinking",
+        "extended_thinking"
+      ]
+    },
+    {
+      "id": "gemma-4-26b-a4b-it",
+      "name": "Gemma 4 26B MoE (local)",
+      "provider": "local",
+      "aliases": [
+        "local-gemma4",
+        "local-gemma4-26b"
+      ],
+      "context_window": 131072,
+      "stream_timeout": 600.0,
+      "modalities": {
+        "input": [
+          "text"
+        ],
+        "output": [
+          "text"
+        ]
+      },
+      "tool_support": {
+        "native": false,
+        "text": true,
+        "tool_search": []
+      },
+      "structured_output": "none",
+      "reasoning": {
+        "modes": [
+          "enabled"
+        ],
+        "effort_supported": false,
+        "none_supported": false,
+        "interleaved_supported": false,
+        "preserve_thinking": false
+      },
+      "prompt_cache": false,
+      "deprecation": {
+        "status": "active"
+      },
+      "quality_tags": [
+        "local"
+      ],
+      "capability_tags": [
+        "streaming",
+        "thinking"
+      ]
+    },
+    {
+      "id": "gemma-4-31b-it",
+      "name": "Gemma 4 31B (local)",
+      "provider": "local",
+      "aliases": [
+        "local-gemma4-31b"
+      ],
+      "context_window": 131072,
+      "stream_timeout": 600.0,
+      "modalities": {
+        "input": [
+          "text"
+        ],
+        "output": [
+          "text"
+        ]
+      },
+      "tool_support": {
+        "native": false,
+        "text": true,
+        "tool_search": []
+      },
+      "structured_output": "none",
+      "reasoning": {
+        "modes": [
+          "enabled"
+        ],
+        "effort_supported": false,
+        "none_supported": false,
+        "interleaved_supported": false,
+        "preserve_thinking": false
+      },
+      "prompt_cache": false,
+      "deprecation": {
+        "status": "active"
+      },
+      "quality_tags": [
+        "local"
+      ],
+      "capability_tags": [
+        "streaming",
+        "thinking"
+      ]
+    },
+    {
+      "id": "gemma-4-e2b-it",
+      "name": "Gemma 4 E2B (local)",
+      "provider": "local",
+      "aliases": [
+        "local-gemma4-e2b"
+      ],
+      "context_window": 131072,
+      "stream_timeout": 300.0,
+      "prefer_prefill_done": true,
+      "modalities": {
+        "input": [
+          "text"
+        ],
+        "output": [
+          "text"
+        ]
+      },
+      "tool_support": {
+        "native": false,
+        "text": true,
+        "tool_search": []
+      },
+      "structured_output": "none",
+      "reasoning": {
+        "modes": [
+          "enabled"
+        ],
+        "effort_supported": false,
+        "none_supported": false,
+        "interleaved_supported": false,
+        "preserve_thinking": false
+      },
+      "prompt_cache": false,
+      "deprecation": {
+        "status": "active"
+      },
+      "quality_tags": [
+        "local"
+      ],
+      "capability_tags": [
+        "streaming",
+        "thinking"
+      ]
+    },
+    {
+      "id": "gemma-4-e4b-it",
+      "name": "Gemma 4 E4B (local)",
+      "provider": "local",
+      "aliases": [
+        "local-gemma4-e4b"
+      ],
+      "context_window": 131072,
+      "stream_timeout": 300.0,
+      "prefer_prefill_done": true,
+      "modalities": {
+        "input": [
+          "text"
+        ],
+        "output": [
+          "text"
+        ]
+      },
+      "tool_support": {
+        "native": false,
+        "text": true,
+        "tool_search": []
+      },
+      "structured_output": "none",
+      "reasoning": {
+        "modes": [
+          "enabled"
+        ],
+        "effort_supported": false,
+        "none_supported": false,
+        "interleaved_supported": false,
+        "preserve_thinking": false
+      },
+      "prompt_cache": false,
+      "deprecation": {
+        "status": "active"
+      },
+      "quality_tags": [
+        "local"
+      ],
+      "capability_tags": [
+        "streaming",
+        "thinking"
+      ]
+    },
+    {
+      "id": "unsloth/Qwen3.6-27B-UD-MLX-4bit",
+      "name": "Qwen3.6 27B (MLX 4-bit)",
+      "provider": "mlx",
+      "aliases": [
+        "mlx-qwen36-27b"
+      ],
+      "context_window": 262144,
+      "stream_timeout": 900.0,
+      "modalities": {
+        "input": [
+          "text",
+          "image"
+        ],
+        "output": [
+          "text"
+        ]
+      },
+      "tool_support": {
+        "native": true,
+        "text": true,
+        "tool_search": []
+      },
+      "structured_output": "native",
+      "reasoning": {
+        "modes": [
+          "enabled"
+        ],
+        "effort_supported": false,
+        "none_supported": false,
+        "interleaved_supported": false,
+        "preserve_thinking": true
+      },
+      "prompt_cache": false,
+      "deprecation": {
+        "status": "active"
+      },
+      "quality_tags": [
+        "local"
+      ],
+      "capability_tags": [
+        "streaming",
+        "tools",
+        "vision",
+        "thinking",
+        "structured_output"
+      ]
+    },
+    {
+      "id": "llama3.2",
+      "name": "Llama 3.2",
+      "provider": "ollama",
+      "aliases": [],
+      "context_window": 32000,
+      "stream_timeout": 300.0,
+      "modalities": {
+        "input": [
+          "text"
+        ],
+        "output": [
+          "text"
+        ]
+      },
+      "tool_support": {
+        "native": false,
+        "text": true,
+        "tool_search": []
+      },
+      "structured_output": "none",
+      "reasoning": {
+        "modes": [],
+        "effort_supported": false,
+        "none_supported": false,
+        "interleaved_supported": false,
+        "preserve_thinking": false
+      },
+      "prompt_cache": false,
+      "deprecation": {
+        "status": "active"
+      },
+      "quality_tags": [
+        "local"
+      ],
+      "capability_tags": [
+        "streaming"
+      ]
+    },
+    {
+      "id": "gpt-4-turbo",
+      "name": "GPT-4 Turbo",
+      "provider": "openai",
+      "aliases": [],
+      "context_window": 128000,
+      "modalities": {
+        "input": [
+          "text"
+        ],
+        "output": [
+          "text"
+        ]
+      },
+      "tool_support": {
+        "native": true,
+        "text": true,
+        "tool_search": []
+      },
+      "structured_output": "native",
+      "reasoning": {
+        "modes": [],
+        "effort_supported": false,
+        "none_supported": false,
+        "interleaved_supported": false,
+        "preserve_thinking": false
+      },
+      "prompt_cache": false,
+      "pricing": {
+        "input_per_mtok": 10.0,
+        "output_per_mtok": 30.0,
+        "cache_read_per_mtok": null,
+        "cache_write_per_mtok": null
+      },
+      "deprecation": {
+        "status": "active"
+      },
+      "quality_tags": [],
+      "capability_tags": [
+        "streaming",
+        "tools",
+        "structured_output"
+      ]
+    },
+    {
+      "id": "gpt-4o",
+      "name": "GPT-4o",
+      "provider": "openai",
+      "aliases": [],
+      "context_window": 128000,
+      "modalities": {
+        "input": [
+          "text",
+          "image",
+          "audio"
+        ],
+        "output": [
+          "text"
+        ]
+      },
+      "tool_support": {
+        "native": true,
+        "text": true,
+        "tool_search": []
+      },
+      "structured_output": "native",
+      "reasoning": {
+        "modes": [],
+        "effort_supported": false,
+        "none_supported": false,
+        "interleaved_supported": false,
+        "preserve_thinking": false
+      },
+      "prompt_cache": false,
+      "pricing": {
+        "input_per_mtok": 2.5,
+        "output_per_mtok": 10.0,
+        "cache_read_per_mtok": 1.25,
+        "cache_write_per_mtok": null
+      },
+      "deprecation": {
+        "status": "active"
+      },
+      "quality_tags": [],
+      "capability_tags": [
+        "streaming",
+        "tools",
+        "vision",
+        "audio",
+        "structured_output"
+      ]
+    },
+    {
+      "id": "gpt-4o-mini",
+      "name": "GPT-4o Mini",
+      "provider": "openai",
+      "aliases": [
+        "mid",
+        "tier/mid"
+      ],
+      "context_window": 128000,
+      "modalities": {
+        "input": [
+          "text",
+          "image",
+          "audio"
+        ],
+        "output": [
+          "text"
+        ]
+      },
+      "tool_support": {
+        "native": true,
+        "text": true,
+        "tool_search": []
+      },
+      "structured_output": "native",
+      "reasoning": {
+        "modes": [],
+        "effort_supported": false,
+        "none_supported": false,
+        "interleaved_supported": false,
+        "preserve_thinking": false
+      },
+      "prompt_cache": false,
+      "pricing": {
+        "input_per_mtok": 0.15,
+        "output_per_mtok": 0.6,
+        "cache_read_per_mtok": null,
+        "cache_write_per_mtok": null
+      },
+      "deprecation": {
+        "status": "active"
+      },
+      "quality_tags": [
+        "balanced"
+      ],
+      "capability_tags": [
+        "streaming",
+        "tools",
+        "vision",
+        "audio",
+        "structured_output"
+      ]
+    },
+    {
+      "id": "o1",
+      "name": "OpenAI o1",
+      "provider": "openai",
+      "aliases": [],
+      "context_window": 200000,
+      "modalities": {
+        "input": [
+          "text"
+        ],
+        "output": [
+          "text"
+        ]
+      },
+      "tool_support": {
+        "native": true,
+        "text": true,
+        "tool_search": []
+      },
+      "structured_output": "native",
+      "reasoning": {
+        "modes": [
+          "effort"
+        ],
+        "effort_supported": true,
+        "none_supported": false,
+        "interleaved_supported": false,
+        "preserve_thinking": false
+      },
+      "prompt_cache": false,
+      "pricing": {
+        "input_per_mtok": 15.0,
+        "output_per_mtok": 60.0,
+        "cache_read_per_mtok": 7.5,
+        "cache_write_per_mtok": null
+      },
+      "deprecation": {
+        "status": "active"
+      },
+      "quality_tags": [],
+      "capability_tags": [
+        "streaming",
+        "tools",
+        "thinking",
+        "extended_thinking",
+        "structured_output"
+      ]
+    },
+    {
+      "id": "o1-mini",
+      "name": "OpenAI o1-mini",
+      "provider": "openai",
+      "aliases": [],
+      "context_window": 128000,
+      "modalities": {
+        "input": [
+          "text"
+        ],
+        "output": [
+          "text"
+        ]
+      },
+      "tool_support": {
+        "native": true,
+        "text": true,
+        "tool_search": []
+      },
+      "structured_output": "native",
+      "reasoning": {
+        "modes": [
+          "effort"
+        ],
+        "effort_supported": true,
+        "none_supported": false,
+        "interleaved_supported": false,
+        "preserve_thinking": false
+      },
+      "prompt_cache": false,
+      "pricing": {
+        "input_per_mtok": 3.0,
+        "output_per_mtok": 12.0,
+        "cache_read_per_mtok": 1.5,
+        "cache_write_per_mtok": null
+      },
+      "deprecation": {
+        "status": "active"
+      },
+      "quality_tags": [],
+      "capability_tags": [
+        "streaming",
+        "tools",
+        "thinking",
+        "extended_thinking",
+        "structured_output"
+      ]
+    },
+    {
+      "id": "o3",
+      "name": "OpenAI o3",
+      "provider": "openai",
+      "aliases": [],
+      "context_window": 200000,
+      "modalities": {
+        "input": [
+          "text"
+        ],
+        "output": [
+          "text"
+        ]
+      },
+      "tool_support": {
+        "native": true,
+        "text": true,
+        "tool_search": []
+      },
+      "structured_output": "native",
+      "reasoning": {
+        "modes": [
+          "effort"
+        ],
+        "effort_supported": true,
+        "none_supported": false,
+        "interleaved_supported": false,
+        "preserve_thinking": false
+      },
+      "prompt_cache": false,
+      "pricing": {
+        "input_per_mtok": 15.0,
+        "output_per_mtok": 60.0,
+        "cache_read_per_mtok": 7.5,
+        "cache_write_per_mtok": null
+      },
+      "deprecation": {
+        "status": "active"
+      },
+      "quality_tags": [],
+      "capability_tags": [
+        "streaming",
+        "tools",
+        "thinking",
+        "extended_thinking",
+        "structured_output"
+      ]
+    },
+    {
+      "id": "o3-mini",
+      "name": "OpenAI o3-mini",
+      "provider": "openai",
+      "aliases": [],
+      "context_window": 200000,
+      "modalities": {
+        "input": [
+          "text"
+        ],
+        "output": [
+          "text"
+        ]
+      },
+      "tool_support": {
+        "native": true,
+        "text": true,
+        "tool_search": []
+      },
+      "structured_output": "native",
+      "reasoning": {
+        "modes": [
+          "effort"
+        ],
+        "effort_supported": true,
+        "none_supported": false,
+        "interleaved_supported": false,
+        "preserve_thinking": false
+      },
+      "prompt_cache": false,
+      "pricing": {
+        "input_per_mtok": 1.1,
+        "output_per_mtok": 4.4,
+        "cache_read_per_mtok": 0.55,
+        "cache_write_per_mtok": null
+      },
+      "deprecation": {
+        "status": "active"
+      },
+      "quality_tags": [],
+      "capability_tags": [
+        "streaming",
+        "tools",
+        "thinking",
+        "extended_thinking",
+        "structured_output"
+      ]
+    },
+    {
+      "id": "Qwen/Qwen3.5-9B",
+      "name": "Qwen3.5 9B",
+      "provider": "openrouter",
+      "aliases": [
+        "small",
+        "tier/small"
+      ],
+      "context_window": 131072,
+      "modalities": {
+        "input": [
+          "text"
+        ],
+        "output": [
+          "text"
+        ]
+      },
+      "tool_support": {
+        "native": true,
+        "text": true,
+        "tool_search": []
+      },
+      "structured_output": "native",
+      "reasoning": {
+        "modes": [
+          "enabled",
+          "effort"
+        ],
+        "effort_supported": false,
+        "none_supported": false,
+        "interleaved_supported": false,
+        "preserve_thinking": false
+      },
+      "prompt_cache": false,
+      "deprecation": {
+        "status": "active"
+      },
+      "quality_tags": [
+        "small"
+      ],
+      "capability_tags": [
+        "streaming",
+        "tools",
+        "thinking",
+        "extended_thinking",
+        "structured_output"
+      ]
+    },
+    {
+      "id": "mistral-large-latest",
+      "name": "Mistral Large",
+      "provider": "openrouter",
+      "aliases": [],
+      "context_window": 128000,
+      "modalities": {
+        "input": [
+          "text"
+        ],
+        "output": [
+          "text"
+        ]
+      },
+      "tool_support": {
+        "native": false,
+        "text": true,
+        "tool_search": []
+      },
+      "structured_output": "none",
+      "reasoning": {
+        "modes": [],
+        "effort_supported": false,
+        "none_supported": false,
+        "interleaved_supported": false,
+        "preserve_thinking": false
+      },
+      "prompt_cache": false,
+      "pricing": {
+        "input_per_mtok": 2.0,
+        "output_per_mtok": 6.0,
+        "cache_read_per_mtok": null,
+        "cache_write_per_mtok": null
+      },
+      "deprecation": {
+        "status": "active"
+      },
+      "quality_tags": [],
+      "capability_tags": [
+        "streaming"
+      ]
+    },
+    {
+      "id": "mistral-small-latest",
+      "name": "Mistral Small",
+      "provider": "openrouter",
+      "aliases": [],
+      "context_window": 128000,
+      "modalities": {
+        "input": [
+          "text"
+        ],
+        "output": [
+          "text"
+        ]
+      },
+      "tool_support": {
+        "native": false,
+        "text": true,
+        "tool_search": []
+      },
+      "structured_output": "none",
+      "reasoning": {
+        "modes": [],
+        "effort_supported": false,
+        "none_supported": false,
+        "interleaved_supported": false,
+        "preserve_thinking": false
+      },
+      "prompt_cache": false,
+      "pricing": {
+        "input_per_mtok": 0.2,
+        "output_per_mtok": 0.6,
+        "cache_read_per_mtok": null,
+        "cache_write_per_mtok": null
+      },
+      "deprecation": {
+        "status": "active"
+      },
+      "quality_tags": [],
+      "capability_tags": [
+        "streaming"
+      ]
+    }
+  ],
+  "aliases": [
+    {
+      "name": "frontier",
+      "model_id": "claude-sonnet-4-20250514",
+      "provider": "anthropic"
+    },
+    {
+      "name": "local-gemma4",
+      "model_id": "gemma-4-26b-a4b-it",
+      "provider": "local"
+    },
+    {
+      "name": "local-gemma4-26b",
+      "model_id": "gemma-4-26b-a4b-it",
+      "provider": "local"
+    },
+    {
+      "name": "local-gemma4-31b",
+      "model_id": "gemma-4-31b-it",
+      "provider": "local"
+    },
+    {
+      "name": "local-gemma4-e2b",
+      "model_id": "gemma-4-e2b-it",
+      "provider": "local"
+    },
+    {
+      "name": "local-gemma4-e4b",
+      "model_id": "gemma-4-e4b-it",
+      "provider": "local"
+    },
+    {
+      "name": "mid",
+      "model_id": "gpt-4o-mini",
+      "provider": "openai"
+    },
+    {
+      "name": "mlx-qwen36-27b",
+      "model_id": "unsloth/Qwen3.6-27B-UD-MLX-4bit",
+      "provider": "mlx"
+    },
+    {
+      "name": "small",
+      "model_id": "Qwen/Qwen3.5-9B",
+      "provider": "openrouter"
+    },
+    {
+      "name": "tier/frontier",
+      "model_id": "claude-sonnet-4-20250514",
+      "provider": "anthropic"
+    },
+    {
+      "name": "tier/mid",
+      "model_id": "gpt-4o-mini",
+      "provider": "openai"
+    },
+    {
+      "name": "tier/small",
+      "model_id": "Qwen/Qwen3.5-9B",
+      "provider": "openrouter"
+    }
+  ],
+  "variants": [
+    {
+      "id": "fast",
+      "label": "Fast",
+      "description": "Lowest-latency general coding-agent route.",
+      "model_id": "Qwen/Qwen3.5-9B",
+      "provider": "openrouter",
+      "source": "alias:small"
+    },
+    {
+      "id": "balanced",
+      "label": "Balanced",
+      "description": "Default cost/quality tradeoff for routine coding-agent work.",
+      "model_id": "gpt-4o-mini",
+      "provider": "openai",
+      "source": "alias:mid"
+    },
+    {
+      "id": "high-reasoning",
+      "label": "High reasoning",
+      "description": "Frontier route for hard planning, repair, and review tasks.",
+      "model_id": "claude-sonnet-4-20250514",
+      "provider": "anthropic",
+      "source": "alias:frontier"
+    },
+    {
+      "id": "local",
+      "label": "Local",
+      "description": "Best local/offline model route in the checked-in catalog.",
+      "model_id": "unsloth/Qwen3.6-27B-UD-MLX-4bit",
+      "provider": "mlx",
+      "source": "catalog"
+    },
+    {
+      "id": "cheap",
+      "label": "Cheap",
+      "description": "Lowest known hosted input+output token price.",
+      "model_id": "gemini-2.5-flash",
+      "provider": "gemini",
+      "source": "catalog"
+    },
+    {
+      "id": "vision-capable",
+      "label": "Vision capable",
+      "description": "A model route that accepts image input.",
+      "model_id": "gemini-2.5-pro",
+      "provider": "gemini",
+      "source": "catalog"
+    },
+    {
+      "id": "long-context",
+      "label": "Long context",
+      "description": "Largest context-window route in the checked-in catalog.",
+      "model_id": "gemini-2.5-pro",
+      "provider": "gemini",
+      "source": "catalog"
+    }
+  ],
+  "qc_defaults": {
+    "anthropic": "claude-3-5-haiku-20241022",
+    "local": "gpt-4o",
+    "ollama": "llama3.2",
+    "openai": "gpt-4o-mini",
+    "openrouter": "google/gemini-2.5-flash"
+  }
+}

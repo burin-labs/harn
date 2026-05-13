@@ -779,6 +779,26 @@ fn model_def_to_vm_value(id: &str, model: &llm_config::ModelDef) -> VmValue {
             .map(pricing_to_vm_value)
             .unwrap_or(VmValue::Nil),
     );
+    dict.insert("deprecated".to_string(), VmValue::Bool(model.deprecated));
+    dict.insert(
+        "deprecation_note".to_string(),
+        model
+            .deprecation_note
+            .as_deref()
+            .map(|note| VmValue::String(Rc::from(note)))
+            .unwrap_or(VmValue::Nil),
+    );
+    dict.insert(
+        "quality_tags".to_string(),
+        string_list_to_vm_value(model.quality_tags.clone()),
+    );
+    dict.insert(
+        "prefer_prefill_done".to_string(),
+        model
+            .prefer_prefill_done
+            .map(VmValue::Bool)
+            .unwrap_or(VmValue::Nil),
+    );
     VmValue::Dict(Rc::new(dict))
 }
 

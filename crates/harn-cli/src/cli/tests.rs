@@ -6,9 +6,9 @@ use super::{
     ConnectorCommand, CrystallizeCommand, FlowArchivistCommand, FlowCommand, McpCommand,
     ModelsCommand, OrchestratorCommand, OrchestratorDeployProvider, OrchestratorLogFormat,
     OrchestratorQueueCommand, OrchestratorTenantCommand, PackageArtifactsCommand,
-    PackageCacheCommand, PackageCommand, PersonaCommand, ProjectTemplate, RunsCommand,
-    SessionCommand, SkillCommand, SkillKeyCommand, SkillTrustCommand, SkillsCommand, ToolCommand,
-    TraceCommand, TriggerCommand, TrustCommand, TrustOutcomeArg, TrustTierArg,
+    PackageCacheCommand, PackageCommand, PersonaCommand, ProjectTemplate, ProvidersCommand,
+    RunsCommand, SessionCommand, SkillCommand, SkillKeyCommand, SkillTrustCommand, SkillsCommand,
+    ToolCommand, TraceCommand, TriggerCommand, TrustCommand, TrustOutcomeArg, TrustTierArg,
 };
 use clap::{CommandFactory, Parser};
 
@@ -2282,6 +2282,86 @@ fn test_parses_models_test_args() {
     assert_eq!(args.provider.as_deref(), Some("ollama"));
     assert_eq!(args.prompt, "say pong");
     assert!(args.json);
+}
+
+#[test]
+fn test_parses_providers_refresh_args() {
+    let cli = Cli::parse_from([
+        "harn",
+        "providers",
+        "refresh",
+        "--live",
+        "--check",
+        "--script",
+        "scripts/update_provider_catalog.harn",
+    ]);
+
+    let Command::Providers(args) = cli.command.unwrap() else {
+        panic!("expected providers command");
+    };
+    let ProvidersCommand::Refresh(args) = args.command else {
+        panic!("expected providers refresh command");
+    };
+    assert!(args.live);
+    assert!(args.check);
+    assert!(!args.update);
+    assert_eq!(
+        args.script,
+        std::path::PathBuf::from("scripts/update_provider_catalog.harn")
+    );
+}
+
+#[test]
+fn test_parses_providers_validate_args() {
+    let cli = Cli::parse_from([
+        "harn",
+        "providers",
+        "validate",
+        "--overlay",
+        "providers.local.toml",
+        "--check-artifacts",
+        "--artifact-dir",
+        "spec/provider-catalog",
+        "--json",
+    ]);
+
+    let Command::Providers(args) = cli.command.unwrap() else {
+        panic!("expected providers command");
+    };
+    let ProvidersCommand::Validate(args) = args.command else {
+        panic!("expected providers validate command");
+    };
+    assert_eq!(
+        args.overlay.as_deref(),
+        Some(std::path::Path::new("providers.local.toml"))
+    );
+    assert!(args.check_artifacts);
+    assert_eq!(
+        args.artifact_dir,
+        std::path::PathBuf::from("spec/provider-catalog")
+    );
+    assert!(args.json);
+}
+
+#[test]
+fn test_parses_providers_export_args() {
+    let cli = Cli::parse_from([
+        "harn",
+        "providers",
+        "export",
+        "--output-dir",
+        "tmp/catalog",
+        "--check",
+    ]);
+
+    let Command::Providers(args) = cli.command.unwrap() else {
+        panic!("expected providers command");
+    };
+    let ProvidersCommand::Export(args) = args.command else {
+        panic!("expected providers export command");
+    };
+    assert_eq!(args.output_dir, std::path::PathBuf::from("tmp/catalog"));
+    assert!(args.check);
 }
 
 #[test]

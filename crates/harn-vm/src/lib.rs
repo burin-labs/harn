@@ -42,6 +42,7 @@ pub mod personas;
 pub mod process_sandbox;
 pub mod profile;
 pub mod provenance;
+pub mod provider_catalog;
 pub mod receipts;
 pub mod record_filter;
 pub mod redact;

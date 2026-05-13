@@ -23,6 +23,11 @@ condensed series summaries instead of full per-patch history.
   schema, and CI workflow template. The report includes replay-fidelity,
   permission-preservation, tool-call drift, transcript drift, observed-cost,
   and first-divergence triage metrics.
+- **Generated provider catalog contract (#1584).** Added `harn providers`
+  commands to refresh, validate, and export the provider/model catalog,
+  checked-in JSON/JSON Schema artifacts, and TypeScript/Swift downstream
+  bindings for aliases, variants, pricing, deprecation metadata, capabilities,
+  and provider endpoint/auth metadata.
 
 ## v0.8.13
 

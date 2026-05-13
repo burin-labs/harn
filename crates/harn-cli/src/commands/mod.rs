@@ -26,6 +26,7 @@ pub mod persona_supervision;
 pub mod playground;
 pub(crate) mod portal;
 pub(crate) mod protocol_conformance;
+pub(crate) mod providers;
 pub(crate) mod quickstart;
 pub(crate) mod repl;
 pub mod run;

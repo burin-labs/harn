@@ -48,6 +48,7 @@ Regenerate with `make gen-provider-matrix` and verify with `make check-provider-
 | `llamacpp` | `*qwen3*` | `enabled` | no | no | no | yes | no | `native` | yes | no |
 | `local` | `*qwen3.6*` | `enabled` | no | no | no | yes | no | `native` | yes | no |
 | `local` | `*qwen3*` | `enabled` | no | no | no | yes | no | `native` | yes | no |
+| `local` | `gemma-4*` | `enabled` | no | no | no | yes | no | no | no | no |
 | `mlx` | `*qwen3.6*` | `enabled` | yes | no | no | yes | no | `native` | yes | no |
 | `mlx` | `*qwen3*` | `enabled` | yes | no | no | yes | no | `native` | yes | no |
 | `ollama` | `llava*` | no | yes | no | no | yes | no | no | no | no |

@@ -981,6 +981,10 @@ mod tests {
                     cache_read_per_mtok: None,
                     cache_write_per_mtok: None,
                 }),
+                deprecated: false,
+                deprecation_note: None,
+                quality_tags: Vec::new(),
+                prefer_prefill_done: None,
             },
         );
         crate::llm_config::set_user_overrides(Some(overlay));

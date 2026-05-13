@@ -34,6 +34,7 @@ mod playground;
 mod portal;
 mod profile;
 mod provider;
+mod providers;
 mod quickstart;
 mod run;
 mod runs;
@@ -123,6 +124,10 @@ pub(crate) use playground::PlaygroundArgs;
 pub(crate) use portal::PortalArgs;
 pub(crate) use profile::ProfileArgs;
 pub(crate) use provider::{ModelInfoArgs, ProviderCatalogArgs, ProviderReadyArgs};
+pub(crate) use providers::{
+    ProvidersArgs, ProvidersCommand, ProvidersExportArgs, ProvidersRefreshArgs,
+    ProvidersValidateArgs,
+};
 pub(crate) use quickstart::QuickstartArgs;
 pub(crate) use run::RunArgs;
 pub(crate) use runs::{EvalArgs, ReplayArgs, RunsArgs, RunsCommand};
@@ -330,6 +335,8 @@ SCRIPTING
     ModelInfo(ModelInfoArgs),
     /// List, install, recommend, and test configured LLM models.
     Models(ModelsArgs),
+    /// Validate and generate provider/model catalog artifacts.
+    Providers(ProvidersArgs),
     /// Print the provider/model catalog Harn loaded as JSON.
     ProviderCatalog(ProviderCatalogArgs),
     /// Probe a provider's /models endpoint and optionally verify a served model.
