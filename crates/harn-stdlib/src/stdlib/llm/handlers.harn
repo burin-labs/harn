@@ -15,6 +15,7 @@
 // "context_window_exceeded", "auth", "policy_blocked", "circuit_open".
 import { agent_emit_event } from "std/agent/state"
 import { cache_get, cache_put } from "std/cache"
+import { llm_call_options } from "std/llm/options"
 import { with_case_insensitive_keys } from "std/llm/safe"
 
 /**
@@ -27,7 +28,7 @@ import { with_case_insensitive_keys } from "std/llm/safe"
 pub fn default_llm_caller() {
   return { call ->
     let result = try {
-      llm_call(call.prompt, call.system, call.opts)
+      llm_call(call.prompt, call.system, llm_call_options(call.opts))
     }
     if !is_err(result) {
       return {ok: true, value: unwrap(result)}
@@ -716,7 +717,7 @@ pub fn with_cache(first, second = nil, third = nil) {
     system,
     opts,
     session_id,
-    fn() { return llm_call(prompt, system, opts) },
+    fn() { return llm_call(prompt, system, llm_call_options(opts)) },
     fn(result) { return __llm_handler_should_store_direct_result(result) },
   )
 }

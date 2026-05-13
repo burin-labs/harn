@@ -858,6 +858,50 @@ fn test_builtin_arg_type_mismatch() {
 }
 
 #[test]
+fn test_llm_call_option_literal_checks_known_field_types() {
+    let errs = errors(
+        r#"pipeline t(task) {
+  llm_call("prompt", nil, {provider: "mock", max_tokens: "many"})
+}"#,
+    );
+    assert_eq!(errs.len(), 1, "got errors: {errs:?}");
+    assert!(errs[0].contains("argument 3 `options`"), "{errs:?}");
+    assert!(errs[0].contains("max_tokens?: int"), "{errs:?}");
+    assert!(errs[0].contains("max_tokens: string"), "{errs:?}");
+}
+
+#[test]
+fn test_llm_call_option_literal_flags_probable_typos() {
+    let warns = warnings(
+        r#"pipeline t(task) {
+  llm_call("prompt", nil, {provider: "mock", max_toknes: 256})
+}"#,
+    );
+    assert_eq!(warns.len(), 1, "got warnings: {warns:?}");
+    assert!(
+        warns[0].contains("unknown `llm_call` option `max_toknes`"),
+        "{warns:?}"
+    );
+    assert!(warns[0].contains("max_tokens"), "{warns:?}");
+}
+
+#[test]
+fn test_structured_llm_options_accept_structured_aliases() {
+    let errs = errors(
+        r#"pipeline t(task) {
+  let schema = {type: "object", properties: {answer: {type: "string"}}}
+  llm_call_structured_result("prompt", schema, {
+    provider: "mock",
+    retries: 1,
+    repair: {enabled: true, model: "mock"},
+    output_validation: "error"
+  })
+}"#,
+    );
+    assert!(errs.is_empty(), "unexpected errors: {errs:?}");
+}
+
+#[test]
 fn test_builtin_arity_warning() {
     let warns = warnings(r#"pipeline t(task) { len("abc", "extra") }"#);
     assert_eq!(warns.len(), 1);

@@ -154,6 +154,61 @@ impl TypeChecker {
         }
     }
 
+    fn builtin_uses_strict_llm_option_keys(name: &str, param_name: &str) -> bool {
+        param_name == "options"
+            && matches!(
+                name,
+                "llm_call"
+                    | "llm_call_safe"
+                    | "llm_stream_call"
+                    | "llm_call_structured"
+                    | "llm_call_structured_safe"
+                    | "llm_call_structured_result"
+                    | "llm_completion"
+            )
+    }
+
+    fn check_strict_llm_option_keys(
+        &mut self,
+        builtin_name: &str,
+        param_name: &str,
+        expected: &TypeExpr,
+        arg: &SNode,
+    ) {
+        if !Self::builtin_uses_strict_llm_option_keys(builtin_name, param_name) {
+            return;
+        }
+        let TypeExpr::Shape(fields) = expected else {
+            return;
+        };
+        let Node::DictLiteral(entries) = &arg.node else {
+            return;
+        };
+        let candidates: Vec<&str> = fields.iter().map(|field| field.name.as_str()).collect();
+        for entry in entries {
+            if matches!(entry.value.node, Node::Spread(_)) {
+                continue;
+            }
+            let key = match &entry.key.node {
+                Node::StringLiteral(key) | Node::Identifier(key) => key,
+                _ => continue,
+            };
+            if fields.iter().any(|field| field.name == *key) {
+                continue;
+            }
+            let message =
+                match crate::diagnostic::find_closest_match(key, candidates.iter().copied(), 3) {
+                    Some(suggestion) => {
+                        format!(
+                            "unknown `{builtin_name}` option `{key}`; did you mean `{suggestion}`?"
+                        )
+                    }
+                    None => format!("unknown `{builtin_name}` option `{key}`"),
+                };
+            self.warning_at(message, entry.key.span);
+        }
+    }
+
     fn check_builtin_signature_call(
         &mut self,
         name: &str,
@@ -263,6 +318,7 @@ impl TypeChecker {
             let actual = self.infer_type(arg, scope);
             if let Some(actual) = &actual {
                 let expected = Self::apply_type_bindings(&param.ty.to_type_expr(), &type_bindings);
+                self.check_strict_llm_option_keys(name, param.name, &expected, arg);
                 let compatible = self.types_compatible(&expected, actual, &call_scope)
                     || (param.optional
                         && Self::type_without_nil(actual).is_none_or(|non_nil| {

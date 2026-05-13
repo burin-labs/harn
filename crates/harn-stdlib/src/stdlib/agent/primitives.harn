@@ -1,9 +1,10 @@
 // @harn-entrypoint-category agent.stdlib
 import { typed_output_checkpoint } from "std/checkpoint"
+import { llm_call_options } from "std/llm/options"
 
 /** agent_llm_turn. */
 pub fn agent_llm_turn(prompt, system = nil, options = nil) {
-  return llm_call(prompt, system, options ?? {})
+  return llm_call(prompt, system, llm_call_options(options))
 }
 
 /** agent_typed_output_checkpoint. */

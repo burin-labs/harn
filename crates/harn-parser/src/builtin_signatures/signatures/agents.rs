@@ -1,8 +1,8 @@
 //! Agent / orchestration / sub-agent builtin signatures.
 
 use super::shapes::{
-    AGENT_SESSION_COMPACT_OPTS, AGENT_SESSION_SEED_OPTS, AGENT_SPAWN_CONFIG, SESSION_ANCESTRY,
-    SUB_AGENT_OPTIONS, WORKER_SUMMARY,
+    AGENT_SESSION_COMPACT_OPTS, AGENT_SESSION_SEED_OPTS, AGENT_SPAWN_CONFIG, LLM_CALL_OPTIONS,
+    SESSION_ANCESTRY, SUB_AGENT_OPTIONS, WORKER_SUMMARY,
 };
 use super::{
     BuiltinSignature, Param, Ty, TY_ANY, TY_BOOL, TY_CLOSURE, TY_DICT, TY_DICT_OR_NIL, TY_FLOAT,
@@ -449,19 +449,12 @@ pub(crate) const SIGNATURES: &[BuiltinSignature] = &[
         &[Param::new("model", TY_STRING)],
         TY_DICT,
     ),
-    // NOTE: LLM_CALL_OPTIONS shape (see `super::shapes::LLM_CALL_OPTIONS`) is
-    // the documented surface for user code, but `llm_call*` is heavily
-    // invoked internally by `agent_loop` / `agent_turn` / `sub_agent_run`
-    // with dicts whose runtime field types (e.g. `tools` as
-    // tool_registry-dict, `loop_until_done` etc.) are broader than the
-    // user-facing contract. Apply `TY_DICT` here until internal callers
-    // converge on the documented shape.
     BuiltinSignature::simple(
         "llm_call",
         &[
             Param::new("prompt", TY_STRING),
             Param::optional("system", TY_STRING),
-            Param::optional("options", TY_DICT),
+            Param::optional("options", LLM_CALL_OPTIONS),
         ],
         TY_DICT,
     ),
@@ -470,7 +463,7 @@ pub(crate) const SIGNATURES: &[BuiltinSignature] = &[
         &[
             Param::new("prompt", TY_STRING),
             Param::optional("system", TY_STRING),
-            Param::optional("options", TY_DICT),
+            Param::optional("options", LLM_CALL_OPTIONS),
         ],
         TY_DICT,
     ),
@@ -479,7 +472,7 @@ pub(crate) const SIGNATURES: &[BuiltinSignature] = &[
         &[
             Param::new("prompt", TY_STRING),
             Param::optional("system", TY_STRING),
-            Param::optional("options", TY_DICT),
+            Param::optional("options", LLM_CALL_OPTIONS),
         ],
         Ty::Named("stream"),
     ),
@@ -488,7 +481,7 @@ pub(crate) const SIGNATURES: &[BuiltinSignature] = &[
         &[
             Param::new("prompt", TY_STRING),
             Param::new("schema", TY_SCHEMA_VALUE),
-            Param::optional("options", TY_DICT),
+            Param::optional("options", LLM_CALL_OPTIONS),
         ],
         TY_ANY,
     ),
@@ -497,7 +490,7 @@ pub(crate) const SIGNATURES: &[BuiltinSignature] = &[
         &[
             Param::new("prompt", TY_STRING),
             Param::new("schema", TY_SCHEMA_VALUE),
-            Param::optional("options", TY_DICT),
+            Param::optional("options", LLM_CALL_OPTIONS),
         ],
         TY_DICT,
     ),
@@ -506,7 +499,7 @@ pub(crate) const SIGNATURES: &[BuiltinSignature] = &[
         &[
             Param::new("prompt", TY_STRING),
             Param::new("schema", TY_SCHEMA_VALUE),
-            Param::optional("options", TY_DICT),
+            Param::optional("options", LLM_CALL_OPTIONS),
         ],
         TY_ANY,
     ),
@@ -516,7 +509,7 @@ pub(crate) const SIGNATURES: &[BuiltinSignature] = &[
             Param::new("prefix", TY_STRING),
             Param::optional("suffix", TY_STRING),
             Param::optional("system", TY_STRING),
-            Param::optional("options", TY_DICT),
+            Param::optional("options", LLM_CALL_OPTIONS),
         ],
         TY_DICT,
     ),
