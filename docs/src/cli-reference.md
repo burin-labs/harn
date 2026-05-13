@@ -83,6 +83,31 @@ Verification recomputes the EventLog record chain, the receipt event root, the
 receipt hash, and the Ed25519 signature. It exits non-zero if any receipt event
 or signature material has been changed.
 
+## harn session
+
+Export, validate, import, and check canonical session bundles.
+
+```bash
+harn session export .harn-runs/<run>/run.json --out run.bundle.json
+harn session export .harn-runs/<run>/run.json --local --out run.local.bundle.json
+harn session export .harn-runs/<run>/run.json --replay-only --out run.replay.bundle.json
+harn session validate run.bundle.json --json
+harn session import run.bundle.json --out imported-run.json
+harn session schema --check
+```
+
+| Subcommand | Description |
+|---|---|
+| `export <run-record>` | Writes a `harn_session_bundle` envelope. Default output is sanitized; `--local` preserves local-only content; `--replay-only` withholds prompt/tool payload fields. |
+| `validate <bundle>` | Validates required fields, schema version, bundle type, and high-confidence secret markers without writing a run record. |
+| `import <bundle>` | Validates the bundle and materializes a local run record from `replay.run_record` or replay metadata. |
+| `schema` | Prints, writes, or checks `spec/schemas/session-bundle.v1.schema.json`. |
+
+`export --include-attachments` copies artifact payloads into the top-level
+`attachments` array. By default attachment payloads are omitted for share
+safety. `import` and `validate` accept
+`--allow-unsafe-secret-markers` only for trusted local bundles.
+
 ## harn completions
 
 Print shell completion scripts.

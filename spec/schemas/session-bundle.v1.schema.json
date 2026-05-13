@@ -1,0 +1,371 @@
+{
+  "$defs": {
+    "json_entry": {
+      "additionalProperties": true,
+      "properties": {
+        "index": {
+          "minimum": 0,
+          "type": "integer"
+        },
+        "source": {
+          "type": "string"
+        },
+        "value": true
+      },
+      "required": [
+        "source",
+        "index",
+        "value"
+      ],
+      "type": "object"
+    },
+    "transcript_section": {
+      "additionalProperties": true,
+      "properties": {
+        "assets": {
+          "items": true,
+          "type": "array"
+        },
+        "events": {
+          "items": true,
+          "type": "array"
+        },
+        "id": {
+          "type": "string"
+        },
+        "label": {
+          "type": "string"
+        },
+        "location": {
+          "type": "string"
+        },
+        "messages": {
+          "items": true,
+          "type": "array"
+        },
+        "metadata": {
+          "type": "object"
+        },
+        "scope": {
+          "type": "string"
+        },
+        "summary": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "id",
+        "label",
+        "scope",
+        "location",
+        "messages",
+        "events",
+        "assets",
+        "metadata"
+      ],
+      "type": "object"
+    }
+  },
+  "$id": "https://harnlang.com/schemas/session-bundle.v1.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": true,
+  "properties": {
+    "_type": {
+      "const": "harn_session_bundle"
+    },
+    "attachments": {
+      "items": {
+        "type": "object"
+      },
+      "type": "array"
+    },
+    "bundle_id": {
+      "minLength": 1,
+      "type": "string"
+    },
+    "created_at": {
+      "minLength": 1,
+      "type": "string"
+    },
+    "metadata": {
+      "type": "object"
+    },
+    "permissions": {
+      "items": {
+        "type": "object"
+      },
+      "type": "array"
+    },
+    "producer": {
+      "additionalProperties": true,
+      "properties": {
+        "name": {
+          "type": "string"
+        },
+        "schema_id": {
+          "type": "string"
+        },
+        "version": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "name",
+        "version",
+        "schema_id"
+      ],
+      "type": "object"
+    },
+    "redaction": {
+      "additionalProperties": true,
+      "properties": {
+        "entries": {
+          "items": {
+            "type": "object"
+          },
+          "type": "array"
+        },
+        "mode": {
+          "enum": [
+            "local",
+            "sanitized",
+            "replay_only"
+          ]
+        },
+        "placeholder": {
+          "type": "string"
+        },
+        "policy": {
+          "type": "string"
+        },
+        "unsafe_secret_markers_rejected": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "mode",
+        "policy",
+        "placeholder",
+        "entries",
+        "unsafe_secret_markers_rejected"
+      ],
+      "type": "object"
+    },
+    "replay": {
+      "additionalProperties": true,
+      "properties": {
+        "checkpoints": {
+          "items": {
+            "type": "object"
+          },
+          "type": "array"
+        },
+        "deterministic_events": {
+          "items": {
+            "$ref": "#/$defs/json_entry"
+          },
+          "type": "array"
+        },
+        "event_log_pointers": {
+          "items": {
+            "type": "object"
+          },
+          "type": "array"
+        },
+        "replay_fixture": {
+          "type": [
+            "object",
+            "null"
+          ]
+        },
+        "run_record": {
+          "type": [
+            "object",
+            "null"
+          ]
+        },
+        "trace_spans": {
+          "items": {
+            "type": "object"
+          },
+          "type": "array"
+        },
+        "transitions": {
+          "items": {
+            "type": "object"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "event_log_pointers",
+        "transitions",
+        "checkpoints",
+        "trace_spans",
+        "deterministic_events"
+      ],
+      "type": "object"
+    },
+    "runtime": {
+      "additionalProperties": true,
+      "properties": {
+        "harn_version": {
+          "type": "string"
+        },
+        "metadata": {
+          "type": "object"
+        },
+        "provider_models": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "usage": {
+          "type": [
+            "object",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "harn_version",
+        "provider_models"
+      ],
+      "type": "object"
+    },
+    "schema_version": {
+      "maximum": 1,
+      "minimum": 1,
+      "type": "integer"
+    },
+    "source": {
+      "additionalProperties": true,
+      "properties": {
+        "child_run_count": {
+          "minimum": 0,
+          "type": "integer"
+        },
+        "finished_at": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "kind": {
+          "type": "string"
+        },
+        "parent_run_id": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "persisted_path": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "root_run_id": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "run_record_id": {
+          "type": "string"
+        },
+        "started_at": {
+          "type": "string"
+        },
+        "status": {
+          "type": "string"
+        },
+        "task": {
+          "type": "string"
+        },
+        "workflow_id": {
+          "type": "string"
+        },
+        "workflow_name": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "kind",
+        "run_record_id",
+        "workflow_id",
+        "task",
+        "status"
+      ],
+      "type": "object"
+    },
+    "tools": {
+      "additionalProperties": true,
+      "properties": {
+        "calls": {
+          "items": {
+            "type": "object"
+          },
+          "type": "array"
+        },
+        "schemas": {
+          "items": {
+            "$ref": "#/$defs/json_entry"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "schemas",
+        "calls"
+      ],
+      "type": "object"
+    },
+    "transcript": {
+      "additionalProperties": true,
+      "properties": {
+        "sections": {
+          "items": {
+            "$ref": "#/$defs/transcript_section"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "sections"
+      ],
+      "type": "object"
+    },
+    "workspace": {
+      "type": [
+        "object",
+        "null"
+      ]
+    }
+  },
+  "required": [
+    "_type",
+    "schema_version",
+    "bundle_id",
+    "created_at",
+    "producer",
+    "source",
+    "runtime",
+    "transcript",
+    "tools",
+    "permissions",
+    "replay",
+    "redaction",
+    "attachments"
+  ],
+  "title": "Harn Session Bundle v1",
+  "type": "object"
+}

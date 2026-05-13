@@ -61,6 +61,7 @@ grepping logs trivial to write.
 | `LogEvent` payloads | [`LogEvent::redact_in_place`](../../crates/harn-vm/src/event_log/mod.rs) | Headers are scrubbed in-place; the JSON payload is walked recursively. Backends are intentionally unaware of redaction so emitters that need it call this before appending. |
 | Portal transcript projection | [`portal::transcript`](../../crates/harn-cli/src/commands/portal/transcript.rs) | Defense in depth: even transcripts written before the unified policy landed are redacted at portal read time. |
 | Workflow artifacts | [`ArtifactRecord::redact_in_place`](../../crates/harn-vm/src/orchestration/artifacts.rs) | `text` is run through the secret-pattern scanner; `data` and `metadata` go through the JSON walk. |
+| Session bundles | [`harn_vm::session_bundle`](../../crates/harn-vm/src/session_bundle.rs) | Sanitized exports walk the whole bundle and emit a redaction manifest; replay-only exports additionally withhold prompt and tool payload fields. Import and validation reject high-confidence secret markers unless explicitly allowed. |
 | Connector inbound headers | [`HeaderRedactionPolicy` (alias for `RedactionPolicy`)](../../crates/harn-vm/src/triggers/event.rs) | Each connector strips inbound HTTP headers before they reach the durable inbox. |
 | HTTP egress diagnostics | [`crate::egress`](../../crates/harn-vm/src/egress.rs) | URLs reported in `EgressBlocked` errors and `http_mock` calls are redacted via the same policy. |
 

@@ -134,6 +134,18 @@ tool_format?, error?}`. `source_format` is `message_events`,
 with `validate: false` and is assistant-response best effort, not prefix-cache
 equivalent replay.
 
+## Portable session bundles
+
+VM-local session builtins own live transcript state. Persisted run
+records can leave the workstation through the canonical
+[`harn session export`](./session-bundles.md) bundle format. Bundles
+carry transcript sections, tool-call records, permission/HITL evidence,
+replay fixtures, trace spans, and a redaction manifest in one envelope.
+
+Use sanitized bundles for support and sharing, local bundles inside one
+trust boundary, and replay-only bundles when another host needs replay
+evidence without prompt or tool payload text.
+
 ## Storage model
 
 Sessions live in a per-thread `HashMap<String, SessionState>` in

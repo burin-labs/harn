@@ -729,6 +729,7 @@ async fn async_main() {
                 inspect_run_record(&inspect.path, inspect.compare.as_deref())
             }
         },
+        Command::Session(args) => commands::session::run(args),
         Command::Replay(args) => replay_run_record(&args.path),
         Command::Eval(args) => {
             let llm_mock_mode = if let Some(path) = args.llm_mock.as_ref() {

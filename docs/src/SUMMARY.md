@@ -62,6 +62,7 @@
   - [Merge Captain](./personas/merge-captain.md)
 - [Skill provenance](./skill-provenance.md)
 - [Sessions](./sessions.md)
+- [Session bundles](./session-bundles.md)
 - [Agent state](./agent-state.md)
 - [Memory](./memory.md)
 - [Transcript architecture](./transcript-architecture.md)

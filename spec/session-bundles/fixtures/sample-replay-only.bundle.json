@@ -1,0 +1,821 @@
+{
+  "_type": "harn_session_bundle",
+  "schema_version": 1,
+  "bundle_id": "bundle_019e21f3-2b71-7c51-91c5-abd31902541f",
+  "created_at": "1778686045",
+  "producer": {
+    "name": "harn",
+    "version": "0.8.12",
+    "schema_id": "https://harnlang.com/schemas/session-bundle.v1.json"
+  },
+  "source": {
+    "kind": "run_record",
+    "run_record_id": "run_fixture_session_bundle",
+    "workflow_id": "wf_fixture_session_bundle",
+    "workflow_name": "Session bundle fixture",
+    "task": "[withheld]",
+    "status": "completed",
+    "started_at": "2026-05-01T00:00:00Z",
+    "finished_at": "2026-05-01T00:00:30Z",
+    "persisted_path": "[redacted]",
+    "root_run_id": null,
+    "parent_run_id": null,
+    "child_run_count": 0
+  },
+  "runtime": {
+    "harn_version": "0.8.12",
+    "provider_models": [
+      "mock/deploy-investigator"
+    ],
+    "usage": {
+      "input_tokens": 42,
+      "output_tokens": 17,
+      "call_count": 1,
+      "total_duration_ms": 1200,
+      "total_cost": 0.002,
+      "models": [
+        "mock/deploy-investigator"
+      ]
+    },
+    "metadata": {}
+  },
+  "workspace": {
+    "identity": "workspace_fixture",
+    "source_root": "[redacted]",
+    "policy": "safe_identity_only"
+  },
+  "transcript": {
+    "sections": [
+      {
+        "id": "run",
+        "label": "Run transcript",
+        "scope": "run",
+        "location": "$.transcript",
+        "summary": "[withheld]",
+        "messages": [
+          {
+            "content": "[withheld]",
+            "role": "user"
+          },
+          {
+            "content": "[withheld]",
+            "role": "assistant"
+          }
+        ],
+        "events": [
+          {
+            "schemas": [
+              {
+                "name": "read_file"
+              }
+            ],
+            "type": "tool_schemas"
+          },
+          {
+            "agent": "deploy-investigator",
+            "arguments": "[withheld]",
+            "kind": "permission_requested",
+            "request_id": "perm_fixture_1"
+          }
+        ],
+        "assets": [],
+        "metadata": {
+          "system_prompt": "[withheld]"
+        }
+      },
+      {
+        "id": "stage_fixture_answer",
+        "label": "Stage answer",
+        "scope": "stage",
+        "location": "$.stages[0].transcript",
+        "summary": null,
+        "messages": [
+          {
+            "content": "[withheld]",
+            "role": "assistant"
+          }
+        ],
+        "events": [],
+        "assets": [],
+        "metadata": {
+          "tool_schemas": [
+            {
+              "input_schema": {
+                "properties": {
+                  "path": {
+                    "type": "string"
+                  }
+                },
+                "type": "object"
+              },
+              "name": "read_file"
+            }
+          ]
+        }
+      }
+    ]
+  },
+  "tools": {
+    "schemas": [
+      {
+        "source": "run.transcript",
+        "index": 0,
+        "value": {
+          "schemas": [
+            {
+              "name": "read_file"
+            }
+          ],
+          "type": "tool_schemas"
+        }
+      }
+    ],
+    "calls": [
+      {
+        "tool_name": "read_file",
+        "tool_use_id": "tool_fixture_1",
+        "args_hash": "fixture_args_hash",
+        "result": "[withheld]",
+        "is_rejected": false,
+        "duration_ms": 8,
+        "iteration": 1,
+        "timestamp": "2026-05-01T00:00:10Z"
+      }
+    ]
+  },
+  "permissions": [
+    {
+      "kind": "hitl_question",
+      "source": "run.hitl_questions",
+      "request_id": "hitl_fixture_1",
+      "agent": "deploy-investigator",
+      "payload": {
+        "agent": "deploy-investigator",
+        "asked_at": "2026-05-01T00:00:05Z",
+        "prompt": "[withheld]",
+        "request_id": "hitl_fixture_1",
+        "trace_id": null
+      }
+    },
+    {
+      "kind": "permission_requested",
+      "source": "run.transcript",
+      "request_id": "perm_fixture_1",
+      "agent": "deploy-investigator",
+      "payload": {
+        "agent": "deploy-investigator",
+        "arguments": "[withheld]",
+        "kind": "permission_requested",
+        "request_id": "perm_fixture_1"
+      }
+    }
+  ],
+  "replay": {
+    "replay_fixture": {
+      "_type": "replay_fixture",
+      "id": "replay_fixture_session_bundle",
+      "source_run_id": "run_fixture_session_bundle",
+      "workflow_id": "wf_fixture_session_bundle",
+      "workflow_name": "Session bundle fixture",
+      "created_at": "2026-05-01T00:00:31Z",
+      "eval_kind": null,
+      "clarifying_question": null,
+      "expected_status": "completed",
+      "stage_assertions": [
+        {
+          "node_id": "answer",
+          "expected_status": "completed",
+          "expected_outcome": "ok",
+          "expected_branch": null,
+          "required_artifact_kinds": [
+            "summary"
+          ],
+          "visible_text_contains": "stale config"
+        }
+      ]
+    },
+    "run_record": {
+      "_type": "run_record",
+      "artifacts": [
+        {
+          "_type": "",
+          "created_at": "",
+          "data": null,
+          "estimated_tokens": null,
+          "freshness": null,
+          "id": "artifact_fixture_summary",
+          "kind": "summary",
+          "lineage": [],
+          "metadata": {
+            "classification": "shareable"
+          },
+          "priority": null,
+          "relevance": null,
+          "source": null,
+          "stage": "stage_fixture_answer",
+          "text": "[withheld]",
+          "title": "Deploy investigation summary"
+        }
+      ],
+      "checkpoints": [
+        {
+          "completed_nodes": [
+            "answer"
+          ],
+          "id": "checkpoint_fixture_done",
+          "last_stage_id": "stage_fixture_answer",
+          "persisted_at": "2026-05-01T00:00:30Z",
+          "ready_nodes": [],
+          "reason": "completed"
+        }
+      ],
+      "child_runs": [],
+      "completed_nodes": [
+        "answer"
+      ],
+      "execution": null,
+      "finished_at": "2026-05-01T00:00:30Z",
+      "handoffs": [],
+      "hitl_questions": [
+        {
+          "agent": "deploy-investigator",
+          "asked_at": "2026-05-01T00:00:05Z",
+          "prompt": "[withheld]",
+          "request_id": "hitl_fixture_1",
+          "trace_id": null
+        }
+      ],
+      "id": "run_fixture_session_bundle",
+      "metadata": {
+        "project_root": "[redacted]",
+        "workspace_id": "workspace_fixture"
+      },
+      "observability": {
+        "action_graph_edges": [
+          {
+            "from_id": "run:run_fixture_session_bundle",
+            "kind": "transition",
+            "label": null,
+            "to_id": "stage:stage_fixture_answer"
+          }
+        ],
+        "action_graph_nodes": [
+          {
+            "id": "run:run_fixture_session_bundle",
+            "kind": "run",
+            "label": "Session bundle fixture",
+            "metadata": {
+              "workflow_id": "wf_fixture_session_bundle"
+            },
+            "node_id": null,
+            "outcome": "completed",
+            "run_id": "run_fixture_session_bundle",
+            "run_path": "[redacted]",
+            "stage_id": null,
+            "status": "completed",
+            "trace_id": null,
+            "worker_id": null
+          },
+          {
+            "id": "stage:stage_fixture_answer",
+            "kind": "stage",
+            "label": "answer",
+            "metadata": {
+              "stage_kind": "agent"
+            },
+            "node_id": "answer",
+            "outcome": "ok",
+            "run_id": null,
+            "run_path": "[redacted]",
+            "stage_id": "stage_fixture_answer",
+            "status": "completed",
+            "trace_id": null,
+            "worker_id": null
+          }
+        ],
+        "compaction_events": [],
+        "daemon_events": [],
+        "planner_rounds": [],
+        "research_fact_count": 0,
+        "schema_version": 4,
+        "transcript_pointers": [
+          {
+            "available": true,
+            "id": "stage:stage_fixture_answer:transcript",
+            "kind": "embedded_transcript",
+            "label": "Stage answer transcript",
+            "location": "run.stages[answer].transcript",
+            "path": "[redacted]"
+          },
+          {
+            "available": true,
+            "id": "run:transcript",
+            "kind": "embedded_transcript",
+            "label": "Run transcript",
+            "location": "run.transcript",
+            "path": "[redacted]"
+          },
+          {
+            "available": false,
+            "id": "run:llm_transcript",
+            "kind": "llm_jsonl",
+            "label": "LLM transcript sidecar",
+            "location": "run sidecar",
+            "path": "[redacted]"
+          }
+        ],
+        "verification_outcomes": [],
+        "worker_lineage": []
+      },
+      "parent_run_id": null,
+      "pending_nodes": [],
+      "persisted_path": "[redacted]",
+      "persona_runtime": [],
+      "policy": {
+        "capabilities": {},
+        "recursion_limit": null,
+        "side_effect_level": null,
+        "tool_annotations": {},
+        "tool_arg_constraints": [],
+        "tools": [],
+        "workspace_roots": []
+      },
+      "replay_fixture": {
+        "_type": "replay_fixture",
+        "clarifying_question": null,
+        "created_at": "2026-05-01T00:00:31Z",
+        "eval_kind": null,
+        "expected_status": "completed",
+        "id": "replay_fixture_session_bundle",
+        "source_run_id": "run_fixture_session_bundle",
+        "stage_assertions": [
+          {
+            "expected_branch": null,
+            "expected_outcome": "ok",
+            "expected_status": "completed",
+            "node_id": "answer",
+            "required_artifact_kinds": [
+              "summary"
+            ],
+            "visible_text_contains": "stale config"
+          }
+        ],
+        "workflow_id": "wf_fixture_session_bundle",
+        "workflow_name": "Session bundle fixture"
+      },
+      "root_run_id": null,
+      "stages": [
+        {
+          "artifacts": [],
+          "attempts": [],
+          "branch": null,
+          "consumed_artifact_ids": [],
+          "finished_at": "2026-05-01T00:00:20Z",
+          "id": "stage_fixture_answer",
+          "kind": "agent",
+          "metadata": {},
+          "node_id": "answer",
+          "outcome": "ok",
+          "private_reasoning": "[withheld]",
+          "produced_artifact_ids": [],
+          "started_at": "2026-05-01T00:00:01Z",
+          "status": "completed",
+          "transcript": {
+            "assets": [],
+            "events": [],
+            "messages": [
+              {
+                "content": "[withheld]",
+                "role": "assistant"
+              }
+            ],
+            "metadata": {
+              "tool_schemas": [
+                {
+                  "input_schema": {
+                    "properties": {
+                      "path": {
+                        "type": "string"
+                      }
+                    },
+                    "type": "object"
+                  },
+                  "name": "read_file"
+                }
+              ]
+            }
+          },
+          "usage": null,
+          "verification": null,
+          "visible_text": "[withheld]"
+        }
+      ],
+      "started_at": "2026-05-01T00:00:00Z",
+      "status": "completed",
+      "task": "[withheld]",
+      "tool_recordings": [
+        {
+          "args_hash": "fixture_args_hash",
+          "duration_ms": 8,
+          "is_rejected": false,
+          "iteration": 1,
+          "result": "[withheld]",
+          "timestamp": "2026-05-01T00:00:10Z",
+          "tool_name": "read_file",
+          "tool_use_id": "tool_fixture_1"
+        }
+      ],
+      "trace_spans": [
+        {
+          "duration_ms": 1200,
+          "kind": "stage",
+          "metadata": {},
+          "name": "answer",
+          "parent_id": null,
+          "span_id": 1,
+          "start_ms": 0
+        }
+      ],
+      "transcript": {
+        "_type": "transcript",
+        "assets": [],
+        "events": [
+          {
+            "schemas": [
+              {
+                "name": "read_file"
+              }
+            ],
+            "type": "tool_schemas"
+          },
+          {
+            "agent": "deploy-investigator",
+            "arguments": "[withheld]",
+            "kind": "permission_requested",
+            "request_id": "perm_fixture_1"
+          }
+        ],
+        "messages": [
+          {
+            "content": "[withheld]",
+            "role": "user"
+          },
+          {
+            "content": "[withheld]",
+            "role": "assistant"
+          }
+        ],
+        "metadata": {
+          "system_prompt": "[withheld]"
+        },
+        "summary": "[withheld]"
+      },
+      "transitions": [
+        {
+          "branch": null,
+          "consumed_artifact_ids": [],
+          "from_node_id": null,
+          "from_stage_id": null,
+          "id": "transition_fixture_start",
+          "produced_artifact_ids": [],
+          "timestamp": "2026-05-01T00:00:01Z",
+          "to_node_id": "answer"
+        }
+      ],
+      "usage": {
+        "call_count": 1,
+        "input_tokens": 42,
+        "models": [
+          "mock/deploy-investigator"
+        ],
+        "output_tokens": 17,
+        "total_cost": 0.002,
+        "total_duration_ms": 1200
+      },
+      "workflow_id": "wf_fixture_session_bundle",
+      "workflow_name": "Session bundle fixture"
+    },
+    "event_log_pointers": [
+      {
+        "kind": "embedded_transcript",
+        "topic": null,
+        "path": "[redacted]",
+        "location": "run.stages[answer].transcript",
+        "available": true
+      },
+      {
+        "kind": "embedded_transcript",
+        "topic": null,
+        "path": "[redacted]",
+        "location": "run.transcript",
+        "available": true
+      },
+      {
+        "kind": "llm_jsonl",
+        "topic": null,
+        "path": "[redacted]",
+        "location": "run sidecar",
+        "available": false
+      }
+    ],
+    "transitions": [
+      {
+        "id": "transition_fixture_start",
+        "from_stage_id": null,
+        "from_node_id": null,
+        "to_node_id": "answer",
+        "branch": null,
+        "timestamp": "2026-05-01T00:00:01Z",
+        "consumed_artifact_ids": [],
+        "produced_artifact_ids": []
+      }
+    ],
+    "checkpoints": [
+      {
+        "id": "checkpoint_fixture_done",
+        "ready_nodes": [],
+        "completed_nodes": [
+          "answer"
+        ],
+        "last_stage_id": "stage_fixture_answer",
+        "persisted_at": "2026-05-01T00:00:30Z",
+        "reason": "completed"
+      }
+    ],
+    "trace_spans": [
+      {
+        "span_id": 1,
+        "parent_id": null,
+        "kind": "stage",
+        "name": "answer",
+        "start_ms": 0,
+        "duration_ms": 1200,
+        "metadata": {}
+      }
+    ],
+    "deterministic_events": [
+      {
+        "source": "run.transitions",
+        "index": 0,
+        "value": {
+          "branch": null,
+          "consumed_artifact_ids": [],
+          "from_node_id": null,
+          "from_stage_id": null,
+          "id": "transition_fixture_start",
+          "produced_artifact_ids": [],
+          "timestamp": "2026-05-01T00:00:01Z",
+          "to_node_id": "answer"
+        }
+      },
+      {
+        "source": "run.checkpoints",
+        "index": 0,
+        "value": {
+          "completed_nodes": [
+            "answer"
+          ],
+          "id": "checkpoint_fixture_done",
+          "last_stage_id": "stage_fixture_answer",
+          "persisted_at": "2026-05-01T00:00:30Z",
+          "ready_nodes": [],
+          "reason": "completed"
+        }
+      }
+    ]
+  },
+  "redaction": {
+    "mode": "replay_only",
+    "policy": "harn_vm::redact::RedactionPolicy::default+session_bundle_local_paths",
+    "placeholder": "[redacted]",
+    "entries": [
+      {
+        "path": "$.permissions[1].payload.arguments.api_key",
+        "class": "sensitive_field",
+        "action": "replaced",
+        "replacement": "[redacted]"
+      },
+      {
+        "path": "$.replay.run_record.metadata.project_root",
+        "class": "sensitive_field",
+        "action": "replaced",
+        "replacement": "[redacted]"
+      },
+      {
+        "path": "$.replay.run_record.observability.action_graph_nodes[0].run_path",
+        "class": "sensitive_field",
+        "action": "replaced",
+        "replacement": "[redacted]"
+      },
+      {
+        "path": "$.replay.run_record.observability.action_graph_nodes[1].run_path",
+        "class": "sensitive_field",
+        "action": "replaced",
+        "replacement": "[redacted]"
+      },
+      {
+        "path": "$.replay.run_record.persisted_path",
+        "class": "sensitive_field",
+        "action": "replaced",
+        "replacement": "[redacted]"
+      },
+      {
+        "path": "$.replay.run_record.transcript.events[1].arguments.api_key",
+        "class": "sensitive_field",
+        "action": "replaced",
+        "replacement": "[redacted]"
+      },
+      {
+        "path": "$.source.persisted_path",
+        "class": "sensitive_field",
+        "action": "replaced",
+        "replacement": "[redacted]"
+      },
+      {
+        "path": "$.transcript.sections[0].events[1].arguments.api_key",
+        "class": "sensitive_field",
+        "action": "replaced",
+        "replacement": "[redacted]"
+      },
+      {
+        "path": "$.workspace.source_root",
+        "class": "sensitive_field",
+        "action": "replaced",
+        "replacement": "[redacted]"
+      },
+      {
+        "path": "$.replay.event_log_pointers[0].path",
+        "class": "local_pointer_path",
+        "action": "replaced",
+        "replacement": "[redacted]"
+      },
+      {
+        "path": "$.replay.event_log_pointers[1].path",
+        "class": "local_pointer_path",
+        "action": "replaced",
+        "replacement": "[redacted]"
+      },
+      {
+        "path": "$.replay.event_log_pointers[2].path",
+        "class": "local_pointer_path",
+        "action": "replaced",
+        "replacement": "[redacted]"
+      },
+      {
+        "path": "$.replay.run_record.observability.transcript_pointers[0].path",
+        "class": "local_pointer_path",
+        "action": "replaced",
+        "replacement": "[redacted]"
+      },
+      {
+        "path": "$.replay.run_record.observability.transcript_pointers[1].path",
+        "class": "local_pointer_path",
+        "action": "replaced",
+        "replacement": "[redacted]"
+      },
+      {
+        "path": "$.replay.run_record.observability.transcript_pointers[2].path",
+        "class": "local_pointer_path",
+        "action": "replaced",
+        "replacement": "[redacted]"
+      },
+      {
+        "path": "$.permissions[0].payload.prompt",
+        "class": "prompt_or_tool_payload",
+        "action": "withheld",
+        "replacement": "[withheld]"
+      },
+      {
+        "path": "$.permissions[1].payload.arguments",
+        "class": "prompt_or_tool_payload",
+        "action": "withheld",
+        "replacement": "[withheld]"
+      },
+      {
+        "path": "$.replay.run_record.artifacts[0].text",
+        "class": "prompt_or_tool_payload",
+        "action": "withheld",
+        "replacement": "[withheld]"
+      },
+      {
+        "path": "$.replay.run_record.hitl_questions[0].prompt",
+        "class": "prompt_or_tool_payload",
+        "action": "withheld",
+        "replacement": "[withheld]"
+      },
+      {
+        "path": "$.replay.run_record.stages[0].private_reasoning",
+        "class": "prompt_or_tool_payload",
+        "action": "withheld",
+        "replacement": "[withheld]"
+      },
+      {
+        "path": "$.replay.run_record.stages[0].transcript.messages[0].content",
+        "class": "prompt_or_tool_payload",
+        "action": "withheld",
+        "replacement": "[withheld]"
+      },
+      {
+        "path": "$.replay.run_record.stages[0].visible_text",
+        "class": "prompt_or_tool_payload",
+        "action": "withheld",
+        "replacement": "[withheld]"
+      },
+      {
+        "path": "$.replay.run_record.task",
+        "class": "prompt_or_tool_payload",
+        "action": "withheld",
+        "replacement": "[withheld]"
+      },
+      {
+        "path": "$.replay.run_record.tool_recordings[0].result",
+        "class": "prompt_or_tool_payload",
+        "action": "withheld",
+        "replacement": "[withheld]"
+      },
+      {
+        "path": "$.replay.run_record.transcript.events[1].arguments",
+        "class": "prompt_or_tool_payload",
+        "action": "withheld",
+        "replacement": "[withheld]"
+      },
+      {
+        "path": "$.replay.run_record.transcript.messages[0].content",
+        "class": "prompt_or_tool_payload",
+        "action": "withheld",
+        "replacement": "[withheld]"
+      },
+      {
+        "path": "$.replay.run_record.transcript.messages[1].content",
+        "class": "prompt_or_tool_payload",
+        "action": "withheld",
+        "replacement": "[withheld]"
+      },
+      {
+        "path": "$.replay.run_record.transcript.metadata.system_prompt",
+        "class": "prompt_or_tool_payload",
+        "action": "withheld",
+        "replacement": "[withheld]"
+      },
+      {
+        "path": "$.replay.run_record.transcript.summary",
+        "class": "prompt_or_tool_payload",
+        "action": "withheld",
+        "replacement": "[withheld]"
+      },
+      {
+        "path": "$.source.task",
+        "class": "prompt_or_tool_payload",
+        "action": "withheld",
+        "replacement": "[withheld]"
+      },
+      {
+        "path": "$.tools.calls[0].result",
+        "class": "prompt_or_tool_payload",
+        "action": "withheld",
+        "replacement": "[withheld]"
+      },
+      {
+        "path": "$.transcript.sections[0].events[1].arguments",
+        "class": "prompt_or_tool_payload",
+        "action": "withheld",
+        "replacement": "[withheld]"
+      },
+      {
+        "path": "$.transcript.sections[0].messages[0].content",
+        "class": "prompt_or_tool_payload",
+        "action": "withheld",
+        "replacement": "[withheld]"
+      },
+      {
+        "path": "$.transcript.sections[0].messages[1].content",
+        "class": "prompt_or_tool_payload",
+        "action": "withheld",
+        "replacement": "[withheld]"
+      },
+      {
+        "path": "$.transcript.sections[0].metadata.system_prompt",
+        "class": "prompt_or_tool_payload",
+        "action": "withheld",
+        "replacement": "[withheld]"
+      },
+      {
+        "path": "$.transcript.sections[0].summary",
+        "class": "prompt_or_tool_payload",
+        "action": "withheld",
+        "replacement": "[withheld]"
+      },
+      {
+        "path": "$.transcript.sections[1].messages[0].content",
+        "class": "prompt_or_tool_payload",
+        "action": "withheld",
+        "replacement": "[withheld]"
+      }
+    ],
+    "unsafe_secret_markers_rejected": true
+  },
+  "attachments": [],
+  "metadata": {
+    "format_note": "Session bundles are portable JSON envelopes; hosted share links should reference sanitized bundles rather than raw run records."
+  }
+}

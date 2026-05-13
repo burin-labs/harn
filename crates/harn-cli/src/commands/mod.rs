@@ -29,6 +29,7 @@ pub(crate) mod quickstart;
 pub(crate) mod repl;
 pub mod run;
 pub(crate) mod serve;
+pub(crate) mod session;
 pub(crate) mod skill;
 pub(crate) mod skills;
 pub(crate) mod supervisor;

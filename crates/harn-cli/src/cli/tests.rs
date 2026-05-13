@@ -7,8 +7,8 @@ use super::{
     OrchestratorCommand, OrchestratorDeployProvider, OrchestratorLogFormat,
     OrchestratorQueueCommand, OrchestratorTenantCommand, PackageArtifactsCommand,
     PackageCacheCommand, PackageCommand, PersonaCommand, ProjectTemplate, RunsCommand,
-    SkillCommand, SkillKeyCommand, SkillTrustCommand, SkillsCommand, TraceCommand, TriggerCommand,
-    TrustCommand, TrustOutcomeArg, TrustTierArg,
+    SessionCommand, SkillCommand, SkillKeyCommand, SkillTrustCommand, SkillsCommand, TraceCommand,
+    TriggerCommand, TrustCommand, TrustOutcomeArg, TrustTierArg,
 };
 use clap::{CommandFactory, Parser};
 
@@ -405,6 +405,68 @@ fn test_parses_runs_inspect_compare() {
     let RunsCommand::Inspect(inspect) = args.command;
     assert_eq!(inspect.path, "run.json");
     assert_eq!(inspect.compare.as_deref(), Some("baseline.json"));
+}
+
+#[test]
+fn test_parses_session_bundle_commands() {
+    let cli = Cli::parse_from([
+        "harn",
+        "session",
+        "export",
+        "run.json",
+        "--out",
+        "bundle.json",
+        "--include-attachments",
+    ]);
+
+    let Command::Session(args) = cli.command.unwrap() else {
+        panic!("expected session command");
+    };
+    let SessionCommand::Export(export) = args.command else {
+        panic!("expected session export");
+    };
+    assert_eq!(export.run_record, "run.json");
+    assert_eq!(export.out.as_deref(), Some("bundle.json"));
+    assert!(export.include_attachments);
+
+    let cli = Cli::parse_from([
+        "harn",
+        "session",
+        "import",
+        "bundle.json",
+        "--out",
+        "imported.json",
+        "--allow-unsafe-secret-markers",
+    ]);
+
+    let Command::Session(args) = cli.command.unwrap() else {
+        panic!("expected session command");
+    };
+    let SessionCommand::Import(import) = args.command else {
+        panic!("expected session import");
+    };
+    assert_eq!(import.bundle, "bundle.json");
+    assert_eq!(import.out.as_deref(), Some("imported.json"));
+    assert!(import.allow_unsafe_secret_markers);
+
+    let cli = Cli::parse_from(["harn", "session", "validate", "bundle.json", "--json"]);
+    let Command::Session(args) = cli.command.unwrap() else {
+        panic!("expected session command");
+    };
+    let SessionCommand::Validate(validate) = args.command else {
+        panic!("expected session validate");
+    };
+    assert_eq!(validate.bundle, "bundle.json");
+    assert!(validate.json);
+
+    let cli = Cli::parse_from(["harn", "session", "schema", "--check"]);
+    let Command::Session(args) = cli.command.unwrap() else {
+        panic!("expected session command");
+    };
+    let SessionCommand::Schema(schema) = args.command else {
+        panic!("expected session schema");
+    };
+    assert!(schema.check);
 }
 
 #[test]
