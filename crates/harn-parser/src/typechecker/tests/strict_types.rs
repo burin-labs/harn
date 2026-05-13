@@ -290,9 +290,10 @@ fn test_spawn_agent_literal_config_rejects_unknown_option_key() {
 }"#,
     );
     assert!(
-        errs.iter()
-            .any(|m| m.contains("unknown option key `persmissions`")
-                && m.contains("did you mean `permissions`")),
+        errs.iter().any(
+            |m| m.contains("argument 1 `config`: unknown option `persmissions`")
+                && m.contains("did you mean `permissions`")
+        ),
         "expected spawn_agent option-key typo error, got: {errs:?}"
     );
 }
@@ -305,9 +306,10 @@ fn test_sub_agent_run_literal_options_rejects_unknown_option_key() {
 }"#,
     );
     assert!(
-        errs.iter()
-            .any(|m| m.contains("unknown option key `backgroun`")
-                && m.contains("did you mean `background`")),
+        errs.iter().any(
+            |m| m.contains("argument 2 `options`: unknown option `backgroun`")
+                && m.contains("did you mean `background`")
+        ),
         "expected sub_agent_run option-key typo error, got: {errs:?}"
     );
 }

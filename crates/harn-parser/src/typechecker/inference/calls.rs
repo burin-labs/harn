@@ -12,7 +12,7 @@
 //! across the program to catch deprecated calls that hide inside
 //! expression contexts where `check_node` would only trigger `infer_type`.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 
 use crate::ast::*;
 use crate::builtin_signatures;
@@ -45,79 +45,6 @@ impl TypeChecker {
             sig.params.get(index)
         }?;
         Some((entry.0.as_str(), entry.1.as_ref()))
-    }
-
-    fn single_shape_fields(ty: &TypeExpr) -> Option<&[ShapeField]> {
-        match ty {
-            TypeExpr::Shape(fields) => Some(fields),
-            TypeExpr::Union(members) => {
-                let mut shape = None;
-                for member in members {
-                    match member {
-                        TypeExpr::Named(name) if name == "nil" => {}
-                        TypeExpr::Shape(fields) if shape.is_none() => {
-                            shape = Some(fields.as_slice())
-                        }
-                        TypeExpr::Shape(_) => return None,
-                        _ => return None,
-                    }
-                }
-                shape
-            }
-            _ => None,
-        }
-    }
-
-    fn check_builtin_literal_shape_keys(
-        &mut self,
-        builtin_name: &str,
-        param_name: &str,
-        expected: &TypeExpr,
-        arg: &SNode,
-    ) {
-        // Structural shapes remain width-subtyped elsewhere. These option bags
-        // are closed user-facing surfaces where a misspelled literal key is
-        // almost certainly a bug.
-        if !matches!(
-            (builtin_name, param_name),
-            ("spawn_agent", "config")
-                | ("sub_agent_run", "options")
-                | ("sub_agent_request", "options")
-        ) {
-            return;
-        }
-        let Some(expected_fields) = Self::single_shape_fields(expected) else {
-            return;
-        };
-        let Node::DictLiteral(entries) = &arg.node else {
-            return;
-        };
-        let known_fields = expected_fields
-            .iter()
-            .map(|field| field.name.as_str())
-            .collect::<Vec<_>>();
-        for entry in entries {
-            let key = match &entry.key.node {
-                Node::StringLiteral(key) | Node::RawStringLiteral(key) | Node::Identifier(key) => {
-                    key
-                }
-                _ => continue,
-            };
-            if known_fields.iter().any(|field| field == key) {
-                continue;
-            }
-            let max_dist = if key.len() <= 4 { 1 } else { 2 };
-            let suggestion =
-                crate::diagnostic::find_closest_match(key, known_fields.iter().copied(), max_dist);
-            let mut message = format!(
-                "argument `{param_name}` for builtin `{builtin_name}` has unknown option key `{key}`"
-            );
-            if let Some(close) = suggestion {
-                message.push_str(&format!(" — did you mean `{close}`?"));
-            }
-            let help = format!("available option keys: {}", known_fields.join(", "));
-            self.error_at_with_help(message, entry.key.span, help);
-        }
     }
 
     /// Collapse the field types of a shape into a single value type. Used when
@@ -206,6 +133,103 @@ impl TypeChecker {
                     None => format!("unknown `{builtin_name}` option `{key}`"),
                 };
             self.warning_at(message, entry.key.span);
+        }
+    }
+
+    fn option_bag_type_name(ty: &TypeExpr) -> Option<&str> {
+        match ty {
+            TypeExpr::Named(name) | TypeExpr::Applied { name, .. }
+                if name.ends_with("Options") || name.ends_with("Config") =>
+            {
+                Some(name)
+            }
+            TypeExpr::Union(members) => members.iter().find_map(Self::option_bag_type_name),
+            _ => None,
+        }
+    }
+
+    fn is_option_bag_param_name(param_name: &str) -> bool {
+        matches!(param_name, "opts" | "options" | "config")
+            || param_name.ends_with("_opts")
+            || param_name.ends_with("_options")
+            || param_name.ends_with("_config")
+    }
+
+    fn option_bag_shape_fields(
+        &self,
+        param_name: &str,
+        expected: &TypeExpr,
+        scope: &TypeScope,
+    ) -> Option<Vec<ShapeField>> {
+        let option_bag_name = Self::option_bag_type_name(expected);
+        if option_bag_name.is_none() && !Self::is_option_bag_param_name(param_name) {
+            return None;
+        }
+        let resolved = self.resolve_alias(expected, scope);
+        match resolved {
+            TypeExpr::Shape(fields) => Some(fields),
+            TypeExpr::Union(members) => {
+                let mut shapes = members.into_iter().filter_map(|member| match member {
+                    TypeExpr::Named(name) if name == "nil" => None,
+                    TypeExpr::Shape(fields) => Some(fields),
+                    _ => None,
+                });
+                let fields = shapes.next()?;
+                if shapes.next().is_none() {
+                    Some(fields)
+                } else {
+                    None
+                }
+            }
+            _ => None,
+        }
+    }
+
+    fn check_unknown_option_bag_fields(
+        &mut self,
+        context: impl Into<String>,
+        param_name: &str,
+        expected: &TypeExpr,
+        arg: &SNode,
+        scope: &TypeScope,
+    ) {
+        let Node::DictLiteral(entries) = &arg.node else {
+            return;
+        };
+        let Some(fields) = self.option_bag_shape_fields(param_name, expected, scope) else {
+            return;
+        };
+        let known: BTreeSet<&str> = fields.iter().map(|field| field.name.as_str()).collect();
+        if known.is_empty() {
+            return;
+        }
+        let context = context.into();
+        let expected_list = known
+            .iter()
+            .map(|field| format!("`{field}`"))
+            .collect::<Vec<_>>()
+            .join(", ");
+        for entry in entries {
+            if matches!(entry.value.node, Node::Spread(_)) {
+                continue;
+            }
+            let key = match &entry.key.node {
+                Node::StringLiteral(key) | Node::Identifier(key) => key,
+                _ => continue,
+            };
+            if known.contains(key.as_str()) {
+                continue;
+            }
+            let mut message = format!(
+                "{}: unknown option `{}`; expected one of {}",
+                context, key, expected_list
+            );
+            if let Some(candidate) =
+                crate::diagnostic::find_closest_match(key, known.iter().copied(), 3)
+            {
+                message.push_str(&format!(" — did you mean `{candidate}`?"));
+            }
+            self.error_at(message, entry.key.span);
         }
     }
 
@@ -319,6 +343,15 @@ impl TypeChecker {
             if let Some(actual) = &actual {
                 let expected = Self::apply_type_bindings(&param.ty.to_type_expr(), &type_bindings);
                 self.check_strict_llm_option_keys(name, param.name, &expected, arg);
+                if !Self::builtin_uses_strict_llm_option_keys(name, param.name) {
+                    self.check_unknown_option_bag_fields(
+                        format!("argument {} `{}`", i + 1, param.name),
+                        param.name,
+                        &expected,
+                        arg,
+                        &call_scope,
+                    );
+                }
                 let compatible = self.types_compatible(&expected, actual, &call_scope)
                     || (param.optional
                         && Self::type_without_nil(actual).is_none_or(|non_nil| {
@@ -335,7 +368,6 @@ impl TypeChecker {
                         &call_scope,
                     );
                 }
-                self.check_builtin_literal_shape_keys(name, param.name, &expected, arg);
             }
         }
 
@@ -1202,6 +1234,13 @@ impl TypeChecker {
                     let actual = self.infer_type(arg, scope);
                     if let Some(actual) = &actual {
                         let expected = Self::apply_type_bindings(expected, &type_bindings);
+                        self.check_unknown_option_bag_fields(
+                            format!("argument {} `{}`", i + 1, param_name),
+                            param_name,
+                            &expected,
+                            arg,
+                            &call_scope,
+                        );
                         if !self.types_compatible(&expected, actual, &call_scope) {
                             self.type_mismatch_at(
                                 format!("argument {} `{}`", i + 1, param_name),

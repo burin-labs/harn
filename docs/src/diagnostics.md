@@ -118,6 +118,12 @@ catches misuse statically against the declared contract:
 error: function `pick_keys` parameter `d`: expected dict<string, V>, found string
 ```
 
+For option-bag parameters, direct dict literals also reject unknown keys:
+
+```text
+error: argument 3 `options`: unknown option `dropnil`; expected one of `drop_nil` — did you mean `drop_nil`?
+```
+
 When a value flows in dynamically (e.g. via `unknown` or a boundary
 source), the runtime parameter guard catches it with the parameter name
 intact:

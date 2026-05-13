@@ -91,6 +91,9 @@ struct ModuleInfo {
     /// Top-level type-like declarations that can be imported into a caller's
     /// static type environment.
     type_declarations: Vec<SNode>,
+    /// Top-level callable declarations whose signatures can be imported into
+    /// a caller's static type environment.
+    callable_declarations: Vec<SNode>,
 }
 
 #[derive(Debug, Clone)]
@@ -499,6 +502,50 @@ impl ModuleGraph {
         Some(decls)
     }
 
+    /// Collect callable declarations made visible to `file` by its imports.
+    /// Only signatures are consumed by the type checker; imported bodies
+    /// remain owned by their defining modules.
+    pub fn imported_callable_declarations_for_file(&self, file: &Path) -> Option<Vec<SNode>> {
+        let file = normalize_path(file);
+        let module = self.modules.get(&file)?;
+        if module.has_unresolved_wildcard_import || module.has_unresolved_selective_import {
+            return None;
+        }
+
+        let mut decls = Vec::new();
+        for import in &module.imports {
+            let import_path = import.path.as_ref()?;
+            let imported = self
+                .modules
+                .get(import_path)
+                .or_else(|| self.modules.get(&normalize_path(import_path)))?;
+            let selective_import = import.selective_names.is_some();
+            let names_to_collect: Vec<String> = match &import.selective_names {
+                None => imported.exports.iter().cloned().collect(),
+                Some(selective) => selective.iter().cloned().collect(),
+            };
+            for name in &names_to_collect {
+                if selective_import || imported.own_exports.contains(name) {
+                    if let Some(decl) = imported
+                        .callable_declarations
+                        .iter()
+                        .find(|decl| callable_decl_name(decl) == Some(name.as_str()))
+                    {
+                        decls.push(decl.clone());
+                        continue;
+                    }
+                }
+                let mut visited = HashSet::new();
+                if let Some(decl) =
+                    self.find_exported_callable_decl(import_path, name, &mut visited)
+                {
+                    decls.push(decl);
+                }
+            }
+        }
+        Some(decls)
+    }
+
     /// Walk a module's local type declarations and re-export chains to find
     /// the SNode for an exported type/struct/enum/interface named `name`.
     fn find_exported_type_decl(
@@ -529,6 +576,40 @@ impl ModuleGraph {
         }
         for source in &module.wildcard_re_export_paths {
             if let Some(decl) = self.find_exported_type_decl(source, name, visited) {
+                return Some(decl);
+            }
+        }
+        None
+    }
+
+    fn find_exported_callable_decl(
+        &self,
+        path: &Path,
+        name: &str,
+        visited: &mut HashSet<PathBuf>,
+    ) -> Option<SNode> {
+        let canonical = normalize_path(path);
+        if !visited.insert(canonical.clone()) {
+            return None;
+        }
+        let module = self
+            .modules
+            .get(&canonical)
+            .or_else(|| self.modules.get(path))?;
+        for decl in &module.callable_declarations {
+            if callable_decl_name(decl) == Some(name) && module.own_exports.contains(name) {
+                return Some(decl.clone());
+            }
+        }
+        if let Some(sources) = module.selective_re_exports.get(name) {
+            for source in sources {
+                if let Some(decl) = self.find_exported_callable_decl(source, name, visited) {
+                    return Some(decl);
+                }
+            }
+        }
+        for source in &module.wildcard_re_export_paths {
+            if let Some(decl) = self.find_exported_callable_decl(source, name, visited) {
                 return Some(decl);
             }
         }
@@ -699,6 +780,7 @@ fn load_module(path: &Path) -> ModuleInfo {
     for node in &program {
         collect_module_info(path, node, &mut module);
         collect_type_declarations(node, &mut module.type_declarations);
+        collect_callable_declarations(node, &mut module.callable_declarations);
     }
     // Fallback matching the VM loader: if the module declares no
     // `pub fn`, every fn is implicitly exported.
@@ -878,12 +960,32 @@ fn collect_type_declarations(snode: &SNode, decls: &mut Vec<SNode>) {
     }
 }
 
+fn collect_callable_declarations(snode: &SNode, decls: &mut Vec<SNode>) {
+    match &snode.node {
+        Node::FnDecl { .. } | Node::Pipeline { .. } | Node::ToolDecl { .. } => {
+            decls.push(snode.clone())
+        }
+        Node::AttributedDecl { inner, .. } => collect_callable_declarations(inner, decls),
+        _ => {}
+    }
+}
+
 fn type_decl_name(snode: &SNode) -> Option<&str> {
     match &snode.node {
         Node::TypeDecl { name, .. }
         | Node::StructDecl { name, .. }
         | Node::EnumDecl { name, .. }
         | Node::InterfaceDecl { name, .. } => Some(name.as_str()),
+        _ => None,
+    }
+}
+
+fn callable_decl_name(snode: &SNode) -> Option<&str> {
+    match &snode.node {
+        Node::FnDecl { name, .. } | Node::Pipeline { name, .. } | Node::ToolDecl { name, .. } => {
+            Some(name.as_str())
+        }
+        Node::AttributedDecl { inner, .. } => callable_decl_name(inner),
         _ => None,
     }
 }
@@ -1058,6 +1160,28 @@ mod tests {
         assert!(names.contains("TriggerEvent"));
         assert!(names.contains("ProviderPayload"));
         assert!(names.contains("SignatureStatus"));
+    }
+
+    #[test]
+    fn stdlib_imports_expose_callable_declarations() {
+        let tmp = tempfile::tempdir().unwrap();
+        let root = tmp.path();
+        let entry = write_file(
+            root,
+            "entry.harn",
+            "import { select_from } from \"std/tui\"\nlet item = \"alpha\"\n",
+        );
+
+        let graph = build(std::slice::from_ref(&entry));
+        let decls = graph
+            .imported_callable_declarations_for_file(&entry)
+            .expect("std/tui callable declarations should resolve");
+        let names: HashSet<String> = decls
+            .iter()
+            .filter_map(callable_decl_name)
+            .map(ToString::to_string)
+            .collect();
+        assert!(names.contains("select_from"));
     }
 
     #[test]

@@ -14,7 +14,7 @@ pipeline default(task) {
   println(picked.a)
   println(picked.c)
   println(contains(picked.keys(), "b"))
-  let dropped = pick_keys<int>({a: 1, b: nil, c: 3}, ["a", "b", "c"], {drop_nil: true})
+  let dropped = pick_keys<int?>({a: 1, b: nil, c: 3}, ["a", "b", "c"], {drop_nil: true})
   println(dropped.a)
   println(dropped.c)
   println(contains(dropped.keys(), "b"))

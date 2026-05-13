@@ -106,3 +106,39 @@ pipeline t(task) {
         .collect();
     assert!(errors.is_empty(), "got imported-struct errors: {errors:?}");
 }
+
+#[test]
+fn imported_callable_signatures_check_arguments() {
+    let imported = parse_program(
+        r#"
+type PickOptions = {drop_nil?: bool}
+
+pub fn pick(options: PickOptions = {}) -> nil {
+  return nil
+}
+"#,
+    );
+    let program = parse_program(
+        r#"
+pipeline t(task) {
+  pick({dropnil: true})
+}
+"#,
+    );
+
+    let diagnostics = TypeChecker::new()
+        .with_imported_type_decls(imported.clone())
+        .with_imported_callable_decls(imported)
+        .check(&program);
+    let errors: Vec<String> = diagnostics
+        .into_iter()
+        .filter(|diag| diag.severity == DiagnosticSeverity::Error)
+        .map(|diag| diag.message)
+        .collect();
+    assert!(
+        errors
+            .iter()
+            .any(|error| error.contains("argument 1 `options`: unknown option `dropnil`")),
+        "expected imported argument error, got: {errors:?}"
+    );
+}

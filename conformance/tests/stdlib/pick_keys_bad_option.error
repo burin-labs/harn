@@ -1,1 +1,1 @@
-parameter 'd': expected dict or struct, got string
+argument 1 `d`: expected dict<string, V>, found string

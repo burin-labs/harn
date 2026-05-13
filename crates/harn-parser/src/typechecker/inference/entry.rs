@@ -20,6 +20,10 @@ impl TypeChecker {
         program: &[SNode],
     ) -> (Vec<TypeDiagnostic>, Vec<InlayHintInfo>) {
         Self::register_declarations_into(&mut self.scope, &self.imported_type_decls);
+        Self::register_imported_callable_signatures_into(
+            &mut self.scope,
+            &self.imported_callable_decls,
+        );
         // First pass: collect declarations (type/enum/struct/interface) into scope
         // before type-checking bodies so forward references resolve.
         Self::register_declarations_into(&mut self.scope, program);
@@ -271,6 +275,62 @@ impl TypeChecker {
             }
         }
         walk_all(scope, nodes);
+    }
+
+    fn register_imported_callable_signatures_into(scope: &mut TypeScope, nodes: &[SNode]) {
+        for snode in nodes {
+            let inner = match &snode.node {
+                Node::AttributedDecl { inner, .. } => inner.as_ref(),
+                _ => snode,
+            };
+            match &inner.node {
+                Node::FnDecl {
+                    name,
+                    params,
+                    return_type,
+                    type_params,
+                    where_clauses,
+                    body,
+                    is_stream,
+                    ..
+                } => {
+                    let return_type =
+                        TypeChecker::callable_return_type(*is_stream, return_type, body);
+                    let sig = FnSignature {
+                        params: params
+                            .iter()
+                            .map(|p| (p.name.clone(), p.type_expr.clone()))
+                            .collect(),
+                        return_type,
+                        definition_span: None,
+                        type_param_names: type_params.iter().map(|tp| tp.name.clone()).collect(),
+                        required_params: params
+                            .iter()
+                            .filter(|p| p.default_value.is_none())
+                            .count(),
+                        where_clauses: where_clauses
+                            .iter()
+                            .map(|wc| (wc.type_name.clone(), wc.bound.clone()))
+                            .collect(),
+                        has_rest: params.last().is_some_and(|p| p.rest),
+                    };
+                    scope.define_fn(name, sig);
+                }
+                Node::Pipeline { name, .. } | Node::ToolDecl { name, .. } => {
+                    let sig = FnSignature {
+                        params: Vec::new(),
+                        return_type: None,
+                        definition_span: None,
+                        type_param_names: Vec::new(),
+                        required_params: 0,
+                        where_clauses: Vec::new(),
+                        has_rest: false,
+                    };
+                    scope.define_fn(name, sig);
+                }
+                _ => {}
+            }
+        }
     }
 
     /// Register type, enum, interface, and struct declarations from AST nodes into a scope.

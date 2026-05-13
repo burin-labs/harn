@@ -113,6 +113,9 @@ pub struct TypeChecker {
     /// into the scope before local checking so imported type aliases and tagged
     /// unions participate in normal field access and narrowing.
     imported_type_decls: Vec<SNode>,
+    /// Callable declarations imported from other modules. Only their
+    /// signatures are registered; bodies stay owned by the defining module.
+    imported_callable_decls: Vec<SNode>,
 }
 
 impl TypeChecker {
@@ -145,6 +148,7 @@ impl TypeChecker {
             deprecated_fns: std::collections::HashMap::new(),
             imported_names: None,
             imported_type_decls: Vec::new(),
+            imported_callable_decls: Vec::new(),
         }
     }
 
@@ -163,6 +167,7 @@ impl TypeChecker {
             deprecated_fns: std::collections::HashMap::new(),
             imported_names: None,
             imported_type_decls: Vec::new(),
+            imported_callable_decls: Vec::new(),
         }
     }
 
@@ -186,6 +191,15 @@ impl TypeChecker {
     /// visible declarations before passing them in.
     pub fn with_imported_type_decls(mut self, imported: Vec<SNode>) -> Self {
         self.imported_type_decls = imported;
+        self
+    }
+
+    /// Attach imported function / pipeline / tool declarations. The checker
+    /// registers only call signatures so imported pure-Harn functions enforce
+    /// their parameter annotations at the caller without checking the imported
+    /// body in the caller's scope.
+    pub fn with_imported_callable_decls(mut self, imported: Vec<SNode>) -> Self {
+        self.imported_callable_decls = imported;
         self
     }
 
