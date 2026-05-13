@@ -1533,11 +1533,11 @@ See [LLM calls and agent loops](llm-and-agents.md) for full documentation.
 
 | Function | Parameters | Returns | Description |
 |---|---|---|---|
-| `llm_call(prompt, system?, options?)` | prompt: string, system: string, options: dict | dict | Single LLM request. Returns `{text, model, input_tokens, output_tokens}`. Supports `budget: {max_cost_usd?, max_input_tokens?, max_output_tokens?, total_budget_usd?}` pre-flight checks and throws on transport / rate-limit / budget / schema-validation failures |
-| `llm_call_safe(prompt, system?, options?)` | prompt: string, system: string, options: dict | dict | Non-throwing envelope around `llm_call`. Returns `{ok: bool, response: dict or nil, error: {category, message} or nil}`. `error.category` is one of `ErrorCategory`'s canonical strings (`"rate_limit"`, `"timeout"`, `"overloaded"`, `"server_error"`, `"transient_network"`, `"schema_validation"`, `"auth"`, `"not_found"`, `"circuit_open"`, `"budget_exceeded"`, `"tool_error"`, `"tool_rejected"`, `"egress_blocked"`, `"cancelled"`, `"generic"`) |
+| `llm_call(prompt, system?, options?)` | prompt: string, system: string, options: dict | dict | Single LLM request. Returns `{text, model, provider, input_tokens, output_tokens, usage, prose, visible_text, blocks, transcript?, tool_calls?, stop_reason?, data?}`. Supports `budget: {max_cost_usd?, max_input_tokens?, max_output_tokens?, total_budget_usd?}` pre-flight checks and throws on transport / rate-limit / budget / schema-validation failures |
+| `llm_call_safe(prompt, system?, options?)` | prompt: string, system: string, options: dict | dict | Non-throwing envelope around `llm_call`. Returns `{ok: bool, response: llm_call result or nil, error: {category, kind, reason, message, provider?, model?, retry_after_ms?} or nil}`. `error.category` is one of `ErrorCategory`'s canonical strings (`"rate_limit"`, `"timeout"`, `"overloaded"`, `"server_error"`, `"transient_network"`, `"schema_validation"`, `"auth"`, `"not_found"`, `"circuit_open"`, `"budget_exceeded"`, `"tool_error"`, `"tool_rejected"`, `"egress_blocked"`, `"cancelled"`, `"generic"`) |
 | `llm_stream_call(prompt, system?, options?)` | prompt: string, system: string, options: dict | stream | Streaming LLM request. Returns `Stream<{delta, visible_delta, partial, role, finish_reason}>`; dropping the stream cancels the background request. Uses the same options as `llm_call`; the `stream` option remains the transport toggle |
 | `with_rate_limit(provider, fn, options?)` | provider: string, fn: closure, options: dict | whatever `fn` returns | Acquire a permit from the provider's sliding-window rate limiter, invoke `fn`, and retry with exponential backoff on retryable errors (`rate_limit`, `overloaded`, `transient_network`, `timeout`). Options: `max_retries` (default 5), `backoff_ms` (default 1000, capped at 30s after doubling) |
-| `llm_completion(prefix, suffix?, system?, options?)` | prefix: string, suffix: string, system: string, options: dict | dict | Text completion / fill-in-the-middle request. Returns `{text, model, input_tokens, output_tokens}` |
+| `llm_completion(prefix, suffix?, system?, options?)` | prefix: string, suffix: string, system: string, options: dict | dict | Text completion / fill-in-the-middle request. Returns the same result shape as `llm_call` |
 | `agent_loop(prompt, system?, options?)` | prompt: string, system: string, options: dict | dict | Multi-turn agent loop with natural completion for native-tool loops, sentinel completion for text/no-tool loops (`<done>##DONE##</done>` in tagged text-tool stages), daemon/idling support, optional per-turn context filtering, opt-in repeated-tool-call stall diagnostics, and structured provider/tool-protocol failure capture. Returns `{status, error?, text, visible_text, llm: {iterations, duration_ms, input_tokens, output_tokens}, tools: {calls, successful, rejected, mode}, transcript, task_ledger, trace, …}` |
 | `agent_turn(prompt, options?)` | prompt: string, options: dict | dict | High-level agent turn wrapper around `agent_loop`. It installs generic user-visible progress guidance, requires the completion judge (`done_judge`), defaults to loop-until-done completion (natural for native-tool turns, sentinel-based for text/no-tool turns), and returns the normal loop result plus `iterations` and `judge_decisions` summaries |
 | `agent_llm_turn(prompt, system?, options?)` | prompt: string, system: string, options: dict | dict | Low-level one-turn LLM request used by stdlib orchestration; equivalent to `llm_call` but intentionally lives under the agent primitive surface |
@@ -1646,16 +1646,16 @@ llm_mock_clear()
 
 | Function | Parameters | Returns | Description |
 |---|---|---|---|
-| `transcript(metadata?)` | metadata: dict | dict | Create a new transcript |
-| `transcript_from_messages(messages_or_transcript)` | list or dict | dict | Normalize a message list into a transcript |
+| `transcript(metadata?)` | metadata: dict | transcript | Create a new transcript |
+| `transcript_from_messages(messages_or_transcript)` | list or dict | transcript | Normalize a message list into a transcript |
 | `transcript_messages(transcript)` | transcript: dict | list | Get transcript messages |
 | `transcript_summary(transcript)` | transcript: dict | string or nil | Get transcript summary |
 | `transcript_id(transcript)` | transcript: dict | string | Get transcript id |
 | `transcript_export(transcript)` | transcript: dict | string | Export transcript as JSON |
 | `transcript_import(json_text)` | json_text: string | dict | Import transcript JSON |
-| `transcript_fork(transcript, options?)` | transcript: dict, options: dict | dict | Fork transcript, optionally dropping messages or summary |
-| `transcript_summarize(transcript, options?)` | transcript: dict, options: dict | dict | Summarize and compact a transcript via `llm_call` |
-| `transcript_compact(transcript, options?)` | transcript: dict, options: dict | dict | Compact a transcript with the runtime compaction engine, preserving durable artifacts and compaction events. `strategy: "custom"` requires `custom_compactor`, a closure that returns the replacement transcript state |
+| `transcript_fork(transcript, options?)` | transcript: dict, options: dict | transcript | Fork transcript, optionally dropping messages or summary |
+| `transcript_summarize(transcript, options?)` | transcript: dict, options: dict | transcript | Summarize and compact a transcript via `llm_call` |
+| `transcript_compact(transcript, options?)` | transcript: dict, options: dict | transcript | Compact a transcript with the runtime compaction engine, preserving durable artifacts and compaction events. `strategy: "custom"` requires `custom_compactor`, a closure that returns the replacement transcript state |
 | `transcript_auto_compact(messages, options?)` | messages: list, options: dict | list | Apply the agent-loop compaction pipeline to a message list using `llm`, `truncate`, or `custom` strategy |
 
 ### Provider configuration
@@ -2077,7 +2077,7 @@ tool registry dict.
 
 | Function | Parameters | Returns | Description |
 |---|---|---|---|
-| `tool_registry()` | — | dict | Create an empty tool registry |
+| `tool_registry()` | — | tool registry | Create an empty `{_type: "tool_registry", tools: []}` registry |
 | `tool_define(registry, name, desc, config)` | registry, name, desc: string, config: dict | dict | Add a tool (config: `{parameters, handler, returns?, annotations?, ...}`) |
 | `tool_define_many(registry, specs)` | registry: dict, specs: list | dict | Stdlib helper from `std/tools`; add many declarative tool specs to a registry |
 | `tool_registry_from(specs)` | specs: list | dict | Stdlib helper from `std/tools`; create a registry from declarative tool specs |
@@ -2424,7 +2424,7 @@ artifact list and bake the packed chunks into the system prompt.
 |---|---|---|---|
 | `spawn_agent(config)` | config: dict | dict | Start a worker from a workflow graph or delegated stage config |
 | `sub_agent_request(task, options?)` | task: string, options: dict | dict | Build the normalized child-agent request that `sub_agent_run` sends to the host execution primitive |
-| `sub_agent_run(task, options?)` | task: string, options: dict | dict | Run an isolated child agent loop and return a clean envelope `{summary, artifacts, evidence_added, tokens_used, budget_exceeded, ...}` without leaking the child transcript into the parent |
+| `sub_agent_run(task, options?)` | task: string, options: dict | dict | Run an isolated child agent loop and return a clean envelope `{ok, summary, artifacts, evidence_added, tokens_used, budget_exceeded, data, error, session_id, transcript}`; with `background: true`, returns an agent-handle summary |
 | `send_input(handle, task)` | handle, task | dict | Re-run a completed worker with a new task, carrying forward worker state where applicable |
 | `resume_agent(id_or_snapshot_path)` | id or path | dict | Restore a persisted worker snapshot into the current runtime |
 | `wait_agent(handle_or_list)` | handle or list | dict or list | Wait for one worker or a list of workers to finish |
@@ -2527,7 +2527,7 @@ See the [Sessions](./sessions.md) chapter for the full model.
 | `agent_session_exists(id)` | id | bool | Safe on unknown ids |
 | `agent_session_current_id()` | none | string or nil | Returns the innermost active session id, or `nil` outside any active session |
 | `agent_session_length(id)` | id | int | Message count; errors on unknown id |
-| `agent_session_snapshot(id)` | id | dict or nil | Read-only transcript snapshot plus `parent_id`, `child_ids`, `branched_at_event_index` |
+| `agent_session_snapshot(id)` | id | dict or nil | Read-only transcript snapshot plus `length`, `created_at`, `system_prompt`, `tool_format`, `parent_id`, `child_ids`, and `branched_at_event_index` |
 | `agent_session_ancestry(id)` | id | dict or nil | Returns `{parent_id, child_ids, root_id}` for the current in-VM lineage |
 | `agent_session_reset(id)` | id | nil | Wipes history; preserves id and subscribers |
 | `agent_session_fork(src, dst?)` | src, dst | string | Copies transcript, sets `dst.parent_id`, and appends `dst` to `src.child_ids` |

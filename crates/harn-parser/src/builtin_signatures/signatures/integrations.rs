@@ -1,5 +1,6 @@
 //! Connector, host, tool, and shell-facing builtin signatures.
 
+use super::shapes::TOOL_REGISTRY;
 use super::{
     BuiltinSignature, Param, Ty, TY_ANY, TY_BOOL, TY_BYTES_OR_NIL, TY_CLOSURE, TY_DICT,
     TY_DICT_OR_NIL, TY_INT, TY_LIST, TY_NIL, TY_NUMBER, TY_STRING, TY_STRING_OR_NIL,
@@ -695,7 +696,11 @@ pub(crate) const SIGNATURES: &[BuiltinSignature] = &[
         &[Param::optional("registry", TY_TOOL_REGISTRY)],
         TY_DICT_OR_NIL,
     ),
-    BuiltinSignature::simple("__host_current_tool_registry", &[], TY_DICT_OR_NIL),
+    BuiltinSignature::simple(
+        "__host_current_tool_registry",
+        &[],
+        Ty::Union(&[TOOL_REGISTRY, TY_NIL]),
+    ),
     BuiltinSignature::simple(
         "tool_count",
         &[Param::new("registry", TY_TOOL_REGISTRY)],
@@ -742,7 +747,7 @@ pub(crate) const SIGNATURES: &[BuiltinSignature] = &[
         TY_STRING,
     ),
     BuiltinSignature::simple("tool_ref", &[Param::new("name", TY_STRING)], TY_STRING),
-    BuiltinSignature::simple("tool_registry", &[], TY_DICT),
+    BuiltinSignature::simple("tool_registry", &[], TOOL_REGISTRY),
     BuiltinSignature::simple(
         "tool_remove",
         &[

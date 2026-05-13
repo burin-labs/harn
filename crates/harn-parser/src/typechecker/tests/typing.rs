@@ -970,6 +970,76 @@ fn test_workflow_and_transcript_builtins_are_known() {
 }
 
 #[test]
+fn test_structured_stdlib_return_shapes_allow_documented_field_access() {
+    let errs = errors(
+        r#"pipeline t(task) {
+  let call = llm_call("prompt", "system")
+  let text: string = call.text
+  let tool_calls: list = call.tool_calls
+  let input_tokens: int = call.usage.input_tokens
+
+  let safe = llm_call_safe("prompt", "system")
+  let ok: bool = safe.ok
+  let safe_text: string | nil = safe.response?.text
+  let safe_error: string | nil = safe.error?.message
+
+  let completion = llm_completion("prefix", "suffix", "system")
+  let stop: string | nil = completion.stop_reason
+
+  let snap = agent_session_snapshot("session")
+  let length: int = snap.length
+  let messages: list = snap.messages
+  let created: string = snap.created_at
+
+  let child = sub_agent_run("summarize this")
+  let summary: string | nil = child?.summary
+  let worker_id: string | nil = child?.id
+
+  let transcript = transcript_reset({metadata: {source: "test"}})
+  let transcript_id: string = transcript.id
+  let archived_state: string | nil = transcript_archive(transcript).state
+
+  let tools = tool_registry()
+  let tool_type: string = tools._type
+  let tool_entries: list = tools.tools
+
+  println(text)
+  println(tool_calls)
+  println(input_tokens)
+  println(ok)
+  println(safe_text)
+  println(safe_error)
+  println(stop)
+  println(length)
+  println(messages)
+  println(created)
+  println(summary)
+  println(worker_id)
+  println(transcript_id)
+  println(archived_state)
+  println(tool_type)
+  println(tool_entries)
+}"#,
+    );
+    assert!(errs.is_empty(), "unexpected type errors: {errs:?}");
+}
+
+#[test]
+fn test_structured_stdlib_return_shapes_type_known_fields() {
+    let errs = errors(
+        r#"pipeline t(task) {
+  let call = llm_call("prompt", "system")
+  let bad: int = call.text
+}"#,
+    );
+    assert_eq!(errs.len(), 1, "expected one type error: {errs:?}");
+    assert!(
+        errs[0].contains("expected int") && errs[0].contains("found string"),
+        "unexpected error: {errs:?}"
+    );
+}
+
+#[test]
 fn test_binary_op_type_inference() {
     let errs = errors("pipeline t(task) { let x: string = 1 + 2 }");
     assert_eq!(errs.len(), 1);
