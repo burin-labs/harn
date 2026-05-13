@@ -44,11 +44,13 @@ condensed series summaries instead of full per-patch history.
   (`AGENT_SESSION_SEED_OPTS`), `agent_session_compact`
   (`AGENT_SESSION_COMPACT_OPTS`), `agent_session_ancestry`
   (`SESSION_ANCESTRY` return), and `spawn_agent` (`WORKER_SUMMARY`
-  return). Shapes for `AGENT_SPAWN_CONFIG`, `SUB_AGENT_OPTIONS`, and
-  `LLM_CALL_OPTIONS` are defined in
-  `crates/harn-parser/src/builtin_signatures/signatures/shapes.rs` and
-  documented; full enforcement on those slots is deferred until internal
-  callers (`agent_loop`, `agent_turn`) converge on the documented shape.
+  return), `spawn_agent` config (`AGENT_SPAWN_CONFIG`), and
+  `sub_agent_run` / `sub_agent_request` options (`SUB_AGENT_OPTIONS`).
+  Literal worker/sub-agent option bags now reject unknown keys at `harn check`
+  time, so misspelled worker/sub-agent options fail before runtime.
+  `LLM_CALL_OPTIONS` remains defined and documented, with full
+  enforcement deferred until internal callers (`agent_loop`, `agent_turn`)
+  converge on the documented shape.
 
 ### Changed
 

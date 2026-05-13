@@ -610,11 +610,21 @@ parallel.
 
 ```harn
 // Spawn workers and collect results
-let agents = ["research", "analyze", "summarize"]
-let results = parallel each agents { role ->
-  let agent = spawn_agent({name: role, system: "You are a ${role} agent."})
-  send_input(agent, task)
-  wait_agent(agent)
+pipeline default(task) {
+  let roles = ["research", "analyze", "summarize"]
+  let _results = parallel each roles { role ->
+    let agent = spawn_agent({
+      name: role,
+      task: "Handle ${role}: ${task}",
+      node: {
+        kind: "subagent",
+        mode: "llm",
+        model_policy: {provider: "mock"},
+        output_contract: {output_kinds: ["summary"]},
+      },
+    })
+    wait_agent(agent)
+  }
 }
 ```
 

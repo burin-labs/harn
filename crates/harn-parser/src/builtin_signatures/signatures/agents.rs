@@ -1,7 +1,8 @@
 //! Agent / orchestration / sub-agent builtin signatures.
 
 use super::shapes::{
-    AGENT_SESSION_COMPACT_OPTS, AGENT_SESSION_SEED_OPTS, SESSION_ANCESTRY, WORKER_SUMMARY,
+    AGENT_SESSION_COMPACT_OPTS, AGENT_SESSION_SEED_OPTS, AGENT_SPAWN_CONFIG, SESSION_ANCESTRY,
+    SUB_AGENT_OPTIONS, WORKER_SUMMARY,
 };
 use super::{
     BuiltinSignature, Param, Ty, TY_ANY, TY_BOOL, TY_CLOSURE, TY_DICT, TY_DICT_OR_NIL, TY_FLOAT,
@@ -680,24 +681,16 @@ pub(crate) const SIGNATURES: &[BuiltinSignature] = &[
         &[Param::new("answerer", TY_ANY)],
         TY_DICT,
     ),
-    // NOTE: AGENT_SPAWN_CONFIG / SUB_AGENT_OPTIONS shapes exist in
-    // `super::shapes` and are accurate for *user-facing* literal-call sites,
-    // but the runtime checker applies the same type contract to internal
-    // calls that pass dicts with broader runtime types (e.g. `tools` as a
-    // tool_registry dict). Use `TY_DICT` at the parser layer until either:
-    //   1. The runtime check loosens for these slots, or
-    //   2. The internal callers are updated to match the documented shape.
-    // The constants remain authoritative documentation in `shapes.rs`.
     BuiltinSignature::simple(
         "spawn_agent",
-        &[Param::new("config", TY_DICT)],
+        &[Param::new("config", AGENT_SPAWN_CONFIG)],
         WORKER_SUMMARY,
     ),
     BuiltinSignature::simple(
         "sub_agent_run",
         &[
             Param::new("task", TY_STRING),
-            Param::optional("options", TY_DICT),
+            Param::optional("options", SUB_AGENT_OPTIONS),
         ],
         TY_DICT,
     ),
@@ -705,7 +698,7 @@ pub(crate) const SIGNATURES: &[BuiltinSignature] = &[
         "sub_agent_request",
         &[
             Param::new("task", TY_STRING),
-            Param::optional("options", TY_DICT),
+            Param::optional("options", SUB_AGENT_OPTIONS),
         ],
         TY_DICT,
     ),

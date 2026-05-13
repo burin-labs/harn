@@ -279,6 +279,53 @@ fn test_renamed_stdlib_call_suggests_replacement() {
 }
 
 #[test]
+fn test_spawn_agent_literal_config_rejects_unknown_option_key() {
+    let errs = errors(
+        r#"pipeline t(task) {
+  spawn_agent({
+    task: "do it",
+    node: {kind: "stage"},
+    persmissions: {}
+  })
+}"#,
+    );
+    assert!(
+        errs.iter()
+            .any(|m| m.contains("unknown option key `persmissions`")
+                && m.contains("did you mean `permissions`")),
+        "expected spawn_agent option-key typo error, got: {errs:?}"
+    );
+}
+
+#[test]
+fn test_sub_agent_run_literal_options_rejects_unknown_option_key() {
+    let errs = errors(
+        r#"pipeline t(task) {
+  sub_agent_run("do it", {provider: "mock", backgroun: true})
+}"#,
+    );
+    assert!(
+        errs.iter()
+            .any(|m| m.contains("unknown option key `backgroun`")
+                && m.contains("did you mean `background`")),
+        "expected sub_agent_run option-key typo error, got: {errs:?}"
+    );
+}
+
+#[test]
+fn test_sub_agent_request_accepts_registry_tools_shape() {
+    let errs = errors(
+        r#"pipeline t(task) {
+  sub_agent_request("do it", {provider: "mock", tools: tool_registry()})
+}"#,
+    );
+    assert!(
+        errs.is_empty(),
+        "sub_agent_request should accept a tool registry dict in options.tools, got: {errs:?}"
+    );
+}
+
+#[test]
 fn test_cross_module_local_fn_not_flagged() {
     let diags = check_source_with_imports(
         r#"fn local_fn() { 42 }
