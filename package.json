@@ -16,6 +16,8 @@
     "portal:demo": "./scripts/portal_demo.sh"
   },
   "overrides": {
+    "react": "19.2.6",
+    "react-dom": "19.2.6",
     "smol-toml": "1.6.1"
   },
   "devDependencies": {

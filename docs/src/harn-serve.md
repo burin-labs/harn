@@ -1,8 +1,9 @@
 # Outbound Workflow Server
 
 `harn-serve` is the shared outbound-server crate for exposing Harn workflows to
-external callers. It contains the MCP, A2A, and ACP adapters plus the shared
-dispatch, auth, replay, and export-catalog pieces those adapters use.
+external callers. It contains the local Agents API, MCP, A2A, and ACP adapters
+plus the shared dispatch, auth, replay, and export-catalog pieces those
+adapters use.
 
 For user-facing protocol examples, start with
 [MCP, ACP, and A2A integration](./mcp-and-acp.md). For a quick status table
@@ -41,6 +42,31 @@ documents, streaming, progress notifications, or session semantics.
 
 Choose the adapter based on the caller's mental model, not by protocol
 popularity alone.
+
+### Local Agents API
+
+Choose the local Agents API when a client wants an OpenAPI-described HTTP
+surface instead of a protocol-specific JSON-RPC transport.
+
+Run it with:
+
+```bash
+harn serve api agent.harn
+harn serve api --bind 127.0.0.1:8787 agent.harn
+harn serve api --api-key "$HARN_KEY" agent.harn
+```
+
+Behavior today:
+
+- serves `GET /openapi.json`, `GET /health`, `GET /version`, and `/v1/*`
+- creates ACP-backed sessions and runs prompts as Tasks
+- streams session, task, tool, and permission updates over SSE
+- forwards ACP `session/request_permission` and Harn HITL responses through
+  the existing runtime path so decisions remain transcript and replay visible
+- exposes local runtime, capability, tool-registry, workspace, and UTF-8 file
+  helpers for generated SDKs
+- supports the same API-key, HMAC, and TLS listener settings as the other HTTP
+  adapters
 
 ### MCP
 

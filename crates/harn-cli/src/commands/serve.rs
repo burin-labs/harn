@@ -14,17 +14,20 @@ use axum::{Json, Router};
 use futures::channel::mpsc::{unbounded, UnboundedReceiver, UnboundedSender};
 use futures::{stream, StreamExt};
 use harn_serve::{
-    A2aHttpServeOptions, A2aServer, A2aServerConfig, ApiKeyAuthConfig, AuthMethodConfig,
-    AuthPolicy, AuthRequest, AuthorizationDecision, DispatchCore, DispatchCoreConfig,
-    ExportCatalog, ExportedCallableKind, HmacAuthConfig, HttpTlsConfig, McpHttpServeOptions,
-    McpServer, McpServerConfig, MCP_PROTOCOL_VERSION,
+    A2aHttpServeOptions, A2aServer, A2aServerConfig, AcpProfileConfig, ApiHttpServeOptions,
+    ApiKeyAuthConfig, ApiServer, ApiServerConfig, AuthMethodConfig, AuthPolicy, AuthRequest,
+    AuthorizationDecision, DispatchCore, DispatchCoreConfig, ExportCatalog, ExportedCallableKind,
+    HmacAuthConfig, HttpTlsConfig, McpHttpServeOptions, McpServer, McpServerConfig,
+    MCP_PROTOCOL_VERSION,
 };
 use serde_json::Value as JsonValue;
 use time::Duration;
 use tokio::sync::{mpsc as tokio_mpsc, oneshot};
 use uuid::Uuid;
 
-use crate::cli::{A2aServeArgs, McpServeTransport, ServeAcpArgs, ServeMcpArgs, ServeTlsMode};
+use crate::cli::{
+    A2aServeArgs, ApiServeArgs, McpServeTransport, ServeAcpArgs, ServeMcpArgs, ServeTlsMode,
+};
 
 pub(crate) async fn run_acp_server(args: &ServeAcpArgs) -> Result<(), String> {
     crate::acp::run_acp_server(
@@ -50,6 +53,23 @@ pub(crate) async fn run_a2a_server(args: &A2aServeArgs) -> Result<(), String> {
     server
         .run_http(A2aHttpServeOptions {
             bind: SocketAddr::from(([0, 0, 0, 0], args.port)),
+            public_url: args.public_url.clone(),
+            tls: build_tls_config(args.tls, args.cert.as_ref(), args.key.as_ref())?,
+        })
+        .await
+}
+
+pub(crate) async fn run_api_server(args: &ApiServeArgs) -> Result<(), String> {
+    let config = ApiServerConfig::for_pipeline(args.file.clone())
+        .with_auth_policy(build_auth_policy(&args.api_key, args.hmac_secret.as_ref()))
+        .with_profile(AcpProfileConfig {
+            text: args.trace || args.profile.text,
+            json_path: args.profile.json_path.clone(),
+        });
+    let server = Arc::new(ApiServer::new(config));
+    server
+        .run_http(ApiHttpServeOptions {
+            bind: args.bind,
             public_url: args.public_url.clone(),
             tls: build_tls_config(args.tls, args.cert.as_ref(), args.key.as_ref())?,
         })
