@@ -1,6 +1,7 @@
 pub(crate) mod agents_conformance;
 pub(crate) mod bench;
 pub(crate) mod check;
+pub(crate) mod config_cmd;
 pub(crate) mod connect;
 pub(crate) mod connector;
 pub(crate) mod contracts;

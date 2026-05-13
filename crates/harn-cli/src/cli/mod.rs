@@ -13,6 +13,7 @@
 mod bench;
 mod check;
 mod completions;
+mod config_cmd;
 mod connect;
 mod connector;
 mod contracts;
@@ -55,6 +56,7 @@ mod workflow;
 pub(crate) use bench::BenchArgs;
 pub(crate) use check::{CheckArgs, CheckOutputFormat};
 pub(crate) use completions::{CompletionShell, CompletionsArgs};
+pub(crate) use config_cmd::{ConfigArgs, ConfigCommand, ConfigInspectArgs, ConfigValidateArgs};
 pub(crate) use connect::{
     ConnectApiKeyArgs, ConnectArgs, ConnectCommand, ConnectGenericArgs, ConnectGithubArgs,
     ConnectLinearArgs, ConnectOAuthArgs, ConnectSetupPlanArgs, ConnectStatusArgs,
@@ -214,6 +216,8 @@ SCRIPTING
     Run(RunArgs),
     /// Type-check .harn files or directories without executing them.
     Check(CheckArgs),
+    /// Inspect, validate, and emit schemas for layered Harn runtime config.
+    Config(ConfigArgs),
     /// Explain the control-flow path that violates a Harn invariant
     /// (e.g. `fs.writes`, `approval.reachability`) for a specific
     /// function or trigger handler.

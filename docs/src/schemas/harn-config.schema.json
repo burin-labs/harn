@@ -1,0 +1,411 @@
+{
+  "$defs": {
+    "endpoint": {
+      "additionalProperties": false,
+      "properties": {
+        "command": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "enabled": {
+          "type": "boolean"
+        },
+        "headers": {
+          "additionalProperties": {
+            "type": "string"
+          },
+          "type": "object"
+        },
+        "transport": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "url": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "type": "object"
+    },
+    "model_alias": {
+      "additionalProperties": false,
+      "properties": {
+        "capability_refs": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "model": {
+          "type": "string"
+        },
+        "provider": {
+          "type": "string"
+        }
+      },
+      "type": "object"
+    },
+    "permission_mode": {
+      "enum": [
+        "allow",
+        "ask",
+        "deny"
+      ]
+    },
+    "provider": {
+      "additionalProperties": false,
+      "properties": {
+        "auth_env": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "base_url": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "capability_refs": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "metadata": {
+          "type": "object"
+        },
+        "models": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        }
+      },
+      "type": "object"
+    },
+    "source": {
+      "additionalProperties": false,
+      "properties": {
+        "kind": {
+          "type": "string"
+        },
+        "name": {
+          "type": "string"
+        },
+        "path": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "trust": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "url": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "type": "object"
+    }
+  },
+  "$id": "https://harnlang.com/schemas/harn-config.schema.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "properties": {
+    "endpoints": {
+      "additionalProperties": false,
+      "properties": {
+        "a2a": {
+          "additionalProperties": {
+            "$ref": "#/$defs/endpoint"
+          },
+          "type": "object"
+        },
+        "acp": {
+          "additionalProperties": {
+            "$ref": "#/$defs/endpoint"
+          },
+          "type": "object"
+        },
+        "mcp": {
+          "additionalProperties": {
+            "$ref": "#/$defs/endpoint"
+          },
+          "type": "object"
+        }
+      },
+      "type": "object"
+    },
+    "limits": {
+      "additionalProperties": false,
+      "properties": {
+        "budget_usd": {
+          "minimum": 0,
+          "type": [
+            "number",
+            "null"
+          ]
+        },
+        "concurrency": {
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "filesystem": {
+          "enum": [
+            "read-write",
+            "read-only",
+            "sandboxed"
+          ]
+        },
+        "network": {
+          "enum": [
+            "allow",
+            "ask",
+            "deny",
+            "offline"
+          ]
+        },
+        "sandbox": {
+          "enum": [
+            "host",
+            "process",
+            "container",
+            "worktree"
+          ]
+        },
+        "tokens": {
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        }
+      },
+      "type": "object"
+    },
+    "logging": {
+      "additionalProperties": false,
+      "properties": {
+        "file": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "format": {
+          "type": "string"
+        },
+        "level": {
+          "enum": [
+            "error",
+            "warn",
+            "info",
+            "debug",
+            "trace"
+          ]
+        }
+      },
+      "type": "object"
+    },
+    "models": {
+      "additionalProperties": false,
+      "properties": {
+        "aliases": {
+          "additionalProperties": {
+            "$ref": "#/$defs/model_alias"
+          },
+          "type": "object"
+        },
+        "capability_refs": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "default_model": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "default_provider": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "providers": {
+          "additionalProperties": {
+            "$ref": "#/$defs/provider"
+          },
+          "type": "object"
+        }
+      },
+      "type": "object"
+    },
+    "packages": {
+      "additionalProperties": false,
+      "properties": {
+        "lockfile": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "sources": {
+          "items": {
+            "$ref": "#/$defs/source"
+          },
+          "type": "array"
+        }
+      },
+      "type": "object"
+    },
+    "permissions": {
+      "additionalProperties": false,
+      "properties": {
+        "capabilities": {
+          "additionalProperties": {
+            "$ref": "#/$defs/permission_mode"
+          },
+          "type": "object"
+        },
+        "default": {
+          "$ref": "#/$defs/permission_mode"
+        }
+      },
+      "type": "object"
+    },
+    "plugins": {
+      "additionalProperties": false,
+      "properties": {
+        "sources": {
+          "items": {
+            "$ref": "#/$defs/source"
+          },
+          "type": "array"
+        }
+      },
+      "type": "object"
+    },
+    "policy": {
+      "additionalProperties": false,
+      "properties": {
+        "denied_fields": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "locked_fields": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        }
+      },
+      "type": "object"
+    },
+    "redaction": {
+      "additionalProperties": false,
+      "properties": {
+        "extra_fields": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "extra_url_params": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "mode": {
+          "enum": [
+            "off",
+            "standard",
+            "strict"
+          ]
+        }
+      },
+      "type": "object"
+    },
+    "replay": {
+      "additionalProperties": false,
+      "properties": {
+        "directory": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "enabled": {
+          "type": "boolean"
+        }
+      },
+      "type": "object"
+    },
+    "retention": {
+      "additionalProperties": false,
+      "properties": {
+        "days": {
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "max_bytes": {
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        }
+      },
+      "type": "object"
+    },
+    "schema_version": {
+      "const": 1,
+      "type": "integer"
+    },
+    "skills": {
+      "additionalProperties": false,
+      "properties": {
+        "paths": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "sources": {
+          "items": {
+            "$ref": "#/$defs/source"
+          },
+          "type": "array"
+        }
+      },
+      "type": "object"
+    }
+  },
+  "title": "Harn runtime config",
+  "type": "object"
+}

@@ -40,6 +40,7 @@
   - [LLM providers](./llm/providers.md)
   - [Provider capability matrix](./provider-matrix.md)
   - [Provider catalog refresh workflow](./llm/provider-catalog-refresh.md)
+- [Layered runtime configuration](./configuration.md)
 - [Long-running tools](./long-running-tools.md)
 - [Tool surface validation](./tool-surface-validation.md)
 - [Cache stdlib](./stdlib/cache.md)

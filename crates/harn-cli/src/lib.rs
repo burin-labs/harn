@@ -289,6 +289,11 @@ async fn async_main() {
                 process::exit(1);
             }
         }
+        Command::Config(args) => {
+            if let Err(error) = commands::config_cmd::run(args).await {
+                command_error(&error);
+            }
+        }
         Command::Explain(args) => {
             let code = commands::explain::run_explain(&args);
             if code != 0 {
