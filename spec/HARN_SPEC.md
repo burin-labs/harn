@@ -4775,6 +4775,13 @@ stem. Use `harn add <alias> --path ../repo` for the legacy explicit
 alias form, or `harn add <alias> --git ../repo` when a local git checkout
 should be pinned by commit instead of live-linked.
 
+`harn tool new <name>` scaffolds a Harn-native tool package with
+`[[package.tools]]` metadata, a stable `tools` export, package-local dispatch
+tests, API docs, and CI. `harn skill new <name>` is the singular alias for
+`harn skills new <name>`. Tool and skill packages still install through the
+same `[dependencies]`, `.harn/packages/`, and `harn.lock` mechanism as ordinary
+module packages.
+
 ### Eval packs
 
 Packages can ship portable eval packs in `harn.eval.toml` or in paths listed
@@ -4973,17 +4980,29 @@ community packages by capability and stable name. Use direct GitHub refs
 for local dogfood, private repositories, unreleased commits, or temporary
 pins that are not ready for the shared index.
 
-`harn.lock` is a typed TOML file with `version = 1` and one `[[package]]`
+`harn.lock` is a typed TOML file with `version = 3` and one `[[package]]`
 entry per dependency. Each git entry records:
 
 - `source`
 - `rev_request`
 - `commit`
 - `content_hash`
+- `package_version`
+- `harn_compat`
+- `provenance`
+- `manifest_digest`
+- `exports`
+- `permissions`
+- `host_requirements`
 
 `content_hash` is a SHA-256 over the cached package tree. Harn verifies
 that hash whenever it reuses a cached package or re-materializes
-`.harn/packages/<alias>/`.
+`.harn/packages/<alias>/`. `manifest_digest` separately hashes the resolved
+package manifest so audit and host policy can detect package-surface drift
+without re-hashing the full tree. `provenance`, `exports`, `permissions`, and
+`host_requirements` mirror the resolved package's declared source,
+module/tool/skill surface, and policy requirements for host UI, CI, and
+locked-install review.
 
 For CI and production hosts, `harn install --locked --offline` uses only
 the committed `harn.lock` plus the local shared cache; it fails when the
@@ -4992,6 +5011,13 @@ already cached. `harn package cache list`, `clean`, and `verify`
 inspect, garbage-collect, and recompute content hashes for cached git
 packages. `harn package cache verify --materialized` also verifies
 installed `.harn/packages/` contents against the lockfile hashes.
+`harn package list` summarizes locked packages, their exported surfaces,
+permissions, host requirements, materialization status, and integrity state.
+`harn package doctor` diagnoses missing/stale lockfiles, missing materialized
+packages, content-hash mismatches, host capability gaps, and invalid installed
+tool or skill metadata. Publish-readiness checks stay under
+`harn package check`; applications can run doctor without becoming
+publishable packages.
 
 ### `[exports]` — stable package module entry points
 
@@ -5008,6 +5034,50 @@ directory layout.
 
 Exports are resolved after the direct `.harn/packages/<path>` lookup, so
 packages can still expose raw file trees when they want that behavior.
+
+### `[[package.tools]]` and `[[package.skills]]`
+
+Custom tool and skill packages declare their host-facing surface in the
+`[package]` table so installs can be reviewed from the manifest and lockfile:
+
+```toml
+[package]
+name = "acme-tools"
+version = "0.1.0"
+provenance = "https://github.com/acme/acme-tools/releases/tag/v0.1.0"
+permissions = ["tool:read_only"]
+host_requirements = ["workspace.read_text"]
+
+[exports]
+tools = "lib/tools.harn"
+
+[[package.tools]]
+name = "read-note"
+module = "lib/tools.harn"
+symbol = "tools"
+description = "Read a note through the package tool registry."
+permissions = ["tool:read_only"]
+
+[package.tools.input_schema]
+type = "object"
+required = ["path"]
+
+[package.tools.annotations]
+kind = "read"
+side_effect_level = "read_only"
+
+[[package.skills]]
+name = "review"
+path = "skills/review"
+```
+
+Each tool `module` is a package-root-relative Harn module and `symbol` names
+the exported registry builder. `input_schema`, `output_schema`, and
+`annotations` are TOML tables that must round-trip to the runtime JSON schema
+and tool annotation shapes. Each skill `path` is a package-root-relative
+directory containing `SKILL.md` with valid front matter. Package-level
+permissions and host requirements are merged with per-tool or per-skill values
+when Harn writes the lockfile.
 
 ### `[asset_roots]` — package-root prompt asset aliases
 

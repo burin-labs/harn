@@ -7,8 +7,8 @@ use super::{
     OrchestratorCommand, OrchestratorDeployProvider, OrchestratorLogFormat,
     OrchestratorQueueCommand, OrchestratorTenantCommand, PackageArtifactsCommand,
     PackageCacheCommand, PackageCommand, PersonaCommand, ProjectTemplate, RunsCommand,
-    SessionCommand, SkillCommand, SkillKeyCommand, SkillTrustCommand, SkillsCommand, TraceCommand,
-    TriggerCommand, TrustCommand, TrustOutcomeArg, TrustTierArg,
+    SessionCommand, SkillCommand, SkillKeyCommand, SkillTrustCommand, SkillsCommand, ToolCommand,
+    TraceCommand, TriggerCommand, TrustCommand, TrustOutcomeArg, TrustTierArg,
 };
 use clap::{CommandFactory, Parser};
 
@@ -1571,6 +1571,24 @@ fn test_parses_add_registry_override() {
 
 #[test]
 fn test_parses_package_cache_subcommands() {
+    let cli = Cli::parse_from(["harn", "package", "list", "--json"]);
+    let Command::Package(args) = cli.command.unwrap() else {
+        panic!("expected package command");
+    };
+    let PackageCommand::List(list) = args.command else {
+        panic!("expected package list");
+    };
+    assert!(list.json);
+
+    let cli = Cli::parse_from(["harn", "package", "doctor", "--json"]);
+    let Command::Package(args) = cli.command.unwrap() else {
+        panic!("expected package command");
+    };
+    let PackageCommand::Doctor(doctor) = args.command else {
+        panic!("expected package doctor");
+    };
+    assert!(doctor.json);
+
     let cli = Cli::parse_from([
         "harn",
         "package",
@@ -1669,6 +1687,39 @@ fn test_parses_package_cache_subcommands() {
         panic!("expected package cache verify");
     };
     assert!(verify.materialized);
+}
+
+#[test]
+fn test_parses_tool_new_and_skill_new_alias() {
+    let cli = Cli::parse_from([
+        "harn",
+        "tool",
+        "new",
+        "acme-tool",
+        "--description",
+        "Echo text",
+        "--dir",
+        "packages/acme-tool",
+        "--force",
+    ]);
+    let Command::Tool(args) = cli.command.unwrap() else {
+        panic!("expected tool command");
+    };
+    let ToolCommand::New(new) = args.command;
+    assert_eq!(new.name, "acme-tool");
+    assert_eq!(new.description.as_deref(), Some("Echo text"));
+    assert_eq!(new.dir.as_deref(), Some("packages/acme-tool"));
+    assert!(new.force);
+
+    let cli = Cli::parse_from(["harn", "skill", "new", "deploy", "--description", "Deploy"]);
+    let Command::Skill(args) = cli.command.unwrap() else {
+        panic!("expected skill command");
+    };
+    let SkillCommand::New(new) = args.command else {
+        panic!("expected skill new alias");
+    };
+    assert_eq!(new.name, "deploy");
+    assert_eq!(new.description.as_deref(), Some("Deploy"));
 }
 
 #[test]

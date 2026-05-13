@@ -577,6 +577,30 @@ harn new package my-lib
 the default quick-start flow and `new` when you want the template choice to be
 explicit.
 
+## harn tool
+
+Scaffold Harn-native custom tool packages.
+
+```bash
+harn tool new acme-echo
+harn tool new acme-echo --dir packages/acme-echo
+harn tool new acme-echo --description "Echo text for tests."
+```
+
+The generated package includes `[[package.tools]]` metadata, a stable
+`tools` export, package-local dispatch tests, API docs, and CI commands for
+`harn test`, `harn package check`, `harn package docs --check`, and
+`harn package pack --dry-run`.
+
+## harn skill
+
+Scaffold or inspect one custom skill. `harn skill new` is the singular alias
+for `harn skills new`.
+
+```bash
+harn skill new review-helper
+```
+
 ## harn quickstart
 
 Inspect local provider readiness and write starter LLM configuration.
@@ -1439,6 +1463,34 @@ Remove one dependency from `harn.toml`, `harn.lock`, and
 ```bash
 harn remove my-lib
 ```
+
+## harn package list
+
+List packages from the current `harn.lock`.
+
+```bash
+harn package list
+harn package list --json
+```
+
+The report includes each locked package's source, materialization status,
+integrity status, package version, Harn compatibility range, exported
+modules/tools/skills, permissions, and host requirements.
+
+## harn package doctor
+
+Diagnose package install and contract issues.
+
+```bash
+harn package doctor
+harn package doctor --json
+```
+
+Doctor checks for missing or stale lockfiles, missing materialized packages,
+content-hash mismatches, declared host capability gaps, and invalid installed
+package tool/skill metadata. Publish-readiness checks remain under
+`harn package check`, so applications can use doctor without adding package
+metadata that only published libraries need.
 
 ## harn package search
 

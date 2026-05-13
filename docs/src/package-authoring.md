@@ -29,10 +29,43 @@ Consumers can add a local package while developing:
 ```bash
 harn add ../acme-tools
 harn install
+harn package list
+harn package doctor
 ```
 
 Before publishing, replace local path dependencies with registry or git
 dependencies pinned to a version or rev.
+
+## Create a tool package
+
+```bash
+harn tool new acme-echo
+cd acme-echo
+harn test tests/
+harn package check
+harn package docs --check
+harn package pack --dry-run
+```
+
+The tool template creates a package with a Harn-native registry builder,
+`[[package.tools]]` metadata, a local smoke test that dispatches the tool,
+and CI that exercises the same publish-readiness checks. The generated package
+is intentionally ordinary Harn source; consumers install it with `harn add`,
+import the stable export, and merge it into their own tool registry:
+
+```harn,ignore
+import { tools } from "acme-echo/tools"
+```
+
+## Create a skill package
+
+```bash
+harn skill new review-helper
+```
+
+`harn skill new` is the singular alias for `harn skills new`. Package authors
+can publish skills by adding `[[package.skills]]` entries that point at
+package-root-relative skill directories containing `SKILL.md`.
 
 ## Create a connector package
 
@@ -72,20 +105,47 @@ version = "0.1.0"
 description = "Reusable Harn helpers."
 license = "MIT OR Apache-2.0"
 repository = "https://github.com/acme/acme-tools"
+provenance = "https://github.com/acme/acme-tools/releases/tag/v0.1.0"
 harn = ">=0.8,<0.9"
 docs_url = "docs/api.md"
+permissions = ["tool:read_only"]
+host_requirements = ["workspace.read_text"]
 
 [exports]
 lib = "lib/main.harn"
+
+[[package.tools]]
+name = "read-note"
+module = "lib/main.harn"
+symbol = "tools"
+description = "Read a note through the package tool registry."
+permissions = ["tool:read_only"]
+
+[package.tools.input_schema]
+type = "object"
+required = ["path"]
+
+[package.tools.annotations]
+kind = "read"
+side_effect_level = "read_only"
+
+[[package.skills]]
+name = "review"
+path = "skills/review"
 
 [dependencies]
 json-helpers = { git = "https://github.com/acme/json-helpers", rev = "v0.1.0" }
 ```
 
 `harn package check` validates required metadata, dependency declarations,
-stable exports, README/license presence, docs links, and Harn compatibility.
-Publish readiness rejects path-only dependencies and unsupported Harn version
-ranges because they cannot be reproduced from a registry index.
+stable exports, tool and skill declarations, README/license presence, docs
+links, and Harn compatibility. Tool declarations must point at a parseable
+Harn module, provide valid JSON-schema-shaped `input_schema` and
+`output_schema` tables when present, and use policy annotations that match the
+runtime tool annotation schema. Skill declarations must stay inside the package
+root and point at a directory with valid `SKILL.md` front matter. Publish
+readiness rejects path-only dependencies and unsupported Harn version ranges
+because they cannot be reproduced from a registry index.
 
 ## API docs
 
@@ -134,8 +194,11 @@ write captures:
   top level so downstream automation can detect when the lock was produced
   by an older Harn line.
 - Per-entry `source`, `commit`, and `content_hash` for git/registry deps,
-  plus `package_version`, `harn_compat`, and a separate `manifest_digest`
-  taken from the resolved package's `harn.toml`.
+  plus `package_version`, `harn_compat`, package `provenance`, and a separate
+  `manifest_digest` taken from the resolved package's `harn.toml`.
+- Exported modules, custom tools, skills, package permissions, and host
+  requirements declared by the resolved package. Hosts and CI can inspect this
+  metadata without reading arbitrary package source.
 - A `[package.registry]` table for entries originally added via
   `harn add @scope/name@version`, preserving the registry source, package
   name, and requested version so `harn package outdated` can compare
@@ -147,9 +210,16 @@ resolved `path+file://` URI plus the same `package_version` and
 
 ## Maturing the package surface
 
-Once a manifest and lockfile are in place, three commands cover the
+Once a manifest and lockfile are in place, these commands cover the
 day-to-day automation surface:
 
+- `harn package list` — summarize locked packages, materialization status,
+  exported modules/tools/skills, and declared permission or host requirements.
+  Use `--json` when the output feeds host UI or CI policy.
+- `harn package doctor` — diagnose missing or stale lockfiles, missing
+  materialized packages, content-hash mismatches, declared host capability
+  gaps, and invalid installed package tool/skill metadata. It is safe for
+  applications: publish-only checks remain under `harn package check`.
 - `harn package outdated` — surface registry version bumps and (with
   `--remote`) git branch HEAD drift. JSON output matches the report
   struct documented in
@@ -173,22 +243,26 @@ consistent way to land the bump. The recommended sequence:
 1. **Refresh the running Harn binary** in the downstream repo
    (`fetch-harn`, `make setup`, or whatever the local script is).
 2. **Re-resolve dependencies** with `harn install` so `harn.lock`
-   rewrites in v2 with the current `generator_version` and
-   `protocol_artifact_version`.
-3. **Audit** with `harn package audit --json`. If any package declares a
+   rewrites with the current `generator_version`,
+   `protocol_artifact_version`, exported package surface, and host
+   requirements.
+3. **Inspect** with `harn package list --json` and `harn package doctor --json`
+   so host requirements and materialized package state are visible before
+   tests start.
+4. **Audit** with `harn package audit --json`. If any package declares a
    `harn` range that excludes the new line, contact the package owner or
    pin to a previous tag.
-4. **Check vendored protocol bindings** with
+5. **Check vendored protocol bindings** with
    `harn package artifacts check path/to/vendored/manifest.json`. If it
    reports drift, regenerate the bindings (`make gen-protocol-artifacts`
    inside the downstream repo, or `harn package artifacts manifest
    --output …` to refresh the vendored copy).
-5. **Surface registry updates** with `harn package outdated --json` and
+6. **Surface registry updates** with `harn package outdated --json` and
    bump dependency versions intentionally; `harn update <alias>` keeps
    each upgrade in its own commit.
 
-Steps 2–4 are a single CI job for hosts that vendor Harn artifacts:
-`harn install --frozen --json`, then `harn package audit --json`, then
-`harn package artifacts check`. The `--json` output is stable across
-Harn lines, so the same automation script runs against multiple Harn
-versions during a staged rollout.
+Steps 2–5 are a single CI job for hosts that vendor Harn artifacts:
+`harn install --frozen --json`, then `harn package doctor --json`, then
+`harn package audit --json`, then `harn package artifacts check`. The `--json`
+output is stable across Harn lines, so the same automation script runs against
+multiple Harn versions during a staged rollout.

@@ -21,7 +21,7 @@ const HARN_CACHE_DIR_ENV: &str = "HARN_CACHE_DIR";
 const HARN_PACKAGE_REGISTRY_ENV: &str = "HARN_PACKAGE_REGISTRY";
 const DEFAULT_PACKAGE_REGISTRY_URL: &str = "https://packages.harnlang.com/index.toml";
 const CACHE_METADATA_VERSION: u32 = 1;
-const LOCK_FILE_VERSION: u32 = 2;
+const LOCK_FILE_VERSION: u32 = 3;
 const REGISTRY_INDEX_VERSION: u32 = 1;
 const PKG_DIR: &str = ".harn/packages";
 const MANIFEST: &str = "harn.toml";
@@ -47,7 +47,7 @@ pub use lockfile::add_package;
 pub(crate) use lockfile::*;
 pub use lockfile::{
     add_package_with_registry, ensure_dependencies_materialized, install_packages, lock_packages,
-    remove_package, update_packages,
+    remove_package, update_packages, PackageLockExport, PackageLockExports,
 };
 pub use manifest::*;
 pub use maturity::{

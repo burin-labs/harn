@@ -43,6 +43,7 @@ mod skills;
 mod supervisor;
 mod test;
 mod test_bench;
+mod tool;
 mod trace;
 mod trigger;
 mod trust;
@@ -151,6 +152,7 @@ pub(crate) use test_bench::{
     TestBenchArgs, TestBenchCommand, TestBenchExportAnnotationsArgs, TestBenchFidelityArgs,
     TestBenchReplayArgs, TestBenchRunArgs, TestBenchValidateAnnotationsArgs,
 };
+pub(crate) use tool::{ToolArgs, ToolCommand, ToolNewArgs};
 pub(crate) use trace::{TraceArgs, TraceCommand, TraceImportArgs};
 pub(crate) use trigger::{TriggerArgs, TriggerCancelArgs, TriggerCommand, TriggerReplayArgs};
 pub(crate) use try_cmd::TryArgs;
@@ -336,6 +338,8 @@ SCRIPTING
     Skills(SkillsArgs),
     /// Manage skill provenance: keys, signatures, verification, and trust policy.
     Skill(SkillArgs),
+    /// Scaffold and inspect Harn-native custom tools.
+    Tool(ToolArgs),
     /// Print the decorated version banner.
     Version,
     /// Regenerate docs/theme/harn-keywords.js from the live lexer + stdlib sets.
