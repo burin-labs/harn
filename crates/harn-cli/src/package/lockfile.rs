@@ -57,6 +57,9 @@ pub(crate) struct LockEntry {
     /// current Harn line.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub(crate) harn_compat: Option<String>,
+    /// Package-authored provenance URL or identifier from `[package]`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) provenance: Option<String>,
     /// SHA-256 digest (`sha256:<hex>`) of the resolved package's
     /// `harn.toml`, separate from the full-contents `content_hash`. Lets
     /// audit detect manifest tampering without re-hashing the entire tree.
@@ -68,6 +71,12 @@ pub(crate) struct LockEntry {
     /// version.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub(crate) registry: Option<RegistryProvenance>,
+    #[serde(default, skip_serializing_if = "PackageLockExports::is_empty")]
+    pub(crate) exports: PackageLockExports,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub(crate) permissions: Vec<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub(crate) host_requirements: Vec<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -77,6 +86,36 @@ pub(crate) struct RegistryProvenance {
     pub(crate) version: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub(crate) provenance_url: Option<String>,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct PackageLockExports {
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub modules: Vec<PackageLockExport>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub tools: Vec<PackageLockExport>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub skills: Vec<PackageLockExport>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub personas: Vec<String>,
+}
+
+impl PackageLockExports {
+    pub(crate) fn is_empty(&self) -> bool {
+        self.modules.is_empty()
+            && self.tools.is_empty()
+            && self.skills.is_empty()
+            && self.personas.is_empty()
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct PackageLockExport {
+    pub name: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub path: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub symbol: Option<String>,
 }
 
 impl LockFile {
@@ -101,10 +140,10 @@ impl LockFile {
                 lock.sort_entries();
                 Ok(Some(lock))
             }
-            Some(1) => {
-                // v1 bump migration: load with the same struct (the new
-                // fields default), then stamp the version so the next save
-                // rewrites in v2 with provenance fully populated.
+            Some(1 | 2) => {
+                // Older lockfile versions load through the current struct
+                // because added fields are optional. Saving stamps the current
+                // version and enriches provenance on the next install.
                 let mut lock: Self = toml::from_str(&content)
                     .map_err(|error| format!("failed to parse {}: {error}", path.display()))?;
                 lock.version = LOCK_FILE_VERSION;
@@ -140,8 +179,12 @@ impl LockFile {
                             content_hash: None,
                             package_version: None,
                             harn_compat: None,
+                            provenance: None,
                             manifest_digest: None,
                             registry: None,
+                            exports: PackageLockExports::default(),
+                            permissions: Vec::new(),
+                            host_requirements: Vec::new(),
                         })
                         .collect(),
                 };
@@ -287,7 +330,11 @@ pub(crate) fn read_package_manifest_from_dir(dir: &Path) -> Result<Option<Manife
 pub(crate) struct LockEntryProvenance {
     pub(crate) package_version: Option<String>,
     pub(crate) harn_compat: Option<String>,
+    pub(crate) provenance: Option<String>,
     pub(crate) manifest_digest: Option<String>,
+    pub(crate) exports: PackageLockExports,
+    pub(crate) permissions: Vec<String>,
+    pub(crate) host_requirements: Vec<String>,
 }
 
 pub(crate) fn read_lock_entry_provenance(
@@ -301,22 +348,106 @@ pub(crate) fn read_lock_entry_provenance(
         .map_err(|error| format!("failed to read {}: {error}", manifest_path.display()))?;
     let digest = format!("sha256:{}", sha256_hex(&bytes));
     let manifest = read_manifest_from_path(&manifest_path)?;
-    let (package_version, harn_compat) = manifest
+    let (package_version, harn_compat, provenance, permissions, host_requirements) = manifest
         .package
         .as_ref()
-        .map(|info| (info.version.clone(), info.harn.clone()))
-        .unwrap_or((None, None));
+        .map(|info| {
+            (
+                info.version.clone(),
+                info.harn.clone(),
+                info.provenance.clone(),
+                info.permissions.clone(),
+                info.host_requirements.clone(),
+            )
+        })
+        .unwrap_or((None, None, None, Vec::new(), Vec::new()));
     Ok(LockEntryProvenance {
         package_version,
         harn_compat,
+        provenance,
         manifest_digest: Some(digest),
+        exports: package_lock_exports_from_manifest(&manifest),
+        permissions: normalized_requirements(&permissions),
+        host_requirements: normalized_requirements(&host_requirements),
     })
 }
 
 fn fill_provenance(entry: &mut LockEntry, provenance: LockEntryProvenance) {
     entry.package_version = provenance.package_version;
     entry.harn_compat = provenance.harn_compat;
+    entry.provenance = provenance.provenance;
     entry.manifest_digest = provenance.manifest_digest;
+    entry.exports = provenance.exports;
+    entry.permissions = provenance.permissions;
+    entry.host_requirements = provenance.host_requirements;
+}
+
+pub(crate) fn package_lock_exports_from_manifest(manifest: &Manifest) -> PackageLockExports {
+    let mut modules: Vec<PackageLockExport> = manifest
+        .exports
+        .iter()
+        .map(|(name, path)| PackageLockExport {
+            name: name.clone(),
+            path: Some(path.clone()),
+            symbol: None,
+        })
+        .collect();
+    modules.sort_by(|left, right| left.name.cmp(&right.name));
+
+    let (mut tools, mut skills) = manifest
+        .package
+        .as_ref()
+        .map(|package| {
+            let tools = package
+                .tools
+                .iter()
+                .map(|tool| PackageLockExport {
+                    name: tool.name.clone(),
+                    path: Some(tool.module.clone()),
+                    symbol: Some(tool.symbol.clone()),
+                })
+                .collect::<Vec<_>>();
+            let skills = package
+                .skills
+                .iter()
+                .map(|skill| PackageLockExport {
+                    name: skill.name.clone(),
+                    path: Some(skill.path.clone()),
+                    symbol: None,
+                })
+                .collect::<Vec<_>>();
+            (tools, skills)
+        })
+        .unwrap_or_default();
+    tools.sort_by(|left, right| left.name.cmp(&right.name));
+    skills.sort_by(|left, right| left.name.cmp(&right.name));
+
+    let mut personas: Vec<String> = manifest
+        .personas
+        .iter()
+        .filter_map(|persona| persona.name.clone())
+        .collect();
+    personas.sort();
+    personas.dedup();
+
+    PackageLockExports {
+        modules,
+        tools,
+        skills,
+        personas,
+    }
+}
+
+pub(crate) fn normalized_requirements(values: &[String]) -> Vec<String> {
+    let mut out: Vec<String> = values
+        .iter()
+        .map(|value| value.trim())
+        .filter(|value| !value.is_empty())
+        .map(str::to_string)
+        .collect();
+    out.sort();
+    out.dedup();
+    out
 }
 
 pub(crate) fn dependency_conflict_message(
@@ -455,7 +586,10 @@ pub(crate) fn build_lockfile(
                         offline,
                     )?;
                     let cache_dir = git_cache_dir_in(workspace, &entry.source, commit)?;
-                    if entry.manifest_digest.is_none() || entry.package_version.is_none() {
+                    if entry.manifest_digest.is_none()
+                        || entry.package_version.is_none()
+                        || entry.provenance.is_none()
+                    {
                         fill_provenance(&mut entry, read_lock_entry_provenance(&cache_dir)?);
                     }
                     if entry.registry.is_none() {
@@ -476,7 +610,10 @@ pub(crate) fn build_lockfile(
                 } else if entry.source.starts_with("path+") {
                     let source = path_from_source_uri(&entry.source)?;
                     let manifest_dir = dependency_manifest_dir(&source);
-                    if entry.manifest_digest.is_none() || entry.package_version.is_none() {
+                    if entry.manifest_digest.is_none()
+                        || entry.package_version.is_none()
+                        || entry.provenance.is_none()
+                    {
                         if let Some(dir) = manifest_dir.as_deref() {
                             fill_provenance(&mut entry, read_lock_entry_provenance(dir)?);
                         }
@@ -523,8 +660,12 @@ pub(crate) fn build_lockfile(
                 content_hash: None,
                 package_version: None,
                 harn_compat: None,
+                provenance: None,
                 manifest_digest: None,
                 registry: None,
+                exports: PackageLockExports::default(),
+                permissions: Vec::new(),
+                host_requirements: Vec::new(),
             };
             fill_provenance(&mut entry, provenance);
             let inserted = replace_lock_entry(&mut lock, entry)?;
@@ -569,8 +710,12 @@ pub(crate) fn build_lockfile(
                 content_hash: Some(content_hash),
                 package_version: None,
                 harn_compat: None,
+                provenance: None,
                 manifest_digest: None,
                 registry: dependency.registry_provenance(),
+                exports: PackageLockExports::default(),
+                permissions: Vec::new(),
+                host_requirements: Vec::new(),
             };
             fill_provenance(&mut entry, provenance);
             let inserted = replace_lock_entry(&mut lock, entry)?;
@@ -1285,8 +1430,27 @@ mod tests {
                 content_hash: Some("sha256:deadbeef".to_string()),
                 package_version: Some("1.0.0".to_string()),
                 harn_compat: Some(">=0.8,<0.9".to_string()),
+                provenance: Some(
+                    "https://github.com/acme/acme-lib/releases/tag/v1.0.0".to_string(),
+                ),
                 manifest_digest: Some("sha256:cafebabe".to_string()),
                 registry: None,
+                exports: PackageLockExports {
+                    modules: vec![PackageLockExport {
+                        name: "lib".to_string(),
+                        path: Some("lib/main.harn".to_string()),
+                        symbol: None,
+                    }],
+                    tools: vec![PackageLockExport {
+                        name: "echo".to_string(),
+                        path: Some("lib/tools.harn".to_string()),
+                        symbol: Some("tools".to_string()),
+                    }],
+                    skills: Vec::new(),
+                    personas: Vec::new(),
+                },
+                permissions: vec!["tool:read_only".to_string()],
+                host_requirements: vec!["workspace.read_text".to_string()],
             }],
         };
         lock.save(&path).unwrap();

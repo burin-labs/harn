@@ -74,6 +74,10 @@ pub(crate) struct PackageArgs {
 
 #[derive(Debug, Subcommand)]
 pub(crate) enum PackageCommand {
+    /// List locked and materialized packages plus exported surfaces.
+    List(PackageListArgs),
+    /// Diagnose harn.toml, harn.lock, installed packages, and host requirements.
+    Doctor(PackageDoctorArgs),
     /// Search the package registry index.
     Search(PackageSearchArgs),
     /// Show package registry metadata for one package.
@@ -92,6 +96,20 @@ pub(crate) enum PackageCommand {
     Audit(PackageAuditArgs),
     /// Inspect or verify the published Harn protocol-artifact contract.
     Artifacts(PackageArtifactsArgs),
+}
+
+#[derive(Debug, Args)]
+pub(crate) struct PackageListArgs {
+    /// Emit JSON instead of a human-readable report.
+    #[arg(long)]
+    pub json: bool,
+}
+
+#[derive(Debug, Args)]
+pub(crate) struct PackageDoctorArgs {
+    /// Emit JSON instead of a human-readable report.
+    #[arg(long)]
+    pub json: bool,
 }
 
 #[derive(Debug, Args)]

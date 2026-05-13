@@ -36,6 +36,7 @@ pub(crate) mod skills;
 pub(crate) mod supervisor;
 pub(crate) mod test;
 pub mod test_bench;
+pub(crate) mod tool;
 pub(crate) mod trace;
 pub mod trigger;
 pub(crate) mod trust;

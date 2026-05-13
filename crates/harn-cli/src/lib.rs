@@ -23,7 +23,7 @@ use cli::{
     Cli, Command, CompletionShell, MergeCaptainCommand, MergeCaptainMockCommand, ModelInfoArgs,
     PackageArtifactsCommand, PackageCacheCommand, PackageCommand, PersonaCommand,
     PersonaSupervisionCommand, RunsCommand, ServeCommand, SkillCommand, SkillKeyCommand,
-    SkillTrustCommand, SkillsCommand,
+    SkillTrustCommand, SkillsCommand, ToolCommand,
 };
 use harn_lexer::Lexer;
 use harn_parser::{DiagnosticSeverity, Parser, TypeChecker};
@@ -111,6 +111,7 @@ async fn async_main() {
                 SkillTrustCommand::Add(add) => commands::skill::run_trust_add(&add),
                 SkillTrustCommand::List(list) => commands::skill::run_trust_list(&list),
             },
+            SkillCommand::New(new_args) => commands::skills::run_new(&new_args),
         },
         Command::Run(args) => {
             if !args.explain_cost {
@@ -787,6 +788,8 @@ async fn async_main() {
         Command::Remove(args) => package::remove_package(&args.alias),
         Command::Lock => package::lock_packages(),
         Command::Package(args) => match args.command {
+            PackageCommand::List(list) => package::list_packages(list.json),
+            PackageCommand::Doctor(doctor) => package::doctor_packages(doctor.json),
             PackageCommand::Search(search) => package::search_package_registry(
                 search.query.as_deref(),
                 search.registry.as_deref(),
@@ -1029,6 +1032,14 @@ async fn async_main() {
             SkillsCommand::Match(matcher) => commands::skills::run_match(&matcher),
             SkillsCommand::Install(install) => commands::skills::run_install(&install),
             SkillsCommand::New(new_args) => commands::skills::run_new(&new_args),
+        },
+        Command::Tool(args) => match args.command {
+            ToolCommand::New(new_args) => {
+                if let Err(error) = commands::tool::run_new(&new_args) {
+                    eprintln!("error: {error}");
+                    process::exit(1);
+                }
+            }
         },
         Command::DumpHighlightKeywords(args) => {
             commands::dump_highlight_keywords::run(&args.output, args.check);

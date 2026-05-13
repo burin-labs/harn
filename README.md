@@ -221,8 +221,11 @@ defaults, safe, prompts, catalog).
   (`blocks`, `lines`, `tokens`), and event-log-backed OCR audit records for
   replayable agent/tool flows.
 - Manifest-backed extension ABI: packages can publish stable module entry
-  points via `[exports]` and ship provider/alias adapters declaratively via
-  `[llm]` in `harn.toml`, without editing core runtime registration code.
+  points via `[exports]`, declare custom tool and skill surfaces via
+  `[[package.tools]]` and `[[package.skills]]`, and ship provider/alias
+  adapters declaratively via `[llm]` in `harn.toml`, without editing core
+  runtime registration code. `harn tool new <name>` scaffolds a Harn-native
+  tool package with manifest metadata, tests, docs, and CI.
   Local sibling packages can be added with `harn add ../harn-openapi`;
   Harn derives the alias from the dependency's `harn.toml` and live-links
   directory path dependencies into `.harn/packages/` for fast multi-repo
@@ -230,6 +233,9 @@ defaults, safe, prompts, catalog).
   `harn package search`, `harn package info`, and
   `harn add @burin/<name>@<version>`, which resolve through the package
   index and then use the same git-backed install path as direct GitHub refs.
+  `harn package list` and `harn package doctor` expose locked exports,
+  permissions, host requirements, and materialized-package integrity for host
+  UI and CI policy checks.
 - Design-by-contract and project/runtime helpers: `require ...`,
   metadata/scanner runtime builtins, `import "std/project"` for
   freshness-aware metadata and scan state, and `import "std/runtime"` for

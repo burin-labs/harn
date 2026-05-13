@@ -1,5 +1,7 @@
 use clap::{Args, Subcommand};
 
+use super::skills::SkillsNewArgs;
+
 #[derive(Debug, Args)]
 pub(crate) struct SkillArgs {
     #[command(subcommand)]
@@ -8,6 +10,8 @@ pub(crate) struct SkillArgs {
 
 #[derive(Debug, Subcommand)]
 pub(crate) enum SkillCommand {
+    /// Scaffold a new SKILL.md bundle under `.harn/skills/<name>/`.
+    New(SkillsNewArgs),
     /// Manage Ed25519 signing keys for skill provenance.
     Key(SkillKeyArgs),
     /// Sign a skill manifest and emit `<path>.sig`.

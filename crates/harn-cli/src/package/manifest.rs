@@ -686,6 +686,52 @@ pub struct PackageInfo {
     pub harn: Option<String>,
     #[serde(default)]
     pub docs_url: Option<String>,
+    #[serde(default)]
+    pub provenance: Option<String>,
+    #[serde(default)]
+    pub permissions: Vec<String>,
+    #[serde(default, alias = "host-requirements")]
+    pub host_requirements: Vec<String>,
+    #[serde(default)]
+    pub tools: Vec<PackageToolExport>,
+    #[serde(default)]
+    pub skills: Vec<PackageSkillExport>,
+}
+
+#[derive(Debug, Clone, Deserialize, PartialEq)]
+pub struct PackageToolExport {
+    pub name: String,
+    pub module: String,
+    #[serde(default = "default_package_tool_symbol")]
+    pub symbol: String,
+    #[serde(default)]
+    pub description: Option<String>,
+    #[serde(default)]
+    pub permissions: Vec<String>,
+    #[serde(default, alias = "host-requirements")]
+    pub host_requirements: Vec<String>,
+    #[serde(default, alias = "input-schema")]
+    pub input_schema: Option<toml::Value>,
+    #[serde(default, alias = "output-schema")]
+    pub output_schema: Option<toml::Value>,
+    #[serde(default)]
+    pub annotations: BTreeMap<String, toml::Value>,
+}
+
+pub(crate) fn default_package_tool_symbol() -> String {
+    "tools".to_string()
+}
+
+#[derive(Debug, Clone, Deserialize, PartialEq, Eq)]
+pub struct PackageSkillExport {
+    pub name: String,
+    pub path: String,
+    #[serde(default)]
+    pub description: Option<String>,
+    #[serde(default)]
+    pub permissions: Vec<String>,
+    #[serde(default, alias = "host-requirements")]
+    pub host_requirements: Vec<String>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
