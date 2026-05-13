@@ -552,27 +552,32 @@ async fn enforce_git_approval(command: &GitCommand) -> Result<Option<JsonValue>,
         "affected_paths": command.affected_paths,
     });
     if command.mutation == GitMutation::Risky {
-        let approval = request_permission(command.operation, &args).await?;
+        let approval = request_permission(command.operation, &args, None).await?;
         return Ok(Some(approval));
     }
     let Some(policy) = crate::orchestration::current_approval_policy() else {
         return Ok(None);
     };
-    match policy.evaluate(command.operation, &args) {
-        crate::orchestration::ToolApprovalDecision::AutoApproved => Ok(None),
-        crate::orchestration::ToolApprovalDecision::AutoDenied { reason } => {
-            Err(VmError::CategorizedError {
-                message: reason,
-                category: crate::value::ErrorCategory::ToolRejected,
-            })
-        }
-        crate::orchestration::ToolApprovalDecision::RequiresHostApproval => {
-            request_permission(command.operation, &args).await.map(Some)
-        }
+    let decision = policy.evaluate_detailed(command.operation, &args);
+    if decision.is_allow() {
+        Ok(None)
+    } else if decision.is_deny() {
+        Err(VmError::CategorizedError {
+            message: decision.reason,
+            category: crate::value::ErrorCategory::ToolRejected,
+        })
+    } else {
+        request_permission(command.operation, &args, Some(decision.receipt))
+            .await
+            .map(Some)
     }
 }
 
-async fn request_permission(operation: &str, args: &JsonValue) -> Result<JsonValue, VmError> {
+async fn request_permission(
+    operation: &str,
+    args: &JsonValue,
+    policy_decision: Option<JsonValue>,
+) -> Result<JsonValue, VmError> {
     let Some(bridge) = crate::vm::clone_async_builtin_child_vm().and_then(|vm| vm.bridge.clone())
     else {
         return Err(VmError::CategorizedError {
@@ -587,7 +592,10 @@ async fn request_permission(operation: &str, args: &JsonValue) -> Result<JsonVal
         args.clone(),
         crate::llm::current_agent_session_id().unwrap_or_else(|| "harn".to_string()),
         Vec::new(),
-        JsonValue::Null,
+        policy_decision
+            .as_ref()
+            .map(|decision| json!({"policy_decision": decision}))
+            .unwrap_or(JsonValue::Null),
         vec![format!("stdlib.{operation}")],
     );
     let response = bridge
@@ -595,6 +603,7 @@ async fn request_permission(operation: &str, args: &JsonValue) -> Result<JsonVal
             "session/request_permission",
             json!({
                 "approvalRequest": approval_request,
+                "policyDecision": policy_decision,
                 "toolCall": {
                     "toolCallId": approval_id,
                     "toolName": operation,

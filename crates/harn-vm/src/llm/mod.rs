@@ -518,6 +518,7 @@ pub fn reset_llm_state() {
     autonomy_budget::reset_autonomy_budget_state();
     agent_session_host::reset_agent_session_host_state();
     permissions::clear_dynamic_permission_state();
+    crate::orchestration::clear_all_approval_policy_repeat_counts();
     trigger_predicate::reset_trigger_predicate_state();
     capabilities::clear_user_overrides();
     // Per-`@step` registry, active stack, and completed-step log are
@@ -1120,11 +1121,35 @@ fn emit_permission_event(
     reason: &str,
     escalated: bool,
 ) {
+    emit_permission_event_with_policy(
+        session_id, kind, tool_name, tool_args, reason, escalated, None,
+    );
+}
+
+fn emit_permission_event_with_policy(
+    session_id: &str,
+    kind: &str,
+    tool_name: &str,
+    tool_args: &serde_json::Value,
+    reason: &str,
+    escalated: bool,
+    policy_decision: Option<serde_json::Value>,
+) {
     if !crate::agent_sessions::exists(session_id) {
         return;
     }
-    let event =
-        permissions::permission_transcript_event(kind, tool_name, tool_args, reason, escalated);
+    let event = if let Some(policy_decision) = policy_decision {
+        permissions::permission_transcript_event_with_policy(
+            kind,
+            tool_name,
+            tool_args,
+            reason,
+            escalated,
+            Some(policy_decision),
+        )
+    } else {
+        permissions::permission_transcript_event(kind, tool_name, tool_args, reason, escalated)
+    };
     let _ = crate::agent_sessions::append_event(session_id, event);
 }
 
@@ -1395,38 +1420,57 @@ async fn host_agent_dispatch_tool_call(
         }
     }
 
-    let approval = crate::orchestration::current_approval_policy()
-        .map(|policy| policy.evaluate(&tool_name, &tool_args));
+    let approval = crate::orchestration::current_approval_policy().map(|policy| {
+        let repeat_count = crate::orchestration::next_approval_policy_repeat_count(
+            &session_id,
+            &tool_name,
+            &tool_args,
+        );
+        policy.evaluate_detailed_with_repeat(&tool_name, &tool_args, repeat_count)
+    });
     let mut approval_status = None;
     match approval {
-        None | Some(crate::orchestration::ToolApprovalDecision::AutoApproved) => {}
-        Some(crate::orchestration::ToolApprovalDecision::AutoDenied { reason }) => {
-            emit_permission_event(
+        None => {}
+        Some(decision) if decision.is_allow() && decision.has_audit_signal() => {
+            emit_permission_event_with_policy(
+                &session_id,
+                "PermissionGrant",
+                &tool_name,
+                &tool_args,
+                &decision.reason,
+                false,
+                Some(decision.receipt.clone()),
+            );
+        }
+        Some(decision) if decision.is_deny() => {
+            emit_permission_event_with_policy(
                 &session_id,
                 "PermissionDeny",
                 &tool_name,
                 &tool_args,
-                &reason,
+                &decision.reason,
                 false,
+                Some(decision.receipt.clone()),
             );
             return Ok(json_to_vm_value(&agent_primitive_denied_tool(
                 &tool_name,
                 &tool_id,
                 &tool_args,
-                reason,
+                decision.reason,
                 crate::agent_events::ToolCallErrorCategory::PermissionDenied,
             )));
         }
-        Some(crate::orchestration::ToolApprovalDecision::RequiresHostApproval) => {
+        Some(decision) if decision.is_ask() => {
             let Some(bridge) = bridge.as_ref() else {
                 let reason = "approval required but no host bridge is available";
-                emit_permission_event(
+                emit_permission_event_with_policy(
                     &session_id,
                     "PermissionDeny",
                     &tool_name,
                     &tool_args,
                     reason,
                     false,
+                    Some(decision.receipt.clone()),
                 );
                 return Ok(json_to_vm_value(&agent_primitive_denied_tool(
                     &tool_name,
@@ -1447,7 +1491,7 @@ async fn host_agent_dispatch_tool_call(
                 tool_args.clone(),
                 session_id.clone(),
                 Vec::new(),
-                serde_json::Value::Null,
+                serde_json::json!({"policy_decision": decision.receipt.clone()}),
                 vec![format!("tool.{tool_name}")],
             );
             let response = bridge
@@ -1456,6 +1500,7 @@ async fn host_agent_dispatch_tool_call(
                     serde_json::json!({
                         "sessionId": session_id,
                         "approvalRequest": approval_request,
+                        "policyDecision": decision.receipt.clone(),
                         "toolCall": {
                             "toolCallId": approval_id,
                             "toolName": tool_name,
@@ -1482,26 +1527,28 @@ async fn host_agent_dispatch_tool_call(
                             tool_args = new_args.clone();
                         }
                         approval_status = Some("host_granted");
-                        emit_permission_event(
+                        emit_permission_event_with_policy(
                             &session_id,
                             "PermissionGrant",
                             &tool_name,
                             &tool_args,
                             "host approved tool call",
                             true,
+                            Some(decision.receipt.clone()),
                         );
                     } else {
                         let reason = response
                             .get("reason")
                             .and_then(|value| value.as_str())
                             .unwrap_or("host did not grant approval");
-                        emit_permission_event(
+                        emit_permission_event_with_policy(
                             &session_id,
                             "PermissionDeny",
                             &tool_name,
                             &tool_args,
                             reason,
                             true,
+                            Some(decision.receipt.clone()),
                         );
                         return Ok(json_to_vm_value(&agent_primitive_denied_tool(
                             &tool_name,
@@ -1515,13 +1562,14 @@ async fn host_agent_dispatch_tool_call(
                 Err(_) => {
                     let reason =
                         "approval request failed or host does not implement session/request_permission";
-                    emit_permission_event(
+                    emit_permission_event_with_policy(
                         &session_id,
                         "PermissionDeny",
                         &tool_name,
                         &tool_args,
                         reason,
                         true,
+                        Some(decision.receipt.clone()),
                     );
                     return Ok(json_to_vm_value(&agent_primitive_denied_tool(
                         &tool_name,
@@ -1533,6 +1581,7 @@ async fn host_agent_dispatch_tool_call(
                 }
             }
         }
+        Some(_) => {}
     }
 
     match crate::orchestration::run_pre_tool_hooks(&tool_name, &tool_args).await? {

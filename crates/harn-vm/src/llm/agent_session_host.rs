@@ -390,6 +390,7 @@ async fn host_agent_session_finalize(args: Vec<VmValue>) -> Result<VmValue, VmEr
             ))
         })?;
     permissions::clear_session_grants(&session_id);
+    crate::orchestration::clear_approval_policy_repeat_counts(&session_id);
     if session.pushed_transcript_dir {
         super::agent_observe::pop_llm_transcript_dir();
     }

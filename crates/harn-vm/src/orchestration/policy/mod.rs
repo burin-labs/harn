@@ -1,5 +1,6 @@
 //! Policy types and capability-ceiling enforcement.
 
+mod approval_rules;
 mod types;
 
 use std::cell::RefCell;
@@ -9,12 +10,16 @@ use std::thread_local;
 
 use serde::{Deserialize, Serialize};
 
-use super::glob_match;
 use crate::tool_annotations::{SideEffectLevel, ToolAnnotations};
 use crate::value::{VmError, VmValue};
 use crate::workspace_path::{classify_workspace_path, WorkspacePathInfo};
 
 pub use crate::tool_annotations::{ToolArgSchema, ToolKind};
+pub use approval_rules::{
+    clear_all_approval_policy_repeat_counts, clear_approval_policy_repeat_counts,
+    next_approval_policy_repeat_count, ApprovalShape, PolicyAction, PolicyEvaluation,
+    PolicyMatchedRule, PolicyRule, PolicyRuleMatch,
+};
 pub use types::{
     enforce_tool_arg_constraints, AutoCompactPolicy, BranchSemantics, CapabilityPolicy,
     ContextPolicy, EqIgnored, EscalationPolicy, JoinPolicy, MapPolicy, ModelPolicy,
@@ -66,7 +71,7 @@ pub fn current_tool_annotations(tool: &str) -> Option<ToolAnnotations> {
     current_execution_policy().and_then(|policy| policy.tool_annotations.get(tool).cloned())
 }
 
-fn tool_kind_participates_in_write_allowlist(tool_name: &str) -> bool {
+pub(super) fn tool_kind_participates_in_write_allowlist(tool_name: &str) -> bool {
     current_tool_annotations(tool_name)
         .map(|annotations| !annotations.kind.is_read_only())
         .unwrap_or(true)
@@ -501,6 +506,10 @@ pub fn builtin_ceiling() -> CapabilityPolicy {
 #[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(default)]
 pub struct ToolApprovalPolicy {
+    /// Ordered allow/ask/deny rules over tool metadata, path, command,
+    /// URL, MCP, agent/persona/mode, and repeat-count dimensions.
+    #[serde(default)]
+    pub rules: Vec<PolicyRule>,
     /// Glob patterns for tools that should be auto-approved.
     #[serde(default)]
     pub auto_approve: Vec<String>,
@@ -513,6 +522,25 @@ pub struct ToolApprovalPolicy {
     /// Glob patterns for writable paths.
     #[serde(default)]
     pub write_path_allowlist: Vec<String>,
+    /// Explicit opt-out for the deny-by-default sensitive-path guard.
+    #[serde(default)]
+    pub allow_sensitive_paths: bool,
+    /// Additional or replacement sensitive path globs. Empty uses the
+    /// runtime defaults such as `.env`, private keys, and credential files.
+    #[serde(default)]
+    pub sensitive_path_patterns: Vec<String>,
+    /// Explicit opt-out for the external-path guard on declared path args.
+    #[serde(default)]
+    pub allow_external_paths: bool,
+    /// Host-absolute roots allowed when `allow_external_paths` is false.
+    #[serde(default)]
+    pub external_roots: Vec<String>,
+    /// Optional repeated-call threshold for the same `(session, tool, args)`.
+    #[serde(default, alias = "repeated_call_limit")]
+    pub repeat_limit: Option<u64>,
+    /// Action for `repeat_limit`; defaults to `ask`.
+    #[serde(default, alias = "repeated_call_action")]
+    pub repeat_action: Option<PolicyAction>,
 }
 
 /// Result of evaluating a tool call against a ToolApprovalPolicy.
@@ -528,51 +556,31 @@ pub enum ToolApprovalDecision {
 }
 
 impl ToolApprovalPolicy {
+    pub fn evaluate_detailed(&self, tool_name: &str, args: &serde_json::Value) -> PolicyEvaluation {
+        approval_rules::evaluate_tool_approval_policy(self, tool_name, args, None)
+    }
+
+    pub fn evaluate_detailed_with_repeat(
+        &self,
+        tool_name: &str,
+        args: &serde_json::Value,
+        repeat_count: u64,
+    ) -> PolicyEvaluation {
+        approval_rules::evaluate_tool_approval_policy(self, tool_name, args, Some(repeat_count))
+    }
+
     /// Evaluate whether a tool call should be approved, denied, or needs
     /// host confirmation.
     pub fn evaluate(&self, tool_name: &str, args: &serde_json::Value) -> ToolApprovalDecision {
-        // Auto-deny takes precedence over every other pattern list.
-        for pattern in &self.auto_deny {
-            if glob_match(pattern, tool_name) {
-                return ToolApprovalDecision::AutoDenied {
-                    reason: format!("tool '{tool_name}' matches deny pattern '{pattern}'"),
-                };
-            }
+        let decision = self.evaluate_detailed(tool_name, args);
+        if decision.is_deny() {
+            return ToolApprovalDecision::AutoDenied {
+                reason: decision.reason,
+            };
         }
-
-        if !self.write_path_allowlist.is_empty()
-            && tool_kind_participates_in_write_allowlist(tool_name)
-        {
-            let paths = super::current_tool_declared_path_entries(tool_name, args);
-            for path in &paths {
-                let allowed = self.write_path_allowlist.iter().any(|pattern| {
-                    path.policy_candidates()
-                        .iter()
-                        .any(|candidate| glob_match(pattern, candidate))
-                });
-                if !allowed {
-                    return ToolApprovalDecision::AutoDenied {
-                        reason: format!(
-                            "tool '{tool_name}' targets '{}' which is not in the write-path allowlist",
-                            path.display_path()
-                        ),
-                    };
-                }
-            }
+        if decision.is_ask() {
+            return ToolApprovalDecision::RequiresHostApproval;
         }
-
-        for pattern in &self.auto_approve {
-            if glob_match(pattern, tool_name) {
-                return ToolApprovalDecision::AutoApproved;
-            }
-        }
-
-        for pattern in &self.require_approval {
-            if glob_match(pattern, tool_name) {
-                return ToolApprovalDecision::RequiresHostApproval;
-            }
-        }
-
         ToolApprovalDecision::AutoApproved
     }
 
@@ -608,11 +616,50 @@ impl ToolApprovalPolicy {
                 .cloned()
                 .collect()
         };
+        let mut rules = self.rules.clone();
+        rules.extend(other.rules.iter().cloned());
+        let mut sensitive_path_patterns = self.sensitive_path_patterns.clone();
+        sensitive_path_patterns.extend(other.sensitive_path_patterns.iter().cloned());
+        sensitive_path_patterns.sort();
+        sensitive_path_patterns.dedup();
+        let external_roots = if self.external_roots.is_empty() {
+            other.external_roots.clone()
+        } else if other.external_roots.is_empty() {
+            self.external_roots.clone()
+        } else {
+            self.external_roots
+                .iter()
+                .filter(|root| other.external_roots.contains(root))
+                .cloned()
+                .collect()
+        };
         ToolApprovalPolicy {
+            rules,
             auto_approve,
             auto_deny,
             require_approval,
             write_path_allowlist,
+            allow_sensitive_paths: self.allow_sensitive_paths && other.allow_sensitive_paths,
+            sensitive_path_patterns,
+            allow_external_paths: self.allow_external_paths && other.allow_external_paths,
+            external_roots,
+            repeat_limit: match (self.repeat_limit, other.repeat_limit) {
+                (Some(left), Some(right)) => Some(left.min(right)),
+                (Some(left), None) => Some(left),
+                (None, Some(right)) => Some(right),
+                (None, None) => None,
+            },
+            repeat_action: match (self.repeat_action, other.repeat_action) {
+                (Some(PolicyAction::Deny), _) | (_, Some(PolicyAction::Deny)) => {
+                    Some(PolicyAction::Deny)
+                }
+                (Some(PolicyAction::Ask), _) | (_, Some(PolicyAction::Ask)) => {
+                    Some(PolicyAction::Ask)
+                }
+                (Some(PolicyAction::Allow), Some(PolicyAction::Allow)) => Some(PolicyAction::Allow),
+                (Some(action), None) | (None, Some(action)) => Some(action),
+                (None, None) => None,
+            },
         }
     }
 }

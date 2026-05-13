@@ -230,6 +230,13 @@ pub(crate) fn glob_match(pattern: &str, name: &str) -> bool {
     if pattern == "*" {
         return true;
     }
+    if pattern.contains('*') || pattern.contains('?') || pattern.contains('[') {
+        if let Ok(glob) = globset::Glob::new(pattern) {
+            if glob.compile_matcher().is_match(name) {
+                return true;
+            }
+        }
+    }
     if let Some(prefix) = pattern.strip_suffix('*') {
         return name.starts_with(prefix);
     }

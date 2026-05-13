@@ -1518,6 +1518,28 @@ decisions append `PermissionGrant`, `PermissionDeny`, and
 `suggest` trigger contexts append a `trust.promote` OpenTrustGraph record at
 `act_with_approval`.
 
+`approval_policy` is the declarative host-approval policy. It accepts legacy
+`auto_approve`, `auto_deny`, `require_approval`, and `write_path_allowlist`
+fields plus `rules`, a compact allow/ask/deny DSL. A rule may be written as
+`{allow: {...}}`, `{ask: {...}}`, `{deny: {...}}`, or
+`{action: "ask", match: {...}}`. Match dimensions include `tool`,
+`tool_kind`, `side_effect`, `path`, `command`, `command_identity`, `url`,
+`domain`, `method`, `mcp_server`, `mcp_tool`, `agent`, `persona`, `mode`,
+`capability`, and `repeat_count_gte`. Dimensions inside a rule are ANDed;
+string fields accept glob patterns. Deny beats ask, ask beats allow, and
+unmatched tools are approved.
+
+When an approval policy is active, sensitive path strings such as `.env`,
+private keys, and credential files are denied by default unless
+`allow_sensitive_paths: true` is set. Declared host-absolute paths outside the
+workspace are denied unless `external_roots` covers the path or
+`allow_external_paths: true` is set. `ask` decisions call the host via
+`session/request_permission` and fail closed when no host bridge is attached.
+Each approval decision produces a `harn.permission_policy_decision.v1` receipt
+containing the matched rule, risk labels, normalized context, and rationale;
+host approval payloads and permission transcript events carry that receipt for
+audit and replay.
+
 ```harn
 let budget = shared_cell({scope: "task_group", key: "tokens", initial: 0})
 

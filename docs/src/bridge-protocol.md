@@ -243,9 +243,29 @@ Request payload (harn-issued):
       "session_id": "session_123",
       "run_id": "run_123",
       "worker_id": null,
-      "mutation_scope": "apply_workspace"
+      "mutation_scope": "apply_workspace",
+      "policy_decision": {
+        "type": "harn.permission_policy_decision.v1",
+        "action": "ask",
+        "reason": "workspace edit",
+        "matched_rule": {"source": "rules", "action": "ask", "id": "edit-src", "index": 0},
+        "risk_labels": ["approval_required", "path_rule"]
+      }
     },
     "capabilities_requested": ["workspace.write_text"]
+  },
+  "policyDecision": {
+    "type": "harn.permission_policy_decision.v1",
+    "action": "ask",
+    "reason": "workspace edit",
+    "matched_rule": {"source": "rules", "action": "ask", "id": "edit-src", "index": 0},
+    "risk_labels": ["approval_required", "path_rule"],
+    "context": {
+      "tool_name": "edit_file",
+      "tool_kind": "edit",
+      "side_effect": "workspace_write",
+      "paths": [{"workspace_path": "src/main.rs"}]
+    }
   },
   "toolCall": {
     "toolCallId": "call_123",
@@ -264,9 +284,14 @@ Request payload (harn-issued):
 ```
 
 `approvalRequest` is the canonical Harn `ApprovalRequest` payload. Hosts should
-render approval UI from that object and treat the surrounding `toolCall`,
-`mutation`, and `declaredPaths` fields as compatibility/context fields. The same
-shape is used in stdlib HITL notifications at
+render approval UI from that object and use `policyDecision` as the policy
+rationale: it includes the matched rule, risk labels, normalized context, and
+the action (`ask` for host approval requests). The same receipt is copied into
+`approvalRequest.undo_metadata.policy_decision` and into
+`PermissionGrant`/`PermissionDeny` transcript-event metadata so approvals are
+auditable and replayable even when the host only persists the canonical request.
+Treat the surrounding `toolCall`, `mutation`, and `declaredPaths` fields as
+compatibility/context fields. The same shape is used in stdlib HITL notifications at
 `harn.hitl.requested.params.payload.approval_request`, so Burin Code,
 harn-cloud approval inboxes, and CLI-style hosts can share one renderer.
 
