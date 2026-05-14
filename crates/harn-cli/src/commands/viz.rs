@@ -198,6 +198,7 @@ impl MermaidGraph {
                 (route, done)
             }
             Node::TryCatch {
+                has_catch: _,
                 body,
                 error_var,
                 catch_body,
@@ -475,7 +476,7 @@ fn summarize_node(node: &SNode) -> String {
         Node::WhileLoop { condition, .. } => format!("while {}", inline_label(condition)),
         Node::Retry { count, .. } => format!("retry {}", inline_label(count)),
         Node::CostRoute { .. } => "cost_route".to_string(),
-        Node::TryCatch { .. } => "try/catch".to_string(),
+        Node::TryCatch { has_catch: _, .. } => "try/catch".to_string(),
         Node::TryExpr { .. } => "try expr".to_string(),
         Node::SpawnExpr { .. } => "spawn".to_string(),
         Node::DeferStmt { .. } => "defer".to_string(),

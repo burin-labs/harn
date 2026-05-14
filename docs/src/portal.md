@@ -57,9 +57,11 @@ Useful flags:
 ```bash
 harn portal --dir runs/archive
 harn portal --manifest examples/personas/harn.toml --persona-state-dir .harn/personas
-harn portal --host 0.0.0.0 --port 4900
 harn portal --open false
 ```
+
+Binding the portal to a non-loopback interface disables launch/replay mutation endpoints by
+default. Use `--allow-remote-launch` only on a trusted network.
 
 For frontend development with Vite, `npm run portal:dev` starts:
 

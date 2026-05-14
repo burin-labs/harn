@@ -29,3 +29,12 @@ pub(super) fn not_found_error(message: impl ToString) -> (StatusCode, Json<Error
         }),
     )
 }
+
+pub(super) fn forbidden_error(message: impl ToString) -> (StatusCode, Json<ErrorResponse>) {
+    (
+        StatusCode::FORBIDDEN,
+        Json(ErrorResponse {
+            error: message.to_string(),
+        }),
+    )
+}

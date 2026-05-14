@@ -13,7 +13,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use tokio::io::AsyncBufReadExt;
-use tokio::sync::{oneshot, Mutex};
+use tokio::sync::{oneshot, Mutex, Notify};
 
 use crate::orchestration::MutationSessionRecord;
 use crate::value::{ErrorCategory, VmClosure, VmError, VmValue};
@@ -54,6 +54,8 @@ pub struct HostBridge {
     pending: Arc<Mutex<HashMap<u64, oneshot::Sender<serde_json::Value>>>>,
     /// Whether the host has sent a cancel notification.
     cancelled: Arc<AtomicBool>,
+    /// Wakes pending host calls when cancellation arrives.
+    cancel_notify: Arc<Notify>,
     /// Transport writer used to send JSON-RPC to the host.
     writer: HostBridgeWriter,
     /// ACP session ID (set in ACP mode for session-scoped notifications).
@@ -253,6 +255,7 @@ impl HostBridge {
         let pending: Arc<Mutex<HashMap<u64, oneshot::Sender<serde_json::Value>>>> =
             Arc::new(Mutex::new(HashMap::new()));
         let cancelled = Arc::new(AtomicBool::new(false));
+        let cancel_notify = Arc::new(Notify::new());
         let queued_user_messages: Arc<Mutex<VecDeque<QueuedUserMessage>>> =
             Arc::new(Mutex::new(VecDeque::new()));
         let resume_requested = Arc::new(AtomicBool::new(false));
@@ -262,6 +265,7 @@ impl HostBridge {
         // Stdin reader: reads JSON-RPC lines and dispatches responses
         let pending_clone = pending.clone();
         let cancelled_clone = cancelled.clone();
+        let cancel_notify_clone = cancel_notify.clone();
         let queued_clone = queued_user_messages.clone();
         let resume_clone = resume_requested.clone();
         let skills_reload_clone = skills_reload_requested.clone();
@@ -286,6 +290,7 @@ impl HostBridge {
                     if let Some(method) = msg["method"].as_str() {
                         if method == "cancel" {
                             cancelled_clone.store(true, Ordering::SeqCst);
+                            cancel_notify_clone.notify_waiters();
                         } else if method == "agent/resume" {
                             resume_clone.store(true, Ordering::SeqCst);
                         } else if method == "skills/update" {
@@ -334,6 +339,7 @@ impl HostBridge {
             next_id: AtomicU64::new(1),
             pending,
             cancelled,
+            cancel_notify,
             writer: stdout_writer(Arc::new(std::sync::Mutex::new(()))),
             session_id: std::sync::Mutex::new(String::new()),
             script_name: std::sync::Mutex::new(String::new()),
@@ -372,6 +378,7 @@ impl HostBridge {
             next_id: AtomicU64::new(start_id),
             pending,
             cancelled,
+            cancel_notify: Arc::new(Notify::new()),
             writer,
             session_id: std::sync::Mutex::new(String::new()),
             script_name: std::sync::Mutex::new(String::new()),
@@ -394,6 +401,7 @@ impl HostBridge {
             next_id: AtomicU64::new(1),
             pending: Arc::new(Mutex::new(HashMap::new())),
             cancelled: Arc::new(AtomicBool::new(false)),
+            cancel_notify: Arc::new(Notify::new()),
             writer: stdout_writer(Arc::new(std::sync::Mutex::new(()))),
             session_id: std::sync::Mutex::new(String::new()),
             script_name: std::sync::Mutex::new(String::new()),
@@ -459,6 +467,8 @@ impl HostBridge {
         }
 
         let id = self.next_id.fetch_add(1, Ordering::SeqCst);
+        let cancel_wait = self.cancel_notify.notified();
+        tokio::pin!(cancel_wait);
 
         let request = crate::jsonrpc::request(id, method, params);
 
@@ -476,15 +486,28 @@ impl HostBridge {
             return Err(e);
         }
 
-        let response = match tokio::time::timeout(DEFAULT_TIMEOUT, rx).await {
-            Ok(Ok(msg)) => msg,
-            Ok(Err(_)) => {
-                // Sender dropped: host closed or stdin reader exited.
-                return Err(VmError::Runtime(
-                    "Bridge: host closed connection before responding".into(),
-                ));
+        if self.is_cancelled() {
+            let mut pending = self.pending.lock().await;
+            pending.remove(&id);
+            return Err(VmError::Runtime("Bridge: operation cancelled".into()));
+        }
+
+        let response = tokio::select! {
+            result = rx => match result {
+                Ok(msg) => msg,
+                Err(_) => {
+                    // Sender dropped: host closed or stdin reader exited.
+                    return Err(VmError::Runtime(
+                        "Bridge: host closed connection before responding".into(),
+                    ));
+                }
+            },
+            _ = &mut cancel_wait => {
+                let mut pending = self.pending.lock().await;
+                pending.remove(&id);
+                return Err(VmError::Runtime("Bridge: operation cancelled".into()));
             }
-            Err(_) => {
+            _ = tokio::time::sleep(DEFAULT_TIMEOUT) => {
                 let mut pending = self.pending.lock().await;
                 pending.remove(&id);
                 return Err(VmError::Runtime(format!(
@@ -1005,6 +1028,48 @@ mod tests {
         assert!(!cancelled.load(Ordering::SeqCst));
         cancelled.store(true, Ordering::SeqCst);
         assert!(cancelled.load(Ordering::SeqCst));
+    }
+
+    #[test]
+    fn pending_host_calls_return_when_cancellation_arrives() {
+        let runtime = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .unwrap();
+        runtime.block_on(async {
+            let pending = Arc::new(Mutex::new(HashMap::new()));
+            let cancelled = Arc::new(AtomicBool::new(false));
+            let bridge = HostBridge::from_parts_with_writer(
+                pending.clone(),
+                cancelled.clone(),
+                Arc::new(|_| Ok(())),
+                1,
+            );
+
+            let call = bridge.call("host/work", serde_json::json!({}));
+            tokio::pin!(call);
+
+            loop {
+                tokio::select! {
+                    result = &mut call => panic!("call completed before cancellation: {result:?}"),
+                    _ = tokio::task::yield_now() => {}
+                }
+                if !pending.lock().await.is_empty() {
+                    break;
+                }
+            }
+
+            cancelled.store(true, Ordering::SeqCst);
+            bridge.cancel_notify.notify_waiters();
+
+            let result = tokio::time::timeout(Duration::from_secs(1), call)
+                .await
+                .expect("pending call should observe cancellation promptly");
+            assert!(
+                matches!(result, Err(VmError::Runtime(message)) if message.contains("cancelled"))
+            );
+            assert!(pending.lock().await.is_empty());
+        });
     }
 
     #[test]

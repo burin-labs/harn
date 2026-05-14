@@ -53,6 +53,35 @@ pipeline test(task) {
               (identifier))))))))
 
 ==================
+Try Catch Bare Error Variable
+==================
+
+pipeline test(task) {
+  let v = try { work() } catch e { fallback }
+}
+
+---
+
+(source_file
+  (pipeline_declaration
+    name: (identifier)
+    (parameter_list
+      (typed_parameter
+        name: (identifier)))
+    (block
+      (let_binding
+        name: (identifier)
+        value: (try_expression
+          body: (block
+            (expression_statement
+              (call_expression
+                function: (identifier))))
+          error_var: (identifier)
+          handler: (block
+            (expression_statement
+              (identifier))))))))
+
+==================
 Typed Catch Expression
 ==================
 

@@ -19,6 +19,7 @@ const JWKS_URL_ENV: &str = "HARN_MCP_OAUTH_JWKS_URL";
 const ISSUER_ENV: &str = "HARN_MCP_OAUTH_ISSUER";
 const AUDIENCE_ENV: &str = "HARN_MCP_OAUTH_AUDIENCE";
 const JWKS_REFRESH: Duration = Duration::from_secs(5 * 60);
+const OAUTH_HTTP_TIMEOUT: Duration = Duration::from_secs(10);
 
 #[derive(Clone)]
 pub(crate) struct OAuthResourceServer {
@@ -124,17 +125,28 @@ impl OAuthResourceServer {
             ));
         }
 
+        let resource = env_nonempty(RESOURCE_ENV);
+        let audiences = split_list_env(AUDIENCE_ENV);
+        if resource.is_none() && audiences.is_empty() {
+            return Err(format!(
+                "{AUTHORIZATION_SERVERS_ENV} requires {RESOURCE_ENV} or {AUDIENCE_ENV}; refusing to derive OAuth audiences from request headers"
+            ));
+        }
+
         Ok(Some(Self {
             config: OAuthResourceConfig {
                 authorization_servers,
-                resource: env_nonempty(RESOURCE_ENV),
+                resource,
                 scopes: split_scope_env(SCOPES_ENV),
                 introspection,
                 jwt,
                 issuer: env_nonempty(ISSUER_ENV),
-                audiences: split_list_env(AUDIENCE_ENV),
+                audiences,
             },
-            client: reqwest::Client::new(),
+            client: reqwest::Client::builder()
+                .timeout(OAUTH_HTTP_TIMEOUT)
+                .build()
+                .map_err(|error| format!("failed to build OAuth HTTP client: {error}"))?,
             jwks_cache: Arc::new(Mutex::new(None)),
         }))
     }

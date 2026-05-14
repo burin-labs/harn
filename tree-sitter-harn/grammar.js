@@ -65,6 +65,8 @@ module.exports = grammar({
         choice(
           $.pipeline_declaration,
           $.fn_declaration,
+          $.tool_declaration,
+          $.skill_declaration,
           $.eval_pack_declaration,
           $.struct_declaration,
           $.enum_declaration,
@@ -206,8 +208,21 @@ module.exports = grammar({
           "}",
           "from",
           $.string_literal
+        ),
+        seq(
+          optional("pub"),
+          "import",
+          field("path", $.scoped_import_path),
+          "::",
+          "{",
+          commaSep1($.identifier),
+          optional(","),
+          "}"
         )
       ),
+
+    scoped_import_path: ($) =>
+      token(/[a-zA-Z_][a-zA-Z0-9_]*(::[a-zA-Z_][a-zA-Z0-9_]*)+/),
 
     enum_declaration: ($) =>
       seq(
@@ -831,11 +846,14 @@ module.exports = grammar({
           optional(
             seq(
               "catch",
-              optional(seq(
-                "(",
-                field("error_var", $.identifier),
-                optional(seq(":", field("error_type", $.type_annotation))),
-                ")"
+              optional(choice(
+                seq(
+                  "(",
+                  field("error_var", $.identifier),
+                  optional(seq(":", field("error_type", $.type_annotation))),
+                  ")"
+                ),
+                field("error_var", $.identifier)
               )),
               field("handler", $.block)
             )

@@ -334,7 +334,6 @@ impl Lexer {
                 if self.pos >= self.source.len() {
                     return Err(LexerError::UnterminatedString(start));
                 }
-                self.advance();
                 if expr.trim().is_empty() {
                     return Err(LexerError::UnexpectedCharacter(
                         '}',
@@ -346,6 +345,7 @@ impl Lexer {
                         ),
                     ));
                 }
+                self.advance();
                 segments.push(StringSegment::Expression(expr, expr_line, expr_col));
                 continue;
             }
@@ -485,6 +485,17 @@ impl Lexer {
                 if self.pos >= self.source.len() {
                     return Err(LexerError::UnterminatedString(start));
                 }
+                if expr.trim().is_empty() {
+                    return Err(LexerError::UnexpectedCharacter(
+                        '}',
+                        Span::with_offsets(
+                            self.byte_pos,
+                            self.byte_pos + 1,
+                            self.line,
+                            self.column,
+                        ),
+                    ));
+                }
                 self.advance();
                 segments.push(StringSegment::Expression(expr, expr_line, expr_col));
                 continue;
@@ -609,55 +620,33 @@ impl Lexer {
         let n: u64 = num_str.parse().ok()?;
         if self.pos < self.source.len() {
             let ch = self.source[self.pos];
-            if ch == 'm' && self.source.get(self.pos + 1) == Some(&'s') {
+            if ch == 'm'
+                && self.source.get(self.pos + 1) == Some(&'s')
+                && is_duration_suffix_boundary(self.source.get(self.pos + 2))
+            {
                 self.advance();
                 self.advance();
                 return Some(n);
             }
-            if ch == 's'
-                && self
-                    .source
-                    .get(self.pos + 1)
-                    .is_none_or(|c| !c.is_alphanumeric())
-            {
+            if ch == 's' && is_duration_suffix_boundary(self.source.get(self.pos + 1)) {
                 self.advance();
-                return Some(n * 1000);
+                return Some(n.saturating_mul(1000));
             }
-            if ch == 'm'
-                && self
-                    .source
-                    .get(self.pos + 1)
-                    .is_none_or(|c| !c.is_alphanumeric() && *c != 's')
-            {
+            if ch == 'm' && is_duration_suffix_boundary(self.source.get(self.pos + 1)) {
                 self.advance();
-                return Some(n * 60 * 1000);
+                return Some(n.saturating_mul(60_000));
             }
-            if ch == 'h'
-                && self
-                    .source
-                    .get(self.pos + 1)
-                    .is_none_or(|c| !c.is_alphanumeric())
-            {
+            if ch == 'h' && is_duration_suffix_boundary(self.source.get(self.pos + 1)) {
                 self.advance();
-                return Some(n * 60 * 60 * 1000);
+                return Some(n.saturating_mul(3_600_000));
             }
-            if ch == 'd'
-                && self
-                    .source
-                    .get(self.pos + 1)
-                    .is_none_or(|c| !c.is_alphanumeric())
-            {
+            if ch == 'd' && is_duration_suffix_boundary(self.source.get(self.pos + 1)) {
                 self.advance();
-                return Some(n * 24 * 60 * 60 * 1000);
+                return Some(n.saturating_mul(86_400_000));
             }
-            if ch == 'w'
-                && self
-                    .source
-                    .get(self.pos + 1)
-                    .is_none_or(|c| !c.is_alphanumeric())
-            {
+            if ch == 'w' && is_duration_suffix_boundary(self.source.get(self.pos + 1)) {
                 self.advance();
-                return Some(n * 7 * 24 * 60 * 60 * 1000);
+                return Some(n.saturating_mul(604_800_000));
             }
         }
         None
@@ -803,6 +792,10 @@ impl Lexer {
             _ => None,
         }
     }
+}
+
+fn is_duration_suffix_boundary(ch: Option<&char>) -> bool {
+    ch.is_none_or(|c| !c.is_alphanumeric() && *c != '_')
 }
 
 /// Strip common leading whitespace from multi-line strings.
@@ -970,6 +963,26 @@ mod tests {
     }
 
     #[test]
+    fn test_duration_suffix_requires_identifier_boundary() {
+        let mut lexer = Lexer::new("1ms 1msfoo 2h_task 3s.ok");
+        let tokens = lexer.tokenize().unwrap();
+        assert_eq!(tokens[0].kind, TokenKind::DurationLiteral(1));
+        assert_eq!(tokens[1].kind, TokenKind::IntLiteral(1));
+        assert!(matches!(&tokens[2].kind, TokenKind::Identifier(name) if name == "msfoo"));
+        assert_eq!(tokens[3].kind, TokenKind::IntLiteral(2));
+        assert!(matches!(&tokens[4].kind, TokenKind::Identifier(name) if name == "h_task"));
+        assert_eq!(tokens[5].kind, TokenKind::DurationLiteral(3000));
+        assert_eq!(tokens[6].kind, TokenKind::Dot);
+    }
+
+    #[test]
+    fn test_duration_suffix_overflow_saturates() {
+        let mut lexer = Lexer::new("18446744073709551615w");
+        let tokens = lexer.tokenize().unwrap();
+        assert_eq!(tokens[0].kind, TokenKind::DurationLiteral(u64::MAX));
+    }
+
+    #[test]
     fn test_string() {
         let mut lexer = Lexer::new(r#""hello world""#);
         let tokens = lexer.tokenize().unwrap();
@@ -991,6 +1004,21 @@ mod tests {
         } else {
             panic!("Expected interpolated string");
         }
+    }
+
+    #[test]
+    fn test_empty_interpolation_rejected_in_single_and_multiline_strings() {
+        let mut single = Lexer::new(r#""hello ${}""#);
+        assert!(matches!(
+            single.tokenize(),
+            Err(LexerError::UnexpectedCharacter('}', _))
+        ));
+
+        let mut multiline = Lexer::new("\"\"\"\nhello ${}\n\"\"\"");
+        assert!(matches!(
+            multiline.tokenize(),
+            Err(LexerError::UnexpectedCharacter('}', _))
+        ));
     }
 
     #[test]

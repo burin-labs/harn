@@ -163,9 +163,10 @@ impl GeminiProvider {
         if !response.status().is_success() {
             let status = response.status();
             let body = response.text().await.unwrap_or_default();
-            return Err(VmError::Thrown(VmValue::String(Rc::from(format!(
-                "gemini API error HTTP {status}: {body}"
-            )))));
+            return Err(VmError::Thrown(VmValue::String(Rc::from(
+                crate::llm::api::classify_provider_http_error("gemini", status, None, &body)
+                    .message,
+            ))));
         }
         let json: serde_json::Value = response.json().await.map_err(|error| {
             VmError::Thrown(VmValue::String(Rc::from(format!(

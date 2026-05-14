@@ -193,6 +193,7 @@ pub enum Node {
     },
     TryCatch {
         body: Vec<SNode>,
+        has_catch: bool,
         error_var: Option<String>,
         error_type: Option<TypeExpr>,
         catch_body: Vec<SNode>,

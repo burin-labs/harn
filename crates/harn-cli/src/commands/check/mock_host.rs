@@ -245,6 +245,7 @@ fn collect_mock_host_capabilities_from_node(
             }
         }
         Node::TryCatch {
+            has_catch: _,
             body,
             catch_body,
             finally_body,

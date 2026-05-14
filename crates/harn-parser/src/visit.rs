@@ -110,6 +110,7 @@ pub fn walk_children(node: &SNode, visitor: &mut impl FnMut(&SNode)) {
             }
         }
         Node::TryCatch {
+            has_catch: _,
             body,
             catch_body,
             finally_body,

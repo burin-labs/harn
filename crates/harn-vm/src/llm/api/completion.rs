@@ -15,6 +15,31 @@ use super::response::{
 };
 use super::result::{mock_completion_response, LlmResult};
 
+async fn completion_json_response(
+    provider: &str,
+    response: reqwest::Response,
+) -> Result<serde_json::Value, VmError> {
+    if !response.status().is_success() {
+        let status = response.status();
+        let retry_after = response
+            .headers()
+            .get("retry-after")
+            .and_then(|value| value.to_str().ok())
+            .map(str::to_string);
+        let body = response.text().await.unwrap_or_default();
+        let message =
+            super::classify_provider_http_error(provider, status, retry_after.as_deref(), &body)
+                .message;
+        return Err(VmError::Thrown(VmValue::String(Rc::from(message))));
+    }
+
+    response.json().await.map_err(|e| {
+        VmError::Thrown(VmValue::String(Rc::from(format!(
+            "{provider} completion response parse error: {e}"
+        ))))
+    })
+}
+
 /// Execute a text completion / fill-in-the-middle call owned by Harn.
 pub(crate) async fn vm_call_completion_full(
     opts: &LlmCallOptions,
@@ -100,12 +125,7 @@ async fn vm_call_completion_openai_style(
         ))))
     })?;
 
-    let json: serde_json::Value = response.json().await.map_err(|e| {
-        VmError::Thrown(VmValue::String(Rc::from(format!(
-            "{} completion response parse error: {e}",
-            opts.provider
-        ))))
-    })?;
+    let json = completion_json_response(&opts.provider, response).await?;
 
     if let Some(err) = json["error"]["message"].as_str() {
         return Err(VmError::Thrown(VmValue::String(Rc::from(format!(
@@ -206,12 +226,7 @@ async fn vm_call_completion_ollama(
             opts.provider
         ))))
     })?;
-    let json: serde_json::Value = response.json().await.map_err(|e| {
-        VmError::Thrown(VmValue::String(Rc::from(format!(
-            "{} completion response parse error: {e}",
-            opts.provider
-        ))))
-    })?;
+    let json = completion_json_response(&opts.provider, response).await?;
     if let Some(err) = json["error"].as_str() {
         return Err(VmError::Thrown(VmValue::String(Rc::from(format!(
             "{} completion API error: {err}",

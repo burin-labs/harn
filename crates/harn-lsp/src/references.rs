@@ -117,6 +117,7 @@ fn collect_references(snode: &SNode, target_name: &str, refs: &mut Vec<Span>) {
             }
         }
         Node::TryCatch {
+            has_catch: _,
             body,
             error_var,
             catch_body,

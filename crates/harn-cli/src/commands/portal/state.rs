@@ -16,4 +16,5 @@ pub(super) struct PortalState {
     pub(super) event_log: Option<Arc<AnyEventLog>>,
     pub(super) launch_program: PathBuf,
     pub(super) launch_jobs: Arc<Mutex<HashMap<String, PortalLaunchJob>>>,
+    pub(super) mutation_endpoints_enabled: bool,
 }

@@ -385,6 +385,7 @@ fn node_uses_provider_llm(node: &SNode, shadows: &HashSet<String>) -> bool {
                 })
         }
         Node::TryCatch {
+            has_catch: _,
             body,
             catch_body,
             finally_body,

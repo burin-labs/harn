@@ -210,7 +210,7 @@ smoke-audit:
 # Requires npm dependencies: run `make setup` or `cd crates/harn-cli/portal && npm install`.
 portal-check:
 	@echo "=== Checking portal frontend build ==="
-	cd crates/harn-cli/portal && npm run lint && npm run build
+	cd crates/harn-cli/portal && npm run lint && npm test && npm run build
 	@echo "    Portal build OK."
 
 portal:

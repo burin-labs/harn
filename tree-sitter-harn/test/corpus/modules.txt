@@ -136,6 +136,20 @@ pub import { greet, add } from "lib/helpers"
     (string_literal)))
 
 ==================
+Scoped Selective Import
+==================
+
+pub import std::personas::prelude::{verify_then_act, summarize}
+
+---
+
+(source_file
+  (import_declaration
+    path: (scoped_import_path)
+    (identifier)
+    (identifier)))
+
+==================
 Public And Generic Declarations
 ==================
 

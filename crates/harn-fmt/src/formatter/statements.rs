@@ -184,6 +184,7 @@ impl Formatter<'_> {
             }
             Node::TryCatch {
                 body,
+                has_catch,
                 error_var,
                 error_type,
                 catch_body,
@@ -193,7 +194,7 @@ impl Formatter<'_> {
                 let close = "  ".repeat(indent_level);
                 let mut result = String::from("try {\n");
                 result.push_str(&self.format_body_string(body, inner));
-                if !catch_body.is_empty() || error_var.is_some() {
+                if *has_catch {
                     let catch_param = format_catch_param(error_var, error_type);
                     result.push_str(&close);
                     result.push_str(&format!("}} catch{catch_param} {{\n"));

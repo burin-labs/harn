@@ -2,16 +2,41 @@
 //!
 //! `VmIter` is the backing enum for `VmValue::Iter`. It's a single-pass, fused
 //! iterator; once `next` returns `None` the variant is replaced with
-//! `Exhausted`. Step (a) only introduces source variants (Vec, Dict, Chars,
-//! Gen, Chan, Exhausted) and wires them into the for-loop driver. Combinator
-//! variants (`Map`, `Filter`, `Take`, ...) and sink builtins land in later
-//! steps per the plan.
+//! `Exhausted`.
 
 use std::cell::RefCell;
 use std::collections::{BTreeMap, VecDeque};
 use std::rc::Rc;
 
 use crate::value::{VmChannelHandle, VmError, VmGenerator, VmStream, VmValue};
+
+fn range_initial_done(start: i64, end: i64, inclusive: bool) -> bool {
+    if inclusive {
+        start > end
+    } else {
+        start >= end
+    }
+}
+
+fn range_next(next: &mut i64, end: i64, inclusive: bool, done: &mut bool) -> Option<i64> {
+    if *done {
+        return None;
+    }
+    let value = *next;
+    let at_end = if inclusive {
+        value >= end
+    } else {
+        value
+            .checked_add(1)
+            .is_none_or(|candidate| candidate >= end)
+    };
+    if at_end {
+        *done = true;
+    } else {
+        *next += 1;
+    }
+    Some(value)
+}
 
 #[derive(Debug)]
 pub struct VmBroadcastState {
@@ -24,13 +49,15 @@ pub struct VmBroadcastState {
 #[derive(Debug)]
 pub enum VmIter {
     /// Step through a lazy integer range without materializing.
-    /// `next` is the value to emit on the next call; `stop` is the
-    /// first value that terminates the iteration (one past the end).
-    Range { next: i64, stop: i64 },
+    Range {
+        next: i64,
+        end: i64,
+        inclusive: bool,
+        done: bool,
+    },
     /// Snapshot over a shared list / set backing store.
     Vec { items: Rc<Vec<VmValue>>, idx: usize },
-    /// Snapshot over a dict; yields one-key `{key, value}` dicts for now.
-    /// Step (b) swaps these for `VmValue::Pair` when the Pair variant lands.
+    /// Snapshot over a dict; yields `Pair(key, value)` items.
     Dict {
         entries: Rc<BTreeMap<String, VmValue>>,
         keys: Vec<String>,
@@ -182,10 +209,13 @@ impl VmIter {
     async fn next_impl(&mut self, vm: &mut crate::vm::Vm) -> Result<Option<VmValue>, VmError> {
         match self {
             VmIter::Exhausted => Ok(None),
-            VmIter::Range { next, stop } => {
-                if *next < *stop {
-                    let v = *next;
-                    *next += 1;
+            VmIter::Range {
+                next,
+                end,
+                inclusive,
+                done,
+            } => {
+                if let Some(v) = range_next(next, *end, *inclusive, done) {
                     Ok(Some(VmValue::Int(v)))
                 } else {
                     *self = VmIter::Exhausted;
@@ -1136,17 +1166,12 @@ impl VmIter {
 pub fn iter_from_value(v: VmValue) -> Result<VmValue, VmError> {
     let inner = match v {
         VmValue::Iter(h) => return Ok(VmValue::Iter(h)),
-        VmValue::Range(r) => {
-            let stop = if r.inclusive {
-                r.end.saturating_add(1)
-            } else {
-                r.end
-            };
-            VmIter::Range {
-                next: r.start,
-                stop,
-            }
-        }
+        VmValue::Range(r) => VmIter::Range {
+            next: r.start,
+            end: r.end,
+            inclusive: r.inclusive,
+            done: range_initial_done(r.start, r.end, r.inclusive),
+        },
         VmValue::List(items) => VmIter::Vec { items, idx: 0 },
         VmValue::Set(items) => VmIter::Vec { items, idx: 0 },
         VmValue::Dict(entries) => {
@@ -1169,4 +1194,54 @@ pub fn iter_from_value(v: VmValue) -> Result<VmValue, VmError> {
         }
     };
     Ok(VmValue::Iter(Rc::new(RefCell::new(inner))))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::value::VmRange;
+
+    fn run_iter_test(test: impl std::future::Future<Output = ()>) {
+        let rt = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .unwrap();
+        rt.block_on(test);
+    }
+
+    #[test]
+    fn inclusive_range_at_i64_max_yields_the_endpoint() {
+        run_iter_test(async {
+            let mut vm = crate::vm::Vm::new();
+            let VmValue::Iter(handle) = iter_from_value(VmValue::Range(VmRange {
+                start: i64::MAX,
+                end: i64::MAX,
+                inclusive: true,
+            }))
+            .unwrap() else {
+                panic!("expected iter");
+            };
+
+            let first = next_handle(&handle, &mut vm).await.unwrap();
+            assert!(matches!(first, Some(VmValue::Int(value)) if value == i64::MAX));
+            assert!(next_handle(&handle, &mut vm).await.unwrap().is_none());
+        });
+    }
+
+    #[test]
+    fn exclusive_range_at_i64_max_is_empty() {
+        run_iter_test(async {
+            let mut vm = crate::vm::Vm::new();
+            let VmValue::Iter(handle) = iter_from_value(VmValue::Range(VmRange {
+                start: i64::MAX,
+                end: i64::MAX,
+                inclusive: false,
+            }))
+            .unwrap() else {
+                panic!("expected iter");
+            };
+
+            assert!(next_handle(&handle, &mut vm).await.unwrap().is_none());
+        });
+    }
 }

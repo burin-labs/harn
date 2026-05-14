@@ -3,6 +3,34 @@ use std::rc::Rc;
 
 use crate::value::{VmError, VmValue};
 
+fn range_initial_done(start: i64, end: i64, inclusive: bool) -> bool {
+    if inclusive {
+        start > end
+    } else {
+        start >= end
+    }
+}
+
+fn range_next(next: &mut i64, end: i64, inclusive: bool, done: &mut bool) -> Option<i64> {
+    if *done {
+        return None;
+    }
+    let value = *next;
+    let at_end = if inclusive {
+        value >= end
+    } else {
+        value
+            .checked_add(1)
+            .is_none_or(|candidate| candidate >= end)
+    };
+    if at_end {
+        *done = true;
+    } else {
+        *next += 1;
+    }
+    Some(value)
+}
+
 impl super::super::Vm {
     pub(super) fn execute_iter_init(&mut self) -> Result<(), VmError> {
         let iterable = self.pop()?;
@@ -38,16 +66,12 @@ impl super::super::Vm {
                     .push(super::super::IterState::Stream { stream });
             }
             VmValue::Range(r) => {
-                let stop = if r.inclusive {
-                    // Saturate to avoid i64 overflow on `i64::MAX to i64::MAX`.
-                    r.end.saturating_add(1)
-                } else {
-                    r.end
-                };
-                // `5 to 1` is simply empty: no reverse iteration.
-                let next = r.start;
-                self.iterators
-                    .push(super::super::IterState::Range { next, stop });
+                self.iterators.push(super::super::IterState::Range {
+                    next: r.start,
+                    end: r.end,
+                    inclusive: r.inclusive,
+                    done: range_initial_done(r.start, r.end, r.inclusive),
+                });
             }
             VmValue::Iter(handle) => {
                 self.iterators
@@ -135,10 +159,13 @@ impl super::super::Vm {
                         }
                     }
                 }
-                super::super::IterState::Range { next, stop } => {
-                    if *next < *stop {
-                        let v = *next;
-                        *next += 1;
+                super::super::IterState::Range {
+                    next,
+                    end,
+                    inclusive,
+                    done,
+                } => {
+                    if let Some(v) = range_next(next, *end, *inclusive, done) {
                         self.stack.push(VmValue::Int(v));
                     } else {
                         self.iterators.pop();
@@ -300,6 +327,35 @@ mod tests {
                     assert_eq!(*idx, 0);
                 }
                 _ => panic!("expected dict iterator state"),
+            }
+        });
+    }
+
+    #[test]
+    fn iter_init_inclusive_range_at_i64_max_is_not_empty() {
+        run_iter_init_test(async {
+            let mut vm = Vm::new();
+            vm.stack.push(VmValue::Range(crate::value::VmRange {
+                start: i64::MAX,
+                end: i64::MAX,
+                inclusive: true,
+            }));
+
+            vm.execute_iter_init().unwrap();
+
+            match vm.iterators.last().unwrap() {
+                IterState::Range {
+                    next,
+                    end,
+                    inclusive,
+                    done,
+                } => {
+                    assert_eq!(*next, i64::MAX);
+                    assert_eq!(*end, i64::MAX);
+                    assert!(*inclusive);
+                    assert!(!*done);
+                }
+                _ => panic!("expected range iterator state"),
             }
         });
     }

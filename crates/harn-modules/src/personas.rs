@@ -532,6 +532,7 @@ fn collect_called_functions_node(node: &SNode, calls: &mut Vec<String>) {
             collect_many(body, calls);
         }
         Node::TryCatch {
+            has_catch: _,
             body,
             catch_body,
             finally_body,

@@ -285,6 +285,7 @@ fn visit_children_for_callables(node: &SNode, callables: &mut Vec<CallableInfo>)
             }
         }
         Node::TryCatch {
+            has_catch: _,
             body,
             catch_body,
             finally_body,
@@ -418,6 +419,7 @@ fn visit_child_owners(node: &SNode, owner_span: Span, calls: &mut Vec<CallSite>)
         | Node::MutexBlock { body }
         | Node::Closure { body, .. } => body_contains_owner(body, owner_span, calls),
         Node::TryCatch {
+            has_catch: _,
             body,
             catch_body,
             finally_body,
@@ -532,6 +534,7 @@ fn collect_calls(node: &SNode, calls: &mut Vec<CallSite>) {
             }
         }
         Node::TryCatch {
+            has_catch: _,
             body,
             catch_body,
             finally_body,

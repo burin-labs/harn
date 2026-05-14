@@ -336,7 +336,8 @@ impl TypeChecker {
     /// Register type, enum, interface, and struct declarations from AST nodes into a scope.
     fn register_declarations_into(scope: &mut TypeScope, nodes: &[SNode]) {
         for snode in nodes {
-            match &snode.node {
+            let (_, decl) = peel_attributes(snode);
+            match &decl.node {
                 Node::TypeDecl {
                     name,
                     type_params,

@@ -167,9 +167,9 @@ pub async fn ensure_active(name: &str) -> Result<VmMcpClientHandle, VmError> {
     let handle = connect_mcp_server_from_json(&registration.spec).await?;
 
     // Install under the lock. Handle race: another task may have
-    // connected the same server in the meantime — if so, keep the
-    // incumbent handle and silently drop ours (the new child process
-    // will exit when the handle is dropped).
+    // connected the same server in the meantime; keep the incumbent handle.
+    // Dropping the redundant handle tears down its transport via the MCP
+    // client's drop guards.
     let mut guard = REGISTRY.lock().expect("mcp registry poisoned");
     match guard.active.get_mut(name) {
         Some(existing) => {

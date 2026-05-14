@@ -637,6 +637,7 @@ impl<'a> Linter<'a> {
         match &node.node {
             Node::DeferStmt { body } => Self::block_calls_cancel_handle(body),
             Node::TryCatch {
+                has_catch: _,
                 body,
                 catch_body,
                 finally_body,
@@ -706,6 +707,7 @@ impl<'a> Linter<'a> {
                         .is_some_and(|body| Self::block_calls_cancel_handle(body))
             }
             Node::TryCatch {
+                has_catch: _,
                 body,
                 catch_body,
                 finally_body,
@@ -988,6 +990,7 @@ impl<'a> Linter<'a> {
                 state
             }
             Node::TryCatch {
+                has_catch: _,
                 body,
                 catch_body,
                 finally_body,
@@ -1292,6 +1295,7 @@ impl<'a> Linter<'a> {
                 self.collect_persona_calls(persona_name, body);
             }
             Node::TryCatch {
+                has_catch: _,
                 body,
                 catch_body,
                 finally_body,
