@@ -6,6 +6,26 @@ Pre-0.6 highlights live in [CHANGELOG-pre-0.6.md](CHANGELOG-pre-0.6.md).
 Harn had no external users before 0.6.0, so that archive intentionally keeps
 condensed series summaries instead of full per-patch history.
 
+## Unreleased
+
+### Added
+
+- **`harn local` runtime lifecycle commands (#1599).** New top-level
+  command surface for managing local LLM runtimes: `harn local list`
+  surveys every local provider Harn knows about (Ollama, llama.cpp, MLX,
+  generic OpenAI-compatible, vLLM) with base URL, port, served models,
+  loaded models, and memory footprint; `harn local status` shows the
+  currently-active selection plus a brief per-provider summary;
+  `harn local switch <alias>` warms a model on its provider, evicts
+  conflicting local runtimes (drains Ollama's loaded set, stops tracked
+  llama.cpp/MLX PIDs), re-checks `/v1/models` after the first success,
+  and persists the selection to `<state>/local/selection.json`;
+  `harn local stop [--all]` unloads loaded Ollama models via
+  `keep_alive=0` and SIGTERMs Harn-managed llama.cpp/MLX PIDs.
+  Defaults for `--ctx` and `--keep-alive` come from a machine profile
+  derived from RAM and accelerator presence so a 48 GB Apple Silicon
+  laptop picks a wider context window than a low-RAM Linux box.
+
 ## v0.8.16
 
 ### Added

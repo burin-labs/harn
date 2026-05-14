@@ -80,6 +80,9 @@ fs2 = "0.4"
 thiserror = "2"
 which = "8"
 
+[target.'cfg(unix)'.dependencies]
+libc = "0.2"
+
 [features]
 default = ["hostlib"]
 # Wire `harn-hostlib`'s code-intelligence and tool builtins into the ACP

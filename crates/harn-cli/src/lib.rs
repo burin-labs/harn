@@ -600,6 +600,7 @@ async fn async_main() {
             .await
         }
         Command::Models(args) => commands::models::run(args).await,
+        Command::Local(args) => commands::local::run(args).await,
         Command::Providers(args) => match args.command {
             ProvidersCommand::Refresh(refresh) => {
                 if let Err(error) = commands::providers::run_refresh(&refresh).await {

@@ -24,6 +24,7 @@ mod explain;
 mod flow;
 mod init;
 mod lint_fmt;
+mod local;
 mod mcp;
 mod merge_captain;
 mod models;
@@ -87,6 +88,9 @@ pub(crate) use flow::{
 };
 pub(crate) use init::{InitArgs, NewArgs, ProjectTemplate};
 pub(crate) use lint_fmt::{FmtArgs, PathTargetsArgs};
+pub(crate) use local::{
+    LocalArgs, LocalCommand, LocalListArgs, LocalStatusArgs, LocalStopArgs, LocalSwitchArgs,
+};
 pub(crate) use mcp::{McpArgs, McpCommand, McpLoginArgs, McpServeArgs, McpServerRefArgs};
 pub(crate) use merge_captain::{
     MergeCaptainArgs, MergeCaptainAuditArgs, MergeCaptainAuditFormat, MergeCaptainBackendKind,
@@ -335,6 +339,9 @@ SCRIPTING
     ModelInfo(ModelInfoArgs),
     /// List, install, recommend, and test configured LLM models.
     Models(ModelsArgs),
+    /// Manage local LLM runtime lifecycle: enumerate, switch, and stop
+    /// Ollama, llama.cpp, MLX, and other OpenAI-compatible local servers.
+    Local(LocalArgs),
     /// Validate and generate provider/model catalog artifacts.
     Providers(ProvidersArgs),
     /// Print the provider/model catalog Harn loaded as JSON.

@@ -71,6 +71,35 @@ commands. `mlx-vlm` server flags vary by release; only add
 Hosts that support auto-start should run their launcher, report launcher
 failures, then call the Harn readiness probe again.
 
+### `harn local` runtime lifecycle
+
+For interactive local-model setups, `harn local` wraps the assorted
+provider CLIs (`ollama`, `llama-server`, `mlx_lm.server`) behind one
+stable surface:
+
+```bash
+# Survey every local provider, with served models and loaded-model
+# memory footprint (Ollama /api/ps).
+harn local list
+
+# Active selection + machine profile defaults derived from RAM/GPU.
+harn local status
+
+# Warm a model on its provider, evict conflicting local runtimes
+# (drains Ollama's loaded set, stops tracked llama.cpp/MLX PIDs), and
+# persist the selection to <state>/local/selection.json.
+harn local switch qwen36-coder --ctx 65536 --keep-alive 1h
+
+# Unload via keep_alive=0 (Ollama) or SIGTERM tracked PIDs.
+harn local stop --all
+```
+
+`--ctx` / `--keep-alive` default to a machine profile derived from
+RAM and accelerator presence — a 48 GB Apple Silicon laptop picks a
+wider context window than a low-RAM Linux box. Override either by
+passing the flag explicitly. State lives under
+`<state_root>/local/` (`HARN_STATE_DIR` honored).
+
 ### Enterprise providers
 
 Bedrock uses the AWS credential chain. Harn checks `AWS_ACCESS_KEY_ID`,
