@@ -2584,7 +2584,10 @@ mod tests {
 
         let entry = model_catalog_entry("acme/model-fast").expect("catalog entry");
         assert_eq!(entry.context_window, 65_536);
-        assert_eq!(entry.capabilities, vec!["streaming".to_string()]);
+        assert_eq!(
+            entry.capabilities,
+            vec!["streaming".to_string(), "tools".to_string()]
+        );
         assert_eq!(
             entry.pricing.as_ref().map(|pricing| pricing.input_per_mtok),
             Some(1.25)
