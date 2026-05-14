@@ -498,14 +498,14 @@ vision_supported = true
 
 [[provider.ollama]]
 model_match = "qwen3.6*"
-native_tools = true
+native_tools = false
 structured_output = "format_kw"
 thinking_modes = ["enabled"]
 preserve_thinking = true
-server_parser = "ollama_qwen3coder"
+server_parser = "none"
 honors_chat_template_kwargs = false
-recommended_endpoint = "/api/generate-raw"
-text_tool_wire_format_supported = false
+recommended_endpoint = "/api/chat"
+text_tool_wire_format_supported = true
 thinking_disable_directive = "/no_think"
 
 [[provider.ollama]]
@@ -519,12 +519,14 @@ recommended_endpoint = "/api/generate-raw"
 text_tool_wire_format_supported = false
 thinking_disable_directive = "/no_think"
 
-# llama.cpp / llama-server speaks OpenAI-compat but is a separate
-# provider entry from Ollama. Give it the same Qwen3.6 wiring so the
-# local GGUF path gets `preserve_thinking` by default too.
+# llama.cpp / llama-server speaks OpenAI-compat but is a separate provider
+# entry from Ollama. Qwen/Devstral native tool-call parsing in llama-server has
+# current upstream edge cases around malformed / leaked OpenAI tool JSON, so
+# Harn defaults these local routes to the text-tool contract while preserving
+# the chat-template thinking controls.
 [[provider.llamacpp]]
 model_match = "*qwen3.6*"
-native_tools = true
+native_tools = false
 structured_output = "native"
 thinking_modes = ["enabled"]
 preserve_thinking = true
@@ -536,7 +538,7 @@ thinking_disable_directive = "/no_think"
 
 [[provider.llamacpp]]
 model_match = "*qwen3*"
-native_tools = true
+native_tools = false
 structured_output = "native"
 thinking_modes = ["enabled"]
 server_parser = "none"
@@ -544,6 +546,24 @@ honors_chat_template_kwargs = true
 recommended_endpoint = "/v1/chat/completions"
 text_tool_wire_format_supported = true
 thinking_disable_directive = "/no_think"
+
+[[provider.llamacpp]]
+model_match = "*devstral-small-2*"
+native_tools = false
+structured_output = "native"
+server_parser = "none"
+honors_chat_template_kwargs = true
+recommended_endpoint = "/v1/chat/completions"
+text_tool_wire_format_supported = true
+
+[[provider.ollama]]
+model_match = "devstral-small-2*"
+native_tools = false
+structured_output = "format_kw"
+server_parser = "none"
+honors_chat_template_kwargs = false
+recommended_endpoint = "/api/chat"
+text_tool_wire_format_supported = true
 
 # Local vLLM / SGLang — same story. The capability rules here gate
 # chat_template_kwargs emission in openai_compat; the actual model has

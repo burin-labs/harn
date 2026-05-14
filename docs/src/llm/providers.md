@@ -11,6 +11,14 @@ Run `harn quickstart` to detect existing credentials, local Ollama, free disk
 space, and GPU availability, then write starter `providers.toml`, `harn.toml`,
 and `.env` files.
 
+Run `harn models recommend` to choose a starter model for the current hardware.
+Run `harn models install qwen3.6-coding`, `harn models install devstral-small-2`,
+or `harn models install ollama-gemma4` to resolve Harn aliases and pull the
+matching Ollama model. For non-Ollama local runtimes, `harn models install
+local-qwen3.6-gguf` and `harn models install local-qwen3.6-27b` print concrete
+llama.cpp / MLX download, launch, context-window, endpoint, and
+`provider-ready` verification commands.
+
 For model-specific feature support, see the generated
 [provider capability matrix](../provider-matrix.md).
 
@@ -23,7 +31,7 @@ For model-specific feature support, see the generated
 | Bedrock | AWS env/profile/instance role | explicit Bedrock `model` |
 | Azure OpenAI | `AZURE_OPENAI_API_KEY` or `AZURE_OPENAI_AD_TOKEN` | deployment name in `model` |
 | Vertex AI | `VERTEX_AI_ACCESS_TOKEN` or `GOOGLE_APPLICATION_CREDENTIALS` | Gemini model ID |
-| Ollama | `OLLAMA_HOST` (optional) | `llama3.2` |
+| Ollama | `OLLAMA_HOST` (optional) | `qwen3.6-coding` when installed, otherwise `llama3.2` |
 | Local server | `LOCAL_LLM_BASE_URL` | `LOCAL_LLM_MODEL` or explicit `model` |
 | llama.cpp server | `LLAMACPP_BASE_URL` | explicit `model` from `/v1/models` |
 | MLX OpenAI-compatible server | `MLX_BASE_URL` | `MLX_MODEL_ID` or `mlx-qwen36-27b` |
@@ -47,15 +55,21 @@ something like `http://192.168.86.250:8000` and either pass
 For llama.cpp / `llama-server`, Harn has a separate `llamacpp` provider so Qwen
 thinking-template quirks can be modeled independently from other local
 OpenAI-compatible servers. Set `LLAMACPP_BASE_URL` when it is not listening on
-`http://127.0.0.1:8001`.
+`http://127.0.0.1:8001`. `harn models install local-qwen3.6-gguf` prints the
+recommended Qwen3.6 GGUF download and `llama-server` command. The generated
+launch command uses a 65,536-token context, one server slot, quantized KV cache,
+and the Harn text-tool contract by default.
 
 For an Apple Silicon MLX OpenAI-compatible server, Harn uses
 `MLX_BASE_URL` with a default of `http://127.0.0.1:8002`. Run
 `harn provider-ready mlx --model mlx-qwen36-27b` to probe `/v1/models`
 and verify that the configured model or alias is currently served. Harn
-does not launch MLX scripts itself; hosts that support auto-start should
-run their launcher, report launcher failures, then call the Harn readiness
-probe again.
+does not launch MLX scripts itself; `harn models install local-qwen3.6-27b`
+prints the venv, model download, `mlx_vlm.server`, endpoint, and readiness
+commands. `mlx-vlm` server flags vary by release; only add
+`--served-model-name` when `python -m mlx_vlm.server --help` advertises it.
+Hosts that support auto-start should run their launcher, report launcher
+failures, then call the Harn readiness probe again.
 
 ### Enterprise providers
 
@@ -111,10 +125,12 @@ The same matrix is the source of truth for Harn's default tool-calling
 mode. Alias-level `tool_format` still wins when set explicitly, but
 otherwise a matrix row with `native_tools = true` makes
 `agent_loop()` and `model-info` choose native provider tools for that
-provider/model route. Model-catalog display tags are derived from this
-matrix too; legacy `models.*.capabilities` entries are parsed for
-backwards compatibility but do not override runtime capability
-resolution.
+provider/model route. Rows can also set `text_tool_wire_format_supported = true`
+for runtimes where Harn's text-tool contract is the reliable tool path even
+though native provider tool calls are unavailable or too flaky. Model-catalog
+display tags are derived from this matrix too; legacy `models.*.capabilities`
+entries are parsed for backwards compatibility but do not override runtime
+capability resolution.
 
 Projects override or extend the shipped table in `harn.toml` — useful
 for flagging a proxied OpenAI-compat endpoint as supporting
@@ -244,6 +260,9 @@ adapters and model aliases without editing Rust-side registration code.
 - Default host: `http://localhost:11434`
 - No authentication required
 - Same message format as OpenAI
+- Qwen3.6, Devstral Small 2, and Gemma4 local aliases default to Harn's
+  text-tool contract. Native tool calling remains opt-in for model-specific
+  experiments, because local runtime parsers can lag current model templates.
 - Harn applies shared runtime settings to Ollama chat, completion,
   context-window fallback, and warmup requests. `HARN_OLLAMA_NUM_CTX` wins over
   `OLLAMA_CONTEXT_LENGTH` and `OLLAMA_NUM_CTX`, then defaults to `32768`.
@@ -268,8 +287,12 @@ adapters and model aliases without editing Rust-side registration code.
 - Endpoint: `<LLAMACPP_BASE_URL>/v1/chat/completions`
 - Default host: `http://127.0.0.1:8001`
 - No authentication required
-- Qwen3 capability rules enable `chat_template_kwargs` and `/no_think`
-  handling when the model ID matches Qwen
+- Qwen3 and Devstral capability rules enable Harn's text-tool contract by
+  default. Native llama-server tool calls remain opt-in because upstream
+  llama.cpp has current OpenAI-compatible parser edge cases for malformed or
+  leaked tool-call JSON with these templates.
+- Qwen3 rules still enable `chat_template_kwargs` and `/no_think` handling
+  when the model ID matches Qwen
 
 ### MLX OpenAI-compatible server
 

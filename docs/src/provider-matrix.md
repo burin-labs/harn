@@ -44,8 +44,9 @@ Regenerate with `make gen-provider-matrix` and verify with `make check-provider-
 | `huggingface` | `qwen/qwen3-coder*` | no | no | no | no | yes | no | `native` | yes | no |
 | `huggingface` | `qwen/*` | `enabled` | no | no | no | yes | no | `native` | yes | no |
 | `huggingface` | `deepseek-ai/deepseek-v3*` | `enabled` | no | no | no | yes | no | `native` | yes | yes |
-| `llamacpp` | `*qwen3.6*` | `enabled` | no | no | no | yes | no | `native` | yes | no |
-| `llamacpp` | `*qwen3*` | `enabled` | no | no | no | yes | no | `native` | yes | no |
+| `llamacpp` | `*qwen3.6*` | `enabled` | no | no | no | yes | no | `native` | no | no |
+| `llamacpp` | `*qwen3*` | `enabled` | no | no | no | yes | no | `native` | no | no |
+| `llamacpp` | `*devstral-small-2*` | no | no | no | no | yes | no | `native` | no | no |
 | `local` | `*qwen3.6*` | `enabled` | no | no | no | yes | no | `native` | yes | no |
 | `local` | `*qwen3*` | `enabled` | no | no | no | yes | no | `native` | yes | no |
 | `local` | `gemma-4*` | `enabled` | no | no | no | yes | no | no | no | no |
@@ -56,8 +57,9 @@ Regenerate with `make gen-provider-matrix` and verify with `make check-provider-
 | `ollama` | `llama3.2-vision*` | no | yes | no | no | yes | no | no | no | no |
 | `ollama` | `gemma3*` | no | yes | no | no | yes | no | no | no | no |
 | `ollama` | `gemma4*` | no | yes | no | no | yes | no | no | no | no |
-| `ollama` | `qwen3.6*` | `enabled` | no | no | no | yes | no | `format_kw` | yes | no |
+| `ollama` | `qwen3.6*` | `enabled` | no | no | no | yes | no | `format_kw` | no | no |
 | `ollama` | `qwen3*` | `enabled` | no | no | no | yes | no | `format_kw` | yes | no |
+| `ollama` | `devstral-small-2*` | no | no | no | no | yes | no | `format_kw` | no | no |
 | `openai` | `gpt-4o*` | no | yes | yes | no | yes | no | `native` | yes | no |
 | `openai` | `gpt-4.1*` | no | yes | no | no | yes | no | `native` | yes | no |
 | `openai` | `gpt-*` | `effort` | yes | no | no | yes | no | `native` | yes | no |

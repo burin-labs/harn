@@ -745,7 +745,7 @@ pub fn effective_model_capability_tags(provider: &str, model_id: &str) -> Vec<St
     // Today all Harn chat providers expose streaming. Keep this as a
     // transport baseline rather than a duplicated per-model declaration.
     tags.push("streaming".to_string());
-    if caps.native_tools {
+    if caps.native_tools || caps.text_tool_wire_format_supported {
         tags.push("tools".to_string());
     }
     if !caps.tool_search.is_empty() {
@@ -1581,11 +1581,139 @@ fn default_config() -> ProvidersConfig {
         },
     );
     config.aliases.insert(
+        "ollama-gemma4".to_string(),
+        AliasDef {
+            id: "gemma4:26b".to_string(),
+            provider: "ollama".to_string(),
+            tool_format: Some("text".to_string()),
+        },
+    );
+    config.aliases.insert(
+        "ollama-gemma4-26b".to_string(),
+        AliasDef {
+            id: "gemma4:26b".to_string(),
+            provider: "ollama".to_string(),
+            tool_format: Some("text".to_string()),
+        },
+    );
+    config.aliases.insert(
+        "qwen3.6-coding".to_string(),
+        AliasDef {
+            id: "qwen3.6:35b-a3b-coding-nvfp4".to_string(),
+            provider: "ollama".to_string(),
+            tool_format: Some("text".to_string()),
+        },
+    );
+    config.aliases.insert(
+        "qwen3.6-35b-coding".to_string(),
+        AliasDef {
+            id: "qwen3.6:35b-a3b-coding-nvfp4".to_string(),
+            provider: "ollama".to_string(),
+            tool_format: Some("text".to_string()),
+        },
+    );
+    config.aliases.insert(
+        "qwen3.6-coding-nvfp4".to_string(),
+        AliasDef {
+            id: "qwen3.6:35b-a3b-coding-nvfp4".to_string(),
+            provider: "ollama".to_string(),
+            tool_format: Some("text".to_string()),
+        },
+    );
+    config.aliases.insert(
+        "qwen3.6-coding-native".to_string(),
+        AliasDef {
+            id: "qwen3.6:35b-a3b-coding-nvfp4".to_string(),
+            provider: "ollama".to_string(),
+            tool_format: Some("native".to_string()),
+        },
+    );
+    config.aliases.insert(
+        "llamacpp-qwen3.6".to_string(),
+        AliasDef {
+            id: "qwen3.6-35b-a3b".to_string(),
+            provider: "llamacpp".to_string(),
+            tool_format: Some("text".to_string()),
+        },
+    );
+    config.aliases.insert(
+        "llamacpp-qwen3.6-q4".to_string(),
+        AliasDef {
+            id: "qwen3.6-35b-a3b-ud-q4-k-xl".to_string(),
+            provider: "llamacpp".to_string(),
+            tool_format: Some("text".to_string()),
+        },
+    );
+    config.aliases.insert(
+        "local-qwen3.6".to_string(),
+        AliasDef {
+            id: "qwen3.6-35b-a3b-ud-q4-k-xl".to_string(),
+            provider: "llamacpp".to_string(),
+            tool_format: Some("text".to_string()),
+        },
+    );
+    config.aliases.insert(
+        "local-qwen3.6-gguf".to_string(),
+        AliasDef {
+            id: "qwen3.6-35b-a3b-ud-q4-k-xl".to_string(),
+            provider: "llamacpp".to_string(),
+            tool_format: Some("text".to_string()),
+        },
+    );
+    config.aliases.insert(
         "mlx-qwen36-27b".to_string(),
         AliasDef {
             id: "unsloth/Qwen3.6-27B-UD-MLX-4bit".to_string(),
             provider: "mlx".to_string(),
             tool_format: None,
+        },
+    );
+    config.aliases.insert(
+        "mlx-qwen3.6-27b".to_string(),
+        AliasDef {
+            id: "unsloth/Qwen3.6-27B-UD-MLX-4bit".to_string(),
+            provider: "mlx".to_string(),
+            tool_format: Some("native".to_string()),
+        },
+    );
+    config.aliases.insert(
+        "mlx-qwen3.6-27b-q4".to_string(),
+        AliasDef {
+            id: "unsloth/Qwen3.6-27B-UD-MLX-4bit".to_string(),
+            provider: "mlx".to_string(),
+            tool_format: Some("native".to_string()),
+        },
+    );
+    config.aliases.insert(
+        "local-qwen3.6-27b".to_string(),
+        AliasDef {
+            id: "unsloth/Qwen3.6-27B-UD-MLX-4bit".to_string(),
+            provider: "mlx".to_string(),
+            tool_format: Some("native".to_string()),
+        },
+    );
+    config.aliases.insert(
+        "devstral-small-2".to_string(),
+        AliasDef {
+            id: "devstral-small-2:24b".to_string(),
+            provider: "ollama".to_string(),
+            tool_format: Some("text".to_string()),
+        },
+    );
+    config.aliases.insert(
+        "ollama-devstral-small-2".to_string(),
+        AliasDef {
+            id: "devstral-small-2:24b".to_string(),
+            provider: "ollama".to_string(),
+            tool_format: Some("text".to_string()),
+        },
+    );
+    config.aliases.insert(
+        "ollama-devstral-small-2-native".to_string(),
+        AliasDef {
+            id: "devstral-small-2:24b".to_string(),
+            provider: "ollama".to_string(),
+            tool_format: Some("native".to_string()),
         },
     );
 
@@ -1604,6 +1732,47 @@ fn default_config() -> ProvidersConfig {
     ]));
 
     config.models.extend(BTreeMap::from([
+        (
+            "qwen3.6:35b-a3b-coding-nvfp4".to_string(),
+            ModelDef {
+                name: "Qwen3.6 35B A3B Coding (NVFP4)".to_string(),
+                provider: "ollama".to_string(),
+                context_window: 262_144,
+                runtime_context_window: Some(32_768),
+                stream_timeout: Some(900.0),
+                capabilities: vec![
+                    "tools".to_string(),
+                    "streaming".to_string(),
+                    "thinking".to_string(),
+                ],
+                pricing: None,
+                deprecated: false,
+                deprecation_note: None,
+                quality_tags: Vec::new(),
+                prefer_prefill_done: None,
+            },
+        ),
+        (
+            "gemma4:26b".to_string(),
+            ModelDef {
+                name: "Gemma 4 26B MoE".to_string(),
+                provider: "ollama".to_string(),
+                context_window: 131_072,
+                runtime_context_window: Some(32_768),
+                stream_timeout: Some(300.0),
+                capabilities: vec![
+                    "tools".to_string(),
+                    "vision".to_string(),
+                    "streaming".to_string(),
+                    "thinking".to_string(),
+                ],
+                pricing: None,
+                deprecated: false,
+                deprecation_note: None,
+                quality_tags: Vec::new(),
+                prefer_prefill_done: None,
+            },
+        ),
         (
             "claude-sonnet-4-20250514".to_string(),
             ModelDef {
@@ -1709,6 +1878,39 @@ fn default_config() -> ProvidersConfig {
     local_model("gemma-4-26b-a4b-it", "Gemma 4 26B MoE (local)", 600.0, None);
     local_model("gemma-4-31b-it", "Gemma 4 31B (local)", 600.0, None);
 
+    for (id, name) in [
+        (
+            "qwen3.6-35b-a3b-ud-q4-k-xl",
+            "Qwen3.6 35B (Unsloth Q4_K_XL, llama.cpp)",
+        ),
+        (
+            "qwen3.6-35b-a3b-ud-q5-k-xl",
+            "Qwen3.6 35B (Unsloth Q5_K_XL, llama.cpp)",
+        ),
+        ("qwen3.6-35b-a3b", "Qwen3.6 35B (llama.cpp)"),
+    ] {
+        config.models.insert(
+            id.to_string(),
+            ModelDef {
+                name: name.to_string(),
+                provider: "llamacpp".to_string(),
+                context_window: 262_144,
+                runtime_context_window: Some(65_536),
+                stream_timeout: Some(900.0),
+                capabilities: vec![
+                    "tools".to_string(),
+                    "streaming".to_string(),
+                    "thinking".to_string(),
+                ],
+                pricing: None,
+                deprecated: false,
+                deprecation_note: None,
+                quality_tags: Vec::new(),
+                prefer_prefill_done: None,
+            },
+        );
+    }
+
     config.models.insert(
         "unsloth/Qwen3.6-27B-UD-MLX-4bit".to_string(),
         ModelDef {
@@ -1723,6 +1925,23 @@ fn default_config() -> ProvidersConfig {
                 "streaming".to_string(),
                 "thinking".to_string(),
             ],
+            pricing: None,
+            deprecated: false,
+            deprecation_note: None,
+            quality_tags: Vec::new(),
+            prefer_prefill_done: None,
+        },
+    );
+
+    config.models.insert(
+        "devstral-small-2:24b".to_string(),
+        ModelDef {
+            name: "Devstral Small 2 24B".to_string(),
+            provider: "ollama".to_string(),
+            context_window: 262_144,
+            runtime_context_window: Some(32_768),
+            stream_timeout: Some(600.0),
+            capabilities: vec!["tools".to_string(), "streaming".to_string()],
             pricing: None,
             deprecated: false,
             deprecation_note: None,
@@ -2320,6 +2539,14 @@ mod tests {
 
         assert_eq!(
             default_tool_format("qwen3.6-35b-a3b-ud-q4-k-xl", "llamacpp"),
+            "text"
+        );
+        assert_eq!(
+            default_tool_format("devstral-small-2:24b", "ollama"),
+            "text"
+        );
+        assert_eq!(
+            default_tool_format("ollama-devstral-small-2-native", "ollama"),
             "native"
         );
         assert_eq!(default_tool_format("gemma-4-26b-a4b-it", "local"), "text");
@@ -2357,7 +2584,10 @@ mod tests {
 
         let entry = model_catalog_entry("acme/model-fast").expect("catalog entry");
         assert_eq!(entry.context_window, 65_536);
-        assert_eq!(entry.capabilities, vec!["streaming".to_string()]);
+        assert_eq!(
+            entry.capabilities,
+            vec!["streaming".to_string(), "tools".to_string()]
+        );
         assert_eq!(
             entry.pricing.as_ref().map(|pricing| pricing.input_per_mtok),
             Some(1.25)

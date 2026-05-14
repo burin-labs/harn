@@ -55,14 +55,14 @@ ram_bucket = "16_32"
 gpu = "mps"
 has_provider_key = false
 provider = "ollama"
-model_id = "ollama/qwen2.5:14b-instruct"
+model_id = "devstral-small-2"
 
 [[recommendations]]
 ram_bucket = "16_32"
 gpu = "cuda"
 has_provider_key = false
 provider = "ollama"
-model_id = "ollama/qwen2.5:14b-instruct"
+model_id = "devstral-small-2"
 
 [[recommendations]]
 ram_bucket = "32_plus"
@@ -76,14 +76,14 @@ ram_bucket = "32_plus"
 gpu = "mps"
 has_provider_key = false
 provider = "ollama"
-model_id = "ollama/qwen2.5:32b-instruct"
+model_id = "qwen3.6-coding"
 
 [[recommendations]]
 ram_bucket = "32_plus"
 gpu = "cuda"
 has_provider_key = false
 provider = "ollama"
-model_id = "ollama/qwen2.5:32b-instruct"
+model_id = "qwen3.6-coding"
 
 [[recommendations]]
 ram_bucket = "lt8"
