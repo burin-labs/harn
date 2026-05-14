@@ -10,7 +10,7 @@ pub(crate) struct ModelsArgs {
 pub(crate) enum ModelsCommand {
     /// List models grouped by provider.
     List(ModelsListArgs),
-    /// Pull a model via Ollama.
+    /// Pull an Ollama model or print setup steps for a known local runtime.
     Install(ModelsInstallArgs),
     /// Recommend a starter model for the current machine and credentials.
     Recommend(ModelRecommendArgs),
@@ -33,7 +33,7 @@ pub(crate) struct ModelsListArgs {
 
 #[derive(Debug, Args)]
 pub(crate) struct ModelsInstallArgs {
-    /// Model id to pull (e.g. `llama3.2`, `qwen2.5:7b`).
+    /// Model alias or provider-native id to install or set up.
     pub model: String,
     /// Skip the size-confirmation prompt.
     #[arg(long)]

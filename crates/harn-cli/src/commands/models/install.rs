@@ -6,6 +6,25 @@ use tokio::io::{AsyncBufReadExt, BufReader};
 use crate::cli::ModelsInstallArgs;
 
 pub(crate) async fn run(args: ModelsInstallArgs) {
+    let resolved = harn_vm::llm_config::resolve_model_info(&args.model);
+    if resolved.provider != "ollama" {
+        if let Some(plan) = setup_plan_for(&args.model, &resolved.provider, &resolved.id) {
+            print_setup_plan(&plan);
+            return;
+        }
+        eprintln!(
+            "harn models install currently knows how to pull Ollama models and print setup steps \
+             for known local servers; '{}' resolved to provider '{}'.",
+            args.model, resolved.provider
+        );
+        eprintln!("For this provider, start the server yourself and verify it with:");
+        eprintln!(
+            "  harn provider-ready {} --model {}",
+            resolved.provider, args.model
+        );
+        std::process::exit(1);
+    }
+
     if which::which("ollama").is_err() {
         let hint = if cfg!(target_os = "macos") {
             "macOS: install with `brew install ollama` or download from https://ollama.com"
@@ -19,11 +38,18 @@ pub(crate) async fn run(args: ModelsInstallArgs) {
         std::process::exit(1);
     }
 
-    if let Some(size_gb) = estimate_size_gb(&args.model).await {
+    if args.model != resolved.id {
+        println!(
+            "Resolved {} -> {} via provider {}",
+            args.model, resolved.id, resolved.provider
+        );
+    }
+
+    if let Some(size_gb) = estimate_size_gb(&resolved.id).await {
         if size_gb > 10 && !args.yes {
             eprint!(
                 "Model {} is approximately {size_gb} GB. Continue? [y/N] ",
-                args.model
+                resolved.id
             );
             io::stderr().flush().ok();
             let mut buf = String::new();
@@ -37,7 +63,7 @@ pub(crate) async fn run(args: ModelsInstallArgs) {
     }
 
     let mut command = tokio::process::Command::new("ollama");
-    command.arg("pull").arg(&args.model);
+    command.arg("pull").arg(&resolved.id);
     if let Some(keep) = &args.keep_alive {
         command.env("OLLAMA_KEEP_ALIVE", keep);
     }
@@ -67,17 +93,97 @@ pub(crate) async fn run(args: ModelsInstallArgs) {
         eprintln!("ollama pull exited {status}");
         std::process::exit(status.code().unwrap_or(1));
     }
-    println!("\nPulled {}", args.model);
+    println!("\nPulled {}", resolved.id);
 
     // Best-effort warm probe through the OpenAI-compatible interface. Skip
     // silently if it fails — the pull itself succeeded.
     let api_key = std::env::var("OLLAMA_API_KEY").unwrap_or_default();
     let readiness =
-        harn_vm::llm::probe_openai_compatible_model("ollama", &args.model, &api_key).await;
+        harn_vm::llm::probe_openai_compatible_model("ollama", &resolved.id, &api_key).await;
     if readiness.valid {
         println!("Warm probe: ok");
     } else {
         println!("Warm probe: skipped ({})", readiness.message);
+    }
+    println!();
+    println!("Use with:");
+    println!(
+        "  HARN_LLM_PROVIDER=ollama HARN_LLM_MODEL={} harn run <file.harn>",
+        args.model
+    );
+    println!("Verify:");
+    println!("  harn provider-ready ollama --model {}", args.model);
+}
+
+struct SetupPlan {
+    title: &'static str,
+    steps: Vec<String>,
+}
+
+fn setup_plan_for(selector: &str, provider: &str, model_id: &str) -> Option<SetupPlan> {
+    match provider {
+        "llamacpp" => Some(llamacpp_setup_plan(selector, model_id)),
+        "mlx" => Some(mlx_setup_plan(selector, model_id)),
+        "local" => Some(local_openai_setup_plan(selector, model_id)),
+        _ => None,
+    }
+}
+
+fn llamacpp_setup_plan(selector: &str, model_id: &str) -> SetupPlan {
+    let model_path = if model_id.contains("qwen3.6") {
+        "$HOME/models/qwen3.6/Qwen3.6-35B-A3B-UD-Q4_K_XL.gguf"
+    } else {
+        "$HOME/models/model.gguf"
+    };
+    let alias = if model_id.contains("qwen3.6") {
+        "qwen3.6-35b-a3b-ud-q4-k-xl"
+    } else {
+        model_id
+    };
+    SetupPlan {
+        title: "llama.cpp setup",
+        steps: vec![
+            "Install runtime tools: `brew install llama.cpp hf`".to_string(),
+            "Download Qwen3.6 GGUF: `hf download unsloth/Qwen3.6-35B-A3B-GGUF --include \"Qwen3.6-35B-A3B-UD-Q4_K_XL.gguf\" --local-dir ~/models/qwen3.6`".to_string(),
+            format!(
+                "Launch server: `llama-server --model {model_path} --alias {alias} --host 127.0.0.1 --port 8001 --ctx-size 65536 --parallel 1 --cache-type-k q4_0 --cache-type-v q4_0 --cache-ram 0 --n-gpu-layers 99 --jinja --chat-template-kwargs '{{\"enable_thinking\":false}}'`"
+            ),
+            "Export endpoint: `export LLAMACPP_BASE_URL=http://127.0.0.1:8001`".to_string(),
+            format!("Verify: `harn provider-ready llamacpp --model {selector}`"),
+        ],
+    }
+}
+
+fn mlx_setup_plan(selector: &str, _model_id: &str) -> SetupPlan {
+    SetupPlan {
+        title: "MLX vision-language setup",
+        steps: vec![
+            "Create runtime: `python3 -m venv ~/.harn/mlx-vlm && ~/.harn/mlx-vlm/bin/pip install -U pip mlx-vlm huggingface_hub`".to_string(),
+            "Download Qwen3.6 MLX: `~/.harn/mlx-vlm/bin/hf download unsloth/Qwen3.6-27B-UD-MLX-4bit --local-dir ~/models/qwen3.6-27b/Qwen3.6-27B-UD-MLX-4bit`".to_string(),
+            "Launch server: `~/.harn/mlx-vlm/bin/python -m mlx_vlm.server --model ~/models/qwen3.6-27b/Qwen3.6-27B-UD-MLX-4bit --host 127.0.0.1 --port 8002 --max-tokens 81920`".to_string(),
+            "If `python -m mlx_vlm.server --help` lists `--served-model-name`, add `--served-model-name unsloth/Qwen3.6-27B-UD-MLX-4bit` so `/v1/models` reports the Harn alias target.".to_string(),
+            "Export endpoint: `export MLX_BASE_URL=http://127.0.0.1:8002`".to_string(),
+            format!("Verify: `harn provider-ready mlx --model {selector}`"),
+        ],
+    }
+}
+
+fn local_openai_setup_plan(selector: &str, model_id: &str) -> SetupPlan {
+    SetupPlan {
+        title: "local OpenAI-compatible setup",
+        steps: vec![
+            "Start your OpenAI-compatible runtime on a stable host and port, for example vLLM/SGLang on `http://127.0.0.1:8000`.".to_string(),
+            format!("Export endpoint and model: `export LOCAL_LLM_BASE_URL=http://127.0.0.1:8000 LOCAL_LLM_MODEL={model_id}`"),
+            format!("Verify: `harn provider-ready local --model {selector}`"),
+        ],
+    }
+}
+
+fn print_setup_plan(plan: &SetupPlan) {
+    println!("{}", plan.title);
+    println!();
+    for (idx, step) in plan.steps.iter().enumerate() {
+        println!("{}. {step}", idx + 1);
     }
 }
 
@@ -101,4 +207,37 @@ async fn estimate_size_gb(model: &str) -> Option<u64> {
     let v: serde_json::Value = resp.json().await.ok()?;
     let bytes = v.get("size").and_then(|n| n.as_u64())?;
     Some(bytes / (1024 * 1024 * 1024))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn setup_plan_exists_for_llamacpp_qwen_alias() {
+        let resolved = harn_vm::llm_config::resolve_model_info("local-qwen3.6-gguf");
+        let plan = setup_plan_for("local-qwen3.6-gguf", &resolved.provider, &resolved.id)
+            .expect("llama.cpp setup plan");
+        assert_eq!(plan.title, "llama.cpp setup");
+        assert!(plan
+            .steps
+            .iter()
+            .any(|step| step.contains("harn provider-ready llamacpp")));
+        assert!(plan
+            .steps
+            .iter()
+            .any(|step| step.contains("--ctx-size 65536")));
+    }
+
+    #[test]
+    fn setup_plan_exists_for_mlx_qwen_alias() {
+        let resolved = harn_vm::llm_config::resolve_model_info("local-qwen3.6-27b");
+        let plan = setup_plan_for("local-qwen3.6-27b", &resolved.provider, &resolved.id)
+            .expect("MLX setup plan");
+        assert_eq!(plan.title, "MLX vision-language setup");
+        assert!(plan
+            .steps
+            .iter()
+            .any(|step| step.contains("mlx_vlm.server")));
+    }
 }

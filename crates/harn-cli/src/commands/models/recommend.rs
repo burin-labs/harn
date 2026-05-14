@@ -354,6 +354,15 @@ mod tests {
     }
 
     #[test]
+    fn high_memory_mps_recommends_current_local_coding_alias() {
+        let recommendation =
+            recommend_model(snapshot(48, GpuKind::Mps), false, None).expect("recommendation");
+        assert_eq!(recommendation.model_id, "qwen3.6-coding");
+        assert_eq!(recommendation.harn_selector, "qwen3.6-coding");
+        assert_eq!(recommendation.provider, "ollama");
+    }
+
+    #[test]
     fn cloud_creds_resolve_to_best_available_cloud_default() {
         let recommendation = recommend_model(
             snapshot(32, GpuKind::Cuda),

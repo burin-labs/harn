@@ -737,20 +737,17 @@ anthropic_beta_features = ["fine-grained-tool-streaming-2025-05-14"]
     fn qwen36_ollama_preserves_thinking() {
         reset();
         let caps = lookup("ollama", "qwen3.6:35b-a3b-coding-nvfp4");
-        assert!(caps.native_tools);
+        assert!(!caps.native_tools);
         assert_eq!(caps.json_schema.as_deref(), Some("format_kw"));
         assert!(!caps.thinking_modes.is_empty());
         assert!(
             caps.preserve_thinking,
             "Qwen3.6 should enable preserve_thinking by default for long-horizon loops"
         );
-        assert_eq!(caps.server_parser, "ollama_qwen3coder");
+        assert_eq!(caps.server_parser, "none");
         assert!(!caps.honors_chat_template_kwargs);
-        assert_eq!(
-            caps.recommended_endpoint.as_deref(),
-            Some("/api/generate-raw")
-        );
-        assert!(!caps.text_tool_wire_format_supported);
+        assert_eq!(caps.recommended_endpoint.as_deref(), Some("/api/chat"));
+        assert!(caps.text_tool_wire_format_supported);
     }
 
     #[test]
@@ -776,7 +773,6 @@ anthropic_beta_features = ["fine-grained-tool-streaming-2025-05-14"]
             ("huggingface", "Qwen/Qwen3.6-35B-A3B"),
             ("fireworks", "accounts/fireworks/models/qwen3p6-plus"),
             ("dashscope", "qwen3.6-plus"),
-            ("llamacpp", "unsloth/Qwen3.6-35B-A3B-GGUF"),
             ("local", "Qwen3.6-35B-A3B"),
             ("mlx", "unsloth/Qwen3.6-27B-UD-MLX-4bit"),
             ("mlx", "Qwen/Qwen3.6-27B"),
@@ -796,6 +792,13 @@ anthropic_beta_features = ["fine-grained-tool-streaming-2025-05-14"]
                 "{provider}/{model}: only Ollama routes through the qwen3coder response parser"
             );
         }
+
+        let caps = lookup("llamacpp", "unsloth/Qwen3.6-35B-A3B-GGUF");
+        assert!(!caps.thinking_modes.is_empty());
+        assert!(caps.preserve_thinking);
+        assert!(!caps.native_tools);
+        assert!(caps.text_tool_wire_format_supported);
+        assert_eq!(caps.server_parser, "none");
     }
 
     #[test]
@@ -830,11 +833,25 @@ anthropic_beta_features = ["fine-grained-tool-streaming-2025-05-14"]
         let caps = lookup("llamacpp", "unsloth/Qwen3.5-Coder-GGUF");
         assert_eq!(caps.server_parser, "none");
         assert!(caps.honors_chat_template_kwargs);
+        assert!(!caps.native_tools);
         assert!(caps.text_tool_wire_format_supported);
         assert_eq!(
             caps.recommended_endpoint.as_deref(),
             Some("/v1/chat/completions")
         );
+    }
+
+    #[test]
+    fn devstral_local_routes_default_to_text_tools() {
+        reset();
+        for provider in ["ollama", "llamacpp"] {
+            let caps = lookup(provider, "devstral-small-2:24b");
+            assert!(!caps.native_tools, "{provider}: native tools stay opt-in");
+            assert!(
+                caps.text_tool_wire_format_supported,
+                "{provider}: text tools should remain available"
+            );
+        }
     }
 
     #[test]
