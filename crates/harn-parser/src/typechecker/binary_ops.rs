@@ -8,6 +8,7 @@
 use crate::ast::*;
 
 use super::scope::InferredType;
+use super::union::{contains_nil, simplify_union, without_nil};
 
 fn dict_like(ty: &TypeExpr) -> bool {
     matches!(ty, TypeExpr::Named(n) if n == "dict")
@@ -78,26 +79,19 @@ pub(super) fn infer_binary_op_type(
             _ => None,
         },
         "??" => match (left, right) {
-            // Union containing nil: strip nil, use non-nil members
-            (Some(TypeExpr::Union(members)), _) => {
-                let non_nil: Vec<_> = members
-                    .iter()
-                    .filter(|m| !matches!(m, TypeExpr::Named(n) if n == "nil"))
-                    .cloned()
-                    .collect();
-                if non_nil.len() == 1 {
-                    Some(non_nil[0].clone())
-                } else if non_nil.is_empty() {
-                    right.clone()
-                } else {
-                    Some(TypeExpr::Union(non_nil))
-                }
-            }
-            // Left is nil: result is always the right side
-            (Some(TypeExpr::Named(n)), _) if n == "nil" => right.clone(),
-            // Left is a known non-nil type: right is unreachable, preserve left
-            (Some(l), _) => Some(l.clone()),
-            // Unknown left: use right as best guess
+            (Some(left), right) => match without_nil(left) {
+                // Left is only nil, so the result is exactly the fallback.
+                None => right.clone(),
+                // Left cannot be nil, so the fallback is unreachable.
+                Some(non_nil_left) if !contains_nil(left) => Some(non_nil_left),
+                // Left may be nil; include the fallback when its type is known.
+                Some(non_nil_left) => match right {
+                    Some(right) if &non_nil_left == right => Some(non_nil_left),
+                    Some(right) => Some(simplify_union(vec![non_nil_left, right.clone()])),
+                    None => Some(non_nil_left),
+                },
+            },
+            // Unknown left: use right as best guess.
             (None, _) => right.clone(),
         },
         "|>" => None,

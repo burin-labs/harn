@@ -21,6 +21,7 @@ use harn_lexer::Span;
 use super::super::format::format_type;
 use super::super::schema_inference::schema_type_expr_from_node;
 use super::super::scope::{is_builtin, EnumDeclInfo, FnSignature, StructDeclInfo, TypeScope};
+use super::super::union::without_nil;
 use super::super::TypeChecker;
 
 impl TypeChecker {
@@ -62,22 +63,6 @@ impl TypeChecker {
             0 => None,
             1 => Some(members.into_iter().next().unwrap()),
             _ => Some(TypeExpr::Union(members)),
-        }
-    }
-
-    fn type_without_nil(ty: &TypeExpr) -> Option<TypeExpr> {
-        match ty {
-            TypeExpr::Named(name) if name == "nil" => None,
-            TypeExpr::Union(members) => {
-                let non_nil: Vec<TypeExpr> =
-                    members.iter().filter_map(Self::type_without_nil).collect();
-                match non_nil.as_slice() {
-                    [] => None,
-                    [only] => Some(only.clone()),
-                    _ => Some(TypeExpr::Union(non_nil)),
-                }
-            }
-            other => Some(other.clone()),
         }
     }
 
@@ -354,7 +339,7 @@ impl TypeChecker {
                 }
                 let compatible = self.types_compatible(&expected, actual, &call_scope)
                     || (param.optional
-                        && Self::type_without_nil(actual).is_none_or(|non_nil| {
+                        && without_nil(actual).is_none_or(|non_nil| {
                             self.types_compatible(&expected, &non_nil, &call_scope)
                         }));
                 if !compatible {

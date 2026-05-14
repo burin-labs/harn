@@ -148,6 +148,48 @@ if x != nil && type_of(x) == "string" {
 }
 
 #[test]
+fn test_short_circuit_and_narrows_rhs_expression() {
+    let errs = errors(
+        r#"pipeline t(task) {
+  fn count_values(values: list<int>) -> int { return len(values) }
+  fn check(values: list<int> | nil) {
+if values != nil && count_values(values) > 0 {
+  let present: list<int> = values
+}
+  }
+}"#,
+    );
+    assert!(errs.is_empty(), "got: {:?}", errs);
+}
+
+#[test]
+fn test_short_circuit_or_narrows_rhs_expression() {
+    let errs = errors(
+        r#"pipeline t(task) {
+  fn count_values(values: list<int>) -> int { return len(values) }
+  fn check(values: list<int> | nil) {
+if values == nil || count_values(values) > 0 {
+  log("ok")
+}
+  }
+}"#,
+    );
+    assert!(errs.is_empty(), "got: {:?}", errs);
+}
+
+#[test]
+fn test_nil_coalescing_call_site_strips_optional_chain_nil() {
+    let errs = errors(
+        r#"pipeline t(task) {
+  type Doc = { components: { schemas: dict<int>? }? }
+  let doc: Doc = { components: nil }
+  let n: int = len(doc.components?.schemas ?? {})
+}"#,
+    );
+    assert!(errs.is_empty(), "got: {:?}", errs);
+}
+
+#[test]
 fn test_or_falsy_narrowing() {
     // || combines falsy refinements
     let errs = errors(
