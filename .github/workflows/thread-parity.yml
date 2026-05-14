@@ -36,6 +36,7 @@ jobs:
         continue-on-error: true
         with:
           shared-key: workspace
+          cache-bin: false
 
       - name: Install cargo-nextest
         uses: taiki-e/install-action@c070f87102a1c75b3183910f391c1cb887fe13c8 # v2.77.6

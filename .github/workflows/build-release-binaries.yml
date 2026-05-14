@@ -154,6 +154,7 @@ jobs:
         with:
           shared-key: release-${{ matrix.target }}
           cache-on-failure: true
+          cache-bin: false
           save-if: ${{ github.ref == 'refs/heads/main' }}
 
       - name: Add cross-compile target to pinned toolchain
