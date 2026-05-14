@@ -14,6 +14,7 @@ pub(crate) mod explain;
 pub mod flow;
 pub(crate) mod hardware;
 pub(crate) mod init;
+pub(crate) mod local;
 pub(crate) mod mcp;
 pub(crate) mod merge_captain;
 pub(crate) mod merge_captain_mock;

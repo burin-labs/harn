@@ -3,12 +3,13 @@ use std::time::Duration as StdDuration;
 
 use super::{
     CheckOutputFormat, Cli, Command, CompletionShell, ConfigCommand, ConnectCommand,
-    ConnectorCommand, CrystallizeCommand, FlowArchivistCommand, FlowCommand, McpCommand,
-    ModelsCommand, OrchestratorCommand, OrchestratorDeployProvider, OrchestratorLogFormat,
-    OrchestratorQueueCommand, OrchestratorTenantCommand, PackageArtifactsCommand,
-    PackageCacheCommand, PackageCommand, PersonaCommand, ProjectTemplate, ProvidersCommand,
-    RunsCommand, SessionCommand, SkillCommand, SkillKeyCommand, SkillTrustCommand, SkillsCommand,
-    ToolCommand, TraceCommand, TriggerCommand, TrustCommand, TrustOutcomeArg, TrustTierArg,
+    ConnectorCommand, CrystallizeCommand, FlowArchivistCommand, FlowCommand, LocalCommand,
+    McpCommand, ModelsCommand, OrchestratorCommand, OrchestratorDeployProvider,
+    OrchestratorLogFormat, OrchestratorQueueCommand, OrchestratorTenantCommand,
+    PackageArtifactsCommand, PackageCacheCommand, PackageCommand, PersonaCommand, ProjectTemplate,
+    ProvidersCommand, RunsCommand, SessionCommand, SkillCommand, SkillKeyCommand,
+    SkillTrustCommand, SkillsCommand, ToolCommand, TraceCommand, TriggerCommand, TrustCommand,
+    TrustOutcomeArg, TrustTierArg,
 };
 use clap::{CommandFactory, Parser};
 
@@ -2282,6 +2283,65 @@ fn test_parses_models_test_args() {
     assert_eq!(args.provider.as_deref(), Some("ollama"));
     assert_eq!(args.prompt, "say pong");
     assert!(args.json);
+}
+
+#[test]
+fn test_parses_local_list_args() {
+    let cli = Cli::parse_from(["harn", "local", "list", "--json", "--provider", "ollama"]);
+    let Command::Local(args) = cli.command.unwrap() else {
+        panic!("expected local command");
+    };
+    let LocalCommand::List(args) = args.command else {
+        panic!("expected local list command");
+    };
+    assert!(args.json);
+    assert_eq!(args.provider.as_deref(), Some("ollama"));
+}
+
+#[test]
+fn test_parses_local_switch_args_with_machine_overrides() {
+    let cli = Cli::parse_from([
+        "harn",
+        "local",
+        "switch",
+        "qwen36-coder",
+        "--provider",
+        "ollama",
+        "--ctx",
+        "65536",
+        "--keep-alive",
+        "1h",
+        "--no-pull",
+        "--no-evict",
+        "--json",
+    ]);
+    let Command::Local(args) = cli.command.unwrap() else {
+        panic!("expected local command");
+    };
+    let LocalCommand::Switch(args) = args.command else {
+        panic!("expected local switch command");
+    };
+    assert_eq!(args.model, "qwen36-coder");
+    assert_eq!(args.provider.as_deref(), Some("ollama"));
+    assert_eq!(args.ctx, Some(65536));
+    assert_eq!(args.keep_alive.as_deref(), Some("1h"));
+    assert!(args.no_pull);
+    assert!(args.no_evict);
+    assert!(args.json);
+}
+
+#[test]
+fn test_parses_local_stop_all_flag() {
+    let cli = Cli::parse_from(["harn", "local", "stop", "--all", "--json"]);
+    let Command::Local(args) = cli.command.unwrap() else {
+        panic!("expected local command");
+    };
+    let LocalCommand::Stop(args) = args.command else {
+        panic!("expected local stop command");
+    };
+    assert!(args.all);
+    assert!(args.json);
+    assert!(args.provider.is_none());
 }
 
 #[test]

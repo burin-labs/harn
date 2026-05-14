@@ -349,6 +349,10 @@ NON_TEST_WALL_CLOCK_ALLOWLIST=(
   "crates/harn-cli/src/commands/connector.rs"
   "crates/harn-cli/src/commands/explain.rs"
   "crates/harn-cli/src/commands/flow.rs"
+  # `harn local switch` stamps the selection record with the actual host
+  # wall clock so `harn local status` can show "selection age" to users
+  # debugging a long-running session.
+  "crates/harn-cli/src/commands/local/state.rs"
   "crates/harn-cli/src/commands/mcp/mod.rs"
   "crates/harn-cli/src/commands/mcp/oauth_resource.rs"
   "crates/harn-cli/src/commands/mcp/serve/util.rs"

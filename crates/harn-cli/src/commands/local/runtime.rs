@@ -1,0 +1,352 @@
+//! Shared helpers for `harn local …` subcommands: provider enumeration,
+//! readiness snapshots, Ollama `/api/ps` loaded-model details, and PID-file
+//! tracking for self-launched llama.cpp / MLX processes.
+
+use std::path::Path;
+use std::time::Duration;
+
+use harn_vm::llm::readiness::{probe_provider_readiness, ProviderReadiness, ReadinessStatus};
+use harn_vm::llm_config::{self, ProviderDef};
+use serde::Serialize;
+
+use super::state::{read_pid_record, PidRecord};
+
+/// Provider ids Harn treats as "local LLM runtimes" for lifecycle purposes.
+/// Order is canonical for output stability.
+pub(crate) const LOCAL_PROVIDERS: &[&str] = &["ollama", "llamacpp", "mlx", "local", "vllm"];
+
+/// Per-provider runtime snapshot. Combines:
+/// - provider catalog metadata (base_url, port, env override, auth style),
+/// - liveness via `/v1/models` (or `/api/tags` for Ollama),
+/// - currently-loaded models with memory footprint (Ollama `/api/ps` only),
+/// - any harn-launched PID we are tracking.
+#[derive(Debug, Clone, Serialize)]
+pub(crate) struct LocalProviderSnapshot {
+    pub provider: String,
+    pub display_name: Option<String>,
+    pub base_url: String,
+    pub base_url_env: Option<String>,
+    pub port: Option<u16>,
+    pub reachable: bool,
+    pub readiness_status: String,
+    pub message: String,
+    pub served_models: Vec<String>,
+    pub loaded_models: Vec<LoadedModel>,
+    pub pid_record: Option<PidRecord>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub(crate) struct LoadedModel {
+    pub name: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub size_bytes: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub size_vram_bytes: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub expires_at: Option<String>,
+}
+
+pub(crate) fn local_provider_ids(filter: Option<&str>) -> Vec<String> {
+    let mut ids = Vec::new();
+    if let Some(name) = filter.map(str::trim).filter(|name| !name.is_empty()) {
+        ids.push(name.to_string());
+        return ids;
+    }
+    for id in LOCAL_PROVIDERS {
+        if llm_config::provider_config(id).is_some() {
+            ids.push((*id).to_string());
+        }
+    }
+    ids
+}
+
+pub(crate) async fn snapshot_provider(
+    provider: &str,
+    state_dir: &Path,
+) -> Result<LocalProviderSnapshot, String> {
+    let def = llm_config::provider_config(provider)
+        .ok_or_else(|| format!("unknown provider: {provider}"))?;
+    let base_url = llm_config::resolve_base_url(&def);
+
+    let (reachable, status, message, served_models) = if provider == "ollama" {
+        snapshot_ollama_reachability(&base_url).await
+    } else {
+        snapshot_openai_reachability(provider, &base_url).await
+    };
+
+    let loaded_models = if provider == "ollama" && reachable {
+        fetch_ollama_ps(&base_url).await.unwrap_or_default()
+    } else {
+        Vec::new()
+    };
+
+    Ok(LocalProviderSnapshot {
+        provider: provider.to_string(),
+        display_name: def.display_name.clone(),
+        base_url: base_url.clone(),
+        base_url_env: def.base_url_env.clone(),
+        port: port_from_base_url(&base_url),
+        reachable,
+        readiness_status: status,
+        message,
+        served_models,
+        loaded_models,
+        pid_record: read_pid_record(state_dir, provider).ok().flatten(),
+    })
+}
+
+async fn snapshot_openai_reachability(
+    provider: &str,
+    base_url: &str,
+) -> (bool, String, String, Vec<String>) {
+    let readiness = probe_provider_readiness(provider, None, Some(base_url)).await;
+    let ProviderReadiness {
+        ok,
+        status,
+        message,
+        served_models,
+        ..
+    } = readiness;
+    (ok, readiness_status_label(status), message, served_models)
+}
+
+async fn snapshot_ollama_reachability(base_url: &str) -> (bool, String, String, Vec<String>) {
+    // `ollama_readiness` is keyed on a specific model id and returns
+    // misleading messages when we just want a liveness check. Hit
+    // `/api/tags` directly and collect the served set.
+    match fetch_ollama_tags(base_url).await {
+        Ok(served) => {
+            let message = format!("Ollama is reachable at {base_url}; {} served", served.len());
+            (true, "ok".to_string(), message, served)
+        }
+        Err(OllamaProbeError { status, message }) => (false, status, message, Vec::new()),
+    }
+}
+
+#[derive(Debug)]
+struct OllamaProbeError {
+    status: String,
+    message: String,
+}
+
+async fn fetch_ollama_tags(base_url: &str) -> Result<Vec<String>, OllamaProbeError> {
+    let url = ollama_endpoint(base_url, "/api/tags").map_err(|message| OllamaProbeError {
+        status: "invalid_url".to_string(),
+        message,
+    })?;
+    let client = local_http_client().map_err(|message| OllamaProbeError {
+        status: "client_error".to_string(),
+        message,
+    })?;
+    let response = client
+        .get(url.clone())
+        .header("Content-Type", "application/json")
+        .timeout(Duration::from_secs(4))
+        .send()
+        .await
+        .map_err(|error| OllamaProbeError {
+            status: "unreachable".to_string(),
+            message: format!("Ollama daemon not reachable at {url}: {error}"),
+        })?;
+    if !response.status().is_success() {
+        return Err(OllamaProbeError {
+            status: "bad_status".to_string(),
+            message: format!("Ollama /api/tags returned HTTP {}", response.status()),
+        });
+    }
+    let body: serde_json::Value = response.json().await.map_err(|error| OllamaProbeError {
+        status: "bad_response".to_string(),
+        message: format!("Ollama /api/tags returned unparsable body: {error}"),
+    })?;
+    Ok(body
+        .get("models")
+        .and_then(|value| value.as_array())
+        .map(|entries| {
+            entries
+                .iter()
+                .filter_map(|entry| {
+                    entry
+                        .get("name")
+                        .and_then(serde_json::Value::as_str)
+                        .map(str::to_string)
+                })
+                .collect::<Vec<_>>()
+        })
+        .unwrap_or_default())
+}
+
+/// Build an Ollama endpoint URL, normalizing `localhost` → `127.0.0.1` (some
+/// Ollama builds reject the literal hostname). One canonical helper so
+/// every call site is consistent.
+fn ollama_endpoint(base_url: &str, path: &str) -> Result<reqwest::Url, String> {
+    let mut url = reqwest::Url::parse(base_url)
+        .map_err(|error| format!("invalid Ollama base URL '{base_url}': {error}"))?;
+    if url.host_str() == Some("localhost") {
+        url.set_host(Some("127.0.0.1"))
+            .map_err(|_| format!("invalid Ollama base URL '{base_url}'"))?;
+    }
+    url.set_path(path);
+    Ok(url)
+}
+
+fn readiness_status_label(status: ReadinessStatus) -> String {
+    match status {
+        ReadinessStatus::Ok => "ok",
+        ReadinessStatus::UnknownProvider => "unknown_provider",
+        ReadinessStatus::InvalidUrl => "invalid_url",
+        ReadinessStatus::Unreachable => "unreachable",
+        ReadinessStatus::BadStatus => "bad_status",
+        ReadinessStatus::BadResponse => "bad_response",
+        ReadinessStatus::ModelMissing => "model_missing",
+    }
+    .to_string()
+}
+
+fn port_from_base_url(base_url: &str) -> Option<u16> {
+    reqwest::Url::parse(base_url)
+        .ok()
+        .and_then(|url| url.port())
+}
+
+/// Best-effort `/api/ps` query so `harn local list` can show which Ollama
+/// models are loaded right now plus their memory footprint. We swallow
+/// errors so list/status keep working when the daemon is older or the
+/// endpoint is unavailable.
+async fn fetch_ollama_ps(base_url: &str) -> Result<Vec<LoadedModel>, String> {
+    let url = ollama_endpoint(base_url, "/api/ps")?;
+    let client = local_http_client()?;
+    let response = client
+        .get(url)
+        .header("Content-Type", "application/json")
+        .timeout(Duration::from_secs(4))
+        .send()
+        .await
+        .map_err(|error| error.to_string())?;
+    if !response.status().is_success() {
+        return Err(format!("/api/ps returned HTTP {}", response.status()));
+    }
+    let body: serde_json::Value = response.json().await.map_err(|error| error.to_string())?;
+    let models = body.get("models").and_then(|value| value.as_array());
+    let Some(models) = models else {
+        return Ok(Vec::new());
+    };
+    Ok(models
+        .iter()
+        .filter_map(|entry| {
+            let name = entry
+                .get("name")
+                .and_then(serde_json::Value::as_str)
+                .or_else(|| entry.get("model").and_then(serde_json::Value::as_str))?
+                .to_string();
+            Some(LoadedModel {
+                name,
+                size_bytes: entry.get("size").and_then(serde_json::Value::as_u64),
+                size_vram_bytes: entry.get("size_vram").and_then(serde_json::Value::as_u64),
+                expires_at: entry
+                    .get("expires_at")
+                    .and_then(serde_json::Value::as_str)
+                    .map(str::to_string),
+            })
+        })
+        .collect())
+}
+
+/// Post `keep_alive=0` to `/api/generate` for `model`. Ollama treats that as
+/// "unload after this request", which matches `ollama stop <model>` from the
+/// CLI. Returns Ok on 2xx, Err with the upstream message otherwise.
+pub(crate) async fn ollama_unload_model(base_url: &str, model: &str) -> Result<(), String> {
+    let url = ollama_endpoint(base_url, "/api/generate")?;
+    let body = serde_json::json!({
+        "model": model,
+        "prompt": "",
+        "stream": false,
+        "keep_alive": 0,
+    });
+    let client = local_http_client()?;
+    let response = client
+        .post(url)
+        .header("Content-Type", "application/json")
+        .timeout(Duration::from_secs(8))
+        .json(&body)
+        .send()
+        .await
+        .map_err(|error| format!("Ollama unload failed: {error}"))?;
+    if response.status().is_success() {
+        Ok(())
+    } else {
+        let status = response.status();
+        let detail = response.text().await.unwrap_or_default();
+        Err(format!(
+            "Ollama unload returned HTTP {}: {}",
+            status.as_u16(),
+            detail
+        ))
+    }
+}
+
+/// SIGTERM a child PID Harn previously launched (llama.cpp / MLX). We
+/// deliberately do not retry with SIGKILL: a stuck launcher is a signal
+/// for the user to investigate, not for us to silently force-kill.
+#[cfg(unix)]
+pub(crate) fn terminate_pid(pid: u32) -> Result<(), String> {
+    use std::convert::TryFrom;
+    let raw = i32::try_from(pid).map_err(|_| format!("pid {pid} is out of range"))?;
+    // SAFETY: `libc::kill` is FFI; we pass a well-formed PID + SIGTERM and
+    // check the return code. No memory is shared with C.
+    let rc = unsafe { libc::kill(raw, libc::SIGTERM) };
+    if rc == 0 {
+        Ok(())
+    } else {
+        Err(std::io::Error::last_os_error().to_string())
+    }
+}
+
+#[cfg(not(unix))]
+pub(crate) fn terminate_pid(pid: u32) -> Result<(), String> {
+    Err(format!(
+        "terminating pid {pid} is not supported on this platform"
+    ))
+}
+
+pub(crate) fn resolve_provider_def(provider: &str) -> Result<ProviderDef, String> {
+    llm_config::provider_config(provider)
+        .ok_or_else(|| format!("unknown provider '{provider}' in Harn provider catalog"))
+}
+
+/// A fresh reqwest client for one-off lifecycle calls. We do not reuse
+/// harn-vm's shared utility client because `harn local` is the only caller
+/// from the CLI side and we want deterministic timeouts independent of the
+/// streaming/transport client settings.
+fn local_http_client() -> Result<reqwest::Client, String> {
+    reqwest::Client::builder()
+        .connect_timeout(Duration::from_secs(2))
+        .timeout(Duration::from_secs(10))
+        .build()
+        .map_err(|error| format!("failed to build HTTP client: {error}"))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn local_provider_ids_filters_unknown_filter() {
+        let ids = local_provider_ids(Some("ollama"));
+        assert_eq!(ids, vec!["ollama".to_string()]);
+    }
+
+    #[test]
+    fn local_provider_ids_returns_canonical_list() {
+        let ids = local_provider_ids(None);
+        assert!(ids.contains(&"ollama".to_string()));
+        assert!(ids.contains(&"llamacpp".to_string()));
+        assert!(ids.contains(&"mlx".to_string()));
+    }
+
+    #[test]
+    fn port_from_base_url_recognizes_explicit_port() {
+        assert_eq!(port_from_base_url("http://127.0.0.1:11434"), Some(11434));
+        assert_eq!(port_from_base_url("http://localhost:8001/v1"), Some(8001));
+        assert_eq!(port_from_base_url("https://api.example.com"), None);
+    }
+}

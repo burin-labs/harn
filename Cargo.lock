@@ -2086,6 +2086,7 @@ dependencies = [
  "jmespath",
  "jsonschema",
  "jsonwebtoken",
+ "libc",
  "notify",
  "nu-ansi-term",
  "rand 0.10.1",
