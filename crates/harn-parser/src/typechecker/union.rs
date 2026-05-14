@@ -12,21 +12,53 @@ use crate::ast::*;
 
 use super::scope::{InferredType, TypeScope};
 
-/// Simplify a union by removing `Never` members and collapsing.
+/// Simplify a union by flattening nested unions, removing `Never` members,
+/// deduplicating, and collapsing single-member unions.
 pub(super) fn simplify_union(members: Vec<TypeExpr>) -> TypeExpr {
     let mut filtered: Vec<TypeExpr> = Vec::new();
-    for member in members
-        .into_iter()
-        .filter(|m| !matches!(m, TypeExpr::Never))
-    {
-        if !filtered.contains(&member) {
-            filtered.push(member);
-        }
+    for member in members {
+        collect_simplified_union_member(member, &mut filtered);
     }
     match filtered.len() {
         0 => TypeExpr::Never,
         1 => filtered.into_iter().next().unwrap(),
         _ => TypeExpr::Union(filtered),
+    }
+}
+
+fn collect_simplified_union_member(member: TypeExpr, filtered: &mut Vec<TypeExpr>) {
+    match member {
+        TypeExpr::Never => {}
+        TypeExpr::Union(members) => {
+            for member in members {
+                collect_simplified_union_member(member, filtered);
+            }
+        }
+        member => {
+            if !filtered.contains(&member) {
+                filtered.push(member);
+            }
+        }
+    }
+}
+
+/// Remove every `nil` arm from a type expression, including nested unions.
+pub(super) fn without_nil(ty: &TypeExpr) -> InferredType {
+    match ty {
+        TypeExpr::Named(name) if name == "nil" => None,
+        TypeExpr::Union(members) => {
+            let non_nil: Vec<TypeExpr> = members.iter().filter_map(without_nil).collect();
+            (!non_nil.is_empty()).then(|| simplify_union(non_nil))
+        }
+        other => Some(other.clone()),
+    }
+}
+
+pub(super) fn contains_nil(ty: &TypeExpr) -> bool {
+    match ty {
+        TypeExpr::Named(name) if name == "nil" => true,
+        TypeExpr::Union(members) => members.iter().any(contains_nil),
+        _ => false,
     }
 }
 

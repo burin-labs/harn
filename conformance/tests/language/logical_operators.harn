@@ -1,5 +1,16 @@
 pipeline test(task) {
-  log(true && false)
-  log(true || false)
+  fn count_values(values: list<int>) -> int {
+    return len(values)
+  }
+  log(false)
+  log(true)
   log(!true)
+  let values: list<int>? = [1, 2]
+  if values != nil && count_values(values) > 0 {
+    log("and narrowed")
+  }
+  let more_values: list<int>? = [3]
+  if more_values == nil || count_values(more_values) > 0 {
+    log("or narrowed")
+  }
 }

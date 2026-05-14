@@ -21,11 +21,12 @@ use super::super::exits::stmt_definitely_exits;
 use super::super::format::{format_type, is_obvious_type};
 use super::super::schema_inference::schema_type_expr_from_node;
 use super::super::scope::{
-    EnumDeclInfo, FnSignature, ImplMethodSig, InterfaceDeclInfo, StructDeclInfo, TypeAliasInfo,
-    TypeScope,
+    EnumDeclInfo, FnSignature, ImplMethodSig, InferredType, InterfaceDeclInfo, StructDeclInfo,
+    TypeAliasInfo, TypeScope,
 };
 use super::super::union::{
-    discriminant_field, narrow_shape_union_by_tag, narrow_to_single, DiscriminantValue,
+    discriminant_field, narrow_shape_union_by_tag, narrow_to_single, simplify_union, without_nil,
+    DiscriminantValue,
 };
 use super::super::{InlayHintInfo, TypeChecker};
 use super::flow::{pattern_alternatives, resolve_union_shape_members};
@@ -142,6 +143,34 @@ impl TypeChecker {
                 TypeExpr::Union(widened)
             }
             other => TypeExpr::Union(vec![other.clone(), TypeExpr::Named("nil".into())]),
+        }
+    }
+
+    fn iterable_item_type(&self, iter_type: &TypeExpr, scope: &TypeScope) -> InferredType {
+        let resolved = self.resolve_alias(iter_type, scope);
+        let non_nil = without_nil(&resolved)?;
+        match self.resolve_alias(&non_nil, scope) {
+            TypeExpr::List(inner)
+            | TypeExpr::Iter(inner)
+            | TypeExpr::Generator(inner)
+            | TypeExpr::Stream(inner) => Some(*inner),
+            TypeExpr::Applied { name, args } if name == "Iter" && args.len() == 1 => {
+                Some(args[0].clone())
+            }
+            TypeExpr::DictType(key, value) => Some(TypeExpr::Applied {
+                name: "Pair".into(),
+                args: vec![*key, *value],
+            }),
+            TypeExpr::Named(name) if name == "string" => Some(TypeExpr::Named("string".into())),
+            TypeExpr::Named(name) if name == "range" => Some(TypeExpr::Named("int".into())),
+            TypeExpr::Union(members) => {
+                let mut item_types = Vec::new();
+                for member in members {
+                    item_types.push(self.iterable_item_type(&member, scope)?);
+                }
+                Some(simplify_union(item_types))
+            }
+            _ => None,
         }
     }
 
@@ -712,60 +741,26 @@ impl TypeChecker {
                 let mut loop_scope = scope.child();
                 let iter_type = self.infer_type(iterable, scope);
                 if let BindingPattern::Identifier(variable) = pattern {
-                    // Infer loop variable type from iterable
-                    let elem_type = match iter_type {
-                        Some(TypeExpr::List(inner)) => Some(*inner),
-                        Some(TypeExpr::Iter(inner)) => Some(*inner),
-                        Some(TypeExpr::Generator(inner)) => Some(*inner),
-                        Some(TypeExpr::Stream(inner)) => Some(*inner),
-                        Some(TypeExpr::Applied { ref name, ref args })
-                            if name == "Iter" && args.len() == 1 =>
-                        {
-                            Some(args[0].clone())
-                        }
-                        Some(TypeExpr::Named(n)) if n == "string" => {
-                            Some(TypeExpr::Named("string".into()))
-                        }
-                        // Iterating a range always yields ints.
-                        Some(TypeExpr::Named(n)) if n == "range" => {
-                            Some(TypeExpr::Named("int".into()))
-                        }
-                        _ => None,
-                    };
+                    let elem_type = iter_type
+                        .as_ref()
+                        .and_then(|ty| self.iterable_item_type(ty, scope));
                     loop_scope.define_var(variable, elem_type);
                     loop_scope.clear_nil_widenable(variable);
                 } else if let BindingPattern::Pair(a, b) = pattern {
                     // Pair destructuring: `for (k, v) in iter` — extract K, V
                     // from the yielded Pair<K, V>.
-                    let (ka, vb) = match &iter_type {
-                        Some(TypeExpr::Iter(inner))
-                        | Some(TypeExpr::Generator(inner))
-                        | Some(TypeExpr::Stream(inner)) => {
-                            if let TypeExpr::Applied { name, args } = inner.as_ref() {
-                                if name == "Pair" && args.len() == 2 {
-                                    (Some(args[0].clone()), Some(args[1].clone()))
-                                } else {
-                                    (None, None)
-                                }
+                    let (ka, vb) = iter_type
+                        .as_ref()
+                        .and_then(|ty| self.iterable_item_type(ty, scope))
+                        .and_then(|ty| {
+                            if let TypeExpr::Applied { name, args } = ty {
+                                (name == "Pair" && args.len() == 2)
+                                    .then(|| (Some(args[0].clone()), Some(args[1].clone())))
                             } else {
-                                (None, None)
+                                None
                             }
-                        }
-                        Some(TypeExpr::Applied { name, args })
-                            if name == "Iter" && args.len() == 1 =>
-                        {
-                            if let TypeExpr::Applied { name: n2, args: a2 } = &args[0] {
-                                if n2 == "Pair" && a2.len() == 2 {
-                                    (Some(a2[0].clone()), Some(a2[1].clone()))
-                                } else {
-                                    (None, None)
-                                }
-                            } else {
-                                (None, None)
-                            }
-                        }
-                        _ => (None, None),
-                    };
+                        })
+                        .unwrap_or((None, None));
                     loop_scope.define_var(a, ka);
                     loop_scope.define_var(b, vb);
                     loop_scope.clear_nil_widenable(a);
@@ -1132,6 +1127,17 @@ impl TypeChecker {
             // Recurse into nested expressions + validate binary op types
             Node::BinaryOp { op, left, right } => {
                 self.check_node(left, scope);
+                if op == "&&" || op == "||" {
+                    let refs = Self::extract_refinements(left, scope);
+                    let mut right_scope = scope.child();
+                    if op == "&&" {
+                        refs.apply_truthy(&mut right_scope);
+                    } else {
+                        refs.apply_falsy(&mut right_scope);
+                    }
+                    self.check_node(right, &mut right_scope);
+                    return;
+                }
                 self.check_node(right, scope);
                 // Validate operator/type compatibility
                 let lt = self.infer_type(left, scope);

@@ -913,6 +913,12 @@ fn test_builtin_arg_type_mismatch() {
 }
 
 #[test]
+fn test_len_accepts_nil_like_runtime() {
+    let errs = errors(r#"pipeline t(task) { let n: int = len(nil) }"#);
+    assert!(errs.is_empty(), "got errors: {errs:?}");
+}
+
+#[test]
 fn test_llm_call_option_literal_checks_known_field_types() {
     let errs = errors(
         r#"pipeline t(task) {

@@ -1107,6 +1107,7 @@ pub(crate) const SIGNATURES: &[BuiltinSignature] = &[
                 TY_DICT,
                 Ty::Named("set"),
                 Ty::Named("range"),
+                TY_NIL,
             ]),
         )],
         TY_INT,

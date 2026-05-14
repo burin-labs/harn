@@ -135,7 +135,9 @@ impl TypeChecker {
             // Logical AND: both operands must be truthy, so truthy refinements compose.
             Node::BinaryOp { op, left, right } if op == "&&" => {
                 let left_ref = Self::extract_refinements(left, scope);
-                let right_ref = Self::extract_refinements(right, scope);
+                let mut right_scope = scope.child();
+                left_ref.apply_truthy(&mut right_scope);
+                let right_ref = Self::extract_refinements(right, &right_scope);
                 let mut truthy = left_ref.truthy;
                 truthy.extend(right_ref.truthy);
                 let mut truthy_ruled_out = left_ref.truthy_ruled_out;
@@ -151,7 +153,9 @@ impl TypeChecker {
             // Logical OR: both operands must be falsy for the whole to be falsy.
             Node::BinaryOp { op, left, right } if op == "||" => {
                 let left_ref = Self::extract_refinements(left, scope);
-                let right_ref = Self::extract_refinements(right, scope);
+                let mut right_scope = scope.child();
+                left_ref.apply_falsy(&mut right_scope);
+                let right_ref = Self::extract_refinements(right, &right_scope);
                 let mut falsy = left_ref.falsy;
                 falsy.extend(right_ref.falsy);
                 let mut falsy_ruled_out = left_ref.falsy_ruled_out;
