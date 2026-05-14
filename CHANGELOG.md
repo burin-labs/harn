@@ -6,7 +6,25 @@ Pre-0.6 highlights live in [CHANGELOG-pre-0.6.md](CHANGELOG-pre-0.6.md).
 Harn had no external users before 0.6.0, so that archive intentionally keeps
 condensed series summaries instead of full per-patch history.
 
-## Unreleased
+## v0.8.15
+
+### Added
+
+- **Current local coding model aliases and setup guidance (#1601).** Catalog
+  now ships aliases for Qwen3.6 35B A3B Coding (NVFP4), Gemma 4 26B MoE,
+  Devstral Small 2 24B, llama.cpp Qwen3.6 GGUF, and Apple MLX Qwen3.6 27B.
+  Local Qwen3.6/Devstral routes default to the text-tool contract (with
+  `*-native` siblings kept for targeted parser A/B tests). `harn quickstart`,
+  `harn models recommend`, and `harn models install` prefer/present the new
+  local coding models and now print concrete setup plans for llama.cpp,
+  MLX, and generic local OpenAI-compatible servers. Documented local
+  provider setup and known MLX server flag variance.
+- **`/api/ps` observability in model-info (#1600).** `harn model-info
+  <alias> --verify` (and `--warm`) now hits `/api/ps`, surfaces the
+  loaded runner's `context_length`, and reports the `num_ctx` Harn would
+  request as `expected.num_ctx`. When the two diverge, `context_drift`
+  explains the load-time semantics and points at `ollama stop <model>`
+  for recovery. Also documented in `docs/src/llm/providers.md`.
 
 ### Fixed
 
@@ -18,15 +36,6 @@ condensed series summaries instead of full per-patch history.
   warmup body now derives from `OllamaRuntimeSettings::warmup_body`, so
   the runner is loaded at the same `num_ctx` chat/completion paths
   request.
-
-### Added
-
-- **`/api/ps` observability in model-info (#1600).** `harn model-info
-  <alias> --verify` (and `--warm`) now hits `/api/ps`, surfaces the
-  loaded runner's `context_length`, and reports the `num_ctx` Harn would
-  request as `expected.num_ctx`. When the two diverge, `context_drift`
-  explains the load-time semantics and points at `ollama stop <model>`
-  for recovery. Also documented in `docs/src/llm/providers.md`.
 
 ## v0.8.14
 
