@@ -76,6 +76,21 @@ jobs:
           # boots quickly when the unit slice already filled the cache.
           shared-key: release-smoke-${{ matrix.platform }}
           cache-on-failure: true
+          # Keep rustup's freshly-installed cargo shim authoritative.
+          # Stale cached binaries can shadow it on macOS tag runners.
+          cache-bin: false
+      - name: Verify macOS Rust toolchain
+        if: runner.os == 'macOS'
+        shell: bash
+        run: |
+          set -euo pipefail
+          rustup show active-toolchain || rustup show
+          echo "cargo path: $(command -v cargo)"
+          echo "rustup cargo: $(rustup which cargo)"
+          echo "rustc path: $(command -v rustc)"
+          echo "rustup rustc: $(rustup which rustc)"
+          cargo --version
+          rustc --version
       - name: Build release harn binary
         shell: bash
         env:
