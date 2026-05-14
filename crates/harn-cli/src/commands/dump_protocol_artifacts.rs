@@ -16,7 +16,7 @@ use harn_serve::adapters::acp::{
     HARN_TOOL_LIFECYCLE_EXTENSION_FIELDS,
 };
 use harn_serve::{A2A_PROTOCOL_VERSION, MCP_PROTOCOL_VERSION};
-use harn_vm::agent_events::{ToolCallErrorCategory, ToolCallStatus};
+use harn_vm::agent_events::{ToolCallErrorCategory, ToolCallStatus, WorkerEvent};
 use harn_vm::tool_annotations::{SideEffectLevel, ToolKind};
 use serde::Serialize;
 use serde_json::json;
@@ -265,6 +265,7 @@ fn generate_manifest() -> Result<String, String> {
             "toolCallStatuses": tool_call_status_values(),
             "toolCallErrorCategories": tool_call_error_category_values(),
             "toolExecutorSimpleValues": ACP_TOOL_EXECUTOR_SIMPLE_VALUES,
+            "workerStatuses": worker_status_values(),
         },
         "a2a": {
             "protocolVersion": A2A_PROTOCOL_VERSION,
@@ -386,6 +387,11 @@ fn generate_typescript() -> String {
         "HARN_SIDE_EFFECT_LEVELS",
         &side_effect_level_values(),
         "HarnSideEffectLevel",
+    ));
+    out.push_str(&ts_array_owned(
+        "HARN_WORKER_STATUSES",
+        &worker_status_values(),
+        "HarnWorkerStatus",
     ));
     out.push_str(&ts_array(
         "A2A_TASK_STATES",
@@ -735,6 +741,7 @@ fn generate_swift() -> String {
         "HarnSideEffectLevel",
         &side_effect_level_values(),
     ));
+    out.push_str(&swift_enum("HarnWorkerStatus", &worker_status_values()));
     out.push_str(&swift_enum(
         "HarnA2ATaskState",
         &strs_to_strings(A2A_TASK_STATES),
@@ -1410,6 +1417,10 @@ fn generate_python() -> String {
         "HARN_SIDE_EFFECT_LEVELS",
         &side_effect_level_values(),
     ));
+    out.push_str(&py_const_tuple_owned(
+        "HARN_WORKER_STATUSES",
+        &worker_status_values(),
+    ));
     out.push_str(&py_const_tuple(
         "HARN_TOOL_LIFECYCLE_EXTENSION_FIELDS",
         HARN_TOOL_LIFECYCLE_EXTENSION_FIELDS,
@@ -1446,6 +1457,10 @@ fn generate_python() -> String {
     out.push_str(&py_str_enum_owned(
         "HarnSideEffectLevel",
         &side_effect_level_values(),
+    ));
+    out.push_str(&py_str_enum_owned(
+        "HarnWorkerStatus",
+        &worker_status_values(),
     ));
     out.push_str(&py_str_enum("A2ATaskState", A2A_TASK_STATES));
     out.push_str(&py_str_enum("A2ATaskEventType", A2A_TASK_EVENT_TYPES));
@@ -1726,6 +1741,7 @@ fn python_public_names() -> Vec<String> {
         "ACP_TOOL_CALL_STATUSES",
         "HARN_TOOL_CALL_ERROR_CATEGORIES",
         "HARN_SIDE_EFFECT_LEVELS",
+        "HARN_WORKER_STATUSES",
         "HARN_TOOL_LIFECYCLE_EXTENSION_FIELDS",
         "HARN_CONTENT_EXTENSION_FIELDS",
         "A2A_METHODS",
@@ -1741,6 +1757,7 @@ fn python_public_names() -> Vec<String> {
         "ACPToolCallStatus",
         "HarnToolCallErrorCategory",
         "HarnSideEffectLevel",
+        "HarnWorkerStatus",
         "A2ATaskState",
         "A2ATaskEventType",
         "MCPLoggingLevel",
@@ -1950,6 +1967,11 @@ fn generate_go() -> String {
         "HarnSideEffectLevel",
         "HarnSideEffectLevels",
         &side_effect_level_values(),
+    ));
+    out.push_str(&go_typed_array_owned(
+        "HarnWorkerStatus",
+        "HarnWorkerStatuses",
+        &worker_status_values(),
     ));
     out.push_str(&go_typed_array(
         "A2ATaskState",
@@ -2486,6 +2508,13 @@ fn tool_call_error_category_values() -> Vec<String> {
         .collect()
 }
 
+fn worker_status_values() -> Vec<String> {
+    WorkerEvent::ALL
+        .iter()
+        .map(|event| event.as_status().to_string())
+        .collect()
+}
+
 fn side_effect_level_values() -> Vec<String> {
     SideEffectLevel::ALL
         .iter()
@@ -2580,9 +2609,13 @@ mod tests {
             .into_iter()
             .chain(tool_call_status_values())
             .chain(tool_call_error_category_values())
+            .chain(worker_status_values())
         {
             assert!(swift.contains(&value), "Swift artifact missing {value}");
         }
+        assert!(swift.contains("public enum HarnWorkerStatus"));
+        assert!(ts.contains("export type HarnWorkerStatus"));
+        assert!(ts.contains("HARN_WORKER_STATUSES"));
     }
 
     #[test]
@@ -2590,6 +2623,7 @@ mod tests {
         let py = generate_python();
         assert!(py.contains("class ACPSessionUpdate(str, Enum):"));
         assert!(py.contains("class HarnToolCallErrorCategory(str, Enum):"));
+        assert!(py.contains("class HarnWorkerStatus(str, Enum):"));
         assert!(py.contains("class _HarnDataclass:"));
         assert!(py.contains("def is_request("));
         for value in HARN_SESSION_UPDATE_EXTENSIONS
@@ -2598,6 +2632,9 @@ mod tests {
             .chain(ACP_AGENT_METHODS.iter())
         {
             assert!(py.contains(value), "Python artifact missing {value}");
+        }
+        for value in worker_status_values() {
+            assert!(py.contains(&value), "Python artifact missing {value}");
         }
     }
 
@@ -2608,12 +2645,17 @@ mod tests {
         assert!(go.contains("type JSONRPCID struct"));
         assert!(go.contains("type ACPSessionUpdateNotification struct"));
         assert!(go.contains("func IsRequest(envelope map[string]json.RawMessage)"));
+        assert!(go.contains("type HarnWorkerStatus = string"));
+        assert!(go.contains("var HarnWorkerStatuses = []HarnWorkerStatus"));
         for value in HARN_SESSION_UPDATE_EXTENSIONS
             .iter()
             .chain(HARN_AGENT_EVENT_KINDS.iter())
             .chain(ACP_AGENT_METHODS.iter())
         {
             assert!(go.contains(value), "Go artifact missing {value}");
+        }
+        for value in worker_status_values() {
+            assert!(go.contains(&value), "Go artifact missing {value}");
         }
     }
 

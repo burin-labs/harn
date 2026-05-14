@@ -195,6 +195,19 @@ var HarnSideEffectLevels = []HarnSideEffectLevel{
 	"network",
 }
 
+// HarnWorkerStatus is the typed alias for the HarnWorkerStatuses wire vocabulary.
+type HarnWorkerStatus = string
+
+// HarnWorkerStatuses enumerates every wire value Harn currently emits for HarnWorkerStatus.
+var HarnWorkerStatuses = []HarnWorkerStatus{
+	"running",
+	"progressed",
+	"awaiting_input",
+	"completed",
+	"failed",
+	"cancelled",
+}
+
 // A2ATaskState is the typed alias for the A2ATaskStates wire vocabulary.
 type A2ATaskState = string
 

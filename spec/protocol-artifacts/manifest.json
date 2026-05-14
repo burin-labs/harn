@@ -160,6 +160,14 @@
       "executor",
       "parsing",
       "rawInputPartial"
+    ],
+    "workerStatuses": [
+      "running",
+      "progressed",
+      "awaiting_input",
+      "completed",
+      "failed",
+      "cancelled"
     ]
   },
   "artifactVersion": "0.8.15",

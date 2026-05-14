@@ -60,6 +60,19 @@ pub enum WorkerEvent {
 }
 
 impl WorkerEvent {
+    /// The full set of `WorkerEvent` variants in canonical order. Mirrors
+    /// the pattern used by `ToolCallStatus::ALL` so the protocol-artifact
+    /// dumper can enumerate worker status wire values without
+    /// special-casing each lifecycle event.
+    pub const ALL: [Self; 6] = [
+        Self::WorkerSpawned,
+        Self::WorkerProgressed,
+        Self::WorkerWaitingForInput,
+        Self::WorkerCompleted,
+        Self::WorkerFailed,
+        Self::WorkerCancelled,
+    ];
+
     /// Wire-level status string used by bridge `worker_update` payloads
     /// and ACP `worker_update` session updates. The four canonical
     /// states are mirrored from harn's internal worker `status` field
@@ -1567,6 +1580,25 @@ mod tests {
                 "{non_terminal:?} should not be terminal"
             );
         }
+
+        // `ALL` is the iteration order downstream protocol-artifact
+        // dumpers walk; keep it in lockstep with the variant list so a
+        // new event doesn't slip in without a wire-status decision.
+        let collected: Vec<&'static str> = WorkerEvent::ALL
+            .iter()
+            .map(|event| event.as_status())
+            .collect();
+        assert_eq!(
+            collected,
+            vec![
+                "running",
+                "progressed",
+                "awaiting_input",
+                "completed",
+                "failed",
+                "cancelled",
+            ]
+        );
     }
 
     #[test]

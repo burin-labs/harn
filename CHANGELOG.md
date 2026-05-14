@@ -6,6 +6,20 @@ Pre-0.6 highlights live in [CHANGELOG-pre-0.6.md](CHANGELOG-pre-0.6.md).
 Harn had no external users before 0.6.0, so that archive intentionally keeps
 condensed series summaries instead of full per-patch history.
 
+## Unreleased
+
+### Added
+
+- **`HarnWorkerStatus` protocol artifact.** `dump-protocol-artifacts` now
+  emits the canonical worker-status wire vocabulary
+  (`running`, `progressed`, `awaiting_input`, `completed`, `failed`,
+  `cancelled`) as a typed enum in every binding (TypeScript, Swift,
+  Python, Go) and a `harnWorkerStatuses` field on the manifest. Hosts
+  consuming `worker_lineage[].status` or `worker_update` payloads can now
+  vendor this enum instead of maintaining hand-rolled synonym buckets
+  for statuses Harn never emits (e.g. `succeeded`, `error`, `timed_out`).
+  `WorkerEvent::ALL` exposes the same set programmatically.
+
 ## v0.8.15
 
 ### Added
