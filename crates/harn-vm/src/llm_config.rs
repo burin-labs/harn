@@ -1757,7 +1757,7 @@ fn default_config() -> ProvidersConfig {
             ModelDef {
                 name: "Gemma 4 26B MoE".to_string(),
                 provider: "ollama".to_string(),
-                context_window: 131_072,
+                context_window: 262_144,
                 runtime_context_window: Some(32_768),
                 stream_timeout: Some(300.0),
                 capabilities: vec![
@@ -2467,6 +2467,20 @@ mod tests {
         assert!(!config.inference_rules.is_empty());
         assert!(!config.tier_rules.is_empty());
         assert_eq!(config.tier_defaults.default, "mid");
+    }
+
+    #[test]
+    fn test_local_ollama_catalog_metadata() {
+        reset_overrides();
+
+        let qwen_coding = model_catalog_entry("qwen3.6:35b-a3b-coding-nvfp4")
+            .expect("qwen3.6 coding catalog entry");
+        assert_eq!(qwen_coding.context_window, 262_144);
+        assert!(!qwen_coding.capabilities.iter().any(|cap| cap == "vision"));
+
+        let gemma4 = model_catalog_entry("gemma4:26b").expect("gemma4 catalog entry");
+        assert_eq!(gemma4.context_window, 262_144);
+        assert!(gemma4.capabilities.iter().any(|cap| cap == "vision"));
     }
 
     #[test]
