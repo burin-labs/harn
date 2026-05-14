@@ -6,6 +6,28 @@ Pre-0.6 highlights live in [CHANGELOG-pre-0.6.md](CHANGELOG-pre-0.6.md).
 Harn had no external users before 0.6.0, so that archive intentionally keeps
 condensed series summaries instead of full per-patch history.
 
+## Unreleased
+
+### Fixed
+
+- **Ollama warmup now applies `num_ctx` (#1600).** The `ollama_readiness`
+  warmup path previously sent `/api/generate` with only `keep_alive` set,
+  which caused Ollama to load the runner at the model's declared maximum
+  context (e.g. `262144` for `qwen3.6:35b-a3b-coding-nvfp4`) regardless of
+  `HARN_OLLAMA_NUM_CTX` or the catalog's `runtime_context_window`. The
+  warmup body now derives from `OllamaRuntimeSettings::warmup_body`, so
+  the runner is loaded at the same `num_ctx` chat/completion paths
+  request.
+
+### Added
+
+- **`/api/ps` observability in model-info (#1600).** `harn model-info
+  <alias> --verify` (and `--warm`) now hits `/api/ps`, surfaces the
+  loaded runner's `context_length`, and reports the `num_ctx` Harn would
+  request as `expected.num_ctx`. When the two diverge, `context_drift`
+  explains the load-time semantics and points at `ollama stop <model>`
+  for recovery. Also documented in `docs/src/llm/providers.md`.
+
 ## v0.8.14
 
 ### Added

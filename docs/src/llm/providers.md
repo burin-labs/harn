@@ -275,6 +275,50 @@ adapters and model aliases without editing Rust-side registration code.
   than this after the request starts, Harn emits one progress notification that
   the model is warming up.
 
+#### Effective vs. loaded context (`num_ctx` semantics)
+
+Ollama sets `num_ctx` once, when a model is **loaded** into memory. After
+that, the runner keeps the same context window for its lifetime — a chat
+request with a different `num_ctx` does *not* shrink an already-loaded
+runner; Ollama unloads and reloads only when the requested value changes
+substantially across requests.
+
+`ollama ps` (and `GET /api/ps`) report `context_length` for each loaded
+runner. That number is the **effective** context the runner will use, not
+the model's declared maximum.
+
+Common gotcha: a model whose Modelfile defaults to a large context (e.g.
+`qwen3.6:35b-a3b-coding-nvfp4` defaults to `262144`) will be loaded at
+that maximum if the first request to load it does not pass an explicit
+`num_ctx`. Subsequent Harn calls with `HARN_OLLAMA_NUM_CTX=32768` then
+appear to be ignored — they are not, but Ollama is reusing the larger
+runner.
+
+Inspect what is actually loaded vs. what Harn would request:
+
+```bash
+harn model-info qwen3.6-coding --verify --warm
+```
+
+The JSON output includes:
+
+- `expected.num_ctx` / `expected.keep_alive` — what Harn injects into
+  request bodies for this model.
+- `loaded_runner.context_length` — what `/api/ps` reports for the
+  matched runner, when present.
+- `context_drift` — a remediation message when the two diverge.
+
+If `context_drift` is set, force a reload with:
+
+```bash
+ollama stop qwen3.6:35b-a3b-coding-nvfp4
+harn model-info qwen3.6-coding --verify --warm
+```
+
+The new warmup correctly passes `options.num_ctx`, so the next load
+respects `HARN_OLLAMA_NUM_CTX` (or the catalog's
+`runtime_context_window`, in that priority order).
+
 ### Local OpenAI-compatible server
 
 - Endpoint: `<LOCAL_LLM_BASE_URL>/v1/chat/completions`

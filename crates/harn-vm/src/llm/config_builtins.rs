@@ -426,6 +426,9 @@ async fn llm_healthcheck_builtin(args: Vec<VmValue>) -> Result<VmValue, VmError>
             let (resolved_model, _) = llm_config::resolve_model(&model);
             let mut readiness = super::api::OllamaReadinessOptions::new(resolved_model);
             readiness.warm = warm;
+            readiness.observe_loaded = options
+                .and_then(|opts| opts.get("observe_loaded"))
+                .is_some_and(|value| matches!(value, VmValue::Bool(true)));
             readiness.base_url = options
                 .and_then(|opts| opts.get("base_url").or_else(|| opts.get("url")))
                 .map(|value| value.display())
