@@ -1170,6 +1170,7 @@ async fn print_model_info(args: &ModelInfoArgs) -> bool {
         if resolved.provider == "ollama" {
             let mut readiness = harn_vm::llm::OllamaReadinessOptions::new(resolved.id.clone());
             readiness.warm = args.warm;
+            readiness.observe_loaded = true;
             readiness.keep_alive = args
                 .keep_alive
                 .as_deref()
