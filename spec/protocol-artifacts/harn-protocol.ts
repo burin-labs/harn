@@ -142,6 +142,16 @@ export const HARN_SIDE_EFFECT_LEVELS = [
 ] as const
 export type HarnSideEffectLevel = (typeof HARN_SIDE_EFFECT_LEVELS)[number]
 
+export const HARN_WORKER_STATUSES = [
+  "running",
+  "progressed",
+  "awaiting_input",
+  "completed",
+  "failed",
+  "cancelled",
+] as const
+export type HarnWorkerStatus = (typeof HARN_WORKER_STATUSES)[number]
+
 export const A2A_TASK_STATES = [
   "submitted",
   "working",

@@ -148,6 +148,15 @@ public enum HarnSideEffectLevel: String, Codable, Sendable, CaseIterable {
     case network = "network"
 }
 
+public enum HarnWorkerStatus: String, Codable, Sendable, CaseIterable {
+    case running = "running"
+    case progressed = "progressed"
+    case awaitingInput = "awaiting_input"
+    case completed = "completed"
+    case failed = "failed"
+    case cancelled = "cancelled"
+}
+
 public enum HarnA2ATaskState: String, Codable, Sendable, CaseIterable {
     case submitted = "submitted"
     case working = "working"

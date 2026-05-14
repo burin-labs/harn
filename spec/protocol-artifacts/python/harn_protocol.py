@@ -32,6 +32,7 @@ __all__ = [
     "ACP_TOOL_CALL_STATUSES",
     "HARN_TOOL_CALL_ERROR_CATEGORIES",
     "HARN_SIDE_EFFECT_LEVELS",
+    "HARN_WORKER_STATUSES",
     "HARN_TOOL_LIFECYCLE_EXTENSION_FIELDS",
     "HARN_CONTENT_EXTENSION_FIELDS",
     "A2A_METHODS",
@@ -47,6 +48,7 @@ __all__ = [
     "ACPToolCallStatus",
     "HarnToolCallErrorCategory",
     "HarnSideEffectLevel",
+    "HarnWorkerStatus",
     "A2ATaskState",
     "A2ATaskEventType",
     "MCPLoggingLevel",
@@ -202,6 +204,14 @@ HARN_SIDE_EFFECT_LEVELS: tuple = (
     "workspace_write",
     "process_exec",
     "network",
+)
+HARN_WORKER_STATUSES: tuple = (
+    "running",
+    "progressed",
+    "awaiting_input",
+    "completed",
+    "failed",
+    "cancelled",
 )
 HARN_TOOL_LIFECYCLE_EXTENSION_FIELDS: tuple = (
     "audit",
@@ -359,6 +369,15 @@ class HarnSideEffectLevel(str, Enum):
     WORKSPACE_WRITE = "workspace_write"
     PROCESS_EXEC = "process_exec"
     NETWORK = "network"
+
+
+class HarnWorkerStatus(str, Enum):
+    RUNNING = "running"
+    PROGRESSED = "progressed"
+    AWAITING_INPUT = "awaiting_input"
+    COMPLETED = "completed"
+    FAILED = "failed"
+    CANCELLED = "cancelled"
 
 
 class A2ATaskState(str, Enum):
