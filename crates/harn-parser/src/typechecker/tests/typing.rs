@@ -802,6 +802,21 @@ second: B
 }
 
 #[test]
+fn test_attributed_struct_forward_reference_is_registered() {
+    let errs = errors(
+        r#"pipeline t(task) {
+  let point = Point { x: 1, y: 2 }
+  @note("shape")
+  struct Point {
+    x: int
+    y: int
+  }
+}"#,
+    );
+    assert!(errs.is_empty(), "unexpected type errors: {errs:?}");
+}
+
+#[test]
 fn test_unknown_struct_literal_reports_error() {
     let diagnostics = check_source(
         r#"pipeline t(task) {

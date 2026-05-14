@@ -4,6 +4,8 @@
 
 use crate::value::ErrorCategory;
 
+const MAX_PROVIDER_ERROR_BODY_CHARS: usize = 2048;
+
 /// Coarse retry semantics for provider failures.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(crate) enum LlmErrorKind {
@@ -79,7 +81,11 @@ pub(crate) fn classify_provider_http_error(
     body: &str,
 ) -> LlmErrorInfo {
     let (kind, reason) = classify_http_status_and_body(status, body);
-    let mut msg = format!("{provider} HTTP {status} [{}]: {body}", reason.legacy_tag());
+    let body_summary = sanitize_provider_error_body(body);
+    let mut msg = format!(
+        "{provider} HTTP {status} [{}]: {body_summary}",
+        reason.legacy_tag()
+    );
     if reason == LlmErrorReason::ContextOverflow {
         if let Some(tokens) = extract_token_count_hint(body) {
             msg.push_str(&format!(" (offending_tokens: {tokens})"));
@@ -93,6 +99,66 @@ pub(crate) fn classify_provider_http_error(
         reason,
         message: msg,
     }
+}
+
+fn sanitize_provider_error_body(body: &str) -> String {
+    let summary =
+        structured_provider_error_summary(body).unwrap_or_else(|| body.trim().to_string());
+    let redacted = redact_provider_error_secrets(&summary);
+    truncate_chars(&redacted, MAX_PROVIDER_ERROR_BODY_CHARS)
+}
+
+fn structured_provider_error_summary(body: &str) -> Option<String> {
+    let json: serde_json::Value = serde_json::from_str(body).ok()?;
+    let error = json.get("error").unwrap_or(&json);
+    if let Some(message) = error.get("message").and_then(serde_json::Value::as_str) {
+        let message = truncate_chars(message, MAX_PROVIDER_ERROR_BODY_CHARS.saturating_sub(256));
+        let mut details = Vec::new();
+        for key in ["type", "code", "status"] {
+            if let Some(value) = error.get(key).and_then(serde_json::Value::as_str) {
+                if !value.is_empty() {
+                    details.push(format!("{key}: {value}"));
+                }
+            }
+        }
+        if details.is_empty() {
+            Some(message)
+        } else {
+            Some(format!("{message} ({})", details.join(", ")))
+        }
+    } else {
+        error.as_str().map(str::to_string)
+    }
+}
+
+fn redact_provider_error_secrets(text: &str) -> String {
+    use regex::Regex;
+    use std::sync::OnceLock;
+
+    static SECRET_FIELD_RE: OnceLock<Regex> = OnceLock::new();
+    static BEARER_RE: OnceLock<Regex> = OnceLock::new();
+    let secret_field_re = SECRET_FIELD_RE.get_or_init(|| {
+        Regex::new(
+            r##"(?i)((?:api[_-]?key|access[_-]?token|refresh[_-]?token|id[_-]?token|authorization|secret|password)["']?\s*[:=]\s*["']?)[^"',\s}]+"##,
+        )
+        .expect("valid secret redaction regex")
+    });
+    let bearer_re = BEARER_RE.get_or_init(|| {
+        Regex::new(r#"(?i)(bearer\s+)[^"',\s}]+"#).expect("valid bearer redaction regex")
+    });
+    let redacted = bearer_re.replace_all(text, "$1[redacted]");
+    secret_field_re
+        .replace_all(&redacted, "$1[redacted]")
+        .into_owned()
+}
+
+fn truncate_chars(text: &str, max_chars: usize) -> String {
+    if text.chars().count() <= max_chars {
+        return text.to_string();
+    }
+    let mut out = text.chars().take(max_chars).collect::<String>();
+    out.push_str("...");
+    out
 }
 
 pub(crate) fn classify_llm_error(category: ErrorCategory, message: &str) -> LlmErrorInfo {
@@ -398,6 +464,27 @@ mod tests {
         );
         assert_eq!(info.kind, LlmErrorKind::Terminal);
         assert_eq!(info.reason, LlmErrorReason::ContentPolicy);
+    }
+
+    #[test]
+    fn provider_http_errors_redact_and_truncate_bodies() {
+        let body = format!(
+            r#"{{"error":{{"message":"Authorization: Bearer sk-secret api_key=abc123 {}","type":"invalid_request_error","code":"bad"}}}}"#,
+            "x".repeat(3000)
+        );
+        let message =
+            classify_provider_http_error("openai", reqwest::StatusCode::BAD_REQUEST, None, &body)
+                .message;
+
+        assert!(message.contains("type: invalid_request_error"));
+        assert!(message.contains("code: bad"));
+        assert!(!message.contains("sk-secret"));
+        assert!(!message.contains("abc123"));
+        assert!(
+            message.len() < 2300,
+            "message was too long: {}",
+            message.len()
+        );
     }
 
     #[test]

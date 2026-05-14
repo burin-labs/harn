@@ -37,21 +37,27 @@ pub(crate) fn check_import_order(
         return;
     }
 
-    // Autofix just emits each import slice joined by newlines; the
-    // formatter re-normalizes spacing in a later pass.
     let first = imports.first().unwrap();
     let last = imports.last().unwrap();
-    let replacement = sorted
-        .iter()
-        .map(|n| render_import_source(source, n))
-        .collect::<Vec<_>>()
-        .join("\n");
     let replace_span = Span::with_offsets(
         first.span.start,
         last.span.end,
         first.span.line,
         first.span.column,
     );
+    let fix = if import_block_has_comments(source, first.span.start, last.span.end) {
+        None
+    } else {
+        let replacement = sorted
+            .iter()
+            .map(|n| render_import_source(source, n))
+            .collect::<Vec<_>>()
+            .join("\n");
+        Some(vec![FixEdit {
+            span: replace_span,
+            replacement,
+        }])
+    };
     diagnostics.push(LintDiagnostic {
         rule: "import-order",
         message: "imports are not in canonical order (stdlib first, then alphabetical by path)"
@@ -62,10 +68,7 @@ pub(crate) fn check_import_order(
             "reorder imports: std/ first, then third-party and local paths alphabetically"
                 .to_string(),
         ),
-        fix: Some(vec![FixEdit {
-            span: replace_span,
-            replacement,
-        }]),
+        fix,
     });
 }
 
@@ -97,4 +100,12 @@ fn render_import_source(source: &str, node: &SNode) -> String {
         .get(node.span.start..node.span.end)
         .unwrap_or("")
         .to_string()
+}
+
+fn import_block_has_comments(source: &str, start: usize, end: usize) -> bool {
+    source.get(start..end).is_some_and(|block| {
+        block
+            .lines()
+            .any(|line| line.trim_start().starts_with("//") || line.contains("/*"))
+    })
 }

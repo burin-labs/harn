@@ -756,6 +756,7 @@ impl<'a> Linter<'a> {
             }
 
             Node::TryCatch {
+                has_catch: _,
                 body,
                 error_var,
                 catch_body,

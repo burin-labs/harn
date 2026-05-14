@@ -327,6 +327,7 @@ fn node_children(node: &SNode) -> Vec<&SNode> {
             out
         }
         Node::TryCatch {
+            has_catch: _,
             body,
             catch_body,
             finally_body,

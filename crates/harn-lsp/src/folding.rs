@@ -134,6 +134,7 @@ fn collect_ast_ranges(
             }
         }
         Node::TryCatch {
+            has_catch: _,
             body,
             catch_body,
             finally_body,

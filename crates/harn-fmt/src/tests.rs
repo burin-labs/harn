@@ -102,6 +102,14 @@ fn test_roundtrip_try_catch() {
 }
 
 #[test]
+fn test_roundtrip_empty_catch() {
+    assert_roundtrip(r#"pipeline default(task) { try { throw "e" } catch {} }"#);
+    assert_roundtrip(
+        r#"pipeline default(task) { try { throw "e" } catch {} finally { log("done") } }"#,
+    );
+}
+
+#[test]
 fn test_roundtrip_for_in() {
     assert_roundtrip("pipeline default(task) { for i in [1, 2, 3] { log(i) } }");
 }

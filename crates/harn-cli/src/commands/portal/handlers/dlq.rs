@@ -10,6 +10,7 @@ use crate::commands::portal::dlq::{
 };
 use crate::commands::portal::dto::PortalLaunchJob;
 use crate::commands::portal::errors::{bad_request_error, internal_error, not_found_error};
+use crate::commands::portal::handlers::ensure_mutation_enabled as ensure_portal_mutation_enabled;
 use crate::commands::portal::query::ErrorResponse;
 use crate::commands::portal::state::PortalState;
 
@@ -37,6 +38,7 @@ pub(crate) async fn replay_dlq_handler(
     State(state): State<Arc<PortalState>>,
     Path(entry_id): Path<String>,
 ) -> Result<Json<PortalLaunchJob>, (StatusCode, Json<ErrorResponse>)> {
+    ensure_mutation_enabled(&state)?;
     replay_entry(&state, &entry_id, false)
         .await
         .map(Json)
@@ -47,6 +49,7 @@ pub(crate) async fn replay_drift_accept_dlq_handler(
     State(state): State<Arc<PortalState>>,
     Path(entry_id): Path<String>,
 ) -> Result<Json<PortalLaunchJob>, (StatusCode, Json<ErrorResponse>)> {
+    ensure_mutation_enabled(&state)?;
     replay_entry(&state, &entry_id, true)
         .await
         .map(Json)
@@ -57,6 +60,7 @@ pub(crate) async fn purge_dlq_handler(
     State(state): State<Arc<PortalState>>,
     Path(entry_id): Path<String>,
 ) -> Result<Json<PortalDlqEntry>, (StatusCode, Json<ErrorResponse>)> {
+    ensure_mutation_enabled(&state)?;
     purge_entry(&state, &entry_id)
         .await
         .map(Json)
@@ -77,6 +81,7 @@ pub(crate) async fn bulk_replay_dlq_handler(
     State(state): State<Arc<PortalState>>,
     ExtractJson(request): ExtractJson<DlqBulkRequest>,
 ) -> Result<Json<PortalDlqBulkResponse>, (StatusCode, Json<ErrorResponse>)> {
+    ensure_mutation_enabled(&state)?;
     bulk_replay(&state, &request)
         .await
         .map(Json)
@@ -87,10 +92,18 @@ pub(crate) async fn bulk_purge_dlq_handler(
     State(state): State<Arc<PortalState>>,
     ExtractJson(request): ExtractJson<DlqBulkRequest>,
 ) -> Result<Json<PortalDlqBulkResponse>, (StatusCode, Json<ErrorResponse>)> {
+    ensure_mutation_enabled(&state)?;
     bulk_purge(&state, &request)
         .await
         .map(Json)
         .map_err(map_dlq_error)
+}
+
+fn ensure_mutation_enabled(state: &PortalState) -> Result<(), (StatusCode, Json<ErrorResponse>)> {
+    ensure_portal_mutation_enabled(
+        state,
+        "portal mutation endpoints are disabled for non-loopback binds",
+    )
 }
 
 fn map_dlq_error(error: String) -> (StatusCode, Json<ErrorResponse>) {

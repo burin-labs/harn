@@ -93,6 +93,7 @@ fn visit_node(node: &SNode, diagnostics: &mut Vec<LintDiagnostic>) {
             visit_nodes(body, diagnostics);
         }
         Node::TryCatch {
+            has_catch: _,
             body,
             catch_body,
             finally_body,

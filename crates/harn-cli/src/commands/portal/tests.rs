@@ -13,8 +13,8 @@ use crate::commands::persona;
 
 use super::dto::{PortalLaunchRequest, PortalRunDiff, PortalRunSummary};
 use super::launch::{
-    build_launch_env, materialize_launch_target, scan_launch_targets, validate_launch_request,
-    validated_env_overrides,
+    build_launch_env, launch_output_logs, materialize_launch_target, prune_completed_launch_jobs,
+    scan_launch_targets, validate_launch_request, validated_env_overrides,
 };
 use super::query::ListRunsQuery;
 use super::router::build_router;
@@ -26,6 +26,13 @@ use super::state::PortalState;
 use super::transcript::discover_transcript_steps;
 
 fn test_portal_state(run_dir: &Path) -> Arc<PortalState> {
+    test_portal_state_with_mutations(run_dir, true)
+}
+
+fn test_portal_state_with_mutations(
+    run_dir: &Path,
+    mutation_endpoints_enabled: bool,
+) -> Arc<PortalState> {
     Arc::new(PortalState {
         run_dir: run_dir.to_path_buf(),
         workspace_root: run_dir.to_path_buf(),
@@ -34,6 +41,7 @@ fn test_portal_state(run_dir: &Path) -> Arc<PortalState> {
         event_log: None,
         launch_program: PathBuf::from("harn"),
         launch_jobs: Arc::new(Mutex::new(HashMap::new())),
+        mutation_endpoints_enabled,
     })
 }
 
@@ -49,6 +57,7 @@ fn test_portal_state_with_event_log(
         event_log: Some(event_log),
         launch_program: PathBuf::from("harn"),
         launch_jobs: Arc::new(Mutex::new(HashMap::new())),
+        mutation_endpoints_enabled: true,
     })
 }
 
@@ -65,6 +74,7 @@ fn test_portal_state_with_personas(
         event_log: None,
         launch_program: PathBuf::from("harn"),
         launch_jobs: Arc::new(Mutex::new(HashMap::new())),
+        mutation_endpoints_enabled: true,
     })
 }
 
@@ -116,6 +126,44 @@ fn scan_runs_ignores_non_run_json() {
     let runs = scan_runs(temp.path()).unwrap();
     assert_eq!(runs.len(), 1);
     assert_eq!(runs[0].workflow_name, "demo");
+}
+
+#[cfg(unix)]
+#[test]
+fn scan_runs_does_not_follow_symlinked_directories() {
+    let temp = tempfile::tempdir().unwrap();
+    let outside = tempfile::tempdir().unwrap();
+    fs::write(
+        outside.path().join("outside.json"),
+        serde_json::json!({
+            "_type": "run_record",
+            "id": "run-outside",
+            "workflow_id": "wf",
+            "workflow_name": "outside",
+            "task": "task",
+            "status": "complete",
+            "started_at": "2026-04-03T01:00:00Z",
+            "finished_at": "2026-04-03T01:00:02Z",
+            "stages": [],
+            "transitions": [],
+            "checkpoints": [],
+            "pending_nodes": [],
+            "completed_nodes": [],
+            "child_runs": [],
+            "artifacts": [],
+            "policy": {},
+            "metadata": {}
+        })
+        .to_string(),
+    )
+    .unwrap();
+    std::os::unix::fs::symlink(outside.path(), temp.path().join("outside-link")).unwrap();
+
+    let runs = scan_runs(temp.path()).unwrap();
+    assert!(
+        runs.is_empty(),
+        "symlinked runs should be ignored: {runs:?}"
+    );
 }
 
 #[test]
@@ -259,6 +307,58 @@ fn build_launch_env_sets_transcript_dir_inside_workspace() {
         env.get("HARN_LLM_TRANSCRIPT_DIR").map(String::as_str),
         Some(temp.path().join("run-llm").to_str().unwrap())
     );
+}
+
+#[test]
+fn launch_output_logs_keeps_only_tail_for_large_outputs() {
+    let logs = launch_output_logs("a".repeat(300_000).as_bytes(), b"stderr-tail");
+    assert!(logs.starts_with("[truncated to last "));
+    assert!(logs.ends_with("stderr-tail"));
+    assert!(logs.len() < 270_000);
+}
+
+#[test]
+fn prune_completed_launch_jobs_keeps_running_jobs() {
+    let mut jobs = HashMap::new();
+    for idx in 0..205 {
+        jobs.insert(
+            format!("job-{idx:03}"),
+            super::dto::PortalLaunchJob {
+                id: format!("job-{idx:03}"),
+                mode: "run".to_string(),
+                target_label: "target".to_string(),
+                status: "completed".to_string(),
+                started_at: format!("started-{idx:03}"),
+                finished_at: Some(format!("finished-{idx:03}")),
+                exit_code: Some(0),
+                logs: String::new(),
+                discovered_run_paths: Vec::new(),
+                workspace_dir: None,
+                transcript_path: None,
+            },
+        );
+    }
+    jobs.insert(
+        "running".to_string(),
+        super::dto::PortalLaunchJob {
+            id: "running".to_string(),
+            mode: "run".to_string(),
+            target_label: "target".to_string(),
+            status: "running".to_string(),
+            started_at: "started-running".to_string(),
+            finished_at: None,
+            exit_code: None,
+            logs: String::new(),
+            discovered_run_paths: Vec::new(),
+            workspace_dir: None,
+            transcript_path: None,
+        },
+    );
+
+    prune_completed_launch_jobs(&mut jobs);
+
+    assert_eq!(jobs.len(), 201);
+    assert!(jobs.contains_key("running"));
 }
 
 #[test]
@@ -688,6 +788,25 @@ async fn api_llm_options_returns_payload() {
         .unwrap();
 
     assert_eq!(response.status(), StatusCode::OK);
+}
+
+#[tokio::test]
+async fn remote_portal_state_rejects_launch_mutation_endpoint() {
+    let temp = tempfile::tempdir().unwrap();
+    let app = build_router(test_portal_state_with_mutations(temp.path(), false));
+    let response = app
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/api/launch")
+                .header("content-type", "application/json")
+                .body(Body::from(r#"{"source":"pipeline test(task) {}"}"#))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::FORBIDDEN);
 }
 
 #[tokio::test]

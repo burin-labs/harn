@@ -534,6 +534,7 @@ impl Compiler {
                 self.chunk.emit(Op::Nil, self.line);
             }
             Node::TryCatch {
+                has_catch: _,
                 body,
                 error_var,
                 error_type,

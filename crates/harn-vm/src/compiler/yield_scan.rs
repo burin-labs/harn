@@ -28,7 +28,10 @@ pub(super) fn node_contains_yield(node: &Node) -> bool {
             node_contains_yield(&iterable.node) || body_contains_yield(body)
         }
         Node::TryCatch {
-            body, catch_body, ..
+            has_catch: _,
+            body,
+            catch_body,
+            ..
         } => body_contains_yield(body) || body_contains_yield(catch_body),
         Node::TryExpr { body } | Node::CostRoute { body, .. } => body_contains_yield(body),
         _ => false,

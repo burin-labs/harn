@@ -22,4 +22,7 @@ pub(crate) struct PortalArgs {
     /// Open the portal in a browser after starting.
     #[arg(long, default_value_t = true, action = ArgAction::Set)]
     pub open: bool,
+    /// Allow launch/replay mutation endpoints when binding a non-loopback host.
+    #[arg(long, default_value_t = false)]
+    pub allow_remote_launch: bool,
 }

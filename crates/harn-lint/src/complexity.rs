@@ -77,6 +77,7 @@ pub(crate) fn cyclomatic_complexity(nodes: &[SNode]) -> usize {
                         .unwrap_or(0)
             }
             Node::TryCatch {
+                has_catch: _,
                 body,
                 catch_body,
                 finally_body,

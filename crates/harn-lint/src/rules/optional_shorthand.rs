@@ -150,6 +150,7 @@ impl<'a, 'd> State<'a, 'd> {
                 self.visit_block(body);
             }
             Node::TryCatch {
+                has_catch: _,
                 body,
                 error_type,
                 catch_body,

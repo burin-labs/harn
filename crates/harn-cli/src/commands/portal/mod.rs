@@ -31,6 +31,7 @@ pub(crate) async fn run_portal(
     host: &str,
     port: u16,
     open_browser: bool,
+    allow_remote_launch: bool,
 ) {
     let run_dir = PathBuf::from(dir);
     let workspace_root = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
@@ -52,12 +53,18 @@ pub(crate) async fn run_portal(
         event_log,
         launch_program,
         launch_jobs: Arc::new(Mutex::new(HashMap::new())),
+        mutation_endpoints_enabled: addr.ip().is_loopback() || allow_remote_launch,
     });
-    let app = build_router(state);
+    let app = build_router(state.clone());
     let url = format!("http://{addr}");
 
     println!("Harn portal listening on {url}");
     println!("Watching run records in {}", run_dir.display());
+    if !state.mutation_endpoints_enabled {
+        println!(
+            "Launch and replay endpoints are disabled for non-loopback binds; pass --allow-remote-launch to enable them."
+        );
+    }
 
     if open_browser {
         let _ = webbrowser::open(&url);

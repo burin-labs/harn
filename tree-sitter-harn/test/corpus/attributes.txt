@@ -79,5 +79,48 @@ fn merge_captain(ctx) -> string {
       (type_annotation
         (identifier))
       body: (block
-        (return_statement
-          (string_literal))))))
+      (return_statement
+        (string_literal))))))
+
+==================
+Attributed Tool And Skill
+==================
+
+@capability("workspace.read")
+tool inspect(path: string) -> string {
+  description "Inspect a file"
+}
+
+@persona("release")
+skill release {
+  description "Release workflow"
+}
+
+---
+
+(source_file
+  (attributed_declaration
+    (attribute
+      name: (identifier)
+      (attribute_arg
+        (string_literal)))
+    (tool_declaration
+      name: (identifier)
+      (parameter_list
+        (typed_parameter
+          name: (identifier)
+          type: (type_annotation
+            (identifier))))
+      (type_annotation
+        (identifier))
+      (tool_description
+        (string_literal))))
+  (attributed_declaration
+    (attribute
+      name: (identifier)
+      (attribute_arg
+        (string_literal)))
+    (skill_declaration
+      name: (identifier)
+      field_name: (identifier)
+      field_value: (string_literal))))

@@ -793,6 +793,7 @@ impl TypeChecker {
             }
 
             Node::TryCatch {
+                has_catch: _,
                 body,
                 error_var,
                 error_type,

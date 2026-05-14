@@ -377,6 +377,7 @@ fn collect_static_tool_surface_from_node(
             }
         }
         Node::TryCatch {
+            has_catch: _,
             body,
             catch_body,
             finally_body,
@@ -1147,6 +1148,7 @@ fn scan_node_preflight(
             }
         }
         Node::TryCatch {
+            has_catch: _,
             body,
             catch_body,
             finally_body,

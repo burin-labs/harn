@@ -40,6 +40,7 @@ pub(super) struct HttpRequestConfig {
     proxy: Option<HttpProxyConfig>,
     tls: HttpTlsConfig,
     decompress: bool,
+    max_response_bytes: usize,
 }
 
 #[derive(Clone, Default)]
@@ -475,6 +476,10 @@ pub(super) fn parse_http_options(options: &BTreeMap<String, VmValue>) -> HttpReq
     let respect_retry_after = vm_get_bool_option(options, "respect_retry_after", true);
     let follow_redirects = vm_get_bool_option(options, "follow_redirects", true);
     let max_redirects = vm_get_int_option(options, "max_redirects", 10).max(0) as usize;
+    let max_response_bytes = vm_get_optional_int_option(options, "max_response_bytes")
+        .or_else(|| vm_get_optional_int_option(options, "max_body_bytes"))
+        .unwrap_or(DEFAULT_MAX_MESSAGE_BYTES as u64)
+        .max(1) as usize;
 
     HttpRequestConfig {
         total_timeout_ms,
@@ -492,12 +497,13 @@ pub(super) fn parse_http_options(options: &BTreeMap<String, VmValue>) -> HttpReq
         proxy: parse_proxy_config(options),
         tls: parse_tls_config(options),
         decompress: vm_get_bool_option(options, "decompress", true),
+        max_response_bytes,
     }
 }
 
 fn http_client_key(config: &HttpRequestConfig) -> String {
     format!(
-        "follow_redirects={};max_redirects={};connect_timeout={:?};read_timeout={:?};proxy={};proxy_auth={};no_proxy={};ca={};client_cert={};client_key={};identity={};pins={};decompress={}",
+        "follow_redirects={};max_redirects={};connect_timeout={:?};read_timeout={:?};proxy={};proxy_auth={};proxy_pass={};no_proxy={};ca={};client_cert={};client_key={};identity={};pins={};decompress={}",
         config.follow_redirects,
         config.max_redirects,
         config.connect_timeout_ms,
@@ -516,6 +522,12 @@ fn http_client_key(config: &HttpRequestConfig) -> String {
         config
             .proxy
             .as_ref()
+            .and_then(|proxy| proxy.auth.as_ref())
+            .map(|(_, pass)| secret_fingerprint(pass))
+            .unwrap_or_default(),
+        config
+            .proxy
+            .as_ref()
             .and_then(|proxy| proxy.no_proxy.as_deref())
             .unwrap_or(""),
         config.tls.ca_bundle_path.as_deref().unwrap_or(""),
@@ -525,6 +537,11 @@ fn http_client_key(config: &HttpRequestConfig) -> String {
         config.tls.pinned_sha256.join(","),
         config.decompress,
     )
+}
+
+fn secret_fingerprint(secret: &str) -> String {
+    let digest = Sha256::digest(secret.as_bytes());
+    hex::encode(&digest[..])
 }
 
 pub(super) fn build_http_client(config: &HttpRequestConfig) -> Result<reqwest::Client, VmError> {
@@ -697,7 +714,7 @@ fn verify_tls_pin(response: &reqwest::Response, pins: &[String]) -> Result<(), V
     let (_, cert) = X509Certificate::from_der(cert_der)
         .map_err(|error| vm_error(format!("http: failed to parse peer certificate: {error}")))?;
     let digest = Sha256::digest(cert.tbs_certificate.subject_pki.raw);
-    let hex_pin = hex::encode(digest.as_slice());
+    let hex_pin = hex::encode(&digest[..]);
     let base64_pin = base64::engine::general_purpose::STANDARD.encode(digest);
     let base64url_pin = base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(digest);
     let wanted = pins
@@ -925,6 +942,45 @@ fn response_retry_after(
         .and_then(parse_retry_after_header)
 }
 
+fn ensure_response_body_within_limit(body_len: usize, max_bytes: usize) -> Result<(), VmError> {
+    if body_len > max_bytes {
+        return Err(vm_error(format!(
+            "http: response body exceeded max_response_bytes ({max_bytes})"
+        )));
+    }
+    Ok(())
+}
+
+async fn read_response_text_limited(
+    mut response: reqwest::Response,
+    max_bytes: usize,
+) -> Result<String, VmError> {
+    if response
+        .content_length()
+        .is_some_and(|len| len > max_bytes as u64)
+    {
+        return Err(vm_error(format!(
+            "http: response body exceeded max_response_bytes ({max_bytes})"
+        )));
+    }
+
+    let mut body = Vec::new();
+    while let Some(chunk) = response
+        .chunk()
+        .await
+        .map_err(|e| vm_error(format!("http: failed to read response body: {e}")))?
+    {
+        let next_len = body
+            .len()
+            .checked_add(chunk.len())
+            .ok_or_else(|| vm_error("http: response body length overflow"))?;
+        ensure_response_body_within_limit(next_len, max_bytes)?;
+        body.extend_from_slice(&chunk);
+    }
+    String::from_utf8(body)
+        .map_err(|error| vm_error(format!("http: response body is not valid UTF-8: {error}")))
+}
+
 pub(super) fn compute_retry_delay(
     attempt: u32,
     base_ms: u64,
@@ -1013,6 +1069,7 @@ async fn vm_execute_http_request_with_client(
                 continue;
             }
 
+            ensure_response_body_within_limit(mock_response.body.len(), config.max_response_bytes)?;
             return Ok(build_http_response(
                 mock_response.status,
                 mock_response.headers,
@@ -1053,10 +1110,8 @@ async fn vm_execute_http_request_with_client(
                 let resp_headers = response_headers(response.headers());
 
                 let response_url = response.url().to_string();
-                let body_text = response
-                    .text()
-                    .await
-                    .map_err(|e| vm_error(format!("http: failed to read response body: {e}")))?;
+                let body_text =
+                    read_response_text_limited(response, config.max_response_bytes).await?;
                 return Ok(build_http_response(
                     status as i64,
                     resp_headers,
@@ -1484,4 +1539,43 @@ pub(super) fn register_http_client_builtins(vm: &mut Vm) {
         let removed = HTTP_SESSIONS.with(|sessions| sessions.borrow_mut().remove(&session_id));
         Ok(VmValue::Bool(removed.is_some()))
     });
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn proxy_options(password: &str) -> BTreeMap<String, VmValue> {
+        BTreeMap::from([
+            (
+                "proxy".to_string(),
+                VmValue::String(Rc::from("http://proxy.local:8080")),
+            ),
+            (
+                "proxy_auth".to_string(),
+                VmValue::Dict(Rc::new(BTreeMap::from([
+                    ("user".to_string(), VmValue::String(Rc::from("alice"))),
+                    ("pass".to_string(), VmValue::String(Rc::from(password))),
+                ]))),
+            ),
+        ])
+    }
+
+    #[test]
+    fn http_client_key_distinguishes_proxy_password_without_leaking_it() {
+        let first = http_client_key(&parse_http_options(&proxy_options("first-secret")));
+        let second = http_client_key(&parse_http_options(&proxy_options("second-secret")));
+
+        assert_ne!(first, second);
+        assert!(!first.contains("first-secret"));
+        assert!(!second.contains("second-secret"));
+    }
+
+    #[test]
+    fn response_body_limit_rejects_oversized_mock_body() {
+        let error = ensure_response_body_within_limit(11, 10).unwrap_err();
+        assert!(error
+            .to_string()
+            .contains("response body exceeded max_response_bytes"));
+    }
 }

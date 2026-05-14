@@ -665,6 +665,7 @@ async fn async_main() {
                 &args.host,
                 args.port,
                 args.open,
+                args.allow_remote_launch,
             )
             .await
         }

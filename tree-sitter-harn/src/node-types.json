@@ -631,7 +631,15 @@
           "named": true
         },
         {
+          "type": "skill_declaration",
+          "named": true
+        },
+        {
           "type": "struct_declaration",
+          "named": true
+        },
+        {
+          "type": "tool_declaration",
           "named": true
         },
         {
@@ -4481,7 +4489,18 @@
   {
     "type": "import_declaration",
     "named": true,
-    "fields": {},
+    "fields": {
+      "path": {
+        "multiple": false,
+        "required": false,
+        "types": [
+          {
+            "type": "scoped_import_path",
+            "named": true
+          }
+        ]
+      }
+    },
     "children": {
       "multiple": true,
       "required": true,
@@ -13303,6 +13322,10 @@
     "named": false
   },
   {
+    "type": "::",
+    "named": false
+  },
+  {
     "type": ";",
     "named": false
   },
@@ -13566,6 +13589,10 @@
   {
     "type": "return",
     "named": false
+  },
+  {
+    "type": "scoped_import_path",
+    "named": true
   },
   {
     "type": "select",

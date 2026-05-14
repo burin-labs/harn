@@ -116,11 +116,13 @@ pub(crate) enum IterState {
         stream: crate::value::VmStream,
     },
     /// Step through a lazy range without materializing a Vec.
-    /// `next` holds the value to emit on the next IterNext; `stop` is
-    /// the first value that terminates the iteration (one past the end).
+    /// Inclusive ranges keep `end` as an actual value so `i64::MAX to i64::MAX`
+    /// still yields one item instead of overflowing a one-past-end sentinel.
     Range {
         next: i64,
-        stop: i64,
+        end: i64,
+        inclusive: bool,
+        done: bool,
     },
     VmIter {
         handle: std::rc::Rc<std::cell::RefCell<crate::vm::iter::VmIter>>,

@@ -6,6 +6,7 @@ use async_trait::async_trait;
 use jsonwebtoken::jwk::JwkSet;
 use serde::{Deserialize, Serialize};
 use serde_json::Value as JsonValue;
+use subtle::ConstantTimeEq;
 use time::OffsetDateTime;
 
 use crate::connectors::{
@@ -159,7 +160,7 @@ impl A2aPushConnector {
                         binding.binding_id
                     ))
                 })?;
-                if token != expected {
+                if !constant_time_secret_eq(token, expected) {
                     return Err(ConnectorError::invalid_signature(
                         "a2a-push bearer token did not match expected token",
                     ));
@@ -179,7 +180,8 @@ impl A2aPushConnector {
                         .as_deref()
                         .or_else(|| header_value(&raw.headers, "x-a2a-token"))
                         .or_else(|| body.get("token").and_then(JsonValue::as_str));
-                    if observed != Some(expected_token) {
+                    if !observed.is_some_and(|value| constant_time_secret_eq(value, expected_token))
+                    {
                         return Err(ConnectorError::invalid_signature(
                             "a2a-push JWT token claim/header did not match expected token",
                         ));
@@ -546,6 +548,13 @@ fn fallback_dedupe_key(raw_body: &[u8]) -> String {
     format!("sha256:{}", hex::encode(digest))
 }
 
+fn constant_time_secret_eq(left: &str, right: &str) -> bool {
+    use sha2::{Digest, Sha256};
+    let left = Sha256::digest(left.as_bytes());
+    let right = Sha256::digest(right.as_bytes());
+    left[..].ct_eq(&right[..]).into()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -651,6 +660,16 @@ mod tests {
             &EncodingKey::from_secret(b"secret"),
         )
         .unwrap()
+    }
+
+    #[test]
+    fn secret_comparison_matches_only_equal_values() {
+        assert!(constant_time_secret_eq("opaque-token", "opaque-token"));
+        assert!(!constant_time_secret_eq("opaque-token", "opaque-tokem"));
+        assert!(!constant_time_secret_eq(
+            "opaque-token",
+            "opaque-token-extra"
+        ));
     }
 
     fn jwt_binding() -> TriggerBinding {

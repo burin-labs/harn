@@ -1134,7 +1134,7 @@ impl Compiler {
             | Node::ContinueStmt
             | Node::RequireStmt { .. }
             | Node::DeferStmt { .. } => false,
-            Node::TryCatch { .. }
+            Node::TryCatch { has_catch: _, .. }
             | Node::TryExpr { .. }
             | Node::Retry { .. }
             | Node::GuardStmt { .. }

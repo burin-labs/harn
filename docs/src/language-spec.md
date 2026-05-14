@@ -98,11 +98,10 @@ The following identifiers are reserved:
 | `from` | `.from` |
 | `to` | `.to` |
 | `tool` | `.tool` |
+| `skill` | `.skill` |
 | `exclusive` | `.exclusive` |
 | `guard` | `.guard` |
 | `require` | `.require` |
-| `each` | `.each` |
-| `settle` | `.settle` |
 | `deadline` | `.deadline` |
 | `yield` | `.yield` |
 | `mutex` | `.mutex` |
@@ -110,6 +109,10 @@ The following identifiers are reserved:
 | `continue` | `.continue` |
 | `select` | `.select` |
 | `impl` | `.impl` |
+| `request_approval` | `.requestApproval` |
+| `dual_control` | `.dualControl` |
+| `ask_user` | `.askUser` |
+| `escalate_to` | `.escalateTo` |
 
 ### Identifiers
 
@@ -307,8 +310,9 @@ top_level          ::= import_decl
                      | statement
 
 attributed_decl    ::= attribute+ (pipeline_decl | fn_decl | tool_decl
-                                  | struct_decl | enum_decl | type_decl
-                                  | interface_decl | impl_block)
+                                  | skill_decl | eval_pack_decl | struct_decl
+                                  | enum_decl | type_decl | interface_decl
+                                  | impl_block)
 attribute          ::= '@' IDENTIFIER ['(' attr_arg (',' attr_arg)* [','] ')']
 attr_arg           ::= [IDENTIFIER ':'] attr_value
 attr_value         ::= STRING_LITERAL | RAW_STRING | INT_LITERAL

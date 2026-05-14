@@ -278,16 +278,19 @@ fn collect_run_files(
         let entry =
             entry.map_err(|error| format!("failed to iterate {}: {error}", current.display()))?;
         let path = entry.path();
-        if path.is_dir() {
+        let metadata = fs::symlink_metadata(&path)
+            .map_err(|error| format!("failed to stat {}: {error}", path.display()))?;
+        if metadata.file_type().is_symlink() {
+            continue;
+        }
+        if metadata.is_dir() {
             collect_run_files(root, &path, out)?;
             continue;
         }
         if path.extension().and_then(|ext| ext.to_str()) != Some("json") {
             continue;
         }
-        let modified_at_ms = entry
-            .metadata()
-            .ok()
+        let modified_at_ms = Some(metadata)
             .and_then(|meta| meta.modified().ok())
             .and_then(system_time_ms)
             .unwrap_or_else(|| system_time_ms(SystemTime::now()).unwrap_or(0));

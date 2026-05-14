@@ -595,6 +595,7 @@ impl Parser {
         Ok(spanned(
             Node::TryCatch {
                 body,
+                has_catch,
                 error_var,
                 error_type,
                 catch_body,

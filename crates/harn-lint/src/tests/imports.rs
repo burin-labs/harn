@@ -77,6 +77,22 @@ fn test_import_order_fires_when_out_of_order() {
 }
 
 #[test]
+fn test_import_order_keeps_comments_by_disabling_unsafe_fix() {
+    let source = "import \"std/io\"\n// keep with imports\nimport \"std/fs\"\n\nfn a() -> int { return 1 }\n";
+    let diags = lint_source(source);
+    let import_order = diags
+        .iter()
+        .find(|diag| diag.rule == "import-order")
+        .expect("expected import-order diagnostic");
+    assert!(
+        import_order.fix.is_none(),
+        "commented import block should not get a destructive fix"
+    );
+    let fixed = apply_fixes(source, &diags);
+    assert!(fixed.contains("// keep with imports"));
+}
+
+#[test]
 fn test_import_order_canonical_does_not_fire() {
     let source = "import \"std/fs\"\nimport \"std/io\"\n\nfn a() -> int { return 1 }\n";
     let diags = lint_source(source);

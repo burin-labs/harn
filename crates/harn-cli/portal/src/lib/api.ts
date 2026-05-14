@@ -23,6 +23,10 @@ async function fetchJson<T>(url: string): Promise<T> {
     return response.json() as Promise<T>
   }
 
+  throw new Error(await responseErrorMessage(response))
+}
+
+async function responseErrorMessage(response: Response): Promise<string> {
   let message = `Request failed: ${response.status}`
   try {
     const payload = (await response.json()) as { error?: string }
@@ -32,7 +36,7 @@ async function fetchJson<T>(url: string): Promise<T> {
   } catch {
     // Ignore parse failures on error bodies and keep the status-based message.
   }
-  throw new Error(message)
+  return message
 }
 
 export function fetchRuns(params?: {
@@ -174,51 +178,11 @@ export async function launchRun(payload: {
   model?: string
   env?: Record<string, string>
 }): Promise<PortalLaunchJob> {
-  const response = await fetch("/api/launch", {
-    method: "POST",
-    headers: {
-      "content-type": "application/json",
-    },
-    body: JSON.stringify(payload),
-  })
-  if (response.ok) {
-    return response.json() as Promise<PortalLaunchJob>
-  }
-
-  let message = `Request failed: ${response.status}`
-  try {
-    const payload = (await response.json()) as { error?: string }
-    if (payload.error) {
-      message = `${message} ${payload.error}`
-    }
-  } catch {
-    // Keep status-based fallback.
-  }
-  throw new Error(message)
+  return postJson<PortalLaunchJob>("/api/launch", payload)
 }
 
 export async function replayTriggerEvent(event_id: string): Promise<PortalLaunchJob> {
-  const response = await fetch("/api/trigger/replay", {
-    method: "POST",
-    headers: {
-      "content-type": "application/json",
-    },
-    body: JSON.stringify({ event_id }),
-  })
-  if (response.ok) {
-    return response.json() as Promise<PortalLaunchJob>
-  }
-
-  let message = `Request failed: ${response.status}`
-  try {
-    const payload = (await response.json()) as { error?: string }
-    if (payload.error) {
-      message = `${message} ${payload.error}`
-    }
-  } catch {
-    // Keep status-based fallback.
-  }
-  throw new Error(message)
+  return postJson<PortalLaunchJob>("/api/trigger/replay", { event_id })
 }
 
 async function postJson<T>(url: string, payload: unknown = {}): Promise<T> {
@@ -233,16 +197,7 @@ async function postJson<T>(url: string, payload: unknown = {}): Promise<T> {
     return response.json() as Promise<T>
   }
 
-  let message = `Request failed: ${response.status}`
-  try {
-    const payload = (await response.json()) as { error?: string }
-    if (payload.error) {
-      message = `${message} ${payload.error}`
-    }
-  } catch {
-    // Keep status-based fallback.
-  }
-  throw new Error(message)
+  throw new Error(await responseErrorMessage(response))
 }
 
 export function replayDlqEntry(entryId: string, driftAccept = false): Promise<PortalLaunchJob> {

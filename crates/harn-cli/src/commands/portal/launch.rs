@@ -1,4 +1,4 @@
-use std::collections::{BTreeMap, HashSet};
+use std::collections::{BTreeMap, HashMap, HashSet};
 use std::fs;
 use std::path::{Component, Path, PathBuf};
 use std::sync::Arc;
@@ -15,6 +15,9 @@ use super::query::ErrorResponse;
 use super::run_analysis::scan_runs;
 use super::state::PortalState;
 use super::util::portal_timestamp_id;
+
+const MAX_LAUNCH_JOB_LOG_BYTES: usize = 256 * 1024;
+const MAX_COMPLETED_LAUNCH_JOBS: usize = 200;
 
 pub(super) async fn create_launch_job(
     state: &Arc<PortalState>,
@@ -78,15 +81,7 @@ pub(super) async fn create_launch_job(
         if let Some(job) = jobs.get_mut(&job_id) {
             match output {
                 Ok(output) => {
-                    let mut logs = String::new();
-                    logs.push_str(&String::from_utf8_lossy(&output.stdout));
-                    if !output.stderr.is_empty() {
-                        if !logs.is_empty() {
-                            logs.push('\n');
-                        }
-                        logs.push_str(&String::from_utf8_lossy(&output.stderr));
-                    }
-                    job.logs = logs;
+                    job.logs = launch_output_logs(&output.stdout, &output.stderr);
                     job.exit_code = output.status.code();
                     job.status = if output.status.success() {
                         "completed".to_string()
@@ -103,6 +98,7 @@ pub(super) async fn create_launch_job(
                     job.logs = format!("failed to start harn run: {error}");
                 }
             }
+            prune_completed_launch_jobs(&mut jobs);
         }
     });
 
@@ -158,15 +154,7 @@ pub(super) async fn create_trigger_replay_job(
         if let Some(job) = jobs.get_mut(&job_id) {
             match output {
                 Ok(output) => {
-                    let mut logs = String::new();
-                    logs.push_str(&String::from_utf8_lossy(&output.stdout));
-                    if !output.stderr.is_empty() {
-                        if !logs.is_empty() {
-                            logs.push('\n');
-                        }
-                        logs.push_str(&String::from_utf8_lossy(&output.stderr));
-                    }
-                    job.logs = logs;
+                    job.logs = launch_output_logs(&output.stdout, &output.stderr);
                     job.exit_code = output.status.code();
                     job.status = if output.status.success() {
                         "completed".to_string()
@@ -183,10 +171,53 @@ pub(super) async fn create_trigger_replay_job(
                     job.logs = format!("failed to start trigger replay: {error}");
                 }
             }
+            prune_completed_launch_jobs(&mut jobs);
         }
     });
 
     Ok(job)
+}
+
+pub(super) fn launch_output_logs(stdout: &[u8], stderr: &[u8]) -> String {
+    let mut bytes = Vec::with_capacity(stdout.len().saturating_add(stderr.len()).saturating_add(1));
+    bytes.extend_from_slice(stdout);
+    if !stderr.is_empty() {
+        if !bytes.is_empty() {
+            bytes.push(b'\n');
+        }
+        bytes.extend_from_slice(stderr);
+    }
+    let truncated = tail_bytes(&bytes, MAX_LAUNCH_JOB_LOG_BYTES);
+    let prefix = if truncated.len() < bytes.len() {
+        format!("[truncated to last {} bytes]\n", MAX_LAUNCH_JOB_LOG_BYTES)
+    } else {
+        String::new()
+    };
+    format!("{prefix}{}", String::from_utf8_lossy(truncated))
+}
+
+fn tail_bytes(bytes: &[u8], max: usize) -> &[u8] {
+    if bytes.len() <= max {
+        bytes
+    } else {
+        &bytes[bytes.len() - max..]
+    }
+}
+
+pub(super) fn prune_completed_launch_jobs(jobs: &mut HashMap<String, PortalLaunchJob>) {
+    let mut completed = jobs
+        .iter()
+        .filter(|(_, job)| job.finished_at.is_some())
+        .map(|(id, job)| (job.finished_at.clone().unwrap_or_default(), id.clone()))
+        .collect::<Vec<_>>();
+    if completed.len() <= MAX_COMPLETED_LAUNCH_JOBS {
+        return;
+    }
+    completed.sort();
+    let remove_count = completed.len() - MAX_COMPLETED_LAUNCH_JOBS;
+    for (_, id) in completed.into_iter().take(remove_count) {
+        jobs.remove(&id);
+    }
 }
 
 pub(super) fn validate_launch_request(

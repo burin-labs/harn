@@ -1559,6 +1559,7 @@ impl<'a> HandlerIrBuilder<'a> {
                 exits
             }
             Node::TryCatch {
+                has_catch: _,
                 body,
                 catch_body,
                 finally_body,

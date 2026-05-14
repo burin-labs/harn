@@ -142,6 +142,7 @@ impl CostAnalyzer {
                 self.walk_nodes(body);
             }
             Node::TryCatch {
+                has_catch: _,
                 body,
                 catch_body,
                 finally_body,

@@ -394,6 +394,7 @@ impl SyncInterpreter {
                 Err(EvalStop::Error(format!("Thrown: {}", val.as_string())))
             }
             Node::TryCatch {
+                has_catch: _,
                 body,
                 error_var,
                 catch_body,

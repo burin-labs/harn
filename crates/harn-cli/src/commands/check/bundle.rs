@@ -394,6 +394,7 @@ fn node_children_bundle(node: &SNode) -> Vec<&SNode> {
         }
         Node::EmitExpr { value } => vec![value.as_ref()],
         Node::TryCatch {
+            has_catch: _,
             body,
             catch_body,
             finally_body,

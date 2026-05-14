@@ -147,7 +147,10 @@ impl BedrockProvider {
         if !response.status().is_success() {
             let status = response.status();
             let body = response.text().await.unwrap_or_default();
-            return Err(vm_err(format!("bedrock HTTP {status}: {body}")));
+            return Err(vm_err(
+                crate::llm::api::classify_provider_http_error("bedrock", status, None, &body)
+                    .message,
+            ));
         }
         let json: serde_json::Value = response
             .json()

@@ -112,6 +112,18 @@ impl HttpMcpClientInner {
     }
 }
 
+impl Drop for StdioMcpClientInner {
+    fn drop(&mut self) {
+        let _ = self.child.start_kill();
+    }
+}
+
+impl Drop for HttpMcpClientInner {
+    fn drop(&mut self) {
+        self.abort_get_stream();
+    }
+}
+
 /// Handle to an MCP client connection, stored in VmValue.
 #[derive(Clone)]
 pub struct VmMcpClientHandle {
@@ -906,6 +918,7 @@ async fn mcp_connect_stdio_impl(
         .stdout(std::process::Stdio::piped())
         .stderr(std::process::Stdio::inherit())
         .envs(env);
+    cmd.kill_on_drop(true);
 
     let mut child = cmd.spawn().map_err(|e| {
         VmError::Thrown(VmValue::String(Rc::from(format!(
