@@ -228,7 +228,6 @@ fn __tool_using_defaults(kind) {
   }
   return {
     profile: profile,
-    tool_format: "native",
     loop_until_done: true,
     done_sentinel: nil,
     done_judge: nil,
@@ -236,6 +235,59 @@ fn __tool_using_defaults(kind) {
     max_nudges: max_nudges,
     stall_diagnostics: {enabled: true, threshold: 3, inject_feedback: true, max_feedback: 1},
   }
+}
+
+/**
+ * Resolves the right `tool_format` for the configured model so it lands in
+ * the preset dict before downstream stdlib helpers (postturn / turn / options
+ * inspectors) read it. Previously this was hardcoded to `"native"`, which the
+ * VM's capability gate rejects for tool-capable text-format routes (e.g.
+ * `ollama/qwen3.6:35b-a3b-coding-nvfp4`) with "option `tools` is not supported
+ * by ..." before `native_tool_fallback` could engage. Now it defers to
+ * `llm_resolve_model`, which consults the capability matrix.
+ */
+fn __preset_default_tool_format(opts) {
+  if opts?.tool_format != nil {
+    return opts.tool_format
+  }
+  let model = opts?.model
+  if model == nil || model == "" {
+    return nil
+  }
+  // When the caller explicitly named a provider, consult the capability
+  // matrix directly. `llm_resolve_model` infers provider from the model id
+  // and would misclassify provider-specific identifiers like
+  // `qwen3.6:35b-a3b-coding-nvfp4` (Ollama) by defaulting them to the
+  // global default provider.
+  if opts?.provider != nil && opts.provider != "auto" && opts.provider != "" {
+    let caps = provider_capabilities(opts.provider, model)
+    if caps?.native_tools ?? false {
+      return "native"
+    }
+    return "text"
+  }
+  let resolved = try {
+    llm_resolve_model(model)
+  }
+  if is_err(resolved) {
+    return nil
+  }
+  let info = unwrap(resolved)
+  if info?.tool_format != nil {
+    return info.tool_format
+  }
+  return nil
+}
+
+fn __apply_tool_format(opts, kind) {
+  if kind == "summary" || kind == "verify" {
+    return opts
+  }
+  let resolved = __preset_default_tool_format(opts)
+  if resolved == nil {
+    return opts
+  }
+  return opts + {tool_format: resolved}
 }
 
 fn __kind_defaults(kind, opts) {
@@ -468,6 +520,7 @@ pub fn agent_preset(kind, options = nil) {
   opts = __apply_thinking(opts, resolved_kind)
   opts = __apply_captain_tool_caller(opts, resolved_kind)
   opts = __apply_captain_llm_caller(opts, resolved_kind)
+  opts = __apply_tool_format(opts, resolved_kind)
   return opts + {_preset_kind: resolved_kind}
 }
 

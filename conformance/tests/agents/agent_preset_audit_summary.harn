@@ -22,7 +22,7 @@ pipeline default() {
   llm_mock_clear()
   llm_mock({tool_calls: [{id: "i1", name: "inspect", arguments: {what: "release"}}]})
   llm_mock({text: "<user_response>Audit complete.</user_response>"})
-  let audit = audit_agent("Audit the release", {provider: "mock", tools: audit_tools()})
+  let audit = audit_agent("Audit the release", {provider: "mock", tools: audit_tools(), tool_format: "native"})
   println(audit.status)
   println(audit.text)
   println(audit.adaptive_budget.mode)
@@ -50,7 +50,10 @@ pipeline default() {
   llm_mock_clear()
   llm_mock({tool_calls: [{id: "r1", name: "inspect", arguments: {what: "fix"}}]})
   llm_mock({text: "<user_response>Fixed.</user_response>"})
-  let repair = repair_agent("Repair the regression", {provider: "mock", tools: audit_tools()})
+  let repair = repair_agent(
+    "Repair the regression",
+    {provider: "mock", tools: audit_tools(), tool_format: "native"},
+  )
   println(repair.status)
   println(repair.adaptive_budget.mode)
   println(repair.adaptive_budget.max >= repair.adaptive_budget.initial)
