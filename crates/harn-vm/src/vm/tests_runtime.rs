@@ -1076,7 +1076,7 @@ echo()
     );
     let err = result.unwrap_err().to_string();
     assert!(err.contains("Arity mismatch: 'echo'"), "{err}");
-    assert!(err.contains("expects 1 argument(s), got 0"), "{err}");
+    assert!(err.contains("expects 1 argument, got 0"), "{err}");
 }
 
 #[test]

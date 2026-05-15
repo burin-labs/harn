@@ -1668,3 +1668,56 @@ fn test_imports_stay_tight_then_blank_before_first_item() {
         "formatter is not idempotent around imports"
     );
 }
+
+#[test]
+fn test_trailing_line_comment_preserved_on_top_level_body_statement() {
+    let source = "fn main() {\n  let x = 1 // trailing\n  let y = 2\n}\n";
+    let result = format_source(source).unwrap();
+    assert!(
+        result.contains("let x = 1") && result.contains("// trailing"),
+        "trailing comment should be preserved on the same line; got:\n{result}"
+    );
+    assert!(
+        !result.trim_end().ends_with("// trailing"),
+        "trailing comment must not be moved to end-of-file; got:\n{result}"
+    );
+    let result2 = format_source(&result).unwrap();
+    assert_eq!(result, result2, "trailing comments must be idempotent");
+}
+
+#[test]
+fn test_trailing_line_comment_preserved_inside_if_else_blocks() {
+    let source = "fn main() {\n  if true {\n    let y = 2 // inner trailing\n  } else {\n    let z = 3 // else trailing\n  } // close brace trailing\n  log(1)\n}\n";
+    let result = format_source(source).unwrap();
+    for needle in [
+        "// inner trailing",
+        "// else trailing",
+        "// close brace trailing",
+    ] {
+        assert!(
+            result.contains(needle),
+            "missing trailing comment '{needle}' in formatted output:\n{result}"
+        );
+    }
+    assert!(
+        !result.trim_end().ends_with("// close brace trailing"),
+        "trailing comment leaked to end of file:\n{result}"
+    );
+    let result2 = format_source(&result).unwrap();
+    assert_eq!(
+        result, result2,
+        "trailing comments inside blocks must be idempotent"
+    );
+}
+
+#[test]
+fn test_trailing_block_comment_preserved_on_statement() {
+    let source = "fn main() {\n  let x = 1 /* trailing block */\n}\n";
+    let result = format_source(source).unwrap();
+    assert!(
+        result.contains("let x = 1") && result.contains("/* trailing block */"),
+        "trailing block comment should be preserved on the same line; got:\n{result}"
+    );
+    let result2 = format_source(&result).unwrap();
+    assert_eq!(result, result2);
+}

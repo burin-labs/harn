@@ -1623,12 +1623,15 @@ impl TypeChecker {
                         return;
                     };
                     if args.len() != enum_variant.fields.len() {
+                        let n = enum_variant.fields.len();
+                        let arg_word = if n == 1 { "argument" } else { "arguments" };
                         self.warning_at(
                             format!(
-                                "{}.{} expects {} argument(s), got {}",
+                                "{}.{} expects {} {}, got {}",
                                 enum_name,
                                 variant,
-                                enum_variant.fields.len(),
+                                n,
+                                arg_word,
                                 args.len()
                             ),
                             span,

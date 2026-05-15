@@ -6,6 +6,36 @@ Pre-0.6 highlights live in [CHANGELOG-pre-0.6.md](CHANGELOG-pre-0.6.md).
 Harn had no external users before 0.6.0, so that archive intentionally keeps
 condensed series summaries instead of full per-patch history.
 
+## Unreleased
+
+### Fixed
+
+- **Trailing comments on body statements are preserved.** `harn fmt`
+  previously dropped same-line comments that followed a statement inside
+  any block body (`fn`/`pipeline`/`if`/`else`/`while`/`for`/`try`/`catch`/
+  `finally`/`match` arms), shoving them to the end of the surrounding
+  scope or, worst-case, to end-of-file. The formatter now splices the
+  trailing `// …` or `/* … */` back onto the source line where it was
+  written. Idempotent across repeated formatting passes.
+- **Multi-line ternary expressions parse correctly.** Wrapping a ternary
+  with `?` or `:` at either the end of the previous line or the start of
+  the next line is now accepted in all three layouts (`cond ?\n a : b`,
+  `cond\n ? a\n : b`, `cond ? a\n : b`). Previously the parser
+  misclassified `?` at the end of a line as a postfix-try operator,
+  producing confusing `expected separator (\`;\` or newline), found :`
+  errors.
+- **Arity errors pluralize correctly.** "Builtin function 'len' expects 1
+  argument, got 0" instead of "expects 1 arguments". The runtime
+  `ArityMismatch` similarly drops the awkward `argument(s)` rendering in
+  favor of conditional `argument`/`arguments`.
+- **Statement spans no longer absorb trailing blank lines.** `let`/`var`
+  bindings, assignments, and `if`/`try`-`catch` statements whose body is
+  followed by blank lines and standalone comments previously reported a
+  `span.end_line` that walked past those blank lines. The formatter's
+  trailing-comment splicer was then attaching the standalone comments
+  onto the closing brace. A new `last_non_newline_span()` parser helper
+  keeps node end-spans pinned to the last significant token.
+
 ## v0.8.19
 
 ### Changed
