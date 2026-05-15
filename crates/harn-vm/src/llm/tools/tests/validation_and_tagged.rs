@@ -112,6 +112,24 @@ fn tagged_parser_accepts_well_formed_response() {
 }
 
 #[test]
+fn tagged_parser_accepts_gemma_json_tool_call_body() {
+    // Local Gemma-family stacks sometimes return raw JSON inside the
+    // `<tool_call>` wrapper instead of Harn's inner `name({...})` syntax.
+    let tools = sample_tool_registry();
+    let text = r#"<tool_call>{"name":"edit","arguments":{"action":"create","path":"a.rs","content":"fn a() {}"}}</tool_call>"#;
+    let result = parse_text_tool_calls_with_tools(text, Some(&tools));
+    assert!(
+        result.violations.is_empty(),
+        "violations: {:?}",
+        result.violations
+    );
+    assert!(result.errors.is_empty(), "errors: {:?}", result.errors);
+    assert_eq!(result.calls.len(), 1);
+    assert_eq!(result.calls[0]["name"], json!("edit"));
+    assert_eq!(result.calls[0]["arguments"]["path"], json!("a.rs"));
+}
+
+#[test]
 fn tagged_parser_accepts_compact_protocol_tag_aliases() {
     let tools = sample_tool_registry();
     let text = "<assistantprose>Checking status.</assistantprose>\n\

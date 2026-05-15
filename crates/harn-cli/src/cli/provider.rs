@@ -1,3 +1,5 @@
+use std::path::PathBuf;
+
 use clap::{ArgAction, Args};
 
 use super::util::{llm_model_completion_parser, llm_provider_completion_parser};
@@ -78,6 +80,64 @@ pub(crate) struct ProviderProbeArgs {
     /// Emit JSON. Defaults to true since this command is meant for
     /// machine consumption (eval aggregators); pass `--json=false` to
     /// drop back to the human summary the readiness probe prints.
-    #[arg(long, default_value_t = true, action = ArgAction::Set)]
+    #[arg(
+        long,
+        default_value_t = true,
+        num_args = 0..=1,
+        default_missing_value = "true",
+        action = ArgAction::Set
+    )]
     pub json: bool,
+}
+
+/// Run the one-tool provider conformance probe and emit JSON that eval
+/// harnesses can use to select native, text, or disabled tool mode.
+#[derive(Debug, Args)]
+pub(crate) struct ProviderToolProbeArgs {
+    /// Provider id from Harn provider config (`ollama`, `llamacpp`, `mlx`,
+    /// `local`, ...).
+    #[arg(
+        value_parser = llm_provider_completion_parser(),
+        hide_possible_values = true
+    )]
+    pub provider: String,
+    /// Model alias or provider-native model id.
+    #[arg(
+        long,
+        value_parser = llm_model_completion_parser(),
+        hide_possible_values = true
+    )]
+    pub model: String,
+    /// Override the configured provider base URL.
+    #[arg(long = "base-url")]
+    pub base_url: Option<String>,
+    /// Probe only one transport mode instead of both.
+    #[arg(long, value_enum, default_value_t = ProviderToolProbeModeArg::Both)]
+    pub mode: ProviderToolProbeModeArg,
+    /// Override the marker the model must echo through the tool call.
+    #[arg(long, default_value = harn_vm::llm::tool_conformance::DEFAULT_TOOL_PROBE_MARKER)]
+    pub marker: String,
+    /// Classify a saved provider response body instead of making a live request.
+    #[arg(long = "response-fixture")]
+    pub response_fixture: Option<PathBuf>,
+    /// Request timeout in seconds for each live probe case.
+    #[arg(long, default_value_t = 120)]
+    pub timeout_secs: u64,
+    /// Emit JSON. Defaults to true because evals and setup scripts consume
+    /// the structured conformance report.
+    #[arg(
+        long,
+        default_value_t = true,
+        num_args = 0..=1,
+        default_missing_value = "true",
+        action = ArgAction::Set
+    )]
+    pub json: bool,
+}
+
+#[derive(Debug, Clone, Copy, clap::ValueEnum)]
+pub(crate) enum ProviderToolProbeModeArg {
+    Both,
+    NonStreaming,
+    Streaming,
 }

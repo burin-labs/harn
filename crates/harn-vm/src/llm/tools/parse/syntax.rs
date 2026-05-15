@@ -67,6 +67,28 @@ pub(super) fn has_object_literal_arg_start(text: &str, open_paren_idx: usize) ->
     bytes.get(idx) == Some(&b'{')
 }
 
+/// Parse a TypeScript-ish object literal starting at the beginning of `text`.
+/// Returns the parsed object and bytes consumed through the closing `}`.
+pub(super) fn parse_object_literal_from(
+    text: &str,
+    name: &str,
+) -> Result<(serde_json::Value, usize), String> {
+    let mut parser = TsValueParser::new(text);
+    parser.skip_ws_and_comments();
+    let value = parser.parse_value().map_err(|error| {
+        format!(
+            "TOOL CALL PARSE ERROR: `{name}{{...}}` — {error}. \
+             Tool arguments must be a TypeScript object literal."
+        )
+    })?;
+    match value {
+        serde_json::Value::Object(map) => Ok((serde_json::Value::Object(map), parser.position())),
+        other => Err(format!(
+            "TOOL CALL PARSE ERROR: `{name}{{...}}` — expected an object literal argument, got `{other}`."
+        )),
+    }
+}
+
 pub(super) fn unwrap_exact_code_wrapper(text: &str) -> Option<&str> {
     let trimmed = text.trim();
     if let Some(rest) = trimmed.strip_prefix("```") {

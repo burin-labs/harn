@@ -89,7 +89,8 @@ pub(crate) use flow::{
 pub(crate) use init::{InitArgs, NewArgs, ProjectTemplate};
 pub(crate) use lint_fmt::{FmtArgs, PathTargetsArgs};
 pub(crate) use local::{
-    LocalArgs, LocalCommand, LocalListArgs, LocalStatusArgs, LocalStopArgs, LocalSwitchArgs,
+    LocalArgs, LocalCommand, LocalListArgs, LocalProfileArgs, LocalStatusArgs, LocalStopArgs,
+    LocalSwitchArgs,
 };
 pub(crate) use mcp::{McpArgs, McpCommand, McpLoginArgs, McpServeArgs, McpServerRefArgs};
 pub(crate) use merge_captain::{
@@ -129,6 +130,7 @@ pub(crate) use portal::PortalArgs;
 pub(crate) use profile::ProfileArgs;
 pub(crate) use provider::{
     ModelInfoArgs, ProviderCatalogArgs, ProviderProbeArgs, ProviderReadyArgs,
+    ProviderToolProbeArgs, ProviderToolProbeModeArg,
 };
 pub(crate) use providers::{
     ProvidersArgs, ProvidersCommand, ProvidersExportArgs, ProvidersRefreshArgs,
@@ -354,6 +356,8 @@ SCRIPTING
     /// memory/context details. Designed for eval pipelines that need a
     /// stable telemetry envelope per provider.
     ProviderProbe(ProviderProbeArgs),
+    /// Run one-tool provider conformance and classify native/text fallback.
+    ProviderToolProbe(ProviderToolProbeArgs),
     /// One-shot agent_loop with a prompt. Routes through the configured
     /// provider (or `HARN_LLM_PROVIDER=mock` for offline use).
     #[command(name = "try")]

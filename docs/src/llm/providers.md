@@ -90,6 +90,10 @@ harn local status
 # persist the selection to <state>/local/selection.json.
 harn local switch qwen36-coder --ctx 65536 --keep-alive 1h
 
+# Explain whether a model/runtime route is preferred, experimental, or
+# quarantined on this machine profile.
+harn local profile qwen3.6-coding --provider llamacpp --json
+
 # Unload via keep_alive=0 (Ollama) or SIGTERM tracked PIDs.
 harn local stop --all
 ```
@@ -99,6 +103,27 @@ RAM and accelerator presence — a 48 GB Apple Silicon laptop picks a
 wider context window than a low-RAM Linux box. Override either by
 passing the flag explicitly. State lives under
 `<state_root>/local/` (`HARN_STATE_DIR` honored).
+
+Harn also carries local runtime risk profiles for hybrid-cache families such
+as Qwen3.6 and Gemma4. The profile table records preferred runtimes, required
+probes, known cache/parser risks, and workarounds for Ollama, llama.cpp, and
+MLX. `harn local switch` refuses experimental or quarantined combinations
+unless the required probes are supplied with `--probe-result` /
+`--passed-probe` or the user passes `--force`.
+
+Use the one-tool conformance probe to produce the JSON receipt consumed by
+local lifecycle gates and eval harnesses:
+
+```bash
+harn provider-tool-probe ollama --model qwen3.6-coding --mode both --json
+harn local switch ollama-gemma4 --probe-result gemma4-tool-probe.json
+```
+
+The report classifies each mode as a structured native tool call, parseable
+Harn text tool call, raw model-specific tag, prose-only response, malformed
+arguments, empty response, HTTP error, or transport error. Its
+`tool_calling.fallback_mode` is the machine-readable choice downstream
+systems should record: `native`, `text`, or `disabled`.
 
 ### Enterprise providers
 
