@@ -362,6 +362,7 @@ fn agent_event_ext_fixture_events() -> Vec<AgentEvent> {
             reasoning: "needs one more concrete action".to_string(),
             next_step: Some("run the verifier".to_string()),
             judge_duration_ms: 42,
+            trigger: Some("stalled".to_string()),
         },
         AgentEvent::TypedCheckpoint {
             session_id: "session-1".to_string(),

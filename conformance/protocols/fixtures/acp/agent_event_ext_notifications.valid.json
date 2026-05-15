@@ -242,6 +242,7 @@
         "nextStep": "run the verifier",
         "reasoning": "needs one more concrete action",
         "sessionId": "session-1",
+        "trigger": "stalled",
         "verdict": "continue"
       }
     },

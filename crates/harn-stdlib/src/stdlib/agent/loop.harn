@@ -445,8 +445,7 @@ fn __stall_warning_record(iteration, tool_name, args, signature, repeat_count, c
   return record
 }
 
-fn __stall_maybe_emit(session_id, warning, config, state) {
-  agent_emit_event(session_id, "agent_loop_stall_warning", warning)
+fn __stall_inject_feedback(session_id, warning, config, state) {
   let wants_feedback = config.inject_feedback ?? true
   let should_feedback = wants_feedback && state.feedback_count < config.max_feedback
   if should_feedback {
@@ -456,15 +455,35 @@ fn __stall_maybe_emit(session_id, warning, config, state) {
   return state
 }
 
-fn __stall_observe_tool_calls(session_id, tool_calls, iteration, raw_config, state) {
+fn __stall_maybe_emit(session_id, warning, config, state, defer_feedback) {
+  agent_emit_event(session_id, "agent_loop_stall_warning", warning)
+  if defer_feedback {
+    return {state: state, warning: warning, feedback_deferred: true}
+  }
+  return {
+    state: __stall_inject_feedback(session_id, warning, config, state),
+    warning: warning,
+    feedback_deferred: false,
+  }
+}
+
+fn __stall_observe_tool_calls(session_id, tool_calls, iteration, raw_config, state, defer_feedback) {
   let config = __stall_diagnostics_config(raw_config)
   if !config.enabled {
-    return {state: state, enabled: false}
+    return {state: state, enabled: false, warning: nil, feedback_deferred: false, config: config}
   }
   if len(tool_calls) == 0 {
-    return {state: __stall_reset_state(state), enabled: true}
+    return {
+      state: __stall_reset_state(state),
+      enabled: true,
+      warning: nil,
+      feedback_deferred: false,
+      config: config,
+    }
   }
   var next_state = state
+  var emitted_warning = nil
+  var feedback_deferred = false
   for call in tool_calls {
     let tool_name = __tool_call_name(call)
     if tool_name == "" || contains(config.exempt_tools, tool_name) {
@@ -486,11 +505,22 @@ fn __stall_observe_tool_calls(session_id, tool_calls, iteration, raw_config, sta
       + {last_signature: signature, streak: streak, repeated_tool_calls: repeated}
     if streak == config.threshold {
       let warning = __stall_warning_record(iteration, tool_name, __tool_call_args(call), signature, streak, config)
-      next_state = __stall_maybe_emit(session_id, warning, config, next_state)
+      let emitted = __stall_maybe_emit(session_id, warning, config, next_state, defer_feedback)
+      next_state = emitted.state
+      if emitted_warning == nil {
+        emitted_warning = warning
+      }
+      feedback_deferred = feedback_deferred || emitted?.feedback_deferred ?? false
       next_state = next_state + {warnings: next_state.warnings.push(warning)}
     }
   }
-  return {state: next_state, enabled: true}
+  return {
+    state: next_state,
+    enabled: true,
+    warning: emitted_warning,
+    feedback_deferred: feedback_deferred,
+    config: config,
+  }
 }
 
 fn __apply_stall_result(result, stall_enabled, stall_state) {
@@ -503,6 +533,38 @@ fn __apply_stall_result(result, stall_enabled, stall_state) {
     stall_warnings: stall_state.warnings,
     suspected_loop: len(stall_state.warnings) > 0,
   }
+}
+
+fn __done_judge_stall_cadence(opts) {
+  let judge = opts?.done_judge
+  if type_of(judge) != "dict" {
+    return nil
+  }
+  let cadence = judge?.cadence
+  if type_of(cadence) != "dict" || cadence?.when != "stalled" {
+    return nil
+  }
+  return cadence
+}
+
+fn __done_judge_stall_due(opts, invocations, turn_number) {
+  let cadence = __done_judge_stall_cadence(opts)
+  if cadence == nil {
+    return false
+  }
+  let max_invocations = cadence?.max_invocations
+  if max_invocations != nil && invocations >= max_invocations {
+    return false
+  }
+  let min_iterations = cadence?.min_iterations_before_first
+  if min_iterations != nil && turn_number <= min_iterations {
+    return false
+  }
+  let every = cadence?.every
+  if every != nil && turn_number % every != 0 {
+    return false
+  }
+  return true
 }
 
 fn __native_fallback_feedback(policy, fallback_index) {
@@ -1207,15 +1269,46 @@ fn __agent_loop_run(message, session, initial_opts) {
       } else {
         __resolve_tool_calls(llm_result, parsed)
       }
+      let stall_judge_due = __done_judge_stall_due(turn_opts, done_judge_invocations, turn_index + 1)
       let stall_observation = __stall_observe_tool_calls(
         session.session_id,
         tool_calls,
         turn_index + 1,
         turn_opts?.stall_diagnostics,
         stall_state,
+        stall_judge_due,
       )
       stall_state = stall_observation.state
       stall_enabled_seen = stall_enabled_seen || stall_observation.enabled
+      if stall_judge_due && stall_observation?.warning != nil {
+        let stall_verify_opts = turn_opts
+          + {_done_judge_due: true, _done_judge_trigger: "stalled"}
+        let stall_verdict = agent_verify_or_continue(session, stall_verify_opts, "stalled", visible_text, turn_index + 1)
+        if stall_verdict?.done_judge_invoked ?? false {
+          done_judge_invocations = done_judge_invocations + 1
+        }
+        if stall_verdict.vetoed {
+          if stall_observation?.feedback_deferred ?? false {
+            stall_state = __stall_inject_feedback(
+              session.session_id,
+              stall_observation.warning,
+              stall_observation.config,
+              stall_state,
+            )
+          }
+        } else {
+          agent_session_record_usage(session.session_id, llm_result)
+          let tool_count = len(tool_calls)
+          agent_emit_event(
+            session.session_id,
+            "turn_end",
+            {iteration: turn_index + 1, turn_info: {tool_count: tool_count, text: visible_text}},
+          )
+          final_status = "done"
+          stop_reason = "stalled_done_judge"
+          break
+        }
+      }
       let dispatched = __dispatch_tool_calls(
         session.session_id,
         tool_calls,

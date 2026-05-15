@@ -1409,7 +1409,7 @@ The result is the normal `agent_loop` dict plus:
 - `iterations` — compact per-turn summaries from live loop events.
 - `judge_decisions` — structured completion judge decisions with
   `iteration`, `verdict`, `reasoning`, `next_step`, and
-  `judge_duration_ms`.
+  `judge_duration_ms`, plus optional `trigger`.
 
 ```harn
 let result = agent_turn("Review this patch and fix obvious issues.", {
@@ -1485,7 +1485,8 @@ the model emits `##DONE##` in a sentinel loop.
 The judge returns `verdict: "done" | "continue"` plus optional
 `reasoning` and `next_step`. A veto injects feedback and the loop
 continues until the judge accepts or `max_verify_attempts` is exhausted.
-Each judge call emits a `JudgeDecision` agent event. Use
+Each judge call emits a `JudgeDecision` agent event with optional `trigger`.
+Use
 `verify_completion_judge` instead when every natural stop should be
 judged.
 
@@ -1505,6 +1506,11 @@ agent_loop(task, system, {
   },
 })
 ```
+
+With `when: "stalled"`, stall diagnostics run the judge when
+`agent_loop_stall_warning` fires. `done` stops the loop with
+`stalled_done_judge`; `continue` keeps the normal stall feedback fallback. The
+judge event includes `trigger: "stalled"`.
 
 Omitting `cadence` preserves the default behavior: every completion
 candidate is judged. `when: "stalled"` is quiet during healthy turns and

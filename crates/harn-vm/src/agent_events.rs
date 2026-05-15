@@ -420,6 +420,8 @@ pub enum AgentEvent {
         reasoning: String,
         next_step: Option<String>,
         judge_duration_ms: u64,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        trigger: Option<String>,
     },
     TypedCheckpoint {
         session_id: String,
@@ -1276,6 +1278,7 @@ mod tests {
             reasoning: "needs a concrete next step".into(),
             next_step: Some("run the verifier".into()),
             judge_duration_ms: 17,
+            trigger: Some("stalled".into()),
         });
         sink.flush().unwrap();
 
@@ -1290,6 +1293,7 @@ mod tests {
                 reasoning,
                 next_step,
                 judge_duration_ms,
+                trigger,
             } => {
                 assert_eq!(session_id, "s");
                 assert_eq!(iteration, 2);
@@ -1297,6 +1301,7 @@ mod tests {
                 assert_eq!(reasoning, "needs a concrete next step");
                 assert_eq!(next_step.as_deref(), Some("run the verifier"));
                 assert_eq!(judge_duration_ms, 17);
+                assert_eq!(trigger.as_deref(), Some("stalled"));
             }
             other => panic!("expected JudgeDecision, got {other:?}"),
         }
