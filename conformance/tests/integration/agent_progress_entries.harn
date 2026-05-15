@@ -1,0 +1,40 @@
+import { agent_capture_events } from "std/agent/events"
+import { agent_progress } from "std/agent/progress"
+import { agent_session_finalize, agent_session_init } from "std/agent/state"
+
+pipeline default() {
+  let session_id = "agent-progress-entries-" + uuid()
+  let captured = agent_capture_events(
+    session_id,
+    fn() {
+      let session = agent_session_init("progress entries", nil, {session_id: session_id})
+      agent_progress(
+        {
+          entries: [
+            {content: "Inspect code", status: "completed", priority: "high"},
+            {content: "Run tests", status: "pending"},
+          ],
+        },
+      )
+      agent_session_finalize(session.session_id, "done")
+      return nil
+    },
+  )
+  let events = captured.events.filter({ event -> event.type == "progress_reported" })
+  require len(events) == 1, "entries-only progress emits one event"
+  let event = events[0]
+  println("message_is_nil=" + to_string(event.message == nil))
+  println("entry_count=" + to_string(len(event.entries)))
+  println(
+    "first=" + event.entries[0].content + ":" + event.entries[0].status + ":"
+      + event.entries[0].priority,
+  )
+  println(
+    "second="
+      + event.entries[1].content
+      + ":"
+      + event.entries[1].status
+      + ":"
+      + to_string(event.entries[1]?.priority ?? "none"),
+  )
+}

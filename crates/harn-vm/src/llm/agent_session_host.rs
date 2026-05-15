@@ -1149,6 +1149,22 @@ fn build_agent_event(
             session_id: session_id.to_string(),
             checkpoint: payload.clone(),
         }),
+        "progress_reported" => Ok(AgentEvent::ProgressReported {
+            session_id: session_id.to_string(),
+            message: get_opt_string("message"),
+            entries: payload_obj
+                .and_then(|m| m.get("entries"))
+                .cloned()
+                .unwrap_or_else(|| serde_json::Value::Array(Vec::new())),
+            replace: payload_obj
+                .and_then(|m| m.get("replace"))
+                .and_then(|v| v.as_bool())
+                .unwrap_or(true),
+            metadata: payload_obj
+                .and_then(|m| m.get("metadata"))
+                .cloned()
+                .unwrap_or_else(|| serde_json::Value::Object(serde_json::Map::new())),
+        }),
         "tool_search_query" => Ok(AgentEvent::ToolSearchQuery {
             session_id: session_id.to_string(),
             tool_use_id: get_string("tool_use_id"),

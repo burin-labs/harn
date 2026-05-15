@@ -80,6 +80,7 @@ export const HARN_AGENT_EVENT_KINDS = [
   "judge_decision",
   "loop_control_decision",
   "loop_stuck",
+  "progress_reported",
   "session_closed",
   "tool_call_audit",
   "typed_checkpoint",

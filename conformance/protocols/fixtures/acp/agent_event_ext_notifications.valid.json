@@ -68,6 +68,30 @@
       "jsonrpc": "2.0",
       "method": "_harn/agentEvent",
       "params": {
+        "entries": [
+          {
+            "content": "Implement progress helper.",
+            "priority": "high",
+            "status": "completed"
+          },
+          {
+            "content": "Run conformance.",
+            "status": "pending"
+          }
+        ],
+        "kind": "progress_reported",
+        "message": "Patched stdlib API.",
+        "metadata": {
+          "source": "agent_progress"
+        },
+        "replace": true,
+        "sessionId": "session-1"
+      }
+    },
+    {
+      "jsonrpc": "2.0",
+      "method": "_harn/agentEvent",
+      "params": {
         "content": "missed required tool call; reissuing",
         "feedbackKind": "protocol_violation",
         "kind": "feedback_injected",

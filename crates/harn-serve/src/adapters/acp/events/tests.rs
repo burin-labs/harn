@@ -253,6 +253,16 @@ fn agent_event_ext_fixture_events() -> Vec<AgentEvent> {
                 "stage": "verify"
             }),
         },
+        AgentEvent::ProgressReported {
+            session_id: "session-1".to_string(),
+            message: Some("Patched stdlib API.".to_string()),
+            entries: serde_json::json!([
+                {"content": "Implement progress helper.", "status": "completed", "priority": "high"},
+                {"content": "Run conformance.", "status": "pending"}
+            ]),
+            replace: true,
+            metadata: serde_json::json!({"source": "agent_progress"}),
+        },
         AgentEvent::FeedbackInjected {
             session_id: "session-1".to_string(),
             kind: "protocol_violation".to_string(),
@@ -1335,6 +1345,13 @@ fn internal_agent_events_never_emit_session_updates() {
         kind: "user".to_string(),
         content: "continue".to_string(),
     });
+    sink.handle_event(&AgentEvent::ProgressReported {
+        session_id: "session-1".to_string(),
+        message: Some("working".to_string()),
+        entries: serde_json::json!([]),
+        replace: true,
+        metadata: serde_json::json!({}),
+    });
     sink.handle_event(&AgentEvent::LoopStuck {
         session_id: "session-1".to_string(),
         max_nudges: 2,
@@ -1364,7 +1381,7 @@ fn internal_agent_events_never_emit_session_updates() {
         );
     }
     assert_eq!(
-        count, 6,
+        count, 7,
         "expected one ExtNotification per fed AgentEvent, got {count}"
     );
 }

@@ -910,6 +910,15 @@ For background or delegated execution, use the worker lifecycle builtins
 directly from the runtime, or the `worker_*` helpers above when you need the
 normalized request/provenance views.
 
+### std/agent/progress
+
+Agent progress events for hosts that render live agent status:
+
+| Function | Description |
+|---|---|
+| `agent_progress(input)` | Emit a `progress_reported` event for the current agent session; `input` requires `message` or `entries`, with optional `replace` and `metadata` |
+| `agent_progress_tool(registry?, options?)` | Add a handler-backed progress tool to a registry; options may set `name`, `description`, and `system_prompt_nudge` |
+
 ### std/agent/chat
 
 Interactive chat-loop helpers built on `agent_loop` sessions:

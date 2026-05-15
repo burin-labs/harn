@@ -387,6 +387,13 @@ pub enum AgentEvent {
         session_id: String,
         plan: serde_json::Value,
     },
+    ProgressReported {
+        session_id: String,
+        message: Option<String>,
+        entries: serde_json::Value,
+        replace: bool,
+        metadata: serde_json::Value,
+    },
     TurnStart {
         session_id: String,
         iteration: usize,
@@ -641,6 +648,7 @@ impl AgentEvent {
             | Self::ToolCall { session_id, .. }
             | Self::ToolCallUpdate { session_id, .. }
             | Self::Plan { session_id, .. }
+            | Self::ProgressReported { session_id, .. }
             | Self::TurnStart { session_id, .. }
             | Self::TurnEnd { session_id, .. }
             | Self::SessionClosed { session_id, .. }
