@@ -892,7 +892,7 @@ println(response.logprobs)       // present when requested and returned
 | `llm_backoff_ms` | int | 250 | (deprecated; see `with_retry`) Base exponential backoff in milliseconds. |
 | `llm_caller` | closure | nil | (`agent_loop` only) Custom caller wrapping the per-turn `llm_call`. See "Composable LLM callers" below. |
 | `tool_caller` | closure | nil | (`agent_loop` only) Custom caller wrapping every tool dispatch. Signature `fn(call, next) -> result_dict`. See "Composable tool middleware" below. |
-| `progress_tool` | bool \| dict | false | (`agent_loop` only) Expose an opt-in progress-reporting tool. `true` installs `agent_progress`; dict form may set `name`, `description`, and `system_prompt_nudge`. |
+| `progress_tool` | bool \| dict | false | (`agent_loop` only) Expose an opt-in progress-reporting tool. `true` installs `agent_progress`; dict form may set `name`, `description`, and `system_prompt_nudge`. ACP clients receive entries as canonical `plan` updates and message-only reports as Harn `progress` narration. |
 | `stream` | bool | true | SSE streaming transport. |
 
 Provider auto-resolution precedence:

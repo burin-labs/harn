@@ -17,6 +17,11 @@ condensed series summaries instead of full per-patch history.
   model-facing tool off by default; opt in with `progress_tool: true` or
   customize `{name, description, system_prompt_nudge}`. ACP extension
   notifications and protocol artifacts now include the new event kind.
+- **ACP progress plan routing (#1627).** ACP renders `agent_progress`
+  entries as canonical `sessionUpdate: "plan"` updates so clients replace
+  their structured task list directly, while message-only progress reports
+  continue to use Harn's vendor `progress` extension with `phase:
+  "narration"`.
 - **Provider telemetry envelope (#1614).** `llm_call` results now carry a
   normalized `provider_telemetry` block that preserves server-side timings
   local runtimes already report and represents missing fields explicitly.

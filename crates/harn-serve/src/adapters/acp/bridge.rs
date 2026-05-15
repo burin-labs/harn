@@ -143,28 +143,21 @@ impl AcpBridge {
         total: Option<i64>,
         data: Option<serde_json::Value>,
     ) {
-        let mut update = serde_json::json!({
-            "sessionUpdate": "progress",
-        });
-        let mut harn_meta = serde_json::Map::new();
-        harn_meta.insert(
-            "phase".to_string(),
-            serde_json::Value::String(phase.to_string()),
+        let update = progress_update(phase, message, progress, total, data);
+        self.send_notification(
+            "session/update",
+            serde_json::json!({
+                "sessionId": self.session_id,
+                "update": update,
+            }),
         );
-        harn_meta.insert(
-            "message".to_string(),
-            serde_json::Value::String(message.to_string()),
-        );
-        if let Some(p) = progress {
-            harn_meta.insert("progress".to_string(), serde_json::Value::from(p));
-        }
-        if let Some(t) = total {
-            harn_meta.insert("total".to_string(), serde_json::Value::from(t));
-        }
-        if let Some(d) = data {
-            harn_meta.insert("data".to_string(), d);
-        }
-        events::merge_harn_meta(&mut update, harn_meta);
+    }
+
+    /// Send a canonical ACP `plan` update. Per ACP, each plan update is
+    /// a full replacement for the client's current plan state.
+    #[allow(dead_code)]
+    pub(super) fn send_plan(&self, entries: serde_json::Value) {
+        let update = plan_update(entries);
         self.send_notification(
             "session/update",
             serde_json::json!({
@@ -306,4 +299,43 @@ impl AcpBridge {
             }
         }
     }
+}
+
+pub(super) fn plan_update(entries: serde_json::Value) -> serde_json::Value {
+    serde_json::json!({
+        "sessionUpdate": "plan",
+        "entries": entries,
+    })
+}
+
+pub(super) fn progress_update(
+    phase: &str,
+    message: &str,
+    progress: Option<i64>,
+    total: Option<i64>,
+    data: Option<serde_json::Value>,
+) -> serde_json::Value {
+    let mut update = serde_json::json!({
+        "sessionUpdate": "progress",
+    });
+    let mut harn_meta = serde_json::Map::new();
+    harn_meta.insert(
+        "phase".to_string(),
+        serde_json::Value::String(phase.to_string()),
+    );
+    harn_meta.insert(
+        "message".to_string(),
+        serde_json::Value::String(message.to_string()),
+    );
+    if let Some(p) = progress {
+        harn_meta.insert("progress".to_string(), serde_json::Value::from(p));
+    }
+    if let Some(t) = total {
+        harn_meta.insert("total".to_string(), serde_json::Value::from(t));
+    }
+    if let Some(d) = data {
+        harn_meta.insert("data".to_string(), d);
+    }
+    events::merge_harn_meta(&mut update, harn_meta);
+    update
 }
