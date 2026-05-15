@@ -7,7 +7,6 @@
 
 use std::collections::BTreeMap;
 use std::rc::Rc;
-use std::time::Instant;
 
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
@@ -352,12 +351,13 @@ async fn execute_live_probe_case(
     marker: &str,
     timeout_secs: u64,
 ) -> ToolConformanceCase {
-    let started = Instant::now();
+    let clock = harn_clock::RealClock::arc();
+    let started_ms = clock.monotonic_ms();
     let Some(def) = llm_config::provider_config(provider) else {
         return ToolConformanceCase::transport_error(
             mode,
             format!("unknown provider: {provider}"),
-            Some(elapsed_ms(started)),
+            Some(elapsed_ms(&*clock, started_ms)),
         );
     };
     let base_url = base_url
@@ -367,7 +367,11 @@ async fn execute_live_probe_case(
     let url = match chat_url(&def, &base_url) {
         Ok(url) => url,
         Err(message) => {
-            return ToolConformanceCase::transport_error(mode, message, Some(elapsed_ms(started)));
+            return ToolConformanceCase::transport_error(
+                mode,
+                message,
+                Some(elapsed_ms(&*clock, started_ms)),
+            );
         }
     };
     let body = probe_request_body(provider, model, mode, marker);
@@ -395,7 +399,7 @@ async fn execute_live_probe_case(
             return ToolConformanceCase::transport_error(
                 mode,
                 format!("provider request failed: {error}"),
-                Some(elapsed_ms(started)),
+                Some(elapsed_ms(&*clock, started_ms)),
             );
         }
     };
@@ -406,11 +410,11 @@ async fn execute_live_probe_case(
             return ToolConformanceCase::transport_error(
                 mode,
                 format!("provider response was unreadable: {error}"),
-                Some(elapsed_ms(started)),
+                Some(elapsed_ms(&*clock, started_ms)),
             );
         }
     };
-    let elapsed = Some(elapsed_ms(started));
+    let elapsed = Some(elapsed_ms(&*clock, started_ms));
     if !status.is_success() {
         return ToolConformanceCase::http_error(
             mode,
@@ -850,8 +854,8 @@ fn first_non_empty(value: Option<String>, fallback: &str) -> String {
         .unwrap_or_else(|| fallback.to_string())
 }
 
-fn elapsed_ms(started: Instant) -> u64 {
-    started.elapsed().as_millis().min(u128::from(u64::MAX)) as u64
+fn elapsed_ms(clock: &dyn harn_clock::Clock, started_ms: i64) -> u64 {
+    clock.monotonic_ms().saturating_sub(started_ms).max(0) as u64
 }
 
 #[cfg(test)]
