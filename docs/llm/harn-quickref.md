@@ -1099,7 +1099,8 @@ Query the effective matrix at runtime:
 let caps = provider_capabilities("anthropic", "claude-opus-4-7")
 // {
 //   provider: "anthropic", model: "claude-opus-4-7",
-//   native_tools: true, defer_loading: true,
+//   native_tools: true, text_tool_wire_format_supported: true,
+//   tools: true, defer_loading: true,
 //   tool_search: ["bm25", "regex"], max_tools: 10000,
 //   prompt_caching: true, thinking: true,
 //   thinking_modes: ["adaptive"],
@@ -1107,6 +1108,11 @@ let caps = provider_capabilities("anthropic", "claude-opus-4-7")
 //   reasoning_effort_supported: false,
 //   interleaved_thinking_supported: true,
 // }
+
+// `caps.tools` matches Harn's own tool gate: true when the route can call
+// tools via either the native API wire shape or Harn's text wire format.
+// Inspect `native_tools` or `text_tool_wire_format_supported` directly when
+// you need to distinguish.
 
 if "bm25" in caps.tool_search {
   // opt into progressive disclosure

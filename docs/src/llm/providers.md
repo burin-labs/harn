@@ -161,13 +161,17 @@ vendor-specific knowledge:
 ```harn
 let caps = provider_capabilities("anthropic", "claude-opus-4-7")
 // {
-//   native_tools: true, defer_loading: true,
+//   native_tools: true, text_tool_wire_format_supported: true,
+//   tools: true, defer_loading: true,
 //   tool_search: ["bm25", "regex"], max_tools: 10000,
 //   prompt_caching: true, thinking: true, vision_supported: true,
 //   interleaved_thinking_supported: true,
 // }
 
-if "bm25" in caps.tool_search {
+// Gate on `tools` for "can this route call tools at all" — true for either
+// native or text-format tool wire. Inspect `native_tools` or
+// `text_tool_wire_format_supported` directly when you need to distinguish.
+if caps.tools && "bm25" in caps.tool_search {
   llm_call(prompt, sys, {
     tools: registry,
     tool_search: "bm25",
