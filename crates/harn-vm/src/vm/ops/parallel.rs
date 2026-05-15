@@ -1,7 +1,7 @@
 use std::collections::{BTreeMap, VecDeque};
 use std::rc::Rc;
 use std::sync::Arc;
-use std::time::Instant;
+use std::time::{Duration, Instant};
 
 use crate::value::{VmError, VmStream, VmTaskHandle, VmValue};
 
@@ -374,9 +374,13 @@ impl super::super::Vm {
             VmValue::Int(n) => (*n).max(0) as u64,
             _ => 30_000,
         };
-        let deadline = Instant::now() + std::time::Duration::from_millis(ms);
-        self.deadlines.push((deadline, self.frames.len()));
+        self.push_deadline_after(Duration::from_millis(ms));
         Ok(())
+    }
+
+    pub(crate) fn push_deadline_after(&mut self, duration: Duration) {
+        let deadline = Instant::now() + duration;
+        self.deadlines.push((deadline, self.frames.len()));
     }
 
     pub(super) fn execute_deadline_end(&mut self) {

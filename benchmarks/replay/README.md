@@ -8,6 +8,7 @@ them. That keeps pass/fail replay semantics and benchmark scoring on the same
 trace contract:
 
 - `simple_tool_run`: deterministic read-only tool call.
+- `composition_readonly`: Code Mode parent and child tool receipts.
 - `permission_gated_edit`: HITL permission decision and file-effect receipt.
 - `event_triggered_multi_step_workflow`: event-triggered worker handoff with
   protocol, transcript, and artifact material.

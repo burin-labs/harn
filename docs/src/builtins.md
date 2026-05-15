@@ -1859,6 +1859,10 @@ description, parameters, handler, ...}` specs to a registry, and
 | `tool_parse_call(text)` | text: string | list | Parse `<tool_call>...</tool_call>` XML from LLM output |
 | `tool_format_result(name, result)` | name, result: string | string | Format a `<tool_result>` XML envelope |
 
+`composition_binding_manifest(tool_list(registry))` projects a registry into a
+prompt-visible Code Mode API. The default manifest hides denied tools; pass
+`{include_denied: true}` only when producing audit/debug examples.
+
 ## Structured logging
 
 | Function | Parameters | Returns | Description |
@@ -2085,11 +2089,23 @@ tool registry dict.
 | `tool_synthesize(config)` | config: dict | closure | Synthesize a deterministic callable tool from a natural-language description |
 | `tool_synthesis_cache()` | — | list | Inspect pinned synthesized tool specs for the current run |
 | `tool_synthesis_clear()` | — | nil | Clear the current run's synthesized tool cache |
+| `composition_binding_manifest(tools, options?)` | tools: list or dict, options?: dict | dict | Build a stable Code Mode binding manifest from Harn, host bridge, MCP, provider-native, or deferred tools |
+| `composition_execute(snippet, manifest, options?)` | snippet: string, manifest: dict, options?: dict | dict | Execute a read-only Harn composition snippet and return parent/child audit data |
+| `composition_search_examples(query?, limit?)` | query?: string, limit?: int | list | Return curated read-only composition examples |
+| `composition_typescript_declarations(manifest)` | manifest: dict | string | Emit declaration-only TypeScript bindings from the manifest |
+| `composition_crystallization_trace(report, options?)` | report: dict, options?: dict | dict | Convert a composition report into crystallization trace input |
 | `mcp_tools(registry)` | registry: dict | nil | Register tools for MCP serving |
 | `mcp_resource(config)` | config: dict | nil | Register a static resource (`{uri, name, text, description?, mime_type?}`) |
 | `mcp_resource_template(config)` | config: dict | nil | Register a resource template (`{uri_template, name, handler, description?, mime_type?, completions?}`); `completions` maps URI variable names to static suggestion lists or completion closures |
 | `mcp_prompt(config)` | config: dict | nil | Register a prompt (`{name, handler, description?, arguments?}`); prompt arguments may include `suggestions`/`completions` or a `complete` closure for MCP `completion/complete` |
 | `mcp_report_progress(progress, opts?)` | progress: number, opts?: dict | bool | Emit a `notifications/progress` update for the in-flight MCP tool call (no-op when the client did not opt in via `_meta.progressToken`). `opts`: `{total?: number, message?: string, token?: string\|number}` |
+
+The `composition_*` builtins back [Governed Code Mode](./code-mode.md). The
+executor is read-only: it rejects imports, writes, process execution, network
+access, direct HITL, parallel/spawn, and calls outside the manifest bindings and
+pure data helpers. `std/composition` adds `composition_mcp_tools(...)`, which
+registers the compact MCP profile tools `harn.code.search_examples` and
+`harn.code.execute_composition`.
 
 `tool_synthesize(config)` is the guarded natural-language tool bootstrapper. It
 returns a callable closure and pins the synthesis in an in-memory cache keyed by

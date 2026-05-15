@@ -9,6 +9,11 @@
       "category": "simple_tool_run"
     },
     {
+      "id": "composition_readonly",
+      "path": "benchmarks/replay/fixtures/composition_readonly.valid.json",
+      "category": "code_mode_composition"
+    },
+    {
       "id": "permission_gated_edit",
       "path": "conformance/replay-oracle/fixtures/approval_tool_call.valid.json",
       "category": "permission_decision_preservation"

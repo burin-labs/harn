@@ -377,7 +377,7 @@ impl Debugger {
             .filter(|name| prefix_lower.is_empty() || name.to_lowercase().contains(&prefix_lower))
             // Keep the response bounded, but large enough that the
             // default builtin surface still fits even as stdlib grows.
-            .take(512)
+            .take(4096)
             .map(|label| {
                 json!({
                     "label": label,

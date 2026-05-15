@@ -1,0 +1,45 @@
+pipeline main() {
+  let tools = [
+    {
+      name: "read_file",
+      parameters: {type: "object", required: ["path"]},
+      annotations: {kind: "read", side_effect_level: "read_only"},
+      metadata: {mock_output: {text: "hello"}},
+    },
+  ]
+  let manifest = composition_binding_manifest(tools)
+  let capped = composition_execute(
+    "let _a = read_file({path: \"a\"})\nreturn read_file({path: \"b\"})",
+    manifest,
+    {run_id: "conformance-child-cap", max_operations: 1},
+  )
+  println(capped.ok)
+  println(capped.run.failure_category)
+  println(capped.child_calls.count)
+  let too_large = composition_execute(
+    "return \"0123456789\"",
+    manifest,
+    {run_id: "conformance-output-cap", max_output_bytes: 4},
+  )
+  println(too_large.ok)
+  println(too_large.run.failure_category)
+  let gated_manifest = composition_binding_manifest(
+    [
+      {
+        name: "write_file",
+        parameters: {type: "object"},
+        annotations: {kind: "edit", side_effect_level: "workspace_write"},
+      },
+    ],
+    {include_denied: true, gated_tools: ["write_file"], side_effect_ceiling: "workspace_write"},
+  )
+  println(gated_manifest.bindings[0].policy.disposition)
+  let gated = composition_execute(
+    "return write_file({path: \"x\", content: \"bad\"})",
+    gated_manifest,
+    {run_id: "conformance-gated"},
+  )
+  println(gated.ok)
+  println(gated.run.failure_category)
+  println(gated.child_results[0].error_category)
+}

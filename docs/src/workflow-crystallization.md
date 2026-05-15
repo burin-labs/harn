@@ -432,6 +432,33 @@ candidate steps generated for `agent_recovery_advice` events carry an
 boundary so hosts must not re-run a failing step without a human
 acknowledging the advice.
 
+## Composition Run Input
+
+Governed Code Mode reports can be fed into the same crystallization pipeline.
+`composition_crystallization_trace(report, options?)` returns a versioned trace
+whose actions are the child binding calls from the composition report. The
+trace metadata keeps the composition run id, snippet hash, binding-manifest
+hash, requested side-effect ceiling, child statuses, capabilities, inputs,
+outputs, and policy context.
+
+The stdlib alias
+`composition_crystallization_input(report, options?)` lives in
+`std/composition` for Harn workflows that collect candidate traces before
+calling `harn crystallize`:
+
+```harn
+import { composition_crystallization_input } from "std/composition"
+
+pipeline capture(report) {
+  return composition_crystallization_input(report, {id: "composition-trace"})
+}
+```
+
+This does not auto-promote scratchpad code. It makes repeated read-only
+composition runs visible to the existing mining, shadow replay, review, and PR
+promotion flow. Model-dependent or environment-dependent parts should still be
+marked fuzzy in the generated candidate before promotion.
+
 ## Persona-aware crystallization
 
 Generic crystallization mines repeated traces. Persona-aware crystallization is

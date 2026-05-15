@@ -775,7 +775,7 @@ mod tests {
             resolve_replay_benchmark_selection(&selection, &repo_root, "fallback")
                 .expect("resolve replay benchmark suite");
         assert_eq!(suite_name, "harn-canonical-replay-determinism");
-        assert_eq!(fixture_paths.len(), 3);
+        assert_eq!(fixture_paths.len(), 4);
 
         let reports = fixture_paths
             .iter()
@@ -793,9 +793,9 @@ mod tests {
             reports,
         );
 
-        assert_eq!(report.summary.passed, 3);
+        assert_eq!(report.summary.passed, 4);
         assert_eq!(report.summary.failed, 0);
-        assert_eq!(report.summary.deterministic_fixtures, 3);
+        assert_eq!(report.summary.deterministic_fixtures, 4);
         assert_eq!(report.summary.tool_call_drift_count, 0);
         assert_eq!(report.summary.transcript_drift_count, 0);
         assert_eq!(report.summary.mean_replay_fidelity_score, 1.0);
@@ -806,5 +806,6 @@ mod tests {
         let text = render_replay_benchmark_report(&report);
         assert!(text.contains("Replay benchmark: harn-canonical-replay-determinism"));
         assert!(text.contains("PASS simple_tool_run"));
+        assert!(text.contains("PASS composition_readonly"));
     }
 }

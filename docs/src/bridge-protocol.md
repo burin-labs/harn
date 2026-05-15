@@ -149,6 +149,13 @@ not as new ACP `session/update` variants. Consumers that do not render
 composition events can ignore unknown `_harn/agentEvent.kind` values and
 continue reading ordinary `tool_call` / `tool_call_update` events.
 
+The Harn-native MVP is surfaced by `composition_binding_manifest(...)`,
+`composition_execute(...)`, and the `std/composition`
+`composition_mcp_tools(...)` profile. Binding manifests are hashable prompt
+contracts; execution reports carry the same parent/child fields described here.
+TypeScript declarations generated from a manifest are editor/model affordances,
+not the bridge authority.
+
 Consumers that do render them should group by `runId`:
 
 - `composition_start` identifies the snippet language, snippet hash,

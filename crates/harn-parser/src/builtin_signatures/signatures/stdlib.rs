@@ -567,6 +567,44 @@ pub(crate) const SIGNATURES: &[BuiltinSignature] = &[
         TY_BOOL,
     ),
     BuiltinSignature::simple(
+        "composition_binding_manifest",
+        &[
+            Param::new("tools", Ty::Union(&[TY_LIST, TY_DICT])),
+            Param::optional("options", TY_DICT_OR_NIL),
+        ],
+        TY_DICT,
+    ),
+    BuiltinSignature::simple(
+        "composition_execute",
+        &[
+            Param::new("snippet", TY_STRING),
+            Param::new("manifest", TY_DICT),
+            Param::optional("options", TY_DICT_OR_NIL),
+        ],
+        TY_DICT,
+    ),
+    BuiltinSignature::simple(
+        "composition_crystallization_trace",
+        &[
+            Param::new("report", TY_DICT),
+            Param::optional("options", TY_DICT_OR_NIL),
+        ],
+        TY_DICT,
+    ),
+    BuiltinSignature::simple(
+        "composition_search_examples",
+        &[
+            Param::optional("query", TY_STRING),
+            Param::optional("limit", TY_INT),
+        ],
+        TY_LIST,
+    ),
+    BuiltinSignature::simple(
+        "composition_typescript_declarations",
+        &[Param::new("manifest", TY_DICT)],
+        TY_STRING,
+    ),
+    BuiltinSignature::simple(
         "cookie_delete",
         &[
             Param::new("name", TY_STRING),

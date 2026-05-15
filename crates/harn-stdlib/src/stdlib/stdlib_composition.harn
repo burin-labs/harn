@@ -1,0 +1,43 @@
+/** composition_mcp_tools builds the compact Code Mode MCP profile registry. */
+pub fn composition_mcp_tools(registry = nil, options = nil) {
+  let opts = options ?? {}
+  var tools = registry ?? tool_registry()
+  tools = tool_define(
+    tools,
+    "harn.code.search_examples",
+    "Search curated examples for governed composition snippets",
+    {
+      parameters: {query: {type: "string", required: false}, limit: {type: "integer", required: false}},
+      returns: {type: "array"},
+      annotations: {kind: "search", side_effect_level: "read_only", inline_result: true},
+      handler: { args -> return composition_search_examples(args?.query ?? "", args?.limit ?? opts?.limit ?? 10) },
+    },
+  )
+  tools = tool_define(
+    tools,
+    "harn.code.execute_composition",
+    "Execute a read-only Harn composition snippet against a binding manifest",
+    {
+      parameters: {
+        snippet: {type: "string"},
+        manifest: {type: "object"},
+        run_id: {type: "string", required: false},
+        max_operations: {type: "integer", required: false},
+        timeout_ms: {type: "integer", required: false},
+        max_output_bytes: {type: "integer", required: false},
+      },
+      returns: {type: "object"},
+      annotations: {kind: "think", side_effect_level: "read_only", inline_result: true},
+      handler: { args ->
+        let call_args = args ?? {}
+        return composition_execute(call_args.snippet, call_args.manifest, opts + call_args)
+      },
+    },
+  )
+  return tools
+}
+
+/** composition_crystallization_input converts a composition report into a crystallization trace. */
+pub fn composition_crystallization_input(report, options = nil) {
+  return composition_crystallization_trace(report, options ?? {})
+}
