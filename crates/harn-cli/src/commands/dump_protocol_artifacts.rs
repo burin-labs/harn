@@ -2346,8 +2346,24 @@ fn generate_round_trip_fixture() -> Result<String, String> {
         "method": HARN_AGENT_EVENT_METHOD,
         "params": {
             "sessionId": "sess-42",
-            "kind": "turn_end",
-            "turnId": "turn-9",
+            "kind": "composition_child_call",
+            "runId": "cmp-42",
+            "toolCallId": "tool-cmp-42",
+            "toolName": "tool.write_file",
+            "operationIndex": 0,
+            "requestedSideEffectLevel": "workspace_write",
+            "annotations": {
+                "kind": "edit",
+                "side_effect_level": "workspace_write",
+            },
+            "policyContext": {
+                "ceiling": "workspace_write",
+                "approval": "denied",
+            },
+            "rawInput": {
+                "path": "src/lib.rs",
+                "content": "...",
+            },
         }
     });
     let request = json!({
@@ -2675,6 +2691,10 @@ mod tests {
         assert_eq!(
             fixture["envelopes"]["agentEventNotification"]["method"],
             json!(HARN_AGENT_EVENT_METHOD)
+        );
+        assert_eq!(
+            fixture["envelopes"]["agentEventNotification"]["params"]["kind"],
+            json!("composition_child_call")
         );
         assert_eq!(fixture["a2aTask"]["status"]["state"], json!("working"));
     }

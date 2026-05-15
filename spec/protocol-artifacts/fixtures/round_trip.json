@@ -22,9 +22,25 @@
       "jsonrpc": "2.0",
       "method": "_harn/agentEvent",
       "params": {
-        "kind": "turn_end",
+        "annotations": {
+          "kind": "edit",
+          "side_effect_level": "workspace_write"
+        },
+        "kind": "composition_child_call",
+        "operationIndex": 0,
+        "policyContext": {
+          "approval": "denied",
+          "ceiling": "workspace_write"
+        },
+        "rawInput": {
+          "content": "...",
+          "path": "src/lib.rs"
+        },
+        "requestedSideEffectLevel": "workspace_write",
+        "runId": "cmp-42",
         "sessionId": "sess-42",
-        "turnId": "turn-9"
+        "toolCallId": "tool-cmp-42",
+        "toolName": "tool.write_file"
       }
     },
     "errorResponse": {

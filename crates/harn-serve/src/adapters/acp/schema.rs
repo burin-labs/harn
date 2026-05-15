@@ -48,6 +48,11 @@ pub const HARN_AGENT_EVENT_METHOD: &str = "_harn/agentEvent";
 /// keep it in lockstep with the match arm in `events.rs`.
 pub const HARN_AGENT_EVENT_KINDS: &[&str] = &[
     "budget_exhausted",
+    "composition_child_call",
+    "composition_child_result",
+    "composition_error",
+    "composition_finish",
+    "composition_start",
     "daemon_watchdog_tripped",
     "feedback_injected",
     "judge_decision",

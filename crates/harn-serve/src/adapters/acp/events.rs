@@ -2,6 +2,7 @@
 //! `session/update` notifications. Registered per-session at prompt start.
 
 use harn_vm::agent_events::{AgentEvent, AgentEventSink, ToolExecutor};
+use harn_vm::composition::{CompositionChildCall, CompositionChildResult, CompositionRunEnvelope};
 use harn_vm::visible_text::sanitize_visible_assistant_text;
 
 use super::AcpOutput;
@@ -110,6 +111,53 @@ impl AcpAgentEventSink {
         harn_meta: serde_json::Map<String, serde_json::Value>,
     ) {
         merge_harn_meta(update, harn_meta);
+    }
+
+    fn composition_run_to_json(run: &CompositionRunEnvelope) -> serde_json::Value {
+        serde_json::json!({
+            "runId": &run.run_id,
+            "language": &run.language,
+            "snippetHash": &run.snippet_hash,
+            "bindingManifestHash": &run.binding_manifest_hash,
+            "requestedSideEffectCeiling": run.requested_side_effect_ceiling.as_str(),
+            "stdout": &run.stdout,
+            "stderr": &run.stderr,
+            "artifacts": &run.artifacts,
+            "result": &run.result,
+            "failureCategory": run.failure_category.map(|category| category.as_str()),
+            "error": &run.error,
+            "durationMs": run.duration_ms,
+            "metadata": &run.metadata,
+        })
+    }
+
+    fn composition_child_call_to_json(call: &CompositionChildCall) -> serde_json::Value {
+        serde_json::json!({
+            "runId": &call.run_id,
+            "toolCallId": &call.tool_call_id,
+            "toolName": &call.tool_name,
+            "operationIndex": call.operation_index,
+            "annotations": &call.annotations,
+            "requestedSideEffectLevel": call.requested_side_effect_level.as_str(),
+            "policyContext": &call.policy_context,
+            "rawInput": &call.raw_input,
+        })
+    }
+
+    fn composition_child_result_to_json(result: &CompositionChildResult) -> serde_json::Value {
+        serde_json::json!({
+            "runId": &result.run_id,
+            "toolCallId": &result.tool_call_id,
+            "toolName": &result.tool_name,
+            "operationIndex": result.operation_index,
+            "status": Self::status_str(result.status),
+            "rawOutput": &result.raw_output,
+            "error": &result.error,
+            "errorCategory": result.error_category.map(|category| category.as_str()),
+            "executor": result.executor.as_ref().map(Self::executor_to_json),
+            "durationMs": result.duration_ms,
+            "executionDurationMs": result.execution_duration_ms,
+        })
     }
 }
 
@@ -837,6 +885,41 @@ impl AgentEventSink for AcpAgentEventSink {
                 ..
             } => {
                 self.emit_agent_event_ext("cache_miss", session_id, payload.clone());
+            }
+            AgentEvent::CompositionStart { session_id, run } => {
+                self.emit_agent_event_ext(
+                    "composition_start",
+                    session_id,
+                    Self::composition_run_to_json(run),
+                );
+            }
+            AgentEvent::CompositionChildCall { session_id, call } => {
+                self.emit_agent_event_ext(
+                    "composition_child_call",
+                    session_id,
+                    Self::composition_child_call_to_json(call),
+                );
+            }
+            AgentEvent::CompositionChildResult { session_id, result } => {
+                self.emit_agent_event_ext(
+                    "composition_child_result",
+                    session_id,
+                    Self::composition_child_result_to_json(result),
+                );
+            }
+            AgentEvent::CompositionFinish { session_id, run } => {
+                self.emit_agent_event_ext(
+                    "composition_finish",
+                    session_id,
+                    Self::composition_run_to_json(run),
+                );
+            }
+            AgentEvent::CompositionError { session_id, run } => {
+                self.emit_agent_event_ext(
+                    "composition_error",
+                    session_id,
+                    Self::composition_run_to_json(run),
+                );
             }
         }
     }

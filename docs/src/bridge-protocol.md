@@ -141,6 +141,32 @@ canonical ACP content block, not the session-update envelope. Example:
 }
 ```
 
+### Composition Event Migration Note
+
+Governed Code Mode composition runs are represented on the Harn
+`_harn/agentEvent` extension channel, not as one opaque tool call and
+not as new ACP `session/update` variants. Consumers that do not render
+composition events can ignore unknown `_harn/agentEvent.kind` values and
+continue reading ordinary `tool_call` / `tool_call_update` events.
+
+Consumers that do render them should group by `runId`:
+
+- `composition_start` identifies the snippet language, snippet hash,
+  binding-manifest hash, and requested side-effect ceiling.
+- `composition_child_call` records each child binding operation with
+  `rawInput`, `policyContext`, `requestedSideEffectLevel`, and the
+  `ToolAnnotations` used for policy decisions.
+- `composition_child_result` records the child status, executor,
+  output/error, and timing.
+- `composition_finish` and `composition_error` are terminal parent
+  events carrying stdout, stderr, artifacts, structured result, duration,
+  and failure category.
+
+Portal and transcript indexers should treat composition events as a
+parent/child grouping overlay. A mutating child remains a mutating child
+operation because its own annotations and side-effect level are present;
+do not infer the whole run is read-only from the parent event alone.
+
 ### `audit` tag
 
 Both `tool_call` and `tool_call_update` carry an optional `_meta.harn.audit`
