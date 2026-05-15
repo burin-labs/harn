@@ -6,6 +6,20 @@ Pre-0.6 highlights live in [CHANGELOG-pre-0.6.md](CHANGELOG-pre-0.6.md).
 Harn had no external users before 0.6.0, so that archive intentionally keeps
 condensed series summaries instead of full per-patch history.
 
+## Unreleased
+
+### Changed
+
+- **`provider_capabilities` exposes text-tool capability.** The dict
+  returned by `provider_capabilities(...)` and `llm_model_info(...)` now
+  includes `text_tool_wire_format_supported` (mirrors the rule field) and a
+  derived `tools` boolean (`native_tools || text_tool_wire_format_supported`)
+  that matches the VM's own tool-capability gate at
+  `effective_model_capability_tags`. Scripts gating on "can this model do
+  tools" should prefer `caps.tools` — gating on `caps.native_tools` alone
+  was rejecting tool-capable local routes like
+  `ollama/qwen3.6:35b-a3b-coding-nvfp4` that use Harn's text wire format.
+
 ## v0.8.18
 
 ### Added

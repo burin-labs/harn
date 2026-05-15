@@ -679,6 +679,16 @@ fn capabilities_to_vm_value(
     );
     dict.insert("native_tools".to_string(), VmValue::Bool(caps.native_tools));
     dict.insert(
+        "text_tool_wire_format_supported".to_string(),
+        VmValue::Bool(caps.text_tool_wire_format_supported),
+    );
+    // Mirrors the VM's tool-capability gate at llm_config::effective_model_capability_tags:
+    // either native or text-format tool calling counts as tool-capable.
+    dict.insert(
+        "tools".to_string(),
+        VmValue::Bool(caps.native_tools || caps.text_tool_wire_format_supported),
+    );
+    dict.insert(
         "defer_loading".to_string(),
         VmValue::Bool(caps.defer_loading),
     );
@@ -1117,5 +1127,27 @@ mod tests {
                 None => std::env::remove_var("HARN_DEFAULT_PROVIDER"),
             }
         }
+    }
+
+    #[test]
+    fn test_provider_capabilities_exposes_tools_for_text_only_models() {
+        super::super::capabilities::clear_user_overrides();
+        let mut out = String::new();
+        let args = vec![
+            VmValue::String(Rc::from("ollama")),
+            VmValue::String(Rc::from("qwen3.6:35b-a3b-coding-nvfp4")),
+        ];
+        let result =
+            provider_capabilities_builtin(&args, &mut out).expect("builtin returned error");
+        let dict = result.as_dict().expect("expected dict");
+        // qwen3.6 on Ollama uses Harn's text tool-call wire format, not native API tools.
+        // Scripts gating on `tools` should still see it as tool-capable.
+        let expect_bool = |key: &str, want: bool| match dict.get(key) {
+            Some(VmValue::Bool(b)) => assert_eq!(*b, want, "{key}"),
+            other => panic!("expected Bool for {key}, got {other:?}"),
+        };
+        expect_bool("native_tools", false);
+        expect_bool("text_tool_wire_format_supported", true);
+        expect_bool("tools", true);
     }
 }
