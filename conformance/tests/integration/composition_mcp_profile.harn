@@ -1,0 +1,28 @@
+import { composition_crystallization_input, composition_mcp_tools } from "std/composition"
+
+pipeline main() {
+  let tools = composition_mcp_tools()
+  println(tool_count(tools))
+  let search = tool_find(tools, "harn.code.search_examples")
+  let examples = search.handler({query: "read", limit: 1})
+  println(examples[0].language)
+  let source_tools = [
+    {
+      name: "read_file",
+      parameters: {type: "object", required: ["path"]},
+      annotations: {kind: "read", side_effect_level: "read_only"},
+      metadata: {mock_output: {text: "profile ok"}},
+    },
+  ]
+  let manifest = composition_binding_manifest(source_tools)
+  let execute = tool_find(tools, "harn.code.execute_composition")
+  let report = execute
+    .handler(
+    {snippet: "return read_file({path: \"README.md\"}).text", manifest: manifest, run_id: "profile-run"},
+  )
+  println(report.ok)
+  println(report.child_calls[0].tool_name)
+  let trace = composition_crystallization_input(report, {id: "profile-trace"})
+  println(trace.source)
+  println(trace.actions[0].name)
+}

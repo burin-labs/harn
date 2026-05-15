@@ -142,6 +142,7 @@ pub fn register_agent_stdlib(vm: &mut Vm) {
     review::register_review_builtins(vm);
     secret_scan::register_secret_scan_builtins(vm);
     tools::register_tool_builtins(vm);
+    crate::composition::register_composition_builtins(vm);
     skills::register_skill_builtins(vm);
     agents_daemon::register_daemon_builtins(vm);
     triggers_stdlib::register_trigger_builtins(vm);

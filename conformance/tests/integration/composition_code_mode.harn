@@ -1,0 +1,45 @@
+pipeline main() {
+  let tools = [
+    {
+      name: "read_file",
+      description: "Read a file",
+      parameters: {type: "object", required: ["path"]},
+      annotations: {
+        kind: "read",
+        side_effect_level: "read_only",
+        arg_schema: {path_params: ["path"]},
+        capabilities: {workspace: ["read_text"]},
+        inline_result: true,
+      },
+      metadata: {mock_output: {text: "hello"}},
+    },
+  ]
+  let manifest = composition_binding_manifest(tools)
+  println(manifest.schema_version)
+  println(manifest.bindings[0].binding)
+  println(manifest.bindings[0].policy.disposition)
+  let report = composition_execute(
+    "let file = read_file({path: \"README.md\"})\nreturn file.text",
+    manifest,
+    {run_id: "conformance-composition"},
+  )
+  println(report.ok)
+  println(report.child_calls[0].tool_name)
+  println(report.run.result)
+  let denied_manifest = composition_binding_manifest(
+    [
+      {
+        name: "write_file",
+        parameters: {type: "object"},
+        annotations: {kind: "edit", side_effect_level: "workspace_write"},
+      },
+    ],
+  )
+  let denied = composition_execute(
+    "return write_file({path: \"x\", content: \"bad\"})",
+    denied_manifest,
+    {run_id: "conformance-denied"},
+  )
+  println(denied.ok)
+  println(denied.run.failure_category)
+}

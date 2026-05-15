@@ -321,6 +321,24 @@ pipeline main(task) {
 }
 ```
 
+For large connector packages, use the compact governed Code Mode profile from
+`std/composition`:
+
+```harn
+import { composition_mcp_tools } from "std/composition"
+
+pipeline main(task) {
+  mcp_tools(composition_mcp_tools())
+}
+```
+
+This exposes `harn.code.search_examples` and
+`harn.code.execute_composition`. The executor still runs through Harn's
+read-only composition path and returns child binding calls/results rather than
+an opaque "execute code" result. Hybrid servers can call
+`composition_mcp_tools(existing_registry)` to expose ordinary tools and the
+compact Code Mode profile together.
+
 ### Defining resources and prompts
 
 ```harn
