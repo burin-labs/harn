@@ -61,13 +61,20 @@ impl Parser {
 
     pub(super) fn parse_ternary(&mut self) -> Result<SNode, ParserError> {
         let condition = self.parse_logical_or()?;
-        if !self.check(&TokenKind::Question) {
+        // `?` may appear on the next line as a wrap-to-new-line continuation.
+        // Postfix `?` (try) is already consumed by `parse_postfix`, so by the
+        // time we reach here a `?` (possibly across a newline) is unambiguously
+        // a ternary operator.
+        if !self.check_skip_newlines(&TokenKind::Question) {
             return Ok(condition);
         }
         let start = condition.span;
         self.advance(); // skip ?
+        self.skip_newlines();
         let true_val = self.parse_ternary()?;
+        // `consume` already skips leading newlines for `:`.
         self.consume(&TokenKind::Colon, ":")?;
+        self.skip_newlines();
         let false_val = self.parse_ternary()?;
         Ok(spanned(
             Node::Ternary {
@@ -538,8 +545,17 @@ impl Parser {
     }
 
     fn question_starts_ternary_branch(&self) -> bool {
-        self.peek_kind_at(1)
-            .is_some_and(Self::token_starts_ternary_branch)
+        // Look at the first non-newline token after `?`. A ternary may wrap
+        // its true-branch onto a new line (`cond ?\n value : other`), so a
+        // newline immediately after `?` must not cause us to misclassify this
+        // as a postfix-`?`.
+        let next = self
+            .tokens
+            .iter()
+            .skip(self.pos + 1)
+            .find(|t| t.kind != TokenKind::Newline)
+            .map(|t| &t.kind);
+        next.is_some_and(Self::token_starts_ternary_branch)
             && self.question_has_top_level_ternary_colon()
     }
 
@@ -578,11 +594,20 @@ impl Parser {
 
     fn question_has_top_level_ternary_colon(&self) -> bool {
         let mut delimiter_depth = 0usize;
+        // True when the most recent significant top-level token was `?` or
+        // `:` — i.e. we're scanning for the start of a branch and a newline
+        // here is just a wrap, not an end-of-ternary.
+        let mut at_branch_start = true;
         for (pos, token) in self.tokens.iter().enumerate().skip(self.pos + 1) {
             if delimiter_depth == 0 {
                 match token.kind {
                     TokenKind::Colon => return true,
                     TokenKind::Newline => {
+                        if at_branch_start {
+                            // `?` (or `:`) was the last significant token; this
+                            // newline simply wraps the branch onto a new line.
+                            continue;
+                        }
                         if self.next_non_newline_continues_ternary_branch(pos + 1) {
                             continue;
                         }
@@ -594,7 +619,9 @@ impl Parser {
                     | TokenKind::Eof => {
                         return false;
                     }
-                    _ => {}
+                    _ => {
+                        at_branch_start = false;
+                    }
                 }
             }
 

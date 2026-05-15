@@ -8,7 +8,7 @@ impl Formatter<'_> {
     /// them and no non-doc-comment line interleaved) and rendered as a
     /// canonical `/** */` block.
     pub(crate) fn emit_comments_for_line(&mut self, line: usize) {
-        if self.emitted_lines.contains(&line) {
+        if self.emitted_lines.borrow().contains(&line) {
             return;
         }
         let Some(comments) = self.comments.get(&line).cloned() else {
@@ -22,7 +22,7 @@ impl Formatter<'_> {
             let mut run_lines: Vec<usize> = vec![line];
             let mut cursor = line + 1;
             while let Some(next_comments) = self.comments.get(&cursor) {
-                if self.emitted_lines.contains(&cursor) {
+                if self.emitted_lines.borrow().contains(&cursor) {
                     break;
                 }
                 if !next_comments.iter().all(|c| c.is_doc) {
@@ -73,13 +73,16 @@ impl Formatter<'_> {
                     }
                 }
             }
-            for l in &run_lines {
-                self.emitted_lines.insert(*l);
+            {
+                let mut emitted = self.emitted_lines.borrow_mut();
+                for l in &run_lines {
+                    emitted.insert(*l);
+                }
             }
             self.emit_doc_block(&body_lines);
             return;
         }
-        self.emitted_lines.insert(line);
+        self.emitted_lines.borrow_mut().insert(line);
         for c in &comments {
             if c.is_block {
                 self.writeln(&format!("/*{}*/", c.text));
@@ -129,12 +132,14 @@ impl Formatter<'_> {
 
     /// Emit any standalone comments whose line is between `from` and `to` (exclusive).
     pub(crate) fn emit_comments_in_range(&mut self, from: usize, to: usize) {
-        let lines: Vec<usize> = self
-            .comments
-            .keys()
-            .filter(|&&l| l >= from && l < to && !self.emitted_lines.contains(&l))
-            .copied()
-            .collect();
+        let lines: Vec<usize> = {
+            let emitted = self.emitted_lines.borrow();
+            self.comments
+                .keys()
+                .filter(|&&l| l >= from && l < to && !emitted.contains(&l))
+                .copied()
+                .collect()
+        };
         for line in lines {
             self.emit_comments_for_line(line);
         }
@@ -148,17 +153,19 @@ impl Formatter<'_> {
     /// range — callers use this to ensure exactly one blank line follows the
     /// last header before the next item.
     pub(crate) fn emit_top_level_comments_in_range(&mut self, from: usize, to: usize) -> bool {
-        let lines: Vec<usize> = self
-            .comments
-            .keys()
-            .filter(|&&l| l >= from && l < to && !self.emitted_lines.contains(&l))
-            .copied()
-            .collect();
+        let lines: Vec<usize> = {
+            let emitted = self.emitted_lines.borrow();
+            self.comments
+                .keys()
+                .filter(|&&l| l >= from && l < to && !emitted.contains(&l))
+                .copied()
+                .collect()
+        };
         let mut any_section_header = false;
         let mut idx = 0;
         while idx < lines.len() {
             let line = lines[idx];
-            if self.emitted_lines.contains(&line) {
+            if self.emitted_lines.borrow().contains(&line) {
                 idx += 1;
                 continue;
             }
@@ -194,9 +201,12 @@ impl Formatter<'_> {
                         if !title.is_empty() && !is_bar_only_line(&mid[0].text) {
                             self.ensure_blank_line_above();
                             self.emit_section_header(title);
-                            self.emitted_lines.insert(lines[idx]);
-                            self.emitted_lines.insert(lines[idx + 1]);
-                            self.emitted_lines.insert(lines[idx + 2]);
+                            {
+                                let mut emitted = self.emitted_lines.borrow_mut();
+                                emitted.insert(lines[idx]);
+                                emitted.insert(lines[idx + 1]);
+                                emitted.insert(lines[idx + 2]);
+                            }
                             self.ensure_blank_line_below();
                             any_section_header = true;
                             idx += 3;
@@ -212,7 +222,7 @@ impl Formatter<'_> {
                     BarKind::PureBar => self.emit_separator_bar(),
                     BarKind::WithTitle(title) => self.emit_section_header(&title),
                 }
-                self.emitted_lines.insert(line);
+                self.emitted_lines.borrow_mut().insert(line);
                 self.ensure_blank_line_below();
                 any_section_header = true;
                 idx += 1;
@@ -271,6 +281,34 @@ impl Formatter<'_> {
         } else {
             self.separator_width
         }
+    }
+
+    /// If `line` has at least one trailing (same-line) non-doc comment, mark
+    /// the line emitted and return a formatted suffix like `// foo` or
+    /// `/* foo */` (without leading whitespace). Returns `None` for empty,
+    /// already-emitted, or doc-comment-only lines — doc comments must always
+    /// render as standalone blocks, never inline.
+    pub(crate) fn take_trailing_comment_for_line(&self, line: usize) -> Option<String> {
+        if self.emitted_lines.borrow().contains(&line) {
+            return None;
+        }
+        let cs = self.comments.get(&line)?;
+        if cs.is_empty() || cs.iter().any(|c| c.is_doc) {
+            return None;
+        }
+        self.emitted_lines.borrow_mut().insert(line);
+        let mut out = String::new();
+        for (i, c) in cs.iter().enumerate() {
+            if i > 0 {
+                out.push(' ');
+            }
+            if c.is_block {
+                out.push_str(&format!("/*{}*/", c.text));
+            } else {
+                out.push_str(&format!("//{}", c.text));
+            }
+        }
+        Some(out)
     }
 }
 

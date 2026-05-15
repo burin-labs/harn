@@ -320,11 +320,16 @@ impl std::fmt::Display for VmError {
             VmError::Return(_) => write!(f, "Return from function"),
             VmError::InvalidInstruction(op) => write!(f, "Invalid instruction: 0x{op:02x}"),
             VmError::ArityMismatch(err) => {
+                let arg_word = match err.expected {
+                    ArityExpect::Exact(1) | ArityExpect::AtLeast(1) => "argument",
+                    _ => "arguments",
+                };
                 write!(
                     f,
-                    "Arity mismatch: '{}' expects {} argument(s), got {}{}",
+                    "Arity mismatch: '{}' expects {} {}, got {}{}",
                     err.callee,
                     err.expected,
+                    arg_word,
                     err.got,
                     fmt_span_suffix(&err.span)
                 )

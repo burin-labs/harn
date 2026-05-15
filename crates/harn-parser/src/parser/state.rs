@@ -38,6 +38,24 @@ impl Parser {
         }
     }
 
+    /// Span of the most recently consumed *non-newline* token. Useful when
+    /// computing a node's end span after the parser has already consumed
+    /// trailing newlines (e.g. while looking ahead for an optional `else` /
+    /// `catch` / `finally` clause). Using `prev_span()` in that position
+    /// would report a newline token whose `end_line` is past the visual end
+    /// of the node, which downstream tools (notably the formatter) interpret
+    /// as belonging to the node.
+    pub(super) fn last_non_newline_span(&self) -> Span {
+        let mut i = self.pos;
+        while i > 0 {
+            i -= 1;
+            if self.tokens[i].kind != TokenKind::Newline {
+                return self.tokens[i].span;
+            }
+        }
+        Span::dummy()
+    }
+
     /// Parse a complete .harn file. Reports multiple errors via recovery.
     pub fn parse(&mut self) -> Result<Vec<SNode>, ParserError> {
         let mut nodes = Vec::new();

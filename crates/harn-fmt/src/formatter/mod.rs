@@ -3,6 +3,7 @@ mod decls;
 mod expressions;
 mod statements;
 
+use std::cell::RefCell;
 use std::collections::{BTreeMap, HashSet};
 
 use harn_parser::{Node, SNode, TypedParam};
@@ -25,8 +26,11 @@ pub(crate) struct Formatter<'a> {
     pub(crate) separator_width: usize,
     /// Line → comments on that line.
     pub(crate) comments: BTreeMap<usize, Vec<Comment>>,
-    /// Track which comment lines have been emitted.
-    pub(crate) emitted_lines: HashSet<usize>,
+    /// Track which comment lines have been emitted. Wrapped in `RefCell` so
+    /// inline (trailing-comment) emission can happen from `&self` string-
+    /// building paths (`format_body_string`, `format_expr`) without forcing
+    /// the entire expression-formatter chain to be `&mut self`.
+    pub(crate) emitted_lines: RefCell<HashSet<usize>>,
 }
 
 impl<'a> Formatter<'a> {
@@ -43,7 +47,7 @@ impl<'a> Formatter<'a> {
             line_width,
             separator_width,
             comments,
-            emitted_lines: HashSet::new(),
+            emitted_lines: RefCell::new(HashSet::new()),
         }
     }
 
@@ -79,6 +83,7 @@ impl<'a> Formatter<'a> {
     }
 
     /// Inner lines of a block — does NOT include opening/closing braces.
+    /// Trailing same-line comments on each statement are preserved inline.
     pub(super) fn format_body_string(&self, body: &[SNode], indent_level: usize) -> String {
         let mut out = String::new();
         let indent_str = "  ".repeat(indent_level);
@@ -86,6 +91,10 @@ impl<'a> Formatter<'a> {
             let expr = self.format_expr_or_stmt(n, indent_level);
             out.push_str(&indent_str);
             out.push_str(&expr);
+            if let Some(trail) = self.take_trailing_comment_for_line(n.span.end_line) {
+                out.push_str("  ");
+                out.push_str(&trail);
+            }
             out.push('\n');
         }
         out
@@ -297,12 +306,35 @@ impl<'a> Formatter<'a> {
     pub(crate) fn format_body(&mut self, nodes: &[SNode], block_start_line: usize) {
         for (i, node) in nodes.iter().enumerate() {
             let range_start = if i > 0 {
-                nodes[i - 1].span.line + 1
+                nodes[i - 1].span.end_line + 1
             } else {
                 block_start_line + 1
             };
             self.emit_comments_in_range(range_start, node.span.line);
             self.format_node(node);
+            self.attach_trailing_comment(node.span.end_line);
+        }
+    }
+
+    /// Splice a trailing comment (if any) on `line` into the most recent line
+    /// already written to `self.output`. Caller is responsible for having just
+    /// written that line via `format_node`/`writeln`. If no trailing comment
+    /// exists, this is a no-op.
+    pub(crate) fn attach_trailing_comment(&mut self, line: usize) {
+        let Some(comment) = self.take_trailing_comment_for_line(line) else {
+            return;
+        };
+        // We expect `self.output` to currently end in "...content\n". Splice
+        // the comment in before that final newline so it lands on the same line
+        // as the rendered statement.
+        if self.output.ends_with('\n') {
+            self.output.pop();
+            self.output.push_str("  ");
+            self.output.push_str(&comment);
+            self.output.push('\n');
+        } else {
+            self.output.push_str("  ");
+            self.output.push_str(&comment);
         }
     }
 }

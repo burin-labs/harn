@@ -263,18 +263,23 @@ impl TypeChecker {
                 args.len() >= required && args.len() <= total
             };
             if !arity_ok {
-                let expected = if sig.has_rest {
-                    format!("at least {}", total.saturating_sub(1))
+                let (expected, single_arg) = if sig.has_rest {
+                    (
+                        format!("at least {}", total.saturating_sub(1)),
+                        total.saturating_sub(1) == 1,
+                    )
                 } else if required == total {
-                    total.to_string()
+                    (total.to_string(), total == 1)
                 } else {
-                    format!("{required}-{total}")
+                    (format!("{required}-{total}"), false)
                 };
+                let arg_word = if single_arg { "argument" } else { "arguments" };
                 self.warning_at(
                     format!(
-                        "Builtin function '{}' expects {} arguments, got {}",
+                        "Builtin function '{}' expects {} {}, got {}",
                         name,
                         expected,
+                        arg_word,
                         args.len()
                     ),
                     span,
@@ -1159,18 +1164,24 @@ impl TypeChecker {
                     args.len() >= sig.required_params && args.len() <= sig.params.len()
                 };
                 if !arity_ok {
-                    let expected = if sig.has_rest {
-                        format!("at least {}", sig.params.len().saturating_sub(1))
-                    } else if sig.required_params == sig.params.len() {
-                        format!("{}", sig.params.len())
+                    let total = sig.params.len();
+                    let (expected, single_arg) = if sig.has_rest {
+                        (
+                            format!("at least {}", total.saturating_sub(1)),
+                            total.saturating_sub(1) == 1,
+                        )
+                    } else if sig.required_params == total {
+                        (format!("{total}"), total == 1)
                     } else {
-                        format!("{}-{}", sig.required_params, sig.params.len())
+                        (format!("{}-{}", sig.required_params, total), false)
                     };
+                    let arg_word = if single_arg { "argument" } else { "arguments" };
                     self.warning_at(
                         format!(
-                            "Function '{}' expects {} arguments, got {}",
+                            "Function '{}' expects {} {}, got {}",
                             name,
                             expected,
+                            arg_word,
                             args.len()
                         ),
                         span,

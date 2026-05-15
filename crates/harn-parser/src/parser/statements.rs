@@ -120,13 +120,19 @@ impl Parser {
         };
         self.consume(&TokenKind::Assign, "=")?;
         let value = self.parse_expression()?;
+        // Use the value expression's own end span rather than `prev_span()`.
+        // Some right-hand sides (e.g. `try { ... } catch (e) { e }`) look
+        // ahead past newlines for optional clauses, leaving `prev_span()`
+        // pointing at a newline whose `end_line` is past the visual end of
+        // the statement.
+        let end = value.span;
         Ok(spanned(
             Node::LetBinding {
                 pattern,
                 type_ann,
                 value: Box::new(value),
             },
-            Span::merge(start, self.prev_span()),
+            Span::merge(start, end),
         ))
     }
 
@@ -141,13 +147,14 @@ impl Parser {
         };
         self.consume(&TokenKind::Assign, "=")?;
         let value = self.parse_expression()?;
+        let end = value.span;
         Ok(spanned(
             Node::VarBinding {
                 pattern,
                 type_ann,
                 value: Box::new(value),
             },
-            Span::merge(start, self.prev_span()),
+            Span::merge(start, end),
         ))
     }
 
@@ -180,7 +187,7 @@ impl Parser {
                 then_body,
                 else_body,
             },
-            Span::merge(start, self.prev_span()),
+            Span::merge(start, self.last_non_newline_span()),
         ))
     }
 
@@ -588,7 +595,7 @@ impl Parser {
         if !has_catch && finally_body.is_none() {
             return Ok(spanned(
                 Node::TryExpr { body },
-                Span::merge(start, self.prev_span()),
+                Span::merge(start, self.last_non_newline_span()),
             ));
         }
 
@@ -601,7 +608,7 @@ impl Parser {
                 catch_body,
                 finally_body,
             },
-            Span::merge(start, self.prev_span()),
+            Span::merge(start, self.last_non_newline_span()),
         ))
     }
 
@@ -798,13 +805,14 @@ impl Parser {
             if self.check(&TokenKind::Assign) {
                 self.advance();
                 let value = self.parse_expression()?;
+                let end = value.span;
                 return Ok(spanned(
                     Node::Assignment {
                         target: Box::new(expr),
                         value: Box::new(value),
                         op: None,
                     },
-                    Span::merge(start, self.prev_span()),
+                    Span::merge(start, end),
                 ));
             }
             let compound_op = if self.check(&TokenKind::PlusAssign) {
@@ -823,13 +831,14 @@ impl Parser {
             if let Some(op) = compound_op {
                 self.advance();
                 let value = self.parse_expression()?;
+                let end = value.span;
                 return Ok(spanned(
                     Node::Assignment {
                         target: Box::new(expr),
                         value: Box::new(value),
                         op: Some(op.into()),
                     },
-                    Span::merge(start, self.prev_span()),
+                    Span::merge(start, end),
                 ));
             }
         }

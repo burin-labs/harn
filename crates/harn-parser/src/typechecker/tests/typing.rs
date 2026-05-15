@@ -966,7 +966,7 @@ fn test_structured_llm_options_accept_structured_aliases() {
 fn test_builtin_arity_warning() {
     let warns = warnings(r#"pipeline t(task) { len("abc", "extra") }"#);
     assert_eq!(warns.len(), 1);
-    assert!(warns[0].contains("Builtin function 'len' expects 1 arguments, got 2"));
+    assert!(warns[0].contains("Builtin function 'len' expects 1 argument, got 2"));
 }
 
 #[test]
