@@ -47,6 +47,13 @@ condensed series summaries instead of full per-patch history.
   candidate. Accepted judge calls still use transcript projection
   isolation: judge prompts and structured responses emit events but do
   not mutate the worker session transcript.
+- **Stall-gated done judge (#1632).** `agent_loop` now runs a configured
+  `done_judge.cadence.when: "stalled"` judge when stall diagnostics emit
+  `agent_loop_stall_warning`. A `done` verdict stops the loop with
+  `stalled_done_judge` before repeating the stalled tool call; a
+  `continue` verdict falls back to the existing stall feedback path.
+  Judge events now include an optional `trigger`, set to `"stalled"` for
+  stall-fired calls.
 
 ## v0.8.17
 

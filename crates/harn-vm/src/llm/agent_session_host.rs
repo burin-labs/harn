@@ -1144,6 +1144,7 @@ fn build_agent_event(
                 .and_then(|m| m.get("judge_duration_ms"))
                 .and_then(|v| v.as_u64())
                 .unwrap_or(0),
+            trigger: get_opt_string("trigger"),
         }),
         "typed_checkpoint" => Ok(AgentEvent::TypedCheckpoint {
             session_id: session_id.to_string(),

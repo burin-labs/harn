@@ -149,6 +149,7 @@ fn __emit_judge_decision(session_id, iteration, verdict) {
       reasoning: verdict?.reasoning ?? "",
       next_step: verdict?.next_step ?? "",
       judge_duration_ms: verdict?.judge_duration_ms ?? 0,
+      trigger: verdict?.trigger ?? nil,
     },
   )
 }
@@ -165,11 +166,12 @@ pub fn agent_verify_or_continue(session, opts, stop_reason, text, iteration = 0)
     __emit_judge_decision(session.session_id, iteration, verdict)
   }
   let done_judge_due = opts?._done_judge_due ?? true
-  let done_judge_applies = opts?.done_judge != nil && (stop_reason == "sentinel" || stop_reason == "natural")
+  let done_judge_applies = opts?.done_judge != nil
+    && (stop_reason == "sentinel" || stop_reason == "natural" || stop_reason == "stalled")
     && done_judge_due
   if !verdict.vetoed && done_judge_applies {
     verdict = __judge_invoke_structured(opts.done_judge, opts, payload)
-    verdict = verdict + {done_judge_invoked: true}
+    verdict = verdict + {done_judge_invoked: true, trigger: opts?._done_judge_trigger ?? nil}
     __emit_judge_decision(session.session_id, iteration, verdict)
   }
   if verdict.vetoed && verdict?.feedback != nil && verdict.feedback != "" {

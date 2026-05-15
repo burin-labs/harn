@@ -1,0 +1,107 @@
+import { agent_capture_events } from "std/agent/events"
+import { agent_session_messages } from "std/agent/state"
+
+fn events_of(events, kind) {
+  return events.filter({ event -> event.type == kind })
+}
+
+fn tool_message_count(session_id) {
+  var count = 0
+  for message in agent_session_messages(session_id) {
+    if message?.role == "tool" && message?.name == "noop" {
+      count = count + 1
+    }
+  }
+  return count
+}
+
+pipeline default() {
+  var tools = tool_registry()
+  tools = tool_define(
+    tools,
+    "noop",
+    "Return the same harmless result",
+    {
+      handler: { _args -> return "noop" },
+      parameters: {},
+      returns: {type: "string"},
+      annotations: {kind: "read"},
+    },
+  )
+  llm_mock_clear()
+  llm_mock({text: "", tool_calls: [{id: "noop1", name: "noop", arguments: {}}]})
+  llm_mock({text: "", tool_calls: [{id: "noop2", name: "noop", arguments: {}}]})
+  llm_mock({text: "", tool_calls: [{id: "noop3", name: "noop", arguments: {}}]})
+  llm_mock(
+    {
+      text: "{\"verdict\":\"continue\",\"reasoning\":\"needs one more turn\",\"next_step\":\"change approach\"}",
+    },
+  )
+  llm_mock({text: "still working"})
+  let session = "stall-judge-continue-" + uuid()
+  let captured = agent_capture_events(
+    session,
+    fn() { return agent_loop(
+      "Continue when the stall judge vetoes.",
+      nil,
+      {
+        provider: "mock",
+        tools: tools,
+        tool_format: "native",
+        loop_until_done: true,
+        max_iterations: 4,
+        session_id: session,
+        stall_diagnostics: {threshold: 3, inject_feedback: true, max_feedback: 1},
+        done_judge: {cadence: {when: "stalled"}},
+      },
+    ) },
+  )
+  let stalls = events_of(captured.events, "agent_loop_stall_warning")
+  let judges = events_of(captured.events, "judge_decision")
+  let messages = json_stringify(agent_session_messages(session))
+  println(captured.result.status)
+  println(len(stalls))
+  println(len(judges))
+  println(judges[0].trigger)
+  println(judges[0].verdict)
+  println(tool_message_count(session))
+  println(contains(messages, "Stall diagnostic"))
+  println(len(llm_mock_calls()))
+  var other_tools = tool_registry()
+  other_tools = tool_define(
+    other_tools,
+    "noop",
+    "Return the same harmless result",
+    {
+      handler: { _args -> return "noop" },
+      parameters: {},
+      returns: {type: "string"},
+      annotations: {kind: "read"},
+    },
+  )
+  llm_mock_clear()
+  llm_mock({text: "", tool_calls: [{id: "noopA", name: "noop", arguments: {}}]})
+  llm_mock({text: "", tool_calls: [{id: "noopB", name: "noop", arguments: {}}]})
+  let other_session = "stall-judge-other-" + uuid()
+  let other = agent_capture_events(
+    other_session,
+    fn() { return agent_loop(
+      "Do not run a stall judge for non-stalled cadence.",
+      nil,
+      {
+        provider: "mock",
+        tools: other_tools,
+        tool_format: "native",
+        loop_until_done: true,
+        max_iterations: 2,
+        session_id: other_session,
+        stall_diagnostics: {threshold: 2, inject_feedback: true, max_feedback: 1},
+        done_judge: {cadence: {when: "always"}},
+      },
+    ) },
+  )
+  println(other.result.status)
+  println(len(events_of(other.events, "agent_loop_stall_warning")))
+  println(len(events_of(other.events, "judge_decision")))
+  println(tool_message_count(other_session))
+}

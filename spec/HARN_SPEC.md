@@ -2090,7 +2090,11 @@ judge returns `verdict: "done" | "continue"` plus optional `reasoning` and
 `next_step`, and injects judge feedback before continuing when the verdict
 rejects completion. Each built-in judge call emits
 `JudgeDecision {session_id, iteration, verdict, reasoning, next_step,
-judge_duration_ms}`.
+judge_duration_ms, trigger?}`. The optional `trigger` is `"stalled"` when a
+`done_judge.cadence.when: "stalled"` judge fires from an
+`agent_loop_stall_warning`; a `done` verdict stops the loop with
+`stalled_done_judge` before the repeated tool call dispatches, and a
+`continue` verdict leaves the stall feedback path in place.
 
 `agent_turn(prompt, options?)` is the high-level wrapper for a single complete
 agent request. It uses `agent_loop`, folds `options.system` into the system

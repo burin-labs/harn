@@ -12,7 +12,7 @@ judge; omit it to use the default judge.
 
 The return value is the normal `agent_loop` result with two extra summaries:
 `iterations` (`[{iteration, started, ended?, tool_count?, prose_chars?}]`) and `judge_decisions`
-(`[{iteration, verdict, reasoning, next_step, judge_duration_ms}]`).
+(`[{iteration, verdict, reasoning, next_step, judge_duration_ms, trigger?}]`).
 
 ```harn
 let result = agent_turn("Summarize the current project risks.", {
@@ -619,13 +619,18 @@ the transcript for a structured judge call and expects
 A veto injects runtime feedback and the loop continues until the judge accepts
 or `max_verify_attempts` is exhausted. Every judge call emits `JudgeDecision`
 with `session_id`, `iteration`, `verdict`, `reasoning`, `next_step`, and
-`judge_duration_ms`.
+`judge_duration_ms`, plus optional `trigger`.
 
 Use `done_judge.cadence` to gate the judge. Omit it to preserve the default:
 every completion candidate is judged. `every: N` judges turns `N`, `2N`, and so
 on; `max_invocations` caps total done-judge calls; `min_iterations_before_first`
 skips the first K turns; `when` accepts `"always"`, `"stalled"`, or a closure
 that receives the same loop-state shape as `loop_control`.
+When `when: "stalled"` is configured, a stall warning can fire the judge
+directly. A `done` verdict stops the loop with `stalled_done_judge` before the
+repeated tool call is dispatched; a `continue` verdict leaves the existing
+stall feedback injection path in place. The corresponding `JudgeDecision`
+event carries `trigger: "stalled"`.
 
 ```harn
 agent_loop(task, system, {
