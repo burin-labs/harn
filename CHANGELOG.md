@@ -19,6 +19,15 @@ condensed series summaries instead of full per-patch history.
   tools" should prefer `caps.tools` — gating on `caps.native_tools` alone
   was rejecting tool-capable local routes like
   `ollama/qwen3.6:35b-a3b-coding-nvfp4` that use Harn's text wire format.
+- **`agent_preset` derives `tool_format` from the model capability matrix.**
+  Tool-using preset kinds (`audit`, `repair`, `merge_captain`,
+  `review_captain`, …) used to hardcode `tool_format: "native"`, which the
+  VM rejected with "option `tools` is not supported by ..." for tool-capable
+  text-format routes (e.g. `ollama/qwen3.6:35b-a3b-coding-nvfp4`) before
+  `native_tool_fallback` could engage. The preset now calls
+  `llm_resolve_model` to resolve `tool_format` from the capability matrix,
+  picking `"native"` for native-capable routes and `"text"` for text-only
+  routes. Callers that explicitly set `tool_format` still win.
 
 ## v0.8.18
 
