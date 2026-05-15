@@ -10,6 +10,13 @@ condensed series summaries instead of full per-patch history.
 
 ### Added
 
+- **Agent progress reporting (#1628).** `std/agent/progress` adds
+  `agent_progress(...)`, which emits a structured `progress_reported`
+  agent event for the current session with optional narration, task-list
+  entries, replacement semantics, and metadata. `agent_loop` keeps the
+  model-facing tool off by default; opt in with `progress_tool: true` or
+  customize `{name, description, system_prompt_nudge}`. ACP extension
+  notifications and protocol artifacts now include the new event kind.
 - **Provider telemetry envelope (#1614).** `llm_call` results now carry a
   normalized `provider_telemetry` block that preserves server-side timings
   local runtimes already report and represents missing fields explicitly.

@@ -1,0 +1,23 @@
+import { agent_capture_events } from "std/agent/events"
+import { agent_progress } from "std/agent/progress"
+import { agent_session_finalize, agent_session_init } from "std/agent/state"
+
+pipeline default() {
+  let session_id = "agent-progress-replace-" + uuid()
+  let captured = agent_capture_events(
+    session_id,
+    fn() {
+      let session = agent_session_init("progress replace", nil, {session_id: session_id})
+      agent_progress({message: "initial"})
+      agent_progress({message: "append", replace: false})
+      agent_session_finalize(session.session_id, "done")
+      return nil
+    },
+  )
+  let events = captured.events.filter({ event -> event.type == "progress_reported" })
+  require len(events) == 2, "replace semantics should emit both updates"
+  println("replace_count=" + to_string(len(events)))
+  println("first_replace=" + to_string(events[0].replace))
+  println("second_replace=" + to_string(events[1].replace))
+  println("messages=" + events[0].message + "," + events[1].message)
+}

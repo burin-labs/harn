@@ -780,6 +780,24 @@ impl AgentEventSink for AcpAgentEventSink {
                     serde_json::json!({"checkpoint": checkpoint}),
                 );
             }
+            AgentEvent::ProgressReported {
+                session_id,
+                message,
+                entries,
+                replace,
+                metadata,
+            } => {
+                self.emit_agent_event_ext(
+                    "progress_reported",
+                    session_id,
+                    serde_json::json!({
+                        "message": message,
+                        "entries": entries,
+                        "replace": replace,
+                        "metadata": metadata,
+                    }),
+                );
+            }
             AgentEvent::FeedbackInjected {
                 session_id,
                 kind,

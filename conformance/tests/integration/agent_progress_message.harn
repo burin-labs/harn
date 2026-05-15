@@ -1,0 +1,36 @@
+import { agent_capture_events } from "std/agent/events"
+import { agent_progress } from "std/agent/progress"
+import { agent_session_finalize, agent_session_init } from "std/agent/state"
+
+fn progress_events(events) {
+  return events.filter({ event -> event.type == "progress_reported" })
+}
+
+pipeline default() {
+  let session_id = "agent-progress-message-" + uuid()
+  let captured = agent_capture_events(
+    session_id,
+    fn() {
+      let session = agent_session_init("progress message", nil, {session_id: session_id})
+      agent_progress({message: "working", metadata: {source: "message-test"}})
+      agent_session_finalize(session.session_id, "done")
+      return nil
+    },
+  )
+  let events = progress_events(captured.events)
+  require len(events) == 1, "message-only progress emits one event"
+  let event = events[0]
+  println("message=" + event.message)
+  println("entries=" + to_string(len(event.entries)))
+  println("replace=" + to_string(event.replace))
+  println("metadata.source=" + event.metadata.source)
+  let invalid_session = agent_session_init("invalid progress", nil, {session_id: session_id + "-invalid"})
+  let invalid = try {
+    agent_progress({})
+  }
+  agent_session_finalize(invalid_session.session_id, "done")
+  println(
+    "validation_error="
+      + to_string(contains(to_string(unwrap_err(invalid)), "message or entries is required")),
+  )
+}

@@ -1,0 +1,62 @@
+import { agent_capture_events } from "std/agent/events"
+
+fn tool_names(tools) {
+  var names = []
+  for entry in tools ?? [] {
+    names = names.push(to_string(entry?.name ?? entry?.function?.name ?? ""))
+  }
+  return names
+}
+
+pipeline default() {
+  let session_id = "agent-progress-tool-" + uuid()
+  llm_mock_clear()
+  llm_mock(
+    {
+      tool_calls: [
+        {
+          id: "progress-1",
+          name: "report_progress",
+          arguments: {
+            message: "from tool",
+            entries: [{content: "Use progress tool", status: "in_progress", priority: "medium"}],
+            replace: false,
+            metadata: {source: "mock-tool"},
+          },
+        },
+      ],
+    },
+  )
+  llm_mock({text: "<user_response>Progress reported.</user_response>"})
+  llm_mock({text: "{\"verdict\":\"done\",\"reasoning\":\"progress event was emitted\"}"})
+  let captured = agent_capture_events(
+    session_id,
+    fn() { return agent_loop(
+      "Report progress with the progress tool.",
+      nil,
+      {
+        provider: "mock",
+        progress_tool: {
+          name: "report_progress",
+          description: "Report structured progress to the host.",
+          system_prompt_nudge: "Use report_progress when reporting status.",
+        },
+        tool_format: "native",
+        loop_until_done: true,
+        done_judge: true,
+        max_iterations: 4,
+        session_id: session_id,
+      },
+    ) },
+  )
+  let calls = llm_mock_calls()
+  let progress_events = captured.events.filter({ event -> event.type == "progress_reported" })
+  require len(progress_events) == 1, "tool-mode progress emits one event"
+  let event = progress_events[0]
+  println("tool_exposed=" + to_string(contains(tool_names(calls[0].tools), "report_progress")))
+  println("progress_events=" + to_string(len(progress_events)))
+  println("event_message=" + event.message)
+  println("entry_status=" + event.entries[0].status)
+  println("replace=" + to_string(event.replace))
+  println("result_status=" + captured.result.status)
+}

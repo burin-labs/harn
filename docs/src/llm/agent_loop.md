@@ -228,6 +228,7 @@ Same as `llm_call`, plus additional options:
 | `reasoning_task` | string | inferred | Task hint for `reasoning_policy: "auto"`: `chat`, `agent`, `code`, `verify`, or `summarize` |
 | `tool_retries` | int | `0` | Number of retry attempts for failed tool calls |
 | `tool_backoff_ms` | int | `1000` | Base backoff delay in ms for tool retries (doubles each attempt) |
+| `progress_tool` | bool/dict | `false` | Opt in to a model-facing progress tool that emits `progress_reported` agent events. `true` exposes `agent_progress`; a dict may set `name`, `description`, and `system_prompt_nudge` |
 | `policy` | dict | nil | Capability ceiling applied to this agent loop |
 | `daemon` | bool | `false` | Idle instead of terminating after text-only turns |
 | `persist_path` | string | nil | Persist daemon snapshots to this path on idle/finalize |

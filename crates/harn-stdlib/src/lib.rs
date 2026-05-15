@@ -250,6 +250,10 @@ pub const STDLIB_SOURCES: &[StdlibSource] = &[
         source: include_str!("stdlib/agent/primitives.harn"),
     },
     StdlibSource {
+        module: "agent/progress",
+        source: include_str!("stdlib/agent/progress.harn"),
+    },
+    StdlibSource {
         module: "agent/loop",
         source: include_str!("stdlib/agent/loop.harn"),
     },

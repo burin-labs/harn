@@ -8,6 +8,7 @@ import { agent_loop_options } from "std/agent/options"
 import { agent_compute_post_turn } from "std/agent/postturn"
 import { agent_build_turn_messages, agent_build_turn_system } from "std/agent/preflight"
 import { agent_dispatch_tool_batch, agent_dispatch_tool_call } from "std/agent/primitives"
+import { agent_progress_apply_options } from "std/agent/progress"
 import { native_tool_contract_feedback_prompt } from "std/agent/prompts"
 import { agent_skills_match } from "std/agent/skills"
 import {
@@ -1374,7 +1375,7 @@ fn __agent_loop_run(message, session, initial_opts) {
 
 /** agent_loop. */
 pub fn agent_loop(message, system_prompt = nil, options = nil) {
-  var opts = agent_loop_options(options)
+  var opts = agent_loop_options(agent_progress_apply_options(options))
   if system_prompt != nil && system_prompt != "" {
     opts = opts + {system: system_prompt}
   }

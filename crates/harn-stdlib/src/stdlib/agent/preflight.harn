@@ -310,6 +310,10 @@ pub fn agent_build_turn_system(session, opts, iteration) {
   if skill_catalog_prompt != "" {
     parts = parts.push(skill_catalog_prompt)
   }
+  let progress_tool_nudge = trim(opts?._progress_tool_system_prompt_nudge ?? "")
+  if progress_tool_nudge != "" {
+    parts = parts.push(progress_tool_nudge)
+  }
   let loop_contract = __agent_loop_contract_prompt(opts)
   if loop_contract != "" {
     parts = parts.push(loop_contract)
