@@ -22,6 +22,10 @@ condensed series summaries instead of full per-patch history.
   their structured task list directly, while message-only progress reports
   continue to use Harn's vendor `progress` extension with `phase:
   "narration"`.
+- **A2A progress status updates (#1629).** A2A task streams now translate
+  `progress_reported` events into non-terminal `working` status updates
+  with agent message text. Entry lists render as deterministic markdown
+  checklists, while terminal completion status emission remains unchanged.
 - **Provider telemetry envelope (#1614).** `llm_call` results now carry a
   normalized `provider_telemetry` block that preserves server-side timings
   local runtimes already report and represents missing fields explicitly.

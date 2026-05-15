@@ -168,6 +168,9 @@ Behavior today:
 - REST-style POST paths at `/message/send`, `/message/stream`,
   `/tasks/resubscribe`, and `/tasks/cancel`, plus deprecated `/tasks/send` and
   `/tasks/send_and_wait` aliases
+- `agent_progress` events stream as non-terminal `working` status updates with
+  agent message text; entry lists render as markdown checklists and final task
+  completion is still emitted separately
 - cooperative cancel propagation into the shared VM cancel token
 - push notification callbacks from caller-provided task configuration
 - HTTP auth hooks built on the shared `AuthPolicy` surface:
