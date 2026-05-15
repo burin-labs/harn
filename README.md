@@ -14,11 +14,19 @@ live in [`opentrustgraph-spec/`](./opentrustgraph-spec/).
 
 ## Install
 
-From a GitHub release:
+One-line installer (recommended; no Rust toolchain required):
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/burin-labs/harn/main/install.sh | sh
+curl -fsSL https://harnlang.com/install.sh | sh
 ```
+
+Detects OS/CPU, downloads the matching signed binary for the latest
+[GitHub release](https://github.com/burin-labs/harn/releases),
+verifies it against the release's `SHA256SUMS` manifest, and installs
+`harn`, `harn-dap`, and `harn-lsp` into the first writable directory
+among `$HARN_INSTALL_DIR`, `$XDG_BIN_DIR`, `$HOME/bin`,
+`$HOME/.local/bin`, or `$HOME/.harn/bin`. macOS binaries are notarized.
+To upgrade later: `harn upgrade`.
 
 With Cargo:
 

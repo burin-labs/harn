@@ -51,6 +51,7 @@ mod trace;
 mod trigger;
 mod trust;
 mod try_cmd;
+mod upgrade;
 mod util;
 mod verify;
 mod viz;
@@ -171,6 +172,7 @@ pub(crate) use tool::{ToolArgs, ToolCommand, ToolNewArgs};
 pub(crate) use trace::{TraceArgs, TraceCommand, TraceImportArgs};
 pub(crate) use trigger::{TriggerArgs, TriggerCancelArgs, TriggerCommand, TriggerReplayArgs};
 pub(crate) use try_cmd::TryArgs;
+pub(crate) use upgrade::UpgradeArgs;
 // `TrustOutcomeArg` / `TrustTierArg` are referenced from the cli
 // parser tests only; they're matched via destructuring elsewhere.
 #[allow(unused_imports)]
@@ -370,6 +372,11 @@ SCRIPTING
     Tool(ToolArgs),
     /// Print the decorated version banner.
     Version,
+    /// Download and atomically replace the running `harn` binary with
+    /// the latest published GitHub release (or a specific tag via
+    /// `--version`). Verifies the archive against the release's
+    /// `SHA256SUMS` manifest before installing.
+    Upgrade(UpgradeArgs),
     /// Regenerate docs/theme/harn-keywords.js from the live lexer + stdlib sets.
     ///
     /// Dev-only. Hidden from `--help` — invoke via
