@@ -1,6 +1,6 @@
 use std::rc::Rc;
 
-use crate::llm::api::{DeltaSender, LlmResult};
+use crate::llm::api::{DeltaSender, LlmResult, ProviderTelemetry};
 use crate::value::{VmError, VmValue};
 
 pub(super) fn vm_err(message: impl Into<String>) -> VmError {
@@ -64,6 +64,7 @@ pub(super) fn empty_result(provider: &str, model: &str) -> LlmResult {
         stop_reason: None,
         blocks: Vec::new(),
         logprobs: Vec::new(),
+        telemetry: ProviderTelemetry::default(),
     }
 }
 

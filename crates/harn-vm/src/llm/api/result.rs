@@ -4,6 +4,7 @@
 use std::collections::BTreeMap;
 use std::rc::Rc;
 
+use super::telemetry::ProviderTelemetry;
 use crate::value::VmValue;
 
 #[derive(Clone, Debug, serde::Serialize, serde::Deserialize, PartialEq)]
@@ -29,6 +30,10 @@ pub(crate) struct LlmResult {
     pub stop_reason: Option<String>,
     pub blocks: Vec<serde_json::Value>,
     pub logprobs: Vec<serde_json::Value>,
+    /// Server-side timings and runtime accounting captured from this
+    /// response. Empty for mocks and providers that report nothing usable.
+    #[serde(default, skip_serializing_if = "ProviderTelemetry::is_empty")]
+    pub telemetry: ProviderTelemetry,
 }
 
 fn build_usage_dict(result: &LlmResult) -> BTreeMap<String, VmValue> {
@@ -125,7 +130,19 @@ pub(crate) fn vm_build_llm_result(
     if let Some(value) = usage.get("cache_savings_usd") {
         dict.insert("cache_savings_usd".to_string(), value.clone());
     }
+    // Surface provider-side timings (Ollama load_duration, prompt_eval_duration,
+    // eval_duration; OpenAI usage; llama.cpp `timings`). Evals key off
+    // `provider_telemetry` for cold-vs-steady-state and prefill-vs-generation
+    // breakdowns; absent fields stay absent rather than collapsing to zero.
+    let telemetry_dict = result.telemetry.as_vm_dict();
+    let mut usage = usage;
+    if let Some(ref telemetry_dict) = telemetry_dict {
+        usage.insert("provider_telemetry".to_string(), telemetry_dict.clone());
+    }
     dict.insert("usage".to_string(), VmValue::Dict(Rc::new(usage)));
+    if let Some(telemetry_dict) = telemetry_dict {
+        dict.insert("provider_telemetry".to_string(), telemetry_dict);
+    }
 
     if let Some(json_val) = parsed_json {
         dict.insert("data".to_string(), json_val);
@@ -318,5 +335,6 @@ pub(super) fn mock_completion_response(prefix: &str, suffix: Option<&str>) -> Ll
             "visibility": "public",
         })],
         logprobs: Vec::new(),
+        telemetry: ProviderTelemetry::default(),
     }
 }

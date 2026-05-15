@@ -496,6 +496,7 @@ mod tests {
             stop_reason: None,
             logprobs: Vec::new(),
             blocks: Vec::new(),
+            telemetry: crate::llm::api::ProviderTelemetry::default(),
         };
 
         let candidates = structured_output_candidates(&result, None);

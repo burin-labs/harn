@@ -14,6 +14,7 @@ use super::response::{
     extract_cache_read_tokens, extract_cache_write_tokens, extract_openai_choice_logprobs,
 };
 use super::result::{mock_completion_response, LlmResult};
+use super::telemetry::{source as telemetry_source, ProviderTelemetry};
 
 async fn completion_json_response(
     provider: &str,
@@ -134,6 +135,8 @@ async fn vm_call_completion_openai_style(
         )))));
     }
 
+    let request_id = json["id"].as_str().filter(|value| !value.is_empty());
+    let telemetry = ProviderTelemetry::from_openai_usage(&json["usage"], request_id);
     Ok(LlmResult {
         text: json["choices"][0]["text"]
             .as_str()
@@ -157,6 +160,7 @@ async fn vm_call_completion_openai_style(
             "visibility": "public",
         })],
         logprobs: extract_openai_choice_logprobs(&json["choices"][0]),
+        telemetry,
     })
 }
 
@@ -234,6 +238,7 @@ async fn vm_call_completion_ollama(
         )))));
     }
 
+    let telemetry = ProviderTelemetry::from_ollama_done(&json, telemetry_source::OLLAMA_GENERATE);
     Ok(LlmResult {
         text: json["response"].as_str().unwrap_or("").to_string(),
         tool_calls: Vec::new(),
@@ -252,6 +257,7 @@ async fn vm_call_completion_ollama(
             "visibility": "public",
         })],
         logprobs: Vec::new(),
+        telemetry,
     })
 }
 

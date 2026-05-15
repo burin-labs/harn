@@ -2467,6 +2467,29 @@ fn test_parses_completions_args() {
 }
 
 #[test]
+fn test_parses_provider_probe_args() {
+    let cli = Cli::parse_from([
+        "harn",
+        "provider-probe",
+        "ollama",
+        "--model",
+        "qwen3.6-coding",
+        "--base-url",
+        "http://127.0.0.1:11434",
+    ]);
+
+    let Command::ProviderProbe(args) = cli.command.unwrap() else {
+        panic!("expected provider-probe command");
+    };
+    assert_eq!(args.provider, "ollama");
+    assert_eq!(args.model.as_deref(), Some("qwen3.6-coding"));
+    assert_eq!(args.base_url.as_deref(), Some("http://127.0.0.1:11434"));
+    // The probe is meant for eval pipelines; JSON output is the default
+    // surface so an aggregator doesn't have to opt in.
+    assert!(args.json);
+}
+
+#[test]
 fn test_provider_model_completion_candidates_stay_permissive() {
     let cli = Cli::parse_from([
         "harn",

@@ -1,9 +1,12 @@
 //! Ollama provider — local Ollama server with NDJSON streaming.
 
-use crate::llm::api::{DeltaSender, LlmRequestPayload, LlmResult};
+use crate::llm::api::{
+    elapsed_ms, telemetry_source, DeltaSender, LlmRequestPayload, LlmResult, ProviderTelemetry,
+};
 use crate::llm::provider::{LlmProvider, LlmProviderChat};
 use crate::value::{VmError, VmValue};
 use std::rc::Rc;
+use std::time::Instant;
 
 /// Zero-cost unit struct for the Ollama provider.
 pub(crate) struct OllamaProvider;
@@ -223,6 +226,7 @@ impl OllamaProvider {
             .timeout(std::time::Duration::from_secs(request.resolve_timeout()))
             .json(&body);
         let req = crate::llm::api::apply_auth_headers(req, &request.api_key, pdef.as_ref());
+        let started = Instant::now();
         let response = req.send().await.map_err(|error| {
             VmError::Thrown(VmValue::String(Rc::from(format!(
                 "ollama raw generate API error: {error}"
@@ -239,15 +243,17 @@ impl OllamaProvider {
             let msg = Self::classify_http_error(status, retry_after.as_deref(), &body).message;
             return Err(VmError::Thrown(VmValue::String(Rc::from(msg))));
         }
-        if request.stream {
+        let mut result = if request.stream {
             let tx = delta_tx.unwrap_or_else(|| {
                 let (tx, _rx) = tokio::sync::mpsc::unbounded_channel::<String>();
                 tx
             });
-            parse_raw_generate_stream(response, &request.provider, &request.model, tx).await
+            parse_raw_generate_stream(response, &request.provider, &request.model, tx).await?
         } else {
-            parse_raw_generate_response(response, request).await
-        }
+            parse_raw_generate_response(response, request).await?
+        };
+        result.telemetry.client_wall_ms = Some(elapsed_ms(started));
+        Ok(result)
     }
 }
 
@@ -389,6 +395,7 @@ async fn parse_raw_generate_response(
             request.model
         )))));
     }
+    let telemetry = ProviderTelemetry::from_ollama_done(&json, telemetry_source::OLLAMA_GENERATE);
     Ok(LlmResult {
         blocks: blocks_from_text_and_thinking(&text, &thinking),
         text,
@@ -410,6 +417,7 @@ async fn parse_raw_generate_response(
             .and_then(|value| value.as_str())
             .map(str::to_string),
         logprobs: Vec::new(),
+        telemetry,
     })
 }
 
@@ -433,6 +441,7 @@ async fn parse_raw_generate_stream(
     let mut input_tokens = 0;
     let mut output_tokens = 0;
     let mut stop_reason = None;
+    let mut telemetry = ProviderTelemetry::default();
 
     while let Ok(Some(line)) = lines.next_line().await {
         if line.is_empty() {
@@ -470,6 +479,8 @@ async fn parse_raw_generate_stream(
                 .get("done_reason")
                 .and_then(|value| value.as_str())
                 .map(str::to_string);
+            telemetry =
+                ProviderTelemetry::from_ollama_done(&json, telemetry_source::OLLAMA_GENERATE);
             break;
         }
     }
@@ -501,6 +512,7 @@ async fn parse_raw_generate_stream(
         thinking_summary: None,
         stop_reason,
         logprobs: Vec::new(),
+        telemetry,
     })
 }
 

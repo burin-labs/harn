@@ -2,7 +2,9 @@
 
 use std::rc::Rc;
 
-use crate::llm::api::{DeltaSender, LlmRequestPayload, LlmResult, ReasoningEffort, ThinkingConfig};
+use crate::llm::api::{
+    DeltaSender, LlmRequestPayload, LlmResult, ProviderTelemetry, ReasoningEffort, ThinkingConfig,
+};
 use crate::llm::provider::{LlmProvider, LlmProviderChat};
 use crate::value::{VmError, VmValue};
 
@@ -219,6 +221,17 @@ fn parse_response(
     let stop_reason = json["candidates"][0]["finishReason"]
         .as_str()
         .map(str::to_string);
+    // Gemini's REST response carries only token counts (no server-side
+    // timings) so we synthesize an OpenAI-shaped usage block and route it
+    // through the same normalizer the rest of the providers use.
+    let usage = serde_json::json!({
+        "prompt_tokens": input_tokens,
+        "completion_tokens": output_tokens,
+    });
+    let request_id = json["responseId"]
+        .as_str()
+        .filter(|value| !value.is_empty());
+    let telemetry = ProviderTelemetry::from_openai_usage(&usage, request_id);
     Ok(LlmResult {
         text,
         tool_calls: Vec::new(),
@@ -233,6 +246,7 @@ fn parse_response(
         stop_reason,
         blocks,
         logprobs: Vec::new(),
+        telemetry,
     })
 }
 

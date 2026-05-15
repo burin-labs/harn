@@ -127,7 +127,9 @@ pub(crate) use persona::{
 pub(crate) use playground::PlaygroundArgs;
 pub(crate) use portal::PortalArgs;
 pub(crate) use profile::ProfileArgs;
-pub(crate) use provider::{ModelInfoArgs, ProviderCatalogArgs, ProviderReadyArgs};
+pub(crate) use provider::{
+    ModelInfoArgs, ProviderCatalogArgs, ProviderProbeArgs, ProviderReadyArgs,
+};
 pub(crate) use providers::{
     ProvidersArgs, ProvidersCommand, ProvidersExportArgs, ProvidersRefreshArgs,
     ProvidersValidateArgs,
@@ -348,6 +350,10 @@ SCRIPTING
     ProviderCatalog(ProviderCatalogArgs),
     /// Probe a provider's /models endpoint and optionally verify a served model.
     ProviderReady(ProviderReadyArgs),
+    /// Snapshot a provider: readiness, served models, loaded models with
+    /// memory/context details. Designed for eval pipelines that need a
+    /// stable telemetry envelope per provider.
+    ProviderProbe(ProviderProbeArgs),
     /// One-shot agent_loop with a prompt. Routes through the configured
     /// provider (or `HARN_LLM_PROVIDER=mock` for offline use).
     #[command(name = "try")]

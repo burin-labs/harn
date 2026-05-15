@@ -1045,6 +1045,7 @@ async fn async_main() {
             )
             .await
         }
+        Command::ProviderProbe(args) => commands::provider::run_provider_probe(args).await,
         Command::Skills(args) => match args.command {
             SkillsCommand::List(list) => commands::skills::run_list(&list),
             SkillsCommand::Inspect(inspect) => commands::skills::run_inspect(&inspect),

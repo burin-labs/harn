@@ -485,6 +485,7 @@ pub(super) fn dump_llm_response(
         .transpose()
         .unwrap_or(None)
         .unwrap_or(serde_json::Value::Null);
+    let telemetry = serde_json::to_value(&result.telemetry).unwrap_or(serde_json::Value::Null);
     append_llm_transcript_entry(&serde_json::json!({
         "type": "provider_call_response",
         "iteration": iteration,
@@ -522,6 +523,9 @@ pub(super) fn dump_llm_response(
         "thinking": result.thinking,
         "thinking_summary": result.thinking_summary,
         "response_ms": response_ms,
+        // Server-side runtime telemetry (Ollama timings, llama.cpp prefill /
+        // decode breakdown, etc.). Empty for providers that report nothing.
+        "provider_telemetry": telemetry,
         "structural_experiment": structural_experiment,
     }));
 }

@@ -48,7 +48,7 @@
 use std::cell::RefCell;
 use std::time::Duration;
 
-use crate::llm::api::{DeltaSender, LlmRequestPayload, LlmResult};
+use crate::llm::api::{DeltaSender, LlmRequestPayload, LlmResult, ProviderTelemetry};
 use crate::llm::provider::{LlmProvider, LlmProviderChat};
 use crate::value::{ErrorCategory, VmError};
 
@@ -455,6 +455,7 @@ async fn play_stream(
         stop_reason: Some(stop_reason.as_str().to_string()),
         blocks,
         logprobs: Vec::new(),
+        telemetry: ProviderTelemetry::default(),
     })
 }
 
