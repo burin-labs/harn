@@ -146,6 +146,7 @@
 - [Maintainer release workflow](./maintainer-release.md)
 - [Platform compatibility](./dev/platform-compatibility.md)
 - [Windows test coverage](./dev/windows-test-coverage.md)
+- [Agent loop runtime notes](./dev/agent-loops.md)
 - [Deterministic test patterns](./dev/testing.md)
 - [Testbench mode](./dev/testbench.md)
 - [Tape format](./dev/tape-format.md)

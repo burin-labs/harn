@@ -1134,6 +1134,7 @@ fn __agent_loop_run(message, session, initial_opts) {
     var final_status = ""
     var terminal_error = nil
     var verify_attempts = 0
+    var done_judge_invocations = 0
     var consecutive_text_only = 0
     var fallback_index = 0
     var successful_tools_seen = []
@@ -1246,8 +1247,32 @@ fn __agent_loop_run(message, session, initial_opts) {
         stop_reason = "max_nudges"
         break
       }
+      let missing_required_for_loop = __required_tools_missing_list(opts, successful_tools_seen)
+      let cadence_loop_state = __snapshot_loop_state(
+        {
+          iteration: iteration,
+          current_limit: current_max,
+          budget_max: budget.max,
+          extensions_used: extensions_used,
+          tool_count: tool_count,
+          turn_successful: turn_successful,
+          turn_rejected: turn_rejected,
+          visible_text: visible_text,
+          turn_native_fallback_used: fallback_outcome.triggered && fallback_outcome.accepted,
+          session_successful: successful_tools_seen,
+          session_rejected: rejected_tools_seen,
+          missing_required_tools: missing_required_for_loop,
+          completion_proposed: false,
+          verdict: nil,
+        },
+      )
       let post_turn_opts = turn_opts
-        + {_session_successful_tools: successful_tools_seen, _session_rejected_tools: rejected_tools_seen}
+        + {
+        _session_successful_tools: successful_tools_seen,
+        _session_rejected_tools: rejected_tools_seen,
+        _done_judge_invocations: done_judge_invocations,
+        _done_judge_loop_state: cadence_loop_state,
+      }
       let outcome = agent_compute_post_turn(
         session,
         normalized + {raw_text: raw_text, parsed_done_marker: parsed?.done_marker ?? ""},
@@ -1269,8 +1294,12 @@ fn __agent_loop_run(message, session, initial_opts) {
             stop_reason = outcome.stop_reason
             break
           }
-          let verdict = agent_verify_or_continue(session, turn_opts, outcome.stop_reason, llm_result.text, turn_index)
+          let verify_opts = turn_opts + {_done_judge_due: outcome?.done_judge_due ?? true}
+          let verdict = agent_verify_or_continue(session, verify_opts, outcome.stop_reason, llm_result.text, turn_index)
           verdict_record = verdict
+          if verdict?.done_judge_invoked ?? false {
+            done_judge_invocations = done_judge_invocations + 1
+          }
           if verdict.vetoed {
             verify_attempts = verify_attempts + 1
             should_continue = true
@@ -1290,7 +1319,6 @@ fn __agent_loop_run(message, session, initial_opts) {
           break
         }
       }
-      let missing_required_for_loop = __required_tools_missing_list(opts, successful_tools_seen)
       let loop_state = __snapshot_loop_state(
         {
           iteration: iteration,

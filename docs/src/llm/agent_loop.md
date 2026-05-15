@@ -249,7 +249,7 @@ Same as `llm_call`, plus additional options:
 | `post_turn_callback` | closure | nil | Hook called after each turn. Receives turn metadata and may inject a message, request an immediate stage stop, or merge next-turn options such as `llm_options: {tool_choice: "none"}` |
 | `verify_completion` | closure | nil | Hook called when the loop is about to stop naturally. Return `nil`/`true` to accept the stop or feedback text to veto and continue |
 | `verify_completion_judge` | bool/dict | nil | Built-in structured judge for any natural stop. `true` uses defaults; a dict may set `provider`, `model`, `system`, and `feedback_fallback` |
-| `done_judge` | bool/dict | nil | Completion structured judge. It runs when the model naturally completes a native-tool loop or emits the done sentinel, and may veto by returning `verdict: "continue"` plus `next_step` or `reasoning` |
+| `done_judge` | bool/dict | nil | Completion structured judge. It runs when the model naturally completes a native-tool loop or emits the done sentinel, and may veto by returning `verdict: "continue"` plus `next_step` or `reasoning`. Dict configs may include `cadence: {every?, when?, max_invocations?, min_iterations_before_first?}` |
 | `llm_transcript_dir` | string | nil | Per-loop directory for Harn's existing `llm_transcript.jsonl` sidecar. This is equivalent to scoping `HARN_LLM_TRANSCRIPT_DIR` to one agent loop and is preferred when a script needs run-specific auditable model-turn JSONL |
 | `turn_policy` | dict | nil | Turn-shape policy for action stages. Supports `require_action_or_yield: bool`, `allow_done_sentinel: bool` (default `true`; set to `false` in workflow-owned action stages so nudges stop advertising the done sentinel), and `max_prose_chars: int` |
 | `native_tool_fallback` | string | `"allow"` | Native-tool-stage policy when the provider emits text-mode `<tool_call>` content instead of native tool calls. `"allow"` preserves the current recovery path, `"allow_once"` accepts the first fallback turn then rejects later repeats with corrective feedback, and `"reject"` fails closed on the first text fallback |
@@ -616,10 +616,29 @@ When `loop_until_done: true`, the system prompt is automatically extended with:
 `done_judge` adds a second gate after completion is detected. The loop renders
 the transcript for a structured judge call and expects
 `verdict: "done" | "continue"` plus optional `reasoning` and `next_step`.
-A veto injects runtime feedback and the loop
-continues until the judge accepts or `max_verify_attempts` is exhausted. Every
-judge call emits `JudgeDecision` with `session_id`, `iteration`, `verdict`,
-`reasoning`, `next_step`, and `judge_duration_ms`.
+A veto injects runtime feedback and the loop continues until the judge accepts
+or `max_verify_attempts` is exhausted. Every judge call emits `JudgeDecision`
+with `session_id`, `iteration`, `verdict`, `reasoning`, `next_step`, and
+`judge_duration_ms`.
+
+Use `done_judge.cadence` to gate the judge. Omit it to preserve the default:
+every completion candidate is judged. `every: N` judges turns `N`, `2N`, and so
+on; `max_invocations` caps total done-judge calls; `min_iterations_before_first`
+skips the first K turns; `when` accepts `"always"`, `"stalled"`, or a closure
+that receives the same loop-state shape as `loop_control`.
+
+```harn
+agent_loop(task, system, {
+  loop_until_done: true,
+  done_judge: {
+    cadence: {every: 5, when: "always", max_invocations: 3},
+  },
+})
+```
+
+`when: "stalled"` does not fire on ordinary completion candidates. It is the
+policy hook used by stall diagnostics so completion checks happen on a signal
+rather than a fixed "are you done?" prompt.
 
 ## Daemon stdlib wrappers
 

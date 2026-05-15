@@ -142,6 +142,67 @@ fn __validate_judge_dict_or_bool(label, value) {
   }
 }
 
+fn __validate_optional_positive_int(label, field, value) {
+  if value == nil {
+    return
+  }
+  if type_of(value) != "int" {
+    throw "agent_loop: `" + label + "." + field + "` must be an integer or nil; got "
+      + type_of(value)
+  }
+  if value < 1 {
+    throw "agent_loop: `" + label + "." + field + "` must be >= 1"
+  }
+}
+
+fn __validate_optional_nonnegative_int(label, field, value) {
+  if value == nil {
+    return
+  }
+  if type_of(value) != "int" {
+    throw "agent_loop: `" + label + "." + field + "` must be an integer or nil; got "
+      + type_of(value)
+  }
+  if value < 0 {
+    throw "agent_loop: `" + label + "." + field + "` must be >= 0"
+  }
+}
+
+fn __validate_judge_cadence(label, value) {
+  if value == nil {
+    return
+  }
+  if type_of(value) != "dict" {
+    throw "agent_loop: `" + label + "` must be a dict or nil; got " + type_of(value)
+  }
+  __validate_optional_positive_int(label, "every", value?.every)
+  __validate_optional_nonnegative_int(label, "max_invocations", value?.max_invocations)
+  __validate_optional_nonnegative_int(
+    label,
+    "min_iterations_before_first",
+    value?.min_iterations_before_first,
+  )
+  let when = value?.when
+  if when == nil {
+    return
+  }
+  let kind = type_of(when)
+  if kind == "closure" {
+    return
+  }
+  if kind == "string" && (when == "always" || when == "stalled") {
+    return
+  }
+  throw "agent_loop: `" + label + ".when` must be \"always\", \"stalled\", a closure, or nil; got "
+    + to_string(when)
+}
+
+fn __validate_done_judge_cadence(value) {
+  if type_of(value) == "dict" {
+    __validate_judge_cadence("done_judge.cadence", value?.cadence)
+  }
+}
+
 fn __positive_int_default(value, fallback) {
   if value == nil {
     return fallback
@@ -200,6 +261,7 @@ fn __validate_agent_loop_completion_options(opts) {
   }
   if __has_key(opts, "done_judge") {
     __validate_judge_dict_or_bool("done_judge", opts.done_judge)
+    __validate_done_judge_cadence(opts.done_judge)
   }
 }
 

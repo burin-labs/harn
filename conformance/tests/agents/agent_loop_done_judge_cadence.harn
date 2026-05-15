@@ -1,0 +1,42 @@
+import { agent_capture_events } from "std/agent/events"
+
+fn judge_events(events) {
+  return events.filter({ event -> event.type == "judge_decision" })
+}
+
+pipeline default() {
+  llm_mock_clear()
+  llm_mock({text: "<user_response>candidate one</user_response>\n<done>##DONE##</done>"})
+  llm_mock({text: "<user_response>candidate two</user_response>\n<done>##DONE##</done>"})
+  llm_mock(
+    {
+      text: "{\"verdict\":\"continue\",\"reasoning\":\"wait for another candidate\",\"next_step\":\"try again\"}",
+    },
+  )
+  llm_mock({text: "<user_response>candidate three</user_response>\n<done>##DONE##</done>"})
+  llm_mock({text: "<user_response>candidate four</user_response>\n<done>##DONE##</done>"})
+  llm_mock({text: "{\"verdict\":\"done\",\"reasoning\":\"fourth candidate is complete\"}"})
+  let session = "done-judge-cadence-" + uuid()
+  let captured = agent_capture_events(
+    session,
+    fn() { return agent_loop(
+      "Finish on cadence.",
+      nil,
+      {
+        provider: "mock",
+        loop_until_done: true,
+        max_iterations: 5,
+        max_nudges: 10,
+        session_id: session,
+        done_judge: {cadence: {every: 2}},
+      },
+    ) },
+  )
+  let judges = judge_events(captured.events)
+  require len(judges) == 2, "done_judge cadence should fire on every second completion candidate"
+  println(captured.result.status)
+  println(captured.result.visible_text)
+  println(captured.result.llm.iterations)
+  println(len(llm_mock_calls()))
+  println(len(judges))
+}
