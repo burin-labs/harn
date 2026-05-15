@@ -434,6 +434,14 @@ Structured Harn plan emissions use the same task stream. When an agent calls
 standard ACP-compatible `entries` plus the normalized `harn.plan.v1` artifact
 under `plan`.
 
+Agent progress reports use protocol-native A2A status updates. When
+`agent_progress` emits narration or entries, task-stream subscribers receive a
+non-terminal `status-update` event with `type: "status"`,
+`status.state: "working"`, a populated `status.message`, and `final: false`.
+Entry lists render as a deterministic markdown checklist inside the message
+text. Final task completion still emits the terminal `completed` status
+separately.
+
 ## Daemon idle/resume notifications
 
 Daemon agents stay alive after text-only turns and wait for host activity with adaptive

@@ -59,6 +59,12 @@ impl harn_vm::agent_events::AgentEventSink for A2aWorkerSink {
                     "plan": plan,
                 })
             }
+            harn_vm::agent_events::AgentEvent::ProgressReported {
+                message, entries, ..
+            } => {
+                self.emit_progress_status(message.as_deref(), entries);
+                return;
+            }
             harn_vm::agent_events::AgentEvent::HitlRequested {
                 request_id,
                 kind,
@@ -132,6 +138,44 @@ impl A2aWorkerSink {
         publish_locked(task, event);
     }
 
+    fn emit_progress_status(&self, message: Option<&str>, entries: &JsonValue) {
+        let Some(text) = render_progress_message(message, entries) else {
+            return;
+        };
+        let mut tasks = self.tasks.lock().expect("tasks poisoned");
+        let Some(task) = tasks.get_mut(&self.task_id) else {
+            return;
+        };
+        if task.status.is_terminal() {
+            return;
+        }
+        task.status = TaskStatus::Working;
+        let mut event = json!({
+            "kind": "status-update",
+            "type": "status",
+            "taskId": self.task_id,
+            "status": {
+                "state": TaskStatus::Working.as_str(),
+                "message": {
+                    "id": Uuid::now_v7().to_string(),
+                    "role": "agent",
+                    "parts": [
+                        {
+                            "kind": "text",
+                            "type": "text",
+                            "text": text,
+                        }
+                    ],
+                },
+            },
+            "final": false,
+        });
+        if let Some(context_id) = task.context_id.as_ref() {
+            event["contextId"] = JsonValue::String(context_id.clone());
+        }
+        publish_locked(task, event);
+    }
+
     /// Flip the task into `input-required` while a HITL primitive is
     /// blocked waiting for a response. The script remains suspended on
     /// a waitpoint; subscribers see two events — a structured `hitl`
@@ -192,5 +236,58 @@ impl A2aWorkerSink {
             task.status = TaskStatus::Working;
             publish_locked(task, status_event(&self.task_id, TaskStatus::Working));
         }
+    }
+}
+
+fn render_progress_message(message: Option<&str>, entries: &JsonValue) -> Option<String> {
+    let mut sections = Vec::new();
+    if let Some(message) = message.map(str::trim).filter(|message| !message.is_empty()) {
+        sections.push(message.to_string());
+    }
+
+    if let Some(entries) = entries.as_array().filter(|entries| !entries.is_empty()) {
+        let mut lines = vec!["Plan:".to_string()];
+        for entry in entries {
+            let Some(content) = entry
+                .get("content")
+                .and_then(JsonValue::as_str)
+                .map(str::trim)
+                .filter(|content| !content.is_empty())
+            else {
+                continue;
+            };
+            let status = entry
+                .get("status")
+                .and_then(JsonValue::as_str)
+                .unwrap_or("pending");
+            let marker = if status == "completed" { "[x]" } else { "[ ]" };
+            let mut line = format!("- {marker} {content}");
+            let mut qualifiers = Vec::new();
+            if !matches!(status, "pending" | "completed") {
+                qualifiers.push(status.replace('_', " "));
+            }
+            if let Some(priority) = entry
+                .get("priority")
+                .and_then(JsonValue::as_str)
+                .filter(|priority| !priority.is_empty())
+            {
+                qualifiers.push(format!("priority: {priority}"));
+            }
+            if !qualifiers.is_empty() {
+                line.push_str(" (");
+                line.push_str(&qualifiers.join(", "));
+                line.push(')');
+            }
+            lines.push(line);
+        }
+        if lines.len() > 1 {
+            sections.push(lines.join("\n"));
+        }
+    }
+
+    if sections.is_empty() {
+        None
+    } else {
+        Some(sections.join("\n\n"))
     }
 }

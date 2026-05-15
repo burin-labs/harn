@@ -305,6 +305,98 @@ pub fn triage(task: string) -> string {
     }));
 }
 
+#[tokio::test]
+async fn streaming_agent_progress_emits_status_update_before_completion() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let script = dir.path().join("server.harn");
+    std::fs::write(
+        &script,
+        r#"
+import { agent_progress } from "std/agent/progress"
+
+pub fn triage(task: string) -> string {
+  agent_progress({
+    message: "Agent is checking progress.",
+    entries: [
+      {content: "Inspect code.", status: "completed", priority: "high"},
+      {content: "Run A2A stream.", status: "in_progress"},
+    ],
+  })
+  return task
+}
+"#,
+    )
+    .expect("write script");
+    let core = DispatchCore::new(DispatchCoreConfig::for_script(&script)).expect("core");
+    let server = Arc::new(A2aServer::new(A2aServerConfig::new(core)));
+    let request = harn_vm::jsonrpc::request(
+        "stream-progress-1",
+        "message/stream",
+        json!({
+            "function": "triage",
+            "message": {
+                "parts": [{"type": "text", "text": "stream progress"}]
+            }
+        }),
+    );
+
+    let processed = server.process_rpc(request, AuthRequest::default()).await;
+    let RpcOutcome::Sse(mut rx) = processed.outcome else {
+        panic!("expected sse response");
+    };
+    let mut events = Vec::new();
+    while let Some(event) = tokio::time::timeout(std::time::Duration::from_secs(2), rx.next())
+        .await
+        .expect("stream event")
+    {
+        let done = event
+            .pointer("/result/status/state")
+            .and_then(JsonValue::as_str)
+            == Some("completed");
+        events.push(event);
+        if done {
+            break;
+        }
+    }
+
+    let progress = events
+        .iter()
+        .find(|event| {
+            event.pointer("/result/kind").and_then(JsonValue::as_str) == Some("status-update")
+        })
+        .expect("progress status update");
+    assert_eq!(
+        progress.pointer("/result/type").and_then(JsonValue::as_str),
+        Some("status")
+    );
+    assert_eq!(
+        progress
+            .pointer("/result/status/state")
+            .and_then(JsonValue::as_str),
+        Some("working")
+    );
+    assert_eq!(
+        progress
+            .pointer("/result/final")
+            .and_then(JsonValue::as_bool),
+        Some(false)
+    );
+    assert_eq!(
+        progress
+            .pointer("/result/status/message/parts/0/text")
+            .and_then(JsonValue::as_str),
+        Some(
+            "Agent is checking progress.\n\nPlan:\n- [x] Inspect code. (priority: high)\n- [ ] Run A2A stream. (in progress)"
+        )
+    );
+    assert!(events.iter().any(|event| {
+        event
+            .pointer("/result/status/state")
+            .and_then(JsonValue::as_str)
+            == Some("completed")
+    }));
+}
+
 #[test]
 fn signed_card_adds_signature_envelope() {
     let mut card = json!({"id": "agent", "skills": []});
@@ -418,6 +510,143 @@ fn a2a_worker_sink_publishes_plan_extension_to_task_stream() {
     assert_eq!(event["taskId"], task_id);
     assert_eq!(event["entries"][0]["content"], "Inspect files.");
     assert_eq!(event["plan"]["schema_version"], "harn.plan.v1");
+}
+
+#[test]
+fn a2a_worker_sink_publishes_progress_as_status_update() {
+    let task_id = "task-progress".to_string();
+    let task = TaskState {
+        id: task_id.clone(),
+        context_id: Some("ctx-progress".to_string()),
+        status: TaskStatus::Working,
+        history: Vec::new(),
+        artifacts: Vec::new(),
+        metadata: BTreeMap::new(),
+        events: Vec::new(),
+        subscribers: Vec::new(),
+        cancel_token: None,
+    };
+    let tasks: TaskStore = Arc::new(Mutex::new(HashMap::from([(task_id.clone(), task)])));
+    let sink = super::A2aWorkerSink {
+        task_id: task_id.clone(),
+        tasks: tasks.clone(),
+    };
+
+    sink.handle_event(&harn_vm::agent_events::AgentEvent::ProgressReported {
+        session_id: super::a2a_worker_session_id(&task_id),
+        message: Some("Patched stdlib API.".to_string()),
+        entries: serde_json::json!([
+            {"content": "Implement progress helper.", "status": "completed", "priority": "high"},
+            {"content": "Run conformance.", "status": "in_progress"}
+        ]),
+        replace: true,
+        metadata: serde_json::json!({"source": "agent_progress"}),
+    });
+
+    let tasks = tasks.lock().expect("tasks");
+    let task = tasks.get(&task_id).expect("task");
+    assert_eq!(task.status, TaskStatus::Working);
+    let event = task
+        .events
+        .iter()
+        .find(|event| event.get("kind").and_then(JsonValue::as_str) == Some("status-update"))
+        .expect("status-update event");
+    assert_eq!(event["type"], "status");
+    assert_eq!(event["taskId"], task_id);
+    assert_eq!(event["contextId"], "ctx-progress");
+    assert_eq!(event["final"], false);
+    assert_eq!(event["status"]["state"], "working");
+    assert!(event["status"]["message"]["id"].is_string());
+    assert_eq!(event["status"]["message"]["role"], "agent");
+    assert_eq!(event["status"]["message"]["parts"][0]["kind"], "text");
+    assert_eq!(event["status"]["message"]["parts"][0]["type"], "text");
+    assert_eq!(
+        event["status"]["message"]["parts"][0]["text"],
+        "Patched stdlib API.\n\nPlan:\n- [x] Implement progress helper. (priority: high)\n- [ ] Run conformance. (in progress)"
+    );
+}
+
+#[test]
+fn a2a_worker_sink_publishes_message_only_progress_status() {
+    let task_id = "task-progress-message".to_string();
+    let task = TaskState {
+        id: task_id.clone(),
+        context_id: None,
+        status: TaskStatus::Working,
+        history: Vec::new(),
+        artifacts: Vec::new(),
+        metadata: BTreeMap::new(),
+        events: Vec::new(),
+        subscribers: Vec::new(),
+        cancel_token: None,
+    };
+    let tasks: TaskStore = Arc::new(Mutex::new(HashMap::from([(task_id.clone(), task)])));
+    let sink = super::A2aWorkerSink {
+        task_id: task_id.clone(),
+        tasks: tasks.clone(),
+    };
+
+    sink.handle_event(&harn_vm::agent_events::AgentEvent::ProgressReported {
+        session_id: super::a2a_worker_session_id(&task_id),
+        message: Some("Working through verification.".to_string()),
+        entries: serde_json::json!([]),
+        replace: true,
+        metadata: serde_json::json!({}),
+    });
+
+    let tasks = tasks.lock().expect("tasks");
+    let task = tasks.get(&task_id).expect("task");
+    let event = task
+        .events
+        .iter()
+        .find(|event| event.get("kind").and_then(JsonValue::as_str) == Some("status-update"))
+        .expect("status-update event");
+    assert_eq!(event["status"]["state"], "working");
+    assert_eq!(
+        event["status"]["message"]["parts"][0]["text"],
+        "Working through verification."
+    );
+    assert!(event.get("contextId").is_none());
+}
+
+#[test]
+fn a2a_worker_sink_does_not_override_terminal_task_with_progress() {
+    let task_id = "task-progress-terminal".to_string();
+    let task = TaskState {
+        id: task_id.clone(),
+        context_id: None,
+        status: TaskStatus::Completed,
+        history: Vec::new(),
+        artifacts: Vec::new(),
+        metadata: BTreeMap::new(),
+        events: Vec::new(),
+        subscribers: Vec::new(),
+        cancel_token: None,
+    };
+    let tasks: TaskStore = Arc::new(Mutex::new(HashMap::from([(task_id.clone(), task)])));
+    let sink = super::A2aWorkerSink {
+        task_id: task_id.clone(),
+        tasks: tasks.clone(),
+    };
+
+    sink.handle_event(&harn_vm::agent_events::AgentEvent::ProgressReported {
+        session_id: super::a2a_worker_session_id(&task_id),
+        message: Some("This should not revive the task.".to_string()),
+        entries: serde_json::json!([
+            {"content": "Ignored progress.", "status": "in_progress"}
+        ]),
+        replace: true,
+        metadata: serde_json::json!({}),
+    });
+
+    let tasks = tasks.lock().expect("tasks");
+    let task = tasks.get(&task_id).expect("task");
+    assert_eq!(task.status, TaskStatus::Completed);
+    assert!(
+        task.events.is_empty(),
+        "terminal task should not publish progress events: {:?}",
+        task.events
+    );
 }
 
 #[tokio::test]
