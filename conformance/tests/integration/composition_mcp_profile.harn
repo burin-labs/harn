@@ -24,5 +24,7 @@ pipeline main() {
   println(report.child_calls[0].tool_name)
   let trace = composition_crystallization_input(report, {id: "profile-trace"})
   println(trace.source)
+  println(trace.actions.count())
   println(trace.actions[0].name)
+  println(trace.actions[1].name)
 }
