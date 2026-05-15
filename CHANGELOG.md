@@ -40,6 +40,13 @@ condensed series summaries instead of full per-patch history.
   Ollama surfaces via `/api/ps` (size, VRAM, expiry, context window).
   JSON output by default for eval pipelines; pair with `harn local
   status --json` to inspect lifecycle state across every local runtime.
+- **Done-judge cadence policy (#1631).** `agent_loop` now accepts
+  `done_judge.cadence` with `every`, `when`, `max_invocations`, and
+  `min_iterations_before_first` gates so completion checks can run on
+  explicit cadence or stall signals instead of every completion
+  candidate. Accepted judge calls still use transcript projection
+  isolation: judge prompts and structured responses emit events but do
+  not mutate the worker session transcript.
 
 ## v0.8.17
 

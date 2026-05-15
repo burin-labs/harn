@@ -136,6 +136,110 @@ fn __native_tool_text_completion(opts, has_tool_calls, text) {
   return trim(text) != ""
 }
 
+fn __done_judge_config(opts) {
+  let judge = opts?.done_judge
+  if judge == nil {
+    return nil
+  }
+  if type_of(judge) == "bool" {
+    return if judge {
+      {}
+    } else {
+      nil
+    }
+  }
+  if type_of(judge) == "dict" {
+    return judge
+  }
+  return nil
+}
+
+fn __done_judge_cadence(opts) {
+  let judge = __done_judge_config(opts)
+  if judge == nil {
+    return nil
+  }
+  let cadence = judge?.cadence
+  if type_of(cadence) == "dict" {
+    return cadence
+  }
+  return {}
+}
+
+fn __done_judge_loop_state(opts, completion_proposed) {
+  let state = opts?._done_judge_loop_state ?? {}
+  let base_completion = state?.completion ?? {}
+  let completion = base_completion + {proposed: completion_proposed}
+  return state + {completion: completion}
+}
+
+fn __done_judge_when_due(opts, cadence, state) {
+  let when = cadence?.when ?? "always"
+  if type_of(when) == "closure" {
+    return when(state) ? true : false
+  }
+  if when == "always" {
+    return true
+  }
+  if when == "stalled" {
+    let trigger = opts?._done_judge_trigger ?? ""
+    let stalled = state?.stall?.triggered ?? false
+    return trigger == "stalled" || stalled
+  }
+  return false
+}
+
+fn __done_judge_every_due(cadence, turn_number) {
+  let every = cadence?.every
+  if every == nil {
+    return true
+  }
+  return turn_number % every == 0
+}
+
+fn __done_judge_past_warmup(cadence, turn_number) {
+  let min_iterations = cadence?.min_iterations_before_first
+  if min_iterations == nil {
+    return true
+  }
+  return turn_number > min_iterations
+}
+
+fn __done_judge_under_cap(opts, cadence) {
+  let max_invocations = cadence?.max_invocations
+  if max_invocations == nil {
+    return true
+  }
+  let invocations = opts?._done_judge_invocations ?? 0
+  return invocations < max_invocations
+}
+
+fn __done_judge_due(opts, payload, completion_proposed) {
+  let cadence = __done_judge_cadence(opts)
+  if cadence == nil {
+    return false
+  }
+  let raw_iteration = payload?.iteration ?? 0
+  let turn_number = raw_iteration + 1
+  let state = __done_judge_loop_state(opts, completion_proposed)
+  return __done_judge_under_cap(opts, cadence)
+    && __done_judge_past_warmup(cadence, turn_number)
+    && __done_judge_every_due(cadence, turn_number)
+    && __done_judge_when_due(opts, cadence, state)
+}
+
+fn __completion_result(opts, payload, stop_reason) {
+  let verify_due = opts?.verify_completion != nil || opts?.verify_completion_judge != nil
+  let done_due = __done_judge_due(opts, payload, true)
+  if verify_due || done_due {
+    return {kind: "break", stop_reason: stop_reason, needs_verify: true, done_judge_due: done_due}
+  }
+  if __done_judge_config(opts) != nil {
+    return {kind: "continue", done_judge_due: false}
+  }
+  return {kind: "break", stop_reason: stop_reason, needs_verify: false, done_judge_due: false}
+}
+
 fn __post_turn_verdict_result(session, opts, verdict) {
   if verdict.kind == "stop" {
     return {kind: "break", stop_reason: "post_turn_stop", needs_verify: opts?.verify_completion != nil}
@@ -192,17 +296,6 @@ pub fn agent_compute_post_turn(session, llm_result, dispatch, opts, iteration) {
   let successful_tool_names = __successful_tool_names(dispatch)
   let rejected_tool_names = __rejected_tool_names(dispatch)
   let has_tool_calls = len(llm_result?.tool_calls ?? []) > 0 || len(dispatch_results) > 0
-  if __sentinel_hit(sentinel_text, sentinel, parsed_done_marker) {
-    return {
-      kind: "break",
-      stop_reason: "sentinel",
-      needs_verify: opts?.done_judge != nil || opts?.verify_completion != nil
-        || opts?.verify_completion_judge != nil,
-    }
-  }
-  if __stop_after_successful_tools(opts, dispatch) {
-    return {kind: "break", stop_reason: "natural", needs_verify: false}
-  }
   let payload = {
     session_id: session.session_id,
     iteration: iteration,
@@ -217,30 +310,27 @@ pub fn agent_compute_post_turn(session, llm_result, dispatch, opts, iteration) {
     text: text,
     visible_text: text,
   }
+  if __sentinel_hit(sentinel_text, sentinel, parsed_done_marker) {
+    return __completion_result(opts, payload, "sentinel")
+  }
+  if __stop_after_successful_tools(opts, dispatch) {
+    return {kind: "break", stop_reason: "natural", needs_verify: false, done_judge_due: false}
+  }
   let verdict = __post_turn_callback_verdict(opts, payload)
   let verdict_result = __post_turn_verdict_result(session, opts, verdict)
   if verdict_result != nil {
     return verdict_result
   }
   if !has_tool_calls && trim(text) != "" && opts?.done_judge != nil {
-    return {kind: "break", stop_reason: "natural", needs_verify: true}
+    return __completion_result(opts, payload, "natural")
   }
   if __native_tool_text_completion(opts, has_tool_calls, text) {
-    return {
-      kind: "break",
-      stop_reason: "natural",
-      needs_verify: opts?.done_judge != nil || opts?.verify_completion != nil
-        || opts?.verify_completion_judge != nil,
-    }
+    return __completion_result(opts, payload, "natural")
   }
   let loop_until_done = opts?.loop_until_done ?? false
   let daemon = opts?.daemon ?? false
   if !has_tool_calls && !loop_until_done && !daemon {
-    return {
-      kind: "break",
-      stop_reason: "natural",
-      needs_verify: opts?.done_judge != nil || opts?.verify_completion != nil,
-    }
+    return __completion_result(opts, payload, "natural")
   }
-  return {kind: "continue"}
+  return {kind: "continue", done_judge_due: false}
 }

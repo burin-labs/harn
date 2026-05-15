@@ -1489,6 +1489,28 @@ Each judge call emits a `JudgeDecision` agent event. Use
 `verify_completion_judge` instead when every natural stop should be
 judged.
 
+Use `done_judge.cadence` when completion checks should be signal-gated
+instead of firing on every completion candidate:
+
+```harn
+agent_loop(task, system, {
+  loop_until_done: true,
+  done_judge: {
+    cadence: {
+      every: 5,                         // judge turns 5, 10, 15, ...
+      when: "always",                   // or "stalled" / { state -> bool }
+      max_invocations: 3,
+      min_iterations_before_first: 2,
+    },
+  },
+})
+```
+
+Omitting `cadence` preserves the default behavior: every completion
+candidate is judged. `when: "stalled"` is quiet during healthy turns and
+is reserved for stall diagnostics; pair it with stall-aware loop policy
+instead of fixed "are you done?" prompting.
+
 Pass `permissions` to scope one agent below the ambient `policy` ceiling:
 
 ```harn

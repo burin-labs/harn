@@ -1,0 +1,39 @@
+import { agent_capture_events } from "std/agent/events"
+import { agent_session_messages } from "std/agent/state"
+
+fn judge_events(events) {
+  return events.filter({ event -> event.type == "judge_decision" })
+}
+
+pipeline default() {
+  llm_mock_clear()
+  llm_mock({text: "<user_response>isolated final answer</user_response>"})
+  llm_mock({text: "{\"verdict\":\"done\",\"reasoning\":\"complete\"}"})
+  let session = "done-judge-isolation-" + uuid()
+  let captured = agent_capture_events(
+    session,
+    fn() { return agent_loop(
+      "Finish once.",
+      nil,
+      {
+        provider: "mock",
+        tools: tool_registry(),
+        tool_format: "native",
+        loop_until_done: true,
+        max_iterations: 2,
+        session_id: session,
+        done_judge: true,
+      },
+    ) },
+  )
+  let messages = agent_session_messages(session)
+  let encoded = json_stringify(messages)
+  let judges = judge_events(captured.events)
+  require len(judges) == 1, "done_judge should emit one decision"
+  println(captured.result.status)
+  println(len(messages))
+  println(contains(encoded, "isolated final answer"))
+  println(!contains(encoded, "\"verdict\""))
+  println(!contains(encoded, "complete"))
+  println(len(llm_mock_calls()))
+}
