@@ -75,6 +75,11 @@ export type HarnACPSessionUpdateExtension = (typeof HARN_ACP_SESSION_UPDATE_EXTE
 export const HARN_AGENT_EVENT_METHOD = "_harn/agentEvent"
 export const HARN_AGENT_EVENT_KINDS = [
   "budget_exhausted",
+  "composition_child_call",
+  "composition_child_result",
+  "composition_error",
+  "composition_finish",
+  "composition_start",
   "daemon_watchdog_tripped",
   "feedback_injected",
   "judge_decision",

@@ -23,6 +23,7 @@ use std::sync::{Arc, Mutex, OnceLock, RwLock};
 
 use serde::{Deserialize, Serialize};
 
+use crate::composition::{CompositionChildCall, CompositionChildResult, CompositionRunEnvelope};
 use crate::event_log::{AnyEventLog, EventLog, LogEvent as EventLogRecord, Topic};
 use crate::orchestration::{HandoffArtifact, MutationSessionRecord};
 use crate::tool_annotations::ToolKind;
@@ -631,6 +632,37 @@ pub enum AgentEvent {
         namespace: String,
         payload: serde_json::Value,
     },
+    /// A language-neutral tool-composition snippet has started. The envelope
+    /// identifies the snippet and binding manifest hashes plus the side-effect
+    /// ceiling requested for the whole parent run.
+    CompositionStart {
+        session_id: String,
+        run: CompositionRunEnvelope,
+    },
+    /// A composition snippet is dispatching a child binding call. The child
+    /// remains visible as its own operation with annotations and policy context
+    /// instead of being hidden inside the parent composition blob.
+    CompositionChildCall {
+        session_id: String,
+        call: CompositionChildCall,
+    },
+    /// A child binding operation emitted a status/result update.
+    CompositionChildResult {
+        session_id: String,
+        result: CompositionChildResult,
+    },
+    /// A composition run finished successfully and carries stdout/stderr,
+    /// artifacts, and the structured result in the terminal envelope.
+    CompositionFinish {
+        session_id: String,
+        run: CompositionRunEnvelope,
+    },
+    /// A composition run failed before producing a successful terminal result.
+    /// The terminal envelope carries the failure category and optional error.
+    CompositionError {
+        session_id: String,
+        run: CompositionRunEnvelope,
+    },
 }
 
 impl AgentEvent {
@@ -665,7 +697,12 @@ impl AgentEvent {
             | Self::AgentLoopStallWarning { session_id, .. }
             | Self::ToolCallAudit { session_id, .. }
             | Self::CacheHit { session_id, .. }
-            | Self::CacheMiss { session_id, .. } => session_id,
+            | Self::CacheMiss { session_id, .. }
+            | Self::CompositionStart { session_id, .. }
+            | Self::CompositionChildCall { session_id, .. }
+            | Self::CompositionChildResult { session_id, .. }
+            | Self::CompositionFinish { session_id, .. }
+            | Self::CompositionError { session_id, .. } => session_id,
         }
     }
 }

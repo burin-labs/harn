@@ -25,6 +25,199 @@
     "jsonrpc": "2.0",
     "method": "_harn/agentEvent",
     "params": {
+      "artifacts": [],
+      "bindingManifestHash": "sha256:manifest-readonly",
+      "durationMs": null,
+      "error": null,
+      "failureCategory": null,
+      "kind": "composition_start",
+      "language": "harn",
+      "metadata": {},
+      "requestedSideEffectCeiling": "read_only",
+      "result": null,
+      "runId": "cmp-1",
+      "sessionId": "session-1",
+      "snippetHash": "sha256:2ef48d9c1687d751a5d53acf87171cfa53db1e0bfb28f4e86ea57e8054d9e775",
+      "stderr": null,
+      "stdout": null
+    }
+  },
+  {
+    "jsonrpc": "2.0",
+    "method": "_harn/agentEvent",
+    "params": {
+      "annotations": {
+        "arg_schema": {
+          "arg_aliases": {},
+          "path_params": [],
+          "required": []
+        },
+        "capabilities": {},
+        "emits_artifacts": false,
+        "inline_result": false,
+        "kind": "search",
+        "result_readers": [],
+        "side_effect_level": "read_only"
+      },
+      "kind": "composition_child_call",
+      "operationIndex": 0,
+      "policyContext": {
+        "approval": "not_required",
+        "ceiling": "read_only"
+      },
+      "rawInput": {
+        "query": "agent_events"
+      },
+      "requestedSideEffectLevel": "read_only",
+      "runId": "cmp-1",
+      "sessionId": "session-1",
+      "toolCallId": "tool-cmp-1",
+      "toolName": "tool.search"
+    }
+  },
+  {
+    "jsonrpc": "2.0",
+    "method": "_harn/agentEvent",
+    "params": {
+      "durationMs": 11,
+      "error": null,
+      "errorCategory": null,
+      "executionDurationMs": 9,
+      "executor": "harn_builtin",
+      "kind": "composition_child_result",
+      "operationIndex": 0,
+      "rawOutput": {
+        "count": 1
+      },
+      "runId": "cmp-1",
+      "sessionId": "session-1",
+      "status": "completed",
+      "toolCallId": "tool-cmp-1",
+      "toolName": "tool.search"
+    }
+  },
+  {
+    "jsonrpc": "2.0",
+    "method": "_harn/agentEvent",
+    "params": {
+      "artifacts": [],
+      "bindingManifestHash": "sha256:manifest-readonly",
+      "durationMs": 18,
+      "error": null,
+      "failureCategory": null,
+      "kind": "composition_finish",
+      "language": "harn",
+      "metadata": {},
+      "requestedSideEffectCeiling": "read_only",
+      "result": {
+        "matches": ["crates/harn-vm/src/lib.rs"]
+      },
+      "runId": "cmp-1",
+      "sessionId": "session-1",
+      "snippetHash": "sha256:2ef48d9c1687d751a5d53acf87171cfa53db1e0bfb28f4e86ea57e8054d9e775",
+      "stderr": null,
+      "stdout": "2 files scanned"
+    }
+  },
+  {
+    "jsonrpc": "2.0",
+    "method": "_harn/agentEvent",
+    "params": {
+      "artifacts": [],
+      "bindingManifestHash": "sha256:manifest-write",
+      "durationMs": null,
+      "error": null,
+      "failureCategory": null,
+      "kind": "composition_start",
+      "language": "harn",
+      "metadata": {},
+      "requestedSideEffectCeiling": "workspace_write",
+      "result": null,
+      "runId": "cmp-2",
+      "sessionId": "session-1",
+      "snippetHash": "sha256:67d844681154387a2adfd1e6e797b73dc6d0b688a9d0ef83edd7fafdd70954fb",
+      "stderr": null,
+      "stdout": null
+    }
+  },
+  {
+    "jsonrpc": "2.0",
+    "method": "_harn/agentEvent",
+    "params": {
+      "annotations": {
+        "arg_schema": {
+          "arg_aliases": {},
+          "path_params": [],
+          "required": []
+        },
+        "capabilities": {},
+        "emits_artifacts": false,
+        "inline_result": false,
+        "kind": "edit",
+        "result_readers": [],
+        "side_effect_level": "workspace_write"
+      },
+      "kind": "composition_child_call",
+      "operationIndex": 0,
+      "policyContext": {
+        "approval": "denied",
+        "ceiling": "workspace_write"
+      },
+      "rawInput": {
+        "content": "...",
+        "path": "src/lib.rs"
+      },
+      "requestedSideEffectLevel": "workspace_write",
+      "runId": "cmp-2",
+      "sessionId": "session-1",
+      "toolCallId": "tool-cmp-2",
+      "toolName": "tool.write_file"
+    }
+  },
+  {
+    "jsonrpc": "2.0",
+    "method": "_harn/agentEvent",
+    "params": {
+      "durationMs": 3,
+      "error": "workspace writes require approval",
+      "errorCategory": "permission_denied",
+      "executionDurationMs": 0,
+      "executor": null,
+      "kind": "composition_child_result",
+      "operationIndex": 0,
+      "rawOutput": null,
+      "runId": "cmp-2",
+      "sessionId": "session-1",
+      "status": "failed",
+      "toolCallId": "tool-cmp-2",
+      "toolName": "tool.write_file"
+    }
+  },
+  {
+    "jsonrpc": "2.0",
+    "method": "_harn/agentEvent",
+    "params": {
+      "artifacts": [],
+      "bindingManifestHash": "sha256:manifest-write",
+      "durationMs": 3,
+      "error": "workspace writes require approval",
+      "failureCategory": "policy_denied",
+      "kind": "composition_error",
+      "language": "harn",
+      "metadata": {},
+      "requestedSideEffectCeiling": "workspace_write",
+      "result": null,
+      "runId": "cmp-2",
+      "sessionId": "session-1",
+      "snippetHash": "sha256:67d844681154387a2adfd1e6e797b73dc6d0b688a9d0ef83edd7fafdd70954fb",
+      "stderr": null,
+      "stdout": null
+    }
+  },
+  {
+    "jsonrpc": "2.0",
+    "method": "_harn/agentEvent",
+    "params": {
       "kind": "session_closed",
       "metadata": {
         "idle_ms": 5000

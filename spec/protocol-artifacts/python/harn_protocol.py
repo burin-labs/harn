@@ -150,6 +150,11 @@ HARN_ACP_SESSION_UPDATE_EXTENSIONS: tuple = (
 )
 HARN_AGENT_EVENT_KINDS: tuple = (
     "budget_exhausted",
+    "composition_child_call",
+    "composition_child_result",
+    "composition_error",
+    "composition_finish",
+    "composition_start",
     "daemon_watchdog_tripped",
     "feedback_injected",
     "judge_decision",

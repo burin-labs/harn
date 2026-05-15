@@ -1,10 +1,14 @@
 use harn_vm::agent_events::{
     AgentEvent, AgentEventSink, FsWatchEvent, ToolCallErrorCategory, ToolCallStatus, ToolExecutor,
 };
+use harn_vm::composition::{
+    composition_snippet_hash, CompositionChildCall, CompositionChildResult,
+    CompositionFailureCategory, CompositionRunEnvelope,
+};
 use harn_vm::orchestration::{
     HandoffArtifact, HandoffTargetRecord, MutationSessionRecord, ToolApprovalPolicy,
 };
-use harn_vm::tool_annotations::ToolKind;
+use harn_vm::tool_annotations::{SideEffectLevel, ToolAnnotations, ToolKind};
 use tokio::sync::mpsc;
 
 use super::super::schema::{
@@ -219,6 +223,30 @@ async fn protocol_conformance_standard_session_update_fixture_is_adapter_generat
 }
 
 fn agent_event_ext_fixture_events() -> Vec<AgentEvent> {
+    let read_only_start = CompositionRunEnvelope::read_only(
+        "cmp-1",
+        "harn",
+        composition_snippet_hash("harn", "tool.search(\"agent_events\")"),
+        "sha256:manifest-readonly",
+    );
+    let read_only_finish = CompositionRunEnvelope {
+        stdout: Some("2 files scanned".to_string()),
+        result: Some(serde_json::json!({"matches": ["crates/harn-vm/src/lib.rs"]})),
+        duration_ms: Some(18),
+        ..read_only_start.clone()
+    };
+    let mut failed_start = CompositionRunEnvelope::read_only(
+        "cmp-2",
+        "harn",
+        composition_snippet_hash("harn", "write_file(\"src/lib.rs\", \"...\")"),
+        "sha256:manifest-write",
+    );
+    failed_start.requested_side_effect_ceiling = SideEffectLevel::WorkspaceWrite;
+    let mut failed_error = failed_start.clone();
+    failed_error.failure_category = Some(CompositionFailureCategory::PolicyDenied);
+    failed_error.error = Some("workspace writes require approval".to_string());
+    failed_error.duration_ms = Some(3);
+
     vec![
         AgentEvent::TurnStart {
             session_id: "session-1".to_string(),
@@ -231,6 +259,95 @@ fn agent_event_ext_fixture_events() -> Vec<AgentEvent> {
                 "tool_calls": 2,
                 "tool_names": ["read_file", "grep"]
             }),
+        },
+        AgentEvent::CompositionStart {
+            session_id: "session-1".to_string(),
+            run: read_only_start,
+        },
+        AgentEvent::CompositionChildCall {
+            session_id: "session-1".to_string(),
+            call: CompositionChildCall {
+                run_id: "cmp-1".to_string(),
+                tool_call_id: "tool-cmp-1".to_string(),
+                tool_name: "tool.search".to_string(),
+                operation_index: 0,
+                requested_side_effect_level: SideEffectLevel::ReadOnly,
+                annotations: Some(ToolAnnotations {
+                    kind: ToolKind::Search,
+                    side_effect_level: SideEffectLevel::ReadOnly,
+                    ..ToolAnnotations::default()
+                }),
+                policy_context: serde_json::json!({
+                    "ceiling": "read_only",
+                    "approval": "not_required"
+                }),
+                raw_input: serde_json::json!({"query": "agent_events"}),
+            },
+        },
+        AgentEvent::CompositionChildResult {
+            session_id: "session-1".to_string(),
+            result: CompositionChildResult {
+                run_id: "cmp-1".to_string(),
+                tool_call_id: "tool-cmp-1".to_string(),
+                tool_name: "tool.search".to_string(),
+                operation_index: 0,
+                status: ToolCallStatus::Completed,
+                raw_output: Some(serde_json::json!({"count": 1})),
+                executor: Some(ToolExecutor::HarnBuiltin),
+                duration_ms: Some(11),
+                execution_duration_ms: Some(9),
+                ..CompositionChildResult::default()
+            },
+        },
+        AgentEvent::CompositionFinish {
+            session_id: "session-1".to_string(),
+            run: read_only_finish,
+        },
+        AgentEvent::CompositionStart {
+            session_id: "session-1".to_string(),
+            run: failed_start,
+        },
+        AgentEvent::CompositionChildCall {
+            session_id: "session-1".to_string(),
+            call: CompositionChildCall {
+                run_id: "cmp-2".to_string(),
+                tool_call_id: "tool-cmp-2".to_string(),
+                tool_name: "tool.write_file".to_string(),
+                operation_index: 0,
+                requested_side_effect_level: SideEffectLevel::WorkspaceWrite,
+                annotations: Some(ToolAnnotations {
+                    kind: ToolKind::Edit,
+                    side_effect_level: SideEffectLevel::WorkspaceWrite,
+                    ..ToolAnnotations::default()
+                }),
+                policy_context: serde_json::json!({
+                    "ceiling": "workspace_write",
+                    "approval": "denied"
+                }),
+                raw_input: serde_json::json!({
+                    "path": "src/lib.rs",
+                    "content": "..."
+                }),
+            },
+        },
+        AgentEvent::CompositionChildResult {
+            session_id: "session-1".to_string(),
+            result: CompositionChildResult {
+                run_id: "cmp-2".to_string(),
+                tool_call_id: "tool-cmp-2".to_string(),
+                tool_name: "tool.write_file".to_string(),
+                operation_index: 0,
+                status: ToolCallStatus::Failed,
+                error: Some("workspace writes require approval".to_string()),
+                error_category: Some(ToolCallErrorCategory::PermissionDenied),
+                duration_ms: Some(3),
+                execution_duration_ms: Some(0),
+                ..CompositionChildResult::default()
+            },
+        },
+        AgentEvent::CompositionError {
+            session_id: "session-1".to_string(),
+            run: failed_error,
         },
         AgentEvent::SessionClosed {
             session_id: "session-1".to_string(),

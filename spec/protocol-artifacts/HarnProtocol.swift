@@ -25,6 +25,11 @@ public enum HarnProtocolConstants {
     ]
     public static let harnAgentEventKinds: [String] = [
         "budget_exhausted",
+        "composition_child_call",
+        "composition_child_result",
+        "composition_error",
+        "composition_finish",
+        "composition_start",
         "daemon_watchdog_tripped",
         "feedback_injected",
         "judge_decision",
