@@ -174,6 +174,47 @@ let first = xs?[0]
     }
 
     #[test]
+    fn parses_multiline_ternary_with_leading_or_trailing_operators() {
+        // Previously the parser rejected ternary wraps that put `?` or `:`
+        // at the end of the previous line: a `?` at end-of-line was
+        // misclassified as a postfix-try operator because
+        // `question_starts_ternary_branch` only looked at the immediate
+        // next token (a newline) instead of the next non-newline token,
+        // and `parse_ternary` itself did not skip newlines around `?`
+        // and `:`. We assert against raw source here rather than a
+        // conformance fixture because `harn fmt` collapses any short
+        // multi-line ternary back onto one line.
+        let cases = [
+            // operator-leading wrap
+            "let a = true\n  ? 1\n  : 2\n",
+            // operator-trailing wrap
+            "let b = true ?\n  1 :\n  2\n",
+            // wrap only on the false branch
+            "let c = true ? 1\n  : 2\n",
+            // nested ternary with operator-leading wrap
+            "let d = true\n  ? false\n    ? 10\n    : 20\n  : 30\n",
+        ];
+        for source in &cases {
+            let wrapped = format!("pipeline p() {{\n  {}\n}}\n", source.replace('\n', "\n  "));
+            let program = parse_source(&wrapped)
+                .unwrap_or_else(|e| panic!("failed to parse multiline ternary: {source:?}: {e}"));
+            // Walk into the pipeline body and find a let binding whose value
+            // is a Ternary.
+            let Node::Pipeline { body, .. } = &program[0].node else {
+                panic!("expected pipeline");
+            };
+            let Node::LetBinding { value, .. } = &body[0].node else {
+                panic!("expected let binding for {source:?}");
+            };
+            assert!(
+                matches!(&value.node, Node::Ternary { .. }),
+                "expected Ternary node for source {source:?}, got {:?}",
+                value.node
+            );
+        }
+    }
+
+    #[test]
     fn parses_public_declarations_and_generic_interfaces() {
         let source = r#"
 pub pipeline build(task) extends base {
