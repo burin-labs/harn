@@ -390,6 +390,8 @@ Imports starting with `std/` load embedded stdlib modules:
   (agent_state_init, agent_state_resume, agent_state_write,
   agent_state_read, agent_state_list, agent_state_delete,
   agent_state_handoff)
+- `import "std/agent/progress"` — agent progress narration and task-list
+  helpers (agent_progress, agent_progress_tool)
 - `import "std/memory"` — append-only durable memory helpers
   (memory_store, memory_recall, memory_summarize, memory_forget)
 - `import "std/trust"` — TrustGraph query and policy helpers
@@ -2097,6 +2099,27 @@ judge_duration_ms, trigger?}`. The optional `trigger` is `"stalled"` when a
 `agent_loop_stall_warning`; a `done` verdict stops the loop with
 `stalled_done_judge` before the repeated tool call dispatches, and a
 `continue` verdict leaves the stall feedback path in place.
+
+#### Agent progress events
+
+`std/agent/progress` exposes `agent_progress(input)` and
+`agent_progress_tool(registry?, options?)` for live agent status. The
+`agent_progress` input must contain a non-empty `message` or `entries`.
+`entries` is a list of task-list dicts with `content`, `status`, and optional
+`priority`; `replace` defaults to `true`, and `metadata` defaults to `{}`.
+
+At runtime `agent_progress` emits the `progress_reported` agent event for the
+current agent session. ACP bridges encode task-list entries as canonical
+`session/update` payloads with `sessionUpdate: "plan"` and full-replacement
+`entries`; message-only reports use Harn progress narration. A2A bridges encode
+progress reports as non-terminal `TaskStatusUpdateEvent` messages with
+`status.state = "working"` and no push-delivery side effect.
+
+`agent_progress_tool` installs a model-facing tool that calls
+`agent_progress`. `agent_loop(..., {progress_tool: true})` installs the default
+tool; dict form may override `name`, `description`, and
+`system_prompt_nudge`. Progress reports are intended for meaningful sub-step
+completion or plan changes, not fixed timer ticks.
 
 `agent_turn(prompt, options?)` is the high-level wrapper for a single complete
 agent request. It uses `agent_loop`, folds `options.system` into the system

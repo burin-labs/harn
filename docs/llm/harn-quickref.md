@@ -892,7 +892,7 @@ println(response.logprobs)       // present when requested and returned
 | `llm_backoff_ms` | int | 250 | (deprecated; see `with_retry`) Base exponential backoff in milliseconds. |
 | `llm_caller` | closure | nil | (`agent_loop` only) Custom caller wrapping the per-turn `llm_call`. See "Composable LLM callers" below. |
 | `tool_caller` | closure | nil | (`agent_loop` only) Custom caller wrapping every tool dispatch. Signature `fn(call, next) -> result_dict`. See "Composable tool middleware" below. |
-| `progress_tool` | bool \| dict | false | (`agent_loop` only) Expose an opt-in progress-reporting tool. `true` installs `agent_progress`; dict form may set `name`, `description`, and `system_prompt_nudge`. ACP clients receive entries as canonical `plan` updates and message-only reports as Harn `progress` narration. |
+| `progress_tool` | bool \| dict | false | (`agent_loop` only) Expose an opt-in progress-reporting tool. `true` installs `agent_progress`; dict form may set `name`, `description`, and `system_prompt_nudge`. ACP clients receive entries as canonical `plan` updates; A2A clients receive non-terminal `working` status updates; message-only reports surface as Harn progress narration. |
 | `stream` | bool | true | SSE streaming transport. |
 
 Provider auto-resolution precedence:
@@ -1479,6 +1479,33 @@ tool calls in the same iteration still run; only subsequent
 iterations are skipped. The loop exits with `status = "done"` and
 the tool name appears in `tools.successful`.
 
+### Progress narration
+
+Use `agent_progress({message?, entries?, replace?, metadata?})` from inside an
+agent session when a meaningful sub-step completes or the visible plan changes.
+The payload must include a non-empty `message` or `entries`; `replace` defaults
+to `true`.
+
+```harn
+agent_progress({
+  message: "Finished API inventory; checking auth paths next.",
+  entries: [
+    {content: "Inventory public API routes", status: "completed", priority: "high"},
+    {content: "Trace auth middleware", status: "in_progress"},
+  ],
+})
+```
+
+`entries` are task-list items with `content`, `status`, and optional
+`priority`. ACP clients receive entries as canonical `session/update`
+`plan` payloads. A2A clients receive non-terminal `TaskStatusUpdateEvent`
+updates with `status.state = "working"`. Message-only reports surface as Harn
+progress narration for clients that do not render plans.
+
+For model-facing loops, set `progress_tool: true` or pass a dict to customize
+the tool name, description, or system-prompt nudge. Call it after observable
+progress, not on a timer.
+
 Pass `done_judge: true` or `done_judge: {...}` to run a structured
 completion judge after a native-tool loop naturally completes or after
 the model emits `##DONE##` in a sentinel loop.
@@ -1516,6 +1543,12 @@ Omitting `cadence` preserves the default behavior: every completion
 candidate is judged. `when: "stalled"` is quiet during healthy turns and
 is reserved for stall diagnostics; pair it with stall-aware loop policy
 instead of fixed "are you done?" prompting.
+
+Fixed-cadence completion prompts are not recommended: Huang et al.'s
+[AutoGPT/agent benchmark study](https://arxiv.org/abs/2310.01798) found that
+periodic "are you done?" checks can distort behavior. Prefer explicit progress
+signals and `done_judge.cadence.when: "stalled"` when the loop is actually
+showing stall symptoms.
 
 Pass `permissions` to scope one agent below the ambient `policy` ceiling:
 
