@@ -19,6 +19,15 @@ condensed series summaries instead of full per-patch history.
   tools" should prefer `caps.tools` — gating on `caps.native_tools` alone
   was rejecting tool-capable local routes like
   `ollama/qwen3.6:35b-a3b-coding-nvfp4` that use Harn's text wire format.
+- **`tool_choice` accepted on text-format tool routes.** The VM's
+  capability gate rejected `tool_choice` whenever `caps.native_tools`
+  was false, even for routes whose text-format tool wire is fully
+  supported. Agent scripts that pass `tool_choice: "none"` to suppress
+  further tool calls (e.g. release_harn's finalization turn) hit
+  "option `tool_choice` is not supported by ..." mid-loop. The gate
+  now permits tool_choice whenever either `native_tools` or
+  `text_tool_wire_format_supported` is true, mirroring the relaxed
+  `tools` gate.
 - **`agent_preset` derives `tool_format` from the model capability matrix.**
   Tool-using preset kinds (`audit`, `repair`, `merge_captain`,
   `review_captain`, …) used to hardcode `tool_format: "native"`, which the

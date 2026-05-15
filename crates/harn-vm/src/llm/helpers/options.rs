@@ -1250,7 +1250,18 @@ pub(crate) fn extract_llm_options(
         .and_then(|o| o.get("tool_choice"))
         .filter(|value| !matches!(value, VmValue::Nil))
         .map(vm_value_to_json);
-    if enforce_capability_gates && tool_choice.is_some() && !caps.native_tools {
+    // tool_choice is accepted for any route that can call tools at all —
+    // native or text-format. Text-format routes don't have a protocol-level
+    // tool_choice field, but the value is still meaningful (e.g. `"none"`
+    // signals "skip tool calls this turn") and providers like Ollama
+    // forward it through. Gating only on `native_tools` blocked scripts
+    // that legitimately request tool_choice on text-tool routes such as
+    // `ollama/qwen3.6:35b-a3b-coding-nvfp4`.
+    if enforce_capability_gates
+        && tool_choice.is_some()
+        && !caps.native_tools
+        && !caps.text_tool_wire_format_supported
+    {
         return Err(unsupported_option_error("tool_choice", &provider, &model));
     }
 
@@ -2305,13 +2316,6 @@ mod routing_tests {
                 ("tools", one_tool_list()),
             ],
         );
-        assert_unsupported_local_option(
-            "tool_choice",
-            vec![(
-                "tool_choice",
-                VmValue::String(Rc::from("required".to_string())),
-            )],
-        );
         assert_unsupported_local_option("cache", vec![("cache", VmValue::Bool(true))]);
         assert_unsupported_local_option("vision", vec![("vision", VmValue::Bool(true))]);
         assert_unsupported_local_option("audio", vec![("audio", VmValue::Bool(true))]);
@@ -2327,6 +2331,38 @@ mod routing_tests {
             "interleaved_thinking",
             vec![("interleaved_thinking", VmValue::Bool(true))],
         );
+    }
+
+    #[test]
+    fn tool_choice_accepted_on_text_tool_routes() {
+        // qwen3.6 on Ollama is native_tools=false but
+        // text_tool_wire_format_supported=true. tool_choice should not
+        // be rejected on text-format routes (e.g. agent scripts that
+        // pass tool_choice="none" to suppress further tool calls).
+        crate::llm::capabilities::clear_user_overrides();
+        crate::llm_config::clear_user_overrides();
+        super::super::reset_provider_key_cache();
+
+        let options = BTreeMap::from([
+            (
+                "provider".to_string(),
+                VmValue::String(Rc::from("ollama".to_string())),
+            ),
+            (
+                "model".to_string(),
+                VmValue::String(Rc::from("qwen3.6:35b-a3b-coding-nvfp4".to_string())),
+            ),
+            (
+                "tool_choice".to_string(),
+                VmValue::String(Rc::from("none".to_string())),
+            ),
+        ]);
+        extract_llm_options(&[
+            VmValue::String(Rc::from("hello".to_string())),
+            VmValue::Nil,
+            VmValue::Dict(Rc::new(options)),
+        ])
+        .expect("tool_choice accepted on text-format routes");
     }
 
     #[test]
