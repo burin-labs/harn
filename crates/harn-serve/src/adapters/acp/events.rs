@@ -177,6 +177,13 @@ fn mark_replayed_params(method: &str, params: &mut serde_json::Value) {
     }
 }
 
+fn has_progress_entries(entries: &serde_json::Value) -> bool {
+    entries
+        .as_array()
+        .map(|entries| !entries.is_empty())
+        .unwrap_or(false)
+}
+
 /// Merge `harn_meta` keys into `value._meta.harn`, creating intermediate
 /// objects as needed. Existing `_meta.harn` keys are preserved (unless
 /// overwritten by `harn_meta`). No-op when `harn_meta` is empty or
@@ -789,16 +796,34 @@ impl AgentEventSink for AcpAgentEventSink {
                 replace,
                 metadata,
             } => {
-                self.emit_agent_event_ext(
-                    "progress_reported",
-                    session_id,
-                    serde_json::json!({
-                        "message": message,
-                        "entries": entries,
-                        "replace": replace,
-                        "metadata": metadata,
-                    }),
-                );
+                if has_progress_entries(entries) {
+                    self.write_notification(serde_json::json!({
+                        "sessionId": session_id,
+                        "update": super::bridge::plan_update(entries.clone()),
+                    }));
+                } else if let Some(message) = message {
+                    self.write_notification(serde_json::json!({
+                        "sessionId": session_id,
+                        "update": super::bridge::progress_update(
+                            "narration",
+                            message,
+                            None,
+                            None,
+                            None,
+                        ),
+                    }));
+                } else {
+                    self.emit_agent_event_ext(
+                        "progress_reported",
+                        session_id,
+                        serde_json::json!({
+                            "message": message,
+                            "entries": entries,
+                            "replace": replace,
+                            "metadata": metadata,
+                        }),
+                    );
+                }
             }
             AgentEvent::FeedbackInjected {
                 session_id,

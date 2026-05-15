@@ -371,16 +371,6 @@ fn agent_event_ext_fixture_events() -> Vec<AgentEvent> {
                 "stage": "verify"
             }),
         },
-        AgentEvent::ProgressReported {
-            session_id: "session-1".to_string(),
-            message: Some("Patched stdlib API.".to_string()),
-            entries: serde_json::json!([
-                {"content": "Implement progress helper.", "status": "completed", "priority": "high"},
-                {"content": "Run conformance.", "status": "pending"}
-            ]),
-            replace: true,
-            metadata: serde_json::json!({"source": "agent_progress"}),
-        },
         AgentEvent::FeedbackInjected {
             session_id: "session-1".to_string(),
             kind: "protocol_violation".to_string(),
@@ -1406,6 +1396,26 @@ async fn bridge_progress_and_log_session_updates_namespace_vendor_fields() {
             assert!(harn_meta.get("total").is_none());
             assert!(harn_meta.get("data").is_none());
             assert!(update.get("progress").is_none());
+
+            bridge.send_plan(serde_json::json!([
+                {"content": "Implement progress helper.", "status": "completed", "priority": "high"},
+                {"content": "Run conformance.", "status": "pending"}
+            ]));
+            let line = rx.recv().await.expect("plan notification");
+            let payload: serde_json::Value = serde_json::from_str(&line).expect("json");
+            let update = &payload["params"]["update"];
+            assert_eq!(update["sessionUpdate"], "plan");
+            assert_eq!(
+                update["entries"],
+                serde_json::json!([
+                    {"content": "Implement progress helper.", "status": "completed", "priority": "high"},
+                    {"content": "Run conformance.", "status": "pending"}
+                ])
+            );
+            assert!(
+                update.get("_meta").is_none(),
+                "canonical plan updates must not carry Harn extension metadata: {update}"
+            );
         })
         .await;
 }
@@ -1463,13 +1473,6 @@ fn internal_agent_events_never_emit_session_updates() {
         kind: "user".to_string(),
         content: "continue".to_string(),
     });
-    sink.handle_event(&AgentEvent::ProgressReported {
-        session_id: "session-1".to_string(),
-        message: Some("working".to_string()),
-        entries: serde_json::json!([]),
-        replace: true,
-        metadata: serde_json::json!({}),
-    });
     sink.handle_event(&AgentEvent::LoopStuck {
         session_id: "session-1".to_string(),
         max_nudges: 2,
@@ -1499,7 +1502,77 @@ fn internal_agent_events_never_emit_session_updates() {
         );
     }
     assert_eq!(
-        count, 7,
+        count, 6,
         "expected one ExtNotification per fed AgentEvent, got {count}"
+    );
+}
+
+#[test]
+fn progress_reported_entries_emit_canonical_acp_plan_update() {
+    let (tx, mut rx) = mpsc::unbounded_channel();
+    let sink = AcpAgentEventSink::new(AcpOutput::Channel(tx));
+    let entries = serde_json::json!([
+        {"content": "Implement progress helper.", "status": "completed", "priority": "high"},
+        {"content": "Run conformance.", "status": "pending"}
+    ]);
+
+    sink.handle_event(&AgentEvent::ProgressReported {
+        session_id: "session-1".to_string(),
+        message: Some("Patched stdlib API.".to_string()),
+        entries: entries.clone(),
+        replace: true,
+        metadata: serde_json::json!({"source": "agent_progress"}),
+    });
+
+    let line = rx.try_recv().expect("ACP plan notification");
+    let payload: serde_json::Value = serde_json::from_str(&line).expect("notification json");
+    assert_eq!(payload["method"], "session/update");
+    assert_eq!(payload["params"]["sessionId"], "session-1");
+    let update = &payload["params"]["update"];
+    assert_eq!(update["sessionUpdate"], "plan");
+    assert_eq!(update["entries"], entries);
+    for forbidden in ["_meta", "message", "metadata", "replace"] {
+        assert!(
+            update.get(forbidden).is_none(),
+            "agent_progress entries must emit canonical ACP plan only; got {update}"
+        );
+    }
+    assert!(
+        rx.try_recv().is_err(),
+        "agent_progress entries must emit exactly one ACP notification"
+    );
+}
+
+#[test]
+fn progress_reported_message_only_uses_harn_progress_extension() {
+    let (tx, mut rx) = mpsc::unbounded_channel();
+    let sink = AcpAgentEventSink::new(AcpOutput::Channel(tx));
+
+    sink.handle_event(&AgentEvent::ProgressReported {
+        session_id: "session-1".to_string(),
+        message: Some("Working through verification.".to_string()),
+        entries: serde_json::json!([]),
+        replace: false,
+        metadata: serde_json::json!({"source": "agent_progress"}),
+    });
+
+    let line = rx.try_recv().expect("ACP progress notification");
+    let payload: serde_json::Value = serde_json::from_str(&line).expect("notification json");
+    assert_eq!(payload["method"], "session/update");
+    assert_eq!(payload["params"]["sessionId"], "session-1");
+    let update = &payload["params"]["update"];
+    assert_eq!(update["sessionUpdate"], "progress");
+    let harn_meta = &update["_meta"]["harn"];
+    assert_eq!(harn_meta["phase"], "narration");
+    assert_eq!(harn_meta["message"], "Working through verification.");
+    for forbidden in ["phase", "message", "progress", "total", "data"] {
+        assert!(
+            update.get(forbidden).is_none(),
+            "progress extension fields must stay under _meta.harn; got {update}"
+        );
+    }
+    assert!(
+        rx.try_recv().is_err(),
+        "message-only agent_progress must emit exactly one ACP notification"
     );
 }
