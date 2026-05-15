@@ -44,6 +44,10 @@ pub mod source {
     pub const UNKNOWN: &str = "unknown";
 }
 
+pub(crate) fn elapsed_ms(started: std::time::Instant) -> u64 {
+    started.elapsed().as_millis().min(u128::from(u64::MAX)) as u64
+}
+
 /// Provider-side timing and runtime accounting captured per LLM call.
 ///
 /// All fields default to `None` / empty. Producers fill in what they can

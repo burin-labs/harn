@@ -1,7 +1,7 @@
 //! Ollama provider — local Ollama server with NDJSON streaming.
 
 use crate::llm::api::{
-    telemetry_source, DeltaSender, LlmRequestPayload, LlmResult, ProviderTelemetry,
+    elapsed_ms, telemetry_source, DeltaSender, LlmRequestPayload, LlmResult, ProviderTelemetry,
 };
 use crate::llm::provider::{LlmProvider, LlmProviderChat};
 use crate::value::{VmError, VmValue};
@@ -255,10 +255,6 @@ impl OllamaProvider {
         result.telemetry.client_wall_ms = Some(elapsed_ms(started));
         Ok(result)
     }
-}
-
-fn elapsed_ms(started: Instant) -> u64 {
-    started.elapsed().as_millis().min(u128::from(u64::MAX)) as u64
 }
 
 fn render_qwen_chat_prompt(opts: &LlmRequestPayload) -> String {

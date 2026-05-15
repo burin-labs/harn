@@ -400,6 +400,9 @@ NON_TEST_WALL_CLOCK_ALLOWLIST=(
   "crates/harn-vm/src/llm/cache.rs"
   "crates/harn-vm/src/llm/mod.rs"
   "crates/harn-vm/src/llm/model_test.rs"
+  # Ollama raw `/api/generate` bypasses the shared transport wrapper, so it
+  # records actual host monotonic elapsed time for provider telemetry.
+  "crates/harn-vm/src/llm/providers/ollama.rs"
   "crates/harn-vm/src/llm/providers/vertex.rs"
   "crates/harn-vm/src/llm/rate_limit.rs"
   "crates/harn-vm/src/llm/stream.rs"

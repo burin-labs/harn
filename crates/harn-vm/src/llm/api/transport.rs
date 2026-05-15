@@ -16,7 +16,7 @@ use super::options::{DeltaSender, LlmRequestPayload};
 use super::partial_tool_args::{project_partial, DeltaCoalescer, PartialToolArgs};
 use super::response::{extract_cache_read_tokens, extract_cache_write_tokens, parse_llm_response};
 use super::result::LlmResult;
-use super::telemetry::{source as telemetry_source, ProviderTelemetry};
+use super::telemetry::{elapsed_ms, source as telemetry_source, ProviderTelemetry};
 use super::thinking::ThinkingStreamSplitter;
 
 fn parse_ollama_tool_arguments(arguments: &serde_json::Value) -> serde_json::Value {
@@ -265,10 +265,6 @@ pub(crate) async fn vm_call_llm_api_with_body(
         result.telemetry.source = telemetry_source::UNKNOWN.to_string();
     }
     Ok(result)
-}
-
-pub(crate) fn elapsed_ms(started: Instant) -> u64 {
-    started.elapsed().as_millis().min(u128::from(u64::MAX)) as u64
 }
 
 async fn vm_call_llm_api_with_body_inner(
