@@ -1175,6 +1175,7 @@ public let harnProviderCatalogJSON = #"""
       "quality_tags": [],
       "capability_tags": [
         "streaming",
+        "tools",
         "vision",
         "audio",
         "pdf",
@@ -1230,12 +1231,154 @@ public let harnProviderCatalogJSON = #"""
       "quality_tags": [],
       "capability_tags": [
         "streaming",
+        "tools",
         "vision",
         "audio",
         "pdf",
         "files",
         "thinking",
         "extended_thinking"
+      ]
+    },
+    {
+      "id": "qwen3.6-35b-a3b",
+      "name": "Qwen3.6 35B (llama.cpp)",
+      "provider": "llamacpp",
+      "aliases": [
+        "llamacpp-qwen3.6"
+      ],
+      "context_window": 262144,
+      "runtime_context_window": 65536,
+      "stream_timeout": 900.0,
+      "modalities": {
+        "input": [
+          "text"
+        ],
+        "output": [
+          "text"
+        ]
+      },
+      "tool_support": {
+        "native": false,
+        "text": true,
+        "tool_search": []
+      },
+      "structured_output": "native",
+      "reasoning": {
+        "modes": [
+          "enabled"
+        ],
+        "effort_supported": false,
+        "none_supported": false,
+        "interleaved_supported": false,
+        "preserve_thinking": true
+      },
+      "prompt_cache": false,
+      "deprecation": {
+        "status": "active"
+      },
+      "quality_tags": [
+        "local"
+      ],
+      "capability_tags": [
+        "streaming",
+        "tools",
+        "thinking",
+        "structured_output"
+      ]
+    },
+    {
+      "id": "qwen3.6-35b-a3b-ud-q4-k-xl",
+      "name": "Qwen3.6 35B (Unsloth Q4_K_XL, llama.cpp)",
+      "provider": "llamacpp",
+      "aliases": [
+        "llamacpp-qwen3.6-q4",
+        "local-qwen3.6",
+        "local-qwen3.6-gguf"
+      ],
+      "context_window": 262144,
+      "runtime_context_window": 65536,
+      "stream_timeout": 900.0,
+      "modalities": {
+        "input": [
+          "text"
+        ],
+        "output": [
+          "text"
+        ]
+      },
+      "tool_support": {
+        "native": false,
+        "text": true,
+        "tool_search": []
+      },
+      "structured_output": "native",
+      "reasoning": {
+        "modes": [
+          "enabled"
+        ],
+        "effort_supported": false,
+        "none_supported": false,
+        "interleaved_supported": false,
+        "preserve_thinking": true
+      },
+      "prompt_cache": false,
+      "deprecation": {
+        "status": "active"
+      },
+      "quality_tags": [
+        "local"
+      ],
+      "capability_tags": [
+        "streaming",
+        "tools",
+        "thinking",
+        "structured_output"
+      ]
+    },
+    {
+      "id": "qwen3.6-35b-a3b-ud-q5-k-xl",
+      "name": "Qwen3.6 35B (Unsloth Q5_K_XL, llama.cpp)",
+      "provider": "llamacpp",
+      "aliases": [],
+      "context_window": 262144,
+      "runtime_context_window": 65536,
+      "stream_timeout": 900.0,
+      "modalities": {
+        "input": [
+          "text"
+        ],
+        "output": [
+          "text"
+        ]
+      },
+      "tool_support": {
+        "native": false,
+        "text": true,
+        "tool_search": []
+      },
+      "structured_output": "native",
+      "reasoning": {
+        "modes": [
+          "enabled"
+        ],
+        "effort_supported": false,
+        "none_supported": false,
+        "interleaved_supported": false,
+        "preserve_thinking": true
+      },
+      "prompt_cache": false,
+      "deprecation": {
+        "status": "active"
+      },
+      "quality_tags": [
+        "local"
+      ],
+      "capability_tags": [
+        "streaming",
+        "tools",
+        "thinking",
+        "structured_output"
       ]
     },
     {
@@ -1280,6 +1423,7 @@ public let harnProviderCatalogJSON = #"""
       ],
       "capability_tags": [
         "streaming",
+        "tools",
         "thinking"
       ]
     },
@@ -1324,6 +1468,7 @@ public let harnProviderCatalogJSON = #"""
       ],
       "capability_tags": [
         "streaming",
+        "tools",
         "thinking"
       ]
     },
@@ -1369,6 +1514,7 @@ public let harnProviderCatalogJSON = #"""
       ],
       "capability_tags": [
         "streaming",
+        "tools",
         "thinking"
       ]
     },
@@ -1414,6 +1560,7 @@ public let harnProviderCatalogJSON = #"""
       ],
       "capability_tags": [
         "streaming",
+        "tools",
         "thinking"
       ]
     },
@@ -1422,6 +1569,9 @@ public let harnProviderCatalogJSON = #"""
       "name": "Qwen3.6 27B (MLX 4-bit)",
       "provider": "mlx",
       "aliases": [
+        "local-qwen3.6-27b",
+        "mlx-qwen3.6-27b",
+        "mlx-qwen3.6-27b-q4",
         "mlx-qwen36-27b"
       ],
       "context_window": 262144,
@@ -1466,6 +1616,98 @@ public let harnProviderCatalogJSON = #"""
       ]
     },
     {
+      "id": "devstral-small-2:24b",
+      "name": "Devstral Small 2 24B",
+      "provider": "ollama",
+      "aliases": [
+        "devstral-small-2",
+        "ollama-devstral-small-2",
+        "ollama-devstral-small-2-native"
+      ],
+      "context_window": 262144,
+      "runtime_context_window": 32768,
+      "stream_timeout": 600.0,
+      "modalities": {
+        "input": [
+          "text"
+        ],
+        "output": [
+          "text"
+        ]
+      },
+      "tool_support": {
+        "native": false,
+        "text": true,
+        "tool_search": []
+      },
+      "structured_output": "format_kw",
+      "reasoning": {
+        "modes": [],
+        "effort_supported": false,
+        "none_supported": false,
+        "interleaved_supported": false,
+        "preserve_thinking": false
+      },
+      "prompt_cache": false,
+      "deprecation": {
+        "status": "active"
+      },
+      "quality_tags": [
+        "local"
+      ],
+      "capability_tags": [
+        "streaming",
+        "tools",
+        "structured_output"
+      ]
+    },
+    {
+      "id": "gemma4:26b",
+      "name": "Gemma 4 26B MoE",
+      "provider": "ollama",
+      "aliases": [
+        "ollama-gemma4",
+        "ollama-gemma4-26b"
+      ],
+      "context_window": 262144,
+      "runtime_context_window": 32768,
+      "stream_timeout": 300.0,
+      "modalities": {
+        "input": [
+          "text",
+          "image"
+        ],
+        "output": [
+          "text"
+        ]
+      },
+      "tool_support": {
+        "native": false,
+        "text": true,
+        "tool_search": []
+      },
+      "structured_output": "none",
+      "reasoning": {
+        "modes": [],
+        "effort_supported": false,
+        "none_supported": false,
+        "interleaved_supported": false,
+        "preserve_thinking": false
+      },
+      "prompt_cache": false,
+      "deprecation": {
+        "status": "active"
+      },
+      "quality_tags": [
+        "local"
+      ],
+      "capability_tags": [
+        "streaming",
+        "tools",
+        "vision"
+      ]
+    },
+    {
       "id": "llama3.2",
       "name": "Llama 3.2",
       "provider": "ollama",
@@ -1501,7 +1743,58 @@ public let harnProviderCatalogJSON = #"""
         "local"
       ],
       "capability_tags": [
-        "streaming"
+        "streaming",
+        "tools"
+      ]
+    },
+    {
+      "id": "qwen3.6:35b-a3b-coding-nvfp4",
+      "name": "Qwen3.6 35B A3B Coding (NVFP4)",
+      "provider": "ollama",
+      "aliases": [
+        "qwen3.6-35b-coding",
+        "qwen3.6-coding",
+        "qwen3.6-coding-native",
+        "qwen3.6-coding-nvfp4"
+      ],
+      "context_window": 262144,
+      "runtime_context_window": 32768,
+      "stream_timeout": 900.0,
+      "modalities": {
+        "input": [
+          "text"
+        ],
+        "output": [
+          "text"
+        ]
+      },
+      "tool_support": {
+        "native": false,
+        "text": true,
+        "tool_search": []
+      },
+      "structured_output": "format_kw",
+      "reasoning": {
+        "modes": [
+          "enabled"
+        ],
+        "effort_supported": false,
+        "none_supported": false,
+        "interleaved_supported": false,
+        "preserve_thinking": true
+      },
+      "prompt_cache": false,
+      "deprecation": {
+        "status": "active"
+      },
+      "quality_tags": [
+        "local"
+      ],
+      "capability_tags": [
+        "streaming",
+        "tools",
+        "thinking",
+        "structured_output"
       ]
     },
     {
@@ -1928,7 +2221,8 @@ public let harnProviderCatalogJSON = #"""
       },
       "quality_tags": [],
       "capability_tags": [
-        "streaming"
+        "streaming",
+        "tools"
       ]
     },
     {
@@ -1970,15 +2264,34 @@ public let harnProviderCatalogJSON = #"""
       },
       "quality_tags": [],
       "capability_tags": [
-        "streaming"
+        "streaming",
+        "tools"
       ]
     }
   ],
   "aliases": [
     {
+      "name": "devstral-small-2",
+      "model_id": "devstral-small-2:24b",
+      "provider": "ollama",
+      "tool_format": "text"
+    },
+    {
       "name": "frontier",
       "model_id": "claude-sonnet-4-20250514",
       "provider": "anthropic"
+    },
+    {
+      "name": "llamacpp-qwen3.6",
+      "model_id": "qwen3.6-35b-a3b",
+      "provider": "llamacpp",
+      "tool_format": "text"
+    },
+    {
+      "name": "llamacpp-qwen3.6-q4",
+      "model_id": "qwen3.6-35b-a3b-ud-q4-k-xl",
+      "provider": "llamacpp",
+      "tool_format": "text"
     },
     {
       "name": "local-gemma4",
@@ -2006,14 +2319,92 @@ public let harnProviderCatalogJSON = #"""
       "provider": "local"
     },
     {
+      "name": "local-qwen3.6",
+      "model_id": "qwen3.6-35b-a3b-ud-q4-k-xl",
+      "provider": "llamacpp",
+      "tool_format": "text"
+    },
+    {
+      "name": "local-qwen3.6-27b",
+      "model_id": "unsloth/Qwen3.6-27B-UD-MLX-4bit",
+      "provider": "mlx",
+      "tool_format": "native"
+    },
+    {
+      "name": "local-qwen3.6-gguf",
+      "model_id": "qwen3.6-35b-a3b-ud-q4-k-xl",
+      "provider": "llamacpp",
+      "tool_format": "text"
+    },
+    {
       "name": "mid",
       "model_id": "gpt-4o-mini",
       "provider": "openai"
     },
     {
+      "name": "mlx-qwen3.6-27b",
+      "model_id": "unsloth/Qwen3.6-27B-UD-MLX-4bit",
+      "provider": "mlx",
+      "tool_format": "native"
+    },
+    {
+      "name": "mlx-qwen3.6-27b-q4",
+      "model_id": "unsloth/Qwen3.6-27B-UD-MLX-4bit",
+      "provider": "mlx",
+      "tool_format": "native"
+    },
+    {
       "name": "mlx-qwen36-27b",
       "model_id": "unsloth/Qwen3.6-27B-UD-MLX-4bit",
       "provider": "mlx"
+    },
+    {
+      "name": "ollama-devstral-small-2",
+      "model_id": "devstral-small-2:24b",
+      "provider": "ollama",
+      "tool_format": "text"
+    },
+    {
+      "name": "ollama-devstral-small-2-native",
+      "model_id": "devstral-small-2:24b",
+      "provider": "ollama",
+      "tool_format": "native"
+    },
+    {
+      "name": "ollama-gemma4",
+      "model_id": "gemma4:26b",
+      "provider": "ollama",
+      "tool_format": "text"
+    },
+    {
+      "name": "ollama-gemma4-26b",
+      "model_id": "gemma4:26b",
+      "provider": "ollama",
+      "tool_format": "text"
+    },
+    {
+      "name": "qwen3.6-35b-coding",
+      "model_id": "qwen3.6:35b-a3b-coding-nvfp4",
+      "provider": "ollama",
+      "tool_format": "text"
+    },
+    {
+      "name": "qwen3.6-coding",
+      "model_id": "qwen3.6:35b-a3b-coding-nvfp4",
+      "provider": "ollama",
+      "tool_format": "text"
+    },
+    {
+      "name": "qwen3.6-coding-native",
+      "model_id": "qwen3.6:35b-a3b-coding-nvfp4",
+      "provider": "ollama",
+      "tool_format": "native"
+    },
+    {
+      "name": "qwen3.6-coding-nvfp4",
+      "model_id": "qwen3.6:35b-a3b-coding-nvfp4",
+      "provider": "ollama",
+      "tool_format": "text"
     },
     {
       "name": "small",
@@ -2065,8 +2456,8 @@ public let harnProviderCatalogJSON = #"""
       "id": "local",
       "label": "Local",
       "description": "Best local/offline model route in the checked-in catalog.",
-      "model_id": "unsloth/Qwen3.6-27B-UD-MLX-4bit",
-      "provider": "mlx",
+      "model_id": "qwen3.6:35b-a3b-coding-nvfp4",
+      "provider": "ollama",
       "source": "catalog"
     },
     {
