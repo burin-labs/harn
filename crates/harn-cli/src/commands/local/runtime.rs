@@ -5,6 +5,7 @@
 use std::path::Path;
 use std::time::Duration;
 
+use harn_vm::llm::api::OllamaPsModel;
 use harn_vm::llm::readiness::{probe_provider_readiness, ProviderReadiness, ReadinessStatus};
 use harn_vm::llm_config::{self, ProviderDef};
 use serde::Serialize;
@@ -44,6 +45,10 @@ pub(crate) struct LoadedModel {
     pub size_vram_bytes: Option<u64>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub expires_at: Option<String>,
+    /// Context window the model was loaded with. Surfaced where Ollama
+    /// includes it in `/api/ps` (newer daemons; older builds return None).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub context_length: Option<u64>,
 }
 
 pub(crate) fn local_provider_ids(filter: Option<&str>) -> Vec<String> {
@@ -212,7 +217,7 @@ fn port_from_base_url(base_url: &str) -> Option<u16> {
 /// models are loaded right now plus their memory footprint. We swallow
 /// errors so list/status keep working when the daemon is older or the
 /// endpoint is unavailable.
-async fn fetch_ollama_ps(base_url: &str) -> Result<Vec<LoadedModel>, String> {
+pub(crate) async fn fetch_ollama_ps(base_url: &str) -> Result<Vec<LoadedModel>, String> {
     let url = ollama_endpoint(base_url, "/api/ps")?;
     let client = local_http_client()?;
     let response = client
@@ -230,22 +235,20 @@ async fn fetch_ollama_ps(base_url: &str) -> Result<Vec<LoadedModel>, String> {
     let Some(models) = models else {
         return Ok(Vec::new());
     };
+    // The harn-vm `OllamaPsModel` parser is the canonical shape, so per-call
+    // telemetry and per-snapshot loaded-model listings can't drift: any new
+    // upstream field (e.g. context window changes) lands in one place.
     Ok(models
         .iter()
         .filter_map(|entry| {
-            let name = entry
-                .get("name")
-                .and_then(serde_json::Value::as_str)
-                .or_else(|| entry.get("model").and_then(serde_json::Value::as_str))?
-                .to_string();
+            let ps = OllamaPsModel::from_ps_entry(entry)?;
+            let name = ps.name?;
             Some(LoadedModel {
                 name,
-                size_bytes: entry.get("size").and_then(serde_json::Value::as_u64),
-                size_vram_bytes: entry.get("size_vram").and_then(serde_json::Value::as_u64),
-                expires_at: entry
-                    .get("expires_at")
-                    .and_then(serde_json::Value::as_str)
-                    .map(str::to_string),
+                size_bytes: ps.size_bytes,
+                size_vram_bytes: ps.size_vram_bytes,
+                expires_at: ps.expires_at,
+                context_length: ps.context_length,
             })
         })
         .collect())

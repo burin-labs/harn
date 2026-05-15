@@ -16,6 +16,7 @@ use super::options::{DeltaSender, LlmRequestPayload};
 use super::partial_tool_args::{project_partial, DeltaCoalescer, PartialToolArgs};
 use super::response::{extract_cache_read_tokens, extract_cache_write_tokens, parse_llm_response};
 use super::result::LlmResult;
+use super::telemetry::{source as telemetry_source, ProviderTelemetry};
 use super::thinking::ThinkingStreamSplitter;
 
 fn parse_ollama_tool_arguments(arguments: &serde_json::Value) -> serde_json::Value {
@@ -243,6 +244,34 @@ async fn dispatch_to_registered_provider(
 /// Provider implementations call this after building their provider-specific
 /// request body via `build_request_body()`.
 pub(crate) async fn vm_call_llm_api_with_body(
+    opts: &LlmRequestPayload,
+    delta_tx: Option<DeltaSender>,
+    body: serde_json::Value,
+    is_anthropic_style: bool,
+    is_ollama: bool,
+) -> Result<LlmResult, VmError> {
+    let started = Instant::now();
+    let mut result =
+        vm_call_llm_api_with_body_inner(opts, delta_tx, body, is_anthropic_style, is_ollama)
+            .await?;
+    // Preserve a per-call wall clock regardless of provider. Server-side
+    // timings (when available) cover only the model's view; client_wall_ms
+    // captures network + streaming overhead the server cannot see, so eval
+    // dashboards can decompose total latency end-to-end.
+    if result.telemetry.client_wall_ms.is_none() {
+        result.telemetry.client_wall_ms = Some(elapsed_ms(started));
+    }
+    if result.telemetry.source.is_empty() {
+        result.telemetry.source = telemetry_source::UNKNOWN.to_string();
+    }
+    Ok(result)
+}
+
+pub(crate) fn elapsed_ms(started: Instant) -> u64 {
+    started.elapsed().as_millis().min(u128::from(u64::MAX)) as u64
+}
+
+async fn vm_call_llm_api_with_body_inner(
     opts: &LlmRequestPayload,
     delta_tx: Option<DeltaSender>,
     mut body: serde_json::Value,
@@ -590,6 +619,8 @@ pub(super) async fn consume_sse_lines<R: tokio::io::AsyncBufRead + Unpin>(
     let mut output_tokens: i64 = 0;
     let mut tool_calls: Vec<serde_json::Value> = Vec::new();
     let mut blocks: Vec<serde_json::Value> = Vec::new();
+    let mut telemetry = ProviderTelemetry::default();
+    let mut anth_request_id: Option<String> = None;
 
     struct ToolBlock {
         id: String,
@@ -676,6 +707,11 @@ pub(super) async fn consume_sse_lines<R: tokio::io::AsyncBufRead + Unpin>(
                     let cw = extract_cache_write_tokens(usage);
                     if cw > 0 {
                         cache_write_tokens = cw;
+                    }
+                    if let Some(rid) = json["message"]["id"].as_str() {
+                        if !rid.is_empty() {
+                            anth_request_id = Some(rid.to_string());
+                        }
                     }
                 }
                 Some("content_block_start") => {
@@ -997,6 +1033,11 @@ pub(super) async fn consume_sse_lines<R: tokio::io::AsyncBufRead + Unpin>(
                 if cw > 0 {
                     cache_write_tokens = cw;
                 }
+                let request_id = json
+                    .get("id")
+                    .and_then(serde_json::Value::as_str)
+                    .filter(|value| !value.is_empty());
+                telemetry = ProviderTelemetry::from_openai_usage(usage, request_id);
             }
         }
     }
@@ -1064,6 +1105,13 @@ pub(super) async fn consume_sse_lines<R: tokio::io::AsyncBufRead + Unpin>(
     } else {
         provider.to_string()
     };
+    if telemetry.is_empty() && is_anthropic_style && (input_tokens > 0 || output_tokens > 0) {
+        let usage = serde_json::json!({
+            "input_tokens": input_tokens,
+            "output_tokens": output_tokens,
+        });
+        telemetry = ProviderTelemetry::from_anthropic_usage(&usage, anth_request_id.as_deref());
+    }
     Ok(LlmResult {
         text,
         tool_calls,
@@ -1082,6 +1130,7 @@ pub(super) async fn consume_sse_lines<R: tokio::io::AsyncBufRead + Unpin>(
         stop_reason,
         blocks,
         logprobs: Vec::new(),
+        telemetry,
     })
 }
 
@@ -1135,6 +1184,7 @@ where
     let mut blocks = Vec::new();
     let mut saw_done = false;
     let mut saw_chunk = false;
+    let mut telemetry = ProviderTelemetry::default();
 
     loop {
         let line = next_ollama_ndjson_line(&mut lines, model, unload_grace, warmup_gate)
@@ -1194,6 +1244,7 @@ where
             if let Some(n) = json["eval_count"].as_i64() {
                 output_tokens = n;
             }
+            telemetry = ProviderTelemetry::from_ollama_done(&json, telemetry_source::OLLAMA_CHAT);
             saw_done = true;
             break;
         }
@@ -1250,6 +1301,7 @@ where
         stop_reason: None,
         blocks,
         logprobs: Vec::new(),
+        telemetry,
     })
 }
 
@@ -1308,7 +1360,7 @@ fn is_ollama_empty_content_parser_bug(err: &VmError) -> bool {
 mod tests {
     use super::{
         append_ollama_tool_calls, consume_ollama_ndjson_lines, parse_ollama_tool_arguments,
-        should_request_stream_usage,
+        should_request_stream_usage, telemetry_source,
     };
     use std::time::Duration;
 
@@ -1404,6 +1456,39 @@ mod tests {
         .await
         .expect_err("truncated Ollama stream should fail");
         assert!(err.to_string().contains("unexpected EOF before done=true"));
+    }
+
+    #[tokio::test]
+    async fn ollama_ndjson_captures_server_telemetry_from_done_frame() {
+        let body = b"{\"message\":{\"role\":\"assistant\",\"content\":\"ok\"},\"done\":false}\n\
+            {\"message\":{\"role\":\"assistant\",\"content\":\"\"},\"done\":true,\
+            \"model\":\"qwen3.6:35b-a3b-coding-nvfp4\",\
+            \"total_duration\":4500000000,\"load_duration\":300000000,\
+            \"prompt_eval_count\":42,\"prompt_eval_duration\":1100000000,\
+            \"eval_count\":7,\"eval_duration\":3000000000}\n";
+        let (tx, _rx) = tokio::sync::mpsc::unbounded_channel();
+        let mut warmup_gate = false;
+        let result = consume_ollama_ndjson_lines(
+            &body[..],
+            "ollama",
+            "qwen3.6:35b-a3b-coding-nvfp4",
+            tx,
+            Duration::ZERO,
+            &mut warmup_gate,
+        )
+        .await
+        .expect("ollama stream parses");
+        assert_eq!(result.telemetry.source, telemetry_source::OLLAMA_CHAT);
+        assert_eq!(result.telemetry.server_total_ms, Some(4500));
+        assert_eq!(result.telemetry.server_load_ms, Some(300));
+        assert_eq!(result.telemetry.server_prompt_eval_ms, Some(1100));
+        assert_eq!(result.telemetry.server_generation_ms, Some(3000));
+        assert_eq!(result.telemetry.server_prompt_tokens, Some(42));
+        assert_eq!(result.telemetry.server_output_tokens, Some(7));
+        assert_eq!(
+            result.telemetry.runtime_loaded_model.as_deref(),
+            Some("qwen3.6:35b-a3b-coding-nvfp4")
+        );
     }
 }
 

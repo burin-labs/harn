@@ -6,6 +6,34 @@ Pre-0.6 highlights live in [CHANGELOG-pre-0.6.md](CHANGELOG-pre-0.6.md).
 Harn had no external users before 0.6.0, so that archive intentionally keeps
 condensed series summaries instead of full per-patch history.
 
+## Unreleased
+
+### Added
+
+- **Provider telemetry envelope (#1614).** `llm_call` results now carry a
+  normalized `provider_telemetry` block that preserves server-side timings
+  local runtimes already report and represents missing fields explicitly.
+  Ollama's `/api/chat` NDJSON and `/api/generate` raw stream lift
+  `total_duration`, `load_duration`, `prompt_eval_duration`, and
+  `eval_duration` (rounded to milliseconds) plus the prompt-eval / eval
+  token counts and the daemon-resolved model id. OpenAI-compatible
+  responses expose `prompt_tokens` / `completion_tokens` even when no
+  durations are reported, and llama.cpp's `usage.timings` extension is
+  promoted to `llamacpp_timings` with the prefill / decode breakdown.
+  Anthropic Messages responses preserve the response id alongside usage
+  counts. Every call also records `client_wall_ms` so end-to-end latency
+  can be decomposed from the network and streaming overhead the
+  server-side counters omit. The same envelope flows through the
+  structured-output wrapper so eval aggregators get the data without
+  provider-specific decoders. The `OllamaPsModel` parser is shared with
+  `harn local list` / `status`, picking up `context_length` from the
+  `/api/ps` payload where the daemon reports it.
+- **`harn provider probe <provider>` command (#1614).** Machine-readable
+  one-shot snapshot of provider readiness plus the loaded-model state
+  Ollama surfaces via `/api/ps` (size, VRAM, expiry, context window).
+  JSON output by default for eval pipelines; pair with `harn local
+  status --json` to inspect lifecycle state across every local runtime.
+
 ## v0.8.17
 
 ### Added

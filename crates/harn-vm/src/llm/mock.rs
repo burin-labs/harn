@@ -1,7 +1,7 @@
 use std::cell::RefCell;
 use std::collections::BTreeSet;
 
-use super::api::LlmResult;
+use super::api::{LlmResult, ProviderTelemetry};
 use crate::orchestration::ToolCallRecord;
 use crate::value::{ErrorCategory, VmError};
 
@@ -236,6 +236,7 @@ fn build_mock_result(mock: &LlmMock, last_msg_len: usize) -> LlmResult {
         stop_reason: mock.stop_reason.clone(),
         blocks,
         logprobs: mock.logprobs.clone(),
+        telemetry: ProviderTelemetry::default(),
     }
 }
 
@@ -583,6 +584,7 @@ pub(crate) fn load_fixture(hash: &str) -> Option<LlmResult> {
         stop_reason: json["stop_reason"].as_str().map(|s| s.to_string()),
         blocks: json["blocks"].as_array().cloned().unwrap_or_default(),
         logprobs: json["logprobs"].as_array().cloned().unwrap_or_default(),
+        telemetry: serde_json::from_value(json["telemetry"].clone()).unwrap_or_default(),
     })
 }
 
@@ -714,6 +716,7 @@ pub(crate) fn mock_llm_response(
                     "visibility": "internal",
                 })],
                 logprobs: Vec::new(),
+                telemetry: ProviderTelemetry::default(),
             };
             if cache {
                 apply_mock_prompt_cache(&mut result, &cache_key);
@@ -761,6 +764,7 @@ pub(crate) fn mock_llm_response(
             "visibility": "public",
         })],
         logprobs: Vec::new(),
+        telemetry: ProviderTelemetry::default(),
     };
     if cache {
         apply_mock_prompt_cache(&mut result, &cache_key);

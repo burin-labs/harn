@@ -8,6 +8,7 @@ use crate::value::{VmError, VmValue};
 
 use super::openai_normalize::{append_paragraph, normalize_openai_message_text};
 use super::result::LlmResult;
+use super::telemetry::ProviderTelemetry;
 
 fn render_reasoning_summary_value(value: &serde_json::Value) -> String {
     match value {
@@ -281,6 +282,8 @@ pub(crate) fn parse_llm_response(
         let cache_read_tokens = extract_cache_read_tokens(&json["usage"]);
         let cache_write_tokens = extract_cache_write_tokens(&json["usage"]);
         let stop_reason = json["stop_reason"].as_str().map(|s| s.to_string());
+        let request_id = json["id"].as_str().filter(|value| !value.is_empty());
+        let telemetry = ProviderTelemetry::from_anthropic_usage(&json["usage"], request_id);
 
         Ok(LlmResult {
             text,
@@ -300,6 +303,7 @@ pub(crate) fn parse_llm_response(
             stop_reason,
             blocks,
             logprobs: Vec::new(),
+            telemetry,
         })
     } else {
         if let Some(err) = json["error"]["message"].as_str() {
@@ -417,6 +421,8 @@ pub(crate) fn parse_llm_response(
         let stop_reason = json["choices"][0]["finish_reason"]
             .as_str()
             .map(|s| s.to_string());
+        let request_id = json["id"].as_str().filter(|value| !value.is_empty());
+        let telemetry = ProviderTelemetry::from_openai_usage(&json["usage"], request_id);
 
         // OpenAI Responses-API `tool_search_call` / `tool_search_output`
         // blocks (harn#71) are server-executed and get stripped from
@@ -465,6 +471,7 @@ pub(crate) fn parse_llm_response(
             stop_reason,
             blocks,
             logprobs: extract_openai_choice_logprobs(&json["choices"][0]),
+            telemetry,
         })
     }
 }
@@ -825,5 +832,92 @@ mod tests {
             Some("get_weather"),
             "reference name preserved"
         );
+    }
+
+    #[test]
+    fn openai_parser_preserves_partial_usage_in_telemetry() {
+        // OpenAI-compatible local servers (vLLM, MLX) often report only
+        // `prompt_tokens` and `completion_tokens`. The parser must still
+        // surface those values in the telemetry envelope rather than
+        // dropping them on the floor — otherwise eval dashboards see
+        // empty per-call accounting and have to fall back to
+        // wall-clock heuristics.
+        let resolved = crate::llm::helpers::ResolvedProvider::resolve("vllm");
+        let response = serde_json::json!({
+            "id": "chatcmpl-abc",
+            "choices": [{
+                "message": {"content": "done"},
+                "finish_reason": "stop"
+            }],
+            "usage": {"prompt_tokens": 314, "completion_tokens": 27}
+        });
+
+        let result =
+            parse_llm_response(&response, "vllm", "qwen3.6", &resolved).expect("parser succeeds");
+
+        assert_eq!(
+            result.telemetry.source,
+            crate::llm::api::telemetry_source::OPENAI_USAGE
+        );
+        assert_eq!(result.telemetry.server_prompt_tokens, Some(314));
+        assert_eq!(result.telemetry.server_output_tokens, Some(27));
+        assert_eq!(result.telemetry.server_prompt_eval_ms, None);
+        assert_eq!(result.telemetry.request_id.as_deref(), Some("chatcmpl-abc"));
+    }
+
+    #[test]
+    fn openai_parser_lifts_llamacpp_timings_into_telemetry() {
+        // llama.cpp's OpenAI-compatible server extends `usage` with a
+        // `timings` block. Preserve the millisecond fields verbatim and
+        // promote the source to `llamacpp_timings` so eval scripts can
+        // route on them.
+        let resolved = crate::llm::helpers::ResolvedProvider::resolve("llamacpp");
+        let response = serde_json::json!({
+            "choices": [{
+                "message": {"content": "answer"},
+                "finish_reason": "stop"
+            }],
+            "usage": {
+                "prompt_tokens": 200,
+                "completion_tokens": 17,
+                "timings": {
+                    "prompt_n": 200,
+                    "prompt_ms": 145.4,
+                    "predicted_n": 17,
+                    "predicted_ms": 89.1
+                }
+            }
+        });
+
+        let result = parse_llm_response(&response, "llamacpp", "qwen-7b", &resolved)
+            .expect("parser succeeds");
+
+        assert_eq!(
+            result.telemetry.source,
+            crate::llm::api::telemetry_source::LLAMACPP_TIMINGS
+        );
+        assert_eq!(result.telemetry.server_prompt_eval_ms, Some(145));
+        assert_eq!(result.telemetry.server_generation_ms, Some(89));
+        assert_eq!(result.telemetry.server_total_ms, Some(234));
+    }
+
+    #[test]
+    fn anthropic_parser_captures_request_id_in_telemetry() {
+        let resolved = anthropic_resolved();
+        let response = serde_json::json!({
+            "id": "msg_01ABC",
+            "content": [{"type": "text", "text": "ok"}],
+            "usage": {"input_tokens": 5, "output_tokens": 2},
+            "stop_reason": "end_turn"
+        });
+        let result = parse_llm_response(&response, "anthropic", "claude-opus-4-7", &resolved)
+            .expect("parser succeeds");
+        assert_eq!(
+            result.telemetry.source,
+            crate::llm::api::telemetry_source::ANTHROPIC_USAGE
+        );
+        assert_eq!(result.telemetry.request_id.as_deref(), Some("msg_01ABC"));
+        assert_eq!(result.telemetry.server_prompt_tokens, Some(5));
+        assert_eq!(result.telemetry.server_output_tokens, Some(2));
     }
 }
