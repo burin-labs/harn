@@ -11,7 +11,7 @@ use sha2::{Digest, Sha256};
 use std::cell::RefCell;
 use std::collections::{BTreeMap, BTreeSet};
 use std::rc::Rc;
-use std::time::Instant;
+use std::sync::Arc;
 
 use crate::agent_events::{AgentEvent, ToolCallErrorCategory, ToolCallStatus, ToolExecutor};
 use crate::tool_annotations::{SideEffectLevel, ToolAnnotations};
@@ -718,7 +718,8 @@ struct ExecutionState {
     request: CompositionExecutionRequest,
     calls: Vec<CompositionChildCall>,
     results: Vec<CompositionChildResult>,
-    started: Instant,
+    clock: Arc<dyn harn_clock::Clock>,
+    started_ms: i64,
 }
 
 impl ExecutionState {
@@ -734,7 +735,7 @@ impl ExecutionState {
             )));
         }
         if let Some(timeout_ms) = self.request.limits.timeout_ms {
-            if self.started.elapsed().as_millis() > timeout_ms as u128 {
+            if elapsed_ms(&*self.clock, self.started_ms) > timeout_ms {
                 return Err(VmError::Runtime(format!(
                     "composition exceeded timeout_ms={timeout_ms}"
                 )));
@@ -890,7 +891,8 @@ pub async fn execute_harn_composition(
     if let Some(session_id) = &session_id {
         run.metadata["session_id"] = Value::String(session_id.clone());
     }
-    let started = Instant::now();
+    let clock = harn_clock::RealClock::arc();
+    let started_ms = clock.monotonic_ms();
 
     let result = if request.language != "harn" {
         Err((
@@ -915,7 +917,7 @@ pub async fn execute_harn_composition(
         Ok((value, stdout, calls, results)) => {
             run.result = Some(value);
             run.stdout = (!stdout.is_empty()).then_some(stdout);
-            run.duration_ms = Some(started.elapsed().as_millis() as u64);
+            run.duration_ms = Some(elapsed_ms(&*clock, started_ms));
             CompositionExecutionReport {
                 schema_version: COMPOSITION_EXECUTION_SCHEMA_VERSION,
                 ok: true,
@@ -931,7 +933,7 @@ pub async fn execute_harn_composition(
         Err((category, error, calls, results)) => {
             run.failure_category = Some(category);
             run.error = Some(error.clone());
-            run.duration_ms = Some(started.elapsed().as_millis() as u64);
+            run.duration_ms = Some(elapsed_ms(&*clock, started_ms));
             CompositionExecutionReport {
                 schema_version: COMPOSITION_EXECUTION_SCHEMA_VERSION,
                 ok: false,
@@ -1057,20 +1059,20 @@ async fn execute_harn_composition_inner(
             )
         })?;
 
+    let execution_clock = harn_clock::RealClock::arc();
+    let execution_started_ms = execution_clock.monotonic_ms();
     let state = Rc::new(RefCell::new(ExecutionState {
         request,
         calls: Vec::new(),
         results: Vec::new(),
-        started: Instant::now(),
+        clock: execution_clock,
+        started_ms: execution_started_ms,
     }));
     let mut vm = Vm::new();
     crate::register_core_stdlib(&mut vm);
     register_composition_call_builtin(&mut vm, state.clone(), host);
     if let Some(timeout_ms) = state.borrow().request.limits.timeout_ms {
-        vm.deadlines.push((
-            Instant::now() + std::time::Duration::from_millis(timeout_ms),
-            0,
-        ));
+        vm.push_deadline_after(std::time::Duration::from_millis(timeout_ms));
     }
     vm.set_source_info("composition://snippet.harn", &source);
     match vm.execute(&chunk).await {
@@ -1144,15 +1146,16 @@ fn register_composition_call_builtin(
                 .get(1)
                 .map(crate::llm::vm_value_to_json)
                 .unwrap_or_else(|| serde_json::json!({}));
-            let (binding, call) = {
+            let (binding, call, clock) = {
                 let mut state = state.borrow_mut();
-                state.next_call(&tool_name, input.clone())?
+                let (binding, call) = state.next_call(&tool_name, input.clone())?;
+                (binding, call, state.clock.clone())
             };
-            let started = Instant::now();
+            let started_ms = clock.monotonic_ms();
             let output = host.call(&binding, input).await;
             {
                 let mut state = state.borrow_mut();
-                state.push_result(&call, &output, started.elapsed().as_millis() as u64);
+                state.push_result(&call, &output, elapsed_ms(&*clock, started_ms));
             }
             if let Some(error) = output.error {
                 return Err(VmError::Runtime(error));
@@ -1162,6 +1165,10 @@ fn register_composition_call_builtin(
             ))
         }
     });
+}
+
+fn elapsed_ms(clock: &dyn harn_clock::Clock, started_ms: i64) -> u64 {
+    clock.monotonic_ms().saturating_sub(started_ms).max(0) as u64
 }
 
 fn composition_validation_source(snippet: &str) -> String {
@@ -1526,53 +1533,94 @@ pub fn composition_crystallization_trace(
         .and_then(Value::as_str)
         .map(ToOwned::to_owned)
         .unwrap_or_else(|| format!("composition_{}", report.run.run_id));
-    let actions = report
-        .child_calls
-        .iter()
-        .map(|call| {
-            let result = report
-                .child_results
-                .iter()
-                .find(|result| result.tool_call_id == call.tool_call_id);
-            let capabilities = call
-                .annotations
-                .as_ref()
-                .map(|annotations| {
-                    annotations
-                        .capabilities
-                        .iter()
-                        .flat_map(|(domain, ops)| {
-                            ops.iter().map(move |op| format!("{domain}.{op}"))
-                        })
-                        .collect::<Vec<_>>()
-                })
-                .unwrap_or_default();
-            serde_json::json!({
-                "id": format!("composition_child_{}", call.operation_index),
-                "kind": "tool_call",
-                "name": call.tool_name,
-                "inputs": call.raw_input,
-                "parameters": call.raw_input,
-                "output": result.and_then(|result| result.raw_output.clone()),
-                "observed_output": result.and_then(|result| result.raw_output.clone()),
-                "capabilities": capabilities,
-                "side_effects": [],
-                "duration_ms": result.and_then(|result| result.duration_ms).unwrap_or(0),
-                "deterministic": true,
-                "fuzzy": false,
-                "metadata": {
-                    "source_kind": "composition_child_call",
-                    "composition_run_id": report.run.run_id,
-                    "composition_tool_call_id": call.tool_call_id,
-                    "requested_side_effect_level": call.requested_side_effect_level,
-                    "annotations": call.annotations,
-                    "policy_context": call.policy_context,
-                    "status": result.map(|result| result.status),
-                    "error_category": result.and_then(|result| result.error_category),
+    let mut capabilities = BTreeSet::new();
+    for call in &report.child_calls {
+        if let Some(annotations) = &call.annotations {
+            for (domain, ops) in &annotations.capabilities {
+                for op in ops {
+                    capabilities.insert(format!("{domain}.{op}"));
                 }
+            }
+        }
+    }
+    let parent_parameters = serde_json::json!({
+        "language": report.run.language,
+        "snippet_hash": report.run.snippet_hash,
+        "binding_manifest_hash": report.run.binding_manifest_hash,
+        "requested_side_effect_ceiling": report.run.requested_side_effect_ceiling,
+    });
+    let mut actions = vec![serde_json::json!({
+        "id": "composition_parent",
+        "kind": "composition_run",
+        "name": "execute_composition",
+        "inputs": parent_parameters,
+        "parameters": parent_parameters,
+        "output": report.run.result,
+        "observed_output": report.run.result,
+        "capabilities": capabilities.into_iter().collect::<Vec<_>>(),
+        "side_effects": [],
+        "duration_ms": report.run.duration_ms.unwrap_or(0),
+        "deterministic": true,
+        "fuzzy": false,
+        "metadata": {
+            "source_kind": "composition_parent_run",
+            "composition_run_id": report.run.run_id,
+            "composition_schema_version": report.schema_version,
+            "child_count": report.child_calls.len(),
+            "ok": report.ok,
+            "failure_category": report.run.failure_category,
+        }
+    })];
+    actions.extend(
+        report
+            .child_calls
+            .iter()
+            .map(|call| {
+                let result = report
+                    .child_results
+                    .iter()
+                    .find(|result| result.tool_call_id == call.tool_call_id);
+                let capabilities = call
+                    .annotations
+                    .as_ref()
+                    .map(|annotations| {
+                        annotations
+                            .capabilities
+                            .iter()
+                            .flat_map(|(domain, ops)| {
+                                ops.iter().map(move |op| format!("{domain}.{op}"))
+                            })
+                            .collect::<Vec<_>>()
+                    })
+                    .unwrap_or_default();
+                serde_json::json!({
+                    "id": format!("composition_child_{}", call.operation_index),
+                    "kind": "tool_call",
+                    "name": call.tool_name,
+                    "inputs": call.raw_input,
+                    "parameters": call.raw_input,
+                    "output": result.and_then(|result| result.raw_output.clone()),
+                    "observed_output": result.and_then(|result| result.raw_output.clone()),
+                    "capabilities": capabilities,
+                    "side_effects": [],
+                    "duration_ms": result.and_then(|result| result.duration_ms).unwrap_or(0),
+                    "deterministic": true,
+                    "fuzzy": false,
+                    "metadata": {
+                        "source_kind": "composition_child_call",
+                        "composition_run_id": report.run.run_id,
+                        "composition_tool_call_id": call.tool_call_id,
+                        "requested_side_effect_level": call.requested_side_effect_level,
+                        "annotations": call.annotations,
+                        "policy_context": call.policy_context,
+                        "status": result.map(|result| result.status),
+                        "error_category": result.and_then(|result| result.error_category),
+                    }
+                })
             })
-        })
-        .collect::<Vec<_>>();
+            .collect::<Vec<_>>(),
+    );
+    let replay_run = composition_replay_run(report, &trace_id);
     serde_json::json!({
         "version": 1,
         "id": trace_id,
@@ -1585,6 +1633,29 @@ pub fn composition_crystallization_trace(
             "transcript_ref": options.get("transcript_ref").and_then(Value::as_str),
         },
         "actions": actions,
+        "replay_run": replay_run,
+        "replay_allowlist": [
+            {
+                "path": "/run_id",
+                "reason": "run ids are allocated per execution"
+            },
+            {
+                "path": "/effect_receipts/*/run_id",
+                "reason": "composition receipts retain source run lineage"
+            },
+            {
+                "path": "/effect_receipts/*/tool_call_id",
+                "reason": "composition child call ids include the source run id"
+            },
+            {
+                "path": "/policy_decisions/*/run_id",
+                "reason": "composition policy decisions retain source run lineage"
+            },
+            {
+                "path": "/policy_decisions/*/tool_call_id",
+                "reason": "composition policy decision ids include the source run id"
+            }
+        ],
         "metadata": {
             "source_kind": "composition_run",
             "composition_schema_version": report.schema_version,
@@ -1596,6 +1667,58 @@ pub fn composition_crystallization_trace(
             "failure_category": report.run.failure_category,
             "child_count": report.child_calls.len(),
         },
+    })
+}
+
+fn composition_replay_run(report: &CompositionExecutionReport, trace_id: &str) -> Value {
+    let event_log_entries = composition_report_events(trace_id, report)
+        .into_iter()
+        .filter_map(|event| serde_json::to_value(event).ok())
+        .collect::<Vec<_>>();
+    let mut effect_receipts = vec![serde_json::json!({
+        "kind": "composition_parent",
+        "run_id": report.run.run_id,
+        "schema_version": report.schema_version,
+        "snippet_hash": report.run.snippet_hash,
+        "binding_manifest_hash": report.run.binding_manifest_hash,
+        "requested_side_effect_ceiling": report.run.requested_side_effect_ceiling,
+        "ok": report.ok,
+        "failure_category": report.run.failure_category,
+        "result": report.run.result,
+        "stdout": report.run.stdout,
+    })];
+    let mut policy_decisions = Vec::new();
+    for call in &report.child_calls {
+        let result = report
+            .child_results
+            .iter()
+            .find(|result| result.tool_call_id == call.tool_call_id);
+        effect_receipts.push(serde_json::json!({
+            "kind": "composition_child",
+            "run_id": report.run.run_id,
+            "tool_call_id": call.tool_call_id,
+            "tool_name": call.tool_name,
+            "operation_index": call.operation_index,
+            "requested_side_effect_level": call.requested_side_effect_level,
+            "input": call.raw_input,
+            "status": result.map(|result| result.status),
+            "error_category": result.and_then(|result| result.error_category),
+            "output": result.and_then(|result| result.raw_output.clone()),
+        }));
+        policy_decisions.push(serde_json::json!({
+            "kind": "composition_child_policy",
+            "run_id": report.run.run_id,
+            "tool_call_id": call.tool_call_id,
+            "tool_name": call.tool_name,
+            "requested_side_effect_level": call.requested_side_effect_level,
+            "policy_context": call.policy_context,
+        }));
+    }
+    serde_json::json!({
+        "run_id": report.run.run_id,
+        "event_log_entries": event_log_entries,
+        "effect_receipts": effect_receipts,
+        "policy_decisions": policy_decisions,
     })
 }
 
@@ -2124,7 +2247,21 @@ mod tests {
         };
         let trace = composition_crystallization_trace(&report, &serde_json::json!({}));
         assert_eq!(trace["source"], "composition_run");
-        assert_eq!(trace["actions"][0]["name"], "read_file");
+        assert_eq!(trace["actions"][0]["name"], "execute_composition");
+        assert_eq!(trace["actions"][1]["name"], "read_file");
+        assert_eq!(trace["replay_run"]["run_id"], "run-crystal");
+        assert_eq!(
+            trace["replay_run"]["effect_receipts"][0]["kind"],
+            "composition_parent"
+        );
+        assert_eq!(
+            trace["replay_run"]["effect_receipts"][1]["kind"],
+            "composition_child"
+        );
+        assert_eq!(
+            trace["replay_run"]["effect_receipts"][1]["tool_call_id"],
+            "run-crystal:0"
+        );
         assert_eq!(
             trace["actions"][0]["capabilities"][0],
             "workspace.read_text"

@@ -1,5 +1,12 @@
 use super::bundle::redact_trace_for_bundle;
 use super::*;
+use crate::agent_events::ToolCallStatus;
+use crate::composition::{
+    composition_crystallization_trace, CompositionChildCall, CompositionChildResult,
+    CompositionExecutionReport, CompositionRunEnvelope, COMPOSITION_EXECUTION_SCHEMA_VERSION,
+};
+use crate::tool_annotations::{SideEffectLevel, ToolAnnotations};
+use crate::{run_replay_oracle_trace, ReplayExpectation, ReplayOracleTrace};
 use serde_json::json;
 use std::collections::{BTreeMap, BTreeSet};
 
@@ -69,6 +76,145 @@ fn version_trace(id: &str, version: &str, side_target: &str, fuzzy: bool) -> Cry
         ],
         ..CrystallizationTrace::default()
     }
+}
+
+fn composition_trace(id: &str, run_id: &str, path: &str, output: &str) -> CrystallizationTrace {
+    let call_id = format!("{run_id}:0");
+    let annotations = ToolAnnotations {
+        capabilities: BTreeMap::from([("workspace".to_string(), vec!["read_text".to_string()])]),
+        ..ToolAnnotations::default()
+    };
+    let mut run = CompositionRunEnvelope::read_only(
+        run_id,
+        "harn",
+        "sha256:composition-snippet",
+        "sha256:composition-manifest",
+    );
+    run.result = Some(json!({"text": output}));
+    run.stdout = Some(String::new());
+    let report = CompositionExecutionReport {
+        schema_version: COMPOSITION_EXECUTION_SCHEMA_VERSION,
+        ok: true,
+        run,
+        child_calls: vec![CompositionChildCall {
+            run_id: run_id.to_string(),
+            tool_call_id: call_id.clone(),
+            tool_name: "read_file".to_string(),
+            operation_index: 0,
+            requested_side_effect_level: SideEffectLevel::ReadOnly,
+            annotations: Some(annotations),
+            raw_input: json!({"path": path}),
+            ..CompositionChildCall::default()
+        }],
+        child_results: vec![CompositionChildResult {
+            run_id: run_id.to_string(),
+            tool_call_id: call_id,
+            tool_name: "read_file".to_string(),
+            operation_index: 0,
+            status: ToolCallStatus::Completed,
+            raw_output: Some(json!({"text": output})),
+            duration_ms: Some(2),
+            execution_duration_ms: Some(2),
+            ..CompositionChildResult::default()
+        }],
+        summary: "ok".to_string(),
+    };
+    serde_json::from_value(composition_crystallization_trace(
+        &report,
+        &json!({
+            "id": id,
+            "workflow_id": "composition_read_trace",
+            "agent_run_id": format!("{run_id}-agent"),
+        }),
+    ))
+    .unwrap()
+}
+
+#[test]
+fn composition_traces_crystallize_with_child_receipt_shadow_replay() {
+    let traces = vec![
+        composition_trace("composition_a", "composition-run-a", "README.md", "hello"),
+        composition_trace("composition_b", "composition-run-b", "README.md", "hello"),
+    ];
+    let artifacts = crystallize_traces(
+        traces.clone(),
+        CrystallizeOptions {
+            min_examples: 2,
+            workflow_name: Some("composition_read_trace".to_string()),
+            package_name: Some("composition-workflows".to_string()),
+            ..CrystallizeOptions::default()
+        },
+    )
+    .expect("crystallize composition traces");
+    let report = &artifacts.report;
+    let selected_id = report
+        .selected_candidate_id
+        .as_deref()
+        .expect("composition candidate selected");
+    let candidate = report
+        .candidates
+        .iter()
+        .find(|candidate| candidate.id == selected_id)
+        .expect("selected candidate exists");
+    assert_eq!(candidate.examples.len(), 2);
+    assert!(candidate.examples.iter().all(|example| example
+        .action_ids
+        .contains(&"composition_child_0".to_string())));
+    assert_eq!(candidate.expected_receipts[0]["kind"], "composition_parent");
+    assert_eq!(candidate.expected_receipts[1]["kind"], "composition_child");
+    assert_eq!(
+        candidate.expected_receipts[1]["tool_call_id"],
+        "composition-run-a:0"
+    );
+
+    let bundle =
+        build_crystallization_bundle(artifacts, &traces, BundleOptions::default()).unwrap();
+    assert_eq!(bundle.manifest.kind, BundleKind::PlanOnly);
+    assert!(bundle
+        .manifest
+        .source_traces
+        .iter()
+        .all(|trace| trace.source_url.as_deref() == Some("composition_run")));
+
+    let dir = tempfile::tempdir().unwrap();
+    write_crystallization_bundle(&bundle, dir.path()).unwrap();
+    let validation = validate_crystallization_bundle(dir.path()).unwrap();
+    assert!(
+        validation.problems.is_empty(),
+        "validation problems: {:#?}",
+        validation.problems
+    );
+    let (_, shadow) = shadow_replay_bundle(dir.path()).unwrap();
+    assert!(shadow.pass, "shadow failures: {:#?}", shadow.failures);
+    assert_eq!(shadow.compared_traces, 2);
+    assert!(shadow
+        .traces
+        .iter()
+        .all(|trace| trace.compared_receipts >= 2));
+}
+
+#[test]
+fn composition_replay_receipts_distinguish_parent_and_child_drift() {
+    let first = composition_trace("composition_a", "composition-run-a", "README.md", "hello");
+    let mut second = first.clone();
+    let replay = second.replay_run.as_mut().expect("composition replay run");
+    replay.run_id = "composition-run-replay".to_string();
+    replay.effect_receipts[1]["output"] = json!({"text": "changed"});
+    let oracle = ReplayOracleTrace {
+        name: "composition_child_drift".to_string(),
+        expect: ReplayExpectation::Match,
+        first_run: first.replay_run.clone().unwrap(),
+        second_run: replay.clone(),
+        ..ReplayOracleTrace::default()
+    };
+    let report = run_replay_oracle_trace(&oracle).unwrap();
+    assert!(!report.passed);
+    let divergence = report.divergence.expect("child drift divergence");
+    assert!(
+        divergence.path.contains("/effect_receipts/1/output"),
+        "unexpected divergence path: {}",
+        divergence.path
+    );
 }
 
 #[test]
