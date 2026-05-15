@@ -358,6 +358,23 @@ jobs:
             --version "${{ needs.setup.outputs.version }}" \
             --output release-notes.md
 
+      - name: Generate SHA256SUMS
+        # install.sh and `harn upgrade` fetch this manifest to verify the
+        # tarball/zip before extracting. The body is the standard
+        # coreutils format (`<sha256>  <filename>`), one entry per
+        # release asset.
+        working-directory: artifacts
+        run: |
+          set -euo pipefail
+          shopt -s nullglob
+          files=(*.tar.gz *.zip)
+          if (( ${#files[@]} == 0 )); then
+            echo "::error::No release artifacts found to checksum"
+            exit 1
+          fi
+          sha256sum "${files[@]}" | LC_ALL=C sort -k 2 > SHA256SUMS
+          cat SHA256SUMS
+
       - name: Create or update GitHub release
         uses: softprops/action-gh-release@b4309332981a82ec1c5618f44dd2e27cc8bfbfda # v3.0.0
         with:
@@ -366,3 +383,4 @@ jobs:
           files: |
             artifacts/*.tar.gz
             artifacts/*.zip
+            artifacts/SHA256SUMS

@@ -97,6 +97,12 @@ async fn async_main() {
 
     match cli.command.expect("clap requires a command") {
         Command::Version => print_version(),
+        Command::Upgrade(args) => {
+            if let Err(error) = commands::upgrade::run(args).await {
+                eprintln!("error: {error}");
+                process::exit(1);
+            }
+        }
         Command::Skill(args) => match args.command {
             SkillCommand::Key(key_args) => match key_args.command {
                 SkillKeyCommand::Generate(generate) => commands::skill::run_key_generate(&generate),

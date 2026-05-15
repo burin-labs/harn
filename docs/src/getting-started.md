@@ -2,15 +2,34 @@
 
 This page gets you from zero to running your first Harn program.
 
-## Prerequisites
-
-- **[Rust](https://rustup.rs/)** 1.70 or later -- install with
-  `curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh`
-- **Git**
-
 ## Installation
 
+### One-line installer (recommended)
+
+```bash
+curl -fsSL https://harnlang.com/install.sh | sh
+```
+
+Detects your OS and CPU, downloads the matching signed binary from the
+latest GitHub release, verifies its SHA256 against the release manifest,
+and installs `harn`, `harn-dap`, and `harn-lsp` into the first writable
+target among `$HARN_INSTALL_DIR`, `$XDG_BIN_DIR`, `$HOME/bin`,
+`$HOME/.local/bin`, or `$HOME/.harn/bin`. macOS binaries are notarized,
+so Gatekeeper validates them on first launch with no extra prompts.
+
+To pin a specific release, pass `HARN_VERSION`:
+
+```bash
+curl -fsSL https://harnlang.com/install.sh | HARN_VERSION=v0.8.19 sh
+```
+
+To upgrade later, run `harn upgrade` — it reuses the same release
+artifacts and SHA256SUMS manifest to atomically replace the running
+binary.
+
 ### From crates.io
+
+If you already have a Rust toolchain:
 
 ```bash
 cargo install harn-cli
@@ -31,6 +50,15 @@ Verify the installation:
 ```bash
 harn version
 ```
+
+## Prerequisites for building from source
+
+- **[Rust](https://rustup.rs/)** 1.70 or later -- install with
+  `curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh`
+- **Git**
+
+The one-line installer and `cargo install harn-cli` do not require a
+Rust toolchain on the user's machine.
 
 ### Run this first
 

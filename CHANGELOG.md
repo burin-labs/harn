@@ -36,6 +36,25 @@ condensed series summaries instead of full per-patch history.
   onto the closing brace. A new `last_non_newline_span()` parser helper
   keeps node end-spans pinned to the last significant token.
 
+### Added
+
+- **One-line installer + signed binaries.** `install.sh` (served from
+  `harnlang.com/install.sh`) now detects the host OS/CPU, resolves the
+  latest GitHub release tag, downloads the matching pre-built archive,
+  and verifies it against the new `SHA256SUMS` release asset before
+  extracting `harn`, `harn-dap`, and `harn-lsp`. The destination is
+  picked from `$HARN_INSTALL_DIR`, `$XDG_BIN_DIR`, `$HOME/bin`,
+  `$HOME/.local/bin`, or `$HOME/.harn/bin` in that order — so the
+  default install path no longer requires `sudo`. macOS binaries
+  remain signed + notarized via the existing release workflow, and
+  Linux/Windows tarballs/zips are now hash-pinned end-to-end.
+- **`harn upgrade` subcommand.** Resolves the latest GitHub release
+  (or a specific `--version vX.Y.Z`), downloads the matching archive,
+  verifies it against `SHA256SUMS`, and atomically replaces the
+  currently running binary in-place. Use `--check` to print the
+  resolved versions without downloading, `--force` to reinstall the
+  same version, and `--no-verify` only as an escape hatch.
+
 ## v0.8.19
 
 ### Changed
