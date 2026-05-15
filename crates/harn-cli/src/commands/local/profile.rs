@@ -6,6 +6,7 @@
 //! `harn local switch` produces sensible defaults without per-machine
 //! configuration.
 
+use crate::cli::LocalProfileArgs;
 use crate::commands::hardware::{bytes_to_gib_floor, GpuKind, HardwareSnapshot};
 
 /// Recommended defaults the user can opt out of with `--ctx` / `--keep-alive`.
@@ -73,6 +74,40 @@ pub(crate) fn defaults_for(hardware: &HardwareSnapshot) -> LocalDefaults {
             bucket,
         },
     }
+}
+
+pub(crate) fn run(args: LocalProfileArgs) -> Result<(), String> {
+    let report = harn_vm::llm::local_profiles::local_runtime_profile_report(
+        &args.model,
+        args.provider.as_deref(),
+    );
+    if args.json {
+        println!(
+            "{}",
+            serde_json::to_string_pretty(&report)
+                .map_err(|error| format!("failed to render local profile JSON: {error}"))?
+        );
+    } else {
+        println!(
+            "{} via {}: {}",
+            report.model_id,
+            report.provider,
+            report.selected_status.as_str()
+        );
+        if !report.selected.requires.is_empty() {
+            println!("  required probes: {}", report.selected.requires.join(", "));
+        }
+        if let Some(ctx) = report.selected.recommended_num_ctx {
+            println!("  recommended ctx: {ctx}");
+        }
+        for risk in &report.selected.known_risks {
+            println!("  risk: {risk}");
+        }
+        for workaround in &report.selected.workarounds {
+            println!("  workaround: {workaround}");
+        }
+    }
+    Ok(())
 }
 
 fn bucket_for(hardware: &HardwareSnapshot) -> ProfileBucket {

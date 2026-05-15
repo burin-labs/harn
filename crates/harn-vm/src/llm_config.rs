@@ -23,6 +23,8 @@ pub struct ProvidersConfig {
     #[serde(default)]
     pub aliases: BTreeMap<String, AliasDef>,
     #[serde(default)]
+    pub alias_tool_calling: BTreeMap<String, AliasToolCallingDef>,
+    #[serde(default)]
     pub models: BTreeMap<String, ModelDef>,
     #[serde(default)]
     pub qc_defaults: BTreeMap<String, String>,
@@ -41,6 +43,7 @@ impl ProvidersConfig {
         self.default_provider.is_none()
             && self.providers.is_empty()
             && self.aliases.is_empty()
+            && self.alias_tool_calling.is_empty()
             && self.models.is_empty()
             && self.qc_defaults.is_empty()
             && self.inference_rules.is_empty()
@@ -52,6 +55,8 @@ impl ProvidersConfig {
     pub fn merge_from(&mut self, overlay: &ProvidersConfig) {
         self.providers.extend(overlay.providers.clone());
         self.aliases.extend(overlay.aliases.clone());
+        self.alias_tool_calling
+            .extend(overlay.alias_tool_calling.clone());
         self.models.extend(overlay.models.clone());
         self.qc_defaults.extend(overlay.qc_defaults.clone());
 
@@ -194,6 +199,28 @@ pub struct AliasDef {
     /// models better served by text-based tool calling use "text".
     #[serde(default)]
     pub tool_format: Option<String>,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize, PartialEq, Eq)]
+pub struct AliasToolCallingDef {
+    #[serde(default)]
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub native: Option<String>,
+    #[serde(default)]
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub text: Option<String>,
+    #[serde(default)]
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub streaming_native: Option<String>,
+    #[serde(default)]
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub fallback_mode: Option<String>,
+    #[serde(default)]
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub failure_reason: Option<String>,
+    #[serde(default)]
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub last_probe_at: Option<String>,
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize, PartialEq)]
@@ -558,6 +585,10 @@ pub fn known_model_names() -> Vec<String> {
 
 pub fn alias_entries() -> Vec<(String, AliasDef)> {
     effective_config().aliases.into_iter().collect()
+}
+
+pub fn alias_tool_calling_entry(alias: &str) -> Option<AliasToolCallingDef> {
+    effective_config().alias_tool_calling.get(alias).cloned()
 }
 
 /// Return every configured model-catalog entry, sorted by provider then id.
@@ -1716,6 +1747,64 @@ fn default_config() -> ProvidersConfig {
             tool_format: Some("native".to_string()),
         },
     );
+
+    config.alias_tool_calling.extend(BTreeMap::from([
+        (
+            "qwen3.6-coding".to_string(),
+            AliasToolCallingDef {
+                native: Some("unknown".to_string()),
+                text: Some("unknown".to_string()),
+                streaming_native: Some("unknown".to_string()),
+                fallback_mode: Some("text".to_string()),
+                failure_reason: None,
+                last_probe_at: None,
+            },
+        ),
+        (
+            "qwen3.6-coding-native".to_string(),
+            AliasToolCallingDef {
+                native: Some("unknown".to_string()),
+                text: Some("unknown".to_string()),
+                streaming_native: Some("unknown".to_string()),
+                fallback_mode: Some("native".to_string()),
+                failure_reason: None,
+                last_probe_at: None,
+            },
+        ),
+        (
+            "ollama-gemma4".to_string(),
+            AliasToolCallingDef {
+                native: Some("unknown".to_string()),
+                text: Some("unknown".to_string()),
+                streaming_native: Some("unknown".to_string()),
+                fallback_mode: Some("disabled".to_string()),
+                failure_reason: Some("requires_tool_probe".to_string()),
+                last_probe_at: None,
+            },
+        ),
+        (
+            "llamacpp-qwen3.6-q4".to_string(),
+            AliasToolCallingDef {
+                native: Some("unknown".to_string()),
+                text: Some("unknown".to_string()),
+                streaming_native: Some("unknown".to_string()),
+                fallback_mode: Some("text".to_string()),
+                failure_reason: Some("requires_tool_probe_and_cache_probe".to_string()),
+                last_probe_at: None,
+            },
+        ),
+        (
+            "mlx-qwen3.6-27b".to_string(),
+            AliasToolCallingDef {
+                native: Some("unknown".to_string()),
+                text: Some("unknown".to_string()),
+                streaming_native: Some("unknown".to_string()),
+                fallback_mode: Some("native".to_string()),
+                failure_reason: Some("requires_served_identity_and_tool_probe".to_string()),
+                last_probe_at: None,
+            },
+        ),
+    ]));
 
     config.qc_defaults.extend(BTreeMap::from([
         (

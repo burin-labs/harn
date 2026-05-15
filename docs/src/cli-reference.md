@@ -763,6 +763,45 @@ unparsable model listings, and missing models. It does not run local launcher
 scripts; host applications that auto-start local servers should report launch
 failures themselves and then call this probe again.
 
+## harn provider-probe
+
+Snapshot a provider's readiness and local loaded-model state as JSON. For
+Ollama, the output also includes `/api/ps` memory/context details. When a
+model is supplied, local runtime profile metadata is included for eval
+pipelines.
+
+```bash
+harn provider-probe ollama --model qwen3.6-coding
+harn provider-probe mlx --model mlx-qwen36-27b --base-url http://127.0.0.1:8002
+```
+
+## harn provider-tool-probe
+
+Run a harmless one-tool conformance probe. The command asks the model to call
+`echo_marker({value})`, tests streaming and non-streaming modes by default, and
+emits JSON with native/text/disabled fallback classification.
+
+```bash
+harn provider-tool-probe ollama --model qwen3.6-coding
+harn provider-tool-probe llamacpp --model local-qwen3.6 --mode non-streaming
+```
+
+Use `--response-fixture` to classify a saved provider response without making a
+network request. `harn local switch` can consume the JSON with `--probe-result`.
+
+## harn local profile
+
+Explain the local runtime risk profile for a model/provider route:
+
+```bash
+harn local profile qwen3.6-coding --provider ollama
+harn local profile ollama-gemma4 --json
+```
+
+Statuses are `preferred`, `experimental`, `vision_only_experimental`,
+`quarantined`, or `unknown`. `harn local switch` refuses experimental and
+quarantined profiles unless the required probes pass or `--force` is supplied.
+
 ## harn models test
 
 Round-trip a small prompt through one resolved model and report model id,

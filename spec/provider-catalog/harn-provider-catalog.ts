@@ -46,6 +46,16 @@ export interface HarnCatalogAlias {
   model_id: string
   provider: string
   tool_format?: string
+  tool_calling?: HarnAliasToolCalling
+}
+
+export interface HarnAliasToolCalling {
+  native?: string
+  text?: string
+  streaming_native?: string
+  fallback_mode?: string
+  failure_reason?: string
+  last_probe_at?: string
 }
 
 export interface HarnCatalogModel {
@@ -117,6 +127,7 @@ export interface CatalogAlias {
   id: string
   provider: string
   toolFormat?: string
+  toolCalling?: HarnAliasToolCalling
 }
 
 
@@ -2211,7 +2222,14 @@ export const harnProviderCatalog: HarnProviderCatalog = {
       "name": "llamacpp-qwen3.6-q4",
       "model_id": "qwen3.6-35b-a3b-ud-q4-k-xl",
       "provider": "llamacpp",
-      "tool_format": "text"
+      "tool_format": "text",
+      "tool_calling": {
+        "native": "unknown",
+        "text": "unknown",
+        "streaming_native": "unknown",
+        "fallback_mode": "text",
+        "failure_reason": "requires_tool_probe_and_cache_probe"
+      }
     },
     {
       "name": "local-gemma4",
@@ -2265,7 +2283,14 @@ export const harnProviderCatalog: HarnProviderCatalog = {
       "name": "mlx-qwen3.6-27b",
       "model_id": "unsloth/Qwen3.6-27B-UD-MLX-4bit",
       "provider": "mlx",
-      "tool_format": "native"
+      "tool_format": "native",
+      "tool_calling": {
+        "native": "unknown",
+        "text": "unknown",
+        "streaming_native": "unknown",
+        "fallback_mode": "native",
+        "failure_reason": "requires_served_identity_and_tool_probe"
+      }
     },
     {
       "name": "mlx-qwen3.6-27b-q4",
@@ -2294,7 +2319,14 @@ export const harnProviderCatalog: HarnProviderCatalog = {
       "name": "ollama-gemma4",
       "model_id": "gemma4:26b",
       "provider": "ollama",
-      "tool_format": "text"
+      "tool_format": "text",
+      "tool_calling": {
+        "native": "unknown",
+        "text": "unknown",
+        "streaming_native": "unknown",
+        "fallback_mode": "disabled",
+        "failure_reason": "requires_tool_probe"
+      }
     },
     {
       "name": "ollama-gemma4-26b",
@@ -2312,13 +2344,25 @@ export const harnProviderCatalog: HarnProviderCatalog = {
       "name": "qwen3.6-coding",
       "model_id": "qwen3.6:35b-a3b-coding-nvfp4",
       "provider": "ollama",
-      "tool_format": "text"
+      "tool_format": "text",
+      "tool_calling": {
+        "native": "unknown",
+        "text": "unknown",
+        "streaming_native": "unknown",
+        "fallback_mode": "text"
+      }
     },
     {
       "name": "qwen3.6-coding-native",
       "model_id": "qwen3.6:35b-a3b-coding-nvfp4",
       "provider": "ollama",
-      "tool_format": "native"
+      "tool_format": "native",
+      "tool_calling": {
+        "native": "unknown",
+        "text": "unknown",
+        "streaming_native": "unknown",
+        "fallback_mode": "native"
+      }
     },
     {
       "name": "qwen3.6-coding-nvfp4",
@@ -2438,6 +2482,7 @@ export const ALIASES: readonly CatalogAlias[] = harnProviderCatalog.aliases.map(
   id: alias.model_id,
   provider: alias.provider,
   toolFormat: alias.tool_format,
+  toolCalling: alias.tool_calling,
 }))
 
 export const QC_DEFAULTS: Readonly<Record<string, string>> = harnProviderCatalog.qc_defaults

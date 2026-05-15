@@ -372,6 +372,9 @@ fn parse_single_tool_call(
     body: &str,
     tools_val: Option<&VmValue>,
 ) -> Result<serde_json::Value, String> {
+    if let Some(call) = parse_json_tool_call_body(body, tools_val)? {
+        return Ok(call);
+    }
     let inner = parse_bare_calls_in_body(body, tools_val);
     if let Some(err) = inner.errors.into_iter().next() {
         return Err(err);
@@ -390,4 +393,91 @@ fn parse_single_tool_call(
         ));
     }
     Ok(inner.calls.into_iter().next().expect("len == 1"))
+}
+
+fn parse_json_tool_call_body(
+    body: &str,
+    tools_val: Option<&VmValue>,
+) -> Result<Option<serde_json::Value>, String> {
+    let trimmed = body.trim();
+    if !(trimmed.starts_with('{') || trimmed.starts_with('[')) {
+        return Ok(None);
+    }
+    let parsed: serde_json::Value = serde_json::from_str(trimmed).map_err(|error| {
+        format!(
+            "<tool_call> body looked like JSON but did not parse: {error}. \
+             Emit either `name({{ ... }})` or JSON with `name` and `arguments`."
+        )
+    })?;
+    let item = match parsed {
+        serde_json::Value::Array(items) if items.len() == 1 => items.into_iter().next().unwrap(),
+        serde_json::Value::Array(items) => {
+            return Err(format!(
+                "<tool_call> JSON array contained {} calls; emit one call per <tool_call> block.",
+                items.len()
+            ));
+        }
+        value @ serde_json::Value::Object(_) => value,
+        other => {
+            return Err(format!(
+                "<tool_call> JSON body must be an object, got `{other}`."
+            ));
+        }
+    };
+    let obj = item.as_object().expect("JSON object matched above");
+    let name = obj
+        .get("name")
+        .or_else(|| obj.get("tool_name"))
+        .or_else(|| {
+            obj.get("function")
+                .and_then(|function| function.get("name"))
+        })
+        .and_then(|value| value.as_str())
+        .unwrap_or("");
+    if name.is_empty() {
+        return Err("<tool_call> JSON body did not contain a tool name".to_string());
+    }
+    let known: BTreeSet<String> = collect_tool_schemas(tools_val, None)
+        .into_iter()
+        .map(|schema| schema.name)
+        .chain(["ledger".to_string(), "load_skill".to_string()])
+        .collect();
+    if !known.contains(name) {
+        let available: Vec<_> = known.iter().take(20).cloned().collect();
+        return Err(format!(
+            "Unknown tool '{}'. Available tools: [{}]",
+            name,
+            available.join(", ")
+        ));
+    }
+    let arguments = obj
+        .get("arguments")
+        .or_else(|| obj.get("parameters"))
+        .or_else(|| obj.get("args"))
+        .or_else(|| {
+            obj.get("function")
+                .and_then(|function| function.get("arguments"))
+        })
+        .cloned()
+        .unwrap_or_else(|| serde_json::json!({}));
+    let arguments = match arguments {
+        serde_json::Value::String(raw) => serde_json::from_str(&raw).map_err(|error| {
+            format!("Could not parse JSON string arguments for tool '{name}': {error}")
+        })?,
+        value => value,
+    };
+    if !arguments.is_object() {
+        return Err(format!(
+            "Tool '{name}' arguments must be a JSON object, got `{arguments}`."
+        ));
+    }
+    let id = obj
+        .get("id")
+        .and_then(|id| id.as_str())
+        .unwrap_or("tc_json");
+    Ok(Some(serde_json::json!({
+        "id": id,
+        "name": name,
+        "arguments": arguments,
+    })))
 }

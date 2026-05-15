@@ -13,14 +13,16 @@ use harn_vm::llm::readiness::{probe_provider_readiness, ProviderReadiness};
 use harn_vm::llm_config;
 use serde::Serialize;
 
-use crate::cli::ProviderProbeArgs;
-use crate::commands::local::runtime::{fetch_ollama_ps, LoadedModel};
+use crate::cli::{ProviderProbeArgs, ProviderToolProbeArgs, ProviderToolProbeModeArg};
+use crate::commands::local::runtime::{fetch_ollama_ps, LoadedModel, LOCAL_PROVIDERS};
 
 #[derive(Debug, Serialize)]
 struct ProviderProbe {
     provider: String,
     base_url: Option<String>,
     readiness: ProviderReadiness,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    runtime_profile: Option<harn_vm::llm::local_profiles::LocalRuntimeProfileReport>,
     #[serde(skip_serializing_if = "Vec::is_empty")]
     loaded_models: Vec<LoadedModel>,
 }
@@ -61,6 +63,16 @@ pub(crate) async fn run_provider_probe(args: ProviderProbeArgs) {
         provider: args.provider.clone(),
         base_url,
         readiness,
+        runtime_profile: if LOCAL_PROVIDERS.contains(&args.provider.as_str()) {
+            args.model.as_deref().map(|model| {
+                harn_vm::llm::local_profiles::local_runtime_profile_report(
+                    model,
+                    Some(&args.provider),
+                )
+            })
+        } else {
+            None
+        },
         loaded_models,
     };
 
@@ -90,6 +102,86 @@ pub(crate) async fn run_provider_probe(args: ProviderProbeArgs) {
 
     if exit_code != 0 {
         process::exit(exit_code);
+    }
+}
+
+pub(crate) async fn run_provider_tool_probe(args: ProviderToolProbeArgs) {
+    let report = if let Some(path) = args.response_fixture.as_ref() {
+        let raw = match std::fs::read_to_string(path) {
+            Ok(raw) => raw,
+            Err(error) => {
+                eprintln!("error: failed to read {}: {error}", path.display());
+                process::exit(1);
+            }
+        };
+        harn_vm::llm::tool_conformance::classify_tool_conformance_fixture(
+            args.provider.clone(),
+            args.model.clone(),
+            modes_for_arg(args.mode)
+                .into_iter()
+                .next()
+                .unwrap_or(harn_vm::llm::tool_conformance::ToolProbeMode::NonStreaming),
+            args.marker.clone(),
+            &raw,
+        )
+    } else {
+        let mut options = harn_vm::llm::tool_conformance::ToolConformanceProbeOptions::new(
+            args.provider.clone(),
+            args.model.clone(),
+        );
+        options.base_url = args.base_url.clone();
+        options.modes = modes_for_arg(args.mode);
+        options.marker = args.marker.clone();
+        options.timeout_secs = args.timeout_secs;
+        harn_vm::llm::tool_conformance::run_tool_conformance_probe(options).await
+    };
+
+    if args.json {
+        match serde_json::to_string_pretty(&report) {
+            Ok(payload) => println!("{payload}"),
+            Err(error) => {
+                eprintln!("error: failed to render probe JSON: {error}");
+                process::exit(1);
+            }
+        }
+    } else {
+        println!(
+            "{} {} fallback={} native={} text={} streaming_native={}",
+            report.provider,
+            report.model,
+            report.tool_calling.fallback_mode.as_str(),
+            report.tool_calling.native.as_str(),
+            report.tool_calling.text.as_str(),
+            report.tool_calling.streaming_native.as_str(),
+        );
+        for case in &report.cases {
+            println!(
+                "  {}: {:?} ok={} reason={}",
+                case.mode.as_str(),
+                case.classification,
+                case.ok,
+                case.failure_reason.as_deref().unwrap_or("-"),
+            );
+        }
+    }
+
+    if report.tool_calling.fallback_mode
+        == harn_vm::llm::tool_conformance::ToolProbeFallbackMode::Disabled
+    {
+        process::exit(1);
+    }
+}
+
+fn modes_for_arg(
+    mode: ProviderToolProbeModeArg,
+) -> Vec<harn_vm::llm::tool_conformance::ToolProbeMode> {
+    use harn_vm::llm::tool_conformance::ToolProbeMode;
+    match mode {
+        ProviderToolProbeModeArg::Both => {
+            vec![ToolProbeMode::NonStreaming, ToolProbeMode::Streaming]
+        }
+        ProviderToolProbeModeArg::NonStreaming => vec![ToolProbeMode::NonStreaming],
+        ProviderToolProbeModeArg::Streaming => vec![ToolProbeMode::Streaming],
     }
 }
 

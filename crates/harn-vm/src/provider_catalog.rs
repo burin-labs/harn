@@ -11,7 +11,7 @@ use serde::Serialize;
 use serde_json::{json, Value};
 
 use crate::llm;
-use crate::llm_config::{self, AliasDef, ModelDef, ModelPricing, ProviderDef};
+use crate::llm_config::{self, AliasDef, AliasToolCallingDef, ModelDef, ModelPricing, ProviderDef};
 
 pub const PROVIDER_CATALOG_SCHEMA_VERSION: u32 = 1;
 pub const PROVIDER_CATALOG_SCHEMA_ID: &str =
@@ -81,6 +81,8 @@ pub struct CatalogAlias {
     pub provider: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub tool_format: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub tool_calling: Option<AliasToolCallingDef>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -443,7 +445,19 @@ pub fn schema_value() -> Value {
                     "name": {"type": "string", "minLength": 1},
                     "model_id": {"type": "string", "minLength": 1},
                     "provider": {"type": "string", "minLength": 1},
-                    "tool_format": {"type": "string"}
+                    "tool_format": {"type": "string"},
+                    "tool_calling": {
+                        "type": "object",
+                        "properties": {
+                            "native": {"type": "string"},
+                            "text": {"type": "string"},
+                            "streaming_native": {"type": "string"},
+                            "fallback_mode": {"type": "string"},
+                            "failure_reason": {"type": "string"},
+                            "last_probe_at": {"type": "string"}
+                        },
+                        "additionalProperties": false
+                    }
                 },
                 "additionalProperties": false
             },
@@ -589,6 +603,7 @@ fn catalog_alias(name: &str, alias: &AliasDef) -> CatalogAlias {
         model_id: alias.id.clone(),
         provider: alias.provider.clone(),
         tool_format: alias.tool_format.clone(),
+        tool_calling: llm_config::alias_tool_calling_entry(name),
     }
 }
 
@@ -936,6 +951,16 @@ export interface HarnCatalogAlias {
   model_id: string
   provider: string
   tool_format?: string
+  tool_calling?: HarnAliasToolCalling
+}
+
+export interface HarnAliasToolCalling {
+  native?: string
+  text?: string
+  streaming_native?: string
+  fallback_mode?: string
+  failure_reason?: string
+  last_probe_at?: string
 }
 
 export interface HarnCatalogModel {
@@ -1007,6 +1032,7 @@ export interface CatalogAlias {
   id: string
   provider: string
   toolFormat?: string
+  toolCalling?: HarnAliasToolCalling
 }
 
 "#;
@@ -1036,6 +1062,7 @@ export const ALIASES: readonly CatalogAlias[] = harnProviderCatalog.aliases.map(
   id: alias.model_id,
   provider: alias.provider,
   toolFormat: alias.tool_format,
+  toolCalling: alias.tool_calling,
 }))
 
 export const QC_DEFAULTS: Readonly<Record<string, string>> = harnProviderCatalog.qc_defaults
@@ -1133,12 +1160,32 @@ public struct HarnCatalogAlias: Codable, Sendable, Equatable {
     public let modelID: String
     public let provider: String
     public let toolFormat: String?
+    public let toolCalling: HarnAliasToolCalling?
 
     enum CodingKeys: String, CodingKey {
         case name
         case modelID = "model_id"
         case provider
         case toolFormat = "tool_format"
+        case toolCalling = "tool_calling"
+    }
+}
+
+public struct HarnAliasToolCalling: Codable, Sendable, Equatable {
+    public let native: String?
+    public let text: String?
+    public let streamingNative: String?
+    public let fallbackMode: String?
+    public let failureReason: String?
+    public let lastProbeAt: String?
+
+    enum CodingKeys: String, CodingKey {
+        case native
+        case text
+        case streamingNative = "streaming_native"
+        case fallbackMode = "fallback_mode"
+        case failureReason = "failure_reason"
+        case lastProbeAt = "last_probe_at"
     }
 }
 

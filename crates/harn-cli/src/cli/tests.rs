@@ -7,9 +7,9 @@ use super::{
     McpCommand, ModelsCommand, OrchestratorCommand, OrchestratorDeployProvider,
     OrchestratorLogFormat, OrchestratorQueueCommand, OrchestratorTenantCommand,
     PackageArtifactsCommand, PackageCacheCommand, PackageCommand, PersonaCommand, ProjectTemplate,
-    ProvidersCommand, RunsCommand, SessionCommand, SkillCommand, SkillKeyCommand,
-    SkillTrustCommand, SkillsCommand, ToolCommand, TraceCommand, TriggerCommand, TrustCommand,
-    TrustOutcomeArg, TrustTierArg,
+    ProviderToolProbeModeArg, ProvidersCommand, RunsCommand, SessionCommand, SkillCommand,
+    SkillKeyCommand, SkillTrustCommand, SkillsCommand, ToolCommand, TraceCommand, TriggerCommand,
+    TrustCommand, TrustOutcomeArg, TrustTierArg,
 };
 use clap::{CommandFactory, Parser};
 
@@ -2313,6 +2313,11 @@ fn test_parses_local_switch_args_with_machine_overrides() {
         "1h",
         "--no-pull",
         "--no-evict",
+        "--force",
+        "--passed-probe",
+        "two_turn_cache_probe",
+        "--probe-result",
+        "probe.json",
         "--json",
     ]);
     let Command::Local(args) = cli.command.unwrap() else {
@@ -2327,6 +2332,31 @@ fn test_parses_local_switch_args_with_machine_overrides() {
     assert_eq!(args.keep_alive.as_deref(), Some("1h"));
     assert!(args.no_pull);
     assert!(args.no_evict);
+    assert!(args.force);
+    assert_eq!(args.passed_probes, vec!["two_turn_cache_probe".to_string()]);
+    assert_eq!(args.probe_results, vec![PathBuf::from("probe.json")]);
+    assert!(args.json);
+}
+
+#[test]
+fn test_parses_local_profile_args() {
+    let cli = Cli::parse_from([
+        "harn",
+        "local",
+        "profile",
+        "qwen3.6-coding",
+        "--provider",
+        "llamacpp",
+        "--json",
+    ]);
+    let Command::Local(args) = cli.command.unwrap() else {
+        panic!("expected local command");
+    };
+    let LocalCommand::Profile(args) = args.command else {
+        panic!("expected local profile command");
+    };
+    assert_eq!(args.model, "qwen3.6-coding");
+    assert_eq!(args.provider.as_deref(), Some("llamacpp"));
     assert!(args.json);
 }
 
@@ -2486,6 +2516,36 @@ fn test_parses_provider_probe_args() {
     assert_eq!(args.base_url.as_deref(), Some("http://127.0.0.1:11434"));
     // The probe is meant for eval pipelines; JSON output is the default
     // surface so an aggregator doesn't have to opt in.
+    assert!(args.json);
+}
+
+#[test]
+fn test_parses_provider_tool_probe_args() {
+    let cli = Cli::parse_from([
+        "harn",
+        "provider-tool-probe",
+        "ollama",
+        "--model",
+        "qwen3.6-coding",
+        "--base-url",
+        "http://127.0.0.1:11434",
+        "--mode",
+        "non-streaming",
+        "--marker",
+        "marker",
+        "--response-fixture",
+        "fixture.json",
+    ]);
+
+    let Command::ProviderToolProbe(args) = cli.command.unwrap() else {
+        panic!("expected provider-tool-probe command");
+    };
+    assert_eq!(args.provider, "ollama");
+    assert_eq!(args.model, "qwen3.6-coding");
+    assert_eq!(args.base_url.as_deref(), Some("http://127.0.0.1:11434"));
+    assert!(matches!(args.mode, ProviderToolProbeModeArg::NonStreaming));
+    assert_eq!(args.marker, "marker");
+    assert_eq!(args.response_fixture, Some(PathBuf::from("fixture.json")));
     assert!(args.json);
 }
 

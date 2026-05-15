@@ -20,6 +20,10 @@
 use std::path::Path;
 use std::time::Duration;
 
+use harn_vm::llm::local_profiles::{
+    evaluate_runtime_profile_gate, local_runtime_profile_report_for, LocalRuntimeProfileReport,
+    RuntimeProbeEvidence, RuntimeProfileGate,
+};
 use harn_vm::llm::readiness::probe_provider_readiness;
 use harn_vm::llm::{
     normalize_ollama_keep_alive, ollama_readiness, warm_ollama_model_with_settings,
@@ -48,6 +52,8 @@ struct SwitchResult {
     evicted: Vec<EvictionRecord>,
     readiness: serde_json::Value,
     rechecked: bool,
+    runtime_profile: LocalRuntimeProfileReport,
+    profile_gate: RuntimeProfileGate,
 }
 
 #[derive(Debug, Serialize)]
@@ -70,6 +76,17 @@ pub(crate) async fn run(args: LocalSwitchArgs, base_dir: &Path) -> Result<(), St
         return Err(format!(
             "'{provider}' is not a local provider Harn manages (expected one of: {})",
             local_provider_ids(None).join(", ")
+        ));
+    }
+    let runtime_profile =
+        local_runtime_profile_report_for(resolved.alias.as_deref(), &resolved.id, &provider);
+    let evidence = load_runtime_probe_evidence(&args)?;
+    let profile_gate = evaluate_runtime_profile_gate(&runtime_profile, &evidence, args.force);
+    if !profile_gate.allowed {
+        return Err(format!(
+            "{}. Run `harn local profile {} --provider {}` for details, pass \
+             `--probe-result <provider-tool-probe.json>` after probing, or use `--force`.",
+            profile_gate.message, args.model, provider
         ));
     }
 
@@ -114,6 +131,8 @@ pub(crate) async fn run(args: LocalSwitchArgs, base_dir: &Path) -> Result<(), St
         evicted,
         readiness,
         rechecked,
+        runtime_profile,
+        profile_gate,
     };
 
     if args.json {
@@ -140,8 +159,31 @@ pub(crate) async fn run(args: LocalSwitchArgs, base_dir: &Path) -> Result<(), St
         if result.rechecked {
             println!("  readiness re-checked after warm");
         }
+        if result.runtime_profile.requires_probe_gate {
+            println!("  runtime profile: {}", result.profile_gate.message);
+        }
     }
     Ok(())
+}
+
+fn load_runtime_probe_evidence(args: &LocalSwitchArgs) -> Result<RuntimeProbeEvidence, String> {
+    let mut evidence = RuntimeProbeEvidence::new();
+    for probe in &args.passed_probes {
+        evidence.add_passed(probe.clone());
+    }
+    for path in &args.probe_results {
+        let raw = std::fs::read_to_string(path)
+            .map_err(|error| format!("failed to read probe result {}: {error}", path.display()))?;
+        let report: harn_vm::llm::tool_conformance::ToolConformanceReport =
+            serde_json::from_str(&raw).map_err(|error| {
+                format!(
+                    "failed to parse provider-tool-probe result {}: {error}",
+                    path.display()
+                )
+            })?;
+        evidence.add_tool_report(report);
+    }
+    Ok(evidence)
 }
 
 async fn evict_siblings(

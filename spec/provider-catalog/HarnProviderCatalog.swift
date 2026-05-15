@@ -78,12 +78,32 @@ public struct HarnCatalogAlias: Codable, Sendable, Equatable {
     public let modelID: String
     public let provider: String
     public let toolFormat: String?
+    public let toolCalling: HarnAliasToolCalling?
 
     enum CodingKeys: String, CodingKey {
         case name
         case modelID = "model_id"
         case provider
         case toolFormat = "tool_format"
+        case toolCalling = "tool_calling"
+    }
+}
+
+public struct HarnAliasToolCalling: Codable, Sendable, Equatable {
+    public let native: String?
+    public let text: String?
+    public let streamingNative: String?
+    public let fallbackMode: String?
+    public let failureReason: String?
+    public let lastProbeAt: String?
+
+    enum CodingKeys: String, CodingKey {
+        case native
+        case text
+        case streamingNative = "streaming_native"
+        case fallbackMode = "fallback_mode"
+        case failureReason = "failure_reason"
+        case lastProbeAt = "last_probe_at"
     }
 }
 
@@ -2291,7 +2311,14 @@ public let harnProviderCatalogJSON = #"""
       "name": "llamacpp-qwen3.6-q4",
       "model_id": "qwen3.6-35b-a3b-ud-q4-k-xl",
       "provider": "llamacpp",
-      "tool_format": "text"
+      "tool_format": "text",
+      "tool_calling": {
+        "native": "unknown",
+        "text": "unknown",
+        "streaming_native": "unknown",
+        "fallback_mode": "text",
+        "failure_reason": "requires_tool_probe_and_cache_probe"
+      }
     },
     {
       "name": "local-gemma4",
@@ -2345,7 +2372,14 @@ public let harnProviderCatalogJSON = #"""
       "name": "mlx-qwen3.6-27b",
       "model_id": "unsloth/Qwen3.6-27B-UD-MLX-4bit",
       "provider": "mlx",
-      "tool_format": "native"
+      "tool_format": "native",
+      "tool_calling": {
+        "native": "unknown",
+        "text": "unknown",
+        "streaming_native": "unknown",
+        "fallback_mode": "native",
+        "failure_reason": "requires_served_identity_and_tool_probe"
+      }
     },
     {
       "name": "mlx-qwen3.6-27b-q4",
@@ -2374,7 +2408,14 @@ public let harnProviderCatalogJSON = #"""
       "name": "ollama-gemma4",
       "model_id": "gemma4:26b",
       "provider": "ollama",
-      "tool_format": "text"
+      "tool_format": "text",
+      "tool_calling": {
+        "native": "unknown",
+        "text": "unknown",
+        "streaming_native": "unknown",
+        "fallback_mode": "disabled",
+        "failure_reason": "requires_tool_probe"
+      }
     },
     {
       "name": "ollama-gemma4-26b",
@@ -2392,13 +2433,25 @@ public let harnProviderCatalogJSON = #"""
       "name": "qwen3.6-coding",
       "model_id": "qwen3.6:35b-a3b-coding-nvfp4",
       "provider": "ollama",
-      "tool_format": "text"
+      "tool_format": "text",
+      "tool_calling": {
+        "native": "unknown",
+        "text": "unknown",
+        "streaming_native": "unknown",
+        "fallback_mode": "text"
+      }
     },
     {
       "name": "qwen3.6-coding-native",
       "model_id": "qwen3.6:35b-a3b-coding-nvfp4",
       "provider": "ollama",
-      "tool_format": "native"
+      "tool_format": "native",
+      "tool_calling": {
+        "native": "unknown",
+        "text": "unknown",
+        "streaming_native": "unknown",
+        "fallback_mode": "native"
+      }
     },
     {
       "name": "qwen3.6-coding-nvfp4",

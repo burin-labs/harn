@@ -203,6 +203,27 @@ fn strips_gemma_tool_code_prefix_so_native_format_parses() {
 }
 
 #[test]
+fn parses_qwen_call_colon_object_literal_tool_marker() {
+    // Some Qwen/Gemma local templates emit `call:name{...}` instead of
+    // `name({...})`. The name is still registry-checked; this only relaxes
+    // the bracket shape for known tools.
+    let tools = sample_tool_registry();
+    let text = "call:run{ command: \"git status --short\" }";
+    let result = parse_bare_calls_in_body(text, Some(&tools));
+    assert!(
+        result.errors.is_empty(),
+        "call:name{{...}} should parse without errors: {:?}",
+        result.errors
+    );
+    assert_eq!(result.calls.len(), 1);
+    assert_eq!(result.calls[0]["name"], json!("run"));
+    assert_eq!(
+        result.calls[0]["arguments"]["command"],
+        json!("git status --short")
+    );
+}
+
+#[test]
 fn strips_assorted_language_and_wrapper_prefixes() {
     let tools = sample_tool_registry();
     for prefix in [

@@ -1,3 +1,5 @@
+use std::path::PathBuf;
+
 use clap::{Args, Subcommand};
 
 use super::util::llm_model_completion_parser;
@@ -22,6 +24,8 @@ pub(crate) enum LocalCommand {
     /// Make `<alias>` the active local model: warm it on its provider,
     /// unload conflicting models, and persist the selection.
     Switch(LocalSwitchArgs),
+    /// Explain the selected local runtime profile and required probes.
+    Profile(LocalProfileArgs),
     /// Unload loaded local models. By default targets the active provider;
     /// pass `--all` to unload every reachable local provider.
     Stop(LocalStopArgs),
@@ -71,6 +75,34 @@ pub(crate) struct LocalSwitchArgs {
     /// Skip unloading other local providers / sibling models.
     #[arg(long = "no-evict")]
     pub no_evict: bool,
+    /// Allow an experimental or quarantined runtime without passing the
+    /// profile's required probes.
+    #[arg(long)]
+    pub force: bool,
+    /// JSON output from `harn provider-tool-probe`; can satisfy the
+    /// profile's `tool_probe` requirement.
+    #[arg(long = "probe-result")]
+    pub probe_results: Vec<PathBuf>,
+    /// Mark an externally-run probe as passed, for example
+    /// `--passed-probe two_turn_cache_probe`.
+    #[arg(long = "passed-probe")]
+    pub passed_probes: Vec<String>,
+    /// Emit a structured JSON result.
+    #[arg(long)]
+    pub json: bool,
+}
+
+#[derive(Debug, Args)]
+pub(crate) struct LocalProfileArgs {
+    /// Model alias or provider-native model id.
+    #[arg(
+        value_parser = llm_model_completion_parser(),
+        hide_possible_values = true
+    )]
+    pub model: String,
+    /// Override the inferred provider/runtime.
+    #[arg(long)]
+    pub provider: Option<String>,
     /// Emit a structured JSON result.
     #[arg(long)]
     pub json: bool,

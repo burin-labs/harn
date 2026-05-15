@@ -1046,6 +1046,7 @@ async fn async_main() {
             .await
         }
         Command::ProviderProbe(args) => commands::provider::run_provider_probe(args).await,
+        Command::ProviderToolProbe(args) => commands::provider::run_provider_tool_probe(args).await,
         Command::Skills(args) => match args.command {
             SkillsCommand::List(list) => commands::skills::run_list(&list),
             SkillsCommand::Inspect(inspect) => commands::skills::run_inspect(&inspect),
@@ -1281,6 +1282,7 @@ fn print_provider_catalog(available_only: bool) {
                 "id": alias.id,
                 "provider": alias.provider,
                 "tool_format": alias.tool_format,
+                "tool_calling": harn_vm::llm_config::alias_tool_calling_entry(&name),
             })
         })
         .collect();

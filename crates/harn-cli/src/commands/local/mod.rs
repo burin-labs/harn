@@ -29,6 +29,7 @@ pub(crate) async fn run(args: LocalArgs) {
         LocalCommand::List(args) => list::run(args, &base_dir).await,
         LocalCommand::Status(args) => status::run(args, &base_dir).await,
         LocalCommand::Switch(args) => switch::run(args, &base_dir).await,
+        LocalCommand::Profile(args) => profile::run(args),
         LocalCommand::Stop(args) => stop::run(args, &base_dir).await,
     };
     if let Err(error) = result {
