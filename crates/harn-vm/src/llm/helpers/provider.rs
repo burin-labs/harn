@@ -444,7 +444,6 @@ pub fn resolve_api_key(provider: &str) -> Result<String, VmError> {
 
 pub(crate) struct ResolvedProvider {
     pub pdef: Option<crate::llm_config::ProviderDef>,
-    pub is_anthropic_style: bool,
     pub base_url: String,
     pub endpoint: String,
 }
@@ -455,7 +454,9 @@ impl ResolvedProvider {
         let is_anthropic_style = pdef
             .as_ref()
             .map(|p| p.chat_endpoint.contains("/messages"))
-            .unwrap_or(provider == "anthropic");
+            .unwrap_or_else(|| {
+                crate::llm::capabilities::lookup(provider, "").message_wire_format == "anthropic"
+            });
         let (default_base, default_endpoint) = if is_anthropic_style {
             ("https://api.anthropic.com/v1", "/messages")
         } else {
@@ -471,7 +472,6 @@ impl ResolvedProvider {
             .unwrap_or_else(|| default_endpoint.to_string());
         ResolvedProvider {
             pdef,
-            is_anthropic_style,
             base_url,
             endpoint,
         }

@@ -30,6 +30,7 @@ Regenerate with `make gen-provider-matrix` and verify with `make check-provider-
 | `azure_openai` | `o1*` | no | no | no | no | yes | no | no | `plain` | `none` | `none` | yes | no |
 | `azure_openai` | `o3*` | no | no | no | no | yes | no | no | `plain` | `none` | `none` | yes | no |
 | `azure_openai` | `o4*` | no | no | no | no | yes | no | no | `plain` | `none` | `none` | yes | no |
+| `bedrock` | `anthropic.claude-*` | no | no | no | no | yes | no | no | `plain` | `none` | `none` | yes | no |
 | `bedrock` | `*` | no | no | no | no | yes | no | no | `plain` | `none` | `none` | yes | no |
 | `dashscope` | `qwen3.6*` | `enabled` | no | no | no | yes | no | `native` | `markdown` | `native_json` | `none` | yes | no |
 | `dashscope` | `qwen*` | `enabled` | no | no | no | yes | no | `native` | `markdown` | `native_json` | `none` | yes | no |

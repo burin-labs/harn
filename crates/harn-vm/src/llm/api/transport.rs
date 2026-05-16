@@ -150,9 +150,9 @@ pub(super) async fn vm_call_llm_api(
     }
 
     // Fallback for unregistered providers: dispatch by API style.
-    let resolved = crate::llm::helpers::ResolvedProvider::resolve(provider);
-    let is_ollama = provider == "ollama" || resolved.endpoint.contains("/api/chat");
-    let is_anthropic = resolved.is_anthropic_style;
+    let is_ollama = crate::llm::provider::provider_uses_ollama_messages(provider, &opts.model);
+    let is_anthropic =
+        crate::llm::provider::provider_uses_anthropic_messages(provider, &opts.model);
 
     if is_ollama {
         return crate::llm::providers::OllamaProvider
@@ -183,7 +183,6 @@ async fn dispatch_to_registered_provider(
     // Providers are zero-cost unit structs constructed inline to avoid
     // RefCell-across-await conflicts on a shared registry.
     let provider = &opts.provider;
-    let resolved = crate::llm::helpers::ResolvedProvider::resolve(provider);
 
     let mock = crate::llm::providers::MockProvider;
     if mock.is_mock() && provider == mock.name() {
@@ -197,12 +196,15 @@ async fn dispatch_to_registered_provider(
     }
 
     let ollama = crate::llm::providers::OllamaProvider;
-    if (provider == ollama.name() || resolved.endpoint.contains("/api/chat")) && ollama.is_local() {
+    if (provider == ollama.name()
+        || crate::llm::provider::provider_uses_ollama_messages(provider, &opts.model))
+        && ollama.is_local()
+    {
         return ollama.chat_impl(opts, delta_tx).await;
     }
 
-    if provider == "gemini" {
-        let gemini = crate::llm::providers::GeminiProvider;
+    let gemini = crate::llm::providers::GeminiProvider;
+    if provider == gemini.name() {
         return gemini.chat_impl(opts, delta_tx).await;
     }
 
@@ -224,7 +226,7 @@ async fn dispatch_to_registered_provider(
             .await;
     }
 
-    if resolved.is_anthropic_style {
+    if crate::llm::provider::provider_uses_anthropic_messages(provider, &opts.model) {
         let anthropic = crate::llm::providers::AnthropicProvider;
         return anthropic.chat_impl(opts, delta_tx).await;
     }
@@ -391,7 +393,7 @@ async fn vm_call_llm_api_with_body_inner(
                     response,
                     provider,
                     model,
-                    &resolved,
+                    is_anthropic_style,
                     tx,
                     opts.session_id.as_deref(),
                 )
@@ -461,7 +463,9 @@ async fn vm_call_llm_api_with_body_inner(
         ))))
     })?;
 
-    parse_llm_response(&json, provider, model, &resolved)
+    let is_anthropic_style =
+        crate::llm::provider::provider_uses_anthropic_messages(provider, model);
+    parse_llm_response(&json, provider, model, is_anthropic_style)
 }
 
 /// Consume an SSE streaming response from an already-sent request.
@@ -472,7 +476,7 @@ async fn vm_call_llm_api_sse_from_response(
     response: reqwest::Response,
     provider: &str,
     model: &str,
-    resolved: &crate::llm::helpers::ResolvedProvider,
+    is_anthropic_style: bool,
     delta_tx: DeltaSender,
     session_id: Option<&str>,
 ) -> Result<LlmResult, VmError> {
@@ -486,7 +490,7 @@ async fn vm_call_llm_api_sse_from_response(
         reader,
         provider,
         model,
-        resolved.is_anthropic_style,
+        is_anthropic_style,
         delta_tx,
         session_id,
     )

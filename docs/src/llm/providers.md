@@ -166,6 +166,8 @@ let caps = provider_capabilities("anthropic", "claude-opus-4-7")
 //   tool_search: ["bm25", "regex"], max_tools: 10000,
 //   prompt_caching: true, thinking: true, vision_supported: true,
 //   interleaved_thinking_supported: true,
+//   message_wire_format: "anthropic",
+//   native_tool_wire_format: "anthropic",
 //   prefers_xml_scaffolding: true, prefers_xml_tools: true,
 //   structured_output_mode: "xml_tagged",
 //   thinking_block_style: "thinking_blocks",
@@ -219,13 +221,18 @@ prompt_caching = true
 thinking_modes = ["enabled"]
 ```
 
-Each `[[capabilities.provider.<name>]]` entry accepts these fields:
+Provider-wide defaults can be declared under
+`[capabilities.provider_defaults.<name>]`; rule entries override those
+defaults for matching models. Each `[[capabilities.provider.<name>]]`
+entry accepts these fields:
 
 | Field | Type | Purpose |
 |---|---|---|
 | `model_match` | glob string | Required. Matched against the lowercased model ID. Leading/trailing `*` or a single middle `*` supported. |
 | `version_min` | `[major, minor]` | Narrows the match to a parseable version (Anthropic / OpenAI extractors). Rules where `version_min` is set but the model ID won't parse are skipped. |
 | `native_tools` | bool | Whether the provider accepts a native tool-call wire shape. |
+| `message_wire_format` | string | Shared request/response message format: `openai`, `anthropic`, or `ollama`. |
+| `native_tool_wire_format` | string | Native tool definition shape: `openai` or `anthropic`. |
 | `defer_loading` | bool | Whether `defer_loading: true` on tool definitions is honored server-side. |
 | `tool_search` | list of strings | Native `tool_search` variants, preferred first. Anthropic: `["bm25", "regex"]`. OpenAI: `["hosted", "client"]`. Empty = no native support (client fallback only). |
 | `max_tools` | int | Cap on tool count. `harn lint` will warn if a registry exceeds the smallest cap any active provider advertises. |
@@ -238,11 +245,15 @@ Each `[[capabilities.provider.<name>]]` entry accepts these fields:
 | `prefers_xml_tools` | bool | Text-rendered tool sections prefer XML tags. |
 | `thinking_block_style` | string | Section-level thinking style: `none`, `thinking_blocks`, `reasoning_summary`, `inline`. |
 | `thinking_modes` | list of strings | Supported script-facing thinking modes. Values are `enabled`, `adaptive`, or `effort`. |
+| `reasoning_wire_format` | string | Non-standard OpenAI-compatible reasoning request shape: `openrouter` or `enabled`. |
 | `reasoning_effort_supported` | bool | Provider accepts a `reasoning_effort` request field for effort-capable models. |
 | `reasoning_none_supported` | bool | Provider accepts `reasoning_effort: "none"` as true reasoning-off instead of flooring at `minimal`. |
 | `interleaved_thinking_supported` | bool | `thinking: true` can request Anthropic's `interleaved-thinking-2025-05-14` beta header. |
 | `anthropic_beta_features` | list of strings | Anthropic beta feature names always requested for this provider/model route. |
 | `vision_supported` | bool | Image content accepted by the provider/model route. |
+| `image_url_input_supported` | bool | Image content may reference remote URLs. Set false for routes that require base64 images. |
+| `file_upload_wire_format` | string | Upload API family used by `files.upload`: `anthropic` or `gemini`. |
+| `seed_supported`, `top_k_supported`, `frequency_penalty_supported`, `presence_penalty_supported` | bool | Generation option support flags used for warnings and provider-neutral validation. |
 | `thinking_disable_directive` | string | In-prompt directive (e.g. `"/no_think"` for Qwen3 chat templates) auto-prepended to the system message when the resolved `thinking` is `Disabled`. Lets script authors write `thinking: false` uniformly across providers without learning per-template prompt directives. Idempotent — never injected twice. |
 
 First match wins. User rules for a given provider are consulted

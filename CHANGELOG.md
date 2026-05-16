@@ -57,6 +57,13 @@ condensed series summaries instead of full per-patch history.
   with `{session, iteration, wake_interval_ms, consolidate_on_idle}`,
   matching the placement documented in `docs/src/extensibility/hooks.md`.
   Conformance coverage at `conformance/tests/hooks_session/session_idle.harn`.
+- **LLM provider behavior dispatch now uses capabilities.** Rust call
+  sites that previously branched on provider strings for Anthropic-style
+  messages, native tool schemas, image URL support, reasoning request
+  shapes, and file-upload transports now read `provider_capabilities`.
+  Bedrock-hosted Claude and custom proxy routes can opt into the same
+  behavior through the capability matrix instead of pretending to be the
+  canonical provider name.
 - **Trailing comments on body statements are preserved.** `harn fmt`
   previously dropped same-line comments that followed a statement inside
   any block body (`fn`/`pipeline`/`if`/`else`/`while`/`for`/`try`/`catch`/

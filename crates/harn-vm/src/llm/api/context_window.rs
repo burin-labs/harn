@@ -187,24 +187,15 @@ async fn fetch_provider_max_context_uncached(
         return Some(n);
     }
 
-    if provider == "ollama" {
+    let caps = crate::llm::capabilities::lookup(provider, model);
+    if caps.message_wire_format == "ollama" {
         return fetch_ollama_context_window(model, base_url).await;
     }
 
-    let is_openai_compatible = matches!(
-        provider,
-        "local"
-            | "openai"
-            | "mlx"
-            | "llamacpp"
-            | "vllm"
-            | "groq"
-            | "together"
-            | "openrouter"
-            | "deepinfra"
-            | "fireworks"
-            | "huggingface"
-    );
+    let endpoint = crate::llm::helpers::ResolvedProvider::resolve(provider).endpoint;
+    let is_openai_compatible = endpoint.contains("/chat/completions")
+        || endpoint.contains("/responses")
+        || endpoint.contains("/v1/");
     if is_openai_compatible {
         return fetch_openai_compatible_context_window(provider, model, api_key, base_url).await;
     }

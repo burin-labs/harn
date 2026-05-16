@@ -1,14 +1,16 @@
 use super::{
-    apply_tool_search_native_injection, defer_loading_registry, extract_deferred_tool_names, json,
-    sample_tool_registry, vm_bool, vm_dict, vm_list, vm_str, vm_tools_to_native,
+    apply_tool_search_native_injection_typed, defer_loading_registry, extract_deferred_tool_names,
+    json, sample_tool_registry, vm_bool, vm_dict, vm_list, vm_str, vm_tools_to_native,
 };
+use crate::llm::provider::NativeToolSearchShape;
 use std::collections::BTreeMap;
 use std::rc::Rc;
 
 #[test]
 fn vm_tools_to_native_emits_defer_loading_for_anthropic() {
     let registry = defer_loading_registry();
-    let tools = vm_tools_to_native(&registry, "anthropic").expect("anthropic native tools");
+    let tools = vm_tools_to_native(&registry, "anthropic", "claude-opus-4-7")
+        .expect("anthropic native tools");
     // Eager `look` tool has no defer_loading key.
     let look = tools
         .iter()
@@ -29,6 +31,24 @@ fn vm_tools_to_native_emits_defer_loading_for_anthropic() {
 }
 
 #[test]
+fn vm_tools_to_native_uses_model_capability_shape_for_bedrock_claude() {
+    let registry = sample_tool_registry();
+    let tools = vm_tools_to_native(
+        &registry,
+        "bedrock",
+        "anthropic.claude-3-5-sonnet-20240620-v1:0",
+    )
+    .expect("bedrock claude native tools");
+
+    assert_eq!(tools[0]["name"].as_str(), Some("edit"));
+    assert!(tools[0].get("input_schema").is_some());
+    assert!(
+        tools[0].get("function").is_none(),
+        "Bedrock-hosted Claude should use Anthropic native tool shape"
+    );
+}
+
+#[test]
 fn vm_tools_to_native_emits_namespace_for_openai_compat() {
     // `namespace` on a tool entry (harn#71) flows through to the
     // OpenAI-shape wrapper alongside `defer_loading`. Anthropic
@@ -45,11 +65,12 @@ fn vm_tools_to_native_emits_namespace_for_openai_compat() {
     ]);
     let registry = vm_list(vec![deferred]);
 
-    let openai = vm_tools_to_native(&registry, "openai").expect("openai native tools");
+    let openai = vm_tools_to_native(&registry, "openai", "gpt-5.4").expect("openai native tools");
     assert_eq!(openai[0]["namespace"].as_str(), Some("ops"));
     assert_eq!(openai[0]["defer_loading"].as_bool(), Some(true));
 
-    let anthropic = vm_tools_to_native(&registry, "anthropic").expect("anthropic native tools");
+    let anthropic = vm_tools_to_native(&registry, "anthropic", "claude-opus-4-7")
+        .expect("anthropic native tools");
     assert_eq!(
         anthropic[0]["namespace"].as_str(),
         Some("ops"),
@@ -65,7 +86,7 @@ fn vm_tools_to_native_emits_defer_loading_for_openai_compat() {
     // the flag will never actually see it — the capability gate in
     // options.rs blocks them before the request leaves the VM.
     let registry = defer_loading_registry();
-    let tools = vm_tools_to_native(&registry, "openai").expect("openai native tools");
+    let tools = vm_tools_to_native(&registry, "openai", "gpt-5.4").expect("openai native tools");
     let deploy = tools
         .iter()
         .find(|tool| {
@@ -86,7 +107,7 @@ fn vm_tools_to_native_emits_defer_loading_for_openai_compat() {
 #[test]
 fn vm_tools_to_native_preserves_rich_parameter_schema_for_openai_compat() {
     let registry = sample_tool_registry();
-    let tools = vm_tools_to_native(&registry, "openai").expect("openai native tools");
+    let tools = vm_tools_to_native(&registry, "openai", "gpt-5.4").expect("openai native tools");
     let edit = tools
         .iter()
         .find(|tool| {
@@ -149,7 +170,7 @@ fn vm_tools_to_native_normalizes_nested_harn_type_aliases() {
     ]);
     let registry = vm_list(vec![tool]);
 
-    let tools = vm_tools_to_native(&registry, "openai").expect("openai native tools");
+    let tools = vm_tools_to_native(&registry, "openai", "gpt-5.4").expect("openai native tools");
     let filters = &tools[0]["function"]["parameters"]["properties"]["filters"];
     assert_eq!(filters["type"].as_str(), Some("object"));
     assert_eq!(
@@ -190,7 +211,7 @@ fn vm_tools_to_native_preserves_json_schema_required_arrays() {
     ]);
     let registry = vm_list(vec![tool]);
 
-    let tools = vm_tools_to_native(&registry, "openai").expect("openai native tools");
+    let tools = vm_tools_to_native(&registry, "openai", "gpt-5.4").expect("openai native tools");
     let payload = &tools[0]["function"]["parameters"]["properties"]["payload"];
     assert_eq!(payload["type"].as_str(), Some("object"));
     assert_eq!(payload["required"], json!(["id"]));
@@ -229,7 +250,12 @@ fn extract_deferred_tool_names_walks_both_wire_shapes() {
 fn apply_tool_search_native_injection_prepends_meta_tool() {
     let mut tools: Option<Vec<serde_json::Value>> =
         Some(vec![json!({"name": "look"}), json!({"name": "deploy"})]);
-    apply_tool_search_native_injection(&mut tools, "anthropic", "bm25");
+    apply_tool_search_native_injection_typed(
+        &mut tools,
+        NativeToolSearchShape::Anthropic,
+        "bm25",
+        "hosted",
+    );
     let tools = tools.expect("tools still set");
     assert_eq!(tools.len(), 3, "search tool prepended");
     assert_eq!(
@@ -243,7 +269,12 @@ fn apply_tool_search_native_injection_prepends_meta_tool() {
 #[test]
 fn apply_tool_search_native_injection_regex_variant() {
     let mut tools: Option<Vec<serde_json::Value>> = Some(vec![json!({"name": "look"})]);
-    apply_tool_search_native_injection(&mut tools, "anthropic", "regex");
+    apply_tool_search_native_injection_typed(
+        &mut tools,
+        NativeToolSearchShape::Anthropic,
+        "regex",
+        "hosted",
+    );
     let tools = tools.unwrap();
     assert_eq!(
         tools[0]["type"].as_str(),
@@ -258,7 +289,12 @@ fn apply_tool_search_native_injection_emits_openai_shape_for_non_anthropic() {
     // `{"type": "tool_search", "mode": "hosted"}` shape, distinct from
     // Anthropic's versioned `tool_search_tool_*_20251119` block.
     let mut tools: Option<Vec<serde_json::Value>> = Some(vec![json!({"name": "look"})]);
-    apply_tool_search_native_injection(&mut tools, "openai", "bm25");
+    apply_tool_search_native_injection_typed(
+        &mut tools,
+        NativeToolSearchShape::OpenAi,
+        "bm25",
+        "hosted",
+    );
     let tools = tools.unwrap();
     assert_eq!(tools.len(), 2, "OpenAI meta-tool prepended");
     assert_eq!(tools[0]["type"].as_str(), Some("tool_search"));
@@ -291,7 +327,12 @@ fn apply_tool_search_native_injection_openai_collects_namespaces() {
             "namespace": "crm",
         }),
     ]);
-    apply_tool_search_native_injection(&mut tools, "openai", "bm25");
+    apply_tool_search_native_injection_typed(
+        &mut tools,
+        NativeToolSearchShape::OpenAi,
+        "bm25",
+        "hosted",
+    );
     let tools = tools.unwrap();
     let namespaces = tools[0]["namespaces"]
         .as_array()
@@ -306,7 +347,12 @@ fn apply_tool_search_native_injection_openai_collects_namespaces() {
 #[test]
 fn apply_tool_search_native_injection_creates_list_when_empty() {
     let mut tools: Option<Vec<serde_json::Value>> = None;
-    apply_tool_search_native_injection(&mut tools, "anthropic", "bm25");
+    apply_tool_search_native_injection_typed(
+        &mut tools,
+        NativeToolSearchShape::Anthropic,
+        "bm25",
+        "hosted",
+    );
     let tools = tools.expect("tools populated");
     assert_eq!(tools.len(), 1);
     assert_eq!(

@@ -15,8 +15,6 @@ pub(crate) use handle_local::{handle_tool_locally, is_vm_stdlib_short_circuit};
 #[cfg(test)]
 pub(crate) use messages::build_assistant_tool_message;
 pub(crate) use messages::{build_assistant_response_message, normalize_tool_args};
-#[cfg(test)]
-pub(crate) use native::apply_tool_search_native_injection;
 pub(crate) use native::{
     apply_tool_search_native_injection_typed, extract_deferred_tool_names, vm_tools_to_native,
 };

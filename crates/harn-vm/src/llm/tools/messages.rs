@@ -6,10 +6,10 @@ pub(crate) fn build_assistant_tool_message(
     text: &str,
     tool_calls: &[serde_json::Value],
     provider: &str,
+    model: &str,
 ) -> serde_json::Value {
-    let resolved = super::super::helpers::ResolvedProvider::resolve(provider);
-    let is_anthropic = resolved.is_anthropic_style;
-    let is_ollama = provider == "ollama" || resolved.endpoint.contains("/api/chat");
+    let is_anthropic = super::super::provider::provider_uses_anthropic_messages(provider, model);
+    let is_ollama = super::super::provider::provider_uses_ollama_messages(provider, model);
     if is_anthropic {
         // Anthropic format: content blocks with text and tool_use
         let mut content = Vec::new();
@@ -83,9 +83,10 @@ pub(crate) fn build_assistant_response_message(
     tool_calls: &[serde_json::Value],
     reasoning: Option<&str>,
     provider: &str,
+    model: &str,
 ) -> serde_json::Value {
     let mut message = if !tool_calls.is_empty() {
-        build_assistant_tool_message(text, tool_calls, provider)
+        build_assistant_tool_message(text, tool_calls, provider, model)
     } else if !blocks.is_empty() {
         serde_json::json!({
             "role": "assistant",

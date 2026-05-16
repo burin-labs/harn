@@ -17,8 +17,9 @@ pub(crate) async fn vm_stream_llm(
     let client = super::shared_streaming_client().clone();
 
     let resolved = ResolvedProvider::resolve(provider);
+    let is_anthropic = super::provider::provider_uses_anthropic_messages(provider, &opts.model);
 
-    let body = if resolved.is_anthropic_style {
+    let body = if is_anthropic {
         let mut body = serde_json::json!({
             "model": opts.model,
             "messages": opts.messages,
@@ -102,7 +103,7 @@ pub(crate) async fn vm_stream_llm(
                 if msg.data == "[DONE]" {
                     break;
                 }
-                let chunk_text = if resolved.is_anthropic_style {
+                let chunk_text = if is_anthropic {
                     parse_anthropic_sse_chunk(&msg.data)
                 } else {
                     parse_openai_sse_chunk(&msg.data)

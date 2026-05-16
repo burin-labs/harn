@@ -399,24 +399,12 @@ fn provider_overrides_force_native(
 }
 
 /// Decide which wire shape this (provider, model) pair should emit for
-/// the native tool-search meta-tool. Anthropic + Claude → Anthropic
-/// shape; anything else → OpenAI shape. For `provider: "mock"` we
-/// inspect the model string so conformance tests can spoof either
-/// backend without HTTP.
+/// the native tool-search meta-tool.
 fn classify_native_shape(
     provider: &str,
     model: &str,
 ) -> crate::llm::provider::NativeToolSearchShape {
-    use crate::llm::provider::NativeToolSearchShape;
-    if provider == "anthropic" {
-        return NativeToolSearchShape::Anthropic;
-    }
-    if provider == "mock"
-        && crate::llm::providers::anthropic::claude_model_supports_tool_search(model)
-    {
-        return NativeToolSearchShape::Anthropic;
-    }
-    NativeToolSearchShape::OpenAi
+    crate::llm::provider::provider_native_tool_search_shape(provider, model)
 }
 
 fn parse_schema_value(
@@ -1068,10 +1056,7 @@ pub(crate) fn extract_llm_options(
     if enforce_capability_gates && uses_file_ids && !caps.files_api_supported {
         return Err(unsupported_option_error("files_api", &provider, &model));
     }
-    if uses_file_ids
-        && (provider == "anthropic"
-            || (provider == "mock" && model.to_lowercase().contains("claude")))
-    {
+    if uses_file_ids && caps.message_wire_format == "anthropic" {
         crate::llm::api::push_unique_anthropic_beta_feature(
             &mut anthropic_beta_features,
             crate::stdlib::files::ANTHROPIC_FILES_API_BETA,
@@ -1081,11 +1066,11 @@ pub(crate) fn extract_llm_options(
         return Err(unsupported_option_error("cache", &provider, &model));
     }
     if vision
-        && provider == "ollama"
+        && !crate::llm::provider::provider_supports_image_urls(&provider, &model)
         && crate::llm::content::messages_contain_url_images(&messages)?
     {
         return Err(VmError::Thrown(VmValue::String(std::rc::Rc::from(
-            "llm_call: provider \"ollama\" requires image base64; url image content is not supported",
+            "llm_call: this provider/model route requires image base64; url image content is not supported",
         ))));
     }
 
@@ -1104,7 +1089,7 @@ pub(crate) fn extract_llm_options(
         return Err(unsupported_option_error("tools", &provider, &model));
     }
     let mut native_tools = if let Some(tools) = &tools_val {
-        Some(vm_tools_to_native(tools, &provider)?)
+        Some(vm_tools_to_native(tools, &provider, &model)?)
     } else {
         None
     };
@@ -1785,54 +1770,31 @@ pub(crate) fn opt_str_list(
 
 /// Emit warnings for options not supported by the target provider.
 fn validate_options(opts: &crate::llm::api::LlmCallOptions) {
-    let p = opts.provider.as_str();
+    let caps = crate::llm::capabilities::lookup(&opts.provider, &opts.model);
     let warn = |param: &str| {
         crate::events::log_warn(
             "llm",
-            &format!("\"{param}\" is not supported by provider \"{p}\", ignoring"),
+            &format!(
+                "\"{param}\" is not supported by provider \"{}\" model \"{}\", ignoring",
+                opts.provider, opts.model
+            ),
         );
     };
 
-    match p {
-        "anthropic" => {
-            if opts.seed.is_some() {
-                warn("seed");
-            }
-            if opts.frequency_penalty.is_some() {
-                warn("frequency_penalty");
-            }
-            if opts.presence_penalty.is_some() {
-                warn("presence_penalty");
-            }
-        }
-        "openai" | "huggingface" | "local" => {
-            if opts.top_k.is_some() {
-                warn("top_k");
-            }
-            if opts.cache {
-                warn("cache");
-            }
-        }
-        "openrouter" => {
-            if opts.top_k.is_some() {
-                warn("top_k");
-            }
-            if opts.cache {
-                warn("cache");
-            }
-        }
-        "ollama" => {
-            if opts.frequency_penalty.is_some() {
-                warn("frequency_penalty");
-            }
-            if opts.presence_penalty.is_some() {
-                warn("presence_penalty");
-            }
-            if opts.cache {
-                warn("cache");
-            }
-        }
-        _ => {}
+    if opts.seed.is_some() && !caps.seed_supported {
+        warn("seed");
+    }
+    if opts.top_k.is_some() && !caps.top_k_supported {
+        warn("top_k");
+    }
+    if opts.frequency_penalty.is_some() && !caps.frequency_penalty_supported {
+        warn("frequency_penalty");
+    }
+    if opts.presence_penalty.is_some() && !caps.presence_penalty_supported {
+        warn("presence_penalty");
+    }
+    if opts.cache && !caps.prompt_caching {
+        warn("cache");
     }
 }
 

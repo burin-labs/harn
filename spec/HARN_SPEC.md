@@ -2252,6 +2252,7 @@ let caps = provider_capabilities("anthropic", "claude-opus-4-7")
 //   tool_search: [string], max_tools: int | nil,
 //   prompt_caching, thinking, thinking_modes: [string],
 //   reasoning_effort_supported, reasoning_none_supported,
+//   message_wire_format, native_tool_wire_format,
 // }
 ```
 

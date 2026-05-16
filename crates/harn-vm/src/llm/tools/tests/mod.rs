@@ -9,7 +9,7 @@
 //! module. Either way the flat `use super::{…}` below is accurate.
 
 pub(super) use super::{
-    apply_tool_search_native_injection, build_assistant_response_message,
+    apply_tool_search_native_injection_typed, build_assistant_response_message,
     build_assistant_tool_message, collect_tool_schemas, extract_deferred_tool_names,
     normalize_tool_args, parse_bare_calls_in_body, parse_native_json_tool_calls,
     parse_text_tool_calls_with_tools, validate_tool_args, vm_tools_to_native,

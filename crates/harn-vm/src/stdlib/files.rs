@@ -275,20 +275,23 @@ async fn upload_file(path: String, provider: String) -> Result<String, VmError> 
         return Ok(file_id);
     }
 
-    let file_id = match provider.as_str() {
-        "mock" => mock_file_id(&provider, &media_type, &bytes),
-        "anthropic" => {
-            let resolved = crate::llm::helpers::ResolvedProvider::resolve(&provider);
-            upload_anthropic(&resolved, &api_key, &resolved_path, &media_type, bytes).await?
-        }
-        "gemini" => {
-            let resolved = crate::llm::helpers::ResolvedProvider::resolve(&provider);
-            upload_gemini(&resolved, &api_key, &resolved_path, &media_type, bytes).await?
-        }
-        other => {
-            return Err(runtime_error(format!(
-                "files.upload: provider `{other}` does not support file uploads"
-            )));
+    let file_id = if provider == "mock" {
+        mock_file_id(&provider, &media_type, &bytes)
+    } else {
+        match crate::llm::provider::provider_file_upload_wire_format(&provider).as_deref() {
+            Some("anthropic") => {
+                let resolved = crate::llm::helpers::ResolvedProvider::resolve(&provider);
+                upload_anthropic(&resolved, &api_key, &resolved_path, &media_type, bytes).await?
+            }
+            Some("gemini") => {
+                let resolved = crate::llm::helpers::ResolvedProvider::resolve(&provider);
+                upload_gemini(&resolved, &api_key, &resolved_path, &media_type, bytes).await?
+            }
+            _ => {
+                return Err(runtime_error(format!(
+                    "files.upload: provider `{provider}` does not support file uploads"
+                )));
+            }
         }
     };
     cache_put(key, file_id.clone());
