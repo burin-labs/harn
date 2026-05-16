@@ -646,6 +646,34 @@ for `harn skills new`.
 harn skill new review-helper
 ```
 
+## harn demo
+
+Run a bundled, fully-offline scenario that demonstrates Harn end-to-end
+without any API keys, project setup, or network access. Designed for
+the cold-start "what does Harn actually do?" moment.
+
+```bash
+harn demo                         # menu of bundled scenarios (default: merge-captain)
+harn demo merge-captain           # persona-supervised PR triage with structured receipts
+harn demo review-captain          # HITL clarifying-question loop on a 5-file diff
+harn demo provider-race           # latency-aware provider race with cost attribution
+harn demo --list                  # one-line summary of every scenario
+harn demo merge-captain --json    # machine-readable summary of the run
+harn demo merge-captain --live    # re-run against the configured LLM provider
+harn demo merge-captain --no-record  # skip writing a `.harn-runs/demo-*` record
+```
+
+Each scenario embeds a `.harn` script and a JSONL `--llm-mock` tape into
+the `harn` binary, so every demo is reproducible across machines and
+finishes in well under a second on the bundled tape. Successful runs
+write a `run.json` under `.harn-runs/demo-<scenario>-<timestamp>/`
+that the portal can inspect.
+
+When `--live` is set the demo skips the bundled tape and routes through
+your configured provider. If the failure looks like a missing/invalid
+provider key the demo prints a hint to re-run without `--live` (or to
+run `harn quickstart` to wire a provider).
+
 ## harn quickstart
 
 Inspect local provider readiness and write starter LLM configuration.

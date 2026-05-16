@@ -60,6 +60,21 @@ harn version
 The one-line installer and `cargo install harn-cli` do not require a
 Rust toolchain on the user's machine.
 
+### See Harn in action in 30 seconds
+
+Before configuring anything, run a bundled offline demo. No API keys,
+no project setup, no network — every demo replays from a JSONL tape
+embedded in the binary:
+
+```bash
+harn demo                  # menu of bundled scenarios
+harn demo merge-captain    # persona-supervised PR triage
+harn demo --list           # one-line summary of every scenario
+```
+
+See [`harn demo` in the CLI reference](cli-reference.md#harn-demo) for
+the full surface and `--live` opt-in.
+
 ### Run this first
 
 `harn doctor` is the one-command environment readiness check. It probes the

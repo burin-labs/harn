@@ -630,6 +630,12 @@ async fn async_main() {
                 command_error(&error);
             }
         }
+        Command::Demo(args) => {
+            let code = commands::demo::run(args).await;
+            if code != 0 {
+                process::exit(code);
+            }
+        }
         Command::Serve(args) => match args.command {
             ServeCommand::Acp(args) => {
                 if let Err(error) = commands::serve::run_acp_server(&args).await {

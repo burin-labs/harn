@@ -144,6 +144,8 @@ lint-harn:
 	@cargo run --quiet --bin harn -- check $(EXPERIMENT_HARN_CHECK)
 	@echo "=== Linting Harn-authored scripts ==="
 	@cargo run --quiet --bin harn -- lint scripts/*.harn scripts/tests/*.harn
+	@echo "=== Linting bundled demo scenarios ==="
+	@cargo run --quiet --bin harn -- lint crates/harn-cli/assets/demo
 	@echo "    Harn lint OK."
 
 # Check harn formatting on canonical stdlib sources and repo test fixtures.
@@ -172,6 +174,8 @@ fmt-harn:
 	@find experiments -name '*.harn' -print0 \
 		| xargs -0 cargo run --quiet --bin harn -- fmt --check
 	@find scripts -name '*.harn' -print0 \
+		| xargs -0 cargo run --quiet --bin harn -- fmt --check
+	@find crates/harn-cli/assets/demo -name '*.harn' -print0 \
 		| xargs -0 cargo run --quiet --bin harn -- fmt --check
 	@echo "    Harn formatting OK."
 

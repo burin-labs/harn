@@ -54,6 +54,20 @@ condensed series summaries instead of full per-patch history.
   currently running binary in-place. Use `--check` to print the
   resolved versions without downloading, `--force` to reinstall the
   same version, and `--no-verify` only as an escape hatch.
+- **`harn demo` subcommand for cold-start aha (#1650).** A new
+  top-level CLI command ships three bundled, fully-offline scenarios
+  that demonstrate the Harn moat — `merge-captain` (persona-supervised
+  PR triage with structured receipts), `review-captain` (HITL
+  clarifying-question loop), and `provider-race` (latency-aware
+  provider racing with cost attribution). Each scenario embeds a
+  `.harn` script and a JSONL `--llm-mock` tape into the binary, so
+  `harn demo merge-captain` finishes in well under a second on a fresh
+  install with zero API keys, zero network, and zero project setup.
+  `harn demo --list` prints the menu; `harn demo --json` emits a
+  machine-readable summary; `harn demo <id> --live` opts into the
+  configured provider. The README `Quick Start` now leads with the
+  demo. CI exercises every scenario via the new `demo_cli`
+  integration test, which catches drift between the script and tape.
 
 ## v0.8.19
 

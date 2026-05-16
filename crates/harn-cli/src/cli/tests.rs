@@ -2680,3 +2680,54 @@ fn test_parses_check_connector_matrix_args() {
     assert_eq!(args.filter.as_deref(), Some("rate-limit"));
     assert_eq!(args.targets, vec!["fixtures/connectors"]);
 }
+
+#[test]
+fn test_parses_demo_no_args_lists_scenarios() {
+    let cli = Cli::parse_from(["harn", "demo"]);
+    let Command::Demo(args) = cli.command.unwrap() else {
+        panic!("expected demo command");
+    };
+    assert_eq!(args.scenario, None);
+    assert!(!args.list);
+    assert!(!args.live);
+    assert!(!args.replay);
+    assert!(!args.json);
+}
+
+#[test]
+fn test_parses_demo_named_scenario_replay_default() {
+    let cli = Cli::parse_from(["harn", "demo", "merge-captain"]);
+    let Command::Demo(args) = cli.command.unwrap() else {
+        panic!("expected demo command");
+    };
+    assert_eq!(args.scenario.as_deref(), Some("merge-captain"));
+    assert!(!args.live);
+}
+
+#[test]
+fn test_parses_demo_live_and_json_flags() {
+    let cli = Cli::parse_from([
+        "harn",
+        "demo",
+        "provider-race",
+        "--live",
+        "--json",
+        "--no-record",
+    ]);
+    let Command::Demo(args) = cli.command.unwrap() else {
+        panic!("expected demo command");
+    };
+    assert_eq!(args.scenario.as_deref(), Some("provider-race"));
+    assert!(args.live);
+    assert!(args.json);
+    assert!(args.no_record);
+}
+
+#[test]
+fn test_parses_demo_live_and_replay_are_mutually_exclusive() {
+    let result = Cli::try_parse_from(["harn", "demo", "merge-captain", "--live", "--replay"]);
+    assert!(
+        result.is_err(),
+        "--live and --replay must be mutually exclusive"
+    );
+}

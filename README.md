@@ -82,6 +82,22 @@ harn orchestrator deploy --provider fly --manifest ./harn.toml --build
 
 ## Quick Start
 
+The fastest way to see Harn in action — no API keys, no project setup —
+is to run a bundled demo scenario:
+
+```bash
+harn demo                       # menu of bundled scenarios
+harn demo merge-captain         # default scenario: persona-supervised PR triage
+harn demo --list                # all scenarios with descriptions
+harn demo provider-race --json  # machine-readable summary
+```
+
+Every demo runs in under 30 seconds against a checked-in LLM tape, so it
+finishes the same way on a laptop with zero credentials as it does in
+CI. Add `--live` to re-run against a configured provider.
+
+Once you've seen something that works, scaffold a project of your own:
+
 ```bash
 harn new my-project --template agent
 cd my-project
