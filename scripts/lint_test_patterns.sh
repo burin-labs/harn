@@ -346,6 +346,11 @@ NON_TEST_WALL_CLOCK_ALLOWLIST=(
   "crates/harn-cli/src/commands/agents_conformance.rs"
   "crates/harn-cli/src/commands/bench.rs"
   "crates/harn-cli/src/commands/connect.rs"
+  # `harn connect` waits for real browser OAuth callbacks and stamps
+  # persisted connector credential metadata with host Unix time; those
+  # values are user-facing wall-clock state, not VM-scheduled time.
+  "crates/harn-cli/src/commands/connect/callback.rs"
+  "crates/harn-cli/src/commands/connect/store.rs"
   "crates/harn-cli/src/commands/connector.rs"
   # `harn demo` measures and renders wall-clock elapsed time in the
   # terminal output ("--- demo complete in 180 ms ---") and stamps the
@@ -399,6 +404,9 @@ NON_TEST_WALL_CLOCK_ALLOWLIST=(
   "crates/harn-vm/src/http/client.rs"
   "crates/harn-vm/src/http/streaming/websocket.rs"
   "crates/harn-vm/src/llm/agent_observe.rs"
+  # Agent host primitive tool dispatch records actual host monotonic
+  # elapsed time for transcript / portal execution telemetry.
+  "crates/harn-vm/src/llm/agent_host_primitives.rs"
   "crates/harn-vm/src/llm/agent_runtime.rs"
   "crates/harn-vm/src/llm/api/partial_tool_args.rs"
   "crates/harn-vm/src/llm/api/transport.rs"
