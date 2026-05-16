@@ -446,6 +446,17 @@ impl Drop for StdoutPassthroughGuard {
     }
 }
 
+// User-facing copy on Ctrl-C. We want the operator to know that a brief
+// pause after the first signal is expected (the VM rewinds the active
+// instruction, drops in-flight async ops like a hanging Ollama request,
+// and unwinds frames before the runtime exits) so they don't reflexively
+// reach for a second Ctrl-C and force-kill the process. The "Ctrl-C
+// again to force-exit" hint is load-bearing — earlier runs of harn
+// released to the fleet showed operators routinely double-tapping the
+// shortcut and losing the chance to inspect the error trace.
+const FIRST_SIGNAL_MESSAGE: &str =
+    "[harn] signal received, interrupting VM (give it a moment to unwind in-flight async ops; Ctrl-C again to force-exit)...";
+
 fn install_signal_shutdown_handler() -> RunInterruptTokens {
     let tokens = RunInterruptTokens {
         cancel_token: Arc::new(AtomicBool::new(false)),
@@ -472,7 +483,7 @@ fn install_signal_shutdown_handler() -> RunInterruptTokens {
                 }
                 seen_signal = true;
                 request_vm_interrupt(&tokens_clone, signal_name);
-                eprintln!("[harn] signal received, interrupting VM...");
+                eprintln!("{FIRST_SIGNAL_MESSAGE}");
             }
         }
         #[cfg(not(unix))]
@@ -486,7 +497,7 @@ fn install_signal_shutdown_handler() -> RunInterruptTokens {
                 }
                 seen_signal = true;
                 request_vm_interrupt(&tokens_clone, "SIGINT");
-                eprintln!("[harn] signal received, interrupting VM...");
+                eprintln!("{FIRST_SIGNAL_MESSAGE}");
             }
         }
     });
