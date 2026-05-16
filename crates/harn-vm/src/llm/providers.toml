@@ -1,0 +1,967 @@
+# providers.toml — Harn's built-in LLM provider/model catalog defaults.
+#
+# This file is the single source of truth for Harn's bundled defaults:
+# providers, model aliases, inference + tier routing rules, canonical
+# model metadata + pricing, qc defaults, and per-pattern hyperparameter
+# overrides. It deserializes into `ProvidersConfig` via the same Serde
+# pipeline that loads HARN_PROVIDERS_CONFIG / ~/.config/harn/providers.toml
+# / harn.toml [providers] / package-manifest [llm] sections at runtime.
+#
+# Resolution order at startup (later overlays win on per-key basis):
+#   1. This file (embedded into the VM via include_str!)
+#   2. ~/.config/harn/providers.toml (user-global override)
+#   3. HARN_PROVIDERS_CONFIG env var (explicit per-process override)
+#   4. Per-run programmatic overlays installed by hosts via
+#      llm_config::set_user_overrides()
+#
+# Edit this file directly to change defaults. Do not re-add the equivalent
+# data as Rust literals in llm_config.rs — that creates the parallel
+# system this file exists to eliminate.
+
+default_provider = "anthropic"
+
+# ── Providers ────────────────────────────────────────────────────────────────
+# Each [providers.X] block defines an LLM endpoint Harn can dial. The
+# `auth_env` field can be a single string or an array (tried in order).
+# `cost_per_1k_in/out` are coarse provider-level fallbacks used when a
+# specific [models.X] entry has no `pricing` table.
+
+[providers.anthropic]
+base_url = "https://api.anthropic.com/v1"
+auth_style = "header"
+auth_header = "x-api-key"
+auth_env = "ANTHROPIC_API_KEY"
+chat_endpoint = "/messages"
+features = ["prompt_caching", "thinking"]
+cost_per_1k_in = 0.003
+cost_per_1k_out = 0.015
+latency_p50_ms = 2500
+extra_headers = { "anthropic-version" = "2023-06-01" }
+
+[providers.anthropic.healthcheck]
+method = "POST"
+path = "/messages/count_tokens"
+body = '{"model":"claude-sonnet-4-6","messages":[{"role":"user","content":"x"}]}'
+
+[providers.openai]
+base_url = "https://api.openai.com/v1"
+auth_style = "bearer"
+auth_env = "OPENAI_API_KEY"
+chat_endpoint = "/chat/completions"
+completion_endpoint = "/completions"
+cost_per_1k_in = 0.0025
+cost_per_1k_out = 0.010
+latency_p50_ms = 1800
+
+[providers.openai.healthcheck]
+method = "GET"
+path = "/models"
+
+[providers.openrouter]
+base_url = "https://openrouter.ai/api/v1"
+auth_style = "bearer"
+auth_env = "OPENROUTER_API_KEY"
+chat_endpoint = "/chat/completions"
+completion_endpoint = "/completions"
+cost_per_1k_in = 0.003
+cost_per_1k_out = 0.015
+latency_p50_ms = 2200
+
+[providers.openrouter.healthcheck]
+method = "GET"
+path = "/auth/key"
+
+[providers.huggingface]
+base_url = "https://router.huggingface.co/v1"
+auth_style = "bearer"
+auth_env = ["HF_TOKEN", "HUGGINGFACE_API_KEY"]
+chat_endpoint = "/chat/completions"
+completion_endpoint = "/completions"
+cost_per_1k_in = 0.0002
+cost_per_1k_out = 0.0006
+latency_p50_ms = 2400
+
+[providers.huggingface.healthcheck]
+method = "GET"
+url = "https://huggingface.co/api/whoami-v2"
+
+# Ollama defaults to /api/chat (native NDJSON) so the test stubs keep
+# working; hosts can flip to /v1/chat/completions via a providers.toml
+# overlay to bypass Ollama's per-model tool-call post-processors
+# (qwen3coder.go, qwen35.go) that raise HTTP 500s on text-mode responses
+# for the Qwen3.5 family.
+[providers.ollama]
+base_url = "http://localhost:11434"
+base_url_env = "OLLAMA_HOST"
+auth_style = "none"
+chat_endpoint = "/api/chat"
+completion_endpoint = "/api/generate"
+cost_per_1k_in = 0.0
+cost_per_1k_out = 0.0
+latency_p50_ms = 1200
+
+[providers.ollama.healthcheck]
+method = "GET"
+path = "/api/tags"
+
+[providers.gemini]
+base_url = "https://generativelanguage.googleapis.com"
+base_url_env = "GEMINI_BASE_URL"
+auth_style = "header"
+auth_header = "x-goog-api-key"
+auth_env = ["GEMINI_API_KEY", "GOOGLE_API_KEY"]
+chat_endpoint = "/v1beta/models"
+cost_per_1k_in = 0.00125
+cost_per_1k_out = 0.005
+latency_p50_ms = 1800
+
+[providers.gemini.healthcheck]
+method = "GET"
+path = "/v1beta/models"
+
+[providers.together]
+base_url = "https://api.together.xyz/v1"
+base_url_env = "TOGETHER_AI_BASE_URL"
+auth_style = "bearer"
+auth_env = "TOGETHER_AI_API_KEY"
+chat_endpoint = "/chat/completions"
+completion_endpoint = "/completions"
+cost_per_1k_in = 0.0002
+cost_per_1k_out = 0.0006
+latency_p50_ms = 1600
+
+[providers.together.healthcheck]
+method = "GET"
+path = "/models"
+
+# Groq — OpenAI-compatible LPU-hosted fast inference. Headline ~840 tok/s
+# on Llama 3.1 8B, ~594 tok/s on Llama 4 Scout. Useful executor target
+# when sub-100ms TTFT matters more than raw quality.
+[providers.groq]
+base_url = "https://api.groq.com/openai/v1"
+base_url_env = "GROQ_BASE_URL"
+auth_style = "bearer"
+auth_env = "GROQ_API_KEY"
+chat_endpoint = "/chat/completions"
+completion_endpoint = "/completions"
+cost_per_1k_in = 0.0001
+cost_per_1k_out = 0.0003
+latency_p50_ms = 450
+
+[providers.groq.healthcheck]
+method = "GET"
+path = "/models"
+
+[providers.deepseek]
+base_url = "https://api.deepseek.com/v1"
+base_url_env = "DEEPSEEK_BASE_URL"
+auth_style = "bearer"
+auth_env = "DEEPSEEK_API_KEY"
+chat_endpoint = "/chat/completions"
+completion_endpoint = "/completions"
+cost_per_1k_in = 0.00014
+cost_per_1k_out = 0.00028
+latency_p50_ms = 1800
+
+[providers.deepseek.healthcheck]
+method = "GET"
+path = "/models"
+
+[providers.fireworks]
+base_url = "https://api.fireworks.ai/inference/v1"
+base_url_env = "FIREWORKS_BASE_URL"
+auth_style = "bearer"
+auth_env = "FIREWORKS_API_KEY"
+chat_endpoint = "/chat/completions"
+completion_endpoint = "/completions"
+cost_per_1k_in = 0.0002
+cost_per_1k_out = 0.0006
+latency_p50_ms = 1400
+
+[providers.fireworks.healthcheck]
+method = "GET"
+path = "/models"
+
+[providers.dashscope]
+base_url = "https://dashscope-intl.aliyuncs.com/compatible-mode/v1"
+base_url_env = "DASHSCOPE_BASE_URL"
+auth_style = "bearer"
+auth_env = "DASHSCOPE_API_KEY"
+chat_endpoint = "/chat/completions"
+completion_endpoint = "/completions"
+cost_per_1k_in = 0.0003
+cost_per_1k_out = 0.0012
+latency_p50_ms = 1600
+
+[providers.dashscope.healthcheck]
+method = "GET"
+path = "/models"
+
+# AWS Bedrock — resolves credentials through env, profile, container, or
+# EC2 instance roles, then signs Converse API calls with SigV4.
+[providers.bedrock]
+base_url = ""
+base_url_env = "BEDROCK_BASE_URL"
+auth_style = "aws_sigv4"
+chat_endpoint = "/model/{model}/converse"
+features = ["native_tools"]
+latency_p50_ms = 2600
+
+# Azure OpenAI — deployment name is routed in the URL; callers can
+# either pass the deployment as the Harn model field or set
+# AZURE_OPENAI_DEPLOYMENT.
+[providers.azure_openai]
+base_url = "https://{resource}.openai.azure.com"
+base_url_env = "AZURE_OPENAI_ENDPOINT"
+auth_style = "azure_openai"
+auth_env = ["AZURE_OPENAI_API_KEY", "AZURE_OPENAI_AD_TOKEN", "AZURE_OPENAI_BEARER_TOKEN"]
+chat_endpoint = "/openai/deployments/{deployment}/chat/completions?api-version={api_version}"
+features = ["native_tools"]
+cost_per_1k_in = 0.0025
+cost_per_1k_out = 0.010
+latency_p50_ms = 1900
+
+[providers.vertex]
+base_url = "https://aiplatform.googleapis.com/v1"
+base_url_env = "VERTEX_AI_BASE_URL"
+auth_style = "bearer"
+auth_env = ["VERTEX_AI_ACCESS_TOKEN", "GOOGLE_OAUTH_ACCESS_TOKEN", "GOOGLE_APPLICATION_CREDENTIALS"]
+chat_endpoint = "/projects/{project}/locations/{location}/publishers/google/models/{model}:generateContent"
+features = ["native_tools"]
+cost_per_1k_in = 0.00125
+cost_per_1k_out = 0.005
+latency_p50_ms = 2100
+
+[providers.local]
+base_url = "http://localhost:8000"
+base_url_env = "LOCAL_LLM_BASE_URL"
+auth_style = "none"
+chat_endpoint = "/v1/chat/completions"
+completion_endpoint = "/v1/completions"
+cost_per_1k_in = 0.0
+cost_per_1k_out = 0.0
+latency_p50_ms = 900
+
+[providers.local.healthcheck]
+method = "GET"
+path = "/v1/models"
+
+# llama.cpp — separate from `local` so capability rules can isolate Qwen
+# chat-template thinking quirks from other local OpenAI-compatible hosts.
+[providers.llamacpp]
+base_url = "http://127.0.0.1:8001"
+base_url_env = "LLAMACPP_BASE_URL"
+auth_style = "none"
+chat_endpoint = "/v1/chat/completions"
+completion_endpoint = "/v1/completions"
+cost_per_1k_in = 0.0
+cost_per_1k_out = 0.0
+latency_p50_ms = 900
+
+[providers.llamacpp.healthcheck]
+method = "GET"
+path = "/v1/models"
+
+# Apple Silicon MLX. Harn owns readiness probing; hosts that want
+# script-based auto-start should launch the process first, then call
+# Harn again to verify readiness.
+[providers.mlx]
+base_url = "http://127.0.0.1:8002"
+base_url_env = "MLX_BASE_URL"
+auth_style = "none"
+chat_endpoint = "/v1/chat/completions"
+completion_endpoint = "/v1/completions"
+cost_per_1k_in = 0.0
+cost_per_1k_out = 0.0
+latency_p50_ms = 900
+
+[providers.mlx.healthcheck]
+method = "GET"
+path = "/v1/models"
+
+[providers.vllm]
+base_url = "http://localhost:8000"
+base_url_env = "VLLM_BASE_URL"
+auth_style = "none"
+chat_endpoint = "/v1/chat/completions"
+completion_endpoint = "/v1/completions"
+cost_per_1k_in = 0.0
+cost_per_1k_out = 0.0
+latency_p50_ms = 800
+
+[providers.vllm.healthcheck]
+method = "GET"
+path = "/v1/models"
+
+[providers.tgi]
+base_url = "http://localhost:8080"
+base_url_env = "TGI_BASE_URL"
+auth_style = "none"
+chat_endpoint = "/v1/chat/completions"
+completion_endpoint = "/v1/completions"
+cost_per_1k_in = 0.0
+cost_per_1k_out = 0.0
+latency_p50_ms = 950
+
+[providers.tgi.healthcheck]
+method = "GET"
+path = "/health"
+
+# ── Inference rules ──────────────────────────────────────────────────────────
+# Map a model ID shape to a default provider when the caller doesn't
+# specify one. First match wins. User overlays prepend, so they can
+# preempt these defaults without removing them.
+
+[[inference_rules]]
+pattern = "claude-*"
+provider = "anthropic"
+
+[[inference_rules]]
+pattern = "gpt-*"
+provider = "openai"
+
+[[inference_rules]]
+pattern = "o1*"
+provider = "openai"
+
+[[inference_rules]]
+pattern = "o3*"
+provider = "openai"
+
+[[inference_rules]]
+pattern = "o4*"
+provider = "openai"
+
+[[inference_rules]]
+pattern = "anthropic.claude-*"
+provider = "bedrock"
+
+[[inference_rules]]
+pattern = "meta.llama*"
+provider = "bedrock"
+
+[[inference_rules]]
+pattern = "amazon.*"
+provider = "bedrock"
+
+[[inference_rules]]
+pattern = "mistral.*"
+provider = "bedrock"
+
+[[inference_rules]]
+pattern = "cohere.*"
+provider = "bedrock"
+
+[[inference_rules]]
+pattern = "gemini-*"
+provider = "gemini"
+
+# ── Tier rules ───────────────────────────────────────────────────────────────
+# Classify a model into small / mid / frontier for default routing and
+# evaluation budgets. First match wins.
+
+[[tier_rules]]
+contains = "9b"
+tier = "small"
+
+[[tier_rules]]
+contains = "a3b"
+tier = "small"
+
+[[tier_rules]]
+contains = "gemma-4-e2b"
+tier = "small"
+
+[[tier_rules]]
+contains = "gemma-4-e4b"
+tier = "small"
+
+[[tier_rules]]
+contains = "gemma-4-26b"
+tier = "mid"
+
+[[tier_rules]]
+contains = "gemma-4-31b"
+tier = "frontier"
+
+[[tier_rules]]
+contains = "gemma4:26b"
+tier = "mid"
+
+[[tier_rules]]
+contains = "gemma4:31b"
+tier = "frontier"
+
+[[tier_rules]]
+pattern = "claude-*"
+tier = "frontier"
+
+[[tier_rules]]
+exact = "gpt-4o"
+tier = "frontier"
+
+[tier_defaults]
+default = "mid"
+
+# ── Aliases ──────────────────────────────────────────────────────────────────
+# Short symbolic names → (model id, provider, optional tool_format). The
+# tier-resolution path (`resolve_tier_model("frontier", None)`) reads
+# `frontier`, `mid`, `small`; provider-scoped tiers like `tier/mid` let
+# callers force a specific resolution per provider.
+
+# Short flagship aliases — these track whatever the current
+# generation is. Bump these when a successor lands.
+[aliases.sonnet]
+id = "claude-sonnet-4-6"
+provider = "anthropic"
+
+[aliases.opus]
+id = "claude-opus-4-7"
+provider = "anthropic"
+
+[aliases.haiku]
+id = "claude-haiku-4-5-20251001"
+provider = "anthropic"
+
+[aliases.frontier]
+id = "claude-sonnet-4-6"
+provider = "anthropic"
+
+[aliases."tier/frontier"]
+id = "claude-sonnet-4-6"
+provider = "anthropic"
+
+[aliases.mid]
+id = "gpt-4o-mini"
+provider = "openai"
+
+[aliases."tier/mid"]
+id = "gpt-4o-mini"
+provider = "openai"
+
+[aliases.small]
+id = "Qwen/Qwen3.5-9B"
+provider = "openrouter"
+
+[aliases."tier/small"]
+id = "Qwen/Qwen3.5-9B"
+provider = "openrouter"
+
+# Local Gemma 4 variants (vLLM / OpenAI-compat backend at `providers.local`).
+[aliases.local-gemma4]
+id = "gemma-4-26b-a4b-it"
+provider = "local"
+
+[aliases.local-gemma4-26b]
+id = "gemma-4-26b-a4b-it"
+provider = "local"
+
+[aliases.local-gemma4-31b]
+id = "gemma-4-31b-it"
+provider = "local"
+
+[aliases.local-gemma4-e4b]
+id = "gemma-4-e4b-it"
+provider = "local"
+
+[aliases.local-gemma4-e2b]
+id = "gemma-4-e2b-it"
+provider = "local"
+
+[aliases.ollama-gemma4]
+id = "gemma4:26b"
+provider = "ollama"
+tool_format = "text"
+
+[aliases.ollama-gemma4-26b]
+id = "gemma4:26b"
+provider = "ollama"
+tool_format = "text"
+
+# Qwen3.6 — Ollama (text tool calling is the safe default; the `-native`
+# variant opts into the experimental native path).
+[aliases."qwen3.6-coding"]
+id = "qwen3.6:35b-a3b-coding-nvfp4"
+provider = "ollama"
+tool_format = "text"
+
+[aliases."qwen3.6-35b-coding"]
+id = "qwen3.6:35b-a3b-coding-nvfp4"
+provider = "ollama"
+tool_format = "text"
+
+[aliases."qwen3.6-coding-nvfp4"]
+id = "qwen3.6:35b-a3b-coding-nvfp4"
+provider = "ollama"
+tool_format = "text"
+
+[aliases."qwen3.6-coding-native"]
+id = "qwen3.6:35b-a3b-coding-nvfp4"
+provider = "ollama"
+tool_format = "native"
+
+# llama.cpp — Unsloth Dynamic 2.0 GGUF served by llama-server.
+[aliases."llamacpp-qwen3.6"]
+id = "qwen3.6-35b-a3b"
+provider = "llamacpp"
+tool_format = "text"
+
+[aliases."llamacpp-qwen3.6-q4"]
+id = "qwen3.6-35b-a3b-ud-q4-k-xl"
+provider = "llamacpp"
+tool_format = "text"
+
+[aliases."local-qwen3.6"]
+id = "qwen3.6-35b-a3b-ud-q4-k-xl"
+provider = "llamacpp"
+tool_format = "text"
+
+[aliases."local-qwen3.6-gguf"]
+id = "qwen3.6-35b-a3b-ud-q4-k-xl"
+provider = "llamacpp"
+tool_format = "text"
+
+# MLX (Apple Silicon).
+[aliases.mlx-qwen36-27b]
+id = "unsloth/Qwen3.6-27B-UD-MLX-4bit"
+provider = "mlx"
+
+[aliases."mlx-qwen3.6-27b"]
+id = "unsloth/Qwen3.6-27B-UD-MLX-4bit"
+provider = "mlx"
+tool_format = "native"
+
+[aliases."mlx-qwen3.6-27b-q4"]
+id = "unsloth/Qwen3.6-27B-UD-MLX-4bit"
+provider = "mlx"
+tool_format = "native"
+
+[aliases."local-qwen3.6-27b"]
+id = "unsloth/Qwen3.6-27B-UD-MLX-4bit"
+provider = "mlx"
+tool_format = "native"
+
+# Devstral (Mistral's agentic-coding tune).
+[aliases.devstral-small-2]
+id = "devstral-small-2:24b"
+provider = "ollama"
+tool_format = "text"
+
+[aliases.ollama-devstral-small-2]
+id = "devstral-small-2:24b"
+provider = "ollama"
+tool_format = "text"
+
+[aliases.ollama-devstral-small-2-native]
+id = "devstral-small-2:24b"
+provider = "ollama"
+tool_format = "native"
+
+# ── Alias tool-calling probe state ───────────────────────────────────────────
+# Per-alias overrides recording the last-observed native vs. text vs.
+# streaming tool-call probe outcome and the desired fallback. Hosts may
+# update these via providers.toml overlays as they re-probe a model.
+
+[alias_tool_calling."qwen3.6-coding"]
+native = "unknown"
+text = "unknown"
+streaming_native = "unknown"
+fallback_mode = "text"
+
+[alias_tool_calling."qwen3.6-coding-native"]
+native = "unknown"
+text = "unknown"
+streaming_native = "unknown"
+fallback_mode = "native"
+
+[alias_tool_calling.ollama-gemma4]
+native = "unknown"
+text = "unknown"
+streaming_native = "unknown"
+fallback_mode = "disabled"
+failure_reason = "requires_tool_probe"
+
+[alias_tool_calling."llamacpp-qwen3.6-q4"]
+native = "unknown"
+text = "unknown"
+streaming_native = "unknown"
+fallback_mode = "text"
+failure_reason = "requires_tool_probe_and_cache_probe"
+
+[alias_tool_calling."mlx-qwen3.6-27b"]
+native = "unknown"
+text = "unknown"
+streaming_native = "unknown"
+fallback_mode = "native"
+failure_reason = "requires_served_identity_and_tool_probe"
+
+# ── QC defaults ──────────────────────────────────────────────────────────────
+# Default low-cost model per provider for cheap quality-check / repair
+# passes. Scripts read these via `qc_default_model(provider)`.
+
+[qc_defaults]
+anthropic = "claude-haiku-4-5-20251001"
+openai = "gpt-4o-mini"
+openrouter = "google/gemini-2.5-flash"
+ollama = "llama3.2"
+local = "gpt-4o"
+
+# ── Models ───────────────────────────────────────────────────────────────────
+# Canonical model metadata: display name, provider, context window,
+# capabilities, pricing (USD per 1M tokens), and deprecation status.
+# Pricing reflects public provider pages snapshotted at the comment
+# beside each section; edit the literal here and the change shows up in
+# `git blame`.
+
+# Anthropic ─ pricing pages: https://www.anthropic.com/pricing &
+# https://platform.claude.com/docs/en/about-claude/model-deprecations.
+# Sonnet 4.5 retired 2026-05-15; Sonnet 4 and Opus 4 retire 2026-06-15.
+
+[models."claude-3-5-haiku-20241022"]
+name = "Claude Haiku 3.5"
+provider = "anthropic"
+context_window = 200000
+capabilities = ["tools", "streaming", "prompt_caching", "thinking"]
+pricing = { input_per_mtok = 0.80, output_per_mtok = 4.00, cache_read_per_mtok = 0.08, cache_write_per_mtok = 1.00 }
+
+[models."claude-haiku-4-5-20251001"]
+name = "Claude Haiku 4.5"
+provider = "anthropic"
+context_window = 200000
+capabilities = ["tools", "streaming", "prompt_caching", "thinking"]
+pricing = { input_per_mtok = 1.00, output_per_mtok = 5.00, cache_read_per_mtok = 0.10, cache_write_per_mtok = 1.25 }
+
+[models."claude-3-5-sonnet-20240620"]
+name = "Claude Sonnet 3.5 (2024-06-20)"
+provider = "anthropic"
+context_window = 200000
+capabilities = ["tools", "streaming", "prompt_caching", "thinking"]
+pricing = { input_per_mtok = 3.00, output_per_mtok = 15.00, cache_read_per_mtok = 0.30, cache_write_per_mtok = 3.75 }
+
+[models."claude-3-5-sonnet-20241022"]
+name = "Claude Sonnet 3.5 (2024-10-22)"
+provider = "anthropic"
+context_window = 200000
+capabilities = ["tools", "streaming", "prompt_caching", "thinking"]
+pricing = { input_per_mtok = 3.00, output_per_mtok = 15.00, cache_read_per_mtok = 0.30, cache_write_per_mtok = 3.75 }
+
+[models."claude-sonnet-4-20250514"]
+name = "Claude Sonnet 4"
+provider = "anthropic"
+context_window = 200000
+capabilities = ["tools", "streaming", "prompt_caching", "thinking"]
+pricing = { input_per_mtok = 3.00, output_per_mtok = 15.00, cache_read_per_mtok = 0.30, cache_write_per_mtok = 3.75 }
+deprecated = true
+deprecation_note = "Sunset 2026-06-15 per Anthropic deprecations page. Replaced by claude-sonnet-4-6."
+
+[models."claude-sonnet-4-5"]
+name = "Claude Sonnet 4.5"
+provider = "anthropic"
+context_window = 200000
+capabilities = ["tools", "streaming", "prompt_caching", "thinking"]
+pricing = { input_per_mtok = 3.00, output_per_mtok = 15.00, cache_read_per_mtok = 0.30, cache_write_per_mtok = 3.75 }
+deprecated = true
+deprecation_note = "Sunset 2026-05-15 per Anthropic deprecations page. Replaced by claude-sonnet-4-6."
+
+[models."claude-sonnet-4-6"]
+name = "Claude Sonnet 4.6"
+provider = "anthropic"
+context_window = 200000
+capabilities = ["tools", "streaming", "prompt_caching", "thinking"]
+pricing = { input_per_mtok = 3.00, output_per_mtok = 15.00, cache_read_per_mtok = 0.30, cache_write_per_mtok = 3.75 }
+
+[models."claude-sonnet-4-7"]
+name = "Claude Sonnet 4.7"
+provider = "anthropic"
+context_window = 200000
+capabilities = ["tools", "streaming", "prompt_caching", "thinking"]
+pricing = { input_per_mtok = 3.00, output_per_mtok = 15.00, cache_read_per_mtok = 0.30, cache_write_per_mtok = 3.75 }
+
+[models."claude-3-opus-20240229"]
+name = "Claude Opus 3"
+provider = "anthropic"
+context_window = 200000
+capabilities = ["tools", "streaming", "prompt_caching", "thinking"]
+pricing = { input_per_mtok = 15.00, output_per_mtok = 75.00, cache_read_per_mtok = 1.50, cache_write_per_mtok = 18.75 }
+
+[models."claude-opus-4-20250514"]
+name = "Claude Opus 4"
+provider = "anthropic"
+context_window = 200000
+capabilities = ["tools", "streaming", "prompt_caching", "thinking"]
+pricing = { input_per_mtok = 15.00, output_per_mtok = 75.00, cache_read_per_mtok = 1.50, cache_write_per_mtok = 18.75 }
+deprecated = true
+deprecation_note = "Sunset 2026-06-15 per Anthropic deprecations page. Replaced by claude-opus-4-7."
+
+[models."claude-opus-4-1-20250805"]
+name = "Claude Opus 4.1"
+provider = "anthropic"
+context_window = 200000
+capabilities = ["tools", "streaming", "prompt_caching", "thinking"]
+pricing = { input_per_mtok = 15.00, output_per_mtok = 75.00, cache_read_per_mtok = 1.50, cache_write_per_mtok = 18.75 }
+deprecated = true
+deprecation_note = "Superseded by claude-opus-4-7. No formal sunset yet; switch when convenient."
+
+[models."claude-opus-4-6"]
+name = "Claude Opus 4.6"
+provider = "anthropic"
+context_window = 200000
+capabilities = ["tools", "streaming", "prompt_caching", "thinking"]
+pricing = { input_per_mtok = 15.00, output_per_mtok = 75.00, cache_read_per_mtok = 1.50, cache_write_per_mtok = 18.75 }
+
+[models."claude-opus-4-7"]
+name = "Claude Opus 4.7"
+provider = "anthropic"
+context_window = 200000
+capabilities = ["tools", "streaming", "prompt_caching", "thinking"]
+pricing = { input_per_mtok = 15.00, output_per_mtok = 75.00, cache_read_per_mtok = 1.50, cache_write_per_mtok = 18.75 }
+
+# OpenAI ─ pricing pages: https://platform.openai.com/docs/pricing.
+# GPT-4o retired from ChatGPT 2026-02-13; chatgpt-4o-latest removed
+# from API 2026-02-17 (Enterprise/Edu grace until 2026-04-03).
+
+[models."gpt-4o"]
+name = "GPT-4o"
+provider = "openai"
+context_window = 128000
+capabilities = ["tools", "streaming"]
+pricing = { input_per_mtok = 2.50, output_per_mtok = 10.00, cache_read_per_mtok = 1.25 }
+deprecated = true
+deprecation_note = "API sunset 2026-02-17 per OpenAI deprecations page. Switch to gpt-5-mini for cheap routing or gpt-5 for frontier."
+
+[models."gpt-4o-mini"]
+name = "GPT-4o Mini"
+provider = "openai"
+context_window = 128000
+capabilities = ["tools", "streaming"]
+pricing = { input_per_mtok = 0.15, output_per_mtok = 0.60 }
+# Not yet deprecated as of 2026-05 — OpenAI's deprecation page lists
+# gpt-4o (Feb 17 2026 API sunset) but gpt-4o-mini has no announced
+# sunset. Still the canonical `mid` tier default until gpt-5-mini ships
+# with confirmed pricing.
+
+[models."gpt-4-turbo"]
+name = "GPT-4 Turbo"
+provider = "openai"
+context_window = 128000
+capabilities = ["tools", "streaming"]
+pricing = { input_per_mtok = 10.00, output_per_mtok = 30.00 }
+deprecated = true
+deprecation_note = "Superseded by gpt-5 family. Listed for cost-attribution backfill only."
+
+[models.o1]
+name = "OpenAI o1"
+provider = "openai"
+context_window = 200000
+capabilities = ["tools", "streaming"]
+pricing = { input_per_mtok = 15.00, output_per_mtok = 60.00, cache_read_per_mtok = 7.50 }
+
+[models."o1-mini"]
+name = "OpenAI o1-mini"
+provider = "openai"
+context_window = 128000
+capabilities = ["tools", "streaming"]
+pricing = { input_per_mtok = 3.00, output_per_mtok = 12.00, cache_read_per_mtok = 1.50 }
+
+[models.o3]
+name = "OpenAI o3"
+provider = "openai"
+context_window = 200000
+capabilities = ["tools", "streaming"]
+pricing = { input_per_mtok = 15.00, output_per_mtok = 60.00, cache_read_per_mtok = 7.50 }
+
+[models."o3-mini"]
+name = "OpenAI o3-mini"
+provider = "openai"
+context_window = 200000
+capabilities = ["tools", "streaming"]
+pricing = { input_per_mtok = 1.10, output_per_mtok = 4.40, cache_read_per_mtok = 0.55 }
+
+# Google Gemini ─ pricing: https://ai.google.dev/pricing.
+# Gemini 1.0 / 1.5 already retired. Gemini 2.0 Flash + Flash-Lite shut
+# down 2026-06-01 per the deprecations page.
+
+[models."gemini-2.5-flash"]
+name = "Gemini 2.5 Flash"
+provider = "gemini"
+context_window = 1048576
+capabilities = ["tools", "streaming"]
+pricing = { input_per_mtok = 0.10, output_per_mtok = 0.40, cache_read_per_mtok = 0.025 }
+
+# OpenRouter-routed variant of the same model — kept as a distinct
+# catalog entry so the `qc_defaults.openrouter` lookup resolves to a
+# registered ID. Pricing matches the native Gemini API; OpenRouter adds
+# its own margin at request time.
+[models."google/gemini-2.5-flash"]
+name = "Gemini 2.5 Flash (via OpenRouter)"
+provider = "openrouter"
+context_window = 1048576
+capabilities = ["tools", "streaming"]
+pricing = { input_per_mtok = 0.10, output_per_mtok = 0.40, cache_read_per_mtok = 0.025 }
+
+[models."gemini-2.5-pro"]
+name = "Gemini 2.5 Pro"
+provider = "gemini"
+context_window = 2097152
+capabilities = ["tools", "streaming"]
+pricing = { input_per_mtok = 1.25, output_per_mtok = 5.00, cache_read_per_mtok = 0.3125 }
+
+# Mistral hosted via OpenRouter.
+
+[models."mistral-large-latest"]
+name = "Mistral Large"
+provider = "openrouter"
+context_window = 128000
+capabilities = ["tools", "streaming"]
+pricing = { input_per_mtok = 2.00, output_per_mtok = 6.00 }
+
+[models."mistral-small-latest"]
+name = "Mistral Small"
+provider = "openrouter"
+context_window = 128000
+capabilities = ["tools", "streaming"]
+pricing = { input_per_mtok = 0.20, output_per_mtok = 0.60 }
+
+# Open-weight executor candidates (<$2/Mtok with function calling). Use
+# these via OpenRouter or Fireworks for fast secondary-model dispatch.
+# Pricing snapshot 2026-05 from OpenRouter / Artificial Analysis.
+
+[models."qwen/qwen3-coder"]
+name = "Qwen3 Coder 480B A35B"
+provider = "openrouter"
+context_window = 262144
+capabilities = ["tools", "streaming"]
+pricing = { input_per_mtok = 0.22, output_per_mtok = 1.80 }
+
+[models."deepseek/deepseek-v3.2"]
+name = "DeepSeek V3.2"
+provider = "openrouter"
+context_window = 131072
+capabilities = ["tools", "streaming"]
+pricing = { input_per_mtok = 0.28, output_per_mtok = 0.42 }
+
+[models."moonshotai/kimi-k2.6"]
+name = "Kimi K2.6"
+provider = "openrouter"
+context_window = 200000
+capabilities = ["tools", "streaming"]
+pricing = { input_per_mtok = 0.55, output_per_mtok = 2.20 }
+
+[models."openai/gpt-oss-120b"]
+name = "GPT-OSS 120B"
+provider = "openrouter"
+context_window = 131072
+capabilities = ["tools", "streaming"]
+pricing = { input_per_mtok = 0.15, output_per_mtok = 0.60 }
+
+# Open-router Qwen3.5 9B (kept for the `small` tier alias).
+
+[models."Qwen/Qwen3.5-9B"]
+name = "Qwen3.5 9B"
+provider = "openrouter"
+context_window = 131072
+capabilities = ["tools", "streaming"]
+
+# Ollama / local models — no `pricing` (free); context_window reflects
+# model card ceiling. `runtime_context_window` caps what Harn will
+# actually feed the runtime (host memory budget).
+
+[models."llama3.2"]
+name = "Llama 3.2"
+provider = "ollama"
+context_window = 32000
+stream_timeout = 300.0
+capabilities = ["tools", "streaming"]
+
+[models."gemma4:26b"]
+name = "Gemma 4 26B MoE"
+provider = "ollama"
+context_window = 262144
+runtime_context_window = 32768
+stream_timeout = 300.0
+capabilities = ["tools", "vision", "streaming", "thinking"]
+
+[models."qwen3.6:35b-a3b-coding-nvfp4"]
+name = "Qwen3.6 35B A3B Coding (NVFP4)"
+provider = "ollama"
+context_window = 262144
+runtime_context_window = 32768
+stream_timeout = 900.0
+capabilities = ["tools", "streaming", "thinking"]
+
+[models."devstral-small-2:24b"]
+name = "Devstral Small 2 24B"
+provider = "ollama"
+context_window = 262144
+runtime_context_window = 32768
+stream_timeout = 600.0
+capabilities = ["tools", "streaming"]
+
+# llama.cpp — Unsloth Dynamic 2.0 GGUF served by llama-server.
+
+[models."qwen3.6-35b-a3b-ud-q4-k-xl"]
+name = "Qwen3.6 35B (Unsloth Q4_K_XL, llama.cpp)"
+provider = "llamacpp"
+context_window = 262144
+runtime_context_window = 65536
+stream_timeout = 900.0
+capabilities = ["tools", "streaming", "thinking"]
+
+[models."qwen3.6-35b-a3b-ud-q5-k-xl"]
+name = "Qwen3.6 35B (Unsloth Q5_K_XL, llama.cpp)"
+provider = "llamacpp"
+context_window = 262144
+runtime_context_window = 65536
+stream_timeout = 900.0
+capabilities = ["tools", "streaming", "thinking"]
+
+[models."qwen3.6-35b-a3b"]
+name = "Qwen3.6 35B (llama.cpp)"
+provider = "llamacpp"
+context_window = 262144
+runtime_context_window = 65536
+stream_timeout = 900.0
+capabilities = ["tools", "streaming", "thinking"]
+
+# Apple Silicon MLX.
+
+[models."unsloth/Qwen3.6-27B-UD-MLX-4bit"]
+name = "Qwen3.6 27B (MLX 4-bit)"
+provider = "mlx"
+context_window = 262144
+stream_timeout = 900.0
+capabilities = ["tools", "vision", "streaming", "thinking"]
+
+# Local OpenAI-compatible servers (vLLM / bring-your-own). The
+# `prefer_prefill_done` opts a small model into the issue #41 brevity
+# nudge — keep it on for the Gemma 4 E2B / E4B sizes that benefit most.
+
+[models."gemma-4-e2b-it"]
+name = "Gemma 4 E2B (local)"
+provider = "local"
+context_window = 131072
+stream_timeout = 300.0
+capabilities = ["streaming", "thinking"]
+prefer_prefill_done = true
+
+[models."gemma-4-e4b-it"]
+name = "Gemma 4 E4B (local)"
+provider = "local"
+context_window = 131072
+stream_timeout = 300.0
+capabilities = ["streaming", "thinking"]
+prefer_prefill_done = true
+
+[models."gemma-4-26b-a4b-it"]
+name = "Gemma 4 26B MoE (local)"
+provider = "local"
+context_window = 131072
+stream_timeout = 600.0
+capabilities = ["streaming", "thinking"]
+
+[models."gemma-4-31b-it"]
+name = "Gemma 4 31B (local)"
+provider = "local"
+context_window = 131072
+stream_timeout = 600.0
+capabilities = ["streaming", "thinking"]

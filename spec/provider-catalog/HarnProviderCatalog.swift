@@ -965,7 +965,9 @@ public let harnProviderCatalogJSON = #"""
       "id": "claude-haiku-4-5-20251001",
       "name": "Claude Haiku 4.5",
       "provider": "anthropic",
-      "aliases": [],
+      "aliases": [
+        "haiku"
+      ],
       "context_window": 200000,
       "modalities": {
         "input": [
@@ -1083,7 +1085,8 @@ public let harnProviderCatalogJSON = #"""
         "cache_write_per_mtok": 18.75
       },
       "deprecation": {
-        "status": "active"
+        "status": "deprecated",
+        "note": "Superseded by claude-opus-4-7. No formal sunset yet; switch when convenient."
       },
       "quality_tags": [],
       "capability_tags": [
@@ -1152,7 +1155,8 @@ public let harnProviderCatalogJSON = #"""
         "cache_write_per_mtok": 18.75
       },
       "deprecation": {
-        "status": "active"
+        "status": "deprecated",
+        "note": "Sunset 2026-06-15 per Anthropic deprecations page. Replaced by claude-opus-4-7."
       },
       "quality_tags": [],
       "capability_tags": [
@@ -1169,13 +1173,152 @@ public let harnProviderCatalogJSON = #"""
       ]
     },
     {
+      "id": "claude-opus-4-6",
+      "name": "Claude Opus 4.6",
+      "provider": "anthropic",
+      "aliases": [],
+      "context_window": 200000,
+      "modalities": {
+        "input": [
+          "text",
+          "image",
+          "audio",
+          "pdf"
+        ],
+        "output": [
+          "text"
+        ]
+      },
+      "tool_support": {
+        "native": true,
+        "text": true,
+        "tool_search": [
+          "bm25",
+          "regex"
+        ],
+        "max_tools": 10000
+      },
+      "structured_output": "tool_use",
+      "format_preferences": {
+        "prefers_xml_scaffolding": true,
+        "prefers_markdown_scaffolding": false,
+        "structured_output_mode": "xml_tagged",
+        "supports_assistant_prefill": false,
+        "prefers_role_developer": false,
+        "prefers_xml_tools": true,
+        "thinking_block_style": "thinking_blocks"
+      },
+      "reasoning": {
+        "modes": [
+          "enabled"
+        ],
+        "effort_supported": false,
+        "none_supported": false,
+        "interleaved_supported": true,
+        "preserve_thinking": false
+      },
+      "prompt_cache": true,
+      "pricing": {
+        "input_per_mtok": 15.0,
+        "output_per_mtok": 75.0,
+        "cache_read_per_mtok": 1.5,
+        "cache_write_per_mtok": 18.75
+      },
+      "deprecation": {
+        "status": "active"
+      },
+      "quality_tags": [],
+      "capability_tags": [
+        "streaming",
+        "tools",
+        "tool_search",
+        "vision",
+        "audio",
+        "pdf",
+        "files",
+        "prompt_caching",
+        "thinking",
+        "extended_thinking",
+        "structured_output"
+      ]
+    },
+    {
+      "id": "claude-opus-4-7",
+      "name": "Claude Opus 4.7",
+      "provider": "anthropic",
+      "aliases": [
+        "opus"
+      ],
+      "context_window": 200000,
+      "modalities": {
+        "input": [
+          "text",
+          "image",
+          "audio",
+          "pdf"
+        ],
+        "output": [
+          "text"
+        ]
+      },
+      "tool_support": {
+        "native": true,
+        "text": true,
+        "tool_search": [
+          "bm25",
+          "regex"
+        ],
+        "max_tools": 10000
+      },
+      "structured_output": "tool_use",
+      "format_preferences": {
+        "prefers_xml_scaffolding": true,
+        "prefers_markdown_scaffolding": false,
+        "structured_output_mode": "xml_tagged",
+        "supports_assistant_prefill": false,
+        "prefers_role_developer": false,
+        "prefers_xml_tools": true,
+        "thinking_block_style": "thinking_blocks"
+      },
+      "reasoning": {
+        "modes": [
+          "adaptive"
+        ],
+        "effort_supported": false,
+        "none_supported": false,
+        "interleaved_supported": true,
+        "preserve_thinking": false
+      },
+      "prompt_cache": true,
+      "pricing": {
+        "input_per_mtok": 15.0,
+        "output_per_mtok": 75.0,
+        "cache_read_per_mtok": 1.5,
+        "cache_write_per_mtok": 18.75
+      },
+      "deprecation": {
+        "status": "active"
+      },
+      "quality_tags": [],
+      "capability_tags": [
+        "streaming",
+        "tools",
+        "tool_search",
+        "vision",
+        "audio",
+        "pdf",
+        "files",
+        "prompt_caching",
+        "thinking",
+        "extended_thinking",
+        "structured_output"
+      ]
+    },
+    {
       "id": "claude-sonnet-4-20250514",
       "name": "Claude Sonnet 4",
       "provider": "anthropic",
-      "aliases": [
-        "frontier",
-        "tier/frontier"
-      ],
+      "aliases": [],
       "context_window": 200000,
       "modalities": {
         "input": [
@@ -1224,6 +1367,150 @@ public let harnProviderCatalogJSON = #"""
         "cache_write_per_mtok": 3.75
       },
       "deprecation": {
+        "status": "deprecated",
+        "note": "Sunset 2026-06-15 per Anthropic deprecations page. Replaced by claude-sonnet-4-6."
+      },
+      "quality_tags": [],
+      "capability_tags": [
+        "streaming",
+        "tools",
+        "tool_search",
+        "vision",
+        "audio",
+        "pdf",
+        "files",
+        "prompt_caching",
+        "thinking",
+        "structured_output"
+      ]
+    },
+    {
+      "id": "claude-sonnet-4-5",
+      "name": "Claude Sonnet 4.5",
+      "provider": "anthropic",
+      "aliases": [],
+      "context_window": 200000,
+      "modalities": {
+        "input": [
+          "text",
+          "image",
+          "audio",
+          "pdf"
+        ],
+        "output": [
+          "text"
+        ]
+      },
+      "tool_support": {
+        "native": true,
+        "text": true,
+        "tool_search": [
+          "bm25",
+          "regex"
+        ],
+        "max_tools": 10000
+      },
+      "structured_output": "tool_use",
+      "format_preferences": {
+        "prefers_xml_scaffolding": true,
+        "prefers_markdown_scaffolding": false,
+        "structured_output_mode": "xml_tagged",
+        "supports_assistant_prefill": true,
+        "prefers_role_developer": false,
+        "prefers_xml_tools": true,
+        "thinking_block_style": "thinking_blocks"
+      },
+      "reasoning": {
+        "modes": [
+          "enabled"
+        ],
+        "effort_supported": false,
+        "none_supported": false,
+        "interleaved_supported": false,
+        "preserve_thinking": false
+      },
+      "prompt_cache": true,
+      "pricing": {
+        "input_per_mtok": 3.0,
+        "output_per_mtok": 15.0,
+        "cache_read_per_mtok": 0.3,
+        "cache_write_per_mtok": 3.75
+      },
+      "deprecation": {
+        "status": "deprecated",
+        "note": "Sunset 2026-05-15 per Anthropic deprecations page. Replaced by claude-sonnet-4-6."
+      },
+      "quality_tags": [],
+      "capability_tags": [
+        "streaming",
+        "tools",
+        "tool_search",
+        "vision",
+        "audio",
+        "pdf",
+        "files",
+        "prompt_caching",
+        "thinking",
+        "structured_output"
+      ]
+    },
+    {
+      "id": "claude-sonnet-4-6",
+      "name": "Claude Sonnet 4.6",
+      "provider": "anthropic",
+      "aliases": [
+        "frontier",
+        "sonnet",
+        "tier/frontier"
+      ],
+      "context_window": 200000,
+      "modalities": {
+        "input": [
+          "text",
+          "image",
+          "audio",
+          "pdf"
+        ],
+        "output": [
+          "text"
+        ]
+      },
+      "tool_support": {
+        "native": true,
+        "text": true,
+        "tool_search": [
+          "bm25",
+          "regex"
+        ],
+        "max_tools": 10000
+      },
+      "structured_output": "tool_use",
+      "format_preferences": {
+        "prefers_xml_scaffolding": true,
+        "prefers_markdown_scaffolding": false,
+        "structured_output_mode": "xml_tagged",
+        "supports_assistant_prefill": false,
+        "prefers_role_developer": false,
+        "prefers_xml_tools": true,
+        "thinking_block_style": "thinking_blocks"
+      },
+      "reasoning": {
+        "modes": [
+          "enabled"
+        ],
+        "effort_supported": false,
+        "none_supported": false,
+        "interleaved_supported": false,
+        "preserve_thinking": false
+      },
+      "prompt_cache": true,
+      "pricing": {
+        "input_per_mtok": 3.0,
+        "output_per_mtok": 15.0,
+        "cache_read_per_mtok": 0.3,
+        "cache_write_per_mtok": 3.75
+      },
+      "deprecation": {
         "status": "active"
       },
       "quality_tags": [
@@ -1239,6 +1526,76 @@ public let harnProviderCatalogJSON = #"""
         "files",
         "prompt_caching",
         "thinking",
+        "structured_output"
+      ]
+    },
+    {
+      "id": "claude-sonnet-4-7",
+      "name": "Claude Sonnet 4.7",
+      "provider": "anthropic",
+      "aliases": [],
+      "context_window": 200000,
+      "modalities": {
+        "input": [
+          "text",
+          "image",
+          "audio",
+          "pdf"
+        ],
+        "output": [
+          "text"
+        ]
+      },
+      "tool_support": {
+        "native": true,
+        "text": true,
+        "tool_search": [
+          "bm25",
+          "regex"
+        ],
+        "max_tools": 10000
+      },
+      "structured_output": "tool_use",
+      "format_preferences": {
+        "prefers_xml_scaffolding": true,
+        "prefers_markdown_scaffolding": false,
+        "structured_output_mode": "xml_tagged",
+        "supports_assistant_prefill": false,
+        "prefers_role_developer": false,
+        "prefers_xml_tools": true,
+        "thinking_block_style": "thinking_blocks"
+      },
+      "reasoning": {
+        "modes": [
+          "adaptive"
+        ],
+        "effort_supported": false,
+        "none_supported": false,
+        "interleaved_supported": false,
+        "preserve_thinking": false
+      },
+      "prompt_cache": true,
+      "pricing": {
+        "input_per_mtok": 3.0,
+        "output_per_mtok": 15.0,
+        "cache_read_per_mtok": 0.3,
+        "cache_write_per_mtok": 3.75
+      },
+      "deprecation": {
+        "status": "active"
+      },
+      "quality_tags": [],
+      "capability_tags": [
+        "streaming",
+        "tools",
+        "tool_search",
+        "vision",
+        "audio",
+        "pdf",
+        "files",
+        "prompt_caching",
+        "thinking",
+        "extended_thinking",
         "structured_output"
       ]
     },
@@ -2081,7 +2438,8 @@ public let harnProviderCatalogJSON = #"""
         "cache_write_per_mtok": null
       },
       "deprecation": {
-        "status": "active"
+        "status": "deprecated",
+        "note": "Superseded by gpt-5 family. Listed for cost-attribution backfill only."
       },
       "quality_tags": [],
       "capability_tags": [
@@ -2136,7 +2494,8 @@ public let harnProviderCatalogJSON = #"""
         "cache_write_per_mtok": null
       },
       "deprecation": {
-        "status": "active"
+        "status": "deprecated",
+        "note": "API sunset 2026-02-17 per OpenAI deprecations page. Switch to gpt-5-mini for cheap routing or gpt-5 for frontier."
       },
       "quality_tags": [],
       "capability_tags": [
@@ -2495,6 +2854,130 @@ public let harnProviderCatalogJSON = #"""
       ]
     },
     {
+      "id": "deepseek/deepseek-v3.2",
+      "name": "DeepSeek V3.2",
+      "provider": "openrouter",
+      "aliases": [],
+      "context_window": 131072,
+      "modalities": {
+        "input": [
+          "text"
+        ],
+        "output": [
+          "text"
+        ]
+      },
+      "tool_support": {
+        "native": true,
+        "text": true,
+        "tool_search": []
+      },
+      "structured_output": "native",
+      "format_preferences": {
+        "prefers_xml_scaffolding": false,
+        "prefers_markdown_scaffolding": true,
+        "structured_output_mode": "native_json",
+        "supports_assistant_prefill": false,
+        "prefers_role_developer": false,
+        "prefers_xml_tools": false,
+        "thinking_block_style": "reasoning_summary"
+      },
+      "reasoning": {
+        "modes": [
+          "enabled",
+          "effort"
+        ],
+        "effort_supported": false,
+        "none_supported": false,
+        "interleaved_supported": false,
+        "preserve_thinking": false
+      },
+      "prompt_cache": true,
+      "pricing": {
+        "input_per_mtok": 0.28,
+        "output_per_mtok": 0.42,
+        "cache_read_per_mtok": null,
+        "cache_write_per_mtok": null
+      },
+      "deprecation": {
+        "status": "active"
+      },
+      "quality_tags": [],
+      "capability_tags": [
+        "streaming",
+        "tools",
+        "prompt_caching",
+        "thinking",
+        "extended_thinking",
+        "structured_output"
+      ]
+    },
+    {
+      "id": "google/gemini-2.5-flash",
+      "name": "Gemini 2.5 Flash (via OpenRouter)",
+      "provider": "openrouter",
+      "aliases": [],
+      "context_window": 1048576,
+      "modalities": {
+        "input": [
+          "text",
+          "image",
+          "audio",
+          "pdf"
+        ],
+        "output": [
+          "text"
+        ]
+      },
+      "tool_support": {
+        "native": true,
+        "text": true,
+        "tool_search": []
+      },
+      "structured_output": "native",
+      "format_preferences": {
+        "prefers_xml_scaffolding": false,
+        "prefers_markdown_scaffolding": true,
+        "structured_output_mode": "native_json",
+        "supports_assistant_prefill": false,
+        "prefers_role_developer": false,
+        "prefers_xml_tools": false,
+        "thinking_block_style": "reasoning_summary"
+      },
+      "reasoning": {
+        "modes": [
+          "enabled",
+          "effort"
+        ],
+        "effort_supported": false,
+        "none_supported": false,
+        "interleaved_supported": false,
+        "preserve_thinking": false
+      },
+      "prompt_cache": true,
+      "pricing": {
+        "input_per_mtok": 0.1,
+        "output_per_mtok": 0.4,
+        "cache_read_per_mtok": 0.025,
+        "cache_write_per_mtok": null
+      },
+      "deprecation": {
+        "status": "active"
+      },
+      "quality_tags": [],
+      "capability_tags": [
+        "streaming",
+        "tools",
+        "vision",
+        "audio",
+        "pdf",
+        "prompt_caching",
+        "thinking",
+        "extended_thinking",
+        "structured_output"
+      ]
+    },
+    {
       "id": "mistral-large-latest",
       "name": "Mistral Large",
       "provider": "openrouter",
@@ -2597,6 +3080,164 @@ public let harnProviderCatalogJSON = #"""
         "streaming",
         "tools"
       ]
+    },
+    {
+      "id": "moonshotai/kimi-k2.6",
+      "name": "Kimi K2.6",
+      "provider": "openrouter",
+      "aliases": [],
+      "context_window": 200000,
+      "modalities": {
+        "input": [
+          "text"
+        ],
+        "output": [
+          "text"
+        ]
+      },
+      "tool_support": {
+        "native": false,
+        "text": true,
+        "tool_search": []
+      },
+      "structured_output": "none",
+      "format_preferences": {
+        "prefers_xml_scaffolding": false,
+        "prefers_markdown_scaffolding": false,
+        "structured_output_mode": "none",
+        "supports_assistant_prefill": false,
+        "prefers_role_developer": false,
+        "prefers_xml_tools": false,
+        "thinking_block_style": "none"
+      },
+      "reasoning": {
+        "modes": [],
+        "effort_supported": false,
+        "none_supported": false,
+        "interleaved_supported": false,
+        "preserve_thinking": false
+      },
+      "prompt_cache": false,
+      "pricing": {
+        "input_per_mtok": 0.55,
+        "output_per_mtok": 2.2,
+        "cache_read_per_mtok": null,
+        "cache_write_per_mtok": null
+      },
+      "deprecation": {
+        "status": "active"
+      },
+      "quality_tags": [],
+      "capability_tags": [
+        "streaming",
+        "tools"
+      ]
+    },
+    {
+      "id": "openai/gpt-oss-120b",
+      "name": "GPT-OSS 120B",
+      "provider": "openrouter",
+      "aliases": [],
+      "context_window": 131072,
+      "modalities": {
+        "input": [
+          "text"
+        ],
+        "output": [
+          "text"
+        ]
+      },
+      "tool_support": {
+        "native": true,
+        "text": true,
+        "tool_search": []
+      },
+      "structured_output": "native",
+      "format_preferences": {
+        "prefers_xml_scaffolding": false,
+        "prefers_markdown_scaffolding": true,
+        "structured_output_mode": "native_json",
+        "supports_assistant_prefill": false,
+        "prefers_role_developer": false,
+        "prefers_xml_tools": false,
+        "thinking_block_style": "none"
+      },
+      "reasoning": {
+        "modes": [],
+        "effort_supported": false,
+        "none_supported": false,
+        "interleaved_supported": false,
+        "preserve_thinking": false
+      },
+      "prompt_cache": false,
+      "pricing": {
+        "input_per_mtok": 0.15,
+        "output_per_mtok": 0.6,
+        "cache_read_per_mtok": null,
+        "cache_write_per_mtok": null
+      },
+      "deprecation": {
+        "status": "active"
+      },
+      "quality_tags": [],
+      "capability_tags": [
+        "streaming",
+        "tools",
+        "structured_output"
+      ]
+    },
+    {
+      "id": "qwen/qwen3-coder",
+      "name": "Qwen3 Coder 480B A35B",
+      "provider": "openrouter",
+      "aliases": [],
+      "context_window": 262144,
+      "modalities": {
+        "input": [
+          "text"
+        ],
+        "output": [
+          "text"
+        ]
+      },
+      "tool_support": {
+        "native": true,
+        "text": true,
+        "tool_search": []
+      },
+      "structured_output": "native",
+      "format_preferences": {
+        "prefers_xml_scaffolding": false,
+        "prefers_markdown_scaffolding": true,
+        "structured_output_mode": "delimited",
+        "supports_assistant_prefill": false,
+        "prefers_role_developer": false,
+        "prefers_xml_tools": false,
+        "thinking_block_style": "none"
+      },
+      "reasoning": {
+        "modes": [],
+        "effort_supported": false,
+        "none_supported": false,
+        "interleaved_supported": false,
+        "preserve_thinking": false
+      },
+      "prompt_cache": false,
+      "pricing": {
+        "input_per_mtok": 0.22,
+        "output_per_mtok": 1.8,
+        "cache_read_per_mtok": null,
+        "cache_write_per_mtok": null
+      },
+      "deprecation": {
+        "status": "active"
+      },
+      "quality_tags": [],
+      "capability_tags": [
+        "streaming",
+        "tools",
+        "structured_output"
+      ]
     }
   ],
   "aliases": [
@@ -2608,7 +3249,12 @@ public let harnProviderCatalogJSON = #"""
     },
     {
       "name": "frontier",
-      "model_id": "claude-sonnet-4-20250514",
+      "model_id": "claude-sonnet-4-6",
+      "provider": "anthropic"
+    },
+    {
+      "name": "haiku",
+      "model_id": "claude-haiku-4-5-20251001",
       "provider": "anthropic"
     },
     {
@@ -2734,6 +3380,11 @@ public let harnProviderCatalogJSON = #"""
       "tool_format": "text"
     },
     {
+      "name": "opus",
+      "model_id": "claude-opus-4-7",
+      "provider": "anthropic"
+    },
+    {
       "name": "qwen3.6-35b-coding",
       "model_id": "qwen3.6:35b-a3b-coding-nvfp4",
       "provider": "ollama",
@@ -2775,8 +3426,13 @@ public let harnProviderCatalogJSON = #"""
       "provider": "openrouter"
     },
     {
+      "name": "sonnet",
+      "model_id": "claude-sonnet-4-6",
+      "provider": "anthropic"
+    },
+    {
       "name": "tier/frontier",
-      "model_id": "claude-sonnet-4-20250514",
+      "model_id": "claude-sonnet-4-6",
       "provider": "anthropic"
     },
     {
@@ -2811,7 +3467,7 @@ public let harnProviderCatalogJSON = #"""
       "id": "high-reasoning",
       "label": "High reasoning",
       "description": "Frontier route for hard planning, repair, and review tasks.",
-      "model_id": "claude-sonnet-4-20250514",
+      "model_id": "claude-sonnet-4-6",
       "provider": "anthropic",
       "source": "alias:frontier"
     },
@@ -2849,7 +3505,7 @@ public let harnProviderCatalogJSON = #"""
     }
   ],
   "qc_defaults": {
-    "anthropic": "claude-3-5-haiku-20241022",
+    "anthropic": "claude-haiku-4-5-20251001",
     "local": "gpt-4o",
     "ollama": "llama3.2",
     "openai": "gpt-4o-mini",
