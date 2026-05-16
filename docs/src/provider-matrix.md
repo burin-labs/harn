@@ -32,8 +32,8 @@ Regenerate with `make gen-provider-matrix` and verify with `make check-provider-
 | `azure_openai` | `o1*` | `any` | no | no | no | no | yes | no | no | `markdown` | `native_json` | no | `developer` | `json` | `reasoning_summary` | yes | no |
 | `azure_openai` | `o3*` | `any` | no | no | no | no | yes | no | no | `markdown` | `native_json` | no | `developer` | `json` | `reasoning_summary` | yes | no |
 | `azure_openai` | `o4*` | `any` | no | no | no | no | yes | no | no | `markdown` | `native_json` | no | `developer` | `json` | `reasoning_summary` | yes | no |
+| `bedrock` | `anthropic.claude-*` | `any` | no | no | no | no | yes | no | no | `xml` | `xml_tagged` | no | `system` | `xml` | `thinking_blocks` | yes | no |
 | `bedrock` | `*claude*` | `any` | no | no | no | no | yes | no | no | `xml` | `xml_tagged` | no | `system` | `xml` | `thinking_blocks` | yes | no |
-| `bedrock` | `anthropic.claude-*` | `any` | no | no | no | no | yes | no | no | `plain` | `none` | no | `system` | `json` | `none` | yes | no |
 | `bedrock` | `*` | `any` | no | no | no | no | yes | no | no | `markdown` | `delimited` | no | `system` | `json` | `none` | yes | no |
 | `dashscope` | `qwen3.6*` | `any` | `enabled` | no | no | no | yes | no | `native` | `markdown` | `delimited` | no | `system` | `json` | `inline` | yes | no |
 | `dashscope` | `qwen*` | `any` | `enabled` | no | no | no | yes | no | `native` | `markdown` | `delimited` | no | `system` | `json` | `inline` | yes | no |
