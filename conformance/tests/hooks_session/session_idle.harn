@@ -1,0 +1,31 @@
+/**
+ * `session_idle` hooks fire whenever the daemon-mode loop enters an
+ * idle wait. Advisory only: the hook can observe iteration count and
+ * `wake_interval_ms` but cannot block the wait.
+ */
+let idle_seen = atomic(0)
+
+pipeline default() {
+  clear_session_hooks()
+  register_session_hook(
+    "session_idle",
+    { event ->
+      if type_of(event?.session?.id) == "string"
+        && type_of(event?.wake_interval_ms) == "int" {
+        atomic_add(idle_seen, 1)
+      }
+      return nil
+    },
+  )
+  llm_mock_clear()
+  llm_mock({text: "tick"})
+  llm_mock({text: "tock"})
+  let result = agent_loop(
+    "poll background",
+    nil,
+    {provider: "mock", daemon: true, max_iterations: 2, wake_interval_ms: 1},
+  )
+  println(result.status)
+  println(atomic_get(idle_seen) >= 1)
+  clear_session_hooks()
+}

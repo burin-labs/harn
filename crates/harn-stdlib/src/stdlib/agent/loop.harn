@@ -1508,11 +1508,6 @@ fn __agent_loop_run(message, session, initial_opts) {
       enforced
     }
   }
-  // Drain queued FileEdited notifications so hooks fire at a
-  // deterministic turn boundary; replay observes the same firing
-  // order regardless of when the underlying writes happened.
-  // Drain any FileEdited notifications recorded during the last
-  // turn so terminal hooks observe them before SessionEnd fires.
   if is_err(run) {
     if !session_finalized {
       __agent_loop_finalize_failed(session, iteration)
