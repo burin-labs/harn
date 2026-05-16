@@ -2363,6 +2363,74 @@ let persona_caller = compose([
 
 Full reference: [`docs/src/stdlib/llm-handlers.md`](https://harnlang.com/docs/stdlib/llm-handlers.html).
 
+## First-class routing policy
+
+`routing_policy({...})` builds a reusable handle that drives a chain of
+providers with failover, latency-aware racing, and per-call / session
+budget caps. Pipe it through `llm_call(... routing: policy ...)` to
+replace ad-hoc `with_routing` + `with_retry` + `with_fallback`
+compositions with a single typed primitive.
+
+```harn,ignore
+let policy = routing_policy({
+  chain: [
+    {provider: "anthropic", model: "claude-opus-4-20250514"},
+    {provider: "openai",    model: "gpt-4o"},
+    {provider: "ollama",    model: "llama4:70b"},      // local fallback
+  ],
+  failover: {
+    on_status: [429, 500, 502, 503, 504],
+    on_timeout_ms: 30_000,
+    on_error_kinds: ["rate_limit", "schema_validation"],
+    max_attempts: 3,
+  },
+  latency: {
+    target_p95_ms: 8000,
+    race_after_ms: 5000,                              // race backup after 5s
+  },
+  budget: {
+    per_call_usd: 0.50,                               // hard ceiling per call
+    session_usd: 5.00,                                // session-wide cap
+    on_exceed: "abort",                               // or "skip" | "warn"
+  },
+  observe: {emit_event: "billing.routing_decision"},  // optional dispatch label
+})
+
+let result = llm_call("Summarize this PR.", nil, {routing: policy})
+// result.routing = {policy, attempts: [{provider, model, status, duration_ms, cost_usd, error?}], selected, session_cost_usd}
+```
+
+Semantics:
+
+- **Failover**: each link is tried in order; an attempt advances when
+  the error matches `on_status` (HTTP code), `on_error_kinds`
+  (category short-name — `rate_limit`, `timeout`, `transient_network`,
+  `server_error`, `schema_validation`, `auth`, `overloaded`,
+  `tool_error`, `tool_rejected`, `egress_blocked`, `cancelled`,
+  `not_found`, `circuit_open`, `budget_exceeded`, `generic`), or the
+  built-in transient defaults (429 / 5xx, rate-limit, overloaded,
+  timeout, transient_network, server_error). Non-failover errors stop
+  the chain immediately.
+- **Racing**: when `race_after_ms` is set and a second link is
+  available, the executor kicks off the next link in parallel after
+  that delay; the loser is cancelled and recorded with
+  `status: "race_lost"`.
+- **Budgets**: `per_call_usd` and `session_usd` reuse the catalog
+  pricing in `std/llm/economics`. `on_exceed: "abort"` throws the
+  standard budget-exceeded error, `"skip"` advances to the next chain
+  link, `"warn"` emits an event and proceeds.
+- **Tape events**: `<dispatch>.decision`, `<dispatch>.attempt`,
+  `<dispatch>.race_started`, `<dispatch>.race_won`,
+  `<dispatch>.race_lost`, `<dispatch>.budget_exceeded`,
+  `<dispatch>.exhausted` (default `dispatch = llm.routing`; override via
+  `observe.emit_event`).
+- **Replay**: the routing decision rides on the result envelope's
+  `routing_decision` block, so transcripts and replay re-attribute each
+  attempt to the same chain link without re-resolving.
+
+The policy is a reusable handle: build it once, pass it to many
+`llm_call` invocations.
+
 ## Composable tool middleware
 
 `agent_loop` also accepts `tool_caller:` — the parallel seam for tool

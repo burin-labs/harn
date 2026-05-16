@@ -36,6 +36,7 @@ pub(crate) mod permissions;
 pub mod plan;
 pub mod readiness;
 mod rerank;
+pub(crate) mod routing;
 pub(crate) mod schema_recover;
 pub(crate) mod skill_score;
 pub(crate) mod structural_experiments;
@@ -619,6 +620,9 @@ pub(crate) async fn execute_llm_call(
     options: Option<std::collections::BTreeMap<String, VmValue>>,
     bridge: Option<&Rc<crate::bridge::HostBridge>>,
 ) -> Result<VmValue, VmError> {
+    if let Some(policy) = opts.routing_policy.clone() {
+        return execute_with_routing_policy(policy, opts, bridge).await;
+    }
     let outcome = execute_schema_retry_loop(opts, options, bridge).await?;
     if outcome.errors.is_empty() {
         return Ok(outcome.vm_result);
@@ -644,6 +648,54 @@ pub(crate) async fn execute_llm_call(
         }
         _ => Ok(outcome.vm_result),
     }
+}
+
+/// Dispatch through the first-class routing policy executor. Each
+/// chain link is tried in order with failover, optional latency-aware
+/// racing, and per-call / session budget enforcement; the winning
+/// link's result is wrapped in the standard `llm_call` envelope plus
+/// a `routing` block summarizing every attempt.
+async fn execute_with_routing_policy(
+    policy: Rc<routing::RoutingPolicyConfig>,
+    mut opts: api::LlmCallOptions,
+    bridge: Option<&Rc<crate::bridge::HostBridge>>,
+) -> Result<VmValue, VmError> {
+    let (result, trace) = routing::execute_with_routing(&policy, opts.clone(), bridge).await?;
+    // Snap option metadata to the winning link so transcript / portal
+    // payloads describe the call that actually ran.
+    opts.provider = result.provider.clone();
+    opts.model = result.model.clone();
+    opts.routing_decision = Some(routing::trace_to_decision(&trace, &policy));
+    let envelope = agent_config::build_llm_call_result(&result, &opts);
+    Ok(attach_routing_block(envelope, &trace, &policy))
+}
+
+fn attach_routing_block(
+    envelope: VmValue,
+    trace: &routing::RoutingTrace,
+    policy: &routing::RoutingPolicyConfig,
+) -> VmValue {
+    let VmValue::Dict(dict) = envelope else {
+        return envelope;
+    };
+    let mut dict = dict.as_ref().clone();
+    let mut routing_dict = std::collections::BTreeMap::new();
+    let label = if trace.label.is_empty() {
+        policy.label.clone()
+    } else {
+        trace.label.clone()
+    };
+    routing_dict.insert("policy".to_string(), VmValue::String(Rc::from(label)));
+    routing_dict.insert("attempts".to_string(), routing::trace_to_vm_attempts(trace));
+    if let Some(selected) = trace.selected {
+        routing_dict.insert("selected".to_string(), VmValue::Int(selected as i64));
+    }
+    routing_dict.insert(
+        "session_cost_usd".to_string(),
+        VmValue::Float(trace.session_cost_usd),
+    );
+    dict.insert("routing".to_string(), VmValue::Dict(Rc::new(routing_dict)));
+    VmValue::Dict(Rc::new(dict))
 }
 
 /// Outcome of the schema-retry loop, exposing both the final attempt's
@@ -2050,6 +2102,37 @@ const LLM_TOOL_SEARCH_SYNC_PRIMITIVES: &[SyncBuiltin] =
             .doc("Rank a tool registry for Harn-managed client-mode tool search."),
     ];
 
+fn routing_policy_builtin(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
+    let config = match args.first() {
+        Some(VmValue::Dict(dict)) => dict.as_ref().clone(),
+        Some(other) => {
+            return Err(VmError::Runtime(format!(
+                "routing_policy: expected a config dict, got {}",
+                other.type_name()
+            )));
+        }
+        None => {
+            return Err(VmError::Runtime(
+                "routing_policy: expected a config dict".to_string(),
+            ));
+        }
+    };
+    routing::build_routing_policy(&config)
+}
+
+const LLM_ROUTING_SYNC_PRIMITIVES: &[SyncBuiltin] =
+    &[SyncBuiltin::new("routing_policy", routing_policy_builtin)
+        .signature("routing_policy(config)")
+        .arity(VmBuiltinArity::Exact(1))
+        .doc(
+            "Build a first-class routing policy handle. Pass {chain: [{provider, model}, ...], \
+     failover: {on_status?, on_timeout_ms?, on_error_kinds?, max_attempts?}, \
+     latency: {race_after_ms?, target_p95_ms?}, budget: {per_call_usd?, session_usd?, on_exceed?}, \
+     observe: {emit_event?}} and pipe the result through `llm_call(... routing: policy ...)` \
+     to drive the chain with failover, latency-aware racing, and budget caps. Tape events: \
+     <dispatch>.{decision,attempt,race_started,race_won,race_lost,budget_exceeded,exhausted}.",
+        )];
+
 const LLM_RUNTIME_PRIMITIVE_GROUPS: &[BuiltinGroup<'static>] = &[
     BuiltinGroup::new()
         .category("agent.trace")
@@ -2075,6 +2158,9 @@ const LLM_RUNTIME_PRIMITIVE_GROUPS: &[BuiltinGroup<'static>] = &[
     BuiltinGroup::new()
         .category("agent.host")
         .sync(LLM_TOOL_SEARCH_SYNC_PRIMITIVES),
+    BuiltinGroup::new()
+        .category("llm.host")
+        .sync(LLM_ROUTING_SYNC_PRIMITIVES),
 ];
 
 const LLM_MOCK_PRIMITIVES: BuiltinGroup<'static> = BuiltinGroup::new()
@@ -2740,6 +2826,7 @@ mod tests {
             fallback_chain: Vec::new(),
             route_fallbacks: Vec::new(),
             routing_decision: None,
+            routing_policy: None,
             session_id: None,
             messages: Vec::new(),
             system: None,

@@ -62,6 +62,7 @@ pub async fn run_model_smoke_test(
         fallback_chain: Vec::new(),
         route_fallbacks: Vec::new(),
         routing_decision: None,
+        routing_policy: None,
         session_id: None,
         messages: vec![serde_json::json!({
             "role": "user",

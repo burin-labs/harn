@@ -222,6 +222,14 @@ pub(crate) struct LlmCallOptions {
     pub fallback_chain: Vec<String>,
     pub route_fallbacks: Vec<LlmRouteFallback>,
     pub routing_decision: Option<LlmRoutingDecision>,
+    /// First-class routing policy handle (from `routing_policy({...})`).
+    /// When set, `llm_call` dispatches the request through the
+    /// failover-aware executor in [`crate::llm::routing`] instead of
+    /// the single-shot `execute_llm_call` path. The `provider`/`model`
+    /// fields above still hold the "first link" defaults so callers
+    /// that ignore the policy (e.g. transcript builders) see a
+    /// coherent placeholder.
+    pub routing_policy: Option<std::rc::Rc<crate::llm::routing::RoutingPolicyConfig>>,
 
     // --- Observability ---
     /// Agent session id, when this call is driven from `run_agent_loop_internal`.
@@ -493,6 +501,7 @@ pub(super) fn base_opts(provider: &str) -> LlmCallOptions {
         fallback_chain: Vec::new(),
         route_fallbacks: Vec::new(),
         routing_decision: None,
+        routing_policy: None,
         session_id: None,
         messages: vec![serde_json::json!({"role": "user", "content": "hello"})],
         system: None,

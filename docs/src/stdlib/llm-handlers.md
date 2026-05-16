@@ -195,6 +195,44 @@ out (so cost stays predictable); `with_budget` enforces the persona's
 USD/token cap deterministically; `with_logging`'s `sink` emits receipt
 records consumed by harn-cloud's ops console.
 
+### First-class `routing_policy` (recommended)
+
+The handler composition above is the right tool when each route needs
+arbitrary closure-based custom logic. For the much more common
+"failover chain plus per-call budget" case, build a `routing_policy`
+once and pass it to `llm_call(... routing: policy ...)` directly:
+
+```harn,ignore
+let policy = routing_policy({
+  chain: [
+    {provider: "anthropic", model: "claude-opus-4-20250514"},
+    {provider: "openai",    model: "gpt-4o"},
+    {provider: "ollama",    model: "llama4:70b"},      // local fallback
+  ],
+  failover: {
+    on_status: [429, 500, 502, 503, 504],
+    on_timeout_ms: 30_000,
+    on_error_kinds: ["rate_limit", "schema_validation"],
+    max_attempts: 3,
+  },
+  latency: {race_after_ms: 5000},
+  budget:  {per_call_usd: 0.5, on_exceed: "abort"},
+  observe: {emit_event: "billing.routing_decision"},
+})
+
+let result = llm_call("Summarize this PR.", nil, {routing: policy})
+```
+
+Compared to `compose([with_routing, with_retry, with_fallback])`, the
+primitive is replay-deterministic (every attempt rides on the result
+envelope's `routing` block), records its own tape events
+(`<dispatch>.{decision,attempt,race_started,race_won,race_lost,budget_exceeded,exhausted}`),
+and pays for `latency.race_after_ms` racing out-of-the-box. Migrate
+existing chains by replacing the wrapper composition with one
+`routing_policy({...})` call; layer `compose([with_logging,
+with_budget, ...])` over the policy only when you need bespoke
+closure-level instrumentation.
+
 ### Error / envelope semantics
 
 Every wrapper returns the same envelope shape:

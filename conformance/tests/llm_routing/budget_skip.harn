@@ -1,0 +1,29 @@
+/**
+ * Per-call budget with on_exceed=skip: the first (expensive) link
+ * is skipped before the provider call, and the chain advances to a
+ * cheaper link that fits inside the cap. The trace shows both the
+ * skipped link and the winning attempt.
+ */
+pipeline test(task) {
+  llm_mock_clear()
+  // Only the cheap link should actually call the mock.
+  llm_mock({text: "cheap won", model: "gpt-4o-mini", provider: "openai"})
+  let policy = routing_policy(
+    {
+      chain: [
+        {provider: "anthropic", model: "claude-opus-4-20250514", label: "expensive"},
+        {provider: "openai", model: "gpt-4o-mini", label: "cheap"},
+      ],
+      budget: {per_call_usd: 0.01, on_exceed: "skip"},
+      label: "skip-expensive",
+    },
+  )
+  let result = llm_call("hi", nil, {routing: policy, max_tokens: 2000})
+  println(result.text)
+  let attempts = result.routing.attempts
+  println(len(attempts))
+  println(attempts[0].label)
+  println(attempts[0].status)
+  println(attempts[1].label)
+  println(attempts[1].status)
+}
