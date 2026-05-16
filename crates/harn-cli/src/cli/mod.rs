@@ -18,6 +18,7 @@ mod connect;
 mod connector;
 mod contracts;
 mod crystallize;
+mod demo;
 mod doctor;
 mod dump;
 mod explain;
@@ -77,6 +78,7 @@ pub(crate) use crystallize::{
     CrystallizeArgs, CrystallizeCommand, CrystallizeIngestArgs, CrystallizeShadowArgs,
     CrystallizeValidateArgs,
 };
+pub(crate) use demo::DemoArgs;
 pub(crate) use doctor::DoctorArgs;
 pub(crate) use dump::{
     DumpConnectorMatrixArgs, DumpHighlightKeywordsArgs, DumpProtocolArtifactsArgs,
@@ -267,6 +269,9 @@ SCRIPTING
     Doctor(DoctorArgs),
     /// Configure a starter Harn project and LLM provider settings.
     Quickstart(QuickstartArgs),
+    /// Run a bundled offline demo scenario to see Harn in action without
+    /// API keys. `harn demo` lists scenarios; `harn demo <id>` runs one.
+    Demo(DemoArgs),
     /// Register outbound connector resources with a provider.
     Connect(Box<ConnectArgs>),
     /// Validate pure-Harn connector packages against the connector contract.

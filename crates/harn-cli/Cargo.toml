@@ -22,6 +22,7 @@ default-run = "harn"
 include = [
     "src/**/*",
     "data/**/*",
+    "assets/**/*",
     "build.rs",
     "Cargo.toml",
     "portal-dist/**/*",

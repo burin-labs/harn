@@ -1,0 +1,63 @@
+/**
+ * review-captain demo: a review_captain persona inspects a 5-file
+ * diff, asks one clarifying question (HITL surfaced via the structured
+ * receipt), then emits a verdict with reasoning and a cost rollup.
+ *
+ * Designed to run fully offline against the bundled `tape.jsonl`
+ * fixture under `assets/demo/review-captain/`. The same script also
+ * runs against a real provider when invoked via `harn demo
+ * review-captain --live`.
+ */
+fn diff_summary() {
+  return {
+    repo: "burin-labs/widgets",
+    pr_number: 502,
+    files: [
+      {path: "src/retry.ts", loc_added: 86, loc_removed: 12, risk: "high"},
+      {path: "src/retry.test.ts", loc_added: 124, loc_removed: 0, risk: "low"},
+      {path: "src/http.ts", loc_added: 14, loc_removed: 8, risk: "medium"},
+      {path: "docs/retry.md", loc_added: 38, loc_removed: 0, risk: "low"},
+      {path: "package.json", loc_added: 1, loc_removed: 1, risk: "medium"},
+    ],
+  }
+}
+
+fn render_review_prompt(diff) {
+  let total_added = diff.files[0].loc_added + diff.files[1].loc_added + diff.files[2].loc_added
+    + diff.files[3].loc_added
+    + diff.files[4].loc_added
+  return "[review_captain][pr=${diff.pr_number}][stage=review] Review this 5-file diff: src/retry.ts (+86/-12, high risk), src/retry.test.ts (+124/-0), src/http.ts (+14/-8), docs/retry.md (+38/-0), package.json (+1/-1). Total added: ${total_added}. Identify regressions, missing test coverage, and risky paths. Ask exactly one clarifying question, then propose a verdict."
+}
+
+fn render_clarification_prompt(question) {
+  return "[review_captain][pr=502][stage=clarified] The author answered: \"${question}\" — emit the final verdict envelope as JSON with keys verdict, missing_tests, risky_paths, reasoning."
+}
+
+pipeline default(_task) {
+  let diff = diff_summary()
+  let review_prompt = render_review_prompt(diff)
+  let initial_envelope = llm_call(review_prompt, "You are review_captain, a thorough code reviewer.")
+  let initial_response = initial_envelope.text
+  println("=== review_captain · stage 1 (initial scan) ===")
+  println(initial_response)
+  println("")
+  let author_answer = "Yes, the retry middleware is intended to wrap idempotent requests only; non-idempotent calls bypass it via the `safe: false` opt-out."
+  let clarification_prompt = render_clarification_prompt(author_answer)
+  let final_envelope = llm_call(clarification_prompt, "You are review_captain, a thorough code reviewer.")
+  let final_response = final_envelope.text
+  let receipt = {
+    persona: "review_captain",
+    execution_mode: "advisory",
+    approval_required: false,
+    repo: diff.repo,
+    pr_number: diff.pr_number,
+    files_reviewed: len(diff.files),
+    clarifying_question_asked: true,
+    clarifying_question_answer: author_answer,
+    final_verdict: final_response,
+    receipt_kind: "review_receipt",
+  }
+  println("=== review_captain · stage 2 (final verdict) ===")
+  println(json_stringify(receipt))
+  return receipt
+}

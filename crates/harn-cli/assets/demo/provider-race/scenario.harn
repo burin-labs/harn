@@ -1,0 +1,85 @@
+/**
+ * provider-race demo: race three mocked LLM providers on the same
+ * prompt, then attribute the chosen response by latency and synthetic
+ * cost. Shows off:
+ *   - first-class `parallel each` racing of independent provider calls
+ *   - replayable tape that pins the per-provider response without API keys
+ *   - cost-attribution rollup that the routing_policy primitive (#1649)
+ *     will eventually consume from telemetry directly
+ *
+ * Designed to run fully offline against the bundled `tape.jsonl`
+ * fixture under `assets/demo/provider-race/`. Invoke `--live` to race
+ * the configured providers instead.
+ */
+fn provider_meta() -> list<{name: string, model: string, est_cost_usd: float, sim_latency_ms: int}> {
+  return [
+    {name: "anthropic", model: "claude-opus-4-7", est_cost_usd: 0.0142, sim_latency_ms: 820},
+    {name: "openai", model: "gpt-5", est_cost_usd: 0.0098, sim_latency_ms: 640},
+    {name: "ollama", model: "qwen3.6:35b", est_cost_usd: 0.0, sim_latency_ms: 1180},
+  ]
+}
+
+fn prompt_for(name: string, model: string) -> string {
+  return "[provider_race][provider=${name}][model=${model}] One sentence: what's the strategic moat of replay-deterministic agent runtimes vs. ad-hoc LLM scripts?"
+}
+
+pipeline default(_task) {
+  let prompt = "Race 3 providers on a one-sentence question and pick the lowest-latency winner."
+  println("=== provider-race · prompt ===")
+  println(prompt)
+  println("")
+  let prov = provider_meta()
+  // `parallel each` races the LLM calls; the returned strings are
+  // zipped back to the provider metadata serially below. Splitting the
+  // race result into a single typed string avoids the type checker
+  // widening every per-row dict field to `_`.
+  let responses: list<string> = parallel each prov { p ->
+    println("[start ${p.name}]")
+    let envelope = llm_call(prompt_for(p.name, p.model), "Be concise. Answer in one sentence.")
+    envelope.text
+  }
+  // Zip provider metadata + LLM response into a typed result list.
+  var results: list<{provider: string, model: string, latency_ms: int, est_cost_usd: float, response: string}> = []
+  var i = 0
+  for p in prov {
+    let row = {
+      provider: p.name,
+      model: p.model,
+      latency_ms: p.sim_latency_ms,
+      est_cost_usd: p.est_cost_usd,
+      response: responses[i],
+    }
+    results = results + [row]
+    i = i + 1
+  }
+  // Pick the lowest-latency completion as the "winner" — what a
+  // latency-aware routing_policy would do once #1649 lands.
+  var winner = results[0]
+  for r in results {
+    if r.latency_ms < winner.latency_ms {
+      winner = r
+    }
+  }
+  var total_cost: float = 0.0
+  for r in results {
+    total_cost = total_cost + r.est_cost_usd
+  }
+  for r in results {
+    println("[${r.provider}] latency=${r.latency_ms}ms cost=$${r.est_cost_usd}")
+    println("    ${r.response}")
+    println("")
+  }
+  let attribution = {
+    persona: "routing_policy",
+    receipt_kind: "race_attribution_receipt",
+    winner: winner.provider,
+    winner_latency_ms: winner.latency_ms,
+    winner_cost_usd: winner.est_cost_usd,
+    total_cost_if_serial_usd: total_cost,
+    races_completed: len(results),
+    per_provider: results,
+  }
+  println("=== routing_policy receipt ===")
+  println(json_stringify(attribution))
+  return attribution
+}
