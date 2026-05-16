@@ -1,7 +1,10 @@
 pipeline test(task) {
   transport_mock_clear()
   let server = websocket_server("127.0.0.1:0", {})
-  let ws_timeout_ms = 2000
+  // 10s instead of 2s gives the WebSocket handshake enough headroom when the
+  // conformance suite runs alongside release-harn's other cargo audit lanes;
+  // local solo runs still complete in milliseconds.
+  let ws_timeout_ms = 10000
   assert(websocket_route(server, "/acp", {idle_timeout_ms: 1000}))
   assert(websocket_route(server, "/secure", {auth: {bearer: "secret"}}))
   assert(websocket_route(server, "/limited", {max_message_bytes: 3}))
