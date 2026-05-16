@@ -59,19 +59,57 @@ pub(crate) fn harn_lint_persona_step_allowlist(path: &Path) -> Vec<String> {
     }
 }
 
+/// Read `[lint] template_variant_branch_threshold` from the nearest
+/// harn.toml. Returns `None` when unset; the
+/// `template-variant-explosion` rule falls back to
+/// [`harn_lint::DEFAULT_TEMPLATE_VARIANT_BRANCH_THRESHOLD`].
+pub(crate) fn harn_lint_template_variant_branch_threshold(path: &Path) -> Option<usize> {
+    match harn_config::load_for_path(path) {
+        Ok(cfg) => cfg.lint.template_variant_branch_threshold,
+        Err(e) => {
+            eprintln!("warning: {e}");
+            None
+        }
+    }
+}
+
+/// Read `[lint] disabled` from the nearest harn.toml.
+pub(crate) fn harn_lint_disabled_rules(path: &Path) -> Vec<String> {
+    match harn_config::load_for_path(path) {
+        Ok(cfg) => cfg.lint.disabled.unwrap_or_default(),
+        Err(e) => {
+            eprintln!("warning: {e}");
+            Vec::new()
+        }
+    }
+}
+
 pub(crate) fn collect_harn_targets(targets: &[&str]) -> Vec<PathBuf> {
     let mut files = Vec::new();
     for target in targets {
         let path = Path::new(target);
         if path.is_dir() {
             super::super::collect_harn_files(path, &mut files);
-        } else {
+        } else if is_harn_program_file(path) {
             files.push(path.to_path_buf());
         }
     }
     files.sort();
     files.dedup();
     files
+}
+
+/// Recognize `.harn` program files while excluding `.harn.prompt`
+/// (which `harn lint` routes through the prompt-template lint pass
+/// instead — see `commands::check::template_lint`).
+fn is_harn_program_file(path: &Path) -> bool {
+    let Some(name) = path.file_name().and_then(|n| n.to_str()) else {
+        return false;
+    };
+    if name.ends_with(".harn.prompt") || name.ends_with(".prompt") {
+        return false;
+    }
+    path.extension().is_some_and(|ext| ext == "harn")
 }
 
 /// Collect every function name that appears in a selective import across

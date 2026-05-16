@@ -1,4 +1,4 @@
-use super::ast::{Expr, Node};
+use super::ast::{Expr, IfBranch, Node};
 use super::error::TemplateError;
 use super::expr_parser::parse_expr;
 use super::lexer::{tokenize, Token};
@@ -115,9 +115,16 @@ impl<'a> Parser<'a> {
         let mut branches = Vec::new();
         let mut else_branch = None;
         let mut cur_cond = first_cond;
+        let mut cur_line = line;
+        let mut cur_col = col;
         loop {
             let body = self.parse_block(&["end", "else", "elif"])?;
-            branches.push((cur_cond, body));
+            branches.push(IfBranch {
+                cond: cur_cond,
+                line: cur_line,
+                col: cur_col,
+                body,
+            });
             let tok = self.peek().cloned();
             match tok {
                 Some(Token::Directive {
@@ -149,6 +156,8 @@ impl<'a> Parser<'a> {
                         "elif" => {
                             let cond = parse_expr(tbody[4..].trim(), tline, tcol)?;
                             cur_cond = cond;
+                            cur_line = tline;
+                            cur_col = tcol;
                             continue;
                         }
                         _ => unreachable!(),

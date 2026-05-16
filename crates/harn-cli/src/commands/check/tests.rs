@@ -1373,6 +1373,82 @@ pub fn exposed() -> string {
 }
 
 #[test]
+fn lint_prompt_file_flags_provider_identity_branch() {
+    use super::template_lint::lint_prompt_file_inner;
+    let dir = unique_temp_dir("harn-lint-prompt-identity");
+    std::fs::create_dir_all(&dir).unwrap();
+    let file = dir.join("sample.harn.prompt");
+    std::fs::write(
+        &file,
+        "{{ if llm.provider == \"anthropic\" }}x{{ else }}y{{ end }}\n",
+    )
+    .unwrap();
+    let outcome = lint_prompt_file_inner(&file, None, &[]);
+    assert!(outcome.has_warning);
+    assert!(!outcome.has_error);
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn lint_prompt_file_flags_variant_explosion_above_threshold() {
+    use super::template_lint::lint_prompt_file_inner;
+    let dir = unique_temp_dir("harn-lint-prompt-explosion");
+    std::fs::create_dir_all(&dir).unwrap();
+    let file = dir.join("sample.harn.prompt");
+    let body: String = (0..4)
+        .map(|i| {
+            let flag = match i {
+                0 => "native_tools",
+                1 => "prefers_xml_scaffolding",
+                2 => "supports_assistant_prefill",
+                _ => "prefers_markdown_scaffolding",
+            };
+            format!("{{{{ if llm.capabilities.{flag} }}}}x{{{{ end }}}}\n")
+        })
+        .collect();
+    std::fs::write(&file, body).unwrap();
+    // Default threshold (3): 4 branches trips the rule.
+    let outcome = lint_prompt_file_inner(&file, None, &[]);
+    assert!(outcome.has_warning);
+    // Explicit threshold of 5 silences the rule.
+    let outcome_lifted = lint_prompt_file_inner(&file, Some(5), &[]);
+    assert!(!outcome_lifted.has_warning);
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn lint_prompt_file_respects_disabled_rules() {
+    use super::template_lint::lint_prompt_file_inner;
+    let dir = unique_temp_dir("harn-lint-prompt-disabled");
+    std::fs::create_dir_all(&dir).unwrap();
+    let file = dir.join("sample.harn.prompt");
+    std::fs::write(&file, "{{ if llm.provider == \"anthropic\" }}x{{ end }}\n").unwrap();
+    let outcome = lint_prompt_file_inner(
+        &file,
+        None,
+        &["template-provider-identity-branch".to_string()],
+    );
+    assert!(!outcome.has_warning);
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn lint_collects_prompt_targets_from_directories() {
+    use super::template_lint::collect_prompt_targets;
+    let dir = unique_temp_dir("harn-lint-prompt-collect");
+    std::fs::create_dir_all(dir.join("nested")).unwrap();
+    std::fs::write(dir.join("a.harn.prompt"), "x").unwrap();
+    std::fs::write(dir.join("nested").join("b.harn.prompt"), "y").unwrap();
+    std::fs::write(dir.join("c.txt"), "ignore").unwrap();
+    let target = dir.display().to_string();
+    let files = collect_prompt_targets(&[target.as_str()]);
+    assert_eq!(files.len(), 2);
+    assert!(files.contains(&dir.join("a.harn.prompt")));
+    assert!(files.contains(&dir.join("nested").join("b.harn.prompt")));
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
 fn lint_file_inner_reports_type_aware_lint_rules() {
     let dir = unique_temp_dir("harn-lint-type-aware");
     std::fs::create_dir_all(&dir).unwrap();

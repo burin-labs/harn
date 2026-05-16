@@ -25,6 +25,59 @@ mod tests;
 pub use diagnostic::{LintDiagnostic, LintOptions, LintSeverity, DEFAULT_COMPLEXITY_THRESHOLD};
 pub use naming::simplify_bool_comparison;
 pub use rules::file_header::derive_file_header_title;
+pub use rules::template_variant_explosion::DEFAULT_BRANCH_THRESHOLD as DEFAULT_TEMPLATE_VARIANT_BRANCH_THRESHOLD;
+
+/// Lint a single `.harn.prompt` template source. Returns the
+/// diagnostics produced by the template-specific lint rules
+/// (`template-provider-identity-branch`, `template-variant-explosion`).
+///
+/// `branch_threshold` overrides the default for the variant-
+/// explosion rule (see [`DEFAULT_TEMPLATE_VARIANT_BRANCH_THRESHOLD`]);
+/// `disabled_rules` is the same comma-separated list `harn lint`
+/// accepts everywhere else.
+///
+/// Returns a single `LintDiagnostic` with rule `"template-parse"`
+/// when the template doesn't parse — surface that to the user before
+/// continuing, mirroring how `harn lint` reports parse failures for
+/// `.harn` programs.
+pub fn lint_prompt_template(
+    source: &str,
+    branch_threshold: Option<usize>,
+    disabled_rules: &[String],
+) -> Vec<LintDiagnostic> {
+    let constructs = match harn_vm::stdlib::template::lint::parse(source) {
+        Ok(constructs) => constructs,
+        Err(message) => {
+            return vec![LintDiagnostic {
+                rule: "template-parse",
+                message: format!("template did not parse: {message}"),
+                span: harn_lexer::Span::dummy(),
+                severity: LintSeverity::Error,
+                suggestion: None,
+                fix: None,
+            }];
+        }
+    };
+    let threshold = branch_threshold.unwrap_or(DEFAULT_TEMPLATE_VARIANT_BRANCH_THRESHOLD);
+    let mut diagnostics = Vec::new();
+    diagnostics.extend(rules::template_provider_identity::check(
+        &constructs,
+        source,
+    ));
+    diagnostics.extend(rules::template_variant_explosion::check(
+        &constructs,
+        threshold,
+        source,
+    ));
+    if disabled_rules.is_empty() {
+        diagnostics
+    } else {
+        diagnostics
+            .into_iter()
+            .filter(|d| !rule_disabled(d.rule, disabled_rules))
+            .collect()
+    }
+}
 
 use linter::Linter;
 use rules::file_header::check_require_file_header;

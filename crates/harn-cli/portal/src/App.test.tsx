@@ -100,6 +100,7 @@ const detailPayload = {
   artifacts: [],
   execution_summary: null,
   transcript_steps: [],
+  template_renders: [],
   story: [],
   child_runs: [],
   observability: {

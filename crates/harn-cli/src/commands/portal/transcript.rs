@@ -1,22 +1,35 @@
-use std::collections::HashMap;
+use std::collections::{BTreeMap, HashMap};
 use std::fs;
 use std::path::Path;
 
-use super::dto::{PortalStorySection, PortalTranscriptMessage, PortalTranscriptStep};
+use super::dto::{
+    PortalStorySection, PortalTemplateBranch, PortalTemplateRender, PortalTranscriptMessage,
+    PortalTranscriptStep,
+};
 use super::util::preview_text;
 
 pub(super) fn discover_transcript_steps(
     run_dir: &Path,
     relative_path: &str,
 ) -> Option<Vec<PortalTranscriptStep>> {
+    let path = locate_llm_transcript(run_dir, relative_path)?;
+    parse_transcript_steps(&path).ok()
+}
+
+pub(super) fn discover_template_renders(
+    run_dir: &Path,
+    relative_path: &str,
+) -> Option<Vec<PortalTemplateRender>> {
+    let path = locate_llm_transcript(run_dir, relative_path)?;
+    parse_template_renders(&path).ok()
+}
+
+fn locate_llm_transcript(run_dir: &Path, relative_path: &str) -> Option<std::path::PathBuf> {
     let run_path = run_dir.join(relative_path);
     let stem = run_path.file_stem()?.to_str()?;
     let parent = run_path.parent()?;
     let transcript_path = parent.join(format!("{stem}-llm/llm_transcript.jsonl"));
-    if !transcript_path.exists() {
-        return None;
-    }
-    parse_transcript_steps(&transcript_path).ok()
+    transcript_path.exists().then_some(transcript_path)
 }
 
 fn parse_transcript_steps(path: &Path) -> Result<Vec<PortalTranscriptStep>, String> {
@@ -182,6 +195,120 @@ fn parse_transcript_steps(path: &Path) -> Result<Vec<PortalTranscriptStep>, Stri
     }
 
     Ok(steps)
+}
+
+fn parse_template_renders(path: &Path) -> Result<Vec<PortalTemplateRender>, String> {
+    let content = fs::read_to_string(path)
+        .map_err(|error| format!("failed to read {}: {error}", path.display()))?;
+    let mut out = Vec::new();
+    let policy = harn_vm::redact::current_policy();
+    for line in content.lines().filter(|line| !line.trim().is_empty()) {
+        let mut raw: serde_json::Value = match serde_json::from_str(line) {
+            Ok(value) => value,
+            Err(_) => continue,
+        };
+        policy.redact_json_in_place(&mut raw);
+        if raw.get("type").and_then(|v| v.as_str()) != Some("template.render") {
+            continue;
+        }
+        let Some(record) = extract_template_render(&raw) else {
+            continue;
+        };
+        out.push(record);
+    }
+    Ok(out)
+}
+
+fn extract_template_render(raw: &serde_json::Value) -> Option<PortalTemplateRender> {
+    let template_uri = raw
+        .get("template_uri")
+        .and_then(|v| v.as_str())
+        .unwrap_or("")
+        .to_string();
+    let template_revision_hash = raw
+        .get("template_revision_hash")
+        .and_then(|v| v.as_str())
+        .unwrap_or("")
+        .to_string();
+    let rendered_bytes = raw
+        .get("rendered_bytes")
+        .and_then(|v| v.as_u64())
+        .unwrap_or_default() as usize;
+    let llm = raw.get("llm")?;
+    let provider = llm
+        .get("provider")
+        .and_then(|v| v.as_str())
+        .unwrap_or("")
+        .to_string();
+    let model = llm
+        .get("model")
+        .and_then(|v| v.as_str())
+        .unwrap_or("")
+        .to_string();
+    let family = llm
+        .get("family")
+        .and_then(|v| v.as_str())
+        .unwrap_or("")
+        .to_string();
+    let capabilities = llm
+        .get("capabilities")
+        .and_then(|v| v.as_object())
+        .map(|map| {
+            map.iter()
+                .map(|(k, v)| (k.clone(), v.clone()))
+                .collect::<BTreeMap<_, _>>()
+        })
+        .unwrap_or_default();
+    let branches = raw
+        .get("branches")
+        .and_then(|v| v.as_array())
+        .map(|items| items.iter().filter_map(extract_template_branch).collect())
+        .unwrap_or_default();
+    let span_id = raw.get("span_id").and_then(|v| v.as_u64());
+    let timestamp = raw
+        .get("timestamp")
+        .and_then(|v| v.as_str())
+        .map(str::to_string);
+    Some(PortalTemplateRender {
+        template_uri,
+        template_revision_hash,
+        rendered_bytes,
+        provider,
+        model,
+        family,
+        capabilities,
+        branches,
+        span_id,
+        timestamp,
+    })
+}
+
+fn extract_template_branch(raw: &serde_json::Value) -> Option<PortalTemplateBranch> {
+    let kind = raw.get("kind").and_then(|v| v.as_str())?.to_string();
+    let template_uri = raw
+        .get("template_uri")
+        .and_then(|v| v.as_str())
+        .unwrap_or("")
+        .to_string();
+    let line = raw.get("line").and_then(|v| v.as_u64()).unwrap_or(0) as usize;
+    let col = raw.get("col").and_then(|v| v.as_u64()).unwrap_or(0) as usize;
+    let branch_id = raw
+        .get("branch_id")
+        .and_then(|v| v.as_str())
+        .unwrap_or("")
+        .to_string();
+    let branch_label = raw
+        .get("branch_label")
+        .and_then(|v| v.as_str())
+        .map(str::to_string);
+    Some(PortalTemplateBranch {
+        kind,
+        template_uri,
+        line,
+        col,
+        branch_id,
+        branch_label,
+    })
 }
 
 fn summarize_transcript_step(step: &PortalTranscriptStep) -> String {

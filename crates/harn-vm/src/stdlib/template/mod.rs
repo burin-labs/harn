@@ -35,6 +35,7 @@ mod error;
 mod expr_parser;
 mod filters;
 mod lexer;
+pub mod lint;
 mod llm_context;
 mod parser;
 mod render;
@@ -351,6 +352,45 @@ pub struct PromptSourceSpan {
     pub template_uri: String,
 }
 
+/// One conditional or section decision recorded during a template
+/// render. Powers the "variant resolution" trace surfaced in the
+/// portal so on-call engineers can answer "which capability branch
+/// fired for this model?" without re-running the template. Recorded
+/// deterministically — same `llm` snapshot + bindings always produce
+/// the same trace, which is what makes replay reproducible (#1668).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct BranchDecision {
+    pub kind: BranchKind,
+    pub template_uri: String,
+    pub line: usize,
+    pub col: usize,
+    /// Short identifier for the taken branch. For `{{ if }}`/`elif`:
+    /// `"if"`, `"elif:<idx>"`, `"else"`, or `"none"` when nothing
+    /// matched and no `{{ else }}` was provided. For `{{ section }}`:
+    /// the materialized envelope (e.g. `"xml"`, `"markdown"`,
+    /// `"native_tools"`, `"react"`).
+    pub branch_id: String,
+    /// Human-readable label. For conditionals: the source-derived
+    /// condition expression (e.g. `llm.capabilities.native_tools`).
+    /// For sections: the section name (e.g. `tools`).
+    pub branch_label: Option<String>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum BranchKind {
+    If,
+    Section,
+}
+
+impl BranchKind {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            BranchKind::If => "if",
+            BranchKind::Section => "section",
+        }
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum PromptSpanKind {
     /// Literal template text between directives.
@@ -409,6 +449,32 @@ pub(crate) fn render_stdlib_prompt_asset(
     render_asset_result(&asset, bindings).map_err(VmError::from)
 }
 
+/// Test-only helper: render an inline template under the active LLM
+/// render context and return the rendered text plus the branch trace
+/// that drove `template.render` event emission. The same trace is
+/// emitted to the transcript JSONL when a transcript dir is wired in;
+/// exposing it here lets unit tests assert determinism without
+/// scraping the JSONL.
+#[cfg(test)]
+pub(crate) fn render_template_collect_branch_trace(
+    template: &str,
+) -> Result<(String, Vec<BranchDecision>), TemplateError> {
+    let asset = TemplateAsset::inline(template, None, None);
+    let nodes = parse_cached(&asset)?;
+    let mut out = String::with_capacity(asset.source.len());
+    let augmented = augment_bindings_with_llm(&asset, None);
+    let scope_bindings = augmented.as_ref();
+    let mut scope = Scope::new(scope_bindings);
+    let mut rc = RenderCtx {
+        current_asset: asset.clone(),
+        include_stack: Vec::new(),
+        current_include_parent: None,
+        branch_trace: Some(Vec::new()),
+    };
+    render_nodes(&nodes, &mut scope, &mut rc, &mut out, None)?;
+    Ok((out, rc.branch_trace.unwrap_or_default()))
+}
+
 pub(crate) fn render_asset_with_provenance_result(
     asset: &TemplateAsset,
     bindings: Option<&BTreeMap<String, VmValue>>,
@@ -424,10 +490,16 @@ pub(crate) fn render_asset_with_provenance_result(
     let augmented = augment_bindings_with_llm(asset, bindings);
     let scope_bindings = augmented.as_ref().or(bindings);
     let mut scope = Scope::new(scope_bindings);
+    // Only collect a branch trace when an LLM frame is in scope —
+    // that's the only context where the trace adds debugging value
+    // (capability-adaptive rendering), and the empty-trace events
+    // would otherwise spam every doc-gen / CI render.
+    let llm_ctx = current_llm_render_context();
     let mut rc = RenderCtx {
         current_asset: asset.clone(),
         include_stack: Vec::new(),
         current_include_parent: None,
+        branch_trace: llm_ctx.as_ref().map(|_| Vec::new()),
     };
     let mut spans = if collect_provenance {
         Some(Vec::new())
@@ -443,5 +515,27 @@ pub(crate) fn render_asset_with_provenance_result(
         }
         e
     })?;
+    if let (Some(ctx), Some(trace)) = (llm_ctx, rc.branch_trace.take()) {
+        emit_template_render_event(asset, &ctx, &trace, out.len());
+    }
     Ok((out, spans.unwrap_or_default()))
+}
+
+/// Emit a `template.render` transcript event capturing the resolved
+/// LLM identity + capability snapshot and the branch trace produced
+/// during rendering. Implementation in
+/// [`crate::llm::agent_observe::record_template_render`].
+fn emit_template_render_event(
+    asset: &TemplateAsset,
+    ctx: &LlmRenderContext,
+    trace: &[BranchDecision],
+    rendered_bytes: usize,
+) {
+    crate::llm::agent_observe::record_template_render(
+        &asset.uri,
+        asset.template_revision_hash().as_str(),
+        ctx,
+        trace,
+        rendered_bytes,
+    );
 }

@@ -21,6 +21,7 @@
 //! require_file_header = false
 //! complexity_threshold = 25
 //! persona_step_allowlist = ["legacy_helper"]
+//! template_variant_branch_threshold = 3
 //!
 //! # Reusable fleets consumed by `harn eval prompt --fleet-name <name>`.
 //! [eval.fleets.frontier]
@@ -84,6 +85,10 @@ pub struct LintConfig {
     /// bodies without being declared as `@step`.
     #[serde(default, alias = "persona-step-allowlist")]
     pub persona_step_allowlist: Vec<String>,
+    /// Threshold for the `template-variant-explosion` rule. Defaults
+    /// to [`harn_lint::DEFAULT_TEMPLATE_VARIANT_BRANCH_THRESHOLD`].
+    #[serde(default, alias = "template-variant-branch-threshold")]
+    pub template_variant_branch_threshold: Option<usize>,
 }
 
 /// `[eval]` section of `harn.toml`. Reserves a `[eval.fleets.<name>]`

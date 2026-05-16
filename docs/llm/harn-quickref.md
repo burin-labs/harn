@@ -2688,6 +2688,16 @@ and LSP go-to-definition follow `@`-paths to the target file.
   `qwen` / `llama` / `mistral` / `deepseek` / `phi` / `grok` / `command`.
   User bindings that already provide an `llm` key win for back-compat
   and trigger a one-shot warning under `template.llm_scope`.
+- **Variant resolution transcripts**: a `template.render` event lands in
+  `llm_transcript.jsonl` for every render under an LLM frame, carrying
+  the resolved `llm` snapshot and a per-branch / per-section trace.
+  Surface in the portal under "Variant resolution".
+- **Drift-prevention lints**: `harn lint` walks `.harn.prompt` files and
+  warns when a template branches on `llm.provider` / `llm.model` /
+  `llm.family` directly (`template-provider-identity-branch`) or when
+  more than three capability-aware conditionals appear in the same file
+  (`template-variant-explosion`). Configure the threshold via
+  `[lint] template_variant_branch_threshold = N`.
 - Full reference: `docs/src/prompt-templating.md`.
 
 ## Discovery

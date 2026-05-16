@@ -316,8 +316,9 @@ async fn async_main() {
         Command::Lint(args) => {
             let targets: Vec<&str> = args.targets.iter().map(String::as_str).collect();
             let files = commands::check::collect_harn_targets(&targets);
-            if files.is_empty() {
-                command_error("no .harn files found under the given target(s)");
+            let prompt_files = commands::check::collect_prompt_targets(&targets);
+            if files.is_empty() && prompt_files.is_empty() {
+                command_error("no .harn or .harn.prompt files found under the given target(s)");
             }
             let module_graph = commands::check::build_module_graph(&files);
             let cross_file_imports = commands::check::collect_cross_file_imports(&module_graph);
@@ -341,6 +342,16 @@ async fn async_main() {
                         &persona_step_allowlist,
                     );
                 }
+                for file in &prompt_files {
+                    let threshold =
+                        commands::check::harn_lint_template_variant_branch_threshold(file);
+                    let disabled = commands::check::harn_lint_disabled_rules(file);
+                    // The template lint rules don't carry autofix
+                    // edits yet (intentionally — see
+                    // `template_provider_identity::make_diagnostic`),
+                    // so `--fix` is equivalent to a regular run.
+                    commands::check::lint_prompt_file_inner(file, threshold, &disabled);
+                }
             } else {
                 let mut should_fail = false;
                 for file in &files {
@@ -361,6 +372,15 @@ async fn async_main() {
                         complexity_threshold,
                         &persona_step_allowlist,
                     );
+                    should_fail |= outcome.should_fail(config.strict);
+                }
+                for file in &prompt_files {
+                    let threshold =
+                        commands::check::harn_lint_template_variant_branch_threshold(file);
+                    let disabled = commands::check::harn_lint_disabled_rules(file);
+                    let config = package::load_check_config(Some(file));
+                    let outcome =
+                        commands::check::lint_prompt_file_inner(file, threshold, &disabled);
                     should_fail |= outcome.should_fail(config.strict);
                 }
                 if should_fail {

@@ -85,6 +85,34 @@ condensed series summaries instead of full per-patch history.
 
 ### Added
 
+- **`template.render` transcript events for variant resolution (#1668).**
+  Every `render()` / `render_prompt()` call performed under an
+  LLM-aware frame now emits a `template.render` event into the run's
+  `llm_transcript.jsonl`. The event captures the resolved `llm` snapshot
+  (`provider`, `model`, `family`, `capabilities`), a per-`{{ if }}`
+  /`{{ elif }}` /`{{ section }}` branch trace with line + column
+  anchors, the template URI + content hash, and the rendered byte count.
+  The portal surfaces a new "Variant resolution" panel showing which
+  capability branches fired for the active model, so an on-call engineer
+  can answer "which prompt did this model actually see?" without
+  re-running the script. Renders outside any LLM frame (doc-gen, CI)
+  emit no event. The branch trace is deterministic across repeated
+  renders of the same template + bindings, which is what makes replay
+  reproducible.
+- **`template-provider-identity-branch` lint rule (#1669).** `harn lint`
+  now also walks `.harn.prompt` (and bare `.prompt`) files and warns
+  when a template branches on `llm.provider`, `llm.model`, or
+  `llm.family` directly. Vendor-identity strings are the trap every
+  prompt-variant framework before #1663 fell into — the diagnostic
+  carries a per-comparison capability-flag replacement suggestion
+  (e.g. `provider == "anthropic"` →
+  `llm.capabilities.prefers_xml_scaffolding`).
+- **`template-variant-explosion` lint rule (#1669).** Companion rule
+  that warns when a single `.harn.prompt` carries more than `N`
+  capability-aware conditionals — combinatorial explosion + drift
+  between materializations is the #1 failure mode for prompt-variant
+  systems per the literature. Default threshold is 3, configurable via
+  `[lint] template_variant_branch_threshold = N` in `harn.toml`.
 - **`harn eval prompt <file> --fleet <models>` (#1670).** New CLI
   subcommand that renders a single `.harn.prompt` template against a
   fleet of models so authors can validate that capability-adapted
