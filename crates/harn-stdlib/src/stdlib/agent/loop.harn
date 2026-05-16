@@ -582,12 +582,10 @@ fn __detect_native_fallback(llm_result, parsed, turn_opts, fallback_index, sessi
   let policy = turn_opts?.native_tool_fallback ?? "reject"
   let accepted = if policy == "allow" {
     true
+  } else if policy == "allow_once" {
+    new_index == 1
   } else {
-    if policy == "allow_once" {
-      new_index == 1
-    } else {
-      false
-    }
+    false
   }
   agent_record_native_tool_fallback(
     session_id,

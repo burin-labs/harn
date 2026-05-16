@@ -6,7 +6,7 @@
 use crate::ast::*;
 
 /// Check whether a single statement definitely exits (return/throw/break/continue
-/// or an if/else where both branches exit).
+/// or an if/else / match where every reachable branch exits).
 pub fn stmt_definitely_exits(stmt: &SNode) -> bool {
     match &stmt.node {
         Node::ReturnStmt { .. } | Node::ThrowStmt { .. } | Node::BreakStmt | Node::ContinueStmt => {
@@ -17,8 +17,26 @@ pub fn stmt_definitely_exits(stmt: &SNode) -> bool {
             else_body: Some(else_body),
             ..
         } => block_definitely_exits(then_body) && block_definitely_exits(else_body),
+        // A `match` definitely exits when every arm exits AND at least
+        // one arm is an unguarded wildcard (`_ -> { ... }`) — that
+        // guarantees the match is exhaustive at the source level
+        // without re-deriving the value's type here. The lint and flow
+        // narrowing layers both rely on this to flag code after a
+        // returning `match` as unreachable, and to let the type
+        // checker treat the tail as `never`.
+        Node::MatchExpr { arms, .. } => match_definitely_exits(arms),
         _ => false,
     }
+}
+
+fn match_definitely_exits(arms: &[MatchArm]) -> bool {
+    if arms.is_empty() {
+        return false;
+    }
+    let has_unguarded_wildcard = arms.iter().any(|arm| {
+        arm.guard.is_none() && matches!(&arm.pattern.node, Node::Identifier(name) if name == "_")
+    });
+    has_unguarded_wildcard && arms.iter().all(|arm| block_definitely_exits(&arm.body))
 }
 
 /// Check whether a block definitely exits (contains a terminating statement).

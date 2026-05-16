@@ -130,12 +130,10 @@ pub fn agent_autocompact_if_needed(session, opts) {
   }
   let engine_strategy = if policy_label != "" {
     __compaction_engine_strategy(policy_label)
+  } else if type_of(opts?.compact_strategy) == "string" {
+    opts.compact_strategy
   } else {
-    if type_of(opts?.compact_strategy) == "string" {
-      opts.compact_strategy
-    } else {
-      "observation_mask"
-    }
+    "observation_mask"
   }
   let keep_last = __compaction_keep_last(opts)
   let compact_opts = __compact_options(opts, engine_strategy, keep_last)

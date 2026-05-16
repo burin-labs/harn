@@ -26,12 +26,10 @@ pipeline default() {
   // Multiple branches via chained else-if still work.
   let grade = if 75 >= 90 {
     "A"
+  } else if 75 >= 80 {
+    "B"
   } else {
-    if 75 >= 80 {
-      "B"
-    } else {
-      "C"
-    }
+    "C"
   }
   println(grade)
 }

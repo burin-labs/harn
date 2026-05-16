@@ -62,12 +62,37 @@ pub(super) fn contains_nil(ty: &TypeExpr) -> bool {
     }
 }
 
-/// Remove a named type from a union, collapsing single-element unions.
-/// Returns `Some(Never)` when all members are removed (exhausted).
+/// Whether a union member corresponds to the `type_of(...)` string
+/// `target`. Recognises both the bare `Named(target)` form and the
+/// parameterised constructor forms (`List<T>` → "list", `DictType` /
+/// `Shape` → "dict", `FnType` → "closure", `Iter` → "iter",
+/// `Generator` → "generator", `Stream` → "stream") plus literal
+/// refinements (`LitString` → "string", `LitInt` → "int"). Without
+/// this, `type_of(x) == "list"` would refuse to narrow `list<int> | int`
+/// because the union member is `List(int)`, not `Named("list")`.
+fn member_matches_runtime_kind(member: &TypeExpr, target: &str) -> bool {
+    match (member, target) {
+        (TypeExpr::Named(n), t) => n == t,
+        (TypeExpr::List(_), "list") => true,
+        (TypeExpr::DictType(_, _), "dict") => true,
+        (TypeExpr::Shape(_), "dict") => true,
+        (TypeExpr::FnType { .. }, "closure") => true,
+        (TypeExpr::Iter(_), "iter") => true,
+        (TypeExpr::Generator(_), "generator") => true,
+        (TypeExpr::Stream(_), "stream") => true,
+        (TypeExpr::LitString(_), "string") => true,
+        (TypeExpr::LitInt(_), "int") => true,
+        _ => false,
+    }
+}
+
+/// Remove every union member whose runtime `type_of` would equal
+/// `to_remove`, collapsing single-element unions. Returns `Some(Never)`
+/// when all members are removed (exhausted).
 pub(super) fn remove_from_union(members: &[TypeExpr], to_remove: &str) -> InferredType {
     let remaining: Vec<TypeExpr> = members
         .iter()
-        .filter(|m| !matches!(m, TypeExpr::Named(n) if n == to_remove))
+        .filter(|m| !member_matches_runtime_kind(m, to_remove))
         .cloned()
         .collect();
     match remaining.len() {
@@ -77,15 +102,20 @@ pub(super) fn remove_from_union(members: &[TypeExpr], to_remove: &str) -> Inferr
     }
 }
 
-/// Narrow a union to just one named type, if that type is a member.
+/// Narrow a union to the (possibly parameterised) members whose
+/// runtime `type_of` equals `target`. Returns the single matching
+/// member when only one matches, a residual union when several match,
+/// and `None` when no member matches.
 pub(super) fn narrow_to_single(members: &[TypeExpr], target: &str) -> InferredType {
-    if members
+    let matched: Vec<TypeExpr> = members
         .iter()
-        .any(|m| matches!(m, TypeExpr::Named(n) if n == target))
-    {
-        Some(TypeExpr::Named(target.to_string()))
-    } else {
-        None
+        .filter(|m| member_matches_runtime_kind(m, target))
+        .cloned()
+        .collect();
+    match matched.len() {
+        0 => None,
+        1 => Some(matched.into_iter().next().unwrap()),
+        _ => Some(TypeExpr::Union(matched)),
     }
 }
 

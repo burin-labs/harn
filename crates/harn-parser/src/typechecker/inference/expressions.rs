@@ -286,8 +286,19 @@ impl TypeChecker {
                 if all_typed && !params.is_empty() {
                     let param_types: Vec<TypeExpr> =
                         params.iter().filter_map(|p| p.type_expr.clone()).collect();
-                    // Try to infer return type from last expression in body
-                    let ret = body.last().and_then(|last| self.infer_type(last, scope));
+                    // Infer return type in a scope that includes the
+                    // closure's typed params; otherwise the body's
+                    // last-expression reference to a param is treated
+                    // as an unbound name and the closure falls back to
+                    // the opaque `closure` type, which has no body
+                    // checks against an expected `fn(...)` slot.
+                    let mut closure_scope = scope.child();
+                    for param in params {
+                        closure_scope.define_var(&param.name, param.type_expr.clone());
+                    }
+                    let ret = body
+                        .last()
+                        .and_then(|last| self.infer_type(last, &closure_scope));
                     if let Some(ret_type) = ret {
                         return Some(TypeExpr::FnType {
                             params: param_types,
@@ -729,25 +740,35 @@ impl TypeChecker {
             | Node::BreakStmt
             | Node::ContinueStmt => Some(TypeExpr::Never),
 
-            // If/else as expression: merge branch types.
+            // If/else as expression: merge branch types. An `if` with no
+            // `else` falls through to `nil` on the falsy path, so the
+            // expression type is `T | nil` (not just `T`) — otherwise
+            // `let x: int = if cond { 1 }` would type-check but run-time
+            // produce `nil` and crash on the first `int` use.
             Node::IfElse {
                 then_body,
                 else_body,
                 ..
             } => {
                 let then_type = self.infer_block_type(then_body, scope);
-                let else_type = else_body
-                    .as_ref()
-                    .and_then(|eb| self.infer_block_type(eb, scope));
-                match (then_type, else_type) {
-                    (Some(TypeExpr::Never), Some(TypeExpr::Never)) => Some(TypeExpr::Never),
-                    (Some(TypeExpr::Never), Some(other)) | (Some(other), Some(TypeExpr::Never)) => {
-                        Some(other)
+                match else_body {
+                    Some(eb) => {
+                        let else_type = self.infer_block_type(eb, scope);
+                        match (then_type, else_type) {
+                            (Some(TypeExpr::Never), Some(TypeExpr::Never)) => Some(TypeExpr::Never),
+                            (Some(TypeExpr::Never), Some(other))
+                            | (Some(other), Some(TypeExpr::Never)) => Some(other),
+                            (Some(t), Some(e)) if t == e => Some(t),
+                            (Some(t), Some(e)) => Some(simplify_union(vec![t, e])),
+                            (Some(t), None) => Some(t),
+                            (None, _) => None,
+                        }
                     }
-                    (Some(t), Some(e)) if t == e => Some(t),
-                    (Some(t), Some(e)) => Some(simplify_union(vec![t, e])),
-                    (Some(t), None) => Some(t),
-                    (None, _) => None,
+                    None => match then_type {
+                        Some(TypeExpr::Never) => Some(TypeExpr::Named("nil".into())),
+                        Some(t) => Some(simplify_union(vec![t, TypeExpr::Named("nil".into())])),
+                        None => None,
+                    },
                 }
             }
 

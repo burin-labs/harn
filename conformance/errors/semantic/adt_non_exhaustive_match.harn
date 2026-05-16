@@ -1,9 +1,9 @@
 // Phase C: missing-variant `match` is a hard error, not a warning.
 // `Edit` is unmatched and there is no wildcard arm.
 enum Action {
-  Create,
-  Edit,
-  Delete,
+  Create
+  Edit
+  Delete
 }
 
 pipeline test(task) {

@@ -242,12 +242,10 @@ pub fn ui_resource(uri, name, html, options = nil) -> UiResource {
   let encoding = opts?.contents_encoding ?? "utf8"
   let contents = if encoding == "base64" {
     bytes_to_base64(bytes_from_string(source))
+  } else if encoding == "utf8" {
+    source
   } else {
-    if encoding == "utf8" {
-      source
-    } else {
-      throw "std/ui_resource: contents_encoding must be utf8 or base64, got " + __ui_text(encoding)
-    }
+    throw "std/ui_resource: contents_encoding must be utf8 or base64, got " + __ui_text(encoding)
   }
   let envelope = {
     schema: UI_RESOURCE_SCHEMA,

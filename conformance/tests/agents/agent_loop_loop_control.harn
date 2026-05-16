@@ -67,12 +67,10 @@ pipeline default() {
       loop_control: { state ->
         if state.budget.remaining > 0 {
           nil
+        } else if state.turn.tool_call_count > 0 {
+          {action: "extend", by: 1, reason: "user-policy: tool progress"}
         } else {
-          if state.turn.tool_call_count > 0 {
-            {action: "extend", by: 1, reason: "user-policy: tool progress"}
-          } else {
-            nil
-          }
+          nil
         }
       },
     },

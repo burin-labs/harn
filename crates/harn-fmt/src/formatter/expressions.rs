@@ -361,11 +361,20 @@ impl Formatter<'_> {
                 result.push_str(&self.format_body_string(then_body, inner));
                 let close = "  ".repeat(indent);
                 if let Some(eb) = else_body {
-                    result.push_str(&close);
-                    result.push_str("} else {\n");
-                    result.push_str(&self.format_body_string(eb, inner));
-                    result.push_str(&close);
-                    result.push('}');
+                    // Render `else if` as a single chain when the else
+                    // body is a sole nested IfElse — matches the source
+                    // form and avoids gratuitously deepening indentation.
+                    if eb.len() == 1 && matches!(eb[0].node, Node::IfElse { .. }) {
+                        result.push_str(&close);
+                        result.push_str("} else ");
+                        result.push_str(&self.format_expr(&eb[0], indent));
+                    } else {
+                        result.push_str(&close);
+                        result.push_str("} else {\n");
+                        result.push_str(&self.format_body_string(eb, inner));
+                        result.push_str(&close);
+                        result.push('}');
+                    }
                 } else {
                     result.push_str(&close);
                     result.push('}');

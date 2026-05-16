@@ -140,12 +140,10 @@ fn __command_normalize_result(result) {
   let success = __command_success(raw)
   let status = if raw?.status != nil {
     raw.status
+  } else if success {
+    "completed"
   } else {
-    if success {
-      "completed"
-    } else {
-      "failed"
-    }
+    "failed"
   }
   return raw
     + {

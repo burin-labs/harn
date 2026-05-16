@@ -1093,12 +1093,10 @@ fn __tot_finalize(search, k, max_depth, beam_width, nodes, best, stop_reason) {
   let best_node = best.terminal ?? best.seen
   let reason = if stop_reason != nil {
     stop_reason
+  } else if best.terminal != nil {
+    "terminal"
   } else {
-    if best.terminal != nil {
-      "terminal"
-    } else {
-      "exhausted"
-    }
+    "exhausted"
   }
   return {
     ok: best.terminal != nil,

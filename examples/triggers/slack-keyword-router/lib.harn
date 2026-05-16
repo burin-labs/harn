@@ -6,12 +6,10 @@ pub fn route_message(event: TriggerEvent) -> dict {
   let text = lowercase(raw.text ?? raw.event?.text ?? "")
   let route = if contains(text, "urgent") {
     "priority"
+  } else if contains(text, "help") {
+    "support"
   } else {
-    if contains(text, "help") {
-      "support"
-    } else {
-      "ambient"
-    }
+    "ambient"
   }
   return {route: route, channel: raw.channel ?? raw.event?.channel, text: text}
 }

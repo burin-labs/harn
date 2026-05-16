@@ -548,7 +548,7 @@ fn replay_qa_history_into_session(session_id, qa_history) {
 fn save_session(session_id, snap_path) {
   let snap = agent_session_snapshot(session_id)
   let messages = if type_of(snap) == "dict" {
-    snap?.messages ?? []
+    snap.messages ?? []
   } else {
     []
   }
@@ -617,12 +617,10 @@ pipeline default() {
   //   "first_turn"       — turn 1, no qa_history, full workspace orientation.
   let resume_mode = if resumed {
     "session"
+  } else if len(qa_history) > 0 {
+    "textual_fallback"
   } else {
-    if len(qa_history) > 0 {
-      "textual_fallback"
-    } else {
-      "first_turn"
-    }
+    "first_turn"
   }
   let user_prompt = if resume_mode == "session" {
     let last = qa_history[len(qa_history) - 1]
@@ -632,13 +630,11 @@ pipeline default() {
       ""
     }
     build_resume_turn_prompt(answer, len(qa_history))
+  } else if resume_mode == "textual_fallback" {
+    replay_qa_history_into_session(session_id, qa_history)
+    "(Continue from the prior conversation. End this step with one TERMINAL call: ask_question or exit_plan_mode.)"
   } else {
-    if resume_mode == "textual_fallback" {
-      replay_qa_history_into_session(session_id, qa_history)
-      "(Continue from the prior conversation. End this step with one TERMINAL call: ask_question or exit_plan_mode.)"
-    } else {
-      build_first_turn_prompt(effective_task)
-    }
+    build_first_turn_prompt(effective_task)
   }
   write_file(
     path_join(dir, "last-prompt.txt"),
@@ -671,12 +667,10 @@ pipeline default() {
   save_session(session_id, snap_path)
   let outcome = if file_exists(path_join(dir, "plan.json")) {
     "exit_plan_mode"
+  } else if file_exists(path_join(dir, "pending.json")) {
+    "ask_question"
   } else {
-    if file_exists(path_join(dir, "pending.json")) {
-      "ask_question"
-    } else {
-      "no_terminal"
-    }
+    "no_terminal"
   }
   let diag = {
     outcome: outcome,
@@ -695,6 +689,6 @@ pipeline default() {
   println("[qmode] step=${outcome} status=${diag?.status} iterations=${diag?.iterations}")
   if outcome == "no_terminal" {
     println("[qmode] WARN: model never called a terminal tool. visible_text:")
-    println(diag?.visible_text)
+    println(diag.visible_text)
   }
 }

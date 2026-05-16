@@ -1,0 +1,23 @@
+/**
+ * An `if` with no `else` arm falls through to `nil` on the falsy
+ * path, so the expression's static type is `T | nil`, not `T`.
+ * `let x: int = if cond { 1 }` must be a type error; `int?` works.
+ * Adding `?? default` collapses the union back to `T`.
+ */
+pipeline default() {
+  let cond = true
+  let maybe: int? = if cond {
+    42
+  }
+  println(maybe)
+  let with_default: int = if cond {
+    7
+  }
+    ?? 0
+  println(with_default + 1)
+  let cond2 = false
+  let none: int? = if cond2 {
+    9
+  }
+  println(none)
+}

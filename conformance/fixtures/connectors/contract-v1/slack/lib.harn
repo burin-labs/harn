@@ -25,21 +25,21 @@ pub fn normalize_inbound(raw) {
   if body.type == "url_verification" {
     return {
       type: "immediate_response",
-      immediate_response: {status: 200, headers: {["content-type"]: "text/plain; charset=utf-8"}, body: body.challenge},
+      immediate_response: {status: 200, headers: {"content-type": "text/plain; charset=utf-8"}, body: body.challenge},
     }
   }
   return {
     type: "event",
     event: {
-    kind: if body.event.type == "message" && body.event.channel_type == "channel" {
-    "message.channels"
-  } else {
-    body.event.type
-  },
-    dedupe_key: body.event_id,
-    payload: body,
-    signature_status: {state: "verified"},
-  },
+      kind: if body.event.type == "message" && body.event.channel_type == "channel" {
+        "message.channels"
+      } else {
+        body.event.type
+      },
+      dedupe_key: body.event_id,
+      payload: body,
+      signature_status: {state: "verified"},
+    },
   }
 }
 

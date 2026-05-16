@@ -1,0 +1,34 @@
+/**
+ * `type_of(x) == "list"` (and "dict", "closure", "iter", "generator",
+ * "stream") must narrow through parameterised constructors — not only
+ * `Named("list")` members — so a `list<int> | int` union narrows to
+ * `list<int>` on the truthy branch and `int` on the falsy branch.
+ */
+pipeline test(task) {
+  fn describe_list(v: list<int> | int) -> string {
+    if type_of(v) == "list" {
+      // v: list<int> here, so len/sum work.
+      return "list of ${len(v)}"
+    }
+    return "int: ${v + 1}"
+  }
+  fn describe_dict(v: dict<string, int> | int) -> string {
+    if type_of(v) == "dict" {
+      let keys: list<string> = v.keys()
+      return "dict with ${len(keys)} keys"
+    }
+    return "int: ${v}"
+  }
+  fn describe_single(v: list<int>) -> string {
+    if type_of(v) != "list" {
+      // Unreachable — v is statically known to be a list.
+      return "impossible"
+    }
+    return "list of ${len(v)}"
+  }
+  log(describe_list([1, 2, 3]))
+  log(describe_list(42))
+  log(describe_dict({a: 1, b: 2}))
+  log(describe_dict(7))
+  log(describe_single([10, 20]))
+}
