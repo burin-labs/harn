@@ -59,6 +59,15 @@ pub fn agent_daemon_snapshot(session, opts, daemon_state = "idle", iteration = 0
 pub fn agent_daemon_step(session, opts, iteration) {
   let snapshot = agent_daemon_snapshot(session, opts, "idle", iteration)
   let timeout = opts?.wake_interval_ms ?? 0
+  __host_fire_session_hook(
+    "session_idle",
+    {
+      session: {id: session.session_id},
+      iteration: iteration,
+      wake_interval_ms: timeout,
+      consolidate_on_idle: opts?.consolidate_on_idle ?? false,
+    },
+  )
   var wake = __host_agent_daemon_wait(session.session_id, timeout)
   while wake?.reason == nil && timeout > 0 {
     wake = __host_agent_daemon_wait(session.session_id, timeout)
