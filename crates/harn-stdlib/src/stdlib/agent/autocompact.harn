@@ -140,6 +140,21 @@ pub fn agent_autocompact_if_needed(session, opts) {
   let keep_last = __compaction_keep_last(opts)
   let compact_opts = __compact_options(opts, engine_strategy, keep_last)
   let messages = __host_agent_session_messages(session.session_id)
+  let pre_payload = {
+    session: {id: session.session_id},
+    strategy: if policy_label != "" {
+      policy_label
+    } else {
+      engine_strategy
+    },
+    engine_strategy: engine_strategy,
+    message_count: len(messages),
+    keep_last: keep_last ?? 0,
+  }
+  let pre_control = __host_fire_session_hook("pre_compact", pre_payload)
+  if pre_control?.control == "block" {
+    return nil
+  }
   let compacted = transcript_auto_compact(messages, compact_opts)
   let summary = __auto_compact_summary(messages, compacted)
   let archived = len(messages) - len(compacted)
@@ -157,6 +172,9 @@ pub fn agent_autocompact_if_needed(session, opts) {
       keep_last: keep_last ?? 0,
     }
     agent_record_compaction(session.session_id, metadata)
+    let post_payload = pre_payload
+      + {archived_messages: archived, new_summary_len: len(summary), remaining_messages: len(compacted)}
+    __host_fire_session_hook("post_compact", post_payload)
   }
   return nil
 }

@@ -46,6 +46,26 @@ pub enum HookEvent {
     OnPersonaPaused,
     #[serde(rename = "OnPersonaResumed")]
     OnPersonaResumed,
+    #[serde(rename = "SessionStart")]
+    SessionStart,
+    #[serde(rename = "SessionEnd")]
+    SessionEnd,
+    #[serde(rename = "UserPromptSubmit")]
+    UserPromptSubmit,
+    #[serde(rename = "PreCompact")]
+    PreCompact,
+    #[serde(rename = "PostCompact")]
+    PostCompact,
+    #[serde(rename = "PermissionAsked")]
+    PermissionAsked,
+    #[serde(rename = "PermissionReplied")]
+    PermissionReplied,
+    #[serde(rename = "FileEdited")]
+    FileEdited,
+    #[serde(rename = "SessionError")]
+    SessionError,
+    #[serde(rename = "SessionIdle")]
+    SessionIdle,
 }
 
 impl HookEvent {
@@ -68,6 +88,35 @@ impl HookEvent {
             Self::OnHandoffEmitted => "OnHandoffEmitted",
             Self::OnPersonaPaused => "OnPersonaPaused",
             Self::OnPersonaResumed => "OnPersonaResumed",
+            Self::SessionStart => "SessionStart",
+            Self::SessionEnd => "SessionEnd",
+            Self::UserPromptSubmit => "UserPromptSubmit",
+            Self::PreCompact => "PreCompact",
+            Self::PostCompact => "PostCompact",
+            Self::PermissionAsked => "PermissionAsked",
+            Self::PermissionReplied => "PermissionReplied",
+            Self::FileEdited => "FileEdited",
+            Self::SessionError => "SessionError",
+            Self::SessionIdle => "SessionIdle",
+        }
+    }
+
+    /// Parse a session-level hook event name. Returns `Err` for unknown
+    /// or non-session events; persona/tool events are intentionally
+    /// rejected so each registration surface owns its own event set.
+    pub fn parse_session_event(name: &str) -> Result<Self, String> {
+        match name.trim() {
+            "SessionStart" | "session_start" => Ok(Self::SessionStart),
+            "SessionEnd" | "session_end" => Ok(Self::SessionEnd),
+            "UserPromptSubmit" | "user_prompt_submit" => Ok(Self::UserPromptSubmit),
+            "PreCompact" | "pre_compact" => Ok(Self::PreCompact),
+            "PostCompact" | "post_compact" => Ok(Self::PostCompact),
+            "PermissionAsked" | "permission_asked" => Ok(Self::PermissionAsked),
+            "PermissionReplied" | "permission_replied" => Ok(Self::PermissionReplied),
+            "FileEdited" | "file_edited" => Ok(Self::FileEdited),
+            "SessionError" | "session_error" | "error" => Ok(Self::SessionError),
+            "SessionIdle" | "session_idle" => Ok(Self::SessionIdle),
+            other => Err(format!("unknown session hook event `{other}`")),
         }
     }
 
@@ -79,6 +128,39 @@ impl HookEvent {
             WorkerEvent::WorkerCompleted => Self::WorkerCompleted,
             WorkerEvent::WorkerFailed => Self::WorkerFailed,
             WorkerEvent::WorkerCancelled => Self::WorkerCancelled,
+        }
+    }
+}
+
+/// Control flow returned by a session-level lifecycle hook.
+///
+/// Most session events are advisory (`Allow`). The two veto-capable
+/// events — `UserPromptSubmit` and `PreCompact` — accept `Block`.
+/// `PermissionAsked` additionally accepts a `Decision` short-circuit so
+/// hooks can override the dynamic permission policy entirely.
+#[derive(Clone, Debug)]
+pub enum HookControl {
+    Allow,
+    Block {
+        reason: String,
+    },
+    Decision {
+        kind: String,
+        reason: Option<String>,
+    },
+}
+
+impl HookControl {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Self::Allow => "allow",
+            Self::Block { .. } => "block",
+            Self::Decision { kind, .. } => match kind.as_str() {
+                "allow" => "decision_allow",
+                "deny" => "decision_deny",
+                "ask" => "decision_ask",
+                _ => "decision_unknown",
+            },
         }
     }
 }
@@ -220,10 +302,49 @@ struct RuntimeHook {
 #[derive(Clone, Debug)]
 pub struct VmLifecycleHookInvocation {
     pub closure: Rc<VmClosure>,
+    pub handler_name: String,
+}
+
+#[derive(Clone, Debug)]
+struct VmLifecycleHookRegistration {
+    handler_name: String,
+    closure: Rc<VmClosure>,
 }
 
 thread_local! {
     static RUNTIME_HOOKS: RefCell<Vec<RuntimeHook>> = const { RefCell::new(Vec::new()) };
+    /// Pending `FileEdited` notifications queued from sync builtins
+    /// (e.g. `write_file`). Drained at safe async boundaries — typically
+    /// at the start of each agent-loop turn — so VM closure handlers
+    /// can run inside an async builtin context.
+    static FILE_EDIT_QUEUE: RefCell<Vec<FileEditedNotification>> = const { RefCell::new(Vec::new()) };
+}
+
+#[derive(Clone, Debug)]
+pub struct FileEditedNotification {
+    pub path: String,
+    pub metadata: serde_json::Value,
+}
+
+/// Queue a file-edited notification. Safe to call from sync contexts.
+pub fn queue_file_edited(path: &str, metadata: serde_json::Value) {
+    FILE_EDIT_QUEUE.with(|queue| {
+        queue.borrow_mut().push(FileEditedNotification {
+            path: path.to_string(),
+            metadata,
+        });
+    });
+}
+
+/// Drain queued file-edited notifications. Returns them in the order
+/// they were queued; the caller is responsible for invoking matching
+/// `FileEdited` hooks (async context required).
+pub fn drain_file_edits() -> Vec<FileEditedNotification> {
+    FILE_EDIT_QUEUE.with(|queue| std::mem::take(&mut *queue.borrow_mut()))
+}
+
+pub fn clear_file_edit_queue() {
+    FILE_EDIT_QUEUE.with(|queue| queue.borrow_mut().clear());
 }
 
 pub(crate) fn glob_match(pattern: &str, name: &str) -> bool {
@@ -296,6 +417,30 @@ pub fn clear_tool_hooks() {
 pub fn clear_runtime_hooks() {
     RUNTIME_HOOKS.with(|hooks| hooks.borrow_mut().clear());
     super::clear_command_policies();
+}
+
+/// Clear only session-level lifecycle hooks (session_start, session_end,
+/// user_prompt_submit, etc.). Leaves tool, persona, step, worker, and
+/// agent-turn hooks installed. Mirrors `clear_tool_hooks()` /
+/// `clear_persona_hooks()` for the new surface.
+pub fn clear_session_hooks() {
+    RUNTIME_HOOKS.with(|hooks| {
+        hooks.borrow_mut().retain(|hook| {
+            !matches!(
+                hook.event,
+                HookEvent::SessionStart
+                    | HookEvent::SessionEnd
+                    | HookEvent::UserPromptSubmit
+                    | HookEvent::PreCompact
+                    | HookEvent::PostCompact
+                    | HookEvent::PermissionAsked
+                    | HookEvent::PermissionReplied
+                    | HookEvent::FileEdited
+                    | HookEvent::SessionError
+                    | HookEvent::SessionIdle
+            )
+        });
+    });
 }
 
 fn value_at_path<'a>(value: &'a serde_json::Value, path: &str) -> Option<&'a serde_json::Value> {
@@ -453,7 +598,8 @@ async fn invoke_vm_hook(
 }
 
 async fn invoke_vm_lifecycle_hooks(
-    closures: Vec<Rc<VmClosure>>,
+    event: HookEvent,
+    registrations: Vec<VmLifecycleHookRegistration>,
     payload: &serde_json::Value,
 ) -> Result<(), VmError> {
     let Some(mut vm) = crate::vm::clone_async_builtin_child_vm() else {
@@ -462,8 +608,24 @@ async fn invoke_vm_lifecycle_hooks(
         ));
     };
     let arg = crate::stdlib::json_to_vm_value(payload);
-    for closure in closures {
-        let _ = vm.call_closure_pub(&closure, &[arg.clone()]).await?;
+    let session_id = payload
+        .get("session")
+        .and_then(|v| v.get("id"))
+        .and_then(|v| v.as_str())
+        .unwrap_or("")
+        .to_string();
+    for registration in registrations {
+        record_hook_call(&session_id, event, &registration.handler_name, payload);
+        let raw = vm
+            .call_closure_pub(&registration.closure, &[arg.clone()])
+            .await?;
+        record_hook_returned(
+            &session_id,
+            event,
+            &registration.handler_name,
+            &HookControl::Allow,
+            &raw,
+        );
     }
     Ok(())
 }
@@ -609,27 +771,215 @@ pub async fn run_lifecycle_hooks(
     event: HookEvent,
     payload: &serde_json::Value,
 ) -> Result<(), VmError> {
-    let closures = matching_vm_lifecycle_closures(event, payload);
-    if closures.is_empty() {
+    let registrations = matching_vm_lifecycle_registrations(event, payload);
+    if registrations.is_empty() {
         return Ok(());
     }
-    invoke_vm_lifecycle_hooks(closures, payload).await
+    invoke_vm_lifecycle_hooks(event, registrations, payload).await
+}
+
+/// Run veto-capable session-level lifecycle hooks. Successive hooks see
+/// `Allow`; the first non-`Allow` return short-circuits and is returned
+/// to the caller. Hook invocations and decisions are captured on the
+/// active session's transcript under `hook_call`, `hook_returned`, and
+/// `hook_vetoed` so a replay reproduces the same control flow.
+pub async fn run_lifecycle_hooks_with_control(
+    event: HookEvent,
+    payload: &serde_json::Value,
+) -> Result<HookControl, VmError> {
+    let registrations = matching_vm_lifecycle_registrations(event, payload);
+    if registrations.is_empty() {
+        return Ok(HookControl::Allow);
+    }
+    let Some(mut vm) = crate::vm::clone_async_builtin_child_vm() else {
+        return Err(VmError::Runtime(
+            "session lifecycle hook requires an async builtin VM context".to_string(),
+        ));
+    };
+    let arg = crate::stdlib::json_to_vm_value(payload);
+    let session_id = payload
+        .get("session")
+        .and_then(|v| v.get("id"))
+        .and_then(|v| v.as_str())
+        .unwrap_or("")
+        .to_string();
+    for registration in registrations {
+        record_hook_call(&session_id, event, &registration.handler_name, payload);
+        let raw = vm
+            .call_closure_pub(&registration.closure, &[arg.clone()])
+            .await?;
+        let control = parse_hook_control(event, &raw)?;
+        record_hook_returned(
+            &session_id,
+            event,
+            &registration.handler_name,
+            &control,
+            &raw,
+        );
+        if !matches!(control, HookControl::Allow) {
+            record_hook_vetoed(&session_id, event, &registration.handler_name, &control);
+            return Ok(control);
+        }
+    }
+    Ok(HookControl::Allow)
+}
+
+fn parse_hook_control(event: HookEvent, value: &VmValue) -> Result<HookControl, VmError> {
+    match value {
+        VmValue::Nil | VmValue::Bool(true) => Ok(HookControl::Allow),
+        VmValue::Bool(false) => Ok(HookControl::Block {
+            reason: format!("{} hook returned false", event.as_str()),
+        }),
+        VmValue::Dict(map) => {
+            if let Some(decision) = map.get("decision") {
+                let kind = decision.display();
+                let kind_norm = kind.trim().to_ascii_lowercase();
+                if !matches!(kind_norm.as_str(), "allow" | "deny" | "ask") {
+                    return Err(VmError::Runtime(format!(
+                        "{} hook `decision` must be \"allow\", \"deny\", or \"ask\"; got \"{kind}\"",
+                        event.as_str()
+                    )));
+                }
+                let reason = map.get("reason").and_then(|v| match v {
+                    VmValue::Nil => None,
+                    other => Some(other.display()),
+                });
+                return Ok(HookControl::Decision {
+                    kind: kind_norm,
+                    reason,
+                });
+            }
+            let block = map.get("block").map(vm_value_truthy).unwrap_or(false);
+            if block {
+                let reason = map
+                    .get("reason")
+                    .map(|v| v.display())
+                    .unwrap_or_else(|| format!("{} hook blocked the operation", event.as_str()));
+                return Ok(HookControl::Block { reason });
+            }
+            Ok(HookControl::Allow)
+        }
+        other => Err(VmError::Runtime(format!(
+            "{} hook must return nil, bool, or a control dict; got {}",
+            event.as_str(),
+            other.type_name()
+        ))),
+    }
+}
+
+fn vm_value_truthy(value: &VmValue) -> bool {
+    match value {
+        VmValue::Nil => false,
+        VmValue::Bool(value) => *value,
+        VmValue::Int(value) => *value != 0,
+        VmValue::Float(value) => *value != 0.0,
+        VmValue::String(value) => !value.is_empty(),
+        VmValue::List(value) => !value.is_empty(),
+        VmValue::Dict(value) => !value.is_empty(),
+        _ => true,
+    }
+}
+
+fn record_hook_call(
+    session_id: &str,
+    event: HookEvent,
+    handler: &str,
+    payload: &serde_json::Value,
+) {
+    if session_id.is_empty() {
+        return;
+    }
+    let metadata = serde_json::json!({
+        "event": event.as_str(),
+        "handler": handler,
+        "payload": payload,
+    });
+    let entry = crate::llm::helpers::transcript_event(
+        "hook_call",
+        "system",
+        "internal",
+        &format!("hook {} invoked: {}", event.as_str(), handler),
+        Some(metadata),
+    );
+    let _ = crate::agent_sessions::append_event(session_id, entry);
+}
+
+fn record_hook_returned(
+    session_id: &str,
+    event: HookEvent,
+    handler: &str,
+    control: &HookControl,
+    raw: &VmValue,
+) {
+    if session_id.is_empty() {
+        return;
+    }
+    let metadata = serde_json::json!({
+        "event": event.as_str(),
+        "handler": handler,
+        "result": control.as_str(),
+        "raw": crate::llm::vm_value_to_json(raw),
+    });
+    let entry = crate::llm::helpers::transcript_event(
+        "hook_returned",
+        "system",
+        "internal",
+        &format!(
+            "hook {} returned {} from {}",
+            event.as_str(),
+            control.as_str(),
+            handler
+        ),
+        Some(metadata),
+    );
+    let _ = crate::agent_sessions::append_event(session_id, entry);
+}
+
+fn record_hook_vetoed(session_id: &str, event: HookEvent, handler: &str, control: &HookControl) {
+    if session_id.is_empty() {
+        return;
+    }
+    let (reason, decision) = match control {
+        HookControl::Allow => return,
+        HookControl::Block { reason } => (reason.clone(), None),
+        HookControl::Decision { kind, reason } => (
+            reason.clone().unwrap_or_else(|| format!("decision={kind}")),
+            Some(kind.clone()),
+        ),
+    };
+    let metadata = serde_json::json!({
+        "event": event.as_str(),
+        "handler": handler,
+        "reason": reason,
+        "decision": decision,
+    });
+    let entry = crate::llm::helpers::transcript_event(
+        "hook_vetoed",
+        "system",
+        "internal",
+        &format!("hook {} vetoed by {}: {reason}", event.as_str(), handler),
+        Some(metadata),
+    );
+    let _ = crate::agent_sessions::append_event(session_id, entry);
 }
 
 pub fn matching_vm_lifecycle_hooks(
     event: HookEvent,
     payload: &serde_json::Value,
 ) -> Vec<VmLifecycleHookInvocation> {
-    matching_vm_lifecycle_closures(event, payload)
+    matching_vm_lifecycle_registrations(event, payload)
         .into_iter()
-        .map(|closure| VmLifecycleHookInvocation { closure })
+        .map(|registration| VmLifecycleHookInvocation {
+            closure: registration.closure,
+            handler_name: registration.handler_name,
+        })
         .collect()
 }
 
-fn matching_vm_lifecycle_closures(
+fn matching_vm_lifecycle_registrations(
     event: HookEvent,
     payload: &serde_json::Value,
-) -> Vec<Rc<VmClosure>> {
+) -> Vec<VmLifecycleHookRegistration> {
     RUNTIME_HOOKS.with(|hooks| {
         hooks
             .borrow()
@@ -637,7 +987,13 @@ fn matching_vm_lifecycle_closures(
             .filter(|hook| hook.event == event)
             .filter(|hook| hook_matches(hook, None, payload))
             .filter_map(|hook| match &hook.handler {
-                RuntimeHookHandler::Vm { closure, .. } => Some(Rc::clone(closure)),
+                RuntimeHookHandler::Vm {
+                    closure,
+                    handler_name,
+                } => Some(VmLifecycleHookRegistration {
+                    handler_name: handler_name.clone(),
+                    closure: Rc::clone(closure),
+                }),
                 RuntimeHookHandler::NativePreTool(_) | RuntimeHookHandler::NativePostTool(_) => {
                     None
                 }

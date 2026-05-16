@@ -1236,6 +1236,11 @@ fn __agent_loop_run(message, session, initial_opts) {
       }
       let turn_index = iteration
       agent_emit_event(session.session_id, "turn_start", {iteration: turn_index + 1})
+      try {
+        __host_drain_file_edits(session.session_id)
+      } catch (e) {
+        nil
+      }
       var turn_opts = agent_skills_match(session, opts, turn_index)
       turn_opts = agent_tool_search_inject_if_needed(turn_opts)
       agent_autocompact_if_needed(session, turn_opts)
@@ -1470,6 +1475,11 @@ fn __agent_loop_run(message, session, initial_opts) {
     if opts?.daemon && final_status != "" {
       agent_daemon_snapshot(session, opts, final_status, iteration)
     }
+    try {
+      __host_drain_file_edits(session.session_id)
+    } catch (e) {
+      nil
+    }
     let result = agent_session_finalize(
       session.session_id,
       {
@@ -1498,6 +1508,11 @@ fn __agent_loop_run(message, session, initial_opts) {
       enforced
     }
   }
+  // Drain queued FileEdited notifications so hooks fire at a
+  // deterministic turn boundary; replay observes the same firing
+  // order regardless of when the underlying writes happened.
+  // Drain any FileEdited notifications recorded during the last
+  // turn so terminal hooks observe them before SessionEnd fires.
   if is_err(run) {
     if !session_finalized {
       __agent_loop_finalize_failed(session, iteration)

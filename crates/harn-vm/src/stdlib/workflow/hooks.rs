@@ -1,5 +1,6 @@
 //! Tool, persona, and step hook registration builtins for workflow execution.
 
+use std::collections::BTreeMap;
 use std::rc::Rc;
 
 use crate::value::{VmError, VmValue};
@@ -157,4 +158,128 @@ pub(super) fn clear_persona_hooks_builtin(
 ) -> Result<VmValue, VmError> {
     crate::step_runtime::clear_persona_hooks();
     Ok(VmValue::Nil)
+}
+
+pub(super) fn register_session_hook_builtin(
+    args: &[VmValue],
+    _out: &mut String,
+) -> Result<VmValue, VmError> {
+    let (event_arg, pattern, handler_arg) = match args.len() {
+        2 => (&args[0], "*".to_string(), &args[1]),
+        3 => (&args[0], args[1].display(), &args[2]),
+        n => {
+            return Err(VmError::Runtime(format!(
+                "register_session_hook expects 2 or 3 arguments (event, pattern?, handler); got {n}"
+            )));
+        }
+    };
+    let event_name = event_arg.display();
+    let event = crate::orchestration::HookEvent::parse_session_event(&event_name)
+        .map_err(|message| VmError::Runtime(format!("register_session_hook: {message}")))?;
+    let VmValue::Closure(closure) = handler_arg else {
+        return Err(VmError::Runtime(format!(
+            "register_session_hook: handler must be a closure, got {}",
+            handler_arg.type_name()
+        )));
+    };
+    let handler_name = format!("session_hook::{}", event.as_str());
+    crate::orchestration::register_vm_hook(event, pattern, handler_name, closure.clone());
+    Ok(VmValue::Nil)
+}
+
+pub(super) fn clear_session_hooks_builtin(
+    _args: &[VmValue],
+    _out: &mut String,
+) -> Result<VmValue, VmError> {
+    crate::orchestration::clear_session_hooks();
+    Ok(VmValue::Nil)
+}
+
+/// Fire a session-level lifecycle hook from Harn. Used by the
+/// Harn-driven agent loop (autocompact, file edits, etc.) to invoke
+/// hooks that are wired in Harn rather than from a Rust host primitive.
+///
+/// Returns a dict shaped like:
+///   { control: "allow" | "block" | "decision", reason?, decision? }
+pub(super) async fn fire_session_hook_builtin(args: Vec<VmValue>) -> Result<VmValue, VmError> {
+    let event_name = args
+        .first()
+        .map(VmValue::display)
+        .ok_or_else(|| VmError::Runtime("__host_fire_session_hook: missing event".to_string()))?;
+    let event = crate::orchestration::HookEvent::parse_session_event(&event_name)
+        .map_err(|message| VmError::Runtime(format!("__host_fire_session_hook: {message}")))?;
+    let payload_value = args.get(1).cloned().unwrap_or(VmValue::Nil);
+    let mut payload = crate::llm::vm_value_to_json(&payload_value);
+    if !payload.is_object() {
+        payload = serde_json::Value::Object(serde_json::Map::new());
+    }
+    if let serde_json::Value::Object(map) = &mut payload {
+        map.entry("event".to_string())
+            .or_insert_with(|| serde_json::Value::String(event.as_str().to_string()));
+    }
+
+    let control = crate::orchestration::run_lifecycle_hooks_with_control(event, &payload).await?;
+    let mut out: BTreeMap<String, VmValue> = BTreeMap::new();
+    match control {
+        crate::orchestration::HookControl::Allow => {
+            out.insert("control".to_string(), VmValue::String(Rc::from("allow")));
+        }
+        crate::orchestration::HookControl::Block { reason } => {
+            out.insert("control".to_string(), VmValue::String(Rc::from("block")));
+            out.insert("reason".to_string(), VmValue::String(Rc::from(reason)));
+        }
+        crate::orchestration::HookControl::Decision { kind, reason } => {
+            out.insert("control".to_string(), VmValue::String(Rc::from("decision")));
+            out.insert("decision".to_string(), VmValue::String(Rc::from(kind)));
+            if let Some(reason) = reason {
+                out.insert("reason".to_string(), VmValue::String(Rc::from(reason)));
+            }
+        }
+    }
+    Ok(VmValue::Dict(Rc::new(out)))
+}
+
+/// Synchronous emit-only entry point: explicitly notify the session
+/// that a file was edited. Records a `file_edited` advisory event on
+/// the active transcript so replay tooling can see it, and queues VM
+/// closure handlers for the next async-builtin boundary.
+pub(super) fn notify_file_edited_builtin(
+    args: &[VmValue],
+    _out: &mut String,
+) -> Result<VmValue, VmError> {
+    let path = args
+        .first()
+        .map(VmValue::display)
+        .ok_or_else(|| VmError::Runtime("notify_file_edited: missing path".to_string()))?;
+    let metadata = args
+        .get(1)
+        .map(crate::llm::helpers::vm_value_to_json)
+        .unwrap_or(serde_json::Value::Null);
+    crate::orchestration::queue_file_edited(&path, metadata);
+    Ok(VmValue::Nil)
+}
+
+/// Drain the file-edit queue and fire `FileEdited` hooks for any
+/// notifications recorded since the last drain. Returns the list of
+/// drained paths so callers (the agent loop) can record them on the
+/// transcript or pass them to follow-up tools.
+pub(super) async fn drain_file_edits_builtin(args: Vec<VmValue>) -> Result<VmValue, VmError> {
+    let session_id = args.first().map(VmValue::display).unwrap_or_default();
+    let drained = crate::orchestration::drain_file_edits();
+    let mut paths: Vec<VmValue> = Vec::with_capacity(drained.len());
+    for edit in drained {
+        let payload = serde_json::json!({
+            "event": crate::orchestration::HookEvent::FileEdited.as_str(),
+            "session": {"id": &session_id},
+            "path": edit.path,
+            "metadata": edit.metadata,
+        });
+        crate::orchestration::run_lifecycle_hooks(
+            crate::orchestration::HookEvent::FileEdited,
+            &payload,
+        )
+        .await?;
+        paths.push(VmValue::String(Rc::from(edit.path)));
+    }
+    Ok(VmValue::List(Rc::new(paths)))
 }

@@ -528,6 +528,7 @@ pub(crate) const SIGNATURES: &[BuiltinSignature] = &[
     BuiltinSignature::simple("circuit_reset", &[Param::new("name", TY_STRING)], TY_NIL),
     BuiltinSignature::simple("clear_tool_hooks", &[], TY_NIL),
     BuiltinSignature::simple("clear_persona_hooks", &[], TY_NIL),
+    BuiltinSignature::simple("clear_session_hooks", &[], TY_NIL),
     BuiltinSignature::simple(
         "close_channel",
         &[Param::new("channel", Ty::Named("channel"))],
@@ -1421,6 +1422,12 @@ pub(crate) const SIGNATURES: &[BuiltinSignature] = &[
         ],
         TY_NIL,
     ),
+    BuiltinSignature::variadic(
+        "register_session_hook",
+        &[Param::new("args", TY_ANY)],
+        TY_NIL,
+    ),
+    BuiltinSignature::variadic("notify_file_edited", &[Param::new("args", TY_ANY)], TY_NIL),
     BuiltinSignature::variadic("render", &[Param::new("args", TY_ANY)], TY_STRING),
     BuiltinSignature::variadic("render_prompt", &[Param::new("args", TY_ANY)], TY_STRING),
     BuiltinSignature::variadic("render_string", &[Param::new("args", TY_ANY)], TY_STRING),

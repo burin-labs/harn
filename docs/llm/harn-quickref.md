@@ -2181,6 +2181,40 @@ two stages sharing an id share their conversation automatically. The
 pre-0.7 `transcript_policy` dict (with `mode: "reset" | "fork"`) was
 removed — call the lifecycle verbs explicitly.
 
+### Lifecycle hooks
+
+Three concentric surfaces:
+
+- `register_tool_hook({pattern, deny?, max_output?})` — tool-level
+  `PreToolUse` / `PostToolUse`.
+- `register_persona_hook(persona_pattern, event, handler)` — persona
+  `PreStep` / `PostStep` / `OnApprovalRequested` / `OnHandoffEmitted` /
+  `OnPersonaPaused` / `OnPersonaResumed` / `OnBudgetThreshold(pct)`.
+- `register_session_hook(event, handler)` — whole-session lifecycle:
+  `session_start`, `session_end`, `user_prompt_submit`, `pre_compact`,
+  `post_compact`, `permission_asked`, `permission_replied`,
+  `file_edited`, `session_error`, `session_idle`. Veto with
+  `{block: true, reason}`; short-circuit a permission with
+  `{decision: "allow"|"deny"|"ask", reason}`. Tape captures every
+  invocation under `hook_call` / `hook_returned` / `hook_vetoed`.
+
+```harn
+register_session_hook("user_prompt_submit", { event ->
+  if to_string(event?.prompt ?? "").contains("secret") {
+    return {block: true, reason: "policy violation"}
+  }
+  return nil
+})
+register_session_hook("file_edited", { event ->
+  log("edit: " + to_string(event?.path ?? ""))
+  return nil
+})
+```
+
+`write_file` / `append_file` / `write_file_bytes` queue automatically;
+hooks fire at the next agent-loop turn boundary. Call
+`notify_file_edited(path, metadata?)` to explicitly emit one.
+
 ## Stdlib LLM helpers (`std/llm/*`)
 
 Nine opinionated modules wrap common LLM patterns:

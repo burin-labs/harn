@@ -430,7 +430,9 @@ fn write_file_builtin(args: &[VmValue], _out: &mut String) -> Result<VmValue, Vm
                 resolved.display()
             ))))
         })?;
-        write_cached_text(resolved, Rc::from(content));
+        let bytes = content.len();
+        write_cached_text(resolved.clone(), Rc::from(content));
+        queue_file_edited_for(&resolved, "write", bytes);
     }
     Ok(VmValue::Nil)
 }
@@ -448,6 +450,7 @@ fn write_file_bytes_builtin(args: &[VmValue], _out: &mut String) -> Result<VmVal
                 )))));
             }
         };
+        let len = content.len();
         crate::stdlib::sandbox::enforce_fs_path(
             "write_file_bytes",
             &resolved,
@@ -462,8 +465,16 @@ fn write_file_bytes_builtin(args: &[VmValue], _out: &mut String) -> Result<VmVal
         FILE_TEXT_CACHE.with(|cache| {
             cache.borrow_mut().remove(&resolved);
         });
+        queue_file_edited_for(&resolved, "write", len);
     }
     Ok(VmValue::Nil)
+}
+
+fn queue_file_edited_for(resolved: &std::path::Path, operation: &str, bytes: usize) {
+    crate::orchestration::queue_file_edited(
+        &resolved.to_string_lossy(),
+        serde_json::json!({"operation": operation, "bytes": bytes}),
+    );
 }
 
 fn file_exists_builtin(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
@@ -530,9 +541,11 @@ fn append_file_builtin(args: &[VmValue], _out: &mut String) -> Result<VmValue, V
                 resolved.display()
             ))))
         })?;
+        let bytes = content.len();
         FILE_TEXT_CACHE.with(|cache| {
             cache.borrow_mut().remove(&resolved);
         });
+        queue_file_edited_for(&resolved, "append", bytes);
     }
     Ok(VmValue::Nil)
 }

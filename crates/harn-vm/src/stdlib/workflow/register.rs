@@ -102,6 +102,18 @@ const WORKFLOW_SYNC_PRIMITIVES: &[SyncBuiltin] = &[
         .signature("clear_persona_hooks()")
         .arity(VmBuiltinArity::Exact(0))
         .doc("Clear registered persona and step lifecycle hooks."),
+    SyncBuiltin::new("register_session_hook", register_session_hook_builtin)
+        .signature("register_session_hook(event, pattern?, handler)")
+        .arity(VmBuiltinArity::Range { min: 2, max: 3 })
+        .doc("Register a session-level lifecycle hook (session_start, session_end, user_prompt_submit, pre_compact, post_compact, permission_asked, permission_replied, file_edited, session_error, session_idle)."),
+    SyncBuiltin::new("clear_session_hooks", clear_session_hooks_builtin)
+        .signature("clear_session_hooks()")
+        .arity(VmBuiltinArity::Exact(0))
+        .doc("Clear registered session-level lifecycle hooks."),
+    SyncBuiltin::new("notify_file_edited", notify_file_edited_builtin)
+        .signature("notify_file_edited(path, metadata?)")
+        .arity(VmBuiltinArity::Range { min: 1, max: 2 })
+        .doc("Queue a `FileEdited` notification; hooks fire on the next agent-loop boundary."),
     SyncBuiltin::new(
         "select_artifacts_adaptive",
         select_artifacts_adaptive_builtin,
@@ -187,6 +199,14 @@ const WORKFLOW_ASYNC_PRIMITIVES: &[AsyncBuiltin] = &[
         .signature("transcript_auto_compact(messages, options?)")
         .arity(VmBuiltinArity::Range { min: 1, max: 2 })
         .doc("Apply the workflow/agent transcript auto-compaction primitive to a message list."),
+    async_builtin!("__host_fire_session_hook", fire_session_hook_builtin)
+        .signature("__host_fire_session_hook(event, payload?)")
+        .arity(VmBuiltinArity::Range { min: 1, max: 2 })
+        .doc("Fire a session-level lifecycle hook and return its control flow."),
+    async_builtin!("__host_drain_file_edits", drain_file_edits_builtin)
+        .signature("__host_drain_file_edits(session_id?)")
+        .arity(VmBuiltinArity::Range { min: 0, max: 1 })
+        .doc("Drain the FileEdited queue, fire matching hooks, return the drained paths."),
 ];
 
 const WORKFLOW_PRIMITIVES: BuiltinGroup<'static> = BuiltinGroup::new()

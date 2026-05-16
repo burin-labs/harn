@@ -56,6 +56,7 @@
   - [OpenTrustGraph v0 spec](./spec/open-trust-graph/v0.md)
 - [Audit receipts](./audit-receipts.md)
 - [Redaction policy](./redaction.md)
+- [Hooks (tool, persona, session lifecycle)](./extensibility/hooks.md)
 - [Skills](./skills.md)
 - [Personas](./personas.md)
   - [Persona Prelude](./personas/prelude.md)

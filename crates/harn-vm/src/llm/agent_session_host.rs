@@ -207,6 +207,34 @@ async fn host_agent_session_init(args: Vec<VmValue>) -> Result<VmValue, VmError>
         .or_else(crate::agent_sessions::current_session_id)
         .unwrap_or_else(|| format!("agent_session_{}", now_id()));
 
+    // Open the session record up front so hook tape capture works even
+    // when `user_prompt_submit` vetoes the turn — the resulting blocked
+    // result still surfaces a transcript with `hook_call`/`hook_vetoed`
+    // entries.
+    let prompt_session_id = crate::agent_sessions::open_or_create(Some(session_id.clone()));
+
+    let prompt_payload = serde_json::json!({
+        "event": crate::orchestration::HookEvent::UserPromptSubmit.as_str(),
+        "session": {"id": &prompt_session_id},
+        "prompt": &message,
+        "system": system.clone().unwrap_or_default(),
+    });
+    if let crate::orchestration::HookControl::Block { reason } =
+        crate::orchestration::run_lifecycle_hooks_with_control(
+            crate::orchestration::HookEvent::UserPromptSubmit,
+            &prompt_payload,
+        )
+        .await?
+    {
+        let blocked = build_user_prompt_block_result(&prompt_session_id, &message, &reason);
+        return Ok(agent_init_control_done(
+            &prompt_session_id,
+            &message,
+            system.as_deref(),
+            blocked,
+        ));
+    }
+
     let autonomy_budget = match check_autonomy_budget(&opts_map, &session_id).await? {
         AutonomyCheck::NoBudget => None,
         AutonomyCheck::Approved(config) => Some(config),
@@ -294,6 +322,19 @@ async fn host_agent_session_init(args: Vec<VmValue>) -> Result<VmValue, VmError>
     // `agent_session_current_id()`. Paired with the pop in finalize.
     crate::agent_sessions::push_current_session(resolved.clone());
 
+    let start_payload = serde_json::json!({
+        "event": crate::orchestration::HookEvent::SessionStart.as_str(),
+        "session": {"id": &resolved},
+        "task": &message,
+        "system": system.clone().unwrap_or_default(),
+        "max_iterations": max_iterations,
+    });
+    crate::orchestration::run_lifecycle_hooks(
+        crate::orchestration::HookEvent::SessionStart,
+        &start_payload,
+    )
+    .await?;
+
     let mut control = BTreeMap::new();
     control.insert(
         "session_id".to_string(),
@@ -341,6 +382,45 @@ async fn check_autonomy_budget(
             Ok(AutonomyCheck::Denied(json_to_vm(&result)))
         }
     }
+}
+
+fn session_status_indicates_error(final_status: &str) -> bool {
+    matches!(
+        final_status,
+        "error" | "failed" | "provider_error" | "verify_exhausted" | "stuck"
+    )
+}
+
+fn build_user_prompt_block_result(session_id: &str, prompt: &str, reason: &str) -> VmValue {
+    let transcript_json = crate::agent_sessions::transcript(session_id)
+        .as_ref()
+        .map(vm_to_json)
+        .unwrap_or(serde_json::Value::Null);
+    let result = serde_json::json!({
+        "status": "blocked",
+        "final_status": "blocked",
+        "stop_reason": "user_prompt_submit_blocked",
+        "error": {
+            "category": "hook_denied",
+            "event": crate::orchestration::HookEvent::UserPromptSubmit.as_str(),
+            "reason": reason,
+        },
+        "text": "",
+        "visible_text": "",
+        "private_reasoning": serde_json::Value::Null,
+        "thinking_summary": serde_json::Value::Null,
+        "llm": {"iterations": 0, "duration_ms": 0, "input_tokens": 0, "output_tokens": 0},
+        "tools": {"calls": [], "successful": [], "rejected": [], "mode": ""},
+        "transcript": transcript_json,
+        "trace": serde_json::Value::Null,
+        "tokens_used": 0,
+        "cost_usd": 0.0,
+        "session_id": session_id,
+        "task": prompt,
+        "daemon_state": serde_json::Value::Null,
+        "daemon_snapshot_path": serde_json::Value::Null,
+    });
+    crate::stdlib::json_to_vm_value(&result)
 }
 
 fn agent_init_control_done(
@@ -394,9 +474,57 @@ async fn host_agent_session_finalize(args: Vec<VmValue>) -> Result<VmValue, VmEr
     if session.pushed_transcript_dir {
         super::agent_observe::pop_llm_transcript_dir();
     }
+
+    let canonical_status = if final_status.is_empty() {
+        "done".to_string()
+    } else {
+        final_status.clone()
+    };
+    if terminal_error.is_some() || session_status_indicates_error(&final_status) {
+        let error_payload = serde_json::json!({
+            "event": crate::orchestration::HookEvent::SessionError.as_str(),
+            "session": {"id": &session_id},
+            "final_status": &canonical_status,
+            "stop_reason": stop_reason,
+            "error": terminal_error.clone(),
+        });
+        // SessionError hooks are advisory — log but do not propagate so
+        // session cleanup always runs.
+        if let Err(err) = crate::orchestration::run_lifecycle_hooks(
+            crate::orchestration::HookEvent::SessionError,
+            &error_payload,
+        )
+        .await
+        {
+            crate::events::log_warn(
+                "agent.session_error_hook",
+                &format!("session={session_id} hook error: {err}"),
+            );
+        }
+    }
+
+    let end_payload = serde_json::json!({
+        "event": crate::orchestration::HookEvent::SessionEnd.as_str(),
+        "session": {"id": &session_id},
+        "final_status": &canonical_status,
+        "stop_reason": stop_reason,
+        "iterations": opt_int(&status_dict, "iterations").unwrap_or(0),
+    });
+    if let Err(err) = crate::orchestration::run_lifecycle_hooks(
+        crate::orchestration::HookEvent::SessionEnd,
+        &end_payload,
+    )
+    .await
+    {
+        crate::events::log_warn(
+            "agent.session_end_hook",
+            &format!("session={session_id} hook error: {err}"),
+        );
+    }
+
     // Pair with the push in init so subsequent loops see the right stack.
     crate::agent_sessions::pop_current_session();
-    // Fire registered session-end hooks (e.g. cancelling orphaned
+    // Fire registered native session-end hooks (e.g. cancelling orphaned
     // long-running handles) after the session has been removed from
     // the active map so hooks observe a fully-quiesced session.
     super::agent_runtime::fire_session_end_hooks(&session_id);

@@ -2442,6 +2442,32 @@ directory. `workflow.update(...)` polls for a response until
 | `register_tool_hook(config)` | config: dict | nil | Register a pre/post hook for tool calls matching `pattern` (glob). `deny` string blocks matching tools; `max_output` int truncates results |
 | `clear_tool_hooks()` | none | nil | Remove all registered tool hooks |
 
+### Session lifecycle hooks
+
+`register_session_hook(event, handler)` (or
+`register_session_hook(event, pattern, handler)`) wires a callback
+into the whole-session turn loop. Events: `session_start`,
+`session_end`, `user_prompt_submit`, `pre_compact`, `post_compact`,
+`permission_asked`, `permission_replied`, `file_edited`,
+`session_error`, `session_idle`. The handler receives a typed event
+dict (`{event, session: {id}, ...}`) and returns:
+
+- `nil` or `true` — allow the operation to proceed.
+- `{block: true, reason}` — veto the operation (honoured for
+  `user_prompt_submit` and `pre_compact`).
+- `{decision: "allow"|"deny", reason}` — short-circuit a
+  `permission_asked` decision.
+
+Each invocation is recorded on the active session transcript under
+the `hook_call`, `hook_returned`, and `hook_vetoed` event kinds, so
+replay tooling reproduces the same control flow.
+
+| Function | Parameters | Returns | Description |
+|---|---|---|---|
+| `register_session_hook(event, pattern?, handler)` | event: string, pattern: string?, handler: closure | nil | Register a session-level lifecycle hook |
+| `clear_session_hooks()` | none | nil | Remove all registered session-level hooks |
+| `notify_file_edited(path, metadata?)` | path: string, metadata: dict? | nil | Explicitly queue a `file_edited` notification; the standard fs builtins (`write_file`, `append_file`, `write_file_bytes`) also queue automatically. Hooks fire at the next agent-loop turn boundary. |
+
 ### Context and compaction utilities
 
 | Function | Parameters | Returns | Description |

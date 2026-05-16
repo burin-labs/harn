@@ -132,6 +132,23 @@ condensed series summaries instead of full per-patch history.
   `cfg(target_os)` and adding a backend is one new file. Full
   per-platform capability → kernel-knob mapping table lives in
   [docs/src/sandboxing.md](docs/src/sandboxing.md).
+- **Session-level lifecycle hooks (#1648).** `register_session_hook(event, handler)`
+  registers callbacks for the whole-session turn lifecycle:
+  `session_start`, `session_end`, `user_prompt_submit`, `pre_compact`,
+  `post_compact`, `permission_asked`, `permission_replied`,
+  `file_edited`, `session_error`, and `session_idle`. The
+  `user_prompt_submit` and `pre_compact` events accept
+  `{block: true, reason}` to veto the operation;
+  `permission_asked` additionally accepts
+  `{decision: "allow"|"deny"|"ask", reason}` to short-circuit the
+  dynamic permission policy. Hook invocations are captured on the
+  active session transcript under `hook_call`, `hook_returned`, and
+  `hook_vetoed` event kinds, so replay tooling reproduces the same
+  control flow. `write_file`, `append_file`, and `write_file_bytes`
+  queue `file_edited` notifications automatically (drained at each
+  turn boundary); call `notify_file_edited(path, metadata?)` to emit
+  one explicitly. Manifest `[[hooks]]` entries accept the new event
+  names. See `docs/src/extensibility/hooks.md`.
 
 ## v0.8.19
 
