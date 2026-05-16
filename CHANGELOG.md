@@ -6,10 +6,19 @@ Pre-0.6 highlights live in [CHANGELOG-pre-0.6.md](CHANGELOG-pre-0.6.md).
 Harn had no external users before 0.6.0, so that archive intentionally keeps
 condensed series summaries instead of full per-patch history.
 
-## Unreleased
+## v0.8.21
 
 ### Added
 
+- **Portable `harn.context_artifact.v1` envelope in `std/context`
+  (#1687).** Host-neutral envelope carries kind / scope / language /
+  applicability / freshness / confidence / provenance / source-hash /
+  token / redaction metadata, plus ranking, dedupe, merge, and
+  budget/select helpers. Provider-capability-aware rendering covers
+  Markdown / XML / plain / compact shapes, and a Burin digest adapter
+  preserves `.burin/context-digests` compatibility. Docs and
+  conformance coverage land alongside the envelope so downstream
+  IDE/eval hosts can pin against a stable shape.
 - **Prompt context-quality gates for `harn eval prompt` (#1682).**
   `harn eval prompt` now accepts repeatable `--context-fixture <json>`
   inputs. Each fixture case supplies candidate repository artifacts plus
@@ -26,6 +35,67 @@ condensed series summaries instead of full per-patch history.
   `examples/triggers/context-maintenance` package cover file-edited,
   session-idle, pre-compact, post-turn, and session-end scheduling,
   plus deterministic replay include/skip behavior.
+
+### Changed
+
+- **LLM provider/model catalog defaults now live in an embedded
+  `crates/harn-vm/src/llm/providers.toml` (#1692).** Roughly 1,100
+  lines of Rust literals in `default_config()` collapse into a single
+  TOML asset that deserializes through the same `ProvidersConfig`
+  schema already used by `HARN_PROVIDERS_CONFIG`,
+  `~/.config/harn/providers.toml`, `harn.toml [llm]`, and package
+  manifests — one source of truth. The catalog refresh registers
+  `claude-sonnet-4-5/4-6/4-7`, `claude-opus-4-6/4-7`,
+  `qwen/qwen3-coder`, `deepseek/deepseek-v3.2`,
+  `moonshotai/kimi-k2.6`, `openai/gpt-oss-120b`, and the
+  OpenRouter-routed `google/gemini-2.5-flash`; flags
+  `claude-sonnet-4-20250514` (sunset 2026-06-15),
+  `claude-sonnet-4-5` (2026-05-15), `claude-opus-4` (2026-06-15),
+  `claude-opus-4-1`, `gpt-4o` (API sunset 2026-02-17), and
+  `gpt-4-turbo` as deprecated with replacement notes; and bumps the
+  `frontier` tier alias from `claude-sonnet-4-20250514` to
+  `claude-sonnet-4-6`. Brittle per-value assertions are replaced by
+  invariant tests (`llm_config::tests::embedded_*`) that verify the
+  TOML parses, every deprecated model carries a `deprecation_note`,
+  every alias/model targets a known provider, every `qc_default`
+  resolves, pricing rates stay non-negative, and the
+  `frontier`/`mid`/`small` tier aliases all resolve to active catalog
+  entries.
+
+### Fixed
+
+- **Release binary artifact publishing is more robust (#1691).** The
+  macOS release binary job now retries transient Apple notary
+  polling/upload failures, the complete expected release asset set is
+  validated before checksumming/uploading, and `publish-release` no
+  longer creates a visible GitHub release before binary assets are
+  ready — `build-release-binaries` owns release notes and assets so
+  the GitHub release flips public only once binaries are attached.
+- **Release `--prepare` no longer corrupts cargo incremental cache
+  (#1707).** Audit lanes populate `target/debug/incremental/` keyed to
+  the pre-bump crate hashes; once `bump_version` rewrites
+  `Cargo.toml`, the workspace rebuilds with fresh hashes and the
+  stale incremental directory leaves dangling `.o` references that
+  abort `make gen-protocol-artifacts` mid-build. `release_gate.sh
+  cmd_prepare` and `release_ship.sh prepare_here` now export
+  `CARGO_INCREMENTAL=0` for the prepare phase (covering both the
+  inner cargo invocations and the fresh shell that runs
+  `regenerate_derived_files`). The Ctrl-C first-signal message is
+  also expanded to "[harn] signal received, interrupting VM (give it
+  a moment to unwind in-flight async ops; Ctrl-C again to
+  force-exit)..." so operators don't reach for a second Ctrl-C
+  during the brief cancel-grace window.
+
+### Internal
+
+- **Long Harn modules split into focused files (#1690).** Trigger
+  event core types, payloads, catalog, normalization, utilities, and
+  tests now live under `triggers/event/`. The LLM façade is split
+  into call execution, agent host primitives, and
+  stream/mock/trace-builtin glue while preserving existing
+  re-exports. `harn connect` is split into OAuth, status, store,
+  callback, GitHub, Linear, workspace, and test modules, and
+  reflected OAuth callback HTML is now escaped on the way out.
 
 ## v0.8.20
 
