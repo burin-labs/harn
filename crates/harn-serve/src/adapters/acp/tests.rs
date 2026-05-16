@@ -238,9 +238,14 @@ fn acp_agent_capabilities_use_canonical_initialize_shape() {
 
     let capabilities = acp_agent_capabilities();
 
-    assert_eq!(
-        configured_llm_route_for_capabilities(),
-        ("openai".into(), "gpt-4o".into())
+    // Pin only the provider routing invariant + that the resolved
+    // model is a registered catalog entry. The specific OpenAI default
+    // moves as the catalog tracks model deprecations.
+    let (provider, model) = configured_llm_route_for_capabilities();
+    assert_eq!(provider, "openai");
+    assert!(
+        harn_vm::llm_config::model_catalog_entry(&model).is_some(),
+        "openai fallback must point at a registered catalog model (got {model})"
     );
     assert_eq!(capabilities["loadSession"], true);
     assert_eq!(
@@ -288,9 +293,17 @@ fn acp_prompt_capabilities_follow_configured_model_aliases() {
 
     let capabilities = acp_agent_capabilities();
 
-    assert_eq!(
-        configured_llm_route_for_capabilities(),
-        ("anthropic".into(), "claude-sonnet-4-20250514".into())
+    // The `frontier` alias resolves to whatever the embedded
+    // providers.toml currently designates as the flagship Anthropic
+    // model; pinning a specific id here would force a test churn every
+    // time the catalog tracks an Anthropic refresh. Pin only the
+    // routing invariant (provider) plus the model's catalog presence.
+    let (provider, model) = configured_llm_route_for_capabilities();
+    assert_eq!(provider, "anthropic");
+    assert!(
+        harn_vm::llm_config::model_catalog_entry(&model)
+            .is_some_and(|entry| entry.provider == "anthropic" && !entry.deprecated),
+        "frontier route must point at a registered, non-deprecated anthropic model (got {model})"
     );
     assert_eq!(
         capabilities["promptCapabilities"],

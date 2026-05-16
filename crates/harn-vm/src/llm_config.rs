@@ -640,13 +640,13 @@ pub fn default_model_for_provider(provider: &str) -> String {
     match provider {
         "local" => std::env::var("LOCAL_LLM_MODEL")
             .or_else(|_| std::env::var("HARN_LLM_MODEL"))
-            .unwrap_or_else(|_| "gpt-4o".to_string()),
+            .unwrap_or_else(|_| "gemma-4-26b-a4b-it".to_string()),
         "mlx" => std::env::var("MLX_MODEL_ID")
             .unwrap_or_else(|_| "unsloth/Qwen3.6-27B-UD-MLX-4bit".to_string()),
-        "openai" => "gpt-4o".to_string(),
+        "openai" => "gpt-4o-mini".to_string(),
         "ollama" => "llama3.2".to_string(),
         "openrouter" => "anthropic/claude-sonnet-4.6".to_string(),
-        _ => "claude-sonnet-4-20250514".to_string(),
+        _ => "claude-sonnet-4-6".to_string(),
     }
 }
 
@@ -931,1360 +931,25 @@ pub fn resolve_base_url(pdef: &ProviderDef) -> String {
     pdef.base_url.clone()
 }
 
+/// Embedded copy of `llm/providers.toml`, the single source of truth for
+/// Harn's bundled provider/model catalog. Edit the TOML, not this string.
+const EMBEDDED_PROVIDERS_TOML: &str = include_str!("llm/providers.toml");
+
+/// Parse the embedded `providers.toml` into the runtime `ProvidersConfig`.
+///
+/// Hosts overlay this base via `HARN_PROVIDERS_CONFIG`,
+/// `~/.config/harn/providers.toml`, `harn.toml`, package-manifest
+/// `[llm]` sections, and per-run `set_user_overrides(...)`. The same
+/// Serde shape applies at every layer, so there is exactly one schema to
+/// keep coherent — no parallel Rust-literal catalog.
+///
+/// We `expect` on parse failure because the file is bundled into the
+/// binary at compile time; a malformed embedded catalog is a build-time
+/// invariant violation that should fail every test, not silently
+/// degrade in production.
 fn default_config() -> ProvidersConfig {
-    let mut config = ProvidersConfig {
-        default_provider: Some("anthropic".to_string()),
-        ..Default::default()
-    };
-
-    config.providers.insert(
-        "anthropic".to_string(),
-        ProviderDef {
-            base_url: "https://api.anthropic.com/v1".to_string(),
-            auth_style: "header".to_string(),
-            auth_header: Some("x-api-key".to_string()),
-            auth_env: AuthEnv::Single("ANTHROPIC_API_KEY".to_string()),
-            extra_headers: BTreeMap::from([(
-                "anthropic-version".to_string(),
-                "2023-06-01".to_string(),
-            )]),
-            chat_endpoint: "/messages".to_string(),
-            completion_endpoint: None,
-            healthcheck: Some(HealthcheckDef {
-                method: "POST".to_string(),
-                path: Some("/messages/count_tokens".to_string()),
-                url: None,
-                body: Some(
-                    r#"{"model":"claude-sonnet-4-20250514","messages":[{"role":"user","content":"x"}]}"#
-                        .to_string(),
-                ),
-            }),
-            features: vec!["prompt_caching".to_string(), "thinking".to_string()],
-            cost_per_1k_in: Some(0.003),
-            cost_per_1k_out: Some(0.015),
-            latency_p50_ms: Some(2500),
-            ..Default::default()
-        },
-    );
-
-    // OpenAI
-    config.providers.insert(
-        "openai".to_string(),
-        ProviderDef {
-            base_url: "https://api.openai.com/v1".to_string(),
-            auth_style: "bearer".to_string(),
-            auth_env: AuthEnv::Single("OPENAI_API_KEY".to_string()),
-            chat_endpoint: "/chat/completions".to_string(),
-            completion_endpoint: Some("/completions".to_string()),
-            healthcheck: Some(HealthcheckDef {
-                method: "GET".to_string(),
-                path: Some("/models".to_string()),
-                url: None,
-                body: None,
-            }),
-            cost_per_1k_in: Some(0.0025),
-            cost_per_1k_out: Some(0.010),
-            latency_p50_ms: Some(1800),
-            ..Default::default()
-        },
-    );
-
-    // OpenRouter
-    config.providers.insert(
-        "openrouter".to_string(),
-        ProviderDef {
-            base_url: "https://openrouter.ai/api/v1".to_string(),
-            auth_style: "bearer".to_string(),
-            auth_env: AuthEnv::Single("OPENROUTER_API_KEY".to_string()),
-            chat_endpoint: "/chat/completions".to_string(),
-            completion_endpoint: Some("/completions".to_string()),
-            healthcheck: Some(HealthcheckDef {
-                method: "GET".to_string(),
-                path: Some("/auth/key".to_string()),
-                url: None,
-                body: None,
-            }),
-            cost_per_1k_in: Some(0.003),
-            cost_per_1k_out: Some(0.015),
-            latency_p50_ms: Some(2200),
-            ..Default::default()
-        },
-    );
-
-    // HuggingFace
-    config.providers.insert(
-        "huggingface".to_string(),
-        ProviderDef {
-            base_url: "https://router.huggingface.co/v1".to_string(),
-            auth_style: "bearer".to_string(),
-            auth_env: AuthEnv::Multiple(vec![
-                "HF_TOKEN".to_string(),
-                "HUGGINGFACE_API_KEY".to_string(),
-            ]),
-            chat_endpoint: "/chat/completions".to_string(),
-            completion_endpoint: Some("/completions".to_string()),
-            healthcheck: Some(HealthcheckDef {
-                method: "GET".to_string(),
-                url: Some("https://huggingface.co/api/whoami-v2".to_string()),
-                path: None,
-                body: None,
-            }),
-            cost_per_1k_in: Some(0.0002),
-            cost_per_1k_out: Some(0.0006),
-            latency_p50_ms: Some(2400),
-            ..Default::default()
-        },
-    );
-
-    // Ollama default. Hosts can override this to `/v1/chat/completions`
-    // via a bundled `providers.toml` (loaded by setting
-    // `HARN_PROVIDERS_CONFIG` in the host process). The OpenAI-compat
-    // path bypasses Ollama's per-model tool-call post-processors
-    // (qwen3coder.go, qwen35.go) which raise HTTP 500s on text-mode
-    // responses for the Qwen3.5 family. The default here stays on
-    // `/api/chat` so the harn-vm test stub keeps working with Ollama's
-    // native NDJSON wire format.
-    config.providers.insert(
-        "ollama".to_string(),
-        ProviderDef {
-            base_url: "http://localhost:11434".to_string(),
-            base_url_env: Some("OLLAMA_HOST".to_string()),
-            auth_style: "none".to_string(),
-            chat_endpoint: "/api/chat".to_string(),
-            completion_endpoint: Some("/api/generate".to_string()),
-            healthcheck: Some(HealthcheckDef {
-                method: "GET".to_string(),
-                path: Some("/api/tags".to_string()),
-                url: None,
-                body: None,
-            }),
-            cost_per_1k_in: Some(0.0),
-            cost_per_1k_out: Some(0.0),
-            latency_p50_ms: Some(1200),
-            ..Default::default()
-        },
-    );
-
-    // Google Gemini native API.
-    config.providers.insert(
-        "gemini".to_string(),
-        ProviderDef {
-            base_url: "https://generativelanguage.googleapis.com".to_string(),
-            base_url_env: Some("GEMINI_BASE_URL".to_string()),
-            auth_style: "header".to_string(),
-            auth_header: Some("x-goog-api-key".to_string()),
-            auth_env: AuthEnv::Multiple(vec![
-                "GEMINI_API_KEY".to_string(),
-                "GOOGLE_API_KEY".to_string(),
-            ]),
-            chat_endpoint: "/v1beta/models".to_string(),
-            healthcheck: Some(HealthcheckDef {
-                method: "GET".to_string(),
-                path: Some("/v1beta/models".to_string()),
-                url: None,
-                body: None,
-            }),
-            cost_per_1k_in: Some(0.00125),
-            cost_per_1k_out: Some(0.005),
-            latency_p50_ms: Some(1800),
-            ..Default::default()
-        },
-    );
-
-    // Together AI (OpenAI-compatible)
-    config.providers.insert(
-        "together".to_string(),
-        ProviderDef {
-            base_url: "https://api.together.xyz/v1".to_string(),
-            base_url_env: Some("TOGETHER_AI_BASE_URL".to_string()),
-            auth_style: "bearer".to_string(),
-            auth_env: AuthEnv::Single("TOGETHER_AI_API_KEY".to_string()),
-            chat_endpoint: "/chat/completions".to_string(),
-            completion_endpoint: Some("/completions".to_string()),
-            healthcheck: Some(HealthcheckDef {
-                method: "GET".to_string(),
-                path: Some("/models".to_string()),
-                url: None,
-                body: None,
-            }),
-            cost_per_1k_in: Some(0.0002),
-            cost_per_1k_out: Some(0.0006),
-            latency_p50_ms: Some(1600),
-            ..Default::default()
-        },
-    );
-
-    // Groq (OpenAI-compatible)
-    config.providers.insert(
-        "groq".to_string(),
-        ProviderDef {
-            base_url: "https://api.groq.com/openai/v1".to_string(),
-            base_url_env: Some("GROQ_BASE_URL".to_string()),
-            auth_style: "bearer".to_string(),
-            auth_env: AuthEnv::Single("GROQ_API_KEY".to_string()),
-            chat_endpoint: "/chat/completions".to_string(),
-            completion_endpoint: Some("/completions".to_string()),
-            healthcheck: Some(HealthcheckDef {
-                method: "GET".to_string(),
-                path: Some("/models".to_string()),
-                url: None,
-                body: None,
-            }),
-            cost_per_1k_in: Some(0.0001),
-            cost_per_1k_out: Some(0.0003),
-            latency_p50_ms: Some(450),
-            ..Default::default()
-        },
-    );
-
-    // DeepSeek (OpenAI-compatible)
-    config.providers.insert(
-        "deepseek".to_string(),
-        ProviderDef {
-            base_url: "https://api.deepseek.com/v1".to_string(),
-            base_url_env: Some("DEEPSEEK_BASE_URL".to_string()),
-            auth_style: "bearer".to_string(),
-            auth_env: AuthEnv::Single("DEEPSEEK_API_KEY".to_string()),
-            chat_endpoint: "/chat/completions".to_string(),
-            completion_endpoint: Some("/completions".to_string()),
-            healthcheck: Some(HealthcheckDef {
-                method: "GET".to_string(),
-                path: Some("/models".to_string()),
-                url: None,
-                body: None,
-            }),
-            cost_per_1k_in: Some(0.00014),
-            cost_per_1k_out: Some(0.00028),
-            latency_p50_ms: Some(1800),
-            ..Default::default()
-        },
-    );
-
-    // Fireworks (OpenAI-compatible open-weight hosting)
-    config.providers.insert(
-        "fireworks".to_string(),
-        ProviderDef {
-            base_url: "https://api.fireworks.ai/inference/v1".to_string(),
-            base_url_env: Some("FIREWORKS_BASE_URL".to_string()),
-            auth_style: "bearer".to_string(),
-            auth_env: AuthEnv::Single("FIREWORKS_API_KEY".to_string()),
-            chat_endpoint: "/chat/completions".to_string(),
-            completion_endpoint: Some("/completions".to_string()),
-            healthcheck: Some(HealthcheckDef {
-                method: "GET".to_string(),
-                path: Some("/models".to_string()),
-                url: None,
-                body: None,
-            }),
-            cost_per_1k_in: Some(0.0002),
-            cost_per_1k_out: Some(0.0006),
-            latency_p50_ms: Some(1400),
-            ..Default::default()
-        },
-    );
-
-    // Alibaba DashScope (OpenAI-compatible Qwen host)
-    config.providers.insert(
-        "dashscope".to_string(),
-        ProviderDef {
-            base_url: "https://dashscope-intl.aliyuncs.com/compatible-mode/v1".to_string(),
-            base_url_env: Some("DASHSCOPE_BASE_URL".to_string()),
-            auth_style: "bearer".to_string(),
-            auth_env: AuthEnv::Single("DASHSCOPE_API_KEY".to_string()),
-            chat_endpoint: "/chat/completions".to_string(),
-            completion_endpoint: Some("/completions".to_string()),
-            healthcheck: Some(HealthcheckDef {
-                method: "GET".to_string(),
-                path: Some("/models".to_string()),
-                url: None,
-                body: None,
-            }),
-            cost_per_1k_in: Some(0.0003),
-            cost_per_1k_out: Some(0.0012),
-            latency_p50_ms: Some(1600),
-            ..Default::default()
-        },
-    );
-
-    // AWS Bedrock Runtime. The provider shim resolves AWS credentials through
-    // env vars, the selected/default profile, container credentials, or EC2
-    // instance profile credentials, then signs Converse API calls with SigV4.
-    config.providers.insert(
-        "bedrock".to_string(),
-        ProviderDef {
-            base_url: String::new(),
-            base_url_env: Some("BEDROCK_BASE_URL".to_string()),
-            auth_style: "aws_sigv4".to_string(),
-            auth_env: AuthEnv::None,
-            chat_endpoint: "/model/{model}/converse".to_string(),
-            features: vec!["native_tools".to_string()],
-            latency_p50_ms: Some(2600),
-            ..Default::default()
-        },
-    );
-
-    // Azure OpenAI. The deployment name is routed in the URL; callers can
-    // use the Harn model field as the deployment name or set
-    // AZURE_OPENAI_DEPLOYMENT.
-    config.providers.insert(
-        "azure_openai".to_string(),
-        ProviderDef {
-            base_url: "https://{resource}.openai.azure.com".to_string(),
-            base_url_env: Some("AZURE_OPENAI_ENDPOINT".to_string()),
-            auth_style: "azure_openai".to_string(),
-            auth_env: AuthEnv::Multiple(vec![
-                "AZURE_OPENAI_API_KEY".to_string(),
-                "AZURE_OPENAI_AD_TOKEN".to_string(),
-                "AZURE_OPENAI_BEARER_TOKEN".to_string(),
-            ]),
-            chat_endpoint:
-                "/openai/deployments/{deployment}/chat/completions?api-version={api_version}"
-                    .to_string(),
-            features: vec!["native_tools".to_string()],
-            cost_per_1k_in: Some(0.0025),
-            cost_per_1k_out: Some(0.010),
-            latency_p50_ms: Some(1900),
-            ..Default::default()
-        },
-    );
-
-    // Google Vertex AI Gemini.
-    config.providers.insert(
-        "vertex".to_string(),
-        ProviderDef {
-            base_url: "https://aiplatform.googleapis.com/v1".to_string(),
-            base_url_env: Some("VERTEX_AI_BASE_URL".to_string()),
-            auth_style: "bearer".to_string(),
-            auth_env: AuthEnv::Multiple(vec![
-                "VERTEX_AI_ACCESS_TOKEN".to_string(),
-                "GOOGLE_OAUTH_ACCESS_TOKEN".to_string(),
-                "GOOGLE_APPLICATION_CREDENTIALS".to_string(),
-            ]),
-            chat_endpoint:
-                "/projects/{project}/locations/{location}/publishers/google/models/{model}:generateContent"
-                    .to_string(),
-            features: vec!["native_tools".to_string()],
-            cost_per_1k_in: Some(0.00125),
-            cost_per_1k_out: Some(0.005),
-            latency_p50_ms: Some(2100),
-            ..Default::default()
-        },
-    );
-
-    // Local OpenAI-compatible server
-    config.providers.insert(
-        "local".to_string(),
-        ProviderDef {
-            base_url: "http://localhost:8000".to_string(),
-            base_url_env: Some("LOCAL_LLM_BASE_URL".to_string()),
-            auth_style: "none".to_string(),
-            chat_endpoint: "/v1/chat/completions".to_string(),
-            completion_endpoint: Some("/v1/completions".to_string()),
-            healthcheck: Some(HealthcheckDef {
-                method: "GET".to_string(),
-                path: Some("/v1/models".to_string()),
-                url: None,
-                body: None,
-            }),
-            cost_per_1k_in: Some(0.0),
-            cost_per_1k_out: Some(0.0),
-            latency_p50_ms: Some(900),
-            ..Default::default()
-        },
-    );
-
-    // llama.cpp / llama-server OpenAI-compatible server. This is separate
-    // from `local` so capability rules can distinguish Qwen chat-template
-    // thinking quirks from other local OpenAI-compatible hosts.
-    config.providers.insert(
-        "llamacpp".to_string(),
-        ProviderDef {
-            base_url: "http://127.0.0.1:8001".to_string(),
-            base_url_env: Some("LLAMACPP_BASE_URL".to_string()),
-            auth_style: "none".to_string(),
-            chat_endpoint: "/v1/chat/completions".to_string(),
-            completion_endpoint: Some("/v1/completions".to_string()),
-            healthcheck: Some(HealthcheckDef {
-                method: "GET".to_string(),
-                path: Some("/v1/models".to_string()),
-                url: None,
-                body: None,
-            }),
-            cost_per_1k_in: Some(0.0),
-            cost_per_1k_out: Some(0.0),
-            latency_p50_ms: Some(900),
-            ..Default::default()
-        },
-    );
-
-    // Apple Silicon MLX OpenAI-compatible server. Harn owns readiness
-    // probing; hosts that want script-based auto-start should launch the
-    // process first, then call Harn again to verify readiness.
-    config.providers.insert(
-        "mlx".to_string(),
-        ProviderDef {
-            base_url: "http://127.0.0.1:8002".to_string(),
-            base_url_env: Some("MLX_BASE_URL".to_string()),
-            auth_style: "none".to_string(),
-            chat_endpoint: "/v1/chat/completions".to_string(),
-            completion_endpoint: Some("/v1/completions".to_string()),
-            healthcheck: Some(HealthcheckDef {
-                method: "GET".to_string(),
-                path: Some("/v1/models".to_string()),
-                url: None,
-                body: None,
-            }),
-            cost_per_1k_in: Some(0.0),
-            cost_per_1k_out: Some(0.0),
-            latency_p50_ms: Some(900),
-            ..Default::default()
-        },
-    );
-
-    // vLLM OpenAI-compatible server.
-    config.providers.insert(
-        "vllm".to_string(),
-        ProviderDef {
-            base_url: "http://localhost:8000".to_string(),
-            base_url_env: Some("VLLM_BASE_URL".to_string()),
-            auth_style: "none".to_string(),
-            chat_endpoint: "/v1/chat/completions".to_string(),
-            completion_endpoint: Some("/v1/completions".to_string()),
-            healthcheck: Some(HealthcheckDef {
-                method: "GET".to_string(),
-                path: Some("/v1/models".to_string()),
-                url: None,
-                body: None,
-            }),
-            cost_per_1k_in: Some(0.0),
-            cost_per_1k_out: Some(0.0),
-            latency_p50_ms: Some(800),
-            ..Default::default()
-        },
-    );
-
-    // HuggingFace Text Generation Inference OpenAI-compatible endpoint.
-    config.providers.insert(
-        "tgi".to_string(),
-        ProviderDef {
-            base_url: "http://localhost:8080".to_string(),
-            base_url_env: Some("TGI_BASE_URL".to_string()),
-            auth_style: "none".to_string(),
-            chat_endpoint: "/v1/chat/completions".to_string(),
-            completion_endpoint: Some("/v1/completions".to_string()),
-            healthcheck: Some(HealthcheckDef {
-                method: "GET".to_string(),
-                path: Some("/health".to_string()),
-                url: None,
-                body: None,
-            }),
-            cost_per_1k_in: Some(0.0),
-            cost_per_1k_out: Some(0.0),
-            latency_p50_ms: Some(950),
-            ..Default::default()
-        },
-    );
-
-    // Default inference rules
-    config.inference_rules = vec![
-        InferenceRule {
-            pattern: Some("claude-*".to_string()),
-            contains: None,
-            exact: None,
-            provider: "anthropic".to_string(),
-        },
-        InferenceRule {
-            pattern: Some("gpt-*".to_string()),
-            contains: None,
-            exact: None,
-            provider: "openai".to_string(),
-        },
-        InferenceRule {
-            pattern: Some("o1*".to_string()),
-            contains: None,
-            exact: None,
-            provider: "openai".to_string(),
-        },
-        InferenceRule {
-            pattern: Some("o3*".to_string()),
-            contains: None,
-            exact: None,
-            provider: "openai".to_string(),
-        },
-        InferenceRule {
-            pattern: Some("o4*".to_string()),
-            contains: None,
-            exact: None,
-            provider: "openai".to_string(),
-        },
-        InferenceRule {
-            pattern: Some("anthropic.claude-*".to_string()),
-            contains: None,
-            exact: None,
-            provider: "bedrock".to_string(),
-        },
-        InferenceRule {
-            pattern: Some("meta.llama*".to_string()),
-            contains: None,
-            exact: None,
-            provider: "bedrock".to_string(),
-        },
-        InferenceRule {
-            pattern: Some("amazon.*".to_string()),
-            contains: None,
-            exact: None,
-            provider: "bedrock".to_string(),
-        },
-        InferenceRule {
-            pattern: Some("mistral.*".to_string()),
-            contains: None,
-            exact: None,
-            provider: "bedrock".to_string(),
-        },
-        InferenceRule {
-            pattern: Some("cohere.*".to_string()),
-            contains: None,
-            exact: None,
-            provider: "bedrock".to_string(),
-        },
-        InferenceRule {
-            pattern: Some("gemini-*".to_string()),
-            contains: None,
-            exact: None,
-            provider: "gemini".to_string(),
-        },
-    ];
-
-    // Default tier rules
-    config.tier_rules = vec![
-        TierRule {
-            contains: Some("9b".to_string()),
-            pattern: None,
-            exact: None,
-            tier: "small".to_string(),
-        },
-        TierRule {
-            contains: Some("a3b".to_string()),
-            pattern: None,
-            exact: None,
-            tier: "small".to_string(),
-        },
-        TierRule {
-            contains: Some("gemma-4-e2b".to_string()),
-            pattern: None,
-            exact: None,
-            tier: "small".to_string(),
-        },
-        TierRule {
-            contains: Some("gemma-4-e4b".to_string()),
-            pattern: None,
-            exact: None,
-            tier: "small".to_string(),
-        },
-        TierRule {
-            contains: Some("gemma-4-26b".to_string()),
-            pattern: None,
-            exact: None,
-            tier: "mid".to_string(),
-        },
-        TierRule {
-            contains: Some("gemma-4-31b".to_string()),
-            pattern: None,
-            exact: None,
-            tier: "frontier".to_string(),
-        },
-        TierRule {
-            contains: Some("gemma4:26b".to_string()),
-            pattern: None,
-            exact: None,
-            tier: "mid".to_string(),
-        },
-        TierRule {
-            contains: Some("gemma4:31b".to_string()),
-            pattern: None,
-            exact: None,
-            tier: "frontier".to_string(),
-        },
-        TierRule {
-            pattern: Some("claude-*".to_string()),
-            contains: None,
-            exact: None,
-            tier: "frontier".to_string(),
-        },
-        TierRule {
-            exact: Some("gpt-4o".to_string()),
-            contains: None,
-            pattern: None,
-            tier: "frontier".to_string(),
-        },
-    ];
-
-    config.tier_defaults = TierDefaults {
-        default: "mid".to_string(),
-    };
-
-    config.aliases.insert(
-        "frontier".to_string(),
-        AliasDef {
-            id: "claude-sonnet-4-20250514".to_string(),
-            provider: "anthropic".to_string(),
-            tool_format: None,
-        },
-    );
-    config.aliases.insert(
-        "tier/frontier".to_string(),
-        AliasDef {
-            id: "claude-sonnet-4-20250514".to_string(),
-            provider: "anthropic".to_string(),
-            tool_format: None,
-        },
-    );
-    config.aliases.insert(
-        "mid".to_string(),
-        AliasDef {
-            id: "gpt-4o-mini".to_string(),
-            provider: "openai".to_string(),
-            tool_format: None,
-        },
-    );
-    config.aliases.insert(
-        "tier/mid".to_string(),
-        AliasDef {
-            id: "gpt-4o-mini".to_string(),
-            provider: "openai".to_string(),
-            tool_format: None,
-        },
-    );
-    config.aliases.insert(
-        "small".to_string(),
-        AliasDef {
-            id: "Qwen/Qwen3.5-9B".to_string(),
-            provider: "openrouter".to_string(),
-            tool_format: None,
-        },
-    );
-    config.aliases.insert(
-        "tier/small".to_string(),
-        AliasDef {
-            id: "Qwen/Qwen3.5-9B".to_string(),
-            provider: "openrouter".to_string(),
-            tool_format: None,
-        },
-    );
-    config.aliases.insert(
-        "local-gemma4".to_string(),
-        AliasDef {
-            id: "gemma-4-26b-a4b-it".to_string(),
-            provider: "local".to_string(),
-            tool_format: None,
-        },
-    );
-    config.aliases.insert(
-        "local-gemma4-26b".to_string(),
-        AliasDef {
-            id: "gemma-4-26b-a4b-it".to_string(),
-            provider: "local".to_string(),
-            tool_format: None,
-        },
-    );
-    config.aliases.insert(
-        "local-gemma4-31b".to_string(),
-        AliasDef {
-            id: "gemma-4-31b-it".to_string(),
-            provider: "local".to_string(),
-            tool_format: None,
-        },
-    );
-    config.aliases.insert(
-        "local-gemma4-e4b".to_string(),
-        AliasDef {
-            id: "gemma-4-e4b-it".to_string(),
-            provider: "local".to_string(),
-            tool_format: None,
-        },
-    );
-    config.aliases.insert(
-        "local-gemma4-e2b".to_string(),
-        AliasDef {
-            id: "gemma-4-e2b-it".to_string(),
-            provider: "local".to_string(),
-            tool_format: None,
-        },
-    );
-    config.aliases.insert(
-        "ollama-gemma4".to_string(),
-        AliasDef {
-            id: "gemma4:26b".to_string(),
-            provider: "ollama".to_string(),
-            tool_format: Some("text".to_string()),
-        },
-    );
-    config.aliases.insert(
-        "ollama-gemma4-26b".to_string(),
-        AliasDef {
-            id: "gemma4:26b".to_string(),
-            provider: "ollama".to_string(),
-            tool_format: Some("text".to_string()),
-        },
-    );
-    config.aliases.insert(
-        "qwen3.6-coding".to_string(),
-        AliasDef {
-            id: "qwen3.6:35b-a3b-coding-nvfp4".to_string(),
-            provider: "ollama".to_string(),
-            tool_format: Some("text".to_string()),
-        },
-    );
-    config.aliases.insert(
-        "qwen3.6-35b-coding".to_string(),
-        AliasDef {
-            id: "qwen3.6:35b-a3b-coding-nvfp4".to_string(),
-            provider: "ollama".to_string(),
-            tool_format: Some("text".to_string()),
-        },
-    );
-    config.aliases.insert(
-        "qwen3.6-coding-nvfp4".to_string(),
-        AliasDef {
-            id: "qwen3.6:35b-a3b-coding-nvfp4".to_string(),
-            provider: "ollama".to_string(),
-            tool_format: Some("text".to_string()),
-        },
-    );
-    config.aliases.insert(
-        "qwen3.6-coding-native".to_string(),
-        AliasDef {
-            id: "qwen3.6:35b-a3b-coding-nvfp4".to_string(),
-            provider: "ollama".to_string(),
-            tool_format: Some("native".to_string()),
-        },
-    );
-    config.aliases.insert(
-        "llamacpp-qwen3.6".to_string(),
-        AliasDef {
-            id: "qwen3.6-35b-a3b".to_string(),
-            provider: "llamacpp".to_string(),
-            tool_format: Some("text".to_string()),
-        },
-    );
-    config.aliases.insert(
-        "llamacpp-qwen3.6-q4".to_string(),
-        AliasDef {
-            id: "qwen3.6-35b-a3b-ud-q4-k-xl".to_string(),
-            provider: "llamacpp".to_string(),
-            tool_format: Some("text".to_string()),
-        },
-    );
-    config.aliases.insert(
-        "local-qwen3.6".to_string(),
-        AliasDef {
-            id: "qwen3.6-35b-a3b-ud-q4-k-xl".to_string(),
-            provider: "llamacpp".to_string(),
-            tool_format: Some("text".to_string()),
-        },
-    );
-    config.aliases.insert(
-        "local-qwen3.6-gguf".to_string(),
-        AliasDef {
-            id: "qwen3.6-35b-a3b-ud-q4-k-xl".to_string(),
-            provider: "llamacpp".to_string(),
-            tool_format: Some("text".to_string()),
-        },
-    );
-    config.aliases.insert(
-        "mlx-qwen36-27b".to_string(),
-        AliasDef {
-            id: "unsloth/Qwen3.6-27B-UD-MLX-4bit".to_string(),
-            provider: "mlx".to_string(),
-            tool_format: None,
-        },
-    );
-    config.aliases.insert(
-        "mlx-qwen3.6-27b".to_string(),
-        AliasDef {
-            id: "unsloth/Qwen3.6-27B-UD-MLX-4bit".to_string(),
-            provider: "mlx".to_string(),
-            tool_format: Some("native".to_string()),
-        },
-    );
-    config.aliases.insert(
-        "mlx-qwen3.6-27b-q4".to_string(),
-        AliasDef {
-            id: "unsloth/Qwen3.6-27B-UD-MLX-4bit".to_string(),
-            provider: "mlx".to_string(),
-            tool_format: Some("native".to_string()),
-        },
-    );
-    config.aliases.insert(
-        "local-qwen3.6-27b".to_string(),
-        AliasDef {
-            id: "unsloth/Qwen3.6-27B-UD-MLX-4bit".to_string(),
-            provider: "mlx".to_string(),
-            tool_format: Some("native".to_string()),
-        },
-    );
-    config.aliases.insert(
-        "devstral-small-2".to_string(),
-        AliasDef {
-            id: "devstral-small-2:24b".to_string(),
-            provider: "ollama".to_string(),
-            tool_format: Some("text".to_string()),
-        },
-    );
-    config.aliases.insert(
-        "ollama-devstral-small-2".to_string(),
-        AliasDef {
-            id: "devstral-small-2:24b".to_string(),
-            provider: "ollama".to_string(),
-            tool_format: Some("text".to_string()),
-        },
-    );
-    config.aliases.insert(
-        "ollama-devstral-small-2-native".to_string(),
-        AliasDef {
-            id: "devstral-small-2:24b".to_string(),
-            provider: "ollama".to_string(),
-            tool_format: Some("native".to_string()),
-        },
-    );
-
-    config.alias_tool_calling.extend(BTreeMap::from([
-        (
-            "qwen3.6-coding".to_string(),
-            AliasToolCallingDef {
-                native: Some("unknown".to_string()),
-                text: Some("unknown".to_string()),
-                streaming_native: Some("unknown".to_string()),
-                fallback_mode: Some("text".to_string()),
-                failure_reason: None,
-                last_probe_at: None,
-            },
-        ),
-        (
-            "qwen3.6-coding-native".to_string(),
-            AliasToolCallingDef {
-                native: Some("unknown".to_string()),
-                text: Some("unknown".to_string()),
-                streaming_native: Some("unknown".to_string()),
-                fallback_mode: Some("native".to_string()),
-                failure_reason: None,
-                last_probe_at: None,
-            },
-        ),
-        (
-            "ollama-gemma4".to_string(),
-            AliasToolCallingDef {
-                native: Some("unknown".to_string()),
-                text: Some("unknown".to_string()),
-                streaming_native: Some("unknown".to_string()),
-                fallback_mode: Some("disabled".to_string()),
-                failure_reason: Some("requires_tool_probe".to_string()),
-                last_probe_at: None,
-            },
-        ),
-        (
-            "llamacpp-qwen3.6-q4".to_string(),
-            AliasToolCallingDef {
-                native: Some("unknown".to_string()),
-                text: Some("unknown".to_string()),
-                streaming_native: Some("unknown".to_string()),
-                fallback_mode: Some("text".to_string()),
-                failure_reason: Some("requires_tool_probe_and_cache_probe".to_string()),
-                last_probe_at: None,
-            },
-        ),
-        (
-            "mlx-qwen3.6-27b".to_string(),
-            AliasToolCallingDef {
-                native: Some("unknown".to_string()),
-                text: Some("unknown".to_string()),
-                streaming_native: Some("unknown".to_string()),
-                fallback_mode: Some("native".to_string()),
-                failure_reason: Some("requires_served_identity_and_tool_probe".to_string()),
-                last_probe_at: None,
-            },
-        ),
-    ]));
-
-    config.qc_defaults.extend(BTreeMap::from([
-        (
-            "anthropic".to_string(),
-            "claude-3-5-haiku-20241022".to_string(),
-        ),
-        ("openai".to_string(), "gpt-4o-mini".to_string()),
-        (
-            "openrouter".to_string(),
-            "google/gemini-2.5-flash".to_string(),
-        ),
-        ("ollama".to_string(), "llama3.2".to_string()),
-        ("local".to_string(), "gpt-4o".to_string()),
-    ]));
-
-    config.models.extend(BTreeMap::from([
-        (
-            "qwen3.6:35b-a3b-coding-nvfp4".to_string(),
-            ModelDef {
-                name: "Qwen3.6 35B A3B Coding (NVFP4)".to_string(),
-                provider: "ollama".to_string(),
-                context_window: 262_144,
-                runtime_context_window: Some(32_768),
-                stream_timeout: Some(900.0),
-                capabilities: vec![
-                    "tools".to_string(),
-                    "streaming".to_string(),
-                    "thinking".to_string(),
-                ],
-                pricing: None,
-                deprecated: false,
-                deprecation_note: None,
-                quality_tags: Vec::new(),
-                prefer_prefill_done: None,
-            },
-        ),
-        (
-            "gemma4:26b".to_string(),
-            ModelDef {
-                name: "Gemma 4 26B MoE".to_string(),
-                provider: "ollama".to_string(),
-                context_window: 262_144,
-                runtime_context_window: Some(32_768),
-                stream_timeout: Some(300.0),
-                capabilities: vec![
-                    "tools".to_string(),
-                    "vision".to_string(),
-                    "streaming".to_string(),
-                    "thinking".to_string(),
-                ],
-                pricing: None,
-                deprecated: false,
-                deprecation_note: None,
-                quality_tags: Vec::new(),
-                prefer_prefill_done: None,
-            },
-        ),
-        (
-            "claude-sonnet-4-20250514".to_string(),
-            ModelDef {
-                name: "Claude Sonnet 4".to_string(),
-                provider: "anthropic".to_string(),
-                context_window: 200_000,
-                runtime_context_window: None,
-                stream_timeout: None,
-                capabilities: vec![
-                    "tools".to_string(),
-                    "streaming".to_string(),
-                    "prompt_caching".to_string(),
-                    "thinking".to_string(),
-                ],
-                pricing: Some(ModelPricing {
-                    input_per_mtok: 3.0,
-                    output_per_mtok: 15.0,
-                    cache_read_per_mtok: Some(0.3),
-                    cache_write_per_mtok: Some(3.75),
-                }),
-                deprecated: false,
-                deprecation_note: None,
-                quality_tags: Vec::new(),
-                prefer_prefill_done: None,
-            },
-        ),
-        (
-            "gpt-4o-mini".to_string(),
-            ModelDef {
-                name: "GPT-4o Mini".to_string(),
-                provider: "openai".to_string(),
-                context_window: 128_000,
-                runtime_context_window: None,
-                stream_timeout: None,
-                capabilities: vec!["tools".to_string(), "streaming".to_string()],
-                pricing: Some(ModelPricing {
-                    input_per_mtok: 0.15,
-                    output_per_mtok: 0.60,
-                    cache_read_per_mtok: None,
-                    cache_write_per_mtok: None,
-                }),
-                deprecated: false,
-                deprecation_note: None,
-                quality_tags: Vec::new(),
-                prefer_prefill_done: None,
-            },
-        ),
-        (
-            "Qwen/Qwen3.5-9B".to_string(),
-            ModelDef {
-                name: "Qwen3.5 9B".to_string(),
-                provider: "openrouter".to_string(),
-                context_window: 131_072,
-                runtime_context_window: None,
-                stream_timeout: None,
-                capabilities: vec!["tools".to_string(), "streaming".to_string()],
-                pricing: None,
-                deprecated: false,
-                deprecation_note: None,
-                quality_tags: Vec::new(),
-                prefer_prefill_done: None,
-            },
-        ),
-        (
-            "llama3.2".to_string(),
-            ModelDef {
-                name: "Llama 3.2".to_string(),
-                provider: "ollama".to_string(),
-                context_window: 32_000,
-                runtime_context_window: None,
-                stream_timeout: Some(300.0),
-                capabilities: vec!["tools".to_string(), "streaming".to_string()],
-                pricing: None,
-                deprecated: false,
-                deprecation_note: None,
-                quality_tags: Vec::new(),
-                prefer_prefill_done: None,
-            },
-        ),
-    ]));
-
-    let mut local_model =
-        |id: &str, name: &str, stream_timeout: f64, prefer_prefill_done: Option<bool>| {
-            config.models.insert(
-                id.to_string(),
-                ModelDef {
-                    name: name.to_string(),
-                    provider: "local".to_string(),
-                    context_window: 131_072,
-                    runtime_context_window: None,
-                    stream_timeout: Some(stream_timeout),
-                    capabilities: vec!["streaming".to_string(), "thinking".to_string()],
-                    pricing: None,
-                    deprecated: false,
-                    deprecation_note: None,
-                    quality_tags: Vec::new(),
-                    prefer_prefill_done,
-                },
-            );
-        };
-    local_model("gemma-4-e2b-it", "Gemma 4 E2B (local)", 300.0, Some(true));
-    local_model("gemma-4-e4b-it", "Gemma 4 E4B (local)", 300.0, Some(true));
-    local_model("gemma-4-26b-a4b-it", "Gemma 4 26B MoE (local)", 600.0, None);
-    local_model("gemma-4-31b-it", "Gemma 4 31B (local)", 600.0, None);
-
-    for (id, name) in [
-        (
-            "qwen3.6-35b-a3b-ud-q4-k-xl",
-            "Qwen3.6 35B (Unsloth Q4_K_XL, llama.cpp)",
-        ),
-        (
-            "qwen3.6-35b-a3b-ud-q5-k-xl",
-            "Qwen3.6 35B (Unsloth Q5_K_XL, llama.cpp)",
-        ),
-        ("qwen3.6-35b-a3b", "Qwen3.6 35B (llama.cpp)"),
-    ] {
-        config.models.insert(
-            id.to_string(),
-            ModelDef {
-                name: name.to_string(),
-                provider: "llamacpp".to_string(),
-                context_window: 262_144,
-                runtime_context_window: Some(65_536),
-                stream_timeout: Some(900.0),
-                capabilities: vec![
-                    "tools".to_string(),
-                    "streaming".to_string(),
-                    "thinking".to_string(),
-                ],
-                pricing: None,
-                deprecated: false,
-                deprecation_note: None,
-                quality_tags: Vec::new(),
-                prefer_prefill_done: None,
-            },
-        );
-    }
-
-    config.models.insert(
-        "unsloth/Qwen3.6-27B-UD-MLX-4bit".to_string(),
-        ModelDef {
-            name: "Qwen3.6 27B (MLX 4-bit)".to_string(),
-            provider: "mlx".to_string(),
-            context_window: 262_144,
-            runtime_context_window: None,
-            stream_timeout: Some(900.0),
-            capabilities: vec![
-                "tools".to_string(),
-                "vision".to_string(),
-                "streaming".to_string(),
-                "thinking".to_string(),
-            ],
-            pricing: None,
-            deprecated: false,
-            deprecation_note: None,
-            quality_tags: Vec::new(),
-            prefer_prefill_done: None,
-        },
-    );
-
-    config.models.insert(
-        "devstral-small-2:24b".to_string(),
-        ModelDef {
-            name: "Devstral Small 2 24B".to_string(),
-            provider: "ollama".to_string(),
-            context_window: 262_144,
-            runtime_context_window: Some(32_768),
-            stream_timeout: Some(600.0),
-            capabilities: vec!["tools".to_string(), "streaming".to_string()],
-            pricing: None,
-            deprecated: false,
-            deprecation_note: None,
-            quality_tags: Vec::new(),
-            prefer_prefill_done: None,
-        },
-    );
-
-    config.models.extend(canonical_priced_models());
-
-    config
-}
-
-/// Canonical hosted-model pricing entries (USD per 1M tokens). Provenance: the
-/// public Anthropic, OpenAI, Google Gemini, and Mistral pricing pages snapshot
-/// at 2026-01. These replace the previous `model_pricing_per_million` Rust
-/// fallback table that lived in `llm/cost.rs` and could silently drift; if a
-/// listed rate changes, edit the literal here so the change shows up in `git
-/// blame`. Users can override or extend the table per environment via
-/// `HARN_PROVIDERS_CONFIG` or `harn.toml`.
-fn canonical_priced_models() -> BTreeMap<String, ModelDef> {
-    let mut out = BTreeMap::new();
-    let anthropic_caps = vec![
-        "tools".to_string(),
-        "streaming".to_string(),
-        "prompt_caching".to_string(),
-        "thinking".to_string(),
-    ];
-    let openai_caps = vec!["tools".to_string(), "streaming".to_string()];
-    let gemini_caps = vec!["tools".to_string(), "streaming".to_string()];
-
-    let mut anthropic = |id: &str,
-                         name: &str,
-                         context_window: u64,
-                         input: f64,
-                         output: f64,
-                         cache_read: Option<f64>,
-                         cache_write: Option<f64>| {
-        out.insert(
-            id.to_string(),
-            ModelDef {
-                name: name.to_string(),
-                provider: "anthropic".to_string(),
-                context_window,
-                runtime_context_window: None,
-                stream_timeout: None,
-                capabilities: anthropic_caps.clone(),
-                pricing: Some(ModelPricing {
-                    input_per_mtok: input,
-                    output_per_mtok: output,
-                    cache_read_per_mtok: cache_read,
-                    cache_write_per_mtok: cache_write,
-                }),
-                deprecated: false,
-                deprecation_note: None,
-                quality_tags: Vec::new(),
-                prefer_prefill_done: None,
-            },
-        );
-    };
-    anthropic(
-        "claude-3-5-haiku-20241022",
-        "Claude Haiku 3.5",
-        200_000,
-        0.80,
-        4.00,
-        Some(0.08),
-        Some(1.00),
-    );
-    anthropic(
-        "claude-haiku-4-5-20251001",
-        "Claude Haiku 4.5",
-        200_000,
-        1.00,
-        5.00,
-        Some(0.10),
-        Some(1.25),
-    );
-    anthropic(
-        "claude-3-5-sonnet-20240620",
-        "Claude Sonnet 3.5 (2024-06-20)",
-        200_000,
-        3.00,
-        15.00,
-        Some(0.30),
-        Some(3.75),
-    );
-    anthropic(
-        "claude-3-5-sonnet-20241022",
-        "Claude Sonnet 3.5 (2024-10-22)",
-        200_000,
-        3.00,
-        15.00,
-        Some(0.30),
-        Some(3.75),
-    );
-    anthropic(
-        "claude-3-opus-20240229",
-        "Claude Opus 3",
-        200_000,
-        15.00,
-        75.00,
-        Some(1.50),
-        Some(18.75),
-    );
-    anthropic(
-        "claude-opus-4-20250514",
-        "Claude Opus 4",
-        200_000,
-        15.00,
-        75.00,
-        Some(1.50),
-        Some(18.75),
-    );
-    anthropic(
-        "claude-opus-4-1-20250805",
-        "Claude Opus 4.1",
-        200_000,
-        15.00,
-        75.00,
-        Some(1.50),
-        Some(18.75),
-    );
-
-    let mut openai = |id: &str,
-                      name: &str,
-                      context_window: u64,
-                      input: f64,
-                      output: f64,
-                      cache_read: Option<f64>| {
-        out.insert(
-            id.to_string(),
-            ModelDef {
-                name: name.to_string(),
-                provider: "openai".to_string(),
-                context_window,
-                runtime_context_window: None,
-                stream_timeout: None,
-                capabilities: openai_caps.clone(),
-                pricing: Some(ModelPricing {
-                    input_per_mtok: input,
-                    output_per_mtok: output,
-                    cache_read_per_mtok: cache_read,
-                    cache_write_per_mtok: None,
-                }),
-                deprecated: false,
-                deprecation_note: None,
-                quality_tags: Vec::new(),
-                prefer_prefill_done: None,
-            },
-        );
-    };
-    openai("gpt-4o", "GPT-4o", 128_000, 2.50, 10.00, Some(1.25));
-    openai("gpt-4-turbo", "GPT-4 Turbo", 128_000, 10.00, 30.00, None);
-    openai("o1", "OpenAI o1", 200_000, 15.00, 60.00, Some(7.50));
-    openai(
-        "o1-mini",
-        "OpenAI o1-mini",
-        128_000,
-        3.00,
-        12.00,
-        Some(1.50),
-    );
-    openai("o3", "OpenAI o3", 200_000, 15.00, 60.00, Some(7.50));
-    openai("o3-mini", "OpenAI o3-mini", 200_000, 1.10, 4.40, Some(0.55));
-
-    let mut gemini = |id: &str,
-                      name: &str,
-                      context_window: u64,
-                      input: f64,
-                      output: f64,
-                      cache_read: Option<f64>| {
-        out.insert(
-            id.to_string(),
-            ModelDef {
-                name: name.to_string(),
-                provider: "gemini".to_string(),
-                context_window,
-                runtime_context_window: None,
-                stream_timeout: None,
-                capabilities: gemini_caps.clone(),
-                pricing: Some(ModelPricing {
-                    input_per_mtok: input,
-                    output_per_mtok: output,
-                    cache_read_per_mtok: cache_read,
-                    cache_write_per_mtok: None,
-                }),
-                deprecated: false,
-                deprecation_note: None,
-                quality_tags: Vec::new(),
-                prefer_prefill_done: None,
-            },
-        );
-    };
-    gemini(
-        "gemini-2.5-flash",
-        "Gemini 2.5 Flash",
-        1_048_576,
-        0.10,
-        0.40,
-        Some(0.025),
-    );
-    gemini(
-        "gemini-2.5-pro",
-        "Gemini 2.5 Pro",
-        2_097_152,
-        1.25,
-        5.00,
-        Some(0.3125),
-    );
-
-    out.insert(
-        "mistral-large-latest".to_string(),
-        ModelDef {
-            name: "Mistral Large".to_string(),
-            provider: "openrouter".to_string(),
-            context_window: 128_000,
-            runtime_context_window: None,
-            stream_timeout: None,
-            capabilities: openai_caps.clone(),
-            pricing: Some(ModelPricing {
-                input_per_mtok: 2.00,
-                output_per_mtok: 6.00,
-                cache_read_per_mtok: None,
-                cache_write_per_mtok: None,
-            }),
-            deprecated: false,
-            deprecation_note: None,
-            quality_tags: Vec::new(),
-            prefer_prefill_done: None,
-        },
-    );
-    out.insert(
-        "mistral-small-latest".to_string(),
-        ModelDef {
-            name: "Mistral Small".to_string(),
-            provider: "openrouter".to_string(),
-            context_window: 128_000,
-            runtime_context_window: None,
-            stream_timeout: None,
-            capabilities: openai_caps,
-            pricing: Some(ModelPricing {
-                input_per_mtok: 0.20,
-                output_per_mtok: 0.60,
-                cache_read_per_mtok: None,
-                cache_write_per_mtok: None,
-            }),
-            deprecated: false,
-            deprecation_note: None,
-            quality_tags: Vec::new(),
-            prefer_prefill_done: None,
-        },
-    );
-    out
+    parse_config_toml(EMBEDDED_PROVIDERS_TOML)
+        .expect("embedded providers.toml must parse — invariant checked by harn-vm tests")
 }
 
 #[cfg(test)]
@@ -2451,20 +1116,47 @@ mod tests {
 
     #[test]
     fn test_resolve_tier_model_default_aliases() {
-        let (model, provider) = resolve_tier_model("frontier", None).unwrap();
-        assert_eq!(model, "claude-sonnet-4-20250514");
+        // Exercise the alias-resolution machinery, not the specific catalog
+        // value: the model under each tier alias evolves as the embedded
+        // providers.toml is updated. The invariants worth pinning are the
+        // provider routing + catalog-registration of the resolved model.
+        let (model, provider) = resolve_tier_model("frontier", None)
+            .expect("frontier alias must resolve from the embedded catalog");
         assert_eq!(provider, "anthropic");
+        assert!(
+            model_catalog_entry(&model)
+                .is_some_and(|entry| entry.provider == "anthropic" && !entry.deprecated),
+            "frontier alias must point at a registered, non-deprecated anthropic model (got {model})"
+        );
 
-        let (model, provider) = resolve_tier_model("small", None).unwrap();
-        assert_eq!(model, "Qwen/Qwen3.5-9B");
-        assert_eq!(provider, "openrouter");
+        let (model, provider) = resolve_tier_model("small", None)
+            .expect("small alias must resolve from the embedded catalog");
+        assert!(
+            [
+                "openrouter",
+                "huggingface",
+                "local",
+                "llamacpp",
+                "mlx",
+                "ollama"
+            ]
+            .contains(&provider.as_str()),
+            "small tier should resolve to an open-weight provider (got {provider} / {model})"
+        );
     }
 
     #[test]
     fn test_resolve_tier_model_prefers_provider_scoped_aliases() {
-        let (model, provider) = resolve_tier_model("mid", Some("openai")).unwrap();
-        assert_eq!(model, "gpt-4o-mini");
+        // tier/<provider> takes precedence over generic tier when the
+        // caller scopes by provider. Don't pin the specific model — the
+        // catalog evolves.
+        let (model, provider) = resolve_tier_model("mid", Some("openai"))
+            .expect("mid tier scoped to openai must resolve");
         assert_eq!(provider, "openai");
+        assert!(
+            model_catalog_entry(&model).is_some(),
+            "mid/openai alias must point at a registered model (got {model})"
+        );
     }
 
     #[test]
@@ -2722,5 +1414,145 @@ mod tests {
         assert_eq!(infer_provider("internal-foo"), "openai");
 
         reset_overrides();
+    }
+
+    // ── Embedded providers.toml invariants ───────────────────────────────────
+    // These tests pin properties of the *system* — TOML parses, every
+    // alias resolves, every deprecated model has a note — without
+    // pinning specific catalog values. They survive future catalog
+    // churn and surface real schema breakage.
+
+    #[test]
+    fn embedded_providers_toml_parses_and_is_not_trivially_empty() {
+        let config = default_config();
+        assert!(
+            config.providers.len() >= 10,
+            "expected >=10 providers in embedded catalog, got {}",
+            config.providers.len()
+        );
+        assert!(
+            config.models.len() >= 20,
+            "expected >=20 models in embedded catalog, got {}",
+            config.models.len()
+        );
+        assert!(
+            config.aliases.len() >= 15,
+            "expected >=15 aliases in embedded catalog, got {}",
+            config.aliases.len()
+        );
+        assert_eq!(config.default_provider.as_deref(), Some("anthropic"));
+    }
+
+    #[test]
+    fn embedded_catalog_every_deprecated_model_has_a_note() {
+        let config = default_config();
+        let offenders: Vec<&str> = config
+            .models
+            .iter()
+            .filter(|(_, model)| {
+                model.deprecated
+                    && model
+                        .deprecation_note
+                        .as_deref()
+                        .unwrap_or("")
+                        .trim()
+                        .is_empty()
+            })
+            .map(|(id, _)| id.as_str())
+            .collect();
+        assert!(
+            offenders.is_empty(),
+            "deprecated models missing a deprecation_note: {offenders:?}"
+        );
+    }
+
+    #[test]
+    fn embedded_catalog_every_model_targets_a_registered_provider() {
+        let config = default_config();
+        let known: std::collections::BTreeSet<&str> =
+            config.providers.keys().map(String::as_str).collect();
+        let orphans: Vec<(&str, &str)> = config
+            .models
+            .iter()
+            .filter(|(_, model)| !known.contains(model.provider.as_str()))
+            .map(|(id, model)| (id.as_str(), model.provider.as_str()))
+            .collect();
+        assert!(
+            orphans.is_empty(),
+            "models reference unknown providers: {orphans:?}"
+        );
+    }
+
+    #[test]
+    fn embedded_catalog_every_alias_targets_a_registered_provider() {
+        let config = default_config();
+        let known: std::collections::BTreeSet<&str> =
+            config.providers.keys().map(String::as_str).collect();
+        let orphans: Vec<(&str, &str)> = config
+            .aliases
+            .iter()
+            .filter(|(_, alias)| !known.contains(alias.provider.as_str()))
+            .map(|(name, alias)| (name.as_str(), alias.provider.as_str()))
+            .collect();
+        assert!(
+            orphans.is_empty(),
+            "aliases reference unknown providers: {orphans:?}"
+        );
+    }
+
+    #[test]
+    fn embedded_catalog_every_qc_default_targets_a_known_model() {
+        let config = default_config();
+        let orphans: Vec<(&str, &str)> = config
+            .qc_defaults
+            .iter()
+            .filter(|(_, model_id)| !config.models.contains_key(model_id.as_str()))
+            .map(|(provider, model_id)| (provider.as_str(), model_id.as_str()))
+            .collect();
+        assert!(
+            orphans.is_empty(),
+            "qc_defaults reference unknown models: {orphans:?}"
+        );
+    }
+
+    #[test]
+    fn embedded_catalog_pricing_rates_are_non_negative() {
+        let config = default_config();
+        for (id, model) in &config.models {
+            let Some(pricing) = &model.pricing else {
+                continue;
+            };
+            assert!(
+                pricing.input_per_mtok >= 0.0 && pricing.output_per_mtok >= 0.0,
+                "{id}: negative pricing — in={} out={}",
+                pricing.input_per_mtok,
+                pricing.output_per_mtok
+            );
+            if let Some(rate) = pricing.cache_read_per_mtok {
+                assert!(rate >= 0.0, "{id}: negative cache_read rate {rate}");
+            }
+            if let Some(rate) = pricing.cache_write_per_mtok {
+                assert!(rate >= 0.0, "{id}: negative cache_write rate {rate}");
+            }
+        }
+    }
+
+    #[test]
+    fn embedded_catalog_tier_aliases_resolve_to_active_models() {
+        // The three canonical tier aliases (frontier / mid / small) MUST
+        // resolve to non-deprecated catalog entries; a default that
+        // routes the loop into a sunsetted model is a release blocker.
+        for alias in ["frontier", "mid", "small"] {
+            let (model, _provider) = resolve_tier_model(alias, None)
+                .unwrap_or_else(|| panic!("tier alias `{alias}` must resolve"));
+            let entry = model_catalog_entry(&model).unwrap_or_else(|| {
+                panic!("tier alias `{alias}` -> `{model}` must be a registered catalog entry")
+            });
+            assert!(
+                !entry.deprecated,
+                "tier alias `{alias}` resolves to deprecated model `{model}` ({:?})",
+                entry.deprecation_note
+            );
+        }
     }
 }
