@@ -1,0 +1,138 @@
+import "std/context"
+
+pipeline default() {
+  let primary = context_artifact(
+    {
+      id: "parser-conventions",
+      kind: "convention_fact",
+      title: "Parser conventions",
+      path: "crates/harn-parser/src/lib.rs",
+      language: "rust",
+      role: "implementer",
+      task: "parser fix",
+      freshness: "fresh",
+      confidence: 0.91,
+      provenance: {
+        source: "burin:typed-evidence",
+        authority: "tier1_scan",
+        explanation: "Source spans were inspected.",
+      },
+      source_hashes: ["sha256:parser"],
+      token_estimate: 8,
+      body: "Parser diagnostics should preserve source spans.",
+      redaction: {sensitivity: "internal", redacted: true},
+    },
+  )
+  let duplicate = context_artifact(
+    {
+      id: "parser-conventions-old",
+      kind: "convention_fact",
+      title: "Old parser conventions",
+      path: "crates/harn-parser/src/lib.rs",
+      language: "rust",
+      freshness: "stale",
+      confidence: 0.2,
+      provenance: {source: "burin:typed-evidence", authority: "tier3_heuristic"},
+      source_hashes: ["sha256:parser"],
+      token_estimate: 8,
+      body: "Stale duplicate body.",
+    },
+  )
+  let digest = context_artifact_from_burin_digest(
+    ".burin/context-digests/parser.md",
+    "# Parser digest\nUse Pratt parsing for expressions.",
+    {
+      title: "Parser digest",
+      confidence: 0.75,
+      source_hashes: ["sha256:digest"],
+      metadata: {legacy_source: "scan"},
+    },
+  )
+  let merged = context_artifact_merge(
+    primary,
+    context_artifact(
+      {
+        id: "parser-conventions-extra",
+        kind: "convention_fact",
+        path: "crates/harn-parser/src/lib.rs",
+        freshness: "fresh",
+        confidence: 0.8,
+        provenance: {source: "manual-review", authority: "tier1_scan"},
+        source_hashes: ["sha256:other"],
+        token_estimate: 2,
+        body: "Additional span evidence.",
+      },
+    ),
+    {merge_body: true},
+  )
+  let secret = context_artifact({id: "api-key", kind: "secret", body: "TOKEN<abc>", sensitivity: "secret"})
+  let redaction_override = context_artifact(
+    {id: "secret-option", kind: "secret", body: "TOKEN<option>", sensitivity: "internal"},
+    {redaction: {sensitivity: "secret", redacted: false}},
+  )
+  let xml_escape = context_artifact({id: "xml", kind: "note", body: "Use <span> tags."})
+  let ctx_with_artifact = context_add_artifact(context([], {artifacts: []}), primary)
+  let same_body_a = context_artifact({kind: "note", path: "a.md", body: "shared body"})
+  let same_body_b = context_artifact({kind: "note", path: "b.md", body: "shared body"})
+  let overlap_hash_a = context_artifact({kind: "note", body: "left", source_hashes: ["sha256:left", "sha256:shared"]})
+  let overlap_hash_b = context_artifact({kind: "note", body: "right", source_hashes: ["sha256:right", "sha256:shared"]})
+  let budgeted = context_artifact_budget(
+    [duplicate, primary, digest],
+    {
+      role: "implementer",
+      task: "parser fix",
+      language: "rust",
+      max_tokens: 40,
+      pinned_ids: ["parser-conventions"],
+    },
+  )
+  println(len(budgeted.artifacts))
+  println(budgeted.artifacts[0].id)
+  println(len(context_artifact_dedupe([primary, duplicate])))
+  println(digest.metadata.burin_legacy_context_digest)
+  println(digest.metadata.legacy_source)
+  println(join(merged.source_hashes, ","))
+  println(merged.token_estimate > primary.token_estimate)
+  println(
+    contains(
+      context_render_artifacts([secret], {variant: "xml", skip_budget: true}),
+      "[sensitive context withheld: secret]",
+    ),
+  )
+  println(
+    contains(
+      context_render_artifacts([redaction_override], {variant: "plain", skip_budget: true}),
+      "[sensitive context withheld: secret]",
+    ),
+  )
+  println(
+    contains(
+      context_render_artifacts([xml_escape], {variant: "xml", skip_budget: true}),
+      "Use &lt;span&gt; tags.",
+    ),
+  )
+  println(ctx_with_artifact.artifacts[0].id)
+  println(len(context_artifact_dedupe([same_body_a, same_body_b])))
+  println(len(context_artifact_dedupe([overlap_hash_a, overlap_hash_b])))
+  println(contains(context_render_artifacts([primary], {variant: "plain"}), "Context Artifacts:"))
+  let packed = assemble_context(
+    {
+      artifacts: budgeted.artifacts,
+      budget_tokens: 40,
+      dedup: "chunked",
+      strategy: "relevance",
+      query: "parser spans",
+    },
+  )
+  println(packed.chunks[0].artifact_id)
+  println(context_render_artifacts([primary], {variant: "markdown"}))
+  println(context_render_artifacts([primary], {capabilities: {prefers_xml_scaffolding: true}}))
+  println(context_render_artifacts([primary, digest], {variant: "compact", max_tokens: 100}))
+  let prompt = prompt_compose(
+    "Fix parser spans.",
+    context([], {artifacts: [primary]}),
+    {capabilities: {prefers_markdown_scaffolding: true}, task_label: "Parser Task"},
+  )
+  println(contains(prompt.prompt, "## Parser Task"))
+  println(contains(prompt.rendered_context, "## Context Artifacts"))
+}
