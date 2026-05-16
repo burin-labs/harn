@@ -20,7 +20,6 @@ use crate::value::{VmError, VmValue};
 use crate::vm::{Vm, VmBuiltinArity, VmBuiltinMetadata};
 
 use super::cost::calculate_cost_for_provider;
-use super::helpers::ResolvedProvider;
 use super::permissions;
 use super::tools::build_assistant_response_message;
 
@@ -66,6 +65,7 @@ struct AgentHostSession {
     rejected_tools: Vec<String>,
     tool_mode: String,
     last_provider: Option<String>,
+    last_model: Option<String>,
     pushed_transcript_dir: bool,
     started_at: String,
     /// Iteration cap from `agent_loop(options.max_iterations)`. Captured
@@ -302,6 +302,7 @@ async fn host_agent_session_init(args: Vec<VmValue>) -> Result<VmValue, VmError>
         rejected_tools: Vec::new(),
         tool_mode: tool_format,
         last_provider: None,
+        last_model: None,
         pushed_transcript_dir,
         started_at: now_id(),
         max_iterations,
@@ -681,6 +682,9 @@ fn assistant_message_from_llm_result(llm_result: &VmValue) -> VmValue {
     let provider = dict_get(llm_result, "provider")
         .map(|v| v.display())
         .unwrap_or_default();
+    let model = dict_get(llm_result, "model")
+        .map(|v| v.display())
+        .unwrap_or_default();
     // Only attach provider-native tool calls to the assistant envelope.
     // Text-mode calls remain inline in `text` and are parsed from there.
     let native_calls_value = dict_get(llm_result, "native_tool_calls")
@@ -704,6 +708,7 @@ fn assistant_message_from_llm_result(llm_result: &VmValue) -> VmValue {
         &native_calls_json,
         thinking.as_deref(),
         &provider,
+        &model,
     );
     json_to_vm(&msg)
 }
@@ -715,6 +720,9 @@ fn host_agent_session_record_assistant_builtin(
     let session_id = args.first().map(|v| v.display()).unwrap_or_default();
     let llm_result = args.get(1).cloned().unwrap_or(VmValue::Nil);
     let provider = dict_get(&llm_result, "provider")
+        .map(|v| v.display())
+        .unwrap_or_default();
+    let model = dict_get(&llm_result, "model")
         .map(|v| v.display())
         .unwrap_or_default();
     let raw_tool_calls = dict_get(&llm_result, "tool_calls")
@@ -729,6 +737,9 @@ fn host_agent_session_record_assistant_builtin(
         if !provider.is_empty() {
             session.last_provider = Some(provider);
         }
+        if !model.is_empty() {
+            session.last_model = Some(model);
+        }
         Ok(())
     });
     let _ = crate::agent_sessions::inject_message(
@@ -740,12 +751,13 @@ fn host_agent_session_record_assistant_builtin(
 
 fn tool_result_message_for_provider(
     provider: &str,
+    model: &str,
     name: &str,
     tool_call_id: &str,
     observation: &str,
 ) -> VmValue {
     let mut msg = BTreeMap::new();
-    if ResolvedProvider::resolve(provider).is_anthropic_style {
+    if crate::llm::provider::provider_uses_anthropic_messages(provider, model) {
         msg.insert("role".to_string(), VmValue::String(Rc::from("tool_result")));
         msg.insert(
             "tool_use_id".to_string(),
@@ -806,10 +818,14 @@ fn host_agent_session_record_tool_results_builtin(
 ) -> Result<VmValue, VmError> {
     let session_id = args.first().map(|v| v.display()).unwrap_or_default();
     let dispatch = args.get(1).cloned().unwrap_or(VmValue::Nil);
-    let provider = with_session(&session_id, HOST_SESSION_RECORD_TOOL_RESULTS, |session| {
-        Ok(session.last_provider.clone().unwrap_or_default())
-    })
-    .unwrap_or_default();
+    let (provider, model) =
+        with_session(&session_id, HOST_SESSION_RECORD_TOOL_RESULTS, |session| {
+            Ok((
+                session.last_provider.clone().unwrap_or_default(),
+                session.last_model.clone().unwrap_or_default(),
+            ))
+        })
+        .unwrap_or_default();
     // dispatch may be either a flat list of results (as returned by
     // agent_dispatch_tool_batch) or a dict with a `results` key (legacy
     // shape some callers still synthesize). Handle both.
@@ -870,7 +886,7 @@ fn host_agent_session_record_tool_results_builtin(
         }
         let _ = crate::agent_sessions::inject_message(
             &session_id,
-            tool_result_message_for_provider(&provider, &name, &tool_call_id, &observation),
+            tool_result_message_for_provider(&provider, &model, &name, &tool_call_id, &observation),
         );
     }
     let _ = with_session(&session_id, HOST_SESSION_RECORD_TOOL_RESULTS, |session| {
@@ -2028,6 +2044,7 @@ mod tests {
     fn tool_results_replay_with_provider_appropriate_ids() {
         let local = vm_to_json(&tool_result_message_for_provider(
             "local",
+            "Qwen/Qwen3.6-35B-A3B",
             "release_run",
             "call_001",
             "ok",
@@ -2038,12 +2055,23 @@ mod tests {
 
         let anthropic = vm_to_json(&tool_result_message_for_provider(
             "anthropic",
+            "claude-opus-4-7",
             "release_run",
             "call_002",
             "ok",
         ));
         assert_eq!(anthropic["role"], "tool_result");
         assert_eq!(anthropic["tool_use_id"], "call_002");
+
+        let bedrock_claude = vm_to_json(&tool_result_message_for_provider(
+            "bedrock",
+            "anthropic.claude-3-5-sonnet-20240620-v1:0",
+            "release_run",
+            "call_003",
+            "ok",
+        ));
+        assert_eq!(bedrock_claude["role"], "tool_result");
+        assert_eq!(bedrock_claude["tool_use_id"], "call_003");
     }
 
     #[test]

@@ -635,6 +635,7 @@ fn assistant_tool_message_includes_empty_content_for_openai_style() {
             "arguments": {"path": "main.rs"},
         })],
         "together",
+        "moonshotai/Kimi-K2.5",
     );
 
     assert_eq!(message["role"], "assistant");
@@ -652,6 +653,7 @@ fn assistant_tool_message_stringifies_ollama_arguments() {
             "arguments": {"path": "main.rs"},
         })],
         "ollama",
+        "qwen3.6:35b-a3b-coding-nvfp4",
     );
 
     assert_eq!(message["role"], "assistant");
@@ -668,6 +670,25 @@ fn assistant_tool_message_stringifies_ollama_arguments() {
 }
 
 #[test]
+fn assistant_tool_message_uses_model_capability_shape_for_bedrock_claude() {
+    let message = build_assistant_tool_message(
+        "using a tool",
+        &[json!({
+            "id": "call_001",
+            "name": "read",
+            "arguments": {"path": "main.rs"},
+        })],
+        "bedrock",
+        "anthropic.claude-3-5-sonnet-20240620-v1:0",
+    );
+
+    assert_eq!(message["role"], "assistant");
+    assert_eq!(message["content"][0]["type"], "text");
+    assert_eq!(message["content"][1]["type"], "tool_use");
+    assert_eq!(message["content"][1]["name"], "read");
+}
+
+#[test]
 fn assistant_response_message_preserves_reasoning() {
     let message = build_assistant_response_message(
         "",
@@ -679,6 +700,7 @@ fn assistant_response_message_preserves_reasoning() {
         })],
         Some("inspect the file before editing"),
         "together",
+        "moonshotai/Kimi-K2.5",
     );
 
     assert_eq!(message["reasoning"], "inspect the file before editing");

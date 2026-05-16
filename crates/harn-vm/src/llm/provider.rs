@@ -245,6 +245,34 @@ pub(crate) fn provider_tool_search_variants(provider: &str, model: &str) -> Vec<
     super::capabilities::lookup(provider, model).tool_search
 }
 
+/// Shared helper message/request/response wire format. This is a model
+/// capability rather than a provider-name check so mock/proxy routes can
+/// exercise the same behavior as the hosted model family they emulate.
+pub(crate) fn provider_uses_anthropic_messages(provider: &str, model: &str) -> bool {
+    super::capabilities::lookup(provider, model).message_wire_format == "anthropic"
+}
+
+/// Whether shared helpers should use Ollama's chat message quirks.
+pub(crate) fn provider_uses_ollama_messages(provider: &str, model: &str) -> bool {
+    super::capabilities::lookup(provider, model).message_wire_format == "ollama"
+}
+
+/// Whether native tool definitions should use Anthropic's `input_schema`
+/// shape instead of OpenAI-compatible `function.parameters`.
+pub(crate) fn provider_uses_anthropic_native_tools(provider: &str, model: &str) -> bool {
+    super::capabilities::lookup(provider, model).native_tool_wire_format == "anthropic"
+}
+
+/// Whether image content blocks may contain remote URLs for this route.
+pub(crate) fn provider_supports_image_urls(provider: &str, model: &str) -> bool {
+    super::capabilities::lookup(provider, model).image_url_input_supported
+}
+
+/// File upload API family for `std/files.upload`, when supported.
+pub(crate) fn provider_file_upload_wire_format(provider: &str) -> Option<String> {
+    super::capabilities::lookup(provider, "").file_upload_wire_format
+}
+
 /// Module-level dispatch for `LlmProvider::supports_thinking`.
 #[allow(dead_code)]
 pub(crate) fn provider_thinking_modes(provider: &str, model: &str) -> Vec<String> {
@@ -262,4 +290,22 @@ pub(crate) enum NativeToolSearchShape {
     Anthropic,
     /// OpenAI Responses API's `{"type": "tool_search"}`.
     OpenAi,
+}
+
+/// Native tool-search meta-tool shape, derived from capability flags.
+pub(crate) fn provider_native_tool_search_shape(
+    provider: &str,
+    model: &str,
+) -> NativeToolSearchShape {
+    let caps = super::capabilities::lookup(provider, model);
+    if caps.native_tool_wire_format == "anthropic"
+        || caps
+            .tool_search
+            .iter()
+            .any(|variant| variant == "bm25" || variant == "regex")
+    {
+        NativeToolSearchShape::Anthropic
+    } else {
+        NativeToolSearchShape::OpenAi
+    }
 }

@@ -679,6 +679,14 @@ pub(crate) fn capabilities_to_vm_value(
     );
     dict.insert("native_tools".to_string(), VmValue::Bool(caps.native_tools));
     dict.insert(
+        "message_wire_format".to_string(),
+        VmValue::String(Rc::from(caps.message_wire_format.clone())),
+    );
+    dict.insert(
+        "native_tool_wire_format".to_string(),
+        VmValue::String(Rc::from(caps.native_tool_wire_format.clone())),
+    );
+    dict.insert(
         "text_tool_wire_format_supported".to_string(),
         VmValue::Bool(caps.text_tool_wire_format_supported),
     );
@@ -731,6 +739,13 @@ pub(crate) fn capabilities_to_vm_value(
     dict.insert(
         "files_api_supported".to_string(),
         VmValue::Bool(caps.files_api_supported),
+    );
+    dict.insert(
+        "file_upload_wire_format".to_string(),
+        caps.file_upload_wire_format
+            .as_ref()
+            .map(|value| VmValue::String(Rc::from(value.clone())))
+            .unwrap_or(VmValue::Nil),
     );
     dict.insert(
         "structured_output".to_string(),
@@ -789,6 +804,29 @@ pub(crate) fn capabilities_to_vm_value(
     dict.insert(
         "reasoning_none_supported".to_string(),
         VmValue::Bool(caps.reasoning_none_supported),
+    );
+    dict.insert(
+        "reasoning_wire_format".to_string(),
+        caps.reasoning_wire_format
+            .as_ref()
+            .map(|value| VmValue::String(Rc::from(value.clone())))
+            .unwrap_or(VmValue::Nil),
+    );
+    dict.insert(
+        "seed_supported".to_string(),
+        VmValue::Bool(caps.seed_supported),
+    );
+    dict.insert(
+        "top_k_supported".to_string(),
+        VmValue::Bool(caps.top_k_supported),
+    );
+    dict.insert(
+        "frequency_penalty_supported".to_string(),
+        VmValue::Bool(caps.frequency_penalty_supported),
+    );
+    dict.insert(
+        "presence_penalty_supported".to_string(),
+        VmValue::Bool(caps.presence_penalty_supported),
     );
     VmValue::Dict(Rc::new(dict))
 }

@@ -100,6 +100,7 @@ fn model_supports_anthropic_prefill(model: &str) -> bool {
 /// server-side tools and the `defer_loading: true` flag on tool definitions.
 /// Per Anthropic's tool-search docs: Claude Mythos Preview, Sonnet 4.0+,
 /// Opus 4.0+, Haiku 4.5+.
+#[allow(dead_code)]
 pub(crate) fn claude_model_supports_tool_search(model: &str) -> bool {
     let lower = model.to_lowercase();
     match claude_generation(&lower) {

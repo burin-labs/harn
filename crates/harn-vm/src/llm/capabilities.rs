@@ -14,10 +14,9 @@
 //!   trait delegates to as the single source of truth.
 //!
 //! Before this module the Anthropic / OpenAI gates were spread across
-//! `providers/anthropic.rs` (`claude_generation`, `claude_model_supports_tool_search`)
-//! and `providers/openai_compat.rs` (`gpt_generation`, `gpt_model_supports_tool_search`).
-//! Those parsers are still used here — they supply the version extractor —
-//! but the boolean gates that used to live alongside them are now data.
+//! `providers/anthropic.rs` and `providers/openai_compat.rs`. Their
+//! generation parsers are still used here for `version_min`, but the
+//! boolean gates that used to live alongside them are now data.
 
 use std::cell::RefCell;
 use std::collections::BTreeMap;
@@ -38,10 +37,131 @@ pub struct CapabilitiesFile {
     /// Per-provider ordered rule lists. First matching rule wins.
     #[serde(default)]
     pub provider: BTreeMap<String, Vec<ProviderRule>>,
+    /// Per-provider defaults applied to every matching row and to
+    /// provider/model pairs that have no model-specific row. This keeps
+    /// transport-shape facts in data without repeating them on every
+    /// generation-specific capability row.
+    #[serde(default)]
+    pub provider_defaults: BTreeMap<String, ProviderDefaults>,
     /// Sibling → canonical family mapping. Providers with no rule of
     /// their own fall through to the named family (recursively).
     #[serde(default)]
     pub provider_family: BTreeMap<String, String>,
+}
+
+/// Provider-wide default fields merged into matching rules.
+#[derive(Debug, Clone, Deserialize, Default)]
+pub struct ProviderDefaults {
+    /// Message/request/response wire format used by shared helpers.
+    /// Known values are `openai`, `anthropic`, and `ollama`.
+    #[serde(default)]
+    pub message_wire_format: Option<String>,
+    /// Native tool definition wire shape. Known values are `openai`
+    /// and `anthropic`.
+    #[serde(default)]
+    pub native_tool_wire_format: Option<String>,
+    /// Whether image content blocks may reference remote URLs.
+    #[serde(default)]
+    pub image_url_input_supported: Option<bool>,
+    /// File-upload transport used by `std/files.upload`. Known values
+    /// are `anthropic` and `gemini`.
+    #[serde(default)]
+    pub file_upload_wire_format: Option<String>,
+    /// Provider-specific reasoning request shape for OpenAI-compatible
+    /// transports. Known values are `openrouter` and `enabled`.
+    #[serde(default)]
+    pub reasoning_wire_format: Option<String>,
+    #[serde(default)]
+    pub files_api_supported: Option<bool>,
+    #[serde(default)]
+    pub seed_supported: Option<bool>,
+    #[serde(default)]
+    pub top_k_supported: Option<bool>,
+    #[serde(default)]
+    pub frequency_penalty_supported: Option<bool>,
+    #[serde(default)]
+    pub presence_penalty_supported: Option<bool>,
+}
+
+impl ProviderDefaults {
+    fn overlay(&mut self, other: &ProviderDefaults) {
+        if other.message_wire_format.is_some() {
+            self.message_wire_format = other.message_wire_format.clone();
+        }
+        if other.native_tool_wire_format.is_some() {
+            self.native_tool_wire_format = other.native_tool_wire_format.clone();
+        }
+        if other.image_url_input_supported.is_some() {
+            self.image_url_input_supported = other.image_url_input_supported;
+        }
+        if other.file_upload_wire_format.is_some() {
+            self.file_upload_wire_format = other.file_upload_wire_format.clone();
+        }
+        if other.reasoning_wire_format.is_some() {
+            self.reasoning_wire_format = other.reasoning_wire_format.clone();
+        }
+        if other.files_api_supported.is_some() {
+            self.files_api_supported = other.files_api_supported;
+        }
+        if other.seed_supported.is_some() {
+            self.seed_supported = other.seed_supported;
+        }
+        if other.top_k_supported.is_some() {
+            self.top_k_supported = other.top_k_supported;
+        }
+        if other.frequency_penalty_supported.is_some() {
+            self.frequency_penalty_supported = other.frequency_penalty_supported;
+        }
+        if other.presence_penalty_supported.is_some() {
+            self.presence_penalty_supported = other.presence_penalty_supported;
+        }
+    }
+
+    fn fill_missing_from(&mut self, other: &ProviderDefaults) {
+        if self.message_wire_format.is_none() {
+            self.message_wire_format = other.message_wire_format.clone();
+        }
+        if self.native_tool_wire_format.is_none() {
+            self.native_tool_wire_format = other.native_tool_wire_format.clone();
+        }
+        if self.image_url_input_supported.is_none() {
+            self.image_url_input_supported = other.image_url_input_supported;
+        }
+        if self.file_upload_wire_format.is_none() {
+            self.file_upload_wire_format = other.file_upload_wire_format.clone();
+        }
+        if self.reasoning_wire_format.is_none() {
+            self.reasoning_wire_format = other.reasoning_wire_format.clone();
+        }
+        if self.files_api_supported.is_none() {
+            self.files_api_supported = other.files_api_supported;
+        }
+        if self.seed_supported.is_none() {
+            self.seed_supported = other.seed_supported;
+        }
+        if self.top_k_supported.is_none() {
+            self.top_k_supported = other.top_k_supported;
+        }
+        if self.frequency_penalty_supported.is_none() {
+            self.frequency_penalty_supported = other.frequency_penalty_supported;
+        }
+        if self.presence_penalty_supported.is_none() {
+            self.presence_penalty_supported = other.presence_penalty_supported;
+        }
+    }
+
+    fn has_any_field(&self) -> bool {
+        self.message_wire_format.is_some()
+            || self.native_tool_wire_format.is_some()
+            || self.image_url_input_supported.is_some()
+            || self.file_upload_wire_format.is_some()
+            || self.reasoning_wire_format.is_some()
+            || self.files_api_supported.is_some()
+            || self.seed_supported.is_some()
+            || self.top_k_supported.is_some()
+            || self.frequency_penalty_supported.is_some()
+            || self.presence_penalty_supported.is_some()
+    }
 }
 
 /// One row of the capability matrix.
@@ -58,6 +178,14 @@ pub struct ProviderRule {
     pub version_min: Option<Vec<u32>>,
     #[serde(default)]
     pub native_tools: Option<bool>,
+    /// Message/request/response wire format used by shared helpers.
+    /// Known values are `openai`, `anthropic`, and `ollama`.
+    #[serde(default)]
+    pub message_wire_format: Option<String>,
+    /// Native tool definition wire shape. Known values are `openai`
+    /// and `anthropic`.
+    #[serde(default)]
+    pub native_tool_wire_format: Option<String>,
     #[serde(default)]
     pub defer_loading: Option<bool>,
     #[serde(default)]
@@ -81,6 +209,10 @@ pub struct ProviderRule {
     /// Whether uploaded file references can be reused in message content.
     #[serde(default)]
     pub files_api_supported: Option<bool>,
+    /// File-upload transport used by `std/files.upload`. Known values
+    /// are `anthropic` and `gemini`.
+    #[serde(default)]
+    pub file_upload_wire_format: Option<String>,
     /// Structured-output transport strategy. Known values are:
     /// `native`, `tool_use`, `format_kw`, and `none`.
     #[serde(default)]
@@ -130,6 +262,9 @@ pub struct ProviderRule {
     /// Whether the model accepts image inputs in chat content.
     #[serde(default)]
     pub vision_supported: Option<bool>,
+    /// Whether image content blocks may reference remote URLs.
+    #[serde(default)]
+    pub image_url_input_supported: Option<bool>,
     /// Carry `<think>...</think>` blocks in assistant history across turns.
     /// Qwen3.6 exposes this as `chat_template_kwargs.preserve_thinking`;
     /// Alibaba recommends enabling it for long-horizon agent loops so the
@@ -159,6 +294,18 @@ pub struct ProviderRule {
     /// floor at `minimal`.
     #[serde(default)]
     pub reasoning_none_supported: Option<bool>,
+    /// Provider-specific reasoning request shape for OpenAI-compatible
+    /// transports. Known values are `openrouter` and `enabled`.
+    #[serde(default)]
+    pub reasoning_wire_format: Option<String>,
+    #[serde(default)]
+    pub seed_supported: Option<bool>,
+    #[serde(default)]
+    pub top_k_supported: Option<bool>,
+    #[serde(default)]
+    pub frequency_penalty_supported: Option<bool>,
+    #[serde(default)]
+    pub presence_penalty_supported: Option<bool>,
     /// Preferred endpoint family for this provider/model route. Values
     /// are descriptive labels consumed by providers, e.g.
     /// `/api/generate-raw` for Ollama raw prompt bypass.
@@ -184,6 +331,8 @@ pub struct ProviderRule {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Capabilities {
     pub native_tools: bool,
+    pub message_wire_format: String,
+    pub native_tool_wire_format: String,
     pub defer_loading: bool,
     pub tool_search: Vec<String>,
     pub max_tools: Option<u32>,
@@ -192,6 +341,7 @@ pub struct Capabilities {
     pub audio: bool,
     pub pdf: bool,
     pub files_api_supported: bool,
+    pub file_upload_wire_format: Option<String>,
     pub structured_output: Option<String>,
     pub prefers_xml_scaffolding: bool,
     pub prefers_markdown_scaffolding: bool,
@@ -206,12 +356,18 @@ pub struct Capabilities {
     pub interleaved_thinking_supported: bool,
     pub anthropic_beta_features: Vec<String>,
     pub vision_supported: bool,
+    pub image_url_input_supported: bool,
     pub preserve_thinking: bool,
     pub server_parser: String,
     pub honors_chat_template_kwargs: bool,
     pub requires_completion_tokens: bool,
     pub reasoning_effort_supported: bool,
     pub reasoning_none_supported: bool,
+    pub reasoning_wire_format: Option<String>,
+    pub seed_supported: bool,
+    pub top_k_supported: bool,
+    pub frequency_penalty_supported: bool,
+    pub presence_penalty_supported: bool,
     pub recommended_endpoint: Option<String>,
     pub text_tool_wire_format_supported: bool,
     pub thinking_disable_directive: Option<String>,
@@ -221,6 +377,8 @@ impl Default for Capabilities {
     fn default() -> Self {
         Self {
             native_tools: false,
+            message_wire_format: "openai".to_string(),
+            native_tool_wire_format: "openai".to_string(),
             defer_loading: false,
             tool_search: Vec::new(),
             max_tools: None,
@@ -229,6 +387,7 @@ impl Default for Capabilities {
             audio: false,
             pdf: false,
             files_api_supported: false,
+            file_upload_wire_format: None,
             structured_output: None,
             prefers_xml_scaffolding: false,
             prefers_markdown_scaffolding: false,
@@ -242,12 +401,18 @@ impl Default for Capabilities {
             interleaved_thinking_supported: false,
             anthropic_beta_features: Vec::new(),
             vision_supported: false,
+            image_url_input_supported: true,
             preserve_thinking: false,
             server_parser: "none".to_string(),
             honors_chat_template_kwargs: false,
             requires_completion_tokens: false,
             reasoning_effort_supported: false,
             reasoning_none_supported: false,
+            reasoning_wire_format: None,
+            seed_supported: true,
+            top_k_supported: true,
+            frequency_penalty_supported: true,
+            presence_penalty_supported: true,
             recommended_endpoint: None,
             text_tool_wire_format_supported: true,
             thinking_disable_directive: None,
@@ -424,12 +589,23 @@ fn lookup_with(
     // Special case: mock spoofs either shape. Try anthropic first
     // (Claude-shape model strings) so `mock` + `claude-opus-4-7`
     // resolves to the Anthropic capability row — the same behaviour
-    // the hardcoded dispatch gave before this refactor.
+    // the hardcoded dispatch gave before this refactor. The native
+    // tool-definition wire shape is pinned to OpenAI so existing
+    // mock-based tests keep observing `t.function.name` regardless of
+    // which family's capability row matched; per-message wire format
+    // still tracks the matched family so Anthropic-specific request
+    // plumbing (beta headers, file-id passthrough) is exercised when
+    // a Claude model is mocked.
     if provider == "mock" {
-        if let Some(caps) = try_match_layer(user, builtin, "anthropic", model, provider) {
+        let anthropic_defaults = merged_provider_defaults(user, builtin, "anthropic");
+        if let Some(mut caps) =
+            try_match_layer(user, builtin, "anthropic", model, &anthropic_defaults)
+        {
+            caps.native_tool_wire_format = "openai".to_string();
             return caps;
         }
-        if let Some(caps) = try_match_layer(user, builtin, "openai", model, provider) {
+        let openai_defaults = merged_provider_defaults(user, builtin, "openai");
+        if let Some(caps) = try_match_layer(user, builtin, "openai", model, &openai_defaults) {
             return caps;
         }
         return Capabilities::default();
@@ -438,9 +614,16 @@ fn lookup_with(
     // Normal chain: walk provider → family(provider) → ... with a
     // visited-guard to avoid cycles in malformed user overrides.
     let mut current = provider.to_string();
+    let mut effective_defaults = ProviderDefaults::default();
     let mut visited: std::collections::HashSet<String> = std::collections::HashSet::new();
     while visited.insert(current.clone()) {
-        if let Some(caps) = try_match_layer(user, builtin, &current, model, provider) {
+        let layer_defaults = merged_provider_defaults(user, builtin, &current);
+        if effective_defaults.has_any_field() {
+            effective_defaults.fill_missing_from(&layer_defaults);
+        } else {
+            effective_defaults.overlay(&layer_defaults);
+        }
+        if let Some(caps) = try_match_layer(user, builtin, &current, model, &effective_defaults) {
             return caps;
         }
         let next = user
@@ -451,6 +634,9 @@ fn lookup_with(
             Some(parent) => current = parent,
             None => break,
         }
+    }
+    if effective_defaults.has_any_field() {
+        return defaults_to_caps(&effective_defaults);
     }
     Capabilities::default()
 }
@@ -463,13 +649,13 @@ fn try_match_layer(
     builtin: &CapabilitiesFile,
     layer_provider: &str,
     model: &str,
-    _original_provider: &str,
+    defaults: &ProviderDefaults,
 ) -> Option<Capabilities> {
     if let Some(user) = user {
         if let Some(rules) = user.provider.get(layer_provider) {
             for rule in rules {
                 if rule_matches(rule, model) {
-                    return Some(rule_to_caps(rule));
+                    return Some(rule_to_caps(rule, defaults));
                 }
             }
         }
@@ -477,17 +663,92 @@ fn try_match_layer(
     if let Some(rules) = builtin.provider.get(layer_provider) {
         for rule in rules {
             if rule_matches(rule, model) {
-                return Some(rule_to_caps(rule));
+                return Some(rule_to_caps(rule, defaults));
             }
         }
     }
     None
 }
 
-fn rule_to_caps(rule: &ProviderRule) -> Capabilities {
+fn merged_provider_defaults(
+    user: Option<&CapabilitiesFile>,
+    builtin: &CapabilitiesFile,
+    provider: &str,
+) -> ProviderDefaults {
+    let mut defaults = builtin
+        .provider_defaults
+        .get(provider)
+        .cloned()
+        .unwrap_or_default();
+    if let Some(user_defaults) = user.and_then(|file| file.provider_defaults.get(provider)) {
+        defaults.overlay(user_defaults);
+    }
+    defaults
+}
+
+fn defaults_to_caps(defaults: &ProviderDefaults) -> Capabilities {
+    let empty = ProviderRule {
+        model_match: "*".to_string(),
+        version_min: None,
+        native_tools: None,
+        message_wire_format: None,
+        native_tool_wire_format: None,
+        defer_loading: None,
+        tool_search: None,
+        max_tools: None,
+        prompt_caching: None,
+        vision: None,
+        audio: None,
+        pdf: None,
+        files_api_supported: None,
+        file_upload_wire_format: None,
+        structured_output: None,
+        prefers_xml_scaffolding: None,
+        prefers_markdown_scaffolding: None,
+        structured_output_mode: None,
+        supports_assistant_prefill: None,
+        prefers_role_developer: None,
+        prefers_xml_tools: None,
+        thinking_block_style: None,
+        json_schema: None,
+        thinking_modes: None,
+        interleaved_thinking_supported: None,
+        anthropic_beta_features: None,
+        thinking: None,
+        vision_supported: None,
+        image_url_input_supported: None,
+        preserve_thinking: None,
+        server_parser: None,
+        honors_chat_template_kwargs: None,
+        requires_completion_tokens: None,
+        reasoning_effort_supported: None,
+        reasoning_none_supported: None,
+        reasoning_wire_format: None,
+        seed_supported: None,
+        top_k_supported: None,
+        frequency_penalty_supported: None,
+        presence_penalty_supported: None,
+        recommended_endpoint: None,
+        text_tool_wire_format_supported: None,
+        thinking_disable_directive: None,
+    };
+    rule_to_caps(&empty, defaults)
+}
+
+fn rule_to_caps(rule: &ProviderRule, defaults: &ProviderDefaults) -> Capabilities {
     let thinking_modes = rule_thinking_modes(rule);
     Capabilities {
         native_tools: rule.native_tools.unwrap_or(false),
+        message_wire_format: rule
+            .message_wire_format
+            .clone()
+            .or_else(|| defaults.message_wire_format.clone())
+            .unwrap_or_else(|| "openai".to_string()),
+        native_tool_wire_format: rule
+            .native_tool_wire_format
+            .clone()
+            .or_else(|| defaults.native_tool_wire_format.clone())
+            .unwrap_or_else(|| "openai".to_string()),
         defer_loading: rule.defer_loading.unwrap_or(false),
         tool_search: rule.tool_search.clone().unwrap_or_default(),
         max_tools: rule.max_tools,
@@ -495,7 +756,14 @@ fn rule_to_caps(rule: &ProviderRule) -> Capabilities {
         vision: rule_vision(rule),
         audio: rule.audio.unwrap_or(false),
         pdf: rule.pdf.unwrap_or(false),
-        files_api_supported: rule.files_api_supported.unwrap_or(false),
+        files_api_supported: rule
+            .files_api_supported
+            .or(defaults.files_api_supported)
+            .unwrap_or(false),
+        file_upload_wire_format: rule
+            .file_upload_wire_format
+            .clone()
+            .or_else(|| defaults.file_upload_wire_format.clone()),
         structured_output: rule_structured_output(rule),
         prefers_xml_scaffolding: rule.prefers_xml_scaffolding.unwrap_or(false),
         prefers_markdown_scaffolding: rule.prefers_markdown_scaffolding.unwrap_or(false),
@@ -511,6 +779,10 @@ fn rule_to_caps(rule: &ProviderRule) -> Capabilities {
         interleaved_thinking_supported: rule.interleaved_thinking_supported.unwrap_or(false),
         anthropic_beta_features: rule.anthropic_beta_features.clone().unwrap_or_default(),
         vision_supported: rule.vision_supported.unwrap_or(false),
+        image_url_input_supported: rule
+            .image_url_input_supported
+            .or(defaults.image_url_input_supported)
+            .unwrap_or(true),
         preserve_thinking: rule.preserve_thinking.unwrap_or(false),
         server_parser: rule
             .server_parser
@@ -520,6 +792,26 @@ fn rule_to_caps(rule: &ProviderRule) -> Capabilities {
         requires_completion_tokens: rule.requires_completion_tokens.unwrap_or(false),
         reasoning_effort_supported: rule.reasoning_effort_supported.unwrap_or(false),
         reasoning_none_supported: rule.reasoning_none_supported.unwrap_or(false),
+        reasoning_wire_format: rule
+            .reasoning_wire_format
+            .clone()
+            .or_else(|| defaults.reasoning_wire_format.clone()),
+        seed_supported: rule
+            .seed_supported
+            .or(defaults.seed_supported)
+            .unwrap_or(true),
+        top_k_supported: rule
+            .top_k_supported
+            .or(defaults.top_k_supported)
+            .unwrap_or(true),
+        frequency_penalty_supported: rule
+            .frequency_penalty_supported
+            .or(defaults.frequency_penalty_supported)
+            .unwrap_or(true),
+        presence_penalty_supported: rule
+            .presence_penalty_supported
+            .or(defaults.presence_penalty_supported)
+            .unwrap_or(true),
         recommended_endpoint: rule.recommended_endpoint.clone(),
         text_tool_wire_format_supported: rule.text_tool_wire_format_supported.unwrap_or(true),
         thinking_disable_directive: rule.thinking_disable_directive.clone(),
@@ -802,6 +1094,17 @@ anthropic_beta_features = ["fine-grained-tool-streaming-2025-05-14"]
         let caps = lookup("openrouter", "gpt-5.4");
         assert!(caps.defer_loading);
         assert_eq!(caps.tool_search, vec!["hosted", "client"]);
+        assert_eq!(caps.reasoning_wire_format.as_deref(), Some("openrouter"));
+        assert!(!caps.top_k_supported);
+    }
+
+    #[test]
+    fn bedrock_claude_uses_anthropic_wire_capabilities() {
+        reset();
+        let caps = lookup("bedrock", "anthropic.claude-3-5-sonnet-20240620-v1:0");
+        assert!(caps.native_tools);
+        assert_eq!(caps.message_wire_format, "anthropic");
+        assert_eq!(caps.native_tool_wire_format, "anthropic");
     }
 
     #[test]

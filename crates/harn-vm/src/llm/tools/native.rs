@@ -6,6 +6,7 @@ use crate::value::{VmError, VmValue};
 pub(crate) fn vm_tools_to_native(
     tools_val: &VmValue,
     provider: &str,
+    model: &str,
 ) -> Result<Vec<serde_json::Value>, VmError> {
     // Accept either a tool_registry dict or a list of tool dicts.
     let tools_list = match tools_val {
@@ -48,12 +49,7 @@ pub(crate) fn vm_tools_to_native(
 
                 let input_schema = vm_build_json_schema(params);
 
-                // API style (not provider name) determines schema shape:
-                // Anthropic = {name, description, input_schema};
-                // OpenAI-compat = {type: "function", function: {...}}.
-                let is_anthropic =
-                    super::super::helpers::ResolvedProvider::resolve(provider).is_anthropic_style;
-                if is_anthropic {
+                if super::super::provider::provider_uses_anthropic_native_tools(provider, model) {
                     let mut tool_json = serde_json::json!({
                         "name": name,
                         "description": description,
@@ -165,23 +161,6 @@ pub(crate) fn extract_deferred_tool_names(native_tools: &[serde_json::Value]) ->
 /// No-ops if `native_tools` is `None` (no tools passed = no search to
 /// do). The meta-tool itself never has `defer_loading` — that's a hard
 /// requirement of Anthropic's API and we match it here.
-#[cfg(test)]
-pub(crate) fn apply_tool_search_native_injection(
-    native_tools: &mut Option<Vec<serde_json::Value>>,
-    provider: &str,
-    variant: &str,
-) {
-    // Back-compat entry for existing unit tests: pick the shape by
-    // provider name alone. The canonical call site (options.rs) uses the
-    // model-aware helper below.
-    let shape = if provider == "anthropic" {
-        super::super::provider::NativeToolSearchShape::Anthropic
-    } else {
-        super::super::provider::NativeToolSearchShape::OpenAi
-    };
-    apply_tool_search_native_injection_typed(native_tools, shape, variant, "hosted");
-}
-
 /// Native tool-search injection with an explicit wire shape + OpenAI
 /// execution mode. `mode` is `"hosted"` or `"client"`; it only affects
 /// the OpenAI Responses-API shape (Anthropic's server always runs the

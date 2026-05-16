@@ -591,7 +591,7 @@ fn probe_request_body(provider: &str, model: &str, mode: ToolProbeMode, marker: 
         "stream": mode == ToolProbeMode::Streaming,
         "temperature": 0,
     });
-    if provider != "ollama" {
+    if !crate::llm::provider::provider_uses_ollama_messages(provider, model) {
         body["tool_choice"] = json!({
             "type": "function",
             "function": {"name": TOOL_PROBE_TOOL_NAME}

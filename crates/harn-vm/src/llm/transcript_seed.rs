@@ -428,6 +428,9 @@ fn assistant_message_from_response(record: &Value, state: &ImportState) -> Optio
     let provider = string_field(record, "provider")
         .or_else(|| state.provider.clone())
         .unwrap_or_default();
+    let model = string_field(record, "model")
+        .or_else(|| state.model.clone())
+        .unwrap_or_default();
     let reasoning = string_field(record, "thinking");
     let message = build_assistant_response_message(
         &text,
@@ -435,6 +438,7 @@ fn assistant_message_from_response(record: &Value, state: &ImportState) -> Optio
         &tool_calls,
         reasoning.as_deref(),
         &provider,
+        &model,
     );
     normalize_message(&message)
 }

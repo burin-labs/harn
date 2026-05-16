@@ -191,9 +191,9 @@ pub(crate) fn parse_llm_response(
     json: &serde_json::Value,
     provider: &str,
     model: &str,
-    resolved: &crate::llm::helpers::ResolvedProvider,
+    is_anthropic_style: bool,
 ) -> Result<LlmResult, VmError> {
-    if resolved.is_anthropic_style {
+    if is_anthropic_style {
         let mut text = String::new();
         let mut thinking_text = String::new();
         let mut tool_calls = Vec::new();
@@ -554,13 +554,6 @@ mod tests {
         parse_llm_response,
     };
 
-    // Build a ResolvedProvider for the Anthropic path without going through
-    // the thread-local provider registry — these parser tests only need the
-    // is_anthropic_style flag set.
-    fn anthropic_resolved() -> crate::llm::helpers::ResolvedProvider {
-        crate::llm::helpers::ResolvedProvider::resolve("anthropic")
-    }
-
     #[test]
     fn cache_write_tokens_supports_openrouter_prompt_details_shape() {
         let usage = serde_json::json!({
@@ -649,7 +642,6 @@ mod tests {
 
     #[test]
     fn anthropic_parser_records_server_tool_use_as_tool_search_query() {
-        let resolved = anthropic_resolved();
         // Build a minimal Anthropic Messages API response containing a
         // server_tool_use block (the model calling the search tool).
         let response = serde_json::json!({
@@ -664,7 +656,7 @@ mod tests {
             ],
             "usage": {"input_tokens": 10, "output_tokens": 5}
         });
-        let result = parse_llm_response(&response, "anthropic", "claude-opus-4-7", &resolved)
+        let result = parse_llm_response(&response, "anthropic", "claude-opus-4-7", true)
             .expect("parser succeeds");
 
         // tool_calls is for *dispatchable* user tools — server-side tools
@@ -691,7 +683,6 @@ mod tests {
         // `tool_calls` vector — OpenAI runs the search on their side —
         // but must record a `tool_search_query` transcript block so
         // replay lines up with the Anthropic path.
-        let resolved = crate::llm::helpers::ResolvedProvider::resolve("openai");
         let response = serde_json::json!({
             "choices": [{
                 "message": {
@@ -708,7 +699,7 @@ mod tests {
             }],
             "usage": {"prompt_tokens": 10, "completion_tokens": 5}
         });
-        let result = parse_llm_response(&response, "openai", "gpt-5.4-preview", &resolved)
+        let result = parse_llm_response(&response, "openai", "gpt-5.4-preview", false)
             .expect("parser succeeds");
 
         assert!(
@@ -726,7 +717,6 @@ mod tests {
 
     #[test]
     fn openai_parser_records_tool_search_output_as_result_event() {
-        let resolved = crate::llm::helpers::ResolvedProvider::resolve("openai");
         let response = serde_json::json!({
             "choices": [{
                 "message": {
@@ -746,7 +736,7 @@ mod tests {
             }],
             "usage": {"prompt_tokens": 3, "completion_tokens": 1}
         });
-        let result = parse_llm_response(&response, "openai", "gpt-5.4-preview", &resolved)
+        let result = parse_llm_response(&response, "openai", "gpt-5.4-preview", false)
             .expect("parser succeeds");
 
         assert!(result.tool_calls.is_empty());
@@ -765,7 +755,6 @@ mod tests {
 
     #[test]
     fn openai_parser_surfaces_reasoning_summary_separate_from_text() {
-        let resolved = crate::llm::helpers::ResolvedProvider::resolve("openai");
         let response = serde_json::json!({
             "choices": [{
                 "message": {
@@ -780,8 +769,7 @@ mod tests {
             "usage": {"prompt_tokens": 5, "completion_tokens": 7}
         });
 
-        let result =
-            parse_llm_response(&response, "openai", "o3", &resolved).expect("parser succeeds");
+        let result = parse_llm_response(&response, "openai", "o3", false).expect("parser succeeds");
 
         assert_eq!(result.text, "Final answer.");
         assert_eq!(
@@ -798,7 +786,6 @@ mod tests {
 
     #[test]
     fn anthropic_parser_records_tool_search_tool_result_as_event() {
-        let resolved = anthropic_resolved();
         let response = serde_json::json!({
             "content": [
                 {
@@ -815,7 +802,7 @@ mod tests {
             ],
             "usage": {"input_tokens": 3, "output_tokens": 1}
         });
-        let result = parse_llm_response(&response, "anthropic", "claude-opus-4-7", &resolved)
+        let result = parse_llm_response(&response, "anthropic", "claude-opus-4-7", true)
             .expect("parser succeeds");
 
         let result_block = result
@@ -842,7 +829,6 @@ mod tests {
         // dropping them on the floor — otherwise eval dashboards see
         // empty per-call accounting and have to fall back to
         // wall-clock heuristics.
-        let resolved = crate::llm::helpers::ResolvedProvider::resolve("vllm");
         let response = serde_json::json!({
             "id": "chatcmpl-abc",
             "choices": [{
@@ -853,7 +839,7 @@ mod tests {
         });
 
         let result =
-            parse_llm_response(&response, "vllm", "qwen3.6", &resolved).expect("parser succeeds");
+            parse_llm_response(&response, "vllm", "qwen3.6", false).expect("parser succeeds");
 
         assert_eq!(
             result.telemetry.source,
@@ -871,7 +857,6 @@ mod tests {
         // `timings` block. Preserve the millisecond fields verbatim and
         // promote the source to `llamacpp_timings` so eval scripts can
         // route on them.
-        let resolved = crate::llm::helpers::ResolvedProvider::resolve("llamacpp");
         let response = serde_json::json!({
             "choices": [{
                 "message": {"content": "answer"},
@@ -889,8 +874,8 @@ mod tests {
             }
         });
 
-        let result = parse_llm_response(&response, "llamacpp", "qwen-7b", &resolved)
-            .expect("parser succeeds");
+        let result =
+            parse_llm_response(&response, "llamacpp", "qwen-7b", false).expect("parser succeeds");
 
         assert_eq!(
             result.telemetry.source,
@@ -903,14 +888,13 @@ mod tests {
 
     #[test]
     fn anthropic_parser_captures_request_id_in_telemetry() {
-        let resolved = anthropic_resolved();
         let response = serde_json::json!({
             "id": "msg_01ABC",
             "content": [{"type": "text", "text": "ok"}],
             "usage": {"input_tokens": 5, "output_tokens": 2},
             "stop_reason": "end_turn"
         });
-        let result = parse_llm_response(&response, "anthropic", "claude-opus-4-7", &resolved)
+        let result = parse_llm_response(&response, "anthropic", "claude-opus-4-7", true)
             .expect("parser succeeds");
         assert_eq!(
             result.telemetry.source,

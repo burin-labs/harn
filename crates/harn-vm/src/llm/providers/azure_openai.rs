@@ -119,12 +119,11 @@ impl AzureOpenAiProvider {
             .json()
             .await
             .map_err(|error| vm_err(format!("azure_openai response parse error: {error}")))?;
-        let resolved = crate::llm::helpers::ResolvedProvider::resolve("openai");
         let result = crate::llm::api::parse_llm_response_for_provider(
             &json,
             "azure_openai",
             &request.model,
-            &resolved,
+            false,
         )?;
         maybe_emit_delta(delta_tx, &result.text);
         Ok(result)

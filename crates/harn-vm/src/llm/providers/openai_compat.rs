@@ -96,13 +96,16 @@ impl LlmProvider for OpenAiCompatibleProvider {
         &self.provider_name
     }
 
-    /// Apply provider-specific request body transformations. For OpenRouter,
-    /// strip the `chat_template_kwargs` thinking field since OpenRouter does
-    /// not reliably support it.
+    /// Apply provider-specific request body transformations.
     fn transform_request(&self, body: &mut serde_json::Value) {
-        if self.provider_name.to_lowercase().contains("openrouter") {
-            if let Some(obj) = body.as_object_mut() {
-                obj.remove("chat_template_kwargs");
+        let model = body
+            .get("model")
+            .and_then(|value| value.as_str())
+            .unwrap_or("");
+        let caps = crate::llm::capabilities::lookup(&self.provider_name, model);
+        if !caps.honors_chat_template_kwargs {
+            if let Some(object) = body.as_object_mut() {
+                object.remove("chat_template_kwargs");
             }
         }
     }
@@ -190,22 +193,24 @@ impl OpenAiCompatibleProvider {
         if let Some(pp) = opts.presence_penalty {
             body["presence_penalty"] = serde_json::json!(pp);
         }
-        if opts.provider == "openrouter" {
-            if let Some(reasoning) = openrouter_reasoning_config(&opts.thinking) {
-                body["reasoning"] = reasoning;
-            }
-        } else {
-            if opts.provider == "together" && !caps.honors_chat_template_kwargs {
-                if let Some(reasoning) = together_reasoning_config(&opts.thinking, &caps) {
+        match caps.reasoning_wire_format.as_deref() {
+            Some("openrouter") => {
+                if let Some(reasoning) = openrouter_reasoning_config(&opts.thinking) {
                     body["reasoning"] = reasoning;
                 }
             }
-            if caps.reasoning_effort_supported {
-                if let ThinkingConfig::Effort { level } = &opts.thinking {
-                    if *level != crate::llm::api::ReasoningEffort::None || opts.provider == "openai"
-                    {
-                        body["reasoning_effort"] = serde_json::json!(level.as_str());
-                    }
+            Some("enabled") => {
+                if let Some(reasoning) = enabled_reasoning_config(&opts.thinking, &caps) {
+                    body["reasoning"] = reasoning;
+                }
+            }
+            _ => {}
+        }
+        if caps.reasoning_effort_supported {
+            if let ThinkingConfig::Effort { level } = &opts.thinking {
+                if *level != crate::llm::api::ReasoningEffort::None || caps.reasoning_none_supported
+                {
+                    body["reasoning_effort"] = serde_json::json!(level.as_str());
                 }
             }
         }
@@ -301,7 +306,7 @@ fn openrouter_reasoning_config(thinking: &ThinkingConfig) -> Option<serde_json::
     }
 }
 
-fn together_reasoning_config(
+fn enabled_reasoning_config(
     thinking: &ThinkingConfig,
     caps: &crate::llm::capabilities::Capabilities,
 ) -> Option<serde_json::Value> {
@@ -461,6 +466,45 @@ mod tests {
             "Qwen3.6 should request preserve_thinking so <think> blocks survive across agentic turns"
         );
         assert_eq!(body["chat_template_kwargs"]["enable_thinking"], true);
+    }
+
+    #[test]
+    fn transform_request_preserves_chat_template_kwargs_when_capability_allows() {
+        crate::llm::capabilities::set_user_overrides_toml(
+            r#"
+[[provider.openrouter]]
+model_match = "custom-qwen"
+honors_chat_template_kwargs = true
+thinking_modes = ["enabled"]
+"#,
+        )
+        .expect("capability override");
+        let provider = OpenAiCompatibleProvider::new("openrouter".to_string());
+        let mut payload = base_request_payload();
+        payload.model = "custom-qwen".to_string();
+        payload.thinking = ThinkingConfig::Enabled {
+            budget_tokens: None,
+        };
+        let mut body = OpenAiCompatibleProvider::build_request_body(&payload, false);
+        assert!(body.get("chat_template_kwargs").is_some());
+
+        provider.transform_request(&mut body);
+
+        assert!(body.get("chat_template_kwargs").is_some());
+        crate::llm::capabilities::clear_user_overrides();
+    }
+
+    #[test]
+    fn transform_request_strips_chat_template_kwargs_when_capability_denies() {
+        let provider = OpenAiCompatibleProvider::new("acme".to_string());
+        let mut body = json!({
+            "model": "custom-qwen",
+            "chat_template_kwargs": {"enable_thinking": true},
+        });
+
+        provider.transform_request(&mut body);
+
+        assert!(body.get("chat_template_kwargs").is_none());
     }
 
     #[test]

@@ -1107,6 +1107,8 @@ let caps = provider_capabilities("anthropic", "claude-opus-4-7")
 //   requires_completion_tokens: false,
 //   reasoning_effort_supported: false,
 //   interleaved_thinking_supported: true,
+//   message_wire_format: "anthropic",
+//   native_tool_wire_format: "anthropic",
 // }
 
 // `caps.tools` matches Harn's own tool gate: true when the route can call
@@ -1127,13 +1129,16 @@ Additional helpers:
   `harn.toml`.
 - `provider_capabilities_clear()` — revert to the shipped defaults.
 
-Rule schema (per `[[provider.<name>]]` entry):
+Rule schema (per `[[provider.<name>]]` entry). Shared defaults can also be
+set under `[provider_defaults.<name>]`:
 
 | Field | Type | Purpose |
 |---|---|---|
 | `model_match` | glob string | Required. Matched against lowercased model ID. |
 | `version_min` | `[major, minor]` | Optional lower bound; parsed via Claude / GPT version extractors. |
 | `native_tools` | bool | Native tool-call wire shape supported. |
+| `message_wire_format` | string | Shared request/response message format: `openai`, `anthropic`, or `ollama`. |
+| `native_tool_wire_format` | string | Native tool definition shape: `openai` or `anthropic`. |
 | `defer_loading` | bool | Provider honors `defer_loading: true` on tool defs. |
 | `tool_search` | `[string]` | Native variants (`["bm25", "regex"]` or `["hosted", "client"]`). Empty = no native support. |
 | `max_tools` | int | Cap on tool count (used by `harn lint`). |
@@ -1146,10 +1151,14 @@ Rule schema (per `[[provider.<name>]]` entry):
 | `prefers_xml_tools` | bool | Text-rendered tool sections prefer XML tags. |
 | `thinking_block_style` | string | Section-level thinking style: `none`, `thinking_blocks`, `reasoning_summary`, `inline`. |
 | `thinking_modes` | `[string]` | Supported script-facing modes: `enabled`, `adaptive`, `effort`. |
+| `reasoning_wire_format` | string | Non-standard OpenAI-compatible reasoning shape: `openrouter` or `enabled`. |
 | `requires_completion_tokens` | bool | Use OpenAI `max_completion_tokens` instead of `max_tokens`. |
 | `reasoning_effort_supported` | bool | Provider/model accepts OpenAI `reasoning_effort`. |
 | `interleaved_thinking_supported` | bool | `thinking: true` can request Anthropic's interleaved-thinking beta header. |
 | `anthropic_beta_features` | `[string]` | Anthropic beta feature names always requested for this route. |
+| `image_url_input_supported` | bool | Image content may use remote URLs. Set false for base64-only routes. |
+| `file_upload_wire_format` | string | Upload API family used by `files.upload`: `anthropic` or `gemini`. |
+| `seed_supported`, `top_k_supported`, `frequency_penalty_supported`, `presence_penalty_supported` | bool | Generation option support flags. |
 | `thinking_disable_directive` | string | In-prompt directive (e.g. `"/no_think"` for Qwen3) auto-prepended to system when `thinking: false`. Idempotent. |
 
 First match wins within a provider's rule list. `[provider_family]`

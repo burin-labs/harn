@@ -22,6 +22,10 @@
 #   model_match     : glob pattern matched against the lowercased model ID.
 #   version_min     : [major, minor] lower bound, provider-aware parse.
 #   native_tools    : whether the model accepts native tool-call wire shape.
+#   message_wire_format:
+#                     shared helper wire format: openai, anthropic, or ollama.
+#   native_tool_wire_format:
+#                     native tool definition shape: openai or anthropic.
 #   defer_loading   : whether `defer_loading: true` is honored on tool defs.
 #   tool_search     : list of native tool-search variants, preferred first.
 #                     Anthropic = ["bm25", "regex"];
@@ -34,6 +38,8 @@
 #   pdf_supported   : whether Harn can send PDF/document input blocks on this route.
 #   files_api_supported:
 #                     whether file_id references from std/files::upload are accepted.
+#   file_upload_wire_format:
+#                     file-upload API family for std/files.upload: anthropic or gemini.
 #   structured_output: structured-output transport: native, tool_use, format_kw, none.
 #   prefers_xml_scaffolding:
 #                     logical prompt sections render as XML tags.
@@ -58,12 +64,17 @@
 #                     unconditional Anthropic beta feature names to request
 #                     for this route.
 #   vision_supported: whether image content blocks are accepted.
+#   image_url_input_supported:
+#                     whether image content blocks may reference remote URLs.
 #   preserve_thinking: whether prior <think> blocks should be carried forward.
 #   server_parser   : server-side response parser that transforms model output.
 #   honors_chat_template_kwargs: whether chat_template_kwargs are honored.
 #   requires_completion_tokens: whether to send max_completion_tokens instead of max_tokens.
 #   reasoning_effort_supported: whether reasoning_effort is accepted.
 #   reasoning_none_supported: whether reasoning_effort="none" is accepted.
+#   reasoning_wire_format:
+#                     OpenAI-compatible non-standard reasoning transport:
+#                     openrouter or enabled.
 #   recommended_endpoint: preferred endpoint family for this route.
 #   text_tool_wire_format_supported: whether Harn text tool calls survive.
 #   thinking_disable_directive:
@@ -73,6 +84,41 @@
 #                     whenever the resolved `thinking` config is `Disabled`,
 #                     so script authors don't need to know provider-specific
 #                     prompt directives. Idempotent — never injected twice.
+
+[provider_defaults.anthropic]
+message_wire_format = "anthropic"
+native_tool_wire_format = "anthropic"
+file_upload_wire_format = "anthropic"
+files_api_supported = true
+seed_supported = false
+frequency_penalty_supported = false
+presence_penalty_supported = false
+
+[provider_defaults.openai]
+top_k_supported = false
+
+[provider_defaults.openrouter]
+reasoning_wire_format = "openrouter"
+top_k_supported = false
+
+[provider_defaults.huggingface]
+top_k_supported = false
+
+[provider_defaults.local]
+top_k_supported = false
+
+[provider_defaults.together]
+reasoning_wire_format = "enabled"
+
+[provider_defaults.ollama]
+message_wire_format = "ollama"
+image_url_input_supported = false
+frequency_penalty_supported = false
+presence_penalty_supported = false
+
+[provider_defaults.gemini]
+file_upload_wire_format = "gemini"
+files_api_supported = true
 
 # ---------- Anthropic (Claude) ------------------------------------------------
 
@@ -1137,6 +1183,14 @@ structured_output_mode = "native_json"
 # Amazon, Mistral, and other Bedrock-hosted model families. Tool-search and
 # prompt-cache semantics remain provider/model-specific, so don't advertise
 # those through the generic Bedrock route yet.
+[[provider.bedrock]]
+model_match = "anthropic.claude-*"
+native_tools = true
+message_wire_format = "anthropic"
+native_tool_wire_format = "anthropic"
+recommended_endpoint = "/model/{model}/converse"
+text_tool_wire_format_supported = true
+
 [[provider.bedrock]]
 model_match = "*"
 native_tools = true
