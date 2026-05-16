@@ -115,6 +115,30 @@ the caller wants Harn to emit the corresponding `composition_start`,
 events to the live agent event sinks. Future frontends must route every binding
 call through the same child dispatch path.
 
+### Host Dispatcher
+
+By default, every binding call resolves through `metadata.mock_output` or a
+structured echo, which is the right behavior for replay fixtures and offline
+audits. Hosts that want real tool dispatch pass a `dispatcher` closure on the
+options dict:
+
+```harn
+let dispatch = { binding_name, input ->
+  if binding_name == "read_file" {
+    return host_call("workspace.read_text", input)
+  }
+  return {error: "unknown binding " + binding_name}
+}
+let report = composition_execute(snippet, manifest, {dispatcher: dispatch})
+```
+
+The dispatcher receives `(binding_name: string, input: dict)` for each child
+call and may return any value or raise a runtime error to fail the child. The
+closure executes on a fresh clone of the outer VM, so host bridge builtins
+(`host_call`, MCP, pipeline imports) resolve normally. The inner composition VM
+still only sees manifest bindings plus the curated pure-helper list, so the
+snippet itself cannot bypass policy by reaching for those builtins directly.
+
 ## MCP Profile
 
 For large connector packages, expose a compact Code Mode profile instead of

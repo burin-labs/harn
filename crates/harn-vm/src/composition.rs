@@ -1360,6 +1360,45 @@ impl CompositionToolHost for StaticCompositionToolHost {
     }
 }
 
+/// Dispatches every binding call to a caller-supplied Harn closure.
+///
+/// The closure is compiled in the calling VM and receives
+/// `(binding_name: string, input: dict)`. Returning a value yields a successful
+/// child result; raising an error fails the child call. Each invocation runs
+/// on a fresh clone of the outer VM so closure-side builtins (`host_call`,
+/// pipeline imports, etc.) resolve normally — the inner composition VM only
+/// sees the manifest bindings plus pure helpers.
+pub struct ClosureCompositionToolHost {
+    closure: crate::VmClosure,
+    outer_vm: Vm,
+}
+
+impl ClosureCompositionToolHost {
+    pub fn new(closure: crate::VmClosure, outer_vm: Vm) -> Self {
+        Self { closure, outer_vm }
+    }
+}
+
+#[async_trait::async_trait(?Send)]
+impl CompositionToolHost for ClosureCompositionToolHost {
+    async fn call(&self, binding: &BindingManifestEntry, input: Value) -> CompositionToolOutput {
+        let mut vm = self.outer_vm.child_vm();
+        let args = vec![
+            VmValue::String(Rc::from(binding.name.as_str())),
+            crate::json_to_vm_value(&input),
+        ];
+        match vm.call_closure_pub(&self.closure, &args).await {
+            Ok(value) => {
+                let json = crate::llm::vm_value_to_json(&value);
+                CompositionToolOutput::ok(json)
+            }
+            Err(error) => {
+                CompositionToolOutput::error(error.to_string(), ToolCallErrorCategory::ToolError)
+            }
+        }
+    }
+}
+
 pub fn composition_search_examples(query: &str, limit: usize) -> Value {
     let mut examples = vec![
         serde_json::json!({
@@ -1816,6 +1855,14 @@ pub fn register_composition_builtins(vm: &mut Vm) {
             .get(1)
             .map(crate::llm::vm_value_to_json)
             .ok_or_else(|| VmError::Runtime("composition_execute: manifest is required".into()))?;
+        let dispatcher = args.get(2).and_then(|value| match value {
+            VmValue::Closure(closure) => Some((**closure).clone()),
+            VmValue::Dict(dict) => match dict.get("dispatcher") {
+                Some(VmValue::Closure(closure)) => Some((**closure).clone()),
+                _ => None,
+            },
+            _ => None,
+        });
         let mut request = CompositionExecutionRequest {
             snippet,
             manifest: serde_json::from_value(manifest_value).map_err(|error| {
@@ -1841,11 +1888,19 @@ pub fn register_composition_builtins(vm: &mut Vm) {
                 request.limits.max_output_bytes = max_output_bytes;
             }
         }
-        let report = execute_harn_composition(
-            request,
-            Rc::new(StaticCompositionToolHost::new(BTreeMap::new())),
-        )
-        .await;
+        let host: Rc<dyn CompositionToolHost> = match dispatcher {
+            Some(closure) => {
+                let outer_vm = crate::vm::clone_async_builtin_child_vm().ok_or_else(|| {
+                    VmError::Runtime(
+                        "composition_execute: dispatcher requires an async builtin VM context"
+                            .into(),
+                    )
+                })?;
+                Rc::new(ClosureCompositionToolHost::new(closure, outer_vm))
+            }
+            None => Rc::new(StaticCompositionToolHost::new(BTreeMap::new())),
+        };
+        let report = execute_harn_composition(request, host).await;
         Ok(crate::json_to_vm_value(
             &serde_json::to_value(report).unwrap_or_else(|_| serde_json::json!({"ok": false})),
         ))
@@ -2186,6 +2241,64 @@ mod tests {
             Some(CompositionFailureCategory::Timeout)
         );
         assert_eq!(report.child_calls.len(), 1);
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn harn_composition_dispatcher_closure_receives_real_inputs_and_returns_outputs() {
+        use std::cell::RefCell;
+        let tools = serde_json::json!([
+            {
+                "name": "read_file",
+                "parameters": {"type": "object", "required": ["path"]},
+                "annotations": {"kind": "read", "side_effect_level": "read_only"},
+            }
+        ]);
+        let manifest =
+            binding_manifest_from_tool_surface(&tools, BindingManifestOptions::default());
+
+        struct CapturingHost {
+            calls: RefCell<Vec<(String, Value)>>,
+        }
+        #[async_trait::async_trait(?Send)]
+        impl CompositionToolHost for CapturingHost {
+            async fn call(
+                &self,
+                binding: &BindingManifestEntry,
+                input: Value,
+            ) -> CompositionToolOutput {
+                self.calls
+                    .borrow_mut()
+                    .push((binding.name.clone(), input.clone()));
+                CompositionToolOutput::ok(serde_json::json!({
+                    "path": input.get("path").cloned().unwrap_or(Value::Null),
+                    "text": "real-file-bytes",
+                }))
+            }
+        }
+        let host = Rc::new(CapturingHost {
+            calls: RefCell::new(Vec::new()),
+        });
+        let report = execute_harn_composition(
+            CompositionExecutionRequest {
+                run_id: "run-dispatch".into(),
+                snippet: "let f = read_file({path: \"README.md\"})\nreturn f.text".into(),
+                manifest,
+                ..CompositionExecutionRequest::default()
+            },
+            host.clone(),
+        )
+        .await;
+        assert!(report.ok, "{}", report.summary);
+        assert_eq!(host.calls.borrow().len(), 1);
+        assert_eq!(host.calls.borrow()[0].0, "read_file");
+        assert_eq!(
+            host.calls.borrow()[0].1.get("path").and_then(Value::as_str),
+            Some("README.md")
+        );
+        assert_eq!(
+            report.run.result.as_ref().and_then(Value::as_str),
+            Some("real-file-bytes")
+        );
     }
 
     #[tokio::test(flavor = "current_thread")]
