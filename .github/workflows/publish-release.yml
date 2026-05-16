@@ -5,7 +5,8 @@ name: Publish release
 #   1. push to a `vX.Y.Z` tag — the canonical "tag is truth" path. The
 #      bump-fleet `release_harn.harn` harness pushes the tag at the
 #      pinned release commit BEFORE the Release PR merges; this trigger
-#      ships crates.io and the GitHub release from that exact commit,
+#      ships crates.io from that exact commit while the binary workflow
+#      creates the GitHub release with artifacts from the same tag,
 #      independent of whatever lands on main between PR-open and merge.
 #      The tag push (under the harn-release-bot App identity) also
 #      cascades to build-release-binaries.yml for tarballs + container.
@@ -26,8 +27,10 @@ name: Publish release
 #      crates so manual re-fire is idempotent.
 #
 # Runs ./scripts/release_ship.sh --finalize, which dry-run publishes,
-# tags (no-op if already at HEAD), publishes to crates.io, and
-# creates/updates the GitHub release.
+# tags (no-op if already at HEAD), and publishes to crates.io. The
+# build-release-binaries.yml cascade creates/updates the GitHub release
+# only after the binary assets are ready, so a failed binary build cannot
+# leave a visible release page with zero artifacts.
 #
 # Audit is skipped by default (RELEASE_FINALIZE_REAUDIT=0): the
 # merge-queue CI of the just-landed Release PR ran the same gates a
@@ -275,7 +278,7 @@ jobs:
           # local recovery runs.
           RELEASE_FINALIZE_REAUDIT: ${{ inputs.reaudit && '1' || '0' }}
         run: |
-          args=(--finalize)
+          args=(--finalize --skip-github-release)
           if [[ "${{ inputs.skip_dry_run }}" == "true" ]]; then
             args+=(--skip-dry-run)
           fi
