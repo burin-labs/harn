@@ -873,6 +873,7 @@ pub(crate) fn extract_llm_options(
     apply_active_step_defaults(&mut options);
 
     let system = compose_system_prompt(system, options.as_ref())?;
+    let routing_policy = crate::llm::routing::extract_routing_policy(options.as_ref())?;
     let route_policy = parse_route_policy_option(options.as_ref())?;
     let mut provider = vm_resolve_provider(&options);
     let mut model = vm_resolve_model(&options, &provider);
@@ -880,6 +881,15 @@ pub(crate) fn extract_llm_options(
     if let Some(decision) = routing_decision.as_ref() {
         provider = decision.selected_provider.clone();
         model = decision.selected_model.clone();
+    }
+    // A routing_policy chain owns provider/model selection: snap the
+    // base options to the first link so transcript-only consumers see
+    // a sensible placeholder. The executor swaps these per attempt.
+    if let Some(policy) = routing_policy.as_ref() {
+        if let Some(first) = policy.chain.first() {
+            provider = first.provider.clone();
+            model = first.model.clone();
+        }
     }
     let route_fallbacks = match &route_policy {
         crate::llm::api::LlmRoutePolicy::PreferenceList { .. } => routing_decision
@@ -1298,6 +1308,7 @@ pub(crate) fn extract_llm_options(
         fallback_chain,
         route_fallbacks,
         routing_decision,
+        routing_policy,
         session_id: None,
         messages,
         system,

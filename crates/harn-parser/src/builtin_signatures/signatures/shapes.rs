@@ -346,6 +346,7 @@ pub(crate) const LLM_CALL_OPTIONS: Ty = Ty::Shape(&[
     ShapeFieldDescriptor::optional("strategy", TY_STRING),
     ShapeFieldDescriptor::optional("fallback_chain", Ty::Union(&[TY_STRING, TY_LIST])),
     ShapeFieldDescriptor::optional("budget_usd", Ty::Union(&[TY_FLOAT, TY_INT])),
+    ShapeFieldDescriptor::optional("routing", TY_DICT),
     // Conversation and system-prompt composition.
     ShapeFieldDescriptor::optional("system", TY_STRING),
     ShapeFieldDescriptor::optional("messages", TY_LIST),

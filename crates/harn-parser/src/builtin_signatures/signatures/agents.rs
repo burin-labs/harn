@@ -625,6 +625,7 @@ pub(crate) const SIGNATURES: &[BuiltinSignature] = &[
         TY_DICT,
     ),
     BuiltinSignature::simple("llm_session_cost", &[], TY_DICT),
+    BuiltinSignature::simple("routing_policy", &[Param::new("config", TY_DICT)], TY_DICT),
     BuiltinSignature::simple(
         "llm_stream",
         &[

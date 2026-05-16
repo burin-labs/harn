@@ -1,0 +1,32 @@
+/**
+ * Returns a tagged dict with the canonicalized config so scripts can
+ * reflect on the policy they built before piping it through llm_call.
+ */
+pipeline test(task) {
+  let policy = routing_policy(
+    {
+      chain: [
+        {provider: "anthropic", model: "claude-opus-4-20250514"},
+        {provider: "openai", model: "gpt-4o-mini"},
+        "ollama:llama4:70b",
+      ],
+      failover: {on_status: [429, 500, 503], on_timeout_ms: 30000, max_attempts: 3},
+      latency: {race_after_ms: 5000, target_p95_ms: 8000},
+      budget: {per_call_usd: 0.5, session_usd: 5.0, on_exceed: "abort"},
+      observe: {emit_event: "billing.routing_decision"},
+      label: "frontier-cascade",
+    },
+  )
+  println(policy.__routing_policy__)
+  println(policy.label)
+  println(len(policy.chain))
+  println(policy.chain[0].provider)
+  println(policy.chain[2].provider)
+  println(policy.chain[2].model)
+  println(policy.failover.max_attempts)
+  println(len(policy.failover.on_status))
+  println(policy.latency.race_after_ms)
+  println(policy.budget.per_call_usd)
+  println(policy.budget.on_exceed)
+  println(policy.observe.emit_event)
+}

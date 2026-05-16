@@ -68,6 +68,36 @@ condensed series summaries instead of full per-patch history.
   configured provider. The README `Quick Start` now leads with the
   demo. CI exercises every scenario via the new `demo_cli`
   integration test, which catches drift between the script and tape.
+- **First-class `routing_policy` primitive (#1649).** `routing_policy({...})`
+  builds a reusable handle that drives a chain of providers with
+  failover, latency-aware racing, and per-call / session budget caps.
+  Pipe it through `llm_call(... routing: policy ...)`:
+
+  ```harn,ignore
+  let policy = routing_policy({
+    chain: [
+      {provider: "anthropic", model: "claude-opus-4-20250514"},
+      {provider: "openai",    model: "gpt-4o"},
+      {provider: "ollama",    model: "llama4:70b"},
+    ],
+    failover: {on_status: [429, 500, 502, 503, 504], max_attempts: 3},
+    latency: {race_after_ms: 5000},
+    budget:  {per_call_usd: 0.5, on_exceed: "abort"},
+    observe: {emit_event: "billing.routing_decision"},
+  })
+
+  let result = llm_call("Summarize this PR.", nil, {routing: policy})
+  ```
+
+  Each chain attempt rides on the result envelope's `routing.attempts`
+  block and emits structured tape events
+  (`<dispatch>.{decision,attempt,race_started,race_won,race_lost,budget_exceeded,exhausted}`)
+  so transcripts and replay can attribute every outcome to a specific
+  link. Migrates the previous BYO composition of `with_routing` +
+  `with_retry` + `with_fallback` to a single typed primitive while
+  reusing the catalog pricing in `std/llm/economics` for budget
+  enforcement. See `docs/llm/harn-quickref.md` and
+  `docs/src/stdlib/llm-handlers.md`.
 
 ## v0.8.19
 

@@ -411,6 +411,10 @@ NON_TEST_WALL_CLOCK_ALLOWLIST=(
   "crates/harn-vm/src/llm/providers/ollama.rs"
   "crates/harn-vm/src/llm/providers/vertex.rs"
   "crates/harn-vm/src/llm/rate_limit.rs"
+  # `routing_policy` records actual per-link wall-clock elapsed so the
+  # routing trace + `<dispatch>.attempt` tape events accurately
+  # attribute provider latency.
+  "crates/harn-vm/src/llm/routing.rs"
   "crates/harn-vm/src/llm/stream.rs"
   "crates/harn-vm/src/mcp_card.rs"
   "crates/harn-vm/src/mcp_registry.rs"

@@ -1,0 +1,16 @@
+/**
+ * Basic routing_policy smoke test: a single-link chain should run
+ * through the new executor and surface the routing block on the
+ * envelope.
+ */
+pipeline test(task) {
+  llm_mock_clear()
+  llm_mock({text: "hello from primary", model: "mock", provider: "mock"})
+  let policy = routing_policy({chain: [{provider: "mock", model: "mock"}], label: "smoke"})
+  let result = llm_call("hi", nil, {routing: policy})
+  println(result.text)
+  println(result.routing.policy)
+  println(result.routing.attempts[0].provider)
+  println(result.routing.attempts[0].status)
+  println(result.routing.selected)
+}
