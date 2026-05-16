@@ -1300,7 +1300,7 @@ export const harnProviderCatalog: HarnProviderCatalog = {
         "structured_output_mode": "delimited",
         "supports_assistant_prefill": false,
         "prefers_role_developer": false,
-        "prefers_xml_tools": true,
+        "prefers_xml_tools": false,
         "thinking_block_style": "inline"
       },
       "reasoning": {
@@ -1358,7 +1358,7 @@ export const harnProviderCatalog: HarnProviderCatalog = {
         "structured_output_mode": "delimited",
         "supports_assistant_prefill": false,
         "prefers_role_developer": false,
-        "prefers_xml_tools": true,
+        "prefers_xml_tools": false,
         "thinking_block_style": "inline"
       },
       "reasoning": {
@@ -1412,7 +1412,7 @@ export const harnProviderCatalog: HarnProviderCatalog = {
         "structured_output_mode": "delimited",
         "supports_assistant_prefill": false,
         "prefers_role_developer": false,
-        "prefers_xml_tools": true,
+        "prefers_xml_tools": false,
         "thinking_block_style": "inline"
       },
       "reasoning": {
@@ -1468,7 +1468,7 @@ export const harnProviderCatalog: HarnProviderCatalog = {
         "structured_output_mode": "delimited",
         "supports_assistant_prefill": false,
         "prefers_role_developer": false,
-        "prefers_xml_tools": true,
+        "prefers_xml_tools": false,
         "thinking_block_style": "inline"
       },
       "reasoning": {
@@ -1522,7 +1522,7 @@ export const harnProviderCatalog: HarnProviderCatalog = {
         "structured_output_mode": "delimited",
         "supports_assistant_prefill": false,
         "prefers_role_developer": false,
-        "prefers_xml_tools": true,
+        "prefers_xml_tools": false,
         "thinking_block_style": "inline"
       },
       "reasoning": {
@@ -1577,7 +1577,7 @@ export const harnProviderCatalog: HarnProviderCatalog = {
         "structured_output_mode": "delimited",
         "supports_assistant_prefill": false,
         "prefers_role_developer": false,
-        "prefers_xml_tools": true,
+        "prefers_xml_tools": false,
         "thinking_block_style": "inline"
       },
       "reasoning": {
@@ -1632,7 +1632,7 @@ export const harnProviderCatalog: HarnProviderCatalog = {
         "structured_output_mode": "delimited",
         "supports_assistant_prefill": false,
         "prefers_role_developer": false,
-        "prefers_xml_tools": true,
+        "prefers_xml_tools": false,
         "thinking_block_style": "inline"
       },
       "reasoning": {
@@ -1690,7 +1690,7 @@ export const harnProviderCatalog: HarnProviderCatalog = {
         "structured_output_mode": "delimited",
         "supports_assistant_prefill": false,
         "prefers_role_developer": false,
-        "prefers_xml_tools": true,
+        "prefers_xml_tools": false,
         "thinking_block_style": "inline"
       },
       "reasoning": {
@@ -1749,7 +1749,7 @@ export const harnProviderCatalog: HarnProviderCatalog = {
         "structured_output_mode": "delimited",
         "supports_assistant_prefill": false,
         "prefers_role_developer": false,
-        "prefers_xml_tools": true,
+        "prefers_xml_tools": false,
         "thinking_block_style": "none"
       },
       "reasoning": {
@@ -1804,7 +1804,7 @@ export const harnProviderCatalog: HarnProviderCatalog = {
         "structured_output_mode": "delimited",
         "supports_assistant_prefill": false,
         "prefers_role_developer": false,
-        "prefers_xml_tools": true,
+        "prefers_xml_tools": false,
         "thinking_block_style": "none"
       },
       "reasoning": {
@@ -1909,7 +1909,7 @@ export const harnProviderCatalog: HarnProviderCatalog = {
         "structured_output_mode": "delimited",
         "supports_assistant_prefill": false,
         "prefers_role_developer": false,
-        "prefers_xml_tools": true,
+        "prefers_xml_tools": false,
         "thinking_block_style": "inline"
       },
       "reasoning": {
@@ -2364,7 +2364,7 @@ export const harnProviderCatalog: HarnProviderCatalog = {
         "structured_output_mode": "delimited",
         "supports_assistant_prefill": false,
         "prefers_role_developer": false,
-        "prefers_xml_tools": true,
+        "prefers_xml_tools": false,
         "thinking_block_style": "inline"
       },
       "reasoning": {

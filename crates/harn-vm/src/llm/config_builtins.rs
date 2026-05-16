@@ -1258,7 +1258,7 @@ mod tests {
         expect_bool("text_tool_wire_format_supported", true);
         expect_bool("tools", true);
         expect_bool("prefers_markdown_scaffolding", true);
-        expect_bool("prefers_xml_tools", true);
+        expect_bool("prefers_xml_tools", false);
         match dict.get("structured_output_mode") {
             Some(VmValue::String(mode)) => assert_eq!(mode.as_ref(), "delimited"),
             other => panic!("expected structured_output_mode string, got {other:?}"),

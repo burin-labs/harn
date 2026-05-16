@@ -68,7 +68,7 @@ pipeline test(task) {
   assert(!qwen35.vision_supported, "qwen3.5 is not a vision route")
   assert(qwen35.prefers_markdown_scaffolding, "qwen3.5 prefers Markdown prompt sections")
   assert(qwen35.structured_output_mode == "delimited", "qwen3.5 prefers delimited output")
-  assert(qwen35.prefers_xml_tools, "qwen3.5 prefers XML text-tool fallback prompts")
+  assert(!qwen35.prefers_xml_tools, "qwen3.5 does not use XML tool wrappers")
   assert(qwen35.thinking_block_style == "inline", "qwen3.5 uses inline thinking blocks")
   let gemini = provider_capabilities("gemini", "gemini-2.5-flash")
   assert(gemini.vision_supported, "gemini native route accepts image content")

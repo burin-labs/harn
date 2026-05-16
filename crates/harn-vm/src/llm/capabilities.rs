@@ -1166,7 +1166,7 @@ anthropic_beta_features = ["fine-grained-tool-streaming-2025-05-14"]
         assert!(caps.text_tool_wire_format_supported);
         assert!(caps.prefers_markdown_scaffolding);
         assert_eq!(caps.structured_output_mode, "delimited");
-        assert!(caps.prefers_xml_tools);
+        assert!(!caps.prefers_xml_tools);
         assert_eq!(caps.thinking_block_style, "inline");
     }
 

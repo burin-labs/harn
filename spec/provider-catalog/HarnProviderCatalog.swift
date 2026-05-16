@@ -1402,7 +1402,7 @@ public let harnProviderCatalogJSON = #"""
         "structured_output_mode": "delimited",
         "supports_assistant_prefill": false,
         "prefers_role_developer": false,
-        "prefers_xml_tools": true,
+        "prefers_xml_tools": false,
         "thinking_block_style": "inline"
       },
       "reasoning": {
@@ -1460,7 +1460,7 @@ public let harnProviderCatalogJSON = #"""
         "structured_output_mode": "delimited",
         "supports_assistant_prefill": false,
         "prefers_role_developer": false,
-        "prefers_xml_tools": true,
+        "prefers_xml_tools": false,
         "thinking_block_style": "inline"
       },
       "reasoning": {
@@ -1514,7 +1514,7 @@ public let harnProviderCatalogJSON = #"""
         "structured_output_mode": "delimited",
         "supports_assistant_prefill": false,
         "prefers_role_developer": false,
-        "prefers_xml_tools": true,
+        "prefers_xml_tools": false,
         "thinking_block_style": "inline"
       },
       "reasoning": {
@@ -1570,7 +1570,7 @@ public let harnProviderCatalogJSON = #"""
         "structured_output_mode": "delimited",
         "supports_assistant_prefill": false,
         "prefers_role_developer": false,
-        "prefers_xml_tools": true,
+        "prefers_xml_tools": false,
         "thinking_block_style": "inline"
       },
       "reasoning": {
@@ -1624,7 +1624,7 @@ public let harnProviderCatalogJSON = #"""
         "structured_output_mode": "delimited",
         "supports_assistant_prefill": false,
         "prefers_role_developer": false,
-        "prefers_xml_tools": true,
+        "prefers_xml_tools": false,
         "thinking_block_style": "inline"
       },
       "reasoning": {
@@ -1679,7 +1679,7 @@ public let harnProviderCatalogJSON = #"""
         "structured_output_mode": "delimited",
         "supports_assistant_prefill": false,
         "prefers_role_developer": false,
-        "prefers_xml_tools": true,
+        "prefers_xml_tools": false,
         "thinking_block_style": "inline"
       },
       "reasoning": {
@@ -1734,7 +1734,7 @@ public let harnProviderCatalogJSON = #"""
         "structured_output_mode": "delimited",
         "supports_assistant_prefill": false,
         "prefers_role_developer": false,
-        "prefers_xml_tools": true,
+        "prefers_xml_tools": false,
         "thinking_block_style": "inline"
       },
       "reasoning": {
@@ -1792,7 +1792,7 @@ public let harnProviderCatalogJSON = #"""
         "structured_output_mode": "delimited",
         "supports_assistant_prefill": false,
         "prefers_role_developer": false,
-        "prefers_xml_tools": true,
+        "prefers_xml_tools": false,
         "thinking_block_style": "inline"
       },
       "reasoning": {
@@ -1851,7 +1851,7 @@ public let harnProviderCatalogJSON = #"""
         "structured_output_mode": "delimited",
         "supports_assistant_prefill": false,
         "prefers_role_developer": false,
-        "prefers_xml_tools": true,
+        "prefers_xml_tools": false,
         "thinking_block_style": "none"
       },
       "reasoning": {
@@ -1906,7 +1906,7 @@ public let harnProviderCatalogJSON = #"""
         "structured_output_mode": "delimited",
         "supports_assistant_prefill": false,
         "prefers_role_developer": false,
-        "prefers_xml_tools": true,
+        "prefers_xml_tools": false,
         "thinking_block_style": "none"
       },
       "reasoning": {
@@ -2011,7 +2011,7 @@ public let harnProviderCatalogJSON = #"""
         "structured_output_mode": "delimited",
         "supports_assistant_prefill": false,
         "prefers_role_developer": false,
-        "prefers_xml_tools": true,
+        "prefers_xml_tools": false,
         "thinking_block_style": "inline"
       },
       "reasoning": {
@@ -2466,7 +2466,7 @@ public let harnProviderCatalogJSON = #"""
         "structured_output_mode": "delimited",
         "supports_assistant_prefill": false,
         "prefers_role_developer": false,
-        "prefers_xml_tools": true,
+        "prefers_xml_tools": false,
         "thinking_block_style": "inline"
       },
       "reasoning": {

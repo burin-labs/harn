@@ -76,7 +76,19 @@ Urgent: Build a tree CLI.
 ## Examples
 - Input: src -> Output: src/main.harn
 - Input: tests -> Output: tests/tree.expected
-
+[[ ## output_format ## ]]
+Return output matching this JSON Schema:
+{
+  "properties": {
+    "tree": {
+      "type": "string"
+    }
+  },
+  "required": [
+    "tree"
+  ],
+  "type": "object"
+}
 Tools:
 Use this ReAct-style envelope when calling a tool:
 Action: <tool name>
@@ -93,7 +105,7 @@ Available tools:
     "name": "print_tree"
   }
 ]
-
+Reason privately before answering.
 ## Reasoning
 Reason privately step by step before answering.
 --- generic-fallback ---

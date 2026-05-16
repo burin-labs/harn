@@ -824,7 +824,7 @@ prefers_markdown_scaffolding = true
 structured_output_mode = "native_json"
 supports_assistant_prefill = false
 prefers_role_developer = false
-prefers_xml_tools = true
+prefers_xml_tools = false
 thinking_block_style = "none"
 
 [[provider.ollama]]
@@ -835,7 +835,7 @@ prefers_markdown_scaffolding = true
 structured_output_mode = "native_json"
 supports_assistant_prefill = false
 prefers_role_developer = false
-prefers_xml_tools = true
+prefers_xml_tools = false
 thinking_block_style = "reasoning_summary"
 
 [[provider.ollama]]
@@ -846,7 +846,7 @@ prefers_markdown_scaffolding = true
 structured_output_mode = "native_json"
 supports_assistant_prefill = false
 prefers_role_developer = false
-prefers_xml_tools = true
+prefers_xml_tools = false
 thinking_block_style = "reasoning_summary"
 
 [[provider.ollama]]
@@ -857,7 +857,7 @@ prefers_markdown_scaffolding = true
 structured_output_mode = "native_json"
 supports_assistant_prefill = false
 prefers_role_developer = false
-prefers_xml_tools = true
+prefers_xml_tools = false
 thinking_block_style = "reasoning_summary"
 
 [[provider.ollama]]
@@ -868,7 +868,7 @@ prefers_markdown_scaffolding = true
 structured_output_mode = "delimited"
 supports_assistant_prefill = false
 prefers_role_developer = false
-prefers_xml_tools = true
+prefers_xml_tools = false
 thinking_block_style = "none"
 
 [[provider.ollama]]
@@ -887,7 +887,7 @@ prefers_markdown_scaffolding = true
 structured_output_mode = "delimited"
 supports_assistant_prefill = false
 prefers_role_developer = false
-prefers_xml_tools = true
+prefers_xml_tools = false
 thinking_block_style = "inline"
 
 [[provider.ollama]]
@@ -905,7 +905,7 @@ prefers_markdown_scaffolding = true
 structured_output_mode = "delimited"
 supports_assistant_prefill = false
 prefers_role_developer = false
-prefers_xml_tools = true
+prefers_xml_tools = false
 thinking_block_style = "inline"
 
 # llama.cpp / llama-server speaks OpenAI-compat but is a separate provider
@@ -929,7 +929,7 @@ prefers_markdown_scaffolding = true
 structured_output_mode = "delimited"
 supports_assistant_prefill = false
 prefers_role_developer = false
-prefers_xml_tools = true
+prefers_xml_tools = false
 thinking_block_style = "inline"
 
 [[provider.llamacpp]]
@@ -947,7 +947,7 @@ prefers_markdown_scaffolding = true
 structured_output_mode = "delimited"
 supports_assistant_prefill = false
 prefers_role_developer = false
-prefers_xml_tools = true
+prefers_xml_tools = false
 thinking_block_style = "inline"
 
 [[provider.llamacpp]]
@@ -963,7 +963,7 @@ prefers_markdown_scaffolding = true
 structured_output_mode = "delimited"
 supports_assistant_prefill = false
 prefers_role_developer = false
-prefers_xml_tools = true
+prefers_xml_tools = false
 thinking_block_style = "none"
 
 [[provider.ollama]]
@@ -979,7 +979,7 @@ prefers_markdown_scaffolding = true
 structured_output_mode = "delimited"
 supports_assistant_prefill = false
 prefers_role_developer = false
-prefers_xml_tools = true
+prefers_xml_tools = false
 thinking_block_style = "none"
 
 # Local vLLM / SGLang — same story. The capability rules here gate
@@ -1001,7 +1001,7 @@ prefers_markdown_scaffolding = true
 structured_output_mode = "delimited"
 supports_assistant_prefill = false
 prefers_role_developer = false
-prefers_xml_tools = true
+prefers_xml_tools = false
 thinking_block_style = "inline"
 
 [[provider.local]]
@@ -1019,7 +1019,7 @@ prefers_markdown_scaffolding = true
 structured_output_mode = "delimited"
 supports_assistant_prefill = false
 prefers_role_developer = false
-prefers_xml_tools = true
+prefers_xml_tools = false
 thinking_block_style = "inline"
 
 [[provider.local]]
@@ -1034,7 +1034,7 @@ prefers_markdown_scaffolding = true
 structured_output_mode = "delimited"
 supports_assistant_prefill = false
 prefers_role_developer = false
-prefers_xml_tools = true
+prefers_xml_tools = false
 thinking_block_style = "inline"
 
 # Apple Silicon MLX server (mlx-vlm). OpenAI-compat with vision; honors
@@ -1057,7 +1057,7 @@ prefers_markdown_scaffolding = true
 structured_output_mode = "delimited"
 supports_assistant_prefill = false
 prefers_role_developer = false
-prefers_xml_tools = true
+prefers_xml_tools = false
 thinking_block_style = "inline"
 
 [[provider.mlx]]
@@ -1076,7 +1076,7 @@ prefers_markdown_scaffolding = true
 structured_output_mode = "delimited"
 supports_assistant_prefill = false
 prefers_role_developer = false
-prefers_xml_tools = true
+prefers_xml_tools = false
 thinking_block_style = "inline"
 
 # ---------- Qwen3.6 family (routed providers) --------------------------------
@@ -1104,7 +1104,7 @@ prefers_markdown_scaffolding = true
 structured_output_mode = "delimited"
 supports_assistant_prefill = false
 prefers_role_developer = false
-prefers_xml_tools = true
+prefers_xml_tools = false
 thinking_block_style = "inline"
 
 [[provider.dashscope]]
@@ -1122,7 +1122,7 @@ prefers_markdown_scaffolding = true
 structured_output_mode = "delimited"
 supports_assistant_prefill = false
 prefers_role_developer = false
-prefers_xml_tools = true
+prefers_xml_tools = false
 thinking_block_style = "inline"
 
 [[provider.fireworks]]
@@ -1141,7 +1141,7 @@ prefers_markdown_scaffolding = true
 structured_output_mode = "delimited"
 supports_assistant_prefill = false
 prefers_role_developer = false
-prefers_xml_tools = true
+prefers_xml_tools = false
 thinking_block_style = "inline"
 
 # Fireworks's own model IDs squash dots to `p` (`qwen3p6`, `qwen3p5`),
@@ -1162,7 +1162,7 @@ prefers_markdown_scaffolding = true
 structured_output_mode = "delimited"
 supports_assistant_prefill = false
 prefers_role_developer = false
-prefers_xml_tools = true
+prefers_xml_tools = false
 thinking_block_style = "inline"
 
 [[provider.fireworks]]
@@ -1180,7 +1180,7 @@ prefers_markdown_scaffolding = true
 structured_output_mode = "delimited"
 supports_assistant_prefill = false
 prefers_role_developer = false
-prefers_xml_tools = true
+prefers_xml_tools = false
 thinking_block_style = "inline"
 
 # OpenRouter: forwards Qwen thinking via its `reasoning` field (not
@@ -1203,7 +1203,7 @@ prefers_markdown_scaffolding = true
 structured_output_mode = "delimited"
 supports_assistant_prefill = false
 prefers_role_developer = false
-prefers_xml_tools = true
+prefers_xml_tools = false
 thinking_block_style = "inline"
 
 [[provider.openrouter]]
@@ -1219,7 +1219,7 @@ prefers_markdown_scaffolding = true
 structured_output_mode = "delimited"
 supports_assistant_prefill = false
 prefers_role_developer = false
-prefers_xml_tools = true
+prefers_xml_tools = false
 thinking_block_style = "none"
 
 [[provider.openrouter]]
@@ -1237,7 +1237,7 @@ prefers_markdown_scaffolding = true
 structured_output_mode = "delimited"
 supports_assistant_prefill = false
 prefers_role_developer = false
-prefers_xml_tools = true
+prefers_xml_tools = false
 thinking_block_style = "inline"
 
 # HuggingFace router + Together pass Qwen chat_template_kwargs through
@@ -1258,7 +1258,7 @@ prefers_markdown_scaffolding = true
 structured_output_mode = "delimited"
 supports_assistant_prefill = false
 prefers_role_developer = false
-prefers_xml_tools = true
+prefers_xml_tools = false
 thinking_block_style = "inline"
 
 [[provider.huggingface]]
@@ -1274,7 +1274,7 @@ prefers_markdown_scaffolding = true
 structured_output_mode = "delimited"
 supports_assistant_prefill = false
 prefers_role_developer = false
-prefers_xml_tools = true
+prefers_xml_tools = false
 thinking_block_style = "none"
 
 [[provider.huggingface]]
@@ -1292,7 +1292,7 @@ prefers_markdown_scaffolding = true
 structured_output_mode = "delimited"
 supports_assistant_prefill = false
 prefers_role_developer = false
-prefers_xml_tools = true
+prefers_xml_tools = false
 thinking_block_style = "inline"
 
 [[provider.together]]
@@ -1311,7 +1311,7 @@ prefers_markdown_scaffolding = true
 structured_output_mode = "delimited"
 supports_assistant_prefill = false
 prefers_role_developer = false
-prefers_xml_tools = true
+prefers_xml_tools = false
 thinking_block_style = "inline"
 
 [[provider.together]]
@@ -1327,7 +1327,7 @@ prefers_markdown_scaffolding = true
 structured_output_mode = "delimited"
 supports_assistant_prefill = false
 prefers_role_developer = false
-prefers_xml_tools = true
+prefers_xml_tools = false
 thinking_block_style = "none"
 
 [[provider.together]]
@@ -1345,7 +1345,7 @@ prefers_markdown_scaffolding = true
 structured_output_mode = "delimited"
 supports_assistant_prefill = false
 prefers_role_developer = false
-prefers_xml_tools = true
+prefers_xml_tools = false
 thinking_block_style = "inline"
 
 # ---------- DeepSeek reasoning (across host providers) -----------------------
