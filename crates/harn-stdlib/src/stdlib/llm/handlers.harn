@@ -930,12 +930,10 @@ fn __repair_apply_strategy(call, envelope, strategy, max_tokens, temperature) {
         __repair_default_nudge(envelope?.error)
       }
     }
+  } else if type_of(strategy) == "string" && strategy != "" {
+    strategy
   } else {
-    if type_of(strategy) == "string" && strategy != "" {
-      strategy
-    } else {
-      __repair_default_nudge(envelope?.error)
-    }
+    __repair_default_nudge(envelope?.error)
   }
   let original_prompt = to_string(call?.prompt ?? "")
   var repaired_opts = __opts_dict(call?.opts)
@@ -1053,19 +1051,17 @@ pub fn with_coerce(next, opts = nil) {
     if type_of(value?.data) == "dict" {
       let normalized = __coerce_value_dict(value.data, lower_keys)
       augmented = augmented + {value: value + {data: normalized, raw_data: value.data}}
-    } else {
-      if on_text_json {
-        let text = to_string(value?.text ?? "")
-        if text != "" {
-          let parsed = try {
-            json_parse(text)
-          }
-          if !is_err(parsed) {
-            let unwrapped = unwrap(parsed)
-            if type_of(unwrapped) == "dict" {
-              let normalized = __coerce_value_dict(unwrapped, lower_keys)
-              augmented = augmented + {value: value + {data: normalized}}
-            }
+    } else if on_text_json {
+      let text = to_string(value?.text ?? "")
+      if text != "" {
+        let parsed = try {
+          json_parse(text)
+        }
+        if !is_err(parsed) {
+          let unwrapped = unwrap(parsed)
+          if type_of(unwrapped) == "dict" {
+            let normalized = __coerce_value_dict(unwrapped, lower_keys)
+            augmented = augmented + {value: value + {data: normalized}}
           }
         }
       }
@@ -1184,24 +1180,22 @@ fn __routing_resolve(routes, call) {
       let predicate = route?.when
       if predicate == nil {
         true
-      } else {
-        if __llm_handler_is_callable(predicate) {
-          let r = try {
-            predicate(call)
-          }
-          if is_err(r) {
+      } else if __llm_handler_is_callable(predicate) {
+        let r = try {
+          predicate(call)
+        }
+        if is_err(r) {
+          false
+        } else {
+          let v = unwrap(r)
+          if v == nil {
             false
           } else {
-            let v = unwrap(r)
-            if v == nil {
-              false
-            } else {
-              !!v
-            }
+            !!v
           }
-        } else {
-          !!predicate
         }
+      } else {
+        !!predicate
       }
     } else {
       false

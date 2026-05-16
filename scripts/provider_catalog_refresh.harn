@@ -400,12 +400,10 @@ fn __sources_summary(adapter_runs) -> list<string> {
   for run in adapter_runs {
     let badge = if run.status == "ok" {
       "✓"
+    } else if run.status == "skipped" {
+      "⊘"
     } else {
-      if run.status == "skipped" {
-        "⊘"
-      } else {
-        "✗"
-      }
+      "✗"
     }
     var line = "- " + badge + " " + run.id + " (" + run.kind + ", " + run.source_owner + ")"
     if run.url != nil {

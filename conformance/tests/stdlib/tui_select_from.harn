@@ -9,21 +9,19 @@ fn show(result) {
   let value_kind = type_of(result?.value)
   let value_repr = if value_kind == "dict" {
     result.value?.id ?? to_string(result.value)
-  } else {
-    if value_kind == "list" {
-      var parts = []
-      for entry in result.value {
-        let part = if type_of(entry) == "dict" {
-          entry?.id ?? to_string(entry)
-        } else {
-          to_string(entry)
-        }
-        parts = parts + [part]
+  } else if value_kind == "list" {
+    var parts = []
+    for entry in result.value {
+      let part = if type_of(entry) == "dict" {
+        entry?.id ?? to_string(entry)
+      } else {
+        to_string(entry)
       }
-      "[" + join(parts, ",") + "]"
-    } else {
-      to_string(result.value)
+      parts = parts + [part]
     }
+    "[" + join(parts, ",") + "]"
+  } else {
+    to_string(result.value)
   }
   println("ok=" + to_string(result.ok) + " status=" + result.status + " value=" + value_repr)
 }

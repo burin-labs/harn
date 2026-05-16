@@ -366,12 +366,10 @@ fn __git_result(result, argv, cwd) -> GitCommandResult {
   let success = process_result_success(raw)
   let status = if raw?.status != nil {
     raw.status
+  } else if success {
+    "completed"
   } else {
-    if success {
-      "completed"
-    } else {
-      "failed"
-    }
+    "failed"
   }
   return raw
     + {

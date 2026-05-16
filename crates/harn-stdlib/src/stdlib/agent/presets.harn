@@ -219,12 +219,10 @@ fn __tool_using_defaults(kind) {
   }
   let max_nudges = if kind == "audit" {
     1
+  } else if __is_captain(kind) {
+    3
   } else {
-    if __is_captain(kind) {
-      3
-    } else {
-      2
-    }
+    2
   }
   return {
     profile: profile,

@@ -266,16 +266,12 @@ pub fn workflow_classify_stage_outcome(config = nil) {
     } else {
       "verification_failed"
     }
+  } else if !stage_succeeded {
+    result_status
+  } else if node_kind == "subagent" {
+    "subagent_completed"
   } else {
-    if !stage_succeeded {
-      result_status
-    } else {
-      if node_kind == "subagent" {
-        "subagent_completed"
-      } else {
-        "success"
-      }
-    }
+    "success"
   }
   let branch = if node_kind == "verify" {
     if verified_ok {
@@ -283,12 +279,10 @@ pub fn workflow_classify_stage_outcome(config = nil) {
     } else {
       "failed"
     }
+  } else if stage_succeeded {
+    "success"
   } else {
-    if stage_succeeded {
-      "success"
-    } else {
-      "failed"
-    }
+    "failed"
   }
   return {outcome: outcome, branch: branch}
 }

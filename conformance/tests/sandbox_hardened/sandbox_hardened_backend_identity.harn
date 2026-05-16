@@ -14,20 +14,14 @@ pipeline default() {
   // marketing material aligned with how Apple brands the OS.
   let expected = if platform() == "linux" {
     "linux"
+  } else if platform() == "darwin" {
+    "macos"
+  } else if platform() == "windows" {
+    "windows"
+  } else if platform() == "openbsd" {
+    "openbsd"
   } else {
-    if platform() == "darwin" {
-      "macos"
-    } else {
-      if platform() == "windows" {
-        "windows"
-      } else {
-        if platform() == "openbsd" {
-          "openbsd"
-        } else {
-          "noop"
-        }
-      }
-    }
+    "noop"
   }
   println(backend == expected)
   // Without an active orchestration policy the script runs at the

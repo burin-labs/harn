@@ -280,8 +280,23 @@ impl TypeChecker {
             return Refinements::empty();
         };
 
+        // The runtime kinds that `type_of(...)` can return and that the
+        // refinement logic knows how to map to a `TypeExpr` member kind.
+        // Keep this in lockstep with `VmValue::type_name` so the
+        // narrower never accepts a tag that the runtime can't produce.
         const KNOWN_TYPES: &[&str] = &[
-            "int", "string", "float", "bool", "nil", "list", "dict", "closure", "bytes",
+            "int",
+            "string",
+            "float",
+            "bool",
+            "nil",
+            "list",
+            "dict",
+            "closure",
+            "bytes",
+            "generator",
+            "stream",
+            "iter",
         ];
         if !KNOWN_TYPES.contains(&type_name.as_str()) {
             return Refinements::empty();
@@ -309,20 +324,6 @@ impl TypeChecker {
                     };
                 }
             }
-            Some(TypeExpr::Named(ref n)) if n == &type_name => {
-                // Single named type matches the typeof check:
-                // truthy = same type, falsy = never (type is fully ruled out).
-                let eq_refs = Refinements {
-                    truthy: vec![(var_name.clone(), Some(TypeExpr::Named(type_name)))],
-                    falsy: vec![(var_name.clone(), Some(TypeExpr::Never))],
-                    ..Refinements::default()
-                };
-                return if op == "==" {
-                    eq_refs
-                } else {
-                    eq_refs.inverted()
-                };
-            }
             Some(TypeExpr::Named(ref n)) if n == "unknown" => {
                 // `unknown` narrows to the tested concrete type on the truthy
                 // branch. The falsy branch keeps `unknown` — subtracting one
@@ -341,6 +342,35 @@ impl TypeChecker {
                 } else {
                     eq_refs.inverted()
                 };
+            }
+            Some(ref ty) => {
+                // Single (non-union) type: reuse the union helpers on a
+                // one-element slice so parameterised constructors like
+                // `list<int>` narrow the same way that `Named("list")`
+                // does inside a union (`type_of(x) == "list"` →
+                // truthy = list<int>, falsy = never). Without this,
+                // single-typed parameterised values silently bypass
+                // narrowing and the falsy branch retains the original
+                // type even though it is provably unreachable.
+                let single = std::slice::from_ref(ty);
+                let narrowed = narrow_to_single(single, &type_name);
+                let remaining = remove_from_union(single, &type_name);
+                if narrowed.is_some() {
+                    let eq_refs = Refinements {
+                        truthy: narrowed
+                            .map(|n| vec![(var_name.clone(), Some(n))])
+                            .unwrap_or_default(),
+                        falsy: remaining
+                            .map(|r| vec![(var_name.clone(), Some(r))])
+                            .unwrap_or_default(),
+                        ..Refinements::default()
+                    };
+                    return if op == "==" {
+                        eq_refs
+                    } else {
+                        eq_refs.inverted()
+                    };
+                }
             }
             _ => {}
         }

@@ -22,11 +22,19 @@ impl Formatter<'_> {
                 let mut result = format!("if {cond} {{\n");
                 result.push_str(&self.format_body_string(then_body, inner));
                 if let Some(eb) = else_body {
-                    result.push_str(&close);
-                    result.push_str("} else {\n");
-                    result.push_str(&self.format_body_string(eb, inner));
-                    result.push_str(&close);
-                    result.push('}');
+                    // `else if` chain: flatten back instead of producing
+                    // a nested `else { if ... }` block.
+                    if eb.len() == 1 && matches!(eb[0].node, Node::IfElse { .. }) {
+                        result.push_str(&close);
+                        result.push_str("} else ");
+                        result.push_str(&self.format_expr_or_stmt(&eb[0], indent_level));
+                    } else {
+                        result.push_str(&close);
+                        result.push_str("} else {\n");
+                        result.push_str(&self.format_body_string(eb, inner));
+                        result.push_str(&close);
+                        result.push('}');
+                    }
                 } else {
                     result.push_str(&close);
                     result.push('}');

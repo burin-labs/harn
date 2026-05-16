@@ -10,6 +10,47 @@ condensed series summaries instead of full per-patch history.
 
 ### Fixed
 
+- **`if`-without-`else` expression value matches its static type.** The
+  VM compiler emitted the falsy-branch `Pop; Nil` cleanup at the end of
+  the truthy branch too, so `let x = if true { 42 }` left `nil` on the
+  stack instead of `42`. The truthy path now jumps past the cleanup
+  unconditionally. The type checker is also corrected to infer the
+  expression as `T | nil` (rather than just `T`) when there is no
+  `else` arm, so the compile-time type now agrees with the runtime
+  value — `let x: int = if cond { 1 }` is rejected, and `int?` /
+  `?? default` are the supported recoveries.
+- **`type_of(x)` narrows through parameterised types.** The flow
+  narrower only recognised `Named("list")` / `Named("dict")` /
+  `Named("closure")` etc. as members of a union, so
+  `list<int> | int` refused to narrow on `type_of(x) == "list"` and
+  the falsy branch retained the original union. `narrow_to_single` and
+  `remove_from_union` now treat `List(_)`, `DictType` / `Shape`,
+  `FnType`, `Iter(_)`, `Generator(_)`, `Stream(_)`, and literal
+  refinements as the corresponding runtime kind. `generator`, `stream`,
+  and `iter` are added to the known-typeof set, and a single
+  non-union variable also participates in the narrowing.
+- **Closure return types are inferred in a scope with their params.**
+  `{ x: int -> x + 1 }` previously failed return-type inference because
+  the body referenced `x`, which was not bound when the closure
+  literal was probed for its `fn(...)` shape. The closure then
+  collapsed to the opaque `closure` type, which was compatible with
+  any `fn(...)` slot, so `let g: fn(int) -> string = { x: int -> x + 1 }`
+  silently type-checked. The inference call now happens inside a
+  child scope populated with the declared param types.
+- **`else if` chains survive `harn fmt` inside expressions.** Only the
+  top-level statement formatter unwound a nested `IfElse` in an
+  `else` body back into `else if`. The expression-position formatters
+  (closure bodies, `let x = if … else if …`, function-call arguments)
+  did not, so each `else if` round-tripped through `fmt` as
+  `else { if … }` and gained an indent level. The expression formatter
+  now matches the statement formatter.
+- **`match` with a wildcard arm counts as a definite exit.** When every
+  arm of a `match` ends in `return` / `throw` / `break` / `continue`
+  and one arm is an unguarded `_ -> { ... }`, the lint and type
+  checker now treat code after the `match` as unreachable. Previously
+  `match x { _ -> { return 0 } }` did not satisfy the exit-detection
+  predicate, so trailing statements escaped the dead-code lint and the
+  type checker refused to refine the surrounding flow as `never`.
 - **`session_idle` lifecycle hook now fires.** `register_session_hook("session_idle", …)`
   was registrable but had no firing path, so handlers never ran. The
   daemon-mode agent loop now fires it once per `wake_interval_ms` wait

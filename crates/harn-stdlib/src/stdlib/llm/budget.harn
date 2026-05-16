@@ -16,15 +16,13 @@ fn __llm_budget_heuristic_tokens(text) {
   }
   let divisor = if regex_match("[\\p{Han}\\p{Hiragana}\\p{Katakana}\\p{Hangul}]", text) {
     1.0
+  } else if contains(text, "```") || contains(text, "=>") || contains(text, "->")
+    || contains(text, "{")
+    || contains(text, "}")
+    || contains(text, ";") {
+    3.5
   } else {
-    if contains(text, "```") || contains(text, "=>") || contains(text, "->")
-      || contains(text, "{")
-      || contains(text, "}")
-      || contains(text, ";") {
-      3.5
-    } else {
-      4.0
-    }
+    4.0
   }
   return to_int(ceil(len(text) * 1.0 / divisor))
 }

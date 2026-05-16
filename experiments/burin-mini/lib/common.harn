@@ -291,16 +291,14 @@ fn normalize_action_entry(profile, item, index) {
   }
   let command = if verification_like {
     trimmed_string(item?.command ?? profile?.verify_command ?? "")
-  } else {
-    if list_contains(allowed_tools, "run") {
-      if list_contains(allowed_tools, "write") {
-        trimmed_string(item?.command ?? "")
-      } else {
-        trimmed_string(item?.command ?? profile?.verify_command ?? "")
-      }
+  } else if list_contains(allowed_tools, "run") {
+    if list_contains(allowed_tools, "write") {
+      trimmed_string(item?.command ?? "")
     } else {
-      ""
+      trimmed_string(item?.command ?? profile?.verify_command ?? "")
     }
+  } else {
+    ""
   }
   if verification_like || generic_action_task(task) {
     if command {

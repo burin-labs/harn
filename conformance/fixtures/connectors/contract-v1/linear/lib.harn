@@ -20,11 +20,11 @@ pub fn normalize_inbound(raw) {
   return {
     type: "event",
     event: {
-    kind: "issue." + body.action,
-    dedupe_key: raw.headers["Linear-Delivery"],
-    payload: body,
-    signature_status: {state: "verified"},
-  },
+      kind: "issue." + body.action,
+      dedupe_key: raw.headers["Linear-Delivery"],
+      payload: body,
+      signature_status: {state: "verified"},
+    },
   }
 }
 

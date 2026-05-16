@@ -37,12 +37,10 @@ fn __tool_search_provider_has_native(opts, cfg) {
   let info = try {
     if opts?.model != nil {
       llm_model_info(opts.model)
+    } else if opts?.provider != nil {
+      llm_model_info(opts.provider)
     } else {
-      if opts?.provider != nil {
-        llm_model_info(opts.provider)
-      } else {
-        nil
-      }
+      nil
     }
   } catch (_e) {
     nil
@@ -50,16 +48,12 @@ fn __tool_search_provider_has_native(opts, cfg) {
   let caps = try {
     if info != nil && info?.capabilities != nil {
       info.capabilities
+    } else if info != nil {
+      provider_capabilities(info.provider, info.id)
+    } else if opts?.provider != nil && opts?.model != nil {
+      provider_capabilities(opts.provider, opts.model)
     } else {
-      if info != nil {
-        provider_capabilities(info.provider, info.id)
-      } else {
-        if opts?.provider != nil && opts?.model != nil {
-          provider_capabilities(opts.provider, opts.model)
-        } else {
-          nil
-        }
-      }
+      nil
     }
   } catch (_e) {
     nil
@@ -207,16 +201,14 @@ fn __tool_search_run(args, state) {
   let query = args?.query ?? ""
   let raw_result = if type_of(state.strategy) == "closure" {
     state.strategy(query, state.deferred_registry, {variant: state.variant})
+  } else if type_of(state.strategy) == "dict" && type_of(state.strategy?.handler) == "closure" {
+    state.strategy.handler(query, state.deferred_registry, state.strategy)
   } else {
-    if type_of(state.strategy) == "dict" && type_of(state.strategy?.handler) == "closure" {
-      state.strategy.handler(query, state.deferred_registry, state.strategy)
-    } else {
-      __host_tool_search_score(
-        query,
-        state.deferred_registry,
-        {strategy: state.strategy, variant: state.variant},
-      )
-    }
+    __host_tool_search_score(
+      query,
+      state.deferred_registry,
+      {strategy: state.strategy, variant: state.variant},
+    )
   }
   let normalized = __tool_search_normalize_result(raw_result)
   let ranked = normalized?.ranked ?? []

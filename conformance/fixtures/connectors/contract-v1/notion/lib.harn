@@ -25,11 +25,11 @@ pub fn normalize_inbound(raw) {
   return {
     type: "event",
     event: {
-    kind: body.type,
-    dedupe_key: "notion:" + body.entity.id,
-    payload: body,
-    signature_status: {state: "verified"},
-  },
+      kind: body.type,
+      dedupe_key: "notion:" + body.entity.id,
+      payload: body,
+      signature_status: {state: "verified"},
+    },
   }
 }
 
@@ -38,12 +38,12 @@ pub fn poll_tick(ctx) {
     cursor: {last_seen: ctx.tick_at},
     state: {state_key: ctx.state_key},
     events: [
-    {
-    kind: "notion.page.polled",
-    dedupe_key: "notion:poll:" + ctx.binding_id,
-    payload: {binding_id: ctx.binding_id, lease_id: ctx.lease.id},
-  },
-  ],
+      {
+        kind: "notion.page.polled",
+        dedupe_key: "notion:poll:" + ctx.binding_id,
+        payload: {binding_id: ctx.binding_id, lease_id: ctx.lease.id},
+      },
+    ],
   }
 }
 

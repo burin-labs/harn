@@ -305,12 +305,10 @@ pub fn workflow_map_finalize(config = nil) {
   let failures = __map_list(config?.failures)
   let status = if len(failures) == 0 {
     "completed"
+  } else if produced_count == 0 {
+    "failed"
   } else {
-    if produced_count == 0 {
-      "failed"
-    } else {
-      "partial"
-    }
+    "partial"
   }
   let text = if status == "failed" {
     "map failed after " + to_string(len(failures)) + " branch failures"

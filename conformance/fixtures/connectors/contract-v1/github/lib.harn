@@ -41,11 +41,11 @@ pub fn normalize_inbound(raw) {
   return {
     type: "event",
     event: {
-    kind: raw.headers["X-GitHub-Event"] ?? raw.headers["x-github-event"],
-    dedupe_key: raw.headers["X-GitHub-Delivery"] ?? raw.headers["x-github-delivery"],
-    payload: body,
-    signature_status: {state: "verified"},
-  },
+      kind: raw.headers["X-GitHub-Event"] ?? raw.headers["x-github-event"],
+      dedupe_key: raw.headers["X-GitHub-Delivery"] ?? raw.headers["x-github-delivery"],
+      payload: body,
+      signature_status: {state: "verified"},
+    },
   }
 }
 

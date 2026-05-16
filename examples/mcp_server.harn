@@ -72,12 +72,10 @@ pipeline main(task) {
       handler: { args ->
         if args.key == "version" {
           "0.4.23"
+        } else if args.key == "name" {
+          "harn-demo"
         } else {
-          if args.key == "name" {
-            "harn-demo"
-          } else {
-            "unknown key: " + args.key
-          }
+          "unknown key: " + args.key
         }
       },
     },

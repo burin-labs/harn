@@ -294,12 +294,10 @@ pub fn bounded_loop(state_init, step_fn, options = nil) {
     let next_digest = __prelude_digest(next_state)
     let progressed = if is_envelope && step_value?.progress != nil {
       step_value.progress
+    } else if is_envelope && step_value?.progress_made != nil {
+      step_value.progress_made
     } else {
-      if is_envelope && step_value?.progress_made != nil {
-        step_value.progress_made
-      } else {
-        next_digest != before_digest
-      }
+      next_digest != before_digest
     }
     let done = is_envelope && step_value?.done ?? false
     history = history + [{iteration: iterations, progress: progressed, done: done}]

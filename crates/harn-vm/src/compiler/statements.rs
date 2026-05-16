@@ -91,25 +91,24 @@ impl Compiler {
         let else_jump = self.chunk.emit_jump(Op::JumpIfFalse, self.line);
         self.chunk.emit(Op::Pop, self.line);
         self.compile_scoped_block(then_body)?;
+        // The branch always leaves exactly one value on the stack, so
+        // the truthy path must skip the falsy cleanup unconditionally.
+        // Without the unconditional jump on the no-else path, control
+        // fell through into the `Pop; Nil` scaffolding emitted for the
+        // false branch, popping the then-body's value and replacing it
+        // with `nil` — meaning `let x = if true { 42 }` produced `nil`
+        // instead of `42`. The synthetic line 0 keeps the debugger
+        // from reporting a phantom stop on the tail line of the
+        // then-body when the VM jumps past the cleanup.
+        let end_jump = self.chunk.emit_jump(Op::Jump, 0);
+        self.chunk.patch_jump(else_jump);
+        self.chunk.emit(Op::Pop, 0);
         if let Some(else_body) = else_body {
-            // Cleanup jump + else-branch Pop share the synthetic line 0
-            // so the debugger doesn't report a phantom stop on the tail
-            // line of the then-body when the VM jumps past it.
-            let end_jump = self.chunk.emit_jump(Op::Jump, 0);
-            self.chunk.patch_jump(else_jump);
-            self.chunk.emit(Op::Pop, 0);
             self.compile_scoped_block(else_body)?;
-            self.chunk.patch_jump(end_jump);
         } else {
-            self.chunk.patch_jump(else_jump);
-            // Same rationale: the Pop/Nil cleanup emitted after the
-            // JumpIfFalse target is part of the compiler's expression
-            // scaffolding, not source code. Tagging these with line 0
-            // keeps step-over from stopping on a line that wasn't
-            // actually executed (see step_execute's upcoming_line()).
-            self.chunk.emit(Op::Pop, 0);
             self.chunk.emit(Op::Nil, 0);
         }
+        self.chunk.patch_jump(end_jump);
         Ok(())
     }
 

@@ -308,12 +308,10 @@ fn __normalize_iteration_budget(opts) {
   }
   let max_default = if mode == "adaptive" {
     16
+  } else if legacy_cap != nil {
+    legacy_cap
   } else {
-    if legacy_cap != nil {
-      legacy_cap
-    } else {
-      50
-    }
+    50
   }
   let max_cap = __positive_int_default(user_budget?.max, max_default)
   let initial_default = if mode == "adaptive" {
