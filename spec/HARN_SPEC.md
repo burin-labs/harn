@@ -4573,8 +4573,9 @@ segments must be relative and cannot escape the memory root.
 
 | Function | Notes |
 |---|---|
+| `memory_open(namespace, options?)` | Append a configuration event that selects the recall backend (`bm25`, `vector`, or `hybrid`) for this namespace |
 | `memory_store(namespace, key, value, tags?, options?)` | Appends a memory observation and returns a `memory_record` dict |
-| `memory_recall(namespace, query, k?, options?)` | Returns up to `k` active records ranked by deterministic BM25-style lexical recall |
+| `memory_recall(namespace, query, k?, options?)` | Returns up to `k` active records ranked by the namespace backend (override per-call with `options.mode`) |
 | `memory_summarize(namespace, window?, options?)` | Returns `{_type: "memory_summary", count, text, records}` for a recent or query-filtered slice |
 | `memory_forget(namespace, predicate, options?)` | Appends a soft-delete event and returns `{forgotten, forgotten_ids}` |
 
@@ -4583,11 +4584,35 @@ provenance}`. `memory_store` accepts `options.id`, `options.now`, and
 `options.provenance`; `id` defaults to UUIDv7 and `stored_at` defaults to the
 current UTC timestamp.
 
-`memory_recall` is deterministic and local: it tokenizes the key, tags, text,
-and JSON value, then ranks active records with BM25 plus small exact key/tag
-boosts. It does not call an embedding provider. Future vector or host-backed
-stores may reuse the same stdlib shape as long as recalled snippets are
-captured by the run record before replay.
+`memory_recall` defaults to deterministic local BM25: it tokenizes the key,
+tags, text, and JSON value, then ranks active records with BM25 plus small
+exact key/tag boosts. Pass `options.mode` (`lexical`, `semantic`, or `hybrid`)
+to override the namespace default for one call.
+
+`memory_open` configures the namespace backend without rewriting prior
+records. The latest open event wins. Supported options:
+
+- `backend` — `"bm25"` (default), `"vector"`, or `"hybrid"`.
+- `embed_model_hint` — opaque model identifier passed to the host. Defaults
+  to `"default"`.
+- `embed_dim` — expected embedding dimensionality. Recall fails fast on a
+  dimension mismatch.
+- `bm25_weight` and `cosine_weight` — hybrid blend weights (defaults `0.5`
+  each). Negative values are rejected.
+
+When the namespace backend uses embeddings (or `memory_store` is called with
+`options.embed: true`), Harn delegates to the typed host capability
+`memory.embed`. Request shape: `{text: string, model_hint: string}`. Response
+shape: `{vector: list<float>, model?: string, dim?: int}`. Harn never bundles
+an embedding model; hosts choose it, and embeddings are cached on disk under
+`.harn/memory/<namespace>/vectors/<sanitized_model_hint>/<sha256(text)>.json`
+keyed by `(model_hint, content_hash)`. Tests can satisfy the capability with
+`host_mock("memory", "embed", {result})`.
+
+Determinism contract: a recall over the same `(namespace, query, mode,
+embed_model_hint, top_k)` against the same event log and embedding cache
+returns the same ordered hits, regardless of whether the host is still
+attached.
 
 `memory_summarize` is deterministic by default. `window` may be `nil`, an
 integer limit, or a dict with `limit`, `query`, and `tag` / `tags`. The summary

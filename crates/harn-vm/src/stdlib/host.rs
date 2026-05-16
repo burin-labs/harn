@@ -165,6 +165,17 @@ fn capability_manifest_map() -> BTreeMap<String, VmValue> {
             &[op("ask", "Ask the user a question.")],
         ),
     );
+    root.insert(
+        "memory".to_string(),
+        capability(
+            "Vector-aware memory: host-provided embeddings.",
+            &[op(
+                "embed",
+                "Embed text for semantic recall. Params: {text, model_hint?}. \
+                 Returns {vector: list<float>, model: string, dim: int}.",
+            )],
+        ),
+    );
     root
 }
 

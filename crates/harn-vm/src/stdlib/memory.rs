@@ -1,3 +1,17 @@
+//! `std/memory` — append-only durable memory with optional host-backed
+//! vector recall.
+//!
+//! The default backend remains deterministic BM25. Callers can opt in to a
+//! vector or hybrid backend per namespace via [`memory_open`]; once opened,
+//! [`memory_recall`] can score with cosine similarity over embeddings the
+//! host supplies through the `memory.embed` capability. Embeddings are
+//! cached on disk per `(model_hint, content_hash)` so replays from the same
+//! event log are deterministic.
+//!
+//! Trust boundary: Harn never bundles an embedding model; the host is
+//! responsible for the model choice, rate limiting, and cost accounting.
+//! See `docs/src/host-boundary.md` and `docs/src/memory.md`.
+
 use std::cmp::Ordering;
 use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::fs::{self, OpenOptions};
@@ -7,23 +21,84 @@ use std::rc::Rc;
 
 use serde::{Deserialize, Serialize};
 use serde_json::Value as JsonValue;
+use sha2::{Digest, Sha256};
 
+use crate::stdlib::host::dispatch_host_operation;
 use crate::value::{VmError, VmValue};
 use crate::vm::Vm;
 
 const MEMORY_TYPE: &str = "memory_record";
 const EVENT_LOG_FILE: &str = "events.jsonl";
+const VECTOR_CACHE_DIR: &str = "vectors";
 const DEFAULT_RECALL_LIMIT: usize = 5;
 const DEFAULT_SUMMARY_LIMIT: usize = 20;
 const MAX_RECALL_LIMIT: usize = 100;
 const MAX_SUMMARY_LIMIT: usize = 200;
 const MAX_SUMMARY_CHARS: usize = 4000;
+const DEFAULT_EMBED_MODEL_HINT: &str = "default";
+const DEFAULT_HYBRID_BM25_WEIGHT: f64 = 0.5;
+const DEFAULT_HYBRID_COSINE_WEIGHT: f64 = 0.5;
+
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq, Deserialize, Serialize)]
+#[serde(rename_all = "snake_case")]
+enum MemoryBackend {
+    #[default]
+    Bm25,
+    Vector,
+    Hybrid,
+}
+
+impl MemoryBackend {
+    fn parse(value: &str, fn_name: &str) -> Result<Self, VmError> {
+        match value.trim().to_ascii_lowercase().as_str() {
+            "" | "bm25" | "lexical" => Ok(Self::Bm25),
+            "vector" | "semantic" => Ok(Self::Vector),
+            "hybrid" => Ok(Self::Hybrid),
+            other => Err(VmError::Runtime(format!(
+                "{fn_name}: unknown backend `{other}` (expected bm25, vector, or hybrid)"
+            ))),
+        }
+    }
+
+    fn default_recall_mode(self) -> RecallMode {
+        match self {
+            Self::Bm25 => RecallMode::Lexical,
+            Self::Vector => RecallMode::Semantic,
+            Self::Hybrid => RecallMode::Hybrid,
+        }
+    }
+
+    fn uses_embeddings(self) -> bool {
+        matches!(self, Self::Vector | Self::Hybrid)
+    }
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum RecallMode {
+    Lexical,
+    Semantic,
+    Hybrid,
+}
+
+impl RecallMode {
+    fn parse(value: &str, fn_name: &str) -> Result<Self, VmError> {
+        match value.trim().to_ascii_lowercase().as_str() {
+            "lexical" | "bm25" => Ok(Self::Lexical),
+            "semantic" | "vector" => Ok(Self::Semantic),
+            "hybrid" => Ok(Self::Hybrid),
+            other => Err(VmError::Runtime(format!(
+                "{fn_name}: unknown recall mode `{other}` (expected lexical, semantic, or hybrid)"
+            ))),
+        }
+    }
+}
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 enum MemoryEvent {
     Store(MemoryRecord),
     Forget(ForgetEvent),
+    Open(OpenEvent),
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
@@ -50,6 +125,47 @@ struct ForgetEvent {
     forgotten_at: String,
 }
 
+#[derive(Clone, Debug, Deserialize, Serialize)]
+struct OpenEvent {
+    id: String,
+    namespace: String,
+    backend: MemoryBackend,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    embed_model_hint: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    embed_dim: Option<usize>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    bm25_weight: Option<f64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    cosine_weight: Option<f64>,
+    opened_at: String,
+}
+
+#[derive(Clone, Debug, Default)]
+struct NamespaceConfig {
+    backend: MemoryBackend,
+    embed_model_hint: Option<String>,
+    embed_dim: Option<usize>,
+    bm25_weight: Option<f64>,
+    cosine_weight: Option<f64>,
+}
+
+impl NamespaceConfig {
+    fn model_hint(&self) -> &str {
+        self.embed_model_hint
+            .as_deref()
+            .filter(|hint| !hint.is_empty())
+            .unwrap_or(DEFAULT_EMBED_MODEL_HINT)
+    }
+
+    fn hybrid_weights(&self) -> (f64, f64) {
+        (
+            self.bm25_weight.unwrap_or(DEFAULT_HYBRID_BM25_WEIGHT),
+            self.cosine_weight.unwrap_or(DEFAULT_HYBRID_COSINE_WEIGHT),
+        )
+    }
+}
+
 #[derive(Clone, Debug)]
 struct ScoredRecord {
     record: MemoryRecord,
@@ -57,10 +173,17 @@ struct ScoredRecord {
     sequence: usize,
 }
 
+#[derive(Clone, Debug, Deserialize, Serialize)]
+struct CachedEmbedding {
+    model: String,
+    dim: usize,
+    vector: Vec<f64>,
+}
+
 pub(crate) fn register_memory_builtins(vm: &mut Vm) {
-    vm.register_builtin("__memory_store", |args, _out| {
-        let namespace = required_string(args, 0, "__memory_store", "namespace")?;
-        let key = required_string(args, 1, "__memory_store", "key")?;
+    vm.register_async_builtin("__memory_store", |args| async move {
+        let namespace = required_string(&args, 0, "__memory_store", "namespace")?;
+        let key = required_string(&args, 1, "__memory_store", "key")?;
         let value = args.get(2).cloned().ok_or_else(|| {
             VmError::Runtime("__memory_store: `value` argument is required".to_string())
         })?;
@@ -80,26 +203,103 @@ pub(crate) fn register_memory_builtins(vm: &mut Vm) {
                 .map(crate::llm::vm_value_to_json),
         };
         append_event(&root, &namespace, &MemoryEvent::Store(record.clone()))?;
+
+        let config = read_namespace_config(&root, &namespace)?;
+        let want_embed = option_bool(options, "embed").unwrap_or(false)
+            || (config.backend.uses_embeddings()
+                && option_bool(options, "skip_embed") != Some(true));
+        if want_embed {
+            let model_hint = option_string(options, "embed_model_hint")
+                .unwrap_or_else(|| config.model_hint().to_string());
+            let _ =
+                ensure_embedding(&root, &namespace, &searchable_text(&record), &model_hint).await?;
+        }
+
         Ok(memory_record_to_vm(&record, None))
     });
 
-    vm.register_builtin("__memory_recall", |args, _out| {
-        let namespace = required_string(args, 0, "__memory_recall", "namespace")?;
-        let query = required_string(args, 1, "__memory_recall", "query")?;
+    vm.register_async_builtin("__memory_recall", |args| async move {
+        let namespace = required_string(&args, 0, "__memory_recall", "namespace")?;
+        let query = required_string(&args, 1, "__memory_recall", "query")?;
         let limit = optional_usize(args.get(2))
             .unwrap_or(DEFAULT_RECALL_LIMIT)
             .clamp(1, MAX_RECALL_LIMIT);
         let options = args.get(3).and_then(VmValue::as_dict);
         let root = memory_root(options);
+        let config = read_namespace_config(&root, &namespace)?;
+        let mode = if let Some(raw) = option_string(options, "mode") {
+            RecallMode::parse(&raw, "__memory_recall")?
+        } else {
+            config.backend.default_recall_mode()
+        };
+        let model_hint = option_string(options, "embed_model_hint")
+            .unwrap_or_else(|| config.model_hint().to_string());
+
         let records = active_records(&root, &namespace)?;
-        let mut scored = score_records(records, &query);
-        scored.truncate(limit);
+        let scored = score_records_async(
+            records,
+            &query,
+            mode,
+            &root,
+            &namespace,
+            &model_hint,
+            &config,
+        )
+        .await?;
         Ok(VmValue::List(Rc::new(
             scored
-                .iter()
+                .into_iter()
+                .take(limit)
                 .map(|item| memory_record_to_vm(&item.record, Some(item.score)))
                 .collect(),
         )))
+    });
+
+    vm.register_async_builtin("__memory_open", |args| async move {
+        let namespace = required_string(&args, 0, "__memory_open", "namespace")?;
+        let options = args.get(1).and_then(VmValue::as_dict);
+        let backend = match option_string(options, "backend") {
+            Some(raw) => MemoryBackend::parse(&raw, "__memory_open")?,
+            None => MemoryBackend::Bm25,
+        };
+        let embed_model_hint = option_string(options, "embed_model_hint")
+            .or_else(|| option_string(options, "model_hint"));
+        let embed_dim = options
+            .and_then(|opts| opts.get("embed_dim"))
+            .and_then(coerce_usize);
+        let bm25_weight = options
+            .and_then(|opts| opts.get("bm25_weight"))
+            .and_then(coerce_finite_f64);
+        let cosine_weight = options
+            .and_then(|opts| opts.get("cosine_weight"))
+            .and_then(coerce_finite_f64);
+        if backend == MemoryBackend::Hybrid {
+            for (label, value) in [
+                ("bm25_weight", bm25_weight),
+                ("cosine_weight", cosine_weight),
+            ] {
+                if let Some(weight) = value {
+                    if weight < 0.0 {
+                        return Err(VmError::Runtime(format!(
+                            "__memory_open: `{label}` must be non-negative"
+                        )));
+                    }
+                }
+            }
+        }
+        let event = OpenEvent {
+            id: option_string(options, "id").unwrap_or_else(|| uuid::Uuid::now_v7().to_string()),
+            namespace: namespace.clone(),
+            backend,
+            embed_model_hint: embed_model_hint.clone(),
+            embed_dim,
+            bm25_weight,
+            cosine_weight,
+            opened_at: option_string(options, "now").unwrap_or_else(now_rfc3339),
+        };
+        let root = memory_root(options);
+        append_event(&root, &namespace, &MemoryEvent::Open(event.clone()))?;
+        Ok(memory_open_to_vm(&event))
     });
 
     vm.register_builtin("__memory_summarize", |args, _out| {
@@ -171,11 +371,35 @@ fn optional_usize(value: Option<&VmValue>) -> Option<usize> {
     }
 }
 
+fn coerce_usize(value: &VmValue) -> Option<usize> {
+    match value {
+        VmValue::Int(raw) if *raw >= 0 => Some(*raw as usize),
+        VmValue::Float(raw) if raw.is_finite() && *raw >= 0.0 => Some(*raw as usize),
+        _ => None,
+    }
+}
+
+fn coerce_finite_f64(value: &VmValue) -> Option<f64> {
+    match value {
+        VmValue::Int(raw) => Some(*raw as f64),
+        VmValue::Float(raw) if raw.is_finite() => Some(*raw),
+        _ => None,
+    }
+}
+
 fn option_string(options: Option<&BTreeMap<String, VmValue>>, key: &str) -> Option<String> {
     options
         .and_then(|opts| opts.get(key))
         .map(VmValue::display)
         .filter(|value| !value.trim().is_empty())
+}
+
+fn option_bool(options: Option<&BTreeMap<String, VmValue>>, key: &str) -> Option<bool> {
+    match options.and_then(|opts| opts.get(key))? {
+        VmValue::Bool(value) => Some(*value),
+        VmValue::Nil => None,
+        _ => None,
+    }
 }
 
 fn memory_root(options: Option<&BTreeMap<String, VmValue>>) -> PathBuf {
@@ -215,6 +439,45 @@ fn namespace_dir(root: &Path, namespace: &str) -> Result<PathBuf, VmError> {
 
 fn event_log_path(root: &Path, namespace: &str) -> Result<PathBuf, VmError> {
     Ok(namespace_dir(root, namespace)?.join(EVENT_LOG_FILE))
+}
+
+fn vector_cache_path(
+    root: &Path,
+    namespace: &str,
+    model_hint: &str,
+    content_hash: &str,
+) -> Result<PathBuf, VmError> {
+    let sanitized = sanitize_model_hint(model_hint);
+    Ok(namespace_dir(root, namespace)?
+        .join(VECTOR_CACHE_DIR)
+        .join(sanitized)
+        .join(format!("{content_hash}.json")))
+}
+
+fn sanitize_model_hint(hint: &str) -> String {
+    let trimmed = hint.trim();
+    if trimmed.is_empty() {
+        return DEFAULT_EMBED_MODEL_HINT.to_string();
+    }
+    // Path traversal hardening: replace every character that is not
+    // alphanumeric, dash, or underscore with `_`. Dots are excluded so that
+    // a maliciously crafted hint like `../escape` cannot resolve a parent
+    // directory once joined into the cache path.
+    let sanitized: String = trimmed
+        .chars()
+        .map(|c| {
+            if c.is_ascii_alphanumeric() || matches!(c, '-' | '_') {
+                c
+            } else {
+                '_'
+            }
+        })
+        .collect();
+    if sanitized.is_empty() {
+        DEFAULT_EMBED_MODEL_HINT.to_string()
+    } else {
+        sanitized
+    }
 }
 
 fn normalize_relative_component(raw: &str, label: &str) -> Result<PathBuf, VmError> {
@@ -341,7 +604,88 @@ fn active_records(root: &Path, namespace: &str) -> Result<Vec<(usize, MemoryReco
     Ok(records)
 }
 
-fn score_records(records: Vec<(usize, MemoryRecord)>, query: &str) -> Vec<ScoredRecord> {
+fn read_namespace_config(root: &Path, namespace: &str) -> Result<NamespaceConfig, VmError> {
+    let events = read_events(root, namespace)?;
+    let mut config = NamespaceConfig::default();
+    for event in events {
+        if let MemoryEvent::Open(open) = event {
+            config = NamespaceConfig {
+                backend: open.backend,
+                embed_model_hint: open.embed_model_hint,
+                embed_dim: open.embed_dim,
+                bm25_weight: open.bm25_weight,
+                cosine_weight: open.cosine_weight,
+            };
+        }
+    }
+    Ok(config)
+}
+
+#[allow(clippy::too_many_arguments)]
+async fn score_records_async(
+    records: Vec<(usize, MemoryRecord)>,
+    query: &str,
+    mode: RecallMode,
+    root: &Path,
+    namespace: &str,
+    model_hint: &str,
+    config: &NamespaceConfig,
+) -> Result<Vec<ScoredRecord>, VmError> {
+    if records.is_empty() {
+        return Ok(Vec::new());
+    }
+    match mode {
+        RecallMode::Lexical => Ok(score_bm25(records, query)),
+        RecallMode::Semantic => {
+            score_semantic(records, query, root, namespace, model_hint, config).await
+        }
+        RecallMode::Hybrid => {
+            let bm25_by_id = score_bm25(records.clone(), query)
+                .into_iter()
+                .map(|item| (item.record.id.clone(), item.score))
+                .collect::<HashMap<_, _>>();
+            let cosine_by_id =
+                score_semantic(records.clone(), query, root, namespace, model_hint, config)
+                    .await?
+                    .into_iter()
+                    .map(|item| (item.record.id.clone(), item.score))
+                    .collect::<HashMap<_, _>>();
+            let (bm25_weight, cosine_weight) = config.hybrid_weights();
+            let max_bm25 = bm25_by_id
+                .values()
+                .copied()
+                .fold(0.0_f64, f64::max)
+                .max(1.0);
+            // Score every active record so that records strong on only one
+            // signal (e.g. high cosine, zero BM25) still surface — that is
+            // the whole point of running hybrid over lexical.
+            let mut blended = Vec::with_capacity(records.len());
+            for (sequence, record) in records {
+                let bm25_raw = bm25_by_id.get(&record.id).copied().unwrap_or(0.0);
+                let cosine_raw = cosine_by_id.get(&record.id).copied().unwrap_or(0.0);
+                if bm25_raw == 0.0 && cosine_raw <= 0.0 {
+                    continue;
+                }
+                let score = bm25_weight * (bm25_raw / max_bm25) + cosine_weight * cosine_raw;
+                blended.push(ScoredRecord {
+                    record,
+                    score,
+                    sequence,
+                });
+            }
+            blended.sort_by(|left, right| {
+                right
+                    .score
+                    .partial_cmp(&left.score)
+                    .unwrap_or(Ordering::Equal)
+                    .then_with(|| newest_first(left, right))
+            });
+            Ok(blended)
+        }
+    }
+}
+
+fn score_bm25(records: Vec<(usize, MemoryRecord)>, query: &str) -> Vec<ScoredRecord> {
     let query_terms = tokenize(query);
     if query_terms.is_empty() {
         let mut newest = records
@@ -397,6 +741,210 @@ fn score_records(records: Vec<(usize, MemoryRecord)>, query: &str) -> Vec<Scored
             .then_with(|| newest_first(left, right))
     });
     scored
+}
+
+async fn score_semantic(
+    records: Vec<(usize, MemoryRecord)>,
+    query: &str,
+    root: &Path,
+    namespace: &str,
+    model_hint: &str,
+    config: &NamespaceConfig,
+) -> Result<Vec<ScoredRecord>, VmError> {
+    let query_vector = ensure_embedding(root, namespace, query, model_hint).await?;
+    if query_vector.is_empty() {
+        return Err(VmError::Runtime(
+            "memory: memory.embed returned an empty vector for the query".to_string(),
+        ));
+    }
+    if let Some(expected) = config.embed_dim {
+        if query_vector.len() != expected {
+            return Err(VmError::Runtime(format!(
+                "memory: memory.embed returned a {}-dim query vector but the namespace was opened with embed_dim={expected}",
+                query_vector.len()
+            )));
+        }
+    }
+    let mut scored = Vec::with_capacity(records.len());
+    for (sequence, record) in records {
+        let record_vector =
+            ensure_embedding(root, namespace, &searchable_text(&record), model_hint).await?;
+        if record_vector.len() != query_vector.len() {
+            return Err(VmError::Runtime(format!(
+                "memory: embedding dimension mismatch for record {} (query={}, record={})",
+                record.id,
+                query_vector.len(),
+                record_vector.len()
+            )));
+        }
+        let score = cosine_similarity(&query_vector, &record_vector);
+        if score > 0.0 {
+            scored.push(ScoredRecord {
+                record,
+                score,
+                sequence,
+            });
+        }
+    }
+    scored.sort_by(|left, right| {
+        right
+            .score
+            .partial_cmp(&left.score)
+            .unwrap_or(Ordering::Equal)
+            .then_with(|| newest_first(left, right))
+    });
+    Ok(scored)
+}
+
+async fn ensure_embedding(
+    root: &Path,
+    namespace: &str,
+    text: &str,
+    model_hint: &str,
+) -> Result<Vec<f64>, VmError> {
+    let hint = if model_hint.trim().is_empty() {
+        DEFAULT_EMBED_MODEL_HINT
+    } else {
+        model_hint
+    };
+    let content_hash = sha256_hex(text);
+    let path = vector_cache_path(root, namespace, hint, &content_hash)?;
+    if let Some(cached) = read_cached_embedding(&path)? {
+        return Ok(cached.vector);
+    }
+    let mut params = BTreeMap::new();
+    params.insert("text".to_string(), VmValue::String(Rc::from(text)));
+    params.insert(
+        "model_hint".to_string(),
+        VmValue::String(Rc::from(hint.to_string())),
+    );
+    let result = dispatch_host_operation("memory", "embed", &params).await?;
+    let cached = parse_embedding_response(result, hint)?;
+    write_cached_embedding(&path, &cached)?;
+    Ok(cached.vector)
+}
+
+fn read_cached_embedding(path: &Path) -> Result<Option<CachedEmbedding>, VmError> {
+    match fs::read(path) {
+        Ok(bytes) => {
+            let cached: CachedEmbedding = serde_json::from_slice(&bytes).map_err(|error| {
+                VmError::Runtime(format!(
+                    "memory: failed to parse cached embedding {}: {error}",
+                    path.display()
+                ))
+            })?;
+            Ok(Some(cached))
+        }
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(None),
+        Err(error) => Err(VmError::Runtime(format!(
+            "memory: failed to read cached embedding {}: {error}",
+            path.display()
+        ))),
+    }
+}
+
+fn write_cached_embedding(path: &Path, embedding: &CachedEmbedding) -> Result<(), VmError> {
+    if let Some(parent) = path.parent() {
+        fs::create_dir_all(parent).map_err(|error| {
+            VmError::Runtime(format!(
+                "memory: failed to create {}: {error}",
+                parent.display()
+            ))
+        })?;
+    }
+    let bytes = serde_json::to_vec(embedding)
+        .map_err(|error| VmError::Runtime(format!("memory: encode embedding error: {error}")))?;
+    fs::write(path, bytes).map_err(|error| {
+        VmError::Runtime(format!(
+            "memory: failed to write {}: {error}",
+            path.display()
+        ))
+    })?;
+    Ok(())
+}
+
+fn parse_embedding_response(
+    value: VmValue,
+    fallback_model: &str,
+) -> Result<CachedEmbedding, VmError> {
+    let dict = value.as_dict().ok_or_else(|| {
+        VmError::Runtime(
+            "memory.embed: host must return a dict with {vector, model?, dim?}".to_string(),
+        )
+    })?;
+    let raw_vector = dict.get("vector").ok_or_else(|| {
+        VmError::Runtime("memory.embed: host response missing `vector` field".to_string())
+    })?;
+    let vector = match raw_vector {
+        VmValue::List(items) => items
+            .iter()
+            .map(|item| match item {
+                VmValue::Int(raw) => Ok(*raw as f64),
+                VmValue::Float(raw) if raw.is_finite() => Ok(*raw),
+                VmValue::Float(_) => Err(VmError::Runtime(
+                    "memory.embed: vector entries must be finite numbers".to_string(),
+                )),
+                other => Err(VmError::Runtime(format!(
+                    "memory.embed: vector entries must be numbers, got {}",
+                    other.type_name()
+                ))),
+            })
+            .collect::<Result<Vec<_>, _>>()?,
+        other => {
+            return Err(VmError::Runtime(format!(
+                "memory.embed: vector must be a list, got {}",
+                other.type_name()
+            )))
+        }
+    };
+    if vector.is_empty() {
+        return Err(VmError::Runtime(
+            "memory.embed: host returned an empty vector".to_string(),
+        ));
+    }
+    let dim = match dict.get("dim").and_then(coerce_usize) {
+        Some(declared) if declared != vector.len() => {
+            return Err(VmError::Runtime(format!(
+                "memory.embed: declared dim={declared} does not match vector length={}",
+                vector.len()
+            )))
+        }
+        Some(declared) => declared,
+        None => vector.len(),
+    };
+    let model = dict
+        .get("model")
+        .map(VmValue::display)
+        .filter(|value| !value.trim().is_empty())
+        .unwrap_or_else(|| fallback_model.to_string());
+    Ok(CachedEmbedding { model, dim, vector })
+}
+
+fn cosine_similarity(a: &[f64], b: &[f64]) -> f64 {
+    debug_assert_eq!(a.len(), b.len());
+    let mut dot = 0.0;
+    let mut norm_a = 0.0;
+    let mut norm_b = 0.0;
+    for (left, right) in a.iter().zip(b.iter()) {
+        dot += left * right;
+        norm_a += left * left;
+        norm_b += right * right;
+    }
+    if norm_a == 0.0 || norm_b == 0.0 {
+        return 0.0;
+    }
+    dot / (norm_a.sqrt() * norm_b.sqrt())
+}
+
+fn sha256_hex(input: &str) -> String {
+    let mut hasher = Sha256::new();
+    hasher.update(input.as_bytes());
+    let digest = hasher.finalize();
+    let mut out = String::with_capacity(digest.len() * 2);
+    for byte in digest {
+        out.push_str(&format!("{byte:02x}"));
+    }
+    out
 }
 
 fn docs_len_f64(doc: &[String]) -> f64 {
@@ -490,7 +1038,7 @@ fn select_summary_records(
 ) -> Result<Vec<MemoryRecord>, VmError> {
     let (limit, query, tags) = parse_summary_window(window)?;
     let mut selected = if let Some(query) = query {
-        score_records(records, &query)
+        score_bm25(records, &query)
             .into_iter()
             .map(|item| item.record)
             .collect::<Vec<_>>()
@@ -740,6 +1288,62 @@ fn forget_result_to_vm(event: &ForgetEvent) -> VmValue {
     VmValue::Dict(Rc::new(map))
 }
 
+fn memory_open_to_vm(event: &OpenEvent) -> VmValue {
+    let mut map = BTreeMap::new();
+    map.insert(
+        "_type".to_string(),
+        VmValue::String(Rc::from("memory_open")),
+    );
+    map.insert(
+        "id".to_string(),
+        VmValue::String(Rc::from(event.id.as_str())),
+    );
+    map.insert(
+        "namespace".to_string(),
+        VmValue::String(Rc::from(event.namespace.as_str())),
+    );
+    let backend = match event.backend {
+        MemoryBackend::Bm25 => "bm25",
+        MemoryBackend::Vector => "vector",
+        MemoryBackend::Hybrid => "hybrid",
+    };
+    map.insert("backend".to_string(), VmValue::String(Rc::from(backend)));
+    map.insert(
+        "embed_model_hint".to_string(),
+        event
+            .embed_model_hint
+            .as_deref()
+            .map(|hint| VmValue::String(Rc::from(hint)))
+            .unwrap_or(VmValue::Nil),
+    );
+    map.insert(
+        "embed_dim".to_string(),
+        event
+            .embed_dim
+            .map(|dim| VmValue::Int(dim as i64))
+            .unwrap_or(VmValue::Nil),
+    );
+    map.insert(
+        "bm25_weight".to_string(),
+        event
+            .bm25_weight
+            .map(VmValue::Float)
+            .unwrap_or(VmValue::Nil),
+    );
+    map.insert(
+        "cosine_weight".to_string(),
+        event
+            .cosine_weight
+            .map(VmValue::Float)
+            .unwrap_or(VmValue::Nil),
+    );
+    map.insert(
+        "opened_at".to_string(),
+        VmValue::String(Rc::from(event.opened_at.as_str())),
+    );
+    VmValue::Dict(Rc::new(map))
+}
+
 fn first_line(text: &str) -> String {
     text.lines().next().unwrap_or("").trim().to_string()
 }
@@ -786,7 +1390,7 @@ mod tests {
         append_event(&root, namespace, &MemoryEvent::Store(first)).unwrap();
         append_event(&root, namespace, &MemoryEvent::Store(second)).unwrap();
 
-        let recalled = score_records(active_records(&root, namespace).unwrap(), "rust profile");
+        let recalled = score_bm25(active_records(&root, namespace).unwrap(), "rust profile");
         assert_eq!(recalled.first().unwrap().record.id, "mem-1");
         assert!(recalled.first().unwrap().score > 0.0);
 
@@ -807,5 +1411,115 @@ mod tests {
         let error = event_log_path(Path::new("/tmp/memory"), "../escape")
             .expect_err("namespace escape should fail");
         assert!(error.to_string().contains("escape"));
+    }
+
+    #[test]
+    fn open_event_records_backend_config_and_overrides_replace_prior() {
+        let root = temp_root("open");
+        let namespace = "agent/cfg";
+        append_event(
+            &root,
+            namespace,
+            &MemoryEvent::Open(OpenEvent {
+                id: "open-1".to_string(),
+                namespace: namespace.to_string(),
+                backend: MemoryBackend::Vector,
+                embed_model_hint: Some("test-model".to_string()),
+                embed_dim: Some(3),
+                bm25_weight: None,
+                cosine_weight: None,
+                opened_at: "2026-05-01T00:00:00Z".to_string(),
+            }),
+        )
+        .unwrap();
+        append_event(
+            &root,
+            namespace,
+            &MemoryEvent::Open(OpenEvent {
+                id: "open-2".to_string(),
+                namespace: namespace.to_string(),
+                backend: MemoryBackend::Hybrid,
+                embed_model_hint: Some("test-model".to_string()),
+                embed_dim: Some(3),
+                bm25_weight: Some(0.4),
+                cosine_weight: Some(0.6),
+                opened_at: "2026-05-02T00:00:00Z".to_string(),
+            }),
+        )
+        .unwrap();
+        let config = read_namespace_config(&root, namespace).unwrap();
+        assert_eq!(config.backend, MemoryBackend::Hybrid);
+        assert_eq!(config.bm25_weight, Some(0.4));
+        assert_eq!(config.cosine_weight, Some(0.6));
+        assert_eq!(config.embed_dim, Some(3));
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn cached_embedding_round_trips() {
+        let root = temp_root("cache");
+        let namespace = "agent/cache";
+        let hash = sha256_hex("hello world");
+        let path = vector_cache_path(&root, namespace, "voyage-2", &hash).unwrap();
+        let embedding = CachedEmbedding {
+            model: "voyage-2".to_string(),
+            dim: 3,
+            vector: vec![0.1, 0.2, 0.3],
+        };
+        write_cached_embedding(&path, &embedding).unwrap();
+        let restored = read_cached_embedding(&path).unwrap().unwrap();
+        assert_eq!(restored.dim, 3);
+        assert_eq!(restored.vector, vec![0.1, 0.2, 0.3]);
+        assert!(path.components().any(|c| c.as_os_str() == VECTOR_CACHE_DIR));
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn cosine_similarity_handles_orthogonal_and_parallel_vectors() {
+        let a = vec![1.0, 0.0, 0.0];
+        let b = vec![0.0, 1.0, 0.0];
+        let c = vec![2.0, 0.0, 0.0];
+        assert!(cosine_similarity(&a, &b).abs() < 1e-9);
+        assert!((cosine_similarity(&a, &c) - 1.0).abs() < 1e-9);
+        let zero = vec![0.0, 0.0, 0.0];
+        assert_eq!(cosine_similarity(&a, &zero), 0.0);
+    }
+
+    #[test]
+    fn sanitize_model_hint_strips_path_separators() {
+        assert_eq!(sanitize_model_hint(""), DEFAULT_EMBED_MODEL_HINT);
+        assert_eq!(sanitize_model_hint("voyage-2"), "voyage-2");
+        assert_eq!(sanitize_model_hint("../escape"), "___escape");
+        assert_eq!(sanitize_model_hint("ns/model"), "ns_model");
+    }
+
+    #[test]
+    fn parse_embedding_response_validates_dim_and_vector_types() {
+        let mut dict = BTreeMap::new();
+        dict.insert(
+            "vector".to_string(),
+            VmValue::List(Rc::new(vec![
+                VmValue::Float(0.1),
+                VmValue::Float(0.2),
+                VmValue::Int(1),
+            ])),
+        );
+        dict.insert("dim".to_string(), VmValue::Int(3));
+        dict.insert("model".to_string(), VmValue::String(Rc::from("test-model")));
+        let value = VmValue::Dict(Rc::new(dict));
+        let parsed = parse_embedding_response(value, "fallback").unwrap();
+        assert_eq!(parsed.dim, 3);
+        assert_eq!(parsed.model, "test-model");
+        assert_eq!(parsed.vector, vec![0.1, 0.2, 1.0]);
+
+        let mut bad = BTreeMap::new();
+        bad.insert(
+            "vector".to_string(),
+            VmValue::List(Rc::new(vec![VmValue::Float(0.1)])),
+        );
+        bad.insert("dim".to_string(), VmValue::Int(2));
+        let err = parse_embedding_response(VmValue::Dict(Rc::new(bad)), "fallback")
+            .expect_err("dim mismatch must error");
+        assert!(err.to_string().contains("dim=2"));
     }
 }

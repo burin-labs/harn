@@ -1,4 +1,5 @@
 import { filter_nil } from "std/collections"
+import { memory_store } from "std/memory"
 
 /**
  * std/personas/bulletins — transparent profile bulletin proposals.
@@ -492,9 +493,64 @@ pub fn bulletin_emit_decision(decision: ProfileBulletinDecision, options = nil) 
   }
 }
 
-/** Shorthand: build and emit an accept decision for a bulletin. */
+/**
+ * Build the memory namespace path for accepted bulletins of this scope.
+ *
+ * Defaults to `personas/bulletins/<scope>/<scope_key>` so semantic recall
+ * is partitioned by scope. Hosts can override with
+ * `options.memory_namespace` on `bulletin_accept`.
+ */
+pub fn bulletin_memory_namespace(bulletin: ProfileBulletin) -> string {
+  let scope = __bulletin_text(bulletin?.scope)
+  let scope_key = __bulletin_text(bulletin?.scope_key)
+  if scope == "" || scope_key == "" {
+    throw "std/personas/bulletins: bulletin is missing scope or scope_key"
+  }
+  return "personas/bulletins/" + scope + "/" + scope_key
+}
+
+fn __bulletin_remember_accepted(bulletin: ProfileBulletin, options) {
+  let opts = options ?? {}
+  let override_namespace = __bulletin_text(opts?.memory_namespace)
+  let namespace = override_namespace != "" ? override_namespace : bulletin_memory_namespace(bulletin)
+  let subject = __bulletin_text(bulletin?.subject)
+  let assertion = __bulletin_text(bulletin?.assertion)
+  let text = subject == "" ? assertion : subject + " — " + assertion
+  let persona = __bulletin_text(bulletin?.persona)
+  var tags = ["bulletin", __bulletin_text(bulletin.scope)]
+  if persona != "" {
+    tags = tags.push("persona:" + persona)
+  }
+  let store_options = filter_nil(
+    {
+      root: opts?.memory_root,
+      embed: true,
+      embed_model_hint: opts?.embed_model_hint,
+      provenance: {
+        schema: BULLETIN_SCHEMA,
+        bulletin_id: bulletin.id,
+        scope: bulletin.scope,
+        scope_key: bulletin.scope_key,
+        persona: persona == "" ? nil : persona,
+      },
+    },
+  )
+  memory_store(namespace, bulletin.id, {text: text, bulletin: bulletin}, tags, store_options)
+}
+
+/**
+ * Shorthand: build and emit an accept decision for a bulletin.
+ *
+ * Pass `options.embed: true` to also store the accepted assertion in the
+ * scope-partitioned memory namespace with a host-provided embedding, so
+ * persona prompts can recall it semantically later.
+ */
 pub fn bulletin_accept(bulletin: ProfileBulletin, options = nil) -> BulletinDecisionReceipt {
-  return bulletin_emit_decision(bulletin_decide(bulletin, "accept", options), options)
+  let receipt = bulletin_emit_decision(bulletin_decide(bulletin, "accept", options), options)
+  if options != nil && options?.embed {
+    __bulletin_remember_accepted(bulletin, options)
+  }
+  return receipt
 }
 
 /** Shorthand: build and emit a reject decision. Rationale should be supplied. */

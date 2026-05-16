@@ -1,0 +1,37 @@
+import "std/memory"
+
+pipeline default() {
+  let root = path_join(temp_dir(), "harn-memory-replay-" + uuid())
+  host_mock_clear()
+  host_mock("memory", "embed", {result: {vector: [0.6, 0.8], dim: 2, model: "fake"}})
+  memory_open("agent/replay", {backend: "vector", embed_dim: 2, embed_model_hint: "fake", root: root})
+  // First round: stores call memory.embed (cache miss → host).
+  memory_store(
+    "agent/replay",
+    "alpha",
+    "first observation",
+    nil,
+    {root: root, now: "2026-05-15T00:00:00Z"},
+  )
+  memory_store(
+    "agent/replay",
+    "beta",
+    "second observation",
+    nil,
+    {root: root, now: "2026-05-15T00:00:01Z"},
+  )
+  let first_recall = memory_recall("agent/replay", "topic", 5, {root: root})
+  println(len(first_recall))
+  let first_calls = host_mock_calls().count
+  println(first_calls >= 3)
+  // Replay: clear mocks entirely. Cached embeddings on disk must satisfy
+  // recall without re-calling the host.
+  host_mock_clear()
+  let second_recall = memory_recall("agent/replay", "topic", 5, {root: root})
+  println(len(second_recall) == len(first_recall))
+  println(host_mock_calls().count == 0)
+  // Same (namespace, query, mode, model_hint, top_k) tape → same order.
+  println(first_recall[0].id == second_recall[0].id)
+  println(first_recall[1].id == second_recall[1].id)
+  delete_file(root)
+}
