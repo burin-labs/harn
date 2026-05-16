@@ -2478,6 +2478,23 @@ replay tooling reproduces the same control flow.
 | `select_artifacts_adaptive(artifacts, policy)` | artifacts: list, policy: dict | list | Deduplicate, microcompact oversized artifacts, then select with token budget |
 | `transcript_auto_compact(messages, options?)` | messages: list, options: dict | list | Run the same transcript auto-compaction pipeline used by `agent_loop` |
 
+`std/context` also provides the host-neutral
+`harn.context_artifact.v1` envelope for durable repository context. Hosts use
+`context_artifact(...)` to normalize kind, scope/path, language, role/task
+applicability, freshness, confidence, provenance, source hashes, token
+estimate, body text, and redaction/sensitivity metadata. The companion helpers
+`context_artifact_rank`, `context_artifact_dedupe`, `context_artifact_merge`,
+`context_artifact_budget`, and `context_artifact_select` implement the portable
+rank/dedupe/merge/budget pass before a host feeds selected artifacts into
+`assemble_context` or directly into a prompt.
+
+`context_render_artifacts(...)` renders the same envelope as Markdown, XML,
+plain text, or compact lines. With `variant: "auto"`, it uses the same provider
+capability flags as logical prompt sections: `prefers_xml_scaffolding` selects
+XML and `prefers_markdown_scaffolding` selects Markdown. Existing Burin
+`.burin/context-digests` markdown files can be wrapped in-place with
+`context_artifact_from_burin_digest(path, body, options?)` during migration.
+
 #### Adaptive context assembly
 
 `assemble_context` is the within-selection complement to

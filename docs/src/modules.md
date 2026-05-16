@@ -511,8 +511,36 @@ Structured prompt/context assembly helpers:
 | `section(name, content, options?)` | Create a named context section |
 | `context_attach(name, path, content, options?)` | Attach file/path-oriented context |
 | `context(sections, options?)` | Build a context object |
+| `context_artifact(input, options?)` | Normalize a host-neutral `harn.context_artifact.v1` envelope |
+| `context_artifact_from_burin_digest(path, body, options?)` | Wrap a legacy `.burin/context-digests` markdown body without changing its storage path |
+| `context_artifact_rank(artifact, options?)` | Score an artifact using freshness, confidence, authority, task/role/path applicability, priority, and token cost |
+| `context_artifact_dedupe(artifacts, options?)` | Deduplicate artifacts by explicit source-hash overlap or canonical body key, merging provenance and metadata |
+| `context_artifact_merge(left, right, options?)` | Merge two duplicate artifact envelopes |
+| `context_artifact_budget(artifacts, options?)` | Rank, deduplicate, filter, and fit artifacts into token/count budgets |
+| `context_artifact_select(artifacts, options?)` | Return only the selected artifacts from `context_artifact_budget` |
+| `context_render_artifacts(artifacts, options?)` | Render artifacts as `markdown`, `xml`, `plain`, `compact`, or provider-capability-driven `auto` |
+| `context_render_logical_section(name, title, body, options?)` | Render a logical section using the same provider capability flags as prompt templates |
 | `context_render(ctx, options?)` | Render a context into prompt text |
+| `context_add_artifact(ctx, artifact)` | Append a normalized context artifact to an existing context |
 | `prompt_compose(task, ctx, options?)` | Compose `{prompt, system, rendered_context}` |
+
+`context_artifact(...)` is the portable repository-context envelope for host
+pipelines. It preserves the artifact body in both `body` and `text` and
+normalizes metadata used by Harn and Burin-style context pipelines:
+
+- `kind`, `scope.path` / `path`, `language`, `role`, `task`, and
+  `applicability.{roles,tasks,languages,paths,tags}`
+- `freshness`, `confidence`, `provenance.{source,authority,explanation,...}`,
+  and `source_hashes`
+- `token_estimate`, `redaction`, `sensitivity`, and arbitrary `metadata`
+
+Rendering with `variant: "auto"` follows the active provider capability flags:
+`prefers_xml_scaffolding` selects XML, `prefers_markdown_scaffolding` selects
+Markdown, and otherwise the renderer falls back to plain text. Explicit
+`variant: "markdown" | "xml" | "plain" | "compact"` overrides capability
+selection. The Burin adapter keeps generated digest compatibility during
+migration by wrapping existing `.burin/context-digests/*.md` content instead of
+requiring hosts to rewrite those files.
 
 ### std/agent_state
 
