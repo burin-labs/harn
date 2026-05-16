@@ -663,7 +663,7 @@ fn model_info_to_vm_value(resolved: &llm_config::ResolvedModel) -> VmValue {
     VmValue::Dict(Rc::new(dict))
 }
 
-fn capabilities_to_vm_value(
+pub(crate) fn capabilities_to_vm_value(
     provider: &str,
     model: &str,
     caps: &super::capabilities::Capabilities,

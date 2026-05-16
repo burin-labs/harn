@@ -38,6 +38,20 @@ condensed series summaries instead of full per-patch history.
 
 ### Added
 
+- **Capability-aware prompt templates: auto-injected `llm` scope (#1664).**
+  When `render()` / `render_prompt()` / `render_string()` is invoked
+  from inside an LLM-aware frame (`llm_call`, `default_llm_caller`,
+  `agent_loop`), the engine now auto-injects a reserved
+  `llm = {provider, model, family, capabilities: {...}}` binding so a
+  single logical `.harn.prompt` can branch on
+  `llm.capabilities.native_tools` and friends without manual option
+  threading. Bare `render()` calls outside any LLM frame leave
+  `llm = nil`; templates guard with `{{ if llm }}` for the CI / doc-gen
+  path. User bindings that already supply an `llm` key win for
+  back-compat and trigger a one-shot `template.llm_scope` lint warning.
+  This is the load-bearing primitive for the capability-adaptive prompt-
+  rendering epic (#1663) — sibling tickets layer logical sections,
+  format-preference capabilities, and cross-model eval on top.
 - **One-line installer + signed binaries.** `install.sh` (served from
   `harnlang.com/install.sh`) now detects the host OS/CPU, resolves the
   latest GitHub release tag, downloads the matching pre-built archive,

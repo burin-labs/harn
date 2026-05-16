@@ -2631,6 +2631,15 @@ and LSP go-to-definition follow `@`-paths to the target file.
   `{{- trim whitespace + one newline -}}`.
 - Missing *bare* `{{ident}}` passes through the literal source (back-compat).
   New constructs raise `template at L:C: ...` errors.
+- **`llm` scope**: inside an LLM-aware frame (`llm_call`, the default
+  handler stack, `agent_loop`) the engine auto-injects
+  `llm = {provider, model, family, capabilities: {...}}` so a single
+  logical prompt can adapt by capability. Branch on `{{ if llm }}` for
+  the bare-render fallback; branch on `{{ if llm.capabilities.native_tools }}`
+  to pick wire envelope. `family` is one of `claude` / `gpt` / `gemini` /
+  `qwen` / `llama` / `mistral` / `deepseek` / `phi` / `grok` / `command`.
+  User bindings that already provide an `llm` key win for back-compat
+  and trigger a one-shot warning under `template.llm_scope`.
 - Full reference: `docs/src/prompt-templating.md`.
 
 ## Discovery

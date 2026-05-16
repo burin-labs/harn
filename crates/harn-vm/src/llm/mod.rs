@@ -20,7 +20,7 @@ pub mod api;
 pub(crate) mod autonomy_budget;
 pub(crate) mod cache;
 pub mod capabilities;
-mod config_builtins;
+pub(crate) mod config_builtins;
 pub(crate) mod content;
 mod conversation;
 pub(crate) mod cost;
@@ -543,6 +543,13 @@ async fn llm_call_impl(args: Vec<VmValue>) -> Result<VmValue, VmError> {
     let opts = extract_llm_options(&args)?;
     let provider = opts.provider.clone();
     let model = opts.model.clone();
+    // Publish the resolved provider/model/capabilities to templates
+    // rendered while this `llm_call` frame is on the stack — e.g.
+    // schema-retry prompts or middleware that re-renders a partial
+    // for a corrective second pass.
+    let _llm_render_guard = crate::stdlib::template::LlmRenderContextGuard::enter(
+        crate::stdlib::template::LlmRenderContext::resolve(&provider, &model),
+    );
     match execute_llm_call(opts, options, None).await {
         Ok(v) => Ok(v),
         Err(err) => Err(VmError::Thrown(build_llm_error_dict(

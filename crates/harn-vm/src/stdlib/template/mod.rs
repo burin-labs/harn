@@ -22,8 +22,9 @@
 //! All new constructs raise `TemplateError` on parse or evaluation failure.
 
 use std::cell::RefCell;
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, HashSet};
 use std::path::Path;
+use std::sync::{Mutex, OnceLock};
 
 use crate::value::{VmError, VmValue};
 
@@ -33,6 +34,7 @@ mod error;
 mod expr_parser;
 mod filters;
 mod lexer;
+mod llm_context;
 mod parser;
 mod render;
 
@@ -42,6 +44,10 @@ mod tests;
 use assets::parse_cached;
 pub(crate) use assets::TemplateAsset;
 use error::TemplateError;
+pub use llm_context::{
+    current_llm_render_context, pop_llm_render_context, push_llm_render_context, LlmRenderContext,
+    LlmRenderContextGuard,
+};
 use render::{render_nodes, RenderCtx, Scope};
 
 // Thread-local registry of recent prompt renders keyed by `prompt_id`.
@@ -216,6 +222,63 @@ pub(crate) fn reset_prompt_registry() {
     PROMPT_SERIAL.with(|s| *s.borrow_mut() = 0);
     PROMPT_RENDER_INDICES.with(|map| map.borrow_mut().clear());
     PROMPT_RENDER_ORDINAL.with(|c| *c.borrow_mut() = 0);
+    llm_context::reset_llm_render_stack();
+    if let Some(cache) = LLM_SHADOW_WARN_CACHE.get() {
+        if let Ok(mut g) = cache.lock() {
+            g.clear();
+        }
+    }
+}
+
+/// One-shot dedup for the user-supplied-`llm`-binding shadow warning.
+/// Keyed by template URI so a recurring render in a loop only emits
+/// the warning once per template per process.
+static LLM_SHADOW_WARN_CACHE: OnceLock<Mutex<HashSet<String>>> = OnceLock::new();
+
+/// Build the merged bindings map that includes the ambient `llm` key
+/// when an LLM render context is in scope. Returns `None` to mean
+/// "no change required — pass the caller's bindings through unchanged":
+/// either there is no active context, or the user already supplied an
+/// `llm` binding (in which case we emit a lint warning and let their
+/// value win for back-compat).
+fn augment_bindings_with_llm(
+    asset: &TemplateAsset,
+    bindings: Option<&BTreeMap<String, VmValue>>,
+) -> Option<BTreeMap<String, VmValue>> {
+    let ctx = current_llm_render_context()?;
+    if bindings.is_some_and(|m| m.contains_key("llm")) {
+        warn_user_llm_shadowed(asset);
+        return None;
+    }
+    let mut merged = bindings.cloned().unwrap_or_default();
+    merged.insert("llm".to_string(), ctx.to_vm_value());
+    Some(merged)
+}
+
+fn warn_user_llm_shadowed(asset: &TemplateAsset) {
+    let cache = LLM_SHADOW_WARN_CACHE.get_or_init(|| Mutex::new(HashSet::new()));
+    let key = asset.uri.clone();
+    {
+        let mut guard = match cache.lock() {
+            Ok(g) => g,
+            Err(_) => return,
+        };
+        if !guard.insert(key.clone()) {
+            return;
+        }
+    }
+    crate::events::log_warn_meta(
+        "template.llm_scope",
+        "user-supplied `llm` binding shadows auto-injected LLM render context; \
+         rename your key to avoid relying on this back-compat path",
+        BTreeMap::from([
+            ("template_uri".to_string(), serde_json::Value::String(key)),
+            (
+                "reason".to_string(),
+                serde_json::Value::String("user_binding_shadowed".to_string()),
+            ),
+        ]),
+    );
 }
 
 /// Parse-only validation for lint/preflight. Returns a human-readable error
@@ -348,7 +411,14 @@ pub(crate) fn render_asset_with_provenance_result(
 ) -> Result<(String, Vec<PromptSourceSpan>), TemplateError> {
     let nodes = parse_cached(asset)?;
     let mut out = String::with_capacity(asset.source.len());
-    let mut scope = Scope::new(bindings);
+    // Materialize the ambient `llm` binding when the caller is inside
+    // an LLM frame (`llm_call` / `agent_loop` / handler-stack). User
+    // bindings that already supply `llm` win — emit a one-shot lint
+    // warning to flag the shadowed auto-injection so the author can
+    // rename their key.
+    let augmented = augment_bindings_with_llm(asset, bindings);
+    let scope_bindings = augmented.as_ref().or(bindings);
+    let mut scope = Scope::new(scope_bindings);
     let mut rc = RenderCtx {
         current_asset: asset.clone(),
         include_stack: Vec::new(),

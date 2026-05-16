@@ -172,6 +172,15 @@ pub(crate) const SIGNATURES: &[BuiltinSignature] = &[
         ],
         TY_STRING,
     ),
+    BuiltinSignature::simple("__pop_llm_render_context", &[], TY_NIL),
+    BuiltinSignature::simple(
+        "__push_llm_render_context",
+        &[
+            Param::new("provider", TY_STRING),
+            Param::optional("model", TY_STRING),
+        ],
+        TY_BOOL,
+    ),
     BuiltinSignature::simple("__select_list", &[Param::new("channels", TY_LIST)], TY_DICT),
     BuiltinSignature::simple(
         "__select_timeout",
