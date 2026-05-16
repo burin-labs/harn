@@ -1,0 +1,25 @@
+/**
+ * `clear_session_hooks()` removes all session-level hooks but leaves
+ * tool/persona hooks alone. Unknown event names raise.
+ */
+let observed = atomic(0)
+
+pipeline default() {
+  clear_session_hooks()
+  register_session_hook(
+    "session_start",
+    { _ev ->
+      atomic_add(observed, 1)
+      return nil
+    },
+  )
+  clear_session_hooks()
+  llm_mock_clear()
+  llm_mock({text: "ok"})
+  agent_loop("hi", nil, {provider: "mock"})
+  println(atomic_get(observed))
+  let err = try {
+    register_session_hook("PreToolUse", { _ev -> return nil })
+  }
+  println(is_err(err))
+}

@@ -334,6 +334,54 @@ async fn check_one_dynamic_permission(
         });
     };
 
+    let ask_payload = serde_json::json!({
+        "event": crate::orchestration::HookEvent::PermissionAsked.as_str(),
+        "session": {"id": session_id},
+        "tool": {"name": tool_name, "args": args},
+        "reason": &reason,
+    });
+    match crate::orchestration::run_lifecycle_hooks_with_control(
+        crate::orchestration::HookEvent::PermissionAsked,
+        &ask_payload,
+    )
+    .await?
+    {
+        crate::orchestration::HookControl::Allow => {}
+        crate::orchestration::HookControl::Block {
+            reason: block_reason,
+        } => {
+            return Ok(PermissionCheck::Denied {
+                reason: block_reason,
+                escalated: true,
+            });
+        }
+        crate::orchestration::HookControl::Decision {
+            kind,
+            reason: decision_reason,
+        } => match kind.as_str() {
+            "allow" => {
+                let grant_reason = decision_reason
+                    .unwrap_or_else(|| format!("permission granted by session hook: {reason}"));
+                session_grants.insert(grant_key);
+                fire_permission_replied(session_id, tool_name, args, "allow", &grant_reason).await;
+                return Ok(PermissionCheck::Granted {
+                    reason: grant_reason,
+                    escalated: true,
+                });
+            }
+            "deny" => {
+                let denied_reason = decision_reason
+                    .unwrap_or_else(|| format!("permission denied by session hook: {reason}"));
+                fire_permission_replied(session_id, tool_name, args, "deny", &denied_reason).await;
+                return Ok(PermissionCheck::Denied {
+                    reason: denied_reason,
+                    escalated: true,
+                });
+            }
+            _ => {}
+        },
+    }
+
     let Some(on_escalation) = policy.on_escalation.as_ref() else {
         return Ok(PermissionCheck::Denied {
             reason,
@@ -349,17 +397,47 @@ async fn check_one_dynamic_permission(
             session_grants.insert(grant_key);
         }
         let grant_reason = response.reason.unwrap_or(reason);
+        fire_permission_replied(session_id, tool_name, args, "allow", &grant_reason).await;
         Ok(PermissionCheck::Granted {
             reason: grant_reason,
             escalated: true,
         })
     } else {
+        let deny_reason = response
+            .reason
+            .unwrap_or_else(|| "permission escalation denied".to_string());
+        fire_permission_replied(session_id, tool_name, args, "deny", &deny_reason).await;
         Ok(PermissionCheck::Denied {
-            reason: response
-                .reason
-                .unwrap_or_else(|| "permission escalation denied".to_string()),
+            reason: deny_reason,
             escalated: true,
         })
+    }
+}
+
+async fn fire_permission_replied(
+    session_id: &str,
+    tool_name: &str,
+    args: &serde_json::Value,
+    decision: &str,
+    reason: &str,
+) {
+    let payload = serde_json::json!({
+        "event": crate::orchestration::HookEvent::PermissionReplied.as_str(),
+        "session": {"id": session_id},
+        "tool": {"name": tool_name, "args": args},
+        "decision": decision,
+        "reason": reason,
+    });
+    if let Err(err) = crate::orchestration::run_lifecycle_hooks(
+        crate::orchestration::HookEvent::PermissionReplied,
+        &payload,
+    )
+    .await
+    {
+        crate::events::log_warn(
+            "agent.permission_replied_hook",
+            &format!("session={session_id} tool={tool_name} hook error: {err}"),
+        );
     }
 }
 

@@ -1,0 +1,29 @@
+/**
+ * `user_prompt_submit` hooks can veto an agent turn before the agent sees
+ * the prompt. A `{block: true, reason}` return short-circuits init and
+ * yields a `blocked` final status with `stop_reason: user_prompt_submit_blocked`.
+ */
+pipeline default() {
+  clear_session_hooks()
+  register_session_hook(
+    "user_prompt_submit",
+    { event ->
+      let prompt = to_string(event?.prompt ?? "")
+      if prompt.contains("secret") {
+        return {block: true, reason: "policy violation: secret in prompt"}
+      }
+      return nil
+    },
+  )
+  llm_mock_clear()
+  llm_mock({text: "should not run"})
+  let blocked = agent_loop("share the secret password", nil, {provider: "mock"})
+  println(blocked.status)
+  println(blocked.stop_reason)
+  println(blocked.error.reason)
+  llm_mock_clear()
+  llm_mock({text: "ok"})
+  let allowed = agent_loop("hello world", nil, {provider: "mock"})
+  println(allowed.status)
+  clear_session_hooks()
+}

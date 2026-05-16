@@ -1,0 +1,55 @@
+/**
+ * `pre_compact` hooks can veto an autocompaction pass with
+ * `{block: true}`. `post_compact` hooks observe the archived-message
+ * count once compaction completes successfully.
+ */
+let pre_seen = atomic(0)
+
+let post_seen = atomic(0)
+
+pipeline default() {
+  clear_session_hooks()
+  register_session_hook(
+    "pre_compact",
+    { event ->
+      if type_of(event?.session?.id) == "string" {
+        atomic_add(pre_seen, 1)
+      }
+      if atomic_get(pre_seen) == 1 {
+        return {block: true, reason: "first compact intentionally vetoed"}
+      }
+      return nil
+    },
+  )
+  // First call: block. Second call: allow.
+  register_session_hook(
+    "post_compact",
+    { event ->
+      if event?.archived_messages ?? 0 > 0 {
+        atomic_add(post_seen, 1)
+      }
+      return nil
+    },
+  )
+  // Force compaction with a hostile threshold so the autocompactor
+  // tries to compress even with a tiny transcript.
+  llm_mock_clear()
+  llm_mock({text: "round one"})
+  llm_mock({text: "round two"})
+  let result = agent_loop(
+    "compact me",
+    nil,
+    {
+      provider: "mock",
+      loop_until_done: true,
+      max_iterations: 2,
+      compaction: {strategy: "observation_mask"},
+      compact_threshold: 1,
+      compact_keep_last: 0,
+    },
+  )
+  println(result.status)
+  println(atomic_get(pre_seen))
+  println(atomic_get(post_seen))
+  clear_session_hooks()
+}

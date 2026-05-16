@@ -1,0 +1,40 @@
+/**
+ * Hook invocations capture deterministic tape entries on the transcript:
+ * `hook_call` before the closure runs, `hook_returned` after, and a
+ * `hook_vetoed` entry when the hook blocks the operation. Replay
+ * tooling consumes these so the same tape reproduces the same control
+ * flow.
+ */
+fn count_kind(events, kind) {
+  var n = 0
+  for ev in events {
+    if to_string(ev?.kind ?? "") == kind {
+      n = n + 1
+    }
+  }
+  return n
+}
+
+pipeline default() {
+  clear_session_hooks()
+  register_session_hook(
+    "user_prompt_submit",
+    { event ->
+      let prompt = to_string(event?.prompt ?? "")
+      if prompt.contains("vetome") {
+        return {block: true, reason: "captured by tape"}
+      }
+      return nil
+    },
+  )
+  register_session_hook("session_start", { _event -> return nil })
+  llm_mock_clear()
+  llm_mock({text: "ok"})
+  let result = agent_loop("hello vetome please", nil, {provider: "mock"})
+  let events = transcript_events(result?.transcript)
+  println(result.status)
+  println(count_kind(events, "hook_call") > 0)
+  println(count_kind(events, "hook_returned") > 0)
+  println(count_kind(events, "hook_vetoed") > 0)
+  clear_session_hooks()
+}
