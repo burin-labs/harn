@@ -358,7 +358,7 @@ pub struct PromptSourceSpan {
 /// fired for this model?" without re-running the template. Recorded
 /// deterministically — same `llm` snapshot + bindings always produce
 /// the same trace, which is what makes replay reproducible (#1668).
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
 pub struct BranchDecision {
     pub kind: BranchKind,
     pub template_uri: String,
@@ -376,7 +376,8 @@ pub struct BranchDecision {
     pub branch_label: Option<String>,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize)]
+#[serde(rename_all = "snake_case")]
 pub enum BranchKind {
     If,
     Section,
@@ -460,19 +461,8 @@ pub(crate) fn render_template_collect_branch_trace(
     template: &str,
 ) -> Result<(String, Vec<BranchDecision>), TemplateError> {
     let asset = TemplateAsset::inline(template, None, None);
-    let nodes = parse_cached(&asset)?;
-    let mut out = String::with_capacity(asset.source.len());
-    let augmented = augment_bindings_with_llm(&asset, None);
-    let scope_bindings = augmented.as_ref();
-    let mut scope = Scope::new(scope_bindings);
-    let mut rc = RenderCtx {
-        current_asset: asset.clone(),
-        include_stack: Vec::new(),
-        current_include_parent: None,
-        branch_trace: Some(Vec::new()),
-    };
-    render_nodes(&nodes, &mut scope, &mut rc, &mut out, None)?;
-    Ok((out, rc.branch_trace.unwrap_or_default()))
+    render_asset_with_provenance_and_trace_result(&asset, None, false, true)
+        .map(|(rendered, _spans, trace)| (rendered, trace))
 }
 
 pub(crate) fn render_asset_with_provenance_result(
@@ -480,6 +470,17 @@ pub(crate) fn render_asset_with_provenance_result(
     bindings: Option<&BTreeMap<String, VmValue>>,
     collect_provenance: bool,
 ) -> Result<(String, Vec<PromptSourceSpan>), TemplateError> {
+    let (rendered, spans, _trace) =
+        render_asset_with_provenance_and_trace_result(asset, bindings, collect_provenance, false)?;
+    Ok((rendered, spans))
+}
+
+fn render_asset_with_provenance_and_trace_result(
+    asset: &TemplateAsset,
+    bindings: Option<&BTreeMap<String, VmValue>>,
+    collect_provenance: bool,
+    force_branch_trace: bool,
+) -> Result<(String, Vec<PromptSourceSpan>, Vec<BranchDecision>), TemplateError> {
     let nodes = parse_cached(asset)?;
     let mut out = String::with_capacity(asset.source.len());
     // Materialize the ambient `llm` binding when the caller is inside
@@ -499,7 +500,7 @@ pub(crate) fn render_asset_with_provenance_result(
         current_asset: asset.clone(),
         include_stack: Vec::new(),
         current_include_parent: None,
-        branch_trace: llm_ctx.as_ref().map(|_| Vec::new()),
+        branch_trace: (force_branch_trace || llm_ctx.is_some()).then(Vec::new),
     };
     let mut spans = if collect_provenance {
         Some(Vec::new())
@@ -515,10 +516,27 @@ pub(crate) fn render_asset_with_provenance_result(
         }
         e
     })?;
-    if let (Some(ctx), Some(trace)) = (llm_ctx, rc.branch_trace.take()) {
+    let trace = rc.branch_trace.take().unwrap_or_default();
+    if let Some(ctx) = llm_ctx {
         emit_template_render_event(asset, &ctx, &trace, out.len());
     }
-    Ok((out, spans.unwrap_or_default()))
+    Ok((out, spans.unwrap_or_default(), trace))
+}
+
+/// Render a template and return the capability branch trace that drove
+/// logical-section materialization. This is the deterministic counterpart
+/// to the `template.render` transcript event and is used by prompt evals
+/// that need to score section shape without scraping JSONL artifacts.
+pub fn render_template_to_string_with_branch_trace(
+    template: &str,
+    bindings: Option<&BTreeMap<String, VmValue>>,
+    base: Option<&Path>,
+    source_path: Option<&Path>,
+) -> Result<(String, Vec<BranchDecision>), String> {
+    let asset = TemplateAsset::inline(template, base, source_path);
+    render_asset_with_provenance_and_trace_result(&asset, bindings, false, true)
+        .map(|(rendered, _spans, trace)| (rendered, trace))
+        .map_err(|error| error.message())
 }
 
 /// Emit a `template.render` transcript event capturing the resolved

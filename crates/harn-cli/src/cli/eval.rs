@@ -72,6 +72,10 @@ pub struct EvalPromptArgs {
     /// JSON file with bindings injected into the template scope.
     #[arg(long)]
     pub bindings: Option<PathBuf>,
+    /// Prompt context-quality fixture(s) that score artifact selection,
+    /// stale/noisy rejection, budget adherence, and logical-section shape.
+    #[arg(long = "context-fixture")]
+    pub context_fixture: Vec<PathBuf>,
     /// Evaluation mode.
     #[arg(long, value_enum, default_value_t = EvalPromptMode::Render)]
     pub mode: EvalPromptMode,

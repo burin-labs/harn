@@ -1,0 +1,85 @@
+{
+  "_type": "prompt_context_eval_fixture",
+  "version": 1,
+  "id": "repo_context_quality",
+  "name": "Repository context artifact-selection golden",
+  "cases": [
+    {
+      "id": "rust_parser_regression",
+      "name": "Rust parser regression selects current Harn artifact",
+      "description": "The fixture includes a correct Rust artifact, stale Rust note, wrong-language Swift note, and tempting CI noise.",
+      "bindings": {
+        "task": "Fix the Rust parser token span regression."
+      },
+      "assembler": {
+        "budget_tokens": 18,
+        "dedup": "none",
+        "strategy": "relevance",
+        "query": "Rust parser token span regression",
+        "microcompact_threshold": 2000
+      },
+      "artifacts": [
+        {
+          "id": "rust-parser-current",
+          "kind": "workspace_file",
+          "title": "Rust parser current",
+          "source": "crates/harn-parser/src/parser.rs",
+          "created_at": "2026-05-16T00:00:00Z",
+          "freshness": "fresh",
+          "text": "Rust parser token span regression fix in harn-parser."
+        },
+        {
+          "id": "rust-parser-stale",
+          "kind": "workspace_file",
+          "title": "Stale parser note",
+          "source": "notes/parser.md",
+          "created_at": "2025-01-01T00:00:00Z",
+          "freshness": "stale",
+          "text": "Old parser note before the diagnostic rewrite. Do not use for the current Rust regression."
+        },
+        {
+          "id": "swift-wrong-language",
+          "kind": "workspace_file",
+          "title": "Swift scanner notes",
+          "source": "Sources/BurinCore/Scanner.swift",
+          "created_at": "2026-05-16T00:00:00Z",
+          "freshness": "fresh",
+          "text": "Swift scanner token span advice for a different host implementation."
+        },
+        {
+          "id": "ci-noisy",
+          "kind": "command_result",
+          "title": "Tempting CI noise",
+          "source": "ci.log",
+          "created_at": "2026-05-16T00:00:00Z",
+          "freshness": "fresh",
+          "text": "Rust parser troubleshooting log: unrelated macOS sandbox output, retry chatter, and dependency download noise."
+        }
+      ],
+      "expect": {
+        "selected_artifact_ids": ["rust-parser-current"],
+        "rejected_artifact_ids": ["rust-parser-stale", "swift-wrong-language", "ci-noisy"],
+        "stale_artifact_ids": ["rust-parser-stale"],
+        "max_total_tokens": 18,
+        "required_section_names": ["system_framing", "task", "examples"],
+        "section_envelopes_by_family": {
+          "claude": {
+            "system_framing": "xml",
+            "task": "xml",
+            "examples": "xml"
+          },
+          "gpt": {
+            "system_framing": "markdown",
+            "task": "markdown",
+            "examples": "markdown"
+          },
+          "qwen": {
+            "system_framing": "markdown",
+            "task": "markdown",
+            "examples": "markdown"
+          }
+        }
+      }
+    }
+  ]
+}

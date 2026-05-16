@@ -68,6 +68,7 @@ provider={{ llm.provider }} family={{ llm.family }}\n",
         ],
         fleet_name: None,
         bindings: None,
+        context_fixture: Vec::new(),
         mode: EvalPromptMode::Render,
         output: EvalPromptOutput::Json,
         out_file: Some(out_file.clone()),
@@ -143,6 +144,7 @@ models = ["claude-3-5-sonnet", "gpt-4o"]
         fleet: Vec::new(),
         fleet_name: Some("smoke".to_string()),
         bindings: None,
+        context_fixture: Vec::new(),
         mode: EvalPromptMode::Render,
         output: EvalPromptOutput::Json,
         out_file: Some(out_file.clone()),
@@ -191,6 +193,7 @@ models = ["claude-3-5-sonnet"]
         fleet: Vec::new(),
         fleet_name: Some("nope".to_string()),
         bindings: None,
+        context_fixture: Vec::new(),
         mode: EvalPromptMode::Render,
         output: EvalPromptOutput::Terminal,
         out_file: None,
@@ -220,6 +223,7 @@ fn bindings_file_drives_template_scope() {
         fleet: vec!["claude-3-5-sonnet".to_string()],
         fleet_name: None,
         bindings: Some(bindings),
+        context_fixture: Vec::new(),
         mode: EvalPromptMode::Render,
         output: EvalPromptOutput::Json,
         out_file: Some(out_file.clone()),
@@ -241,4 +245,143 @@ fn bindings_file_drives_template_scope() {
         .expect("rendered")
         .to_string();
     assert_eq!(rendered, "task=Hello from bindings\n", "bindings injected");
+}
+
+#[test]
+fn context_fixture_scores_artifact_selection_and_section_shape() {
+    let tmp = tempfile::tempdir().expect("tempdir");
+    let template = tmp.path().join("repo-context.harn.prompt");
+    fs::write(
+        &template,
+        "{{ section \"system_framing\" }}Use only selected repository context.{{ endsection }}\n\
+{{ section \"task\" }}{{ task }}{{ endsection }}\n\
+{{ section \"examples\" }}{{ context }}{{ endsection }}\n",
+    )
+    .expect("write template");
+
+    let fixture = tmp.path().join("context-fixture.json");
+    fs::write(
+        &fixture,
+        r#"{
+  "_type": "prompt_context_eval_fixture",
+  "version": 1,
+  "id": "repo_context_quality",
+  "cases": [
+    {
+      "id": "rust_parser_regression",
+      "bindings": {
+        "task": "Fix the Rust parser token span regression."
+      },
+      "assembler": {
+        "budget_tokens": 18,
+        "dedup": "none",
+        "strategy": "relevance",
+        "query": "Rust parser token span regression",
+        "microcompact_threshold": 2000
+      },
+      "artifacts": [
+        {
+          "id": "rust-parser-current",
+          "kind": "workspace_file",
+          "title": "Rust parser current",
+          "source": "crates/harn-parser/src/parser.rs",
+          "created_at": "2026-05-16T00:00:00Z",
+          "freshness": "fresh",
+          "text": "Rust parser token span regression fix in harn-parser."
+        },
+        {
+          "id": "rust-parser-stale",
+          "kind": "workspace_file",
+          "title": "Stale parser note",
+          "source": "notes/parser.md",
+          "created_at": "2025-01-01T00:00:00Z",
+          "freshness": "stale",
+          "text": "Old parser note before the diagnostic rewrite. Do not use for the current Rust regression."
+        },
+        {
+          "id": "swift-wrong-language",
+          "kind": "workspace_file",
+          "title": "Swift scanner notes",
+          "source": "Sources/BurinCore/Scanner.swift",
+          "created_at": "2026-05-16T00:00:00Z",
+          "freshness": "fresh",
+          "text": "Swift scanner token span advice for a different host implementation."
+        },
+        {
+          "id": "ci-noisy",
+          "kind": "command_result",
+          "title": "Tempting CI noise",
+          "source": "ci.log",
+          "created_at": "2026-05-16T00:00:00Z",
+          "freshness": "fresh",
+          "text": "Rust parser troubleshooting log: unrelated macOS sandbox output, retry chatter, and dependency download noise."
+        }
+      ],
+      "expect": {
+        "selected_artifact_ids": ["rust-parser-current"],
+        "rejected_artifact_ids": ["rust-parser-stale", "swift-wrong-language", "ci-noisy"],
+        "stale_artifact_ids": ["rust-parser-stale"],
+        "max_total_tokens": 18,
+        "required_section_names": ["system_framing", "task", "examples"],
+        "section_envelopes_by_family": {
+          "claude": {"system_framing": "xml", "task": "xml", "examples": "xml"},
+          "gpt": {"system_framing": "markdown", "task": "markdown", "examples": "markdown"},
+          "qwen": {"system_framing": "markdown", "task": "markdown", "examples": "markdown"}
+        }
+      }
+    }
+  ]
+}"#,
+    )
+    .expect("write fixture");
+
+    let out_file = tmp.path().join("report.json");
+    let args = EvalPromptArgs {
+        file: template,
+        fleet: vec![
+            "claude-3-5-sonnet".to_string(),
+            "gpt-4o".to_string(),
+            "ollama:qwen3.5".to_string(),
+        ],
+        fleet_name: None,
+        bindings: None,
+        context_fixture: vec![fixture],
+        mode: EvalPromptMode::Render,
+        output: EvalPromptOutput::Json,
+        out_file: Some(out_file.clone()),
+        max_concurrent: 1,
+        judge_template: None,
+        judge_model: "claude-opus-4-7".to_string(),
+        max_tokens: 256,
+        fail_on_unauthorized: false,
+    };
+
+    let exit =
+        run_in_harn_runtime(|| async move { harn_cli::commands::eval_prompt::run(args).await });
+    assert_eq!(exit, 0, "context fixture eval should pass");
+
+    let report: serde_json::Value =
+        serde_json::from_str(&fs::read_to_string(&out_file).expect("report")).expect("parsed JSON");
+    let context_eval = &report["context_eval"];
+    assert_eq!(context_eval["pass"], true);
+    let case = &context_eval["fixtures"][0]["cases"][0];
+    assert_eq!(case["selected_artifact_ids"][0], "rust-parser-current");
+    assert_eq!(case["score"]["overall"], 1.0);
+    assert_eq!(case["score"]["selected_artifacts"], 1.0);
+    assert_eq!(case["score"]["rejected_artifacts"], 1.0);
+    assert_eq!(case["score"]["stale_rejection"], 1.0);
+    assert_eq!(case["score"]["token_budget"], 1.0);
+    assert_eq!(case["score"]["rendered_sections"], 1.0);
+    assert_eq!(case["budget"]["pass"], true);
+    let variants = case["variants"].as_array().expect("variants");
+    assert_eq!(variants.len(), 3);
+    for variant in variants {
+        assert_eq!(
+            variant["pass"], true,
+            "variant should satisfy section shape: {variant:?}",
+        );
+    }
+    assert_eq!(variants[0]["sections"][0]["envelope"], "xml");
+    assert_eq!(variants[1]["sections"][0]["envelope"], "markdown");
+    assert_eq!(variants[2]["sections"][0]["envelope"], "markdown");
 }

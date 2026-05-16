@@ -16,13 +16,16 @@ use std::path::{Path, PathBuf};
 
 use harn_vm::llm_config;
 use harn_vm::stdlib::template::{
-    render_template_to_string, LlmRenderContext, LlmRenderContextGuard,
+    render_template_to_string_with_branch_trace, BranchDecision, LlmRenderContext,
+    LlmRenderContextGuard,
 };
 use harn_vm::value::VmValue;
 use serde_json::Value as JsonValue;
 
 use crate::cli::{EvalPromptArgs, EvalPromptMode, EvalPromptOutput};
 use crate::config;
+
+use super::eval_prompt_context::{evaluate_context_fixtures, PromptContextEvalReport};
 
 /// Resolved per-model envelope produced by `--mode render`.
 #[derive(Debug, Clone, serde::Serialize)]
@@ -36,6 +39,8 @@ struct ModelRender {
     /// `Some` on success; `None` if template rendering failed.
     rendered: Option<String>,
     error: Option<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    branches: Vec<TemplateBranch>,
     /// `true` when the model's provider has no usable credentials. In
     /// render mode this is informational; in run/judge mode it controls
     /// whether the call is skipped.
@@ -60,6 +65,8 @@ struct PromptReport {
     runs: BTreeMap<String, ModelRunResult>,
     #[serde(skip_serializing_if = "Option::is_none")]
     judge: Option<JudgeReport>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    context_eval: Option<PromptContextEvalReport>,
 }
 
 #[derive(Debug, Clone, serde::Serialize)]
@@ -69,6 +76,30 @@ struct JudgeReport {
     /// short JSON or prose verdict; we surface it verbatim so the user
     /// can inspect.
     verdict: String,
+}
+
+#[derive(Debug, Clone, serde::Serialize)]
+struct TemplateBranch {
+    kind: String,
+    template_uri: String,
+    line: usize,
+    col: usize,
+    branch_id: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    branch_label: Option<String>,
+}
+
+impl From<&BranchDecision> for TemplateBranch {
+    fn from(decision: &BranchDecision) -> Self {
+        Self {
+            kind: decision.kind.as_str().to_string(),
+            template_uri: decision.template_uri.clone(),
+            line: decision.line,
+            col: decision.col,
+            branch_id: decision.branch_id.clone(),
+            branch_label: decision.branch_label.clone(),
+        }
+    }
 }
 
 pub async fn run(args: EvalPromptArgs) -> i32 {
@@ -119,7 +150,24 @@ pub async fn run(args: EvalPromptArgs) -> i32 {
         renders,
         runs: BTreeMap::new(),
         judge: None,
+        context_eval: None,
     };
+
+    if !args.context_fixture.is_empty() {
+        match evaluate_context_fixtures(
+            &args.context_fixture,
+            &fleet,
+            &template_source,
+            &template_path,
+            bindings.as_ref(),
+        ) {
+            Ok(context_eval) => report.context_eval = Some(context_eval),
+            Err(error) => {
+                eprintln!("error: {error}");
+                return 1;
+            }
+        }
+    }
 
     if matches!(mode, EvalPromptMode::Run | EvalPromptMode::Judge) {
         let bindings_text = args
@@ -175,10 +223,18 @@ pub async fn run(args: EvalPromptArgs) -> i32 {
         }
     }
 
-    if report.renders.iter().any(|r| r.error.is_some()) {
+    let context_eval_active = report.context_eval.is_some();
+    if !context_eval_active && report.renders.iter().any(|r| r.error.is_some()) {
         return 1;
     }
     if report.runs.values().any(|r| r.error.is_some()) {
+        return 1;
+    }
+    if report
+        .context_eval
+        .as_ref()
+        .is_some_and(|context_eval| !context_eval.pass)
+    {
         return 1;
     }
     0
@@ -236,10 +292,10 @@ fn resolve_fleet(args: &EvalPromptArgs, template_path: &Path) -> Result<Vec<Flee
 }
 
 #[derive(Debug, Clone)]
-struct FleetEntry {
-    selector: String,
-    provider: String,
-    model: String,
+pub(crate) struct FleetEntry {
+    pub(crate) selector: String,
+    pub(crate) provider: String,
+    pub(crate) model: String,
 }
 
 fn load_bindings(path: Option<&Path>) -> Result<Option<VmValue>, String> {
@@ -284,7 +340,7 @@ fn render_fleet(
 
             let result = {
                 let _guard = LlmRenderContextGuard::enter(ctx);
-                render_template_to_string(
+                render_template_to_string_with_branch_trace(
                     template_source,
                     bindings_dict.as_ref(),
                     base,
@@ -292,9 +348,13 @@ fn render_fleet(
                 )
             };
 
-            let (rendered, error) = match result {
-                Ok(text) => (Some(text), None),
-                Err(message) => (None, Some(message)),
+            let (rendered, branches, error) = match result {
+                Ok((text, trace)) => (
+                    Some(text),
+                    trace.iter().map(TemplateBranch::from).collect(),
+                    None,
+                ),
+                Err(message) => (None, Vec::new(), Some(message)),
             };
 
             ModelRender {
@@ -305,6 +365,7 @@ fn render_fleet(
                 capabilities,
                 rendered,
                 error,
+                branches,
                 auth_available,
             }
         })
@@ -684,6 +745,35 @@ fn render_terminal(report: &PromptReport) -> String {
         out.push('\n');
     }
 
+    if let Some(context_eval) = report.context_eval.as_ref() {
+        out.push_str(&format!(
+            "\n# Context fixture gates: {} passed / {} total\n",
+            context_eval.passed, context_eval.total,
+        ));
+        for fixture in &context_eval.fixtures {
+            out.push_str(&format!(
+                "\n## {} ({} passed / {} total)\n",
+                fixture.path.display(),
+                fixture.passed,
+                fixture.total,
+            ));
+            for case in &fixture.cases {
+                out.push_str(&format!(
+                    "- {}: {} score={:.3} selected=[{}] tokens={}/{}\n",
+                    case.id,
+                    if case.pass { "pass" } else { "fail" },
+                    case.score.overall,
+                    case.selected_artifact_ids.join(", "),
+                    case.budget.total_tokens,
+                    case.budget.budget_tokens,
+                ));
+                for failure in &case.failures {
+                    out.push_str(&format!("    failure: {failure}\n"));
+                }
+            }
+        }
+    }
+
     if !report.runs.is_empty() {
         out.push_str("\n# Model responses\n");
         for render in &report.renders {
@@ -817,6 +907,30 @@ fn render_html(report: &PromptReport) -> String {
         out.push_str("</div>");
     }
     out.push_str("</div>");
+    if let Some(context_eval) = report.context_eval.as_ref() {
+        out.push_str(&format!(
+            "<h2>Context fixture gates</h2><p>{} passed / {} total</p>",
+            context_eval.passed, context_eval.total,
+        ));
+        for fixture in &context_eval.fixtures {
+            out.push_str(&format!(
+                "<h3>{}</h3><ul>",
+                html_escape(&fixture.path.to_string_lossy()),
+            ));
+            for case in &fixture.cases {
+                out.push_str(&format!(
+                    "<li><strong>{}</strong>: {} · score {:.3} · selected [{}] · tokens {}/{}</li>",
+                    html_escape(&case.id),
+                    if case.pass { "pass" } else { "fail" },
+                    case.score.overall,
+                    html_escape(&case.selected_artifact_ids.join(", ")),
+                    case.budget.total_tokens,
+                    case.budget.budget_tokens,
+                ));
+            }
+            out.push_str("</ul>");
+        }
+    }
     if let Some(judge) = report.judge.as_ref() {
         out.push_str(&format!(
             "<h2>Judge ({})</h2><pre>{}</pre>",
@@ -858,6 +972,7 @@ mod tests {
             ],
             fleet_name: None,
             bindings: None,
+            context_fixture: Vec::new(),
             mode: EvalPromptMode::Render,
             output: EvalPromptOutput::Terminal,
             out_file: None,
