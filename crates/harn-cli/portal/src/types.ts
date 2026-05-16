@@ -413,6 +413,28 @@ export type PortalTranscriptStep = {
   summary: string
 }
 
+export type PortalTemplateBranch = {
+  kind: string
+  template_uri: string
+  line: number
+  col: number
+  branch_id: string
+  branch_label: string | null
+}
+
+export type PortalTemplateRender = {
+  template_uri: string
+  template_revision_hash: string
+  rendered_bytes: number
+  provider: string
+  model: string
+  family: string
+  capabilities: Record<string, unknown>
+  branches: PortalTemplateBranch[]
+  span_id: number | null
+  timestamp: string | null
+}
+
 export type PortalStorySection = {
   title: string
   scope: string
@@ -602,6 +624,7 @@ export type PortalRunDetail = {
   artifacts: PortalArtifact[]
   execution_summary: PortalExecutionSummary | null
   transcript_steps: PortalTranscriptStep[]
+  template_renders: PortalTemplateRender[]
   story: PortalStorySection[]
   child_runs: PortalChildRun[]
   observability: RunObservability

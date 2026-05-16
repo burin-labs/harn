@@ -399,9 +399,15 @@ variables, unused functions, dead code after terminating statements,
 pointless comparisons, redundant clones, empty blocks, missing `/** */`
 HarnDoc on public functions, etc.).
 
+`harn lint` also walks `.harn.prompt` (and bare `.prompt`) files in the
+same pass and applies template-specific drift-prevention rules
+(`template-provider-identity-branch`,
+`template-variant-explosion` — see `docs/src/prompt-templating.md`).
+
 ```bash
 harn lint main.harn
 harn lint src/ tests/
+harn lint prompts/system.harn.prompt
 ```
 
 Pass `--fix` to automatically apply safe fixes (e.g., `var` → `let` for

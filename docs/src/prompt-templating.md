@@ -411,6 +411,45 @@ Capability dispatch is feature-based, not provider-string-based:
 | `thinking_block_style` | Controls `thinking_scaffold` (`none`, `thinking_blocks`, `reasoning_summary`, `inline`). |
 | `prefers_role_developer` | `system_framing` targets developer instructions instead of system instructions. |
 
+## Variant resolution in transcripts
+
+Every `render()` / `render_prompt()` call made under an LLM-aware frame
+(`llm_call`, `default_llm_caller`, `agent_loop`) emits a
+`template.render` event into the run's `llm_transcript.jsonl`. The event
+captures:
+
+- The resolved `llm` snapshot — `provider`, `model`, `family`, and the
+  full `capabilities` map at render time.
+- A branch trace listing every `{{ if }}` / `{{ elif }}` / `{{ else }}`
+  decision and every `{{ section }}` envelope that fired, anchored to
+  source line + column.
+- The template URI and a stable content hash (`template_revision_hash`)
+  so replay can detect "the rendered text matches but the source drifted
+  underneath" drift.
+
+The portal renders this as a "Variant resolution" panel in the run
+detail view. Renders outside any LLM frame (doc-gen, CI) emit no event.
+The trace is deterministic — the same `llm` snapshot and the same
+bindings always produce the same trace, which is what makes replay
+reproducible.
+
+## Drift-prevention lints
+
+`harn lint` walks `.harn.prompt` (and bare `.prompt`) files alongside
+`.harn` programs and enforces two rules that keep the
+capability-adaptive primitive honest:
+
+| Rule | What it catches |
+| :--- | :--- |
+| `template-provider-identity-branch` | Branching directly on `llm.provider`, `llm.model`, or `llm.family`. The diagnostic suggests the corresponding capability flag (e.g. `provider == "anthropic"` → `llm.capabilities.prefers_xml_scaffolding`). |
+| `template-variant-explosion` | More than `N` capability-aware conditionals in a single template. Default `N=3`, configurable via `[lint] template_variant_branch_threshold` in `harn.toml`. |
+
+Both rules can be disabled per-file via the standard `[lint] disabled`
+list. Lifting capability branches into [logical sections](#logical-sections)
+is the recommended way to silence variant-explosion without raising the
+threshold — the section's envelope dispatch lives in one shared place
+instead of being scattered across the prompt.
+
 ## Preflight checks
 
 `harn check` parses every template referenced by a literal `render(...)` /

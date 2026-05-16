@@ -137,6 +137,14 @@ impl TemplateAsset {
         }
     }
 
+    /// Stable content hash for the template source, used as the
+    /// `template_revision_hash` field on `template.render` transcript
+    /// events so replay can detect "the rendered text matches but the
+    /// source drifted underneath" drift (#1668).
+    pub(crate) fn template_revision_hash(&self) -> String {
+        blake3::hash(self.source.as_bytes()).to_hex().to_string()
+    }
+
     pub(crate) fn error_path(&self) -> Option<PathBuf> {
         match &self.location {
             TemplateLocation::Inline { source_path, .. } => source_path.clone(),

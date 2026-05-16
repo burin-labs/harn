@@ -16,7 +16,7 @@ use super::dto::{
 use super::errors::{bad_request_error, internal_error};
 use super::query::{ErrorResponse, ListRunsQuery};
 use super::skill_events::{extract as extract_skill_events, ExtractedEvents};
-use super::transcript::{build_story, discover_transcript_steps};
+use super::transcript::{build_story, discover_template_renders, discover_transcript_steps};
 use super::util::{
     compact_json, compact_metadata, date_ms, format_duration, humanize_kind, is_completed_status,
     is_failed_status, metadata_pretty_json, metadata_string, owning_stage, preview_text,
@@ -443,6 +443,7 @@ pub(super) fn build_run_detail(
     let checkpoints = build_checkpoints(run);
     let artifacts = build_artifacts(run);
     let transcript_steps = discover_transcript_steps(run_dir, relative_path).unwrap_or_default();
+    let template_renders = discover_template_renders(run_dir, relative_path).unwrap_or_default();
     let story = build_story(run);
     let child_runs = run
         .child_runs
@@ -489,6 +490,7 @@ pub(super) fn build_run_detail(
         artifacts,
         execution_summary: build_execution_summary(run.execution.as_ref()),
         transcript_steps,
+        template_renders,
         story,
         child_runs,
         observability: run.observability.clone().unwrap_or_else(|| {

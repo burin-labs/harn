@@ -323,6 +323,90 @@ fn append_llm_transcript_event_log(entry: &serde_json::Value) {
     }
 }
 
+/// Record a `template.render` transcript event for a `render()` /
+/// `render_prompt()` call that resolved under an LLM-aware frame.
+/// Captures the active LLM identity + capability snapshot plus the
+/// branch trace produced during rendering. Replay determinism is
+/// guaranteed by the renderer itself; this function is purely a
+/// serializer.
+pub fn record_template_render(
+    template_uri: &str,
+    template_revision_hash: &str,
+    ctx: &crate::stdlib::template::LlmRenderContext,
+    trace: &[crate::stdlib::template::BranchDecision],
+    rendered_bytes: usize,
+) {
+    let branches = trace
+        .iter()
+        .map(|decision| {
+            let mut entry = serde_json::Map::new();
+            entry.insert(
+                "kind".to_string(),
+                serde_json::Value::String(decision.kind.as_str().to_string()),
+            );
+            entry.insert(
+                "template_uri".to_string(),
+                serde_json::Value::String(decision.template_uri.clone()),
+            );
+            entry.insert("line".to_string(), serde_json::json!(decision.line));
+            entry.insert("col".to_string(), serde_json::json!(decision.col));
+            entry.insert(
+                "branch_id".to_string(),
+                serde_json::Value::String(decision.branch_id.clone()),
+            );
+            if let Some(label) = decision.branch_label.as_ref() {
+                entry.insert(
+                    "branch_label".to_string(),
+                    serde_json::Value::String(label.clone()),
+                );
+            }
+            serde_json::Value::Object(entry)
+        })
+        .collect::<Vec<_>>();
+    let llm = serde_json::json!({
+        "provider": ctx.provider,
+        "model": ctx.model,
+        "family": ctx.family,
+        "capabilities": vm_value_to_json(&ctx.capabilities),
+    });
+    let mut fields = serde_json::Map::new();
+    fields.insert(
+        "template_uri".to_string(),
+        serde_json::Value::String(template_uri.to_string()),
+    );
+    fields.insert(
+        "template_revision_hash".to_string(),
+        serde_json::Value::String(template_revision_hash.to_string()),
+    );
+    fields.insert("llm".to_string(), llm);
+    fields.insert("branches".to_string(), serde_json::Value::Array(branches));
+    fields.insert(
+        "rendered_bytes".to_string(),
+        serde_json::json!(rendered_bytes),
+    );
+    append_llm_observability_entry("template.render", fields);
+}
+
+fn vm_value_to_json(value: &crate::value::VmValue) -> serde_json::Value {
+    use crate::value::VmValue;
+    match value {
+        VmValue::Nil => serde_json::Value::Null,
+        VmValue::Bool(b) => serde_json::Value::Bool(*b),
+        VmValue::Int(n) => serde_json::json!(*n),
+        VmValue::Float(f) => serde_json::json!(*f),
+        VmValue::String(s) => serde_json::Value::String(s.to_string()),
+        VmValue::List(items) => {
+            serde_json::Value::Array(items.iter().map(vm_value_to_json).collect())
+        }
+        VmValue::Dict(d) => serde_json::Value::Object(
+            d.iter()
+                .map(|(k, v)| (k.clone(), vm_value_to_json(v)))
+                .collect(),
+        ),
+        other => serde_json::Value::String(other.display()),
+    }
+}
+
 pub(crate) fn append_llm_observability_entry(
     event_type: &str,
     mut fields: serde_json::Map<String, serde_json::Value>,
@@ -995,6 +1079,55 @@ mod retry_tests {
             message: msg.to_string(),
             category,
         }
+    }
+
+    #[test]
+    fn template_render_event_round_trips_through_jsonl() {
+        use crate::stdlib::template::{
+            render_template_to_string, LlmRenderContext, LlmRenderContextGuard,
+        };
+        let dir = tempfile::tempdir().expect("tempdir");
+        push_llm_transcript_dir(dir.path().to_str().expect("utf8"));
+        {
+            let _ctx = LlmRenderContextGuard::enter(LlmRenderContext::resolve(
+                "anthropic",
+                "claude-opus-4-7",
+            ));
+            let rendered = render_template_to_string(
+                "{{ if llm.capabilities.native_tools }}native{{ else }}text{{ end }}\
+                 {{ section \"task\" }}b{{ endsection }}",
+                None,
+                None,
+                None,
+            )
+            .expect("render");
+            assert!(rendered.contains("native"));
+            assert!(rendered.contains("<task>"));
+        }
+        pop_llm_transcript_dir();
+        let transcript = std::fs::read_to_string(dir.path().join("llm_transcript.jsonl"))
+            .expect("read transcript");
+        let line = transcript
+            .lines()
+            .find(|line| line.contains("\"template.render\""))
+            .expect("template.render event present");
+        let event: serde_json::Value = serde_json::from_str(line).expect("parse event");
+        assert_eq!(event["type"], "template.render");
+        assert_eq!(event["llm"]["provider"], "anthropic");
+        assert_eq!(event["llm"]["family"], "claude");
+        assert_eq!(event["llm"]["capabilities"]["native_tools"], true);
+        let branches = event["branches"].as_array().expect("branches array");
+        let if_branch = branches
+            .iter()
+            .find(|b| b["kind"] == "if")
+            .expect("if branch present");
+        assert_eq!(if_branch["branch_id"], "if");
+        let section_branch = branches
+            .iter()
+            .find(|b| b["kind"] == "section")
+            .expect("section branch present");
+        assert_eq!(section_branch["branch_id"], "xml");
+        assert_eq!(section_branch["branch_label"], "task");
     }
 
     #[test]

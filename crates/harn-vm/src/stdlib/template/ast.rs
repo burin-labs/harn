@@ -7,7 +7,7 @@ pub(super) enum Node {
         col: usize,
     },
     If {
-        branches: Vec<(Expr, Vec<Node>)>,
+        branches: Vec<IfBranch>,
         else_branch: Option<Vec<Node>>,
         line: usize,
         col: usize,
@@ -39,6 +39,18 @@ pub(super) enum Node {
     LegacyBareInterp {
         ident: String,
     },
+}
+
+/// One `{{ if expr }}` or `{{ elif expr }}` branch inside an
+/// [`Node::If`] chain. Tracks per-branch source position so lint
+/// rules and the branch-trace recorder can point at the specific
+/// `{{ if }} / {{ elif }}` directive that fired (or didn't).
+#[derive(Debug, Clone)]
+pub(super) struct IfBranch {
+    pub(super) cond: Expr,
+    pub(super) line: usize,
+    pub(super) col: usize,
+    pub(super) body: Vec<Node>,
 }
 
 #[derive(Debug, Clone)]

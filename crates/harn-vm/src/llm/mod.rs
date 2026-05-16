@@ -12,7 +12,7 @@
 //! - `config_builtins`: Provider configuration query builtins
 
 mod agent_config;
-mod agent_observe;
+pub(crate) mod agent_observe;
 mod agent_runtime;
 mod agent_session_host;
 mod agent_tools;

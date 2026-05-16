@@ -83,6 +83,28 @@ const messages = defineMessages({
     defaultMessage:
       "Saved request/response turns from llm_transcript.jsonl when a transcript sidecar exists.",
   },
+  variantResolution: {
+    id: "portal.detail.variantResolution",
+    defaultMessage: "Variant resolution",
+  },
+  variantResolutionCopy: {
+    id: "portal.detail.variantResolutionCopy",
+    defaultMessage:
+      "Which capability-adaptive branches fired in each prompt template, alongside the resolved LLM identity and capability snapshot.",
+  },
+  noTemplateRenders: {
+    id: "portal.detail.noTemplateRenders",
+    defaultMessage:
+      "No template.render events were captured for this run. (Variant resolution is only recorded when render() runs inside an LLM-aware frame.)",
+  },
+  variantBranchesNone: {
+    id: "portal.detail.variantBranchesNone",
+    defaultMessage: "No capability branches recorded.",
+  },
+  variantCapabilitiesNone: {
+    id: "portal.detail.variantCapabilitiesNone",
+    defaultMessage: "No capability snapshot recorded.",
+  },
   transcriptStory: { id: "portal.detail.transcriptStory", defaultMessage: "Transcript story" },
   transcriptStoryCopy: {
     id: "portal.detail.transcriptStoryCopy",
@@ -1322,6 +1344,70 @@ export function RunDetail({ detail, runs, onSelectRun }: RunDetailProps) {
             ))
           ) : (
             <div className="muted">{intl.formatMessage(messages.noArtifacts)}</div>
+          )}
+        </div>
+      </section>
+
+      <section className="panel">
+        <div className="panel-header">
+          <div>
+            <h3>{intl.formatMessage(messages.variantResolution)}</h3>
+            <p>{intl.formatMessage(messages.variantResolutionCopy)}</p>
+          </div>
+        </div>
+        <div className="turn-list">
+          {detail.template_renders.length ? (
+            detail.template_renders.map((render, index) => {
+              const capabilityKeys = Object.keys(render.capabilities)
+              return (
+                <div className="turn-item" key={`${render.template_uri}-${index}`}>
+                  <div className="row">
+                    <strong>{render.template_uri || "(inline template)"}</strong>
+                    <span className="pill running">{render.family || "unknown"}</span>
+                  </div>
+                  <div className="meta">
+                    {render.provider}
+                    {render.model ? ` • ${render.model}` : ""}
+                    {render.rendered_bytes ? ` • ${formatNumber(render.rendered_bytes)} bytes` : ""}
+                  </div>
+                  <div className="turn-chip-row">
+                    {render.branches.length ? (
+                      render.branches.map((branch, branchIndex) => (
+                        <span
+                          className="turn-chip"
+                          key={`${branch.template_uri}:${branch.line}:${branch.col}:${branchIndex}`}
+                          title={branch.branch_label ?? undefined}
+                        >
+                          {branch.kind}:{branch.branch_id}
+                          {branch.branch_label ? ` — ${branch.branch_label}` : ""}
+                        </span>
+                      ))
+                    ) : (
+                      <span className="muted">
+                        {intl.formatMessage(messages.variantBranchesNone)}
+                      </span>
+                    )}
+                  </div>
+                  <details>
+                    <summary>Capability snapshot</summary>
+                    {capabilityKeys.length ? (
+                      <pre>
+                        {capabilityKeys
+                          .sort()
+                          .map((key) => `${key}: ${JSON.stringify(render.capabilities[key])}`)
+                          .join("\n")}
+                      </pre>
+                    ) : (
+                      <div className="muted">
+                        {intl.formatMessage(messages.variantCapabilitiesNone)}
+                      </div>
+                    )}
+                  </details>
+                </div>
+              )
+            })
+          ) : (
+            <div className="muted">{intl.formatMessage(messages.noTemplateRenders)}</div>
           )}
         </div>
       </section>

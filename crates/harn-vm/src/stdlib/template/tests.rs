@@ -639,3 +639,76 @@ fn include_cannot_escape_template_root() {
 fn tempdir() -> tempfile::TempDir {
     tempfile::tempdir().unwrap()
 }
+
+// Branch-trace coverage for #1668. The transcript event built on this
+// trace is what powers the portal's variant-resolution panel; here we
+// assert determinism (same llm snapshot → same trace) plus the
+// labels the trace consumer expects.
+
+#[test]
+fn branch_trace_records_if_taken_branch() {
+    let _guard =
+        LlmRenderContextGuard::enter(LlmRenderContext::resolve("anthropic", "claude-opus-4-7"));
+    let tpl = "{{ if llm.capabilities.native_tools }}native{{ else }}text{{ end }}";
+    let (rendered, trace) = render_template_collect_branch_trace(tpl).unwrap();
+    assert_eq!(rendered, "native");
+    assert_eq!(trace.len(), 1);
+    let decision = &trace[0];
+    assert_eq!(decision.kind, BranchKind::If);
+    assert_eq!(decision.branch_id, "if");
+    assert_eq!(
+        decision.branch_label.as_deref(),
+        Some("llm.capabilities.native_tools"),
+    );
+}
+
+#[test]
+fn branch_trace_records_else_when_no_branch_matches() {
+    let _guard =
+        LlmRenderContextGuard::enter(LlmRenderContext::resolve("anthropic", "claude-opus-4-7"));
+    let tpl =
+        "{{ if llm.provider == \"openai\" }}openai{{ elif llm.provider == \"google\" }}google{{ else }}other{{ end }}";
+    let (rendered, trace) = render_template_collect_branch_trace(tpl).unwrap();
+    assert_eq!(rendered, "other");
+    assert_eq!(trace.len(), 1);
+    assert_eq!(trace[0].branch_id, "else");
+}
+
+#[test]
+fn branch_trace_records_section_envelope() {
+    let _guard =
+        LlmRenderContextGuard::enter(LlmRenderContext::resolve("anthropic", "claude-opus-4-7"));
+    let tpl = "{{ section \"task\" }}Build a tree CLI.{{ endsection }}";
+    let (_rendered, trace) = render_template_collect_branch_trace(tpl).unwrap();
+    let section = trace
+        .iter()
+        .find(|d| d.kind == BranchKind::Section)
+        .expect("section trace entry");
+    assert_eq!(section.branch_id, "xml");
+    assert_eq!(section.branch_label.as_deref(), Some("task"));
+}
+
+#[test]
+fn branch_trace_is_deterministic_across_repeated_renders() {
+    let _guard =
+        LlmRenderContextGuard::enter(LlmRenderContext::resolve("anthropic", "claude-opus-4-7"));
+    let tpl = "\
+{{ if llm.capabilities.native_tools }}n{{ end }}\
+{{ section \"task\" }}b{{ endsection }}";
+    let (_, trace_a) = render_template_collect_branch_trace(tpl).unwrap();
+    let (_, trace_b) = render_template_collect_branch_trace(tpl).unwrap();
+    assert_eq!(trace_a, trace_b);
+}
+
+#[test]
+fn branch_trace_label_summarizes_provider_identity_comparison() {
+    let _guard = LlmRenderContextGuard::enter(LlmRenderContext::resolve("openai", "gpt-5.4"));
+    let tpl = "{{ if llm.provider == \"openai\" }}o{{ else }}x{{ end }}";
+    let (_rendered, trace) = render_template_collect_branch_trace(tpl).unwrap();
+    assert_eq!(trace.len(), 1);
+    assert_eq!(trace[0].branch_id, "if");
+    assert_eq!(
+        trace[0].branch_label.as_deref(),
+        Some("llm.provider == \"openai\""),
+    );
+}

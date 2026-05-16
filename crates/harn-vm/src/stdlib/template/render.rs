@@ -3,10 +3,10 @@ use std::rc::Rc;
 
 use crate::value::{values_equal, VmValue};
 
-use super::ast::{BinOp, Expr, Node, PathSeg, UnOp};
+use super::ast::{BinOp, Expr, IfBranch, Node, PathSeg, UnOp};
 use super::error::TemplateError;
 use super::filters::apply_filter;
-use super::{PromptSourceSpan, PromptSpanKind, TemplateAsset};
+use super::{BranchDecision, BranchKind, PromptSourceSpan, PromptSpanKind, TemplateAsset};
 
 #[derive(Default, Debug, Clone)]
 pub(super) struct Scope<'a> {
@@ -68,6 +68,11 @@ pub(super) struct RenderCtx {
     /// IDE can walk a breadcrumb back through nested includes
     /// (#96). `None` at the top level.
     pub(super) current_include_parent: Option<Box<PromptSourceSpan>>,
+    /// When set, every conditional / section node appends a
+    /// [`BranchDecision`] here so callers can reconstruct which
+    /// capability-adaptive branches fired. Only populated when the
+    /// top-level render entry-point opts in.
+    pub(super) branch_trace: Option<Vec<BranchDecision>>,
 }
 
 /// Template URI reported alongside every span. Filesystem templates use
@@ -159,20 +164,21 @@ fn render_node(
             line,
             col,
         } => {
-            let mut matched = false;
-            for (cond, body) in branches {
-                let v = eval_expr(cond, scope, *line, *col)?;
+            let mut matched: Option<usize> = None;
+            for (idx, branch) in branches.iter().enumerate() {
+                let v = eval_expr(&branch.cond, scope, branch.line, branch.col)?;
                 if truthy(&v) {
-                    render_nodes(body, scope, rc, out, spans.as_deref_mut())?;
-                    matched = true;
+                    render_nodes(&branch.body, scope, rc, out, spans.as_deref_mut())?;
+                    matched = Some(idx);
                     break;
                 }
             }
-            if !matched {
+            if matched.is_none() {
                 if let Some(eb) = else_branch {
                     render_nodes(eb, scope, rc, out, spans.as_deref_mut())?;
                 }
             }
+            record_branch_if(rc, *line, *col, branches, else_branch.is_some(), matched);
             if let Some(spans) = spans.as_deref_mut() {
                 spans.push(PromptSourceSpan {
                     template_line: *line,
@@ -346,6 +352,17 @@ fn render_node(
                 *line,
                 *col,
             )?;
+            let template_uri = current_template_uri(rc);
+            if let Some(trace) = rc.branch_trace.as_mut() {
+                trace.push(BranchDecision {
+                    kind: BranchKind::Section,
+                    template_uri,
+                    line: *line,
+                    col: *col,
+                    branch_id: section.envelope.to_string(),
+                    branch_label: Some(name.clone()),
+                });
+            }
             out.push_str(&section.text);
             if let Some(spans) = spans {
                 if let (Some(child_spans), Some(body_output_start)) =
@@ -379,6 +396,112 @@ fn render_node(
         }
     }
     Ok(())
+}
+
+/// Record a branch decision for an `{{ if }}` chain.
+///
+/// `matched` is the 0-based index of the conditional whose body fired;
+/// `None` means none of the conditions were truthy. `had_else` is true
+/// when the source carried an `{{ else }}` branch, which is the
+/// label used in the trace when no condition matched but an else
+/// rendered.
+fn record_branch_if(
+    rc: &mut RenderCtx,
+    line: usize,
+    col: usize,
+    branches: &[IfBranch],
+    had_else: bool,
+    matched: Option<usize>,
+) {
+    if rc.branch_trace.is_none() {
+        return;
+    }
+    let template_uri = current_template_uri(rc);
+    let (branch_id, branch_label, anchor_line, anchor_col) = match matched {
+        Some(0) => (
+            "if".to_string(),
+            describe_condition(&branches[0].cond),
+            branches[0].line,
+            branches[0].col,
+        ),
+        Some(idx) => (
+            format!("elif:{idx}"),
+            describe_condition(&branches[idx].cond),
+            branches[idx].line,
+            branches[idx].col,
+        ),
+        None if had_else => ("else".to_string(), None, line, col),
+        None => ("none".to_string(), None, line, col),
+    };
+    if let Some(trace) = rc.branch_trace.as_mut() {
+        trace.push(BranchDecision {
+            kind: BranchKind::If,
+            template_uri,
+            line: anchor_line,
+            col: anchor_col,
+            branch_id,
+            branch_label,
+        });
+    }
+}
+
+/// Describe an `{{ if expr }}` condition compactly so the trace shows
+/// *what* gated the branch (e.g. `llm.capabilities.native_tools`). The
+/// renderer doesn't depend on perfect source reconstruction here — the
+/// trace already carries line/col for jump-to-source — but a readable
+/// label helps in the portal's variant-resolution panel.
+fn describe_condition(expr: &Expr) -> Option<String> {
+    match expr {
+        Expr::Path(segs) => Some(format_path(segs)),
+        Expr::Unary(UnOp::Not, inner) => describe_condition(inner).map(|s| format!("!{s}")),
+        Expr::Binary(op, a, b) => {
+            let lhs = describe_value(a);
+            let rhs = describe_value(b);
+            let op_str = match op {
+                BinOp::Eq => "==",
+                BinOp::Neq => "!=",
+                BinOp::Lt => "<",
+                BinOp::Le => "<=",
+                BinOp::Gt => ">",
+                BinOp::Ge => ">=",
+                BinOp::And => "&&",
+                BinOp::Or => "||",
+            };
+            Some(format!("{lhs} {op_str} {rhs}"))
+        }
+        Expr::Filter(inner, name, _) => describe_condition(inner).map(|s| format!("{s} | {name}")),
+        _ => Some(describe_value(expr)),
+    }
+}
+
+fn describe_value(expr: &Expr) -> String {
+    match expr {
+        Expr::Nil => "nil".to_string(),
+        Expr::Bool(b) => b.to_string(),
+        Expr::Int(n) => n.to_string(),
+        Expr::Float(f) => f.to_string(),
+        Expr::Str(s) => format!("\"{s}\""),
+        Expr::Path(segs) => format_path(segs),
+        _ => "<expr>".to_string(),
+    }
+}
+
+fn format_path(segs: &[PathSeg]) -> String {
+    let mut out = String::new();
+    for (idx, seg) in segs.iter().enumerate() {
+        match seg {
+            PathSeg::Field(name) | PathSeg::Key(name) => {
+                if idx > 0 {
+                    out.push('.');
+                }
+                out.push_str(name);
+            }
+            PathSeg::Index(i) => {
+                out.push_str(&format!("[{i}]"));
+            }
+        }
+    }
+    out
 }
 
 /// Cap a rendered value's preview at 80 chars so span records don't

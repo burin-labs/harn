@@ -250,6 +250,36 @@ pub(super) struct PortalTranscriptStep {
     pub(super) summary: String,
 }
 
+/// Variant-resolution snapshot recovered from a `template.render`
+/// transcript event. One entry per top-level `render()` /
+/// `render_prompt()` call that executed inside an LLM-aware frame.
+/// Powers the portal's "Variant resolution" panel (#1668) so on-call
+/// engineers can answer "which capability branch fired for this
+/// model?" without re-running the template.
+#[derive(Debug, Clone, Serialize)]
+pub(super) struct PortalTemplateRender {
+    pub(super) template_uri: String,
+    pub(super) template_revision_hash: String,
+    pub(super) rendered_bytes: usize,
+    pub(super) provider: String,
+    pub(super) model: String,
+    pub(super) family: String,
+    pub(super) capabilities: BTreeMap<String, serde_json::Value>,
+    pub(super) branches: Vec<PortalTemplateBranch>,
+    pub(super) span_id: Option<u64>,
+    pub(super) timestamp: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub(super) struct PortalTemplateBranch {
+    pub(super) kind: String,
+    pub(super) template_uri: String,
+    pub(super) line: usize,
+    pub(super) col: usize,
+    pub(super) branch_id: String,
+    pub(super) branch_label: Option<String>,
+}
+
 #[derive(Debug, Clone, Serialize)]
 pub(super) struct PortalStorySection {
     pub(super) title: String,
@@ -342,6 +372,7 @@ pub(super) struct PortalRunDetail {
     pub(super) artifacts: Vec<PortalArtifact>,
     pub(super) execution_summary: Option<PortalExecutionSummary>,
     pub(super) transcript_steps: Vec<PortalTranscriptStep>,
+    pub(super) template_renders: Vec<PortalTemplateRender>,
     pub(super) story: Vec<PortalStorySection>,
     pub(super) child_runs: Vec<PortalChildRun>,
     pub(super) observability: harn_vm::orchestration::RunObservabilityRecord,
