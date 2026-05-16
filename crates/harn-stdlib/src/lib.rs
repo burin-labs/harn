@@ -38,6 +38,18 @@ pub const STDLIB_SOURCES: &[StdlibSource] = &[
         source: include_str!("stdlib/stdlib_text.harn"),
     },
     StdlibSource {
+        module: "ansi",
+        source: include_str!("stdlib/stdlib_ansi.harn"),
+    },
+    StdlibSource {
+        module: "table",
+        source: include_str!("stdlib/stdlib_table.harn"),
+    },
+    StdlibSource {
+        module: "diff",
+        source: include_str!("stdlib/stdlib_diff.harn"),
+    },
+    StdlibSource {
         module: "edit",
         source: include_str!("stdlib/stdlib_edit.harn"),
     },
@@ -56,6 +68,14 @@ pub const STDLIB_SOURCES: &[StdlibSource] = &[
     StdlibSource {
         module: "path",
         source: include_str!("stdlib/stdlib_path.harn"),
+    },
+    StdlibSource {
+        module: "fs",
+        source: include_str!("stdlib/stdlib_fs.harn"),
+    },
+    StdlibSource {
+        module: "os",
+        source: include_str!("stdlib/stdlib_os.harn"),
     },
     StdlibSource {
         module: "json",
@@ -156,6 +176,10 @@ pub const STDLIB_SOURCES: &[StdlibSource] = &[
     StdlibSource {
         module: "cli",
         source: include_str!("stdlib/stdlib_cli.harn"),
+    },
+    StdlibSource {
+        module: "gha",
+        source: include_str!("stdlib/stdlib_gha.harn"),
     },
     StdlibSource {
         module: "tui",

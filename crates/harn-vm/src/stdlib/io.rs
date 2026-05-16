@@ -109,6 +109,10 @@ const IO_SYNC_PRIMITIVES: &[SyncBuiltin] = &[
         .signature("set_color_mode(mode)")
         .arity(VmBuiltinArity::Exact(1))
         .doc("Set ANSI color handling to auto, always, or never."),
+    SyncBuiltin::new("__ansi_enabled", ansi_enabled_builtin)
+        .signature("__ansi_enabled(stream?)")
+        .arity(VmBuiltinArity::Range { min: 0, max: 1 })
+        .doc("Return whether ANSI styling is enabled for stdin, stdout, or stderr."),
     SyncBuiltin::new("eprint", eprint_builtin)
         .signature("eprint(message)")
         .arity(VmBuiltinArity::Exact(1))
@@ -701,6 +705,19 @@ fn set_color_mode_builtin(args: &[VmValue], _out: &mut String) -> Result<VmValue
     };
     COLOR_MODE.with(|m| *m.borrow_mut() = parsed);
     Ok(VmValue::Nil)
+}
+
+fn ansi_enabled_builtin(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
+    let stream = args
+        .first()
+        .map(|a| a.display())
+        .unwrap_or_else(|| "stdout".to_string());
+    match stream.as_str() {
+        "stdin" | "stdout" | "stderr" => Ok(VmValue::Bool(ansi_enabled_for_stream(&stream))),
+        other => Err(VmError::Thrown(VmValue::String(Rc::from(format!(
+            "__ansi_enabled: invalid stream '{other}'. Expected 'stdin', 'stdout', or 'stderr'."
+        ))))),
+    }
 }
 
 fn eprint_builtin(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {

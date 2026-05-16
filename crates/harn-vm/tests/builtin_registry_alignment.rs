@@ -240,7 +240,7 @@ fn migrated_stdlib_modules_publish_runtime_metadata() {
     let migrated_categories = [
         ("concurrency", 51usize),
         ("fs", 18usize),
-        ("io", 34usize),
+        ("io", 35usize),
         ("tui", 3usize),
     ];
 

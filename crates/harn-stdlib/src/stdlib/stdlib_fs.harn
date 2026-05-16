@@ -1,0 +1,193 @@
+// std/fs - file-system convenience helpers built on the host fs primitives.
+import { pretty, safe_parse } from "std/json"
+
+type WriteDataOptions = {pretty?: bool, trailing_newline?: bool, ensure_parent?: bool}
+
+fn __fs_norm(path) -> string {
+  return replace(path ?? "", "\\", "/")
+}
+
+fn __fs_parent(path) -> string {
+  return dirname(path ?? "")
+}
+
+fn __fs_with_newline(text, trailing_newline) {
+  if !(trailing_newline ?? true) || ends_with(text, "\n") {
+    return text
+  }
+  return text + "\n"
+}
+
+/** Create the parent directory for `path` when it is not `.` or empty. */
+pub fn ensure_parent_dir(path: string) {
+  let parent = __fs_parent(path)
+  if parent != "" && parent != "." {
+    mkdir(parent)
+  }
+}
+
+/** Read and parse a JSON file, returning `fallback` for missing or invalid files. */
+pub fn read_json(path: string, fallback = nil) {
+  if !file_exists(path) {
+    return fallback
+  }
+  let parsed = safe_parse(read_file(path))
+  if parsed == nil {
+    return fallback
+  }
+  return parsed
+}
+
+/** Read and parse a JSON file, returning `{ok, value?, error?}`. */
+pub fn read_json_result(path: string) -> dict {
+  if !file_exists(path) {
+    return {ok: false, error: "file not found: " + path}
+  }
+  let parsed = try {
+    json_parse(read_file(path))
+  }
+  if is_ok(parsed) {
+    return {ok: true, value: unwrap(parsed)}
+  }
+  return {ok: false, error: to_string(parsed)}
+}
+
+/** Write a JSON file with optional pretty formatting and parent-dir creation. */
+pub fn write_json(path: string, value, options: WriteDataOptions = {}) {
+  let opts = options ?? {}
+  if opts.ensure_parent ?? true {
+    ensure_parent_dir(path)
+  }
+  let body = if opts.pretty ?? false {
+    pretty(value)
+  } else {
+    json_stringify(value)
+  }
+  write_file(path, __fs_with_newline(body, opts?.trailing_newline ?? true))
+}
+
+/** Read and parse a YAML file, returning `fallback` for missing or invalid files. */
+pub fn read_yaml(path: string, fallback = nil) {
+  if !file_exists(path) {
+    return fallback
+  }
+  let parsed = try {
+    yaml_parse(read_file(path))
+  }
+  if is_ok(parsed) {
+    return unwrap(parsed)
+  }
+  return fallback
+}
+
+/** Write a YAML file. */
+pub fn write_yaml(path: string, value, options: WriteDataOptions = {}) {
+  let opts = options ?? {}
+  if opts.ensure_parent ?? true {
+    ensure_parent_dir(path)
+  }
+  write_file(path, __fs_with_newline(yaml_stringify(value), opts?.trailing_newline ?? true))
+}
+
+/** Read and parse a TOML file, returning `fallback` for missing or invalid files. */
+pub fn read_toml(path: string, fallback = nil) {
+  if !file_exists(path) {
+    return fallback
+  }
+  let parsed = try {
+    toml_parse(read_file(path))
+  }
+  if is_ok(parsed) {
+    return unwrap(parsed)
+  }
+  return fallback
+}
+
+/** Write a TOML file. */
+pub fn write_toml(path: string, value, options: WriteDataOptions = {}) {
+  let opts = options ?? {}
+  if opts.ensure_parent ?? true {
+    ensure_parent_dir(path)
+  }
+  write_file(path, __fs_with_newline(toml_stringify(value), opts?.trailing_newline ?? true))
+}
+
+/** Write a list of lines as a text file. */
+pub fn write_lines(path: string, lines: list<string>, options: WriteDataOptions = {}) {
+  let opts = options ?? {}
+  if opts.ensure_parent ?? true {
+    ensure_parent_dir(path)
+  }
+  write_file(path, __fs_with_newline(join(lines ?? [], "\n"), opts?.trailing_newline ?? true))
+}
+
+/** Append one line to a text file. */
+pub fn append_line(path: string, line: string) {
+  let text = line ?? ""
+  append_file(path, text + "\n")
+}
+
+/** Create a file if missing and update it to empty content only on first creation. */
+pub fn touch(path: string) {
+  if !file_exists(path) {
+    ensure_parent_dir(path)
+    write_file(path, "")
+  }
+}
+
+/** Return files matching `pattern` below `root`, using the host glob implementation. */
+pub fn find_files(root: string, pattern: string, options = {}) -> list<string> {
+  let matches = glob(pattern, {base: root, long_running: options?.long_running ?? false})
+  if options?.relative ?? false {
+    return matches.map({ path -> relative_path(root, path) }).to_list()
+  }
+  return matches
+}
+
+/** Return `path` relative to `root` when it is inside that root. */
+pub fn relative_path(root: string, path: string) -> string {
+  let base_raw = __fs_norm(root)
+  let target = __fs_norm(path)
+  let base = if ends_with(base_raw, "/") {
+    base_raw
+  } else {
+    base_raw + "/"
+  }
+  if starts_with(target, base) {
+    return substring(target, len(base))
+  }
+  return target
+}
+
+/** Return whether `path` exists and is a regular file. */
+pub fn is_file(path: string) -> bool {
+  let info = try {
+    stat(path)
+  }
+  if !is_ok(info) {
+    return false
+  }
+  return unwrap(info)?.is_file ?? false
+}
+
+/** Return whether `path` exists and is a directory. */
+pub fn is_dir(path: string) -> bool {
+  let info = try {
+    stat(path)
+  }
+  if !is_ok(info) {
+    return false
+  }
+  return unwrap(info)?.is_dir ?? false
+}
+
+/** Return a file size in bytes, or nil when the path cannot be statted. */
+pub fn file_size(path: string) {
+  let info = try {
+    stat(path)
+  }
+  if is_ok(info) {
+    return unwrap(info)?.size
+  }
+  return nil
+}

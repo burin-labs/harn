@@ -156,6 +156,54 @@ pub fn truncate_head_tail(text, n) {
     + join(lines[-n:], "\n")
 }
 
+/** Truncate text to `max_chars`, appending a deterministic marker when clipped. */
+pub fn truncate_text(text, max_chars = 4000, marker = nil) {
+  let value = text ?? ""
+  let limit = max_chars ?? 4000
+  if limit <= 0 || len(value) <= limit {
+    return value
+  }
+  let suffix = marker ?? ("\n... truncated " + to_string(len(value) - limit) + " chars ...")
+  return substring(value, 0, limit) + suffix
+}
+
+/** Keep both ends of long text, with a marker in the middle. */
+pub fn truncate_middle(text, max_chars = 4000, marker = "...") {
+  let value = text ?? ""
+  let limit = max_chars ?? 4000
+  if limit <= 0 || len(value) <= limit {
+    return value
+  }
+  let suffix = marker ?? "..."
+  if limit <= len(suffix) {
+    return substring(suffix, 0, limit)
+  }
+  let keep = limit - len(suffix)
+  let head = ceil(keep / 2)
+  let tail = keep - head
+  return substring(value, 0, head) + suffix + substring(value, len(value) - tail)
+}
+
+/** Collapse whitespace for one-line report fields, returning fallback for blank input. */
+pub fn single_line_or(value, fallback = "") {
+  let text = trim(value ?? "")
+  if text == "" {
+    return fallback
+  }
+  return regex_replace_all("\\s+", " ", text)
+}
+
+/** Prefix each line in text. */
+pub fn prefix_lines(text, prefix = "  ") {
+  let p = prefix ?? ""
+  return split(text ?? "", "\n").map({ line -> p + line }).join("\n")
+}
+
+/** Indent text by `spaces` spaces. */
+pub fn indent(text, spaces = 2) {
+  return prefix_lines(text, " ".repeat(max(spaces ?? 0, 0)))
+}
+
 // Check if compiler/build output contains compile error indicators.
 // Case-sensitive match; recognises Python, Rust, Go, and generic patterns.
 /** detect_compile_error. */

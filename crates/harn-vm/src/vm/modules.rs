@@ -40,8 +40,13 @@ fn reset_stdlib_module_artifact_cache() {
 }
 
 #[cfg(test)]
-fn stdlib_module_artifact_cache_len() -> usize {
-    stdlib_module_artifact_cache().lock().unwrap().len()
+fn stdlib_module_artifact_cache_ptr(module: &str, source: &str) -> Option<usize> {
+    let key = stdlib_artifact_cache_key(module, source);
+    stdlib_module_artifact_cache()
+        .lock()
+        .unwrap()
+        .get(&key)
+        .map(|artifact| Arc::as_ptr(artifact) as usize)
 }
 
 #[derive(Clone)]
@@ -812,6 +817,11 @@ mod tests {
             .unwrap()
     }
 
+    fn cached_stdlib_module_ptr(module: &str) -> Option<usize> {
+        let source = harn_stdlib::get_stdlib_source(module).expect("stdlib module source exists");
+        stdlib_module_artifact_cache_ptr(module, source)
+    }
+
     #[test]
     fn stdlib_artifact_cache_reuses_compilation_with_fresh_vm_state() {
         let _guard = cache_test_guard();
@@ -828,7 +838,8 @@ mod tests {
                 .await
                 .expect("first stdlib import succeeds")
         });
-        assert_eq!(stdlib_module_artifact_cache_len(), 1);
+        let first_cached =
+            cached_stdlib_module_ptr("agent/prompts").expect("first import cached stdlib artifact");
 
         let second_exports = runtime.block_on(async {
             let mut second_vm = Vm::new();
@@ -837,7 +848,10 @@ mod tests {
                 .await
                 .expect("second stdlib import succeeds")
         });
-        assert_eq!(stdlib_module_artifact_cache_len(), 1);
+        assert_eq!(
+            cached_stdlib_module_ptr("agent/prompts"),
+            Some(first_cached)
+        );
 
         let first = first_exports
             .get("render_agent_prompt")
@@ -873,7 +887,8 @@ mod tests {
             });
         });
         handle.join().expect("thread joins");
-        assert_eq!(stdlib_module_artifact_cache_len(), 1);
+        let thread_cached = cached_stdlib_module_ptr("agent/prompts")
+            .expect("thread import cached stdlib artifact");
 
         let runtime = tokio::runtime::Builder::new_current_thread()
             .enable_all()
@@ -885,6 +900,9 @@ mod tests {
                 .await
                 .expect("main-thread stdlib import succeeds");
         });
-        assert_eq!(stdlib_module_artifact_cache_len(), 1);
+        assert_eq!(
+            cached_stdlib_module_ptr("agent/prompts"),
+            Some(thread_cached)
+        );
     }
 }

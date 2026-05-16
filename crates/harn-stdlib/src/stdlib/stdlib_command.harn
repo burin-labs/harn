@@ -1,4 +1,6 @@
 /** std/command - deterministic command steps for Harn scripts. */
+import { truncate_text } from "std/text"
+
 fn __command_options(options) {
   return options ?? {}
 }
@@ -592,5 +594,70 @@ pub fn command_step_ref(step, options = nil) -> dict {
     stdout_path: step?.stdout_path,
     stderr_path: step?.stderr_path,
     tail: __command_suffix(step?.failure_tail ?? step?.tail ?? step?.combined, tail_bytes),
+  }
+}
+
+/** argv_label renders argv parts as the same stable space-separated label used in step records. */
+pub fn argv_label(argv: list) -> string {
+  return join((argv ?? []).map({ arg -> to_string(arg) }), " ")
+}
+
+/**
+ * command_output_text returns stdout, stderr, combined, tail, or failure_tail from a command result.
+ */
+pub fn command_output_text(result, stream: string = "combined") -> string {
+  let mode = stream ?? "combined"
+  if mode == "stdout" {
+    return result?.stdout ?? ""
+  }
+  if mode == "stderr" {
+    return result?.stderr ?? ""
+  }
+  if mode == "tail" {
+    return result?.tail ?? ""
+  }
+  if mode == "failure_tail" {
+    return result?.failure_tail ?? result?.tail ?? ""
+  }
+  return __command_combined(result)
+}
+
+/** command_failure_text formats a compact failure block for logs and recovery prompts. */
+pub fn command_failure_text(result, options = nil) -> string {
+  let opts = __command_options(options)
+  let max_stdout = opts?.max_stdout_chars ?? 8000
+  let max_stderr = opts?.max_stderr_chars ?? 4000
+  let status = result?.status ?? "failed"
+  let exit_code = result?.exit_code ?? result?.status
+  var lines = ["status=" + to_string(status) + " exit=" + to_string(exit_code)]
+  if trim(result?.stdout ?? "") != "" {
+    lines = lines + ["stdout:", truncate_text(result.stdout, max_stdout)]
+  }
+  if trim(result?.stderr ?? "") != "" {
+    lines = lines + ["stderr:", truncate_text(result.stderr, max_stderr)]
+  }
+  if len(lines) == 1 && trim(command_output_text(result)) != "" {
+    lines = lines + ["output:", truncate_text(command_output_text(result), max_stdout)]
+  }
+  return join(lines, "\n")
+}
+
+/** Build a normalized successful command-result dict for tests and harness adapters. */
+pub fn command_result_ok(stdout: string = "", extra = nil) -> dict {
+  let base = extra ?? {}
+  return base + {success: true, ok: true, status: "completed", exit_code: 0, stdout: stdout, stderr: ""}
+}
+
+/** Build a normalized failed command-result dict for tests and harness adapters. */
+pub fn command_result_fail(exit_code: int = 1, stderr: string = "", extra = nil) -> dict {
+  let base = extra ?? {}
+  return base
+    + {
+    success: false,
+    ok: false,
+    status: "failed",
+    exit_code: exit_code,
+    stdout: base?.stdout ?? "",
+    stderr: stderr,
   }
 }

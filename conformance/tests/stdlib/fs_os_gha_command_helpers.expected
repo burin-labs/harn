@@ -1,0 +1,22 @@
+harn
+2
+nested/data.json
+x
+
+answer<<EOF
+42
+EOF
+
+true
+true
+true
+::warning file=src/main.rs,line=7,title=Heads%2C up::line1%0Aline2
+true
+git status --short
+bad
+true
+a b c
+> a
+> b
+a...f
+true

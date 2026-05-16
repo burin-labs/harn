@@ -79,11 +79,12 @@ code or inside any pipeline.
 
 `import "std/..."` is only needed for the Harn-written helper modules
 described below (`std/text`, `std/json`, `std/math`, `std/collections`,
-`std/path`, `std/edit`, `std/artifact/web`, `std/ui_resource`, `std/cache`,
+`std/ansi`, `std/table`, `std/diff`, `std/path`, `std/fs`, `std/os`,
+`std/edit`, `std/artifact/web`, `std/ui_resource`, `std/cache`,
 `std/llm/handlers`, `std/llm/budget`, `std/llm/prompts`, `std/vision`,
 `std/context`, `std/agent_state`, `std/agents`, `std/agent/user`,
-`std/runtime`, `std/command`, `std/tui`, `std/git`, `std/review`,
-`std/experiments`,
+`std/runtime`, `std/command`, `std/gha`, `std/tui`, `std/git`,
+`std/review`, `std/experiments`,
 `std/project`, `std/memory`, `std/prompt_library`, `std/monitors`,
 `std/triage`, `std/worktree`, `std/checkpoint`, `std/personas/prelude`,
 `std/personas/bulletins`,
@@ -187,9 +188,26 @@ Text processing utilities for LLM output and code analysis:
 | `parse_cells(response)` | Parse fenced code blocks from LLM output. Returns `[{type, lang, code}]` |
 | `filter_test_cells(cells, target_file?)` | Filter cells to keep code blocks and write_file calls |
 | `truncate_head_tail(text, n)` | Keep first/last n lines with omission marker |
+| `truncate_text(text, max_chars?, marker?)` | Keep the first `max_chars` characters and append a deterministic truncation marker |
+| `truncate_middle(text, max_chars?, marker?)` | Keep both ends of a long string with an omission marker in the middle |
+| `single_line_or(value, fallback?)` | Collapse whitespace into one line, returning `fallback` for blank input |
+| `prefix_lines(text, prefix?)` | Prefix every line in a text block |
+| `indent(text, spaces?)` | Prefix every line with a fixed number of spaces |
 | `detect_compile_error(output)` | Check for compile error patterns (SyntaxError, etc.) |
 | `has_got_want(output)` | Check for got/want test failure patterns |
 | `format_test_errors(output)` | Extract error-relevant lines (max 20) |
+
+These helpers are intentionally small because they sit under higher-level
+reporting modules. For example, harnesses can normalize untrusted command
+output before placing it into prompt context:
+
+```harn
+import { single_line_or, truncate_middle } from "std/text"
+
+let long_output = "..."
+let label = single_line_or(" cargo\n test\t-p harn-vm ", "command")
+let summary = truncate_middle(long_output, 2000)
+```
 
 ### std/edit
 
@@ -472,6 +490,84 @@ let subset = pick({a: 1, b: 2, c: 3}, ["a", "c"])  // {a: 1, c: 3}
 let rest = omit({a: 1, b: 2, c: 3}, ["b"])          // {a: 1, c: 3}
 ```
 
+### std/ansi
+
+Terminal styling helpers that follow Harn's color policy (`NO_COLOR`,
+`FORCE_COLOR`, configured color mode, and TTY detection) by default:
+
+| Function | Description |
+|---|---|
+| `ansi_enabled(options?)` | Return whether ANSI should be emitted for `stdout`, `stderr`, or `stdin`; accepts `{mode: "auto"/"always"/"never", enabled?, stream?}` |
+| `ansi_escape(code)` | Build a Select Graphic Rendition escape sequence |
+| `ansi_reset()` | Return the reset escape sequence |
+| `ansi_strip(text)` | Remove CSI and OSC ANSI escape sequences |
+| `ansi_visible_len(text)` | Count visible characters after stripping ANSI escapes |
+| `ansi_style(text, style?, options?)` | Apply foreground/background color and common styles when enabled |
+| `ansi_color(text, name, options?)` / `ansi_bg(text, name, options?)` | Apply a named foreground or background color |
+| `ansi_bold(text, options?)`, `ansi_dim(text, options?)`, `ansi_underline(text, options?)` | Common text styles |
+| `ansi_success(text, options?)`, `ansi_warn(text, options?)`, `ansi_error(text, options?)`, `ansi_info(text, options?)`, `ansi_muted(text, options?)` | Semantic styles for CLI status output |
+| `ansi_link(label, url, options?)` | Render an OSC-8 terminal hyperlink when ANSI is enabled |
+| `ansi_truncate(text, max_chars, marker?)` | Truncate by visible length after stripping ANSI escapes |
+
+Pass `{mode: "always"}` in deterministic tests when you need to assert exact
+escape output; otherwise let the auto policy decide.
+
+```harn
+import { ansi_success, ansi_strip } from "std/ansi"
+
+let line = ansi_success("passed", {mode: "always"})
+println(ansi_strip(line)) // passed
+```
+
+### std/table
+
+Deterministic plain-text and Markdown table rendering for logs, summaries, and
+GitHub step output:
+
+| Function | Description |
+|---|---|
+| `render_table(rows, options?)` | Render dict/list/scalar rows as a stable plain-text or Markdown table |
+| `render_markdown_table(rows, options?)` | Alias for `render_table(..., {format: "markdown"})` |
+| `render_kv_table(data, options?)` | Render a dict as a sorted two-column key/value table |
+
+Columns can be inferred from the first row or supplied with
+`{key, header?, align?, width?, max_width?}` entries. Cell text is single-line
+normalized, ANSI-aware for visible width, and optionally capped with
+`max_cell_width`.
+
+```harn
+import { render_table } from "std/table"
+
+println(render_table(
+  [{name: "harn", status: "ok"}, {name: "burin", status: "queued"}],
+  {columns: ["name", "status"]},
+))
+```
+
+### std/diff
+
+Pure-Harn line diff helpers for short texts, generated reports, and release
+scripts that need a stable unified diff without shelling out:
+
+| Function | Description |
+|---|---|
+| `diff_lines(before, after)` | Return `{changed, insertions, deletions, old_lines, new_lines, ops}` |
+| `unified_diff(before, after, options?)` | Render a unified diff with optional `{path, from_label, to_label, context, color, color_mode}` |
+| `colorize_diff(diff_text, options?)` | Apply ANSI coloring to an existing unified diff |
+| `diff_summary(before, after)` | Return compact changed/insertions/deletions counts |
+| `render_diff_stat(entries, options?)` | Render per-file diff stats from `{path, before, after}` or stat dicts |
+
+`std/diff` favors predictable, dependency-free rendering over competing with
+`git diff` for large repository diffs. For large file sets, call `git diff`
+through `std/git` or `std/command` and use `colorize_diff` or
+`render_diff_stat` for presentation.
+
+```harn
+import { unified_diff } from "std/diff"
+
+println(unified_diff("one\ntwo", "one\nthree", {path: "example.txt"}))
+```
+
 ### std/cache
 
 Persistent cache helpers backed by sqlite or filesystem storage:
@@ -651,6 +747,54 @@ Generic host/runtime helpers that are useful across many hosts:
 | `interaction_ask_with_kind(question, kind)` | Ask the host/user a question with an explicit interaction kind |
 | `record_run_metadata(run, workflow_name)` | Persist normalized workflow run metadata through the runtime contract |
 
+### std/fs
+
+File-system convenience helpers built on the globally available host file
+primitives. These remove the repeated parent-directory, parse/fallback, and
+relative-path boilerplate that release scripts and harnesses tend to carry:
+
+| Function | Description |
+|---|---|
+| `ensure_parent_dir(path)` | Create the parent directory for a file path when needed |
+| `read_json(path, fallback?)` | Read and parse JSON, returning `fallback` for missing or invalid files |
+| `read_json_result(path)` | Read and parse JSON as `{ok, value?, error?}` |
+| `write_json(path, value, options?)` | Write JSON with optional `{pretty, trailing_newline, ensure_parent}` |
+| `read_yaml(path, fallback?)` / `write_yaml(path, value, options?)` | YAML file helpers |
+| `read_toml(path, fallback?)` / `write_toml(path, value, options?)` | TOML file helpers |
+| `write_lines(path, lines, options?)` | Write a list of lines as one text file |
+| `append_line(path, line)` | Append exactly one line with a newline terminator |
+| `touch(path)` | Create an empty file if it does not exist |
+| `find_files(root, pattern, options?)` | Glob below `root`; pass `{relative: true}` for root-relative paths |
+| `relative_path(root, path)` | Return a slash-normalized path relative to `root` when possible |
+| `is_file(path)` / `is_dir(path)` | Return type-aware existence checks |
+| `file_size(path)` | Return file size in bytes, or `nil` when unavailable |
+
+```harn
+import { read_json, relative_path, write_json } from "std/fs"
+
+let path = path_join(temp_dir(), "report/data.json")
+write_json(path, {status: "ok"}, {pretty: true})
+println(read_json(path).status)
+println(relative_path(temp_dir(), path))
+```
+
+### std/os
+
+Environment and host diagnostic helpers:
+
+| Function | Description |
+|---|---|
+| `os_info()` | Return platform, arch, cwd, home/temp dirs, user/host, pid, runtime paths, and TTY status |
+| `env_bool(name, fallback?)` | Read a boolean environment variable using common CLI spellings |
+| `env_int(name, fallback?)` | Read an integer environment variable |
+| `env_list(name, separator?)` | Split a path/list environment variable and drop blanks |
+| `require_env(name)` | Return a required env var or throw a clear error |
+| `which(binary)` | Resolve an executable on `PATH`, returning `nil` when absent |
+| `command_exists(binary)` | Return whether an executable is visible on `PATH` |
+
+Use `std/os` for script-local concerns. Use `std/runtime` when the information
+comes from the Harn host contract rather than the ambient operating system.
+
 ### std/command
 
 Deterministic command-runner helpers for Harn scripts and harnesses. These use
@@ -669,6 +813,11 @@ compact recovery context:
 | `command_steps_failed(steps, options?)` | Return whether any step failed and was not caller-marked recovered |
 | `command_last_failed_step(steps, options?)` | Return the last unrecovered failed step, or `nil` |
 | `command_step_ref(step, options?)` | Return compact agent/recovery context with command identity, status, artifacts, classification, recovery hint, and capped tail |
+| `argv_label(argv)` | Render argv parts as a stable space-separated label for logs |
+| `command_output_text(result, stream?)` | Extract stdout, stderr, combined output, tail, or failure tail from a command result |
+| `command_failure_text(result, options?)` | Render a compact failure block with status, exit code, and capped stdout/stderr |
+| `command_result_ok(stdout?, extra?)` | Build a normalized success result for tests and harness adapters |
+| `command_result_fail(exit_code?, stderr?, extra?)` | Build a normalized failure result for tests and harness adapters |
 
 `spec` is either an argv list, such as `["git", "status", "--short"]`, or a
 dict with `argv`, `cwd`, `env`, `env_mode`, `stdin`, `timeout_ms`, `capture`,
@@ -705,6 +854,35 @@ let step = command_step("verify package", ["cargo", "test", "-p", "harn-vm"], {
     return nil
   },
 })
+```
+
+### std/gha
+
+GitHub Actions workflow command helpers. The render-only functions are useful
+in any terminal; the write helpers append to the file paths GitHub exposes in
+`$GITHUB_OUTPUT`, `$GITHUB_ENV`, and `$GITHUB_STEP_SUMMARY`, or to an explicit
+path supplied by tests:
+
+| Function | Description |
+|---|---|
+| `gha_escape_data(value)` | Escape `%`, CR, and LF for workflow command data |
+| `gha_escape_property(value)` | Escape workflow command property text |
+| `gha_annotation(kind, message, options?)` | Build a `::notice`, `::warning`, or `::error` annotation line |
+| `gha_notice(message, options?)` / `gha_warning(message, options?)` / `gha_error(message, options?)` | Print an annotation to stdout |
+| `gha_env_block(name, value, delimiter?)` | Build a multiline-safe environment/output block |
+| `gha_write_output(name, value, path?)` | Append one value to `$GITHUB_OUTPUT` or `path`; returns `false` outside Actions when no path is available |
+| `gha_write_env(name, value, path?)` | Append one value to `$GITHUB_ENV` or `path` |
+| `gha_append_summary(markdown, path?)` | Append Markdown to `$GITHUB_STEP_SUMMARY` or `path`, ensuring a trailing newline |
+
+```harn
+import { gha_annotation, gha_write_output } from "std/gha"
+
+println(gha_annotation("warning", "line1\nline2", {
+  file: "src/main.rs",
+  line: 7,
+  title: "Heads up",
+}))
+gha_write_output("release_tag", "v1.2.3")
 ```
 
 ### std/tui
