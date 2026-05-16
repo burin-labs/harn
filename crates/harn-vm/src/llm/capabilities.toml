@@ -42,20 +42,20 @@
 #                     file-upload API family for std/files.upload: anthropic or gemini.
 #   structured_output: structured-output transport: native, tool_use, format_kw, none.
 #   prefers_xml_scaffolding:
-#                     logical prompt sections render as XML tags.
+#                     prompt sections should use XML tags (`<task>`, `<examples>`).
 #   prefers_markdown_scaffolding:
-#                     logical prompt sections render as Markdown headings.
+#                     prompt sections should use Markdown headings (`## Task`).
 #   structured_output_mode:
-#                     prompt-section output format: native_json, delimited,
-#                     xml_tagged, none.
+#                     preferred logical output shape: native_json, delimited, xml_tagged, none.
 #   supports_assistant_prefill:
 #                     whether assistant-role prefill turns are accepted.
 #   prefers_role_developer:
-#                     whether system_framing should target developer role.
+#                     whether durable instructions should use `developer` role.
 #   prefers_xml_tools:
-#                     whether text-rendered tools prefer XML tags.
+#                     whether text-rendered tool specs should use XML wrappers.
 #   thinking_block_style:
-#                     none, thinking_blocks, reasoning_summary, or inline.
+#                     preferred transcript thinking style: none, thinking_blocks,
+#                     reasoning_summary, inline.
 #   thinking_modes  : supported script-facing modes: enabled, adaptive, effort.
 #   interleaved_thinking_supported:
 #                     whether `thinking` can opt Anthropic Messages API
@@ -136,13 +136,15 @@ audio_supported = true
 pdf_supported = true
 files_api_supported = true
 structured_output = "tool_use"
-prefers_xml_scaffolding = true
-prefers_xml_tools = true
-structured_output_mode = "xml_tagged"
-supports_assistant_prefill = true
-thinking_block_style = "thinking_blocks"
 thinking_modes = ["adaptive"]
 vision_supported = true
+prefers_xml_scaffolding = true
+prefers_markdown_scaffolding = false
+structured_output_mode = "xml_tagged"
+supports_assistant_prefill = false
+prefers_role_developer = false
+prefers_xml_tools = true
+thinking_block_style = "thinking_blocks"
 
 [[provider.anthropic]]
 model_match = "claude-opus-*"
@@ -157,14 +159,16 @@ audio_supported = true
 pdf_supported = true
 files_api_supported = true
 structured_output = "tool_use"
-prefers_xml_scaffolding = true
-prefers_xml_tools = true
-structured_output_mode = "xml_tagged"
-supports_assistant_prefill = true
-thinking_block_style = "thinking_blocks"
 thinking_modes = ["adaptive"]
 interleaved_thinking_supported = true
 vision_supported = true
+prefers_xml_scaffolding = true
+prefers_markdown_scaffolding = false
+structured_output_mode = "xml_tagged"
+supports_assistant_prefill = false
+prefers_role_developer = false
+prefers_xml_tools = true
+thinking_block_style = "thinking_blocks"
 
 [[provider.anthropic]]
 model_match = "claude-sonnet-*"
@@ -179,13 +183,15 @@ audio_supported = true
 pdf_supported = true
 files_api_supported = true
 structured_output = "tool_use"
-prefers_xml_scaffolding = true
-prefers_xml_tools = true
-structured_output_mode = "xml_tagged"
-supports_assistant_prefill = true
-thinking_block_style = "thinking_blocks"
 thinking_modes = ["adaptive"]
 vision_supported = true
+prefers_xml_scaffolding = true
+prefers_markdown_scaffolding = false
+structured_output_mode = "xml_tagged"
+supports_assistant_prefill = false
+prefers_role_developer = false
+prefers_xml_tools = true
+thinking_block_style = "thinking_blocks"
 
 # Haiku 4.5+ supports server-side tool search.
 [[provider.anthropic]]
@@ -201,15 +207,17 @@ audio_supported = true
 pdf_supported = true
 files_api_supported = true
 structured_output = "tool_use"
-prefers_xml_scaffolding = true
-prefers_xml_tools = true
-structured_output_mode = "xml_tagged"
-supports_assistant_prefill = true
-thinking_block_style = "thinking_blocks"
 thinking_modes = ["enabled"]
 vision_supported = true
+prefers_xml_scaffolding = true
+prefers_markdown_scaffolding = false
+structured_output_mode = "xml_tagged"
+supports_assistant_prefill = true
+prefers_role_developer = false
+prefers_xml_tools = true
+thinking_block_style = "thinking_blocks"
 
-# Opus 4.6+ supports interleaved thinking.
+# Opus 4.6+ supports interleaved thinking but rejects assistant prefill.
 [[provider.anthropic]]
 model_match = "claude-opus-*"
 version_min = [4, 6]
@@ -223,14 +231,16 @@ audio_supported = true
 pdf_supported = true
 files_api_supported = true
 json_schema = "tool_use"
-prefers_xml_scaffolding = true
-prefers_xml_tools = true
-structured_output_mode = "xml_tagged"
-supports_assistant_prefill = true
-thinking_block_style = "thinking_blocks"
 thinking_modes = ["enabled"]
 interleaved_thinking_supported = true
 vision_supported = true
+prefers_xml_scaffolding = true
+prefers_markdown_scaffolding = false
+structured_output_mode = "xml_tagged"
+supports_assistant_prefill = false
+prefers_role_developer = false
+prefers_xml_tools = true
+thinking_block_style = "thinking_blocks"
 
 [[provider.anthropic]]
 model_match = "claude-opus-*"
@@ -245,13 +255,39 @@ audio_supported = true
 pdf_supported = true
 files_api_supported = true
 structured_output = "tool_use"
-prefers_xml_scaffolding = true
-prefers_xml_tools = true
-structured_output_mode = "xml_tagged"
-supports_assistant_prefill = true
-thinking_block_style = "thinking_blocks"
 thinking_modes = ["enabled"]
 vision_supported = true
+prefers_xml_scaffolding = true
+prefers_markdown_scaffolding = false
+structured_output_mode = "xml_tagged"
+supports_assistant_prefill = true
+prefers_role_developer = false
+prefers_xml_tools = true
+thinking_block_style = "thinking_blocks"
+
+# Sonnet 4.6 rejects assistant prefill while keeping the 4.x tool surface.
+[[provider.anthropic]]
+model_match = "claude-sonnet-*"
+version_min = [4, 6]
+native_tools = true
+defer_loading = true
+tool_search = ["bm25", "regex"]
+max_tools = 10000
+prompt_caching = true
+vision = true
+audio_supported = true
+pdf_supported = true
+files_api_supported = true
+structured_output = "tool_use"
+thinking_modes = ["enabled"]
+vision_supported = true
+prefers_xml_scaffolding = true
+prefers_markdown_scaffolding = false
+structured_output_mode = "xml_tagged"
+supports_assistant_prefill = false
+prefers_role_developer = false
+prefers_xml_tools = true
+thinking_block_style = "thinking_blocks"
 
 # Sonnet 4.0+ supports tool search.
 [[provider.anthropic]]
@@ -267,13 +303,15 @@ audio_supported = true
 pdf_supported = true
 files_api_supported = true
 structured_output = "tool_use"
-prefers_xml_scaffolding = true
-prefers_xml_tools = true
-structured_output_mode = "xml_tagged"
-supports_assistant_prefill = true
-thinking_block_style = "thinking_blocks"
 thinking_modes = ["enabled"]
 vision_supported = true
+prefers_xml_scaffolding = true
+prefers_markdown_scaffolding = false
+structured_output_mode = "xml_tagged"
+supports_assistant_prefill = true
+prefers_role_developer = false
+prefers_xml_tools = true
+thinking_block_style = "thinking_blocks"
 
 # OpenRouter-style `anthropic/claude-...` prefixes.
 [[provider.anthropic]]
@@ -289,13 +327,15 @@ audio_supported = true
 pdf_supported = true
 files_api_supported = true
 structured_output = "tool_use"
-prefers_xml_scaffolding = true
-prefers_xml_tools = true
-structured_output_mode = "xml_tagged"
-supports_assistant_prefill = true
-thinking_block_style = "thinking_blocks"
 thinking_modes = ["adaptive"]
 vision_supported = true
+prefers_xml_scaffolding = true
+prefers_markdown_scaffolding = false
+structured_output_mode = "xml_tagged"
+supports_assistant_prefill = false
+prefers_role_developer = false
+prefers_xml_tools = true
+thinking_block_style = "thinking_blocks"
 
 [[provider.anthropic]]
 model_match = "anthropic/claude-opus-*"
@@ -310,14 +350,16 @@ audio_supported = true
 pdf_supported = true
 files_api_supported = true
 structured_output = "tool_use"
-prefers_xml_scaffolding = true
-prefers_xml_tools = true
-structured_output_mode = "xml_tagged"
-supports_assistant_prefill = true
-thinking_block_style = "thinking_blocks"
 thinking_modes = ["adaptive"]
 interleaved_thinking_supported = true
 vision_supported = true
+prefers_xml_scaffolding = true
+prefers_markdown_scaffolding = false
+structured_output_mode = "xml_tagged"
+supports_assistant_prefill = false
+prefers_role_developer = false
+prefers_xml_tools = true
+thinking_block_style = "thinking_blocks"
 
 [[provider.anthropic]]
 model_match = "anthropic/claude-sonnet-*"
@@ -332,13 +374,15 @@ audio_supported = true
 pdf_supported = true
 files_api_supported = true
 structured_output = "tool_use"
-prefers_xml_scaffolding = true
-prefers_xml_tools = true
-structured_output_mode = "xml_tagged"
-supports_assistant_prefill = true
-thinking_block_style = "thinking_blocks"
 thinking_modes = ["adaptive"]
 vision_supported = true
+prefers_xml_scaffolding = true
+prefers_markdown_scaffolding = false
+structured_output_mode = "xml_tagged"
+supports_assistant_prefill = false
+prefers_role_developer = false
+prefers_xml_tools = true
+thinking_block_style = "thinking_blocks"
 
 [[provider.anthropic]]
 model_match = "anthropic/claude-haiku-*"
@@ -353,13 +397,15 @@ audio_supported = true
 pdf_supported = true
 files_api_supported = true
 structured_output = "tool_use"
-prefers_xml_scaffolding = true
-prefers_xml_tools = true
-structured_output_mode = "xml_tagged"
-supports_assistant_prefill = true
-thinking_block_style = "thinking_blocks"
 thinking_modes = ["enabled"]
 vision_supported = true
+prefers_xml_scaffolding = true
+prefers_markdown_scaffolding = false
+structured_output_mode = "xml_tagged"
+supports_assistant_prefill = true
+prefers_role_developer = false
+prefers_xml_tools = true
+thinking_block_style = "thinking_blocks"
 
 [[provider.anthropic]]
 model_match = "anthropic/claude-opus-*"
@@ -374,14 +420,16 @@ audio_supported = true
 pdf_supported = true
 files_api_supported = true
 json_schema = "tool_use"
-prefers_xml_scaffolding = true
-prefers_xml_tools = true
-structured_output_mode = "xml_tagged"
-supports_assistant_prefill = true
-thinking_block_style = "thinking_blocks"
 thinking_modes = ["enabled"]
 interleaved_thinking_supported = true
 vision_supported = true
+prefers_xml_scaffolding = true
+prefers_markdown_scaffolding = false
+structured_output_mode = "xml_tagged"
+supports_assistant_prefill = false
+prefers_role_developer = false
+prefers_xml_tools = true
+thinking_block_style = "thinking_blocks"
 
 [[provider.anthropic]]
 model_match = "anthropic/claude-opus-*"
@@ -396,13 +444,38 @@ audio_supported = true
 pdf_supported = true
 files_api_supported = true
 structured_output = "tool_use"
-prefers_xml_scaffolding = true
-prefers_xml_tools = true
-structured_output_mode = "xml_tagged"
-supports_assistant_prefill = true
-thinking_block_style = "thinking_blocks"
 thinking_modes = ["enabled"]
 vision_supported = true
+prefers_xml_scaffolding = true
+prefers_markdown_scaffolding = false
+structured_output_mode = "xml_tagged"
+supports_assistant_prefill = true
+prefers_role_developer = false
+prefers_xml_tools = true
+thinking_block_style = "thinking_blocks"
+
+[[provider.anthropic]]
+model_match = "anthropic/claude-sonnet-*"
+version_min = [4, 6]
+native_tools = true
+defer_loading = true
+tool_search = ["bm25", "regex"]
+max_tools = 10000
+prompt_caching = true
+vision = true
+audio_supported = true
+pdf_supported = true
+files_api_supported = true
+structured_output = "tool_use"
+thinking_modes = ["enabled"]
+vision_supported = true
+prefers_xml_scaffolding = true
+prefers_markdown_scaffolding = false
+structured_output_mode = "xml_tagged"
+supports_assistant_prefill = false
+prefers_role_developer = false
+prefers_xml_tools = true
+thinking_block_style = "thinking_blocks"
 
 [[provider.anthropic]]
 model_match = "anthropic/claude-sonnet-*"
@@ -417,13 +490,15 @@ audio_supported = true
 pdf_supported = true
 files_api_supported = true
 structured_output = "tool_use"
-prefers_xml_scaffolding = true
-prefers_xml_tools = true
-structured_output_mode = "xml_tagged"
-supports_assistant_prefill = true
-thinking_block_style = "thinking_blocks"
 thinking_modes = ["enabled"]
 vision_supported = true
+prefers_xml_scaffolding = true
+prefers_markdown_scaffolding = false
+structured_output_mode = "xml_tagged"
+supports_assistant_prefill = true
+prefers_role_developer = false
+prefers_xml_tools = true
+thinking_block_style = "thinking_blocks"
 
 # Catch-all for older Claude models — native tools + prompt caching +
 # thinking, but no progressive tool disclosure.
@@ -436,13 +511,15 @@ audio_supported = true
 pdf_supported = true
 files_api_supported = true
 structured_output = "tool_use"
-prefers_xml_scaffolding = true
-prefers_xml_tools = true
-structured_output_mode = "xml_tagged"
-supports_assistant_prefill = true
-thinking_block_style = "thinking_blocks"
 thinking_modes = ["enabled"]
 vision_supported = true
+prefers_xml_scaffolding = true
+prefers_markdown_scaffolding = false
+structured_output_mode = "xml_tagged"
+supports_assistant_prefill = true
+prefers_role_developer = false
+prefers_xml_tools = true
+thinking_block_style = "thinking_blocks"
 
 # ---------- OpenAI family -----------------------------------------------------
 #
@@ -451,25 +528,36 @@ vision_supported = true
 # Fireworks, HuggingFace, local vLLM/SGLang). Siblings may still add their
 # own `[[provider.<name>]]` rules and those win over the openai fallback.
 
-# gpt-5.4+ exposes native `tool_search` on the Responses API.
+# ChatGPT-era GPT models use Markdown prompt sections and native JSON output.
 [[provider.openai]]
 model_match = "gpt-4o*"
 native_tools = true
 vision = true
 audio_supported = true
 structured_output = "native"
+vision_supported = true
+prefers_xml_scaffolding = false
 prefers_markdown_scaffolding = true
 structured_output_mode = "native_json"
-vision_supported = true
+supports_assistant_prefill = false
+prefers_role_developer = false
+prefers_xml_tools = false
+thinking_block_style = "none"
 
 [[provider.openai]]
 model_match = "gpt-4.1*"
 native_tools = true
 vision_supported = true
 structured_output = "native"
+prefers_xml_scaffolding = false
 prefers_markdown_scaffolding = true
 structured_output_mode = "native_json"
+supports_assistant_prefill = false
+prefers_role_developer = false
+prefers_xml_tools = false
+thinking_block_style = "none"
 
+# gpt-5.4+ exposes native `tool_search` on the Responses API.
 [[provider.openai]]
 model_match = "gpt-*"
 version_min = [5, 4]
@@ -478,11 +566,16 @@ defer_loading = true
 tool_search = ["hosted", "client"]
 vision_supported = true
 structured_output = "native"
-prefers_markdown_scaffolding = true
-structured_output_mode = "native_json"
 thinking_modes = ["effort"]
 reasoning_effort_supported = true
 reasoning_none_supported = true
+prefers_xml_scaffolding = false
+prefers_markdown_scaffolding = true
+structured_output_mode = "native_json"
+supports_assistant_prefill = false
+prefers_role_developer = false
+prefers_xml_tools = false
+thinking_block_style = "reasoning_summary"
 
 [[provider.openai]]
 model_match = "gpt-*"
@@ -490,11 +583,16 @@ version_min = [5, 1]
 native_tools = true
 vision_supported = true
 structured_output = "native"
-prefers_markdown_scaffolding = true
-structured_output_mode = "native_json"
 thinking_modes = ["effort"]
 reasoning_effort_supported = true
 reasoning_none_supported = true
+prefers_xml_scaffolding = false
+prefers_markdown_scaffolding = true
+structured_output_mode = "native_json"
+supports_assistant_prefill = false
+prefers_role_developer = false
+prefers_xml_tools = false
+thinking_block_style = "reasoning_summary"
 
 [[provider.openai]]
 model_match = "gpt-*"
@@ -502,50 +600,75 @@ version_min = [5, 0]
 native_tools = true
 vision_supported = true
 structured_output = "native"
-prefers_markdown_scaffolding = true
-structured_output_mode = "native_json"
 thinking_modes = ["effort"]
 reasoning_effort_supported = true
+prefers_xml_scaffolding = false
+prefers_markdown_scaffolding = true
+structured_output_mode = "native_json"
+supports_assistant_prefill = false
+prefers_role_developer = false
+prefers_xml_tools = false
+thinking_block_style = "reasoning_summary"
 
 # Legacy GPT: native tool calls only.
 [[provider.openai]]
 model_match = "gpt-*"
 native_tools = true
 structured_output = "native"
+prefers_xml_scaffolding = false
 prefers_markdown_scaffolding = true
 structured_output_mode = "native_json"
+supports_assistant_prefill = false
+prefers_role_developer = false
+prefers_xml_tools = false
+thinking_block_style = "none"
 
 # Reasoning family (o1, o3, o4, ...).
 [[provider.openai]]
 model_match = "o1*"
 native_tools = true
 structured_output = "native"
-prefers_markdown_scaffolding = true
-structured_output_mode = "native_json"
 thinking_modes = ["effort"]
 requires_completion_tokens = true
 reasoning_effort_supported = true
+prefers_xml_scaffolding = false
+prefers_markdown_scaffolding = true
+structured_output_mode = "native_json"
+supports_assistant_prefill = false
+prefers_role_developer = true
+prefers_xml_tools = false
+thinking_block_style = "reasoning_summary"
 
 [[provider.openai]]
 model_match = "o3*"
 native_tools = true
 structured_output = "native"
-prefers_markdown_scaffolding = true
-structured_output_mode = "native_json"
 thinking_modes = ["effort"]
 requires_completion_tokens = true
 reasoning_effort_supported = true
+prefers_xml_scaffolding = false
+prefers_markdown_scaffolding = true
+structured_output_mode = "native_json"
+supports_assistant_prefill = false
+prefers_role_developer = true
+prefers_xml_tools = false
+thinking_block_style = "reasoning_summary"
 
 [[provider.openai]]
 model_match = "o4*"
 native_tools = true
 structured_output = "native"
-prefers_markdown_scaffolding = true
-structured_output_mode = "native_json"
 thinking_modes = ["effort"]
 vision_supported = true
 requires_completion_tokens = true
 reasoning_effort_supported = true
+prefers_xml_scaffolding = false
+prefers_markdown_scaffolding = true
+structured_output_mode = "native_json"
+supports_assistant_prefill = false
+prefers_role_developer = true
+prefers_xml_tools = false
+thinking_block_style = "reasoning_summary"
 
 # OpenRouter-style provider-prefixed IDs.
 [[provider.openai]]
@@ -554,17 +677,27 @@ native_tools = true
 vision = true
 audio_supported = true
 structured_output = "native"
+vision_supported = true
+prefers_xml_scaffolding = false
 prefers_markdown_scaffolding = true
 structured_output_mode = "native_json"
-vision_supported = true
+supports_assistant_prefill = false
+prefers_role_developer = false
+prefers_xml_tools = false
+thinking_block_style = "none"
 
 [[provider.openai]]
 model_match = "openai/gpt-4.1*"
 native_tools = true
 vision_supported = true
 structured_output = "native"
+prefers_xml_scaffolding = false
 prefers_markdown_scaffolding = true
 structured_output_mode = "native_json"
+supports_assistant_prefill = false
+prefers_role_developer = false
+prefers_xml_tools = false
+thinking_block_style = "none"
 
 [[provider.openai]]
 model_match = "openai/gpt-*"
@@ -574,70 +707,105 @@ defer_loading = true
 tool_search = ["hosted", "client"]
 vision_supported = true
 structured_output = "native"
-prefers_markdown_scaffolding = true
-structured_output_mode = "native_json"
 thinking_modes = ["effort"]
 reasoning_effort_supported = true
 reasoning_none_supported = true
+prefers_xml_scaffolding = false
+prefers_markdown_scaffolding = true
+structured_output_mode = "native_json"
+supports_assistant_prefill = false
+prefers_role_developer = false
+prefers_xml_tools = false
+thinking_block_style = "reasoning_summary"
 
 [[provider.openai]]
 model_match = "openai/gpt-*"
 version_min = [5, 1]
 native_tools = true
 json_schema = "native"
-prefers_markdown_scaffolding = true
-structured_output_mode = "native_json"
 thinking_modes = ["effort"]
 reasoning_effort_supported = true
 reasoning_none_supported = true
+prefers_xml_scaffolding = false
+prefers_markdown_scaffolding = true
+structured_output_mode = "native_json"
+supports_assistant_prefill = false
+prefers_role_developer = false
+prefers_xml_tools = false
+thinking_block_style = "reasoning_summary"
 
 [[provider.openai]]
 model_match = "openai/gpt-*"
 version_min = [5, 0]
 native_tools = true
 json_schema = "native"
-prefers_markdown_scaffolding = true
-structured_output_mode = "native_json"
 thinking_modes = ["effort"]
 reasoning_effort_supported = true
+prefers_xml_scaffolding = false
+prefers_markdown_scaffolding = true
+structured_output_mode = "native_json"
+supports_assistant_prefill = false
+prefers_role_developer = false
+prefers_xml_tools = false
+thinking_block_style = "reasoning_summary"
 
 [[provider.openai]]
 model_match = "openai/gpt-*"
 native_tools = true
 structured_output = "native"
+prefers_xml_scaffolding = false
 prefers_markdown_scaffolding = true
 structured_output_mode = "native_json"
+supports_assistant_prefill = false
+prefers_role_developer = false
+prefers_xml_tools = false
+thinking_block_style = "none"
 
 [[provider.openai]]
 model_match = "openai/o1*"
 native_tools = true
 json_schema = "native"
-prefers_markdown_scaffolding = true
-structured_output_mode = "native_json"
 thinking_modes = ["effort"]
 requires_completion_tokens = true
 reasoning_effort_supported = true
+prefers_xml_scaffolding = false
+prefers_markdown_scaffolding = true
+structured_output_mode = "native_json"
+supports_assistant_prefill = false
+prefers_role_developer = true
+prefers_xml_tools = false
+thinking_block_style = "reasoning_summary"
 
 [[provider.openai]]
 model_match = "openai/o3*"
 native_tools = true
 json_schema = "native"
-prefers_markdown_scaffolding = true
-structured_output_mode = "native_json"
 thinking_modes = ["effort"]
 requires_completion_tokens = true
 reasoning_effort_supported = true
+prefers_xml_scaffolding = false
+prefers_markdown_scaffolding = true
+structured_output_mode = "native_json"
+supports_assistant_prefill = false
+prefers_role_developer = true
+prefers_xml_tools = false
+thinking_block_style = "reasoning_summary"
 
 [[provider.openai]]
 model_match = "openai/o4*"
 native_tools = true
 json_schema = "native"
-prefers_markdown_scaffolding = true
-structured_output_mode = "native_json"
 thinking_modes = ["effort"]
 vision_supported = true
 requires_completion_tokens = true
 reasoning_effort_supported = true
+prefers_xml_scaffolding = false
+prefers_markdown_scaffolding = true
+structured_output_mode = "native_json"
+supports_assistant_prefill = false
+prefers_role_developer = true
+prefers_xml_tools = false
+thinking_block_style = "reasoning_summary"
 
 # ---------- Local / Ollama ----------------------------------------------------
 #
@@ -651,29 +819,62 @@ reasoning_effort_supported = true
 [[provider.ollama]]
 model_match = "llava*"
 vision_supported = true
+prefers_xml_scaffolding = false
+prefers_markdown_scaffolding = true
+structured_output_mode = "native_json"
+supports_assistant_prefill = false
+prefers_role_developer = false
+prefers_xml_tools = false
+thinking_block_style = "none"
 
 [[provider.ollama]]
 model_match = "bakllava*"
 vision_supported = true
+prefers_xml_scaffolding = false
+prefers_markdown_scaffolding = true
+structured_output_mode = "native_json"
+supports_assistant_prefill = false
+prefers_role_developer = false
+prefers_xml_tools = false
+thinking_block_style = "reasoning_summary"
 
 [[provider.ollama]]
 model_match = "llama3.2-vision*"
 vision_supported = true
+prefers_xml_scaffolding = false
+prefers_markdown_scaffolding = true
+structured_output_mode = "native_json"
+supports_assistant_prefill = false
+prefers_role_developer = false
+prefers_xml_tools = false
+thinking_block_style = "reasoning_summary"
 
 [[provider.ollama]]
 model_match = "gemma3*"
 vision_supported = true
+prefers_xml_scaffolding = false
+prefers_markdown_scaffolding = true
+structured_output_mode = "native_json"
+supports_assistant_prefill = false
+prefers_role_developer = false
+prefers_xml_tools = false
+thinking_block_style = "reasoning_summary"
 
 [[provider.ollama]]
 model_match = "gemma4*"
 vision_supported = true
+prefers_xml_scaffolding = false
+prefers_markdown_scaffolding = true
+structured_output_mode = "delimited"
+supports_assistant_prefill = false
+prefers_role_developer = false
+prefers_xml_tools = false
+thinking_block_style = "none"
 
 [[provider.ollama]]
 model_match = "qwen3.6*"
 native_tools = false
 structured_output = "format_kw"
-prefers_markdown_scaffolding = true
-structured_output_mode = "native_json"
 thinking_modes = ["enabled"]
 preserve_thinking = true
 server_parser = "none"
@@ -681,19 +882,31 @@ honors_chat_template_kwargs = false
 recommended_endpoint = "/api/chat"
 text_tool_wire_format_supported = true
 thinking_disable_directive = "/no_think"
+prefers_xml_scaffolding = false
+prefers_markdown_scaffolding = true
+structured_output_mode = "delimited"
+supports_assistant_prefill = false
+prefers_role_developer = false
+prefers_xml_tools = false
+thinking_block_style = "inline"
 
 [[provider.ollama]]
 model_match = "qwen3*"
 native_tools = true
 structured_output = "format_kw"
-prefers_markdown_scaffolding = true
-structured_output_mode = "native_json"
 thinking_modes = ["enabled"]
 server_parser = "ollama_qwen3coder"
 honors_chat_template_kwargs = false
 recommended_endpoint = "/api/generate-raw"
 text_tool_wire_format_supported = false
 thinking_disable_directive = "/no_think"
+prefers_xml_scaffolding = false
+prefers_markdown_scaffolding = true
+structured_output_mode = "delimited"
+supports_assistant_prefill = false
+prefers_role_developer = false
+prefers_xml_tools = false
+thinking_block_style = "inline"
 
 # llama.cpp / llama-server speaks OpenAI-compat but is a separate provider
 # entry from Ollama. Qwen/Devstral native tool-call parsing in llama-server has
@@ -704,8 +917,6 @@ thinking_disable_directive = "/no_think"
 model_match = "*qwen3.6*"
 native_tools = false
 structured_output = "native"
-prefers_markdown_scaffolding = true
-structured_output_mode = "native_json"
 thinking_modes = ["enabled"]
 preserve_thinking = true
 server_parser = "none"
@@ -713,40 +924,63 @@ honors_chat_template_kwargs = true
 recommended_endpoint = "/v1/chat/completions"
 text_tool_wire_format_supported = true
 thinking_disable_directive = "/no_think"
+prefers_xml_scaffolding = false
+prefers_markdown_scaffolding = true
+structured_output_mode = "delimited"
+supports_assistant_prefill = false
+prefers_role_developer = false
+prefers_xml_tools = false
+thinking_block_style = "inline"
 
 [[provider.llamacpp]]
 model_match = "*qwen3*"
 native_tools = false
 structured_output = "native"
-prefers_markdown_scaffolding = true
-structured_output_mode = "native_json"
 thinking_modes = ["enabled"]
 server_parser = "none"
 honors_chat_template_kwargs = true
 recommended_endpoint = "/v1/chat/completions"
 text_tool_wire_format_supported = true
 thinking_disable_directive = "/no_think"
+prefers_xml_scaffolding = false
+prefers_markdown_scaffolding = true
+structured_output_mode = "delimited"
+supports_assistant_prefill = false
+prefers_role_developer = false
+prefers_xml_tools = false
+thinking_block_style = "inline"
 
 [[provider.llamacpp]]
 model_match = "*devstral-small-2*"
 native_tools = false
 structured_output = "native"
-prefers_markdown_scaffolding = true
-structured_output_mode = "native_json"
 server_parser = "none"
 honors_chat_template_kwargs = true
 recommended_endpoint = "/v1/chat/completions"
 text_tool_wire_format_supported = true
+prefers_xml_scaffolding = false
+prefers_markdown_scaffolding = true
+structured_output_mode = "delimited"
+supports_assistant_prefill = false
+prefers_role_developer = false
+prefers_xml_tools = false
+thinking_block_style = "none"
 
 [[provider.ollama]]
 model_match = "devstral-small-2*"
 native_tools = false
 structured_output = "format_kw"
-structured_output_mode = "native_json"
 server_parser = "none"
 honors_chat_template_kwargs = false
 recommended_endpoint = "/api/chat"
 text_tool_wire_format_supported = true
+prefers_xml_scaffolding = false
+prefers_markdown_scaffolding = true
+structured_output_mode = "delimited"
+supports_assistant_prefill = false
+prefers_role_developer = false
+prefers_xml_tools = false
+thinking_block_style = "none"
 
 # Local vLLM / SGLang — same story. The capability rules here gate
 # chat_template_kwargs emission in openai_compat; the actual model has
@@ -755,8 +989,6 @@ text_tool_wire_format_supported = true
 model_match = "*qwen3.6*"
 native_tools = true
 structured_output = "native"
-prefers_markdown_scaffolding = true
-structured_output_mode = "native_json"
 thinking_modes = ["enabled"]
 preserve_thinking = true
 server_parser = "none"
@@ -764,19 +996,31 @@ honors_chat_template_kwargs = true
 recommended_endpoint = "/v1/chat/completions"
 text_tool_wire_format_supported = true
 thinking_disable_directive = "/no_think"
+prefers_xml_scaffolding = false
+prefers_markdown_scaffolding = true
+structured_output_mode = "delimited"
+supports_assistant_prefill = false
+prefers_role_developer = false
+prefers_xml_tools = false
+thinking_block_style = "inline"
 
 [[provider.local]]
 model_match = "*qwen3*"
 native_tools = true
 structured_output = "native"
-prefers_markdown_scaffolding = true
-structured_output_mode = "native_json"
 thinking_modes = ["enabled"]
 server_parser = "none"
 honors_chat_template_kwargs = true
 recommended_endpoint = "/v1/chat/completions"
 text_tool_wire_format_supported = true
 thinking_disable_directive = "/no_think"
+prefers_xml_scaffolding = false
+prefers_markdown_scaffolding = true
+structured_output_mode = "delimited"
+supports_assistant_prefill = false
+prefers_role_developer = false
+prefers_xml_tools = false
+thinking_block_style = "inline"
 
 [[provider.local]]
 model_match = "gemma-4*"
@@ -785,6 +1029,13 @@ server_parser = "none"
 honors_chat_template_kwargs = false
 recommended_endpoint = "/v1/chat/completions"
 text_tool_wire_format_supported = true
+prefers_xml_scaffolding = false
+prefers_markdown_scaffolding = true
+structured_output_mode = "delimited"
+supports_assistant_prefill = false
+prefers_role_developer = false
+prefers_xml_tools = false
+thinking_block_style = "inline"
 
 # Apple Silicon MLX server (mlx-vlm). OpenAI-compat with vision; honors
 # the same `chat_template_kwargs.preserve_thinking` knob as vLLM, since
@@ -794,8 +1045,6 @@ model_match = "*qwen3.6*"
 native_tools = true
 vision = true
 structured_output = "native"
-prefers_markdown_scaffolding = true
-structured_output_mode = "native_json"
 thinking_modes = ["enabled"]
 preserve_thinking = true
 server_parser = "none"
@@ -803,20 +1052,32 @@ honors_chat_template_kwargs = true
 recommended_endpoint = "/v1/chat/completions"
 text_tool_wire_format_supported = true
 thinking_disable_directive = "/no_think"
+prefers_xml_scaffolding = false
+prefers_markdown_scaffolding = true
+structured_output_mode = "delimited"
+supports_assistant_prefill = false
+prefers_role_developer = false
+prefers_xml_tools = false
+thinking_block_style = "inline"
 
 [[provider.mlx]]
 model_match = "*qwen3*"
 native_tools = true
 vision = true
 structured_output = "native"
-prefers_markdown_scaffolding = true
-structured_output_mode = "native_json"
 thinking_modes = ["enabled"]
 server_parser = "none"
 honors_chat_template_kwargs = true
 recommended_endpoint = "/v1/chat/completions"
 text_tool_wire_format_supported = true
 thinking_disable_directive = "/no_think"
+prefers_xml_scaffolding = false
+prefers_markdown_scaffolding = true
+structured_output_mode = "delimited"
+supports_assistant_prefill = false
+prefers_role_developer = false
+prefers_xml_tools = false
+thinking_block_style = "inline"
 
 # ---------- Qwen3.6 family (routed providers) --------------------------------
 #
@@ -831,8 +1092,6 @@ thinking_disable_directive = "/no_think"
 model_match = "qwen3.6*"
 native_tools = true
 structured_output = "native"
-prefers_markdown_scaffolding = true
-structured_output_mode = "native_json"
 thinking_modes = ["enabled"]
 preserve_thinking = true
 server_parser = "none"
@@ -840,26 +1099,36 @@ honors_chat_template_kwargs = true
 recommended_endpoint = "/v1/chat/completions"
 text_tool_wire_format_supported = true
 thinking_disable_directive = "/no_think"
+prefers_xml_scaffolding = false
+prefers_markdown_scaffolding = true
+structured_output_mode = "delimited"
+supports_assistant_prefill = false
+prefers_role_developer = false
+prefers_xml_tools = false
+thinking_block_style = "inline"
 
 [[provider.dashscope]]
 model_match = "qwen*"
 native_tools = true
 structured_output = "native"
-prefers_markdown_scaffolding = true
-structured_output_mode = "native_json"
 thinking_modes = ["enabled"]
 server_parser = "none"
 honors_chat_template_kwargs = true
 recommended_endpoint = "/v1/chat/completions"
 text_tool_wire_format_supported = true
 thinking_disable_directive = "/no_think"
+prefers_xml_scaffolding = false
+prefers_markdown_scaffolding = true
+structured_output_mode = "delimited"
+supports_assistant_prefill = false
+prefers_role_developer = false
+prefers_xml_tools = false
+thinking_block_style = "inline"
 
 [[provider.fireworks]]
 model_match = "*qwen3.6*"
 native_tools = true
 structured_output = "native"
-prefers_markdown_scaffolding = true
-structured_output_mode = "native_json"
 thinking_modes = ["enabled"]
 preserve_thinking = true
 server_parser = "none"
@@ -867,6 +1136,13 @@ honors_chat_template_kwargs = true
 recommended_endpoint = "/v1/chat/completions"
 text_tool_wire_format_supported = true
 thinking_disable_directive = "/no_think"
+prefers_xml_scaffolding = false
+prefers_markdown_scaffolding = true
+structured_output_mode = "delimited"
+supports_assistant_prefill = false
+prefers_role_developer = false
+prefers_xml_tools = false
+thinking_block_style = "inline"
 
 # Fireworks's own model IDs squash dots to `p` (`qwen3p6`, `qwen3p5`),
 # so we need a second rule to catch their canonical naming.
@@ -874,8 +1150,6 @@ thinking_disable_directive = "/no_think"
 model_match = "*qwen3p6*"
 native_tools = true
 structured_output = "native"
-prefers_markdown_scaffolding = true
-structured_output_mode = "native_json"
 thinking_modes = ["enabled"]
 preserve_thinking = true
 server_parser = "none"
@@ -883,19 +1157,31 @@ honors_chat_template_kwargs = true
 recommended_endpoint = "/v1/chat/completions"
 text_tool_wire_format_supported = true
 thinking_disable_directive = "/no_think"
+prefers_xml_scaffolding = false
+prefers_markdown_scaffolding = true
+structured_output_mode = "delimited"
+supports_assistant_prefill = false
+prefers_role_developer = false
+prefers_xml_tools = false
+thinking_block_style = "inline"
 
 [[provider.fireworks]]
 model_match = "*qwen*"
 native_tools = true
 structured_output = "native"
-prefers_markdown_scaffolding = true
-structured_output_mode = "native_json"
 thinking_modes = ["enabled"]
 server_parser = "none"
 honors_chat_template_kwargs = true
 recommended_endpoint = "/v1/chat/completions"
 text_tool_wire_format_supported = true
 thinking_disable_directive = "/no_think"
+prefers_xml_scaffolding = false
+prefers_markdown_scaffolding = true
+structured_output_mode = "delimited"
+supports_assistant_prefill = false
+prefers_role_developer = false
+prefers_xml_tools = false
+thinking_block_style = "inline"
 
 # OpenRouter: forwards Qwen thinking via its `reasoning` field (not
 # chat_template_kwargs — transform_request strips that). Preservation
@@ -905,8 +1191,6 @@ thinking_disable_directive = "/no_think"
 model_match = "qwen/qwen3.6*"
 native_tools = true
 structured_output = "native"
-prefers_markdown_scaffolding = true
-structured_output_mode = "native_json"
 thinking_modes = ["enabled", "effort"]
 preserve_thinking = true
 server_parser = "none"
@@ -914,30 +1198,47 @@ honors_chat_template_kwargs = false
 recommended_endpoint = "/v1/chat/completions"
 text_tool_wire_format_supported = true
 thinking_disable_directive = "/no_think"
+prefers_xml_scaffolding = false
+prefers_markdown_scaffolding = true
+structured_output_mode = "delimited"
+supports_assistant_prefill = false
+prefers_role_developer = false
+prefers_xml_tools = false
+thinking_block_style = "inline"
 
 [[provider.openrouter]]
 model_match = "qwen/qwen3-coder*"
 native_tools = true
 structured_output = "native"
-prefers_markdown_scaffolding = true
-structured_output_mode = "native_json"
 server_parser = "none"
 honors_chat_template_kwargs = false
 recommended_endpoint = "/v1/chat/completions"
 text_tool_wire_format_supported = true
+prefers_xml_scaffolding = false
+prefers_markdown_scaffolding = true
+structured_output_mode = "delimited"
+supports_assistant_prefill = false
+prefers_role_developer = false
+prefers_xml_tools = false
+thinking_block_style = "none"
 
 [[provider.openrouter]]
 model_match = "qwen/*"
 native_tools = true
 structured_output = "native"
-prefers_markdown_scaffolding = true
-structured_output_mode = "native_json"
 thinking_modes = ["enabled", "effort"]
 server_parser = "none"
 honors_chat_template_kwargs = false
 recommended_endpoint = "/v1/chat/completions"
 text_tool_wire_format_supported = true
 thinking_disable_directive = "/no_think"
+prefers_xml_scaffolding = false
+prefers_markdown_scaffolding = true
+structured_output_mode = "delimited"
+supports_assistant_prefill = false
+prefers_role_developer = false
+prefers_xml_tools = false
+thinking_block_style = "inline"
 
 # HuggingFace router + Together pass Qwen chat_template_kwargs through
 # unchanged. Match the qwen3.6 model card shape (`Qwen/Qwen3.6-*`).
@@ -945,8 +1246,6 @@ thinking_disable_directive = "/no_think"
 model_match = "qwen/qwen3.6*"
 native_tools = true
 structured_output = "native"
-prefers_markdown_scaffolding = true
-structured_output_mode = "native_json"
 thinking_modes = ["enabled"]
 preserve_thinking = true
 server_parser = "none"
@@ -954,37 +1253,52 @@ honors_chat_template_kwargs = true
 recommended_endpoint = "/v1/chat/completions"
 text_tool_wire_format_supported = true
 thinking_disable_directive = "/no_think"
+prefers_xml_scaffolding = false
+prefers_markdown_scaffolding = true
+structured_output_mode = "delimited"
+supports_assistant_prefill = false
+prefers_role_developer = false
+prefers_xml_tools = false
+thinking_block_style = "inline"
 
 [[provider.huggingface]]
 model_match = "qwen/qwen3-coder*"
 native_tools = true
 structured_output = "native"
-prefers_markdown_scaffolding = true
-structured_output_mode = "native_json"
 server_parser = "none"
 honors_chat_template_kwargs = true
 recommended_endpoint = "/v1/chat/completions"
 text_tool_wire_format_supported = true
+prefers_xml_scaffolding = false
+prefers_markdown_scaffolding = true
+structured_output_mode = "delimited"
+supports_assistant_prefill = false
+prefers_role_developer = false
+prefers_xml_tools = false
+thinking_block_style = "none"
 
 [[provider.huggingface]]
 model_match = "qwen/*"
 native_tools = true
 structured_output = "native"
-prefers_markdown_scaffolding = true
-structured_output_mode = "native_json"
 thinking_modes = ["enabled"]
 server_parser = "none"
 honors_chat_template_kwargs = true
 recommended_endpoint = "/v1/chat/completions"
 text_tool_wire_format_supported = true
 thinking_disable_directive = "/no_think"
+prefers_xml_scaffolding = false
+prefers_markdown_scaffolding = true
+structured_output_mode = "delimited"
+supports_assistant_prefill = false
+prefers_role_developer = false
+prefers_xml_tools = false
+thinking_block_style = "inline"
 
 [[provider.together]]
 model_match = "qwen/qwen3.6*"
 native_tools = true
 structured_output = "native"
-prefers_markdown_scaffolding = true
-structured_output_mode = "native_json"
 thinking_modes = ["enabled"]
 preserve_thinking = true
 server_parser = "none"
@@ -992,30 +1306,47 @@ honors_chat_template_kwargs = true
 recommended_endpoint = "/v1/chat/completions"
 text_tool_wire_format_supported = true
 thinking_disable_directive = "/no_think"
+prefers_xml_scaffolding = false
+prefers_markdown_scaffolding = true
+structured_output_mode = "delimited"
+supports_assistant_prefill = false
+prefers_role_developer = false
+prefers_xml_tools = false
+thinking_block_style = "inline"
 
 [[provider.together]]
 model_match = "qwen/qwen3-coder*"
 native_tools = true
 structured_output = "native"
-prefers_markdown_scaffolding = true
-structured_output_mode = "native_json"
 server_parser = "none"
 honors_chat_template_kwargs = true
 recommended_endpoint = "/v1/chat/completions"
 text_tool_wire_format_supported = true
+prefers_xml_scaffolding = false
+prefers_markdown_scaffolding = true
+structured_output_mode = "delimited"
+supports_assistant_prefill = false
+prefers_role_developer = false
+prefers_xml_tools = false
+thinking_block_style = "none"
 
 [[provider.together]]
 model_match = "qwen/*"
 native_tools = true
 structured_output = "native"
-prefers_markdown_scaffolding = true
-structured_output_mode = "native_json"
 thinking_modes = ["enabled"]
 server_parser = "none"
 honors_chat_template_kwargs = true
 recommended_endpoint = "/v1/chat/completions"
 text_tool_wire_format_supported = true
 thinking_disable_directive = "/no_think"
+prefers_xml_scaffolding = false
+prefers_markdown_scaffolding = true
+structured_output_mode = "delimited"
+supports_assistant_prefill = false
+prefers_role_developer = false
+prefers_xml_tools = false
+thinking_block_style = "inline"
 
 # ---------- DeepSeek reasoning (across host providers) -----------------------
 #
@@ -1031,10 +1362,15 @@ native_tools = true
 thinking_modes = ["enabled"]
 prompt_caching = true
 structured_output = "native"
-prefers_markdown_scaffolding = true
-structured_output_mode = "native_json"
 server_parser = "none"
 honors_chat_template_kwargs = true
+prefers_xml_scaffolding = false
+prefers_markdown_scaffolding = true
+structured_output_mode = "native_json"
+supports_assistant_prefill = false
+prefers_role_developer = false
+prefers_xml_tools = false
+thinking_block_style = "inline"
 
 [[provider.huggingface]]
 model_match = "deepseek-ai/deepseek-v3*"
@@ -1042,10 +1378,15 @@ native_tools = true
 thinking_modes = ["enabled"]
 prompt_caching = true
 structured_output = "native"
-prefers_markdown_scaffolding = true
-structured_output_mode = "native_json"
 server_parser = "none"
 honors_chat_template_kwargs = true
+prefers_xml_scaffolding = false
+prefers_markdown_scaffolding = true
+structured_output_mode = "native_json"
+supports_assistant_prefill = false
+prefers_role_developer = false
+prefers_xml_tools = false
+thinking_block_style = "inline"
 
 [[provider.openrouter]]
 model_match = "deepseek/deepseek-v3*"
@@ -1053,10 +1394,15 @@ native_tools = true
 thinking_modes = ["enabled", "effort"]
 prompt_caching = true
 structured_output = "native"
-prefers_markdown_scaffolding = true
-structured_output_mode = "native_json"
 server_parser = "none"
 honors_chat_template_kwargs = false
+prefers_xml_scaffolding = false
+prefers_markdown_scaffolding = true
+structured_output_mode = "native_json"
+supports_assistant_prefill = false
+prefers_role_developer = false
+prefers_xml_tools = false
+thinking_block_style = "reasoning_summary"
 
 # ---------- Google Gemini + Gemma 4 (via OpenRouter) -------------------------
 #
@@ -1074,8 +1420,13 @@ vision = true
 audio_supported = true
 pdf_supported = true
 structured_output = "native"
+prefers_xml_scaffolding = false
 prefers_markdown_scaffolding = true
 structured_output_mode = "native_json"
+supports_assistant_prefill = false
+prefers_role_developer = false
+prefers_xml_tools = false
+thinking_block_style = "reasoning_summary"
 
 [[provider.gemini]]
 model_match = "gemini-2.5*"
@@ -1084,6 +1435,13 @@ vision_supported = true
 audio_supported = true
 pdf_supported = true
 files_api_supported = true
+prefers_xml_scaffolding = false
+prefers_markdown_scaffolding = true
+structured_output_mode = "native_json"
+supports_assistant_prefill = false
+prefers_role_developer = false
+prefers_xml_tools = false
+thinking_block_style = "reasoning_summary"
 
 [[provider.gemini]]
 model_match = "models/gemini-2.5*"
@@ -1092,6 +1450,13 @@ vision_supported = true
 audio_supported = true
 pdf_supported = true
 files_api_supported = true
+prefers_xml_scaffolding = false
+prefers_markdown_scaffolding = true
+structured_output_mode = "native_json"
+supports_assistant_prefill = false
+prefers_role_developer = false
+prefers_xml_tools = false
+thinking_block_style = "reasoning_summary"
 
 [[provider.gemini]]
 model_match = "gemini-*"
@@ -1099,6 +1464,13 @@ vision_supported = true
 audio_supported = true
 pdf_supported = true
 files_api_supported = true
+prefers_xml_scaffolding = false
+prefers_markdown_scaffolding = true
+structured_output_mode = "native_json"
+supports_assistant_prefill = false
+prefers_role_developer = false
+prefers_xml_tools = false
+thinking_block_style = "none"
 
 [[provider.gemini]]
 model_match = "models/gemini-*"
@@ -1106,13 +1478,25 @@ vision_supported = true
 audio_supported = true
 pdf_supported = true
 files_api_supported = true
+prefers_xml_scaffolding = false
+prefers_markdown_scaffolding = true
+structured_output_mode = "native_json"
+supports_assistant_prefill = false
+prefers_role_developer = false
+prefers_xml_tools = false
+thinking_block_style = "none"
 
 [[provider.openrouter]]
 model_match = "google/gemma-4*"
 native_tools = true
 structured_output = "native"
+prefers_xml_scaffolding = false
 prefers_markdown_scaffolding = true
 structured_output_mode = "native_json"
+supports_assistant_prefill = false
+prefers_role_developer = false
+prefers_xml_tools = false
+thinking_block_style = "none"
 
 # ---------- Together reasoning models ----------------------------------------
 #
@@ -1126,10 +1510,15 @@ structured_output_mode = "native_json"
 [[provider.together]]
 model_match = "openai/gpt-oss-*"
 structured_output = "native"
-prefers_markdown_scaffolding = true
-structured_output_mode = "native_json"
 thinking_modes = ["effort"]
 reasoning_effort_supported = true
+prefers_xml_scaffolding = false
+prefers_markdown_scaffolding = true
+structured_output_mode = "native_json"
+supports_assistant_prefill = false
+prefers_role_developer = false
+prefers_xml_tools = false
+thinking_block_style = "reasoning_summary"
 
 [[provider.together]]
 model_match = "deepseek-ai/deepseek-v4*"
@@ -1138,44 +1527,69 @@ thinking_modes = ["enabled", "effort"]
 reasoning_effort_supported = true
 prompt_caching = true
 structured_output = "native"
-prefers_markdown_scaffolding = true
-structured_output_mode = "native_json"
 server_parser = "none"
 honors_chat_template_kwargs = false
+prefers_xml_scaffolding = false
+prefers_markdown_scaffolding = true
+structured_output_mode = "native_json"
+supports_assistant_prefill = false
+prefers_role_developer = false
+prefers_xml_tools = false
+thinking_block_style = "reasoning_summary"
 
 [[provider.together]]
 model_match = "moonshotai/kimi-k2*"
 native_tools = true
 structured_output = "native"
-prefers_markdown_scaffolding = true
-structured_output_mode = "native_json"
 thinking_modes = ["enabled"]
 honors_chat_template_kwargs = false
+prefers_xml_scaffolding = false
+prefers_markdown_scaffolding = true
+structured_output_mode = "native_json"
+supports_assistant_prefill = false
+prefers_role_developer = false
+prefers_xml_tools = false
+thinking_block_style = "inline"
 
 [[provider.together]]
 model_match = "zai-org/glm-5*"
 native_tools = true
 structured_output = "native"
-prefers_markdown_scaffolding = true
-structured_output_mode = "native_json"
 thinking_modes = ["enabled"]
 honors_chat_template_kwargs = false
+prefers_xml_scaffolding = false
+prefers_markdown_scaffolding = true
+structured_output_mode = "native_json"
+supports_assistant_prefill = false
+prefers_role_developer = false
+prefers_xml_tools = false
+thinking_block_style = "inline"
 
 [[provider.together]]
 model_match = "google/gemma-4*"
 native_tools = true
 structured_output = "native"
-prefers_markdown_scaffolding = true
-structured_output_mode = "native_json"
 thinking_modes = ["enabled"]
 honors_chat_template_kwargs = false
+prefers_xml_scaffolding = false
+prefers_markdown_scaffolding = true
+structured_output_mode = "native_json"
+supports_assistant_prefill = false
+prefers_role_developer = false
+prefers_xml_tools = false
+thinking_block_style = "inline"
 
 [[provider.together]]
 model_match = "moonshotai/*"
 native_tools = true
 structured_output = "native"
+prefers_xml_scaffolding = false
 prefers_markdown_scaffolding = true
 structured_output_mode = "native_json"
+supports_assistant_prefill = false
+prefers_role_developer = false
+prefers_xml_tools = false
+thinking_block_style = "none"
 
 # ---------- Enterprise cloud providers ---------------------------------------
 
@@ -1183,6 +1597,10 @@ structured_output_mode = "native_json"
 # Amazon, Mistral, and other Bedrock-hosted model families. Tool-search and
 # prompt-cache semantics remain provider/model-specific, so don't advertise
 # those through the generic Bedrock route yet.
+# Bedrock-hosted Claude keeps Anthropic's prompt-format preferences while
+# using Bedrock Converse transport. The `anthropic.claude-*` rule must
+# come before the broader `*claude*` fallback so the canonical Bedrock
+# model identifiers pick up the anthropic wire-format fields.
 [[provider.bedrock]]
 model_match = "anthropic.claude-*"
 native_tools = true
@@ -1190,12 +1608,39 @@ message_wire_format = "anthropic"
 native_tool_wire_format = "anthropic"
 recommended_endpoint = "/model/{model}/converse"
 text_tool_wire_format_supported = true
+prefers_xml_scaffolding = true
+prefers_markdown_scaffolding = false
+structured_output_mode = "xml_tagged"
+supports_assistant_prefill = false
+prefers_role_developer = false
+prefers_xml_tools = true
+thinking_block_style = "thinking_blocks"
+
+[[provider.bedrock]]
+model_match = "*claude*"
+native_tools = true
+recommended_endpoint = "/model/{model}/converse"
+text_tool_wire_format_supported = true
+prefers_xml_scaffolding = true
+prefers_markdown_scaffolding = false
+structured_output_mode = "xml_tagged"
+supports_assistant_prefill = false
+prefers_role_developer = false
+prefers_xml_tools = true
+thinking_block_style = "thinking_blocks"
 
 [[provider.bedrock]]
 model_match = "*"
 native_tools = true
 recommended_endpoint = "/model/{model}/converse"
 text_tool_wire_format_supported = true
+prefers_xml_scaffolding = false
+prefers_markdown_scaffolding = true
+structured_output_mode = "delimited"
+supports_assistant_prefill = false
+prefers_role_developer = false
+prefers_xml_tools = false
+thinking_block_style = "none"
 
 # Azure OpenAI uses deployment-name routing but keeps the OpenAI chat
 # completions tool-call body. Do not inherit OpenAI Responses API
@@ -1205,24 +1650,52 @@ model_match = "gpt-*"
 native_tools = true
 recommended_endpoint = "/openai/deployments/{deployment}/chat/completions"
 text_tool_wire_format_supported = true
+prefers_xml_scaffolding = false
+prefers_markdown_scaffolding = true
+structured_output_mode = "native_json"
+supports_assistant_prefill = false
+prefers_role_developer = false
+prefers_xml_tools = false
+thinking_block_style = "none"
 
 [[provider.azure_openai]]
 model_match = "o1*"
 native_tools = true
 recommended_endpoint = "/openai/deployments/{deployment}/chat/completions"
 text_tool_wire_format_supported = true
+prefers_xml_scaffolding = false
+prefers_markdown_scaffolding = true
+structured_output_mode = "native_json"
+supports_assistant_prefill = false
+prefers_role_developer = true
+prefers_xml_tools = false
+thinking_block_style = "reasoning_summary"
 
 [[provider.azure_openai]]
 model_match = "o3*"
 native_tools = true
 recommended_endpoint = "/openai/deployments/{deployment}/chat/completions"
 text_tool_wire_format_supported = true
+prefers_xml_scaffolding = false
+prefers_markdown_scaffolding = true
+structured_output_mode = "native_json"
+supports_assistant_prefill = false
+prefers_role_developer = true
+prefers_xml_tools = false
+thinking_block_style = "reasoning_summary"
 
 [[provider.azure_openai]]
 model_match = "o4*"
 native_tools = true
 recommended_endpoint = "/openai/deployments/{deployment}/chat/completions"
 text_tool_wire_format_supported = true
+prefers_xml_scaffolding = false
+prefers_markdown_scaffolding = true
+structured_output_mode = "native_json"
+supports_assistant_prefill = false
+prefers_role_developer = true
+prefers_xml_tools = false
+thinking_block_style = "reasoning_summary"
 
 # Vertex Gemini exposes function declarations in generateContent. Harn maps
 # native tool schemas to that shape, but leaves provider-specific cached
@@ -1232,6 +1705,13 @@ model_match = "gemini-*"
 native_tools = true
 recommended_endpoint = "/projects/{project}/locations/{location}/publishers/google/models/{model}:generateContent"
 text_tool_wire_format_supported = true
+prefers_xml_scaffolding = false
+prefers_markdown_scaffolding = true
+structured_output_mode = "native_json"
+supports_assistant_prefill = false
+prefers_role_developer = false
+prefers_xml_tools = false
+thinking_block_style = "none"
 
 # ---------- Mock --------------------------------------------------------------
 #

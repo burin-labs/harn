@@ -12,6 +12,14 @@ const FEATURES: &[&str] = &[
     "streaming",
     "files_api",
     "json_schema",
+    "xml_scaffolding",
+    "markdown_scaffolding",
+    "assistant_prefill",
+    "role_developer",
+    "xml_tools",
+    "native_json",
+    "delimited_output",
+    "xml_tagged_output",
     "tools",
     "cache",
 ];
@@ -32,18 +40,21 @@ pub(crate) fn generate_markdown(rows: &[ProviderCapabilityMatrixRow]) -> String 
     out.push_str("<!-- Source of truth: crates/harn-vm/src/llm/capabilities.toml. -->\n\n");
     out.push_str("<!-- markdownlint-disable MD013 -->\n\n");
     out.push_str(
-        "This table is generated from Harn's live provider capability rules. `Model pattern` is the `model_match` rule used by the runtime; first match wins within each provider.\n\n",
+        "This table is generated from Harn's live provider capability rules. `Model pattern` is the `model_match` rule used by the runtime; first match wins within each provider. `Version min` is the optional inclusive lower bound for provider-specific model versions.\n\n",
     );
     out.push_str("Regenerate with `make gen-provider-matrix` and verify with `make check-provider-matrix`.\n\n");
     out.push_str(
-        "| Provider | Model pattern | Thinking | Vision | Audio | PDF | Streaming | Files API | JSON schema | Scaffolding | Output mode | Thinking section | Tools | Cache |\n",
+        "| Provider | Model pattern | Version min | Thinking | Vision | Audio | PDF | Streaming | Files API | JSON schema | Prompt | Output mode | Prefill | Role | Tool prompt | Thinking blocks | Tools | Cache |\n",
     );
-    out.push_str("|---|---|---|---:|---:|---:|---:|---:|---|---|---|---|---:|---:|\n");
+    out.push_str(
+        "|---|---|---|---|---:|---:|---:|---:|---:|---|---|---|---:|---|---|---|---:|---:|\n",
+    );
     for row in rows {
         out.push_str(&format!(
-            "| `{}` | `{}` | {} | {} | {} | {} | {} | {} | {} | {} | {} | {} | {} | {} |\n",
+            "| `{}` | `{}` | {} | {} | {} | {} | {} | {} | {} | {} | {} | `{}` | {} | `{}` | `{}` | `{}` | {} | {} |\n",
             row.provider,
             row.model,
+            markdown_cell(&version_min_cell(row)),
             markdown_cell(&thinking_cell(row)),
             yes_no(row.vision),
             yes_no(row.audio),
@@ -51,9 +62,12 @@ pub(crate) fn generate_markdown(rows: &[ProviderCapabilityMatrixRow]) -> String 
             yes_no(row.streaming),
             yes_no(row.files_api_supported),
             markdown_cell(&json_schema_cell(row)),
-            markdown_cell(&row.scaffolding),
-            markdown_cell(&row.structured_output_mode),
-            markdown_cell(&row.thinking_block_style),
+            markdown_cell(&scaffolding_cell(row)),
+            row.structured_output_mode,
+            yes_no(row.supports_assistant_prefill),
+            instruction_role_cell(row),
+            tool_prompt_cell(row),
+            row.thinking_block_style,
             yes_no(row.tools),
             yes_no(row.cache),
         ));
@@ -92,6 +106,14 @@ fn row_supports_feature(row: &ProviderCapabilityMatrixRow, feature: &str) -> boo
         "streaming" => row.streaming,
         "files_api" => row.files_api_supported,
         "json_schema" => row.json_schema.is_some(),
+        "xml_scaffolding" => row.prefers_xml_scaffolding,
+        "markdown_scaffolding" => row.prefers_markdown_scaffolding,
+        "assistant_prefill" => row.supports_assistant_prefill,
+        "role_developer" => row.prefers_role_developer,
+        "xml_tools" => row.prefers_xml_tools,
+        "native_json" => row.structured_output_mode == "native_json",
+        "delimited_output" => row.structured_output_mode == "delimited",
+        "xml_tagged_output" => row.structured_output_mode == "xml_tagged",
         "tools" => row.tools,
         "cache" => row.cache,
         _ => false,
@@ -99,11 +121,12 @@ fn row_supports_feature(row: &ProviderCapabilityMatrixRow, feature: &str) -> boo
 }
 
 fn print_text(rows: &[ProviderCapabilityMatrixRow]) {
-    let table_rows: Vec<[String; 13]> = rows
+    let table_rows: Vec<[String; 17]> = rows
         .iter()
         .map(|row| {
             [
                 provider_model_cell(row),
+                version_min_cell(row),
                 thinking_cell(row),
                 yes_no(row.vision).to_string(),
                 yes_no(row.audio).to_string(),
@@ -111,8 +134,11 @@ fn print_text(rows: &[ProviderCapabilityMatrixRow]) {
                 yes_no(row.streaming).to_string(),
                 yes_no(row.files_api_supported).to_string(),
                 json_schema_cell(row),
-                row.scaffolding.clone(),
+                scaffolding_cell(row),
                 row.structured_output_mode.clone(),
+                yes_no(row.supports_assistant_prefill).to_string(),
+                instruction_role_cell(row),
+                tool_prompt_cell(row),
                 row.thinking_block_style.clone(),
                 yes_no(row.tools).to_string(),
                 yes_no(row.cache).to_string(),
@@ -121,6 +147,7 @@ fn print_text(rows: &[ProviderCapabilityMatrixRow]) {
         .collect();
     let headers = [
         "provider/model".to_string(),
+        "version_min".to_string(),
         "thinking".to_string(),
         "vision".to_string(),
         "audio".to_string(),
@@ -128,9 +155,12 @@ fn print_text(rows: &[ProviderCapabilityMatrixRow]) {
         "streaming".to_string(),
         "files_api".to_string(),
         "json_schema".to_string(),
-        "scaffolding".to_string(),
+        "prompt".to_string(),
         "output_mode".to_string(),
-        "thinking_section".to_string(),
+        "prefill".to_string(),
+        "role".to_string(),
+        "tool_prompt".to_string(),
+        "thinking_blocks".to_string(),
         "tools".to_string(),
         "cache".to_string(),
     ];
@@ -186,8 +216,53 @@ fn provider_model_cell(row: &ProviderCapabilityMatrixRow) -> String {
     }
 }
 
+fn version_min_cell(row: &ProviderCapabilityMatrixRow) -> String {
+    let Some(parts) = row.version_min.as_ref() else {
+        return "any".to_string();
+    };
+    match parts.as_slice() {
+        [major, minor] => format!(">={major}.{minor}"),
+        _ => format!(
+            ">={}",
+            parts
+                .iter()
+                .map(u32::to_string)
+                .collect::<Vec<_>>()
+                .join(".")
+        ),
+    }
+}
+
 fn json_schema_cell(row: &ProviderCapabilityMatrixRow) -> String {
     row.json_schema.clone().unwrap_or_else(|| "no".to_string())
+}
+
+fn scaffolding_cell(row: &ProviderCapabilityMatrixRow) -> String {
+    match (
+        row.prefers_xml_scaffolding,
+        row.prefers_markdown_scaffolding,
+    ) {
+        (true, true) => "xml,markdown".to_string(),
+        (true, false) => "xml".to_string(),
+        (false, true) => "markdown".to_string(),
+        (false, false) => "plain".to_string(),
+    }
+}
+
+fn instruction_role_cell(row: &ProviderCapabilityMatrixRow) -> String {
+    if row.prefers_role_developer {
+        "developer".to_string()
+    } else {
+        "system".to_string()
+    }
+}
+
+fn tool_prompt_cell(row: &ProviderCapabilityMatrixRow) -> String {
+    if row.prefers_xml_tools {
+        "xml".to_string()
+    } else {
+        "json".to_string()
+    }
 }
 
 fn yes_no(value: bool) -> &'static str {
@@ -225,7 +300,7 @@ mod tests {
         assert!(markdown.contains("Source of truth"));
         assert!(markdown.contains("harn check --provider-matrix --format markdown"));
         assert!(markdown.contains(
-            "| Provider | Model pattern | Thinking | Vision | Audio | PDF | Streaming | Files API | JSON schema | Scaffolding | Output mode | Thinking section | Tools | Cache |"
+            "| Provider | Model pattern | Version min | Thinking | Vision | Audio | PDF | Streaming | Files API | JSON schema | Prompt | Output mode | Prefill | Role | Tool prompt | Thinking blocks | Tools | Cache |"
         ));
     }
 }

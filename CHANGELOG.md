@@ -138,6 +138,17 @@ condensed series summaries instead of full per-patch history.
   `--fleet-name`. Run / judge modes synthesize a thin Harn driver and
   reuse the existing `llm_call` pipeline so credentials, the provider
   catalog, and `HARN_LLM_PROVIDER=mock` work exactly as in `harn run`.
+- **Provider format-preference capabilities (#1665).**
+  `provider_capabilities(...)`, `llm_model_info(...)`, the provider
+  catalog, and the generated provider matrix now expose prompt-format
+  preferences separately from transport feature gates: XML vs. Markdown
+  section scaffolding, native JSON vs. delimited/XML-tagged output
+  preference, assistant prefill support, developer-role instructions,
+  XML text-tool rendering, and thinking-block style. The shipped matrix
+  is populated for Anthropic, OpenAI/Azure, Gemini/Vertex, Qwen/local
+  routes, Ollama, and Bedrock so prompt renderers can adapt without
+  provider-name dispatch. This bumps the generated provider catalog
+  schema to v2 because model entries now require `format_preferences`.
 - **Capability-aware prompt templates: auto-injected `llm` scope (#1664).**
   When `render()` / `render_prompt()` / `render_string()` is invoked
   from inside an LLM-aware frame (`llm_call`, `default_llm_caller`,

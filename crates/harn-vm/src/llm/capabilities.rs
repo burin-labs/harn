@@ -217,33 +217,39 @@ pub struct ProviderRule {
     /// `native`, `tool_use`, `format_kw`, and `none`.
     #[serde(default)]
     pub structured_output: Option<String>,
-    /// Preferred prompt scaffolding for logical template sections.
-    #[serde(default)]
-    pub prefers_xml_scaffolding: Option<bool>,
-    /// Preferred prompt scaffolding for logical template sections.
-    #[serde(default)]
-    pub prefers_markdown_scaffolding: Option<bool>,
-    /// Structured-output prompt-section mode. Known values are:
-    /// `native_json`, `delimited`, `xml_tagged`, and `none`.
-    #[serde(default)]
-    pub structured_output_mode: Option<String>,
-    /// Whether the provider accepts assistant-role prefill messages.
-    #[serde(default)]
-    pub supports_assistant_prefill: Option<bool>,
-    /// Whether top-level instructions should use a developer role.
-    #[serde(default)]
-    pub prefers_role_developer: Option<bool>,
-    /// Whether text-rendered tools should use an XML envelope.
-    #[serde(default)]
-    pub prefers_xml_tools: Option<bool>,
-    /// Preferred thinking-section envelope. Known values are:
-    /// `none`, `thinking_blocks`, `reasoning_summary`, and `inline`.
-    #[serde(default)]
-    pub thinking_block_style: Option<String>,
     /// Legacy name retained for project overrides written before
     /// `structured_output` became the canonical capability.
     #[serde(default)]
     pub json_schema: Option<String>,
+    /// Whether prompt sections should prefer XML-style tags such as
+    /// `<task>` / `<examples>` over Markdown headings.
+    #[serde(default)]
+    pub prefers_xml_scaffolding: Option<bool>,
+    /// Whether prompt sections should prefer Markdown headings such as
+    /// `## Task` / `## Examples`.
+    #[serde(default)]
+    pub prefers_markdown_scaffolding: Option<bool>,
+    /// Preferred logical structured-output prompt shape. This is separate
+    /// from the transport-level `structured_output` strategy above.
+    /// Known values are `native_json`, `delimited`, and `xml_tagged`.
+    #[serde(default)]
+    pub structured_output_mode: Option<String>,
+    /// Whether the route accepts an assistant-role prefill message.
+    #[serde(default)]
+    pub supports_assistant_prefill: Option<bool>,
+    /// Whether durable instructions should use OpenAI's `developer` role
+    /// instead of `system`.
+    #[serde(default)]
+    pub prefers_role_developer: Option<bool>,
+    /// Whether text-rendered tool specifications should use XML wrappers
+    /// instead of JSON-schema prose.
+    #[serde(default)]
+    pub prefers_xml_tools: Option<bool>,
+    /// Preferred representation for model thinking/reasoning blocks in
+    /// transcript-like prompt context. Known values are `none`,
+    /// `thinking_blocks`, `reasoning_summary`, and `inline`.
+    #[serde(default)]
+    pub thinking_block_style: Option<String>,
     /// Supported thinking/reasoning modes for this rule. Values are
     /// script-facing mode names: `enabled`, `adaptive`, and `effort`.
     #[serde(default)]
@@ -343,6 +349,8 @@ pub struct Capabilities {
     pub files_api_supported: bool,
     pub file_upload_wire_format: Option<String>,
     pub structured_output: Option<String>,
+    /// Legacy mirror for CLI display and older callers.
+    pub json_schema: Option<String>,
     pub prefers_xml_scaffolding: bool,
     pub prefers_markdown_scaffolding: bool,
     pub structured_output_mode: String,
@@ -350,8 +358,6 @@ pub struct Capabilities {
     pub prefers_role_developer: bool,
     pub prefers_xml_tools: bool,
     pub thinking_block_style: String,
-    /// Legacy mirror for CLI display and older callers.
-    pub json_schema: Option<String>,
     pub thinking_modes: Vec<String>,
     pub interleaved_thinking_supported: bool,
     pub anthropic_beta_features: Vec<String>,
@@ -389,6 +395,7 @@ impl Default for Capabilities {
             files_api_supported: false,
             file_upload_wire_format: None,
             structured_output: None,
+            json_schema: None,
             prefers_xml_scaffolding: false,
             prefers_markdown_scaffolding: false,
             structured_output_mode: "none".to_string(),
@@ -396,7 +403,6 @@ impl Default for Capabilities {
             prefers_role_developer: false,
             prefers_xml_tools: false,
             thinking_block_style: "none".to_string(),
-            json_schema: None,
             thinking_modes: Vec::new(),
             interleaved_thinking_supported: false,
             anthropic_beta_features: Vec::new(),
@@ -428,6 +434,7 @@ impl Default for Capabilities {
 pub struct ProviderCapabilityMatrixRow {
     pub provider: String,
     pub model: String,
+    pub version_min: Option<Vec<u32>>,
     pub thinking: Vec<String>,
     pub vision: bool,
     pub audio: bool,
@@ -435,8 +442,12 @@ pub struct ProviderCapabilityMatrixRow {
     pub streaming: bool,
     pub files_api_supported: bool,
     pub json_schema: Option<String>,
-    pub scaffolding: String,
+    pub prefers_xml_scaffolding: bool,
+    pub prefers_markdown_scaffolding: bool,
     pub structured_output_mode: String,
+    pub supports_assistant_prefill: bool,
+    pub prefers_role_developer: bool,
+    pub prefers_xml_tools: bool,
     pub thinking_block_style: String,
     pub tools: bool,
     pub cache: bool,
@@ -550,6 +561,7 @@ fn rule_to_matrix_row(
     ProviderCapabilityMatrixRow {
         provider: provider.to_string(),
         model: rule.model_match.clone(),
+        version_min: rule.version_min.clone(),
         thinking: rule_thinking_modes(rule),
         vision: rule_vision(rule),
         audio: rule.audio.unwrap_or(false),
@@ -557,8 +569,14 @@ fn rule_to_matrix_row(
         streaming: true,
         files_api_supported: rule.files_api_supported.unwrap_or(false),
         json_schema: rule_structured_output(rule),
-        scaffolding: rule_scaffolding(rule).to_string(),
+        prefers_xml_scaffolding: rule.prefers_xml_scaffolding.unwrap_or(false),
+        prefers_markdown_scaffolding: rule.prefers_markdown_scaffolding.unwrap_or(false),
         structured_output_mode: rule_structured_output_mode(rule),
+        supports_assistant_prefill: rule.supports_assistant_prefill.unwrap_or(false),
+        prefers_role_developer: rule
+            .prefers_role_developer
+            .unwrap_or_else(|| rule.requires_completion_tokens.unwrap_or(false)),
+        prefers_xml_tools: rule.prefers_xml_tools.unwrap_or(false),
         thinking_block_style: rule_thinking_block_style(rule),
         tools: rule.native_tools.unwrap_or(false),
         cache: rule.prompt_caching.unwrap_or(false),
@@ -765,16 +783,14 @@ fn rule_to_caps(rule: &ProviderRule, defaults: &ProviderDefaults) -> Capabilitie
             .clone()
             .or_else(|| defaults.file_upload_wire_format.clone()),
         structured_output: rule_structured_output(rule),
+        json_schema: rule_structured_output(rule),
         prefers_xml_scaffolding: rule.prefers_xml_scaffolding.unwrap_or(false),
         prefers_markdown_scaffolding: rule.prefers_markdown_scaffolding.unwrap_or(false),
         structured_output_mode: rule_structured_output_mode(rule),
         supports_assistant_prefill: rule.supports_assistant_prefill.unwrap_or(false),
-        prefers_role_developer: rule
-            .prefers_role_developer
-            .unwrap_or_else(|| rule.requires_completion_tokens.unwrap_or(false)),
+        prefers_role_developer: rule.prefers_role_developer.unwrap_or(false),
         prefers_xml_tools: rule.prefers_xml_tools.unwrap_or(false),
         thinking_block_style: rule_thinking_block_style(rule),
-        json_schema: rule_structured_output(rule),
         thinking_modes,
         interleaved_thinking_supported: rule.interleaved_thinking_supported.unwrap_or(false),
         anthropic_beta_features: rule.anthropic_beta_features.clone().unwrap_or_default(),
@@ -825,18 +841,6 @@ fn rule_structured_output(rule: &ProviderRule) -> Option<String> {
         .filter(|value| value != "none")
 }
 
-fn rule_thinking_block_style(rule: &ProviderRule) -> String {
-    rule.thinking_block_style.clone().unwrap_or_else(|| {
-        if rule.reasoning_effort_supported.unwrap_or(false)
-            || rule.requires_completion_tokens.unwrap_or(false)
-        {
-            "reasoning_summary".to_string()
-        } else {
-            "none".to_string()
-        }
-    })
-}
-
 fn rule_structured_output_mode(rule: &ProviderRule) -> String {
     if let Some(mode) = &rule.structured_output_mode {
         return mode.clone();
@@ -848,14 +852,16 @@ fn rule_structured_output_mode(rule: &ProviderRule) -> String {
     }
 }
 
-fn rule_scaffolding(rule: &ProviderRule) -> &'static str {
-    if rule.prefers_xml_scaffolding.unwrap_or(false) {
-        "xml"
-    } else if rule.prefers_markdown_scaffolding.unwrap_or(false) {
-        "markdown"
-    } else {
-        "plain"
-    }
+fn rule_thinking_block_style(rule: &ProviderRule) -> String {
+    rule.thinking_block_style.clone().unwrap_or_else(|| {
+        if rule.reasoning_effort_supported.unwrap_or(false)
+            || rule.requires_completion_tokens.unwrap_or(false)
+        {
+            "reasoning_summary".to_string()
+        } else {
+            "none".to_string()
+        }
+    })
 }
 
 fn rule_matches(rule: &ProviderRule, model: &str) -> bool {
@@ -931,16 +937,18 @@ mod tests {
         assert_eq!(caps.tool_search, vec!["bm25", "regex"]);
         assert!(caps.prompt_caching);
         assert_eq!(caps.thinking_modes, vec!["adaptive"]);
-        assert!(caps.prefers_xml_scaffolding);
-        assert!(caps.prefers_xml_tools);
-        assert_eq!(caps.structured_output_mode, "xml_tagged");
-        assert!(caps.supports_assistant_prefill);
-        assert_eq!(caps.thinking_block_style, "thinking_blocks");
         assert!(caps.vision_supported);
         assert!(caps.audio);
         assert!(caps.pdf);
         assert!(caps.files_api_supported);
         assert_eq!(caps.max_tools, Some(10000));
+        assert!(caps.prefers_xml_scaffolding);
+        assert!(!caps.prefers_markdown_scaffolding);
+        assert_eq!(caps.structured_output_mode, "xml_tagged");
+        assert!(!caps.supports_assistant_prefill);
+        assert!(!caps.prefers_role_developer);
+        assert!(caps.prefers_xml_tools);
+        assert_eq!(caps.thinking_block_style, "thinking_blocks");
     }
 
     #[test]
@@ -949,6 +957,7 @@ mod tests {
         let caps = lookup("anthropic", "claude-opus-4-6");
         assert_eq!(caps.thinking_modes, vec!["enabled"]);
         assert!(caps.interleaved_thinking_supported);
+        assert!(!caps.supports_assistant_prefill);
     }
 
     #[test]
@@ -957,6 +966,7 @@ mod tests {
         let caps = lookup("anthropic", "claude-opus-4-5");
         assert_eq!(caps.thinking_modes, vec!["enabled"]);
         assert!(!caps.interleaved_thinking_supported);
+        assert!(caps.supports_assistant_prefill);
     }
 
     #[test]
@@ -1014,11 +1024,15 @@ anthropic_beta_features = ["fine-grained-tool-streaming-2025-05-14"]
         assert_eq!(caps.tool_search, vec!["hosted", "client"]);
         assert_eq!(caps.json_schema.as_deref(), Some("native"));
         assert_eq!(caps.thinking_modes, vec!["effort"]);
-        assert!(caps.prefers_markdown_scaffolding);
-        assert_eq!(caps.structured_output_mode, "native_json");
-        assert_eq!(caps.thinking_block_style, "reasoning_summary");
         assert!(caps.reasoning_effort_supported);
         assert!(caps.reasoning_none_supported);
+        assert!(!caps.prefers_xml_scaffolding);
+        assert!(caps.prefers_markdown_scaffolding);
+        assert_eq!(caps.structured_output_mode, "native_json");
+        assert!(!caps.supports_assistant_prefill);
+        assert!(!caps.prefers_role_developer);
+        assert!(!caps.prefers_xml_tools);
+        assert_eq!(caps.thinking_block_style, "reasoning_summary");
     }
 
     #[test]
@@ -1063,10 +1077,11 @@ anthropic_beta_features = ["fine-grained-tool-streaming-2025-05-14"]
         assert_eq!(caps.thinking_modes, vec!["effort"]);
         assert!(caps.requires_completion_tokens);
         assert!(caps.reasoning_effort_supported);
+        assert!(caps.prefers_role_developer);
+        assert_eq!(caps.thinking_block_style, "reasoning_summary");
         let prefixed = lookup("openrouter", "openai/o4-mini");
         assert!(prefixed.requires_completion_tokens);
         assert!(prefixed.reasoning_effort_supported);
-        assert!(prefixed.prefers_role_developer);
     }
 
     #[test]
@@ -1081,6 +1096,10 @@ anthropic_beta_features = ["fine-grained-tool-streaming-2025-05-14"]
         assert!(lookup("gemini", "gemini-2.5-flash").vision_supported);
         assert!(lookup("gemini", "gemini-2.5-flash").audio);
         assert!(lookup("gemini", "gemini-2.5-flash").pdf);
+        assert_eq!(
+            lookup("gemini", "gemini-2.5-flash").structured_output_mode,
+            "native_json"
+        );
         assert!(lookup("ollama", "llava:latest").vision_supported);
         assert!(lookup("ollama", "gemma4:26b").vision_supported);
         assert!(lookup("ollama", "gemma4-128k:latest").vision_supported);
@@ -1145,8 +1164,10 @@ anthropic_beta_features = ["fine-grained-tool-streaming-2025-05-14"]
         assert!(!caps.honors_chat_template_kwargs);
         assert_eq!(caps.recommended_endpoint.as_deref(), Some("/api/chat"));
         assert!(caps.text_tool_wire_format_supported);
-        assert_eq!(caps.structured_output_mode, "native_json");
         assert!(caps.prefers_markdown_scaffolding);
+        assert_eq!(caps.structured_output_mode, "delimited");
+        assert!(!caps.prefers_xml_tools);
+        assert_eq!(caps.thinking_block_style, "inline");
     }
 
     #[test]
@@ -1274,19 +1295,44 @@ anthropic_beta_features = ["fine-grained-tool-streaming-2025-05-14"]
     }
 
     #[test]
+    fn enterprise_routes_expose_format_preferences() {
+        reset();
+        let bedrock_claude = lookup("bedrock", "anthropic.claude-opus-4-7-v1:0");
+        assert!(bedrock_claude.prefers_xml_scaffolding);
+        assert_eq!(bedrock_claude.structured_output_mode, "xml_tagged");
+        assert!(!bedrock_claude.supports_assistant_prefill);
+        assert!(bedrock_claude.prefers_xml_tools);
+
+        let azure_o = lookup("azure_openai", "o3-prod");
+        assert!(azure_o.prefers_markdown_scaffolding);
+        assert_eq!(azure_o.structured_output_mode, "native_json");
+        assert!(azure_o.prefers_role_developer);
+        assert_eq!(azure_o.thinking_block_style, "reasoning_summary");
+    }
+
+    #[test]
     fn user_override_adds_new_provider() {
         reset();
-        let toml_src = r#"
-[[provider.my-proxy]]
-model_match = "*"
-native_tools = true
-tool_search = ["hosted"]
-"#;
+        let toml_src = concat!(
+            "[[provider.my-proxy]]\n",
+            "model_match = \"*\"\n",
+            "native_tools = true\n",
+            "tool_search = [\"hosted\"]\n",
+            "prefers_xml_scaffolding = true\n",
+            "structured_output_mode = \"xml_tagged\"\n",
+            "supports_assistant_prefill = true\n",
+            "prefers_xml_tools = true\n",
+            "thinking_block_style = \"thinking_blocks\"\n",
+        );
         set_user_overrides_toml(toml_src).unwrap();
         let caps = lookup("my-proxy", "anything");
         assert!(caps.native_tools);
         assert_eq!(caps.tool_search, vec!["hosted"]);
-        assert_eq!(caps.structured_output_mode, "none");
+        assert!(caps.prefers_xml_scaffolding);
+        assert_eq!(caps.structured_output_mode, "xml_tagged");
+        assert!(caps.supports_assistant_prefill);
+        assert!(caps.prefers_xml_tools);
+        assert_eq!(caps.thinking_block_style, "thinking_blocks");
         clear_user_overrides();
     }
 
@@ -1311,19 +1357,26 @@ tool_search = []
     #[test]
     fn user_override_from_manifest_toml() {
         reset();
-        let manifest = r#"
-[package]
-name = "demo"
-
-[[capabilities.provider.my-proxy]]
-model_match = "*"
-native_tools = true
-tool_search = ["hosted"]
-"#;
+        let manifest = concat!(
+            "[package]\n",
+            "name = \"demo\"\n\n",
+            "[[capabilities.provider.my-proxy]]\n",
+            "model_match = \"*\"\n",
+            "native_tools = true\n",
+            "tool_search = [\"hosted\"]\n",
+            "prefers_markdown_scaffolding = true\n",
+            "structured_output_mode = \"native_json\"\n",
+            "prefers_role_developer = true\n",
+            "thinking_block_style = \"reasoning_summary\"\n",
+        );
         set_user_overrides_from_manifest_toml(manifest).unwrap();
         let caps = lookup("my-proxy", "foo");
         assert!(caps.native_tools);
         assert_eq!(caps.tool_search, vec!["hosted"]);
+        assert!(caps.prefers_markdown_scaffolding);
+        assert_eq!(caps.structured_output_mode, "native_json");
+        assert!(caps.prefers_role_developer);
+        assert_eq!(caps.thinking_block_style, "reasoning_summary");
         clear_user_overrides();
     }
 

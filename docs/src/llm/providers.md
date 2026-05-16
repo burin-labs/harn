@@ -168,8 +168,10 @@ let caps = provider_capabilities("anthropic", "claude-opus-4-7")
 //   interleaved_thinking_supported: true,
 //   message_wire_format: "anthropic",
 //   native_tool_wire_format: "anthropic",
-//   prefers_xml_scaffolding: true, prefers_xml_tools: true,
+//   prefers_xml_scaffolding: true,
 //   structured_output_mode: "xml_tagged",
+//   supports_assistant_prefill: false,
+//   prefers_xml_tools: true,
 //   thinking_block_style: "thinking_blocks",
 // }
 
@@ -194,6 +196,12 @@ though native provider tool calls are unavailable or too flaky. Model-catalog
 display tags are derived from this matrix too; legacy `models.*.capabilities`
 entries are parsed for backwards compatibility but do not override runtime
 capability resolution.
+
+The matrix also records format preferences that prompt renderers can use
+without branching on provider names: XML vs. Markdown section scaffolding,
+native JSON vs. delimited/XML-tagged structured-output preference, assistant
+prefill support, developer-role instruction preference, XML text-tool prompt
+preference, and the preferred thinking-block representation.
 
 Projects override or extend the shipped table in `harn.toml` — useful
 for flagging a proxied OpenAI-compat endpoint as supporting
@@ -237,13 +245,13 @@ entry accepts these fields:
 | `tool_search` | list of strings | Native `tool_search` variants, preferred first. Anthropic: `["bm25", "regex"]`. OpenAI: `["hosted", "client"]`. Empty = no native support (client fallback only). |
 | `max_tools` | int | Cap on tool count. `harn lint` will warn if a registry exceeds the smallest cap any active provider advertises. |
 | `prompt_caching` | bool | `cache_control` blocks honored. |
-| `prefers_xml_scaffolding` | bool | Logical prompt sections render as XML tags. |
-| `prefers_markdown_scaffolding` | bool | Logical prompt sections render as Markdown headings. |
-| `structured_output_mode` | string | Section-level output-format mode: `native_json`, `delimited`, `xml_tagged`, `none`. |
-| `supports_assistant_prefill` | bool | Provider accepts assistant-role prefill turns. |
-| `prefers_role_developer` | bool | `system_framing` should target developer instructions. |
-| `prefers_xml_tools` | bool | Text-rendered tool sections prefer XML tags. |
-| `thinking_block_style` | string | Section-level thinking style: `none`, `thinking_blocks`, `reasoning_summary`, `inline`. |
+| `prefers_xml_scaffolding` | bool | Logical prompt sections should prefer XML tags such as `<task>` / `<examples>`. |
+| `prefers_markdown_scaffolding` | bool | Logical prompt sections should prefer Markdown headings such as `## Task`. |
+| `structured_output_mode` | string | Preferred logical structured-output shape: `native_json`, `delimited`, `xml_tagged`, or `none`. Separate from the transport-level `structured_output` strategy. |
+| `supports_assistant_prefill` | bool | Provider/model route accepts an assistant-role prefill message. |
+| `prefers_role_developer` | bool | Durable instructions should use OpenAI's `developer` role rather than `system`. |
+| `prefers_xml_tools` | bool | Text-rendered tool specs should use XML wrappers rather than JSON-schema prose. |
+| `thinking_block_style` | string | Preferred transcript thinking style: `none`, `thinking_blocks`, `reasoning_summary`, or `inline`. |
 | `thinking_modes` | list of strings | Supported script-facing thinking modes. Values are `enabled`, `adaptive`, or `effort`. |
 | `reasoning_wire_format` | string | Non-standard OpenAI-compatible reasoning request shape: `openrouter` or `enabled`. |
 | `reasoning_effort_supported` | bool | Provider accepts a `reasoning_effort` request field for effort-capable models. |
@@ -262,8 +270,8 @@ before the shipped rules — so the order inside the TOML file matters
 
 `[provider_family]` declares sibling providers that inherit rules
 from a canonical family. The shipped table routes OpenRouter,
-Together, Groq, DeepSeek, Fireworks, HuggingFace, and local vLLM to
-`[[provider.openai]]` by default.
+Together, Groq, DeepSeek, Fireworks, HuggingFace, DashScope, local
+vLLM, llama.cpp, and MLX to `[[provider.openai]]` by default.
 
 Two programmatic helpers mirror the `harn.toml` path for cases where
 editing the manifest is awkward:

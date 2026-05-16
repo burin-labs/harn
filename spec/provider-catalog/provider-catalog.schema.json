@@ -117,6 +117,52 @@
       ],
       "type": "object"
     },
+    "format_preferences": {
+      "additionalProperties": false,
+      "properties": {
+        "prefers_markdown_scaffolding": {
+          "type": "boolean"
+        },
+        "prefers_role_developer": {
+          "type": "boolean"
+        },
+        "prefers_xml_scaffolding": {
+          "type": "boolean"
+        },
+        "prefers_xml_tools": {
+          "type": "boolean"
+        },
+        "structured_output_mode": {
+          "enum": [
+            "native_json",
+            "delimited",
+            "xml_tagged",
+            "none"
+          ]
+        },
+        "supports_assistant_prefill": {
+          "type": "boolean"
+        },
+        "thinking_block_style": {
+          "enum": [
+            "none",
+            "thinking_blocks",
+            "reasoning_summary",
+            "inline"
+          ]
+        }
+      },
+      "required": [
+        "prefers_xml_scaffolding",
+        "prefers_markdown_scaffolding",
+        "structured_output_mode",
+        "supports_assistant_prefill",
+        "prefers_role_developer",
+        "prefers_xml_tools",
+        "thinking_block_style"
+      ],
+      "type": "object"
+    },
     "modalities": {
       "additionalProperties": false,
       "properties": {
@@ -162,6 +208,9 @@
         },
         "deprecation": {
           "$ref": "#/$defs/deprecation"
+        },
+        "format_preferences": {
+          "$ref": "#/$defs/format_preferences"
         },
         "id": {
           "minLength": 1,
@@ -220,6 +269,7 @@
         "modalities",
         "tool_support",
         "structured_output",
+        "format_preferences",
         "reasoning",
         "prompt_cache",
         "deprecation",
@@ -421,7 +471,7 @@
       "type": "object"
     }
   },
-  "$id": "https://harnlang.com/schemas/provider-catalog.v1.json",
+  "$id": "https://harnlang.com/schemas/provider-catalog.v2.json",
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "additionalProperties": false,
   "properties": {
@@ -453,10 +503,10 @@
       "type": "object"
     },
     "schema": {
-      "const": "https://harnlang.com/schemas/provider-catalog.v1.json"
+      "const": "https://harnlang.com/schemas/provider-catalog.v2.json"
     },
     "schema_version": {
-      "const": 1
+      "const": 2
     },
     "variants": {
       "items": {

@@ -715,8 +715,36 @@ pub(crate) fn capabilities_to_vm_value(
         VmValue::Bool(caps.prompt_caching),
     );
     dict.insert(
+        "prefers_xml_scaffolding".to_string(),
+        VmValue::Bool(caps.prefers_xml_scaffolding),
+    );
+    dict.insert(
+        "prefers_markdown_scaffolding".to_string(),
+        VmValue::Bool(caps.prefers_markdown_scaffolding),
+    );
+    dict.insert(
+        "structured_output_mode".to_string(),
+        VmValue::String(Rc::from(caps.structured_output_mode.as_str())),
+    );
+    dict.insert(
+        "supports_assistant_prefill".to_string(),
+        VmValue::Bool(caps.supports_assistant_prefill),
+    );
+    dict.insert(
+        "prefers_role_developer".to_string(),
+        VmValue::Bool(caps.prefers_role_developer),
+    );
+    dict.insert(
+        "prefers_xml_tools".to_string(),
+        VmValue::Bool(caps.prefers_xml_tools),
+    );
+    dict.insert(
         "thinking".to_string(),
         VmValue::Bool(!caps.thinking_modes.is_empty()),
+    );
+    dict.insert(
+        "thinking_block_style".to_string(),
+        VmValue::String(Rc::from(caps.thinking_block_style.as_str())),
     );
     dict.insert(
         "thinking_modes".to_string(),
@@ -1229,6 +1257,16 @@ mod tests {
         expect_bool("native_tools", false);
         expect_bool("text_tool_wire_format_supported", true);
         expect_bool("tools", true);
+        expect_bool("prefers_markdown_scaffolding", true);
+        expect_bool("prefers_xml_tools", false);
+        match dict.get("structured_output_mode") {
+            Some(VmValue::String(mode)) => assert_eq!(mode.as_ref(), "delimited"),
+            other => panic!("expected structured_output_mode string, got {other:?}"),
+        }
+        match dict.get("thinking_block_style") {
+            Some(VmValue::String(style)) => assert_eq!(style.as_ref(), "inline"),
+            other => panic!("expected thinking_block_style string, got {other:?}"),
+        }
     }
 
     #[test]
@@ -1254,7 +1292,7 @@ mod tests {
 
         expect_bool("prefers_xml_scaffolding", true);
         expect_bool("prefers_xml_tools", true);
-        expect_bool("supports_assistant_prefill", true);
+        expect_bool("supports_assistant_prefill", false);
         expect_string("structured_output_mode", "xml_tagged");
         expect_string("thinking_block_style", "thinking_blocks");
     }
