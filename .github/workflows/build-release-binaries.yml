@@ -233,13 +233,45 @@ jobs:
           done
 
           (cd "target/${TARGET}/release" && zip -j "$NOTARY_ZIP" harn harn-dap harn-lsp)
-          echo "Submitting to Apple notary (this typically takes 1-5 minutes)..."
-          xcrun notarytool submit "$NOTARY_ZIP" \
-            --key "$KEY_FILE" \
-            --key-id "$APPLE_API_KEY_ID" \
-            --issuer "$APPLE_API_ISSUER_ID" \
-            --wait \
-            --timeout 30m
+          notary_submit_with_retry() {
+            local attempt=1
+            local max_attempts=4
+            local delay=20
+
+            while [ "$attempt" -le "$max_attempts" ]; do
+              local log_file="$RUNNER_TEMP/notary-submit-${attempt}.log"
+              echo "Submitting to Apple notary (attempt ${attempt}/${max_attempts}; this typically takes 1-5 minutes)..."
+              set +e
+              xcrun notarytool submit "$NOTARY_ZIP" \
+                --key "$KEY_FILE" \
+                --key-id "$APPLE_API_KEY_ID" \
+                --issuer "$APPLE_API_ISSUER_ID" \
+                --wait \
+                --timeout 30m 2>&1 | tee "$log_file"
+              local status="${PIPESTATUS[0]}"
+              set -e
+
+              if [ "$status" -eq 0 ]; then
+                return 0
+              fi
+
+              if [ "$attempt" -eq "$max_attempts" ]; then
+                return "$status"
+              fi
+
+              if grep -Eiq 'NSURLErrorDomain|offline|timed out|connection|network|gateway|service unavailable|Current status: In Progress' "$log_file"; then
+                echo "Apple notary returned a transient polling/upload error; retrying in ${delay}s..."
+                sleep "$delay"
+                attempt=$((attempt + 1))
+                delay=$((delay * 2))
+                continue
+              fi
+
+              return "$status"
+            done
+          }
+
+          notary_submit_with_retry
           rm -f "$KEY_FILE" "$NOTARY_ZIP"
 
       - name: Tear down macOS keychain
@@ -366,12 +398,25 @@ jobs:
         working-directory: artifacts
         run: |
           set -euo pipefail
-          shopt -s nullglob
-          files=(*.tar.gz *.zip)
-          if (( ${#files[@]} == 0 )); then
-            echo "::error::No release artifacts found to checksum"
+          expected=(
+            harn-aarch64-apple-darwin.tar.gz
+            harn-aarch64-unknown-linux-gnu.tar.gz
+            harn-x86_64-apple-darwin.tar.gz
+            harn-x86_64-pc-windows-msvc.zip
+            harn-x86_64-unknown-linux-gnu.tar.gz
+          )
+          missing=()
+          for file in "${expected[@]}"; do
+            if [ ! -f "$file" ]; then
+              missing+=("$file")
+            fi
+          done
+          if (( ${#missing[@]} > 0 )); then
+            printf '::error::Missing release artifacts: %s\n' "${missing[*]}"
+            find . -maxdepth 1 -type f -print | sort
             exit 1
           fi
+          files=("${expected[@]}")
           sha256sum "${files[@]}" | LC_ALL=C sort -k 2 > SHA256SUMS
           cat SHA256SUMS
 

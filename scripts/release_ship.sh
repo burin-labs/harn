@@ -61,7 +61,7 @@ usage() {
 Usage:
   ./scripts/release_ship.sh --prepare --bump patch|minor|major [--skip-audit] [--skip-dry-run]
   ./scripts/release_ship.sh --bump patch|minor|major [--skip-dry-run] [--base main]   # recovery
-  ./scripts/release_ship.sh --finalize [--skip-dry-run] [--reaudit] [--notes-output path] [--base main]
+  ./scripts/release_ship.sh --finalize [--skip-dry-run] [--reaudit] [--notes-output path] [--skip-github-release] [--base main]
 
 Merge-queue-safe release sequence for a prepared Harn release.
 
@@ -92,12 +92,12 @@ DEFAULT FLOW (one human PR, then bot finalizes)
        gh pr create
 
   5. publish-release.yml fires on the tag push, checks out the tagged
-     commit (detached), and finalizes — crates.io publish, GitHub
-     release, build-release-binaries cascade — all from the pinned
-     commit. The Release PR remains as paperwork; auto-merge can land
-     it whenever, even if main has moved on. The post-merge push to
-     main no-ops (no drift, since Cargo.toml on main now matches the
-     tag).
+     commit (detached), and finalizes crates.io. The
+     build-release-binaries cascade creates the GitHub release with
+     binary artifacts from the same pinned commit. The Release PR
+     remains as paperwork; auto-merge can land it whenever, even if
+     main has moved on. The post-merge push to main no-ops (no drift,
+     since Cargo.toml on main now matches the tag).
 
 ==============================================================================
 PREPARE MODE
@@ -156,7 +156,9 @@ FINALIZE MODE
   4. Pushes the tag (no-op if origin already has it).
   5. Runs cargo publish to upload crates to crates.io.
   6. Renders changelog-backed release notes.
-  7. Creates/updates a GitHub release with the rendered notes.
+  7. Creates/updates a GitHub release with the rendered notes, unless
+     --skip-github-release is passed because another workflow owns the
+     release page and binary artifacts.
 
   Set RELEASE_FINALIZE_REAUDIT=1 (or pass --reaudit) to opt back into
   the full release-gate audit before finalizing — useful when running
@@ -552,6 +554,7 @@ SKIP_AUDIT=0
 MODE="bump-pr"
 BASE_BRANCH="main"
 NOTES_OUTPUT=""
+SKIP_GITHUB_RELEASE=0
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -589,6 +592,10 @@ while [[ $# -gt 0 ]]; do
     --notes-output)
       NOTES_OUTPUT="${2:-}"
       shift 2
+      ;;
+    --skip-github-release)
+      SKIP_GITHUB_RELEASE=1
+      shift
       ;;
     --no-push)
       echo "error: --no-push was removed from release_ship.sh"
@@ -695,12 +702,15 @@ log_step "Release notes"
 ./scripts/release_gate.sh notes --version "$TAG" --output "$NOTES_OUTPUT"
 cat "$NOTES_OUTPUT"
 
-# Create or update GitHub release with rendered notes as the LAST step, so
-# the release body reflects the final crates.io + git state. If crates.io
-# was slow, the upstream tag is already live — downstream CI will have
-# kicked off minutes ago.
 GH_RELEASE_URL=""
-if command -v gh &>/dev/null; then
+if [[ "$SKIP_GITHUB_RELEASE" -eq 1 ]]; then
+  log_step "GitHub release skipped"
+  echo "Skipping GitHub release creation/update; binary release workflow owns release assets and notes."
+elif command -v gh &>/dev/null; then
+  # Create or update GitHub release with rendered notes as the LAST step, so
+  # the release body reflects the final crates.io + git state. If crates.io
+  # was slow, the upstream tag is already live — downstream CI will have
+  # kicked off minutes ago.
   log_step "GitHub release"
   if gh release view "$TAG" &>/dev/null; then
     GH_RELEASE_URL="$(gh release edit "$TAG" --notes-file "$NOTES_OUTPUT" 2>&1)"
