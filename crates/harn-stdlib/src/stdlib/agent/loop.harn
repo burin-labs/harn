@@ -1190,6 +1190,19 @@ fn __agent_loop_run(message, session, initial_opts) {
   var opts = initial_opts
   var iteration = 0
   var session_finalized = false
+  // Publish the resolved provider/model so any `.harn.prompt` rendered
+  // during turn-system construction (loop contract, tool contract,
+  // skills, …) can branch on `llm.capabilities.*` without manual
+  // option threading. Skipped when provider is empty — the render
+  // sees `llm = nil` and the existing branch falls through.
+  let __llm_ctx_provider = to_string(initial_opts?.provider ?? "")
+  let __llm_ctx_model = to_string(initial_opts?.model ?? "")
+  let __llm_ctx_pushed = __push_llm_render_context(__llm_ctx_provider, __llm_ctx_model)
+  defer {
+    if __llm_ctx_pushed {
+      __pop_llm_render_context()
+    }
+  }
   let run = try {
     opts = agent_mcp_bootstrap_if_needed(session, opts)
     var stop_reason = nil

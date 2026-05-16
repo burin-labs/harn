@@ -290,6 +290,69 @@ Typical cases:
 - `circular include detected: a.prompt → b.prompt → a.prompt`.
 - `include path must be a string` — `{{ include }}` target wasn't a string.
 
+## The `llm` scope
+
+When `render()` / `render_prompt()` / `render_string()` is invoked from
+inside an LLM-aware frame (`llm_call`, the default handler stack, or
+`agent_loop`), the engine auto-injects a reserved `llm` binding so a
+single logical template can adapt its wire envelope per provider
+without manual option threading:
+
+```harn-prompt
+{{ if llm.capabilities.native_tools }}
+  Call `finish_task` when done.
+{{ else }}
+  When done, output: `<<DONE>>`
+{{ end }}
+```
+
+The injected value is shaped:
+
+```text
+llm = {
+  provider: "anthropic",          // resolved provider name
+  model:    "claude-3-5-sonnet",  // resolved model id
+  family:   "claude",             // canonical model-family token
+  capabilities: { ... },          // result of provider_capabilities()
+}
+```
+
+`family` is one of `claude` / `gpt` / `gemini` / `qwen` / `llama` /
+`mistral` / `deepseek` / `phi` / `grok` / `command`, derived from the
+model id with a provider-alias fallback. Branch on `family` for
+human-readable identity checks; branch on `capabilities.*` for wire-
+format adaptation (native vs text-format tools, prompt caching,
+structured output, etc.).
+
+Bare `render()` calls outside any LLM frame leave `llm = nil`, so the
+same template works in CI / doc-gen contexts as long as it guards with
+`{{ if llm }}`:
+
+```harn-prompt
+{{ if llm }}
+  Targeting {{ llm.provider }}/{{ llm.model }} — using
+  {{ if llm.capabilities.native_tools }}native{{ else }}text{{ end }} tools.
+{{ else }}
+  Generic prompt — no model selected.
+{{ end }}
+```
+
+The frame is published by:
+
+- the native `llm_call` builtin for its full call duration (covers
+  middleware-driven re-renders during schema retry),
+- `default_llm_caller` for the entire handler-stack closure (so
+  user-authored middleware that renders sees the same context), and
+- `agent_loop` for the whole loop, so every per-turn system-prompt
+  partial (loop contract, native-tool contract, skill catalog, …)
+  renders against the active provider/model.
+
+User bindings that already supply an `llm` key are left untouched —
+the engine emits a one-shot lint warning under the
+`template.llm_scope` category and the user's value wins for
+back-compat. Rename your key (e.g. `local_model`, `current_llm`) to
+clear the warning.
+
 ## Preflight checks
 
 `harn check` parses every template referenced by a literal `render(...)` /

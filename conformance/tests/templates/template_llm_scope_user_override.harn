@@ -1,0 +1,12 @@
+pipeline default() {
+  __push_llm_render_context("anthropic", "claude-3-5-sonnet")
+  defer {
+    __pop_llm_render_context()
+  }
+  // User-supplied `llm` binding wins over the auto-injected context,
+  // preserving back-compat for any pre-existing template that happens
+  // to use the `llm` key for unrelated data. A one-shot lint warning
+  // is emitted in the host log (not captured in this transcript).
+  let tmpl = "user={{ llm.tag }} provider={{ llm.provider }}"
+  println(render_string(tmpl, {llm: {tag: "user-payload", provider: "user-provider"}}))
+}

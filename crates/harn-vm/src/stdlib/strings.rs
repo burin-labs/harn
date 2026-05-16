@@ -560,4 +560,31 @@ pub(crate) fn register_string_builtins(vm: &mut Vm) {
         crate::stdlib::template::record_prompt_render_index(prompt_id, event_index);
         Ok(VmValue::Int(event_index as i64))
     });
+
+    // Internal LLM render-context plumbing — paired push/pop hooks used
+    // by the agent_loop / handler-stack stdlib so user-authored
+    // `.harn.prompt` partials can branch on `llm.provider`,
+    // `llm.capabilities.native_tools`, etc. while rendering inside an
+    // LLM-aware frame. Userspace never calls these directly; the stdlib
+    // wraps every push in a matching `defer { __pop_llm_render_context() }`.
+    vm.register_builtin("__push_llm_render_context", |args, _out| {
+        let provider = args.first().map(|a| a.display()).unwrap_or_default();
+        let model = args.get(1).map(|a| a.display()).unwrap_or_default();
+        // Skip the push when the caller hasn't resolved a concrete
+        // provider yet (empty or `"auto"`). Templates rendered while
+        // the unresolved options are in scope simply see `llm = nil`
+        // instead of an empty-capabilities frame that would silently
+        // mis-flag every capability check as false.
+        if provider.is_empty() || provider.eq_ignore_ascii_case("auto") {
+            return Ok(VmValue::Bool(false));
+        }
+        crate::stdlib::template::push_llm_render_context(
+            crate::stdlib::template::LlmRenderContext::resolve(&provider, &model),
+        );
+        Ok(VmValue::Bool(true))
+    });
+    vm.register_builtin("__pop_llm_render_context", |_args, _out| {
+        crate::stdlib::template::pop_llm_render_context();
+        Ok(VmValue::Nil)
+    });
 }
