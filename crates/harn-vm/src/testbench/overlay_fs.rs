@@ -553,6 +553,25 @@ pub mod helpers {
             None => std::fs::create_dir_all(path),
         }
     }
+
+    pub fn read_dir(path: &Path) -> std::io::Result<Vec<OverlayDirEntry>> {
+        match active_overlay() {
+            Some(overlay) => overlay.read_dir(path),
+            None => {
+                let mut entries = Vec::new();
+                for entry in std::fs::read_dir(path)? {
+                    let entry = entry?;
+                    let file_type = entry.file_type()?;
+                    entries.push(OverlayDirEntry {
+                        path: entry.path(),
+                        is_dir: file_type.is_dir(),
+                        is_file: file_type.is_file(),
+                    });
+                }
+                Ok(entries)
+            }
+        }
+    }
 }
 
 #[cfg(test)]

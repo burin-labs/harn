@@ -75,7 +75,9 @@ impl Debugger {
         // Breakpoints replaced for this file — hit counts from the prior
         // set would be attached to now-stale ids, so drop them. Hit
         // counts on breakpoints in other files survive.
-        self.bp_hit_counts.clear();
+        let live_ids: Vec<i64> = self.breakpoints.iter().map(|bp| bp.id).collect();
+        self.bp_hit_counts.retain(|id, _| live_ids.contains(id));
+        self.armed_breakpoints.retain(|id, _| live_ids.contains(id));
 
         if let Some(vm) = &mut self.vm {
             // Push per-file breakpoint sets so the VM can match
@@ -90,9 +92,14 @@ impl Debugger {
                     .unwrap_or_default();
                 by_file.entry(key).or_default().push(bp.line as usize);
             }
-            // Clear stale files first by setting empty for every file we
-            // know about -- covers the case where the user removed all
-            // breakpoints from a file that previously had some.
+            // If this request cleared the source's final breakpoint,
+            // mirror the empty set to the VM. `by_file` only contains
+            // files that still have active breakpoints.
+            if let Some(path) = request_path.as_deref() {
+                if !by_file.contains_key(path) {
+                    vm.set_breakpoints_for_file(path, Vec::new());
+                }
+            }
             let known_keys: Vec<String> = by_file.keys().cloned().collect();
             for key in known_keys.iter() {
                 vm.set_breakpoints_for_file(key, by_file[key].clone());

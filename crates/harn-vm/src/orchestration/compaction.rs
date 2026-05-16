@@ -110,16 +110,31 @@ impl Default for AutoCompactConfig {
 
 /// Estimate token count from a list of JSON messages (chars / 4 heuristic).
 pub fn estimate_message_tokens(messages: &[serde_json::Value]) -> usize {
-    messages
-        .iter()
-        .map(|m| {
-            m.get("content")
-                .and_then(|c| c.as_str())
-                .map(|s| s.len())
-                .unwrap_or(0)
-        })
-        .sum::<usize>()
-        / 4
+    messages.iter().map(estimate_message_chars).sum::<usize>() / 4
+}
+
+fn estimate_message_chars(message: &serde_json::Value) -> usize {
+    let mut total = message
+        .get("content")
+        .map(estimate_content_chars)
+        .unwrap_or_default();
+    if let Some(reasoning) = message.get("reasoning") {
+        total += estimate_content_chars(reasoning);
+    }
+    if let Some(tool_calls) = message.get("tool_calls") {
+        total += estimate_content_chars(tool_calls);
+    }
+    total
+}
+
+fn estimate_content_chars(value: &serde_json::Value) -> usize {
+    match value {
+        serde_json::Value::String(text) => text.len(),
+        serde_json::Value::Array(items) => items.iter().map(estimate_content_chars).sum(),
+        serde_json::Value::Object(map) => map.values().map(estimate_content_chars).sum(),
+        serde_json::Value::Null => 0,
+        other => other.to_string().len(),
+    }
 }
 
 fn is_reasoning_or_tool_turn_message(message: &serde_json::Value) -> bool {
@@ -715,6 +730,29 @@ mod tests {
         assert!(
             result.contains("[diagnostic lines preserved]"),
             "has diagnostic marker"
+        );
+    }
+
+    #[test]
+    fn token_estimate_counts_structured_message_content() {
+        let text = "x".repeat(400);
+        let messages = vec![serde_json::json!({
+            "role": "user",
+            "content": [
+                {"type": "text", "text": text},
+                {"type": "input_text", "text": "tail"},
+            ],
+            "reasoning": {"text": "scratch"},
+            "tool_calls": [{
+                "id": "call_1",
+                "type": "function",
+                "function": {"name": "read", "arguments": "{\"path\":\"src/main.rs\"}"}
+            }],
+        })];
+
+        assert!(
+            estimate_message_tokens(&messages) >= 100,
+            "structured content must not count as zero"
         );
     }
 

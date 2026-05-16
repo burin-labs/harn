@@ -381,7 +381,9 @@ pub(super) fn run_file_hash(
     let Some(state) = guard.as_ref() else {
         return Ok(VmValue::Nil);
     };
-    let abs = state.absolute_path(&path);
+    let Some(abs) = state.absolute_path(&path) else {
+        return Ok(VmValue::Nil);
+    };
     match std::fs::read(&abs) {
         Ok(bytes) => Ok(str_value(fnv1a64(&bytes).to_string())),
         Err(_) => Ok(VmValue::Nil),
@@ -421,7 +423,15 @@ pub(super) fn run_read_range(
     };
     let guard = index.lock().expect("code_index mutex poisoned");
     let abs = match guard.as_ref() {
-        Some(state) => state.absolute_path(&path),
+        Some(state) => {
+            state
+                .absolute_path(&path)
+                .ok_or_else(|| HostlibError::InvalidParameter {
+                    builtin: BUILTIN_READ_RANGE,
+                    param: "path",
+                    message: "path must stay within the indexed workspace root".to_string(),
+                })?
+        }
         None => PathBuf::from(&path),
     };
     drop(guard);
@@ -471,7 +481,13 @@ pub(super) fn run_reindex_file(
             ("file_id", VmValue::Nil),
         ]));
     };
-    let abs = state.absolute_path(&path);
+    let Some(abs) = state.absolute_path(&path) else {
+        return Err(HostlibError::InvalidParameter {
+            builtin: BUILTIN_REINDEX_FILE,
+            param: "path",
+            message: "path must stay within the indexed workspace root".to_string(),
+        });
+    };
     let id = state.reindex_file(&abs);
     Ok(build_dict([
         ("indexed", VmValue::Bool(id.is_some())),

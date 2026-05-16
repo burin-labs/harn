@@ -249,12 +249,18 @@ impl IndexState {
     /// Resolve a workspace-relative path against the canonical root.
     /// Used by host builtins that take a `path` argument and need to
     /// open the underlying file (e.g. `read_range`, `file_hash`).
-    pub fn absolute_path(&self, rel_or_abs: &str) -> PathBuf {
+    pub fn absolute_path(&self, rel_or_abs: &str) -> Option<PathBuf> {
         let p = Path::new(rel_or_abs);
-        if p.is_absolute() {
+        let candidate = if p.is_absolute() {
             p.to_path_buf()
         } else {
             self.root.join(p)
+        };
+        let canonical = canonicalize_existing(&candidate);
+        if canonical.strip_prefix(&self.root).is_ok() {
+            Some(canonical)
+        } else {
+            None
         }
     }
 

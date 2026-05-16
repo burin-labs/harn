@@ -548,7 +548,7 @@ fn list_dir_builtin(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmEr
         &resolved,
         crate::stdlib::sandbox::FsAccess::Read,
     )?;
-    let entries = std::fs::read_dir(&resolved).map_err(|e| {
+    let entries = overlay::read_dir(&resolved).map_err(|e| {
         VmError::Thrown(VmValue::String(Rc::from(format!(
             "Failed to list directory {}: {e}",
             resolved.display()
@@ -556,8 +556,10 @@ fn list_dir_builtin(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmEr
     })?;
     let mut result = Vec::new();
     for entry in entries {
-        let entry = entry.map_err(|e| VmError::Thrown(VmValue::String(Rc::from(e.to_string()))))?;
-        let name = entry.file_name().to_string_lossy().into_owned();
+        let Some(name) = entry.path.file_name() else {
+            continue;
+        };
+        let name = name.to_string_lossy().into_owned();
         result.push(VmValue::String(Rc::from(name)));
     }
     result.sort_by_key(|a| a.display());
@@ -709,7 +711,7 @@ fn read_lines_builtin(args: &[VmValue], _out: &mut String) -> Result<VmValue, Vm
         &resolved,
         crate::stdlib::sandbox::FsAccess::Read,
     )?;
-    let content = std::fs::read_to_string(&resolved).map_err(|e| {
+    let content = overlay::read_to_string(&resolved).map_err(|e| {
         VmError::Thrown(VmValue::String(Rc::from(format!(
             "read_lines: {}: {e}",
             resolved.display()
@@ -919,6 +921,66 @@ mod tests {
                 .unwrap()
                 .display(),
             "two updated"
+        );
+    }
+
+    #[test]
+    fn list_dir_observes_active_overlay_entries() {
+        let dir = tempfile::tempdir().unwrap();
+        let overlay = std::sync::Arc::new(crate::testbench::overlay_fs::OverlayFs::rooted_at(
+            dir.path(),
+        ));
+        let _guard = crate::testbench::overlay_fs::install_overlay(overlay);
+        let mut vm = vm();
+        let subdir = dir.path().join("overlay-dir");
+        let file = subdir.join("created.txt");
+
+        call(&mut vm, "mkdir", vec![s(&subdir.to_string_lossy())]).unwrap();
+        call(
+            &mut vm,
+            "write_file",
+            vec![s(&file.to_string_lossy()), s("overlay only")],
+        )
+        .unwrap();
+
+        let listed = call(&mut vm, "list_dir", vec![s(&subdir.to_string_lossy())]).unwrap();
+        let VmValue::List(items) = listed else {
+            panic!("list_dir returns list");
+        };
+        let names = items.iter().map(VmValue::display).collect::<Vec<_>>();
+        assert_eq!(names, vec!["created.txt".to_string()]);
+        assert!(
+            !file.exists(),
+            "overlay write should not materialize on the underlying fs"
+        );
+    }
+
+    #[test]
+    fn read_lines_observes_active_overlay_content() {
+        let dir = tempfile::tempdir().unwrap();
+        let overlay = std::sync::Arc::new(crate::testbench::overlay_fs::OverlayFs::rooted_at(
+            dir.path(),
+        ));
+        let _guard = crate::testbench::overlay_fs::install_overlay(overlay);
+        let mut vm = vm();
+        let path = dir.path().join("lines.txt");
+
+        call(
+            &mut vm,
+            "write_file",
+            vec![s(&path.to_string_lossy()), s("one\ntwo\n")],
+        )
+        .unwrap();
+
+        let lines = call(&mut vm, "read_lines", vec![s(&path.to_string_lossy())]).unwrap();
+        let VmValue::List(items) = lines else {
+            panic!("read_lines returns list");
+        };
+        let lines = items.iter().map(VmValue::display).collect::<Vec<_>>();
+        assert_eq!(lines, vec!["one".to_string(), "two".to_string()]);
+        assert!(
+            !path.exists(),
+            "overlay write should not materialize on the underlying fs"
         );
     }
 

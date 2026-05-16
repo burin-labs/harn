@@ -94,3 +94,24 @@ fn unsubscribe_reports_unknown_handles() {
         Some(false)
     );
 }
+
+#[test]
+fn subscribe_rejects_paths_outside_root() {
+    let root = tempfile::tempdir().expect("root tempdir");
+    let outside = tempfile::tempdir().expect("outside tempdir");
+    let registry = registry();
+    let subscribe = registry
+        .find("hostlib_fs_watch_subscribe")
+        .expect("subscribe registered");
+    let outside_path = outside.path().to_string_lossy().to_string();
+
+    let err = (subscribe.handler)(&[dict([
+        ("session_id", str_value("fs-watch-boundary")),
+        ("root", str_value(root.path().to_string_lossy())),
+        ("paths", list(&[outside_path.as_str()])),
+    ])])
+    .expect_err("outside path should be rejected");
+
+    let msg = format!("{err}");
+    assert!(msg.contains("outside root"), "{msg}");
+}

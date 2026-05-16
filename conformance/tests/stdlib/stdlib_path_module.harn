@@ -1,0 +1,11 @@
+import "std/path"
+
+pipeline test(task) {
+  log(ext("lib/main.rs"))
+  log(stem("archive.tar.gz"))
+  log(stem(".gitignore"))
+  log(is_absolute("/tmp/x"))
+  log(is_absolute("C:/tmp/x"))
+  log(is_absolute("C:tmp/x"))
+  log(is_absolute("relative/path"))
+}
