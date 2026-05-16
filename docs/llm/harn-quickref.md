@@ -1109,6 +1109,11 @@ let caps = provider_capabilities("anthropic", "claude-opus-4-7")
 //   interleaved_thinking_supported: true,
 //   message_wire_format: "anthropic",
 //   native_tool_wire_format: "anthropic",
+//   prefers_xml_scaffolding: true,
+//   structured_output_mode: "xml_tagged",
+//   supports_assistant_prefill: false,
+//   prefers_xml_tools: true,
+//   thinking_block_style: "thinking_blocks",
 // }
 
 // `caps.tools` matches Harn's own tool gate: true when the route can call
@@ -1143,13 +1148,13 @@ set under `[provider_defaults.<name>]`:
 | `tool_search` | `[string]` | Native variants (`["bm25", "regex"]` or `["hosted", "client"]`). Empty = no native support. |
 | `max_tools` | int | Cap on tool count (used by `harn lint`). |
 | `prompt_caching` | bool | `cache_control` blocks honored. |
-| `prefers_xml_scaffolding` | bool | Logical prompt sections render as XML tags. |
-| `prefers_markdown_scaffolding` | bool | Logical prompt sections render as Markdown headings. |
-| `structured_output_mode` | string | Section-level output-format mode: `native_json`, `delimited`, `xml_tagged`, `none`. |
-| `supports_assistant_prefill` | bool | Provider accepts assistant-role prefill turns. |
-| `prefers_role_developer` | bool | `system_framing` should target developer instructions. |
-| `prefers_xml_tools` | bool | Text-rendered tool sections prefer XML tags. |
-| `thinking_block_style` | string | Section-level thinking style: `none`, `thinking_blocks`, `reasoning_summary`, `inline`. |
+| `prefers_xml_scaffolding` | bool | Prompt sections prefer XML tags such as `<task>` / `<examples>`. |
+| `prefers_markdown_scaffolding` | bool | Prompt sections prefer Markdown headings such as `## Task`. |
+| `structured_output_mode` | string | Preferred logical output shape: `native_json`, `delimited`, `xml_tagged`, or `none`. |
+| `supports_assistant_prefill` | bool | Assistant-role prefill turns are accepted. |
+| `prefers_role_developer` | bool | Durable instructions should use OpenAI's `developer` role. |
+| `prefers_xml_tools` | bool | Text-rendered tool specs should use XML wrappers. |
+| `thinking_block_style` | string | Preferred thinking representation: `none`, `thinking_blocks`, `reasoning_summary`, or `inline`. |
 | `thinking_modes` | `[string]` | Supported script-facing modes: `enabled`, `adaptive`, `effort`. |
 | `reasoning_wire_format` | string | Non-standard OpenAI-compatible reasoning shape: `openrouter` or `enabled`. |
 | `requires_completion_tokens` | bool | Use OpenAI `max_completion_tokens` instead of `max_tokens`. |
@@ -2672,13 +2677,6 @@ and LSP go-to-definition follow `@`-paths to the target file.
 - `{{ include "partial.prompt" }}` or `{{ include "..." with { x: y } }}`
   — resolves relative to the including file; `{{ include "@/..." }}`
   resolves from the project root; cycle detection is built in.
-- `{{ section "task" }}..{{ endsection }}` — logical prompt sections.
-  Built-ins: `task`, `examples`, `output_format`, `tools`,
-  `thinking_scaffold`, `chain_of_thought`, `system_framing`.
-  `output_format` accepts `schema=...`; `tools` accepts `tools=...`.
-  Rendering follows `llm.capabilities` (`prefers_xml_scaffolding`,
-  `prefers_markdown_scaffolding`, `structured_output_mode`,
-  `prefers_xml_tools`, `thinking_block_style`, `prefers_role_developer`).
 - Filters: `{{ name | upper | default: "anon" }}`. Built-ins: `upper`,
   `lower`, `title`, `trim`, `capitalize`, `length`, `first`, `last`,
   `reverse`, `join:sep`, `default:fallback`, `json`, `indent:n`, `lines`,

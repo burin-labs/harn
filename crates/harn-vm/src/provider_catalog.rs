@@ -13,9 +13,9 @@ use serde_json::{json, Value};
 use crate::llm;
 use crate::llm_config::{self, AliasDef, AliasToolCallingDef, ModelDef, ModelPricing, ProviderDef};
 
-pub const PROVIDER_CATALOG_SCHEMA_VERSION: u32 = 1;
+pub const PROVIDER_CATALOG_SCHEMA_VERSION: u32 = 2;
 pub const PROVIDER_CATALOG_SCHEMA_ID: &str =
-    "https://harnlang.com/schemas/provider-catalog.v1.json";
+    "https://harnlang.com/schemas/provider-catalog.v2.json";
 pub const PROVIDER_CATALOG_GENERATOR: &str = "harn providers export";
 
 #[derive(Debug, Clone, Serialize)]
@@ -101,6 +101,7 @@ pub struct CatalogModel {
     pub modalities: ModelModalities,
     pub tool_support: ModelToolSupport,
     pub structured_output: String,
+    pub format_preferences: ModelFormatPreferences,
     pub reasoning: ModelReasoning,
     pub prompt_cache: bool,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -123,6 +124,17 @@ pub struct ModelToolSupport {
     pub tool_search: Vec<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub max_tools: Option<u32>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct ModelFormatPreferences {
+    pub prefers_xml_scaffolding: bool,
+    pub prefers_markdown_scaffolding: bool,
+    pub structured_output_mode: String,
+    pub supports_assistant_prefill: bool,
+    pub prefers_role_developer: bool,
+    pub prefers_xml_tools: bool,
+    pub thinking_block_style: String,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -472,6 +484,7 @@ pub fn schema_value() -> Value {
                     "modalities",
                     "tool_support",
                     "structured_output",
+                    "format_preferences",
                     "reasoning",
                     "prompt_cache",
                     "deprecation",
@@ -490,6 +503,7 @@ pub fn schema_value() -> Value {
                     "modalities": {"$ref": "#/$defs/modalities"},
                     "tool_support": {"$ref": "#/$defs/tool_support"},
                     "structured_output": {"type": "string"},
+                    "format_preferences": {"$ref": "#/$defs/format_preferences"},
                     "reasoning": {"$ref": "#/$defs/reasoning"},
                     "prompt_cache": {"type": "boolean"},
                     "pricing": {"$ref": "#/$defs/pricing"},
@@ -516,6 +530,28 @@ pub fn schema_value() -> Value {
                     "text": {"type": "boolean"},
                     "tool_search": {"type": "array", "items": {"type": "string"}},
                     "max_tools": {"type": "integer", "minimum": 1}
+                },
+                "additionalProperties": false
+            },
+            "format_preferences": {
+                "type": "object",
+                "required": [
+                    "prefers_xml_scaffolding",
+                    "prefers_markdown_scaffolding",
+                    "structured_output_mode",
+                    "supports_assistant_prefill",
+                    "prefers_role_developer",
+                    "prefers_xml_tools",
+                    "thinking_block_style"
+                ],
+                "properties": {
+                    "prefers_xml_scaffolding": {"type": "boolean"},
+                    "prefers_markdown_scaffolding": {"type": "boolean"},
+                    "structured_output_mode": {"enum": ["native_json", "delimited", "xml_tagged", "none"]},
+                    "supports_assistant_prefill": {"type": "boolean"},
+                    "prefers_role_developer": {"type": "boolean"},
+                    "prefers_xml_tools": {"type": "boolean"},
+                    "thinking_block_style": {"enum": ["none", "thinking_blocks", "reasoning_summary", "inline"]}
                 },
                 "additionalProperties": false
             },
@@ -633,6 +669,15 @@ fn catalog_model(
             max_tools: caps.max_tools,
         },
         structured_output,
+        format_preferences: ModelFormatPreferences {
+            prefers_xml_scaffolding: caps.prefers_xml_scaffolding,
+            prefers_markdown_scaffolding: caps.prefers_markdown_scaffolding,
+            structured_output_mode: caps.structured_output_mode.clone(),
+            supports_assistant_prefill: caps.supports_assistant_prefill,
+            prefers_role_developer: caps.prefers_role_developer,
+            prefers_xml_tools: caps.prefers_xml_tools,
+            thinking_block_style: caps.thinking_block_style.clone(),
+        },
         reasoning: ModelReasoning {
             modes: caps.thinking_modes.clone(),
             effort_supported: caps.reasoning_effort_supported,
@@ -908,7 +953,7 @@ fn generated_header(comment: &str, language: &str) -> String {
 }
 
 const TYPESCRIPT_TYPES: &str = r#"export interface HarnProviderCatalog {
-  schema_version: 1
+  schema_version: 2
   schema: string
   generated_by: string
   providers: HarnCatalogProvider[]
@@ -980,6 +1025,15 @@ export interface HarnCatalogModel {
     max_tools?: number
   }
   structured_output: string
+  format_preferences: {
+    prefers_xml_scaffolding: boolean
+    prefers_markdown_scaffolding: boolean
+    structured_output_mode: "native_json" | "delimited" | "xml_tagged" | "none"
+    supports_assistant_prefill: boolean
+    prefers_role_developer: boolean
+    prefers_xml_tools: boolean
+    thinking_block_style: "none" | "thinking_blocks" | "reasoning_summary" | "inline"
+  }
   reasoning: {
     modes: string[]
     effort_supported: boolean
@@ -1201,6 +1255,7 @@ public struct HarnCatalogModel: Codable, Sendable, Equatable {
     public let modalities: HarnModelModalities
     public let toolSupport: HarnModelToolSupport
     public let structuredOutput: String
+    public let formatPreferences: HarnModelFormatPreferences
     public let reasoning: HarnModelReasoning
     public let promptCache: Bool
     public let pricing: HarnModelPricing?
@@ -1220,6 +1275,7 @@ public struct HarnCatalogModel: Codable, Sendable, Equatable {
         case modalities
         case toolSupport = "tool_support"
         case structuredOutput = "structured_output"
+        case formatPreferences = "format_preferences"
         case reasoning
         case promptCache = "prompt_cache"
         case pricing
@@ -1245,6 +1301,26 @@ public struct HarnModelToolSupport: Codable, Sendable, Equatable {
         case text
         case toolSearch = "tool_search"
         case maxTools = "max_tools"
+    }
+}
+
+public struct HarnModelFormatPreferences: Codable, Sendable, Equatable {
+    public let prefersXMLScaffolding: Bool
+    public let prefersMarkdownScaffolding: Bool
+    public let structuredOutputMode: String
+    public let supportsAssistantPrefill: Bool
+    public let prefersRoleDeveloper: Bool
+    public let prefersXMLTools: Bool
+    public let thinkingBlockStyle: String
+
+    enum CodingKeys: String, CodingKey {
+        case prefersXMLScaffolding = "prefers_xml_scaffolding"
+        case prefersMarkdownScaffolding = "prefers_markdown_scaffolding"
+        case structuredOutputMode = "structured_output_mode"
+        case supportsAssistantPrefill = "supports_assistant_prefill"
+        case prefersRoleDeveloper = "prefers_role_developer"
+        case prefersXMLTools = "prefers_xml_tools"
+        case thinkingBlockStyle = "thinking_block_style"
     }
 }
 

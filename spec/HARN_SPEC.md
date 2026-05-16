@@ -2253,6 +2253,10 @@ let caps = provider_capabilities("anthropic", "claude-opus-4-7")
 //   prompt_caching, thinking, thinking_modes: [string],
 //   reasoning_effort_supported, reasoning_none_supported,
 //   message_wire_format, native_tool_wire_format,
+//   prefers_xml_scaffolding, prefers_markdown_scaffolding,
+//   structured_output_mode: "native_json" | "delimited" | "xml_tagged" | "none",
+//   supports_assistant_prefill, prefers_role_developer, prefers_xml_tools,
+//   thinking_block_style: "none" | "thinking_blocks" | "reasoning_summary" | "inline",
 // }
 ```
 
