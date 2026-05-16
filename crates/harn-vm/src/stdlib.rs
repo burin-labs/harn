@@ -126,6 +126,7 @@ pub fn register_io_stdlib(vm: &mut Vm) {
     memory::register_memory_builtins(vm);
     process::register_process_builtins(vm);
     process::register_path_builtins(vm);
+    sandbox::register_sandbox_builtins(vm);
     // Clock builtins overlay process::timestamp/elapsed so they honor
     // mock_time / advance_time. Register AFTER process to take precedence.
     clock::register_clock_builtins(vm);

@@ -1062,6 +1062,7 @@ fn build_policy_summary_reads_validation_metadata() {
                 arg_key: Some("path".to_string()),
             }],
             tool_annotations: BTreeMap::new(),
+            sandbox_profile: harn_vm::orchestration::SandboxProfile::default(),
         },
         metadata: BTreeMap::from([(
             "validation".to_string(),

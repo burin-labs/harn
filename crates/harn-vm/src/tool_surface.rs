@@ -308,6 +308,7 @@ pub fn tool_capability_policy_from_spec(value: &serde_json::Value) -> Capability
         recursion_limit: None,
         tool_arg_constraints: Vec::new(),
         tool_annotations,
+        sandbox_profile: crate::orchestration::SandboxProfile::default(),
     }
 }
 

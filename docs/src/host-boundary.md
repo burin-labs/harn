@@ -82,6 +82,21 @@ Tests can satisfy any capability with `host_mock(capability, op, {result})`;
 embedders ship richer behavior via the `HostCallBridge` trait described in
 `crates/harn-vm/src/stdlib/host.rs`.
 
+## Process sandbox
+
+The runtime confines every subprocess it spawns under an active
+capability ceiling. The default profile is `worktree` —
+workspace-root path enforcement plus best-effort OS-level
+confinement (Linux Landlock + seccomp, macOS sandbox-exec, Windows
+AppContainer + Job Object). Pipelines that spawn untrusted code opt
+into `os_hardened`, which makes the OS confinement *required* and
+turns every spawn into a `tool_rejected` if the platform mechanism
+is missing.
+
+See [Process sandboxing](./sandboxing.md) for the full per-platform
+capability → kernel-knob mapping table, profile selection examples,
+and replay semantics.
+
 ## Contract surfaces
 
 Harn now ships machine-readable contract exports so hosts do not need to

@@ -1,0 +1,42 @@
+/**
+ * Verify the per-platform sandbox backend dispatched at compile time
+ * matches the host OS, and that the platform mechanism it relies on
+ * is reachable. Acts as a smoke check that the SandboxBackend trait
+ * stays wired up across refactors — if a future change breaks
+ * platform selection, this fixture flips before any of the
+ * behavior-level fixtures notice.
+ */
+pipeline default() {
+  let backend = sandbox_active_backend()
+  // Harn `platform()` returns the underlying OS slug (`darwin`,
+  // `linux`, `windows`, `openbsd`); the sandbox backend names map
+  // 1:1 to those except `darwin` → `macos` to keep the docs and
+  // marketing material aligned with how Apple brands the OS.
+  let expected = if platform() == "linux" {
+    "linux"
+  } else {
+    if platform() == "darwin" {
+      "macos"
+    } else {
+      if platform() == "windows" {
+        "windows"
+      } else {
+        if platform() == "openbsd" {
+          "openbsd"
+        } else {
+          "noop"
+        }
+      }
+    }
+  }
+  println(backend == expected)
+  // Without an active orchestration policy the script runs at the
+  // unrestricted profile — that is the documented `harn run` default.
+  println(sandbox_active_profile())
+  // Each shipped backend reports availability as `true` on its host.
+  // (Linux Landlock/seccomp are runtime-detected by the per-mechanism
+  // setup, so the backend reports `true` even on kernels missing one
+  // or both — the per-mechanism unavailability surfaces as a
+  // structured warning rather than a backend-availability flip.)
+  println(sandbox_backend_available())
+}

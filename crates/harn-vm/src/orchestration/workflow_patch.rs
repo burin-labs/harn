@@ -394,6 +394,7 @@ pub fn bundle_capability_ceiling(bundle: &WorkflowBundle) -> CapabilityPolicy {
         recursion_limit: None,
         tool_arg_constraints: Vec::new(),
         tool_annotations: BTreeMap::new(),
+        sandbox_profile: crate::orchestration::SandboxProfile::default(),
     }
 }
 

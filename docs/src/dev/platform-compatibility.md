@@ -23,7 +23,7 @@ that points at the specific (platform, capability) pair, not just
 | `harn package check` | Yes | Yes | Yes | Manifest parsing, exports resolution, path normalization. Smoke step 5. |
 | Generated artifacts (`harn check --provider-matrix`) | Yes | Yes | Yes | Deterministic-text emitter; line endings, sort order, and rounding are normalized in the writer. Smoke step 6. |
 | `harn run` | Yes | Yes | Yes | VM bootstrapping + stdlib startup. Smoke step 7. |
-| Process spawning (`std/command::command_run`) | Yes (sandbox-exec / Seatbelt) | Yes (Landlock + seccomp; falls back to warn under `HARN_HANDLER_SANDBOX=warn`) | Yes (AppContainer + Job Objects; warn fallback applies the same way) | Sandbox backend differences are encapsulated in `crates/harn-vm/src/stdlib/sandbox.rs`. Scripts pick argv via `platform()`. Smoke step 8. |
+| Process spawning (`std/command::command_run`) | Yes (sandbox-exec / Seatbelt) | Yes (Landlock + seccomp; falls back to warn under `HARN_HANDLER_SANDBOX=warn`) | Yes (AppContainer + Job Objects; warn fallback applies the same way) | Sandbox backend differences are encapsulated in `crates/harn-vm/src/stdlib/sandbox/` (one file per OS) behind a shared `SandboxBackend` trait. Scripts pick argv via `platform()`. Smoke step 8. |
 | No-credentials workflow (`provider: "mock"`) | Yes | Yes | Yes | Drives `llm_call` end-to-end through the in-memory mock provider with no API keys, network, or platform secret store. Smoke step 9. |
 | File watching (`harn watch`) | Yes (FSEvents) | Yes (inotify) | Yes (ReadDirectoryChangesW) | All three backends provided by the `notify` crate. Smoke step 10 boots the watcher and verifies the readiness banner; graceful shutdown via SIGTERM is Unix-only (see below). |
 | Graceful orchestrator shutdown (`SIGTERM` drain) | Yes | Yes | **Deferred** | Tests that depend on the orchestrator drain are gated `#![cfg(unix)]`. See [Windows test coverage](./windows-test-coverage.md) for the inventory. On Windows the smoke kills `harn watch` with `taskkill /F`. |
@@ -59,8 +59,14 @@ that points at the specific (platform, capability) pair, not just
 
 ### Process spawning and sandboxing
 
-- Per-platform sandbox backends live in `crates/harn-vm/src/stdlib/sandbox.rs`.
-  The fallback mode is `warn`, configurable via `HARN_HANDLER_SANDBOX`.
+- Per-platform sandbox backends live in `crates/harn-vm/src/stdlib/sandbox/`
+  (one file per OS) behind a shared `SandboxBackend` trait. The default
+  profile is `worktree` (workspace-root path enforcement plus best-effort
+  OS confinement). Pipelines opt into `sandbox_profile: "os_hardened"`
+  via the active `CapabilityPolicy` to make OS confinement required —
+  see [Process sandboxing](../sandboxing.md). The fallback mode is
+  `warn`, configurable via `HARN_HANDLER_SANDBOX` for the `worktree`
+  profile only; `os_hardened` always enforces.
 - Scripts must pick platform-appropriate argv when shelling out. The
   canonical pattern (used by smoke step 8) is:
 

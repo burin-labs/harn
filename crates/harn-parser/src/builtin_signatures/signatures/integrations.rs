@@ -521,6 +521,9 @@ pub(crate) const SIGNATURES: &[BuiltinSignature] = &[
         TY_BOOL,
     ),
     BuiltinSignature::simple("runtime_paths", &[], TY_DICT),
+    BuiltinSignature::simple("sandbox_active_backend", &[], TY_STRING),
+    BuiltinSignature::simple("sandbox_active_profile", &[], TY_STRING),
+    BuiltinSignature::simple("sandbox_backend_available", &[], TY_BOOL),
     BuiltinSignature::simple("shell", &[Param::new("command", TY_STRING)], TY_DICT),
     BuiltinSignature::simple(
         "shell_at",

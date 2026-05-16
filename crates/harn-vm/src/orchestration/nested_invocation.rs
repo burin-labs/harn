@@ -218,6 +218,7 @@ fn scan_harn_script_ceiling(source: &str) -> CapabilityPolicy {
         recursion_limit: None,
         tool_arg_constraints: Vec::new(),
         tool_annotations: std::collections::BTreeMap::new(),
+        sandbox_profile: crate::orchestration::SandboxProfile::default(),
     }
 }
 
@@ -246,6 +247,7 @@ fn scan_burin_manifest_ceiling(manifest: &serde_json::Value) -> CapabilityPolicy
         recursion_limit: None,
         tool_arg_constraints: Vec::new(),
         tool_annotations: std::collections::BTreeMap::new(),
+        sandbox_profile: crate::orchestration::SandboxProfile::default(),
     }
 }
 
@@ -422,6 +424,7 @@ mod tests {
             recursion_limit: None,
             tool_arg_constraints: Vec::new(),
             tool_annotations: BTreeMap::new(),
+            sandbox_profile: crate::orchestration::SandboxProfile::default(),
         }
     }
 
@@ -443,6 +446,7 @@ mod tests {
             recursion_limit: None,
             tool_arg_constraints: Vec::new(),
             tool_annotations: BTreeMap::new(),
+            sandbox_profile: crate::orchestration::SandboxProfile::default(),
         }
     }
 
