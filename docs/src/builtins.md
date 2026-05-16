@@ -2448,7 +2448,7 @@ directory. `workflow.update(...)` polls for a response until
 `register_session_hook(event, pattern, handler)`) wires a callback
 into the whole-session turn loop. Events: `session_start`,
 `session_end`, `user_prompt_submit`, `pre_compact`, `post_compact`,
-`permission_asked`, `permission_replied`, `file_edited`,
+`post_turn`, `permission_asked`, `permission_replied`, `file_edited`,
 `session_error`, `session_idle`. The handler receives a typed event
 dict (`{event, session: {id}, ...}`) and returns:
 
@@ -2461,6 +2461,8 @@ dict (`{event, session: {id}, ...}`) and returns:
 Each invocation is recorded on the active session transcript under
 the `hook_call`, `hook_returned`, and `hook_vetoed` event kinds, so
 replay tooling reproduces the same control flow.
+For slow background context work, return a receipt from
+`std/context/maintenance` and let the host-owned queue run the job.
 
 | Function | Parameters | Returns | Description |
 |---|---|---|---|

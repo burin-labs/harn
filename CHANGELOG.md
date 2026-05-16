@@ -19,6 +19,13 @@ condensed series summaries instead of full per-patch history.
   `context_eval` report with per-case scores and per-model section
   shapes, giving Burin CI/eval dashboards a deterministic gate for
   context-engineering changes before live prompt runs.
+- **Context maintenance hook recipes (#1681).** Session hooks now include
+  `post_turn`, and `std/context/maintenance` provides the portable
+  `harn.context_maintenance.job_receipt.v1` shape for non-blocking
+  `context.refresh` / `context.crystallize` jobs. The new docs and
+  `examples/triggers/context-maintenance` package cover file-edited,
+  session-idle, pre-compact, post-turn, and session-end scheduling,
+  plus deterministic replay include/skip behavior.
 
 ## v0.8.20
 

@@ -105,7 +105,7 @@ const WORKFLOW_SYNC_PRIMITIVES: &[SyncBuiltin] = &[
     SyncBuiltin::new("register_session_hook", register_session_hook_builtin)
         .signature("register_session_hook(event, pattern?, handler)")
         .arity(VmBuiltinArity::Range { min: 2, max: 3 })
-        .doc("Register a session-level lifecycle hook (session_start, session_end, user_prompt_submit, pre_compact, post_compact, permission_asked, permission_replied, file_edited, session_error, session_idle)."),
+        .doc("Register a session-level lifecycle hook (session_start, session_end, user_prompt_submit, pre_compact, post_compact, post_turn, permission_asked, permission_replied, file_edited, session_error, session_idle)."),
     SyncBuiltin::new("clear_session_hooks", clear_session_hooks_builtin)
         .signature("clear_session_hooks()")
         .arity(VmBuiltinArity::Exact(0))

@@ -542,6 +542,23 @@ selection. The Burin adapter keeps generated digest compatibility during
 migration by wrapping existing `.burin/context-digests/*.md` content instead of
 requiring hosts to rewrite those files.
 
+### std/context/maintenance
+
+Portable receipts for host-owned background context jobs:
+
+| Function | Description |
+|---|---|
+| `context_maintenance_dedupe_key(job_id, lifecycle_event, affected_paths?, source_id?)` | Build a stable dedupe key from job identity, lifecycle event, sorted paths, and source/session id |
+| `context_maintenance_receipt(job_id, status, input?)` | Normalize a `harn.context_maintenance.job_receipt.v1` receipt |
+| `context_maintenance_queue_receipt(job_id, event, options?)` | Return the standard non-blocking queued receipt for a lifecycle hook event |
+| `context_maintenance_transition(receipt, status, patch?)` | Move a receipt to `running`, `succeeded`, `failed`, or `skipped` while preserving stable fields |
+| `context_maintenance_replay_decision(receipt, options?)` | Return a deterministic replay include/skip decision and matching receipt update |
+
+Use this module from lifecycle hook packages that queue refresh or librarian
+jobs. See [Context maintenance hooks](./context-maintenance-hooks.md) for the
+canonical file-edited, session-idle, pre-compact, post-turn, and session-end
+recipes.
+
 ### std/agent_state
 
 Durable session-scoped state helpers built on the VM-side durable-state

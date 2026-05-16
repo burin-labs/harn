@@ -1,0 +1,13 @@
+import {
+  on_file_edited,
+  on_session_end,
+  run_crystallize_job,
+  run_refresh_job,
+} from "./triggers/context-maintenance/lib"
+
+pipeline default() {
+  let refresh = on_file_edited({event: "FileEdited", session: {id: "demo"}, path: "src/lib.rs"})
+  let crystallize = on_session_end({event: "SessionEnd", session: {id: "demo"}, final_status: "done"})
+  println(run_refresh_job(refresh).status)
+  println(run_crystallize_job(crystallize).artifact_ids[0])
+}

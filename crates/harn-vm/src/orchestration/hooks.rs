@@ -56,6 +56,8 @@ pub enum HookEvent {
     PreCompact,
     #[serde(rename = "PostCompact")]
     PostCompact,
+    #[serde(rename = "PostTurn")]
+    PostTurn,
     #[serde(rename = "PermissionAsked")]
     PermissionAsked,
     #[serde(rename = "PermissionReplied")]
@@ -93,6 +95,7 @@ impl HookEvent {
             Self::UserPromptSubmit => "UserPromptSubmit",
             Self::PreCompact => "PreCompact",
             Self::PostCompact => "PostCompact",
+            Self::PostTurn => "PostTurn",
             Self::PermissionAsked => "PermissionAsked",
             Self::PermissionReplied => "PermissionReplied",
             Self::FileEdited => "FileEdited",
@@ -111,6 +114,7 @@ impl HookEvent {
             "UserPromptSubmit" | "user_prompt_submit" => Ok(Self::UserPromptSubmit),
             "PreCompact" | "pre_compact" => Ok(Self::PreCompact),
             "PostCompact" | "post_compact" => Ok(Self::PostCompact),
+            "PostTurn" | "post_turn" => Ok(Self::PostTurn),
             "PermissionAsked" | "permission_asked" => Ok(Self::PermissionAsked),
             "PermissionReplied" | "permission_replied" => Ok(Self::PermissionReplied),
             "FileEdited" | "file_edited" => Ok(Self::FileEdited),
@@ -433,6 +437,7 @@ pub fn clear_session_hooks() {
                     | HookEvent::UserPromptSubmit
                     | HookEvent::PreCompact
                     | HookEvent::PostCompact
+                    | HookEvent::PostTurn
                     | HookEvent::PermissionAsked
                     | HookEvent::PermissionReplied
                     | HookEvent::FileEdited

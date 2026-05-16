@@ -298,6 +298,7 @@ pub fn agent_compute_post_turn(session, llm_result, dispatch, opts, iteration) {
   let has_tool_calls = len(llm_result?.tool_calls ?? []) > 0 || len(dispatch_results) > 0
   let payload = {
     session_id: session.session_id,
+    session: {id: session.session_id},
     iteration: iteration,
     has_tool_calls: has_tool_calls,
     dispatch: dispatch,
@@ -310,6 +311,7 @@ pub fn agent_compute_post_turn(session, llm_result, dispatch, opts, iteration) {
     text: text,
     visible_text: text,
   }
+  __host_fire_session_hook("post_turn", payload)
   if __sentinel_hit(sentinel_text, sentinel, parsed_done_marker) {
     return __completion_result(opts, payload, "sentinel")
   }

@@ -102,6 +102,10 @@ pub const STDLIB_SOURCES: &[StdlibSource] = &[
         source: include_str!("stdlib/stdlib_context.harn"),
     },
     StdlibSource {
+        module: "context/maintenance",
+        source: include_str!("stdlib/context/maintenance.harn"),
+    },
+    StdlibSource {
         module: "runtime",
         source: include_str!("stdlib/stdlib_runtime.harn"),
     },
@@ -872,6 +876,7 @@ mod tests {
     fn key_stdlib_modules_resolve() {
         for module in [
             "context",
+            "context/maintenance",
             "edit",
             "artifact/web",
             "command",
