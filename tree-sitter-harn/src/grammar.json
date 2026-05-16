@@ -6818,8 +6818,13 @@
                   "type": "FIELD",
                   "name": "stream_marker",
                   "content": {
-                    "type": "SYMBOL",
-                    "name": "identifier"
+                    "type": "ALIAS",
+                    "content": {
+                      "type": "STRING",
+                      "value": "stream"
+                    },
+                    "named": true,
+                    "value": "stream_marker"
                   }
                 }
               ]

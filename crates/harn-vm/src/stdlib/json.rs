@@ -448,7 +448,10 @@ fn pointer_delete_at(value: &VmValue, tokens: &[String]) -> VmValue {
 }
 
 fn parse_pointer_index(token: &str) -> Option<usize> {
-    if token.is_empty() || (token.len() > 1 && token.starts_with('0')) {
+    if token.is_empty()
+        || !token.bytes().all(|byte| byte.is_ascii_digit())
+        || (token.len() > 1 && token.starts_with('0'))
+    {
         return None;
     }
     token.parse::<usize>().ok()
@@ -687,5 +690,15 @@ mod tests {
     fn extract_handles_escaped_quotes() {
         let text = r#"{"key": "value with \" quote"}"#;
         assert_eq!(extract_json_from_text(text), text);
+    }
+
+    #[test]
+    fn pointer_indices_reject_signed_or_non_digit_tokens() {
+        assert_eq!(parse_pointer_index("0"), Some(0));
+        assert_eq!(parse_pointer_index("10"), Some(10));
+        assert_eq!(parse_pointer_index("+1"), None);
+        assert_eq!(parse_pointer_index("-1"), None);
+        assert_eq!(parse_pointer_index("01"), None);
+        assert_eq!(parse_pointer_index("1.0"), None);
     }
 }

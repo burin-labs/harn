@@ -38,6 +38,14 @@ exports.deactivate = deactivate;
 const vscode = __importStar(require("vscode"));
 const node_1 = require("vscode-languageclient/node");
 let client;
+function runHarnTerminal(harnPath, args) {
+    const terminal = vscode.window.createTerminal({
+        name: `Harn: ${args[0]}`,
+        shellPath: harnPath,
+        shellArgs: args,
+    });
+    terminal.show();
+}
 class HarnDebugConfigurationProvider {
     resolveDebugConfiguration(_folder, config) {
         if (!config.type && !config.request && !config.name) {
@@ -92,10 +100,7 @@ function activate(context) {
             return;
         }
         await editor.document.save();
-        const terminal = vscode.window.terminals.find((t) => t.name === "Harn") ||
-            vscode.window.createTerminal("Harn");
-        terminal.show();
-        terminal.sendText(`${harnPath} run "${editor.document.fileName}"`);
+        runHarnTerminal(harnPath, ["run", editor.document.fileName]);
     });
     // --- Format command ---
     const fmtCommand = vscode.commands.registerCommand("harn.formatFile", async () => {
@@ -104,9 +109,7 @@ function activate(context) {
             return;
         }
         await editor.document.save();
-        const terminal = vscode.window.terminals.find((t) => t.name === "Harn") ||
-            vscode.window.createTerminal("Harn");
-        terminal.sendText(`${harnPath} fmt "${editor.document.fileName}"`);
+        runHarnTerminal(harnPath, ["fmt", editor.document.fileName]);
     });
     // --- Apply All Autofixes command ---
     // Triggers the LSP's bulk `source.fixAll.harn` code action. Same path

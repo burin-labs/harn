@@ -7,6 +7,15 @@ import {
 
 let client: LanguageClient | undefined;
 
+function runHarnTerminal(harnPath: string, args: string[]) {
+  const terminal = vscode.window.createTerminal({
+    name: `Harn: ${args[0]}`,
+    shellPath: harnPath,
+    shellArgs: args,
+  });
+  terminal.show();
+}
+
 class HarnDebugConfigurationProvider
   implements vscode.DebugConfigurationProvider
 {
@@ -89,12 +98,7 @@ export function activate(context: vscode.ExtensionContext) {
 
       await editor.document.save();
 
-      const terminal =
-        vscode.window.terminals.find((t) => t.name === "Harn") ||
-        vscode.window.createTerminal("Harn");
-
-      terminal.show();
-      terminal.sendText(`${harnPath} run "${editor.document.fileName}"`);
+      runHarnTerminal(harnPath, ["run", editor.document.fileName]);
     }
   );
 
@@ -109,11 +113,7 @@ export function activate(context: vscode.ExtensionContext) {
 
       await editor.document.save();
 
-      const terminal =
-        vscode.window.terminals.find((t) => t.name === "Harn") ||
-        vscode.window.createTerminal("Harn");
-
-      terminal.sendText(`${harnPath} fmt "${editor.document.fileName}"`);
+      runHarnTerminal(harnPath, ["fmt", editor.document.fileName]);
     }
   );
 

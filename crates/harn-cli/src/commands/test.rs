@@ -9,7 +9,7 @@ use crate::commands::run::{
     install_cli_llm_mock_mode, persist_cli_llm_mock_recording, CliLlmMockMode,
 };
 use crate::env_guard::ScopedEnvVar;
-use crate::execute;
+use crate::execute_with_skill_dirs;
 use crate::test_runner;
 
 fn normalize_expected_output(text: &str) -> String {
@@ -222,6 +222,7 @@ async fn execute_conformance_source(
     timeout_ms: u64,
     llm_mock_mode: &CliLlmMockMode,
     testbench: &TestbenchSidecarConfig,
+    cli_skill_dirs: &[PathBuf],
 ) -> Result<ConformanceRun, String> {
     use harn_vm::testbench::{
         ClockConfig, FilesystemConfig, SubprocessConfig, TapeConfig, Testbench,
@@ -284,7 +285,7 @@ async fn execute_conformance_source(
     let start = std::time::Instant::now();
     let result = tokio::time::timeout(
         std::time::Duration::from_millis(timeout_ms),
-        execute(source, Some(harn_file)),
+        execute_with_skill_dirs(source, Some(harn_file), cli_skill_dirs),
     )
     .await;
     let duration_ms = start.elapsed().as_millis() as u64;
@@ -384,6 +385,7 @@ async fn execute_conformance_source(
 async fn verify_unoptimized_conformance_subprocess(
     harn_file: &Path,
     timeout_ms: u64,
+    cli_skill_dirs: &[PathBuf],
 ) -> Result<u64, String> {
     let exe = std::env::current_exe()
         .map_err(|error| format!("failed to resolve current harn executable: {error}"))?;
@@ -399,6 +401,9 @@ async fn verify_unoptimized_conformance_subprocess(
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
         .kill_on_drop(true);
+    for dir in cli_skill_dirs {
+        command.arg("--skill-dir").arg(dir);
+    }
 
     let wait_timeout = std::time::Duration::from_millis(timeout_ms.saturating_add(2_000));
     let output = match tokio::time::timeout(wait_timeout, command.output()).await {
@@ -533,19 +538,24 @@ fn resolve_conformance_selection(
     Ok(files)
 }
 
+pub(crate) struct ConformanceRunOptions<'a> {
+    pub(crate) verbose: bool,
+    pub(crate) timing: bool,
+    pub(crate) differential_optimizations: bool,
+    pub(crate) cli_skill_dirs: &'a [PathBuf],
+}
+
 pub(crate) async fn run_conformance_tests(
     dir: &str,
     selection: Option<&str>,
     filter: Option<&str>,
     junit_path: Option<&str>,
     timeout_ms: u64,
-    verbose: bool,
-    timing: bool,
-    differential_optimizations: bool,
+    options: ConformanceRunOptions<'_>,
 ) {
-    let show_timing = verbose || timing;
+    let show_timing = options.verbose || options.timing;
     let _disable_llm_calls = ScopedEnvVar::set(harn_vm::llm::LLM_CALLS_DISABLED_ENV, "1");
-    let _force_optimized_parent = if differential_optimizations {
+    let _force_optimized_parent = if options.differential_optimizations {
         Some(ScopedEnvVar::unset(harn_vm::HARN_DISABLE_OPTIMIZATIONS_ENV))
     } else {
         None
@@ -644,6 +654,7 @@ pub(crate) async fn run_conformance_tests(
                 timeout_ms,
                 &llm_mock_mode,
                 &testbench_config,
+                options.cli_skill_dirs,
             )
             .await
             {
@@ -663,10 +674,13 @@ pub(crate) async fn run_conformance_tests(
                 ConformanceExecution::Completed(Ok(output)) => {
                     let actual = normalize_actual_output(output.trim_end());
                     if actual == expected {
-                        if differential_optimizations {
-                            if let Err(error) =
-                                verify_unoptimized_conformance_subprocess(harn_file, timeout_ms)
-                                    .await
+                        if options.differential_optimizations {
+                            if let Err(error) = verify_unoptimized_conformance_subprocess(
+                                harn_file,
+                                timeout_ms,
+                                options.cli_skill_dirs,
+                            )
+                            .await
                             {
                                 println!("  \x1b[31mFAIL\x1b[0m  {rel_path}");
                                 let msg = format!("{rel_path}: {error}");
@@ -690,7 +704,7 @@ pub(crate) async fn run_conformance_tests(
                             println!("  \x1b[31mFAIL\x1b[0m  {rel_path}");
                         }
                         let diff = simple_diff(&expected, &actual);
-                        let msg = if verbose {
+                        let msg = if options.verbose {
                             format!(
                                 "{rel_path}:\n  expected:\n    {}\n  actual:\n    {}\n  diff:\n{diff}",
                                 expected.lines().collect::<Vec<_>>().join("\n    "),
@@ -705,7 +719,7 @@ pub(crate) async fn run_conformance_tests(
                     }
                 }
                 ConformanceExecution::Completed(Err(e)) => {
-                    if verbose {
+                    if options.verbose {
                         println!("  \x1b[31mFAIL\x1b[0m  {rel_path} ({duration_ms} ms)");
                     } else {
                         println!("  \x1b[31mFAIL\x1b[0m  {rel_path}");
@@ -755,6 +769,7 @@ pub(crate) async fn run_conformance_tests(
                 timeout_ms,
                 &llm_mock_mode,
                 &testbench_config,
+                options.cli_skill_dirs,
             )
             .await
             {
@@ -774,9 +789,13 @@ pub(crate) async fn run_conformance_tests(
                 ConformanceExecution::Completed(Err(ref err))
                     if error_matches(err, &expected_error) =>
                 {
-                    if differential_optimizations {
-                        if let Err(error) =
-                            verify_unoptimized_conformance_subprocess(harn_file, timeout_ms).await
+                    if options.differential_optimizations {
+                        if let Err(error) = verify_unoptimized_conformance_subprocess(
+                            harn_file,
+                            timeout_ms,
+                            options.cli_skill_dirs,
+                        )
+                        .await
                         {
                             println!("  \x1b[31mFAIL\x1b[0m  {rel_path}");
                             let msg = format!("{rel_path}: {error}");
@@ -786,7 +805,7 @@ pub(crate) async fn run_conformance_tests(
                             continue;
                         }
                     }
-                    if verbose {
+                    if options.verbose {
                         println!("  \x1b[32mPASS\x1b[0m  {rel_path} ({duration_ms} ms)");
                     } else {
                         println!("  \x1b[32mPASS\x1b[0m  {rel_path}");
@@ -795,7 +814,7 @@ pub(crate) async fn run_conformance_tests(
                     passed += 1;
                 }
                 ConformanceExecution::Completed(Err(err)) => {
-                    if verbose {
+                    if options.verbose {
                         println!("  \x1b[31mFAIL\x1b[0m  {rel_path} ({duration_ms} ms)");
                     } else {
                         println!("  \x1b[31mFAIL\x1b[0m  {rel_path}");
@@ -946,13 +965,14 @@ pub(crate) async fn run_user_tests(
     filter: Option<&str>,
     timeout_ms: u64,
     parallel: bool,
+    cli_skill_dirs: &[PathBuf],
 ) {
     let path = PathBuf::from(path_str);
     if !path.exists() {
         eprintln!("Path not found: {path_str}");
         process::exit(1);
     }
-    let summary = test_runner::run_tests(&path, filter, timeout_ms, parallel).await;
+    let summary = test_runner::run_tests(&path, filter, timeout_ms, parallel, cli_skill_dirs).await;
     print_test_results(&summary);
     if summary.failed > 0 {
         process::exit(1);
@@ -1028,6 +1048,7 @@ async fn execute_determinism_run(
     llm_mock_mode: &CliLlmMockMode,
     run_dir: &tempfile::TempDir,
     transcript_dir: &tempfile::TempDir,
+    cli_skill_dirs: &[PathBuf],
 ) -> Result<String, String> {
     harn_vm::reset_thread_local_state();
     install_cli_llm_mock_mode(llm_mock_mode)?;
@@ -1041,7 +1062,7 @@ async fn execute_determinism_run(
     );
     let result = tokio::time::timeout(
         std::time::Duration::from_millis(timeout_ms),
-        execute(source, Some(path)),
+        execute_with_skill_dirs(source, Some(path), cli_skill_dirs),
     )
     .await;
     let persist_result = persist_cli_llm_mock_recording(llm_mock_mode);
@@ -1095,7 +1116,11 @@ fn compare_determinism_artifacts(
     Ok(())
 }
 
-async fn run_determinism_case(path: &Path, timeout_ms: u64) -> Result<(), String> {
+async fn run_determinism_case(
+    path: &Path,
+    timeout_ms: u64,
+    cli_skill_dirs: &[PathBuf],
+) -> Result<(), String> {
     let source = fs::read_to_string(path)
         .map_err(|error| format!("failed to read {}: {error}", path.display()))?;
     let recording_dir = tempfile::Builder::new()
@@ -1135,6 +1160,7 @@ async fn run_determinism_case(path: &Path, timeout_ms: u64) -> Result<(), String
         &first_mode,
         &recording_dir,
         &record_transcript,
+        cli_skill_dirs,
     )
     .await?;
     let second_output = execute_determinism_run(
@@ -1144,6 +1170,7 @@ async fn run_determinism_case(path: &Path, timeout_ms: u64) -> Result<(), String
         &second_mode,
         &replay_dir,
         &replay_transcript,
+        cli_skill_dirs,
     )
     .await?;
 
@@ -1169,7 +1196,12 @@ async fn run_determinism_case(path: &Path, timeout_ms: u64) -> Result<(), String
     )
 }
 
-pub(crate) async fn run_determinism_tests(path_str: &str, filter: Option<&str>, timeout_ms: u64) {
+pub(crate) async fn run_determinism_tests(
+    path_str: &str,
+    filter: Option<&str>,
+    timeout_ms: u64,
+    cli_skill_dirs: &[PathBuf],
+) {
     let files = collect_user_test_files(path_str).unwrap_or_else(|error| {
         eprintln!("{error}");
         process::exit(1);
@@ -1191,7 +1223,7 @@ pub(crate) async fn run_determinism_tests(path_str: &str, filter: Option<&str>, 
             }
         }
 
-        match run_determinism_case(&path, timeout_ms).await {
+        match run_determinism_case(&path, timeout_ms, cli_skill_dirs).await {
             Ok(()) => {
                 println!("  \x1b[32mPASS\x1b[0m  {rel_path}");
                 passed += 1;
@@ -1228,6 +1260,7 @@ pub(crate) async fn run_conformance_determinism_tests(
     selection: Option<&str>,
     filter: Option<&str>,
     timeout_ms: u64,
+    cli_skill_dirs: &[PathBuf],
 ) {
     let dir_path = PathBuf::from(dir);
     let suite_root = canonicalize_or_err(&dir_path).unwrap_or_else(|error| {
@@ -1255,7 +1288,7 @@ pub(crate) async fn run_conformance_determinism_tests(
                 continue;
             }
         }
-        match run_determinism_case(&path, timeout_ms).await {
+        match run_determinism_case(&path, timeout_ms, cli_skill_dirs).await {
             Ok(()) => {
                 println!("  \x1b[32mPASS\x1b[0m  {rel_path}");
                 passed += 1;
@@ -1292,6 +1325,7 @@ pub(crate) async fn run_watch_tests(
     filter: Option<&str>,
     timeout_ms: u64,
     parallel: bool,
+    cli_skill_dirs: &[PathBuf],
 ) {
     use notify::{Config, RecommendedWatcher, RecursiveMode, Watcher};
     use std::sync::mpsc;
@@ -1305,7 +1339,7 @@ pub(crate) async fn run_watch_tests(
 
     println!("Watching {path_str} for changes... (Ctrl+C to stop)\n");
 
-    let summary = test_runner::run_tests(&path, filter, timeout_ms, parallel).await;
+    let summary = test_runner::run_tests(&path, filter, timeout_ms, parallel, cli_skill_dirs).await;
     print_test_results(&summary);
 
     let (tx, rx) = mpsc::channel();
@@ -1335,7 +1369,9 @@ pub(crate) async fn run_watch_tests(
                 while rx.recv_timeout(Duration::from_millis(100)).is_ok() {}
 
                 println!("\n\x1b[2m--- file changed, re-running tests ---\x1b[0m\n");
-                let summary = test_runner::run_tests(&path, filter, timeout_ms, parallel).await;
+                let summary =
+                    test_runner::run_tests(&path, filter, timeout_ms, parallel, cli_skill_dirs)
+                        .await;
                 print_test_results(&summary);
             }
             Ok(Err(e)) => {

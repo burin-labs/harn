@@ -1,7 +1,7 @@
 //! Crystallization bundle: types, build/write/load/validate, shadow replay, and redaction helpers.
 
 use std::collections::BTreeSet;
-use std::path::Path;
+use std::path::{Component, Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
 use serde_json::Value as JsonValue;
@@ -638,6 +638,36 @@ pub fn load_crystallization_bundle_manifest(
     Ok(manifest)
 }
 
+fn resolve_bundle_manifest_path(
+    bundle_dir: &Path,
+    relative_path: &str,
+    label: &str,
+) -> Result<PathBuf, String> {
+    let path = Path::new(relative_path);
+    if relative_path.trim().is_empty()
+        || path.is_absolute()
+        || path.components().any(|component| {
+            matches!(
+                component,
+                Component::ParentDir | Component::Prefix(_) | Component::RootDir
+            )
+        })
+        || has_windows_rooted_or_drive_relative_prefix(relative_path)
+    {
+        return Err(format!(
+            "manifest {label} path {relative_path:?} must stay inside the bundle"
+        ));
+    }
+    Ok(bundle_dir.join(path))
+}
+
+fn has_windows_rooted_or_drive_relative_prefix(path: &str) -> bool {
+    let normalized = path.replace('\\', "/");
+    let bytes = normalized.as_bytes();
+    normalized.starts_with('/')
+        || (bytes.len() >= 2 && bytes[0].is_ascii_alphabetic() && bytes[1] == b':')
+}
+
 /// Read every fixture trace referenced by the bundle manifest. Returns
 /// the manifest plus loaded traces, in the order they appear in the
 /// manifest. Fixtures with `path: None` are skipped.
@@ -647,7 +677,8 @@ pub fn load_crystallization_bundle(
     let manifest = load_crystallization_bundle_manifest(bundle_dir)?;
     let mut traces = Vec::new();
     for fixture in &manifest.fixtures {
-        let path = bundle_dir.join(&fixture.path);
+        let path = resolve_bundle_manifest_path(bundle_dir, &fixture.path, "fixture")
+            .map_err(VmError::Runtime)?;
         traces.push(load_crystallization_trace(&path)?);
     }
     Ok((manifest, traces))
@@ -673,13 +704,16 @@ pub fn validate_crystallization_bundle(bundle_dir: &Path) -> Result<BundleValida
     validation.kind = manifest.kind.clone();
     validation.candidate_id = manifest.candidate_id.clone();
 
-    let workflow_path = bundle_dir.join(&manifest.workflow.path);
-    if workflow_path.exists() {
-        validation.workflow_ok = true;
-    } else {
-        validation
-            .problems
-            .push(format!("missing workflow file {}", workflow_path.display()));
+    match resolve_bundle_manifest_path(bundle_dir, &manifest.workflow.path, "workflow") {
+        Ok(workflow_path) if workflow_path.exists() => {
+            validation.workflow_ok = true;
+        }
+        Ok(workflow_path) => {
+            validation
+                .problems
+                .push(format!("missing workflow file {}", workflow_path.display()));
+        }
+        Err(problem) => validation.problems.push(problem),
     }
 
     let report_path = bundle_dir.join(BUNDLE_REPORT_FILE);
@@ -718,14 +752,17 @@ pub fn validate_crystallization_bundle(bundle_dir: &Path) -> Result<BundleValida
     }
 
     if let Some(eval_pack) = &manifest.eval_pack {
-        let path = bundle_dir.join(&eval_pack.path);
-        if path.exists() {
-            validation.eval_pack_ok = true;
-        } else {
-            validation.problems.push(format!(
-                "manifest references eval pack {} but file is missing",
-                path.display()
-            ));
+        match resolve_bundle_manifest_path(bundle_dir, &eval_pack.path, "eval_pack") {
+            Ok(path) if path.exists() => {
+                validation.eval_pack_ok = true;
+            }
+            Ok(path) => {
+                validation.problems.push(format!(
+                    "manifest references eval pack {} but file is missing",
+                    path.display()
+                ));
+            }
+            Err(problem) => validation.problems.push(problem),
         }
     } else {
         validation.eval_pack_ok = true;
@@ -733,7 +770,14 @@ pub fn validate_crystallization_bundle(bundle_dir: &Path) -> Result<BundleValida
 
     let mut fixtures_problem = false;
     for fixture in &manifest.fixtures {
-        let path = bundle_dir.join(&fixture.path);
+        let path = match resolve_bundle_manifest_path(bundle_dir, &fixture.path, "fixture") {
+            Ok(path) => path,
+            Err(problem) => {
+                validation.problems.push(problem);
+                fixtures_problem = true;
+                continue;
+            }
+        };
         if !path.exists() {
             validation
                 .problems

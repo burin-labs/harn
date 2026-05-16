@@ -1300,13 +1300,26 @@ pub(crate) fn safe_package_relative_path(
 ) -> Result<PathBuf, PackageError> {
     let rel = PathBuf::from(rel_path);
     if rel.is_absolute()
-        || rel
-            .components()
-            .any(|component| matches!(component, std::path::Component::ParentDir))
+        || has_windows_rooted_or_drive_relative_prefix(rel_path)
+        || rel.components().any(|component| {
+            matches!(
+                component,
+                std::path::Component::ParentDir
+                    | std::path::Component::Prefix(_)
+                    | std::path::Component::RootDir
+            )
+        })
     {
         return Err(format!("path {rel_path:?} escapes package root").into());
     }
     Ok(root.join(rel))
+}
+
+fn has_windows_rooted_or_drive_relative_prefix(path: &str) -> bool {
+    let normalized = path.replace('\\', "/");
+    let bytes = normalized.as_bytes();
+    normalized.starts_with('/')
+        || (bytes.len() >= 2 && bytes[0].is_ascii_alphabetic() && bytes[1] == b':')
 }
 
 pub(crate) fn extract_api_symbols(source: &str) -> Vec<PackageApiSymbol> {
@@ -1880,6 +1893,23 @@ mod tests {
             "{:?}",
             pack.files
         );
+    }
+
+    #[test]
+    fn package_relative_paths_reject_windows_rooted_forms() {
+        let tmp = tempfile::tempdir().unwrap();
+        for rel_path in [
+            "/repo/secret.harn",
+            r"\repo\secret.harn",
+            r"C:\repo\secret.harn",
+            "C:secret.harn",
+            r"\\server\share\secret.harn",
+        ] {
+            assert!(
+                safe_package_relative_path(tmp.path(), rel_path).is_err(),
+                "{rel_path:?} must not be accepted as package-relative"
+            );
+        }
     }
 
     #[test]

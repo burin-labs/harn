@@ -476,7 +476,7 @@ async fn smoke_check(
             format!("{} not found", test_path.display()),
         );
     }
-    let summary = test_runner::run_tests(&test_path, None, timeout_ms, false).await;
+    let summary = test_runner::run_tests(&test_path, None, timeout_ms, false, &[]).await;
     if summary.failed > 0 {
         let first_error = summary
             .results

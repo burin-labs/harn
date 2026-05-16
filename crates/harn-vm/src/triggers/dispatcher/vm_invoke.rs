@@ -52,6 +52,7 @@ impl Dispatcher {
                 .map_err(|error| DispatchError::Local(error.to_string()))?,
             None => tier_policy,
         };
+        let _execution_context_guard = DispatchProcessContextGuard::install(&vm);
         crate::orchestration::push_execution_policy(effective_policy);
         let _policy_guard = DispatchExecutionPolicyGuard;
         let future = vm.call_closure_pub(closure, &args);
@@ -165,5 +166,142 @@ impl Dispatcher {
         } else {
             future.await
         }
+    }
+}
+
+struct DispatchProcessContextGuard {
+    prior: Option<crate::orchestration::RunExecutionRecord>,
+    installed: bool,
+}
+
+impl DispatchProcessContextGuard {
+    fn install(vm: &crate::vm::Vm) -> Self {
+        let execution_source_dir = vm
+            .source_dir
+            .as_ref()
+            .map(|path| path.to_string_lossy().into_owned());
+        let fallback_cwd = vm
+            .project_root()
+            .map(|path| path.to_string_lossy().into_owned());
+        let prior = crate::stdlib::process::current_execution_context();
+
+        let next = match prior.clone() {
+            Some(mut context) => {
+                if context.cwd.is_none() {
+                    context.cwd = fallback_cwd.clone();
+                }
+                if context.source_dir.is_none() {
+                    context.source_dir = execution_source_dir.clone();
+                }
+                Some(context)
+            }
+            None if fallback_cwd.is_some() || execution_source_dir.is_some() => {
+                Some(crate::orchestration::RunExecutionRecord {
+                    cwd: fallback_cwd,
+                    source_dir: execution_source_dir,
+                    env: Default::default(),
+                    adapter: None,
+                    repo_path: None,
+                    worktree_path: None,
+                    branch: None,
+                    base_ref: None,
+                    cleanup: None,
+                })
+            }
+            None => None,
+        };
+        let installed = next.is_some();
+        if let Some(next) = next {
+            crate::stdlib::process::set_thread_execution_context(Some(next));
+        }
+        Self { prior, installed }
+    }
+}
+
+impl Drop for DispatchProcessContextGuard {
+    fn drop(&mut self) {
+        if self.installed {
+            crate::stdlib::process::set_thread_execution_context(self.prior.clone());
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::DispatchProcessContextGuard;
+
+    fn run_record(
+        cwd: Option<&std::path::Path>,
+        source_dir: Option<&std::path::Path>,
+    ) -> crate::orchestration::RunExecutionRecord {
+        crate::orchestration::RunExecutionRecord {
+            cwd: cwd.map(|path| path.to_string_lossy().into_owned()),
+            source_dir: source_dir.map(|path| path.to_string_lossy().into_owned()),
+            env: Default::default(),
+            adapter: None,
+            repo_path: None,
+            worktree_path: None,
+            branch: None,
+            base_ref: None,
+            cleanup: None,
+        }
+    }
+
+    #[test]
+    fn dispatch_context_preserves_existing_execution_cwd() {
+        crate::stdlib::process::reset_process_state();
+        let existing_cwd = tempfile::tempdir().unwrap();
+        let handler_source = tempfile::tempdir().unwrap();
+        crate::stdlib::process::set_thread_execution_context(Some(run_record(
+            Some(existing_cwd.path()),
+            None,
+        )));
+        let mut vm = crate::vm::Vm::new();
+        vm.set_source_dir(handler_source.path());
+
+        {
+            let _guard = DispatchProcessContextGuard::install(&vm);
+            let current = crate::stdlib::process::current_execution_context().unwrap();
+            assert_eq!(
+                current.cwd.as_deref(),
+                Some(existing_cwd.path().to_string_lossy().as_ref())
+            );
+            assert_eq!(
+                current.source_dir.as_deref(),
+                Some(handler_source.path().to_string_lossy().as_ref())
+            );
+        }
+
+        let restored = crate::stdlib::process::current_execution_context().unwrap();
+        assert_eq!(
+            restored.cwd.as_deref(),
+            Some(existing_cwd.path().to_string_lossy().as_ref())
+        );
+        assert!(restored.source_dir.is_none());
+        crate::stdlib::process::reset_process_state();
+    }
+
+    #[test]
+    fn dispatch_context_installs_vm_root_without_existing_context() {
+        crate::stdlib::process::reset_process_state();
+        let handler_source = tempfile::tempdir().unwrap();
+        let mut vm = crate::vm::Vm::new();
+        vm.set_source_dir(handler_source.path());
+
+        {
+            let _guard = DispatchProcessContextGuard::install(&vm);
+            let current = crate::stdlib::process::current_execution_context().unwrap();
+            assert_eq!(
+                current.cwd.as_deref(),
+                Some(handler_source.path().to_string_lossy().as_ref())
+            );
+            assert_eq!(
+                current.source_dir.as_deref(),
+                Some(handler_source.path().to_string_lossy().as_ref())
+            );
+        }
+
+        assert!(crate::stdlib::process::current_execution_context().is_none());
+        crate::stdlib::process::reset_process_state();
     }
 }

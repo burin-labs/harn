@@ -921,14 +921,7 @@ module.exports = grammar({
         )),
         statementSeparated($, $._statement),
         "}",
-        // Optional `as stream` suffix converts the parallel-each result
-        // into a streaming iterator. The runtime parser checks for the
-        // identifier `as` followed by the identifier `stream`; tree-sitter
-        // can't peek at identifier text, so `as` is promoted to a keyword
-        // here (it is unused as an identifier in Harn) and the trailing
-        // word is matched as an arbitrary identifier — the runtime parser
-        // is the source of truth for shape correctness.
-        optional(seq("as", field("stream_marker", $.identifier)))
+        optional(seq("as", field("stream_marker", alias("stream", $.stream_marker))))
       ),
 
     parallel_settle_expression: ($) =>
