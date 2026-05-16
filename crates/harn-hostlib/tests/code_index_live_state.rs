@@ -232,6 +232,26 @@ fn file_hash_reads_the_file_off_disk() {
     assert_eq!(s, expected.to_string());
 }
 
+#[test]
+fn file_hash_rejects_absolute_paths_outside_workspace() {
+    let dir = workspace();
+    let outside = tempfile::NamedTempFile::new().unwrap();
+    fs::write(outside.path(), "outside workspace\n").unwrap();
+    let (registry, _) = build();
+    rebuild_in(dir.path(), &registry);
+
+    let value = call(
+        &registry,
+        "hostlib_code_index_file_hash",
+        dict(&[(
+            "path",
+            VmValue::String(Rc::from(outside.path().to_string_lossy().to_string())),
+        )]),
+    );
+
+    assert!(matches!(value, VmValue::Nil));
+}
+
 // === Cached reads ===
 
 #[test]
@@ -279,6 +299,27 @@ fn read_range_errors_when_file_missing() {
     .expect_err("missing file should error");
     let msg = format!("{err}");
     assert!(msg.contains("file not found"));
+}
+
+#[test]
+fn read_range_rejects_paths_outside_workspace() {
+    let dir = workspace();
+    let outside = tempfile::NamedTempFile::new().unwrap();
+    fs::write(outside.path(), "outside workspace\n").unwrap();
+    let (registry, _) = build();
+    rebuild_in(dir.path(), &registry);
+
+    let err = try_call(
+        &registry,
+        "hostlib_code_index_read_range",
+        dict(&[(
+            "path",
+            VmValue::String(Rc::from(outside.path().to_string_lossy().to_string())),
+        )]),
+    )
+    .expect_err("outside workspace path should error");
+    let msg = format!("{err}");
+    assert!(msg.contains("indexed workspace root"));
 }
 
 #[test]

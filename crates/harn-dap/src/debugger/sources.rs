@@ -97,8 +97,56 @@ impl Debugger {
             return Some(source.to_string());
         }
 
-        let fs_path = path.strip_prefix("file://").unwrap_or(path);
+        let fs_path = file_uri_to_path(path).unwrap_or_else(|| std::path::PathBuf::from(path));
         std::fs::read_to_string(fs_path).ok()
+    }
+}
+
+fn file_uri_to_path(uri: &str) -> Option<std::path::PathBuf> {
+    let rest = uri.strip_prefix("file://")?;
+    let local = if rest == "localhost" {
+        ""
+    } else if rest.starts_with("localhost/") {
+        &rest["localhost".len()..]
+    } else {
+        rest
+    };
+    let decoded = percent_decode(local)?;
+    #[cfg(windows)]
+    {
+        let path = decoded.strip_prefix('/').unwrap_or(&decoded);
+        Some(std::path::PathBuf::from(path))
+    }
+    #[cfg(not(windows))]
+    {
+        Some(std::path::PathBuf::from(decoded))
+    }
+}
+
+fn percent_decode(input: &str) -> Option<String> {
+    let bytes = input.as_bytes();
+    let mut out = Vec::with_capacity(bytes.len());
+    let mut i = 0;
+    while i < bytes.len() {
+        if bytes[i] == b'%' {
+            let hi = *bytes.get(i + 1)?;
+            let lo = *bytes.get(i + 2)?;
+            out.push((hex_value(hi)? << 4) | hex_value(lo)?);
+            i += 3;
+        } else {
+            out.push(bytes[i]);
+            i += 1;
+        }
+    }
+    String::from_utf8(out).ok()
+}
+
+fn hex_value(byte: u8) -> Option<u8> {
+    match byte {
+        b'0'..=b'9' => Some(byte - b'0'),
+        b'a'..=b'f' => Some(byte - b'a' + 10),
+        b'A'..=b'F' => Some(byte - b'A' + 10),
+        _ => None,
     }
 }
 

@@ -1497,13 +1497,21 @@ pub(crate) fn collect_package_files_inner(
         let entry =
             entry.map_err(|error| format!("failed to read {} entry: {error}", dir.display()))?;
         let path = entry.path();
-        let name = entry.file_name();
-        if path.is_dir() {
-            if should_skip_package_dir(&name) {
+        let file_type = entry
+            .file_type()
+            .map_err(|error| format!("failed to inspect {}: {error}", path.display()))?;
+        if file_type.is_symlink() {
+            continue;
+        }
+        if file_type.is_dir() {
+            let rel = path
+                .strip_prefix(root)
+                .map_err(|error| format!("failed to relativize {}: {error}", path.display()))?;
+            if should_skip_package_dir(rel) {
                 continue;
             }
             collect_package_files_inner(root, &path, out)?;
-        } else if path.is_file() {
+        } else if file_type.is_file() {
             let rel = path
                 .strip_prefix(root)
                 .map_err(|error| format!("failed to relativize {}: {error}", path.display()))?
@@ -1515,11 +1523,16 @@ pub(crate) fn collect_package_files_inner(
     Ok(())
 }
 
-pub(crate) fn should_skip_package_dir(name: &OsStr) -> bool {
-    matches!(
-        name.to_str(),
-        Some(".git" | ".harn" | "target" | "node_modules" | "docs/dist")
-    )
+pub(crate) fn should_skip_package_dir(rel: &Path) -> bool {
+    if rel == Path::new("docs").join("dist") {
+        return true;
+    }
+    rel.components().any(|component| {
+        matches!(
+            component.as_os_str().to_str(),
+            Some(".git" | ".harn" | "target" | "node_modules")
+        )
+    })
 }
 
 pub(crate) fn default_artifact_dir(ctx: &ManifestContext, report: &PackageCheckReport) -> PathBuf {
@@ -1833,6 +1846,40 @@ mod tests {
         let pack = pack_package_impl(Some(tmp.path()), None, true).unwrap();
         assert!(pack.files.contains(&"harn.toml".to_string()));
         assert!(pack.files.contains(&"lib/main.harn".to_string()));
+    }
+
+    #[test]
+    fn package_pack_skips_generated_docs_dist() {
+        let tmp = tempfile::tempdir().unwrap();
+        write_publishable_package(tmp.path());
+        fs::create_dir_all(tmp.path().join("docs/dist")).unwrap();
+        fs::write(tmp.path().join("docs/dist/index.html"), "<html></html>\n").unwrap();
+
+        let pack = pack_package_impl(Some(tmp.path()), None, true).unwrap();
+
+        assert!(
+            !pack.files.iter().any(|path| path.starts_with("docs/dist/")),
+            "{:?}",
+            pack.files
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn package_pack_does_not_follow_symlinked_files() {
+        let tmp = tempfile::tempdir().unwrap();
+        write_publishable_package(tmp.path());
+        let outside = tempfile::NamedTempFile::new().unwrap();
+        fs::write(outside.path(), "secret\n").unwrap();
+        std::os::unix::fs::symlink(outside.path(), tmp.path().join("secret.txt")).unwrap();
+
+        let pack = pack_package_impl(Some(tmp.path()), None, true).unwrap();
+
+        assert!(
+            !pack.files.contains(&"secret.txt".to_string()),
+            "{:?}",
+            pack.files
+        );
     }
 
     #[test]

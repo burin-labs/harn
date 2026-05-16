@@ -262,11 +262,19 @@ impl SubscribeRequest {
             } else {
                 path
             };
-            watch_paths.push(normalize_existing_path_buf(
-                SUBSCRIBE_BUILTIN,
-                "paths",
-                &resolved,
-            )?);
+            let normalized = normalize_existing_path_buf(SUBSCRIBE_BUILTIN, "paths", &resolved)?;
+            if normalized.strip_prefix(&root).is_err() {
+                return Err(HostlibError::InvalidParameter {
+                    builtin: SUBSCRIBE_BUILTIN,
+                    param: "paths",
+                    message: format!(
+                        "watch path `{}` is outside root `{}`",
+                        normalized.display(),
+                        root.display()
+                    ),
+                });
+            }
+            watch_paths.push(normalized);
         }
 
         let recursive = optional_bool(SUBSCRIBE_BUILTIN, dict, "recursive", true)?;

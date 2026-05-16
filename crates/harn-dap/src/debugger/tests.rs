@@ -354,6 +354,31 @@ fn test_source_reads_prompt_template_from_disk() {
 }
 
 #[test]
+fn test_source_decodes_file_uri_paths() {
+    let (dir, file) = write_temp_program("space name.harn", "pipeline test(task) {}\n");
+    let encoded = file.to_string_lossy().replace(' ', "%20");
+
+    for (seq, uri) in [
+        format!("file://{encoded}"),
+        format!("file://localhost{encoded}"),
+    ]
+    .into_iter()
+    .enumerate()
+    {
+        let responses = Debugger::new().handle_message(make_request(
+            seq as i64 + 1,
+            "source",
+            Some(json!({"source": {"path": uri}})),
+        ));
+        assert_eq!(responses.len(), 1);
+        assert_eq!(responses[0].success, Some(true), "{responses:?}");
+        let body = responses[0].body.as_ref().unwrap();
+        assert_eq!(body["content"], "pipeline test(task) {}\n");
+    }
+    drop(dir);
+}
+
+#[test]
 fn test_source_reads_stdlib_synthetic_source() {
     let responses = Debugger::new().handle_message(make_request(
         1,
@@ -536,6 +561,59 @@ fn test_breakpoint_stop() {
     assert!(
         stopped_on_breakpoint,
         "expected a stopped event with reason=breakpoint for the entry script"
+    );
+    drop(dbg);
+}
+
+#[test]
+fn test_clearing_breakpoints_updates_live_vm() {
+    let mut dbg = Debugger::new();
+
+    let (_dir, file) = write_temp_program(
+        "clear_breakpoints.harn",
+        "pipeline test(task) {\n  let x = 1\n  let y = 2\n  log(x + y)\n}\n",
+    );
+    let path = file.to_string_lossy().to_string();
+
+    dbg.handle_message(make_request(1, "initialize", None));
+    dbg.handle_message(make_request(
+        2,
+        "setBreakpoints",
+        Some(json!({
+            "source": {"path": path},
+            "breakpoints": [{"line": 3}]
+        })),
+    ));
+    dbg.handle_message(make_request(
+        3,
+        "launch",
+        Some(json!({"program": file.to_string_lossy()})),
+    ));
+    dbg.handle_message(make_request(
+        4,
+        "setBreakpoints",
+        Some(json!({
+            "source": {"path": file.to_string_lossy()},
+            "breakpoints": []
+        })),
+    ));
+
+    let mut responses = dbg.handle_message(make_request(5, "configurationDone", None));
+    while dbg.is_running() {
+        responses.extend(dbg.step_running_vm());
+    }
+
+    assert!(
+        responses
+            .iter()
+            .all(|r| r.event.as_deref() != Some("stopped")),
+        "cleared breakpoint should not stop the VM: {responses:?}"
+    );
+    assert!(
+        responses
+            .iter()
+            .any(|r| r.event.as_deref() == Some("terminated")),
+        "program should run through after breakpoint clear"
     );
     drop(dbg);
 }
