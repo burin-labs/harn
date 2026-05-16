@@ -1096,6 +1096,12 @@ harn eval prompt examples/coding-agent-system.harn.prompt \
 
 # Use a named fleet from `[eval.fleets.<name>]` in harn.toml.
 harn eval prompt prompts/agent.harn.prompt --fleet-name frontier --output html -o report.html
+
+# Score repo-context artifact selection and rendered section shape.
+harn eval prompt examples/evals/repo-context-quality.harn.prompt \
+    --fleet claude-3-5-sonnet,gpt-4o,ollama:qwen3.5 \
+    --context-fixture examples/evals/context-retrieval-fixture.json \
+    --output json -o context-quality.json
 ```
 
 | Flag | Description |
@@ -1103,6 +1109,7 @@ harn eval prompt prompts/agent.harn.prompt --fleet-name frontier --output html -
 | `--fleet <list>` | Comma-separated model selectors (alias or `provider:model`). Repeatable. |
 | `--fleet-name <name>` | Named fleet from `[eval.fleets.<name>]` in `harn.toml`. |
 | `--bindings <path>` | JSON file injected into the template scope. Top-level value must be an object. |
+| `--context-fixture <path>` | JSON fixture(s) for context-quality gates. Each case supplies candidate artifacts, assembler options, and expectations for selected/rejected/stale artifact ids, token budget, and logical-section envelopes. Repeatable. |
 | `--mode <render\|run\|judge>` | Default `render`. |
 | `--output <terminal\|json\|html>` | Default `terminal`. |
 | `-o, --out-file <path>` | Write `--output` payload to a file instead of stdout. |
@@ -1130,6 +1137,16 @@ routes through the existing `llm_call` infrastructure, so credentials,
 provider catalog, and `HARN_LLM_PROVIDER=mock` work exactly as in
 `harn run`. Judge mode is run mode plus a final LLM-as-judge call that
 asks for a one-line JSON verdict on cross-model equivalence.
+
+`--context-fixture` adds deterministic repo-context quality gates to
+the same fleet render. The CLI first packs each case's candidate
+artifacts with `assemble_context`, injects `context`,
+`assembled_context`, `candidate_artifacts`, `selected_artifact_ids`,
+and `dropped_artifact_ids` into the template bindings, then renders the
+case across every fleet member. JSON/HTML/terminal output includes a
+`context_eval` report with selected artifact ids, stale/noisy rejection,
+budget adherence, per-model logical-section envelopes, and an overall
+score suitable for CI or dashboard ingestion.
 
 ## harn merge-captain
 

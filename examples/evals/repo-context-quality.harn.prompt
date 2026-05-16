@@ -1,0 +1,11 @@
+{{ section "system_framing" }}
+Use only the selected repository context. Ignore stale, wrong-language, or log-noise artifacts even when they share keywords with the task.
+{{ endsection }}
+
+{{ section "task" }}
+{{ task }}
+{{ endsection }}
+
+{{ section "examples" }}
+{{ context }}
+{{ endsection }}

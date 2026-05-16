@@ -6,6 +6,20 @@ Pre-0.6 highlights live in [CHANGELOG-pre-0.6.md](CHANGELOG-pre-0.6.md).
 Harn had no external users before 0.6.0, so that archive intentionally keeps
 condensed series summaries instead of full per-patch history.
 
+## Unreleased
+
+### Added
+
+- **Prompt context-quality gates for `harn eval prompt` (#1682).**
+  `harn eval prompt` now accepts repeatable `--context-fixture <json>`
+  inputs. Each fixture case supplies candidate repository artifacts plus
+  `assemble_context` options and expectations for selected artifact ids,
+  stale/noisy rejection, token budget adherence, and logical-section
+  envelopes across the fleet. JSON/HTML/terminal output includes a
+  `context_eval` report with per-case scores and per-model section
+  shapes, giving Burin CI/eval dashboards a deterministic gate for
+  context-engineering changes before live prompt runs.
+
 ## v0.8.20
 
 ### Fixed
