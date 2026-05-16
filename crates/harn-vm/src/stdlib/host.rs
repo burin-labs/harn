@@ -696,7 +696,8 @@ async fn dispatch_process_exec_after_policy(
     let mut cmd = crate::process_sandbox::tokio_command_for(&program, &args)
         .map_err(|e| VmError::Runtime(format!("host_call process.exec sandbox setup: {e}")))?;
     if let Some(cwd) = optional_string(params, "cwd") {
-        crate::process_sandbox::enforce_process_cwd(std::path::Path::new(&cwd))
+        let cwd = resolve_process_exec_cwd(&cwd);
+        crate::process_sandbox::enforce_process_cwd(&cwd)
             .map_err(|e| VmError::Runtime(format!("host_call process.exec cwd: {e}")))?;
         cmd.current_dir(cwd);
     }
@@ -872,6 +873,10 @@ fn process_exec_response(response: ProcessExecResponse<'_>) -> VmValue {
     );
     result.insert("success".to_string(), VmValue::Bool(response.success));
     VmValue::Dict(Rc::new(result))
+}
+
+fn resolve_process_exec_cwd(cwd: &str) -> std::path::PathBuf {
+    crate::stdlib::process::resolve_source_relative_path(cwd)
 }
 
 fn process_exec_argv(params: &BTreeMap<String, VmValue>) -> Result<(String, Vec<String>), VmError> {
@@ -1101,13 +1106,38 @@ mod tests {
     use super::{
         capability_manifest_with_mocks, clear_host_call_bridge, dispatch_host_operation,
         dispatch_host_tool_call, dispatch_host_tool_list, dispatch_mock_host_call, push_host_mock,
-        reset_host_state, set_host_call_bridge, HostCallBridge, HostMock,
+        reset_host_state, resolve_process_exec_cwd, set_host_call_bridge, HostCallBridge, HostMock,
     };
     use std::cell::Cell;
     use std::collections::BTreeMap;
     use std::rc::Rc;
 
     use crate::value::{VmError, VmValue};
+
+    #[test]
+    fn process_exec_relative_cwd_resolves_against_execution_root() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        crate::stdlib::process::set_thread_execution_context(Some(
+            crate::orchestration::RunExecutionRecord {
+                cwd: Some(dir.path().to_string_lossy().into_owned()),
+                source_dir: Some(dir.path().join("src").to_string_lossy().into_owned()),
+                env: BTreeMap::new(),
+                adapter: None,
+                repo_path: None,
+                worktree_path: None,
+                branch: None,
+                base_ref: None,
+                cleanup: None,
+            },
+        ));
+
+        assert_eq!(
+            resolve_process_exec_cwd("subdir"),
+            dir.path().join("subdir")
+        );
+
+        crate::stdlib::process::set_thread_execution_context(None);
+    }
 
     #[test]
     fn manifest_includes_operation_metadata() {

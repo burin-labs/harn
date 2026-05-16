@@ -36,6 +36,7 @@ pub async fn run_test_file(
     filter: Option<&str>,
     timeout_ms: u64,
     execution_cwd: Option<&Path>,
+    cli_skill_dirs: &[PathBuf],
 ) -> Result<Vec<TestResult>, String> {
     let source = std::fs::read_to_string(path)
         .map_err(|e| format!("Failed to read {}: {e}", path.display()))?;
@@ -138,7 +139,7 @@ pub async fn run_test_file(
                 }
                 let loaded =
                     crate::skill_loader::load_skills(&crate::skill_loader::SkillLoaderInputs {
-                        cli_dirs: Vec::new(),
+                        cli_dirs: cli_skill_dirs.to_vec(),
                         source_path: Some(path.to_path_buf()),
                     });
                 crate::skill_loader::emit_loader_warnings(&loaded.loader_warnings);
@@ -206,6 +207,7 @@ pub async fn run_tests(
     filter: Option<&str>,
     timeout_ms: u64,
     parallel: bool,
+    cli_skill_dirs: &[PathBuf],
 ) -> TestSummary {
     // Default LLM provider to "mock" in test mode unless caller overrides.
     let _default_llm_provider = ScopedEnvVar::set_if_unset("HARN_LLM_PROVIDER", "mock");
@@ -222,56 +224,49 @@ pub async fn run_tests(
     };
 
     if parallel {
-        let local = tokio::task::LocalSet::new();
-        let results = local
-            .run_until(async {
-                let mut handles = Vec::new();
-                for file in files {
-                    let filter = filter.map(|s| s.to_string());
-                    handles.push(tokio::task::spawn_local(async move {
-                        let execution_cwd = file
-                            .parent()
-                            .filter(|parent| !parent.as_os_str().is_empty())
-                            .map(Path::to_path_buf);
-                        run_test_file(
-                            &file,
-                            filter.as_deref(),
-                            timeout_ms,
-                            execution_cwd.as_deref(),
-                        )
-                        .await
-                    }));
-                }
-                let mut results = Vec::new();
-                for handle in handles {
-                    match handle.await {
-                        Ok(Ok(r)) => results.extend(r),
-                        Ok(Err(e)) => results.push(TestResult {
-                            name: "<file error>".to_string(),
-                            file: String::new(),
-                            passed: false,
-                            error: Some(e),
-                            duration_ms: 0,
-                        }),
-                        Err(e) => results.push(TestResult {
-                            name: "<join error>".to_string(),
-                            file: String::new(),
-                            passed: false,
-                            error: Some(format!("{e}")),
-                            duration_ms: 0,
-                        }),
-                    }
-                }
-                results
-            })
-            .await;
-        all_results = results;
+        let mut handles = Vec::new();
+        for file in files {
+            let filter = filter.map(|s| s.to_string());
+            let cli_skill_dirs = cli_skill_dirs.to_vec();
+            handles.push(tokio::task::spawn_blocking(move || {
+                let execution_cwd = file
+                    .parent()
+                    .filter(|parent| !parent.as_os_str().is_empty())
+                    .map(Path::to_path_buf);
+                run_test_file_on_isolated_thread(
+                    &file,
+                    filter.as_deref(),
+                    timeout_ms,
+                    execution_cwd.as_deref(),
+                    &cli_skill_dirs,
+                )
+            }));
+        }
+        for handle in handles {
+            match handle.await {
+                Ok(Ok(r)) => all_results.extend(r),
+                Ok(Err(e)) => all_results.push(TestResult {
+                    name: "<file error>".to_string(),
+                    file: String::new(),
+                    passed: false,
+                    error: Some(e),
+                    duration_ms: 0,
+                }),
+                Err(e) => all_results.push(TestResult {
+                    name: "<join error>".to_string(),
+                    file: String::new(),
+                    passed: false,
+                    error: Some(format!("{e}")),
+                    duration_ms: 0,
+                }),
+            }
+        }
     } else {
         for file in &files {
             let execution_cwd = file
                 .parent()
                 .filter(|parent| !parent.as_os_str().is_empty());
-            match run_test_file(file, filter, timeout_ms, execution_cwd).await {
+            match run_test_file(file, filter, timeout_ms, execution_cwd, cli_skill_dirs).await {
                 Ok(results) => all_results.extend(results),
                 Err(e) => {
                     all_results.push(TestResult {
@@ -297,6 +292,26 @@ pub async fn run_tests(
         total,
         duration_ms: start.elapsed().as_millis() as u64,
     }
+}
+
+fn run_test_file_on_isolated_thread(
+    file: &Path,
+    filter: Option<&str>,
+    timeout_ms: u64,
+    execution_cwd: Option<&Path>,
+    cli_skill_dirs: &[PathBuf],
+) -> Result<Vec<TestResult>, String> {
+    let runtime = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .map_err(|error| format!("failed to start test runtime: {error}"))?;
+    runtime.block_on(run_test_file(
+        file,
+        filter,
+        timeout_ms,
+        execution_cwd,
+        cli_skill_dirs,
+    ))
 }
 
 fn discover_test_files(dir: &Path) -> Vec<PathBuf> {
@@ -405,7 +420,7 @@ pipeline test_current_dir(task) {
         );
 
         let original_cwd = std::env::current_dir().unwrap();
-        let summary = run_tests(&temp.path().join("suite"), None, 1_000, false).await;
+        let summary = run_tests(&temp.path().join("suite"), None, 1_000, false, &[]).await;
         let restored_cwd = std::env::current_dir().unwrap();
 
         assert_eq!(summary.failed, 0);
@@ -438,8 +453,47 @@ pipeline test_two(task) {
 "#,
         );
 
-        let summary = run_tests(&temp.path().join("suite"), None, 1_000, true).await;
+        let summary = run_tests(&temp.path().join("suite"), None, 1_000, true, &[]).await;
         assert_eq!(summary.failed, 0);
         assert_eq!(summary.passed, 2);
+    }
+
+    #[tokio::test]
+    async fn run_tests_loads_cli_skill_dirs() {
+        let _env_guard = crate::tests::common::env_lock::lock_env().lock().await;
+        let temp = TempTestDir::new();
+        temp.write(
+            "skills/review/SKILL.md",
+            r#"---
+name: review
+short: Review PRs
+description: Review pull requests
+---
+
+Review instructions.
+"#,
+        );
+        temp.write(
+            "suite/test_skills.harn",
+            r#"
+pipeline test_cli_skills(task) {
+  assert_eq(skill_count(skills), 1)
+  let found = skill_find(skills, "review")
+  assert_eq(found.name, "review")
+}
+"#,
+        );
+
+        let summary = run_tests(
+            &temp.path().join("suite"),
+            None,
+            1_000,
+            false,
+            &[temp.path().join("skills")],
+        )
+        .await;
+
+        assert_eq!(summary.failed, 0, "{:?}", summary.results[0].error);
+        assert_eq!(summary.passed, 1);
     }
 }

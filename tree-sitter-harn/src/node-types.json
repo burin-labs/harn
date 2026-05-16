@@ -6725,7 +6725,7 @@
         "required": false,
         "types": [
           {
-            "type": "identifier",
+            "type": "stream_marker",
             "named": true
           }
         ]
@@ -13609,6 +13609,10 @@
   {
     "type": "spawn",
     "named": false
+  },
+  {
+    "type": "stream_marker",
+    "named": true
   },
   {
     "type": "string_content",

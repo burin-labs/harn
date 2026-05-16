@@ -189,6 +189,8 @@ jobs:
         working-directory: crates/harn-cli/portal
       - run: npm run lint
         working-directory: crates/harn-cli/portal
+      - run: npm run test
+        working-directory: crates/harn-cli/portal
       - run: npm run build
         working-directory: crates/harn-cli/portal
 

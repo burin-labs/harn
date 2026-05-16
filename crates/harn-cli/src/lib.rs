@@ -487,6 +487,8 @@ async fn async_main() {
                 }
                 run_package_evals();
             } else if args.determinism {
+                let cli_skill_dirs: Vec<PathBuf> =
+                    args.skill_dir.iter().map(PathBuf::from).collect();
                 if args.watch {
                     command_error("--determinism cannot be combined with --watch");
                 }
@@ -500,6 +502,7 @@ async fn async_main() {
                             args.selection.as_deref(),
                             args.filter.as_deref(),
                             args.timeout,
+                            &cli_skill_dirs,
                         )
                         .await;
                     } else if args.selection.is_some() {
@@ -511,6 +514,7 @@ async fn async_main() {
                             t,
                             args.filter.as_deref(),
                             args.timeout,
+                            &cli_skill_dirs,
                         )
                         .await;
                     }
@@ -529,10 +533,13 @@ async fn async_main() {
                         &test_dir,
                         args.filter.as_deref(),
                         args.timeout,
+                        &cli_skill_dirs,
                     )
                     .await;
                 }
             } else {
+                let cli_skill_dirs: Vec<PathBuf> =
+                    args.skill_dir.iter().map(PathBuf::from).collect();
                 if args.record {
                     harn_vm::llm::set_replay_mode(
                         harn_vm::llm::LlmReplayMode::Record,
@@ -553,9 +560,12 @@ async fn async_main() {
                             args.filter.as_deref(),
                             args.junit.as_deref(),
                             args.timeout,
-                            args.verbose,
-                            args.timing,
-                            args.differential_optimizations,
+                            commands::test::ConformanceRunOptions {
+                                verbose: args.verbose,
+                                timing: args.timing,
+                                differential_optimizations: args.differential_optimizations,
+                                cli_skill_dirs: &cli_skill_dirs,
+                            },
                         )
                         .await;
                     } else if args.selection.is_some() {
@@ -568,6 +578,7 @@ async fn async_main() {
                             args.filter.as_deref(),
                             args.timeout,
                             args.parallel,
+                            &cli_skill_dirs,
                         )
                         .await;
                     } else {
@@ -576,6 +587,7 @@ async fn async_main() {
                             args.filter.as_deref(),
                             args.timeout,
                             args.parallel,
+                            &cli_skill_dirs,
                         )
                         .await;
                     }
@@ -596,6 +608,7 @@ async fn async_main() {
                             args.filter.as_deref(),
                             args.timeout,
                             args.parallel,
+                            &cli_skill_dirs,
                         )
                         .await;
                     } else {
@@ -604,6 +617,7 @@ async fn async_main() {
                             args.filter.as_deref(),
                             args.timeout,
                             args.parallel,
+                            &cli_skill_dirs,
                         )
                         .await;
                     }
@@ -2367,6 +2381,14 @@ fn error_span_from_parse(e: &harn_parser::ParserError) -> harn_lexer::Span {
 
 /// Execute source code and return the output. Used by REPL and conformance tests.
 pub(crate) async fn execute(source: &str, source_path: Option<&Path>) -> Result<String, String> {
+    execute_with_skill_dirs(source, source_path, &[]).await
+}
+
+pub(crate) async fn execute_with_skill_dirs(
+    source: &str,
+    source_path: Option<&Path>,
+    cli_skill_dirs: &[PathBuf],
+) -> Result<String, String> {
     let mut lexer = Lexer::new(source);
     let tokens = lexer.tokenize().map_err(|e| e.to_string())?;
     let mut parser = Parser::new(tokens);
@@ -2457,7 +2479,7 @@ pub(crate) async fn execute(source: &str, source_path: Option<&Path>) -> Result<
             // `skill_fs_*` fixtures to see the bundled `skills/` folder
             // we run the same layered discovery as `harn run`.
             let loaded = skill_loader::load_skills(&skill_loader::SkillLoaderInputs {
-                cli_dirs: Vec::new(),
+                cli_dirs: cli_skill_dirs.to_vec(),
                 source_path: source_path.map(Path::to_path_buf),
             });
             skill_loader::emit_loader_warnings(&loaded.loader_warnings);

@@ -514,6 +514,55 @@ fn validate_rejects_bundle_with_missing_workflow() {
 }
 
 #[test]
+fn validate_rejects_manifest_paths_that_escape_bundle() {
+    let traces = version_traces(3);
+    let artifacts = crystallize_traces(traces.clone(), CrystallizeOptions::default()).unwrap();
+    let mut bundle =
+        build_crystallization_bundle(artifacts, &traces, BundleOptions::default()).unwrap();
+    bundle.manifest.workflow.path = "../outside.harn".to_string();
+    bundle.manifest.eval_pack = Some(BundleEvalPackRef {
+        path: "C:\\outside\\harn.eval.toml".to_string(),
+        link: None,
+    });
+    bundle.manifest.fixtures[0].path = "/tmp/outside.json".to_string();
+
+    let dir = tempfile::tempdir().unwrap();
+    write_crystallization_bundle(&bundle, dir.path()).unwrap();
+
+    let validation = validate_crystallization_bundle(dir.path()).unwrap();
+    assert!(!validation.is_ok());
+    assert!(validation
+        .problems
+        .iter()
+        .any(|problem| problem.contains("workflow path")));
+    assert!(validation
+        .problems
+        .iter()
+        .any(|problem| problem.contains("eval_pack path")));
+    assert!(validation
+        .problems
+        .iter()
+        .any(|problem| problem.contains("fixture path")));
+}
+
+#[test]
+fn load_rejects_fixture_paths_that_escape_bundle() {
+    let traces = version_traces(3);
+    let artifacts = crystallize_traces(traces.clone(), CrystallizeOptions::default()).unwrap();
+    let mut bundle =
+        build_crystallization_bundle(artifacts, &traces, BundleOptions::default()).unwrap();
+    bundle.manifest.fixtures[0].path = "../outside.json".to_string();
+
+    let dir = tempfile::tempdir().unwrap();
+    write_crystallization_bundle(&bundle, dir.path()).unwrap();
+
+    let error = load_crystallization_bundle(dir.path()).unwrap_err();
+    assert!(error
+        .to_string()
+        .contains("fixture path \"../outside.json\" must stay inside the bundle"));
+}
+
+#[test]
 fn validate_rejects_bundle_with_unredacted_fixture() {
     let traces = version_traces(3);
     let artifacts = crystallize_traces(traces.clone(), CrystallizeOptions::default()).unwrap();

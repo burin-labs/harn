@@ -189,4 +189,31 @@ pipeline default() {
           variable: (identifier)
           (return_statement
             (identifier))
-          stream_marker: (identifier))))))
+          stream_marker: (stream_marker))))))
+
+==================
+Invalid Parallel Each Stream Marker
+==================
+
+pipeline default() {
+  let results = parallel each [30] { n ->
+    return n
+  } as batch
+}
+
+---
+
+(source_file
+  (pipeline_declaration
+    name: (identifier)
+    (block
+      (let_binding
+        name: (identifier)
+        value: (parallel_each_expression
+          list: (list_literal
+            (integer_literal))
+          variable: (identifier)
+          (return_statement
+            (identifier))))
+      (ERROR
+        (identifier)))))

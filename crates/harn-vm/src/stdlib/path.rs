@@ -142,6 +142,16 @@ fn stem(p: &str) -> String {
     name
 }
 
+fn join_parent_child(parent_dir: &str, child: &str) -> String {
+    if parent_dir.is_empty() {
+        child.to_string()
+    } else if parent_dir == "/" || parent_dir.ends_with(":/") {
+        format!("{parent_dir}{child}")
+    } else {
+        format!("{parent_dir}/{child}")
+    }
+}
+
 /// Replace the extension on a path. `new_ext` may include or omit the
 /// leading dot.
 fn with_extension(p: &str, new_ext: &str) -> String {
@@ -153,13 +163,7 @@ fn with_extension(p: &str, new_ext: &str) -> String {
     let parent_dir = parent(p);
     let stem_name = stem(p);
     let new_name = format!("{stem_name}{normalized_ext}");
-    if parent_dir.is_empty() {
-        new_name
-    } else if parent_dir == "/" {
-        format!("/{new_name}")
-    } else {
-        format!("{parent_dir}/{new_name}")
-    }
+    join_parent_child(&parent_dir, &new_name)
 }
 
 /// Replace the file stem on a path, keeping the extension.
@@ -167,13 +171,7 @@ fn with_stem(p: &str, new_stem: &str) -> String {
     let ext = extension(p);
     let parent_dir = parent(p);
     let new_name = format!("{new_stem}{ext}");
-    if parent_dir.is_empty() {
-        new_name
-    } else if parent_dir == "/" {
-        format!("/{new_name}")
-    } else {
-        format!("{parent_dir}/{new_name}")
-    }
+    join_parent_child(&parent_dir, &new_name)
 }
 
 /// Compute the relative path from `base` to `p`. Returns `None` if `p` is
@@ -414,8 +412,12 @@ mod tests {
         assert_eq!(with_extension("a/b/c.rs", "txt"), "a/b/c.txt");
         assert_eq!(with_extension("a/b/c.rs", ".txt"), "a/b/c.txt");
         assert_eq!(with_extension("c.rs", "py"), "c.py");
+        assert_eq!(with_extension("/c.rs", "py"), "/c.py");
+        assert_eq!(with_extension("C:/c.rs", "py"), "C:/c.py");
         assert_eq!(with_stem("a/b/c.rs", "main"), "a/b/main.rs");
         assert_eq!(with_stem("c.rs", "main"), "main.rs");
+        assert_eq!(with_stem("/c.rs", "main"), "/main.rs");
+        assert_eq!(with_stem("C:/c.rs", "main"), "C:/main.rs");
     }
 
     #[test]

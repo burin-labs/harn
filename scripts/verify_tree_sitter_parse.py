@@ -11,8 +11,9 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent
 GRAMMAR_DIR = ROOT / "tree-sitter-harn"
 # Support both macOS (.dylib) and Linux (.so) compiled libraries.
-_LIB_CANDIDATES = [GRAMMAR_DIR / "harn.dylib", GRAMMAR_DIR / "harn.so"]
-LIB_PATH = next((p for p in _LIB_CANDIDATES if p.exists()), _LIB_CANDIDATES[0])
+_NATIVE_LIB = GRAMMAR_DIR / ("harn.dylib" if sys.platform == "darwin" else "harn.so")
+_LIB_CANDIDATES = [_NATIVE_LIB, GRAMMAR_DIR / "harn.dylib", GRAMMAR_DIR / "harn.so"]
+LIB_PATH = _NATIVE_LIB
 CLI = GRAMMAR_DIR / "scripts" / "tree-sitter-cli.sh"
 GRAMMAR_SOURCES = [
     GRAMMAR_DIR / "grammar.js",
@@ -28,6 +29,7 @@ SCAN_ROOTS = [
 
 
 def ensure_compiled_library() -> int:
+    global LIB_PATH
     if not CLI.exists():
         print(f"error: missing tree-sitter CLI wrapper at {CLI}", file=sys.stderr)
         return 1
@@ -35,9 +37,9 @@ def ensure_compiled_library() -> int:
     source_mtime = max(
         path.stat().st_mtime for path in GRAMMAR_SOURCES if path.exists()
     )
-    needs_build = not LIB_PATH.exists()
+    needs_build = not _NATIVE_LIB.exists()
     if not needs_build:
-        needs_build = LIB_PATH.stat().st_mtime < source_mtime
+        needs_build = _NATIVE_LIB.stat().st_mtime < source_mtime
 
     if not needs_build:
         return 0
@@ -55,6 +57,7 @@ def ensure_compiled_library() -> int:
         if result.stderr:
             print(result.stderr, file=sys.stderr, end="")
         return result.returncode
+    LIB_PATH = next((p for p in _LIB_CANDIDATES if p.exists()), _NATIVE_LIB)
     return 0
 
 

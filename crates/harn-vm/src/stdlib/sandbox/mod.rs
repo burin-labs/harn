@@ -256,9 +256,6 @@ pub(crate) fn enforce_fs_path(builtin: &str, path: &Path, access: FsAccess) -> R
     if matches!(policy.sandbox_profile, SandboxProfile::Unrestricted) {
         return Ok(());
     }
-    if policy.workspace_roots.is_empty() {
-        return Ok(());
-    }
     let candidate = normalize_for_policy(path);
     let roots = normalized_workspace_roots(&policy);
     if roots.iter().any(|root| path_is_within(&candidate, root)) {
@@ -281,9 +278,6 @@ pub fn enforce_process_cwd(path: &Path) -> Result<(), VmError> {
         return Ok(());
     };
     if matches!(policy.sandbox_profile, SandboxProfile::Unrestricted) {
-        return Ok(());
-    }
-    if policy.workspace_roots.is_empty() {
         return Ok(());
     }
     let candidate = normalize_for_policy(path);
@@ -575,6 +569,11 @@ pub(crate) fn unavailable(
 }
 
 fn normalized_workspace_roots(policy: &CapabilityPolicy) -> Vec<PathBuf> {
+    if policy.workspace_roots.is_empty() {
+        return vec![normalize_for_policy(
+            &crate::stdlib::process::execution_root_path(),
+        )];
+    }
     policy
         .workspace_roots
         .iter()
@@ -583,15 +582,7 @@ fn normalized_workspace_roots(policy: &CapabilityPolicy) -> Vec<PathBuf> {
 }
 
 pub(crate) fn process_sandbox_roots(policy: &CapabilityPolicy) -> Vec<PathBuf> {
-    let roots = if policy.workspace_roots.is_empty() {
-        vec![crate::stdlib::process::execution_root_path()]
-    } else {
-        normalized_workspace_roots(policy)
-    };
-    roots
-        .into_iter()
-        .map(|root| normalize_for_policy(&root))
-        .collect()
+    normalized_workspace_roots(policy)
 }
 
 fn resolve_policy_path(path: &str) -> PathBuf {
@@ -712,6 +703,7 @@ impl FsAccess {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::orchestration::{pop_execution_policy, push_execution_policy};
 
     #[test]
     fn missing_create_path_normalizes_against_existing_parent() {
@@ -722,6 +714,71 @@ mod tests {
             normalized,
             normalize_for_policy(&dir.path().join("new.txt"))
         );
+    }
+
+    #[test]
+    fn empty_workspace_roots_default_to_execution_root_for_fs_paths() {
+        let dir = tempfile::tempdir().unwrap();
+        crate::stdlib::process::set_thread_execution_context(Some(
+            crate::orchestration::RunExecutionRecord {
+                cwd: Some(dir.path().to_string_lossy().into_owned()),
+                source_dir: None,
+                env: Default::default(),
+                adapter: None,
+                repo_path: None,
+                worktree_path: None,
+                branch: None,
+                base_ref: None,
+                cleanup: None,
+            },
+        ));
+        push_execution_policy(CapabilityPolicy {
+            sandbox_profile: SandboxProfile::Worktree,
+            ..CapabilityPolicy::default()
+        });
+
+        assert!(
+            enforce_fs_path("read_file", &dir.path().join("inside.txt"), FsAccess::Read).is_ok()
+        );
+        let outside = tempfile::tempdir().unwrap();
+        assert!(enforce_fs_path(
+            "read_file",
+            &outside.path().join("outside.txt"),
+            FsAccess::Read
+        )
+        .is_err());
+
+        pop_execution_policy();
+        crate::stdlib::process::set_thread_execution_context(None);
+    }
+
+    #[test]
+    fn empty_workspace_roots_default_to_execution_root_for_process_cwd() {
+        let dir = tempfile::tempdir().unwrap();
+        crate::stdlib::process::set_thread_execution_context(Some(
+            crate::orchestration::RunExecutionRecord {
+                cwd: Some(dir.path().to_string_lossy().into_owned()),
+                source_dir: None,
+                env: Default::default(),
+                adapter: None,
+                repo_path: None,
+                worktree_path: None,
+                branch: None,
+                base_ref: None,
+                cleanup: None,
+            },
+        ));
+        push_execution_policy(CapabilityPolicy {
+            sandbox_profile: SandboxProfile::Worktree,
+            ..CapabilityPolicy::default()
+        });
+
+        assert!(enforce_process_cwd(dir.path()).is_ok());
+        let outside = tempfile::tempdir().unwrap();
+        assert!(enforce_process_cwd(outside.path()).is_err());
+
+        pop_execution_policy();
+        crate::stdlib::process::set_thread_execution_context(None);
     }
 
     #[test]

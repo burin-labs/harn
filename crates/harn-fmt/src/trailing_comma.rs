@@ -110,6 +110,7 @@ struct BracketPair {
     /// `,` span if a comma at depth 1 is followed only by whitespace
     /// before the closer — i.e. it is the trailing comma.
     trailing_comma: Option<Span>,
+    last_item_token: Option<Span>,
     kind: BracketKind,
 }
 
@@ -119,13 +120,12 @@ impl BracketPair {
         if inner.trim().is_empty() {
             return None;
         }
-        let last_byte = last_meaningful_byte_before(source, self.close_byte)?;
-        let has_trailing_comma = source.as_bytes()[last_byte] == b',';
+        let has_trailing_comma = self.trailing_comma.is_some();
         if self.close_line > self.open_line {
             if has_trailing_comma {
                 return None;
             }
-            let insert_pos = last_byte + 1;
+            let insert_pos = self.last_item_token?.end;
             let span = span_at_offset(source, insert_pos, insert_pos);
             Some(TrailingCommaIssue {
                 edit: FixEdit {
@@ -169,12 +169,13 @@ enum BracketKind {
     Brace,
 }
 
-fn build_bracket_pairs(source: &str, tokens: &[Token]) -> Vec<BracketPair> {
+fn build_bracket_pairs(_source: &str, tokens: &[Token]) -> Vec<BracketPair> {
     struct OpenFrame {
         kind: BracketKind,
         open_byte: usize,
         open_line: usize,
         last_comma_at_depth_1: Option<Span>,
+        last_token_at_depth_1: Option<Span>,
     }
     let mut stack: Vec<OpenFrame> = Vec::new();
     let mut pairs = Vec::new();
@@ -188,42 +189,55 @@ fn build_bracket_pairs(source: &str, tokens: &[Token]) -> Vec<BracketPair> {
                 open_byte: tok.span.start,
                 open_line: tok.span.line,
                 last_comma_at_depth_1: None,
+                last_token_at_depth_1: None,
             }),
             TokenKind::LBracket => stack.push(OpenFrame {
                 kind: BracketKind::Bracket,
                 open_byte: tok.span.start,
                 open_line: tok.span.line,
                 last_comma_at_depth_1: None,
+                last_token_at_depth_1: None,
             }),
             TokenKind::LBrace => stack.push(OpenFrame {
                 kind: BracketKind::Brace,
                 open_byte: tok.span.start,
                 open_line: tok.span.line,
                 last_comma_at_depth_1: None,
+                last_token_at_depth_1: None,
             }),
             TokenKind::RParen | TokenKind::RBracket | TokenKind::RBrace => {
                 let Some(frame) = stack.pop() else { continue };
                 if !brackets_match(frame.kind, &tok.kind) {
                     continue;
                 }
-                let trailing_comma = frame
-                    .last_comma_at_depth_1
-                    .filter(|c| is_whitespace_only(source, c.end, tok.span.start));
+                let trailing_comma = frame.last_comma_at_depth_1.filter(|comma| {
+                    frame
+                        .last_token_at_depth_1
+                        .is_none_or(|token| token.start < comma.start)
+                });
                 pairs.push(BracketPair {
                     open_byte: frame.open_byte,
                     open_line: frame.open_line,
                     close_byte: tok.span.start,
                     close_line: tok.span.line,
                     trailing_comma,
+                    last_item_token: frame.last_token_at_depth_1,
                     kind: frame.kind,
                 });
+                if let Some(parent) = stack.last_mut() {
+                    parent.last_token_at_depth_1 = Some(tok.span);
+                }
             }
             TokenKind::Comma => {
                 if let Some(top) = stack.last_mut() {
                     top.last_comma_at_depth_1 = Some(tok.span);
                 }
             }
-            _ => {}
+            _ => {
+                if let Some(top) = stack.last_mut() {
+                    top.last_token_at_depth_1 = Some(tok.span);
+                }
+            }
         }
     }
     pairs
@@ -318,28 +332,6 @@ fn apply_edits(source: &str, mut edits: Vec<FixEdit>) -> String {
     out
 }
 
-fn last_meaningful_byte_before(source: &str, pos: usize) -> Option<usize> {
-    let bytes = source.as_bytes();
-    if pos == 0 {
-        return None;
-    }
-    let mut i = pos;
-    while i > 0 {
-        i -= 1;
-        if matches!(bytes[i], b' ' | b'\t' | b'\n' | b'\r') {
-            continue;
-        }
-        return Some(i);
-    }
-    None
-}
-
-fn is_whitespace_only(source: &str, start: usize, end: usize) -> bool {
-    source[start..end]
-        .bytes()
-        .all(|b| matches!(b, b' ' | b'\t' | b'\n' | b'\r'))
-}
-
 fn span_at_offset(source: &str, start: usize, end: usize) -> Span {
     let line = source[..start].bytes().filter(|b| *b == b'\n').count() + 1;
     let line_start = source[..start].rfind('\n').map(|idx| idx + 1).unwrap_or(0);
@@ -358,6 +350,18 @@ mod tests {
     fn inserts_trailing_comma_on_multiline_list() {
         let src = "let xs = [\n  1,\n  2\n]\n";
         assert_eq!(fix(src), "let xs = [\n  1,\n  2,\n]\n");
+    }
+
+    #[test]
+    fn inserts_missing_comma_before_trailing_line_comment() {
+        let src = "let xs = [\n  1 // one\n]\n";
+        assert_eq!(fix(src), "let xs = [\n  1, // one\n]\n");
+    }
+
+    #[test]
+    fn preserves_existing_trailing_comma_before_line_comment() {
+        let src = "let xs = [\n  1, // one\n]\n";
+        assert_eq!(fix(src), src);
     }
 
     #[test]
