@@ -814,6 +814,12 @@ async fn async_main() {
                     process::exit(code);
                 }
             }
+            Some(EvalCommand::ToolCalls(tool_calls_args)) => {
+                let code = commands::eval_tool_calls::run(tool_calls_args).await;
+                if code != 0 {
+                    process::exit(code);
+                }
+            }
             None => {
                 let Some(path) = args.path else {
                     eprintln!(

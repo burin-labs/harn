@@ -1,0 +1,11 @@
+{
+  "schema_version": 1,
+  "planner": {
+    "selector": "mock:mock",
+    "provider": "mock",
+    "model": "mock"
+  },
+  "total_cases": 50,
+  "passed_cases": 4,
+  "pass_rate": 0.08
+}

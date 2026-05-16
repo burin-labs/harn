@@ -25,6 +25,7 @@ mod conversation;
 pub(crate) mod cost;
 pub(crate) mod cost_route;
 pub(crate) mod daemon;
+pub mod eval;
 pub(crate) mod fake;
 pub(crate) mod helpers;
 pub mod jsonl;

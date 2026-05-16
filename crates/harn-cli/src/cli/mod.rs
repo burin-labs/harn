@@ -85,7 +85,10 @@ pub(crate) use dump::{
     DumpConnectorMatrixArgs, DumpHighlightKeywordsArgs, DumpProtocolArtifactsArgs,
     DumpTriggerQuickrefArgs,
 };
-pub use eval::{EvalArgs, EvalCommand, EvalPromptArgs, EvalPromptMode, EvalPromptOutput};
+pub use eval::{
+    EvalArgs, EvalCommand, EvalPromptArgs, EvalPromptMode, EvalPromptOutput, EvalToolCallsArgs,
+    EvalToolCallsCommand, EvalToolCallsRegressionArgs,
+};
 pub(crate) use explain::ExplainArgs;
 pub(crate) use flow::{
     FlowArchivistCommand, FlowArchivistScanArgs, FlowArgs, FlowCommand, FlowReplayAuditArgs,

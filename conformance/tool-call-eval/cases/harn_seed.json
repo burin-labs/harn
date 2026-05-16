@@ -1,0 +1,275 @@
+[
+  {
+    "id": "harn_echo_msg",
+    "prompt": "Echo the message 'first' back to the caller.",
+    "tools": [
+      {
+        "name": "echo",
+        "description": "Echo a short message.",
+        "parameters": {
+          "msg": {"type": "string", "description": "Message to echo"}
+        }
+      }
+    ],
+    "expected": {"kind": "exact", "name": "echo", "args": {"msg": "first"}},
+    "source": "harn:conformance/tests/integration/agent_loop_tool_caller_observes.harn",
+    "tags": ["harn_seed", "simple"]
+  },
+  {
+    "id": "harn_read_src_lib",
+    "prompt": "Inspect the repository by reading src/lib.rs.",
+    "tools": [
+      {
+        "name": "read",
+        "description": "Read a file from the workspace.",
+        "parameters": {
+          "path": {"type": "string", "description": "Path to read"}
+        }
+      }
+    ],
+    "expected": {"kind": "exact", "name": "read", "args": {"path": "src/lib.rs"}},
+    "source": "harn:conformance/tests/integration/native_tool_fallback_observability.harn",
+    "tags": ["harn_seed", "file"]
+  },
+  {
+    "id": "harn_greet_world",
+    "prompt": "Say hello to world using the greet tool.",
+    "tools": [
+      {
+        "name": "greet",
+        "description": "Say hello.",
+        "parameters": {
+          "name": {"type": "string", "description": "Name to greet"}
+        }
+      }
+    ],
+    "expected": {"kind": "exact", "name": "greet", "args": {"name": "world"}},
+    "source": "harn:conformance/tests/integration/tool_registry.harn",
+    "tags": ["harn_seed", "simple"]
+  },
+  {
+    "id": "harn_add_two_numbers",
+    "prompt": "Calculate 2 + 3.",
+    "tools": [
+      {
+        "name": "add",
+        "description": "Add two integers.",
+        "parameters": {
+          "left": {"type": "integer", "description": "Left operand"},
+          "right": {"type": "integer", "description": "Right operand"}
+        }
+      }
+    ],
+    "expected": {"kind": "exact", "name": "add", "args": {"left": 2, "right": 3}},
+    "source": "harn:conformance/tests/agents/agent_primitives_one_turn.harn",
+    "tags": ["harn_seed", "math"]
+  },
+  {
+    "id": "harn_lookup_release",
+    "prompt": "Look up release information.",
+    "tools": [
+      {
+        "name": "lookup",
+        "description": "Look up a topic.",
+        "parameters": {
+          "query": {"type": "string", "description": "Search query"}
+        }
+      }
+    ],
+    "expected": {"kind": "exact", "name": "lookup", "args": {"query": "release"}},
+    "source": "harn:conformance/tests/agents/agent_loop_native_natural_completion.harn",
+    "tags": ["harn_seed", "search"]
+  },
+  {
+    "id": "harn_delegate_readonly",
+    "prompt": "Delegate a read-only worker to inspect the config file.",
+    "tools": [
+      {
+        "name": "delegate_readonly",
+        "description": "Delegate a read-only task.",
+        "parameters": {
+          "task": {"type": "string", "description": "Task for the worker"}
+        }
+      }
+    ],
+    "expected": {
+      "kind": "exact",
+      "name": "delegate_readonly",
+      "args": {"task": "Inspect the config file"}
+    },
+    "source": "harn:conformance/tests/stdlib/workflow_sub_agent_skill_context.harn",
+    "tags": ["harn_seed", "delegation"]
+  },
+  {
+    "id": "harn_write_note_denied_shape",
+    "prompt": "Write notes.txt with the latest finding.",
+    "tools": [
+      {
+        "name": "write_note",
+        "description": "Write a note file.",
+        "parameters": {
+          "path": {"type": "string"},
+          "content": {"type": "string"}
+        }
+      }
+    ],
+    "expected": {
+      "kind": "exact",
+      "name": "write_note",
+      "args": {"path": "notes.txt", "content": "latest finding"}
+    },
+    "source": "harn:conformance/tests/agents/sub_agent_run_schema_and_permission.harn",
+    "tags": ["harn_seed", "file"]
+  },
+  {
+    "id": "harn_wait_for_user_branch",
+    "prompt": "Ask the user which branch to use.",
+    "tools": [
+      {
+        "name": "wait_for_user",
+        "description": "Ask the user a question and wait.",
+        "parameters": {
+          "question": {"type": "string"}
+        }
+      }
+    ],
+    "expected": {
+      "kind": "exact",
+      "name": "wait_for_user",
+      "args": {"question": "Which branch?"}
+    },
+    "source": "harn:conformance/tests/agents/agent_chat_loop.harn",
+    "tags": ["harn_seed", "hitl"]
+  },
+  {
+    "id": "harn_read_current_session_id",
+    "prompt": "Check the current agent session id.",
+    "tools": [
+      {
+        "name": "read_current_id",
+        "description": "Read the current session id.",
+        "parameters": {}
+      }
+    ],
+    "expected": {"kind": "exact", "name": "read_current_id", "args": {}},
+    "source": "harn:conformance/tests/agents/agent_session_current_id.harn",
+    "tags": ["harn_seed", "session"]
+  },
+  {
+    "id": "harn_find_config_path",
+    "prompt": "Search for the config path.",
+    "tools": [
+      {
+        "name": "search",
+        "description": "Search the workspace.",
+        "parameters": {
+          "query": {"type": "string"}
+        }
+      },
+      {
+        "name": "read",
+        "description": "Read a file.",
+        "parameters": {
+          "path": {"type": "string"}
+        }
+      }
+    ],
+    "expected": {"kind": "exact", "name": "search", "args": {"query": "config path"}},
+    "source": "harn:conformance/tests/agents/sub_agent_run_clean_transcript.harn",
+    "tags": ["harn_seed", "multiple"]
+  },
+  {
+    "id": "harn_git_status",
+    "prompt": "Check the repository status.",
+    "tools": [
+      {
+        "name": "git_status",
+        "description": "Show git status.",
+        "parameters": {}
+      },
+      {
+        "name": "git_log",
+        "description": "Show git history.",
+        "parameters": {
+          "limit": {"type": "integer", "default": 10}
+        }
+      }
+    ],
+    "expected": {"kind": "exact", "name": "git_status", "args": {}},
+    "source": "harn:conformance/tests/stdlib/git_stdlib_receipts.harn",
+    "tags": ["harn_seed", "multiple"]
+  },
+  {
+    "id": "harn_git_log_release",
+    "prompt": "Show the last five release commits.",
+    "tools": [
+      {
+        "name": "git_status",
+        "description": "Show git status.",
+        "parameters": {}
+      },
+      {
+        "name": "git_log",
+        "description": "Show git history.",
+        "parameters": {
+          "limit": {"type": "integer"},
+          "query": {"type": "string", "required": false}
+        }
+      }
+    ],
+    "expected": {"kind": "exact", "name": "git_log", "args": {"limit": 5, "query": "release"}},
+    "source": "harn:conformance/tests/stdlib/git_stdlib_receipts.harn",
+    "tags": ["harn_seed", "multiple"]
+  },
+  {
+    "id": "harn_noop_stall",
+    "prompt": "Call the no-op tool once to keep the loop alive.",
+    "tools": [
+      {
+        "name": "noop",
+        "description": "Do nothing.",
+        "parameters": {}
+      }
+    ],
+    "expected": {"kind": "exact", "name": "noop", "args": {}},
+    "source": "harn:conformance/tests/agents/agent_loop_stall_triggers_judge.harn",
+    "tags": ["harn_seed", "loop"]
+  },
+  {
+    "id": "harn_delete_preview_dry_run",
+    "prompt": "Dry-run deleting /tmp/preview.",
+    "tools": [
+      {
+        "name": "delete",
+        "description": "Delete a path.",
+        "parameters": {
+          "path": {"type": "string"},
+          "dry_run": {"type": "boolean", "default": false}
+        }
+      }
+    ],
+    "expected": {
+      "kind": "exact",
+      "name": "delete",
+      "args": {"path": "/tmp/preview", "dry_run": true}
+    },
+    "source": "harn:conformance/tests/agents/agent_preset_captains.harn",
+    "tags": ["harn_seed", "safety"]
+  },
+  {
+    "id": "harn_inspect_release",
+    "prompt": "Inspect the release plan.",
+    "tools": [
+      {
+        "name": "inspect",
+        "description": "Inspect a topic.",
+        "parameters": {
+          "what": {"type": "string"}
+        }
+      }
+    ],
+    "expected": {"kind": "exact", "name": "inspect", "args": {"what": "release"}},
+    "source": "harn:conformance/tests/agents/agent_preset_audit_summary.harn",
+    "tags": ["harn_seed", "audit"]
+  }
+]

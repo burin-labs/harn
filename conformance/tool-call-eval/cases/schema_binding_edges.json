@@ -1,0 +1,224 @@
+[
+  {
+    "id": "edge_tool_name_typo_correction",
+    "prompt": "Use the search_documents tool to find the roadmap.",
+    "tools": [
+      {
+        "name": "search_documents",
+        "description": "Search indexed documents.",
+        "parameters": {
+          "query": {"type": "string"}
+        }
+      },
+      {
+        "name": "search_document",
+        "description": "Legacy singular search alias.",
+        "parameters": {
+          "query": {"type": "string"},
+          "deprecated": {"type": "boolean", "default": true}
+        }
+      }
+    ],
+    "expected": {
+      "kind": "exact",
+      "name": "search_documents",
+      "args": {"query": "roadmap"}
+    },
+    "source": "harn_hand_authored:binder_edge",
+    "tags": ["edge", "tool_name"]
+  },
+  {
+    "id": "edge_required_arg_from_prompt",
+    "prompt": "Create a note titled Demo with body Ship the eval harness.",
+    "tools": [
+      {
+        "name": "create_note",
+        "description": "Create a note.",
+        "parameters": {
+          "title": {"type": "string"},
+          "body": {"type": "string"}
+        }
+      }
+    ],
+    "expected": {
+      "kind": "exact",
+      "name": "create_note",
+      "args": {"title": "Demo", "body": "Ship the eval harness."}
+    },
+    "source": "harn_hand_authored:binder_edge",
+    "tags": ["edge", "required_arg"]
+  },
+  {
+    "id": "edge_optional_arg_omit_default",
+    "prompt": "List open pull requests.",
+    "tools": [
+      {
+        "name": "list_pull_requests",
+        "description": "List pull requests.",
+        "parameters": {
+          "state": {"type": "string", "enum": ["open", "closed", "all"]},
+          "limit": {"type": "integer", "default": 30}
+        }
+      }
+    ],
+    "expected": {
+      "kind": "exact",
+      "name": "list_pull_requests",
+      "args": {"state": "open"}
+    },
+    "source": "harn_hand_authored:binder_edge",
+    "tags": ["edge", "optional_arg"]
+  },
+  {
+    "id": "edge_confusable_path_vs_query",
+    "prompt": "Search for errors in logs/app.log.",
+    "tools": [
+      {
+        "name": "read_file",
+        "description": "Read a file path.",
+        "parameters": {
+          "path": {"type": "string"}
+        }
+      },
+      {
+        "name": "grep_file",
+        "description": "Search within a file.",
+        "parameters": {
+          "path": {"type": "string"},
+          "query": {"type": "string"}
+        }
+      }
+    ],
+    "expected": {
+      "kind": "exact",
+      "name": "grep_file",
+      "args": {"path": "logs/app.log", "query": "errors"}
+    },
+    "source": "harn_hand_authored:binder_edge",
+    "tags": ["edge", "confusable_args"]
+  },
+  {
+    "id": "edge_boolean_dry_run",
+    "prompt": "Preview a deploy to staging without applying changes.",
+    "tools": [
+      {
+        "name": "deploy_service",
+        "description": "Deploy a service.",
+        "parameters": {
+          "environment": {"type": "string"},
+          "dry_run": {"type": "boolean"}
+        }
+      }
+    ],
+    "expected": {
+      "kind": "exact",
+      "name": "deploy_service",
+      "args": {"environment": "staging", "dry_run": true}
+    },
+    "source": "harn_hand_authored:binder_edge",
+    "tags": ["edge", "boolean"]
+  },
+  {
+    "id": "edge_enum_normalization",
+    "prompt": "Create a bug issue with high priority.",
+    "tools": [
+      {
+        "name": "create_issue",
+        "description": "Create an issue.",
+        "parameters": {
+          "kind": {"type": "string", "enum": ["bug", "feature", "task"]},
+          "priority": {"type": "string", "enum": ["low", "medium", "high"]}
+        }
+      }
+    ],
+    "expected": {
+      "kind": "exact",
+      "name": "create_issue",
+      "args": {"kind": "bug", "priority": "high"}
+    },
+    "source": "harn_hand_authored:binder_edge",
+    "tags": ["edge", "enum"]
+  },
+  {
+    "id": "edge_nested_object",
+    "prompt": "Patch user 42 to set notifications.email to false.",
+    "tools": [
+      {
+        "name": "update_user",
+        "description": "Update a user profile.",
+        "parameters": {
+          "user_id": {"type": "integer"},
+          "patch": {
+            "type": "object",
+            "properties": {
+              "notifications": {
+                "type": "object",
+                "properties": {"email": {"type": "boolean"}},
+                "required": ["email"]
+              }
+            },
+            "required": ["notifications"]
+          }
+        }
+      }
+    ],
+    "expected": {
+      "kind": "exact",
+      "name": "update_user",
+      "args": {"user_id": 42, "patch": {"notifications": {"email": false}}}
+    },
+    "source": "harn_hand_authored:binder_edge",
+    "tags": ["edge", "nested"]
+  },
+  {
+    "id": "edge_array_args",
+    "prompt": "Tag issue HARN-1697 with mvp and area/evals.",
+    "tools": [
+      {
+        "name": "add_labels",
+        "description": "Add labels to an issue.",
+        "parameters": {
+          "issue": {"type": "string"},
+          "labels": {"type": "array", "items": {"type": "string"}}
+        }
+      }
+    ],
+    "expected": {
+      "kind": "exact",
+      "name": "add_labels",
+      "args": {"issue": "HARN-1697", "labels": ["mvp", "area/evals"]}
+    },
+    "source": "harn_hand_authored:binder_edge",
+    "tags": ["edge", "array"]
+  },
+  {
+    "id": "edge_integer_not_string",
+    "prompt": "Set retry count to 3.",
+    "tools": [
+      {
+        "name": "set_retry_count",
+        "description": "Set retry count.",
+        "parameters": {
+          "count": {"type": "integer"}
+        }
+      }
+    ],
+    "expected": {"kind": "exact", "name": "set_retry_count", "args": {"count": 3}},
+    "source": "harn_hand_authored:binder_edge",
+    "tags": ["edge", "type_binding"]
+  },
+  {
+    "id": "edge_no_args_tool",
+    "prompt": "Refresh the provider cache.",
+    "tools": [
+      {
+        "name": "refresh_provider_cache",
+        "description": "Refresh provider cache.",
+        "parameters": {}
+      }
+    ],
+    "expected": {"kind": "exact", "name": "refresh_provider_cache", "args": {}},
+    "source": "harn_hand_authored:binder_edge",
+    "tags": ["edge", "no_args"]
+  }
+]
