@@ -2,6 +2,7 @@ use super::ast::{Expr, Node};
 use super::error::TemplateError;
 use super::expr_parser::parse_expr;
 use super::lexer::{tokenize, Token};
+use super::sections;
 
 pub(super) fn parse(src: &str) -> Result<Vec<Node>, TemplateError> {
     let tokens = tokenize(src)?;
@@ -65,6 +66,13 @@ impl<'a> Parser<'a> {
                     if body == "end" {
                         return Err(TemplateError::new(line, col, "unexpected `{{ end }}`"));
                     }
+                    if first_word == "endsection" {
+                        return Err(TemplateError::new(
+                            line,
+                            col,
+                            "unexpected `{{ endsection }}`",
+                        ));
+                    }
                     if body == "else" {
                         return Err(TemplateError::new(line, col, "unexpected `{{ else }}`"));
                     }
@@ -82,6 +90,9 @@ impl<'a> Parser<'a> {
                         out.push(node);
                     } else if first_word == "include" {
                         let node = parse_include(body[7..].trim(), line, col)?;
+                        out.push(node);
+                    } else if first_word == "section" {
+                        let node = self.parse_section(body[7..].trim(), line, col)?;
                         out.push(node);
                     } else if is_bare_ident(&body) {
                         out.push(Node::LegacyBareInterp { ident: body });
@@ -225,6 +236,56 @@ impl<'a> Parser<'a> {
             col,
         })
     }
+
+    fn parse_section(
+        &mut self,
+        spec: &str,
+        line: usize,
+        col: usize,
+    ) -> Result<Node, TemplateError> {
+        let (name, rest) = parse_section_name(spec, line, col)?;
+        if !sections::is_builtin_section(&name) {
+            return Err(TemplateError::new(
+                line,
+                col,
+                format!("unknown template section `{name}`"),
+            ));
+        }
+        let args = parse_section_args(rest, line, col)?;
+        let body = self.parse_block(&["endsection"])?;
+        match self.peek().cloned() {
+            Some(Token::Directive {
+                body: end,
+                line: end_line,
+                col: end_col,
+            }) if first_word(&end) == "endsection" => {
+                self.pos += 1;
+                if let Some(end_name) = parse_optional_endsection_name(&end, end_line, end_col)? {
+                    if end_name != name {
+                        return Err(TemplateError::new(
+                            end_line,
+                            end_col,
+                            format!("mismatched section end: expected `{name}`, got `{end_name}`"),
+                        ));
+                    }
+                }
+            }
+            _ => {
+                return Err(TemplateError::new(
+                    line,
+                    col,
+                    "`{{ section }}` missing matching `{{ endsection }}`",
+                ));
+            }
+        }
+        Ok(Node::Section {
+            name,
+            args,
+            body,
+            line,
+            col,
+        })
+    }
 }
 
 fn parse_include(spec: &str, line: usize, col: usize) -> Result<Node, TemplateError> {
@@ -244,6 +305,171 @@ fn parse_include(spec: &str, line: usize, col: usize) -> Result<Node, TemplateEr
         line,
         col,
     })
+}
+
+fn parse_section_name(
+    spec: &str,
+    line: usize,
+    col: usize,
+) -> Result<(String, &str), TemplateError> {
+    let s = spec.trim_start();
+    let Some(quote) = s.as_bytes().first().copied() else {
+        return Err(TemplateError::new(line, col, "expected section name"));
+    };
+    if quote != b'"' && quote != b'\'' {
+        return Err(TemplateError::new(
+            line,
+            col,
+            "section name must be a string literal",
+        ));
+    }
+    let (name, consumed) = parse_quoted_literal(s, quote, line, col)?;
+    Ok((name, &s[consumed..]))
+}
+
+fn parse_optional_endsection_name(
+    body: &str,
+    line: usize,
+    col: usize,
+) -> Result<Option<String>, TemplateError> {
+    let rest = body["endsection".len()..].trim();
+    if rest.is_empty() {
+        return Ok(None);
+    }
+    let (name, tail) = parse_section_name(rest, line, col)?;
+    if !tail.trim().is_empty() {
+        return Err(TemplateError::new(
+            line,
+            col,
+            "unexpected tokens after endsection name",
+        ));
+    }
+    Ok(Some(name))
+}
+
+fn parse_quoted_literal(
+    src: &str,
+    quote: u8,
+    line: usize,
+    col: usize,
+) -> Result<(String, usize), TemplateError> {
+    let bytes = src.as_bytes();
+    let mut out = String::new();
+    let mut i = 1;
+    while i < bytes.len() {
+        let b = bytes[i];
+        if b == quote {
+            return Ok((out, i + 1));
+        }
+        if b == b'\\' && i + 1 < bytes.len() {
+            match bytes[i + 1] {
+                b'n' => out.push('\n'),
+                b't' => out.push('\t'),
+                b'r' => out.push('\r'),
+                b'\\' => out.push('\\'),
+                b'"' => out.push('"'),
+                b'\'' => out.push('\''),
+                c => out.push(c as char),
+            }
+            i += 2;
+            continue;
+        }
+        out.push(b as char);
+        i += 1;
+    }
+    Err(TemplateError::new(
+        line,
+        col,
+        "unterminated section name string literal",
+    ))
+}
+
+fn parse_section_args(
+    src: &str,
+    line: usize,
+    col: usize,
+) -> Result<Vec<(String, Expr)>, TemplateError> {
+    let mut out = Vec::new();
+    for chunk in split_section_arg_chunks(src) {
+        let chunk = chunk.trim().trim_matches(',');
+        if chunk.is_empty() {
+            continue;
+        }
+        let (key, value) = split_once_top_level(chunk, '=').ok_or_else(|| {
+            TemplateError::new(line, col, "expected `name=value` section argument")
+        })?;
+        let key = key.trim();
+        if !is_ident(key) {
+            return Err(TemplateError::new(
+                line,
+                col,
+                "invalid section argument name",
+            ));
+        }
+        out.push((key.to_string(), parse_expr(value.trim(), line, col)?));
+    }
+    Ok(out)
+}
+
+fn split_section_arg_chunks(s: &str) -> Vec<&str> {
+    let mut out = Vec::new();
+    let mut depth = 0i32;
+    let mut in_str = false;
+    let mut quote = '"';
+    let bytes = s.as_bytes();
+    let mut start = 0;
+    let mut i = 0;
+    while i < bytes.len() {
+        let b = bytes[i] as char;
+        if in_str {
+            if b == '\\' {
+                i += 2;
+                continue;
+            }
+            if b == quote {
+                in_str = false;
+            }
+            i += 1;
+            continue;
+        }
+        match b {
+            '"' | '\'' => {
+                in_str = true;
+                quote = b;
+            }
+            '(' | '[' | '{' => depth += 1,
+            ')' | ']' | '}' => depth -= 1,
+            ',' if depth == 0 => {
+                out.push(&s[start..i]);
+                start = i + 1;
+            }
+            c if c.is_whitespace() && depth == 0 => {
+                let mut j = i;
+                while j < bytes.len() && (bytes[j] as char).is_whitespace() {
+                    j += 1;
+                }
+                if next_token_is_arg(&s[j..]) {
+                    out.push(&s[start..i]);
+                    start = j;
+                }
+                i = j;
+                continue;
+            }
+            _ => {}
+        }
+        i += 1;
+    }
+    out.push(&s[start..]);
+    out
+}
+
+fn next_token_is_arg(s: &str) -> bool {
+    let trimmed = s.trim_start();
+    let Some(eq) = trimmed.find('=') else {
+        return false;
+    };
+    let key = trimmed[..eq].trim();
+    !key.is_empty() && is_ident(key)
 }
 
 fn parse_dict_literal(

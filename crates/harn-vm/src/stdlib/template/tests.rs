@@ -22,6 +22,10 @@ fn render_with_spans(tpl: &str, b: &BTreeMap<String, VmValue>) -> (String, Vec<P
     render_template_with_provenance(tpl, Some(b), None, None, true).unwrap()
 }
 
+fn list(items: Vec<VmValue>) -> VmValue {
+    VmValue::List(Rc::new(items))
+}
+
 #[test]
 fn bare_interp() {
     let b = dict(&[("name", s("Alice"))]);
@@ -246,6 +250,160 @@ fn whitespace_trim() {
     let b = dict(&[("x", s("v"))]);
     let tpl = "line1\n  {{- x -}}  \nline2";
     assert_eq!(render(tpl, &b), "line1vline2");
+}
+
+#[test]
+fn logical_section_scaffolding_follows_llm_capabilities() {
+    let b = dict(&[]);
+    let tpl = "{{ section \"task\" }}Build a tree CLI.{{ endsection }}";
+
+    {
+        let _guard =
+            LlmRenderContextGuard::enter(LlmRenderContext::resolve("anthropic", "claude-opus-4-7"));
+        assert_eq!(render(tpl, &b), "<task>\nBuild a tree CLI.\n</task>");
+    }
+
+    {
+        let _guard = LlmRenderContextGuard::enter(LlmRenderContext::resolve("openai", "gpt-5.4"));
+        assert_eq!(render(tpl, &b), "## Task\nBuild a tree CLI.");
+    }
+
+    assert_eq!(render(tpl, &b), "Task:\nBuild a tree CLI.");
+}
+
+#[test]
+fn logical_section_tools_and_output_format_use_section_args() {
+    let tool = VmValue::Dict(Rc::new(BTreeMap::from([
+        ("name".to_string(), s("read_file")),
+        ("description".to_string(), s("Read a file")),
+    ])));
+    let schema = VmValue::Dict(Rc::new(BTreeMap::from([
+        ("type".to_string(), s("object")),
+        (
+            "properties".to_string(),
+            VmValue::Dict(Rc::new(BTreeMap::from([(
+                "answer".to_string(),
+                s("string"),
+            )]))),
+        ),
+    ])));
+    let b = dict(&[("tools", list(vec![tool])), ("schema", schema)]);
+
+    {
+        let _guard =
+            LlmRenderContextGuard::enter(LlmRenderContext::resolve("anthropic", "claude-opus-4-7"));
+        let out = render(
+            "{{ section \"tools\" tools=tools }}{{ endsection }}\n{{ section \"output_format\" schema=schema }}{{ endsection }}",
+            &b,
+        );
+        assert!(out.contains("<tools>"));
+        assert!(out.contains("\"name\": \"read_file\""));
+        assert!(out.contains("<output_format>"));
+        assert!(out.contains("\"answer\": \"string\""));
+    }
+
+    {
+        let _guard = LlmRenderContextGuard::enter(LlmRenderContext::resolve("openai", "gpt-5.4"));
+        let out = render(
+            "{{ section \"output_format\" schema=schema }}{{ endsection }}",
+            &b,
+        );
+        assert_eq!(out, "");
+    }
+
+    {
+        let _guard = LlmRenderContextGuard::enter(LlmRenderContext::resolve(
+            "ollama",
+            "qwen3.6:35b-a3b-coding-nvfp4",
+        ));
+        let out = render("{{ section \"tools\" tools=tools }}{{ endsection }}", &b);
+        assert!(out.contains("ReAct-style envelope"));
+        assert!(out.contains("Action Input: <json arguments>"));
+        assert!(out.contains("\"name\": \"read_file\""));
+    }
+}
+
+#[test]
+fn logical_section_errors_and_legacy_bare_compat() {
+    let b = dict(&[]);
+    assert_eq!(render("{{ section_name }}", &b), "{{section_name}}");
+
+    let missing_name =
+        render_template_result("{{ section }}x{{ endsection }}", Some(&b), None, None);
+    assert!(missing_name
+        .unwrap_err()
+        .kind
+        .contains("expected section name"));
+
+    let unknown = render_template_result(
+        "{{ section \"bogus\" }}x{{ endsection }}",
+        Some(&b),
+        None,
+        None,
+    );
+    assert!(unknown
+        .unwrap_err()
+        .kind
+        .contains("unknown template section"));
+
+    let unclosed = render_template_result("{{ section \"task\" }}x", Some(&b), None, None);
+    assert!(unclosed.unwrap_err().kind.contains("missing matching"));
+
+    let mismatched = render_template_result(
+        "{{ section \"task\" }}x{{ endsection \"examples\" }}",
+        Some(&b),
+        None,
+        None,
+    );
+    assert!(mismatched
+        .unwrap_err()
+        .kind
+        .contains("mismatched section end"));
+}
+
+#[test]
+fn logical_section_nests_inside_if_for_and_whitespace_trim() {
+    let b = dict(&[("show", VmValue::Bool(true))]);
+    let out = render(
+        "{{- if show -}}{{ section \"task\" }}T{{ endsection }}{{- end -}}",
+        &b,
+    );
+    assert_eq!(out, "Task:\nT");
+
+    let names = list(vec![s("Alice"), s("Bob")]);
+    let b = dict(&[("names", names)]);
+    let out = render(
+        "{{ for n in names }}{{ section \"task\" }}For {{ n }}{{ endsection }}\n{{ end }}",
+        &b,
+    );
+    assert_eq!(out, "Task:\nFor Alice\nTask:\nFor Bob\n");
+}
+
+#[test]
+fn logical_section_provenance_adjusts_child_spans() {
+    let b = dict(&[("name", s("Alice"))]);
+    let (out, spans) = render_with_spans(
+        "{{ section \"task\" }}Hi {{ name | upper }}{{ endsection }}",
+        &b,
+    );
+    assert_eq!(out, "Task:\nHi ALICE");
+    assert!(spans.iter().any(|s| s.kind == PromptSpanKind::Section));
+    let expr = spans
+        .iter()
+        .find(|s| s.kind == PromptSpanKind::Expr)
+        .expect("expr span");
+    assert_eq!(&out[expr.output_start..expr.output_end], "ALICE");
+
+    let (out, spans) = render_with_spans(
+        "{{ section \"tools\" }}Tool owner: {{ name | upper }}{{ endsection }}",
+        &b,
+    );
+    assert_eq!(out, "Tools:\nTool owner: ALICE");
+    let expr = spans
+        .iter()
+        .find(|s| s.kind == PromptSpanKind::Expr)
+        .expect("tools expr span");
+    assert_eq!(&out[expr.output_start..expr.output_end], "ALICE");
 }
 
 #[test]

@@ -323,6 +323,60 @@ fn render_node(
                 });
             }
         }
+        Node::Section {
+            name,
+            args,
+            body,
+            line,
+            col,
+        } => {
+            let mut evaluated_args = BTreeMap::new();
+            for (key, expr) in args {
+                evaluated_args.insert(key.clone(), eval_expr(expr, scope, *line, *col)?);
+            }
+            let mut body_out = String::new();
+            let mut body_spans = spans.as_ref().map(|_| Vec::new());
+            render_nodes(body, scope, rc, &mut body_out, body_spans.as_mut())?;
+            let llm = scope.lookup("llm");
+            let section = super::sections::render_section(
+                name,
+                &body_out,
+                &evaluated_args,
+                llm.as_ref(),
+                *line,
+                *col,
+            )?;
+            out.push_str(&section.text);
+            if let Some(spans) = spans {
+                if let (Some(child_spans), Some(body_output_start)) =
+                    (body_spans, section.body_output_start)
+                {
+                    let body_start = section.body_source_start;
+                    let body_end = section.body_source_end;
+                    for mut span in child_spans {
+                        if span.output_end <= body_start || span.output_start >= body_end {
+                            continue;
+                        }
+                        span.output_start =
+                            start + body_output_start + span.output_start.max(body_start)
+                                - body_start;
+                        span.output_end =
+                            start + body_output_start + span.output_end.min(body_end) - body_start;
+                        spans.push(span);
+                    }
+                }
+                spans.push(PromptSourceSpan {
+                    template_line: *line,
+                    template_col: *col,
+                    output_start: start,
+                    output_end: out.len(),
+                    kind: PromptSpanKind::Section,
+                    parent_span: rc.current_include_parent.clone(),
+                    template_uri: current_template_uri(rc),
+                    bound_value: Some(name.clone()),
+                });
+            }
+        }
     }
     Ok(())
 }

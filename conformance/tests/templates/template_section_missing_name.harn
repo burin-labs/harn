@@ -1,0 +1,3 @@
+pipeline default() {
+  println(render_string("{{ section }}x{{ endsection }}", {}))
+}

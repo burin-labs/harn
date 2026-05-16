@@ -1138,6 +1138,13 @@ Rule schema (per `[[provider.<name>]]` entry):
 | `tool_search` | `[string]` | Native variants (`["bm25", "regex"]` or `["hosted", "client"]`). Empty = no native support. |
 | `max_tools` | int | Cap on tool count (used by `harn lint`). |
 | `prompt_caching` | bool | `cache_control` blocks honored. |
+| `prefers_xml_scaffolding` | bool | Logical prompt sections render as XML tags. |
+| `prefers_markdown_scaffolding` | bool | Logical prompt sections render as Markdown headings. |
+| `structured_output_mode` | string | Section-level output-format mode: `native_json`, `delimited`, `xml_tagged`, `none`. |
+| `supports_assistant_prefill` | bool | Provider accepts assistant-role prefill turns. |
+| `prefers_role_developer` | bool | `system_framing` should target developer instructions. |
+| `prefers_xml_tools` | bool | Text-rendered tool sections prefer XML tags. |
+| `thinking_block_style` | string | Section-level thinking style: `none`, `thinking_blocks`, `reasoning_summary`, `inline`. |
 | `thinking_modes` | `[string]` | Supported script-facing modes: `enabled`, `adaptive`, `effort`. |
 | `requires_completion_tokens` | bool | Use OpenAI `max_completion_tokens` instead of `max_tokens`. |
 | `reasoning_effort_supported` | bool | Provider/model accepts OpenAI `reasoning_effort`. |
@@ -2622,6 +2629,13 @@ and LSP go-to-definition follow `@`-paths to the target file.
 - `{{ include "partial.prompt" }}` or `{{ include "..." with { x: y } }}`
   — resolves relative to the including file; `{{ include "@/..." }}`
   resolves from the project root; cycle detection is built in.
+- `{{ section "task" }}..{{ endsection }}` — logical prompt sections.
+  Built-ins: `task`, `examples`, `output_format`, `tools`,
+  `thinking_scaffold`, `chain_of_thought`, `system_framing`.
+  `output_format` accepts `schema=...`; `tools` accepts `tools=...`.
+  Rendering follows `llm.capabilities` (`prefers_xml_scaffolding`,
+  `prefers_markdown_scaffolding`, `structured_output_mode`,
+  `prefers_xml_tools`, `thinking_block_style`, `prefers_role_developer`).
 - Filters: `{{ name | upper | default: "anon" }}`. Built-ins: `upper`,
   `lower`, `title`, `trim`, `capitalize`, `length`, `first`, `last`,
   `reverse`, `join:sep`, `default:fallback`, `json`, `indent:n`, `lines`,

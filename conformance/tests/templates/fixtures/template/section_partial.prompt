@@ -1,0 +1,1 @@
+{{ section "task" }}Partial task for {{ name }}.{{ endsection }}

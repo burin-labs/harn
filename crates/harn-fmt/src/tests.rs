@@ -1542,6 +1542,18 @@ fn test_multiline_string_preserves_verbatim_body() {
 }
 
 #[test]
+fn test_prompt_section_template_string_preserves_verbatim_body() {
+    let source = "pipeline test(task) {\n  let template = \"\"\"\n{{ section \"task\" }}\nBuild {{ thing }}.\n{{ endsection }}\n{{ section \"tools\" tools=tool_list }}{{ endsection }}\n\"\"\"\n  log(render_string(template, {thing: \"it\", tool_list: []}))\n}\n";
+    let out = format_source(source).unwrap();
+    assert_eq!(
+        out, source,
+        "formatter should preserve prompt sections inside triple-quoted strings verbatim"
+    );
+    let out2 = format_source(&out).unwrap();
+    assert_eq!(out, out2, "formatter should be idempotent");
+}
+
+#[test]
 fn test_multiline_interpolated_string_preserves_verbatim_body() {
     let source = "pipeline test(task) {\n  let name = \"x\"\n  let g = \"\"\"\n  root:\n    name: ${name}  \n    nested:\n      keep: exact\n\"\"\"\n  log(g)\n}\n";
     let out = format_source(source).unwrap();

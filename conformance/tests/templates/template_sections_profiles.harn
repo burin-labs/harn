@@ -1,0 +1,36 @@
+pipeline default() {
+  let template = """
+{{ section "system_framing" }}You are a build agent.{{ endsection }}
+{{ section "task" }}{{ if urgent }}Urgent: {{ end }}Build a tree CLI.{{ endsection }}
+{{ section "examples" }}{{ for ex in examples }}- Input: {{ ex.input }} -> Output: {{ ex.output }}{{ if !loop.last }}
+{{ end }}{{ end }}{{ endsection }}
+{{ section "output_format" schema=output_schema }}{{ endsection }}
+{{ section "tools" tools=tool_list }}{{ endsection }}
+{{ section "thinking_scaffold" }}{{ endsection }}
+{{ section "chain_of_thought" }}{{ endsection }}
+"""
+  let bindings = {
+    urgent: true,
+    examples: [{input: "src", output: "src/main.harn"}, {input: "tests", output: "tests/tree.expected"}],
+    output_schema: {type: "object", properties: {tree: {type: "string"}}, required: ["tree"]},
+    tool_list: [
+      {name: "read_dir", description: "Read directory entries"},
+      {name: "print_tree", description: "Print the final tree"},
+    ],
+  }
+  println("--- claude-xml ---")
+  __push_llm_render_context("anthropic", "claude-opus-4-7")
+  println(render_string(template, bindings))
+  __pop_llm_render_context()
+  println("--- gpt-markdown ---")
+  __push_llm_render_context("openai", "gpt-5.4")
+  println(render_string(template, bindings))
+  println(render("fixtures/template/section_partial.prompt", {name: "Alice"}))
+  __pop_llm_render_context()
+  println("--- qwen-text-tools ---")
+  __push_llm_render_context("ollama", "qwen3.6:35b-a3b-coding-nvfp4")
+  println(render_string(template, bindings))
+  __pop_llm_render_context()
+  println("--- generic-fallback ---")
+  println(render_string(template, bindings))
+}

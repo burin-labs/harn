@@ -9,89 +9,89 @@ This table is generated from Harn's live provider capability rules. `Model patte
 
 Regenerate with `make gen-provider-matrix` and verify with `make check-provider-matrix`.
 
-| Provider | Model pattern | Thinking | Vision | Audio | PDF | Streaming | Files API | JSON schema | Tools | Cache |
-|---|---|---|---:|---:|---:|---:|---:|---|---:|---:|
-| `anthropic` | `claude-haiku-*` | `adaptive` | yes | yes | yes | yes | yes | `tool_use` | yes | yes |
-| `anthropic` | `claude-opus-*` | `adaptive` | yes | yes | yes | yes | yes | `tool_use` | yes | yes |
-| `anthropic` | `claude-sonnet-*` | `adaptive` | yes | yes | yes | yes | yes | `tool_use` | yes | yes |
-| `anthropic` | `claude-haiku-*` | `enabled` | yes | yes | yes | yes | yes | `tool_use` | yes | yes |
-| `anthropic` | `claude-opus-*` | `enabled` | yes | yes | yes | yes | yes | `tool_use` | yes | yes |
-| `anthropic` | `claude-opus-*` | `enabled` | yes | yes | yes | yes | yes | `tool_use` | yes | yes |
-| `anthropic` | `claude-sonnet-*` | `enabled` | yes | yes | yes | yes | yes | `tool_use` | yes | yes |
-| `anthropic` | `anthropic/claude-haiku-*` | `adaptive` | yes | yes | yes | yes | yes | `tool_use` | yes | yes |
-| `anthropic` | `anthropic/claude-opus-*` | `adaptive` | yes | yes | yes | yes | yes | `tool_use` | yes | yes |
-| `anthropic` | `anthropic/claude-sonnet-*` | `adaptive` | yes | yes | yes | yes | yes | `tool_use` | yes | yes |
-| `anthropic` | `anthropic/claude-haiku-*` | `enabled` | yes | yes | yes | yes | yes | `tool_use` | yes | yes |
-| `anthropic` | `anthropic/claude-opus-*` | `enabled` | yes | yes | yes | yes | yes | `tool_use` | yes | yes |
-| `anthropic` | `anthropic/claude-opus-*` | `enabled` | yes | yes | yes | yes | yes | `tool_use` | yes | yes |
-| `anthropic` | `anthropic/claude-sonnet-*` | `enabled` | yes | yes | yes | yes | yes | `tool_use` | yes | yes |
-| `anthropic` | `claude-*` | `enabled` | yes | yes | yes | yes | yes | `tool_use` | yes | yes |
-| `azure_openai` | `gpt-*` | no | no | no | no | yes | no | no | yes | no |
-| `azure_openai` | `o1*` | no | no | no | no | yes | no | no | yes | no |
-| `azure_openai` | `o3*` | no | no | no | no | yes | no | no | yes | no |
-| `azure_openai` | `o4*` | no | no | no | no | yes | no | no | yes | no |
-| `bedrock` | `*` | no | no | no | no | yes | no | no | yes | no |
-| `dashscope` | `qwen3.6*` | `enabled` | no | no | no | yes | no | `native` | yes | no |
-| `dashscope` | `qwen*` | `enabled` | no | no | no | yes | no | `native` | yes | no |
-| `fireworks` | `*qwen3.6*` | `enabled` | no | no | no | yes | no | `native` | yes | no |
-| `fireworks` | `*qwen3p6*` | `enabled` | no | no | no | yes | no | `native` | yes | no |
-| `fireworks` | `*qwen*` | `enabled` | no | no | no | yes | no | `native` | yes | no |
-| `gemini` | `gemini-2.5*` | `enabled,adaptive,effort` | yes | yes | yes | yes | yes | no | no | no |
-| `gemini` | `models/gemini-2.5*` | `enabled,adaptive,effort` | yes | yes | yes | yes | yes | no | no | no |
-| `gemini` | `gemini-*` | no | yes | yes | yes | yes | yes | no | no | no |
-| `gemini` | `models/gemini-*` | no | yes | yes | yes | yes | yes | no | no | no |
-| `huggingface` | `qwen/qwen3.6*` | `enabled` | no | no | no | yes | no | `native` | yes | no |
-| `huggingface` | `qwen/qwen3-coder*` | no | no | no | no | yes | no | `native` | yes | no |
-| `huggingface` | `qwen/*` | `enabled` | no | no | no | yes | no | `native` | yes | no |
-| `huggingface` | `deepseek-ai/deepseek-v3*` | `enabled` | no | no | no | yes | no | `native` | yes | yes |
-| `llamacpp` | `*qwen3.6*` | `enabled` | no | no | no | yes | no | `native` | no | no |
-| `llamacpp` | `*qwen3*` | `enabled` | no | no | no | yes | no | `native` | no | no |
-| `llamacpp` | `*devstral-small-2*` | no | no | no | no | yes | no | `native` | no | no |
-| `local` | `*qwen3.6*` | `enabled` | no | no | no | yes | no | `native` | yes | no |
-| `local` | `*qwen3*` | `enabled` | no | no | no | yes | no | `native` | yes | no |
-| `local` | `gemma-4*` | `enabled` | no | no | no | yes | no | no | no | no |
-| `mlx` | `*qwen3.6*` | `enabled` | yes | no | no | yes | no | `native` | yes | no |
-| `mlx` | `*qwen3*` | `enabled` | yes | no | no | yes | no | `native` | yes | no |
-| `ollama` | `llava*` | no | yes | no | no | yes | no | no | no | no |
-| `ollama` | `bakllava*` | no | yes | no | no | yes | no | no | no | no |
-| `ollama` | `llama3.2-vision*` | no | yes | no | no | yes | no | no | no | no |
-| `ollama` | `gemma3*` | no | yes | no | no | yes | no | no | no | no |
-| `ollama` | `gemma4*` | no | yes | no | no | yes | no | no | no | no |
-| `ollama` | `qwen3.6*` | `enabled` | no | no | no | yes | no | `format_kw` | no | no |
-| `ollama` | `qwen3*` | `enabled` | no | no | no | yes | no | `format_kw` | yes | no |
-| `ollama` | `devstral-small-2*` | no | no | no | no | yes | no | `format_kw` | no | no |
-| `openai` | `gpt-4o*` | no | yes | yes | no | yes | no | `native` | yes | no |
-| `openai` | `gpt-4.1*` | no | yes | no | no | yes | no | `native` | yes | no |
-| `openai` | `gpt-*` | `effort` | yes | no | no | yes | no | `native` | yes | no |
-| `openai` | `gpt-*` | `effort` | yes | no | no | yes | no | `native` | yes | no |
-| `openai` | `gpt-*` | `effort` | yes | no | no | yes | no | `native` | yes | no |
-| `openai` | `gpt-*` | no | no | no | no | yes | no | `native` | yes | no |
-| `openai` | `o1*` | `effort` | no | no | no | yes | no | `native` | yes | no |
-| `openai` | `o3*` | `effort` | no | no | no | yes | no | `native` | yes | no |
-| `openai` | `o4*` | `effort` | yes | no | no | yes | no | `native` | yes | no |
-| `openai` | `openai/gpt-4o*` | no | yes | yes | no | yes | no | `native` | yes | no |
-| `openai` | `openai/gpt-4.1*` | no | yes | no | no | yes | no | `native` | yes | no |
-| `openai` | `openai/gpt-*` | `effort` | yes | no | no | yes | no | `native` | yes | no |
-| `openai` | `openai/gpt-*` | `effort` | no | no | no | yes | no | `native` | yes | no |
-| `openai` | `openai/gpt-*` | `effort` | no | no | no | yes | no | `native` | yes | no |
-| `openai` | `openai/gpt-*` | no | no | no | no | yes | no | `native` | yes | no |
-| `openai` | `openai/o1*` | `effort` | no | no | no | yes | no | `native` | yes | no |
-| `openai` | `openai/o3*` | `effort` | no | no | no | yes | no | `native` | yes | no |
-| `openai` | `openai/o4*` | `effort` | yes | no | no | yes | no | `native` | yes | no |
-| `openrouter` | `qwen/qwen3.6*` | `enabled,effort` | no | no | no | yes | no | `native` | yes | no |
-| `openrouter` | `qwen/qwen3-coder*` | no | no | no | no | yes | no | `native` | yes | no |
-| `openrouter` | `qwen/*` | `enabled,effort` | no | no | no | yes | no | `native` | yes | no |
-| `openrouter` | `deepseek/deepseek-v3*` | `enabled,effort` | no | no | no | yes | no | `native` | yes | yes |
-| `openrouter` | `google/gemini-2.5*` | `enabled,effort` | yes | yes | yes | yes | no | `native` | yes | yes |
-| `openrouter` | `google/gemma-4*` | no | no | no | no | yes | no | `native` | yes | no |
-| `together` | `qwen/qwen3.6*` | `enabled` | no | no | no | yes | no | `native` | yes | no |
-| `together` | `qwen/qwen3-coder*` | no | no | no | no | yes | no | `native` | yes | no |
-| `together` | `qwen/*` | `enabled` | no | no | no | yes | no | `native` | yes | no |
-| `together` | `deepseek-ai/deepseek-v3*` | `enabled` | no | no | no | yes | no | `native` | yes | yes |
-| `together` | `openai/gpt-oss-*` | `effort` | no | no | no | yes | no | `native` | no | no |
-| `together` | `deepseek-ai/deepseek-v4*` | `enabled,effort` | no | no | no | yes | no | `native` | yes | yes |
-| `together` | `moonshotai/kimi-k2*` | `enabled` | no | no | no | yes | no | `native` | yes | no |
-| `together` | `zai-org/glm-5*` | `enabled` | no | no | no | yes | no | `native` | yes | no |
-| `together` | `google/gemma-4*` | `enabled` | no | no | no | yes | no | `native` | yes | no |
-| `together` | `moonshotai/*` | no | no | no | no | yes | no | `native` | yes | no |
-| `vertex` | `gemini-*` | no | no | no | no | yes | no | no | yes | no |
+| Provider | Model pattern | Thinking | Vision | Audio | PDF | Streaming | Files API | JSON schema | Scaffolding | Output mode | Thinking section | Tools | Cache |
+|---|---|---|---:|---:|---:|---:|---:|---|---|---|---|---:|---:|
+| `anthropic` | `claude-haiku-*` | `adaptive` | yes | yes | yes | yes | yes | `tool_use` | `xml` | `xml_tagged` | `thinking_blocks` | yes | yes |
+| `anthropic` | `claude-opus-*` | `adaptive` | yes | yes | yes | yes | yes | `tool_use` | `xml` | `xml_tagged` | `thinking_blocks` | yes | yes |
+| `anthropic` | `claude-sonnet-*` | `adaptive` | yes | yes | yes | yes | yes | `tool_use` | `xml` | `xml_tagged` | `thinking_blocks` | yes | yes |
+| `anthropic` | `claude-haiku-*` | `enabled` | yes | yes | yes | yes | yes | `tool_use` | `xml` | `xml_tagged` | `thinking_blocks` | yes | yes |
+| `anthropic` | `claude-opus-*` | `enabled` | yes | yes | yes | yes | yes | `tool_use` | `xml` | `xml_tagged` | `thinking_blocks` | yes | yes |
+| `anthropic` | `claude-opus-*` | `enabled` | yes | yes | yes | yes | yes | `tool_use` | `xml` | `xml_tagged` | `thinking_blocks` | yes | yes |
+| `anthropic` | `claude-sonnet-*` | `enabled` | yes | yes | yes | yes | yes | `tool_use` | `xml` | `xml_tagged` | `thinking_blocks` | yes | yes |
+| `anthropic` | `anthropic/claude-haiku-*` | `adaptive` | yes | yes | yes | yes | yes | `tool_use` | `xml` | `xml_tagged` | `thinking_blocks` | yes | yes |
+| `anthropic` | `anthropic/claude-opus-*` | `adaptive` | yes | yes | yes | yes | yes | `tool_use` | `xml` | `xml_tagged` | `thinking_blocks` | yes | yes |
+| `anthropic` | `anthropic/claude-sonnet-*` | `adaptive` | yes | yes | yes | yes | yes | `tool_use` | `xml` | `xml_tagged` | `thinking_blocks` | yes | yes |
+| `anthropic` | `anthropic/claude-haiku-*` | `enabled` | yes | yes | yes | yes | yes | `tool_use` | `xml` | `xml_tagged` | `thinking_blocks` | yes | yes |
+| `anthropic` | `anthropic/claude-opus-*` | `enabled` | yes | yes | yes | yes | yes | `tool_use` | `xml` | `xml_tagged` | `thinking_blocks` | yes | yes |
+| `anthropic` | `anthropic/claude-opus-*` | `enabled` | yes | yes | yes | yes | yes | `tool_use` | `xml` | `xml_tagged` | `thinking_blocks` | yes | yes |
+| `anthropic` | `anthropic/claude-sonnet-*` | `enabled` | yes | yes | yes | yes | yes | `tool_use` | `xml` | `xml_tagged` | `thinking_blocks` | yes | yes |
+| `anthropic` | `claude-*` | `enabled` | yes | yes | yes | yes | yes | `tool_use` | `xml` | `xml_tagged` | `thinking_blocks` | yes | yes |
+| `azure_openai` | `gpt-*` | no | no | no | no | yes | no | no | `plain` | `none` | `none` | yes | no |
+| `azure_openai` | `o1*` | no | no | no | no | yes | no | no | `plain` | `none` | `none` | yes | no |
+| `azure_openai` | `o3*` | no | no | no | no | yes | no | no | `plain` | `none` | `none` | yes | no |
+| `azure_openai` | `o4*` | no | no | no | no | yes | no | no | `plain` | `none` | `none` | yes | no |
+| `bedrock` | `*` | no | no | no | no | yes | no | no | `plain` | `none` | `none` | yes | no |
+| `dashscope` | `qwen3.6*` | `enabled` | no | no | no | yes | no | `native` | `markdown` | `native_json` | `none` | yes | no |
+| `dashscope` | `qwen*` | `enabled` | no | no | no | yes | no | `native` | `markdown` | `native_json` | `none` | yes | no |
+| `fireworks` | `*qwen3.6*` | `enabled` | no | no | no | yes | no | `native` | `markdown` | `native_json` | `none` | yes | no |
+| `fireworks` | `*qwen3p6*` | `enabled` | no | no | no | yes | no | `native` | `markdown` | `native_json` | `none` | yes | no |
+| `fireworks` | `*qwen*` | `enabled` | no | no | no | yes | no | `native` | `markdown` | `native_json` | `none` | yes | no |
+| `gemini` | `gemini-2.5*` | `enabled,adaptive,effort` | yes | yes | yes | yes | yes | no | `plain` | `none` | `none` | no | no |
+| `gemini` | `models/gemini-2.5*` | `enabled,adaptive,effort` | yes | yes | yes | yes | yes | no | `plain` | `none` | `none` | no | no |
+| `gemini` | `gemini-*` | no | yes | yes | yes | yes | yes | no | `plain` | `none` | `none` | no | no |
+| `gemini` | `models/gemini-*` | no | yes | yes | yes | yes | yes | no | `plain` | `none` | `none` | no | no |
+| `huggingface` | `qwen/qwen3.6*` | `enabled` | no | no | no | yes | no | `native` | `markdown` | `native_json` | `none` | yes | no |
+| `huggingface` | `qwen/qwen3-coder*` | no | no | no | no | yes | no | `native` | `markdown` | `native_json` | `none` | yes | no |
+| `huggingface` | `qwen/*` | `enabled` | no | no | no | yes | no | `native` | `markdown` | `native_json` | `none` | yes | no |
+| `huggingface` | `deepseek-ai/deepseek-v3*` | `enabled` | no | no | no | yes | no | `native` | `markdown` | `native_json` | `none` | yes | yes |
+| `llamacpp` | `*qwen3.6*` | `enabled` | no | no | no | yes | no | `native` | `markdown` | `native_json` | `none` | no | no |
+| `llamacpp` | `*qwen3*` | `enabled` | no | no | no | yes | no | `native` | `markdown` | `native_json` | `none` | no | no |
+| `llamacpp` | `*devstral-small-2*` | no | no | no | no | yes | no | `native` | `markdown` | `native_json` | `none` | no | no |
+| `local` | `*qwen3.6*` | `enabled` | no | no | no | yes | no | `native` | `markdown` | `native_json` | `none` | yes | no |
+| `local` | `*qwen3*` | `enabled` | no | no | no | yes | no | `native` | `markdown` | `native_json` | `none` | yes | no |
+| `local` | `gemma-4*` | `enabled` | no | no | no | yes | no | no | `plain` | `none` | `none` | no | no |
+| `mlx` | `*qwen3.6*` | `enabled` | yes | no | no | yes | no | `native` | `markdown` | `native_json` | `none` | yes | no |
+| `mlx` | `*qwen3*` | `enabled` | yes | no | no | yes | no | `native` | `markdown` | `native_json` | `none` | yes | no |
+| `ollama` | `llava*` | no | yes | no | no | yes | no | no | `plain` | `none` | `none` | no | no |
+| `ollama` | `bakllava*` | no | yes | no | no | yes | no | no | `plain` | `none` | `none` | no | no |
+| `ollama` | `llama3.2-vision*` | no | yes | no | no | yes | no | no | `plain` | `none` | `none` | no | no |
+| `ollama` | `gemma3*` | no | yes | no | no | yes | no | no | `plain` | `none` | `none` | no | no |
+| `ollama` | `gemma4*` | no | yes | no | no | yes | no | no | `plain` | `none` | `none` | no | no |
+| `ollama` | `qwen3.6*` | `enabled` | no | no | no | yes | no | `format_kw` | `markdown` | `native_json` | `none` | no | no |
+| `ollama` | `qwen3*` | `enabled` | no | no | no | yes | no | `format_kw` | `markdown` | `native_json` | `none` | yes | no |
+| `ollama` | `devstral-small-2*` | no | no | no | no | yes | no | `format_kw` | `plain` | `native_json` | `none` | no | no |
+| `openai` | `gpt-4o*` | no | yes | yes | no | yes | no | `native` | `markdown` | `native_json` | `none` | yes | no |
+| `openai` | `gpt-4.1*` | no | yes | no | no | yes | no | `native` | `markdown` | `native_json` | `none` | yes | no |
+| `openai` | `gpt-*` | `effort` | yes | no | no | yes | no | `native` | `markdown` | `native_json` | `reasoning_summary` | yes | no |
+| `openai` | `gpt-*` | `effort` | yes | no | no | yes | no | `native` | `markdown` | `native_json` | `reasoning_summary` | yes | no |
+| `openai` | `gpt-*` | `effort` | yes | no | no | yes | no | `native` | `markdown` | `native_json` | `reasoning_summary` | yes | no |
+| `openai` | `gpt-*` | no | no | no | no | yes | no | `native` | `markdown` | `native_json` | `none` | yes | no |
+| `openai` | `o1*` | `effort` | no | no | no | yes | no | `native` | `markdown` | `native_json` | `reasoning_summary` | yes | no |
+| `openai` | `o3*` | `effort` | no | no | no | yes | no | `native` | `markdown` | `native_json` | `reasoning_summary` | yes | no |
+| `openai` | `o4*` | `effort` | yes | no | no | yes | no | `native` | `markdown` | `native_json` | `reasoning_summary` | yes | no |
+| `openai` | `openai/gpt-4o*` | no | yes | yes | no | yes | no | `native` | `markdown` | `native_json` | `none` | yes | no |
+| `openai` | `openai/gpt-4.1*` | no | yes | no | no | yes | no | `native` | `markdown` | `native_json` | `none` | yes | no |
+| `openai` | `openai/gpt-*` | `effort` | yes | no | no | yes | no | `native` | `markdown` | `native_json` | `reasoning_summary` | yes | no |
+| `openai` | `openai/gpt-*` | `effort` | no | no | no | yes | no | `native` | `markdown` | `native_json` | `reasoning_summary` | yes | no |
+| `openai` | `openai/gpt-*` | `effort` | no | no | no | yes | no | `native` | `markdown` | `native_json` | `reasoning_summary` | yes | no |
+| `openai` | `openai/gpt-*` | no | no | no | no | yes | no | `native` | `markdown` | `native_json` | `none` | yes | no |
+| `openai` | `openai/o1*` | `effort` | no | no | no | yes | no | `native` | `markdown` | `native_json` | `reasoning_summary` | yes | no |
+| `openai` | `openai/o3*` | `effort` | no | no | no | yes | no | `native` | `markdown` | `native_json` | `reasoning_summary` | yes | no |
+| `openai` | `openai/o4*` | `effort` | yes | no | no | yes | no | `native` | `markdown` | `native_json` | `reasoning_summary` | yes | no |
+| `openrouter` | `qwen/qwen3.6*` | `enabled,effort` | no | no | no | yes | no | `native` | `markdown` | `native_json` | `none` | yes | no |
+| `openrouter` | `qwen/qwen3-coder*` | no | no | no | no | yes | no | `native` | `markdown` | `native_json` | `none` | yes | no |
+| `openrouter` | `qwen/*` | `enabled,effort` | no | no | no | yes | no | `native` | `markdown` | `native_json` | `none` | yes | no |
+| `openrouter` | `deepseek/deepseek-v3*` | `enabled,effort` | no | no | no | yes | no | `native` | `markdown` | `native_json` | `none` | yes | yes |
+| `openrouter` | `google/gemini-2.5*` | `enabled,effort` | yes | yes | yes | yes | no | `native` | `markdown` | `native_json` | `none` | yes | yes |
+| `openrouter` | `google/gemma-4*` | no | no | no | no | yes | no | `native` | `markdown` | `native_json` | `none` | yes | no |
+| `together` | `qwen/qwen3.6*` | `enabled` | no | no | no | yes | no | `native` | `markdown` | `native_json` | `none` | yes | no |
+| `together` | `qwen/qwen3-coder*` | no | no | no | no | yes | no | `native` | `markdown` | `native_json` | `none` | yes | no |
+| `together` | `qwen/*` | `enabled` | no | no | no | yes | no | `native` | `markdown` | `native_json` | `none` | yes | no |
+| `together` | `deepseek-ai/deepseek-v3*` | `enabled` | no | no | no | yes | no | `native` | `markdown` | `native_json` | `none` | yes | yes |
+| `together` | `openai/gpt-oss-*` | `effort` | no | no | no | yes | no | `native` | `markdown` | `native_json` | `reasoning_summary` | no | no |
+| `together` | `deepseek-ai/deepseek-v4*` | `enabled,effort` | no | no | no | yes | no | `native` | `markdown` | `native_json` | `reasoning_summary` | yes | yes |
+| `together` | `moonshotai/kimi-k2*` | `enabled` | no | no | no | yes | no | `native` | `markdown` | `native_json` | `none` | yes | no |
+| `together` | `zai-org/glm-5*` | `enabled` | no | no | no | yes | no | `native` | `markdown` | `native_json` | `none` | yes | no |
+| `together` | `google/gemma-4*` | `enabled` | no | no | no | yes | no | `native` | `markdown` | `native_json` | `none` | yes | no |
+| `together` | `moonshotai/*` | no | no | no | no | yes | no | `native` | `markdown` | `native_json` | `none` | yes | no |
+| `vertex` | `gemini-*` | no | no | no | no | yes | no | no | `plain` | `none` | `none` | yes | no |
