@@ -1,12 +1,45 @@
-// std/memory — append-only durable memory helpers.
+// std/memory — append-only durable memory with optional host-backed vector recall.
 //
 // Import: import "std/memory"
-/** memory_store. */
+//
+// The default backend is deterministic BM25 lexical recall. Call
+// `memory_open(namespace, {backend: "vector" | "hybrid", ...})` once to
+// switch a namespace to host-provided embeddings via the `memory.embed`
+// host capability. Recall queries can override the namespace default per
+// call by passing `{mode: "lexical" | "semantic" | "hybrid"}`. Embeddings
+// are cached on disk per `(model_hint, content_hash)` so replays are
+// deterministic from the recorded event log.
+/**
+ * Configure a memory namespace.
+ *
+ * `options.backend` selects the recall backend ("bm25" — default,
+ * "vector", or "hybrid"). `options.embed_model_hint` selects the host
+ * embedding model. `options.embed_dim`, `options.bm25_weight`, and
+ * `options.cosine_weight` are optional. Open events are append-only;
+ * calling `memory_open` again replaces the active config.
+ */
+pub fn memory_open(namespace, options = nil) {
+  return __memory_open(namespace, options)
+}
+
+/**
+ * Append a memory observation.
+ *
+ * Set `options.embed: true` (or open the namespace with backend
+ * "vector"/"hybrid") to eagerly cache the record's embedding so later
+ * semantic recall is cache-only.
+ */
 pub fn memory_store(namespace, key, value, tags = nil, options = nil) {
   return __memory_store(namespace, key, value, tags, options)
 }
 
-/** memory_recall. */
+/**
+ * Recall active records ranked by the namespace backend.
+ *
+ * Pass `options.mode` to override per call ("lexical", "semantic", or
+ * "hybrid"). `options.embed_model_hint` overrides the namespace embedding
+ * model for this query only.
+ */
 pub fn memory_recall(namespace, query, k = nil, options = nil) {
   return __memory_recall(namespace, query, k, options)
 }

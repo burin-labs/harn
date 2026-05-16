@@ -2139,6 +2139,42 @@ let _accepted = bulletin_accept(bulletin, {decided_by: "user"})
   within their TTL; `bulletin_render_for_prompt(bulletins, options?)` renders
   prompt-ready text that visibly separates accepted facts from proposals
   pending review. Pass `{include_proposed: false}` to drop proposals.
+- `bulletin_accept(b, {embed: true, memory_root?, embed_model_hint?})` also
+  writes the accepted bulletin into the scope-partitioned memory namespace
+  (`bulletin_memory_namespace(b)` — `personas/bulletins/<scope>/<scope_key>`)
+  with eager embedding, so persona prompts can `memory_recall` past
+  decisions semantically.
+
+### Durable memory (`std/memory`)
+
+```harn
+import { memory_open, memory_store, memory_recall, memory_summarize, memory_forget } from "std/memory"
+
+// Optional: configure the namespace once. Defaults to deterministic BM25.
+memory_open("workspace/acme", {backend: "hybrid", embed_dim: 1024, embed_model_hint: "voyage-2"})
+
+memory_store("workspace/acme", "alice-profile", {text: "prefers Rust"}, ["profile"])
+let hits = memory_recall("workspace/acme", "rust", 5, {mode: "semantic"})
+let summary = memory_summarize("workspace/acme", {limit: 10})
+memory_forget("workspace/acme", {tag: "stale"})
+```
+
+- Append-only event log at `.harn/memory/<namespace>/events.jsonl`. Pass
+  `{root: "path"}` in options to override.
+- `memory_open` writes a config event (latest wins) — backends: `"bm25"`
+  (default), `"vector"`, `"hybrid"`. Hybrid weights default to `0.5 / 0.5`
+  and are tunable via `bm25_weight` / `cosine_weight`.
+- `memory_recall` accepts `options.mode` (`lexical` / `semantic` / `hybrid`)
+  to override the namespace default for one query. Returned records carry a
+  `score` field.
+- Vector and hybrid recall call the typed host capability
+  `memory.embed({text, model_hint})` and cache the result on disk at
+  `.harn/memory/<namespace>/vectors/<sanitized_model_hint>/<sha256(text)>.json`.
+  Replays with the same event log and cache are deterministic without the
+  host being attached.
+- In tests, register the embedder via `host_mock("memory", "embed", {result:
+  {vector: [...], dim: N, model: "..."}})`. Mocks can match on `params: {text,
+  model_hint}` for per-record vectors.
 
 Workflow stages pick up a session id from `model_policy.session_id`;
 two stages sharing an id share their conversation automatically. The

@@ -62,6 +62,26 @@ Hosts should own the concrete UX:
 - editor undo/redo semantics
 - trust UI around which worker or session produced a change
 
+## Typed host capabilities
+
+Typed capabilities surfaced through `host_call(capability.operation, params)`
+let Harn delegate platform effects without coupling to one host. Notable
+capabilities Harn defines today:
+
+- `process.exec` and the `process.*` shell helpers — process execution.
+- `template.render` — host-resolved template rendering.
+- `interaction.ask` — synchronous user prompts.
+- `memory.embed` — host-provided text embeddings used by the `std/memory`
+  vector and hybrid backends. Request shape: `{text, model_hint}`. Response
+  shape: `{vector: list<float>, model?: string, dim?: int}`. Hosts pick the
+  model and own rate limiting and cost accounting; Harn caches embeddings
+  per `(model_hint, content_hash)` so replays are deterministic. See
+  [Memory](memory.md) for the recall and storage contract.
+
+Tests can satisfy any capability with `host_mock(capability, op, {result})`;
+embedders ship richer behavior via the `HostCallBridge` trait described in
+`crates/harn-vm/src/stdlib/host.rs`.
+
 ## Contract surfaces
 
 Harn now ships machine-readable contract exports so hosts do not need to

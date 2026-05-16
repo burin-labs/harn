@@ -1,0 +1,75 @@
+import "std/memory"
+
+pipeline default() {
+  let root = path_join(temp_dir(), "harn-memory-hybrid-" + uuid())
+  host_mock_clear()
+  // Give distinct unit vectors per record by matching on the
+  // record-key line that searchable_text emits first. The mocks are
+  // checked newest-first so the more specific one wins.
+  let alice_text = "alice\nAlice prefers Rust examples\nprofile rust\n\"Alice prefers Rust examples\""
+  let bob_text = "bob\nBob prefers TypeScript\nprofile typescript\n\"Bob prefers TypeScript\""
+  host_mock("memory", "embed", {result: {vector: [0.5, 0.5], dim: 2, model: "fake"}})
+  host_mock(
+    "memory",
+    "embed",
+    {result: {vector: [1.0, 0.0], dim: 2, model: "fake"}, params: {text: alice_text}},
+  )
+  host_mock(
+    "memory",
+    "embed",
+    {result: {vector: [0.0, 1.0], dim: 2, model: "fake"}, params: {text: bob_text}},
+  )
+  host_mock(
+    "memory",
+    "embed",
+    {result: {vector: [1.0, 0.0], dim: 2, model: "fake"}, params: {text: "rust"}},
+  )
+  host_mock(
+    "memory",
+    "embed",
+    {result: {vector: [0.0, 1.0], dim: 2, model: "fake"}, params: {text: "typescript"}},
+  )
+  memory_open(
+    "agent/hybrid",
+    {
+      backend: "hybrid",
+      embed_dim: 2,
+      embed_model_hint: "fake",
+      bm25_weight: 0.0,
+      cosine_weight: 1.0,
+      root: root,
+    },
+  )
+  memory_store(
+    "agent/hybrid",
+    "alice",
+    "Alice prefers Rust examples",
+    ["profile", "rust"],
+    {root: root, now: "2026-05-15T00:00:00Z"},
+  )
+  memory_store(
+    "agent/hybrid",
+    "bob",
+    "Bob prefers TypeScript",
+    ["profile", "typescript"],
+    {root: root, now: "2026-05-15T00:00:01Z"},
+  )
+  // Cosine-only weights → query "rust" routes to alice via the explicit
+  // mocked vector.
+  let rust_hits = memory_recall("agent/hybrid", "rust", 5, {root: root})
+  println(rust_hits[0].key)
+  println(rust_hits[0].score >= 0.999)
+  // Semantic override picks the same record regardless of namespace
+  // hybrid config.
+  let semantic_only = memory_recall("agent/hybrid", "typescript", 5, {root: root, mode: "semantic"})
+  println(semantic_only[0].key)
+  // Lexical override drops cosine entirely; BM25 on "rust" matches alice
+  // by tag boost.
+  let lexical = memory_recall("agent/hybrid", "rust", 5, {root: root, mode: "lexical"})
+  println(lexical[0].key)
+  // Re-open with a different default mode flips the default behavior.
+  memory_open("agent/hybrid", {backend: "bm25", root: root})
+  let default_now_lexical = memory_recall("agent/hybrid", "typescript", 5, {root: root})
+  println(default_now_lexical[0].key)
+  delete_file(root)
+}
