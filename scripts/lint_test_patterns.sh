@@ -347,6 +347,12 @@ NON_TEST_WALL_CLOCK_ALLOWLIST=(
   "crates/harn-cli/src/commands/bench.rs"
   "crates/harn-cli/src/commands/connect.rs"
   "crates/harn-cli/src/commands/connector.rs"
+  # `harn demo` measures and renders wall-clock elapsed time in the
+  # terminal output ("--- demo complete in 180 ms ---") and stamps the
+  # demo's run record with the actual host wall-clock instant so users
+  # can correlate the run against their own activity. Same shape as the
+  # existing allowlisted `run.rs` entry.
+  "crates/harn-cli/src/commands/demo.rs"
   "crates/harn-cli/src/commands/explain.rs"
   "crates/harn-cli/src/commands/flow.rs"
   # `harn local switch` stamps the selection record with the actual host
