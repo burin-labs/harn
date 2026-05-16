@@ -73,10 +73,20 @@ pub fn wait_for_a2a_server_url(log_path) {
   return wait_for_log_match(log_path, "Harn A2A server listening on (\\S+)")
 }
 
-/** Wait for a subprocess to exit after the test has requested shutdown. */
+/**
+ * Wait for a subprocess to exit after the test has requested shutdown.
+ *
+ * Polls every 50ms for up to 30s. The upper bound is generous so the
+ * helper stays reliable when the conformance suite runs alongside other
+ * cargo audit lanes (e.g. release-harn's parallel rust-audit / harn-audit
+ * / grammar-audit / smoke-audit lanes), where the async runtime
+ * scheduling the doomed subprocess can be starved long past the
+ * single-suite baseline. Returns false on timeout; callers that need the
+ * process gone for subsequent steps should pair this with `kill -KILL`.
+ */
 pub fn wait_for_exit(pid) {
   var attempts = 0
-  while attempts < 200 {
+  while attempts < 600 {
     if !process_alive(pid) {
       return true
     }

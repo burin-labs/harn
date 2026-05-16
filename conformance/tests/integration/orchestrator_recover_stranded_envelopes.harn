@@ -51,7 +51,17 @@ pipeline test(task) {
       headers: {"Content-Type": "application/json", Authorization: "Bearer test-key"},
     },
   )
-  println(response.status == 200 && wait_for_exit(crash_pid))
+  let crash_exited = wait_for_exit(crash_pid)
+  if !crash_exited && process_alive(crash_pid) {
+    // Under heavy CI load the dispatcher can be scheduling-starved past
+    // the wait_for_exit timeout. Force-kill so the restart orchestrator
+    // doesn't race the still-alive crash process for the state dir; the
+    // assertion below still reflects whether the crash happened
+    // naturally under HARN_TEST_DISPATCHER_FAIL_BEFORE_OUTBOX.
+    let _ = shell("kill -KILL " + crash_pid)
+    wait_for_exit(crash_pid)
+  }
+  println(response.status == 200 && crash_exited)
   let restart = shell_at(
     root,
     "nohup env HARN_SECRET_PROVIDERS=env HARN_EVENT_LOG_BACKEND=file HARN_ORCHESTRATOR_API_KEYS=test-key HARN_ORCHESTRATOR_HMAC_SECRET=shared-secret "
