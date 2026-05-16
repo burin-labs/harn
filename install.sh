@@ -230,4 +230,5 @@ if [ "$INSTALL_DIR/harn" != "$(command -v harn 2>/dev/null || true)" ] \
 fi
 
 echo
-info "Run \`harn quickstart\` to set up a project, or \`harn --help\` to explore."
+info "Try a 30-second offline demo: \`harn demo\` (no API keys required)."
+info "Then \`harn quickstart\` to wire a provider, or \`harn --help\` to explore."
