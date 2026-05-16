@@ -1018,7 +1018,9 @@ harn replay .harn-runs/<run>.json
 
 ## harn eval
 
-Evaluate a persisted workflow run record as a regression fixture.
+Evaluate a persisted workflow run record as a regression fixture, or
+diff a `.harn.prompt` template across a fleet of models with `harn eval
+prompt`.
 
 ```bash
 harn eval .harn-runs/<run>.json
@@ -1028,6 +1030,9 @@ harn eval evals/regression.json
 harn eval harn.eval.toml
 harn eval evals/clarifying-question.json
 harn eval --llm-mock fixtures.jsonl --structural-experiment doubled_prompt pipeline.harn
+harn eval prompt examples/coding-agent-system.harn.prompt \
+    --fleet claude-opus-4-7,gpt-5,gemini-2.5-pro,qwen3.5,ollama:qwen3.5 \
+    --bindings examples/coding-agent-system.bindings.json
 ```
 
 `harn eval` accepts five inputs:
@@ -1058,6 +1063,67 @@ the pipeline twice in isolated temp run directories: once as the baseline and
 once with `HARN_STRUCTURAL_EXPERIMENT=<spec>`. The CLI then evaluates both run
 sets against their embedded replay fixtures and prints a paired A/B summary.
 Use `--llm-mock <fixture.jsonl>` to keep the two runs deterministic.
+
+### harn eval prompt
+
+Render a single `.harn.prompt` template against every model in a fleet,
+optionally execute it against each, and surface the resulting wire
+envelopes side-by-side. This is the cross-model diff renderer that
+exists so capability-adapted variants do not rot silently as the model
+mix evolves (see [Capability-aware prompts](./prompt-templating.md#the-llm-scope)).
+
+```bash
+# Render-only: produces side-by-side rendered envelopes per model.
+harn eval prompt examples/coding-agent-system.harn.prompt \
+    --fleet claude-opus-4-7,gpt-5,gemini-2.5-pro,qwen3.5,ollama:qwen3.5
+
+# Run mode: also calls each model and collects the response.
+harn eval prompt examples/coding-agent-system.harn.prompt \
+    --fleet claude-opus-4-7,gpt-5 \
+    --mode run
+
+# Judge mode: scores cross-model equivalence with an LLM judge.
+harn eval prompt examples/coding-agent-system.harn.prompt \
+    --fleet claude-opus-4-7,gpt-5,gemini-2.5-pro \
+    --mode judge \
+    --judge-model claude-opus-4-7
+
+# Use a named fleet from `[eval.fleets.<name>]` in harn.toml.
+harn eval prompt prompts/agent.harn.prompt --fleet-name frontier --output html -o report.html
+```
+
+| Flag | Description |
+|---|---|
+| `--fleet <list>` | Comma-separated model selectors (alias or `provider:model`). Repeatable. |
+| `--fleet-name <name>` | Named fleet from `[eval.fleets.<name>]` in `harn.toml`. |
+| `--bindings <path>` | JSON file injected into the template scope. Top-level value must be an object. |
+| `--mode <render\|run\|judge>` | Default `render`. |
+| `--output <terminal\|json\|html>` | Default `terminal`. |
+| `-o, --out-file <path>` | Write `--output` payload to a file instead of stdout. |
+| `--max-concurrent <N>` | Cap concurrent provider invocations in `run` / `judge` modes (default 4). |
+| `--judge-template <path>` | Override the built-in judge `.harn.prompt`. |
+| `--judge-model <selector>` | Judge model (default `claude-opus-4-7`). |
+| `--max-tokens <N>` | Cap on completion tokens for `run` / `judge` calls (default 1024). |
+| `--fail-on-unauthorized` | Treat unauthenticated providers as errors instead of skipping. |
+
+Fleets can be declared in `harn.toml` and reused:
+
+```toml
+[eval.fleets.frontier]
+models = ["claude-opus-4-7", "gpt-5", "gemini-2.5-pro"]
+
+[eval.fleets.local]
+models = ["ollama:qwen3.5"]
+```
+
+Render mode never calls a model — it only pushes the LLM render context
+per fleet member and resolves the template so authors can confirm that
+`{{ if llm.capabilities.* }}` branches produce the intended wire
+envelope on each profile. Run mode synthesizes a thin Harn driver and
+routes through the existing `llm_call` infrastructure, so credentials,
+provider catalog, and `HARN_LLM_PROVIDER=mock` work exactly as in
+`harn run`. Judge mode is run mode plus a final LLM-as-judge call that
+asks for a one-line JSON verdict on cross-model equivalence.
 
 ## harn merge-captain
 

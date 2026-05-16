@@ -38,6 +38,24 @@ condensed series summaries instead of full per-patch history.
 
 ### Added
 
+- **`harn eval prompt <file> --fleet <models>` (#1670).** New CLI
+  subcommand that renders a single `.harn.prompt` template against a
+  fleet of models so authors can validate that capability-adapted
+  envelopes stay equivalent across the provider mix. Three modes:
+  `--mode render` (the default) pushes a per-model
+  `LlmRenderContext` and resolves the template — no LLM calls,
+  byte-deterministic across runs. `--mode run` extends render by
+  invoking each model and collecting outputs; unauthenticated providers
+  are skipped with a warning (override with `--fail-on-unauthorized`).
+  `--mode judge` adds a final LLM-as-judge call (default
+  `claude-opus-4-7`, override with `--judge-template` /
+  `--judge-model`). Output via `--output terminal|json|html` and
+  optionally redirected with `-o <path>`. Fleets accept ad-hoc
+  comma-separated selectors (`alias` or `provider:model`) or named
+  groups declared as `[eval.fleets.<name>]` in `harn.toml` via
+  `--fleet-name`. Run / judge modes synthesize a thin Harn driver and
+  reuse the existing `llm_call` pipeline so credentials, the provider
+  catalog, and `HARN_LLM_PROVIDER=mock` work exactly as in `harn run`.
 - **Capability-aware prompt templates: auto-injected `llm` scope (#1664).**
   When `render()` / `render_prompt()` / `render_string()` is invoked
   from inside an LLM-aware frame (`llm_call`, `default_llm_caller`,

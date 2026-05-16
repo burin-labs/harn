@@ -21,6 +21,7 @@ mod crystallize;
 mod demo;
 mod doctor;
 mod dump;
+mod eval;
 mod explain;
 mod flow;
 mod init;
@@ -84,6 +85,7 @@ pub(crate) use dump::{
     DumpConnectorMatrixArgs, DumpHighlightKeywordsArgs, DumpProtocolArtifactsArgs,
     DumpTriggerQuickrefArgs,
 };
+pub use eval::{EvalArgs, EvalCommand, EvalPromptArgs, EvalPromptMode, EvalPromptOutput};
 pub(crate) use explain::ExplainArgs;
 pub(crate) use flow::{
     FlowArchivistCommand, FlowArchivistScanArgs, FlowArgs, FlowCommand, FlowReplayAuditArgs,
@@ -141,7 +143,7 @@ pub(crate) use providers::{
 };
 pub(crate) use quickstart::QuickstartArgs;
 pub(crate) use run::RunArgs;
-pub(crate) use runs::{EvalArgs, ReplayArgs, RunsArgs, RunsCommand};
+pub(crate) use runs::{ReplayArgs, RunsArgs, RunsCommand};
 pub(crate) use serve::{
     A2aServeArgs, ApiServeArgs, McpServeTransport, ServeAcpArgs, ServeArgs, ServeCommand,
     ServeMcpArgs, ServeTlsMode,
