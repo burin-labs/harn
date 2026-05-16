@@ -11,6 +11,7 @@ pub(crate) mod doctor;
 pub(crate) mod dump_highlight_keywords;
 pub(crate) mod dump_protocol_artifacts;
 pub(crate) mod dump_trigger_quickref;
+pub mod eval_prompt;
 pub(crate) mod explain;
 pub mod flow;
 pub(crate) mod hardware;

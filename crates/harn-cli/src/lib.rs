@@ -20,8 +20,8 @@ use std::sync::Arc;
 use std::{env, fs, process, thread};
 
 use cli::{
-    Cli, Command, CompletionShell, MergeCaptainCommand, MergeCaptainMockCommand, ModelInfoArgs,
-    PackageArtifactsCommand, PackageCacheCommand, PackageCommand, PersonaCommand,
+    Cli, Command, CompletionShell, EvalCommand, MergeCaptainCommand, MergeCaptainMockCommand,
+    ModelInfoArgs, PackageArtifactsCommand, PackageCacheCommand, PackageCommand, PersonaCommand,
     PersonaSupervisionCommand, ProvidersCommand, RunsCommand, ServeCommand, SkillCommand,
     SkillKeyCommand, SkillTrustCommand, SkillsCommand, ToolCommand,
 };
@@ -773,26 +773,41 @@ async fn async_main() {
         },
         Command::Session(args) => commands::session::run(args),
         Command::Replay(args) => replay_run_record(&args.path),
-        Command::Eval(args) => {
-            let llm_mock_mode = if let Some(path) = args.llm_mock.as_ref() {
-                commands::run::CliLlmMockMode::Replay {
-                    fixture_path: PathBuf::from(path),
+        Command::Eval(args) => match args.command {
+            Some(EvalCommand::Prompt(prompt_args)) => {
+                let code = commands::eval_prompt::run(prompt_args).await;
+                if code != 0 {
+                    process::exit(code);
                 }
-            } else if let Some(path) = args.llm_mock_record.as_ref() {
-                commands::run::CliLlmMockMode::Record {
-                    fixture_path: PathBuf::from(path),
-                }
-            } else {
-                commands::run::CliLlmMockMode::Off
-            };
-            eval_run_record(
-                &args.path,
-                args.compare.as_deref(),
-                args.structural_experiment.as_deref(),
-                &args.argv,
-                &llm_mock_mode,
-            )
-        }
+            }
+            None => {
+                let Some(path) = args.path else {
+                    eprintln!(
+                        "error: `harn eval` requires a path or a subcommand (e.g. `prompt`)."
+                    );
+                    eprintln!("See `harn eval --help`.");
+                    process::exit(2);
+                };
+                let llm_mock_mode = if let Some(path) = args.llm_mock.as_ref() {
+                    commands::run::CliLlmMockMode::Replay {
+                        fixture_path: PathBuf::from(path),
+                    }
+                } else if let Some(path) = args.llm_mock_record.as_ref() {
+                    commands::run::CliLlmMockMode::Record {
+                        fixture_path: PathBuf::from(path),
+                    }
+                } else {
+                    commands::run::CliLlmMockMode::Off
+                };
+                eval_run_record(
+                    &path,
+                    args.compare.as_deref(),
+                    args.structural_experiment.as_deref(),
+                    &args.argv,
+                    &llm_mock_mode,
+                )
+            }
+        },
         Command::Repl => commands::repl::run_repl().await,
         Command::Bench(args) => commands::bench::run(args).await,
         Command::TestBench(args) => commands::test_bench::run(args.command).await,

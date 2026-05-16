@@ -1,10 +1,12 @@
-//! Lightweight `harn.toml` loader for `harn fmt` and `harn lint`.
+//! Lightweight `harn.toml` loader for `harn fmt`, `harn lint`, and
+//! `harn eval prompt --fleet-name <name>`.
 //!
 //! This module is intentionally separate from `crate::package` (which owns
 //! the richer `[check]` + `[dependencies]` manifest model used by
 //! `harn check`, `harn install`, etc.). `harn.toml` can carry both sets of
-//! keys; this loader focuses on the `[fmt]` and `[lint]` sections and walks
-//! up from an input file looking for the nearest manifest.
+//! keys; this loader focuses on the `[fmt]`, `[lint]`, and `[eval.fleets]`
+//! sections and walks up from an input file looking for the nearest
+//! manifest.
 //!
 //! Recognized keys (snake_case, Cargo-style):
 //!
@@ -19,8 +21,16 @@
 //! require_file_header = false
 //! complexity_threshold = 25
 //! persona_step_allowlist = ["legacy_helper"]
+//!
+//! # Reusable fleets consumed by `harn eval prompt --fleet-name <name>`.
+//! [eval.fleets.frontier]
+//! models = ["claude-opus-4-7", "gpt-5", "gemini-2.5-pro"]
+//!
+//! [eval.fleets.local]
+//! models = ["ollama:qwen3.5", "ollama:llama4"]
 //! ```
 
+use std::collections::BTreeMap;
 use std::fmt;
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -38,11 +48,13 @@ const MANIFEST: &str = "harn.toml";
 /// (e.g. a user's home directory or `/tmp`).
 const MAX_PARENT_DIRS: usize = 16;
 
-/// Combined `harn.toml` view used by `harn fmt` and `harn lint`.
+/// Combined `harn.toml` view used by `harn fmt`, `harn lint`, and
+/// `harn eval prompt`.
 #[derive(Debug, Default, Clone)]
 pub struct HarnConfig {
     pub fmt: FmtConfig,
     pub lint: LintConfig,
+    pub eval: EvalConfig,
 }
 
 #[derive(Debug, Default, Clone, Deserialize)]
@@ -74,12 +86,30 @@ pub struct LintConfig {
     pub persona_step_allowlist: Vec<String>,
 }
 
+/// `[eval]` section of `harn.toml`. Reserves a `[eval.fleets.<name>]`
+/// table keyed by fleet name; each entry lists the model selectors
+/// (alias or `provider:model`) consumed by
+/// `harn eval prompt --fleet-name <name>`.
+#[derive(Debug, Default, Clone, Deserialize)]
+pub struct EvalConfig {
+    #[serde(default)]
+    pub fleets: BTreeMap<String, EvalFleet>,
+}
+
+#[derive(Debug, Default, Clone, Deserialize)]
+pub struct EvalFleet {
+    #[serde(default)]
+    pub models: Vec<String>,
+}
+
 #[derive(Debug, Default, Deserialize)]
 struct RawManifest {
     #[serde(default)]
     fmt: FmtConfig,
     #[serde(default)]
     lint: LintConfig,
+    #[serde(default)]
+    eval: EvalConfig,
 }
 
 #[derive(Debug)]
@@ -164,6 +194,7 @@ fn parse_manifest(path: &Path) -> Result<HarnConfig, ConfigError> {
     Ok(HarnConfig {
         fmt: raw.fmt,
         lint: raw.lint,
+        eval: raw.eval,
     })
 }
 
@@ -342,6 +373,40 @@ line_width = 999
         // higher up on some systems.
         let cfg = load_for_path(&harn_file).expect("load");
         assert!(cfg.fmt.line_width.is_none());
+    }
+
+    #[test]
+    fn eval_fleets_parse_into_named_lookups() {
+        let tmp = tempfile::tempdir().unwrap();
+        write_file(
+            tmp.path(),
+            "harn.toml",
+            r#"
+[eval.fleets.frontier]
+models = ["claude-opus-4-7", "gpt-5", "gemini-2.5-pro"]
+
+[eval.fleets.local]
+models = ["ollama:qwen3.5"]
+"#,
+        );
+        let harn_file = write_file(tmp.path(), "main.harn", "pipeline default(t) {}\n");
+        let cfg = load_for_path(&harn_file).expect("load");
+        assert_eq!(cfg.eval.fleets.len(), 2);
+        assert_eq!(
+            cfg.eval.fleets.get("frontier").map(|f| f.models.as_slice()),
+            Some(
+                [
+                    "claude-opus-4-7".to_string(),
+                    "gpt-5".to_string(),
+                    "gemini-2.5-pro".to_string(),
+                ]
+                .as_slice()
+            ),
+        );
+        assert_eq!(
+            cfg.eval.fleets.get("local").map(|f| f.models.as_slice()),
+            Some(["ollama:qwen3.5".to_string()].as_slice()),
+        );
     }
 
     #[test]
