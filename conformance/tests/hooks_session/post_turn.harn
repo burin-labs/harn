@@ -1,0 +1,27 @@
+/**
+ * `post_turn` hooks fire after a model/tool turn has been recorded and
+ * before post-turn control logic decides whether the loop should continue.
+ * They are advisory and are meant for enqueueing background work.
+ */
+let post_seen = atomic(0)
+
+pipeline default() {
+  clear_session_hooks()
+  register_session_hook(
+    "post_turn",
+    { event ->
+      if event?.session_id == event?.session?.id
+        && type_of(event?.iteration) == "int"
+        && type_of(event?.tool_count) == "int" {
+        atomic_add(post_seen, 1)
+      }
+      return nil
+    },
+  )
+  llm_mock_clear()
+  llm_mock({text: "ok"})
+  let result = agent_loop("hi", nil, {provider: "mock"})
+  println(result.status)
+  println(atomic_get(post_seen))
+  clear_session_hooks()
+}

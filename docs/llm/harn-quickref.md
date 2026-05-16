@@ -2213,7 +2213,7 @@ Three concentric surfaces:
   `OnPersonaPaused` / `OnPersonaResumed` / `OnBudgetThreshold(pct)`.
 - `register_session_hook(event, handler)` — whole-session lifecycle:
   `session_start`, `session_end`, `user_prompt_submit`, `pre_compact`,
-  `post_compact`, `permission_asked`, `permission_replied`,
+  `post_compact`, `post_turn`, `permission_asked`, `permission_replied`,
   `file_edited`, `session_error`, `session_idle`. Veto with
   `{block: true, reason}`; short-circuit a permission with
   `{decision: "allow"|"deny"|"ask", reason}`. Tape captures every
@@ -2235,6 +2235,9 @@ register_session_hook("file_edited", { event ->
 `write_file` / `append_file` / `write_file_bytes` queue automatically;
 hooks fire at the next agent-loop turn boundary. Call
 `notify_file_edited(path, metadata?)` to explicitly emit one.
+For background context refresh/librarian jobs, import
+`std/context/maintenance` and return `context_maintenance_queue_receipt(...)`
+from the hook instead of doing slow work inline.
 
 ## Stdlib LLM helpers (`std/llm/*`)
 

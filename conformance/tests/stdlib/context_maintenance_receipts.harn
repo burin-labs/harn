@@ -1,0 +1,68 @@
+import {
+  context_maintenance_dedupe_key,
+  context_maintenance_queue_receipt,
+  context_maintenance_receipt,
+  context_maintenance_replay_decision,
+  context_maintenance_transition,
+} from "std/context/maintenance"
+
+pipeline default() {
+  let event = {event: "FileEdited", session: {id: "session-1"}, path: "src/lib.rs"}
+  let queued = context_maintenance_queue_receipt(
+    "context.refresh",
+    event,
+    {
+      queued_at: "2026-05-16T18:00:00Z",
+      retry_hint: {retryable: true, after_ms: 1000},
+      replay: {mode: "include"},
+    },
+  )
+  println(queued.schema)
+  println(queued.status)
+  println(queued.lifecycle_event)
+  println(queued.affected_paths[0])
+  println(queued.retry_hint.retryable)
+  let running = context_maintenance_transition(
+    queued,
+    "running",
+    {started_at: "2026-05-16T18:00:01Z", duration_ms: 1},
+  )
+  println(running.status)
+  println(running.run_id == queued.run_id)
+  let succeeded = context_maintenance_transition(
+    running,
+    "succeeded",
+    {
+      completed_at: "2026-05-16T18:00:03Z",
+      duration_ms: 3000,
+      artifact_ids: ["scan-result", "scan-result"],
+    },
+  )
+  println(succeeded.status)
+  println(succeeded.duration_ms)
+  println(len(succeeded.artifact_ids))
+  let failed = context_maintenance_transition(
+    running,
+    "failed",
+    {
+      duration_ms: 2000,
+      error: "transient index failure",
+      retry_hint: {retryable: true, reason: "transient"},
+    },
+  )
+  println(failed.status)
+  println(failed.retry_hint.reason)
+  let skipped = context_maintenance_replay_decision(succeeded, {mode: "skip", reason: "fixture covers it"})
+  println(skipped.should_run)
+  println(skipped.receipt.status)
+  println(skipped.receipt.error)
+  let included = context_maintenance_replay_decision(succeeded, {mode: "include"})
+  println(included.should_run)
+  let invalid = try {
+    context_maintenance_receipt("context.refresh", "paused", {})
+  }
+  println(is_err(invalid))
+  let key_a = context_maintenance_dedupe_key("context.refresh", "FileEdited", ["b", "a", "a"], "session-1")
+  let key_b = context_maintenance_dedupe_key("context.refresh", "FileEdited", ["a", "b"], "session-1")
+  println(key_a == key_b)
+}

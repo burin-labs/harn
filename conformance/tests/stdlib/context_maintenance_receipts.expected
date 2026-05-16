@@ -1,0 +1,18 @@
+harn.context_maintenance.job_receipt.v1
+queued
+FileEdited
+src/lib.rs
+true
+running
+true
+succeeded
+3000
+1
+failed
+transient
+false
+skipped
+fixture covers it
+true
+true
+true

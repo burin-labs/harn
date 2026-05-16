@@ -1,0 +1,100 @@
+import {
+  context_maintenance_queue_receipt,
+  context_maintenance_replay_decision,
+  context_maintenance_transition,
+} from "std/context/maintenance"
+
+fn __queue(job_id, event, options = nil) {
+  let receipt = context_maintenance_queue_receipt(job_id, event, options ?? {})
+  log("queued " + receipt.job_id + " from " + to_string(receipt.lifecycle_event ?? "unknown"))
+  return receipt
+}
+
+/** Queue a deterministic scan/index refresh for changed files. */
+pub fn on_file_edited(event) {
+  return __queue(
+    "context.refresh",
+    event,
+    {
+      retry_hint: {retryable: true, after_ms: 1000, max_attempts: 3},
+      replay: {mode: "include"},
+      metadata: {lane: "hot"},
+    },
+  )
+}
+
+/** Queue fuzzy enrichment only when the host says idle consolidation is enabled. */
+pub fn on_session_idle(event) {
+  let status = event?.consolidate_on_idle ?? false ? "queued" : "skipped"
+  return __queue(
+    "context.crystallize",
+    event,
+    {
+      status: status,
+      retry_hint: {retryable: true, after_ms: event?.wake_interval_ms ?? 0, max_attempts: 2},
+      replay: {mode: "skip", reason: "idle enrichment warms host context caches"},
+      metadata: {lane: "idle"},
+    },
+  )
+}
+
+/** Preserve durable context artifacts before compaction removes transcript detail. */
+pub fn on_pre_compact(event) {
+  return __queue(
+    "context.crystallize",
+    event,
+    {retry_hint: {retryable: false}, replay: {mode: "include"}, metadata: {lane: "pre_compact"}},
+  )
+}
+
+/** React to turn results without making the next foreground turn wait. */
+pub fn on_post_turn(event) {
+  let tool_names = event?.successful_tool_names ?? []
+  return __queue(
+    "context.refresh",
+    event,
+    {
+      affected_paths: event?.affected_paths ?? [],
+      retry_hint: {retryable: true, after_ms: 250, max_attempts: 2},
+      replay: {mode: "include"},
+      metadata: {lane: "post_turn", successful_tools: tool_names},
+    },
+  )
+}
+
+/** Flush final context/librarian artifacts after the session completes. */
+pub fn on_session_end(event) {
+  return __queue(
+    "context.crystallize",
+    event,
+    {
+      retry_hint: {retryable: false},
+      replay: {mode: "include"},
+      metadata: {lane: "session_end", final_status: event?.final_status},
+    },
+  )
+}
+
+/** Worker stub for hosts that run a refresh lane outside the hook. */
+pub fn run_refresh_job(receipt) {
+  let running = context_maintenance_transition(receipt, "running", {duration_ms: 1})
+  return context_maintenance_transition(
+    running,
+    "succeeded",
+    {artifact_ids: ["scan-result"], duration_ms: 25},
+  )
+}
+
+/** Worker stub for hosts that run a crystallization lane outside the hook. */
+pub fn run_crystallize_job(receipt) {
+  let decision = context_maintenance_replay_decision(receipt, receipt?.replay ?? {})
+  if !decision.should_run {
+    return decision.receipt
+  }
+  let running = context_maintenance_transition(receipt, "running", {duration_ms: 1})
+  return context_maintenance_transition(
+    running,
+    "succeeded",
+    {artifact_ids: ["context-pack", "librarian-candidates"], duration_ms: 75},
+  )
+}

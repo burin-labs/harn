@@ -4,6 +4,7 @@ These examples show ready-to-customize `[[triggers]]` shapes. Each directory
 contains `harn.toml`, `lib.harn`, `README.md`, and `SKILL.md` unless noted:
 
 - `cron-daily-digest/`: cron schedule + local handler
+- `context-maintenance/`: lifecycle hooks for non-blocking context refresh and crystallization
 - `github-new-issue/`: webhook trigger + local predicate + local handler
 - `a2a-reviewer-fanout/`: a2a-push trigger + remote A2A handler
 - `local-a2a-dispatch/`: one handler with local and A2A trigger manifests

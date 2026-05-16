@@ -57,6 +57,7 @@
 - [Audit receipts](./audit-receipts.md)
 - [Redaction policy](./redaction.md)
 - [Hooks (tool, persona, session lifecycle)](./extensibility/hooks.md)
+- [Context maintenance hooks](./context-maintenance-hooks.md)
 - [Skills](./skills.md)
 - [Personas](./personas.md)
   - [Persona Prelude](./personas/prelude.md)

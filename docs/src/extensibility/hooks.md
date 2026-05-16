@@ -43,6 +43,7 @@ tool call.
 | `user_prompt_submit` | Before the agent sees the user's prompt | `{block: true, reason}` returns a `blocked` result with `stop_reason: user_prompt_submit_blocked` |
 | `pre_compact` | Before transcript autocompaction runs | `{block: true}` skips this compaction pass |
 | `post_compact` | After autocompaction completes and replaces messages | Advisory |
+| `post_turn` | After a model/tool turn is recorded, before post-turn control logic decides whether to continue | Advisory |
 | `permission_asked` | When the dynamic permission policy needs to escalate | `{decision: "allow"\|"deny", reason}` short-circuits the policy |
 | `permission_replied` | After the dynamic permission policy decides | Advisory |
 | `file_edited` | After `write_file` / `append_file` / `write_file_bytes` / `notify_file_edited` queues an edit. Drained at each agent-loop turn boundary | Advisory |
@@ -95,6 +96,10 @@ register_session_hook("file_edited", { event ->
 })
 ```
 
+For non-blocking context refresh, librarian, and crystallization jobs, use the
+receipt contract in [Context maintenance hooks](../context-maintenance-hooks.md)
+instead of doing slow work inside the hook closure.
+
 ## `[[hooks]]` package manifest entries
 
 Declarative entries in `harn.toml` register VM hooks at package load
@@ -127,4 +132,4 @@ Because the events are first-class transcript entries, replay tools
 that re-execute a recorded session see the same hooks fire in the
 same order with the same payloads, even if the closures are no longer
 registered. This is the basis for the replay-fidelity guarantee
-documented in [Replay and the event log](../event-log.md).
+used by transcript, trigger, and orchestrator replay tooling.
