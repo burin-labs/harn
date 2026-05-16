@@ -1,0 +1,132 @@
+--- claude-xml ---
+<system>
+You are a build agent.
+</system>
+<task>
+Urgent: Build a tree CLI.
+</task>
+<examples>
+- Input: src -> Output: src/main.harn
+- Input: tests -> Output: tests/tree.expected
+</examples>
+<output_format>
+Return output matching this JSON Schema:
+{
+  "properties": {
+    "tree": {
+      "type": "string"
+    }
+  },
+  "required": [
+    "tree"
+  ],
+  "type": "object"
+}
+</output_format>
+<tools>
+[
+  {
+    "description": "Read directory entries",
+    "name": "read_dir"
+  },
+  {
+    "description": "Print the final tree",
+    "name": "print_tree"
+  }
+]
+</tools>
+<thinking>
+Think through the task before answering.
+</thinking>
+<reasoning>
+Reason privately step by step before answering.
+</reasoning>
+--- gpt-markdown ---
+## System Instructions
+You are a build agent.
+## Task
+Urgent: Build a tree CLI.
+## Examples
+- Input: src -> Output: src/main.harn
+- Input: tests -> Output: tests/tree.expected
+
+## Tools
+[
+  {
+    "description": "Read directory entries",
+    "name": "read_dir"
+  },
+  {
+    "description": "Print the final tree",
+    "name": "print_tree"
+  }
+]
+## Reasoning
+Use internal reasoning and provide a concise answer.
+## Reasoning
+Reason privately step by step before answering.
+## Task
+Partial task for Alice.
+
+--- qwen-text-tools ---
+## System Instructions
+You are a build agent.
+## Task
+Urgent: Build a tree CLI.
+## Examples
+- Input: src -> Output: src/main.harn
+- Input: tests -> Output: tests/tree.expected
+
+Tools:
+Use this ReAct-style envelope when calling a tool:
+Action: <tool name>
+Action Input: <json arguments>
+
+Available tools:
+[
+  {
+    "description": "Read directory entries",
+    "name": "read_dir"
+  },
+  {
+    "description": "Print the final tree",
+    "name": "print_tree"
+  }
+]
+
+## Reasoning
+Reason privately step by step before answering.
+--- generic-fallback ---
+System Instructions:
+You are a build agent.
+Task:
+Urgent: Build a tree CLI.
+Examples:
+- Input: src -> Output: src/main.harn
+- Input: tests -> Output: tests/tree.expected
+Output Format:
+Return output matching this JSON Schema:
+{
+  "properties": {
+    "tree": {
+      "type": "string"
+    }
+  },
+  "required": [
+    "tree"
+  ],
+  "type": "object"
+}
+Tools:
+[
+  {
+    "description": "Read directory entries",
+    "name": "read_dir"
+  },
+  {
+    "description": "Print the final tree",
+    "name": "print_tree"
+  }
+]
+
+Reason privately step by step before answering.

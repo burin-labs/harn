@@ -12,6 +12,7 @@
 //! {{ for k, v in dict }}..{{ end }}
 //! {{ include "partial.harn.prompt" }}
 //! {{ include "partial.harn.prompt" with { x: name } }}
+//! {{ section "task" }}..{{ endsection }}
 //! {{# comment — stripped at parse time #}}
 //! {{ raw }}..literal {{braces}}..{{ endraw }}
 //! {{- x -}}                                  whitespace-trim markers
@@ -37,6 +38,7 @@ mod lexer;
 mod llm_context;
 mod parser;
 mod render;
+mod sections;
 
 #[cfg(test)]
 mod tests;
@@ -142,9 +144,10 @@ pub fn lookup_prompt_span(
                     PromptSpanKind::Expr => 0,
                     PromptSpanKind::LegacyBareInterp => 1,
                     PromptSpanKind::Text => 2,
-                    PromptSpanKind::Include => 3,
-                    PromptSpanKind::ForIteration => 4,
-                    PromptSpanKind::If => 5,
+                    PromptSpanKind::Section => 3,
+                    PromptSpanKind::Include => 4,
+                    PromptSpanKind::ForIteration => 5,
+                    PromptSpanKind::If => 6,
                 };
                 (kind_weight, width)
             })?
@@ -365,6 +368,8 @@ pub enum PromptSpanKind {
     /// Rendered partial/include expansion. Child spans carry the
     /// included template's own `template_uri`.
     Include,
+    /// Capability-adaptive logical prompt section.
+    Section,
 }
 
 /// Provenance-aware rendering. Returns the rendered string plus — when

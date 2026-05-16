@@ -41,6 +41,7 @@ has a condensed version for agents writing Harn.
 {{ for key, value in dict }} ... {{ end }}
 {{ include "partial.harn.prompt" }}
 {{ include "partial.harn.prompt" with { x: name } }}
+{{ section "task" }} ... {{ endsection }}
 {{# stripped at parse time #}}
 {{ raw }} ... literal {{braces}} ... {{ endraw }}
 {{- name -}}                                 whitespace-trim markers
@@ -289,6 +290,10 @@ Typical cases:
 - `unknown filter \`foo\`` — the named filter isn't registered.
 - `circular include detected: a.prompt → b.prompt → a.prompt`.
 - `include path must be a string` — `{{ include }}` target wasn't a string.
+- `unknown template section \`foo\`` — `{{ section "foo" }}` is not one of
+  the built-in logical sections.
+- ``{{ section }}` missing matching `{{ endsection }}`` — a logical section
+  was not closed.
 
 ## The `llm` scope
 
@@ -352,6 +357,59 @@ the engine emits a one-shot lint warning under the
 `template.llm_scope` category and the user's value wins for
 back-compat. Rename your key (e.g. `local_model`, `current_llm`) to
 clear the warning.
+
+## Logical sections
+
+Logical sections encode the role of a prompt chunk and let the renderer choose
+the wire envelope from `llm.capabilities`:
+
+```harn-prompt
+{{ section "task" }}
+Build a CLI that prints a directory tree.
+{{ endsection }}
+
+{{ section "output_format" schema=output_schema }}{{ endsection }}
+
+{{ section "tools" tools=tool_list }}{{ endsection }}
+```
+
+The built-in section names are:
+
+| Section | Purpose |
+| ------- | ------- |
+| `task` | Primary user task or instruction. |
+| `examples` | Few-shot examples or demonstrations. |
+| `output_format` | Output schema or parse contract. Suppressed when `structured_output_mode == "native_json"` because the provider envelope carries the schema. |
+| `tools` | Tool definitions rendered as XML, Markdown/JSON, or a ReAct-style text contract depending on the route. |
+| `thinking_scaffold` | Thinking envelope for models that need one; no output for models with no thinking section style. |
+| `chain_of_thought` | A provider-shaped private-reasoning instruction. |
+| `system_framing` | Top-level persona or policy framing; uses developer-role wording when `prefers_role_developer` is true. |
+
+Section arguments use `name=value` pairs. `output_format` accepts `schema=...`;
+`tools` accepts `tools=...`. Section bodies can contain normal template
+directives, including `if`, `for`, and `include`.
+
+```harn-prompt
+{{ section "examples" }}
+{{ for ex in examples }}
+- Input: {{ ex.input }}
+- Output: {{ ex.output }}
+{{ end }}
+{{ endsection }}
+```
+
+Capability dispatch is feature-based, not provider-string-based:
+
+| Capability | Effect |
+| ---------- | ------ |
+| `prefers_xml_scaffolding` | `task`, `examples`, and `system_framing` render as XML tags. |
+| `prefers_markdown_scaffolding` | Those sections render as Markdown headings. |
+| `prefers_xml_tools` | `tools` renders as `<tools>...</tools>`. |
+| `native_tools` | `tools` renders as a Markdown/JSON description when XML tools are not preferred. |
+| `text_tool_wire_format_supported` | `tools` renders a ReAct-style text-tool contract for local/text routes. |
+| `structured_output_mode` | Controls `output_format`; `native_json` omits the section. |
+| `thinking_block_style` | Controls `thinking_scaffold` (`none`, `thinking_blocks`, `reasoning_summary`, `inline`). |
+| `prefers_role_developer` | `system_framing` targets developer instructions instead of system instructions. |
 
 ## Preflight checks
 

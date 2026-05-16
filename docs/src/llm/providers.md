@@ -166,6 +166,9 @@ let caps = provider_capabilities("anthropic", "claude-opus-4-7")
 //   tool_search: ["bm25", "regex"], max_tools: 10000,
 //   prompt_caching: true, thinking: true, vision_supported: true,
 //   interleaved_thinking_supported: true,
+//   prefers_xml_scaffolding: true, prefers_xml_tools: true,
+//   structured_output_mode: "xml_tagged",
+//   thinking_block_style: "thinking_blocks",
 // }
 
 // Gate on `tools` for "can this route call tools at all" — true for either
@@ -227,6 +230,13 @@ Each `[[capabilities.provider.<name>]]` entry accepts these fields:
 | `tool_search` | list of strings | Native `tool_search` variants, preferred first. Anthropic: `["bm25", "regex"]`. OpenAI: `["hosted", "client"]`. Empty = no native support (client fallback only). |
 | `max_tools` | int | Cap on tool count. `harn lint` will warn if a registry exceeds the smallest cap any active provider advertises. |
 | `prompt_caching` | bool | `cache_control` blocks honored. |
+| `prefers_xml_scaffolding` | bool | Logical prompt sections render as XML tags. |
+| `prefers_markdown_scaffolding` | bool | Logical prompt sections render as Markdown headings. |
+| `structured_output_mode` | string | Section-level output-format mode: `native_json`, `delimited`, `xml_tagged`, `none`. |
+| `supports_assistant_prefill` | bool | Provider accepts assistant-role prefill turns. |
+| `prefers_role_developer` | bool | `system_framing` should target developer instructions. |
+| `prefers_xml_tools` | bool | Text-rendered tool sections prefer XML tags. |
+| `thinking_block_style` | string | Section-level thinking style: `none`, `thinking_blocks`, `reasoning_summary`, `inline`. |
 | `thinking_modes` | list of strings | Supported script-facing thinking modes. Values are `enabled`, `adaptive`, or `effort`. |
 | `reasoning_effort_supported` | bool | Provider accepts a `reasoning_effort` request field for effort-capable models. |
 | `reasoning_none_supported` | bool | Provider accepts `reasoning_effort: "none"` as true reasoning-off instead of flooring at `minimal`. |

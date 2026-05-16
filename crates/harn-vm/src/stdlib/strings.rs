@@ -219,6 +219,7 @@ fn span_kind_label(kind: PromptSpanKind) -> &'static str {
         PromptSpanKind::If => "if",
         PromptSpanKind::ForIteration => "for_iteration",
         PromptSpanKind::Include => "include",
+        PromptSpanKind::Section => "section",
     }
 }
 

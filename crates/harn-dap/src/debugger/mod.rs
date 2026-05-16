@@ -43,6 +43,7 @@ fn prompt_span_kind_label(kind: harn_vm::PromptSpanKind) -> &'static str {
         harn_vm::PromptSpanKind::If => "if",
         harn_vm::PromptSpanKind::ForIteration => "for_iteration",
         harn_vm::PromptSpanKind::Include => "include",
+        harn_vm::PromptSpanKind::Section => "section",
     }
 }
 

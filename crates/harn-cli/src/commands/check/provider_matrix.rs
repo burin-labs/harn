@@ -36,12 +36,12 @@ pub(crate) fn generate_markdown(rows: &[ProviderCapabilityMatrixRow]) -> String 
     );
     out.push_str("Regenerate with `make gen-provider-matrix` and verify with `make check-provider-matrix`.\n\n");
     out.push_str(
-        "| Provider | Model pattern | Thinking | Vision | Audio | PDF | Streaming | Files API | JSON schema | Tools | Cache |\n",
+        "| Provider | Model pattern | Thinking | Vision | Audio | PDF | Streaming | Files API | JSON schema | Scaffolding | Output mode | Thinking section | Tools | Cache |\n",
     );
-    out.push_str("|---|---|---|---:|---:|---:|---:|---:|---|---:|---:|\n");
+    out.push_str("|---|---|---|---:|---:|---:|---:|---:|---|---|---|---|---:|---:|\n");
     for row in rows {
         out.push_str(&format!(
-            "| `{}` | `{}` | {} | {} | {} | {} | {} | {} | {} | {} | {} |\n",
+            "| `{}` | `{}` | {} | {} | {} | {} | {} | {} | {} | {} | {} | {} | {} | {} |\n",
             row.provider,
             row.model,
             markdown_cell(&thinking_cell(row)),
@@ -51,6 +51,9 @@ pub(crate) fn generate_markdown(rows: &[ProviderCapabilityMatrixRow]) -> String 
             yes_no(row.streaming),
             yes_no(row.files_api_supported),
             markdown_cell(&json_schema_cell(row)),
+            markdown_cell(&row.scaffolding),
+            markdown_cell(&row.structured_output_mode),
+            markdown_cell(&row.thinking_block_style),
             yes_no(row.tools),
             yes_no(row.cache),
         ));
@@ -96,7 +99,7 @@ fn row_supports_feature(row: &ProviderCapabilityMatrixRow, feature: &str) -> boo
 }
 
 fn print_text(rows: &[ProviderCapabilityMatrixRow]) {
-    let table_rows: Vec<[String; 10]> = rows
+    let table_rows: Vec<[String; 13]> = rows
         .iter()
         .map(|row| {
             [
@@ -108,6 +111,9 @@ fn print_text(rows: &[ProviderCapabilityMatrixRow]) {
                 yes_no(row.streaming).to_string(),
                 yes_no(row.files_api_supported).to_string(),
                 json_schema_cell(row),
+                row.scaffolding.clone(),
+                row.structured_output_mode.clone(),
+                row.thinking_block_style.clone(),
                 yes_no(row.tools).to_string(),
                 yes_no(row.cache).to_string(),
             ]
@@ -122,6 +128,9 @@ fn print_text(rows: &[ProviderCapabilityMatrixRow]) {
         "streaming".to_string(),
         "files_api".to_string(),
         "json_schema".to_string(),
+        "scaffolding".to_string(),
+        "output_mode".to_string(),
+        "thinking_section".to_string(),
         "tools".to_string(),
         "cache".to_string(),
     ];
@@ -216,7 +225,7 @@ mod tests {
         assert!(markdown.contains("Source of truth"));
         assert!(markdown.contains("harn check --provider-matrix --format markdown"));
         assert!(markdown.contains(
-            "| Provider | Model pattern | Thinking | Vision | Audio | PDF | Streaming | Files API | JSON schema | Tools | Cache |"
+            "| Provider | Model pattern | Thinking | Vision | Audio | PDF | Streaming | Files API | JSON schema | Scaffolding | Output mode | Thinking section | Tools | Cache |"
         ));
     }
 }

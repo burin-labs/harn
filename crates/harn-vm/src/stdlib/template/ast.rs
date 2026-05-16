@@ -27,6 +27,13 @@ pub(super) enum Node {
         line: usize,
         col: usize,
     },
+    Section {
+        name: String,
+        args: Vec<(String, Expr)>,
+        body: Vec<Node>,
+        line: usize,
+        col: usize,
+    },
     /// A legacy bare `{{ident}}` that should silently pass-through its source
     /// text on miss — preserves pre-v2 semantics for back-compat.
     LegacyBareInterp {

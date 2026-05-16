@@ -85,6 +85,29 @@ pub struct ProviderRule {
     /// `native`, `tool_use`, `format_kw`, and `none`.
     #[serde(default)]
     pub structured_output: Option<String>,
+    /// Preferred prompt scaffolding for logical template sections.
+    #[serde(default)]
+    pub prefers_xml_scaffolding: Option<bool>,
+    /// Preferred prompt scaffolding for logical template sections.
+    #[serde(default)]
+    pub prefers_markdown_scaffolding: Option<bool>,
+    /// Structured-output prompt-section mode. Known values are:
+    /// `native_json`, `delimited`, `xml_tagged`, and `none`.
+    #[serde(default)]
+    pub structured_output_mode: Option<String>,
+    /// Whether the provider accepts assistant-role prefill messages.
+    #[serde(default)]
+    pub supports_assistant_prefill: Option<bool>,
+    /// Whether top-level instructions should use a developer role.
+    #[serde(default)]
+    pub prefers_role_developer: Option<bool>,
+    /// Whether text-rendered tools should use an XML envelope.
+    #[serde(default)]
+    pub prefers_xml_tools: Option<bool>,
+    /// Preferred thinking-section envelope. Known values are:
+    /// `none`, `thinking_blocks`, `reasoning_summary`, and `inline`.
+    #[serde(default)]
+    pub thinking_block_style: Option<String>,
     /// Legacy name retained for project overrides written before
     /// `structured_output` became the canonical capability.
     #[serde(default)]
@@ -170,6 +193,13 @@ pub struct Capabilities {
     pub pdf: bool,
     pub files_api_supported: bool,
     pub structured_output: Option<String>,
+    pub prefers_xml_scaffolding: bool,
+    pub prefers_markdown_scaffolding: bool,
+    pub structured_output_mode: String,
+    pub supports_assistant_prefill: bool,
+    pub prefers_role_developer: bool,
+    pub prefers_xml_tools: bool,
+    pub thinking_block_style: String,
     /// Legacy mirror for CLI display and older callers.
     pub json_schema: Option<String>,
     pub thinking_modes: Vec<String>,
@@ -200,6 +230,13 @@ impl Default for Capabilities {
             pdf: false,
             files_api_supported: false,
             structured_output: None,
+            prefers_xml_scaffolding: false,
+            prefers_markdown_scaffolding: false,
+            structured_output_mode: "none".to_string(),
+            supports_assistant_prefill: false,
+            prefers_role_developer: false,
+            prefers_xml_tools: false,
+            thinking_block_style: "none".to_string(),
             json_schema: None,
             thinking_modes: Vec::new(),
             interleaved_thinking_supported: false,
@@ -233,6 +270,9 @@ pub struct ProviderCapabilityMatrixRow {
     pub streaming: bool,
     pub files_api_supported: bool,
     pub json_schema: Option<String>,
+    pub scaffolding: String,
+    pub structured_output_mode: String,
+    pub thinking_block_style: String,
     pub tools: bool,
     pub cache: bool,
     pub source: String,
@@ -352,6 +392,9 @@ fn rule_to_matrix_row(
         streaming: true,
         files_api_supported: rule.files_api_supported.unwrap_or(false),
         json_schema: rule_structured_output(rule),
+        scaffolding: rule_scaffolding(rule).to_string(),
+        structured_output_mode: rule_structured_output_mode(rule),
+        thinking_block_style: rule_thinking_block_style(rule),
         tools: rule.native_tools.unwrap_or(false),
         cache: rule.prompt_caching.unwrap_or(false),
         source: source.to_string(),
@@ -454,6 +497,15 @@ fn rule_to_caps(rule: &ProviderRule) -> Capabilities {
         pdf: rule.pdf.unwrap_or(false),
         files_api_supported: rule.files_api_supported.unwrap_or(false),
         structured_output: rule_structured_output(rule),
+        prefers_xml_scaffolding: rule.prefers_xml_scaffolding.unwrap_or(false),
+        prefers_markdown_scaffolding: rule.prefers_markdown_scaffolding.unwrap_or(false),
+        structured_output_mode: rule_structured_output_mode(rule),
+        supports_assistant_prefill: rule.supports_assistant_prefill.unwrap_or(false),
+        prefers_role_developer: rule
+            .prefers_role_developer
+            .unwrap_or_else(|| rule.requires_completion_tokens.unwrap_or(false)),
+        prefers_xml_tools: rule.prefers_xml_tools.unwrap_or(false),
+        thinking_block_style: rule_thinking_block_style(rule),
         json_schema: rule_structured_output(rule),
         thinking_modes,
         interleaved_thinking_supported: rule.interleaved_thinking_supported.unwrap_or(false),
@@ -479,6 +531,39 @@ fn rule_structured_output(rule: &ProviderRule) -> Option<String> {
         .clone()
         .or_else(|| rule.json_schema.clone())
         .filter(|value| value != "none")
+}
+
+fn rule_thinking_block_style(rule: &ProviderRule) -> String {
+    rule.thinking_block_style.clone().unwrap_or_else(|| {
+        if rule.reasoning_effort_supported.unwrap_or(false)
+            || rule.requires_completion_tokens.unwrap_or(false)
+        {
+            "reasoning_summary".to_string()
+        } else {
+            "none".to_string()
+        }
+    })
+}
+
+fn rule_structured_output_mode(rule: &ProviderRule) -> String {
+    if let Some(mode) = &rule.structured_output_mode {
+        return mode.clone();
+    }
+    match rule_structured_output(rule).as_deref() {
+        Some("native") | Some("format_kw") => "native_json".to_string(),
+        Some("tool_use") => "xml_tagged".to_string(),
+        _ => "none".to_string(),
+    }
+}
+
+fn rule_scaffolding(rule: &ProviderRule) -> &'static str {
+    if rule.prefers_xml_scaffolding.unwrap_or(false) {
+        "xml"
+    } else if rule.prefers_markdown_scaffolding.unwrap_or(false) {
+        "markdown"
+    } else {
+        "plain"
+    }
 }
 
 fn rule_matches(rule: &ProviderRule, model: &str) -> bool {
@@ -554,6 +639,11 @@ mod tests {
         assert_eq!(caps.tool_search, vec!["bm25", "regex"]);
         assert!(caps.prompt_caching);
         assert_eq!(caps.thinking_modes, vec!["adaptive"]);
+        assert!(caps.prefers_xml_scaffolding);
+        assert!(caps.prefers_xml_tools);
+        assert_eq!(caps.structured_output_mode, "xml_tagged");
+        assert!(caps.supports_assistant_prefill);
+        assert_eq!(caps.thinking_block_style, "thinking_blocks");
         assert!(caps.vision_supported);
         assert!(caps.audio);
         assert!(caps.pdf);
@@ -632,6 +722,9 @@ anthropic_beta_features = ["fine-grained-tool-streaming-2025-05-14"]
         assert_eq!(caps.tool_search, vec!["hosted", "client"]);
         assert_eq!(caps.json_schema.as_deref(), Some("native"));
         assert_eq!(caps.thinking_modes, vec!["effort"]);
+        assert!(caps.prefers_markdown_scaffolding);
+        assert_eq!(caps.structured_output_mode, "native_json");
+        assert_eq!(caps.thinking_block_style, "reasoning_summary");
         assert!(caps.reasoning_effort_supported);
         assert!(caps.reasoning_none_supported);
     }
@@ -681,6 +774,7 @@ anthropic_beta_features = ["fine-grained-tool-streaming-2025-05-14"]
         let prefixed = lookup("openrouter", "openai/o4-mini");
         assert!(prefixed.requires_completion_tokens);
         assert!(prefixed.reasoning_effort_supported);
+        assert!(prefixed.prefers_role_developer);
     }
 
     #[test]
@@ -748,6 +842,8 @@ anthropic_beta_features = ["fine-grained-tool-streaming-2025-05-14"]
         assert!(!caps.honors_chat_template_kwargs);
         assert_eq!(caps.recommended_endpoint.as_deref(), Some("/api/chat"));
         assert!(caps.text_tool_wire_format_supported);
+        assert_eq!(caps.structured_output_mode, "native_json");
+        assert!(caps.prefers_markdown_scaffolding);
     }
 
     #[test]
@@ -887,6 +983,7 @@ tool_search = ["hosted"]
         let caps = lookup("my-proxy", "anything");
         assert!(caps.native_tools);
         assert_eq!(caps.tool_search, vec!["hosted"]);
+        assert_eq!(caps.structured_output_mode, "none");
         clear_user_overrides();
     }
 

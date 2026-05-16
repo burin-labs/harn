@@ -733,6 +733,48 @@ pub(crate) fn capabilities_to_vm_value(
         VmValue::Bool(caps.files_api_supported),
     );
     dict.insert(
+        "structured_output".to_string(),
+        caps.structured_output
+            .as_deref()
+            .map(|value| VmValue::String(Rc::from(value)))
+            .unwrap_or(VmValue::Nil),
+    );
+    dict.insert(
+        "json_schema".to_string(),
+        caps.json_schema
+            .as_deref()
+            .map(|value| VmValue::String(Rc::from(value)))
+            .unwrap_or(VmValue::Nil),
+    );
+    dict.insert(
+        "prefers_xml_scaffolding".to_string(),
+        VmValue::Bool(caps.prefers_xml_scaffolding),
+    );
+    dict.insert(
+        "prefers_markdown_scaffolding".to_string(),
+        VmValue::Bool(caps.prefers_markdown_scaffolding),
+    );
+    dict.insert(
+        "structured_output_mode".to_string(),
+        VmValue::String(Rc::from(caps.structured_output_mode.as_str())),
+    );
+    dict.insert(
+        "supports_assistant_prefill".to_string(),
+        VmValue::Bool(caps.supports_assistant_prefill),
+    );
+    dict.insert(
+        "prefers_role_developer".to_string(),
+        VmValue::Bool(caps.prefers_role_developer),
+    );
+    dict.insert(
+        "prefers_xml_tools".to_string(),
+        VmValue::Bool(caps.prefers_xml_tools),
+    );
+    dict.insert(
+        "thinking_block_style".to_string(),
+        VmValue::String(Rc::from(caps.thinking_block_style.as_str())),
+    );
+    dict.insert(
         "preserve_thinking".to_string(),
         VmValue::Bool(caps.preserve_thinking),
     );
@@ -1149,5 +1191,33 @@ mod tests {
         expect_bool("native_tools", false);
         expect_bool("text_tool_wire_format_supported", true);
         expect_bool("tools", true);
+    }
+
+    #[test]
+    fn test_provider_capabilities_exposes_prompt_format_preferences() {
+        super::super::capabilities::clear_user_overrides();
+        let mut out = String::new();
+        let args = vec![
+            VmValue::String(Rc::from("anthropic")),
+            VmValue::String(Rc::from("claude-opus-4-7")),
+        ];
+        let result =
+            provider_capabilities_builtin(&args, &mut out).expect("builtin returned error");
+        let dict = result.as_dict().expect("expected dict");
+
+        let expect_bool = |key: &str, want: bool| match dict.get(key) {
+            Some(VmValue::Bool(b)) => assert_eq!(*b, want, "{key}"),
+            other => panic!("expected Bool for {key}, got {other:?}"),
+        };
+        let expect_string = |key: &str, want: &str| match dict.get(key) {
+            Some(VmValue::String(value)) => assert_eq!(value.as_ref(), want, "{key}"),
+            other => panic!("expected String for {key}, got {other:?}"),
+        };
+
+        expect_bool("prefers_xml_scaffolding", true);
+        expect_bool("prefers_xml_tools", true);
+        expect_bool("supports_assistant_prefill", true);
+        expect_string("structured_output_mode", "xml_tagged");
+        expect_string("thinking_block_style", "thinking_blocks");
     }
 }

@@ -70,6 +70,16 @@ condensed series summaries instead of full per-patch history.
   This is the load-bearing primitive for the capability-adaptive prompt-
   rendering epic (#1663) — sibling tickets layer logical sections,
   format-preference capabilities, and cross-model eval on top.
+- **Logical prompt-template sections (#1666).** `.harn.prompt` assets
+  now support `{{ section "task" }} ... {{ endsection }}` and the
+  built-in logical roles `task`, `examples`, `output_format`, `tools`,
+  `thinking_scaffold`, `chain_of_thought`, and `system_framing`.
+  Rendering is driven by provider capability flags such as
+  `prefers_xml_scaffolding`, `prefers_markdown_scaffolding`,
+  `structured_output_mode`, `prefers_xml_tools`, and
+  `thinking_block_style`, so a single logical prompt can materialize as
+  Claude XML, GPT-style Markdown/native JSON, local text-tool
+  instructions, or a generic fallback without provider-string branches.
 - **One-line installer + signed binaries.** `install.sh` (served from
   `harnlang.com/install.sh`) now detects the host OS/CPU, resolves the
   latest GitHub release tag, downloads the matching pre-built archive,

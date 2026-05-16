@@ -50,7 +50,7 @@
     },
     "keyword": {
       "name": "keyword.control.harn.prompt",
-      "match": "\\b(if|elif|else|end|for|in|include|with|raw|endraw|and|or|not|true|false|nil)\\b"
+      "match": "\\b(if|elif|else|end|for|in|include|with|section|endsection|raw|endraw|and|or|not|true|false|nil)\\b"
     },
     "literal": {
       "patterns": [
@@ -78,7 +78,7 @@
     },
     "operator": {
       "name": "keyword.operator.harn.prompt",
-      "match": "==|!=|<=|>=|<|>|&&|\\|\\||!|\\."
+      "match": "==|!=|<=|>=|=|<|>|&&|\\|\\||!|\\."
     },
     "filter": {
       "name": "entity.name.function.filter.harn.prompt",
