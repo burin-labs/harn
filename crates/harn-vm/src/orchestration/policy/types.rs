@@ -113,6 +113,57 @@ pub fn enforce_tool_arg_constraints(
     Ok(())
 }
 
+/// Selectable confinement strength for processes spawned under this
+/// policy. Defaults to [`SandboxProfile::Worktree`] — workspace-roots
+/// path enforcement plus best-effort OS confinement (warn-and-skip if
+/// the platform mechanism is unavailable). Stricter callers opt into
+/// [`SandboxProfile::OsHardened`], which requires the OS sandbox to
+/// engage and surfaces a typed `tool_rejected` error otherwise.
+#[derive(Clone, Copy, Debug, Default, Serialize, Deserialize, PartialEq, Eq, Hash)]
+#[serde(rename_all = "snake_case")]
+pub enum SandboxProfile {
+    /// No path enforcement, no OS confinement. Used by `harn run` when
+    /// no orchestration policy is active and by escape hatches that
+    /// explicitly disable isolation.
+    Unrestricted,
+    /// Workspace-root path enforcement plus best-effort OS confinement.
+    /// Honors `HARN_HANDLER_SANDBOX={off,warn,enforce}` for the OS
+    /// portion. Default for orchestrator-launched workflows.
+    #[default]
+    Worktree,
+    /// Workspace-root path enforcement plus required OS confinement.
+    /// Spawns fail with `tool_rejected` if the platform's hardening
+    /// mechanism (Linux Landlock+seccomp, macOS sandbox-exec, Windows
+    /// AppContainer) is unavailable, regardless of
+    /// `HARN_HANDLER_SANDBOX`.
+    OsHardened,
+    /// Testbench WASI sandbox — subprocess execution is replayed from
+    /// recorded WASI modules instead of running on the host. Selected
+    /// indirectly by `harn test bench --process-wasi <dir>`.
+    Wasi,
+}
+
+impl SandboxProfile {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            SandboxProfile::Unrestricted => "unrestricted",
+            SandboxProfile::Worktree => "worktree",
+            SandboxProfile::OsHardened => "os_hardened",
+            SandboxProfile::Wasi => "wasi",
+        }
+    }
+
+    pub fn parse(value: &str) -> Option<Self> {
+        match value {
+            "unrestricted" => Some(SandboxProfile::Unrestricted),
+            "worktree" => Some(SandboxProfile::Worktree),
+            "os_hardened" => Some(SandboxProfile::OsHardened),
+            "wasi" => Some(SandboxProfile::Wasi),
+            _ => None,
+        }
+    }
+}
+
 #[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(default)]
 pub struct CapabilityPolicy {
@@ -128,6 +179,12 @@ pub struct CapabilityPolicy {
     /// level). Pipelines own the registry; the VM reads it.
     #[serde(default)]
     pub tool_annotations: BTreeMap<String, ToolAnnotations>,
+    /// Confinement strength applied to subprocesses spawned under this
+    /// policy. Defaults to [`SandboxProfile::Worktree`]; pipelines opt
+    /// into [`SandboxProfile::OsHardened`] when the workload should
+    /// refuse to run if the platform sandbox is unavailable.
+    #[serde(default)]
+    pub sandbox_profile: SandboxProfile,
 }
 
 impl CapabilityPolicy {
@@ -246,6 +303,12 @@ impl CapabilityPolicy {
             })
             .collect();
 
+        // The sandbox profile composes via "max strictness wins" so
+        // intersecting a worktree ceiling with an os_hardened request
+        // yields os_hardened (the host gets the stricter of the two).
+        let sandbox_profile =
+            strictest_sandbox_profile(self.sandbox_profile, requested.sandbox_profile);
+
         Ok(CapabilityPolicy {
             tools,
             capabilities,
@@ -254,7 +317,25 @@ impl CapabilityPolicy {
             recursion_limit,
             tool_arg_constraints,
             tool_annotations,
+            sandbox_profile,
         })
+    }
+}
+
+fn sandbox_profile_strictness(profile: SandboxProfile) -> u8 {
+    match profile {
+        SandboxProfile::Unrestricted => 0,
+        SandboxProfile::Worktree => 1,
+        SandboxProfile::Wasi => 2,
+        SandboxProfile::OsHardened => 3,
+    }
+}
+
+fn strictest_sandbox_profile(left: SandboxProfile, right: SandboxProfile) -> SandboxProfile {
+    if sandbox_profile_strictness(left) >= sandbox_profile_strictness(right) {
+        left
+    } else {
+        right
     }
 }
 

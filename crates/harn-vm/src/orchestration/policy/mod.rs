@@ -23,8 +23,8 @@ pub use approval_rules::{
 pub use types::{
     enforce_tool_arg_constraints, AutoCompactPolicy, BranchSemantics, CapabilityPolicy,
     ContextPolicy, EqIgnored, EscalationPolicy, JoinPolicy, MapPolicy, ModelPolicy,
-    NativeToolFallbackPolicy, ReducePolicy, RetryPolicy, StageContract, ToolArgConstraint,
-    TurnPolicy,
+    NativeToolFallbackPolicy, ReducePolicy, RetryPolicy, SandboxProfile, StageContract,
+    ToolArgConstraint, TurnPolicy,
 };
 
 thread_local! {
@@ -497,6 +497,7 @@ pub fn builtin_ceiling() -> CapabilityPolicy {
         recursion_limit: Some(8),
         tool_arg_constraints: Vec::new(),
         tool_annotations: BTreeMap::new(),
+        sandbox_profile: SandboxProfile::Worktree,
     }
 }
 

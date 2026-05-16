@@ -13,6 +13,7 @@
 //! `stdlib::*` plumbing.
 
 pub use crate::stdlib::sandbox::{
-    command_output, enforce_process_cwd, process_spawn_error, process_violation_error,
-    std_command_for, tokio_command_for, ProcessCommandConfig,
+    active_backend_available, active_backend_name, command_output, enforce_process_cwd,
+    process_spawn_error, process_violation_error, std_command_for, tokio_command_for,
+    ProcessCommandConfig,
 };

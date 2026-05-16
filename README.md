@@ -269,7 +269,15 @@ defaults, safe, prompts, catalog).
   creation, status, diff, shell execution, and cleanup. Worker execution
   profiles can now pin delegated runs to a cwd, env overlay, or managed
   worktree so background execution is reproducible instead of ambient-cwd
-  dependent.
+  dependent. Subprocesses spawned under an active capability ceiling
+  run inside a per-platform OS sandbox by default — Linux Landlock +
+  seccomp, macOS sandbox-exec, Windows AppContainer + Job Object —
+  selected via `CapabilityPolicy::sandbox_profile` and documented in
+  [docs/src/sandboxing.md](docs/src/sandboxing.md). Pipelines that
+  spawn untrusted code opt into `sandbox_profile: "os_hardened"` to
+  make the OS confinement *required* (the spawn fails as
+  `tool_rejected` if the platform mechanism is missing) instead of
+  best-effort.
 - Stronger preflight behavior via `harn check`: import graph resolution,
   literal template/render path validation, import symbol collision detection,
   and host capability contract validation all fail before runtime. Starting in

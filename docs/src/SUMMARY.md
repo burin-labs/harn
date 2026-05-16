@@ -141,6 +141,7 @@
 
 - [Playground](./playground.md)
 - [Host boundary](./host-boundary.md)
+- [Process sandboxing](./sandboxing.md)
 - [Deploy to Render](./deploy/render.md)
 - [Deploy to Fly.io](./deploy/fly.md)
 - [Deploy to Railway](./deploy/railway.md)

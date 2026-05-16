@@ -95,7 +95,7 @@ expect_json_path "minimal run.graph_digest"       "$RUN_JSON" "graph_digest"    
 
 # Pinned digest in the docs page — bump both together if the canonical
 # graph encoding intentionally changes.
-EXPECTED_MIN_DIGEST='sha256:8fda87ea791e3a050904c4e3814c0a05f40e80b3769ccd0c2f77e2690dc422e5'
+EXPECTED_MIN_DIGEST='sha256:3c0fccd1422d3e8a4d5d3d02df9e053775808bffc9ef039fd61241be4913a1e8'
 if [[ "$MIN_DIGEST" != "$EXPECTED_MIN_DIGEST" ]]; then
   echo "FAIL: minimal bundle graph_digest drifted from the value pinned in" >&2
   echo "      docs/src/workflow-authoring-quickstart.md" >&2

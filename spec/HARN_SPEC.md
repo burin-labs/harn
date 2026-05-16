@@ -5325,19 +5325,37 @@ by `harn-wasm` as `executePureComponent` and described by
 imports for filesystem, process, network, clock, random, LLM, or async
 effects, so attempted side effects fail inside the component boundary.
 
-Process execution is wrapped in an OS sandbox when Harn can do so for the
-current platform. On Linux, Harn installs a seccomp-BPF filter that returns
-`EPERM` for denied syscalls and a Landlock filesystem ruleset derived from
-the active `CapabilityPolicy`. On OpenBSD, Harn applies `pledge` promises
-and `unveil` path permissions derived from the same policy. On macOS, Harn
-generates a `sandbox-exec` profile from the active capability policy:
-writes are limited to process plumbing locations plus declared
-`workspace_roots` only when the policy allows workspace writes, and network
-access is allowed only when the policy side-effect ceiling permits
-`network`. Unsupported platforms warn once and run the process unsandboxed
-by default. Set `HARN_HANDLER_SANDBOX=enforce` to fail closed when no OS
-sandbox is available, or `HARN_HANDLER_SANDBOX=off` to disable the process
-wrapper.
+Process execution is wrapped in an OS sandbox selected by the active
+`CapabilityPolicy.sandbox_profile`. The default profile is `worktree`:
+workspace-root path enforcement plus best-effort OS confinement, with
+`HARN_HANDLER_SANDBOX={off,warn,enforce}` controlling what happens when
+the platform mechanism is unavailable. Pipelines opt into
+`sandbox_profile: "os_hardened"` to make the OS confinement required —
+spawns return `tool_rejected` if the platform mechanism is missing,
+regardless of `HARN_HANDLER_SANDBOX`. The per-platform mechanisms are:
+
+- **Linux**: a Landlock LSM ruleset derived from `workspace_roots` and
+  the workspace capability set, plus a seccomp-bpf blocklist of
+  Tier-1 dangerous syscalls (and the network family when the
+  side-effect level is below `network`); `PR_SET_NO_NEW_PRIVS` is
+  always enabled.
+- **macOS**: a `sandbox-exec` profile rendered from the policy.
+  Writes are limited to scratch dirs plus declared `workspace_roots`
+  only when the policy allows workspace writes; network is allowed
+  only when the side-effect ceiling permits `network`.
+- **Windows**: a per-spawn AppContainer with no capability SIDs plus
+  a Job Object capping memory, process count, and UI surface;
+  `icacls` grants the AppContainer SID Modify (or ReadAndExecute)
+  on each `workspace_roots` entry for the lifetime of the spawn.
+- **OpenBSD**: `pledge` promises and `unveil` path permissions
+  derived from the same policy.
+
+`SandboxProfile::Unrestricted` skips both path enforcement and OS
+confinement (used by `harn run` when no orchestration policy is
+active). `SandboxProfile::Wasi` is testbench-only — subprocesses are
+intercepted by the process tape and resolved against recorded WASI
+modules. See [docs/src/sandboxing.md](../docs/src/sandboxing.md) for
+the full per-platform capability → kernel-knob mapping table.
 
 ## Test framework
 

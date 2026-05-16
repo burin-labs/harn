@@ -98,6 +98,26 @@ condensed series summaries instead of full per-patch history.
   reusing the catalog pricing in `std/llm/economics` for budget
   enforcement. See `docs/llm/harn-quickref.md` and
   `docs/src/stdlib/llm-handlers.md`.
+- **Production OS sandbox profiles (#1647).** `CapabilityPolicy`
+  now carries a `sandbox_profile: SandboxProfile` field
+  (`unrestricted` / `worktree` / `os_hardened` / `wasi`). The
+  default `worktree` matches today's behavior — workspace-root path
+  enforcement plus best-effort OS confinement. Pipelines that run
+  untrusted code opt into `os_hardened`, which makes the OS
+  confinement *required* (Linux Landlock + seccomp, macOS
+  sandbox-exec, Windows AppContainer + Job Object): spawns return
+  `tool_rejected` if the platform mechanism is unavailable,
+  regardless of `HARN_HANDLER_SANDBOX`. The `host_call("process",
+  "exec", ...)` host call accepts `sandbox_profile: "..."` to
+  promote a single spawn without rewriting the surrounding policy.
+  Three Harn builtins surface backend identity for diagnostics:
+  `sandbox_active_backend()`, `sandbox_backend_available()`, and
+  `sandbox_active_profile()`. The 1.2k-line `stdlib/sandbox.rs`
+  was split into a `stdlib/sandbox/` directory with one
+  `SandboxBackend` impl per OS, so callers no longer branch on
+  `cfg(target_os)` and adding a backend is one new file. Full
+  per-platform capability → kernel-knob mapping table lives in
+  [docs/src/sandboxing.md](docs/src/sandboxing.md).
 
 ## v0.8.19
 

@@ -38,8 +38,74 @@ use windows_sys::Win32::System::Threading::{
     PROC_THREAD_ATTRIBUTE_SECURITY_CAPABILITIES, STARTF_USESTDHANDLES, STARTUPINFOEXW,
 };
 
-use super::{policy_allows_workspace_write, process_sandbox_roots, ProcessCommandConfig};
-use crate::orchestration::CapabilityPolicy;
+use super::{
+    policy_allows_workspace_write, process_sandbox_roots, process_spawn_error, sandbox_rejection,
+    unavailable, PrepareOutcome, ProcessCommandConfig, SandboxBackend,
+};
+use crate::orchestration::{CapabilityPolicy, SandboxProfile};
+use crate::value::VmError;
+
+pub(super) struct Backend;
+
+impl SandboxBackend for Backend {
+    fn name() -> &'static str {
+        "windows"
+    }
+
+    fn available() -> bool {
+        true
+    }
+
+    /// `std::process::Command` cannot carry an AppContainer
+    /// `SECURITY_CAPABILITIES` block — Windows requires
+    /// `STARTUPINFOEX` plumbing handled directly by `CreateProcessW`.
+    /// Callers that need an `Output` go through [`Backend::run_to_output`];
+    /// callers that need a `Command` (e.g. `harn-hostlib`'s background
+    /// process spawner) get the warn-or-error fallback below.
+    fn prepare_std_command(
+        _program: &str,
+        _args: &[String],
+        _command: &mut std::process::Command,
+        _policy: &CapabilityPolicy,
+        profile: SandboxProfile,
+    ) -> Result<PrepareOutcome, VmError> {
+        unavailable(
+            "Windows process sandboxing requires command_output(); std_command_for() cannot attach an AppContainer to std::process::Command",
+            profile,
+        )
+    }
+
+    fn prepare_tokio_command(
+        _program: &str,
+        _args: &[String],
+        _command: &mut tokio::process::Command,
+        _policy: &CapabilityPolicy,
+        profile: SandboxProfile,
+    ) -> Result<PrepareOutcome, VmError> {
+        unavailable(
+            "Windows process sandboxing requires command_output(); tokio_command_for() cannot attach an AppContainer to tokio::process::Command",
+            profile,
+        )
+    }
+
+    fn run_to_output(
+        program: &str,
+        args: &[String],
+        config: &ProcessCommandConfig,
+        policy: &CapabilityPolicy,
+        _profile: SandboxProfile,
+    ) -> Result<Output, VmError> {
+        // `mod.rs::command_output` only routes here after
+        // `active_sandbox_policy()` decides the spawn should be
+        // confined (profile is `Worktree` or `OsHardened` and
+        // `HARN_HANDLER_SANDBOX` is not `off`). The AppContainer
+        // launch is the only meaningful path on Windows.
+        sandboxed_output(program, args, config, policy).map_err(|error| {
+            process_spawn_error(&error)
+                .unwrap_or_else(|| sandbox_rejection(format!("process sandbox failed: {error}")))
+        })
+    }
+}
 
 static PROFILE_COUNTER: AtomicU64 = AtomicU64::new(1);
 

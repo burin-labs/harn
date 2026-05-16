@@ -22,6 +22,7 @@ fn parent_ceiling_act_with_approval() -> CapabilityPolicy {
         recursion_limit: None,
         tool_arg_constraints: Vec::new(),
         tool_annotations: BTreeMap::new(),
+        sandbox_profile: crate::orchestration::SandboxProfile::default(),
     }
 }
 
@@ -36,6 +37,7 @@ fn parent_ceiling_read_only() -> CapabilityPolicy {
         recursion_limit: None,
         tool_arg_constraints: Vec::new(),
         tool_annotations: BTreeMap::new(),
+        sandbox_profile: crate::orchestration::SandboxProfile::default(),
     }
 }
 

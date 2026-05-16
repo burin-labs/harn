@@ -684,6 +684,15 @@ async fn dispatch_process_exec_after_policy(
         .or_else(|| optional_i64(params, "timeout_ms"))
         .filter(|value| *value > 0)
         .map(|value| value as u64);
+    // Optional per-call profile override. Pipelines that want to
+    // promote a single spawn to `os_hardened` (e.g. running
+    // attacker-controlled code) pass `sandbox_profile: "os_hardened"`
+    // without having to rewrite the surrounding policy. The override
+    // is scoped to this call and pops with the guard at end-of-scope.
+    let _profile_guard = match optional_string(params, "sandbox_profile") {
+        Some(value) => Some(push_sandbox_profile_override(&value)?),
+        None => None,
+    };
     let mut cmd = crate::process_sandbox::tokio_command_for(&program, &args)
         .map_err(|e| VmError::Runtime(format!("host_call process.exec sandbox setup: {e}")))?;
     if let Some(cwd) = optional_string(params, "cwd") {
@@ -904,6 +913,35 @@ fn split_argv(mut argv: Vec<String>) -> Result<(String, Vec<String>), VmError> {
         ));
     }
     Ok((program, argv))
+}
+
+/// Push a transient policy onto the execution stack with the
+/// requested sandbox profile, returning a guard that pops on drop.
+/// Used by `host_call("process", "exec", ...)` to honor a per-call
+/// `sandbox_profile` override without rewriting the surrounding
+/// orchestration policy.
+fn push_sandbox_profile_override(value: &str) -> Result<SandboxProfileGuard, VmError> {
+    let profile = crate::orchestration::SandboxProfile::parse(value).ok_or_else(|| {
+        VmError::Thrown(VmValue::String(Rc::from(format!(
+            "host_call process.exec: unknown sandbox_profile {value:?}; expected one of \"unrestricted\", \"worktree\", \"os_hardened\", \"wasi\""
+        ))))
+    })?;
+    let mut policy = crate::orchestration::current_execution_policy().unwrap_or_default();
+    policy.sandbox_profile = profile;
+    crate::orchestration::push_execution_policy(policy);
+    Ok(SandboxProfileGuard {
+        _private: std::marker::PhantomData,
+    })
+}
+
+struct SandboxProfileGuard {
+    _private: std::marker::PhantomData<*const ()>,
+}
+
+impl Drop for SandboxProfileGuard {
+    fn drop(&mut self) {
+        crate::orchestration::pop_execution_policy();
+    }
 }
 
 fn optional_i64(params: &BTreeMap<String, VmValue>, key: &str) -> Option<i64> {

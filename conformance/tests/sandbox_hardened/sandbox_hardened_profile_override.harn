@@ -1,0 +1,25 @@
+/**
+ * Verify the per-call sandbox_profile parameter on
+ * host_call("process.exec", ...) parses the documented profile names
+ * and rejects unknown values with a typed error rather than silently
+ * running the command unsandboxed.
+ */
+pipeline default() {
+  let argv = if platform() == "windows" {
+    ["cmd", "/C", "echo|set /p=ok"]
+  } else {
+    ["printf", "ok"]
+  }
+  let result = host_call("process.exec", {mode: "argv", argv: argv, sandbox_profile: "worktree"})
+  println(result?.success)
+  println(result?.stdout)
+  let unrestricted = host_call("process.exec", {mode: "argv", argv: argv, sandbox_profile: "unrestricted"})
+  println(unrestricted?.success)
+  let bad = try {
+    host_call("process.exec", {mode: "argv", argv: argv, sandbox_profile: "wide_open"})
+    nil
+  } catch (e) {
+    e
+  }
+  println(bad != nil)
+}
