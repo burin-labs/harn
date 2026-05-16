@@ -1598,7 +1598,24 @@ thinking_block_style = "none"
 # prompt-cache semantics remain provider/model-specific, so don't advertise
 # those through the generic Bedrock route yet.
 # Bedrock-hosted Claude keeps Anthropic's prompt-format preferences while
-# using Bedrock Converse transport.
+# using Bedrock Converse transport. The `anthropic.claude-*` rule must
+# come before the broader `*claude*` fallback so the canonical Bedrock
+# model identifiers pick up the anthropic wire-format fields.
+[[provider.bedrock]]
+model_match = "anthropic.claude-*"
+native_tools = true
+message_wire_format = "anthropic"
+native_tool_wire_format = "anthropic"
+recommended_endpoint = "/model/{model}/converse"
+text_tool_wire_format_supported = true
+prefers_xml_scaffolding = true
+prefers_markdown_scaffolding = false
+structured_output_mode = "xml_tagged"
+supports_assistant_prefill = false
+prefers_role_developer = false
+prefers_xml_tools = true
+thinking_block_style = "thinking_blocks"
+
 [[provider.bedrock]]
 model_match = "*claude*"
 native_tools = true
@@ -1611,14 +1628,6 @@ supports_assistant_prefill = false
 prefers_role_developer = false
 prefers_xml_tools = true
 thinking_block_style = "thinking_blocks"
-
-[[provider.bedrock]]
-model_match = "anthropic.claude-*"
-native_tools = true
-message_wire_format = "anthropic"
-native_tool_wire_format = "anthropic"
-recommended_endpoint = "/model/{model}/converse"
-text_tool_wire_format_supported = true
 
 [[provider.bedrock]]
 model_match = "*"
