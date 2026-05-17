@@ -8,6 +8,12 @@ condensed series summaries instead of full per-patch history.
 
 ## Unreleased
 
+### Fixed
+
+- **Swift protocol artifact CaseIterable synthesis.** Generated Swift
+  wire-value enums now include explicit `allCases` arrays so deprecated
+  cases such as ACP `session/stop` do not break downstream Swift builds.
+
 ## v0.8.23
 
 ### Added
