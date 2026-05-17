@@ -460,6 +460,7 @@ async fn acp_websocket_requires_configured_bearer_auth() {
         response["result"]["agentCapabilities"]["sessionCapabilities"],
         json!({
             "list": {},
+            "resume": {},
         })
     );
     assert!(

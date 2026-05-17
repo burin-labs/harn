@@ -146,6 +146,7 @@ async fn acp_server_handles_session_flow_and_prompt_updates() {
                 initialize["result"]["agentCapabilities"]["sessionCapabilities"],
                 serde_json::json!({
                     "list": {},
+                    "resume": {},
                 })
             );
             assert!(

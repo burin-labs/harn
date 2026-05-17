@@ -74,6 +74,8 @@ public enum HarnProtocolConstants {
 public enum HarnACPAgentMethod: String, Codable, Sendable, CaseIterable {
     case initialize = "initialize"
     case sessionNew = "session/new"
+    case sessionLoad = "session/load"
+    case sessionResume = "session/resume"
     case sessionPrompt = "session/prompt"
     case sessionTruncate = "session/truncate"
     case sessionStop = "session/stop"

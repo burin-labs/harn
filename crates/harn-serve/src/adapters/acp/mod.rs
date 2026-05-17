@@ -1413,21 +1413,8 @@ impl AcpServer {
         }
     }
 
-    async fn handle_session_load(&mut self, id: &serde_json::Value, params: &serde_json::Value) {
-        let Some(session_id) = params
-            .get("sessionId")
-            .or_else(|| params.get("session_id"))
-            .and_then(serde_json::Value::as_str)
-        else {
-            self.send_error(id, -32602, "session/load requires sessionId");
-            return;
-        };
-
-        let Some(session) = self.sessions.get(session_id) else {
-            self.send_error(id, -32004, &format!("Session not found: {session_id}"));
-            return;
-        };
-
+    fn session_restore_result(&self, session_id: &str) -> Option<serde_json::Value> {
+        let session = self.sessions.get(session_id)?;
         let mut session_value = serde_json::json!({
             "sessionId": session_id,
             "cwd": session.cwd.display().to_string(),
@@ -1438,6 +1425,45 @@ impl AcpServer {
         if !session.info.meta.is_empty() {
             session_value["_meta"] = serde_json::Value::Object(session.info.meta.clone());
         }
+
+        Some(serde_json::json!({
+            "session": session_value,
+            "modes": modes::session_mode_state(&session.current_mode_id),
+            "configOptions": modes::config_options_state(
+                &session.current_mode_id,
+                self.pinned_model(session_id).as_deref(),
+            ),
+        }))
+    }
+
+    fn restored_session_id<'a>(
+        &self,
+        id: &serde_json::Value,
+        params: &'a serde_json::Value,
+        method: &str,
+    ) -> Option<&'a str> {
+        let Some(session_id) = params
+            .get("sessionId")
+            .or_else(|| params.get("session_id"))
+            .and_then(serde_json::Value::as_str)
+        else {
+            self.send_error(id, -32602, &format!("{method} requires sessionId"));
+            return None;
+        };
+
+        if !self.sessions.contains_key(session_id) {
+            self.send_error(id, -32602, &format!("unknown session: {session_id}"));
+            return None;
+        };
+
+        harn_vm::agent_sessions::open_or_create(Some(session_id.to_string()));
+        Some(session_id)
+    }
+
+    async fn handle_session_load(&mut self, id: &serde_json::Value, params: &serde_json::Value) {
+        let Some(session_id) = self.restored_session_id(id, params, "session/load") else {
+            return;
+        };
 
         let replay_events =
             match harn_vm::orchestration::load_agent_session_replay_events(session_id).await {
@@ -1468,18 +1494,21 @@ impl AcpServer {
             })
             .collect();
 
-        self.send_response(
-            id,
-            serde_json::json!({
-                "session": session_value,
-                "modes": modes::session_mode_state(&session.current_mode_id),
-                "configOptions": modes::config_options_state(
-                    &session.current_mode_id,
-                    harn_vm::agent_sessions::pinned_model(session_id).as_deref(),
-                ),
-                "replayed": replayed,
-            }),
-        );
+        let mut result = self
+            .session_restore_result(session_id)
+            .expect("validated session should still exist");
+        result["replayed"] = serde_json::json!(replayed);
+        self.send_response(id, result);
+    }
+
+    fn handle_session_resume(&self, id: &serde_json::Value, params: &serde_json::Value) {
+        let Some(session_id) = self.restored_session_id(id, params, "session/resume") else {
+            return;
+        };
+        let result = self
+            .session_restore_result(session_id)
+            .expect("validated session should still exist");
+        self.send_response(id, result);
     }
 
     fn set_session_mode(&mut self, session_id: &str, mode_id: &str) -> Result<bool, String> {
@@ -1715,6 +1744,12 @@ impl AcpServer {
                     return;
                 }
                 self.handle_session_load(&id, &params).await;
+            }
+            "session/resume" => {
+                if self.reject_unauthenticated(&id) {
+                    return;
+                }
+                self.handle_session_resume(&id, &params);
             }
             "session/fork" => {
                 if self.reject_unauthenticated(&id) {

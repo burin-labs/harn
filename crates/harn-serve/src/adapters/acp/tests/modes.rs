@@ -245,6 +245,104 @@ async fn acp_session_load_includes_current_mode_state() {
         .any(|m| m["id"] == "architect"));
 }
 
+/// `session/resume` restores the same session mode/config state as
+/// `session/load`, but it must not replay persisted `session/update`
+/// notifications before responding.
+#[tokio::test(flavor = "current_thread")]
+async fn acp_session_resume_includes_current_mode_state_without_replay() {
+    harn_vm::event_log::reset_active_event_log();
+    let _log = harn_vm::event_log::install_memory_for_current_thread(64);
+
+    let (tx, mut rx) = mpsc::unbounded_channel();
+    let mut server = AcpServer::new_with_output(AcpServerConfig::new(None), AcpOutput::Channel(tx));
+
+    server
+        .handle_incoming_message(serde_json::json!({
+            "jsonrpc": "2.0",
+            "id": 1,
+            "method": "session/new",
+            "params": {"cwd": "."},
+        }))
+        .await;
+    let created = recv_json(&mut rx).await;
+    let session_id = created["result"]["sessionId"]
+        .as_str()
+        .expect("session id")
+        .to_string();
+
+    server
+        .handle_incoming_message(serde_json::json!({
+            "jsonrpc": "2.0",
+            "id": 2,
+            "method": "session/set_mode",
+            "params": {"sessionId": session_id, "modeId": "architect"},
+        }))
+        .await;
+    let _ack = recv_json(&mut rx).await;
+    let _mode_notification = recv_json(&mut rx).await;
+    let _config_notification = recv_json(&mut rx).await;
+
+    harn_vm::agent_events::emit_event(&harn_vm::agent_events::AgentEvent::AgentMessageChunk {
+        session_id: session_id.clone(),
+        content: "do not replay me".to_string(),
+    });
+    tokio::task::yield_now().await;
+
+    server
+        .handle_incoming_message(serde_json::json!({
+            "jsonrpc": "2.0",
+            "id": 3,
+            "method": "session/resume",
+            "params": {"sessionId": session_id},
+        }))
+        .await;
+    let resumed = recv_json(&mut rx).await;
+    assert_eq!(resumed["id"], 3);
+    assert!(resumed.get("method").is_none(), "resume must respond first");
+    assert_eq!(resumed["result"]["modes"]["currentModeId"], "architect");
+    assert_eq!(
+        resumed["result"]["configOptions"][0]["currentValue"],
+        "architect"
+    );
+    assert!(
+        resumed["result"].get("replayed").is_none(),
+        "session/resume must not include replay metadata"
+    );
+    assert!(
+        rx.try_recv().is_err(),
+        "session/resume must not emit replay notifications"
+    );
+
+    harn_vm::agent_events::clear_session_sinks(created["result"]["sessionId"].as_str().unwrap());
+    harn_vm::event_log::reset_active_event_log();
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn acp_session_restore_methods_reject_unknown_sessions() {
+    let (tx, mut rx) = mpsc::unbounded_channel();
+    let mut server = AcpServer::new_with_output(AcpServerConfig::new(None), AcpOutput::Channel(tx));
+
+    for (id, method) in [(1, "session/load"), (2, "session/resume")] {
+        server
+            .handle_incoming_message(serde_json::json!({
+                "jsonrpc": "2.0",
+                "id": id,
+                "method": method,
+                "params": {"sessionId": "missing-session"},
+            }))
+            .await;
+        let response = recv_json(&mut rx).await;
+        assert_eq!(response["id"], id);
+        assert_eq!(response["error"]["code"], -32602);
+        assert!(
+            response["error"]["message"]
+                .as_str()
+                .is_some_and(|message| message.contains("unknown session")),
+            "unexpected error for {method}: {response}"
+        );
+    }
+}
+
 #[tokio::test(flavor = "current_thread")]
 async fn acp_session_load_replays_persisted_agent_events() {
     harn_vm::event_log::reset_active_event_log();

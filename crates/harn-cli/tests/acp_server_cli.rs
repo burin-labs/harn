@@ -163,6 +163,7 @@ fn acp_session_fork_branches_runtime_state_and_dispatches_independently() {
         init["result"]["agentCapabilities"]["sessionCapabilities"],
         json!({
             "list": {},
+            "resume": {},
         })
     );
     assert!(init["result"]["agentCapabilities"]["sessionCapabilities"]

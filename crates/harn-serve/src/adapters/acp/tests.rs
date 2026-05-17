@@ -267,6 +267,7 @@ fn acp_agent_capabilities_use_canonical_initialize_shape() {
         capabilities["sessionCapabilities"],
         serde_json::json!({
             "list": {},
+            "resume": {},
         })
     );
     assert!(
