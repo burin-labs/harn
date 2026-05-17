@@ -118,6 +118,32 @@ fn test_parses_fix_plan_json_args() {
 }
 
 #[test]
+fn test_parses_fix_apply_dry_run_args() {
+    let cli = Cli::parse_from([
+        "harn",
+        "fix",
+        "--apply",
+        "--dry-run",
+        "--json",
+        "--safety",
+        "scope-local",
+        "src/",
+    ]);
+
+    let Command::Fix(args) = cli.command.unwrap() else {
+        panic!("expected fix command");
+    };
+    assert!(args.apply);
+    assert!(args.dry_run);
+    assert!(args.json);
+    assert_eq!(
+        args.safety.map(|safety| safety.as_str()),
+        Some("scope-local")
+    );
+    assert_eq!(args.path, PathBuf::from("src/"));
+}
+
+#[test]
 fn test_parses_agents_conformance_target_url() {
     let cli = Cli::parse_from([
         "harn",

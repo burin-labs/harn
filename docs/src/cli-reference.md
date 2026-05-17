@@ -522,23 +522,30 @@ action that VS Code can run on save:
 
 ## harn fix
 
-Emit a repair plan for one `.harn` file or directory without editing files.
-Plan mode runs the same type-check, lint, and preflight diagnostic passes used
-by `harn check`, keeps diagnostics that carry a registered repair classifier,
-and reports the concrete `FixEdit` edits when a diagnostic already has a
+Emit a repair plan for one `.harn` file or directory, or apply clean
+machine-applicable repairs under an explicit safety ceiling. Plan mode runs
+the same type-check, lint, and preflight diagnostic passes used by
+`harn check`, keeps diagnostics that carry a registered repair classifier, and
+reports the concrete `FixEdit` edits when a diagnostic already has a
 machine-applicable fix.
 
 ```bash
 harn fix --plan main.harn
 harn fix --plan --json main.harn
 harn fix --plan --json --safety behavior-preserving src/
+harn fix --apply --safety behavior-preserving main.harn
+harn fix --apply --dry-run --json --safety scope-local src/
 ```
 
 `--json` returns a `RepairPlan` with `schemaVersion: 1`, `diagnostics[]`,
 `repairs[]`, and `safetyLevels[]`. Each repair includes the diagnostic code,
 repair `{id, summary, safety}`, candidate edits, `applies_cleanly`, and
-`conflicts_with` indexes for overlapping edit ranges. `--apply` is reserved for
-the apply-mode ticket and currently exits with an error.
+`conflicts_with` indexes for overlapping edit ranges. Apply mode requires
+`--safety <format-only|behavior-preserving|scope-local|surface-changing|capability-changing>`;
+`needs-human` repairs are propose-only and are never auto-applied.
+`--apply --json` returns `schemaVersion`, `applied[]`, `skipped[]`, and
+`post_apply_diagnostics_count`. `--dry-run` reports the same apply set without
+writing files.
 
 ## harn check
 

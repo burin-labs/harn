@@ -172,11 +172,12 @@ condensed series summaries instead of full per-patch history.
   auto-invokes `fn main` when present with the `harness` global set by
   the run path (CLI, conformance, bench, playground), and the
   typechecker enforces the new convention via `HARN-NAM-101`: any
-  `fn main` with a signature other than `main(harness: Harness)` is
-  rejected at parse time. `harness.stdio.println` / `print` / `eprintln` /
-  `eprint` and `harness.clock.now_ms` / `monotonic_ms` / `sleep_ms` are
-  wired end-to-end so `examples/hello_v2.harn` runs against the new
-  shape today.
+  `fn main` with a signature other than `main(harness: Harness)` or the
+  unused-capability opt-out `main(_harness: Harness)` is rejected at
+  parse time. `harness.stdio.println` / `print` / `eprintln` / `eprint`
+  and `harness.clock.now_ms` / `monotonic_ms` / `sleep_ms` are wired
+  end-to-end so `examples/hello_v2.harn` runs against the new shape
+  today.
 - **`harn fix --plan --json` repair plans (#1749).** Adds plan-only
   `harn fix` mode for diagnostics with registered repair classifiers.
   `harn fix --plan <path>` prints a summary table and
@@ -186,8 +187,18 @@ condensed series summaries instead of full per-patch history.
   lint, and preflight diagnostics, reports concrete `FixEdit` entries
   when available, marks overlapping edits via `applies_cleanly: false`
   plus `conflicts_with`, and never writes files. `--safety <class>`
-  filters proposals by maximum autonomy class; `--apply` remains
-  reserved for #1752.
+  filters proposals by maximum autonomy class.
+- **`harn fix --apply --safety <class>` guarded repair application
+  (#1752).** Extends `harn fix` with the apply half of the repair
+  contract. Apply mode requires an explicit ceiling from `format-only`
+  through `capability-changing`, rejects `needs-human` as propose-only,
+  filters out conflicts and above-ceiling repairs, writes accepted
+  `FixEdit`s bottom-up per file, then reruns the same diagnostic passes
+  to report `post_apply_diagnostics_count`. `--dry-run` reports the same
+  apply set without writing, and `--apply --json` emits a
+  schema-versioned result with `applied[]`, `skipped[]`, skip reasons,
+  and the post-apply diagnostic count. The `harn --json-schemas` catalog
+  now includes `fix apply`.
 - **`with_scoped_executor` tool-caller middleware (#1702).** Narrows the
   active `CapabilityPolicy` for the duration of one tool dispatch:
   `compose_tool_callers([..., with_scoped_executor({stage, allowed_tools,

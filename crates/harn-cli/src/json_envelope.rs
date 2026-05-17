@@ -177,6 +177,12 @@ pub fn catalog() -> Vec<SchemaEntry> {
             schema_json: None,
         },
         SchemaEntry {
+            command: "fix apply",
+            schema_version: crate::commands::fix::FIX_APPLY_SCHEMA_VERSION,
+            description: "Apply clean repair edits at or below a declared safety ceiling.",
+            schema_json: None,
+        },
+        SchemaEntry {
             command: "skills list",
             schema_version: 1,
             description: "Embedded canonical Harn skill corpus, frontmatter only.",
@@ -284,6 +290,14 @@ mod tests {
         assert_eq!(
             entry.schema_version,
             crate::commands::fix::FIX_PLAN_SCHEMA_VERSION
+        );
+        let entry = entries
+            .iter()
+            .find(|entry| entry.command == "fix apply")
+            .expect("fix apply schema should be registered");
+        assert_eq!(
+            entry.schema_version,
+            crate::commands::fix::FIX_APPLY_SCHEMA_VERSION
         );
     }
 

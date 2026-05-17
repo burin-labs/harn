@@ -280,7 +280,7 @@ SCRIPTING
     /// legacy `--invariant <NAME> <FUNCTION> <FILE>` form to walk the
     /// control-flow path behind a Harn invariant violation.
     Explain(ExplainArgs),
-    /// Emit repair plans for diagnostics without editing files.
+    /// Plan or apply repair-bearing diagnostics under an explicit safety ceiling.
     Fix(FixArgs),
     /// Export machine-readable Harn contracts and bundle manifests.
     Contracts(ContractsArgs),

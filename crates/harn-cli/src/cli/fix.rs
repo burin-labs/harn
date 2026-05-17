@@ -8,9 +8,12 @@ pub(crate) struct FixArgs {
     /// Emit a repair plan without writing files.
     #[arg(long, conflicts_with = "apply")]
     pub plan: bool,
-    /// Apply repairs. Reserved for E1.5; currently returns an error.
+    /// Apply clean repairs at or below the declared safety ceiling.
     #[arg(long, conflicts_with = "plan")]
     pub apply: bool,
+    /// With --apply, report what would change without writing files.
+    #[arg(long, requires = "apply")]
+    pub dry_run: bool,
     /// Maximum repair safety class to include.
     #[arg(long, value_parser = parse_repair_safety, value_name = "SAFETY")]
     pub safety: Option<RepairSafety>,
