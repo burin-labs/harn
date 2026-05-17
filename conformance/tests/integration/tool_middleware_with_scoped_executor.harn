@@ -1,0 +1,111 @@
+/**
+ * with_scoped_executor — preemptively rejects tool names outside the
+ * stage allowlist, decorates approved calls with `audit.scope`, and
+ * pushes a CapabilityPolicy that downstream dispatch sees as the top of
+ * the policy stack.
+ */
+import { with_scoped_executor } from "std/llm/tool_middleware"
+
+fn synthetic_next() {
+  return { call -> return {
+    ok: true,
+    status: "ok",
+    tool_name: call.tool_name,
+    tool_call_id: call.call_id,
+    arguments: call.tool_args,
+    result: "ran " + call.tool_name,
+    rendered_result: "ran " + call.tool_name,
+    observation: "",
+    error: nil,
+    error_category: nil,
+    executor: "harn",
+  } }
+}
+
+fn envelope(name) {
+  return {
+    tool_name: name,
+    tool_args: {},
+    call_id: "call-" + name,
+    declared_executor: "harn",
+    schema: nil,
+    description: "",
+    turn: {iteration: 0, session_id: "scope-test"},
+  }
+}
+
+pipeline default() {
+  let next = synthetic_next()
+  // Allowed tool passes; audit.scope records the stage + allowlist.
+  let research_mw = with_scoped_executor({stage: "research", allowed_tools: ["search_files", "read_file"]})
+  let ok = research_mw(envelope("search_files"), next)
+  println(ok.ok)
+  println(ok.audit.scope.stage)
+  println(join(ok.audit.scope.allowed_tools, ","))
+  println(ok.audit.layers[0].status)
+  // Disallowed tool short-circuits with `scope_violation`.
+  let reject = research_mw(envelope("write_file"), next)
+  println(reject.ok)
+  println(reject.status)
+  println(reject.error_category)
+  println(reject.error)
+  println(reject.audit.layers[0].status)
+  // `on_violation: "raise"` throws instead of short-circuiting.
+  let raising_mw = with_scoped_executor({stage: "plan", allowed_tools: ["sketch_plan"], on_violation: "raise"})
+  try {
+    raising_mw(envelope("edit_file"), next)
+    println("no-throw")
+  } catch (e) {
+    println("caught")
+    println(e)
+  }
+  // Missing `allowed_tools` skips the preemptive check; the middleware
+  // still pushes a side_effect_level for the duration of `next`.
+  let ceiling_mw = with_scoped_executor({stage: "edit", side_effect_level: "workspace_write"})
+  let r3 = ceiling_mw(envelope("anything"), next)
+  println(r3.ok)
+  println(r3.audit.scope.stage)
+  println(contains(r3.audit.scope.keys(), "allowed_tools"))
+  // Invalid on_violation rejects at middleware-construction time.
+  try {
+    with_scoped_executor({stage: "x", allowed_tools: ["y"], on_violation: "log"})
+    println("no-throw-ctor")
+  } catch (e) {
+    println("caught-ctor")
+  }
+  // Defense-in-depth: the pushed CapabilityPolicy is visible to the
+  // runtime's `enforce_current_policy_for_tool`, so even if a caller
+  // bypasses the preemptive check (e.g. by dispatching a different tool
+  // from inside `next`), the runtime still rejects it.
+  var tools = tool_registry()
+  tools = tool_define(
+    tools,
+    "read_note",
+    "Read a note",
+    {
+      handler: { args -> "read " + args.path },
+      parameters: {path: {type: "string"}},
+      returns: {type: "string"},
+    },
+  )
+  tools = tool_define(
+    tools,
+    "write_note",
+    "Write a note",
+    {
+      handler: { args -> "wrote " + args.path },
+      parameters: {path: {type: "string"}},
+      returns: {type: "string"},
+    },
+  )
+  let dispatch_next = { call -> return agent_dispatch_tool_call(
+    {name: "write_note", id: call.call_id, arguments: {path: "notes.txt"}},
+    tools,
+  ) }
+  let dispatch_mw = with_scoped_executor({stage: "audit", allowed_tools: ["read_note"]})
+  // Envelope advertises an allowed name; `next` rewrites to the denied
+  // name to simulate a misbehaving inner layer.
+  let runtime_deny = dispatch_mw(envelope("read_note"), dispatch_next)
+  println(runtime_deny.ok)
+  println(runtime_deny.error_category)
+}

@@ -89,6 +89,7 @@ the field names align with prevailing specs where they exist:
 | `kind?` | ACP ToolCall.kind | One of `read`/`edit`/`delete`/`move`/`search`/`execute`/`think`/`fetch`/`other` |
 | `hints?` | MCP tool annotations | `{read_only?, destructive?, idempotent?, open_world?}` |
 | `consent?` | (coined; ACP/MCP keep this off the call object) | `{decision, decided_by, decided_at}` |
+| `scope?` | (coined; mirrors `PersonaRuntimeBinding.stages`) | `{stage, allowed_tools?, side_effect_level?}` — the scoped capability surface this call ran under |
 | `layers?` | (coined) | `[{name, status, started_at, ended_at, error?}]` per-layer audit log |
 | `metadata?` | A2A `metadata`, LangChain | Free-form extension slot |
 
@@ -102,8 +103,9 @@ When a layer short-circuits, prefer one of these `status` values so
 composition stays predictable:
 
 `"ok"`, `"tool_not_found"`, `"schema_violation"`, `"consent_denied"`,
-`"policy_blocked"`, `"executor_error"`, `"redacted"`, `"dry_run"`,
-`"rate_limited"`, `"exception"`, `"tool_middleware_exception"`.
+`"policy_blocked"`, `"scope_violation"`, `"executor_error"`,
+`"redacted"`, `"dry_run"`, `"rate_limited"`, `"exception"`,
+`"tool_middleware_exception"`.
 
 ## Bundled middleware
 
@@ -169,6 +171,49 @@ same append-only JSONL sink used by `sink: "local"`.
 Denied calls short-circuit with `consent_denied`; approved calls
 proceed and record the decision in `audit.consent`. Pair with the host
 UX (e.g. burin-code's approval modal) for destructive tools.
+
+### `with_scoped_executor(opts) -> caller`
+
+Narrows the active `CapabilityPolicy` for the duration of one tool
+dispatch. Wraps the downstream chain in `with_execution_policy(...)`
+so the runtime's existing `enforce_current_policy_for_tool` machinery
+(capability ceilings, side-effect ceiling, tool-arg constraints) sees
+the scoped policy as the top of the stack — the scoped policy is
+intersected with the ambient policy, so a stage can only tighten the
+surface, never widen it. A preemptive tool-name check short-circuits
+with `status: "scope_violation"` so the audit chain captures the stage
+label even when the wrapped dispatch never runs.
+
+Compose this **outside** binder / consent layers so it can reject
+before either does expensive work:
+
+```harn,ignore
+let caller = compose_tool_callers([
+  with_audit_log({...}),
+  with_scoped_executor({stage: "research", allowed_tools: ["search_files", "read_file"]}),
+  with_consent(prompt),
+  default_tool_caller(),
+])
+```
+
+Options:
+
+- `stage` (default `"scoped"`) — surfaced on `audit.scope.stage` and in
+  layer/error messages.
+- `allowed_tools` (list of tool names; empty / missing skips the
+  preemptive check and any tool-surface restriction).
+- `side_effect_level` (`"none"` / `"read_only"` / `"workspace_write"` /
+  `"process_exec"` / `"network"`; tightens the ambient ceiling).
+- `capabilities` (capability → operation allowlist; same shape as
+  `CapabilityPolicy.capabilities`).
+- `on_violation` (`"reject"` (default) → short-circuit with
+  `scope_violation` and a typed receipt; `"raise"` → throw so the agent
+  loop's `try { ... }` can react).
+
+Companion to per-stage persona declarations (`PersonaRuntimeBinding.stages`):
+the persona runtime auto-installs stage policies at step boundaries,
+while this middleware lets standalone tool callers narrow the surface
+without declaring a full persona manifest.
 
 ### `with_dry_run(opts?) -> caller`
 
