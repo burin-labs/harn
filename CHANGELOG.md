@@ -61,6 +61,12 @@ condensed series summaries instead of full per-patch history.
   module. New `harn_modules::fingerprint` module exposes
   `fingerprint_program` / `fingerprint_file` / `fingerprint_source` for
   reuse by editors and the bytecode cache.
+- **`harn routes <root> [--json]` static trigger inventory (#1788).** New
+  top-level command audits declarative trigger projects without executing
+  handlers, reporting route paths, handler modules, declared budgets, inferred
+  host capabilities, vendor-lock disclosure, and template framework-overhead
+  tokens. The JSON mode uses the standard `{ schemaVersion, ok, data, error,
+  warnings }` envelope and is registered in `harn --json-schemas`.
 - **`harn explain HARN-<CAT>-<NNN>` text + `--json` envelope (#1748).** The
   `explain` subcommand now dispatches on registered stable diagnostic codes
   in addition to its original control-flow invariant form. `harn explain

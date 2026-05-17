@@ -1420,6 +1420,27 @@ under `deploy/<provider>/`, optionally builds/pushes `--image` with
 `--build`, and syncs locally available secrets unless `--no-secret-sync` is
 set.
 
+## harn routes
+
+Static trigger-surface inventory for a project manifest.
+
+```bash
+# Human-readable table of declared trigger routes.
+harn routes .
+
+# Stable JSON envelope for automation and deployment audits.
+harn routes . --json
+```
+
+`harn routes <root>` loads the nearest `harn.toml`, validates the manifest
+trigger declarations, and reads local handler source without executing it. The
+report includes trigger kind/provider, HTTP route path when the binding exposes
+one, local module and handler, match events, declared budgets, statically
+required host capabilities, vendor-lock disclosure from provider-specific
+imports, and template framework overhead tokens for non-trivial
+`render(...)` / `render_prompt(...)` / `render_string(...)` use. Webhook and
+A2A-push triggers default to `/triggers/<id>` when no path is declared.
+
 ## harn trigger replay
 
 Replay a persisted `TriggerEvent` from a standalone EventLog snapshot

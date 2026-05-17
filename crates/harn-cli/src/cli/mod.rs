@@ -42,6 +42,7 @@ mod profile;
 mod provider;
 mod providers;
 mod quickstart;
+mod routes;
 mod run;
 mod runs;
 mod serve;
@@ -152,6 +153,7 @@ pub(crate) use providers::{
     ProvidersValidateArgs,
 };
 pub(crate) use quickstart::QuickstartArgs;
+pub(crate) use routes::RoutesArgs;
 pub(crate) use run::RunArgs;
 pub(crate) use runs::{ReplayArgs, RunsArgs, RunsCommand};
 pub(crate) use serve::{
@@ -337,6 +339,8 @@ SCRIPTING
     Portal(PortalArgs),
     /// Replay and inspect historical trigger dispatches from the event log.
     Trigger(TriggerArgs),
+    /// Statically enumerate declared trigger routes and their requirements.
+    Routes(RoutesArgs),
     /// Inspect Harn Flow atom, slice, and predicate audit state.
     Flow(FlowArgs),
     /// Validate, preview, and run portable workflow bundles.
