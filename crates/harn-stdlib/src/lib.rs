@@ -250,6 +250,10 @@ pub const STDLIB_SOURCES: &[StdlibSource] = &[
         source: include_str!("stdlib/llm/tool_middleware.harn"),
     },
     StdlibSource {
+        module: "llm/tool_binder",
+        source: include_str!("stdlib/llm/tool_binder.harn"),
+    },
+    StdlibSource {
         module: "llm/refine",
         source: include_str!("stdlib/llm/refine.harn"),
     },
@@ -631,6 +635,10 @@ pub const STDLIB_PROMPT_ASSETS: &[StdlibPromptAsset] = &[
         source: include_str!("stdlib/llm/prompts/pairwise_rerank_user.harn.prompt"),
     },
     StdlibPromptAsset {
+        path: "llm/prompts/tool_binder_user.harn.prompt",
+        source: include_str!("stdlib/llm/prompts/tool_binder_user.harn.prompt"),
+    },
+    StdlibPromptAsset {
         path: "workflow/prompts/stage.harn.prompt",
         source: include_str!("stdlib/workflow/prompts/stage.harn.prompt"),
     },
@@ -911,6 +919,7 @@ mod tests {
             "waitpoint",
             "llm/handlers",
             "llm/tool_middleware",
+            "llm/tool_binder",
             "llm/ensemble",
             "llm/rerank",
             "personas/prelude",

@@ -1,0 +1,154 @@
+/**
+ * std/llm/tool_binder::with_natural_language_executor — middleware coverage.
+ *
+ * Verifies five scenarios through the composable tool-caller seam, using
+ * an injected `binder_fn` so the test doesn't need a live provider and
+ * `mock_time` so timeout semantics are deterministic:
+ *
+ *   1. Passthrough when args already validate against the schema (no
+ *      binder hop, audit.binder.status = "skipped").
+ *   2. Passthrough when no natural-language intent is supplied.
+ *   3. Successful binder dispatch — intent is bound into structured args
+ *      via the binder LLM, original args are replaced before next().
+ *   4. Timeout → audit.binder.status = "timeout"; envelope passes
+ *      through unchanged with the stripped args.
+ *   5. on_failure: "reject" — schema-error from binder short-circuits
+ *      with a `schema_violation` error and never reaches next().
+ */
+import { with_natural_language_executor } from "std/llm/tool_binder"
+import { compose_tool_callers } from "std/llm/tool_middleware"
+
+fn synthetic_next() {
+  return { call -> return {
+    ok: true,
+    status: "ok",
+    tool_name: call.tool_name,
+    tool_call_id: call.call_id,
+    arguments: call.tool_args,
+    result: "ran " + call.tool_name,
+    rendered_result: "ran " + call.tool_name,
+    observation: "[result of " + call.tool_name + "]\n",
+    error: nil,
+    error_category: nil,
+    executor: "harn",
+  } }
+}
+
+fn envelope(name, args, schema) {
+  return {
+    tool_name: name,
+    tool_args: args,
+    call_id: "call-" + name,
+    declared_executor: "harn",
+    schema: schema,
+    description: "Read or write a file at the given path",
+    turn: {iteration: 1, session_id: ""},
+  }
+}
+
+fn file_schema() {
+  return {
+    type: "object",
+    properties: {path: {type: "string"}, contents: {type: "string"}},
+    required: ["path"],
+  }
+}
+
+pipeline default() {
+  let next = synthetic_next()
+  let schema = file_schema()
+  // (1) Args already validate → binder is skipped, no hop, status="skipped".
+  let mw_skip = with_natural_language_executor(
+    {
+      provider: "cerebras",
+      model: "gpt-oss-120b",
+      timeout_ms: 100,
+      binder_fn: { _p, _s, _o ->
+        throw "binder should not be invoked when args are valid"
+      },
+    },
+  )
+  let r1 = mw_skip(envelope("file_read", {path: "/etc/hosts"}, schema), next)
+  println(r1.ok)
+  println(r1.audit.binder.status)
+  println(r1.audit.binder.reason)
+  println(r1.audit.binder.attempts)
+  println(r1.arguments.path)
+  // (2) No intent provided AND args don't validate → still skipped because
+  // there's nothing to bind from. Audit reason = "no_intent".
+  let r2 = mw_skip(envelope("file_read", {}, schema), next)
+  println(r2.audit.binder.status)
+  println(r2.audit.binder.reason)
+  // (3) Successful binder dispatch — invalid args + intent → binder rewrites.
+  let mock_binder = { _prompt, _system, _opts -> return {
+    text: "{\"path\":\"/var/log/syslog\",\"contents\":\"hello\"}",
+    model: "mock",
+    provider: "mock",
+    input_tokens: 0,
+    output_tokens: 0,
+  } }
+  let mw_ok = with_natural_language_executor(
+    {provider: "cerebras", model: "gpt-oss-120b", timeout_ms: 100, binder_fn: mock_binder},
+  )
+  let _ = mock_time(0)
+  let r3 = mw_ok(envelope("file_read", {_nl_intent: "read /var/log/syslog and append hello"}, schema), next)
+  let _ = unmock_time()
+  println(r3.ok)
+  println(r3.audit.binder.status)
+  println(r3.audit.binder.attempts)
+  println(r3.arguments.path)
+  println(r3.arguments.contents)
+  // Intent must be stripped before dispatch.
+  println(contains(r3.arguments.keys(), "_nl_intent"))
+  // (4) Timeout: binder takes longer than timeout_ms; envelope passes through.
+  let slow_binder = { _prompt, _system, _opts ->
+    let _ = advance_time(250)
+    return {
+      text: "{\"path\":\"/never/reached\"}",
+      model: "mock",
+      provider: "mock",
+      input_tokens: 0,
+      output_tokens: 0,
+    }
+  }
+  let mw_timeout = with_natural_language_executor(
+    {provider: "cerebras", model: "gpt-oss-120b", timeout_ms: 100, binder_fn: slow_binder},
+  )
+  let _ = mock_time(0)
+  let r4 = mw_timeout(envelope("file_read", {_nl_intent: "do something slow"}, schema), next)
+  let _ = unmock_time()
+  println(r4.ok)
+  println(r4.audit.binder.status)
+  println(r4.audit.binder.latency_ms >= 100)
+  // Stripped args reach next() — intent is gone, original args (empty here) pass through.
+  println(contains(r4.arguments.keys(), "_nl_intent"))
+  // (5) on_failure: "reject" — bad binder JSON short-circuits with schema_violation.
+  let bad_binder = { _prompt, _system, _opts -> return {text: "not json at all", model: "mock", provider: "mock", input_tokens: 0, output_tokens: 0} }
+  let was_dispatched = atomic(0)
+  let watch_next = { call ->
+    let _ = atomic_set(was_dispatched, 1)
+    return next(call)
+  }
+  let mw_reject = with_natural_language_executor(
+    {
+      provider: "cerebras",
+      model: "gpt-oss-120b",
+      timeout_ms: 100,
+      binder_fn: bad_binder,
+      on_failure: "reject",
+    },
+  )
+  let r5 = mw_reject(envelope("file_read", {_nl_intent: "anything"}, schema), watch_next)
+  println(r5.ok)
+  println(r5.error_category)
+  println(r5.audit.binder.status)
+  println(atomic_get(was_dispatched) == 1)
+  // (6) compose_tool_callers stacks cleanly with the binder.
+  let composed = compose_tool_callers([mw_ok])
+  let _ = mock_time(0)
+  let r6 = composed(envelope("file_read", {_nl_intent: "read /var/log/syslog and append hello"}, schema), next)
+  let _ = unmock_time()
+  println(r6.ok)
+  println(r6.audit.binder.status)
+  println(r6.arguments.path)
+}
