@@ -269,7 +269,10 @@ When a tool's result carries a handoff payload (under `__handoff` /
 `handoff(...)` and surfaces the typed record on `audit.handoff`. The
 optional `sink(record, call)` callback fires once per emitted handoff
 for side-effecting persistence. Pairs with `std/handoffs` for the
-typed handoff schema.
+typed handoff schema. If the payload includes `policy_override`, the
+normalized audit record preserves it at `audit.handoff.policy_override`
+so downstream handoff dispatch can run the target under that replacement
+execution policy.
 
 Options: `sink` (callback), `detect` (custom locator),
 `keys` (extra result keys to inspect, default `["__handoff", "handoff"]`),

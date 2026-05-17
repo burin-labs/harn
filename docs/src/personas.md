@@ -101,6 +101,15 @@ by persona code through the `context.predicates` map passed to
 in the EventLog and accepts optional local dispatcher hooks for tests or
 embedded adapters.
 
+Handoff payloads may include `policy_override`, a `CapabilityPolicy` dict such
+as `{ tools = ["read_note"], side_effect_level = "read_only" }`. Dispatch
+preserves the policy on `handoff.policy_override`, records
+`audit.scope.source_handoff`, and the receiving persona/sub-agent adopts that
+policy as the top execution-policy frame for the handoff run. This is a
+replacement for the target's current session policy during the handoff, not a
+merge with it, so route authors should make the override explicit and scoped to
+the delegated task.
+
 ## Validation
 
 `harn persona check`, `harn persona list`, and `harn persona inspect` validate

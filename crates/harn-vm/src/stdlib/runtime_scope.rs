@@ -38,6 +38,16 @@ async fn call_scoped_closure(closure: Rc<VmClosure>, label: &str) -> Result<VmVa
 }
 
 pub(crate) fn register_runtime_scope_builtins(vm: &mut Vm) {
+    vm.register_builtin("current_policy", |_args, _out| {
+        let Some(policy) = crate::orchestration::current_execution_policy() else {
+            return Ok(VmValue::Nil);
+        };
+        let json = serde_json::to_value(policy).map_err(|error| {
+            VmError::Runtime(format!("current_policy: serialize policy failed: {error}"))
+        })?;
+        Ok(crate::stdlib::json_to_vm_value(&json))
+    });
+
     vm.register_async_builtin("with_autonomy_policy", |args| async move {
         let policy_value = args
             .first()
@@ -71,6 +81,24 @@ pub(crate) fn register_runtime_scope_builtins(vm: &mut Vm) {
         crate::orchestration::push_execution_policy(effective);
         let _guard = ScopeGuard::new(crate::orchestration::pop_execution_policy);
         call_scoped_closure(closure, "with_execution_policy").await
+    });
+
+    vm.register_async_builtin("__harn_with_execution_policy_override", |args| async move {
+        let policy_value = args.first().ok_or_else(|| {
+            VmError::Runtime("__harn_with_execution_policy_override: policy is required".into())
+        })?;
+        let policy = serde_json::from_value::<crate::orchestration::CapabilityPolicy>(
+            crate::llm::helpers::vm_value_to_json(policy_value),
+        )
+        .map_err(|error| {
+            VmError::Runtime(format!(
+                "__harn_with_execution_policy_override: invalid policy: {error}"
+            ))
+        })?;
+        let closure = closure_arg(&args, 1, "__harn_with_execution_policy_override")?;
+        crate::orchestration::push_execution_policy(policy);
+        let _guard = ScopeGuard::new(crate::orchestration::pop_execution_policy);
+        call_scoped_closure(closure, "__harn_with_execution_policy_override").await
     });
 
     vm.register_async_builtin("with_approval_policy", |args| async move {
