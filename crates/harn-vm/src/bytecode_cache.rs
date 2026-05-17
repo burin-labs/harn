@@ -19,9 +19,11 @@
 //! schema_ver   : u32       = SCHEMA_VERSION
 //! version_len  : u32
 //! harn_version : [u8; version_len]
+//! compiler_tag : u8        bitmask of active CompilerOptions
+//! kind         : u8        1 = entry chunk, 2 = module artifact
 //! source_hash  : [u8; 32]
 //! import_hash  : [u8; 32]
-//! payload      : bincode-serialized CachedChunk
+//! payload      : bincode-serialized payload for `kind`
 //! ```
 //!
 //! The header lets a stale binary detect a future-version artifact
@@ -41,23 +43,33 @@ use std::path::{Path, PathBuf};
 use sha2::{Digest, Sha256};
 
 use crate::chunk::{CachedChunk, Chunk};
+use crate::compiler::CompilerOptions;
+use crate::module_artifact::ModuleArtifact;
 
-/// Header magic. The trailing NULs reserve room for a one-byte type
-/// discriminator should we later store IR alongside bytecode in the
-/// same file.
+/// Header magic for all bytecode-cache artifact families.
 pub const MAGIC: &[u8; 8] = b"HARNBC\0\0";
 
 /// On-disk format version. Bump when [`CachedChunk`] or the header
 /// layout changes in a backwards-incompatible way.
-pub const SCHEMA_VERSION: u32 = 1;
+pub const SCHEMA_VERSION: u32 = 2;
 
 /// Compile-time Harn release. Cache files written by a different release
 /// are rejected on load.
 pub const HARN_VERSION: &str = env!("CARGO_PKG_VERSION");
 
-/// Conventional extension for cache files. Used both for entries in the
-/// shared cache dir and for adjacent precompiled artifacts.
+/// Conventional extension for entry-chunk cache files.
 pub const CACHE_EXTENSION: &str = "harnbc";
+
+/// Conventional extension for module-artifact cache files. Distinct from
+/// [`CACHE_EXTENSION`] so the same `.harn` source can have both shipped
+/// adjacent if needed (e.g. when a file is both an executable entry and
+/// imported by other files).
+pub const MODULE_CACHE_EXTENSION: &str = "harnmod";
+
+/// On-disk discriminant for a [`Chunk`] payload.
+const KIND_ENTRY_CHUNK: u8 = 1;
+/// On-disk discriminant for a [`ModuleArtifact`] payload.
+const KIND_MODULE_ARTIFACT: u8 = 2;
 
 /// Environment override for the cache directory. When set, takes
 /// precedence over the XDG and home-directory fallbacks.
@@ -76,12 +88,16 @@ pub struct LookupOutcome {
 }
 
 /// Cache key components for a single pipeline source. Equality of all
-/// three fields is necessary and sufficient for cache reuse.
+/// fields is necessary and sufficient for cache reuse.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct CacheKey {
     pub source_hash: [u8; 32],
     pub import_graph_hash: [u8; 32],
     pub harn_version: &'static str,
+    /// Compact tag for active [`CompilerOptions`]. Flipping
+    /// `HARN_DISABLE_OPTIMIZATIONS` between runs would otherwise reuse a
+    /// chunk compiled under the wrong setting.
+    pub compiler_tag: u8,
 }
 
 impl CacheKey {
@@ -95,15 +111,21 @@ impl CacheKey {
             source_hash,
             import_graph_hash,
             harn_version: HARN_VERSION,
+            compiler_tag: compiler_options_tag(CompilerOptions::from_env()),
         }
     }
 
-    /// Cache filename for this key. We hash by source content alone so
-    /// that two invocations of the same source from different paths
+    /// Entry-chunk filename for this key. We hash by source content
+    /// alone so two invocations of the same source from different paths
     /// share a cache entry; the header's import-graph hash still gates
     /// reuse on a per-load basis.
     pub fn filename(&self) -> String {
         format!("{}.{}", hex(&self.source_hash), CACHE_EXTENSION)
+    }
+
+    /// Module-artifact filename for this key.
+    pub fn module_filename(&self) -> String {
+        format!("{}.{}", hex(&self.source_hash), MODULE_CACHE_EXTENSION)
     }
 }
 
@@ -181,50 +203,132 @@ pub fn store(key: &CacheKey, chunk: &Chunk) -> io::Result<()> {
     }
     let dir = cache_dir();
     fs::create_dir_all(&dir)?;
-    write_atomic(&dir.join(key.filename()), key, chunk)
+    write_atomic_chunk(&dir.join(key.filename()), key, chunk)
 }
 
-/// Write a precompiled artifact to an explicit path, for use by the
-/// `harn precompile` subcommand. The header still records the key, so
-/// adjacent artifacts shipped with source are validated like any other
-/// cache hit.
+/// Write a precompiled entry-chunk artifact to an explicit path, for
+/// use by the `harn precompile` subcommand. The header still records
+/// the key, so adjacent artifacts shipped with source are validated
+/// like any other cache hit.
 pub fn store_at(path: &Path, key: &CacheKey, chunk: &Chunk) -> io::Result<()> {
-    if let Some(parent) = path.parent() {
-        if !parent.as_os_str().is_empty() {
-            fs::create_dir_all(parent)?;
+    ensure_parent_dir(path)?;
+    write_atomic_chunk(path, key, chunk)
+}
+
+/// Look up the [`ModuleArtifact`] for `source_path` (whose contents are
+/// `source`). Mirrors [`load`] but for the `.harnmod` family.
+pub fn load_module(source_path: &Path, source: &str) -> ModuleLookupOutcome {
+    let key = CacheKey::from_source(source_path, source);
+    if !cache_enabled() {
+        return ModuleLookupOutcome {
+            key,
+            artifact: None,
+        };
+    }
+    let mut candidates: Vec<PathBuf> = Vec::with_capacity(2);
+    if let Some(adjacent) = adjacent_module_cache_path(source_path) {
+        candidates.push(adjacent);
+    }
+    candidates.push(cache_dir().join(key.module_filename()));
+    for path in candidates {
+        match read_module_if_matches(&path, &key) {
+            Ok(Some(artifact)) => {
+                return ModuleLookupOutcome {
+                    key,
+                    artifact: Some(artifact),
+                }
+            }
+            Ok(None) => continue,
+            Err(_) => continue,
         }
     }
-    write_atomic(path, key, chunk)
+    ModuleLookupOutcome {
+        key,
+        artifact: None,
+    }
 }
 
-/// Path to the adjacent precompiled artifact for `source_path`, if any.
-/// `foo.harn` → `foo.harnbc`; files without a stem or extension return
-/// `None`.
+/// Persist `artifact` to the shared cache under `key`. Atomic;
+/// concurrent invocations race safely.
+pub fn store_module(key: &CacheKey, artifact: &ModuleArtifact) -> io::Result<()> {
+    if !cache_enabled() {
+        return Ok(());
+    }
+    let dir = cache_dir();
+    fs::create_dir_all(&dir)?;
+    write_atomic_module(&dir.join(key.module_filename()), key, artifact)
+}
+
+/// Write a module artifact to an explicit path.
+pub fn store_module_at(path: &Path, key: &CacheKey, artifact: &ModuleArtifact) -> io::Result<()> {
+    ensure_parent_dir(path)?;
+    write_atomic_module(path, key, artifact)
+}
+
+/// Result of a [`load_module`] lookup. Carries the precomputed key so
+/// the caller can write it back on a miss without rehashing.
+pub struct ModuleLookupOutcome {
+    pub key: CacheKey,
+    pub artifact: Option<ModuleArtifact>,
+}
+
+/// Path to the adjacent precompiled entry-chunk artifact for
+/// `source_path`. `foo.harn` → `foo.harnbc`.
 pub fn adjacent_cache_path(source_path: &Path) -> Option<PathBuf> {
+    adjacent_path_with_extension(source_path, CACHE_EXTENSION)
+}
+
+/// Path to the adjacent precompiled module-artifact for `source_path`.
+/// `foo.harn` → `foo.harnmod`.
+pub fn adjacent_module_cache_path(source_path: &Path) -> Option<PathBuf> {
+    adjacent_path_with_extension(source_path, MODULE_CACHE_EXTENSION)
+}
+
+fn adjacent_path_with_extension(source_path: &Path, ext: &str) -> Option<PathBuf> {
     let stem = source_path.file_stem()?;
     if stem.is_empty() {
         return None;
     }
     let parent = source_path.parent().unwrap_or_else(|| Path::new(""));
     let mut out = parent.join(stem);
-    out.set_extension(CACHE_EXTENSION);
+    out.set_extension(ext);
     Some(out)
 }
 
-fn write_atomic(target: &Path, key: &CacheKey, chunk: &Chunk) -> io::Result<()> {
+fn ensure_parent_dir(path: &Path) -> io::Result<()> {
+    if let Some(parent) = path.parent() {
+        if !parent.as_os_str().is_empty() {
+            fs::create_dir_all(parent)?;
+        }
+    }
+    Ok(())
+}
+
+fn write_atomic_chunk(target: &Path, key: &CacheKey, chunk: &Chunk) -> io::Result<()> {
     let cached = chunk.freeze_for_cache();
     let payload = bincode::serialize(&cached)
         .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e.to_string()))?;
+    write_atomic(target, key, KIND_ENTRY_CHUNK, &payload)
+}
 
+fn write_atomic_module(target: &Path, key: &CacheKey, artifact: &ModuleArtifact) -> io::Result<()> {
+    let payload = bincode::serialize(artifact)
+        .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e.to_string()))?;
+    write_atomic(target, key, KIND_MODULE_ARTIFACT, &payload)
+}
+
+fn write_atomic(target: &Path, key: &CacheKey, kind: u8, payload: &[u8]) -> io::Result<()> {
     let mut buf: Vec<u8> = Vec::with_capacity(payload.len() + 128);
     buf.extend_from_slice(MAGIC);
     buf.extend_from_slice(&SCHEMA_VERSION.to_le_bytes());
     let version_bytes = HARN_VERSION.as_bytes();
     buf.extend_from_slice(&(version_bytes.len() as u32).to_le_bytes());
     buf.extend_from_slice(version_bytes);
+    buf.push(key.compiler_tag);
+    buf.push(kind);
     buf.extend_from_slice(&key.source_hash);
     buf.extend_from_slice(&key.import_graph_hash);
-    buf.extend_from_slice(&payload);
+    buf.extend_from_slice(payload);
 
     let tmp_name = match target.file_name() {
         Some(name) => format!(".{}.{}.tmp", name.to_string_lossy(), std::process::id(),),
@@ -244,7 +348,14 @@ fn write_atomic(target: &Path, key: &CacheKey, chunk: &Chunk) -> io::Result<()> 
     }
 }
 
-fn read_chunk_if_matches(path: &Path, key: &CacheKey) -> io::Result<Option<Chunk>> {
+/// Parsed cache header. Read by both the chunk and module loaders so the
+/// header-validation logic stays in one place.
+struct ParsedHeader {
+    kind: u8,
+    payload: Vec<u8>,
+}
+
+fn read_header_if_matches(path: &Path, key: &CacheKey) -> io::Result<Option<ParsedHeader>> {
     let mut file = match fs::File::open(path) {
         Ok(f) => f,
         Err(err) if err.kind() == io::ErrorKind::NotFound => return Ok(None),
@@ -262,9 +373,8 @@ fn read_chunk_if_matches(path: &Path, key: &CacheKey) -> io::Result<Option<Chunk
         return Ok(None);
     }
     let version_len = u32::from_le_bytes(header[12..16].try_into().unwrap()) as usize;
-    // Sanity-check the version string length to keep a corrupted file
-    // from forcing an unbounded allocation.
     if version_len > 256 {
+        // Bound the alloc so a corrupted file cannot force an unbounded read.
         return Ok(None);
     }
     let mut version_buf = vec![0u8; version_len];
@@ -274,6 +384,14 @@ fn read_chunk_if_matches(path: &Path, key: &CacheKey) -> io::Result<Option<Chunk
     if version_buf != key.harn_version.as_bytes() {
         return Ok(None);
     }
+    let mut compiler_and_kind = [0u8; 2];
+    if file.read_exact(&mut compiler_and_kind).is_err() {
+        return Ok(None);
+    }
+    if compiler_and_kind[0] != key.compiler_tag {
+        return Ok(None);
+    }
+    let kind = compiler_and_kind[1];
     let mut hashes = [0u8; 64];
     if file.read_exact(&mut hashes).is_err() {
         return Ok(None);
@@ -285,11 +403,48 @@ fn read_chunk_if_matches(path: &Path, key: &CacheKey) -> io::Result<Option<Chunk
     if file.read_to_end(&mut payload).is_err() {
         return Ok(None);
     }
-    let cached: CachedChunk = match bincode::deserialize(&payload) {
+    Ok(Some(ParsedHeader { kind, payload }))
+}
+
+fn read_chunk_if_matches(path: &Path, key: &CacheKey) -> io::Result<Option<Chunk>> {
+    let Some(header) = read_header_if_matches(path, key)? else {
+        return Ok(None);
+    };
+    if header.kind != KIND_ENTRY_CHUNK {
+        return Ok(None);
+    }
+    let cached: CachedChunk = match bincode::deserialize(&header.payload) {
         Ok(c) => c,
         Err(_) => return Ok(None),
     };
     Ok(Some(Chunk::from_cached(&cached)))
+}
+
+fn read_module_if_matches(path: &Path, key: &CacheKey) -> io::Result<Option<ModuleArtifact>> {
+    let Some(header) = read_header_if_matches(path, key)? else {
+        return Ok(None);
+    };
+    if header.kind != KIND_MODULE_ARTIFACT {
+        return Ok(None);
+    }
+    match bincode::deserialize::<ModuleArtifact>(&header.payload) {
+        Ok(artifact) => Ok(Some(artifact)),
+        Err(_) => Ok(None),
+    }
+}
+
+/// Compact representation of [`CompilerOptions`] for the cache header.
+/// Independent flags get distinct bits so adding a new flag never
+/// silently changes existing keys when an old binary reads a new
+/// artifact — the header check will fail-closed before we get there
+/// anyway, but mapping to bits also keeps the tag a stable function
+/// of the option set.
+fn compiler_options_tag(options: CompilerOptions) -> u8 {
+    let mut tag: u8 = 0;
+    if options.optimizations_enabled() {
+        tag |= 0b0000_0001;
+    }
+    tag
 }
 
 fn sha256(bytes: &[u8]) -> [u8; 32] {
@@ -573,8 +728,27 @@ mod tests {
             source_hash: [0xAB; 32],
             import_graph_hash: key.import_graph_hash,
             harn_version: HARN_VERSION,
+            compiler_tag: key.compiler_tag,
         };
         assert!(read_chunk_if_matches(&path, &other).unwrap().is_none());
+    }
+
+    #[test]
+    fn compiler_tag_mismatch_returns_none() {
+        let chunk = compile_source("1 + 1").expect("compile");
+        let key = CacheKey::from_source(Path::new("/tmp/b.harn"), "1 + 1");
+        let tmp = tempfile::tempdir().unwrap();
+        let path = tmp.path().join("b.harnbc");
+        store_at(&path, &key, &chunk).expect("write");
+        let other = CacheKey {
+            compiler_tag: key.compiler_tag ^ 0xFF,
+            ..key.clone()
+        };
+        assert!(
+            read_chunk_if_matches(&path, &other).unwrap().is_none(),
+            "flipped HARN_DISABLE_OPTIMIZATIONS must not reuse a chunk \
+             compiled under the opposite setting"
+        );
     }
 
     #[test]

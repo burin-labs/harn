@@ -9,6 +9,7 @@
 use std::path::{Path, PathBuf};
 
 use harn_parser::DiagnosticSeverity;
+use harn_vm::module_artifact::ModuleArtifact;
 
 use crate::cli::PrecompileArgs;
 use crate::command_error;
@@ -20,6 +21,14 @@ use crate::parse_source_file;
 struct Stats {
     compiled: usize,
     failed: usize,
+}
+
+/// One file can be both an executable entry pipeline AND an imported
+/// module. Precompile emits both so the runtime loader hits whichever
+/// path the user takes.
+struct PrecompileArtifacts {
+    entry_chunk: harn_vm::Chunk,
+    module_artifact: Option<ModuleArtifact>,
 }
 
 pub fn run(args: PrecompileArgs) {
@@ -101,29 +110,73 @@ fn precompile_one(
         eprint!("{messages}");
     }
 
-    let chunk = harn_vm::Compiler::new()
-        .compile(&program)
-        .map_err(|e| format!("compile error: {e}"))?;
+    let artifacts = compile_artifacts(source_path, &program)?;
     let key = harn_vm::bytecode_cache::CacheKey::from_source(source_path, &source);
 
-    let dest = output_path(source_path, source_root, out_root)?;
-    harn_vm::bytecode_cache::store_at(&dest, &key, &chunk)
-        .map_err(|e| format!("write {}: {e}", dest.display()))?;
+    let entry_dest = output_path(
+        source_path,
+        source_root,
+        out_root,
+        harn_vm::bytecode_cache::CACHE_EXTENSION,
+    )?;
+    harn_vm::bytecode_cache::store_at(&entry_dest, &key, &artifacts.entry_chunk)
+        .map_err(|e| format!("write {}: {e}", entry_dest.display()))?;
 
-    Ok(dest)
+    if let Some(module_artifact) = &artifacts.module_artifact {
+        let module_dest = output_path(
+            source_path,
+            source_root,
+            out_root,
+            harn_vm::bytecode_cache::MODULE_CACHE_EXTENSION,
+        )?;
+        harn_vm::bytecode_cache::store_module_at(&module_dest, &key, module_artifact)
+            .map_err(|e| format!("write {}: {e}", module_dest.display()))?;
+    }
+
+    Ok(entry_dest)
+}
+
+/// Compile both the entry-chunk view and the module-artifact view of the
+/// same source. A `.harn` file with a `pipeline default { ... }` block is
+/// callable as both an entry and an importable module; one without is
+/// importable but produces an entry chunk that just returns `nil`. We
+/// emit both artifacts unconditionally so the runtime loader hits the
+/// cache regardless of how the user invokes the file.
+fn compile_artifacts(
+    source_path: &Path,
+    program: &[harn_parser::SNode],
+) -> Result<PrecompileArtifacts, String> {
+    let entry_chunk = harn_vm::Compiler::new()
+        .compile(program)
+        .map_err(|e| format!("compile error: {e}"))?;
+    let module_artifact = harn_vm::module_artifact::compile_module_artifact(
+        program,
+        Some(source_path.display().to_string()),
+    )
+    .map_err(|e| format!("module compile error: {e}"))
+    .ok();
+    Ok(PrecompileArtifacts {
+        entry_chunk,
+        module_artifact,
+    })
 }
 
 /// Map a source path under (optional) `source_root` to its destination
-/// under (optional) `out_root`. When no `out_root` is given the artifact
-/// lands adjacent to the source.
+/// under (optional) `out_root` with the given file extension. When no
+/// `out_root` is given the artifact lands adjacent to the source.
 fn output_path(
     source_path: &Path,
     source_root: Option<&Path>,
     out_root: Option<&Path>,
+    extension: &str,
 ) -> Result<PathBuf, String> {
-    let adjacent = harn_vm::bytecode_cache::adjacent_cache_path(source_path)
+    let stem = source_path
+        .file_stem()
         .ok_or_else(|| format!("source has no file stem: {}", source_path.display()))?;
     let Some(out_root) = out_root else {
+        let parent = source_path.parent().unwrap_or_else(|| Path::new(""));
+        let mut adjacent = parent.join(stem);
+        adjacent.set_extension(extension);
         return Ok(adjacent);
     };
     let relative = match source_root {
@@ -145,6 +198,6 @@ fn output_path(
         ),
     };
     let mut dest = out_root.join(&relative);
-    dest.set_extension(harn_vm::bytecode_cache::CACHE_EXTENSION);
+    dest.set_extension(extension);
     Ok(dest)
 }

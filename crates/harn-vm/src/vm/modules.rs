@@ -7,30 +7,17 @@ use std::pin::Pin;
 use std::rc::Rc;
 use std::sync::{Arc, Mutex, OnceLock};
 
-use crate::chunk::{CachedChunk, CachedCompiledFunction, Chunk, CompiledFunction};
+use crate::bytecode_cache;
+use crate::chunk::{Chunk, CompiledFunction};
+use crate::module_artifact::{compile_module_artifact_from_source, ModuleArtifact};
 use crate::value::{ModuleFunctionRegistry, VmClosure, VmEnv, VmError, VmValue};
 
 use super::{ScopeSpan, Vm};
 
-#[derive(Clone)]
-struct ModuleImportSpec {
-    path: String,
-    selected_names: Option<Vec<String>>,
-    is_pub: bool,
-}
-
-#[derive(Clone)]
-struct CompiledStdlibModule {
-    imports: Vec<ModuleImportSpec>,
-    init_chunk: Option<CachedChunk>,
-    functions: BTreeMap<String, CachedCompiledFunction>,
-    public_names: HashSet<String>,
-}
-
-static STDLIB_MODULE_ARTIFACT_CACHE: OnceLock<Mutex<BTreeMap<String, Arc<CompiledStdlibModule>>>> =
+static STDLIB_MODULE_ARTIFACT_CACHE: OnceLock<Mutex<BTreeMap<String, Arc<ModuleArtifact>>>> =
     OnceLock::new();
 
-fn stdlib_module_artifact_cache() -> &'static Mutex<BTreeMap<String, Arc<CompiledStdlibModule>>> {
+fn stdlib_module_artifact_cache() -> &'static Mutex<BTreeMap<String, Arc<ModuleArtifact>>> {
     STDLIB_MODULE_ARTIFACT_CACHE.get_or_init(|| Mutex::new(BTreeMap::new()))
 }
 
@@ -80,8 +67,8 @@ fn stdlib_artifact_cache_key(module: &str, source: &str) -> String {
 fn stdlib_module_artifact(
     module: &str,
     synthetic: &Path,
-    source: &str,
-) -> Result<Arc<CompiledStdlibModule>, VmError> {
+    source: &'static str,
+) -> Result<Arc<ModuleArtifact>, VmError> {
     let key = stdlib_artifact_cache_key(module, source);
     {
         let cache = stdlib_module_artifact_cache().lock().unwrap();
@@ -90,109 +77,30 @@ fn stdlib_module_artifact(
         }
     }
 
-    let compiled = Arc::new(compile_stdlib_module_artifact(synthetic, source)?);
+    // Stdlib modules are embedded in the binary so their content cannot
+    // legitimately change between processes; that means the disk cache
+    // for stdlib can use a synthetic source_path. The harn_version field
+    // of the cache key gates correctness across releases.
+    let lookup = bytecode_cache::load_module(synthetic, source);
+    let artifact = if let Some(artifact) = lookup.artifact {
+        artifact
+    } else {
+        let compiled = compile_module_artifact_from_source(synthetic, source)?;
+        if let Err(err) = bytecode_cache::store_module(&lookup.key, &compiled) {
+            if std::env::var_os("HARN_BYTECODE_CACHE_DEBUG").is_some() {
+                eprintln!("[harn] stdlib module cache write skipped for {module}: {err}");
+            }
+        }
+        compiled
+    };
+
+    let compiled = Arc::new(artifact);
     let mut cache = stdlib_module_artifact_cache().lock().unwrap();
     if let Some(cached) = cache.get(&key) {
         return Ok(Arc::clone(cached));
     }
     cache.insert(key, Arc::clone(&compiled));
     Ok(compiled)
-}
-
-fn compile_stdlib_module_artifact(
-    synthetic: &Path,
-    source: &str,
-) -> Result<CompiledStdlibModule, VmError> {
-    let mut lexer = harn_lexer::Lexer::new(source);
-    let tokens = lexer.tokenize().map_err(|e| {
-        VmError::Runtime(format!("Import lex error in {}: {e}", synthetic.display()))
-    })?;
-    let mut parser = harn_parser::Parser::new(tokens);
-    let program = parser.parse().map_err(|e| {
-        VmError::Runtime(format!(
-            "Import parse error in {}: {e}",
-            synthetic.display()
-        ))
-    })?;
-
-    let imports = program
-        .iter()
-        .filter_map(|node| match &node.node {
-            harn_parser::Node::ImportDecl { path, is_pub } => Some(ModuleImportSpec {
-                path: path.clone(),
-                selected_names: None,
-                is_pub: *is_pub,
-            }),
-            harn_parser::Node::SelectiveImport {
-                names,
-                path,
-                is_pub,
-            } => Some(ModuleImportSpec {
-                path: path.clone(),
-                selected_names: Some(names.clone()),
-                is_pub: *is_pub,
-            }),
-            _ => None,
-        })
-        .collect();
-
-    let init_nodes: Vec<harn_parser::SNode> = program
-        .iter()
-        .filter(|sn| {
-            matches!(
-                &sn.node,
-                harn_parser::Node::VarBinding { .. } | harn_parser::Node::LetBinding { .. }
-            )
-        })
-        .cloned()
-        .collect();
-    let init_chunk = if init_nodes.is_empty() {
-        None
-    } else {
-        Some(
-            crate::Compiler::new()
-                .compile(&init_nodes)
-                .map_err(|e| VmError::Runtime(format!("Import init compile error: {e}")))?
-                .freeze_for_cache(),
-        )
-    };
-
-    let mut functions = BTreeMap::new();
-    let mut public_names = HashSet::new();
-    let module_source_file = Some(synthetic.display().to_string());
-    for node in &program {
-        let inner = match &node.node {
-            harn_parser::Node::AttributedDecl { inner, .. } => inner.as_ref(),
-            _ => node,
-        };
-        let harn_parser::Node::FnDecl {
-            name,
-            type_params,
-            params,
-            body,
-            is_pub,
-            ..
-        } = &inner.node
-        else {
-            continue;
-        };
-
-        let mut compiler = crate::Compiler::new();
-        let func_chunk = compiler
-            .compile_fn_body(type_params, params, body, module_source_file.clone())
-            .map_err(|e| VmError::Runtime(format!("Import compile error: {e}")))?;
-        functions.insert(name.clone(), func_chunk.freeze_for_cache());
-        if *is_pub {
-            public_names.insert(name.clone());
-        }
-    }
-
-    Ok(CompiledStdlibModule {
-        imports,
-        init_chunk,
-        functions,
-        public_names,
-    })
 }
 
 impl Vm {
@@ -206,22 +114,10 @@ impl Vm {
         }
         Rc::make_mut(&mut self.source_cache).insert(synthetic.clone(), source.to_string());
 
-        let mut lexer = harn_lexer::Lexer::new(source);
-        let tokens = lexer.tokenize().map_err(|e| {
-            VmError::Runtime(format!("Import lex error in {}: {e}", synthetic.display()))
-        })?;
-        let mut parser = harn_parser::Parser::new(tokens);
-        let program = parser.parse().map_err(|e| {
-            VmError::Runtime(format!(
-                "Import parse error in {}: {e}",
-                synthetic.display()
-            ))
-        })?;
+        let artifact = compile_module_artifact_from_source(&synthetic, source)?;
 
         self.imported_paths.push(synthetic.clone());
-        let loaded = self
-            .import_declarations(&program, None, Some(&synthetic))
-            .await?;
+        let loaded = self.instantiate_module(None, &artifact).await?;
         self.imported_paths.pop();
         Rc::make_mut(&mut self.module_cache).insert(synthetic, loaded.clone());
         Ok(loaded)
@@ -240,9 +136,7 @@ impl Vm {
 
         let artifact = stdlib_module_artifact(module, &synthetic, source)?;
         self.imported_paths.push(synthetic.clone());
-        let loaded = self
-            .instantiate_stdlib_module(&synthetic, artifact.as_ref())
-            .await?;
+        let loaded = self.instantiate_stdlib_module(artifact.as_ref()).await?;
         self.imported_paths.pop();
         Rc::make_mut(&mut self.module_cache).insert(synthetic, loaded.clone());
         Ok(loaded)
@@ -250,13 +144,27 @@ impl Vm {
 
     async fn instantiate_stdlib_module(
         &mut self,
-        _synthetic: &Path,
-        artifact: &CompiledStdlibModule,
+        artifact: &ModuleArtifact,
+    ) -> Result<LoadedModule, VmError> {
+        self.instantiate_module(None, artifact).await
+    }
+
+    /// Instantiate a previously-compiled [`ModuleArtifact`] into a
+    /// [`LoadedModule`]. Re-runs nested imports, replays the init chunk
+    /// into a fresh module env, mints a [`VmClosure`] for each compiled
+    /// function (stamped with `module_source_dir` so imports from inside
+    /// those functions resolve against the originating file), and
+    /// applies the re-export pass. Used by both stdlib and user-import
+    /// code paths.
+    async fn instantiate_module(
+        &mut self,
+        module_source_dir: Option<PathBuf>,
+        artifact: &ModuleArtifact,
     ) -> Result<LoadedModule, VmError> {
         let caller_env = self.env.clone();
         let old_source_dir = self.source_dir.clone();
         self.env = VmEnv::new();
-        self.source_dir = None;
+        self.source_dir = module_source_dir.clone();
 
         for import in &artifact.imports {
             self.execute_import(&import.path, import.selected_names.as_deref())
@@ -292,7 +200,7 @@ impl Vm {
             let closure = Rc::new(VmClosure {
                 func: Rc::new(CompiledFunction::from_cached(compiled)),
                 env: module_env.clone(),
-                source_dir: None,
+                source_dir: module_source_dir.clone(),
                 module_functions: Some(Rc::clone(&registry)),
                 module_state: Some(Rc::clone(&module_state)),
             });
@@ -440,222 +348,33 @@ impl Vm {
             Rc::make_mut(&mut self.source_cache).insert(canonical.clone(), source.clone());
             Rc::make_mut(&mut self.source_cache).insert(file_path.clone(), source.clone());
 
-            let mut lexer = harn_lexer::Lexer::new(&source);
-            let tokens = lexer
-                .tokenize()
-                .map_err(|e| VmError::Runtime(format!("Import lex error: {e}")))?;
-            let mut parser = harn_parser::Parser::new(tokens);
-            let program = parser
-                .parse()
-                .map_err(|e| VmError::Runtime(format!("Import parse error: {e}")))?;
+            // Disk cache first: hits skip parse + compile for the imported
+            // module's whole function pool, not just the entry pipeline.
+            let lookup = bytecode_cache::load_module(&file_path, &source);
+            let artifact = if let Some(artifact) = lookup.artifact {
+                artifact
+            } else {
+                let compiled = compile_module_artifact_from_source(&file_path, &source)?;
+                if let Err(err) = bytecode_cache::store_module(&lookup.key, &compiled) {
+                    if std::env::var_os("HARN_BYTECODE_CACHE_DEBUG").is_some() {
+                        eprintln!(
+                            "[harn] module cache write skipped for {}: {err}",
+                            file_path.display()
+                        );
+                    }
+                }
+                compiled
+            };
 
+            let module_source_dir = file_path.parent().map(|p| p.to_path_buf());
             let loaded = self
-                .import_declarations(&program, Some(&file_path), Some(&file_path))
+                .instantiate_module(module_source_dir, &artifact)
                 .await?;
             self.imported_paths.pop();
             Rc::make_mut(&mut self.module_cache).insert(canonical.clone(), loaded.clone());
             self.export_loaded_module(&canonical, &loaded, selected_names)?;
 
             Ok(())
-        })
-    }
-
-    /// Process top-level declarations from an imported module.
-    fn import_declarations<'a>(
-        &'a mut self,
-        program: &'a [harn_parser::SNode],
-        file_path: Option<&'a Path>,
-        debug_source_file: Option<&'a Path>,
-    ) -> Pin<Box<dyn Future<Output = Result<LoadedModule, VmError>> + 'a>> {
-        Box::pin(async move {
-            let caller_env = self.env.clone();
-            let old_source_dir = self.source_dir.clone();
-            self.env = VmEnv::new();
-            if let Some(fp) = file_path {
-                if let Some(parent) = fp.parent() {
-                    self.source_dir = Some(parent.to_path_buf());
-                }
-            }
-
-            for node in program {
-                match &node.node {
-                    harn_parser::Node::ImportDecl { path: sub_path, .. } => {
-                        self.execute_import(sub_path, None).await?;
-                    }
-                    harn_parser::Node::SelectiveImport {
-                        names,
-                        path: sub_path,
-                        ..
-                    } => {
-                        self.execute_import(sub_path, Some(names)).await?;
-                    }
-                    _ => {}
-                }
-            }
-
-            // Route top-level `var`/`let` bindings into a shared
-            // `module_state` rather than `module_env`. If they appeared in
-            // `module_env` (captured by each closure's lexical snapshot),
-            // every call's per-invocation env clone would shadow them and
-            // writes would land in a per-call copy discarded on return.
-            let module_state: crate::value::ModuleState = {
-                let mut init_env = self.env.clone();
-                let init_nodes: Vec<harn_parser::SNode> = program
-                    .iter()
-                    .filter(|sn| {
-                        matches!(
-                            &sn.node,
-                            harn_parser::Node::VarBinding { .. }
-                                | harn_parser::Node::LetBinding { .. }
-                        )
-                    })
-                    .cloned()
-                    .collect();
-                if !init_nodes.is_empty() {
-                    let init_compiler = crate::Compiler::new();
-                    let init_chunk = init_compiler
-                        .compile(&init_nodes)
-                        .map_err(|e| VmError::Runtime(format!("Import init compile error: {e}")))?;
-                    // Save frame state so run_chunk_entry's top-level
-                    // frame-pop doesn't restore self.env.
-                    let saved_env = std::mem::replace(&mut self.env, init_env);
-                    let saved_frames = std::mem::take(&mut self.frames);
-                    let saved_handlers = std::mem::take(&mut self.exception_handlers);
-                    let saved_iterators = std::mem::take(&mut self.iterators);
-                    let saved_deadlines = std::mem::take(&mut self.deadlines);
-                    let init_result = self.run_chunk(&init_chunk).await;
-                    init_env = std::mem::replace(&mut self.env, saved_env);
-                    self.frames = saved_frames;
-                    self.exception_handlers = saved_handlers;
-                    self.iterators = saved_iterators;
-                    self.deadlines = saved_deadlines;
-                    init_result?;
-                }
-                Rc::new(RefCell::new(init_env))
-            };
-
-            let module_env = self.env.clone();
-            let registry: ModuleFunctionRegistry = Rc::new(RefCell::new(BTreeMap::new()));
-            let source_dir = file_path.and_then(|fp| fp.parent().map(|p| p.to_path_buf()));
-            let mut functions: BTreeMap<String, Rc<VmClosure>> = BTreeMap::new();
-            let mut public_names: HashSet<String> = HashSet::new();
-
-            for node in program {
-                // Imports may carry `@deprecated` / `@test` etc. on top-level
-                // fn decls; transparently peel the wrapper before pattern
-                // matching the FnDecl shape.
-                let inner = match &node.node {
-                    harn_parser::Node::AttributedDecl { inner, .. } => inner.as_ref(),
-                    _ => node,
-                };
-                let harn_parser::Node::FnDecl {
-                    name,
-                    type_params,
-                    params,
-                    body,
-                    is_pub,
-                    ..
-                } = &inner.node
-                else {
-                    continue;
-                };
-
-                let mut compiler = crate::Compiler::new();
-                let module_source_file = debug_source_file.map(|p| p.display().to_string());
-                let func_chunk = compiler
-                    .compile_fn_body(type_params, params, body, module_source_file)
-                    .map_err(|e| VmError::Runtime(format!("Import compile error: {e}")))?;
-                let closure = Rc::new(VmClosure {
-                    func: Rc::new(func_chunk),
-                    env: module_env.clone(),
-                    source_dir: source_dir.clone(),
-                    module_functions: Some(Rc::clone(&registry)),
-                    module_state: Some(Rc::clone(&module_state)),
-                });
-                registry
-                    .borrow_mut()
-                    .insert(name.clone(), Rc::clone(&closure));
-                self.env
-                    .define(name, VmValue::Closure(Rc::clone(&closure)), false)?;
-                // Publish into module_state so sibling fns can be read
-                // as VALUES (e.g. `{handler: other_fn}` or as callbacks).
-                // Closures captured module_env BEFORE fn decls were added,
-                // so their static env alone can't resolve sibling fns.
-                // Direct calls use the module_functions late-binding path;
-                // value reads rely on this module_state entry.
-                module_state.borrow_mut().define(
-                    name,
-                    VmValue::Closure(Rc::clone(&closure)),
-                    false,
-                )?;
-                functions.insert(name.clone(), Rc::clone(&closure));
-                if *is_pub {
-                    public_names.insert(name.clone());
-                }
-            }
-
-            // Re-export pass: for every `pub import ...` declaration in
-            // the module, surface the imported closures in this module's
-            // `functions`/`public_names` so callers that import this
-            // module see the re-exported names.
-            for node in program {
-                let (sub_path, selective_names, is_pub_import) = match &node.node {
-                    harn_parser::Node::ImportDecl {
-                        path: sub_path,
-                        is_pub,
-                    } => (sub_path.clone(), None, *is_pub),
-                    harn_parser::Node::SelectiveImport {
-                        names,
-                        path: sub_path,
-                        is_pub,
-                    } => (sub_path.clone(), Some(names.clone()), *is_pub),
-                    _ => continue,
-                };
-                if !is_pub_import {
-                    continue;
-                }
-                let cache_key = self.cache_key_for_import(&sub_path);
-                let Some(loaded) = self.module_cache.get(&cache_key).cloned() else {
-                    return Err(VmError::Runtime(format!(
-                        "Re-export error: imported module '{sub_path}' was not loaded"
-                    )));
-                };
-                let names_to_reexport: Vec<String> = match selective_names {
-                    Some(names) => names,
-                    None => {
-                        if loaded.public_names.is_empty() {
-                            loaded.functions.keys().cloned().collect()
-                        } else {
-                            loaded.public_names.iter().cloned().collect()
-                        }
-                    }
-                };
-                for name in names_to_reexport {
-                    let Some(closure) = loaded.functions.get(&name) else {
-                        return Err(VmError::Runtime(format!(
-                            "Re-export error: '{name}' is not exported by '{sub_path}'"
-                        )));
-                    };
-                    if let Some(existing) = functions.get(&name) {
-                        if !Rc::ptr_eq(existing, closure) {
-                            return Err(VmError::Runtime(format!(
-                                "Re-export collision: '{name}' is defined here and also \
-                                 re-exported from '{sub_path}'"
-                            )));
-                        }
-                    }
-                    functions.insert(name.clone(), Rc::clone(closure));
-                    public_names.insert(name);
-                }
-            }
-
-            self.env = caller_env;
-            self.source_dir = old_source_dir;
-
-            Ok(LoadedModule {
-                functions,
-                public_names,
-            })
         })
     }
 
