@@ -5,11 +5,13 @@ use std::path::{Path, PathBuf};
 use std::process;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
+use std::time::Instant;
 
 use harn_parser::DiagnosticSeverity;
 use harn_vm::event_log::EventLog;
 
 use crate::commands::mcp::{self, AuthResolution};
+use crate::commands::time::RunTiming;
 use crate::package;
 use crate::parse_source_file;
 use crate::skill_loader::{
@@ -122,6 +124,24 @@ pub(crate) fn compile_or_load_chunk_for_run(
     path: &str,
     stderr: &mut String,
 ) -> Option<LoadedChunk> {
+    compile_or_load_chunk_with_timing(path, stderr, None)
+}
+
+/// Like [`compile_or_load_chunk_for_run`] but lets the caller observe
+/// per-phase wall-clock timings (parse, typecheck, bytecode compile +
+/// cache hit/miss). Used by `harn time run` to drive the same code
+/// path as `harn run` while reporting phase-level timing.
+//
+// The `as_deref_mut` calls reborrow the inner `&mut RunTiming` so each
+// phase can mutate it independently. Clippy's `needless_option_as_deref`
+// is correct that the surface types match — that's exactly the
+// reborrow we want.
+#[allow(clippy::needless_option_as_deref)]
+pub(crate) fn compile_or_load_chunk_with_timing(
+    path: &str,
+    stderr: &mut String,
+    mut timing: Option<&mut RunTiming>,
+) -> Option<LoadedChunk> {
     let source = match fs::read_to_string(path) {
         Ok(s) => s,
         Err(e) => {
@@ -129,14 +149,31 @@ pub(crate) fn compile_or_load_chunk_for_run(
             return None;
         }
     };
-    let lookup = harn_vm::bytecode_cache::load(Path::new(path), &source);
-    if let Some(chunk) = lookup.chunk {
-        return Some(LoadedChunk { source, chunk });
+    if let Some(t) = timing.as_deref_mut() {
+        t.input_bytes = source.len() as u64;
     }
 
+    let compile_phase_start = Instant::now();
+    let lookup = harn_vm::bytecode_cache::load(Path::new(path), &source);
+    if let Some(chunk) = lookup.chunk {
+        if let Some(t) = timing.as_deref_mut() {
+            t.cache_hit = true;
+            t.bytecode_compile = compile_phase_start.elapsed();
+        }
+        return Some(LoadedChunk { source, chunk });
+    }
+    if let Some(t) = timing.as_deref_mut() {
+        t.cache_hit = false;
+    }
+
+    let parse_start = Instant::now();
     let (parsed_source, program) = parse_source_file(path);
     debug_assert_eq!(parsed_source, source, "parse_source_file re-read drifted");
+    if let Some(t) = timing.as_deref_mut() {
+        t.parse = parse_start.elapsed();
+    }
 
+    let typecheck_start = Instant::now();
     let mut had_type_error = false;
     let type_diagnostics = typecheck_with_imports(&program, Path::new(path), &source);
     for diag in &type_diagnostics {
@@ -146,10 +183,14 @@ pub(crate) fn compile_or_load_chunk_for_run(
         }
         stderr.push_str(&rendered);
     }
+    if let Some(t) = timing.as_deref_mut() {
+        t.typecheck = typecheck_start.elapsed();
+    }
     if had_type_error {
         return None;
     }
 
+    let compile_step_start = Instant::now();
     let chunk = match harn_vm::Compiler::new().compile(&program) {
         Ok(c) => c,
         Err(e) => {
@@ -166,6 +207,9 @@ pub(crate) fn compile_or_load_chunk_for_run(
         if std::env::var_os("HARN_BYTECODE_CACHE_DEBUG").is_some() {
             eprintln!("[harn] bytecode cache write skipped: {err}");
         }
+    }
+    if let Some(t) = timing.as_deref_mut() {
+        t.bytecode_compile = compile_step_start.elapsed();
     }
 
     Some(LoadedChunk { source, chunk })
@@ -344,6 +388,7 @@ struct ExecuteRunInputs<'a> {
     profile: RunProfileOptions,
     interrupt_tokens: Option<RunInterruptTokens>,
     json: Option<(RunJsonOptions, Box<dyn io::Write + Send>)>,
+    timing: Option<&'a mut RunTiming>,
 }
 
 /// Captured outcome of an in-process `execute_run` invocation. Tests use this
@@ -465,6 +510,7 @@ pub(crate) async fn run_file_with_skill_dirs(
         profile,
         interrupt_tokens: Some(interrupt_tokens.clone()),
         json: json_with_stdout,
+        timing: None,
     })
     .await;
 
@@ -518,12 +564,12 @@ pub fn execute_explain_cost(path: &str) -> RunOutcome {
     }
 }
 
-struct StdoutPassthroughGuard {
+pub(crate) struct StdoutPassthroughGuard {
     previous: bool,
 }
 
 impl StdoutPassthroughGuard {
-    fn enable() -> Self {
+    pub(crate) fn enable() -> Self {
         Self {
             previous: harn_vm::set_stdout_passthrough(true),
         }
@@ -627,6 +673,7 @@ pub async fn execute_run(
         profile,
         interrupt_tokens: None,
         json: None,
+        timing: None,
     })
     .await
 }
@@ -660,10 +707,38 @@ pub async fn execute_run_json(
         profile,
         interrupt_tokens: None,
         json: Some((options, out)),
+        timing: None,
     })
     .await
 }
 
+/// Run a `.harn` file with the default builtin/argv set and record
+/// phase timings into `timing`. Used by `harn time run` so the
+/// instrumented run shares the exact code path as plain `harn run`.
+pub(crate) async fn execute_run_with_timing(
+    path: &str,
+    script_argv: Vec<String>,
+    timing: Option<&mut RunTiming>,
+) -> RunOutcome {
+    execute_run_inner(ExecuteRunInputs {
+        path,
+        trace: false,
+        denied_builtins: HashSet::new(),
+        script_argv,
+        skill_dirs_raw: Vec::new(),
+        llm_mock_mode: CliLlmMockMode::Off,
+        attestation: None,
+        profile: RunProfileOptions::default(),
+        interrupt_tokens: None,
+        json: None,
+        timing,
+    })
+    .await
+}
+
+// See [`compile_or_load_chunk_with_timing`] for why `as_deref_mut` is
+// the intentional reborrow pattern here.
+#[allow(clippy::needless_option_as_deref)]
 async fn execute_run_inner(inputs: ExecuteRunInputs<'_>) -> RunOutcome {
     let ExecuteRunInputs {
         path,
@@ -676,6 +751,7 @@ async fn execute_run_inner(inputs: ExecuteRunInputs<'_>) -> RunOutcome {
         profile,
         interrupt_tokens,
         json,
+        mut timing,
     } = inputs;
 
     // `--json` installs an in-process sink that diverts every
@@ -688,7 +764,8 @@ async fn execute_run_inner(inputs: ExecuteRunInputs<'_>) -> RunOutcome {
     let mut stderr = String::new();
     let mut stdout = String::new();
 
-    let Some(LoadedChunk { source, chunk }) = compile_or_load_chunk_for_run(path, &mut stderr)
+    let Some(LoadedChunk { source, chunk }) =
+        compile_or_load_chunk_with_timing(path, &mut stderr, timing.as_deref_mut())
     else {
         if let Some(session) = json_session {
             return session.finalize_error("compile_error", stderr, 1);
@@ -699,6 +776,11 @@ async fn execute_run_inner(inputs: ExecuteRunInputs<'_>) -> RunOutcome {
             exit_code: 1,
         };
     };
+
+    // Bracket the VM-setup phase explicitly. `run_setup` covers
+    // everything between the bytecode compile and the first VM
+    // instruction; `run_main` covers `vm.execute` proper.
+    let setup_start = Instant::now();
 
     if trace {
         harn_vm::llm::enable_tracing();
@@ -827,6 +909,10 @@ async fn execute_run_inner(inputs: ExecuteRunInputs<'_>) -> RunOutcome {
 
     // Run inside a LocalSet so spawn_local works for concurrency builtins.
     let local = tokio::task::LocalSet::new();
+    if let Some(t) = timing.as_deref_mut() {
+        t.run_setup = setup_start.elapsed();
+    }
+    let main_start = Instant::now();
     let execution = local
         .run_until(async {
             match vm.execute(&chunk).await {
@@ -835,6 +921,9 @@ async fn execute_run_inner(inputs: ExecuteRunInputs<'_>) -> RunOutcome {
             }
         })
         .await;
+    if let Some(t) = timing.as_deref_mut() {
+        t.run_main = main_start.elapsed();
+    }
     if let Err(error) = persist_cli_llm_mock_recording(&llm_mock_mode) {
         stderr.push_str(&format!("error: {error}\n"));
         if let Some(session) = json_session {

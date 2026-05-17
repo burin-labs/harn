@@ -163,6 +163,13 @@ pub fn catalog() -> Vec<SchemaEntry> {
             description: "Pipeline-run NDJSON event stream (stdout, stderr, transcript, tool, hook, persona, result, error).",
             schema_json: None,
         },
+        SchemaEntry {
+            command: "time run",
+            schema_version: crate::commands::time::TIME_RUN_SCHEMA_VERSION,
+            description:
+                "Per-phase wall-clock + cache hit/miss + per-LLM/tool-call latency for `harn run`.",
+            schema_json: None,
+        },
     ]
 }
 

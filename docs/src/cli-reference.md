@@ -298,6 +298,64 @@ harn bench replay \
   --json
 ```
 
+## harn time
+
+Wrap a subcommand with phase-level wall-clock timing plus per-LLM-call
+and per-tool-call latency. Today only `harn time run` is supported.
+
+```bash
+harn time run main.harn
+harn time run main.harn --json
+harn time run main.harn --json --no-cache
+harn time run -e 'println("hi")' --json
+harn time run script.harn -- arg1 arg2
+```
+
+The output is keyed by five fixed phases — `parse`, `typecheck`,
+`bytecode_compile`, `run_setup`, `run_main` — even when a bytecode-cache
+hit lets us skip parse/typecheck. The `bytecode_compile` row carries a
+`cache: "hit" | "miss"` field so cost-and-perf eyeballs and agent
+pipelines can dispatch on cache state without a separate flag.
+
+`--json` emits a versioned `JsonEnvelope` (schema registered as
+`time run` in `harn --json-schemas`):
+
+```json
+{
+  "schemaVersion": 1,
+  "ok": true,
+  "data": {
+    "command": "run",
+    "target": "main.harn",
+    "phases": [
+      { "name": "parse", "duration_ms": 12, "input_bytes": 4096 },
+      { "name": "typecheck", "duration_ms": 80 },
+      { "name": "bytecode_compile", "duration_ms": 35, "cache": "miss" },
+      { "name": "run_setup", "duration_ms": 8 },
+      { "name": "run_main", "duration_ms": 1200, "events": 14 }
+    ],
+    "llm_calls": [
+      { "model": "claude-sonnet-4-6", "latency_ms": 850, "tokens": 1500 }
+    ],
+    "tool_calls": [{ "name": "mcp_call", "latency_ms": 200 }],
+    "totals": {
+      "wall_ms": 1335,
+      "cpu_ms": 320,
+      "cache_hits": 0,
+      "cache_misses": 1
+    },
+    "exit_code": 0
+  }
+}
+```
+
+In `--json` mode the wrapper hands stdout to the envelope: any script
+output is redirected to stderr so `harn time run … --json | jq …` works
+without filtering. Diagnostics and non-zero exit codes from the wrapped
+run still propagate through `harn time`. `--no-cache` sets
+`HARN_BYTECODE_CACHE=0` for the duration of the invocation only,
+forcing a cold parse/typecheck/compile.
+
 ## harn viz
 
 Render a `.harn` file as a Mermaid flowchart.

@@ -49,6 +49,7 @@ mod skills;
 mod supervisor;
 mod test;
 mod test_bench;
+mod time;
 mod tool;
 mod trace;
 mod trigger;
@@ -177,6 +178,7 @@ pub(crate) use test_bench::{
     TestBenchArgs, TestBenchCommand, TestBenchExportAnnotationsArgs, TestBenchFidelityArgs,
     TestBenchReplayArgs, TestBenchRunArgs, TestBenchValidateAnnotationsArgs,
 };
+pub(crate) use time::{TimeArgs, TimeCommand, TimeRunArgs};
 pub(crate) use tool::{ToolArgs, ToolCommand, ToolNewArgs};
 pub(crate) use trace::{TraceArgs, TraceCommand, TraceImportArgs};
 pub(crate) use trigger::{TriggerArgs, TriggerCancelArgs, TriggerCommand, TriggerReplayArgs};
@@ -282,6 +284,11 @@ SCRIPTING
     /// optional LLM/process tapes, fs overlay, deny-by-default network).
     #[command(name = "test-bench")]
     TestBench(TestBenchArgs),
+    /// Instrument a wrapped subcommand with phase-level wall-clock
+    /// timing (parse, typecheck, bytecode compile + cache hit/miss,
+    /// run setup, run main) plus per-LLM-call and per-tool-call
+    /// latency. Pair with `--json` for an agent-readable envelope.
+    Time(TimeArgs),
     /// Scaffold a new project with harn.toml.
     Init(InitArgs),
     /// Scaffold a new project, package, or connector from a starter template.

@@ -10,6 +10,21 @@ condensed series summaries instead of full per-patch history.
 
 ### Added
 
+- **`harn time run [--json]` — phase-timed run with cache hit/miss
+  and per-LLM/tool latency (#1787).** New top-level `harn time`
+  subcommand wraps an existing subcommand and emits a structured
+  timing breakdown. `harn time run script.harn` prints a human
+  table; `harn time run script.harn --json` emits a versioned
+  `JsonEnvelope` with five fixed phases (`parse`, `typecheck`,
+  `bytecode_compile`, `run_setup`, `run_main`), a `cache: "hit" |
+  "miss"` marker on `bytecode_compile`, per-LLM-call entries
+  (model, latency, tokens), per-tool-call entries (name, latency),
+  and totals (`wall_ms`, `cpu_ms`, `cache_hits`, `cache_misses`).
+  The envelope is registered under `time run` in `harn
+  --json-schemas`. Pair with `--no-cache` to force a cold compile
+  and `-e <code>` to time an inline script. Script `stdout` is
+  routed to stderr in `--json` mode so the envelope is alone on
+  stdout for `jq`-style consumption.
 - **`harn explain HARN-<CAT>-<NNN>` text + `--json` envelope (#1748).** The
   `explain` subcommand now dispatches on registered stable diagnostic codes
   in addition to its original control-flow invariant form. `harn explain

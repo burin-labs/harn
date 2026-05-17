@@ -387,6 +387,11 @@ NON_TEST_WALL_CLOCK_ALLOWLIST=(
   "crates/harn-cli/src/commands/run.rs"
   "crates/harn-cli/src/commands/supervisor.rs"
   "crates/harn-cli/src/commands/test.rs"
+  # `harn time run` measures real wall-clock + per-phase elapsed time
+  # for cost/perf debugging — host time is the source of truth, same
+  # shape as the allowlisted `run.rs`, `demo.rs`, and `bench.rs`
+  # entries. Wall/CPU readings are reported in the structured envelope.
+  "crates/harn-cli/src/commands/time.rs"
   "crates/harn-cli/src/commands/trigger/ops.rs"
   "crates/harn-cli/src/commands/trigger/replay.rs"
   "crates/harn-cli/src/package/registry.rs"
