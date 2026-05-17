@@ -220,6 +220,92 @@ async fn acp_fs_mode_and_commit_staged_apply_deferred_hostlib_writes() {
     );
 }
 
+#[cfg(feature = "hostlib")]
+#[tokio::test(flavor = "current_thread")]
+async fn acp_session_restore_tool_call_restores_pre_image_and_emits_update() {
+    use harn_hostlib::tools::permissions;
+
+    permissions::enable_for_test();
+
+    let dir = tempfile::TempDir::new().unwrap();
+    let file = dir.path().join("subject.txt");
+    std::fs::write(&file, b"pre").unwrap();
+
+    let (tx, mut rx) = mpsc::unbounded_channel();
+    let mut server = AcpServer::new_with_output(AcpServerConfig::new(None), AcpOutput::Channel(tx));
+
+    server
+        .handle_incoming_message(serde_json::json!({
+            "jsonrpc": "2.0",
+            "id": 1,
+            "method": "session/new",
+            "params": {"cwd": dir.path().to_string_lossy()},
+        }))
+        .await;
+    let created = recv_json(&mut rx).await;
+    let session_id = created["result"]["sessionId"]
+        .as_str()
+        .expect("session id")
+        .to_string();
+
+    // session/new returns a fresh UUID per call so this test's snapshot
+    // bundle cannot collide with another test running in the same
+    // process. Synthesize a unique tool-call id to match.
+    let tool_call_id = format!(
+        "tc-acp-restore-{}-{}",
+        std::process::id(),
+        ACP_RESTORE_COUNTER.fetch_add(1, std::sync::atomic::Ordering::Relaxed),
+    );
+
+    let snapshot = harn_hostlib::fs_snapshot::snapshot(
+        &session_id,
+        &tool_call_id,
+        &[file.to_string_lossy().into_owned()],
+        Some(dir.path()),
+    )
+    .expect("snapshot");
+    assert_eq!(snapshot.captured_paths.len(), 1);
+
+    // Clobber the on-disk file, then ask ACP to restore the tool call.
+    std::fs::write(&file, b"clobbered").unwrap();
+
+    server
+        .handle_incoming_message(serde_json::json!({
+            "jsonrpc": "2.0",
+            "id": 2,
+            "method": "session/restore_tool_call",
+            "params": {
+                "sessionId": session_id.clone(),
+                "toolCallId": tool_call_id.clone(),
+            },
+        }))
+        .await;
+    let response = recv_json(&mut rx).await;
+    assert_eq!(response["result"]["toolCallId"], tool_call_id);
+    let restored = response["result"]["restoredPaths"].as_array().unwrap();
+    assert_eq!(restored.len(), 1);
+
+    let update = recv_json(&mut rx).await;
+    assert_eq!(update["method"], "session/update");
+    assert_eq!(
+        update["params"]["update"]["sessionUpdate"],
+        "tool_call_update"
+    );
+    assert_eq!(update["params"]["update"]["status"], "restored");
+    assert_eq!(update["params"]["update"]["toolCallId"], tool_call_id);
+    assert_eq!(
+        update["params"]["update"]["_meta"]["harn"]["kind"],
+        "tool_call_restored"
+    );
+
+    assert_eq!(std::fs::read(&file).unwrap(), b"pre");
+
+    harn_hostlib::fs_snapshot::drop_session_snapshots(&session_id);
+}
+
+#[cfg(feature = "hostlib")]
+static ACP_RESTORE_COUNTER: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+
 #[test]
 fn normalize_host_capabilities_wraps_array_entries_in_ops_dicts() {
     let mut root = BTreeMap::new();
@@ -368,6 +454,7 @@ fn acp_agent_capabilities_use_canonical_initialize_shape() {
             "close": {},
             "list": {},
             "resume": {},
+            "restoreToolCall": {},
         })
     );
     assert!(

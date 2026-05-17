@@ -1,0 +1,34 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://harnlang.com/schemas/hostlib/fs/list_snapshots.response.json",
+  "title": "fs.list_snapshots response",
+  "type": "object",
+  "properties": {
+    "snapshots": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "snapshot_id": { "type": "string", "minLength": 1 },
+          "scope_id": { "type": "string", "minLength": 1 },
+          "taken_at_ms": { "type": "integer", "minimum": 0 },
+          "captured_paths": {
+            "type": "array",
+            "items": { "type": "string" }
+          },
+          "byte_count": { "type": "integer", "minimum": 0 }
+        },
+        "required": [
+          "snapshot_id",
+          "scope_id",
+          "taken_at_ms",
+          "captured_paths",
+          "byte_count"
+        ],
+        "additionalProperties": false
+      }
+    }
+  },
+  "required": ["snapshots"],
+  "additionalProperties": false
+}

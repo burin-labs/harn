@@ -148,6 +148,7 @@ async fn acp_server_handles_session_flow_and_prompt_updates() {
                     "close": {},
                     "list": {},
                     "resume": {},
+                    "restoreToolCall": {},
                 })
             );
             assert!(

@@ -96,6 +96,7 @@ and commit the updated goldens.
 | #567  | `tools/` (mutating)      | `write_file`, `delete_file`                                                        | ✅ shipped |
 | #568  | `tools/` (process)       | `run_command`, `run_test`, `run_build_command`, `inspect_test_results`, `manage_packages` | ✅ shipped |
 | #1722 | `fs/`                    | `set_mode`, `staged_status`, `commit_staged`, `discard_staged`                    | ✅ shipped |
+| #1720 | `fs/` (snapshots)        | `snapshot`, `restore`, `list_snapshots`, `drop_snapshot`                          | ✅ shipped |
 
 ### Process tools
 
@@ -224,6 +225,56 @@ until they are committed or discarded. The ACP server also exposes
 `session/update` progress notifications with
 `_meta.harn.kind = "staged_writes_pending"` whenever the pending count
 or staged byte total changes.
+
+## Per-tool-call FS snapshots
+
+`fs/` also ships a Gemini-style rollback primitive paralleling the staged
+overlay. Four builtins under the same `fs/` schema bucket:
+
+- `hostlib_fs_snapshot({ session_id, scope_id, paths?, root? })` registers
+  a snapshot keyed by `scope_id` (canonically the ACP `toolCallId`).
+  Passing `paths` captures their pre-images immediately; omitting them
+  leaves the snapshot "open" for lazy capture by the auto-on-write hook
+  inside `tools/write_file` and `tools/delete_file`. Auto-capture binds
+  to the active snapshot whose id matches
+  [`harn_vm::agent_sessions::current_tool_call_id`].
+- `hostlib_fs_restore({ session_id, snapshot_id, paths? })` writes
+  captured bytes back onto disk and surgically removes paths the
+  snapshot saw as absent. The ACP server exposes the same operation as
+  `session/restore_tool_call` and broadcasts the result as a
+  `session/update` tagged `_meta.harn.kind = "tool_call_restored"`.
+- `hostlib_fs_list_snapshots({ session_id })` returns one entry per
+  registered snapshot — `snapshot_id`, `scope_id`, `taken_at_ms`,
+  `captured_paths`, `byte_count` — sorted by capture time.
+- `hostlib_fs_drop_snapshot({ session_id, snapshot_id })` removes a
+  snapshot from both the in-memory store and
+  `.harn/state/snapshots/<session>/<scope>/`.
+
+Each snapshot is content-addressed under
+`.harn/state/snapshots/<session>/<scope>/bodies/<sha256>` with a
+`manifest.json` mapping logical paths to entries. When a session bundle
+exceeds the per-session byte cap (default
+[`fs_snapshot::DEFAULT_SESSION_BYTE_CAP`] = 1 GiB; override per session
+with [`fs_snapshot::configure_session_byte_cap`]), the oldest snapshots
+are evicted in insertion order. Snapshots are ephemeral and live only
+as long as the in-memory store; consumers that need durable rollback
+bundle them into a session via `session/load`, and the ACP server drops
+the bundle automatically on `session/close`.
+
+To advertise `restoreToolCall` over ACP the agent emits
+`{ sessionCapabilities: { restoreToolCall: {} } }` in the initialize
+response. Clients can then call:
+
+```jsonc
+{
+  "method": "session/restore_tool_call",
+  "params": { "sessionId": "sess_abc", "toolCallId": "tc_42" }
+}
+```
+
+The Rust dispatch routes through `harn_hostlib::fs_snapshot::restore`
+and emits a `tool_call_update` with `status: "restored"` plus
+`restoredPaths` on the canonical SessionUpdate channel.
 
 ## How embedders consume it
 

@@ -1,0 +1,17 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://harnlang.com/schemas/hostlib/fs/restore.request.json",
+  "title": "fs.restore request",
+  "type": "object",
+  "properties": {
+    "session_id": { "type": "string", "minLength": 1 },
+    "snapshot_id": { "type": "string", "minLength": 1 },
+    "paths": {
+      "type": "array",
+      "items": { "type": "string" },
+      "description": "Optional subset of paths to restore. Omitted/empty restores every captured path."
+    }
+  },
+  "required": ["session_id", "snapshot_id"],
+  "additionalProperties": false
+}

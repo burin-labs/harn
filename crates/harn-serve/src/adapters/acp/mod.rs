@@ -1235,6 +1235,10 @@ impl AcpServer {
             .unwrap_or_else(|error| error.into_inner())
             .remove(session_id);
         clear_session_sinks(session_id);
+        #[cfg(feature = "hostlib")]
+        {
+            harn_hostlib::fs_snapshot::drop_session_snapshots(session_id);
+        }
         harn_vm::agent_sessions::close_with_status(
             session_id,
             "client_request",
@@ -1782,6 +1786,118 @@ impl AcpServer {
         );
     }
 
+    #[cfg(feature = "hostlib")]
+    fn handle_session_restore_tool_call(
+        &mut self,
+        id: &serde_json::Value,
+        params: &serde_json::Value,
+    ) {
+        let Some(session_id) = params
+            .get("sessionId")
+            .or_else(|| params.get("session_id"))
+            .and_then(serde_json::Value::as_str)
+        else {
+            self.send_error(id, -32602, "session/restore_tool_call requires sessionId");
+            return;
+        };
+        let Some(tool_call_id) = params
+            .get("toolCallId")
+            .or_else(|| params.get("tool_call_id"))
+            .and_then(serde_json::Value::as_str)
+        else {
+            self.send_error(id, -32602, "session/restore_tool_call requires toolCallId");
+            return;
+        };
+        if !self.sessions.contains_key(session_id) {
+            self.send_error(id, -32602, &format!("Unknown session: {session_id}"));
+            return;
+        }
+        let paths = params
+            .get("paths")
+            .and_then(serde_json::Value::as_array)
+            .map(|values| {
+                values
+                    .iter()
+                    .filter_map(serde_json::Value::as_str)
+                    .map(str::to_string)
+                    .collect::<Vec<_>>()
+            })
+            .unwrap_or_default();
+        match harn_hostlib::fs_snapshot::restore(session_id, tool_call_id, &paths) {
+            Ok(result) => {
+                self.send_response(
+                    id,
+                    serde_json::json!({
+                        "toolCallId": &result.snapshot_id,
+                        "restoredPaths": &result.restored_paths,
+                        "skippedPathsWithReasons": result
+                            .skipped_paths_with_reasons
+                            .iter()
+                            .map(|(path, reason)| serde_json::json!({
+                                "path": path,
+                                "reason": reason,
+                            }))
+                            .collect::<Vec<_>>(),
+                    }),
+                );
+                let mut update = serde_json::json!({
+                    "sessionUpdate": "tool_call_update",
+                    "toolCallId": &result.snapshot_id,
+                    "status": "restored",
+                });
+                let mut harn_meta = serde_json::Map::new();
+                harn_meta.insert(
+                    "kind".to_string(),
+                    serde_json::Value::String("tool_call_restored".to_string()),
+                );
+                harn_meta.insert(
+                    "restoredPaths".to_string(),
+                    serde_json::to_value(&result.restored_paths).unwrap_or_default(),
+                );
+                if !result.skipped_paths_with_reasons.is_empty() {
+                    harn_meta.insert(
+                        "skippedPathsWithReasons".to_string(),
+                        serde_json::to_value(
+                            result
+                                .skipped_paths_with_reasons
+                                .iter()
+                                .map(|(path, reason)| {
+                                    serde_json::json!({
+                                        "path": path,
+                                        "reason": reason,
+                                    })
+                                })
+                                .collect::<Vec<_>>(),
+                        )
+                        .unwrap_or_default(),
+                    );
+                }
+                events::merge_harn_meta(&mut update, harn_meta);
+                self.send_notification(
+                    "session/update",
+                    serde_json::json!({
+                        "sessionId": session_id,
+                        "update": update,
+                    }),
+                );
+            }
+            Err(error) => self.send_error(id, -32000, &error.to_string()),
+        }
+    }
+
+    #[cfg(not(feature = "hostlib"))]
+    fn handle_session_restore_tool_call(
+        &mut self,
+        id: &serde_json::Value,
+        _params: &serde_json::Value,
+    ) {
+        self.send_error(
+            id,
+            -32601,
+            "session/restore_tool_call requires the hostlib feature",
+        );
+    }
+
     fn handle_session_set_mode(&mut self, id: &serde_json::Value, params: &serde_json::Value) {
         let Some(session_id) = params
             .get("sessionId")
@@ -1983,6 +2099,12 @@ impl AcpServer {
                     return;
                 }
                 self.handle_session_fs_commit_staged(&id, &params);
+            }
+            "session/restore_tool_call" => {
+                if self.reject_unauthenticated(&id) {
+                    return;
+                }
+                self.handle_session_restore_tool_call(&id, &params);
             }
             "session/prompt" => {
                 if self.reject_unauthenticated(&id) {

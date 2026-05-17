@@ -572,6 +572,54 @@ pub const SCHEMAS: &[(&str, &str, SchemaKind, &str)] = &[
         SchemaKind::Response,
         include_str!("../schemas/fs/discard_staged.response.json"),
     ),
+    (
+        "fs",
+        "snapshot",
+        SchemaKind::Request,
+        include_str!("../schemas/fs/snapshot.request.json"),
+    ),
+    (
+        "fs",
+        "snapshot",
+        SchemaKind::Response,
+        include_str!("../schemas/fs/snapshot.response.json"),
+    ),
+    (
+        "fs",
+        "restore",
+        SchemaKind::Request,
+        include_str!("../schemas/fs/restore.request.json"),
+    ),
+    (
+        "fs",
+        "restore",
+        SchemaKind::Response,
+        include_str!("../schemas/fs/restore.response.json"),
+    ),
+    (
+        "fs",
+        "list_snapshots",
+        SchemaKind::Request,
+        include_str!("../schemas/fs/list_snapshots.request.json"),
+    ),
+    (
+        "fs",
+        "list_snapshots",
+        SchemaKind::Response,
+        include_str!("../schemas/fs/list_snapshots.response.json"),
+    ),
+    (
+        "fs",
+        "drop_snapshot",
+        SchemaKind::Request,
+        include_str!("../schemas/fs/drop_snapshot.request.json"),
+    ),
+    (
+        "fs",
+        "drop_snapshot",
+        SchemaKind::Response,
+        include_str!("../schemas/fs/drop_snapshot.response.json"),
+    ),
     // fs_watch/
     (
         "fs_watch",
