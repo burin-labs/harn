@@ -21,6 +21,11 @@ pub struct EmbeddedSkill {
     pub name: &'static str,
     pub frontmatter: SkillFrontmatter,
     pub body: &'static str,
+    /// The full original SKILL.md source — frontmatter delimiter,
+    /// frontmatter block, blank line, and body — exactly as embedded.
+    /// Use this when round-tripping a skill back to disk so the dumped
+    /// copy is byte-identical to the binary's canonical record.
+    pub source: &'static str,
 }
 
 const SOURCES: &[&str] = &[
@@ -56,6 +61,7 @@ fn parse_skill(source: &'static str) -> EmbeddedSkill {
         name: frontmatter.name,
         frontmatter,
         body,
+        source,
     }
 }
 
@@ -147,6 +153,27 @@ mod tests {
         let mut sorted = names.clone();
         sorted.sort_unstable();
         assert_eq!(names, sorted);
+    }
+
+    #[test]
+    fn source_round_trips_to_frontmatter_and_body() {
+        for skill in list_embedded_skills() {
+            assert!(
+                skill.source.starts_with("---\n"),
+                "{} source missing opening fence",
+                skill.name
+            );
+            assert!(
+                skill.source.ends_with(skill.body),
+                "{} source must end with the body so dump output is byte-stable",
+                skill.name
+            );
+            assert!(
+                skill.source.contains(&format!("name: {}\n", skill.name)),
+                "{} source missing canonical name field",
+                skill.name
+            );
+        }
     }
 
     #[test]

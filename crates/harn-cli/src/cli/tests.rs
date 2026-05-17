@@ -2154,7 +2154,7 @@ fn test_profile_env_aliases_apply_to_supported_commands() {
 
 #[test]
 fn test_parses_skills_subcommands() {
-    let cli = Cli::parse_from(["harn", "skills", "list", "--json", "--all"]);
+    let cli = Cli::parse_from(["harn", "skills", "list", "--json"]);
     let Command::Skills(args) = cli.command.unwrap() else {
         panic!("expected skills command");
     };
@@ -2162,7 +2162,46 @@ fn test_parses_skills_subcommands() {
         panic!("expected skills list");
     };
     assert!(list.json);
-    assert!(list.all);
+
+    let cli = Cli::parse_from(["harn", "skills", "get", "harn-language", "--full", "--json"]);
+    let Command::Skills(args) = cli.command.unwrap() else {
+        panic!("expected skills command");
+    };
+    let SkillsCommand::Get(get) = args.command else {
+        panic!("expected skills get");
+    };
+    assert_eq!(get.name, "harn-language");
+    assert!(get.full);
+    assert!(get.json);
+
+    let cli = Cli::parse_from([
+        "harn",
+        "skills",
+        "dump",
+        "--all",
+        "--out",
+        "/tmp/skills",
+        "--force",
+    ]);
+    let Command::Skills(args) = cli.command.unwrap() else {
+        panic!("expected skills command");
+    };
+    let SkillsCommand::Dump(dump) = args.command else {
+        panic!("expected skills dump");
+    };
+    assert!(dump.all);
+    assert_eq!(dump.out.as_deref(), Some("/tmp/skills"));
+    assert!(dump.force);
+
+    let cli = Cli::parse_from(["harn", "skills", "resolved", "--json", "--all"]);
+    let Command::Skills(args) = cli.command.unwrap() else {
+        panic!("expected skills command");
+    };
+    let SkillsCommand::Resolved(resolved) = args.command else {
+        panic!("expected skills resolved");
+    };
+    assert!(resolved.json);
+    assert!(resolved.all);
 
     let cli = Cli::parse_from(["harn", "skills", "match", "deploy the app", "--top-n", "3"]);
     let Command::Skills(args) = cli.command.unwrap() else {

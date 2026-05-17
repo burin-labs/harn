@@ -121,10 +121,10 @@ pub struct SchemaEntry {
 
 /// Static catalog of commands that already emit a stable JSON shape.
 ///
-/// E2.1 only registers the commands that ship a `schema_version` in
-/// their JSON today (doctor, session export, the provider catalog).
-/// E2.2–E2.6 will add `run`, `test`, `parse`, `tokens`, `graph`, and
-/// `fmt` as they migrate to [`JsonEnvelope`].
+/// E2.1 seeds the commands that ship a `schema_version` today (doctor,
+/// session export, the provider catalog). New commands register here as
+/// they migrate to [`JsonEnvelope`] — for example, the `skills` family
+/// added in E3.2.
 pub fn catalog() -> Vec<SchemaEntry> {
     vec![
         SchemaEntry {
@@ -168,6 +168,18 @@ pub fn catalog() -> Vec<SchemaEntry> {
             schema_version: crate::commands::time::TIME_RUN_SCHEMA_VERSION,
             description:
                 "Per-phase wall-clock + cache hit/miss + per-LLM/tool-call latency for `harn run`.",
+            schema_json: None,
+        },
+        SchemaEntry {
+            command: "skills list",
+            schema_version: 1,
+            description: "Embedded canonical Harn skill corpus, frontmatter only.",
+            schema_json: None,
+        },
+        SchemaEntry {
+            command: "skills get",
+            schema_version: 1,
+            description: "One embedded skill's frontmatter (and body with --full).",
             schema_json: None,
         },
     ]

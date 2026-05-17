@@ -316,19 +316,99 @@ See [Bridge protocol](./bridge-protocol.md) for wire-format details.
 
 ## Managing skills
 
-The `harn skills` CLI manages and inspects skills without running a
-pipeline. Each subcommand resolves the layered catalog the same way
-`harn run` does (`--skill-dir`, `HARN_SKILLS_PATH`, project, manifest,
-user, packages, system, host), so what you see here is exactly what
-pipelines see.
+The `harn skills` CLI splits into two complementary surfaces:
+
+- **Embedded corpus** — the canonical Harn skills shipped *inside* the
+  `harn` binary (`harn-language`, `harn-orchestration`, `harn-testing`,
+  …). Access these with `harn skills list`, `harn skills get <name>`,
+  and `harn skills dump --all`. They are always available, with no
+  project or filesystem state required.
+- **Layered FS discovery** — user-authored skills picked up from
+  `--skill-dir`, `HARN_SKILLS_PATH`, project, manifest, user, packages,
+  system, and host layers. Access these with `harn skills resolved`,
+  `harn skills inspect <name>`, and `harn skills match`. What you see
+  there is byte-for-byte the registry that `harn run` / `harn test` /
+  `harn check` hand to the VM.
 
 ### `harn skills list`
 
-Prints every resolved skill with the layer it came from. Pass
-`--all` to include shadowed entries; pass `--json` for machine output.
+Lists the embedded canonical skill corpus that ships with this build
+of `harn`. Pass `--json` for a versioned `JsonEnvelope` payload that
+agents and CI can pipe through `jq`.
 
 ```text
 $ harn skills list
+Embedded canonical skills (7):
+  harn-agent          Agent runtime, supervisor wiring, and tool callers.
+  harn-diagnostics    Diagnostic codes, severity rules, suppression hints.
+  harn-language       Harn syntax, modules, types, diagnostics, script structure.
+  harn-orchestration  Triggers, orchestrator handoffs, parallelism primitives.
+  harn-providers      Provider catalog, model packs, fallback policy.
+  harn-testing        Conformance suite, deterministic test patterns.
+  harn-tracing        Transcripts, eval replay, observability surfaces.
+
+Run `harn skills get <name>` for one entry's frontmatter.
+Run `harn skills get <name> --full` to include the body.
+```
+
+The `--json` output uses the standard envelope (`schemaVersion`, `ok`,
+`data`, `error`, `warnings`). The `data.skills` array contains the
+same frontmatter fields shown above:
+
+```bash
+$ harn skills list --json | jq '.data.skills | length'
+7
+```
+
+### `harn skills get <name>`
+
+Prints frontmatter for a single embedded skill. Pass `--full` to
+include the SKILL.md body; pass `--json` to wrap the output in a
+`JsonEnvelope` for machine consumption.
+
+```text
+$ harn skills get harn-language
+name:        harn-language
+short:       Harn syntax, modules, types, diagnostics, and script structure.
+description: Use for Harn language syntax, typechecking, modules, imports, and idiomatic script authoring.
+when_to_use: Use when writing, reviewing, or explaining Harn source code and language-level behavior.
+
+$ harn skills get harn-language --full --json | jq '.data | keys'
+[
+  "body",
+  "description",
+  "name",
+  "short",
+  "when_to_use"
+]
+```
+
+Unknown names return `ok: false` with a `skill_not_found` error code
+and the list of available skills in `error.details.available`.
+
+### `harn skills dump --all [--out <dir>]`
+
+Writes every embedded skill to disk as a `<dir>/<name>/SKILL.md` tree
+so agents and CI can review the corpus offline. Defaults the output
+directory to `./skills`. Refuses to overwrite existing files unless
+`--force` is passed.
+
+```text
+$ harn skills dump --all --out /tmp/skills
+Wrote 7 skill(s) to /tmp/skills
+  /tmp/skills/harn-agent/SKILL.md
+  /tmp/skills/harn-diagnostics/SKILL.md
+  …
+```
+
+### `harn skills resolved`
+
+Prints every FS-resolved skill with the layer it came from. Pass
+`--all` to include shadowed entries; pass `--json` for newline-delimited
+JSON records:
+
+```text
+$ harn skills resolved
 Resolved skills (3):
   deploy         [cli]       Deploy to production when release work is requested
   review         [project]   Review a pull request when asked for code review help
@@ -410,7 +490,7 @@ Scaffolded skill 'deploy' at .harn/skills/deploy
   SKILL.md
   files/README.md
 
-Edit the SKILL.md frontmatter and body, then run `harn skills list`
+Edit the SKILL.md frontmatter and body, then run `harn skills resolved`
 to verify the compact card is picked up.
 ```
 

@@ -8,8 +8,14 @@ pub(crate) struct SkillsArgs {
 
 #[derive(Debug, Subcommand)]
 pub(crate) enum SkillsCommand {
-    /// Show resolved skills in priority order, with collision warnings.
+    /// List the embedded canonical Harn skill corpus.
     List(SkillsListArgs),
+    /// Print one embedded skill's frontmatter (or full body with `--full`).
+    Get(SkillsGetArgs),
+    /// Write the embedded skill corpus to disk for offline review.
+    Dump(SkillsDumpArgs),
+    /// Show layered-resolution skills discovered from the filesystem.
+    Resolved(SkillsResolvedArgs),
     /// Dump the resolved SKILL.md plus bundled files and metadata for one skill.
     Inspect(SkillsInspectArgs),
     /// Run the metadata matcher against a prompt and show ranked candidates.
@@ -23,6 +29,40 @@ pub(crate) enum SkillsCommand {
 
 #[derive(Debug, Args)]
 pub(crate) struct SkillsListArgs {
+    /// Emit a [`JsonEnvelope`]-wrapped catalog of embedded skills.
+    #[arg(long)]
+    pub json: bool,
+}
+
+#[derive(Debug, Args)]
+pub(crate) struct SkillsGetArgs {
+    /// Embedded skill name (e.g. `harn-language`).
+    pub name: String,
+    /// Include the full SKILL.md body alongside the frontmatter.
+    #[arg(long)]
+    pub full: bool,
+    /// Emit a [`JsonEnvelope`]-wrapped record instead of human-readable text.
+    #[arg(long)]
+    pub json: bool,
+}
+
+#[derive(Debug, Args)]
+pub(crate) struct SkillsDumpArgs {
+    /// Required selector — reserved for future filters.
+    /// Today only `--all` is accepted; without it `dump` refuses to run.
+    #[arg(long)]
+    pub all: bool,
+    /// Destination directory. Defaults to `./skills` in the current
+    /// working directory. Each skill is written to `<dir>/<name>/SKILL.md`.
+    #[arg(long = "out", value_name = "DIR")]
+    pub out: Option<String>,
+    /// Overwrite existing files in the destination instead of refusing.
+    #[arg(long)]
+    pub force: bool,
+}
+
+#[derive(Debug, Args)]
+pub(crate) struct SkillsResolvedArgs {
     /// Emit newline-delimited JSON (one record per skill) instead of a table.
     #[arg(long)]
     pub json: bool,

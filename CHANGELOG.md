@@ -67,6 +67,19 @@ condensed series summaries instead of full per-patch history.
   the in-process `FakeLlmProvider` all route through the shared
   `StreamSchemaWatch` helper so script-driven and test-driven paths
   exercise the same logic.
+- **`harn skills list / get / dump` over the embedded corpus (#1762).**
+  Wires the `harn-skills` bundled corpus (#1761) through the CLI:
+  `harn skills list [--json]` returns the canonical Harn skills shipped
+  with this build, `harn skills get <name> [--full] [--json]` prints
+  one skill's frontmatter (and SKILL.md body when `--full` is passed),
+  and `harn skills dump --all [--out <dir>] [--force]` writes every
+  skill to disk as byte-stable copies of the embedded source. `--json`
+  output uses the canonical `JsonEnvelope` shape from #1754, with a
+  `skill_not_found` error envelope and `error.details.available`
+  payload on unknown lookups. The legacy FS-discovery list view moves
+  to `harn skills resolved` (same flags as the old `list`), and
+  `harn skills list / get` register in the `harn --json-schemas`
+  catalog as schema-version 1.
 - **`with_scoped_executor` tool-caller middleware (#1702).** Narrows the
   active `CapabilityPolicy` for the duration of one tool dispatch:
   `compose_tool_callers([..., with_scoped_executor({stage, allowed_tools,
