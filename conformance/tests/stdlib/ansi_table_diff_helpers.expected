@@ -1,0 +1,22 @@
+"\u001b[1;31mhi\u001b[0m"
+hi
+2
+true
+Name | Status | Count
+-----+--------+------
+api  | ok     |    12
+web  | fail   |     3
+| Name |
+| ---- |
+| api  |
+true
+2
+1
+--- a/demo.txt
++++ b/demo.txt
+@@ -1,3 +1,4 @@
+ a
+-b
++B
+ c
++d

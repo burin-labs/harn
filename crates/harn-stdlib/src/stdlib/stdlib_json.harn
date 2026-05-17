@@ -6,7 +6,7 @@
  * pretty.
  */
 pub fn pretty(value) {
-  return json_stringify(value)
+  return json_stringify_pretty(value)
 }
 
 /**

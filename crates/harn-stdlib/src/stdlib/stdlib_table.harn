@@ -1,0 +1,272 @@
+// std/table - deterministic plain-text and Markdown table rendering.
+import { ansi_truncate, ansi_visible_len } from "std/ansi"
+
+type TableColumn = {key?: string, header?: string, align?: string, width?: int, max_width?: int}
+
+type TableOptions = {
+  columns?: list,
+  headers?: list<string>,
+  format?: string,
+  max_cell_width?: int,
+  header?: bool,
+  empty?: string,
+}
+
+fn __table_text(value) -> string {
+  if value == nil {
+    return ""
+  }
+  let kind = type_of(value)
+  if kind == "dict" || kind == "list" || kind == "set" {
+    return json_stringify(value)
+  }
+  return to_string(value)
+}
+
+fn __table_cell(value, max_width) -> string {
+  let normalized = replace(replace(__table_text(value), "\r", " "), "\n", "\\n")
+  if max_width != nil && max_width > 0 {
+    return ansi_truncate(normalized, max_width)
+  }
+  return normalized
+}
+
+fn __table_column_from(raw, idx, headers) {
+  if type_of(raw) == "string" {
+    return {key: raw, header: raw, align: "left", index: idx}
+  }
+  let col = raw ?? {}
+  let key = col?.key ?? col?.name ?? col?.header ?? to_string(idx)
+  let header = col?.header ?? (headers?[idx] ?? key)
+  return {
+    key: key,
+    header: header,
+    align: lowercase(col?.align ?? "left"),
+    width: col?.width,
+    max_width: col?.max_width,
+    index: idx,
+  }
+}
+
+fn __table_columns(rows, opts) {
+  let options = opts ?? {}
+  let headers = options?.headers ?? []
+  var cols = []
+  if type_of(options?.columns) == "list" && len(options.columns) > 0 {
+    var idx = 0
+    for raw in options.columns {
+      cols = cols.push(__table_column_from(raw, idx, headers))
+      idx += 1
+    }
+    return cols
+  }
+  if len(headers) > 0 {
+    var hidx = 0
+    for header in headers {
+      cols = cols.push({key: to_string(hidx), header: header, align: "left", index: hidx})
+      hidx += 1
+    }
+    return cols
+  }
+  let first = rows?[0]
+  if type_of(first) == "dict" {
+    for key in keys(first).sort() {
+      cols = cols.push({key: key, header: key, align: "left", index: len(cols)})
+    }
+    return cols
+  }
+  if type_of(first) == "list" {
+    var i = 0
+    while i < len(first) {
+      cols = cols.push({key: to_string(i), header: to_string(i), align: "left", index: i})
+      i += 1
+    }
+  }
+  return cols
+}
+
+fn __table_value(row, col) {
+  if type_of(row) == "dict" {
+    return row[col.key]
+  }
+  if type_of(row) == "list" {
+    return row[col.index]
+  }
+  if col.index == 0 {
+    return row
+  }
+  return nil
+}
+
+fn __table_matrix(rows, cols, opts) {
+  let default_max = opts?.max_cell_width
+  var matrix = []
+  for row in rows ?? [] {
+    var rendered = []
+    for col in cols {
+      let max_width = col?.max_width ?? default_max
+      rendered = rendered.push(__table_cell(__table_value(row, col), max_width))
+    }
+    matrix = matrix.push(rendered)
+  }
+  return matrix
+}
+
+fn __table_widths(cols, matrix) {
+  var widths = []
+  var i = 0
+  while i < len(cols) {
+    let fixed = cols[i]?.width
+    if fixed != nil && fixed > 0 {
+      widths = widths.push(fixed)
+      i += 1
+      continue
+    }
+    var width = ansi_visible_len(cols[i]?.header ?? "")
+    for row in matrix {
+      width = max(width, ansi_visible_len(row[i] ?? ""))
+    }
+    widths = widths.push(width)
+    i += 1
+  }
+  return widths
+}
+
+fn __table_pad(value, width, align) -> string {
+  let text = value ?? ""
+  let missing = width - ansi_visible_len(text)
+  if missing <= 0 {
+    return text
+  }
+  if align == "right" {
+    return " ".repeat(missing) + text
+  }
+  if align == "center" {
+    let left = floor(missing / 2)
+    let right = missing - left
+    return " ".repeat(left) + text + " ".repeat(right)
+  }
+  return text + " ".repeat(missing)
+}
+
+fn __table_render_row(cells, cols, widths) -> string {
+  var out = []
+  var i = 0
+  while i < len(cols) {
+    out = out.push(__table_pad(cells[i] ?? "", widths[i], cols[i]?.align ?? "left"))
+    i += 1
+  }
+  return join(out, " | ")
+}
+
+fn __table_plain_separator(widths) -> string {
+  var parts = []
+  for width in widths {
+    parts = parts.push("-".repeat(max(width, 3)))
+  }
+  return join(parts, "-+-")
+}
+
+fn __table_markdown_escape(value) -> string {
+  return replace(value ?? "", "|", "\\|")
+}
+
+fn __table_markdown_row(cells, cols, widths) -> string {
+  var out = []
+  var i = 0
+  while i < len(cols) {
+    out = out.push(__table_markdown_escape(__table_pad(cells[i] ?? "", widths[i], cols[i]?.align ?? "left")))
+    i += 1
+  }
+  return "| " + join(out, " | ") + " |"
+}
+
+fn __table_markdown_separator(cols, widths) -> string {
+  var out = []
+  var i = 0
+  while i < len(cols) {
+    let marks = "-".repeat(max(widths[i], 3))
+    let align = cols[i]?.align ?? "left"
+    let cell = if align == "right" {
+      marks + ":"
+    } else if align == "center" {
+      ":" + marks + ":"
+    } else {
+      marks
+    }
+    out = out.push(cell)
+    i += 1
+  }
+  return "| " + join(out, " | ") + " |"
+}
+
+fn __table_render_plain(cols, matrix, widths, show_header) -> string {
+  var lines = []
+  if show_header {
+    let header_cells = cols.map({ col -> col?.header ?? col?.key ?? "" })
+    lines = lines.push(__table_render_row(header_cells, cols, widths))
+    lines = lines.push(__table_plain_separator(widths))
+  }
+  for row in matrix {
+    lines = lines.push(__table_render_row(row, cols, widths))
+  }
+  return join(lines, "\n")
+}
+
+fn __table_render_markdown(cols, matrix, widths, show_header) -> string {
+  var lines = []
+  let header_cells = if show_header {
+    cols.map({ col -> col?.header ?? col?.key ?? "" })
+  } else {
+    cols.map({ _col -> "" })
+  }
+  lines = lines.push(__table_markdown_row(header_cells, cols, widths))
+  lines = lines.push(__table_markdown_separator(cols, widths))
+  for row in matrix {
+    lines = lines.push(__table_markdown_row(row, cols, widths))
+  }
+  return join(lines, "\n")
+}
+
+/** Render rows as a stable plain-text or Markdown table. */
+pub fn render_table(rows: list, options: TableOptions = {}) -> string {
+  let items = rows ?? []
+  if len(items) == 0 {
+    return options.empty ?? ""
+  }
+  let cols = __table_columns(items, options)
+  if len(cols) == 0 {
+    return options.empty ?? ""
+  }
+  let matrix = __table_matrix(items, cols, options ?? {})
+  let widths = __table_widths(cols, matrix)
+  let format = lowercase(options.format ?? "plain")
+  let show_header = options.header ?? true
+  if format == "markdown" || format == "md" {
+    return __table_render_markdown(cols, matrix, widths, show_header)
+  }
+  return __table_render_plain(cols, matrix, widths, show_header)
+}
+
+/** Alias for `render_table(..., {format: "markdown"})`. */
+pub fn render_markdown_table(rows: list, options: TableOptions = {}) -> string {
+  let base = options ?? {}
+  return render_table(rows, base + {format: "markdown"})
+}
+
+/** Render a dict as a two-column key/value table. */
+pub fn render_kv_table(data: dict, options: TableOptions = {}) -> string {
+  var rows = []
+  for key in keys(data ?? {}).sort() {
+    rows = rows.push({key: key, value: data[key]})
+  }
+  let base = options ?? {}
+  let opts = base
+    + {
+    columns: [
+      {key: "key", header: base?.key_header ?? "Key"},
+      {key: "value", header: base?.value_header ?? "Value"},
+    ],
+  }
+  return render_table(rows, opts)
+}

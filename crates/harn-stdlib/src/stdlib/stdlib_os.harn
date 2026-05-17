@@ -1,0 +1,113 @@
+// std/os - environment and host information helpers.
+import { command_run } from "std/command"
+
+/** Return a compact host/runtime information dict for diagnostics. */
+pub fn os_info() -> dict {
+  return {
+    platform: platform(),
+    arch: arch(),
+    cwd: cwd(),
+    home_dir: home_dir(),
+    temp_dir: temp_dir(),
+    username: username(),
+    hostname: hostname(),
+    pid: pid(),
+    runtime_paths: runtime_paths(),
+    stdin_tty: is_stdin_tty(),
+    stdout_tty: is_stdout_tty(),
+    stderr_tty: is_stderr_tty(),
+  }
+}
+
+/** Read an environment variable as a bool, accepting common CLI spellings. */
+pub fn env_bool(name: string, fallback: bool = false) -> bool {
+  let value = env(name)
+  if value == nil {
+    return fallback
+  }
+  let normalized = lowercase(trim(value))
+  if normalized == "1" || normalized == "true" || normalized == "yes" || normalized == "y"
+    || normalized == "on" {
+    return true
+  }
+  if normalized == "0" || normalized == "false" || normalized == "no" || normalized == "n"
+    || normalized == "off" {
+    return false
+  }
+  return fallback
+}
+
+/** Read an environment variable as an int, returning fallback on absence or parse failure. */
+pub fn env_int(name: string, fallback = nil) {
+  let value = env(name)
+  if value == nil {
+    return fallback
+  }
+  return to_int(value) ?? fallback
+}
+
+/** Split a path/list-style environment variable, dropping empty entries. */
+pub fn env_list(name: string, separator = nil) -> list<string> {
+  let value = env(name)
+  if value == nil || value == "" {
+    return []
+  }
+  var sep = separator
+  if sep == nil {
+    sep = if platform() == "windows" {
+      ";"
+    } else {
+      ":"
+    }
+  }
+  var out = []
+  for item in split(value, sep) {
+    let trimmed = trim(item)
+    if trimmed != "" {
+      out = out.push(trimmed)
+    }
+  }
+  return out
+}
+
+/** Read a required environment variable or throw a clear error. */
+pub fn require_env(name: string) -> string {
+  let value = env(name)
+  if value == nil || value == "" {
+    throw "required environment variable is not set: " + name
+  }
+  return value
+}
+
+/** Resolve an executable on PATH, returning nil when not found. */
+pub fn which(binary: string) {
+  let executable = trim(binary ?? "")
+  if executable == "" {
+    return nil
+  }
+  let argv = if platform() == "windows" {
+    ["where", executable]
+  } else {
+    ["which", executable]
+  }
+  let result = try {
+    command_run({argv: argv}, {capture: {max_inline_bytes: 4096}})
+  }
+  if !is_ok(result) {
+    return nil
+  }
+  let out = unwrap(result)
+  if !(out?.success ?? false) {
+    return nil
+  }
+  let lines = split(trim(out?.stdout ?? ""), "\n").filter({ line -> trim(line) != "" })
+  if len(lines) == 0 {
+    return nil
+  }
+  return trim(lines[0])
+}
+
+/** Return whether an executable is visible on PATH. */
+pub fn command_exists(binary: string) -> bool {
+  return which(binary) != nil
+}

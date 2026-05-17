@@ -164,6 +164,11 @@ pub(crate) const SIGNATURES: &[BuiltinSignature] = &[
         IO_RESULT_ENVELOPE,
     ),
     BuiltinSignature::simple(
+        "__ansi_enabled",
+        &[Param::optional("stream", TY_STRING)],
+        TY_BOOL,
+    ),
+    BuiltinSignature::simple(
         "__llm_cache_key",
         &[
             Param::new("prompt", TY_ANY),
@@ -1110,6 +1115,11 @@ pub(crate) const SIGNATURES: &[BuiltinSignature] = &[
         TY_ANY,
     ),
     BuiltinSignature::simple("json_stringify", &[Param::new("value", TY_ANY)], TY_STRING),
+    BuiltinSignature::simple(
+        "json_stringify_pretty",
+        &[Param::new("value", TY_ANY)],
+        TY_STRING,
+    ),
     BuiltinSignature::simple(
         "json_validate",
         &[Param::new("value", TY_ANY), Param::new("schema", TY_DICT)],

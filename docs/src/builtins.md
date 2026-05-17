@@ -13,6 +13,7 @@ Complete reference for all built-in functions available in Harn.
 | `color(text, name)` | text: any, name: string | string | Wrap text with an ANSI foreground color code |
 | `bold(text)` | text: any | string | Wrap text with ANSI bold styling |
 | `dim(text)` | text: any | string | Wrap text with ANSI dim styling |
+| `set_color_mode(mode)` | mode: `"auto"`, `"always"`, or `"never"` | nil | Configure process-local ANSI color behavior for `color`, `bold`, `dim`, and `std/ansi`; `auto` honors TTY detection, `NO_COLOR`, and `FORCE_COLOR` |
 
 ## Type conversion
 
@@ -82,6 +83,7 @@ println(unwrap_err(bad))         // something went wrong
 |---|---|---|---|
 | `json_parse(str)` | str: string | value | Parse JSON string into Harn values. Throws on invalid JSON |
 | `json_stringify(value)` | value: any | string | Serialize Harn value to JSON. Closures and handles become `null` |
+| `json_stringify_pretty(value)` | value: any | string | Serialize Harn value to pretty-printed JSON with stable two-space indentation |
 | `yaml_parse(str)` | str: string | value | Parse YAML string into Harn values. Throws on invalid YAML |
 | `yaml_stringify(value)` | value: any | string | Serialize Harn value to YAML |
 | `toml_parse(str)` | str: string | value | Parse TOML string into Harn values. Throws on invalid TOML |

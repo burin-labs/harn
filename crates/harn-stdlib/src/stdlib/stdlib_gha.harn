@@ -1,0 +1,122 @@
+/** std/gha - GitHub Actions output, summary, and annotation helpers. */
+type GhaAnnotationOptions = {
+  file?: string,
+  line?: int,
+  endLine?: int,
+  col?: int,
+  endColumn?: int,
+  title?: string,
+}
+
+fn __gha_escape_data(value) -> string {
+  let text = to_string(value ?? "")
+  return replace(replace(replace(text, "%", "%25"), "\r", "%0D"), "\n", "%0A")
+}
+
+fn __gha_escape_property(value) -> string {
+  return replace(replace(__gha_escape_data(value), ":", "%3A"), ",", "%2C")
+}
+
+fn __gha_kv(key, value) {
+  if value == nil {
+    return nil
+  }
+  return key + "=" + __gha_escape_property(value)
+}
+
+fn __gha_file_path(path, fallback) {
+  let explicit = path ?? fallback
+  if explicit != nil && explicit != "" {
+    return explicit
+  }
+  return nil
+}
+
+/** Escape text for the data portion of a GitHub Actions workflow command. */
+pub fn gha_escape_data(value) -> string {
+  return __gha_escape_data(value)
+}
+
+/** Escape text for a GitHub Actions workflow-command property. */
+pub fn gha_escape_property(value) -> string {
+  return __gha_escape_property(value)
+}
+
+/** Build a workflow annotation line (`::warning ...::message`). */
+pub fn gha_annotation(kind: string, message: string, options: GhaAnnotationOptions = {}) -> string {
+  let opts = options ?? {}
+  var props = []
+  for pair in [
+    __gha_kv("file", opts?.file),
+    __gha_kv("line", opts?.line),
+    __gha_kv("endLine", opts?.endLine),
+    __gha_kv("col", opts?.col),
+    __gha_kv("endColumn", opts?.endColumn),
+    __gha_kv("title", opts?.title),
+  ] {
+    if pair != nil {
+      props = props.push(pair)
+    }
+  }
+  let suffix = if len(props) > 0 {
+    " " + join(props, ",")
+  } else {
+    ""
+  }
+  let annotation_kind = kind ?? "notice"
+  return "::" + annotation_kind + suffix + "::" + __gha_escape_data(message)
+}
+
+/** Print a GitHub Actions notice. */
+pub fn gha_notice(message: string, options: GhaAnnotationOptions = {}) {
+  println(gha_annotation("notice", message, options))
+}
+
+/** Print a GitHub Actions warning. */
+pub fn gha_warning(message: string, options: GhaAnnotationOptions = {}) {
+  println(gha_annotation("warning", message, options))
+}
+
+/** Print a GitHub Actions error annotation. */
+pub fn gha_error(message: string, options: GhaAnnotationOptions = {}) {
+  println(gha_annotation("error", message, options))
+}
+
+/** Build the multiline-safe entry used by `$GITHUB_OUTPUT` and `$GITHUB_ENV`. */
+pub fn gha_env_block(name: string, value, delimiter: string? = nil) -> string {
+  let delim = delimiter ?? ("harn_" + uuid_v7())
+  return name + "<<" + delim + "\n" + to_string(value ?? "") + "\n" + delim + "\n"
+}
+
+/** Append an output value to `$GITHUB_OUTPUT`, or to `path` when supplied. */
+pub fn gha_write_output(name: string, value, path: string? = nil) -> bool {
+  let target = __gha_file_path(path, env("GITHUB_OUTPUT"))
+  if target == nil {
+    return false
+  }
+  append_file(target, gha_env_block(name, value))
+  return true
+}
+
+/** Append an environment value to `$GITHUB_ENV`, or to `path` when supplied. */
+pub fn gha_write_env(name: string, value, path: string? = nil) -> bool {
+  let target = __gha_file_path(path, env("GITHUB_ENV"))
+  if target == nil {
+    return false
+  }
+  append_file(target, gha_env_block(name, value))
+  return true
+}
+
+/** Append Markdown to `$GITHUB_STEP_SUMMARY`, or to `path` when supplied. */
+pub fn gha_append_summary(markdown: string, path: string? = nil) -> bool {
+  let target = __gha_file_path(path, env("GITHUB_STEP_SUMMARY"))
+  if target == nil {
+    return false
+  }
+  append_file(target, markdown ?? "")
+  if !ends_with(markdown ?? "", "\n") {
+    append_file(target, "\n")
+  }
+  return true
+}

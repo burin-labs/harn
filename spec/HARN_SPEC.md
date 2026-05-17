@@ -357,7 +357,16 @@ Imports starting with `std/` load embedded stdlib modules:
 - `import "std/text"` — text processing (extract_paths, parse_cells,
   filter_test_cells, truncate_head_tail, detect_compile_error, has_got_want,
   format_test_errors, int_to_string, float_to_string, parse_int_or,
-  parse_float_or)
+  parse_float_or, truncate_text, truncate_middle, single_line_or,
+  prefix_lines, indent)
+- `import "std/ansi"` — terminal styling helpers (ansi_enabled,
+  ansi_style, ansi_color, ansi_strip, ansi_visible_len, ansi_link,
+  ansi_success, ansi_warn, ansi_error)
+- `import "std/table"` — deterministic plain-text and Markdown table
+  rendering (render_table, render_markdown_table, render_kv_table)
+- `import "std/diff"` — line diff, unified diff, colored diff, and diff
+  stat helpers (diff_lines, unified_diff, colorize_diff, diff_summary,
+  render_diff_stat)
 - `import "std/edit"` — pure old/new text patch helpers
   (edit_apply_old_new_patch, edit_splice_lines, edit_changed_regions,
   edit_validate_changed_regions)
@@ -375,6 +384,15 @@ Imports starting with `std/` load embedded stdlib modules:
   terminal_width, rule, clear)
 - `import "std/collections"` — collection utilities (filter_nil, store_stale,
   store_refresh)
+- `import "std/fs"` — file-system convenience helpers built on host
+  primitives (ensure_parent_dir, read_json, write_json, read_yaml,
+  write_yaml, read_toml, write_toml, write_lines, append_line, touch,
+  find_files, relative_path, is_file, is_dir, file_size)
+- `import "std/os"` — environment and host diagnostic helpers (os_info,
+  env_bool, env_int, env_list, require_env, which, command_exists)
+- `import "std/gha"` — GitHub Actions workflow command helpers
+  (gha_escape_data, gha_annotation, gha_notice, gha_warning, gha_error,
+  gha_env_block, gha_write_output, gha_write_env, gha_append_summary)
 - `import "std/async"` — polling and retry helpers (wait_for, retry_until,
   retry_predicate_with_backoff, circuit_call)
 - `import "std/signal"` — cooperative process interruption helpers

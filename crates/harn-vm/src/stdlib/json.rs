@@ -41,6 +41,17 @@ pub(crate) fn register_json_builtins(vm: &mut Vm) {
         Ok(VmValue::String(Rc::from(vm_value_to_json(val))))
     });
 
+    vm.register_builtin("json_stringify_pretty", |args, _out| {
+        let val = args.first().unwrap_or(&VmValue::Nil);
+        serde_json::to_string_pretty(&vm_value_to_data_value(val))
+            .map(|text| VmValue::String(Rc::from(text)))
+            .map_err(|error| {
+                VmError::Thrown(VmValue::String(Rc::from(format!(
+                    "json_stringify_pretty: {error}"
+                ))))
+            })
+    });
+
     vm.register_builtin("json_parse", |args, _out| {
         let text = args.first().map(|a| a.display()).unwrap_or_default();
         if let Some(cached) = JSON_PARSE_CACHE.with(|cache| cache.borrow().get(&text).cloned()) {

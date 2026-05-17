@@ -424,6 +424,13 @@ fn websocket_server_loop(
     while running.load(Ordering::SeqCst) {
         match listener.accept() {
             Ok((stream, peer)) => {
+                // The listener is intentionally nonblocking, but tungstenite's
+                // server handshake here is blocking and can otherwise fail
+                // spuriously with "Handshake not finished" on inherited
+                // nonblocking accepted sockets.
+                if stream.set_nonblocking(false).is_err() {
+                    continue;
+                }
                 let routes = routes.clone();
                 let event_tx = event_tx.clone();
                 let running = running.clone();
