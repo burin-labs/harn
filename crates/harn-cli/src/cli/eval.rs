@@ -79,8 +79,11 @@ pub struct EvalToolCallsArgs {
     /// Maximum planner response tokens.
     #[arg(long = "max-tokens", default_value_t = 512)]
     pub max_tokens: i64,
-    /// Maximum binder response tokens.
-    #[arg(long = "binder-max-tokens", default_value_t = 256)]
+    /// Maximum binder response tokens. Default is sized to leave room for
+    /// reasoning-emitting models (e.g. GPT-OSS-120B emits ~200 tokens of
+    /// chain-of-thought before the JSON payload); non-reasoning binders
+    /// will under-fill this budget at no extra cost.
+    #[arg(long = "binder-max-tokens", default_value_t = 1024)]
     pub binder_max_tokens: i64,
     /// Run only cases whose id or tag contains this string.
     #[arg(long)]

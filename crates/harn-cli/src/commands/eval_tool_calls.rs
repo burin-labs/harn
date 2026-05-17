@@ -673,14 +673,37 @@ fn predicate_judge_script(
 fn binder_prompt(case: &ToolCallEvalCase, planner_response: &JsonValue) -> String {
     let tools = serde_json::to_string_pretty(&case.tools).unwrap_or_default();
     let planner = serde_json::to_string_pretty(planner_response).unwrap_or_default();
+    // Authority is the user prompt + the tool schema — NOT the planner's
+    // output. The planner's response is a hint; it may have selected the
+    // wrong tool, used the wrong capitalization, paraphrased a query,
+    // included extraneous fields, or omitted required ones. This mirrors
+    // the production middleware contract at
+    // crates/harn-stdlib/src/stdlib/llm/prompts/tool_binder_user.harn.prompt
+    // ("bind from the intent, not from these"). The earlier "canonicalize
+    // the planner response" framing was a degenerate version that
+    // rubber-stamped the planner's args verbatim and didn't actually
+    // exercise the binder pattern.
     format!(
-        "Canonicalize the planner response into one tool-call decision.\n\
-Return JSON with decision=call or decision=refusal.\n\
-When decision=call: set name to exactly one declared tool name and arguments_json to a \
-JSON-stringified object containing only that tool's arguments (no markdown, no comments).\n\
-When decision=refusal: set name=\"\" and arguments_json=\"{{}}\".\n\
-reason is always a short one-line rationale.\n\n\
-User prompt:\n{}\n\nDeclared tools:\n{}\n\nPlanner response:\n{}",
+        "You are a fast schema-binder. Read the user's prompt and the declared tool \
+schemas as the source of truth, then produce the single best tool-call decision.\n\
+The planner's response is a HINT only — it may pick the wrong tool, paraphrase \
+the user's query, normalize case, omit required arguments, or include extraneous \
+ones. Treat it as a suggestion to evaluate, not a transcript to canonicalize.\n\
+\n\
+Output JSON with these fields (all required):\n\
+- decision: \"call\" or \"refusal\"\n\
+- name: when decision=call, the exact declared tool name; otherwise \"\".\n\
+- arguments_json: when decision=call, a JSON-stringified object containing only \
+the arguments the chosen tool declares — copied from the user's prompt verbatim \
+where possible (preserve original capitalization, punctuation, and exact phrasing \
+from the user's request); when decision=refusal, \"{{}}\".\n\
+- reason: one short line explaining the decision.\n\
+\n\
+Refuse (decision=refusal) when no declared tool can serve the user's request, \
+when a required argument is missing from the user's prompt, or when the request \
+is purely conversational.\n\
+\n\
+User prompt:\n{}\n\nDeclared tools:\n{}\n\nPlanner hint:\n{}",
         case.prompt, tools, planner
     )
 }
