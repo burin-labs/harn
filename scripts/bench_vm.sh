@@ -235,7 +235,7 @@ if [[ "$mode" == "loop" ]]; then
 
     wall_line="$(awk '/^Wall time:/ { print; exit }' <<<"$output")"
     min_ms="$(extract_metric "$wall_line" "min")"
-    avg_ms="$(extract_metric "$wall_line" "avg")"
+    avg_ms="$(extract_metric "$wall_line" "mean")"
     max_ms="$(extract_metric "$wall_line" "max")"
     if [[ ! "$min_ms" =~ ^[0-9]+([.][0-9]+)?$ || ! "$avg_ms" =~ ^[0-9]+([.][0-9]+)?$ || ! "$max_ms" =~ ^[0-9]+([.][0-9]+)?$ ]]; then
       echo "error: failed to parse wall-time metrics from harn bench output for $fixture" >&2
