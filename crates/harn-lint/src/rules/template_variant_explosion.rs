@@ -10,6 +10,7 @@
 //! `[lint] template_variant_branch_threshold` in `harn.toml`.
 
 use harn_lexer::Span;
+use harn_parser::DiagnosticCode as Code;
 use harn_vm::stdlib::template::lint::{ConditionShape, LintConstruct};
 
 use crate::diagnostic::{LintDiagnostic, LintSeverity};
@@ -55,6 +56,7 @@ pub(crate) fn check(
          one shared place instead of being scattered across the prompt.",
     );
     vec![LintDiagnostic {
+        code: Code::LintTemplateVariantExplosion,
         rule: RULE_NAME,
         message,
         span,

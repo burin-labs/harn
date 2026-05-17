@@ -89,11 +89,12 @@ pub(crate) fn check_file_inner(
                 PreflightSeverity::Off => unreachable!(),
             }
             diagnostic_count += 1;
-            let rendered = harn_parser::diagnostic::render_diagnostic(
+            let rendered = harn_parser::diagnostic::render_diagnostic_with_code(
                 &diag.source,
                 &diag.path,
                 &diag.span,
                 severity_label,
+                diag.code,
                 &diag.message,
                 Some(category),
                 diag.help.as_deref(),

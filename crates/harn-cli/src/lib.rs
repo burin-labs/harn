@@ -2342,11 +2342,12 @@ pub(crate) fn parse_source_file(path: &str) -> (String, Vec<harn_parser::SNode>)
     let tokens = match lexer.tokenize() {
         Ok(t) => t,
         Err(e) => {
-            let diagnostic = harn_parser::diagnostic::render_diagnostic(
+            let diagnostic = harn_parser::diagnostic::render_diagnostic_with_code(
                 &source,
                 path,
                 &error_span_from_lex(&e),
                 "error",
+                harn_parser::diagnostic::lexer_error_code(&e),
                 &e.to_string(),
                 Some("here"),
                 None,
@@ -2362,11 +2363,12 @@ pub(crate) fn parse_source_file(path: &str) -> (String, Vec<harn_parser::SNode>)
         Err(err) => {
             if parser.all_errors().is_empty() {
                 let span = error_span_from_parse(&err);
-                let diagnostic = harn_parser::diagnostic::render_diagnostic(
+                let diagnostic = harn_parser::diagnostic::render_diagnostic_with_code(
                     &source,
                     path,
                     &span,
                     "error",
+                    harn_parser::diagnostic::parser_error_code(&err),
                     &harn_parser::diagnostic::parser_error_message(&err),
                     Some(harn_parser::diagnostic::parser_error_label(&err)),
                     harn_parser::diagnostic::parser_error_help(&err),
@@ -2375,11 +2377,12 @@ pub(crate) fn parse_source_file(path: &str) -> (String, Vec<harn_parser::SNode>)
             } else {
                 for e in parser.all_errors() {
                     let span = error_span_from_parse(e);
-                    let diagnostic = harn_parser::diagnostic::render_diagnostic(
+                    let diagnostic = harn_parser::diagnostic::render_diagnostic_with_code(
                         &source,
                         path,
                         &span,
                         "error",
+                        harn_parser::diagnostic::parser_error_code(e),
                         &harn_parser::diagnostic::parser_error_message(e),
                         Some(harn_parser::diagnostic::parser_error_label(e)),
                         harn_parser::diagnostic::parser_error_help(e),

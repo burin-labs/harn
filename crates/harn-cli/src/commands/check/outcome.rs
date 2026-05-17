@@ -26,11 +26,12 @@ pub(super) fn print_lint_diagnostics(
                 "error"
             }
         };
-        let rendered = harn_parser::diagnostic::render_diagnostic(
+        let rendered = harn_parser::diagnostic::render_diagnostic_with_code(
             source,
             path,
             &diag.span,
             severity,
+            diag.code,
             &diag.message,
             Some(&format!("lint[{}]", diag.rule)),
             diag.suggestion.as_deref(),

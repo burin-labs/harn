@@ -8,7 +8,7 @@ use std::collections::HashSet;
 use std::path::Path;
 
 use harn_modules::WildcardResolution;
-use harn_parser::SNode;
+use harn_parser::{DiagnosticCode as Code, SNode};
 
 mod complexity;
 mod decls;
@@ -49,6 +49,7 @@ pub fn lint_prompt_template(
         Ok(constructs) => constructs,
         Err(message) => {
             return vec![LintDiagnostic {
+                code: Code::LintTemplateParse,
                 rule: "template-parse",
                 message: format!("template did not parse: {message}"),
                 span: harn_lexer::Span::dummy(),
@@ -240,6 +241,7 @@ fn type_diagnostic_as_lint(diagnostic: &harn_parser::TypeDiagnostic) -> Option<L
     let rule = type_diagnostic_lint_rule(diagnostic)?;
     let span = diagnostic.span?;
     Some(LintDiagnostic {
+        code: diagnostic.code,
         rule,
         message: diagnostic.message.clone(),
         span,

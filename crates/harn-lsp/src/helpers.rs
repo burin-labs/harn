@@ -294,6 +294,9 @@ pub(crate) fn lexer_error_to_diagnostic(err: &LexerError) -> Diagnostic {
         },
         severity: Some(DiagnosticSeverity::ERROR),
         source: Some("harn".to_string()),
+        code: Some(NumberOrString::String(
+            diagnostic::lexer_error_code(err).to_string(),
+        )),
         message,
         ..Default::default()
     }
@@ -308,6 +311,9 @@ pub(crate) fn parser_error_to_diagnostic(err: &ParserError) -> Diagnostic {
             },
             severity: Some(DiagnosticSeverity::ERROR),
             source: Some("harn".to_string()),
+            code: Some(NumberOrString::String(
+                diagnostic::parser_error_code(err).to_string(),
+            )),
             message: diagnostic::parser_error_message(err),
             ..Default::default()
         },
@@ -321,6 +327,9 @@ pub(crate) fn parser_error_to_diagnostic(err: &ParserError) -> Diagnostic {
             },
             severity: Some(DiagnosticSeverity::ERROR),
             source: Some("harn".to_string()),
+            code: Some(NumberOrString::String(
+                diagnostic::parser_error_code(err).to_string(),
+            )),
             message: diagnostic::parser_error_message(err),
             ..Default::default()
         },

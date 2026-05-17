@@ -1,6 +1,7 @@
 use std::process;
 
 use harn_fmt::{format_source_opts, FmtOptions};
+use harn_parser::DiagnosticCode as Code;
 
 /// Whether `harn fmt` should rewrite files in place or just report drift.
 #[derive(Clone, Copy, Debug)]
@@ -72,7 +73,10 @@ fn fmt_file_inner(path: &str, mode: FmtMode, opts: &FmtOptions) -> bool {
 
     if mode.is_check() {
         if source != formatted {
-            eprintln!("{path}: would be reformatted");
+            eprintln!(
+                "{path}: {}: would be reformatted",
+                Code::FormatterWouldReformat
+            );
             return false;
         }
     } else if source != formatted {

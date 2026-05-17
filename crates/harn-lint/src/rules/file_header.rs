@@ -3,6 +3,7 @@
 //! title from the filename when autofixing.
 
 use harn_lexer::{FixEdit, Span};
+use harn_parser::DiagnosticCode as Code;
 
 use crate::diagnostic::{LintDiagnostic, LintSeverity};
 
@@ -26,6 +27,7 @@ pub(crate) fn check_require_file_header(
     let header = format!("/**\n * {title}\n */\n\n");
     let span = Span::with_offsets(0, 0, 1, 1);
     diagnostics.push(LintDiagnostic {
+        code: Code::LintRequireFileHeader,
         rule: "require-file-header",
         message: "file is missing a `/** */` header doc block".to_string(),
         span,

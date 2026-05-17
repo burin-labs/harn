@@ -2,7 +2,7 @@ use std::collections::{BTreeSet, HashMap, HashSet};
 use std::path::{Path, PathBuf};
 
 use harn_modules::resolve_import_path;
-use harn_parser::{Node, SNode};
+use harn_parser::{DiagnosticCode as Code, Node, SNode};
 
 use super::host_capabilities::{is_known_host_operation, load_host_capabilities};
 use super::imports::{scan_import_collisions, scan_re_export_conflicts};
@@ -11,6 +11,7 @@ use super::source::parse_resolved_module;
 use crate::package::CheckConfig;
 
 pub(super) struct PreflightDiagnostic {
+    pub(super) code: Code,
     pub(super) path: String,
     pub(super) source: String,
     pub(super) span: harn_lexer::Span,
@@ -127,6 +128,7 @@ fn scan_static_tool_surface_preflight(
         for reference in harn_vm::tool_surface::prompt_tool_references(&body) {
             if !tool_names.contains(&reference) {
                 diagnostics.push(PreflightDiagnostic {
+                    code: Code::PromptToolSurfaceUnknown,
                     path: file_path.display().to_string(),
                     source: source.to_string(),
                     span: harn_lexer::Span::with_offsets(0, 0, 1, 1),
@@ -142,6 +144,7 @@ fn scan_static_tool_surface_preflight(
                 });
             } else if deferred.contains(&reference) && !tool_search_active {
                 diagnostics.push(PreflightDiagnostic {
+                    code: Code::PromptToolSurfaceDeferredReference,
                     path: file_path.display().to_string(),
                     source: source.to_string(),
                     span: harn_lexer::Span::with_offsets(0, 0, 1, 1),
@@ -749,6 +752,7 @@ fn scan_node_preflight(
                     }
                 }
                 None => diagnostics.push(PreflightDiagnostic {
+                    code: Code::ModuleImportUnresolved,
                     path: file_path.display().to_string(),
                     source: source.to_string(),
                     span: node.span,
@@ -787,6 +791,7 @@ fn scan_node_preflight(
                         // user sees the structural cause, not a generic
                         // "render target does not exist" message.
                         diagnostics.push(PreflightDiagnostic {
+                            code: Code::ImportResolutionFailed,
                             path: file_path.display().to_string(),
                             source: source.to_string(),
                             span: args[0].span,
@@ -805,6 +810,7 @@ fn scan_node_preflight(
                         if let Err(err) = harn_vm::stdlib::template::validate_template_syntax(&body)
                         {
                             diagnostics.push(PreflightDiagnostic {
+                                code: Code::PromptTemplateParse,
                                 path: file_path.display().to_string(),
                                 source: source.to_string(),
                                 span: args[0].span,
@@ -822,6 +828,7 @@ fn scan_node_preflight(
                     }
                 } else {
                     diagnostics.push(PreflightDiagnostic {
+                        code: Code::PromptTargetMissing,
                         path: file_path.display().to_string(),
                         source: source.to_string(),
                         span: args[0].span,
@@ -841,6 +848,7 @@ fn scan_node_preflight(
                 let resolved = resolve_source_relative(file_path, &dir);
                 if !resolved.is_dir() {
                     diagnostics.push(PreflightDiagnostic {
+                        code: Code::ExecutionTargetMissing,
                         path: file_path.display().to_string(),
                         source: source.to_string(),
                         span: args[0].span,
@@ -874,6 +882,7 @@ fn scan_node_preflight(
         }
         Node::FunctionCall { name, args, .. } if name == "host_invoke" => {
             diagnostics.push(PreflightDiagnostic {
+                code: Code::DeprecatedStdlibSymbol,
                 path: file_path.display().to_string(),
                 source: source.to_string(),
                 span: node.span,
@@ -923,6 +932,7 @@ fn scan_node_preflight(
             if let Some((cap, op, params_arg)) = parse_host_call_args(args) {
                 if !is_known_host_operation(host_capabilities, &cap, &op) {
                     diagnostics.push(PreflightDiagnostic {
+                        code: Code::CapabilityUnknownOperation,
                         path: file_path.display().to_string(),
                         source: source.to_string(),
                         span: node.span,
@@ -954,6 +964,7 @@ fn scan_node_preflight(
                                     harn_modules::asset_paths::resolve(&asset_ref, anchor)
                                 {
                                     diagnostics.push(PreflightDiagnostic {
+                                        code: Code::ImportResolutionFailed,
                                         path: file_path.display().to_string(),
                                         source: source.to_string(),
                                         span: params_arg.map(|arg| arg.span).unwrap_or(node.span),
@@ -970,6 +981,7 @@ fn scan_node_preflight(
                                 resolve_preflight_target(file_path, &template_path, config);
                             if !resolved.iter().any(|path| path.exists()) {
                                 diagnostics.push(PreflightDiagnostic {
+                                    code: Code::PromptTargetMissing,
                                     path: file_path.display().to_string(),
                                     source: source.to_string(),
                                     span: params_arg.map(|arg| arg.span).unwrap_or(node.span),
@@ -990,6 +1002,7 @@ fn scan_node_preflight(
                 }
             } else if let Some(arg) = args.first() {
                 diagnostics.push(PreflightDiagnostic {
+                    code: Code::CapabilityCallStaticNameRequired,
                     path: file_path.display().to_string(),
                     source: source.to_string(),
                     span: arg.span,
@@ -1866,6 +1879,7 @@ fn scan_stdlib_prompt_target(
     }
     let Some(body) = harn_vm::stdlib_modules::get_stdlib_prompt_asset(template_path) else {
         diagnostics.push(PreflightDiagnostic {
+            code: Code::PromptTargetMissing,
             path: file_path.display().to_string(),
             source: source.to_string(),
             span,
@@ -1882,6 +1896,7 @@ fn scan_stdlib_prompt_target(
     };
     if let Err(err) = harn_vm::stdlib::template::validate_template_syntax(body) {
         diagnostics.push(PreflightDiagnostic {
+            code: Code::PromptTemplateParse,
             path: file_path.display().to_string(),
             source: source.to_string(),
             span,
@@ -2066,6 +2081,7 @@ fn scan_tool_define_preflight(
         && executor != "provider_native"
     {
         diagnostics.push(PreflightDiagnostic {
+            code: Code::ToolDefinitionInvalid,
             path: file_path.display().to_string(),
             source: source.to_string(),
             span: executor_node.span,
@@ -2086,6 +2102,7 @@ fn scan_tool_define_preflight(
     }
     let Some(capability_node) = dict_literal_field(config_arg, "host_capability") else {
         diagnostics.push(PreflightDiagnostic {
+            code: Code::CapabilityBindingInvalid,
             path: file_path.display().to_string(),
             source: source.to_string(),
             span: node.span,
@@ -2107,6 +2124,7 @@ fn scan_tool_define_preflight(
     };
     let Some((cap, op)) = capability.split_once('.') else {
         diagnostics.push(PreflightDiagnostic {
+            code: Code::CapabilityBindingInvalid,
             path: file_path.display().to_string(),
             source: source.to_string(),
             span: capability_node.span,
@@ -2125,6 +2143,7 @@ fn scan_tool_define_preflight(
     };
     if !is_known_host_operation(host_capabilities, cap, op) {
         diagnostics.push(PreflightDiagnostic {
+            code: Code::CapabilityUnknownOperation,
             path: file_path.display().to_string(),
             source: source.to_string(),
             span: capability_node.span,
@@ -2165,6 +2184,7 @@ fn scan_spawn_agent_preflight(
         let resolved = resolve_source_relative(file_path, &cwd);
         if !resolved.is_dir() {
             diagnostics.push(PreflightDiagnostic {
+                code: Code::ExecutionTargetMissing,
                 path: file_path.display().to_string(),
                 source: source.to_string(),
                 span: execution.span,
@@ -2188,6 +2208,7 @@ fn scan_spawn_agent_preflight(
         let resolved = resolve_source_relative(file_path, &repo);
         if !resolved.is_dir() {
             diagnostics.push(PreflightDiagnostic {
+                code: Code::ExecutionTargetMissing,
                 path: file_path.display().to_string(),
                 source: source.to_string(),
                 span: worktree.span,

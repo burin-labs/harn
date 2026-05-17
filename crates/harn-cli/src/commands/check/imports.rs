@@ -1,7 +1,7 @@
 use std::path::{Path, PathBuf};
 
 use harn_modules::resolve_import_path;
-use harn_parser::{Node, SNode};
+use harn_parser::{DiagnosticCode as Code, Node, SNode};
 
 use super::preflight::PreflightDiagnostic;
 use super::source::parse_resolved_module;
@@ -38,6 +38,7 @@ pub(super) fn scan_import_collisions(
                     if let Some(existing) = imported_names.get(&name) {
                         if existing.module_path != import_str {
                             diagnostics.push(PreflightDiagnostic {
+                                code: Code::ModuleImportCollision,
                                 path: file_path.display().to_string(),
                                 source: source.to_string(),
                                 span: node.span,
@@ -69,6 +70,7 @@ pub(super) fn scan_import_collisions(
                     if let Some(existing) = imported_names.get(name) {
                         if existing.module_path != module_path {
                             diagnostics.push(PreflightDiagnostic {
+                                code: Code::ModuleImportCollision,
                                 path: file_path.display().to_string(),
                                 source: source.to_string(),
                                 span: node.span,
@@ -157,6 +159,7 @@ pub(super) fn scan_re_export_conflicts(
             .map(|p: &PathBuf| p.display().to_string())
             .collect();
         diagnostics.push(PreflightDiagnostic {
+            code: Code::ModuleReExportConflict,
             path: file_path.display().to_string(),
             source: source.to_string(),
             span,

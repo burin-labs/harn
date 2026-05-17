@@ -5,7 +5,7 @@
 use std::collections::HashSet;
 
 use harn_lexer::{FixEdit, Span, Token, TokenKind};
-use harn_parser::{Node, SNode};
+use harn_parser::{DiagnosticCode as Code, Node, SNode};
 
 use crate::diagnostic::{LintDiagnostic, LintSeverity};
 use crate::rules::ast_walk::collect_expression_spans;
@@ -38,6 +38,7 @@ pub(crate) fn check_unnecessary_parentheses(
                 {
                     let open = &tokens[open_idx];
                     diagnostics.push(LintDiagnostic {
+                        code: Code::LintUnnecessaryParentheses,
                         rule: "unnecessary-parentheses",
                         message: "unnecessary parentheses around a single value".to_string(),
                         span: Span::merge(open.span, token.span),

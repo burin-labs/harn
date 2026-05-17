@@ -8,8 +8,8 @@ use std::collections::HashSet;
 
 use harn_lexer::{FixEdit, Span, TokenKind};
 use harn_parser::{
-    format_type, EnumVariant, InterfaceMethod, MatchArm, Node, SNode, ShapeField, StructField,
-    TypeExpr, TypedParam,
+    format_type, DiagnosticCode as Code, EnumVariant, InterfaceMethod, MatchArm, Node, SNode,
+    ShapeField, StructField, TypeExpr, TypedParam,
 };
 
 use crate::diagnostic::{LintDiagnostic, LintSeverity};
@@ -521,6 +521,7 @@ impl<'a, 'd> State<'a, 'd> {
         );
         let replacement = format!("{inner_text}?");
         self.diagnostics.push(LintDiagnostic {
+            code: Code::LintPreferOptionalShorthand,
             rule: "prefer-optional-shorthand",
             message: format!("prefer `{inner_text}?` over `{inner_text} | nil`"),
             span,

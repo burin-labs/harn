@@ -5,9 +5,10 @@ mod tests;
 mod trailing_comma;
 
 use std::collections::BTreeMap;
+use std::fmt;
 
 use harn_lexer::{Lexer, TokenKind};
-use harn_parser::Parser;
+use harn_parser::{DiagnosticCode as Code, Parser};
 
 pub(crate) use formatter::{Comment, Formatter};
 pub use trailing_comma::{
@@ -17,6 +18,30 @@ pub use trailing_comma::{
 /// `FmtOptions::separator_width` value that resolves section-header bars from
 /// `line_width` minus the current indent.
 pub const AUTO_SEPARATOR_WIDTH: usize = 0;
+
+/// Error returned when formatting cannot proceed.
+#[derive(Debug, Clone)]
+pub struct FormatError {
+    pub code: Code,
+    pub message: String,
+}
+
+impl FormatError {
+    fn new(code: Code, message: impl Into<String>) -> Self {
+        Self {
+            code,
+            message: message.into(),
+        }
+    }
+}
+
+impl fmt::Display for FormatError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}: {}", self.code, self.message)
+    }
+}
+
+impl std::error::Error for FormatError {}
 
 /// Options controlling formatter behavior.
 #[derive(Debug, Clone)]
@@ -40,12 +65,12 @@ impl Default for FmtOptions {
 }
 
 /// Format Harn source code to canonical style using default options.
-pub fn format_source(source: &str) -> Result<String, String> {
+pub fn format_source(source: &str) -> Result<String, FormatError> {
     format_source_opts(source, &FmtOptions::default())
 }
 
 /// Format Harn source code with explicit options.
-pub fn format_source_opts(source: &str, opts: &FmtOptions) -> Result<String, String> {
+pub fn format_source_opts(source: &str, opts: &FmtOptions) -> Result<String, FormatError> {
     // Preserve a shebang line (`#!...`) at offset 0 — the lexer skips it
     // entirely, so without explicit reattachment the formatter would drop it.
     let (shebang, source_for_lex) = match source.starts_with("#!") {
@@ -58,7 +83,9 @@ pub fn format_source_opts(source: &str, opts: &FmtOptions) -> Result<String, Str
 
     // Lex with comments preserved, then split into (comments by line, parser tokens).
     let mut lexer = Lexer::new(source_for_lex);
-    let all_tokens = lexer.tokenize_with_comments().map_err(|e| e.to_string())?;
+    let all_tokens = lexer
+        .tokenize_with_comments()
+        .map_err(|e| FormatError::new(Code::FormatterParseFailed, e.to_string()))?;
 
     let mut comments: BTreeMap<usize, Vec<Comment>> = BTreeMap::new();
     let mut parser_tokens = Vec::with_capacity(all_tokens.len());
@@ -83,7 +110,9 @@ pub fn format_source_opts(source: &str, opts: &FmtOptions) -> Result<String, Str
     }
 
     let mut parser = Parser::new(parser_tokens);
-    let program = parser.parse().map_err(|e| e.to_string())?;
+    let program = parser
+        .parse()
+        .map_err(|e| FormatError::new(Code::FormatterParseFailed, e.to_string()))?;
 
     let mut fmt = Formatter::new(
         source_for_lex,

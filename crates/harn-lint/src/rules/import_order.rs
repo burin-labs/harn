@@ -3,7 +3,7 @@
 //! after bare imports for the same path.
 
 use harn_lexer::{FixEdit, Span};
-use harn_parser::{Node, SNode};
+use harn_parser::{DiagnosticCode as Code, Node, SNode};
 
 use crate::diagnostic::{LintDiagnostic, LintSeverity};
 use crate::naming::is_import_item;
@@ -59,6 +59,7 @@ pub(crate) fn check_import_order(
         }])
     };
     diagnostics.push(LintDiagnostic {
+        code: Code::LintImportOrder,
         rule: "import-order",
         message: "imports are not in canonical order (stdlib first, then alphabetical by path)"
             .to_string(),

@@ -3,7 +3,7 @@
 //! construction isolated from the linter walk.
 
 use harn_lexer::{FixEdit, Span};
-use harn_parser::{Node, SNode};
+use harn_parser::{DiagnosticCode as Code, Node, SNode};
 
 use crate::diagnostic::{LintDiagnostic, LintSeverity};
 use crate::naming::{is_documentable_item, item_is_pub};
@@ -241,6 +241,7 @@ fn check_one_item(
         ),
     };
     diagnostics.push(LintDiagnostic {
+        code: Code::LintLegacyDocComment,
         rule: "legacy-doc-comment",
         message: format!("{prefix} doc comment(s) above this item should use `/** */` form"),
         span: Span::with_offsets(first.start_byte, last.end_byte, first.line, 1),

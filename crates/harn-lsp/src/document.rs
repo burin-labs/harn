@@ -95,6 +95,7 @@ impl DocumentState {
                 range,
                 severity: Some(severity),
                 source: Some("harn-typecheck".to_string()),
+                code: Some(NumberOrString::String(diag.code.to_string())),
                 message: diag.message.clone(),
                 ..Default::default()
             });
@@ -125,6 +126,7 @@ impl DocumentState {
                 range,
                 severity: Some(severity),
                 source: Some("harn-lint".to_string()),
+                code: Some(NumberOrString::String(ld.code.to_string())),
                 message: format!("[{}] {}", ld.rule, ld.message),
                 ..Default::default()
             });

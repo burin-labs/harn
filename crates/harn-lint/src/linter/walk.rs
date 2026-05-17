@@ -3,7 +3,7 @@
 //! state-tracking plumbing.
 
 use harn_lexer::{FixEdit, Span, StringSegment};
-use harn_parser::{BindingPattern, Node, SNode};
+use harn_parser::{BindingPattern, DiagnosticCode as Code, Node, SNode};
 
 use super::Linter;
 use crate::decls::{FnDeclaration, ImportInfo, TypeDeclaration};
@@ -33,6 +33,7 @@ impl<'a> Linter<'a> {
                     && !Self::is_test_pipeline_name(name)
                 {
                     self.diagnostics.push(LintDiagnostic {
+                        code: Code::LintPipelineReturnType,
                         rule: "pipeline-return-type",
                         message: format!(
                             "public pipeline `{name}` has no declared return type; \
@@ -91,6 +92,7 @@ impl<'a> Linter<'a> {
                         .is_none()
                 {
                     self.diagnostics.push(LintDiagnostic {
+                        code: Code::LintMissingHarndoc,
                         rule: "missing-harndoc",
                         message: format!(
                             "public function `{name}` is missing a `/** */` doc comment"
@@ -290,6 +292,7 @@ impl<'a> Linter<'a> {
                 }
                 if Self::is_assert_builtin(name) && !self.in_test_pipeline() {
                     self.diagnostics.push(LintDiagnostic {
+                        code: Code::LintAssertOutsideTest,
                         rule: "assert-outside-test",
                         message: format!(
                             "`{name}` is intended for test pipelines, not production control flow"
@@ -304,6 +307,7 @@ impl<'a> Linter<'a> {
                 }
                 if name == "llm_call" && args.get(1).is_some_and(Self::has_interpolation) {
                     self.diagnostics.push(LintDiagnostic {
+                        code: Code::LintPromptInjectionRisk,
                         rule: "prompt-injection-risk",
                         message:
                             "interpolated data in the `llm_call` system prompt can smuggle untrusted instructions"
@@ -322,6 +326,7 @@ impl<'a> Linter<'a> {
                         harn_vm::connector_export_denied_builtin_reason(export, name)
                     {
                         self.diagnostics.push(LintDiagnostic {
+                            code: Code::LintConnectorEffectPolicy,
                             rule: "connector-effect-policy",
                             message: format!(
                                 "connector export `{export}` calls disallowed builtin `{name}`: {reason}"
@@ -341,6 +346,7 @@ impl<'a> Linter<'a> {
                     let fix = unnecessary_cast_fix(self.source, snode.span, inner.span);
                     let article = if matches!(target, "int") { "an" } else { "a" };
                     self.diagnostics.push(LintDiagnostic {
+                        code: Code::LintUnnecessaryCast,
                         rule: "unnecessary-cast",
                         message: format!(
                             "`{name}` is a no-op here — its argument is already {article} {target}"
@@ -380,6 +386,7 @@ impl<'a> Linter<'a> {
                 if let Node::FunctionCall { name, .. } = &object.node {
                     if Self::is_boundary_api(name) {
                         self.diagnostics.push(LintDiagnostic {
+                            code: Code::LintUntypedDictAccess,
                             rule: "untyped-dict-access",
                             message: format!(
                                 "property access on raw `{}()` result without schema validation",
@@ -403,6 +410,7 @@ impl<'a> Linter<'a> {
                 if let Node::FunctionCall { name, .. } = &object.node {
                     if Self::is_boundary_api(name) {
                         self.diagnostics.push(LintDiagnostic {
+                            code: Code::LintUntypedDictAccess,
                             rule: "untyped-dict-access",
                             message: format!(
                                 "subscript access on raw `{}()` result without schema validation",
@@ -437,6 +445,7 @@ impl<'a> Linter<'a> {
                     Self::constant_logical_reduction(op, left, right)
                 {
                     self.diagnostics.push(LintDiagnostic {
+                        code: Code::LintConstantLogicalOperand,
                         rule: "constant-logical-operand",
                         message,
                         span: snode.span,
@@ -454,6 +463,7 @@ impl<'a> Linter<'a> {
                 if is_pointless_self_comparison {
                     let replacement = if op == "==" { "true" } else { "false" };
                     self.diagnostics.push(LintDiagnostic {
+                        code: Code::LintPointlessComparison,
                         rule: "pointless-comparison",
                         message: format!("expression is compared to itself with `{op}`"),
                         span: snode.span,
@@ -499,6 +509,7 @@ impl<'a> Linter<'a> {
                             }])
                         });
                         self.diagnostics.push(LintDiagnostic {
+                            code: Code::LintComparisonToBool,
                             rule: "comparison-to-bool",
                             message: msg.to_string(),
                             span: snode.span,
@@ -543,6 +554,7 @@ impl<'a> Linter<'a> {
                             None
                         };
                         self.diagnostics.push(LintDiagnostic {
+                            code: Code::LintInvalidBinaryOpLiteral,
                             rule: "invalid-binary-op-literal",
                             message: format!(
                                 "operator '{}' used with boolean or nil literal — this will cause a runtime error",
@@ -592,6 +604,7 @@ impl<'a> Linter<'a> {
                         }])
                     });
                     self.diagnostics.push(LintDiagnostic {
+                        code: Code::LintRedundantNilTernary,
                         rule: "redundant-nil-ternary",
                         message: format!(
                             "ternary nil check over `{ident}` can be replaced with `{ident} ?? <fallback>`"
@@ -612,6 +625,7 @@ impl<'a> Linter<'a> {
                 self.lint_node(condition);
                 if let Node::BoolLiteral(value) = &condition.node {
                     self.diagnostics.push(LintDiagnostic {
+                        code: Code::LintPointlessComparison,
                         rule: "pointless-comparison",
                         message: format!("if condition is always `{value}`"),
                         span: condition.span,
@@ -633,6 +647,7 @@ impl<'a> Linter<'a> {
                         None
                     };
                     self.diagnostics.push(LintDiagnostic {
+                        code: Code::LintEmptyBlock,
                         rule: "empty-block",
                         message: "if block has an empty body".to_string(),
                         span: snode.span,
@@ -676,6 +691,7 @@ impl<'a> Linter<'a> {
                             }])
                         });
                         self.diagnostics.push(LintDiagnostic {
+                            code: Code::LintUnnecessaryElseReturn,
                             rule: "unnecessary-else-return",
                             message: "both if and else branches return — else is unnecessary"
                                 .to_string(),
@@ -712,6 +728,7 @@ impl<'a> Linter<'a> {
                         None
                     };
                     self.diagnostics.push(LintDiagnostic {
+                        code: Code::LintEmptyBlock,
                         rule: "empty-block",
                         message: "for loop has an empty body".to_string(),
                         span: snode.span,
@@ -746,6 +763,7 @@ impl<'a> Linter<'a> {
                 self.lint_node(condition);
                 if body.is_empty() {
                     self.diagnostics.push(LintDiagnostic {
+                        code: Code::LintEmptyBlock,
                         rule: "empty-block",
                         message: "while loop has an empty body".to_string(),
                         span: snode.span,
@@ -771,6 +789,7 @@ impl<'a> Linter<'a> {
             } => {
                 if body.is_empty() {
                     self.diagnostics.push(LintDiagnostic {
+                        code: Code::LintEmptyBlock,
                         rule: "empty-block",
                         message: "try block has an empty body".to_string(),
                         span: snode.span,
@@ -812,6 +831,7 @@ impl<'a> Linter<'a> {
                     for earlier in &arms[..i] {
                         if arm.pattern.node == earlier.pattern.node && arm.guard == earlier.guard {
                             self.diagnostics.push(LintDiagnostic {
+                                code: Code::LintDuplicateMatchArm,
                                 rule: "duplicate-match-arm",
                                 message: "duplicate match arm pattern".to_string(),
                                 span: arm.pattern.span,
@@ -906,6 +926,7 @@ impl<'a> Linter<'a> {
             Node::RequireStmt { condition, message } => {
                 if self.in_test_pipeline() {
                     self.diagnostics.push(LintDiagnostic {
+                        code: Code::LintRequireInTest,
                         rule: "require-in-test",
                         message: "`require` in a test pipeline should usually be an assertion"
                             .to_string(),
@@ -1159,6 +1180,7 @@ impl<'a> Linter<'a> {
                         "continue"
                     };
                     self.diagnostics.push(LintDiagnostic {
+                        code: Code::LintBreakOutsideLoop,
                         rule: "break-outside-loop",
                         message: format!("`{keyword}` used outside of a loop"),
                         span: snode.span,

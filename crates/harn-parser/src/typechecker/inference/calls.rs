@@ -16,6 +16,7 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use crate::ast::*;
 use crate::builtin_signatures;
+use crate::diagnostic_codes::Code;
 use harn_lexer::Span;
 
 use super::super::format::format_type;
@@ -117,7 +118,7 @@ impl TypeChecker {
                     }
                     None => format!("unknown `{builtin_name}` option `{key}`"),
                 };
-            self.warning_at(message, entry.key.span);
+            self.warning_at(Code::UnknownLlmOption, message, entry.key.span);
         }
     }
 
@@ -214,7 +215,7 @@ impl TypeChecker {
             {
                 message.push_str(&format!(" — did you mean `{candidate}`?"));
             }
-            self.error_at(message, entry.key.span);
+            self.error_at(Code::UnknownOption, message, entry.key.span);
         }
     }
 
@@ -235,6 +236,7 @@ impl TypeChecker {
         if !type_args.is_empty() {
             if !sig.is_generic() {
                 self.error_at(
+                    Code::GenericTypeArgumentUnsupported,
                     format!(
                         "Builtin function '{}' does not declare type parameters",
                         name
@@ -243,6 +245,7 @@ impl TypeChecker {
                 );
             } else if type_args.len() != sig.type_params.len() {
                 self.error_at(
+                    Code::GenericTypeArgumentArity,
                     format!(
                         "Builtin function '{}' expects {} type arguments, got {}",
                         name,
@@ -275,6 +278,7 @@ impl TypeChecker {
                 };
                 let arg_word = if single_arg { "argument" } else { "arguments" };
                 self.warning_at(
+                    Code::BuiltinArity,
                     format!(
                         "Builtin function '{}' expects {} {}, got {}",
                         name,
@@ -318,7 +322,7 @@ impl TypeChecker {
             if let Err(message) =
                 self.bind_from_arg_node(&param_ty, arg, &type_param_set, &mut type_bindings, scope)
             {
-                self.error_at(message, arg.span);
+                self.error_at(Code::ArgumentTypeMismatch, message, arg.span);
             }
         }
 
@@ -349,12 +353,12 @@ impl TypeChecker {
                         }));
                 if !compatible {
                     self.type_mismatch_at(
+                        Code::ArgumentTypeMismatch,
                         format!("argument {} `{}`", i + 1, param.name),
                         &expected,
                         actual,
                         arg.span,
-                        None,
-                        Some(arg.span),
+                        (None, Some(arg.span)),
                         &call_scope,
                     );
                 }
@@ -366,7 +370,7 @@ impl TypeChecker {
                 if let Some(concrete_type) = type_bindings.get(*type_param) {
                     let concrete_name = format_type(concrete_type);
                     let Some(base_type_name) = Self::base_type_name(concrete_type) else {
-                        self.error_at(
+                        self.error_at(Code::WhereConstraintMismatch,
                             format!(
                                 "Type '{}' does not satisfy interface '{}': only named types can satisfy interfaces (required by constraint `where {}: {}`)",
                                 concrete_name, bound, type_param, bound
@@ -382,6 +386,7 @@ impl TypeChecker {
                         scope,
                     ) {
                         self.error_at(
+                            Code::WhereConstraintMismatch,
                             format!(
                                 "Type '{}' does not satisfy interface '{}': {} \
                                  (required by constraint `where {}: {}`)",
@@ -767,10 +772,13 @@ impl TypeChecker {
                         msg.push_str(&format!(" (since {s})"));
                     }
                     match use_hint {
-                        Some(h) => {
-                            self.warning_at_with_help(msg, node.span, format!("use `{h}` instead"))
-                        }
-                        None => self.warning_at(msg, node.span),
+                        Some(h) => self.warning_at_with_help(
+                            Code::DeprecatedFunction,
+                            msg,
+                            node.span,
+                            format!("use `{h}` instead"),
+                        ),
+                        None => self.warning_at(Code::DeprecatedFunction, msg, node.span),
                     }
                 }
                 for a in args {
@@ -1079,10 +1087,13 @@ impl TypeChecker {
                     None => format!("call target `{name}` is not defined or imported"),
                 };
                 match suggestion {
-                    Some(s) => {
-                        self.error_at_with_help(message, span, format!("did you mean `{s}`?"))
-                    }
-                    None => self.error_at(message, span),
+                    Some(s) => self.error_at_with_help(
+                        Code::UndefinedFunction,
+                        message,
+                        span,
+                        format!("did you mean `{s}`?"),
+                    ),
+                    None => self.error_at(Code::UndefinedFunction, message, span),
                 }
             }
         }
@@ -1098,8 +1109,8 @@ impl TypeChecker {
             }
             let help = use_hint.map(|h| format!("use `{h}` instead"));
             match help {
-                Some(h) => self.warning_at_with_help(msg, span, h),
-                None => self.warning_at(msg, span),
+                Some(h) => self.warning_at_with_help(Code::DeprecatedFunction, msg, span, h),
+                None => self.warning_at(Code::DeprecatedFunction, msg, span),
             }
         }
         // Special-case: unreachable(x) — when the argument is a variable,
@@ -1110,7 +1121,7 @@ impl TypeChecker {
                     let arg_type = self.infer_type(arg, scope);
                     if let Some(ref ty) = arg_type {
                         if !matches!(ty, TypeExpr::Never) {
-                            self.error_at(
+                            self.error_at(Code::NonExhaustiveMatch,
                                 format!(
                                     "unreachable() argument has type `{}` — not all cases are handled",
                                     format_type(ty)
@@ -1142,11 +1153,13 @@ impl TypeChecker {
             if !type_args.is_empty() {
                 if sig.type_param_names.is_empty() {
                     self.error_at(
+                        Code::GenericTypeArgumentUnsupported,
                         format!("Function '{}' does not declare type parameters", name),
                         span,
                     );
                 } else if type_args.len() != sig.type_param_names.len() {
                     self.error_at(
+                        Code::GenericTypeArgumentArity,
                         format!(
                             "Function '{}' expects {} type arguments, got {}",
                             name,
@@ -1177,6 +1190,7 @@ impl TypeChecker {
                     };
                     let arg_word = if single_arg { "argument" } else { "arguments" };
                     self.warning_at(
+                        Code::OrchestrationArity,
                         format!(
                             "Function '{}' expects {} {}, got {}",
                             name,
@@ -1219,7 +1233,7 @@ impl TypeChecker {
                         &mut type_bindings,
                         scope,
                     ) {
-                        self.error_at(message, arg.span);
+                        self.error_at(Code::ArgumentTypeMismatch, message, arg.span);
                     }
                 }
             }
@@ -1240,14 +1254,17 @@ impl TypeChecker {
                         );
                         if !self.types_compatible(&expected, actual, &call_scope) {
                             self.type_mismatch_at(
+                                Code::ArgumentTypeMismatch,
                                 format!("argument {} `{}`", i + 1, param_name),
                                 &expected,
                                 actual,
                                 arg.span,
-                                sig.definition_span.map(|span| {
-                                    (span, format!("parameter `{param_name}` declared here"))
-                                }),
-                                Some(arg.span),
+                                (
+                                    sig.definition_span.map(|span| {
+                                        (span, format!("parameter `{param_name}` declared here"))
+                                    }),
+                                    Some(arg.span),
+                                ),
                                 &call_scope,
                             );
                         }
@@ -1259,7 +1276,7 @@ impl TypeChecker {
                     if let Some(concrete_type) = type_bindings.get(type_param) {
                         let concrete_name = format_type(concrete_type);
                         let Some(base_type_name) = Self::base_type_name(concrete_type) else {
-                            self.error_at(
+                            self.error_at(Code::WhereConstraintMismatch,
                                 format!(
                                     "Type '{}' does not satisfy interface '{}': only named types can satisfy interfaces (required by constraint `where {}: {}`)",
                                     concrete_name, bound, type_param, bound
@@ -1275,6 +1292,7 @@ impl TypeChecker {
                             scope,
                         ) {
                             self.error_at(
+                                Code::WhereConstraintMismatch,
                                 format!(
                                     "Type '{}' does not satisfy interface '{}': {} \
                                      (required by constraint `where {}: {}`)",
