@@ -333,7 +333,8 @@ fn positive_u32_arg(
     if value <= 0 {
         return Err(VmError::Runtime(format!("{name}: value must be positive")));
     }
-    Ok(value as u32)
+    u32::try_from(value)
+        .map_err(|_| VmError::Runtime(format!("{name}: value {value} exceeds u32::MAX")))
 }
 
 fn dict_string(dict: &BTreeMap<String, VmValue>, key: &str) -> Option<String> {

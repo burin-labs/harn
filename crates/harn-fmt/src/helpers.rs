@@ -518,6 +518,16 @@ pub(crate) fn format_float(f: f64) -> String {
     }
 }
 
+/// Visual width of the last (or only) line of `s`. Used to compute column
+/// positions for wrap decisions when a sub-expression was rendered onto
+/// multiple physical lines and the next token tails its last line.
+pub(crate) fn last_line_width(s: &str) -> usize {
+    match s.rfind('\n') {
+        Some(idx) => s[idx + 1..].chars().count(),
+        None => s.chars().count(),
+    }
+}
+
 pub(crate) fn is_identifier(s: &str) -> bool {
     !s.is_empty()
         && s.chars()

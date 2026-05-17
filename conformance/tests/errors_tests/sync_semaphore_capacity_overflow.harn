@@ -1,0 +1,6 @@
+// Capacity arguments to sync primitives are u32 internally. Passing a
+// value larger than u32::MAX must raise a clear error rather than
+// silently wrapping the value modulo 2^32.
+pipeline test(task) {
+  sync_semaphore_acquire("pool", 4294967296, 1)
+}

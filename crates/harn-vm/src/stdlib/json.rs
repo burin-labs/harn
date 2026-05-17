@@ -6,6 +6,12 @@ use crate::stdlib::json_query;
 use crate::value::{VmError, VmValue};
 use crate::vm::Vm;
 
+/// Cap on memoized parses. Each entry holds the original source string as
+/// its key plus the parsed value tree, so the cache can grow large quickly
+/// when a script feeds varied JSON. Mirror the regex-cache bound so the
+/// VM's per-thread parse caches share a predictable ceiling.
+const JSON_PARSE_CACHE_LIMIT: usize = 128;
+
 thread_local! {
     static JSON_PARSE_CACHE: RefCell<BTreeMap<String, VmValue>> = const { RefCell::new(BTreeMap::new()) };
 }
@@ -61,7 +67,11 @@ pub(crate) fn register_json_builtins(vm: &mut Vm) {
             Ok(jv) => {
                 let parsed = schema::json_to_vm_value(&jv);
                 JSON_PARSE_CACHE.with(|cache| {
-                    cache.borrow_mut().insert(text, parsed.clone());
+                    let mut cache = cache.borrow_mut();
+                    if cache.len() >= JSON_PARSE_CACHE_LIMIT {
+                        cache.clear();
+                    }
+                    cache.insert(text, parsed.clone());
                 });
                 Ok(parsed)
             }

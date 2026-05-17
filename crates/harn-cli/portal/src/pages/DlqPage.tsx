@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react"
+import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { defineMessages, useIntl } from "react-intl"
 import { useNavigate, useSearchParams } from "react-router-dom"
 
@@ -95,6 +95,16 @@ export function DlqPage() {
   const [loading, setLoading] = useState(false)
   const [lastError, setLastError] = useState<string | null>(null)
   const [notice, setNotice] = useState<string | null>(null)
+  const jobPollerRef = useRef<number | null>(null)
+
+  useEffect(() => {
+    return () => {
+      if (jobPollerRef.current !== null) {
+        window.clearInterval(jobPollerRef.current)
+        jobPollerRef.current = null
+      }
+    }
+  }, [])
 
   const filters = useMemo(
     () => ({
@@ -162,22 +172,31 @@ export function DlqPage() {
       navigate(`/runs/detail?path=${encodeURIComponent(job.discovered_run_paths[0])}`)
       return
     }
+    if (jobPollerRef.current !== null) {
+      window.clearInterval(jobPollerRef.current)
+    }
     const startedAt = Date.now()
-    const timer = window.setInterval(() => {
+    const clearPoller = () => {
+      if (jobPollerRef.current !== null) {
+        window.clearInterval(jobPollerRef.current)
+        jobPollerRef.current = null
+      }
+    }
+    jobPollerRef.current = window.setInterval(() => {
       void fetchLaunchJobs()
         .then((payload) => {
           const next = payload.jobs.find((candidate) => candidate.id === job.id)
           const runPath = next?.discovered_run_paths[0]
           if (runPath) {
-            window.clearInterval(timer)
+            clearPoller()
             navigate(`/runs/detail?path=${encodeURIComponent(runPath)}`)
           }
           if (next?.status === "failed" || Date.now() - startedAt > 30_000) {
-            window.clearInterval(timer)
+            clearPoller()
           }
         })
         .catch(() => {
-          window.clearInterval(timer)
+          clearPoller()
         })
     }, 1000)
   }
