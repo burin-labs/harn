@@ -18,8 +18,9 @@ struct ExplainEnvelope<'a> {
     summary: &'a str,
     body: &'a str,
     /// Repair shapes available for this code, sourced from the per-code
-    /// registry. Empty until the `Repair` struct lands on `TypeDiagnostic`
-    /// (epic #1745, E1.2).
+    /// registry. Each entry carries the namespaced repair id, safety
+    /// class, and a one-line summary; today the catalog binds at most
+    /// one repair per code, so this is a `Vec` for forward compatibility.
     repairs: Vec<RepairEnvelope<'a>>,
     related: Vec<&'a str>,
     #[serde(rename = "apiStability")]
@@ -61,6 +62,13 @@ fn print_code_text(code: Code) -> i32 {
     println!("{} — {}", code, code.summary());
     println!();
     println!("{}", code.explanation().trim_end());
+    if let Some(template) = code.repair_template() {
+        println!();
+        println!(
+            "Repair: {} [{}] — {}",
+            template.id, template.safety, template.summary
+        );
+    }
     let related = code.related();
     if !related.is_empty() {
         println!();
@@ -74,13 +82,23 @@ fn print_code_text(code: Code) -> i32 {
 
 fn build_envelope(code: Code) -> ExplainEnvelope<'static> {
     let related_strs: Vec<&'static str> = code.related().iter().map(|c| c.as_str()).collect();
+    let repairs = code
+        .repair_template()
+        .map(|template| {
+            vec![RepairEnvelope {
+                id: template.id,
+                safety: template.safety.as_str(),
+                summary: template.summary,
+            }]
+        })
+        .unwrap_or_default();
     ExplainEnvelope {
         schema_version: 1,
         code: code.as_str(),
         category: code.category().as_str(),
         summary: code.summary(),
         body: code.explanation(),
-        repairs: Vec::new(),
+        repairs,
         related: related_strs,
         api_stability: "stable",
     }
@@ -223,6 +241,37 @@ mod tests {
                 entry.identifier
             );
         }
+    }
+
+    #[test]
+    fn explain_envelope_surfaces_repair_when_registered() {
+        // HARN-OWN-001 (immutable assignment) is mapped to
+        // `bindings/make-mutable` / scope-local in the registry. The
+        // envelope must surface that so IDE clients and agents can
+        // dispatch on safety without parsing prose.
+        let envelope =
+            super::build_envelope(harn_parser::diagnostic_codes::Code::ImmutableAssignment);
+        let value: serde_json::Value =
+            serde_json::from_str(&serde_json::to_string(&envelope).unwrap()).unwrap();
+        let repairs = value["repairs"]
+            .as_array()
+            .expect("repairs should always be an array");
+        assert_eq!(repairs.len(), 1, "expected one registered repair");
+        assert_eq!(repairs[0]["id"], "bindings/make-mutable");
+        assert_eq!(repairs[0]["safety"], "scope-local");
+    }
+
+    #[test]
+    fn explain_envelope_repairs_empty_when_no_template_registered() {
+        // Parser errors don't have a registered repair shape (they're
+        // diagnose-only). Envelope `repairs` should still be an empty
+        // array, not absent — the schema contract is that the field
+        // exists for every code.
+        let envelope =
+            super::build_envelope(harn_parser::diagnostic_codes::Code::ParserUnexpectedToken);
+        let value: serde_json::Value =
+            serde_json::from_str(&serde_json::to_string(&envelope).unwrap()).unwrap();
+        assert_eq!(value["repairs"], serde_json::json!([]));
     }
 
     #[test]

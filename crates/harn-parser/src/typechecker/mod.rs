@@ -2,7 +2,7 @@ use std::collections::HashSet;
 
 use crate::ast::*;
 use crate::builtin_signatures;
-use crate::diagnostic_codes::Code;
+use crate::diagnostic_codes::{Code, Repair};
 use harn_lexer::{FixEdit, Span};
 
 type TypeMismatchEvidence = (Option<(Span, String)>, Option<Span>);
@@ -47,6 +47,12 @@ pub struct TypeDiagnostic {
     /// need more than a static `FixEdit`. Out-of-band from `fix` so the
     /// string-based rendering pipeline doesn't have to care.
     pub details: Option<DiagnosticDetails>,
+    /// Structured repair classifier — id, summary, and safety class.
+    /// Agents and IDEs dispatch on `repair.safety` to decide whether to
+    /// auto-apply, propose, or escalate. `None` when no repair shape is
+    /// registered for this code; populated automatically from
+    /// [`Code::repair_template`] by the builder helpers.
+    pub repair: Option<Repair>,
 }
 
 #[derive(Debug, Clone)]
@@ -314,6 +320,7 @@ impl TypeChecker {
             related: Vec::new(),
             fix: None,
             details: None,
+            repair: default_repair(code),
         });
     }
 
@@ -334,6 +341,7 @@ impl TypeChecker {
             related: Vec::new(),
             fix: None,
             details: None,
+            repair: default_repair(code),
         });
     }
 
@@ -381,6 +389,7 @@ impl TypeChecker {
             related,
             fix: None,
             details: Some(DiagnosticDetails::TypeMismatch),
+            repair: default_repair(code),
         });
     }
 
@@ -400,6 +409,7 @@ impl TypeChecker {
             related: Vec::new(),
             fix: Some(fix),
             details: None,
+            repair: default_repair(code),
         });
     }
 
@@ -424,6 +434,7 @@ impl TypeChecker {
             related: Vec::new(),
             fix: None,
             details: None,
+            repair: default_repair(code),
         });
     }
 
@@ -447,6 +458,7 @@ impl TypeChecker {
             related: Vec::new(),
             fix: None,
             details: Some(DiagnosticDetails::NonExhaustiveMatch { missing }),
+            repair: default_repair(code),
         });
     }
 
@@ -460,6 +472,7 @@ impl TypeChecker {
             related: Vec::new(),
             fix: None,
             details: None,
+            repair: default_repair(code),
         });
     }
 
@@ -480,6 +493,7 @@ impl TypeChecker {
             related: Vec::new(),
             fix: None,
             details: None,
+            repair: default_repair(code),
         });
     }
 
@@ -501,8 +515,17 @@ impl TypeChecker {
             related: Vec::new(),
             fix: Some(fix),
             details: Some(DiagnosticDetails::LintRule { rule }),
+            repair: default_repair(code),
         });
     }
+}
+
+/// Materialize the default [`Repair`] for a diagnostic code, or `None`
+/// if no static repair shape is registered. Cheap (one pointer
+/// dereference plus an allocation for the summary string); call sites
+/// pay nothing when the code has no repair template.
+pub(crate) fn default_repair(code: Code) -> Option<Repair> {
+    code.repair_template().map(Repair::from_template)
 }
 
 #[derive(Debug)]

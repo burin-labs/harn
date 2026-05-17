@@ -15,6 +15,7 @@ mod imports;
 mod interfaces;
 mod narrowing;
 mod reachability;
+mod repair;
 mod strict_types;
 mod typing;
 

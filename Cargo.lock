@@ -2250,6 +2250,7 @@ dependencies = [
  "harn-modules",
  "harn-parser",
  "harn-vm",
+ "serde_json",
  "tokio",
  "tower-lsp",
 ]

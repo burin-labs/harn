@@ -1,8 +1,27 @@
 use harn_lexer::{LexerError, Span};
-use harn_parser::{diagnostic, ParserError, TypeExpr};
+use harn_parser::{diagnostic, ParserError, Repair, TypeExpr};
 use tower_lsp::lsp_types::*;
 
 use crate::symbols::SymbolInfo;
+
+/// Serialize a [`Repair`] into the JSON envelope that rides on
+/// `Diagnostic.data`. Code-action providers and IDE clients read this
+/// without re-deriving from the code registry, so the field names here
+/// are the contract surface:
+///
+/// ```json
+/// { "repair": { "id": "...", "summary": "...", "safety": "..." } }
+/// ```
+pub(crate) fn repair_data_value(repair: Option<&Repair>) -> Option<serde_json::Value> {
+    let repair = repair?;
+    Some(serde_json::json!({
+        "repair": {
+            "id": repair.id.as_str(),
+            "summary": repair.summary,
+            "safety": repair.safety.as_str(),
+        }
+    }))
+}
 
 /// Convert a 1-based Span to a 0-based LSP Range.
 pub(crate) fn span_to_range(span: &Span) -> Range {

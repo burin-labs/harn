@@ -8,7 +8,7 @@ use std::collections::BTreeMap;
 use std::fmt;
 
 use harn_lexer::{Lexer, TokenKind};
-use harn_parser::{DiagnosticCode as Code, Parser};
+use harn_parser::{DiagnosticCode as Code, Parser, Repair};
 
 pub(crate) use formatter::{Comment, Formatter};
 pub use trailing_comma::{
@@ -32,6 +32,14 @@ impl FormatError {
             code,
             message: message.into(),
         }
+    }
+
+    /// Materialize the structured repair classifier for this error.
+    /// Derived from the central diagnostic-code registry so the autonomy
+    /// surface is identical to `TypeDiagnostic::repair` and
+    /// `LintDiagnostic::repair`.
+    pub fn repair(&self) -> Option<Repair> {
+        self.code.repair_template().map(Repair::from_template)
     }
 }
 
