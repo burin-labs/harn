@@ -17,6 +17,12 @@ multiple `[[triggers.sources]]` entries. `kind = "stream"` covers cataloged
 continuous sources such as Kafka, NATS JetStream, Pulsar, Postgres CDC, email,
 and WebSocket ingest, including tumbling, sliding, and session window metadata.
 
+Use `harn routes <root> --json` before deploying a trigger project to audit the
+static ingress surface. The command reports each declarative trigger's route
+path, handler module, declared budgets, statically required capabilities,
+vendor-lock disclosure, and prompt/template overhead without executing handler
+code.
+
 ## Streaming trigger admission
 
 Continuous sources should enter Harn through the connector-facing stream

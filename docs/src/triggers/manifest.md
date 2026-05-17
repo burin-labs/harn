@@ -8,6 +8,8 @@ Each entry declares:
 - a stable trigger `id`
 - a trigger `kind` such as `webhook`, `cron`, or `a2a-push`
 - a `provider` from the registered trigger provider catalog
+- an optional HTTP `path`, either as top-level `path = "/..."` or
+  `match = { path = "/...", ... }`
 - an `autonomy_tier` (or `tier`) that defines the default execution mode
 - a delivery `handler`
 - optional dedupe, retry, budget, flow-control, secret, and predicate settings
@@ -36,6 +38,11 @@ concurrency = { max = 10 }
 secrets = { signing_secret = "github/webhook-secret" }
 filter = "event.kind"
 ```
+
+Run `harn routes <root> --json` to inspect the manifest's static trigger
+inventory. The JSON envelope reports route paths, local handler modules,
+declared budgets, inferred host capabilities, vendor-lock disclosure, and
+template overhead before the orchestrator starts.
 
 Supported autonomy tiers:
 

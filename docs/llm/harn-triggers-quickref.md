@@ -39,7 +39,9 @@ timezone = "America/Los_Angeles"
 handler = "handlers::send_digest"
 ```
 
-Key fields: `id`, `kind`, `provider`, `handler`, `match.events`, `match.path`, `when`, `dedupe_key`, `retry`, `budget`, `secrets`, `schedule`, `timezone`, and provider-specific config tables such as `poll`.
+Key fields: `id`, `kind`, `provider`, `handler`, `path` or `match.path`, `match.events`, `when`, `dedupe_key`, `retry`, `budget`, `secrets`, `schedule`, `timezone`, and provider-specific config tables such as `poll`.
+
+Audit a project before deploy with `harn routes <root> --json`; it reports each declarative trigger's route path, handler module, budgets, inferred host capabilities, vendor-lock disclosure, and prompt/template overhead without executing handler code.
 
 ## Provider catalog
 

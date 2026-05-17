@@ -194,6 +194,12 @@ pub fn catalog() -> Vec<SchemaEntry> {
             description: "`harn dev --watch` incremental NDJSON event stream (ready / fingerprint_changed / rerun / diagnostics / tests).",
             schema_json: None,
         },
+        SchemaEntry {
+            command: "routes",
+            schema_version: 1,
+            description: "Static trigger route, budget, capability, and vendor-lock inventory.",
+            schema_json: None,
+        },
     ]
 }
 

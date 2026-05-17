@@ -83,6 +83,17 @@ fn test_parses_config_validate_and_schema() {
 }
 
 #[test]
+fn test_parses_routes_json() {
+    let cli = Cli::parse_from(["harn", "routes", "fixtures/project", "--json"]);
+
+    let Command::Routes(args) = cli.command.unwrap() else {
+        panic!("expected routes command");
+    };
+    assert_eq!(args.root, PathBuf::from("fixtures/project"));
+    assert!(args.json);
+}
+
+#[test]
 fn test_parses_agents_conformance_target_url() {
     let cli = Cli::parse_from([
         "harn",

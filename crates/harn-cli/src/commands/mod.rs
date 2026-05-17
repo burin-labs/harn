@@ -39,6 +39,7 @@ pub(crate) mod provider;
 pub(crate) mod providers;
 pub(crate) mod quickstart;
 pub(crate) mod repl;
+pub(crate) mod routes;
 pub mod run;
 pub(crate) mod serve;
 pub(crate) mod session;

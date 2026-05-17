@@ -747,6 +747,12 @@ async fn async_main() {
                 process::exit(1);
             }
         }
+        Command::Routes(args) => {
+            let code = commands::routes::run(args).await;
+            if code != 0 {
+                process::exit(code);
+            }
+        }
         Command::Flow(args) => match commands::flow::run_flow(&args) {
             Ok(code) => {
                 if code != 0 {

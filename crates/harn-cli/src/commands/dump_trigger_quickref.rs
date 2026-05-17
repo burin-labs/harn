@@ -139,7 +139,8 @@ fn generate_file() -> String {
     out.push_str("[[triggers]]\n");
     out.push_str("id = \"github-prs\"\nkind = \"webhook\"\nprovider = \"github\"\nmatch = { path = \"/hooks/github\", events = [\"pull_request.opened\"] }\nhandler = \"handlers::on_pull_request\"\nwhen = \"handlers::should_handle\"\ndedupe_key = \"event.dedupe_key\"\nretry = { max = 7, backoff = \"svix\" }\nbudget = { daily_cost_usd = 5.00, max_concurrent = 4 }\nsecrets = { signing_secret = \"github/webhook-secret\" }\n\n");
     out.push_str("[[triggers]]\nid = \"weekday-digest\"\nkind = \"cron\"\nprovider = \"cron\"\nschedule = \"0 9 * * 1-5\"\ntimezone = \"America/Los_Angeles\"\nhandler = \"handlers::send_digest\"\n```\n\n");
-    out.push_str("Key fields: `id`, `kind`, `provider`, `handler`, `match.events`, `match.path`, `when`, `dedupe_key`, `retry`, `budget`, `secrets`, `schedule`, `timezone`, and provider-specific config tables such as `poll`.\n\n");
+    out.push_str("Key fields: `id`, `kind`, `provider`, `handler`, `path` or `match.path`, `match.events`, `when`, `dedupe_key`, `retry`, `budget`, `secrets`, `schedule`, `timezone`, and provider-specific config tables such as `poll`.\n\n");
+    out.push_str("Audit a project before deploy with `harn routes <root> --json`; it reports each declarative trigger's route path, handler module, budgets, inferred host capabilities, vendor-lock disclosure, and prompt/template overhead without executing handler code.\n\n");
 
     out.push_str("## Provider catalog\n\n");
     out.push_str("This table is generated from `std/triggers::list_providers()` / `ProviderCatalog` metadata.\n\n");

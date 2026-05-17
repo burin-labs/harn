@@ -129,7 +129,7 @@ impl RouteConfig {
                 }))
             }
             TriggerKind::Stream => {
-                if !trigger.config.kind_specific.contains_key("path") {
+                if !has_trigger_path(trigger) {
                     return Ok(None);
                 }
                 Ok(Some(Self {
@@ -970,12 +970,36 @@ fn trigger_path(trigger: &CollectedManifestTrigger) -> Result<String, Orchestrat
         .kind_specific
         .get("path")
         .and_then(JsonValueExt::as_toml_str)
+        .or_else(|| {
+            trigger
+                .config
+                .match_
+                .extra
+                .get("path")
+                .and_then(JsonValueExt::as_toml_str)
+        })
         .map(str::to_string)
         .unwrap_or_else(|| format!("/triggers/{}", trigger.config.id));
     if !path.starts_with('/') {
         return Err(format!("trigger '{}' path must start with '/'", trigger.config.id).into());
     }
     Ok(path)
+}
+
+fn has_trigger_path(trigger: &CollectedManifestTrigger) -> bool {
+    trigger
+        .config
+        .kind_specific
+        .get("path")
+        .and_then(JsonValueExt::as_toml_str)
+        .is_some()
+        || trigger
+            .config
+            .match_
+            .extra
+            .get("path")
+            .and_then(JsonValueExt::as_toml_str)
+            .is_some()
 }
 
 fn parse_secret_id(raw: Option<&str>) -> Option<SecretId> {
