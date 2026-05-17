@@ -72,7 +72,7 @@ The stdlib maps these event kinds to default statuses:
 Callers can override `status` when a runtime has a more specific local state,
 but hosts should be able to render a useful card from the default mapping.
 
-## Static Jobs view
+## Static jobs view
 
 `dashboard_jobs_view(events, {emit?})` dedupes an ordered event stream and
 reduces it into `harn.dashboard_job_card.v1` cards. The reducer is intentionally

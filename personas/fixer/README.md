@@ -1,4 +1,4 @@
-# Fixer Persona
+# Fixer persona
 
 Fixer consumes `invariant.blocked_with_remediation` events from Harn Flow.
 Remediation suggestions are inert until Fixer materializes them as freshly

@@ -1,8 +1,8 @@
 # Harn
 
-Harn is a pipeline-oriented programming language for orchestrating AI
-agents. LLM calls, tool use, concurrency, and error recovery are built
-into the language -- no libraries or SDKs needed.
+Harn is a pipeline-oriented programming language for orchestrating AI agents.
+LLM calls, tool use, concurrency, and error recovery are built into the
+language instead of spread across SDK glue.
 
 ```harn
 let response = llm_call(
@@ -32,33 +32,33 @@ pipeline default(task) {
 
 ## Get started
 
-The fastest way to start is the [Getting Started](./getting-started.md)
-guide: install Harn, write a program, and run it in under five minutes.
+Start with [Getting started](./getting-started.md): install Harn, write a
+program, and run it in under five minutes.
 
 ## What's in this guide
 
-- **[Getting started](./getting-started.md)** -- Install and run your first program
-- **[Why Harn?](./why-harn.md)** -- What problems Harn solves and how it compares
-- **[Language basics](./language-basics.md)** -- Syntax, types, control flow, functions, structs, enums
-- **[Error handling](./error-handling.md)** -- try/catch, Result type, the `?` operator, retry
-- **[Modules and imports](./modules.md)** -- Splitting code across files, standard library
-- **[Concurrency](./concurrency.md)** -- spawn/await, parallel, channels, mutexes, deadlines
-- **[Language specification](./language-spec.md)** -- Formal grammar and runtime semantics
-- **[LLM and agents](./llm-and-agents.md)** -- Calling models, agent loops, tool use
-- **[Transcript architecture](./transcript-architecture.md)** -- How Harn stores and replays agent conversations
-- **[Workflow runtime](./workflow-runtime.md)** -- Workflow graphs, artifacts, run records, replay, evals
-- **[Cookbook](./cookbook.md)** -- Practical recipes and patterns
-- **[Host boundary](./host-boundary.md)** -- How Harn integrates with host applications
-- **[Bridge protocol](./bridge-protocol.md)** -- JSON-RPC contract for host bridges
-- **[Protocol support matrix](./protocol-support.md)** -- ACP, A2A, and MCP entry points
-- **[MCP, ACP, and A2A integration](./mcp-and-acp.md)** -- Protocol examples and behavior
-- **[Harn portal](./portal.md)** -- Local observability UI for runs and transcripts
-- **[CLI reference](./cli-reference.md)** -- All CLI commands and flags
-- **[Builtin functions](./builtins.md)** -- Complete reference for all built-in functions
-- **[Editor integration](./editor-integration.md)** -- LSP, tree-sitter, and formatter support
-- **[Testing](./testing.md)** -- Running user tests and the conformance suite
+- [Getting started](./getting-started.md): install and run your first program
+- [Why Harn?](./why-harn.md): what Harn solves and how it compares
+- [Language basics](./language-basics.md): syntax, types, control flow, functions, structs, enums
+- [Error handling](./error-handling.md): try/catch, Result type, the `?` operator, retry
+- [Modules and imports](./modules.md): files, modules, and the standard library
+- [Concurrency](./concurrency.md): spawn/await, parallel, channels, mutexes, deadlines
+- [Language specification](./language-spec.md): grammar and runtime semantics
+- [LLM and agents](./llm-and-agents.md): model calls, agent loops, and tool use
+- [Transcript architecture](./transcript-architecture.md): storage and replay for agent conversations
+- [Workflow runtime](./workflow-runtime.md): workflow graphs, artifacts, run records, replay, evals
+- [Cookbook](./cookbook.md): practical recipes and patterns
+- [Host boundary](./host-boundary.md): integration with host applications
+- [Bridge protocol](./bridge-protocol.md): JSON-RPC contract for host bridges
+- [Protocol support matrix](./protocol-support.md): ACP, A2A, and MCP entry points
+- [MCP, ACP, and A2A integration](./mcp-and-acp.md): protocol examples and behavior
+- [Harn portal](./portal.md): local observability UI for runs and transcripts
+- [CLI reference](./cli-reference.md): commands and flags
+- [Builtin functions](./builtins.md): built-in function reference
+- [Editor integration](./editor-integration.md): LSP, tree-sitter, and formatter support
+- [Testing](./testing.md): user tests and the conformance suite
 
 ## Links
 
 - [GitHub](https://github.com/burin-labs/harn)
-- [Language Specification](./language-spec.md)
+- [Language specification](./language-spec.md)

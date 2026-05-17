@@ -1,4 +1,4 @@
-# OpenTrustGraph v0 Conformance
+# OpenTrustGraph v0 conformance
 
 This document defines what a runtime, consumer, or verifier must do to be
 "OpenTrustGraph v0 conformant". The wording follows RFC 2119: MUST, MUST

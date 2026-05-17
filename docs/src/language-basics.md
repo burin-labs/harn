@@ -906,7 +906,7 @@ have. Harn uses **implicit satisfaction**, just like Go. A struct satisfies
 an interface automatically if its `impl` block has all the required methods.
 You never write `implements` or `impl Interface for Type`.
 
-### Step 1: Define an interface
+### Step 1: define an interface
 
 An interface lists method signatures without bodies:
 
@@ -939,7 +939,7 @@ interface Collection {
 }
 ```
 
-### Step 2: Create structs with matching methods
+### Step 2: create structs with matching methods
 
 ```harn
 struct Dog {
@@ -969,7 +969,7 @@ impl Cat {
 Both `Dog` and `Cat` have a `display(self) -> string` method, so they
 both satisfy `Displayable`. No extra annotation is needed.
 
-### Step 3: Use the interface as a type
+### Step 3: use the interface as a type
 
 Now you can write a function that accepts any `Displayable`:
 

@@ -1,4 +1,4 @@
-# Tutorial: Build an eval pipeline
+# Tutorial: build an eval pipeline
 
 This tutorial builds a small evaluation loop that runs a set of examples,
 records metrics, and produces an auditable summary. The goal is to make quality

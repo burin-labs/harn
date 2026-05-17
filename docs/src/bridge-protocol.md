@@ -25,7 +25,7 @@ Internally, the agent loop emits `AgentEvent::ToolCall` +
 translates them into `session/update` notifications via an `AgentEventSink` it
 registers per session.
 
-### ACP Compatibility Contract
+### ACP compatibility contract
 
 Harn-owned ACP/MCP extension fields are specified in
 [Harn ACP/MCP extensions v1](./spec/harn-extensions/v1.md). Harn tracks the
@@ -141,7 +141,7 @@ canonical ACP content block, not the session-update envelope. Example:
 }
 ```
 
-### Composition Event Migration Note
+### Composition event migration note
 
 Governed Code Mode composition runs are represented on the Harn
 `_harn/agentEvent` extension channel, not as one opaque tool call and

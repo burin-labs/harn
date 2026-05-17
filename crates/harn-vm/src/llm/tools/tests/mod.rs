@@ -44,7 +44,7 @@ pub(super) fn vm_list(items: Vec<VmValue>) -> VmValue {
     VmValue::List(Rc::new(items))
 }
 
-/// Build a small tool registry containing an `edit` tool with rich schema
+/// Build a small tool registry containing an `edit` tool with a detailed schema
 /// (enum action, required path, multiple fields). Returned as a VmValue so it
 /// can be passed to `parse_text_tool_calls_with_tools`.
 pub(super) fn sample_tool_registry() -> VmValue {

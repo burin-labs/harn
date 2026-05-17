@@ -1,4 +1,4 @@
-# Context Maintenance Hook Recipes
+# Context maintenance hook recipes
 
 Long-lived coding hosts need context work that should not block the foreground
 agent turn: fast index refreshes after file edits, slower librarian or
@@ -29,7 +29,7 @@ pub fn on_file_edited(event) {
 }
 ```
 
-## Receipt Shape
+## Receipt shape
 
 `context_maintenance_receipt(job_id, status, input?)` returns
 `harn.context_maintenance.job_receipt.v1`:
@@ -50,7 +50,7 @@ The helper sorts and deduplicates paths and artifact ids before hashing the
 dedupe key, so a replay fixture can compare receipts without depending on file
 watch ordering.
 
-## Hook Recipes
+## Hook recipes
 
 | Lifecycle point | Recommended job | Why this hook |
 |---|---|---|
@@ -77,7 +77,7 @@ Jobs that only warm host caches or refresh UI projections should use
 `skipped` receipt with the original `run_id` and `dedupe_key`, so downstream
 views can see that the job was intentionally omitted rather than lost.
 
-## Burin Mapping
+## Burin mapping
 
 Burin's current two lanes map directly:
 

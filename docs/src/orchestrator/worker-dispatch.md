@@ -1,11 +1,11 @@
-# Worker Dispatch
+# Worker dispatch
 
 `worker://<queue>` is Harn's durable queue-delegation path for triggers. Unlike
 `a2a://...`, it does not call a specific remote agent immediately. The
 dispatcher appends a job to the shared EventLog and returns an enqueue receipt;
 some other orchestrator or handler-only consumer drains the queue later.
 
-## When To Use It
+## When to use it
 
 Use `worker://...` when you want:
 
@@ -17,7 +17,7 @@ Use `worker://...` when you want:
 
 Use `a2a://...` when you want RPC-style delivery to a specific remote agent.
 
-## Queue Model
+## Queue model
 
 Each queue uses four append-only topic families:
 
@@ -39,7 +39,7 @@ Queue priority supports `high`, `normal`, and `low`. Consumers drain high first,
 and older normal jobs are promoted ahead of newer high-priority work after
 15 minutes to prevent starvation.
 
-## Producer / Consumer Split
+## Producer / consumer split
 
 The simplest operating model is two manifests sharing one state dir:
 
@@ -72,7 +72,7 @@ handler = "handlers::on_task"
 The consumer uses the same trigger id so `harn orchestrator queue drain` can
 resolve the queued job back to a concrete local handler.
 
-## CLI Workflow
+## CLI workflow
 
 Inspect queues:
 
@@ -111,7 +111,7 @@ harn orchestrator queue \
   --confirm
 ```
 
-## Backend Scope
+## Backend scope
 
 Worker queues inherit the scope of the configured EventLog backend:
 
@@ -124,7 +124,7 @@ That keeps the product model simple: the same manifest-level `worker://queue`
 shape works for local single-host deployments today and shared-log deployments
 later.
 
-## Fair-Share Scheduler
+## Fair-share scheduler
 
 When a single worker queue is shared across multiple tenants, bindings, or
 trigger ids, the dispatcher's per-binding flow-control gates do not on their

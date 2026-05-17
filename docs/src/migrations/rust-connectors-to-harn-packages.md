@@ -88,7 +88,7 @@ one provider on the pure-Harn implementation before moving the rest.
    reports `trigger:<id>` as `via <provider>`, so existing health checks keep
    working.
 
-## Harn Cloud specifics
+## Harn cloud specifics
 
 Managed Harn Cloud orchestrators load pure-Harn connector packages through
 the same `[[providers]]` mechanism documented above. Connector packages are

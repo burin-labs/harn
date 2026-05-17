@@ -1,4 +1,4 @@
-# Local / A2A Dispatch Demo
+# Local / A2A dispatch demo
 
 This example keeps the handler logic stable while moving dispatch across the
 trust boundary.

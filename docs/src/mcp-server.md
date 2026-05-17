@@ -1,4 +1,4 @@
-# Orchestrator MCP Server
+# Orchestrator MCP server
 
 `harn mcp serve` exposes a local Harn orchestrator as an MCP server so any MCP
 client can fire triggers, inspect queues, replay events, and read runtime state
@@ -144,7 +144,7 @@ The server prints a warning when this `apiKey` initialize extension is used. If
 neither OAuth mode nor `HARN_ORCHESTRATOR_API_KEYS` is configured, the MCP
 server runs without auth.
 
-## Tool Catalog
+## Tool catalog
 
 MCP list endpoints use cursor pagination. `tools/list`, `resources/list`,
 `resources/templates/list`, `prompts/list`, and `tasks/list` return up to 100
@@ -320,7 +320,7 @@ The server advertises `tools.listChanged`, `resources.listChanged`, and
 `prompts.listChanged`. It emits the corresponding `notifications/*/list_changed`
 messages when watched manifest, prompt, lockfile, or package metadata changes.
 
-## Protocol Support
+## Protocol support
 
 `harn mcp serve` negotiates MCP protocol version `2025-11-25`. It is a
 control-plane server for Harn orchestration state, so it supports tools,

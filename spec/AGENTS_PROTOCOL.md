@@ -1,4 +1,4 @@
-# Harn Agents Protocol v1
+# Harn agents protocol v1
 
 The Harn Agents Protocol is the public wire contract for managed Harn agents.
 It lets clients, hosts, and third-party Harness implementations create
@@ -29,7 +29,7 @@ https://harnlang.com/spec/agents-protocol/v1
 - Reference implementation: `burin-labs/harn-cloud`
 - Open source specification home: `burin-labs/harn`
 
-## Design Goals
+## Design goals
 
 The protocol is designed around these constraints:
 
@@ -44,7 +44,7 @@ The protocol is designed around these constraints:
 - Durable resources should be reconstructable from append-only events.
 - Receipts prove what happened without exposing full private traces by default.
 
-## Normative Language
+## Normative language
 
 The key words "MUST", "MUST NOT", "SHOULD", "SHOULD NOT", and "MAY" are
 normative when written in all caps.
@@ -54,7 +54,7 @@ MUST NOT recycle an identifier for a different resource. Unless a field says
 otherwise, timestamps are RFC3339 UTC strings and objects MAY include unknown
 extension fields under `metadata`.
 
-## Compatibility With Existing Harn Surfaces
+## Compatibility with existing Harn surfaces
 
 This protocol reuses existing Harn concepts instead of redefining them:
 
@@ -91,7 +91,7 @@ enum value as success. When an unknown enum value appears, clients SHOULD keep
 the raw value for display and handle the resource as an indeterminate active or
 failed state according to the field's context.
 
-## Resource Model
+## Resource model
 
 All resources share this envelope shape when represented as top-level REST
 objects:
@@ -218,7 +218,7 @@ Optional fields include `parent_branch_id`, `session_id`, `task_id`,
 Servers MUST expose enough Branch lineage for a client to understand whether a
 mutation or artifact came from the main path or an alternate execution path.
 
-### Message, Part, And Artifact
+### Message, part, and artifact
 
 A Message is a conversational turn or protocol-visible agent update.
 
@@ -479,7 +479,7 @@ paths and schemas. This narrative spec requires the REST surface to cover:
 REST writes that create or mutate resources MUST accept `Idempotency-Key` when
 the method is not naturally idempotent.
 
-### Server-Sent Events
+### Server-sent events
 
 SSE streams deliver Events as UTF-8 `text/event-stream`.
 
@@ -517,11 +517,11 @@ for clients to detect broken connections. A resumed WebSocket session MUST
 mark replayed events so clients can distinguish historical delivery from live
 activity.
 
-## Authentication And Authorization
+## Authentication and authorization
 
 The protocol defines two baseline authentication schemes.
 
-### API Key
+### API key
 
 API key authentication uses:
 
@@ -532,7 +532,7 @@ Authorization: Bearer <api-key>
 Servers MUST bind API keys to an actor and authorization policy. API keys MUST
 NOT be logged in Events, Receipts, or error details.
 
-### OAuth2 Client Credentials
+### OAuth2 client credentials
 
 Machine-to-machine clients MAY use OAuth2 client credentials. Tokens are sent
 with the same bearer header:
@@ -545,7 +545,7 @@ Servers MUST validate issuer, audience, expiry, and required scopes. Token
 scopes SHOULD map to resource actions such as `sessions:read`, `tasks:write`,
 `events:read`, `artifacts:write`, and `receipts:read`.
 
-### Authorization Rules
+### Authorization rules
 
 Authentication identifies the caller. Authorization decides whether the caller
 may perform an action.
@@ -587,7 +587,7 @@ Tasks, Messages, Artifacts, or approval actions for equivalent retried writes.
 Connectors SHOULD map provider delivery ids to idempotency keys or dedupe keys
 when submitting Tasks.
 
-## Task Lifecycle
+## Task lifecycle
 
 Task states are uppercase on the Harn Agents Protocol wire:
 
@@ -625,20 +625,20 @@ state. Cancellation is cooperative: a Task MAY finish before a cancel request
 is observed, but once the server records `CANCELED`, no later success Outcome
 may replace it.
 
-## Event Taxonomy
+## Event taxonomy
 
 Event names are lower-snake or dotted names. Dotted names group events by
 actor and subsystem. Servers MAY add vendor events, but vendor events SHOULD
 use a reverse-DNS or `vendor.` prefix.
 
-### User Events
+### User events
 
 - `user.message`: user Message appended to a Session.
 - `user.input_submitted`: requested input supplied.
 - `user.tool_confirmation`: user approved, denied, or modified a tool action.
 - `user.cancel_requested`: user requested Task cancellation.
 
-### Agent Events
+### Agent events
 
 - `agent.message`: assistant or agent Message appended.
 - `agent.reasoning_summary`: optional redacted reasoning summary.
@@ -654,7 +654,7 @@ including Anthropic-style tool ids and input/result pairing where practical.
 Events MUST NOT expose hidden chain-of-thought. Summaries and receipts may
 describe decisions without revealing private reasoning.
 
-### Task Events
+### Task events
 
 - `task.submitted`
 - `task.started`
@@ -665,7 +665,7 @@ describe decisions without revealing private reasoning.
 - `task.canceled`
 - `task.status_changed`
 
-### Session Events
+### Session events
 
 - `session.created`
 - `session.closed`
@@ -676,21 +676,21 @@ describe decisions without revealing private reasoning.
 - `session.thread_merged`
 - `session.replayed`
 
-### Branch Events
+### Branch events
 
 - `branch.created`
 - `branch.updated`
 - `branch.merged`
 - `branch.abandoned`
 
-### Artifact Events
+### Artifact events
 
 - `artifact.created`
 - `artifact.updated`
 - `artifact.linked`
 - `artifact.redacted`
 
-### Tool And Span Events
+### Tool and span events
 
 - `span.started`
 - `span.updated`
@@ -707,7 +707,7 @@ Span events provide timing and hierarchy. Tool events provide user-facing tool
 semantics. A server MAY emit both for the same action when it preserves
 correlation ids.
 
-### Connector Events
+### Connector events
 
 - `connector.delivery_received`
 - `connector.delivery_deduped`
@@ -715,7 +715,7 @@ correlation ids.
 - `connector.task_submitted`
 - `connector.failed`
 
-### Receipt And Replay Events
+### Receipt and replay events
 
 - `receipt.issued`
 - `receipt.verified`
@@ -725,7 +725,7 @@ correlation ids.
 - `replay.completed`
 - `replay.failed`
 
-## Error Taxonomy
+## Error taxonomy
 
 Errors use HTTP status codes plus machine-readable error codes.
 
@@ -782,7 +782,7 @@ Core error codes:
 Errors caused by agent work SHOULD also produce Task or Span events so the
 failure is visible in streams and receipts.
 
-## Receipt Wire Format
+## Receipt wire format
 
 The receipt-format sibling artifact defines the normative receipt envelope,
 canonicalization, hash inputs, signatures, redaction rules, verification
@@ -798,7 +798,7 @@ Task, Outcome, Event, and Artifact objects MAY reference receipts by id.
 Clients MUST NOT infer cryptographic validity from the presence of a
 `receipt_id`; they must call the receipt verification surface when available.
 
-## Replay Contract
+## Replay contract
 
 The replay-as-API sibling spec defines exact REST paths and replay fixtures.
 This narrative spec requires:
@@ -823,7 +823,7 @@ This narrative spec requires:
 - Replay failures MUST identify the first unavailable event, artifact, memory,
   receipt, or host dependency that prevents replay.
 
-## Privacy And Redaction
+## Privacy and redaction
 
 Servers MUST distinguish public content, internal content, and receipt-only
 content. Hidden model reasoning, secrets, bearer tokens, private keys, raw
@@ -834,7 +834,7 @@ Artifact and Event redaction MUST preserve enough structure for clients to
 understand that content existed. Prefer redacted descriptors over deletion when
 audit continuity matters.
 
-## Conformance Levels
+## Conformance levels
 
 Conformance is cumulative unless a level says otherwise.
 
@@ -892,7 +892,7 @@ Replay SHOULD be combined with Receipts for production Harnesses, but the
 levels remain separate so lightweight test Harnesses can validate replay
 without implementing cryptographic receipts.
 
-## Implementation Notes
+## Implementation notes
 
 Harn implementations should keep protocol adapters thin. REST, SSE, WebSocket,
 A2A, ACP, and MCP surfaces should map into the same dispatch, policy,

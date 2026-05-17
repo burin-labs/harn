@@ -327,7 +327,7 @@ try {
 }
 ```
 
-## Synchronization Taxonomy
+## Synchronization taxonomy
 
 Harn synchronization is intentionally higher-level than OS locks:
 
@@ -520,7 +520,7 @@ if shutdown.status == "completed" {
 }
 ```
 
-## Supervisor Trees
+## Supervisor trees
 
 Use `supervisor_start` when a workflow owns long-lived child loops that need
 named lifecycle, restart policies, backoff, graceful drain, and introspection.

@@ -1,4 +1,4 @@
-# Flow Predicate Language
+# Flow predicate language
 
 Status: design decision record for Harn Flow v0. This page records the
 predicate-language decisions and the implementation shape they imply.
@@ -10,7 +10,7 @@ shape used by directory metadata. The goal is a policy surface that can be
 audited, replayed, and proposed by agents without letting agents silently expand
 their own authority.
 
-## Implementation State
+## Implementation state
 
 The design in this document assumes the following implementation state:
 
@@ -25,7 +25,7 @@ The design in this document assumes the following implementation state:
 | Archivist persona | Landed as deterministic propose-only scan output. |
 | Fixer persona | In progress. |
 
-## Predicate Declarations
+## Predicate declarations
 
 Every shipping predicate is a top-level Harn function marked with
 `@invariant` and exactly one execution kind:
@@ -77,7 +77,7 @@ Evidence items point at atoms, metadata paths, transcript spans, or external
 citations. Remediation is inert: it is input to Fixer, never an auto-apply
 instruction.
 
-## Decision 1: Budget Semantics Under Concurrency
+## Decision 1: budget semantics under concurrency
 
 Default stance: per-slice budget envelopes with a fairness scheduler.
 
@@ -137,7 +137,7 @@ slice is queued together. The single-slice convenience method
 `execute_slice(slice, predicates)` still works and routes through the same
 scheduler so per-slice envelopes apply uniformly.
 
-## Decision 2: Bootstrap Signing
+## Decision 2: bootstrap signing
 
 Default stance: add a minimal, hand-authored root `meta-invariants.harn` that
 governs predicate authorship. Archivist may propose edits to `invariants.harn`,
@@ -211,7 +211,7 @@ callers (Archivist promotion, future `harn flow validate` subcommand) — Ship
 Captain only surfaces the discovered policy hash and maintainers, since
 Phase 0 doesn't yet evaluate proposed edits during atom emission.
 
-## Decision 3: Semantic Predicate Determinism
+## Decision 3: semantic predicate determinism
 
 Default stance: every `@semantic` predicate must have a deterministic fallback.
 
@@ -239,7 +239,7 @@ replay path depend on deterministic code. It also aligns with policy engines
 such as CEL and OPA: fast deterministic checks should carry the enforceable
 contract, while richer evaluators can annotate and escalate.
 
-## Decision 4: Cross-Directory Slice Composition
+## Decision 4: cross-directory slice composition
 
 Default stance: use the union of all predicates applicable to every touched
 directory, with de-duplication for shared ancestors and explicit explosion
@@ -297,7 +297,7 @@ The open implementation work is exhausted. Ship Captain may evaluate
 cross-directory unions without a human in the loop only because the ceiling
 makes the cost visible and bounded.
 
-## Replay And Audit Contract
+## Replay and audit contract
 
 Every shipped slice records every predicate hash and result that gated it. A
 later predicate change cannot retroactively unship historical work.
@@ -313,7 +313,7 @@ Replay audit is advisory by default:
 This matches the append-only Flow model: new facts create new atoms, slices, or
 audit records; they do not mutate old shipping decisions.
 
-## Archivist Proposal Scans
+## Archivist proposal scans
 
 Archivist v0 is intentionally dumb and review-first. It does not promote
 predicates and it does not fetch live evidence during slice evaluation. The CLI
@@ -348,7 +348,7 @@ If no Flow store exists, `shadow_evaluation.status` is `no_flow_store` rather
 than an error. That keeps initial repo bootstrap useful while making the
 absence of atom history explicit.
 
-## Remaining Implementation Work
+## Remaining implementation work
 
 The decisions above leave one concrete implementation gap beyond the landed
 predicate runtime: deterministic fallback metadata and enforcement for
@@ -356,7 +356,7 @@ predicate runtime: deterministic fallback metadata and enforcement for
 cross-slice scheduling, aggregate predicate budgets, and cross-directory
 predicate ceilings are covered by the implementation described above.
 
-## External Reference Points
+## External reference points
 
 The design intentionally stays close to proven policy and provenance shapes:
 

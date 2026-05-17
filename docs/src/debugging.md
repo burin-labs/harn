@@ -1,4 +1,4 @@
-# Debugging Agent Runs
+# Debugging agent runs
 
 Harn provides several tools for inspecting, replaying, and evaluating agent
 runs. This page walks through the debugging workflow.

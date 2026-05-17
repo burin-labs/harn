@@ -276,7 +276,7 @@ println(unwrap(r))          // 42
 println(unwrap_or(Err("x"), "default"))  // default
 ```
 
-### Pattern matching on Result
+### Pattern matching on result
 
 Result values can be destructured with `match`:
 

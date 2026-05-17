@@ -1,4 +1,4 @@
-# Merge Captain transcript oracle fixtures
+# Merge captain transcript oracle fixtures
 
 Reference fixtures for `harn merge-captain audit` (#1013). Each
 scenario is a paired:

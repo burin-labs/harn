@@ -1,6 +1,6 @@
-# Agent Loop Runtime Notes
+# Agent loop runtime notes
 
-## Completion Judge Isolation
+## Completion judge isolation
 
 `done_judge` and `verify_completion_judge` run on a transcript projection. The
 judge prompt includes the worker transcript, but the judge's own LLM request and

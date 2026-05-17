@@ -1,4 +1,4 @@
-# Human In The Loop
+# Human in the loop
 
 Harn's human-in-the-loop surface is **first-class typed syntax**.
 `ask_user`, `request_approval`, `dual_control`, and `escalate_to` are
@@ -247,7 +247,7 @@ type HitlPendingRequest = {
 }
 ```
 
-## Event Topics
+## Event topics
 
 HITL records are written to dedicated durable topics:
 
@@ -259,7 +259,7 @@ HITL records are written to dedicated durable topics:
 These append through the normal event-log path, so they get the same
 crash-safety guarantees as trigger dispatch records.
 
-## Host Contract
+## Host contract
 
 When a builtin opens a HITL wait, Harn emits a bridge notification:
 
@@ -284,7 +284,7 @@ that request kind:
 ACP and MCP both expose `harn.hitl.respond`. The orchestrator CLI also exposes
 manual escalation resume via `harn orchestrator resume <request_id>`.
 
-## Replay Semantics
+## Replay semantics
 
 Replay is event-log-driven.
 

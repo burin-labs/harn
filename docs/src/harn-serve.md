@@ -1,4 +1,4 @@
-# Outbound Workflow Server
+# Outbound workflow server
 
 `harn-serve` is the shared outbound-server crate for exposing Harn workflows to
 external callers. It contains the local Agents API, MCP, A2A, and ACP adapters
@@ -43,7 +43,7 @@ documents, streaming, progress notifications, or session semantics.
 Choose the adapter based on the caller's mental model, not by protocol
 popularity alone.
 
-### Local Agents API
+### Local agents API
 
 Choose the local Agents API when a client wants an OpenAPI-described HTTP
 surface instead of a protocol-specific JSON-RPC transport.
@@ -179,7 +179,7 @@ Behavior today:
 - optional HS256 agent-card signatures with
   `--card-signing-secret` or `HARN_SERVE_A2A_CARD_SECRET`
 
-## TLS Modes
+## TLS modes
 
 `harn serve` HTTP adapters accept the same TLS modes exposed by the HTTP
 stdlib helpers:

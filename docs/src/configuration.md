@@ -1,4 +1,4 @@
-# Layered Runtime Configuration
+# Layered runtime configuration
 
 Harn runtime configuration is a typed, layered document used by the CLI, VM
 hosts, and downstream products to explain model policy, permissions, protocol
@@ -59,7 +59,7 @@ denied_fields = ["endpoints.mcp.untrusted"]
 Locked fields keep the managed value even if a later environment override tries
 to replace it. Denied fields reject later candidates entirely.
 
-## File Locations
+## File locations
 
 Runtime install defaults:
 
@@ -95,7 +95,7 @@ Remote defaults use `HARN_CONFIG_REMOTE_DEFAULTS_URL` or
 URLs. This keeps enterprise bootstrap explicit while leaving cloud policy
 distribution decoupled from local OSS Harn.
 
-## Environment Overrides
+## Environment overrides
 
 Environment overrides are intentionally small and explainable:
 
@@ -115,7 +115,7 @@ Environment overrides are intentionally small and explainable:
 | `HARN_SANDBOX_MODE` | `limits.sandbox` |
 | `HARN_REPLAY_ENABLED` | `replay.enabled` |
 
-## Local OSS Example
+## Local OSS example
 
 ```toml
 schema_version = 1
@@ -143,7 +143,7 @@ mode = "standard"
 extra_fields = ["internal_audit_token"]
 ```
 
-## Org-Managed Example
+## Org-managed example
 
 ```toml
 [permissions]

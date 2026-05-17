@@ -1,4 +1,4 @@
-# Harn Agents Protocol Receipt Format
+# Harn agents protocol receipt format
 
 This directory is the canonical v1 receipt-format artifact for the Harn Agents
 Protocol. It formalizes receipts as portable proof summaries, distinct from raw

@@ -1,4 +1,4 @@
-# Merge Captain persona
+# Merge captain persona
 
 The Merge Captain persona is a Harn-native runbook for owning
 pull-request queues across multiple repositories. It is the

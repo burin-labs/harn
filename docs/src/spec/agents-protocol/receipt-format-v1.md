@@ -1,4 +1,4 @@
-# Harn Agents Protocol Receipt Format
+# Harn agents protocol receipt format
 
 The canonical receipt-format artifact lives in
 [`agents-protocol-receipts`](../../../../agents-protocol-receipts/README.md).

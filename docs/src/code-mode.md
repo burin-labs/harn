@@ -1,4 +1,4 @@
-# Governed Code Mode
+# Governed code mode
 
 Governed Code Mode is executable tool composition with a small API surface and
 normal Harn audit. A model sees a binding manifest, writes a short Harn snippet
@@ -12,7 +12,7 @@ parallel/spawn, and calls outside the injected manifest bindings plus pure data
 helpers. Denied or approval-gated bindings either stay out of the default
 manifest or fail closed with a child audit record when included for review.
 
-## What Is New
+## What is new
 
 Ordinary `agent_loop` tool use asks the model to choose one tool call at a time.
 Code Mode lets one reviewed parent operation do small read-only control flow:
@@ -38,7 +38,7 @@ declarations from the same binding manifest, but Harn-native execution and the
 binding manifest remain the runtime authority until a separate sandbox proves
 identical child events, policy behavior, and replay fidelity.
 
-## Binding Manifest
+## Binding manifest
 
 `composition_binding_manifest(tools, options?)` consumes ordinary Harn tool
 registries, MCP `tools/list`-style objects, provider-native tool arrays, and
@@ -76,7 +76,7 @@ By default, bindings above the requested side-effect ceiling are omitted. Pass
 `{include_denied: true}` only for diagnostics or audit examples where the model
 should see why a binding is not callable.
 
-## Read-Only Executor
+## Read-only executor
 
 `composition_execute(snippet, manifest, options?)` runs a Harn snippet inside a
 generated `pipeline main()` with one wrapper function per manifest binding:
@@ -115,7 +115,7 @@ the caller wants Harn to emit the corresponding `composition_start`,
 events to the live agent event sinks. Future frontends must route every binding
 call through the same child dispatch path.
 
-### Host Dispatcher
+### Host dispatcher
 
 By default, every binding call resolves through `metadata.mock_output` or a
 structured echo, which is the right behavior for replay fixtures and offline
@@ -139,7 +139,7 @@ closure executes on a fresh clone of the outer VM, so host bridge builtins
 still only sees manifest bindings plus the curated pure-helper list, so the
 snippet itself cannot bypass policy by reaching for those builtins directly.
 
-## MCP Profile
+## MCP profile
 
 For large connector packages, expose a compact Code Mode profile instead of
 eagerly listing every endpoint:
@@ -171,7 +171,7 @@ operation sequence, capabilities, inputs, outputs, and policy context. Repeated
 read-only snippets can then be mined, shadow checked, and promoted through the
 normal review workflow.
 
-## Choosing A Surface
+## Choosing a surface
 
 Use ordinary tools when one call is enough and the model should decide each next
 step. Use a bundle or batched read tool when the operation is fixed. Use Code

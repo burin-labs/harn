@@ -1,4 +1,4 @@
-# Mini Auth Demo
+# Mini auth demo
 
 A tiny TypeScript auth API demo used by the Burin Mini playground experiment.
 

@@ -1,4 +1,4 @@
-# Tool Surface Validation
+# Tool surface validation
 
 Harn validates agent tool surfaces before a loop or workflow stage spends model
 tokens. The validator checks the active tool registry, capability policy,
@@ -23,7 +23,7 @@ stable diagnostic codes; error diagnostics abort the loop before the first model
 call. `workflow_validate(...)` and `workflow_policy_report(...)` include the
 same diagnostics for workflow and stage tool surfaces.
 
-## Diagnostic Codes
+## Diagnostic codes
 
 | Code | Severity | Meaning |
 | --- | --- | --- |
@@ -42,7 +42,7 @@ same diagnostics for workflow and stage tool surfaces.
 | `TOOL_SURFACE_DEPRECATED_ARG_ALIAS` | warning | Prompt text mentions an argument alias instead of its canonical key. |
 | `TOOL_SURFACE_SIDE_EFFECT_CEILING_EXCEEDED` | error | A tool requires a higher side-effect level than the policy ceiling. |
 
-## Artifact Readers
+## Artifact readers
 
 Execute tools that may return large output handles should declare that contract
 in annotations:
@@ -59,7 +59,7 @@ annotations: {
 If a tool always returns complete inline output, set `inline_result: true`
 instead of declaring a reader.
 
-## Prompt Suppression
+## Prompt suppression
 
 Prompt scans ignore fenced code blocks by default. For historical examples or
 non-binding snippets outside fences, use these comment markers:

@@ -1,4 +1,4 @@
-//! Single, rich descriptor for every builtin known to Harn.
+//! One descriptor for every builtin known to Harn.
 //!
 //! Both the static type checker (this crate) and the runtime VM (`harn-vm`)
 //! consume these signatures: arity, per-parameter types, generic bindings,

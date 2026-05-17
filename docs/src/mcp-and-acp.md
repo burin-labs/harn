@@ -156,7 +156,7 @@ for s in status {
 }
 ```
 
-### Server Cards (MCP v2.1)
+### Server cards (MCP v2.1)
 
 A Server Card is a small JSON document that advertises a server's
 identity, capabilities, and tool catalog **without requiring a
@@ -412,7 +412,7 @@ for registered resource URIs.
 | `tasks/get`, `tasks/result`, `tasks/list`, `tasks/cancel` | Supported for task-augmented orchestrator tool calls |
 | `tools/call` with `params.task` | Supported for tools that advertise optional task execution; rejected with `-32602` for non-taskable tools |
 
-#### Publishing a Server Card
+#### Publishing a server card
 
 Attach a Server Card so clients can discover your server's identity and
 capabilities before connecting:
@@ -514,7 +514,7 @@ are advertised in their upstream locations. Harn-only methods such as
 `session/fork` remain documented extensions instead of being inserted into
 upstream `sessionCapabilities`.
 
-### Session Forking
+### Session forking
 
 `session/fork` promotes Harn's runtime transcript branching to a host-visible
 ACP method. The request shape is:
@@ -553,7 +553,7 @@ hosts can render branch-aware session UIs without scraping text output. The
 forked session gets its own stream; subscriber sinks and in-flight prompt state
 are not copied from the parent.
 
-### Session Modes
+### Session modes
 
 Harn exposes ACP
 [session config options](https://agentclientprotocol.com/protocol/session-config-options)
@@ -653,7 +653,7 @@ ACP sessions and runtime autonomy stay aligned. The conformance case
 `acp_architect_mode_blocks_destructive_writes_in_prompt` locks this behavior
 end-to-end.
 
-### Session Model Pin
+### Session model pin
 
 `session/set_config_option(configId="model")` pins an LLM model selector on
 the session so subsequent `llm_call` invocations without an explicit

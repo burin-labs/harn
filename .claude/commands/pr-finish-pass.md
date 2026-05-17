@@ -4,7 +4,7 @@ The goal is the state a senior reviewer would land without comments. The sweep
 is targeted at the recurring issues this repo accumulates between "the feature
 works" and "the PR is landable" — not a generic code review.
 
-## Phase 0 — Identify the work
+## Phase 0 — identify the work
 
 ```bash
 git status --short
@@ -20,7 +20,7 @@ Always read the full diff before touching anything: `git diff origin/main...HEAD
 In PR mode, also read existing review comments — sometimes the easiest finding
 is one a reviewer already left.
 
-## Phase 1 — Rebase on origin/main (PR mode only)
+## Phase 1 — rebase on origin/main (PR mode only)
 
 ```bash
 git fetch origin main
@@ -39,7 +39,7 @@ Conflict rules in this repo:
 
 Then `git push --force-with-lease`. Never bare `--force`.
 
-## Phase 2 — Drive CI to green (PR mode only)
+## Phase 2 — drive CI to green (PR mode only)
 
 ```bash
 gh pr checks
@@ -68,12 +68,12 @@ silenced asserts. Common categories:
 If a failure is a known-flaky unrelated test, `gh run rerun --failed`. Don't
 silence it.
 
-## Phase 3 — The review sweep
+## Phase 3 — the review sweep
 
 For every category below, fix material findings inline. Note non-material ones
 in your summary so the user can decide.
 
-### 3.1 Correctness / perf / security / privacy / reliability
+### 3.1 correctness / perf / security / privacy / reliability
 
 - Off-by-ones, unhandled `Option`/`Result`, panics on hostile input, integer
   overflow on user-controlled arithmetic.
@@ -89,7 +89,7 @@ in your summary so the user can decide.
 - Provider/network code: timeouts set, retries bounded, backoff applied,
   partial reads handled.
 
-### 3.2 Flaky test patterns
+### 3.2 flaky test patterns
 
 The deflake epic (#1057) banned wall-clock polling from the fast suite.
 `make lint-test-patterns` enforces literal patterns; you also need to catch
@@ -109,7 +109,7 @@ Also flag: tests synchronized only by spawn-sleep-assert (even in allowlisted
 files); wall-clock literals without a named constant; E2E tests sharing
 process-wide globals under parallel execution. Reference: `docs/src/dev/testing.md`.
 
-### 3.3 Sloppy comments — strip aggressively
+### 3.3 sloppy comments — strip aggressively
 
 - **Historical narration:** "previously this used X", "this used to live in
   foo.rs", "removed the old fallback path." Git blame is the historical record.
@@ -127,7 +127,7 @@ process-wide globals under parallel execution. Reference: `docs/src/dev/testing.
 When in doubt: delete it. The bar is "would removing this confuse a future
 reader." If no, it goes.
 
-### 3.4 Cross-crate drift
+### 3.4 cross-crate drift
 
 A change that looks local often leaves another crate stale.
 
@@ -185,7 +185,7 @@ primitive host capability, not the orchestration. This is the trust boundary
 the repo is built on. If the refactor is too big for the current PR, file an
 issue and link it.
 
-### 3.7 Prompt prose → `.harn.prompt`
+### 3.7 prompt prose → `.harn.prompt`
 
 Long prompt strings embedded in Rust (or as inline `.harn` literals) should
 usually live in `.harn.prompt` files rendered via `template.render` /
@@ -201,7 +201,7 @@ Look for:
 Move them to `.harn.prompt`, expose an override hook, and replace the inline
 string with a `render` call.
 
-### 3.8 Overly long files
+### 3.8 overly long files
 
 Files past ~800 lines spanning multiple concerns are a split candidate:
 
@@ -214,7 +214,7 @@ Files past ~800 lines spanning multiple concerns are a split candidate:
 Don't split for the sake of splitting; split when the file no longer fits in
 a single mental model.
 
-### 3.9 Interpreter perf wins
+### 3.9 interpreter perf wins
 
 If the diff touches `crates/harn-vm` execution paths, look for patterns that
 bundle naturally:
@@ -229,7 +229,7 @@ bundle naturally:
 Bundle only when the perf path overlaps the diff. Don't open a "while I'm
 here" rabbit hole that doubles the PR scope.
 
-## Phase 4 — Re-validate
+## Phase 4 — re-validate
 
 ```bash
 make fmt
@@ -247,7 +247,7 @@ cargo run --bin harn -- test conformance --filter <relevant>
 Then push (`--force-with-lease` if you rewrote history, plain push otherwise)
 and let CI re-run.
 
-## Phase 5 — Land
+## Phase 5 — land
 
 ```bash
 gh pr merge --auto

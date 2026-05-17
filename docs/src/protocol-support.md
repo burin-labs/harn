@@ -1,4 +1,4 @@
-# Protocol Support Matrix
+# Protocol support matrix
 
 This page is the quick routing table for Harn's protocol surfaces. The
 canonical task guides remain:

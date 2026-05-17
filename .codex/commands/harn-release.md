@@ -1,4 +1,4 @@
-# Harn Release Command
+# Harn release command
 
 Run the merge-queue-safe Harn release workflow.
 

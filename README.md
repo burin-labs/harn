@@ -3,10 +3,10 @@
 [![CI](https://github.com/burin-labs/harn/actions/workflows/ci.yml/badge.svg)](https://github.com/burin-labs/harn/actions/workflows/ci.yml)
 
 Harn is a programming language and runtime for orchestrating AI agents.
-It is designed to be the orchestration boundary between product code and
-provider/runtime code: products declare workflows, policies, capabilities,
-and UI hooks, while Harn owns transcripts, context assembly, retries,
-tool routing, persistence, replay, and provider normalization.
+It sits between product code and provider/runtime code: products declare
+workflows, policies, capabilities, and UI hooks, while Harn owns transcripts,
+context assembly, retries, tool routing, persistence, replay, and provider
+normalization.
 
 Harn also emits portable `opentrustgraph/v0` trust records for autonomy
 decisions, approval gates, and tier transitions. The public schema and fixtures
@@ -20,7 +20,7 @@ One-line installer (recommended; no Rust toolchain required):
 curl -fsSL https://harnlang.com/install.sh | sh
 ```
 
-Detects OS/CPU, downloads the matching signed binary for the latest
+Detects OS/CPU, downloads the matching signed binary for the current
 [GitHub release](https://github.com/burin-labs/harn/releases),
 verifies it against the release's `SHA256SUMS` manifest, and installs
 `harn`, `harn-dap`, and `harn-lsp` into the first writable directory
@@ -80,10 +80,9 @@ Cloud deploy templates for Render, Fly.io, and Railway live under
 harn orchestrator deploy --provider fly --manifest ./harn.toml --build
 ```
 
-## Quick Start
+## Quick start
 
-The fastest way to see Harn in action — no API keys, no project setup —
-is to run a bundled demo scenario:
+Run a bundled demo first. It needs no API keys or project setup:
 
 ```bash
 harn demo                       # menu of bundled scenarios
@@ -96,7 +95,7 @@ Every demo runs in under 30 seconds against a checked-in LLM tape, so it
 finishes the same way on a laptop with zero credentials as it does in
 CI. Add `--live` to re-run against a configured provider.
 
-Once you've seen something that works, scaffold a project of your own:
+Then scaffold a project of your own:
 
 ```bash
 harn new my-project --template agent
@@ -188,7 +187,7 @@ See [docs/src/stdlib/llm-handlers.md](docs/src/stdlib/llm-handlers.md)
 for the full module catalog (handlers, ensemble, refine, budget,
 defaults, safe, prompts, catalog).
 
-## Core Capabilities
+## Core capabilities
 
 - Typed workflow graphs via `workflow_graph(...)` and `workflow_execute(...)`
   with explicit nodes, edges, validation, policy attachment, map/join style
@@ -214,7 +213,7 @@ defaults, safe, prompts, catalog).
 - Delegated worker lifecycle builtins via `spawn_agent(...)`, `send_input(...)`,
   `resume_agent(...)`, `wait_agent(...)`, `close_agent(...)`, and `list_agents()`,
   with child run lineage, persisted worker snapshots, and host-visible worker
-  lifecycle events. Worker handles now retain immutable original `request`
+  lifecycle events. Worker handles retain immutable original `request`
   metadata plus normalized `provenance` so parent orchestration can recover
   research questions, action items, workflow stages, and verification steps
   without positional rebinding.
@@ -267,11 +266,11 @@ defaults, safe, prompts, catalog).
 - Isolated execution substrate via directory-scoped command builtins
   (`exec_at`, `shell_at`) plus the `std/worktree` module for git worktree
   creation, status, diff, shell execution, and cleanup. Worker execution
-  profiles can now pin delegated runs to a cwd, env overlay, or managed
+  profiles can pin delegated runs to a cwd, env overlay, or managed
   worktree so background execution is reproducible instead of ambient-cwd
   dependent. Subprocesses spawned under an active capability ceiling
-  run inside a per-platform OS sandbox by default — Linux Landlock +
-  seccomp, macOS sandbox-exec, Windows AppContainer + Job Object —
+  run inside a per-platform OS sandbox by default: Linux Landlock +
+  seccomp, macOS sandbox-exec, or Windows AppContainer + Job Object,
   selected via `CapabilityPolicy::sandbox_profile` and documented in
   [docs/src/sandboxing.md](docs/src/sandboxing.md). Pipelines that
   spawn untrusted code opt into `sandbox_profile: "os_hardened"` to
@@ -280,12 +279,12 @@ defaults, safe, prompts, catalog).
   best-effort.
 - Stronger preflight behavior via `harn check`: import graph resolution,
   literal template/render path validation, import symbol collision detection,
-  and host capability contract validation all fail before runtime. Starting in
-  v0.7.12, `harn check` / `harn run` / the LSP share one recursive module
-  graph that resolves every `import` (including `std/*` embeds) and rejects
-  calls to names that are not builtins, local declarations, struct
-  constructors, callable variables, or imported symbols — so stale or typo'd
-  references surface before the VM starts. `render(...)` resolves relative to
+  and host capability contract validation all fail before runtime.
+  `harn check` / `harn run` / the LSP share one recursive module graph that
+  resolves every `import` (including `std/*` embeds) and rejects calls to names
+  that are not builtins, local declarations, struct constructors, callable
+  variables, or imported symbols, so stale or typo'd references surface before
+  the VM starts. `render(...)` resolves relative to
   the module source tree (including inside imported modules) instead of the
   ambient process cwd. Literal delegated execution roots,
   `exec_at(...)` / `shell_at(...)` directories, and unknown
@@ -297,7 +296,7 @@ defaults, safe, prompts, catalog).
   `mock_host_result(...)`, `mock_host_error(...)`, and
   `assert_host_called(...)` for ordinary Harn tests.
 - Configurable LLM mock responses via `llm_mock(...)`, `llm_mock_calls()`,
-  and `llm_mock_clear()` — queue specific text, tool calls, or mixed
+  and `llm_mock_clear()`: queue specific text, tool calls, or mixed
   responses for the mock provider. Supports FIFO queuing and glob-pattern
   matching against prompts.
 - Eval suite manifests and portable eval packs via `eval_pack { ... }`,
@@ -333,9 +332,9 @@ defaults, safe, prompts, catalog).
   bearer tokens for standalone CLI use, and automatic token reuse for HTTP MCP
   servers declared in `harn.toml`.
 - Runtime semantic cleanup for older surfaces: repeated `catch e { ... }`
-  bindings now work within the same enclosing block, and float division keeps
+  bindings work within the same enclosing block, and float division keeps
   IEEE `NaN`/`Infinity` behavior instead of raising runtime errors.
-- Formatter width handling now wraps oversized comma-separated forms
+- Formatter width handling wraps oversized comma-separated forms
   consistently across calls, list literals, dict literals, enum payloads, and
   struct-style construction instead of leaving long single-line output intact.
 - Tool lifecycle hooks via `register_tool_hook(...)`: pre-execution deny/modify
@@ -367,9 +366,9 @@ defaults, safe, prompts, catalog).
 - Generic call-site type checking is stricter: `where`-clause interface
   violations are errors, repeated generic parameters must bind to one concrete
   type, and container bindings like `list<T>` propagate their element type.
-- Workflow map stages can now execute in parallel with `"all"`, `"first"`, or
+- Workflow map stages can execute in parallel with `"all"`, `"first"`, or
   `"quorum"` join strategies plus `max_concurrent` throttling.
-- LSP completions now surface inferred shape fields, struct members, and enum
+- LSP completions surface inferred shape fields, struct members, and enum
   payload fields on dot access instead of defaulting to dict methods.
 - Adaptive context assembly with deduplication and microcompaction via
   `select_artifacts_adaptive(...)`, plus `estimate_tokens(...)` and
@@ -386,7 +385,7 @@ defaults, safe, prompts, catalog).
 - String method aliases for case normalization: `.lower()`, `.upper()`,
   `.to_lower()`, and `.to_upper()`.
 
-## Trust Boundary
+## Trust boundary
 
 Harn owns orchestration and provenance. Hosts own concrete mutation UX.
 
@@ -398,12 +397,12 @@ Harn owns orchestration and provenance. Hosts own concrete mutation UX.
 For autonomous or background edits, the recommended default is worktree-backed
 execution plus explicit host approval for destructive operations.
 
-## Release Workflow
+## Release workflow
 
 Maintainer release commands and gates live in
 [Maintainer release workflow](docs/src/maintainer-release.md).
 
-## Local Development
+## Local development
 
 For a local contributor setup:
 
@@ -422,14 +421,14 @@ worktrees do not fight over one shared Cargo target. `make portal` launches the
 built-in observability UI for persisted runs under `.harn-runs/`.
 
 The repo-root portal scripts (`npm run portal:lint`, `portal:test`,
-`portal:build`, and `portal:dev`) now self-bootstrap
+`portal:build`, and `portal:dev`) self-bootstrap
 `crates/harn-cli/portal/node_modules` from the checked-in lockfile when those
 dependencies are missing, and the git hooks call the same bootstrap path before
 portal lint runs.
 
-## Why This Matters
+## Why this matters
 
-Without a runtime boundary like Harn, application code tends to accumulate:
+Without a runtime boundary like Harn, application code often accumulates:
 
 - provider-specific message/response parsing
 - transcript compaction and summarization logic
@@ -438,15 +437,14 @@ Without a runtime boundary like Harn, application code tends to accumulate:
 - provenance, replay, and eval fixtures
 - host/editor queue semantics
 
-Harn moves those concerns into a typed runtime layer so a host app can stay
-focused on:
+Harn keeps those concerns in a typed runtime layer so a host app can focus on:
 
 - capabilities it wants to expose
 - top-level policy ceilings
 - workflow templates and product defaults
 - UI/session integration
 
-## Workflow Runtime Example
+## Workflow runtime example
 
 ```harn
 let graph = workflow_graph({
@@ -507,9 +505,9 @@ println(run.run.stages)
 `verify` nodes can either run an explicit command as shown above or use an
 agent/LLM mode when verification should stay provider-driven.
 
-## Transcript And Artifact Model
+## Transcript and artifact model
 
-`llm_call(...)` and `agent_loop(...)` now return a canonical schema that
+`llm_call(...)` and `agent_loop(...)` return a canonical schema that
 separates human-visible output from internal execution state:
 
 - `visible_text`: safe assistant-visible text
@@ -538,7 +536,7 @@ let focused = artifact_select([note], {
 })
 ```
 
-## Host Integration
+## Host integration
 
 Run Harn as an ACP backend:
 

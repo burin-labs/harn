@@ -23,7 +23,7 @@ landable."
 
 If there is no current branch worth polishing — say so and stop.
 
-## Phase 0 — Identify the work
+## Phase 0 — identify the work
 
 Determine the scope before touching anything:
 
@@ -48,7 +48,7 @@ For PRs in PR mode, also read `gh pr view --json title,body,comments`
 and skim review comments — sometimes the easiest finding is one a
 reviewer already left.
 
-## Phase 1 — Rebase on origin/main (PR mode only)
+## Phase 1 — rebase on origin/main (PR mode only)
 
 ```bash
 git fetch origin main
@@ -73,7 +73,7 @@ git push --force-with-lease
 
 Never `--force` without `--with-lease` — co-authors may have pushed.
 
-## Phase 2 — Drive CI to green (PR mode only)
+## Phase 2 — drive CI to green (PR mode only)
 
 ```bash
 gh pr checks
@@ -114,14 +114,14 @@ batching every guess at once.
 If a failure is a known-flaky test unrelated to the diff, re-run the
 specific job (`gh run rerun <run-id> --failed`). Do not silence it.
 
-## Phase 3 — The review sweep
+## Phase 3 — the review sweep
 
 This is the substance of the skill. Walk the diff and look for each of
 the following classes of finding. Fix every material one inline; note
 non-material findings in your end-of-turn summary so the user can
 decide whether to address them.
 
-### 3.1 Correctness, performance, security, privacy, reliability
+### 3.1 correctness, performance, security, privacy, reliability
 
 - Off-by-ones, unhandled `Option`/`Result`, panics on hostile input,
   integer overflow on user-controlled arithmetic.
@@ -138,7 +138,7 @@ decide whether to address them.
 - Provider/network code paths: timeouts set, retries bounded, backoff
   applied, partial reads handled.
 
-### 3.2 Flaky test patterns
+### 3.2 flaky test patterns
 
 The deflake epic ([#1057]) removed wall-clock polling from the fast
 suite. `make lint-test-patterns` enforces the bans, but it only catches
@@ -168,7 +168,7 @@ Also flag:
 
 Reference: `docs/src/dev/testing.md` has the canonical patterns.
 
-### 3.3 Sloppy comments
+### 3.3 sloppy comments
 
 Strip every comment that a senior engineer would not have written:
 
@@ -193,7 +193,7 @@ Strip every comment that a senior engineer would not have written:
 When in doubt: delete it. The bar is "would removing this comment
 confuse a future reader." If the answer is no, it goes.
 
-### 3.4 Cross-crate drift
+### 3.4 cross-crate drift
 
 Changes that look local often silently leave another crate stale. Walk
 the checklist for every public-surface change:
@@ -263,7 +263,7 @@ is the trust boundary the repo is built on.
 If a refactor is too large for the current PR, file an issue with the
 specific surface to migrate and link it from the PR description.
 
-### 3.7 Prompt prose that belongs in `.harn.prompt` files
+### 3.7 prompt prose that belongs in `.harn.prompt` files
 
 Long prompt strings embedded in Rust (or in `.harn` scripts as inline
 literals) should usually live in `.harn.prompt` files and be rendered
@@ -283,7 +283,7 @@ Look for:
 Move them to `.harn.prompt` files with a clear name, expose an
 override hook, and replace the inline string with a `render` call.
 
-### 3.8 Overly long files
+### 3.8 overly long files
 
 Files past ~800 lines that span multiple concerns are a refactor
 target. Split candidates:
@@ -299,7 +299,7 @@ target. Split candidates:
 Don't split for the sake of splitting; split when the file no longer
 fits in a single mental model.
 
-### 3.9 Interpreter perf wins
+### 3.9 interpreter perf wins
 
 If the diff touches `crates/harn-vm` execution paths, look for
 patterns that bundle naturally:
@@ -315,7 +315,7 @@ patterns that bundle naturally:
 Bundle these only when they touch code already in the diff. Don't open
 a "while I'm here" perf rabbit hole that doubles the PR scope.
 
-## Phase 4 — Re-validate
+## Phase 4 — re-validate
 
 After making fixes:
 
@@ -335,7 +335,7 @@ cargo run --bin harn -- test conformance --filter <relevant>
 Then push (`git push --force-with-lease` if you rewrote history
 during the sweep, plain `git push` otherwise) and let CI run.
 
-## Phase 5 — Land
+## Phase 5 — land
 
 Once CI is green and the diff looks landable:
 

@@ -1,4 +1,4 @@
-# Agent State
+# Agent state
 
 `std/agent_state` is Harn's durable, session-scoped scratch space for
 agent orchestration. It gives a caller-owned root directory plus a

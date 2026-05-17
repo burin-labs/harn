@@ -17,9 +17,9 @@ These templates are safe by default:
 - model routing defaults to a cheap model and escalates only when needed
 - secrets live in [secrets.example.env](./secrets.example.env) as placeholders
 
-## What works today
+## Current behavior
 
-Persona manifest v1 is now inspection, validation, and durable runtime control.
+Persona manifest v1 supports inspection, validation, and durable runtime control.
 The CLI can record schedule wakes, trigger wakes, leases, pause/resume/disable
 controls, budget receipts, and status JSON for these entries. The checked-in
 workflows, fixtures, and evals remain starter artifacts for teams to fork, not

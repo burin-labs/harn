@@ -1,4 +1,4 @@
-# Burin Mini
+# Burin mini
 
 Throwaway playground experiment for the DFS sub-agent research-queue architecture
 tracked by `burin-code#144`.
@@ -10,7 +10,7 @@ This version stays deliberately small:
 - one tiny TypeScript auth demo workspace under `workspace/`
 - deterministic JSONL fixtures for the 3 canonical task shapes
 
-## Canonical Tasks
+## Canonical tasks
 
 1. `Explain this repo to me in simple terms`
 2. `Comment what this file does`
@@ -30,7 +30,7 @@ harn playground \
   --task "Explain this repo to me in simple terms"
 ```
 
-## Deterministic Fixture Runs
+## Deterministic fixture runs
 
 ```bash
 harn playground \
@@ -52,7 +52,7 @@ harn playground \
   --llm-mock experiments/burin-mini/fixtures/rate-limit.jsonl
 ```
 
-## Live Ollama Runs
+## Live Ollama runs
 
 `harn playground --llm ollama:<model>` sets the generator model. The semantic
 evaluator defaults to the same provider/model unless you override
@@ -101,7 +101,7 @@ Treat the raw transcript files as chronology/debugging data instead:
 Set `BURIN_MINI_SEMANTIC_EVAL_MODE=heuristic` when you want a deterministic
 local harness grade without spending an evaluator model call.
 
-## Reasoning Matrix
+## Reasoning matrix
 
 `run_reasoning_matrix.sh` runs the live suite across local and remote model
 backends while varying Harn's provider-aware reasoning policy:

@@ -45,7 +45,7 @@ JWT/JWKS is the default. The connector verifies:
 
 JWKS entries are cached for one day and refreshed after expiry.
 
-## Event Shape
+## Event shape
 
 The connector accepts A2A stream-response push payloads:
 
@@ -73,7 +73,7 @@ Handlers receive `provider_payload` with:
 - `kind`
 - `raw`
 
-## A2A Dispatch Registration
+## A2A dispatch registration
 
 When `HARN_A2A_PUSH_URL` is set, outbound `a2a://...` dispatches include
 and register a `pushNotificationConfig` for pending tasks. Set

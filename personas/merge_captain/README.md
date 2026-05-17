@@ -1,4 +1,4 @@
-# Merge Captain persona
+# Merge captain persona
 
 Merge Captain is a Harn-native runbook for owning pull-request queues
 across `harn`, `harn-cloud`, and `burin-code` (or any other repo whose

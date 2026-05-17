@@ -2,7 +2,22 @@
 
 This repository implements Harn, a programming language and runtime for orchestrating AI agents.
 
-## Dev Environment Tips
+## For agents writing Harn scripts
+
+Before writing or editing `.harn` code, read the one-page Harn quickref. It covers syntax,
+concurrency primitives (`parallel each` / `parallel settle` with `max_concurrent`), the
+`llm_call` options table (including `schema_retries` + `provider: "auto"`), and the gotchas
+that repeatedly trip up first-time scripters.
+
+- In-repo: `docs/llm/harn-quickref.md`
+- Trigger/orchestrator add-on: `docs/llm/harn-triggers-quickref.md`
+- Canonical URL: <https://harnlang.com/docs/llm/harn-quickref.html>
+- Trigger/orchestrator URL: <https://harnlang.com/docs/llm/harn-triggers-quickref.html>
+
+Claude Code users get these autoloaded via the `harn-scripting` skill at
+`.claude/skills/harn-scripting/SKILL.md`.
+
+## Dev environment tips
 
 - Run `make setup` on a fresh clone. It configures `.githooks/`, installs `cargo-nextest`,
   `sccache`, and `actionlint` when their toolchains are available, installs repo-local Node
@@ -26,7 +41,7 @@ This repository implements Harn, a programming language and runtime for orchestr
   portal, generated-file drift checks, and affected Harn format/lint checks. Set
   `HARN_PREPUSH_FULL_TESTS=1` for the broader `make test` gate before pushing.
 
-## Repository Map
+## Repository map
 
 - `crates/harn-lexer`: tokenizer and span tracking.
 - `crates/harn-parser`: AST, parser, and type checker.
@@ -46,7 +61,21 @@ This repository implements Harn, a programming language and runtime for orchestr
 - `tree-sitter-harn/`: tree-sitter grammar and tests.
 - `editors/vscode/`: VS Code extension.
 
-## Core Commands
+## Prompt template engine
+
+- The `.harn.prompt` / `.prompt` template language used by `render(...)`,
+  `render_prompt(...)`, and the `template.render` host capability lives in one file:
+  `crates/harn-vm/src/stdlib/template.rs`. Do not add a second parser or evaluator; both
+  host-call and script-call paths route through `render_template_result` in that module and
+  must stay behavior-identical.
+- Full reference: `docs/src/prompt-templating.md`. Condensed quickref: the "Prompt templates"
+  section of `docs/llm/harn-quickref.md`.
+- Back-compat contract: pre-v2 `{{name}}` silent passthrough on a missing bare identifier is
+  preserved. Existing templates render byte-for-byte identically. Only the new constructs
+  (`if`/`elif`/`else`, `for`, `include`, filters, `{{# #}}`, `{{ raw }}`, `{{- -}}`) raise
+  parse errors.
+
+## Core commands
 
 - Build: `cargo build`
 - Run a Harn program: `cargo run --bin harn -- run examples/hello.harn`
@@ -63,7 +92,7 @@ This repository implements Harn, a programming language and runtime for orchestr
 - Portal server: `cargo run --bin harn -- portal`
 - Portal full dev loop: `npm run portal:dev`
 
-## Testing Instructions
+## Testing instructions
 
 - Before merging, prefer `make all`. It runs formatting, clippy, Rust tests, conformance, markdown
   lint, Harn lint/format checks, highlight drift checks, and docs snippet parsing.
@@ -78,8 +107,13 @@ This repository implements Harn, a programming language and runtime for orchestr
   `npm run portal:build`.
 - If you change the VS Code extension, run `(cd editors/vscode && npm run compile)`.
 - If you change tree-sitter grammar or queries, run `(cd tree-sitter-harn && npm test)`.
+- Do not add `std::thread::sleep`, `tokio::time::sleep`, `Instant::now()` polling loops,
+  `SystemTime::now()`, or short `recv_timeout` calls to test files. These patterns are banned
+  by `make lint-test-patterns`. Use `tokio::time::pause()`/`advance()`, `EventLog::subscribe()`,
+  or `OrchestratorHarness` instead. See `docs/src/dev/testing.md` for approved patterns and the
+  opt-out procedure.
 
-## Generated Files And Sync Rules
+## Generated files and sync rules
 
 - Edit `spec/HARN_SPEC.md`, not `docs/src/language-spec.md`; regenerate with
   `make sync-language-spec` (which runs `scripts/sync_language_spec.harn`).
@@ -94,7 +128,7 @@ This repository implements Harn, a programming language and runtime for orchestr
 - `docs/dist/`, `.harn-runs/`, `.harn/`, `.harn/receipts/`, `.claude/`, `.burin/`, `target/`,
   and `node_modules/` are generated or local-only paths.
 
-## Change Alignment Rules
+## Change alignment rules
 
 - Syntax changes usually require coordinated updates to the lexer, parser, spec, tree-sitter, and
   conformance tests.
@@ -105,15 +139,20 @@ This repository implements Harn, a programming language and runtime for orchestr
 - When public CLI commands, builtins, or host capability behavior changes, update the user-facing docs
   and help text along with the implementation.
 - Conformance tests are the main executable spec for user-visible language and runtime behavior.
+- Changes to `.harn.prompt` template syntax require coordinated updates to
+  `crates/harn-vm/src/stdlib/template.rs`, `docs/src/prompt-templating.md`,
+  `docs/llm/harn-quickref.md`, the VS Code grammar at
+  `editors/vscode/syntaxes/harn-prompt.tmLanguage.json`, conformance fixtures under
+  `conformance/tests/template_*`, and `CHANGELOG.md`.
 
-## Trust Boundary
+## Trust boundary
 
 - Harn owns orchestration, transcript lifecycle, replay/eval, delegated worker lineage, and mutation
   session audit metadata.
 - Hosts own approval UX, concrete file mutations, and undo/redo semantics.
 - For autonomous or background edits, prefer worktree-backed execution over ambient cwd state.
 
-## Release Workflow
+## Release workflow
 
 - Open version-bump PR after release content lands: `./scripts/release_ship.sh --bump patch`
 - Finalize after bump PR lands: `./scripts/release_ship.sh --finalize`

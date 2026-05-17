@@ -1,4 +1,4 @@
-# ADR 0002: Compile-Time Capability Invariants
+# ADR 0002: compile-time capability invariants
 
 ## Status
 

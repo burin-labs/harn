@@ -161,7 +161,7 @@ Recovery reuses the normal `trigger_replay(...)` path, so replayed
 envelopes still flow through the dispatcher's retry policy and DLQ
 handling instead of using a special bypass path.
 
-## Replay Oracle
+## Replay oracle
 
 Use `replay-oracle` to validate checked-in end-to-end replay determinism
 fixtures:
@@ -194,7 +194,7 @@ benchmark artifacts rather than only oracle pass/fail output. The benchmark
 command reuses the same trace schema and adds replay-fidelity,
 permission-preservation, tool-drift, transcript-drift, and receipt metrics.
 
-## HTTP Listener
+## HTTP listener
 
 The orchestrator listener assembles routes from `[[triggers]]` entries
 with `kind = "webhook"` or `kind = "a2a-push"`.

@@ -65,7 +65,7 @@ Use `llm_completion(prefix, suffix?, system?, options?)` for text continuation
 and fill-in-the-middle generation. It shares provider, model, budget, and usage
 semantics with `llm_call`.
 
-## Tool Vault
+## Tool vault
 
 Tool Vault is Harn's progressive-tool-disclosure primitive. Tools marked
 `defer_loading: true` stay out of the prompt-visible tool surface until native

@@ -41,7 +41,7 @@ There is no NDJSON, SSE, or extra wrapper envelope.
 The server responds with one JSON-RPC object in one text frame. Binary frames
 are rejected with JSON-RPC `Invalid Request`.
 
-## Harn-Native Ingress
+## Harn-native ingress
 
 Harnesses that need to host ACP-style browser or agent streams can expose an
 upgrade route directly from Harn:
