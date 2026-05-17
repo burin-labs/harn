@@ -8,9 +8,9 @@
 use crate::llm::api::{DeltaSender, LlmRequestPayload, LlmResult};
 use crate::llm::provider::{LlmProvider, LlmProviderChat};
 use crate::llm::providers::common::{
-    apply_provider_overrides, maybe_emit_delta, percent_encode_path_segment, request_text_content,
-    vm_err,
+    apply_provider_overrides, maybe_emit_delta, request_text_content, vm_err,
 };
+use crate::url_encoding::percent_encode_component;
 use crate::value::VmError;
 
 pub(crate) struct VertexProvider;
@@ -131,9 +131,9 @@ impl VertexProvider {
         } else {
             format!(
                 "projects/{}/locations/{}/publishers/google/models/{}",
-                percent_encode_path_segment(&project),
-                percent_encode_path_segment(&location),
-                percent_encode_path_segment(&request.model)
+                percent_encode_component(&project),
+                percent_encode_component(&location),
+                percent_encode_component(&request.model)
             )
         };
         Ok(format!("{base_url}/{model}:generateContent"))

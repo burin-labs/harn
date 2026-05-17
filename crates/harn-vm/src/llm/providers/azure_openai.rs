@@ -6,9 +6,8 @@
 
 use crate::llm::api::{DeltaSender, LlmRequestPayload, LlmResult};
 use crate::llm::provider::{LlmProvider, LlmProviderChat};
-use crate::llm::providers::common::{
-    apply_provider_overrides, maybe_emit_delta, percent_encode_path_segment, vm_err,
-};
+use crate::llm::providers::common::{apply_provider_overrides, maybe_emit_delta, vm_err};
+use crate::url_encoding::percent_encode_component;
 use crate::value::VmError;
 
 use super::openai_compat::OpenAiCompatibleProvider;
@@ -60,7 +59,7 @@ impl AzureOpenAiProvider {
             .unwrap_or_else(|| DEFAULT_API_VERSION.to_string());
         Ok(format!(
             "{base_url}/openai/deployments/{}/chat/completions?api-version={api_version}",
-            percent_encode_path_segment(deployment.trim())
+            percent_encode_component(deployment.trim())
         ))
     }
 

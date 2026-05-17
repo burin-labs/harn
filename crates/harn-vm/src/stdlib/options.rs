@@ -1,27 +1,22 @@
 //! Shared option-bag and argument-extraction helpers for stdlib builtins.
 //!
-//! Before this module landed, every option-bag-accepting builtin had its own
-//! hand-rolled chain of `dict.get().map().and_then().ok_or_else()` plus its
-//! own near-duplicate `optional_string` / `required_string_arg` /
-//! `opts_dict_arg` helpers. Several modules duplicated the same logic under
-//! different names with subtly different error shapes (some emitted
-//! [`VmError::Runtime`], some [`VmError::Thrown`]). This module is the single
-//! canonical home for that logic; builtins pick an [`ErrorKind`] based on
-//! whether their failures should bubble out or be catchable from Harn.
+//! Builtins choose an [`ErrorKind`] per call: [`ErrorKind::Runtime`] for
+//! failures that should bubble out as runtime errors, [`ErrorKind::Thrown`]
+//! for failures that user code can `try` / `recover`.
 //!
 //! Conventions:
 //! - Function-name strings are `&'static str` so error messages can be
 //!   formatted without allocations on the success path.
 //! - Optional fields treat both `Nil` and "missing" as None.
-//! - String getters trim whitespace and treat trimmed-empty strings as None
-//!   (matching the pre-existing helpers).
-//! - [`OptionsParser`] tracks consumed keys so callsites with a closed schema
-//!   can call [`OptionsParser::finish_strict`] to reject unknown options.
+//! - String getters trim whitespace and treat trimmed-empty strings as None.
+//! - [`OptionsParser`] tracks consumed keys; call
+//!   [`OptionsParser::finish_strict`] on closed-schema option bags to reject
+//!   unknown options.
 //!
-//! Some helpers below are unused by today's callsites and intentionally kept
-//! for adoption by future stdlib additions (option-bag parsing is the most
-//! common new-builtin shape). `#![allow(dead_code)]` keeps the API surface
-//! intact without per-item attributes.
+//! Several helpers below have no callers today but are kept available for
+//! future stdlib additions — option-bag parsing is the most common
+//! new-builtin shape. `#![allow(dead_code)]` keeps the API surface intact
+//! without per-item attributes.
 #![allow(dead_code)]
 
 use std::collections::{BTreeMap, BTreeSet};

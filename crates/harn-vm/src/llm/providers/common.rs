@@ -36,19 +36,6 @@ pub(super) fn request_text_content(message: &serde_json::Value) -> String {
     text
 }
 
-pub(super) fn percent_encode_path_segment(input: &str) -> String {
-    let mut out = String::with_capacity(input.len());
-    for byte in input.bytes() {
-        match byte {
-            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'_' | b'.' | b'~' => {
-                out.push(byte as char)
-            }
-            _ => out.push_str(&format!("%{byte:02X}")),
-        }
-    }
-    out
-}
-
 pub(super) fn empty_result(provider: &str, model: &str) -> LlmResult {
     LlmResult {
         text: String::new(),
@@ -77,5 +64,64 @@ pub(super) fn apply_provider_overrides(
     };
     for (key, value) in obj {
         body[key] = value.clone();
+    }
+}
+
+/// Parse a `(major, minor)` generation pair from the tail of a model ID after
+/// the family needle. Accepts both dotted forms (`4.7`, `5.4-preview`) and
+/// dashed forms (`4-7`, `5-4-preview`, `4-20251001`).
+///
+/// Trailing chunks that look like date stamps (≥ 1000) are not treated as a
+/// minor version — `claude-haiku-4-5-20251001` parses as `(4, 5)`,
+/// `claude-opus-4-20251001` parses as `(4, 0)`. If no integer major can be
+/// parsed at the start of `tail`, returns `None`.
+pub(super) fn parse_major_minor_tail(tail: &str) -> Option<(u32, u32)> {
+    if let Some((major, rest)) = tail.split_once('.') {
+        if let Ok(major) = major.parse::<u32>() {
+            let minor_str: String = rest.chars().take_while(|c| c.is_ascii_digit()).collect();
+            if let Ok(minor) = minor_str.parse::<u32>() {
+                return Some((major, minor));
+            }
+        }
+    }
+    let mut parts = tail.split('-');
+    let major = parts.next()?.parse::<u32>().ok()?;
+    let Some(minor_chunk) = parts.next() else {
+        return Some((major, 0));
+    };
+    let Ok(minor) = minor_chunk.parse::<u32>() else {
+        return Some((major, 0));
+    };
+    Some((major, if minor >= 1000 { 0 } else { minor }))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn parse_major_minor_tail_dotted() {
+        assert_eq!(parse_major_minor_tail("4.7"), Some((4, 7)));
+        assert_eq!(parse_major_minor_tail("5.4-preview"), Some((5, 4)));
+        assert_eq!(parse_major_minor_tail("5.4.1-turbo"), Some((5, 4)));
+    }
+
+    #[test]
+    fn parse_major_minor_tail_dashed() {
+        assert_eq!(parse_major_minor_tail("4-7"), Some((4, 7)));
+        assert_eq!(parse_major_minor_tail("5-4-preview"), Some((5, 4)));
+        assert_eq!(parse_major_minor_tail("5"), Some((5, 0)));
+    }
+
+    #[test]
+    fn parse_major_minor_tail_date_chunk_is_zero_minor() {
+        assert_eq!(parse_major_minor_tail("4-20251001"), Some((4, 0)));
+        assert_eq!(parse_major_minor_tail("5-20260115"), Some((5, 0)));
+    }
+
+    #[test]
+    fn parse_major_minor_tail_rejects_non_numeric_major() {
+        assert!(parse_major_minor_tail("preview").is_none());
+        assert!(parse_major_minor_tail("").is_none());
     }
 }

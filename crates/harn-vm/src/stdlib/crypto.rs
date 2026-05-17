@@ -5,6 +5,7 @@ use jsonwebtoken::{Algorithm, EncodingKey, Header};
 use url::Url;
 use zeroize::Zeroizing;
 
+use crate::url_encoding::percent_encode_component;
 use crate::value::{VmError, VmValue};
 use crate::vm::Vm;
 
@@ -255,19 +256,6 @@ fn parse_query_pairs(raw: &str) -> Vec<(String, String)> {
     url::form_urlencoded::parse(raw.as_bytes())
         .map(|(key, value)| (key.into_owned(), value.into_owned()))
         .collect()
-}
-
-fn percent_encode_component(input: &str) -> String {
-    let mut out = String::new();
-    for byte in input.as_bytes() {
-        match *byte {
-            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'_' | b'.' | b'~' => {
-                out.push(*byte as char);
-            }
-            _ => out.push_str(&format!("%{byte:02X}")),
-        }
-    }
-    out
 }
 
 fn percent_encode_path(input: &str) -> String {

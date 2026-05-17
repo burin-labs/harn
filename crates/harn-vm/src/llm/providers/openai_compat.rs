@@ -4,6 +4,7 @@
 
 use crate::llm::api::{DeltaSender, LlmRequestPayload, LlmResult, ThinkingConfig};
 use crate::llm::provider::{LlmProvider, LlmProviderChat};
+use crate::llm::providers::common::parse_major_minor_tail;
 use crate::value::VmError;
 
 /// Parse the (major, minor) version out of a GPT model ID. Handles dotted
@@ -15,38 +16,12 @@ use crate::value::VmError;
 /// Returns `None` for non-GPT shapes (`claude-opus-4-7`, `llama-3.1`, …).
 pub(crate) fn gpt_generation(model: &str) -> Option<(u32, u32)> {
     let lower = model.to_lowercase();
-    // Strip any `namespace/` prefix (OpenRouter, Azure, vertex).
     let stripped = match lower.rsplit_once('/') {
         Some((_, tail)) => tail,
         None => lower.as_str(),
     };
-    let needle = "gpt-";
-    let idx = stripped.find(needle)?;
-    let tail = &stripped[idx + needle.len()..];
-    // Dotted: "5.4" / "5.4-preview" / "5.4-turbo".
-    if let Some((major, rest)) = tail.split_once('.') {
-        if let Ok(major) = major.parse::<u32>() {
-            let minor_str: String = rest.chars().take_while(|c| c.is_ascii_digit()).collect();
-            if let Ok(minor) = minor_str.parse::<u32>() {
-                return Some((major, minor));
-            }
-        }
-    }
-    // Dashed: "5-4" / "5-4-preview" / "5" (minor=0).
-    let mut parts = tail.split('-');
-    if let Some(major_str) = parts.next() {
-        if let Ok(major) = major_str.parse::<u32>() {
-            if let Some(minor_str) = parts.next() {
-                if let Ok(minor) = minor_str.parse::<u32>() {
-                    // Dates ≥ 1000 are stamps, not minor versions.
-                    let minor = if minor >= 1000 { 0 } else { minor };
-                    return Some((major, minor));
-                }
-            }
-            return Some((major, 0));
-        }
-    }
-    None
+    let idx = stripped.find("gpt-")?;
+    parse_major_minor_tail(&stripped[idx + "gpt-".len()..])
 }
 
 /// True for GPT models that expose OpenAI's Responses-API `tool_search` meta-tool
