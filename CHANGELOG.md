@@ -82,6 +82,16 @@ condensed series summaries instead of full per-patch history.
   `telemetry_sink` → `telemetry` to take the new config shape
   directly. Schema reference: `docs/src/observability/tool-call-spans.md`.
 
+### Removed
+
+- **`prefer_prefill_done` model field.** Dropped the vestigial flag from
+  `ModelDef`, the `model_info(...)` builtin dict, the generated provider
+  catalog (Rust struct + JSON schema + JSON / TS / Swift artifacts), and
+  the two `providers.toml` rows (`gemma-4-e2b-it`, `gemma-4-e4b-it`)
+  that set it. The flag's only consumer in burin-code now gates on the
+  per-model `supports_assistant_prefill` capability added in #1665
+  (burin-labs/burin-code#787), so the field carried no behavior.
+
 ## v0.8.21
 
 ### Added

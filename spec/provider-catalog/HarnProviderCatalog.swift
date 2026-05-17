@@ -115,7 +115,6 @@ public struct HarnCatalogModel: Codable, Sendable, Equatable {
     public let contextWindow: Int
     public let runtimeContextWindow: Int?
     public let streamTimeout: Double?
-    public let preferPrefillDone: Bool?
     public let modalities: HarnModelModalities
     public let toolSupport: HarnModelToolSupport
     public let structuredOutput: String
@@ -135,7 +134,6 @@ public struct HarnCatalogModel: Codable, Sendable, Equatable {
         case contextWindow = "context_window"
         case runtimeContextWindow = "runtime_context_window"
         case streamTimeout = "stream_timeout"
-        case preferPrefillDone = "prefer_prefill_done"
         case modalities
         case toolSupport = "tool_support"
         case structuredOutput = "structured_output"
@@ -2198,7 +2196,6 @@ public let harnProviderCatalogJSON = #"""
       ],
       "context_window": 131072,
       "stream_timeout": 300.0,
-      "prefer_prefill_done": true,
       "modalities": {
         "input": [
           "text"
@@ -2253,7 +2250,6 @@ public let harnProviderCatalogJSON = #"""
       ],
       "context_window": 131072,
       "stream_timeout": 300.0,
-      "prefer_prefill_done": true,
       "modalities": {
         "input": [
           "text"

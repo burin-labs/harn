@@ -223,9 +223,6 @@
           "minLength": 1,
           "type": "string"
         },
-        "prefer_prefill_done": {
-          "type": "boolean"
-        },
         "pricing": {
           "$ref": "#/$defs/pricing"
         },

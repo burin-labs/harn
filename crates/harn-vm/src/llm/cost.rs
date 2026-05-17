@@ -984,7 +984,6 @@ mod tests {
                 deprecated: false,
                 deprecation_note: None,
                 quality_tags: Vec::new(),
-                prefer_prefill_done: None,
             },
         );
         crate::llm_config::set_user_overrides(Some(overlay));

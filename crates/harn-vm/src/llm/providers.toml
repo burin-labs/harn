@@ -994,9 +994,7 @@ context_window = 262144
 stream_timeout = 900.0
 capabilities = ["tools", "vision", "streaming", "thinking"]
 
-# Local OpenAI-compatible servers (vLLM / bring-your-own). The
-# `prefer_prefill_done` opts a small model into the issue #41 brevity
-# nudge — keep it on for the Gemma 4 E2B / E4B sizes that benefit most.
+# Local OpenAI-compatible servers (vLLM / bring-your-own).
 
 [models."gemma-4-e2b-it"]
 name = "Gemma 4 E2B (local)"
@@ -1004,7 +1002,6 @@ provider = "local"
 context_window = 131072
 stream_timeout = 300.0
 capabilities = ["streaming", "thinking"]
-prefer_prefill_done = true
 
 [models."gemma-4-e4b-it"]
 name = "Gemma 4 E4B (local)"
@@ -1012,7 +1009,6 @@ provider = "local"
 context_window = 131072
 stream_timeout = 300.0
 capabilities = ["streaming", "thinking"]
-prefer_prefill_done = true
 
 [models."gemma-4-26b-a4b-it"]
 name = "Gemma 4 26B MoE (local)"

@@ -913,13 +913,6 @@ fn model_def_to_vm_value(id: &str, model: &llm_config::ModelDef) -> VmValue {
         "quality_tags".to_string(),
         string_list_to_vm_value(model.quality_tags.clone()),
     );
-    dict.insert(
-        "prefer_prefill_done".to_string(),
-        model
-            .prefer_prefill_done
-            .map(VmValue::Bool)
-            .unwrap_or(VmValue::Nil),
-    );
     VmValue::Dict(Rc::new(dict))
 }
 

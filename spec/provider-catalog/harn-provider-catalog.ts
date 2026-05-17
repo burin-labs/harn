@@ -66,7 +66,6 @@ export interface HarnCatalogModel {
   context_window: number
   runtime_context_window?: number
   stream_timeout?: number
-  prefer_prefill_done?: boolean
   modalities: { input: string[]; output: string[] }
   tool_support: {
     native: boolean
@@ -128,7 +127,6 @@ export interface CatalogEntry {
     cacheWritePerMTok?: number | null
   }
   streamTimeout?: number
-  preferPrefillDone?: boolean
 }
 
 export interface CatalogAlias {
@@ -2096,7 +2094,6 @@ export const harnProviderCatalog: HarnProviderCatalog = {
       ],
       "context_window": 131072,
       "stream_timeout": 300.0,
-      "prefer_prefill_done": true,
       "modalities": {
         "input": [
           "text"
@@ -2151,7 +2148,6 @@ export const harnProviderCatalog: HarnProviderCatalog = {
       ],
       "context_window": 131072,
       "stream_timeout": 300.0,
-      "prefer_prefill_done": true,
       "modalities": {
         "input": [
           "text"
@@ -3610,7 +3606,6 @@ export const MODEL_CATALOG: readonly CatalogEntry[] = harnProviderCatalog.models
       }
     : undefined,
   streamTimeout: model.stream_timeout,
-  preferPrefillDone: model.prefer_prefill_done,
 }))
 
 export const ALIASES: readonly CatalogAlias[] = harnProviderCatalog.aliases.map((alias) => ({
