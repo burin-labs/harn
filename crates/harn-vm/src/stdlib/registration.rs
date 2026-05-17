@@ -10,111 +10,71 @@ pub(crate) type AsyncBuiltinFuture = Pin<Box<dyn Future<Output = Result<VmValue,
 pub(crate) type SyncBuiltinHandler = fn(&[VmValue], &mut String) -> Result<VmValue, VmError>;
 pub(crate) type AsyncBuiltinHandler = fn(Vec<VmValue>) -> AsyncBuiltinFuture;
 
-#[derive(Clone)]
-pub(crate) struct SyncBuiltin {
-    name: &'static str,
-    signature: Option<&'static str>,
-    arity: Option<VmBuiltinArity>,
-    doc: Option<&'static str>,
-    handler: SyncBuiltinHandler,
+/// Generate a builder struct for a builtin kind (sync or async).
+///
+/// Both kinds share the same builder surface — name, optional signature,
+/// arity, and doc — and the same metadata-application logic. The only
+/// thing that differs is the handler type and which `VmBuiltinMetadata`
+/// constructor stamps the kind (`sync_static` vs `async_static`).
+macro_rules! builtin_kind {
+    ($struct_name:ident, $handler_ty:ident, $meta_ctor:ident) => {
+        #[derive(Clone)]
+        pub(crate) struct $struct_name {
+            name: &'static str,
+            signature: Option<&'static str>,
+            arity: Option<VmBuiltinArity>,
+            doc: Option<&'static str>,
+            handler: $handler_ty,
+        }
+
+        impl $struct_name {
+            pub(crate) const fn new(name: &'static str, handler: $handler_ty) -> Self {
+                Self {
+                    name,
+                    signature: None,
+                    arity: None,
+                    doc: None,
+                    handler,
+                }
+            }
+
+            pub(crate) const fn signature(mut self, signature: &'static str) -> Self {
+                self.signature = Some(signature);
+                self
+            }
+
+            pub(crate) const fn arity(mut self, arity: VmBuiltinArity) -> Self {
+                self.arity = Some(arity);
+                self
+            }
+
+            pub(crate) const fn doc(mut self, doc: &'static str) -> Self {
+                self.doc = Some(doc);
+                self
+            }
+
+            fn metadata(&self, default_category: Option<&'static str>) -> VmBuiltinMetadata {
+                let mut metadata = VmBuiltinMetadata::$meta_ctor(self.name);
+                if let Some(signature) = self.signature {
+                    metadata = metadata.signature_static(signature);
+                }
+                if let Some(arity) = self.arity {
+                    metadata = metadata.arity(arity);
+                }
+                if let Some(category) = default_category {
+                    metadata = metadata.category_static(category);
+                }
+                if let Some(doc) = self.doc {
+                    metadata = metadata.doc_static(doc);
+                }
+                metadata
+            }
+        }
+    };
 }
 
-impl SyncBuiltin {
-    pub(crate) const fn new(name: &'static str, handler: SyncBuiltinHandler) -> Self {
-        Self {
-            name,
-            signature: None,
-            arity: None,
-            doc: None,
-            handler,
-        }
-    }
-
-    pub(crate) const fn signature(mut self, signature: &'static str) -> Self {
-        self.signature = Some(signature);
-        self
-    }
-
-    pub(crate) const fn arity(mut self, arity: VmBuiltinArity) -> Self {
-        self.arity = Some(arity);
-        self
-    }
-
-    pub(crate) const fn doc(mut self, doc: &'static str) -> Self {
-        self.doc = Some(doc);
-        self
-    }
-
-    fn metadata(&self, default_category: Option<&'static str>) -> VmBuiltinMetadata {
-        let mut metadata = VmBuiltinMetadata::sync_static(self.name);
-        if let Some(signature) = self.signature {
-            metadata = metadata.signature_static(signature);
-        }
-        if let Some(arity) = self.arity {
-            metadata = metadata.arity(arity);
-        }
-        if let Some(category) = default_category {
-            metadata = metadata.category_static(category);
-        }
-        if let Some(doc) = self.doc {
-            metadata = metadata.doc_static(doc);
-        }
-        metadata
-    }
-}
-
-#[derive(Clone)]
-pub(crate) struct AsyncBuiltin {
-    name: &'static str,
-    signature: Option<&'static str>,
-    arity: Option<VmBuiltinArity>,
-    doc: Option<&'static str>,
-    handler: AsyncBuiltinHandler,
-}
-
-impl AsyncBuiltin {
-    pub(crate) const fn new(name: &'static str, handler: AsyncBuiltinHandler) -> Self {
-        Self {
-            name,
-            signature: None,
-            arity: None,
-            doc: None,
-            handler,
-        }
-    }
-
-    pub(crate) const fn signature(mut self, signature: &'static str) -> Self {
-        self.signature = Some(signature);
-        self
-    }
-
-    pub(crate) const fn arity(mut self, arity: VmBuiltinArity) -> Self {
-        self.arity = Some(arity);
-        self
-    }
-
-    pub(crate) const fn doc(mut self, doc: &'static str) -> Self {
-        self.doc = Some(doc);
-        self
-    }
-
-    fn metadata(&self, default_category: Option<&'static str>) -> VmBuiltinMetadata {
-        let mut metadata = VmBuiltinMetadata::async_static(self.name);
-        if let Some(signature) = self.signature {
-            metadata = metadata.signature_static(signature);
-        }
-        if let Some(arity) = self.arity {
-            metadata = metadata.arity(arity);
-        }
-        if let Some(category) = default_category {
-            metadata = metadata.category_static(category);
-        }
-        if let Some(doc) = self.doc {
-            metadata = metadata.doc_static(doc);
-        }
-        metadata
-    }
-}
+builtin_kind!(SyncBuiltin, SyncBuiltinHandler, sync_static);
+builtin_kind!(AsyncBuiltin, AsyncBuiltinHandler, async_static);
 
 pub(crate) fn boxed_async_builtin<Fut>(future: Fut) -> AsyncBuiltinFuture
 where

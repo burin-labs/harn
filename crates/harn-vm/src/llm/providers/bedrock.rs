@@ -12,9 +12,9 @@ use sha2::{Digest, Sha256};
 use crate::llm::api::{DeltaSender, LlmRequestPayload, LlmResult};
 use crate::llm::provider::{LlmProvider, LlmProviderChat};
 use crate::llm::providers::common::{
-    apply_provider_overrides, maybe_emit_delta, percent_encode_path_segment, request_text_content,
-    vm_err,
+    apply_provider_overrides, maybe_emit_delta, request_text_content, vm_err,
 };
+use crate::url_encoding::percent_encode_component;
 use crate::value::VmError;
 
 pub(crate) struct BedrockProvider;
@@ -114,7 +114,7 @@ impl BedrockProvider {
             .map_err(|error| vm_err(format!("bedrock request serialization failed: {error}")))?;
         let path = format!(
             "/model/{}/converse",
-            percent_encode_path_segment(&request.model)
+            percent_encode_component(&request.model)
         );
         let base_url = bedrock_base_url(&region);
         let url = format!("{}{}", base_url.trim_end_matches('/'), path);

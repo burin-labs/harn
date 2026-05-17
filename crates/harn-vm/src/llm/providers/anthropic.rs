@@ -5,6 +5,7 @@ use std::collections::HashSet;
 
 use crate::llm::api::{DeltaSender, LlmRequestPayload, LlmResult, ThinkingConfig};
 use crate::llm::provider::{LlmProvider, LlmProviderChat};
+use crate::llm::providers::common::parse_major_minor_tail;
 use crate::value::VmError;
 
 pub(crate) const ANTHROPIC_INTERLEAVED_THINKING_BETA: &str = "interleaved-thinking-2025-05-14";
@@ -29,36 +30,10 @@ pub(crate) fn claude_generation(model: &str) -> Option<(u32, u32)> {
     if !lower.starts_with("claude-") && !lower.contains("/claude-") {
         return None;
     }
-    // Try dotted form first: "…claude-opus-4.7…", "…claude-opus-4.6-fast…".
     for family in ["opus", "sonnet", "haiku"] {
         let needle = format!("{family}-");
         if let Some(idx) = lower.find(&needle) {
-            let tail = &lower[idx + needle.len()..];
-            // Dotted: "4.7" / "4.6"
-            if let Some((major, rest)) = tail.split_once('.') {
-                if let Ok(major) = major.parse::<u32>() {
-                    let minor_str: String =
-                        rest.chars().take_while(|c| c.is_ascii_digit()).collect();
-                    if let Ok(minor) = minor_str.parse::<u32>() {
-                        return Some((major, minor));
-                    }
-                }
-            }
-            // Dashed: "4-7", "4-6", "4-20250514" (minor=0 when the second
-            // chunk is clearly a date, not a small version number).
-            let mut parts = tail.split('-');
-            if let Some(major_str) = parts.next() {
-                if let Ok(major) = major_str.parse::<u32>() {
-                    if let Some(minor_str) = parts.next() {
-                        if let Ok(minor) = minor_str.parse::<u32>() {
-                            // Dates ≥ 1000 aren't minor versions.
-                            let minor = if minor >= 1000 { 0 } else { minor };
-                            return Some((major, minor));
-                        }
-                    }
-                    return Some((major, 0));
-                }
-            }
+            return parse_major_minor_tail(&lower[idx + needle.len()..]);
         }
     }
     None
