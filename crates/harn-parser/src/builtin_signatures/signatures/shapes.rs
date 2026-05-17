@@ -409,6 +409,7 @@ pub(crate) const LLM_CALL_OPTIONS: Ty = Ty::Shape(&[
     ShapeFieldDescriptor::optional("openrouter", TY_DICT),
     ShapeFieldDescriptor::optional("together", TY_DICT),
     ShapeFieldDescriptor::optional("groq", TY_DICT),
+    ShapeFieldDescriptor::optional("cerebras", TY_DICT),
     ShapeFieldDescriptor::optional("deepseek", TY_DICT),
     ShapeFieldDescriptor::optional("fireworks", TY_DICT),
     ShapeFieldDescriptor::optional("huggingface", TY_DICT),

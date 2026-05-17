@@ -194,6 +194,7 @@ pub(crate) fn register_default_providers() {
             "openrouter",
             "together",
             "groq",
+            "cerebras",
             "deepseek",
             "fireworks",
             "huggingface",

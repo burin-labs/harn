@@ -6,6 +6,20 @@ Pre-0.6 highlights live in [CHANGELOG-pre-0.6.md](CHANGELOG-pre-0.6.md).
 Harn had no external users before 0.6.0, so that archive intentionally keeps
 condensed series summaries instead of full per-patch history.
 
+## Unreleased
+
+### Added
+
+- **Cerebras provider (#1705).** Added a first-class `cerebras` provider
+  routed through the OpenAI-compatible stack with a `provider_family =
+  "openai"` capability inheritance row. Catalog ships canonical
+  `gpt-oss-120b`, `llama-3.3-70b`, and `qwen-3-coder-480b` model entries
+  (wire IDs match Cerebras's `/v1/models`); selectors of the form
+  `cerebras/<model>` route to the provider and normalize to the bare
+  wire ID. `scripts/smoke_cerebras.harn` is the latency-floor smoke for
+  the NL-binder substrate work tracked under #1696/#1698 — empirical
+  warm-state p50 of ~150ms from a residential network, p99 ~230ms.
+
 ## v0.8.21
 
 ### Added

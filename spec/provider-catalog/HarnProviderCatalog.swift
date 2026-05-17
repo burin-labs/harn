@@ -328,6 +328,32 @@ public let harnProviderCatalogJSON = #"""
       "latency_p50_ms": 2600
     },
     {
+      "id": "cerebras",
+      "display_name": "Cerebras",
+      "classification": "hosted",
+      "endpoint": {
+        "base_url": "https://api.cerebras.ai/v1",
+        "base_url_env": "CEREBRAS_BASE_URL",
+        "chat_endpoint": "/chat/completions",
+        "completion_endpoint": "/completions"
+      },
+      "auth": {
+        "style": "bearer",
+        "env": [
+          "CEREBRAS_API_KEY"
+        ],
+        "required": true
+      },
+      "protocols": [
+        "openai_chat_completions"
+      ],
+      "features": [
+        "native_tools"
+      ],
+      "caveats": [],
+      "latency_p50_ms": 80
+    },
+    {
       "id": "dashscope",
       "display_name": "Dashscope",
       "classification": "hosted",
@@ -1597,6 +1623,163 @@ public let harnProviderCatalogJSON = #"""
         "thinking",
         "extended_thinking",
         "structured_output"
+      ]
+    },
+    {
+      "id": "gpt-oss-120b",
+      "name": "GPT-OSS 120B (Cerebras)",
+      "provider": "cerebras",
+      "aliases": [],
+      "context_window": 131072,
+      "modalities": {
+        "input": [
+          "text"
+        ],
+        "output": [
+          "text"
+        ]
+      },
+      "tool_support": {
+        "native": true,
+        "text": true,
+        "tool_search": []
+      },
+      "structured_output": "native",
+      "format_preferences": {
+        "prefers_xml_scaffolding": false,
+        "prefers_markdown_scaffolding": true,
+        "structured_output_mode": "native_json",
+        "supports_assistant_prefill": false,
+        "prefers_role_developer": false,
+        "prefers_xml_tools": false,
+        "thinking_block_style": "none"
+      },
+      "reasoning": {
+        "modes": [],
+        "effort_supported": false,
+        "none_supported": false,
+        "interleaved_supported": false,
+        "preserve_thinking": false
+      },
+      "prompt_cache": false,
+      "pricing": {
+        "input_per_mtok": 0.25,
+        "output_per_mtok": 0.69,
+        "cache_read_per_mtok": null,
+        "cache_write_per_mtok": null
+      },
+      "deprecation": {
+        "status": "active"
+      },
+      "quality_tags": [],
+      "capability_tags": [
+        "streaming",
+        "tools",
+        "structured_output"
+      ]
+    },
+    {
+      "id": "llama-3.3-70b",
+      "name": "Llama 3.3 70B (Cerebras)",
+      "provider": "cerebras",
+      "aliases": [],
+      "context_window": 131072,
+      "modalities": {
+        "input": [
+          "text"
+        ],
+        "output": [
+          "text"
+        ]
+      },
+      "tool_support": {
+        "native": false,
+        "text": true,
+        "tool_search": []
+      },
+      "structured_output": "none",
+      "format_preferences": {
+        "prefers_xml_scaffolding": false,
+        "prefers_markdown_scaffolding": false,
+        "structured_output_mode": "none",
+        "supports_assistant_prefill": false,
+        "prefers_role_developer": false,
+        "prefers_xml_tools": false,
+        "thinking_block_style": "none"
+      },
+      "reasoning": {
+        "modes": [],
+        "effort_supported": false,
+        "none_supported": false,
+        "interleaved_supported": false,
+        "preserve_thinking": false
+      },
+      "prompt_cache": false,
+      "pricing": {
+        "input_per_mtok": 0.85,
+        "output_per_mtok": 1.2,
+        "cache_read_per_mtok": null,
+        "cache_write_per_mtok": null
+      },
+      "deprecation": {
+        "status": "active"
+      },
+      "quality_tags": [],
+      "capability_tags": [
+        "streaming",
+        "tools"
+      ]
+    },
+    {
+      "id": "qwen-3-coder-480b",
+      "name": "Qwen3 Coder 480B (Cerebras)",
+      "provider": "cerebras",
+      "aliases": [],
+      "context_window": 131072,
+      "modalities": {
+        "input": [
+          "text"
+        ],
+        "output": [
+          "text"
+        ]
+      },
+      "tool_support": {
+        "native": false,
+        "text": true,
+        "tool_search": []
+      },
+      "structured_output": "none",
+      "format_preferences": {
+        "prefers_xml_scaffolding": false,
+        "prefers_markdown_scaffolding": false,
+        "structured_output_mode": "none",
+        "supports_assistant_prefill": false,
+        "prefers_role_developer": false,
+        "prefers_xml_tools": false,
+        "thinking_block_style": "none"
+      },
+      "reasoning": {
+        "modes": [],
+        "effort_supported": false,
+        "none_supported": false,
+        "interleaved_supported": false,
+        "preserve_thinking": false
+      },
+      "prompt_cache": false,
+      "pricing": {
+        "input_per_mtok": 2.0,
+        "output_per_mtok": 2.0,
+        "cache_read_per_mtok": null,
+        "cache_write_per_mtok": null
+      },
+      "deprecation": {
+        "status": "active"
+      },
+      "quality_tags": [],
+      "capability_tags": [
+        "streaming",
+        "tools"
       ]
     },
     {
