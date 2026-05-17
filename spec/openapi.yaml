@@ -534,6 +534,31 @@ paths:
         default:
           $ref: "#/components/responses/Error"
 
+  /v1/sessions/{session_id}/truncate:
+    post:
+      tags: [Sessions]
+      operationId: truncateSession
+      summary: Truncate a Session transcript in place.
+      parameters:
+        - $ref: "#/components/parameters/ProtocolVersion"
+        - $ref: "#/components/parameters/SessionId"
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/TruncateSessionRequest"
+      responses:
+        "200":
+          description: Truncated Session.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TruncateSessionResponse"
+        default:
+          $ref: "#/components/responses/Error"
+
   /v1/sessions/{session_id}/messages:
     get:
       tags: [Messages]
@@ -2172,6 +2197,42 @@ components:
           type: [string, "null"]
         metadata:
           $ref: "#/components/schemas/Metadata"
+    TruncateSessionRequest:
+      type: object
+      required: [keep_first]
+      properties:
+        keep_first:
+          type: integer
+          minimum: 0
+          description: Number of leading turns to keep in the current Session transcript.
+        reason:
+          type: string
+          description: Optional client-visible reason for the truncation notification.
+    TruncateSessionResponse:
+      type: object
+      required:
+        - object
+        - session_id
+        - kept_turn_count
+        - removed_turn_count
+        - new_tip_turn_id
+        - session
+      properties:
+        object:
+          type: string
+          enum: [session.truncate_result]
+        session_id:
+          type: string
+        kept_turn_count:
+          type: integer
+          minimum: 0
+        removed_turn_count:
+          type: integer
+          minimum: 0
+        new_tip_turn_id:
+          type: [string, "null"]
+        session:
+          $ref: "#/components/schemas/Session"
 
     Task:
       allOf:

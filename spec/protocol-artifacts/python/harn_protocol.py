@@ -98,6 +98,7 @@ ACP_AGENT_METHODS: tuple = (
     "initialize",
     "session/new",
     "session/prompt",
+    "session/truncate",
     "session/stop",
 )
 ACP_CLIENT_METHODS: tuple = (
@@ -123,6 +124,7 @@ ACP_SESSION_UPDATES: tuple = (
     "current_mode_update",
     "config_option_update",
     "session_info_update",
+    "session_truncated",
     "fs_watch",
     "handoff",
     "hitl_request",
@@ -311,6 +313,7 @@ class ACPAgentMethod(str, Enum):
     INITIALIZE = "initialize"
     SESSION_NEW = "session/new"
     SESSION_PROMPT = "session/prompt"
+    SESSION_TRUNCATE = "session/truncate"
     SESSION_STOP = "session/stop"
 
 
@@ -339,6 +342,7 @@ class ACPSessionUpdate(str, Enum):
     CURRENT_MODE_UPDATE = "current_mode_update"
     CONFIG_OPTION_UPDATE = "config_option_update"
     SESSION_INFO_UPDATE = "session_info_update"
+    SESSION_TRUNCATED = "session_truncated"
     FS_WATCH = "fs_watch"
     HANDOFF = "handoff"
     HITL_REQUEST = "hitl_request"
@@ -618,6 +622,10 @@ class ACPSessionUpdateEnvelope(_HarnDataclass):
     sessionUpdate: str
     content: Optional[ACPContentBlock] = None
     entries: Optional[List[JsonValue]] = None
+    keptTurnCount: Optional[int] = None
+    removedTurnCount: Optional[int] = None
+    newTipTurnId: Optional[str] = None
+    reason: Optional[str] = None
     toolCallId: Optional[str] = None
     title: Optional[str] = None
     kind: Optional[str] = None

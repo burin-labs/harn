@@ -29,7 +29,7 @@ pub async fn run_acp_channel_server(
                     }
 
                     prepare_session_prompt(&cancellations, &msg);
-                    if preempt_session_cancel(&cancellations, &msg) {
+                    if preempt_session_cancel_or_truncate(&cancellations, &msg) {
                         continue;
                     }
 
@@ -95,7 +95,7 @@ pub async fn run_acp_server(config: AcpServerConfig) {
                     }
 
                     prepare_session_prompt(&cancellations, &msg);
-                    if preempt_session_cancel(&cancellations, &msg) {
+                    if preempt_session_cancel_or_truncate(&cancellations, &msg) {
                         continue;
                     }
 

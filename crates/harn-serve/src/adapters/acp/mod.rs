@@ -35,7 +35,7 @@ pub use schema::{
     HARN_TOOL_LIFECYCLE_EXTENSION_FIELDS,
 };
 use sessions::{
-    mark_cancelled_session, preempt_session_cancel, prepare_session_prompt, Session,
+    mark_cancelled_session, preempt_session_cancel_or_truncate, prepare_session_prompt, Session,
     SessionCancellation, SessionInfo,
 };
 pub use transport::{run_acp_channel_server, run_acp_server};
@@ -66,6 +66,31 @@ use events::AcpAgentEventSink;
 use io::send_json_response;
 
 const ACP_AUTH_REQUIRED_CODE: i64 = -32000;
+
+fn session_id_param(params: &serde_json::Value) -> Option<String> {
+    params
+        .get("sessionId")
+        .or_else(|| params.get("session_id"))
+        .and_then(|value| value.as_str())
+        .map(str::to_string)
+}
+
+fn nonnegative_usize_param(
+    params: &serde_json::Value,
+    names: &[&str],
+    label: &str,
+) -> Result<Option<usize>, String> {
+    for name in names {
+        let Some(value) = params.get(*name) else {
+            continue;
+        };
+        return match value.as_i64() {
+            Some(value) if value >= 0 => Ok(Some(value as usize)),
+            _ => Err(format!("Invalid {label}: must be >= 0")),
+        };
+    }
+    Ok(None)
+}
 
 fn append_profile_json_line(
     path: &std::path::Path,
@@ -730,11 +755,7 @@ impl AcpServer {
     }
 
     fn handle_session_fork(&mut self, id: &serde_json::Value, params: &serde_json::Value) {
-        let src_id = params
-            .get("session_id")
-            .or_else(|| params.get("sessionId"))
-            .and_then(|value| value.as_str())
-            .map(str::to_string);
+        let src_id = session_id_param(params);
         let Some(src_id) = src_id else {
             self.send_error(id, -32602, "Missing session_id");
             return;
@@ -752,14 +773,14 @@ impl AcpServer {
             harn_vm::agent_sessions::open_or_create(Some(src_id.clone()));
         }
 
-        let keep_first = match params.get("keep_first").and_then(|value| value.as_i64()) {
-            Some(value) if value < 0 => {
-                self.send_error(id, -32602, "Invalid keep_first: must be >= 0");
-                return;
-            }
-            Some(value) => Some(value as usize),
-            None => None,
-        };
+        let keep_first =
+            match nonnegative_usize_param(params, &["keep_first", "keepFirst"], "keep_first") {
+                Ok(value) => value,
+                Err(message) => {
+                    self.send_error(id, -32602, &message);
+                    return;
+                }
+            };
         let dst_id = params
             .get("id")
             .and_then(|value| value.as_str())
@@ -837,6 +858,72 @@ impl AcpServer {
                 "branched_at": branched_at,
                 "modes": modes::session_mode_state(&parent_mode_id),
                 "configOptions": modes::config_options_state(&parent_mode_id),
+            }),
+        );
+    }
+
+    fn handle_session_truncate(&mut self, id: &serde_json::Value, params: &serde_json::Value) {
+        let Some(session_id) = session_id_param(params) else {
+            self.send_error(id, -32602, "Missing sessionId");
+            return;
+        };
+        let keep_first =
+            match nonnegative_usize_param(params, &["keepFirst", "keep_first"], "keepFirst") {
+                Ok(Some(value)) => value,
+                Ok(None) => {
+                    self.send_error(id, -32602, "Missing keepFirst");
+                    return;
+                }
+                Err(message) => {
+                    self.send_error(id, -32602, &message);
+                    return;
+                }
+            };
+        let Some(cancellation) = self
+            .sessions
+            .get(&session_id)
+            .map(|session| session.cancellation.clone())
+        else {
+            self.send_error(id, -32602, &format!("Unknown session: {session_id}"));
+            return;
+        };
+
+        cancellation.cancel();
+        if !harn_vm::agent_sessions::exists(&session_id) {
+            harn_vm::agent_sessions::open_or_create(Some(session_id.clone()));
+        }
+        let Some(result) = harn_vm::agent_sessions::truncate(&session_id, keep_first) else {
+            self.send_error(
+                id,
+                -32000,
+                &format!("Failed to truncate session: {session_id}"),
+            );
+            return;
+        };
+
+        let mut update = serde_json::json!({
+            "sessionUpdate": "session_truncated",
+            "keptTurnCount": result.kept_turn_count,
+            "removedTurnCount": result.removed_turn_count,
+            "newTipTurnId": result.new_tip_turn_id.clone(),
+        });
+        if let Some(reason) = params.get("reason").and_then(|value| value.as_str()) {
+            update["reason"] = serde_json::json!(reason);
+        }
+        self.send_notification(
+            "session/update",
+            serde_json::json!({
+                "sessionId": session_id,
+                "update": update,
+            }),
+        );
+        self.send_response(
+            id,
+            serde_json::json!({
+                "sessionId": session_id,
+                "keptTurnCount": result.kept_turn_count,
+                "removedTurnCount": result.removed_turn_count,
+                "newTipTurnId": result.new_tip_turn_id,
             }),
         );
     }
@@ -1544,6 +1631,12 @@ impl AcpServer {
                     return;
                 }
                 self.handle_session_fork(&id, &params);
+            }
+            "session/truncate" => {
+                if self.reject_unauthenticated(&id) {
+                    return;
+                }
+                self.handle_session_truncate(&id, &params);
             }
             "session/set_mode" => {
                 if self.reject_unauthenticated(&id) {

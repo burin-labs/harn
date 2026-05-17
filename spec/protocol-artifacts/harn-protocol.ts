@@ -7,6 +7,7 @@ export const ACP_AGENT_METHODS = [
   "initialize",
   "session/new",
   "session/prompt",
+  "session/truncate",
   "session/stop",
 ] as const
 export type ACPAgentMethod = (typeof ACP_AGENT_METHODS)[number]
@@ -38,6 +39,7 @@ export const ACP_SESSION_UPDATES = [
   "current_mode_update",
   "config_option_update",
   "session_info_update",
+  "session_truncated",
   "fs_watch",
   "handoff",
   "hitl_request",
@@ -344,6 +346,14 @@ export interface ACPPlanUpdate {
   harnPlan?: ACPValue
 }
 
+export interface ACPSessionTruncatedUpdate {
+  sessionUpdate: "session_truncated"
+  keptTurnCount: number
+  removedTurnCount: number
+  newTipTurnId?: string | null
+  reason?: string
+}
+
 export interface ACPHarnExtensionUpdate {
   sessionUpdate: HarnACPSessionUpdateExtension
   _meta?: ACPExtensionMeta<ACPObject>
@@ -354,6 +364,7 @@ export type ACPSessionUpdateEnvelope =
   | ACPToolCall
   | ACPToolCallUpdate
   | ACPPlanUpdate
+  | ACPSessionTruncatedUpdate
   | ACPHarnExtensionUpdate
 
 export interface ACPSessionUpdateParams {

@@ -75,6 +75,7 @@ public enum HarnACPAgentMethod: String, Codable, Sendable, CaseIterable {
     case initialize = "initialize"
     case sessionNew = "session/new"
     case sessionPrompt = "session/prompt"
+    case sessionTruncate = "session/truncate"
     case sessionStop = "session/stop"
 }
 
@@ -103,6 +104,7 @@ public enum HarnACPSessionUpdate: String, Codable, Sendable, CaseIterable {
     case currentModeUpdate = "current_mode_update"
     case configOptionUpdate = "config_option_update"
     case sessionInfoUpdate = "session_info_update"
+    case sessionTruncated = "session_truncated"
     case fsWatch = "fs_watch"
     case handoff = "handoff"
     case hitlRequest = "hitl_request"
@@ -725,6 +727,10 @@ public struct HarnACPSessionUpdateEnvelope: Codable, Sendable, Equatable {
     public var sessionUpdate: HarnACPSessionUpdate
     public var content: HarnACPContentBlock?
     public var entries: [HarnACPValue]?
+    public var keptTurnCount: Int?
+    public var removedTurnCount: Int?
+    public var newTipTurnId: String?
+    public var reason: String?
     public var toolCallId: String?
     public var title: String?
     public var kind: HarnACPToolKind?
@@ -737,6 +743,10 @@ public struct HarnACPSessionUpdateEnvelope: Codable, Sendable, Equatable {
         case sessionUpdate
         case content
         case entries
+        case keptTurnCount
+        case removedTurnCount
+        case newTipTurnId
+        case reason
         case toolCallId
         case title
         case kind

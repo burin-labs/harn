@@ -172,6 +172,11 @@ Servers MUST preserve message ordering inside a Session. Servers MAY compact
 older transcript content, but compaction MUST preserve enough event and
 artifact references for audit and replay.
 
+Servers that support transcript walk-back MUST expose a truncate operation that
+keeps the first N turns of the current Session and drops all later turns in
+place. Truncation mutates the current trunk; clients that need a recoverable
+side branch SHOULD fork the Session before truncating it.
+
 ### Task
 
 A Task is a unit of agent work submitted by a user, connector, automation, or
@@ -466,7 +471,7 @@ paths and schemas. This narrative spec requires the REST surface to cover:
 - discovery and HarnAgentCard retrieval
 - Persona, Workspace, Session, Task, Branch, Message, Artifact, Event,
   Receipt, Memory, Connector, Skill, Outcome, and Quota reads
-- Session creation, close, fork, and message append
+- Session creation, close, fork, truncate, and message append
 - Task submit, get, cancel, and list
 - artifact upload or registration
 - event range reads
@@ -501,6 +506,7 @@ The WebSocket profile MUST support:
 
 - client-to-server user messages
 - client-to-server task cancellation
+- client-to-server session truncation
 - server-to-client Event frames
 - server-to-client input or authorization requests
 - optional host-mediated tool or approval requests
@@ -665,6 +671,7 @@ describe decisions without revealing private reasoning.
 - `session.closed`
 - `session.message_appended`
 - `session.compacted`
+- `session.truncated`
 - `session.thread_forked`
 - `session.thread_merged`
 - `session.replayed`

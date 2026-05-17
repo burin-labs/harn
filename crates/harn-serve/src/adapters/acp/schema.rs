@@ -13,6 +13,7 @@ pub const ACP_SESSION_UPDATE_VARIANTS: &[&str] = &[
     "current_mode_update",
     "config_option_update",
     "session_info_update",
+    "session_truncated",
 ];
 
 pub const HARN_SESSION_UPDATE_EXTENSIONS: &[&str] = &[
