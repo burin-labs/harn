@@ -183,7 +183,7 @@ pub struct DropResult {
     pub dropped: bool,
 }
 
-#[derive(Default, Debug)]
+#[derive(Debug)]
 struct SessionSnapshots {
     /// Snapshots, in insertion order.
     snapshots: Vec<SnapshotState>,
@@ -191,44 +191,62 @@ struct SessionSnapshots {
     /// this rather than recomputing from `bodies/` so eviction stays
     /// O(snapshots) instead of walking the filesystem on every write.
     byte_count: u64,
+    /// Per-session byte cap. Defaults to [`DEFAULT_SESSION_BYTE_CAP`] and
+    /// can be overridden with [`configure_session_byte_cap`].
+    byte_cap: u64,
+}
+
+impl Default for SessionSnapshots {
+    fn default() -> Self {
+        Self {
+            snapshots: Vec::new(),
+            byte_count: 0,
+            byte_cap: DEFAULT_SESSION_BYTE_CAP,
+        }
+    }
 }
 
 static SESSIONS: OnceLock<Mutex<BTreeMap<String, SessionSnapshots>>> = OnceLock::new();
-static SESSION_BYTE_CAP: OnceLock<Mutex<u64>> = OnceLock::new();
 
 fn sessions() -> &'static Mutex<BTreeMap<String, SessionSnapshots>> {
     SESSIONS.get_or_init(|| Mutex::new(BTreeMap::new()))
 }
 
-fn session_byte_cap() -> u64 {
-    *SESSION_BYTE_CAP
-        .get_or_init(|| Mutex::new(DEFAULT_SESSION_BYTE_CAP))
-        .lock()
-        .expect("fs_snapshot byte cap mutex poisoned")
-}
-
-/// Override the per-session byte cap. Returns the previous value.
+/// Override the byte cap for a specific session and immediately enforce
+/// it. Returns the previous cap.
 ///
-/// Primarily for tests that want to force eviction without writing a
-/// gigabyte. Production embedders should leave the default in place
-/// unless they have evidence it is too large.
-pub fn set_session_byte_cap(bytes: u64) -> u64 {
-    let mutex = SESSION_BYTE_CAP.get_or_init(|| Mutex::new(DEFAULT_SESSION_BYTE_CAP));
-    let mut guard = mutex.lock().expect("fs_snapshot byte cap mutex poisoned");
-    let previous = *guard;
-    *guard = bytes.max(1);
-    previous
-}
-
-/// Test-only helper that clears the in-memory snapshot store. We deliberately
-/// leave on-disk state alone — tests that need a clean filesystem use a
-/// `TempDir` and reseat the workspace root.
-#[doc(hidden)]
-pub fn reset_for_test() {
+/// Primarily intended for tests that want to force eviction without
+/// writing a gigabyte. Production embedders generally leave the default
+/// in place; touching one session never affects another.
+pub fn configure_session_byte_cap(session_id: &str, bytes: u64) -> u64 {
     let mut guard = sessions()
         .lock()
         .expect("fs_snapshot session mutex poisoned");
-    guard.clear();
+    let bundle = guard.entry(session_id.to_string()).or_default();
+    let previous = bundle.byte_cap;
+    bundle.byte_cap = bytes.max(1);
+    enforce_byte_cap(bundle, session_id);
+    previous
+}
+
+/// Drop every snapshot registered for `session_id`, both in memory and
+/// on disk. Returns the number of snapshots removed.
+///
+/// ACP hosts should call this on session close so the snapshot bundle
+/// doesn't outlive the conversation. Tests can also call it on
+/// teardown when reusing a session id across cases.
+pub fn drop_session_snapshots(session_id: &str) -> usize {
+    let mut guard = sessions()
+        .lock()
+        .expect("fs_snapshot session mutex poisoned");
+    let Some(bundle) = guard.remove(session_id) else {
+        return 0;
+    };
+    let count = bundle.snapshots.len();
+    for snapshot in &bundle.snapshots {
+        remove_snapshot_dir(snapshot);
+    }
+    count
 }
 
 /// Take a snapshot. When `paths` is empty the snapshot is "open" — bytes
@@ -732,13 +750,13 @@ fn atomic_write(path: &Path, bytes: &[u8]) -> Result<(), String> {
 }
 
 fn enforce_byte_cap(bundle: &mut SessionSnapshots, session_id: &str) {
-    let cap = session_byte_cap();
-    while bundle.byte_count > cap && !bundle.snapshots.is_empty() {
+    while bundle.byte_count > bundle.byte_cap && !bundle.snapshots.is_empty() {
         let evicted = bundle.snapshots.remove(0);
         bundle.byte_count = bundle.byte_count.saturating_sub(entry_byte_count(&evicted));
         tracing::info!(
-            "fs_snapshot: evicting snapshot `{}` from session `{session_id}` (over byte cap {cap})",
-            evicted.snapshot_id
+            "fs_snapshot: evicting snapshot `{}` from session `{session_id}` (over byte cap {})",
+            evicted.snapshot_id,
+            bundle.byte_cap,
         );
         remove_snapshot_dir(&evicted);
     }
@@ -870,48 +888,50 @@ fn now_ms() -> i64 {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::sync::{Mutex, MutexGuard, OnceLock};
+    use std::sync::atomic::{AtomicU64, Ordering};
     use tempfile::TempDir;
 
-    /// Tests in this module mutate process-wide snapshot state and the
-    /// thread-local session/tool-call stacks. Serialize them so reset
-    /// calls from one test don't race with another's in-flight setup.
-    fn test_guard() -> MutexGuard<'static, ()> {
-        static GUARD: OnceLock<Mutex<()>> = OnceLock::new();
-        GUARD
-            .get_or_init(|| Mutex::new(()))
-            .lock()
-            .unwrap_or_else(|poisoned| poisoned.into_inner())
+    /// Hand each test its own session id so the process-wide `SESSIONS`
+    /// map isolates them by key — no serialization or process-wide
+    /// reset required.
+    fn unique_session(prefix: &str) -> String {
+        static COUNTER: AtomicU64 = AtomicU64::new(0);
+        let n = COUNTER.fetch_add(1, Ordering::Relaxed);
+        format!("{prefix}-{n}-{}", std::process::id())
     }
 
-    fn enter_session(id: &'static str) -> harn_vm::agent_sessions::CurrentSessionGuard {
-        harn_vm::agent_sessions::reset_session_store();
+    fn unique_scope() -> String {
+        static COUNTER: AtomicU64 = AtomicU64::new(0);
+        format!("tc-{}", COUNTER.fetch_add(1, Ordering::Relaxed))
+    }
+
+    fn enter_session(id: &str) -> harn_vm::agent_sessions::CurrentSessionGuard {
         harn_vm::agent_sessions::open_or_create(Some(id.to_string()));
-        harn_vm::agent_sessions::enter_current_session(id)
+        harn_vm::agent_sessions::enter_current_session(id.to_string())
     }
 
     #[test]
     fn explicit_snapshot_then_restore_round_trips_file_bytes() {
-        let _guard = test_guard();
-        reset_for_test();
         let dir = TempDir::new().unwrap();
         let file = dir.path().join("note.txt");
         stdfs::write(&file, b"v1").unwrap();
-        let _session = enter_session("snap-roundtrip");
+        let session = unique_session("snap-roundtrip");
+        let scope = unique_scope();
+        let _session_guard = enter_session(&session);
 
         let result = snapshot(
-            "snap-roundtrip",
-            "tc-1",
+            &session,
+            &scope,
             &[file.to_string_lossy().into_owned()],
             Some(dir.path()),
         )
         .unwrap();
-        assert_eq!(result.snapshot_id, "tc-1");
+        assert_eq!(result.snapshot_id, scope);
         assert_eq!(result.captured_paths.len(), 1);
         assert_eq!(result.byte_count, 2);
 
         stdfs::write(&file, b"clobbered").unwrap();
-        let restored = restore("snap-roundtrip", "tc-1", &[]).unwrap();
+        let restored = restore(&session, &scope, &[]).unwrap();
         assert_eq!(restored.restored_paths.len(), 1);
         assert!(restored.skipped_paths_with_reasons.is_empty());
         assert_eq!(stdfs::read(&file).unwrap(), b"v1");
@@ -919,45 +939,45 @@ mod tests {
 
     #[test]
     fn restore_reinstates_deleted_file() {
-        let _guard = test_guard();
-        reset_for_test();
         let dir = TempDir::new().unwrap();
         let file = dir.path().join("doomed.txt");
         stdfs::write(&file, b"alive").unwrap();
-        let _session = enter_session("snap-reinstate");
+        let session = unique_session("snap-reinstate");
+        let scope = unique_scope();
+        let _session_guard = enter_session(&session);
 
         snapshot(
-            "snap-reinstate",
-            "tc-2",
+            &session,
+            &scope,
             &[file.to_string_lossy().into_owned()],
             Some(dir.path()),
         )
         .unwrap();
         stdfs::remove_file(&file).unwrap();
         assert!(!file.exists());
-        let restored = restore("snap-reinstate", "tc-2", &[]).unwrap();
+        let restored = restore(&session, &scope, &[]).unwrap();
         assert_eq!(restored.restored_paths.len(), 1);
         assert_eq!(stdfs::read(&file).unwrap(), b"alive");
     }
 
     #[test]
     fn absent_snapshot_means_restore_deletes_paths_created_during_the_call() {
-        let _guard = test_guard();
-        reset_for_test();
         let dir = TempDir::new().unwrap();
         let file = dir.path().join("new.txt");
         assert!(!file.exists());
-        let _session = enter_session("snap-absent");
+        let session = unique_session("snap-absent");
+        let scope = unique_scope();
+        let _session_guard = enter_session(&session);
 
         snapshot(
-            "snap-absent",
-            "tc-3",
+            &session,
+            &scope,
             &[file.to_string_lossy().into_owned()],
             Some(dir.path()),
         )
         .unwrap();
         stdfs::write(&file, b"created during call").unwrap();
-        let restored = restore("snap-absent", "tc-3", &[]).unwrap();
+        let restored = restore(&session, &scope, &[]).unwrap();
         assert_eq!(restored.restored_paths.len(), 1);
         assert!(
             !file.exists(),
@@ -967,60 +987,61 @@ mod tests {
 
     #[test]
     fn list_and_drop_round_trip_through_metadata() {
-        let _guard = test_guard();
-        reset_for_test();
         let dir = TempDir::new().unwrap();
         let file = dir.path().join("listed.txt");
         stdfs::write(&file, b"abc").unwrap();
-        let _session = enter_session("snap-list");
+        let session = unique_session("snap-list");
+        let scope = unique_scope();
+        let _session_guard = enter_session(&session);
 
         snapshot(
-            "snap-list",
-            "tc-4",
+            &session,
+            &scope,
             &[file.to_string_lossy().into_owned()],
             Some(dir.path()),
         )
         .unwrap();
-        let summaries = list_snapshots("snap-list").unwrap();
+        let summaries = list_snapshots(&session).unwrap();
         assert_eq!(summaries.len(), 1);
-        assert_eq!(summaries[0].snapshot_id, "tc-4");
+        assert_eq!(summaries[0].snapshot_id, scope);
         assert_eq!(summaries[0].byte_count, 3);
 
-        let dropped = drop_snapshot("snap-list", "tc-4").unwrap();
+        let dropped = drop_snapshot(&session, &scope).unwrap();
         assert!(dropped.dropped);
-        assert!(list_snapshots("snap-list").unwrap().is_empty());
+        assert!(list_snapshots(&session).unwrap().is_empty());
 
-        let again = drop_snapshot("snap-list", "tc-4").unwrap();
+        let again = drop_snapshot(&session, &scope).unwrap();
         assert!(!again.dropped, "second drop must be idempotent");
     }
 
     #[test]
     fn auto_capture_records_pre_image_keyed_by_current_tool_call_id() {
-        let _guard = test_guard();
-        reset_for_test();
         let dir = TempDir::new().unwrap();
         let file = dir.path().join("auto.txt");
         stdfs::write(&file, b"pre").unwrap();
-        let _session = enter_session("snap-auto");
-        let _tool = harn_vm::agent_sessions::enter_current_tool_call("tc-auto");
+        let session = unique_session("snap-auto");
+        let scope = unique_scope();
+        let _session_guard = enter_session(&session);
+        let _tool_guard = harn_vm::agent_sessions::enter_current_tool_call(scope.clone());
 
-        snapshot("snap-auto", "tc-auto", &[], Some(dir.path())).unwrap();
-        // Pretend a mutating tool fired:
+        snapshot(&session, &scope, &[], Some(dir.path())).unwrap();
         auto_capture_for_write("hostlib_tools_write_file", &file);
         stdfs::write(&file, b"post").unwrap();
 
-        let restored = restore("snap-auto", "tc-auto", &[]).unwrap();
+        let restored = restore(&session, &scope, &[]).unwrap();
         assert_eq!(restored.restored_paths.len(), 1);
         assert_eq!(stdfs::read(&file).unwrap(), b"pre");
     }
 
     #[test]
     fn byte_cap_evicts_oldest_snapshot_when_exceeded() {
-        let _guard = test_guard();
-        reset_for_test();
-        let prev_cap = set_session_byte_cap(8);
         let dir = TempDir::new().unwrap();
-        let _session = enter_session("snap-evict");
+        let session = unique_session("snap-evict");
+        let _session_guard = enter_session(&session);
+
+        // Per-session cap: only affects this test's session, so other
+        // tests can run in parallel without seeing the squeeze.
+        configure_session_byte_cap(&session, 8);
 
         let mk = |name: &str| {
             let path = dir.path().join(name);
@@ -1028,33 +1049,65 @@ mod tests {
             path
         };
 
+        let scope_a = unique_scope();
+        let scope_b = unique_scope();
         let a = mk("a.txt");
         snapshot(
-            "snap-evict",
-            "tc-a",
+            &session,
+            &scope_a,
             &[a.to_string_lossy().into_owned()],
             Some(dir.path()),
         )
         .unwrap();
         let b = mk("b.txt");
         snapshot(
-            "snap-evict",
-            "tc-b",
+            &session,
+            &scope_b,
             &[b.to_string_lossy().into_owned()],
             Some(dir.path()),
         )
         .unwrap();
-        let snapshots = list_snapshots("snap-evict").unwrap();
-        let ids: Vec<&str> = snapshots
-            .iter()
-            .map(|summary| summary.snapshot_id.as_str())
+
+        let ids: Vec<String> = list_snapshots(&session)
+            .unwrap()
+            .into_iter()
+            .map(|summary| summary.snapshot_id)
             .collect();
         assert_eq!(
             ids,
-            vec!["tc-b"],
+            vec![scope_b],
             "older snapshot must be evicted when the per-session byte cap is exceeded"
         );
+    }
 
-        set_session_byte_cap(prev_cap);
+    #[test]
+    fn drop_session_snapshots_removes_every_snapshot_for_a_session() {
+        let dir = TempDir::new().unwrap();
+        let file = dir.path().join("retained.txt");
+        stdfs::write(&file, b"x").unwrap();
+        let session = unique_session("snap-drop-session");
+        let scope_a = unique_scope();
+        let scope_b = unique_scope();
+        let _session_guard = enter_session(&session);
+
+        snapshot(
+            &session,
+            &scope_a,
+            &[file.to_string_lossy().into_owned()],
+            Some(dir.path()),
+        )
+        .unwrap();
+        snapshot(
+            &session,
+            &scope_b,
+            &[file.to_string_lossy().into_owned()],
+            Some(dir.path()),
+        )
+        .unwrap();
+        assert_eq!(list_snapshots(&session).unwrap().len(), 2);
+
+        assert_eq!(drop_session_snapshots(&session), 2);
+        assert!(list_snapshots(&session).unwrap().is_empty());
+        assert_eq!(drop_session_snapshots(&session), 0, "idempotent");
     }
 }

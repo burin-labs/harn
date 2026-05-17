@@ -1235,6 +1235,10 @@ impl AcpServer {
             .unwrap_or_else(|error| error.into_inner())
             .remove(session_id);
         clear_session_sinks(session_id);
+        #[cfg(feature = "hostlib")]
+        {
+            harn_hostlib::fs_snapshot::drop_session_snapshots(session_id);
+        }
         harn_vm::agent_sessions::close_with_status(
             session_id,
             "client_request",

@@ -225,10 +225,7 @@ async fn acp_fs_mode_and_commit_staged_apply_deferred_hostlib_writes() {
 async fn acp_session_restore_tool_call_restores_pre_image_and_emits_update() {
     use harn_hostlib::tools::permissions;
 
-    permissions::reset();
     permissions::enable_for_test();
-    harn_hostlib::fs_snapshot::reset_for_test();
-    harn_vm::agent_sessions::reset_session_store();
 
     let dir = tempfile::TempDir::new().unwrap();
     let file = dir.path().join("subject.txt");
@@ -251,10 +248,18 @@ async fn acp_session_restore_tool_call_restores_pre_image_and_emits_update() {
         .expect("session id")
         .to_string();
 
-    // Take an explicit snapshot keyed by the synthetic tool-call id.
+    // session/new returns a fresh UUID per call so this test's snapshot
+    // bundle cannot collide with another test running in the same
+    // process. Synthesize a unique tool-call id to match.
+    let tool_call_id = format!(
+        "tc-acp-restore-{}-{}",
+        std::process::id(),
+        ACP_RESTORE_COUNTER.fetch_add(1, std::sync::atomic::Ordering::Relaxed),
+    );
+
     let snapshot = harn_hostlib::fs_snapshot::snapshot(
         &session_id,
-        "tc-acp-restore",
+        &tool_call_id,
         &[file.to_string_lossy().into_owned()],
         Some(dir.path()),
     )
@@ -271,12 +276,12 @@ async fn acp_session_restore_tool_call_restores_pre_image_and_emits_update() {
             "method": "session/restore_tool_call",
             "params": {
                 "sessionId": session_id.clone(),
-                "toolCallId": "tc-acp-restore",
+                "toolCallId": tool_call_id.clone(),
             },
         }))
         .await;
     let response = recv_json(&mut rx).await;
-    assert_eq!(response["result"]["toolCallId"], "tc-acp-restore");
+    assert_eq!(response["result"]["toolCallId"], tool_call_id);
     let restored = response["result"]["restoredPaths"].as_array().unwrap();
     assert_eq!(restored.len(), 1);
 
@@ -287,14 +292,19 @@ async fn acp_session_restore_tool_call_restores_pre_image_and_emits_update() {
         "tool_call_update"
     );
     assert_eq!(update["params"]["update"]["status"], "restored");
-    assert_eq!(update["params"]["update"]["toolCallId"], "tc-acp-restore");
+    assert_eq!(update["params"]["update"]["toolCallId"], tool_call_id);
     assert_eq!(
         update["params"]["update"]["_meta"]["harn"]["kind"],
         "tool_call_restored"
     );
 
     assert_eq!(std::fs::read(&file).unwrap(), b"pre");
+
+    harn_hostlib::fs_snapshot::drop_session_snapshots(&session_id);
 }
+
+#[cfg(feature = "hostlib")]
+static ACP_RESTORE_COUNTER: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
 
 #[test]
 fn normalize_host_capabilities_wraps_array_entries_in_ops_dicts() {

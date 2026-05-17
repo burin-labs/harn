@@ -50,10 +50,13 @@ Snapshot manifests record the snapshot id, originating scope id,
 capture timestamp, workspace root, and per-path entries. File bodies
 are content-addressed by SHA-256.
 
-When a session bundle exceeds the configurable byte cap
+When a session bundle exceeds the per-session byte cap
 (`harn_hostlib::fs_snapshot::DEFAULT_SESSION_BYTE_CAP`, 1 GiB) the
 oldest snapshots are evicted in insertion order. Embedders can override
-the cap with `harn_hostlib::fs_snapshot::set_session_byte_cap`.
+the cap per session with
+`harn_hostlib::fs_snapshot::configure_session_byte_cap`. The ACP server
+also calls `harn_hostlib::fs_snapshot::drop_session_snapshots` on
+`session/close` so closed sessions never leak their snapshot bundles.
 
 Snapshots are session-scoped and ephemeral. Durable rollback across
 process restarts is out of scope; consumers that need it bundle the

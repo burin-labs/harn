@@ -226,17 +226,14 @@ return {{
 
 #[test]
 fn end_to_end_fs_snapshot_and_auto_restore_via_harn_script() {
-    use std::sync::{Mutex, OnceLock};
-    static GUARD: OnceLock<Mutex<()>> = OnceLock::new();
-    let _serialize = GUARD
-        .get_or_init(|| Mutex::new(()))
-        .lock()
-        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    use std::sync::atomic::{AtomicU64, Ordering};
+    static COUNTER: AtomicU64 = AtomicU64::new(0);
+    let n = COUNTER.fetch_add(1, Ordering::Relaxed);
+    let session = format!("smoke-snapshot-session-{}-{}", std::process::id(), n);
+    let scope = format!("smoke-tc-{n}");
     permissions::reset();
-    harn_hostlib::fs_snapshot::reset_for_test();
-    harn_vm::agent_sessions::reset_session_store();
-    let _session_guard = harn_vm::agent_sessions::enter_current_session("smoke-snapshot-session");
-    let _tool_guard = harn_vm::agent_sessions::enter_current_tool_call("smoke-tc");
+    let _session_guard = harn_vm::agent_sessions::enter_current_session(session.clone());
+    let _tool_guard = harn_vm::agent_sessions::enter_current_tool_call(scope.clone());
 
     let dir = TempDir::new().unwrap();
     let root = dir.path();
@@ -245,8 +242,6 @@ fn end_to_end_fs_snapshot_and_auto_restore_via_harn_script() {
 
     let root_str = root.to_string_lossy().replace('\\', "/");
     let target = format!("{}/target.txt", root_str);
-    let session = "smoke-snapshot-session";
-    let scope = "smoke-tc";
 
     // The script opens an auto-on-write snapshot keyed by the tool-call id,
     // performs a destructive `hostlib_tools_write_file`, then asks

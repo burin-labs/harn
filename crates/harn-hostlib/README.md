@@ -253,11 +253,13 @@ overlay. Four builtins under the same `fs/` schema bucket:
 Each snapshot is content-addressed under
 `.harn/state/snapshots/<session>/<scope>/bodies/<sha256>` with a
 `manifest.json` mapping logical paths to entries. When a session bundle
-exceeds the configurable byte cap (default 1 GiB; tune with
-[`fs_snapshot::set_session_byte_cap`]), the oldest snapshots are
-evicted in insertion order. Snapshots are ephemeral and live only as
-long as the in-memory store; consumers that need durable rollback bundle
-them into a session via `session/load`.
+exceeds the per-session byte cap (default
+[`fs_snapshot::DEFAULT_SESSION_BYTE_CAP`] = 1 GiB; override per session
+with [`fs_snapshot::configure_session_byte_cap`]), the oldest snapshots
+are evicted in insertion order. Snapshots are ephemeral and live only
+as long as the in-memory store; consumers that need durable rollback
+bundle them into a session via `session/load`, and the ACP server drops
+the bundle automatically on `session/close`.
 
 To advertise `restoreToolCall` over ACP the agent emits
 `{ sessionCapabilities: { restoreToolCall: {} } }` in the initialize
