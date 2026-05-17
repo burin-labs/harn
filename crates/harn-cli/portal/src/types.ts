@@ -322,6 +322,20 @@ export type PortalSpan = {
   metadata: Record<string, unknown>
 }
 
+export type PortalActivityAuditLayer = {
+  name: string
+  status: string
+  metadata?: Record<string, unknown>
+}
+
+export type PortalActivityAudit = {
+  reason?: string
+  kind?: string
+  status: string
+  layers: PortalActivityAuditLayer[]
+  receipt_uri?: string
+}
+
 export type PortalActivity = {
   label: string
   kind: string
@@ -330,6 +344,7 @@ export type PortalActivity = {
   stage_node_id: string | null
   call_id: string | null
   summary: string
+  audit?: PortalActivityAudit
 }
 
 export type PortalTransition = {

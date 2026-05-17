@@ -7,11 +7,12 @@ use axum::http::StatusCode;
 use axum::Json;
 
 use super::dto::{
-    PortalActivity, PortalArtifact, PortalCheckpoint, PortalChildRun, PortalCostReport,
-    PortalCostSummary, PortalCostTrendPoint, PortalExecutionSummary, PortalInsight,
-    PortalPolicySummary, PortalProviderCostBreakdown, PortalReplayAssertion, PortalReplaySummary,
-    PortalRunDetail, PortalRunSummary, PortalSpan, PortalStage, PortalStageDebug, PortalStats,
-    PortalStorySection, PortalTranscriptStep, PortalTransition,
+    PortalActivity, PortalActivityAudit, PortalActivityAuditLayer, PortalArtifact,
+    PortalCheckpoint, PortalChildRun, PortalCostReport, PortalCostSummary, PortalCostTrendPoint,
+    PortalExecutionSummary, PortalInsight, PortalPolicySummary, PortalProviderCostBreakdown,
+    PortalReplayAssertion, PortalReplaySummary, PortalRunDetail, PortalRunSummary, PortalSpan,
+    PortalStage, PortalStageDebug, PortalStats, PortalStorySection, PortalTranscriptStep,
+    PortalTransition,
 };
 use super::errors::{bad_request_error, internal_error};
 use super::query::{ErrorResponse, ListRunsQuery};
@@ -438,7 +439,8 @@ pub(super) fn build_run_detail(
     let summary = build_run_summary(relative_path, 0, run);
     let spans = build_spans(run);
     let stages = build_stages(run);
-    let activities = build_activities(&spans, &stages);
+    let audit_index = build_tool_call_audit_index(run);
+    let activities = build_activities(&spans, &stages, &audit_index);
     let transitions = build_transitions(run);
     let checkpoints = build_checkpoints(run);
     let artifacts = build_artifacts(run);
@@ -658,24 +660,183 @@ fn build_spans(run: &harn_vm::orchestration::RunRecord) -> Vec<PortalSpan> {
         .collect()
 }
 
-fn build_activities(spans: &[PortalSpan], stages: &[PortalStage]) -> Vec<PortalActivity> {
+fn build_activities(
+    spans: &[PortalSpan],
+    stages: &[PortalStage],
+    audit_index: &HashMap<String, PortalActivityAudit>,
+) -> Vec<PortalActivity> {
     spans
         .iter()
         .filter(|span| span.kind != "pipeline")
-        .map(|span| PortalActivity {
-            label: span.label.clone(),
-            kind: span.kind.clone(),
-            started_offset_ms: span.start_ms,
-            duration_ms: span.duration_ms,
-            stage_node_id: owning_stage(span, stages).map(|stage| stage.node_id.clone()),
-            call_id: span
+        .map(|span| {
+            let call_id = span
                 .metadata
                 .get("call_id")
                 .and_then(|value| value.as_str())
-                .map(str::to_string),
-            summary: compact_metadata(&span.metadata),
+                .map(str::to_string);
+            let audit = call_id
+                .as_deref()
+                .and_then(|id| audit_index.get(id).cloned());
+            PortalActivity {
+                label: span.label.clone(),
+                kind: span.kind.clone(),
+                started_offset_ms: span.start_ms,
+                duration_ms: span.duration_ms,
+                stage_node_id: owning_stage(span, stages).map(|stage| stage.node_id.clone()),
+                call_id,
+                summary: compact_metadata(&span.metadata),
+                audit,
+            }
         })
         .collect()
+}
+
+/// Build a lookup table from `tool_call_id` to the joined audit/receipt
+/// payload by scanning every transcript on the run (run-level plus
+/// per-stage). One pass per run, O(1) lookup per activity span — keeps
+/// `build_activities` linear in the span count even when the audit
+/// stream is large.
+fn build_tool_call_audit_index(
+    run: &harn_vm::orchestration::RunRecord,
+) -> HashMap<String, PortalActivityAudit> {
+    let mut index: HashMap<String, PortalActivityAudit> = HashMap::new();
+    if let Some(transcript) = &run.transcript {
+        collect_tool_call_audit_events(transcript, &mut index);
+    }
+    for stage in &run.stages {
+        if let Some(transcript) = &stage.transcript {
+            collect_tool_call_audit_events(transcript, &mut index);
+        }
+    }
+    index
+}
+
+fn collect_tool_call_audit_events(
+    transcript: &serde_json::Value,
+    index: &mut HashMap<String, PortalActivityAudit>,
+) {
+    let Some(events) = transcript.get("events").and_then(|value| value.as_array()) else {
+        return;
+    };
+    for event in events {
+        let kind = event
+            .get("kind")
+            .and_then(|value| value.as_str())
+            .unwrap_or_default();
+        if kind != "tool_call_audit" {
+            continue;
+        }
+        let metadata = event.get("metadata");
+        let Some(call_id) = metadata
+            .and_then(|m| m.get("tool_call_id"))
+            .and_then(|value| value.as_str())
+            .filter(|value| !value.is_empty())
+        else {
+            continue;
+        };
+        let entry = portal_audit_from_event_metadata(metadata.unwrap_or(&serde_json::Value::Null));
+        // Latest audit for a given `tool_call_id` wins — middleware can
+        // emit multiple events in sequence (e.g. consent prompt update
+        // followed by the final outcome) and the most recent payload
+        // carries the terminal status + receipt.
+        index.insert(call_id.to_string(), entry);
+    }
+}
+
+fn portal_audit_from_event_metadata(metadata: &serde_json::Value) -> PortalActivityAudit {
+    let receipt = metadata.get("receipt");
+    let audit = metadata
+        .get("audit")
+        .cloned()
+        .unwrap_or(serde_json::Value::Null);
+    let reason = audit
+        .get("summary")
+        .and_then(|value| value.as_str())
+        .map(str::to_string)
+        .or_else(|| {
+            receipt
+                .and_then(|r| r.get("reason"))
+                .and_then(|value| value.as_str())
+                .map(str::to_string)
+        })
+        .filter(|value| !value.is_empty());
+    let kind = audit
+        .get("kind")
+        .and_then(|value| value.as_str())
+        .map(str::to_string)
+        .or_else(|| {
+            receipt
+                .and_then(|r| r.get("kind"))
+                .and_then(|value| value.as_str())
+                .map(str::to_string)
+        })
+        .filter(|value| !value.is_empty());
+    let status = receipt
+        .and_then(|r| r.get("status"))
+        .and_then(|value| value.as_str())
+        .map(str::to_string)
+        .unwrap_or_else(|| "unknown".to_string());
+    let layers = audit
+        .get("layers")
+        .and_then(|value| value.as_array())
+        .map(|items| {
+            items
+                .iter()
+                .filter_map(portal_audit_layer_from_value)
+                .collect::<Vec<_>>()
+        })
+        .unwrap_or_default();
+    let receipt_uri = audit
+        .get("receipt_uri")
+        .and_then(|value| value.as_str())
+        .or_else(|| {
+            receipt
+                .and_then(|r| r.get("audit"))
+                .and_then(|value| value.get("receipt_uri"))
+                .and_then(|value| value.as_str())
+        })
+        .map(str::to_string)
+        .filter(|value| !value.is_empty());
+
+    PortalActivityAudit {
+        reason,
+        kind,
+        status,
+        layers,
+        receipt_uri,
+    }
+}
+
+fn portal_audit_layer_from_value(value: &serde_json::Value) -> Option<PortalActivityAuditLayer> {
+    let name = value
+        .get("name")
+        .and_then(|v| v.as_str())
+        .map(str::to_string)
+        .filter(|v| !v.is_empty())?;
+    let status = value
+        .get("status")
+        .and_then(|v| v.as_str())
+        .map(str::to_string)
+        .unwrap_or_else(|| "unknown".to_string());
+    let metadata = value
+        .as_object()
+        .map(|obj| {
+            let mut clone = serde_json::Map::new();
+            for (key, val) in obj {
+                if key == "name" || key == "status" {
+                    continue;
+                }
+                clone.insert(key.clone(), val.clone());
+            }
+            clone
+        })
+        .filter(|map| !map.is_empty())
+        .map(serde_json::Value::Object);
+    Some(PortalActivityAuditLayer {
+        name,
+        status,
+        metadata,
+    })
 }
 
 fn build_transitions(run: &harn_vm::orchestration::RunRecord) -> Vec<PortalTransition> {

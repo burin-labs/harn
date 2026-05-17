@@ -150,6 +150,44 @@ pub(super) struct PortalActivity {
     pub(super) stage_node_id: Option<String>,
     pub(super) call_id: Option<String>,
     pub(super) summary: String,
+    /// Captured `tool_call_audit` payload joined by `call_id`, when the
+    /// underlying middleware stack attached one. `None` keeps the
+    /// activity row visually clean for spans that never went through
+    /// `with_required_reason` / `with_audit_log` / etc.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub(super) audit: Option<PortalActivityAudit>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub(super) struct PortalActivityAudit {
+    /// User-facing one-liner pulled from `audit.summary`
+    /// (ACP `title` / OpenAI `summary_text` convention). Renders as a
+    /// chip below the tool name.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub(super) reason: Option<String>,
+    /// Optional ACP-style classification (`read`, `search`, etc.) from
+    /// `audit.kind` or the typed receipt.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub(super) kind: Option<String>,
+    /// Receipt status (`ok` / `error` / `consent_denied` / etc.) when a
+    /// `ToolCallReceipt` was attached.
+    pub(super) status: String,
+    /// Dispatch-order layer chain (outer-to-inner) extracted from
+    /// `audit.layers`. Powers the tooltip on hover.
+    pub(super) layers: Vec<PortalActivityAuditLayer>,
+    /// Pointer to a persisted receipt (`file://` for local sinks or a
+    /// pre-signed cloud URL). Passed through unchanged — the portal
+    /// never rewrites it.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub(super) receipt_uri: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub(super) struct PortalActivityAuditLayer {
+    pub(super) name: String,
+    pub(super) status: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub(super) metadata: Option<serde_json::Value>,
 }
 
 #[derive(Debug, Clone, Serialize)]
