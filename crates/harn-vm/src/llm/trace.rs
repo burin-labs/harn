@@ -128,6 +128,18 @@ pub enum AgentTraceEvent {
         nudge_used: bool,
         correction_prompt: String,
     },
+    /// Emitted when `llm_call` aborts a streaming provider response
+    /// because the partial JSON content can no longer satisfy
+    /// `output_schema`. `chunks_consumed` counts text-delta chunks seen
+    /// before the abort; `provider` / `model` track the route that fired
+    /// so cost dashboards can attribute the savings.
+    SchemaStreamAborted {
+        provider: String,
+        model: String,
+        reason: String,
+        path: String,
+        chunks_consumed: usize,
+    },
     TypedCheckpoint {
         name: String,
         status: String,
@@ -184,6 +196,7 @@ pub fn agent_trace_summary() -> serde_json::Value {
         let mut native_text_tool_fallbacks = 0usize;
         let mut native_text_tool_fallback_rejections = 0usize;
         let mut empty_completion_retries = 0usize;
+        let mut schema_stream_aborts = 0usize;
         let mut typed_checkpoints = 0usize;
         let mut typed_checkpoint_failures = 0usize;
         let mut total_input_tokens = 0i64;
@@ -240,6 +253,9 @@ pub fn agent_trace_summary() -> serde_json::Value {
                     total_duration_ms = *d;
                 }
                 AgentTraceEvent::SchemaRetry { .. } => {}
+                AgentTraceEvent::SchemaStreamAborted { .. } => {
+                    schema_stream_aborts += 1;
+                }
                 AgentTraceEvent::TypedCheckpoint { final_accepted, .. } => {
                     typed_checkpoints += 1;
                     if !final_accepted {
@@ -270,6 +286,7 @@ pub fn agent_trace_summary() -> serde_json::Value {
             "native_text_tool_fallbacks": native_text_tool_fallbacks,
             "native_text_tool_fallback_rejections": native_text_tool_fallback_rejections,
             "empty_completion_retries": empty_completion_retries,
+            "schema_stream_aborts": schema_stream_aborts,
             "typed_checkpoints": typed_checkpoints,
             "typed_checkpoint_failures": typed_checkpoint_failures,
             "total_input_tokens": total_input_tokens,

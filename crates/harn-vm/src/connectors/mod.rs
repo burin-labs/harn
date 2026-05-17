@@ -1014,6 +1014,19 @@ impl MetricsRegistry {
         );
     }
 
+    /// Track LLM streaming responses aborted mid-stream by
+    /// `schema_stream_abort` because the partial JSON cannot satisfy
+    /// `output_schema`. Counter is labelled by `(provider, model)` so
+    /// dashboards can attribute the savings — each abort short-circuits
+    /// a provider stream that would otherwise have run to completion.
+    pub fn record_schema_stream_aborted(&self, provider: &str, model: &str) {
+        self.increment_counter(
+            "harn_llm_schema_stream_aborted_total",
+            labels([("provider", provider), ("model", model)]),
+            1,
+        );
+    }
+
     pub fn render_prometheus(&self) -> String {
         let snapshot = self.snapshot();
         let counters = [
@@ -1234,6 +1247,7 @@ fn metric_family_names(kind: MetricKind) -> &'static [&'static str] {
             "harn_llm_calls_total",
             "harn_llm_cost_usd_total",
             "harn_llm_cache_hits_total",
+            "harn_llm_schema_stream_aborted_total",
             "harn_scheduler_selections_total",
             "harn_scheduler_deferrals_total",
             "harn_scheduler_starvation_promotions_total",

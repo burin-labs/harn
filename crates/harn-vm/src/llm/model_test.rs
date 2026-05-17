@@ -85,6 +85,7 @@ pub async fn run_model_smoke_test(
         json_schema: None,
         output_schema: None,
         output_validation: None,
+        schema_stream_abort: false,
         thinking: ThinkingConfig::Disabled,
         anthropic_beta_features: Vec::new(),
         vision: false,

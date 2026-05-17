@@ -235,7 +235,7 @@ impl ToolCallErrorCategory {
             | Internal::Overloaded
             | Internal::ServerError
             | Internal::TransientNetwork => Self::Network,
-            Internal::SchemaValidation => Self::SchemaValidation,
+            Internal::SchemaValidation | Internal::SchemaStreamAborted => Self::SchemaValidation,
             Internal::ToolError => Self::ToolError,
             Internal::ToolRejected => Self::PermissionDenied,
             Internal::Cancelled => Self::Cancelled,

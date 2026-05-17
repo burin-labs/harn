@@ -590,6 +590,8 @@ mod tests {
             },
             response_format: Some("json".to_string()),
             json_schema: Some(serde_json::json!({"type": "object"})),
+            output_schema: Some(serde_json::json!({"type": "object"})),
+            schema_stream_abort: false,
             thinking: ThinkingConfig::Disabled,
             anthropic_beta_features: Vec::new(),
             vision: false,

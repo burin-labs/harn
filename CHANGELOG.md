@@ -33,6 +33,25 @@ condensed series summaries instead of full per-patch history.
   structured stream intact. The `run` command is now listed in
   `harn --json-schemas` with `schemaVersion: 1`. Foundation for the
   `--json` epic (#1753) and the burin-code TUI replatform.
+- **`llm_call` mid-stream `output_schema` abort (#1775).** When an
+  `llm_call` carries `output_schema` and `schema_stream_abort` is on
+  (the new default for schema-bearing calls), the streaming transport
+  feeds every visible text delta through the incremental validator from
+  `std/json/stream`. The first delta that makes the partial JSON unable
+  to satisfy the schema short-circuits the provider stream, emits a
+  `schema_stream_aborted` transcript event (`provider`, `model`,
+  `reason`, `path`, `chunks_consumed`), increments
+  `harn_llm_schema_stream_aborted_total{provider,model}`, and surfaces
+  an `ErrorCategory::SchemaStreamAborted` to the schema-retry loop.
+  The loop consumes one `schema_retries` slot per abort and folds the
+  abort `path` + `reason` into the corrective nudge, so the next
+  attempt gets a sharper prompt than a generic stream failure. Opt out
+  by passing `schema_stream_abort: false` to let the stream complete
+  and rely on `schema_retries` for post-hoc recovery. SSE
+  (`consume_sse_lines`), NDJSON (`consume_ollama_ndjson_lines`), and
+  the in-process `FakeLlmProvider` all route through the shared
+  `StreamSchemaWatch` helper so script-driven and test-driven paths
+  exercise the same logic.
 - **`with_scoped_executor` tool-caller middleware (#1702).** Narrows the
   active `CapabilityPolicy` for the duration of one tool dispatch:
   `compose_tool_callers([..., with_scoped_executor({stage, allowed_tools,

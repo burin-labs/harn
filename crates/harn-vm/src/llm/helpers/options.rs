@@ -1072,6 +1072,22 @@ pub(crate) fn extract_llm_options(
         validate_output_format_supported(&output_format, &provider, &model, &caps)?;
     }
     let output_schema = output_schema.or_else(|| output_format.schema().cloned());
+    // `schema_stream_abort` defaults to true whenever a schema is in play,
+    // so callers that expect structured output get the early-abort win
+    // automatically. Explicit `false` opts out and lets the stream run to
+    // completion (relying on `schema_retries` for post-hoc recovery).
+    let schema_stream_abort = match options.as_ref().and_then(|o| o.get("schema_stream_abort")) {
+        Some(VmValue::Bool(value)) => *value,
+        Some(VmValue::Nil) | None => output_schema.is_some(),
+        Some(other) => {
+            return Err(VmError::Thrown(VmValue::String(std::rc::Rc::from(
+                format!(
+                    "llm_call: `schema_stream_abort` must be a bool, got {}",
+                    other.type_name()
+                ),
+            ))));
+        }
+    };
 
     // Reject the deprecated `transcript` option key. Conversation
     // lifecycle is expressed through `session_id` + the explicit
@@ -1368,6 +1384,7 @@ pub(crate) fn extract_llm_options(
         json_schema,
         output_schema,
         output_validation,
+        schema_stream_abort,
         thinking,
         anthropic_beta_features,
         vision,

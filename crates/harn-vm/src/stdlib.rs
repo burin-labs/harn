@@ -31,7 +31,7 @@ pub(crate) mod io;
 mod iter;
 pub(crate) mod json;
 mod json_query;
-mod json_stream;
+pub(crate) mod json_stream;
 mod junit;
 mod logging;
 pub mod long_running;
