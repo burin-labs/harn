@@ -18,6 +18,17 @@ use crate::skill_loader::{
 };
 
 mod explain_cost;
+pub mod json_events;
+
+use self::json_events::NdjsonEmitter;
+
+/// JSON event-stream configuration for `--json` runs.
+#[derive(Clone, Default)]
+pub struct RunJsonOptions {
+    /// Suppress `stdout` / `stderr` events. Transcript, tool, hook,
+    /// persona, and the terminal result/error events still flow.
+    pub quiet: bool,
+}
 
 pub(crate) enum RunFileMcpServeMode {
     Stdio,
@@ -332,6 +343,7 @@ struct ExecuteRunInputs<'a> {
     attestation: Option<RunAttestationOptions>,
     profile: RunProfileOptions,
     interrupt_tokens: Option<RunInterruptTokens>,
+    json: Option<(RunJsonOptions, Box<dyn io::Write + Send>)>,
 }
 
 /// Captured outcome of an in-process `execute_run` invocation. Tests use this
@@ -406,6 +418,7 @@ pub(crate) async fn run_file(
         llm_mock_mode,
         attestation,
         profile,
+        None,
     )
     .await;
 }
@@ -423,6 +436,7 @@ pub(crate) fn run_explain_cost_file_with_skill_dirs(path: &str) {
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 pub(crate) async fn run_file_with_skill_dirs(
     path: &str,
     trace: bool,
@@ -432,11 +446,14 @@ pub(crate) async fn run_file_with_skill_dirs(
     llm_mock_mode: CliLlmMockMode,
     attestation: Option<RunAttestationOptions>,
     profile: RunProfileOptions,
+    json: Option<RunJsonOptions>,
 ) {
     // Graceful shutdown: flush run records before exit on SIGINT/SIGTERM.
     let interrupt_tokens = install_signal_shutdown_handler();
 
     let _stdout_passthrough = StdoutPassthroughGuard::enable();
+    let json_with_stdout =
+        json.map(|opts| (opts, Box::new(io::stdout()) as Box<dyn io::Write + Send>));
     let outcome = execute_run_inner(ExecuteRunInputs {
         path,
         trace,
@@ -447,6 +464,7 @@ pub(crate) async fn run_file_with_skill_dirs(
         attestation,
         profile,
         interrupt_tokens: Some(interrupt_tokens.clone()),
+        json: json_with_stdout,
     })
     .await;
 
@@ -608,6 +626,40 @@ pub async fn execute_run(
         attestation,
         profile,
         interrupt_tokens: None,
+        json: None,
+    })
+    .await
+}
+
+/// `execute_run` variant for `--json` mode. Returns once the run is
+/// complete; the NDJSON event stream — including the terminal `result`
+/// or `error` event — has already been written to `out` and flushed.
+/// `out` must be `Send` because the run-event sink may be called from
+/// any worker thread the VM spawns.
+#[allow(clippy::too_many_arguments)]
+pub async fn execute_run_json(
+    path: &str,
+    trace: bool,
+    denied_builtins: HashSet<String>,
+    script_argv: Vec<String>,
+    skill_dirs_raw: Vec<String>,
+    llm_mock_mode: CliLlmMockMode,
+    attestation: Option<RunAttestationOptions>,
+    profile: RunProfileOptions,
+    out: Box<dyn io::Write + Send>,
+    options: RunJsonOptions,
+) -> RunOutcome {
+    execute_run_inner(ExecuteRunInputs {
+        path,
+        trace,
+        denied_builtins,
+        script_argv,
+        skill_dirs_raw,
+        llm_mock_mode,
+        attestation,
+        profile,
+        interrupt_tokens: None,
+        json: Some((options, out)),
     })
     .await
 }
@@ -623,13 +675,24 @@ async fn execute_run_inner(inputs: ExecuteRunInputs<'_>) -> RunOutcome {
         attestation,
         profile,
         interrupt_tokens,
+        json,
     } = inputs;
+
+    // `--json` installs an in-process sink that diverts every
+    // observable VM event (stdout, stderr, transcript, tool, hook,
+    // persona) into a single NDJSON stream on `out`. The sink stays
+    // active until we drop the guard below — fatal errors emit a
+    // terminal `error` event on the same stream before bailing.
+    let json_session = json.map(|(options, out)| JsonRunSession::install(options, out));
 
     let mut stderr = String::new();
     let mut stdout = String::new();
 
     let Some(LoadedChunk { source, chunk }) = compile_or_load_chunk_for_run(path, &mut stderr)
     else {
+        if let Some(session) = json_session {
+            return session.finalize_error("compile_error", stderr, 1);
+        }
         return RunOutcome {
             stdout,
             stderr,
@@ -645,6 +708,9 @@ async fn execute_run_inner(inputs: ExecuteRunInputs<'_>) -> RunOutcome {
     }
     if let Err(error) = install_cli_llm_mock_mode(&llm_mock_mode) {
         stderr.push_str(&format!("error: {error}\n"));
+        if let Some(session) = json_session {
+            return session.finalize_error("llm_mock_install", error, 1);
+        }
         return RunOutcome {
             stdout,
             stderr,
@@ -736,6 +802,9 @@ async fn execute_run_inner(inputs: ExecuteRunInputs<'_>) -> RunOutcome {
         stderr.push_str(&format!(
             "error: failed to install manifest triggers: {error}\n"
         ));
+        if let Some(session) = json_session {
+            return session.finalize_error("manifest_triggers", error.to_string(), 1);
+        }
         return RunOutcome {
             stdout,
             stderr,
@@ -746,6 +815,9 @@ async fn execute_run_inner(inputs: ExecuteRunInputs<'_>) -> RunOutcome {
         stderr.push_str(&format!(
             "error: failed to install manifest hooks: {error}\n"
         ));
+        if let Some(session) = json_session {
+            return session.finalize_error("manifest_hooks", error.to_string(), 1);
+        }
         return RunOutcome {
             stdout,
             stderr,
@@ -765,6 +837,9 @@ async fn execute_run_inner(inputs: ExecuteRunInputs<'_>) -> RunOutcome {
         .await;
     if let Err(error) = persist_cli_llm_mock_recording(&llm_mock_mode) {
         stderr.push_str(&format!("error: {error}\n"));
+        if let Some(session) = json_session {
+            return session.finalize_error("llm_mock_record", error, 1);
+        }
         return RunOutcome {
             stdout,
             stderr,
@@ -796,6 +871,9 @@ async fn execute_run_inner(inputs: ExecuteRunInputs<'_>) -> RunOutcome {
             stderr.push_str(&format!(
                 "error: failed to emit provenance receipt: {error}\n"
             ));
+            if let Some(session) = json_session {
+                return session.finalize_error("attestation", error.to_string(), 1);
+            }
             return RunOutcome {
                 stdout,
                 stderr,
@@ -819,6 +897,10 @@ async fn execute_run_inner(inputs: ExecuteRunInputs<'_>) -> RunOutcome {
             if exit_code != 0 {
                 stderr.push_str(&render_return_value_error(&return_value));
             }
+            if let Some(session) = json_session {
+                let value = harn_vm::llm::vm_value_to_json(&return_value);
+                return session.finalize_result(value, exit_code);
+            }
             RunOutcome {
                 stdout,
                 stderr,
@@ -831,6 +913,9 @@ async fn execute_run_inner(inputs: ExecuteRunInputs<'_>) -> RunOutcome {
                 if let Err(error) = render_and_persist_profile(&profile, &mut stderr) {
                     stderr.push_str(&format!("warning: failed to write profile: {error}\n"));
                 }
+            }
+            if let Some(session) = json_session {
+                return session.finalize_error("runtime", rendered_error, 1);
             }
             RunOutcome {
                 stdout,
@@ -972,6 +1057,69 @@ fn exit_code_from_return_value(value: &harn_vm::VmValue) -> i32 {
             fields,
         } if enum_name.as_ref() == "Result" && variant.as_ref() == "Err" => 1,
         _ => 0,
+    }
+}
+
+/// State for a single `harn run --json` invocation. Installs the
+/// run-event sink in [`Self::install`] and removes it in [`Drop`], so
+/// every exit path through `execute_run_inner` cleans up correctly
+/// even if a panic unwinds out of the VM. Save-and-restore of any
+/// previously installed sink keeps the helper safe to nest (rare, but
+/// in-process embeddings can call into `harn run` from a host that
+/// already had a sink wired).
+///
+/// `finalize_result` / `finalize_error` emit the terminal event and
+/// build a [`RunOutcome`] whose stdout/stderr captured-buffer fields
+/// stay **empty** — the canonical stream is on `out`.
+/// `outcome.exit_code` still carries the process exit code so the
+/// binary entry can `process::exit(...)`.
+struct JsonRunSession {
+    emitter: self::json_events::NdjsonEmitter,
+    prior_sink: Option<Arc<dyn harn_vm::run_events::RunEventSink>>,
+}
+
+impl JsonRunSession {
+    fn install(options: RunJsonOptions, out: Box<dyn io::Write + Send>) -> Self {
+        let emitter = NdjsonEmitter::new(out, options.quiet);
+        let prior_sink = harn_vm::run_events::install_sink(emitter.sink());
+        Self {
+            emitter,
+            prior_sink,
+        }
+    }
+
+    fn finalize_result(self, value: serde_json::Value, exit_code: i32) -> RunOutcome {
+        self.emitter.emit_result(value, exit_code);
+        RunOutcome {
+            stdout: String::new(),
+            stderr: String::new(),
+            exit_code,
+        }
+    }
+
+    fn finalize_error(
+        self,
+        code: impl Into<String>,
+        message: impl Into<String>,
+        exit_code: i32,
+    ) -> RunOutcome {
+        self.emitter.emit_error(code, message);
+        RunOutcome {
+            stdout: String::new(),
+            stderr: String::new(),
+            exit_code,
+        }
+    }
+}
+
+impl Drop for JsonRunSession {
+    fn drop(&mut self) {
+        match self.prior_sink.take() {
+            Some(prior) => {
+                harn_vm::run_events::install_sink(prior);
+            }
+            None => harn_vm::run_events::clear_sink(),
+        }
     }
 }
 

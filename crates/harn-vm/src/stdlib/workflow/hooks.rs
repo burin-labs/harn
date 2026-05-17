@@ -219,6 +219,15 @@ pub(super) async fn fire_session_hook_builtin(args: Vec<VmValue>) -> Result<VmVa
     }
 
     let control = crate::orchestration::run_lifecycle_hooks_with_control(event, &payload).await?;
+    crate::run_events::emit(crate::run_events::RunEvent::Hook {
+        name: event_name.clone(),
+        phase: match &control {
+            crate::orchestration::HookControl::Allow => "allow".to_string(),
+            crate::orchestration::HookControl::Block { .. } => "block".to_string(),
+            crate::orchestration::HookControl::Decision { kind, .. } => format!("decision:{kind}"),
+        },
+        payload: payload.clone(),
+    });
     let mut out: BTreeMap<String, VmValue> = BTreeMap::new();
     match control {
         crate::orchestration::HookControl::Allow => {

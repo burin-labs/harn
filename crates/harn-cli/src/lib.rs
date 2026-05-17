@@ -175,6 +175,9 @@ async fn async_main() {
                 agent_id: args.attest_agent.clone(),
             });
             let profile_options = run_profile_options(&args.profile);
+            let json_options = args
+                .json
+                .then_some(commands::run::RunJsonOptions { quiet: args.quiet });
 
             match (args.eval.as_deref(), args.file.as_deref()) {
                 (Some(code), None) => {
@@ -197,6 +200,7 @@ async fn async_main() {
                             llm_mock_mode.clone(),
                             attestation.clone(),
                             profile_options.clone(),
+                            json_options.clone(),
                         )
                         .await;
                     }
@@ -215,6 +219,7 @@ async fn async_main() {
                             llm_mock_mode,
                             attestation,
                             profile_options,
+                            json_options,
                         )
                         .await
                     }

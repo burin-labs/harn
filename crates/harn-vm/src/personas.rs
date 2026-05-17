@@ -1662,6 +1662,7 @@ async fn append_persona_event(
 ) -> Result<u64, String> {
     let mut headers = BTreeMap::new();
     headers.insert("persona".to_string(), persona.to_string());
+    forward_persona_run_event(persona, kind, &payload);
     let event = LogEvent {
         kind: kind.to_string(),
         payload,
@@ -1671,6 +1672,36 @@ async fn append_persona_event(
     log.append(&runtime_topic()?, event)
         .await
         .map_err(|error| error.to_string())
+}
+
+/// Mirror persona-stage transitions onto the run-events sink for
+/// `harn run --json`. Both `persona.stage.*` (per-stage moves) and
+/// `persona.run.*` (whole-run lifecycle) kinds are surfaced as
+/// [`crate::run_events::RunEvent::PersonaStage`]; the `transition`
+/// field carries the suffix (`started`, `completed`, `handoff_started`,
+/// `failed`, ...) and `stage` carries the named stage when present.
+fn forward_persona_run_event(persona: &str, kind: &str, payload: &serde_json::Value) {
+    if !crate::run_events::sink_active() {
+        return;
+    }
+    let transition = kind
+        .strip_prefix("persona.stage.")
+        .or_else(|| kind.strip_prefix("persona.run."));
+    let Some(transition) = transition else {
+        return;
+    };
+    let stage = payload
+        .get("stage")
+        .or_else(|| payload.get("to"))
+        .or_else(|| payload.get("name"))
+        .and_then(|value| value.as_str())
+        .unwrap_or("")
+        .to_string();
+    crate::run_events::emit(crate::run_events::RunEvent::PersonaStage {
+        persona: persona.to_string(),
+        stage,
+        transition: transition.to_string(),
+    });
 }
 
 struct PersonaValueEventDelta {

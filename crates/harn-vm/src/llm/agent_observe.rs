@@ -257,6 +257,7 @@ pub(crate) fn parse_retry_after(msg: &str) -> Option<u64> {
 pub(super) fn append_llm_transcript_entry(entry: &serde_json::Value) {
     let mut redacted = entry.clone();
     crate::redact::current_policy().redact_json_in_place(&mut redacted);
+    forward_transcript_run_events(&redacted);
     append_llm_transcript_event_log(&redacted);
     let Some(dir) = current_transcript_dir() else {
         return;
@@ -279,6 +280,92 @@ pub(super) fn append_llm_transcript_entry(entry: &serde_json::Value) {
         let _ = f.write_all(line.as_bytes());
         let _ = f.write_all(b"\n");
     }
+}
+
+/// Fan transcript entries out to the run-events sink (`harn run
+/// --json`). [`RunEvent::Transcript`] mirrors the raw entry; tool
+/// calls and tool results carried inside the transcript stream are
+/// also surfaced as their own [`RunEvent::ToolCall`] /
+/// [`RunEvent::ToolResult`] variants so consumers don't have to
+/// re-parse the transcript shape.
+///
+/// `tool_call` events are emitted once per logical call, keyed off
+/// `interpreted_response` (the post-parse view that resolves the final
+/// tool selection). Earlier-stage entries (`provider_call_response`)
+/// still appear as `transcript` events for replay, but their
+/// `tool_calls` arrays are not promoted to avoid duplicate
+/// `tool_call` events for the same `call_id`.
+fn forward_transcript_run_events(entry: &serde_json::Value) {
+    if !crate::run_events::sink_active() {
+        return;
+    }
+    let kind = entry
+        .get("type")
+        .and_then(|value| value.as_str())
+        .unwrap_or("transcript_event")
+        .to_string();
+    let agent_id = entry
+        .get("agent_id")
+        .and_then(|value| value.as_str())
+        .map(str::to_string);
+
+    if kind == "interpreted_response" {
+        if let Some(calls) = entry.get("tool_calls").and_then(|value| value.as_array()) {
+            for call in calls {
+                let name = call
+                    .get("name")
+                    .and_then(|value| value.as_str())
+                    .unwrap_or("")
+                    .to_string();
+                let id = call
+                    .get("id")
+                    .or_else(|| call.get("call_id"))
+                    .and_then(|value| value.as_str())
+                    .unwrap_or("")
+                    .to_string();
+                let args = call
+                    .get("arguments")
+                    .or_else(|| call.get("args"))
+                    .cloned()
+                    .unwrap_or(serde_json::Value::Null);
+                crate::run_events::emit(crate::run_events::RunEvent::ToolCall {
+                    call_id: id,
+                    name,
+                    args,
+                    started_at: chrono_now(),
+                });
+            }
+        }
+    }
+
+    if kind == "tool_result" {
+        let call_id = entry
+            .get("call_id")
+            .or_else(|| entry.get("id"))
+            .and_then(|value| value.as_str())
+            .unwrap_or("")
+            .to_string();
+        let ok = entry
+            .get("ok")
+            .and_then(|value| value.as_bool())
+            .unwrap_or(true);
+        let result = entry
+            .get("result")
+            .or_else(|| entry.get("content"))
+            .cloned()
+            .unwrap_or(serde_json::Value::Null);
+        crate::run_events::emit(crate::run_events::RunEvent::ToolResult {
+            call_id,
+            ok,
+            result,
+        });
+    }
+
+    crate::run_events::emit(crate::run_events::RunEvent::Transcript {
+        agent_id,
+        kind,
+        payload: entry.clone(),
+    });
 }
 
 fn append_llm_transcript_event_log(entry: &serde_json::Value) {

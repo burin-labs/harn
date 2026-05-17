@@ -59,6 +59,16 @@ pub(crate) struct RunArgs {
     /// Agent id used to look up or generate the receipt signing key.
     #[arg(long = "attest-agent", value_name = "ID", requires = "attest")]
     pub attest_agent: Option<String>,
+    /// Emit a versioned NDJSON event stream on stdout (epic #1753).
+    /// One `JsonEnvelope<RunEvent>` per line with monotonic `seq`.
+    /// See `docs/src/cli/run-json.md`.
+    #[arg(long = "json", action = clap::ArgAction::SetTrue)]
+    pub json: bool,
+    /// Suppress `stdout` / `stderr` events when `--json` is active.
+    /// Transcript, tool, hook, persona-stage, and the final result
+    /// events still flow.
+    #[arg(long = "quiet", action = clap::ArgAction::SetTrue, requires = "json")]
+    pub quiet: bool,
     /// Path to the .harn file to execute.
     pub file: Option<String>,
     /// Positional arguments passed to the pipeline as the global `argv`
