@@ -16,6 +16,58 @@ pub(crate) fn extract_json(text: &str) -> String {
     crate::stdlib::json::extract_json_from_text(text)
 }
 
+/// Resolve the wall-clock timeout from the (`timeout`, `timeout_ms`) pair.
+///
+/// `timeout` (canonical, seconds) wins when explicitly set. Otherwise
+/// `timeout_ms` is accepted for symmetry with the broader option surface
+/// (`with_timeout`, HTTP, command exec) and rounded UP to the nearest
+/// whole second — the underlying HTTP transports all consume
+/// `Duration::from_secs(u64)`. Sub-second budgets must be enforced at
+/// the caller (e.g. the wall-clock post-check in `std/llm/tool_binder`).
+pub(crate) fn resolve_timeout_secs(timeout: Option<i64>, timeout_ms: Option<i64>) -> Option<u64> {
+    if let Some(seconds) = timeout {
+        return Some(seconds.max(0) as u64);
+    }
+    timeout_ms.map(|ms| {
+        if ms <= 0 {
+            0
+        } else {
+            (ms as u64).div_ceil(1000)
+        }
+    })
+}
+
+#[cfg(test)]
+mod resolve_timeout_secs_tests {
+    use super::resolve_timeout_secs;
+
+    #[test]
+    fn explicit_timeout_wins_over_timeout_ms() {
+        assert_eq!(resolve_timeout_secs(Some(5), Some(100)), Some(5));
+    }
+
+    #[test]
+    fn timeout_ms_rounds_up_to_seconds() {
+        assert_eq!(resolve_timeout_secs(None, Some(1)), Some(1));
+        assert_eq!(resolve_timeout_secs(None, Some(100)), Some(1));
+        assert_eq!(resolve_timeout_secs(None, Some(1000)), Some(1));
+        assert_eq!(resolve_timeout_secs(None, Some(1001)), Some(2));
+        assert_eq!(resolve_timeout_secs(None, Some(5000)), Some(5));
+    }
+
+    #[test]
+    fn non_positive_clamps_to_zero() {
+        assert_eq!(resolve_timeout_secs(None, Some(0)), Some(0));
+        assert_eq!(resolve_timeout_secs(None, Some(-1)), Some(0));
+        assert_eq!(resolve_timeout_secs(Some(-1), None), Some(0));
+    }
+
+    #[test]
+    fn returns_none_when_neither_set() {
+        assert_eq!(resolve_timeout_secs(None, None), None);
+    }
+}
+
 pub(crate) fn expects_structured_output(opts: &crate::llm::api::LlmCallOptions) -> bool {
     opts.output_format.is_structured() || opts.output_schema.is_some()
 }
@@ -922,7 +974,10 @@ pub(crate) fn extract_llm_options(
         opt_float(&options, "frequency_penalty").or_else(|| default_float("frequency_penalty"));
     let presence_penalty =
         opt_float(&options, "presence_penalty").or_else(|| default_float("presence_penalty"));
-    let timeout = opt_int(&options, "timeout").map(|t| t as u64);
+    let timeout = resolve_timeout_secs(
+        opt_int(&options, "timeout"),
+        opt_int(&options, "timeout_ms"),
+    );
     let idle_timeout = opt_int(&options, "idle_timeout").map(|t| t as u64);
     let cache = opt_bool(&options, "cache");
     let stream = options

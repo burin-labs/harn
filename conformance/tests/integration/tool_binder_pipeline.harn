@@ -80,13 +80,20 @@ pipeline default() {
   println(r2.audit.binder.status)
   println(r2.audit.binder.reason)
   // (3) Successful binder dispatch — invalid args + intent → binder rewrites.
-  let mock_binder = { _prompt, _system, _opts -> return {
-    text: "{\"path\":\"/var/log/syslog\",\"contents\":\"hello\"}",
-    model: "mock",
-    provider: "mock",
-    input_tokens: 0,
-    output_tokens: 0,
-  } }
+  // Also capture the binder opts so we can assert the configured `timeout_ms`
+  // is forwarded to the inner caller (this is how the wall-clock budget is
+  // expressed to a real `llm_call` substrate).
+  let captured_timeout_ms = atomic(0)
+  let mock_binder = { _prompt, _system, opts ->
+    let _ = atomic_set(captured_timeout_ms, to_int(opts?.timeout_ms ?? 0))
+    return {
+      text: "{\"path\":\"/var/log/syslog\",\"contents\":\"hello\"}",
+      model: "mock",
+      provider: "mock",
+      input_tokens: 0,
+      output_tokens: 0,
+    }
+  }
   let mw_ok = with_natural_language_executor(
     {provider: "cerebras", model: "gpt-oss-120b", timeout_ms: 100, binder_fn: mock_binder},
   )
@@ -100,6 +107,10 @@ pipeline default() {
   println(r3.arguments.contents)
   // Intent must be stripped before dispatch.
   println(contains(r3.arguments.keys(), "_nl_intent"))
+  // The configured `timeout_ms` must reach the binder substrate so a real
+  // `llm_call` (which now recognizes `timeout_ms`) can apply an HTTP-level
+  // backstop in addition to the middleware's post-call wall-clock check.
+  println(atomic_get(captured_timeout_ms))
   // (4) Timeout: binder takes longer than timeout_ms; envelope passes through.
   let slow_binder = { _prompt, _system, _opts ->
     let _ = advance_time(250)

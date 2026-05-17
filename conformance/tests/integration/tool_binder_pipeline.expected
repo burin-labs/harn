@@ -11,6 +11,7 @@ ok
 /var/log/syslog
 hello
 false
+100
 true
 timeout
 true

@@ -84,6 +84,17 @@ condensed series summaries instead of full per-patch history.
 
 ### Changed
 
+- **`llm_call` now recognizes `timeout_ms` (#1698 follow-up).** The
+  option surface gains `timeout_ms` as a first-class alias for
+  `timeout` so `with_timeout`-style middleware, the natural-language
+  tool binder, and other callers that already think in milliseconds
+  stop having their value silently dropped at the parse layer. The
+  underlying HTTP transports still consume `Duration::from_secs(u64)`,
+  so a `timeout_ms` value is rounded UP to the nearest whole second
+  for the network-level backstop; sub-second budgets must additionally
+  be enforced at the caller (the binder middleware already does this
+  via a wall-clock post-check). When both `timeout` and `timeout_ms`
+  are set, the explicit `timeout` (seconds) wins.
 - **WorkflowBundle schema v2 / `.harnpack` foundation (#1780).** Portable
   workflow bundles now use schema v2 with canonical package metadata
   (`entrypoint`, transitive module hashes, Harn/stdlib versions, provider
