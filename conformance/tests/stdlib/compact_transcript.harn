@@ -60,9 +60,7 @@ pipeline test(task) {
   let _ = transcript_compact(session_snapshot, {strategy: "truncate", keep_last: 1, target_tokens: 1})
   println(
     json_stringify(transcript_messages(agent_session_snapshot(stream_session) ?? {}))
-      .contains(
-      "LIVE_COMPACTION_EVENT",
-    ),
+      .contains("LIVE_COMPACTION_EVENT"),
   )
   let run = run_record(
     {

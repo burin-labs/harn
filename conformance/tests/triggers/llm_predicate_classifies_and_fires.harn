@@ -40,9 +40,7 @@ pipeline test(task) {
     {provider: "github", kind: "issue.opened", headers: {x_delivery: "evt-fire-" + unique}},
   )
   let evaluated = trigger_inspect_lifecycle("predicate.evaluated")
-    .filter(
-    { entry -> entry?.headers?.trigger_id == handle.id },
-  )
+    .filter({ entry -> entry?.headers?.trigger_id == handle.id })
   println(fire.status == "dispatched")
   println(contains(json_stringify(fire.result ?? {}), "\"handled\":true"))
   println(len(evaluated) == 1 && evaluated[0]?.payload?.result)

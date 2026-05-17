@@ -41,9 +41,7 @@ pipeline test(task) {
   )
   let replay: DispatchHandle = trigger_replay(fire.event_id)
   let evaluated = trigger_inspect_lifecycle("predicate.evaluated")
-    .filter(
-    { entry -> entry?.headers?.trigger_id == handle.id },
-  )
+    .filter({ entry -> entry?.headers?.trigger_id == handle.id })
   println(fire.status == "dispatched" && replay.status == "dispatched")
   println(len(llm_mock_calls()) == 1)
   println(len(evaluated) == 2)
