@@ -178,6 +178,14 @@ const messages = defineMessages({
     id: "portal.detail.noActivity",
     defaultMessage: "No span activity captured for this run.",
   },
+  auditLayersTooltip: {
+    id: "portal.detail.auditLayersTooltip",
+    defaultMessage: "Middleware layers (outer → inner)",
+  },
+  auditReceiptLink: {
+    id: "portal.detail.auditReceiptLink",
+    defaultMessage: "View receipt",
+  },
   noArtifacts: {
     id: "portal.detail.noArtifacts",
     defaultMessage: "This run did not persist any artifacts.",
@@ -1293,19 +1301,75 @@ export function RunDetail({ detail, runs, onSelectRun }: RunDetailProps) {
           </div>
           <div className="activity-list">
             {detail.activities.length ? (
-              detail.activities.slice(0, 40).map((item) => (
-                <div className="activity-item" key={`${item.label}-${item.started_offset_ms}`}>
-                  <div className="row">
-                    <strong>{item.label}</strong>
-                    <span>{formatDuration(item.duration_ms)}</span>
+              detail.activities.slice(0, 40).map((item) => {
+                const audit = item.audit
+                const layerChain = audit?.layers.length
+                  ? audit.layers.map((layer) => layer.name).join(" → ")
+                  : null
+                const tooltipId = audit
+                  ? `activity-audit-${item.call_id ?? item.label}-${item.started_offset_ms}`
+                  : undefined
+                return (
+                  <div
+                    className="activity-item"
+                    key={`${item.label}-${item.started_offset_ms}`}
+                  >
+                    <div className="row">
+                      <strong>{item.label}</strong>
+                      <span>{formatDuration(item.duration_ms)}</span>
+                    </div>
+                    {audit ? (
+                      <div className="activity-audit">
+                        {audit.reason ? (
+                          <span
+                            className="turn-chip activity-audit-reason"
+                            title={audit.reason}
+                          >
+                            {audit.reason}
+                          </span>
+                        ) : null}
+                        {layerChain ? (
+                          <span
+                            className="turn-chip activity-audit-layers"
+                            aria-describedby={tooltipId}
+                            title={layerChain}
+                          >
+                            {audit.layers.length} layer
+                            {audit.layers.length === 1 ? "" : "s"}
+                            <span
+                              id={tooltipId}
+                              role="tooltip"
+                              className="activity-audit-tooltip"
+                            >
+                              <span className="activity-audit-tooltip-title">
+                                {intl.formatMessage(messages.auditLayersTooltip)}
+                              </span>
+                              <span className="activity-audit-tooltip-chain">
+                                {layerChain}
+                              </span>
+                            </span>
+                          </span>
+                        ) : null}
+                        {audit.receipt_uri ? (
+                          <a
+                            className="turn-chip activity-audit-receipt"
+                            href={audit.receipt_uri}
+                            target="_blank"
+                            rel="noreferrer"
+                          >
+                            {intl.formatMessage(messages.auditReceiptLink)}
+                          </a>
+                        ) : null}
+                      </div>
+                    ) : null}
+                    <div className="meta">
+                      {item.kind} • +{formatDuration(item.started_offset_ms)}
+                      {item.stage_node_id ? ` • ${item.stage_node_id}` : ""}
+                    </div>
+                    <div className="meta">{item.summary}</div>
                   </div>
-                  <div className="meta">
-                    {item.kind} • +{formatDuration(item.started_offset_ms)}
-                    {item.stage_node_id ? ` • ${item.stage_node_id}` : ""}
-                  </div>
-                  <div className="meta">{item.summary}</div>
-                </div>
-              ))
+                )
+              })
             ) : (
               <div className="muted">{intl.formatMessage(messages.noActivity)}</div>
             )}

@@ -753,6 +753,72 @@ textarea {
   margin-bottom: 0;
 }
 
+.activity-audit {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 6px;
+}
+
+.activity-audit-reason {
+  background: rgba(110, 168, 254, 0.14);
+  border-color: rgba(110, 168, 254, 0.32);
+  max-width: 100%;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.activity-audit-layers {
+  position: relative;
+  cursor: help;
+}
+
+.activity-audit-receipt {
+  text-decoration: none;
+}
+
+.activity-audit-receipt:hover {
+  background: rgba(255, 255, 255, 0.12);
+}
+
+.activity-audit-tooltip {
+  position: absolute;
+  bottom: calc(100% + 4px);
+  left: 0;
+  display: none;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 220px;
+  padding: 8px 10px;
+  background: var(--panel-3);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.45);
+  font-size: 11px;
+  color: var(--text);
+  z-index: 5;
+  pointer-events: none;
+  white-space: normal;
+}
+
+.activity-audit-layers:hover .activity-audit-tooltip,
+.activity-audit-layers:focus-within .activity-audit-tooltip {
+  display: flex;
+}
+
+.activity-audit-tooltip-title {
+  color: var(--muted);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  font-size: 10px;
+}
+
+.activity-audit-tooltip-chain {
+  color: var(--text);
+  font-family: var(--font-mono, ui-monospace, SFMono-Regular, monospace);
+}
+
 .run-card-link {
   margin-top: 10px;
   cursor: pointer;

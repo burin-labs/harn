@@ -246,6 +246,119 @@ fn build_run_detail_exposes_observability_summary() {
 }
 
 #[test]
+fn build_run_detail_joins_tool_call_audit_onto_matching_activity() {
+    let temp = tempfile::tempdir().unwrap();
+    let run_path = temp.path().join("audit-run.json");
+    fs::write(&run_path, "{}").unwrap();
+
+    // Two trace spans, only one of which has a matching audit event.
+    let trace_spans = vec![
+        harn_vm::orchestration::RunTraceSpanRecord {
+            span_id: 1,
+            parent_id: None,
+            kind: "tool_call".to_string(),
+            name: "search_files".to_string(),
+            start_ms: 0,
+            duration_ms: 12,
+            metadata: BTreeMap::from([(
+                "call_id".to_string(),
+                serde_json::json!("call-with-audit"),
+            )]),
+        },
+        harn_vm::orchestration::RunTraceSpanRecord {
+            span_id: 2,
+            parent_id: None,
+            kind: "tool_call".to_string(),
+            name: "read_file".to_string(),
+            start_ms: 20,
+            duration_ms: 5,
+            metadata: BTreeMap::from([(
+                "call_id".to_string(),
+                serde_json::json!("call-without-audit"),
+            )]),
+        },
+    ];
+
+    let transcript = serde_json::json!({
+        "events": [
+            {
+                "kind": "tool_call_audit",
+                "role": "tool",
+                "metadata": {
+                    "session_id": "s",
+                    "tool_call_id": "call-with-audit",
+                    "tool_name": "search_files",
+                    "audit": {
+                        "summary": "Look up rate limiter",
+                        "kind": "search",
+                        "layers": [
+                            {"name": "with_required_reason", "status": "ok"},
+                            {"name": "with_consent", "status": "approved", "decided_by": "auto"},
+                            {"name": "with_audit_log", "status": "ok"},
+                        ],
+                        "receipt_uri": "file:///tmp/.harn/receipts/s.jsonl",
+                    },
+                    "receipt": {
+                        "schema_version": 1,
+                        "session_id": "s",
+                        "tool_call_id": "call-with-audit",
+                        "tool_name": "search_files",
+                        "iteration": 1,
+                        "status": "ok",
+                    }
+                }
+            }
+        ]
+    });
+
+    let run = harn_vm::orchestration::RunRecord {
+        id: "run-audit".to_string(),
+        workflow_id: "wf".to_string(),
+        workflow_name: Some("audit-demo".to_string()),
+        task: "task".to_string(),
+        status: "succeeded".to_string(),
+        persisted_path: Some(run_path.to_string_lossy().into_owned()),
+        trace_spans,
+        transcript: Some(transcript),
+        ..Default::default()
+    };
+
+    let detail = build_run_detail(temp.path(), "audit-run.json", &run);
+    let with_audit = detail
+        .activities
+        .iter()
+        .find(|activity| activity.call_id.as_deref() == Some("call-with-audit"))
+        .expect("activity for call-with-audit");
+    let audit = with_audit
+        .audit
+        .as_ref()
+        .expect("matching activity carries audit");
+    assert_eq!(audit.reason.as_deref(), Some("Look up rate limiter"));
+    assert_eq!(audit.kind.as_deref(), Some("search"));
+    assert_eq!(audit.status, "ok");
+    let layer_names: Vec<&str> = audit
+        .layers
+        .iter()
+        .map(|layer| layer.name.as_str())
+        .collect();
+    assert_eq!(
+        layer_names,
+        vec!["with_required_reason", "with_consent", "with_audit_log"]
+    );
+    assert_eq!(
+        audit.receipt_uri.as_deref(),
+        Some("file:///tmp/.harn/receipts/s.jsonl")
+    );
+
+    let without_audit = detail
+        .activities
+        .iter()
+        .find(|activity| activity.call_id.as_deref() == Some("call-without-audit"))
+        .expect("activity for call-without-audit");
+    assert!(without_audit.audit.is_none(), "no audit event => no chip");
+}
+
+#[test]
 fn scan_launch_targets_finds_harn_files() {
     let temp = tempfile::tempdir().unwrap();
     fs::create_dir_all(temp.path().join("examples")).unwrap();

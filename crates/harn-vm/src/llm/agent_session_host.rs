@@ -1221,8 +1221,12 @@ async fn host_agent_emit_event(args: Vec<VmValue>) -> Result<VmValue, VmError> {
             | "tool_search_result"
             | "typed_checkpoint"
             | "agent_loop_stall_warning"
+            | "tool_call_audit"
     ) {
-        let role = if event_type == "tool_search_result" {
+        let role = if matches!(
+            event_type.as_str(),
+            "tool_search_result" | "tool_call_audit"
+        ) {
             "tool"
         } else {
             "assistant"
