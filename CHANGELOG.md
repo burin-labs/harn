@@ -134,6 +134,38 @@ condensed series summaries instead of full per-patch history.
   the editor `/model` workaround that hinted "takes effect after
   `/clear`" — the new wire path matches the mid-session model swap
   Crush / OpenCode / Codex already ship.
+### Fixed
+
+- **`.githooks/` cover the same incremental-cache corruption #1707
+  fixed in the release scripts.** `release_gate.sh` and
+  `release_ship.sh` export `CARGO_INCREMENTAL=0` for the prepare
+  phase, but `.githooks/pre-commit` and `.githooks/pre-push` run
+  cargo from fresh subprocesses the export does not reach — committing
+  the "Release vX.Y.Z" change still hit `cached cgu ... should have an
+  object file, but doesn't` against the stale incremental dir from the
+  audit. A new helper in `lib.sh`
+  (`hook_disable_cargo_incremental_if_release_bump`) inspects the
+  staged/push diff for a `^version =` change in `Cargo.toml` or
+  `crates/*/Cargo.toml`; on a real workspace bump it exports
+  `CARGO_INCREMENTAL=0` and purges `target/debug/incremental` for the
+  hook run only. Day-to-day commits keep incremental cache enabled.
+- **`release_ship.sh --prepare` auto-renames `## Unreleased` →
+  `## vX.Y.Z` instead of erroring after the audit.** The accumulator
+  convention between releases is to drop new bullets under
+  `## Unreleased`; the strict heading check in
+  `require_changelog_top_matches` rejected that exact shape and only
+  surfaced after burning ~7 min of audit wall time. The check now
+  promotes a top `## Unreleased` heading to `## v$expected` in place
+  (subsequent `git add -u` in the staging step picks the rename up).
+  Mismatched `## vX.Y.Z` headings still error with the same hint.
+- **Lint: for-loop iteration bindings no longer trigger
+  `undefined-function` false positives (#1704).** `for entry in
+  callables { entry(arg) }` is now valid — the iteration binding is
+  tracked as a callable local. Affects only the linter; runtime
+  behavior is unchanged.
+
+### Added
+
 - **MCP client notification relay.** The MCP client transport now
   routes inbound `notifications/progress`, `notifications/message`,
   and `*/list_changed` server-to-client notifications into the
@@ -154,6 +186,20 @@ condensed series summaries instead of full per-patch history.
   control flow. Both available at the host-builtin layer
   (`__host_agent_session_post_event`) and as Harn-side wrappers in
   `std/agent/state`.
+- **`secret_store` hostlib capability (#1714).** Adds
+  `hostlib_secret_store_{get,set,delete,list}` to `harn-hostlib`, a
+  generic per-application credential primitive any Harn-hosted
+  application can compose. Picks an Apple Keychain backend on
+  macOS/iOS, a Credential Manager backend on Windows, and a
+  `0o600`-permissioned JSON file at
+  `$XDG_CONFIG_HOME/<account>/credentials.json` everywhere else.
+  `HARN_SECRET_STORE_BACKEND=file` forces the file backend on every OS
+  for sandboxed CI and eval harnesses. The file-backend path layout is
+  byte-compatible with burin-code's existing credentials file so
+  existing deployments migrate without data movement, and JSON schemas
+  under `crates/harn-hostlib/schemas/secret_store/` keep `harn check`
+  preflight covering the new builtins. Docs at
+  `docs/src/hostlib/secret_store.md`.
 - **Cerebras provider (#1705).** Added a first-class `cerebras` provider
   routed through the OpenAI-compatible stack with a `provider_family =
   "openai"` capability inheritance row. Catalog ships canonical
