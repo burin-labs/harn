@@ -94,6 +94,25 @@ const AGENT_SESSION_SYNC_PRIMITIVES: &[SyncBuiltin] = &[
         .signature("agent_session_inject(id, message)")
         .arity(VmBuiltinArity::Exact(2))
         .doc("Inject one message into an agent session."),
+    SyncBuiltin::new("agent_session_post_event", agent_session_post_event_builtin)
+        .signature("agent_session_post_event(id, kind, content, source?)")
+        .arity(VmBuiltinArity::Range { min: 3, max: 4 })
+        .doc(
+            "Post an event into a running session's agent_inbox. Triggers, \
+         connectors, and external host integrations use this to nudge \
+         a mid-loop session; the next turn boundary (including the \
+         drain after compaction) surfaces the entry as feedback.",
+        ),
+    SyncBuiltin::new(
+        "agent_session_drain_inbox",
+        agent_session_drain_inbox_builtin,
+    )
+    .signature("agent_session_drain_inbox(id)")
+    .arity(VmBuiltinArity::Exact(1))
+    .doc(
+        "Drain every pending agent_inbox entry for a session. Each entry \
+         has {sequence, kind, content, source, ts_ms}.",
+    ),
     SyncBuiltin::new(
         "agent_session_seed_from_jsonl",
         agent_session_seed_from_jsonl_builtin,
@@ -481,6 +500,55 @@ fn agent_session_inject_builtin(args: &[VmValue], _out: &mut String) -> Result<V
         .ok_or_else(|| err("agent_session_inject: `message` required"))?;
     agent_sessions::inject_message(&id, message).map_err(err)?;
     Ok(VmValue::Nil)
+}
+
+fn agent_session_post_event_builtin(
+    args: &[VmValue],
+    _out: &mut String,
+) -> Result<VmValue, VmError> {
+    let id = arg_string_required(args, 0, "agent_session_post_event", "id")?;
+    let kind = arg_string_required(args, 1, "agent_session_post_event", "kind")?;
+    let content = match args.get(2) {
+        Some(VmValue::String(s)) => s.to_string(),
+        Some(other) => {
+            serde_json::to_string(&crate::llm::vm_value_to_json(other)).unwrap_or_default()
+        }
+        None => {
+            return Err(err("agent_session_post_event: `content` required"));
+        }
+    };
+    let source = match args.get(3) {
+        Some(VmValue::String(s)) if !s.is_empty() => s.to_string(),
+        _ => "harn.post_event".to_string(),
+    };
+    crate::orchestration::agent_inbox::push(&id, &kind, &content, &source);
+    Ok(VmValue::Nil)
+}
+
+fn agent_session_drain_inbox_builtin(
+    args: &[VmValue],
+    _out: &mut String,
+) -> Result<VmValue, VmError> {
+    let id = arg_string_required(args, 0, "agent_session_drain_inbox", "id")?;
+    let entries = crate::orchestration::agent_inbox::drain(&id)
+        .into_iter()
+        .map(|entry| {
+            let mut dict = BTreeMap::new();
+            dict.insert("sequence".to_string(), VmValue::Int(entry.sequence as i64));
+            dict.insert("kind".to_string(), VmValue::String(Rc::from(entry.kind)));
+            dict.insert(
+                "content".to_string(),
+                VmValue::String(Rc::from(entry.content)),
+            );
+            dict.insert(
+                "source".to_string(),
+                VmValue::String(Rc::from(entry.source)),
+            );
+            dict.insert("ts_ms".to_string(), VmValue::Int(entry.ts_ms));
+            VmValue::Dict(Rc::new(dict))
+        })
+        .collect::<Vec<_>>();
+    Ok(VmValue::List(Rc::new(entries)))
 }
 
 const SEED_FROM_JSONL_OPT_KEYS: &[&str] = &[

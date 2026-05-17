@@ -225,7 +225,7 @@ pub fn stdlib_builtin_metadata() -> Vec<crate::vm::VmBuiltinMetadata> {
 /// Note: `long_running::reset_state()` is intentionally NOT called here
 /// because that store is process-global, not thread-local. Wiping it
 /// from a per-test reset hook lets one test cancel another test's
-/// in-flight worker thread (and lose its `push_pending_feedback_global`
+/// in-flight worker thread (and lose its `agent_inbox::push`
 /// notification), which surfaces as `walk_dir_long_running` /
 /// `glob_long_running` timing out under parallel test load. The two
 /// call sites that genuinely need a clean handle store —

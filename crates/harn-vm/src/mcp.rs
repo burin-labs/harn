@@ -264,7 +264,13 @@ async fn stdio_call(
             Err(_) => continue,
         };
 
+        // JSON-RPC notifications have a `method` but no `id`. Route
+        // them through `handle_inbound_client_request` so we can
+        // capture `notifications/progress`, `notifications/message`,
+        // and `*/list_changed` into the active session's inbox even
+        // while we're parked waiting for the in-flight call's reply.
         if msg.get("id").is_none() {
+            let _ = handle_inbound_client_request(server_name, &msg).await;
             continue;
         }
 
@@ -307,6 +313,22 @@ async fn handle_inbound_client_request(
     msg: &serde_json::Value,
 ) -> Option<serde_json::Value> {
     let method = msg.get("method").and_then(|value| value.as_str())?;
+    if method == "notifications/progress" {
+        relay_progress_notification(server_name, msg);
+        return None;
+    }
+    if method == "notifications/message" {
+        relay_log_notification(server_name, msg);
+        return None;
+    }
+    if method == "notifications/resources/updated"
+        || method == "notifications/resources/list_changed"
+        || method == "notifications/tools/list_changed"
+        || method == "notifications/prompts/list_changed"
+    {
+        relay_resource_notification(server_name, method, msg);
+        return None;
+    }
     if method == crate::mcp_elicit::ELICITATION_METHOD {
         return Some(crate::mcp_elicit::dispatch_inbound_elicitation(server_name, msg).await);
     }
@@ -318,6 +340,101 @@ async fn handle_inbound_client_request(
         return Some(harn_roots_list_response(id));
     }
     client_request_rejection(msg)
+}
+
+/// Forward an MCP `notifications/progress` event into the originating
+/// agent session's inbox. Correlation by `progressToken`: every
+/// outgoing `tools/call` issued by [`call_mcp_tool`] registers a fresh
+/// token in [`client_progress`]; this function looks up the inbound
+/// notification's token and routes it back to whichever session is
+/// bound to it. Falls back to the thread-local current session for
+/// notifications without a token (e.g. servers that emit progress
+/// unsolicited). Drops silently when neither a token mapping nor a
+/// current session is present.
+fn relay_progress_notification(server_name: &str, msg: &serde_json::Value) {
+    let params = msg.get("params");
+    let progress_token = params
+        .and_then(|p| p.get("progressToken"))
+        .and_then(|t| match t {
+            serde_json::Value::String(s) => Some(s.clone()),
+            serde_json::Value::Number(n) => Some(n.to_string()),
+            _ => None,
+        });
+    let token_context = progress_token.as_deref().and_then(client_progress::lookup);
+    let session_id = token_context
+        .as_ref()
+        .and_then(|ctx| ctx.session_id.clone())
+        .or_else(crate::llm::current_agent_session_id);
+    let Some(session_id) = session_id else {
+        return;
+    };
+    let mut payload = params.cloned().unwrap_or(serde_json::Value::Null);
+    if let Some(obj) = payload.as_object_mut() {
+        obj.insert(
+            "server".to_string(),
+            serde_json::Value::String(server_name.to_string()),
+        );
+        if let Some(ctx) = token_context.as_ref() {
+            obj.insert(
+                "tool".to_string(),
+                serde_json::Value::String(ctx.tool.clone()),
+            );
+        }
+    } else {
+        payload = serde_json::json!({
+            "server": server_name,
+            "tool": token_context.as_ref().map(|c| c.tool.as_str()).unwrap_or(""),
+            "raw": payload,
+        });
+    }
+    let content = serde_json::to_string(&payload).unwrap_or_default();
+    crate::orchestration::agent_inbox::push(
+        &session_id,
+        "mcp_progress",
+        &content,
+        "mcp.notifications/progress",
+    );
+}
+
+fn relay_log_notification(server_name: &str, msg: &serde_json::Value) {
+    let Some(session_id) = crate::llm::current_agent_session_id() else {
+        return;
+    };
+    let mut payload = msg
+        .get("params")
+        .cloned()
+        .unwrap_or(serde_json::Value::Null);
+    if let Some(obj) = payload.as_object_mut() {
+        obj.insert(
+            "server".to_string(),
+            serde_json::Value::String(server_name.to_string()),
+        );
+    }
+    let content = serde_json::to_string(&payload).unwrap_or_default();
+    crate::orchestration::agent_inbox::push(
+        &session_id,
+        "mcp_log",
+        &content,
+        "mcp.notifications/message",
+    );
+}
+
+fn relay_resource_notification(server_name: &str, method: &str, msg: &serde_json::Value) {
+    let Some(session_id) = crate::llm::current_agent_session_id() else {
+        return;
+    };
+    let payload = serde_json::json!({
+        "server": server_name,
+        "method": method,
+        "params": msg.get("params").cloned().unwrap_or(serde_json::Value::Null),
+    });
+    let content = serde_json::to_string(&payload).unwrap_or_default();
+    crate::orchestration::agent_inbox::push(
+        &session_id,
+        "mcp_resource_change",
+        &content,
+        "mcp.notifications",
+    );
 }
 
 async fn stdio_notify(
@@ -1053,20 +1170,114 @@ fn extract_content_text(result: &serde_json::Value) -> String {
     }
 }
 
+/// Process-wide registry mapping MCP progress tokens to the agent
+/// session that issued the originating `tools/call`. The MCP transport
+/// reader (line-by-line stdio loop, SSE parser, multiplexed HTTP
+/// stream) consults this registry when it sees an inbound
+/// `notifications/progress` so the right session's `agent_inbox`
+/// receives the update — even when the reader runs on a task that
+/// doesn't share the issuer's thread-local current-session.
+pub(crate) mod client_progress {
+    use std::collections::HashMap;
+    use std::sync::{Mutex, OnceLock, PoisonError};
+    use uuid::Uuid;
+
+    /// Snapshot of an active progress-token registration.
+    #[derive(Clone, Debug)]
+    pub struct ProgressTokenContext {
+        pub token: String,
+        pub session_id: Option<String>,
+        #[allow(dead_code)] // recorded for telemetry / future debug surface
+        pub server: String,
+        pub tool: String,
+    }
+
+    fn registry() -> &'static Mutex<HashMap<String, ProgressTokenContext>> {
+        static REGISTRY: OnceLock<Mutex<HashMap<String, ProgressTokenContext>>> = OnceLock::new();
+        REGISTRY.get_or_init(|| Mutex::new(HashMap::new()))
+    }
+
+    fn lock<T>(m: &Mutex<T>) -> std::sync::MutexGuard<'_, T> {
+        m.lock().unwrap_or_else(PoisonError::into_inner)
+    }
+
+    /// Issue a fresh progress token for an outgoing `tools/call`. The
+    /// token is registered against the active session id when one is
+    /// available; calls made outside a session context still get a
+    /// token (so the server emits notifications), but inbound updates
+    /// for it have no inbox to land in and are dropped.
+    pub fn issue_token(server: &str, tool: &str) -> Option<ProgressTokenContext> {
+        let session_id = crate::llm::current_agent_session_id();
+        let ctx = ProgressTokenContext {
+            token: format!("hpt_{}", Uuid::now_v7()),
+            session_id,
+            server: server.to_string(),
+            tool: tool.to_string(),
+        };
+        lock(registry()).insert(ctx.token.clone(), ctx.clone());
+        Some(ctx)
+    }
+
+    /// Look up the registration for `token`. Returns `None` for unknown
+    /// or already-released tokens (e.g. a late progress notification
+    /// that arrived after the call completed).
+    pub fn lookup(token: &str) -> Option<ProgressTokenContext> {
+        lock(registry()).get(token).cloned()
+    }
+
+    /// Drop the registration for `token`. Idempotent.
+    pub fn release(token: &str) {
+        lock(registry()).remove(token);
+    }
+
+    /// RAII guard returned by [`issue_token`]; releases the
+    /// registration on drop so a long-lived MCP connection doesn't
+    /// accumulate stale tokens.
+    pub struct ProgressTokenGuard {
+        pub token: String,
+    }
+
+    impl Drop for ProgressTokenGuard {
+        fn drop(&mut self) {
+            release(&self.token);
+        }
+    }
+
+    #[cfg(any(test, feature = "vm-bench-internals"))]
+    #[allow(dead_code)]
+    pub fn reset() {
+        lock(registry()).clear();
+    }
+}
+
 pub(crate) async fn call_mcp_tool(
     client: &VmMcpClientHandle,
     tool_name: &str,
     arguments: serde_json::Value,
 ) -> Result<serde_json::Value, VmError> {
-    let result = client
-        .call(
-            "tools/call",
-            serde_json::json!({
-                "name": tool_name,
-                "arguments": arguments,
-            }),
-        )
-        .await?;
+    // Attach a unique progress token so the server can emit
+    // `notifications/progress` updates that we route back into the
+    // active session's `agent_inbox`. Tokens are scoped to the active
+    // session id (when one is bound) and reaped on call completion via
+    // the RAII `ProgressTokenGuard`.
+    let progress_token = client_progress::issue_token(&client.name, tool_name);
+    let _progress_guard = progress_token
+        .as_ref()
+        .map(|tok| client_progress::ProgressTokenGuard {
+            token: tok.token.clone(),
+        });
+    let params = match progress_token.as_ref() {
+        Some(tok) => serde_json::json!({
+            "name": tool_name,
+            "arguments": arguments,
+            "_meta": { "progressToken": tok.token },
+        }),
+        None => serde_json::json!({
+            "name": tool_name,
+            "arguments": arguments,
+        }),
+    };
+    let result = client.call("tools/call", params).await?;
 
     if result.get("isError").and_then(|v| v.as_bool()) == Some(true) {
         let error_text = extract_content_text(&result);

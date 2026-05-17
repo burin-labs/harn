@@ -10,8 +10,7 @@
 use std::cell::RefCell;
 use std::collections::BTreeMap;
 use std::rc::Rc;
-use std::sync::{Arc, Condvar, LazyLock, Mutex};
-use std::time::Duration;
+use std::sync::{Arc, LazyLock, Mutex};
 
 use crate::agent_events::{self, AgentEvent, AgentEventSink};
 use crate::mcp::VmMcpClientHandle;
@@ -36,17 +35,6 @@ thread_local! {
     static CURRENT_LOOP_SINKS: RefCell<Vec<Arc<dyn AgentEventSink>>> =
         const { RefCell::new(Vec::new()) };
 }
-
-/// Global (cross-thread) pending feedback queue. Background threads
-/// (e.g. long-running tool monitors) push here so the agent loop can
-/// drain them at safe boundaries.
-static GLOBAL_PENDING_FEEDBACK: LazyLock<Mutex<Vec<(String, String, String)>>> =
-    LazyLock::new(|| Mutex::new(Vec::new()));
-/// Paired notifier so test helpers can wait for new entries without a
-/// poll loop. `push_pending_feedback_global` notifies after pushing;
-/// `wait_for_global_pending_feedback` parks on this condvar with a
-/// timeout.
-static GLOBAL_PENDING_FEEDBACK_CV: LazyLock<Condvar> = LazyLock::new(Condvar::new);
 
 /// Registry of hooks called when an agent-loop session ends. Each hook
 /// receives the `session_id` so it can release resources scoped to that
@@ -150,76 +138,12 @@ pub(crate) async fn emit_agent_event(event: &AgentEvent) {
     }
 }
 
-/// Push a pending-feedback item from any thread. Background tasks (e.g.
-/// long-running tool monitors) use this to deliver results; the agent
-/// loop drains it at injection boundaries.
-pub fn push_pending_feedback_global(session_id: &str, kind: &str, content: &str) {
-    if let Ok(mut q) = GLOBAL_PENDING_FEEDBACK.lock() {
-        q.push((
-            session_id.to_string(),
-            kind.to_string(),
-            content.to_string(),
-        ));
-    }
-    GLOBAL_PENDING_FEEDBACK_CV.notify_all();
-}
-
-/// Test/integration helper: block (with timeout) until at least one
-/// item with `session_id` is queued in the global pending-feedback
-/// queue, then return without draining. Replaces `Instant::now()` +
-/// `thread::sleep` polling loops in tests that observe background-thread
-/// feedback. Returns `true` if an item with the matching session_id
-/// appeared before the timeout, `false` on timeout. Spurious wake-ups
-/// are absorbed by re-checking the queue inside the wait loop.
-pub fn wait_for_global_pending_feedback(session_id: &str, timeout: Duration) -> bool {
-    let Ok(mut guard) = GLOBAL_PENDING_FEEDBACK.lock() else {
-        return false;
-    };
-    if guard.iter().any(|(sid, _, _)| sid == session_id) {
-        return true;
-    }
-    let start = std::time::Instant::now();
-    loop {
-        let remaining = match timeout.checked_sub(start.elapsed()) {
-            Some(remaining) if !remaining.is_zero() => remaining,
-            _ => return guard.iter().any(|(sid, _, _)| sid == session_id),
-        };
-        let (next_guard, wait_result) =
-            match GLOBAL_PENDING_FEEDBACK_CV.wait_timeout(guard, remaining) {
-                Ok(pair) => pair,
-                Err(poison) => {
-                    let pair = poison.into_inner();
-                    (pair.0, pair.1)
-                }
-            };
-        guard = next_guard;
-        if guard.iter().any(|(sid, _, _)| sid == session_id) {
-            return true;
-        }
-        if wait_result.timed_out() {
-            return false;
-        }
-    }
-}
-
-/// Drain every item for `session_id` from the global (cross-thread)
-/// queue. Intended for integration tests that want to inspect feedback
-/// pushed by background threads without running a full agent loop.
-pub fn drain_global_pending_feedback(session_id: &str) -> Vec<(String, String)> {
-    let mut drained = Vec::new();
-    if let Ok(mut q) = GLOBAL_PENDING_FEEDBACK.lock() {
-        let mut kept = Vec::new();
-        for (sid, kind, content) in q.drain(..) {
-            if sid == session_id {
-                drained.push((kind, content));
-            } else {
-                kept.push((sid, kind, content));
-            }
-        }
-        *q = kept;
-    }
-    drained
-}
+// Legacy `push_pending_feedback_global` / `drain_global_pending_feedback` /
+// `wait_for_global_pending_feedback` shims were removed in the unified
+// inbox cutover. Producers and consumers now use
+// `crate::orchestration::agent_inbox::{push, drain, wait_sync,
+// wait_async}` directly so each call site can carry a typed source
+// label, observe sequence numbers, and use the clock-aware async wait.
 
 /// Register a hook that fires when any agent-loop session ends. The
 /// hook receives the session id and must be `Send + Sync` so it can be

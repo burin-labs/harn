@@ -32,6 +32,7 @@ const HOST_SESSION_RECORD_USAGE: &str = "__host_agent_session_record_usage";
 const HOST_SESSION_DRAIN_FEEDBACK: &str = "__host_agent_session_drain_feedback";
 const HOST_SESSION_TOTALS: &str = "__host_agent_session_totals";
 const HOST_SESSION_INJECT_FEEDBACK: &str = "__host_agent_session_inject_feedback";
+const HOST_SESSION_POST_EVENT: &str = "__host_agent_session_post_event";
 const HOST_SESSION_SET_ACTIVE_SKILLS: &str = "__host_agent_session_set_active_skills";
 const HOST_SESSION_ACTIVE_SKILLS: &str = "__host_agent_session_active_skills";
 const HOST_SESSION_RECORD_SKILL_EVENT: &str = "__host_agent_session_record_skill_event";
@@ -981,12 +982,21 @@ fn host_agent_session_drain_feedback_builtin(
             )))
         }
     };
-    let drained = crate::llm::drain_global_pending_feedback(&session_id)
+    let drained = crate::orchestration::agent_inbox::drain(&session_id)
         .into_iter()
-        .map(|(kind, content)| {
+        .map(|entry| {
             let mut item = BTreeMap::new();
-            item.insert("kind".to_string(), VmValue::String(Rc::from(kind)));
-            item.insert("content".to_string(), VmValue::String(Rc::from(content)));
+            item.insert("kind".to_string(), VmValue::String(Rc::from(entry.kind)));
+            item.insert(
+                "content".to_string(),
+                VmValue::String(Rc::from(entry.content)),
+            );
+            item.insert(
+                "source".to_string(),
+                VmValue::String(Rc::from(entry.source)),
+            );
+            item.insert("sequence".to_string(), VmValue::Int(entry.sequence as i64));
+            item.insert("ts_ms".to_string(), VmValue::Int(entry.ts_ms));
             VmValue::Dict(Rc::new(item))
         })
         .collect::<Vec<_>>();
@@ -1018,6 +1028,44 @@ fn host_agent_session_inject_feedback_builtin(
         &session_id,
         super::agent_config::agent_feedback_message(&kind, &content),
     );
+    Ok(VmValue::Nil)
+}
+
+/// Post an event into a running session's `agent_inbox`. Surface for
+/// triggers, connectors, and external host integrations that want to
+/// nudge a session that's already mid-loop without bypassing the
+/// canonical drain-at-turn-boundary path (e.g. "the GitHub PR you
+/// were waiting on just merged").
+fn host_agent_session_post_event_builtin(
+    args: &[VmValue],
+    _out: &mut String,
+) -> Result<VmValue, VmError> {
+    let session_id = match args.first() {
+        Some(VmValue::String(s)) if !s.is_empty() => s.to_string(),
+        _ => {
+            return Err(VmError::Runtime(format!(
+                "{HOST_SESSION_POST_EVENT}: session_id must be a non-empty string"
+            )))
+        }
+    };
+    let kind = match args.get(1) {
+        Some(VmValue::String(s)) if !s.is_empty() => s.to_string(),
+        _ => {
+            return Err(VmError::Runtime(format!(
+                "{HOST_SESSION_POST_EVENT}: kind must be a non-empty string"
+            )))
+        }
+    };
+    let content = match args.get(2) {
+        Some(VmValue::String(s)) => s.to_string(),
+        Some(other) => serde_json::to_string(&vm_to_json(other)).unwrap_or_default(),
+        None => String::new(),
+    };
+    let source = match args.get(3) {
+        Some(VmValue::String(s)) if !s.is_empty() => s.to_string(),
+        _ => "host.post_event".to_string(),
+    };
+    crate::orchestration::agent_inbox::push(&session_id, &kind, &content, &source);
     Ok(VmValue::Nil)
 }
 
@@ -1868,6 +1916,16 @@ const HOST_SESSION_PRIMITIVES_SYNC: &[SyncBuiltin] = &[
     .signature("__host_agent_session_inject_feedback(session_id, kind, content)")
     .arity(VmBuiltinArity::Exact(3))
     .doc("Append a runtime-feedback note to the session as a synthetic user turn."),
+    SyncBuiltin::new(
+        HOST_SESSION_POST_EVENT,
+        host_agent_session_post_event_builtin,
+    )
+    .signature("__host_agent_session_post_event(session_id, kind, content, source?)")
+    .arity(VmBuiltinArity::Range { min: 3, max: 4 })
+    .doc(
+        "Post an event into a running session's agent_inbox. Used by triggers, \
+             connectors, and external host integrations to nudge a mid-loop session.",
+    ),
     SyncBuiltin::new(
         HOST_SESSION_SET_ACTIVE_SKILLS,
         host_agent_session_set_active_skills_builtin,

@@ -12,9 +12,10 @@
 //! }
 //! ```
 //!
-//! A background thread waits for the child and, when it exits, calls
-//! `harn_vm::push_pending_feedback_global(session_id, "tool_result", json)`
-//! so the agent-loop's next turn-preflight picks it up.
+//! A background thread waits for the child and, when it exits, pushes a
+//! `tool_result` entry into the active session's `agent_inbox` via
+//! `harn_vm::orchestration::agent_inbox::push(...)` so the agent-loop's
+//! next turn-preflight (or post-compaction drain) picks it up.
 //!
 //! ### Cancellation
 //!
@@ -154,8 +155,9 @@ impl LongRunningHandleInfo {
 
 /// Spawn the argv as a long-running child process and return a handle.
 ///
-/// The background waiter calls `push_pending_feedback_global` when the
-/// process exits so the next agent-loop turn sees the result.
+/// The background waiter pushes a `tool_result` entry into the active
+/// session's `agent_inbox` when the process exits so the next
+/// agent-loop turn sees the result.
 pub fn spawn_long_running(
     builtin: &'static str,
     program: String,
@@ -470,7 +472,12 @@ fn waiter_thread(context: WaiterContext, cancel_state: Arc<CancelState>, capture
     }
 
     let content = serde_json::to_string(&payload).unwrap_or_default();
-    harn_vm::push_pending_feedback_global(&context.session_id, "tool_result", &content);
+    harn_vm::orchestration::agent_inbox::push(
+        &context.session_id,
+        "tool_result",
+        &content,
+        "hostlib.long_running.exit",
+    );
     signal_done();
 }
 
@@ -553,10 +560,11 @@ fn spawn_progress_thread(context: ProgressThreadContext) -> std::thread::JoinHan
                 "line_count": stdout.iter().chain(stderr.iter()).filter(|byte| **byte == b'\n').count() as i64,
                 "process_group_id": context.process_group_id,
             });
-            harn_vm::push_pending_feedback_global(
+            harn_vm::orchestration::agent_inbox::push(
                 &context.session_id,
                 "tool_progress",
                 &payload.to_string(),
+                "hostlib.long_running.progress",
             );
         }
     })

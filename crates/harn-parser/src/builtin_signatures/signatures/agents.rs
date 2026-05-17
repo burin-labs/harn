@@ -349,6 +349,21 @@ pub(crate) const SIGNATURES: &[BuiltinSignature] = &[
         TY_NIL,
     ),
     BuiltinSignature::simple(
+        "agent_session_post_event",
+        &[
+            Param::new("id", TY_STRING),
+            Param::new("kind", TY_STRING),
+            Param::new("content", TY_ANY),
+            Param::optional("source", TY_STRING),
+        ],
+        TY_NIL,
+    ),
+    BuiltinSignature::simple(
+        "agent_session_drain_inbox",
+        &[Param::new("id", TY_STRING)],
+        TY_LIST,
+    ),
+    BuiltinSignature::simple(
         "agent_session_length",
         &[Param::new("id", TY_STRING)],
         TY_INT,

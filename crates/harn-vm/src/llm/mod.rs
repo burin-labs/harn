@@ -222,10 +222,7 @@ pub use self::agent_config::{
     register_agent_loop_with_bridge, register_llm_call_structured_with_bridge,
     register_llm_call_with_bridge,
 };
-pub use self::agent_runtime::{
-    current_agent_session_id, drain_global_pending_feedback, push_pending_feedback_global,
-    register_session_end_hook, wait_for_global_pending_feedback,
-};
+pub use self::agent_runtime::{current_agent_session_id, register_session_end_hook};
 pub(crate) use self::agent_runtime::{
     current_host_bridge, emit_agent_event as emit_live_agent_event,
     emit_agent_event_sync as emit_live_agent_event_sync,

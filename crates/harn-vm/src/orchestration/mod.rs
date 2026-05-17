@@ -33,6 +33,8 @@ pub use command_policy::*;
 mod compaction;
 pub use compaction::*;
 
+pub mod agent_inbox;
+
 mod artifacts;
 pub use artifacts::*;
 

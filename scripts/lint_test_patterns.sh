@@ -408,6 +408,12 @@ NON_TEST_WALL_CLOCK_ALLOWLIST=(
   # elapsed time for transcript / portal execution telemetry.
   "crates/harn-vm/src/llm/agent_host_primitives.rs"
   "crates/harn-vm/src/llm/agent_runtime.rs"
+  # `agent_inbox::wait_sync` is a sync blocking primitive for sync
+  # builtins that already block the runtime thread (e.g.
+  # `run_command`'s wait-briefly-for-initial-output helper). The
+  # paired `agent_inbox::wait_async` is the clock-aware variant used
+  # by everything else.
+  "crates/harn-vm/src/orchestration/agent_inbox.rs"
   "crates/harn-vm/src/llm/api/partial_tool_args.rs"
   "crates/harn-vm/src/llm/api/transport.rs"
   "crates/harn-vm/src/llm/autonomy_budget.rs"

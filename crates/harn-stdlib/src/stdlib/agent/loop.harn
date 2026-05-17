@@ -1253,9 +1253,13 @@ fn __agent_loop_run(message, session, initial_opts) {
       }
       var turn_opts = agent_skills_match(session, opts, turn_index)
       turn_opts = agent_tool_search_inject_if_needed(turn_opts)
+      let pending_pre = agent_session_drain_feedback(session.session_id)
+      for note in pending_pre {
+        agent_session_inject_feedback(session.session_id, note.kind, note.content)
+      }
       agent_autocompact_if_needed(session, turn_opts)
-      let pending = agent_session_drain_feedback(session.session_id)
-      for note in pending {
+      let pending_post = agent_session_drain_feedback(session.session_id)
+      for note in pending_post {
         agent_session_inject_feedback(session.session_id, note.kind, note.content)
       }
       let turn_system = agent_build_turn_system(session, turn_opts, turn_index)
@@ -1527,6 +1531,16 @@ fn __agent_loop_run(message, session, initial_opts) {
   return unwrap(run)
 }
 
+// Drain async events (long-running tool completions, MCP server
+// progress, command-policy feedback, file-edited nudges, trigger
+// events) BEFORE compaction so the summarizer sees the freshest
+// transcript. Without this, anything that landed between turns
+// would be elided from the summary.
+// Drain again AFTER compaction: when Tier-2 LLM summarization
+// runs it can take 5-30s, and any async producer (tool worker,
+// MCP `notifications/progress`, GitHub PR merge trigger,
+// `command_policy` post-hook) firing in that window must be
+// visible in *this* turn's prompt, not the one after.
 /** agent_loop. */
 pub fn agent_loop(message, system_prompt = nil, options = nil) {
   var opts = agent_loop_options(agent_progress_apply_options(options))
