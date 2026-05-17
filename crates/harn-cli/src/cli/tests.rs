@@ -3,13 +3,13 @@ use std::time::Duration as StdDuration;
 
 use super::{
     CheckOutputFormat, Cli, Command, CompletionShell, ConfigCommand, ConnectCommand,
-    ConnectorCommand, CrystallizeCommand, FlowArchivistCommand, FlowCommand, LocalCommand,
-    McpCommand, ModelsCommand, OrchestratorCommand, OrchestratorDeployProvider,
-    OrchestratorLogFormat, OrchestratorQueueCommand, OrchestratorTenantCommand,
-    PackageArtifactsCommand, PackageCacheCommand, PackageCommand, PersonaCommand, ProjectTemplate,
-    ProviderToolProbeModeArg, ProvidersCommand, RunsCommand, SessionCommand, SkillCommand,
-    SkillKeyCommand, SkillTrustCommand, SkillsCommand, ToolCommand, TraceCommand, TriggerCommand,
-    TrustCommand, TrustOutcomeArg, TrustTierArg,
+    ConnectorCommand, CrystallizeCommand, EvalCommand, EvalToolCallsCommand, FlowArchivistCommand,
+    FlowCommand, LocalCommand, McpCommand, ModelsCommand, OrchestratorCommand,
+    OrchestratorDeployProvider, OrchestratorLogFormat, OrchestratorQueueCommand,
+    OrchestratorTenantCommand, PackageArtifactsCommand, PackageCacheCommand, PackageCommand,
+    PersonaCommand, ProjectTemplate, ProviderToolProbeModeArg, ProvidersCommand, RunsCommand,
+    SessionCommand, SkillCommand, SkillKeyCommand, SkillTrustCommand, SkillsCommand, ToolCommand,
+    TraceCommand, TriggerCommand, TrustCommand, TrustOutcomeArg, TrustTierArg,
 };
 use clap::{CommandFactory, Parser};
 
@@ -140,6 +140,67 @@ fn test_parses_run_llm_mock_flags() {
     };
     assert_eq!(args.llm_mock_record.as_deref(), Some("out.jsonl"));
     assert_eq!(args.llm_mock, None);
+}
+
+#[test]
+fn test_parses_eval_tool_calls_args() {
+    let cli = Cli::parse_from([
+        "harn",
+        "eval",
+        "tool-calls",
+        "--dataset",
+        "conformance/tool-call-eval",
+        "--planner",
+        "provider=mock,model=mock",
+        "--binder",
+        "mock:mock-binder",
+        "--output",
+        ".harn-runs/tool-call-eval/latest",
+        "--max-cases",
+        "3",
+    ]);
+
+    let Command::Eval(args) = cli.command.unwrap() else {
+        panic!("expected eval command");
+    };
+    let Some(EvalCommand::ToolCalls(tool_calls)) = args.command else {
+        panic!("expected tool-calls command");
+    };
+    assert_eq!(
+        tool_calls.dataset,
+        PathBuf::from("conformance/tool-call-eval")
+    );
+    assert_eq!(
+        tool_calls.planner.as_deref(),
+        Some("provider=mock,model=mock")
+    );
+    assert_eq!(tool_calls.binder.as_deref(), Some("mock:mock-binder"));
+    assert_eq!(tool_calls.max_cases, Some(3));
+
+    let cli = Cli::parse_from([
+        "harn",
+        "eval",
+        "tool-calls",
+        "regression-check",
+        "--planner",
+        "mock:mock",
+        "--against",
+        "baseline.json",
+        "--max-drop-pp",
+        "1.5",
+    ]);
+    let Command::Eval(args) = cli.command.unwrap() else {
+        panic!("expected eval command");
+    };
+    let Some(EvalCommand::ToolCalls(tool_calls)) = args.command else {
+        panic!("expected tool-calls command");
+    };
+    let Some(EvalToolCallsCommand::RegressionCheck(regression)) = tool_calls.command else {
+        panic!("expected regression-check command");
+    };
+    assert_eq!(regression.planner.as_deref(), Some("mock:mock"));
+    assert_eq!(regression.against, PathBuf::from("baseline.json"));
+    assert_eq!(regression.max_drop_pp, 1.5);
 }
 
 #[test]

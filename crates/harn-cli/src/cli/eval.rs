@@ -49,6 +49,70 @@ pub struct EvalArgs {
 pub enum EvalCommand {
     /// Render and optionally run a `.harn.prompt` across a fleet of models.
     Prompt(EvalPromptArgs),
+    /// Run tool-call accuracy, latency, and cost evals over a dataset.
+    ToolCalls(EvalToolCallsArgs),
+}
+
+#[derive(Debug, Args)]
+pub struct EvalToolCallsArgs {
+    #[command(subcommand)]
+    pub command: Option<EvalToolCallsCommand>,
+    /// Dataset directory or JSON file. Directories prefer a `cases/` child.
+    #[arg(long, default_value = "conformance/tool-call-eval")]
+    pub dataset: PathBuf,
+    /// Planner model selector: alias, `provider:model`, or `provider=...,model=...`.
+    #[arg(long)]
+    pub planner: Option<String>,
+    /// Optional binder model selector. When set, a second model canonicalizes
+    /// the planner's response into a call/refusal decision before scoring.
+    #[arg(long)]
+    pub binder: Option<String>,
+    /// Judge model used only for predicate cases.
+    #[arg(long = "judge-model", default_value = "claude-opus-4-7")]
+    pub judge_model: String,
+    /// Output directory for `summary.json` and `per_case.jsonl`.
+    #[arg(long)]
+    pub output: Option<PathBuf>,
+    /// Override tool rendering for the planner (`native` or `text`).
+    #[arg(long = "tool-format")]
+    pub tool_format: Option<String>,
+    /// Maximum planner response tokens.
+    #[arg(long = "max-tokens", default_value_t = 512)]
+    pub max_tokens: i64,
+    /// Maximum binder response tokens.
+    #[arg(long = "binder-max-tokens", default_value_t = 256)]
+    pub binder_max_tokens: i64,
+    /// Run only cases whose id or tag contains this string.
+    #[arg(long)]
+    pub filter: Option<String>,
+    /// Stop after N selected cases, useful for smoke runs.
+    #[arg(long = "max-cases")]
+    pub max_cases: Option<usize>,
+    /// Treat missing credentials as an immediate preflight error.
+    #[arg(long = "fail-on-unauthorized")]
+    pub fail_on_unauthorized: bool,
+}
+
+#[derive(Debug, Subcommand)]
+pub enum EvalToolCallsCommand {
+    /// Compare a current summary against a pinned baseline.
+    RegressionCheck(EvalToolCallsRegressionArgs),
+}
+
+#[derive(Debug, Args)]
+pub struct EvalToolCallsRegressionArgs {
+    /// Current run summary. Defaults to `.harn-runs/tool-call-eval/latest/summary.json`.
+    #[arg(long)]
+    pub current: Option<PathBuf>,
+    /// Optional planner label for diagnostics.
+    #[arg(long)]
+    pub planner: Option<String>,
+    /// Baseline summary JSON to compare against.
+    #[arg(long)]
+    pub against: PathBuf,
+    /// Maximum allowed pass-rate drop in percentage points.
+    #[arg(long = "max-drop-pp", default_value_t = 2.0)]
+    pub max_drop_pp: f64,
 }
 
 #[derive(Debug, Args)]
