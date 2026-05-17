@@ -258,6 +258,12 @@ pub fn take_stderr_buffer() -> String {
 }
 
 fn write_stderr(line: &str) {
+    if crate::run_events::sink_active() {
+        crate::run_events::emit(crate::run_events::RunEvent::Stderr {
+            payload: line.to_string(),
+        });
+        return;
+    }
     let capturing = STDERR_CAPTURING.with(|c| *c.borrow());
     if capturing {
         STDERR_BUFFER.with(|s| s.borrow_mut().push_str(line));
@@ -269,6 +275,12 @@ fn write_stderr(line: &str) {
 }
 
 pub(crate) fn write_stdout(out: &mut String, text: &str) {
+    if crate::run_events::sink_active() {
+        crate::run_events::emit(crate::run_events::RunEvent::Stdout {
+            payload: text.to_string(),
+        });
+        return;
+    }
     if stdout_passthrough_enabled() {
         let mut stdout = std::io::stdout().lock();
         let _ = stdout.write_all(text.as_bytes());

@@ -24,6 +24,15 @@ condensed series summaries instead of full per-patch history.
   build — the CI gate required by the epic. The legacy
   `harn explain --invariant <NAME> <FUNCTION> <FILE>` form continues to
   work; both forms share one dispatcher.
+- **`harn run --json` event stream (#1755).** Adds a versioned NDJSON
+  surface to `harn run`: one `JsonEnvelope` per line, each carrying a
+  typed `RunEvent` with a strictly monotonic `seq`. Variants cover
+  `stdout`, `stderr`, `transcript`, `tool_call`, `tool_result`, `hook`,
+  `persona_stage`, plus a terminal `result` / `error` event. `--quiet`
+  drops the noisy `stdout` / `stderr` events while keeping the
+  structured stream intact. The `run` command is now listed in
+  `harn --json-schemas` with `schemaVersion: 1`. Foundation for the
+  `--json` epic (#1753) and the burin-code TUI replatform.
 - **`with_scoped_executor` tool-caller middleware (#1702).** Narrows the
   active `CapabilityPolicy` for the duration of one tool dispatch:
   `compose_tool_callers([..., with_scoped_executor({stage, allowed_tools,

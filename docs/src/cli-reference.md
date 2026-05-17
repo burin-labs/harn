@@ -32,6 +32,38 @@ harn run --attest --receipt-out receipt.json <file.harn>
 | `--attest` | Emit a signed provenance receipt after execution |
 | `--receipt-out <path>` | Write the receipt to a specific JSON path |
 | `--attest-agent <id>` | Agent id used to load or create the Ed25519 signing key |
+| `--json` | Emit a versioned NDJSON event stream on stdout instead of mixed pipeline output |
+| `--quiet` | When `--json` is set, drop `stdout` and `stderr` events (transcript/tool/hook/persona/result still flow) |
+
+### `--json` event stream
+
+`harn run --json <file>` writes one `JsonEnvelope` per line to stdout,
+each carrying a typed `RunEvent`. The stream is strictly ordered via a
+monotonic `seq` (starts at `1`) so a downstream agent can reconstruct
+the run without parsing prose. The envelope's `schemaVersion` is `1`;
+see `harn --json-schemas` for the catalog entry.
+
+Event types (the `event_type` discriminator lives at
+`data.event_type`):
+
+| `event_type` | Payload |
+|---|---|
+| `stdout` | `{ payload: string }` — bytes written via `print`/`println`/`log`, verbatim. |
+| `stderr` | `{ payload: string }` — bytes written via `eprint`/`eprintln`. |
+| `transcript` | `{ agent_id?: string, kind: string, payload: object }` — one entry from the LLM-call transcript stream. |
+| `tool_call` | `{ call_id, name, args, started_at }` — model-issued tool invocation. |
+| `tool_result` | `{ call_id, ok: bool, result }` — outcome of a tool invocation. |
+| `hook` | `{ name, phase, payload? }` — session lifecycle hook fired during the run. |
+| `persona_stage` | `{ persona, stage, transition }` — persona-stage transition (`started` / `completed` / `handoff_started` / …). |
+| `result` | `{ value, exit_code: int }` — terminal event for successful runs. |
+| `error` | `{ error: { code, message, details? } }` — terminal event when a fatal error prevents a `result`. |
+
+The stream is line-flushed per event. Streaming consumers can pipe
+through `jq -c .` for live filtering:
+
+```bash
+harn run --json examples/hello.harn | jq -c '.data | {seq, event_type}'
+```
 
 You can also run a file directly without the `run` subcommand:
 

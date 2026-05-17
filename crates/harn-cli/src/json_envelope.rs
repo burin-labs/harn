@@ -157,6 +157,12 @@ pub fn catalog() -> Vec<SchemaEntry> {
             description: "Step-by-step plan to bring a connector online.",
             schema_json: None,
         },
+        SchemaEntry {
+            command: "run",
+            schema_version: crate::commands::run::json_events::RUN_JSON_SCHEMA_VERSION,
+            description: "Pipeline-run NDJSON event stream (stdout, stderr, transcript, tool, hook, persona, result, error).",
+            schema_json: None,
+        },
     ]
 }
 
