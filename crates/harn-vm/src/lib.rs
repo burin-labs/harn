@@ -38,6 +38,7 @@ pub mod mcp_registry;
 pub mod mcp_sampling;
 pub mod mcp_server;
 pub mod metadata;
+pub mod module_artifact;
 pub mod observability;
 pub mod orchestration;
 pub mod personas;

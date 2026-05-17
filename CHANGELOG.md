@@ -21,6 +21,19 @@ condensed series summaries instead of full per-patch history.
   `session/fs_mode` and `session/fs_commit_staged`, and receive
   `session/update` progress notifications tagged
   `_meta.harn.kind = "staged_writes_pending"`.
+- **Imported-module bytecode cache + correctness fixes (#1710 follow-up).**
+  Extends the v0.8.22 entry cache to imported modules — both stdlib and
+  user files now persist a `.harnmod` artifact alongside the entry
+  `.harnbc`, eliminating per-process re-parse and re-compile of every
+  imported function pool. `harn precompile` emits both artifact families
+  per source so shipped libraries hit the cache whether the user runs
+  them as an entry or imports them. Cache key now folds in active
+  `CompilerOptions` (so flipping `HARN_DISABLE_OPTIMIZATIONS` between
+  runs no longer reuses a chunk compiled under the opposite setting),
+  and the on-disk format gains a kind discriminant so the two artifact
+  families coexist in one cache dir without filename collisions. Header
+  schema bumped to `2`; older v0.8.22-written cache files are rejected
+  fail-closed and recompiled.
 
 ## v0.8.22
 
