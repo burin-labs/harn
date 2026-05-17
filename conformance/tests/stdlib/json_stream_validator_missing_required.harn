@@ -1,0 +1,11 @@
+import { stream_validator } from "std/json"
+
+pipeline default(task) {
+  let validator = stream_validator(
+    {type: "dict", required: ["name", "age"], properties: {name: {type: "string"}, age: {type: "int"}}},
+  )
+  let status = validator.feed("{\"name\":\"Ada\"}")
+  println(status.variant)
+  println(status.fields[0].path)
+  println(validator.value() == nil)
+}
