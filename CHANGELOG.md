@@ -177,6 +177,17 @@ condensed series summaries instead of full per-patch history.
   `eprint` and `harness.clock.now_ms` / `monotonic_ms` / `sleep_ms` are
   wired end-to-end so `examples/hello_v2.harn` runs against the new
   shape today.
+- **`harn fix --plan --json` repair plans (#1749).** Adds plan-only
+  `harn fix` mode for diagnostics with registered repair classifiers.
+  `harn fix --plan <path>` prints a summary table and
+  `harn fix --plan --json <path>` emits a `RepairPlan` with
+  `schemaVersion: 1`, `diagnostics[]`, `repairs[]`, and
+  `safetyLevels[]`. Plan mode mirrors the check path across type-check,
+  lint, and preflight diagnostics, reports concrete `FixEdit` entries
+  when available, marks overlapping edits via `applies_cleanly: false`
+  plus `conflicts_with`, and never writes files. `--safety <class>`
+  filters proposals by maximum autonomy class; `--apply` remains
+  reserved for #1752.
 - **`with_scoped_executor` tool-caller middleware (#1702).** Narrows the
   active `CapabilityPolicy` for the duration of one tool dispatch:
   `compose_tool_callers([..., with_scoped_executor({stage, allowed_tools,

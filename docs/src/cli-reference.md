@@ -520,6 +520,26 @@ action that VS Code can run on save:
 }
 ```
 
+## harn fix
+
+Emit a repair plan for one `.harn` file or directory without editing files.
+Plan mode runs the same type-check, lint, and preflight diagnostic passes used
+by `harn check`, keeps diagnostics that carry a registered repair classifier,
+and reports the concrete `FixEdit` edits when a diagnostic already has a
+machine-applicable fix.
+
+```bash
+harn fix --plan main.harn
+harn fix --plan --json main.harn
+harn fix --plan --json --safety behavior-preserving src/
+```
+
+`--json` returns a `RepairPlan` with `schemaVersion: 1`, `diagnostics[]`,
+`repairs[]`, and `safetyLevels[]`. Each repair includes the diagnostic code,
+repair `{id, summary, safety}`, candidate edits, `applies_cleanly`, and
+`conflicts_with` indexes for overlapping edit ranges. `--apply` is reserved for
+the apply-mode ticket and currently exits with an error.
+
 ## harn check
 
 Type-check one or more `.harn` files or directories and run preflight

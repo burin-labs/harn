@@ -10,24 +10,24 @@ use super::mock_host::collect_mock_host_capabilities;
 use super::source::parse_resolved_module;
 use crate::package::CheckConfig;
 
-pub(super) struct PreflightDiagnostic {
-    pub(super) code: Code,
-    pub(super) path: String,
-    pub(super) source: String,
-    pub(super) span: harn_lexer::Span,
-    pub(super) message: String,
-    pub(super) help: Option<String>,
+pub(crate) struct PreflightDiagnostic {
+    pub(crate) code: Code,
+    pub(crate) path: String,
+    pub(crate) source: String,
+    pub(crate) span: harn_lexer::Span,
+    pub(crate) message: String,
+    pub(crate) help: Option<String>,
     /// Optional `"capability.operation"` tag used for per-capability
     /// suppression via `[check].preflight_allow`. `None` means this
     /// diagnostic is not scoped to a single host capability.
-    pub(super) tags: Option<String>,
+    pub(crate) tags: Option<String>,
 }
 
 /// Returns `true` when `tag` matches any entry in `allow`. Entries may
 /// be exact (`project.scan`), capability wildcards (`project.*` or
 /// just `project`), or a literal `*` to suppress every preflight
 /// diagnostic that carries a tag.
-pub(super) fn is_preflight_allowed(tag: &Option<String>, allow: &[String]) -> bool {
+pub(crate) fn is_preflight_allowed(tag: &Option<String>, allow: &[String]) -> bool {
     let Some(tag) = tag else { return false };
     let (cap, _) = tag.split_once('.').unwrap_or((tag.as_str(), ""));
     allow.iter().any(|entry| {
@@ -42,7 +42,7 @@ pub(super) fn is_preflight_allowed(tag: &Option<String>, allow: &[String]) -> bo
     })
 }
 
-pub(super) fn collect_preflight_diagnostics(
+pub(crate) fn collect_preflight_diagnostics(
     path: &Path,
     source: &str,
     program: &[SNode],

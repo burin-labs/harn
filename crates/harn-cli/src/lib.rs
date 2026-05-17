@@ -328,6 +328,11 @@ async fn async_main() {
                 process::exit(code);
             }
         }
+        Command::Fix(args) => {
+            if let Err(error) = commands::fix::run(&args) {
+                command_error(&error);
+            }
+        }
         Command::Contracts(args) => {
             commands::contracts::handle_contracts_command(args).await;
         }
