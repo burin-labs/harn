@@ -133,6 +133,18 @@ condensed series summaries instead of full per-patch history.
 
 ### Changed
 
+- **`harn eval tool-calls` binder schema works under Cerebras strict mode
+  (#1698 follow-up).** The binder's JSON Schema response shape used
+  `arguments: {"type": "object"}` with no `properties` list, which
+  Cerebras's strict OpenAI-compat structured-output endpoint rejects with
+  HTTP 400 (`Object fields require at least one of: 'properties' or
+  'anyOf'`). The harness now asks the binder for a JSON-stringified
+  `arguments_json` field with all top-level fields unconditionally
+  required (strict OpenAI-compat providers also reject conditional
+  `if/then/else` requirement schemas), and the scorer parses the string
+  back. The legacy inline `arguments` object shape is still accepted as a
+  fallback so non-strict providers keep working. This unblocked the
+  empirical go/no-go cell against Cerebras GPT-OSS-120B for #1698.
 - **`llm_call` now recognizes `timeout_ms` (#1698 follow-up).** The
   option surface gains `timeout_ms` as a first-class alias for
   `timeout` so `with_timeout`-style middleware, the natural-language

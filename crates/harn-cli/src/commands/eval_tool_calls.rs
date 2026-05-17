@@ -414,6 +414,23 @@ fn observed_from_llm_response(response: &JsonValue) -> ObservedToolCallOutcome {
     }
 }
 
+/// Decode the binder's `arguments_json` (string) into a JSON object. Falls
+/// back to the legacy `arguments` (object) field — older or non-strict
+/// providers may emit the inline object form, and accepting both keeps the
+/// scorer agnostic to which binder shape produced the verdict.
+fn parse_binder_arguments(data: &JsonValue) -> JsonValue {
+    if let Some(text) = data.get("arguments_json").and_then(JsonValue::as_str) {
+        if let Ok(parsed) = serde_json::from_str::<JsonValue>(text) {
+            if parsed.is_object() {
+                return parsed;
+            }
+        }
+    }
+    data.get("arguments")
+        .cloned()
+        .unwrap_or_else(|| serde_json::json!({}))
+}
+
 fn observed_from_binder(response: &JsonValue) -> ObservedToolCallOutcome {
     let data = response
         .get("data")
@@ -435,10 +452,7 @@ fn observed_from_binder(response: &JsonValue) -> ObservedToolCallOutcome {
             .and_then(JsonValue::as_str)
             .unwrap_or_default()
             .to_string();
-        let args = data
-            .get("arguments")
-            .cloned()
-            .unwrap_or_else(|| serde_json::json!({}));
+        let args = parse_binder_arguments(&data);
         return ObservedToolCallOutcome {
             tool_call: (!name.is_empty()).then_some(ObservedToolCall { name, args }),
             final_text: response_text(response),
@@ -661,8 +675,11 @@ fn binder_prompt(case: &ToolCallEvalCase, planner_response: &JsonValue) -> Strin
     let planner = serde_json::to_string_pretty(planner_response).unwrap_or_default();
     format!(
         "Canonicalize the planner response into one tool-call decision.\n\
-Return JSON only with decision=call or decision=refusal.\n\
-If decision=call, set name to one declared tool and arguments to the exact JSON object.\n\n\
+Return JSON with decision=call or decision=refusal.\n\
+When decision=call: set name to exactly one declared tool name and arguments_json to a \
+JSON-stringified object containing only that tool's arguments (no markdown, no comments).\n\
+When decision=refusal: set name=\"\" and arguments_json=\"{{}}\".\n\
+reason is always a short one-line rationale.\n\n\
 User prompt:\n{}\n\nDeclared tools:\n{}\n\nPlanner response:\n{}",
         case.prompt, tools, planner
     )
@@ -684,13 +701,24 @@ fn predicate_judge_prompt(case: &ToolCallEvalCase, observed: &ObservedToolCallOu
 }
 
 fn binder_schema() -> JsonValue {
+    // `arguments` is a tool-specific object whose shape varies per case, so
+    // we cannot pre-declare its `properties`. Encode it as a JSON-stringified
+    // payload instead: providers like Cerebras enforce strict structured
+    // output and reject `{"type": "object"}` without a properties list. The
+    // scorer parses the string back via `observed_from_binder`.
+    //
+    // All fields are unconditionally required — strict OpenAI-compat
+    // providers (Cerebras, Together) reject conditional `if/then/else`
+    // requirements at the schema layer, so we surface the convention in
+    // the prompt instead: refusals emit empty strings for `name` and
+    // `arguments_json` (`"{}"`).
     serde_json::json!({
         "type": "object",
-        "required": ["decision", "reason"],
+        "required": ["decision", "name", "arguments_json", "reason"],
         "properties": {
             "decision": {"type": "string", "enum": ["call", "refusal"]},
             "name": {"type": "string"},
-            "arguments": {"type": "object"},
+            "arguments_json": {"type": "string"},
             "reason": {"type": "string"}
         },
         "additionalProperties": false
@@ -923,6 +951,37 @@ mod tests {
         }));
         assert!(observed.tool_call.is_none());
         assert_eq!(observed.final_text, "no matching tool");
+    }
+
+    #[test]
+    fn observed_from_binder_parses_arguments_json_string() {
+        let observed = observed_from_binder(&json!({
+            "data": {
+                "decision": "call",
+                "name": "search",
+                "arguments_json": "{\"query\":\"harn\"}",
+                "reason": "ok",
+            },
+            "text": "",
+        }));
+        let call = observed.tool_call.expect("binder call");
+        assert_eq!(call.name, "search");
+        assert_eq!(call.args, json!({"query": "harn"}));
+    }
+
+    #[test]
+    fn observed_from_binder_falls_back_to_inline_arguments_object() {
+        let observed = observed_from_binder(&json!({
+            "data": {
+                "decision": "call",
+                "name": "search",
+                "arguments": {"query": "harn"},
+                "reason": "ok",
+            },
+            "text": "",
+        }));
+        let call = observed.tool_call.expect("binder call");
+        assert_eq!(call.args, json!({"query": "harn"}));
     }
 
     #[test]
