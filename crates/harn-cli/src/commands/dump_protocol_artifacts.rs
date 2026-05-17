@@ -2779,6 +2779,13 @@ fn swift_enum_with_deprecations(
         out.push_str(&json_string_literal(value));
         out.push('\n');
     }
+    out.push_str("\n    public static let allCases: [Self] = [\n");
+    for value in values {
+        out.push_str("        ");
+        out.push_str(&json_string_literal(value));
+        out.push_str(",\n");
+    }
+    out.push_str("    ].map { Self(rawValue: $0)! }\n");
     out.push_str("}\n\n");
     out
 }
@@ -2962,6 +2969,7 @@ mod tests {
         assert!(swift.contains("public enum HarnACPAgentMethod"));
         assert!(swift.contains("case sessionClose = \"session/close\""));
         assert!(swift.contains("@available(*, deprecated"));
+        assert!(swift.contains("public static let allCases: [Self]"));
         assert!(swift.contains("public enum HarnACPClientMethod"));
         assert!(swift.contains("public enum HarnACPAgentNotification"));
         assert!(swift.contains("public enum HarnJsonRpcId"));

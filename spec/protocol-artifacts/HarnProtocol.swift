@@ -81,6 +81,17 @@ public enum HarnACPAgentMethod: String, Codable, Sendable, CaseIterable {
     case sessionClose = "session/close"
     @available(*, deprecated, message: "Use session/close; session/stop will be removed after one release.")
     case sessionStop = "session/stop"
+
+    public static let allCases: [Self] = [
+        "initialize",
+        "session/new",
+        "session/load",
+        "session/resume",
+        "session/prompt",
+        "session/truncate",
+        "session/close",
+        "session/stop",
+    ].map { Self(rawValue: $0)! }
 }
 
 public enum HarnACPClientMethod: String, Codable, Sendable, CaseIterable {
@@ -89,12 +100,26 @@ public enum HarnACPClientMethod: String, Codable, Sendable, CaseIterable {
     case terminalCreate = "terminal/create"
     case terminalKill = "terminal/kill"
     case sessionRequestPermission = "session/request_permission"
+
+    public static let allCases: [Self] = [
+        "fs/read_text_file",
+        "fs/write_text_file",
+        "terminal/create",
+        "terminal/kill",
+        "session/request_permission",
+    ].map { Self(rawValue: $0)! }
 }
 
 public enum HarnACPAgentNotification: String, Codable, Sendable, CaseIterable {
     case sessionMessage = "session/message"
     case sessionUpdate = "session/update"
     case terminalOutput = "terminal/output"
+
+    public static let allCases: [Self] = [
+        "session/message",
+        "session/update",
+        "terminal/output",
+    ].map { Self(rawValue: $0)! }
 }
 
 public enum HarnACPSessionUpdate: String, Codable, Sendable, CaseIterable {
@@ -122,6 +147,33 @@ public enum HarnACPSessionUpdate: String, Codable, Sendable, CaseIterable {
     case toolSearchResult = "tool_search_result"
     case transcriptCompacted = "transcript_compacted"
     case workerUpdate = "worker_update"
+
+    public static let allCases: [Self] = [
+        "user_message_chunk",
+        "agent_message_chunk",
+        "agent_thought_chunk",
+        "tool_call",
+        "tool_call_update",
+        "plan",
+        "available_commands_update",
+        "current_mode_update",
+        "config_option_update",
+        "session_info_update",
+        "session_truncated",
+        "fs_watch",
+        "handoff",
+        "hitl_request",
+        "hitl_resolved",
+        "log",
+        "progress",
+        "skill_activated",
+        "skill_deactivated",
+        "skill_scope_tools",
+        "tool_search_query",
+        "tool_search_result",
+        "transcript_compacted",
+        "worker_update",
+    ].map { Self(rawValue: $0)! }
 }
 
 public enum HarnACPContentBlockType: String, Codable, Sendable, CaseIterable {
@@ -130,6 +182,14 @@ public enum HarnACPContentBlockType: String, Codable, Sendable, CaseIterable {
     case resource = "resource"
     case image = "image"
     case audio = "audio"
+
+    public static let allCases: [Self] = [
+        "text",
+        "resource_link",
+        "resource",
+        "image",
+        "audio",
+    ].map { Self(rawValue: $0)! }
 }
 
 public enum HarnACPToolKind: String, Codable, Sendable, CaseIterable {
@@ -142,6 +202,18 @@ public enum HarnACPToolKind: String, Codable, Sendable, CaseIterable {
     case think = "think"
     case fetch = "fetch"
     case other = "other"
+
+    public static let allCases: [Self] = [
+        "read",
+        "edit",
+        "delete",
+        "move",
+        "search",
+        "execute",
+        "think",
+        "fetch",
+        "other",
+    ].map { Self(rawValue: $0)! }
 }
 
 public enum HarnACPToolCallStatus: String, Codable, Sendable, CaseIterable {
@@ -149,6 +221,13 @@ public enum HarnACPToolCallStatus: String, Codable, Sendable, CaseIterable {
     case inProgress = "in_progress"
     case completed = "completed"
     case failed = "failed"
+
+    public static let allCases: [Self] = [
+        "pending",
+        "in_progress",
+        "completed",
+        "failed",
+    ].map { Self(rawValue: $0)! }
 }
 
 public enum HarnToolCallErrorCategory: String, Codable, Sendable, CaseIterable {
@@ -163,6 +242,20 @@ public enum HarnToolCallErrorCategory: String, Codable, Sendable, CaseIterable {
     case network = "network"
     case cancelled = "cancelled"
     case unknown = "unknown"
+
+    public static let allCases: [Self] = [
+        "schema_validation",
+        "tool_error",
+        "mcp_server_error",
+        "host_bridge_error",
+        "permission_denied",
+        "rejected_loop",
+        "parse_aborted",
+        "timeout",
+        "network",
+        "cancelled",
+        "unknown",
+    ].map { Self(rawValue: $0)! }
 }
 
 public enum HarnSideEffectLevel: String, Codable, Sendable, CaseIterable {
@@ -171,6 +264,14 @@ public enum HarnSideEffectLevel: String, Codable, Sendable, CaseIterable {
     case workspaceWrite = "workspace_write"
     case processExec = "process_exec"
     case network = "network"
+
+    public static let allCases: [Self] = [
+        "none",
+        "read_only",
+        "workspace_write",
+        "process_exec",
+        "network",
+    ].map { Self(rawValue: $0)! }
 }
 
 public enum HarnWorkerStatus: String, Codable, Sendable, CaseIterable {
@@ -180,6 +281,15 @@ public enum HarnWorkerStatus: String, Codable, Sendable, CaseIterable {
     case completed = "completed"
     case failed = "failed"
     case cancelled = "cancelled"
+
+    public static let allCases: [Self] = [
+        "running",
+        "progressed",
+        "awaiting_input",
+        "completed",
+        "failed",
+        "cancelled",
+    ].map { Self(rawValue: $0)! }
 }
 
 public enum HarnToolCallReceiptStatus: String, Codable, Sendable, CaseIterable {
@@ -188,6 +298,14 @@ public enum HarnToolCallReceiptStatus: String, Codable, Sendable, CaseIterable {
     case consentDenied = "consent_denied"
     case timeout = "timeout"
     case error = "error"
+
+    public static let allCases: [Self] = [
+        "ok",
+        "schema_violation",
+        "consent_denied",
+        "timeout",
+        "error",
+    ].map { Self(rawValue: $0)! }
 }
 
 public enum HarnToolCallReceiptExecutor: String, Codable, Sendable, CaseIterable {
@@ -195,6 +313,13 @@ public enum HarnToolCallReceiptExecutor: String, Codable, Sendable, CaseIterable
     case hostBridge = "host_bridge"
     case mcpServer = "mcp_server"
     case providerNative = "provider_native"
+
+    public static let allCases: [Self] = [
+        "harn",
+        "host_bridge",
+        "mcp_server",
+        "provider_native",
+    ].map { Self(rawValue: $0)! }
 }
 
 public enum HarnA2ATaskState: String, Codable, Sendable, CaseIterable {
@@ -207,12 +332,30 @@ public enum HarnA2ATaskState: String, Codable, Sendable, CaseIterable {
     case inputRequired = "input-required"
     case rejected = "rejected"
     case authRequired = "auth-required"
+
+    public static let allCases: [Self] = [
+        "submitted",
+        "working",
+        "completed",
+        "failed",
+        "canceled",
+        "cancelled",
+        "input-required",
+        "rejected",
+        "auth-required",
+    ].map { Self(rawValue: $0)! }
 }
 
 public enum HarnA2ATaskEventType: String, Codable, Sendable, CaseIterable {
     case status = "status"
     case message = "message"
     case workerUpdate = "worker_update"
+
+    public static let allCases: [Self] = [
+        "status",
+        "message",
+        "worker_update",
+    ].map { Self(rawValue: $0)! }
 }
 
 public enum HarnMCPMethod: String, Codable, Sendable, CaseIterable {
@@ -230,6 +373,23 @@ public enum HarnMCPMethod: String, Codable, Sendable, CaseIterable {
     case elicitationCreate = "elicitation/create"
     case notificationsInitialized = "notifications/initialized"
     case notificationsMessage = "notifications/message"
+
+    public static let allCases: [Self] = [
+        "initialize",
+        "tools/list",
+        "tools/call",
+        "resources/list",
+        "resources/read",
+        "resources/templates/list",
+        "prompts/list",
+        "prompts/get",
+        "completion/complete",
+        "logging/setLevel",
+        "sampling/createMessage",
+        "elicitation/create",
+        "notifications/initialized",
+        "notifications/message",
+    ].map { Self(rawValue: $0)! }
 }
 
 public enum HarnMCPLoggingLevel: String, Codable, Sendable, CaseIterable {
@@ -241,6 +401,17 @@ public enum HarnMCPLoggingLevel: String, Codable, Sendable, CaseIterable {
     case critical = "critical"
     case alert = "alert"
     case emergency = "emergency"
+
+    public static let allCases: [Self] = [
+        "debug",
+        "info",
+        "notice",
+        "warning",
+        "error",
+        "critical",
+        "alert",
+        "emergency",
+    ].map { Self(rawValue: $0)! }
 }
 
 public enum HarnACPValue: Codable, Sendable, Equatable {
