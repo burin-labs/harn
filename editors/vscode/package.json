@@ -133,7 +133,7 @@
   "devDependencies": {
     "@types/vscode": "^1.80.0",
     "typescript": "^6.0.3",
-    "@vscode/vsce": "^3.7.1"
+    "@vscode/vsce": "^3.9.1"
   },
   "dependencies": {
     "vscode-languageclient": "^9.0.1"

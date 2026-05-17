@@ -41,7 +41,7 @@ tokio = { version = "1", features = ["rt", "rt-multi-thread", "sync", "time", "t
 reqwest = { version = "0.12", default-features = false, features = ["brotli", "deflate", "gzip", "json", "multipart", "rustls-tls", "zstd"] }
 reqwest-eventsource = "0.6"
 tokio-tungstenite = { version = "0.29", default-features = false, features = ["connect", "rustls-tls-webpki-roots"] }
-jsonwebtoken = { version = "9", default-features = false, features = ["use_pem"] }
+jsonwebtoken = { version = "10", default-features = false, features = ["use_pem", "aws_lc_rs"] }
 rcgen = "0.14"
 libc = "0.2"
 tokio-stream = "0.1"
@@ -51,9 +51,9 @@ data-encoding = "2"
 ed25519-dalek = { version = "2", features = ["pem", "pkcs8", "rand_core"] }
 x25519-dalek = { version = "2", features = ["static_secrets"] }
 hex = "0.4"
-sha1 = "0.10"
+sha1 = "0.11"
 sha2 = "0.11"
-sha3 = "0.11"
+sha3 = "0.12"
 blake3 = "1"
 md-5 = "0.11"
 csv = "1"
@@ -90,7 +90,7 @@ flate2 = "1.1.9"
 zstd = "0.13.3"
 brotli = "8.0.2"
 tar = { version = "0.4.45", default-features = false }
-zip = { version = "2", default-features = false, features = ["deflate-flate2", "flate2"] }
+zip = { version = "8", default-features = false, features = ["deflate-flate2"] }
 x509-parser = "0.18.1"
 wasmtime = { version = "44", optional = true, default-features = false, features = ["cranelift", "runtime"] }
 wasmtime-wasi = { version = "44", optional = true, default-features = false, features = ["p1"] }

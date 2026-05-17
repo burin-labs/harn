@@ -39,6 +39,6 @@ hostlib = ["dep:harn-hostlib"]
 [dev-dependencies]
 filetime = "0.2"
 hex = "0.4"
-jsonwebtoken = { version = "9", default-features = false, features = ["use_pem"] }
+jsonwebtoken = { version = "10", default-features = false, features = ["use_pem", "aws_lc_rs"] }
 tempfile = "3"
 tower = { version = "0.5", features = ["util"] }
