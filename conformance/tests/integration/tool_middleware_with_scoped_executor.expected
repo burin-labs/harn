@@ -1,0 +1,17 @@
+true
+research
+search_files,read_file
+ok
+false
+scope_violation
+scope_violation
+tool 'write_file' not in stage 'research' allowlist
+rejected
+caught
+scope_violation: tool 'edit_file' not in stage 'plan' allowlist
+true
+edit
+false
+caught-ctor
+false
+permission_denied

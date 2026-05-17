@@ -42,6 +42,9 @@
 //   hints?:       dict     // {read_only?, destructive?, idempotent?,
 //                          // open_world?} — verbatim from MCP tool annotations.
 //   consent?:     dict     // {decision, decided_by, decided_at} — coined.
+//   scope?:       dict     // {stage, allowed_tools?, side_effect_level?} —
+//                          // the scoped capability surface a stage middleware
+//                          // narrowed this call to.
 //   layers?:      list     // [{name, status, started_at, ended_at, error?}]
 //                          // per-layer audit trail.
 //   metadata?:    dict     // free-form extension slot — A2A/LangChain idiom.
@@ -50,8 +53,8 @@
 // composition stays predictable):
 //
 //   "ok", "tool_not_found", "schema_violation", "consent_denied",
-//   "policy_blocked", "executor_error", "redacted", "dry_run",
-//   "rate_limited", "exception", "tool_middleware_exception".
+//   "policy_blocked", "scope_violation", "executor_error", "redacted",
+//   "dry_run", "rate_limited", "exception", "tool_middleware_exception".
 //
 // Composition uses `compose_tool_callers([outer, ..., inner])` — leftmost is
 // the outermost wrapper. Exactly mirrors std/llm/handlers `compose`.
@@ -705,6 +708,101 @@ pub fn with_consent(prompt_fn) {
         },
         layers: [{name: "with_consent", status: verdict}],
       },
+    )
+  }
+}
+
+/**
+ * with_scoped_executor(opts) -> caller
+ *
+ * Narrows the active CapabilityPolicy for the duration of one tool
+ * dispatch. Wraps the downstream caller in `with_execution_policy(...)`
+ * so the runtime's existing `enforce_current_policy_for_tool` machinery
+ * (capability ceilings, side-effect ceiling, tool-arg constraints) sees
+ * the scoped policy as the top of the stack. A preemptive tool-name
+ * check short-circuits with `status: "scope_violation"` so the audit
+ * chain captures the stage label even when the wrapped dispatch never
+ * runs.
+ *
+ * Compose this OUTSIDE binder/consent layers so it can reject before
+ * either does expensive work:
+ *
+ *     compose_tool_callers([
+ *       with_audit_log({...}),
+ *       with_scoped_executor({stage: "research", allowed_tools: [...]}),
+ *       with_consent(...),
+ *       default_tool_caller(),
+ *     ])
+ *
+ * Options:
+ *   stage:              string       (default "scoped"; surfaced on audit.scope)
+ *   allowed_tools:      list<string> (empty/missing = no tool-name restriction)
+ *   side_effect_level:  string?      ("none"/"read_only"/"workspace_write"/
+ *                                     "process_exec"/"network" — tightens the
+ *                                     ambient ceiling for this call)
+ *   capabilities:       dict?        (capability.operation allowlist; same
+ *                                     shape as `CapabilityPolicy.capabilities`)
+ *   on_violation:       string       ("reject" (default) → short-circuit with
+ *                                     scope_violation status; "raise" → throw)
+ *
+ * The pushed policy is popped on success or throw (`with_execution_policy`
+ * owns the RAII guard). Subsequent middleware layers see the scope record
+ * on `audit.scope` and a layer entry under `audit.layers`.
+ */
+pub fn with_scoped_executor(opts) {
+  let cfg = __tool_mw_dict(opts)
+  let stage = to_string(cfg?.stage ?? "scoped")
+  let allowed = __tool_mw_string_list(cfg?.allowed_tools)
+  let restrict_tools = cfg?.allowed_tools != nil
+  let side_effect_level = __tool_mw_optional_text(cfg?.side_effect_level)
+  let capabilities_value = if type_of(cfg?.capabilities) == "dict" {
+    cfg.capabilities
+  } else {
+    nil
+  }
+  let on_violation = to_string(cfg?.on_violation ?? "reject")
+  if on_violation != "reject" && on_violation != "raise" {
+    throw "with_scoped_executor: on_violation must be `reject` or `raise`; got " + on_violation
+  }
+  let scope_descriptor = if restrict_tools {
+    {stage: stage, allowed_tools: allowed}
+  } else {
+    {stage: stage}
+  }
+  return { call, next ->
+    if restrict_tools && !contains(allowed, call.tool_name) {
+      let reason = "tool '" + call.tool_name + "' not in stage '" + stage + "' allowlist"
+      if on_violation == "raise" {
+        throw "scope_violation: " + reason
+      }
+      return __tool_mw_short_circuit(
+        call,
+        "scope_violation",
+        {
+          status: "scope_violation",
+          error: reason,
+          error_category: "scope_violation",
+          audit: {
+            scope: scope_descriptor,
+            layers: [{name: "with_scoped_executor", status: "rejected", stage: stage, reason: reason}],
+          },
+        },
+      )
+    }
+    var policy = {}
+    if restrict_tools {
+      policy = policy + {tools: allowed}
+    }
+    if side_effect_level != nil {
+      policy = policy + {side_effect_level: side_effect_level}
+    }
+    if capabilities_value != nil {
+      policy = policy + {capabilities: capabilities_value}
+    }
+    let result = with_execution_policy(policy, fn() { return next(call) })
+    return __tool_mw_attach_audit(
+      result,
+      {scope: scope_descriptor, layers: [{name: "with_scoped_executor", status: "ok", stage: stage}]},
     )
   }
 }

@@ -88,3 +88,15 @@ read-only research stage against a workspace-mutating persona.
 If `stages` is empty (or omitted), behavior is identical to a persona
 without stage declarations — the ambient policy alone governs every
 tool call.
+
+## Per-dispatch scoping outside a persona
+
+For callers that don't run under a persona — ad-hoc agents, one-off
+`agent_loop` invocations, or test harnesses — the same scoping is
+available as a tool-caller middleware:
+[`with_scoped_executor(...)`](../stdlib/tool-middleware.md). It pushes
+a `CapabilityPolicy` for the duration of a single dispatch (intersected
+with whatever ambient policy is active) and decorates the result with
+`audit.scope = {stage, allowed_tools, ...}`. Out-of-scope tool names
+short-circuit with `status: "scope_violation"` so callers can route on
+the typed receipt.

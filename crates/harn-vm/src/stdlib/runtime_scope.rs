@@ -57,14 +57,18 @@ pub(crate) fn register_runtime_scope_builtins(vm: &mut Vm) {
         let policy_value = args
             .first()
             .ok_or_else(|| VmError::Runtime("with_execution_policy: policy is required".into()))?;
-        let policy = serde_json::from_value::<crate::orchestration::CapabilityPolicy>(
+        let requested = serde_json::from_value::<crate::orchestration::CapabilityPolicy>(
             crate::llm::helpers::vm_value_to_json(policy_value),
         )
         .map_err(|error| {
             VmError::Runtime(format!("with_execution_policy: invalid policy: {error}"))
         })?;
         let closure = closure_arg(&args, 1, "with_execution_policy")?;
-        crate::orchestration::push_execution_policy(policy);
+        let effective = match crate::orchestration::current_execution_policy() {
+            Some(outer) => outer.intersect(&requested).map_err(VmError::Runtime)?,
+            None => requested,
+        };
+        crate::orchestration::push_execution_policy(effective);
         let _guard = ScopeGuard::new(crate::orchestration::pop_execution_policy);
         call_scoped_closure(closure, "with_execution_policy").await
     });

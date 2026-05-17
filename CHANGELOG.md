@@ -8,6 +8,22 @@ condensed series summaries instead of full per-patch history.
 
 ## Unreleased
 
+### Added
+
+- **`with_scoped_executor` tool-caller middleware (#1702).** Narrows the
+  active `CapabilityPolicy` for the duration of one tool dispatch:
+  `compose_tool_callers([..., with_scoped_executor({stage, allowed_tools,
+  side_effect_level?, capabilities?}), ...])`. The middleware pushes the
+  scoped policy via `with_execution_policy(...)` (now intersected with
+  the ambient policy so it can only tighten the surface, never widen
+  it), preemptively rejects out-of-allowlist tool names with the new
+  `status: "scope_violation"`, and decorates results with
+  `audit.scope = {stage, allowed_tools, ...}`. Pairs with
+  `PersonaRuntimeBinding.stages` for per-stage tool scoping outside a
+  persona manifest. Opt-in `on_violation: "raise"` throws instead of
+  short-circuiting so `try { agent_loop(...) }` can route on the
+  exception.
+
 ## v0.8.24
 
 ### Fixed
