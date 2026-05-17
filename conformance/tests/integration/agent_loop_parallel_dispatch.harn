@@ -8,7 +8,7 @@
  * parsers keyed on declaration order keep working.
  *
  * To assert real concurrency (vs serial) we count peak in-flight tool
- * handlers via atomics — the handler bumps the counter, yields a few
+ * handlers via atomics - the handler bumps the counter, yields a few
  * times so siblings can arrive, then decrements. With cap=1 only one
  * handler is ever in-flight; with cap=4 all four reach in-flight=4.
  */
@@ -82,6 +82,36 @@ fn run(cap) {
   return {status: result.status, observed: atomic_get(observed), peak: atomic_get(peak)}
 }
 
+fn run_without_middleware(cap) {
+  llm_mock_clear()
+  atomic_set(in_flight, 0)
+  atomic_set(peak, 0)
+  llm_mock(
+    {
+      tool_calls: [
+        {id: "n1", name: "fanout_echo", arguments: {msg: "one"}},
+        {id: "n2", name: "fanout_echo", arguments: {msg: "two"}},
+        {id: "n3", name: "fanout_echo", arguments: {msg: "three"}},
+        {id: "n4", name: "fanout_echo", arguments: {msg: "four"}},
+      ],
+    },
+  )
+  llm_mock({text: "##DONE##"})
+  let result = agent_loop(
+    "fan out without middleware",
+    nil,
+    {
+      provider: "mock",
+      tools: fanout_tools(),
+      tool_format: "native",
+      max_iterations: 3,
+      loop_until_done: true,
+      max_concurrent_tools: cap,
+    },
+  )
+  return {status: result.status, peak: atomic_get(peak)}
+}
+
 let audit_receipt_count = atomic(0)
 
 let audit_emit_order_bitmask = atomic(0)
@@ -138,6 +168,67 @@ fn run_with_audit(cap) {
   }
 }
 
+let prefetch_audit_finished = atomic(0)
+
+let prefetch_second_turn_before_audit = atomic(0)
+
+let prefetch_llm_turns = atomic(0)
+
+fn run_prefetch(prefetch) {
+  atomic_set(in_flight, 0)
+  atomic_set(peak, 0)
+  atomic_set(prefetch_audit_finished, 0)
+  atomic_set(prefetch_second_turn_before_audit, 0)
+  atomic_set(prefetch_llm_turns, 0)
+  let llm_caller = { _call ->
+    let turn = atomic_add(prefetch_llm_turns, 1) + 1
+    if turn == 1 {
+      return {
+        ok: true,
+        value: {
+          tool_calls: [
+            {id: "p1", name: "fanout_echo", arguments: {msg: "prefetch-1"}},
+            {id: "p2", name: "fanout_echo", arguments: {msg: "prefetch-2"}},
+          ],
+        },
+      }
+    }
+    if atomic_get(prefetch_audit_finished) < 2 {
+      atomic_set(prefetch_second_turn_before_audit, 1)
+    }
+    return {ok: true, value: {text: "##DONE##"}}
+  }
+  let audit_sink = { _receipt ->
+    var spins = 0
+    while spins < 50 {
+      yield_now()
+      spins = spins + 1
+    }
+    atomic_add(prefetch_audit_finished, 1)
+  }
+  let result = agent_loop(
+    "prefetch audit flush",
+    nil,
+    {
+      provider: "mock",
+      tools: fanout_tools(),
+      tool_format: "native",
+      max_iterations: 3,
+      loop_until_done: true,
+      max_concurrent_tools: 2,
+      prefetch_next_turn: prefetch,
+      tool_caller: compose_tool_callers([with_audit_log({sink: audit_sink})]),
+      llm_caller: llm_caller,
+    },
+  )
+  return {
+    status: result.status,
+    llm_turns: atomic_get(prefetch_llm_turns),
+    second_before_audit: atomic_get(prefetch_second_turn_before_audit),
+    audit_finished: atomic_get(prefetch_audit_finished),
+  }
+}
+
 pipeline default() {
   // Default (cap=1, sequential): peak in-flight is exactly 1.
   let serial = run(1)
@@ -154,12 +245,26 @@ pipeline default() {
   println("capped.status=" + capped.status)
   println("capped.observed=" + to_string(capped.observed))
   println("capped.peak=" + to_string(capped.peak))
+  // The host batch path honors the same cap even without tool middleware.
+  let no_middleware = run_without_middleware(4)
+  println("no_middleware.status=" + no_middleware.status)
+  println("no_middleware.peak=" + to_string(no_middleware.peak))
   // `with_audit_log` receipts carry each call's source-batch position
   // as `emit_order`. With 3 parallel calls we should see all three
-  // distinct positions (bits 0, 1, 2 → bitmask 7), regardless of
+  // distinct positions (bits 0, 1, 2 -> bitmask 7), regardless of
   // completion order.
   let audited = run_with_audit(3)
   println("audit.status=" + audited.status)
   println("audit.receipt_count=" + to_string(audited.receipt_count))
   println("audit.emit_bitmask=" + to_string(audited.emit_bitmask))
+  let prefetch_off = run_prefetch(false)
+  println("prefetch_off.status=" + prefetch_off.status)
+  println("prefetch_off.llm_turns=" + to_string(prefetch_off.llm_turns))
+  println("prefetch_off.second_before_audit=" + to_string(prefetch_off.second_before_audit))
+  println("prefetch_off.audit_finished=" + to_string(prefetch_off.audit_finished))
+  let prefetch_on = run_prefetch(true)
+  println("prefetch_on.status=" + prefetch_on.status)
+  println("prefetch_on.llm_turns=" + to_string(prefetch_on.llm_turns))
+  println("prefetch_on.second_before_audit=" + to_string(prefetch_on.second_before_audit))
+  println("prefetch_on.audit_finished=" + to_string(prefetch_on.audit_finished))
 }

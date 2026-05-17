@@ -67,6 +67,7 @@ fn fixture_tool_call_receipt() -> ToolCallReceipt {
         tool_name: "read_file".to_string(),
         iteration: 6,
         turn_index: Some(5),
+        emit_order: 0,
         reason: Some("Read project context".to_string()),
         kind: Some("read".to_string()),
         executor: Some("harn".to_string()),

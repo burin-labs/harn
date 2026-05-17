@@ -609,6 +609,28 @@ fn __tool_mw_audit_log_emit_local(receipt) {
   }
 }
 
+fn __tool_mw_audit_log_has_deferred_sink(cfg) -> bool {
+  return cfg.mode == "local" || cfg.mode == "both" || cfg.sink_fn != nil
+}
+
+fn __tool_mw_audit_log_flush(cfg, receipt) {
+  if cfg.mode == "local" || cfg.mode == "both" {
+    __tool_mw_audit_log_emit_local(receipt)
+  }
+  if cfg.sink_fn != nil {
+    let _ = try {
+      cfg.sink_fn(receipt)
+    }
+  }
+}
+
+fn __tool_mw_audit_log_return(result, cfg, receipt) {
+  if cfg.mode == "cloud" || cfg.mode == "both" {
+    return result + {receipt: receipt}
+  }
+  return result
+}
+
 /**
  * with_audit_log(sink_or_options) -> caller
  *
@@ -631,18 +653,16 @@ pub fn with_audit_log(sink_or_options) {
     let result = next(call)
     let duration = now_ms() - started
     let receipt = __tool_mw_tool_call_receipt(call, result, duration, cfg.redact_keys)
-    if cfg.mode == "local" || cfg.mode == "both" {
-      __tool_mw_audit_log_emit_local(receipt)
-    }
-    if cfg.sink_fn != nil {
-      let _ = try {
-        cfg.sink_fn(receipt)
+    if call?.turn?.prefetch_next_turn ?? false {
+      let returned = __tool_mw_audit_log_return(result, cfg, receipt)
+      if __tool_mw_audit_log_has_deferred_sink(cfg) {
+        return returned
+          + {_audit_flush: { -> __tool_mw_audit_log_flush(cfg, receipt) }}
       }
+      return returned
     }
-    if cfg.mode == "cloud" || cfg.mode == "both" {
-      return result + {receipt: receipt}
-    }
-    return result
+    __tool_mw_audit_log_flush(cfg, receipt)
+    return __tool_mw_audit_log_return(result, cfg, receipt)
   }
 }
 

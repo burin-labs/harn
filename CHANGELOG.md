@@ -48,16 +48,22 @@ condensed series summaries instead of full per-patch history.
   exception.
 - **In-turn parallel tool dispatch (#1699).** `agent_loop` now accepts a
   `max_concurrent_tools: N` option (default 1). When a planner emits
-  multiple tool calls in a single turn and the loop is configured with
-  a `tool_caller` middleware, siblings dispatch concurrently via
-  `parallel settle` capped at `N`. Each sibling invokes its own caller
-  chain in a fresh closure scope so `audit.layers` histories never
-  cross-talk between concurrent calls. Results inject in source order
-  regardless of completion order so text tool-call parsers keyed on
-  declaration order keep working. The tool-call envelope grows
-  `turn.tool_call_index`, and `with_audit_log` receipts grow an
-  `emit_order` field equal to that index so completion-ordered
-  receipts can be re-sorted to source order.
+  multiple tool calls in a single turn, siblings dispatch concurrently
+  capped at `N`; middleware-backed calls use `parallel settle`, and the
+  host batch path honors the same cap. Each middleware sibling invokes
+  its own caller chain in a fresh scope so `audit.layers` histories
+  never cross-talk between concurrent calls. Results inject in source
+  order regardless of completion order so text tool-call parsers keyed
+  on declaration order keep working. The tool-call envelope grows
+  `turn.tool_call_index`, and typed `ToolCallReceipt` records grow an
+  `emit_order` field equal to that index so completion-ordered receipts
+  can be re-sorted to source order. The new `prefetch_next_turn: true`
+  option starts the next planner turn after tool results are recorded
+  while local/custom audit receipt sinks flush in the background; the
+  loop drains those flushes before returning. Parallel tool dispatch
+  now scopes `current_tool_call_id()` task-locally across `.await`
+  points and propagates cancellation instead of turning it into an
+  ordinary tool error.
 - **Natural-language tool binder middleware (#1698).** New experimental
   `std/llm/tool_binder` module exporting
   `with_natural_language_executor({provider, model, timeout_ms, ...})`.

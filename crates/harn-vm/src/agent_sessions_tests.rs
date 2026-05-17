@@ -4,6 +4,7 @@ use crate::agent_events::{
     AgentEventSink,
 };
 use crate::event_log::{active_event_log, EventLog, Topic};
+use futures::StreamExt as _;
 use std::collections::BTreeMap;
 use std::sync::{Arc, Mutex};
 
@@ -462,24 +463,47 @@ fn prompt_state_prepends_summary_message_when_missing_from_messages() {
     assert_eq!(prompt.messages[1]["role"].as_str(), Some("assistant"));
 }
 
+#[tokio::test(flavor = "current_thread")]
+async fn current_tool_call_scope_is_task_local() {
+    reset_session_store();
+    let first = scope_current_tool_call("first", async {
+        tokio::task::yield_now().await;
+        current_tool_call_id()
+    });
+    let second = scope_current_tool_call("second", async { current_tool_call_id() });
+
+    let (first_id, second_id) = tokio::join!(first, second);
+
+    assert_eq!(first_id.as_deref(), Some("first"));
+    assert_eq!(second_id.as_deref(), Some("second"));
+    assert_eq!(current_tool_call_id(), None);
+}
+
 #[tokio::test(flavor = "current_thread", start_paused = true)]
 async fn open_or_create_registers_event_log_sink_when_active_log_is_installed() {
     reset_all_sinks();
     crate::event_log::reset_active_event_log();
-    let dir = tempfile::tempdir().expect("tempdir");
-    crate::event_log::install_default_for_base_dir(dir.path()).expect("install event log");
+    crate::event_log::install_memory_for_current_thread(128);
 
     let session = open_or_create(Some("event-log-session".into()));
     assert_eq!(session_external_sink_count(&session), 1);
+
+    let topic = Topic::new("observability.agent_events.event-log-session").unwrap();
+    let log = active_event_log().expect("active event log");
+    let mut stream = log.clone().subscribe(&topic, None).await.unwrap();
 
     emit_event(&AgentEvent::TurnStart {
         session_id: session.clone(),
         iteration: 0,
     });
-    tokio::time::sleep(std::time::Duration::from_millis(25)).await;
 
-    let topic = Topic::new("observability.agent_events.event-log-session").unwrap();
-    let log = active_event_log().expect("active event log");
+    let emitted = stream
+        .next()
+        .await
+        .expect("event log stream should receive emitted event")
+        .expect("event log stream item");
+    assert_eq!(emitted.1.kind, "turn_start");
+
     let events = log.read_range(&topic, None, usize::MAX).await.unwrap();
     assert_eq!(events.len(), 1);
     assert_eq!(events[0].1.kind, "turn_start");

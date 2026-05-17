@@ -553,6 +553,7 @@ export interface ToolCallReceipt {
   tool_name: string
   iteration: number
   turn_index: number | null
+  emit_order: number
   reason: string | null
   kind: string | null
   executor: HarnToolCallReceiptExecutor | null
@@ -1301,6 +1302,7 @@ public struct HarnToolCallReceipt: Codable, Sendable, Equatable {
     public var toolName: String
     public var iteration: Int
     public var turnIndex: Int?
+    public var emitOrder: Int
     public var reason: String?
     public var kind: String?
     public var executor: HarnToolCallReceiptExecutor?
@@ -1322,6 +1324,7 @@ public struct HarnToolCallReceipt: Codable, Sendable, Equatable {
         case toolName = "tool_name"
         case iteration
         case turnIndex = "turn_index"
+        case emitOrder = "emit_order"
         case reason
         case kind
         case executor
@@ -1780,6 +1783,7 @@ class ToolCallReceipt(_HarnDataclass):
     tool_call_id: str
     tool_name: str
     iteration: int
+    emit_order: int
     status: str
     duration_ms: int
     args_hash: str
@@ -2357,6 +2361,7 @@ type ToolCallReceipt struct {
 	ToolName      string                   `json:"tool_name"`
 	Iteration     uint64                   `json:"iteration"`
 	TurnIndex     *uint64                  `json:"turn_index"`
+	EmitOrder     uint64                   `json:"emit_order"`
 	Reason        *string                  `json:"reason"`
 	Kind          *string                  `json:"kind"`
 	Executor      *ToolCallReceiptExecutor `json:"executor"`
@@ -2637,6 +2642,7 @@ fn generate_round_trip_fixture() -> Result<String, String> {
         "tool_name": "read_file",
         "iteration": 1,
         "turn_index": 0,
+        "emit_order": 0,
         "reason": "Read README.md for context",
         "kind": "read",
         "executor": "harn",

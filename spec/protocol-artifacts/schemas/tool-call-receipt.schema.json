@@ -12,6 +12,10 @@
       "minimum": 0,
       "type": "integer"
     },
+    "emit_order": {
+      "minimum": 0,
+      "type": "integer"
+    },
     "emitted_at": {
       "format": "date-time",
       "type": "string"
@@ -123,6 +127,7 @@
     "tool_name",
     "iteration",
     "turn_index",
+    "emit_order",
     "reason",
     "kind",
     "executor",

@@ -209,6 +209,10 @@ pub fn classify_error_message(msg: &str) -> ErrorCategory {
     }
     // 2. Well-known error identifiers from major APIs
     //    (Anthropic, OpenAI, and standard HTTP patterns)
+    let lower = msg.to_lowercase();
+    if lower.contains("cancelled") || lower.contains("canceled") {
+        return ErrorCategory::Cancelled;
+    }
     if msg.contains("Deadline exceeded") || msg.contains("context deadline exceeded") {
         return ErrorCategory::Timeout;
     }
@@ -234,7 +238,6 @@ pub fn classify_error_message(msg: &str) -> ErrorCategory {
         return ErrorCategory::CircuitOpen;
     }
     // Network-level transient patterns (pre-HTTP-status, pre-provider-framing).
-    let lower = msg.to_lowercase();
     if lower.contains("connection reset")
         || lower.contains("connection refused")
         || lower.contains("connection closed")
@@ -357,3 +360,20 @@ fn fmt_span_suffix(span: &Option<Span>) -> String {
 }
 
 impl std::error::Error for VmError {}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn classifies_cancelled_messages() {
+        assert_eq!(
+            classify_error_message("Bridge: operation cancelled"),
+            ErrorCategory::Cancelled
+        );
+        assert_eq!(
+            classify_error_message("operation canceled by host"),
+            ErrorCategory::Cancelled
+        );
+    }
+}

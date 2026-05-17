@@ -124,6 +124,7 @@
       "summary": "Read README.md for context"
     },
     "duration_ms": 12,
+    "emit_order": 0,
     "emitted_at": "2026-05-16T00:00:00Z",
     "error_category": null,
     "executor": "harn",
