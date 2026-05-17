@@ -30,6 +30,7 @@ pub mod persona_scaffold;
 pub mod persona_supervision;
 pub mod playground;
 pub(crate) mod portal;
+pub mod precompile;
 pub(crate) mod protocol_conformance;
 pub(crate) mod provider;
 pub(crate) mod providers;

@@ -35,6 +35,7 @@ mod package;
 mod persona;
 mod playground;
 mod portal;
+mod precompile;
 mod profile;
 mod provider;
 mod providers;
@@ -135,6 +136,7 @@ pub(crate) use persona::{
 };
 pub(crate) use playground::PlaygroundArgs;
 pub(crate) use portal::PortalArgs;
+pub use precompile::PrecompileArgs;
 pub(crate) use profile::ProfileArgs;
 pub(crate) use provider::{
     ModelInfoArgs, ProviderCatalogArgs, ProviderProbeArgs, ProviderReadyArgs,
@@ -326,6 +328,16 @@ SCRIPTING
     Repl,
     /// Benchmark a .harn pipeline over repeated runs.
     Bench(BenchArgs),
+    /// Pre-compile `.harn` sources into the content-addressed bytecode
+    /// cache so cold-start `harn run` for the same source skips parse
+    /// and compile and goes straight to bytecode load.
+    ///
+    /// `harn precompile path/` walks the directory and compiles every
+    /// `.harn` file; `harn precompile script.harn` compiles a single
+    /// file. Artifacts are written adjacent to each source as
+    /// `<name>.harnbc` by default; pass `--out DIR` to redirect them
+    /// into a sibling tree.
+    Precompile(PrecompileArgs),
     /// Render a .harn file as a Mermaid workflow graph.
     Viz(VizArgs),
     /// Install dependencies declared in harn.toml.

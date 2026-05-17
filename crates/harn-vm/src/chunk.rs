@@ -4,6 +4,7 @@ use std::fmt;
 use std::rc::Rc;
 
 use harn_parser::TypeExpr;
+use serde::{Deserialize, Serialize};
 
 /// Bytecode opcodes for the Harn VM.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -369,7 +370,7 @@ impl Op {
 }
 
 /// A constant value in the constant pool.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub enum Constant {
     Int(i64),
     Float(f64),
@@ -434,7 +435,7 @@ pub(crate) enum MethodCacheTarget {
 }
 
 /// Debug metadata for a slot-indexed local in a compiled chunk.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct LocalSlotInfo {
     pub name: String,
     pub mutable: bool,
@@ -488,30 +489,34 @@ pub struct Chunk {
 pub type ChunkRef = Rc<Chunk>;
 pub type CompiledFunctionRef = Rc<CompiledFunction>;
 
-#[derive(Debug, Clone)]
-pub(crate) struct CachedChunk {
-    code: Vec<u8>,
-    constants: Vec<Constant>,
-    lines: Vec<u32>,
-    columns: Vec<u32>,
-    source_file: Option<String>,
-    current_col: u32,
-    functions: Vec<CachedCompiledFunction>,
-    inline_cache_slots: BTreeMap<usize, usize>,
-    local_slots: Vec<LocalSlotInfo>,
+/// Serializable snapshot of a [`Chunk`] suitable for the on-disk bytecode
+/// cache and for in-memory stdlib artifact caches. Inline-cache state is
+/// dropped at freeze time because it warms at runtime per-process; the
+/// rest of the chunk round-trips byte-identically.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CachedChunk {
+    pub(crate) code: Vec<u8>,
+    pub(crate) constants: Vec<Constant>,
+    pub(crate) lines: Vec<u32>,
+    pub(crate) columns: Vec<u32>,
+    pub(crate) source_file: Option<String>,
+    pub(crate) current_col: u32,
+    pub(crate) functions: Vec<CachedCompiledFunction>,
+    pub(crate) inline_cache_slots: BTreeMap<usize, usize>,
+    pub(crate) local_slots: Vec<LocalSlotInfo>,
 }
 
-#[derive(Debug, Clone)]
-pub(crate) struct CachedCompiledFunction {
-    name: String,
-    type_params: Vec<String>,
-    nominal_type_names: Vec<String>,
-    params: Vec<ParamSlot>,
-    default_start: Option<usize>,
-    chunk: CachedChunk,
-    is_generator: bool,
-    is_stream: bool,
-    has_rest_param: bool,
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CachedCompiledFunction {
+    pub(crate) name: String,
+    pub(crate) type_params: Vec<String>,
+    pub(crate) nominal_type_names: Vec<String>,
+    pub(crate) params: Vec<ParamSlot>,
+    pub(crate) default_start: Option<usize>,
+    pub(crate) chunk: CachedChunk,
+    pub(crate) is_generator: bool,
+    pub(crate) is_stream: bool,
+    pub(crate) has_rest_param: bool,
 }
 
 /// One parameter slot of a compiled user-defined function. Carries the
@@ -519,7 +524,7 @@ pub(crate) struct CachedCompiledFunction {
 /// for whether a default value was provided. The runtime consults the
 /// type expression in `bind_param_slots` to enforce declared types
 /// against the values supplied at the call site.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ParamSlot {
     pub name: String,
     /// Declared parameter type. `None` for untyped parameters (gradual
@@ -826,7 +831,7 @@ impl Chunk {
         }
     }
 
-    pub(crate) fn freeze_for_cache(&self) -> CachedChunk {
+    pub fn freeze_for_cache(&self) -> CachedChunk {
         CachedChunk {
             code: self.code.clone(),
             constants: self.constants.clone(),
@@ -844,7 +849,7 @@ impl Chunk {
         }
     }
 
-    pub(crate) fn from_cached(cached: &CachedChunk) -> Self {
+    pub fn from_cached(cached: &CachedChunk) -> Self {
         let inline_cache_count = cached.inline_cache_slots.len();
         Self {
             code: cached.code.clone(),

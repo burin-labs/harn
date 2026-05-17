@@ -13,6 +13,7 @@ pub mod atomic_io;
 pub mod autonomy;
 pub mod bridge;
 mod builtin_id;
+pub mod bytecode_cache;
 pub mod checkpoint;
 mod chunk;
 mod compiler;

@@ -88,6 +88,78 @@ pub(crate) fn build_denied_builtins(
     }
 }
 
+/// Result of [`compile_or_load_chunk_for_run`]. Failures propagate as
+/// diagnostic text on the run path so callers map them straight to a
+/// non-zero exit code without bespoke error types.
+pub(crate) struct LoadedChunk {
+    pub(crate) source: String,
+    pub(crate) chunk: harn_vm::Chunk,
+}
+
+/// Load the entry pipeline as a runnable [`harn_vm::Chunk`], using the
+/// content-addressed bytecode cache when its key matches. On a cache miss
+/// we read, parse, type-check, and compile, then persist the chunk.
+/// On a hit we skip parse/typecheck/compile entirely — the cache invariant
+/// is that a stored chunk passed those phases on the writer's harn build,
+/// and the key includes every transitively-imported user file so any
+/// change re-runs the full path.
+///
+/// `stderr` receives any diagnostic output. Returns `None` when a fatal
+/// type or compile error blocks execution; the caller maps that to
+/// exit-code 1.
+pub(crate) fn compile_or_load_chunk_for_run(
+    path: &str,
+    stderr: &mut String,
+) -> Option<LoadedChunk> {
+    let source = match fs::read_to_string(path) {
+        Ok(s) => s,
+        Err(e) => {
+            stderr.push_str(&format!("Error reading {path}: {e}\n"));
+            return None;
+        }
+    };
+    let lookup = harn_vm::bytecode_cache::load(Path::new(path), &source);
+    if let Some(chunk) = lookup.chunk {
+        return Some(LoadedChunk { source, chunk });
+    }
+
+    let (parsed_source, program) = parse_source_file(path);
+    debug_assert_eq!(parsed_source, source, "parse_source_file re-read drifted");
+
+    let mut had_type_error = false;
+    let type_diagnostics = typecheck_with_imports(&program, Path::new(path), &source);
+    for diag in &type_diagnostics {
+        let rendered = harn_parser::diagnostic::render_type_diagnostic(&source, path, diag);
+        if matches!(diag.severity, DiagnosticSeverity::Error) {
+            had_type_error = true;
+        }
+        stderr.push_str(&rendered);
+    }
+    if had_type_error {
+        return None;
+    }
+
+    let chunk = match harn_vm::Compiler::new().compile(&program) {
+        Ok(c) => c,
+        Err(e) => {
+            stderr.push_str(&format!("error: compile error: {e}\n"));
+            return None;
+        }
+    };
+
+    // Cache misses are best-effort — read-only homedirs, full disks, and
+    // sandboxes are common in CI environments. Surface the failure as a
+    // single-line warning when explicitly requested via the audit hook;
+    // otherwise stay quiet to avoid bloating happy-path output.
+    if let Err(err) = harn_vm::bytecode_cache::store(&lookup.key, &chunk) {
+        if std::env::var_os("HARN_BYTECODE_CACHE_DEBUG").is_some() {
+            eprintln!("[harn] bytecode cache write skipped: {err}");
+        }
+    }
+
+    Some(LoadedChunk { source, chunk })
+}
+
 /// Run the static type checker against `program` with cross-module
 /// import-aware call resolution when the file's imports all resolve. Used
 /// by `run_file` and the MCP server entry so `harn run` catches undefined
@@ -556,35 +628,13 @@ async fn execute_run_inner(inputs: ExecuteRunInputs<'_>) -> RunOutcome {
     let mut stderr = String::new();
     let mut stdout = String::new();
 
-    let (source, program) = parse_source_file(path);
-
-    let mut had_type_error = false;
-    let type_diagnostics = typecheck_with_imports(&program, Path::new(path), &source);
-    for diag in &type_diagnostics {
-        let rendered = harn_parser::diagnostic::render_type_diagnostic(&source, path, diag);
-        if matches!(diag.severity, DiagnosticSeverity::Error) {
-            had_type_error = true;
-        }
-        stderr.push_str(&rendered);
-    }
-    if had_type_error {
+    let Some(LoadedChunk { source, chunk }) = compile_or_load_chunk_for_run(path, &mut stderr)
+    else {
         return RunOutcome {
             stdout,
             stderr,
             exit_code: 1,
         };
-    }
-
-    let chunk = match harn_vm::Compiler::new().compile(&program) {
-        Ok(c) => c,
-        Err(e) => {
-            stderr.push_str(&format!("error: compile error: {e}\n"));
-            return RunOutcome {
-                stdout,
-                stderr,
-                exit_code: 1,
-            };
-        }
     };
 
     if trace {
@@ -1094,30 +1144,15 @@ pub(crate) async fn run_file_mcp_serve(
     card_source: Option<&str>,
     mode: RunFileMcpServeMode,
 ) {
-    let (source, program) = crate::parse_source_file(path);
-
-    let type_diagnostics = typecheck_with_imports(&program, Path::new(path), &source);
-    for diag in &type_diagnostics {
-        match diag.severity {
-            DiagnosticSeverity::Error => {
-                let rendered = harn_parser::diagnostic::render_type_diagnostic(&source, path, diag);
-                eprint!("{rendered}");
-                process::exit(1);
-            }
-            DiagnosticSeverity::Warning => {
-                let rendered = harn_parser::diagnostic::render_type_diagnostic(&source, path, diag);
-                eprint!("{rendered}");
-            }
-        }
-    }
-
-    let chunk = match harn_vm::Compiler::new().compile(&program) {
-        Ok(c) => c,
-        Err(e) => {
-            eprintln!("error: compile error: {e}");
-            process::exit(1);
-        }
+    let mut diagnostics = String::new();
+    let Some(LoadedChunk { source, chunk }) = compile_or_load_chunk_for_run(path, &mut diagnostics)
+    else {
+        eprint!("{diagnostics}");
+        process::exit(1);
     };
+    if !diagnostics.is_empty() {
+        eprint!("{diagnostics}");
+    }
 
     let mut vm = harn_vm::Vm::new();
     harn_vm::register_vm_stdlib(&mut vm);

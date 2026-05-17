@@ -40,6 +40,18 @@ condensed series summaries instead of full per-patch history.
 
 ### Added
 
+- **Bytecode cache + `harn precompile` (#1710).** `harn run` now persists
+  compiled bytecode under `$HARN_CACHE_DIR` (defaulting to
+  `~/.cache/harn/bytecode`) and reloads it whenever the entry source and
+  every transitively-imported user file are unchanged. Header-stable
+  format records magic, schema version, harn version, source hash, and
+  import-graph hash; mismatches transparently fall back to recompile.
+  `harn precompile <path>` precomputes artifacts for shipping
+  pre-compiled `.harnbc` files adjacent to source — the loader picks
+  those up before consulting the shared cache. Cold-start cost on small
+  pipelines collapses from full parse+typecheck+compile to a single
+  `fopen` + `bincode::deserialize`. Gates the burin-code thin-rust
+  cutover at burin-code#814. See `docs/perf/bytecode-cache.md`.
 - **`secret_store` hostlib capability (#1714).** Adds
   `hostlib_secret_store_{get,set,delete,list}` to `harn-hostlib`, a
   generic per-application credential primitive any Harn-hosted
