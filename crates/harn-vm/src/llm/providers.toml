@@ -152,6 +152,27 @@ latency_p50_ms = 450
 method = "GET"
 path = "/models"
 
+# Cerebras — OpenAI-compatible wafer-scale inference. Headline ~3,000 tok/s
+# on gpt-oss-120b and ~2,100 tok/s on Llama 3.3 70B, fast enough to keep
+# binder-style single-tool-call hops under ~50ms p50. Provider-level
+# pricing here is a coarse default; per-model rows under [models.X] hold
+# the authoritative numbers from the Cerebras pricing page.
+[providers.cerebras]
+base_url = "https://api.cerebras.ai/v1"
+base_url_env = "CEREBRAS_BASE_URL"
+auth_style = "bearer"
+auth_env = "CEREBRAS_API_KEY"
+chat_endpoint = "/chat/completions"
+completion_endpoint = "/completions"
+cost_per_1k_in = 0.00025
+cost_per_1k_out = 0.00069
+latency_p50_ms = 80
+features = ["native_tools"]
+
+[providers.cerebras.healthcheck]
+method = "GET"
+path = "/models"
+
 [providers.deepseek]
 base_url = "https://api.deepseek.com/v1"
 base_url_env = "DEEPSEEK_BASE_URL"
@@ -355,6 +376,15 @@ provider = "bedrock"
 [[inference_rules]]
 pattern = "gemini-*"
 provider = "gemini"
+
+# Cerebras model IDs come back as bare names ("gpt-oss-120b",
+# "llama-3.3-70b") from /v1/models, so callers slash-prefix
+# them as "cerebras/<model>" to disambiguate from OpenRouter's
+# one-slash convention. Match the prefix before the generic
+# single-slash rule routes it elsewhere.
+[[inference_rules]]
+pattern = "cerebras/*"
+provider = "cerebras"
 
 # ── Tier rules ───────────────────────────────────────────────────────────────
 # Classify a model into small / mid / frontier for default routing and
@@ -853,6 +883,38 @@ provider = "openrouter"
 context_window = 131072
 capabilities = ["tools", "streaming"]
 pricing = { input_per_mtok = 0.15, output_per_mtok = 0.60 }
+
+# Cerebras-hosted open-weight models. Pricing snapshot from
+# https://www.cerebras.ai/pricing (2026-05). The headline binder-substrate
+# candidate is gpt-oss-120b at ~3,000 tok/s; Llama 3.3 70B trails at
+# ~2,100 tok/s but is included as a fallback when the binder hop wants
+# function-calling-trained Llama instead of GPT-OSS.
+#
+# Catalog keys are bare wire IDs (Cerebras's /v1/chat/completions wants
+# the raw model name). Users routing via `model: "cerebras/<name>"` get
+# the slash-prefixed selector stripped by `normalize_model_id` while
+# `infer_provider` routes them to this provider.
+
+[models."gpt-oss-120b"]
+name = "GPT-OSS 120B (Cerebras)"
+provider = "cerebras"
+context_window = 131072
+capabilities = ["tools", "streaming"]
+pricing = { input_per_mtok = 0.25, output_per_mtok = 0.69 }
+
+[models."llama-3.3-70b"]
+name = "Llama 3.3 70B (Cerebras)"
+provider = "cerebras"
+context_window = 131072
+capabilities = ["tools", "streaming"]
+pricing = { input_per_mtok = 0.85, output_per_mtok = 1.20 }
+
+[models."qwen-3-coder-480b"]
+name = "Qwen3 Coder 480B (Cerebras)"
+provider = "cerebras"
+context_window = 131072
+capabilities = ["tools", "streaming"]
+pricing = { input_per_mtok = 2.00, output_per_mtok = 2.00 }
 
 # Open-router Qwen3.5 9B (kept for the `small` tier alias).
 

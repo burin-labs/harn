@@ -411,9 +411,11 @@ pub fn resolve_model(alias: &str) -> (String, Option<String>) {
 /// Strip host/provider selector prefixes that identify transport, not the
 /// provider-native model id. This mirrors Burin's existing normalization so
 /// `ollama:qwen3:30b` reaches Ollama as `qwen3:30b` instead of an invalid
-/// model named `ollama`.
+/// model named `ollama`. Cerebras follows the same convention but uses a
+/// slash separator (`cerebras/gpt-oss-120b`) because its own /v1/models
+/// endpoint returns bare names that overlap OpenAI's families.
 pub fn normalize_model_id(raw: &str) -> String {
-    for prefix in ["ollama:", "local:", "huggingface:", "hf:"] {
+    for prefix in ["ollama:", "local:", "huggingface:", "hf:", "cerebras/"] {
         if let Some(stripped) = raw.strip_prefix(prefix) {
             return stripped.to_string();
         }
@@ -1047,6 +1049,25 @@ mod tests {
     }
 
     #[test]
+    fn test_cerebras_inference_beats_openrouter_slash_fallback() {
+        let _guard = crate::llm::env_lock().lock().expect("env lock");
+        let prev_default_provider = std::env::var("HARN_DEFAULT_PROVIDER").ok();
+        unsafe {
+            std::env::remove_var("HARN_DEFAULT_PROVIDER");
+        }
+
+        assert_eq!(infer_provider("cerebras/gpt-oss-120b"), "cerebras");
+        assert_eq!(infer_provider("cerebras/llama-3.3-70b"), "cerebras");
+
+        unsafe {
+            match prev_default_provider {
+                Some(value) => std::env::set_var("HARN_DEFAULT_PROVIDER", value),
+                None => std::env::remove_var("HARN_DEFAULT_PROVIDER"),
+            }
+        }
+    }
+
+    #[test]
     fn test_resolve_model_info_normalizes_provider_prefixes() {
         let local = resolve_model_info("local:gemma-4-e4b-it");
         assert_eq!(local.id, "gemma-4-e4b-it");
@@ -1059,6 +1080,10 @@ mod tests {
         let hf = resolve_model_info("hf:Qwen/Qwen3.6-35B-A3B");
         assert_eq!(hf.id, "Qwen/Qwen3.6-35B-A3B");
         assert_eq!(hf.provider, "huggingface");
+
+        let cerebras = resolve_model_info("cerebras/gpt-oss-120b");
+        assert_eq!(cerebras.id, "gpt-oss-120b");
+        assert_eq!(cerebras.provider, "cerebras");
     }
 
     #[test]

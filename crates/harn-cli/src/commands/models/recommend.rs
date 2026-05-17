@@ -234,6 +234,7 @@ fn cloud_provider_candidates() -> Vec<String> {
         "gemini",
         "together",
         "groq",
+        "cerebras",
         "deepseek",
         "fireworks",
         "dashscope",

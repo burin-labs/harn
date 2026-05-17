@@ -1134,6 +1134,15 @@ anthropic_beta_features = ["fine-grained-tool-streaming-2025-05-14"]
     }
 
     #[test]
+    fn cerebras_inherits_openai_family() {
+        reset();
+        let caps = lookup("cerebras", "gpt-oss-120b");
+        assert_eq!(caps.message_wire_format, "openai");
+        assert_eq!(caps.native_tool_wire_format, "openai");
+        assert!(caps.native_tools);
+    }
+
+    #[test]
     fn mock_with_claude_model_routes_to_anthropic() {
         reset();
         let caps = lookup("mock", "claude-sonnet-4-7");
