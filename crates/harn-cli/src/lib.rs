@@ -26,7 +26,7 @@ use cli::{
     Cli, Command, CompletionShell, EvalCommand, MergeCaptainCommand, MergeCaptainMockCommand,
     ModelInfoArgs, PackageArtifactsCommand, PackageCacheCommand, PackageCommand, PersonaCommand,
     PersonaSupervisionCommand, ProvidersCommand, RunsCommand, ServeCommand, SkillCommand,
-    SkillKeyCommand, SkillTrustCommand, SkillsCommand, ToolCommand,
+    SkillKeyCommand, SkillTrustCommand, SkillsCommand, TimeCommand, ToolCommand,
 };
 use harn_lexer::Lexer;
 use harn_parser::{DiagnosticSeverity, Parser, TypeChecker};
@@ -1163,6 +1163,9 @@ async fn async_main() {
         Command::DumpProtocolArtifacts(args) => {
             commands::dump_protocol_artifacts::run(&args.output_dir, args.check);
         }
+        Command::Time(args) => match args.command {
+            TimeCommand::Run(time_args) => commands::time::run(time_args).await,
+        },
     }
 }
 
