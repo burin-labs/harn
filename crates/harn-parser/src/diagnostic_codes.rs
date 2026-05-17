@@ -125,6 +125,17 @@ macro_rules! diagnostic_codes {
                     $(Code::$variant => $summary,)*
                 }
             }
+
+            /// Full markdown explanation embedded at compile time. Every
+            /// registered code must ship a matching file under
+            /// `diagnostic_codes/explanations/`; missing files fail the build.
+            pub const fn explanation(self) -> &'static str {
+                match self {
+                    $(Code::$variant => include_str!(
+                        concat!("diagnostic_codes/explanations/", $identifier, ".md")
+                    ),)*
+                }
+            }
         }
 
         pub const REGISTRY: &[RegistryEntry] = &[
@@ -292,6 +303,107 @@ impl Code {
     pub const fn registry() -> &'static [RegistryEntry] {
         REGISTRY
     }
+
+    /// Codes that an agent should consider alongside this one when planning
+    /// repairs. Curated per-code — typically near-neighbours in the same
+    /// category that share a fix shape. Returns an empty slice for codes
+    /// without curated cross-references.
+    pub const fn related(self) -> &'static [Code] {
+        match self {
+            // Type mismatches form a family — surfacing the others helps an
+            // agent disambiguate between assignment, argument, return, etc.
+            Code::TypeMismatch => &[
+                Code::AssignmentTypeMismatch,
+                Code::ArgumentTypeMismatch,
+                Code::ReturnTypeMismatch,
+                Code::VariableTypeMismatch,
+                Code::FieldTypeMismatch,
+            ],
+            Code::AssignmentTypeMismatch => &[Code::TypeMismatch, Code::VariableTypeMismatch],
+            Code::ArgumentTypeMismatch => &[Code::TypeMismatch, Code::GenericTypeArgumentMismatch],
+            Code::ReturnTypeMismatch => &[Code::TypeMismatch, Code::ClosureReturnTypeMismatch],
+            Code::VariableTypeMismatch => &[Code::TypeMismatch, Code::AssignmentTypeMismatch],
+            Code::ClosureReturnTypeMismatch => &[Code::ReturnTypeMismatch],
+            Code::FieldTypeMismatch => &[Code::TypeMismatch, Code::InvalidStructLiteral],
+            Code::MethodTypeMismatch => &[Code::TypeMismatch, Code::CallableExpected],
+            // Generic type-argument family.
+            Code::GenericTypeArgumentUnsupported => &[
+                Code::GenericTypeArgumentMismatch,
+                Code::GenericTypeArgumentArity,
+            ],
+            Code::GenericTypeArgumentMismatch => &[
+                Code::GenericTypeArgumentArity,
+                Code::WhereConstraintMismatch,
+            ],
+            Code::GenericTypeArgumentArity => {
+                &[Code::GenericTypeArgumentMismatch, Code::TypeParameterArity]
+            }
+            Code::TypeParameterArity => &[Code::GenericTypeArgumentArity],
+            Code::WhereConstraintMismatch => &[Code::GenericTypeArgumentMismatch],
+            // Naming.
+            Code::UndefinedVariable => &[Code::UndefinedFunction, Code::UnknownDeclaration],
+            Code::UndefinedFunction => &[Code::UnknownBuiltin, Code::UnknownDeclaration],
+            Code::UnknownField => &[Code::UnknownMethod, Code::InvalidStructLiteral],
+            Code::UnknownMethod => &[Code::UnknownField, Code::CallableExpected],
+            Code::UnknownAttribute => {
+                &[Code::InvalidAttributeArgument, Code::InvalidAttributeTarget]
+            }
+            Code::InvalidAttributeArgument => {
+                &[Code::UnknownAttribute, Code::InvalidAttributeTarget]
+            }
+            Code::InvalidAttributeTarget => {
+                &[Code::UnknownAttribute, Code::InvalidAttributeArgument]
+            }
+            // LLM call family — schema, options, provider branching.
+            Code::LlmSchemaMissing => &[Code::LlmSchemaInvalid, Code::UnknownLlmOption],
+            Code::LlmSchemaInvalid => &[Code::LlmSchemaMissing, Code::UnknownLlmOption],
+            Code::UnknownLlmOption => &[Code::DeprecatedLlmOption, Code::LlmSchemaInvalid],
+            Code::DeprecatedLlmOption => &[Code::UnknownLlmOption],
+            Code::LlmProviderIdentityBranch => &[Code::PromptProviderIdentityBranch],
+            // Prompt-template family.
+            Code::PromptTemplateParse => &[Code::PromptTargetMissing],
+            Code::PromptInjectionRisk => &[Code::LintPromptInjectionRisk],
+            Code::PromptProviderIdentityBranch => &[
+                Code::LlmProviderIdentityBranch,
+                Code::LintTemplateProviderIdentityBranch,
+            ],
+            Code::PromptVariantExplosion => &[Code::LintTemplateVariantExplosion],
+            // Capabilities.
+            Code::CapabilityResultUnchecked => {
+                &[Code::RescueOutsideFunction, Code::TryOutsideFunction]
+            }
+            Code::CapabilityUnknownOperation => &[Code::CapabilityCallStaticNameRequired],
+            // Recovery / match.
+            Code::RescueOutsideFunction => {
+                &[Code::TryOutsideFunction, Code::InvalidRescueConstruct]
+            }
+            Code::TryOutsideFunction => &[Code::RescueOutsideFunction],
+            Code::NonExhaustiveMatch => &[Code::InvalidMatchPattern, Code::DuplicateMatchArm],
+            Code::DuplicateMatchArm => &[Code::NonExhaustiveMatch, Code::LintDuplicateMatchArm],
+            // Module / import family.
+            Code::ModuleImportUnresolved => {
+                &[Code::ImportResolutionFailed, Code::ImportSymbolMissing]
+            }
+            Code::ModuleImportUnused => &[Code::LintUnusedImport],
+            Code::ImportResolutionFailed => {
+                &[Code::ModuleImportUnresolved, Code::ImportSymbolMissing]
+            }
+            Code::ImportCycle => &[Code::ImportResolutionFailed],
+            // Ownership.
+            Code::ImmutableAssignment => &[Code::MutableNeverReassigned],
+            Code::MutableNeverReassigned => &[Code::LintMutableNeverReassigned],
+            // Lint pairs (drift between lint and runtime/typecheck codes).
+            Code::LintDeprecatedLlmOptions => &[Code::DeprecatedLlmOption, Code::UnknownLlmOption],
+            Code::LintPromptInjectionRisk => &[Code::PromptInjectionRisk],
+            Code::LintTemplateVariantExplosion => &[Code::PromptVariantExplosion],
+            Code::LintTemplateProviderIdentityBranch => &[Code::PromptProviderIdentityBranch],
+            Code::LintRenamedStdlibSymbol => &[Code::DeprecatedStdlibSymbol],
+            Code::LintMutableNeverReassigned => &[Code::MutableNeverReassigned],
+            Code::LintUnusedImport => &[Code::ModuleImportUnused],
+            Code::LintDuplicateMatchArm => &[Code::DuplicateMatchArm],
+            _ => &[],
+        }
+    }
 }
 
 impl fmt::Display for Code {
@@ -365,6 +477,42 @@ mod tests {
                     .any(|entry| entry.category == *category),
                 "missing diagnostic code category {category}"
             );
+        }
+    }
+
+    #[test]
+    fn every_code_has_non_empty_explanation() {
+        for entry in Code::registry() {
+            let body = entry.code.explanation();
+            assert!(
+                !body.trim().is_empty(),
+                "diagnostic code {} has an empty explanation file",
+                entry.identifier
+            );
+            assert!(
+                body.contains(entry.identifier),
+                "explanation for {} should reference its identifier",
+                entry.identifier
+            );
+        }
+    }
+
+    #[test]
+    fn related_codes_are_registered_and_non_self() {
+        for entry in Code::registry() {
+            for &other in entry.code.related() {
+                assert_ne!(
+                    other, entry.code,
+                    "{} lists itself as a related code",
+                    entry.identifier
+                );
+                assert!(
+                    Code::registry().iter().any(|e| e.code == other),
+                    "{} lists unregistered related code {}",
+                    entry.identifier,
+                    other
+                );
+            }
         }
     }
 }

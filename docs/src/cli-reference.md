@@ -541,10 +541,41 @@ CI log filters.
 
 ## harn explain
 
-Explain the control-flow path behind one invariant violation for a single
-handler. This is the companion to `harn check --invariants`: `check`
-answers whether a handler violates its declared contract, and `explain`
-shows the path that makes the violation reachable.
+`harn explain` dispatches on two forms behind one subcommand.
+
+### Form 1 — explain a stable diagnostic code
+
+```bash
+harn explain HARN-TYP-014
+harn explain HARN-TYP-014 --json
+```
+
+Pass any identifier registered in the in-binary diagnostic-code registry
+(`HARN-<CAT>-<NNN>` — see [`crates/harn-parser/src/diagnostic_codes.rs`](https://github.com/burin-labs/harn/blob/main/crates/harn-parser/src/diagnostic_codes.rs)).
+Text mode prints the embedded markdown explanation plus a curated
+`See also:` list of related codes. `--json` emits a stable envelope an
+agent or editor can ingest without parsing prose:
+
+```json
+{
+  "schemaVersion": 1,
+  "code": "HARN-TYP-014",
+  "category": "TYP",
+  "summary": "declaration has the wrong number of type parameters",
+  "body": "# HARN-TYP-014 — ... full markdown ...",
+  "repairs": [],
+  "related": ["HARN-TYP-013"],
+  "apiStability": "stable"
+}
+```
+
+`schemaVersion` is the contract LSPs, IDEs, and hosted error-page mirrors
+dispatch on; bumps will follow a deprecation cycle. `repairs` is currently
+empty and will populate once the `Repair` struct lands on
+`TypeDiagnostic` (see epic [#1745](https://github.com/burin-labs/harn/issues/1745)).
+An unknown code exits with status 2.
+
+### Form 2 — explain a control-flow invariant violation
 
 ```bash
 harn explain --invariant fs.writes write_patch main.harn
@@ -552,8 +583,10 @@ harn explain --invariant approval.reachability deploy_agent agent.harn
 harn explain --invariant budget.remaining spend_budget budget.harn
 ```
 
-`harn explain` loads the file, rebuilds the same handler IR used by
-`check`, and prints:
+This is the companion to `harn check --invariants`: `check` answers
+whether a handler violates its declared contract, and `--invariant`-mode
+`explain` shows the path that makes the violation reachable. It loads
+the file, rebuilds the same handler IR used by `check`, and prints:
 
 - the invariant name and handler
 - the violation message plus any help text

@@ -10,6 +10,20 @@ condensed series summaries instead of full per-patch history.
 
 ### Added
 
+- **`harn explain HARN-<CAT>-<NNN>` text + `--json` envelope (#1748).** The
+  `explain` subcommand now dispatches on registered stable diagnostic codes
+  in addition to its original control-flow invariant form. `harn explain
+  HARN-TYP-014` prints an embedded markdown explanation plus a curated
+  `See also:` list; `harn explain HARN-TYP-014 --json` emits a stable
+  envelope `{ schemaVersion, code, category, summary, body, repairs,
+  related, apiStability }` that LSPs, IDEs, hosted error-page mirrors,
+  and agents can dispatch on without parsing prose. Every entry in the
+  diagnostic-code registry (#1746) carries an explanation markdown body
+  under `crates/harn-parser/src/diagnostic_codes/explanations/HARN-<CAT>-
+  <NNN>.md`, embedded via `include_str!` so a missing file fails the
+  build — the CI gate required by the epic. The legacy
+  `harn explain --invariant <NAME> <FUNCTION> <FILE>` form continues to
+  work; both forms share one dispatcher.
 - **`with_scoped_executor` tool-caller middleware (#1702).** Narrows the
   active `CapabilityPolicy` for the duration of one tool dispatch:
   `compose_tool_callers([..., with_scoped_executor({stage, allowed_tools,

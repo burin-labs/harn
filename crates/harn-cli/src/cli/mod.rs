@@ -265,9 +265,10 @@ SCRIPTING
     Check(CheckArgs),
     /// Inspect, validate, and emit schemas for layered Harn runtime config.
     Config(ConfigArgs),
-    /// Explain the control-flow path that violates a Harn invariant
-    /// (e.g. `fs.writes`, `approval.reachability`) for a specific
-    /// function or trigger handler.
+    /// Explain a diagnostic. Pass a stable `HARN-<CAT>-<NNN>` code
+    /// (optionally with `--json` for the structured envelope), or the
+    /// legacy `--invariant <NAME> <FUNCTION> <FILE>` form to walk the
+    /// control-flow path behind a Harn invariant violation.
     Explain(ExplainArgs),
     /// Export machine-readable Harn contracts and bundle manifests.
     Contracts(ContractsArgs),
