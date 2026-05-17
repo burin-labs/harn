@@ -1690,12 +1690,20 @@ fn test_parses_playground_llm_mock_flags() {
 
 #[test]
 fn test_parses_doctor_flags() {
-    let cli = Cli::parse_from(["harn", "doctor", "--no-network"]);
+    let cli = Cli::parse_from([
+        "harn",
+        "doctor",
+        "--json",
+        "--check-providers",
+        "--check-targets",
+    ]);
 
     let Command::Doctor(args) = cli.command.unwrap() else {
         panic!("expected doctor command");
     };
-    assert!(args.no_network);
+    assert!(args.json);
+    assert!(args.check_providers);
+    assert!(args.check_targets);
 }
 
 #[test]

@@ -8,6 +8,8 @@ use std::process::Command;
 use harn_cli::json_envelope::CATALOG_SCHEMA_VERSION;
 use harn_cli::tests::common::json_envelope::assert_envelope;
 
+const DOCTOR_SCHEMA_VERSION: u32 = 2;
+
 fn binary_path() -> std::path::PathBuf {
     // CARGO_BIN_EXE_<name> is set by Cargo for integration tests in the
     // crate that owns the binary.
@@ -17,7 +19,7 @@ fn binary_path() -> std::path::PathBuf {
 #[test]
 fn doctor_json_smoke() {
     let output = Command::new(binary_path())
-        .args(["doctor", "--json", "--no-network"])
+        .args(["doctor", "--json"])
         .output()
         .expect("spawn harn doctor");
     let stdout = String::from_utf8_lossy(&output.stdout);
@@ -27,26 +29,34 @@ fn doctor_json_smoke() {
     );
     let parsed: serde_json::Value =
         serde_json::from_str(stdout.trim()).expect("doctor --json is valid JSON");
+    let data = assert_envelope(&parsed, DOCTOR_SCHEMA_VERSION);
 
-    // Stable top-level keys consumed by Burin Code preflight automation.
+    // Stable top-level keys consumed by Burin Code preflight automation
+    // (`checks`, `hardware`, `summary`, `next_step`) plus the new
+    // capability-matrix fields introduced by #1785
+    // (`host`, `targets`, `providers`, `capabilities`).
     for key in [
-        "schema_version",
-        "harn_version",
+        "host",
+        "targets",
+        "providers",
+        "capabilities",
         "checks",
         "hardware",
         "next_step",
         "summary",
     ] {
-        assert!(parsed.get(key).is_some(), "missing top-level key '{key}'");
+        assert!(data.get(key).is_some(), "missing data key '{key}': {data}");
     }
-    assert_eq!(
-        parsed["schema_version"].as_str(),
-        Some("1"),
-        "schema_version must remain '1' until a documented breaking change"
-    );
 
-    let summary = &parsed["summary"];
-    for key in ["ok", "warn", "fail", "skip", "blocked_flows"] {
+    // Host fingerprint.
+    let host = &data["host"];
+    assert!(host["os"].is_string());
+    assert!(host["arch"].is_string());
+    assert!(host["harn_version"].is_string());
+
+    // Summary uses the new "blocking"/"warning" names per the spec.
+    let summary = &data["summary"];
+    for key in ["ok", "warning", "blocking", "skip", "blocked_flows"] {
         assert!(
             summary.get(key).is_some(),
             "summary missing key '{key}': {summary}"
@@ -54,7 +64,63 @@ fn doctor_json_smoke() {
     }
     assert!(summary["blocked_flows"].is_array());
 
-    let checks = parsed["checks"].as_array().expect("checks array");
+    // Targets matrix: each entry exposes triple + installed + buildable + reasons.
+    let targets = data["targets"].as_array().expect("targets array");
+    assert!(
+        !targets.is_empty(),
+        "doctor should list at least the canonical targets"
+    );
+    for target in targets {
+        for field in ["triple", "installed", "buildable", "reasons", "checked"] {
+            assert!(
+                target.get(field).is_some(),
+                "target missing key '{field}': {target}"
+            );
+        }
+        assert!(target["reasons"].is_array());
+    }
+
+    // Providers matrix: every entry has the configured/reachable/probed flags
+    // plus an errors[] array.
+    let providers = data["providers"].as_array().expect("providers array");
+    assert!(!providers.is_empty(), "no providers reported");
+    for provider in providers {
+        for field in [
+            "name",
+            "configured",
+            "reachable",
+            "latency_ms",
+            "errors",
+            "probed",
+        ] {
+            assert!(
+                provider.get(field).is_some(),
+                "provider missing key '{field}': {provider}"
+            );
+        }
+        assert!(provider["errors"].is_array());
+        // Default doctor invocation skips probes; reachable/latency_ms are null.
+        assert_eq!(provider["probed"], false);
+        assert!(provider["reachable"].is_null());
+        assert!(provider["latency_ms"].is_null());
+    }
+
+    // Capability matrix: every entry has a stdlib effect name and a non-empty
+    // sandbox-profile list.
+    let capabilities = data["capabilities"].as_array().expect("capabilities array");
+    assert!(!capabilities.is_empty(), "no capabilities reported");
+    for capability in capabilities {
+        assert!(capability["name"].is_string());
+        let profiles = capability["available_in_sandbox_profile"]
+            .as_array()
+            .expect("sandbox profile list");
+        assert!(
+            !profiles.is_empty(),
+            "capability {capability} should list at least one profile"
+        );
+    }
+
+    let checks = data["checks"].as_array().expect("checks array");
     assert!(!checks.is_empty(), "no checks emitted");
 
     let mut seen_ids = std::collections::HashSet::new();
@@ -97,9 +163,9 @@ fn doctor_json_smoke() {
 
 /// `doctor` is registered in the top-level `--json-schemas` catalog so
 /// agents can discover the JSON contract before invoking the command.
-/// Exercises the shared [`assert_envelope`] helper against the real
-/// binary — when `harn doctor --json` migrates to a [`JsonEnvelope`]
-/// (Tier-3 ticket), this test stays the catalog's source of truth.
+/// Both the catalog envelope and the doctor payload conform to the same
+/// `JsonEnvelope` shape — this test is the source of truth for that
+/// invariant.
 #[test]
 fn doctor_appears_in_json_schemas_catalog() {
     let output = Command::new(binary_path())
@@ -115,7 +181,7 @@ fn doctor_appears_in_json_schemas_catalog() {
     let entries = data.as_array().expect("data is an array");
     assert_eq!(entries.len(), 1);
     assert_eq!(entries[0]["command"], "doctor");
-    assert_eq!(entries[0]["schemaVersion"], 1);
+    assert_eq!(entries[0]["schemaVersion"], DOCTOR_SCHEMA_VERSION);
 }
 
 /// Asserts that no check ever surfaces a literal env-var value in `detail`.
@@ -127,7 +193,7 @@ fn doctor_never_prints_secret_values() {
     // make sure the value never appears in stdout.
     let sentinel = "SUPER_SECRET_SENTINEL_VALUE_12345";
     let output = Command::new(binary_path())
-        .args(["doctor", "--json", "--no-network"])
+        .args(["doctor", "--json"])
         .env("ANTHROPIC_API_KEY", sentinel)
         .env("OPENAI_API_KEY", sentinel)
         .output()

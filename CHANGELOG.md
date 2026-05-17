@@ -25,6 +25,24 @@ condensed series summaries instead of full per-patch history.
   and `-e <code>` to time an inline script. Script `stdout` is
   routed to stderr in `--json` mode so the envelope is alone on
   stdout for `jq`-style consumption.
+- **`harn doctor --json` capability matrix (#1785).** Doctor now emits a
+  `JsonEnvelope` (`schemaVersion: 2`) whose `data` carries four structured
+  sections in addition to the existing `checks` / `hardware` / `summary`
+  keys consumed by Burin Code preflight: `host` (os, arch, harn version,
+  rust toolchain), `targets[]` (per-Rustup triple `installed` +
+  `buildable` flag, with reasons), `providers[]` (per-provider
+  `configured` / `reachable` / `latency_ms` / `errors`), and
+  `capabilities[]` (each stdlib effect mapped to the sandbox profiles
+  that permit it on this host). `summary` adds the spec-aligned
+  `blocking` / `warning` counts. New opt-in flags `--check-providers`
+  and `--check-targets` fan out active HTTP / `cargo check` probes
+  (parallel-fanned for providers; only configured providers are probed
+  so no-credential rows don't pollute the report with 0ms
+  `unreachable`). The legacy `--no-network` flag is removed — doctor is
+  now offline-clean by default, so the flag was redundant. Text output
+  is regenerated from the same `DoctorReport`, so JSON and human
+  surfaces never drift.
+
 - **`harn explain HARN-<CAT>-<NNN>` text + `--json` envelope (#1748).** The
   `explain` subcommand now dispatches on registered stable diagnostic codes
   in addition to its original control-flow invariant form. `harn explain

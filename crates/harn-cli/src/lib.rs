@@ -655,8 +655,9 @@ async fn async_main() {
         },
         Command::Doctor(args) => {
             commands::doctor::run_doctor_with_options(commands::doctor::DoctorOptions {
-                network: !args.no_network,
                 json: args.json,
+                check_providers: args.check_providers,
+                check_targets: args.check_targets,
             })
             .await
         }

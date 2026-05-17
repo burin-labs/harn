@@ -129,8 +129,8 @@ pub fn catalog() -> Vec<SchemaEntry> {
     vec![
         SchemaEntry {
             command: "doctor",
-            schema_version: 1,
-            description: "Diagnose toolchain, providers, MCP, and manifest health.",
+            schema_version: crate::commands::doctor::DOCTOR_SCHEMA_VERSION,
+            description: "Capability matrix: host, per-target buildability, per-provider reachability, per-stdlib-effect availability.",
             schema_json: None,
         },
         SchemaEntry {

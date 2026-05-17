@@ -3,13 +3,15 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
-use harn_vm::llm_config::{self, AuthEnv};
+use harn_vm::llm_config;
 use harn_vm::runtime_paths;
 use harn_vm::secrets::{
     configured_default_chain, EnvSecretProvider, KeyringSecretProvider, SecretId,
     DEFAULT_SECRET_PROVIDER_CHAIN, SECRET_PROVIDER_CHAIN_ENV,
 };
+use serde::Serialize;
 
+use crate::json_envelope::{to_string_pretty, JsonEnvelope, JsonOutput};
 use crate::package;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
@@ -19,17 +21,6 @@ pub(crate) enum DoctorStatus {
     Warn,
     Fail,
     Skip,
-}
-
-impl DoctorStatus {
-    fn label(self) -> &'static str {
-        match self {
-            Self::Ok => "OK",
-            Self::Warn => "WARN",
-            Self::Fail => "FAIL",
-            Self::Skip => "SKIP",
-        }
-    }
 }
 
 #[derive(Debug, Clone, Default)]
@@ -60,28 +51,42 @@ impl DoctorCheck {
 /// Stable schema version for `harn doctor --json`. Bump when the JSON shape
 /// changes in a way that downstream consumers (Burin Code preflight, Harn
 /// Cloud onboarding) need to react to.
-pub(crate) const DOCTOR_JSON_SCHEMA_VERSION: &str = "1";
+pub(crate) const DOCTOR_SCHEMA_VERSION: u32 = 2;
 
 #[derive(Debug, Clone, Default)]
 pub(crate) struct DoctorOptions {
-    pub network: bool,
     pub json: bool,
-}
-
-#[allow(dead_code)]
-pub(crate) async fn run_doctor(network: bool) {
-    run_doctor_with_options(DoctorOptions {
-        network,
-        json: false,
-    })
-    .await
+    /// When true, fan out an HTTP probe per configured provider and record
+    /// reachability + p50 latency on the report. When false, only credential
+    /// presence is checked so the command stays offline-clean.
+    pub check_providers: bool,
+    /// When true, run `cargo check --target <triple>` per Rustup-installed
+    /// target plus the canonical Linux/macOS/Windows/WASM triples. Off by
+    /// default because each probe spawns Cargo and dominates wall-clock.
+    pub check_targets: bool,
 }
 
 pub(crate) async fn run_doctor_with_options(opts: DoctorOptions) {
+    let report = build_report(&opts).await;
+    let failed = report.summary.blocking > 0;
+
+    if opts.json {
+        println!("{}", to_string_pretty(&report.clone().into_envelope()));
+    } else {
+        render_text(&report);
+    }
+
+    if failed {
+        std::process::exit(1);
+    }
+}
+
+async fn build_report(opts: &DoctorOptions) -> DoctorReport {
     let version_check = check_harn_version();
     let mut checks: Vec<DoctorCheck> = Vec::new();
-    checks.push(version_check.clone());
-    checks.extend(check_toolchain());
+    checks.push(version_check);
+    let toolchain = check_toolchain();
+    checks.extend(toolchain.iter().cloned());
     checks.extend(check_dev_tools());
     checks.extend(check_protocol_artifacts());
     checks.extend(check_portal());
@@ -94,39 +99,51 @@ pub(crate) async fn run_doctor_with_options(opts: DoctorOptions) {
     checks.extend(check_metadata_cache());
     checks.extend(check_skills());
     checks.push(check_ollama().await);
-    let hardware = check_hardware();
-    checks.push(hardware.0.clone());
-    checks.extend(check_provider_health(opts.network).await);
+    let (hardware_check, hardware) = check_hardware();
+    checks.push(hardware_check);
+
+    let providers = collect_providers(opts.check_providers).await;
+    checks.extend(provider_doctor_checks(&providers));
+
+    let targets = collect_targets(opts.check_targets).await;
+    checks.extend(target_doctor_checks(&targets));
 
     for check in &mut checks {
         check.ensure_id();
     }
 
     let next_step = next_step_suggestion(&checks);
-    let failed = checks.iter().any(|c| c.status == DoctorStatus::Fail);
+    let summary = build_summary(&checks);
+    let host = build_host_info(&toolchain);
+    let capabilities = stdlib_capability_matrix();
 
-    if opts.json {
-        let json = build_doctor_json(&checks, &hardware.1, &next_step);
-        match serde_json::to_string_pretty(&json) {
-            Ok(text) => println!("{text}"),
-            Err(error) => eprintln!("failed to serialize doctor JSON: {error}"),
-        }
-        if failed {
-            std::process::exit(1);
-        }
-        return;
+    DoctorReport {
+        host,
+        providers_config_path: llm_config::loaded_config_path()
+            .map(|p| p.display().to_string())
+            .unwrap_or_default(),
+        model_defaults: serialize_model_defaults(),
+        targets,
+        providers,
+        capabilities,
+        checks: checks.iter().map(DoctorCheckJson::from).collect(),
+        summary,
+        hardware,
+        next_step,
     }
+}
 
+fn render_text(report: &DoctorReport) {
     println!("Harn doctor");
     println!();
-    for check in &checks {
+    for check in &report.checks {
         println!(
             "{:>4}  {:<24} {}",
-            check.status.label(),
+            check.status.to_uppercase(),
             check.label,
             check.detail
         );
-        if check.status != DoctorStatus::Ok && check.status != DoctorStatus::Skip {
+        if check.status != "ok" && check.status != "skip" {
             if let Some(fix) = &check.fix_command {
                 println!("       fix: {fix}");
             }
@@ -138,45 +155,220 @@ pub(crate) async fn run_doctor_with_options(opts: DoctorOptions) {
             }
         }
     }
+
+    println!();
+    println!("--- Targets ---");
+    for target in &report.targets {
+        let buildable = match target.buildable {
+            Some(true) => "buildable",
+            Some(false) => "not buildable",
+            None => "not probed",
+        };
+        let installed = if target.installed {
+            "installed"
+        } else {
+            "missing"
+        };
+        println!("  {:<32} {installed}, {buildable}", target.triple);
+        for reason in &target.reasons {
+            println!("       {reason}");
+        }
+    }
+
+    println!();
+    println!("--- Providers ---");
+    for provider in &report.providers {
+        let configured = if provider.configured {
+            "configured"
+        } else {
+            "no credentials"
+        };
+        let reachable = match (provider.probed, provider.reachable) {
+            (true, Some(true)) => match provider.latency_ms {
+                Some(ms) => format!("reachable ({ms}ms)"),
+                None => "reachable".to_string(),
+            },
+            (true, Some(false)) => "unreachable".to_string(),
+            (true, None) => "probed".to_string(),
+            (false, _) => "not probed".to_string(),
+        };
+        println!("  {:<24} {configured}, {reachable}", provider.name);
+        for error in &provider.errors {
+            println!("       {error}");
+        }
+    }
+
+    println!();
+    println!("--- Stdlib capabilities ---");
+    for capability in &report.capabilities {
+        println!(
+            "  {:<24} sandbox: {}",
+            capability.name,
+            capability.available_in_sandbox_profile.join(", ")
+        );
+    }
+
     println!();
     println!("--- Summary ---");
-    let summary = doctor_summary(&checks);
     println!(
         "OK={ok} WARN={warn} FAIL={fail} SKIP={skip}",
-        ok = summary.ok,
-        warn = summary.warn,
-        fail = summary.fail,
-        skip = summary.skip,
+        ok = report.summary.ok,
+        warn = report.summary.warning,
+        fail = report.summary.blocking,
+        skip = report.summary.skip,
     );
-    if !summary.blocked_flows.is_empty() {
-        println!("blocked: {}", summary.blocked_flows.join(", "));
+    if !report.summary.blocked_flows.is_empty() {
+        println!("blocked: {}", report.summary.blocked_flows.join(", "));
     }
     println!();
     println!("--- Next step ---");
-    println!("{next_step}");
+    println!("{}", report.next_step);
+}
 
-    if failed {
-        std::process::exit(1);
+/// The complete machine-readable report. Wrapped in [`JsonEnvelope`] for
+/// `--json` and consumed directly by [`render_text`] for the human view, so
+/// both surfaces draw from the same numbers.
+#[derive(Debug, Clone, Serialize)]
+pub(crate) struct DoctorReport {
+    pub host: HostInfo,
+    /// Path to the loaded providers config (empty string when defaults are
+    /// in effect — kept stringly-typed to match downstream consumers).
+    pub providers_config_path: String,
+    /// TOML-derived `[model_defaults]` map flattened to JSON.
+    pub model_defaults: serde_json::Value,
+    pub targets: Vec<TargetInfo>,
+    pub providers: Vec<ProviderInfo>,
+    pub capabilities: Vec<CapabilityInfo>,
+    pub checks: Vec<DoctorCheckJson>,
+    pub hardware: HardwareSnapshot,
+    pub summary: DoctorSummary,
+    pub next_step: String,
+}
+
+impl JsonOutput for DoctorReport {
+    const SCHEMA_VERSION: u32 = DOCTOR_SCHEMA_VERSION;
+    type Data = DoctorReport;
+    fn into_envelope(self) -> JsonEnvelope<DoctorReport> {
+        JsonEnvelope::ok(Self::SCHEMA_VERSION, self)
     }
 }
 
-#[derive(Debug, Default)]
-struct DoctorSummary {
-    ok: usize,
-    warn: usize,
-    fail: usize,
-    skip: usize,
-    blocked_flows: Vec<&'static str>,
+#[derive(Debug, Clone, Serialize)]
+pub(crate) struct HostInfo {
+    /// Platform identifier as reported by `std::env::consts::OS`
+    /// (`"macos"`, `"linux"`, `"windows"`, `"freebsd"`, …).
+    pub os: String,
+    /// CPU architecture as reported by `std::env::consts::ARCH`
+    /// (`"aarch64"`, `"x86_64"`, …).
+    pub arch: String,
+    pub harn_version: String,
+    /// `rustc --version` first line, when the toolchain is on PATH.
+    pub rust_toolchain: Option<String>,
+    /// `cargo --version` first line, when Cargo is on PATH.
+    pub cargo_version: Option<String>,
 }
 
-fn doctor_summary(checks: &[DoctorCheck]) -> DoctorSummary {
+#[derive(Debug, Clone, Serialize)]
+pub(crate) struct TargetInfo {
+    pub triple: String,
+    /// `rustup target list --installed` contains this triple.
+    pub installed: bool,
+    /// `Some(true)` when `cargo check --target` succeeded, `Some(false)`
+    /// when it failed. `None` when [`DoctorOptions::check_targets`] was
+    /// off, i.e. no probe was attempted.
+    pub buildable: Option<bool>,
+    /// Human-readable notes attached during enumeration — typically the
+    /// cargo error message when `buildable == Some(false)`, or the
+    /// reason a target was skipped.
+    pub reasons: Vec<String>,
+    pub checked: bool,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub(crate) struct ProviderInfo {
+    pub name: String,
+    /// True when credentials are resolvable (env var set or auth not
+    /// required for this provider).
+    pub configured: bool,
+    /// `Some(true)` when the healthcheck returned a success status,
+    /// `Some(false)` on failure, `None` when no probe was attempted.
+    pub reachable: Option<bool>,
+    pub latency_ms: Option<u64>,
+    pub errors: Vec<String>,
+    pub probed: bool,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub(crate) struct CapabilityInfo {
+    /// Canonical capability name as used by the orchestration policy
+    /// (`workspace.read_text`, `process.exec`, `network`, …).
+    pub name: String,
+    /// Sandbox profiles in which this capability can be exercised on
+    /// the current host. Static today; gains runtime probes once the
+    /// per-platform sandbox engines expose a self-test.
+    pub available_in_sandbox_profile: Vec<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Default)]
+pub(crate) struct DoctorSummary {
+    pub ok: usize,
+    /// Count of `warn` checks. Aliased as `warning` to match the spec
+    /// language ("warning count") used by the issue.
+    pub warning: usize,
+    /// Count of `fail` checks. Aliased as `blocking` per the spec to
+    /// communicate that these checks gate one or more workflows.
+    pub blocking: usize,
+    pub skip: usize,
+    /// Distinct, sorted list of workflow tags that any failing check
+    /// declared in its `blocks` set (`build`, `test`, `portal`, …).
+    pub blocked_flows: Vec<&'static str>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub(crate) struct DoctorCheckJson {
+    pub id: String,
+    pub label: String,
+    pub status: &'static str,
+    pub detail: String,
+    pub fix_command: Option<String>,
+    pub docs_url: Option<String>,
+    pub blocks: Vec<&'static str>,
+}
+
+impl From<&DoctorCheck> for DoctorCheckJson {
+    fn from(check: &DoctorCheck) -> Self {
+        Self {
+            id: check.id.clone(),
+            label: check.label.clone(),
+            status: match check.status {
+                DoctorStatus::Ok => "ok",
+                DoctorStatus::Warn => "warn",
+                DoctorStatus::Fail => "fail",
+                DoctorStatus::Skip => "skip",
+            },
+            detail: check.detail.clone(),
+            fix_command: check.fix_command.clone(),
+            docs_url: check.docs_url.clone(),
+            blocks: check.blocks.clone(),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Default)]
+pub(crate) struct HardwareSnapshot {
+    pub ram_gb: Option<u64>,
+    pub gpu: String,
+    pub free_disk_gb: Option<u64>,
+}
+
+fn build_summary(checks: &[DoctorCheck]) -> DoctorSummary {
     let mut summary = DoctorSummary::default();
     let mut blocks: std::collections::BTreeSet<&'static str> = std::collections::BTreeSet::new();
     for check in checks {
         match check.status {
             DoctorStatus::Ok => summary.ok += 1,
-            DoctorStatus::Warn => summary.warn += 1,
-            DoctorStatus::Fail => summary.fail += 1,
+            DoctorStatus::Warn => summary.warning += 1,
+            DoctorStatus::Fail => summary.blocking += 1,
             DoctorStatus::Skip => summary.skip += 1,
         }
         if check.status == DoctorStatus::Fail {
@@ -189,62 +381,312 @@ fn doctor_summary(checks: &[DoctorCheck]) -> DoctorSummary {
     summary
 }
 
-#[derive(Debug, Clone, Default)]
-pub(crate) struct HardwareSnapshot {
-    pub ram_gb: Option<u64>,
-    pub gpu: String,
-    pub free_disk_gb: Option<u64>,
+fn build_host_info(toolchain_checks: &[DoctorCheck]) -> HostInfo {
+    let rust_toolchain = toolchain_checks
+        .iter()
+        .find(|c| c.id == "rustc" && c.status == DoctorStatus::Ok)
+        .map(|c| c.detail.clone());
+    let cargo_version = toolchain_checks
+        .iter()
+        .find(|c| c.id == "cargo" && c.status == DoctorStatus::Ok)
+        .map(|c| c.detail.clone());
+    HostInfo {
+        os: std::env::consts::OS.to_string(),
+        arch: std::env::consts::ARCH.to_string(),
+        harn_version: env!("CARGO_PKG_VERSION").to_string(),
+        rust_toolchain,
+        cargo_version,
+    }
 }
 
-fn build_doctor_json(
-    checks: &[DoctorCheck],
-    hardware: &HardwareSnapshot,
-    next_step: &str,
-) -> serde_json::Value {
-    let providers_path = llm_config::loaded_config_path()
-        .map(|p| p.display().to_string())
-        .unwrap_or_default();
-    let model_defaults = serialize_model_defaults();
-    let checks_json: Vec<serde_json::Value> = checks
+/// Canonical Rust target triples Harn ships for. Probed/listed by
+/// `harn doctor` so contributors can see at a glance whether Linux,
+/// macOS, Windows, and WASM builds will work locally without spawning
+/// a CI run.
+const CANONICAL_TARGETS: &[&str] = &[
+    "x86_64-unknown-linux-gnu",
+    "aarch64-unknown-linux-gnu",
+    "x86_64-apple-darwin",
+    "aarch64-apple-darwin",
+    "x86_64-pc-windows-msvc",
+    "aarch64-pc-windows-msvc",
+    "wasm32-unknown-unknown",
+    "wasm32-wasip1",
+];
+
+async fn collect_targets(check_targets: bool) -> Vec<TargetInfo> {
+    let installed = installed_rustup_targets();
+    let mut triples: std::collections::BTreeSet<String> =
+        CANONICAL_TARGETS.iter().map(|t| (*t).to_string()).collect();
+    triples.extend(installed.iter().cloned());
+
+    let mut targets = Vec::with_capacity(triples.len());
+    for triple in triples {
+        let is_installed = installed.contains(&triple);
+        let mut reasons = Vec::new();
+        let (buildable, checked) = if !check_targets {
+            (None, false)
+        } else if !is_installed {
+            reasons.push(format!(
+                "target not installed; run `rustup target add {triple}` to probe"
+            ));
+            (Some(false), true)
+        } else {
+            match cargo_check_target(&triple).await {
+                Ok(()) => (Some(true), true),
+                Err(detail) => {
+                    reasons.push(detail);
+                    (Some(false), true)
+                }
+            }
+        };
+        targets.push(TargetInfo {
+            triple,
+            installed: is_installed,
+            buildable,
+            reasons,
+            checked,
+        });
+    }
+    targets
+}
+
+fn installed_rustup_targets() -> Vec<String> {
+    let output = Command::new("rustup")
+        .args(["target", "list", "--installed"])
+        .output()
+        .ok();
+    match output {
+        Some(out) if out.status.success() => String::from_utf8_lossy(&out.stdout)
+            .lines()
+            .map(|line| line.trim().to_string())
+            .filter(|line| !line.is_empty())
+            .collect(),
+        _ => Vec::new(),
+    }
+}
+
+async fn cargo_check_target(triple: &str) -> Result<(), String> {
+    let output = tokio::process::Command::new("cargo")
+        .args(["check", "--quiet", "--target", triple])
+        .output()
+        .await
+        .map_err(|err| format!("failed to spawn cargo check: {err}"))?;
+    if output.status.success() {
+        Ok(())
+    } else {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        let summary = stderr
+            .lines()
+            .rev()
+            .find(|line| line.contains("error"))
+            .map(|line| line.trim().to_string())
+            .unwrap_or_else(|| format!("cargo check --target {triple} failed"));
+        Err(summary)
+    }
+}
+
+fn target_doctor_checks(targets: &[TargetInfo]) -> Vec<DoctorCheck> {
+    targets
         .iter()
-        .map(|c| {
-            serde_json::json!({
-                "id": c.id,
-                "label": c.label,
-                "status": match c.status {
-                    DoctorStatus::Ok => "ok",
-                    DoctorStatus::Warn => "warn",
-                    DoctorStatus::Fail => "fail",
-                    DoctorStatus::Skip => "skip",
+        .filter(|t| t.checked)
+        .map(|t| {
+            let status = match t.buildable {
+                Some(true) => DoctorStatus::Ok,
+                Some(false) => DoctorStatus::Warn,
+                None => DoctorStatus::Skip,
+            };
+            let detail = match t.buildable {
+                Some(true) => "cargo check --target succeeded".to_string(),
+                Some(false) => t.reasons.first().cloned().unwrap_or_default(),
+                None => "not probed".to_string(),
+            };
+            DoctorCheck {
+                id: format!("target:{}", t.triple),
+                status,
+                label: format!("target:{}", t.triple),
+                detail,
+                fix_command: if !t.installed {
+                    Some(format!("rustup target add {}", t.triple))
+                } else {
+                    None
                 },
-                "detail": c.detail,
-                "fix_command": c.fix_command,
-                "docs_url": c.docs_url,
-                "blocks": c.blocks,
-            })
+                docs_url: Some("https://doc.rust-lang.org/rustc/platform-support.html".to_string()),
+                blocks: Vec::new(),
+            }
         })
+        .collect()
+}
+
+async fn collect_providers(check_providers: bool) -> Vec<ProviderInfo> {
+    let mut names = llm_config::provider_names();
+    names.sort();
+
+    let probes: Vec<_> = names
+        .iter()
+        .map(|name| collect_provider(name.clone(), check_providers))
         .collect();
-    let summary = doctor_summary(checks);
-    serde_json::json!({
-        "schema_version": DOCTOR_JSON_SCHEMA_VERSION,
-        "harn_version": env!("CARGO_PKG_VERSION"),
-        "providers_config_path": providers_path,
-        "model_defaults": model_defaults,
-        "checks": checks_json,
-        "summary": {
-            "ok": summary.ok,
-            "warn": summary.warn,
-            "fail": summary.fail,
-            "skip": summary.skip,
-            "blocked_flows": summary.blocked_flows,
-        },
-        "hardware": {
-            "ram_gb": hardware.ram_gb,
-            "gpu": hardware.gpu,
-            "free_disk_gb": hardware.free_disk_gb,
-        },
-        "next_step": next_step,
-    })
+    futures::future::join_all(probes).await
+}
+
+async fn collect_provider(name: String, check_providers: bool) -> ProviderInfo {
+    let def = llm_config::provider_config(&name);
+    let configured = match &def {
+        None => false,
+        Some(def) if def.auth_style == "none" => true,
+        Some(def) => llm_config::auth_env_names(&def.auth_env)
+            .iter()
+            .any(|env| std::env::var(env).map(|v| !v.is_empty()).unwrap_or(false)),
+    };
+
+    // Probing an unconfigured provider would short-circuit inside the
+    // healthcheck with a "missing credentials" error and report a 0ms
+    // latency — meaningless data that clutters the report. Skip the
+    // network round-trip until the provider has credentials.
+    if !check_providers || !configured {
+        return ProviderInfo {
+            name,
+            configured,
+            reachable: None,
+            latency_ms: None,
+            errors: Vec::new(),
+            probed: false,
+        };
+    }
+
+    let start = std::time::Instant::now();
+    let result = harn_vm::llm::run_provider_healthcheck(&name).await;
+    let latency_ms = u64::try_from(start.elapsed().as_millis()).unwrap_or(u64::MAX);
+
+    let mut errors = Vec::new();
+    if !result.valid {
+        errors.push(result.message.clone());
+    }
+
+    ProviderInfo {
+        name,
+        configured,
+        reachable: Some(result.valid),
+        latency_ms: Some(latency_ms),
+        errors,
+        probed: true,
+    }
+}
+
+fn provider_doctor_checks(providers: &[ProviderInfo]) -> Vec<DoctorCheck> {
+    providers
+        .iter()
+        .filter(|p| p.probed)
+        .map(|p| {
+            let status = match p.reachable {
+                Some(true) => DoctorStatus::Ok,
+                Some(false) => {
+                    if p.configured {
+                        DoctorStatus::Fail
+                    } else {
+                        DoctorStatus::Warn
+                    }
+                }
+                None => DoctorStatus::Skip,
+            };
+            let detail = match (p.reachable, p.latency_ms) {
+                (Some(true), Some(ms)) => format!("reachable in {ms}ms"),
+                (Some(true), None) => "reachable".to_string(),
+                (Some(false), _) => p
+                    .errors
+                    .first()
+                    .cloned()
+                    .unwrap_or_else(|| "healthcheck failed".to_string()),
+                (None, _) => "not probed".to_string(),
+            };
+            DoctorCheck {
+                id: format!("provider:{}", p.name),
+                status,
+                label: format!("provider:{}", p.name),
+                detail,
+                ..Default::default()
+            }
+        })
+        .collect()
+}
+
+/// Static enumeration of the stdlib capabilities the runtime gates today.
+/// Each entry lists the sandbox profiles that currently permit it on this
+/// host. The mapping is conservative: capabilities that don't need any
+/// platform-specific OS confinement (`workspace.*`, `network`, `llm.call`,
+/// in-process calls) are available across every profile; capabilities
+/// that need subprocess execution mark the `OsHardened` profile based on
+/// whether the host advertises a working sandbox engine.
+fn stdlib_capability_matrix() -> Vec<CapabilityInfo> {
+    let in_process = vec![
+        "unrestricted".to_string(),
+        "worktree".to_string(),
+        "os_hardened".to_string(),
+        "wasi".to_string(),
+    ];
+    let mut subprocess = vec!["unrestricted".to_string(), "worktree".to_string()];
+    if os_sandbox_available() {
+        subprocess.push("os_hardened".to_string());
+    }
+    subprocess.push("wasi".to_string()); // WASI replay covers subprocess capture
+
+    let mut entries = Vec::new();
+    for name in [
+        "workspace.read_text",
+        "workspace.write_text",
+        "workspace.list",
+        "workspace.exists",
+        "workspace.apply_edit",
+        "workspace.delete",
+    ] {
+        entries.push(CapabilityInfo {
+            name: name.to_string(),
+            available_in_sandbox_profile: in_process.clone(),
+        });
+    }
+    for name in [
+        "network",
+        "llm.call",
+        "connector.call",
+        "agent_state.access",
+    ] {
+        entries.push(CapabilityInfo {
+            name: name.to_string(),
+            available_in_sandbox_profile: in_process.clone(),
+        });
+    }
+    for name in ["process.exec", "vision.ocr"] {
+        entries.push(CapabilityInfo {
+            name: name.to_string(),
+            available_in_sandbox_profile: subprocess.clone(),
+        });
+    }
+    entries
+}
+
+#[cfg(target_os = "macos")]
+fn os_sandbox_available() -> bool {
+    which::which("sandbox-exec").is_ok()
+}
+
+#[cfg(target_os = "linux")]
+fn os_sandbox_available() -> bool {
+    // Landlock requires kernel ≥5.13. /sys/kernel/security/lsm enumerates
+    // active LSMs — fall back to checking that /proc is accessible because
+    // a working seccomp + Landlock stack always exposes one.
+    std::path::Path::new("/sys/kernel/security/lsm").exists()
+}
+
+#[cfg(target_os = "windows")]
+fn os_sandbox_available() -> bool {
+    // AppContainer is always present on supported Windows builds. Stub for
+    // now; refine once the Windows sandbox engine lands a self-test.
+    true
+}
+
+#[cfg(not(any(target_os = "macos", target_os = "linux", target_os = "windows")))]
+fn os_sandbox_available() -> bool {
+    false
 }
 
 fn serialize_model_defaults() -> serde_json::Value {
@@ -1441,136 +1883,6 @@ fn check_event_log() -> Vec<DoctorCheck> {
     }
 }
 
-async fn check_provider_health(network: bool) -> Vec<DoctorCheck> {
-    let mut providers = llm_config::provider_names();
-    providers.sort();
-
-    let client = reqwest::Client::builder()
-        .timeout(std::time::Duration::from_secs(5))
-        .build()
-        .expect("reqwest client");
-
-    let mut checks = Vec::new();
-    for provider_name in providers {
-        if !network {
-            checks.push(DoctorCheck {
-                id: String::new(),
-                status: DoctorStatus::Skip,
-                label: format!("provider:{provider_name}"),
-                detail: "network checks disabled".to_string(),
-                ..Default::default()
-            });
-            continue;
-        }
-
-        // Local OpenAI-compatible providers expose loaded models through
-        // `/v1/models`. Probe the selected model directly so a missing model
-        // surfaces with the distinct `model_missing` category rather than a
-        // generic 200 OK from the unified healthcheck.
-        if let Some(def) = llm_config::provider_config(&provider_name) {
-            if harn_vm::llm::supports_model_readiness_probe(&def) {
-                if let Some(model) = harn_vm::llm::selected_model_for_provider(&provider_name) {
-                    let api_key = match &def.auth_env {
-                        AuthEnv::None => String::new(),
-                        AuthEnv::Single(name) => std::env::var(name).unwrap_or_default(),
-                        AuthEnv::Multiple(names) => names
-                            .iter()
-                            .find_map(|name| std::env::var(name).ok())
-                            .unwrap_or_default(),
-                    };
-                    checks.push(run_model_readiness(&provider_name, &model, &api_key).await);
-                    continue;
-                }
-            }
-        }
-
-        let result = harn_vm::llm::run_provider_healthcheck_with_options(
-            &provider_name,
-            harn_vm::llm::ProviderHealthcheckOptions {
-                api_key: None,
-                client: Some(client.clone()),
-            },
-        )
-        .await;
-        checks.push(healthcheck_result_to_doctor_check(result));
-    }
-    checks
-}
-
-async fn run_model_readiness(provider_name: &str, model: &str, api_key: &str) -> DoctorCheck {
-    let readiness =
-        harn_vm::llm::probe_openai_compatible_model(provider_name, model, api_key).await;
-    let status = if readiness.valid {
-        DoctorStatus::Ok
-    } else {
-        match readiness.category.as_str() {
-            "model_missing" | "bad_status" | "invalid_url" => DoctorStatus::Fail,
-            _ => DoctorStatus::Warn,
-        }
-    };
-    DoctorCheck {
-        id: String::new(),
-        status,
-        label: format!("provider:{provider_name}"),
-        detail: format!("{}: {}", readiness.category, readiness.message),
-        ..Default::default()
-    }
-}
-
-fn healthcheck_result_to_doctor_check(
-    result: harn_vm::llm::ProviderHealthcheckResult,
-) -> DoctorCheck {
-    let reason = result
-        .metadata
-        .get("reason")
-        .and_then(|value| value.as_str())
-        .unwrap_or("unknown");
-    let status_code = result
-        .metadata
-        .get("status")
-        .and_then(|value| value.as_u64())
-        .unwrap_or_default();
-    let status = if result.valid {
-        DoctorStatus::Ok
-    } else {
-        match reason {
-            "no_healthcheck" => DoctorStatus::Skip,
-            "missing_credentials" => DoctorStatus::Warn,
-            "http_status" if status_code == 401 || status_code == 403 => DoctorStatus::Fail,
-            "http_status" => DoctorStatus::Warn,
-            _ => DoctorStatus::Fail,
-        }
-    };
-    let detail = if result.valid {
-        let url = result
-            .metadata
-            .get("url")
-            .and_then(|value| value.as_str())
-            .unwrap_or("");
-        let status = result
-            .metadata
-            .get("status")
-            .and_then(|value| value.as_u64())
-            .map(|value| value.to_string())
-            .unwrap_or_else(|| "ok".to_string());
-        if url.is_empty() {
-            status
-        } else {
-            format!("{status} {url}")
-        }
-    } else {
-        result.message
-    };
-
-    DoctorCheck {
-        id: String::new(),
-        status,
-        label: format!("provider:{}", result.provider),
-        detail,
-        ..Default::default()
-    }
-}
-
 fn find_nearest_manifest(start: &Path) -> Option<PathBuf> {
     let mut dir = start.to_path_buf();
     loop {
@@ -1610,16 +1922,14 @@ fn read_manifest(path: &Path) -> Result<package::Manifest, String> {
 #[cfg(test)]
 mod tests {
     use super::{
-        build_doctor_json, check_event_log, check_hardware, check_manifest, check_ollama,
-        check_platform_capabilities, check_protocol_artifacts, doctor_summary, find_harn_repo_root,
-        find_nearest_manifest, format_trigger_metrics, healthcheck_result_to_doctor_check,
-        next_step_suggestion, read_manifest, DoctorCheck, DoctorStatus, HardwareSnapshot,
-        DOCTOR_JSON_SCHEMA_VERSION,
+        build_host_info, build_summary, check_event_log, check_hardware, check_manifest,
+        check_ollama, check_platform_capabilities, check_protocol_artifacts, find_harn_repo_root,
+        find_nearest_manifest, format_trigger_metrics, next_step_suggestion, read_manifest,
+        stdlib_capability_matrix, target_doctor_checks, DoctorCheck, DoctorReport, DoctorStatus,
+        HardwareSnapshot, TargetInfo, DOCTOR_SCHEMA_VERSION,
     };
-    use harn_vm::llm::ProviderHealthcheckResult;
+    use crate::json_envelope::JsonOutput;
     use harn_vm::llm_config::{AuthEnv, HealthcheckDef, ProviderDef};
-    use serde_json::json;
-    use std::collections::BTreeMap;
 
     #[test]
     fn build_healthcheck_url_uses_base_and_path() {
@@ -1637,44 +1947,6 @@ mod tests {
         assert_eq!(
             harn_vm::llm::build_healthcheck_url(&def, &healthcheck),
             "https://example.com/api/health"
-        );
-    }
-
-    #[test]
-    fn doctor_maps_healthcheck_results_to_existing_statuses() {
-        let missing = ProviderHealthcheckResult {
-            provider: "openai".to_string(),
-            valid: false,
-            message: "Missing credentials".to_string(),
-            metadata: BTreeMap::from([("reason".to_string(), json!("missing_credentials"))]),
-        };
-        let auth_rejected = ProviderHealthcheckResult {
-            provider: "openai".to_string(),
-            valid: false,
-            message: "openai returned HTTP 401".to_string(),
-            metadata: BTreeMap::from([
-                ("reason".to_string(), json!("http_status")),
-                ("status".to_string(), json!(401)),
-            ]),
-        };
-        let no_probe = ProviderHealthcheckResult {
-            provider: "custom".to_string(),
-            valid: false,
-            message: "No healthcheck configured".to_string(),
-            metadata: BTreeMap::from([("reason".to_string(), json!("no_healthcheck"))]),
-        };
-
-        assert_eq!(
-            healthcheck_result_to_doctor_check(missing).status,
-            DoctorStatus::Warn
-        );
-        assert_eq!(
-            healthcheck_result_to_doctor_check(auth_rejected).status,
-            DoctorStatus::Fail
-        );
-        assert_eq!(
-            healthcheck_result_to_doctor_check(no_probe).status,
-            DoctorStatus::Skip
         );
     }
 
@@ -1704,15 +1976,6 @@ mod tests {
             manifest.package.and_then(|pkg| pkg.name),
             Some("demo".to_string())
         );
-    }
-
-    #[test]
-    fn auth_env_multiple_variant_exists_for_provider_checks() {
-        let auth = AuthEnv::Multiple(vec!["FIRST".to_string(), "SECOND".to_string()]);
-        let AuthEnv::Multiple(names) = auth else {
-            panic!("expected multiple auth envs");
-        };
-        assert_eq!(names, vec!["FIRST".to_string(), "SECOND".to_string()]);
     }
 
     #[test]
@@ -1856,27 +2119,61 @@ pub fn on_new_issue(event: TriggerEvent) {
     }
 
     #[test]
-    fn json_emits_stable_ids() {
+    fn report_envelope_carries_capability_matrix_and_stable_ids() {
         let checks = vec![
             check("harn_version", DoctorStatus::Ok),
             check("creds:openai", DoctorStatus::Warn),
         ];
-        let hardware = HardwareSnapshot {
-            ram_gb: Some(16),
-            gpu: "mps".to_string(),
-            free_disk_gb: Some(100),
+        let report = DoctorReport {
+            host: build_host_info(&[]),
+            providers_config_path: String::new(),
+            model_defaults: serde_json::Value::Null,
+            targets: vec![TargetInfo {
+                triple: "x86_64-unknown-linux-gnu".to_string(),
+                installed: true,
+                buildable: Some(true),
+                reasons: Vec::new(),
+                checked: true,
+            }],
+            providers: vec![super::ProviderInfo {
+                name: "anthropic".to_string(),
+                configured: true,
+                reachable: Some(true),
+                latency_ms: Some(120),
+                errors: Vec::new(),
+                probed: true,
+            }],
+            capabilities: stdlib_capability_matrix(),
+            checks: checks.iter().map(super::DoctorCheckJson::from).collect(),
+            hardware: HardwareSnapshot {
+                ram_gb: Some(16),
+                gpu: "mps".to_string(),
+                free_disk_gb: Some(100),
+            },
+            summary: build_summary(&checks),
+            next_step: "test next step".to_string(),
         };
-        let value = build_doctor_json(&checks, &hardware, "test next step");
-        let checks_arr = value["checks"].as_array().expect("checks array");
-        assert_eq!(checks_arr.len(), 2);
+        let envelope = report.into_envelope();
+        let value = serde_json::to_value(&envelope).unwrap();
+        assert_eq!(value["schemaVersion"], DOCTOR_SCHEMA_VERSION);
+        assert_eq!(value["ok"], true);
+        let data = &value["data"];
+        assert!(data["host"]["os"].is_string());
+        assert!(data["host"]["arch"].is_string());
+        assert_eq!(data["targets"][0]["triple"], "x86_64-unknown-linux-gnu");
+        assert_eq!(data["targets"][0]["buildable"], true);
+        assert_eq!(data["providers"][0]["name"], "anthropic");
+        assert_eq!(data["providers"][0]["reachable"], true);
+        assert_eq!(data["providers"][0]["latency_ms"], 120);
+        assert!(!data["capabilities"].as_array().unwrap().is_empty());
+        let checks_arr = data["checks"].as_array().expect("checks array");
         assert_eq!(checks_arr[0]["id"], "harn_version");
         assert_eq!(checks_arr[0]["status"], "ok");
         assert_eq!(checks_arr[1]["id"], "creds:openai");
         assert_eq!(checks_arr[1]["status"], "warn");
-        assert_eq!(value["hardware"]["ram_gb"], 16);
-        assert_eq!(value["hardware"]["gpu"], "mps");
-        assert_eq!(value["next_step"], "test next step");
-        assert!(value.get("harn_version").is_some());
+        assert_eq!(data["hardware"]["ram_gb"], 16);
+        assert_eq!(data["hardware"]["gpu"], "mps");
+        assert_eq!(data["next_step"], "test next step");
     }
 
     #[test]
@@ -1914,7 +2211,7 @@ pub fn on_new_issue(event: TriggerEvent) {
     }
 
     #[test]
-    fn doctor_summary_aggregates_status_counts_and_blocked_flows() {
+    fn summary_aggregates_status_counts_and_blocked_flows() {
         let checks = vec![
             DoctorCheck {
                 id: "rustc".to_string(),
@@ -1945,57 +2242,83 @@ pub fn on_new_issue(event: TriggerEvent) {
                 ..Default::default()
             },
         ];
-        let summary = doctor_summary(&checks);
+        let summary = build_summary(&checks);
         assert_eq!(summary.ok, 1);
-        assert_eq!(summary.warn, 1);
-        assert_eq!(summary.fail, 2);
+        assert_eq!(summary.warning, 1);
+        assert_eq!(summary.blocking, 2);
         assert_eq!(summary.skip, 1);
         // Sorted, deduplicated, alphabetical.
         assert_eq!(summary.blocked_flows, vec!["build", "portal", "test"]);
     }
 
     #[test]
-    fn doctor_json_includes_schema_version_summary_and_per_check_metadata() {
-        let checks = vec![
-            DoctorCheck {
-                id: "rustc".to_string(),
-                status: DoctorStatus::Fail,
-                label: "rustc".to_string(),
-                detail: "missing".to_string(),
-                fix_command: Some("install rust".to_string()),
-                docs_url: Some("https://rustup.rs".to_string()),
-                blocks: vec!["build", "test"],
+    fn capability_matrix_lists_known_capabilities() {
+        let entries = stdlib_capability_matrix();
+        let names: std::collections::BTreeSet<&str> =
+            entries.iter().map(|e| e.name.as_str()).collect();
+        assert!(names.contains("workspace.read_text"), "names: {names:?}");
+        assert!(names.contains("network"), "names: {names:?}");
+        assert!(names.contains("process.exec"), "names: {names:?}");
+        for entry in &entries {
+            assert!(
+                !entry.available_in_sandbox_profile.is_empty(),
+                "{} should list at least one sandbox profile",
+                entry.name
+            );
+            for profile in &entry.available_in_sandbox_profile {
+                assert!(
+                    ["unrestricted", "worktree", "os_hardened", "wasi"].contains(&profile.as_str()),
+                    "unknown sandbox profile '{profile}'"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn host_info_reports_os_arch_and_harn_version() {
+        let info = build_host_info(&[]);
+        assert_eq!(info.os, std::env::consts::OS);
+        assert_eq!(info.arch, std::env::consts::ARCH);
+        assert_eq!(info.harn_version, env!("CARGO_PKG_VERSION"));
+    }
+
+    #[test]
+    fn target_checks_skipped_when_not_probed() {
+        let targets = vec![
+            TargetInfo {
+                triple: "x86_64-apple-darwin".to_string(),
+                installed: true,
+                buildable: None,
+                reasons: Vec::new(),
+                checked: false,
             },
-            DoctorCheck {
-                id: "harn_version".to_string(),
-                status: DoctorStatus::Ok,
-                label: "harn version".to_string(),
-                detail: "v0.0.0".to_string(),
-                ..Default::default()
+            TargetInfo {
+                triple: "wasm32-unknown-unknown".to_string(),
+                installed: false,
+                buildable: Some(false),
+                reasons: vec!["target not installed".to_string()],
+                checked: true,
             },
         ];
-        let hardware = HardwareSnapshot::default();
-        let value = build_doctor_json(&checks, &hardware, "next");
+        let checks = target_doctor_checks(&targets);
+        // Only the probed target emits a check entry.
+        assert_eq!(checks.len(), 1);
+        assert_eq!(checks[0].id, "target:wasm32-unknown-unknown");
+        assert_eq!(checks[0].status, DoctorStatus::Warn);
+        assert!(checks[0]
+            .fix_command
+            .as_deref()
+            .map(|s| s.contains("rustup target add"))
+            .unwrap_or(false));
+    }
 
-        assert_eq!(value["schema_version"], DOCTOR_JSON_SCHEMA_VERSION);
-        assert_eq!(value["summary"]["ok"], 1);
-        assert_eq!(value["summary"]["fail"], 1);
-        assert_eq!(
-            value["summary"]["blocked_flows"],
-            serde_json::json!(["build", "test"])
-        );
-
-        let first = &value["checks"][0];
-        assert_eq!(first["fix_command"], "install rust");
-        assert_eq!(first["docs_url"], "https://rustup.rs");
-        assert_eq!(first["blocks"], serde_json::json!(["build", "test"]));
-
-        let second = &value["checks"][1];
-        // Optional fields surface as JSON null / empty array — the keys
-        // themselves are always present so consumers can rely on the shape.
-        assert!(second["fix_command"].is_null());
-        assert!(second["docs_url"].is_null());
-        assert_eq!(second["blocks"], serde_json::json!([]));
+    #[test]
+    fn auth_env_multiple_variant_exists_for_provider_checks() {
+        let auth = AuthEnv::Multiple(vec!["FIRST".to_string(), "SECOND".to_string()]);
+        let AuthEnv::Multiple(names) = auth else {
+            panic!("expected multiple auth envs");
+        };
+        assert_eq!(names, vec!["FIRST".to_string(), "SECOND".to_string()]);
     }
 
     #[test]
