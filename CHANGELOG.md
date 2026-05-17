@@ -8,6 +8,8 @@ condensed series summaries instead of full per-patch history.
 
 ## Unreleased
 
+## v0.8.24
+
 ### Fixed
 
 - **Swift protocol artifact CaseIterable synthesis.** Generated Swift
