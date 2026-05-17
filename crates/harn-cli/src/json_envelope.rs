@@ -182,6 +182,12 @@ pub fn catalog() -> Vec<SchemaEntry> {
             description: "One embedded skill's frontmatter (and body with --full).",
             schema_json: None,
         },
+        SchemaEntry {
+            command: "pack",
+            schema_version: crate::commands::pack::PACK_SCHEMA_VERSION,
+            description: "Signed-ready .harnpack run-bundle build summary.",
+            schema_json: None,
+        },
     ]
 }
 

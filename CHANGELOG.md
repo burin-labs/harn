@@ -93,6 +93,29 @@ condensed series summaries instead of full per-patch history.
   `.repair()` methods. The CLI now renders a `repair: ID [SAFETY] —
   SUMMARY` line, and the LSP attaches the same payload to
   `Diagnostic.data` as `{"repair": {"id", "summary", "safety"}}`.
+- **`harn pack <entrypoint>` builds a `.harnpack` run bundle (#1781).**
+  New top-level CLI subcommand that walks the entrypoint's transitive
+  imports, precompiles every module into the bytecode-cache header
+  format, snapshots the provider catalog hash + stdlib pin, generates a
+  minimal SBOM (one entry per module + stdlib dep), and assembles a v2
+  `WorkflowBundle` manifest. The result is a deterministic tar.zst
+  archive written to `<entrypoint>.harnpack` (overridable with
+  `--out <path>`). `--json` emits the canonical `JsonEnvelope`
+  containing `bundle_hash` (BLAKE3 over the canonical manifest + sorted
+  content hashes), `output_path`, `size_bytes`, and the full manifest;
+  the catalog row is registered with `harn --json-schemas`.
+  `--upgrade <old.harnpack>` reads an older bundle (v1 JSON or v2
+  archive) and re-emits it under the v2 manifest, preserving the prior
+  bundle's id, name, version, triggers, workflow graph, and prompt
+  capsules while populating the new v2 fields from the entrypoint walk.
+  Signing (E6.3) and full SBOM enumeration (E6.4) land in follow-ups;
+  today the bundle ships unsigned. Companion: `harn-vm` exposes
+  `read_workflow_bundle_manifest_any_version` and
+  `load_workflow_bundle_any_version` for relaxed-schema reads, and
+  `bytecode_cache::serialize_chunk_artifact` /
+  `serialize_module_artifact` so in-memory consumers can package
+  bytecode bytes byte-identical to the on-disk `.harnbc`/`.harnmod`
+  files.
 - **`with_scoped_executor` tool-caller middleware (#1702).** Narrows the
   active `CapabilityPolicy` for the duration of one tool dispatch:
   `compose_tool_callers([..., with_scoped_executor({stage, allowed_tools,

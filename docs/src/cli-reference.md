@@ -1809,6 +1809,42 @@ Remove one dependency from `harn.toml`, `harn.lock`, and
 harn remove my-lib
 ```
 
+## harn pack
+
+Build a signed-ready `.harnpack` run bundle from a Harn entrypoint
+([#1781][issue-1781]). The bundle is a deterministic tar.zst archive
+containing a v2 `WorkflowBundle` manifest (`harnpack.json`), every
+transitively-imported `.harn` source under `sources/`, every module's
+precompiled `.harnbc`/`.harnmod` artifact under `bytecode/`, a
+provider-catalog hash + stdlib version pin, a minimal SPDX-lite SBOM,
+and a (future) Ed25519 signature slot.
+
+```bash
+harn pack examples/hello.harn
+harn pack examples/hello.harn --out /tmp/hello.harnpack
+harn pack examples/hello.harn --unsigned --json
+harn pack workflows/new-entry.harn --upgrade old.harnpack --out new.harnpack
+```
+
+Output paths default to `<entrypoint>.harnpack` next to the entrypoint.
+`--json` emits a `JsonEnvelope` with `bundle_hash` (BLAKE3 over the
+canonical manifest bytes plus sorted content hashes), `output_path`,
+`size_bytes`, and the full manifest; see the catalog row at
+`harn --json-schemas --command pack` for the schema version. Repacking
+the same source produces a byte-identical archive.
+
+`--upgrade <old.harnpack>` reads a prior bundle (v1 JSON or v2 archive)
+and re-emits it under the v2 manifest, preserving the prior bundle's
+id, name, version, triggers, workflow graph, and prompt capsules. The
+new `<entrypoint>` argument supplies the transitive-module + SBOM
+payload that the older schema lacked.
+
+Signing (`--sign --key <path>`) and richer SBOM enumeration land in
+follow-ups (E6.3 and E6.4). Today the bundle ships unsigned; pass
+`--unsigned` to make that intent explicit.
+
+[issue-1781]: https://github.com/burin-labs/harn/issues/1781
+
 ## harn package list
 
 List packages from the current `harn.lock`.

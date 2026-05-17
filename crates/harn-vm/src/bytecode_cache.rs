@@ -305,19 +305,36 @@ fn ensure_parent_dir(path: &Path) -> io::Result<()> {
 }
 
 fn write_atomic_chunk(target: &Path, key: &CacheKey, chunk: &Chunk) -> io::Result<()> {
-    let cached = chunk.freeze_for_cache();
-    let payload = bincode::serialize(&cached)
-        .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e.to_string()))?;
-    write_atomic(target, key, KIND_ENTRY_CHUNK, &payload)
+    let buf = serialize_chunk_artifact(key, chunk)?;
+    write_atomic(target, &buf)
 }
 
 fn write_atomic_module(target: &Path, key: &CacheKey, artifact: &ModuleArtifact) -> io::Result<()> {
-    let payload = bincode::serialize(artifact)
-        .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e.to_string()))?;
-    write_atomic(target, key, KIND_MODULE_ARTIFACT, &payload)
+    let buf = serialize_module_artifact(key, artifact)?;
+    write_atomic(target, &buf)
 }
 
-fn write_atomic(target: &Path, key: &CacheKey, kind: u8, payload: &[u8]) -> io::Result<()> {
+/// Serialize an entry-chunk artifact (header + payload) to bytes. The
+/// resulting buffer is byte-identical to the file [`store_at`] would
+/// have written for the same `(key, chunk)`. Use this when packaging
+/// artifacts into a container (e.g. `harn pack`) without going through
+/// the filesystem.
+pub fn serialize_chunk_artifact(key: &CacheKey, chunk: &Chunk) -> io::Result<Vec<u8>> {
+    let cached = chunk.freeze_for_cache();
+    let payload = bincode::serialize(&cached)
+        .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e.to_string()))?;
+    Ok(encode_artifact(key, KIND_ENTRY_CHUNK, &payload))
+}
+
+/// Serialize a module artifact (header + payload) to bytes. Companion
+/// to [`serialize_chunk_artifact`] for the `.harnmod` family.
+pub fn serialize_module_artifact(key: &CacheKey, artifact: &ModuleArtifact) -> io::Result<Vec<u8>> {
+    let payload = bincode::serialize(artifact)
+        .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e.to_string()))?;
+    Ok(encode_artifact(key, KIND_MODULE_ARTIFACT, &payload))
+}
+
+fn encode_artifact(key: &CacheKey, kind: u8, payload: &[u8]) -> Vec<u8> {
     let mut buf: Vec<u8> = Vec::with_capacity(payload.len() + 128);
     buf.extend_from_slice(MAGIC);
     buf.extend_from_slice(&SCHEMA_VERSION.to_le_bytes());
@@ -329,14 +346,17 @@ fn write_atomic(target: &Path, key: &CacheKey, kind: u8, payload: &[u8]) -> io::
     buf.extend_from_slice(&key.source_hash);
     buf.extend_from_slice(&key.import_graph_hash);
     buf.extend_from_slice(payload);
+    buf
+}
 
+fn write_atomic(target: &Path, buf: &[u8]) -> io::Result<()> {
     let tmp_name = match target.file_name() {
         Some(name) => format!(".{}.{}.tmp", name.to_string_lossy(), std::process::id(),),
         None => format!(".harn-cache.{}.tmp", std::process::id()),
     };
     let tmp_path = target.with_file_name(tmp_name);
     let mut tmp_file = fs::File::create(&tmp_path)?;
-    tmp_file.write_all(&buf)?;
+    tmp_file.write_all(buf)?;
     tmp_file.sync_all()?;
     drop(tmp_file);
     match fs::rename(&tmp_path, target) {
@@ -715,6 +735,23 @@ mod tests {
         store_at(&path, &key, &chunk).expect("write");
         let loaded = read_chunk_if_matches(&path, &key).unwrap();
         assert!(loaded.is_some(), "expected cached chunk to load");
+    }
+
+    #[test]
+    fn serialize_chunk_artifact_matches_store_at() {
+        // `serialize_chunk_artifact` packages an artifact into a buffer for
+        // in-memory consumers (e.g. `harn pack` writing into a tar.zst
+        // bundle). The contract is: the resulting bytes match what
+        // `store_at` would have written for the same key+chunk, so the
+        // shipped artifact is byte-identical to the on-disk cache form.
+        let chunk = compile_source("println(\"hi\")").expect("compile");
+        let key = CacheKey::from_source(Path::new("/tmp/pack.harn"), "println(\"hi\")");
+        let tmp = tempfile::tempdir().unwrap();
+        let on_disk = tmp.path().join("pack.harnbc");
+        store_at(&on_disk, &key, &chunk).expect("write");
+        let on_disk_bytes = std::fs::read(&on_disk).unwrap();
+        let in_memory_bytes = serialize_chunk_artifact(&key, &chunk).expect("serialize");
+        assert_eq!(in_memory_bytes, on_disk_bytes);
     }
 
     #[test]

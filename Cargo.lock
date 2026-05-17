@@ -2069,6 +2069,7 @@ dependencies = [
  "axum",
  "axum-server",
  "base64",
+ "blake3",
  "chrono-tz",
  "clap",
  "clap_complete",
