@@ -2090,6 +2090,7 @@ dependencies = [
  "harn-modules",
  "harn-parser",
  "harn-serve",
+ "harn-skills",
  "harn-vm",
  "hmac 0.13.0",
  "include_dir",
@@ -2323,6 +2324,10 @@ dependencies = [
  "url",
  "uuid",
 ]
+
+[[package]]
+name = "harn-skills"
+version = "0.8.24"
 
 [[package]]
 name = "harn-stdlib"

@@ -42,6 +42,7 @@ harn-lint = { path = "../harn-lint", version = "0.8" }
 harn-modules = { path = "../harn-modules", version = "0.8" }
 harn-fmt = { path = "../harn-fmt", version = "0.8" }
 harn-serve = { path = "../harn-serve", version = "0.8" }
+harn-skills = { path = "../harn-skills", version = "0.8" }
 async-trait = "0.1"
 axum = { version = "0.8", features = ["ws"] }
 axum-server = { version = "0.8", features = ["tls-rustls"] }

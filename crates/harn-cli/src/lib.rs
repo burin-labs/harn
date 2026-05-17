@@ -15,6 +15,8 @@ pub mod test_runner;
 #[doc(hidden)]
 pub mod tests;
 
+pub use harn_skills::{get_embedded_skill, list_embedded_skills, EmbeddedSkill, SkillFrontmatter};
+
 use clap::{error::ErrorKind, CommandFactory, Parser as ClapParser};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
