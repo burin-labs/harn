@@ -214,10 +214,13 @@ smoke-audit:
 	HARN_BINARY=target/debug/harn$(if $(filter Windows_NT,$(OS)),.exe,) ./scripts/release_smoke.sh
 
 # Build-verify the portal frontend (TypeScript type check + Vite bundle).
-# Requires npm dependencies: run `make setup` or `cd crates/harn-cli/portal && npm install`.
+# The repo-root npm scripts bootstrap portal dependencies when needed so this
+# target works in fresh worktrees.
 portal-check:
 	@echo "=== Checking portal frontend build ==="
-	cd crates/harn-cli/portal && npm run lint && npm test && npm run build
+	npm run portal:lint
+	npm run portal:test
+	npm run portal:build
 	@echo "    Portal build OK."
 
 portal:

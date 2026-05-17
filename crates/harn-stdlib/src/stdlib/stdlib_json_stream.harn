@@ -1,0 +1,32 @@
+/**
+ * std/json/stream - incremental JSON stream validation
+ *
+ * Import with: import { stream_validator } from "std/json"
+ */
+pub enum JsonStreamStatus {
+  Pending
+  Valid
+  Invalid(error)
+}
+
+type JsonStreamValidator = {
+  feed: fn(any) -> JsonStreamStatus,
+  value: fn() -> any,
+  status: fn() -> JsonStreamStatus,
+}
+
+/**
+ * Create an incremental validator for UTF-8 JSON string or bytes chunks.
+ * `feed(chunk)` returns JsonStreamStatus.Pending, JsonStreamStatus.Valid, or
+ * JsonStreamStatus.Invalid({reason, path}). `value()` returns the parsed JSON
+ * value after Valid and nil otherwise.
+ */
+pub fn stream_validator(schema) -> JsonStreamValidator {
+  let handle = __json_stream_validator(schema)
+  return {
+    _namespace: "json_stream_validator",
+    feed: fn(chunk) { return __json_stream_validator_feed(handle, chunk) },
+    value: fn() { return __json_stream_validator_value(handle) },
+    status: fn() { return __json_stream_validator_status(handle) },
+  }
+}

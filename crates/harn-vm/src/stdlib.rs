@@ -31,6 +31,7 @@ pub(crate) mod io;
 mod iter;
 pub(crate) mod json;
 mod json_query;
+mod json_stream;
 mod junit;
 mod logging;
 pub mod long_running;
@@ -90,6 +91,7 @@ pub fn register_core_stdlib(vm: &mut Vm) {
     math::register_math_builtins(vm);
     strings::register_string_builtins(vm);
     json::register_json_builtins(vm);
+    json_stream::register_json_stream_builtins(vm);
     datetime::register_datetime_builtins(vm);
     calendar::register_calendar_builtins(vm);
     regex::register_regex_builtins(vm);
@@ -240,6 +242,7 @@ pub fn reset_stdlib_state() {
     sandbox::reset_sandbox_state();
     fs::reset_fs_state();
     json::reset_json_state();
+    json_stream::reset_json_stream_state();
     host::reset_host_state();
     crate::egress::reset_egress_policy_for_host();
     hitl::reset_hitl_state();

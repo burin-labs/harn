@@ -21,6 +21,7 @@ use crate::llm::vm_value_to_json;
 use crate::orchestration::CapabilityPolicy;
 use crate::stdlib::register_vm_stdlib;
 use crate::triggers::dispatcher::InboxEnvelope;
+use crate::triggers::test_util::clock;
 use crate::value::{ErrorCategory, VmClosure, VmError, VmValue};
 use crate::vm::Vm;
 use crate::{
@@ -1237,7 +1238,7 @@ async fn run_poll_tick(
         &binding.state_key,
     )
     .await?;
-    let tick_at = OffsetDateTime::now_utc();
+    let tick_at = clock::now_utc();
     let input = json!({
         "provider_id": provider_id.as_str(),
         "binding": binding_to_json(&binding.binding),
@@ -1303,7 +1304,7 @@ async fn run_poll_tick(
                 state_key: binding.state_key.clone(),
                 cursor: result.cursor,
                 state: result.state,
-                updated_at: OffsetDateTime::now_utc(),
+                updated_at: clock::now_utc(),
             },
         )
         .await?;
@@ -2199,10 +2200,14 @@ pub fn poll_tick(ctx) {
 
     #[tokio::test]
     async fn poll_tick_emits_inbox_events_and_persists_cursor_state() {
+        let _clock = clock::install_override(clock::MockClock::new(
+            OffsetDateTime::parse("2026-04-22T12:34:56Z", &Rfc3339).unwrap(),
+        ));
         let (_dir, module_path) = write_poll_connector();
         let log = Arc::new(AnyEventLog::Memory(MemoryEventLog::new(128)));
+        let connector_ctx = ctx(log.clone()).await;
         let mut connector = HarnConnector::load(&module_path).await.unwrap();
-        connector.init(ctx(log.clone()).await).await.unwrap();
+        connector.init(connector_ctx.clone()).await.unwrap();
 
         let mut binding = TriggerBinding::new(ProviderId::from("webhook"), "poll", "poll-source");
         binding.dedupe_key = Some("event.dedupe_key".to_string());
@@ -2229,6 +2234,7 @@ pub fn poll_tick(ctx) {
         )
         .await
         .unwrap();
+        clock::advance(StdDuration::from_secs(1));
         run_poll_tick(
             &connector.provider_id,
             worker,

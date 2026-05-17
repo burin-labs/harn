@@ -1,6 +1,8 @@
 // std/json — JSON utility patterns
 //
 // Import with: import "std/json"
+pub import "std/json/stream"
+
 /**
  * Pretty-print a value as indented JSON (2-space indent).
  * pretty.
