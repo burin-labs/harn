@@ -9,6 +9,7 @@ harn_format_files=$(mktemp)
 harn_lint_files=$(mktemp)
 trap 'rm -f "$changed" "$harn_format_files" "$harn_lint_files"' EXIT
 hook_write_staged_files "$changed"
+hook_disable_cargo_incremental_if_release_bump staged
 
 if hook_paths_match "$changed" "$HOOK_RUST_PATTERN"; then
   echo "=== Pre-commit: formatting Rust ==="

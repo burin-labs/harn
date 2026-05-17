@@ -8,6 +8,31 @@ condensed series summaries instead of full per-patch history.
 
 ## Unreleased
 
+### Fixed
+
+- **`.githooks/` cover the same incremental-cache corruption #1707
+  fixed in the release scripts.** `release_gate.sh` and
+  `release_ship.sh` export `CARGO_INCREMENTAL=0` for the prepare
+  phase, but `.githooks/pre-commit` and `.githooks/pre-push` run
+  cargo from fresh subprocesses the export does not reach — committing
+  the "Release vX.Y.Z" change still hit `cached cgu ... should have an
+  object file, but doesn't` against the stale incremental dir from the
+  audit. A new helper in `lib.sh`
+  (`hook_disable_cargo_incremental_if_release_bump`) inspects the
+  staged/push diff for a `^version =` change in `Cargo.toml` or
+  `crates/*/Cargo.toml`; on a real workspace bump it exports
+  `CARGO_INCREMENTAL=0` and purges `target/debug/incremental` for the
+  hook run only. Day-to-day commits keep incremental cache enabled.
+- **`release_ship.sh --prepare` auto-renames `## Unreleased` →
+  `## vX.Y.Z` instead of erroring after the audit.** The accumulator
+  convention between releases is to drop new bullets under
+  `## Unreleased`; the strict heading check in
+  `require_changelog_top_matches` rejected that exact shape and only
+  surfaced after burning ~7 min of audit wall time. The check now
+  promotes a top `## Unreleased` heading to `## v$expected` in place
+  (subsequent `git add -u` in the staging step picks the rename up).
+  Mismatched `## vX.Y.Z` headings still error with the same hint.
+
 ### Added
 
 - **Cerebras provider (#1705).** Added a first-class `cerebras` provider

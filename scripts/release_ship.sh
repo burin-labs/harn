@@ -326,29 +326,57 @@ require_release_branch() {
 
 # Verify the top CHANGELOG.md heading matches the expected next version.
 # The human is expected to have authored "## vX.Y.Z" before running prepare.
+#
+# Convenience: if the first H2 is `## Unreleased` (the convention for
+# accumulating bullets between releases), promote it to `## v$expected`
+# in-place rather than failing after the audit has already burned ~7
+# minutes of wall time. The `git add -u` in the staging step picks the
+# rename up; if --prepare is later cancelled the rename is harmless.
 require_changelog_top_matches() {
   local expected="$1"
-  local top
-  top="$(python3 - <<'PY'
-from pathlib import Path
+  python3 - "$expected" <<'PY'
 import re
-text = Path("CHANGELOG.md").read_text()
-for line in text.splitlines():
-    m = re.match(r"^## v(\d+\.\d+\.\d+)\s*$", line)
-    if m:
-        print(m.group(1))
+import sys
+from pathlib import Path
+
+expected = sys.argv[1]
+path = Path("CHANGELOG.md")
+text = path.read_text()
+lines = text.splitlines(keepends=True)
+top_index = None
+for i, line in enumerate(lines):
+    if re.match(r"^## ", line):
+        top_index = i
         break
+
+if top_index is None:
+    sys.stderr.write("error: CHANGELOG.md has no '## vX.Y.Z' heading\n")
+    sys.exit(1)
+
+top = lines[top_index].rstrip("\n").rstrip("\r")
+m = re.match(r"^## v(\d+\.\d+\.\d+)\s*$", top)
+if m:
+    if m.group(1) == expected:
+        sys.exit(0)
+    sys.stderr.write(
+        f"error: CHANGELOG.md top heading is v{m.group(1)} but --bump implies v{expected}\n"
+        f"hint: edit CHANGELOG.md to add '## v{expected}' as the new top entry, then re-run\n"
+    )
+    sys.exit(1)
+
+if re.match(r"^## Unreleased\s*$", top):
+    lines[top_index] = f"## v{expected}\n"
+    path.write_text("".join(lines))
+    print(f"note: renamed CHANGELOG.md top heading '## Unreleased' -> '## v{expected}'")
+    sys.exit(0)
+
+sys.stderr.write(
+    f"error: CHANGELOG.md top heading '{top}' is neither '## Unreleased' "
+    f"nor '## v$expected'\n"
+    f"hint: edit CHANGELOG.md to add '## v{expected}' as the new top entry, then re-run\n"
+)
+sys.exit(1)
 PY
-)"
-  if [[ -z "$top" ]]; then
-    echo "error: CHANGELOG.md has no '## vX.Y.Z' heading"
-    exit 1
-  fi
-  if [[ "$top" != "$expected" ]]; then
-    echo "error: CHANGELOG.md top heading is v$top but --bump implies v$expected"
-    echo "hint: edit CHANGELOG.md to add '## v$expected' as the new top entry, then re-run"
-    exit 1
-  fi
 }
 
 run_common_gates() {

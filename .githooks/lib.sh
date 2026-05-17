@@ -55,17 +55,63 @@ hook_write_staged_files() {
   git diff --cached --name-only --diff-filter=ACMR > "$1"
 }
 
-hook_write_push_files() {
-  output=$1
+hook_push_base() {
   upstream=$(git rev-parse --abbrev-ref --symbolic-full-name '@{upstream}' 2>/dev/null || true)
   if [ -n "$upstream" ]; then
-    base=$(git merge-base HEAD "$upstream")
+    git merge-base HEAD "$upstream"
   elif git rev-parse --verify origin/main >/dev/null 2>&1; then
-    base=$(git merge-base HEAD origin/main)
+    git merge-base HEAD origin/main
   else
-    base=$(git rev-list --max-parents=0 HEAD | tail -n 1)
+    git rev-list --max-parents=0 HEAD | tail -n 1
   fi
+}
+
+hook_write_push_files() {
+  output=$1
+  base=$(hook_push_base)
   git diff --name-only --diff-filter=ACMR "$base"...HEAD > "$output"
+}
+
+# Cover the same incremental-cache corruption that scripts/release_gate.sh
+# `cmd_prepare` and scripts/release_ship.sh `prepare_here` work around for
+# their own cargo invocations: once `bump_version` rewrites Cargo.toml the
+# workspace crates rebuild with fresh hashes, and any
+# `target/debug/incremental/` populated against the previous version
+# leaves dangling .o references that abort cargo with "failed to open
+# object file ... No such file or directory" / "extern location for
+# harn_modules does not exist". Those scripts export CARGO_INCREMENTAL=0
+# in their own process, but git hooks run cargo from fresh subprocesses
+# the export does not reach. Mirror the fix here for the hook context.
+#
+# Day-to-day commits keep incremental cache enabled — we only disable it
+# when the staged or push diff is actually bumping the workspace
+# version line.
+#
+# Args:
+#   $1 = "staged"        # pre-commit context (uses --cached)
+#      | "push <base>"   # pre-push context (uses <base>...HEAD)
+hook_disable_cargo_incremental_if_release_bump() {
+  case "$1" in
+    staged)
+      diff_args="--cached"
+      ;;
+    "push "*)
+      base=${1#push }
+      diff_args="$base...HEAD"
+      ;;
+    *)
+      return 0
+      ;;
+  esac
+  # `version =` matches both the root workspace key and per-crate
+  # manifests; either one moving is a workspace bump signal.
+  # shellcheck disable=SC2086
+  if git diff $diff_args -- Cargo.toml 'crates/*/Cargo.toml' 2>/dev/null \
+      | grep -Eq '^[-+]version = '; then
+    echo "=== Hook: workspace version bump detected; disabling cargo incremental cache ==="
+    export CARGO_INCREMENTAL=0
+    rm -rf target/debug/incremental
+  fi
 }
 
 hook_harn_format_supported() {
