@@ -59,6 +59,7 @@ fn __llm_call_option_keys() {
     "llm_retries",
     "llm_backoff_ms",
     "timeout",
+    "timeout_ms",
     "idle_timeout",
     "stream",
     "anthropic",

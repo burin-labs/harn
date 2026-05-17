@@ -130,7 +130,7 @@ as both LLM content and deterministic `vision_ocr(...)` context.
 | `budget` | dict | nil | Pre-flight LLM budget envelope. Supports `max_cost_usd`, `max_input_tokens`, `max_output_tokens`, and `total_budget_usd` |
 | `cache` | bool | `false` | Enable prompt caching (Anthropic) |
 | `stream` | bool | `true` | Use streaming SSE transport. Set `false` for synchronous request/response. Env: `HARN_LLM_STREAM` |
-| `timeout` | int | `120` | Request timeout in seconds |
+| `timeout` | int | `120` | Request timeout in seconds. `timeout_ms` accepted as an alias and rounded up to whole seconds (HTTP transports take `Duration::from_secs`); sub-second budgets must be enforced at the caller. |
 | `messages` | list | nil | Full message list (overrides prompt) |
 | `structural_experiment` | string/dict/closure | nil | Prompt-structure transform applied immediately before the provider call. Built-ins: `prompt_order_permutation(seed: N)`, `doubled_prompt`, `chain_of_draft`, `inverted_system`. Env: `HARN_STRUCTURAL_EXPERIMENT` |
 | `transcript` | dict | nil | Continue from a previous transcript; prompt is appended as the next user turn |
