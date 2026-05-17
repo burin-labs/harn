@@ -706,7 +706,12 @@ fn parse_post_hook_action(
                                 )))
                                 .to_string()
                             });
-                    crate::llm::push_pending_feedback_global(&session_id, &kind, &content);
+                    crate::orchestration::agent_inbox::push(
+                        &session_id,
+                        &kind,
+                        &content,
+                        "orchestration.command_policy",
+                    );
                 }
             }
             let annotation = if map.contains_key("unsafe")

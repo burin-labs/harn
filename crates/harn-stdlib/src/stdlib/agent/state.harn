@@ -46,6 +46,16 @@ pub fn agent_session_inject_feedback(session_id, kind, content) {
   return __host_agent_session_inject_feedback(session_id, kind, content)
 }
 
+/**
+ * agent_session_post_event. Post an event into a running session's
+ * inbox from outside the loop (triggers, connectors, host
+ * integrations). The next turn boundary — including the post-
+ * compaction drain — surfaces the entry as feedback.
+ */
+pub fn agent_session_post_event(session_id, kind, content, source = nil) {
+  return __host_agent_session_post_event(session_id, kind, content, source)
+}
+
 /** agent_session_set_active_skills. */
 pub fn agent_session_set_active_skills(session_id, skills) {
   return __host_agent_session_set_active_skills(session_id, skills)

@@ -143,7 +143,12 @@ where
                 }
             }
             let content = serde_json::to_string(&payload).unwrap_or_default();
-            crate::llm::push_pending_feedback_global(&entry.session_id, "tool_result", &content);
+            crate::orchestration::agent_inbox::push(
+                &entry.session_id,
+                "tool_result",
+                &content,
+                "stdlib.long_running",
+            );
         })
         .map_err(|error| {
             let entry = {

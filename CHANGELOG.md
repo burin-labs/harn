@@ -34,6 +34,68 @@ condensed series summaries instead of full per-patch history.
   families coexist in one cache dir without filename collisions. Header
   schema bumped to `2`; older v0.8.22-written cache files are rejected
   fail-closed and recompiled.
+- **MCP client notification relay.** The MCP client transport now
+  routes inbound `notifications/progress`, `notifications/message`,
+  and `*/list_changed` server-to-client notifications into the
+  originating session's `agent_inbox` (kinds `mcp_progress`,
+  `mcp_log`, `mcp_resource_change`). Correlation is by per-call
+  progress token: every outgoing `tools/call` registers a fresh token
+  with the new `client_progress` registry and injects it as
+  `_meta.progressToken`; inbound notifications carrying that token
+  push to the issuing session even when the transport reader runs on
+  a different task. Previously these notifications were silently
+  dropped at the stdio read loop.
+- **`agent_session_post_event(id, kind, content, source?)` builtin.**
+  Triggers, connectors, and external host integrations can now post
+  events directly into a running session's inbox — the canonical way
+  to wire "GitHub PR you've been waiting on just merged" or "your
+  remote build finished" nudges into a mid-loop agent. Paired with
+  `agent_session_drain_inbox(id)` for explicit drain in scripted
+  control flow. Both available at the host-builtin layer
+  (`__host_agent_session_post_event`) and as Harn-side wrappers in
+  `std/agent/state`.
+
+### Changed
+
+- **Unified per-session agent inbox.** Folded the cross-thread
+  `GLOBAL_PENDING_FEEDBACK` queue, its paired `Condvar`, and the
+  bespoke push/drain/wait surface into a single per-session inbox in
+  `crate::orchestration::agent_inbox`. Producers (long-running tool
+  workers, command-policy post-hooks, MCP server notifications,
+  triggers, host-side `run_command` background output) call
+  `agent_inbox::push(session_id, kind, content, source)` with a typed
+  source label; consumers drain in FIFO order with monotonic
+  per-session sequence numbers. Synchronous callers still get a
+  Condvar-backed `wait_sync`; async callers get the new clock-aware
+  `wait_async(session_id, timeout, &dyn Clock)` that composes with
+  `harn_clock::PausedClock`. The legacy
+  `push_pending_feedback_global` / `drain_global_pending_feedback` /
+  `wait_for_global_pending_feedback` exports were removed — breaking
+  change for out-of-tree consumers, who should switch to the new API
+  one-to-one.
+- **Compaction-time event delivery race fixed.** `std/agent/loop` now
+  drains the agent inbox **before** `agent_autocompact_if_needed` so
+  the summary reflects events that landed between turns, and drains
+  **again afterwards** so any push that landed during a Tier-2 LLM
+  summarization call (typically 5–30 s wall-clock) is injected into
+  this turn's prompt instead of waiting an extra turn. Closes a
+  silent-loss class for tool completions, MCP progress
+  notifications, and trigger-driven nudges that arrived mid-
+  compaction.
+
+### Fixed
+
+- **`wait_async` cross-thread notify race.** The per-session
+  `agent_inbox::wait_async` waiter was checking `pending_count`
+  *before* creating its `tokio::sync::Notify::notified()` snapshot.
+  A producer thread that completed its entire `push` (entry append +
+  `notify_waiters`) between those two steps left the new `Notified`
+  with a counter snapshot already at the post-increment value, so the
+  await would park indefinitely even though an entry was sitting in
+  the queue. The waiter now captures the `Notified` first and re-
+  checks `pending_count` against it: any push that completed before
+  the snapshot is visible via the entry count, and any push that
+  completes after the snapshot triggers the `Notified`.
 
 ## v0.8.22
 

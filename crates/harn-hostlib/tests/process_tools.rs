@@ -680,12 +680,16 @@ fn run_command_long_running_feedback_fires_after_exit() {
 
     completion_rx.recv().expect("waiter completion never fired");
 
-    let items = harn_vm::drain_global_pending_feedback(&session_id);
+    let items = harn_vm::orchestration::agent_inbox::drain(&session_id);
     assert_eq!(items.len(), 1, "expected exactly one feedback item");
-    let (kind, content) = &items[0];
-    assert_eq!(kind, "tool_result", "unexpected feedback kind: {kind}");
+    let entry = &items[0];
+    assert_eq!(
+        entry.kind, "tool_result",
+        "unexpected feedback kind: {}",
+        entry.kind
+    );
     let payload: serde_json::Value =
-        serde_json::from_str(content).expect("feedback content not valid JSON");
+        serde_json::from_str(&entry.content).expect("feedback content not valid JSON");
     assert_eq!(
         payload["handle_id"].as_str().unwrap(),
         info.handle_id,
@@ -757,10 +761,11 @@ fn cancel_handle_kills_long_running_process() {
     }
 
     // Cancelled handles never push feedback — drain returns empty.
-    let items = harn_vm::drain_global_pending_feedback(&session_id);
+    let items = harn_vm::orchestration::agent_inbox::drain(&session_id);
     assert!(
         items.is_empty(),
-        "cancelled handle should not push feedback, got {items:?}"
+        "cancelled handle should not push feedback, got {} entries",
+        items.len()
     );
 }
 

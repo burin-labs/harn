@@ -850,18 +850,18 @@ mod tests {
     }
 
     fn drain_feedback(handle_id: &str) -> serde_json::Value {
-        // Cap total wait at 10s; each iteration parks on the
-        // condvar paired with `GLOBAL_PENDING_FEEDBACK` so we wake the
-        // moment a background thread pushes, instead of polling
-        // `Instant::now()` + sleeping. The outer loop accounts for items
-        // that arrive for *other* handles (we requeue them via the
-        // `seen_handles` log; long-running ops use session_id="" today).
+        // Cap total wait at 10s; each iteration parks on the inbox's
+        // sync waiter so we wake the moment a background thread pushes
+        // instead of polling. The outer loop accounts for items that
+        // arrive for *other* handles (we requeue them via the
+        // `seen_handles` log; long-running fs/glob ops push under the
+        // empty session id).
         let overall_deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
         let mut seen_handles = Vec::new();
         loop {
-            for (kind, content) in crate::llm::drain_global_pending_feedback("") {
-                assert_eq!(kind, "tool_result");
-                let payload: serde_json::Value = serde_json::from_str(&content).unwrap();
+            for entry in crate::orchestration::agent_inbox::drain("") {
+                assert_eq!(entry.kind, "tool_result");
+                let payload: serde_json::Value = serde_json::from_str(&entry.content).unwrap();
                 if payload["handle_id"] == handle_id {
                     return payload;
                 }
@@ -876,15 +876,14 @@ mod tests {
                 );
             }
             // Block until a producer notifies a push, or we hit the
-            // remaining deadline. `wait_for_global_pending_feedback`
-            // returns `false` only when nothing matched within the
-            // window; we still loop once more to drain any stragglers
-            // that arrived just before the timeout.
-            if !crate::llm::wait_for_global_pending_feedback("", remaining) {
-                let leftover = crate::llm::drain_global_pending_feedback("");
-                for (kind, content) in leftover {
-                    assert_eq!(kind, "tool_result");
-                    let payload: serde_json::Value = serde_json::from_str(&content).unwrap();
+            // remaining deadline. `wait_sync` returns `false` only
+            // when nothing matched within the window; we still loop
+            // once more to drain any stragglers that arrived just
+            // before the timeout.
+            if !crate::orchestration::agent_inbox::wait_sync("", remaining) {
+                for entry in crate::orchestration::agent_inbox::drain("") {
+                    assert_eq!(entry.kind, "tool_result");
+                    let payload: serde_json::Value = serde_json::from_str(&entry.content).unwrap();
                     if payload["handle_id"] == handle_id {
                         return payload;
                     }
@@ -1008,7 +1007,7 @@ mod tests {
             .lock()
             .unwrap_or_else(|poisoned| poisoned.into_inner());
         crate::stdlib::long_running::reset_state();
-        let _ = crate::llm::drain_global_pending_feedback("");
+        let _ = crate::orchestration::agent_inbox::drain("");
         let dir = tempfile::tempdir().unwrap();
         std::fs::create_dir_all(dir.path().join("src")).unwrap();
         std::fs::write(dir.path().join("src/lib.harn"), "fn main() {}\n").unwrap();
@@ -1052,7 +1051,7 @@ mod tests {
             .lock()
             .unwrap_or_else(|poisoned| poisoned.into_inner());
         crate::stdlib::long_running::reset_state();
-        let _ = crate::llm::drain_global_pending_feedback("");
+        let _ = crate::orchestration::agent_inbox::drain("");
         let dir = tempfile::tempdir().unwrap();
         std::fs::create_dir_all(dir.path().join("src")).unwrap();
         std::fs::write(dir.path().join("src/lib.harn"), "fn main() {}\n").unwrap();

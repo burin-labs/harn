@@ -112,11 +112,13 @@ fn wait_for_initial_background_feedback(
     wait_ms: u64,
 ) -> Option<VmValue> {
     let timeout = Duration::from_millis(wait_ms);
-    if !harn_vm::wait_for_global_pending_feedback(session_id, timeout) {
+    if !harn_vm::orchestration::agent_inbox::wait_sync(session_id, timeout) {
         return None;
     }
     let mut selected = None;
-    for (kind, content) in harn_vm::drain_global_pending_feedback(session_id) {
+    for entry in harn_vm::orchestration::agent_inbox::drain(session_id) {
+        let kind = entry.kind;
+        let content = entry.content;
         let parsed = serde_json::from_str::<serde_json::Value>(&content).ok();
         let matches_handle = parsed
             .as_ref()
@@ -135,7 +137,12 @@ fn wait_for_initial_background_feedback(
                 continue;
             }
         }
-        harn_vm::push_pending_feedback_global(session_id, &kind, &content);
+        harn_vm::orchestration::agent_inbox::push(
+            session_id,
+            &kind,
+            &content,
+            "hostlib.run_command.requeue",
+        );
     }
     selected
 }
