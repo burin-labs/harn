@@ -187,18 +187,9 @@ pub fn web_artifact_text_fallback(html, options = nil) {
     .replace("&nbsp;", " ")
     .replace("&amp;", "&")
     .replace("&lt;", "<")
-    .replace(
-    "&gt;",
-    ">",
-  )
-    .replace(
-    "&quot;",
-    "\"",
-  )
-    .replace(
-    "&#39;",
-    "'",
-  )
+    .replace("&gt;", ">")
+    .replace("&quot;", "\"")
+    .replace("&#39;", "'")
   let fallback = trim(regex_replace("\\s+", " ", decoded))
   let max_chars = options?.max_chars ?? nil
   if max_chars != nil && len(fallback) > max_chars {
