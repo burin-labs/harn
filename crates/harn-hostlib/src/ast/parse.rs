@@ -67,7 +67,12 @@ pub(super) fn run(args: &[VmValue]) -> Result<VmValue, HostlibError> {
 /// Read the file, optionally truncating to the first `max_bytes` bytes.
 /// `max_bytes == 0` means unlimited (per the request schema).
 pub(super) fn read_source(path: &str, max_bytes: usize) -> Result<String, HostlibError> {
-    let bytes = std::fs::read(path).map_err(|err| HostlibError::Backend {
+    let path_buf = PathBuf::from(path);
+    let bytes = match crate::fs::read(&path_buf, None) {
+        Some(result) => result,
+        None => std::fs::read(path),
+    }
+    .map_err(|err| HostlibError::Backend {
         builtin: BUILTIN,
         message: format!("read `{path}`: {err}"),
     })?;

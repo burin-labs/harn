@@ -9,6 +9,8 @@ Opt-in host builtins for the Harn VM that provide:
    file I/O, directory listing, file outline, git inspection (`gix`), file
    watching (`notify`), and process lifecycle (`run_command`, `run_test`,
    `run_build_command`, `inspect_test_results`, `manage_packages`).
+3. **Session filesystem staging** — per-session deferred writes, deletes,
+   read-through overlays, status reporting, commit, and discard.
 
 ## Status
 
@@ -30,6 +32,10 @@ host builtins (`query`, `rebuild`, `stats`, `imports_for`,
 [#569](https://github.com/burin-labs/harn/issues/569) lights up the
 `fs_watch` surface: cross-platform `notify` subscriptions with
 debounced AgentEvent batches.
+[#1722](https://github.com/burin-labs/harn/issues/1722) lights up the
+`fs` surface: deferred filesystem writes stored under
+`.harn/state/staged/<session_id>/` with read-through overlays and ACP
+commit controls.
 
 ### `ast/` languages
 
@@ -89,6 +95,7 @@ and commit the updated goldens.
 | #567  | `tools/` (read & search) | `search`, `read_file`, `list_directory`, `get_file_outline`, `git`                 | ✅ shipped |
 | #567  | `tools/` (mutating)      | `write_file`, `delete_file`                                                        | ✅ shipped |
 | #568  | `tools/` (process)       | `run_command`, `run_test`, `run_build_command`, `inspect_test_results`, `manage_packages` | ✅ shipped |
+| #1722 | `fs/`                    | `set_mode`, `staged_status`, `commit_staged`, `discard_staged`                    | ✅ shipped |
 
 ### Process tools
 
@@ -193,6 +200,31 @@ Embedders that want to enable the surface from Rust without going through
 the builtin can use [`tools::permissions::enable_for_test`] (test-only)
 or call `tools::permissions::enable("tools:deterministic")` directly.
 
+## Staged filesystem mode
+
+`fs/` adds a session-scoped deferred-write layer for hosts that want an
+agent to build a cumulative diff before touching the working tree.
+
+- `hostlib_fs_set_mode({ session_id, mode: "immediate" | "staged",
+  root? })` switches the session and returns `{ previous_mode }`.
+- `hostlib_fs_staged_status({ session_id })` returns pending writes,
+  deletes, byte counts, and the age of the oldest pending change.
+- `hostlib_fs_commit_staged({ session_id, paths? })` applies all pending
+  changes, or only the selected paths, and reports per-path failures.
+- `hostlib_fs_discard_staged({ session_id, paths? })` drops pending
+  changes without mutating the working tree.
+
+While a session is in `staged` mode, `tools/write_file` and
+`tools/delete_file` write to `.harn/state/staged/<session_id>/` instead
+of the target path. `tools/read_file`, `tools/list_directory`,
+`get_file_outline`, the AST parse-file helper, and code-index file reads
+consult the same overlay first, so the agent sees its pending changes
+until they are committed or discarded. The ACP server also exposes
+`session/fs_mode` and `session/fs_commit_staged`, and emits
+`session/update` progress notifications with
+`_meta.harn.kind = "staged_writes_pending"` whenever the pending count
+or staged byte total changes.
+
 ## How embedders consume it
 
 The `harn-cli` ACP server wires hostlib in by default:
@@ -250,6 +282,7 @@ crates/harn-hostlib/
 │   ├── ast/
 │   ├── code_index/
 │   ├── scanner/
+│   ├── fs/
 │   ├── fs_watch/
 │   └── tools/
 ├── src/
@@ -260,6 +293,7 @@ crates/harn-hostlib/
 │   ├── ast/
 │   ├── code_index/            # trigram + word index, dep graph (#565)
 │   ├── scanner/
+│   ├── fs.rs                  # deferred per-session filesystem overlay
 │   ├── fs_watch/
 │   └── tools/
 └── tests/

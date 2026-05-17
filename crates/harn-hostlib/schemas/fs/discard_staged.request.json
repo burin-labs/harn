@@ -1,0 +1,16 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://harnlang.com/schemas/hostlib/fs/discard_staged.request.json",
+  "title": "fs.discard_staged request",
+  "type": "object",
+  "properties": {
+    "session_id": { "type": "string", "minLength": 1 },
+    "paths": {
+      "type": "array",
+      "items": { "type": "string" },
+      "description": "Optional exact staged paths to discard. Missing or empty discards every pending path."
+    }
+  },
+  "required": ["session_id"],
+  "additionalProperties": false
+}

@@ -1,0 +1,11 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://harnlang.com/schemas/hostlib/fs/set_mode.response.json",
+  "title": "fs.set_mode response",
+  "type": "object",
+  "properties": {
+    "previous_mode": { "type": "string", "enum": ["immediate", "staged"] }
+  },
+  "required": ["previous_mode"],
+  "additionalProperties": false
+}

@@ -121,6 +121,105 @@ async fn start_acp_code_session_with_config(
     (request_tx, response_rx, server, session_id)
 }
 
+#[cfg(feature = "hostlib")]
+#[tokio::test(flavor = "current_thread")]
+async fn acp_fs_mode_and_commit_staged_apply_deferred_hostlib_writes() {
+    use harn_hostlib::{
+        tools::{permissions, ToolsCapability},
+        BuiltinRegistry, HostlibCapability,
+    };
+
+    permissions::reset();
+    permissions::enable_for_test();
+
+    let dir = tempfile::TempDir::new().unwrap();
+    let file = dir.path().join("draft.txt");
+    let (tx, mut rx) = mpsc::unbounded_channel();
+    let mut server = AcpServer::new_with_output(AcpServerConfig::new(None), AcpOutput::Channel(tx));
+
+    server
+        .handle_incoming_message(serde_json::json!({
+            "jsonrpc": "2.0",
+            "id": 1,
+            "method": "session/new",
+            "params": {"cwd": dir.path().to_string_lossy()},
+        }))
+        .await;
+    let created = recv_json(&mut rx).await;
+    let session_id = created["result"]["sessionId"]
+        .as_str()
+        .expect("session id")
+        .to_string();
+
+    server
+        .handle_incoming_message(serde_json::json!({
+            "jsonrpc": "2.0",
+            "id": 2,
+            "method": "session/fs_mode",
+            "params": {"sessionId": session_id.clone(), "mode": "staged"},
+        }))
+        .await;
+    let mode_response = recv_json(&mut rx).await;
+    assert_eq!(mode_response["result"]["previousMode"], "immediate");
+    assert_eq!(mode_response["result"]["mode"], "staged");
+    let mode_update = recv_json(&mut rx).await;
+    assert_eq!(
+        mode_update["params"]["update"]["_meta"]["harn"]["kind"],
+        "staged_writes_pending"
+    );
+    assert_eq!(
+        mode_update["params"]["update"]["_meta"]["harn"]["pendingCount"],
+        0
+    );
+
+    let mut registry = BuiltinRegistry::new();
+    ToolsCapability.register_builtins(&mut registry);
+    let mut args = BTreeMap::new();
+    args.insert(
+        "session_id".to_string(),
+        VmValue::String(Rc::from(session_id.as_str())),
+    );
+    args.insert(
+        "path".to_string(),
+        VmValue::String(Rc::from(file.to_string_lossy().as_ref())),
+    );
+    args.insert("content".to_string(), VmValue::String(Rc::from("draft")));
+    (registry
+        .find("hostlib_tools_write_file")
+        .expect("write_file builtin")
+        .handler)(&[VmValue::Dict(Rc::new(args))])
+    .expect("stage write");
+    assert!(!file.exists(), "ACP staged mode should defer disk writes");
+
+    server
+        .handle_incoming_message(serde_json::json!({
+            "jsonrpc": "2.0",
+            "id": 3,
+            "method": "session/fs_commit_staged",
+            "params": {"sessionId": session_id.clone()},
+        }))
+        .await;
+    let commit_response = recv_json(&mut rx).await;
+    assert_eq!(
+        commit_response["result"]["committedPaths"]
+            .as_array()
+            .unwrap()
+            .len(),
+        1
+    );
+    assert_eq!(std::fs::read_to_string(&file).unwrap(), "draft");
+
+    let commit_update = recv_json(&mut rx).await;
+    assert_eq!(
+        commit_update["params"]["update"]["_meta"]["harn"]["kind"],
+        "staged_writes_pending"
+    );
+    assert_eq!(
+        commit_update["params"]["update"]["_meta"]["harn"]["pendingCount"],
+        0
+    );
+}
+
 #[test]
 fn normalize_host_capabilities_wraps_array_entries_in_ops_dicts() {
     let mut root = BTreeMap::new();

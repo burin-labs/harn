@@ -384,7 +384,11 @@ pub(super) fn run_file_hash(
     let Some(abs) = state.absolute_path(&path) else {
         return Ok(VmValue::Nil);
     };
-    match std::fs::read(&abs) {
+    let bytes = match crate::fs::read(&abs, None) {
+        Some(result) => result,
+        None => std::fs::read(&abs),
+    };
+    match bytes {
         Ok(bytes) => Ok(str_value(fnv1a64(&bytes).to_string())),
         Err(_) => Ok(VmValue::Nil),
     }
@@ -436,7 +440,11 @@ pub(super) fn run_read_range(
     };
     drop(guard);
 
-    let content = match std::fs::read_to_string(&abs) {
+    let content_result = match crate::fs::read_to_string(&abs, None) {
+        Some(result) => result,
+        None => std::fs::read_to_string(&abs),
+    };
+    let content = match content_result {
         Ok(s) => s,
         Err(_) => {
             return Err(HostlibError::Backend {
@@ -940,7 +948,11 @@ fn candidates_for(state: &IndexState, needle: &str) -> Vec<FileId> {
 }
 
 fn read_file_text(root: &std::path::Path, relative: &str) -> Option<String> {
-    std::fs::read_to_string(root.join(relative)).ok()
+    let path = root.join(relative);
+    match crate::fs::read_to_string(&path, None) {
+        Some(result) => result.ok(),
+        None => std::fs::read_to_string(path).ok(),
+    }
 }
 
 fn count_matches(haystack: &str, needle: &str, case_sensitive: bool) -> u64 {

@@ -1,0 +1,14 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://harnlang.com/schemas/hostlib/fs/discard_staged.response.json",
+  "title": "fs.discard_staged response",
+  "type": "object",
+  "properties": {
+    "discarded_paths": {
+      "type": "array",
+      "items": { "type": "string" }
+    }
+  },
+  "required": ["discarded_paths"],
+  "additionalProperties": false
+}

@@ -1,0 +1,29 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://harnlang.com/schemas/hostlib/fs/staged_status.response.json",
+  "title": "fs.staged_status response",
+  "type": "object",
+  "properties": {
+    "pending_writes": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/pending_write" }
+    },
+    "total_bytes_pending": { "type": "integer", "minimum": 0 },
+    "oldest_pending_age_ms": { "type": "integer", "minimum": 0 }
+  },
+  "required": ["pending_writes", "total_bytes_pending", "oldest_pending_age_ms"],
+  "additionalProperties": false,
+  "$defs": {
+    "pending_write": {
+      "type": "object",
+      "properties": {
+        "path": { "type": "string" },
+        "kind": { "type": "string", "enum": ["write", "delete", "move"] },
+        "bytes_added": { "type": "integer", "minimum": 0 },
+        "bytes_removed": { "type": "integer", "minimum": 0 }
+      },
+      "required": ["path", "kind", "bytes_added", "bytes_removed"],
+      "additionalProperties": false
+    }
+  }
+}

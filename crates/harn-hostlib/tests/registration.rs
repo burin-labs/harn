@@ -8,9 +8,10 @@
 //! removed builtin.
 
 use harn_hostlib::{
-    ast::AstCapability, code_index::CodeIndexCapability, fs_watch::FsWatchCapability,
-    scanner::ScannerCapability, schemas, secret_store::SecretStoreCapability,
-    tools::ToolsCapability, BuiltinRegistry, HostlibCapability, HostlibError, HostlibRegistry,
+    ast::AstCapability, code_index::CodeIndexCapability, fs::FsCapability,
+    fs_watch::FsWatchCapability, scanner::ScannerCapability, schemas,
+    secret_store::SecretStoreCapability, tools::ToolsCapability, BuiltinRegistry,
+    HostlibCapability, HostlibError, HostlibRegistry,
 };
 
 fn collect_into_registry<C: HostlibCapability>(cap: C) -> BuiltinRegistry {
@@ -156,6 +157,38 @@ fn scanner_capability_registers_documented_methods() {
 }
 
 #[test]
+fn fs_capability_registers_documented_methods() {
+    let registry = collect_into_registry(FsCapability);
+    let names: Vec<_> = registry.iter().map(|b| b.name).collect();
+    assert_eq!(
+        names,
+        vec![
+            "hostlib_fs_set_mode",
+            "hostlib_fs_staged_status",
+            "hostlib_fs_commit_staged",
+            "hostlib_fs_discard_staged",
+        ]
+    );
+    let expected_missing: &[(&str, &str)] = &[
+        ("hostlib_fs_set_mode", "session_id"),
+        ("hostlib_fs_staged_status", "session_id"),
+        ("hostlib_fs_commit_staged", "session_id"),
+        ("hostlib_fs_discard_staged", "session_id"),
+    ];
+    for (name, expected_param) in expected_missing {
+        let entry = registry.find(name).expect("registered");
+        let err = (entry.handler)(&[]).expect_err("must reject empty args");
+        match err {
+            HostlibError::MissingParameter { builtin, param } => {
+                assert_eq!(builtin, *name);
+                assert_eq!(param, *expected_param);
+            }
+            other => panic!("expected MissingParameter for {name}, got {other:?}"),
+        }
+    }
+}
+
+#[test]
 fn fs_watch_capability_registers_documented_methods() {
     let registry = collect_into_registry(FsWatchCapability);
     let names: Vec<_> = registry.iter().map(|b| b.name).collect();
@@ -285,14 +318,15 @@ fn install_default_wires_every_module_into_a_vm() {
             "ast",
             "code_index",
             "scanner",
+            "fs",
             "fs_watch",
             "tools",
             "secret_store"
         ]
     );
-    // Builtin count: 12 ast + 27 code_index + 2 scanner + 2 fs_watch + 13
-    // tools + 1 hostlib_enable + 4 secret_store = 61.
-    assert!(registry.builtins().len() >= 61);
+    // Builtin count: 12 ast + 27 code_index + 2 scanner + 4 fs + 2
+    // fs_watch + 13 tools + 1 hostlib_enable + 4 secret_store = 65.
+    assert!(registry.builtins().len() >= 65);
 }
 
 #[test]
@@ -301,6 +335,7 @@ fn every_registered_builtin_has_request_and_response_schemas() {
         .with(AstCapability)
         .with(CodeIndexCapability::new())
         .with(ScannerCapability)
+        .with(FsCapability)
         .with(FsWatchCapability)
         .with(ToolsCapability)
         .with(SecretStoreCapability);

@@ -1,0 +1,16 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://harnlang.com/schemas/hostlib/fs/set_mode.request.json",
+  "title": "fs.set_mode request",
+  "type": "object",
+  "properties": {
+    "session_id": { "type": "string", "minLength": 1 },
+    "mode": { "type": "string", "enum": ["immediate", "staged"] },
+    "root": {
+      "type": "string",
+      "description": "Optional workspace root for .harn/state/staged storage. Defaults to the session root when an embedder provides one, otherwise the process cwd."
+    }
+  },
+  "required": ["session_id", "mode"],
+  "additionalProperties": false
+}

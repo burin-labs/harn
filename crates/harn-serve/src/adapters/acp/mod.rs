@@ -632,7 +632,11 @@ impl AcpServer {
                 profile_turn: 0,
             },
         );
-        harn_vm::agent_sessions::open_or_create(Some(session_id));
+        harn_vm::agent_sessions::open_or_create(Some(session_id.clone()));
+        #[cfg(feature = "hostlib")]
+        if let Some(session) = self.sessions.get(&session_id) {
+            harn_hostlib::fs::configure_session_root(&session_id, &session.cwd);
+        }
     }
 
     fn handle_session_new(&mut self, id: &serde_json::Value, params: &serde_json::Value) {
@@ -969,6 +973,8 @@ impl AcpServer {
         };
         harn_vm::agent_sessions::open_or_create(Some(session_id.clone()));
         let _session_guard = harn_vm::agent_sessions::enter_current_session(session_id.clone());
+        #[cfg(feature = "hostlib")]
+        harn_hostlib::fs::configure_session_root(&session_id, &cwd);
 
         let (source, source_path) = if let Some(ref pipeline_path) = self.pipeline {
             let full_path = if Path::new(pipeline_path).is_absolute() {
@@ -1585,6 +1591,159 @@ impl AcpServer {
         );
     }
 
+    #[cfg(feature = "hostlib")]
+    fn emit_staged_writes_update(&self, session_id: &str) {
+        let Ok(status) = harn_hostlib::fs::staged_status(session_id) else {
+            return;
+        };
+        let mut update = bridge::progress_update(
+            "fs_staging",
+            "staged writes pending",
+            Some(status.pending_writes.len() as i64),
+            None,
+            None,
+        );
+        let mut harn_meta = serde_json::Map::new();
+        harn_meta.insert(
+            "kind".to_string(),
+            serde_json::Value::String("staged_writes_pending".to_string()),
+        );
+        harn_meta.insert(
+            "pendingCount".to_string(),
+            serde_json::Value::from(status.pending_writes.len() as u64),
+        );
+        harn_meta.insert(
+            "totalBytes".to_string(),
+            serde_json::Value::from(status.total_bytes_pending),
+        );
+        events::merge_harn_meta(&mut update, harn_meta);
+        self.send_notification(
+            "session/update",
+            serde_json::json!({
+                "sessionId": session_id,
+                "update": update,
+            }),
+        );
+    }
+
+    #[cfg(feature = "hostlib")]
+    fn handle_session_fs_mode(&mut self, id: &serde_json::Value, params: &serde_json::Value) {
+        let Some(session_id) = params
+            .get("sessionId")
+            .or_else(|| params.get("session_id"))
+            .and_then(serde_json::Value::as_str)
+        else {
+            self.send_error(id, -32602, "session/fs_mode requires sessionId");
+            return;
+        };
+        let Some(mode_raw) = params.get("mode").and_then(serde_json::Value::as_str) else {
+            self.send_error(id, -32602, "session/fs_mode requires mode");
+            return;
+        };
+        let mode = match mode_raw {
+            "immediate" => harn_hostlib::fs::FsMode::Immediate,
+            "staged" => harn_hostlib::fs::FsMode::Staged,
+            other => {
+                self.send_error(
+                    id,
+                    -32602,
+                    &format!("session/fs_mode mode must be immediate or staged, got {other}"),
+                );
+                return;
+            }
+        };
+        let Some(cwd) = self
+            .sessions
+            .get(session_id)
+            .map(|session| session.cwd.clone())
+        else {
+            self.send_error(id, -32602, &format!("Unknown session: {session_id}"));
+            return;
+        };
+        match harn_hostlib::fs::set_mode(session_id, mode, Some(&cwd)) {
+            Ok(result) => {
+                self.send_response(
+                    id,
+                    serde_json::json!({
+                        "previousMode": result.previous_mode.as_str(),
+                        "mode": mode.as_str(),
+                    }),
+                );
+                self.emit_staged_writes_update(session_id);
+            }
+            Err(error) => self.send_error(id, -32000, &error.to_string()),
+        }
+    }
+
+    #[cfg(not(feature = "hostlib"))]
+    fn handle_session_fs_mode(&mut self, id: &serde_json::Value, _params: &serde_json::Value) {
+        self.send_error(id, -32601, "session/fs_mode requires the hostlib feature");
+    }
+
+    #[cfg(feature = "hostlib")]
+    fn handle_session_fs_commit_staged(
+        &mut self,
+        id: &serde_json::Value,
+        params: &serde_json::Value,
+    ) {
+        let Some(session_id) = params
+            .get("sessionId")
+            .or_else(|| params.get("session_id"))
+            .and_then(serde_json::Value::as_str)
+        else {
+            self.send_error(id, -32602, "session/fs_commit_staged requires sessionId");
+            return;
+        };
+        if !self.sessions.contains_key(session_id) {
+            self.send_error(id, -32602, &format!("Unknown session: {session_id}"));
+            return;
+        }
+        let paths = params
+            .get("paths")
+            .and_then(serde_json::Value::as_array)
+            .map(|values| {
+                values
+                    .iter()
+                    .filter_map(serde_json::Value::as_str)
+                    .map(str::to_string)
+                    .collect::<Vec<_>>()
+            })
+            .unwrap_or_default();
+        match harn_hostlib::fs::commit_staged(session_id, &paths) {
+            Ok(result) => {
+                self.send_response(
+                    id,
+                    serde_json::json!({
+                        "committedPaths": result.committed_paths,
+                        "failedPathsWithReasons": result
+                            .failed_paths_with_reasons
+                            .into_iter()
+                            .map(|(path, reason)| serde_json::json!({
+                                "path": path,
+                                "reason": reason,
+                            }))
+                            .collect::<Vec<_>>(),
+                    }),
+                );
+                self.emit_staged_writes_update(session_id);
+            }
+            Err(error) => self.send_error(id, -32000, &error.to_string()),
+        }
+    }
+
+    #[cfg(not(feature = "hostlib"))]
+    fn handle_session_fs_commit_staged(
+        &mut self,
+        id: &serde_json::Value,
+        _params: &serde_json::Value,
+    ) {
+        self.send_error(
+            id,
+            -32601,
+            "session/fs_commit_staged requires the hostlib feature",
+        );
+    }
+
     fn handle_session_set_mode(&mut self, id: &serde_json::Value, params: &serde_json::Value) {
         let Some(session_id) = params
             .get("sessionId")
@@ -1774,6 +1933,18 @@ impl AcpServer {
                     return;
                 }
                 self.handle_session_set_config_option(&id, &params);
+            }
+            "session/fs_mode" => {
+                if self.reject_unauthenticated(&id) {
+                    return;
+                }
+                self.handle_session_fs_mode(&id, &params);
+            }
+            "session/fs_commit_staged" => {
+                if self.reject_unauthenticated(&id) {
+                    return;
+                }
+                self.handle_session_fs_commit_staged(&id, &params);
             }
             "session/prompt" => {
                 if self.reject_unauthenticated(&id) {

@@ -611,6 +611,37 @@ impl AgentEventSink for AcpAgentEventSink {
                     "update": update,
                 }));
             }
+            AgentEvent::StagedWritesPending {
+                session_id,
+                pending_count,
+                total_bytes,
+            } => {
+                let mut update = super::bridge::progress_update(
+                    "fs_staging",
+                    "staged writes pending",
+                    Some(*pending_count as i64),
+                    None,
+                    None,
+                );
+                let mut harn_meta = serde_json::Map::new();
+                harn_meta.insert(
+                    "kind".to_string(),
+                    serde_json::Value::String("staged_writes_pending".to_string()),
+                );
+                harn_meta.insert(
+                    "pendingCount".to_string(),
+                    serde_json::Value::from(*pending_count as u64),
+                );
+                harn_meta.insert(
+                    "totalBytes".to_string(),
+                    serde_json::Value::from(*total_bytes),
+                );
+                merge_harn_meta(&mut update, harn_meta);
+                self.write_notification(serde_json::json!({
+                    "sessionId": session_id,
+                    "update": update,
+                }));
+            }
             AgentEvent::WorkerUpdate {
                 session_id,
                 worker_id,

@@ -13,7 +13,11 @@
       "default": "utf-8"
     },
     "create_parents": { "type": "boolean", "default": true },
-    "overwrite": { "type": "boolean", "default": true }
+    "overwrite": { "type": "boolean", "default": true },
+    "session_id": {
+      "type": "string",
+      "description": "Optional hostlib session whose staged filesystem mode should intercept this write."
+    }
   },
   "required": ["path", "content"],
   "additionalProperties": false

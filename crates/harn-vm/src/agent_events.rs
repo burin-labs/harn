@@ -525,6 +525,15 @@ pub enum AgentEvent {
         subscription_id: String,
         events: Vec<FsWatchEvent>,
     },
+    /// Emitted when hostlib staged filesystem state changes for a session.
+    /// The ACP adapter maps this to the existing `progress` extension so
+    /// clients can update rollup-diff badges without waiting for a prompt
+    /// turn boundary.
+    StagedWritesPending {
+        session_id: String,
+        pending_count: usize,
+        total_bytes: u64,
+    },
     /// Lifecycle update for a delegated/background worker. Carries the
     /// canonical typed `event` variant alongside the worker's current
     /// `status` string and the structured `metadata` payload that
@@ -704,6 +713,7 @@ impl AgentEvent {
             | Self::TranscriptCompacted { session_id, .. }
             | Self::Handoff { session_id, .. }
             | Self::FsWatch { session_id, .. }
+            | Self::StagedWritesPending { session_id, .. }
             | Self::WorkerUpdate { session_id, .. }
             | Self::HitlRequested { session_id, .. }
             | Self::HitlResolved { session_id, .. }
