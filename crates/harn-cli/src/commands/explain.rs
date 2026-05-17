@@ -1,14 +1,119 @@
+use std::str::FromStr;
+
+use harn_parser::diagnostic_codes::Code;
+use serde::Serialize;
+
 use crate::cli::ExplainArgs;
 use crate::parse_source_file;
 
+/// JSON envelope returned by `harn explain <CODE> --json`. Stable shape —
+/// downstream tooling (LSPs, IDEs, hosted error pages, agents) can dispatch
+/// on `schemaVersion` and `code` without parsing prose.
+#[derive(Debug, Serialize)]
+struct ExplainEnvelope<'a> {
+    #[serde(rename = "schemaVersion")]
+    schema_version: u32,
+    code: &'a str,
+    category: &'a str,
+    summary: &'a str,
+    body: &'a str,
+    /// Repair shapes available for this code, sourced from the per-code
+    /// registry. Empty until the `Repair` struct lands on `TypeDiagnostic`
+    /// (epic #1745, E1.2).
+    repairs: Vec<RepairEnvelope<'a>>,
+    related: Vec<&'a str>,
+    #[serde(rename = "apiStability")]
+    api_stability: &'a str,
+}
+
+#[derive(Debug, Serialize)]
+struct RepairEnvelope<'a> {
+    id: &'a str,
+    safety: &'a str,
+    summary: &'a str,
+}
+
 pub(crate) fn run_explain(args: &ExplainArgs) -> i32 {
-    let (_, program) = parse_source_file(&args.file);
-    match harn_ir::explain_handler_invariant(&program, &args.function, &args.invariant) {
+    if let Some(invariant) = &args.invariant {
+        return run_invariant_explain(invariant, args);
+    }
+
+    let code = match Code::from_str(&args.target) {
+        Ok(code) => code,
+        Err(_) => {
+            eprintln!(
+                "Unknown Harn diagnostic code `{}`. Expected `HARN-<CAT>-<NNN>` (e.g. `HARN-TYP-014`).",
+                args.target
+            );
+            eprintln!("Run `harn explain HARN-TYP-001` for an example, or check the catalog at <https://harnlang.com/diagnostics/>.");
+            return 2;
+        }
+    };
+
+    if args.json {
+        print_code_json(code)
+    } else {
+        print_code_text(code)
+    }
+}
+
+fn print_code_text(code: Code) -> i32 {
+    println!("{} — {}", code, code.summary());
+    println!();
+    println!("{}", code.explanation().trim_end());
+    let related = code.related();
+    if !related.is_empty() {
+        println!();
+        println!("See also:");
+        for other in related {
+            println!("  - {} — {}", other, other.summary());
+        }
+    }
+    0
+}
+
+fn build_envelope(code: Code) -> ExplainEnvelope<'static> {
+    let related_strs: Vec<&'static str> = code.related().iter().map(|c| c.as_str()).collect();
+    ExplainEnvelope {
+        schema_version: 1,
+        code: code.as_str(),
+        category: code.category().as_str(),
+        summary: code.summary(),
+        body: code.explanation(),
+        repairs: Vec::new(),
+        related: related_strs,
+        api_stability: "stable",
+    }
+}
+
+fn print_code_json(code: Code) -> i32 {
+    let envelope = build_envelope(code);
+    match serde_json::to_string_pretty(&envelope) {
+        Ok(json) => {
+            println!("{json}");
+            0
+        }
+        Err(err) => {
+            eprintln!("failed to serialise explain envelope: {err}");
+            1
+        }
+    }
+}
+
+fn run_invariant_explain(invariant: &str, args: &ExplainArgs) -> i32 {
+    let Some(file) = args.file.as_deref() else {
+        eprintln!(
+            "`--invariant` requires both a function name and a path. Usage: `harn explain --invariant <NAME> <FUNCTION> <FILE>`"
+        );
+        return 2;
+    };
+    let (_, program) = parse_source_file(file);
+    match harn_ir::explain_handler_invariant(&program, &args.target, invariant) {
         Ok(diagnostics) => {
             if diagnostics.is_empty() {
                 println!(
                     "No `{}` violations found for `{}` in {}.",
-                    args.invariant, args.function, args.file
+                    invariant, args.target, file
                 );
                 return 0;
             }
@@ -21,7 +126,7 @@ pub(crate) fn run_explain(args: &ExplainArgs) -> i32 {
                     println!(
                         "  {}. {}:{}:{} {}",
                         index + 1,
-                        args.file,
+                        file,
                         step.span.line,
                         step.span.column,
                         step.label
@@ -42,17 +147,82 @@ pub(crate) fn run_explain(args: &ExplainArgs) -> i32 {
 
 #[cfg(test)]
 mod tests {
-    use std::time::{SystemTime, UNIX_EPOCH};
-
     use super::run_explain;
     use crate::cli::ExplainArgs;
+    use std::sync::atomic::{AtomicU64, Ordering};
+
+    static TMP_COUNTER: AtomicU64 = AtomicU64::new(0);
 
     fn unique_temp_dir(prefix: &str) -> std::path::PathBuf {
-        let nanos = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
+        let pid = std::process::id();
+        let n = TMP_COUNTER.fetch_add(1, Ordering::Relaxed);
+        std::env::temp_dir().join(format!("{prefix}-{pid}-{n}"))
+    }
+
+    fn args_for_code(code: &str, json: bool) -> ExplainArgs {
+        ExplainArgs {
+            target: code.to_string(),
+            file: None,
+            invariant: None,
+            json,
+        }
+    }
+
+    #[test]
+    fn explain_code_text_succeeds_for_registered_code() {
+        let code = run_explain(&args_for_code("HARN-TYP-014", false));
+        assert_eq!(code, 0);
+    }
+
+    #[test]
+    fn explain_code_fails_for_unknown_code() {
+        let code = run_explain(&args_for_code("HARN-ZZZ-999", false));
+        assert_eq!(code, 2);
+    }
+
+    #[test]
+    fn explain_json_envelope_round_trips_schema_and_code() {
+        let envelope =
+            super::build_envelope(harn_parser::diagnostic_codes::Code::TypeParameterArity);
+        let serialised = serde_json::to_string(&envelope).expect("serialise");
+        let value: serde_json::Value = serde_json::from_str(&serialised).expect("parse json");
+        assert_eq!(value["schemaVersion"], serde_json::json!(1));
+        assert_eq!(value["code"], serde_json::json!("HARN-TYP-014"));
+        assert_eq!(value["category"], serde_json::json!("TYP"));
+        assert_eq!(value["apiStability"], serde_json::json!("stable"));
+        assert!(
+            value["body"]
+                .as_str()
+                .is_some_and(|b| b.contains("HARN-TYP-014")),
+            "envelope body should reference the code, got: {value:?}"
+        );
+        assert!(value["related"].is_array(), "related is an array");
+        let related: Vec<String> = value["related"]
+            .as_array()
             .unwrap()
-            .as_nanos();
-        std::env::temp_dir().join(format!("{prefix}-{nanos}"))
+            .iter()
+            .map(|v| v.as_str().unwrap().to_string())
+            .collect();
+        assert!(related.contains(&"HARN-TYP-013".to_string()));
+    }
+
+    #[test]
+    fn explain_every_registered_code_emits_valid_envelope() {
+        use harn_parser::diagnostic_codes::Code;
+        for entry in Code::registry() {
+            let envelope = super::build_envelope(entry.code);
+            let serialised =
+                serde_json::to_string(&envelope).expect("serialise registered code envelope");
+            let value: serde_json::Value =
+                serde_json::from_str(&serialised).expect("parse registered code envelope");
+            assert_eq!(value["schemaVersion"], serde_json::json!(1));
+            assert_eq!(value["code"], serde_json::json!(entry.identifier));
+            assert!(
+                value["body"].as_str().is_some_and(|b| !b.trim().is_empty()),
+                "{} has empty body in envelope",
+                entry.identifier
+            );
+        }
     }
 
     #[test]
@@ -72,9 +242,10 @@ fn handler() {
         .unwrap();
 
         let code = run_explain(&ExplainArgs {
-            invariant: "approval.reachability".to_string(),
-            function: "handler".to_string(),
-            file: file.to_string_lossy().into_owned(),
+            target: "handler".to_string(),
+            file: Some(file.to_string_lossy().into_owned()),
+            invariant: Some("approval.reachability".to_string()),
+            json: false,
         });
 
         assert_eq!(code, 0);
@@ -97,9 +268,10 @@ fn handler() {
         .unwrap();
 
         let code = run_explain(&ExplainArgs {
-            invariant: "approval.reachability".to_string(),
-            function: "missing".to_string(),
-            file: file.to_string_lossy().into_owned(),
+            target: "missing".to_string(),
+            file: Some(file.to_string_lossy().into_owned()),
+            invariant: Some("approval.reachability".to_string()),
+            json: false,
         });
 
         assert_eq!(code, 1);
