@@ -1,0 +1,377 @@
+// @harn-entrypoint-category llm.stdlib
+//
+// std/llm/tool_binder — natural-language tool binder middleware.
+//
+// Experimental answer to the question: "can a weak planner reach a strong
+// planner's tool-call accuracy when paired with a fast binder?". Builds on
+// the std/llm/tool_middleware seam — opt in via composition, never on by
+// default.
+//
+//   import { with_natural_language_executor } from "std/llm/tool_binder"
+//   import { compose_tool_callers, default_tool_caller } from "std/llm/tool_middleware"
+//
+//   let caller = compose_tool_callers([
+//     with_natural_language_executor({
+//       provider: "cerebras",
+//       model: "gpt-oss-120b",
+//       timeout_ms: 100,
+//     }),
+//     default_tool_caller(),
+//   ])
+//   agent_loop(prompt, system, {tools: registry, tool_caller: caller})
+//
+// Contract (the parent epic — #1696 — restated here):
+//
+//   - `timeout_ms` is a HARD wall-clock budget. If the binder hop overruns
+//     it, the envelope passes through unchanged and `audit.binder.status`
+//     is `"timeout"`. We do not cancel mid-flight (cancellation belongs in
+//     `agent_loop({deadline_ms})`); we observe the breach.
+//   - Off by default. There is no implicit registration anywhere in the
+//     default agent pipeline. Activation requires explicit composition.
+//   - The middleware NEVER falls back to a second binder hop. Retries
+//     defeat the latency win; if the model needs more shots, raise
+//     `temperature` or pick a better model — don't retry on the hot path.
+//     `max_retries` is reserved for forward compatibility (default 0) and
+//     intentionally rejected if non-zero today.
+//
+// Audit shape (lands under `audit.binder`, broadcast through
+// `tool_call_audit` events the same way `with_required_reason` surfaces
+// `audit.summary`):
+//
+//   {
+//     provider:   string,         // binder LLM provider
+//     model:      string,         // binder LLM model
+//     status:     string,         // ok|timeout|transport_error|schema_error|skipped
+//     latency_ms: int,            // wall-clock for the binder hop (0 if skipped)
+//     reason:     string?,        // present when status != ok, explains the disposition
+//     attempts:   int,            // 0 or 1 (no retry on the hot path)
+//   }
+
+// -------------------------------------------------------------------------------------------------
+// shared helpers
+// -------------------------------------------------------------------------------------------------
+
+fn __binder_dict(value) -> dict {
+  if type_of(value) == "dict" {
+    return value
+  }
+  return {}
+}
+
+fn __binder_is_callable(value) -> bool {
+  let kind = type_of(value)
+  return kind == "function" || kind == "closure" || kind == "fn"
+}
+
+fn __binder_drop_key(args, field) {
+  var cleaned = {}
+  for key in args.keys() {
+    if key != field {
+      cleaned = cleaned + {[key]: args[key]}
+    }
+  }
+  return cleaned
+}
+
+fn __binder_short_circuit(envelope, reason) {
+  return {
+    ok: false,
+    status: "error",
+    tool_name: envelope.tool_name,
+    tool_call_id: envelope.call_id,
+    arguments: envelope.tool_args,
+    result: nil,
+    rendered_result: "",
+    observation: "[blocked: " + envelope.tool_name + " — binder rejected]",
+    error: reason,
+    error_category: "schema_violation",
+    executor: nil,
+  }
+}
+
+fn __binder_attach_audit(result, audit) {
+  let existing = if type_of(result?.audit) == "dict" {
+    result.audit
+  } else {
+    {}
+  }
+  return result + {audit: existing + {binder: audit}}
+}
+
+fn __binder_default_system() -> string {
+  return "You are a fast schema-binder. Output JSON that conforms to the supplied JSON Schema. JSON only — no prose, no markdown."
+}
+
+fn __binder_audit(provider, model, status, latency_ms, reason, attempts) {
+  let base = {provider: provider, model: model, status: status, latency_ms: latency_ms, attempts: attempts}
+  if reason == nil {
+    return base
+  }
+  return base + {reason: reason}
+}
+
+// -------------------------------------------------------------------------------------------------
+// Prompt rendering
+// -------------------------------------------------------------------------------------------------
+
+fn __binder_prompt(envelope, intent, partial_args) -> string {
+  let schema_for_prompt = if envelope.schema != nil {
+    envelope.schema
+  } else {
+    {}
+  }
+  let has_partial = type_of(partial_args) == "dict" && len(partial_args.keys()) > 0
+  let partial_json = if has_partial {
+    json_stringify(partial_args)
+  } else {
+    "{}"
+  }
+  return render_prompt(
+    "std/llm/prompts/tool_binder_user.harn.prompt",
+    {
+      tool_name: envelope.tool_name,
+      description: to_string(envelope?.description ?? ""),
+      intent: intent,
+      has_partial_args: has_partial,
+      partial_args_json: partial_json,
+      schema_json: json_stringify(schema_for_prompt),
+    },
+  )
+}
+
+// -------------------------------------------------------------------------------------------------
+// Binder dispatch
+// -------------------------------------------------------------------------------------------------
+
+fn __binder_extract_json(response) {
+  if type_of(response) == "dict" {
+    let data = response?.data
+    if type_of(data) == "dict" {
+      return {ok: true, value: data}
+    }
+    let text = response?.text
+    if type_of(text) == "string" {
+      let parsed = try {
+        json_parse(text)
+      }
+      if is_err(parsed) {
+        return {ok: false, reason: "binder response is not valid JSON"}
+      }
+      let value = unwrap(parsed)
+      if type_of(value) == "dict" {
+        return {ok: true, value: value}
+      }
+      return {ok: false, reason: "binder response parsed as " + type_of(value) + "; expected dict"}
+    }
+  }
+  return {ok: false, reason: "binder returned an unexpected envelope shape"}
+}
+
+fn __binder_invoke(binder_fn, prompt, system, cfg) {
+  let opts = {
+    provider: cfg.provider,
+    model: cfg.model,
+    temperature: cfg.temperature,
+    max_tokens: cfg.max_tokens,
+    output_format: {kind: "json_schema", schema: cfg.schema, strict: true},
+    output_validation: "warn",
+    schema_retries: 0,
+    timeout_ms: cfg.timeout_ms,
+    stream: false,
+  }
+  return binder_fn(prompt, system, opts)
+}
+
+// -------------------------------------------------------------------------------------------------
+// Failure handling
+// -------------------------------------------------------------------------------------------------
+
+/**
+ * Centralizes the three-way `on_failure` decision so the caller body
+ * stays a flat sequence of error checks instead of nesting `if reject /
+ * raise / passthrough` blocks per failure mode.
+ */
+fn __binder_handle_failure(envelope, next, ctx, status, reason) {
+  if ctx.on_failure == "raise" {
+    throw "with_natural_language_executor: " + reason
+  }
+  let audit = __binder_audit(ctx.provider, ctx.model, status, ctx.elapsed_ms, reason, 1)
+  if ctx.on_failure == "reject" {
+    return __binder_attach_audit(__binder_short_circuit(envelope, reason), audit)
+  }
+  let result = next(envelope + {tool_args: ctx.stripped_args})
+  return __binder_attach_audit(result, audit)
+}
+
+// -------------------------------------------------------------------------------------------------
+// Middleware
+// -------------------------------------------------------------------------------------------------
+
+fn __binder_validate_opts(cfg) {
+  let provider = to_string(cfg?.provider ?? "")
+  let model = to_string(cfg?.model ?? "")
+  if provider == "" {
+    throw "with_natural_language_executor: `provider` is required"
+  }
+  if model == "" {
+    throw "with_natural_language_executor: `model` is required"
+  }
+  let timeout_ms = to_int(cfg?.timeout_ms ?? 100) ?? 100
+  if timeout_ms <= 0 {
+    throw "with_natural_language_executor: `timeout_ms` must be > 0; got " + to_string(timeout_ms)
+  }
+  let max_retries = to_int(cfg?.max_retries ?? 0) ?? 0
+  if max_retries != 0 {
+    throw "with_natural_language_executor: `max_retries` must be 0 — retries defeat the latency win; got "
+      + to_string(max_retries)
+  }
+  let on_failure = to_string(cfg?.on_failure ?? "passthrough")
+  if on_failure != "passthrough" && on_failure != "reject" && on_failure != "raise" {
+    throw "with_natural_language_executor: `on_failure` must be one of passthrough|reject|raise; got "
+      + on_failure
+  }
+  let binder_fn = if cfg?.binder_fn != nil {
+    if !__binder_is_callable(cfg.binder_fn) {
+      throw "with_natural_language_executor: `binder_fn` must be callable; got " + type_of(cfg.binder_fn)
+    }
+    cfg.binder_fn
+  } else {
+    { binder_prompt, binder_system, binder_opts -> llm_call(binder_prompt, binder_system, binder_opts) }
+  }
+  return {
+    provider: provider,
+    model: model,
+    timeout_ms: timeout_ms,
+    intent_field: to_string(cfg?.intent_field ?? "_nl_intent"),
+    passthrough_when_args_valid: cfg?.passthrough_when_args_valid ?? true,
+    on_failure: on_failure,
+    temperature: cfg?.temperature ?? 0.0,
+    max_tokens: to_int(cfg?.max_tokens ?? 256) ?? 256,
+    system_prompt: to_string(cfg?.system ?? __binder_default_system()),
+    binder_fn: binder_fn,
+  }
+}
+
+fn __binder_skip_reason(intent, schema_provided, already_valid) {
+  // Order matters: "args_already_valid" is the cheapest skip (no binder
+  // hop, no missing-intent error to surface) so we check it first.
+  if already_valid {
+    return "args_already_valid"
+  }
+  if !schema_provided {
+    return "no_schema"
+  }
+  if intent == "" {
+    return "no_intent"
+  }
+  return nil
+}
+
+fn __binder_passthrough(envelope, next, stripped_args, intent, ctx, skip_reason) {
+  let next_args = if intent == "" {
+    envelope.tool_args
+  } else {
+    stripped_args
+  }
+  let result = next(envelope + {tool_args: next_args})
+  let audit = __binder_audit(ctx.provider, ctx.model, "skipped", 0, skip_reason, 0)
+  return __binder_attach_audit(result, audit)
+}
+
+/**
+ * with_natural_language_executor(opts) -> caller
+ *
+ * Intercepts a tool call, hands the planner-emitted natural-language
+ * intent + the tool's JSON Schema to a sub-100ms binder LLM, and
+ * replaces the envelope's `tool_args` with the binder's structured
+ * output before dispatching downstream.
+ *
+ * Required options:
+ *   provider:   string   // binder LLM provider (e.g. "cerebras")
+ *   model:      string   // binder LLM model    (e.g. "gpt-oss-120b")
+ *
+ * Optional knobs (all conservative defaults):
+ *   timeout_ms:                  int     (default 100; hard wall-clock budget — see header)
+ *   max_retries:                 int     (default 0; non-zero rejected — retries defeat latency)
+ *   intent_field:                string  (default "_nl_intent")
+ *   passthrough_when_args_valid: bool    (default true; skip the hop when args already validate)
+ *   on_failure:                  string  (default "passthrough"; "passthrough"|"reject"|"raise")
+ *   system:                      string  (binder system prompt; sensible default supplied)
+ *   temperature:                 float   (default 0.0)
+ *   max_tokens:                  int     (default 256)
+ *   binder_fn:                   fn      (test hook; defaults to llm_call)
+ */
+pub fn with_natural_language_executor(opts) {
+  let ctx = __binder_validate_opts(__binder_dict(opts))
+  return { envelope, next ->
+    let raw_intent = envelope.tool_args?[ctx.intent_field]
+    let intent = if type_of(raw_intent) == "string" {
+      trim(raw_intent)
+    } else {
+      ""
+    }
+    let schema = envelope.schema
+    let stripped_args = __binder_drop_key(envelope.tool_args, ctx.intent_field)
+    let schema_provided = schema != nil
+    let already_valid = if schema_provided && ctx.passthrough_when_args_valid {
+      schema_is(stripped_args, schema)
+    } else {
+      false
+    }
+    let skip = __binder_skip_reason(intent, schema_provided, already_valid)
+    if skip != nil {
+      return __binder_passthrough(envelope, next, stripped_args, intent, ctx, skip)
+    }
+    let prompt = __binder_prompt(envelope, intent, stripped_args)
+    let invoke_cfg = {
+      provider: ctx.provider,
+      model: ctx.model,
+      temperature: ctx.temperature,
+      max_tokens: ctx.max_tokens,
+      schema: schema,
+      timeout_ms: ctx.timeout_ms,
+    }
+    let started = now_ms()
+    let outcome = try {
+      __binder_invoke(ctx.binder_fn, prompt, ctx.system_prompt, invoke_cfg)
+    }
+    let elapsed = now_ms() - started
+    let fail_ctx = ctx + {elapsed_ms: elapsed, stripped_args: stripped_args}
+    if elapsed > ctx.timeout_ms {
+      return __binder_handle_failure(
+        envelope,
+        next,
+        fail_ctx,
+        "timeout",
+        "binder hop exceeded timeout_ms=" + to_string(ctx.timeout_ms) + " (elapsed="
+          + to_string(elapsed)
+          + "ms)",
+      )
+    }
+    if is_err(outcome) {
+      return __binder_handle_failure(
+        envelope,
+        next,
+        fail_ctx,
+        "transport_error",
+        "binder transport error: " + to_string(unwrap_err(outcome)),
+      )
+    }
+    let extracted = __binder_extract_json(unwrap(outcome))
+    if !extracted.ok {
+      return __binder_handle_failure(envelope, next, fail_ctx, "schema_error", extracted.reason)
+    }
+    let bound_args = extracted.value
+    if !schema_is(bound_args, schema) {
+      return __binder_handle_failure(
+        envelope,
+        next,
+        fail_ctx,
+        "schema_error",
+        "binder output failed schema validation",
+      )
+    }
+    let result = next(envelope + {tool_args: bound_args})
+    return __binder_attach_audit(result, __binder_audit(ctx.provider, ctx.model, "ok", elapsed, nil, 1))
+  }
+}

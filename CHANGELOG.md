@@ -35,6 +35,19 @@ condensed series summaries instead of full per-patch history.
   `turn.tool_call_index`, and `with_audit_log` receipts grow an
   `emit_order` field equal to that index so completion-ordered
   receipts can be re-sorted to source order.
+- **Natural-language tool binder middleware (#1698).** New experimental
+  `std/llm/tool_binder` module exporting
+  `with_natural_language_executor({provider, model, timeout_ms, ...})`.
+  Composes via `compose_tool_callers` to intercept a tool call, hand
+  the planner-emitted intent + JSON Schema to a sub-100ms binder LLM
+  (Cerebras GPT-OSS-120B is the primary substrate), and replace
+  `tool_args` with the binder's structured output before dispatch.
+  OFF by default — activation requires explicit composition. Hard
+  wall-clock budget per the parent epic (#1696): overruns drop the
+  binder hop and pass through unchanged with
+  `audit.binder.status = "timeout"`. Surfaces a typed audit slot at
+  `audit.binder = {provider, model, status, latency_ms, reason?, attempts}`
+  alongside the existing `with_audit_log` receipt machinery.
 
 ## v0.8.24
 
