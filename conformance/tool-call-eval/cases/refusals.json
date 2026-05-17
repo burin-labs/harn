@@ -96,7 +96,7 @@
     ],
     "expected": {
       "kind": "refusal",
-      "reason_must_match": "(?i)(no|not).*translate|translation.*(unavailable|not available)|answer.*directly"
+      "reason_must_match": "(?i)(no|not)[^.\\n]*translat(e|ion)|translation[^.\\n]*(unavailable|not available)|answer[^.\\n]*directly"
     },
     "source": "bfcl_style_synthetic:irrelevance",
     "tags": ["refusal", "irrelevance"]

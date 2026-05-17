@@ -414,6 +414,23 @@ fn observed_from_llm_response(response: &JsonValue) -> ObservedToolCallOutcome {
     }
 }
 
+/// Decode the binder's `arguments_json` (string) into a JSON object. Falls
+/// back to the legacy `arguments` (object) field — older or non-strict
+/// providers may emit the inline object form, and accepting both keeps the
+/// scorer agnostic to which binder shape produced the verdict.
+fn parse_binder_arguments(data: &JsonValue) -> JsonValue {
+    if let Some(text) = data.get("arguments_json").and_then(JsonValue::as_str) {
+        if let Ok(parsed) = serde_json::from_str::<JsonValue>(text) {
+            if parsed.is_object() {
+                return parsed;
+            }
+        }
+    }
+    data.get("arguments")
+        .cloned()
+        .unwrap_or_else(|| serde_json::json!({}))
+}
+
 fn observed_from_binder(response: &JsonValue) -> ObservedToolCallOutcome {
     let data = response
         .get("data")
@@ -435,10 +452,7 @@ fn observed_from_binder(response: &JsonValue) -> ObservedToolCallOutcome {
             .and_then(JsonValue::as_str)
             .unwrap_or_default()
             .to_string();
-        let args = data
-            .get("arguments")
-            .cloned()
-            .unwrap_or_else(|| serde_json::json!({}));
+        let args = parse_binder_arguments(&data);
         return ObservedToolCallOutcome {
             tool_call: (!name.is_empty()).then_some(ObservedToolCall { name, args }),
             final_text: response_text(response),
@@ -576,6 +590,13 @@ fn planner_script(
     let tool_format_line = tool_format
         .map(|format| format!("      tool_format: {},\n", json_string_literal(format)))
         .unwrap_or_default();
+    // Deliberately no planner system prompt. The PEAR-style eval is meant
+    // to measure a *weak* planner against the binder's lift — adding a
+    // curated system prompt strengthens the planner enough that some
+    // tests measure the wrong thing (literal extraction wins on some
+    // cases, hurts on others where the schema field implies a canonical
+    // form like "CA" for `country_code` or "errors" for the user's
+    // explicit plural). See discussion on #1698.
     format!(
         "pipeline main() {{\n\
   let tools = json_parse({tools_lit})\n\
@@ -659,11 +680,68 @@ fn predicate_judge_script(
 fn binder_prompt(case: &ToolCallEvalCase, planner_response: &JsonValue) -> String {
     let tools = serde_json::to_string_pretty(&case.tools).unwrap_or_default();
     let planner = serde_json::to_string_pretty(planner_response).unwrap_or_default();
+    // Authority is the user's request + the tool schemas. The planner's
+    // response is a hint to evaluate, not a transcript to canonicalize.
+    // The binder's job is to produce the MINIMUM CORRECT tool call —
+    // strip articles, strip user-supplied quotes around literals, strip
+    // elaborations ("uses of X" → "X"), drop default args the user
+    // didn't request, coerce types to match the schema. The planner's
+    // args are useful as a starting hypothesis but should be overridden
+    // freely when needed. The two few-shot examples below pin down the
+    // failure modes the v1/v2 prompts regressed on: literal-quote
+    // insertion and surface-phrase echo.
     format!(
-        "Canonicalize the planner response into one tool-call decision.\n\
-Return JSON only with decision=call or decision=refusal.\n\
-If decision=call, set name to one declared tool and arguments to the exact JSON object.\n\n\
-User prompt:\n{}\n\nDeclared tools:\n{}\n\nPlanner response:\n{}",
+        "You are a fast schema-binder. The user's request and the declared tool schemas are \
+the source of truth; the planner's response is a hint to evaluate, not a transcript to \
+copy.\n\
+\n\
+Produce the MINIMUM correct tool call:\n\
+- pick exactly one declared tool, or refuse;\n\
+- argument values should be the SHORTEST faithful extraction of the user's actual target:\n\
+  - drop leading articles (\"the\", \"a\", \"an\") unless they're part of a proper noun;\n\
+  - strip the user's action verb (\"uses of X\" → \"X\"; \"information about Y\" → \"Y\"; \
+\"X plan\" → \"X\" when the user's intent is X itself, not the plan);\n\
+  - if the user wrapped a literal in single or double quotes, strip the quotes;\n\
+  - omit optional arguments the user did not request, even if they have schema defaults;\n\
+- JSON types must EXACTLY match the schema: numbers as JSON numbers (42, not \"42\"), \
+booleans as true/false, arrays as arrays. The user saying \"id is 42\" means an integer.\n\
+\n\
+Refuse (decision=refusal) ONLY when:\n\
+- no declared tool can serve the user's request, OR\n\
+- a required argument is genuinely missing and unrecoverable from the user's request, OR\n\
+- the request is purely conversational chitchat.\n\
+Refusal reason text should include the word \"no\" or \"not\" or \"cannot\", plus the \
+capability the user wanted (e.g. \"no tool for refunds\", \"cannot translate\", \"no order \
+id provided in the request\").\n\
+\n\
+Output JSON with these fields (all required):\n\
+- decision: \"call\" or \"refusal\"\n\
+- name: declared tool name when decision=call, else \"\".\n\
+- arguments_json: when decision=call, JSON-stringified args object; when refusal, \"{{}}\".\n\
+- reason: one short line.\n\
+\n\
+Example 1 — strip elaboration, type coercion:\n\
+  User prompt: Select email from users where id is 42.\n\
+  Correct output: {{\"decision\":\"call\",\"name\":\"sql_execute\",\
+\"arguments_json\":\"{{\\\"sql_keyword\\\":\\\"SELECT\\\",\\\"table_name\\\":\\\"users\\\",\
+\\\"columns\\\":[\\\"email\\\"],\\\"conditions\\\":{{\\\"id\\\":42}}}}\",\"reason\":\"call\"}}\n\
+  WRONG: id=\"42\" (the user said \"42\" as a number, not a string).\n\
+\n\
+Example 2 — strip user-supplied quotes around literals:\n\
+  User prompt: Translate 'good morning' to Spanish.\n\
+  Correct output: {{\"decision\":\"call\",\"name\":\"translate_text\",\
+\"arguments_json\":\"{{\\\"text\\\":\\\"good morning\\\",\\\"target_language\\\":\\\"Spanish\\\"}}\",\"reason\":\"call\"}}\n\
+  WRONG: text=\"'good morning'\" (the single quotes around \"good morning\" are part of \
+the user's notation, not part of the literal text to translate).\n\
+\n\
+Example 3 — strip elaboration, plural preserved:\n\
+  User prompt: Search the repository for uses of llm_call.\n\
+  Correct output: {{\"decision\":\"call\",\"name\":\"repo_search\",\
+\"arguments_json\":\"{{\\\"query\\\":\\\"llm_call\\\"}}\",\"reason\":\"call\"}}\n\
+  WRONG: query=\"uses of llm_call\" (the action verb \"uses of\" is the user's framing, \
+not part of the search target).\n\
+\n\
+User prompt:\n{}\n\nDeclared tools:\n{}\n\nPlanner hint:\n{}",
         case.prompt, tools, planner
     )
 }
@@ -684,13 +762,24 @@ fn predicate_judge_prompt(case: &ToolCallEvalCase, observed: &ObservedToolCallOu
 }
 
 fn binder_schema() -> JsonValue {
+    // `arguments` is a tool-specific object whose shape varies per case, so
+    // we cannot pre-declare its `properties`. Encode it as a JSON-stringified
+    // payload instead: providers like Cerebras enforce strict structured
+    // output and reject `{"type": "object"}` without a properties list. The
+    // scorer parses the string back via `observed_from_binder`.
+    //
+    // All fields are unconditionally required — strict OpenAI-compat
+    // providers (Cerebras, Together) reject conditional `if/then/else`
+    // requirements at the schema layer, so we surface the convention in
+    // the prompt instead: refusals emit empty strings for `name` and
+    // `arguments_json` (`"{}"`).
     serde_json::json!({
         "type": "object",
-        "required": ["decision", "reason"],
+        "required": ["decision", "name", "arguments_json", "reason"],
         "properties": {
             "decision": {"type": "string", "enum": ["call", "refusal"]},
             "name": {"type": "string"},
-            "arguments": {"type": "object"},
+            "arguments_json": {"type": "string"},
             "reason": {"type": "string"}
         },
         "additionalProperties": false
@@ -923,6 +1012,37 @@ mod tests {
         }));
         assert!(observed.tool_call.is_none());
         assert_eq!(observed.final_text, "no matching tool");
+    }
+
+    #[test]
+    fn observed_from_binder_parses_arguments_json_string() {
+        let observed = observed_from_binder(&json!({
+            "data": {
+                "decision": "call",
+                "name": "search",
+                "arguments_json": "{\"query\":\"harn\"}",
+                "reason": "ok",
+            },
+            "text": "",
+        }));
+        let call = observed.tool_call.expect("binder call");
+        assert_eq!(call.name, "search");
+        assert_eq!(call.args, json!({"query": "harn"}));
+    }
+
+    #[test]
+    fn observed_from_binder_falls_back_to_inline_arguments_object() {
+        let observed = observed_from_binder(&json!({
+            "data": {
+                "decision": "call",
+                "name": "search",
+                "arguments": {"query": "harn"},
+                "reason": "ok",
+            },
+            "text": "",
+        }));
+        let call = observed.tool_call.expect("binder call");
+        assert_eq!(call.args, json!({"query": "harn"}));
     }
 
     #[test]
