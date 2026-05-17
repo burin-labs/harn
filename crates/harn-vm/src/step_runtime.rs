@@ -21,7 +21,11 @@ use std::rc::Rc;
 use serde::Serialize;
 use serde_json::Value as JsonValue;
 
-use crate::orchestration::HookEvent;
+use crate::orchestration::{
+    current_execution_policy, pop_execution_policy, push_execution_policy, CapabilityPolicy,
+    HookEvent,
+};
+use crate::personas::StageDecl;
 use crate::value::{VmClosure, VmError, VmValue};
 
 fn vm_str(value: &VmValue) -> Option<&str> {
@@ -52,6 +56,11 @@ pub struct StepDefinition {
 #[derive(Debug, Default, Clone)]
 pub struct PersonaDefinition {
     pub name: String,
+    /// Per-stage tool/side-effect scoping. Keyed lookups by stage name happen
+    /// every step entry; the list is small (a handful of stages per persona)
+    /// so a `Vec` keeps insertion order and matches the manifest's authored
+    /// ordering.
+    pub stages: Vec<StageDecl>,
 }
 
 impl StepDefinition {
@@ -89,6 +98,11 @@ pub struct ActiveStep {
     /// completion. 0 when tracing was disabled at push time, in which
     /// case `span_end` is a no-op anyway.
     pub span_id: u64,
+    /// True when this step pushed a per-stage `CapabilityPolicy` onto the
+    /// execution policy stack. The runtime pops it when the step's frame
+    /// unwinds, mirroring the RAII guard pattern in
+    /// `crates/harn-serve/src/adapters/acp/modes.rs`.
+    pub stage_policy_pushed: bool,
 }
 
 impl ActiveStep {
@@ -98,6 +112,7 @@ impl ActiveStep {
         persona: Option<String>,
         args: Vec<VmValue>,
         span_id: u64,
+        stage_policy_pushed: bool,
     ) -> Self {
         Self {
             frame_depth,
@@ -110,6 +125,7 @@ impl ActiveStep {
             llm_calls: 0,
             last_model: None,
             span_id,
+            stage_policy_pushed,
         }
     }
 
@@ -207,9 +223,76 @@ pub fn register_persona_from_dict(args: Vec<VmValue>) -> Result<VmValue, VmError
             .and_then(vm_str)
             .map(str::to_string)
             .unwrap_or_else(|| function.clone()),
+        stages: parse_stage_decls(meta.get("stages"))?,
     };
     register_persona(&function, definition);
     Ok(VmValue::Nil)
+}
+
+fn parse_stage_decls(value: Option<&VmValue>) -> Result<Vec<StageDecl>, VmError> {
+    let Some(value) = value else {
+        return Ok(Vec::new());
+    };
+    let entries = match value {
+        VmValue::Nil => return Ok(Vec::new()),
+        VmValue::List(list) => list.as_ref(),
+        _ => {
+            return Err(VmError::Thrown(VmValue::String(Rc::from(
+                "__register_persona: stages argument must be a list of dicts",
+            ))));
+        }
+    };
+    let mut out = Vec::with_capacity(entries.len());
+    for entry in entries {
+        let dict = entry.as_dict().ok_or_else(|| {
+            VmError::Thrown(VmValue::String(Rc::from(
+                "__register_persona: each stage entry must be a dict",
+            )))
+        })?;
+        let Some(name) = dict.get("name").and_then(vm_str) else {
+            return Err(VmError::Thrown(VmValue::String(Rc::from(
+                "__register_persona: stage dict missing required 'name'",
+            ))));
+        };
+        let allowed_tools = match dict.get("allowed_tools") {
+            None | Some(VmValue::Nil) => None,
+            Some(VmValue::List(items)) => Some(
+                items
+                    .iter()
+                    .map(|item| {
+                        vm_str(item).map(str::to_string).ok_or_else(|| {
+                            VmError::Thrown(VmValue::String(Rc::from(
+                                "__register_persona: stage allowed_tools entries must be strings",
+                            )))
+                        })
+                    })
+                    .collect::<Result<Vec<_>, _>>()?,
+            ),
+            _ => {
+                return Err(VmError::Thrown(VmValue::String(Rc::from(
+                    "__register_persona: stage allowed_tools must be a list of strings",
+                ))));
+            }
+        };
+        let side_effect_level = dict
+            .get("side_effect_level")
+            .and_then(vm_str)
+            .map(str::to_string)
+            .filter(|s| !s.is_empty());
+        let max_iterations = match dict.get("max_iterations") {
+            Some(VmValue::Int(n)) if *n >= 0 => Some(*n as u32),
+            Some(VmValue::Float(f)) if f.is_finite() && *f >= 0.0 => Some(*f as u32),
+            _ => None,
+        };
+        out.push(StageDecl {
+            name: name.to_string(),
+            allowed_tools,
+            side_effect_level,
+            max_iterations,
+            on_exit: None,
+        });
+    }
+    Ok(out)
 }
 
 /// Builtin entry point invoked by compiler-emitted bytecode after every
@@ -371,6 +454,53 @@ pub fn current_persona_name() -> Option<String> {
     PERSONA_STACK.with(|stack| stack.borrow().last().map(|p| p.definition.name.clone()))
 }
 
+/// Resolve the per-stage policy for `step_name` against the currently
+/// active persona's stage declarations. Returns `None` when no persona is
+/// active or no stage matches the step name. Caller pushes the result onto
+/// `EXECUTION_POLICY_STACK`.
+///
+/// When an ambient policy is already active, the stage policy is
+/// intersected with it so a stage can only ever tighten the tool surface
+/// and side-effect ceiling — never widen them.
+fn stage_policy_for_active_step(step_name: &str) -> Option<CapabilityPolicy> {
+    let stage_policy = PERSONA_STACK.with(|stack| {
+        let stack = stack.borrow();
+        let persona = stack.last()?;
+        let stage = persona
+            .definition
+            .stages
+            .iter()
+            .find(|stage| stage.name == step_name)?;
+        Some(stage_decl_to_policy(stage))
+    })?;
+    let Some(parent) = current_execution_policy() else {
+        return Some(stage_policy);
+    };
+    // `intersect` is conservative: failure means the stage referenced a tool
+    // the ambient policy already denied. Fall back to a narrowed copy that
+    // drops those entries so the stage can never widen the ceiling.
+    Some(parent.intersect(&stage_policy).unwrap_or_else(|_| {
+        let intersected_tools: Vec<String> = stage_policy
+            .tools
+            .iter()
+            .filter(|tool| parent.tools.is_empty() || parent.tools.contains(*tool))
+            .cloned()
+            .collect();
+        CapabilityPolicy {
+            tools: intersected_tools,
+            ..stage_policy
+        }
+    }))
+}
+
+fn stage_decl_to_policy(stage: &StageDecl) -> CapabilityPolicy {
+    CapabilityPolicy {
+        tools: stage.allowed_tools.clone().unwrap_or_default(),
+        side_effect_level: stage.side_effect_level.clone(),
+        ..CapabilityPolicy::default()
+    }
+}
+
 fn persona_matches(pattern: &str, persona: &str) -> bool {
     crate::orchestration::glob_match(pattern, persona)
 }
@@ -447,6 +577,7 @@ pub fn maybe_push_active_step(function_name: &str, frame_depth: usize, args: &[V
             serde_json::Value::String(model.to_string()),
         );
     }
+    let step_name = definition.name.clone();
     STEP_STACK.with(|stack| {
         stack.borrow_mut().push(ActiveStep::new(
             frame_depth,
@@ -454,8 +585,17 @@ pub fn maybe_push_active_step(function_name: &str, frame_depth: usize, args: &[V
             persona,
             args.to_vec(),
             span_id,
+            false,
         ));
     });
+    if let Some(policy) = stage_policy_for_active_step(&step_name) {
+        push_execution_policy(policy);
+        STEP_STACK.with(|stack| {
+            if let Some(top) = stack.borrow_mut().last_mut() {
+                top.stage_policy_pushed = true;
+            }
+        });
+    }
     true
 }
 
@@ -532,6 +672,9 @@ pub fn pop_and_record(current_frame_depth: usize, status: &str, error: Option<St
 }
 
 fn finish_step(step: ActiveStep, status: &str, error: Option<String>) {
+    if step.stage_policy_pushed {
+        pop_execution_policy();
+    }
     crate::tracing::span_set_metadata(
         step.span_id,
         "status",
@@ -862,5 +1005,93 @@ mod tests {
         fresh_state();
         assert!(!maybe_push_active_step("not_a_step", 1, &[]));
         assert!(active_step_frame_depth().is_none());
+    }
+
+    #[test]
+    fn stage_policy_narrows_but_does_not_widen_parent_policy() {
+        fresh_state();
+        let mut meta: BTreeMap<String, VmValue> = BTreeMap::new();
+        meta.insert("name".to_string(), VmValue::String(Rc::from("research")));
+        register_step_from_dict(vec![
+            VmValue::String(Rc::from("research_step")),
+            VmValue::Dict(Rc::new(meta)),
+        ])
+        .expect("step registration");
+
+        let mut stage_dict: BTreeMap<String, VmValue> = BTreeMap::new();
+        stage_dict.insert("name".to_string(), VmValue::String(Rc::from("research")));
+        // Stage tries to add `edit` on top of a parent that only allowed `read`.
+        stage_dict.insert(
+            "allowed_tools".to_string(),
+            VmValue::List(Rc::new(vec![
+                VmValue::String(Rc::from("read")),
+                VmValue::String(Rc::from("edit")),
+            ])),
+        );
+        let mut persona_meta: BTreeMap<String, VmValue> = BTreeMap::new();
+        persona_meta.insert("name".to_string(), VmValue::String(Rc::from("scoped")));
+        persona_meta.insert(
+            "stages".to_string(),
+            VmValue::List(Rc::new(vec![VmValue::Dict(Rc::new(stage_dict))])),
+        );
+        register_persona_from_dict(vec![
+            VmValue::String(Rc::from("scoped_persona")),
+            VmValue::Dict(Rc::new(persona_meta)),
+        ])
+        .expect("persona registration");
+
+        push_execution_policy(CapabilityPolicy {
+            tools: vec!["read".to_string()],
+            ..CapabilityPolicy::default()
+        });
+        assert!(maybe_push_active_persona("scoped_persona", 1));
+        assert!(maybe_push_active_step("research_step", 2, &[]));
+        let policy = current_execution_policy().expect("stage policy active");
+        // `edit` is filtered out because the parent already denied it.
+        assert_eq!(policy.tools, vec!["read".to_string()]);
+
+        prune_below_frame(0);
+        pop_execution_policy();
+        assert!(current_execution_policy().is_none());
+    }
+
+    #[test]
+    fn stage_policy_is_pushed_and_popped_around_step() {
+        fresh_state();
+        let mut meta: BTreeMap<String, VmValue> = BTreeMap::new();
+        meta.insert("name".to_string(), VmValue::String(Rc::from("research")));
+        register_step_from_dict(vec![
+            VmValue::String(Rc::from("research_step")),
+            VmValue::Dict(Rc::new(meta)),
+        ])
+        .expect("step registration succeeds");
+
+        let mut stage_dict: BTreeMap<String, VmValue> = BTreeMap::new();
+        stage_dict.insert("name".to_string(), VmValue::String(Rc::from("research")));
+        stage_dict.insert(
+            "allowed_tools".to_string(),
+            VmValue::List(Rc::new(vec![VmValue::String(Rc::from("read"))])),
+        );
+        let mut persona_meta: BTreeMap<String, VmValue> = BTreeMap::new();
+        persona_meta.insert("name".to_string(), VmValue::String(Rc::from("scoped")));
+        persona_meta.insert(
+            "stages".to_string(),
+            VmValue::List(Rc::new(vec![VmValue::Dict(Rc::new(stage_dict))])),
+        );
+        register_persona_from_dict(vec![
+            VmValue::String(Rc::from("scoped_persona")),
+            VmValue::Dict(Rc::new(persona_meta)),
+        ])
+        .expect("persona registration succeeds");
+
+        assert!(maybe_push_active_persona("scoped_persona", 1));
+        assert!(crate::orchestration::current_execution_policy().is_none());
+        assert!(maybe_push_active_step("research_step", 2, &[]));
+        let policy = crate::orchestration::current_execution_policy()
+            .expect("stage policy is active inside step");
+        assert_eq!(policy.tools, vec!["read".to_string()]);
+
+        prune_below_frame(0);
+        assert!(crate::orchestration::current_execution_policy().is_none());
     }
 }

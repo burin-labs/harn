@@ -267,6 +267,14 @@ impl Compiler {
             self.compile_attribute_value(name)?;
             entries += 1;
         }
+        if let Some(stages) = attr.named_arg("stages") {
+            if matches!(stages.node, Node::ListLiteral(_)) {
+                let key_idx = self.chunk.add_constant(Constant::String("stages".into()));
+                self.chunk.emit_u16(Op::Constant, key_idx, self.line);
+                self.compile_attribute_value(stages)?;
+                entries += 1;
+            }
+        }
         self.chunk.emit_u16(Op::BuildDict, entries, self.line);
         self.chunk.emit_u8(Op::Call, 2, self.line);
         self.chunk.emit(Op::Pop, self.line);

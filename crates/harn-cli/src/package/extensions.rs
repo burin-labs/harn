@@ -434,7 +434,17 @@ fn persona_runtime_binding_for_handler(
             format!("handler persona://{name} does not match a declared persona"),
         ));
     };
-    Ok(harn_vm::PersonaRuntimeBinding {
+    Ok(persona_runtime_binding(name, persona))
+}
+
+/// Lower a manifest persona entry into the runtime binding. Centralised so
+/// every call site (`harn persona` CLI, trigger registration, etc.) carries
+/// the same shape — stages included.
+pub(crate) fn persona_runtime_binding(
+    name: &str,
+    persona: &PersonaManifestEntry,
+) -> harn_vm::PersonaRuntimeBinding {
+    harn_vm::PersonaRuntimeBinding {
         name: name.to_string(),
         template_ref: persona_template_ref(persona),
         entry_workflow: persona.entry_workflow.clone().unwrap_or_default(),
@@ -446,7 +456,26 @@ fn persona_runtime_binding_for_handler(
             run_usd: persona.budget.run_usd,
             max_tokens: persona.budget.max_tokens,
         },
-    })
+        stages: persona
+            .stages
+            .iter()
+            .map(persona_stage_decl_to_runtime)
+            .collect(),
+    }
+}
+
+fn persona_stage_decl_to_runtime(stage: &PersonaStageDecl) -> harn_vm::StageDecl {
+    harn_vm::StageDecl {
+        name: stage.name.clone(),
+        allowed_tools: stage.allowed_tools.clone(),
+        side_effect_level: stage.side_effect_level.clone(),
+        max_iterations: stage.max_iterations,
+        on_exit: stage.on_exit.as_ref().map(|exit| harn_vm::StageExit {
+            on_complete: exit.on_complete.clone(),
+            on_failure: exit.on_failure.clone(),
+            policy_override: None,
+        }),
+    }
 }
 
 pub(crate) async fn compile_optional_trigger_expression(
@@ -773,19 +802,7 @@ fn persona_trigger_binding_spec(
     kind: &str,
     persona: &PersonaManifestEntry,
 ) -> harn_vm::TriggerBindingSpec {
-    let runtime_binding = harn_vm::PersonaRuntimeBinding {
-        name: name.to_string(),
-        template_ref: persona_template_ref(persona),
-        entry_workflow: persona.entry_workflow.clone().unwrap_or_default(),
-        schedules: persona.schedules.clone(),
-        triggers: persona.triggers.clone(),
-        budget: harn_vm::PersonaBudgetPolicy {
-            daily_usd: persona.budget.daily_usd,
-            hourly_usd: persona.budget.hourly_usd,
-            run_usd: persona.budget.run_usd,
-            max_tokens: persona.budget.max_tokens,
-        },
-    };
+    let runtime_binding = persona_runtime_binding(name, persona);
     let id = format!("persona.{name}.{provider}.{kind}");
     let handler = harn_vm::TriggerHandlerSpec::Persona {
         binding: runtime_binding.clone(),

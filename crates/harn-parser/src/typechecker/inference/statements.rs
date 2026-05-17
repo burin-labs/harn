@@ -2061,6 +2061,7 @@ impl TypeChecker {
             "receipts",
             "model",
             "owner",
+            "stages",
         ];
         for arg in &attr.args {
             let Some(name) = self.require_named_arg("@persona", arg) else {
@@ -2081,6 +2082,7 @@ impl TypeChecker {
                     self.expect_list_of_symbols("@persona", name, &arg.value, arg.span)
                 }
                 "budget" => self.expect_budget_dict("@persona", name, &arg.value, arg.span),
+                "stages" => self.expect_persona_stages("@persona", &arg.value, arg.span),
                 "receipts" => {
                     if !is_symbol_like(&arg.value.node)
                         && !matches!(arg.value.node, Node::BoolLiteral(_))
@@ -2092,6 +2094,81 @@ impl TypeChecker {
                     }
                 }
                 _ => self.expect_symbol_like("@persona", name, &arg.value, arg.span),
+            }
+        }
+    }
+
+    fn expect_persona_stages(&mut self, owner: &str, value: &SNode, span: Span) {
+        let Node::ListLiteral(entries) = &value.node else {
+            self.warning_at(
+                format!("`{owner}(stages: ...)` must be a list of stage dicts"),
+                span,
+            );
+            return;
+        };
+        const KNOWN_STAGE_KEYS: &[&str] = &[
+            "name",
+            "allowed_tools",
+            "side_effect_level",
+            "max_iterations",
+        ];
+        for entry in entries {
+            let Node::DictLiteral(fields) = &entry.node else {
+                self.warning_at(
+                    format!("`{owner}(stages: ...)` entries must be dict literals"),
+                    entry.span,
+                );
+                continue;
+            };
+            let mut saw_name = false;
+            for dict_entry in fields {
+                let Some(key) = dict_entry_key_str(&dict_entry.key) else {
+                    self.warning_at(
+                        format!("`{owner}(stages: ...)` stage keys must be identifiers"),
+                        dict_entry.key.span,
+                    );
+                    continue;
+                };
+                if !KNOWN_STAGE_KEYS.contains(&key.as_str()) {
+                    self.warning_at(
+                        format!("unknown stage key `{key}`; expected one of {KNOWN_STAGE_KEYS:?}"),
+                        dict_entry.key.span,
+                    );
+                    continue;
+                }
+                match key.as_str() {
+                    "name" | "side_effect_level" => {
+                        if !is_symbol_like(&dict_entry.value.node) {
+                            self.warning_at(
+                                format!("stage `{key}` must be a string"),
+                                dict_entry.value.span,
+                            );
+                        }
+                        if key == "name" {
+                            saw_name = true;
+                        }
+                    }
+                    "allowed_tools" => self.expect_list_of_symbols(
+                        owner,
+                        "allowed_tools",
+                        &dict_entry.value,
+                        dict_entry.value.span,
+                    ),
+                    "max_iterations" if !matches!(dict_entry.value.node, Node::IntLiteral(n) if n >= 0) =>
+                    {
+                        self.warning_at(
+                            "stage `max_iterations` must be a non-negative integer".to_string(),
+                            dict_entry.value.span,
+                        );
+                    }
+                    _ => {}
+                }
+            }
+            if !saw_name {
+                self.warning_at(
+                    format!("`{owner}(stages: ...)` entry missing required `name`"),
+                    entry.span,
+                );
             }
         }
     }
@@ -2452,6 +2529,10 @@ fn symbol_like_value(node: &Node) -> Option<&str> {
         }
         _ => None,
     }
+}
+
+fn dict_entry_key_str(key: &SNode) -> Option<String> {
+    symbol_like_value(&key.node).map(str::to_string)
 }
 
 fn is_trigger_spec(node: &Node) -> bool {
