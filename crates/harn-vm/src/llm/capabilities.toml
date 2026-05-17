@@ -1498,6 +1498,25 @@ prefers_role_developer = false
 prefers_xml_tools = false
 thinking_block_style = "none"
 
+# Meta Llama 3+ routes through OpenRouter to providers (Together, Fireworks,
+# Cloudflare, etc.) that all expose OpenAI-compatible function-calling and
+# JSON-schema structured output. Surfacing the capability lets eval harnesses
+# and downstream callers use these models for structured-output workloads
+# without per-call workarounds. (Discovered while running the #1698 go/no-go
+# cell — `meta-llama/llama-3.3-70b-instruct` was previously rejected at the
+# capability gate even though every upstream provider supports it.)
+[[provider.openrouter]]
+model_match = "meta-llama/llama-3*"
+native_tools = true
+structured_output = "native"
+prefers_xml_scaffolding = false
+prefers_markdown_scaffolding = true
+structured_output_mode = "native_json"
+supports_assistant_prefill = false
+prefers_role_developer = false
+prefers_xml_tools = false
+thinking_block_style = "none"
+
 # ---------- Together reasoning models ----------------------------------------
 #
 # Together exposes three reasoning surfaces today:

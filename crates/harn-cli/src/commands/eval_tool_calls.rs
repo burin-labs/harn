@@ -590,6 +590,13 @@ fn planner_script(
     let tool_format_line = tool_format
         .map(|format| format!("      tool_format: {},\n", json_string_literal(format)))
         .unwrap_or_default();
+    // Deliberately no planner system prompt. The PEAR-style eval is meant
+    // to measure a *weak* planner against the binder's lift — adding a
+    // curated system prompt strengthens the planner enough that some
+    // tests measure the wrong thing (literal extraction wins on some
+    // cases, hurts on others where the schema field implies a canonical
+    // form like "CA" for `country_code` or "errors" for the user's
+    // explicit plural). See discussion on #1698.
     format!(
         "pipeline main() {{\n\
   let tools = json_parse({tools_lit})\n\
@@ -673,35 +680,66 @@ fn predicate_judge_script(
 fn binder_prompt(case: &ToolCallEvalCase, planner_response: &JsonValue) -> String {
     let tools = serde_json::to_string_pretty(&case.tools).unwrap_or_default();
     let planner = serde_json::to_string_pretty(planner_response).unwrap_or_default();
-    // Authority is the user prompt + the tool schema — NOT the planner's
-    // output. The planner's response is a hint; it may have selected the
-    // wrong tool, used the wrong capitalization, paraphrased a query,
-    // included extraneous fields, or omitted required ones. This mirrors
-    // the production middleware contract at
-    // crates/harn-stdlib/src/stdlib/llm/prompts/tool_binder_user.harn.prompt
-    // ("bind from the intent, not from these"). The earlier "canonicalize
-    // the planner response" framing was a degenerate version that
-    // rubber-stamped the planner's args verbatim and didn't actually
-    // exercise the binder pattern.
+    // Authority is the user's request + the tool schemas. The planner's
+    // response is a hint to evaluate, not a transcript to canonicalize.
+    // The binder's job is to produce the MINIMUM CORRECT tool call —
+    // strip articles, strip user-supplied quotes around literals, strip
+    // elaborations ("uses of X" → "X"), drop default args the user
+    // didn't request, coerce types to match the schema. The planner's
+    // args are useful as a starting hypothesis but should be overridden
+    // freely when needed. The two few-shot examples below pin down the
+    // failure modes the v1/v2 prompts regressed on: literal-quote
+    // insertion and surface-phrase echo.
     format!(
-        "You are a fast schema-binder. Read the user's prompt and the declared tool \
-schemas as the source of truth, then produce the single best tool-call decision.\n\
-The planner's response is a HINT only — it may pick the wrong tool, paraphrase \
-the user's query, normalize case, omit required arguments, or include extraneous \
-ones. Treat it as a suggestion to evaluate, not a transcript to canonicalize.\n\
+        "You are a fast schema-binder. The user's request and the declared tool schemas are \
+the source of truth; the planner's response is a hint to evaluate, not a transcript to \
+copy.\n\
+\n\
+Produce the MINIMUM correct tool call:\n\
+- pick exactly one declared tool, or refuse;\n\
+- argument values should be the SHORTEST faithful extraction of the user's actual target:\n\
+  - drop leading articles (\"the\", \"a\", \"an\") unless they're part of a proper noun;\n\
+  - strip the user's action verb (\"uses of X\" → \"X\"; \"information about Y\" → \"Y\"; \
+\"X plan\" → \"X\" when the user's intent is X itself, not the plan);\n\
+  - if the user wrapped a literal in single or double quotes, strip the quotes;\n\
+  - omit optional arguments the user did not request, even if they have schema defaults;\n\
+- JSON types must EXACTLY match the schema: numbers as JSON numbers (42, not \"42\"), \
+booleans as true/false, arrays as arrays. The user saying \"id is 42\" means an integer.\n\
+\n\
+Refuse (decision=refusal) ONLY when:\n\
+- no declared tool can serve the user's request, OR\n\
+- a required argument is genuinely missing and unrecoverable from the user's request, OR\n\
+- the request is purely conversational chitchat.\n\
+Refusal reason text should include the word \"no\" or \"not\" or \"cannot\", plus the \
+capability the user wanted (e.g. \"no tool for refunds\", \"cannot translate\", \"no order \
+id provided in the request\").\n\
 \n\
 Output JSON with these fields (all required):\n\
 - decision: \"call\" or \"refusal\"\n\
-- name: when decision=call, the exact declared tool name; otherwise \"\".\n\
-- arguments_json: when decision=call, a JSON-stringified object containing only \
-the arguments the chosen tool declares — copied from the user's prompt verbatim \
-where possible (preserve original capitalization, punctuation, and exact phrasing \
-from the user's request); when decision=refusal, \"{{}}\".\n\
-- reason: one short line explaining the decision.\n\
+- name: declared tool name when decision=call, else \"\".\n\
+- arguments_json: when decision=call, JSON-stringified args object; when refusal, \"{{}}\".\n\
+- reason: one short line.\n\
 \n\
-Refuse (decision=refusal) when no declared tool can serve the user's request, \
-when a required argument is missing from the user's prompt, or when the request \
-is purely conversational.\n\
+Example 1 — strip elaboration, type coercion:\n\
+  User prompt: Select email from users where id is 42.\n\
+  Correct output: {{\"decision\":\"call\",\"name\":\"sql_execute\",\
+\"arguments_json\":\"{{\\\"sql_keyword\\\":\\\"SELECT\\\",\\\"table_name\\\":\\\"users\\\",\
+\\\"columns\\\":[\\\"email\\\"],\\\"conditions\\\":{{\\\"id\\\":42}}}}\",\"reason\":\"call\"}}\n\
+  WRONG: id=\"42\" (the user said \"42\" as a number, not a string).\n\
+\n\
+Example 2 — strip user-supplied quotes around literals:\n\
+  User prompt: Translate 'good morning' to Spanish.\n\
+  Correct output: {{\"decision\":\"call\",\"name\":\"translate_text\",\
+\"arguments_json\":\"{{\\\"text\\\":\\\"good morning\\\",\\\"target_language\\\":\\\"Spanish\\\"}}\",\"reason\":\"call\"}}\n\
+  WRONG: text=\"'good morning'\" (the single quotes around \"good morning\" are part of \
+the user's notation, not part of the literal text to translate).\n\
+\n\
+Example 3 — strip elaboration, plural preserved:\n\
+  User prompt: Search the repository for uses of llm_call.\n\
+  Correct output: {{\"decision\":\"call\",\"name\":\"repo_search\",\
+\"arguments_json\":\"{{\\\"query\\\":\\\"llm_call\\\"}}\",\"reason\":\"call\"}}\n\
+  WRONG: query=\"uses of llm_call\" (the action verb \"uses of\" is the user's framing, \
+not part of the search target).\n\
 \n\
 User prompt:\n{}\n\nDeclared tools:\n{}\n\nPlanner hint:\n{}",
         case.prompt, tools, planner
