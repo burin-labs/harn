@@ -43,6 +43,24 @@ condensed series summaries instead of full per-patch history.
   is regenerated from the same `DoctorReport`, so JSON and human
   surfaces never drift.
 
+- **`harn dev --watch` incremental loop gated by interface fingerprints
+  (#1786).** New `harn dev --watch [<root>]` watches every `.harn` file
+  under `<root>` (defaulting to the cwd) and re-type-checks only the
+  modules whose public surface actually moved. Each module carries a
+  BLAKE3 **interface fingerprint** over its public types, function /
+  pipeline / tool signatures, struct + enum shapes, and `pub import`
+  re-exports — bodies, doc comments, and private helpers are
+  intentionally excluded. An edit that flips a fingerprint transitively
+  invalidates importers via `ModuleGraph::importers_of`; an edit that
+  leaves the fingerprint stable only re-checks the changed file.
+  `--json` emits an NDJSON event stream (`ready` /
+  `fingerprint_changed` / `rerun` / `diagnostics` / `tests`) wrapped in
+  the canonical `JsonEnvelope`, registered under `dev` in
+  `harn --json-schemas`. `--with-tests` extends the loop to also
+  re-run `test_*` / `@test`-attributed pipelines in each invalidated
+  module. New `harn_modules::fingerprint` module exposes
+  `fingerprint_program` / `fingerprint_file` / `fingerprint_source` for
+  reuse by editors and the bytecode cache.
 - **`harn explain HARN-<CAT>-<NNN>` text + `--json` envelope (#1748).** The
   `explain` subcommand now dispatches on registered stable diagnostic codes
   in addition to its original control-flow invariant form. `harn explain

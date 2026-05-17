@@ -1123,6 +1123,53 @@ harn watch main.harn
 harn watch --deny shell main.harn
 ```
 
+## harn dev
+
+Watch a whole Harn project and re-type-check only the modules invalidated by
+the latest edit. Invalidation is gated by per-module **interface fingerprints**
+— a stable BLAKE3 hash of every module's public surface (types, function
+signatures, `pub import` re-exports). An edit that only changes a function
+body leaves the fingerprint alone, so dependents are not re-checked. An edit
+to a public signature, struct shape, or re-export bumps the fingerprint and
+every transitive importer is invalidated and re-checked.
+
+```bash
+harn dev --watch                 # watch the current directory
+harn dev --watch ./src           # watch a specific tree
+harn dev --watch --json          # NDJSON event stream for agents/editors
+harn dev --watch --with-tests    # also re-run `test_*` pipelines per module
+```
+
+| Flag | Description |
+|---|---|
+| `--watch` | Required. Starts the incremental file-watch loop. |
+| `--json` | Emit a newline-delimited JSON event stream on stdout. Every line is a `JsonEnvelope`-wrapped event (`ready`, `fingerprint_changed`, `rerun`, `diagnostics`, `tests`). See `harn --json-schemas --command dev`. |
+| `--with-tests` | After each re-check, run every `test_*` or `@test`-attributed pipeline in the invalidated modules. |
+| `--test-timeout-ms <ms>` | Per-module test timeout when `--with-tests` is set. Defaults to `10000`. |
+| `<root>` | Optional project root. Defaults to the current working directory. |
+
+`harn dev --watch --json` event shapes (one per line):
+
+```jsonc
+// First event — the initial fingerprint snapshot.
+{"event":"ready","root":"/abs/path","modules":3,"fingerprints":{"src/lib.harn":"<hex>", ...}}
+// Public-surface diff for a single module.
+{"event":"fingerprint_changed","module":"src/lib.harn","old":"<hex>","new":"<hex>"}
+// The set of modules about to be re-checked. Driven by either a body-only
+// edit (just the changed file) or a fingerprint flip (the changed file plus
+// every transitive importer).
+{"event":"rerun","modules":["src/lib.harn","src/user.harn"]}
+// One per module re-checked.
+{"event":"diagnostics","module":"src/user.harn","count":1,"diagnostics":[{"severity":"warning","code":"HARN-ORC-001","message":"Function 'add' expects 3 arguments, got 2","line":2,"column":17}]}
+// Only emitted with `--with-tests`.
+{"event":"tests","module":"src/user.harn","passed":3,"failed":0,"failures":[]}
+```
+
+The bytecode cache (`harn precompile`) keys on transitive source content, so a
+fingerprint-stable edit still busts the entry-chunk cache for the changed
+file. `harn dev`'s contribution is the dependent-pruning half: dependents whose
+imports' fingerprints didn't move are never re-precompiled.
+
 ## harn portal
 
 Launch the local Harn observability portal for persisted runs.

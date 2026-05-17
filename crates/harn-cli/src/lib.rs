@@ -726,6 +726,9 @@ async fn async_main() {
                 commands::run::build_denied_builtins(args.deny.as_deref(), args.allow.as_deref());
             commands::run::run_watch(&args.file, denied).await;
         }
+        Command::Dev(args) => {
+            commands::dev::run(args).await;
+        }
         Command::Portal(args) => {
             commands::portal::run_portal(
                 &args.dir,
