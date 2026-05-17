@@ -239,7 +239,13 @@ fn __tool_envelope(call, tools, options) {
     schema: schema,
     annotations: annotations,
     description: description,
-    turn: {iteration: options?._turn_iteration ?? 0, session_id: to_string(options?.session_id ?? "")},
+    turn: {
+      iteration: options?._turn_iteration ?? 0,
+      session_id: to_string(options?.session_id ?? ""),
+      run_id: options?.run_id ?? options?._run_id,
+      model: options?.model,
+      provider: options?.provider,
+    },
   }
 }
 
@@ -313,23 +319,29 @@ fn __invoke_tool(call, tools, options) {
   }
   let r = unwrap(outcome)
   __validate_tool_caller_result(r)
-  __maybe_emit_tool_audit(envelope.turn.session_id, envelope, r?.audit)
+  __maybe_emit_tool_audit(envelope.turn.session_id, envelope, r?.audit, r?.receipt)
   return r
 }
 
-fn __maybe_emit_tool_audit(session_id, envelope, audit) {
-  if audit == nil {
+fn __maybe_emit_tool_audit(session_id, envelope, audit, receipt = nil) {
+  if audit == nil && receipt == nil {
     return
   }
   if session_id == "" {
     return
   }
+  let payload = if receipt == nil {
+    {tool_call_id: envelope.call_id, tool_name: envelope.tool_name, audit: audit}
+  } else {
+    {
+      tool_call_id: envelope.call_id,
+      tool_name: envelope.tool_name,
+      audit: audit ?? {},
+      receipt: receipt,
+    }
+  }
   let _ = try {
-    agent_emit_event(
-      session_id,
-      "tool_call_audit",
-      {tool_call_id: envelope.call_id, tool_name: envelope.tool_name, audit: audit},
-    )
+    agent_emit_event(session_id, "tool_call_audit", payload)
   }
 }
 

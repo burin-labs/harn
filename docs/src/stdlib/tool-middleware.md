@@ -130,16 +130,38 @@ the model omits the synthetic `reason` field, while still recording
 `"(no reason given)"` in the audit summary.
 
 ```harn,ignore
-let mw = with_required_reason()
+let mw = with_required_reason({schema_required: false})
 let registry = tools_use_middleware(my_registry, mw.schema_transform)
 agent_loop(task, system, {tools: registry, tool_caller: mw.caller})
 ```
 
-### `with_audit_log(sink) -> caller`
+`schema_required: false` keeps runtime validation aligned with the
+default `strip: true`; the middleware still rejects calls that omit the
+reason before the tool handler runs.
 
-Pushes one record per tool call into `sink(record)` after the call
-completes. Useful for shipping audit data to a database, file, or
-observability sink. Sink exceptions are swallowed.
+### `with_audit_log(sink_or_options) -> caller`
+
+Builds one typed `ToolCallReceipt` per tool call after the call
+completes. Receipts include the required-reason summary, status,
+executor, timing, model/provider, audit metadata, and SHA-256 hashes of
+canonicalized args/results instead of raw payloads.
+
+`sink_or_options` accepts a callable sink, `"local"`, `"cloud"`,
+`"both"`, or `{sink, redact}`. Local receipts append to
+`.harn/receipts/<session_id>.jsonl`; cloud receipts mirror through the
+host event bridge; `both` writes local first and mirrors the same
+receipt. `redact` is a list of argument keys removed before `args_hash`
+is computed.
+
+```harn,ignore
+let caller = compose_tool_callers([
+  with_audit_log({sink: "both", redact: ["token", "content"]}),
+  with_required_reason({schema_required: false}).caller,
+])
+```
+
+For explicit file routing, `local_receipt_sink(session_id)` returns the
+same append-only JSONL sink used by `sink: "local"`.
 
 ### `with_consent(prompt_fn) -> caller`
 
@@ -225,10 +247,10 @@ outermost. This mirrors `compose` in `std/llm/handlers`.
 
 ```harn,ignore
 let caller = compose_tool_callers([
-  with_audit_log(sink),
+  with_audit_log({sink: "both", redact: ["token", "content"]}),
   with_consent(prompt),
   with_redaction(redactor),
-  with_required_reason().caller,
+  with_required_reason({schema_required: false}).caller,
 ])
 ```
 
@@ -255,10 +277,10 @@ import {
   with_telemetry,
 } from "std/llm/tool_middleware"
 
-let reason_mw = with_required_reason()
+let reason_mw = with_required_reason({schema_required: false})
 
 let captain_tool_caller = compose_tool_callers([
-  with_audit_log(receipts_sink),               // every dispatch → audit ledger
+  with_audit_log({sink: "both", redact: ["token", "content"]}), // typed tool receipts
   with_telemetry(otel_sink),                   // gen_ai.tool.* spans
   with_summary({ call, _r -> describe(call) }), // user-facing one-liner
   with_consent(persona.autonomy_policy),       // act_with_approval gate

@@ -56,6 +56,19 @@ public enum HarnProtocolConstants {
         "visible_delta",
         "visible_text",
     ]
+    public static let toolCallReceiptStatuses: [String] = [
+        "ok",
+        "schema_violation",
+        "consent_denied",
+        "timeout",
+        "error",
+    ]
+    public static let toolCallReceiptExecutors: [String] = [
+        "harn",
+        "host_bridge",
+        "mcp_server",
+        "provider_native",
+    ]
 }
 
 public enum HarnACPAgentMethod: String, Codable, Sendable, CaseIterable {
@@ -161,6 +174,21 @@ public enum HarnWorkerStatus: String, Codable, Sendable, CaseIterable {
     case completed = "completed"
     case failed = "failed"
     case cancelled = "cancelled"
+}
+
+public enum HarnToolCallReceiptStatus: String, Codable, Sendable, CaseIterable {
+    case ok = "ok"
+    case schemaViolation = "schema_violation"
+    case consentDenied = "consent_denied"
+    case timeout = "timeout"
+    case error = "error"
+}
+
+public enum HarnToolCallReceiptExecutor: String, Codable, Sendable, CaseIterable {
+    case harn = "harn"
+    case hostBridge = "host_bridge"
+    case mcpServer = "mcp_server"
+    case providerNative = "provider_native"
 }
 
 public enum HarnA2ATaskState: String, Codable, Sendable, CaseIterable {
@@ -621,6 +649,50 @@ public struct HarnToolLifecycleMeta: Codable, Sendable, Equatable {
     public var executor: HarnACPToolExecutor?
     public var parsing: Bool?
     public var rawInputPartial: String?
+}
+
+public struct HarnToolCallReceipt: Codable, Sendable, Equatable {
+    public var schemaVersion: Int
+    public var sessionId: String
+    public var runId: String?
+    public var toolCallId: String
+    public var toolName: String
+    public var iteration: Int
+    public var turnIndex: Int?
+    public var reason: String?
+    public var kind: String?
+    public var executor: HarnToolCallReceiptExecutor?
+    public var status: HarnToolCallReceiptStatus
+    public var errorCategory: String?
+    public var durationMs: Int
+    public var argsHash: String
+    public var resultHash: String?
+    public var audit: HarnACPValue
+    public var emittedAt: String
+    public var model: String?
+    public var provider: String?
+
+    enum CodingKeys: String, CodingKey {
+        case schemaVersion = "schema_version"
+        case sessionId = "session_id"
+        case runId = "run_id"
+        case toolCallId = "tool_call_id"
+        case toolName = "tool_name"
+        case iteration
+        case turnIndex = "turn_index"
+        case reason
+        case kind
+        case executor
+        case status
+        case errorCategory = "error_category"
+        case durationMs = "duration_ms"
+        case argsHash = "args_hash"
+        case resultHash = "result_hash"
+        case audit
+        case emittedAt = "emitted_at"
+        case model
+        case provider
+    }
 }
 
 public struct HarnACPToolCall: Codable, Sendable, Equatable {

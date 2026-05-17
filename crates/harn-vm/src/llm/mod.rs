@@ -122,6 +122,7 @@ mod healthcheck;
 pub(crate) mod provider;
 pub(crate) mod providers;
 pub(crate) mod rate_limit;
+pub mod receipts;
 mod stream;
 pub(crate) mod tools;
 mod trace;

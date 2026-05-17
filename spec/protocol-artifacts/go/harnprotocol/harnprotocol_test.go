@@ -235,6 +235,25 @@ func TestRoundTripFixture(t *testing.T) {
 		}
 		assertRoundTrip(t, "MCPTool", raw, out)
 	})
+
+	t.Run("ToolCallReceipt", func(t *testing.T) {
+		raw, ok := fixture["toolCallReceipt"]
+		if !ok {
+			t.Fatal("fixture missing toolCallReceipt")
+		}
+		var receipt ToolCallReceipt
+		if err := json.Unmarshal(raw, &receipt); err != nil {
+			t.Fatalf("decode tool call receipt: %v", err)
+		}
+		if receipt.SchemaVersion != 1 {
+			t.Fatalf("expected schema_version=1, got %d", receipt.SchemaVersion)
+		}
+		out, err := json.Marshal(receipt)
+		if err != nil {
+			t.Fatalf("encode tool call receipt: %v", err)
+		}
+		assertRoundTrip(t, "ToolCallReceipt", raw, out)
+	})
 }
 
 func mustString(t *testing.T, fixture map[string]json.RawMessage, key string) string {
@@ -330,6 +349,8 @@ func TestVocabulariesArePopulated(t *testing.T) {
 		{"ACPToolCallStatuses", ACPToolCallStatuses},
 		{"HarnToolCallErrorCategories", HarnToolCallErrorCategories},
 		{"HarnSideEffectLevels", HarnSideEffectLevels},
+		{"ToolCallReceiptStatuses", ToolCallReceiptStatuses},
+		{"ToolCallReceiptExecutors", ToolCallReceiptExecutors},
 		{"A2ATaskStates", A2ATaskStates},
 		{"A2ATaskEventTypes", A2ATaskEventTypes},
 		{"MCPMethods", MCPMethods},

@@ -1,0 +1,83 @@
+import { agent_capture_events } from "std/agent/events"
+import { read_jsonl } from "std/jsonl"
+import {
+  compose_tool_callers,
+  tools_use_middleware,
+  with_audit_log,
+  with_required_reason,
+} from "std/llm/tool_middleware"
+
+fn receipt_tools() {
+  let registry = tool_registry()
+  return tool_define(
+    registry,
+    "echo_receipt",
+    "Echo a message",
+    {
+      handler: { args -> return {echoed: to_string(args?.message ?? "")} },
+      parameters: {message: {type: "string"}, secret: {type: "string"}},
+    },
+  )
+}
+
+fn run_receipt_agent(session, audit_options) {
+  llm_mock_clear()
+  llm_mock(
+    {
+      tool_calls: [
+        {
+          id: "receipt-1",
+          name: "echo_receipt",
+          arguments: {message: "hello", secret: "hide-me", reason: "Need a receipt"},
+        },
+      ],
+    },
+  )
+  llm_mock({text: "Done. ##DONE##"})
+  let reason = with_required_reason({schema_required: false})
+  let tools = tools_use_middleware(receipt_tools(), reason.schema_transform)
+  let caller = compose_tool_callers([with_audit_log(audit_options), reason.caller])
+  return agent_loop(
+    "emit a tool receipt",
+    nil,
+    {
+      provider: "mock",
+      model: "mock",
+      session_id: session,
+      tools: tools,
+      tool_format: "native",
+      loop_until_done: true,
+      max_iterations: 3,
+      tool_caller: caller,
+    },
+  )
+}
+
+pipeline default() {
+  let local_session = "receipt-local-" + uuid()
+  let local_path = path_join(".harn", "receipts", local_session + ".jsonl")
+  if file_exists(local_path) {
+    delete_file(local_path)
+  }
+  let local_result = run_receipt_agent(local_session, {sink: "local", redact: ["secret"]})
+  let records = read_jsonl(local_path, {strict: true})
+  let receipt = records[0]
+  let receipt_json = json_stringify(receipt)
+  let expected_args_hash = sha256("{\"message\":\"hello\",\"reason\":\"Need a receipt\"}")
+  println("local_status=" + local_result.status)
+  println("local_records=" + to_string(len(records)))
+  println("schema_version=" + to_string(receipt.schema_version))
+  println("reason=" + receipt.reason)
+  println("receipt_status=" + receipt.status)
+  println("secret_redacted=" + to_string(!contains(receipt_json, "hide-me")))
+  println("args_hash_redacted=" + to_string(receipt.args_hash == expected_args_hash))
+  println("result_hash_present=" + to_string(len(to_string(receipt.result_hash ?? "")) == 64))
+  let cloud_session = "receipt-cloud-" + uuid()
+  let captured = agent_capture_events(
+    cloud_session,
+    fn() { return run_receipt_agent(cloud_session, {sink: "cloud", redact: ["secret"]}) },
+  )
+  let receipt_events = captured.events.filter({ event -> event.type == "tool_call_audit" && event?.receipt != nil })
+  println("cloud_receipts=" + to_string(len(receipt_events)))
+  println("cloud_reason=" + receipt_events[0].receipt.reason)
+}

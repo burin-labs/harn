@@ -1,0 +1,145 @@
+{
+  "$id": "https://harnlang.com/schemas/tool-call-receipt.v1.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "properties": {
+    "args_hash": {
+      "pattern": "^[a-f0-9]{64}$",
+      "type": "string"
+    },
+    "audit": true,
+    "duration_ms": {
+      "minimum": 0,
+      "type": "integer"
+    },
+    "emitted_at": {
+      "format": "date-time",
+      "type": "string"
+    },
+    "error_category": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "executor": {
+      "enum": [
+        "harn",
+        "host_bridge",
+        "mcp_server",
+        "provider_native",
+        null
+      ],
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "iteration": {
+      "minimum": 0,
+      "type": "integer"
+    },
+    "kind": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "model": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "provider": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "reason": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "result_hash": {
+      "anyOf": [
+        {
+          "pattern": "^[a-f0-9]{64}$",
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "run_id": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "schema_version": {
+      "const": 1,
+      "description": "Receipt schema version. Starts at 1.",
+      "type": "integer"
+    },
+    "session_id": {
+      "minLength": 1,
+      "type": "string"
+    },
+    "status": {
+      "enum": [
+        "ok",
+        "schema_violation",
+        "consent_denied",
+        "timeout",
+        "error"
+      ],
+      "type": "string"
+    },
+    "tool_call_id": {
+      "minLength": 1,
+      "type": "string"
+    },
+    "tool_name": {
+      "minLength": 1,
+      "type": "string"
+    },
+    "turn_index": {
+      "minimum": 0,
+      "type": [
+        "integer",
+        "null"
+      ]
+    }
+  },
+  "required": [
+    "schema_version",
+    "session_id",
+    "run_id",
+    "tool_call_id",
+    "tool_name",
+    "iteration",
+    "turn_index",
+    "reason",
+    "kind",
+    "executor",
+    "status",
+    "error_category",
+    "duration_ms",
+    "args_hash",
+    "result_hash",
+    "audit",
+    "emitted_at",
+    "model",
+    "provider"
+  ],
+  "title": "ToolCallReceipt",
+  "type": "object",
+  "x-harn-provenance": {
+    "schemaVersion": 1,
+    "source": "crates/harn-vm/src/llm/receipts.rs"
+  }
+}

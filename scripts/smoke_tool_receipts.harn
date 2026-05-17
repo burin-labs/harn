@@ -1,0 +1,63 @@
+import { read_jsonl } from "std/jsonl"
+import {
+  compose_tool_callers,
+  tools_use_middleware,
+  with_audit_log,
+  with_required_reason,
+} from "std/llm/tool_middleware"
+
+fn smoke_tools() {
+  let registry = tool_registry()
+  return tool_define(
+    registry,
+    "receipt_echo",
+    "Echo receipt smoke input",
+    {
+      handler: { args -> return {echoed: to_string(args?.message ?? "")} },
+      parameters: {message: {type: "string"}, token: {type: "string"}},
+    },
+  )
+}
+
+pipeline default() {
+  let session = "smoke-tool-receipts-" + uuid()
+  let receipt_path = path_join(".harn", "receipts", session + ".jsonl")
+  if file_exists(receipt_path) {
+    delete_file(receipt_path)
+  }
+  llm_mock_clear()
+  llm_mock(
+    {
+      tool_calls: [
+        {
+          id: "smoke-receipt-1",
+          name: "receipt_echo",
+          arguments: {message: "hello", token: "redacted", reason: "Verify receipt smoke path"},
+        },
+      ],
+    },
+  )
+  llm_mock({text: "Done. ##DONE##"})
+  let reason = with_required_reason({schema_required: false})
+  let tools = tools_use_middleware(smoke_tools(), reason.schema_transform)
+  let caller = compose_tool_callers([with_audit_log({sink: "local", redact: ["token"]}), reason.caller])
+  let result = agent_loop(
+    "smoke tool receipts",
+    nil,
+    {
+      provider: "mock",
+      model: "mock",
+      session_id: session,
+      tools: tools,
+      tool_format: "native",
+      loop_until_done: true,
+      max_iterations: 3,
+      tool_caller: caller,
+    },
+  )
+  let records = read_jsonl(receipt_path, {strict: true})
+  println("status=" + result.status)
+  println("receipt_path=" + receipt_path)
+  println("records=" + to_string(len(records)))
+  println("reason=" + records[0].reason)
+}

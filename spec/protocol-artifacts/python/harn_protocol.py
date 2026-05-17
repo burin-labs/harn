@@ -33,6 +33,8 @@ __all__ = [
     "HARN_TOOL_CALL_ERROR_CATEGORIES",
     "HARN_SIDE_EFFECT_LEVELS",
     "HARN_WORKER_STATUSES",
+    "HARN_TOOL_CALL_RECEIPT_STATUSES",
+    "HARN_TOOL_CALL_RECEIPT_EXECUTORS",
     "HARN_TOOL_LIFECYCLE_EXTENSION_FIELDS",
     "HARN_CONTENT_EXTENSION_FIELDS",
     "A2A_METHODS",
@@ -49,6 +51,8 @@ __all__ = [
     "HarnToolCallErrorCategory",
     "HarnSideEffectLevel",
     "HarnWorkerStatus",
+    "ToolCallReceiptStatus",
+    "ToolCallReceiptExecutor",
     "A2ATaskState",
     "A2ATaskEventType",
     "MCPLoggingLevel",
@@ -60,6 +64,7 @@ __all__ = [
     "HarnExtensionMeta",
     "ACPContentBlock",
     "HarnToolLifecycleMeta",
+    "ToolCallReceipt",
     "ACPToolCall",
     "ACPToolCallUpdate",
     "ACPSessionUpdateEnvelope",
@@ -218,6 +223,19 @@ HARN_WORKER_STATUSES: tuple = (
     "completed",
     "failed",
     "cancelled",
+)
+HARN_TOOL_CALL_RECEIPT_STATUSES: tuple = (
+    "ok",
+    "schema_violation",
+    "consent_denied",
+    "timeout",
+    "error",
+)
+HARN_TOOL_CALL_RECEIPT_EXECUTORS: tuple = (
+    "harn",
+    "host_bridge",
+    "mcp_server",
+    "provider_native",
 )
 HARN_TOOL_LIFECYCLE_EXTENSION_FIELDS: tuple = (
     "audit",
@@ -386,6 +404,21 @@ class HarnWorkerStatus(str, Enum):
     CANCELLED = "cancelled"
 
 
+class ToolCallReceiptStatus(str, Enum):
+    OK = "ok"
+    SCHEMA_VIOLATION = "schema_violation"
+    CONSENT_DENIED = "consent_denied"
+    TIMEOUT = "timeout"
+    ERROR = "error"
+
+
+class ToolCallReceiptExecutor(str, Enum):
+    HARN = "harn"
+    HOST_BRIDGE = "host_bridge"
+    MCP_SERVER = "mcp_server"
+    PROVIDER_NATIVE = "provider_native"
+
+
 class A2ATaskState(str, Enum):
     SUBMITTED = "submitted"
     WORKING = "working"
@@ -524,6 +557,32 @@ class HarnToolLifecycleMeta(_HarnDataclass):
     executor: Optional[JsonValue] = None
     parsing: Optional[bool] = None
     rawInputPartial: Optional[str] = None
+
+
+@dataclass
+class ToolCallReceipt(_HarnDataclass):
+    schema_version: int
+    session_id: str
+    tool_call_id: str
+    tool_name: str
+    iteration: int
+    status: str
+    duration_ms: int
+    args_hash: str
+    audit: JsonValue
+    emitted_at: str
+    run_id: Optional[str] = None
+    turn_index: Optional[int] = None
+    reason: Optional[str] = None
+    kind: Optional[str] = None
+    executor: Optional[str] = None
+    error_category: Optional[str] = None
+    result_hash: Optional[str] = None
+    model: Optional[str] = None
+    provider: Optional[str] = None
+
+    def to_wire(self) -> JsonObject:
+        return asdict(self)
 
 
 @dataclass

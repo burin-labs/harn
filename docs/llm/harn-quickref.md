@@ -2509,17 +2509,23 @@ import {
   compose_tool_callers, tools_use_middleware,
 } from "std/llm/tool_middleware"
 
-let mw = with_required_reason()
+let mw = with_required_reason({schema_required: false})
 let registry = tools_use_middleware(my_registry, mw.schema_transform)
 
 let caller = compose_tool_callers([
-  with_audit_log({ record -> persist_audit(record) }),
+  with_audit_log({sink: "both", redact: ["token", "content"]}),
   with_consent({ call -> ask_human(call) }),
   mw.caller,
 ])
 
 agent_loop(task, system, {tools: registry, tool_caller: caller})
 ```
+
+`with_audit_log` emits typed `ToolCallReceipt` records with rationale,
+status, timing, model/provider, and hashes instead of raw args/results.
+Use `sink: "local"` for `.harn/receipts/<session_id>.jsonl`,
+`sink: "cloud"` for host bridge mirroring, or `sink: "both"` for both
+paths.
 
 The caller signature is `fn(call, next) -> result_dict` where
 `call = {tool_name, tool_args, call_id, declared_executor, schema, description, turn}`

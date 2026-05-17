@@ -25,6 +25,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::composition::{CompositionChildCall, CompositionChildResult, CompositionRunEnvelope};
 use crate::event_log::{AnyEventLog, EventLog, LogEvent as EventLogRecord, Topic};
+use crate::llm::receipts::ToolCallReceipt;
 use crate::orchestration::{HandoffArtifact, MutationSessionRecord};
 use crate::tool_annotations::ToolKind;
 
@@ -608,12 +609,15 @@ pub enum AgentEvent {
     /// existing `ToolCall` / `ToolCallUpdate` stream. The `audit` payload
     /// is intentionally free-form JSON so middleware can carry whatever
     /// shape the harness author chooses without needing protocol-level
-    /// changes per new middleware.
+    /// changes per new middleware. When present, `receipt` carries the
+    /// stable typed, privacy-preserving record hosts can persist or mirror.
     ToolCallAudit {
         session_id: String,
         tool_call_id: String,
         tool_name: String,
         audit: serde_json::Value,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        receipt: Option<ToolCallReceipt>,
     },
     /// Emitted by `std/cache::with_cache` (both the generic and LLM
     /// forms) when a cached lookup returns a hit. Carries the
@@ -1870,6 +1874,7 @@ mod tests {
             tool_call_id: "tc-1".into(),
             tool_name: "search_files".into(),
             audit: audit.clone(),
+            receipt: None,
         };
         let json = serde_json::to_value(&event).unwrap();
         assert_eq!(json["type"], "tool_call_audit");
@@ -1886,7 +1891,43 @@ mod tests {
             tool_call_id: "tc".into(),
             tool_name: "read".into(),
             audit: serde_json::Value::Null,
+            receipt: None,
         };
         assert_eq!(event.session_id(), "abc");
+    }
+
+    #[test]
+    fn tool_call_audit_serializes_typed_receipt_when_present() {
+        let receipt = ToolCallReceipt {
+            schema_version: 1,
+            session_id: "s".into(),
+            run_id: None,
+            tool_call_id: "tc-1".into(),
+            tool_name: "search_files".into(),
+            iteration: 3,
+            turn_index: Some(2),
+            reason: Some("Search for middleware".into()),
+            kind: Some("search".into()),
+            executor: Some("harn".into()),
+            status: "ok".into(),
+            error_category: None,
+            duration_ms: 9,
+            args_hash: "0".repeat(64),
+            result_hash: Some("1".repeat(64)),
+            audit: serde_json::json!({"summary": "Search for middleware"}),
+            emitted_at: "2026-05-16T00:00:00Z".into(),
+            model: Some("mock".into()),
+            provider: Some("mock".into()),
+        };
+        let event = AgentEvent::ToolCallAudit {
+            session_id: "s".into(),
+            tool_call_id: "tc-1".into(),
+            tool_name: "search_files".into(),
+            audit: receipt.audit.clone(),
+            receipt: Some(receipt.clone()),
+        };
+        let json = serde_json::to_value(&event).unwrap();
+        assert_eq!(json["receipt"], serde_json::to_value(receipt).unwrap());
+        assert_eq!(json["receipt"]["args_hash"], "0".repeat(64));
     }
 }
