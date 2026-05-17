@@ -615,6 +615,7 @@ async fn persona_supervision_tail_projects_multiplexed_ndjson_contract() {
         schedules: Vec::new(),
         triggers: Vec::new(),
         budget: harn_vm::PersonaBudgetPolicy::default(),
+        stages: Vec::new(),
     };
     let _ = harn_vm::report_repair_worker_status(
         &log,

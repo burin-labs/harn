@@ -223,6 +223,24 @@ pub(crate) fn run_inspect(manifest: Option<&Path>, args: &PersonaInspectArgs) {
             println!("{detail}");
         }
     }
+    if !persona.stages.is_empty() {
+        println!("stages:");
+        for stage in &persona.stages {
+            let tools = stage
+                .allowed_tools
+                .as_deref()
+                .map(comma_or_dash)
+                .unwrap_or_else(|| "inherit".to_string());
+            let mut detail = format!("  - {} tools={tools}", stage.name);
+            if let Some(level) = stage.side_effect_level.as_deref() {
+                detail.push_str(&format!(" side_effect={level}"));
+            }
+            if let Some(max) = stage.max_iterations {
+                detail.push_str(&format!(" max_iterations={max}"));
+            }
+            println!("{detail}");
+        }
+    }
     if let Some(owner) = &persona.owner {
         println!("owner:          {owner}");
     }
@@ -541,36 +559,10 @@ fn runtime_binding_or_err(
                 catalog.manifest_path.display()
             )
         })?;
-    Ok(harn_vm::PersonaRuntimeBinding {
-        name: persona.name.clone().unwrap_or_default(),
-        template_ref: persona_template_ref(persona),
-        entry_workflow: persona.entry_workflow.clone().unwrap_or_default(),
-        schedules: persona.schedules.clone(),
-        triggers: persona.triggers.clone(),
-        budget: harn_vm::PersonaBudgetPolicy {
-            daily_usd: persona.budget.daily_usd,
-            hourly_usd: persona.budget.hourly_usd,
-            run_usd: persona.budget.run_usd,
-            max_tokens: persona.budget.max_tokens,
-        },
-    })
-}
-
-fn persona_template_ref(persona: &PersonaManifestEntry) -> Option<String> {
-    persona
-        .package_source
-        .package
-        .as_ref()
-        .zip(persona.version.as_ref())
-        .map(|(package, version)| format!("{package}@{version}"))
-        .or_else(|| persona.package_source.package.clone())
-        .or_else(|| {
-            persona
-                .name
-                .as_ref()
-                .zip(persona.version.as_ref())
-                .map(|(name, version)| format!("{name}@{version}"))
-        })
+    Ok(crate::package::persona_runtime_binding(
+        persona.name.as_deref().unwrap_or_default(),
+        persona,
+    ))
 }
 
 pub(super) fn open_persona_log(state_dir: &Path) -> Result<Arc<AnyEventLog>, String> {
@@ -767,6 +759,7 @@ fn persona_to_json(
         "context_packs": &persona.context_packs,
         "evals": &persona.evals,
         "steps": &persona.steps,
+        "stages": &persona.stages,
         "owner": persona.owner.as_deref(),
         "package_source": {
             "package": persona.package_source.package.as_deref(),

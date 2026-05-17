@@ -1,0 +1,76 @@
+/**
+ * Per-stage policy scoping (harn#1701):
+ * `@persona(stages: [...])` declares per-stage tool allowlists. While the
+ * matching `@step` runs the runtime pushes a CapabilityPolicy whose tool
+ * surface equals the stage's `allowed_tools`. Tool calls outside that
+ * surface come back as `permission_denied` receipts; in-stage calls
+ * dispatch normally. The execution policy stack is empty once every step
+ * frame unwinds.
+ */
+fn stage_tools() {
+  var tools = tool_registry()
+  tools = tool_define(
+    tools,
+    "read",
+    "Read",
+    {
+      handler: { _args -> "read-ok" },
+      parameters: {},
+      returns: {type: "string"},
+      annotations: {kind: "read"},
+    },
+  )
+  tools = tool_define(
+    tools,
+    "edit",
+    "Edit",
+    {
+      handler: { _args -> "edit-ok" },
+      parameters: {},
+      returns: {type: "string"},
+      annotations: {kind: "edit"},
+    },
+  )
+  return tools
+}
+
+@persona(name: "scoped_persona", stages: [{name: "research", allowed_tools: ["read"]}, {name: "edit_phase", allowed_tools: ["edit"]}])
+fn scoped_persona(ctx) {
+  let r = research_step(ctx)
+  let e = edit_phase_step(ctx)
+  return {research: r, edit: e}
+}
+
+@step(name: "research")
+fn research_step(ctx) {
+  let tools = ctx.tools
+  let in_scope = agent_dispatch_tool_call({name: "read", arguments: {}}, tools)
+  let out_of_scope = agent_dispatch_tool_call({name: "edit", arguments: {}}, tools)
+  return {in_scope: in_scope, out_of_scope: out_of_scope}
+}
+
+@step(name: "edit_phase")
+fn edit_phase_step(ctx) {
+  let tools = ctx.tools
+  let in_scope = agent_dispatch_tool_call({name: "edit", arguments: {}}, tools)
+  let out_of_scope = agent_dispatch_tool_call({name: "read", arguments: {}}, tools)
+  return {in_scope: in_scope, out_of_scope: out_of_scope}
+}
+
+pipeline main() {
+  let tools = stage_tools()
+  let outcome = scoped_persona({tools: tools})
+  println(outcome.research.in_scope.ok)
+  println(outcome.research.in_scope.rendered_result)
+  println(outcome.research.out_of_scope.ok)
+  println(outcome.research.out_of_scope.error_category)
+  println(outcome.edit.in_scope.ok)
+  println(outcome.edit.in_scope.rendered_result)
+  println(outcome.edit.out_of_scope.ok)
+  println(outcome.edit.out_of_scope.error_category)
+  // After every stage unwinds the per-stage policy is gone, so an ambient
+  // dispatch should pass.
+  let ambient = agent_dispatch_tool_call({name: "edit", arguments: {}}, tools)
+  println(ambient.ok)
+  println(ambient.rendered_result)
+}

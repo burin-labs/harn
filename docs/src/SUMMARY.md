@@ -61,6 +61,7 @@
 - [Skills](./skills.md)
 - [Personas](./personas.md)
   - [Persona Prelude](./personas/prelude.md)
+  - [Per-stage tool scoping](./personas/stages.md)
   - [Profile bulletins](./personas/profile-bulletins.md)
   - [Merge Captain](./personas/merge-captain.md)
 - [Skill provenance](./skill-provenance.md)

@@ -1,7 +1,8 @@
 use super::errors::PackageError;
 use super::*;
 pub use harn_modules::personas::{
-    PersonaAutonomyTier, PersonaManifestEntry, PersonaValidationError, ResolvedPersonaManifest,
+    PersonaAutonomyTier, PersonaManifestEntry, PersonaStageDecl, PersonaStageExit,
+    PersonaValidationError, ResolvedPersonaManifest,
 };
 
 #[derive(Debug, Clone, Deserialize)]

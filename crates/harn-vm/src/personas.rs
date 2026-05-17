@@ -65,6 +65,51 @@ pub struct PersonaRuntimeBinding {
     pub triggers: Vec<String>,
     #[serde(default)]
     pub budget: PersonaBudgetPolicy,
+    /// Ordered stage declarations. Each stage names a `@step` and narrows the
+    /// runtime capability surface for the duration of that step (see
+    /// `crates/harn-vm/src/step_runtime.rs`). Empty means the persona keeps
+    /// the ambient `CapabilityPolicy`.
+    #[serde(default)]
+    pub stages: Vec<StageDecl>,
+}
+
+/// Per-stage narrowing of the runtime tool surface.
+///
+/// `name` matches a `@step` declaration on the persona. When that step's
+/// frame is entered the runtime pushes a `CapabilityPolicy` whose `tools`
+/// allowlist is `allowed_tools` (when set) and whose side-effect ceiling is
+/// `side_effect_level` (when set). Both narrow the ambient policy — the
+/// existing ceiling still applies, this just adds a tighter scope.
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+pub struct StageDecl {
+    pub name: String,
+    /// Tool allowlist for the stage. `None` (omitted) inherits the
+    /// persona-level allowlist; `Some(vec![])` denies every tool.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub allowed_tools: Option<Vec<String>>,
+    /// Optional side-effect ceiling override (`none` / `read_only` /
+    /// `workspace_write` / `process_exec` / `network`). Tightens, never
+    /// loosens, the ambient ceiling.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub side_effect_level: Option<String>,
+    /// Optional agent-loop iteration cap for the stage. Surfaced for
+    /// downstream consumers; `agent_loop` reads it via the persona binding.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub max_iterations: Option<u32>,
+    /// Exit transitions that name the next stage on success/failure plus an
+    /// optional explicit policy override.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub on_exit: Option<StageExit>,
+}
+
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+pub struct StageExit {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub on_complete: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub on_failure: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub policy_override: Option<crate::orchestration::CapabilityPolicy>,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -1982,6 +2027,7 @@ mod tests {
                 run_usd: Some(0.02),
                 max_tokens: Some(100),
             },
+            stages: Vec::new(),
         }
     }
 

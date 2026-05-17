@@ -181,7 +181,7 @@ pub use personas::{
     PersonaRunReceipt, PersonaRuntimeBinding, PersonaStatus, PersonaSupervisionEvent,
     PersonaSupervisionSink, PersonaSupervisionSinkRegistration, PersonaTriggerEnvelope,
     PersonaValueEvent, PersonaValueEventKind, PersonaValueReceipt, PersonaValueSink,
-    PersonaValueSinkRegistration, PERSONA_RUNTIME_TOPIC,
+    PersonaValueSinkRegistration, StageDecl, StageExit, PERSONA_RUNTIME_TOPIC,
 };
 pub use provenance::{
     build_signed_receipt, load_or_generate_agent_signing_key, verify_receipt, ProvenanceReceipt,

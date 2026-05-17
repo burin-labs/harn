@@ -52,6 +52,42 @@ pub struct PersonaManifestEntry {
     pub rollout_policy: PersonaRolloutPolicy,
     #[serde(default)]
     pub steps: Vec<PersonaStepMetadata>,
+    /// Per-stage tool-surface narrowing. Each stage names a `@step` and
+    /// declares the tools / side-effect ceiling enforced while that step
+    /// runs.
+    #[serde(default)]
+    pub stages: Vec<PersonaStageDecl>,
+    #[serde(flatten, default)]
+    pub extra: BTreeMap<String, toml::Value>,
+}
+
+/// Stage declaration carried on a `PersonaManifestEntry`.
+///
+/// Mirrors the runtime `harn_vm::StageDecl` shape so loaders can map
+/// directly. `allowed_tools = None` means "inherit the persona-level
+/// tool list"; `Some(vec![])` means "deny every tool while this stage is
+/// active".
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+pub struct PersonaStageDecl {
+    pub name: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub allowed_tools: Option<Vec<String>>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub side_effect_level: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub max_iterations: Option<u32>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub on_exit: Option<PersonaStageExit>,
+    #[serde(flatten, default)]
+    pub extra: BTreeMap<String, toml::Value>,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+pub struct PersonaStageExit {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub on_complete: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub on_failure: Option<String>,
     #[serde(flatten, default)]
     pub extra: BTreeMap<String, toml::Value>,
 }
@@ -343,6 +379,7 @@ pub fn extract_personas_from_program(program: &[SNode]) -> PersonaManifestDocume
                 .and_then(|value| PersonaReceiptPolicy::from_str(value).ok())
                 .or(Some(PersonaReceiptPolicy::Optional)),
             steps,
+            stages: attr_stage_list(persona_attr),
             ..PersonaManifestEntry::default()
         });
     }
@@ -404,6 +441,55 @@ fn node_string(node: &SNode) -> Option<String> {
         }
         _ => None,
     }
+}
+
+fn attr_stage_list(attr: &Attribute) -> Vec<PersonaStageDecl> {
+    let Some(value) = attr.named_arg("stages") else {
+        return Vec::new();
+    };
+    let Node::ListLiteral(entries) = &value.node else {
+        return Vec::new();
+    };
+    let mut out = Vec::with_capacity(entries.len());
+    for entry in entries {
+        let Node::DictLiteral(fields) = &entry.node else {
+            continue;
+        };
+        let mut stage = PersonaStageDecl::default();
+        for dict_entry in fields {
+            let Some(key) = entry_key(&dict_entry.key) else {
+                continue;
+            };
+            match key {
+                "name" => {
+                    if let Some(name) = node_string(&dict_entry.value) {
+                        stage.name = name;
+                    }
+                }
+                "allowed_tools" => {
+                    if let Node::ListLiteral(items) = &dict_entry.value.node {
+                        let tools: Vec<String> = items.iter().filter_map(node_string).collect();
+                        stage.allowed_tools = Some(tools);
+                    }
+                }
+                "side_effect_level" => {
+                    stage.side_effect_level = node_string(&dict_entry.value);
+                }
+                "max_iterations" => {
+                    if let Node::IntLiteral(n) = dict_entry.value.node {
+                        if n >= 0 {
+                            stage.max_iterations = Some(n as u32);
+                        }
+                    }
+                }
+                _ => {}
+            }
+        }
+        if !stage.name.is_empty() {
+            out.push(stage);
+        }
+    }
+    out
 }
 
 fn attr_retry(attr: &Attribute) -> Option<PersonaStepRetry> {
@@ -837,6 +923,7 @@ pub fn validate_persona(
         }
     }
     validate_persona_budget(manifest_path, &root, &persona.budget, errors);
+    validate_persona_stages(manifest_path, &root, persona, context, errors);
     validate_persona_nested_extra(
         manifest_path,
         &root,
@@ -969,6 +1056,101 @@ pub fn validate_persona_nested_extra(
             format!("unknown {field} field"),
             errors,
         );
+    }
+}
+
+pub fn validate_persona_stages(
+    manifest_path: &Path,
+    root: &str,
+    persona: &PersonaManifestEntry,
+    context: &PersonaValidationContext,
+    errors: &mut Vec<PersonaValidationError>,
+) {
+    let stage_names: BTreeSet<&str> = persona
+        .stages
+        .iter()
+        .map(|stage| stage.name.as_str())
+        .collect();
+    let mut seen = BTreeSet::new();
+    for (index, stage) in persona.stages.iter().enumerate() {
+        let field = format!("{root}.stages[{index}]");
+        if stage.name.trim().is_empty() {
+            persona_error(
+                manifest_path,
+                format!("{field}.name"),
+                "stage name must not be empty",
+                errors,
+            );
+        } else {
+            validate_tokenish(manifest_path, &field, "name", &stage.name, errors);
+            if !seen.insert(stage.name.as_str()) {
+                persona_error(
+                    manifest_path,
+                    format!("{field}.name"),
+                    format!("duplicate stage name '{}'", stage.name),
+                    errors,
+                );
+            }
+        }
+        validate_persona_nested_extra(manifest_path, &field, "stages", &stage.extra, errors);
+        if let Some(tools) = stage.allowed_tools.as_ref() {
+            for tool in tools {
+                if tool.trim().is_empty() {
+                    persona_error(
+                        manifest_path,
+                        format!("{field}.allowed_tools"),
+                        "allowed_tools entries must not be empty",
+                        errors,
+                    );
+                    continue;
+                }
+                if !context.known_tools.is_empty() && !context.known_tools.contains(tool) {
+                    persona_error(
+                        manifest_path,
+                        format!("{field}.allowed_tools"),
+                        format!("unknown tool '{tool}'"),
+                        errors,
+                    );
+                } else if !persona.tools.is_empty() && !persona.tools.contains(tool) {
+                    persona_error(
+                        manifest_path,
+                        format!("{field}.allowed_tools"),
+                        format!("tool '{tool}' is not part of the persona-level tools allowlist"),
+                        errors,
+                    );
+                }
+            }
+        }
+        if let Some(level) = stage.side_effect_level.as_deref() {
+            match level {
+                "none" | "read_only" | "workspace_write" | "process_exec" | "network" => {}
+                _ => persona_error(
+                    manifest_path,
+                    format!("{field}.side_effect_level"),
+                    format!(
+                        "unknown side_effect_level '{level}' (expected none, read_only, workspace_write, process_exec, or network)"
+                    ),
+                    errors,
+                ),
+            }
+        }
+        if let Some(exit) = stage.on_exit.as_ref() {
+            validate_persona_nested_extra(manifest_path, &field, "on_exit", &exit.extra, errors);
+            for (key, target) in [
+                ("on_complete", exit.on_complete.as_deref()),
+                ("on_failure", exit.on_failure.as_deref()),
+            ] {
+                let Some(target) = target else { continue };
+                if !stage_names.contains(target) {
+                    persona_error(
+                        manifest_path,
+                        format!("{field}.on_exit.{key}"),
+                        format!("unknown stage '{target}'"),
+                        errors,
+                    );
+                }
+            }
+        }
     }
 }
 
@@ -1154,6 +1336,137 @@ surprise = true
         assert!(fields.contains("[[personas]][0].budget.daily_usd"));
         assert!(fields.contains("[[personas]][0].budget.surprise"));
         assert!(fields.contains("[[personas]][0].surprise"));
+    }
+
+    #[test]
+    fn manifest_stages_round_trip_through_serde() {
+        let parsed = parse_persona_manifest_str(
+            r#"
+[[personas]]
+name = "scoped"
+description = "Per-stage scoping demo."
+entry_workflow = "workflows/scoped.harn#run"
+tools = ["github", "ci"]
+autonomy = "act_with_approval"
+receipts = "required"
+
+[[personas.stages]]
+name = "research"
+allowed_tools = ["github"]
+side_effect_level = "read_only"
+
+[[personas.stages]]
+name = "act"
+allowed_tools = ["github", "ci"]
+side_effect_level = "process_exec"
+max_iterations = 4
+on_exit = { on_complete = "research" }
+"#,
+        )
+        .expect("manifest parses");
+
+        validate_persona_manifests(
+            Path::new("harn.toml"),
+            &parsed.personas,
+            &context(&["scoped"]),
+        )
+        .expect("stage-scoped manifest validates");
+        let persona = &parsed.personas[0];
+        assert_eq!(persona.stages.len(), 2);
+        assert_eq!(persona.stages[0].name, "research");
+        assert_eq!(
+            persona.stages[0].allowed_tools.as_deref(),
+            Some(["github".to_string()].as_slice())
+        );
+        assert_eq!(
+            persona.stages[1]
+                .on_exit
+                .as_ref()
+                .unwrap()
+                .on_complete
+                .as_deref(),
+            Some("research")
+        );
+
+        // Round-trip via the TOML serializer to ensure the shape is stable.
+        let serialised = toml::to_string(&PersonaManifestDocument {
+            personas: parsed.personas.clone(),
+        })
+        .expect("serialize");
+        let reparsed = parse_persona_manifest_str(&serialised).expect("reparse");
+        assert_eq!(reparsed.personas, parsed.personas);
+    }
+
+    #[test]
+    fn stage_validation_flags_unknown_targets_and_levels() {
+        let parsed = parse_persona_manifest_str(
+            r#"
+[[personas]]
+name = "scoped"
+description = "Bad stages."
+entry_workflow = "workflows/scoped.harn#run"
+tools = ["github"]
+autonomy = "suggest"
+receipts = "optional"
+
+[[personas.stages]]
+name = "research"
+allowed_tools = ["ci"]
+side_effect_level = "do_anything"
+on_exit = { on_complete = "missing" }
+
+[[personas.stages]]
+name = "research"
+"#,
+        )
+        .expect("manifest parses");
+
+        let errors = validate_persona_manifests(
+            Path::new("harn.toml"),
+            &parsed.personas,
+            &context(&["scoped"]),
+        )
+        .expect_err("rejects bad stage config");
+        let fields: BTreeSet<_> = errors
+            .iter()
+            .map(|error| error.field_path.as_str())
+            .collect();
+        assert!(fields.contains("[[personas]][0].stages[0].allowed_tools"));
+        assert!(fields.contains("[[personas]][0].stages[0].side_effect_level"));
+        assert!(fields.contains("[[personas]][0].stages[0].on_exit.on_complete"));
+        assert!(fields.contains("[[personas]][0].stages[1].name"));
+    }
+
+    #[test]
+    fn source_persona_picks_up_stage_attributes() {
+        let parsed = parse_persona_source_str(
+            r#"
+@persona(name: "scoped", tools: [github, ci], stages: [
+  {name: "research", allowed_tools: [github]},
+  {name: "act", allowed_tools: [github, ci], side_effect_level: "process_exec"},
+])
+fn scoped(ctx) {
+  research(ctx)
+  act(ctx)
+}
+
+@step(name: "research") fn research(ctx) { return ctx }
+@step(name: "act") fn act(ctx) { return ctx }
+"#,
+        )
+        .expect("source persona parses");
+
+        let persona = &parsed.personas[0];
+        assert_eq!(persona.stages.len(), 2);
+        assert_eq!(persona.stages[0].name, "research");
+        assert_eq!(
+            persona.stages[0].allowed_tools.as_deref(),
+            Some(["github".to_string()].as_slice()),
+        );
+        assert_eq!(
+            persona.stages[1].side_effect_level.as_deref(),
+            Some("process_exec"),
+        );
     }
 
     #[test]

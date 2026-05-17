@@ -33,6 +33,11 @@ budget = { daily_usd = 10.0, frontier_escalations = 1, max_tokens = 60000, max_r
 model_policy = { default_model = "gpt-5.4-mini", escalation_model = "gpt-5.4", fallback_models = ["gpt-5.2"], reasoning_effort = "medium" }
 rollout_policy = { mode = "approval_only", percentage = 100, cohorts = ["template-pack"] }
 package_source = { package = "harn-persona-template-pack", path = "examples/personas" }
+stages = [
+  { name = "classify", allowed_tools = ["github", "ci"], side_effect_level = "read_only" },
+  { name = "plan_repair", allowed_tools = ["github", "ci", "linear", "notion"], side_effect_level = "read_only" },
+  { name = "apply_repair", allowed_tools = ["github", "ci"], side_effect_level = "process_exec", on_exit = { on_complete = "classify", on_failure = "plan_repair" } },
+]
 
 [[personas]]
 name = "review_captain"
