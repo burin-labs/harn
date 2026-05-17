@@ -78,6 +78,21 @@ condensed series summaries instead of full per-patch history.
   archives with `harnpack.json` at the root, computes BLAKE3 bundle hashes
   over canonical manifest bytes plus sorted content hashes, and rejects v1
   manifests with a typed schema-version error.
+- **Dependency refresh.** Bulk dependency audit and bump across the
+  workspace. Notable Cargo bumps: `jsonwebtoken` 9 → 10 (now selects
+  the `aws_lc_rs` crypto backend explicitly to match the rustls
+  provider already in use), `zip` 2 → 8 (the `flate2` Cargo feature is
+  folded into `deflate-flate2`), `sha1` 0.10 → 0.11 and `sha3` 0.11 →
+  0.12 to align with the rest of the RustCrypto family. Workspace
+  `cargo update` rolled minor/patch upgrades for aws-lc, hyper-rustls,
+  jsonschema, rustls-pki-types, tokio, tonic, tower-http, wasm-bindgen,
+  and the wasm-* tool crates. npm: portal jumps `vitest` 3 → 4 and
+  bumps `react-router-dom`, `react-intl`, `@codemirror/view`, `eslint`,
+  `vite`, and `typescript-eslint` to current. Root `@redocly/cli` and
+  vscode `@vscode/vsce` bumped to clear high/moderate `npm audit`
+  vulnerabilities in their transitive trees (`protobufjs`,
+  `fast-xml-builder`, `fast-uri`). All workspaces now report
+  `0 vulnerabilities`.
 
 ## v0.8.24
 

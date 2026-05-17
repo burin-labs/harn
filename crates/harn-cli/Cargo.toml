@@ -66,7 +66,7 @@ webbrowser = "1"
 rand = "0.10"
 regex = "1"
 jsonschema = { version = "0.46.4", default-features = false }
-jsonwebtoken = { version = "9", default-features = false, features = ["use_pem"] }
+jsonwebtoken = { version = "10", default-features = false, features = ["use_pem", "aws_lc_rs"] }
 clap = { version = "4", features = ["derive", "env", "string"] }
 clap_complete = "4"
 rpassword = "7"
