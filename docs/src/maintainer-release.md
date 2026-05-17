@@ -37,3 +37,13 @@ release PR:
 ```
 
 `scripts/publish.sh` remains the crates.io publisher used by the release gate.
+
+## Release artifacts
+
+Every published release uploads five per-target archives, a
+coreutils-format `SHA256SUMS` manifest, and a structured
+`release-assets.json` manifest. Downstream packagers
+(`burin-code/scripts/fetch-harn.sh`, the `@burin/cli` npm postinstall,
+Scoop/Homebrew formula generators) should prefer the structured
+manifest. See [Release assets manifest](./dev/release-assets-manifest.md)
+for the schema and stable URLs.

@@ -76,6 +76,7 @@ jobs:
               "harn-x86_64-apple-darwin.tar.gz"
               "harn-x86_64-pc-windows-msvc.zip"
               "harn-x86_64-unknown-linux-gnu.tar.gz"
+              "release-assets.json"
             )
 
             if [[ "$FORCE_REBUILD" == "true" ]]; then
@@ -420,6 +421,18 @@ jobs:
           sha256sum "${files[@]}" | LC_ALL=C sort -k 2 > SHA256SUMS
           cat SHA256SUMS
 
+      - name: Generate release-assets.json
+        # Per-target download manifest consumed by downstream packagers
+        # (burin-code's fetch-harn.sh, the @burin/cli npm postinstall,
+        # Scoop). See docs/src/dev/release-assets-manifest.md for the
+        # schema and consumer contract.
+        run: |
+          python3 scripts/build_release_assets_manifest.py \
+            --artifacts-dir artifacts \
+            --tag "${{ needs.setup.outputs.ref }}" \
+            --output artifacts/release-assets.json
+          cat artifacts/release-assets.json
+
       - name: Create or update GitHub release
         uses: softprops/action-gh-release@b4309332981a82ec1c5618f44dd2e27cc8bfbfda # v3.0.0
         with:
@@ -429,3 +442,4 @@ jobs:
             artifacts/*.tar.gz
             artifacts/*.zip
             artifacts/SHA256SUMS
+            artifacts/release-assets.json
