@@ -361,6 +361,10 @@ NON_TEST_WALL_CLOCK_ALLOWLIST=(
   # can correlate the run against their own activity. Same shape as the
   # existing allowlisted `run.rs` entry.
   "crates/harn-cli/src/commands/demo.rs"
+  # `harn doctor --check-providers` reports observed HTTP latency per
+  # provider — host wall clock is the source of truth, same shape as
+  # the allowlisted `run.rs` / `bench.rs` / `time.rs` entries.
+  "crates/harn-cli/src/commands/doctor.rs"
   "crates/harn-cli/src/commands/explain.rs"
   "crates/harn-cli/src/commands/flow.rs"
   # `harn local switch` stamps the selection record with the actual host
