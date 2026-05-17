@@ -23,6 +23,20 @@
       "params": {
         "sessionId": "session-1",
         "update": {
+          "sessionUpdate": "session_truncated",
+          "keptTurnCount": 1,
+          "removedTurnCount": 2,
+          "newTipTurnId": "turn-1",
+          "reason": "user_edit"
+        }
+      }
+    },
+    {
+      "jsonrpc": "2.0",
+      "method": "session/update",
+      "params": {
+        "sessionId": "session-1",
+        "update": {
           "sessionUpdate": "tool_search_query",
           "toolUseId": "search-1",
           "name": "tool_search",

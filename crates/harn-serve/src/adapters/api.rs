@@ -597,6 +597,7 @@ fn api_router(state: ApiState) -> Router {
         )
         .route("/v1/sessions/{session_id}/close", post(close_session))
         .route("/v1/sessions/{session_id}/fork", post(fork_session))
+        .route("/v1/sessions/{session_id}/truncate", post(truncate_session))
         .route(
             "/v1/sessions/{session_id}/messages",
             get(list_session_messages).post(append_session_message),
@@ -1196,6 +1197,114 @@ async fn fork_session(
     }
     state.append_event(Some(new_id), None, "session.forked", session.clone());
     (StatusCode::CREATED, Json(session)).into_response()
+}
+
+async fn truncate_session(
+    State(state): State<ApiState>,
+    AxumPath(session_id): AxumPath<String>,
+    OriginalUri(uri): OriginalUri,
+    headers: HeaderMap,
+    body: Bytes,
+) -> Response {
+    if let Err(response) = authorize(&state, Method::POST, &uri, &headers, body.clone()).await {
+        return response;
+    }
+    let Ok(input) = parse_json_body(&body) else {
+        return api_error(
+            StatusCode::BAD_REQUEST,
+            "invalid_json",
+            "request body must be JSON",
+        );
+    };
+    let keep_first = match input
+        .get("keep_first")
+        .or_else(|| input.get("keepFirst"))
+        .and_then(Value::as_i64)
+    {
+        Some(value) if value >= 0 => value as usize,
+        _ => {
+            return api_error(
+                StatusCode::BAD_REQUEST,
+                "invalid_request",
+                "keep_first must be a non-negative integer",
+            )
+        }
+    };
+    {
+        let inner = state.inner.lock().expect("api state poisoned");
+        if !inner.sessions.contains_key(&session_id) {
+            return api_error(StatusCode::NOT_FOUND, "not_found", "session not found");
+        }
+    }
+
+    let mut acp_params = json!({
+        "sessionId": session_id.clone(),
+        "keepFirst": keep_first,
+    });
+    if let Some(reason) = input.get("reason").and_then(Value::as_str) {
+        acp_params["reason"] = json!(reason);
+    }
+    let result = match state.acp.call("session/truncate", acp_params).await {
+        Ok(result) => result,
+        Err(error) => return api_error(StatusCode::BAD_GATEWAY, "acp_error", &error),
+    };
+    let kept_turn_count = result
+        .get("keptTurnCount")
+        .and_then(Value::as_u64)
+        .unwrap_or(0) as usize;
+    let removed_turn_count = result
+        .get("removedTurnCount")
+        .and_then(Value::as_u64)
+        .unwrap_or(0) as usize;
+    let new_tip_turn_id = result.get("newTipTurnId").cloned().unwrap_or(Value::Null);
+
+    let (session, canceled_task) = {
+        let mut inner = state.inner.lock().expect("api state poisoned");
+        if let Some(messages) = inner.messages.get_mut(&session_id) {
+            messages.truncate(keep_first);
+        }
+        let canceled_task_id = inner.active_task_by_session.remove(&session_id);
+        let canceled_task = canceled_task_id.and_then(|task_id| {
+            let task = inner.tasks.get_mut(&task_id)?;
+            if task.get("status").and_then(Value::as_str) != Some("CANCELED") {
+                task["status"] = json!("CANCELED");
+                task["updated_at"] = json!(now_rfc3339());
+                task["canceled_at"] = json!(now_rfc3339());
+            }
+            Some((task_id, task.clone()))
+        });
+        let Some(session) = inner.sessions.get_mut(&session_id) else {
+            return api_error(StatusCode::NOT_FOUND, "not_found", "session not found");
+        };
+        if session.get("state").and_then(Value::as_str) != Some("CLOSED") {
+            session["state"] = json!("IDLE");
+        }
+        session["updated_at"] = json!(now_rfc3339());
+        (session.clone(), canceled_task)
+    };
+    if let Some((task_id, task)) = canceled_task {
+        state.append_event(
+            Some(session_id.clone()),
+            Some(task_id),
+            "task.canceled",
+            task,
+        );
+    }
+    let response = json!({
+        "object": "session.truncate_result",
+        "session_id": session_id,
+        "kept_turn_count": kept_turn_count,
+        "removed_turn_count": removed_turn_count,
+        "new_tip_turn_id": new_tip_turn_id,
+        "session": session,
+    });
+    state.append_event(
+        Some(session_id),
+        None,
+        "session.truncated",
+        response.clone(),
+    );
+    Json(response).into_response()
 }
 
 async fn list_session_messages(
@@ -2068,7 +2177,7 @@ fn prompt_text(input: &Value) -> Option<String> {
 
 fn capability_values() -> Vec<Value> {
     vec![
-        json!({"id": "sessions", "description": "Create, inspect, fork, update, and close ACP-backed Harn sessions."}),
+        json!({"id": "sessions", "description": "Create, inspect, fork, truncate, update, and close ACP-backed Harn sessions."}),
         json!({"id": "tasks", "description": "Submit prompts asynchronously, track task status, and abort active tasks."}),
         json!({"id": "events", "description": "Read snapshots and stream live session, task, tool, permission, and runtime events over SSE."}),
         json!({"id": "permissions", "description": "Approve or deny host permission and HITL requests through the same ACP runtime path."}),
@@ -2093,6 +2202,14 @@ fn tool_values() -> Vec<Value> {
             "name": "session.cancel",
             "description": "Cancel the active prompt for a Harn session.",
             "input_schema": {"type": "object", "required": ["session_id"]},
+            "output_schema": {"type": "object"}
+        }),
+        json!({
+            "id": "harn.session.truncate",
+            "object": "tool",
+            "name": "session.truncate",
+            "description": "Drop a Harn session transcript after the first N turns.",
+            "input_schema": {"type": "object", "required": ["session_id", "keep_first"]},
             "output_schema": {"type": "object"}
         }),
         json!({
@@ -2205,6 +2322,91 @@ mod tests {
         assert_eq!(task["object"], "task");
         assert_eq!(task["status"], "WORKING");
         assert_eq!(task["session_id"], session_id);
+    }
+
+    #[tokio::test]
+    async fn local_api_truncates_session_messages() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let script = dir.path().join("agent.harn");
+        std::fs::write(&script, "pipeline main() { println(prompt) }\n").expect("write script");
+        let server = ApiServer::new(ApiServerConfig::for_pipeline(
+            script.to_string_lossy().to_string(),
+        ));
+        let app = api_router(server.state);
+
+        let response = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/v1/sessions")
+                    .header("content-type", "application/json")
+                    .body(Body::from(r#"{"workspace_id":"local"}"#))
+                    .expect("request"),
+            )
+            .await
+            .expect("session response");
+        assert_eq!(response.status(), StatusCode::CREATED);
+        let body = to_bytes(response.into_body(), usize::MAX)
+            .await
+            .expect("body");
+        let session: Value = serde_json::from_slice(&body).expect("session");
+        let session_id = session["id"].as_str().expect("session id");
+
+        for text in ["alpha", "beta"] {
+            let response = app
+                .clone()
+                .oneshot(
+                    Request::builder()
+                        .method("POST")
+                        .uri(format!("/v1/sessions/{session_id}/messages"))
+                        .header("content-type", "application/json")
+                        .body(Body::from(format!(
+                            r#"{{"role":"user","parts":[{{"type":"text","text":"{text}","visibility":"public"}}]}}"#
+                        )))
+                        .expect("request"),
+                )
+                .await
+                .expect("message response");
+            assert_eq!(response.status(), StatusCode::CREATED);
+        }
+
+        let response = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri(format!("/v1/sessions/{session_id}/truncate"))
+                    .header("content-type", "application/json")
+                    .body(Body::from(r#"{"keep_first":1,"reason":"user_edit"}"#))
+                    .expect("request"),
+            )
+            .await
+            .expect("truncate response");
+        assert_eq!(response.status(), StatusCode::OK);
+        let body = to_bytes(response.into_body(), usize::MAX)
+            .await
+            .expect("body");
+        let result: Value = serde_json::from_slice(&body).expect("truncate json");
+        assert_eq!(result["object"], "session.truncate_result");
+        assert_eq!(result["session_id"], session_id);
+
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .uri(format!("/v1/sessions/{session_id}/messages"))
+                    .body(Body::empty())
+                    .expect("request"),
+            )
+            .await
+            .expect("messages response");
+        assert_eq!(response.status(), StatusCode::OK);
+        let body = to_bytes(response.into_body(), usize::MAX)
+            .await
+            .expect("body");
+        let messages: Value = serde_json::from_slice(&body).expect("messages json");
+        assert_eq!(messages["data"].as_array().expect("messages").len(), 1);
+        assert_eq!(messages["data"][0]["parts"][0]["text"], "alpha");
     }
 
     #[tokio::test]

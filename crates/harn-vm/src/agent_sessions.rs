@@ -81,6 +81,13 @@ pub struct SessionAncestry {
     pub root_id: String,
 }
 
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct SessionTruncateResult {
+    pub kept_turn_count: usize,
+    pub removed_turn_count: usize,
+    pub new_tip_turn_id: Option<String>,
+}
+
 thread_local! {
     static SESSIONS: RefCell<HashMap<String, SessionState>> = RefCell::new(HashMap::new());
     static SESSION_CAP: Cell<usize> = const { Cell::new(DEFAULT_SESSION_CAP) };
@@ -420,39 +427,70 @@ pub fn fork_at(src_id: &str, keep_first: usize, dst_id: Option<String>) -> Optio
     })?;
     let new_id = fork(src_id, dst_id)?;
     link_child_session_with_branch(src_id, &new_id, Some(branched_at_event_index));
-    retain_first(&new_id, keep_first);
+    let _ = truncate(&new_id, keep_first);
     Some(new_id)
 }
 
 /// Truncate the session transcript to the first `keep_first`
-/// messages (opposite of `trim`, which keeps the last N). Used by
-/// `fork_at` to cut a branch at a scrubber position.
-fn retain_first(id: &str, keep_first: usize) {
+/// messages (opposite of `trim`, which keeps the last N). Returns
+/// counts and the retained tip event id when the session exists.
+pub fn truncate(id: &str, keep_first: usize) -> Option<SessionTruncateResult> {
     SESSIONS.with(|s| {
         let mut map = s.borrow_mut();
-        let Some(state) = map.get_mut(id) else {
-            return;
+        let state = map.get_mut(id)?;
+        Some(truncate_state(state, keep_first))
+    })
+}
+
+fn truncate_state(state: &mut SessionState, keep_first: usize) -> SessionTruncateResult {
+    let dict = state
+        .transcript
+        .as_dict()
+        .cloned()
+        .unwrap_or_else(BTreeMap::new);
+    let messages: Vec<VmValue> = match dict.get("messages") {
+        Some(VmValue::List(list)) => list.iter().cloned().collect(),
+        _ => Vec::new(),
+    };
+    let existing_events = match dict.get("events") {
+        Some(VmValue::List(list)) => Some(list.iter().cloned().collect::<Vec<_>>()),
+        _ => None,
+    };
+    let kept_turn_count = keep_first.min(messages.len());
+    let removed_turn_count = messages.len().saturating_sub(kept_turn_count);
+    let mut new_tip_turn_id = existing_events
+        .as_ref()
+        .map(|events| turn_event_id_for_count(events, kept_turn_count))
+        .unwrap_or_else(|| {
+            let events = crate::llm::helpers::transcript_events_from_messages(&messages);
+            turn_event_id_for_count(&events, kept_turn_count)
+        });
+
+    if removed_turn_count > 0 {
+        let retained: Vec<VmValue> = messages.into_iter().take(kept_turn_count).collect();
+        let retained_events = match existing_events {
+            Some(events) => {
+                let keep_event_count = event_prefix_len_for_messages(&events, kept_turn_count);
+                events.into_iter().take(keep_event_count).collect()
+            }
+            None => crate::llm::helpers::transcript_events_from_messages(&retained),
         };
-        let Some(dict) = state.transcript.as_dict() else {
-            return;
-        };
-        let dict = dict.clone();
-        let messages: Vec<VmValue> = match dict.get("messages") {
-            Some(VmValue::List(list)) => list.iter().cloned().collect(),
-            _ => Vec::new(),
-        };
-        let retained: Vec<VmValue> = messages.into_iter().take(keep_first).collect();
+        new_tip_turn_id = turn_event_id_for_count(&retained_events, kept_turn_count);
         let mut next = dict;
         next.insert(
             "events".to_string(),
-            VmValue::List(Rc::new(
-                crate::llm::helpers::transcript_events_from_messages(&retained),
-            )),
+            VmValue::List(Rc::new(retained_events)),
         );
         next.insert("messages".to_string(), VmValue::List(Rc::new(retained)));
+        next.remove("summary");
         state.transcript = VmValue::Dict(Rc::new(next));
-        state.last_accessed = Instant::now();
-    });
+    }
+    state.last_accessed = Instant::now();
+    SessionTruncateResult {
+        kept_turn_count,
+        removed_turn_count,
+        new_tip_turn_id,
+    }
 }
 
 /// Retain only the last `keep_last` messages in the session transcript.
@@ -1119,13 +1157,37 @@ fn branch_event_index(transcript: &VmValue, keep_first: usize) -> usize {
     let Some(VmValue::List(events)) = dict.get("events") else {
         return keep_first;
     };
+    event_prefix_len_for_messages(events, keep_first)
+}
+
+fn event_kind(event: &VmValue) -> Option<String> {
+    event
+        .as_dict()
+        .and_then(|dict| dict.get("kind"))
+        .map(VmValue::display)
+}
+
+fn event_id(event: &VmValue) -> Option<String> {
+    event
+        .as_dict()
+        .and_then(|dict| dict.get("id"))
+        .map(VmValue::display)
+}
+
+fn is_turn_event(event: &VmValue) -> bool {
+    matches!(
+        event_kind(event).as_deref(),
+        Some("message" | "tool_result")
+    )
+}
+
+fn event_prefix_len_for_messages(events: &[VmValue], keep_first: usize) -> usize {
+    if keep_first == 0 {
+        return 0;
+    }
     let mut retained_messages = 0usize;
     for (index, event) in events.iter().enumerate() {
-        let kind = event
-            .as_dict()
-            .and_then(|dict| dict.get("kind"))
-            .map(VmValue::display);
-        if matches!(kind.as_deref(), Some("message" | "tool_result")) {
+        if is_turn_event(event) {
             retained_messages += 1;
             if retained_messages == keep_first {
                 return index + 1;
@@ -1133,6 +1195,22 @@ fn branch_event_index(transcript: &VmValue, keep_first: usize) -> usize {
         }
     }
     events.len()
+}
+
+fn turn_event_id_for_count(events: &[VmValue], keep_first: usize) -> Option<String> {
+    if keep_first == 0 {
+        return None;
+    }
+    let mut retained_messages = 0usize;
+    for event in events {
+        if is_turn_event(event) {
+            retained_messages += 1;
+            if retained_messages == keep_first {
+                return event_id(event);
+            }
+        }
+    }
+    None
 }
 
 #[cfg(test)]
@@ -1306,6 +1384,76 @@ mod tests {
         // Subscribers not carried — forks start with a clean fanout list.
         assert_eq!(subscriber_count(&dst), 0);
         reset_session_store();
+    }
+
+    #[test]
+    fn truncate_retains_prefix_and_reports_removed_turns() {
+        reset_session_store();
+        let id = open_or_create(Some("truncate-prefix".into()));
+        inject_message(&id, make_msg("user", "a")).unwrap();
+        inject_message(&id, make_msg("assistant", "b")).unwrap();
+        inject_message(&id, make_msg("user", "c")).unwrap();
+        append_event(
+            &id,
+            crate::llm::helpers::transcript_event(
+                "tool_call_audit",
+                "tool",
+                "internal",
+                "audit for dropped turn",
+                None,
+            ),
+        )
+        .unwrap();
+
+        let result = truncate(&id, 2).expect("truncate result");
+        assert_eq!(result.kept_turn_count, 2);
+        assert_eq!(result.removed_turn_count, 1);
+        assert!(
+            result.new_tip_turn_id.is_some(),
+            "retained tip event id should be surfaced"
+        );
+        assert_eq!(message_count(&id), 2);
+        assert_eq!(event_count_by_kind(&id, "message"), 2);
+        assert_eq!(event_count_by_kind(&id, "tool_call_audit"), 0);
+
+        let messages = messages_json(&id);
+        assert_eq!(messages[0]["content"], "a");
+        assert_eq!(messages[1]["content"], "b");
+        reset_session_store();
+    }
+
+    #[test]
+    fn truncate_to_zero_clears_messages_events_and_stale_summary() {
+        reset_session_store();
+        let id = open_or_create(Some("truncate-zero".into()));
+        replace_messages_with_summary(
+            &id,
+            &[
+                serde_json::json!({"role": "user", "content": "before"}),
+                serde_json::json!({"role": "assistant", "content": "after"}),
+            ],
+            Some("summary that mentions removed turns"),
+        );
+
+        let result = truncate(&id, 0).expect("truncate result");
+        assert_eq!(result.kept_turn_count, 0);
+        assert_eq!(result.removed_turn_count, 2);
+        assert_eq!(result.new_tip_turn_id, None);
+        assert_eq!(message_count(&id), 0);
+        assert_eq!(event_count_by_kind(&id, "message"), 0);
+        let snapshot = snapshot(&id).expect("session snapshot");
+        let dict = snapshot.as_dict().expect("snapshot dict");
+        assert!(
+            !dict.contains_key("summary"),
+            "truncating away summarized turns must not leave stale prompt summary"
+        );
+        reset_session_store();
+    }
+
+    #[test]
+    fn truncate_unknown_session_returns_none() {
+        reset_session_store();
+        assert!(truncate("does-not-exist", 1).is_none());
     }
 
     #[test]

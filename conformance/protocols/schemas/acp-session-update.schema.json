@@ -150,6 +150,7 @@
         { "$ref": "#/$defs/CurrentModeUpdate" },
         { "$ref": "#/$defs/ConfigOptionUpdate" },
         { "$ref": "#/$defs/SessionInfoUpdate" },
+        { "$ref": "#/$defs/SessionTruncated" },
         { "$ref": "#/$defs/SkillActivated" },
         { "$ref": "#/$defs/SkillDeactivated" },
         { "$ref": "#/$defs/SkillScopeTools" },
@@ -336,6 +337,18 @@
       "additionalProperties": true,
       "properties": {
         "sessionUpdate": { "const": "session_info_update" }
+      }
+    },
+    "SessionTruncated": {
+      "type": "object",
+      "required": ["sessionUpdate", "keptTurnCount", "removedTurnCount"],
+      "additionalProperties": true,
+      "properties": {
+        "sessionUpdate": { "const": "session_truncated" },
+        "keptTurnCount": { "type": "integer", "minimum": 0 },
+        "removedTurnCount": { "type": "integer", "minimum": 0 },
+        "newTipTurnId": { "type": ["string", "null"] },
+        "reason": { "type": "string" }
       }
     },
     "SkillActivated": {

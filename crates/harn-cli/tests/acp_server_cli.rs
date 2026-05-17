@@ -335,6 +335,130 @@ fn acp_session_fork_branches_runtime_state_and_dispatches_independently() {
 
 #[ignore = "binary surface — moves to slow E2E/smoke job (issue #1069)"]
 #[test]
+fn acp_session_truncate_mutates_runtime_state_in_place() {
+    let _guard = lock_acp_cli_tests();
+    let temp = TempDir::new().unwrap();
+    write_fixture(&temp);
+
+    let mut child = harn_e2e_command()
+        .current_dir(temp.path())
+        .arg("serve")
+        .arg("acp")
+        .arg("acp_fixture.harn")
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::null())
+        .spawn()
+        .unwrap();
+
+    let mut stdin = child.stdin.take().unwrap();
+    let mut stdout = BufReader::new(child.stdout.take().unwrap());
+
+    let (_, created) = send_request(
+        &mut stdin,
+        &mut stdout,
+        json!({
+            "jsonrpc": "2.0",
+            "id": 1,
+            "method": "session/new",
+            "params": {
+                "cwd": temp.path(),
+            }
+        }),
+    );
+    let session_id = created["result"]["sessionId"].as_str().unwrap().to_string();
+
+    let (alpha_notifications, alpha_response) = send_request(
+        &mut stdin,
+        &mut stdout,
+        json!({
+            "jsonrpc": "2.0",
+            "id": 2,
+            "method": "session/prompt",
+            "params": {
+                "sessionId": session_id,
+                "prompt": [{ "type": "text", "text": "alpha" }]
+            }
+        }),
+    );
+    assert_eq!(alpha_response["result"]["stopReason"], "end_turn");
+    assert_eq!(
+        latest_prompt_summary(&alpha_notifications, &session_id)["len"],
+        1
+    );
+
+    let (beta_notifications, beta_response) = send_request(
+        &mut stdin,
+        &mut stdout,
+        json!({
+            "jsonrpc": "2.0",
+            "id": 3,
+            "method": "session/prompt",
+            "params": {
+                "sessionId": session_id,
+                "prompt": [{ "type": "text", "text": "beta" }]
+            }
+        }),
+    );
+    assert_eq!(beta_response["result"]["stopReason"], "end_turn");
+    assert_eq!(
+        latest_prompt_summary(&beta_notifications, &session_id)["len"],
+        2
+    );
+
+    let (truncate_notifications, truncate_response) = send_request(
+        &mut stdin,
+        &mut stdout,
+        json!({
+            "jsonrpc": "2.0",
+            "id": 4,
+            "method": "session/truncate",
+            "params": {
+                "sessionId": session_id,
+                "keepFirst": 1,
+                "reason": "user_edit"
+            }
+        }),
+    );
+    assert_eq!(truncate_response["result"]["sessionId"], session_id);
+    assert_eq!(truncate_response["result"]["keptTurnCount"], 1);
+    assert_eq!(truncate_response["result"]["removedTurnCount"], 1);
+    assert!(truncate_response["result"]["newTipTurnId"].is_string());
+    let truncate_update = truncate_notifications
+        .iter()
+        .find(|message| {
+            message["method"] == "session/update"
+                && message["params"]["sessionId"] == session_id
+                && message["params"]["update"]["sessionUpdate"] == "session_truncated"
+        })
+        .unwrap_or_else(|| panic!("missing session_truncated update"));
+    assert_eq!(truncate_update["params"]["update"]["reason"], "user_edit");
+
+    let (snapshot_notifications, snapshot_response) = send_request(
+        &mut stdin,
+        &mut stdout,
+        json!({
+            "jsonrpc": "2.0",
+            "id": 5,
+            "method": "session/prompt",
+            "params": {
+                "sessionId": session_id,
+                "prompt": [{ "type": "text", "text": "snapshot" }]
+            }
+        }),
+    );
+    assert_eq!(snapshot_response["result"]["stopReason"], "end_turn");
+    let snapshot = latest_prompt_summary(&snapshot_notifications, &session_id);
+    assert_eq!(snapshot["len"], 1);
+    assert_eq!(snapshot["messages"][0]["content"], "alpha");
+
+    drop(stdin);
+    let status = child.wait().unwrap();
+    assert!(status.success(), "status={status}");
+}
+
+#[ignore = "binary surface — moves to slow E2E/smoke job (issue #1069)"]
+#[test]
 fn serve_acp_stdio_runs_packaged_adapter() {
     let _guard = lock_acp_cli_tests();
     let temp = TempDir::new().unwrap();

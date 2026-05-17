@@ -71,7 +71,11 @@ pub(super) fn mark_cancelled_session(
     cancellations: &Arc<std::sync::Mutex<HashMap<String, SessionCancellation>>>,
     params: &serde_json::Value,
 ) -> bool {
-    let Some(session_id) = params.get("sessionId").and_then(|value| value.as_str()) else {
+    let Some(session_id) = params
+        .get("sessionId")
+        .or_else(|| params.get("session_id"))
+        .and_then(|value| value.as_str())
+    else {
         return false;
     };
     let Some(cancellation) = lookup_session_cancellation(cancellations, session_id) else {
@@ -92,16 +96,23 @@ pub(super) fn lookup_session_cancellation(
         .cloned()
 }
 
-pub(super) fn preempt_session_cancel(
+pub(super) fn preempt_session_cancel_or_truncate(
     cancellations: &Arc<std::sync::Mutex<HashMap<String, SessionCancellation>>>,
     msg: &serde_json::Value,
 ) -> bool {
-    if msg.get("method").and_then(|value| value.as_str()) != Some("session/cancel") {
-        return false;
-    }
+    let method = msg.get("method").and_then(|value| value.as_str());
     let params = msg.get("params").unwrap_or(&serde_json::Value::Null);
-    mark_cancelled_session(cancellations, params);
-    msg.get("id").is_none()
+    match method {
+        Some("session/cancel") => {
+            mark_cancelled_session(cancellations, params);
+            msg.get("id").is_none()
+        }
+        Some("session/truncate") => {
+            mark_cancelled_session(cancellations, params);
+            false
+        }
+        _ => false,
+    }
 }
 
 pub(super) fn prepare_session_prompt(

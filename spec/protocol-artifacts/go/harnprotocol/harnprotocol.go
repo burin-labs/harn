@@ -32,6 +32,7 @@ var ACPAgentMethods = []ACPAgentMethod{
 	"initialize",
 	"session/new",
 	"session/prompt",
+	"session/truncate",
 	"session/stop",
 }
 
@@ -72,6 +73,7 @@ var ACPSessionUpdates = []ACPSessionUpdate{
 	"current_mode_update",
 	"config_option_update",
 	"session_info_update",
+	"session_truncated",
 	"fs_watch",
 	"handoff",
 	"hitl_request",
@@ -497,16 +499,20 @@ type ACPToolCallUpdate struct {
 // `sessionUpdate` discriminator will be populated; the rest stay zero-value
 // and are stripped via `omitempty` on serialization.
 type ACPSessionUpdateEnvelope struct {
-	SessionUpdate string             `json:"sessionUpdate"`
-	Content       *ACPContentBlock   `json:"content,omitempty"`
-	Entries       []json.RawMessage  `json:"entries,omitempty"`
-	ToolCallID    *string            `json:"toolCallId,omitempty"`
-	Title         *string            `json:"title,omitempty"`
-	Kind          *string            `json:"kind,omitempty"`
-	Status        *string            `json:"status,omitempty"`
-	RawInput      json.RawMessage    `json:"rawInput,omitempty"`
-	RawOutput     json.RawMessage    `json:"rawOutput,omitempty"`
-	Meta          *HarnExtensionMeta `json:"_meta,omitempty"`
+	SessionUpdate    string             `json:"sessionUpdate"`
+	Content          *ACPContentBlock   `json:"content,omitempty"`
+	Entries          []json.RawMessage  `json:"entries,omitempty"`
+	KeptTurnCount    *int               `json:"keptTurnCount,omitempty"`
+	RemovedTurnCount *int               `json:"removedTurnCount,omitempty"`
+	NewTipTurnID     *string            `json:"newTipTurnId,omitempty"`
+	Reason           *string            `json:"reason,omitempty"`
+	ToolCallID       *string            `json:"toolCallId,omitempty"`
+	Title            *string            `json:"title,omitempty"`
+	Kind             *string            `json:"kind,omitempty"`
+	Status           *string            `json:"status,omitempty"`
+	RawInput         json.RawMessage    `json:"rawInput,omitempty"`
+	RawOutput        json.RawMessage    `json:"rawOutput,omitempty"`
+	Meta             *HarnExtensionMeta `json:"_meta,omitempty"`
 }
 
 // ACPSessionUpdateParams is the params payload of `session/update`.

@@ -29,6 +29,7 @@ const ACP_AGENT_METHODS: &[&str] = &[
     "initialize",
     "session/new",
     "session/prompt",
+    "session/truncate",
     "session/stop",
 ];
 const ACP_CLIENT_METHODS: &[&str] = &[
@@ -571,6 +572,14 @@ export interface ACPPlanUpdate {
   harnPlan?: ACPValue
 }
 
+export interface ACPSessionTruncatedUpdate {
+  sessionUpdate: "session_truncated"
+  keptTurnCount: number
+  removedTurnCount: number
+  newTipTurnId?: string | null
+  reason?: string
+}
+
 export interface ACPHarnExtensionUpdate {
   sessionUpdate: HarnACPSessionUpdateExtension
   _meta?: ACPExtensionMeta<ACPObject>
@@ -581,6 +590,7 @@ export type ACPSessionUpdateEnvelope =
   | ACPToolCall
   | ACPToolCallUpdate
   | ACPPlanUpdate
+  | ACPSessionTruncatedUpdate
   | ACPHarnExtensionUpdate
 
 export interface ACPSessionUpdateParams {
@@ -1324,6 +1334,10 @@ public struct HarnACPSessionUpdateEnvelope: Codable, Sendable, Equatable {
     public var sessionUpdate: HarnACPSessionUpdate
     public var content: HarnACPContentBlock?
     public var entries: [HarnACPValue]?
+    public var keptTurnCount: Int?
+    public var removedTurnCount: Int?
+    public var newTipTurnId: String?
+    public var reason: String?
     public var toolCallId: String?
     public var title: String?
     public var kind: HarnACPToolKind?
@@ -1336,6 +1350,10 @@ public struct HarnACPSessionUpdateEnvelope: Codable, Sendable, Equatable {
         case sessionUpdate
         case content
         case entries
+        case keptTurnCount
+        case removedTurnCount
+        case newTipTurnId
+        case reason
         case toolCallId
         case title
         case kind
@@ -1781,6 +1799,10 @@ class ACPSessionUpdateEnvelope(_HarnDataclass):
     sessionUpdate: str
     content: Optional[ACPContentBlock] = None
     entries: Optional[List[JsonValue]] = None
+    keptTurnCount: Optional[int] = None
+    removedTurnCount: Optional[int] = None
+    newTipTurnId: Optional[str] = None
+    reason: Optional[str] = None
     toolCallId: Optional[str] = None
     title: Optional[str] = None
     kind: Optional[str] = None
@@ -2349,16 +2371,20 @@ type ACPToolCallUpdate struct {
 // `sessionUpdate` discriminator will be populated; the rest stay zero-value
 // and are stripped via `omitempty` on serialization.
 type ACPSessionUpdateEnvelope struct {
-	SessionUpdate string             `json:"sessionUpdate"`
-	Content       *ACPContentBlock   `json:"content,omitempty"`
-	Entries       []json.RawMessage  `json:"entries,omitempty"`
-	ToolCallID    *string            `json:"toolCallId,omitempty"`
-	Title         *string            `json:"title,omitempty"`
-	Kind          *string            `json:"kind,omitempty"`
-	Status        *string            `json:"status,omitempty"`
-	RawInput      json.RawMessage    `json:"rawInput,omitempty"`
-	RawOutput     json.RawMessage    `json:"rawOutput,omitempty"`
-	Meta          *HarnExtensionMeta `json:"_meta,omitempty"`
+	SessionUpdate    string             `json:"sessionUpdate"`
+	Content          *ACPContentBlock   `json:"content,omitempty"`
+	Entries          []json.RawMessage  `json:"entries,omitempty"`
+	KeptTurnCount    *int               `json:"keptTurnCount,omitempty"`
+	RemovedTurnCount *int               `json:"removedTurnCount,omitempty"`
+	NewTipTurnID     *string            `json:"newTipTurnId,omitempty"`
+	Reason           *string            `json:"reason,omitempty"`
+	ToolCallID       *string            `json:"toolCallId,omitempty"`
+	Title            *string            `json:"title,omitempty"`
+	Kind             *string            `json:"kind,omitempty"`
+	Status           *string            `json:"status,omitempty"`
+	RawInput         json.RawMessage    `json:"rawInput,omitempty"`
+	RawOutput        json.RawMessage    `json:"rawOutput,omitempty"`
+	Meta             *HarnExtensionMeta `json:"_meta,omitempty"`
 }
 
 // ACPSessionUpdateParams is the params payload of `session/update`.

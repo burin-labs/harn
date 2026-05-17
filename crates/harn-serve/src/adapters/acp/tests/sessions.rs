@@ -65,6 +65,55 @@ async fn run_prompt_with_project_capability(
     output
 }
 
+async fn run_json_prompt(
+    request_tx: &mpsc::UnboundedSender<serde_json::Value>,
+    response_rx: &mut mpsc::UnboundedReceiver<String>,
+    session_id: &str,
+    id: i64,
+    prompt_text: &str,
+) -> serde_json::Value {
+    request_tx
+        .send(serde_json::json!({
+            "jsonrpc": "2.0",
+            "id": id,
+            "method": "session/prompt",
+            "params": {
+                "sessionId": session_id,
+                "prompt": [{"type": "text", "text": prompt_text}],
+            },
+        }))
+        .expect("send session/prompt");
+
+    let mut output = String::new();
+    for _ in 0..64 {
+        let message = recv_json(response_rx).await;
+        match message.get("method").and_then(|value| value.as_str()) {
+            Some("host/capabilities") => {
+                request_tx
+                    .send(serde_json::json!({
+                        "jsonrpc": "2.0",
+                        "id": message["id"].clone(),
+                        "result": {},
+                    }))
+                    .expect("send host/capabilities response");
+            }
+            Some("session/update")
+                if message["params"]["update"]["sessionUpdate"] == "agent_message_chunk" =>
+            {
+                if let Some(text) = message["params"]["update"]["content"]["text"].as_str() {
+                    output.push_str(text);
+                }
+            }
+            _ if message["id"] == id => {
+                assert_eq!(message["result"]["stopReason"], "end_turn");
+                return serde_json::from_str(output.trim()).expect("prompt JSON output");
+            }
+            _ => {}
+        }
+    }
+    panic!("prompt {id} did not complete")
+}
+
 #[tokio::test(flavor = "current_thread")]
 async fn acp_server_handles_session_flow_and_prompt_updates() {
     let local = tokio::task::LocalSet::new();
@@ -225,6 +274,153 @@ async fn acp_server_handles_session_flow_and_prompt_updates() {
             }
             assert!(saw_update, "prompt should emit session/update text");
             assert!(saw_completed, "prompt should finish successfully");
+
+            drop(request_tx);
+            server.await.expect("ACP channel server task");
+        })
+        .await;
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn acp_session_truncate_mutates_current_session_and_notifies_client() {
+    let local = tokio::task::LocalSet::new();
+    local
+        .run_until(async {
+            harn_vm::reset_thread_local_state();
+            let (request_tx, mut response_rx, server, session_id) =
+                start_acp_channel_session().await;
+
+            let first = run_json_prompt(
+                &request_tx,
+                &mut response_rx,
+                &session_id,
+                2,
+                r#"
+let sid = agent_session_current_id()
+guard sid != nil else { throw "missing session id" }
+agent_session_inject(sid, {role: "user", content: "alpha"})
+let snap = agent_session_snapshot(sid)
+println(json_stringify({len: len(snap["messages"]), messages: snap["messages"]}))
+"#,
+            )
+            .await;
+            assert_eq!(first["len"], 1);
+            let second = run_json_prompt(
+                &request_tx,
+                &mut response_rx,
+                &session_id,
+                3,
+                r#"
+let sid = agent_session_current_id()
+guard sid != nil else { throw "missing session id" }
+agent_session_inject(sid, {role: "user", content: "beta"})
+let snap = agent_session_snapshot(sid)
+println(json_stringify({len: len(snap["messages"]), messages: snap["messages"]}))
+"#,
+            )
+            .await;
+            assert_eq!(second["len"], 2);
+
+            request_tx
+                .send(serde_json::json!({
+                    "jsonrpc": "2.0",
+                    "id": 4,
+                    "method": "session/truncate",
+                    "params": {
+                        "sessionId": session_id.clone(),
+                        "keepFirst": 1,
+                        "reason": "user_edit",
+                    },
+                }))
+                .expect("send session/truncate");
+
+            let mut response = None;
+            let mut notification = None;
+            for _ in 0..4 {
+                let message = recv_json(&mut response_rx).await;
+                if message["id"] == 4 {
+                    response = Some(message);
+                } else if message["method"] == "session/update"
+                    && message["params"]["update"]["sessionUpdate"] == "session_truncated"
+                {
+                    notification = Some(message);
+                }
+                if response.is_some() && notification.is_some() {
+                    break;
+                }
+            }
+            let response = response.expect("truncate response");
+            assert_eq!(response["result"]["sessionId"], session_id);
+            assert_eq!(response["result"]["keptTurnCount"], 1);
+            assert_eq!(response["result"]["removedTurnCount"], 1);
+            assert!(response["result"]["newTipTurnId"].is_string());
+
+            let notification = notification.expect("session_truncated notification");
+            assert_eq!(notification["params"]["sessionId"], session_id);
+            assert_eq!(notification["params"]["update"]["keptTurnCount"], 1);
+            assert_eq!(notification["params"]["update"]["removedTurnCount"], 1);
+            assert_eq!(notification["params"]["update"]["reason"], "user_edit");
+
+            let snapshot = run_json_prompt(
+                &request_tx,
+                &mut response_rx,
+                &session_id,
+                5,
+                r#"
+let sid = agent_session_current_id()
+guard sid != nil else { throw "missing session id" }
+let snap = agent_session_snapshot(sid)
+println(json_stringify({len: len(snap["messages"]), messages: snap["messages"]}))
+"#,
+            )
+            .await;
+            assert_eq!(snapshot["len"], 1);
+            assert_eq!(snapshot["messages"][0]["content"], "alpha");
+
+            drop(request_tx);
+            server.await.expect("ACP channel server task");
+        })
+        .await;
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn acp_session_truncate_validates_inputs() {
+    let local = tokio::task::LocalSet::new();
+    local
+        .run_until(async {
+            let (request_tx, mut response_rx, server, session_id) =
+                start_acp_channel_session().await;
+
+            for (id, params, expected) in [
+                (
+                    2,
+                    serde_json::json!({"sessionId": session_id.clone()}),
+                    "Missing keepFirst",
+                ),
+                (
+                    3,
+                    serde_json::json!({"sessionId": session_id.clone(), "keepFirst": -1}),
+                    "Invalid keepFirst: must be >= 0",
+                ),
+                (
+                    4,
+                    serde_json::json!({"sessionId": "missing-session", "keepFirst": 0}),
+                    "Unknown session: missing-session",
+                ),
+            ] {
+                request_tx
+                    .send(serde_json::json!({
+                        "jsonrpc": "2.0",
+                        "id": id,
+                        "method": "session/truncate",
+                        "params": params,
+                    }))
+                    .expect("send session/truncate");
+                let response = recv_json(&mut response_rx).await;
+                assert_eq!(response["id"], id);
+                assert_eq!(response["error"]["code"], -32602);
+                assert_eq!(response["error"]["message"], expected);
+            }
 
             drop(request_tx);
             server.await.expect("ACP channel server task");
