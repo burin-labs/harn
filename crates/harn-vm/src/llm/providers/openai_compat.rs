@@ -692,6 +692,8 @@ thinking_modes = ["enabled"]
             output_format: crate::llm::api::OutputFormat::Text,
             response_format: None,
             json_schema: None,
+            output_schema: None,
+            schema_stream_abort: false,
             thinking: ThinkingConfig::Disabled,
             anthropic_beta_features: Vec::new(),
             vision: false,

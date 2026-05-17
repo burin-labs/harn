@@ -10,11 +10,12 @@ mod context_window;
 mod errors;
 mod ollama;
 mod openai_normalize;
-mod options;
+pub(crate) mod options;
 mod partial_tool_args;
 mod readiness;
 mod response;
 mod result;
+mod schema_stream;
 mod telemetry;
 mod thinking;
 mod transport;
@@ -56,6 +57,10 @@ pub use readiness::{
 };
 pub(crate) use response::parse_llm_response as parse_llm_response_for_provider;
 pub(crate) use result::{vm_build_llm_result, LlmResult};
+pub(crate) use schema_stream::{
+    aborted_result_value as schema_stream_aborted_result_value, parse_schema_stream_abort,
+    SchemaStreamAbort, StreamSchemaWatch,
+};
 pub(crate) use telemetry::elapsed_ms;
 pub use telemetry::{source as telemetry_source, OllamaPsModel, ProviderTelemetry};
 pub(crate) use thinking::{split_openai_thinking_blocks, ThinkingStreamSplitter};

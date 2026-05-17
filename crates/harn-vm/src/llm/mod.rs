@@ -637,6 +637,7 @@ mod tests {
                 }
             })),
             output_validation: Some("error".to_string()),
+            schema_stream_abort: true,
             thinking: crate::llm::api::ThinkingConfig::Disabled,
             anthropic_beta_features: Vec::new(),
             vision: false,

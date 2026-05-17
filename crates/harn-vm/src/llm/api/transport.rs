@@ -388,6 +388,9 @@ async fn vm_call_llm_api_with_body_inner(
                 .get("content-type")
                 .and_then(|v| v.to_str().ok())
                 .is_some_and(|ct| ct.contains("text/event-stream"));
+            // Build a fresh schema watch per attempt so an Ollama-retry
+            // restart doesn't see chunks from the previous run.
+            let schema_watch = super::schema_stream::StreamSchemaWatch::from_payload(opts);
             if is_sse {
                 return vm_call_llm_api_sse_from_response(
                     response,
@@ -396,6 +399,7 @@ async fn vm_call_llm_api_with_body_inner(
                     is_anthropic_style,
                     tx,
                     opts.session_id.as_deref(),
+                    schema_watch,
                 )
                 .await;
             }
@@ -406,6 +410,7 @@ async fn vm_call_llm_api_with_body_inner(
                 tx.clone(),
                 unload_grace,
                 &mut ollama_warmup_gate,
+                schema_watch,
             )
             .await
             {
@@ -479,6 +484,7 @@ async fn vm_call_llm_api_sse_from_response(
     is_anthropic_style: bool,
     delta_tx: DeltaSender,
     session_id: Option<&str>,
+    schema_watch: Option<super::schema_stream::StreamSchemaWatch>,
 ) -> Result<LlmResult, VmError> {
     use tokio_stream::StreamExt;
 
@@ -493,6 +499,7 @@ async fn vm_call_llm_api_sse_from_response(
         is_anthropic_style,
         delta_tx,
         session_id,
+        schema_watch,
     )
     .await
 }
@@ -610,6 +617,7 @@ pub(super) async fn consume_sse_lines<R: tokio::io::AsyncBufRead + Unpin>(
     is_anthropic_style: bool,
     delta_tx: DeltaSender,
     session_id: Option<&str>,
+    mut schema_watch: Option<super::schema_stream::StreamSchemaWatch>,
 ) -> Result<LlmResult, VmError> {
     use tokio::io::AsyncBufReadExt;
     let mut lines = reader.lines();
@@ -788,6 +796,11 @@ pub(super) async fn consume_sse_lines<R: tokio::io::AsyncBufRead + Unpin>(
                                 text.push_str(t);
                                 let _ = delta_tx.send(t.to_string());
                                 blocks.push(serde_json::json!({"type": "output_text", "text": t, "visibility": "public"}));
+                                if let Some(watch) = schema_watch.as_mut() {
+                                    if let Some(abort) = watch.observe(t) {
+                                        return Err(abort.into_vm_error());
+                                    }
+                                }
                             }
                         }
                         Some("thinking_delta") => {
@@ -871,6 +884,11 @@ pub(super) async fn consume_sse_lines<R: tokio::io::AsyncBufRead + Unpin>(
                     text.push_str(&visible);
                     let _ = delta_tx.send(visible.clone());
                     blocks.push(serde_json::json!({"type": "output_text", "text": visible, "visibility": "public"}));
+                    if let Some(watch) = schema_watch.as_mut() {
+                        if let Some(abort) = watch.observe(&visible) {
+                            return Err(abort.into_vm_error());
+                        }
+                    }
                 }
             }
             // Streaming deltas for `reasoning` (Ollama OpenAI-compat,
@@ -1062,6 +1080,11 @@ pub(super) async fn consume_sse_lines<R: tokio::io::AsyncBufRead + Unpin>(
         text.push_str(&final_visible);
         let _ = delta_tx.send(final_visible.clone());
         blocks.push(serde_json::json!({"type": "output_text", "text": final_visible, "visibility": "public"}));
+        if let Some(watch) = schema_watch.as_mut() {
+            if let Some(abort) = watch.observe(&final_visible) {
+                return Err(abort.into_vm_error());
+            }
+        }
     }
     if !oai_thinking_splitter.thinking.is_empty() {
         append_paragraph(&mut thinking_text, &oai_thinking_splitter.thinking);
@@ -1149,6 +1172,7 @@ async fn vm_call_llm_api_ndjson_from_response(
     delta_tx: DeltaSender,
     unload_grace: Duration,
     warmup_gate: &mut bool,
+    schema_watch: Option<super::schema_stream::StreamSchemaWatch>,
 ) -> Result<LlmResult, VmError> {
     use tokio_stream::StreamExt;
 
@@ -1156,7 +1180,16 @@ async fn vm_call_llm_api_ndjson_from_response(
     let reader = tokio::io::BufReader::new(tokio_util::io::StreamReader::new(
         stream.map(|r| r.map_err(std::io::Error::other)),
     ));
-    consume_ollama_ndjson_lines(reader, provider, model, delta_tx, unload_grace, warmup_gate).await
+    consume_ollama_ndjson_lines(
+        reader,
+        provider,
+        model,
+        delta_tx,
+        unload_grace,
+        warmup_gate,
+        schema_watch,
+    )
+    .await
 }
 
 async fn consume_ollama_ndjson_lines<R>(
@@ -1166,6 +1199,7 @@ async fn consume_ollama_ndjson_lines<R>(
     delta_tx: DeltaSender,
     unload_grace: Duration,
     warmup_gate: &mut bool,
+    mut schema_watch: Option<super::schema_stream::StreamSchemaWatch>,
 ) -> Result<LlmResult, VmError>
 where
     R: tokio::io::AsyncBufRead + Unpin,
@@ -1224,6 +1258,11 @@ where
             blocks.push(
                 serde_json::json!({"type": "output_text", "text": content, "visibility": "public"}),
             );
+            if let Some(watch) = schema_watch.as_mut() {
+                if let Some(abort) = watch.observe(content) {
+                    return Err(abort.into_vm_error());
+                }
+            }
         } else if !thinking.is_empty() {
             thinking_text.push_str(thinking);
             let _ = delta_tx.send(thinking.to_string());
@@ -1429,6 +1468,7 @@ mod tests {
             tx,
             Duration::ZERO,
             &mut warmup_gate,
+            None,
         )
         .await
         .expect_err("empty Ollama parser-bug response should fail");
@@ -1452,6 +1492,7 @@ mod tests {
             tx,
             Duration::ZERO,
             &mut warmup_gate,
+            None,
         )
         .await
         .expect_err("truncated Ollama stream should fail");
@@ -1475,6 +1516,7 @@ mod tests {
             tx,
             Duration::ZERO,
             &mut warmup_gate,
+            None,
         )
         .await
         .expect("ollama stream parses");
@@ -1562,6 +1604,7 @@ mod streaming_tool_call_tests {
             is_anthropic,
             delta_tx,
             Some(session_id),
+            None,
         )
         .await
         .expect("sse parse should succeed");
@@ -1775,9 +1818,17 @@ mod streaming_tool_call_tests {
         let events = install_capturing_sink(&session_id);
         let (delta_tx, _delta_rx) = tokio::sync::mpsc::unbounded_channel::<String>();
         let reader = tokio::io::BufReader::new(body.as_bytes());
-        let _result = consume_sse_lines(reader, "anthropic", "test-model", true, delta_tx, None)
-            .await
-            .expect("parse");
+        let _result = consume_sse_lines(
+            reader,
+            "anthropic",
+            "test-model",
+            true,
+            delta_tx,
+            None,
+            None,
+        )
+        .await
+        .expect("parse");
         let captured = events.lock().expect("capture mutex").clone();
         assert!(
             captured.is_empty(),
@@ -1827,5 +1878,146 @@ mod streaming_tool_call_tests {
             "coalescing must cap the burst — got {pending_updates} pending updates from 20 deltas"
         );
         clear_session_sinks(&session_id);
+    }
+}
+
+#[cfg(test)]
+mod schema_stream_abort_tests {
+    //! End-to-end coverage for the streaming `output_schema` abort
+    //! (`schema_stream_abort` — harn#1775). Drives [`consume_sse_lines`]
+    //! against a canned OpenAI-shaped SSE body whose content delta
+    //! immediately violates the schema, asserts:
+    //!
+    //! - the consumer returns a categorized `SchemaStreamAborted` error,
+    //! - a `SchemaStreamAborted` transcript event is emitted, and
+    //! - the `harn_llm_schema_stream_aborted_total` counter increments.
+    //!
+    //! Driven via `consume_sse_lines` rather than a full HTTP stack so
+    //! the test stays deterministic and offline.
+    use super::*;
+    use crate::llm::api::StreamSchemaWatch;
+    use crate::llm::trace::{peek_agent_trace, reset_agent_trace_state, AgentTraceEvent};
+    use crate::value::ErrorCategory;
+    use crate::{install_active_metrics_registry, MetricsRegistry};
+    use std::sync::Arc;
+
+    fn schema_with_int_age() -> serde_json::Value {
+        serde_json::json!({
+            "type": "object",
+            "required": ["age"],
+            "properties": {"age": {"type": "integer"}}
+        })
+    }
+
+    fn build_payload(schema: serde_json::Value) -> crate::llm::api::LlmRequestPayload {
+        let mut opts = crate::llm::api::options::base_opts("openai");
+        opts.model = "gpt-test".to_string();
+        opts.output_schema = Some(schema);
+        opts.schema_stream_abort = true;
+        opts.session_id = None;
+        crate::llm::api::LlmRequestPayload::from(&opts)
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn openai_stream_aborts_on_impossible_property_type() {
+        reset_agent_trace_state();
+        let metrics = Arc::new(MetricsRegistry::default());
+        install_active_metrics_registry(metrics.clone());
+
+        let payload = build_payload(schema_with_int_age());
+        let watch = StreamSchemaWatch::from_payload(&payload).expect("schema is canonicalizable");
+
+        // First content delta opens `"age":"`, which is incompatible with
+        // `age: int`. The mid-stream watch should fire on the trailing
+        // string quote; the second delta is never read because we abort.
+        let body = concat!(
+            "data: {\"choices\":[{\"delta\":{\"content\":\"{\\\"age\\\":\"}}]}\n",
+            "data: {\"choices\":[{\"delta\":{\"content\":\"\\\"twenty\"}}]}\n",
+            "data: [DONE]\n",
+        );
+        let (delta_tx, _delta_rx) = tokio::sync::mpsc::unbounded_channel::<String>();
+        let reader = tokio::io::BufReader::new(body.as_bytes());
+        let err = consume_sse_lines(
+            reader,
+            "openai",
+            "gpt-test",
+            false,
+            delta_tx,
+            None,
+            Some(watch),
+        )
+        .await
+        .expect_err("schema abort must surface as error");
+
+        match &err {
+            VmError::CategorizedError { category, message } => {
+                assert_eq!(*category, ErrorCategory::SchemaStreamAborted);
+                assert!(
+                    message.contains("$.age"),
+                    "abort message should include JSON path; got: {message}"
+                );
+            }
+            other => panic!("expected CategorizedError; got {other:?}"),
+        }
+
+        let events = peek_agent_trace();
+        let aborts: Vec<_> = events
+            .iter()
+            .filter_map(|e| match e {
+                AgentTraceEvent::SchemaStreamAborted {
+                    provider,
+                    model,
+                    reason,
+                    path,
+                    chunks_consumed,
+                } => Some((
+                    provider.clone(),
+                    model.clone(),
+                    reason.clone(),
+                    path.clone(),
+                    *chunks_consumed,
+                )),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(
+            aborts.len(),
+            1,
+            "expected exactly one SchemaStreamAborted event; got {events:#?}"
+        );
+        let (provider, model, _reason, path, chunks) = &aborts[0];
+        assert_eq!(provider, "openai");
+        assert_eq!(model, "gpt-test");
+        assert_eq!(path, "$.age");
+        assert!(*chunks >= 1);
+
+        // Telemetry counter incremented through the installed registry.
+        let rendered = metrics.render_prometheus();
+        assert!(
+            rendered.contains("harn_llm_schema_stream_aborted_total"),
+            "metric family missing from prometheus render"
+        );
+        assert!(
+            rendered.contains(
+                "harn_llm_schema_stream_aborted_total{model=\"gpt-test\",provider=\"openai\"} 1"
+            ),
+            "expected labelled counter increment; got:\n{rendered}"
+        );
+
+        reset_agent_trace_state();
+        crate::clear_active_metrics_registry();
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn opt_out_keeps_stream_alive_through_invalid_content() {
+        reset_agent_trace_state();
+
+        let mut payload = build_payload(schema_with_int_age());
+        payload.schema_stream_abort = false;
+        // With the watch disabled, even a clearly-invalid stream must
+        // run to completion; only the post-hoc validator catches it.
+        assert!(StreamSchemaWatch::from_payload(&payload).is_none());
+
+        reset_agent_trace_state();
     }
 }

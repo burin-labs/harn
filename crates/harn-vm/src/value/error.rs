@@ -97,6 +97,13 @@ pub enum ErrorCategory {
     TransientNetwork,
     /// LLM output failed schema validation. Retryable via `schema_retries`.
     SchemaValidation,
+    /// LLM streaming response was aborted mid-stream because the partial
+    /// JSON content could not conceivably satisfy `output_schema`. Surfaced
+    /// by `llm_call` when `schema_stream_abort` is on (the default for
+    /// schema-bearing calls). Consumes one `schema_retries` budget slot;
+    /// the retry replays the prompt with a corrective nudge that cites
+    /// the abort path + reason.
+    SchemaStreamAborted,
     /// Tool execution failure
     ToolError,
     /// Tool was rejected by the host (not permitted / not in allowlist)
@@ -125,6 +132,7 @@ impl ErrorCategory {
             ErrorCategory::ServerError => "server_error",
             ErrorCategory::TransientNetwork => "transient_network",
             ErrorCategory::SchemaValidation => "schema_validation",
+            ErrorCategory::SchemaStreamAborted => "schema_stream_aborted",
             ErrorCategory::ToolError => "tool_error",
             ErrorCategory::ToolRejected => "tool_rejected",
             ErrorCategory::EgressBlocked => "egress_blocked",
@@ -145,6 +153,7 @@ impl ErrorCategory {
             "server_error" => ErrorCategory::ServerError,
             "transient_network" => ErrorCategory::TransientNetwork,
             "schema_validation" => ErrorCategory::SchemaValidation,
+            "schema_stream_aborted" => ErrorCategory::SchemaStreamAborted,
             "tool_error" => ErrorCategory::ToolError,
             "tool_rejected" => ErrorCategory::ToolRejected,
             "egress_blocked" => ErrorCategory::EgressBlocked,

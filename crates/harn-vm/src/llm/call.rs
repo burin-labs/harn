@@ -5,7 +5,11 @@ use crate::value::{VmError, VmValue};
 
 use super::helpers::extract_llm_options;
 use super::trace::{emit_agent_event, AgentTraceEvent};
-use super::{agent_config, agent_observe, api, helpers, routing, structural_experiments};
+use super::{
+    agent_config, agent_observe, api,
+    api::{parse_schema_stream_abort, schema_stream_aborted_result_value, SchemaStreamAbort},
+    helpers, routing, structural_experiments,
+};
 
 fn output_validation_mode(opts: &api::LlmCallOptions) -> &str {
     opts.output_validation.as_deref().unwrap_or("off")
@@ -492,7 +496,7 @@ pub(crate) async fn execute_schema_retry_loop(
     // conversation.
     let original_messages = opts.messages.clone();
     for attempt in 0..=schema_retries {
-        let result = agent_observe::observed_llm_call(
+        let call_result = agent_observe::observed_llm_call(
             &opts,
             tool_format.as_deref(),
             bridge,
@@ -506,23 +510,40 @@ pub(crate) async fn execute_schema_retry_loop(
             // loop's `run_llm_call` is the integration point that owns it.
             None,
         )
-        .await?;
+        .await;
 
-        let raw_text = result.text.clone();
-        // Non-bridge path runs schema validation; bridge path
-        // delegates validation to the host.
-        let vm_result = agent_config::build_llm_call_result(&result, &opts);
-        if !expects_structured {
-            return Ok(SchemaLoopOutcome {
-                vm_result,
-                raw_text,
-                errors: Vec::new(),
-                attempts: attempt + 1,
-                schema_retries_budget: schema_retries,
-                output_validation_mode,
-            });
-        }
-        let errors = structured_output_errors(&vm_result, &opts);
+        // A mid-stream schema abort short-circuits the provider call but
+        // is otherwise equivalent to a normal schema-validation failure:
+        // it consumes one `schema_retries` slot and feeds its
+        // `path` + `reason` into the corrective nudge so the next attempt
+        // gets a sharper prompt than a generic "stream failed".
+        let (vm_result, raw_text, errors) = match call_result {
+            Ok(result) => {
+                let raw_text = result.text.clone();
+                let vm_result = agent_config::build_llm_call_result(&result, &opts);
+                if !expects_structured {
+                    return Ok(SchemaLoopOutcome {
+                        vm_result,
+                        raw_text,
+                        errors: Vec::new(),
+                        attempts: attempt + 1,
+                        schema_retries_budget: schema_retries,
+                        output_validation_mode,
+                    });
+                }
+                let errors = structured_output_errors(&vm_result, &opts);
+                (vm_result, raw_text, errors)
+            }
+            Err(error) => match parse_schema_stream_abort(&error) {
+                Some(abort) => {
+                    let errors = vec![schema_stream_abort_message(&abort)];
+                    let vm_result = schema_stream_aborted_result_value(&abort);
+                    (vm_result, String::new(), errors)
+                }
+                None => return Err(error),
+            },
+        };
+
         if errors.is_empty() {
             return Ok(SchemaLoopOutcome {
                 vm_result,
@@ -570,6 +591,19 @@ pub(crate) async fn execute_schema_retry_loop(
         });
     }
     unreachable!("schema retry loop exited without returning");
+}
+
+/// Render the schema-stream abort as a validation-style error string so
+/// the existing nudge builder can fold it into its corrective prompt
+/// alongside post-hoc validation errors.
+fn schema_stream_abort_message(abort: &SchemaStreamAbort) -> String {
+    format!(
+        "streaming response aborted at {path}: {reason} (after {chunks} chunk{plural})",
+        path = abort.path,
+        reason = abort.reason,
+        chunks = abort.chunks_consumed,
+        plural = if abort.chunks_consumed == 1 { "" } else { "s" },
+    )
 }
 
 pub(super) fn llm_safe_envelope_ok(response: VmValue) -> VmValue {
@@ -755,4 +789,193 @@ pub(crate) fn structured_safe_envelope_err(err: &VmError) -> VmValue {
     dict.insert("data".to_string(), VmValue::Nil);
     dict.insert("error".to_string(), VmValue::Dict(Rc::new(err_dict)));
     VmValue::Dict(Rc::new(dict))
+}
+
+#[cfg(test)]
+mod schema_stream_abort_retry_tests {
+    //! Integration coverage for the `schema_stream_abort` ↔ `schema_retries`
+    //! handshake (harn#1775 E5.2). Drives [`execute_schema_retry_loop`]
+    //! through the in-process `FakeLlmProvider` so we can script:
+    //!
+    //! 1. an attempt that emits schema-violating tokens mid-stream
+    //!    (triggers the abort, fires a `SchemaStreamAborted` event, and
+    //!    consumes one retry budget slot), and
+    //! 2. a follow-up attempt that emits a conforming JSON document
+    //!    (the loop accepts it as the final answer).
+    //!
+    //! The corrective `SchemaRetry` event surfaces the abort path /
+    //! reason verbatim, so callers see why the retry happened rather
+    //! than a generic stream failure.
+
+    use std::collections::BTreeMap;
+
+    use super::*;
+    use crate::llm::fake::{
+        install_fake_llm_script, FakeLlmEvent, FakeLlmScript, FakeLlmTurn, FakeStopReason,
+    };
+    use crate::llm::trace::{peek_agent_trace, reset_agent_trace_state, AgentTraceEvent};
+
+    fn options_with_retries(retries: i64) -> BTreeMap<String, VmValue> {
+        let mut opts = BTreeMap::new();
+        opts.insert("schema_retries".to_string(), VmValue::Int(retries));
+        opts
+    }
+
+    fn schema() -> serde_json::Value {
+        serde_json::json!({
+            "type": "object",
+            "required": ["age"],
+            "properties": {"age": {"type": "integer"}}
+        })
+    }
+
+    fn fake_opts_with_schema() -> api::LlmCallOptions {
+        let mut opts = api::options::base_opts("fake");
+        opts.model = "fake-stream".to_string();
+        opts.output_schema = Some(schema());
+        opts.output_format = api::OutputFormat::JsonSchema {
+            schema: schema(),
+            strict: true,
+        };
+        opts.json_schema = Some(schema());
+        opts.response_format = Some("json".to_string());
+        opts.output_validation = Some("error".to_string());
+        opts.schema_stream_abort = true;
+        opts.native_tools = None;
+        opts.tools = None;
+        opts.tool_choice = None;
+        opts.provider_overrides = None;
+        opts
+    }
+
+    #[test]
+    fn mid_stream_abort_consumes_one_retry_then_recovers() {
+        let runtime = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .expect("runtime");
+        runtime.block_on(async {
+            reset_agent_trace_state();
+
+            // Turn 1: stream a partial doc that violates `age: int`.
+            // Turn 2: stream a valid doc.
+            let _script_guard = install_fake_llm_script(
+                FakeLlmScript::new()
+                    .push(FakeLlmTurn::stream(vec![
+                        FakeLlmEvent::Token("{\"age\": ".into()),
+                        FakeLlmEvent::Token("\"twenty".into()),
+                        // Done isn't reached — the abort returns Err before
+                        // the validator sees this chunk.
+                        FakeLlmEvent::Token("\"}".into()),
+                        FakeLlmEvent::Done(FakeStopReason::EndTurn),
+                    ]))
+                    .push(FakeLlmTurn::stream(vec![
+                        FakeLlmEvent::Token("{\"age\": 20}".into()),
+                        FakeLlmEvent::Done(FakeStopReason::EndTurn),
+                    ])),
+            );
+
+            let opts = fake_opts_with_schema();
+            let outcome = execute_schema_retry_loop(opts, Some(options_with_retries(2)), None)
+                .await
+                .expect("retry loop runs cleanly");
+
+            assert_eq!(outcome.attempts, 2, "expected the recovery to run twice");
+            assert!(
+                outcome.errors.is_empty(),
+                "final attempt must validate cleanly; got {:?}",
+                outcome.errors
+            );
+
+            // The result envelope carries the validated data on the second
+            // turn (post-loop, dict-shaped).
+            match &outcome.vm_result {
+                VmValue::Dict(d) => {
+                    let data = d.get("data").cloned().unwrap_or(VmValue::Nil);
+                    match data {
+                        VmValue::Dict(inner) => match inner.get("age") {
+                            Some(VmValue::Int(n)) => assert_eq!(*n, 20),
+                            other => panic!("expected age=20; got {other:?}"),
+                        },
+                        other => panic!("expected validated dict; got {other:?}"),
+                    }
+                }
+                other => panic!("expected dict result; got {other:?}"),
+            }
+
+            // Transcript events: exactly one SchemaStreamAborted, exactly one
+            // SchemaRetry whose `errors` includes the abort path.
+            let events = peek_agent_trace();
+            let aborts: Vec<_> = events
+                .iter()
+                .filter_map(|e| match e {
+                    AgentTraceEvent::SchemaStreamAborted { path, reason, .. } => {
+                        Some((path.clone(), reason.clone()))
+                    }
+                    _ => None,
+                })
+                .collect::<Vec<_>>();
+            assert_eq!(
+                aborts.len(),
+                1,
+                "expected one SchemaStreamAborted; got {events:#?}"
+            );
+            assert_eq!(aborts[0].0, "$.age");
+
+            let retries: Vec<_> = events
+                .iter()
+                .filter_map(|e| match e {
+                    AgentTraceEvent::SchemaRetry { errors, .. } => Some(errors.clone()),
+                    _ => None,
+                })
+                .collect::<Vec<_>>();
+            assert_eq!(retries.len(), 1, "expected one SchemaRetry event");
+            assert!(
+                retries[0].iter().any(|err| err.contains("$.age")),
+                "retry nudge should cite the abort path; got {:?}",
+                retries[0]
+            );
+
+            reset_agent_trace_state();
+        });
+    }
+
+    #[test]
+    fn opt_out_lets_invalid_stream_run_to_completion() {
+        let runtime = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .expect("runtime");
+        runtime.block_on(async {
+            reset_agent_trace_state();
+
+            let _script_guard = install_fake_llm_script(FakeLlmScript::streaming(vec![
+                FakeLlmEvent::Token("{\"age\":".into()),
+                FakeLlmEvent::Token("\"twenty\"}".into()),
+                FakeLlmEvent::Done(FakeStopReason::EndTurn),
+            ]));
+
+            let mut opts = fake_opts_with_schema();
+            opts.schema_stream_abort = false;
+            let outcome = execute_schema_retry_loop(opts, Some(options_with_retries(0)), None)
+                .await
+                .expect("retry loop completes");
+
+            // No mid-stream abort fired; the stream ran to completion and
+            // the schema validator caught the failure post-hoc instead.
+            let events = peek_agent_trace();
+            assert!(
+                !events
+                    .iter()
+                    .any(|e| matches!(e, AgentTraceEvent::SchemaStreamAborted { .. })),
+                "abort must not fire when opted out; got {events:#?}"
+            );
+            assert!(
+                !outcome.errors.is_empty(),
+                "post-hoc validation should still flag the malformed response"
+            );
+
+            reset_agent_trace_state();
+        });
+    }
 }

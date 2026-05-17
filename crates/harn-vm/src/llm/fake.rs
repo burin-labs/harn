@@ -377,6 +377,10 @@ async fn play_stream(
     let mut blocks: Vec<serde_json::Value> = Vec::new();
     let mut stop_reason: Option<FakeStopReason> = None;
     let mut next_tool_index: usize = 1;
+    // Mirror the real-transport mid-stream abort so tests can exercise
+    // `schema_stream_abort` end-to-end without standing up a live SSE
+    // server.
+    let mut schema_watch = crate::llm::api::StreamSchemaWatch::from_payload(request);
 
     for event in events {
         match event {
@@ -385,6 +389,11 @@ async fn play_stream(
                     let _ = tx.send(chunk.clone());
                 }
                 text.push_str(&chunk);
+                if let Some(watch) = schema_watch.as_mut() {
+                    if let Some(abort) = watch.observe(&chunk) {
+                        return Err(abort.into_vm_error());
+                    }
+                }
             }
             FakeLlmEvent::ToolCallDelta {
                 id,
@@ -517,6 +526,8 @@ mod tests {
             output_format: OutputFormat::Text,
             response_format: None,
             json_schema: None,
+            output_schema: None,
+            schema_stream_abort: false,
             thinking: ThinkingConfig::Disabled,
             anthropic_beta_features: Vec::new(),
             vision: false,

@@ -268,6 +268,12 @@ pub(crate) struct LlmCallOptions {
     pub json_schema: Option<serde_json::Value>,
     pub output_schema: Option<serde_json::Value>,
     pub output_validation: Option<String>,
+    /// Abort the streaming response when partial JSON can no longer
+    /// satisfy `output_schema`. Defaults to `true` when `output_schema`
+    /// is present; opt out with `schema_stream_abort: false` to wait
+    /// for the full malformed response (and rely on `schema_retries`
+    /// to recover post-hoc).
+    pub schema_stream_abort: bool,
 
     // --- Thinking ---
     pub thinking: ThinkingConfig,
@@ -389,6 +395,16 @@ pub(crate) struct LlmRequestPayload {
     pub output_format: OutputFormat,
     pub response_format: Option<String>,
     pub json_schema: Option<serde_json::Value>,
+    /// Normalized `output_schema` forwarded to the streaming transport
+    /// so it can fail-fast when partial JSON can no longer satisfy the
+    /// schema. Mirrors `LlmCallOptions::output_schema` after option
+    /// resolution; transport layers only need this field, not the
+    /// VM-local original.
+    pub output_schema: Option<serde_json::Value>,
+    /// See `LlmCallOptions::schema_stream_abort`. Forwarded so the
+    /// off-thread transport task can decide without re-reading VM-local
+    /// option state.
+    pub schema_stream_abort: bool,
     pub thinking: ThinkingConfig,
     pub anthropic_beta_features: Vec<String>,
     pub vision: bool,
@@ -435,6 +451,8 @@ impl From<&LlmCallOptions> for LlmRequestPayload {
             output_format: opts.output_format.clone(),
             response_format: opts.response_format.clone(),
             json_schema: opts.json_schema.clone(),
+            output_schema: opts.output_schema.clone(),
+            schema_stream_abort: opts.schema_stream_abort,
             thinking: opts.thinking.clone(),
             anthropic_beta_features: opts.anthropic_beta_features_for_request(),
             vision: opts.vision,
@@ -491,7 +509,7 @@ fn apply_thinking_disable_directive(payload: &mut LlmRequestPayload) {
 }
 
 #[cfg(test)]
-pub(super) fn base_opts(provider: &str) -> LlmCallOptions {
+pub(crate) fn base_opts(provider: &str) -> LlmCallOptions {
     use std::rc::Rc;
     LlmCallOptions {
         provider: provider.to_string(),
@@ -524,6 +542,10 @@ pub(super) fn base_opts(provider: &str) -> LlmCallOptions {
         json_schema: Some(serde_json::json!({"type": "object"})),
         output_schema: Some(serde_json::json!({"type": "object"})),
         output_validation: Some("error".to_string()),
+        // Default-off in the test fixture: most callers stream
+        // non-JSON text and would unexpectedly abort if the watch ran.
+        // Tests that exercise the mid-stream abort opt in explicitly.
+        schema_stream_abort: false,
         thinking: ThinkingConfig::Disabled,
         anthropic_beta_features: Vec::new(),
         vision: false,
