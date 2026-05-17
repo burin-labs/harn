@@ -6,6 +6,7 @@ pub mod commands;
 pub mod config;
 pub mod env_guard;
 pub mod format;
+pub mod json_envelope;
 pub mod package;
 mod provider_bootstrap;
 pub mod skill_loader;
@@ -95,7 +96,20 @@ async fn async_main() {
         }
     };
 
-    match cli.command.expect("clap requires a command") {
+    if cli.json_schemas {
+        commands::json_schemas::run(cli.schema_command.as_deref());
+        return;
+    }
+
+    let Some(subcommand) = cli.command else {
+        // `arg_required_else_help` already shows help when no args are
+        // supplied. We only land here if a top-level flag (e.g. a
+        // future `--version` long flag) parsed without a subcommand.
+        let mut cmd = Cli::command();
+        cmd.print_help().ok();
+        return;
+    };
+    match subcommand {
         Command::Version => print_version(),
         Command::Upgrade(args) => {
             if let Err(error) = commands::upgrade::run(args).await {

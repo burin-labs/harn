@@ -209,6 +209,22 @@ use clap::{Parser, Subcommand};
     arg_required_else_help = true
 )]
 pub(crate) struct Cli {
+    /// Emit the JSON-schema catalog for every `harn` subcommand that
+    /// exposes a structured `--json` envelope. Pair with
+    /// `--command <name>` to print just one entry.
+    #[arg(long = "json-schemas", global = false)]
+    pub json_schemas: bool,
+
+    /// When combined with `--json-schemas`, restrict the catalog to a
+    /// single command name (e.g. `--command run`).
+    #[arg(
+        long = "command",
+        requires = "json_schemas",
+        value_name = "COMMAND",
+        global = false
+    )]
+    pub schema_command: Option<String>,
+
     #[command(subcommand)]
     pub command: Option<Command>,
 }

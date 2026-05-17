@@ -5,6 +5,9 @@
 
 use std::process::Command;
 
+use harn_cli::json_envelope::CATALOG_SCHEMA_VERSION;
+use harn_cli::tests::common::json_envelope::assert_envelope;
+
 fn binary_path() -> std::path::PathBuf {
     // CARGO_BIN_EXE_<name> is set by Cargo for integration tests in the
     // crate that owns the binary.
@@ -90,6 +93,29 @@ fn doctor_json_smoke() {
             "expected check '{id}' in JSON output. Saw: {seen_ids:?}"
         );
     }
+}
+
+/// `doctor` is registered in the top-level `--json-schemas` catalog so
+/// agents can discover the JSON contract before invoking the command.
+/// Exercises the shared [`assert_envelope`] helper against the real
+/// binary — when `harn doctor --json` migrates to a [`JsonEnvelope`]
+/// (Tier-3 ticket), this test stays the catalog's source of truth.
+#[test]
+fn doctor_appears_in_json_schemas_catalog() {
+    let output = Command::new(binary_path())
+        .args(["--json-schemas", "--command", "doctor"])
+        .output()
+        .expect("spawn harn --json-schemas --command doctor");
+    assert!(output.status.success(), "exit={:?}", output.status.code());
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let parsed: serde_json::Value =
+        serde_json::from_str(stdout.trim()).expect("catalog is valid JSON");
+    let data = assert_envelope(&parsed, CATALOG_SCHEMA_VERSION);
+    let entries = data.as_array().expect("data is an array");
+    assert_eq!(entries.len(), 1);
+    assert_eq!(entries[0]["command"], "doctor");
+    assert_eq!(entries[0]["schemaVersion"], 1);
 }
 
 /// Asserts that no check ever surfaces a literal env-var value in `detail`.
