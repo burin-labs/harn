@@ -34,6 +34,27 @@ condensed series summaries instead of full per-patch history.
   families coexist in one cache dir without filename collisions. Header
   schema bumped to `2`; older v0.8.22-written cache files are rejected
   fail-closed and recompiled.
+- **MCP client notification relay.** The MCP client transport now
+  routes inbound `notifications/progress`, `notifications/message`,
+  and `*/list_changed` server-to-client notifications into the
+  originating session's `agent_inbox` (kinds `mcp_progress`,
+  `mcp_log`, `mcp_resource_change`). Correlation is by per-call
+  progress token: every outgoing `tools/call` registers a fresh token
+  with the new `client_progress` registry and injects it as
+  `_meta.progressToken`; inbound notifications carrying that token
+  push to the issuing session even when the transport reader runs on
+  a different task. Previously these notifications were silently
+  dropped at the stdio read loop.
+- **`agent_session_post_event(id, kind, content, source?)` builtin.**
+  Triggers, connectors, and external host integrations can now post
+  events directly into a running session's inbox — the canonical way
+  to wire "GitHub PR you've been waiting on just merged" or "your
+  remote build finished" nudges into a mid-loop agent. Paired with
+  `agent_session_drain_inbox(id)` for explicit drain in scripted
+  control flow. Both available at the host-builtin layer
+  (`__host_agent_session_post_event`) and as Harn-side wrappers in
+  `std/agent/state`.
+
 ### Changed
 
 - **Unified per-session agent inbox.** Folded the cross-thread
@@ -61,29 +82,6 @@ condensed series summaries instead of full per-patch history.
   silent-loss class for tool completions, MCP progress
   notifications, and trigger-driven nudges that arrived mid-
   compaction.
-
-### Added
-
-- **MCP client notification relay.** The MCP client transport now
-  routes inbound `notifications/progress`, `notifications/message`,
-  and `*/list_changed` server-to-client notifications into the
-  originating session's `agent_inbox` (kinds `mcp_progress`,
-  `mcp_log`, `mcp_resource_change`). Correlation is by per-call
-  progress token: every outgoing `tools/call` registers a fresh token
-  with the new `client_progress` registry and injects it as
-  `_meta.progressToken`; inbound notifications carrying that token
-  push to the issuing session even when the transport reader runs on
-  a different task. Previously these notifications were silently
-  dropped at the stdio read loop.
-- **`agent_session_post_event(id, kind, content, source?)` builtin.**
-  Triggers, connectors, and external host integrations can now post
-  events directly into a running session's inbox — the canonical way
-  to wire "GitHub PR you've been waiting on just merged" or "your
-  remote build finished" nudges into a mid-loop agent. Paired with
-  `agent_session_drain_inbox(id)` for explicit drain in scripted
-  control flow. Both available at the host-builtin layer
-  (`__host_agent_session_post_event`) and as Harn-side wrappers in
-  `std/agent/state`.
 
 ### Fixed
 
