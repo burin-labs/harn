@@ -476,6 +476,55 @@ pub fn load_workflow_bundle(path: &Path) -> Result<WorkflowBundle, WorkflowBundl
     }
 }
 
+/// Read a manifest from any prior or current schema version without
+/// rejecting on a `schema_version` mismatch. Used by `harn pack
+/// --upgrade` to read v1 bundles before re-emitting them under the v2
+/// shape. Fields the older schema didn't carry deserialize to their
+/// type defaults via `#[serde(default)]`.
+pub fn read_workflow_bundle_manifest_any_version(
+    bytes: &[u8],
+) -> Result<WorkflowBundle, WorkflowBundleError> {
+    let value: serde_json::Value = serde_json::from_slice(bytes)?;
+    if value.get("schema_version").is_none() {
+        return Err(WorkflowBundleError::new(
+            WorkflowBundleErrorKind::MissingSchemaVersion,
+            "workflow bundle manifest is missing schema_version",
+        ));
+    }
+    serde_json::from_value(value).map_err(Into::into)
+}
+
+/// Variant of [`load_workflow_bundle`] that accepts any historical
+/// schema version. Reads the manifest from a `.harnpack` archive or a
+/// bare JSON manifest as appropriate.
+pub fn load_workflow_bundle_any_version(
+    path: &Path,
+) -> Result<WorkflowBundle, WorkflowBundleError> {
+    let bytes = fs::read(path)?;
+    if path.extension().and_then(|extension| extension.to_str()) == Some("harnpack") {
+        let tar_bytes = zstd::stream::decode_all(Cursor::new(bytes))?;
+        let mut archive = tar::Archive::new(Cursor::new(tar_bytes));
+        for entry in archive.entries()? {
+            let mut entry = entry?;
+            if entry.header().entry_type().is_dir() {
+                continue;
+            }
+            let path = normalize_archive_path(entry.path()?.as_ref())?;
+            if path == HARNPACK_MANIFEST_PATH {
+                let mut entry_bytes = Vec::new();
+                entry.read_to_end(&mut entry_bytes)?;
+                return read_workflow_bundle_manifest_any_version(&entry_bytes);
+            }
+        }
+        Err(WorkflowBundleError::new(
+            WorkflowBundleErrorKind::InvalidArchive,
+            format!("harnpack archive is missing {HARNPACK_MANIFEST_PATH}"),
+        ))
+    } else {
+        read_workflow_bundle_manifest_any_version(&bytes)
+    }
+}
+
 pub fn parse_workflow_bundle_manifest(bytes: &[u8]) -> Result<WorkflowBundle, WorkflowBundleError> {
     let value: serde_json::Value = serde_json::from_slice(bytes)?;
     let schema_version = value

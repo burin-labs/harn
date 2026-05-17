@@ -132,6 +132,109 @@ fn harnpack_build_read_and_bundle_hash_are_deterministic() {
 }
 
 #[test]
+fn read_manifest_any_version_accepts_v1_payload() {
+    // A minimal v1 manifest: only the pre-v2 fields. The relaxed parser
+    // must accept it and default the v2-only fields, so `harn pack
+    // --upgrade <old>` can keep the original workflow/triggers and
+    // bolt on the new metadata.
+    let v1 = r#"{
+      "schema_version": 1,
+      "id": "legacy",
+      "version": "1.0.0",
+      "workflow": {
+        "_type": "workflow_graph",
+        "id": "wf",
+        "version": 1,
+        "entry": "step",
+        "nodes": { "step": { "id": "step", "kind": "action" } }
+      },
+      "triggers": [{ "id": "manual", "kind": "manual", "node_id": "step" }]
+    }"#;
+    let bundle = read_workflow_bundle_manifest_any_version(v1.as_bytes()).unwrap();
+    assert_eq!(bundle.schema_version, 1);
+    assert_eq!(bundle.id, "legacy");
+    assert_eq!(bundle.workflow.id, "wf");
+    assert_eq!(bundle.triggers.len(), 1);
+    assert!(bundle.transitive_modules.is_empty());
+    assert!(bundle.entrypoint.as_os_str().is_empty());
+
+    // The strict parser still rejects v1 so callers that aren't
+    // explicitly migrating cannot accidentally interpret one.
+    let strict = parse_workflow_bundle_manifest(v1.as_bytes()).unwrap_err();
+    assert_eq!(
+        strict.kind,
+        WorkflowBundleErrorKind::UnsupportedSchemaVersion {
+            actual: 1,
+            expected: WORKFLOW_BUNDLE_SCHEMA_VERSION,
+        }
+    );
+}
+
+#[test]
+fn load_any_version_reads_v1_harnpack_archive() {
+    // Round-trip: assemble a v2 harnpack, hand-roll a manifest
+    // override to schema_version=1, repack, and confirm
+    // load_workflow_bundle_any_version returns it.
+    let bundle = fixture_bundle();
+    let contents = vec![HarnpackEntry::new(
+        "sources/legacy.harn",
+        b"// placeholder".to_vec(),
+    )];
+    let temp = tempfile::tempdir().unwrap();
+    let pack_path = temp.path().join("legacy.harnpack");
+    // Build with the current schema first to reuse the canonicalizer.
+    let archive = build_harnpack(&bundle, &contents).unwrap();
+    // Patch the manifest's schema_version to 1 by rewriting the
+    // archive's manifest entry, then write it to disk.
+    let opened = read_harnpack(&archive).unwrap();
+    let mut downgraded = opened.manifest;
+    downgraded.schema_version = 1;
+    let mut tar_bytes = Vec::new();
+    {
+        let mut builder = tar::Builder::new(&mut tar_bytes);
+        let manifest_bytes = serde_json::to_vec(&downgraded).unwrap();
+        let mut header = tar::Header::new_gnu();
+        header.set_path(HARNPACK_MANIFEST_PATH).unwrap();
+        header.set_entry_type(tar::EntryType::Regular);
+        header.set_size(manifest_bytes.len() as u64);
+        header.set_mode(0o644);
+        header.set_mtime(0);
+        header.set_cksum();
+        builder.append(&header, manifest_bytes.as_slice()).unwrap();
+        for entry in &opened.contents {
+            let mut header = tar::Header::new_gnu();
+            header
+                .set_path(entry.path.to_string_lossy().to_string())
+                .unwrap();
+            header.set_entry_type(tar::EntryType::Regular);
+            header.set_size(entry.bytes.len() as u64);
+            header.set_mode(entry.mode);
+            header.set_mtime(0);
+            header.set_cksum();
+            builder.append(&header, entry.bytes.as_slice()).unwrap();
+        }
+        builder.finish().unwrap();
+    }
+    let zstd_bytes = zstd::stream::encode_all(std::io::Cursor::new(tar_bytes), 0).unwrap();
+    std::fs::write(&pack_path, &zstd_bytes).unwrap();
+
+    // The strict loader rejects the downgraded archive…
+    let strict = load_workflow_bundle(&pack_path).unwrap_err();
+    assert_eq!(
+        strict.kind,
+        WorkflowBundleErrorKind::UnsupportedSchemaVersion {
+            actual: 1,
+            expected: WORKFLOW_BUNDLE_SCHEMA_VERSION,
+        }
+    );
+    // …the relaxed loader accepts it.
+    let loaded = load_workflow_bundle_any_version(&pack_path).unwrap();
+    assert_eq!(loaded.schema_version, 1);
+    assert_eq!(loaded.id, bundle.id);
+    assert_eq!(loaded.workflow.id, bundle.workflow.id);
+}
+
+#[test]
 fn validator_rejects_missing_v2_manifest_contract_fields() {
     let mut bundle = fixture_bundle();
     bundle.entrypoint = std::path::PathBuf::new();

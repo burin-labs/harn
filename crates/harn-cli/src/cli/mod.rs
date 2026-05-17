@@ -31,6 +31,7 @@ mod mcp;
 mod merge_captain;
 mod models;
 mod orchestrator;
+mod pack;
 mod package;
 mod persona;
 mod playground;
@@ -125,6 +126,7 @@ pub(crate) use orchestrator::{
     OrchestratorTenantCreateArgs, OrchestratorTenantDeleteArgs, OrchestratorTenantLsArgs,
     OrchestratorTenantSuspendArgs,
 };
+pub use pack::PackArgs;
 pub(crate) use package::{
     AddArgs, InstallArgs, PackageArgs, PackageArtifactsCommand, PackageCacheCommand,
     PackageCommand, PublishArgs, RemoveArgs, UpdateArgs,
@@ -362,6 +364,20 @@ SCRIPTING
     /// `<name>.harnbc` by default; pass `--out DIR` to redirect them
     /// into a sibling tree.
     Precompile(PrecompileArgs),
+    /// Build a signed-ready `.harnpack` run bundle from a Harn entrypoint.
+    ///
+    /// `harn pack <entrypoint>` walks the entrypoint's transitive imports,
+    /// precompiles every module, snapshots the provider catalog and
+    /// stdlib pin, generates a minimal SBOM, and emits a deterministic
+    /// tar.zst container under `<entrypoint>.harnpack` (or `--out`).
+    ///
+    /// `--upgrade <old.harnpack>` reads an existing bundle (v1 or v2) and
+    /// re-emits it under the v2 manifest, preserving the prior bundle's
+    /// workflow graph, triggers, and prompt capsules.
+    ///
+    /// Signing (E6.3) and richer SBOM enumeration (E6.4) land in
+    /// follow-ups; today the bundle ships unsigned with a stdlib-pin SBOM.
+    Pack(PackArgs),
     /// Render a .harn file as a Mermaid workflow graph.
     Viz(VizArgs),
     /// Install dependencies declared in harn.toml.

@@ -360,6 +360,22 @@ fn finalize_package_target(package_root: &Path, path: &Path) -> Option<PathBuf> 
 }
 
 impl ModuleGraph {
+    /// Sorted list of every module path discovered by [`build`]. Includes
+    /// `<std>/<name>` virtual paths for stdlib modules reached transitively.
+    /// Callers that want only real-disk modules can filter for paths whose
+    /// string form does not start with `<std>/`.
+    pub fn module_paths(&self) -> Vec<PathBuf> {
+        let mut paths: Vec<PathBuf> = self.modules.keys().cloned().collect();
+        paths.sort();
+        paths
+    }
+
+    /// True when `path` (or its canonical form) was discovered during the
+    /// module-graph walk.
+    pub fn contains_module(&self, path: &Path) -> bool {
+        self.modules.contains_key(path) || self.modules.contains_key(&normalize_path(path))
+    }
+
     /// Collect every name used in selective imports from all files.
     pub fn all_selective_import_names(&self) -> HashSet<&str> {
         let mut names = HashSet::new();
