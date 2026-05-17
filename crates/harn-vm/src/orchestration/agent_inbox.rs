@@ -265,6 +265,14 @@ fn has_pending(map: &HashMap<String, InboxState>, session_id: &str) -> bool {
 /// or `clock.sleep(timeout)` resolves. Uses `tokio::sync::Notify` so it
 /// composes correctly with `tokio::time::pause()` and the
 /// [`harn_clock::PausedClock`] used by deterministic tests.
+///
+/// Cross-thread safety: a producer running on a different thread may
+/// finish its entire `push` (entry append + `notify_waiters`) between
+/// our `pending_count` check and our `Notified` snapshot. To close that
+/// window we *create* the `Notified` first (which captures the
+/// `notify_waiters` call counter), then re-check `pending_count`. Any
+/// push completed before the snapshot is visible via `pending_count`;
+/// any push completed after the snapshot triggers the `Notified`.
 pub async fn wait_async(session_id: &str, timeout: Duration, clock: &dyn Clock) -> bool {
     if pending_count(session_id) > 0 {
         return true;
@@ -280,9 +288,16 @@ pub async fn wait_async(session_id: &str, timeout: Duration, clock: &dyn Clock) 
     let sleep = clock.sleep(timeout);
     tokio::pin!(sleep);
     loop {
+        // Snapshot the notify counter BEFORE re-checking pending_count.
+        // See doc comment above for the race this closes.
+        let notified = notify.notified();
+        tokio::pin!(notified);
+        if pending_count(session_id) > 0 {
+            return true;
+        }
         tokio::select! {
             biased;
-            _ = notify.notified() => {
+            _ = &mut notified => {
                 if pending_count(session_id) > 0 {
                     return true;
                 }
@@ -360,7 +375,14 @@ mod tests {
         assert_eq!(again[0].content, "first");
     }
 
-    #[tokio::test(flavor = "multi_thread", worker_threads = 1)]
+    // `current_thread` keeps everything on a single OS thread so the
+    // waiter and producer can't race across threads — the test
+    // task and any spawned tasks share the same scheduler and are
+    // serialized by tokio. The cross-thread race is exercised by the
+    // `inbox_survives_concurrent_pushes_during_awaited_future` end-to-
+    // end test in `crates/harn-vm/tests/agent_inbox_e2e.rs`, and the
+    // `wait_async` cross-thread safety is documented inline.
+    #[tokio::test]
     async fn wait_async_returns_when_push_happens() {
         let sid = fresh_session_id();
         let clock = PausedClock::new(OffsetDateTime::UNIX_EPOCH);
@@ -378,11 +400,15 @@ mod tests {
         assert_eq!(entries.len(), 1);
     }
 
-    #[tokio::test(flavor = "multi_thread", worker_threads = 1)]
+    #[tokio::test]
     async fn wait_async_times_out_when_silent() {
         let sid = fresh_session_id();
         let clock = PausedClock::new(OffsetDateTime::UNIX_EPOCH);
         // Drive the timeout to completion by advancing logical time.
+        // On `current_thread`, the test task yields when wait_async
+        // parks on the clock notify; the spawned advancer then runs
+        // synchronously after wait_async has registered its waiter, so
+        // the deadline computation and the advance can't race.
         let clock_advance = clock.clone();
         let advancer = tokio::spawn(async move {
             tokio::task::yield_now().await;
