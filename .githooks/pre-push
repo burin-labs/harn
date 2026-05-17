@@ -10,6 +10,7 @@ harn_lint_files=$(mktemp)
 changed_packages=$(mktemp)
 trap 'rm -f "$changed" "$harn_format_files" "$harn_lint_files" "$changed_packages"' EXIT
 hook_write_push_files "$changed"
+hook_disable_cargo_incremental_if_release_bump "push $(hook_push_base)"
 
 # Merge-queue guard. GitHub does not reject pushes to a PR that's already
 # in the merge queue — it just keeps using the snapshot it took when the
