@@ -19,6 +19,7 @@ mod connector;
 mod contracts;
 mod crystallize;
 mod demo;
+mod dev;
 mod doctor;
 mod dump;
 mod eval;
@@ -83,6 +84,7 @@ pub(crate) use crystallize::{
     CrystallizeValidateArgs,
 };
 pub(crate) use demo::DemoArgs;
+pub(crate) use dev::DevArgs;
 pub(crate) use doctor::DoctorArgs;
 pub(crate) use dump::{
     DumpConnectorMatrixArgs, DumpHighlightKeywordsArgs, DumpProtocolArtifactsArgs,
@@ -315,6 +317,22 @@ SCRIPTING
     Mcp(McpArgs),
     /// Watch a .harn file and re-run it on changes.
     Watch(WatchArgs),
+    /// Watch a Harn project and re-typecheck only the modules whose
+    /// public interface fingerprint actually changed.
+    ///
+    /// USAGE
+    ///     harn dev --watch [<root>]
+    ///     harn dev --watch --json
+    ///     harn dev --watch --with-tests
+    ///
+    /// On each file change, the changed module's interface fingerprint
+    /// (BLAKE3 of types + signatures + `pub import` re-exports) is
+    /// recomputed. If it matches the previous fingerprint, only that
+    /// module is re-checked. If it changed, every transitive importer
+    /// is invalidated and re-checked. `--with-tests` extends the loop
+    /// to also re-run `test_*` / `@test`-attributed pipelines in
+    /// every invalidated module.
+    Dev(DevArgs),
     /// Launch the local Harn observability portal.
     Portal(PortalArgs),
     /// Replay and inspect historical trigger dispatches from the event log.

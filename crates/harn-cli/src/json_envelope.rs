@@ -188,6 +188,12 @@ pub fn catalog() -> Vec<SchemaEntry> {
             description: "Signed-ready .harnpack run-bundle build summary.",
             schema_json: None,
         },
+        SchemaEntry {
+            command: "dev",
+            schema_version: 1,
+            description: "`harn dev --watch` incremental NDJSON event stream (ready / fingerprint_changed / rerun / diagnostics / tests).",
+            schema_json: None,
+        },
     ]
 }
 

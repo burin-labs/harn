@@ -2260,6 +2260,7 @@ dependencies = [
 name = "harn-modules"
 version = "0.8.24"
 dependencies = [
+ "blake3",
  "croner",
  "harn-lexer",
  "harn-parser",

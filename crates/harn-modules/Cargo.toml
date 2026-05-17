@@ -12,6 +12,7 @@ include = [
 ]
 
 [dependencies]
+blake3 = "1"
 croner = "3.0.1"
 harn-lexer = { path = "../harn-lexer", version = "0.8" }
 harn-parser = { path = "../harn-parser", version = "0.8" }

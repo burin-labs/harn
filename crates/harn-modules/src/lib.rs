@@ -6,6 +6,7 @@ use harn_parser::{BindingPattern, Node, Parser, SNode};
 use serde::Deserialize;
 
 pub mod asset_paths;
+pub mod fingerprint;
 pub mod personas;
 mod stdlib;
 
@@ -385,6 +386,27 @@ impl ModuleGraph {
             }
         }
         names
+    }
+
+    /// Files that directly import `target`. Resolves `target` to a
+    /// canonical path before lookup so callers can pass either spelling.
+    pub fn importers_of(&self, target: &Path) -> Vec<PathBuf> {
+        let target = normalize_path(target);
+        let mut out: Vec<PathBuf> = self
+            .modules
+            .iter()
+            .filter(|(_, info)| {
+                info.imports.iter().any(|import| {
+                    import
+                        .path
+                        .as_ref()
+                        .is_some_and(|p| normalize_path(p) == target)
+                })
+            })
+            .map(|(path, _)| path.clone())
+            .collect();
+        out.sort();
+        out
     }
 
     /// Resolve wildcard imports for `file`.
@@ -1046,6 +1068,26 @@ mod tests {
         let path = dir.join(name);
         fs::write(&path, contents).unwrap();
         path
+    }
+
+    #[test]
+    fn importers_of_finds_direct_dependents() {
+        let tmp = tempfile::tempdir().unwrap();
+        let root = tmp.path();
+        let leaf = write_file(root, "leaf.harn", "pub fn leaf() { 1 }\n");
+        write_file(root, "a.harn", "import \"./leaf\"\nleaf()\n");
+        write_file(root, "b.harn", "import { leaf } from \"./leaf\"\nleaf()\n");
+        let entry = write_file(root, "entry.harn", "import \"./a\"\nimport \"./b\"\n");
+
+        let graph = build(std::slice::from_ref(&entry));
+        let importers = graph.importers_of(&leaf);
+        let names: Vec<String> = importers
+            .iter()
+            .map(|p| p.file_name().unwrap().to_string_lossy().into_owned())
+            .collect();
+        assert!(names.contains(&"a.harn".to_string()));
+        assert!(names.contains(&"b.harn".to_string()));
+        assert!(!names.contains(&"entry.harn".to_string()));
     }
 
     #[test]
