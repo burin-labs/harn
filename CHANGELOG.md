@@ -32,6 +32,11 @@ condensed series summaries instead of full per-patch history.
   promotes a top `## Unreleased` heading to `## v$expected` in place
   (subsequent `git add -u` in the staging step picks the rename up).
   Mismatched `## vX.Y.Z` headings still error with the same hint.
+- **Lint: for-loop iteration bindings no longer trigger
+  `undefined-function` false positives (#1704).** `for entry in
+  callables { entry(arg) }` is now valid — the iteration binding is
+  tracked as a callable local. Affects only the linter; runtime
+  behavior is unchanged.
 
 ### Added
 
@@ -44,6 +49,24 @@ condensed series summaries instead of full per-patch history.
   wire ID. `scripts/smoke_cerebras.harn` is the latency-floor smoke for
   the NL-binder substrate work tracked under #1696/#1698 — empirical
   warm-state p50 of ~150ms from a residential network, p99 ~230ms.
+- **Tool-call telemetry: standardized spans + built-in Langfuse / OTel /
+  stderr / noop sinks (#1704).** `with_telemetry` (in
+  `std/llm/tool_middleware`) now builds a standardized tool-call span
+  for every dispatch — including timing, args hash, executor, layered
+  child spans, and `dispatched` / `result_returned` /
+  `scope_violation` events — and fans it out to one or more sinks.
+  The new `std/llm/tool_telemetry` module exposes
+  `tool_call_span(call, result, start_ms, end_ms, extras?)` plus
+  `langfuse_sink`, `otel_sink`, `stderr_sink`, `noop_sink`, and
+  `resolve_telemetry_sink` for custom middleware. `with_telemetry`
+  accepts a callable, a built-in name string, or a config dict
+  (`{sink: "langfuse", project: "..."}` /
+  `{sinks: [...]}` for fan-out). The Langfuse sink POSTs to
+  `${LANGFUSE_BASE_URL}/api/public/ingestion` using the standard
+  `LANGFUSE_PUBLIC_KEY` / `LANGFUSE_SECRET_KEY` env shape, with
+  per-span `on_error` opt-in. Captain presets renamed
+  `telemetry_sink` → `telemetry` to take the new config shape
+  directly. Schema reference: `docs/src/observability/tool-call-spans.md`.
 
 ## v0.8.21
 

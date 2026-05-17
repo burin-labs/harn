@@ -1,0 +1,159 @@
+/**
+ * with_telemetry + std/llm/tool_telemetry — standardized tool-call span
+ * shape and sink resolution.
+ *
+ * Confirms:
+ *   - the span schema documented in tool_call_span(...) survives a real
+ *     dispatch (attributes, gen_ai.* mirrors, events, child spans);
+ *   - error_category="scope_violation" produces a tool_call.scope_violation
+ *     event;
+ *   - with_telemetry accepts a callable, a built-in name string, a dict
+ *     with `sink:`, and a fan-out `sinks:` list.
+ */
+import { with_telemetry } from "std/llm/tool_middleware"
+import { resolve_telemetry_sink, tool_call_span } from "std/llm/tool_telemetry"
+
+fn ok_next() {
+  return { call -> return {
+    ok: true,
+    status: "ok",
+    tool_name: call.tool_name,
+    tool_call_id: call.call_id,
+    arguments: call.tool_args,
+    result: {rendered: "hello"},
+    rendered_result: "hello",
+    observation: "",
+    error: nil,
+    error_category: nil,
+    executor: "harn",
+    audit: {
+      layers: [
+        {name: "with_consent", status: "approved"},
+        {name: "with_rate_limit", status: "ok", count: 3, cap: 50},
+      ],
+    },
+  } }
+}
+
+fn scope_violation_next() {
+  return { call -> return {
+    ok: false,
+    status: "error",
+    tool_name: call.tool_name,
+    tool_call_id: call.call_id,
+    arguments: call.tool_args,
+    result: nil,
+    rendered_result: "",
+    observation: "",
+    error: "tool 'shell.exec' is outside the configured scope",
+    error_category: "scope_violation",
+    executor: "harn",
+  } }
+}
+
+fn envelope(name, call_id, session_id) {
+  return {
+    tool_name: name,
+    tool_args: {q: "evidence"},
+    call_id: call_id,
+    declared_executor: "harn",
+    schema: nil,
+    description: "",
+    turn: {iteration: 2, session_id: session_id},
+  }
+}
+
+pipeline default() {
+  // (1) Callable sink receives the standardized span shape.
+  let mw = with_telemetry(
+    { s ->
+      println(s.name)
+      println(s.kind)
+      println(s.span_id)
+      println(s.trace_id)
+      println(s.attributes.tool_name)
+      println(s.attributes.tool_call_id)
+      println(s.attributes.iteration)
+      println(s.attributes.session_id)
+      println(s.attributes.executor)
+      println(s.attributes.status)
+      println(s.attributes.ok)
+      println(s.attributes["gen_ai.tool.name"])
+      println(s.attributes["gen_ai.tool.call.id"])
+      println(s.attributes["gen_ai.tool.executor"])
+      println(s.events[0].name)
+      println(s.events[1].name)
+      println(len(s.child_spans))
+      println(s.child_spans[0].name)
+      println(s.child_spans[1].name)
+      println(s.child_spans[1].attributes.count)
+      println(s.child_spans[1].attributes.cap)
+    },
+  )
+  let ok = mw(envelope("read", "call_1", "sess_alpha"), ok_next())
+  println(ok.ok)
+  println(ok.status)
+  // (2) Scope-violation errors raise a tool_call.scope_violation event.
+  let scope_mw = with_telemetry(
+    { s ->
+      println(s.status)
+      println(s.attributes.error_category)
+      println(len(s.events))
+      println(s.events[2].name)
+      println(s.events[2].attributes.category)
+    },
+  )
+  let denied = scope_mw(envelope("shell.exec", "call_2", "sess_beta"), scope_violation_next())
+  println(denied.ok)
+  // (3) When the envelope has no session_id, the trace_id falls back
+  // to "tool_call:<call_id>".
+  let traceless_mw = with_telemetry({ s -> println(s.trace_id) })
+  let _ = traceless_mw(envelope("read", "call_3", ""), ok_next())
+  // (4) Dict config: persona + mode + extra_attributes ride along.
+  let attr_mw = with_telemetry(
+    {
+      sink: { s ->
+        println(s.attributes.persona)
+        println(s.attributes.mode)
+        println(s.attributes.env)
+      },
+      persona: "merge_captain",
+      mode: "preview",
+      extra_attributes: {env: "dev"},
+    },
+  )
+  let _ = attr_mw(envelope("read", "call_4", "sess_gamma"), ok_next())
+  // (5) Fan-out: `sinks: [..]` invokes every sink.
+  let left = atomic(0)
+  let right = atomic(0)
+  let fanout = with_telemetry(
+    {
+      sinks: [
+        { _s ->
+          let _ = atomic_add(left, 1)
+        },
+        { _s ->
+          let _ = atomic_add(right, 1)
+        },
+      ],
+    },
+  )
+  let _ = fanout(envelope("read", "call_5", "sess_delta"), ok_next())
+  println(atomic_get(left))
+  println(atomic_get(right))
+  // (6) Unknown built-in name raises a clear error.
+  let bad = try {
+    resolve_telemetry_sink("kaboom")
+  }
+  println(is_err(bad))
+  // (7) tool_call_span(...) is callable directly for ad-hoc reporting.
+  let direct = tool_call_span(
+    envelope("read", "call_6", "sess_epsilon"),
+    {ok: true, status: "ok", executor: "harn", result: nil},
+    1000,
+    1042,
+    {persona: "review_captain"},
+  )
+  println(direct.duration_ms)
+  println(direct.attributes.persona)
+}

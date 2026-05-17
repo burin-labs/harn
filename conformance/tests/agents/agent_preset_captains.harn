@@ -53,8 +53,8 @@ pipeline default() {
   println(release?.tool_caller == nil)
   // (5) Caller-supplied audit/telemetry sinks compose into the stack.
   let audit_sink = { _record -> nil }
-  let telemetry_sink = { _record -> nil }
-  let merge_with_sinks = agent_preset("merge_captain", {audit_sink: audit_sink, telemetry_sink: telemetry_sink})
+  let telemetry_sink = { _span -> nil }
+  let merge_with_sinks = agent_preset("merge_captain", {audit_sink: audit_sink, telemetry: telemetry_sink})
   println(merge_with_sinks?.tool_caller != nil)
   // (6) Caller-supplied cheap-default + frontier escalation builds
   // the with_routing-backed llm_caller.
