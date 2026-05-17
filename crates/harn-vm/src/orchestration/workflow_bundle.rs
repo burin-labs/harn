@@ -1,21 +1,36 @@
-//! Portable workflow bundle contract and deterministic local receipts.
+//! Portable workflow bundle contract, `.harnpack` container helpers, and
+//! deterministic local receipts.
 
 use std::collections::{BTreeMap, BTreeSet, VecDeque};
 use std::fs;
-use std::path::Path;
+use std::io::{Cursor, Read};
+use std::path::{Component, Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
 use super::{validate_workflow, WorkflowEdge, WorkflowGraph};
+use crate::tool_annotations::ToolAnnotations;
 
-pub const WORKFLOW_BUNDLE_SCHEMA_VERSION: u32 = 1;
+pub const WORKFLOW_BUNDLE_SCHEMA_VERSION: u32 = 2;
 pub const WORKFLOW_BUNDLE_RECEIPT_TYPE: &str = "harn.workflow_bundle.run";
+pub const HARNPACK_MANIFEST_PATH: &str = "harnpack.json";
 
-#[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq)]
+const DEFAULT_HARNPACK_FILE_MODE: u32 = 0o644;
+
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
 #[serde(default)]
 pub struct WorkflowBundle {
     pub schema_version: u32,
+    pub entrypoint: PathBuf,
+    pub transitive_modules: Vec<ModuleEntry>,
+    pub stdlib_version: String,
+    pub harn_version: String,
+    pub provider_catalog_hash: String,
+    pub tool_manifest: Vec<ToolEntry>,
+    pub sbom: SBOMDoc,
+    pub signature: Option<Ed25519Signature>,
+    pub parent_trust_record_id: Option<String>,
     pub id: String,
     pub name: Option<String>,
     pub version: String,
@@ -27,6 +42,91 @@ pub struct WorkflowBundle {
     pub environment: EnvironmentRequirements,
     pub receipts: WorkflowBundleReplayMetadata,
     pub metadata: BTreeMap<String, serde_json::Value>,
+}
+
+impl Default for WorkflowBundle {
+    fn default() -> Self {
+        Self {
+            schema_version: WORKFLOW_BUNDLE_SCHEMA_VERSION,
+            entrypoint: PathBuf::new(),
+            transitive_modules: Vec::new(),
+            stdlib_version: env!("CARGO_PKG_VERSION").to_string(),
+            harn_version: env!("CARGO_PKG_VERSION").to_string(),
+            provider_catalog_hash: String::new(),
+            tool_manifest: Vec::new(),
+            sbom: SBOMDoc::default(),
+            signature: None,
+            parent_trust_record_id: None,
+            id: String::new(),
+            name: None,
+            version: String::new(),
+            triggers: Vec::new(),
+            workflow: WorkflowGraph::default(),
+            prompt_capsules: BTreeMap::new(),
+            policy: WorkflowBundlePolicy::default(),
+            connectors: Vec::new(),
+            environment: EnvironmentRequirements::default(),
+            receipts: WorkflowBundleReplayMetadata::default(),
+            metadata: BTreeMap::new(),
+        }
+    }
+}
+
+#[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(default)]
+pub struct ModuleEntry {
+    pub path: PathBuf,
+    pub source_hash_blake3: String,
+    pub harnbc_hash_blake3: String,
+}
+
+#[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(default)]
+pub struct ToolEntry {
+    pub name: String,
+    pub provider: Option<String>,
+    pub annotations: Option<ToolAnnotations>,
+    pub schema_hash_blake3: Option<String>,
+    pub metadata: BTreeMap<String, String>,
+}
+
+#[allow(clippy::upper_case_acronyms)]
+#[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(default)]
+pub struct SBOMDoc {
+    pub format: String,
+    pub version: String,
+    pub packages: Vec<SBOMPackage>,
+    pub relationships: Vec<SBOMRelationship>,
+}
+
+#[allow(clippy::upper_case_acronyms)]
+#[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(default)]
+pub struct SBOMPackage {
+    pub name: String,
+    pub version: Option<String>,
+    pub package_hash_blake3: Option<String>,
+    pub license: Option<String>,
+}
+
+#[allow(clippy::upper_case_acronyms)]
+#[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(default)]
+pub struct SBOMRelationship {
+    pub from: String,
+    pub to: String,
+    pub relationship_type: String,
+}
+
+#[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(default)]
+pub struct Ed25519Signature {
+    pub key_id: Option<String>,
+    pub public_key: String,
+    pub signature: String,
+    pub manifest_hash_blake3: String,
+    pub algorithm: String,
 }
 
 #[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq, Eq)]
@@ -281,8 +381,70 @@ pub struct WorkflowBundleRunNodeReceipt {
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
+pub struct HarnpackEntry {
+    pub path: PathBuf,
+    pub bytes: Vec<u8>,
+    pub mode: u32,
+}
+
+impl HarnpackEntry {
+    pub fn new(path: impl Into<PathBuf>, bytes: impl Into<Vec<u8>>) -> Self {
+        Self {
+            path: path.into(),
+            bytes: bytes.into(),
+            mode: DEFAULT_HARNPACK_FILE_MODE,
+        }
+    }
+
+    pub fn with_mode(mut self, mode: u32) -> Self {
+        self.mode = mode;
+        self
+    }
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct HarnpackArchive {
+    pub manifest: WorkflowBundle,
+    pub contents: Vec<HarnpackEntry>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum WorkflowBundleErrorKind {
+    Io,
+    Json,
+    MissingSchemaVersion,
+    UnsupportedSchemaVersion { actual: u32, expected: u32 },
+    InvalidArchive,
+    DuplicateArchiveEntry,
+    UnsafeArchivePath,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct WorkflowBundleError {
+    pub kind: WorkflowBundleErrorKind,
     pub message: String,
+}
+
+impl WorkflowBundleError {
+    fn new(kind: WorkflowBundleErrorKind, message: impl Into<String>) -> Self {
+        Self {
+            kind,
+            message: message.into(),
+        }
+    }
+
+    fn unsupported_schema_version(actual: u32) -> Self {
+        Self::new(
+            WorkflowBundleErrorKind::UnsupportedSchemaVersion {
+                actual,
+                expected: WORKFLOW_BUNDLE_SCHEMA_VERSION,
+            },
+            format!(
+                "unsupported workflow bundle schema_version {actual}; expected {}",
+                WORKFLOW_BUNDLE_SCHEMA_VERSION
+            ),
+        )
+    }
 }
 
 impl std::fmt::Display for WorkflowBundleError {
@@ -295,23 +457,179 @@ impl std::error::Error for WorkflowBundleError {}
 
 impl From<std::io::Error> for WorkflowBundleError {
     fn from(error: std::io::Error) -> Self {
-        Self {
-            message: error.to_string(),
-        }
+        Self::new(WorkflowBundleErrorKind::Io, error.to_string())
     }
 }
 
 impl From<serde_json::Error> for WorkflowBundleError {
     fn from(error: serde_json::Error) -> Self {
-        Self {
-            message: error.to_string(),
-        }
+        Self::new(WorkflowBundleErrorKind::Json, error.to_string())
     }
 }
 
 pub fn load_workflow_bundle(path: &Path) -> Result<WorkflowBundle, WorkflowBundleError> {
     let bytes = fs::read(path)?;
-    serde_json::from_slice(&bytes).map_err(Into::into)
+    if path.extension().and_then(|extension| extension.to_str()) == Some("harnpack") {
+        read_harnpack(&bytes).map(|archive| archive.manifest)
+    } else {
+        parse_workflow_bundle_manifest(&bytes)
+    }
+}
+
+pub fn parse_workflow_bundle_manifest(bytes: &[u8]) -> Result<WorkflowBundle, WorkflowBundleError> {
+    let value: serde_json::Value = serde_json::from_slice(bytes)?;
+    let schema_version = value
+        .get("schema_version")
+        .and_then(serde_json::Value::as_u64)
+        .ok_or_else(|| {
+            WorkflowBundleError::new(
+                WorkflowBundleErrorKind::MissingSchemaVersion,
+                "workflow bundle manifest is missing numeric schema_version",
+            )
+        })?;
+    let actual = u32::try_from(schema_version).map_err(|_| {
+        WorkflowBundleError::new(
+            WorkflowBundleErrorKind::UnsupportedSchemaVersion {
+                actual: u32::MAX,
+                expected: WORKFLOW_BUNDLE_SCHEMA_VERSION,
+            },
+            format!(
+                "unsupported workflow bundle schema_version {schema_version}; expected {}",
+                WORKFLOW_BUNDLE_SCHEMA_VERSION
+            ),
+        )
+    })?;
+    if actual != WORKFLOW_BUNDLE_SCHEMA_VERSION {
+        return Err(WorkflowBundleError::unsupported_schema_version(actual));
+    }
+    serde_json::from_value(value).map_err(Into::into)
+}
+
+pub fn canonical_workflow_bundle_manifest_bytes(
+    bundle: &WorkflowBundle,
+) -> Result<Vec<u8>, WorkflowBundleError> {
+    serde_json::to_vec(&canonical_workflow_bundle_manifest(bundle)).map_err(Into::into)
+}
+
+pub fn workflow_bundle_hash(
+    bundle: &WorkflowBundle,
+    contents: &[HarnpackEntry],
+) -> Result<String, WorkflowBundleError> {
+    let mut hasher = blake3::Hasher::new();
+    let mut canonical = canonical_workflow_bundle_manifest(bundle);
+    canonical.signature = None;
+    let manifest_bytes = serde_json::to_vec(&canonical)?;
+    hasher.update(&manifest_bytes);
+
+    let mut content_hashes = contents
+        .iter()
+        .map(|entry| blake3_hash_bytes(&entry.bytes))
+        .collect::<Vec<_>>();
+    content_hashes.sort();
+    for content_hash in content_hashes {
+        hasher.update(b"\n");
+        hasher.update(content_hash.as_bytes());
+    }
+
+    Ok(blake3_digest_string(hasher.finalize()))
+}
+
+pub fn build_harnpack(
+    bundle: &WorkflowBundle,
+    contents: &[HarnpackEntry],
+) -> Result<Vec<u8>, WorkflowBundleError> {
+    let manifest_bytes = canonical_workflow_bundle_manifest_bytes(bundle)?;
+    let mut entries = contents
+        .iter()
+        .map(|entry| {
+            normalize_archive_path(&entry.path).map(|path| (path, entry.bytes.clone(), entry.mode))
+        })
+        .collect::<Result<Vec<_>, _>>()?;
+    entries.sort_by(|left, right| left.0.cmp(&right.0));
+
+    let mut seen = BTreeSet::new();
+    for (path, _, _) in &entries {
+        if path == HARNPACK_MANIFEST_PATH {
+            return Err(WorkflowBundleError::new(
+                WorkflowBundleErrorKind::DuplicateArchiveEntry,
+                format!("archive content cannot replace {HARNPACK_MANIFEST_PATH}"),
+            ));
+        }
+        if !seen.insert(path.clone()) {
+            return Err(WorkflowBundleError::new(
+                WorkflowBundleErrorKind::DuplicateArchiveEntry,
+                format!("duplicate archive entry: {path}"),
+            ));
+        }
+    }
+
+    let mut tar_bytes = Vec::new();
+    {
+        let mut builder = tar::Builder::new(&mut tar_bytes);
+        append_harnpack_entry(
+            &mut builder,
+            HARNPACK_MANIFEST_PATH,
+            &manifest_bytes,
+            DEFAULT_HARNPACK_FILE_MODE,
+        )?;
+        for (path, bytes, mode) in entries {
+            append_harnpack_entry(&mut builder, &path, &bytes, mode)?;
+        }
+        builder.finish()?;
+    }
+
+    zstd::stream::encode_all(Cursor::new(tar_bytes), 0).map_err(Into::into)
+}
+
+pub fn read_harnpack(bytes: &[u8]) -> Result<HarnpackArchive, WorkflowBundleError> {
+    let tar_bytes = zstd::stream::decode_all(Cursor::new(bytes))?;
+    let mut archive = tar::Archive::new(Cursor::new(tar_bytes));
+    let mut manifest = None;
+    let mut contents = Vec::new();
+    let mut seen = BTreeSet::new();
+
+    for entry in archive.entries()? {
+        let mut entry = entry?;
+        if entry.header().entry_type().is_dir() {
+            continue;
+        }
+        let path = normalize_archive_path(entry.path()?.as_ref())?;
+        if !seen.insert(path.clone()) {
+            return Err(WorkflowBundleError::new(
+                WorkflowBundleErrorKind::DuplicateArchiveEntry,
+                format!("duplicate archive entry: {path}"),
+            ));
+        }
+        let mode = entry.header().mode().unwrap_or(DEFAULT_HARNPACK_FILE_MODE);
+        let mut entry_bytes = Vec::new();
+        entry.read_to_end(&mut entry_bytes)?;
+
+        if path == HARNPACK_MANIFEST_PATH {
+            manifest = Some(parse_workflow_bundle_manifest(&entry_bytes)?);
+        } else {
+            contents.push(HarnpackEntry {
+                path: PathBuf::from(path),
+                bytes: entry_bytes,
+                mode,
+            });
+        }
+    }
+
+    contents.sort_by(|left, right| left.path.cmp(&right.path));
+    Ok(HarnpackArchive {
+        manifest: manifest.ok_or_else(|| {
+            WorkflowBundleError::new(
+                WorkflowBundleErrorKind::InvalidArchive,
+                format!("harnpack archive is missing {HARNPACK_MANIFEST_PATH}"),
+            )
+        })?,
+        contents,
+    })
+}
+
+pub fn current_provider_catalog_hash_blake3() -> Result<String, WorkflowBundleError> {
+    let bytes = serde_json::to_vec(&crate::provider_catalog::artifact())?;
+    Ok(blake3_hash_bytes(&bytes))
 }
 
 pub fn workflow_graph_digest(graph: &WorkflowGraph) -> String {
@@ -326,6 +644,127 @@ pub fn workflow_graph_digest(graph: &WorkflowGraph) -> String {
     format!("sha256:{hex}")
 }
 
+fn canonical_workflow_bundle_manifest(bundle: &WorkflowBundle) -> WorkflowBundle {
+    let mut canonical = bundle.clone();
+    canonical.workflow = canonical_workflow_graph(&bundle.workflow);
+    canonical.transitive_modules.sort_by(|left, right| {
+        (
+            path_sort_key(&left.path),
+            &left.source_hash_blake3,
+            &left.harnbc_hash_blake3,
+        )
+            .cmp(&(
+                path_sort_key(&right.path),
+                &right.source_hash_blake3,
+                &right.harnbc_hash_blake3,
+            ))
+    });
+    canonical.tool_manifest.sort_by(|left, right| {
+        (&left.name, &left.provider, &left.schema_hash_blake3).cmp(&(
+            &right.name,
+            &right.provider,
+            &right.schema_hash_blake3,
+        ))
+    });
+    canonical.sbom.packages.sort_by(|left, right| {
+        (&left.name, &left.version, &left.package_hash_blake3).cmp(&(
+            &right.name,
+            &right.version,
+            &right.package_hash_blake3,
+        ))
+    });
+    canonical.sbom.relationships.sort_by(|left, right| {
+        (&left.from, &left.to, &left.relationship_type).cmp(&(
+            &right.from,
+            &right.to,
+            &right.relationship_type,
+        ))
+    });
+    canonical
+}
+
+fn append_harnpack_entry<W: std::io::Write>(
+    builder: &mut tar::Builder<W>,
+    path: &str,
+    bytes: &[u8],
+    mode: u32,
+) -> Result<(), WorkflowBundleError> {
+    let mut header = tar::Header::new_gnu();
+    header.set_path(path).map_err(|error| {
+        WorkflowBundleError::new(
+            WorkflowBundleErrorKind::UnsafeArchivePath,
+            format!("invalid archive path {path}: {error}"),
+        )
+    })?;
+    header.set_entry_type(tar::EntryType::Regular);
+    header.set_size(bytes.len() as u64);
+    header.set_mode(mode);
+    header.set_mtime(0);
+    header.set_uid(0);
+    header.set_gid(0);
+    header.set_cksum();
+    builder.append(&header, bytes)?;
+    Ok(())
+}
+
+fn normalize_archive_path(path: &Path) -> Result<String, WorkflowBundleError> {
+    let mut parts = Vec::new();
+    for component in path.components() {
+        match component {
+            Component::Normal(part) => {
+                let Some(part) = part.to_str() else {
+                    return Err(WorkflowBundleError::new(
+                        WorkflowBundleErrorKind::UnsafeArchivePath,
+                        format!("archive path is not valid UTF-8: {}", path.display()),
+                    ));
+                };
+                if part.is_empty() {
+                    return Err(WorkflowBundleError::new(
+                        WorkflowBundleErrorKind::UnsafeArchivePath,
+                        "archive path contains an empty component",
+                    ));
+                }
+                parts.push(part.to_string());
+            }
+            Component::CurDir => {}
+            Component::ParentDir | Component::RootDir | Component::Prefix(_) => {
+                return Err(WorkflowBundleError::new(
+                    WorkflowBundleErrorKind::UnsafeArchivePath,
+                    format!(
+                        "archive path must be relative and contained: {}",
+                        path.display()
+                    ),
+                ));
+            }
+        }
+    }
+    if parts.is_empty() {
+        return Err(WorkflowBundleError::new(
+            WorkflowBundleErrorKind::UnsafeArchivePath,
+            "archive path is empty",
+        ));
+    }
+    Ok(parts.join("/"))
+}
+
+fn path_sort_key(path: &Path) -> String {
+    path.components()
+        .filter_map(|component| match component {
+            Component::Normal(part) => part.to_str().map(ToOwned::to_owned),
+            _ => None,
+        })
+        .collect::<Vec<_>>()
+        .join("/")
+}
+
+fn blake3_hash_bytes(bytes: &[u8]) -> String {
+    blake3_digest_string(blake3::hash(bytes))
+}
+
+fn blake3_digest_string(hash: blake3::Hash) -> String {
+    format!("blake3:{hash}")
+}
+
 pub fn validate_workflow_bundle(bundle: &WorkflowBundle) -> WorkflowBundleValidationReport {
     let canonical = canonical_workflow_graph(&bundle.workflow);
     let mut report = WorkflowBundleValidationReport {
@@ -337,6 +776,7 @@ pub fn validate_workflow_bundle(bundle: &WorkflowBundle) -> WorkflowBundleValida
         warnings: Vec::new(),
     };
 
+    validate_manifest_contract(bundle, &mut report);
     validate_bundle_identity(bundle, &canonical, &mut report);
     validate_triggers(bundle, &canonical, &mut report);
     validate_prompt_capsules(bundle, &canonical, &mut report);
@@ -855,6 +1295,253 @@ fn validate_bundle_identity(
                 Some(node_id.clone()),
             );
         }
+    }
+}
+
+fn validate_manifest_contract(
+    bundle: &WorkflowBundle,
+    report: &mut WorkflowBundleValidationReport,
+) {
+    validate_relative_path(
+        report,
+        "entrypoint",
+        &bundle.entrypoint,
+        "entrypoint is required",
+    );
+    if bundle.transitive_modules.is_empty() {
+        push_error(
+            report,
+            "transitive_modules",
+            "at least one transitive module entry is required",
+            None,
+        );
+    }
+    let mut module_paths = BTreeSet::new();
+    for (index, module) in bundle.transitive_modules.iter().enumerate() {
+        let path = format!("transitive_modules[{index}]");
+        validate_relative_path(
+            report,
+            format!("{path}.path"),
+            &module.path,
+            "module path is required",
+        );
+        if !module.path.as_os_str().is_empty() && !module_paths.insert(path_sort_key(&module.path))
+        {
+            push_error(
+                report,
+                format!("{path}.path"),
+                format!(
+                    "duplicate transitive module path: {}",
+                    module.path.display()
+                ),
+                None,
+            );
+        }
+        validate_blake3_hash(
+            report,
+            format!("{path}.source_hash_blake3"),
+            &module.source_hash_blake3,
+            true,
+        );
+        validate_blake3_hash(
+            report,
+            format!("{path}.harnbc_hash_blake3"),
+            &module.harnbc_hash_blake3,
+            true,
+        );
+    }
+    if bundle.stdlib_version.trim().is_empty() {
+        push_error(report, "stdlib_version", "stdlib_version is required", None);
+    }
+    if bundle.harn_version.trim().is_empty() {
+        push_error(report, "harn_version", "harn_version is required", None);
+    }
+    validate_blake3_hash(
+        report,
+        "provider_catalog_hash",
+        &bundle.provider_catalog_hash,
+        true,
+    );
+
+    let mut tool_names = BTreeSet::new();
+    for (index, tool) in bundle.tool_manifest.iter().enumerate() {
+        let path = format!("tool_manifest[{index}]");
+        if tool.name.trim().is_empty() {
+            push_error(
+                report,
+                format!("{path}.name"),
+                "tool manifest entry name is required",
+                None,
+            );
+        } else if !tool_names.insert(tool.name.clone()) {
+            push_error(
+                report,
+                format!("{path}.name"),
+                format!("duplicate tool manifest entry: {}", tool.name),
+                None,
+            );
+        }
+        if let Some(hash) = tool.schema_hash_blake3.as_deref() {
+            validate_blake3_hash(report, format!("{path}.schema_hash_blake3"), hash, true);
+        }
+    }
+
+    if bundle.sbom.format.trim().is_empty() {
+        push_error(report, "sbom.format", "SBOM format is required", None);
+    }
+    if bundle.sbom.version.trim().is_empty() {
+        push_error(report, "sbom.version", "SBOM version is required", None);
+    }
+    let mut sbom_packages = BTreeSet::new();
+    for (index, package) in bundle.sbom.packages.iter().enumerate() {
+        let path = format!("sbom.packages[{index}]");
+        if package.name.trim().is_empty() {
+            push_error(
+                report,
+                format!("{path}.name"),
+                "SBOM package name is required",
+                None,
+            );
+        } else if !sbom_packages.insert(package.name.clone()) {
+            push_error(
+                report,
+                format!("{path}.name"),
+                format!("duplicate SBOM package: {}", package.name),
+                None,
+            );
+        }
+        if let Some(hash) = package.package_hash_blake3.as_deref() {
+            validate_blake3_hash(report, format!("{path}.package_hash_blake3"), hash, true);
+        }
+    }
+    for (index, relationship) in bundle.sbom.relationships.iter().enumerate() {
+        let path = format!("sbom.relationships[{index}]");
+        if relationship.from.trim().is_empty() {
+            push_error(
+                report,
+                format!("{path}.from"),
+                "SBOM relationship source is required",
+                None,
+            );
+        }
+        if relationship.to.trim().is_empty() {
+            push_error(
+                report,
+                format!("{path}.to"),
+                "SBOM relationship target is required",
+                None,
+            );
+        }
+        if relationship.relationship_type.trim().is_empty() {
+            push_error(
+                report,
+                format!("{path}.relationship_type"),
+                "SBOM relationship type is required",
+                None,
+            );
+        }
+    }
+
+    if let Some(parent_id) = bundle.parent_trust_record_id.as_deref() {
+        if parent_id.trim().is_empty() {
+            push_error(
+                report,
+                "parent_trust_record_id",
+                "parent_trust_record_id cannot be empty when present",
+                None,
+            );
+        }
+    }
+    if let Some(signature) = &bundle.signature {
+        if signature.algorithm.trim().is_empty() {
+            push_error(
+                report,
+                "signature.algorithm",
+                "signature algorithm is required",
+                None,
+            );
+        } else if signature.algorithm != "ed25519" {
+            push_error(
+                report,
+                "signature.algorithm",
+                "signature algorithm must be ed25519",
+                None,
+            );
+        }
+        if signature.public_key.trim().is_empty() {
+            push_error(
+                report,
+                "signature.public_key",
+                "signature public_key is required",
+                None,
+            );
+        }
+        if signature.signature.trim().is_empty() {
+            push_error(
+                report,
+                "signature.signature",
+                "signature value is required",
+                None,
+            );
+        }
+        validate_blake3_hash(
+            report,
+            "signature.manifest_hash_blake3",
+            &signature.manifest_hash_blake3,
+            true,
+        );
+    }
+}
+
+fn validate_relative_path(
+    report: &mut WorkflowBundleValidationReport,
+    path: impl Into<String>,
+    value: &Path,
+    empty_message: &str,
+) {
+    let path = path.into();
+    if value.as_os_str().is_empty() {
+        push_error(report, path, empty_message, None);
+        return;
+    }
+    if normalize_archive_path(value).is_err() {
+        push_error(
+            report,
+            path,
+            format!("path must be relative and contained: {}", value.display()),
+            None,
+        );
+    }
+}
+
+fn validate_blake3_hash(
+    report: &mut WorkflowBundleValidationReport,
+    path: impl Into<String>,
+    value: &str,
+    required: bool,
+) {
+    let path = path.into();
+    if value.trim().is_empty() {
+        if required {
+            push_error(report, path, "BLAKE3 hash is required", None);
+        }
+        return;
+    }
+    let Some(hex) = value.strip_prefix("blake3:") else {
+        push_error(report, path, "BLAKE3 hash must use blake3:<hex>", None);
+        return;
+    };
+    if hex.len() != 64
+        || !hex
+            .bytes()
+            .all(|byte| byte.is_ascii_digit() || matches!(byte, b'a'..=b'f'))
+    {
+        push_error(
+            report,
+            path,
+            "BLAKE3 hash must contain 64 lowercase hex digits",
+            None,
+        );
     }
 }
 

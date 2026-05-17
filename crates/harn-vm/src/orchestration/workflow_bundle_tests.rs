@@ -2,111 +2,7 @@ use super::*;
 use crate::orchestration::{WorkflowEdge, WorkflowNode};
 
 fn fixture_bundle() -> WorkflowBundle {
-    serde_json::from_str(
-        r#"{
-  "schema_version": 1,
-  "id": "github-pr-monitor",
-  "name": "GitHub PR monitor",
-  "version": "1.0.0",
-  "triggers": [
-    {
-      "id": "github-pr-updated",
-      "kind": "github",
-      "provider": "github",
-      "events": ["pull_request.opened", "pull_request.synchronize"],
-      "node_id": "ingest"
-    },
-    {
-      "id": "delay-log-check",
-      "kind": "delay",
-      "delay": "PT10M",
-      "node_id": "query_logs"
-    }
-  ],
-  "workflow": {
-    "_type": "workflow_graph",
-    "id": "pr_monitor_workflow",
-    "name": "PR monitor",
-    "version": 1,
-    "entry": "ingest",
-    "nodes": {
-      "ingest": {
-        "id": "ingest",
-        "kind": "action",
-        "task_label": "Normalize PR event"
-      },
-      "wait_for_deploy": {
-        "id": "wait_for_deploy",
-        "kind": "waitpoint",
-        "task_label": "Wait for deploy"
-      },
-      "query_logs": {
-        "id": "query_logs",
-        "kind": "action",
-        "task_label": "Query logs"
-      },
-      "notify": {
-        "id": "notify",
-        "kind": "notification",
-        "task_label": "Notify user"
-      }
-    },
-    "edges": [
-      {
-        "from": "ingest",
-        "to": "wait_for_deploy"
-      },
-      {
-        "from": "wait_for_deploy",
-        "to": "query_logs"
-      },
-      {
-        "from": "query_logs",
-        "to": "notify"
-      }
-    ]
-  },
-  "prompt_capsules": {
-    "query-logs": {
-      "id": "query-logs",
-      "node_id": "query_logs",
-      "trigger_id": "delay-log-check",
-      "prompt": "Query deploy logs for the pull request and summarize failures."
-    }
-  },
-  "policy": {
-    "autonomy_tier": "act_with_approval",
-    "retry": {
-      "max_attempts": 2,
-      "backoff": "exponential"
-    },
-    "catchup": {
-      "mode": "latest",
-      "max_events": 1
-    }
-  },
-  "connectors": [
-    {
-      "id": "github",
-      "provider_id": "github",
-      "scopes": ["pull_requests:read", "checks:read"],
-      "setup_required": true,
-      "status_required": true
-    }
-  ],
-  "environment": {
-    "repo_setup_profile": "default",
-    "worktree_policy": "host_managed",
-    "command_gates": ["make test"]
-  },
-  "receipts": {
-    "run_id": "bundle_run_pr_monitor_fixture",
-    "event_ids": ["github:event:42"],
-    "workflow_version": 1
-  }
-}"#,
-    )
-    .unwrap()
+    super::super::workflow_test_fixtures::pr_monitor_bundle()
 }
 
 fn graph_node_types(preview: &WorkflowBundlePreview) -> Vec<String> {
@@ -162,6 +58,103 @@ fn validates_fixture_bundle_and_previews_graph() {
         field.id == "prompt_capsule.query-logs.prompt"
             && field.json_pointer == "/prompt_capsules/query-logs/prompt"
     }));
+}
+
+#[test]
+fn v2_manifest_deserializes_and_v1_is_typed_error() {
+    let bundle = parse_workflow_bundle_manifest(
+        super::super::workflow_test_fixtures::PR_MONITOR_BUNDLE_JSON.as_bytes(),
+    )
+    .unwrap();
+    assert_eq!(bundle.schema_version, WORKFLOW_BUNDLE_SCHEMA_VERSION);
+    assert_eq!(
+        bundle.entrypoint,
+        std::path::PathBuf::from("workflows/github-pr-monitor.harn")
+    );
+    assert_eq!(bundle.transitive_modules.len(), 1);
+    assert!(current_provider_catalog_hash_blake3()
+        .unwrap()
+        .starts_with("blake3:"));
+
+    let err = parse_workflow_bundle_manifest(br#"{"schema_version":1}"#).unwrap_err();
+    assert_eq!(
+        err.kind,
+        WorkflowBundleErrorKind::UnsupportedSchemaVersion {
+            actual: 1,
+            expected: WORKFLOW_BUNDLE_SCHEMA_VERSION,
+        }
+    );
+}
+
+#[test]
+fn harnpack_build_read_and_bundle_hash_are_deterministic() {
+    let bundle = fixture_bundle();
+    let contents = vec![
+        HarnpackEntry::new("bytecode/pr_monitor.harnbc", b"bytecode-v1".to_vec()),
+        HarnpackEntry::new("sources/pr_monitor.harn", b"source-v1".to_vec()),
+    ];
+    let reversed_contents = vec![contents[1].clone(), contents[0].clone()];
+
+    let left_pack = build_harnpack(&bundle, &contents).unwrap();
+    let right_pack = build_harnpack(&bundle, &reversed_contents).unwrap();
+    assert_eq!(left_pack, right_pack);
+
+    let left_hash = workflow_bundle_hash(&bundle, &contents).unwrap();
+    let right_hash = workflow_bundle_hash(&bundle, &reversed_contents).unwrap();
+    assert_eq!(left_hash, right_hash);
+
+    let changed_hash = workflow_bundle_hash(
+        &bundle,
+        &[HarnpackEntry::new(
+            "sources/pr_monitor.harn",
+            b"source-v2".to_vec(),
+        )],
+    )
+    .unwrap();
+    assert_ne!(left_hash, changed_hash);
+
+    let archive = read_harnpack(&left_pack).unwrap();
+    assert_eq!(archive.manifest.id, bundle.id);
+    assert_eq!(
+        archive
+            .contents
+            .iter()
+            .map(|entry| entry.path.display().to_string())
+            .collect::<Vec<_>>(),
+        vec!["bytecode/pr_monitor.harnbc", "sources/pr_monitor.harn"]
+    );
+
+    let temp = tempfile::tempdir().unwrap();
+    let pack_path = temp.path().join("fixture.harnpack");
+    std::fs::write(&pack_path, left_pack).unwrap();
+    let loaded = load_workflow_bundle(&pack_path).unwrap();
+    assert_eq!(loaded.id, bundle.id);
+}
+
+#[test]
+fn validator_rejects_missing_v2_manifest_contract_fields() {
+    let mut bundle = fixture_bundle();
+    bundle.entrypoint = std::path::PathBuf::new();
+    bundle.transitive_modules.clear();
+    bundle.provider_catalog_hash = "sha256:not-blake3".to_string();
+    bundle.sbom.format.clear();
+
+    let report = validate_workflow_bundle(&bundle);
+    assert!(!report.valid);
+    for path in [
+        "entrypoint",
+        "transitive_modules",
+        "provider_catalog_hash",
+        "sbom.format",
+    ] {
+        assert!(
+            report
+                .errors
+                .iter()
+                .any(|diagnostic| diagnostic.path == path),
+            "{report:#?}"
+        );
+    }
 }
 
 #[test]

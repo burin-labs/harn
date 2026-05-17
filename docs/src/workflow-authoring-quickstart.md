@@ -28,8 +28,9 @@ Copy them to your workspace and edit in place.
 
 ## 1. Validate a minimal deterministic bundle
 
-A workflow bundle is JSON. The smallest viable bundle has a
-`schema_version`, identity fields, one trigger, and one node.
+A workflow bundle is JSON while authoring. The smallest viable schema v2
+bundle has canonical package metadata, identity fields, one trigger, and one
+node.
 
 ```bash
 harn workflow validate \

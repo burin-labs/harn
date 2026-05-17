@@ -56,7 +56,27 @@ truth.
 
 ```json
 {
-  "schema_version": 1,
+  "schema_version": 2,
+  "entrypoint": "workflows/<kebab-case-id>.harn",
+  "transitive_modules": [
+    {
+      "path": "workflows/<kebab-case-id>.harn",
+      "source_hash_blake3": "blake3:<64 lowercase hex digits>",
+      "harnbc_hash_blake3": "blake3:<64 lowercase hex digits>"
+    }
+  ],
+  "stdlib_version": "<harn stdlib version>",
+  "harn_version": "<harn version>",
+  "provider_catalog_hash": "blake3:<64 lowercase hex digits>",
+  "tool_manifest": [],
+  "sbom": {
+    "format": "spdx-lite",
+    "version": "2.3",
+    "packages": [],
+    "relationships": []
+  },
+  "signature": null,
+  "parent_trust_record_id": null,
   "id": "<kebab-case-id>",
   "name": "<human label>",
   "version": "1.0.0",
@@ -101,7 +121,11 @@ truth.
 
 ## Hard rules (validator enforces)
 
-- `schema_version` must be `1`.
+- `schema_version` must be `2`.
+- `entrypoint`, `transitive_modules`, `stdlib_version`, `harn_version`,
+  `provider_catalog_hash`, `tool_manifest`, `sbom`, `signature`, and
+  `parent_trust_record_id` are part of the canonical `.harnpack` manifest.
+- BLAKE3 fields use `blake3:<64 lowercase hex digits>`.
 - `id`, `version`, `workflow.id`, `workflow.entry` are non-empty.
 - Every `workflow.nodes[k].id` matches its map key `k`.
 - Every edge endpoint and `trigger.node_id` references an existing node.
