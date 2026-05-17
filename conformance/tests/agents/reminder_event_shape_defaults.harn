@@ -1,0 +1,34 @@
+/**
+ * R-01: `transcript_reminder_event` applies protocol defaults when the
+ * caller omits fields. Body-only construction is legal; everything else
+ * resolves to the spec-canonical fallbacks.
+ */
+pipeline main() {
+  let evt = transcript_reminder_event({body: "Reload tools before next turn."})
+  println(evt?.kind == "system_reminder")
+  // Defaults: propagate=session, role_hint=system, source=in_pipeline,
+  // preserve_on_compact=false, tags=[], dedupe_key=nil, ttl_turns=nil,
+  // fired_at_turn=0.
+  println(evt?.role == "system")
+  println(evt?.visibility == "public")
+  println(evt?.reminder?.propagate == "session")
+  println(evt?.reminder?.role_hint == "system")
+  println(evt?.reminder?.source == "in_pipeline")
+  println(!evt?.reminder?.preserve_on_compact)
+  println(len(evt?.reminder?.tags) == 0)
+  println(evt?.reminder?.dedupe_key == nil)
+  println(evt?.reminder?.ttl_turns == nil)
+  println(evt?.reminder?.fired_at_turn == 0)
+  println(evt?.reminder?.body == "Reload tools before next turn.")
+  println(len(evt?.reminder?.id) > 0)
+  // Filter by `kind` so reminders show up alongside other transcript
+  // events without breaking existing kind-based consumers.
+  let crafted = {
+    _type: "transcript",
+    messages: [],
+    events: [{kind: "message", visibility: "public", text: "hello"}, evt],
+  }
+  let reminders = transcript_events_by_kind(crafted, "system_reminder")
+  println(len(reminders) == 1)
+  println(reminders[0]?.reminder?.body == "Reload tools before next turn.")
+}

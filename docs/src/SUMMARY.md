@@ -71,6 +71,7 @@
 - [Agent state](./agent-state.md)
 - [Memory](./memory.md)
 - [Transcript architecture](./transcript-architecture.md)
+- [System reminders](./system-reminders.md)
 - [Workflow runtime](./workflow-runtime.md)
 - [Portable workflow bundles](./workflow-bundles.md)
 - [Local workflow supervisor](./workflow-supervisor.md)

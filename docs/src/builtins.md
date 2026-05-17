@@ -2690,6 +2690,7 @@ and offline analysis.
 | `transcript_add_asset(transcript, asset)` | transcript, asset | transcript | Register a durable asset reference on a transcript |
 | `transcript_events(transcript)` | transcript | list | Return canonical transcript events |
 | `transcript_events_by_kind(transcript, kind)` | transcript, kind | list | Filter transcript events by their `kind` field |
+| `transcript_reminder_event(reminder)` | reminder: dict | event dict | Build a normalized `system_reminder` event (see [System reminders](./system-reminders.md)) |
 | `transcript_stats(transcript)` | transcript | dict | Count messages, tool calls, and visible events on a transcript |
 | `transcript_summary(transcript)` | transcript | string or nil | Return transcript summary |
 | `transcript_fork(transcript, options?)` | transcript, options | transcript | Fork transcript state |
