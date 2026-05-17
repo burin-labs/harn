@@ -1,4 +1,4 @@
-# Persona Templates
+# Persona templates
 
 These packages mirror the built-in `harn persona new --template <kind>` layouts.
 They are intentionally Harn-first: each template centers an `@persona` function,

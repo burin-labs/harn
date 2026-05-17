@@ -1,4 +1,4 @@
-# ADR 0001: Pipe Operator With Explicit Placeholder
+# ADR 0001: pipe operator with explicit placeholder
 
 ## Status
 

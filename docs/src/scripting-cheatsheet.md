@@ -1,4 +1,4 @@
-# Scripting Cheatsheet
+# Scripting cheatsheet
 
 A compact, prose-friendly tour of everything you need to write real
 Harn scripts. The companion one-page LLM reference is at
@@ -76,7 +76,7 @@ let body = if len(content) > 2400 {
 }
 ```
 
-## Stream Operators
+## Stream operators
 
 `stream.*` accepts lists, ranges, channels, generators, and lazy
 `iter(...)` values. Operators stay lazy until a sink such as
@@ -193,7 +193,7 @@ let results = parallel settle paths with { max_concurrent: 4 } { p ->
 `concurrency.md` for the RPM rate limiter, channels, `select`,
 `deadline`, and `defer`.
 
-## Stream Generators
+## Stream generators
 
 Use `gen fn` plus `emit` for lazy script-level streams:
 

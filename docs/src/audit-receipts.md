@@ -1,4 +1,4 @@
-# Audit Receipts
+# Audit receipts
 
 Harn owns one canonical audit receipt envelope for run, persona, tool, model,
 approval, handoff, and side-effect summaries:
@@ -34,7 +34,7 @@ redaction policy can wrap their existing `ReceiptSink` with
 known secret patterns from `model_calls[]`, `tool_calls[]`, and `metadata`
 before persistence — see [Redaction policy](./redaction.md).
 
-## Rust Usage
+## Rust usage
 
 ```rust
 use harn_vm::receipts::{Receipt, ReceiptSink, ReceiptStatus};
@@ -50,7 +50,7 @@ Implement `ReceiptSink` at persistence boundaries. The trait keeps storage
 backends such as harn-cloud-store, local run-record writers, and future host
 surfaces accepting the same envelope even when their physical storage differs.
 
-## harn-cloud Migration
+## harn-cloud migration
 
 `run_receipts.payload` remains JSONB. The migration should enforce the canonical
 envelope at the JSON boundary:
@@ -81,7 +81,7 @@ The existing typed harn-cloud receipt views can stay as projections for public
 or operator display, but writes to `payload` should come from
 `harn_vm::receipts::Receipt` and the schema in `docs/schemas/receipt.v1.json`.
 
-## burin-code Migration
+## burin-code migration
 
 `RunRecord` readers in burin-code should be generated from
 `docs/schemas/receipt.v1.json` or decode the canonical envelope directly. Swift
@@ -89,7 +89,7 @@ view models may keep local projection types, but they should map from the
 schema-generated receipt type and not carry independent field definitions for
 `parent_run_id`, `trace_id`, and `cost_usd`.
 
-## Duplication Guard
+## Duplication guard
 
 `make check-receipt-structs` fails if a Rust `pub struct` outside
 `crates/harn-vm/src/receipts/` contains the duplicate receipt field trio

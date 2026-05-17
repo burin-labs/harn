@@ -1,4 +1,4 @@
-# Workflow Crystallization
+# Workflow crystallization
 
 Workflow crystallization is the review loop for turning repeated agent traces
 into deterministic Harn code:
@@ -18,7 +18,7 @@ It looks for repeated contiguous action sequences, extracts scalar parameters
 from fields that vary across examples, rejects candidates with divergent side
 effects, and marks any model-dependent step as a fuzzy segment.
 
-## Trace Input
+## Trace input
 
 `harn crystallize` accepts a directory of JSON files. Each file can be either:
 
@@ -147,7 +147,7 @@ The report includes:
 Candidates with divergent side effects stay in `rejected_candidates` and do not
 produce a selected candidate.
 
-## Shadow Mode
+## Shadow mode
 
 Shadow comparison does not call tools or mutate external systems. It compares
 the selected sequence against each source trace:
@@ -167,7 +167,7 @@ blocks promotion.
 This gives Harn Cloud and local reviewers a deterministic pass/fail surface
 before promotion.
 
-## Checked-In V2 Fixture Harness
+## Checked-in V2 fixture harness
 
 The repository includes a fixture-driven release/package-maintenance steel
 thread:
@@ -194,14 +194,14 @@ keeps the same action sequence but changes the receipt hash. Using it as
 `--shadow-from` leaves the candidate in `rejected_candidates` with a replay
 divergence path under `effect_receipts`.
 
-## Eval Pack
+## Eval pack
 
 When `--eval-pack` is supplied, the CLI writes a minimal eval-pack v1 manifest
 with a `crystallization-shadow` assertion. Hosted runners can attach the trace
 fixtures and richer rubrics later; the local artifact records the candidate id,
 source trace ids, and blocking shadow expectation.
 
-## Portable Bundle
+## Portable bundle
 
 Pass `--bundle <DIR>` to also emit a portable crystallization-candidate
 **bundle** that Harn Cloud (and any other downstream importer) can consume
@@ -432,7 +432,7 @@ candidate steps generated for `agent_recovery_advice` events carry an
 boundary so hosts must not re-run a failing step without a human
 acknowledging the advice.
 
-## Composition Run Input
+## Composition run input
 
 Governed Code Mode reports can be fed into the same crystallization pipeline.
 `composition_crystallization_trace(report, options?)` returns a versioned trace

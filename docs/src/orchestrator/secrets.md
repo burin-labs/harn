@@ -1,4 +1,4 @@
-# Orchestrator Secrets
+# Orchestrator secrets
 
 Reactive Harn features need a single way to fetch secrets without
 sprinkling provider-specific code across connectors, OAuth flows, and

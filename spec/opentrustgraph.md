@@ -125,7 +125,7 @@ Fields:
 - `chain.producer`: producer name and version.
 - `records`: ordered `TrustRecord` list.
 
-## JSON Schema and Protobuf
+## JSON schema and protobuf
 
 JSON is canonical. The normative wire-format files live in the public
 artifact directory:

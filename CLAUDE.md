@@ -1,14 +1,13 @@
-# AGENTS.md
+# CLAUDE.md
 
 This repository implements Harn, a programming language and runtime for orchestrating AI agents.
 
 ## For agents writing Harn scripts
 
-Before writing or editing `.harn` code, read the one-page Harn
-quickref. It distills syntax, concurrency primitives (`parallel each`
-/ `parallel settle` with `max_concurrent`), the `llm_call` options
-table (including `schema_retries` + `provider: "auto"`), and the
-gotchas that repeatedly trip up first-time scripters.
+Before writing or editing `.harn` code, read the one-page Harn quickref. It covers syntax,
+concurrency primitives (`parallel each` / `parallel settle` with `max_concurrent`), the
+`llm_call` options table (including `schema_retries` + `provider: "auto"`), and the gotchas
+that repeatedly trip up first-time scripters.
 
 - In-repo: `docs/llm/harn-quickref.md`
 - Trigger/orchestrator add-on: `docs/llm/harn-triggers-quickref.md`
@@ -18,12 +17,13 @@ gotchas that repeatedly trip up first-time scripters.
 Claude Code users get these autoloaded via the `harn-scripting` skill
 at `.claude/skills/harn-scripting/SKILL.md`.
 
-## Dev Environment Tips
+## Dev environment tips
 
-- Run `make setup` on a fresh clone. It configures `.githooks/`, installs `cargo-nextest` and
-  `sccache`, installs repo-local Node tooling including the portal frontend when `npm` is
-  available, enables the sccache rustc wrapper, writes a per-worktree temp Cargo `target-dir`
-  when `CODEX_WORKTREE_PATH` is set, and runs `cargo check --workspace`.
+- Run `make setup` on a fresh clone. It configures `.githooks/`, installs `cargo-nextest`,
+  `sccache`, and `actionlint` when their toolchains are available, installs repo-local Node
+  tooling including the portal frontend when `npm` is available, enables the sccache rustc wrapper,
+  writes a per-worktree temp Cargo `target-dir` when `CODEX_WORKTREE_PATH` is set, and runs
+  `cargo check --workspace`.
 - Use `make test` for workspace Rust tests. It runs `cargo nextest` when available and falls back
   to `cargo test --workspace`. Use `make test-cargo` when you explicitly need baseline Cargo
   behavior.
@@ -31,15 +31,21 @@ at `.claude/skills/harn-scripting/SKILL.md`.
 - Use `cargo run --quiet --bin harn -- --help` to inspect the current CLI surface.
 - The root `package.json` is only for repo tooling. The portal UI, tree-sitter grammar, and VS Code
   extension each have their own package manifests.
+- The repo-root portal scripts self-bootstrap `crates/harn-cli/portal/node_modules` when needed, so
+  `npm run portal:lint`, `portal:test`, `portal:build`, and the git hooks should not fail just
+  because portal deps have not been installed in a fresh worktree yet.
 - `crates/harn-wasm` is excluded from the Cargo workspace. Build it separately with
   `cd crates/harn-wasm && wasm-pack build`.
-- Installed hooks are worth keeping on: pre-commit runs `cargo fmt`, clippy, markdown lint, and
-  portal lint; pre-push runs workspace tests plus markdown, portal, and conformance format checks.
+- Installed hooks are worth keeping on: pre-commit runs `cargo fmt`, clippy, markdown lint,
+  actionlint, and portal lint; pre-push runs targeted package checks plus markdown, actionlint,
+  portal, generated-file drift checks, and affected Harn format/lint checks. Set
+  `HARN_PREPUSH_FULL_TESTS=1` for the broader `make test` gate before pushing.
 
-## Repository Map
+## Repository map
 
 - `crates/harn-lexer`: tokenizer and span tracking.
 - `crates/harn-parser`: AST, parser, and type checker.
+- `crates/harn-stdlib`: canonical embedded Harn stdlib source catalog.
 - `crates/harn-vm`: compiler, VM, stdlib, LLM/providers, orchestration runtime, transcripts, and
   bridge/ACP integration.
 - `crates/harn-cli`: `harn` CLI, conformance runner, portal server, MCP/OAuth commands, A2A/ACP
@@ -57,22 +63,19 @@ at `.claude/skills/harn-scripting/SKILL.md`.
 
 ## Prompt template engine
 
-- The `.harn.prompt` / `.prompt` template language used by `render(...)` /
-  `render_prompt(...)` / the `template.render` host capability lives in
-  **one** file: `crates/harn-vm/src/stdlib/template.rs`. Never add a second
-  parser/evaluator — both host-call and script-call paths route through
-  `render_template_result` in that module, and they must stay
-  behavior-identical.
-- Full reference: `docs/src/prompt-templating.md`. Condensed quickref
-  (autoloaded by the `harn-scripting` skill): the "Prompt templates"
+- The `.harn.prompt` / `.prompt` template language used by `render(...)`,
+  `render_prompt(...)`, and the `template.render` host capability lives in one file:
+  `crates/harn-vm/src/stdlib/template.rs`. Do not add a second parser or evaluator; both
+  host-call and script-call paths route through `render_template_result` in that module and
+  must stay behavior-identical.
+- Full reference: `docs/src/prompt-templating.md`. Condensed quickref: the "Prompt templates"
   section of `docs/llm/harn-quickref.md`.
-- Back-compat contract: pre-v2 `{{name}}` silent-passthrough on a missing
-  bare identifier is preserved. Existing templates render byte-for-byte
-  identically. Only the new constructs (`if`/`elif`/`else`, `for`,
-  `include`, filters, `{{# #}}`, `{{ raw }}`, `{{- -}}`) raise parse
-  errors.
+- Back-compat contract: pre-v2 `{{name}}` silent passthrough on a missing bare identifier is
+  preserved. Existing templates render byte-for-byte identically. Only the new constructs
+  (`if`/`elif`/`else`, `for`, `include`, filters, `{{# #}}`, `{{ raw }}`, `{{- -}}`) raise
+  parse errors.
 
-## Core Commands
+## Core commands
 
 - Build: `cargo build`
 - Run a Harn program: `cargo run --bin harn -- run examples/hello.harn`
@@ -82,13 +85,14 @@ at `.claude/skills/harn-scripting/SKILL.md`.
 - Check formatting: `cargo run --bin harn -- fmt --check <path>`
 - Workspace tests: `make test`
 - Explicit Cargo fallback: `make test-cargo`
+- GitHub Actions workflow lint: `make lint-actions`
 - Conformance suite: `cargo run --bin harn -- test conformance`
 - Targeted conformance case: `cargo run --bin harn -- test conformance --filter <name>`
 - Full repo gate: `make all`
 - Portal server: `cargo run --bin harn -- portal`
 - Portal full dev loop: `npm run portal:dev`
 
-## Testing Instructions
+## Testing instructions
 
 - Before merging, prefer `make all`. It runs formatting, clippy, Rust tests, conformance, markdown
   lint, Harn lint/format checks, highlight drift checks, and docs snippet parsing.
@@ -109,7 +113,7 @@ at `.claude/skills/harn-scripting/SKILL.md`.
   or `OrchestratorHarness` instead. See `docs/src/dev/testing.md` for approved patterns and the
   opt-out procedure.
 
-## Generated Files And Sync Rules
+## Generated files and sync rules
 
 - Edit `spec/HARN_SPEC.md`, not `docs/src/language-spec.md`; regenerate with
   `make sync-language-spec` (which runs `scripts/sync_language_spec.harn`).
@@ -124,7 +128,7 @@ at `.claude/skills/harn-scripting/SKILL.md`.
 - `docs/dist/`, `.harn-runs/`, `.harn/`, `.harn/receipts/`, `.claude/`, `.burin/`, `target/`,
   and `node_modules/` are generated or local-only paths.
 
-## Change Alignment Rules
+## Change alignment rules
 
 - Syntax changes usually require coordinated updates to the lexer, parser, spec, tree-sitter, and
   conformance tests.
@@ -141,14 +145,14 @@ at `.claude/skills/harn-scripting/SKILL.md`.
   `editors/vscode/syntaxes/harn-prompt.tmLanguage.json`, conformance fixtures
   under `conformance/tests/template_*`, and `CHANGELOG.md`.
 
-## Trust Boundary
+## Trust boundary
 
 - Harn owns orchestration, transcript lifecycle, replay/eval, delegated worker lineage, and mutation
   session audit metadata.
 - Hosts own approval UX, concrete file mutations, and undo/redo semantics.
 - For autonomous or background edits, prefer worktree-backed execution over ambient cwd state.
 
-## Release Workflow
+## Release workflow
 
 - Open version-bump PR after release content lands: `./scripts/release_ship.sh --bump patch`
 - Finalize after bump PR lands: `./scripts/release_ship.sh --finalize`

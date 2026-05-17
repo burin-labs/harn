@@ -1,4 +1,4 @@
-# Runtime Context
+# Runtime context
 
 Harn exposes logical runtime identity through `runtime_context()`. This is the
 task/thread abstraction Harn code should use for observability and debugging;
@@ -13,7 +13,7 @@ println(ctx.parent_task_id)
 println(ctx.root_task_id)
 ```
 
-## Stable Fields
+## Stable fields
 
 These fields are stable API and always present. Unavailable values are `nil`.
 
@@ -33,7 +33,7 @@ These fields are stable API and always present. Unavailable values are `nil`.
 | `context_values` | Task-local values for the current logical task |
 | `cancelled` | Whether the current task has observed cancellation |
 
-## Context Values
+## Context values
 
 Task-local values are stored on the current logical task. Children created by
 `spawn`, `parallel`, `parallel each`, and `parallel settle` inherit a snapshot of
@@ -57,7 +57,7 @@ assert_eq(result, ["acme", "acme"])
 | `runtime_context_set(key, value)` | Set a task-local value and return the previous value or `nil` |
 | `runtime_context_clear(key)` | Clear a task-local value and return the previous value or `nil` |
 
-## Copying vs Sharing
+## Copying vs sharing
 
 `spawn`, `parallel`, `parallel each`, and `parallel settle` create isolated
 interpreter instances. Normal bindings, lists, dicts, structs, and task-local
@@ -80,7 +80,7 @@ Explicit handle values are shared by design:
 mailboxes, shared state handles, `agent_state_*`, or host storage when a parent
 and worker need data exchange outside the transcript.
 
-## Debug Fields
+## Debug fields
 
 `runtime_context().debug` contains best-effort introspection for tools:
 `active_task_ids`, `waiting_reason`, `cancelled`, and `held_synchronization`.

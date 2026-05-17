@@ -50,7 +50,7 @@ Records contain:
 `memory_store` accepts `options.id`, `options.now`, and `options.provenance`.
 These are useful for tests, imports, and replay fixtures.
 
-## Recall And Summary
+## Recall and summary
 
 `memory_recall` defaults to deterministic, local BM25. It tokenizes the record
 key, tags, text, and JSON value, then ranks active records with BM25 plus small

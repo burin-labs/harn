@@ -1,4 +1,4 @@
-# Local And A2A Dispatch
+# Local and A2A dispatch
 
 Harn trigger handlers can move between in-process execution and A2A dispatch
 without changing the handler's input contract. Keep the trigger `id`, provider
@@ -21,7 +21,7 @@ The dispatcher still records the same core lifecycle shape:
 - a trust record for the terminal dispatch decision
 - action-graph nodes and edges for replay comparison
 
-## Choosing A Mode
+## Choosing a mode
 
 Use a local handler when the workflow should run inside the current Harn process:
 
@@ -37,7 +37,7 @@ Use A2A dispatch when execution crosses an agent or trust boundary:
 - an operator needs to see that the work ran remotely
 - retries and DLQ movement should treat the remote endpoint as a destination
 
-## Trust And Replay
+## Trust and replay
 
 Local and A2A dispatch share typed `TriggerEvent` input and JSON output
 semantics. A2A wraps the event in a `harn.trigger.dispatch` envelope, sends it
@@ -59,7 +59,7 @@ Replay comparisons should assert the logical output and event shape while
 allowlisting location-specific metadata such as `trust_boundary`,
 `remote_identity`, remote URLs, and generated task ids.
 
-## Failure Modes
+## Failure modes
 
 A2A dispatch fails closed for trust-boundary denials:
 

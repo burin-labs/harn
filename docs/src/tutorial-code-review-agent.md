@@ -1,4 +1,4 @@
-# Tutorial: Build a code review agent
+# Tutorial: build a code review agent
 
 This tutorial shows a small but realistic review pipeline. The goal is not to
 rebuild a full IDE integration. Instead, we want a deterministic Harn program

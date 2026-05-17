@@ -1,4 +1,4 @@
-# Trigger Observability In The Action Graph
+# Trigger observability in the action graph
 
 Harn projects trigger activity into both persisted run observability and the
 live dispatcher event stream. The current surface includes `trigger`,

@@ -1,4 +1,4 @@
-# Tutorial: Build an MCP server
+# Tutorial: build an MCP server
 
 This tutorial builds a small MCP server in Harn. The same program can expose
 tools, static resources, resource templates, and prompts over stdio or

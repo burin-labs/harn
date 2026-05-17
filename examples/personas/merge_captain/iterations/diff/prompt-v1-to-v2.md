@@ -1,4 +1,4 @@
-# Merge Captain iteration diff: prompt-v1-baseline -> prompt-v2-candidate
+# Merge captain iteration diff: prompt-v1-baseline -> prompt-v2-candidate
 
 - improved: 1
 - regressed: 0

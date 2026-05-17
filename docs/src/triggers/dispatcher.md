@@ -1,4 +1,4 @@
-# Trigger Dispatcher
+# Trigger dispatcher
 
 The trigger dispatcher is the runtime path that turns a normalized
 `TriggerEvent` plus a live registry binding into actual handler work.

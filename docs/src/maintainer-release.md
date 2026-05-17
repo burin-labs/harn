@@ -1,4 +1,4 @@
-# Maintainer Release Workflow
+# Maintainer release workflow
 
 This page is for Harn maintainers cutting a release. User-facing CLI behavior
 lives in [CLI reference](./cli-reference.md).

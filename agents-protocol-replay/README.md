@@ -1,4 +1,4 @@
-# Harn Agents Protocol Replay Contract
+# Harn agents protocol replay contract
 
 This directory is the canonical v1 replay-as-API contract for the Harn Agents
 Protocol. It makes Harn's durable EventLog replay model visible as a public API

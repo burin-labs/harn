@@ -1,4 +1,4 @@
-# MCP Apps UI resource envelopes
+# MCP apps UI resource envelopes
 
 `std/ui_resource` packages interactive HTML widgets as portable UI resource
 envelopes that follow the [MCP Apps overview][mcp-apps] and degrade cleanly

@@ -1,6 +1,6 @@
 # Contributing to Harn
 
-Thanks for your interest in contributing to Harn! This guide covers the basics.
+This guide covers the local setup, checks, and conventions for Harn contributors.
 
 ## Getting started
 
@@ -13,13 +13,14 @@ cd harn
 This script:
 
 - configures `.githooks` as the repo hook path
-- installs `cargo-nextest` and `sccache` (for faster tests and cached builds)
+- installs `cargo-nextest`, `sccache`, and `actionlint` when their toolchains are available
 - enables the sccache rustc wrapper via a local `.cargo/config.toml`
 - writes a per-worktree temp Cargo `target-dir` when `CODEX_WORKTREE_PATH` is
   set so parallel Codex worktrees stay isolated
 - installs repo-local markdown tooling plus Node dependencies for the portal,
   `tree-sitter-harn/`, and `editors/vscode/` when `npm` is available
 - builds `crates/harn-cli/portal-dist` when `npm` is available
+- reuses the repo-root portal bootstrap path for `npm run portal:*` commands
 - runs `cargo check --workspace`
 
 ## Running checks
@@ -57,7 +58,7 @@ The workspace splits tests into two tiers and keeps pre-push targeted so local
 pushes do not repeatedly pay for broad workspace compilation that CI already
 runs:
 
-**Fast suite** — `make test`
+**Fast suite**: `make test`
 
 In-process, deterministic, zero subprocess-per-test. Wall-clock budget: <2 min
 on a warm cache. Runs on every PR and when you opt into the broader local
@@ -66,16 +67,16 @@ pre-push gate with `HARN_PREPUSH_FULL_TESTS=1`. The nextest
 (those live in `crates/harn-cli/tests/` and spawn the compiled `harn` binary as
 a subprocess).
 
-**Slow E2E suite** — `make test-e2e`
+**Slow E2E suite**: `make test-e2e`
 
 Subprocess-spawning binary surface tests: CLI invocation, signal handling, MCP
 server launch, real `ProcessHandle` smoke, orchestrator drain/replay, etc. Uses
 the nextest `e2e` profile, which targets `package(harn-cli) and kind(test)`.
 Runs on:
 
-- Schedule — nightly at 3 AM UTC (`.github/workflows/e2e.yml`)
-- `e2e` PR label — add the label to opt in before merge
-- Merge-queue — the `e2e` job in `ci.yml` runs before a PR lands
+- Schedule: nightly at 3 AM UTC (`.github/workflows/e2e.yml`)
+- `e2e` PR label: add the label to opt in before merge
+- Merge queue: the `e2e` job in `ci.yml` runs before a PR lands
 
 ### Preferred Rust test path
 
@@ -114,17 +115,17 @@ make test-cargo  # force plain cargo test --workspace
 make test-e2e    # run slow E2E / smoke suite
 ```
 
-This runs:
+`make all` runs:
 
-- `cargo fmt` -- Rust formatting
-- `harn fmt --check` -- Harn file formatting
-- `cargo clippy -- -D warnings` -- Lint (warnings are errors)
-- `make lint-no-rust-prompt-prose` -- prompt ownership ratchet
-- `make lint-no-xfail-regression` -- conformance xfail count ratchet
-- `markdownlint-cli2` -- Markdown lint
-- `harn lint` -- Harn linter on conformance tests
-- `make test` -- Rust workspace tests (`cargo nextest` when available)
-- `harn test conformance` -- Conformance test suite
+- `cargo fmt`: Rust formatting
+- `harn fmt --check`: Harn file formatting
+- `cargo clippy -- -D warnings`: lint, with warnings treated as errors
+- `make lint-no-rust-prompt-prose`: prompt ownership ratchet
+- `make lint-no-xfail-regression`: conformance xfail count ratchet
+- `markdownlint-cli2`: Markdown lint
+- `harn lint`: Harn linter on conformance tests
+- `make test`: Rust workspace tests (`cargo nextest` when available)
+- `harn test conformance`: conformance suite
 
 Model-facing prompt prose lives in `crates/harn-stdlib/src/stdlib/**/*.harn.prompt`.
 Rust may carry only short diagnostics, tests, parser/protocol constants, and
@@ -197,9 +198,8 @@ cargo run --bin harn -- test conformance --timing --filter my_test
 ```
 
 Tests live under `conformance/tests/` (passing) and `conformance/errors/`
-(expected failures), each organized into feature-area subdirectories — the
-runner discovers `.harn` files recursively, so just drop new tests into
-the subdirectory that best matches their area.
+(expected failures). The runner discovers `.harn` files recursively, so add
+new tests to the feature-area subdirectory that best matches the behavior.
 
 ## Writing tests
 
@@ -220,7 +220,7 @@ genuinely unavoidable.
 
 ## Code style
 
-- Clippy warnings are treated as errors -- fix all warnings before committing
+- Clippy warnings are treated as errors; fix all warnings before committing
 - Harn files use 2-space indent (enforced by `harn fmt`)
 - Rust files use standard `rustfmt` defaults
 - Avoid adding comments unless the logic is non-obvious
@@ -235,10 +235,10 @@ move the already-condensed older entries into a versioned archive such as
 
 ## Key references
 
-- [Language spec](spec/HARN_SPEC.md) -- authoritative language specification
-- [AST docs](spec/AST.md) -- AST node types
-- [Builtin reference](docs/builtins.md) -- all built-in functions
-- [Language basics](docs/language-basics.md) -- syntax guide
+- [Language spec](spec/HARN_SPEC.md): authoritative language specification
+- [AST docs](spec/AST.md): AST node types
+- [Builtin reference](docs/src/builtins.md): all built-in functions
+- [Language basics](docs/src/language-basics.md): syntax guide
 
 ## License
 

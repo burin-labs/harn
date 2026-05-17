@@ -1,4 +1,4 @@
-# Agents Protocol stdlib gap audit (issue #634)
+# Agents protocol stdlib gap audit (issue #634)
 
 First-cut survey of `harn-vm` stdlib primitives needed before a Harn-native
 Harness reference implementation (paired with the harn-cloud reference in

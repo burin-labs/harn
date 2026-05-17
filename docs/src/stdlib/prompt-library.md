@@ -1,4 +1,4 @@
-# Prompt Library Stdlib
+# Prompt library stdlib
 
 `std/prompt_library` manages reusable prompt fragments and deterministic
 hotspot proposals for repeated context prefixes.
@@ -15,7 +15,7 @@ let system_prefix = prompt_library.inject(
 )
 ```
 
-## Fragment Catalogs
+## Fragment catalogs
 
 Catalog files are TOML with one or more `[[prompt_fragments]]` entries:
 
@@ -72,7 +72,7 @@ only text.
 | `prompt_library_hotspots(conversations, options?)` | Produce tenant-scoped k-means fragment proposals from recent conversations |
 | `prompt_library_review_queue(library, filters?)` | Return pending k-means proposals for review UIs |
 
-## Hotspot Proposals
+## Hotspot proposals
 
 `prompt_library_hotspots(...)` accepts recent conversations as strings or dicts.
 Dict records can include `id`, `tenant_id`, `text` / `prefix` / `prompt`, and an

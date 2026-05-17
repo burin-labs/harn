@@ -9,7 +9,7 @@ requirements.
 The product principle is simple: personas are operational roles with policies,
 not just natural-language behavior.
 
-## Manifest Shape
+## Manifest shape
 
 Persona v1 is a typed manifest schema owned by `harn-modules`, so hosts such as
 `harn-cli`, Harn Cloud, and Burin Code can parse and validate the same contract.
@@ -74,7 +74,7 @@ Optional fields:
 | `package_source` | Package/path/git provenance. |
 | `rollout_policy` | Rollout mode, percentage, and cohorts. |
 
-## Handoff Routes
+## Handoff routes
 
 Personas may emit typed handoff artifacts, but route selection policy stays in
 Harn code. `harn.toml` can carry tenant route data as `[[handoff_routes]]`;
@@ -148,7 +148,7 @@ consume. It includes name, version, tools, capabilities, autonomy tier, model
 policy, budget, triggers, handoffs, context packs, evals, receipt policy, and
 manifest source.
 
-## Trigger Handlers
+## Trigger handlers
 
 Persona trigger names are first-class trigger registrations. A persona with
 `triggers = ["github.pr_opened"]` installs a manifest trigger binding for
@@ -262,7 +262,7 @@ That means template packs should stay honest about missing platform scope:
 - backend-specific systems such as Honeycomb and Splunk should be expressed
   through current tool wiring such as MCP rather than invented manifest fields
 
-## Skill Vs Persona Vs Workflow
+## Skill vs persona vs workflow
 
 | Concept | What It Is | Main Unit | Executes? |
 |---|---|---|---|

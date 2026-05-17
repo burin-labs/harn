@@ -1,4 +1,4 @@
-# Tool Format Contracts
+# Tool format contracts
 
 An agent transcript is bound to one tool-calling contract for its lifetime.
 
@@ -15,7 +15,7 @@ An agent transcript is bound to one tool-calling contract for its lifetime.
   events on the parent, but they do not inherit the parent's messages or tool
   format and may choose a different model/tool contract.
 
-## Model Switching
+## Model switching
 
 Changing models inside an existing transcript is valid only when the effective
 tool format stays the same. If a requested model change would cross from `text`

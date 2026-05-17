@@ -2,7 +2,7 @@
 
 Status: scaffolded, fixture-driven, and live-smoke-tested against local Ollama.
 
-## What Worked
+## What worked
 
 - `harn playground` is now good enough for deterministic control-flow iteration
   because it accepts `--llm-mock` and `--llm-mock-record`, not just `harn run`.
@@ -13,7 +13,7 @@ Status: scaffolded, fixture-driven, and live-smoke-tested against local Ollama.
 - A tiny in-repo workspace makes the three task shapes reproducible from a
   fresh clone.
 
-## What Did Not Work Yet
+## What did not work yet
 
 - I do not have a fresh, apples-to-apples numeric baseline against current
   `burin-code` pipelines for the exact same three prompts. Recent eval work in
@@ -23,7 +23,7 @@ Status: scaffolded, fixture-driven, and live-smoke-tested against local Ollama.
   transcripts, but it is still environment-dependent and not yet stable enough
   to treat the 3-task suite as a hard pass/fail release gate.
 
-## Latest Live Snapshot
+## Latest live snapshot
 
 Model: `qwen3.5:35b-a3b-coding-nvfp4` via local Ollama on April 19, 2026.
 
@@ -42,7 +42,7 @@ This is good enough to validate the architecture and the playground/toolchain
 integration, but not good enough to call the third task solved on a cheap local
 model without more context-engineering and runtime support.
 
-## High-Level Comparison
+## High-level comparison
 
 | Dimension | Burin Mini DFS queue | Current burin-code pipeline |
 | --- | --- | --- |
@@ -70,7 +70,7 @@ Do not adopt wholesale:
 - this exact pipeline as a production replacement for `burin-code`
 - the in-repo sample workspace approach outside experiments
 
-## Follow-Up
+## Follow-up
 
 - Use the transcript-backed failures from `rate_limit_auth` to drive runtime and
   stdlib follow-up issues around plan normalization, verifier-aware planning,

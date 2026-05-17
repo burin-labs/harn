@@ -1,4 +1,4 @@
-# GraphQL Stdlib
+# GraphQL stdlib
 
 `import "std/graphql"` provides a small provider-neutral substrate for GraphQL-backed
 connector packages.
@@ -7,7 +7,7 @@ Use it when a connector needs to own GraphQL documents in Harn instead of
 hand-assembling request JSON, error envelopes, cursor metadata, and generated
 wrapper source in each package.
 
-## Core Helpers
+## Core helpers
 
 - `graphql_request(endpoint, query, variables?, options?)` sends a GraphQL-over-HTTP
   `POST` request and returns a normalized envelope.
@@ -22,7 +22,7 @@ wrapper source in each package.
 - `graphql_parse_schema(sdl)` parses lightweight SDL fixtures into type records.
 - `graphql_introspection_query()` and `graphql_schema_from_introspection(payload)` normalize introspection responses.
 
-## Connector Example
+## Connector example
 
 ```harn
 import {

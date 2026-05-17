@@ -1,4 +1,4 @@
-# Tool-Call Eval Dataset
+# Tool-call eval dataset
 
 This directory contains Harn's PEAR-style tool-call accuracy fixture set for:
 
@@ -46,7 +46,7 @@ cargo run --bin harn -- eval tool-calls regression-check \
 Baseline files keep only stable pass-rate fields; run outputs keep volatile per-case latencies in
 `.harn-runs/`.
 
-## Case Format
+## Case format
 
 Cases are JSON objects under `cases/`; files may contain one object or an array.
 
@@ -96,7 +96,7 @@ BFCL is published under Apache-2.0 on Hugging Face and documented at:
 - https://huggingface.co/datasets/gorilla-llm/Berkeley-Function-Calling-Leaderboard
 - https://gorilla.cs.berkeley.edu/leaderboard.html
 
-## Adding Cases
+## Adding cases
 
 Add a stable `id`, keep prompts self-contained, declare only the tools visible to the planner, and
 include tags that let smoke runs focus on a slice with `--filter`. Use exact cases for deterministic

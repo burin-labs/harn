@@ -2,10 +2,9 @@
 
 ## The problem
 
-Building AI agents is complex. A typical agent needs to call LLMs, execute
-tools, handle errors and retries, run tasks concurrently, maintain
-conversation state, and coordinate multiple sub-agents. In most languages,
-this means assembling a tower of libraries:
+Building AI agents usually means coordinating models, tools, retries,
+concurrency, state, and sub-agents. In most languages, that turns into a
+stack of libraries:
 
 - An LLM SDK (LangChain, OpenAI SDK, Anthropic SDK)
 - An async runtime (asyncio, Tokio, goroutines)
@@ -14,23 +13,21 @@ this means assembling a tower of libraries:
 - Structured logging and tracing (separate packages)
 - A test framework (pytest, Jest)
 
-Each layer adds configuration, boilerplate, and failure modes.
-The orchestration logic -- the part that actually matters -- gets buried
-under infrastructure code.
+Each layer adds configuration, boilerplate, and failure modes. The
+orchestration logic gets buried under infrastructure code.
 
 ## What Harn does differently
 
-Harn is a programming language where agent orchestration primitives are
-built into the syntax, not bolted on as libraries.
+Harn puts agent orchestration primitives in the language instead of leaving
+them to framework glue.
 
 For a capability-by-capability comparison with Inngest, Temporal, LangGraph,
 and Cursor Automations, see the [feature matrix](feature-matrix.md).
 
-In practice that means Harn aims to be the long-term orchestration boundary
-between product code and provider/runtime code. Product integrations should
-mainly declare workflows, policies, capabilities, and UI hooks rather than
-rebuilding transcript logic, tool queues, replay fixtures, or provider
-response normalization.
+In practice, Harn is the orchestration boundary between product code and
+provider/runtime code. Product integrations declare workflows, policies,
+capabilities, and UI hooks; Harn handles transcripts, tool queues, replay
+fixtures, and provider response normalization.
 
 ### Native LLM calls
 
@@ -48,9 +45,9 @@ providers is a one-field change in the options dict.
 
 ### Pipeline composition
 
-Pipelines are the unit of composition. They can extend each other,
-override steps, and be imported across files. This gives you a natural
-way to structure multi-stage agent workflows:
+Pipelines are the unit of composition. They can extend each other, override
+steps, and be imported across files, which keeps multi-stage agent workflows
+readable:
 
 ```harn
 pipeline analyze(task) {
@@ -67,7 +64,7 @@ pipeline analyze(task) {
 ```
 
 Files can also contain top-level code without a pipeline block (implicit
-pipeline), making Harn work well for scripts and quick experiments.
+pipeline), which keeps scripts and quick experiments short.
 
 ### MCP and ACP integration
 
@@ -76,9 +73,8 @@ Harn has built-in support for the
 MCP server, or expose your Harn pipeline as one. ACP integration lets
 editors use Harn as an agent backend.
 
-That includes remote HTTP MCP servers with standalone OAuth handled by the
-CLI, so cloud MCP integrations can be treated as normal runtime dependencies
-instead of host-specific glue.
+The CLI handles standalone OAuth for remote HTTP MCP servers, so cloud MCP
+integrations can be ordinary runtime dependencies instead of host-specific glue.
 
 ```harn
 let client = mcp_connect("npx", ["-y", "@modelcontextprotocol/server-filesystem", "/tmp"])
@@ -190,9 +186,8 @@ pipeline default(task) {
 }
 ```
 
-The Harn version has no imports, no decorators, no client initialization,
-no async annotations, and no runtime setup. The orchestration logic is
-all that remains.
+The Harn version has no imports, decorators, client initialization, async
+annotations, or runtime setup.
 
 ## Getting started
 

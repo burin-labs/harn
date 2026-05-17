@@ -1,4 +1,4 @@
-# Harn SDK OpenAPI Surface Audit
+# Harn SDK OpenAPI surface audit
 
 `spec/openapi.yaml` is the canonical source for generated Harn Agents API SDKs.
 It covers the public REST and server-sent event surface exposed by
@@ -19,7 +19,7 @@ operations that SDKs can model as normal request/response operations.
   `/v1/events/stream`, `/v1/sessions/{session_id}/events/stream`, and
   `/v1/tasks/{task_id}/stream`.
 
-## Deliberately Outside This OpenAPI Document
+## Deliberately outside this OpenAPI document
 
 - `harn mcp serve --transport http` exposes MCP Streamable HTTP JSON-RPC at
   its configured path, default `/mcp`, plus optional legacy SSE/message paths.
@@ -33,7 +33,7 @@ operations that SDKs can model as normal request/response operations.
 - Portal and local orchestrator admin endpoints are implementation/admin
   surfaces, not the stable public Agents SDK contract.
 
-## Generation Gate
+## Generation gate
 
 `scripts/generate_sdk_clients.sh` regenerates both clients from the same
 OpenAPI document:

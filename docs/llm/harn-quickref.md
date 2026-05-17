@@ -1,4 +1,4 @@
-# Harn Quick Reference (LLM-friendly)
+# Harn quick reference (LLM-friendly)
 
 **Canonical URL:** <https://harnlang.com/docs/llm/harn-quickref.html>
 
@@ -44,7 +44,7 @@ load `docs/llm/harn-triggers-quickref.md`.
     - `return Ok(_)` / no explicit return → exits 0.
   - Uncaught errors exit with 1 and a rendered diagnostic.
 
-## Merge Captain eval loop
+## Merge captain eval loop
 
 Use `harn merge-captain run` when iterating on the Merge Captain persona from a
 single command. It resolves a backend, streams canonical agent JSONL, persists a
@@ -811,7 +811,7 @@ let ci       = regex_match("hello", "HeLLo", "i")
 `regex_replace` and `regex_replace_all` both replace every match and
 both support `$1`, `$2`, `${name}` backrefs.
 
-## Encoding, Bytes, and Compression
+## Encoding, bytes, and compression
 
 Use byte helpers when content may not be UTF-8:
 
@@ -2070,7 +2070,7 @@ for event in feed.events {
 - Non-navigation action intents must set `requires_approval: true`; hosts own
   write execution for dismiss, snooze, and convert-to-task actions.
 
-### MCP Apps UI resource stdlib
+### MCP apps UI resource stdlib
 
 Use `std/ui_resource` to package interactive widgets as `ui://` resources for
 MCP Apps hosts while keeping text/structured fallbacks first-class:

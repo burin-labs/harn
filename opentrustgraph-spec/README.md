@@ -1,4 +1,4 @@
-# OpenTrustGraph Spec
+# OpenTrustGraph spec
 
 This directory is the canonical OpenTrustGraph v0 artifact for Harn. It is
 kept small enough to vendor into Harn today and direct-publish as a standalone

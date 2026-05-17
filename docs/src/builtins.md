@@ -224,7 +224,7 @@ let data = json_extract(result.text)         // parse, stripping fences
 let name = json_extract(result.text, "name") // extract just one key
 ```
 
-### JSON Pointer and jq-like queries
+### JSON pointer and jq-like queries
 
 `json_pointer` implements RFC 6901 addressing, including `~0` for `~`
 and `~1` for `/`. `json_pointer_set` and `json_pointer_delete` return
@@ -1402,7 +1402,7 @@ assert(is_err(result))
 existing `PreStep` / `PostStep` hook payloads and assert Harn-level step,
 handoff, receipt, and structured transcript boundaries.
 
-## Git Stdlib
+## Git stdlib
 
 The `git` namespace provides typed local repository operations over the
 runtime command runner. These are local subprocess operations, not forge
@@ -1451,7 +1451,7 @@ deterministic lexical scorer, and `run_git_tool` executes one returned operation
 id. Mutating operations stay unavailable unless the toolbox is configured with
 `include_mutations: true`.
 
-## Command Policy
+## Command policy
 
 | Function | Parameters | Returns | Description |
 |---|---|---|---|
@@ -1752,7 +1752,7 @@ for i in 0 to 5 exclusive {
 }
 ```
 
-## Runtime Context
+## Runtime context
 
 Logical task, workflow, trigger, agent-session, and trace introspection.
 Use this instead of raw OS thread identity.

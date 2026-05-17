@@ -2478,7 +2478,7 @@ error, not a warning. Add the missing arm or end with a wildcard
 partial; opt into exhaustiveness by ending the chain with
 `unreachable("…")`.
 
-### Built-in Result enum
+### Built-in result enum
 
 Harn provides a built-in generic `Result<T, E>` enum with two variants:
 
@@ -2508,7 +2508,7 @@ let err2 = Result.Err("oops")
 | `unwrap_or(r, default)` | Returns the `Ok` value, or `default` if `r` is `Err` |
 | `unwrap_err(r)` | Returns the `Err` value, throws if `r` is `Ok` |
 
-### The `?` operator (Result propagation)
+### The `?` operator (result propagation)
 
 The postfix `?` operator unwraps a `Result.Ok` value or propagates a
 `Result.Err` from the current function. It is a postfix operator with the
@@ -2541,7 +2541,7 @@ For `expr?[...]`, optional subscript is used unless the `?` is followed by a
 valid branch expression and a top-level ternary `:`. For example,
 `repo ? ["--repo", repo] : []` parses as a ternary without extra parentheses.
 
-### Pattern matching on Result
+### Pattern matching on result
 
 ```harn
 match result {

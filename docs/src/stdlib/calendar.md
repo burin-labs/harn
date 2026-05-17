@@ -9,7 +9,7 @@ and `duration_hours` stay available globally. `std/calendar` adds ISO week
 fields, quarter and boundary helpers, local-time construction with explicit DST
 overlap behavior, supported country metadata, and business-day arithmetic.
 
-## Civil Calendar Helpers
+## Civil calendar helpers
 
 ```harn
 import { iso_week, next_weekday, quarter, start_of_day } from "std/calendar"
@@ -36,7 +36,7 @@ start on Monday.
 in the half-open range `[start, end)`. Supported units are `day`, `week`,
 `month`, `quarter`, and `year`.
 
-## DST Semantics
+## DST semantics
 
 `local_datetime(parts, timezone, disambiguation?)` builds a timestamp from
 local civil fields. Fall-back overlaps are deterministic:
@@ -70,7 +70,7 @@ pipeline default() {
 }
 ```
 
-## Business Calendars
+## Business calendars
 
 The v1 built-in holiday calendar is `US-FEDERAL`, using observed United States
 federal holidays and Saturday/Sunday weekends. Unsupported named calendars fail
@@ -114,7 +114,7 @@ pipeline default() {
 }
 ```
 
-## Country And Timezone Metadata
+## Country and timezone metadata
 
 Country helpers use a deterministic static dataset keyed by ISO alpha-2 codes.
 `default_timezone_for_country` only returns a timezone when the supported

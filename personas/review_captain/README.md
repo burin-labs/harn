@@ -1,4 +1,4 @@
-# Review Captain Persona
+# Review captain persona
 
 Canonical Harn package for `review_captain`. Hosts (Burin Code,
 harn-cloud, the CLI) discover it through `harn persona list --json` and

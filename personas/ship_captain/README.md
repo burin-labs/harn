@@ -1,4 +1,4 @@
-# Ship Captain Persona
+# Ship captain persona
 
 Ship Captain is the Phase 0 Harn Flow persona. It watches stored Flow atoms,
 groups them into intent summaries, derives a candidate slice, validates the

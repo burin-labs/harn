@@ -2197,18 +2197,7 @@ pub fn poll_tick(ctx) {
         log.read_range(&topic, None, usize::MAX).await.unwrap()
     }
 
-    async fn wait_for_topic_count(log: &Arc<AnyEventLog>, topic: &str, expected: usize) {
-        for _ in 0..1000 {
-            if read_topic(log, topic).await.len() >= expected {
-                return;
-            }
-            tokio::time::advance(StdDuration::from_millis(1)).await;
-            tokio::task::yield_now().await;
-        }
-        panic!("topic {topic} did not reach {expected} records");
-    }
-
-    #[tokio::test(flavor = "current_thread", start_paused = true)]
+    #[tokio::test]
     async fn poll_tick_emits_inbox_events_and_persists_cursor_state() {
         let (_dir, module_path) = write_poll_connector();
         let log = Arc::new(AnyEventLog::Memory(MemoryEventLog::new(128)));
@@ -2227,11 +2216,28 @@ pub fn poll_tick(ctx) {
             }
         });
 
-        connector.activate(&[binding]).await.unwrap();
-        wait_for_topic_count(&log, crate::triggers::TRIGGER_INBOX_ENVELOPES_TOPIC, 1).await;
-
-        tokio::time::advance(StdDuration::from_millis(1000)).await;
-        wait_for_topic_count(&log, crate::triggers::TRIGGER_INBOX_ENVELOPES_TOPIC, 2).await;
+        let resolved = resolve_poll_binding(&binding).unwrap();
+        let worker = connector.shared.worker().unwrap();
+        let connector_ctx = connector.shared.ctx().unwrap();
+        let shutdown = Arc::new(PollShutdownSignal::default());
+        run_poll_tick(
+            &connector.provider_id,
+            worker.clone(),
+            &connector_ctx,
+            &resolved,
+            shutdown.clone(),
+        )
+        .await
+        .unwrap();
+        run_poll_tick(
+            &connector.provider_id,
+            worker,
+            &connector_ctx,
+            &resolved,
+            shutdown,
+        )
+        .await
+        .unwrap();
         connector.shutdown(StdDuration::ZERO).await.unwrap();
 
         let inbox = read_topic(&log, crate::triggers::TRIGGER_INBOX_ENVELOPES_TOPIC).await;

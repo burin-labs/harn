@@ -101,7 +101,7 @@ model:
 - both commands append operator metadata to `trigger.operations.audit`
   so portal/MCP surfaces can inspect historical bulk operations later
 
-## Test Harness
+## Test harness
 
 `harn_vm::triggers::test_util` now provides the shared trigger-system
 test harness used by both Rust unit tests and `.harn` conformance

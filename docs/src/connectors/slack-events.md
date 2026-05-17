@@ -1,4 +1,4 @@
-# Slack Events connector
+# Slack events connector
 
 Slack provider behavior lives in the pure-Harn
 [`harn-slack-connector`](https://github.com/burin-labs/harn-slack-connector)

@@ -1,4 +1,4 @@
-# Persona Prelude
+# Persona prelude
 
 `std/personas/prelude` provides small orchestration primitives for persona
 workflows. Each helper returns an explicit envelope with `ok`, `status`,

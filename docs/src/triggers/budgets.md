@@ -1,4 +1,4 @@
-# Trigger Budgets
+# Trigger budgets
 
 LLM-backed trigger predicates can run on every inbound event. A broad Slack
 classifier that asks "does this mention cake?" in a busy channel can become a
@@ -9,7 +9,7 @@ Budgets apply only to predicate LLM evaluation. Cheap manifest filters, dedupe,
 flow control, and non-LLM handlers still run unless the configured exhaustion
 strategy says otherwise.
 
-## Trigger Budget
+## Trigger budget
 
 ```toml
 [[triggers]]
@@ -50,7 +50,7 @@ Supported fields:
 supported for older manifests. If both `when_budget` and `budget` specify a
 per-predicate ceiling, `when_budget` wins.
 
-## Exhaustion Strategies
+## Exhaustion strategies
 
 - `false`: default. The predicate evaluates to `false`, the event is skipped,
   and lifecycle/Prometheus budget metrics are emitted.
@@ -61,7 +61,7 @@ per-predicate ceiling, `when_budget` wins.
 - `warn`: predicate budget exhaustion is logged, but dispatch proceeds. Use this
   only for advisory predicates where cost governance should not block work.
 
-## Global Budget
+## Global budget
 
 Use `[orchestrator.budget]` to cap aggregate predicate spend across all triggers
 in one orchestrator process.
@@ -94,7 +94,7 @@ default `operator` reviewer, adds an approval gate node to the action graph, and
 records an `autonomy.tier_transition` trust-graph audit entry from `act_auto` to
 `act_with_approval`.
 
-## Per-agent Autonomy Budget
+## Per-agent autonomy budget
 
 `agent_loop` accepts an `autonomy_budget` option that gates an autonomous
 loop the same way the trigger-level cap gates a webhook handler. The check

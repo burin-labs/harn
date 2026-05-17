@@ -17,7 +17,7 @@ Tenant records live under `<state-dir>/tenants/registry.json`. Each tenant gets:
 
 Tenant ids may contain ASCII letters, numbers, `_`, and `-`.
 
-## Request Resolution
+## Request resolution
 
 In multi-tenant mode every inbound trigger request must resolve to a tenant. The preferred mechanism
 is a tenant API key in `X-API-Key` or `Authorization: Bearer <key>`. Path-scoped ingress is also
@@ -52,7 +52,7 @@ Signing secrets are loaded through a tenant-scoped provider in multi-tenant requ
 references `github/webhook-signing-secret` resolves that name inside `harn.tenant.<tenant-id>`; an
 explicit `harn.tenant.<other-id>/...` lookup is rejected.
 
-## Tenant Lifecycle
+## Tenant lifecycle
 
 ```bash
 harn orchestrator tenant ls --state-dir .harn/orchestrator

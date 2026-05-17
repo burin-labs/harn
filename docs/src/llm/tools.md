@@ -276,7 +276,7 @@ Useful options:
 | `namespace`, `defer_loading` | Apply Tool Vault metadata to generated tools. |
 | `output_format`, `result_formatter` | Return JSON strings by default, or customize rendering. |
 
-## Tool Vault
+## Tool vault
 
 Harn's Tool Vault is the progressive-tool-disclosure primitive: tool
 definitions that stay out of the model's context until they're

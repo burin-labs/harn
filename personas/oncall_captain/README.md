@@ -1,11 +1,11 @@
-# Oncall Captain Persona
+# Oncall captain persona
 
 This is the canonical Harn package for `oncall_captain`. Hosts such as
 Burin Code should discover it through `harn persona list --json` and
 `harn persona inspect oncall_captain --json`, then treat the resulting
 manifest as Harn-owned metadata.
 
-## Local Checks
+## Local checks
 
 ```bash
 cargo run --quiet --bin harn -- persona --manifest personas/oncall_captain/harn.toml inspect oncall_captain --json

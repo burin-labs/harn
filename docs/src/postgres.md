@@ -51,7 +51,7 @@ Pool options include `max_connections`, `min_connections`,
 `statement_cache_capacity`. Prepared statement caching is driver-managed by
 SQLx; tune it with `statement_cache_capacity` when needed.
 
-## Parameters And Decoding
+## Parameters and decoding
 
 Always pass dynamic values through the `params` list. Harn values are bound as
 Postgres parameters rather than interpolated into SQL:
@@ -72,7 +72,7 @@ nulls, booleans, integer and float types, text, `uuid`, `json`/`jsonb`, `bytea`,
 `date`, `time`, `timestamp`, and `timestamptz`. Unknown types are decoded as
 text when the Postgres driver can expose them that way.
 
-## Transactions And Tenant Settings
+## Transactions and tenant settings
 
 Use `pg_transaction` for changes that must commit or roll back together. The
 transaction handle is only valid inside the callback.
@@ -107,7 +107,7 @@ system, SQLx CLI, Sqitch, Flyway, or another migration runner before Harn
 pipelines depend on the schema. For lightweight smoke checks, `pg_execute` can
 run explicit DDL, but Harn does not maintain a migration ledger.
 
-## Mock Fixtures
+## Mock fixtures
 
 Tests can avoid a live Postgres server with `pg_mock_pool`.
 

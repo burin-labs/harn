@@ -1,4 +1,4 @@
-# Team Learning and Context Packs
+# Team learning and context packs
 
 Harn can turn repeated team friction into reviewable context packs or promoted workflows. The loop is:
 
@@ -15,7 +15,7 @@ storing raw conversation history.
 For repeated action traces that should become deterministic Harn code, use the
 workflow crystallization loop in [Workflow crystallization](./workflow-crystallization.md).
 
-## Friction Events
+## Friction events
 
 Use `friction_record(payload, options?)` to record repeated pain from Harn workflows
 or host integrations. With no configured recorder, the event is stored in the
@@ -52,7 +52,7 @@ Events intentionally keep `redacted_summary` as the user-facing text field. Raw
 prompts, raw content, and secret-looking metadata are dropped or redacted by the
 normalizer.
 
-## Context Pack Manifests
+## Context pack manifests
 
 `context_pack_manifest(payload)` validates a manifest shape. `context_pack_manifest_parse(src)` accepts TOML or JSON.
 
@@ -107,7 +107,7 @@ artifact_kind = "context"
 
 Secrets are references to host-managed capabilities, not raw token values.
 
-## Suggestions and Evals
+## Suggestions and evals
 
 `context_pack_suggestions(events?, options?)` groups repeated friction and emits
 candidate suggestion artifacts with evidence, example summaries, estimated savings,

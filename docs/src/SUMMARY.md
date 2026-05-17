@@ -2,7 +2,7 @@
 
 [Introduction](./introduction.md)
 
-# Getting Started
+# Getting started
 
 - [Getting started](./getting-started.md)
 - [Common tasks](./common-tasks.md)
@@ -24,7 +24,7 @@
 - [ADR 0001: Pipe operator](./adr/0001-pipe-operator.md)
 - [ADR 0002: Compile-time capability invariants](./adr/0002-compile-time-capability-invariants.md)
 
-# Agent Runtime
+# Agent runtime
 
 - [LLM and agents](./llm-and-agents.md)
   - [LLM calls](./llm/llm_call.md)
@@ -115,7 +115,7 @@
 - [Connector OAuth](./orchestrator/oauth.md)
 - [Orchestrator MCP server](./mcp-server.md)
 
-# Packages and Connectors
+# Packages and connectors
 
 - [Package authoring](./package-authoring.md)
 - [Connector authoring](./connectors/authoring.md)
@@ -162,7 +162,7 @@
 - [VM and stdlib perf notes](./dev/vm-stdlib-perf-notes.md)
 - [Bytecode cache](./perf/bytecode-cache.md)
 
-# Tutorials and Guides
+# Tutorials and guides
 
 - [Cookbook](./cookbook.md)
 - [Workflow authoring quickstart](./workflow-authoring-quickstart.md)
