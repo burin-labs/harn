@@ -1,5 +1,8 @@
+use std::collections::BTreeMap;
 use std::rc::Rc;
 use std::sync::Arc;
+
+use futures::stream::{FuturesUnordered, StreamExt};
 
 use crate::stdlib::json_to_vm_value;
 use crate::stdlib::registration::{async_builtin, AsyncBuiltin};
@@ -218,20 +221,6 @@ fn agent_primitive_denied_tool(
     })
 }
 
-fn agent_primitive_call_name(call: &VmValue) -> Option<String> {
-    let dict = call.as_dict()?;
-    let name = dict.get("name")?.display();
-    (!name.trim().is_empty()).then_some(name)
-}
-
-fn agent_primitive_call_is_read_only(call: &VmValue) -> bool {
-    agent_primitive_call_name(call)
-        .as_deref()
-        .and_then(crate::orchestration::current_tool_annotations)
-        .map(|annotations| annotations.kind.is_read_only())
-        .unwrap_or(false)
-}
-
 async fn host_agent_parse_tool_calls_impl(args: Vec<VmValue>) -> Result<VmValue, VmError> {
     let text = match args.first() {
         Some(VmValue::String(text)) => text.to_string(),
@@ -261,6 +250,65 @@ async fn host_agent_parse_tool_calls_impl(args: Vec<VmValue>) -> Result<VmValue,
     })))
 }
 
+fn agent_primitive_max_concurrent_tools(options: &BTreeMap<String, VmValue>) -> usize {
+    agent_primitive_option_int(options, "_max_concurrent_tools")
+        .or_else(|| agent_primitive_option_int(options, "max_concurrent_tools"))
+        .unwrap_or(1)
+        .max(1) as usize
+}
+
+async fn host_agent_dispatch_tool_call_indexed<'a>(
+    index: usize,
+    call: VmValue,
+    tools: Option<&'a VmValue>,
+    options: &'a BTreeMap<String, VmValue>,
+) -> (usize, Result<VmValue, VmError>) {
+    (
+        index,
+        host_agent_dispatch_tool_call(call, tools, options).await,
+    )
+}
+
+async fn host_agent_dispatch_tool_batch_capped(
+    calls: Vec<VmValue>,
+    tools: Option<&VmValue>,
+    options: &BTreeMap<String, VmValue>,
+    cap: usize,
+) -> Result<Vec<VmValue>, VmError> {
+    let total = calls.len();
+    if total == 0 {
+        return Ok(Vec::new());
+    }
+
+    let slot = cap.max(1).min(total);
+    let mut pending = calls.into_iter().enumerate();
+    let mut in_flight = FuturesUnordered::new();
+    let mut results: Vec<Option<VmValue>> = vec![None; total];
+
+    while in_flight.len() < slot {
+        let Some((index, call)) = pending.next() else {
+            break;
+        };
+        in_flight.push(host_agent_dispatch_tool_call_indexed(
+            index, call, tools, options,
+        ));
+    }
+
+    while let Some((index, result)) = in_flight.next().await {
+        results[index] = Some(result?);
+        if let Some((next_index, next_call)) = pending.next() {
+            in_flight.push(host_agent_dispatch_tool_call_indexed(
+                next_index, next_call, tools, options,
+            ));
+        }
+    }
+
+    Ok(results
+        .into_iter()
+        .map(|value| value.unwrap_or(VmValue::Nil))
+        .collect())
+}
+
 async fn host_agent_dispatch_tool_batch_impl(args: Vec<VmValue>) -> Result<VmValue, VmError> {
     let mut args = args.into_iter();
     let calls = match args.next() {
@@ -283,39 +331,18 @@ async fn host_agent_dispatch_tool_batch_impl(args: Vec<VmValue>) -> Result<VmVal
     let tools = agent_primitive_tools_value_arg(args.next(), "__host_agent_dispatch_tool_batch")?;
     let options =
         agent_primitive_options_value_arg(args.next(), "__host_agent_dispatch_tool_batch")?;
-    let ro_prefix_len = calls
-        .iter()
-        .position(|call| !agent_primitive_call_is_read_only(call))
-        .unwrap_or(calls.len());
-
-    let mut results: Vec<Option<VmValue>> = vec![None; calls.len()];
-    if ro_prefix_len >= 2 {
-        let futures = calls[..ro_prefix_len]
-            .iter()
-            .cloned()
-            .map(|call| host_agent_dispatch_tool_call(call, tools.as_ref(), &options));
-        for (index, result) in futures::future::join_all(futures)
-            .await
-            .into_iter()
-            .enumerate()
-        {
-            results[index] = Some(result?);
+    let cap = agent_primitive_max_concurrent_tools(&options);
+    let results = if cap <= 1 || calls.len() <= 1 {
+        let mut results = Vec::with_capacity(calls.len());
+        for call in calls {
+            results.push(host_agent_dispatch_tool_call(call, tools.as_ref(), &options).await?);
         }
-    }
-
-    for (index, call) in calls.into_iter().enumerate() {
-        if results[index].is_some() {
-            continue;
-        }
-        results[index] = Some(host_agent_dispatch_tool_call(call, tools.as_ref(), &options).await?);
-    }
-
-    Ok(VmValue::List(Rc::new(
         results
-            .into_iter()
-            .map(|value| value.unwrap_or(VmValue::Nil))
-            .collect(),
-    )))
+    } else {
+        host_agent_dispatch_tool_batch_capped(calls, tools.as_ref(), &options, cap).await?
+    };
+
+    Ok(VmValue::List(Rc::new(results)))
 }
 
 async fn host_agent_dispatch_tool_call_impl(args: Vec<VmValue>) -> Result<VmValue, VmError> {
@@ -334,7 +361,7 @@ async fn host_agent_dispatch_tool_call_impl(args: Vec<VmValue>) -> Result<VmValu
 async fn host_agent_dispatch_tool_call(
     call: VmValue,
     tools: Option<&VmValue>,
-    options: &std::collections::BTreeMap<String, VmValue>,
+    options: &BTreeMap<String, VmValue>,
 ) -> Result<VmValue, VmError> {
     let call = match call {
         VmValue::Dict(call) => call,
@@ -670,19 +697,18 @@ async fn host_agent_dispatch_tool_call(
     } else {
         Some(&session_mcp)
     };
-    // Scope the active tool-call id so synchronous hostlib mutations
-    // triggered by the tool handler attribute their FS pre-images to this
-    // call. Empty tool ids are silently ignored by the guard.
-    let _tool_call_guard = crate::agent_sessions::enter_current_tool_call(tool_id.clone());
-    let outcome = agent_tools::dispatch_tool_execution_with_mcp(
-        &tool_name,
-        &tool_args,
-        tools,
-        mcp_clients_ref,
-        bridge.as_ref(),
-        tool_retries,
-        tool_backoff_ms,
-    )
+    let outcome = crate::agent_sessions::scope_current_tool_call(tool_id.clone(), async {
+        agent_tools::dispatch_tool_execution_with_mcp(
+            &tool_name,
+            &tool_args,
+            tools,
+            mcp_clients_ref,
+            bridge.as_ref(),
+            tool_retries,
+            tool_backoff_ms,
+        )
+        .await
+    })
     .await;
     let execution_duration_ms = started.elapsed().as_millis() as u64;
     let executor = outcome
@@ -721,6 +747,9 @@ async fn host_agent_dispatch_tool_call(
         }
         Err(error) => {
             let category = crate::value::error_to_category(&error);
+            if matches!(category, crate::value::ErrorCategory::Cancelled) {
+                return Err(error);
+            }
             let error_text = error.to_string();
             let observation = format!(
                 "[error from {name}]\n{error}\n[end of {name} error]\n",

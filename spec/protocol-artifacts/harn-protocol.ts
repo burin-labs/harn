@@ -310,6 +310,7 @@ export interface ToolCallReceipt {
   tool_name: string
   iteration: number
   turn_index: number | null
+  emit_order: number
   reason: string | null
   kind: string | null
   executor: HarnToolCallReceiptExecutor | null

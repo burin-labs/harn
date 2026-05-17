@@ -576,6 +576,7 @@ class ToolCallReceipt(_HarnDataclass):
     tool_call_id: str
     tool_name: str
     iteration: int
+    emit_order: int
     status: str
     duration_ms: int
     args_hash: str

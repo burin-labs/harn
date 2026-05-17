@@ -329,6 +329,7 @@
           "tool_name": "read_file",
           "iteration": 6,
           "turn_index": 5,
+          "emit_order": 0,
           "reason": "Read project context",
           "kind": "read",
           "executor": "harn",

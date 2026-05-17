@@ -1916,6 +1916,7 @@ mod tests {
             tool_name: "search_files".into(),
             iteration: 3,
             turn_index: Some(2),
+            emit_order: 0,
             reason: Some("Search for middleware".into()),
             kind: Some("search".into()),
             executor: Some("harn".into()),

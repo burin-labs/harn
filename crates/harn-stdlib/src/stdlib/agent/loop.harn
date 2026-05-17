@@ -246,6 +246,8 @@ fn __tool_envelope(call, tools, options) {
       model: options?.model,
       provider: options?.provider,
       tool_call_index: options?._tool_call_index ?? 0,
+      max_concurrent_tools: options?._max_concurrent_tools ?? 1,
+      prefetch_next_turn: options?._prefetch_next_turn ?? false,
     },
   }
 }
@@ -311,6 +313,9 @@ fn __invoke_tool(call, tools, options) {
   }
   if is_err(outcome) {
     let err = unwrap_err(outcome)
+    if error_category(err) == "cancelled" {
+      throw err
+    }
     __maybe_emit_tool_audit(
       envelope.turn.session_id,
       envelope,
@@ -633,9 +638,102 @@ fn __resolve_max_concurrent_tools(turn_opts) {
   return 1
 }
 
+fn __callable(value) {
+  let kind = type_of(value)
+  return kind == "closure" || kind == "function" || kind == "fn"
+}
+
+fn __audit_flushes_from_result(result) {
+  var flushes = []
+  let single = result?._audit_flush
+  if __callable(single) {
+    flushes = flushes.push(single)
+  }
+  let many = result?._audit_flushes
+  if type_of(many) == "list" {
+    for flush in many {
+      if __callable(flush) {
+        flushes = flushes.push(flush)
+      }
+    }
+  }
+  return flushes
+}
+
+fn __collect_audit_flushes(dispatch) {
+  var flushes = []
+  for result in __dispatch_results_list(dispatch) {
+    for flush in __audit_flushes_from_result(result) {
+      flushes = flushes.push(flush)
+    }
+  }
+  return flushes
+}
+
+fn __strip_internal_tool_result(result) {
+  if type_of(result) != "dict" {
+    return result
+  }
+  var clean = {}
+  for key in result.keys() {
+    if !starts_with(key, "_") {
+      clean = clean + {[key]: result[key]}
+    }
+  }
+  return clean
+}
+
+fn __strip_internal_dispatch(dispatch) {
+  if type_of(dispatch) == "list" {
+    var clean_results = []
+    for result in dispatch {
+      clean_results = clean_results.push(__strip_internal_tool_result(result))
+    }
+    return clean_results
+  }
+  if type_of(dispatch) != "dict" {
+    return dispatch
+  }
+  var clean_dispatch = {}
+  for key in dispatch.keys() {
+    if !starts_with(key, "_") {
+      clean_dispatch = clean_dispatch + {[key]: dispatch[key]}
+    }
+  }
+  if type_of(dispatch?.results) == "list" {
+    var clean_results = []
+    for result in dispatch.results {
+      clean_results = clean_results.push(__strip_internal_tool_result(result))
+    }
+    clean_dispatch = clean_dispatch + {results: clean_results}
+  }
+  return clean_dispatch
+}
+
+fn __spawn_audit_flushes(tasks, flushes) {
+  var out = tasks
+  for flush in flushes {
+    let task = spawn {
+      let _ = try {
+        flush()
+      }
+    }
+    out = out.push(task)
+  }
+  return out
+}
+
+fn __drain_audit_flushes(tasks) {
+  for task in tasks {
+    let _ = try {
+      await(task)
+    }
+  }
+}
+
 fn __dispatch_tool_calls(session_id, tool_calls, turn_opts) {
   if len(tool_calls) == 0 {
-    return {dispatch: nil, turn_opts: turn_opts}
+    return {dispatch: nil, turn_opts: turn_opts, audit_flushes: []}
   }
   agent_tool_search_emit_queries(session_id, tool_calls, turn_opts)
   let tools = turn_opts?.tools
@@ -650,17 +748,21 @@ fn __dispatch_tool_calls(session_id, tool_calls, turn_opts) {
     _turn_iteration: turn_opts?._turn_iteration ?? 0,
     _tool_caller: turn_opts?._tool_caller,
     _max_concurrent_tools: cap,
+    _prefetch_next_turn: turn_opts?.prefetch_next_turn ?? false,
   }
   let caller = turn_opts?._tool_caller
-  let dispatch = if caller == nil {
+  let raw_dispatch = if caller == nil {
     agent_dispatch_tool_batch(tool_calls, tools, dispatch_options)
   } else {
     __dispatch_tool_calls_with_middleware(tool_calls, tools, dispatch_options, cap)
   }
+  let audit_flushes = __collect_audit_flushes(raw_dispatch)
+  let dispatch = __strip_internal_dispatch(raw_dispatch)
   agent_session_record_tool_results(session_id, dispatch)
   return {
     dispatch: dispatch,
     turn_opts: agent_tool_search_record_results(session_id, tool_calls, dispatch, turn_opts),
+    audit_flushes: audit_flushes,
   }
 }
 
@@ -699,6 +801,9 @@ fn __dispatch_tool_calls_with_middleware(tool_calls, tools, options, cap) {
       // value here is a VM-level bug (e.g. parallel-task plumbing). Surface
       // it as a synthetic error result rather than tear down the loop.
       let err = unwrap_err(r)
+      if error_category(err) == "cancelled" {
+        throw err
+      }
       results = results
         .push(
         {
@@ -1264,6 +1369,7 @@ fn __agent_loop_run(message, session, initial_opts) {
   let __llm_ctx_provider = to_string(initial_opts?.provider ?? "")
   let __llm_ctx_model = to_string(initial_opts?.model ?? "")
   let __llm_ctx_pushed = __push_llm_render_context(__llm_ctx_provider, __llm_ctx_model)
+  var audit_background_tasks = []
   defer {
     if __llm_ctx_pushed {
       __pop_llm_render_context()
@@ -1403,6 +1509,7 @@ fn __agent_loop_run(message, session, initial_opts) {
         turn_opts + {_turn_iteration: turn_index + 1, _tool_caller: opts?._tool_caller},
       )
       let dispatch = dispatched.dispatch
+      audit_background_tasks = __spawn_audit_flushes(audit_background_tasks, dispatched.audit_flushes)
       opts = __sync_tool_search_state(opts, dispatched.turn_opts)
       successful_tools_seen = __merge_tool_names(successful_tools_seen, __tool_names_by_status(dispatch, true))
       rejected_tools_seen = __merge_tool_names(rejected_tools_seen, __tool_names_by_status(dispatch, false))
@@ -1550,6 +1657,8 @@ fn __agent_loop_run(message, session, initial_opts) {
     } catch (e) {
       nil
     }
+    __drain_audit_flushes(audit_background_tasks)
+    audit_background_tasks = []
     let result = agent_session_finalize(
       session.session_id,
       {
@@ -1579,6 +1688,7 @@ fn __agent_loop_run(message, session, initial_opts) {
     }
   }
   if is_err(run) {
+    __drain_audit_flushes(audit_background_tasks)
     if !session_finalized {
       __agent_loop_finalize_failed(session, iteration)
     }

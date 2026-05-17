@@ -455,6 +455,7 @@ type ToolCallReceipt struct {
 	ToolName      string                   `json:"tool_name"`
 	Iteration     uint64                   `json:"iteration"`
 	TurnIndex     *uint64                  `json:"turn_index"`
+	EmitOrder     uint64                   `json:"emit_order"`
 	Reason        *string                  `json:"reason"`
 	Kind          *string                  `json:"kind"`
 	Executor      *ToolCallReceiptExecutor `json:"executor"`

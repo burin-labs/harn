@@ -836,6 +836,7 @@ public struct HarnToolCallReceipt: Codable, Sendable, Equatable {
     public var toolName: String
     public var iteration: Int
     public var turnIndex: Int?
+    public var emitOrder: Int
     public var reason: String?
     public var kind: String?
     public var executor: HarnToolCallReceiptExecutor?
@@ -857,6 +858,7 @@ public struct HarnToolCallReceipt: Codable, Sendable, Equatable {
         case toolName = "tool_name"
         case iteration
         case turnIndex = "turn_index"
+        case emitOrder = "emit_order"
         case reason
         case kind
         case executor

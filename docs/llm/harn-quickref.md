@@ -893,7 +893,8 @@ println(response.logprobs)       // present when requested and returned
 | `llm_backoff_ms` | int | 250 | (deprecated; see `with_retry`) Base exponential backoff in milliseconds. |
 | `llm_caller` | closure | nil | (`agent_loop` only) Custom caller wrapping the per-turn `llm_call`. See "Composable LLM callers" below. |
 | `tool_caller` | closure | nil | (`agent_loop` only) Custom caller wrapping every tool dispatch. Signature `fn(call, next) -> result_dict`. See "Composable tool middleware" below. |
-| `max_concurrent_tools` | int | 1 | (`agent_loop` only) When a planner emits N tool calls in one turn AND a `tool_caller` is configured, dispatch siblings concurrently capped at this count via `parallel settle`. Results inject in source order regardless of completion order. Each sibling invokes its own middleware chain in a fresh scope, so `audit.layers` histories never cross-talk. With `with_audit_log`, each receipt carries an `emit_order` field so consumers can sort completion-ordered events back to source order. |
+| `max_concurrent_tools` | int | 1 | (`agent_loop` only) When a planner emits N tool calls in one turn, dispatch siblings concurrently capped at this count. Results inject in source order regardless of completion order. Middleware-backed dispatch uses a fresh caller chain per sibling, so `audit.layers` histories never cross-talk. With `with_audit_log`, each receipt carries an `emit_order` field so consumers can sort completion-ordered events back to source order. |
+| `prefetch_next_turn` | bool | false | (`agent_loop` only) Start the next planner turn as soon as tool results have been recorded, before non-result audit sinks such as local receipt writes or custom receipt callbacks finish. Background audit flushes are drained before the loop returns. |
 | `progress_tool` | bool \| dict | false | (`agent_loop` only) Expose an opt-in progress-reporting tool. `true` installs `agent_progress`; dict form may set `name`, `description`, and `system_prompt_nudge`. ACP clients receive entries as canonical `plan` updates; A2A clients receive non-terminal `working` status updates; message-only reports surface as Harn progress narration. |
 | `stream` | bool | true | SSE streaming transport. |
 
@@ -2548,13 +2549,17 @@ fans out (`max_concurrent_tools > 1`) and needs to reorder completions
 back to source order.
 
 For multi-tool turns, set `max_concurrent_tools: N` on `agent_loop` to
-fan out dispatch across siblings (capped at N) via `parallel settle`.
-Each sibling invokes its own caller chain in a fresh scope, so
-`audit.layers` histories don't cross-talk. Results inject in source
+fan out dispatch across siblings (capped at N). Middleware-backed
+dispatch uses `parallel settle`; the host-batch path uses the same cap.
+Each middleware sibling invokes its own caller chain in a fresh scope,
+so `audit.layers` histories don't cross-talk. Results inject in source
 order regardless of completion order so text tool-call parsers keep
 working. `with_audit_log` receipts carry an `emit_order` field equal
 to `turn.tool_call_index` so consumers can re-sort to source order
-if they store events in completion order.
+if they store events in completion order. Set `prefetch_next_turn:
+true` to let the next planner call begin after tool results are in the
+transcript while local/custom audit receipt sinks finish in the
+background; the loop drains those flushes before returning.
 
 Middleware-attached metadata rides on `result.audit` (free-form dict
 aligned with A2A `metadata` / ACP `kind` / OpenAI `summary_text` / OTel

@@ -145,15 +145,19 @@ reason before the tool handler runs.
 
 Builds one typed `ToolCallReceipt` per tool call after the call
 completes. Receipts include the required-reason summary, status,
-executor, timing, model/provider, audit metadata, and SHA-256 hashes of
-canonicalized args/results instead of raw payloads.
+executor, timing, model/provider, emitted batch position (`emit_order`),
+audit metadata, and SHA-256 hashes of canonicalized args/results
+instead of raw payloads.
 
 `sink_or_options` accepts a callable sink, `"local"`, `"cloud"`,
 `"both"`, or `{sink, redact}`. Local receipts append to
 `.harn/receipts/<session_id>.jsonl`; cloud receipts mirror through the
 host event bridge; `both` writes local first and mirrors the same
 receipt. `redact` is a list of argument keys removed before `args_hash`
-is computed.
+is computed. In `agent_loop({prefetch_next_turn: true})`, local and
+callable sinks flush in the background after the tool result has been
+recorded; cloud receipt mirroring still remains attached to the tool
+result event.
 
 ```harn,ignore
 let caller = compose_tool_callers([
@@ -371,12 +375,11 @@ audit log sees what the runtime actually attempted.
    `rendered_result` or `output` or `content`). Use
    `__tool_mw_short_circuit` patterns or the bundled middleware as a
    template.
-3. **Sequential dispatch with middleware.** When `tool_caller` is set,
-   the runtime dispatches tool calls sequentially in source order so
-   audit-log / consent / redaction observe a deterministic sequence.
-   Without middleware, the runtime parallelizes the read-only prefix
-   (the historical optimization). Authors that want concurrency under
-   middleware can wrap the inner call with their own `parallel each`.
+3. **Parallel dispatch ordering.** `agent_loop({max_concurrent_tools:
+   N})` can run sibling tool calls from one planner turn concurrently,
+   with or without middleware. The transcript still records tool
+   results in planner-emitted order, and audited receipts carry
+   `emit_order` for consumers that store events in completion order.
 4. **Schema decorators should be additive.** `tool_inject_param`
    leaves an existing parameter untouched if it's already declared so
    layered middleware (e.g. multiple injects of the same field) is

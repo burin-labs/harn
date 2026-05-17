@@ -20,6 +20,7 @@
 
 use std::cell::{Cell, RefCell};
 use std::collections::{BTreeMap, HashMap, HashSet};
+use std::future::Future;
 use std::rc::Rc;
 use std::time::Instant;
 
@@ -100,6 +101,10 @@ thread_local! {
     static SESSION_CAP: Cell<usize> = const { Cell::new(DEFAULT_SESSION_CAP) };
     static CURRENT_SESSION_STACK: RefCell<Vec<String>> = const { RefCell::new(Vec::new()) };
     static CURRENT_TOOL_CALL_STACK: RefCell<Vec<String>> = const { RefCell::new(Vec::new()) };
+}
+
+tokio::task_local! {
+    static CURRENT_TOOL_CALL_TASK: String;
 }
 
 pub struct CurrentSessionGuard {
@@ -192,7 +197,29 @@ fn pop_current_tool_call() {
 /// Hostlib builtins consult this to attribute side-effect snapshots to
 /// the owning ACP `toolCallId` without callers passing it explicitly.
 pub fn current_tool_call_id() -> Option<String> {
+    if let Ok(id) = CURRENT_TOOL_CALL_TASK.try_with(Clone::clone) {
+        if !id.trim().is_empty() {
+            return Some(id);
+        }
+    }
     CURRENT_TOOL_CALL_STACK.with(|stack| stack.borrow().last().cloned())
+}
+
+/// Scope the active tool-call id to one async task.
+///
+/// Parallel tool dispatch runs sibling calls on the same OS thread, so
+/// thread-local guards alone cannot preserve attribution across `.await`
+/// points. Tokio task-local scoping follows the future instead.
+pub async fn scope_current_tool_call<F, T>(id: impl Into<String>, future: F) -> T
+where
+    F: Future<Output = T>,
+{
+    let id = id.into();
+    if id.trim().is_empty() {
+        future.await
+    } else {
+        CURRENT_TOOL_CALL_TASK.scope(id, future).await
+    }
 }
 
 /// Scope the active tool-call id for the duration of the returned guard.
