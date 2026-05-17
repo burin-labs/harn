@@ -69,10 +69,20 @@ pub(super) fn session_mode_state(current_mode_id: &str) -> serde_json::Value {
     })
 }
 
-/// Render the preferred ACP `configOptions` representation for the same mode
-/// catalog. ACP clients that understand this field should prefer it over
-/// `modes`; Harn keeps both in sync while the protocol transitions.
-pub(super) fn config_options_state(current_mode_id: &str) -> serde_json::Value {
+/// Render the preferred ACP `configOptions` representation for the
+/// per-session knobs Harn exposes today: session mode plus pinned LLM
+/// model. Both entries follow the `select` shape (the only `type` the
+/// current spec defines, per
+/// <https://agentclientprotocol.com/protocol/session-config-options>).
+///
+/// New knobs (temperature, permissions, …) plug in here by appending
+/// another entry rather than introducing a new wire surface; ACP keeps
+/// `configId` open-ended so clients can ignore unknown ids without
+/// breaking.
+pub(super) fn config_options_state(
+    current_mode_id: &str,
+    pinned_model: Option<&str>,
+) -> serde_json::Value {
     serde_json::json!([
         {
             "id": "mode",
@@ -82,7 +92,8 @@ pub(super) fn config_options_state(current_mode_id: &str) -> serde_json::Value {
             "type": "select",
             "currentValue": current_mode_id,
             "options": mode_entries("value"),
-        }
+        },
+        model_config_option(pinned_model),
     ])
 }
 
@@ -100,6 +111,128 @@ fn mode_entries(id_key: &str) -> Vec<serde_json::Value> {
             serde_json::Value::Object(entry)
         })
         .collect()
+}
+
+/// Sentinel option value rendered on the model selector when no
+/// session-level pin is active. Picking it through
+/// `session/set_config_option` clears any prior pin and reverts the
+/// session to the ambient default (env / providers.toml).
+///
+/// Spec note: the ACP `ConfigOption.currentValue` field has
+/// `minLength: 1`, so an empty string can't represent "unpinned".
+/// `@inherit` is a stable sentinel that satisfies the schema and
+/// clearly signals "fall through to the ambient default" instead of
+/// being mistaken for a real model id.
+pub(super) const MODEL_INHERIT_VALUE: &str = "@inherit";
+
+fn model_config_option(pinned_model: Option<&str>) -> serde_json::Value {
+    serde_json::json!({
+        "id": "model",
+        "name": "LLM Model",
+        "description": "Pinned model for subsequent prompts. llm_call invocations without an \
+                        explicit `model:` option resolve to this selector. Aliases and \
+                        `provider:model` selectors are both accepted; pick `@inherit` to clear \
+                        the pin and revert to the ambient default.",
+        "category": "model",
+        "type": "select",
+        "currentValue": pinned_model.unwrap_or(MODEL_INHERIT_VALUE),
+        "options": model_select_options(pinned_model),
+    })
+}
+
+/// Curated list of model values the spec-mandated `select` renders.
+/// Anything that resolves through `harn_vm::llm_config::resolve_model_info`
+/// to a registered provider is accepted by the handler — the dropdown is
+/// a UI hint, not the enforcement boundary.
+fn model_select_options(pinned_model: Option<&str>) -> Vec<serde_json::Value> {
+    let mut entries: Vec<serde_json::Value> = Vec::new();
+    entries.push(serde_json::json!({
+        "value": MODEL_INHERIT_VALUE,
+        "name": "Inherit ambient default",
+        "description": "Clear any session-level pin and use HARN_LLM_MODEL / providers.toml.",
+    }));
+    let mut seen: std::collections::BTreeSet<String> = std::collections::BTreeSet::new();
+    for alias in harn_vm::llm_config::known_model_names() {
+        let resolved = harn_vm::llm_config::resolve_model_info(&alias);
+        let label = format!("{alias} ({}/{})", resolved.provider, resolved.id);
+        if seen.insert(alias.clone()) {
+            let description = if resolved.tier.is_empty() {
+                resolved.provider.clone()
+            } else {
+                format!("tier: {}", resolved.tier)
+            };
+            entries.push(serde_json::json!({
+                "value": alias,
+                "name": label,
+                "description": description,
+            }));
+        }
+    }
+    // The currently pinned selector may be a free-form id outside the
+    // alias catalog. Surface it so the dropdown reflects the real
+    // state instead of showing a stale "(none)" entry.
+    if let Some(pinned) = pinned_model.filter(|value| !value.is_empty()) {
+        if seen.insert(pinned.to_string()) {
+            entries.push(serde_json::json!({
+                "value": pinned,
+                "name": pinned,
+                "description": "Currently pinned (not in alias catalog).",
+            }));
+        }
+    }
+    entries
+}
+
+/// Validate a model selector for `session/set_config_option(configId="model")`.
+/// Returns the normalized selector (trimmed; aliases are kept verbatim so
+/// the session pin tracks the user's chosen handle) or a descriptive
+/// error suitable for surfacing as `invalid_model`.
+///
+/// The wire surface is intentionally curated: scripts that need ad-hoc
+/// selectors should pass `model:` directly to `llm_call`. Accepted forms:
+///
+/// - empty / whitespace → `Ok(None)` (clear pin sentinel)
+/// - `provider:model` / `provider/model` where provider is in `providers.toml`
+/// - an alias from `known_model_names()`
+/// - a model id present in `model_catalog_entries()`
+pub(super) fn validate_model_selector(raw: &str) -> Result<Option<String>, String> {
+    let trimmed = raw.trim();
+    if trimmed.is_empty() || trimmed == MODEL_INHERIT_VALUE {
+        return Ok(None);
+    }
+    if let Some((provider, _model)) = split_provider_prefix(trimmed)
+        .filter(|(provider, model)| !provider.trim().is_empty() && !model.trim().is_empty())
+    {
+        if provider == "mock" || harn_vm::llm_config::provider_config(provider).is_some() {
+            return Ok(Some(trimmed.to_string()));
+        }
+        return Err(format!(
+            "invalid_model: provider '{provider}' is not registered. Available: {}",
+            harn_vm::llm_config::provider_names().join(", ")
+        ));
+    }
+    if harn_vm::llm_config::known_model_names()
+        .iter()
+        .any(|name| name == trimmed)
+    {
+        return Ok(Some(trimmed.to_string()));
+    }
+    if harn_vm::llm_config::model_catalog_entry(trimmed).is_some() {
+        return Ok(Some(trimmed.to_string()));
+    }
+    Err(format!(
+        "invalid_model: '{trimmed}' is not a known alias, catalog model id, or 'provider:model' form."
+    ))
+}
+
+/// Split a selector on the first provider-form separator. Both `:` and
+/// `/` are recognized because the two appear in the wild — Anthropic /
+/// OpenAI route paths use `/` (e.g. `anthropic/claude-opus-4-7`), while
+/// Ollama tag selectors use `:` (e.g. `ollama:llama3.2:latest`).
+fn split_provider_prefix(value: &str) -> Option<(&str, &str)> {
+    let position = value.find([':', '/'])?;
+    let (provider, rest) = value.split_at(position);
+    Some((provider, &rest[1..]))
 }
 
 /// Capability ceiling enforced while a prompt runs in this mode. Harn's
@@ -172,9 +305,9 @@ mod tests {
 
     #[test]
     fn config_options_state_contains_mode_selector() {
-        let state = config_options_state("code");
+        let state = config_options_state("code", None);
         let options = state.as_array().expect("config options array");
-        assert_eq!(options.len(), 1);
+        assert_eq!(options.len(), 2);
         assert_eq!(options[0]["id"], "mode");
         assert_eq!(options[0]["currentValue"], "code");
         assert!(options[0]["options"]
@@ -182,6 +315,78 @@ mod tests {
             .expect("mode options")
             .iter()
             .any(|m| m["value"] == "ask"));
+    }
+
+    #[test]
+    fn config_options_state_includes_model_selector_with_pin_clear_sentinel() {
+        let state = config_options_state("code", None);
+        let options = state.as_array().expect("config options array");
+        let model_option = options
+            .iter()
+            .find(|entry| entry["id"] == "model")
+            .expect("model config option");
+        assert_eq!(model_option["category"], "model");
+        assert_eq!(model_option["type"], "select");
+        assert_eq!(model_option["currentValue"], MODEL_INHERIT_VALUE);
+        let values: Vec<&str> = model_option["options"]
+            .as_array()
+            .expect("model options")
+            .iter()
+            .map(|entry| entry["value"].as_str().expect("value string"))
+            .collect();
+        assert!(
+            values.contains(&MODEL_INHERIT_VALUE),
+            "options must include the inherit sentinel: {values:?}"
+        );
+    }
+
+    #[test]
+    fn config_options_state_surfaces_free_form_pinned_model() {
+        let state = config_options_state("code", Some("custom-model-not-in-catalog"));
+        let model_option = state
+            .as_array()
+            .expect("config options array")
+            .iter()
+            .find(|entry| entry["id"] == "model")
+            .cloned()
+            .expect("model config option");
+        assert_eq!(model_option["currentValue"], "custom-model-not-in-catalog");
+        let has_entry = model_option["options"]
+            .as_array()
+            .expect("model options")
+            .iter()
+            .any(|entry| entry["value"] == "custom-model-not-in-catalog");
+        assert!(
+            has_entry,
+            "free-form pinned model must appear in select options"
+        );
+    }
+
+    #[test]
+    fn validate_model_selector_accepts_empty_as_clear_pin() {
+        assert!(validate_model_selector("").unwrap().is_none());
+        assert!(validate_model_selector("   ").unwrap().is_none());
+        assert!(validate_model_selector("@inherit").unwrap().is_none());
+    }
+
+    #[test]
+    fn validate_model_selector_accepts_known_alias() {
+        // `claude-sonnet-4-6` is the catalog default; any registered
+        // alias works for this check.
+        let resolved = validate_model_selector("claude-sonnet-4-6")
+            .expect("known alias should validate")
+            .expect("known alias should produce a Some(...) selector");
+        assert_eq!(resolved, "claude-sonnet-4-6");
+    }
+
+    #[test]
+    fn validate_model_selector_rejects_unknown_provider_form() {
+        let error = validate_model_selector("nosuchprovider:nosuchmodel")
+            .expect_err("unknown provider must error");
+        assert!(
+            error.contains("invalid_model"),
+            "error should be tagged invalid_model: {error}"
+        );
     }
 
     #[test]

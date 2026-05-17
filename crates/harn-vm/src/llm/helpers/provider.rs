@@ -113,6 +113,16 @@ fn infer_provider_from_model_selector(raw_model: &str, warn_on_default: bool) ->
     inference.provider
 }
 
+/// Read the pinned model selector for the session currently on the
+/// VM's session stack, if any. Used by `vm_resolve_provider` /
+/// `vm_resolve_model` to honour ACP `session/set_config_option`
+/// (configId="model") swaps without each builtin needing to thread the
+/// session id manually.
+fn current_session_pinned_model() -> Option<String> {
+    let id = crate::agent_sessions::current_session_id()?;
+    crate::agent_sessions::pinned_model(&id)
+}
+
 fn env_selected_model_for_tier() -> Option<(String, String)> {
     use crate::llm_config;
 
@@ -257,6 +267,9 @@ pub(crate) fn vm_resolve_provider(options: &Option<BTreeMap<String, VmValue>>) -
             return infer_provider_from_model_selector(&m, true);
         }
     }
+    if let Some(pinned) = current_session_pinned_model() {
+        return infer_provider_from_model_selector(&pinned, true);
+    }
     if let Ok(p) = std::env::var("HARN_LLM_PROVIDER") {
         return p;
     }
@@ -323,6 +336,14 @@ pub(crate) fn vm_resolve_model(
         .map(|v| v.display())
     {
         if let Some((resolved, _)) = resolve_available_tier_model(&tier, Some(provider)) {
+            return resolved;
+        }
+    }
+    if let Some(pinned) = current_session_pinned_model() {
+        let (resolved, resolved_provider) = llm_config::resolve_model(&pinned);
+        let inferred_provider =
+            resolved_provider.unwrap_or_else(|| infer_provider_from_model_selector(&pinned, false));
+        if inferred_provider == provider {
             return resolved;
         }
     }

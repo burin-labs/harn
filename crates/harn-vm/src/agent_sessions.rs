@@ -52,6 +52,12 @@ pub struct SessionState {
     /// metadata, not a replay message: providers receive it through
     /// their system/developer instruction channel on each call.
     pub system_prompt: Option<String>,
+    /// Session-pinned model selector. When set, `llm_call` invocations
+    /// that do not pass an explicit `model:` option resolve to this
+    /// selector instead of `HARN_LLM_MODEL` / provider defaults. Mid-
+    /// session swap is exposed over ACP via `session/set_config_option`
+    /// (configId="model").
+    pub pinned_model: Option<String>,
 }
 
 impl SessionState {
@@ -70,6 +76,7 @@ impl SessionState {
             active_skills: Vec::new(),
             tool_format: None,
             system_prompt: None,
+            pinned_model: None,
         }
     }
 }
@@ -374,19 +381,21 @@ pub fn reset_transcript(id: &str) -> bool {
 /// operation itself can't make `src` look stale and kick it out of
 /// the LRU just to make room for the new fork.
 pub fn fork(src_id: &str, dst_id: Option<String>) -> Option<String> {
-    let (src_transcript, src_tool_format, src_system_prompt, dst) = SESSIONS.with(|s| {
-        let mut map = s.borrow_mut();
-        let src = map.get_mut(src_id)?;
-        src.last_accessed = Instant::now();
-        let dst = dst_id.unwrap_or_else(|| uuid::Uuid::now_v7().to_string());
-        let forked_transcript = clone_transcript_with_id(&src.transcript, &dst);
-        Some((
-            forked_transcript,
-            src.tool_format.clone(),
-            src.system_prompt.clone(),
-            dst,
-        ))
-    })?;
+    let (src_transcript, src_tool_format, src_system_prompt, src_pinned_model, dst) = SESSIONS
+        .with(|s| {
+            let mut map = s.borrow_mut();
+            let src = map.get_mut(src_id)?;
+            src.last_accessed = Instant::now();
+            let dst = dst_id.unwrap_or_else(|| uuid::Uuid::now_v7().to_string());
+            let forked_transcript = clone_transcript_with_id(&src.transcript, &dst);
+            Some((
+                forked_transcript,
+                src.tool_format.clone(),
+                src.system_prompt.clone(),
+                src.pinned_model.clone(),
+                dst,
+            ))
+        })?;
     // Ensure cap is respected when inserting the fork.
     open_or_create(Some(dst.clone()));
     SESSIONS.with(|s| {
@@ -395,6 +404,7 @@ pub fn fork(src_id: &str, dst_id: Option<String>) -> Option<String> {
             state.transcript = src_transcript;
             state.tool_format = src_tool_format;
             state.system_prompt = src_system_prompt;
+            state.pinned_model = src_pinned_model;
             state.last_accessed = Instant::now();
         }
         update_lineage(&mut map, src_id, &dst, None);
@@ -973,6 +983,37 @@ pub fn system_prompt(id: &str) -> Option<String> {
     })
 }
 
+/// Pin (or clear, with `None`) a model selector on a session. Returns
+/// `Ok(true)` when the value actually changed so callers can decide
+/// whether to broadcast a notification. The selector is stored verbatim
+/// — alias / catalog resolution is the call-site's job.
+pub fn set_pinned_model(id: &str, model: Option<String>) -> Result<bool, String> {
+    let normalized = model
+        .map(|value| value.trim().to_string())
+        .filter(|value| !value.is_empty());
+    SESSIONS.with(|s| {
+        let mut map = s.borrow_mut();
+        let Some(state) = map.get_mut(id) else {
+            return Err(format!("agent session '{id}' does not exist"));
+        };
+        let changed = state.pinned_model != normalized;
+        state.pinned_model = normalized;
+        state.last_accessed = Instant::now();
+        Ok(changed)
+    })
+}
+
+/// Read the session's pinned model selector, if any. Consumed by
+/// `vm_resolve_model` as the per-session default when a script-level
+/// `llm_call` does not pass `model:` explicitly.
+pub fn pinned_model(id: &str) -> Option<String> {
+    SESSIONS.with(|s| {
+        s.borrow()
+            .get(id)
+            .and_then(|state| state.pinned_model.clone())
+    })
+}
+
 fn empty_transcript(id: &str) -> VmValue {
     use crate::llm::helpers::new_transcript_with;
     new_transcript_with(Some(id.to_string()), Vec::new(), None, None)
@@ -1115,6 +1156,14 @@ fn session_snapshot(state: &SessionState) -> VmValue {
             .tool_format
             .as_ref()
             .map(|format| VmValue::String(Rc::from(format.clone())))
+            .unwrap_or(VmValue::Nil),
+    );
+    next.insert(
+        "pinned_model".to_string(),
+        state
+            .pinned_model
+            .as_ref()
+            .map(|model| VmValue::String(Rc::from(model.clone())))
             .unwrap_or(VmValue::Nil),
     );
     VmValue::Dict(Rc::new(next))
@@ -1319,6 +1368,70 @@ mod tests {
             .is_some());
         assert_eq!(message_count(&id), 1);
         assert_eq!(event_count_by_kind(&id, "system_prompt"), 1);
+    }
+
+    #[test]
+    fn pinned_model_round_trips_through_session_state_and_snapshot() {
+        reset_session_store();
+        let id = open_or_create(Some("pinned-model-session".into()));
+
+        // Default: no pin.
+        assert!(pinned_model(&id).is_none());
+        let initial_snapshot = snapshot(&id).expect("session snapshot");
+        assert!(matches!(
+            initial_snapshot
+                .as_dict()
+                .and_then(|d| d.get("pinned_model")),
+            Some(VmValue::Nil)
+        ));
+
+        // First set returns changed=true; snapshot reflects the pin.
+        assert!(set_pinned_model(&id, Some("custom-model".into())).unwrap());
+        assert_eq!(pinned_model(&id).as_deref(), Some("custom-model"));
+        let pinned_snapshot = snapshot(&id).expect("session snapshot");
+        let pinned_value = pinned_snapshot
+            .as_dict()
+            .and_then(|d| d.get("pinned_model"))
+            .map(|v| v.display())
+            .unwrap_or_default();
+        assert_eq!(pinned_value, "custom-model");
+
+        // Re-setting to the same selector returns changed=false; no churn.
+        assert!(!set_pinned_model(&id, Some("custom-model".into())).unwrap());
+
+        // Whitespace-only input is normalized to None (clears the pin).
+        assert!(set_pinned_model(&id, Some("   ".into())).unwrap());
+        assert!(pinned_model(&id).is_none());
+
+        // Setting on an unknown session surfaces a descriptive error.
+        let error = set_pinned_model("ghost-session", Some("x".into())).unwrap_err();
+        assert!(
+            error.contains("ghost-session"),
+            "unknown-session error must name the session: {error}"
+        );
+    }
+
+    #[test]
+    fn fork_inherits_parent_pinned_model_so_branch_starts_on_same_route() {
+        reset_session_store();
+        let parent_id = open_or_create(Some("fork-pin-parent".into()));
+        set_pinned_model(&parent_id, Some("claude-sonnet-4-6".into())).unwrap();
+        let child_id = fork(&parent_id, Some("fork-pin-child".into())).expect("fork");
+
+        assert_eq!(
+            pinned_model(&child_id).as_deref(),
+            Some("claude-sonnet-4-6"),
+            "fork should mirror tool_format/system_prompt by carrying the parent's model pin",
+        );
+
+        // Independent state: re-pinning on the child must not affect
+        // the parent.
+        set_pinned_model(&child_id, Some("gpt-4o-mini".into())).unwrap();
+        assert_eq!(
+            pinned_model(&parent_id).as_deref(),
+            Some("claude-sonnet-4-6")
+        );
+        assert_eq!(pinned_model(&child_id).as_deref(), Some("gpt-4o-mini"));
     }
 
     #[test]

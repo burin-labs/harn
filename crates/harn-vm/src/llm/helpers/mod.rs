@@ -444,4 +444,101 @@ mod tests {
 
         assert_eq!(resolved, "anthropic/claude-sonnet-4.6");
     }
+
+    #[test]
+    fn session_pinned_model_overrides_env_default_resolution() {
+        // ACP `session/set_config_option(configId="model")` writes a
+        // per-session pin via `agent_sessions::set_pinned_model`. The
+        // resolvers must surface that pin in place of the env-driven
+        // default so the next `llm_call` honours it without each
+        // builtin threading the session id manually.
+        let _guard = crate::llm::env_lock().lock().expect("env lock");
+        let prev_harn_model = std::env::var("HARN_LLM_MODEL").ok();
+        let prev_harn_provider = std::env::var("HARN_LLM_PROVIDER").ok();
+        unsafe {
+            std::env::set_var("HARN_LLM_MODEL", "gpt-4o-mini");
+            std::env::set_var("HARN_LLM_PROVIDER", "openai");
+        }
+        reset_provider_key_cache();
+
+        crate::agent_sessions::reset_session_store();
+        let id = crate::agent_sessions::open_or_create(Some("pinned-resolver-session".to_string()));
+        crate::agent_sessions::set_pinned_model(&id, Some("claude-sonnet-4-6".to_string()))
+            .expect("set pinned model");
+        let _session_guard = crate::agent_sessions::enter_current_session(id.clone());
+
+        let provider = vm_resolve_provider(&None);
+        let model = vm_resolve_model(&None, &provider);
+
+        // Drop the guard before mutating shared env to keep cleanup
+        // local even if the assertion below fails.
+        drop(_session_guard);
+        crate::agent_sessions::reset_session_store();
+        unsafe {
+            match prev_harn_model {
+                Some(value) => std::env::set_var("HARN_LLM_MODEL", value),
+                None => std::env::remove_var("HARN_LLM_MODEL"),
+            }
+            match prev_harn_provider {
+                Some(value) => std::env::set_var("HARN_LLM_PROVIDER", value),
+                None => std::env::remove_var("HARN_LLM_PROVIDER"),
+            }
+        }
+        reset_provider_key_cache();
+
+        assert_eq!(provider, "anthropic", "session pin should reroute provider");
+        assert_eq!(
+            model, "claude-sonnet-4-6",
+            "session pin should reroute model"
+        );
+    }
+
+    #[test]
+    fn explicit_call_site_model_wins_over_session_pin() {
+        let _guard = crate::llm::env_lock().lock().expect("env lock");
+        let prev_harn_model = std::env::var("HARN_LLM_MODEL").ok();
+        let prev_harn_provider = std::env::var("HARN_LLM_PROVIDER").ok();
+        unsafe {
+            std::env::remove_var("HARN_LLM_MODEL");
+            std::env::remove_var("HARN_LLM_PROVIDER");
+        }
+        reset_provider_key_cache();
+
+        crate::agent_sessions::reset_session_store();
+        let id =
+            crate::agent_sessions::open_or_create(Some("explicit-override-session".to_string()));
+        crate::agent_sessions::set_pinned_model(&id, Some("claude-sonnet-4-6".to_string()))
+            .expect("set pinned model");
+        let _session_guard = crate::agent_sessions::enter_current_session(id.clone());
+
+        // Call-site `model:` option must win — scripts opting into a
+        // specific model should not be silently overridden by an ACP
+        // pin meant only for "no-option" calls.
+        let mut explicit_opts: BTreeMap<String, VmValue> = BTreeMap::new();
+        explicit_opts.insert(
+            "model".to_string(),
+            VmValue::String(Rc::from("gpt-4o-mini")),
+        );
+        explicit_opts.insert("provider".to_string(), VmValue::String(Rc::from("openai")));
+        let opts = Some(explicit_opts);
+        let provider = vm_resolve_provider(&opts);
+        let model = vm_resolve_model(&opts, &provider);
+
+        drop(_session_guard);
+        crate::agent_sessions::reset_session_store();
+        unsafe {
+            match prev_harn_model {
+                Some(value) => std::env::set_var("HARN_LLM_MODEL", value),
+                None => std::env::remove_var("HARN_LLM_MODEL"),
+            }
+            match prev_harn_provider {
+                Some(value) => std::env::set_var("HARN_LLM_PROVIDER", value),
+                None => std::env::remove_var("HARN_LLM_PROVIDER"),
+            }
+        }
+        reset_provider_key_cache();
+
+        assert_eq!(provider, "openai");
+        assert_eq!(model, "gpt-4o-mini");
+    }
 }

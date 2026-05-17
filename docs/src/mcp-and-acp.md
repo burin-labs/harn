@@ -490,7 +490,7 @@ The ACP server supports these JSON-RPC methods:
 | `session/prompt` | Send a prompt to the agent for execution |
 | `session/cancel` | Cancel the currently running prompt |
 | `session/set_mode` | Switch the active session mode |
-| `session/set_config_option` | Switch a preferred ACP session config option such as `mode` |
+| `session/set_config_option` | Switch a preferred ACP session config option (`mode` or `model`) |
 | `workflow/signal` | Enqueue a workflow signal message in the current session workspace |
 | `workflow/query` | Read a named workflow query value from the current session workspace |
 | `workflow/update` | Send a workflow update request and wait for a response |
@@ -574,6 +574,17 @@ it; Harn keeps `modes` available for clients still on `session/set_mode`.
         { "value": "code",      "name": "Code",      "description": "..." },
         { "value": "shadow",    "name": "Shadow",    "description": "..." }
       ]
+    },
+    {
+      "id": "model",
+      "name": "LLM Model",
+      "category": "model",
+      "type": "select",
+      "currentValue": "@inherit",
+      "options": [
+        { "value": "@inherit",         "name": "Inherit ambient default", "description": "..." },
+        { "value": "claude-sonnet-4-6", "name": "claude-sonnet-4-6 (anthropic/claude-sonnet-4-6)", "description": "tier: frontier" }
+      ]
     }
   ],
   "modes": {
@@ -637,6 +648,57 @@ policy from the same `AutonomyTier` machinery used by trigger dispatch, so
 ACP sessions and runtime autonomy stay aligned. The conformance case
 `acp_architect_mode_blocks_destructive_writes_in_prompt` locks this behavior
 end-to-end.
+
+### Session Model Pin
+
+`session/set_config_option(configId="model")` pins an LLM model selector on
+the session so subsequent `llm_call` invocations without an explicit
+`model:` option resolve to the pinned value instead of the
+`HARN_LLM_MODEL` / providers.toml default. This is the wire surface
+behind editor `/model` commands (Crush, OpenCode `<leader>m`, Codex
+`/model`) and replaces the "the change takes effect after `/clear`"
+workaround.
+
+```json
+{
+  "jsonrpc": "2.0",
+  "id": 42,
+  "method": "session/set_config_option",
+  "params": {
+    "sessionId": "sess_abc",
+    "configId": "model",
+    "value": "claude-sonnet-4-6"
+  }
+}
+```
+
+Accepted selector forms:
+
+- a known alias from the llm.toml catalog (e.g. `claude-sonnet-4-6`)
+- an explicit `provider:model` or `provider/model` pair where the
+  provider is in `providers.toml`
+- a model id present in the catalog (`model_catalog_entry`)
+
+Setting the value to the sentinel `"@inherit"` (also accepted: empty
+string) clears the pin and reverts the session to the ambient default.
+The ACP wire surface is intentionally curated; scripts that need
+ad-hoc selectors still pass `model:` directly to `llm_call`.
+
+Per-call options always win over the pin — invoking
+`llm_call(..., {model: "..."})` ignores the session pin so prompts that
+deliberately route to a different model aren't silently rebound. The
+existing conversation buffer, transcript metadata, and memory context
+are untouched by a model swap; only the resolver for the next prompt's
+default model changes. Pinning rejects unregistered providers with a
+`-32602` error tagged `invalid_model`.
+
+Notification semantics match `mode`: a `session/update` with
+`sessionUpdate: "config_option_update"` is emitted whenever the pin
+actually changes (re-pinning to the same selector is a silent ack).
+`session/fork` carries the parent's pin over to the new branch
+(matching how `tool_format` and the session-level system prompt
+inherit), so a branch starts with the same effective model as the
+parent. Setting a different pin on the child stays local.
 
 ### Queued user messages during agent execution
 

@@ -66,6 +66,17 @@ condensed series summaries instead of full per-patch history.
   under `crates/harn-hostlib/schemas/secret_store/` keep `harn check`
   preflight covering the new builtins. Docs at
   `docs/src/hostlib/secret_store.md`.
+- **ACP `session/set_config_option(configId="model")` (#1721).**
+  Generalized the config-option dispatch table from a hardcoded
+  `mode`-only branch to a registry covering `mode` and `model`.
+  Pinning a model writes a per-session selector that the LLM resolver
+  (`vm_resolve_model` / `vm_resolve_provider`) honours for subsequent
+  prompts without touching the transcript, tool-call audit log, or
+  memory context. Per-call `model:` options still win, and clearing
+  the pin (`value: "@inherit"`) reverts to the ambient default. Closes
+  the editor `/model` workaround that hinted "takes effect after
+  `/clear`" — the new wire path matches the mid-session model swap
+  Crush / OpenCode / Codex already ship.
 - **Cerebras provider (#1705).** Added a first-class `cerebras` provider
   routed through the OpenAI-compatible stack with a `provider_family =
   "openai"` capability inheritance row. Catalog ships canonical
