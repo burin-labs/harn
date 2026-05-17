@@ -1954,7 +1954,6 @@
       ],
       "context_window": 131072,
       "stream_timeout": 300.0,
-      "prefer_prefill_done": true,
       "modalities": {
         "input": [
           "text"
@@ -2009,7 +2008,6 @@
       ],
       "context_window": 131072,
       "stream_timeout": 300.0,
-      "prefer_prefill_done": true,
       "modalities": {
         "input": [
           "text"

@@ -96,8 +96,6 @@ pub struct CatalogModel {
     pub runtime_context_window: Option<u64>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub stream_timeout: Option<f64>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub prefer_prefill_done: Option<bool>,
     pub modalities: ModelModalities,
     pub tool_support: ModelToolSupport,
     pub structured_output: String,
@@ -499,7 +497,6 @@ pub fn schema_value() -> Value {
                     "context_window": {"type": "integer", "minimum": 1},
                     "runtime_context_window": {"type": "integer", "minimum": 1},
                     "stream_timeout": {"type": "number", "exclusiveMinimum": 0},
-                    "prefer_prefill_done": {"type": "boolean"},
                     "modalities": {"$ref": "#/$defs/modalities"},
                     "tool_support": {"$ref": "#/$defs/tool_support"},
                     "structured_output": {"type": "string"},
@@ -703,7 +700,6 @@ fn catalog_model(
         context_window: model.context_window,
         runtime_context_window: model.runtime_context_window,
         stream_timeout: model.stream_timeout,
-        prefer_prefill_done: model.prefer_prefill_done,
     }
 }
 
@@ -1016,7 +1012,6 @@ export interface HarnCatalogModel {
   context_window: number
   runtime_context_window?: number
   stream_timeout?: number
-  prefer_prefill_done?: boolean
   modalities: { input: string[]; output: string[] }
   tool_support: {
     native: boolean
@@ -1078,7 +1073,6 @@ export interface CatalogEntry {
     cacheWritePerMTok?: number | null
   }
   streamTimeout?: number
-  preferPrefillDone?: boolean
 }
 
 export interface CatalogAlias {
@@ -1108,7 +1102,6 @@ export const MODEL_CATALOG: readonly CatalogEntry[] = harnProviderCatalog.models
       }
     : undefined,
   streamTimeout: model.stream_timeout,
-  preferPrefillDone: model.prefer_prefill_done,
 }))
 
 export const ALIASES: readonly CatalogAlias[] = harnProviderCatalog.aliases.map((alias) => ({
@@ -1251,7 +1244,6 @@ public struct HarnCatalogModel: Codable, Sendable, Equatable {
     public let contextWindow: Int
     public let runtimeContextWindow: Int?
     public let streamTimeout: Double?
-    public let preferPrefillDone: Bool?
     public let modalities: HarnModelModalities
     public let toolSupport: HarnModelToolSupport
     public let structuredOutput: String
@@ -1271,7 +1263,6 @@ public struct HarnCatalogModel: Codable, Sendable, Equatable {
         case contextWindow = "context_window"
         case runtimeContextWindow = "runtime_context_window"
         case streamTimeout = "stream_timeout"
-        case preferPrefillDone = "prefer_prefill_done"
         case modalities
         case toolSupport = "tool_support"
         case structuredOutput = "structured_output"

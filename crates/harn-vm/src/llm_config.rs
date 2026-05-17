@@ -252,8 +252,6 @@ pub struct ModelDef {
     pub deprecation_note: Option<String>,
     #[serde(default)]
     pub quality_tags: Vec<String>,
-    #[serde(default)]
-    pub prefer_prefill_done: Option<bool>,
 }
 
 #[derive(Debug, Clone, Serialize, PartialEq, Eq)]
@@ -1394,7 +1392,6 @@ mod tests {
                 deprecated: false,
                 deprecation_note: None,
                 quality_tags: Vec::new(),
-                prefer_prefill_done: None,
             },
         );
         overlay
