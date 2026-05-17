@@ -245,6 +245,7 @@ fn __tool_envelope(call, tools, options) {
       run_id: options?.run_id ?? options?._run_id,
       model: options?.model,
       provider: options?.provider,
+      tool_call_index: options?._tool_call_index ?? 0,
     },
   }
 }
@@ -624,12 +625,21 @@ fn __detect_native_fallback(llm_result, parsed, turn_opts, fallback_index, sessi
   return {triggered: true, accepted: accepted, fallback_index: new_index, calls: resolved_calls}
 }
 
+fn __resolve_max_concurrent_tools(turn_opts) {
+  let raw = turn_opts?.max_concurrent_tools
+  if type_of(raw) == "int" && raw > 1 {
+    return raw
+  }
+  return 1
+}
+
 fn __dispatch_tool_calls(session_id, tool_calls, turn_opts) {
   if len(tool_calls) == 0 {
     return {dispatch: nil, turn_opts: turn_opts}
   }
   agent_tool_search_emit_queries(session_id, tool_calls, turn_opts)
   let tools = turn_opts?.tools
+  let cap = __resolve_max_concurrent_tools(turn_opts)
   let dispatch_options = {
     session_id: session_id,
     tool_format: turn_opts.tool_format,
@@ -639,12 +649,13 @@ fn __dispatch_tool_calls(session_id, tool_calls, turn_opts) {
     permissions: turn_opts?.permissions,
     _turn_iteration: turn_opts?._turn_iteration ?? 0,
     _tool_caller: turn_opts?._tool_caller,
+    _max_concurrent_tools: cap,
   }
   let caller = turn_opts?._tool_caller
   let dispatch = if caller == nil {
     agent_dispatch_tool_batch(tool_calls, tools, dispatch_options)
   } else {
-    __dispatch_tool_calls_with_middleware(tool_calls, tools, dispatch_options)
+    __dispatch_tool_calls_with_middleware(tool_calls, tools, dispatch_options, cap)
   }
   agent_session_record_tool_results(session_id, dispatch)
   return {
@@ -653,13 +664,58 @@ fn __dispatch_tool_calls(session_id, tool_calls, turn_opts) {
   }
 }
 
-fn __dispatch_tool_calls_with_middleware(tool_calls, tools, options) {
-  // Middleware-enabled path: dispatch sequentially so each call observes
-  // the audit-log/consent/redaction order in source order. Authors that
-  // want concurrency can wrap the inner call themselves.
+fn __invoke_tool_with_index(call, index, tools, options) {
+  return __invoke_tool(call, tools, options + {_tool_call_index: index})
+}
+
+fn __dispatch_tool_calls_with_middleware(tool_calls, tools, options, cap) {
+  // Middleware-enabled path. Each call invokes its own caller chain
+  // inside a fresh closure scope, so `audit.layers` histories stay
+  // independent across siblings. When `max_concurrent_tools > 1`,
+  // dispatch siblings concurrently via `parallel settle` with the
+  // requested cap; results come back in source order regardless of
+  // completion order so text tool-call parsers that key on
+  // declaration order still match.
+  if cap <= 1 || len(tool_calls) <= 1 {
+    var results = []
+    for (index, call) in iter(tool_calls).enumerate() {
+      results = results.push(__invoke_tool_with_index(call, index, tools, options))
+    }
+    return results
+  }
+  var indexed = []
+  for (index, call) in iter(tool_calls).enumerate() {
+    indexed = indexed.push({index: index, call: call})
+  }
+  let settled = parallel settle indexed with { max_concurrent: cap } { entry ->
+    __invoke_tool_with_index(entry.call, entry.index, tools, options)
+  }
   var results = []
-  for call in tool_calls {
-    results = results.push(__invoke_tool(call, tools, options))
+  for r in settled.results {
+    if is_ok(r) {
+      results = results.push(unwrap(r))
+    } else {
+      // `__invoke_tool` traps its own middleware exceptions, so a thrown
+      // value here is a VM-level bug (e.g. parallel-task plumbing). Surface
+      // it as a synthetic error result rather than tear down the loop.
+      let err = unwrap_err(r)
+      results = results
+        .push(
+        {
+          ok: false,
+          status: "error",
+          tool_name: "",
+          tool_call_id: "",
+          arguments: {},
+          result: nil,
+          rendered_result: to_string(err),
+          observation: to_string(err),
+          error: to_string(err),
+          error_category: "tool_parallel_dispatch_exception",
+          executor: nil,
+        },
+      )
+    }
   }
   return results
 }
