@@ -553,7 +553,7 @@ pub struct InterfaceMethod {
 }
 
 /// A type annotation (optional, for runtime checking).
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
 pub enum TypeExpr {
     /// A named type: int, string, float, bool, nil, list, dict, closure,
     /// or a user-defined type name.
@@ -596,7 +596,7 @@ pub enum TypeExpr {
 }
 
 /// A field in a dict shape type.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct ShapeField {
     pub name: String,
     pub type_expr: TypeExpr,
