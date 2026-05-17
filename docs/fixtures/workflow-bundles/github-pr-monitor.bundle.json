@@ -1,5 +1,31 @@
 {
-  "schema_version": 1,
+  "schema_version": 2,
+  "entrypoint": "workflows/github-pr-monitor.harn",
+  "transitive_modules": [
+    {
+      "path": "workflows/github-pr-monitor.harn",
+      "source_hash_blake3": "blake3:1111111111111111111111111111111111111111111111111111111111111111",
+      "harnbc_hash_blake3": "blake3:2222222222222222222222222222222222222222222222222222222222222222"
+    }
+  ],
+  "stdlib_version": "0.8.24",
+  "harn_version": "0.8.24",
+  "provider_catalog_hash": "blake3:3333333333333333333333333333333333333333333333333333333333333333",
+  "tool_manifest": [],
+  "sbom": {
+    "format": "spdx-lite",
+    "version": "2.3",
+    "packages": [
+      {
+        "name": "harn-stdlib",
+        "version": "0.8.24",
+        "package_hash_blake3": "blake3:4444444444444444444444444444444444444444444444444444444444444444"
+      }
+    ],
+    "relationships": []
+  },
+  "signature": null,
+  "parent_trust_record_id": null,
   "id": "github-pr-monitor",
   "name": "GitHub PR monitor",
   "version": "1.0.0",

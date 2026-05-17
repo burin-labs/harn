@@ -5,7 +5,9 @@ automations. It is designed to run on a trusted laptop under Burin/Harn and to
 remain importable into Harn Cloud later without changing the workflow's durable
 identity, graph, policy, or replay metadata.
 
-The canonical on-disk format is JSON. The current schema version is `1`.
+The canonical package format is `.harnpack`: a deterministic `tar.zst` archive
+with `harnpack.json` at the archive root. The manifest can also be read as
+plain JSON during authoring. The current schema version is `2`.
 
 For an end-to-end walkthrough that authors a bundle, validates it,
 previews the graph, and runs a deterministic local receipt — all
@@ -25,7 +27,15 @@ Top-level bundle fields:
 
 | Field | Purpose |
 |---|---|
-| `schema_version` | Bundle schema version. Must be `1`. |
+| `schema_version` | Bundle schema version. Must be `2`. |
+| `entrypoint` | Relative path to the entry Harn module inside the package. |
+| `transitive_modules` | Sorted module manifest entries with source and bytecode BLAKE3 hashes. |
+| `stdlib_version` / `harn_version` | Runtime and standard library versions used to build the package. |
+| `provider_catalog_hash` | BLAKE3 hash of the provider catalog used at build time. |
+| `tool_manifest` | Tool names, providers, optional annotations, and schema hashes captured for review. |
+| `sbom` | SBOM document for package dependencies. |
+| `signature` | Optional Ed25519 signature slot; signing is filled by the signing workflow. |
+| `parent_trust_record_id` | Optional link into a parent OpenTrustGraph chain. |
 | `id` / `version` | Stable bundle identity for hosts and importers. |
 | `triggers` | Declarations for GitHub, cron, delay, manual, webhook, or MCP wakeups. |
 | `workflow` | A normalized Harn `WorkflowGraph` with stable node ids. |
@@ -46,11 +56,16 @@ Trigger kinds:
 | `webhook` | `webhook_path`. |
 | `mcp` | `mcp_tool`. |
 
-`harn workflow validate` checks schema version, stable workflow/node ids,
-workflow graph validity, trigger references, prompt capsule references, policy
-values, connector identity, and environment worktree policy. The validation
-report includes a stable `graph_digest` over canonical graph JSON so receipts
-and replay runs can pin the exact workflow graph.
+`harn workflow validate` checks schema version, manifest metadata, relative
+package paths, BLAKE3 hash syntax, stable workflow/node ids, workflow graph
+validity, trigger references, prompt capsule references, policy values,
+connector identity, and environment worktree policy. The validation report
+includes a stable `graph_digest` over canonical graph JSON so receipts and
+replay runs can pin the exact workflow graph.
+
+Bundle identity for `.harnpack` archives is BLAKE3 over the canonical manifest
+bytes plus the sorted content hashes. Re-packing the same manifest and content
+produces the same bundle hash.
 
 ## Preview
 

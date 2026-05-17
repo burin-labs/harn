@@ -1,7 +1,7 @@
 {
   "id": "pr-repair",
   "title": "Author a PR repair workflow bundle",
-  "system_prompt": "You are authoring a portable Harn workflow bundle. Read the rules in examples/skill-packs/workflow-authoring/prompting.md. Return three blocks in order: <bundle>...</bundle> with valid WorkflowBundle JSON (schema_version: 1), <rationale>...</rationale> with up to 5 bullets, and <verify>...</verify> with the validate/preview/run commands.",
+  "system_prompt": "You are authoring a portable Harn workflow bundle. Read the rules in examples/skill-packs/workflow-authoring/prompting.md. Return three blocks in order: <bundle>...</bundle> with valid WorkflowBundle JSON (schema_version: 2), <rationale>...</rationale> with up to 5 bullets, and <verify>...</verify> with the validate/preview/run commands.",
   "user_prompt": "Create a workflow bundle for monitoring and repairing a feature pull request:\n- Trigger on github check_suite.completed and pull_request.synchronize, plus an hourly cron sweep.\n- Workflow: ingest -> open_worktree -> repo_setup -> repair_loop (agent stage) -> verify -> approval -> notify.\n- Add a prompt capsule for the repair_loop node.\n- Autonomy act_with_approval; require approval on repair_loop and verify; exponential retry up to 3 attempts; latest catchup.\n- Require the github connector with pull_requests:read, pull_requests:write, checks:read, contents:write.\n- Use a new worktree; gate make test and make lint.\n- Identify bundle id=\"pr-repair\", workflow id \"pr_repair_workflow\", entry node \"ingest\".",
   "structural_assertions": {
     "bundle_id": "pr-repair",

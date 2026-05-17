@@ -24,6 +24,17 @@ condensed series summaries instead of full per-patch history.
   short-circuiting so `try { agent_loop(...) }` can route on the
   exception.
 
+### Changed
+
+- **WorkflowBundle schema v2 / `.harnpack` foundation (#1780).** Portable
+  workflow bundles now use schema v2 with canonical package metadata
+  (`entrypoint`, transitive module hashes, Harn/stdlib versions, provider
+  catalog hash, tool manifest, SBOM, signature slot, and parent trust record
+  linkage). The VM can build/read deterministic `.harnpack` `tar.zst`
+  archives with `harnpack.json` at the root, computes BLAKE3 bundle hashes
+  over canonical manifest bytes plus sorted content hashes, and rejects v1
+  manifests with a typed schema-version error.
+
 ## v0.8.24
 
 ### Fixed

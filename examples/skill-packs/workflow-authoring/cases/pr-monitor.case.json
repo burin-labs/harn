@@ -1,7 +1,7 @@
 {
   "id": "pr-monitor",
   "title": "Author a PR monitor workflow bundle",
-  "system_prompt": "You are authoring a portable Harn workflow bundle. Read the rules in examples/skill-packs/workflow-authoring/prompting.md. Return three blocks in order: <bundle>...</bundle> with valid WorkflowBundle JSON (schema_version: 1), <rationale>...</rationale> with up to 5 bullets, and <verify>...</verify> with the validate/preview/run commands.",
+  "system_prompt": "You are authoring a portable Harn workflow bundle. Read the rules in examples/skill-packs/workflow-authoring/prompting.md. Return three blocks in order: <bundle>...</bundle> with valid WorkflowBundle JSON (schema_version: 2), <rationale>...</rationale> with up to 5 bullets, and <verify>...</verify> with the validate/preview/run commands.",
   "user_prompt": "Create a workflow bundle for monitoring a GitHub pull request:\n- Trigger on pull_request.opened and pull_request.synchronize.\n- After a 10 minute delay, query deploy logs and summarize failures.\n- Notify the requester at the end.\n- Use act_with_approval autonomy and exponential retry.\n- Require the github connector with pull_requests:read and checks:read.\n- Identify the bundle as id=\"pr-monitor\", workflow id \"pr_monitor_workflow\", entry node \"ingest\".",
   "structural_assertions": {
     "bundle_id": "pr-monitor",

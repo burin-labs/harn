@@ -1,5 +1,36 @@
 {
-  "schema_version": 1,
+  "schema_version": 2,
+  "entrypoint": "workflows/pr-repair.harn",
+  "transitive_modules": [
+    {
+      "path": "workflows/pr-repair.harn",
+      "source_hash_blake3": "blake3:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+      "harnbc_hash_blake3": "blake3:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd"
+    }
+  ],
+  "stdlib_version": "0.8.24",
+  "harn_version": "0.8.24",
+  "provider_catalog_hash": "blake3:3333333333333333333333333333333333333333333333333333333333333333",
+  "tool_manifest": [
+    {
+      "name": "exec",
+      "schema_hash_blake3": "blake3:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"
+    }
+  ],
+  "sbom": {
+    "format": "spdx-lite",
+    "version": "2.3",
+    "packages": [
+      {
+        "name": "harn-stdlib",
+        "version": "0.8.24",
+        "package_hash_blake3": "blake3:4444444444444444444444444444444444444444444444444444444444444444"
+      }
+    ],
+    "relationships": []
+  },
+  "signature": null,
+  "parent_trust_record_id": null,
   "id": "pr-repair",
   "name": "PR repair",
   "version": "1.0.0",
