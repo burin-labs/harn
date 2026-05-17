@@ -145,6 +145,7 @@ async fn acp_server_handles_session_flow_and_prompt_updates() {
             assert_eq!(
                 initialize["result"]["agentCapabilities"]["sessionCapabilities"],
                 serde_json::json!({
+                    "close": {},
                     "list": {},
                     "resume": {},
                 })
@@ -487,6 +488,149 @@ async fn acp_profile_json_appends_one_line_per_prompt_turn() {
             assert_eq!(entries[0]["turn"], 1);
             assert_eq!(entries[1]["turn"], 2);
             assert!(entries[0]["rollup"]["by_kind"].is_array());
+
+            drop(request_tx);
+            server.await.expect("ACP channel server task");
+        })
+        .await;
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn acp_session_close_and_stop_alias_free_active_session() {
+    let local = tokio::task::LocalSet::new();
+    local
+        .run_until(async {
+            let (request_tx, request_rx) = mpsc::unbounded_channel();
+            let (response_tx, mut response_rx) = mpsc::unbounded_channel();
+            let server = tokio::task::spawn_local(super::run_acp_channel_server(
+                AcpServerConfig::new(None),
+                request_rx,
+                response_tx,
+            ));
+
+            for (index, method) in ["session/close", "session/stop"].into_iter().enumerate() {
+                let request_base = 10 + (index as i64 * 10);
+                request_tx
+                    .send(serde_json::json!({
+                        "jsonrpc": "2.0",
+                        "id": request_base,
+                        "method": "session/new",
+                        "params": {"cwd": "."},
+                    }))
+                    .expect("send session/new");
+                let created = recv_json(&mut response_rx).await;
+                let session_id = created["result"]["sessionId"]
+                    .as_str()
+                    .expect("session id")
+                    .to_string();
+                assert!(harn_vm::agent_sessions::exists(&session_id));
+
+                request_tx
+                    .send(serde_json::json!({
+                        "jsonrpc": "2.0",
+                        "id": request_base + 1,
+                        "method": method,
+                        "params": {"sessionId": session_id},
+                    }))
+                    .expect("send session close request");
+                let closed = recv_json(&mut response_rx).await;
+                assert_eq!(closed["id"], request_base + 1);
+                assert_eq!(closed["result"], serde_json::json!({}));
+                assert!(
+                    !harn_vm::agent_sessions::exists(&session_id),
+                    "{method} should free VM session state"
+                );
+
+                request_tx
+                    .send(serde_json::json!({
+                        "jsonrpc": "2.0",
+                        "id": request_base + 2,
+                        "method": "session/list",
+                        "params": {},
+                    }))
+                    .expect("send session/list");
+                let listed = recv_json(&mut response_rx).await;
+                let sessions = listed["result"]["sessions"].as_array().unwrap();
+                assert!(
+                    sessions
+                        .iter()
+                        .all(|entry| entry["sessionId"].as_str() != Some(session_id.as_str())),
+                    "{method} should remove the active ACP session"
+                );
+
+                request_tx
+                    .send(serde_json::json!({
+                        "jsonrpc": "2.0",
+                        "id": request_base + 3,
+                        "method": "session/prompt",
+                        "params": {
+                            "sessionId": session_id,
+                            "prompt": [{"type": "text", "text": "println(\"closed\")"}],
+                        },
+                    }))
+                    .expect("send session/prompt");
+                let rejected = recv_json(&mut response_rx).await;
+                assert_eq!(rejected["id"], request_base + 3);
+                assert_eq!(rejected["error"]["code"], -32602);
+            }
+
+            drop(request_tx);
+            server.await.expect("ACP channel server task");
+        })
+        .await;
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn acp_session_close_cancels_pending_host_bridge_call() {
+    let local = tokio::task::LocalSet::new();
+    local
+        .run_until(async {
+            let (request_tx, mut response_rx, server, session_id) =
+                start_acp_channel_session().await;
+
+            request_tx
+                .send(serde_json::json!({
+                    "jsonrpc": "2.0",
+                    "id": 2,
+                    "method": "session/prompt",
+                    "params": {
+                        "sessionId": session_id.clone(),
+                        "prompt": [{"type": "text", "text": "println(\"after host capabilities\")"}],
+                    },
+                }))
+                .expect("send session/prompt");
+
+            let host_capabilities = recv_json(&mut response_rx).await;
+            assert_eq!(host_capabilities["method"], "host/capabilities");
+            request_tx
+                .send(serde_json::json!({
+                    "jsonrpc": "2.0",
+                    "id": 3,
+                    "method": "session/close",
+                    "params": {"sessionId": session_id.clone()},
+                }))
+                .expect("send session/close");
+
+            let mut saw_cancelled_response = false;
+            let mut saw_close_response = false;
+            for _ in 0..8 {
+                let message = recv_json(&mut response_rx).await;
+                if message["id"] == 2 {
+                    assert_eq!(message["result"]["stopReason"], "cancelled");
+                    saw_cancelled_response = true;
+                } else if message["id"] == 3 {
+                    assert_eq!(message["result"], serde_json::json!({}));
+                    assert!(!harn_vm::agent_sessions::exists(&session_id));
+                    saw_close_response = true;
+                    break;
+                }
+            }
+
+            assert!(
+                saw_cancelled_response,
+                "prompt should observe close as cancellation"
+            );
+            assert!(saw_close_response, "session/close should free the session");
 
             drop(request_tx);
             server.await.expect("ACP channel server task");
@@ -928,6 +1072,122 @@ async fn acp_session_cancel_kills_active_terminal() {
             assert!(
                 saw_cancelled_response,
                 "prompt should finish with stopReason=cancelled"
+            );
+
+            drop(request_tx);
+            server.await.expect("ACP channel server task");
+        })
+        .await;
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn acp_session_close_cancels_active_terminal_before_freeing_session() {
+    let local = tokio::task::LocalSet::new();
+    local
+        .run_until(async {
+            let (request_tx, mut response_rx, server, session_id) =
+                start_acp_channel_session().await;
+
+            request_tx
+                .send(serde_json::json!({
+                    "jsonrpc": "2.0",
+                    "id": 2,
+                    "method": "session/prompt",
+                    "params": {
+                        "sessionId": session_id.clone(),
+                        "prompt": [{"type": "text", "text": "run_command(\"sleep 999\")"}],
+                    },
+                }))
+                .expect("send session/prompt");
+
+            let terminal_id = "term-close-demo";
+            let mut saw_wait = false;
+            let mut saw_kill = false;
+            let mut saw_release = false;
+            let mut saw_cancelled_response = false;
+            let mut saw_close_response = false;
+            for _ in 0..32 {
+                let message = recv_json(&mut response_rx).await;
+                match message.get("method").and_then(|value| value.as_str()) {
+                    Some("host/capabilities") => {
+                        request_tx
+                            .send(serde_json::json!({
+                                "jsonrpc": "2.0",
+                                "id": message["id"].clone(),
+                                "result": {},
+                            }))
+                            .expect("send host capabilities response");
+                    }
+                    Some("terminal/create") => {
+                        request_tx
+                            .send(serde_json::json!({
+                                "jsonrpc": "2.0",
+                                "id": message["id"].clone(),
+                                "result": {"terminalId": terminal_id},
+                            }))
+                            .expect("send terminal/create response");
+                    }
+                    Some("terminal/wait_for_exit") => {
+                        assert_eq!(message["params"]["terminalId"], terminal_id);
+                        saw_wait = true;
+                        request_tx
+                            .send(serde_json::json!({
+                                "jsonrpc": "2.0",
+                                "id": 3,
+                                "method": "session/close",
+                                "params": {"sessionId": session_id.clone()},
+                            }))
+                            .expect("send session/close");
+                    }
+                    Some("terminal/kill") => {
+                        assert_eq!(message["params"]["terminalId"], terminal_id);
+                        saw_kill = true;
+                        request_tx
+                            .send(serde_json::json!({
+                                "jsonrpc": "2.0",
+                                "id": message["id"].clone(),
+                                "result": {},
+                            }))
+                            .expect("send terminal/kill response");
+                    }
+                    Some("terminal/release") => {
+                        assert_eq!(message["params"]["terminalId"], terminal_id);
+                        saw_release = true;
+                        request_tx
+                            .send(serde_json::json!({
+                                "jsonrpc": "2.0",
+                                "id": message["id"].clone(),
+                                "result": {},
+                            }))
+                            .expect("send terminal/release response");
+                    }
+                    _ if message["id"] == 2 => {
+                        assert_eq!(message["result"]["stopReason"], "cancelled");
+                        saw_cancelled_response = true;
+                    }
+                    _ if message["id"] == 3 => {
+                        assert_eq!(message["result"], serde_json::json!({}));
+                        assert!(!harn_vm::agent_sessions::exists(&session_id));
+                        saw_close_response = true;
+                        break;
+                    }
+                    _ => {}
+                }
+            }
+
+            assert!(saw_wait, "prompt should block on terminal/wait_for_exit");
+            assert!(saw_kill, "session/close should issue terminal/kill");
+            assert!(
+                saw_release,
+                "closed terminal execution should still release the terminal"
+            );
+            assert!(
+                saw_cancelled_response,
+                "prompt should finish with stopReason=cancelled"
+            );
+            assert!(
+                saw_close_response,
+                "session/close should respond after cleanup"
             );
 
             drop(request_tx);

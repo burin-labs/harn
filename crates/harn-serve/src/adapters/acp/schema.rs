@@ -176,6 +176,7 @@ pub(super) fn acp_agent_capabilities() -> serde_json::Value {
             "sse": true,
         },
         "sessionCapabilities": {
+            "close": {},
             "list": {},
             "resume": {},
         },

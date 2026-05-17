@@ -489,6 +489,9 @@ The ACP server supports these JSON-RPC methods:
 | `session/list` | List active sessions known to the ACP adapter |
 | `session/prompt` | Send a prompt to the agent for execution |
 | `session/cancel` | Cancel the currently running prompt |
+| `session/truncate` | Truncate the session transcript to a requested prefix |
+| `session/close` | Close a session and cancel any active prompt |
+| `session/stop` | Deprecated alias for `session/close` |
 | `session/set_mode` | Switch the active session mode |
 | `session/set_config_option` | Switch a preferred ACP session config option (`mode` or `model`) |
 | `workflow/signal` | Enqueue a workflow signal message in the current session workspace |
@@ -506,9 +509,10 @@ use.
 
 During `initialize`, Harn keeps the public `agentCapabilities` object aligned
 with upstream ACP: `loadSession`, `promptCapabilities`, `mcpCapabilities`, and
-the canonical `sessionCapabilities.list` flag are advertised in their upstream
-locations. Harn-only methods such as `session/fork` remain documented
-extensions instead of being inserted into upstream `sessionCapabilities`.
+the canonical `sessionCapabilities.close` and `sessionCapabilities.list` flags
+are advertised in their upstream locations. Harn-only methods such as
+`session/fork` remain documented extensions instead of being inserted into
+upstream `sessionCapabilities`.
 
 ### Session Forking
 

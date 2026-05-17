@@ -96,6 +96,12 @@ condensed series summaries instead of full per-patch history.
   checks `pending_count` against it: any push that completed before
   the snapshot is visible via the entry count, and any push that
   completes after the snapshot triggers the `Notified`.
+- **ACP now exposes upstream `session/close` (#1725).** The stdio and
+  WebSocket ACP adapters advertise `sessionCapabilities.close`, route
+  `session/close` through session cleanup and active-prompt cancellation,
+  and keep `session/stop` as a one-release deprecated alias with a warning.
+  Generated TypeScript and Swift protocol bindings expose `session/close`
+  as the canonical method and mark `session/stop` deprecated.
 
 ## v0.8.22
 

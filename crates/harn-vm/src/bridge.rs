@@ -374,11 +374,27 @@ impl HostBridge {
         writer: HostBridgeWriter,
         start_id: u64,
     ) -> Self {
+        Self::from_parts_with_writer_and_cancel_notify(
+            pending,
+            cancelled,
+            Arc::new(Notify::new()),
+            writer,
+            start_id,
+        )
+    }
+
+    pub fn from_parts_with_writer_and_cancel_notify(
+        pending: Arc<Mutex<HashMap<u64, oneshot::Sender<serde_json::Value>>>>,
+        cancelled: Arc<AtomicBool>,
+        cancel_notify: Arc<Notify>,
+        writer: HostBridgeWriter,
+        start_id: u64,
+    ) -> Self {
         Self {
             next_id: AtomicU64::new(start_id),
             pending,
             cancelled,
-            cancel_notify: Arc::new(Notify::new()),
+            cancel_notify,
             writer,
             session_id: std::sync::Mutex::new(String::new()),
             script_name: std::sync::Mutex::new(String::new()),

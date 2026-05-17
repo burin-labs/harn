@@ -78,6 +78,8 @@ public enum HarnACPAgentMethod: String, Codable, Sendable, CaseIterable {
     case sessionResume = "session/resume"
     case sessionPrompt = "session/prompt"
     case sessionTruncate = "session/truncate"
+    case sessionClose = "session/close"
+    @available(*, deprecated, message: "Use session/close; session/stop will be removed after one release.")
     case sessionStop = "session/stop"
 }
 

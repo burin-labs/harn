@@ -162,6 +162,7 @@ fn acp_session_fork_branches_runtime_state_and_dispatches_independently() {
     assert_eq!(
         init["result"]["agentCapabilities"]["sessionCapabilities"],
         json!({
+            "close": {},
             "list": {},
             "resume": {},
         })
@@ -677,6 +678,78 @@ default_provider = "openai"
     assert_eq!(response["result"]["stopReason"], "end_turn");
     let summary = latest_prompt_summary(&notifications, &session_id);
     assert_eq!(summary["messages"][0]["content"], "packaged");
+
+    drop(stdin);
+    let status = child.wait().unwrap();
+    assert!(status.success(), "status={status}");
+}
+
+#[ignore = "binary surface — moves to slow E2E/smoke job (issue #1069)"]
+#[test]
+fn serve_acp_stdio_closes_sessions_with_close_and_stop_spellings() {
+    let _guard = lock_acp_cli_tests();
+    let temp = TempDir::new().unwrap();
+    write_fixture(&temp);
+
+    let mut child = harn_e2e_command()
+        .current_dir(temp.path())
+        .arg("serve")
+        .arg("acp")
+        .arg("acp_fixture.harn")
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::null())
+        .spawn()
+        .unwrap();
+
+    let mut stdin = child.stdin.take().unwrap();
+    let mut stdout = BufReader::new(child.stdout.take().unwrap());
+
+    for (index, method) in ["session/close", "session/stop"].into_iter().enumerate() {
+        let request_base = 10 + (index as i64 * 10);
+        let (_, created) = send_request(
+            &mut stdin,
+            &mut stdout,
+            json!({
+                "jsonrpc": "2.0",
+                "id": request_base,
+                "method": "session/new",
+                "params": {
+                    "cwd": temp.path(),
+                }
+            }),
+        );
+        let session_id = created["result"]["sessionId"].as_str().unwrap().to_string();
+
+        let (_, closed) = send_request(
+            &mut stdin,
+            &mut stdout,
+            json!({
+                "jsonrpc": "2.0",
+                "id": request_base + 1,
+                "method": method,
+                "params": {
+                    "sessionId": session_id.clone(),
+                }
+            }),
+        );
+        assert_eq!(closed["result"], json!({}));
+
+        let (_, listed) = send_request(
+            &mut stdin,
+            &mut stdout,
+            json!({
+                "jsonrpc": "2.0",
+                "id": request_base + 2,
+                "method": "session/list",
+                "params": {}
+            }),
+        );
+        let sessions = listed["result"]["sessions"].as_array().unwrap();
+        assert!(sessions
+            .iter()
+            .all(|entry| entry["sessionId"].as_str() != Some(session_id.as_str())));
+    }
 
     drop(stdin);
     let status = child.wait().unwrap();
