@@ -218,6 +218,11 @@ pub fn values_equal(a: &VmValue, b: &VmValue) -> bool {
         (VmValue::Pair(a), VmValue::Pair(b)) => {
             values_equal(&a.0, &b.0) && values_equal(&a.1, &b.1)
         }
+        // Harness handles carry runtime capability state, not values. Two
+        // handles that refer to the same backing capability are still
+        // observed-distinct because the script never compares them. Returning
+        // `false` matches `Channel` / `Generator` / `Stream` precedent.
+        (VmValue::Harness(_), VmValue::Harness(_)) => false,
         _ => false,
     }
 }

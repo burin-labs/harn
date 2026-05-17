@@ -223,6 +223,16 @@ impl Compiler {
                     self.chunk.emit(Op::Pop, self.line);
                 }
             }
+            // E4.1 entrypoint convention: a top-level `fn main(harness: Harness)`
+            // is invoked automatically with the runtime-provided `harness`
+            // global. The typechecker rejects every other signature with
+            // HARN-NAM-101 so we don't need to re-validate the shape here.
+            if Self::has_top_level_fn_main(program) {
+                let harness_name = self.chunk.add_constant(Constant::String("harness".into()));
+                self.chunk.emit_u16(Op::GetVar, harness_name, self.line);
+                self.emit_named_call("main", 1);
+                pipeline_emits_value = true;
+            }
         }
 
         for fb in self.all_pending_finallys() {
@@ -233,6 +243,15 @@ impl Compiler {
         }
         self.chunk.emit(Op::Return, self.line);
         Ok(self.chunk)
+    }
+
+    /// True when the program declares a top-level `fn main(...)`. Drives the
+    /// auto-call wired by `compile()` for the new `main(harness: Harness)`
+    /// entrypoint convention.
+    fn has_top_level_fn_main(program: &[SNode]) -> bool {
+        program
+            .iter()
+            .any(|sn| matches!(peel_node(sn), Node::FnDecl { name, .. } if name == "main"))
     }
 
     /// Compile a specific named pipeline (for test runners).

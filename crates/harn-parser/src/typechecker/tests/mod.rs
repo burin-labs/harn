@@ -13,6 +13,7 @@ use super::{DiagnosticSeverity, TypeChecker, TypeDiagnostic};
 mod exhaustiveness;
 mod imports;
 mod interfaces;
+mod main_signature;
 mod narrowing;
 mod reachability;
 mod repair;

@@ -1789,6 +1789,12 @@ impl<'a> Linter<'a> {
             if decl.is_pub || decl.is_method || decl.name.starts_with('_') {
                 continue;
             }
+            // `fn main` is the auto-invoked entrypoint (see E4.1): the
+            // compiler emits a synthetic call to it, so static call-graph
+            // analysis can't see any references. Treat it like `pub`.
+            if decl.name == "main" {
+                continue;
+            }
             if self.externally_imported_names.contains(&decl.name) {
                 continue;
             }

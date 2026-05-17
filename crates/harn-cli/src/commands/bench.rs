@@ -141,6 +141,7 @@ pub(crate) async fn run_bench(path: &str, iterations: usize, profile: RunProfile
         if !source_parent.as_os_str().is_empty() {
             vm.set_source_dir(source_parent);
         }
+        vm.set_harness(harn_vm::Harness::real());
 
         if let Some(manifest) = extensions.root_manifest.as_ref() {
             if !manifest.mcp.is_empty() {

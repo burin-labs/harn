@@ -197,6 +197,17 @@ impl super::super::Vm {
                     )));
                 }
             },
+            VmValue::Harness(handle) => match handle.sub_handle(name) {
+                Some(sub) => VmValue::Harness(sub),
+                None if optional => VmValue::Nil,
+                None => {
+                    return Err(VmError::TypeError(format!(
+                        "cannot access property `{name}` on {} — Harness exposes `stdio`, \
+                         `clock`, `fs`, `env`, `random`, `net`",
+                        handle.type_name(),
+                    )));
+                }
+            },
             VmValue::Nil => {
                 return Err(VmError::TypeError(format!(
                     "cannot access property `{name}` on nil — use `?.{name}` for optional access, or narrow with a `!= nil` guard before reading fields"

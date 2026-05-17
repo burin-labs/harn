@@ -1,6 +1,7 @@
 mod dict;
 mod dispatch;
 mod generator;
+mod harness;
 mod iter;
 mod list;
 mod number;

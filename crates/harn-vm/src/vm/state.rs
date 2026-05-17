@@ -755,6 +755,15 @@ impl Vm {
         Rc::make_mut(&mut self.globals).insert(name.to_string(), value);
     }
 
+    /// Install the script's `Harness` capability handle as the `harness`
+    /// global so the auto-call emitted by `Compiler::compile()` (for
+    /// `fn main(harness: Harness)` entrypoints) can read it. Hosts that
+    /// drive the VM directly (CLI, MCP server, composition runtime) call
+    /// this once before `execute()`.
+    pub fn set_harness(&mut self, harness: crate::harness::Harness) {
+        self.set_global("harness", harness.into_vm_value());
+    }
+
     /// Get the captured output.
     pub fn output(&self) -> &str {
         &self.output

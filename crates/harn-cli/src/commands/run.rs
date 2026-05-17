@@ -873,6 +873,11 @@ async fn execute_run_inner(inputs: ExecuteRunInputs<'_>) -> RunOutcome {
         harn_vm::VmValue::List(std::rc::Rc::new(argv_values)),
     );
 
+    // Install the script's `Harness` capability handle so the auto-call
+    // emitted by `Compiler::compile()` for `fn main(harness: Harness)`
+    // entrypoints can read it.
+    vm.set_harness(harn_vm::Harness::real());
+
     let extensions = package::load_runtime_extensions(Path::new(path));
     package::install_runtime_extensions(&extensions);
     if let Some(manifest) = extensions.root_manifest.as_ref() {

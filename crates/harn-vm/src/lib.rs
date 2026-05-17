@@ -25,6 +25,7 @@ pub mod egress;
 pub mod event_log;
 pub mod events;
 pub mod flow;
+pub mod harness;
 mod http;
 pub mod jsonrpc;
 pub mod llm;
@@ -129,6 +130,10 @@ pub use corrections::{
     correction_record_from_json, policy_with_corrections, query_correction_records,
     CorrectionQueryFilters, CorrectionRecord, CorrectionScope, CORRECTIONS_TOPIC,
     CORRECTION_EVENT_KIND, CORRECTION_SCHEMA_V0,
+};
+pub use harness::{
+    Harness, HarnessClock, HarnessEnv, HarnessFs, HarnessKind, HarnessNet, HarnessRandom,
+    HarnessStdio, VmHarness,
 };
 pub use http::{register_http_builtins, reset_http_state};
 pub use llm::register_llm_builtins;

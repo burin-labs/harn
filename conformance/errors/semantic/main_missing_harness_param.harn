@@ -1,0 +1,7 @@
+// HARN-NAM-101: `fn main` is the new entrypoint convention; its only
+// supported signature is `main(harness: Harness)`. A zero-arg main
+// fails the typechecker so the runtime never gets to threading a
+// `Harness` it can't bind.
+fn main() {
+  print("oops")
+}

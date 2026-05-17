@@ -272,6 +272,7 @@ async fn configured_vm(
         }
     }
     vm.set_global("argv", harn_vm::VmValue::List(Rc::new(Vec::new())));
+    vm.set_harness(harn_vm::Harness::real());
 
     let loaded = load_skills(&SkillLoaderInputs {
         cli_dirs: Vec::new(),
