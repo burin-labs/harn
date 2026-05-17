@@ -39,8 +39,12 @@ THREAD_SLEEP_ALLOWLIST=(
 #   - `orchestrator_http/support.rs`: `wait_for_path` polls a real
 #     filesystem marker written by handler-side code where no
 #     event signal is available; bounded with `tokio::time::timeout`.
+#   - `agent_sessions_tests.rs`: pre-existing real-time delivery test
+#     for the event-log sink (extracted from agent_sessions.rs's inline
+#     test mod, which was previously below this lint's file filter).
 TOKIO_SLEEP_ALLOWLIST=(
   "crates/harn-vm/src/orchestration/tests.rs"
+  "crates/harn-vm/src/agent_sessions_tests.rs"
   "crates/harn-cli/tests/orchestrator_http/support.rs"
 )
 
@@ -51,12 +55,10 @@ INSTANT_NOW_DEADLINE_ALLOWLIST=(
 
 # SystemTime::now() in test files — use injected clock / MockClock instead.
 # Remaining entries: legitimate fixture-setup uses against real OS time
-# (httpdate Retry-After parsing, real-mtime touch fixtures, tempdir
-# nano-suffix uniqueness).
+# (httpdate Retry-After parsing, real-mtime touch fixtures).
 SYSTEM_TIME_ALLOWLIST=(
   "crates/harn-vm/src/http/tests.rs"
   "crates/harn-hostlib/tests/scanner_e2e.rs"
-  "crates/harn-cli/src/commands/check/tests.rs"
 )
 
 # recv_timeout with an explicit sub-second Duration literal.
