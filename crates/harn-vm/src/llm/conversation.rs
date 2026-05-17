@@ -7,8 +7,8 @@ use crate::vm::Vm;
 use super::helpers::{
     extract_llm_options, is_transcript_value, new_transcript_with, new_transcript_with_events,
     normalize_transcript_asset, transcript_asset_list, transcript_event, transcript_id,
-    transcript_message_list, transcript_summary_text, vm_add_role_message, vm_message_value,
-    vm_value_to_json,
+    transcript_message_list, transcript_reminder_event_from_value, transcript_summary_text,
+    vm_add_role_message, vm_message_value, vm_value_to_json,
 };
 
 /// Extract and validate a transcript dict from the first argument.
@@ -103,6 +103,18 @@ pub(crate) fn register_conversation_builtins(vm: &mut Vm) {
             .get("events")
             .cloned()
             .unwrap_or_else(|| VmValue::List(Rc::new(Vec::new()))))
+    });
+
+    // Build a normalized `system_reminder` transcript event from a dict
+    // describing the reminder lifecycle (body/tags/dedupe_key/ttl_turns/
+    // preserve_on_compact/propagate/role_hint/source/fired_at_turn).
+    // Defaults are applied per spec when fields are omitted. Returns the
+    // canonical event envelope so callers can pass the result straight
+    // to `agent_session_append_event` or splice it into an
+    // event list manually.
+    vm.register_builtin("transcript_reminder_event", |args, _out| {
+        let value = args.first().cloned().unwrap_or(VmValue::Nil);
+        Ok(transcript_reminder_event_from_value(&value))
     });
 
     vm.register_builtin("transcript_summary", |args, _out| {

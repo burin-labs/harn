@@ -819,6 +819,11 @@ pub(crate) const SIGNATURES: &[BuiltinSignature] = &[
         TY_STRING,
     ),
     BuiltinSignature::simple(
+        "transcript_reminder_event",
+        &[Param::new("reminder", TY_DICT)],
+        TY_DICT,
+    ),
+    BuiltinSignature::simple(
         "transcript_reset",
         &[Param::optional("opts", TY_DICT)],
         TRANSCRIPT,

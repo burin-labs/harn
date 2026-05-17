@@ -1,0 +1,46 @@
+/**
+ * R-01: `system_reminder` events expose the full lifecycle envelope
+ * (id/tags/dedupe_key/ttl_turns/preserve_on_compact/propagate/role_hint
+ * /source/body/fired_at_turn) on a normalized transcript event.
+ */
+pipeline main() {
+  let evt = transcript_reminder_event(
+    {
+      body: "Approaching context window cap.",
+      tags: ["token_pressure", "memory"],
+      dedupe_key: "token_pressure",
+      ttl_turns: 3,
+      preserve_on_compact: true,
+      propagate: "session",
+      role_hint: "developer",
+      source: "stdlib_provider",
+      fired_at_turn: 4,
+    },
+  )
+  // Canonical envelope mirrors every other transcript event so existing
+  // consumers keep working without learning a new shape.
+  println(evt?.kind == "system_reminder")
+  println(evt?.role == "developer")
+  println(evt?.visibility == "public")
+  println(evt?.text == "Approaching context window cap.")
+  println(len(evt?.blocks) == 1)
+  println(evt?.blocks[0]?.type == "text")
+  println(evt?.blocks[0]?.text == "Approaching context window cap.")
+  // Typed `reminder` lifecycle slot carries the full envelope.
+  println(evt?.reminder?.body == "Approaching context window cap.")
+  println(evt?.reminder?.tags[0] == "token_pressure")
+  println(evt?.reminder?.tags[1] == "memory")
+  println(evt?.reminder?.dedupe_key == "token_pressure")
+  println(evt?.reminder?.ttl_turns == 3)
+  println(evt?.reminder?.preserve_on_compact)
+  println(evt?.reminder?.propagate == "session")
+  println(evt?.reminder?.role_hint == "developer")
+  println(evt?.reminder?.source == "stdlib_provider")
+  println(evt?.reminder?.fired_at_turn == 4)
+  println(len(evt?.reminder?.id) > 0)
+  // Metadata mirrors the reminder envelope so hosts that already key
+  // off `event.metadata` see reminder context without learning a
+  // second field.
+  println(evt?.metadata?.body == "Approaching context window cap.")
+  println(evt?.metadata?.source == "stdlib_provider")
+}

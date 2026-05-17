@@ -30,7 +30,18 @@ pub(crate) use transcript::{
     is_transcript_value, new_transcript_with, new_transcript_with_events,
     normalize_transcript_asset, transcript_asset_list, transcript_event,
     transcript_event_from_message, transcript_events_from_messages, transcript_id,
-    transcript_message_list, transcript_summary_text, transcript_to_vm_with_event_prefix,
+    transcript_message_list, transcript_reminder_event_from_value, transcript_summary_text,
+    transcript_to_vm_with_event_prefix,
+};
+// Re-exports reserved for the R-02+ wave (stdlib reminder providers,
+// bridge `agent/inject_reminder`, hook `Reminder` return variants).
+// They live here so consumers don't have to reach into the
+// `transcript::` submodule; mark as unused-allowed until those callers
+// land.
+#[allow(unused_imports)]
+pub(crate) use transcript::{
+    transcript_reminder_event, ReminderPropagate, ReminderRoleHint, ReminderSource, SystemReminder,
+    SYSTEM_REMINDER_EVENT_KIND,
 };
 
 pub(super) const TRANSCRIPT_TYPE: &str = "transcript";
