@@ -80,6 +80,79 @@ fn __tool_mw_list(value) -> list {
   return []
 }
 
+fn __tool_mw_string_list(value) -> list {
+  var out = []
+  for item in __tool_mw_list(value) {
+    if item != nil {
+      out = out.push(to_string(item))
+    }
+  }
+  return out
+}
+
+fn __tool_mw_optional_text(value) {
+  if value == nil {
+    return nil
+  }
+  let text = to_string(value)
+  if text == "" {
+    return nil
+  }
+  return text
+}
+
+fn __tool_mw_nonnegative_int(value) -> int {
+  let parsed = to_int(value) ?? 0
+  if parsed < 0 {
+    return 0
+  }
+  return parsed
+}
+
+fn __tool_mw_drop_keys(value, keys) {
+  if type_of(value) == "dict" {
+    var out = {}
+    for key in value.keys() {
+      if contains(keys, key) {
+        continue
+      }
+      out = out + {[key]: __tool_mw_drop_keys(value[key], keys)}
+    }
+    return out
+  }
+  if type_of(value) == "list" {
+    var out = []
+    for item in value {
+      out = out.push(__tool_mw_drop_keys(item, keys))
+    }
+    return out
+  }
+  return value
+}
+
+fn __tool_mw_canonical_json(value) -> string {
+  if type_of(value) == "dict" {
+    let keys = value.keys().sort()
+    var parts = []
+    for key in keys {
+      parts = parts.push(json_stringify(to_string(key)) + ":" + __tool_mw_canonical_json(value[key]))
+    }
+    return "{" + join(parts, ",") + "}"
+  }
+  if type_of(value) == "list" {
+    var parts = []
+    for item in value {
+      parts = parts.push(__tool_mw_canonical_json(item))
+    }
+    return "[" + join(parts, ",") + "]"
+  }
+  return json_stringify(value)
+}
+
+fn __tool_mw_sha256_value(value) -> string {
+  return sha256(__tool_mw_canonical_json(value))
+}
+
 fn __tool_mw_short_circuit(envelope, status, fields) {
   let base = {
     ok: false,
@@ -399,44 +472,170 @@ pub fn with_required_reason(opts = nil) {
 }
 
 /**
- * with_audit_log(sink) -> caller
+ * local_receipt_sink(session_id) -> sink_fn
  *
- * Pushes one record per tool call into `sink(record)` after the call
- * completes. `record` shape:
- *
- *   {
- *     tool_name, tool_call_id, ok, status, executor,
- *     duration_ms, args, result, error,
- *     audit,                           // middleware-attached metadata
- *     turn: {iteration, session_id},
- *   }
- *
- * The sink runs after `next` returns; exceptions inside the sink are
- * swallowed so audit failures don't break the agent loop.
+ * Returns a receipt sink that appends JSONL to `.harn/receipts/<session>.jsonl`.
+ * The sink writes one record per invocation and does not buffer.
  */
-pub fn with_audit_log(sink) {
-  if !__tool_mw_is_callable(sink) {
-    throw "with_audit_log: sink must be callable; got " + type_of(sink)
+pub fn local_receipt_sink(session_id) {
+  let fallback = __tool_mw_optional_text(session_id) ?? "session"
+  return { receipt ->
+    let raw_session = __tool_mw_optional_text(receipt?.session_id) ?? fallback
+    let filename = raw_session.replace("/", "_").replace("\\", "_")
+    let dir = path_join(".harn", "receipts")
+    mkdir(dir)
+    let path = path_join(dir, filename + ".jsonl")
+    append_file(path, json_stringify(receipt) + "\n")
+    return path
   }
+}
+
+fn __tool_mw_receipt_status(result) -> string {
+  let status = to_string(result?.status ?? "")
+  let category = to_string(result?.error_category ?? "")
+  if result?.ok ?? result?.success ?? false {
+    return "ok"
+  }
+  if status == "ok" || status == "success" || status == "completed" {
+    return "ok"
+  }
+  if status == "schema_violation" || category == "schema_violation" || category == "schema_validation" {
+    return "schema_violation"
+  }
+  if status == "consent_denied" || category == "consent_denied" {
+    return "consent_denied"
+  }
+  if status == "timeout" || category == "timeout" {
+    return "timeout"
+  }
+  return "error"
+}
+
+fn __tool_mw_receipt_executor(value) {
+  let raw = __tool_mw_optional_text(value)
+  if raw == nil {
+    return nil
+  }
+  if raw == "harn" || raw == "harn_builtin" {
+    return "harn"
+  }
+  if raw == "host_bridge" || raw == "mcp_server" || raw == "provider_native" {
+    return raw
+  }
+  if raw.starts_with("mcp") {
+    return "mcp_server"
+  }
+  return nil
+}
+
+fn __tool_mw_receipt_kind(call, audit) {
+  let audit_kind = __tool_mw_optional_text(audit?.kind)
+  if audit_kind != nil {
+    return audit_kind
+  }
+  return __tool_mw_optional_text(call?.annotations?.kind)
+}
+
+fn __tool_mw_receipt_result_hash(result) {
+  if result?.result == nil {
+    return nil
+  }
+  return __tool_mw_sha256_value(result.result)
+}
+
+fn __tool_mw_tool_call_receipt(call, result, duration_ms, redact_keys) {
+  let turn = __tool_mw_dict(call?.turn)
+  let audit = __tool_mw_dict(result?.audit)
+  let iteration = __tool_mw_nonnegative_int(turn?.iteration)
+  let turn_index = if iteration > 0 {
+    iteration - 1
+  } else {
+    nil
+  }
+  let args_for_hash = __tool_mw_drop_keys(call?.tool_args ?? {}, redact_keys)
+  return {
+    schema_version: 1,
+    session_id: to_string(turn?.session_id ?? ""),
+    run_id: __tool_mw_optional_text(turn?.run_id),
+    tool_call_id: to_string(call?.call_id ?? ""),
+    tool_name: to_string(call?.tool_name ?? ""),
+    iteration: iteration,
+    turn_index: turn_index,
+    reason: __tool_mw_optional_text(audit?.summary),
+    kind: __tool_mw_receipt_kind(call, audit),
+    executor: __tool_mw_receipt_executor(result?.executor ?? call?.declared_executor),
+    status: __tool_mw_receipt_status(result),
+    error_category: __tool_mw_optional_text(result?.error_category),
+    duration_ms: __tool_mw_nonnegative_int(duration_ms),
+    args_hash: __tool_mw_sha256_value(args_for_hash),
+    result_hash: __tool_mw_receipt_result_hash(result),
+    audit: audit,
+    emitted_at: __tool_mw_now_iso(),
+    model: __tool_mw_optional_text(turn?.model),
+    provider: __tool_mw_optional_text(turn?.provider),
+  }
+}
+
+fn __tool_mw_audit_log_config(sink) {
+  let raw_cfg = if type_of(sink) == "dict" {
+    sink
+  } else {
+    {sink: sink}
+  }
+  let redact_keys = __tool_mw_string_list(raw_cfg?.redact)
+  let raw_sink = raw_cfg?.sink
+  if __tool_mw_is_callable(raw_sink) {
+    return {mode: "closure", sink_fn: raw_sink, redact_keys: redact_keys}
+  }
+  if type_of(raw_sink) != "string" {
+    throw "with_audit_log: sink must be callable or one of local/cloud/both; got " + type_of(raw_sink)
+  }
+  let mode = to_string(raw_sink)
+  if mode != "local" && mode != "cloud" && mode != "both" {
+    throw "with_audit_log: sink must be callable or one of local/cloud/both; got " + mode
+  }
+  return {mode: mode, sink_fn: nil, redact_keys: redact_keys}
+}
+
+fn __tool_mw_audit_log_emit_local(receipt) {
+  let sink = local_receipt_sink(receipt?.session_id)
+  let _ = try {
+    sink(receipt)
+  }
+}
+
+/**
+ * with_audit_log(sink_or_options) -> caller
+ *
+ * Builds one typed ToolCallReceipt per tool call after the call completes.
+ * `sink_or_options` accepts:
+ *
+ *   - callable: sink(receipt)
+ *   - "local": append JSONL under `.harn/receipts/<session_id>.jsonl`
+ *   - "cloud": mirror the receipt through the host event bridge
+ *   - "both": local append first, then host event bridge
+ *   - {sink, redact}: same modes, dropping matching argument keys from args_hash
+ *
+ * Receipts carry hashes instead of raw args/results, so local and cloud
+ * sinks can be queryable without leaking tool payloads.
+ */
+pub fn with_audit_log(sink_or_options) {
+  let cfg = __tool_mw_audit_log_config(sink_or_options)
   return { call, next ->
     let started = now_ms()
     let result = next(call)
     let duration = now_ms() - started
-    let record = {
-      tool_name: call.tool_name,
-      tool_call_id: call.call_id,
-      ok: result?.ok ?? false,
-      status: to_string(result?.status ?? ""),
-      executor: result?.executor,
-      duration_ms: duration,
-      args: call.tool_args,
-      result: result?.result,
-      error: result?.error,
-      audit: result?.audit,
-      turn: call.turn,
+    let receipt = __tool_mw_tool_call_receipt(call, result, duration, cfg.redact_keys)
+    if cfg.mode == "local" || cfg.mode == "both" {
+      __tool_mw_audit_log_emit_local(receipt)
     }
-    let _ = try {
-      sink(record)
+    if cfg.sink_fn != nil {
+      let _ = try {
+        cfg.sink_fn(receipt)
+      }
+    }
+    if cfg.mode == "cloud" || cfg.mode == "both" {
+      return result + {receipt: receipt}
     }
     return result
   }

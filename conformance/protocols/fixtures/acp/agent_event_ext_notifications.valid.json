@@ -321,6 +321,30 @@
           "summary": "Read project context"
         },
         "kind": "tool_call_audit",
+        "receipt": {
+          "schema_version": 1,
+          "session_id": "session-1",
+          "run_id": "run-1",
+          "tool_call_id": "tool-1",
+          "tool_name": "read_file",
+          "iteration": 6,
+          "turn_index": 5,
+          "reason": "Read project context",
+          "kind": "read",
+          "executor": "harn",
+          "status": "ok",
+          "error_category": null,
+          "duration_ms": 7,
+          "args_hash": "0000000000000000000000000000000000000000000000000000000000000000",
+          "result_hash": "1111111111111111111111111111111111111111111111111111111111111111",
+          "audit": {
+            "consent": "not_required",
+            "summary": "Read project context"
+          },
+          "emitted_at": "2026-05-16T00:00:00Z",
+          "model": "mock",
+          "provider": "mock"
+        },
         "sessionId": "session-1",
         "toolCallId": "tool-1",
         "toolName": "read_file"

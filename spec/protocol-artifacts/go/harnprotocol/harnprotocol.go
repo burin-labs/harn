@@ -214,6 +214,29 @@ var HarnWorkerStatuses = []HarnWorkerStatus{
 	"cancelled",
 }
 
+// ToolCallReceiptStatus is the typed alias for the ToolCallReceiptStatuses wire vocabulary.
+type ToolCallReceiptStatus = string
+
+// ToolCallReceiptStatuses enumerates every wire value Harn currently emits for ToolCallReceiptStatus.
+var ToolCallReceiptStatuses = []ToolCallReceiptStatus{
+	"ok",
+	"schema_violation",
+	"consent_denied",
+	"timeout",
+	"error",
+}
+
+// ToolCallReceiptExecutor is the typed alias for the ToolCallReceiptExecutors wire vocabulary.
+type ToolCallReceiptExecutor = string
+
+// ToolCallReceiptExecutors enumerates every wire value Harn currently emits for ToolCallReceiptExecutor.
+var ToolCallReceiptExecutors = []ToolCallReceiptExecutor{
+	"harn",
+	"host_bridge",
+	"mcp_server",
+	"provider_native",
+}
+
 // A2ATaskState is the typed alias for the A2ATaskStates wire vocabulary.
 type A2ATaskState = string
 
@@ -415,6 +438,30 @@ type HarnToolLifecycleMeta struct {
 	Executor            json.RawMessage `json:"executor,omitempty"`
 	Parsing             *bool           `json:"parsing,omitempty"`
 	RawInputPartial     *string         `json:"rawInputPartial,omitempty"`
+}
+
+// ToolCallReceipt is the typed, privacy-preserving receipt emitted for an
+// audited tool call.
+type ToolCallReceipt struct {
+	SchemaVersion int                      `json:"schema_version"`
+	SessionID     string                   `json:"session_id"`
+	RunID         *string                  `json:"run_id"`
+	ToolCallID    string                   `json:"tool_call_id"`
+	ToolName      string                   `json:"tool_name"`
+	Iteration     uint64                   `json:"iteration"`
+	TurnIndex     *uint64                  `json:"turn_index"`
+	Reason        *string                  `json:"reason"`
+	Kind          *string                  `json:"kind"`
+	Executor      *ToolCallReceiptExecutor `json:"executor"`
+	Status        ToolCallReceiptStatus    `json:"status"`
+	ErrorCategory *string                  `json:"error_category"`
+	DurationMs    uint64                   `json:"duration_ms"`
+	ArgsHash      string                   `json:"args_hash"`
+	ResultHash    *string                  `json:"result_hash"`
+	Audit         json.RawMessage          `json:"audit"`
+	EmittedAt     string                   `json:"emitted_at"`
+	Model         *string                  `json:"model"`
+	Provider      *string                  `json:"provider"`
 }
 
 // ACPToolCall is the `tool_call` session update.

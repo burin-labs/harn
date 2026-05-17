@@ -10,6 +10,7 @@ docs/dist/
 tree-sitter-harn/*.dylib
 tree-sitter-harn/*.so
 tree-sitter-harn/*.dll
+.harn/receipts/
 .harn/
 # Conformance skill fixtures deliberately ship a .harn/ subdir so the
 # project-layer loader (issue #73) has something to discover. The

@@ -17,6 +17,10 @@ use harn_serve::adapters::acp::{
 };
 use harn_serve::{A2A_PROTOCOL_VERSION, MCP_PROTOCOL_VERSION};
 use harn_vm::agent_events::{ToolCallErrorCategory, ToolCallStatus, WorkerEvent};
+use harn_vm::llm::receipts::{
+    tool_call_receipt_schema, TOOL_CALL_RECEIPT_EXECUTORS, TOOL_CALL_RECEIPT_SCHEMA_ARTIFACT,
+    TOOL_CALL_RECEIPT_SCHEMA_VERSION, TOOL_CALL_RECEIPT_STATUSES,
+};
 use harn_vm::tool_annotations::{SideEffectLevel, ToolKind};
 use serde::Serialize;
 use serde_json::json;
@@ -187,6 +191,10 @@ fn generate_artifacts() -> Result<Vec<Artifact>, String> {
         Artifact::new("go/harnprotocol/harnprotocol.go", generate_go()),
         Artifact::new("go/harnprotocol/go.mod", generate_go_mod()),
         Artifact::new("fixtures/round_trip.json", generate_round_trip_fixture()?),
+        Artifact::new(
+            TOOL_CALL_RECEIPT_SCHEMA_ARTIFACT,
+            generate_tool_call_receipt_schema()?,
+        ),
     ];
 
     for schema in SCHEMA_COPIES {
@@ -197,6 +205,11 @@ fn generate_artifacts() -> Result<Vec<Artifact>, String> {
     }
     artifacts.sort_by(|left, right| left.relative_path.cmp(&right.relative_path));
     Ok(artifacts)
+}
+
+fn generate_tool_call_receipt_schema() -> Result<String, String> {
+    serde_json::to_string_pretty(&tool_call_receipt_schema())
+        .map_err(|error| format!("failed to serialize tool-call receipt schema: {error}"))
 }
 
 const PYTHON_INIT_STUB: &str = "from .harn_protocol import *  # noqa: F401,F403\n";
@@ -211,7 +224,7 @@ pub(crate) fn manifest_json() -> Result<String, String> {
 }
 
 fn generate_manifest() -> Result<String, String> {
-    let schemas = SCHEMA_COPIES
+    let mut schemas = SCHEMA_COPIES
         .iter()
         .map(|schema| {
             Ok(json!({
@@ -222,6 +235,16 @@ fn generate_manifest() -> Result<String, String> {
             }))
         })
         .collect::<Result<Vec<_>, String>>()?;
+    let receipt_schema = tool_call_receipt_schema();
+    schemas.push(json!({
+        "protocol": "harn",
+        "source": "crates/harn-vm/src/llm/receipts.rs",
+        "artifact": TOOL_CALL_RECEIPT_SCHEMA_ARTIFACT,
+        "provenance": receipt_schema
+            .get("x-harn-provenance")
+            .cloned()
+            .unwrap_or(serde_json::Value::Null),
+    }));
 
     serde_json::to_string_pretty(&json!({
         "schemaVersion": 1,
@@ -278,6 +301,12 @@ fn generate_manifest() -> Result<String, String> {
             "methods": MCP_METHODS,
             "loggingLevels": MCP_LOGGING_LEVELS,
         },
+        "receipts": {
+            "toolCallReceiptSchemaVersion": TOOL_CALL_RECEIPT_SCHEMA_VERSION,
+            "toolCallReceiptSchema": TOOL_CALL_RECEIPT_SCHEMA_ARTIFACT,
+            "toolCallReceiptStatuses": TOOL_CALL_RECEIPT_STATUSES,
+            "toolCallReceiptExecutors": TOOL_CALL_RECEIPT_EXECUTORS,
+        },
     }))
     .map_err(|error| format!("failed to serialize manifest: {error}"))
 }
@@ -306,6 +335,8 @@ fn generate_readme() -> String {
            profile (`{acp}`).\n\
          - `schemas/a2a-0.3.0.schema.json`: Harn's A2A schema profile (`{a2a}`).\n\
          - `schemas/mcp-2025-11-25.schema.json`: Harn's MCP schema profile (`{mcp}`).\n\
+         - `schemas/tool-call-receipt.schema.json`: Harn's typed, privacy-preserving\n\
+           `ToolCallReceipt` schema for audited tool calls.\n\
          - `harn-protocol.ts`: TypeScript definitions for ACP session updates,\n\
            tool lifecycle metadata, A2A task events, and MCP metadata.\n\
          - `HarnProtocol.swift`: Swift definitions for the same host-facing surface.\n\
@@ -394,6 +425,16 @@ fn generate_typescript() -> String {
         "HarnWorkerStatus",
     ));
     out.push_str(&ts_array(
+        "HARN_TOOL_CALL_RECEIPT_STATUSES",
+        TOOL_CALL_RECEIPT_STATUSES,
+        "HarnToolCallReceiptStatus",
+    ));
+    out.push_str(&ts_array(
+        "HARN_TOOL_CALL_RECEIPT_EXECUTORS",
+        TOOL_CALL_RECEIPT_EXECUTORS,
+        "HarnToolCallReceiptExecutor",
+    ));
+    out.push_str(&ts_array(
         "A2A_TASK_STATES",
         A2A_TASK_STATES,
         "A2ATaskState",
@@ -469,6 +510,28 @@ export interface HarnToolLifecycleMeta {
   executor?: ACPToolExecutor
   parsing?: boolean
   rawInputPartial?: string
+}
+
+export interface ToolCallReceipt {
+  schema_version: number
+  session_id: string
+  run_id: string | null
+  tool_call_id: string
+  tool_name: string
+  iteration: number
+  turn_index: number | null
+  reason: string | null
+  kind: string | null
+  executor: HarnToolCallReceiptExecutor | null
+  status: HarnToolCallReceiptStatus
+  error_category: string | null
+  duration_ms: number
+  args_hash: string
+  result_hash: string | null
+  audit: ACPValue
+  emitted_at: string
+  model: string | null
+  provider: string | null
 }
 
 export interface ACPToolCall {
@@ -706,6 +769,14 @@ fn generate_swift() -> String {
         "contentExtensionFields",
         HARN_CONTENT_EXTENSION_FIELDS,
     ));
+    out.push_str(&swift_string_array(
+        "toolCallReceiptStatuses",
+        TOOL_CALL_RECEIPT_STATUSES,
+    ));
+    out.push_str(&swift_string_array(
+        "toolCallReceiptExecutors",
+        TOOL_CALL_RECEIPT_EXECUTORS,
+    ));
     out.push_str("}\n\n");
 
     out.push_str(&swift_enum(
@@ -742,6 +813,14 @@ fn generate_swift() -> String {
         &side_effect_level_values(),
     ));
     out.push_str(&swift_enum("HarnWorkerStatus", &worker_status_values()));
+    out.push_str(&swift_enum(
+        "HarnToolCallReceiptStatus",
+        &strs_to_strings(TOOL_CALL_RECEIPT_STATUSES),
+    ));
+    out.push_str(&swift_enum(
+        "HarnToolCallReceiptExecutor",
+        &strs_to_strings(TOOL_CALL_RECEIPT_EXECUTORS),
+    ));
     out.push_str(&swift_enum(
         "HarnA2ATaskState",
         &strs_to_strings(A2A_TASK_STATES),
@@ -1171,6 +1250,50 @@ public struct HarnToolLifecycleMeta: Codable, Sendable, Equatable {
     public var rawInputPartial: String?
 }
 
+public struct HarnToolCallReceipt: Codable, Sendable, Equatable {
+    public var schemaVersion: Int
+    public var sessionId: String
+    public var runId: String?
+    public var toolCallId: String
+    public var toolName: String
+    public var iteration: Int
+    public var turnIndex: Int?
+    public var reason: String?
+    public var kind: String?
+    public var executor: HarnToolCallReceiptExecutor?
+    public var status: HarnToolCallReceiptStatus
+    public var errorCategory: String?
+    public var durationMs: Int
+    public var argsHash: String
+    public var resultHash: String?
+    public var audit: HarnACPValue
+    public var emittedAt: String
+    public var model: String?
+    public var provider: String?
+
+    enum CodingKeys: String, CodingKey {
+        case schemaVersion = "schema_version"
+        case sessionId = "session_id"
+        case runId = "run_id"
+        case toolCallId = "tool_call_id"
+        case toolName = "tool_name"
+        case iteration
+        case turnIndex = "turn_index"
+        case reason
+        case kind
+        case executor
+        case status
+        case errorCategory = "error_category"
+        case durationMs = "duration_ms"
+        case argsHash = "args_hash"
+        case resultHash = "result_hash"
+        case audit
+        case emittedAt = "emitted_at"
+        case model
+        case provider
+    }
+}
+
 public struct HarnACPToolCall: Codable, Sendable, Equatable {
     public var sessionUpdate: HarnACPSessionUpdate
     public var toolCallId: String
@@ -1422,6 +1545,14 @@ fn generate_python() -> String {
         &worker_status_values(),
     ));
     out.push_str(&py_const_tuple(
+        "HARN_TOOL_CALL_RECEIPT_STATUSES",
+        TOOL_CALL_RECEIPT_STATUSES,
+    ));
+    out.push_str(&py_const_tuple(
+        "HARN_TOOL_CALL_RECEIPT_EXECUTORS",
+        TOOL_CALL_RECEIPT_EXECUTORS,
+    ));
+    out.push_str(&py_const_tuple(
         "HARN_TOOL_LIFECYCLE_EXTENSION_FIELDS",
         HARN_TOOL_LIFECYCLE_EXTENSION_FIELDS,
     ));
@@ -1461,6 +1592,14 @@ fn generate_python() -> String {
     out.push_str(&py_str_enum_owned(
         "HarnWorkerStatus",
         &worker_status_values(),
+    ));
+    out.push_str(&py_str_enum(
+        "ToolCallReceiptStatus",
+        TOOL_CALL_RECEIPT_STATUSES,
+    ));
+    out.push_str(&py_str_enum(
+        "ToolCallReceiptExecutor",
+        TOOL_CALL_RECEIPT_EXECUTORS,
     ));
     out.push_str(&py_str_enum("A2ATaskState", A2A_TASK_STATES));
     out.push_str(&py_str_enum("A2ATaskEventType", A2A_TASK_EVENT_TYPES));
@@ -1581,6 +1720,32 @@ class HarnToolLifecycleMeta(_HarnDataclass):
     executor: Optional[JsonValue] = None
     parsing: Optional[bool] = None
     rawInputPartial: Optional[str] = None
+
+
+@dataclass
+class ToolCallReceipt(_HarnDataclass):
+    schema_version: int
+    session_id: str
+    tool_call_id: str
+    tool_name: str
+    iteration: int
+    status: str
+    duration_ms: int
+    args_hash: str
+    audit: JsonValue
+    emitted_at: str
+    run_id: Optional[str] = None
+    turn_index: Optional[int] = None
+    reason: Optional[str] = None
+    kind: Optional[str] = None
+    executor: Optional[str] = None
+    error_category: Optional[str] = None
+    result_hash: Optional[str] = None
+    model: Optional[str] = None
+    provider: Optional[str] = None
+
+    def to_wire(self) -> JsonObject:
+        return asdict(self)
 
 
 @dataclass
@@ -1742,6 +1907,8 @@ fn python_public_names() -> Vec<String> {
         "HARN_TOOL_CALL_ERROR_CATEGORIES",
         "HARN_SIDE_EFFECT_LEVELS",
         "HARN_WORKER_STATUSES",
+        "HARN_TOOL_CALL_RECEIPT_STATUSES",
+        "HARN_TOOL_CALL_RECEIPT_EXECUTORS",
         "HARN_TOOL_LIFECYCLE_EXTENSION_FIELDS",
         "HARN_CONTENT_EXTENSION_FIELDS",
         "A2A_METHODS",
@@ -1758,6 +1925,8 @@ fn python_public_names() -> Vec<String> {
         "HarnToolCallErrorCategory",
         "HarnSideEffectLevel",
         "HarnWorkerStatus",
+        "ToolCallReceiptStatus",
+        "ToolCallReceiptExecutor",
         "A2ATaskState",
         "A2ATaskEventType",
         "MCPLoggingLevel",
@@ -1769,6 +1938,7 @@ fn python_public_names() -> Vec<String> {
         "HarnExtensionMeta",
         "ACPContentBlock",
         "HarnToolLifecycleMeta",
+        "ToolCallReceipt",
         "ACPToolCall",
         "ACPToolCallUpdate",
         "ACPSessionUpdateEnvelope",
@@ -1974,6 +2144,16 @@ fn generate_go() -> String {
         &worker_status_values(),
     ));
     out.push_str(&go_typed_array(
+        "ToolCallReceiptStatus",
+        "ToolCallReceiptStatuses",
+        TOOL_CALL_RECEIPT_STATUSES,
+    ));
+    out.push_str(&go_typed_array(
+        "ToolCallReceiptExecutor",
+        "ToolCallReceiptExecutors",
+        TOOL_CALL_RECEIPT_EXECUTORS,
+    ));
+    out.push_str(&go_typed_array(
         "A2ATaskState",
         "A2ATaskStates",
         A2A_TASK_STATES,
@@ -2110,6 +2290,30 @@ type HarnToolLifecycleMeta struct {
 	Executor            json.RawMessage `json:"executor,omitempty"`
 	Parsing             *bool           `json:"parsing,omitempty"`
 	RawInputPartial     *string         `json:"rawInputPartial,omitempty"`
+}
+
+// ToolCallReceipt is the typed, privacy-preserving receipt emitted for an
+// audited tool call.
+type ToolCallReceipt struct {
+	SchemaVersion int                      `json:"schema_version"`
+	SessionID     string                   `json:"session_id"`
+	RunID         *string                  `json:"run_id"`
+	ToolCallID    string                   `json:"tool_call_id"`
+	ToolName      string                   `json:"tool_name"`
+	Iteration     uint64                   `json:"iteration"`
+	TurnIndex     *uint64                  `json:"turn_index"`
+	Reason        *string                  `json:"reason"`
+	Kind          *string                  `json:"kind"`
+	Executor      *ToolCallReceiptExecutor `json:"executor"`
+	Status        ToolCallReceiptStatus    `json:"status"`
+	ErrorCategory *string                  `json:"error_category"`
+	DurationMs    uint64                   `json:"duration_ms"`
+	ArgsHash      string                   `json:"args_hash"`
+	ResultHash    *string                  `json:"result_hash"`
+	Audit         json.RawMessage          `json:"audit"`
+	EmittedAt     string                   `json:"emitted_at"`
+	Model         *string                  `json:"model"`
+	Provider      *string                  `json:"provider"`
 }
 
 // ACPToolCall is the `tool_call` session update.
@@ -2366,6 +2570,30 @@ fn generate_round_trip_fixture() -> Result<String, String> {
             },
         }
     });
+    let tool_call_receipt = json!({
+        "schema_version": TOOL_CALL_RECEIPT_SCHEMA_VERSION,
+        "session_id": "sess-42",
+        "run_id": "run-42",
+        "tool_call_id": "call-001",
+        "tool_name": "read_file",
+        "iteration": 1,
+        "turn_index": 0,
+        "reason": "Read README.md for context",
+        "kind": "read",
+        "executor": "harn",
+        "status": "ok",
+        "error_category": null,
+        "duration_ms": 12,
+        "args_hash": "0".repeat(64),
+        "result_hash": "1".repeat(64),
+        "audit": {
+            "summary": "Read README.md for context",
+            "layers": [{"name": "with_required_reason", "status": "ok"}],
+        },
+        "emitted_at": "2026-05-16T00:00:00Z",
+        "model": "mock",
+        "provider": "mock",
+    });
     let request = json!({
         "jsonrpc": "2.0",
         "id": 17,
@@ -2409,6 +2637,7 @@ fn generate_round_trip_fixture() -> Result<String, String> {
         },
         "a2aTask": a2a_task,
         "mcpTool": mcp_tool,
+        "toolCallReceipt": tool_call_receipt,
     });
 
     serde_json::to_string_pretty(&fixture)
@@ -2621,17 +2850,25 @@ mod tests {
         assert!(swift.contains("public var id: HarnJsonRpcId"));
         assert!(swift.contains("public init?(jsonObject: Any)"));
         assert!(swift.contains("public static func success(id: HarnJsonRpcId"));
+        assert!(swift.contains("public struct HarnToolCallReceipt"));
         for value in tool_kind_values()
             .into_iter()
             .chain(tool_call_status_values())
             .chain(tool_call_error_category_values())
             .chain(worker_status_values())
+            .chain(
+                TOOL_CALL_RECEIPT_STATUSES
+                    .iter()
+                    .map(|value| (*value).to_string()),
+            )
         {
             assert!(swift.contains(&value), "Swift artifact missing {value}");
         }
         assert!(swift.contains("public enum HarnWorkerStatus"));
         assert!(ts.contains("export type HarnWorkerStatus"));
         assert!(ts.contains("HARN_WORKER_STATUSES"));
+        assert!(ts.contains("export interface ToolCallReceipt"));
+        assert!(ts.contains("HARN_TOOL_CALL_RECEIPT_STATUSES"));
     }
 
     #[test]
@@ -2640,6 +2877,8 @@ mod tests {
         assert!(py.contains("class ACPSessionUpdate(str, Enum):"));
         assert!(py.contains("class HarnToolCallErrorCategory(str, Enum):"));
         assert!(py.contains("class HarnWorkerStatus(str, Enum):"));
+        assert!(py.contains("class ToolCallReceipt(_HarnDataclass):"));
+        assert!(py.contains("class ToolCallReceiptStatus(str, Enum):"));
         assert!(py.contains("class _HarnDataclass:"));
         assert!(py.contains("def is_request("));
         for value in HARN_SESSION_UPDATE_EXTENSIONS
@@ -2663,6 +2902,8 @@ mod tests {
         assert!(go.contains("func IsRequest(envelope map[string]json.RawMessage)"));
         assert!(go.contains("type HarnWorkerStatus = string"));
         assert!(go.contains("var HarnWorkerStatuses = []HarnWorkerStatus"));
+        assert!(go.contains("type ToolCallReceipt struct"));
+        assert!(go.contains("var ToolCallReceiptStatuses = []ToolCallReceiptStatus"));
         for value in HARN_SESSION_UPDATE_EXTENSIONS
             .iter()
             .chain(HARN_AGENT_EVENT_KINDS.iter())
@@ -2697,6 +2938,7 @@ mod tests {
             json!("composition_child_call")
         );
         assert_eq!(fixture["a2aTask"]["status"]["state"], json!("working"));
+        assert_eq!(fixture["toolCallReceipt"]["schema_version"], json!(1));
     }
 
     #[test]
@@ -2712,6 +2954,10 @@ mod tests {
         );
         assert_eq!(manifest["bindings"]["python"]["stability"], json!("stable"));
         assert_eq!(manifest["bindings"]["go"]["stability"], json!("stable"));
+        assert_eq!(
+            manifest["receipts"]["toolCallReceiptSchemaVersion"],
+            json!(TOOL_CALL_RECEIPT_SCHEMA_VERSION)
+        );
     }
 
     #[test]
@@ -2729,6 +2975,14 @@ mod tests {
                 schema.artifact
             );
         }
+        assert!(
+            manifest["schemas"]
+                .as_array()
+                .expect("schema array")
+                .iter()
+                .any(|entry| entry["artifact"] == TOOL_CALL_RECEIPT_SCHEMA_ARTIFACT),
+            "manifest missing {TOOL_CALL_RECEIPT_SCHEMA_ARTIFACT}"
+        );
     }
 
     #[test]

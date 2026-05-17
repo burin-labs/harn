@@ -121,8 +121,8 @@ at `.claude/skills/harn-scripting/SKILL.md`.
   Go in `spec/protocol-artifacts/go/harnprotocol/`. The Go test file
   `harnprotocol_test.go` is hand-written and round-trips the published
   fixture.
-- `docs/dist/`, `.harn-runs/`, `.harn/`, `.claude/`, `.burin/`, `target/`, and `node_modules/` are
-  generated or local-only paths.
+- `docs/dist/`, `.harn-runs/`, `.harn/`, `.harn/receipts/`, `.claude/`, `.burin/`, `target/`,
+  and `node_modules/` are generated or local-only paths.
 
 ## Change Alignment Rules
 

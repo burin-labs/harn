@@ -71,6 +71,7 @@ def main() -> int:
         ),
         ("A2ATask", fixture["a2aTask"], hp.A2ATask),
         ("MCPTool", fixture["mcpTool"], hp.MCPTool),
+        ("ToolCallReceipt", fixture["toolCallReceipt"], hp.ToolCallReceipt),
     ]
     for label, payload, cls in cases:
         instance = cls.from_wire(payload)

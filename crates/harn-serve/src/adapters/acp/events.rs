@@ -906,16 +906,23 @@ impl AgentEventSink for AcpAgentEventSink {
                 tool_call_id,
                 tool_name,
                 audit,
+                receipt,
             } => {
-                self.emit_agent_event_ext(
-                    "tool_call_audit",
-                    session_id,
-                    serde_json::json!({
-                        "toolCallId": tool_call_id,
-                        "toolName": tool_name,
-                        "audit": audit,
-                    }),
-                );
+                let mut payload = serde_json::json!({
+                    "toolCallId": tool_call_id,
+                    "toolName": tool_name,
+                    "audit": audit,
+                });
+                if let Some(receipt) = receipt {
+                    payload
+                        .as_object_mut()
+                        .expect("tool_call_audit payload is an object")
+                        .insert(
+                            "receipt".to_string(),
+                            serde_json::to_value(receipt).expect("receipt serializes"),
+                        );
+                }
+                self.emit_agent_event_ext("tool_call_audit", session_id, payload);
             }
             AgentEvent::CacheHit {
                 session_id,

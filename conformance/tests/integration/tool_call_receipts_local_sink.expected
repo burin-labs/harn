@@ -1,0 +1,10 @@
+local_status=done
+local_records=1
+schema_version=1
+reason=Need a receipt
+receipt_status=ok
+secret_redacted=true
+args_hash_redacted=true
+result_hash_present=true
+cloud_receipts=1
+cloud_reason=Need a receipt

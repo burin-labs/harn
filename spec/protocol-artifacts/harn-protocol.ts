@@ -158,6 +158,23 @@ export const HARN_WORKER_STATUSES = [
 ] as const
 export type HarnWorkerStatus = (typeof HARN_WORKER_STATUSES)[number]
 
+export const HARN_TOOL_CALL_RECEIPT_STATUSES = [
+  "ok",
+  "schema_violation",
+  "consent_denied",
+  "timeout",
+  "error",
+] as const
+export type HarnToolCallReceiptStatus = (typeof HARN_TOOL_CALL_RECEIPT_STATUSES)[number]
+
+export const HARN_TOOL_CALL_RECEIPT_EXECUTORS = [
+  "harn",
+  "host_bridge",
+  "mcp_server",
+  "provider_native",
+] as const
+export type HarnToolCallReceiptExecutor = (typeof HARN_TOOL_CALL_RECEIPT_EXECUTORS)[number]
+
 export const A2A_TASK_STATES = [
   "submitted",
   "working",
@@ -266,6 +283,28 @@ export interface HarnToolLifecycleMeta {
   executor?: ACPToolExecutor
   parsing?: boolean
   rawInputPartial?: string
+}
+
+export interface ToolCallReceipt {
+  schema_version: number
+  session_id: string
+  run_id: string | null
+  tool_call_id: string
+  tool_name: string
+  iteration: number
+  turn_index: number | null
+  reason: string | null
+  kind: string | null
+  executor: HarnToolCallReceiptExecutor | null
+  status: HarnToolCallReceiptStatus
+  error_category: string | null
+  duration_ms: number
+  args_hash: string
+  result_hash: string | null
+  audit: ACPValue
+  emitted_at: string
+  model: string | null
+  provider: string | null
 }
 
 export interface ACPToolCall {

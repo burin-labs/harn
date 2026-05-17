@@ -1241,6 +1241,7 @@ fn build_agent_event(
     payload: &serde_json::Value,
 ) -> Result<crate::agent_events::AgentEvent, VmError> {
     use crate::agent_events::AgentEvent;
+    use crate::llm::receipts::ToolCallReceipt;
     let payload_obj = payload.as_object();
     let get_usize = |key: &str| -> usize {
         payload_obj
@@ -1353,15 +1354,28 @@ fn build_agent_event(
             session_id: session_id.to_string(),
             warning: payload.clone(),
         }),
-        "tool_call_audit" => Ok(AgentEvent::ToolCallAudit {
-            session_id: session_id.to_string(),
-            tool_call_id: get_string("tool_call_id"),
-            tool_name: get_string("tool_name"),
-            audit: payload_obj
-                .and_then(|m| m.get("audit"))
+        "tool_call_audit" => {
+            let receipt = payload_obj
+                .and_then(|m| m.get("receipt"))
                 .cloned()
-                .unwrap_or(serde_json::Value::Null),
-        }),
+                .map(serde_json::from_value::<ToolCallReceipt>)
+                .transpose()
+                .map_err(|error| {
+                    VmError::Runtime(format!(
+                        "{HOST_AGENT_EMIT_EVENT}: invalid tool_call_audit.receipt: {error}"
+                    ))
+                })?;
+            Ok(AgentEvent::ToolCallAudit {
+                session_id: session_id.to_string(),
+                tool_call_id: get_string("tool_call_id"),
+                tool_name: get_string("tool_name"),
+                audit: payload_obj
+                    .and_then(|m| m.get("audit"))
+                    .cloned()
+                    .unwrap_or(serde_json::Value::Null),
+                receipt,
+            })
+        }
         "cache_hit" => Ok(AgentEvent::CacheHit {
             session_id: session_id.to_string(),
             key: get_string("key"),

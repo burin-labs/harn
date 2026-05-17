@@ -5,6 +5,7 @@ use harn_vm::composition::{
     composition_snippet_hash, CompositionChildCall, CompositionChildResult,
     CompositionFailureCategory, CompositionRunEnvelope,
 };
+use harn_vm::llm::receipts::ToolCallReceipt;
 use harn_vm::orchestration::{
     HandoffArtifact, HandoffTargetRecord, MutationSessionRecord, ToolApprovalPolicy,
 };
@@ -55,6 +56,33 @@ fn fixture_handoff() -> HandoffArtifact {
         ..Default::default()
     }
     .normalize()
+}
+
+fn fixture_tool_call_receipt() -> ToolCallReceipt {
+    ToolCallReceipt {
+        schema_version: 1,
+        session_id: "session-1".to_string(),
+        run_id: Some("run-1".to_string()),
+        tool_call_id: "tool-1".to_string(),
+        tool_name: "read_file".to_string(),
+        iteration: 6,
+        turn_index: Some(5),
+        reason: Some("Read project context".to_string()),
+        kind: Some("read".to_string()),
+        executor: Some("harn".to_string()),
+        status: "ok".to_string(),
+        error_category: None,
+        duration_ms: 7,
+        args_hash: "0".repeat(64),
+        result_hash: Some("1".repeat(64)),
+        audit: serde_json::json!({
+            "summary": "Read project context",
+            "consent": "not_required"
+        }),
+        emitted_at: "2026-05-16T00:00:00Z".to_string(),
+        model: Some("mock".to_string()),
+        provider: Some("mock".to_string()),
+    }
 }
 
 fn standard_fixture_events() -> Vec<AgentEvent> {
@@ -408,6 +436,7 @@ fn agent_event_ext_fixture_events() -> Vec<AgentEvent> {
                 "summary": "Read project context",
                 "consent": "not_required"
             }),
+            receipt: Some(fixture_tool_call_receipt()),
         },
     ]
 }
