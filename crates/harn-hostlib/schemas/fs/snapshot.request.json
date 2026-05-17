@@ -1,0 +1,25 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://harnlang.com/schemas/hostlib/fs/snapshot.request.json",
+  "title": "fs.snapshot request",
+  "type": "object",
+  "properties": {
+    "session_id": { "type": "string", "minLength": 1 },
+    "scope_id": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Caller-chosen snapshot id; canonically the ACP toolCallId. Opaque to this primitive."
+    },
+    "paths": {
+      "type": "array",
+      "items": { "type": "string" },
+      "description": "Optional explicit paths to capture. Omitted/empty leaves the snapshot open for auto-on-write capture by subsequent mutating tools."
+    },
+    "root": {
+      "type": "string",
+      "description": "Optional workspace root used to anchor snapshot storage and relative paths. Defaults to the active session root."
+    }
+  },
+  "required": ["session_id", "scope_id"],
+  "additionalProperties": false
+}

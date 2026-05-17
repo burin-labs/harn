@@ -179,6 +179,7 @@ pub(super) fn acp_agent_capabilities() -> serde_json::Value {
             "close": {},
             "list": {},
             "resume": {},
+            "restoreToolCall": {},
         },
     })
 }

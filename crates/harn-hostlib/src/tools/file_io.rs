@@ -161,6 +161,10 @@ pub(super) fn write_file(args: &[VmValue]) -> Result<VmValue, HostlibError> {
         });
     }
 
+    // Capture the pre-image into any open snapshots before mutating disk
+    // so a `session/restore_tool_call` can roll the write back surgically.
+    crate::fs_snapshot::auto_capture_for_write(WRITE_FILE_BUILTIN, &path);
+
     if create_parents {
         if let Some(parent) = path.parent() {
             if !parent.as_os_str().is_empty() {
@@ -220,6 +224,10 @@ pub(super) fn delete_file(args: &[VmValue]) -> Result<VmValue, HostlibError> {
             });
         }
     };
+
+    // Capture the pre-image into any open snapshots before mutating disk
+    // so a `session/restore_tool_call` can roll the delete back.
+    crate::fs_snapshot::auto_capture_for_write(DELETE_FILE_BUILTIN, &path);
 
     let removed = if metadata.is_dir() {
         if recursive {

@@ -9,8 +9,8 @@
 
 use harn_hostlib::{
     ast::AstCapability, code_index::CodeIndexCapability, fs::FsCapability,
-    fs_watch::FsWatchCapability, scanner::ScannerCapability, schemas,
-    secret_store::SecretStoreCapability, tools::ToolsCapability, BuiltinRegistry,
+    fs_snapshot::FsSnapshotCapability, fs_watch::FsWatchCapability, scanner::ScannerCapability,
+    schemas, secret_store::SecretStoreCapability, tools::ToolsCapability, BuiltinRegistry,
     HostlibCapability, HostlibError, HostlibRegistry,
 };
 
@@ -189,6 +189,38 @@ fn fs_capability_registers_documented_methods() {
 }
 
 #[test]
+fn fs_snapshot_capability_registers_documented_methods() {
+    let registry = collect_into_registry(FsSnapshotCapability);
+    let names: Vec<_> = registry.iter().map(|b| b.name).collect();
+    assert_eq!(
+        names,
+        vec![
+            "hostlib_fs_snapshot",
+            "hostlib_fs_restore",
+            "hostlib_fs_list_snapshots",
+            "hostlib_fs_drop_snapshot",
+        ]
+    );
+    let expected_missing: &[(&str, &str)] = &[
+        ("hostlib_fs_snapshot", "session_id"),
+        ("hostlib_fs_restore", "session_id"),
+        ("hostlib_fs_list_snapshots", "session_id"),
+        ("hostlib_fs_drop_snapshot", "session_id"),
+    ];
+    for (name, expected_param) in expected_missing {
+        let entry = registry.find(name).expect("registered");
+        let err = (entry.handler)(&[]).expect_err("must reject empty args");
+        match err {
+            HostlibError::MissingParameter { builtin, param } => {
+                assert_eq!(builtin, *name);
+                assert_eq!(param, *expected_param);
+            }
+            other => panic!("expected MissingParameter for {name}, got {other:?}"),
+        }
+    }
+}
+
+#[test]
 fn fs_watch_capability_registers_documented_methods() {
     let registry = collect_into_registry(FsWatchCapability);
     let names: Vec<_> = registry.iter().map(|b| b.name).collect();
@@ -319,14 +351,15 @@ fn install_default_wires_every_module_into_a_vm() {
             "code_index",
             "scanner",
             "fs",
+            "fs",
             "fs_watch",
             "tools",
             "secret_store"
         ]
     );
-    // Builtin count: 12 ast + 27 code_index + 2 scanner + 4 fs + 2
-    // fs_watch + 13 tools + 1 hostlib_enable + 4 secret_store = 65.
-    assert!(registry.builtins().len() >= 65);
+    // Builtin count: 12 ast + 27 code_index + 2 scanner + 4 fs + 4 fs_snapshot
+    // + 2 fs_watch + 13 tools + 1 hostlib_enable + 4 secret_store = 69.
+    assert!(registry.builtins().len() >= 69);
 }
 
 #[test]
@@ -336,6 +369,7 @@ fn every_registered_builtin_has_request_and_response_schemas() {
         .with(CodeIndexCapability::new())
         .with(ScannerCapability)
         .with(FsCapability)
+        .with(FsSnapshotCapability)
         .with(FsWatchCapability)
         .with(ToolsCapability)
         .with(SecretStoreCapability);

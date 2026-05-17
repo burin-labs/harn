@@ -220,6 +220,82 @@ async fn acp_fs_mode_and_commit_staged_apply_deferred_hostlib_writes() {
     );
 }
 
+#[cfg(feature = "hostlib")]
+#[tokio::test(flavor = "current_thread")]
+async fn acp_session_restore_tool_call_restores_pre_image_and_emits_update() {
+    use harn_hostlib::tools::permissions;
+
+    permissions::reset();
+    permissions::enable_for_test();
+    harn_hostlib::fs_snapshot::reset_for_test();
+    harn_vm::agent_sessions::reset_session_store();
+
+    let dir = tempfile::TempDir::new().unwrap();
+    let file = dir.path().join("subject.txt");
+    std::fs::write(&file, b"pre").unwrap();
+
+    let (tx, mut rx) = mpsc::unbounded_channel();
+    let mut server = AcpServer::new_with_output(AcpServerConfig::new(None), AcpOutput::Channel(tx));
+
+    server
+        .handle_incoming_message(serde_json::json!({
+            "jsonrpc": "2.0",
+            "id": 1,
+            "method": "session/new",
+            "params": {"cwd": dir.path().to_string_lossy()},
+        }))
+        .await;
+    let created = recv_json(&mut rx).await;
+    let session_id = created["result"]["sessionId"]
+        .as_str()
+        .expect("session id")
+        .to_string();
+
+    // Take an explicit snapshot keyed by the synthetic tool-call id.
+    let snapshot = harn_hostlib::fs_snapshot::snapshot(
+        &session_id,
+        "tc-acp-restore",
+        &[file.to_string_lossy().into_owned()],
+        Some(dir.path()),
+    )
+    .expect("snapshot");
+    assert_eq!(snapshot.captured_paths.len(), 1);
+
+    // Clobber the on-disk file, then ask ACP to restore the tool call.
+    std::fs::write(&file, b"clobbered").unwrap();
+
+    server
+        .handle_incoming_message(serde_json::json!({
+            "jsonrpc": "2.0",
+            "id": 2,
+            "method": "session/restore_tool_call",
+            "params": {
+                "sessionId": session_id.clone(),
+                "toolCallId": "tc-acp-restore",
+            },
+        }))
+        .await;
+    let response = recv_json(&mut rx).await;
+    assert_eq!(response["result"]["toolCallId"], "tc-acp-restore");
+    let restored = response["result"]["restoredPaths"].as_array().unwrap();
+    assert_eq!(restored.len(), 1);
+
+    let update = recv_json(&mut rx).await;
+    assert_eq!(update["method"], "session/update");
+    assert_eq!(
+        update["params"]["update"]["sessionUpdate"],
+        "tool_call_update"
+    );
+    assert_eq!(update["params"]["update"]["status"], "restored");
+    assert_eq!(update["params"]["update"]["toolCallId"], "tc-acp-restore");
+    assert_eq!(
+        update["params"]["update"]["_meta"]["harn"]["kind"],
+        "tool_call_restored"
+    );
+
+    assert_eq!(std::fs::read(&file).unwrap(), b"pre");
+}
+
 #[test]
 fn normalize_host_capabilities_wraps_array_entries_in_ops_dicts() {
     let mut root = BTreeMap::new();
@@ -368,6 +444,7 @@ fn acp_agent_capabilities_use_canonical_initialize_shape() {
             "close": {},
             "list": {},
             "resume": {},
+            "restoreToolCall": {},
         })
     );
     assert!(

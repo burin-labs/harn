@@ -670,6 +670,10 @@ async fn host_agent_dispatch_tool_call(
     } else {
         Some(&session_mcp)
     };
+    // Scope the active tool-call id so synchronous hostlib mutations
+    // triggered by the tool handler attribute their FS pre-images to this
+    // call. Empty tool ids are silently ignored by the guard.
+    let _tool_call_guard = crate::agent_sessions::enter_current_tool_call(tool_id.clone());
     let outcome = agent_tools::dispatch_tool_execution_with_mcp(
         &tool_name,
         &tool_args,

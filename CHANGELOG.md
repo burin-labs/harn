@@ -48,6 +48,25 @@ condensed series summaries instead of full per-patch history.
   `audit.binder.status = "timeout"`. Surfaces a typed audit slot at
   `audit.binder = {provider, model, status, latency_ms, reason?, attempts}`
   alongside the existing `with_audit_log` receipt machinery.
+- **Per-tool-call FS snapshot + restore hostlib primitives (#1720).**
+  Adds `hostlib_fs_snapshot`, `hostlib_fs_restore`,
+  `hostlib_fs_list_snapshots`, and `hostlib_fs_drop_snapshot` builtins
+  under the existing `fs/` schema bucket. Snapshots are keyed by the
+  caller-supplied `scope_id` (canonically the ACP `toolCallId`) and
+  stored content-addressed under
+  `.harn/state/snapshots/<session>/<scope>/`. `tools/write_file` and
+  `tools/delete_file` lazy-capture pre-images into any open snapshot
+  bound to the current `harn_vm::agent_sessions::current_tool_call_id`,
+  so a single `hostlib_fs_snapshot({session_id, scope_id})`
+  registration is enough to roll the next mutation back. Session
+  bundles evict oldest-first past a configurable byte cap (default
+  1 GiB).
+- **ACP `session/restore_tool_call` method (#1720).** The ACP server now
+  advertises `{ sessionCapabilities: { restoreToolCall: {} } }` in the
+  initialize response and exposes a `session/restore_tool_call` method
+  that drives `harn_hostlib::fs_snapshot::restore`. Each restore emits
+  a canonical `session/update` with `sessionUpdate: "tool_call_update"`,
+  `status: "restored"`, and `_meta.harn.kind = "tool_call_restored"`.
 
 ### Changed
 

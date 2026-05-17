@@ -99,6 +99,7 @@ thread_local! {
     static SESSIONS: RefCell<HashMap<String, SessionState>> = RefCell::new(HashMap::new());
     static SESSION_CAP: Cell<usize> = const { Cell::new(DEFAULT_SESSION_CAP) };
     static CURRENT_SESSION_STACK: RefCell<Vec<String>> = const { RefCell::new(Vec::new()) };
+    static CURRENT_TOOL_CALL_STACK: RefCell<Vec<String>> = const { RefCell::new(Vec::new()) };
 }
 
 pub struct CurrentSessionGuard {
@@ -109,6 +110,23 @@ impl Drop for CurrentSessionGuard {
     fn drop(&mut self) {
         if self.active {
             pop_current_session();
+        }
+    }
+}
+
+/// RAII guard that scopes the active tool-call id for the running thread.
+///
+/// Set on entry to a tool dispatch and dropped on exit, so any hostlib
+/// builtin invoked under it (e.g. `tools/write_file`) can resolve the
+/// owning tool call without threading the id through every parameter.
+pub struct CurrentToolCallGuard {
+    active: bool,
+}
+
+impl Drop for CurrentToolCallGuard {
+    fn drop(&mut self) {
+        if self.active {
+            pop_current_tool_call();
         }
     }
 }
@@ -127,6 +145,7 @@ pub fn session_cap() -> usize {
 pub fn reset_session_store() {
     SESSIONS.with(|s| s.borrow_mut().clear());
     CURRENT_SESSION_STACK.with(|stack| stack.borrow_mut().clear());
+    CURRENT_TOOL_CALL_STACK.with(|stack| stack.borrow_mut().clear());
 }
 
 pub(crate) fn push_current_session(id: String) {
@@ -153,6 +172,37 @@ pub fn enter_current_session(id: impl Into<String>) -> CurrentSessionGuard {
     }
     push_current_session(id);
     CurrentSessionGuard { active: true }
+}
+
+fn push_current_tool_call(id: String) {
+    if id.is_empty() {
+        return;
+    }
+    CURRENT_TOOL_CALL_STACK.with(|stack| stack.borrow_mut().push(id));
+}
+
+fn pop_current_tool_call() {
+    CURRENT_TOOL_CALL_STACK.with(|stack| {
+        let _ = stack.borrow_mut().pop();
+    });
+}
+
+/// Return the active tool-call id for the current thread, if any.
+///
+/// Hostlib builtins consult this to attribute side-effect snapshots to
+/// the owning ACP `toolCallId` without callers passing it explicitly.
+pub fn current_tool_call_id() -> Option<String> {
+    CURRENT_TOOL_CALL_STACK.with(|stack| stack.borrow().last().cloned())
+}
+
+/// Scope the active tool-call id for the duration of the returned guard.
+pub fn enter_current_tool_call(id: impl Into<String>) -> CurrentToolCallGuard {
+    let id = id.into();
+    if id.trim().is_empty() {
+        return CurrentToolCallGuard { active: false };
+    }
+    push_current_tool_call(id);
+    CurrentToolCallGuard { active: true }
 }
 
 pub fn exists(id: &str) -> bool {

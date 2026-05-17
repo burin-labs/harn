@@ -225,6 +225,85 @@ return {{
 }
 
 #[test]
+fn end_to_end_fs_snapshot_and_auto_restore_via_harn_script() {
+    use std::sync::{Mutex, OnceLock};
+    static GUARD: OnceLock<Mutex<()>> = OnceLock::new();
+    let _serialize = GUARD
+        .get_or_init(|| Mutex::new(()))
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    permissions::reset();
+    harn_hostlib::fs_snapshot::reset_for_test();
+    harn_vm::agent_sessions::reset_session_store();
+    let _session_guard = harn_vm::agent_sessions::enter_current_session("smoke-snapshot-session");
+    let _tool_guard = harn_vm::agent_sessions::enter_current_tool_call("smoke-tc");
+
+    let dir = TempDir::new().unwrap();
+    let root = dir.path();
+    let original = "original-bytes";
+    fs::write(root.join("target.txt"), original).unwrap();
+
+    let root_str = root.to_string_lossy().replace('\\', "/");
+    let target = format!("{}/target.txt", root_str);
+    let session = "smoke-snapshot-session";
+    let scope = "smoke-tc";
+
+    // The script opens an auto-on-write snapshot keyed by the tool-call id,
+    // performs a destructive `hostlib_tools_write_file`, then asks
+    // `hostlib_fs_restore` to roll the workspace back to the pre-image.
+    let source = format!(
+        r#"
+let _enable = hostlib_enable("tools:deterministic")
+let snap = hostlib_fs_snapshot({{
+    session_id: "{session}",
+    scope_id: "{scope}",
+    root: "{root}",
+}})
+let _wrote = hostlib_tools_write_file({{ path: "{target}", content: "clobbered" }})
+let before_restore = hostlib_tools_read_file({{ path: "{target}" }})
+let restored = hostlib_fs_restore({{
+    session_id: "{session}",
+    snapshot_id: "{scope}",
+}})
+let after_restore = hostlib_tools_read_file({{ path: "{target}" }})
+let listed = hostlib_fs_list_snapshots({{ session_id: "{session}" }})
+let _dropped = hostlib_fs_drop_snapshot({{
+    session_id: "{session}",
+    snapshot_id: "{scope}",
+}})
+let listed_after = hostlib_fs_list_snapshots({{ session_id: "{session}" }})
+
+return {{
+    snapshot_id: snap.snapshot_id,
+    before_restore: before_restore.content,
+    restored_count: len(restored.restored_paths),
+    after_restore: after_restore.content,
+    listed_count: len(listed.snapshots),
+    listed_after_count: len(listed_after.snapshots),
+}}
+"#,
+        root = root_str,
+        target = target,
+        session = session,
+        scope = scope,
+    );
+
+    let (result, _) = run_harn(&source);
+    let dict = match &result {
+        VmValue::Dict(d) => d,
+        other => panic!("expected dict, got {other:?}"),
+    };
+    let get = |k: &str| dict.get(k).unwrap_or_else(|| panic!("missing {k}"));
+
+    assert!(matches!(get("snapshot_id"), VmValue::String(s) if s.as_ref() == scope));
+    assert!(matches!(get("before_restore"), VmValue::String(s) if s.as_ref() == "clobbered"));
+    assert!(matches!(get("restored_count"), VmValue::Int(1)));
+    assert!(matches!(get("after_restore"), VmValue::String(s) if s.as_ref() == original));
+    assert!(matches!(get("listed_count"), VmValue::Int(1)));
+    assert!(matches!(get("listed_after_count"), VmValue::Int(0)));
+}
+
+#[test]
 fn end_to_end_code_index_via_harn_script() {
     let dir = TempDir::new().unwrap();
     let root = dir.path();
