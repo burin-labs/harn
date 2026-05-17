@@ -29,7 +29,7 @@ stages = [
 
 or directly on the `@persona` attribute in a Harn workflow:
 
-```harn,ignore
+```harn
 @persona(
   name: "scoped_persona",
   tools: [github, ci],
@@ -42,6 +42,9 @@ fn scoped_persona(ctx) {
   research(ctx)
   act(ctx)
 }
+
+@step(name: "research") fn research(ctx) { return ctx }
+@step(name: "act") fn act(ctx) { return ctx }
 ```
 
 Each stage's `name` must match a `@step(name: "...")` declaration in the

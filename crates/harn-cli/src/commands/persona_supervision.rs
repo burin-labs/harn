@@ -1,4 +1,3 @@
-use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::Duration;
@@ -74,15 +73,30 @@ pub(crate) async fn run_tail(
     args: &PersonaSupervisionTailArgs,
 ) -> Result<(), String> {
     let options = PersonaSupervisionTailOptions::from(args);
-    validate_tail_options(&options)?;
+    let stdout = std::io::stdout();
+    let mut stdout = stdout.lock();
+    drive_tail(manifest, state_dir, &options, &mut stdout, None).await
+}
+
+/// Drive the supervision tail loop against `writer`, optionally signalling
+/// `ready_tx` once the watcher is armed and the initial frames have been
+/// flushed. The CLI entrypoint passes a stdout lock and `None`; tests can
+/// inject an in-memory writer plus a oneshot to avoid subprocess timing
+/// races.
+pub async fn drive_tail<W: std::io::Write>(
+    manifest: Option<&Path>,
+    state_dir: &Path,
+    options: &PersonaSupervisionTailOptions,
+    writer: &mut W,
+    mut ready_tx: Option<tokio::sync::oneshot::Sender<()>>,
+) -> Result<(), String> {
+    validate_tail_options(options)?;
     let catalog = load_catalog_for_tail(manifest)?;
     let log = open_persona_log(state_dir)?;
     let topic = persona_runtime_topic()?;
     let mut cursor = options.since_event_id;
     let mut remaining = options.limit;
     let mut waiter = EventLogChangeWaiter::new(log.describe().location);
-    let stdout = std::io::stdout();
-    let mut stdout = stdout.lock();
 
     loop {
         let frames = read_supervision_frames(
@@ -97,15 +111,18 @@ pub(crate) async fn run_tail(
         for frame in frames {
             let line = serde_json::to_string(&frame)
                 .map_err(|error| format!("failed to serialize supervision frame: {error}"))?;
-            writeln!(stdout, "{line}")
+            writeln!(writer, "{line}")
                 .map_err(|error| format!("failed to write supervision frame: {error}"))?;
         }
-        stdout
+        writer
             .flush()
             .map_err(|error| format!("failed to flush supervision stream: {error}"))?;
 
         if remaining == Some(0) || !options.follow {
             return Ok(());
+        }
+        if let Some(tx) = ready_tx.take() {
+            let _ = tx.send(());
         }
         waiter.wait().await;
     }
