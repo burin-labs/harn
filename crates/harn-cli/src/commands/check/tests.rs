@@ -1,6 +1,6 @@
 use std::collections::HashMap;
 use std::path::PathBuf;
-use std::time::{SystemTime, UNIX_EPOCH};
+use std::sync::atomic::{AtomicU64, Ordering};
 
 use harn_lexer::Lexer;
 use harn_modules::resolve_import_path;
@@ -24,11 +24,14 @@ fn parse_program(source: &str) -> Vec<SNode> {
 }
 
 fn unique_temp_dir(prefix: &str) -> PathBuf {
-    let nanos = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .unwrap()
-        .as_nanos();
-    std::env::temp_dir().join(format!("{prefix}-{nanos}"))
+    // Process ID disambiguates across parallel test shards/processes; an
+    // atomic counter disambiguates within a process. Wall-clock-based
+    // uniqueness (SystemTime nanos) collides when two callers land in the
+    // same nanosecond, which has been observed on loaded CI runners.
+    static COUNTER: AtomicU64 = AtomicU64::new(0);
+    let pid = std::process::id();
+    let seq = COUNTER.fetch_add(1, Ordering::Relaxed);
+    std::env::temp_dir().join(format!("{prefix}-{pid}-{seq}"))
 }
 
 fn load_replay_oracle_fixture(name: &str) -> Option<serde_json::Value> {

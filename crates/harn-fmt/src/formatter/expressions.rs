@@ -130,8 +130,23 @@ impl Formatter<'_> {
                 if needs_parens_as_postfix_object(&object.node) {
                     obj = format!("({obj})");
                 }
-                let args_str = self.format_call_args(args, obj.len() + method.len() + 2, indent);
-                if object.span.end_line > 0 && node.span.end_line > object.span.end_line {
+                // When `obj` spans multiple lines, the bytes returned by
+                // `format_expr` include intermediate newlines + indent; using
+                // them as a column position causes the args wrap check to
+                // over-count by the height of `obj`. Either (a) the chained
+                // call wraps onto its own line — in which case the prefix is
+                // `pad + "." + method + "("` — or (b) it tails the last
+                // physical line of `obj` — in which case the prefix is that
+                // line's length. Compute the correct column either way.
+                let obj_is_multiline =
+                    object.span.end_line > 0 && node.span.end_line > object.span.end_line;
+                let prefix_len = if obj_is_multiline {
+                    (indent + 1) * 2 + method.len() + 2
+                } else {
+                    last_line_width(&obj) + method.len() + 2
+                };
+                let args_str = self.format_call_args(args, prefix_len, indent);
+                if obj_is_multiline {
                     let pad = "  ".repeat(indent + 1);
                     format!("{obj}\n{pad}.{method}({args_str})")
                 } else {
@@ -147,8 +162,15 @@ impl Formatter<'_> {
                 if needs_parens_as_postfix_object(&object.node) {
                     obj = format!("({obj})");
                 }
-                let args_str = self.format_call_args(args, obj.len() + method.len() + 3, indent);
-                if object.span.end_line > 0 && node.span.end_line > object.span.end_line {
+                let obj_is_multiline =
+                    object.span.end_line > 0 && node.span.end_line > object.span.end_line;
+                let prefix_len = if obj_is_multiline {
+                    (indent + 1) * 2 + method.len() + 3
+                } else {
+                    last_line_width(&obj) + method.len() + 3
+                };
+                let args_str = self.format_call_args(args, prefix_len, indent);
+                if obj_is_multiline {
                     let pad = "  ".repeat(indent + 1);
                     format!("{obj}\n{pad}?.{method}({args_str})")
                 } else {

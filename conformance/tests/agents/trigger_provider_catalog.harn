@@ -215,9 +215,7 @@ pipeline test(task) {
   assert(len(notion_secrets) == 1, "notion should publish its webhook verification secret")
   assert(
     notion_secrets
-      .any(
-      { secret -> secret.name == "verification_token" && secret.namespace == "notion" },
-    ),
+      .any({ secret -> secret.name == "verification_token" && secret.namespace == "notion" }),
     "notion should require verification_token in the notion namespace",
   )
   let notion_methods = notion?.outbound_methods ?? []

@@ -54,9 +54,7 @@ pipeline test(task) {
     {provider: "github", kind: "issue.opened", headers: {x_delivery: "evt-breaker-4-" + unique}},
   )
   let evaluated = trigger_inspect_lifecycle("predicate.evaluated")
-    .filter(
-    { entry -> entry?.headers?.trigger_id == handle.id },
-  )
+    .filter({ entry -> entry?.headers?.trigger_id == handle.id })
   let last = evaluated[len(evaluated) - 1]
   println(len(llm_mock_calls()) == 3)
   println(contains(json_stringify(first.result ?? {}), "\"skipped\":true"))

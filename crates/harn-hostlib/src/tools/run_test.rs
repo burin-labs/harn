@@ -225,12 +225,15 @@ fn base_test_argv(eco: Ecosystem) -> Vec<String> {
 }
 
 fn junit_temp_path(cwd: &Path, prefix: &str) -> PathBuf {
-    let id: u64 = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .map(|d| d.as_nanos() as u64)
-        .unwrap_or(0);
+    // Combine process id with an in-process atomic counter so repeated
+    // invocations within the same nanosecond cannot collide. The previous
+    // SystemTime::now() nanos seed could clamp when two calls landed in
+    // the same tick (observed on loaded test runners).
+    use std::sync::atomic::{AtomicU64, Ordering};
+    static COUNTER: AtomicU64 = AtomicU64::new(0);
+    let seq = COUNTER.fetch_add(1, Ordering::Relaxed);
     let pid = std::process::id();
     let target_dir = cwd.join(".harn").join("hostlib-tests");
     let _ = std::fs::create_dir_all(&target_dir);
-    target_dir.join(format!("{prefix}-{pid}-{id}.xml"))
+    target_dir.join(format!("{prefix}-{pid}-{seq}.xml"))
 }
