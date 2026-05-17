@@ -3,7 +3,7 @@
 //! surface is easy to locate and audit.
 
 use harn_lexer::{FixEdit, Span};
-use harn_parser::DiagnosticCode as Code;
+use harn_parser::{DiagnosticCode as Code, Repair};
 
 /// A lint diagnostic reported by the linter.
 #[derive(Debug, Clone)]
@@ -16,6 +16,20 @@ pub struct LintDiagnostic {
     pub suggestion: Option<String>,
     /// Machine-applicable fix edits (applied in order, non-overlapping).
     pub fix: Option<Vec<FixEdit>>,
+}
+
+impl LintDiagnostic {
+    /// Materialize the structured [`Repair`] for this lint, derived from
+    /// the central diagnostic-code registry. Returns `None` when no
+    /// actionable repair shape is registered.
+    ///
+    /// `LintDiagnostic` does not store `repair` inline (unlike
+    /// `TypeDiagnostic`) because every lint's safety class is purely a
+    /// function of its `code`; storing a per-site copy would invite
+    /// drift. Callers that need the dispatch handle ask for it here.
+    pub fn repair(&self) -> Option<Repair> {
+        self.code.repair_template().map(Repair::from_template)
+    }
 }
 
 /// Severity level for lint diagnostics.

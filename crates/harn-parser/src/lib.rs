@@ -7,7 +7,10 @@ pub mod typechecker;
 pub mod visit;
 
 pub use ast::*;
-pub use diagnostic_codes::{Category as DiagnosticCodeCategory, Code as DiagnosticCode};
+pub use diagnostic_codes::{
+    Category as DiagnosticCodeCategory, Code as DiagnosticCode, ParseRepairSafetyError, Repair,
+    RepairId, RepairSafety, RepairTemplate, REPAIR_REGISTRY,
+};
 pub use parser::*;
 pub use typechecker::{
     block_definitely_exits, format_type, stmt_definitely_exits, DiagnosticDetails,

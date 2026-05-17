@@ -116,11 +116,23 @@ def category_code(category: str) -> str:
 
 
 def check_struct_literals(errors: list[str], name: str, root: Path) -> None:
+    # Patterns that precede `Foo {` in non-literal positions (and the
+    # name itself sits at `start`, so we only need to inspect what comes
+    # immediately before it).
+    non_literal_prefix = re.compile(
+        r"(?:\bimpl(?:\s*<[^>]*>)?\s+(?:[\w:]+::)?|->\s*(?:[\w:]+::)?)$"
+    )
     for path in sorted(root.rglob("*.rs")):
         text = path.read_text()
         for start, end in find_struct_literals(text, f"{name} {{"):
             prefix = text[max(0, start - 80) : start]
+            # Skip non-literal occurrences:
+            #   - the struct definition itself (`pub struct Foo { ... }`)
+            #   - inherent / trait impl blocks (`impl Foo { ... }`)
+            #   - function return-type body openings (`-> Foo {`, `-> crate::Foo {`)
             if f"pub struct {name}" in prefix:
+                continue
+            if non_literal_prefix.search(prefix):
                 continue
             block = text[start:end]
             if not re.search(r"\bcode\s*[:,]", block):
@@ -201,7 +213,10 @@ def check_unknown_code_variants(errors: list[str], code_names: set[str]) -> None
             if path == REGISTRY:
                 continue
             text = path.read_text()
-            for match in re.finditer(r"\bCode::([A-Za-z][A-Za-z0-9_]*)", text):
+            # Rust convention: enum variants are UpperCamelCase, methods
+            # are snake_case. Only flag the former — `Code::repair_template()`
+            # and other inherent methods are intentionally not variants.
+            for match in re.finditer(r"\bCode::([A-Z][A-Za-z0-9_]*)", text):
                 if match.group(1) not in code_names:
                     errors.append(
                         f"{rel(path)}:{line(text, match.start())}: unknown Code::{match.group(1)}"

@@ -1191,6 +1191,7 @@ fn test_type_mismatch_render_snapshot_with_coercion_help() {
  2 |   let label: string = 42
    |                       ^^ found this type
    = help: did you mean `to_string(42)`?
+   = repair: casts/insert-explicit-conversion [scope-local] — Insert an explicit conversion or correct the operand type
    = note: expected type declared here
   --> test.harn:2:3
    |
@@ -1215,6 +1216,7 @@ fn test_type_mismatch_render_snapshot_with_nested_note() {
    |
  2 |   let item: {name: string, count: int} = {name: 1, count: 2}
    |                                          ^^^^^^^^^^^^^^^^^^^ found this type
+   = repair: casts/insert-explicit-conversion [scope-local] — Insert an explicit conversion or correct the operand type
    = note: expected type declared here
   --> test.harn:2:3
    |

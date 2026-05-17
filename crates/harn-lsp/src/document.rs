@@ -2,7 +2,9 @@ use harn_lexer::Lexer;
 use harn_parser::{Parser, SNode, TypeChecker};
 use tower_lsp::lsp_types::*;
 
-use crate::helpers::{lexer_error_to_diagnostic, parser_error_to_diagnostic, span_to_range};
+use crate::helpers::{
+    lexer_error_to_diagnostic, parser_error_to_diagnostic, repair_data_value, span_to_range,
+};
 use crate::symbols::{build_symbol_table, SymbolInfo};
 
 pub(crate) struct DocumentState {
@@ -97,6 +99,7 @@ impl DocumentState {
                 source: Some("harn-typecheck".to_string()),
                 code: Some(NumberOrString::String(diag.code.to_string())),
                 message: diag.message.clone(),
+                data: repair_data_value(diag.repair.as_ref()),
                 ..Default::default()
             });
         }
@@ -122,12 +125,14 @@ impl DocumentState {
                 harn_lint::LintSeverity::Error => DiagnosticSeverity::ERROR,
             };
             let range = span_to_range(&ld.span);
+            let lint_repair = ld.repair();
             self.diagnostics.push(Diagnostic {
                 range,
                 severity: Some(severity),
                 source: Some("harn-lint".to_string()),
                 code: Some(NumberOrString::String(ld.code.to_string())),
                 message: format!("[{}] {}", ld.rule, ld.message),
+                data: repair_data_value(lint_repair.as_ref()),
                 ..Default::default()
             });
         }
@@ -190,6 +195,35 @@ fn handler() {
                 .iter()
                 .map(|diag| (&diag.source, &diag.message))
                 .collect::<Vec<_>>()
+        );
+    }
+
+    #[test]
+    fn typecheck_diagnostics_carry_repair_data_envelope() {
+        // A `let x = 1; x = 2` reassigns an immutable binding —
+        // HARN-OWN-001 with a `bindings/make-mutable` repair. The
+        // LSP-side code-action provider reads the safety class from
+        // `Diagnostic.data` to decide whether to auto-apply.
+        let state = DocumentState::new("pipeline main() {\n  let x = 1\n  x = 2\n}\n".to_string());
+        let diag = state
+            .diagnostics
+            .iter()
+            .find(|d| {
+                matches!(
+                    d.code.as_ref(),
+                    Some(tower_lsp::lsp_types::NumberOrString::String(code)) if code == "HARN-OWN-001"
+                )
+            })
+            .expect("expected ImmutableAssignment diagnostic");
+        let data = diag.data.as_ref().expect("repair data should be attached");
+        let repair = data.get("repair").expect("data.repair should be present");
+        assert_eq!(
+            repair.get("id").and_then(|v| v.as_str()),
+            Some("bindings/make-mutable")
+        );
+        assert_eq!(
+            repair.get("safety").and_then(|v| v.as_str()),
+            Some("scope-local")
         );
     }
 }

@@ -3,6 +3,7 @@ use std::io::IsTerminal;
 use harn_lexer::Span;
 use yansi::{Color, Paint};
 
+use crate::diagnostic_codes::Repair;
 use crate::ParserError;
 
 pub struct RelatedSpanLabel<'a> {
@@ -129,6 +130,7 @@ pub fn render_diagnostic(
         label,
         help,
         related: &[],
+        repair: None,
     })
 }
 
@@ -142,6 +144,7 @@ pub fn render_diagnostic_with_code(
     label: Option<&str>,
     help: Option<&str>,
 ) -> String {
+    let repair_owned = code.repair_template().map(Repair::from_template);
     render_diagnostic_inner(RenderDiagnostic {
         source,
         filename,
@@ -152,6 +155,7 @@ pub fn render_diagnostic_with_code(
         label,
         help,
         related: &[],
+        repair: repair_owned.as_ref(),
     })
 }
 
@@ -175,6 +179,7 @@ pub fn render_diagnostic_with_related(
         label,
         help,
         related,
+        repair: None,
     })
 }
 
@@ -188,6 +193,7 @@ struct RenderDiagnostic<'a> {
     label: Option<&'a str>,
     help: Option<&'a str>,
     related: &'a [RelatedSpanLabel<'a>],
+    repair: Option<&'a Repair>,
 }
 
 fn render_diagnostic_inner(input: RenderDiagnostic<'_>) -> String {
@@ -268,6 +274,18 @@ fn render_diagnostic_inner(input: RenderDiagnostic<'_>) -> String {
         ));
     }
 
+    if let Some(repair) = input.repair {
+        let repair_prefix = style_fragment("repair", Color::Cyan, true);
+        out.push_str(&format!(
+            "{:>width$} = {repair_prefix}: {} [{}] — {}\n",
+            " ",
+            repair.id,
+            repair.safety,
+            repair.summary,
+            width = gutter_width + 1,
+        ));
+    }
+
     for item in related {
         out.push_str(&format!(
             "{:>width$} = {note_prefix}: {}\n",
@@ -325,8 +343,15 @@ pub fn render_type_diagnostic(
             label: primary_label.as_deref(),
             help: diag.help.as_deref(),
             related: &related,
+            repair: diag.repair.as_ref(),
         }),
-        None => format!("{severity}[{}]: {}\n", diag.code, diag.message),
+        None => match diag.repair.as_ref() {
+            Some(repair) => format!(
+                "{severity}[{}]: {}\n  = repair: {} [{}] — {}\n",
+                diag.code, diag.message, repair.id, repair.safety, repair.summary,
+            ),
+            None => format!("{severity}[{}]: {}\n", diag.code, diag.message),
+        },
     }
 }
 

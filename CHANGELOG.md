@@ -80,6 +80,19 @@ condensed series summaries instead of full per-patch history.
   to `harn skills resolved` (same flags as the old `list`), and
   `harn skills list / get` register in the `harn --json-schemas`
   catalog as schema-version 1.
+- **Repair classifier on diagnostics (#1747).** `TypeDiagnostic` grows a
+  structured `repair: Option<Repair>` field carrying a namespaced repair
+  id (`bindings/make-mutable`, `imports/fix-path`, …), a one-line
+  summary, and a six-level `RepairSafety` taxonomy
+  (`format-only` → `behavior-preserving` → `scope-local` →
+  `surface-changing` → `capability-changing` → `needs-human`). Agents
+  and IDEs dispatch on `repair.safety` to decide whether to auto-apply,
+  propose, or escalate. The catalog maps ≥20 diagnostic codes to
+  templates via `Code::repair_template()`; `LintDiagnostic` and
+  `FormatError` expose the same handle through derived
+  `.repair()` methods. The CLI now renders a `repair: ID [SAFETY] —
+  SUMMARY` line, and the LSP attaches the same payload to
+  `Diagnostic.data` as `{"repair": {"id", "summary", "safety"}}`.
 - **`with_scoped_executor` tool-caller middleware (#1702).** Narrows the
   active `CapabilityPolicy` for the duration of one tool dispatch:
   `compose_tool_callers([..., with_scoped_executor({stage, allowed_tools,

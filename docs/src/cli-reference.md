@@ -649,21 +649,30 @@ agent or editor can ingest without parsing prose:
 ```json
 {
   "schemaVersion": 1,
-  "code": "HARN-TYP-014",
-  "category": "TYP",
-  "summary": "declaration has the wrong number of type parameters",
-  "body": "# HARN-TYP-014 — ... full markdown ...",
-  "repairs": [],
-  "related": ["HARN-TYP-013"],
+  "code": "HARN-OWN-001",
+  "category": "OWN",
+  "summary": "immutable binding is reassigned",
+  "body": "# HARN-OWN-001 — ... full markdown ...",
+  "repairs": [
+    {
+      "id": "bindings/make-mutable",
+      "safety": "scope-local",
+      "summary": "Mark the binding `mut` so it can be reassigned"
+    }
+  ],
+  "related": [],
   "apiStability": "stable"
 }
 ```
 
 `schemaVersion` is the contract LSPs, IDEs, and hosted error-page mirrors
-dispatch on; bumps will follow a deprecation cycle. `repairs` is currently
-empty and will populate once the `Repair` struct lands on
-`TypeDiagnostic` (see epic [#1745](https://github.com/burin-labs/harn/issues/1745)).
-An unknown code exits with status 2.
+dispatch on; bumps will follow a deprecation cycle. `repairs` carries the
+structured repair classifier — a namespaced kebab-case id plus a
+six-level safety class (`format-only` → `behavior-preserving` →
+`scope-local` → `surface-changing` → `capability-changing` →
+`needs-human`) — that agents use to decide whether to auto-apply,
+propose, or escalate a fix. Codes without a registered repair shape
+return `"repairs": []`. An unknown code exits with status 2.
 
 ### Form 2 — explain a control-flow invariant violation
 
