@@ -872,6 +872,16 @@ impl TypeChecker {
                 Self::string_property_type(property, optional)
             }
             TypeExpr::Named(name) if name == "dict" => None,
+            TypeExpr::Named(name) if name == "Harness" => match property {
+                "stdio" => Some(TypeExpr::Named("HarnessStdio".into())),
+                "clock" => Some(TypeExpr::Named("HarnessClock".into())),
+                "fs" => Some(TypeExpr::Named("HarnessFs".into())),
+                "env" => Some(TypeExpr::Named("HarnessEnv".into())),
+                "random" => Some(TypeExpr::Named("HarnessRandom".into())),
+                "net" => Some(TypeExpr::Named("HarnessNet".into())),
+                _ if optional => Some(TypeExpr::Named("nil".into())),
+                _ => None,
+            },
             TypeExpr::Named(name) if scope.get_struct(name).is_some() => {
                 self.struct_property_type(name, &[], property, scope, optional)
             }

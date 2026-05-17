@@ -57,6 +57,24 @@ return "ok"
 }
 
 #[test]
+fn test_main_function_exempt() {
+    let diags = lint_source(
+        r#"
+fn main(_harness: Harness) {
+}
+"#,
+    );
+    assert!(
+        !has_rule(&diags, "unused-function"),
+        "`main` is auto-invoked and should be exempt from unused-function: {diags:?}"
+    );
+    assert!(
+        !has_rule(&diags, "unused-parameter"),
+        "`_harness` should suppress the unused-parameter lint: {diags:?}"
+    );
+}
+
+#[test]
 fn test_function_passed_as_value() {
     let diags = lint_source(
         r#"

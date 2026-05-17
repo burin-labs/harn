@@ -192,6 +192,7 @@ diagnostic_codes! {
     UnknownDeclaration, "HARN-NAM-010", Nam, "declaration reference cannot be resolved";
     InvalidAttributeTarget, "HARN-NAM-011", Nam, "attribute is attached to an unsupported declaration";
     InvalidAttributeArgument, "HARN-NAM-012", Nam, "attribute argument is invalid";
+    InvalidMainSignature, "HARN-NAM-101", Nam, "`main` entrypoint must take a single `harness: Harness` parameter";
     CapabilityPayloadInvalid, "HARN-CAP-001", Cap, "capability payload is invalid";
     HitlMissingApprovalPolicy, "HARN-CAP-002", Cap, "human approval construct is missing policy";
     HitlInvalidApprovalArgument, "HARN-CAP-003", Cap, "human approval argument is invalid";
@@ -624,6 +625,7 @@ impl Code {
             | Code::UnknownMethod
             | Code::UnknownBuiltin
             | Code::UnknownDeclaration => Some(&REPAIR_BINDINGS_RENAME_TO_CLOSEST),
+            Code::InvalidMainSignature => Some(&REPAIR_BINDINGS_THREAD_HARNESS),
             Code::DeprecatedFunction => Some(&REPAIR_STDLIB_MIGRATE_RENAMED),
             Code::ModuleImportUnresolved | Code::ImportResolutionFailed => {
                 Some(&REPAIR_IMPORTS_FIX_PATH)
@@ -787,6 +789,12 @@ const REPAIR_BINDINGS_RENAME_SHADOW: RepairTemplate = RepairTemplate {
     id: "bindings/rename-shadow",
     summary: "Rename the shadowing binding to a distinct name",
     safety: RepairSafety::ScopeLocal,
+};
+
+const REPAIR_BINDINGS_THREAD_HARNESS: RepairTemplate = RepairTemplate {
+    id: "bindings/thread-harness",
+    summary: "Rewrite the entrypoint as `fn main(harness: Harness)` so the runtime can thread its capability handle",
+    safety: RepairSafety::SurfaceChanging,
 };
 
 const REPAIR_DECLARATIONS_REMOVE_UNUSED: RepairTemplate = RepairTemplate {
@@ -964,6 +972,7 @@ pub const REPAIR_REGISTRY: &[&RepairTemplate] = &[
     &REPAIR_BINDINGS_MAKE_IMMUTABLE,
     &REPAIR_BINDINGS_RENAME_UNUSED,
     &REPAIR_BINDINGS_RENAME_SHADOW,
+    &REPAIR_BINDINGS_THREAD_HARNESS,
     &REPAIR_DECLARATIONS_REMOVE_UNUSED,
     &REPAIR_IMPORTS_FIX_PATH,
     &REPAIR_IMPORTS_REMOVE_UNUSED,

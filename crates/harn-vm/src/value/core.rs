@@ -3,6 +3,7 @@ use std::rc::Rc;
 use std::sync::atomic::Ordering;
 use std::{cell::RefCell, future::Future, pin::Pin};
 
+use crate::harness::VmHarness;
 use crate::mcp::VmMcpClientHandle;
 use crate::BuiltinId;
 
@@ -129,6 +130,11 @@ pub enum VmValue {
     /// Accessed via `.first` / `.second`, and destructurable in
     /// `for (a, b) in ...` loops.
     Pair(Rc<(VmValue, VmValue)>),
+    /// Capability handle threaded into `main(harness: Harness)`. The same
+    /// variant carries the root handle and each typed sub-handle (`stdio`,
+    /// `clock`, `fs`, `env`, `random`, `net`) so they share one inline
+    /// payload but stay distinguishable via `VmHarness::kind`.
+    Harness(VmHarness),
 }
 
 impl VmValue {
@@ -181,6 +187,7 @@ impl VmValue {
             VmValue::Range(_) => true,
             VmValue::Iter(_) => true,
             VmValue::Pair(_) => true,
+            VmValue::Harness(_) => true,
         }
     }
 
@@ -212,6 +219,7 @@ impl VmValue {
             VmValue::Range(_) => "range",
             VmValue::Iter(_) => "iter",
             VmValue::Pair(_) => "pair",
+            VmValue::Harness(h) => h.type_name(),
         }
     }
 
@@ -473,6 +481,9 @@ impl VmValue {
                 } else {
                     out.push_str("<iter>");
                 }
+            }
+            VmValue::Harness(h) => {
+                let _ = write!(out, "<{}>", h.type_name());
             }
             VmValue::Pair(p) => {
                 out.push('(');

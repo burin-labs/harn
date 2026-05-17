@@ -1,0 +1,6 @@
+// HARN-NAM-101: a `main` with the right arity but a non-Harness
+// param type is rejected. The runtime can only safely thread the
+// concrete capability handle.
+fn main(harness: string) {
+  print(harness)
+}

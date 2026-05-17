@@ -257,7 +257,7 @@ pub fn take_stderr_buffer() -> String {
     STDERR_BUFFER.with(|s| std::mem::take(&mut *s.borrow_mut()))
 }
 
-fn write_stderr(line: &str) {
+pub(crate) fn write_stderr(line: &str) {
     if crate::run_events::sink_active() {
         crate::run_events::emit(crate::run_events::RunEvent::Stderr {
             payload: line.to_string(),

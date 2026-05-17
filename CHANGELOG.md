@@ -158,6 +158,25 @@ condensed series summaries instead of full per-patch history.
   `serialize_module_artifact` so in-memory consumers can package
   bytecode bytes byte-identical to the on-disk `.harnbc`/`.harnmod`
   files.
+- **`Harness` capability handle + `main(harness: Harness)` entrypoint
+  (#1766).** First step of the E4 epic that replaces ambient stdio /
+  clock / fs / env / random / net globals with an explicit handle threaded
+  through `main`. Introduces the public `harn_vm::Harness` Rust type and
+  its six sub-handles (`HarnessStdio`, `HarnessClock`, `HarnessFs`,
+  `HarnessEnv`, `HarnessRandom`, `HarnessNet`), each carrying the same
+  refcounted `HarnessInner` and exposed at the Harn-language level via
+  field access (`harness.stdio`, `harness.clock`, etc.). `Harness::real()`
+  wires `harn-clock::RealClock` as the production backing; the
+  filesystem, environment, random, and network surfaces are stubbed and
+  land alongside the ambient-builtin migrations in E4.2-E4.4. The VM
+  auto-invokes `fn main` when present with the `harness` global set by
+  the run path (CLI, conformance, bench, playground), and the
+  typechecker enforces the new convention via `HARN-NAM-101`: any
+  `fn main` with a signature other than `main(harness: Harness)` is
+  rejected at parse time. `harness.stdio.println` / `print` / `eprintln` /
+  `eprint` and `harness.clock.now_ms` / `monotonic_ms` / `sleep_ms` are
+  wired end-to-end so `examples/hello_v2.harn` runs against the new
+  shape today.
 - **`with_scoped_executor` tool-caller middleware (#1702).** Narrows the
   active `CapabilityPolicy` for the duration of one tool dispatch:
   `compose_tool_callers([..., with_scoped_executor({stage, allowed_tools,

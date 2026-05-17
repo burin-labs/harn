@@ -2539,6 +2539,7 @@ pub(crate) async fn execute_with_skill_dirs(
             });
             skill_loader::emit_loader_warnings(&loaded.loader_warnings);
             skill_loader::install_skills_global(&mut vm, &loaded);
+            vm.set_harness(harn_vm::Harness::real());
             if let Some(path) = source_path {
                 let extensions = package::load_runtime_extensions(path);
                 package::install_runtime_extensions(&extensions);

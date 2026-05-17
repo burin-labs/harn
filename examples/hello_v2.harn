@@ -1,0 +1,9 @@
+/**
+ * E4.1 entrypoint convention: `main` takes a single typed Harness
+ * parameter, replacing the ambient stdio/clock/fs globals. See
+ * docs/llm/harn-quickref.md for the full surface; E4.2-E4.4 land the
+ * remaining capability migrations.
+ */
+fn main(harness: Harness) {
+  harness.stdio.println("Hello, world!")
+}

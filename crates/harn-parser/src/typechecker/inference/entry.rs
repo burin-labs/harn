@@ -7,6 +7,7 @@
 //! check.
 
 use crate::ast::*;
+use crate::diagnostic_codes::Code;
 
 use super::super::scope::{
     EnumDeclInfo, FnSignature, ImplMethodSig, InterfaceDeclInfo, StructDeclInfo, TypeAliasInfo,
@@ -131,6 +132,9 @@ impl TypeChecker {
                         has_rest: params.last().is_some_and(|p| p.rest),
                     };
                     self.scope.define_fn(name, sig);
+                    if name == "main" {
+                        self.check_main_signature(params, snode.span);
+                    }
                     self.check_fn_body(
                         type_params,
                         params,
@@ -159,6 +163,59 @@ impl TypeChecker {
         }
 
         (self.diagnostics, self.hints)
+    }
+
+    /// Validate the entrypoint convention: a top-level `fn main` must take
+    /// a single typed parameter `harness: Harness` (no defaults, no rest,
+    /// no extras). Anything else fires `HARN-NAM-101`.
+    pub(in crate::typechecker) fn check_main_signature(
+        &mut self,
+        params: &[TypedParam],
+        span: harn_lexer::Span,
+    ) {
+        let signature_ok = matches!(
+            params,
+            [TypedParam {
+                name,
+                type_expr: Some(TypeExpr::Named(ty)),
+                default_value: None,
+                rest: false,
+            }] if matches!(name.as_str(), "harness" | "_harness") && ty == "Harness"
+        );
+        if signature_ok {
+            return;
+        }
+        let message = if params.is_empty() {
+            "`main` must take a single `harness: Harness` parameter".to_string()
+        } else if params.len() == 1 {
+            let p = &params[0];
+            match (&p.name, &p.type_expr) {
+                (name, _) if !matches!(name.as_str(), "harness" | "_harness") => {
+                    format!("`main` parameter is named `{name}`, expected `harness` or `_harness`")
+                }
+                (_, None) => {
+                    "`main(harness: Harness)` requires an explicit `Harness` type annotation"
+                        .to_string()
+                }
+                (_, Some(actual)) => format!(
+                    "`main(harness: …)` parameter type must be `Harness`, found `{}`",
+                    crate::typechecker::format_type(actual)
+                ),
+            }
+        } else {
+            format!(
+                "`main` must take exactly one parameter (`harness: Harness`), found {}",
+                params.len()
+            )
+        };
+        self.error_at_with_help(
+            Code::InvalidMainSignature,
+            message,
+            span,
+            "rewrite as `fn main(harness: Harness) { ... }` — the runtime threads its \
+             capability handle through this single parameter"
+                .to_string(),
+        );
     }
 
     /// Pre-populate placeholder signatures for every
