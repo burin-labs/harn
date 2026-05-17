@@ -94,6 +94,30 @@ fn test_parses_routes_json() {
 }
 
 #[test]
+fn test_parses_fix_plan_json_args() {
+    let cli = Cli::parse_from([
+        "harn",
+        "fix",
+        "--plan",
+        "--json",
+        "--safety",
+        "behavior-preserving",
+        "main.harn",
+    ]);
+
+    let Command::Fix(args) = cli.command.unwrap() else {
+        panic!("expected fix command");
+    };
+    assert!(args.plan);
+    assert!(args.json);
+    assert_eq!(
+        args.safety.map(|safety| safety.as_str()),
+        Some("behavior-preserving")
+    );
+    assert_eq!(args.path, PathBuf::from("main.harn"));
+}
+
+#[test]
 fn test_parses_agents_conformance_target_url() {
     let cli = Cli::parse_from([
         "harn",

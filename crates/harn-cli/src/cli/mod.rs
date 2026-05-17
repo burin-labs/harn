@@ -24,6 +24,7 @@ mod doctor;
 mod dump;
 mod eval;
 mod explain;
+mod fix;
 mod flow;
 mod init;
 mod lint_fmt;
@@ -96,6 +97,7 @@ pub use eval::{
     EvalToolCallsCommand, EvalToolCallsRegressionArgs,
 };
 pub(crate) use explain::ExplainArgs;
+pub(crate) use fix::FixArgs;
 pub(crate) use flow::{
     FlowArchivistCommand, FlowArchivistScanArgs, FlowArgs, FlowCommand, FlowReplayAuditArgs,
     FlowShipCommand, FlowShipWatchArgs,
@@ -278,6 +280,8 @@ SCRIPTING
     /// legacy `--invariant <NAME> <FUNCTION> <FILE>` form to walk the
     /// control-flow path behind a Harn invariant violation.
     Explain(ExplainArgs),
+    /// Emit repair plans for diagnostics without editing files.
+    Fix(FixArgs),
     /// Export machine-readable Harn contracts and bundle manifests.
     Contracts(ContractsArgs),
     /// Lint .harn files or directories for common issues.

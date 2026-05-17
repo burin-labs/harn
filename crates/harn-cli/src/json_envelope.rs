@@ -171,6 +171,12 @@ pub fn catalog() -> Vec<SchemaEntry> {
             schema_json: None,
         },
         SchemaEntry {
+            command: "fix plan",
+            schema_version: crate::commands::fix::FIX_PLAN_SCHEMA_VERSION,
+            description: "Plan repair-bearing diagnostics without editing files.",
+            schema_json: None,
+        },
+        SchemaEntry {
             command: "skills list",
             schema_version: 1,
             description: "Embedded canonical Harn skill corpus, frontmatter only.",
@@ -266,6 +272,19 @@ mod tests {
             deduped.len()
         };
         assert_eq!(commands.len(), unique_count, "command names must be unique");
+    }
+
+    #[test]
+    fn catalog_includes_fix_plan() {
+        let entries = catalog();
+        let entry = entries
+            .iter()
+            .find(|entry| entry.command == "fix plan")
+            .expect("fix plan schema should be registered");
+        assert_eq!(
+            entry.schema_version,
+            crate::commands::fix::FIX_PLAN_SCHEMA_VERSION
+        );
     }
 
     #[test]

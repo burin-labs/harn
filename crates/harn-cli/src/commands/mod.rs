@@ -16,6 +16,7 @@ pub mod eval_prompt;
 pub(crate) mod eval_prompt_context;
 pub(crate) mod eval_tool_calls;
 pub(crate) mod explain;
+pub(crate) mod fix;
 pub mod flow;
 pub(crate) mod hardware;
 pub(crate) mod init;
