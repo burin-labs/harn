@@ -35,6 +35,20 @@ condensed series summaries instead of full per-patch history.
 
 ### Added
 
+- **`secret_store` hostlib capability (#1714).** Adds
+  `hostlib_secret_store_{get,set,delete,list}` to `harn-hostlib`, a
+  generic per-application credential primitive any Harn-hosted
+  application can compose. Picks an Apple Keychain backend on
+  macOS/iOS, a Credential Manager backend on Windows, and a
+  `0o600`-permissioned JSON file at
+  `$XDG_CONFIG_HOME/<account>/credentials.json` everywhere else.
+  `HARN_SECRET_STORE_BACKEND=file` forces the file backend on every OS
+  for sandboxed CI and eval harnesses. The file-backend path layout is
+  byte-compatible with burin-code's existing credentials file so
+  existing deployments migrate without data movement, and JSON schemas
+  under `crates/harn-hostlib/schemas/secret_store/` keep `harn check`
+  preflight covering the new builtins. Docs at
+  `docs/src/hostlib/secret_store.md`.
 - **Cerebras provider (#1705).** Added a first-class `cerebras` provider
   routed through the OpenAI-compatible stack with a `provider_family =
   "openai"` capability inheritance row. Catalog ships canonical

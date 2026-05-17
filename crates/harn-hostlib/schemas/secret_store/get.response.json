@@ -1,0 +1,14 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://harnlang.com/schemas/hostlib/secret_store/get.response.json",
+  "title": "secret_store.get response",
+  "type": "object",
+  "properties": {
+    "account": { "type": "string" },
+    "key": { "type": "string" },
+    "value": { "type": ["string", "null"] },
+    "backend": { "type": "string", "enum": ["keychain", "wincred", "file"] }
+  },
+  "required": ["account", "key", "value", "backend"],
+  "additionalProperties": false
+}

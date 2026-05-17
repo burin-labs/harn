@@ -2169,6 +2169,7 @@ dependencies = [
  "notify",
  "once_cell",
  "regex",
+ "security-framework 3.7.0",
  "serde",
  "serde_json",
  "sha2 0.11.0",
@@ -2198,6 +2199,7 @@ dependencies = [
  "tree-sitter-typescript",
  "tree-sitter-zig",
  "walkdir",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]

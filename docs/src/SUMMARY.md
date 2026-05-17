@@ -177,6 +177,7 @@
 - [Prompt templating](./prompt-templating.md)
 - [Editor integration](./editor-integration.md)
 - [Testing](./testing.md)
+- [Secret store (hostlib)](./hostlib/secret_store.md)
 
 # Migrations
 
