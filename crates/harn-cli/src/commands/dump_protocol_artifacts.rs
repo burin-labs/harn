@@ -28,6 +28,8 @@ use serde_json::json;
 const ACP_AGENT_METHODS: &[&str] = &[
     "initialize",
     "session/new",
+    "session/load",
+    "session/resume",
     "session/prompt",
     "session/truncate",
     "session/stop",

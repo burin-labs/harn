@@ -6,6 +6,8 @@ export const HARN_PROTOCOL_ARTIFACT_VERSION = "0.8.22"
 export const ACP_AGENT_METHODS = [
   "initialize",
   "session/new",
+  "session/load",
+  "session/resume",
   "session/prompt",
   "session/truncate",
   "session/stop",

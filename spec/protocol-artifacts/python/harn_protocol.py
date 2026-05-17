@@ -97,6 +97,8 @@ MCP_PROTOCOL_VERSION: str = "2025-11-25"
 ACP_AGENT_METHODS: tuple = (
     "initialize",
     "session/new",
+    "session/load",
+    "session/resume",
     "session/prompt",
     "session/truncate",
     "session/stop",
@@ -312,6 +314,8 @@ MCP_LOGGING_LEVELS: tuple = (
 class ACPAgentMethod(str, Enum):
     INITIALIZE = "initialize"
     SESSION_NEW = "session/new"
+    SESSION_LOAD = "session/load"
+    SESSION_RESUME = "session/resume"
     SESSION_PROMPT = "session/prompt"
     SESSION_TRUNCATE = "session/truncate"
     SESSION_STOP = "session/stop"

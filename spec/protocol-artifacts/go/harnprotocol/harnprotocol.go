@@ -31,6 +31,8 @@ type ACPAgentMethod = string
 var ACPAgentMethods = []ACPAgentMethod{
 	"initialize",
 	"session/new",
+	"session/load",
+	"session/resume",
 	"session/prompt",
 	"session/truncate",
 	"session/stop",
