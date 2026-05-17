@@ -1092,7 +1092,14 @@ pub fn validate_persona_stages(
                 );
             }
         }
-        validate_persona_nested_extra(manifest_path, &field, "stages", &stage.extra, errors);
+        for key in stage.extra.keys() {
+            persona_error(
+                manifest_path,
+                format!("{field}.{key}"),
+                "unknown stage field",
+                errors,
+            );
+        }
         if let Some(tools) = stage.allowed_tools.as_ref() {
             for tool in tools {
                 if tool.trim().is_empty() {

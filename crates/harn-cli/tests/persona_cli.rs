@@ -10,13 +10,12 @@
 use std::collections::BTreeSet;
 use std::fs;
 use std::path::Path;
-use std::process::Stdio;
+use std::sync::Arc;
 use std::time::Duration;
 
 use harn_cli::commands::{persona, persona_doctor, persona_scaffold, persona_supervision};
 use harn_vm::event_log::EventLog as _;
 use tempfile::TempDir;
-use tokio::io::{AsyncBufReadExt, BufReader};
 
 fn write_manifest(body: &str) -> TempDir {
     let temp = TempDir::new().unwrap();
@@ -748,26 +747,42 @@ async fn persona_supervision_tail_follow_streams_new_events() {
     let manifest = manifest_path(&temp);
     let state_dir = temp.path().join(".harn-personas-test");
 
-    let mut child = tokio::process::Command::new(env!("CARGO_BIN_EXE_harn"))
-        .arg("persona")
-        .arg("--manifest")
-        .arg(&manifest)
-        .arg("--state-dir")
-        .arg(&state_dir)
-        .arg("supervision")
-        .arg("tail")
-        .arg("--persona")
-        .arg("merge_captain")
-        .arg("--follow")
-        .arg("--limit")
-        .arg("1")
-        .arg("--json")
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        .spawn()
-        .expect("spawn harn persona supervision tail");
-    let stdout = child.stdout.take().expect("tail stdout");
-    let mut lines = BufReader::new(stdout).lines();
+    // Drive `drive_tail` in-process so the test can deterministically
+    // wait for the tail to arm its filesystem watcher (via `ready_tx`)
+    // before writing the next event. The previous subprocess+stdout race
+    // was inherently flaky because there is no observable signal for
+    // "subprocess has reached the wait loop" without a sentinel line.
+    let writer = Arc::new(std::sync::Mutex::new(Vec::<u8>::new()));
+    let (ready_tx, ready_rx) = tokio::sync::oneshot::channel();
+    let options = persona_supervision::PersonaSupervisionTailOptions {
+        persona: Some("merge_captain".to_string()),
+        follow: true,
+        limit: Some(1),
+        ..Default::default()
+    };
+
+    let manifest_clone = manifest.clone();
+    let state_dir_clone = state_dir.clone();
+    let writer_clone = Arc::clone(&writer);
+    let task = tokio::spawn(async move {
+        let mut guard = SharedWriter(writer_clone);
+        persona_supervision::drive_tail(
+            Some(&manifest_clone),
+            &state_dir_clone,
+            &options,
+            &mut guard,
+            Some(ready_tx),
+        )
+        .await
+    });
+
+    // `ready_rx` fires only after the tail has flushed its initial read
+    // (empty, here) and is about to wait for changes — so any event we
+    // append now must traverse the follow path.
+    tokio::time::timeout(Duration::from_secs(5), ready_rx)
+        .await
+        .expect("tail signalled ready")
+        .expect("ready oneshot delivered");
 
     let _ = persona::tick_payload(
         Some(&manifest),
@@ -780,21 +795,35 @@ async fn persona_supervision_tail_follow_streams_new_events() {
     .await
     .expect("append followed event");
 
-    let line = tokio::time::timeout(Duration::from_secs(5), lines.next_line())
+    let result = tokio::time::timeout(Duration::from_secs(5), task)
         .await
-        .expect("tail produced a line before timeout")
-        .expect("read tail line")
-        .expect("tail line");
-    let frame: serde_json::Value = serde_json::from_str(&line).expect("tail line JSON");
+        .expect("tail finished")
+        .expect("tail task did not panic");
+    result.expect("tail completed without error");
+
+    let bytes = writer.lock().unwrap().clone();
+    let line = std::str::from_utf8(&bytes)
+        .expect("utf8 tail output")
+        .trim()
+        .to_string();
+    let frame: serde_json::Value = serde_json::from_str(&line).expect("follow JSON");
     assert_eq!(frame["persona_id"], "merge_captain");
     assert_eq!(frame["update_kind"], "receipt");
     assert_eq!(frame["payload"]["status"], "completed");
+    assert_eq!(frame["occurred_at"], "2026-05-10T15:00:00Z");
+}
 
-    let status = tokio::time::timeout(Duration::from_secs(5), child.wait())
-        .await
-        .expect("tail exited after limit")
-        .expect("wait for tail");
-    assert!(status.success(), "tail exited with {status}");
+struct SharedWriter(Arc<std::sync::Mutex<Vec<u8>>>);
+
+impl std::io::Write for SharedWriter {
+    fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
+        self.0.lock().unwrap().extend_from_slice(buf);
+        Ok(buf.len())
+    }
+
+    fn flush(&mut self) -> std::io::Result<()> {
+        Ok(())
+    }
 }
 
 #[tokio::test(flavor = "current_thread")]
