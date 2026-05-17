@@ -7,7 +7,6 @@
 //! `ast.outline`'s response schema, so the extractor can be replaced by a
 //! tree-sitter implementation without disturbing callers.
 
-use std::fs;
 use std::path::{Path, PathBuf};
 use std::rc::Rc;
 
@@ -24,6 +23,7 @@ pub(super) fn run(args: &[VmValue]) -> Result<VmValue, HostlibError> {
 
     let path_str = require_string(BUILTIN, dict, "path")?;
     let max_depth = optional_int(BUILTIN, dict, "max_depth", 0)?;
+    let session_id = crate::tools::args::optional_string(BUILTIN, dict, "session_id")?;
     if max_depth < 0 {
         return Err(HostlibError::InvalidParameter {
             builtin: BUILTIN,
@@ -36,7 +36,11 @@ pub(super) fn run(args: &[VmValue]) -> Result<VmValue, HostlibError> {
     let path = PathBuf::from(&path_str);
     let language = detect_language(&path);
 
-    let content = fs::read_to_string(&path).map_err(|err| HostlibError::Backend {
+    let content = match crate::fs::read_to_string(&path, session_id.as_deref()) {
+        Some(result) => result,
+        None => std::fs::read_to_string(&path),
+    }
+    .map_err(|err| HostlibError::Backend {
         builtin: BUILTIN,
         message: format!("read `{path_str}`: {err}"),
     })?;

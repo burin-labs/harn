@@ -523,6 +523,55 @@ pub const SCHEMAS: &[(&str, &str, SchemaKind, &str)] = &[
         SchemaKind::Response,
         include_str!("../schemas/scanner/scan_incremental.response.json"),
     ),
+    // fs/
+    (
+        "fs",
+        "set_mode",
+        SchemaKind::Request,
+        include_str!("../schemas/fs/set_mode.request.json"),
+    ),
+    (
+        "fs",
+        "set_mode",
+        SchemaKind::Response,
+        include_str!("../schemas/fs/set_mode.response.json"),
+    ),
+    (
+        "fs",
+        "staged_status",
+        SchemaKind::Request,
+        include_str!("../schemas/fs/staged_status.request.json"),
+    ),
+    (
+        "fs",
+        "staged_status",
+        SchemaKind::Response,
+        include_str!("../schemas/fs/staged_status.response.json"),
+    ),
+    (
+        "fs",
+        "commit_staged",
+        SchemaKind::Request,
+        include_str!("../schemas/fs/commit_staged.request.json"),
+    ),
+    (
+        "fs",
+        "commit_staged",
+        SchemaKind::Response,
+        include_str!("../schemas/fs/commit_staged.response.json"),
+    ),
+    (
+        "fs",
+        "discard_staged",
+        SchemaKind::Request,
+        include_str!("../schemas/fs/discard_staged.request.json"),
+    ),
+    (
+        "fs",
+        "discard_staged",
+        SchemaKind::Response,
+        include_str!("../schemas/fs/discard_staged.response.json"),
+    ),
     // fs_watch/
     (
         "fs_watch",

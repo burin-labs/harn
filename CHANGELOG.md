@@ -6,6 +6,22 @@ Pre-0.6 highlights live in [CHANGELOG-pre-0.6.md](CHANGELOG-pre-0.6.md).
 Harn had no external users before 0.6.0, so that archive intentionally keeps
 condensed series summaries instead of full per-patch history.
 
+## Unreleased
+
+### Added
+
+- **Staged filesystem hostlib mode (#1722).** Adds the `fs/` hostlib
+  capability with `hostlib_fs_set_mode`, `hostlib_fs_staged_status`,
+  `hostlib_fs_commit_staged`, and `hostlib_fs_discard_staged`.
+  Sessions can switch to deferred writes stored under
+  `.harn/state/staged/<session_id>/`; hostlib file reads, directory
+  listings, outlines, AST parse-file calls, and code-index file reads
+  see pending changes before disk, while commit/discard controls apply
+  or drop the accumulated diff. ACP hosts can drive the same mode with
+  `session/fs_mode` and `session/fs_commit_staged`, and receive
+  `session/update` progress notifications tagged
+  `_meta.harn.kind = "staged_writes_pending"`.
+
 ## v0.8.22
 
 ### Fixed

@@ -1,0 +1,26 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://harnlang.com/schemas/hostlib/fs/commit_staged.response.json",
+  "title": "fs.commit_staged response",
+  "type": "object",
+  "properties": {
+    "committed_paths": {
+      "type": "array",
+      "items": { "type": "string" }
+    },
+    "failed_paths_with_reasons": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "path": { "type": "string" },
+          "reason": { "type": "string" }
+        },
+        "required": ["path", "reason"],
+        "additionalProperties": false
+      }
+    }
+  },
+  "required": ["committed_paths", "failed_paths_with_reasons"],
+  "additionalProperties": false
+}

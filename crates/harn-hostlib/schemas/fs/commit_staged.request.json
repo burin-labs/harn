@@ -1,0 +1,16 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://harnlang.com/schemas/hostlib/fs/commit_staged.request.json",
+  "title": "fs.commit_staged request",
+  "type": "object",
+  "properties": {
+    "session_id": { "type": "string", "minLength": 1 },
+    "paths": {
+      "type": "array",
+      "items": { "type": "string" },
+      "description": "Optional exact staged paths to commit. Missing or empty commits every pending path."
+    }
+  },
+  "required": ["session_id"],
+  "additionalProperties": false
+}

@@ -15,6 +15,7 @@ base64 = "0.22"
 futures = "0.3"
 harn-parser = { path = "../harn-parser", version = "0.8" }
 harn-vm = { path = "../harn-vm", version = "0.8" }
+harn-hostlib = { path = "../harn-hostlib", version = "0.8", optional = true }
 hmac = "0.13"
 rcgen = "0.14"
 reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
@@ -30,6 +31,10 @@ toml = "1.1"
 tracing = "0.1"
 url = "2"
 uuid = { version = "1", features = ["v4", "v7"] }
+
+[features]
+default = []
+hostlib = ["dep:harn-hostlib"]
 
 [dev-dependencies]
 filetime = "0.2"

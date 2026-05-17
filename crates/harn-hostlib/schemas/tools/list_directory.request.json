@@ -6,7 +6,11 @@
   "properties": {
     "path": { "type": "string" },
     "include_hidden": { "type": "boolean", "default": false },
-    "max_entries": { "type": "integer", "minimum": 0, "default": 0 }
+    "max_entries": { "type": "integer", "minimum": 0, "default": 0 },
+    "session_id": {
+      "type": "string",
+      "description": "Optional hostlib session whose staged filesystem overlay should be reflected in the listing."
+    }
   },
   "required": ["path"],
   "additionalProperties": false

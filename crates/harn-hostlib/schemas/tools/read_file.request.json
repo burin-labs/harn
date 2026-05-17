@@ -11,6 +11,10 @@
       "type": "string",
       "enum": ["utf-8", "binary"],
       "default": "utf-8"
+    },
+    "session_id": {
+      "type": "string",
+      "description": "Optional hostlib session whose staged filesystem overlay should be consulted before disk."
     }
   },
   "required": ["path"],

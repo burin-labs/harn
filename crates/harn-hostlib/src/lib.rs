@@ -30,6 +30,7 @@
 pub mod ast;
 pub mod code_index;
 pub mod error;
+pub mod fs;
 pub mod fs_watch;
 pub mod process;
 pub mod scanner;
@@ -54,6 +55,7 @@ pub fn install_default(vm: &mut harn_vm::Vm) -> HostlibRegistry {
         .with(ast::AstCapability)
         .with(code_index::CodeIndexCapability::new())
         .with(scanner::ScannerCapability)
+        .with(fs::FsCapability)
         .with(fs_watch::FsWatchCapability)
         .with(tools::ToolsCapability)
         .with(secret_store::SecretStoreCapability);

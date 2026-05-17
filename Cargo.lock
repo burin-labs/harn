@@ -2300,6 +2300,7 @@ dependencies = [
  "base64",
  "filetime",
  "futures",
+ "harn-hostlib",
  "harn-parser",
  "harn-vm",
  "hex",
