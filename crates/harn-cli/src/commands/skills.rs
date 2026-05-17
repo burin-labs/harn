@@ -1,7 +1,15 @@
-//! `harn skills` CLI subcommands: `list`, `inspect`, `match`, `install`,
-//! `new`. These sit on top of the layered discovery already implemented
-//! in `harn_vm::skills` so what the user sees here is byte-for-byte the
-//! registry that `harn run` / `harn test` / `harn check` hand to the VM.
+//! `harn skills` CLI subcommands.
+//!
+//! Two complementary surfaces share this namespace:
+//!
+//! - `list` / `get` / `dump` operate on the **embedded corpus** shipped
+//!   inside the `harn` binary (see [`harn_skills`]). These are the
+//!   canonical Harn skills — `harn-language`, `harn-orchestration`,
+//!   etc. — and are always available without a project on disk.
+//! - `resolved` / `inspect` / `match` / `install` / `new` operate on
+//!   the **layered FS discovery** implemented in `harn_vm::skills`, so
+//!   what the user sees there is byte-for-byte what `harn run` /
+//!   `harn test` / `harn check` hand to the VM.
 //!
 //! Install resolves a git URL or local path into
 //! `.harn/skills-cache/<namespace?>/<name>/` — mirroring
@@ -13,6 +21,9 @@ use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
 use std::{fs, process};
 
+use serde::Serialize;
+
+use harn_skills::{get_embedded_skill, list_embedded_skills, EmbeddedSkill, SkillFrontmatter};
 use harn_vm::skills::{
     build_fs_discovery, default_system_dirs, default_user_dir, parse_env_skills_path,
     DiscoveryOptions, FsLayerConfig, Layer, LayeredDiscovery, ManifestSource, Skill,
@@ -20,14 +31,257 @@ use harn_vm::skills::{
 };
 
 use crate::cli::{
-    SkillsInspectArgs, SkillsInstallArgs, SkillsListArgs, SkillsMatchArgs, SkillsNewArgs,
+    SkillsDumpArgs, SkillsGetArgs, SkillsInspectArgs, SkillsInstallArgs, SkillsListArgs,
+    SkillsMatchArgs, SkillsNewArgs, SkillsResolvedArgs,
 };
+use crate::json_envelope::{self, JsonEnvelope, JsonOutput};
 use crate::package::{load_skills_config, resolve_skills_paths, SkillSourceEntry};
 use crate::skill_loader::canonicalize_cli_dirs;
 
 const SKILLS_CACHE_DIR: &str = ".harn/skills-cache";
 
+/// `JsonEnvelope` schemaVersion for `harn skills list --json`.
+pub(crate) const SKILLS_LIST_SCHEMA_VERSION: u32 = 1;
+/// `JsonEnvelope` schemaVersion for `harn skills get --json`.
+pub(crate) const SKILLS_GET_SCHEMA_VERSION: u32 = 1;
+
+/// One row in the `skills list --json` payload — frontmatter only,
+/// no body, to keep `list` cheap to consume.
+#[derive(Debug, Clone, Serialize)]
+pub struct ListedSkill {
+    pub name: &'static str,
+    pub short: &'static str,
+    pub description: &'static str,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub when_to_use: Option<&'static str>,
+}
+
+impl ListedSkill {
+    fn from_embedded(skill: &EmbeddedSkill) -> Self {
+        Self {
+            name: skill.name,
+            short: skill.frontmatter.short,
+            description: skill.frontmatter.description,
+            when_to_use: skill.frontmatter.when_to_use,
+        }
+    }
+}
+
+/// Top-level payload for `skills list --json`. A struct (not a bare
+/// array) lets the envelope carry top-level metadata (resolution
+/// source, total counts, etc.) without a breaking schema bump.
+#[derive(Debug, Clone, Serialize)]
+pub struct SkillsListPayload {
+    pub skills: Vec<ListedSkill>,
+}
+
+impl JsonOutput for SkillsListPayload {
+    const SCHEMA_VERSION: u32 = SKILLS_LIST_SCHEMA_VERSION;
+    type Data = Self;
+
+    fn into_envelope(self) -> JsonEnvelope<Self::Data> {
+        JsonEnvelope::ok(Self::SCHEMA_VERSION, self)
+    }
+}
+
+/// Payload for `skills get --json`. `body` is only present when the
+/// caller passed `--full` — `Option` rather than empty string so the
+/// JSON shape encodes the distinction unambiguously.
+#[derive(Debug, Clone, Serialize)]
+pub struct SkillsGetPayload {
+    pub name: &'static str,
+    pub short: &'static str,
+    pub description: &'static str,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub when_to_use: Option<&'static str>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub body: Option<&'static str>,
+}
+
+impl SkillsGetPayload {
+    fn from_embedded(skill: &EmbeddedSkill, include_body: bool) -> Self {
+        Self {
+            name: skill.name,
+            short: skill.frontmatter.short,
+            description: skill.frontmatter.description,
+            when_to_use: skill.frontmatter.when_to_use,
+            body: include_body.then_some(skill.body),
+        }
+    }
+}
+
+impl JsonOutput for SkillsGetPayload {
+    const SCHEMA_VERSION: u32 = SKILLS_GET_SCHEMA_VERSION;
+    type Data = Self;
+
+    fn into_envelope(self) -> JsonEnvelope<Self::Data> {
+        JsonEnvelope::ok(Self::SCHEMA_VERSION, self)
+    }
+}
+
+/// `harn skills list` — surfaces the embedded canonical Harn skill
+/// corpus. FS-discovered skills live under `harn skills resolved`.
 pub(crate) fn run_list(args: &SkillsListArgs) {
+    let skills = list_embedded_skills();
+
+    if args.json {
+        let payload = SkillsListPayload {
+            skills: skills.iter().map(ListedSkill::from_embedded).collect(),
+        };
+        println!(
+            "{}",
+            json_envelope::to_string_pretty(&payload.into_envelope())
+        );
+        return;
+    }
+
+    if skills.is_empty() {
+        println!("No embedded skills bundled with this `harn` build.");
+        return;
+    }
+
+    println!("Embedded canonical skills ({}):", skills.len());
+    let name_width = skills.iter().map(|s| s.name.len()).max().unwrap_or(4);
+    for skill in skills {
+        let short = if skill.frontmatter.short.is_empty() {
+            "(no short description)"
+        } else {
+            skill.frontmatter.short
+        };
+        println!(
+            "  {:<name_width$}  {}",
+            skill.name,
+            truncate(short, 72),
+            name_width = name_width
+        );
+    }
+    println!();
+    println!("Run `harn skills get <name>` for one entry's frontmatter.");
+    println!("Run `harn skills get <name> --full` to include the body.");
+}
+
+/// `harn skills get <name>` — embedded skill frontmatter, or full
+/// SKILL.md body when `--full` is passed.
+pub(crate) fn run_get(args: &SkillsGetArgs) {
+    let Some(skill) = get_embedded_skill(&args.name) else {
+        emit_get_not_found(&args.name, args.json);
+        process::exit(1);
+    };
+
+    if args.json {
+        let payload = SkillsGetPayload::from_embedded(skill, args.full);
+        println!(
+            "{}",
+            json_envelope::to_string_pretty(&payload.into_envelope())
+        );
+        return;
+    }
+
+    print_skill_frontmatter(&skill.frontmatter);
+    if args.full {
+        println!();
+        println!("---- SKILL.md body ----");
+        print!("{}", skill.body);
+        if !skill.body.ends_with('\n') {
+            println!();
+        }
+    }
+}
+
+/// `harn skills dump --all` — write every embedded skill to disk so
+/// agents and CI can review the corpus offline.
+pub(crate) fn run_dump(args: &SkillsDumpArgs) {
+    if !args.all {
+        eprintln!(
+            "error: `harn skills dump` requires `--all`. \
+             Pass `--all` to write every embedded skill."
+        );
+        process::exit(2);
+    }
+
+    let out_dir = args
+        .out
+        .as_deref()
+        .map(PathBuf::from)
+        .unwrap_or_else(|| PathBuf::from("skills"));
+
+    if let Err(error) = fs::create_dir_all(&out_dir) {
+        eprintln!("error: failed to create {}: {error}", out_dir.display());
+        process::exit(1);
+    }
+
+    let skills = list_embedded_skills();
+    let mut written = Vec::with_capacity(skills.len());
+    for skill in skills {
+        let skill_dir = out_dir.join(skill.name);
+        if let Err(error) = fs::create_dir_all(&skill_dir) {
+            eprintln!("error: failed to create {}: {error}", skill_dir.display());
+            process::exit(1);
+        }
+
+        let dest = skill_dir.join("SKILL.md");
+        if dest.exists() && !args.force {
+            eprintln!(
+                "error: {} already exists. Pass --force to overwrite.",
+                dest.display()
+            );
+            process::exit(1);
+        }
+
+        // Byte-for-byte mirror the binary's canonical source so on-disk
+        // copies stay diff-stable against the embedded record.
+        if let Err(error) = fs::write(&dest, skill.source) {
+            eprintln!("error: failed to write {}: {error}", dest.display());
+            process::exit(1);
+        }
+        written.push(dest);
+    }
+
+    println!("Wrote {} skill(s) to {}", written.len(), out_dir.display());
+    for path in &written {
+        println!("  {}", path.display());
+    }
+}
+
+fn print_skill_frontmatter(frontmatter: &SkillFrontmatter) {
+    println!("name:        {}", frontmatter.name);
+    if !frontmatter.short.is_empty() {
+        println!("short:       {}", frontmatter.short);
+    }
+    if !frontmatter.description.is_empty() {
+        println!("description: {}", frontmatter.description);
+    }
+    if let Some(when) = frontmatter.when_to_use {
+        println!("when_to_use: {when}");
+    }
+}
+
+fn emit_get_not_found(name: &str, json: bool) {
+    if json {
+        let envelope: JsonEnvelope<SkillsGetPayload> = JsonEnvelope::err(
+            SKILLS_GET_SCHEMA_VERSION,
+            "skill_not_found",
+            format!("no embedded skill named `{name}`"),
+        )
+        .with_details(serde_json::json!({
+            "requested": name,
+            "available": list_embedded_skills()
+                .iter()
+                .map(|s| s.name)
+                .collect::<Vec<_>>(),
+        }));
+        println!("{}", json_envelope::to_string_pretty(&envelope));
+    } else {
+        eprintln!("error: no embedded skill named `{name}`.");
+        eprintln!("hint: run `harn skills list` to see what ships with this binary.");
+    }
+}
+
+/// `harn skills resolved` — FS-layered discovery view. The
+/// counterpart to the embedded `list`/`get`/`dump` surface: walks the
+/// project, manifest, user, package, and host layers the same way the
+/// VM does, and reports collisions and shadowing.
+pub(crate) fn run_resolved(args: &SkillsResolvedArgs) {
     let discovery = build_discovery(&args.skill_dir, args.from.as_deref());
     let report = discovery.build_report();
 
@@ -430,7 +684,7 @@ They are accessible to the skill body via `${{HARN_SKILL_DIR}}/files/<name>`.\n"
     println!("  files/README.md");
     println!();
     println!(
-        "Edit the SKILL.md frontmatter and body, then run `harn skills list` to verify it's picked up."
+        "Edit the SKILL.md frontmatter and body, then run `harn skills resolved` to verify it's picked up."
     );
 }
 

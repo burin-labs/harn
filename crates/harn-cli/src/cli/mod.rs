@@ -164,8 +164,8 @@ pub(crate) use skill::{
     SkillWhoSignedArgs,
 };
 pub(crate) use skills::{
-    SkillsArgs, SkillsCommand, SkillsInspectArgs, SkillsInstallArgs, SkillsListArgs,
-    SkillsMatchArgs, SkillsNewArgs,
+    SkillsArgs, SkillsCommand, SkillsDumpArgs, SkillsGetArgs, SkillsInspectArgs, SkillsInstallArgs,
+    SkillsListArgs, SkillsMatchArgs, SkillsNewArgs, SkillsResolvedArgs,
 };
 pub(crate) use supervisor::{
     SupervisorArgs, SupervisorCommand, SupervisorDlqCommand, SupervisorDlqListArgs,
@@ -410,7 +410,8 @@ SCRIPTING
     /// provider (or `HARN_LLM_PROVIDER=mock` for offline use).
     #[command(name = "try")]
     Try(TryArgs),
-    /// Manage and inspect Harn skills (list, inspect, match, install, new).
+    /// Manage and inspect Harn skills (list/get/dump for the embedded
+    /// corpus; resolved/inspect/match/install/new for FS-resolved skills).
     Skills(SkillsArgs),
     /// Manage skill provenance: keys, signatures, verification, and trust policy.
     Skill(SkillArgs),

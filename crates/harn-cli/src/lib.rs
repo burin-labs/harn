@@ -1138,6 +1138,9 @@ async fn async_main() {
         Command::ProviderToolProbe(args) => commands::provider::run_provider_tool_probe(args).await,
         Command::Skills(args) => match args.command {
             SkillsCommand::List(list) => commands::skills::run_list(&list),
+            SkillsCommand::Get(get) => commands::skills::run_get(&get),
+            SkillsCommand::Dump(dump) => commands::skills::run_dump(&dump),
+            SkillsCommand::Resolved(resolved) => commands::skills::run_resolved(&resolved),
             SkillsCommand::Inspect(inspect) => commands::skills::run_inspect(&inspect),
             SkillsCommand::Match(matcher) => commands::skills::run_match(&matcher),
             SkillsCommand::Install(install) => commands::skills::run_install(&install),
