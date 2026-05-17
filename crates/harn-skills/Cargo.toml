@@ -1,0 +1,11 @@
+[package]
+name = "harn-skills"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+description = "Embedded skill corpus for the Harn CLI and runtime"
+include = ["src/**/*", "Cargo.toml"]
+
+[dependencies]
