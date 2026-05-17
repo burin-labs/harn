@@ -142,6 +142,7 @@ const RUNTIME_ONLY_EXCEPTIONS: &[&str] = &[
     "__host_workflow_record_transitions",
     "__host_workflow_stage_complete",
     "__host_workflow_stage_prepare",
+    "__harn_with_execution_policy_override",
     "__memory_forget",
     "__memory_open",
     "__memory_recall",

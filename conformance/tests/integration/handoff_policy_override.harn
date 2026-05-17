@@ -1,0 +1,112 @@
+/**
+ * Handoff policy overrides are carried on the typed envelope, surfaced in
+ * tool-middleware audit records, and adopted as a replacement execution policy
+ * for the target dispatcher invocation.
+ */
+import "std/agents"
+import "std/handoffs"
+import { with_handoff_artifact } from "std/llm/tool_middleware"
+
+fn note_tools() {
+  var tools = tool_registry()
+  tools = tool_define(
+    tools,
+    "read_note",
+    "Read a note",
+    {
+      handler: { args -> "read " + args.path },
+      parameters: {path: {type: "string"}},
+      returns: {type: "string"},
+    },
+  )
+  tools = tool_define(
+    tools,
+    "write_note",
+    "Write a note",
+    {
+      handler: { args -> "wrote " + args.path },
+      parameters: {path: {type: "string"}},
+      returns: {type: "string"},
+    },
+  )
+  return tools
+}
+
+fn handoff_tool_call() {
+  return {
+    tool_name: "handoff_tool",
+    tool_args: {},
+    call_id: "handoff-call",
+    declared_executor: "harn",
+    schema: nil,
+    description: "",
+    turn: {iteration: 0, session_id: "handoff-policy-test"},
+  }
+}
+
+fn successful_handoff_result(payload) {
+  return { call -> return {
+    ok: true,
+    status: "ok",
+    tool_name: call.tool_name,
+    tool_call_id: call.call_id,
+    arguments: call.tool_args,
+    result: {__handoff: payload},
+    rendered_result: "handoff",
+    observation: "",
+    error: nil,
+    error_category: nil,
+    executor: "harn",
+  } }
+}
+
+fn review_captain_mock(envelope) {
+  let policy = current_policy()
+  let tools = note_tools()
+  let read_result = agent_dispatch_tool_call({name: "read_note", id: "read-1", arguments: {path: "notes.txt"}}, tools)
+  let denied = agent_dispatch_tool_call({name: "write_note", id: "write-1", arguments: {path: "notes.txt"}}, tools)
+  return {
+    source_handoff: envelope?.audit?.scope?.source_handoff,
+    handoff_policy_tool: envelope?.handoff?.policy_override?.tools[0],
+    active_policy_tool: policy?.tools[0],
+    read_ok: read_result?.ok,
+    denied_ok: denied?.ok,
+    denied_category: denied?.error_category,
+  }
+}
+
+pipeline main() {
+  let routes = [
+    {
+      id: "handoff-policy-review",
+      kind: "merge_receipt",
+      from: "merge_captain",
+      route: [{target: "review_captain", when: "always"}],
+    },
+  ]
+  let payload = {
+    kind: "merge_receipt",
+    source_persona: "merge_captain",
+    target_persona_or_human: {kind: "persona", id: "review_captain", label: "review_captain"},
+    task: "Review policy-scoped handoff",
+    reason: "The receiving persona should run under the handoff override",
+    requested_capabilities: ["review"],
+    policy_override: {tools: ["read_note"], side_effect_level: "read_only"},
+  }
+  let record = handoff(payload)
+  let mw = with_handoff_artifact()
+  let audited = mw(handoff_tool_call(), successful_handoff_result(payload))
+  let routed = handoff_routed(payload, routes, {})
+  let dispatch = handoff_dispatch(routed, nil, {dispatchers: {review_captain: review_captain_mock}})
+  let invocation = dispatch?.dispatch_receipt?.invocation_result
+  println(record?.policy_override?.tools[0] == "read_note")
+  println(audited?.audit?.handoff?.policy_override?.tools[0] == "read_note")
+  println(dispatch?.audit?.scope?.source_handoff == routed?.id)
+  println(invocation?.source_handoff == routed?.id)
+  println(invocation?.handoff_policy_tool == "read_note")
+  println(invocation?.active_policy_tool == "read_note")
+  println(invocation?.read_ok)
+  println(!invocation?.denied_ok)
+  println(invocation?.denied_category == "permission_denied")
+  println(current_policy() == nil)
+}

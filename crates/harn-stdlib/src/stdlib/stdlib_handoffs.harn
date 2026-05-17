@@ -193,6 +193,26 @@ fn __handoff_dispatcher(options, selected) {
   return nil
 }
 
+fn __handoff_dispatch_audit_scope(handoff_value) {
+  return {source_handoff: handoff_value?.id}
+}
+
+fn __handoff_policy_override(handoff_value) {
+  let policy = handoff_value?.policy_override
+  if type_of(policy) == "dict" {
+    return policy
+  }
+  return nil
+}
+
+fn __handoff_invoke_dispatcher(dispatcher, envelope) {
+  let policy = __handoff_policy_override(envelope?.handoff)
+  if policy == nil {
+    return dispatcher(envelope)
+  }
+  return __harn_with_execution_policy_override(policy, fn() { return dispatcher(envelope) })
+}
+
 /** Persist the selected handoff route and enqueue a target-specific dispatch record. */
 pub fn handoff_dispatch(handoff_payload, decision = nil, options = nil) {
   let handoff_value = handoff(handoff_payload)
@@ -207,6 +227,7 @@ pub fn handoff_dispatch(handoff_payload, decision = nil, options = nil) {
     handoff: handoff_value,
     decision: dispatch,
     tenant_id: options?.tenant_id,
+    audit: {scope: __handoff_dispatch_audit_scope(handoff_value)},
   }
   let decision_event_id = event_log
     .emit(
@@ -223,17 +244,20 @@ pub fn handoff_dispatch(handoff_payload, decision = nil, options = nil) {
     {handoff_id: handoff_value.id, target: selected.target},
   )
   let dispatcher = __handoff_dispatcher(options, selected)
+  let invocation_envelope = payload + {decision_event_id: decision_event_id, enqueue_event_id: enqueue_event_id}
   let invocation_result = if dispatcher == nil {
     nil
   } else {
-    dispatcher(payload + {decision_event_id: decision_event_id, enqueue_event_id: enqueue_event_id})
+    __handoff_invoke_dispatcher(dispatcher, invocation_envelope)
   }
   return dispatch
     + {
+    audit: payload.audit,
     dispatch_receipt: {
       decision_event_id: decision_event_id,
       enqueue_event_id: enqueue_event_id,
       topic: __handoff_dispatch_topic(selected),
+      audit: payload.audit,
       invocation_result: invocation_result,
     },
   }

@@ -3,7 +3,9 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use serde::{Deserialize, Serialize};
 
-use super::{current_mutation_session, new_id, now_rfc3339, ArtifactRecord, RunRecord};
+use super::{
+    current_mutation_session, new_id, now_rfc3339, ArtifactRecord, CapabilityPolicy, RunRecord,
+};
 
 const HANDOFF_TYPE: &str = "handoff_artifact";
 const HANDOFF_ARTIFACT_KIND: &str = "handoff";
@@ -266,6 +268,8 @@ pub struct HandoffArtifact {
     pub blocked_on: Vec<String>,
     pub requested_capabilities: Vec<String>,
     pub allowed_side_effects: Vec<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub policy_override: Option<CapabilityPolicy>,
     pub budget_remaining: Option<HandoffBudgetRemainingRecord>,
     pub deadline_checkback: Option<HandoffDeadlineCheckbackRecord>,
     pub confidence: Option<f64>,
@@ -505,6 +509,9 @@ fn merge_handoffs(mut left: HandoffArtifact, right: HandoffArtifact) -> HandoffA
     }
     if left.allowed_side_effects.is_empty() {
         left.allowed_side_effects = right.allowed_side_effects;
+    }
+    if left.policy_override.is_none() {
+        left.policy_override = right.policy_override;
     }
     if left.budget_remaining.is_none() {
         left.budget_remaining = right.budget_remaining;

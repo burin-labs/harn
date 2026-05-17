@@ -697,6 +697,7 @@ pub(crate) const SIGNATURES: &[BuiltinSignature] = &[
         TY_STRING,
     ),
     BuiltinSignature::simple("cos", &[Param::new("value", TY_NUMBER)], TY_FLOAT),
+    BuiltinSignature::simple("current_policy", &[], TY_ANY),
     BuiltinSignature::simple(
         "csv_parse",
         &[
