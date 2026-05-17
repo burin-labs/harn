@@ -3,7 +3,7 @@
 //! an item treated as part of that item.
 
 use harn_lexer::{FixEdit, Span};
-use harn_parser::SNode;
+use harn_parser::{DiagnosticCode as Code, SNode};
 
 use crate::diagnostic::{LintDiagnostic, LintSeverity};
 use crate::harndoc::{collect_comment_tokens, LegacyCommentTok};
@@ -68,6 +68,7 @@ pub(crate) fn check_blank_line_between_items(
             };
             let span = Span::with_offsets(insert_offset, insert_offset, insert_line, 1);
             diagnostics.push(LintDiagnostic {
+                code: Code::LintBlankLineBetweenItems,
                 rule: "blank-line-between-items",
                 message: "top-level items should be separated by a blank line".to_string(),
                 span,

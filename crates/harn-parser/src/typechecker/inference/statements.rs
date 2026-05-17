@@ -15,6 +15,7 @@ use harn_lexer::Span;
 
 use crate::ast::*;
 use crate::builtin_signatures;
+use crate::diagnostic_codes::Code;
 
 use super::super::binary_ops::infer_binary_op_type;
 use super::super::exits::stmt_definitely_exits;
@@ -58,7 +59,11 @@ impl TypeChecker {
         let mut definitely_exited = false;
         for stmt in stmts {
             if definitely_exited {
-                self.warning_at("unreachable code".to_string(), stmt.span);
+                self.warning_at(
+                    Code::UnreachableCode,
+                    "unreachable code".to_string(),
+                    stmt.span,
+                );
                 break; // warn once per block
             }
             self.check_node(stmt, scope);
@@ -197,6 +202,7 @@ impl TypeChecker {
             return;
         }
         self.warning_at(
+            Code::UnknownMethod,
             format!(
                 "Method '{}' not found in interface '{}' (constraint on '{}')",
                 method, iface_name, type_name
@@ -250,7 +256,7 @@ impl TypeChecker {
         }
         match &resolved {
             TypeExpr::Named(name) if name == "nil" && !optional => {
-                self.error_at_with_help(
+                self.error_at_with_help(Code::InvalidOptionalAccess,
                     format!(
                         "cannot access property `{property}` on `nil`; the value is statically known to be nil here"
                     ),
@@ -259,7 +265,7 @@ impl TypeChecker {
                 );
             }
             TypeExpr::Named(name) if matches!(name.as_str(), "unknown") => {
-                self.warning_at_with_help(
+                self.warning_at_with_help(Code::UnknownField,
                     format!("property access `.{property}` on an `unknown` value will fail at runtime if the value is not a shape with that field"),
                     span,
                     "narrow with `is_a`/`type_of`, validate with `assert_shape`, or annotate with a shape type before accessing fields"
@@ -280,7 +286,7 @@ impl TypeChecker {
                     msg.push_str(&format!(" — did you mean `{close}`?"));
                 }
                 let help = format!("available fields: {}", actual.join(", "));
-                self.error_at_with_help(msg, span, help);
+                self.error_at_with_help(Code::UnknownField, msg, span, help);
             }
             TypeExpr::Named(name) if scope.get_struct(name).is_some() => {
                 self.check_struct_property(name, property, scope, span);
@@ -334,7 +340,7 @@ impl TypeChecker {
         } else {
             format!("available fields: {}", field_names.join(", "))
         };
-        self.error_at_with_help(msg, span, help);
+        self.error_at_with_help(Code::UnknownField, msg, span, help);
     }
 
     /// If `ty` is a `T | nil` union (any width), emit a hint to use `?.`
@@ -380,7 +386,7 @@ impl TypeChecker {
         if !non_nil_admits_property {
             return;
         }
-        self.error_at_with_help(
+        self.error_at_with_help(Code::InvalidOptionalAccess,
             format!(
                 "cannot access property `{property}` on nilable type `{ty}`; the value may be nil at runtime",
                 ty = format_type(ty)
@@ -407,7 +413,7 @@ impl TypeChecker {
                 let has_schema = (name == "llm_call" || name == "llm_completion")
                     && Self::llm_call_has_typed_schema_option(args, scope);
                 if !has_schema {
-                    self.warning_at_with_help(
+                    self.warning_at_with_help(Code::BoundaryValueUnvalidated,
                         format!("{} on unvalidated `{}()` result", kind.direct_label(), name),
                         span,
                         "assign to a variable and validate with schema_expect() or a type annotation first".to_string(),
@@ -417,7 +423,7 @@ impl TypeChecker {
         }
         if let Node::Identifier(name) = &object.node {
             if let Some(source) = scope.is_untyped_source(name) {
-                self.warning_at_with_help(
+                self.warning_at_with_help(Code::BoundaryValueUnvalidated,
                     format!(
                         "{} on unvalidated value '{}' from `{}`",
                         kind.variable_label(),
@@ -446,12 +452,15 @@ impl TypeChecker {
                         if let Some(actual) = &inferred {
                             if !self.types_compatible(expected, actual, scope) {
                                 self.type_mismatch_at(
+                                    Code::VariableTypeMismatch,
                                     format!("let binding `{name}`"),
                                     expected,
                                     actual,
                                     value.span,
-                                    Some((span, "expected type declared here".to_string())),
-                                    Some(value.span),
+                                    (
+                                        Some((span, "expected type declared here".to_string())),
+                                        Some(value.span),
+                                    ),
                                     scope,
                                 );
                             }
@@ -504,12 +513,15 @@ impl TypeChecker {
                         if let Some(actual) = &inferred {
                             if !self.types_compatible(expected, actual, scope) {
                                 self.type_mismatch_at(
+                                    Code::VariableTypeMismatch,
                                     format!("var binding `{name}`"),
                                     expected,
                                     actual,
                                     value.span,
-                                    Some((span, "expected type declared here".to_string())),
-                                    Some(value.span),
+                                    (
+                                        Some((span, "expected type declared here".to_string())),
+                                        Some(value.span),
+                                    ),
                                     scope,
                                 );
                             }
@@ -817,7 +829,7 @@ impl TypeChecker {
 
             Node::TryStar { operand } => {
                 if self.fn_depth == 0 {
-                    self.error_at(
+                    self.error_at(Code::TryOutsideFunction,
                         "try* requires an enclosing function (fn, tool, or pipeline) so the rethrow has a target".to_string(),
                         span,
                     );
@@ -839,7 +851,7 @@ impl TypeChecker {
                     let mut widened_slot_type: Option<TypeExpr> = None;
                     // Compile-time immutability check
                     if scope.get_var(name).is_some() && !scope.is_mutable(name) {
-                        self.warning_at(
+                        self.warning_at(Code::ImmutableAssignment,
                             format!(
                                 "Cannot assign to '{}': variable is immutable (declared with 'let')",
                                 name
@@ -872,15 +884,18 @@ impl TypeChecker {
                                     widened_slot_type = Some(Self::union_with_nil(actual));
                                 } else {
                                     self.type_mismatch_at(
+                                        Code::AssignmentTypeMismatch,
                                         format!("assignment to `{name}`"),
                                         check_type,
                                         actual,
                                         value.span,
-                                        Some((
-                                            target.span,
-                                            format!("`{name}` has this expected type"),
-                                        )),
-                                        Some(value.span),
+                                        (
+                                            Some((
+                                                target.span,
+                                                format!("`{name}` has this expected type"),
+                                            )),
+                                            Some(value.span),
+                                        ),
                                         scope,
                                     );
                                 }
@@ -1063,7 +1078,7 @@ impl TypeChecker {
                                     Node::BoolLiteral(_) => "bool",
                                     _ => unreachable!(),
                                 };
-                                self.warning_at(
+                                self.warning_at(Code::InvalidMatchPattern,
                                     format!(
                                         "Match pattern type mismatch: matching {} against {} literal",
                                         value_type_name, pattern_type
@@ -1148,6 +1163,7 @@ impl TypeChecker {
                             let numeric = ["int", "float"];
                             if !numeric.contains(&l.as_str()) || !numeric.contains(&r.as_str()) {
                                 self.error_at(
+                                    Code::InvalidBinaryOperator,
                                     format!(
                                         "can't use '{}' on {} and {} (needs numeric operands)",
                                         op, l, r
@@ -1164,6 +1180,7 @@ impl TypeChecker {
                                 (l == "string" && r == "int") || (l == "int" && r == "string");
                             if !is_numeric && !is_string_repeat {
                                 self.error_at(
+                                    Code::InvalidBinaryOperator,
                                     format!("can't multiply {} and {} (try string * int)", l, r),
                                     span,
                                 );
@@ -1186,9 +1203,14 @@ impl TypeChecker {
                                     None
                                 };
                                 if let Some(fix) = fix {
-                                    self.error_at_with_fix(msg, span, fix);
+                                    self.error_at_with_fix(
+                                        Code::StringInterpolationRewrite,
+                                        msg,
+                                        span,
+                                        fix,
+                                    );
                                 } else {
-                                    self.error_at(msg, span);
+                                    self.error_at(Code::InvalidBinaryOperator, msg, span);
                                 }
                             }
                         }
@@ -1198,6 +1220,7 @@ impl TypeChecker {
                                 || !comparable.contains(&r.as_str())
                             {
                                 self.warning_at(
+                                    Code::InvalidBinaryOperator,
                                     format!(
                                         "Comparison '{}' may not be meaningful for types {} and {}",
                                         op, l, r
@@ -1205,7 +1228,7 @@ impl TypeChecker {
                                     span,
                                 );
                             } else if (l == "string") != (r == "string") {
-                                self.warning_at(
+                                self.warning_at(Code::InvalidBinaryOperator,
                                     format!(
                                         "Comparing {} with {} using '{}' may give unexpected results",
                                         l, r, op
@@ -1346,6 +1369,7 @@ impl TypeChecker {
                         if let Some(ty) = self.infer_type(value, scope) {
                             if !matches!(ty, TypeExpr::Named(ref n) if n == "int") {
                                 self.error_at(
+                                    Code::OrchestrationType,
                                     format!(
                                         "`max_concurrent` on `parallel` must be int, got {ty:?}"
                                     ),
@@ -1474,6 +1498,7 @@ impl TypeChecker {
             Node::YieldExpr { value } => {
                 if self.stream_fn_depth > 0 {
                     self.error_at(
+                        Code::OrchestrationType,
                         "`yield` is not a stream emit; use `emit` inside `gen fn`".to_string(),
                         span,
                     );
@@ -1487,6 +1512,7 @@ impl TypeChecker {
                 self.check_node(value, scope);
                 if self.stream_fn_depth == 0 {
                     self.error_at(
+                        Code::OrchestrationType,
                         "`emit` can only be used inside a `gen fn`".to_string(),
                         span,
                     );
@@ -1494,12 +1520,15 @@ impl TypeChecker {
                     if let Some(actual) = self.infer_type(value, scope) {
                         if !self.types_compatible(&expected, &actual, scope) {
                             self.type_mismatch_at(
+                                Code::ReturnTypeMismatch,
                                 "`emit` value",
                                 &expected,
                                 &actual,
                                 span,
-                                Some((span, "stream emit type expected here".to_string())),
-                                Some(value.span),
+                                (
+                                    Some((span, "stream emit type expected here".to_string())),
+                                    Some(value.span),
+                                ),
                                 scope,
                             );
                         }
@@ -1522,6 +1551,7 @@ impl TypeChecker {
                         if let Node::StringLiteral(key) | Node::Identifier(key) = &entry.key.node {
                             if !struct_info.fields.iter().any(|field| field.name == *key) {
                                 self.warning_at(
+                                    Code::UnknownField,
                                     format!("Unknown field '{}' in struct '{}'", key, struct_name),
                                     entry.key.span,
                                 );
@@ -1539,6 +1569,7 @@ impl TypeChecker {
                     for field in &struct_info.fields {
                         if !field.optional && !provided.contains(&field.name) {
                             self.warning_at(
+                                Code::FieldTypeMismatch,
                                 format!(
                                     "Missing field '{}' in struct '{}' construction",
                                     field.name, struct_name
@@ -1562,12 +1593,15 @@ impl TypeChecker {
                         let expected = Self::apply_type_bindings(expected_type, &type_bindings);
                         if !self.types_compatible(&expected, &actual_type, scope) {
                             self.type_mismatch_at(
+                                Code::FieldTypeMismatch,
                                 format!("field `{}` in struct `{struct_name}`", field.name),
                                 &expected,
                                 &actual_type,
                                 entry.value.span,
-                                Some((span, format!("struct `{struct_name}` expected here"))),
-                                Some(entry.value.span),
+                                (
+                                    Some((span, format!("struct `{struct_name}` expected here"))),
+                                    Some(entry.value.span),
+                                ),
                                 scope,
                             );
                         }
@@ -1587,11 +1621,13 @@ impl TypeChecker {
                     };
                     match suggestion {
                         Some(candidate) => self.error_at_with_help(
+                            Code::UnknownTypeName,
                             message,
                             span,
                             format!("declare `struct {candidate} {{ ... }}` or fix the type name"),
                         ),
                         None => self.error_at_with_help(
+                            Code::UnknownTypeName,
                             message,
                             span,
                             format!(
@@ -1617,6 +1653,7 @@ impl TypeChecker {
                         .find(|enum_variant| enum_variant.name == *variant)
                     else {
                         self.warning_at(
+                            Code::InvalidEnumConstruct,
                             format!("Unknown variant '{}' in enum '{}'", variant, enum_name),
                             span,
                         );
@@ -1626,6 +1663,7 @@ impl TypeChecker {
                         let n = enum_variant.fields.len();
                         let arg_word = if n == 1 { "argument" } else { "arguments" };
                         self.warning_at(
+                            Code::OrchestrationArity,
                             format!(
                                 "{}.{} expects {} {}, got {}",
                                 enum_name,
@@ -1656,7 +1694,7 @@ impl TypeChecker {
                             &type_param_set,
                             &mut type_bindings,
                         ) {
-                            self.error_at(message, arg.span);
+                            self.error_at(Code::GenericTypeArgumentMismatch, message, arg.span);
                         }
                     }
                     for (field, arg) in enum_variant.fields.iter().zip(args.iter()) {
@@ -1669,15 +1707,20 @@ impl TypeChecker {
                         let expected = Self::apply_type_bindings(expected_type, &type_bindings);
                         if !self.types_compatible(&expected, &actual_type, scope) {
                             self.type_mismatch_at(
+                                Code::ArgumentTypeMismatch,
                                 format!("{}.{} argument `{}`", enum_name, variant, field.name),
                                 &expected,
                                 &actual_type,
                                 arg.span,
-                                Some((
-                                    span,
-                                    format!("enum variant `{enum_name}.{variant}` expected here"),
-                                )),
-                                Some(arg.span),
+                                (
+                                    Some((
+                                        span,
+                                        format!(
+                                            "enum variant `{enum_name}.{variant}` expected here"
+                                        ),
+                                    )),
+                                    Some(arg.span),
+                                ),
                                 scope,
                             );
                         }
@@ -1734,6 +1777,7 @@ impl TypeChecker {
                     let is_wildcard = matches!(&alt.node, Node::Identifier(name) if name == "_");
                     if !is_literal && !is_wildcard {
                         self.error_at(
+                            Code::InvalidMatchPattern,
                             "Or-pattern alternatives must be literal patterns \
                              (string, int, float, bool, nil, or `_`). Identifier \
                              bindings and destructuring patterns are not allowed \
@@ -1774,25 +1818,32 @@ impl TypeChecker {
                 | "deterministic" | "semantic" | "archivist" | "retroactive" | "persona"
                 | "step" | "trigger" | "handoff" | "budget" | "command" => {}
                 other => {
-                    self.warning_at(format!("unknown attribute `@{}`", other), attr.span);
+                    self.warning_at(
+                        Code::UnknownAttribute,
+                        format!("unknown attribute `@{}`", other),
+                        attr.span,
+                    );
                 }
             }
             self.validate_standard_attribute_args(attr);
             // `@test` marks test pipelines discovered by `harn test`.
             if attr.name == "test" && !matches!(inner.node, Node::Pipeline { .. }) {
                 self.warning_at(
+                    Code::InvalidAttributeTarget,
                     "`@test` only applies to pipeline declarations".to_string(),
                     attr.span,
                 );
             }
             if attr.name == "acp_tool" && !matches!(inner.node, Node::FnDecl { .. }) {
                 self.warning_at(
+                    Code::InvalidAttributeTarget,
                     "`@acp_tool` only applies to function declarations".to_string(),
                     attr.span,
                 );
             }
             if attr.name == "acp_skill" && !matches!(inner.node, Node::FnDecl { .. }) {
                 self.warning_at(
+                    Code::InvalidAttributeTarget,
                     "`@acp_skill` only applies to function declarations".to_string(),
                     attr.span,
                 );
@@ -1805,6 +1856,7 @@ impl TypeChecker {
                 Node::FnDecl { .. } | Node::ToolDecl { .. } | Node::Pipeline { .. }
             ) {
                 self.warning_at(
+                    Code::InvalidAttributeTarget,
                     format!(
                         "`@{}` only applies to function, tool, or pipeline declarations",
                         attr.name
@@ -1814,12 +1866,14 @@ impl TypeChecker {
             }
             if attr.name == "command" && !matches!(inner.node, Node::Pipeline { .. }) {
                 self.warning_at(
+                    Code::InvalidAttributeTarget,
                     "`@command` only applies to pipeline declarations".to_string(),
                     attr.span,
                 );
             }
             if attr.name == "step" && !matches!(inner.node, Node::FnDecl { .. }) {
                 self.warning_at(
+                    Code::InvalidAttributeTarget,
                     "`@step` only applies to function declarations".to_string(),
                     attr.span,
                 );
@@ -1830,6 +1884,7 @@ impl TypeChecker {
             ) && !matches!(inner.node, Node::FnDecl { .. })
             {
                 self.warning_at(
+                    Code::InvalidAttributeTarget,
                     format!("`@{}` only applies to function declarations", attr.name),
                     attr.span,
                 );
@@ -1841,6 +1896,7 @@ impl TypeChecker {
                 )
             {
                 self.warning_at(
+                    Code::InvalidAttributeTarget,
                     "`@invariant` only applies to function, tool, or pipeline declarations"
                         .to_string(),
                     attr.span,
@@ -1862,6 +1918,7 @@ impl TypeChecker {
 
         if let (Some(det), Some(sem)) = (deterministic, semantic) {
             self.warning_at(
+                Code::FlowInvariantAttributeInvalid,
                 "`@deterministic` and `@semantic` are mutually exclusive; \
                  a Flow predicate is one mode or the other"
                     .to_string(),
@@ -1872,6 +1929,7 @@ impl TypeChecker {
         if let Some(inv) = flow_invariant {
             if deterministic.is_none() && semantic.is_none() {
                 self.warning_at(
+                    Code::FlowInvariantAttributeInvalid,
                     "Flow `@invariant` requires exactly one of `@deterministic` \
                      (default) or `@semantic`"
                         .to_string(),
@@ -1880,6 +1938,7 @@ impl TypeChecker {
             }
             if archivist.is_none() {
                 self.warning_at(
+                    Code::FlowInvariantAttributeInvalid,
                     "Flow `@invariant` is missing `@archivist(...)` provenance \
                      (evidence, confidence, source_date, coverage_examples)"
                         .to_string(),
@@ -1889,6 +1948,7 @@ impl TypeChecker {
         } else {
             if let Some(arch) = archivist {
                 self.warning_at(
+                    Code::FlowInvariantAttributeInvalid,
                     "`@archivist(...)` only applies to Flow predicates marked \
                      with `@invariant`"
                         .to_string(),
@@ -1897,6 +1957,7 @@ impl TypeChecker {
             }
             if let Some(retro) = retroactive {
                 self.warning_at(
+                    Code::FlowInvariantAttributeInvalid,
                     "`@retroactive` only applies to Flow predicates marked \
                      with `@invariant`"
                         .to_string(),
@@ -1920,7 +1981,11 @@ impl TypeChecker {
             "deprecated" => self.validate_deprecated_args(attr),
             "command" => self.validate_command_args(attr),
             "test" if !attr.args.is_empty() => {
-                self.warning_at("`@test` does not accept arguments".to_string(), attr.span);
+                self.warning_at(
+                    Code::InvalidAttributeArgument,
+                    "`@test` does not accept arguments".to_string(),
+                    attr.span,
+                );
             }
             _ => {}
         }
@@ -1934,6 +1999,7 @@ impl TypeChecker {
             };
             if !KNOWN_KEYS.contains(&name) {
                 self.warning_at(
+                    Code::InvalidAttributeArgument,
                     format!("unknown `@command` argument `{name}`; expected one of {KNOWN_KEYS:?}"),
                     arg.span,
                 );
@@ -1960,6 +2026,7 @@ impl TypeChecker {
             };
             if !KNOWN_KEYS.contains(&name) {
                 self.warning_at(
+                    Code::InvalidAttributeArgument,
                     format!("unknown `@step` argument `{name}`; expected one of {KNOWN_KEYS:?}"),
                     arg.span,
                 );
@@ -1995,6 +2062,7 @@ impl TypeChecker {
         }
         if !has_name {
             self.warning_at(
+                Code::InvalidAttributeArgument,
                 "`@step(...)` should declare `name: \"...\"` for stable supervision metadata"
                     .to_string(),
                 attr.span,
@@ -2006,6 +2074,7 @@ impl TypeChecker {
         const NUMBER_KEYS: &[&str] = &["max_tokens", "max_usd"];
         let Node::DictLiteral(entries) = &value.node else {
             self.warning_at(
+                Code::InvalidAttributeArgument,
                 "`@step(budget: ...)` must be a dict such as `{ max_tokens: 1000, max_usd: 0.05 }`"
                     .to_string(),
                 span,
@@ -2015,13 +2084,14 @@ impl TypeChecker {
         for entry in entries {
             let Some(field_name) = attr_key_name(&entry.key.node) else {
                 self.warning_at(
+                    Code::InvalidAttributeArgument,
                     "`@step(budget: ...)` field names must be strings or identifiers".to_string(),
                     entry.key.span,
                 );
                 continue;
             };
             if !NUMBER_KEYS.contains(&field_name) {
-                self.warning_at(
+                self.warning_at(Code::InvalidAttributeArgument,
                     format!(
                         "unknown `@step(budget: ...)` field `{field_name}`; expected one of {NUMBER_KEYS:?}"
                     ),
@@ -2032,12 +2102,14 @@ impl TypeChecker {
             match (field_name, &entry.value.node) {
                 ("max_tokens", Node::IntLiteral(value)) if *value >= 1 => {}
                 ("max_tokens", _) => self.warning_at(
+                    Code::InvalidAttributeArgument,
                     "`@step(budget: { max_tokens: ... })` must be a positive integer".to_string(),
                     entry.value.span,
                 ),
                 ("max_usd", Node::IntLiteral(value)) if *value >= 0 => {}
                 ("max_usd", Node::FloatLiteral(value)) if value.is_finite() && *value >= 0.0 => {}
                 ("max_usd", _) => self.warning_at(
+                    Code::InvalidAttributeArgument,
                     "`@step(budget: { max_usd: ... })` must be a non-negative number".to_string(),
                     entry.value.span,
                 ),
@@ -2069,6 +2141,7 @@ impl TypeChecker {
             };
             if !KNOWN_KEYS.contains(&name) {
                 self.warning_at(
+                    Code::InvalidAttributeArgument,
                     format!("unknown `@persona` argument `{name}`; expected one of {KNOWN_KEYS:?}"),
                     arg.span,
                 );
@@ -2088,6 +2161,7 @@ impl TypeChecker {
                         && !matches!(arg.value.node, Node::BoolLiteral(_))
                     {
                         self.warning_at(
+                            Code::InvalidAttributeArgument,
                             "`@persona(receipts: ...)` must be a string/symbol or bool".to_string(),
                             arg.span,
                         );
@@ -2101,6 +2175,7 @@ impl TypeChecker {
     fn expect_persona_stages(&mut self, owner: &str, value: &SNode, span: Span) {
         let Node::ListLiteral(entries) = &value.node else {
             self.warning_at(
+                Code::InvalidAttributeArgument,
                 format!("`{owner}(stages: ...)` must be a list of stage dicts"),
                 span,
             );
@@ -2115,6 +2190,7 @@ impl TypeChecker {
         for entry in entries {
             let Node::DictLiteral(fields) = &entry.node else {
                 self.warning_at(
+                    Code::InvalidAttributeArgument,
                     format!("`{owner}(stages: ...)` entries must be dict literals"),
                     entry.span,
                 );
@@ -2124,6 +2200,7 @@ impl TypeChecker {
             for dict_entry in fields {
                 let Some(key) = dict_entry_key_str(&dict_entry.key) else {
                     self.warning_at(
+                        Code::InvalidAttributeArgument,
                         format!("`{owner}(stages: ...)` stage keys must be identifiers"),
                         dict_entry.key.span,
                     );
@@ -2131,6 +2208,7 @@ impl TypeChecker {
                 };
                 if !KNOWN_STAGE_KEYS.contains(&key.as_str()) {
                     self.warning_at(
+                        Code::InvalidAttributeArgument,
                         format!("unknown stage key `{key}`; expected one of {KNOWN_STAGE_KEYS:?}"),
                         dict_entry.key.span,
                     );
@@ -2140,6 +2218,7 @@ impl TypeChecker {
                     "name" | "side_effect_level" => {
                         if !is_symbol_like(&dict_entry.value.node) {
                             self.warning_at(
+                                Code::InvalidAttributeArgument,
                                 format!("stage `{key}` must be a string"),
                                 dict_entry.value.span,
                             );
@@ -2157,6 +2236,7 @@ impl TypeChecker {
                     "max_iterations" if !matches!(dict_entry.value.node, Node::IntLiteral(n) if n >= 0) =>
                     {
                         self.warning_at(
+                            Code::InvalidAttributeArgument,
                             "stage `max_iterations` must be a non-negative integer".to_string(),
                             dict_entry.value.span,
                         );
@@ -2166,6 +2246,7 @@ impl TypeChecker {
             }
             if !saw_name {
                 self.warning_at(
+                    Code::InvalidAttributeArgument,
                     format!("`{owner}(stages: ...)` entry missing required `name`"),
                     entry.span,
                 );
@@ -2180,7 +2261,7 @@ impl TypeChecker {
         for arg in &attr.args {
             if arg.name.is_none() {
                 if !is_trigger_spec(&arg.value.node) {
-                    self.warning_at(
+                    self.warning_at(Code::InvalidAttributeArgument,
                         "`@trigger(...)` positional arguments must be strings, dotted trigger ids, or schedule(...)"
                             .to_string(),
                         arg.span,
@@ -2191,6 +2272,7 @@ impl TypeChecker {
             let name = arg.name.as_deref().unwrap();
             if !KNOWN_KEYS.contains(&name) {
                 self.warning_at(
+                    Code::InvalidAttributeArgument,
                     format!("unknown `@trigger` argument `{name}`; expected one of {KNOWN_KEYS:?}"),
                     arg.span,
                 );
@@ -2200,6 +2282,7 @@ impl TypeChecker {
                 "schedule" => {
                     if !is_trigger_spec(&arg.value.node) {
                         self.warning_at(
+                            Code::InvalidAttributeArgument,
                             "`@trigger(schedule: ...)` must be a string/symbol or schedule(...)"
                                 .to_string(),
                             arg.span,
@@ -2220,6 +2303,7 @@ impl TypeChecker {
             };
             if !KNOWN_KEYS.contains(&name) {
                 self.warning_at(
+                    Code::InvalidAttributeArgument,
                     format!("unknown `@handoff` argument `{name}`; expected one of {KNOWN_KEYS:?}"),
                     arg.span,
                 );
@@ -2254,6 +2338,7 @@ impl TypeChecker {
             };
             if !KNOWN_KEYS.contains(&name) {
                 self.warning_at(
+                    Code::InvalidAttributeArgument,
                     format!(
                         "unknown `@deprecated` argument `{name}`; expected one of {KNOWN_KEYS:?}"
                     ),
@@ -2270,6 +2355,7 @@ impl TypeChecker {
             Some(name) => Some(name),
             None => {
                 self.warning_at(
+                    Code::InvalidAttributeArgument,
                     format!("`{attr_name}(...)` arguments must be named"),
                     arg.span,
                 );
@@ -2281,6 +2367,7 @@ impl TypeChecker {
     fn expect_symbol_like(&mut self, attr_name: &str, key: &str, value: &SNode, span: Span) {
         if !is_symbol_like(&value.node) {
             self.warning_at(
+                Code::InvalidAttributeArgument,
                 format!("`{attr_name}({key}: ...)` must be a string or symbol"),
                 span,
             );
@@ -2297,6 +2384,7 @@ impl TypeChecker {
     ) {
         let Some(value) = symbol_like_value(&value.node) else {
             self.warning_at(
+                Code::InvalidAttributeArgument,
                 format!("`{attr_name}({key}: ...)` must be one of {allowed:?}"),
                 span,
             );
@@ -2304,6 +2392,7 @@ impl TypeChecker {
         };
         if !allowed.contains(&value) {
             self.warning_at(
+                Code::InvalidAttributeArgument,
                 format!("`{attr_name}({key}: ...)` must be one of {allowed:?}"),
                 span,
             );
@@ -2313,6 +2402,7 @@ impl TypeChecker {
     fn expect_list_of_symbols(&mut self, attr_name: &str, key: &str, value: &SNode, span: Span) {
         let Node::ListLiteral(items) = &value.node else {
             self.warning_at(
+                Code::InvalidAttributeArgument,
                 format!("`{attr_name}({key}: ...)` must be a list of strings or symbols"),
                 span,
             );
@@ -2320,6 +2410,7 @@ impl TypeChecker {
         };
         if items.iter().any(|item| !is_symbol_like(&item.node)) {
             self.warning_at(
+                Code::InvalidAttributeArgument,
                 format!("`{attr_name}({key}: ...)` must contain only strings or symbols"),
                 span,
             );
@@ -2334,7 +2425,7 @@ impl TypeChecker {
         span: Span,
     ) {
         let Node::ListLiteral(items) = &value.node else {
-            self.warning_at(
+            self.warning_at(Code::InvalidAttributeArgument,
                 format!(
                     "`{attr_name}({key}: ...)` must be a list of strings, dotted trigger ids, or schedule(...)"
                 ),
@@ -2343,7 +2434,7 @@ impl TypeChecker {
             return;
         };
         if items.iter().any(|item| !is_trigger_spec(&item.node)) {
-            self.warning_at(
+            self.warning_at(Code::InvalidAttributeArgument,
                 format!(
                     "`{attr_name}({key}: ...)` must contain only strings, dotted trigger ids, or schedule(...)"
                 ),
@@ -2355,6 +2446,7 @@ impl TypeChecker {
     fn expect_budget_dict(&mut self, attr_name: &str, key: &str, value: &SNode, span: Span) {
         let Node::DictLiteral(entries) = &value.node else {
             self.warning_at(
+                Code::InvalidAttributeArgument,
                 format!("`{attr_name}({key}: ...)` must be a dict of budget fields"),
                 span,
             );
@@ -2363,6 +2455,7 @@ impl TypeChecker {
         for entry in entries {
             let Some(field_name) = attr_key_name(&entry.key.node) else {
                 self.warning_at(
+                    Code::InvalidAttributeArgument,
                     "budget field names must be strings or identifiers".to_string(),
                     entry.key.span,
                 );
@@ -2375,6 +2468,7 @@ impl TypeChecker {
     fn expect_step_retry_dict(&mut self, value: &SNode, span: Span) {
         let Node::DictLiteral(entries) = &value.node else {
             self.warning_at(
+                Code::InvalidAttributeArgument,
                 "`@step(retry: ...)` must be a dict such as `{ max_attempts: 3 }`".to_string(),
                 span,
             );
@@ -2383,6 +2477,7 @@ impl TypeChecker {
         for entry in entries {
             let Some(field_name) = attr_key_name(&entry.key.node) else {
                 self.warning_at(
+                    Code::InvalidAttributeArgument,
                     "`@step(retry: ...)` field names must be strings or identifiers".to_string(),
                     entry.key.span,
                 );
@@ -2392,6 +2487,7 @@ impl TypeChecker {
                 "max_attempts" => {
                     if !matches!(entry.value.node, Node::IntLiteral(i) if i >= 1) {
                         self.warning_at(
+                            Code::InvalidAttributeArgument,
                             "`@step(retry: { max_attempts: ... })` must be a positive integer"
                                 .to_string(),
                             entry.value.span,
@@ -2400,6 +2496,7 @@ impl TypeChecker {
                 }
                 other => {
                     self.warning_at(
+                        Code::InvalidAttributeArgument,
                         format!(
                             "unknown `@step(retry: ...)` field `{other}`; expected `max_attempts`"
                         ),
@@ -2423,12 +2520,16 @@ impl TypeChecker {
         const STRING_KEYS: &[&str] = &["on_exhausted", "on_budget_exhausted"];
         if NUMBER_KEYS.contains(&key) {
             if !matches!(value.node, Node::IntLiteral(_) | Node::FloatLiteral(_)) {
-                self.warning_at(format!("`{attr_name}({key}: ...)` must be a number"), span);
+                self.warning_at(
+                    Code::InvalidAttributeArgument,
+                    format!("`{attr_name}({key}: ...)` must be a number"),
+                    span,
+                );
             }
         } else if STRING_KEYS.contains(&key) {
             self.expect_symbol_like(attr_name, key, value, span);
         } else {
-            self.warning_at(
+            self.warning_at(Code::InvalidAttributeArgument,
                 format!(
                     "unknown `{attr_name}` budget field `{key}`; expected one of {NUMBER_KEYS:?} or {STRING_KEYS:?}"
                 ),
@@ -2455,6 +2556,7 @@ impl TypeChecker {
         for arg in &attr.args {
             let Some(name) = arg.name.as_deref() else {
                 self.warning_at(
+                    Code::InvalidAttributeArgument,
                     "`@archivist(...)` arguments must be named (e.g. \
                      `evidence: [...], confidence: 0.9`)"
                         .to_string(),
@@ -2464,6 +2566,7 @@ impl TypeChecker {
             };
             if !KNOWN_KEYS.contains(&name) {
                 self.warning_at(
+                    Code::InvalidAttributeArgument,
                     format!(
                         "unknown `@archivist` argument `{name}`; expected one of \
                          {KNOWN_KEYS:?}"
@@ -2485,6 +2588,7 @@ impl TypeChecker {
                     Node::Identifier(_) => {}
                     _ => {
                         self.warning_at(
+                            Code::InvalidAttributeArgument,
                             "`@archivist(confidence: ...)` must be a float in \
                              [0.0, 1.0]"
                                 .to_string(),
@@ -2497,6 +2601,7 @@ impl TypeChecker {
 
         if !has_evidence {
             self.warning_at(
+                Code::InvalidAttributeArgument,
                 "`@archivist(...)` should declare `evidence: [...]` so \
                  predicates can be audited"
                     .to_string(),

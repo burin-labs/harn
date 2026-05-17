@@ -2,7 +2,10 @@ use std::collections::HashSet;
 
 use crate::ast::*;
 use crate::builtin_signatures;
+use crate::diagnostic_codes::Code;
 use harn_lexer::{FixEdit, Span};
+
+type TypeMismatchEvidence = (Option<(Span, String)>, Option<Span>);
 
 mod binary_ops;
 mod exits;
@@ -31,6 +34,7 @@ pub struct InlayHintInfo {
 /// A diagnostic produced by the type checker.
 #[derive(Debug, Clone)]
 pub struct TypeDiagnostic {
+    pub code: Code,
     pub message: String,
     pub severity: DiagnosticSeverity,
     pub span: Option<Span>,
@@ -300,8 +304,9 @@ impl TypeChecker {
         self.check_inner(program)
     }
 
-    pub(in crate::typechecker) fn error_at(&mut self, message: String, span: Span) {
+    pub(in crate::typechecker) fn error_at(&mut self, code: Code, message: String, span: Span) {
         self.diagnostics.push(TypeDiagnostic {
+            code,
             message,
             severity: DiagnosticSeverity::Error,
             span: Some(span),
@@ -315,11 +320,13 @@ impl TypeChecker {
     #[allow(dead_code)]
     pub(in crate::typechecker) fn error_at_with_help(
         &mut self,
+        code: Code,
         message: String,
         span: Span,
         help: String,
     ) {
         self.diagnostics.push(TypeDiagnostic {
+            code,
             message,
             severity: DiagnosticSeverity::Error,
             span: Some(span),
@@ -332,14 +339,15 @@ impl TypeChecker {
 
     pub(in crate::typechecker) fn type_mismatch_at(
         &mut self,
+        code: Code,
         context: impl Into<String>,
         expected: &TypeExpr,
         actual: &TypeExpr,
         span: Span,
-        expected_origin: Option<(Span, String)>,
-        value_span: Option<Span>,
+        evidence: TypeMismatchEvidence,
         scope: &TypeScope,
     ) {
+        let (expected_origin, value_span) = evidence;
         let nested_mismatch = first_nested_mismatch(expected, actual, scope);
         let mut message = format!(
             "{}: expected {}, found {}",
@@ -365,6 +373,7 @@ impl TypeChecker {
         }
 
         self.diagnostics.push(TypeDiagnostic {
+            code,
             message,
             severity: DiagnosticSeverity::Error,
             span: Some(span),
@@ -377,11 +386,13 @@ impl TypeChecker {
 
     pub(in crate::typechecker) fn error_at_with_fix(
         &mut self,
+        code: Code,
         message: String,
         span: Span,
         fix: Vec<FixEdit>,
     ) {
         self.diagnostics.push(TypeDiagnostic {
+            code,
             message,
             severity: DiagnosticSeverity::Error,
             span: Some(span),
@@ -398,8 +409,14 @@ impl TypeChecker {
     /// Partial `if/elif/else` chains are intentionally allowed and are
     /// instead handled by `check_unknown_exhaustiveness`, which stays a
     /// warning so the `unreachable()` opt-in pattern continues to work.
-    pub(in crate::typechecker) fn exhaustiveness_error_at(&mut self, message: String, span: Span) {
+    pub(in crate::typechecker) fn exhaustiveness_error_at(
+        &mut self,
+        code: Code,
+        message: String,
+        span: Span,
+    ) {
         self.diagnostics.push(TypeDiagnostic {
+            code,
             message,
             severity: DiagnosticSeverity::Error,
             span: Some(span),
@@ -416,11 +433,13 @@ impl TypeChecker {
     /// without string-parsing the message.
     pub(in crate::typechecker) fn exhaustiveness_error_with_missing(
         &mut self,
+        code: Code,
         message: String,
         span: Span,
         missing: Vec<String>,
     ) {
         self.diagnostics.push(TypeDiagnostic {
+            code,
             message,
             severity: DiagnosticSeverity::Error,
             span: Some(span),
@@ -431,8 +450,9 @@ impl TypeChecker {
         });
     }
 
-    pub(in crate::typechecker) fn warning_at(&mut self, message: String, span: Span) {
+    pub(in crate::typechecker) fn warning_at(&mut self, code: Code, message: String, span: Span) {
         self.diagnostics.push(TypeDiagnostic {
+            code,
             message,
             severity: DiagnosticSeverity::Warning,
             span: Some(span),
@@ -446,11 +466,13 @@ impl TypeChecker {
     #[allow(dead_code)]
     pub(in crate::typechecker) fn warning_at_with_help(
         &mut self,
+        code: Code,
         message: String,
         span: Span,
         help: String,
     ) {
         self.diagnostics.push(TypeDiagnostic {
+            code,
             message,
             severity: DiagnosticSeverity::Warning,
             span: Some(span),
@@ -463,6 +485,7 @@ impl TypeChecker {
 
     pub(in crate::typechecker) fn lint_warning_at_with_fix(
         &mut self,
+        code: Code,
         rule: &'static str,
         message: String,
         span: Span,
@@ -470,6 +493,7 @@ impl TypeChecker {
         fix: Vec<FixEdit>,
     ) {
         self.diagnostics.push(TypeDiagnostic {
+            code,
             message,
             severity: DiagnosticSeverity::Warning,
             span: Some(span),

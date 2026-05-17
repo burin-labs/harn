@@ -3,10 +3,12 @@
 //! surface is easy to locate and audit.
 
 use harn_lexer::{FixEdit, Span};
+use harn_parser::DiagnosticCode as Code;
 
 /// A lint diagnostic reported by the linter.
 #[derive(Debug, Clone)]
 pub struct LintDiagnostic {
+    pub code: Code,
     pub rule: &'static str,
     pub message: String,
     pub span: Span,

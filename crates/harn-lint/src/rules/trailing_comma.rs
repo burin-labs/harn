@@ -6,6 +6,7 @@
 //! a post-pass, and `harn lint --fix` surfaces the same diagnostics.
 
 use harn_fmt::{trailing_comma_issues, TrailingCommaKind};
+use harn_parser::DiagnosticCode as Code;
 
 use crate::diagnostic::{LintDiagnostic, LintSeverity};
 
@@ -22,6 +23,7 @@ pub(crate) fn check_trailing_comma(source: &str, diagnostics: &mut Vec<LintDiagn
             ),
         };
         diagnostics.push(LintDiagnostic {
+            code: Code::LintTrailingComma,
             rule: "trailing-comma",
             message: message.to_string(),
             span: issue.edit.span,

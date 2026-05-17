@@ -19,6 +19,7 @@
 use harn_lexer::Span;
 
 use crate::ast::{HitlArg, HitlKind, Node, ShapeField, TypeExpr};
+use crate::diagnostic_codes::Code;
 
 use super::super::scope::TypeScope;
 use super::super::TypeChecker;
@@ -150,6 +151,7 @@ impl TypeChecker {
                 if !params.iter().any(|p| p.name == name) {
                     let allowed = params.iter().map(|p| p.name).collect::<Vec<_>>().join(", ");
                     self.error_at(
+                        Code::HitlInvalidApprovalArgument,
                         format!("{kw}: unknown argument `{name}` (expected one of: {allowed})"),
                         arg.span,
                     );
@@ -165,6 +167,7 @@ impl TypeChecker {
                 Some(_) => seen_named = true,
                 None if seen_named => {
                     self.error_at(
+                        Code::HitlInvalidApprovalArgument,
                         format!("{kw}: positional argument cannot follow a named argument"),
                         arg.span,
                     );
@@ -181,7 +184,11 @@ impl TypeChecker {
                     .skip(i + 1)
                     .any(|other| other.name.as_deref() == Some(name))
                 {
-                    self.error_at(format!("{kw}: duplicate argument `{name}`"), arg.span);
+                    self.error_at(
+                        Code::DuplicateArgument,
+                        format!("{kw}: duplicate argument `{name}`"),
+                        arg.span,
+                    );
                 }
             }
         }
@@ -197,6 +204,7 @@ impl TypeChecker {
             let by_name = args.iter().any(|a| a.name.as_deref() == Some(p.name));
             if !by_position && !by_name {
                 self.error_at(
+                    Code::HitlMissingApprovalPolicy,
                     format!("{kw}: missing required argument `{}`", p.name),
                     span,
                 );
@@ -206,6 +214,7 @@ impl TypeChecker {
         // Reject excess positional args.
         if positional_count > params.len() {
             self.error_at(
+                Code::HitlInvalidApprovalArgument,
                 format!(
                     "{kw}: too many positional arguments (max {} positional, got {})",
                     params.len(),

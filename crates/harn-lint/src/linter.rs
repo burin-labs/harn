@@ -7,7 +7,7 @@ use std::collections::{HashMap, HashSet};
 
 use harn_lexer::{FixEdit, Span};
 use harn_parser::diagnostic::{find_closest_match, renamed_stdlib_symbol};
-use harn_parser::{BindingPattern, Node, SNode, TypeExpr, TypedParam};
+use harn_parser::{BindingPattern, DiagnosticCode as Code, Node, SNode, TypeExpr, TypedParam};
 
 use crate::complexity::cyclomatic_complexity;
 use crate::decls::{Declaration, FnDeclaration, ImportInfo, ParamDeclaration, TypeDeclaration};
@@ -188,6 +188,7 @@ impl<'a> Linter<'a> {
             return;
         };
         self.diagnostics.push(LintDiagnostic {
+            code: Code::LintRenamedStdlibSymbol,
             rule: "renamed-stdlib-symbol",
             message: format!("`{name}` was renamed to `{replacement}`"),
             span,
@@ -211,6 +212,7 @@ impl<'a> Linter<'a> {
             return;
         }
         self.diagnostics.push(LintDiagnostic {
+            code: Code::LintCyclomaticComplexity,
             rule: "cyclomatic-complexity",
             message: format!(
                 "function `{name}` has cyclomatic complexity {complexity} (> {threshold})"
@@ -229,6 +231,7 @@ impl<'a> Linter<'a> {
             return;
         }
         self.diagnostics.push(LintDiagnostic {
+            code: Code::LintNamingConvention,
             rule: "naming-convention",
             message: format!("function `{name}` should use snake_case"),
             span,
@@ -246,6 +249,7 @@ impl<'a> Linter<'a> {
             return;
         }
         self.diagnostics.push(LintDiagnostic {
+            code: Code::LintNamingConvention,
             rule: "naming-convention",
             message: format!("{kind} `{name}` should use PascalCase"),
             span,
@@ -405,6 +409,7 @@ impl<'a> Linter<'a> {
         );
         let fix = append_sink_fix(value.span, sink);
         self.diagnostics.push(LintDiagnostic {
+            code: Code::LintEagerCollectionConversion,
             rule: "eager-collection-conversion",
             message,
             span: value.span,
@@ -444,6 +449,7 @@ impl<'a> Linter<'a> {
             };
             let fix = remove_method_call_wrapper_fix(self.source, arg.span, receiver.span);
             self.diagnostics.push(LintDiagnostic {
+                code: Code::LintRedundantClone,
                 rule: "redundant-clone",
                 message,
                 span: arg.span,
@@ -569,6 +575,7 @@ impl<'a> Linter<'a> {
             return;
         }
         self.diagnostics.push(LintDiagnostic {
+            code: Code::LintLongRunningWithoutCleanup,
             rule: "long-running-without-cleanup",
             message: format!(
                 "`{name}` starts long-running work without a defer/finally cleanup path"
@@ -830,6 +837,7 @@ impl<'a> Linter<'a> {
 
     fn warn_missing_mcp_tool_annotations(&mut self, span: Span) {
         self.diagnostics.push(LintDiagnostic {
+            code: Code::LintMcpToolAnnotations,
             rule: "mcp-tool-annotations",
             message: "MCP-exposed `tool_define` registration has no `annotations`".to_string(),
             span,
@@ -844,6 +852,7 @@ impl<'a> Linter<'a> {
 
     fn warn_missing_secret_scan(&mut self, span: Span) {
         self.diagnostics.push(LintDiagnostic {
+            code: Code::LintPrOpenWithoutSecretScan,
             rule: "pr-open-without-secret-scan",
             message: "PR-open flow calls `git::push_pr` without a preceding `secret_scan(...)` in the same handler".to_string(),
             span,
@@ -1107,6 +1116,7 @@ impl<'a> Linter<'a> {
             if let Some(scope) = self.scopes.last() {
                 if scope.contains(name) {
                     self.diagnostics.push(LintDiagnostic {
+                        code: Code::LintShadowVariable,
                         rule: "shadow-variable",
                         message: format!(
                             "cannot redeclare immutable variable `{name}` in the same scope"
@@ -1126,6 +1136,7 @@ impl<'a> Linter<'a> {
             let outer = &self.scopes[..self.scopes.len() - 1];
             if outer.iter().any(|s| s.contains(name)) {
                 self.diagnostics.push(LintDiagnostic {
+                    code: Code::LintShadowVariable,
                     rule: "shadow-variable",
                     message: format!("variable `{name}` shadows a variable in an outer scope"),
                     span,
@@ -1159,6 +1170,7 @@ impl<'a> Linter<'a> {
             let outer = &self.scopes[..self.scopes.len() - 1];
             if outer.iter().any(|s| s.contains(name)) {
                 self.diagnostics.push(LintDiagnostic {
+                    code: Code::LintShadowVariable,
                     rule: "shadow-variable",
                     message: format!("variable `{name}` shadows a variable in an outer scope"),
                     span,
@@ -1447,6 +1459,7 @@ impl<'a> Linter<'a> {
             .collect();
         if matching_personas.is_empty() {
             self.diagnostics.push(LintDiagnostic {
+                code: Code::LintPersonaHookTarget,
                 rule: "persona-hook-target",
                 message: format!(
                     "`register_step_hook` pattern `{persona_pattern}` does not match a statically declared `@persona`"
@@ -1466,6 +1479,7 @@ impl<'a> Linter<'a> {
             return;
         }
         self.diagnostics.push(LintDiagnostic {
+            code: Code::LintPersonaHookTarget,
             rule: "persona-hook-target",
             message: format!(
                 "`register_step_hook` targets step `{step_name}`, but it is not declared by persona(s): {}",
@@ -1501,6 +1515,7 @@ impl<'a> Linter<'a> {
         for (idx, node) in nodes.iter().enumerate() {
             if found_terminator {
                 self.diagnostics.push(LintDiagnostic {
+                    code: Code::LintDeadCodeAfterReturn,
                     rule: "dead-code-after-return",
                     message: "unreachable code after a terminating statement".to_string(),
                     span: node.span,
@@ -1564,6 +1579,7 @@ impl<'a> Linter<'a> {
             }])
         });
         self.diagnostics.push(LintDiagnostic {
+            code: Code::LintLetThenReturn,
             rule: "let-then-return",
             message: format!("binding `{name}` is immediately returned"),
             span: Span::with_offsets(
@@ -1596,6 +1612,7 @@ impl<'a> Linter<'a> {
             _ => return,
         };
         self.diagnostics.push(LintDiagnostic {
+            code: Code::LintUnhandledApprovalResult,
             rule: "unhandled-approval-result",
             message: format!("approval result from `{name}` is discarded"),
             span: node.span,
@@ -1615,8 +1632,9 @@ impl<'a> Linter<'a> {
                 continue;
             }
             if !self.references.contains(&decl.name) {
-                let (rule, message, suggestion, fix) = if decl.is_simple_ident {
+                let (code, rule, message, suggestion, fix) = if decl.is_simple_ident {
                     (
+                        Code::LintUnusedVariable,
                         "unused-variable",
                         format!("variable `{}` is declared but never used", decl.name),
                         format!("prefix with underscore: `_{}`", decl.name),
@@ -1624,6 +1642,7 @@ impl<'a> Linter<'a> {
                     )
                 } else {
                     (
+                        Code::LintUnusedPatternBinding,
                         "unused-pattern-binding",
                         format!("pattern binding `{}` is never used", decl.name),
                         "rename the binding with an underscore prefix or remove it from the pattern"
@@ -1632,6 +1651,7 @@ impl<'a> Linter<'a> {
                     )
                 };
                 self.diagnostics.push(LintDiagnostic {
+                    code,
                     rule,
                     message,
                     span: decl.span,
@@ -1648,6 +1668,7 @@ impl<'a> Linter<'a> {
             }
             if !self.references.contains(&decl.name) {
                 self.diagnostics.push(LintDiagnostic {
+                    code: Code::LintUnusedParameter,
                     rule: "unused-parameter",
                     message: format!("parameter `{}` is declared but never used", decl.name),
                     span: decl.span,
@@ -1719,6 +1740,7 @@ impl<'a> Linter<'a> {
                     }
                 });
                 self.diagnostics.push(LintDiagnostic {
+                    code: Code::LintUnusedImport,
                     rule: "unused-import",
                     message: format!("imported name `{name}` is never used"),
                     span: import.span,
@@ -1749,6 +1771,7 @@ impl<'a> Linter<'a> {
                     }])
                 });
                 self.diagnostics.push(LintDiagnostic {
+                    code: Code::LintMutableNeverReassigned,
                     rule: "mutable-never-reassigned",
                     message: format!(
                         "variable `{}` is declared as `var` but never reassigned",
@@ -1771,6 +1794,7 @@ impl<'a> Linter<'a> {
             }
             if !self.function_references.contains(&decl.name) {
                 self.diagnostics.push(LintDiagnostic {
+                    code: Code::LintUnusedFunction,
                     rule: "unused-function",
                     message: format!("function `{}` is declared but never used", decl.name),
                     span: decl.span,
@@ -1790,6 +1814,7 @@ impl<'a> Linter<'a> {
             }
             if !self.type_references.contains(&decl.name) {
                 self.diagnostics.push(LintDiagnostic {
+                    code: Code::LintUnusedType,
                     rule: "unused-type",
                     message: format!(
                         "{} `{}` is declared but never referenced",
@@ -1820,6 +1845,7 @@ impl<'a> Linter<'a> {
                 continue;
             }
             self.diagnostics.push(LintDiagnostic {
+                code: Code::LintPersonaBodyMustCallSteps,
                 rule: "persona-body-must-call-steps",
                 message: format!(
                     "`@persona` function `{persona_name}` calls `{name}`, which is not declared `@step`"
@@ -1877,6 +1903,7 @@ impl<'a> Linter<'a> {
                 format!("check the spelling or import `{name}`")
             };
             self.diagnostics.push(LintDiagnostic {
+                code: Code::LintUndefinedFunction,
                 rule: "undefined-function",
                 message: format!("function `{name}` is not defined"),
                 span: *span,

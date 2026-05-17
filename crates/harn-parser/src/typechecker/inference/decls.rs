@@ -7,6 +7,7 @@
 //! every reachable return matches the declared return type.
 
 use crate::ast::*;
+use crate::diagnostic_codes::Code;
 use harn_lexer::Span;
 
 use super::super::format::format_type;
@@ -178,6 +179,7 @@ impl TypeChecker {
         if is_stream && !matches!(return_type, None | Some(TypeExpr::Stream(_))) {
             if let Some(actual) = return_type {
                 self.error_at(
+                    Code::ReturnTypeMismatch,
                     format!(
                         "`gen fn` must return Stream<T>, found {}",
                         format_type(actual)
@@ -214,12 +216,15 @@ impl TypeChecker {
                 if let Some(actual) = &inferred {
                     if !self.types_compatible(expected, actual, scope) {
                         self.type_mismatch_at(
+                            Code::ReturnTypeMismatch,
                             "return value",
                             expected,
                             actual,
                             val.span,
-                            Some((expected_span, "return type declared here".to_string())),
-                            Some(val.span),
+                            (
+                                Some((expected_span, "return type declared here".to_string())),
+                                Some(val.span),
+                            ),
                             scope,
                         );
                     }

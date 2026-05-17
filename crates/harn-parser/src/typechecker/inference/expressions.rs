@@ -14,6 +14,7 @@ use std::collections::BTreeMap;
 
 use crate::ast::*;
 use crate::builtin_signatures;
+use crate::diagnostic_codes::Code;
 use harn_lexer::{FixEdit, Span};
 
 use super::super::binary_ops::infer_binary_op_type;
@@ -1139,6 +1140,7 @@ impl TypeChecker {
             SafeNavigationKind::Subscript => "`?[]`".to_string(),
         };
         self.lint_warning_at_with_fix(
+            Code::LintUnnecessarySafeNavigation,
             UNNECESSARY_SAFE_NAVIGATION_RULE,
             format!("{access} is unnecessary because the receiver cannot be nil"),
             span,

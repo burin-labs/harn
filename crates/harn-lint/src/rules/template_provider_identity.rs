@@ -13,6 +13,7 @@
 //! that matches the branch's intent.
 
 use harn_lexer::Span;
+use harn_parser::DiagnosticCode as Code;
 use harn_vm::stdlib::template::lint::{ConditionShape, IdentityField, LintConstruct};
 
 use crate::diagnostic::{LintDiagnostic, LintSeverity};
@@ -63,6 +64,7 @@ fn make_diagnostic(field: IdentityField, line: usize, col: usize, source: &str) 
         suggestion_text,
     );
     LintDiagnostic {
+        code: Code::LintTemplateProviderIdentityBranch,
         rule: RULE_NAME,
         message,
         span,

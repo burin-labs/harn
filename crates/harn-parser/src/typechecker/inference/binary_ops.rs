@@ -7,6 +7,7 @@
 //! `super::super::binary_ops::infer_binary_op_type`.
 
 use crate::ast::*;
+use crate::diagnostic_codes::Code;
 use harn_lexer::{FixEdit, Span};
 
 use super::super::scope::TypeScope;
@@ -42,9 +43,14 @@ impl TypeChecker {
                                     None
                                 };
                                 if let Some(fix) = fix {
-                                    self.error_at_with_fix(msg, span, fix);
+                                    self.error_at_with_fix(
+                                        Code::StringInterpolationRewrite,
+                                        msg,
+                                        span,
+                                        fix,
+                                    );
                                 } else {
-                                    self.error_at(msg, span);
+                                    self.error_at(Code::InvalidBinaryOperator, msg, span);
                                 }
                             }
                         }
@@ -52,6 +58,7 @@ impl TypeChecker {
                             let numeric = ["int", "float"];
                             if !numeric.contains(&l.as_str()) || !numeric.contains(&r.as_str()) {
                                 self.error_at(
+                                    Code::InvalidBinaryOperator,
                                     format!(
                                         "can't use '{}' on {} and {} (needs numeric operands)",
                                         op, l, r
@@ -68,6 +75,7 @@ impl TypeChecker {
                                 (l == "string" && r == "int") || (l == "int" && r == "string");
                             if !is_numeric && !is_string_repeat {
                                 self.error_at(
+                                    Code::InvalidBinaryOperator,
                                     format!("can't multiply {} and {} (try string * int)", l, r),
                                     span,
                                 );

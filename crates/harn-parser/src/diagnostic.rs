@@ -119,7 +119,40 @@ pub fn render_diagnostic(
     label: Option<&str>,
     help: Option<&str>,
 ) -> String {
-    render_diagnostic_with_related(source, filename, span, severity, message, label, help, &[])
+    render_diagnostic_inner(RenderDiagnostic {
+        source,
+        filename,
+        span,
+        severity,
+        code: None,
+        message,
+        label,
+        help,
+        related: &[],
+    })
+}
+
+pub fn render_diagnostic_with_code(
+    source: &str,
+    filename: &str,
+    span: &Span,
+    severity: &str,
+    code: crate::diagnostic_codes::Code,
+    message: &str,
+    label: Option<&str>,
+    help: Option<&str>,
+) -> String {
+    render_diagnostic_inner(RenderDiagnostic {
+        source,
+        filename,
+        span,
+        severity,
+        code: Some(code.as_str()),
+        message,
+        label,
+        help,
+        related: &[],
+    })
 }
 
 pub fn render_diagnostic_with_related(
@@ -132,8 +165,41 @@ pub fn render_diagnostic_with_related(
     help: Option<&str>,
     related: &[RelatedSpanLabel<'_>],
 ) -> String {
+    render_diagnostic_inner(RenderDiagnostic {
+        source,
+        filename,
+        span,
+        severity,
+        code: None,
+        message,
+        label,
+        help,
+        related,
+    })
+}
+
+struct RenderDiagnostic<'a> {
+    source: &'a str,
+    filename: &'a str,
+    span: &'a Span,
+    severity: &'a str,
+    code: Option<&'a str>,
+    message: &'a str,
+    label: Option<&'a str>,
+    help: Option<&'a str>,
+    related: &'a [RelatedSpanLabel<'a>],
+}
+
+fn render_diagnostic_inner(input: RenderDiagnostic<'_>) -> String {
     let mut out = String::new();
-    let filename = normalize_diagnostic_path(filename);
+    let source = input.source;
+    let span = input.span;
+    let severity = input.severity;
+    let message = input.message;
+    let label = input.label;
+    let help = input.help;
+    let related = input.related;
+    let filename = normalize_diagnostic_path(input.filename);
     let severity_color = severity_color(severity);
     let gutter = style_fragment("|", Color::Blue, false);
     let arrow = style_fragment("-->", Color::Blue, true);
@@ -141,6 +207,11 @@ pub fn render_diagnostic_with_related(
     let note_prefix = style_fragment("note", Color::Magenta, true);
 
     out.push_str(&style_fragment(severity, severity_color, true));
+    if let Some(code) = input.code {
+        out.push('[');
+        out.push_str(code);
+        out.push(']');
+    }
     out.push_str(": ");
     out.push_str(message);
     out.push('\n');
@@ -244,17 +315,43 @@ pub fn render_type_diagnostic(
         .collect::<Vec<_>>();
     let primary_label = type_diagnostic_primary_label(diag);
     match &diag.span {
-        Some(span) => render_diagnostic_with_related(
+        Some(span) => render_diagnostic_inner(RenderDiagnostic {
             source,
             filename,
             span,
             severity,
-            &diag.message,
-            primary_label.as_deref(),
-            diag.help.as_deref(),
-            &related,
-        ),
-        None => format!("{severity}: {}\n", diag.message),
+            code: Some(diag.code.as_str()),
+            message: &diag.message,
+            label: primary_label.as_deref(),
+            help: diag.help.as_deref(),
+            related: &related,
+        }),
+        None => format!("{severity}[{}]: {}\n", diag.code, diag.message),
+    }
+}
+
+pub fn lexer_error_code(err: &harn_lexer::LexerError) -> crate::diagnostic_codes::Code {
+    match err {
+        harn_lexer::LexerError::UnexpectedCharacter(_, _) => {
+            crate::diagnostic_codes::Code::ParserUnexpectedCharacter
+        }
+        harn_lexer::LexerError::UnterminatedString(_) => {
+            crate::diagnostic_codes::Code::ParserUnterminatedString
+        }
+        harn_lexer::LexerError::UnterminatedBlockComment(_) => {
+            crate::diagnostic_codes::Code::ParserUnterminatedBlockComment
+        }
+    }
+}
+
+pub fn parser_error_code(err: &crate::parser::ParserError) -> crate::diagnostic_codes::Code {
+    match err {
+        crate::parser::ParserError::Unexpected { .. } => {
+            crate::diagnostic_codes::Code::ParserUnexpectedToken
+        }
+        crate::parser::ParserError::UnexpectedEof { .. } => {
+            crate::diagnostic_codes::Code::ParserUnexpectedEof
+        }
     }
 }
 

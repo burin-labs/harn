@@ -1,11 +1,13 @@
 mod ast;
 pub mod builtin_signatures;
 pub mod diagnostic;
+pub mod diagnostic_codes;
 mod parser;
 pub mod typechecker;
 pub mod visit;
 
 pub use ast::*;
+pub use diagnostic_codes::{Category as DiagnosticCodeCategory, Code as DiagnosticCode};
 pub use parser::*;
 pub use typechecker::{
     block_definitely_exits, format_type, stmt_definitely_exits, DiagnosticDetails,

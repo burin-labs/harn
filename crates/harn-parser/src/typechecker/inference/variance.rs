@@ -9,6 +9,7 @@
 use std::collections::BTreeMap;
 
 use crate::ast::*;
+use crate::diagnostic_codes::Code;
 use harn_lexer::Span;
 
 use super::super::scope::Polarity;
@@ -189,6 +190,7 @@ impl TypeChecker {
                             Polarity::Invariant => "invariant",
                         };
                         self.error_at(
+                            Code::GenericTypeArgumentMismatch,
                             format!(
                                 "type parameter '{name}' is declared '{marker}' \
                                  ({declared_word}) but appears in a \

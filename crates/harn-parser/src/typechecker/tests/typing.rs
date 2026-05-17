@@ -1185,7 +1185,7 @@ fn test_type_mismatch_render_snapshot_with_coercion_help() {
     let rendered = crate::diagnostic::render_type_diagnostic(source, "test.harn", &diags[0]);
     assert_eq!(
         rendered,
-        r#"error: let binding `label`: expected string, found int
+        r#"error[HARN-TYP-007]: let binding `label`: expected string, found int
   --> test.harn:2:23
    |
  2 |   let label: string = 42
@@ -1210,7 +1210,7 @@ fn test_type_mismatch_render_snapshot_with_nested_note() {
     let rendered = crate::diagnostic::render_type_diagnostic(source, "test.harn", &diags[0]);
     assert_eq!(
         rendered,
-        r#"error: let binding `item`: expected {name: string, count: int}, found {name: int, count: int} (field 'name' has type int, expected string)
+        r#"error[HARN-TYP-007]: let binding `item`: expected {name: string, count: int}, found {name: int, count: int} (field 'name' has type int, expected string)
   --> test.harn:2:42
    |
  2 |   let item: {name: string, count: int} = {name: 1, count: 2}

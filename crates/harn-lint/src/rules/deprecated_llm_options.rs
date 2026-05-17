@@ -6,7 +6,7 @@
 //! `std/llm/handlers`.
 
 use harn_lexer::Span;
-use harn_parser::{DictEntry, MatchArm, Node, SNode, SelectCase};
+use harn_parser::{DiagnosticCode as Code, DictEntry, MatchArm, Node, SNode, SelectCase};
 
 use crate::diagnostic::{LintDiagnostic, LintSeverity};
 
@@ -317,6 +317,7 @@ fn make_diagnostic(key: &str, span: Span) -> LintDiagnostic {
         "remove `{key}` from this options dict and wrap the call with `with_retry(default_llm_caller(), {{max_attempts: N+1}})` from `std/llm/handlers`."
     ));
     LintDiagnostic {
+        code: Code::LintDeprecatedLlmOptions,
         rule: RULE_NAME,
         message,
         span,
