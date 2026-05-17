@@ -1,0 +1,16 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://harnlang.com/schemas/hostlib/secret_store/list.response.json",
+  "title": "secret_store.list response",
+  "type": "object",
+  "properties": {
+    "account": { "type": "string" },
+    "keys": {
+      "type": "array",
+      "items": { "type": "string" }
+    },
+    "backend": { "type": "string", "enum": ["keychain", "wincred", "file"] }
+  },
+  "required": ["account", "keys", "backend"],
+  "additionalProperties": false
+}

@@ -9,8 +9,8 @@
 
 use harn_hostlib::{
     ast::AstCapability, code_index::CodeIndexCapability, fs_watch::FsWatchCapability,
-    scanner::ScannerCapability, schemas, tools::ToolsCapability, BuiltinRegistry,
-    HostlibCapability, HostlibError, HostlibRegistry,
+    scanner::ScannerCapability, schemas, secret_store::SecretStoreCapability,
+    tools::ToolsCapability, BuiltinRegistry, HostlibCapability, HostlibError, HostlibRegistry,
 };
 
 fn collect_into_registry<C: HostlibCapability>(cap: C) -> BuiltinRegistry {
@@ -241,17 +241,58 @@ fn tools_capability_registers_documented_methods() {
 }
 
 #[test]
+fn secret_store_capability_registers_documented_methods() {
+    let registry = collect_into_registry(SecretStoreCapability);
+    let names: Vec<_> = registry.iter().map(|b| b.name).collect();
+    assert_eq!(
+        names,
+        vec![
+            "hostlib_secret_store_get",
+            "hostlib_secret_store_set",
+            "hostlib_secret_store_delete",
+            "hostlib_secret_store_list",
+        ]
+    );
+    // Each entry must refuse an empty payload with a structured
+    // `MissingParameter` rather than panicking.
+    let expected_missing: &[(&str, &str)] = &[
+        ("hostlib_secret_store_get", "account"),
+        ("hostlib_secret_store_set", "account"),
+        ("hostlib_secret_store_delete", "account"),
+        ("hostlib_secret_store_list", "account"),
+    ];
+    for (name, expected_param) in expected_missing {
+        let entry = registry.find(name).expect("registered");
+        let err = (entry.handler)(&[]).expect_err("must reject empty args");
+        match err {
+            HostlibError::MissingParameter { builtin, param } => {
+                assert_eq!(builtin, *name);
+                assert_eq!(param, *expected_param);
+            }
+            other => panic!("expected MissingParameter for {name}, got {other:?}"),
+        }
+    }
+}
+
+#[test]
 fn install_default_wires_every_module_into_a_vm() {
     let mut vm = harn_vm::Vm::new();
     let registry = harn_hostlib::install_default(&mut vm);
 
     assert_eq!(
         registry.modules(),
-        &["ast", "code_index", "scanner", "fs_watch", "tools"]
+        &[
+            "ast",
+            "code_index",
+            "scanner",
+            "fs_watch",
+            "tools",
+            "secret_store"
+        ]
     );
     // Builtin count: 12 ast + 27 code_index + 2 scanner + 2 fs_watch + 13
-    // tools + 1 hostlib_enable = 57.
-    assert!(registry.builtins().len() >= 57);
+    // tools + 1 hostlib_enable + 4 secret_store = 61.
+    assert!(registry.builtins().len() >= 61);
 }
 
 #[test]
@@ -261,7 +302,8 @@ fn every_registered_builtin_has_request_and_response_schemas() {
         .with(CodeIndexCapability::new())
         .with(ScannerCapability)
         .with(FsWatchCapability)
-        .with(ToolsCapability);
+        .with(ToolsCapability)
+        .with(SecretStoreCapability);
 
     for entry in registry.builtins().iter() {
         assert!(

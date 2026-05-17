@@ -1,0 +1,13 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://harnlang.com/schemas/hostlib/secret_store/set.request.json",
+  "title": "secret_store.set request",
+  "type": "object",
+  "properties": {
+    "account": { "type": "string", "minLength": 1 },
+    "key": { "type": "string", "minLength": 1 },
+    "value": { "type": "string" }
+  },
+  "required": ["account", "key", "value"],
+  "additionalProperties": false
+}

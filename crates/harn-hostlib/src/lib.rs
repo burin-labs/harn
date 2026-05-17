@@ -34,6 +34,7 @@ pub mod fs_watch;
 pub mod process;
 pub mod scanner;
 pub mod schemas;
+pub mod secret_store;
 pub mod tools;
 
 mod registry;
@@ -54,7 +55,8 @@ pub fn install_default(vm: &mut harn_vm::Vm) -> HostlibRegistry {
         .with(code_index::CodeIndexCapability::new())
         .with(scanner::ScannerCapability)
         .with(fs_watch::FsWatchCapability)
-        .with(tools::ToolsCapability);
+        .with(tools::ToolsCapability)
+        .with(secret_store::SecretStoreCapability);
     registry.register_into_vm(vm);
     registry
 }
