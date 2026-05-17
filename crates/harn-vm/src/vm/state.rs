@@ -424,8 +424,7 @@ impl Vm {
                 while env.scopes.len() <= scope_idx {
                     env.push_scope();
                 }
-                env.scopes[scope_idx]
-                    .vars
+                Rc::make_mut(&mut env.scopes[scope_idx].vars)
                     .insert(info.name.clone(), (slot.value.clone(), info.mutable));
             }
         }
@@ -561,6 +560,26 @@ impl Vm {
         VmBaseline::from_vm(self)
     }
 
+    /// Returns true if any debugging affordance is active — DAP hook,
+    /// line breakpoints, or function breakpoints. Call-site code uses
+    /// this to decide whether to capture per-frame restart snapshots
+    /// (`initial_env`, `initial_local_slots`); without a debugger those
+    /// snapshots are dead weight, so skipping them removes two
+    /// allocations from every function call hot path.
+    ///
+    /// All three signals are stable across a function call's lifetime
+    /// (they're set before pipeline execution starts), so the gate is
+    /// consistent between frame creation and any later `restart_frame`
+    /// invocation. The three `is_empty` checks compile to a handful of
+    /// branch-predicted memory probes — cheaper than a single
+    /// `BTreeMap` clone, which is what we're avoiding.
+    #[inline]
+    pub(crate) fn debugger_attached(&self) -> bool {
+        self.debug_hook.is_some()
+            || !self.breakpoints.is_empty()
+            || !self.function_breakpoints.is_empty()
+    }
+
     /// Set the bridge for delegating unknown builtins in bridge mode.
     pub fn set_bridge(&mut self, bridge: Rc<crate::bridge::HostBridge>) {
         self.bridge = Some(bridge);
@@ -582,18 +601,30 @@ impl Vm {
 
     /// Initialize execution (push the initial frame).
     pub fn start(&mut self, chunk: &Chunk) {
-        let initial_env = self.env.clone();
+        // The top-level pipeline frame captures env at start so
+        // restartFrame on the outermost frame rewinds to the
+        // pre-pipeline state — basically "restart session" in
+        // debugger terms. Skipped when no debugger is attached:
+        // the snapshot is dead weight in that case and dominates
+        // call-overhead bench numbers (~5-10%).
+        let debugger = self.debugger_attached();
+        let initial_env = if debugger {
+            Some(self.env.clone())
+        } else {
+            None
+        };
+        let initial_local_slots = if debugger {
+            Some(Self::fresh_local_slots(chunk))
+        } else {
+            None
+        };
         self.frames.push(CallFrame {
             chunk: Rc::new(chunk.clone()),
             ip: 0,
             stack_base: self.stack.len(),
             saved_env: self.env.clone(),
-            // The top-level pipeline frame captures env at start so
-            // restartFrame on the outermost frame rewinds to the
-            // pre-pipeline state — basically "restart session" in
-            // debugger terms.
-            initial_env: Some(initial_env),
-            initial_local_slots: Some(Self::fresh_local_slots(chunk)),
+            initial_env,
+            initial_local_slots,
             saved_iterator_depth: self.iterators.len(),
             fn_name: String::new(),
             argc: 0,

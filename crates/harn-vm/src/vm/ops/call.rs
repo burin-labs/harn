@@ -710,11 +710,20 @@ impl super::super::Vm {
             };
 
             call_env.push_scope();
-            let initial_env = call_env.clone();
+            let debugger = self.debugger_attached();
+            let initial_env = if debugger {
+                Some(call_env.clone())
+            } else {
+                None
+            };
             self.env = call_env;
             let mut local_slots = Self::fresh_local_slots(&closure.func.chunk);
             Self::bind_param_slots(&mut local_slots, &closure.func, &args, false);
-            let initial_local_slots = local_slots.clone();
+            let initial_local_slots = if debugger {
+                Some(local_slots.clone())
+            } else {
+                None
+            };
 
             // Inherit the popped frame's iterator depth so iterators
             // pushed by for-loops inside the caller (`return f(...)` from
@@ -729,8 +738,8 @@ impl super::super::Vm {
                 ip: 0,
                 stack_base,
                 saved_env: parent_env,
-                initial_env: Some(initial_env),
-                initial_local_slots: Some(initial_local_slots),
+                initial_env,
+                initial_local_slots,
                 saved_iterator_depth,
                 fn_name: closure.func.name.clone(),
                 argc,

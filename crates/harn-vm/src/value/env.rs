@@ -38,6 +38,17 @@ pub type ModuleFunctionRegistry = Rc<RefCell<BTreeMap<String, Rc<VmClosure>>>>;
 pub type ModuleState = Rc<RefCell<VmEnv>>;
 
 /// VM environment for variable storage.
+///
+/// `Scope::vars` is wrapped in `Rc` so that `VmEnv::clone()` is cheap
+/// (Rc bump per scope) instead of a deep walk of every BTreeMap. The
+/// VM saves and restores `env` snapshots on every function call, and
+/// the call hot path dominates orchestration-heavy workloads (e.g.
+/// burin-code's PreToolUse hooks). With `Rc<BTreeMap<..>>` the
+/// per-scope clone collapses to an atomic-less refcount bump, and
+/// `Rc::make_mut` only does a deep copy when the scope is still shared
+/// with a saved snapshot — which is exactly the case where the caller
+/// would have needed an isolated copy anyway. Reads still go through
+/// the `BTreeMap` directly via `Deref`.
 #[derive(Debug, Clone)]
 pub struct VmEnv {
     pub(crate) scopes: Vec<Scope>,
@@ -45,7 +56,16 @@ pub struct VmEnv {
 
 #[derive(Debug, Clone)]
 pub(crate) struct Scope {
-    pub(crate) vars: BTreeMap<String, (VmValue, bool)>, // (value, mutable)
+    pub(crate) vars: Rc<BTreeMap<String, (VmValue, bool)>>, // (value, mutable)
+}
+
+impl Scope {
+    #[inline]
+    fn empty() -> Self {
+        Self {
+            vars: Rc::new(BTreeMap::new()),
+        }
+    }
 }
 
 impl Default for VmEnv {
@@ -57,16 +77,12 @@ impl Default for VmEnv {
 impl VmEnv {
     pub fn new() -> Self {
         Self {
-            scopes: vec![Scope {
-                vars: BTreeMap::new(),
-            }],
+            scopes: vec![Scope::empty()],
         }
     }
 
     pub fn push_scope(&mut self) {
-        self.scopes.push(Scope {
-            vars: BTreeMap::new(),
-        });
+        self.scopes.push(Scope::empty());
     }
 
     pub fn pop_scope(&mut self) {
@@ -111,7 +127,7 @@ impl VmEnv {
                     )));
                 }
             }
-            scope.vars.insert(name.to_string(), (value, mutable));
+            Rc::make_mut(&mut scope.vars).insert(name.to_string(), (value, mutable));
         }
         Ok(())
     }
@@ -119,7 +135,7 @@ impl VmEnv {
     pub fn all_variables(&self) -> BTreeMap<String, VmValue> {
         let mut vars = BTreeMap::new();
         for scope in &self.scopes {
-            for (name, (value, _)) in &scope.vars {
+            for (name, (value, _)) in scope.vars.iter() {
                 vars.insert(name.clone(), value.clone());
             }
         }
@@ -132,7 +148,7 @@ impl VmEnv {
                 if !mutable {
                     return Err(VmError::ImmutableAssignment(name.to_string()));
                 }
-                scope.vars.insert(name.to_string(), (value, true));
+                Rc::make_mut(&mut scope.vars).insert(name.to_string(), (value, true));
                 return Ok(());
             }
         }
@@ -150,7 +166,7 @@ impl VmEnv {
         for scope in self.scopes.iter_mut().rev() {
             if let Some((_, mutable)) = scope.vars.get(name) {
                 let mutable = *mutable;
-                scope.vars.insert(name.to_string(), (value, mutable));
+                Rc::make_mut(&mut scope.vars).insert(name.to_string(), (value, mutable));
                 return Ok(());
             }
         }

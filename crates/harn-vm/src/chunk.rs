@@ -482,6 +482,14 @@ pub struct Chunk {
     /// Shared cache entries so cloned chunks in call frames warm the same side
     /// table as the compiled chunk used by tests/debugging.
     inline_caches: Rc<RefCell<Vec<InlineCacheEntry>>>,
+    /// Lazily-materialized `Rc<str>` cache for `Constant::String` entries,
+    /// parallel to `constants`. `Op::Constant` for a string used to run
+    /// `Rc::from(s.as_str())` on every execution, allocating a fresh
+    /// `Rc<str>` per push — death by a thousand allocations for
+    /// string-interpolation-heavy hot paths. With this side table the
+    /// allocation happens once per unique constant; subsequent pushes
+    /// are an Rc refcount bump.
+    constant_strings: Rc<RefCell<Vec<Option<Rc<str>>>>>,
     /// Source-name metadata for slot-indexed locals in this chunk.
     pub(crate) local_slots: Vec<LocalSlotInfo>,
 }
@@ -641,6 +649,7 @@ impl Chunk {
             functions: Vec::new(),
             inline_cache_slots: BTreeMap::new(),
             inline_caches: Rc::new(RefCell::new(Vec::new())),
+            constant_strings: Rc::new(RefCell::new(Vec::new())),
             local_slots: Vec::new(),
         }
     }
@@ -817,6 +826,30 @@ impl Chunk {
         self.inline_cache_slots.get(&op_offset).copied()
     }
 
+    /// Returns an `Rc<str>` for a `Constant::String` at the given pool
+    /// index, materializing it on first access and caching for reuse.
+    /// Returns `None` when the constant at `idx` is not a string (the
+    /// caller should fall back to the regular `Constant` match).
+    pub(crate) fn constant_string_rc(&self, idx: usize) -> Option<Rc<str>> {
+        // Borrow the side table mutably so we can lazily extend / fill
+        // entries. The borrow is scope-confined to this function; the
+        // VM never re-enters constant_string_rc for the same chunk
+        // during a single materialization, so no nested-borrow risk.
+        let mut entries = self.constant_strings.borrow_mut();
+        if entries.len() < self.constants.len() {
+            entries.resize(self.constants.len(), None);
+        }
+        if let Some(Some(existing)) = entries.get(idx) {
+            return Some(Rc::clone(existing));
+        }
+        let materialized = match self.constants.get(idx)? {
+            Constant::String(s) => Rc::<str>::from(s.as_str()),
+            _ => return None,
+        };
+        entries[idx] = Some(Rc::clone(&materialized));
+        Some(materialized)
+    }
+
     pub(crate) fn inline_cache_entry(&self, slot: usize) -> InlineCacheEntry {
         self.inline_caches
             .borrow()
@@ -851,6 +884,7 @@ impl Chunk {
 
     pub fn from_cached(cached: &CachedChunk) -> Self {
         let inline_cache_count = cached.inline_cache_slots.len();
+        let constants_count = cached.constants.len();
         Self {
             code: cached.code.clone(),
             constants: cached.constants.clone(),
@@ -868,6 +902,7 @@ impl Chunk {
                 InlineCacheEntry::Empty;
                 inline_cache_count
             ])),
+            constant_strings: Rc::new(RefCell::new(vec![None; constants_count])),
             local_slots: cached.local_slots.clone(),
         }
     }

@@ -43,7 +43,7 @@ impl Vm {
         // for local recursive / mutually-recursive fns to self-reference
         // without leaking caller-local data into the callee.
         for scope in &caller_env.scopes {
-            for (name, (val, mutable)) in &scope.vars {
+            for (name, (val, mutable)) in scope.vars.iter() {
                 if matches!(val, VmValue::Closure(_)) && !call_env.contains(name) {
                     let _ = call_env.define(name, val.clone(), *mutable);
                 }
@@ -91,11 +91,20 @@ impl Vm {
         let mut call_env = self.closure_call_env_for_current_frame(closure);
         call_env.push_scope();
 
-        let initial_env = call_env.clone();
+        let debugger = self.debugger_attached();
+        let initial_env = if debugger {
+            Some(call_env.clone())
+        } else {
+            None
+        };
         self.env = call_env;
         let mut local_slots = Self::fresh_local_slots(&closure.func.chunk);
         Self::bind_param_slots(&mut local_slots, &closure.func, args, false);
-        let initial_local_slots = local_slots.clone();
+        let initial_local_slots = if debugger {
+            Some(local_slots.clone())
+        } else {
+            None
+        };
 
         // Function-name breakpoint latch: record the name so the step
         // loop can raise a single "function breakpoint" stop on the
@@ -112,8 +121,8 @@ impl Vm {
             ip: 0,
             stack_base: self.stack.len(),
             saved_env,
-            initial_env: Some(initial_env),
-            initial_local_slots: Some(initial_local_slots),
+            initial_env,
+            initial_local_slots,
             saved_iterator_depth: self.iterators.len(),
             fn_name: closure.func.name.clone(),
             argc: args.len(),
