@@ -35,7 +35,7 @@ pub use schema::{
     HARN_TOOL_LIFECYCLE_EXTENSION_FIELDS,
 };
 use sessions::{
-    mark_cancelled_session, preempt_session_cancel_or_truncate, prepare_session_prompt, Session,
+    mark_cancelled_session, preempt_session_interruption, prepare_session_prompt, Session,
     SessionCancellation, SessionInfo,
 };
 pub use transport::{run_acp_channel_server, run_acp_server};
@@ -1073,15 +1073,18 @@ impl AcpServer {
             assistant_state: std::sync::Mutex::new(VisibleTextState::default()),
         });
         let bridge_output = output.clone();
-        let host_bridge = Rc::new(harn_vm::bridge::HostBridge::from_parts_with_writer(
-            bridge.pending.clone(),
-            Arc::new(AtomicBool::new(false)),
-            Arc::new(move |line| {
-                bridge_output.write_line(line);
-                Ok(())
-            }),
-            bridge.next_id_counter.fetch_add(10_000, Ordering::SeqCst),
-        ));
+        let host_bridge = Rc::new(
+            harn_vm::bridge::HostBridge::from_parts_with_writer_and_cancel_notify(
+                bridge.pending.clone(),
+                cancellation.cancelled.clone(),
+                cancellation.notify.clone(),
+                Arc::new(move |line| {
+                    bridge_output.write_line(line);
+                    Ok(())
+                }),
+                bridge.next_id_counter.fetch_add(10_000, Ordering::SeqCst),
+            ),
+        );
         host_bridge.set_session_id(&bridge.session_id);
 
         let compile_started = Instant::now();
@@ -1208,6 +1211,41 @@ impl AcpServer {
 
     fn handle_session_cancel(&mut self, params: &serde_json::Value) {
         mark_cancelled_session(&self.session_cancellations, params);
+    }
+
+    fn handle_session_close(
+        &mut self,
+        id: &serde_json::Value,
+        params: &serde_json::Value,
+        method: &str,
+    ) {
+        let Some(session_id) = params.get("sessionId").and_then(|value| value.as_str()) else {
+            self.send_error(id, -32602, &format!("{method} requires sessionId"));
+            return;
+        };
+
+        let Some(session) = self.sessions.remove(session_id) else {
+            self.send_error(id, -32004, &format!("Session not found: {session_id}"));
+            return;
+        };
+
+        session.cancellation.cancel();
+        self.session_cancellations
+            .lock()
+            .unwrap_or_else(|error| error.into_inner())
+            .remove(session_id);
+        clear_session_sinks(session_id);
+        harn_vm::agent_sessions::close_with_status(
+            session_id,
+            "client_request",
+            "closed",
+            serde_json::json!({
+                "protocol": "acp",
+                "method": method,
+            }),
+        );
+
+        self.send_response(id, serde_json::json!({}));
     }
 
     async fn handle_session_input(&self, params: &serde_json::Value) {
@@ -1954,6 +1992,22 @@ impl AcpServer {
             }
             "session/cancel" => {
                 self.handle_session_cancel(&params);
+            }
+            "session/close" => {
+                if self.reject_unauthenticated(&id) {
+                    return;
+                }
+                self.handle_session_close(&id, &params, "session/close");
+            }
+            "session/stop" => {
+                if self.reject_unauthenticated(&id) {
+                    return;
+                }
+                tracing::warn!("ACP method session/stop is deprecated; use session/close instead");
+                eprintln!(
+                    "warning: ACP method session/stop is deprecated; use session/close instead"
+                );
+                self.handle_session_close(&id, &params, "session/stop");
             }
             "session/input" | "user_message" | "agent/user_message" => {
                 if self.reject_unauthenticated(&id) {

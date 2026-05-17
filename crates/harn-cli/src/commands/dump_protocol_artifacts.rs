@@ -32,8 +32,13 @@ const ACP_AGENT_METHODS: &[&str] = &[
     "session/resume",
     "session/prompt",
     "session/truncate",
+    "session/close",
     "session/stop",
 ];
+const ACP_DEPRECATED_AGENT_METHODS: &[DeprecatedWireValue] = &[DeprecatedWireValue {
+    value: "session/stop",
+    replacement: "session/close",
+}];
 const ACP_CLIENT_METHODS: &[&str] = &[
     "fs/read_text_file",
     "fs/write_text_file",
@@ -120,6 +125,11 @@ struct SchemaCopy {
     protocol: &'static str,
     source: &'static str,
     artifact: &'static str,
+}
+
+struct DeprecatedWireValue {
+    value: &'static str,
+    replacement: &'static str,
 }
 
 #[derive(Debug)]
@@ -278,6 +288,7 @@ fn generate_manifest() -> Result<String, String> {
         "acp": {
             "schemaCompatibility": ACP_SCHEMA_COMPATIBILITY,
             "agentMethods": ACP_AGENT_METHODS,
+            "deprecatedAgentMethods": deprecated_wire_values(ACP_DEPRECATED_AGENT_METHODS),
             "clientMethods": ACP_CLIENT_METHODS,
             "agentNotifications": ACP_AGENT_NOTIFICATIONS,
             "sessionUpdateVariants": all_acp_session_updates(),
@@ -312,6 +323,20 @@ fn generate_manifest() -> Result<String, String> {
         },
     }))
     .map_err(|error| format!("failed to serialize manifest: {error}"))
+}
+
+fn deprecated_wire_values(values: &[DeprecatedWireValue]) -> serde_json::Value {
+    let mut map = serde_json::Map::new();
+    for value in values {
+        map.insert(
+            value.value.to_string(),
+            json!({
+                "replacement": value.replacement,
+                "removal": "after one release",
+            }),
+        );
+    }
+    serde_json::Value::Object(map)
 }
 
 fn generate_readme() -> String {
@@ -367,6 +392,11 @@ fn generate_typescript() -> String {
         "ACP_AGENT_METHODS",
         ACP_AGENT_METHODS,
         "ACPAgentMethod",
+    ));
+    out.push_str(&ts_wire_value_object(
+        "ACP_AGENT_METHOD",
+        ACP_AGENT_METHODS,
+        ACP_DEPRECATED_AGENT_METHODS,
     ));
     out.push_str(&ts_array(
         "ACP_CLIENT_METHODS",
@@ -791,9 +821,10 @@ fn generate_swift() -> String {
     ));
     out.push_str("}\n\n");
 
-    out.push_str(&swift_enum(
+    out.push_str(&swift_enum_with_deprecations(
         "HarnACPAgentMethod",
         &strs_to_strings(ACP_AGENT_METHODS),
+        ACP_DEPRECATED_AGENT_METHODS,
     ));
     out.push_str(&swift_enum(
         "HarnACPClientMethod",
@@ -2704,9 +2735,44 @@ fn ts_array_owned(name: &str, values: &[String], type_name: &str) -> String {
     out
 }
 
+fn ts_wire_value_object(
+    name: &str,
+    values: &[&str],
+    deprecated_values: &[DeprecatedWireValue],
+) -> String {
+    let mut out = format!("export const {name} = {{\n");
+    for value in values {
+        if let Some(deprecated) = deprecated_wire_value(deprecated_values, value) {
+            out.push_str("  /** @deprecated ");
+            out.push_str(&deprecation_message(deprecated));
+            out.push_str(" */\n");
+        }
+        out.push_str("  ");
+        out.push_str(&wire_value_property_name(value));
+        out.push_str(": ");
+        out.push_str(&json_string_literal(value));
+        out.push_str(",\n");
+    }
+    out.push_str("} as const\n\n");
+    out
+}
+
 fn swift_enum(name: &str, values: &[String]) -> String {
+    swift_enum_with_deprecations(name, values, &[])
+}
+
+fn swift_enum_with_deprecations(
+    name: &str,
+    values: &[String],
+    deprecated_values: &[DeprecatedWireValue],
+) -> String {
     let mut out = format!("public enum {name}: String, Codable, Sendable, CaseIterable {{\n");
     for value in values {
+        if let Some(deprecated) = deprecated_wire_value(deprecated_values, value) {
+            out.push_str("    @available(*, deprecated, message: ");
+            out.push_str(&json_string_literal(&deprecation_message(deprecated)));
+            out.push_str(")\n");
+        }
         out.push_str("    case ");
         out.push_str(&swift_case_name(value));
         out.push_str(" = ");
@@ -2715,6 +2781,26 @@ fn swift_enum(name: &str, values: &[String]) -> String {
     }
     out.push_str("}\n\n");
     out
+}
+
+fn deprecated_wire_value<'a>(
+    deprecated_values: &'a [DeprecatedWireValue],
+    value: &str,
+) -> Option<&'a DeprecatedWireValue> {
+    deprecated_values
+        .iter()
+        .find(|deprecated| deprecated.value == value)
+}
+
+fn deprecation_message(value: &DeprecatedWireValue) -> String {
+    format!(
+        "Use {}; {} will be removed after one release.",
+        value.replacement, value.value
+    )
+}
+
+fn wire_value_property_name(value: &str) -> String {
+    swift_case_name(value)
 }
 
 fn swift_string_array(name: &str, values: &[&str]) -> String {
@@ -2863,6 +2949,8 @@ mod tests {
     fn generated_types_include_harn_wire_vocabularies() {
         let ts = generate_typescript();
         assert!(ts.contains("export type JsonRpcId = number | string | null"));
+        assert!(ts.contains("sessionClose: \"session/close\""));
+        assert!(ts.contains("@deprecated Use session/close; session/stop will be removed"));
         for value in HARN_SESSION_UPDATE_EXTENSIONS
             .iter()
             .chain(HARN_AGENT_EVENT_KINDS.iter())
@@ -2872,6 +2960,8 @@ mod tests {
         }
         let swift = generate_swift();
         assert!(swift.contains("public enum HarnACPAgentMethod"));
+        assert!(swift.contains("case sessionClose = \"session/close\""));
+        assert!(swift.contains("@available(*, deprecated"));
         assert!(swift.contains("public enum HarnACPClientMethod"));
         assert!(swift.contains("public enum HarnACPAgentNotification"));
         assert!(swift.contains("public enum HarnJsonRpcId"));
@@ -2985,6 +3075,10 @@ mod tests {
         assert_eq!(
             manifest["receipts"]["toolCallReceiptSchemaVersion"],
             json!(TOOL_CALL_RECEIPT_SCHEMA_VERSION)
+        );
+        assert_eq!(
+            manifest["acp"]["deprecatedAgentMethods"]["session/stop"]["replacement"],
+            json!("session/close")
         );
     }
 

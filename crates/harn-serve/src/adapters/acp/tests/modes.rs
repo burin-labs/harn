@@ -1,4 +1,46 @@
 use super::*;
+use harn_vm::event_log::EventLog as _;
+
+async fn wait_for_agent_event_log_entries(
+    log: &std::sync::Arc<harn_vm::event_log::AnyEventLog>,
+    session_id: &str,
+    expected: usize,
+) {
+    let topic = harn_vm::event_log::Topic::new(format!(
+        "observability.agent_events.{}",
+        harn_vm::event_log::sanitize_topic_component(session_id)
+    ))
+    .expect("session event topic");
+    for _ in 0..20 {
+        let entries = log
+            .read_range(&topic, None, expected)
+            .await
+            .expect("read event log");
+        if entries.len() >= expected {
+            return;
+        }
+        tokio::task::yield_now().await;
+    }
+    let entries = log
+        .read_range(&topic, None, expected)
+        .await
+        .expect("read event log after wait");
+    panic!(
+        "expected {expected} persisted event-log entries for {session_id}, saw {}",
+        entries.len()
+    );
+}
+
+fn install_test_agent_event_log_sink(
+    log: &std::sync::Arc<harn_vm::event_log::AnyEventLog>,
+    session_id: &str,
+) {
+    harn_vm::agent_events::clear_session_sinks(session_id);
+    harn_vm::agent_events::register_sink(
+        session_id.to_string(),
+        harn_vm::agent_events::EventLogSink::new(log.clone(), session_id),
+    );
+}
 #[tokio::test(flavor = "current_thread")]
 async fn acp_authenticate_uses_shared_auth_policy() {
     let local = tokio::task::LocalSet::new();
@@ -251,7 +293,7 @@ async fn acp_session_load_includes_current_mode_state() {
 #[tokio::test(flavor = "current_thread")]
 async fn acp_session_resume_includes_current_mode_state_without_replay() {
     harn_vm::event_log::reset_active_event_log();
-    let _log = harn_vm::event_log::install_memory_for_current_thread(64);
+    let log = harn_vm::event_log::install_memory_for_current_thread(64);
 
     let (tx, mut rx) = mpsc::unbounded_channel();
     let mut server = AcpServer::new_with_output(AcpServerConfig::new(None), AcpOutput::Channel(tx));
@@ -269,6 +311,7 @@ async fn acp_session_resume_includes_current_mode_state_without_replay() {
         .as_str()
         .expect("session id")
         .to_string();
+    install_test_agent_event_log_sink(&log, &session_id);
 
     server
         .handle_incoming_message(serde_json::json!({
@@ -286,7 +329,7 @@ async fn acp_session_resume_includes_current_mode_state_without_replay() {
         session_id: session_id.clone(),
         content: "do not replay me".to_string(),
     });
-    tokio::task::yield_now().await;
+    wait_for_agent_event_log_entries(&log, &session_id, 1).await;
 
     server
         .handle_incoming_message(serde_json::json!({
@@ -346,7 +389,7 @@ async fn acp_session_restore_methods_reject_unknown_sessions() {
 #[tokio::test(flavor = "current_thread")]
 async fn acp_session_load_replays_persisted_agent_events() {
     harn_vm::event_log::reset_active_event_log();
-    let _log = harn_vm::event_log::install_memory_for_current_thread(64);
+    let log = harn_vm::event_log::install_memory_for_current_thread(64);
 
     let (tx, mut rx) = mpsc::unbounded_channel();
     let mut server = AcpServer::new_with_output(AcpServerConfig::new(None), AcpOutput::Channel(tx));
@@ -364,6 +407,7 @@ async fn acp_session_load_replays_persisted_agent_events() {
         .as_str()
         .expect("session id")
         .to_string();
+    install_test_agent_event_log_sink(&log, &session_id);
 
     harn_vm::agent_events::emit_event(&harn_vm::agent_events::AgentEvent::AgentMessageChunk {
         session_id: session_id.clone(),
@@ -373,7 +417,7 @@ async fn acp_session_load_replays_persisted_agent_events() {
         session_id: session_id.clone(),
         plan: serde_json::json!([{"content": "do the thing", "status": "pending"}]),
     });
-    tokio::task::yield_now().await;
+    wait_for_agent_event_log_entries(&log, &session_id, 2).await;
 
     server
         .handle_incoming_message(serde_json::json!({

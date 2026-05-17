@@ -38,6 +38,7 @@
       "session/resume",
       "session/prompt",
       "session/truncate",
+      "session/close",
       "session/stop"
     ],
     "agentNotifications": [
@@ -63,6 +64,12 @@
       "visible_delta",
       "visible_text"
     ],
+    "deprecatedAgentMethods": {
+      "session/stop": {
+        "removal": "after one release",
+        "replacement": "session/close"
+      }
+    },
     "harnAgentEventKinds": [
       "budget_exhausted",
       "composition_child_call",

@@ -10,9 +10,22 @@ export const ACP_AGENT_METHODS = [
   "session/resume",
   "session/prompt",
   "session/truncate",
+  "session/close",
   "session/stop",
 ] as const
 export type ACPAgentMethod = (typeof ACP_AGENT_METHODS)[number]
+
+export const ACP_AGENT_METHOD = {
+  initialize: "initialize",
+  sessionNew: "session/new",
+  sessionLoad: "session/load",
+  sessionResume: "session/resume",
+  sessionPrompt: "session/prompt",
+  sessionTruncate: "session/truncate",
+  sessionClose: "session/close",
+  /** @deprecated Use session/close; session/stop will be removed after one release. */
+  sessionStop: "session/stop",
+} as const
 
 export const ACP_CLIENT_METHODS = [
   "fs/read_text_file",

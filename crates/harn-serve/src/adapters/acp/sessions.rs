@@ -96,7 +96,7 @@ pub(super) fn lookup_session_cancellation(
         .cloned()
 }
 
-pub(super) fn preempt_session_cancel_or_truncate(
+pub(super) fn preempt_session_interruption(
     cancellations: &Arc<std::sync::Mutex<HashMap<String, SessionCancellation>>>,
     msg: &serde_json::Value,
 ) -> bool {
@@ -107,7 +107,7 @@ pub(super) fn preempt_session_cancel_or_truncate(
             mark_cancelled_session(cancellations, params);
             msg.get("id").is_none()
         }
-        Some("session/truncate") => {
+        Some("session/truncate" | "session/close" | "session/stop") => {
             mark_cancelled_session(cancellations, params);
             false
         }

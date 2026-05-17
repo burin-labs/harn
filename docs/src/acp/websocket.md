@@ -95,6 +95,8 @@ surface as stdio ACP:
 - `session/list`
 - `session/prompt`
 - `session/cancel`
+- `session/truncate`
+- `session/close`
 - `session/input`
 - `session/fork`
 - `session/set_mode`
