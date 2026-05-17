@@ -268,6 +268,7 @@ pub struct HandoffArtifact {
     pub blocked_on: Vec<String>,
     pub requested_capabilities: Vec<String>,
     pub allowed_side_effects: Vec<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub policy_override: Option<CapabilityPolicy>,
     pub budget_remaining: Option<HandoffBudgetRemainingRecord>,
     pub deadline_checkback: Option<HandoffDeadlineCheckbackRecord>,
