@@ -23,6 +23,18 @@ condensed series summaries instead of full per-patch history.
   persona manifest. Opt-in `on_violation: "raise"` throws instead of
   short-circuiting so `try { agent_loop(...) }` can route on the
   exception.
+- **In-turn parallel tool dispatch (#1699).** `agent_loop` now accepts a
+  `max_concurrent_tools: N` option (default 1). When a planner emits
+  multiple tool calls in a single turn and the loop is configured with
+  a `tool_caller` middleware, siblings dispatch concurrently via
+  `parallel settle` capped at `N`. Each sibling invokes its own caller
+  chain in a fresh closure scope so `audit.layers` histories never
+  cross-talk between concurrent calls. Results inject in source order
+  regardless of completion order so text tool-call parsers keyed on
+  declaration order keep working. The tool-call envelope grows
+  `turn.tool_call_index`, and `with_audit_log` receipts grow an
+  `emit_order` field equal to that index so completion-ordered
+  receipts can be re-sorted to source order.
 
 ## v0.8.24
 

@@ -243,6 +243,18 @@ fn __validate_tool_caller(value) {
   }
 }
 
+fn __validate_max_concurrent_tools(value) {
+  if value == nil {
+    return
+  }
+  if type_of(value) != "int" {
+    throw "agent_loop: `max_concurrent_tools` must be an integer or nil; got " + type_of(value)
+  }
+  if value < 1 {
+    throw "agent_loop: `max_concurrent_tools` must be >= 1; got " + to_string(value)
+  }
+}
+
 fn __validate_removed_agent_loop_options(opts) {
   if __has_key(opts, "persistent") {
     throw "agent_loop: `persistent` was removed; use `loop_until_done` for completion looping and `session_id` for transcript persistence"
@@ -274,6 +286,9 @@ fn __validate_agent_loop_callback_options(opts) {
   }
   if __has_key(opts, "tool_caller") {
     __validate_tool_caller(opts.tool_caller)
+  }
+  if __has_key(opts, "max_concurrent_tools") {
+    __validate_max_concurrent_tools(opts.max_concurrent_tools)
   }
 }
 

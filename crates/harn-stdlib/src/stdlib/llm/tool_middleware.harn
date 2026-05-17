@@ -565,6 +565,7 @@ fn __tool_mw_tool_call_receipt(call, result, duration_ms, redact_keys) {
     tool_name: to_string(call?.tool_name ?? ""),
     iteration: iteration,
     turn_index: turn_index,
+    emit_order: __tool_mw_nonnegative_int(turn?.tool_call_index),
     reason: __tool_mw_optional_text(audit?.summary),
     kind: __tool_mw_receipt_kind(call, audit),
     executor: __tool_mw_receipt_executor(result?.executor ?? call?.declared_executor),

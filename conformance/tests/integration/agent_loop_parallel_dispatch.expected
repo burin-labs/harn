@@ -1,0 +1,12 @@
+serial.status=done
+serial.observed=4
+serial.peak=1
+parallel.status=done
+parallel.observed=4
+parallel.peak=4
+capped.status=done
+capped.observed=4
+capped.peak=2
+audit.status=done
+audit.receipt_count=3
+audit.emit_bitmask=7
