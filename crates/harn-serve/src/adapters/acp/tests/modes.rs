@@ -162,18 +162,31 @@ async fn acp_session_new_advertises_session_mode_state_and_config_options() {
     let config_options = created["result"]["configOptions"]
         .as_array()
         .expect("configOptions array");
-    assert_eq!(config_options.len(), 1);
-    assert_eq!(config_options[0]["id"], "mode");
-    assert_eq!(config_options[0]["category"], "mode");
-    assert_eq!(config_options[0]["type"], "select");
-    assert_eq!(config_options[0]["currentValue"], "ask");
-    let option_ids: Vec<&str> = config_options[0]["options"]
+    let mode_option = config_options
+        .iter()
+        .find(|entry| entry["id"] == "mode")
+        .expect("mode config option");
+    assert_eq!(mode_option["category"], "mode");
+    assert_eq!(mode_option["type"], "select");
+    assert_eq!(mode_option["currentValue"], "ask");
+    let option_ids: Vec<&str> = mode_option["options"]
         .as_array()
         .expect("mode options")
         .iter()
         .map(|mode| mode["value"].as_str().expect("mode value"))
         .collect();
     assert_eq!(option_ids, vec!["ask", "architect", "code", "shadow"]);
+
+    let model_option = config_options
+        .iter()
+        .find(|entry| entry["id"] == "model")
+        .expect("model config option");
+    assert_eq!(model_option["category"], "model");
+    assert_eq!(model_option["type"], "select");
+    // No model is pinned for a freshly created session — the dropdown
+    // should advertise the "inherit ambient default" sentinel as the
+    // current value so clients render an "unpinned" state.
+    assert_eq!(model_option["currentValue"], "@inherit");
 }
 
 /// `session/load` echoes the active mode state back to a
@@ -795,5 +808,210 @@ async fn acp_session_fork_inherits_parent_current_mode() {
     assert_eq!(
         fork_response["result"]["modes"]["currentModeId"],
         "architect"
+    );
+}
+
+/// Pinning a model via `session/set_config_option(configId="model")`
+/// updates the harn-vm session pin, surfaces the new value back in the
+/// response, and emits a `config_option_update` notification so other
+/// connected clients (e.g. additional editor panes) re-render the
+/// selector. Validates the v1 model-swap contract from #1721.
+#[tokio::test(flavor = "current_thread")]
+async fn acp_set_config_option_pins_model_and_emits_update() {
+    let (tx, mut rx) = mpsc::unbounded_channel();
+    let mut server = AcpServer::new_with_output(AcpServerConfig::new(None), AcpOutput::Channel(tx));
+
+    server
+        .handle_incoming_message(serde_json::json!({
+            "jsonrpc": "2.0",
+            "id": 1,
+            "method": "session/new",
+            "params": {"cwd": "."},
+        }))
+        .await;
+    let created = recv_json(&mut rx).await;
+    let session_id = created["result"]["sessionId"]
+        .as_str()
+        .expect("session id")
+        .to_string();
+
+    server
+        .handle_incoming_message(serde_json::json!({
+            "jsonrpc": "2.0",
+            "id": 2,
+            "method": "session/set_config_option",
+            "params": {
+                "sessionId": session_id,
+                "configId": "model",
+                "value": "claude-sonnet-4-6",
+            },
+        }))
+        .await;
+    let ack = recv_json(&mut rx).await;
+    assert_eq!(ack["id"], 2);
+    let pinned_value = ack["result"]["configOptions"]
+        .as_array()
+        .expect("configOptions array")
+        .iter()
+        .find(|entry| entry["id"] == "model")
+        .expect("model config option")
+        .get("currentValue")
+        .and_then(|v| v.as_str())
+        .expect("currentValue string");
+    assert_eq!(pinned_value, "claude-sonnet-4-6");
+
+    let notification = recv_json(&mut rx).await;
+    assert_eq!(notification["method"], "session/update");
+    assert_eq!(
+        notification["params"]["update"]["sessionUpdate"],
+        "config_option_update"
+    );
+    let pin_in_notification = notification["params"]["update"]["configOptions"]
+        .as_array()
+        .expect("configOptions in notification")
+        .iter()
+        .find(|entry| entry["id"] == "model")
+        .expect("model entry in notification")
+        .get("currentValue")
+        .and_then(|v| v.as_str())
+        .expect("currentValue string");
+    assert_eq!(pin_in_notification, "claude-sonnet-4-6");
+
+    assert_eq!(
+        harn_vm::agent_sessions::pinned_model(&session_id).as_deref(),
+        Some("claude-sonnet-4-6"),
+        "vm session state must reflect the pin"
+    );
+
+    // Clear the pin by sending the `@inherit` sentinel — empty strings
+    // would violate the spec's `currentValue` minLength constraint, so
+    // the wire surface uses a stable string instead.
+    server
+        .handle_incoming_message(serde_json::json!({
+            "jsonrpc": "2.0",
+            "id": 3,
+            "method": "session/set_config_option",
+            "params": {
+                "sessionId": session_id,
+                "configId": "model",
+                "value": "@inherit",
+            },
+        }))
+        .await;
+    let clear_ack = recv_json(&mut rx).await;
+    assert_eq!(clear_ack["id"], 3);
+    let cleared_value = clear_ack["result"]["configOptions"]
+        .as_array()
+        .expect("configOptions array")
+        .iter()
+        .find(|entry| entry["id"] == "model")
+        .expect("model config option")
+        .get("currentValue")
+        .and_then(|v| v.as_str())
+        .expect("currentValue string");
+    assert_eq!(cleared_value, "@inherit");
+    let _clear_notification = recv_json(&mut rx).await;
+    assert!(
+        harn_vm::agent_sessions::pinned_model(&session_id).is_none(),
+        "clearing the pin should remove the vm-side selector"
+    );
+}
+
+/// `session/set_config_option(configId="model")` rejects selectors that
+/// don't resolve to a registered provider — the wire surface stays
+/// distinct from the more permissive `provider/model` form a Harn
+/// script can pass to `llm_call`.
+#[tokio::test(flavor = "current_thread")]
+async fn acp_set_config_option_rejects_unknown_model_provider() {
+    let (tx, mut rx) = mpsc::unbounded_channel();
+    let mut server = AcpServer::new_with_output(AcpServerConfig::new(None), AcpOutput::Channel(tx));
+
+    server
+        .handle_incoming_message(serde_json::json!({
+            "jsonrpc": "2.0",
+            "id": 1,
+            "method": "session/new",
+            "params": {"cwd": "."},
+        }))
+        .await;
+    let created = recv_json(&mut rx).await;
+    let session_id = created["result"]["sessionId"]
+        .as_str()
+        .expect("session id")
+        .to_string();
+
+    server
+        .handle_incoming_message(serde_json::json!({
+            "jsonrpc": "2.0",
+            "id": 2,
+            "method": "session/set_config_option",
+            "params": {
+                "sessionId": session_id,
+                "configId": "model",
+                "value": "nosuchprovider:nosuchmodel",
+            },
+        }))
+        .await;
+    let response = recv_json(&mut rx).await;
+    assert_eq!(response["id"], 2);
+    assert_eq!(response["error"]["code"], -32602);
+    let message = response["error"]["message"]
+        .as_str()
+        .unwrap_or_default()
+        .to_string();
+    assert!(
+        message.contains("invalid_model"),
+        "error message should be tagged invalid_model: {message}"
+    );
+    assert!(
+        harn_vm::agent_sessions::pinned_model(&session_id).is_none(),
+        "rejected pin must not mutate vm session state"
+    );
+}
+
+/// Unknown `configId` values surface a structured error listing the
+/// supported ids, so clients can distinguish "spec drift" from
+/// "validation failure" without parsing the message.
+#[tokio::test(flavor = "current_thread")]
+async fn acp_set_config_option_rejects_unknown_config_id() {
+    let (tx, mut rx) = mpsc::unbounded_channel();
+    let mut server = AcpServer::new_with_output(AcpServerConfig::new(None), AcpOutput::Channel(tx));
+
+    server
+        .handle_incoming_message(serde_json::json!({
+            "jsonrpc": "2.0",
+            "id": 1,
+            "method": "session/new",
+            "params": {"cwd": "."},
+        }))
+        .await;
+    let created = recv_json(&mut rx).await;
+    let session_id = created["result"]["sessionId"]
+        .as_str()
+        .expect("session id")
+        .to_string();
+
+    server
+        .handle_incoming_message(serde_json::json!({
+            "jsonrpc": "2.0",
+            "id": 2,
+            "method": "session/set_config_option",
+            "params": {
+                "sessionId": session_id,
+                "configId": "temperature",
+                "value": "0.4",
+            },
+        }))
+        .await;
+    let response = recv_json(&mut rx).await;
+    assert_eq!(response["id"], 2);
+    assert_eq!(response["error"]["code"], -32602);
+    let message = response["error"]["message"]
+        .as_str()
+        .unwrap_or_default()
+        .to_string();
+    assert!(
+        message.contains("Unknown config option") && message.contains("model"),
+        "error message should advertise the registry's supported ids: {message}"
     );
 }

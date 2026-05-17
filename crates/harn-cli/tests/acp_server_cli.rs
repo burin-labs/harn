@@ -333,6 +333,146 @@ fn acp_session_fork_branches_runtime_state_and_dispatches_independently() {
     assert!(status.success(), "status={status}");
 }
 
+/// Round-trip the v1 mid-session model swap: pin a model via
+/// `session/set_config_option(configId="model")`, observe the
+/// `config_option_update` notification, and verify the next
+/// `session/prompt` sees the pin reflected in `agent_session_snapshot`.
+/// Locks the wire contract from #1721 against future regressions.
+#[ignore = "binary surface — moves to slow E2E/smoke job (issue #1069)"]
+#[test]
+fn acp_session_set_config_option_model_pins_for_next_prompt() {
+    let _guard = lock_acp_cli_tests();
+    let temp = TempDir::new().unwrap();
+    write_file(
+        temp.path(),
+        "pin_fixture.harn",
+        r#"
+pub pipeline main() {
+  let sid = agent_session_current_id()
+  guard sid != nil else { throw "ACP prompt installs the current session id" }
+  let snap = agent_session_snapshot(sid)
+  println(
+    json_stringify({
+      session_id: sid,
+      pinned_model: snap["pinned_model"],
+    }),
+  )
+}
+"#,
+    );
+
+    let mut child = harn_e2e_command()
+        .current_dir(temp.path())
+        .arg("serve")
+        .arg("acp")
+        .arg("pin_fixture.harn")
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::null())
+        .spawn()
+        .unwrap();
+
+    let mut stdin = child.stdin.take().unwrap();
+    let mut stdout = BufReader::new(child.stdout.take().unwrap());
+
+    let (_, _init) = send_request(
+        &mut stdin,
+        &mut stdout,
+        json!({
+            "jsonrpc": "2.0",
+            "id": 1,
+            "method": "initialize",
+            "params": {},
+        }),
+    );
+
+    let (_, created) = send_request(
+        &mut stdin,
+        &mut stdout,
+        json!({
+            "jsonrpc": "2.0",
+            "id": 2,
+            "method": "session/new",
+            "params": {"cwd": temp.path()},
+        }),
+    );
+    let session_id = created["result"]["sessionId"].as_str().unwrap().to_string();
+    // Freshly created sessions have no model pinned — the `model`
+    // config option must advertise the inherit sentinel.
+    let model_option = created["result"]["configOptions"]
+        .as_array()
+        .expect("configOptions array")
+        .iter()
+        .find(|entry| entry["id"] == "model")
+        .expect("model config option in session/new response");
+    assert_eq!(model_option["currentValue"], "@inherit");
+
+    let (_pin_notifications, pin_ack) = send_request(
+        &mut stdin,
+        &mut stdout,
+        json!({
+            "jsonrpc": "2.0",
+            "id": 3,
+            "method": "session/set_config_option",
+            "params": {
+                "sessionId": session_id,
+                "configId": "model",
+                "value": "claude-sonnet-4-6",
+            },
+        }),
+    );
+    let ack_model = pin_ack["result"]["configOptions"]
+        .as_array()
+        .expect("configOptions array")
+        .iter()
+        .find(|entry| entry["id"] == "model")
+        .expect("model config option in ack");
+    assert_eq!(ack_model["currentValue"], "claude-sonnet-4-6");
+
+    // The `config_option_update` notification is emitted *after* the
+    // ack (matching the `session/set_mode` convention), so it lands in
+    // the notification buffer of the *next* request rather than the
+    // one that triggered it.
+    let (prompt_notifications, prompt_response) = send_request(
+        &mut stdin,
+        &mut stdout,
+        json!({
+            "jsonrpc": "2.0",
+            "id": 4,
+            "method": "session/prompt",
+            "params": {
+                "sessionId": session_id,
+                "prompt": [{"type": "text", "text": "irrelevant"}],
+            },
+        }),
+    );
+    assert_eq!(prompt_response["result"]["stopReason"], "end_turn");
+    let summary = latest_prompt_summary(&prompt_notifications, &session_id);
+    assert_eq!(summary["pinned_model"], "claude-sonnet-4-6");
+
+    let saw_update = prompt_notifications.iter().any(|message| {
+        message["method"] == "session/update"
+            && message["params"]["sessionId"] == session_id
+            && message["params"]["update"]["sessionUpdate"] == "config_option_update"
+            && message["params"]["update"]["configOptions"]
+                .as_array()
+                .map(|entries| {
+                    entries.iter().any(|entry| {
+                        entry["id"] == "model" && entry["currentValue"] == "claude-sonnet-4-6"
+                    })
+                })
+                .unwrap_or(false)
+    });
+    assert!(
+        saw_update,
+        "set_config_option(model) must emit config_option_update reflecting the pin"
+    );
+
+    drop(stdin);
+    let status = child.wait().unwrap();
+    assert!(status.success(), "status={status}");
+}
+
 #[ignore = "binary surface — moves to slow E2E/smoke job (issue #1069)"]
 #[test]
 fn acp_session_truncate_mutates_runtime_state_in_place() {
