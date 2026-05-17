@@ -11,7 +11,17 @@ impl super::super::Vm {
         let val = match &frame.chunk.constants[idx] {
             Constant::Int(n) => VmValue::Int(*n),
             Constant::Float(n) => VmValue::Float(*n),
-            Constant::String(s) => VmValue::String(Rc::from(s.as_str())),
+            Constant::String(_) => {
+                // Route through the chunk's lazy `Rc<str>` cache so
+                // repeated pushes of the same string constant share a
+                // single allocation instead of materializing a fresh
+                // `Rc<str>` per execution.
+                let rc = frame
+                    .chunk
+                    .constant_string_rc(idx)
+                    .expect("Constant::String idx must resolve to an Rc<str>");
+                VmValue::String(rc)
+            }
             Constant::Bool(b) => VmValue::Bool(*b),
             Constant::Nil => VmValue::Nil,
             Constant::Duration(ms) => VmValue::Duration(*ms),

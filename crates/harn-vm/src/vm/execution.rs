@@ -114,16 +114,25 @@ impl Vm {
         module_state: Option<crate::value::ModuleState>,
         local_slots: Option<Vec<LocalSlot>>,
     ) -> Result<VmValue, VmError> {
-        let initial_env = self.env.clone();
+        let debugger = self.debugger_attached();
         let local_slots = local_slots.unwrap_or_else(|| Self::fresh_local_slots(&chunk));
-        let initial_local_slots = local_slots.clone();
+        let initial_env = if debugger {
+            Some(self.env.clone())
+        } else {
+            None
+        };
+        let initial_local_slots = if debugger {
+            Some(local_slots.clone())
+        } else {
+            None
+        };
         self.frames.push(CallFrame {
             chunk,
             ip: 0,
             stack_base: self.stack.len(),
             saved_env: self.env.clone(),
-            initial_env: Some(initial_env),
-            initial_local_slots: Some(initial_local_slots),
+            initial_env,
+            initial_local_slots,
             saved_iterator_depth: self.iterators.len(),
             fn_name: String::new(),
             argc,

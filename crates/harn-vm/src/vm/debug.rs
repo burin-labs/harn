@@ -452,7 +452,9 @@ impl Vm {
         }
         let Some(initial_env) = self.frames[frame_id].initial_env.clone() else {
             return Err(VmError::Runtime(
-                "restartFrame: target frame was not captured for restart (scratch / evaluator frame)"
+                "restartFrame: target frame was not captured for restart \
+                 (scratch / evaluator frame, or frame created before a \
+                 debugger was attached)"
                     .into(),
             ));
         };
