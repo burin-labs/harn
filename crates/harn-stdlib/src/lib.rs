@@ -242,6 +242,10 @@ pub const STDLIB_SOURCES: &[StdlibSource] = &[
         source: include_str!("stdlib/llm/handlers.harn"),
     },
     StdlibSource {
+        module: "llm/tool_telemetry",
+        source: include_str!("stdlib/llm/tool_telemetry.harn"),
+    },
+    StdlibSource {
         module: "llm/tool_middleware",
         source: include_str!("stdlib/llm/tool_middleware.harn"),
     },

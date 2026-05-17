@@ -56,6 +56,7 @@
 // Composition uses `compose_tool_callers([outer, ..., inner])` — leftmost is
 // the outermost wrapper. Exactly mirrors std/llm/handlers `compose`.
 import { cache_get, cache_put } from "std/cache"
+import { resolve_telemetry_sink, tool_call_span } from "std/llm/tool_telemetry"
 
 // -------------------------------------------------------------------------------------------------
 // shared helpers
@@ -898,45 +899,85 @@ pub fn with_rate_limit(opts) {
 }
 
 /**
- * with_telemetry(sink) -> caller
+ * with_telemetry(sink_or_opts) -> caller
  *
- * Sink-style observer that emits one record per call with timings + the
- * declared executor + status. Format-compatible with OTel `gen_ai.tool.*`
- * attributes — sinks can map directly to spans:
+ * Builds a standardized tool-call span for every dispatch and fans it
+ * out to one or more sinks. The span shape is documented in
+ * `std/llm/tool_telemetry` (and `docs/src/observability/tool-call-spans.md`)
+ * and includes timing, status, executor, args hash, layered child
+ * spans, and dispatched/result/scope-violation events.
  *
- *   {
- *     gen_ai_tool_name, gen_ai_tool_call_id, gen_ai_tool_call_arguments,
- *     gen_ai_tool_call_result, gen_ai_tool_executor,
- *     status, duration_ms, error?,
- *   }
+ * Accepted argument shapes:
+ *
+ *   callable                                     — custom sink fn(span)
+ *   "langfuse" | "otel" | "stderr" | "noop"      — built-in sink
+ *   {sink: callable | "langfuse" | …, ...opts}   — single sink + opts
+ *   {sinks: [...], ...opts}                      — fan out to multiple sinks
+ *
+ * Recognized `opts` (passed through to built-in sinks and used to
+ * decorate the span):
+ *   persona, mode                — included as span attributes
+ *   parent_span_id, trace_id_override
+ *   extra_attributes             — merged into `attributes`
+ *   base_url, public_key, secret_key, project, environment, release,
+ *   timeout_ms, on_error         — Langfuse-specific
+ *   prefix                       — stderr/otel-specific
+ *
+ * Examples:
+ *
+ *     with_telemetry(my_callable)
+ *     with_telemetry("langfuse")
+ *     with_telemetry({sink: "langfuse", project: "harn-dev"})
+ *     with_telemetry({sinks: ["langfuse", "stderr"], persona: "merge_captain"})
  */
-pub fn with_telemetry(sink) {
-  if !__tool_mw_is_callable(sink) {
-    throw "with_telemetry: sink must be callable; got " + type_of(sink)
-  }
+pub fn with_telemetry(sink_or_opts) {
+  let sink = resolve_telemetry_sink(sink_or_opts)
+  let extras = __telemetry_extras(sink_or_opts)
   return { call, next ->
-    let started = now_ms()
+    let started_ms = now_ms()
+    let started_iso = __tool_mw_now_iso()
     let result = next(call)
-    let duration = now_ms() - started
-    let record = {
-      gen_ai_tool_name: call.tool_name,
-      gen_ai_tool_call_id: call.call_id,
-      gen_ai_tool_call_arguments: call.tool_args,
-      gen_ai_tool_call_result: result?.result,
-      gen_ai_tool_executor: result?.executor,
-      status: to_string(result?.status ?? ""),
-      ok: result?.ok ?? false,
-      duration_ms: duration,
-      error: result?.error,
-    }
+    let ended_ms = now_ms()
+    let ended_iso = __tool_mw_now_iso()
+    let span = tool_call_span(
+      call,
+      result,
+      started_ms,
+      ended_ms,
+      extras + {start_time_iso: started_iso, end_time_iso: ended_iso},
+    )
     let _ = try {
-      sink(record)
+      sink(span)
     }
     return __tool_mw_attach_audit(
       result,
-      {layers: [{name: "with_telemetry", status: "ok", duration_ms: duration}]},
+      {layers: [{name: "with_telemetry", status: "ok", elapsed_ms: ended_ms - started_ms}]},
     )
   }
+}
+
+fn __telemetry_extras(value) {
+  if type_of(value) != "dict" {
+    return {}
+  }
+  let cfg = value
+  var extras = {}
+  if cfg?.persona != nil {
+    extras = extras + {persona: cfg.persona}
+  }
+  if cfg?.mode != nil {
+    extras = extras + {mode: cfg.mode}
+  }
+  if cfg?.parent_span_id != nil {
+    extras = extras + {parent_span_id: cfg.parent_span_id}
+  }
+  if cfg?.trace_id_override != nil {
+    extras = extras + {trace_id_override: cfg.trace_id_override}
+  }
+  if type_of(cfg?.extra_attributes) == "dict" {
+    extras = extras + {extra_attributes: cfg.extra_attributes}
+  }
+  return extras
 }
 
 /**

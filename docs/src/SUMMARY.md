@@ -138,6 +138,7 @@
 - [Trigger observability in the action graph](./observability/triggers-in-action-graph.md)
 - [Orchestrator observability](./orchestrator/observability.md)
 - [Replay benchmarks](./observability/replay-benchmarks.md)
+- [Tool-call spans](./observability/tool-call-spans.md)
 
 # Operations
 

@@ -727,6 +727,12 @@ impl<'a> Linter<'a> {
                             scope.insert(name.clone());
                         }
                         self.references.insert(name.clone());
+                        // Track the iteration binding so the
+                        // undefined-function lint treats it as a
+                        // potentially-callable local (e.g. when the
+                        // loop iterates over closures and invokes
+                        // them in the body).
+                        self.declare_parameter(name, snode.span);
                     }
                     _ => self.declare_pattern_variables(pattern, snode.span, false),
                 }

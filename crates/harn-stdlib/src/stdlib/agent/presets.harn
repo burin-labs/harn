@@ -385,9 +385,9 @@ fn __captain_tool_layers(kind, opts) {
   if audit_sink != nil {
     layers = layers.push(with_audit_log(audit_sink))
   }
-  let telemetry_sink = __captain_layer_value(opts, "telemetry_sink", nil)
-  if telemetry_sink != nil {
-    layers = layers.push(with_telemetry(telemetry_sink))
+  let telemetry = __captain_layer_value(opts, "telemetry", nil)
+  if telemetry != nil {
+    layers = layers.push(with_telemetry(telemetry))
   }
   if kind == "merge_captain" {
     let consent_fn = __captain_layer_value(opts, "consent", __captain_consent_default(kind))
@@ -494,7 +494,7 @@ fn __apply_captain_llm_caller(opts, kind) {
  * spread it into `agent_loop(...)` directly, or merge further overrides
  * on top. Captain presets additionally compose:
  *   - a `tool_caller` middleware stack from any of `audit_sink`,
- *     `telemetry_sink`, `consent`, `rate_limit`, `dry_run`,
+ *     `telemetry`, `consent`, `rate_limit`, `dry_run`,
  *     `handoff_sink` the caller supplied;
  *   - an `llm_caller` handler stack from `cheap_caller` +
  *     `frontier_caller` + `escalate_predicate` (cheap-default with

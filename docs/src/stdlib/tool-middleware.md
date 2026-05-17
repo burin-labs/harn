@@ -202,11 +202,15 @@ queries within the TTL reuse cached results.
 Caps the total number of tool calls processed by this caller. Once
 `max_calls` is hit, further calls short-circuit with `rate_limited`.
 
-### `with_telemetry(sink) -> caller`
+### `with_telemetry(sink_or_opts) -> caller`
 
-OTel-shaped sink: emits one record per call with timings + the
-declared executor + status. Field names match `gen_ai.tool.*` so sinks
-can map directly to OpenTelemetry spans.
+Emits a standardized tool-call span for every dispatch and fans it out
+to one or more sinks. Accepts a callable `fn(span)`, a built-in name
+(`"langfuse"`, `"otel"`, `"stderr"`, `"noop"`), or a config dict with
+`sink:` / `sinks:`. The span shape mirrors `gen_ai.tool.*` attributes
+and exposes timing, executor, args hash, layered child spans, and
+dispatched / result / scope-violation events. Full schema and built-in
+sink reference: [Tool-call spans](../observability/tool-call-spans.md).
 
 ### `with_summary(format_fn) -> caller`
 
@@ -281,7 +285,7 @@ let reason_mw = with_required_reason({schema_required: false})
 
 let captain_tool_caller = compose_tool_callers([
   with_audit_log({sink: "both", redact: ["token", "content"]}), // typed tool receipts
-  with_telemetry(otel_sink),                   // gen_ai.tool.* spans
+  with_telemetry({sink: "langfuse", project: "harn-dev"}), // tool-call spans
   with_summary({ call, _r -> describe(call) }), // user-facing one-liner
   with_consent(persona.autonomy_policy),       // act_with_approval gate
   reason_mw.caller,                            // require `reason` arg

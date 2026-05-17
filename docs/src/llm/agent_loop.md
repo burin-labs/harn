@@ -557,7 +557,7 @@ let shipping = release_captain_agent("Cut v0.9.0.", {
 ```
 
 Captain layers are opt-in: the preset only adds an `audit_sink` /
-`telemetry_sink` / `consent` / `rate_limit` / `dry_run` /
+`telemetry` / `consent` / `rate_limit` / `dry_run` /
 `handoff_sink` layer when the caller supplies the matching dependency
 (plus the per-captain defaults in the table above). Pass an explicit
 `tool_caller` to opt out completely. Captain presets also build an
