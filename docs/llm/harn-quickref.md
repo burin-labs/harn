@@ -2217,10 +2217,20 @@ Three concentric surfaces:
 - `register_session_hook(event, handler)` — whole-session lifecycle:
   `session_start`, `session_end`, `user_prompt_submit`, `pre_compact`,
   `post_compact`, `post_turn`, `permission_asked`, `permission_replied`,
-  `file_edited`, `session_error`, `session_idle`. Veto with
+  `file_edited`, `session_error`, `session_idle`, `pre_finish`,
+  `post_finish`, `on_unsettled_detected`. Veto with
   `{block: true, reason}`; short-circuit a permission with
   `{decision: "allow"|"deny"|"ask", reason}`. Tape captures every
   invocation under `hook_call` / `hook_returned` / `hook_vetoed`.
+- `pipeline_on_finish(callback)` — register a `fn(harness, return_value)`
+  callback that runs between `pre_finish` and `post_finish` on the main
+  VM (its stdout reaches the host capture buffer). The callback's
+  return value replaces the pipeline's return value, so a custom
+  `on_finish` can wrap, redact, or audit the result. Presets ship in
+  `std/lifecycle`: `on_finish_abandon` (legacy no-op) and
+  `on_finish_drain` (settlement-agent stub — currently identical to
+  `abandon`; replaced by the P-02 settlement implementation under
+  harn#1853).
 
 ```harn
 register_session_hook("user_prompt_submit", { event ->

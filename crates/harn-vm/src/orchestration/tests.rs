@@ -1351,6 +1351,79 @@ async fn lifecycle_hook_patterns_match_payload_shapes() {
     clear_runtime_hooks();
 }
 
+#[tokio::test(flavor = "current_thread")]
+async fn pipeline_on_finish_callback_replaces_return_value() {
+    crate::reset_thread_local_state();
+
+    let local = tokio::task::LocalSet::new();
+    let value = local
+        .run_until(async {
+            let mut vm = crate::Vm::new();
+            crate::register_vm_stdlib(&mut vm);
+            let chunk = crate::compile_source(
+                "pipeline default() { pipeline_on_finish({ _h, v -> v + 100 }); return 7 }",
+            )
+            .expect("compile");
+            vm.execute(&chunk).await.expect("execute")
+        })
+        .await;
+
+    match value {
+        VmValue::Int(n) => assert_eq!(n, 107, "on_finish callback should add 100 to 7"),
+        other => panic!("expected Int, got {}", other.type_name()),
+    }
+
+    // One-shot consumption: a second execute without re-registration must
+    // not re-invoke the previous callback.
+    let next = local
+        .run_until(async {
+            let mut vm = crate::Vm::new();
+            crate::register_vm_stdlib(&mut vm);
+            let chunk = crate::compile_source("pipeline default() { return 7 }").expect("compile");
+            vm.execute(&chunk).await.expect("execute")
+        })
+        .await;
+    match next {
+        VmValue::Int(n) => assert_eq!(n, 7, "no callback registered → value passes through"),
+        other => panic!("expected Int, got {}", other.type_name()),
+    }
+}
+
+#[test]
+fn pipeline_finish_events_round_trip_through_session_hook_parser() {
+    for (input, expected) in [
+        ("pre_finish", HookEvent::PreFinish),
+        ("PreFinish", HookEvent::PreFinish),
+        ("post_finish", HookEvent::PostFinish),
+        ("PostFinish", HookEvent::PostFinish),
+        ("on_unsettled_detected", HookEvent::OnUnsettledDetected),
+        ("OnUnsettledDetected", HookEvent::OnUnsettledDetected),
+    ] {
+        let parsed = HookEvent::parse_session_event(input)
+            .unwrap_or_else(|err| panic!("{input} should parse as a session event: {err}"));
+        assert_eq!(parsed, expected, "{input} should map to {expected:?}");
+    }
+}
+
+#[test]
+fn unsettled_state_snapshot_starts_empty() {
+    let snapshot = unsettled_state_snapshot();
+    assert!(snapshot.is_empty());
+    assert_eq!(
+        snapshot.to_json()["suspended_subagents"],
+        serde_json::json!([])
+    );
+    assert_eq!(snapshot.to_json()["queued_triggers"], serde_json::json!([]));
+    assert_eq!(
+        snapshot.to_json()["partial_handoffs"],
+        serde_json::json!([])
+    );
+    assert_eq!(
+        snapshot.to_json()["in_flight_llm_calls"],
+        serde_json::json!([])
+    );
+}
+
 #[test]
 fn glob_match_patterns() {
     assert!(glob_match("*", "anything"));

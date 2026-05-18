@@ -1,0 +1,33 @@
+/**
+ * `on_finish_abandon` from `std/lifecycle` is the legacy no-op preset:
+ * it returns the pipeline's value unchanged. PreFinish and PostFinish
+ * both observe the same return value because `abandon` does not
+ * transform it.
+ *
+ * `on_finish_drain` is a stub today and behaves identically; P-02 will
+ * replace its body with the settlement-agent spawn.
+ *
+ * Tracking: harn#1854.
+ */
+import { on_finish_abandon } from "std/lifecycle"
+
+pipeline default() {
+  clear_session_hooks()
+  register_session_hook(
+    "pre_finish",
+    { event ->
+      println("pre_finish saw " + to_string(event.return_value))
+      return nil
+    },
+  )
+  register_session_hook(
+    "post_finish",
+    { event ->
+      println("post_finish saw " + to_string(event.return_value))
+      return nil
+    },
+  )
+  pipeline_on_finish(on_finish_abandon)
+  println("body done")
+  return 42
+}

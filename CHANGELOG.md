@@ -10,6 +10,22 @@ condensed series summaries instead of full per-patch history.
 
 ### Added
 
+- **Pipeline `on_finish` callback + finish lifecycle hooks (#1854).**
+  Adds the `pipeline_on_finish(callback)` builtin and three new
+  session-level hook events — `PreFinish`, `PostFinish`, and
+  `OnUnsettledDetected` — emitted by `Vm::execute` after the script's
+  declared steps complete. The callback receives `(harness,
+  return_value)` and its return value replaces the pipeline's return
+  value, so post-completion logic (transcript wrap-up, audit emission,
+  settlement decisions) has a typed boundary instead of an abandoned
+  trailing edge. `std/lifecycle` exports `on_finish_abandon` (the
+  legacy no-op preset) and `on_finish_drain` (a stub the P-02
+  settlement-agent epic replaces). `OnUnsettledDetected` only fires
+  when a future unsettled-state snapshot is non-empty; P-01 ships an
+  always-empty snapshot so the wiring is exercised without depending
+  on the suspend/resume, trigger-queue, handoff-envelope, or
+  in-flight-LLM-call producers that follow under harn#1853. Foundation
+  ticket for the Pipeline Lifecycle Framework epic.
 - **`harn check --json` and `harn fmt --json` (#1759).** Adds
   standard `JsonEnvelope` reports for static checks and formatter
   runs, including per-file status, diagnostics, summary counts, and

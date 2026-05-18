@@ -1,0 +1,44 @@
+/**
+ * `pipeline_on_finish` registers a callback that runs between PreFinish
+ * and PostFinish, receives `(harness, return_value)`, and can transform
+ * the pipeline's return value. PreFinish and PostFinish are emitted by
+ * the runtime around the callback boundary. OnUnsettledDetected stays
+ * silent until P-04 wires the unsettled-state producers.
+ *
+ * Tracking: harn#1854.
+ */
+pipeline default() {
+  clear_session_hooks()
+  register_session_hook(
+    "pre_finish",
+    { event ->
+      println(
+        "pre_finish: has_on_finish=" + to_string(event.has_on_finish) + " return_value="
+          + to_string(event.return_value),
+      )
+      return nil
+    },
+  )
+  register_session_hook(
+    "post_finish",
+    { event ->
+      println("post_finish: return_value=" + to_string(event.return_value))
+      return nil
+    },
+  )
+  register_session_hook(
+    "on_unsettled_detected",
+    { event ->
+      println("on_unsettled_detected fired (unexpected for P-01)")
+      return nil
+    },
+  )
+  pipeline_on_finish(
+    { _harness, return_value ->
+      println("on_finish: return_value=" + to_string(return_value))
+      return return_value + 100
+    },
+  )
+  println("body done")
+  return 7
+}
