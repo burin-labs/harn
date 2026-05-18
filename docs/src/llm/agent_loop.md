@@ -981,7 +981,8 @@ Worker lifecycle builtins:
 | `sub_agent_request(task, options?)` | Build the normalized child-agent request used by `sub_agent_run` |
 | `sub_agent_run(task, options?)` | Run an isolated child agent loop and return a single clean result envelope to the parent |
 | `send_input(handle, task)` | Re-run a completed worker with a new task, carrying transcript/artifacts forward when applicable |
-| `resume_agent(id_or_snapshot_path)` | Restore a persisted worker snapshot and continue it in the current runtime |
+| `suspend_agent(worker, reason?, options?)` | Cooperatively suspend a worker, persist a resumable snapshot, and return `status: "suspended"` with `suspension` metadata |
+| `resume_agent(worker_or_snapshot, resume_input?)` | Resume a suspended worker, optionally with new input, or restore a persisted worker snapshot and continue it in the current runtime |
 | `wait_agent(handle_or_list)` | Wait for one worker or a list of workers to finish |
 | `close_agent(handle)` | Cancel a worker and mark it terminal |
 | `list_agents()` | Return summaries for all known workers in the current runtime |

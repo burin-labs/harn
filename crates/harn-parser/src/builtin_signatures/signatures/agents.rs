@@ -651,10 +651,26 @@ pub(crate) const SIGNATURES: &[BuiltinSignature] = &[
         Ty::Named("channel"),
     ),
     BuiltinSignature::simple("llm_usage", &[], TY_DICT),
-    BuiltinSignature::simple("resume_agent", &[Param::new("target", TY_STRING)], TY_DICT),
+    BuiltinSignature::simple(
+        "resume_agent",
+        &[
+            Param::new("worker_or_snapshot", TY_ANY),
+            Param::optional("resume_input", TY_ANY),
+        ],
+        TY_DICT,
+    ),
     BuiltinSignature::simple(
         "send_input",
         &[Param::new("handle", TY_ANY), Param::new("task", TY_STRING)],
+        TY_DICT,
+    ),
+    BuiltinSignature::simple(
+        "suspend_agent",
+        &[
+            Param::new("worker", TY_ANY),
+            Param::optional("reason", TY_STRING),
+            Param::optional("options", TY_DICT_OR_NIL),
+        ],
         TY_DICT,
     ),
     BuiltinSignature::simple(

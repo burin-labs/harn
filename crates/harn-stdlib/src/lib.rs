@@ -1063,6 +1063,32 @@ mod tests {
     }
 
     #[test]
+    fn agent_workers_exports_suspend_resume_wrappers() {
+        let exports = public_functions_for_module("agent/workers");
+        let suspend = exports
+            .iter()
+            .find(|function| function.name == "suspend_agent")
+            .expect("std/agent/workers should export suspend_agent");
+        assert_eq!(
+            suspend.signature,
+            "suspend_agent(worker, reason = \"\", options = nil)"
+        );
+        assert_eq!(suspend.required_params, 1);
+        assert_eq!(suspend.total_params, 3);
+
+        let resume = exports
+            .iter()
+            .find(|function| function.name == "resume_agent")
+            .expect("std/agent/workers should export resume_agent");
+        assert_eq!(
+            resume.signature,
+            "resume_agent(worker_or_snapshot, resume_input = nil)"
+        );
+        assert_eq!(resume.required_params, 1);
+        assert_eq!(resume.total_params, 2);
+    }
+
+    #[test]
     fn tui_stdlib_module_exports_terminal_helpers() {
         let exports = public_functions_for_module("tui")
             .into_iter()

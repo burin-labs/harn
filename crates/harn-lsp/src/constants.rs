@@ -218,7 +218,14 @@ pub(crate) const BUILTINS: &[(&str, &str)] = &[
         "agent_loop",
         "agent_loop(prompt, system?, options?) -> dict",
     ),
-    ("resume_agent", "resume_agent(id_or_snapshot_path) -> dict"),
+    (
+        "suspend_agent",
+        "suspend_agent(worker, reason?, options?) -> dict",
+    ),
+    (
+        "resume_agent",
+        "resume_agent(worker_or_snapshot, resume_input?) -> dict",
+    ),
     ("secret_scan", "secret_scan(content) -> list"),
     ("vision_ocr", "vision_ocr(image, options?) -> dict"),
     // MCP
