@@ -656,6 +656,7 @@ pub(crate) const SIGNATURES: &[BuiltinSignature] = &[
         &[
             Param::new("worker_or_snapshot", TY_ANY),
             Param::optional("resume_input", TY_ANY),
+            Param::optional("continue_transcript", TY_BOOL),
         ],
         TY_DICT,
     ),

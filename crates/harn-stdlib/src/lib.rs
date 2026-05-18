@@ -1082,10 +1082,10 @@ mod tests {
             .expect("std/agent/workers should export resume_agent");
         assert_eq!(
             resume.signature,
-            "resume_agent(worker_or_snapshot, resume_input = nil)"
+            "resume_agent(worker_or_snapshot, resume_input = nil, continue_transcript = true)"
         );
         assert_eq!(resume.required_params, 1);
-        assert_eq!(resume.total_params, 2);
+        assert_eq!(resume.total_params, 3);
     }
 
     #[test]

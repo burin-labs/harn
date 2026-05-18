@@ -240,15 +240,21 @@ pub fn suspend_agent(worker, reason = "", options = nil) {
  *
  * Resume a suspended worker, optionally wiring new input into the resumed
  * task, or restore a persisted worker snapshot into the current runtime.
+ * By default the resumed worker keeps its transcript. Pass
+ * `continue_transcript = false` to resume from the prior transcript summary
+ * plus the new input only.
  *
  * @effects: [host]
  * @allocation: heap
  * @errors: []
  * @api_stability: experimental
- * @example: resume_agent(worker_or_snapshot, resume_input)
+ * @example: resume_agent(worker_or_snapshot, resume_input, continue_transcript)
  */
-pub fn resume_agent(worker_or_snapshot, resume_input = nil) {
-  return __host_worker_resume(worker_or_snapshot, resume_input)
+pub fn resume_agent(worker_or_snapshot, resume_input = nil, continue_transcript = true) {
+  return __host_worker_resume(
+    worker_or_snapshot,
+    {input: resume_input, continue_transcript: continue_transcript},
+  )
 }
 
 /**

@@ -62,8 +62,10 @@ const AGENT_ASYNC_PRIMITIVES: &[AsyncBuiltin] = &[
         .arity(VmBuiltinArity::Exact(1))
         .doc("Wait for one or more host workers to reach a terminal state."),
     async_builtin!("__host_worker_resume", resume_agent_builtin)
-        .signature("__host_worker_resume(worker_or_snapshot, input?)")
-        .arity(VmBuiltinArity::Range { min: 1, max: 2 })
+        .signature(
+            "__host_worker_resume(worker_or_snapshot, input_or_options?, continue_transcript?)",
+        )
+        .arity(VmBuiltinArity::Range { min: 1, max: 3 })
         .doc("Resume a suspended or persisted worker into the local host worker registry."),
     async_builtin!("__host_worker_suspend", suspend_agent_builtin)
         .signature("__host_worker_suspend(worker, reason, options?)")
@@ -587,12 +589,100 @@ async fn suspend_agent_builtin(args: Vec<VmValue>) -> Result<VmValue, VmError> {
 ///   the snapshot into the registry. If the snapshot recorded a suspended
 ///   state it is preserved (the caller can then re-issue resume to warm
 ///   it up); otherwise it lands in the snapshot's terminal/awaiting state.
+#[derive(Clone)]
+struct WorkerResumeOptions {
+    resume_input: Option<VmValue>,
+    continue_transcript: bool,
+}
+
+impl Default for WorkerResumeOptions {
+    fn default() -> Self {
+        Self {
+            resume_input: None,
+            continue_transcript: true,
+        }
+    }
+}
+
+fn is_nil(value: &VmValue) -> bool {
+    matches!(value, VmValue::Nil)
+}
+
+fn parse_resume_options(args: &[VmValue]) -> WorkerResumeOptions {
+    let mut options = WorkerResumeOptions::default();
+    let Some(raw) = args.get(1) else {
+        return options;
+    };
+    if let VmValue::Dict(dict) = raw {
+        let has_options = dict.contains_key("input")
+            || dict.contains_key("resume_input")
+            || dict.contains_key("continue_transcript");
+        if has_options {
+            options.resume_input = dict
+                .get("input")
+                .or_else(|| dict.get("resume_input"))
+                .filter(|value| !is_nil(value))
+                .cloned();
+            if let Some(flag) = dict
+                .get("continue_transcript")
+                .filter(|value| !is_nil(value))
+            {
+                options.continue_transcript = flag.is_truthy();
+            }
+        } else {
+            options.resume_input = Some(raw.clone());
+        }
+    } else if !is_nil(raw) {
+        options.resume_input = Some(raw.clone());
+    }
+    if let Some(flag) = args.get(2).filter(|value| !is_nil(value)) {
+        options.continue_transcript = flag.is_truthy();
+    }
+    options
+}
+
+fn summary_message(summary: &str) -> VmValue {
+    VmValue::Dict(Rc::new(BTreeMap::from([
+        (
+            "role".to_string(),
+            VmValue::String(Rc::from("user".to_string())),
+        ),
+        (
+            "content".to_string(),
+            VmValue::String(Rc::from(summary.to_string())),
+        ),
+    ])))
+}
+
+fn summary_only_resume_transcript(transcript: Option<VmValue>) -> Option<VmValue> {
+    let transcript = transcript?;
+    let dict = transcript.as_dict()?;
+    let summary = crate::llm::helpers::transcript_summary_text(dict)?;
+    let summary = summary.trim();
+    if summary.is_empty() {
+        return None;
+    }
+    Some(crate::llm::helpers::new_transcript_with(
+        crate::llm::helpers::transcript_id(dict),
+        vec![summary_message(summary)],
+        Some(summary.to_string()),
+        dict.get("metadata").cloned(),
+    ))
+}
+
+fn apply_resume_transcript_policy(worker: &mut WorkerState, continue_transcript: bool) {
+    if continue_transcript {
+        return;
+    }
+    worker.transcript = summary_only_resume_transcript(worker.transcript.take());
+}
+
 async fn resume_agent_builtin(args: Vec<VmValue>) -> Result<VmValue, VmError> {
     let target_value = args
         .first()
         .ok_or_else(|| VmError::Runtime("resume_agent: missing worker handle".to_string()))?
         .clone();
-    let resume_input = args.get(1).cloned();
+    let options = parse_resume_options(&args);
 
     let warm_target_id = match &target_value {
         VmValue::Dict(_) | VmValue::TaskHandle(_) => Some(worker_id_from_value(&target_value)?),
@@ -627,9 +717,16 @@ async fn resume_agent_builtin(args: Vec<VmValue>) -> Result<VmValue, VmError> {
     // call is a no-op summary read, matching the idempotent contract on
     // the suspend side.
     if state.borrow().status == "suspended" {
-        warm_resume_worker(state, resume_input).await
+        warm_resume_worker(state, options).await
     } else {
-        apply_resume_input(&mut state.borrow_mut(), resume_input.as_ref());
+        {
+            let mut worker = state.borrow_mut();
+            apply_resume_transcript_policy(&mut worker, options.continue_transcript);
+            apply_resume_input(&mut worker, options.resume_input.as_ref());
+            if worker.carry_policy.persist_state {
+                persist_worker_state_snapshot(&worker)?;
+            }
+        }
         worker_summary(&state.borrow())
     }
 }
@@ -679,7 +776,7 @@ async fn join_checkpointed_worker_handle(state: Rc<RefCell<WorkerState>>) -> Res
 
 async fn warm_resume_worker(
     state: Rc<RefCell<WorkerState>>,
-    resume_input: Option<VmValue>,
+    options: WorkerResumeOptions,
 ) -> Result<VmValue, VmError> {
     join_checkpointed_worker_handle(state.clone()).await?;
     let snapshot = {
@@ -698,7 +795,8 @@ async fn warm_resume_worker(
         worker.status = "running".to_string();
         worker.finished_at = None;
         worker.latest_error = None;
-        apply_resume_input(&mut worker, resume_input.as_ref());
+        apply_resume_transcript_policy(&mut worker, options.continue_transcript);
+        apply_resume_input(&mut worker, options.resume_input.as_ref());
         let task = worker.task.clone();
         apply_resume_task_to_config(&mut worker.config, &task);
         if worker.carry_policy.persist_state {
@@ -925,6 +1023,19 @@ mod suspend_tests {
         VmValue::TaskHandle(worker_id.to_string())
     }
 
+    fn message_value(role: &str, content: &str) -> VmValue {
+        VmValue::Dict(Rc::new(BTreeMap::from([
+            (
+                "role".to_string(),
+                VmValue::String(Rc::from(role.to_string())),
+            ),
+            (
+                "content".to_string(),
+                VmValue::String(Rc::from(content.to_string())),
+            ),
+        ])))
+    }
+
     fn summary_status(summary: &VmValue) -> String {
         summary
             .as_dict()
@@ -1002,6 +1113,72 @@ mod suspend_tests {
             .await
             .expect("close");
         assert_eq!(summary_status(&closed), "cancelled");
+
+        teardown(&dir, &worker_id);
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn resume_can_drop_transcript_history_to_summary() {
+        let _guard = suspend_test_lock().await;
+        let (worker_id, dir) = seed_test_worker("worker-resume-summary-only");
+
+        WORKER_REGISTRY.with(|registry| {
+            let state = registry.borrow().get(&worker_id).cloned().unwrap();
+            state.borrow_mut().transcript = Some(crate::llm::helpers::new_transcript_with(
+                Some(format!("session_{worker_id}")),
+                vec![
+                    message_value("user", "old request"),
+                    message_value("assistant", "old answer"),
+                ],
+                Some("Prior digest".to_string()),
+                None,
+            ));
+        });
+        suspend_agent_builtin(vec![
+            handle_value(&worker_id),
+            VmValue::String(Rc::from("park before fresh prompt")),
+        ])
+        .await
+        .expect("suspend");
+
+        let resumed = resume_agent_builtin(vec![
+            handle_value(&worker_id),
+            VmValue::Dict(Rc::new(BTreeMap::from([
+                (
+                    "input".to_string(),
+                    VmValue::String(Rc::from("fresh prompt")),
+                ),
+                ("continue_transcript".to_string(), VmValue::Bool(false)),
+            ]))),
+        ])
+        .await
+        .expect("resume with transcript reset");
+        assert_eq!(summary_status(&resumed), "running");
+        assert_eq!(
+            resumed.as_dict().unwrap().get("task").map(VmValue::display),
+            Some("fresh prompt".to_string())
+        );
+
+        let transcript = WORKER_REGISTRY.with(|registry| {
+            registry
+                .borrow()
+                .get(&worker_id)
+                .unwrap()
+                .borrow()
+                .transcript
+                .clone()
+        });
+        let transcript = transcript.expect("summary-only transcript");
+        let dict = transcript.as_dict().expect("transcript dict");
+        let messages = crate::llm::helpers::transcript_message_list(dict).expect("messages");
+        assert_eq!(messages.len(), 1);
+        assert_eq!(
+            messages[0]
+                .as_dict()
+                .and_then(|message| message.get("content"))
+                .map(VmValue::display),
+            Some("Prior digest".to_string())
+        );
 
         teardown(&dir, &worker_id);
     }
