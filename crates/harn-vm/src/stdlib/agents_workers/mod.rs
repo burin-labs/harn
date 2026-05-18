@@ -139,6 +139,8 @@ pub(crate) struct WorkerSuspension {
     pub(crate) snapshot_ref: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub(crate) conditions: Option<serde_json::Value>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub(crate) auto_resume_trigger: Option<crate::stdlib::triggers_stdlib::AutoResumeTriggerHandle>,
 }
 
 #[derive(Clone, Debug, Default, serde::Serialize, serde::Deserialize, PartialEq, Eq)]

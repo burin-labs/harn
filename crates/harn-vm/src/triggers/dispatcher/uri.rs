@@ -36,6 +36,9 @@ pub enum DispatchUri {
     Persona {
         name: String,
     },
+    AutoResume {
+        worker_id: String,
+    },
 }
 
 impl DispatchUri {
@@ -89,6 +92,7 @@ impl DispatchUri {
             Self::A2a { .. } => "a2a",
             Self::Worker { .. } => "worker",
             Self::Persona { .. } => "persona",
+            Self::AutoResume { .. } => "auto_resume",
         }
     }
 
@@ -98,6 +102,7 @@ impl DispatchUri {
             Self::A2a { target, .. } => format!("a2a://{target}"),
             Self::Worker { queue } => format!("worker://{queue}"),
             Self::Persona { name } => format!("persona://{name}"),
+            Self::AutoResume { worker_id } => format!("auto_resume://{worker_id}"),
         }
     }
 
@@ -107,6 +112,7 @@ impl DispatchUri {
             Self::A2a { .. } => "federated_a2a",
             Self::Worker { .. } => "event_log_worker_queue",
             Self::Persona { .. } => "persona_runtime",
+            Self::AutoResume { .. } => "local_process",
         }
     }
 
@@ -116,6 +122,7 @@ impl DispatchUri {
             Self::A2a { .. } => "remote",
             Self::Worker { .. } => "queued",
             Self::Persona { .. } => "managed_persona",
+            Self::AutoResume { .. } => "in_process",
         }
     }
 
@@ -164,6 +171,9 @@ impl From<&TriggerHandlerSpec> for DispatchUri {
             },
             TriggerHandlerSpec::Persona { binding } => Self::Persona {
                 name: binding.name.clone(),
+            },
+            TriggerHandlerSpec::AutoResume { worker_id } => Self::AutoResume {
+                worker_id: worker_id.clone(),
             },
         }
     }

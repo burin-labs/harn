@@ -70,6 +70,7 @@ pub(super) fn dispatch_success_outcome(
         }
         DispatchUri::A2a { .. } => "completed",
         DispatchUri::Local { .. } => "success",
+        DispatchUri::AutoResume { .. } => "resumed",
     }
 }
 
@@ -270,7 +271,7 @@ pub(super) fn dispatch_success_metadata(
                 metadata.insert("status".to_string(), serde_json::json!(status));
             }
         }
-        DispatchUri::Local { .. } => {}
+        DispatchUri::Local { .. } | DispatchUri::AutoResume { .. } => {}
     }
     metadata
 }

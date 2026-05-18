@@ -2131,6 +2131,19 @@ impl Dispatcher {
                     metadata: route.dispatch_boundary_metadata(),
                 })
             }
+            DispatchUri::AutoResume { worker_id } => {
+                let value =
+                    crate::stdlib::agents::resume_worker_from_auto_resume_trigger(worker_id, event)
+                        .await
+                        .map_err(|error| DispatchError::Local(error.to_string()))?;
+                let mut metadata = route.dispatch_boundary_metadata();
+                metadata.insert("worker_id".to_string(), serde_json::json!(worker_id));
+                metadata.insert("resume_kind".to_string(), serde_json::json!("auto_resume"));
+                Ok(DispatchCallResult {
+                    output: vm_value_to_json(&value),
+                    metadata,
+                })
+            }
         }
     }
 

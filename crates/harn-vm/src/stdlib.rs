@@ -254,6 +254,7 @@ pub fn reset_stdlib_state() {
     monitors::reset_monitor_state();
     waitpoints::reset_waitpoint_state();
     waitpoint::reset_waitpoint_state();
+    triggers_stdlib::reset_auto_resume_timeouts();
     postgres::reset_postgres_state();
     supervisor::reset_supervisor_state();
     agents::records::reset_eval_metrics();
