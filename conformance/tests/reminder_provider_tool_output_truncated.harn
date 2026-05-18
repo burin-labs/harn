@@ -1,0 +1,59 @@
+import { agent_dispatch_tool_call } from "std/agent/primitives"
+import {
+  agent_reminder_providers_fire,
+  agent_session_apply_reminder_post_turn,
+} from "std/agent/state"
+
+fn truncating_tools() {
+  var tools = tool_registry()
+  tools = tool_define(
+    tools,
+    "large_output",
+    "Return output long enough for the max_output hook to compact.",
+    {handler: { _args -> "large " + "x" * 800 }, parameters: {}, returns: {type: "string"}},
+  )
+  return tools
+}
+
+pipeline main() {
+  let session = agent_session_open("reminder-provider-tool-output-truncated")
+  agent_session_reset(session)
+  let payload = {
+    session: {id: session},
+    iteration: 1,
+    tool: {name: "search", args: {}},
+    result: {text: "snipped", truncated: true, original_size: 4096, final_size: 64},
+  }
+  let first = agent_reminder_providers_fire(session, "post_tool_use", payload, {})
+  let second = agent_reminder_providers_fire(session, "post_tool_use", payload, {})
+  let before = transcript_events_by_kind(agent_session_snapshot(session), "system_reminder")
+  let ttl = agent_session_apply_reminder_post_turn(session, 2)
+  let after = transcript_events_by_kind(agent_session_snapshot(session), "system_reminder")
+  println(first.fired_count)
+  println(second.reports[0].deduped_count)
+  println(len(before))
+  println(before[0].reminder.tags[0])
+  println(before[0].reminder.body.contains("search"))
+  println(ttl.expired_count)
+  println(len(after))
+  clear_tool_hooks()
+  register_tool_hook({pattern: "large_output", max_output: 200})
+  let dispatch_session = agent_session_open("reminder-provider-tool-output-dispatch")
+  agent_session_reset(dispatch_session)
+  let dispatch = agent_dispatch_tool_call(
+    {id: "large_1", name: "large_output", arguments: {}},
+    truncating_tools(),
+    {session_id: dispatch_session, _turn_iteration: 1},
+  )
+  let dispatch_reminders = transcript_events_by_kind(agent_session_snapshot(dispatch_session), "system_reminder")
+  let same_turn_ttl = agent_session_apply_reminder_post_turn(dispatch_session, 0)
+  let same_turn_reminders = transcript_events_by_kind(agent_session_snapshot(dispatch_session), "system_reminder")
+  println(dispatch.tool_output_truncated)
+  println(dispatch.reminder_provider_report.fired_count)
+  println(len(dispatch_reminders))
+  println(dispatch_reminders[0].reminder.tags[0])
+  println(same_turn_ttl.expired_count)
+  println(len(same_turn_reminders))
+  println(same_turn_reminders[0].reminder.ttl_turns)
+  clear_tool_hooks()
+}

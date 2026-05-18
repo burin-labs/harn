@@ -619,6 +619,11 @@ pub(crate) fn apply_reminder_post_turn(transcript: &VmValue, turn: i64) -> Remin
             next_events.push(event.clone());
             continue;
         };
+        if reminder.fired_at_turn > turn {
+            next_events.push(event.clone());
+            remaining_count += 1;
+            continue;
+        }
         match reminder.ttl_turns {
             Some(ttl) if ttl <= 1 => {
                 changed = true;

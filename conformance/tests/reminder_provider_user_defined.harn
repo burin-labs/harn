@@ -1,0 +1,34 @@
+import {
+  agent_reminder_providers_fire,
+  agent_session_apply_reminder_post_turn,
+} from "std/agent/state"
+
+pipeline main() {
+  clear_reminder_providers()
+  register_reminder_provider(
+    {
+      id: "custom_echo",
+      subscribes_to: ["session_idle"],
+      evaluate: { ctx -> return {
+        reminder: {body: "custom " + ctx.payload.note, tags: ["custom"], dedupe_key: "custom_echo", ttl_turns: 2},
+      } },
+    },
+  )
+  let session = agent_session_open("reminder-provider-user-defined")
+  agent_session_reset(session)
+  let payload = {session: {id: session}, iteration: 1, wake_interval_ms: 0, note: "provider"}
+  let first = agent_reminder_providers_fire(session, "session_idle", payload, {})
+  let second = agent_reminder_providers_fire(session, "session_idle", payload, {})
+  let before = transcript_events_by_kind(agent_session_snapshot(session), "system_reminder")
+  let ttl = agent_session_apply_reminder_post_turn(session, 2)
+  let after = transcript_events_by_kind(agent_session_snapshot(session), "system_reminder")
+  println(first.fired_count)
+  println(second.reports[0].deduped_count)
+  println(len(before))
+  println(before[0].reminder.body)
+  println(before[0].reminder.source)
+  println(before[0].reminder.tags[0])
+  println(ttl.decremented_count)
+  println(after[0].reminder.ttl_turns)
+  clear_reminder_providers()
+}

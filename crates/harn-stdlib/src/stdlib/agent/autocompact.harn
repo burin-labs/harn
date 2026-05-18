@@ -1,4 +1,4 @@
-import { agent_record_compaction } from "std/agent/state"
+import { agent_record_compaction, agent_reminder_providers_fire } from "std/agent/state"
 
 fn __compaction_strategy_label(value) {
   if type_of(value) == "string" {
@@ -179,8 +179,14 @@ pub fn agent_autocompact_if_needed(session, opts) {
     }
     agent_record_compaction(session.session_id, metadata)
     let post_payload = pre_payload
-      + {archived_messages: archived, new_summary_len: len(summary), remaining_messages: len(compacted)}
+      + {
+      archived_messages: archived,
+      new_summary_len: len(summary),
+      remaining_messages: len(compacted),
+      summary: summary,
+    }
     __host_fire_session_hook("post_compact", post_payload)
+    agent_reminder_providers_fire(session.session_id, "post_compact", post_payload, opts)
   }
   return nil
 }

@@ -64,6 +64,7 @@ pub async fn run_model_smoke_test(
         routing_decision: None,
         routing_policy: None,
         session_id: None,
+        reminders: None,
         messages: vec![serde_json::json!({
             "role": "user",
             "content": options.prompt,

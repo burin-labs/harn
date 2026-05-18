@@ -36,6 +36,7 @@ mod model_test;
 pub(crate) mod permissions;
 pub mod plan;
 pub mod readiness;
+pub(crate) mod reminder_providers;
 mod rerank;
 pub(crate) mod routing;
 pub(crate) mod schema_recover;
@@ -270,6 +271,7 @@ pub fn reset_llm_state() {
     mock::reset_llm_mock_state();
     autonomy_budget::reset_autonomy_budget_state();
     agent_session_host::reset_agent_session_host_state();
+    reminder_providers::clear_reminder_providers();
     permissions::clear_dynamic_permission_state();
     crate::orchestration::clear_all_approval_policy_repeat_counts();
     trigger_predicate::reset_trigger_predicate_state();
@@ -617,6 +619,7 @@ mod tests {
             routing_decision: None,
             routing_policy: None,
             session_id: None,
+            reminders: None,
             messages: Vec::new(),
             system: None,
             transcript_summary: None,

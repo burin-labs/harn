@@ -1641,7 +1641,7 @@ fn __agent_loop_run(message, session, initial_opts) {
       let await_call = __agent_await_resumption_call(tool_calls)
       if await_call != nil {
         suspend_result = __agent_loop_await_resumption(session, iteration, await_call, opts)
-        let _totals = agent_session_record_usage(session.session_id, llm_result)
+        let _totals = agent_session_record_usage(session.session_id, llm_result, turn_opts, turn_index + 1)
         agent_emit_event(
           session.session_id,
           "turn_end",
@@ -1679,7 +1679,7 @@ fn __agent_loop_run(message, session, initial_opts) {
             )
           }
         } else {
-          agent_session_record_usage(session.session_id, llm_result)
+          agent_session_record_usage(session.session_id, llm_result, turn_opts, turn_index + 1)
           let tool_count = len(tool_calls)
           agent_emit_event(
             session.session_id,
@@ -1701,7 +1701,7 @@ fn __agent_loop_run(message, session, initial_opts) {
       opts = __sync_tool_search_state(opts, dispatched.turn_opts)
       successful_tools_seen = __merge_tool_names(successful_tools_seen, __tool_names_by_status(dispatch, true))
       rejected_tools_seen = __merge_tool_names(rejected_tools_seen, __tool_names_by_status(dispatch, false))
-      let totals = agent_session_record_usage(session.session_id, llm_result)
+      let totals = agent_session_record_usage(session.session_id, llm_result, turn_opts, turn_index + 1)
       let tool_count = len(tool_calls)
       agent_emit_event(
         session.session_id,
