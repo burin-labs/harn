@@ -235,6 +235,108 @@ pub(super) fn clear_session_hooks_builtin(
     Ok(VmValue::Nil)
 }
 
+fn reminder_provider_event_list(
+    value: Option<&VmValue>,
+    builtin: &str,
+) -> Result<Vec<crate::orchestration::HookEvent>, VmError> {
+    let Some(value) = value else {
+        return Err(VmError::Runtime(format!(
+            "{builtin}: missing subscribes_to"
+        )));
+    };
+    match value {
+        VmValue::String(event) => crate::llm::reminder_providers::parse_provider_event(event)
+            .map(|event| vec![event])
+            .map_err(|message| VmError::Runtime(format!("{builtin}: {message}"))),
+        VmValue::List(events) => {
+            let mut out = Vec::new();
+            for event in events.iter() {
+                let name = match event {
+                    VmValue::String(name) if !name.trim().is_empty() => name.to_string(),
+                    other => {
+                        return Err(VmError::Runtime(format!(
+                            "{builtin}: subscribes_to entries must be non-empty strings, got {}",
+                            other.type_name()
+                        )));
+                    }
+                };
+                out.push(
+                    crate::llm::reminder_providers::parse_provider_event(&name)
+                        .map_err(|message| VmError::Runtime(format!("{builtin}: {message}")))?,
+                );
+            }
+            if out.is_empty() {
+                return Err(VmError::Runtime(format!(
+                    "{builtin}: subscribes_to must not be empty"
+                )));
+            }
+            Ok(out)
+        }
+        other => Err(VmError::Runtime(format!(
+            "{builtin}: subscribes_to must be a string or list, got {}",
+            other.type_name()
+        ))),
+    }
+}
+
+pub(super) fn register_reminder_provider_builtin(
+    args: &[VmValue],
+    _out: &mut String,
+) -> Result<VmValue, VmError> {
+    let config = args
+        .first()
+        .and_then(|arg| arg.as_dict())
+        .cloned()
+        .ok_or_else(|| {
+            VmError::Runtime("register_reminder_provider: config must be a dict".to_string())
+        })?;
+    let id = match config.get("id") {
+        Some(VmValue::String(id)) if !id.trim().is_empty() => id.to_string(),
+        Some(other) => {
+            return Err(VmError::Runtime(format!(
+                "register_reminder_provider: id must be a non-empty string, got {}",
+                other.type_name()
+            )))
+        }
+        None => {
+            return Err(VmError::Runtime(
+                "register_reminder_provider: missing id".to_string(),
+            ))
+        }
+    };
+    let subscribes_to = reminder_provider_event_list(
+        config
+            .get("subscribes_to")
+            .or_else(|| config.get("events"))
+            .or_else(|| config.get("event")),
+        "register_reminder_provider",
+    )?;
+    let evaluate = match config.get("evaluate") {
+        Some(VmValue::Closure(closure)) => closure.clone(),
+        Some(other) => {
+            return Err(VmError::Runtime(format!(
+                "register_reminder_provider: evaluate must be a closure, got {}",
+                other.type_name()
+            )))
+        }
+        None => {
+            return Err(VmError::Runtime(
+                "register_reminder_provider: missing evaluate".to_string(),
+            ))
+        }
+    };
+    crate::llm::reminder_providers::register_vm_provider(id, subscribes_to, evaluate);
+    Ok(VmValue::Nil)
+}
+
+pub(super) fn clear_reminder_providers_builtin(
+    _args: &[VmValue],
+    _out: &mut String,
+) -> Result<VmValue, VmError> {
+    crate::llm::reminder_providers::clear_reminder_providers();
+    Ok(VmValue::Nil)
+}
+
 /// Register the callback `Vm::execute` invokes after the pipeline's
 /// declared steps complete (signature `fn(harness, return_value)`). Last-
 /// write-wins; the callback's return value replaces the pipeline's return

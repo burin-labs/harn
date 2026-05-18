@@ -1,0 +1,32 @@
+import {
+  agent_reminder_providers_fire,
+  agent_session_apply_reminder_post_turn,
+} from "std/agent/state"
+
+pipeline main() {
+  let session = agent_session_open("reminder-provider-idle-nudge")
+  agent_session_reset(session)
+  let opts = {reminders: {config: {idle_nudge: {idle_seconds: 60}}}}
+  let first = agent_reminder_providers_fire(
+    session,
+    "session_idle",
+    {session: {id: session}, iteration: 2, wake_interval_ms: 65000},
+    opts,
+  )
+  let second = agent_reminder_providers_fire(
+    session,
+    "session_idle",
+    {session: {id: session}, iteration: 3, wake_interval_ms: 65000},
+    opts,
+  )
+  let before = transcript_events_by_kind(agent_session_snapshot(session), "system_reminder")
+  let ttl = agent_session_apply_reminder_post_turn(session, 4)
+  let after = transcript_events_by_kind(agent_session_snapshot(session), "system_reminder")
+  println(first.fired_count)
+  println(second.reports[0].deduped_count)
+  println(len(before))
+  println(before[0].reminder.tags[0])
+  println(before[0].reminder.ttl_turns)
+  println(ttl.expired_count)
+  println(len(after))
+}

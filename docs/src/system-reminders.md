@@ -13,11 +13,12 @@ R-01 shipped the **schema and event envelope**. R-02 adds deterministic
 in-Harn transcript transforms for injecting and clearing pending reminder
 events, plus EventLog-backed dedupe and post-turn TTL expiry audit
 records. R-03 lets tool, persona, step, and session hooks return reminder
-effects that inject into the active session transcript. The rest of the
-lifecycle (stdlib providers, the bridge `agent/inject_reminder`
-notification, compaction
-honoring TTL + `preserve_on_compact`, sub-agent propagation, and
-capability-aware rendering) lands in later tickets under epic
+effects that inject into the active session transcript. R-04 adds the
+provider registry, four canonical stdlib providers, and
+`register_reminder_provider(...)` for Harn-defined providers. The rest
+of the lifecycle (the bridge `agent/inject_reminder` notification,
+compaction honoring TTL + `preserve_on_compact`, sub-agent propagation,
+and capability-aware rendering) lands in later tickets under epic
 [#1815](https://github.com/burin-labs/harn/issues/1815).
 
 ## Event shape
@@ -170,6 +171,65 @@ a bare reminder spec such as `{body: "Refresh context"}`, or a
 session-hook effect list such as `[{reminder: {...}}]`. Bridge
 notifications and provider-specific reminder rendering are intentionally
 left to follow-up tickets.
+
+## Reminder providers
+
+`agent_loop(...)` enables stdlib reminder providers by default. Providers
+observe lifecycle events and inject pending `system_reminder` events into
+the active session transcript. Bare `llm_call(...)` does not fire
+providers.
+
+Canonical providers:
+
+| Provider | Event | Reminder |
+|---|---|---|
+| `token_pressure` | `on_budget_threshold` | Fires near 70/85/95% of the context window; tag `token_pressure`, dedupe key `token_pressure`, `ttl_turns: 2`, and `preserve_on_compact: true` at the critical threshold. |
+| `idle_nudge` | `session_idle` | Fires after the daemon idle interval reaches the configured threshold (default 60s); tag `idle`, `ttl_turns: 1`. |
+| `tool_output_truncated` | `post_tool_use` | Fires when post-tool hooks compact or truncate output before it reaches the model; tag `truncation`, `ttl_turns: 1`. |
+| `post_compact_recap` | `post_compact` | Fires after transcript compaction with the current recap; tag `recap`, `ttl_turns: 2`. |
+
+Disable providers per loop with the `reminders.providers` opt-out list:
+
+```harn,ignore
+agent_loop(task, system, {
+  reminders: {
+    providers: ["-token_pressure", "-idle_nudge"],
+  },
+})
+```
+
+Provider-specific configuration lives under `reminders.config`:
+
+```harn,ignore
+agent_loop(task, system, {
+  reminders: {
+    config: {
+      token_pressure: {context_window: 128000},
+      idle_nudge: {idle_seconds: 120},
+    },
+  },
+})
+```
+
+Register a Harn provider with `register_reminder_provider({id,
+subscribes_to, evaluate})`. The `evaluate` closure receives
+`{event, session, session_id, payload, options, config}` and returns a
+reminder effect, a bare reminder spec, an effect list, or `nil`:
+
+```harn,ignore
+register_reminder_provider({
+  id: "custom_echo",
+  subscribes_to: ["session_idle"],
+  evaluate: { ctx -> return {
+    reminder: {
+      body: "Custom reminder: " + ctx.payload.note,
+      tags: ["custom"],
+      dedupe_key: "custom_echo",
+      ttl_turns: 2,
+    },
+  } },
+})
+```
 
 ## Reading reminders off a transcript
 

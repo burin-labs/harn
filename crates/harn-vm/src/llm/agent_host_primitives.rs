@@ -715,10 +715,37 @@ async fn host_agent_dispatch_tool_call(
 
     match outcome.result {
         Ok(raw_result) => {
-            let rendered = agent_tools::render_tool_result(&raw_result);
-            let rendered =
-                crate::orchestration::run_post_tool_hooks(&tool_name, &tool_args, &rendered)
-                    .await?;
+            let rendered_before_hooks = agent_tools::render_tool_result(&raw_result);
+            let rendered = crate::orchestration::run_post_tool_hooks(
+                &tool_name,
+                &tool_args,
+                &rendered_before_hooks,
+            )
+            .await?;
+            let output_truncated = rendered.len() < rendered_before_hooks.len();
+            let reminder_payload = serde_json::json!({
+                "event": crate::orchestration::HookEvent::PostToolUse.as_str(),
+                "session": {"id": &session_id},
+                "iteration": agent_primitive_option_int(options, "_turn_iteration").unwrap_or(0),
+                "tool": {"name": &tool_name, "args": &tool_args},
+                "tool_name": &tool_name,
+                "result": {
+                    "text": &rendered,
+                    "truncated": output_truncated,
+                    "original_size": rendered_before_hooks.len(),
+                    "final_size": rendered.len(),
+                },
+                "truncated": output_truncated,
+                "original_size": rendered_before_hooks.len(),
+                "final_size": rendered.len(),
+            });
+            let reminder_report = super::reminder_providers::evaluate_and_inject(
+                crate::orchestration::HookEvent::PostToolUse,
+                &session_id,
+                reminder_payload,
+                super::reminder_providers::options_map_to_json(options),
+            )
+            .await?;
             let denied = agent_tools::is_denied_tool_result(&raw_result);
             let observation = format!(
                 "[result of {name}]\n{result}\n[end of {name} result]\n",
@@ -740,6 +767,10 @@ async fn host_agent_dispatch_tool_call(
                 "executor": executor,
                 "approval": approval_status,
                 "execution_duration_ms": execution_duration_ms,
+                "tool_output_truncated": output_truncated,
+                "original_size": rendered_before_hooks.len(),
+                "final_size": rendered.len(),
+                "reminder_provider_report": reminder_report,
             })))
         }
         Err(error) => {
@@ -929,6 +960,59 @@ async fn host_mcp_disconnect_impl(args: Vec<VmValue>) -> Result<VmValue, VmError
     Ok(VmValue::Bool(true))
 }
 
+async fn host_agent_reminder_providers_fire_impl(args: Vec<VmValue>) -> Result<VmValue, VmError> {
+    let session_id = match args.first() {
+        Some(VmValue::String(s)) if !s.trim().is_empty() => s.to_string(),
+        Some(other) => {
+            return Err(VmError::Runtime(format!(
+                "__host_agent_reminder_providers_fire(session_id, event, payload?, options?): session_id must be a non-empty string; got {}",
+                other.type_name()
+            )))
+        }
+        None => {
+            return Err(VmError::Runtime(
+                "__host_agent_reminder_providers_fire(session_id, event, payload?, options?): missing session_id"
+                    .to_string(),
+            ))
+        }
+    };
+    let event_name = match args.get(1) {
+        Some(VmValue::String(s)) if !s.trim().is_empty() => s.to_string(),
+        Some(other) => {
+            return Err(VmError::Runtime(format!(
+                "__host_agent_reminder_providers_fire: event must be a non-empty string; got {}",
+                other.type_name()
+            )))
+        }
+        None => {
+            return Err(VmError::Runtime(
+                "__host_agent_reminder_providers_fire: missing event".to_string(),
+            ))
+        }
+    };
+    let event =
+        super::reminder_providers::parse_provider_event(&event_name).map_err(|message| {
+            VmError::Runtime(format!("__host_agent_reminder_providers_fire: {message}"))
+        })?;
+    let payload = args
+        .get(2)
+        .filter(|value| !matches!(value, VmValue::Nil))
+        .map(helpers::vm_value_to_json)
+        .unwrap_or_else(|| serde_json::json!({}));
+    let options = agent_primitive_options_value_arg(
+        args.get(3).cloned(),
+        "__host_agent_reminder_providers_fire",
+    )?;
+    let report = super::reminder_providers::evaluate_and_inject(
+        event,
+        &session_id,
+        payload,
+        super::reminder_providers::options_map_to_json(&options),
+    )
+    .await?;
+    Ok(json_to_vm_value(&report))
+}
+
 pub(super) const AGENT_HOST_ASYNC_PRIMITIVES: &[AsyncBuiltin] = &[
     async_builtin!(
         "__host_agent_capture_events",
@@ -973,4 +1057,11 @@ pub(super) const AGENT_HOST_ASYNC_PRIMITIVES: &[AsyncBuiltin] = &[
             "Disconnect all MCP clients installed for session_id and remove them \
              from the session registry.",
         ),
+    async_builtin!(
+        "__host_agent_reminder_providers_fire",
+        host_agent_reminder_providers_fire_impl
+    )
+    .signature("__host_agent_reminder_providers_fire(session_id, event, payload?, options?)")
+    .arity(VmBuiltinArity::Range { min: 2, max: 4 })
+    .doc("Evaluate registered reminder providers for an agent lifecycle event."),
 ];

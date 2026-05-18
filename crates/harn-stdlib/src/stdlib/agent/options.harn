@@ -302,6 +302,16 @@ fn __validate_agent_loop_callback_options(opts) {
   }
 }
 
+fn __normalize_reminder_provider_options(opts) {
+  if !__has_key(opts, "reminders") {
+    return opts + {reminders: {}}
+  }
+  if type_of(opts.reminders) == "list" {
+    return opts + {reminders: {providers: opts.reminders}}
+  }
+  return opts
+}
+
 fn __normalize_iteration_budget(opts) {
   let raw = opts?.iteration_budget
   let legacy = opts?.max_iterations
@@ -464,6 +474,7 @@ pub fn agent_loop_options(options = nil) {
   let budget = __normalize_iteration_budget(opts)
   opts = opts + {iteration_budget: budget, max_iterations: budget.max}
   opts = agent_reasoning_apply(opts)
+  opts = __normalize_reminder_provider_options(opts)
   opts = opts + {_llm_caller: llm_caller, _tool_caller: tool_caller}
   return opts
 }

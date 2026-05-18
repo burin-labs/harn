@@ -97,6 +97,16 @@ condensed series summaries instead of full per-patch history.
   allow/deny/modify/block/decision return shapes. `register_tool_hook`
   also accepts `pre` and `post` closures alongside the legacy `deny`
   and `max_output` shortcuts.
+- **Reminder provider registry (#1820).** `agent_loop(...)` now enables
+  canonical stdlib reminder providers for token pressure, daemon idle
+  nudges, truncated tool output, and post-compaction recaps. Loop callers
+  can opt out with `reminders: {providers: ["-token_pressure"]}` or
+  disable providers with `reminders: false`; bare `llm_call(...)` does
+  not auto-fire providers. `register_reminder_provider({id,
+  subscribes_to, evaluate})` lets Harn scripts add provider callbacks
+  that return the same reminder effects used by hooks, and
+  `clear_reminder_providers()` clears user-defined providers for tests
+  and isolated runs.
 - **OAuth provider catalogue records (#1905).** Adds
   `std/oauth/providers` with ten preconfigured OAuth provider records
   (GitHub, Slack, Linear, Notion, Google, Microsoft, Atlassian,

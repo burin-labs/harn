@@ -239,6 +239,11 @@ pub(crate) struct LlmCallOptions {
     /// own lifecycle events. `None` for raw `llm_call(...)` invocations
     /// from script context — those have no agent session to attach to.
     pub session_id: Option<String>,
+    /// Agent-loop reminder provider configuration. Parsed for option-table
+    /// visibility and transcript/replay fidelity; raw `llm_call(...)` does
+    /// not evaluate reminder providers.
+    #[allow(dead_code)]
+    pub reminders: Option<serde_json::Value>,
 
     // --- Conversation ---
     pub messages: Vec<serde_json::Value>,
@@ -521,6 +526,7 @@ pub(crate) fn base_opts(provider: &str) -> LlmCallOptions {
         routing_decision: None,
         routing_policy: None,
         session_id: None,
+        reminders: None,
         messages: vec![serde_json::json!({"role": "user", "content": "hello"})],
         system: None,
         transcript_summary: Some("summary".to_string()),

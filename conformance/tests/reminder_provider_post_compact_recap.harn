@@ -1,0 +1,30 @@
+import {
+  agent_reminder_providers_fire,
+  agent_session_apply_reminder_post_turn,
+} from "std/agent/state"
+
+pipeline main() {
+  let session = agent_session_open("reminder-provider-post-compact-recap")
+  agent_session_reset(session)
+  let payload = {
+    session: {id: session},
+    iteration: 8,
+    archived_messages: 4,
+    new_summary_len: 16,
+    remaining_messages: 2,
+    summary: "compact recap",
+  }
+  let first = agent_reminder_providers_fire(session, "post_compact", payload, {})
+  let second = agent_reminder_providers_fire(session, "post_compact", payload, {})
+  let before = transcript_events_by_kind(agent_session_snapshot(session), "system_reminder")
+  let ttl = agent_session_apply_reminder_post_turn(session, 9)
+  let after = transcript_events_by_kind(agent_session_snapshot(session), "system_reminder")
+  println(first.fired_count)
+  println(second.reports[0].deduped_count)
+  println(len(before))
+  println(before[0].reminder.tags[0])
+  println(before[0].reminder.body.contains("compact recap"))
+  println(before[0].reminder.preserve_on_compact)
+  println(ttl.decremented_count)
+  println(after[0].reminder.ttl_turns)
+}

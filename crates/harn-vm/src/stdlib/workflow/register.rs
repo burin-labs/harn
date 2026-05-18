@@ -110,6 +110,14 @@ const WORKFLOW_SYNC_PRIMITIVES: &[SyncBuiltin] = &[
         .signature("clear_session_hooks()")
         .arity(VmBuiltinArity::Exact(0))
         .doc("Clear registered session-level lifecycle hooks."),
+    SyncBuiltin::new("register_reminder_provider", register_reminder_provider_builtin)
+        .signature("register_reminder_provider(config)")
+        .arity(VmBuiltinArity::Exact(1))
+        .doc("Register a system-reminder provider closure for agent lifecycle events."),
+    SyncBuiltin::new("clear_reminder_providers", clear_reminder_providers_builtin)
+        .signature("clear_reminder_providers()")
+        .arity(VmBuiltinArity::Exact(0))
+        .doc("Clear registered user-defined system-reminder providers."),
     SyncBuiltin::new("pipeline_on_finish", pipeline_on_finish_builtin)
         .signature("pipeline_on_finish(callback)")
         .arity(VmBuiltinArity::Exact(1))

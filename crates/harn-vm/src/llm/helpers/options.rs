@@ -1355,6 +1355,10 @@ pub(crate) fn extract_llm_options(
     let structural_experiment =
         crate::llm::structural_experiments::parse_structural_experiment_option(options.as_ref())?;
     let budget = crate::llm::cost::parse_budget_envelope(options.as_ref())?;
+    let reminders = options
+        .as_ref()
+        .and_then(|o| o.get("reminders"))
+        .map(vm_value_to_json);
 
     let opts = LlmCallOptions {
         provider,
@@ -1366,6 +1370,7 @@ pub(crate) fn extract_llm_options(
         routing_decision,
         routing_policy,
         session_id: None,
+        reminders,
         messages,
         system,
         transcript_summary: None,

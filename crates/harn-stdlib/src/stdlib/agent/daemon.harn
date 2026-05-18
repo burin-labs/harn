@@ -1,6 +1,10 @@
 // @harn-entrypoint-category agent.stdlib
 import { daemon_timer_feedback_prompt, daemon_watch_feedback_prompt } from "std/agent/prompts"
-import { agent_emit_event, agent_session_inject_feedback } from "std/agent/state"
+import {
+  agent_emit_event,
+  agent_reminder_providers_fire,
+  agent_session_inject_feedback,
+} from "std/agent/state"
 import { agent_await_resumption } from "std/agent/workers"
 
 fn __daemon_compaction_summary(opts) {
@@ -123,15 +127,14 @@ pub fn agent_daemon_step(session, opts, iteration) {
   let snapshot = agent_daemon_snapshot(session, opts, "idle", iteration)
   let timeout = opts?.wake_interval_ms ?? 0
   __agent_daemon_await_resumption(session, opts, iteration, timeout)
-  __host_fire_session_hook(
-    "session_idle",
-    {
-      session: {id: session.session_id},
-      iteration: iteration,
-      wake_interval_ms: timeout,
-      consolidate_on_idle: opts?.consolidate_on_idle ?? false,
-    },
-  )
+  let idle_payload = {
+    session: {id: session.session_id},
+    iteration: iteration,
+    wake_interval_ms: timeout,
+    consolidate_on_idle: opts?.consolidate_on_idle ?? false,
+  }
+  __host_fire_session_hook("session_idle", idle_payload)
+  agent_reminder_providers_fire(session.session_id, "session_idle", idle_payload, opts)
   var wake = __host_agent_daemon_wait(session.session_id, timeout)
   while wake?.reason == nil && timeout > 0 {
     wake = __host_agent_daemon_wait(session.session_id, timeout)

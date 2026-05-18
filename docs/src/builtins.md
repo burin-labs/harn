@@ -2474,6 +2474,18 @@ For slow background context work, return a receipt from
 | `clear_session_hooks()` | none | nil | Remove all registered session-level hooks |
 | `notify_file_edited(path, metadata?)` | path: string, metadata: dict? | nil | Explicitly queue a `file_edited` notification; the standard fs builtins (`write_file`, `append_file`, `write_file_bytes`) also queue automatically. Hooks fire at the next agent-loop turn boundary. |
 
+### Reminder providers
+
+`agent_loop(...)` enables canonical reminder providers by default.
+Use `reminders: false` to disable all providers or
+`reminders: {providers: ["-token_pressure"]}` to opt out by provider id.
+Bare `llm_call(...)` does not fire reminder providers.
+
+| Function | Parameters | Returns | Description |
+|---|---|---|---|
+| `register_reminder_provider(config)` | config: dict | nil | Register a Harn-defined reminder provider. `config.id` is a string, `config.subscribes_to` is an event string or list, and `config.evaluate(ctx)` returns a reminder effect/spec/list or `nil`. |
+| `clear_reminder_providers()` | none | nil | Remove user-defined reminder providers. Canonical stdlib providers remain available through `agent_loop` unless disabled with `reminders`. |
+
 ### Context and compaction utilities
 
 | Function | Parameters | Returns | Description |

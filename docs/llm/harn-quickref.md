@@ -1464,6 +1464,31 @@ During agent-session post-turn processing, finite `ttl_turns` values
 decrement. Reminders that reach zero are removed from transcript events
 and emit `transcript.reminder.expired` on the same lifecycle topic.
 
+`agent_loop(...)` enables canonical reminder providers by default; bare
+`llm_call(...)` does not. Providers are:
+
+- `token_pressure` on `on_budget_threshold` at ~70/85/95% context use
+  (`ttl_turns: 2`, critical threshold preserves across compaction).
+- `idle_nudge` on `session_idle` after `idle_seconds` (default 60).
+- `tool_output_truncated` on `post_tool_use` when tool output was
+  compacted/truncated before the model saw it.
+- `post_compact_recap` on `post_compact` with the latest recap.
+
+Opt out per loop:
+
+```harn
+agent_loop(task, system, {
+  reminders: {providers: ["-token_pressure", "-idle_nudge"]},
+})
+```
+
+Configure providers under `reminders.config`, e.g.
+`{reminders: {config: {token_pressure: {context_window: 128000},
+idle_nudge: {idle_seconds: 120}}}}`. Register Harn-defined providers
+with `register_reminder_provider({id, subscribes_to, evaluate})`; the
+closure receives `{event, session, session_id, payload, options,
+config}` and returns a reminder effect, bare spec, effect list, or `nil`.
+
 ### `agent_turn`
 
 `agent_turn(prompt, options?)` is the high-level wrapper for the common
@@ -1518,8 +1543,10 @@ own `profile`, `tool_retries`, `max_iterations`, `max_nudges`, and
 (`"allow"`, `"allow_once"`, or `"reject"` for native-tool stages that
 receive text-mode `<tool_call>` fallback output). `thinking`,
 `interleaved_thinking`, and `anthropic_beta_features` apply to every
-model turn; for Claude Opus 4.6/4.7, `thinking: true` is enough to
-enable the interleaved-thinking beta header for the whole loop.
+model turn; `reminders` controls canonical reminder providers (`false`
+disables all, `providers: ["-id"]` opts out by id, `config` carries
+provider-specific knobs). For Claude Opus 4.6/4.7, `thinking: true` is
+enough to enable the interleaved-thinking beta header for the whole loop.
 
 Profiles preload common loop budgets and retry counts. Explicit keys
 override the profile:
@@ -2338,6 +2365,10 @@ Three concentric surfaces:
   then?}` to combine the reminder with an existing action, return a bare
   reminder spec such as `{body: "Refresh context", tags: ["context"]}`,
   or return a session-hook effect list like `[{reminder: {...}}]`.
+- `register_reminder_provider({id, subscribes_to, evaluate})` registers a
+  Harn-defined provider for `post_tool_use`, `on_budget_threshold`,
+  `post_compact`, or `session_idle`; `clear_reminder_providers()` clears
+  user-defined providers.
 - `pipeline_on_finish(callback)` — register a `fn(harness, return_value)`
   callback that runs between `pre_finish` and `post_finish` on the main
   VM (its stdout reaches the host capture buffer). The callback's

@@ -66,6 +66,29 @@ pub fn agent_session_record_tool_results(session_id, dispatch) {
   return __host_agent_session_record_tool_results(session_id, dispatch)
 }
 
+fn __agent_usage_int(value) {
+  if type_of(value) == "int" {
+    return value
+  }
+  if type_of(value) == "float" {
+    return to_int(value)
+  }
+  return 0
+}
+
+/**
+ * agent_reminder_providers_fire.
+ *
+ * @effects: [host]
+ * @allocation: heap
+ * @errors: []
+ * @api_stability: experimental
+ * @example: agent_reminder_providers_fire(session_id, "post_compact", payload, opts)
+ */
+pub fn agent_reminder_providers_fire(session_id, event, payload = nil, opts = nil) {
+  return __host_agent_reminder_providers_fire(session_id, event, payload ?? {}, opts ?? {})
+}
+
 /**
  * agent_session_record_usage.
  *
@@ -73,10 +96,29 @@ pub fn agent_session_record_tool_results(session_id, dispatch) {
  * @allocation: heap
  * @errors: []
  * @api_stability: experimental
- * @example: agent_session_record_usage(session_id, llm_result)
+ * @example: agent_session_record_usage(session_id, llm_result, opts, iteration)
  */
-pub fn agent_session_record_usage(session_id, llm_result) {
-  return __host_agent_session_record_usage(session_id, llm_result)
+pub fn agent_session_record_usage(session_id, llm_result, opts = nil, iteration = 0) {
+  let totals = __host_agent_session_record_usage(session_id, llm_result)
+  let llm = llm_result?.llm ?? {}
+  let input_tokens = __agent_usage_int(llm?.input_tokens ?? llm_result?.input_tokens)
+  let output_tokens = __agent_usage_int(llm?.output_tokens ?? llm_result?.output_tokens)
+  agent_reminder_providers_fire(
+    session_id,
+    "on_budget_threshold",
+    {
+      session: {id: session_id},
+      iteration: iteration,
+      input_tokens: input_tokens,
+      output_tokens: output_tokens,
+      tokens_used: totals?.tokens_used ?? 0,
+      cost_usd: totals?.cost_usd ?? 0.0,
+      provider: llm_result?.provider ?? opts?.provider ?? "",
+      model: llm_result?.model ?? opts?.model ?? "",
+    },
+    opts ?? {},
+  )
+  return totals
 }
 
 /**
