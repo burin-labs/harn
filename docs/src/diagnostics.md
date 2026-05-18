@@ -4788,7 +4788,7 @@ drop never fires, and the resource leaks until the runtime garbage-collects
 the handle (which, for OS resources, may be never).
 
 ```harn
-fn open_log(): channel {
+fn open_log() -> channel {
   let ch: owned<channel> = channel("log", 64)
   return ch    // HARN-OWN-003: `ch` escapes; auto-drop is bypassed
 }
@@ -4801,7 +4801,7 @@ fn open_log(): channel {
   dropping it (or transferring it on again):
 
   ```harn
-  fn open_log(): owned<channel> {
+  fn open_log() -> owned<channel> {
     let ch: owned<channel> = channel("log", 64)
     return ch    // OK — ownership flows to the caller
   }
@@ -4811,7 +4811,7 @@ fn open_log(): channel {
   exit triggers the auto-drop, then returning a non-owned summary:
 
   ```harn
-  fn write_log(msg: string): nil {
+  fn write_log(msg: string) -> nil {
     {
       let ch: owned<channel> = channel("log", 64)
       send(ch, msg)
