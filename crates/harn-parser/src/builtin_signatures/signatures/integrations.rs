@@ -10,6 +10,11 @@ const TY_STRING_OR_DICT: Ty = Ty::Union(&[TY_STRING, TY_DICT]);
 const TY_TOOL_REGISTRY: Ty = Ty::Union(&[TY_DICT, TY_CLOSURE]);
 
 pub(crate) const SIGNATURES: &[BuiltinSignature] = &[
+    // Tool-hook catalogue primitive (TH-01 / epic #1884). `ToolRule` and
+    // `Catalogue` are tagged dicts; the registry composes catalogues so
+    // `preset_run_command` (TH-02) and downstream mode callbacks can layer
+    // matching/rewrite logic on top without redefining the data model.
+    BuiltinSignature::simple("catalogue", &[Param::new("config", TY_DICT)], TY_DICT),
     BuiltinSignature::simple(
         "connector_call",
         &[
@@ -739,6 +744,37 @@ pub(crate) const SIGNATURES: &[BuiltinSignature] = &[
         TY_STRING,
     ),
     BuiltinSignature::simple(
+        "tool_hooks_list",
+        &[Param::new("registry", TY_DICT)],
+        TY_LIST,
+    ),
+    BuiltinSignature::simple(
+        "tool_hooks_match",
+        &[
+            Param::new("registry", TY_DICT),
+            Param::new("command", TY_STRING),
+            Param::optional("context", TY_ANY),
+        ],
+        TY_LIST,
+    ),
+    BuiltinSignature::simple(
+        "tool_hooks_register",
+        &[
+            Param::new("registry", TY_DICT),
+            Param::new("catalogue", TY_DICT),
+        ],
+        TY_DICT,
+    ),
+    BuiltinSignature::simple("tool_hooks_registry", &[], TY_DICT),
+    BuiltinSignature::simple(
+        "tool_hooks_unregister",
+        &[
+            Param::new("registry", TY_DICT),
+            Param::new("catalogue_id", TY_STRING),
+        ],
+        TY_DICT,
+    ),
+    BuiltinSignature::simple(
         "tool_list",
         &[Param::new("registry", TY_TOOL_REGISTRY)],
         TY_LIST,
@@ -759,6 +795,7 @@ pub(crate) const SIGNATURES: &[BuiltinSignature] = &[
         ],
         TY_DICT,
     ),
+    BuiltinSignature::simple("tool_rule", &[Param::new("config", TY_DICT)], TY_DICT),
     BuiltinSignature::simple(
         "tool_schema",
         &[

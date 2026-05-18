@@ -26,6 +26,18 @@ condensed series summaries instead of full per-patch history.
   on the suspend/resume, trigger-queue, handoff-envelope, or
   in-flight-LLM-call producers that follow under harn#1853. Foundation
   ticket for the Pipeline Lifecycle Framework epic.
+- **Tool-hook catalogue primitive: `tool_rule`, `catalogue`,
+  `tool_hooks_registry`, `tool_hooks_register`, `tool_hooks_unregister`,
+  `tool_hooks_list`, `tool_hooks_match` (#1894).** Foundational TH-01
+  schema + registry for the preset tool-hooks epic (#1884). `ToolRule`
+  values carry an id, regex-or-callable pattern, `applies_to` stack list,
+  severity, optional rewrite closure, explanation, references, and
+  priority. `Catalogue` bundles rules with stack/version/source
+  provenance, and the registry composes catalogues with predictable
+  ordering. `tool_hooks_match` sweeps catalogues × rules linearly and
+  sorts results by rule priority, catalogue priority, then declaration
+  order so downstream mode callbacks (TH-03) and the
+  `preset_run_command` wrapper (TH-02) layer cleanly on top.
 - **`harn check --json` and `harn fmt --json` (#1759).** Adds
   standard `JsonEnvelope` reports for static checks and formatter
   runs, including per-file status, diagnostics, summary counts, and

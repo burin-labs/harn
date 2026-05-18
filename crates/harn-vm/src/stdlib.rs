@@ -60,6 +60,7 @@ pub(crate) mod supervisor;
 pub mod template;
 mod testbench;
 mod testing;
+pub(crate) mod tool_hooks;
 pub(crate) mod tools;
 pub mod tracing;
 mod transcript_compact;
@@ -145,6 +146,7 @@ pub fn register_agent_stdlib(vm: &mut Vm) {
     review::register_review_builtins(vm);
     secret_scan::register_secret_scan_builtins(vm);
     tools::register_tool_builtins(vm);
+    tool_hooks::register_tool_hooks_builtins(vm);
     crate::composition::register_composition_builtins(vm);
     skills::register_skill_builtins(vm);
     agents_daemon::register_daemon_builtins(vm);
