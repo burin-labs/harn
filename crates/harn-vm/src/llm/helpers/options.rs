@@ -7,9 +7,9 @@ use std::collections::BTreeMap;
 use crate::value::{VmError, VmValue};
 
 use super::{
-    opt_bool, opt_float, opt_int, opt_str, provider_key_available, resolve_api_key,
-    vm_messages_to_json, vm_resolve_model, vm_resolve_provider, vm_value_dict_to_json,
-    vm_value_to_json,
+    opt_bool, opt_float, opt_int, opt_str, provider_key_available, reminder_from_event,
+    resolve_api_key, vm_messages_to_json, vm_resolve_model, vm_resolve_provider,
+    vm_value_dict_to_json, vm_value_to_json, ReminderRoleHint, SystemReminder,
 };
 
 pub(crate) fn extract_json(text: &str) -> String {
@@ -816,9 +816,189 @@ pub(crate) fn system_prompt_event_metadata(system: &str) -> serde_json::Value {
     })
 }
 
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) enum RenderedReminder {
+    SystemText(String),
+    Message(serde_json::Value),
+}
+
+fn escape_xml_text(input: &str) -> String {
+    input
+        .replace('&', "&amp;")
+        .replace('<', "&lt;")
+        .replace('>', "&gt;")
+}
+
+fn reminder_xml_text(reminder: &SystemReminder) -> String {
+    format!(
+        "<system-reminder>\n{}\n</system-reminder>",
+        escape_xml_text(&reminder.body)
+    )
+}
+
+fn reminder_plain_text(reminder: &SystemReminder) -> String {
+    format!("System reminder:\n{}", reminder.body)
+}
+
+fn reminder_system_text(
+    caps: &crate::llm::capabilities::Capabilities,
+    reminder: &SystemReminder,
+) -> String {
+    if caps.prefers_xml_scaffolding {
+        reminder_xml_text(reminder)
+    } else {
+        reminder_plain_text(reminder)
+    }
+}
+
+fn reminder_developer_message(reminder: &SystemReminder) -> RenderedReminder {
+    RenderedReminder::Message(serde_json::json!({
+        "role": "developer",
+        "content": reminder_plain_text(reminder),
+    }))
+}
+
+fn reminder_user_block_message(
+    caps: &crate::llm::capabilities::Capabilities,
+    reminder: &SystemReminder,
+    cache_control: bool,
+) -> RenderedReminder {
+    let mut block = serde_json::json!({
+        "type": "text",
+        "text": reminder_xml_text(reminder),
+    });
+    if cache_control && caps.prompt_caching {
+        block["cache_control"] = serde_json::json!({"type": "ephemeral"});
+    }
+    RenderedReminder::Message(serde_json::json!({
+        "role": "user",
+        "content": [block],
+    }))
+}
+
+pub(crate) fn render_pending_reminders(
+    caps: &crate::llm::capabilities::Capabilities,
+    reminders: &[SystemReminder],
+) -> Vec<RenderedReminder> {
+    reminders
+        .iter()
+        .map(|reminder| {
+            if caps.prefers_role_developer {
+                return reminder_developer_message(reminder);
+            }
+            if caps.message_wire_format == "anthropic" {
+                return match reminder.role_hint {
+                    ReminderRoleHint::UserBlock => {
+                        reminder_user_block_message(caps, reminder, false)
+                    }
+                    ReminderRoleHint::EphemeralCache => {
+                        reminder_user_block_message(caps, reminder, true)
+                    }
+                    ReminderRoleHint::System | ReminderRoleHint::Developer => {
+                        RenderedReminder::SystemText(reminder_system_text(caps, reminder))
+                    }
+                };
+            }
+            RenderedReminder::SystemText(reminder_system_text(caps, reminder))
+        })
+        .collect()
+}
+
+fn pending_reminders_from_session(session_id: Option<&str>) -> Vec<SystemReminder> {
+    let Some(session_id) = session_id.filter(|id| !id.is_empty()) else {
+        return Vec::new();
+    };
+    let Some(transcript) = crate::agent_sessions::transcript(session_id) else {
+        return Vec::new();
+    };
+    let Some(dict) = transcript.as_dict() else {
+        return Vec::new();
+    };
+    let events = dict.get("events").or_else(|| dict.get("messages"));
+    match events {
+        Some(VmValue::List(items)) => items.iter().filter_map(reminder_from_event).collect(),
+        _ => Vec::new(),
+    }
+}
+
+fn prepend_content_blocks(content: &mut serde_json::Value, mut blocks: Vec<serde_json::Value>) {
+    if let serde_json::Value::Array(existing) = content {
+        blocks.append(existing);
+        *existing = blocks;
+        return;
+    }
+    if let serde_json::Value::String(text) = content {
+        blocks.push(serde_json::json!({"type": "text", "text": text.clone()}));
+        *content = serde_json::Value::Array(blocks);
+        return;
+    }
+    if content.is_null() {
+        *content = serde_json::Value::Array(blocks);
+        return;
+    }
+    blocks.push(std::mem::take(content));
+    *content = serde_json::Value::Array(blocks);
+}
+
+fn try_prepend_user_reminder(
+    messages: &mut [serde_json::Value],
+    reminder: &serde_json::Value,
+) -> bool {
+    if reminder.get("role").and_then(|role| role.as_str()) != Some("user") {
+        return false;
+    }
+    let Some(blocks) = reminder
+        .get("content")
+        .and_then(|content| content.as_array())
+        .cloned()
+    else {
+        return false;
+    };
+    let Some(first) = messages.first_mut() else {
+        return false;
+    };
+    let Some(first_obj) = first.as_object_mut() else {
+        return false;
+    };
+    if first_obj.get("role").and_then(|role| role.as_str()) != Some("user") {
+        return false;
+    }
+    let content = first_obj
+        .entry("content".to_string())
+        .or_insert(serde_json::Value::Null);
+    prepend_content_blocks(content, blocks);
+    true
+}
+
+fn apply_rendered_reminder_messages(
+    messages: Vec<serde_json::Value>,
+    rendered: &[RenderedReminder],
+) -> Vec<serde_json::Value> {
+    let mut messages = messages;
+    let mut prefix = Vec::new();
+    for reminder in rendered {
+        let RenderedReminder::Message(message) = reminder else {
+            continue;
+        };
+        if !try_prepend_user_reminder(&mut messages, message) {
+            prefix.push(message.clone());
+        }
+    }
+    prefix.extend(messages);
+    prefix
+}
+
 pub(crate) fn compose_system_prompt(
     system: Option<String>,
     options: Option<&BTreeMap<String, VmValue>>,
+) -> Result<Option<String>, VmError> {
+    compose_system_prompt_with_reminders(system, options, &[])
+}
+
+fn compose_system_prompt_with_reminders(
+    system: Option<String>,
+    options: Option<&BTreeMap<String, VmValue>>,
+    rendered_reminders: &[RenderedReminder],
 ) -> Result<Option<String>, VmError> {
     let mut before = Vec::new();
     let mut after = Vec::new();
@@ -878,6 +1058,11 @@ pub(crate) fn compose_system_prompt(
     if let Some(system) = primary_system {
         push_system_prompt_part(&mut before, system);
     }
+    for reminder in rendered_reminders {
+        if let RenderedReminder::SystemText(text) = reminder {
+            push_system_prompt_part(&mut before, text.clone());
+        }
+    }
     before.extend(after);
     if before.is_empty() {
         Ok(None)
@@ -912,7 +1097,6 @@ pub(crate) fn extract_llm_options(
     let mut options = options;
     apply_active_step_defaults(&mut options);
 
-    let system = compose_system_prompt(system, options.as_ref())?;
     let routing_policy = crate::llm::routing::extract_routing_policy(options.as_ref())?;
     let route_policy = parse_route_policy_option(options.as_ref())?;
     let mut provider = vm_resolve_provider(&options);
@@ -951,6 +1135,13 @@ pub(crate) fn extract_llm_options(
     let fallback_chain = parse_fallback_chain_option(options.as_ref());
     let api_key = resolve_api_key(&provider)?;
     let caps = crate::llm::capabilities::lookup(&provider, &model);
+    let session_id = opt_str(&options, "session_id")
+        .filter(|value| !value.is_empty())
+        .or_else(crate::agent_sessions::current_session_id);
+    let pending_reminders = pending_reminders_from_session(session_id.as_deref());
+    let rendered_reminders = render_pending_reminders(&caps, &pending_reminders);
+    let system =
+        compose_system_prompt_with_reminders(system, options.as_ref(), &rendered_reminders)?;
     let enforce_capability_gates = !crate::llm::mock::cli_llm_mock_replay_active()
         && !crate::llm::mock::builtin_llm_mock_active();
 
@@ -1108,6 +1299,7 @@ pub(crate) fn extract_llm_options(
     } else {
         vec![serde_json::json!({"role": "user", "content": prompt})]
     };
+    let messages = apply_rendered_reminder_messages(messages, &rendered_reminders);
     let vision =
         opt_bool(&options, "vision") || crate::llm::content::messages_contain_images(&messages)?;
     let audio = option_is_enabled(options.as_ref(), "audio")
@@ -1369,7 +1561,7 @@ pub(crate) fn extract_llm_options(
         route_fallbacks,
         routing_decision,
         routing_policy,
-        session_id: None,
+        session_id,
         reminders,
         messages,
         system,
@@ -1963,6 +2155,125 @@ structured_output = "format_kw"
         )
         .expect("supported structured output");
         crate::llm::capabilities::clear_user_overrides();
+    }
+}
+
+#[cfg(test)]
+mod reminder_render_tests {
+    use super::*;
+
+    fn reminder(role_hint: ReminderRoleHint, body: &str) -> SystemReminder {
+        SystemReminder {
+            id: "reminder-1".to_string(),
+            tags: vec!["test".to_string()],
+            dedupe_key: None,
+            ttl_turns: None,
+            preserve_on_compact: false,
+            propagate: crate::llm::helpers::ReminderPropagate::Session,
+            role_hint,
+            source: crate::llm::helpers::ReminderSource::InPipeline,
+            body: body.to_string(),
+            fired_at_turn: 0,
+        }
+    }
+
+    #[test]
+    fn anthropic_user_block_renders_as_xml_user_content_block() {
+        crate::llm::capabilities::clear_user_overrides();
+        let caps = crate::llm::capabilities::lookup("mock", "claude-sonnet-4-7");
+        let rendered = render_pending_reminders(
+            &caps,
+            &[reminder(
+                ReminderRoleHint::EphemeralCache,
+                "remember <this>",
+            )],
+        );
+
+        let RenderedReminder::Message(message) = &rendered[0] else {
+            panic!("anthropic user block should render as a message");
+        };
+        assert_eq!(message["role"], "user");
+        assert!(message["content"][0]["text"]
+            .as_str()
+            .unwrap()
+            .contains("<system-reminder>"));
+        assert!(message["content"][0]["text"]
+            .as_str()
+            .unwrap()
+            .contains("remember &lt;this&gt;"));
+        assert_eq!(
+            message["content"][0]["cache_control"],
+            serde_json::json!({"type": "ephemeral"})
+        );
+    }
+
+    #[test]
+    fn openai_developer_capability_renders_separate_developer_message() {
+        crate::llm::capabilities::clear_user_overrides();
+        let caps = crate::llm::capabilities::lookup("mock", "o3");
+        let rendered = render_pending_reminders(
+            &caps,
+            &[reminder(ReminderRoleHint::System, "keep policy in mind")],
+        );
+
+        let RenderedReminder::Message(message) = &rendered[0] else {
+            panic!("OpenAI developer route should render as a message");
+        };
+        assert_eq!(message["role"], "developer");
+        assert_eq!(
+            message["content"].as_str(),
+            Some("System reminder:\nkeep policy in mind")
+        );
+    }
+
+    #[test]
+    fn gemini_xml_capability_renders_system_text_with_xml_scaffolding() {
+        crate::llm::capabilities::clear_user_overrides();
+        let caps = crate::llm::capabilities::lookup("gemini", "gemini-2.5-flash");
+        let rendered =
+            render_pending_reminders(&caps, &[reminder(ReminderRoleHint::System, "use context")]);
+
+        let RenderedReminder::SystemText(text) = &rendered[0] else {
+            panic!("Gemini route should fold reminder into system text");
+        };
+        assert_eq!(text, "<system-reminder>\nuse context\n</system-reminder>");
+    }
+
+    #[test]
+    fn local_fallback_renders_plain_system_text() {
+        let caps = crate::llm::capabilities::Capabilities::default();
+        let rendered =
+            render_pending_reminders(&caps, &[reminder(ReminderRoleHint::System, "plain")]);
+
+        assert_eq!(
+            rendered,
+            vec![RenderedReminder::SystemText(
+                "System reminder:\nplain".to_string()
+            )]
+        );
+    }
+
+    #[test]
+    fn compose_system_prompt_places_reminders_before_appendix() {
+        let options = BTreeMap::from([
+            (
+                "system_prompt_parts".to_string(),
+                VmValue::String(std::rc::Rc::from("parts")),
+            ),
+            (
+                "system_appendix".to_string(),
+                VmValue::String(std::rc::Rc::from("appendix")),
+            ),
+        ]);
+        let prompt = compose_system_prompt_with_reminders(
+            Some("base".to_string()),
+            Some(&options),
+            &[RenderedReminder::SystemText("reminder".to_string())],
+        )
+        .expect("system prompt")
+        .expect("non-empty prompt");
+
+        assert_eq!(prompt, "parts\n\nbase\n\nreminder\n\nappendix");
     }
 }
 

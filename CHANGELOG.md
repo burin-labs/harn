@@ -85,8 +85,7 @@ condensed series summaries instead of full per-patch history.
   pending reminders with the same `dedupe_key`, and emits
   `transcript.reminder.deduped` when an EventLog is active. Agent
   post-turn processing now decrements finite `ttl_turns`, removes
-  expired reminders, and emits `transcript.reminder.expired`; provider
-  rendering remains a follow-up.
+  expired reminders, and emits `transcript.reminder.expired`.
 - **Hook-emitted system reminders (#1819).** Tool, persona, step, and
   session hooks can now return typed reminder effects using
   `{reminder: {body, tags?, dedupe_key?, ttl_turns?,
@@ -114,6 +113,17 @@ condensed series summaries instead of full per-patch history.
   `agent/user_message` remain user-role only; reminders validate the
   reminder-spec payload, report malformed payloads as `HARN-RMD-002`, and
   enter the transcript with `source: "bridge"`.
+  reminder-spec payload and enter the transcript with `source: "bridge"`.
+- **Capability-aware system-reminder rendering (#1822).** Pending
+  `system_reminder` events now render at LLM-call time based on the
+  resolved provider capability row: OpenAI developer-role routes receive
+  separate `developer` messages, Anthropic user-block hints prepend a
+  `<system-reminder>` content block with prompt-cache metadata when
+  supported, Gemini XML routes fold reminders into the system prompt with
+  XML scaffolding, and local fallback routes use plain system text. `harn
+  lint` emits `HARN-RMD-003` when a pipeline hardcodes
+  `role_hint: "user_block"` alongside a route that cannot preserve that
+  shape.
 - **OAuth provider catalogue records (#1905).** Adds
   `std/oauth/providers` with ten preconfigured OAuth provider records
   (GitHub, Slack, Linear, Notion, Google, Microsoft, Atlassian,

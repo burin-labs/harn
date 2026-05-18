@@ -626,6 +626,10 @@ fn lookup_with(
         if let Some(caps) = try_match_layer(user, builtin, "openai", model, &openai_defaults) {
             return caps;
         }
+        let gemini_defaults = merged_provider_defaults(user, builtin, "gemini");
+        if let Some(caps) = try_match_layer(user, builtin, "gemini", model, &gemini_defaults) {
+            return caps;
+        }
         return Capabilities::default();
     }
 
@@ -1156,6 +1160,14 @@ anthropic_beta_features = ["fine-grained-tool-streaming-2025-05-14"]
         let caps = lookup("mock", "gpt-5.4-preview");
         assert!(caps.defer_loading);
         assert_eq!(caps.tool_search, vec!["hosted", "client"]);
+    }
+
+    #[test]
+    fn mock_with_gemini_model_routes_to_gemini() {
+        reset();
+        let caps = lookup("mock", "gemini-2.5-flash");
+        assert_eq!(caps.message_wire_format, "openai");
+        assert!(caps.prefers_xml_scaffolding);
     }
 
     #[test]

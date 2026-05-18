@@ -1,0 +1,34 @@
+import { agent_reminder_providers_fire, agent_session_messages } from "std/agent/state"
+
+pipeline main() {
+  clear_reminder_providers()
+  register_reminder_provider(
+    {
+      id: "render_gemini",
+      subscribes_to: ["session_idle"],
+      evaluate: { _ctx -> return {reminder: {body: "gemini reminder", role_hint: "system"}} },
+    },
+  )
+  let session = agent_session_open("reminder-render-gemini")
+  agent_session_reset(session)
+  agent_session_inject(session, {role: "user", content: "hello"})
+  agent_reminder_providers_fire(session, "session_idle", {session: {id: session}}, {})
+  llm_mock_clear()
+  llm_mock({text: "ok"})
+  llm_call(
+    "ignored",
+    "base system",
+    {
+      provider: "mock",
+      model: "gemini-2.5-flash",
+      messages: agent_session_messages(session),
+      session_id: session,
+    },
+  )
+  let call = llm_mock_calls()[0]
+  println(contains(call.system, "base system"))
+  println(contains(call.system, "<system-reminder>"))
+  println(contains(call.system, "gemini reminder"))
+  println(call.messages[0].role)
+  clear_reminder_providers()
+}

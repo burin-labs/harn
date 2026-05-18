@@ -113,6 +113,28 @@ Hosts and stdlib reminder providers reuse the same shape — the typed
 [`SystemReminder`](https://docs.rs/harn-vm) Rust struct serde-round-trips
 into and out of this dict.
 
+## Rendering pending reminders
+
+`llm_call(...)` reads pending `system_reminder` events from the active
+`session_id` transcript and renders them after `system_prompt_parts` and
+the primary system prompt, but before `system_appendix` / `system_suffix`.
+The final wire shape is capability-aware:
+
+| Capability / hint | Rendering |
+|---|---|
+| `prefers_role_developer` | Separate `role: "developer"` messages. |
+| Anthropic `role_hint: "user_block"` | A user content block containing `<system-reminder>...</system-reminder>`. |
+| Anthropic `role_hint: "ephemeral_cache"` | Same user content block, with `cache_control: {type: "ephemeral"}` when prompt caching is supported. |
+| `prefers_xml_scaffolding` | System-prompt text wrapped in `<system-reminder>` tags. |
+| Fallback providers | Plain system-prompt text prefixed with `System reminder:`. |
+
+Pipeline authors can pick a semantic `role_hint` once; provider
+capabilities decide whether it becomes a developer message, a user content
+block, XML system text, or plain system text.
+`harn lint` emits `HARN-RMD-003` when a pipeline hardcodes
+`role_hint: "user_block"` while also hardcoding a provider/model route
+that cannot preserve that user-block shape.
+
 ## Injecting and clearing pending reminders
 
 Use `transcript.inject_reminder(transcript, options)` when a Harn
@@ -170,8 +192,8 @@ boundary, is removed from the session transcript events, and emits a
 Hooks can inject reminders by returning `{reminder: {...}, then?: ...}`,
 a bare reminder spec such as `{body: "Refresh context"}`, or a
 session-hook effect list such as `[{reminder: {...}}]`. Bridge
-notifications and provider-specific reminder rendering are intentionally
-left to follow-up tickets.
+notifications use the same reminder spec and provider-specific rendering
+happens at the next LLM call.
 
 ## Reminder providers
 

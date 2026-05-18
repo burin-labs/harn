@@ -24,6 +24,7 @@ use crate::rules::blank_lines::check_blank_line_between_items;
 use crate::rules::deprecated_llm_options::check_deprecated_llm_options;
 use crate::rules::import_order::check_import_order;
 use crate::rules::optional_shorthand::check_prefer_optional_shorthand;
+use crate::rules::reminder_role_hint::check_reminder_role_hint_capabilities;
 use crate::rules::trailing_comma::check_trailing_comma;
 use crate::rules::unnecessary_parentheses::check_unnecessary_parentheses;
 
@@ -1322,6 +1323,7 @@ impl<'a> Linter<'a> {
             check_unnecessary_parentheses(src, nodes, &mut self.diagnostics);
         }
         check_deprecated_llm_options(nodes, &mut self.diagnostics);
+        check_reminder_role_hint_capabilities(nodes, &mut self.diagnostics);
         for node in nodes {
             self.lint_node(node);
         }

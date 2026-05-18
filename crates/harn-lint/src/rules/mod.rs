@@ -10,6 +10,7 @@ pub(crate) mod deprecated_llm_options;
 pub(crate) mod file_header;
 pub(crate) mod import_order;
 pub(crate) mod optional_shorthand;
+pub(crate) mod reminder_role_hint;
 pub(crate) mod template_provider_identity;
 pub(crate) mod template_variant_explosion;
 pub(crate) mod trailing_comma;
