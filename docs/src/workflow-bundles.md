@@ -6,8 +6,8 @@ remain importable into Harn Cloud later without changing the workflow's durable
 identity, graph, policy, or replay metadata.
 
 The canonical package format is `.harnpack`: a deterministic `tar.zst` archive
-with `harnpack.json` at the archive root. The manifest can also be read as
-plain JSON during authoring. The current schema version is `2`.
+with `harnpack.json` and `sbom.spdx.json` at the archive root. The manifest can
+also be read as plain JSON during authoring. The current schema version is `2`.
 
 For an end-to-end walkthrough that authors a bundle, validates it,
 previews the graph, and runs a deterministic local receipt — all
@@ -66,6 +66,12 @@ replay runs can pin the exact workflow graph.
 Bundle identity for `.harnpack` archives is BLAKE3 over the canonical manifest
 bytes plus the sorted content hashes. Re-packing the same manifest and content
 produces the same bundle hash.
+
+`harn pack --json` emits a `JsonEnvelope` summary with the bundle hash, output
+path, archive size, signature presence, SBOM counts, bytecode/debug-symbol
+metadata, and the full manifest. Signing is represented as `{ present: false,
+algorithm: "ed25519" }` until the signing workflow fills the manifest
+signature slot.
 
 ## Preview
 

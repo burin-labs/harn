@@ -15,11 +15,10 @@ use harn_parser::DiagnosticSeverity;
 use harn_vm::bytecode_cache;
 use harn_vm::module_artifact;
 use harn_vm::orchestration::{
-    build_harnpack, current_provider_catalog_hash_blake3, load_workflow_bundle_any_version,
-    workflow_bundle_hash, CatchupPolicySpec, ConnectorRequirement, EnvironmentRequirements,
-    HarnpackEntry, ModuleEntry, RetryPolicySpec, SBOMDoc, SBOMPackage, SBOMRelationship, ToolEntry,
-    WorkflowBundle, WorkflowBundlePolicy, WorkflowBundleReplayMetadata, WorkflowBundleTrigger,
-    WORKFLOW_BUNDLE_SCHEMA_VERSION,
+    build_harnpack, load_workflow_bundle_any_version, workflow_bundle_hash, CatchupPolicySpec,
+    ConnectorRequirement, EnvironmentRequirements, HarnpackEntry, ModuleEntry, RetryPolicySpec,
+    SBOMDoc, SBOMPackage, SBOMRelationship, ToolEntry, WorkflowBundle, WorkflowBundlePolicy,
+    WorkflowBundleReplayMetadata, WorkflowBundleTrigger, WORKFLOW_BUNDLE_SCHEMA_VERSION,
 };
 use harn_vm::Compiler;
 use serde::Serialize;
@@ -31,7 +30,8 @@ use crate::parse_source_file;
 
 /// Stable schema version for the `harn pack --json` envelope. Bump when
 /// [`PackJsonData`] changes shape in a way that agents need to detect.
-pub const PACK_SCHEMA_VERSION: u32 = 1;
+pub const PACK_SCHEMA_VERSION: u32 = 2;
+pub const PACK_SBOM_ARCHIVE_PATH: &str = "sbom.spdx.json";
 
 /// JSON payload emitted under `JsonEnvelope.data` for `harn pack`.
 #[derive(Debug, Clone, Serialize)]
@@ -39,7 +39,31 @@ pub struct PackJsonData {
     pub bundle_hash: String,
     pub output_path: PathBuf,
     pub size_bytes: u64,
+    pub signature: PackSignatureSummary,
+    pub sbom_summary: PackSbomSummary,
+    pub debug_symbol_metadata: PackDebugSymbolMetadata,
     pub manifest: WorkflowBundle,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct PackSignatureSummary {
+    pub algorithm: String,
+    pub key_id: Option<String>,
+    pub present: bool,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct PackSbomSummary {
+    pub components: usize,
+    pub stdlib_modules: usize,
+    pub providers: usize,
+    pub tools: usize,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct PackDebugSymbolMetadata {
+    pub harnbc_count: usize,
+    pub total_bytes: u64,
 }
 
 struct PackJsonOutput(PackJsonData);
@@ -86,6 +110,65 @@ pub fn run_to_envelope(args: &PackArgs) -> JsonEnvelope<PackJsonData> {
         Ok(outcome) => PackJsonOutput(outcome.json).into_envelope(),
         Err(err) => JsonEnvelope::err(PACK_SCHEMA_VERSION, err.code, err.message),
     }
+}
+
+pub fn json_schema() -> serde_json::Value {
+    serde_json::json!({
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "title": "harn pack --json",
+        "type": "object",
+        "required": ["schemaVersion", "ok", "data", "warnings"],
+        "properties": {
+            "schemaVersion": { "const": PACK_SCHEMA_VERSION },
+            "ok": { "const": true },
+            "warnings": { "type": "array" },
+            "data": {
+                "type": "object",
+                "required": [
+                    "bundle_hash",
+                    "output_path",
+                    "size_bytes",
+                    "signature",
+                    "sbom_summary",
+                    "debug_symbol_metadata",
+                    "manifest"
+                ],
+                "properties": {
+                    "bundle_hash": { "type": "string", "pattern": "^blake3:" },
+                    "output_path": { "type": "string", "minLength": 1 },
+                    "size_bytes": { "type": "integer", "minimum": 1 },
+                    "signature": {
+                        "type": "object",
+                        "required": ["algorithm", "key_id", "present"],
+                        "properties": {
+                            "algorithm": { "const": "ed25519" },
+                            "key_id": { "type": ["string", "null"] },
+                            "present": { "type": "boolean" }
+                        }
+                    },
+                    "sbom_summary": {
+                        "type": "object",
+                        "required": ["components", "stdlib_modules", "providers", "tools"],
+                        "properties": {
+                            "components": { "type": "integer", "minimum": 1 },
+                            "stdlib_modules": { "type": "integer", "minimum": 0 },
+                            "providers": { "type": "integer", "minimum": 0 },
+                            "tools": { "type": "integer", "minimum": 0 }
+                        }
+                    },
+                    "debug_symbol_metadata": {
+                        "type": "object",
+                        "required": ["harnbc_count", "total_bytes"],
+                        "properties": {
+                            "harnbc_count": { "type": "integer", "minimum": 1 },
+                            "total_bytes": { "type": "integer", "minimum": 1 }
+                        }
+                    },
+                    "manifest": { "type": "object" }
+                }
+            }
+        }
+    })
 }
 
 /// Outcome of [`build`]. Used by tests; the dispatcher consumes it
@@ -186,6 +269,10 @@ pub fn build(args: &PackArgs) -> Result<PackOutcome, PackError> {
     let mut contents = Vec::new();
     let mut sbom_packages = Vec::new();
     let mut sbom_relationships = Vec::new();
+    let mut debug_symbol_metadata = PackDebugSymbolMetadata {
+        harnbc_count: 0,
+        total_bytes: 0,
+    };
 
     let stdlib_version = bytecode_cache::HARN_VERSION.to_string();
     let harn_version = bytecode_cache::HARN_VERSION.to_string();
@@ -283,6 +370,8 @@ pub fn build(args: &PackArgs) -> Result<PackOutcome, PackError> {
 
         let source_hash = blake3_hash(source.as_bytes());
         let harnbc_hash = blake3_hash(&chunk_bytes);
+        debug_symbol_metadata.harnbc_count += 1;
+        debug_symbol_metadata.total_bytes += chunk_bytes.len() as u64;
 
         transitive_modules.push(ModuleEntry {
             path: rel.clone(),
@@ -296,6 +385,7 @@ pub fn build(args: &PackArgs) -> Result<PackOutcome, PackError> {
         ));
         contents.push(HarnpackEntry::new(chunk_archive_path, chunk_bytes));
         if let Some(artifact_bytes) = module_artifact_bytes {
+            debug_symbol_metadata.total_bytes += artifact_bytes.len() as u64;
             let module_rel = adjacent_with_extension(&rel, bytecode_cache::MODULE_CACHE_EXTENSION)
                 .ok_or_else(|| {
                     PackError::new(
@@ -332,17 +422,59 @@ pub fn build(args: &PackArgs) -> Result<PackOutcome, PackError> {
         ));
     }
 
-    let provider_catalog_hash = current_provider_catalog_hash_blake3().map_err(|err| {
+    let provider_catalog = harn_vm::provider_catalog::artifact();
+    let provider_catalog_bytes = serde_json::to_vec(&provider_catalog).map_err(|err| {
         PackError::new(
             "provider_catalog.failed",
-            format!("failed to snapshot provider catalog: {err}"),
+            format!("failed to serialize provider catalog snapshot: {err}"),
         )
     })?;
+    let provider_catalog_hash = blake3_hash(&provider_catalog_bytes);
+    sbom_packages.push(SBOMPackage {
+        name: "harn-provider-catalog".to_string(),
+        version: Some(harn_version.clone()),
+        package_hash_blake3: Some(provider_catalog_hash.clone()),
+        license: None,
+    });
+    sbom_relationships.push(SBOMRelationship {
+        from: format!("entrypoint:{}", entrypoint_rel.display()),
+        to: "harn-provider-catalog".to_string(),
+        relationship_type: "depends_on".to_string(),
+    });
+    for provider in &provider_catalog.providers {
+        let provider_name = format!("provider:{}", provider.id);
+        sbom_packages.push(SBOMPackage {
+            name: provider_name.clone(),
+            version: None,
+            package_hash_blake3: None,
+            license: None,
+        });
+        sbom_relationships.push(SBOMRelationship {
+            from: "harn-provider-catalog".to_string(),
+            to: provider_name,
+            relationship_type: "contains".to_string(),
+        });
+    }
 
-    // E6.4 populates `tool_manifest` from the static module walk; today
-    // it stays empty so the v2 manifest is consistently deterministic.
+    // The static module walk does not yet discover tool definitions, but
+    // the SBOM path below is wired so future tool manifest entries are
+    // reflected in both the manifest and JSON summary without another
+    // archive format change.
     let tool_manifest: Vec<ToolEntry> = Vec::new();
-    let bundle = assemble_bundle(
+    for tool in &tool_manifest {
+        sbom_packages.push(SBOMPackage {
+            name: format!("tool:{}", tool.name),
+            version: None,
+            package_hash_blake3: tool.schema_hash_blake3.clone(),
+            license: None,
+        });
+        sbom_relationships.push(SBOMRelationship {
+            from: format!("entrypoint:{}", entrypoint_rel.display()),
+            to: format!("tool:{}", tool.name),
+            relationship_type: "depends_on".to_string(),
+        });
+    }
+    let mut bundle = assemble_bundle(
         &entrypoint_rel,
         transitive_modules,
         stdlib_version,
@@ -357,6 +489,14 @@ pub fn build(args: &PackArgs) -> Result<PackOutcome, PackError> {
         },
         prior.as_ref(),
     );
+    sort_sbom_doc(&mut bundle.sbom);
+    let sbom_bytes = serde_json::to_vec_pretty(&bundle.sbom).map_err(|err| {
+        PackError::new(
+            "pack.sbom_failed",
+            format!("failed to render SBOM document: {err}"),
+        )
+    })?;
+    contents.push(HarnpackEntry::new(PACK_SBOM_ARCHIVE_PATH, sbom_bytes));
 
     let archive_bytes = build_harnpack(&bundle, &contents).map_err(|err| {
         PackError::new(
@@ -398,9 +538,65 @@ pub fn build(args: &PackArgs) -> Result<PackOutcome, PackError> {
             bundle_hash,
             output_path,
             size_bytes,
+            signature: signature_summary(&bundle),
+            sbom_summary: sbom_summary(&bundle),
+            debug_symbol_metadata,
             manifest: bundle,
         },
     })
+}
+
+fn signature_summary(bundle: &WorkflowBundle) -> PackSignatureSummary {
+    match &bundle.signature {
+        Some(signature) => PackSignatureSummary {
+            algorithm: signature.algorithm.clone(),
+            key_id: signature.key_id.clone(),
+            present: true,
+        },
+        None => PackSignatureSummary {
+            algorithm: "ed25519".to_string(),
+            key_id: None,
+            present: false,
+        },
+    }
+}
+
+fn sbom_summary(bundle: &WorkflowBundle) -> PackSbomSummary {
+    let stdlib_modules = bundle
+        .sbom
+        .packages
+        .iter()
+        .filter(|package| package.name.starts_with("std/"))
+        .count();
+    let providers = bundle
+        .sbom
+        .packages
+        .iter()
+        .filter(|package| package.name.starts_with("provider:"))
+        .count();
+    PackSbomSummary {
+        components: bundle.sbom.packages.len(),
+        stdlib_modules,
+        providers,
+        tools: bundle.tool_manifest.len(),
+    }
+}
+
+fn sort_sbom_doc(sbom: &mut SBOMDoc) {
+    sbom.packages.sort_by(|left, right| {
+        (&left.name, &left.version, &left.package_hash_blake3).cmp(&(
+            &right.name,
+            &right.version,
+            &right.package_hash_blake3,
+        ))
+    });
+    sbom.relationships.sort_by(|left, right| {
+        (&left.from, &left.to, &left.relationship_type).cmp(&(
+            &right.from,
+            &right.to,
+            &right.relationship_type,
+        ))
+    });
 }
 
 fn assemble_bundle(

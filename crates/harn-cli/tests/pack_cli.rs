@@ -12,7 +12,9 @@ use std::path::{Path, PathBuf};
 use harn_cli::cli::PackArgs;
 use harn_cli::commands::pack;
 use harn_cli::tests::common::cwd_lock;
-use harn_vm::orchestration::{load_workflow_bundle, read_harnpack, WORKFLOW_BUNDLE_SCHEMA_VERSION};
+use harn_vm::orchestration::{
+    load_workflow_bundle, read_harnpack, SBOMDoc, WORKFLOW_BUNDLE_SCHEMA_VERSION,
+};
 use tempfile::TempDir;
 use tokio::runtime::Builder;
 
@@ -67,6 +69,37 @@ fn pack_writes_valid_harnpack_archive() {
         .contents
         .iter()
         .any(|entry| entry.path == Path::new("bytecode/hello.harnbc")));
+    let sbom_entry = archive
+        .contents
+        .iter()
+        .find(|entry| entry.path == Path::new(pack::PACK_SBOM_ARCHIVE_PATH))
+        .expect("harnpack contains archived SBOM document");
+    let sbom_doc: SBOMDoc = serde_json::from_slice(&sbom_entry.bytes).unwrap();
+    assert_eq!(sbom_doc.format, "spdx-lite");
+    assert_eq!(sbom_doc.version, "2.3");
+    let sbom_value: serde_json::Value = serde_json::from_slice(&sbom_entry.bytes).unwrap();
+    assert_eq!(
+        sbom_value,
+        serde_json::to_value(&archive.manifest.sbom).unwrap()
+    );
+    assert!(
+        archive
+            .manifest
+            .sbom
+            .packages
+            .iter()
+            .any(|package| package.name == "harn-provider-catalog"),
+        "SBOM must carry provider catalog component"
+    );
+    assert!(
+        archive
+            .manifest
+            .sbom
+            .packages
+            .iter()
+            .any(|package| package.name.starts_with("provider:")),
+        "SBOM must enumerate provider catalog entries"
+    );
     let report = harn_vm::orchestration::validate_workflow_bundle(&archive.manifest);
     assert!(report.valid, "{report:#?}");
 }
@@ -147,6 +180,9 @@ fn pack_json_envelope_carries_pack_schema() {
         });
 
     let value = serde_json::to_value(&envelope).unwrap();
+    jsonschema::draft202012::meta::validate(&pack::json_schema()).unwrap();
+    let validator = jsonschema::draft202012::new(&pack::json_schema()).unwrap();
+    validator.validate(&value).unwrap();
     assert_eq!(value["schemaVersion"], pack::PACK_SCHEMA_VERSION);
     assert_eq!(value["ok"], true);
     assert_eq!(value["data"]["output_path"], out.display().to_string());
@@ -154,6 +190,31 @@ fn pack_json_envelope_carries_pack_schema() {
         .as_str()
         .is_some_and(|s| s.starts_with("blake3:")));
     assert!(value["data"]["size_bytes"].as_u64().unwrap() > 0);
+    assert_eq!(value["data"]["signature"]["algorithm"], "ed25519");
+    assert_eq!(value["data"]["signature"]["present"], false);
+    assert!(
+        value["data"]["sbom_summary"]["components"]
+            .as_u64()
+            .unwrap()
+            > 0
+    );
+    assert!(value["data"]["sbom_summary"]["providers"].as_u64().unwrap() > 0);
+    assert_eq!(
+        value["data"]["sbom_summary"]["components"]
+            .as_u64()
+            .unwrap(),
+        value["data"]["manifest"]["sbom"]["packages"]
+            .as_array()
+            .unwrap()
+            .len() as u64
+    );
+    assert_eq!(value["data"]["debug_symbol_metadata"]["harnbc_count"], 1);
+    assert!(
+        value["data"]["debug_symbol_metadata"]["total_bytes"]
+            .as_u64()
+            .unwrap()
+            > 0
+    );
     assert_eq!(
         value["data"]["manifest"]["schema_version"],
         WORKFLOW_BUNDLE_SCHEMA_VERSION

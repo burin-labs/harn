@@ -241,7 +241,7 @@ pub fn catalog() -> Vec<SchemaEntry> {
             command: "pack",
             schema_version: crate::commands::pack::PACK_SCHEMA_VERSION,
             description: "Signed-ready .harnpack run-bundle build summary.",
-            schema_json: None,
+            schema_json: Some(crate::commands::pack::json_schema()),
         },
         SchemaEntry {
             command: "dev",
