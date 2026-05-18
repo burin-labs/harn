@@ -96,6 +96,12 @@ pub struct SessionTruncateResult {
     pub new_tip_turn_id: Option<String>,
 }
 
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ReminderInjectionReport {
+    pub reminder_id: String,
+    pub deduped_count: usize,
+}
+
 thread_local! {
     static SESSIONS: RefCell<HashMap<String, SessionState>> = RefCell::new(HashMap::new());
     static SESSION_CAP: Cell<usize> = const { Cell::new(DEFAULT_SESSION_CAP) };
@@ -871,6 +877,81 @@ pub fn apply_reminder_post_turn(id: &str, turn: i64) -> Result<serde_json::Value
         "decremented_count": report.decremented_count,
         "remaining_count": report.remaining_count,
     }))
+}
+
+/// Inject a typed system reminder into the session transcript's event
+/// stream. This mirrors `transcript.inject_reminder` for live sessions:
+/// reminders with the same `dedupe_key` are replaced before the new
+/// reminder event is appended.
+pub fn inject_reminder(
+    id: &str,
+    reminder: crate::llm::helpers::SystemReminder,
+) -> Result<ReminderInjectionReport, String> {
+    let reminder_id = reminder.id.clone();
+    let dedupe_key = reminder.dedupe_key.clone();
+    let mut deduped_reminder_ids = Vec::new();
+    SESSIONS.with(|s| {
+        let mut map = s.borrow_mut();
+        let Some(state) = map.get_mut(id) else {
+            return Err(format!(
+                "agent_session_inject_reminder: unknown session id '{id}'"
+            ));
+        };
+        let dict = state
+            .transcript
+            .as_dict()
+            .cloned()
+            .unwrap_or_else(BTreeMap::new);
+        let mut events: Vec<VmValue> = match dict.get("events") {
+            Some(VmValue::List(list)) => list.iter().cloned().collect(),
+            _ => dict
+                .get("messages")
+                .and_then(|value| match value {
+                    VmValue::List(list) => Some(list.iter().cloned().collect::<Vec<_>>()),
+                    _ => None,
+                })
+                .map(|messages| crate::llm::helpers::transcript_events_from_messages(&messages))
+                .unwrap_or_default(),
+        };
+        if let Some(expected_key) = dedupe_key.as_deref() {
+            events.retain(|event| {
+                let Some(existing) = crate::llm::helpers::reminder_from_event(event) else {
+                    return true;
+                };
+                if existing.dedupe_key.as_deref() == Some(expected_key) {
+                    deduped_reminder_ids.push(existing.id);
+                    false
+                } else {
+                    true
+                }
+            });
+        }
+        events.push(crate::llm::helpers::transcript_reminder_event(&reminder));
+        let mut next = dict;
+        next.insert("events".to_string(), VmValue::List(Rc::new(events)));
+        state.transcript = VmValue::Dict(Rc::new(next));
+        state.last_accessed = Instant::now();
+        Ok(())
+    })?;
+
+    if !deduped_reminder_ids.is_empty() {
+        let dropped_count = deduped_reminder_ids.len();
+        crate::llm::helpers::emit_reminder_lifecycle_event(
+            crate::llm::helpers::REMINDER_DEDUPED_EVENT_KIND,
+            serde_json::json!({
+                "transcript_id": id,
+                "reminder_id": &reminder_id,
+                "dedupe_key": &dedupe_key,
+                "dropped_reminder_ids": &deduped_reminder_ids,
+                "dropped_count": dropped_count,
+            }),
+        );
+    }
+
+    Ok(ReminderInjectionReport {
+        reminder_id,
+        deduped_count: deduped_reminder_ids.len(),
+    })
 }
 
 /// Append a transcript event to the session without mutating its

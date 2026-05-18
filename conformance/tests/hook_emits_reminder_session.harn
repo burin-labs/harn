@@ -1,0 +1,20 @@
+pipeline main() {
+  clear_session_hooks()
+  register_session_hook(
+    "post_turn",
+    { _event -> return [
+      {reminder: {body: "session reminder stale", dedupe_key: "session-hook", tags: ["session"]}},
+      {reminder: {body: "session reminder fresh", dedupe_key: "session-hook", tags: ["session"]}},
+    ] },
+  )
+  llm_mock_clear()
+  llm_mock({text: "done"})
+  let result = agent_loop("session hook reminder", nil, {provider: "mock", session_id: "hook-reminder-session"})
+  let events = transcript_events_by_kind(result.transcript, "system_reminder")
+  println(result.status)
+  println(len(events))
+  println(events[0].reminder.body)
+  println(events[0].reminder.source)
+  println(events[0].reminder.tags[0])
+  clear_session_hooks()
+}

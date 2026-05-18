@@ -139,6 +139,12 @@ impl super::super::Vm {
                 None,
             );
             let raw = self.call_lifecycle_hook(&hook.closure, payload).await?;
+            let (raw, effects) = crate::orchestration::collect_hook_effects_and_action(
+                HookEvent::PreStep,
+                raw,
+                VmValue::Nil,
+            )?;
+            crate::orchestration::inject_hook_effects_into_current_session(effects)?;
             match Self::parse_step_pre_hook_result(raw, args)? {
                 StepPreHookAction::Allow(next_args) => args = next_args,
                 StepPreHookAction::Deny(reason) => {
@@ -162,6 +168,12 @@ impl super::super::Vm {
                 None,
             );
             let raw = self.call_lifecycle_hook(&hook.handler, payload).await?;
+            let (raw, effects) = crate::orchestration::collect_hook_effects_and_action(
+                HookEvent::PreStep,
+                raw,
+                VmValue::Nil,
+            )?;
+            crate::orchestration::inject_hook_effects_into_current_session(effects)?;
             match Self::parse_step_pre_hook_result(raw, args)? {
                 StepPreHookAction::Allow(next_args) => args = next_args,
                 StepPreHookAction::Deny(reason) => {
@@ -225,6 +237,12 @@ impl super::super::Vm {
                     Some(current.clone()),
                 );
                 let raw = self.call_lifecycle_hook(&hook.closure, payload).await?;
+                let (raw, effects) = crate::orchestration::collect_hook_effects_and_action(
+                    HookEvent::PostStep,
+                    raw,
+                    VmValue::Nil,
+                )?;
+                crate::orchestration::inject_hook_effects_into_current_session(effects)?;
                 current = Self::parse_step_post_hook_result(raw, current)?;
             }
             for hook in hooks {
@@ -237,6 +255,12 @@ impl super::super::Vm {
                     Some(current.clone()),
                 );
                 let raw = self.call_lifecycle_hook(&hook.handler, payload).await?;
+                let (raw, effects) = crate::orchestration::collect_hook_effects_and_action(
+                    HookEvent::PostStep,
+                    raw,
+                    VmValue::Nil,
+                )?;
+                crate::orchestration::inject_hook_effects_into_current_session(effects)?;
                 current = Self::parse_step_post_hook_result(raw, current)?;
             }
             Ok::<VmValue, VmError>(current)

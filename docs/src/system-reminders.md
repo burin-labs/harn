@@ -12,8 +12,10 @@ message history.
 R-01 shipped the **schema and event envelope**. R-02 adds deterministic
 in-Harn transcript transforms for injecting and clearing pending reminder
 events, plus EventLog-backed dedupe and post-turn TTL expiry audit
-records. The rest of the lifecycle (stdlib providers, hook return
-variants, the bridge `agent/inject_reminder` notification, compaction
+records. R-03 lets tool, persona, step, and session hooks return reminder
+effects that inject into the active session transcript. The rest of the
+lifecycle (stdlib providers, the bridge `agent/inject_reminder`
+notification, compaction
 honoring TTL + `preserve_on_compact`, sub-agent propagation, and
 capability-aware rendering) lands in later tickets under epic
 [#1815](https://github.com/burin-labs/harn/issues/1815).
@@ -163,8 +165,11 @@ values. A reminder with `ttl_turns: 1` expires at the next post-turn
 boundary, is removed from the session transcript events, and emits a
 `transcript.reminder.expired` record on
 `transcript.reminder.lifecycle` when an active EventLog is installed.
-Hook return variants, bridge notifications, and provider-specific
-reminder rendering are intentionally left to follow-up tickets.
+Hooks can inject reminders by returning `{reminder: {...}, then?: ...}`,
+a bare reminder spec such as `{body: "Refresh context"}`, or a
+session-hook effect list such as `[{reminder: {...}}]`. Bridge
+notifications and provider-specific reminder rendering are intentionally
+left to follow-up tickets.
 
 ## Reading reminders off a transcript
 
@@ -185,6 +190,6 @@ for evt in reminders {
 - Transform builtins: [#1817 — `transcript.inject_reminder()` + `transcript.clear_reminders()`](https://github.com/burin-labs/harn/issues/1817).
 - Capability flags driving the `role_hint` → wire-role dispatch:
   [#1665](https://github.com/burin-labs/harn/issues/1665).
-- Hook return variants that will surface `Reminder{...}` alongside
-  `Allow` / `Deny` / `Modify`: see
+- Hook return variants that surface reminders alongside `Allow` /
+  `Deny` / `Modify`: see
   [Hooks (tool, persona, session lifecycle)](./extensibility/hooks.md).

@@ -87,6 +87,16 @@ condensed series summaries instead of full per-patch history.
   post-turn processing now decrements finite `ttl_turns`, removes
   expired reminders, and emits `transcript.reminder.expired`; provider
   rendering remains a follow-up.
+- **Hook-emitted system reminders (#1819).** Tool, persona, step, and
+  session hooks can now return typed reminder effects using
+  `{reminder: {body, tags?, dedupe_key?, ttl_turns?,
+  preserve_on_compact?, propagate?, role_hint?}, then?}`, a bare
+  reminder spec, or a session-level effect list. Hook reminders inject
+  into the active session transcript as `system_reminder` events, use
+  `source: "hook"`, honor `dedupe_key`, and compose with existing
+  allow/deny/modify/block/decision return shapes. `register_tool_hook`
+  also accepts `pre` and `post` closures alongside the legacy `deny`
+  and `max_output` shortcuts.
 - **OAuth provider catalogue records (#1905).** Adds
   `std/oauth/providers` with ten preconfigured OAuth provider records
   (GitHub, Slack, Linear, Notion, Google, Microsoft, Atlassian,

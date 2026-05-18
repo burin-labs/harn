@@ -97,8 +97,15 @@ impl Vm {
         }
         let arg = crate::stdlib::json_to_vm_value(payload);
         for invocation in invocations {
-            self.call_closure_pub(&invocation.closure, &[arg.clone()])
+            let raw = self
+                .call_closure_pub(&invocation.closure, &[arg.clone()])
                 .await?;
+            let (_action, effects) = crate::orchestration::collect_hook_effects_and_action(
+                event,
+                raw,
+                crate::value::VmValue::Nil,
+            )?;
+            crate::orchestration::inject_hook_effects_into_current_session(effects)?;
         }
         Ok(())
     }

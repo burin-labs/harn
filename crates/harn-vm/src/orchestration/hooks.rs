@@ -1,12 +1,14 @@
 //! Runtime lifecycle hooks — tool, agent-turn, and worker interception.
 
 use std::cell::RefCell;
+use std::collections::BTreeMap;
 use std::rc::Rc;
 
 use regex::Regex;
 use serde::{Deserialize, Serialize};
 
 use crate::agent_events::WorkerEvent;
+use crate::llm::helpers::{ReminderPropagate, ReminderRoleHint, ReminderSource, SystemReminder};
 use crate::value::{VmClosure, VmError, VmValue};
 
 /// Manifest / runtime hook event names.
@@ -189,6 +191,22 @@ impl HookControl {
     }
 }
 
+pub type ReminderSpec = SystemReminder;
+
+/// Side effect emitted by a hook in addition to any control/action
+/// result. Reminder effects are appended to the active session
+/// transcript's pending reminder event set.
+#[derive(Clone, Debug)]
+pub enum HookEffect {
+    Reminder(ReminderSpec),
+}
+
+#[derive(Clone, Debug)]
+struct HookOutcome {
+    control: HookControl,
+    effects: Vec<HookEffect>,
+}
+
 /// Action returned by a PreToolUse hook.
 #[derive(Clone, Debug)]
 pub enum PreToolAction {
@@ -198,6 +216,11 @@ pub enum PreToolAction {
     Deny(String),
     /// Allow but replace the arguments.
     Modify(serde_json::Value),
+    /// Inject a reminder, then continue with the inner pre-tool action.
+    Reminder {
+        spec: ReminderSpec,
+        then: Box<PreToolAction>,
+    },
 }
 
 /// Action returned by a PostToolUse hook.
@@ -207,6 +230,11 @@ pub enum PostToolAction {
     Pass,
     /// Replace the result text.
     Modify(String),
+    /// Inject a reminder, then continue with the inner post-tool action.
+    Reminder {
+        spec: ReminderSpec,
+        then: Box<PostToolAction>,
+    },
 }
 
 /// Callback types for legacy tool lifecycle hooks.
@@ -647,6 +675,7 @@ async fn invoke_vm_lifecycle_hooks(
         let raw = vm
             .call_closure_pub(&registration.closure, &[arg.clone()])
             .await?;
+        let effects = parse_hook_effects(event, &raw)?;
         record_hook_returned(
             &session_id,
             event,
@@ -654,21 +683,404 @@ async fn invoke_vm_lifecycle_hooks(
             &HookControl::Allow,
             &raw,
         );
+        inject_hook_effects(session_id.as_str(), effects)?;
     }
     Ok(())
 }
 
+fn reminder_error(context: &str, message: impl Into<String>) -> VmError {
+    VmError::Runtime(format!("{context}: {}", message.into()))
+}
+
+fn required_reminder_spec_string(
+    options: &BTreeMap<String, VmValue>,
+    key: &str,
+    context: &str,
+) -> Result<String, VmError> {
+    match options.get(key) {
+        Some(VmValue::String(value)) if !value.trim().is_empty() => Ok(value.to_string()),
+        Some(VmValue::String(_)) | None | Some(VmValue::Nil) => Err(reminder_error(
+            context,
+            format!("`{key}` must be a non-empty string"),
+        )),
+        Some(other) => Err(reminder_error(
+            context,
+            format!("`{key}` must be a string, got {}", other.type_name()),
+        )),
+    }
+}
+
+fn optional_reminder_spec_string(
+    options: &BTreeMap<String, VmValue>,
+    key: &str,
+    context: &str,
+) -> Result<Option<String>, VmError> {
+    match options.get(key) {
+        None | Some(VmValue::Nil) => Ok(None),
+        Some(VmValue::String(value)) => {
+            let trimmed = value.trim();
+            if trimmed.is_empty() {
+                Ok(None)
+            } else {
+                Ok(Some(trimmed.to_string()))
+            }
+        }
+        Some(other) => Err(reminder_error(
+            context,
+            format!("`{key}` must be a string or nil, got {}", other.type_name()),
+        )),
+    }
+}
+
+fn optional_reminder_spec_bool(
+    options: &BTreeMap<String, VmValue>,
+    key: &str,
+    context: &str,
+) -> Result<Option<bool>, VmError> {
+    match options.get(key) {
+        None | Some(VmValue::Nil) => Ok(None),
+        Some(VmValue::Bool(value)) => Ok(Some(*value)),
+        Some(other) => Err(reminder_error(
+            context,
+            format!("`{key}` must be a bool or nil, got {}", other.type_name()),
+        )),
+    }
+}
+
+fn reminder_spec_tags(
+    options: &BTreeMap<String, VmValue>,
+    context: &str,
+) -> Result<Vec<String>, VmError> {
+    match options.get("tags") {
+        None | Some(VmValue::Nil) => Ok(Vec::new()),
+        Some(VmValue::List(values)) => {
+            let mut tags = Vec::new();
+            for value in values.iter() {
+                let VmValue::String(tag) = value else {
+                    return Err(reminder_error(
+                        context,
+                        format!("`tags` entries must be strings, got {}", value.type_name()),
+                    ));
+                };
+                let trimmed = tag.trim();
+                if trimmed.is_empty() {
+                    return Err(reminder_error(
+                        context,
+                        "`tags` entries must be non-empty strings",
+                    ));
+                }
+                if !tags.iter().any(|existing| existing == trimmed) {
+                    tags.push(trimmed.to_string());
+                }
+            }
+            Ok(tags)
+        }
+        Some(other) => Err(reminder_error(
+            context,
+            format!("`tags` must be a list or nil, got {}", other.type_name()),
+        )),
+    }
+}
+
+fn optional_reminder_spec_ttl(
+    options: &BTreeMap<String, VmValue>,
+    context: &str,
+) -> Result<Option<i64>, VmError> {
+    match options.get("ttl_turns") {
+        None | Some(VmValue::Nil) => Ok(None),
+        Some(VmValue::Int(value)) if *value > 0 => Ok(Some(*value)),
+        Some(VmValue::Int(_)) => Err(reminder_error(context, "`ttl_turns` must be > 0")),
+        Some(other) => Err(reminder_error(
+            context,
+            format!(
+                "`ttl_turns` must be an int or nil, got {}",
+                other.type_name()
+            ),
+        )),
+    }
+}
+
+fn optional_reminder_spec_propagate(
+    options: &BTreeMap<String, VmValue>,
+    context: &str,
+) -> Result<Option<ReminderPropagate>, VmError> {
+    optional_reminder_spec_string(options, "propagate", context)?
+        .map(|value| match value.as_str() {
+            "all" => Ok(ReminderPropagate::All),
+            "session" => Ok(ReminderPropagate::Session),
+            "none" => Ok(ReminderPropagate::None),
+            _ => Err(reminder_error(
+                context,
+                "`propagate` must be one of all, session, or none",
+            )),
+        })
+        .transpose()
+}
+
+fn optional_reminder_spec_role_hint(
+    options: &BTreeMap<String, VmValue>,
+    context: &str,
+) -> Result<Option<ReminderRoleHint>, VmError> {
+    optional_reminder_spec_string(options, "role_hint", context)?
+        .map(|value| match value.as_str() {
+            "system" => Ok(ReminderRoleHint::System),
+            "developer" => Ok(ReminderRoleHint::Developer),
+            "user_block" => Ok(ReminderRoleHint::UserBlock),
+            "ephemeral_cache" => Ok(ReminderRoleHint::EphemeralCache),
+            _ => Err(reminder_error(
+                context,
+                "`role_hint` must be one of system, developer, user_block, or ephemeral_cache",
+            )),
+        })
+        .transpose()
+}
+
+fn parse_reminder_spec(value: &VmValue, context: &str) -> Result<ReminderSpec, VmError> {
+    let Some(options) = value.as_dict() else {
+        return Err(reminder_error(
+            context,
+            format!("reminder spec must be a dict, got {}", value.type_name()),
+        ));
+    };
+    const ALLOWED: &[&str] = &[
+        "body",
+        "tags",
+        "dedupe_key",
+        "ttl_turns",
+        "preserve_on_compact",
+        "propagate",
+        "role_hint",
+    ];
+    let unknown = options
+        .keys()
+        .filter(|key| !ALLOWED.contains(&key.as_str()))
+        .map(String::as_str)
+        .collect::<Vec<_>>();
+    if !unknown.is_empty() {
+        return Err(reminder_error(
+            context,
+            format!("unknown reminder option(s): {}", unknown.join(", ")),
+        ));
+    }
+    Ok(SystemReminder {
+        id: uuid::Uuid::now_v7().to_string(),
+        tags: reminder_spec_tags(options, context)?,
+        dedupe_key: optional_reminder_spec_string(options, "dedupe_key", context)?,
+        ttl_turns: optional_reminder_spec_ttl(options, context)?,
+        preserve_on_compact: optional_reminder_spec_bool(options, "preserve_on_compact", context)?
+            .unwrap_or(false),
+        propagate: optional_reminder_spec_propagate(options, context)?
+            .unwrap_or(ReminderPropagate::Session),
+        role_hint: optional_reminder_spec_role_hint(options, context)?
+            .unwrap_or(ReminderRoleHint::System),
+        source: ReminderSource::Hook,
+        body: required_reminder_spec_string(options, "body", context)?,
+        fired_at_turn: 0,
+    })
+}
+
+fn looks_like_reminder_spec(map: &BTreeMap<String, VmValue>) -> bool {
+    map.contains_key("body")
+        && !map.contains_key("deny")
+        && !map.contains_key("args")
+        && !map.contains_key("result")
+        && !map.contains_key("output")
+        && !map.contains_key("modify")
+        && !map.contains_key("block")
+        && !map.contains_key("decision")
+        && !map.contains_key("action")
+        && !map.contains_key("control")
+}
+
+fn parse_hook_effect_item(event: HookEvent, value: &VmValue) -> Result<HookEffect, VmError> {
+    let context = format!("{} hook reminder", event.as_str());
+    if let Some(map) = value.as_dict() {
+        if let Some(reminder) = map.get("reminder") {
+            return Ok(HookEffect::Reminder(parse_reminder_spec(
+                reminder, &context,
+            )?));
+        }
+        if matches!(
+            map.get("type")
+                .or_else(|| map.get("kind"))
+                .map(|value| value.display())
+                .as_deref(),
+            Some("reminder" | "Reminder")
+        ) {
+            let spec = map
+                .get("spec")
+                .or_else(|| map.get("reminder"))
+                .ok_or_else(|| reminder_error(&context, "reminder effect missing `spec`"))?;
+            return Ok(HookEffect::Reminder(parse_reminder_spec(spec, &context)?));
+        }
+        if looks_like_reminder_spec(map) {
+            return Ok(HookEffect::Reminder(parse_reminder_spec(value, &context)?));
+        }
+    }
+    Err(reminder_error(
+        &context,
+        "hook effect must be {reminder: {...}} or a reminder spec",
+    ))
+}
+
+pub fn parse_hook_effects(event: HookEvent, value: &VmValue) -> Result<Vec<HookEffect>, VmError> {
+    let Some(map) = value.as_dict() else {
+        if let VmValue::List(items) = value {
+            return items
+                .iter()
+                .map(|item| parse_hook_effect_item(event, item))
+                .collect();
+        }
+        return Ok(Vec::new());
+    };
+
+    let mut effects = Vec::new();
+    if let Some(items) = map.get("effects") {
+        match items {
+            VmValue::List(list) => {
+                for item in list.iter() {
+                    effects.push(parse_hook_effect_item(event, item)?);
+                }
+            }
+            other => effects.push(parse_hook_effect_item(event, other)?),
+        }
+    }
+    if let Some(reminder) = map.get("reminder") {
+        let context = format!("{} hook reminder", event.as_str());
+        effects.push(HookEffect::Reminder(parse_reminder_spec(
+            reminder, &context,
+        )?));
+    } else if effects.is_empty() && looks_like_reminder_spec(map) {
+        let context = format!("{} hook reminder", event.as_str());
+        effects.push(HookEffect::Reminder(parse_reminder_spec(value, &context)?));
+    }
+    Ok(effects)
+}
+
+fn action_value_after_effects(value: VmValue, default_action: VmValue) -> VmValue {
+    let VmValue::Dict(map) = value else {
+        return value;
+    };
+    if let Some(then) = map.get("then") {
+        return then.clone();
+    }
+    let has_effects = map.contains_key("effects")
+        || map.contains_key("reminder")
+        || looks_like_reminder_spec(map.as_ref());
+    if !has_effects {
+        return VmValue::Dict(map);
+    }
+    let mut action = map.as_ref().clone();
+    action.remove("effects");
+    action.remove("reminder");
+    action.remove("then");
+    if action.keys().any(|key| {
+        matches!(
+            key.as_str(),
+            "deny" | "args" | "result" | "output" | "modify" | "block" | "decision" | "action"
+        )
+    }) {
+        VmValue::Dict(Rc::new(action))
+    } else {
+        default_action
+    }
+}
+
+pub fn collect_hook_effects_and_action(
+    event: HookEvent,
+    value: VmValue,
+    default_action: VmValue,
+) -> Result<(VmValue, Vec<HookEffect>), VmError> {
+    let mut current = value;
+    let mut effects = Vec::new();
+    for _ in 0..32 {
+        let current_effects = parse_hook_effects(event, &current)?;
+        if current_effects.is_empty() {
+            return Ok((current, effects));
+        }
+        effects.extend(current_effects);
+        current = action_value_after_effects(current, default_action.clone());
+    }
+    Err(VmError::Runtime(format!(
+        "{} hook reminder return nested too deeply",
+        event.as_str()
+    )))
+}
+
+fn inject_hook_effects(session_id: &str, effects: Vec<HookEffect>) -> Result<(), VmError> {
+    if effects.is_empty() {
+        return Ok(());
+    }
+    let target_session = if session_id.is_empty() {
+        crate::agent_sessions::current_session_id().unwrap_or_default()
+    } else {
+        session_id.to_string()
+    };
+    if target_session.is_empty() {
+        return Ok(());
+    }
+    for effect in effects {
+        match effect {
+            HookEffect::Reminder(spec) => {
+                crate::agent_sessions::inject_reminder(&target_session, spec)
+                    .map_err(VmError::Runtime)?;
+            }
+        }
+    }
+    Ok(())
+}
+
+pub fn inject_hook_effects_into_current_session(effects: Vec<HookEffect>) -> Result<(), VmError> {
+    inject_hook_effects("", effects)
+}
+
+fn wrap_pre_tool_effects(effects: Vec<HookEffect>, mut action: PreToolAction) -> PreToolAction {
+    for effect in effects.into_iter().rev() {
+        match effect {
+            HookEffect::Reminder(spec) => {
+                action = PreToolAction::Reminder {
+                    spec,
+                    then: Box::new(action),
+                };
+            }
+        }
+    }
+    action
+}
+
+fn wrap_post_tool_effects(effects: Vec<HookEffect>, mut action: PostToolAction) -> PostToolAction {
+    for effect in effects.into_iter().rev() {
+        match effect {
+            HookEffect::Reminder(spec) => {
+                action = PostToolAction::Reminder {
+                    spec,
+                    then: Box::new(action),
+                };
+            }
+        }
+    }
+    action
+}
+
 fn parse_pre_tool_result(value: VmValue) -> Result<PreToolAction, VmError> {
+    let (value, effects) =
+        collect_hook_effects_and_action(HookEvent::PreToolUse, value, VmValue::Nil)?;
     match value {
-        VmValue::Nil => Ok(PreToolAction::Allow),
+        VmValue::Nil => Ok(wrap_pre_tool_effects(effects, PreToolAction::Allow)),
         VmValue::Dict(map) => {
             if let Some(reason) = map.get("deny") {
-                return Ok(PreToolAction::Deny(reason.display()));
+                return Ok(wrap_pre_tool_effects(
+                    effects,
+                    PreToolAction::Deny(reason.display()),
+                ));
             }
             if let Some(args) = map.get("args") {
-                return Ok(PreToolAction::Modify(crate::llm::vm_value_to_json(args)));
+                return Ok(wrap_pre_tool_effects(
+                    effects,
+                    PreToolAction::Modify(crate::llm::vm_value_to_json(args)),
+                ));
             }
-            Ok(PreToolAction::Allow)
+            Ok(wrap_pre_tool_effects(effects, PreToolAction::Allow))
         }
         other => Err(VmError::Runtime(format!(
             "PreToolUse hook must return nil or {{deny, args}}, got {}",
@@ -678,19 +1090,56 @@ fn parse_pre_tool_result(value: VmValue) -> Result<PreToolAction, VmError> {
 }
 
 fn parse_post_tool_result(value: VmValue) -> Result<PostToolAction, VmError> {
+    let (value, effects) =
+        collect_hook_effects_and_action(HookEvent::PostToolUse, value, VmValue::Nil)?;
     match value {
-        VmValue::Nil => Ok(PostToolAction::Pass),
-        VmValue::String(text) => Ok(PostToolAction::Modify(text.to_string())),
+        VmValue::Nil => Ok(wrap_post_tool_effects(effects, PostToolAction::Pass)),
+        VmValue::String(text) => Ok(wrap_post_tool_effects(
+            effects,
+            PostToolAction::Modify(text.to_string()),
+        )),
         VmValue::Dict(map) => {
             if let Some(result) = map.get("result") {
-                return Ok(PostToolAction::Modify(result.display()));
+                return Ok(wrap_post_tool_effects(
+                    effects,
+                    PostToolAction::Modify(result.display()),
+                ));
             }
-            Ok(PostToolAction::Pass)
+            Ok(wrap_post_tool_effects(effects, PostToolAction::Pass))
         }
         other => Err(VmError::Runtime(format!(
             "PostToolUse hook must return nil, string, or {{result}}, got {}",
             other.type_name()
         ))),
+    }
+}
+
+pub fn apply_pre_tool_action(
+    action: PreToolAction,
+    current_args: &mut serde_json::Value,
+) -> Result<Option<String>, VmError> {
+    match action {
+        PreToolAction::Allow => Ok(None),
+        PreToolAction::Deny(reason) => Ok(Some(reason)),
+        PreToolAction::Modify(new_args) => {
+            *current_args = new_args;
+            Ok(None)
+        }
+        PreToolAction::Reminder { spec, then } => {
+            inject_hook_effects_into_current_session(vec![HookEffect::Reminder(spec)])?;
+            apply_pre_tool_action(*then, current_args)
+        }
+    }
+}
+
+fn apply_post_tool_action(action: PostToolAction, current: String) -> Result<String, VmError> {
+    match action {
+        PostToolAction::Pass => Ok(current),
+        PostToolAction::Modify(new_result) => Ok(new_result),
+        PostToolAction::Reminder { spec, then } => {
+            inject_hook_effects_into_current_session(vec![HookEffect::Reminder(spec)])?;
+            apply_post_tool_action(*then, current)
+        }
     }
 }
 
@@ -730,12 +1179,8 @@ pub async fn run_pre_tool_hooks(
             }
             RuntimeHookHandler::NativePostTool(_) => continue,
         };
-        match action {
-            PreToolAction::Allow => {}
-            PreToolAction::Deny(reason) => return Ok(PreToolAction::Deny(reason)),
-            PreToolAction::Modify(new_args) => {
-                current_args = new_args;
-            }
+        if let Some(reason) = apply_pre_tool_action(action, &mut current_args)? {
+            return Ok(PreToolAction::Deny(reason));
         }
     }
     if current_args != *args {
@@ -790,6 +1235,10 @@ pub async fn run_post_tool_hooks(
             PostToolAction::Modify(new_result) => {
                 current = new_result;
             }
+            PostToolAction::Reminder { spec, then } => {
+                inject_hook_effects_into_current_session(vec![HookEffect::Reminder(spec)])?;
+                current = apply_post_tool_action(*then, current)?;
+            }
         }
     }
     Ok(current)
@@ -836,20 +1285,37 @@ pub async fn run_lifecycle_hooks_with_control(
         let raw = vm
             .call_closure_pub(&registration.closure, &[arg.clone()])
             .await?;
-        let control = parse_hook_control(event, &raw)?;
+        let outcome = parse_hook_outcome(event, &raw)?;
         record_hook_returned(
             &session_id,
             event,
             &registration.handler_name,
-            &control,
+            &outcome.control,
             &raw,
         );
-        if !matches!(control, HookControl::Allow) {
-            record_hook_vetoed(&session_id, event, &registration.handler_name, &control);
-            return Ok(control);
+        inject_hook_effects(session_id.as_str(), outcome.effects)?;
+        if !matches!(outcome.control, HookControl::Allow) {
+            record_hook_vetoed(
+                &session_id,
+                event,
+                &registration.handler_name,
+                &outcome.control,
+            );
+            return Ok(outcome.control);
         }
     }
     Ok(HookControl::Allow)
+}
+
+fn parse_hook_outcome(event: HookEvent, value: &VmValue) -> Result<HookOutcome, VmError> {
+    let effects = parse_hook_effects(event, value)?;
+    let action_value = if matches!(value, VmValue::List(_)) {
+        VmValue::Nil
+    } else {
+        action_value_after_effects(value.clone(), VmValue::Nil)
+    };
+    let control = parse_hook_control(event, &action_value)?;
+    Ok(HookOutcome { control, effects })
 }
 
 fn parse_hook_control(event: HookEvent, value: &VmValue) -> Result<HookControl, VmError> {

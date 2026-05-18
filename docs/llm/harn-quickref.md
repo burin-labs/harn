@@ -2317,8 +2317,10 @@ removed — call the lifecycle verbs explicitly.
 
 Three concentric surfaces:
 
-- `register_tool_hook({pattern, deny?, max_output?})` — tool-level
-  `PreToolUse` / `PostToolUse`.
+- `register_tool_hook({pattern, deny?, max_output?, pre?, post?})` — tool-level
+  `PreToolUse` / `PostToolUse`. `pre` and `post` are closures that
+  receive `{event, tool, result?}` payloads; `pre` can return `{deny}`
+  or `{args}`, and `post` can return a string or `{result}`.
 - `register_persona_hook(persona_pattern, event, handler)` — persona
   `PreStep` / `PostStep` / `OnApprovalRequested` / `OnHandoffEmitted` /
   `OnPersonaPaused` / `OnPersonaResumed` / `OnBudgetThreshold(pct)`.
@@ -2330,6 +2332,12 @@ Three concentric surfaces:
   `{block: true, reason}`; short-circuit a permission with
   `{decision: "allow"|"deny"|"ask", reason}`. Tape captures every
   invocation under `hook_call` / `hook_returned` / `hook_vetoed`.
+- Any tool, persona, step, or session hook can also emit a typed reminder
+  for the active session transcript. Return `{reminder: {body, tags?,
+  dedupe_key?, ttl_turns?, preserve_on_compact?, propagate?, role_hint?},
+  then?}` to combine the reminder with an existing action, return a bare
+  reminder spec such as `{body: "Refresh context", tags: ["context"]}`,
+  or return a session-hook effect list like `[{reminder: {...}}]`.
 - `pipeline_on_finish(callback)` — register a `fn(harness, return_value)`
   callback that runs between `pre_finish` and `post_finish` on the main
   VM (its stdout reaches the host capture buffer). The callback's

@@ -25,6 +25,26 @@ pub(super) fn register_tool_hook_builtin(
         VmValue::Int(n) => Some(*n as usize),
         _ => None,
     });
+    let pre_handler = match config.get("pre") {
+        Some(VmValue::Closure(closure)) => Some(closure.clone()),
+        Some(VmValue::Nil) | None => None,
+        Some(other) => {
+            return Err(VmError::Runtime(format!(
+                "register_tool_hook: pre must be a closure, got {}",
+                other.type_name()
+            )));
+        }
+    };
+    let post_handler = match config.get("post") {
+        Some(VmValue::Closure(closure)) => Some(closure.clone()),
+        Some(VmValue::Nil) | None => None,
+        Some(other) => {
+            return Err(VmError::Runtime(format!(
+                "register_tool_hook: post must be a closure, got {}",
+                other.type_name()
+            )));
+        }
+    };
 
     let pre: Option<crate::orchestration::PreToolHookFn> = deny_reason.map(|reason| {
         Rc::new(move |_name: &str, _args: &serde_json::Value| {
@@ -44,7 +64,27 @@ pub(super) fn register_tool_hook_builtin(
         }) as _
     });
 
-    crate::orchestration::register_tool_hook(crate::orchestration::ToolHook { pattern, pre, post });
+    crate::orchestration::register_tool_hook(crate::orchestration::ToolHook {
+        pattern: pattern.clone(),
+        pre,
+        post,
+    });
+    if let Some(handler) = pre_handler {
+        crate::orchestration::register_vm_hook(
+            crate::orchestration::HookEvent::PreToolUse,
+            pattern.clone(),
+            format!("tool_hook::{}::pre", pattern),
+            handler,
+        );
+    }
+    if let Some(handler) = post_handler {
+        crate::orchestration::register_vm_hook(
+            crate::orchestration::HookEvent::PostToolUse,
+            pattern.clone(),
+            format!("tool_hook::{}::post", pattern),
+            handler,
+        );
+    }
     Ok(VmValue::Nil)
 }
 
