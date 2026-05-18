@@ -1172,6 +1172,16 @@ fn parse_trigger_config(config: &BTreeMap<String, VmValue>) -> Result<TriggerBin
     })
 }
 
+pub(crate) fn validate_resume_trigger_spec(
+    config: &BTreeMap<String, VmValue>,
+) -> Result<(), VmError> {
+    let mut normalized = config.clone();
+    normalized
+        .entry("handler".to_string())
+        .or_insert_with(|| VmValue::String(Rc::from("worker://__resume_auto_resume__")));
+    parse_trigger_config(&normalized).map(|_| ())
+}
+
 fn parse_duration_millis(raw: &str) -> Result<u64, VmError> {
     let trimmed = raw.trim();
     if trimmed.is_empty() {

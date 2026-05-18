@@ -2565,6 +2565,7 @@ artifact list and bake the packed chunks into the system prompt.
 | `send_input(handle, task)` | handle, task | dict | Re-run a completed worker with a new task, carrying forward worker state where applicable |
 | `suspend_agent(worker, reason?, options?)` | worker, reason, options | dict | Cooperatively suspend a worker, persist a resumable snapshot, and return `status: "suspended"` with `suspension` metadata |
 | `resume_agent(worker_or_snapshot, resume_input?, continue_transcript?)` | worker or snapshot, input, bool | dict | Resume a suspended worker, optionally with new input; set `continue_transcript=false` to resume from the prior summary plus new input only |
+| `parse_resume_conditions(conditions?)` | conditions | dict or nil | Validate and normalize `ResumeConditions` for self-parking agents and `spawn_agent({options: {resume_when}})` using the trigger-spec validator |
 | `wait_agent(handle_or_list)` | handle or list | dict or list | Wait for one worker or a list of workers to finish |
 | `close_agent(handle)` | handle | dict | Cancel a worker and mark it terminal |
 | `list_agents()` | none | list | List worker summaries tracked by the current runtime |

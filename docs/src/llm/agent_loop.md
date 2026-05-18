@@ -978,6 +978,13 @@ parent ceiling before the worker starts or is resumed. Permission denials are
 returned to the agent loop as structured tool results:
 `{error: "permission_denied", tool, reason}`.
 
+Worker `options.resume_when` accepts the shared `ResumeConditions` shape used by
+self-parking agents: optional `trigger`, `timeout`, and `on_event` fields.
+`parse_resume_conditions(...)` validates that shape without spawning a worker;
+`trigger` is checked by the same `std/triggers` trigger-spec parser used by
+`trigger_register(...)`, while invalid fields raise `HARN-SUS-002` with the
+failing field path.
+
 Worker lifecycle builtins:
 
 | Function | Description |
@@ -988,6 +995,7 @@ Worker lifecycle builtins:
 | `send_input(handle, task)` | Re-run a completed worker with a new task, carrying transcript/artifacts forward when applicable |
 | `suspend_agent(worker, reason?, options?)` | Cooperatively suspend a worker, persist a resumable snapshot, and return `status: "suspended"` with `suspension` metadata |
 | `resume_agent(worker_or_snapshot, resume_input?, continue_transcript?)` | Resume a suspended worker, optionally with new input; set `continue_transcript=false` to resume from the prior summary plus new input only |
+| `parse_resume_conditions(conditions?)` | Validate `trigger`, `timeout`, and `on_event` resume conditions for self-park and `spawn_agent({options: {resume_when}})` |
 | `wait_agent(handle_or_list)` | Wait for one worker or a list of workers to finish |
 | `close_agent(handle)` | Cancel a worker and mark it terminal |
 | `list_agents()` | Return summaries for all known workers in the current runtime |

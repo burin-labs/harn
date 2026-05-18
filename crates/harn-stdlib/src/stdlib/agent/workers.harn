@@ -1,6 +1,12 @@
 // @harn-entrypoint-category agent.stdlib
 import { filter_nil, pick_keys } from "std/collections"
 
+type ResumeTimeoutAction = "resume_with_summary" | "fail" | "resume_with_input"
+
+type ResumeTimeoutSpec = {duration_minutes: int, on_timeout: ResumeTimeoutAction?}
+
+type ResumeConditions = {trigger: dict?, timeout: ResumeTimeoutSpec?, on_event: string?}
+
 fn __agent_option_keys() {
   return [
     "provider",
@@ -109,6 +115,13 @@ fn __worker_options(value, label) {
   throw label + ": options must be a dict or nil"
 }
 
+fn __worker_resume_options(options) {
+  if options?.resume_when == nil {
+    return options
+  }
+  return options + {resume_when: parse_resume_conditions(options.resume_when)}
+}
+
 fn __worker_mode(config) {
   if config?.graph != nil {
     return "workflow"
@@ -117,7 +130,7 @@ fn __worker_mode(config) {
 }
 
 fn __worker_workflow_config(config) {
-  let options = __worker_dict(config?.options)
+  let options = __worker_resume_options(__worker_dict(config?.options))
   return filter_nil(
     config
       + {graph: workflow_graph(config.graph), artifacts: __worker_list(config?.artifacts), options: options},
@@ -126,7 +139,11 @@ fn __worker_workflow_config(config) {
 
 fn __worker_stage_config(config) {
   return filter_nil(
-    config + {artifacts: __worker_list(config?.artifacts), options: __worker_dict(config?.options)},
+    config
+      + {
+      artifacts: __worker_list(config?.artifacts),
+      options: __worker_resume_options(__worker_dict(config?.options)),
+    },
   )
 }
 
@@ -150,6 +167,25 @@ fn __worker_config(config) {
  */
 pub fn spawn_agent(config) {
   return __host_worker_spawn(__worker_config(config))
+}
+
+/**
+ * parse_resume_conditions.
+ *
+ * Validate and normalize a ResumeConditions dict used by self-parking
+ * agents and `spawn_agent({options: {resume_when: ...}})`. `trigger`
+ * is validated through the same trigger-spec parser used by
+ * `trigger_register`; `timeout.duration_minutes` must be positive; and
+ * `on_event` must be a non-empty EventLog topic.
+ *
+ * @effects: [host]
+ * @allocation: heap
+ * @errors: [HARN-SUS-002]
+ * @api_stability: experimental
+ * @example: parse_resume_conditions(conditions)
+ */
+pub fn parse_resume_conditions(conditions = nil) -> ResumeConditions? {
+  return __host_resume_conditions_parse(conditions)
 }
 
 /**
@@ -358,7 +394,7 @@ pub fn sub_agent_request(task, options = nil) {
   if task_text == "" {
     throw "sub_agent_run: task is required"
   }
-  let opts = __worker_options(options, "sub_agent_run")
+  let opts = __worker_resume_options(__worker_options(options, "sub_agent_run"))
   let allowed_tools = __sub_agent_string_list(opts?.allowed_tools, "sub_agent_run.allowed_tools")
   let selected_tools = __sub_agent_selected_tools(opts, allowed_tools)
   let session_id = __sub_agent_string(opts?.session_id, "sub_agent_session_" + uuid_v7())

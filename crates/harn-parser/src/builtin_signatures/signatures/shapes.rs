@@ -41,6 +41,25 @@ const TY_TOOL_REGISTRY_OR_LIST: Ty = Ty::Union(&[TY_LIST, TY_DICT]);
 // Agent option bags
 // ---------------------------------------------------------------------------
 
+const RESUME_TIMEOUT_ACTION: Ty = Ty::Union(&[
+    Ty::LitString("resume_with_summary"),
+    Ty::LitString("fail"),
+    Ty::LitString("resume_with_input"),
+]);
+
+pub(crate) const RESUME_TIMEOUT_SPEC: Ty = Ty::Shape(&[
+    ShapeFieldDescriptor::new("duration_minutes", TY_INT),
+    ShapeFieldDescriptor::optional("on_timeout", RESUME_TIMEOUT_ACTION),
+]);
+
+pub(crate) const RESUME_CONDITIONS: Ty = Ty::Shape(&[
+    ShapeFieldDescriptor::optional("trigger", TY_DICT),
+    ShapeFieldDescriptor::optional("timeout", RESUME_TIMEOUT_SPEC),
+    ShapeFieldDescriptor::optional("on_event", TY_STRING),
+]);
+
+pub(crate) const RESUME_CONDITIONS_OR_NIL: Ty = Ty::Union(&[RESUME_CONDITIONS, TY_NIL]);
+
 /// Configuration accepted by `spawn_agent` and `agent.spawn`.
 ///
 /// `task` is the only required field; everything else has stdlib-side defaults.
@@ -83,6 +102,7 @@ pub(crate) const SUB_AGENT_OPTIONS: Ty = Ty::Shape(&[
     ShapeFieldDescriptor::optional("carry", TY_DICT),
     ShapeFieldDescriptor::optional("allowed_tools", TY_LIST),
     ShapeFieldDescriptor::optional("policy", TY_ANY),
+    ShapeFieldDescriptor::optional("resume_when", RESUME_CONDITIONS),
     ShapeFieldDescriptor::optional("returns_schema", TY_ANY),
     ShapeFieldDescriptor::optional("returns", TY_DICT),
     ShapeFieldDescriptor::optional("execution", TY_DICT),

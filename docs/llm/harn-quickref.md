@@ -1801,6 +1801,48 @@ be a heavy LLM call without races. Keep broad review strategies in
 multiple competing judges; use `done_judge` for the built-in
 sentinel-only completion gate.
 
+### Resume conditions
+
+Self-parking agents use a shared `ResumeConditions` shape for
+`agent_await_resumption` and `spawn_agent({options: {resume_when:
+...}})`. Call `parse_resume_conditions(conditions?)` from
+`std/agent/workers` when you need to validate or normalize the shape
+without spawning a worker.
+
+```harn
+import { parse_resume_conditions, spawn_agent } from "std/agent/workers"
+
+let resume_when = parse_resume_conditions({
+  trigger: {
+    kind: "review.approved",
+    provider: "github",
+    match: {events: ["review.approved"]},
+  },
+  timeout: {duration_minutes: 30, on_timeout: "resume_with_summary"},
+  on_event: "operator.resume",
+})
+
+let worker_node = {
+  kind: "subagent",
+  mode: "llm",
+  model_policy: {provider: "mock"},
+  output_contract: {output_kinds: ["summary"]},
+}
+
+spawn_agent({
+  task: "wait for review",
+  node: worker_node,
+  options: {resume_when: resume_when},
+})
+```
+
+`trigger` reuses the trigger spec parser from `std/triggers` rather
+than defining a second trigger DSL. `timeout.duration_minutes` must be a
+positive integer, `timeout.on_timeout` defaults to
+`"resume_with_summary"` and may be `"fail"` or `"resume_with_input"`,
+and `on_event` must be a non-empty EventLog topic. Invalid fields raise
+`HARN-SUS-002` with the failing field path.
+
 ### Sessions (persistent conversations)
 
 Pass `session_id` to `agent_loop` to resume a multi-turn conversation:
