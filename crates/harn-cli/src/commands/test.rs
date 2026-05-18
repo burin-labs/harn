@@ -1,8 +1,10 @@
+use std::collections::BTreeSet;
 use std::fs;
 use std::path::{Component, Path, PathBuf};
 use std::process::{self, Stdio};
 
 use regex::Regex;
+use serde::Serialize;
 use serde_json::Value;
 
 use crate::commands::run::{
@@ -10,7 +12,60 @@ use crate::commands::run::{
 };
 use crate::env_guard::ScopedEnvVar;
 use crate::execute_with_skill_dirs;
+use crate::json_envelope::{self, JsonEnvelope, JsonError};
 use crate::test_runner;
+
+pub(crate) const CONFORMANCE_TEST_SCHEMA_VERSION: u32 = 1;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "snake_case")]
+enum ConformanceJsonOutcome {
+    Pass,
+    Fail,
+    XfailExpected,
+    XfailUnexpectedPass,
+}
+
+#[derive(Debug, Clone, Serialize)]
+struct ConformanceJsonResult {
+    name: String,
+    outcome: ConformanceJsonOutcome,
+    duration_ms: u64,
+    message: Option<String>,
+    diagnostic_codes: Vec<String>,
+}
+
+#[derive(Debug, Clone, Default, Serialize)]
+struct ConformanceJsonSummary {
+    pass: u64,
+    fail: u64,
+    xfail_expected: u64,
+    xfail_unexpected_pass: u64,
+    skipped: u64,
+}
+
+impl ConformanceJsonSummary {
+    fn record(&mut self, outcome: ConformanceJsonOutcome) {
+        match outcome {
+            ConformanceJsonOutcome::Pass => self.pass += 1,
+            ConformanceJsonOutcome::Fail => self.fail += 1,
+            ConformanceJsonOutcome::XfailExpected => self.xfail_expected += 1,
+            ConformanceJsonOutcome::XfailUnexpectedPass => self.xfail_unexpected_pass += 1,
+        }
+    }
+
+    fn is_success(&self) -> bool {
+        self.fail == 0 && self.xfail_unexpected_pass == 0
+    }
+}
+
+#[derive(Debug, Clone, Serialize)]
+struct ConformanceJsonReport {
+    #[serde(rename = "snapshotKey")]
+    snapshot_key: String,
+    results: Vec<ConformanceJsonResult>,
+    summary: ConformanceJsonSummary,
+}
 
 fn normalize_expected_output(text: &str) -> String {
     text.lines()
@@ -108,7 +163,7 @@ fn xml_escape(s: &str) -> String {
         .replace('\'', "&apos;")
 }
 
-fn write_junit_xml(path: &str, results: &[(String, bool, String, u64)]) {
+fn write_junit_xml(path: &str, results: &[(String, bool, String, u64)], announce: bool) {
     let total = results.len();
     let failures = results.iter().filter(|r| !r.1).count();
     let total_time: f64 = results.iter().map(|r| r.3 as f64 / 1000.0).sum();
@@ -139,7 +194,7 @@ fn write_junit_xml(path: &str, results: &[(String, bool, String, u64)]) {
 
     if let Err(e) = fs::write(path, &xml) {
         eprintln!("Failed to write JUnit XML to {path}: {e}");
-    } else {
+    } else if announce {
         println!("JUnit XML written to {path}");
     }
 }
@@ -538,11 +593,348 @@ fn resolve_conformance_selection(
     Ok(files)
 }
 
+fn conformance_filter_matches(rel_path: &str, filter: Option<&str>) -> bool {
+    let Some(pattern) = filter else {
+        return true;
+    };
+    if let Some(re_pat) = pattern.strip_prefix("re:") {
+        Regex::new(re_pat).is_ok_and(|re| re.is_match(rel_path))
+    } else if pattern.contains('|') {
+        pattern.split('|').any(|p| rel_path.contains(p.trim()))
+    } else if pattern.contains('*') || pattern.contains('?') {
+        let escaped = regex::escape(pattern)
+            .replace(r"\*", ".*")
+            .replace(r"\?", ".");
+        Regex::new(&escaped).is_ok_and(|re| re.is_match(rel_path))
+    } else {
+        rel_path.contains(pattern)
+    }
+}
+
+#[derive(Debug, Clone)]
+struct ConformanceCaseEvaluation {
+    passed: bool,
+    message: Option<String>,
+    diagnostic_codes: Vec<String>,
+    duration_ms: u64,
+}
+
+impl ConformanceCaseEvaluation {
+    fn pass(duration_ms: u64) -> Self {
+        Self {
+            passed: true,
+            message: None,
+            diagnostic_codes: Vec::new(),
+            duration_ms,
+        }
+    }
+
+    fn fail(message: impl Into<String>, duration_ms: u64) -> Self {
+        let message = message.into();
+        Self {
+            passed: false,
+            diagnostic_codes: extract_diagnostic_codes(&message),
+            message: Some(message),
+            duration_ms,
+        }
+    }
+}
+
+fn extract_diagnostic_codes(message: &str) -> Vec<String> {
+    let re = Regex::new(r"\bHARN-[A-Z0-9]+(?:-[A-Z0-9]+)*-[0-9]{3}\b")
+        .expect("diagnostic code regex compiles");
+    let mut codes = BTreeSet::new();
+    for capture in re.find_iter(message) {
+        codes.insert(capture.as_str().to_string());
+    }
+    codes.into_iter().collect()
+}
+
+fn target_triple_label() -> &'static str {
+    if cfg!(all(target_os = "macos", target_arch = "x86_64")) {
+        "x86_64-apple-darwin"
+    } else if cfg!(all(target_os = "macos", target_arch = "aarch64")) {
+        "aarch64-apple-darwin"
+    } else if cfg!(all(target_os = "linux", target_arch = "x86_64")) {
+        "x86_64-unknown-linux-gnu"
+    } else if cfg!(all(target_os = "linux", target_arch = "aarch64")) {
+        "aarch64-unknown-linux-gnu"
+    } else if cfg!(all(target_os = "windows", target_arch = "x86_64")) {
+        "x86_64-pc-windows-msvc"
+    } else {
+        "unknown-target"
+    }
+}
+
+fn hash_file_if_present(hasher: &mut blake3::Hasher, suite_root: &Path, path: &Path) {
+    if !path.is_file() {
+        return;
+    }
+    hasher.update(b"file\0");
+    let rel = path.strip_prefix(suite_root).unwrap_or(path);
+    hasher.update(logical_path(rel).as_bytes());
+    hasher.update(b"\0");
+    match fs::read(path) {
+        Ok(bytes) => hasher.update(&bytes),
+        Err(error) => hasher.update(format!("read-error:{error}").as_bytes()),
+    };
+    hasher.update(b"\0");
+}
+
+fn hash_dir_if_present(hasher: &mut blake3::Hasher, suite_root: &Path, path: &Path) {
+    if !path.is_dir() {
+        return;
+    }
+    let mut files = Vec::new();
+    collect_files_recursive(path, &mut files);
+    files.sort();
+    for file in files {
+        hash_file_if_present(hasher, suite_root, &file);
+    }
+}
+
+fn collect_files_recursive(dir: &Path, out: &mut Vec<PathBuf>) {
+    if let Ok(entries) = fs::read_dir(dir) {
+        let mut entries = entries.filter_map(Result::ok).collect::<Vec<_>>();
+        entries.sort_by_key(|entry| entry.path());
+        for entry in entries {
+            let path = entry.path();
+            if path.is_dir() {
+                collect_files_recursive(&path, out);
+            } else if path.is_file() {
+                out.push(path);
+            }
+        }
+    }
+}
+
+fn conformance_snapshot_key(suite_root: &Path, selected_files: &[(PathBuf, String)]) -> String {
+    let mut hasher = blake3::Hasher::new();
+    hasher.update(env!("CARGO_PKG_VERSION").as_bytes());
+    hasher.update(b"\0");
+    hasher.update(target_triple_label().as_bytes());
+    hasher.update(b"\0");
+    match harn_vm::orchestration::current_provider_catalog_hash_blake3() {
+        Ok(hash) => hasher.update(hash.as_bytes()),
+        Err(error) => hasher.update(format!("provider-catalog-error:{error}").as_bytes()),
+    };
+    hasher.update(b"\0");
+
+    for (harn_file, rel_path) in selected_files {
+        hasher.update(b"test\0");
+        hasher.update(rel_path.as_bytes());
+        hasher.update(b"\0");
+        hash_file_if_present(&mut hasher, suite_root, harn_file);
+        hash_file_if_present(
+            &mut hasher,
+            suite_root,
+            &harn_file.with_extension("expected"),
+        );
+        hash_file_if_present(&mut hasher, suite_root, &harn_file.with_extension("error"));
+        hash_file_if_present(
+            &mut hasher,
+            suite_root,
+            &harn_file.with_extension("llm-mock.jsonl"),
+        );
+        hash_file_if_present(
+            &mut hasher,
+            suite_root,
+            &harn_file.with_extension("process-tape.json"),
+        );
+        hash_file_if_present(
+            &mut hasher,
+            suite_root,
+            &harn_file.with_extension("testbench-tape"),
+        );
+        hash_file_if_present(
+            &mut hasher,
+            suite_root,
+            &harn_file.with_extension("annotations.jsonl"),
+        );
+        hash_dir_if_present(
+            &mut hasher,
+            suite_root,
+            &harn_file.with_extension("fs-overlay"),
+        );
+    }
+
+    hasher.finalize().to_hex().to_string()
+}
+
 pub(crate) struct ConformanceRunOptions<'a> {
     pub(crate) verbose: bool,
     pub(crate) timing: bool,
     pub(crate) differential_optimizations: bool,
+    pub(crate) json: bool,
     pub(crate) cli_skill_dirs: &'a [PathBuf],
+}
+
+async fn evaluate_conformance_case(
+    harn_file: &Path,
+    expected_file: &Path,
+    error_file: &Path,
+    rel_path: &str,
+    timeout_ms: u64,
+    options: &ConformanceRunOptions<'_>,
+) -> ConformanceCaseEvaluation {
+    if expected_file.exists() {
+        let source = match fs::read_to_string(harn_file) {
+            Ok(s) => s,
+            Err(e) => {
+                return ConformanceCaseEvaluation::fail(
+                    format!("{rel_path}: IO error reading source: {e}"),
+                    0,
+                );
+            }
+        };
+        let expected = match fs::read_to_string(expected_file) {
+            Ok(s) => normalize_expected_output(s.trim_end()),
+            Err(e) => {
+                return ConformanceCaseEvaluation::fail(
+                    format!("{rel_path}: IO error reading expected: {e}"),
+                    0,
+                );
+            }
+        };
+
+        let llm_mock_mode = conformance_llm_mock_mode(harn_file);
+        let testbench_config = conformance_testbench_config(harn_file);
+        let run = match execute_conformance_source(
+            &source,
+            harn_file,
+            timeout_ms,
+            &llm_mock_mode,
+            &testbench_config,
+            options.cli_skill_dirs,
+        )
+        .await
+        {
+            Ok(run) => run,
+            Err(error) => {
+                return ConformanceCaseEvaluation::fail(format!("{rel_path}: {error}"), 0);
+            }
+        };
+        let duration_ms = run.duration_ms;
+
+        return match run.execution {
+            ConformanceExecution::Completed(Ok(output)) => {
+                let actual = normalize_actual_output(output.trim_end());
+                if actual == expected {
+                    if options.differential_optimizations {
+                        if let Err(error) = verify_unoptimized_conformance_subprocess(
+                            harn_file,
+                            timeout_ms,
+                            options.cli_skill_dirs,
+                        )
+                        .await
+                        {
+                            return ConformanceCaseEvaluation::fail(
+                                format!("{rel_path}: {error}"),
+                                duration_ms,
+                            );
+                        }
+                    }
+                    ConformanceCaseEvaluation::pass(duration_ms)
+                } else {
+                    let diff = simple_diff(&expected, &actual);
+                    let msg = if options.verbose {
+                        format!(
+                            "{rel_path}:\n  expected:\n    {}\n  actual:\n    {}\n  diff:\n{diff}",
+                            expected.lines().collect::<Vec<_>>().join("\n    "),
+                            actual.lines().collect::<Vec<_>>().join("\n    "),
+                        )
+                    } else {
+                        format!("{rel_path}:\n{diff}")
+                    };
+                    ConformanceCaseEvaluation::fail(msg, duration_ms)
+                }
+            }
+            ConformanceExecution::Completed(Err(e)) => ConformanceCaseEvaluation::fail(
+                format!("{rel_path}: runtime error: {e}"),
+                duration_ms,
+            ),
+            ConformanceExecution::TimedOut => ConformanceCaseEvaluation::fail(
+                format!("{rel_path}: timed out after {timeout_ms}ms"),
+                timeout_ms,
+            ),
+        };
+    }
+
+    if error_file.exists() {
+        let source = match fs::read_to_string(harn_file) {
+            Ok(s) => s,
+            Err(e) => {
+                return ConformanceCaseEvaluation::fail(
+                    format!("{rel_path}: IO error reading source: {e}"),
+                    0,
+                );
+            }
+        };
+        let expected_error = match fs::read_to_string(error_file) {
+            Ok(s) => s.trim_end().to_string(),
+            Err(e) => {
+                return ConformanceCaseEvaluation::fail(
+                    format!("{rel_path}: IO error reading expected error: {e}"),
+                    0,
+                );
+            }
+        };
+
+        let llm_mock_mode = conformance_llm_mock_mode(harn_file);
+        let testbench_config = conformance_testbench_config(harn_file);
+        let run = match execute_conformance_source(
+            &source,
+            harn_file,
+            timeout_ms,
+            &llm_mock_mode,
+            &testbench_config,
+            options.cli_skill_dirs,
+        )
+        .await
+        {
+            Ok(run) => run,
+            Err(error) => {
+                return ConformanceCaseEvaluation::fail(format!("{rel_path}: {error}"), 0);
+            }
+        };
+        let duration_ms = run.duration_ms;
+
+        return match run.execution {
+            ConformanceExecution::Completed(Err(ref err)) if error_matches(err, &expected_error) => {
+                if options.differential_optimizations {
+                    if let Err(error) = verify_unoptimized_conformance_subprocess(
+                        harn_file,
+                        timeout_ms,
+                        options.cli_skill_dirs,
+                    )
+                    .await
+                    {
+                        return ConformanceCaseEvaluation::fail(
+                            format!("{rel_path}: {error}"),
+                            duration_ms,
+                        );
+                    }
+                }
+                ConformanceCaseEvaluation::pass(duration_ms)
+            }
+            ConformanceExecution::Completed(Err(err)) => ConformanceCaseEvaluation::fail(
+                format!(
+                    "{rel_path}:\n  expected error containing: {expected_error}\n  actual error: {err}"
+                ),
+                duration_ms,
+            ),
+            ConformanceExecution::Completed(Ok(_)) => ConformanceCaseEvaluation::fail(
+                format!("{rel_path}: expected error containing '{expected_error}', but succeeded"),
+                duration_ms,
+            ),
+            ConformanceExecution::TimedOut => ConformanceCaseEvaluation::fail(
+                format!("{rel_path}: timed out after {timeout_ms}ms"),
+                timeout_ms,
+            ),
+        };
+    }
+
+    ConformanceCaseEvaluation::fail(format!("{rel_path}: missing .expected or .error file"), 0)
 }
 
 pub(crate) async fn run_conformance_tests(
@@ -562,13 +954,34 @@ pub(crate) async fn run_conformance_tests(
     };
     let dir_path = PathBuf::from(dir);
     if !dir_path.exists() {
-        eprintln!("Directory not found: {dir}");
+        if options.json {
+            let envelope: JsonEnvelope<ConformanceJsonReport> = JsonEnvelope::err(
+                CONFORMANCE_TEST_SCHEMA_VERSION,
+                "conformance_directory_not_found",
+                format!("Directory not found: {dir}"),
+            );
+            println!("{}", json_envelope::to_string_pretty(&envelope));
+        } else {
+            eprintln!("Directory not found: {dir}");
+        }
         process::exit(1);
     }
-    let suite_root = canonicalize_or_err(&dir_path).unwrap_or_else(|error| {
-        eprintln!("{error}");
-        process::exit(1);
-    });
+    let suite_root = match canonicalize_or_err(&dir_path) {
+        Ok(path) => path,
+        Err(error) => {
+            if options.json {
+                let envelope: JsonEnvelope<ConformanceJsonReport> = JsonEnvelope::err(
+                    CONFORMANCE_TEST_SCHEMA_VERSION,
+                    "conformance_directory_error",
+                    error,
+                );
+                println!("{}", json_envelope::to_string_pretty(&envelope));
+            } else {
+                eprintln!("{error}");
+            }
+            process::exit(1);
+        }
+    };
 
     let suite_start = std::time::Instant::now();
 
@@ -577,276 +990,187 @@ pub(crate) async fn run_conformance_tests(
     let mut skipped = 0;
     let mut skipped_summary: Vec<(String, String)> = Vec::new();
     let mut errors: Vec<String> = Vec::new();
+    let mut json_results: Vec<ConformanceJsonResult> = Vec::new();
+    let mut json_summary = ConformanceJsonSummary::default();
     let mut junit_results: Vec<(String, bool, String, u64)> = Vec::new();
 
-    let harn_files =
-        resolve_conformance_selection(&suite_root, selection).unwrap_or_else(|error| {
-            eprintln!("{error}");
+    let harn_files = match resolve_conformance_selection(&suite_root, selection) {
+        Ok(files) => files,
+        Err(error) => {
+            if options.json {
+                let envelope: JsonEnvelope<ConformanceJsonReport> = JsonEnvelope::err(
+                    CONFORMANCE_TEST_SCHEMA_VERSION,
+                    "conformance_selection_error",
+                    error,
+                );
+                println!("{}", json_envelope::to_string_pretty(&envelope));
+            } else {
+                eprintln!("{error}");
+            }
             process::exit(1);
-        });
+        }
+    };
 
-    for harn_file in &harn_files {
+    let selected_harn_files: Vec<(PathBuf, String)> = harn_files
+        .into_iter()
+        .filter_map(|harn_file| {
+            let rel_path = harn_file.strip_prefix(&suite_root).unwrap_or(&harn_file);
+            let rel_path = logical_path(rel_path);
+            conformance_filter_matches(&rel_path, filter).then_some((harn_file, rel_path))
+        })
+        .collect();
+
+    for (harn_file, rel_path) in &selected_harn_files {
         let expected_file = harn_file.with_extension("expected");
         let error_file = harn_file.with_extension("error");
 
-        let rel_path = harn_file.strip_prefix(&suite_root).unwrap_or(harn_file);
-        let rel_path = logical_path(rel_path);
-
-        // Filter syntax: `re:<regex>`, `foo|bar` (OR), `*_runtime*` (glob),
-        // or plain substring match.
-        if let Some(pattern) = filter {
-            let matched = if let Some(re_pat) = pattern.strip_prefix("re:") {
-                Regex::new(re_pat).is_ok_and(|re| re.is_match(&rel_path))
-            } else if pattern.contains('|') {
-                pattern.split('|').any(|p| rel_path.contains(p.trim()))
-            } else if pattern.contains('*') || pattern.contains('?') {
-                let escaped = regex::escape(pattern)
-                    .replace(r"\*", ".*")
-                    .replace(r"\?", ".");
-                Regex::new(&escaped).is_ok_and(|re| re.is_match(&rel_path))
-            } else {
-                rel_path.contains(pattern)
-            };
-            if !matched {
+        // Honor `// @xfail: <reason>` markers in the first 50 lines of a
+        // conformance test. Text mode preserves the historical skip behavior.
+        // JSON mode executes the test so stale markers become
+        // `xfail_unexpected_pass` failures that force marker cleanup.
+        let xfail_reason = read_xfail_marker(harn_file);
+        if !options.json {
+            if let Some(reason) = xfail_reason.as_ref() {
+                println!("  \x1b[33mSKIP\x1b[0m  {rel_path}  ({reason})");
+                skipped_summary.push((rel_path.clone(), reason.clone()));
+                skipped += 1;
                 continue;
             }
         }
 
-        // Honor `// @xfail: <reason>` markers in the first 50 lines of a
-        // conformance test. Skipped tests are reported but do not count as
-        // failures. Use sparingly, always with a tracking issue link.
-        if let Some(reason) = read_xfail_marker(harn_file) {
-            println!("  \x1b[33mSKIP\x1b[0m  {rel_path}  ({reason})");
-            skipped_summary.push((rel_path.clone(), reason));
-            skipped += 1;
+        if !expected_file.exists() && !error_file.exists() {
             continue;
         }
 
-        if expected_file.exists() {
-            let source = match fs::read_to_string(harn_file) {
-                Ok(s) => s,
-                Err(e) => {
-                    println!("  \x1b[31mFAIL\x1b[0m  {rel_path}");
-                    let msg = format!("{rel_path}: IO error reading source: {e}");
-                    errors.push(msg.clone());
-                    junit_results.push((rel_path, false, msg, 0));
-                    failed += 1;
-                    continue;
-                }
+        let evaluation = evaluate_conformance_case(
+            harn_file,
+            &expected_file,
+            &error_file,
+            rel_path,
+            timeout_ms,
+            &options,
+        )
+        .await;
+
+        if options.json {
+            let outcome = match (&xfail_reason, evaluation.passed) {
+                (Some(_), true) => ConformanceJsonOutcome::XfailUnexpectedPass,
+                (Some(_), false) => ConformanceJsonOutcome::XfailExpected,
+                (None, true) => ConformanceJsonOutcome::Pass,
+                (None, false) => ConformanceJsonOutcome::Fail,
             };
-            let expected = match fs::read_to_string(&expected_file) {
-                Ok(s) => normalize_expected_output(s.trim_end()),
-                Err(e) => {
-                    println!("  \x1b[31mFAIL\x1b[0m  {rel_path}");
-                    let msg = format!("{rel_path}: IO error reading expected: {e}");
-                    errors.push(msg.clone());
-                    junit_results.push((rel_path, false, msg, 0));
-                    failed += 1;
-                    continue;
+            json_summary.record(outcome);
+
+            let message = match (
+                outcome,
+                xfail_reason.as_deref(),
+                evaluation.message.as_deref(),
+            ) {
+                (ConformanceJsonOutcome::XfailUnexpectedPass, Some(reason), _) => {
+                    Some(format!("xfail marker is stale: {reason}"))
                 }
+                (ConformanceJsonOutcome::XfailExpected, Some(reason), Some(message)) => {
+                    Some(format!("expected failure ({reason}): {message}"))
+                }
+                (ConformanceJsonOutcome::XfailExpected, Some(reason), None) => {
+                    Some(format!("expected failure ({reason})"))
+                }
+                (_, _, Some(message)) => Some(message.to_string()),
+                _ => None,
             };
 
-            let llm_mock_mode = conformance_llm_mock_mode(harn_file);
-            let testbench_config = conformance_testbench_config(harn_file);
-            let run = match execute_conformance_source(
-                &source,
-                harn_file,
-                timeout_ms,
-                &llm_mock_mode,
-                &testbench_config,
-                options.cli_skill_dirs,
-            )
-            .await
-            {
-                Ok(run) => run,
-                Err(error) => {
-                    println!("  \x1b[31mFAIL\x1b[0m  {rel_path}");
-                    let msg = format!("{rel_path}: {error}");
-                    errors.push(msg.clone());
-                    junit_results.push((rel_path, false, msg, 0));
-                    failed += 1;
-                    continue;
-                }
-            };
-            let duration_ms = run.duration_ms;
+            let junit_passed = matches!(
+                outcome,
+                ConformanceJsonOutcome::Pass | ConformanceJsonOutcome::XfailExpected
+            );
+            junit_results.push((
+                rel_path.clone(),
+                junit_passed,
+                if junit_passed {
+                    String::new()
+                } else {
+                    message.clone().unwrap_or_default()
+                },
+                evaluation.duration_ms,
+            ));
+            json_results.push(ConformanceJsonResult {
+                name: rel_path.clone(),
+                outcome,
+                duration_ms: evaluation.duration_ms,
+                message,
+                diagnostic_codes: evaluation.diagnostic_codes,
+            });
+            continue;
+        }
 
-            match run.execution {
-                ConformanceExecution::Completed(Ok(output)) => {
-                    let actual = normalize_actual_output(output.trim_end());
-                    if actual == expected {
-                        if options.differential_optimizations {
-                            if let Err(error) = verify_unoptimized_conformance_subprocess(
-                                harn_file,
-                                timeout_ms,
-                                options.cli_skill_dirs,
-                            )
-                            .await
-                            {
-                                println!("  \x1b[31mFAIL\x1b[0m  {rel_path}");
-                                let msg = format!("{rel_path}: {error}");
-                                errors.push(msg.clone());
-                                junit_results.push((rel_path, false, msg, duration_ms));
-                                failed += 1;
-                                continue;
-                            }
-                        }
-                        if show_timing {
-                            println!("  \x1b[32mPASS\x1b[0m  {rel_path} ({duration_ms} ms)");
-                        } else {
-                            println!("  \x1b[32mPASS\x1b[0m  {rel_path}");
-                        }
-                        junit_results.push((rel_path, true, String::new(), duration_ms));
-                        passed += 1;
-                    } else {
-                        if show_timing {
-                            println!("  \x1b[31mFAIL\x1b[0m  {rel_path} ({duration_ms} ms)");
-                        } else {
-                            println!("  \x1b[31mFAIL\x1b[0m  {rel_path}");
-                        }
-                        let diff = simple_diff(&expected, &actual);
-                        let msg = if options.verbose {
-                            format!(
-                                "{rel_path}:\n  expected:\n    {}\n  actual:\n    {}\n  diff:\n{diff}",
-                                expected.lines().collect::<Vec<_>>().join("\n    "),
-                                actual.lines().collect::<Vec<_>>().join("\n    "),
-                            )
-                        } else {
-                            format!("{rel_path}:\n{diff}")
-                        };
-                        errors.push(msg.clone());
-                        junit_results.push((rel_path, false, msg, duration_ms));
-                        failed += 1;
-                    }
-                }
-                ConformanceExecution::Completed(Err(e)) => {
-                    if options.verbose {
-                        println!("  \x1b[31mFAIL\x1b[0m  {rel_path} ({duration_ms} ms)");
-                    } else {
-                        println!("  \x1b[31mFAIL\x1b[0m  {rel_path}");
-                    }
-                    let msg = format!("{rel_path}: runtime error: {e}");
-                    errors.push(msg.clone());
-                    junit_results.push((rel_path, false, msg, duration_ms));
-                    failed += 1;
-                }
-                ConformanceExecution::TimedOut => {
-                    println!("  \x1b[31mFAIL\x1b[0m  {rel_path}");
-                    let msg = format!("{rel_path}: timed out after {timeout_ms}ms");
-                    errors.push(msg.clone());
-                    junit_results.push((rel_path, false, msg, timeout_ms));
-                    failed += 1;
-                }
+        if evaluation.passed {
+            if show_timing {
+                println!(
+                    "  \x1b[32mPASS\x1b[0m  {rel_path} ({} ms)",
+                    evaluation.duration_ms
+                );
+            } else {
+                println!("  \x1b[32mPASS\x1b[0m  {rel_path}");
             }
-        } else if error_file.exists() {
-            let source = match fs::read_to_string(harn_file) {
-                Ok(s) => s,
-                Err(e) => {
-                    println!("  \x1b[31mFAIL\x1b[0m  {rel_path}");
-                    let msg = format!("{rel_path}: IO error reading source: {e}");
-                    errors.push(msg.clone());
-                    junit_results.push((rel_path, false, msg, 0));
-                    failed += 1;
-                    continue;
-                }
-            };
-            let expected_error = match fs::read_to_string(&error_file) {
-                Ok(s) => s.trim_end().to_string(),
-                Err(e) => {
-                    println!("  \x1b[31mFAIL\x1b[0m  {rel_path}");
-                    let msg = format!("{rel_path}: IO error reading expected error: {e}");
-                    errors.push(msg.clone());
-                    junit_results.push((rel_path, false, msg, 0));
-                    failed += 1;
-                    continue;
-                }
-            };
-
-            let llm_mock_mode = conformance_llm_mock_mode(harn_file);
-            let testbench_config = conformance_testbench_config(harn_file);
-            let run = match execute_conformance_source(
-                &source,
-                harn_file,
-                timeout_ms,
-                &llm_mock_mode,
-                &testbench_config,
-                options.cli_skill_dirs,
-            )
-            .await
-            {
-                Ok(run) => run,
-                Err(error) => {
-                    println!("  \x1b[31mFAIL\x1b[0m  {rel_path}");
-                    let msg = format!("{rel_path}: {error}");
-                    errors.push(msg.clone());
-                    junit_results.push((rel_path, false, msg, 0));
-                    failed += 1;
-                    continue;
-                }
-            };
-            let duration_ms = run.duration_ms;
-
-            match run.execution {
-                ConformanceExecution::Completed(Err(ref err))
-                    if error_matches(err, &expected_error) =>
-                {
-                    if options.differential_optimizations {
-                        if let Err(error) = verify_unoptimized_conformance_subprocess(
-                            harn_file,
-                            timeout_ms,
-                            options.cli_skill_dirs,
-                        )
-                        .await
-                        {
-                            println!("  \x1b[31mFAIL\x1b[0m  {rel_path}");
-                            let msg = format!("{rel_path}: {error}");
-                            errors.push(msg.clone());
-                            junit_results.push((rel_path, false, msg, duration_ms));
-                            failed += 1;
-                            continue;
-                        }
-                    }
-                    if options.verbose {
-                        println!("  \x1b[32mPASS\x1b[0m  {rel_path} ({duration_ms} ms)");
-                    } else {
-                        println!("  \x1b[32mPASS\x1b[0m  {rel_path}");
-                    }
-                    junit_results.push((rel_path, true, String::new(), duration_ms));
-                    passed += 1;
-                }
-                ConformanceExecution::Completed(Err(err)) => {
-                    if options.verbose {
-                        println!("  \x1b[31mFAIL\x1b[0m  {rel_path} ({duration_ms} ms)");
-                    } else {
-                        println!("  \x1b[31mFAIL\x1b[0m  {rel_path}");
-                    }
-                    let msg = format!(
-                        "{rel_path}:\n  expected error containing: {expected_error}\n  actual error: {err}"
-                    );
-                    errors.push(msg.clone());
-                    junit_results.push((rel_path, false, msg, duration_ms));
-                    failed += 1;
-                }
-                ConformanceExecution::Completed(Ok(_)) => {
-                    println!("  \x1b[31mFAIL\x1b[0m  {rel_path}");
-                    let msg = format!(
-                        "{rel_path}: expected error containing '{expected_error}', but succeeded"
-                    );
-                    errors.push(msg.clone());
-                    junit_results.push((rel_path, false, msg, duration_ms));
-                    failed += 1;
-                }
-                ConformanceExecution::TimedOut => {
-                    println!("  \x1b[31mFAIL\x1b[0m  {rel_path}");
-                    let msg = format!("{rel_path}: timed out after {timeout_ms}ms");
-                    errors.push(msg.clone());
-                    junit_results.push((rel_path, false, msg, timeout_ms));
-                    failed += 1;
-                }
+            junit_results.push((
+                rel_path.clone(),
+                true,
+                String::new(),
+                evaluation.duration_ms,
+            ));
+            passed += 1;
+        } else {
+            if show_timing {
+                println!(
+                    "  \x1b[31mFAIL\x1b[0m  {rel_path} ({} ms)",
+                    evaluation.duration_ms
+                );
+            } else {
+                println!("  \x1b[31mFAIL\x1b[0m  {rel_path}");
             }
+            let msg = evaluation
+                .message
+                .unwrap_or_else(|| format!("{rel_path}: failed without diagnostic message"));
+            errors.push(msg.clone());
+            junit_results.push((rel_path.clone(), false, msg, evaluation.duration_ms));
+            failed += 1;
         }
     }
 
     let total_duration_ms = suite_start.elapsed().as_millis() as u64;
+
+    if options.json {
+        if let Some(path) = junit_path {
+            write_junit_xml(path, &junit_results, false);
+        }
+        let snapshot_key = conformance_snapshot_key(&suite_root, &selected_harn_files);
+        let ok = json_summary.is_success();
+        let error = (!ok).then(|| JsonError {
+            code: "conformance_failed".to_string(),
+            message: "one or more conformance tests failed or unexpectedly passed an xfail marker"
+                .to_string(),
+            details: serde_json::json!({
+                "fail": json_summary.fail,
+                "xfail_unexpected_pass": json_summary.xfail_unexpected_pass,
+            }),
+        });
+        let envelope = JsonEnvelope {
+            schema_version: CONFORMANCE_TEST_SCHEMA_VERSION,
+            ok,
+            data: Some(ConformanceJsonReport {
+                snapshot_key,
+                results: json_results,
+                summary: json_summary,
+            }),
+            error,
+            warnings: Vec::new(),
+        };
+        println!("{}", json_envelope::to_string_pretty(&envelope));
+        if !ok {
+            process::exit(1);
+        }
+        return;
+    }
 
     println!();
     let total = passed + failed + skipped;
@@ -897,7 +1221,7 @@ pub(crate) async fn run_conformance_tests(
     }
 
     if let Some(path) = junit_path {
-        write_junit_xml(path, &junit_results);
+        write_junit_xml(path, &junit_results, true);
     }
 
     if !errors.is_empty() {
