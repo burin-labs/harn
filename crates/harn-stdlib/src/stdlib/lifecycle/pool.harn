@@ -1,5 +1,5 @@
 /**
- * std/lifecycle/pool — named, concurrency-bounded agent thread pools (PL-01/PL-02).
+ * std/lifecycle/pool — named, concurrency-bounded agent thread pools (PL-01/PL-03).
  *
  * Foundation for the agent pool epic (#1883). Provides:
  *   - pool_create({...}) to allocate a named pool with a max_concurrent cap
@@ -9,11 +9,11 @@
  *   - pool_wait(handle) to block until a submitted task reaches a terminal state
  *
  * Queue strategies are selected with the QueueStrategy descriptors below.
- * Backpressure policies, channel composition, and durable state arrive in
- * later pool tickets.
+ * Backpressure policies are selected with Backpressure descriptors; channel
+ * composition and durable state arrive in later pool tickets.
  *
  * Import:
- *   import { pool_create, pool_get, pool_list, pool_wait, fifo } from "std/lifecycle/pool"
+ *   import { Backpressure, pool_create, pool_get, pool_list, pool_wait, fifo } from "std/lifecycle/pool"
  */
 fn __queue_strategy(kind, options = nil) {
   let base = {_type: "queue_strategy", kind: kind}
@@ -88,12 +88,73 @@ pub fn fair_round_robin(key = "key") {
  * @example: let QueueStrategy = QueueStrategy()
  */
 pub fn QueueStrategy() {
-  return {
-    fifo: fifo(),
-    priority: priority(),
-    lifo: lifo(),
-    fair_round_robin: fair_round_robin,
+  return {fifo: fifo(), priority: priority(), lifo: lifo(), fair_round_robin: fair_round_robin}
+}
+
+fn __backpressure(kind, options = nil) {
+  let base = {_type: "backpressure", kind: kind}
+  if options == nil {
+    return base
   }
+  return base + options
+}
+
+/**
+ * backpressure_queue returns a bounded queue backpressure descriptor.
+ *
+ * `on_full` may be `"block_submitter"`, `"drop_oldest"`, `"drop_newest"`,
+ * or `"fail_submitter"`.
+ *
+ * @effects: []
+ * @allocation: heap
+ * @errors: []
+ * @api_stability: experimental
+ * @example: pool_create({backpressure: backpressure_queue(100, "block_submitter")})
+ */
+pub fn backpressure_queue(max_depth, on_full = "block_submitter") {
+  return __backpressure("queue", {max_depth: max_depth, on_full: on_full})
+}
+
+/**
+ * fail_fast returns a policy descriptor that rejects submissions when no
+ * worker slot is immediately available.
+ *
+ * @effects: []
+ * @allocation: heap
+ * @errors: []
+ * @api_stability: experimental
+ * @example: pool_create({backpressure: fail_fast()})
+ */
+pub fn fail_fast() {
+  return __backpressure("fail_fast")
+}
+
+/**
+ * ring_buffer returns a bounded policy that evicts the oldest queued task
+ * when a new submission arrives after the queue reaches capacity.
+ *
+ * @effects: []
+ * @allocation: heap
+ * @errors: []
+ * @api_stability: experimental
+ * @example: pool_create({backpressure: ring_buffer(10)})
+ */
+pub fn ring_buffer(capacity) {
+  return __backpressure("ring_buffer", {capacity: capacity})
+}
+
+/**
+ * Backpressure returns the named backpressure namespace as a dict for
+ * callers that prefer dotted local access.
+ *
+ * @effects: []
+ * @allocation: heap
+ * @errors: []
+ * @api_stability: experimental
+ * @example: let Backpressure = Backpressure()
+ */
+pub fn Backpressure() {
+  return {queue: backpressure_queue, fail_fast: fail_fast(), ring_buffer: ring_buffer}
 }
 
 fn __pool_attach_methods(snapshot) {

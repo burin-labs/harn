@@ -6,9 +6,9 @@ entire pipeline, session, or tenant — for example, capping how many PR-review
 agents run at once, fairly draining a per-customer queue, or throttling a
 provider's API tier.
 
-This is the PL-01/PL-02 foundation for the agent-pool epic
+This is the PL-01/PL-03 foundation for the agent-pool epic
 ([#1883](https://github.com/burin-labs/harn/issues/1883)). Queue strategies
-ship with the pool surface; backpressure policies, channel composition,
+and backpressure policies ship with the pool surface; channel composition,
 durable state, and OTel spans land in later pool tickets.
 
 ```harn,ignore
@@ -38,7 +38,7 @@ pool errors; use `pool_get(name)` to reuse an existing one.
 | `name`           | string | auto-generated   | Visible in `pool_list()` and snapshots.        |
 | `max_concurrent` | int    | `1`              | Hard cap on simultaneously running tasks.      |
 | `queue`          | dict/string | `priority()` | Queue strategy descriptor. |
-| `backpressure`   | any    | `nil`            | Reserved for [#1888](https://github.com/burin-labs/harn/issues/1888). |
+| `backpressure`   | dict/string | `nil`        | Backpressure descriptor. `nil` keeps the queue unbounded. |
 | `priority`       | any    | `nil`            | Reserved for later priority callbacks. |
 
 The returned handle is a dict with `_type: "pool"`, plus `submit`, `size`, and
@@ -57,7 +57,9 @@ time options:
 | custom key | string | nil     | When using `fair_round_robin("tenant_id")`, pass `tenant_id` here. |
 
 Each call returns a task handle (`_type: "pool_task"`) with `id`, `pool`,
-`pool_id`, `submitted_at`, and the optional `key`.
+`pool_id`, `submitted_at`, `status`, and the optional `key`. Drop policies
+return handles whose terminal snapshot has `status: "rejected"`,
+`rejection_reason`, and `rejection_policy`.
 
 ## Queue Strategies
 
@@ -81,6 +83,33 @@ let pool = pool_create({
 })
 ```
 
+## Backpressure
+
+`std/lifecycle/pool` exports three backpressure factories and the
+`Backpressure()` namespace helper:
+
+| Function | Behavior |
+|---|---|
+| `backpressure_queue(max_depth, on_full = "block_submitter")` | Bounds queued tasks. `on_full` is `block_submitter`, `drop_oldest`, `drop_newest`, or `fail_submitter`. |
+| `fail_fast()` | Rejects any submit that cannot start immediately; no queue is retained. |
+| `ring_buffer(capacity)` | Retains the newest queued tasks by dropping the oldest queued task on overflow. |
+
+```harn,ignore
+import { Backpressure, pool_create } from "std/lifecycle/pool"
+
+let backpressure = Backpressure()
+let pool = pool_create({
+  name: "review",
+  max_concurrent: 2,
+  backpressure: backpressure.queue(100, "fail_submitter"),
+})
+```
+
+`fail_submitter` raises `HARN-POL-001`; `fail_fast` raises
+`HARN-POL-002`. `drop_oldest`, `drop_newest`, and `ring_buffer` emit a
+`pool_drop` audit event on the `lifecycle.pool.audit` EventLog topic with
+the pool name, task ids, policy, queue depth, and max depth.
+
 ## Waiting
 
 `pool_wait(handle)` blocks until the task reaches a terminal state and
@@ -100,7 +129,8 @@ let outcomes = pool_wait(handles)  // or: wait_agent(handles)
 - `pool.size()` — count of active + queued tasks (does not include
   terminal-state tasks).
 - `pool.snapshot()` — full dict including `active`, `queued`,
-  `completed`, `failed`, `total`, the per-task list, and the original
+  `completed`, `failed`, `rejected`, `blocked_submitters`, `total`,
+  the selected `backpressure`, the per-task list, and the original
   `config` so observability stacks can show "what was configured".
 - `pool_get(name_or_id)` — lookup by name; returns `nil` when missing.
 - `pool_list()` — every pool registered on the current runtime.

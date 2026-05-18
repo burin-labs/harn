@@ -2285,6 +2285,32 @@ Three concentric surfaces:
   to host worker primitives; methods whose backing registries are not yet
   present return a typed `{status: "unsupported", method, reason}` result.
 
+### Agent Pools
+
+`std/lifecycle/pool` provides named, concurrency-bounded pools:
+
+```harn
+import { Backpressure, fair_round_robin, pool_create, pool_wait } from "std/lifecycle/pool"
+
+let backpressure = Backpressure()
+let pool = pool_create({
+  name: "reviews",
+  max_concurrent: 2,
+  queue: fair_round_robin("tenant_id"),
+  backpressure: backpressure.queue(100, "fail_submitter"),
+})
+
+let handle = pool.submit({ -> agent_loop("review", {provider: "mock"}) }, {tenant_id: "acme"})
+let result = pool_wait(handle)
+```
+
+Backpressure descriptors are `backpressure.queue(max_depth, on_full)`,
+`backpressure.fail_fast`, and `backpressure.ring_buffer(capacity)`.
+`on_full` accepts `block_submitter`, `drop_oldest`, `drop_newest`, or
+`fail_submitter`. Drop policies return rejected task handles and emit
+`pool_drop` audit events on `lifecycle.pool.audit`; fail paths raise
+`HARN-POL-001` or `HARN-POL-002`.
+
 ```harn
 register_session_hook("user_prompt_submit", { event ->
   if to_string(event?.prompt ?? "").contains("secret") {

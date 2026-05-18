@@ -12,7 +12,7 @@
 //!     categories,
 //!     [
 //!         "TYP", "PAR", "NAM", "CAP", "LLM", "ORC", "STD", "PRM",
-//!         "MOD", "LNT", "FMT", "IMP", "OWN", "RCV", "MAT",
+//!         "MOD", "LNT", "FMT", "IMP", "OWN", "RCV", "MAT", "POL",
 //!     ],
 //! );
 //! ```
@@ -38,6 +38,7 @@ pub enum Category {
     Own,
     Rcv,
     Mat,
+    Pol,
 }
 
 impl Category {
@@ -57,6 +58,7 @@ impl Category {
         Category::Own,
         Category::Rcv,
         Category::Mat,
+        Category::Pol,
     ];
 
     pub const fn as_str(self) -> &'static str {
@@ -76,6 +78,7 @@ impl Category {
             Category::Own => "OWN",
             Category::Rcv => "RCV",
             Category::Mat => "MAT",
+            Category::Pol => "POL",
         }
     }
 }
@@ -301,6 +304,8 @@ diagnostic_codes! {
     NonExhaustiveMatch, "HARN-MAT-001", Mat, "match expression is not exhaustive";
     DuplicateMatchArm, "HARN-MAT-002", Mat, "match expression contains a duplicate arm";
     InvalidMatchPattern, "HARN-MAT-003", Mat, "match pattern is invalid";
+    PoolBackpressureFull, "HARN-POL-001", Pol, "pool backpressure rejected a submit";
+    PoolFailFastFull, "HARN-POL-002", Pol, "fail-fast pool has no immediate capacity";
 }
 
 impl Code {

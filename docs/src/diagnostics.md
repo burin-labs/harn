@@ -50,6 +50,7 @@ Repairs are tagged with a six-level safety class so `harn fix --apply --safety <
 | [`OWN`](#own--ownership-and-mutability) | Ownership and mutability | 4 |
 | [`RCV`](#rcv--error-recovery) | Error recovery | 3 |
 | [`MAT`](#mat--match-exhaustiveness) | Match exhaustiveness | 3 |
+| [`POL`](#pol--runtime-policies) | Runtime policies | 2 |
 
 ## TYP — Type checker
 
@@ -276,6 +277,13 @@ Repairs are tagged with a six-level safety class so `harn fix --apply --safety <
 | [`HARN-MAT-001`](#harn-mat-001) | match expression is not exhaustive | `match/add-missing-arms` | `scope-local` |
 | [`HARN-MAT-002`](#harn-mat-002) | match expression contains a duplicate arm | `match/remove-duplicate-arm` | `behavior-preserving` |
 | [`HARN-MAT-003`](#harn-mat-003) | match pattern is invalid | — | — |
+
+## POL — Runtime policies
+
+| Code | Summary | Repair | Safety |
+|---|---|---|---|
+| [`HARN-POL-001`](#harn-pol-001) | pool backpressure rejected a submit | — | — |
+| [`HARN-POL-002`](#harn-pol-002) | fail-fast pool has no immediate capacity | — | — |
 
 ## Code reference
 
@@ -4968,3 +4976,31 @@ Specifically: match pattern is invalid.
 This code is stable. Its identifier, category, and meaning will not change
 without a deprecation cycle. Cross-language tooling and IDE integrations can
 dispatch on it directly.
+
+### `HARN-POL-001`
+
+**Category:** `POL` (Runtime policies) &nbsp;·&nbsp; **API stability:** `stable`
+
+pool backpressure rejected a submit
+
+`pool.submit(...)` attempted to enqueue work into a bounded pool whose
+`backpressure` policy was already full and configured with
+`on_full: "fail_submitter"`.
+
+Increase the queue depth, choose a different `on_full` policy, wait for
+existing task handles to drain, or catch the error and retry from your
+own orchestration policy.
+
+### `HARN-POL-002`
+
+**Category:** `POL` (Runtime policies) &nbsp;·&nbsp; **API stability:** `stable`
+
+fail-fast pool has no immediate capacity
+
+`pool.submit(...)` targeted a pool configured with
+`Backpressure().fail_fast`, but all worker slots were already occupied.
+Fail-fast pools do not queue work.
+
+Catch the error if rejection is expected, raise `max_concurrent`, or use
+`Backpressure().queue(...)` when callers should wait, drop, or retain a
+bounded queue instead.

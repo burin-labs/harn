@@ -375,6 +375,7 @@ const fn category_title(category: Category) -> &'static str {
         Category::Own => "Ownership and mutability",
         Category::Rcv => "Error recovery",
         Category::Mat => "Match exhaustiveness",
+        Category::Pol => "Runtime policies",
     }
 }
 

@@ -1,20 +1,27 @@
-//! Named agent thread pools (PL-01/PL-02).
+//! Named agent thread pools (PL-01/PL-03).
 //!
 //! Foundation for the agent pool epic (#1883). Provides a thread-local
 //! registry of named pools that bound the number of concurrent Harn
 //! closure executions and queue excess submissions. Queue strategy ships
-//! here; backpressure, durability, and channel composition arrive in later
-//! sub-tickets (#1888..#1893).
+//! here, with bounded backpressure policies layered on the single submit
+//! path. Durability and channel composition arrive in later sub-tickets
+//! (#1889..#1893).
 
 use std::cell::RefCell;
 use std::collections::{BTreeMap, HashMap, VecDeque};
 use std::rc::Rc;
+use std::sync::Arc;
 
+use crate::event_log::{
+    active_event_log, install_memory_for_current_thread, EventLog, LogEvent, Topic,
+};
 use crate::stdlib::registration::{
     async_builtin, register_builtin_group, AsyncBuiltin, BuiltinGroup, SyncBuiltin,
 };
 use crate::value::{VmClosure, VmError, VmValue};
 use crate::vm::{Vm, VmBuiltinArity};
+use harn_parser::diagnostic_codes::Code;
+use serde_json::json;
 
 /// Default `max_concurrent` when a pool is created without one.
 const DEFAULT_MAX_CONCURRENT: usize = 1;
@@ -24,6 +31,8 @@ const DEFAULT_MAX_CONCURRENT: usize = 1;
 /// handles to `__pool_wait` (see `agent/workers.harn`).
 const POOL_TYPE: &str = "pool";
 const POOL_TASK_TYPE: &str = "pool_task";
+const POOL_AUDIT_TOPIC: &str = "lifecycle.pool.audit";
+const POOL_EVENT_LOG_QUEUE_DEPTH: usize = 128;
 
 #[derive(Clone)]
 struct PendingTask {
@@ -48,6 +57,8 @@ struct TaskState {
     finished_at: Option<String>,
     result: Option<VmValue>,
     error: Option<String>,
+    rejection_reason: Option<String>,
+    rejection_policy: Option<String>,
     /// Senders wake every `pool_wait` future the moment the task reaches
     /// a terminal state. The Sender side is dropped to fire the signal.
     waiters: Vec<tokio::sync::oneshot::Sender<()>>,
@@ -59,6 +70,7 @@ enum TaskStatus {
     Running,
     Completed,
     Failed,
+    Rejected,
 }
 
 impl TaskStatus {
@@ -68,11 +80,15 @@ impl TaskStatus {
             TaskStatus::Running => "running",
             TaskStatus::Completed => "completed",
             TaskStatus::Failed => "failed",
+            TaskStatus::Rejected => "rejected",
         }
     }
 
     fn is_terminal(self) -> bool {
-        matches!(self, TaskStatus::Completed | TaskStatus::Failed)
+        matches!(
+            self,
+            TaskStatus::Completed | TaskStatus::Failed | TaskStatus::Rejected
+        )
     }
 }
 
@@ -84,9 +100,11 @@ struct PoolEntry {
     submit_counter: u64,
     queue: VecDeque<PendingTask>,
     queue_strategy: QueueStrategy,
+    backpressure: BackpressureStrategy,
     round_robin_after: Option<String>,
     active: HashMap<String, Rc<RefCell<TaskState>>>,
     tasks: BTreeMap<String, Rc<RefCell<TaskState>>>,
+    space_waiters: Vec<tokio::sync::oneshot::Sender<()>>,
     /// Optional per-create user-supplied config (queue strategy, priority
     /// fn, backpressure). Queue strategy is evaluated by this module;
     /// later pool tickets wire the other config knobs.
@@ -99,6 +117,70 @@ enum QueueStrategy {
     Priority,
     Lifo,
     FairRoundRobin { key_field: String },
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+enum BackpressureStrategy {
+    Unbounded,
+    Queue {
+        max_depth: usize,
+        on_full: QueueOnFullPolicy,
+    },
+    FailFast,
+    RingBuffer {
+        capacity: usize,
+    },
+}
+
+impl BackpressureStrategy {
+    fn name(&self) -> &'static str {
+        match self {
+            BackpressureStrategy::Unbounded => "unbounded",
+            BackpressureStrategy::Queue { .. } => "queue",
+            BackpressureStrategy::FailFast => "fail_fast",
+            BackpressureStrategy::RingBuffer { .. } => "ring_buffer",
+        }
+    }
+
+    fn max_depth(&self) -> Option<usize> {
+        match self {
+            BackpressureStrategy::Queue { max_depth, .. } => Some(*max_depth),
+            BackpressureStrategy::RingBuffer { capacity } => Some(*capacity),
+            _ => None,
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum QueueOnFullPolicy {
+    BlockSubmitter,
+    DropOldest,
+    DropNewest,
+    FailSubmitter,
+}
+
+impl QueueOnFullPolicy {
+    fn as_str(self) -> &'static str {
+        match self {
+            QueueOnFullPolicy::BlockSubmitter => "block_submitter",
+            QueueOnFullPolicy::DropOldest => "drop_oldest",
+            QueueOnFullPolicy::DropNewest => "drop_newest",
+            QueueOnFullPolicy::FailSubmitter => "fail_submitter",
+        }
+    }
+}
+
+#[derive(Clone)]
+struct PoolDropAudit {
+    pool_id: String,
+    pool_name: String,
+    task_id: String,
+    replacement_task_id: Option<String>,
+    reason: String,
+    policy: String,
+    queue_depth: usize,
+    max_depth: Option<usize>,
+    occurred_at: String,
 }
 
 impl QueueStrategy {
@@ -309,6 +391,89 @@ fn parse_queue_strategy_name(name: &str) -> Result<QueueStrategy, VmError> {
     }
 }
 
+fn parse_backpressure(opts: &BTreeMap<String, VmValue>) -> Result<BackpressureStrategy, VmError> {
+    let Some(value) = opts.get("backpressure") else {
+        return Ok(BackpressureStrategy::Unbounded);
+    };
+    match value {
+        VmValue::Nil => Ok(BackpressureStrategy::Unbounded),
+        VmValue::String(text) => parse_backpressure_name(text),
+        VmValue::Dict(map) => {
+            let kind = map
+                .get("kind")
+                .or_else(|| map.get("strategy"))
+                .map(VmValue::display)
+                .filter(|name| !name.is_empty())
+                .ok_or_else(|| {
+                    VmError::Runtime("pool_create: backpressure missing kind".to_string())
+                })?;
+            match kind.as_str() {
+                "queue" => {
+                    let max_depth = parse_positive_usize(
+                        map.get("max_depth").or_else(|| map.get("capacity")),
+                        "pool_create: backpressure.max_depth",
+                    )?;
+                    let on_full = parse_on_full_policy(map.get("on_full"))?;
+                    Ok(BackpressureStrategy::Queue { max_depth, on_full })
+                }
+                "ring_buffer" => {
+                    let capacity = parse_positive_usize(
+                        map.get("capacity").or_else(|| map.get("max_depth")),
+                        "pool_create: backpressure.capacity",
+                    )?;
+                    Ok(BackpressureStrategy::RingBuffer { capacity })
+                }
+                _ => parse_backpressure_name(&kind),
+            }
+        }
+        other => Err(VmError::Runtime(format!(
+            "pool_create: backpressure must be a policy dict or string (got {})",
+            other.type_name()
+        ))),
+    }
+}
+
+fn parse_backpressure_name(name: &str) -> Result<BackpressureStrategy, VmError> {
+    match name {
+        "unbounded" => Ok(BackpressureStrategy::Unbounded),
+        "fail_fast" => Ok(BackpressureStrategy::FailFast),
+        other => Err(VmError::Runtime(format!(
+            "pool_create: unknown backpressure policy '{other}'"
+        ))),
+    }
+}
+
+fn parse_positive_usize(value: Option<&VmValue>, name: &str) -> Result<usize, VmError> {
+    match value {
+        Some(VmValue::Int(n)) if *n >= 1 => Ok(*n as usize),
+        Some(VmValue::Int(_)) => Err(VmError::Runtime(format!("{name} must be >= 1"))),
+        Some(other) => Err(VmError::Runtime(format!(
+            "{name} must be an int (got {})",
+            other.type_name()
+        ))),
+        None => Err(VmError::Runtime(format!("{name} is required"))),
+    }
+}
+
+fn parse_on_full_policy(value: Option<&VmValue>) -> Result<QueueOnFullPolicy, VmError> {
+    match value {
+        None | Some(VmValue::Nil) => Ok(QueueOnFullPolicy::BlockSubmitter),
+        Some(VmValue::String(text)) => match text.as_ref() {
+            "block_submitter" => Ok(QueueOnFullPolicy::BlockSubmitter),
+            "drop_oldest" => Ok(QueueOnFullPolicy::DropOldest),
+            "drop_newest" => Ok(QueueOnFullPolicy::DropNewest),
+            "fail_submitter" => Ok(QueueOnFullPolicy::FailSubmitter),
+            other => Err(VmError::Runtime(format!(
+                "pool_create: unknown backpressure on_full policy '{other}'"
+            ))),
+        },
+        Some(other) => Err(VmError::Runtime(format!(
+            "pool_create: backpressure.on_full must be a string (got {})",
+            other.type_name()
+        ))),
+    }
+}
+
 /// Public surface: snapshot dict mirroring the structure returned by
 /// `pool.snapshot()`. Pulled into its own helper so `__pool_create`,
 /// `__pool_snapshot`, `__pool_list`, and `__pool_get` stay byte-for-byte
@@ -324,10 +489,12 @@ fn pool_snapshot_value(pool: &PoolEntry) -> VmValue {
     let active: i64 = pool.active.len() as i64;
     let mut completed: i64 = 0;
     let mut failed: i64 = 0;
+    let mut rejected: i64 = 0;
     for task in pool.tasks.values() {
         match task.borrow().status {
             TaskStatus::Completed => completed += 1,
             TaskStatus::Failed => failed += 1,
+            TaskStatus::Rejected => rejected += 1,
             _ => {}
         }
     }
@@ -353,10 +520,19 @@ fn pool_snapshot_value(pool: &PoolEntry) -> VmValue {
     snapshot.insert("queued".to_string(), VmValue::Int(queued));
     snapshot.insert("completed".to_string(), VmValue::Int(completed));
     snapshot.insert("failed".to_string(), VmValue::Int(failed));
+    snapshot.insert("rejected".to_string(), VmValue::Int(rejected));
     snapshot.insert("total".to_string(), VmValue::Int(pool.tasks.len() as i64));
     snapshot.insert(
         "queue_strategy".to_string(),
         VmValue::String(Rc::from(pool.queue_strategy.name())),
+    );
+    snapshot.insert(
+        "backpressure".to_string(),
+        backpressure_snapshot_value(&pool.backpressure),
+    );
+    snapshot.insert(
+        "blocked_submitters".to_string(),
+        VmValue::Int(pool.space_waiters.len() as i64),
     );
     snapshot.insert("tasks".to_string(), VmValue::List(Rc::new(tasks)));
     if !pool.config.is_empty() {
@@ -366,6 +542,28 @@ fn pool_snapshot_value(pool: &PoolEntry) -> VmValue {
         );
     }
     VmValue::Dict(Rc::new(snapshot))
+}
+
+fn backpressure_snapshot_value(backpressure: &BackpressureStrategy) -> VmValue {
+    let mut value = BTreeMap::new();
+    value.insert(
+        "_type".to_string(),
+        VmValue::String(Rc::from("backpressure")),
+    );
+    value.insert(
+        "kind".to_string(),
+        VmValue::String(Rc::from(backpressure.name())),
+    );
+    if let Some(max_depth) = backpressure.max_depth() {
+        value.insert("max_depth".to_string(), VmValue::Int(max_depth as i64));
+    }
+    if let BackpressureStrategy::Queue { on_full, .. } = backpressure {
+        value.insert(
+            "on_full".to_string(),
+            VmValue::String(Rc::from(on_full.as_str())),
+        );
+    }
+    VmValue::Dict(Rc::new(value))
 }
 
 fn task_sort_key(task: &VmValue) -> String {
@@ -429,6 +627,18 @@ fn task_snapshot_value(task: &TaskState) -> VmValue {
             VmValue::String(Rc::from(error.as_str())),
         );
     }
+    if let Some(reason) = &task.rejection_reason {
+        entry.insert(
+            "rejection_reason".to_string(),
+            VmValue::String(Rc::from(reason.as_str())),
+        );
+    }
+    if let Some(policy) = &task.rejection_policy {
+        entry.insert(
+            "rejection_policy".to_string(),
+            VmValue::String(Rc::from(policy.as_str())),
+        );
+    }
     VmValue::Dict(Rc::new(entry))
 }
 
@@ -454,8 +664,30 @@ fn task_handle_value(task: &TaskState) -> VmValue {
         "submitted_at".to_string(),
         VmValue::String(Rc::from(task.submitted_at.as_str())),
     );
+    handle.insert(
+        "status".to_string(),
+        VmValue::String(Rc::from(task.status.as_str())),
+    );
     if let Some(key) = &task.key {
         handle.insert("key".to_string(), VmValue::String(Rc::from(key.as_str())));
+    }
+    if let Some(error) = &task.error {
+        handle.insert(
+            "error".to_string(),
+            VmValue::String(Rc::from(error.as_str())),
+        );
+    }
+    if let Some(reason) = &task.rejection_reason {
+        handle.insert(
+            "rejection_reason".to_string(),
+            VmValue::String(Rc::from(reason.as_str())),
+        );
+    }
+    if let Some(policy) = &task.rejection_policy {
+        handle.insert(
+            "rejection_policy".to_string(),
+            VmValue::String(Rc::from(policy.as_str())),
+        );
     }
     VmValue::Dict(Rc::new(handle))
 }
@@ -480,6 +712,7 @@ fn pool_create_sync(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmEr
     }
     let max_concurrent = parse_max_concurrent(&opts)?;
     let queue_strategy = parse_queue_strategy(&opts)?;
+    let backpressure = parse_backpressure(&opts)?;
     let id = next_pool_id();
     let entry = Rc::new(RefCell::new(PoolEntry {
         id: id.clone(),
@@ -489,9 +722,11 @@ fn pool_create_sync(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmEr
         submit_counter: 0,
         queue: VecDeque::new(),
         queue_strategy,
+        backpressure,
         round_robin_after: None,
         active: HashMap::new(),
         tasks: BTreeMap::new(),
+        space_waiters: Vec::new(),
         config: ordered_pool_config(&opts),
     }));
     POOLS.with(|pools| pools.borrow_mut().insert(id.clone(), entry.clone()));
@@ -583,43 +818,226 @@ async fn pool_submit_builtin(args: Vec<VmValue>) -> Result<VmValue, VmError> {
     let priority = parse_priority(&opts)?;
 
     let entry = lookup_pool(&pool_id)?;
-    let task = {
-        let mut pool = entry.borrow_mut();
-        let key = parse_submit_key(&opts, &pool.queue_strategy)?;
-        pool.submit_counter += 1;
-        let seq = pool.submit_counter;
-        let task_id = next_task_id(&pool);
-        let state = Rc::new(RefCell::new(TaskState {
-            id: task_id.clone(),
-            pool_id: pool.id.clone(),
-            pool_name: pool.name.clone(),
-            key: key.clone(),
-            priority,
-            status: TaskStatus::Queued,
-            submitted_at: uuid::Uuid::now_v7().to_string(),
-            started_at: None,
-            finished_at: None,
-            result: None,
-            error: None,
-            waiters: Vec::new(),
-        }));
-        pool.tasks.insert(task_id.clone(), state.clone());
-        enqueue_task(
-            &mut pool,
-            PendingTask {
-                task_id: task_id.clone(),
-                closure: closure.clone(),
-                state: state.clone(),
-                priority,
-                key,
-                seq,
-            },
-        );
-        state
+    let key = {
+        let pool = entry.borrow();
+        parse_submit_key(&opts, &pool.queue_strategy)?
     };
-    dispatch_ready(&entry);
-    let handle = task_handle_value(&task.borrow());
-    Ok(handle)
+
+    loop {
+        let attempt = {
+            let mut pool = entry.borrow_mut();
+            submit_or_wait(&mut pool, closure.clone(), key.clone(), priority)
+        };
+        match attempt {
+            SubmitAttempt::Submitted { task, audits } => {
+                for audit in audits {
+                    emit_pool_drop(audit).await;
+                }
+                dispatch_ready(&entry);
+                let handle = task_handle_value(&task.borrow());
+                return Ok(handle);
+            }
+            SubmitAttempt::Wait(receiver) => {
+                let _ = receiver.await;
+            }
+            SubmitAttempt::Fail(error) => return Err(error),
+        }
+    }
+}
+
+enum SubmitAttempt {
+    Submitted {
+        task: Rc<RefCell<TaskState>>,
+        audits: Vec<PoolDropAudit>,
+    },
+    Wait(tokio::sync::oneshot::Receiver<()>),
+    Fail(VmError),
+}
+
+fn submit_or_wait(
+    pool: &mut PoolEntry,
+    closure: Rc<VmClosure>,
+    key: Option<String>,
+    priority: i64,
+) -> SubmitAttempt {
+    if can_accept_now(pool) {
+        let (state, pending) = create_pending_task(pool, closure, key, priority);
+        enqueue_task(pool, pending);
+        return SubmitAttempt::Submitted {
+            task: state,
+            audits: Vec::new(),
+        };
+    }
+
+    match pool.backpressure.clone() {
+        BackpressureStrategy::Unbounded => {
+            let (state, pending) = create_pending_task(pool, closure, key, priority);
+            enqueue_task(pool, pending);
+            SubmitAttempt::Submitted {
+                task: state,
+                audits: Vec::new(),
+            }
+        }
+        BackpressureStrategy::Queue {
+            max_depth: _,
+            on_full: QueueOnFullPolicy::BlockSubmitter,
+        } => {
+            let (sender, receiver) = tokio::sync::oneshot::channel();
+            pool.space_waiters.push(sender);
+            SubmitAttempt::Wait(receiver)
+        }
+        BackpressureStrategy::Queue {
+            max_depth,
+            on_full: QueueOnFullPolicy::DropOldest,
+        } => submit_with_oldest_drop(
+            pool,
+            closure,
+            key,
+            priority,
+            "drop_oldest_queue_full",
+            QueueOnFullPolicy::DropOldest.as_str(),
+            Some(max_depth),
+        ),
+        BackpressureStrategy::Queue {
+            max_depth,
+            on_full: QueueOnFullPolicy::DropNewest,
+        } => submit_with_newest_drop(
+            pool,
+            closure,
+            key,
+            priority,
+            "drop_newest_queue_full",
+            QueueOnFullPolicy::DropNewest.as_str(),
+            Some(max_depth),
+        ),
+        BackpressureStrategy::Queue {
+            on_full: QueueOnFullPolicy::FailSubmitter,
+            ..
+        } => SubmitAttempt::Fail(policy_error(
+            Code::PoolBackpressureFull,
+            format!(
+                "pool.submit: pool '{}' queue is full under fail_submitter backpressure",
+                pool.name
+            ),
+        )),
+        BackpressureStrategy::FailFast => SubmitAttempt::Fail(policy_error(
+            Code::PoolFailFastFull,
+            format!(
+                "pool.submit: pool '{}' has no immediate capacity under fail_fast backpressure",
+                pool.name
+            ),
+        )),
+        BackpressureStrategy::RingBuffer { capacity } => submit_with_oldest_drop(
+            pool,
+            closure,
+            key,
+            priority,
+            "ring_buffer_drop_oldest",
+            "ring_buffer",
+            Some(capacity),
+        ),
+    }
+}
+
+fn can_accept_now(pool: &PoolEntry) -> bool {
+    if pool.active.len() < pool.max_concurrent && pool.queue.is_empty() {
+        return true;
+    }
+    match &pool.backpressure {
+        BackpressureStrategy::Unbounded => true,
+        BackpressureStrategy::Queue { max_depth, .. } => pool.queue.len() < *max_depth,
+        BackpressureStrategy::FailFast => false,
+        BackpressureStrategy::RingBuffer { capacity } => pool.queue.len() < *capacity,
+    }
+}
+
+fn submit_with_oldest_drop(
+    pool: &mut PoolEntry,
+    closure: Rc<VmClosure>,
+    key: Option<String>,
+    priority: i64,
+    reason: &str,
+    policy: &str,
+    max_depth: Option<usize>,
+) -> SubmitAttempt {
+    let queue_depth = pool.queue.len();
+    let (state, pending) = create_pending_task(pool, closure, key, priority);
+    let replacement_task_id = state.borrow().id.clone();
+    let mut audits = Vec::new();
+    if let Some(dropped) = pool.queue.pop_front() {
+        audits.push(reject_pending_task(
+            pool,
+            dropped,
+            Some(replacement_task_id.as_str()),
+            reason,
+            policy,
+            queue_depth,
+            max_depth,
+        ));
+    }
+    enqueue_task(pool, pending);
+    SubmitAttempt::Submitted {
+        task: state,
+        audits,
+    }
+}
+
+fn submit_with_newest_drop(
+    pool: &mut PoolEntry,
+    closure: Rc<VmClosure>,
+    key: Option<String>,
+    priority: i64,
+    reason: &str,
+    policy: &str,
+    max_depth: Option<usize>,
+) -> SubmitAttempt {
+    let queue_depth = pool.queue.len();
+    let (state, _pending) = create_pending_task(pool, closure, key, priority);
+    let task_id = state.borrow().id.clone();
+    let waiters = reject_task_state(&state, reason, policy);
+    wake_task_waiters(waiters);
+    let audit = pool_drop_audit(pool, &task_id, None, reason, policy, queue_depth, max_depth);
+    SubmitAttempt::Submitted {
+        task: state,
+        audits: vec![audit],
+    }
+}
+
+fn create_pending_task(
+    pool: &mut PoolEntry,
+    closure: Rc<VmClosure>,
+    key: Option<String>,
+    priority: i64,
+) -> (Rc<RefCell<TaskState>>, PendingTask) {
+    pool.submit_counter += 1;
+    let seq = pool.submit_counter;
+    let task_id = next_task_id(pool);
+    let state = Rc::new(RefCell::new(TaskState {
+        id: task_id.clone(),
+        pool_id: pool.id.clone(),
+        pool_name: pool.name.clone(),
+        key: key.clone(),
+        priority,
+        status: TaskStatus::Queued,
+        submitted_at: uuid::Uuid::now_v7().to_string(),
+        started_at: None,
+        finished_at: None,
+        result: None,
+        error: None,
+        rejection_reason: None,
+        rejection_policy: None,
+        waiters: Vec::new(),
+    }));
+    pool.tasks.insert(task_id.clone(), state.clone());
+    let pending = PendingTask {
+        task_id,
+        closure,
+        state: state.clone(),
+        priority,
+        key,
+        seq,
+    };
+    (state, pending)
 }
 
 fn enqueue_task(pool: &mut PoolEntry, pending: PendingTask) {
@@ -627,17 +1045,133 @@ fn enqueue_task(pool: &mut PoolEntry, pending: PendingTask) {
 }
 
 fn dispatch_ready(pool: &Rc<RefCell<PoolEntry>>) {
+    let mut freed_queue_space = false;
     loop {
         let next = {
             let mut pool_ref = pool.borrow_mut();
             if pool_ref.active.len() >= pool_ref.max_concurrent {
                 break;
             }
-            pop_next_task(&mut pool_ref)
+            let next = pop_next_task(&mut pool_ref);
+            if next.is_some() {
+                freed_queue_space = true;
+            }
+            next
         };
         let Some(pending) = next else { break };
         spawn_task(pool.clone(), pending);
     }
+    if freed_queue_space {
+        wake_space_waiters(pool);
+    }
+}
+
+fn reject_pending_task(
+    pool: &PoolEntry,
+    pending: PendingTask,
+    replacement_task_id: Option<&str>,
+    reason: &str,
+    policy: &str,
+    queue_depth: usize,
+    max_depth: Option<usize>,
+) -> PoolDropAudit {
+    let task_id = pending.task_id.clone();
+    let waiters = reject_task_state(&pending.state, reason, policy);
+    wake_task_waiters(waiters);
+    pool_drop_audit(
+        pool,
+        &task_id,
+        replacement_task_id,
+        reason,
+        policy,
+        queue_depth,
+        max_depth,
+    )
+}
+
+fn reject_task_state(
+    state: &Rc<RefCell<TaskState>>,
+    reason: &str,
+    policy: &str,
+) -> Vec<tokio::sync::oneshot::Sender<()>> {
+    let mut state_ref = state.borrow_mut();
+    state_ref.status = TaskStatus::Rejected;
+    state_ref.finished_at = Some(uuid::Uuid::now_v7().to_string());
+    state_ref.error = Some(reason.to_string());
+    state_ref.rejection_reason = Some(reason.to_string());
+    state_ref.rejection_policy = Some(policy.to_string());
+    std::mem::take(&mut state_ref.waiters)
+}
+
+fn wake_task_waiters(waiters: Vec<tokio::sync::oneshot::Sender<()>>) {
+    for waiter in waiters {
+        let _ = waiter.send(());
+    }
+}
+
+fn wake_space_waiters(pool: &Rc<RefCell<PoolEntry>>) {
+    let waiters = {
+        let mut pool_ref = pool.borrow_mut();
+        std::mem::take(&mut pool_ref.space_waiters)
+    };
+    for waiter in waiters {
+        let _ = waiter.send(());
+    }
+}
+
+fn pool_drop_audit(
+    pool: &PoolEntry,
+    task_id: &str,
+    replacement_task_id: Option<&str>,
+    reason: &str,
+    policy: &str,
+    queue_depth: usize,
+    max_depth: Option<usize>,
+) -> PoolDropAudit {
+    PoolDropAudit {
+        pool_id: pool.id.clone(),
+        pool_name: pool.name.clone(),
+        task_id: task_id.to_string(),
+        replacement_task_id: replacement_task_id.map(str::to_string),
+        reason: reason.to_string(),
+        policy: policy.to_string(),
+        queue_depth,
+        max_depth,
+        occurred_at: uuid::Uuid::now_v7().to_string(),
+    }
+}
+
+async fn emit_pool_drop(audit: PoolDropAudit) {
+    let topic = Topic::new(POOL_AUDIT_TOPIC).expect("static pool audit topic is valid");
+    let mut headers = BTreeMap::new();
+    headers.insert("schema".to_string(), "harn.pool_drop.v1".to_string());
+    headers.insert("policy".to_string(), audit.policy.clone());
+    let payload = json!({
+        "pool_id": audit.pool_id,
+        "pool": audit.pool_name,
+        "task_id": audit.task_id,
+        "replacement_task_id": audit.replacement_task_id,
+        "reason": audit.reason,
+        "policy": audit.policy,
+        "queue_depth": audit.queue_depth,
+        "max_depth": audit.max_depth,
+        "occurred_at": audit.occurred_at,
+    });
+    let _ = ensure_pool_event_log()
+        .append(
+            &topic,
+            LogEvent::new("pool_drop", payload).with_headers(headers),
+        )
+        .await;
+}
+
+fn ensure_pool_event_log() -> Arc<crate::event_log::AnyEventLog> {
+    active_event_log()
+        .unwrap_or_else(|| install_memory_for_current_thread(POOL_EVENT_LOG_QUEUE_DEPTH))
+}
+
+fn policy_error(code: Code, message: String) -> VmError {
+    VmError::Runtime(format!("{}: {message}", code.as_str()))
 }
 
 fn pop_next_task(pool: &mut PoolEntry) -> Option<PendingTask> {
@@ -762,10 +1296,9 @@ fn finalize_task(
         waiters = std::mem::take(&mut state_ref.waiters);
     }
     pool.borrow_mut().active.remove(&task_id);
-    for waiter in waiters {
-        let _ = waiter.send(());
-    }
+    wake_task_waiters(waiters);
     dispatch_ready(pool);
+    wake_space_waiters(pool);
 }
 
 async fn pool_wait_builtin(args: Vec<VmValue>) -> Result<VmValue, VmError> {
