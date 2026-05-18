@@ -17,6 +17,12 @@ condensed series summaries instead of full per-patch history.
   or `{ kind, lexeme, start, end, line, column }` entries in `--json`
   mode. Both structured surfaces use the standard `JsonEnvelope` and
   register in `harn --json-schemas`.
+- **LSP repair metadata for quick fixes (#1750).** Harn LSP diagnostics now
+  include flat `data.code`, `data.repair_id`, and `data.safety` fields
+  alongside the existing nested repair envelope. Repair-backed code actions use
+  `quickfix.harn.<safety>` kinds and carry `{ repair_id, safety,
+  diagnostic_code }` data so IDE clients can dispatch without parsing
+  diagnostic prose.
 
 ## v0.8.25
 
