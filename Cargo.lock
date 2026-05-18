@@ -2331,6 +2331,9 @@ dependencies = [
 [[package]]
 name = "harn-skills"
 version = "0.8.25"
+dependencies = [
+ "tempfile",
+]
 
 [[package]]
 name = "harn-stdlib"

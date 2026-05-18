@@ -2,10 +2,10 @@
 //!
 //! Two complementary surfaces share this namespace:
 //!
-//! - `list` / `get` / `dump` operate on the **embedded corpus** shipped
-//!   inside the `harn` binary (see [`harn_skills`]). These are the
-//!   canonical Harn skills — `harn-language`, `harn-orchestration`,
-//!   etc. — and are always available without a project on disk.
+//! - `list` / `get` / `dump` operate on the **canonical corpus** from
+//!   [`harn_skills`]. By default this is the embedded corpus shipped
+//!   inside the `harn` binary; `HARN_SKILLS_DIR` can point at a
+//!   recursive `SKILL.md` tree while iterating locally.
 //! - `resolved` / `inspect` / `match` / `install` / `new` operate on
 //!   the **layered FS discovery** implemented in `harn_vm::skills`, so
 //!   what the user sees there is byte-for-byte what `harn run` /
@@ -23,7 +23,10 @@ use std::{fs, process};
 
 use serde::Serialize;
 
-use harn_skills::{get_embedded_skill, list_embedded_skills, EmbeddedSkill, SkillFrontmatter};
+use harn_skills::{
+    resolve_skill_corpus_from_env, DiskSkill, DiskSkillFrontmatter, EmbeddedSkill, SkillCorpus,
+    SkillFrontmatter,
+};
 use harn_vm::skills::{
     build_fs_discovery, default_system_dirs, default_user_dir, parse_env_skills_path,
     DiscoveryOptions, FsLayerConfig, Layer, LayeredDiscovery, ManifestSource, Skill,
@@ -49,20 +52,29 @@ pub(crate) const SKILLS_GET_SCHEMA_VERSION: u32 = 1;
 /// no body, to keep `list` cheap to consume.
 #[derive(Debug, Clone, Serialize)]
 pub struct ListedSkill {
-    pub name: &'static str,
-    pub short: &'static str,
-    pub description: &'static str,
+    pub name: String,
+    pub short: String,
+    pub description: String,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub when_to_use: Option<&'static str>,
+    pub when_to_use: Option<String>,
 }
 
 impl ListedSkill {
     fn from_embedded(skill: &EmbeddedSkill) -> Self {
         Self {
-            name: skill.name,
-            short: skill.frontmatter.short,
-            description: skill.frontmatter.description,
-            when_to_use: skill.frontmatter.when_to_use,
+            name: skill.name.to_string(),
+            short: skill.frontmatter.short.to_string(),
+            description: skill.frontmatter.description.to_string(),
+            when_to_use: skill.frontmatter.when_to_use.map(str::to_string),
+        }
+    }
+
+    fn from_disk(skill: &DiskSkill) -> Self {
+        Self {
+            name: skill.name.clone(),
+            short: skill.frontmatter.short.clone(),
+            description: skill.frontmatter.description.clone(),
+            when_to_use: skill.frontmatter.when_to_use.clone(),
         }
     }
 }
@@ -89,23 +101,33 @@ impl JsonOutput for SkillsListPayload {
 /// JSON shape encodes the distinction unambiguously.
 #[derive(Debug, Clone, Serialize)]
 pub struct SkillsGetPayload {
-    pub name: &'static str,
-    pub short: &'static str,
-    pub description: &'static str,
+    pub name: String,
+    pub short: String,
+    pub description: String,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub when_to_use: Option<&'static str>,
+    pub when_to_use: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub body: Option<&'static str>,
+    pub body: Option<String>,
 }
 
 impl SkillsGetPayload {
     fn from_embedded(skill: &EmbeddedSkill, include_body: bool) -> Self {
         Self {
-            name: skill.name,
-            short: skill.frontmatter.short,
-            description: skill.frontmatter.description,
-            when_to_use: skill.frontmatter.when_to_use,
-            body: include_body.then_some(skill.body),
+            name: skill.name.to_string(),
+            short: skill.frontmatter.short.to_string(),
+            description: skill.frontmatter.description.to_string(),
+            when_to_use: skill.frontmatter.when_to_use.map(str::to_string),
+            body: include_body.then(|| skill.body.to_string()),
+        }
+    }
+
+    fn from_disk(skill: &DiskSkill, include_body: bool) -> Self {
+        Self {
+            name: skill.name.clone(),
+            short: skill.frontmatter.short.clone(),
+            description: skill.frontmatter.description.clone(),
+            when_to_use: skill.frontmatter.when_to_use.clone(),
+            body: include_body.then(|| skill.body.clone()),
         }
     }
 }
@@ -119,14 +141,14 @@ impl JsonOutput for SkillsGetPayload {
     }
 }
 
-/// `harn skills list` — surfaces the embedded canonical Harn skill
+/// `harn skills list` — surfaces the active canonical Harn skill
 /// corpus. FS-discovered skills live under `harn skills resolved`.
 pub(crate) fn run_list(args: &SkillsListArgs) {
-    let skills = list_embedded_skills();
+    let corpus = resolve_skill_corpus_or_exit();
 
     if args.json {
         let payload = SkillsListPayload {
-            skills: skills.iter().map(ListedSkill::from_embedded).collect(),
+            skills: list_payload_entries(&corpus),
         };
         println!(
             "{}",
@@ -135,18 +157,23 @@ pub(crate) fn run_list(args: &SkillsListArgs) {
         return;
     }
 
-    if skills.is_empty() {
-        println!("No embedded skills bundled with this `harn` build.");
+    if corpus.is_empty() {
+        println!("No canonical skills available for this `harn` build.");
         return;
     }
 
-    println!("Embedded canonical skills ({}):", skills.len());
-    let name_width = skills.iter().map(|s| s.name.len()).max().unwrap_or(4);
-    for skill in skills {
-        let short = if skill.frontmatter.short.is_empty() {
+    if corpus.is_disk() {
+        println!("Disk canonical skills ({}):", corpus.len());
+    } else {
+        println!("Embedded canonical skills ({}):", corpus.len());
+    }
+    let entries = list_payload_entries(&corpus);
+    let name_width = entries.iter().map(|s| s.name.len()).max().unwrap_or(4);
+    for skill in entries {
+        let short = if skill.short.is_empty() {
             "(no short description)"
         } else {
-            skill.frontmatter.short
+            &skill.short
         };
         println!(
             "  {:<name_width$}  {}",
@@ -160,41 +187,68 @@ pub(crate) fn run_list(args: &SkillsListArgs) {
     println!("Run `harn skills get <name> --full` to include the body.");
 }
 
-/// `harn skills get <name>` — embedded skill frontmatter, or full
+/// `harn skills get <name>` — canonical skill frontmatter, or full
 /// SKILL.md body when `--full` is passed.
 pub(crate) fn run_get(args: &SkillsGetArgs) {
-    let Some(skill) = get_embedded_skill(&args.name) else {
-        emit_get_not_found(&args.name, args.json);
-        process::exit(1);
-    };
+    let corpus = resolve_skill_corpus_or_exit();
 
-    if args.json {
-        let payload = SkillsGetPayload::from_embedded(skill, args.full);
-        println!(
-            "{}",
-            json_envelope::to_string_pretty(&payload.into_envelope())
-        );
-        return;
-    }
-
-    print_skill_frontmatter(&skill.frontmatter);
-    if args.full {
-        println!();
-        println!("---- SKILL.md body ----");
-        print!("{}", skill.body);
-        if !skill.body.ends_with('\n') {
-            println!();
+    match &corpus {
+        SkillCorpus::Embedded(skills) => {
+            let Some(skill) = skills.iter().find(|skill| skill.name == args.name) else {
+                emit_get_not_found(&args.name, args.json, &corpus);
+                process::exit(1);
+            };
+            if args.json {
+                let payload = SkillsGetPayload::from_embedded(skill, args.full);
+                println!(
+                    "{}",
+                    json_envelope::to_string_pretty(&payload.into_envelope())
+                );
+                return;
+            }
+            print_skill_frontmatter(&skill.frontmatter);
+            if args.full {
+                println!();
+                println!("---- SKILL.md body ----");
+                print!("{}", skill.body);
+                if !skill.body.ends_with('\n') {
+                    println!();
+                }
+            }
+        }
+        SkillCorpus::Disk(skills) => {
+            let Some(skill) = skills.iter().find(|skill| skill.name == args.name) else {
+                emit_get_not_found(&args.name, args.json, &corpus);
+                process::exit(1);
+            };
+            if args.json {
+                let payload = SkillsGetPayload::from_disk(skill, args.full);
+                println!(
+                    "{}",
+                    json_envelope::to_string_pretty(&payload.into_envelope())
+                );
+                return;
+            }
+            print_disk_skill_frontmatter(&skill.frontmatter);
+            if args.full {
+                println!();
+                println!("---- SKILL.md body ----");
+                print!("{}", skill.body);
+                if !skill.body.ends_with('\n') {
+                    println!();
+                }
+            }
         }
     }
 }
 
-/// `harn skills dump --all` — write every embedded skill to disk so
-/// agents and CI can review the corpus offline.
+/// `harn skills dump --all` — write every canonical skill to disk so
+/// agents and CI can review the active corpus offline.
 pub(crate) fn run_dump(args: &SkillsDumpArgs) {
     if !args.all {
         eprintln!(
             "error: `harn skills dump` requires `--all`. \
-             Pass `--all` to write every embedded skill."
+             Pass `--all` to write every canonical skill."
         );
         process::exit(2);
     }
@@ -210,7 +264,8 @@ pub(crate) fn run_dump(args: &SkillsDumpArgs) {
         process::exit(1);
     }
 
-    let skills = list_embedded_skills();
+    let corpus = resolve_skill_corpus_or_exit();
+    let skills = dump_entries(&corpus);
     let mut written = Vec::with_capacity(skills.len());
     for skill in skills {
         let skill_dir = out_dir.join(skill.name);
@@ -228,8 +283,8 @@ pub(crate) fn run_dump(args: &SkillsDumpArgs) {
             process::exit(1);
         }
 
-        // Byte-for-byte mirror the binary's canonical source so on-disk
-        // copies stay diff-stable against the embedded record.
+        // Byte-for-byte mirror the active canonical source so dumped
+        // copies stay diff-stable against their origin.
         if let Err(error) = fs::write(&dest, skill.source) {
             eprintln!("error: failed to write {}: {error}", dest.display());
             process::exit(1);
@@ -240,6 +295,16 @@ pub(crate) fn run_dump(args: &SkillsDumpArgs) {
     println!("Wrote {} skill(s) to {}", written.len(), out_dir.display());
     for path in &written {
         println!("  {}", path.display());
+    }
+}
+
+fn resolve_skill_corpus_or_exit() -> SkillCorpus {
+    match resolve_skill_corpus_from_env() {
+        Ok(corpus) => corpus,
+        Err(error) => {
+            eprintln!("error: failed to load HARN_SKILLS_DIR: {error}");
+            process::exit(1);
+        }
     }
 }
 
@@ -256,23 +321,73 @@ fn print_skill_frontmatter(frontmatter: &SkillFrontmatter) {
     }
 }
 
-fn emit_get_not_found(name: &str, json: bool) {
+fn print_disk_skill_frontmatter(frontmatter: &DiskSkillFrontmatter) {
+    println!("name:        {}", frontmatter.name);
+    if !frontmatter.short.is_empty() {
+        println!("short:       {}", frontmatter.short);
+    }
+    if !frontmatter.description.is_empty() {
+        println!("description: {}", frontmatter.description);
+    }
+    if let Some(when) = &frontmatter.when_to_use {
+        println!("when_to_use: {when}");
+    }
+}
+
+fn list_payload_entries(corpus: &SkillCorpus) -> Vec<ListedSkill> {
+    match corpus {
+        SkillCorpus::Embedded(skills) => skills.iter().map(ListedSkill::from_embedded).collect(),
+        SkillCorpus::Disk(skills) => skills.iter().map(ListedSkill::from_disk).collect(),
+    }
+}
+
+fn available_skill_names(corpus: &SkillCorpus) -> Vec<String> {
+    match corpus {
+        SkillCorpus::Embedded(skills) => {
+            skills.iter().map(|skill| skill.name.to_string()).collect()
+        }
+        SkillCorpus::Disk(skills) => skills.iter().map(|skill| skill.name.clone()).collect(),
+    }
+}
+
+struct DumpEntry<'a> {
+    name: &'a str,
+    source: &'a str,
+}
+
+fn dump_entries(corpus: &SkillCorpus) -> Vec<DumpEntry<'_>> {
+    match corpus {
+        SkillCorpus::Embedded(skills) => skills
+            .iter()
+            .map(|skill| DumpEntry {
+                name: skill.name,
+                source: skill.source,
+            })
+            .collect(),
+        SkillCorpus::Disk(skills) => skills
+            .iter()
+            .map(|skill| DumpEntry {
+                name: skill.name.as_str(),
+                source: skill.source.as_str(),
+            })
+            .collect(),
+    }
+}
+
+fn emit_get_not_found(name: &str, json: bool, corpus: &SkillCorpus) {
     if json {
         let envelope: JsonEnvelope<SkillsGetPayload> = JsonEnvelope::err(
             SKILLS_GET_SCHEMA_VERSION,
             "skill_not_found",
-            format!("no embedded skill named `{name}`"),
+            format!("no skill named `{name}`"),
         )
         .with_details(serde_json::json!({
             "requested": name,
-            "available": list_embedded_skills()
-                .iter()
-                .map(|s| s.name)
-                .collect::<Vec<_>>(),
+            "available": available_skill_names(corpus),
         }));
         println!("{}", json_envelope::to_string_pretty(&envelope));
     } else {
-        eprintln!("error: no embedded skill named `{name}`.");
+        eprintln!("error: no skill named `{name}`.");
         eprintln!("hint: run `harn skills list` to see what ships with this binary.");
     }
 }

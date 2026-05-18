@@ -31,6 +31,9 @@ conformance/tests/**/.harn/events.sqlite-wal
 # .claude/ is local-only except for shared skill definitions
 .claude/*
 !.claude/commands/
+!.claude/skills/
+!.claude/skills/harn-scripting/
+!.claude/skills/harn-scripting/SKILL.md
 # `merge-captain` covers the Harn-triad lay of the land (including the
 # private harn-cloud repo + business goals); it lives in burin-code's
 # local `.claude/commands/` only, never in the public harn repo.

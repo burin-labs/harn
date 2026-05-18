@@ -9,3 +9,6 @@ description = "Embedded skill corpus for the Harn CLI and runtime"
 include = ["src/**/*", "Cargo.toml"]
 
 [dependencies]
+
+[dev-dependencies]
+tempfile = "3"

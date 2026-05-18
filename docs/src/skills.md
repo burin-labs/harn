@@ -318,11 +318,13 @@ See [Bridge protocol](./bridge-protocol.md) for wire-format details.
 
 The `harn skills` CLI splits into two complementary surfaces:
 
-- **Embedded corpus** — the canonical Harn skills shipped *inside* the
+- **Canonical corpus** — the Harn skills normally shipped *inside* the
   `harn` binary (`harn-language`, `harn-orchestration`, `harn-testing`,
   …). Access these with `harn skills list`, `harn skills get <name>`,
-  and `harn skills dump --all`. They are always available, with no
-  project or filesystem state required.
+  and `harn skills dump --all`. Set `HARN_SKILLS_DIR` to a directory of
+  recursive `SKILL.md` files to make `list`, `get`, and `dump` read
+  from disk while iterating locally; an unset, missing, or empty
+  directory falls back to the embedded corpus.
 - **Layered FS discovery** — user-authored skills picked up from
   `--skill-dir`, `HARN_SKILLS_PATH`, project, manifest, user, packages,
   system, and host layers. Access these with `harn skills resolved`,
@@ -332,9 +334,11 @@ The `harn skills` CLI splits into two complementary surfaces:
 
 ### `harn skills list`
 
-Lists the embedded canonical skill corpus that ships with this build
-of `harn`. Pass `--json` for a versioned `JsonEnvelope` payload that
-agents and CI can pipe through `jq`.
+Lists the canonical skill corpus for this build of `harn`. By default
+that is the embedded corpus; when `HARN_SKILLS_DIR` points at one or
+more recursive `SKILL.md` files, the disk corpus is listed instead.
+Pass `--json` for a versioned `JsonEnvelope` payload that agents and
+CI can pipe through `jq`.
 
 ```text
 $ harn skills list
@@ -362,9 +366,10 @@ $ harn skills list --json | jq '.data.skills | length'
 
 ### `harn skills get <name>`
 
-Prints frontmatter for a single embedded skill. Pass `--full` to
+Prints frontmatter for a single canonical skill. Pass `--full` to
 include the SKILL.md body; pass `--json` to wrap the output in a
-`JsonEnvelope` for machine consumption.
+`JsonEnvelope` for machine consumption. `HARN_SKILLS_DIR` follows the
+same disk-override/fallback behavior as `harn skills list`.
 
 ```text
 $ harn skills get harn-language
@@ -388,10 +393,12 @@ and the list of available skills in `error.details.available`.
 
 ### `harn skills dump --all [--out <dir>]`
 
-Writes every embedded skill to disk as a `<dir>/<name>/SKILL.md` tree
-so agents and CI can review the corpus offline. Defaults the output
-directory to `./skills`. Refuses to overwrite existing files unless
-`--force` is passed.
+Writes every active canonical skill to disk as a `<dir>/<name>/SKILL.md`
+tree so agents and CI can review the corpus offline. By default that
+means the embedded corpus; when `HARN_SKILLS_DIR` contains recursive
+`SKILL.md` files, `dump` mirrors that disk corpus byte-for-byte instead.
+Defaults the output directory to `./skills`. Refuses to overwrite
+existing files unless `--force` is passed.
 
 ```text
 $ harn skills dump --all --out /tmp/skills
