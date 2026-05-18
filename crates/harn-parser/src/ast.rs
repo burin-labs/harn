@@ -1,7 +1,7 @@
 use harn_lexer::{Span, StringSegment};
 
 /// A node wrapped with source location information.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, serde::Serialize)]
 pub struct Spanned<T> {
     pub node: T,
     pub span: Span,
@@ -43,7 +43,7 @@ pub fn peel_attributes(node: &SNode) -> (&[Attribute], &SNode) {
 /// named args use `name: Some("key")`. Values are restricted to
 /// compile-time metadata expressions by the parser (literal scalars,
 /// identifiers, lists, dicts, and call-shaped sentinels).
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, serde::Serialize)]
 pub struct AttributeArg {
     pub name: Option<String>,
     pub value: SNode,
@@ -51,7 +51,7 @@ pub struct AttributeArg {
 }
 
 /// An attribute attached to a declaration: `@deprecated(since: "0.8")`.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, serde::Serialize)]
 pub struct Attribute {
     pub name: String,
     pub args: Vec<AttributeArg>,
@@ -87,7 +87,7 @@ impl Attribute {
 }
 
 /// AST nodes for the Harn language.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, serde::Serialize)]
 pub enum Node {
     /// A declaration carrying one or more attributes (`@attr`). The inner
     /// node is always one of: FnDecl, ToolDecl, Pipeline, StructDecl,
@@ -459,7 +459,7 @@ pub enum Node {
 /// semantics: the names cannot be shadowed or rebound by user code,
 /// signatures are produced by the VM, and the audit log is recorded
 /// deterministically by the runtime.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, serde::Serialize)]
 pub enum HitlKind {
     /// `request_approval(action: ..., args: ..., quorum: ..., reviewers: ..., ...)`.
     RequestApproval,
@@ -487,7 +487,7 @@ impl HitlKind {
 /// A single argument in a [`Node::HitlExpr`] call. `name` is `Some` when
 /// the caller used named-arg syntax (e.g. `quorum: 2`); positional
 /// arguments leave it as `None` and rely on the kind's parameter order.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, serde::Serialize)]
 pub struct HitlArg {
     pub name: Option<String>,
     pub value: SNode,
@@ -495,7 +495,7 @@ pub struct HitlArg {
 }
 
 /// Parallel execution mode.
-#[derive(Debug, Clone, Copy, PartialEq)]
+#[derive(Debug, Clone, Copy, PartialEq, serde::Serialize)]
 pub enum ParallelMode {
     /// `parallel N { i -> ... }` — run N concurrent tasks.
     Count,
@@ -507,7 +507,7 @@ pub enum ParallelMode {
     Settle,
 }
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, serde::Serialize)]
 pub struct MatchArm {
     pub pattern: SNode,
     /// Optional guard: `pattern if condition -> { body }`.
@@ -515,28 +515,28 @@ pub struct MatchArm {
     pub body: Vec<SNode>,
 }
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, serde::Serialize)]
 pub struct SelectCase {
     pub variable: String,
     pub channel: Box<SNode>,
     pub body: Vec<SNode>,
 }
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, serde::Serialize)]
 pub struct DictEntry {
     pub key: SNode,
     pub value: SNode,
 }
 
 /// An enum variant declaration.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, serde::Serialize)]
 pub struct EnumVariant {
     pub name: String,
     pub fields: Vec<TypedParam>,
 }
 
 /// A struct field declaration.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, serde::Serialize)]
 pub struct StructField {
     pub name: String,
     pub type_expr: Option<TypeExpr>,
@@ -544,7 +544,7 @@ pub struct StructField {
 }
 
 /// An interface method signature.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, serde::Serialize)]
 pub struct InterfaceMethod {
     pub name: String,
     pub type_params: Vec<TypeParam>,
@@ -604,7 +604,7 @@ pub struct ShapeField {
 }
 
 /// A binding pattern for destructuring in let/var/for-in.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, serde::Serialize)]
 pub enum BindingPattern {
     /// Simple identifier: `let x = ...`
     Identifier(String),
@@ -623,7 +623,7 @@ pub fn is_discard_name(name: &str) -> bool {
 }
 
 /// A field in a dict destructuring pattern.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, serde::Serialize)]
 pub struct DictPatternField {
     /// The dict key to extract.
     pub key: String,
@@ -636,7 +636,7 @@ pub struct DictPatternField {
 }
 
 /// An element in a list destructuring pattern.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, serde::Serialize)]
 pub struct ListPatternElement {
     /// The variable name to bind.
     pub name: String,
@@ -657,7 +657,7 @@ pub struct ListPatternElement {
 /// - `Contravariant` (`in T`): the parameter appears only in input
 ///   positions (consumed, not produced). `T<Super>` flows into
 ///   `T<Sub>`.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize)]
 pub enum Variance {
     Invariant,
     Covariant,
@@ -665,7 +665,7 @@ pub enum Variance {
 }
 
 /// A generic type parameter on a function or pipeline declaration.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, serde::Serialize)]
 pub struct TypeParam {
     pub name: String,
     pub variance: Variance,
@@ -683,14 +683,14 @@ impl TypeParam {
 }
 
 /// A where-clause constraint on a generic type parameter.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, serde::Serialize)]
 pub struct WhereClause {
     pub type_name: String,
     pub bound: String,
 }
 
 /// A parameter with an optional type annotation and optional default value.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, serde::Serialize)]
 pub struct TypedParam {
     pub name: String,
     pub type_expr: Option<TypeExpr>,

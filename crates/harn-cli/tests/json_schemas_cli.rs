@@ -41,6 +41,14 @@ fn json_schemas_lists_all_registered_commands() {
         entries.iter().any(|e| e["command"] == "time run"),
         "`time run` should be in the catalog: {entries:?}"
     );
+    assert!(
+        entries.iter().any(|e| e["command"] == "parse"),
+        "`parse` should be in the catalog: {entries:?}"
+    );
+    assert!(
+        entries.iter().any(|e| e["command"] == "tokens"),
+        "`tokens` should be in the catalog: {entries:?}"
+    );
     for entry in entries {
         assert!(
             entry.get("command").and_then(|v| v.as_str()).is_some(),

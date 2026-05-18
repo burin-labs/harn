@@ -94,6 +94,23 @@ fn test_parses_routes_json() {
 }
 
 #[test]
+fn test_parses_parse_and_tokens_json() {
+    let parse = Cli::parse_from(["harn", "parse", "main.harn", "--json"]);
+    let Command::Parse(parse_args) = parse.command.unwrap() else {
+        panic!("expected parse command");
+    };
+    assert_eq!(parse_args.path, "main.harn");
+    assert!(parse_args.json);
+
+    let tokens = Cli::parse_from(["harn", "tokens", "main.harn", "--json"]);
+    let Command::Tokens(tokens_args) = tokens.command.unwrap() else {
+        panic!("expected tokens command");
+    };
+    assert_eq!(tokens_args.path, "main.harn");
+    assert!(tokens_args.json);
+}
+
+#[test]
 fn test_parses_fix_plan_json_args() {
     let cli = Cli::parse_from([
         "harn",

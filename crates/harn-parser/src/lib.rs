@@ -1,4 +1,5 @@
 mod ast;
+pub mod ast_json;
 pub mod builtin_signatures;
 pub mod diagnostic;
 pub mod diagnostic_codes;

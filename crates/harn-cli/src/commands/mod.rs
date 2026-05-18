@@ -28,6 +28,7 @@ pub(crate) mod merge_captain_mock;
 pub(crate) mod models;
 pub mod orchestrator;
 pub mod pack;
+pub(crate) mod parse_tokens;
 pub mod persona;
 pub mod persona_doctor;
 pub mod persona_scaffold;

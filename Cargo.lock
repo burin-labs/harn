@@ -2220,6 +2220,9 @@ dependencies = [
 [[package]]
 name = "harn-lexer"
 version = "0.8.25"
+dependencies = [
+ "serde",
+]
 
 [[package]]
 name = "harn-lint"
@@ -2287,6 +2290,7 @@ version = "0.8.25"
 dependencies = [
  "harn-lexer",
  "serde",
+ "serde_json",
  "yansi",
 ]
 
