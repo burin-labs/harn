@@ -11,9 +11,10 @@ message history.
 
 R-01 shipped the **schema and event envelope**. R-02 adds deterministic
 in-Harn transcript transforms for injecting and clearing pending reminder
-events. The rest of the lifecycle (stdlib providers, hook return variants,
-the bridge `agent/inject_reminder` notification, compaction honoring TTL +
-`preserve_on_compact`, sub-agent propagation, expiry EventLog events, and
+events, plus EventLog-backed dedupe and post-turn TTL expiry audit
+records. The rest of the lifecycle (stdlib providers, hook return
+variants, the bridge `agent/inject_reminder` notification, compaction
+honoring TTL + `preserve_on_compact`, sub-agent propagation, and
 capability-aware rendering) lands in later tickets under epic
 [#1815](https://github.com/burin-labs/harn/issues/1815).
 
@@ -138,7 +139,9 @@ are validated; unknown option keys fail fast.
 When `dedupe_key` is set, injection first removes any pending reminder
 events with the same key from the input transcript. The new reminder is
 then appended, and `deduped_count` reports how many older reminders were
-replaced.
+replaced. When an active EventLog is installed, replacement also emits a
+`transcript.reminder.deduped` record on
+`transcript.reminder.lifecycle`.
 
 Use `transcript.clear_reminders(transcript, selector)` to remove
 pending reminders:
@@ -155,10 +158,13 @@ is required. If multiple selectors are present, a reminder must match
 all of them to be removed. This builtin is also a pure transform and
 returns `{transcript, removed_count}`.
 
-`ttl_turns` is stored on reminder events today. Post-turn TTL decrement,
-expiry EventLog events, hook return variants, bridge notifications, and
-provider-specific reminder rendering are intentionally not implemented
-by these transcript transforms.
+Agent-session post-turn processing decrements finite `ttl_turns`
+values. A reminder with `ttl_turns: 1` expires at the next post-turn
+boundary, is removed from the session transcript events, and emits a
+`transcript.reminder.expired` record on
+`transcript.reminder.lifecycle` when an active EventLog is installed.
+Hook return variants, bridge notifications, and provider-specific
+reminder rendering are intentionally left to follow-up tickets.
 
 ## Reading reminders off a transcript
 

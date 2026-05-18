@@ -135,6 +135,19 @@ pub fn agent_session_post_event(session_id, kind, content, source = nil) {
 }
 
 /**
+ * agent_session_apply_reminder_post_turn.
+ *
+ * @effects: [host]
+ * @allocation: heap
+ * @errors: []
+ * @api_stability: experimental
+ * @example: agent_session_apply_reminder_post_turn(session_id, turn)
+ */
+pub fn agent_session_apply_reminder_post_turn(session_id, turn = 0) {
+  return __host_agent_session_apply_reminder_post_turn(session_id, turn)
+}
+
+/**
  * agent_session_set_active_skills.
  *
  * @effects: [host]

@@ -102,6 +102,7 @@ const RUNTIME_ONLY_EXCEPTIONS: &[&str] = &[
     "__host_agent_record_compaction",
     "__host_agent_record_native_tool_fallback",
     "__host_agent_session_active_skills",
+    "__host_agent_session_apply_reminder_post_turn",
     "__host_agent_session_claim_tool_format",
     "__host_agent_session_compact_if_needed",
     "__host_agent_session_drain_feedback",

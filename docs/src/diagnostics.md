@@ -44,6 +44,7 @@ Repairs are tagged with a six-level safety class so `harn fix --apply --safety <
 | [`STD`](#std--stdlib-usage) | Stdlib usage | 4 |
 | [`PRM`](#prm--prompt-templates) | Prompt templates | 7 |
 | [`MOD`](#mod--modules-and-exports) | Modules and exports | 6 |
+| [`RMD`](#rmd--reminder-lifecycle) | Reminder lifecycle | 1 |
 | [`LNT`](#lnt--lint-rules) | Lint rules | 53 |
 | [`FMT`](#fmt--formatter) | Formatter | 3 |
 | [`IMP`](#imp--import-resolution) | Import resolution | 3 |
@@ -178,6 +179,12 @@ Repairs are tagged with a six-level safety class so `harn fix --apply --safety <
 | [`HARN-MOD-004`](#harn-mod-004) | module export is invalid | — | — |
 | [`HARN-MOD-005`](#harn-mod-005) | module imports expose colliding names | — | — |
 | [`HARN-MOD-006`](#harn-mod-006) | module re-exports conflict | — | — |
+
+## RMD — Reminder lifecycle
+
+| Code | Summary | Repair | Safety |
+|---|---|---|---|
+| [`HARN-RMD-001`](#harn-rmd-001) | reminder lifecycle option key is not recognized | — | — |
 
 ## LNT — Lint rules
 
@@ -2858,6 +2865,22 @@ Specifically: module re-exports conflict.
 This code is stable. Its identifier, category, and meaning will not change
 without a deprecation cycle. Cross-language tooling and IDE integrations can
 dispatch on it directly.
+
+### `HARN-RMD-001`
+
+**Category:** `RMD` (Reminder lifecycle) &nbsp;·&nbsp; **API stability:** `stable`
+
+reminder lifecycle option key is not recognized
+
+**Variant:** `Code::ReminderUnknownOption` (reminder lifecycle option key is not recognized)
+
+Reminder lifecycle option tables reject unknown keys so reminder shape stays stable across
+transcript transforms, hooks, and bridge integrations.
+
+Use only the documented `transcript.inject_reminder` keys: `body`, `tags`, `dedupe_key`,
+`ttl_turns`, `preserve_on_compact`, `propagate`, and `role_hint`.
+
+For `transcript.clear_reminders`, use at least one selector from `id`, `tag`, or `dedupe_key`.
 
 ### `HARN-LNT-001`
 

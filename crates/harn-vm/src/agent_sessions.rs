@@ -830,6 +830,49 @@ pub fn store_transcript(id: &str, transcript: VmValue) {
     });
 }
 
+/// Apply the reminder TTL lifecycle that runs once per completed agent
+/// turn. Reminders with `ttl_turns = 1` expire and are removed; larger
+/// finite TTLs are decremented in place. Expiry audit events are emitted
+/// to the active EventLog when one is installed.
+pub fn apply_reminder_post_turn(id: &str, turn: i64) -> Result<serde_json::Value, String> {
+    let report = SESSIONS.with(|s| {
+        let mut map = s.borrow_mut();
+        let Some(state) = map.get_mut(id) else {
+            return Err(format!(
+                "agent_session_apply_reminder_post_turn: unknown session id '{id}'"
+            ));
+        };
+        let report = crate::llm::helpers::apply_reminder_post_turn(&state.transcript, turn);
+        if report.decremented_count > 0 || !report.expired.is_empty() {
+            if let Some(next) = report.transcript.clone() {
+                state.transcript = next;
+            }
+            state.last_accessed = Instant::now();
+        }
+        Ok(report)
+    })?;
+
+    for reminder in &report.expired {
+        crate::llm::helpers::emit_reminder_lifecycle_event(
+            crate::llm::helpers::REMINDER_EXPIRED_EVENT_KIND,
+            serde_json::json!({
+                "transcript_id": id,
+                "reminder_id": &reminder.id,
+                "tags": &reminder.tags,
+                "dedupe_key": &reminder.dedupe_key,
+                "ttl_turns_before": &reminder.ttl_turns,
+                "expired_at_turn": turn,
+            }),
+        );
+    }
+
+    Ok(serde_json::json!({
+        "expired_count": report.expired.len(),
+        "decremented_count": report.decremented_count,
+        "remaining_count": report.remaining_count,
+    }))
+}
+
 /// Append a transcript event to the session without mutating its
 /// message list. Used for orchestration-side lineage events (sub-agent
 /// spawn/completion, workflow hooks, etc.) that should survive

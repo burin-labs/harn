@@ -3,15 +3,17 @@ use std::rc::Rc;
 
 use crate::value::{VmError, VmValue};
 use crate::vm::{Vm, VmBuiltinArity, VmBuiltinMetadata};
+use harn_parser::diagnostic_codes::Code;
 
 use super::helpers::{
-    extract_llm_options, is_transcript_value, new_transcript_with, new_transcript_with_events,
-    normalize_transcript_asset, transcript_asset_list, transcript_drain_decision_event_from_value,
-    transcript_event, transcript_id, transcript_message_list, transcript_reminder_event,
-    transcript_reminder_event_from_value, transcript_resumption_event_from_value,
-    transcript_summary_text, transcript_suspension_event_from_value, vm_add_role_message,
-    vm_message_value, vm_value_to_json, ReminderPropagate, ReminderRoleHint, ReminderSource,
-    SystemReminder, SYSTEM_REMINDER_EVENT_KIND,
+    emit_reminder_lifecycle_event, extract_llm_options, is_transcript_value, new_transcript_with,
+    new_transcript_with_events, normalize_transcript_asset, transcript_asset_list,
+    transcript_drain_decision_event_from_value, transcript_event, transcript_id,
+    transcript_message_list, transcript_reminder_event, transcript_reminder_event_from_value,
+    transcript_resumption_event_from_value, transcript_summary_text,
+    transcript_suspension_event_from_value, vm_add_role_message, vm_message_value,
+    vm_value_to_json, ReminderPropagate, ReminderRoleHint, ReminderSource, SystemReminder,
+    REMINDER_DEDUPED_EVENT_KIND, SYSTEM_REMINDER_EVENT_KIND,
 };
 
 const INJECT_REMINDER_KEYS: &[&str] = &[
@@ -24,7 +26,6 @@ const INJECT_REMINDER_KEYS: &[&str] = &[
     "role_hint",
 ];
 const CLEAR_REMINDER_KEYS: &[&str] = &["id", "tag", "dedupe_key"];
-
 /// Extract and validate a transcript dict from the first argument.
 fn require_transcript<'a>(
     args: &'a [VmValue],
@@ -635,16 +636,24 @@ fn transcript_inject_reminder_builtin(args: &[VmValue]) -> Result<VmValue, VmErr
     let reminder = parse_inject_reminder_options(options, context)?;
 
     let mut preserved = transcript_extra_events(transcript);
-    let mut deduped_count = 0_i64;
+    let mut deduped_reminder_ids = Vec::new();
     if let Some(dedupe_key) = reminder.dedupe_key.as_deref() {
         preserved.retain(|event| {
-            let should_drop = reminder_payload(event)
-                .and_then(|payload| reminder_string_field(payload, "dedupe_key"))
-                .is_some_and(|key| key == dedupe_key);
-            if should_drop {
-                deduped_count += 1;
+            let dropped_id = reminder_payload(event).and_then(|payload| {
+                let key_matches = reminder_string_field(payload, "dedupe_key")
+                    .is_some_and(|key| key == dedupe_key);
+                if key_matches {
+                    Some(reminder_string_field(payload, "id").unwrap_or_default())
+                } else {
+                    None
+                }
+            });
+            if let Some(id) = dropped_id {
+                deduped_reminder_ids.push(id);
+                false
+            } else {
+                true
             }
-            !should_drop
         });
     }
 
@@ -660,13 +669,30 @@ fn transcript_inject_reminder_builtin(args: &[VmValue]) -> Result<VmValue, VmErr
         transcript_state(transcript),
     );
 
+    if !deduped_reminder_ids.is_empty() {
+        let dropped_count = deduped_reminder_ids.len();
+        emit_reminder_lifecycle_event(
+            REMINDER_DEDUPED_EVENT_KIND,
+            serde_json::json!({
+                "transcript_id": transcript_id(transcript),
+                "reminder_id": &reminder_id,
+                "dedupe_key": &reminder.dedupe_key,
+                "dropped_reminder_ids": &deduped_reminder_ids,
+                "dropped_count": dropped_count,
+            }),
+        );
+    }
+
     Ok(VmValue::Dict(Rc::new(BTreeMap::from([
         ("transcript".to_string(), next),
         (
             "reminder_id".to_string(),
             VmValue::String(Rc::from(reminder_id)),
         ),
-        ("deduped_count".to_string(), VmValue::Int(deduped_count)),
+        (
+            "deduped_count".to_string(),
+            VmValue::Int(deduped_reminder_ids.len() as i64),
+        ),
     ]))))
 }
 
@@ -733,7 +759,11 @@ fn ensure_known_reminder_keys(
     } else {
         Err(reminder_error(
             context,
-            format!("unknown option(s): {}", unknown.join(", ")),
+            format!(
+                "{}: unknown option(s): {}",
+                Code::ReminderUnknownOption.as_str(),
+                unknown.join(", ")
+            ),
         ))
     }
 }
