@@ -846,6 +846,7 @@ fn __dispatch_tool_calls(session_id, tool_calls, turn_opts) {
     approval_policy: turn_opts?.approval_policy,
     command_policy: turn_opts?.command_policy,
     permissions: turn_opts?.permissions,
+    reminders: turn_opts?.reminders,
     _turn_iteration: turn_opts?._turn_iteration ?? 0,
     _tool_caller: turn_opts?._tool_caller,
     _max_concurrent_tools: cap,

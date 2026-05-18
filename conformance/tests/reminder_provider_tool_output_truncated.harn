@@ -55,5 +55,39 @@ pipeline main() {
   println(same_turn_ttl.expired_count)
   println(len(same_turn_reminders))
   println(same_turn_reminders[0].reminder.ttl_turns)
+  llm_mock_clear()
+  llm_mock({tool_calls: [{id: "large_loop_1", name: "large_output", arguments: {}}]})
+  let loop_enabled = agent_loop(
+    "call a large tool",
+    nil,
+    {
+      provider: "mock",
+      tools: truncating_tools(),
+      tool_format: "native",
+      max_iterations: 1,
+      done_judge: nil,
+      session_id: "reminder-provider-tool-output-loop-enabled",
+    },
+  )
+  let loop_enabled_reminders = transcript_events_by_kind(loop_enabled.transcript, "system_reminder")
+  llm_mock_clear()
+  llm_mock({tool_calls: [{id: "large_loop_2", name: "large_output", arguments: {}}]})
+  let loop_disabled = agent_loop(
+    "call a large tool",
+    nil,
+    {
+      provider: "mock",
+      tools: truncating_tools(),
+      tool_format: "native",
+      max_iterations: 1,
+      done_judge: nil,
+      session_id: "reminder-provider-tool-output-loop-disabled",
+      reminders: {providers: ["-tool_output_truncated"]},
+    },
+  )
+  let loop_disabled_reminders = transcript_events_by_kind(loop_disabled.transcript, "system_reminder")
+  println(len(loop_enabled_reminders))
+  println(loop_enabled_reminders[0].reminder.tags[0])
+  println(len(loop_disabled_reminders))
   clear_tool_hooks()
 }
