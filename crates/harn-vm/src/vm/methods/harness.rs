@@ -70,7 +70,10 @@ impl crate::vm::Vm {
         let clock = handle.inner().clock();
         match method {
             "now_ms" => Ok(VmValue::Int(crate::clock::now_wall_ms(clock.as_ref()))),
-            "monotonic_ms" => Ok(VmValue::Int(clock.monotonic_ms())),
+            "timestamp" => Ok(VmValue::Float(
+                crate::clock::now_wall_ms(clock.as_ref()) as f64 / 1_000.0,
+            )),
+            "monotonic_ms" | "elapsed" => Ok(VmValue::Int(clock.monotonic_ms())),
             "sleep_ms" => {
                 let ms = args
                     .first()

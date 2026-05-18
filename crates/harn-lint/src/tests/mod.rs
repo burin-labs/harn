@@ -71,6 +71,7 @@ pub(super) fn lint_with_require_header(
     lint_with_options(&program, &[], Some(source), &HashSet::new(), &options)
 }
 
+mod ambient_clock;
 mod assert_pipeline;
 mod autofix;
 mod boolean_patterns;

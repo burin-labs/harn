@@ -6,7 +6,9 @@
 use std::collections::{HashMap, HashSet};
 
 use harn_lexer::{FixEdit, Span};
-use harn_parser::diagnostic::{find_closest_match, renamed_stdlib_symbol};
+use harn_parser::diagnostic::{
+    find_closest_match, harness_clock_replacement, renamed_stdlib_symbol,
+};
 use harn_parser::{BindingPattern, DiagnosticCode as Code, Node, SNode, TypeExpr, TypedParam};
 
 use crate::complexity::cyclomatic_complexity;
@@ -195,6 +197,47 @@ impl<'a> Linter<'a> {
             severity: LintSeverity::Warning,
             suggestion: Some(format!("replace `{name}` with `{replacement}`")),
             fix: replace_identifier_text_fix(self.source, span, name, replacement),
+        });
+    }
+
+    /// Flag ambient clock builtins (`now_ms`, `monotonic_ms`, `sleep_ms`,
+    /// `timestamp`, `elapsed`) so the E4.3 → E4.6 migration can rewrite
+    /// them to `harness.clock.*`. When `harness` (or `_harness`) is in
+    /// scope the lint emits a `bindings/thread-harness-clock` FixEdit;
+    /// otherwise the suggestion points users at the
+    /// `bindings/thread-harness` repair that adds the parameter.
+    pub(super) fn check_ambient_clock_builtin(&mut self, name: &str, span: Span) {
+        let Some(replacement) = harness_clock_replacement(name) else {
+            return;
+        };
+        let harness_in_scope = self
+            .scopes
+            .iter()
+            .any(|scope| scope.contains("harness") || scope.contains("_harness"));
+        let fix = if harness_in_scope {
+            replace_identifier_text_fix(self.source, span, name, replacement)
+        } else {
+            None
+        };
+        let suggestion = if harness_in_scope {
+            format!("replace `{name}` with `{replacement}`")
+        } else {
+            format!(
+                "thread `harness: Harness` through the enclosing fn (see repair \
+                 `bindings/thread-harness`), then call `{replacement}`"
+            )
+        };
+        self.diagnostics.push(LintDiagnostic {
+            code: Code::LintAmbientClockBuiltin,
+            rule: "ambient-clock-builtin",
+            message: format!(
+                "ambient `{name}` is deprecated — capabilities now route through \
+                 `harness.clock.*`"
+            ),
+            span,
+            severity: LintSeverity::Warning,
+            suggestion: Some(suggestion),
+            fix,
         });
     }
 

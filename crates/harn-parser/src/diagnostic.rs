@@ -101,6 +101,23 @@ pub fn renamed_stdlib_symbol(name: &str) -> Option<&'static str> {
     }
 }
 
+/// Map an ambient clock-capability builtin to its `harness.clock.*`
+/// replacement. Returns the new identifier text (including the receiver
+/// path) so the `bindings/thread-harness-clock` repair can replace the
+/// call-site identifier in place. The mapping is the source of truth for
+/// the E4.3 → E4.6 migration; downstream replatform agents query it via
+/// [`Code::repair_template`].
+pub fn harness_clock_replacement(name: &str) -> Option<&'static str> {
+    match name {
+        "now_ms" => Some("harness.clock.now_ms"),
+        "monotonic_ms" => Some("harness.clock.monotonic_ms"),
+        "sleep_ms" => Some("harness.clock.sleep_ms"),
+        "timestamp" => Some("harness.clock.timestamp"),
+        "elapsed" => Some("harness.clock.elapsed"),
+        _ => None,
+    }
+}
+
 /// Render a Rust-style diagnostic message.
 ///
 /// Example output:

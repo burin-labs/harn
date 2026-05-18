@@ -282,6 +282,7 @@ diagnostic_codes! {
     LintLegacyDocComment, "HARN-LNT-049", Lnt, "legacy doc comment lint";
     LintDeprecatedLlmOptions, "HARN-LNT-050", Lnt, "deprecated LLM options lint";
     LintUnnecessarySafeNavigation, "HARN-LNT-051", Lnt, "unnecessary safe navigation lint";
+    LintAmbientClockBuiltin, "HARN-LNT-052", Lnt, "ambient clock builtin replaced by `harness.clock.*`";
     FormatterParseFailed, "HARN-FMT-001", Fmt, "formatter could not parse the source";
     FormatterWouldReformat, "HARN-FMT-002", Fmt, "source is not in canonical format";
     FormatterTrailingComma, "HARN-FMT-003", Fmt, "formatter normalized trailing comma layout";
@@ -399,6 +400,9 @@ impl Code {
             Code::LintTemplateVariantExplosion => &[Code::PromptVariantExplosion],
             Code::LintTemplateProviderIdentityBranch => &[Code::PromptProviderIdentityBranch],
             Code::LintRenamedStdlibSymbol => &[Code::DeprecatedStdlibSymbol],
+            Code::LintAmbientClockBuiltin => {
+                &[Code::InvalidMainSignature, Code::LintRenamedStdlibSymbol]
+            }
             Code::LintMutableNeverReassigned => &[Code::MutableNeverReassigned],
             Code::LintUnusedImport => &[Code::ModuleImportUnused],
             Code::LintDuplicateMatchArm => &[Code::DuplicateMatchArm],
@@ -701,6 +705,7 @@ impl Code {
             Code::LintEagerCollectionConversion => Some(&REPAIR_COLLECTION_PREFER_LAZY),
             Code::LintDeadCodeAfterReturn => Some(&REPAIR_DEAD_CODE_REMOVE),
             Code::LintRenamedStdlibSymbol => Some(&REPAIR_STDLIB_MIGRATE_RENAMED),
+            Code::LintAmbientClockBuiltin => Some(&REPAIR_BINDINGS_THREAD_HARNESS_CLOCK),
             Code::LintDeprecatedLlmOptions => Some(&REPAIR_LLM_MIGRATE_DEPRECATED_OPTION),
             Code::LintTemplateProviderIdentityBranch => Some(&REPAIR_LLM_USE_CAPABILITY_FLAG),
             Code::LintPromptInjectionRisk => Some(&REPAIR_PROMPTS_ESCAPE_INJECTION),
@@ -795,6 +800,12 @@ const REPAIR_BINDINGS_THREAD_HARNESS: RepairTemplate = RepairTemplate {
     id: "bindings/thread-harness",
     summary: "Rewrite the entrypoint as `fn main(harness: Harness)` so the runtime can thread its capability handle",
     safety: RepairSafety::SurfaceChanging,
+};
+
+const REPAIR_BINDINGS_THREAD_HARNESS_CLOCK: RepairTemplate = RepairTemplate {
+    id: "bindings/thread-harness-clock",
+    summary: "Replace the ambient clock builtin with the corresponding `harness.clock.*` method",
+    safety: RepairSafety::ScopeLocal,
 };
 
 const REPAIR_DECLARATIONS_REMOVE_UNUSED: RepairTemplate = RepairTemplate {
@@ -973,6 +984,7 @@ pub const REPAIR_REGISTRY: &[&RepairTemplate] = &[
     &REPAIR_BINDINGS_RENAME_UNUSED,
     &REPAIR_BINDINGS_RENAME_SHADOW,
     &REPAIR_BINDINGS_THREAD_HARNESS,
+    &REPAIR_BINDINGS_THREAD_HARNESS_CLOCK,
     &REPAIR_DECLARATIONS_REMOVE_UNUSED,
     &REPAIR_IMPORTS_FIX_PATH,
     &REPAIR_IMPORTS_REMOVE_UNUSED,
@@ -1219,6 +1231,11 @@ mod tests {
                 Code::NonExhaustiveMatch,
                 RepairSafety::ScopeLocal,
                 "match/add-missing-arms",
+            ),
+            (
+                Code::LintAmbientClockBuiltin,
+                RepairSafety::ScopeLocal,
+                "bindings/thread-harness-clock",
             ),
         ];
         for (code, safety, repair_id) in expected {
