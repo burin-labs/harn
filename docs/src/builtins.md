@@ -2563,7 +2563,8 @@ artifact list and bake the packed chunks into the system prompt.
 | `sub_agent_request(task, options?)` | task: string, options: dict | dict | Build the normalized child-agent request that `sub_agent_run` sends to the host execution primitive |
 | `sub_agent_run(task, options?)` | task: string, options: dict | dict | Run an isolated child agent loop and return a clean envelope `{ok, summary, artifacts, evidence_added, tokens_used, budget_exceeded, data, error, session_id, transcript}`; with `background: true`, returns an agent-handle summary |
 | `send_input(handle, task)` | handle, task | dict | Re-run a completed worker with a new task, carrying forward worker state where applicable |
-| `resume_agent(id_or_snapshot_path)` | id or path | dict | Restore a persisted worker snapshot into the current runtime |
+| `suspend_agent(worker, reason?, options?)` | worker, reason, options | dict | Cooperatively suspend a worker, persist a resumable snapshot, and return `status: "suspended"` with `suspension` metadata |
+| `resume_agent(worker_or_snapshot, resume_input?)` | worker or snapshot, input | dict | Resume a suspended worker, optionally with new input, or restore a persisted worker snapshot into the current runtime |
 | `wait_agent(handle_or_list)` | handle or list | dict or list | Wait for one worker or a list of workers to finish |
 | `close_agent(handle)` | handle | dict | Cancel a worker and mark it terminal |
 | `list_agents()` | none | list | List worker summaries tracked by the current runtime |

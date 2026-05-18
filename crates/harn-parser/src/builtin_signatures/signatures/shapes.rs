@@ -496,6 +496,7 @@ pub(crate) const WORKER_SUMMARY: Ty = Ty::Shape(&[
     ShapeFieldDescriptor::new("execution", TY_DICT),
     ShapeFieldDescriptor::new("snapshot_path", TY_STRING),
     ShapeFieldDescriptor::new("audit", TY_DICT),
+    ShapeFieldDescriptor::optional("suspension", TY_DICT_OR_NIL),
 ]);
 
 /// User-facing result returned by foreground `sub_agent_run`. Background mode

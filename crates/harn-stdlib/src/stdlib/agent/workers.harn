@@ -219,16 +219,36 @@ pub fn close_agent(worker) {
 }
 
 /**
- * resume_agent.
+ * suspend_agent.
+ *
+ * Cooperatively mark a worker as suspended, persist its resumable snapshot,
+ * and return the worker summary with `status: "suspended"` plus
+ * `suspension` metadata.
  *
  * @effects: [host]
  * @allocation: heap
  * @errors: []
  * @api_stability: experimental
- * @example: resume_agent(worker_or_snapshot)
+ * @example: suspend_agent(worker, reason)
  */
-pub fn resume_agent(worker_or_snapshot) {
-  return __host_worker_resume(worker_or_snapshot)
+pub fn suspend_agent(worker, reason = "", options = nil) {
+  return __host_worker_suspend(worker, reason, options)
+}
+
+/**
+ * resume_agent.
+ *
+ * Resume a suspended worker, optionally wiring new input into the resumed
+ * task, or restore a persisted worker snapshot into the current runtime.
+ *
+ * @effects: [host]
+ * @allocation: heap
+ * @errors: []
+ * @api_stability: experimental
+ * @example: resume_agent(worker_or_snapshot, resume_input)
+ */
+pub fn resume_agent(worker_or_snapshot, resume_input = nil) {
+  return __host_worker_resume(worker_or_snapshot, resume_input)
 }
 
 /**
