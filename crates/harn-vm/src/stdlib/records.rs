@@ -5,16 +5,17 @@ use std::collections::BTreeMap;
 use std::rc::Rc;
 
 use crate::orchestration::{
-    diff_run_records, evaluate_context_pack_suggestion_expectations, evaluate_eval_pack_manifest,
-    evaluate_run_against_fixture, evaluate_run_suite, evaluate_run_suite_manifest,
-    extract_handoff_from_artifact, generate_context_pack_suggestions, handoff_context_text,
-    handoff_from_json_value, normalize_artifact, normalize_context_pack_manifest,
-    normalize_eval_pack_manifest_value, normalize_eval_suite_manifest, normalize_friction_event,
-    normalize_handoff_artifact_json, normalize_persona_eval_ladder_manifest_value,
-    normalize_run_record, parse_context_pack_manifest_src, parse_friction_events_value,
-    render_artifacts_context, render_unified_diff, replay_fixture_from_run,
-    run_persona_eval_ladder, save_run_record, select_artifacts, ArtifactRecord,
-    ContextPackSuggestionExpectation, ContextPackSuggestionOptions, ContextPolicy, ReplayFixture,
+    compute_handoff_effects, diff_run_records, evaluate_context_pack_suggestion_expectations,
+    evaluate_eval_pack_manifest, evaluate_run_against_fixture, evaluate_run_suite,
+    evaluate_run_suite_manifest, extract_handoff_from_artifact, generate_context_pack_suggestions,
+    handoff_context_text, handoff_from_json_value, normalize_artifact,
+    normalize_context_pack_manifest, normalize_eval_pack_manifest_value,
+    normalize_eval_suite_manifest, normalize_friction_event, normalize_handoff_artifact_json,
+    normalize_persona_eval_ladder_manifest_value, normalize_run_record,
+    parse_context_pack_manifest_src, parse_friction_events_value, render_artifacts_context,
+    render_unified_diff, replay_fixture_from_run, run_persona_eval_ladder, save_run_record,
+    select_artifacts, ArtifactRecord, CapabilityPolicy, ContextPackSuggestionExpectation,
+    ContextPackSuggestionOptions, ContextPolicy, ReplayFixture,
 };
 use crate::value::{VmError, VmValue};
 use crate::vm::Vm;
@@ -302,6 +303,38 @@ pub(crate) fn register_record_builtins(vm: &mut Vm) {
 
     vm.register_builtin("handoff_routes", |_args, _out| {
         to_vm(&crate::orchestration::snapshot_handoff_routes())
+    });
+
+    // `handoff_effects(source, ceiling?)` — compute the typed effect set
+    // for a child agent's entrypoint source. Pipelines call this when
+    // building a spawn-time handoff so the envelope carries an explicit,
+    // ceiling-clamped effect set (issue HARN-#1776 / E5.3). The dispatcher
+    // (E5.4) and the OpenTrustGraph receipt chain (E5.5) consume this
+    // payload directly.
+    vm.register_builtin("handoff_effects", |args, _out| {
+        let source = match args.first() {
+            Some(VmValue::String(text)) => text.to_string(),
+            Some(VmValue::Nil) | None => String::new(),
+            Some(other) => {
+                return Err(VmError::Runtime(format!(
+                    "handoff_effects: expected source string, got {}",
+                    other.type_name()
+                )));
+            }
+        };
+        let ceiling = match args.get(1) {
+            Some(VmValue::Nil) | None => None,
+            Some(value) => {
+                let json = crate::llm::vm_value_to_json(value);
+                Some(
+                    serde_json::from_value::<CapabilityPolicy>(json).map_err(|error| {
+                        VmError::Runtime(format!("handoff_effects: ceiling parse error: {error}"))
+                    })?,
+                )
+            }
+        };
+        let effects = compute_handoff_effects(&source, ceiling.as_ref());
+        to_vm(&effects)
     });
 
     vm.register_builtin("artifact_derive", |args, _out| {

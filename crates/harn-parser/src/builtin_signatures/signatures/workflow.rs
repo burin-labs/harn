@@ -310,6 +310,17 @@ pub(crate) const SIGNATURES: &[BuiltinSignature] = &[
         &[Param::new("payload", TY_DICT)],
         TY_STRING,
     ),
+    // handoff_effects(source, ceiling?) -> typed effect set computed from a
+    // child agent's entrypoint Harn source, clamped to the optional spawn-
+    // config ceiling (E5.3, #1776).
+    BuiltinSignature::simple(
+        "handoff_effects",
+        &[
+            Param::new("source", TY_STRING),
+            Param::optional("ceiling", TY_DICT_OR_NIL),
+        ],
+        TY_LIST,
+    ),
     // handoff_routes() -> runtime handoff route table from harn.toml.
     BuiltinSignature::simple("handoff_routes", &[], TY_LIST),
     // load_run_tree(path) — load a run record tree from disk.

@@ -36,6 +36,22 @@ condensed series summaries instead of full per-patch history.
   `harn run --json` NDJSON stream carrying the bundle hash, signature
   outcome, signing key id, cache-hit status, and dry-run flag so agents
   can audit pack execution without rereading the archive.
+- **Typed effect inheritance on `HandoffArtifact` (E5.3, #1776).** Adds
+  `EffectRecord { kind, scope, resource }` with `EffectKind` (`Stdio`,
+  `Fs`, `Net`, `Llm { provider, model }`, `Tool { name }`,
+  `Hostcall { name }`, `Persona { id }`, `Spawn`) and `EffectScope`
+  (`Read`, `Write`, `Mutate`, `Observe`) and wires an
+  `effects: Vec<EffectRecord>` field onto `HandoffArtifact` envelopes.
+  A new `compute_handoff_effects(source, ceiling)` utility reuses the
+  same capability analysis that backs `harn graph --json` (#1758) and
+  walks the AST for harness sub-handle method calls
+  (`harness.net.get`, `harness.fs.write_file`, …) that the IR doesn't
+  see directly. `attach_spawn_handoff_effects` and the
+  `handoff_effects(source, ceiling?)` Harn builtin let spawn shims
+  populate the field at child-spawn time, clamping the computed set
+  to the spawn-config declared ceiling. Enforcement of the ⊆ relation
+  lands in E5.4 (`HARN-CAP-301`); the OpenTrustGraph receipt-chain
+  embedding lands in E5.5.
 - **Transcript reminder transforms (#1817).** Adds
   `transcript.inject_reminder(transcript, options)` and
   `transcript.clear_reminders(transcript, selector)` over pending
