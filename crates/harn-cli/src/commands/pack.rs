@@ -11,22 +11,26 @@ use std::collections::BTreeMap;
 use std::path::{Component, Path, PathBuf};
 use std::process;
 
+use ed25519_dalek::Signer;
 use harn_parser::DiagnosticSeverity;
 use harn_vm::bytecode_cache;
 use harn_vm::module_artifact;
 use harn_vm::orchestration::{
     build_harnpack, load_workflow_bundle_any_version, workflow_bundle_hash, CatchupPolicySpec,
-    ConnectorRequirement, EnvironmentRequirements, HarnpackEntry, ModuleEntry, RetryPolicySpec,
-    SBOMDoc, SBOMPackage, SBOMRelationship, ToolEntry, WorkflowBundle, WorkflowBundlePolicy,
-    WorkflowBundleReplayMetadata, WorkflowBundleTrigger, WORKFLOW_BUNDLE_SCHEMA_VERSION,
+    ConnectorRequirement, Ed25519Signature, EnvironmentRequirements, HarnpackEntry, ModuleEntry,
+    RetryPolicySpec, SBOMDoc, SBOMPackage, SBOMRelationship, ToolEntry, WorkflowBundle,
+    WorkflowBundlePolicy, WorkflowBundleReplayMetadata, WorkflowBundleTrigger,
+    WORKFLOW_BUNDLE_SCHEMA_VERSION,
 };
 use harn_vm::Compiler;
+use harn_vm::{AutonomyTier, TrustRecord};
 use serde::Serialize;
 
 use crate::cli::PackArgs;
 use crate::command_error;
 use crate::json_envelope::{to_string_pretty, JsonEnvelope, JsonOutput};
 use crate::parse_source_file;
+use crate::skill_provenance;
 
 /// Stable schema version for the `harn pack --json` envelope. Bump when
 /// [`PackJsonData`] changes shape in a way that agents need to detect.
@@ -204,6 +208,24 @@ impl PackError {
 }
 
 pub fn build(args: &PackArgs) -> Result<PackOutcome, PackError> {
+    if args.sign && args.unsigned {
+        return Err(PackError::new(
+            "pack.sign_conflict",
+            "--sign and --unsigned cannot be used together",
+        ));
+    }
+    if args.sign && args.key.is_none() {
+        return Err(PackError::new(
+            "pack.sign_missing_key",
+            "--sign requires --key <path>",
+        ));
+    }
+    if !args.sign && args.key.is_some() {
+        return Err(PackError::new(
+            "pack.key_without_sign",
+            "--key requires --sign",
+        ));
+    }
     if let Some(upgrade) = &args.upgrade {
         if !upgrade.exists() {
             return Err(PackError::new(
@@ -498,16 +520,21 @@ pub fn build(args: &PackArgs) -> Result<PackOutcome, PackError> {
     })?;
     contents.push(HarnpackEntry::new(PACK_SBOM_ARCHIVE_PATH, sbom_bytes));
 
-    let archive_bytes = build_harnpack(&bundle, &contents).map_err(|err| {
-        PackError::new(
-            "pack.archive_failed",
-            format!("failed to assemble .harnpack archive: {err}"),
-        )
-    })?;
+    if args.sign {
+        let key_path = args.key.as_ref().expect("checked above");
+        sign_bundle(&mut bundle, &contents, key_path)?;
+    }
+
     let bundle_hash = workflow_bundle_hash(&bundle, &contents).map_err(|err| {
         PackError::new(
             "pack.hash_failed",
             format!("failed to compute bundle hash: {err}"),
+        )
+    })?;
+    let archive_bytes = build_harnpack(&bundle, &contents).map_err(|err| {
+        PackError::new(
+            "pack.archive_failed",
+            format!("failed to assemble .harnpack archive: {err}"),
         )
     })?;
 
@@ -529,6 +556,7 @@ pub fn build(args: &PackArgs) -> Result<PackOutcome, PackError> {
         )
     })?;
     let size_bytes = archive_bytes.len() as u64;
+    emit_release_trust_record(&project_root, &bundle_hash, &bundle.harn_version, args.sign)?;
 
     Ok(PackOutcome {
         bundle_hash: bundle_hash.clone(),
@@ -543,6 +571,96 @@ pub fn build(args: &PackArgs) -> Result<PackOutcome, PackError> {
             debug_symbol_metadata,
             manifest: bundle,
         },
+    })
+}
+
+fn sign_bundle(
+    bundle: &mut WorkflowBundle,
+    contents: &[HarnpackEntry],
+    key_path: &Path,
+) -> Result<(), PackError> {
+    let signing_key = skill_provenance::load_ed25519_signing_key(key_path).map_err(|err| {
+        PackError::new(
+            "pack.sign_key_failed",
+            format!("failed to load signing key {}: {err}", key_path.display()),
+        )
+    })?;
+    let bundle_hash = workflow_bundle_hash(bundle, contents).map_err(|err| {
+        PackError::new(
+            "pack.hash_failed",
+            format!("failed to compute bundle hash before signing: {err}"),
+        )
+    })?;
+    let verifying_key = signing_key.verifying_key();
+    let signature = signing_key.sign(bundle_hash.as_bytes());
+    bundle.signature = Some(Ed25519Signature {
+        key_id: Some(skill_provenance::fingerprint_for_key(&verifying_key)),
+        public_key: hex_encode(&verifying_key.to_bytes()),
+        signature: hex_encode(&signature.to_bytes()),
+        manifest_hash_blake3: bundle_hash,
+        algorithm: "ed25519".to_string(),
+    });
+    Ok(())
+}
+
+fn hex_encode(bytes: &[u8]) -> String {
+    let mut out = String::with_capacity(bytes.len() * 2);
+    for byte in bytes {
+        out.push_str(&format!("{byte:02x}"));
+    }
+    out
+}
+
+fn emit_release_trust_record(
+    project_root: &Path,
+    bundle_hash: &str,
+    harn_version: &str,
+    signed: bool,
+) -> Result<TrustRecord, PackError> {
+    let log = harn_vm::event_log::install_default_for_base_dir(project_root).map_err(|err| {
+        PackError::new(
+            "pack.trust_log_failed",
+            format!(
+                "failed to open OpenTrustGraph event log under {}: {err}",
+                project_root.display()
+            ),
+        )
+    })?;
+    let parent_trust_record_id = futures::executor::block_on(harn_vm::query_trust_records(
+        &log,
+        &harn_vm::TrustQueryFilters::default(),
+    ))
+    .map_err(|err| {
+        PackError::new(
+            "pack.trust_query_failed",
+            format!("failed to query prior OpenTrustGraph records: {err}"),
+        )
+    })?
+    .last()
+    .map(|record| record.record_id.clone());
+    let mut record = TrustRecord::release(
+        std::env::var("USER")
+            .ok()
+            .filter(|value| !value.trim().is_empty())
+            .unwrap_or_else(|| "harn-pack".to_string()),
+        bundle_hash.to_string(),
+        harn_version.to_string(),
+        parent_trust_record_id,
+        format!("harnpack-release-{}", uuid::Uuid::now_v7()),
+        if signed {
+            AutonomyTier::ActAuto
+        } else {
+            AutonomyTier::Suggest
+        },
+    );
+    record
+        .metadata
+        .insert("signed".to_string(), serde_json::json!(signed));
+    futures::executor::block_on(harn_vm::append_trust_record(&log, &record)).map_err(|err| {
+        PackError::new(
+            "pack.trust_record_failed",
+            format!("failed to append OpenTrustGraph release record: {err}"),
+        )
     })
 }
 

@@ -208,10 +208,7 @@ pub(crate) fn sign_skill(
     let private_key_path = private_key_path.as_ref();
     let skill_bytes = fs::read(skill_path)
         .map_err(|error| format!("failed to read {}: {error}", skill_path.display()))?;
-    let private_pem = fs::read_to_string(private_key_path)
-        .map_err(|error| format!("failed to read {}: {error}", private_key_path.display()))?;
-    let signing_key = SigningKey::from_pkcs8_pem(&private_pem)
-        .map_err(|error| format!("failed to parse {}: {error}", private_key_path.display()))?;
+    let signing_key = load_ed25519_signing_key(private_key_path)?;
     let signature = signing_key.sign(&skill_bytes);
     let signer_fingerprint = fingerprint_for_key(&signing_key.verifying_key());
     let skill_sha256 = sha256_hex(&skill_bytes);
@@ -269,10 +266,7 @@ pub(crate) fn endorse_skill(
         ));
     }
 
-    let private_pem = fs::read_to_string(private_key_path)
-        .map_err(|error| format!("failed to read {}: {error}", private_key_path.display()))?;
-    let signing_key = SigningKey::from_pkcs8_pem(&private_pem)
-        .map_err(|error| format!("failed to parse {}: {error}", private_key_path.display()))?;
+    let signing_key = load_ed25519_signing_key(private_key_path)?;
     let endorser_fingerprint = fingerprint_for_key(&signing_key.verifying_key());
     if endorser_fingerprint == envelope.signer_fingerprint {
         return Err(
@@ -619,6 +613,13 @@ pub(crate) fn signature_path_for(skill_path: &Path) -> PathBuf {
     append_suffix(skill_path, ".sig")
 }
 
+pub(crate) fn load_ed25519_signing_key(private_key_path: &Path) -> Result<SigningKey, String> {
+    let private_pem = fs::read_to_string(private_key_path)
+        .map_err(|error| format!("failed to read {}: {error}", private_key_path.display()))?;
+    SigningKey::from_pkcs8_pem(&private_pem)
+        .map_err(|error| format!("failed to parse {}: {error}", private_key_path.display()))
+}
+
 fn read_signature_envelope(signature_path: &Path) -> Result<SkillSignatureEnvelope, String> {
     let signature_raw = fs::read_to_string(signature_path)
         .map_err(|error| format!("failed to read {}: {error}", signature_path.display()))?;
@@ -739,7 +740,7 @@ fn sha256_hex(bytes: &[u8]) -> String {
     hex_encode(&digest)
 }
 
-fn fingerprint_for_key(key: &VerifyingKey) -> String {
+pub(crate) fn fingerprint_for_key(key: &VerifyingKey) -> String {
     let digest = Sha256::digest(key.as_bytes());
     hex_encode(&digest)
 }

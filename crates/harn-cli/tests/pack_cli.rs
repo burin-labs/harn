@@ -13,12 +13,19 @@ use harn_cli::cli::PackArgs;
 use harn_cli::commands::pack;
 use harn_cli::tests::common::cwd_lock;
 use harn_vm::orchestration::{
-    load_workflow_bundle, read_harnpack, SBOMDoc, WORKFLOW_BUNDLE_SCHEMA_VERSION,
+    load_workflow_bundle, read_harnpack, verify_workflow_bundle_signature, SBOMDoc,
+    WORKFLOW_BUNDLE_SCHEMA_VERSION,
 };
 use tempfile::TempDir;
 use tokio::runtime::Builder;
 
+const TEST_ED25519_PRIVATE_KEY: &str = "-----BEGIN PRIVATE KEY-----\nMC4CAQAwBQYDK2VwBCIEIDmsNDO8iZqiMmA/b7I7lwGXNKe68o+gDno6R5riUcDC\n-----END PRIVATE KEY-----\n";
+
 fn run_pack(args: &PackArgs) {
+    let _ = build_pack(args);
+}
+
+fn build_pack(args: &PackArgs) -> pack::PackOutcome {
     Builder::new_current_thread()
         .enable_all()
         .build()
@@ -26,8 +33,8 @@ fn run_pack(args: &PackArgs) {
         .block_on(async {
             let _cwd_guard = cwd_lock::lock_cwd_async().await;
             harn_vm::reset_thread_local_state();
-            pack::build(args).expect("pack succeeds");
-        });
+            pack::build(args).expect("pack succeeds")
+        })
 }
 
 fn pack_args(entrypoint: PathBuf, out: PathBuf) -> PackArgs {
@@ -35,6 +42,8 @@ fn pack_args(entrypoint: PathBuf, out: PathBuf) -> PackArgs {
         entrypoint,
         out: Some(out),
         upgrade: None,
+        sign: false,
+        key: None,
         unsigned: true,
         json: false,
     }
@@ -174,6 +183,8 @@ fn pack_json_envelope_carries_pack_schema() {
                 entrypoint: entry.clone(),
                 out: Some(out.clone()),
                 upgrade: None,
+                sign: false,
+                key: None,
                 unsigned: true,
                 json: true,
             })
@@ -253,6 +264,8 @@ fn pack_upgrade_replaces_schema_version_keeping_workflow() {
         entrypoint: entry.clone(),
         out: Some(out.clone()),
         upgrade: Some(v1.clone()),
+        sign: false,
+        key: None,
         unsigned: true,
         json: false,
     });
@@ -266,4 +279,121 @@ fn pack_upgrade_replaces_schema_version_keeping_workflow() {
     assert_eq!(bundle.triggers[0].id, "manual");
     assert!(!bundle.transitive_modules.is_empty(), "v2 fields populated");
     assert!(bundle.provider_catalog_hash.starts_with("blake3:"));
+}
+
+#[test]
+fn pack_signs_manifest_and_emits_release_trust_record() {
+    let workdir = TempDir::new().unwrap();
+    let entry = workdir.path().join("hello.harn");
+    fs::write(&entry, "println(\"signed\")\n").unwrap();
+    let key = workdir.path().join("release-key.pem");
+    fs::write(&key, TEST_ED25519_PRIVATE_KEY).unwrap();
+    let out = workdir.path().join("hello.harnpack");
+
+    let outcome = build_pack(&PackArgs {
+        entrypoint: entry.clone(),
+        out: Some(out.clone()),
+        upgrade: None,
+        sign: true,
+        key: Some(key),
+        unsigned: false,
+        json: false,
+    });
+
+    let archive = read_harnpack(&fs::read(&out).unwrap()).unwrap();
+    let signature = archive
+        .manifest
+        .signature
+        .as_ref()
+        .expect("signed pack embeds signature");
+    assert_eq!(signature.algorithm, "ed25519");
+    assert_eq!(signature.manifest_hash_blake3, outcome.bundle_hash);
+    assert!(signature.key_id.is_some());
+    verify_workflow_bundle_signature(&archive.manifest, &archive.contents)
+        .expect("signature verifies");
+
+    let log = harn_vm::event_log::install_default_for_base_dir(workdir.path()).unwrap();
+    assert!(
+        futures::executor::block_on(harn_vm::verify_trust_chain(&log))
+            .unwrap()
+            .verified
+    );
+    let records = release_records(&log);
+    let record = records.last().expect("release trust record emitted");
+    assert_eq!(record.autonomy_tier, harn_vm::AutonomyTier::ActAuto);
+    assert_eq!(record.metadata["bundle_hash"], outcome.bundle_hash);
+    assert_eq!(
+        record.metadata["harn_version"],
+        archive.manifest.harn_version
+    );
+    assert_eq!(record.metadata["signed"], true);
+    assert_eq!(record.metadata["action_kind"]["kind"], "release");
+}
+
+#[test]
+fn pack_unsigned_emits_suggest_release_trust_record() {
+    let workdir = TempDir::new().unwrap();
+    let entry = workdir.path().join("hello.harn");
+    fs::write(&entry, "println(\"unsigned\")\n").unwrap();
+    let out = workdir.path().join("hello.harnpack");
+
+    let outcome = build_pack(&pack_args(entry.clone(), out.clone()));
+
+    let archive = read_harnpack(&fs::read(&out).unwrap()).unwrap();
+    assert!(archive.manifest.signature.is_none());
+    let log = harn_vm::event_log::install_default_for_base_dir(workdir.path()).unwrap();
+    assert!(
+        futures::executor::block_on(harn_vm::verify_trust_chain(&log))
+            .unwrap()
+            .verified
+    );
+    let records = release_records(&log);
+    let record = records.last().expect("release trust record emitted");
+    assert_eq!(record.autonomy_tier, harn_vm::AutonomyTier::Suggest);
+    assert_eq!(record.metadata["bundle_hash"], outcome.bundle_hash);
+    assert_eq!(record.metadata["signed"], false);
+}
+
+#[test]
+fn workflow_bundle_signature_verifier_rejects_content_mismatch() {
+    let workdir = TempDir::new().unwrap();
+    let entry = workdir.path().join("hello.harn");
+    fs::write(&entry, "println(\"signed\")\n").unwrap();
+    let key = workdir.path().join("release-key.pem");
+    fs::write(&key, TEST_ED25519_PRIVATE_KEY).unwrap();
+    let out = workdir.path().join("hello.harnpack");
+
+    run_pack(&PackArgs {
+        entrypoint: entry.clone(),
+        out: Some(out.clone()),
+        upgrade: None,
+        sign: true,
+        key: Some(key),
+        unsigned: false,
+        json: false,
+    });
+
+    let mut archive = read_harnpack(&fs::read(&out).unwrap()).unwrap();
+    let source = archive
+        .contents
+        .iter_mut()
+        .find(|entry| entry.path == Path::new("sources/hello.harn"))
+        .expect("source entry present");
+    source.bytes = b"println(\"tampered\")\n".to_vec();
+    let error = verify_workflow_bundle_signature(&archive.manifest, &archive.contents)
+        .expect_err("tampered content must fail verification");
+    assert!(error.message.contains("signature hash mismatch"));
+}
+
+fn release_records(
+    log: &std::sync::Arc<harn_vm::event_log::AnyEventLog>,
+) -> Vec<harn_vm::TrustRecord> {
+    futures::executor::block_on(harn_vm::query_trust_records(
+        log,
+        &harn_vm::TrustQueryFilters {
+            action: Some(harn_vm::TRUST_ACTION_RELEASE.to_string()),
+            ..harn_vm::TrustQueryFilters::default()
+        },
+    ))
+    .unwrap()
 }

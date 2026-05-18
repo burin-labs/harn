@@ -22,9 +22,21 @@ pub struct PackArgs {
     #[arg(long, value_name = "OLD_BUNDLE")]
     pub upgrade: Option<PathBuf>,
 
-    /// Mark the bundle as unsigned. Signing lands in E6.3; today this
-    /// flag is documentary so scripts can opt into the future
-    /// `--sign`/`--unsigned` split without breaking.
+    /// Sign the bundle hash and embed an Ed25519 signature in the manifest.
+    #[arg(
+        long,
+        default_value_t = false,
+        conflicts_with = "unsigned",
+        requires = "key"
+    )]
+    pub sign: bool,
+
+    /// Ed25519 private key PEM used with `--sign`.
+    #[arg(long, value_name = "PATH", requires = "sign")]
+    pub key: Option<PathBuf>,
+
+    /// Mark the bundle as unsigned. This still emits an OpenTrustGraph
+    /// release record at autonomy tier `suggest`.
     #[arg(long, default_value_t = false)]
     pub unsigned: bool,
 
