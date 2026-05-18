@@ -1,0 +1,59 @@
+/**
+ * std/lifecycle/pool — named, concurrency-bounded agent thread pools (PL-01).
+ *
+ * Foundation for the agent pool epic (#1883). Provides:
+ *   - pool_create({...}) to allocate a named pool with a max_concurrent cap
+ *   - pool_get(name) / pool_list() for lookup and introspection
+ *   - pool.submit(fn() { ... }, options?) to enqueue a closure on the handle
+ *   - pool.size() and pool.snapshot() for inspection
+ *   - pool_wait(handle) to block until a submitted task reaches a terminal state
+ *
+ * Queue strategies, backpressure policies, channel composition, and durable
+ * state arrive in #1887..#1893; this module ships the minimal steel-thread
+ * surface and leaves room for those to land without an API break.
+ *
+ * Import:
+ *   import { pool_create, pool_get, pool_list, pool_wait } from "std/lifecycle/pool"
+ */
+fn __pool_attach_methods(snapshot) {
+  if type_of(snapshot) != "dict" {
+    return snapshot
+  }
+  let pool_id = snapshot.id
+  let methods = {
+    _namespace: "pool",
+    submit: { closure, options = nil -> __pool_submit(pool_id, closure, options) },
+    size: { -> __pool_size(pool_id) },
+    snapshot: { -> __pool_attach_methods(__pool_snapshot(pool_id)) },
+  }
+  return snapshot + methods
+}
+
+/** pool_create allocates a named pool and returns its handle. */
+pub fn pool_create(options = nil) {
+  return __pool_attach_methods(__pool_create(options))
+}
+
+/** pool_get looks up a pool by name or id; returns nil when not found. */
+pub fn pool_get(name_or_id) {
+  let snapshot = __pool_get(name_or_id)
+  if snapshot == nil {
+    return nil
+  }
+  return __pool_attach_methods(snapshot)
+}
+
+/** pool_list returns every pool registered in the current runtime. */
+pub fn pool_list() {
+  let snapshots = __pool_list()
+  var out = []
+  for snapshot in snapshots {
+    out = out.push(__pool_attach_methods(snapshot))
+  }
+  return out
+}
+
+/** pool_wait blocks until one or more pool task handles complete. */
+pub fn pool_wait(handle_or_handles) {
+  return __pool_wait(handle_or_handles)
+}

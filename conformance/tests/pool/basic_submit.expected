@@ -1,0 +1,22 @@
+[harn] pool
+[harn] demo
+[harn] 1
+[harn] 0
+[harn] 0
+[harn] pool_task
+[harn] demo
+[harn] completed
+[harn] 100
+[harn] completed
+[harn] 200
+[harn] completed
+[harn] 300
+[harn] 0
+[harn] 3
+[harn] 0
+[harn] 3
+[harn] demo
+[harn] true
+[harn] 1
+[harn] failed
+[harn] Thrown: boom

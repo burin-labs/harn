@@ -56,6 +56,15 @@ condensed series summaries instead of full per-patch history.
   registries land. Root harness action methods are present, with worker
   resume/cancel delegated to host worker primitives and not-yet-backed
   actions returning typed unsupported results.
+- **Named agent thread pools — `std/lifecycle/pool` (#1886).** Adds
+  `pool_create({name, max_concurrent, ...})` plus per-handle
+  `pool.submit(closure, options?)`, `pool.size()`, and `pool.snapshot()`
+  for bounding concurrent agent work behind a named, queue-backed pool.
+  Submissions accept `key` and `priority` hints (higher priority dequeues
+  first; ties FIFO). `pool_wait(handle)` and `wait_agent(handle)` both
+  block on pool task handles. Foundation for the agent pool epic
+  (#1883); queue strategies, backpressure, durability, channel
+  composition, and OTel spans land in #1887..#1893.
 - **`harn check --json` and `harn fmt --json` (#1759).** Adds
   standard `JsonEnvelope` reports for static checks and formatter
   runs, including per-file status, diagnostics, summary counts, and

@@ -130,8 +130,22 @@ pub fn worker_trigger(worker, payload) {
   return __host_worker_trigger(worker, payload)
 }
 
+fn __is_pool_task(value) {
+  return type_of(value) == "dict" && value?._type == "pool_task"
+}
+
 /** wait_agent. */
 pub fn wait_agent(worker_or_workers) {
+  if __is_pool_task(worker_or_workers) {
+    return __pool_wait(worker_or_workers)
+  }
+  if type_of(worker_or_workers) == "list" {
+    var results = []
+    for item in worker_or_workers {
+      results = results.push(wait_agent(item))
+    }
+    return results
+  }
   return __host_worker_wait(worker_or_workers)
 }
 
