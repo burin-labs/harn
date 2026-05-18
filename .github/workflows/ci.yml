@@ -27,70 +27,10 @@ env:
   RUSTFLAGS: "-D warnings"
 
 jobs:
-  # Auto-route to a self-hosted Linux runner when one is online with the
-  # `harn-ci` label, else fall back to GitHub-hosted. Mirrors the pattern
-  # in burin-code and harn-cloud so spinning up a Linux runner anywhere in
-  # the org instantly accelerates this repo's CI too. Falls through cleanly
-  # (all outputs `false`) when the GitHub App token cannot be minted or the
-  # API call fails, so CI never breaks because of runner-detection issues.
-  runner-availability:
-    name: Detect self-hosted runner availability
-    runs-on: ubuntu-latest
-    timeout-minutes: 5
-    outputs:
-      linux: ${{ steps.detect.outputs.linux }}
-      windows: ${{ steps.detect.outputs.windows }}
-      macos: ${{ steps.detect.outputs.macos }}
-    steps:
-      - name: Mint GitHub App token
-        id: app-token
-        continue-on-error: true
-        uses: actions/create-github-app-token@1b10c78c7865c340bc4f6099eb2f838309f1e8c3 # v3.1.1
-        with:
-          app-id: ${{ secrets.RELEASE_APP_ID }}
-          private-key: ${{ secrets.RELEASE_APP_PRIVATE_KEY }}
-          owner: ${{ github.repository_owner }}
-      - id: detect
-        env:
-          GH_TOKEN: ${{ steps.app-token.outputs.token }}
-          OWNER: ${{ github.repository_owner }}
-          HARN_TAG: harn-ci
-        run: |
-          set -euo pipefail
-          if [ -z "${GH_TOKEN:-}" ]; then
-            {
-              echo "linux=false"
-              echo "windows=false"
-              echo "macos=false"
-            } >> "$GITHUB_OUTPUT"
-            exit 0
-          fi
-          RUNNER_LIST="$(gh api "/orgs/${OWNER}/actions/runners?per_page=100" 2>/dev/null || true)"
-          if [ -z "$RUNNER_LIST" ] || ! echo "$RUNNER_LIST" | jq -e '.runners' > /dev/null 2>&1; then
-            {
-              echo "linux=false"
-              echo "windows=false"
-              echo "macos=false"
-            } >> "$GITHUB_OUTPUT"
-            exit 0
-          fi
-
-          # `.busy | not` keeps the workflow from queueing behind in-flight
-          # self-hosted work. When every matching runner is busy, the detection
-          # reports the OS as unavailable and the dependent jobs fall through to
-          # the GitHub-hosted runner via the `runs-on` ternary in each job.
-          for OS_LABEL in Linux Windows macOS; do
-            AVAILABLE="$(echo "$RUNNER_LIST" | jq -r --arg os "$OS_LABEL" --arg tag "${HARN_TAG}" '[.runners[] | select(.status == "online" and (.busy | not)) | select(any(.labels[].name; . == $tag)) | select(any(.labels[].name; . == $os))] | length > 0')"
-            KEY="$(echo "$OS_LABEL" | tr '[:upper:]' '[:lower:]')"
-            echo "${KEY}=${AVAILABLE}" >> "$GITHUB_OUTPUT"
-          done
-
   fmt:
     name: Format check
-    needs: runner-availability
-    # Pinned to ubuntu-latest. Runs `make fmt-check` + a small shell script —
-    # no compilation, no cache benefit. Leaving it routing-aware would mean
-    # contending with the slow `rust` job for the 2-runner Linux pool.
+    # Runs `make fmt-check` + a small shell script; no compilation, no cache
+    # benefit, and no reason to wait for a scarce self-hosted runner.
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
@@ -103,8 +43,7 @@ jobs:
 
   lint-md:
     name: Markdown lint
-    needs: runner-availability
-    # Pinned to ubuntu-latest. Single ~5 s Action step — no point contending.
+    # Single ~5 s Action step; no point contending for self-hosted runners.
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
@@ -112,8 +51,9 @@ jobs:
 
   rust:
     name: Rust (lint + test + conformance)
-    needs: runner-availability
-    runs-on: ${{ needs.runner-availability.outputs.linux == 'true' && fromJSON('["self-hosted", "Linux", "harn-ci"]') || 'ubuntu-latest' }}
+    # GitHub-hosted runners keep the required gate predictable while the
+    # self-hosted pool is scarce and shared by multiple repos.
+    runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
@@ -175,8 +115,7 @@ jobs:
 
   changes:
     name: Detect code changes
-    needs: runner-availability
-    runs-on: ${{ needs.runner-availability.outputs.linux == 'true' && fromJSON('["self-hosted", "Linux", "harn-ci"]') || 'ubuntu-latest' }}
+    runs-on: ubuntu-latest
     outputs:
       windows: ${{ steps.filter.outputs.windows }}
     steps:
@@ -200,7 +139,7 @@ jobs:
     name: Rust on Windows (build + smoke test)
     runs-on: windows-latest
     needs: changes
-    if: needs.changes.outputs.windows == 'true' || github.event_name == 'merge_group' || github.event_name == 'push'
+    if: needs.changes.outputs.windows == 'true' || github.event_name == 'push'
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
       - uses: dtolnay/rust-toolchain@29eef336d9b2848a0b548edc03f92a220660cdb8 # stable
@@ -245,9 +184,8 @@ jobs:
 
   portal:
     name: Portal frontend
-    needs: runner-availability
-    # Pinned to ubuntu-latest. ~30 s npm pipeline; setup-node's cache covers
-    # the only meaningful download and there's no sccache/cargo win to reclaim.
+    # ~30 s npm pipeline; setup-node's cache covers the only meaningful
+    # download and there's no sccache/cargo win to reclaim.
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
@@ -267,9 +205,8 @@ jobs:
 
   actions:
     name: GitHub Actions lint
-    needs: runner-availability
-    # Pinned to ubuntu-latest. ~18 s job. `go install` + actionlint runs on
-    # ephemeral images quickly enough; no win from a warm Go cache.
+    # ~18 s job. `go install` + actionlint runs on ephemeral images quickly
+    # enough; no win from a warm Go cache.
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
@@ -278,11 +215,10 @@ jobs:
 
   e2e:
     name: Slow E2E suite
-    needs: runner-availability
-    runs-on: ${{ needs.runner-availability.outputs.linux == 'true' && fromJSON('["self-hosted", "Linux", "harn-ci"]') || 'ubuntu-latest' }}
+    runs-on: ubuntu-latest
     if: >
-      github.event_name == 'merge_group' ||
-      (github.event_name == 'pull_request' && contains(github.event.pull_request.labels.*.name, 'e2e'))
+      github.event_name == 'pull_request' &&
+      contains(github.event.pull_request.labels.*.name, 'e2e')
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
       - uses: dtolnay/rust-toolchain@29eef336d9b2848a0b548edc03f92a220660cdb8 # stable
@@ -302,9 +238,9 @@ jobs:
 
   ci-status:
     name: CI status
-    runs-on: ${{ needs.runner-availability.outputs.linux == 'true' && fromJSON('["self-hosted", "Linux", "harn-ci"]') || 'ubuntu-latest' }}
+    runs-on: ubuntu-latest
     if: always()
-    needs: [runner-availability, fmt, lint-md, rust, windows, portal, actions, e2e]
+    needs: [fmt, lint-md, rust, windows, portal, actions, e2e]
     steps:
       - name: Verify required CI jobs
         run: |
@@ -327,8 +263,8 @@ jobs:
             exit 1
           fi
 
-          # The E2E job only runs on merge_group and PRs with the `e2e` label.
-          # Treat `skipped` as passing so regular PRs are not blocked.
+          # The E2E job only runs on PRs with the `e2e` label. Treat `skipped`
+          # as passing so regular PRs and merge-group batches are not blocked.
           e2e_result="${{ needs.e2e.result }}"
           echo "Slow E2E suite: $e2e_result"
           if [ "$e2e_result" != "success" ] && [ "$e2e_result" != "skipped" ]; then
@@ -349,9 +285,9 @@ jobs:
 
   deploy-docs:
     name: Deploy docs
-    needs: [runner-availability, ci-status]
-    # Pinned to ubuntu-latest. The job is a single `curl` to the Render deploy
-    # hook; running it on a self-hosted runner adds no value.
+    needs: [ci-status]
+    # Single `curl` to the Render deploy hook; running it on a self-hosted
+    # runner adds no value.
     runs-on: ubuntu-latest
     if: github.ref == 'refs/heads/main'
     steps:

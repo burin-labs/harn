@@ -17,7 +17,6 @@ on:
       - "spec/openapi.yaml"
       - "spec/openapi.snapshot"
       - "spec/openapi-sdk-surface.md"
-  merge_group:
   release:
     types:
       - published

@@ -5,8 +5,6 @@ name: E2E
 #   - nightly (3 AM UTC)
 #   - when the `e2e` label is added to a pull request
 #   - manually via workflow_dispatch
-#
-# The merge-queue E2E run lives in ci.yml (needs the same ci-status gate).
 
 on:
   schedule:
