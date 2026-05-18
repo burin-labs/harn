@@ -294,7 +294,7 @@ fn canonical_providers() -> [&'static dyn ReminderProvider; 4] {
 }
 
 fn subscribes_to(events: &[HookEvent], event: HookEvent) -> bool {
-    events.iter().any(|candidate| *candidate == event)
+    events.contains(&event)
 }
 
 fn normalize_payload(event: HookEvent, session_id: &str, payload: JsonValue) -> JsonValue {
