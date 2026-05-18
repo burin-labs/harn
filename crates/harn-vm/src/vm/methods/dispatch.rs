@@ -38,6 +38,32 @@ impl crate::vm::Vm {
                 VmValue::StructInstance { .. } => {
                     self.call_struct_instance_method(&obj, method, args).await
                 }
+                VmValue::BuiltinRef(name) => {
+                    let qualified = format!("{name}.{method}");
+                    if self.builtins.contains_key(&qualified)
+                        || self.async_builtins.contains_key(&qualified)
+                    {
+                        self.call_named_builtin(&qualified, args.to_vec()).await
+                    } else {
+                        Err(VmError::TypeError(format!(
+                            "value of type {} has no method `{method}`",
+                            obj.type_name()
+                        )))
+                    }
+                }
+                VmValue::BuiltinRefId { name, .. } => {
+                    let qualified = format!("{name}.{method}");
+                    if self.builtins.contains_key(&qualified)
+                        || self.async_builtins.contains_key(&qualified)
+                    {
+                        self.call_named_builtin(&qualified, args.to_vec()).await
+                    } else {
+                        Err(VmError::TypeError(format!(
+                            "value of type {} has no method `{method}`",
+                            obj.type_name()
+                        )))
+                    }
+                }
                 VmValue::Generator(gen) => self.call_generator_method(gen, method).await,
                 VmValue::Stream(stream) => self.call_stream_method(stream, method).await,
                 VmValue::Iter(handle) => self.call_iter_method(handle, method, args).await,

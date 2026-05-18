@@ -1,0 +1,26 @@
+pipeline main() {
+  let base = transcript()
+  let first = transcript
+    .inject_reminder(
+    base,
+    {body: "old reminder", tags: ["context"], dedupe_key: "context-slot", ttl_turns: 2},
+  )
+  let second = transcript
+    .inject_reminder(
+    first.transcript,
+    {
+      body: "new reminder",
+      tags: ["context"],
+      dedupe_key: "context-slot",
+      ttl_turns: 3,
+      role_hint: "developer",
+    },
+  )
+  let events = transcript_events_by_kind(second.transcript, "system_reminder")
+  println(second.deduped_count)
+  println(len(events))
+  println(events[0].text)
+  println(events[0].reminder.ttl_turns)
+  println(events[0].role)
+  println(len(transcript_messages(second.transcript)))
+}

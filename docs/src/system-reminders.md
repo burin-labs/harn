@@ -9,11 +9,12 @@ file-changed alerts, post-tool truncation hints, post-compact awareness
 prompts — without abusing the `user` role or polluting the durable
 message history.
 
-R-01 ships the **schema and event envelope**. The rest of the lifecycle
-(stdlib providers, hook return variants, the bridge `agent/inject_reminder`
-notification, the in-Harn `transcript.inject_reminder` builtin, compaction
-honoring TTL + `preserve_on_compact`, sub-agent propagation, and
-capability-aware rendering) lands in R-02 through R-12 under epic
+R-01 shipped the **schema and event envelope**. R-02 adds deterministic
+in-Harn transcript transforms for injecting and clearing pending reminder
+events. The rest of the lifecycle (stdlib providers, hook return variants,
+the bridge `agent/inject_reminder` notification, compaction honoring TTL +
+`preserve_on_compact`, sub-agent propagation, expiry EventLog events, and
+capability-aware rendering) lands in later tickets under epic
 [#1815](https://github.com/burin-labs/harn/issues/1815).
 
 ## Event shape
@@ -92,11 +93,6 @@ let evt = transcript_reminder_event({
   source: "stdlib_provider",
   fired_at_turn: 4,
 })
-// R-02+: hand the typed event to the session-scoped injection
-// pathway (stdlib provider, hook return variant, bridge notification,
-// or pipeline-level `transcript.inject_reminder`). R-01 ships the
-// shape; the injection sites land in subsequent tickets under
-// epic #1815.
 ```
 
 Defaults applied when fields are omitted:
@@ -111,6 +107,58 @@ Defaults applied when fields are omitted:
 Hosts and stdlib reminder providers reuse the same shape — the typed
 [`SystemReminder`](https://docs.rs/harn-vm) Rust struct serde-round-trips
 into and out of this dict.
+
+## Injecting and clearing pending reminders
+
+Use `transcript.inject_reminder(transcript, options)` when a Harn
+pipeline wants to add a pending reminder to a transcript. It returns an
+envelope instead of mutating the input:
+
+```harn,ignore
+let injected = transcript.inject_reminder(transcript(), {
+  body: "Approaching context window cap.",
+  tags: ["token_pressure"],
+  dedupe_key: "token_pressure",
+  ttl_turns: 3,
+  preserve_on_compact: true,
+  propagate: "session",
+  role_hint: "developer",
+})
+
+let next_transcript = injected.transcript
+let reminder_id = injected.reminder_id
+```
+
+The returned transcript has one additional `system_reminder` event and
+the same durable message list as the input transcript. `body` is
+required and must be non-empty. Optional `tags`, `dedupe_key`,
+`ttl_turns`, `preserve_on_compact`, `propagate`, and `role_hint` fields
+are validated; unknown option keys fail fast.
+
+When `dedupe_key` is set, injection first removes any pending reminder
+events with the same key from the input transcript. The new reminder is
+then appended, and `deduped_count` reports how many older reminders were
+replaced.
+
+Use `transcript.clear_reminders(transcript, selector)` to remove
+pending reminders:
+
+```harn,ignore
+let cleared = transcript.clear_reminders(next_transcript, {
+  tag: "token_pressure",
+})
+println(cleared.removed_count)
+```
+
+Selectors support `id`, `tag`, and `dedupe_key`. At least one selector
+is required. If multiple selectors are present, a reminder must match
+all of them to be removed. This builtin is also a pure transform and
+returns `{transcript, removed_count}`.
+
+`ttl_turns` is stored on reminder events today. Post-turn TTL decrement,
+expiry EventLog events, hook return variants, bridge notifications, and
+provider-specific reminder rendering are intentionally not implemented
+by these transcript transforms.
 
 ## Reading reminders off a transcript
 
@@ -128,6 +176,7 @@ for evt in reminders {
 
 - Epic: [#1815 — System Reminders & Ambient Context Injection](https://github.com/burin-labs/harn/issues/1815).
 - Foundation ticket: [#1816 — SystemReminder transcript event kind + lifecycle schema](https://github.com/burin-labs/harn/issues/1816).
+- Transform builtins: [#1817 — `transcript.inject_reminder()` + `transcript.clear_reminders()`](https://github.com/burin-labs/harn/issues/1817).
 - Capability flags driving the `role_hint` → wire-role dispatch:
   [#1665](https://github.com/burin-labs/harn/issues/1665).
 - Hook return variants that will surface `Reminder{...}` alongside

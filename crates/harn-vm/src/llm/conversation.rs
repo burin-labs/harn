@@ -2,16 +2,28 @@ use std::collections::BTreeMap;
 use std::rc::Rc;
 
 use crate::value::{VmError, VmValue};
-use crate::vm::Vm;
+use crate::vm::{Vm, VmBuiltinArity, VmBuiltinMetadata};
 
 use super::helpers::{
     extract_llm_options, is_transcript_value, new_transcript_with, new_transcript_with_events,
     normalize_transcript_asset, transcript_asset_list, transcript_drain_decision_event_from_value,
-    transcript_event, transcript_id, transcript_message_list, transcript_reminder_event_from_value,
-    transcript_resumption_event_from_value, transcript_summary_text,
-    transcript_suspension_event_from_value, vm_add_role_message, vm_message_value,
-    vm_value_to_json,
+    transcript_event, transcript_id, transcript_message_list, transcript_reminder_event,
+    transcript_reminder_event_from_value, transcript_resumption_event_from_value,
+    transcript_summary_text, transcript_suspension_event_from_value, vm_add_role_message,
+    vm_message_value, vm_value_to_json, ReminderPropagate, ReminderRoleHint, ReminderSource,
+    SystemReminder, SYSTEM_REMINDER_EVENT_KIND,
 };
+
+const INJECT_REMINDER_KEYS: &[&str] = &[
+    "body",
+    "tags",
+    "dedupe_key",
+    "ttl_turns",
+    "preserve_on_compact",
+    "propagate",
+    "role_hint",
+];
+const CLEAR_REMINDER_KEYS: &[&str] = &["id", "tag", "dedupe_key"];
 
 /// Extract and validate a transcript dict from the first argument.
 fn require_transcript<'a>(
@@ -40,6 +52,28 @@ pub(crate) fn register_conversation_builtins(vm: &mut Vm) {
         let metadata = args.first().cloned();
         Ok(new_transcript_with(None, Vec::new(), None, metadata))
     });
+
+    vm.register_builtin_with_metadata(
+        VmBuiltinMetadata::sync_static("transcript.inject_reminder")
+            .signature_static("transcript.inject_reminder(transcript, options) -> dict")
+            .arity(VmBuiltinArity::Exact(2))
+            .category_static("transcript")
+            .doc_static(
+                "Inject a pending system reminder and return {transcript, reminder_id, deduped_count}.",
+            ),
+        |args, _out| transcript_inject_reminder_builtin(args),
+    );
+
+    vm.register_builtin_with_metadata(
+        VmBuiltinMetadata::sync_static("transcript.clear_reminders")
+            .signature_static("transcript.clear_reminders(transcript, selector) -> dict")
+            .arity(VmBuiltinArity::Exact(2))
+            .category_static("transcript")
+            .doc_static(
+                "Remove pending system reminders by id, tag, and/or dedupe_key and return {transcript, removed_count}.",
+            ),
+        |args, _out| transcript_clear_reminders_builtin(args),
+    );
 
     vm.register_builtin("transcript_from_messages", |args, _out| {
         let messages = match args.first() {
@@ -557,10 +591,30 @@ fn rebuild_transcript(
     messages: Vec<VmValue>,
     summary: Option<String>,
     assets: Vec<VmValue>,
+    extra_events: Vec<VmValue>,
+    state: Option<&str>,
+) -> VmValue {
+    let preserved = transcript_extra_events(transcript);
+    rebuild_transcript_with_preserved_events(
+        transcript,
+        messages,
+        summary,
+        assets,
+        preserved,
+        extra_events,
+        state,
+    )
+}
+
+fn rebuild_transcript_with_preserved_events(
+    transcript: &BTreeMap<String, VmValue>,
+    messages: Vec<VmValue>,
+    summary: Option<String>,
+    assets: Vec<VmValue>,
+    mut preserved: Vec<VmValue>,
     mut extra_events: Vec<VmValue>,
     state: Option<&str>,
 ) -> VmValue {
-    let mut preserved = transcript_extra_events(transcript);
     preserved.append(&mut extra_events);
     new_transcript_with_events(
         transcript_id(transcript),
@@ -571,4 +625,499 @@ fn rebuild_transcript(
         assets,
         state,
     )
+}
+
+fn transcript_inject_reminder_builtin(args: &[VmValue]) -> Result<VmValue, VmError> {
+    let context = "transcript.inject_reminder";
+    let transcript = require_transcript(args, context)?;
+    let options = require_reminder_options(args, 1, context)?;
+    ensure_known_reminder_keys(context, options, INJECT_REMINDER_KEYS)?;
+    let reminder = parse_inject_reminder_options(options, context)?;
+
+    let mut preserved = transcript_extra_events(transcript);
+    let mut deduped_count = 0_i64;
+    if let Some(dedupe_key) = reminder.dedupe_key.as_deref() {
+        preserved.retain(|event| {
+            let should_drop = reminder_payload(event)
+                .and_then(|payload| reminder_string_field(payload, "dedupe_key"))
+                .is_some_and(|key| key == dedupe_key);
+            if should_drop {
+                deduped_count += 1;
+            }
+            !should_drop
+        });
+    }
+
+    let reminder_id = reminder.id.clone();
+    let reminder_event = transcript_reminder_event(&reminder);
+    let next = rebuild_transcript_with_preserved_events(
+        transcript,
+        transcript_message_list(transcript)?,
+        transcript_summary_text(transcript),
+        transcript_asset_list(transcript)?,
+        preserved,
+        vec![reminder_event],
+        transcript_state(transcript),
+    );
+
+    Ok(VmValue::Dict(Rc::new(BTreeMap::from([
+        ("transcript".to_string(), next),
+        (
+            "reminder_id".to_string(),
+            VmValue::String(Rc::from(reminder_id)),
+        ),
+        ("deduped_count".to_string(), VmValue::Int(deduped_count)),
+    ]))))
+}
+
+fn transcript_clear_reminders_builtin(args: &[VmValue]) -> Result<VmValue, VmError> {
+    let context = "transcript.clear_reminders";
+    let transcript = require_transcript(args, context)?;
+    let options = require_reminder_options(args, 1, context)?;
+    ensure_known_reminder_keys(context, options, CLEAR_REMINDER_KEYS)?;
+    let selector = parse_clear_reminder_selector(options, context)?;
+
+    let mut removed_count = 0_i64;
+    let mut preserved = Vec::new();
+    for event in transcript_extra_events(transcript) {
+        if reminder_payload(&event).is_some_and(|payload| selector.matches(payload)) {
+            removed_count += 1;
+        } else {
+            preserved.push(event);
+        }
+    }
+
+    let next = rebuild_transcript_with_preserved_events(
+        transcript,
+        transcript_message_list(transcript)?,
+        transcript_summary_text(transcript),
+        transcript_asset_list(transcript)?,
+        preserved,
+        Vec::new(),
+        transcript_state(transcript),
+    );
+
+    Ok(VmValue::Dict(Rc::new(BTreeMap::from([
+        ("transcript".to_string(), next),
+        ("removed_count".to_string(), VmValue::Int(removed_count)),
+    ]))))
+}
+
+fn require_reminder_options<'a>(
+    args: &'a [VmValue],
+    index: usize,
+    context: &str,
+) -> Result<&'a BTreeMap<String, VmValue>, VmError> {
+    match args.get(index) {
+        Some(VmValue::Dict(dict)) => Ok(dict),
+        Some(other) => Err(reminder_error(
+            context,
+            format!("options must be a dict, got {}", other.type_name()),
+        )),
+        None => Err(reminder_error(context, "options are required")),
+    }
+}
+
+fn ensure_known_reminder_keys(
+    context: &str,
+    options: &BTreeMap<String, VmValue>,
+    allowed: &[&str],
+) -> Result<(), VmError> {
+    let unknown = options
+        .keys()
+        .filter(|key| !allowed.contains(&key.as_str()))
+        .map(String::as_str)
+        .collect::<Vec<_>>();
+    if unknown.is_empty() {
+        Ok(())
+    } else {
+        Err(reminder_error(
+            context,
+            format!("unknown option(s): {}", unknown.join(", ")),
+        ))
+    }
+}
+
+fn parse_inject_reminder_options(
+    options: &BTreeMap<String, VmValue>,
+    context: &str,
+) -> Result<SystemReminder, VmError> {
+    Ok(SystemReminder {
+        id: uuid::Uuid::now_v7().to_string(),
+        tags: reminder_tags(options, context)?,
+        dedupe_key: optional_reminder_string(options, "dedupe_key", context)?,
+        ttl_turns: optional_reminder_ttl(options, context)?,
+        preserve_on_compact: optional_reminder_bool(options, "preserve_on_compact", context)?
+            .unwrap_or(false),
+        propagate: optional_reminder_propagate(options, context)?
+            .unwrap_or(ReminderPropagate::Session),
+        role_hint: optional_reminder_role_hint(options, context)?
+            .unwrap_or(ReminderRoleHint::System),
+        source: ReminderSource::InPipeline,
+        body: required_reminder_string(options, "body", context)?,
+        fired_at_turn: 0,
+    })
+}
+
+#[derive(Debug, Default)]
+struct ClearReminderSelector {
+    id: Option<String>,
+    tag: Option<String>,
+    dedupe_key: Option<String>,
+}
+
+impl ClearReminderSelector {
+    fn matches(&self, reminder: &BTreeMap<String, VmValue>) -> bool {
+        if let Some(expected) = self.id.as_deref() {
+            if reminder_string_field(reminder, "id").as_deref() != Some(expected) {
+                return false;
+            }
+        }
+        if let Some(expected) = self.dedupe_key.as_deref() {
+            if reminder_string_field(reminder, "dedupe_key").as_deref() != Some(expected) {
+                return false;
+            }
+        }
+        if let Some(expected) = self.tag.as_deref() {
+            let Some(VmValue::List(tags)) = reminder.get("tags") else {
+                return false;
+            };
+            if !tags.iter().any(|tag| tag.display() == expected) {
+                return false;
+            }
+        }
+        true
+    }
+}
+
+fn parse_clear_reminder_selector(
+    options: &BTreeMap<String, VmValue>,
+    context: &str,
+) -> Result<ClearReminderSelector, VmError> {
+    let selector = ClearReminderSelector {
+        id: optional_reminder_string(options, "id", context)?,
+        tag: optional_reminder_string(options, "tag", context)?,
+        dedupe_key: optional_reminder_string(options, "dedupe_key", context)?,
+    };
+    if selector.id.is_none() && selector.tag.is_none() && selector.dedupe_key.is_none() {
+        return Err(reminder_error(
+            context,
+            "at least one of id, tag, or dedupe_key is required",
+        ));
+    }
+    Ok(selector)
+}
+
+fn required_reminder_string(
+    options: &BTreeMap<String, VmValue>,
+    key: &str,
+    context: &str,
+) -> Result<String, VmError> {
+    match options.get(key) {
+        Some(VmValue::String(value)) if !value.trim().is_empty() => Ok(value.to_string()),
+        Some(VmValue::String(_)) | None | Some(VmValue::Nil) => Err(reminder_error(
+            context,
+            format!("`{key}` must be a non-empty string"),
+        )),
+        Some(other) => Err(reminder_error(
+            context,
+            format!("`{key}` must be a string, got {}", other.type_name()),
+        )),
+    }
+}
+
+fn optional_reminder_string(
+    options: &BTreeMap<String, VmValue>,
+    key: &str,
+    context: &str,
+) -> Result<Option<String>, VmError> {
+    match options.get(key) {
+        None | Some(VmValue::Nil) => Ok(None),
+        Some(VmValue::String(value)) => {
+            let trimmed = value.trim();
+            if trimmed.is_empty() {
+                Ok(None)
+            } else {
+                Ok(Some(trimmed.to_string()))
+            }
+        }
+        Some(other) => Err(reminder_error(
+            context,
+            format!("`{key}` must be a string or nil, got {}", other.type_name()),
+        )),
+    }
+}
+
+fn reminder_tags(
+    options: &BTreeMap<String, VmValue>,
+    context: &str,
+) -> Result<Vec<String>, VmError> {
+    match options.get("tags") {
+        None | Some(VmValue::Nil) => Ok(Vec::new()),
+        Some(VmValue::List(values)) => {
+            let mut tags = Vec::new();
+            for value in values.iter() {
+                let VmValue::String(tag) = value else {
+                    return Err(reminder_error(
+                        context,
+                        format!("`tags` entries must be strings, got {}", value.type_name()),
+                    ));
+                };
+                let trimmed = tag.trim();
+                if trimmed.is_empty() {
+                    return Err(reminder_error(
+                        context,
+                        "`tags` entries must be non-empty strings",
+                    ));
+                }
+                if !tags.iter().any(|existing| existing == trimmed) {
+                    tags.push(trimmed.to_string());
+                }
+            }
+            Ok(tags)
+        }
+        Some(other) => Err(reminder_error(
+            context,
+            format!("`tags` must be a list or nil, got {}", other.type_name()),
+        )),
+    }
+}
+
+fn optional_reminder_bool(
+    options: &BTreeMap<String, VmValue>,
+    key: &str,
+    context: &str,
+) -> Result<Option<bool>, VmError> {
+    match options.get(key) {
+        None | Some(VmValue::Nil) => Ok(None),
+        Some(VmValue::Bool(value)) => Ok(Some(*value)),
+        Some(other) => Err(reminder_error(
+            context,
+            format!("`{key}` must be a bool or nil, got {}", other.type_name()),
+        )),
+    }
+}
+
+fn optional_reminder_ttl(
+    options: &BTreeMap<String, VmValue>,
+    context: &str,
+) -> Result<Option<i64>, VmError> {
+    match options.get("ttl_turns") {
+        None | Some(VmValue::Nil) => Ok(None),
+        Some(VmValue::Int(value)) if *value > 0 => Ok(Some(*value)),
+        Some(VmValue::Int(_)) => Err(reminder_error(context, "`ttl_turns` must be > 0")),
+        Some(other) => Err(reminder_error(
+            context,
+            format!(
+                "`ttl_turns` must be an int or nil, got {}",
+                other.type_name()
+            ),
+        )),
+    }
+}
+
+fn optional_reminder_propagate(
+    options: &BTreeMap<String, VmValue>,
+    context: &str,
+) -> Result<Option<ReminderPropagate>, VmError> {
+    optional_reminder_string(options, "propagate", context)?
+        .map(|value| match value.as_str() {
+            "all" => Ok(ReminderPropagate::All),
+            "session" => Ok(ReminderPropagate::Session),
+            "none" => Ok(ReminderPropagate::None),
+            _ => Err(reminder_error(
+                context,
+                "`propagate` must be one of all, session, or none",
+            )),
+        })
+        .transpose()
+}
+
+fn optional_reminder_role_hint(
+    options: &BTreeMap<String, VmValue>,
+    context: &str,
+) -> Result<Option<ReminderRoleHint>, VmError> {
+    optional_reminder_string(options, "role_hint", context)?
+        .map(|value| match value.as_str() {
+            "system" => Ok(ReminderRoleHint::System),
+            "developer" => Ok(ReminderRoleHint::Developer),
+            "user_block" => Ok(ReminderRoleHint::UserBlock),
+            "ephemeral_cache" => Ok(ReminderRoleHint::EphemeralCache),
+            _ => Err(reminder_error(
+                context,
+                "`role_hint` must be one of system, developer, user_block, or ephemeral_cache",
+            )),
+        })
+        .transpose()
+}
+
+fn reminder_payload(event: &VmValue) -> Option<&BTreeMap<String, VmValue>> {
+    let event = event.as_dict()?;
+    if event.get("kind").map(|value| value.display()).as_deref() != Some(SYSTEM_REMINDER_EVENT_KIND)
+    {
+        return None;
+    }
+    event.get("reminder").and_then(VmValue::as_dict)
+}
+
+fn reminder_string_field(reminder: &BTreeMap<String, VmValue>, key: &str) -> Option<String> {
+    match reminder.get(key) {
+        Some(VmValue::String(value)) if !value.is_empty() => Some(value.to_string()),
+        _ => None,
+    }
+}
+
+fn reminder_error(context: &str, message: impl Into<String>) -> VmError {
+    VmError::Thrown(VmValue::String(Rc::from(format!(
+        "{context}: {}",
+        message.into()
+    ))))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn vm_string(value: &str) -> VmValue {
+        VmValue::String(Rc::from(value))
+    }
+
+    fn dict(entries: Vec<(&str, VmValue)>) -> VmValue {
+        VmValue::Dict(Rc::new(
+            entries
+                .into_iter()
+                .map(|(key, value)| (key.to_string(), value))
+                .collect(),
+        ))
+    }
+
+    fn strings(values: &[&str]) -> VmValue {
+        VmValue::List(Rc::new(
+            values.iter().map(|value| vm_string(value)).collect(),
+        ))
+    }
+
+    fn result_transcript(value: &VmValue) -> VmValue {
+        value
+            .as_dict()
+            .and_then(|dict| dict.get("transcript"))
+            .cloned()
+            .expect("result transcript")
+    }
+
+    fn system_reminder_events(transcript: &VmValue) -> Vec<VmValue> {
+        transcript
+            .as_dict()
+            .and_then(|dict| dict.get("events"))
+            .and_then(|events| match events {
+                VmValue::List(values) => Some(values),
+                _ => None,
+            })
+            .expect("events list")
+            .iter()
+            .filter(|event| reminder_payload(event).is_some())
+            .cloned()
+            .collect()
+    }
+
+    #[test]
+    fn inject_replaces_pending_reminder_with_same_dedupe_key() {
+        let base = new_transcript_with(None, Vec::new(), None, None);
+        let first = transcript_inject_reminder_builtin(&[
+            base,
+            dict(vec![
+                ("body", vm_string("first")),
+                ("tags", strings(&["context"])),
+                ("dedupe_key", vm_string("context")),
+            ]),
+        ])
+        .expect("first inject");
+        let second = transcript_inject_reminder_builtin(&[
+            result_transcript(&first),
+            dict(vec![
+                ("body", vm_string("second")),
+                ("tags", strings(&["context"])),
+                ("dedupe_key", vm_string("context")),
+            ]),
+        ])
+        .expect("second inject");
+
+        let second_dict = second.as_dict().expect("result dict");
+        assert_eq!(
+            second_dict.get("deduped_count").and_then(VmValue::as_int),
+            Some(1)
+        );
+        let reminders = system_reminder_events(
+            second_dict
+                .get("transcript")
+                .expect("transformed transcript in result"),
+        );
+        assert_eq!(reminders.len(), 1);
+        let payload = reminder_payload(&reminders[0]).expect("reminder payload");
+        assert_eq!(
+            reminder_string_field(payload, "body").as_deref(),
+            Some("second")
+        );
+    }
+
+    #[test]
+    fn clear_reminders_filters_by_tag() {
+        let base = new_transcript_with(None, Vec::new(), None, None);
+        let first = transcript_inject_reminder_builtin(&[
+            base,
+            dict(vec![
+                ("body", vm_string("keep")),
+                ("tags", strings(&["keep"])),
+            ]),
+        ])
+        .expect("first inject");
+        let second = transcript_inject_reminder_builtin(&[
+            result_transcript(&first),
+            dict(vec![
+                ("body", vm_string("drop")),
+                ("tags", strings(&["drop"])),
+            ]),
+        ])
+        .expect("second inject");
+        let cleared = transcript_clear_reminders_builtin(&[
+            result_transcript(&second),
+            dict(vec![("tag", vm_string("drop"))]),
+        ])
+        .expect("clear reminders");
+        let cleared_dict = cleared.as_dict().expect("result dict");
+        assert_eq!(
+            cleared_dict.get("removed_count").and_then(VmValue::as_int),
+            Some(1)
+        );
+        let reminders = system_reminder_events(
+            cleared_dict
+                .get("transcript")
+                .expect("transformed transcript in result"),
+        );
+        assert_eq!(reminders.len(), 1);
+        let payload = reminder_payload(&reminders[0]).expect("reminder payload");
+        assert_eq!(
+            reminder_string_field(payload, "body").as_deref(),
+            Some("keep")
+        );
+    }
+
+    #[test]
+    fn unknown_reminder_option_reports_key() {
+        let base = new_transcript_with(None, Vec::new(), None, None);
+        let err = transcript_inject_reminder_builtin(&[
+            base,
+            dict(vec![
+                ("body", vm_string("hello")),
+                ("typo_key", VmValue::Bool(true)),
+            ]),
+        ])
+        .expect_err("unknown key should fail");
+        match err {
+            VmError::Thrown(VmValue::String(message)) => {
+                assert!(message.contains("typo_key"), "{message}");
+            }
+            other => panic!("expected thrown reminder error, got {other:?}"),
+        }
+    }
 }
