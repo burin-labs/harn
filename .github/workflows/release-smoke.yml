@@ -13,20 +13,8 @@ name: Release smoke
 # pair via `::error::` annotations from the smoke driver. See
 # docs/src/dev/platform-compatibility.md for the support matrix.
 on:
-  pull_request:
-    paths:
-      - 'crates/**'
-      - 'conformance/**'
-      - 'examples/**'
-      - 'tests/smoke/**'
-      - 'scripts/release_smoke.sh'
-      - '.github/workflows/release-smoke.yml'
-      - 'Cargo.toml'
-      - 'Cargo.lock'
-      - '.cargo/**'
-      - 'rust-toolchain.toml'
-      - 'Makefile'
-  merge_group:
+  schedule:
+    - cron: '17 9 * * *'
   push:
     branches: [main]
     tags: ['v*']

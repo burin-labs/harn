@@ -60,7 +60,7 @@ test:
 
 # Run the slow E2E / smoke suite: subprocess-spawning CLI surface tests,
 # signal handling, MCP server launch, real ProcessHandle smoke tests, etc.
-# Runs on schedule (nightly), on the `e2e` PR label, and on merge-queue.
+# Runs on schedule (nightly), manually, and on PRs with the `e2e` label.
 # Requires cargo-nextest (no plain `cargo test` fallback for profile support).
 test-e2e:
 	HARN_LLM_CALLS_DISABLED=1 cargo nextest run --workspace --profile e2e
