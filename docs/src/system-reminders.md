@@ -155,10 +155,29 @@ is required. If multiple selectors are present, a reminder must match
 all of them to be removed. This builtin is also a pure transform and
 returns `{transcript, removed_count}`.
 
-`ttl_turns` is stored on reminder events today. Post-turn TTL decrement,
-expiry EventLog events, hook return variants, bridge notifications, and
+### Lifecycle events on the EventLog
+
+Both transforms append lifecycle events to the active EventLog on the
+`transcript.reminder` topic so observability tools, daemons, and ACP
+clients can see reminder state changes without scanning transcripts.
+R-02 emits three event kinds; R-12 layers in `fired`, `inherited`, and
+`provider_evaluated`.
+
+| Kind | Emitted by | Payload |
+|---|---|---|
+| `injected` | `transcript.inject_reminder` | `reminder_id`, `tags`, `dedupe_key`, `ttl_turns`, `preserve_on_compact`, `propagate`, `role_hint`, `source` |
+| `deduped` | `transcript.inject_reminder` when an older reminder is replaced | `replaced_id`, `replacing_id`, `dedupe_key` |
+| `expired` | `transcript.clear_reminders` per removed reminder | `reminder_id`, `reason: "cleared"` |
+
+Emission is best-effort: when no EventLog is installed (e.g. unit
+tests that never opt in) the calls silently no-op so the transforms
+stay usable from any context.
+
+Post-turn TTL decrement (with `reason: "ttl"`), compaction-driven
+expiry, hook return variants, bridge notifications, and
 provider-specific reminder rendering are intentionally not implemented
-by these transcript transforms.
+by these transcript transforms — they belong to later tickets in
+[epic #1815](https://github.com/burin-labs/harn/issues/1815).
 
 ## Reading reminders off a transcript
 

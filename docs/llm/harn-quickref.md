@@ -1460,6 +1460,13 @@ let cleared = transcript.clear_reminders(t, {tag: "token_pressure"})
 println(cleared.removed_count)
 ```
 
+Both transforms also append lifecycle events on the
+`transcript.reminder` EventLog topic — `injected`, `deduped` (per
+replaced reminder), and `expired` with `reason: "cleared"` (per cleared
+reminder) — so observability tools and ACP clients can track reminder
+state without scanning transcripts. Emission is best-effort and
+silently no-ops when no EventLog is installed.
+
 ### `agent_turn`
 
 `agent_turn(prompt, options?)` is the high-level wrapper for the common

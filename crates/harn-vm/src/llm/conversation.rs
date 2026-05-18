@@ -1,6 +1,7 @@
 use std::collections::BTreeMap;
 use std::rc::Rc;
 
+use crate::event_log::{active_event_log, EventLog, LogEvent, Topic};
 use crate::value::{VmError, VmValue};
 use crate::vm::{Vm, VmBuiltinArity, VmBuiltinMetadata};
 
@@ -13,6 +14,14 @@ use super::helpers::{
     vm_message_value, vm_value_to_json, ReminderPropagate, ReminderRoleHint, ReminderSource,
     SystemReminder, SYSTEM_REMINDER_EVENT_KIND,
 };
+
+/// EventLog topic for reminder lifecycle events. R-12 will layer more
+/// kinds (`fired`, `inherited`, `provider_evaluated`); R-02 owns
+/// `injected`, `deduped`, and `expired`.
+const REMINDER_LIFECYCLE_TOPIC: &str = "transcript.reminder";
+const REMINDER_KIND_INJECTED: &str = "injected";
+const REMINDER_KIND_DEDUPED: &str = "deduped";
+const REMINDER_KIND_EXPIRED: &str = "expired";
 
 const INJECT_REMINDER_KEYS: &[&str] = &[
     "body",
@@ -635,16 +644,19 @@ fn transcript_inject_reminder_builtin(args: &[VmValue]) -> Result<VmValue, VmErr
     let reminder = parse_inject_reminder_options(options, context)?;
 
     let mut preserved = transcript_extra_events(transcript);
-    let mut deduped_count = 0_i64;
+    let mut deduped_ids = Vec::new();
     if let Some(dedupe_key) = reminder.dedupe_key.as_deref() {
         preserved.retain(|event| {
-            let should_drop = reminder_payload(event)
-                .and_then(|payload| reminder_string_field(payload, "dedupe_key"))
-                .is_some_and(|key| key == dedupe_key);
-            if should_drop {
-                deduped_count += 1;
+            let Some(payload) = reminder_payload(event) else {
+                return true;
+            };
+            if reminder_string_field(payload, "dedupe_key").as_deref() != Some(dedupe_key) {
+                return true;
             }
-            !should_drop
+            if let Some(id) = reminder_string_field(payload, "id") {
+                deduped_ids.push(id);
+            }
+            false
         });
     }
 
@@ -660,13 +672,42 @@ fn transcript_inject_reminder_builtin(args: &[VmValue]) -> Result<VmValue, VmErr
         transcript_state(transcript),
     );
 
+    let mut events = Vec::with_capacity(deduped_ids.len() + 1);
+    for replaced_id in &deduped_ids {
+        events.push(LogEvent::new(
+            REMINDER_KIND_DEDUPED,
+            serde_json::json!({
+                "replaced_id": replaced_id,
+                "replacing_id": reminder_id,
+                "dedupe_key": reminder.dedupe_key,
+            }),
+        ));
+    }
+    events.push(LogEvent::new(
+        REMINDER_KIND_INJECTED,
+        serde_json::json!({
+            "reminder_id": reminder_id,
+            "tags": reminder.tags,
+            "dedupe_key": reminder.dedupe_key,
+            "ttl_turns": reminder.ttl_turns,
+            "preserve_on_compact": reminder.preserve_on_compact,
+            "propagate": reminder.propagate.as_str(),
+            "role_hint": reminder.role_hint.as_str(),
+            "source": reminder.source.as_str(),
+        }),
+    ));
+    emit_reminder_lifecycle_events(events);
+
     Ok(VmValue::Dict(Rc::new(BTreeMap::from([
         ("transcript".to_string(), next),
         (
             "reminder_id".to_string(),
             VmValue::String(Rc::from(reminder_id)),
         ),
-        ("deduped_count".to_string(), VmValue::Int(deduped_count)),
+        (
+            "deduped_count".to_string(),
+            VmValue::Int(deduped_ids.len() as i64),
+        ),
     ]))))
 }
 
@@ -677,11 +718,14 @@ fn transcript_clear_reminders_builtin(args: &[VmValue]) -> Result<VmValue, VmErr
     ensure_known_reminder_keys(context, options, CLEAR_REMINDER_KEYS)?;
     let selector = parse_clear_reminder_selector(options, context)?;
 
-    let mut removed_count = 0_i64;
+    let mut removed_ids = Vec::new();
     let mut preserved = Vec::new();
     for event in transcript_extra_events(transcript) {
-        if reminder_payload(&event).is_some_and(|payload| selector.matches(payload)) {
-            removed_count += 1;
+        let removed_id = reminder_payload(&event)
+            .filter(|payload| selector.matches(payload))
+            .map(|payload| reminder_string_field(payload, "id").unwrap_or_default());
+        if let Some(id) = removed_id {
+            removed_ids.push(id);
         } else {
             preserved.push(event);
         }
@@ -697,10 +741,54 @@ fn transcript_clear_reminders_builtin(args: &[VmValue]) -> Result<VmValue, VmErr
         transcript_state(transcript),
     );
 
+    let events = removed_ids
+        .iter()
+        .map(|removed_id| {
+            LogEvent::new(
+                REMINDER_KIND_EXPIRED,
+                serde_json::json!({
+                    "reminder_id": removed_id,
+                    "reason": "cleared",
+                }),
+            )
+        })
+        .collect();
+    emit_reminder_lifecycle_events(events);
+
     Ok(VmValue::Dict(Rc::new(BTreeMap::from([
         ("transcript".to_string(), next),
-        ("removed_count".to_string(), VmValue::Int(removed_count)),
+        (
+            "removed_count".to_string(),
+            VmValue::Int(removed_ids.len() as i64),
+        ),
     ]))))
+}
+
+/// Append a sequence of reminder lifecycle events to the active
+/// EventLog in order. The append loop runs in a single spawned task so
+/// events emitted from one builtin call land in the same order they
+/// were produced, even on a multi-thread runtime. Best-effort: when no
+/// event log is installed (e.g. unit tests that never opt in) or no
+/// tokio runtime is available, the call silently no-ops so the
+/// pure-transform builtins stay usable from any context.
+fn emit_reminder_lifecycle_events(events: Vec<LogEvent>) {
+    if events.is_empty() {
+        return;
+    }
+    let Some(log) = active_event_log() else {
+        return;
+    };
+    let Ok(topic) = Topic::new(REMINDER_LIFECYCLE_TOPIC) else {
+        return;
+    };
+    let Ok(handle) = tokio::runtime::Handle::try_current() else {
+        return;
+    };
+    handle.spawn(async move {
+        for event in events {
+            let _ = log.append(&topic, event).await;
+        }
+    });
 }
 
 fn require_reminder_options<'a>(
@@ -1119,5 +1207,101 @@ mod tests {
             }
             other => panic!("expected thrown reminder error, got {other:?}"),
         }
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn lifecycle_events_round_trip_through_event_log() {
+        use crate::event_log::{install_memory_for_current_thread, reset_active_event_log, Topic};
+
+        install_memory_for_current_thread(64);
+        let log = crate::event_log::active_event_log().expect("event log installed");
+        let topic = Topic::new(REMINDER_LIFECYCLE_TOPIC).expect("lifecycle topic is valid");
+
+        let base = new_transcript_with(None, Vec::new(), None, None);
+        let first = transcript_inject_reminder_builtin(&[
+            base,
+            dict(vec![
+                ("body", vm_string("first")),
+                ("dedupe_key", vm_string("ctx")),
+                ("tags", strings(&["context"])),
+            ]),
+        ])
+        .expect("first inject");
+        let first_id = first
+            .as_dict()
+            .and_then(|dict| dict.get("reminder_id"))
+            .map(|value| value.display())
+            .expect("first reminder id");
+
+        let second = transcript_inject_reminder_builtin(&[
+            result_transcript(&first),
+            dict(vec![
+                ("body", vm_string("second")),
+                ("dedupe_key", vm_string("ctx")),
+                ("tags", strings(&["context"])),
+            ]),
+        ])
+        .expect("second inject");
+        let second_id = second
+            .as_dict()
+            .and_then(|dict| dict.get("reminder_id"))
+            .map(|value| value.display())
+            .expect("second reminder id");
+
+        let cleared = transcript_clear_reminders_builtin(&[
+            result_transcript(&second),
+            dict(vec![("dedupe_key", vm_string("ctx"))]),
+        ])
+        .expect("clear reminders");
+        let cleared_dict = cleared.as_dict().expect("result dict");
+        assert_eq!(
+            cleared_dict.get("removed_count").and_then(VmValue::as_int),
+            Some(1)
+        );
+
+        // The spawned tasks need to drain before we can read.
+        tokio::task::yield_now().await;
+        tokio::task::yield_now().await;
+        log.flush().await.expect("flush event log");
+
+        let events = log
+            .read_range(&topic, None, 16)
+            .await
+            .expect("read lifecycle events");
+        let kinds: Vec<&str> = events
+            .iter()
+            .map(|(_, event)| event.kind.as_str())
+            .collect();
+        assert_eq!(
+            kinds,
+            vec!["injected", "deduped", "injected", "expired"],
+            "lifecycle events appear in order; got {kinds:?}"
+        );
+
+        let deduped = &events[1].1.payload;
+        assert_eq!(
+            deduped.get("replaced_id").and_then(|v| v.as_str()),
+            Some(first_id.as_str())
+        );
+        assert_eq!(
+            deduped.get("replacing_id").and_then(|v| v.as_str()),
+            Some(second_id.as_str())
+        );
+        assert_eq!(
+            deduped.get("dedupe_key").and_then(|v| v.as_str()),
+            Some("ctx")
+        );
+
+        let expired = &events[3].1.payload;
+        assert_eq!(
+            expired.get("reminder_id").and_then(|v| v.as_str()),
+            Some(second_id.as_str())
+        );
+        assert_eq!(
+            expired.get("reason").and_then(|v| v.as_str()),
+            Some("cleared")
+        );
+
+        reset_active_event_log();
     }
 }

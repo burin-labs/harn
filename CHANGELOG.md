@@ -17,8 +17,12 @@ condensed series summaries instead of full per-patch history.
   reminder options, appends a typed reminder event, and replaces older
   pending reminders with the same `dedupe_key`; clearing removes
   reminders by `id`, `tag`, or `dedupe_key` and reports the removal
-  count. This lands the deterministic transcript model without the later
-  EventLog expiry hooks or provider-rendering framework.
+  count. Both transforms also append lifecycle events on the
+  `transcript.reminder` EventLog topic — `injected`, `deduped` (per
+  replaced reminder), and `expired` with `reason: "cleared"` (per
+  removed reminder) — so observability tools and ACP clients can track
+  reminder state without scanning transcripts. Post-turn TTL decrement
+  and the provider-rendering framework land in later R-* tickets.
 - **OAuth provider catalogue records (#1905).** Adds
   `std/oauth/providers` with ten preconfigured OAuth provider records
   (GitHub, Slack, Linear, Notion, Google, Microsoft, Atlassian,

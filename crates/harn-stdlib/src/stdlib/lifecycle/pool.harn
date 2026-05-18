@@ -88,12 +88,7 @@ pub fn fair_round_robin(key = "key") {
  * @example: let QueueStrategy = QueueStrategy()
  */
 pub fn QueueStrategy() {
-  return {
-    fifo: fifo(),
-    priority: priority(),
-    lifo: lifo(),
-    fair_round_robin: fair_round_robin,
-  }
+  return {fifo: fifo(), priority: priority(), lifo: lifo(), fair_round_robin: fair_round_robin}
 }
 
 fn __pool_attach_methods(snapshot) {
