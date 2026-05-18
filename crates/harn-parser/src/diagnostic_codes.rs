@@ -12,8 +12,8 @@
 //!     categories,
 //!     [
 //!         "TYP", "PAR", "NAM", "CAP", "LLM", "ORC", "STD", "PRM",
-//!         "MOD", "RMD", "LNT", "FMT", "IMP", "OWN", "RCV", "MAT",
-//!         "POL",
+//!         "MOD", "RMD", "SUS", "LNT", "FMT", "IMP", "OWN", "RCV",
+//!         "MAT", "POL",
 //!     ],
 //! );
 //! ```
@@ -34,6 +34,7 @@ pub enum Category {
     Prm,
     Mod,
     Rmd,
+    Sus,
     Lnt,
     Fmt,
     Imp,
@@ -55,6 +56,7 @@ impl Category {
         Category::Prm,
         Category::Mod,
         Category::Rmd,
+        Category::Sus,
         Category::Lnt,
         Category::Fmt,
         Category::Imp,
@@ -76,6 +78,7 @@ impl Category {
             Category::Prm => "PRM",
             Category::Mod => "MOD",
             Category::Rmd => "RMD",
+            Category::Sus => "SUS",
             Category::Lnt => "LNT",
             Category::Fmt => "FMT",
             Category::Imp => "IMP",
@@ -240,6 +243,16 @@ diagnostic_codes! {
     ModuleImportCollision, "HARN-MOD-005", Mod, "module imports expose colliding names";
     ModuleReExportConflict, "HARN-MOD-006", Mod, "module re-exports conflict";
     ReminderUnknownOption, "HARN-RMD-001", Rmd, "reminder lifecycle option key is not recognized";
+    SuspendWorkerNotRunning, "HARN-SUS-001", Sus, "suspend_agent target worker is not running";
+    ResumeConditionsInvalid, "HARN-SUS-002", Sus, "ResumeConditions validation failed";
+    ResumeWorkerNotSuspended, "HARN-SUS-003", Sus, "resume_agent target worker is not suspended";
+    ResumeSnapshotInvalid, "HARN-SUS-004", Sus, "resume snapshot cannot be loaded or used";
+    AwaitResumptionOutsideAgentLoop, "HARN-SUS-005", Sus, "agent_await_resumption was invoked outside agent_loop structural handling";
+    ConcurrentResumeConflict, "HARN-SUS-006", Sus, "concurrent resume changed the worker before resume could complete";
+    ResumeTriggerRegistrationFailed, "HARN-SUS-007", Sus, "ResumeConditions trigger could not be registered";
+    ResumeTimeoutUnsupported, "HARN-SUS-008", Sus, "resume timeout action is unsupported";
+    ResumeInputInvalid, "HARN-SUS-009", Sus, "resume input failed agent_loop input validation";
+    ResumeWorkerClosed, "HARN-SUS-010", Sus, "closed suspended worker cannot be resumed";
     LintRenamedStdlibSymbol, "HARN-LNT-001", Lnt, "renamed stdlib symbol lint";
     LintCyclomaticComplexity, "HARN-LNT-002", Lnt, "cyclomatic complexity lint";
     LintNamingConvention, "HARN-LNT-003", Lnt, "naming convention lint";
@@ -403,6 +416,36 @@ impl Code {
                 &[Code::ModuleImportUnresolved, Code::ImportSymbolMissing]
             }
             Code::ImportCycle => &[Code::ImportResolutionFailed],
+            // Suspend / resume lifecycle.
+            Code::SuspendWorkerNotRunning => {
+                &[Code::ResumeWorkerNotSuspended, Code::ResumeWorkerClosed]
+            }
+            Code::ResumeConditionsInvalid => &[
+                Code::ResumeTriggerRegistrationFailed,
+                Code::ResumeTimeoutUnsupported,
+            ],
+            Code::ResumeWorkerNotSuspended => &[
+                Code::SuspendWorkerNotRunning,
+                Code::ConcurrentResumeConflict,
+            ],
+            Code::ResumeSnapshotInvalid => &[Code::ResumeWorkerNotSuspended],
+            Code::AwaitResumptionOutsideAgentLoop => &[Code::ResumeConditionsInvalid],
+            Code::ConcurrentResumeConflict => {
+                &[Code::ResumeWorkerNotSuspended, Code::ResumeWorkerClosed]
+            }
+            Code::ResumeTriggerRegistrationFailed => &[
+                Code::ResumeConditionsInvalid,
+                Code::ResumeTimeoutUnsupported,
+            ],
+            Code::ResumeTimeoutUnsupported => &[
+                Code::ResumeConditionsInvalid,
+                Code::ResumeTriggerRegistrationFailed,
+            ],
+            Code::ResumeInputInvalid => &[Code::ResumeWorkerNotSuspended],
+            Code::ResumeWorkerClosed => &[
+                Code::ResumeWorkerNotSuspended,
+                Code::ConcurrentResumeConflict,
+            ],
             // Ownership.
             Code::ImmutableAssignment => &[Code::MutableNeverReassigned],
             Code::MutableNeverReassigned => &[Code::LintMutableNeverReassigned],

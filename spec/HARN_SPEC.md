@@ -4504,6 +4504,28 @@ Error: division by zero
 Stack traces are captured at the point of the error before unwinding, so
 they accurately reflect the call chain at the time of failure.
 
+### Diagnostic code appendix
+
+Runtime and static diagnostics use stable `HARN-<category>-<number>` codes.
+The generated diagnostics catalog is authoritative for the full registry; the
+language spec records runtime namespaces whose behavior affects portable
+programs.
+
+#### Suspend/resume diagnostics (`HARN-SUS-*`)
+
+| Code | Description |
+|---|---|
+| `HARN-SUS-001` | `suspend_agent` was called on a worker that is not running. |
+| `HARN-SUS-002` | `ResumeConditions` validation failed. |
+| `HARN-SUS-003` | `resume_agent` was called on a live worker that is not suspended. |
+| `HARN-SUS-004` | A resume snapshot was missing, stale, unreadable, or version-incompatible. |
+| `HARN-SUS-005` | `agent_await_resumption` was invoked outside `agent_loop` structural handling. |
+| `HARN-SUS-006` | A concurrent resume changed the worker before resume completed. |
+| `HARN-SUS-007` | `conditions.trigger` could not be registered with the trigger dispatcher. |
+| `HARN-SUS-008` | A timeout fired or was configured with an unsupported `on_timeout` action. |
+| `HARN-SUS-009` | Resume input failed `agent_loop` input validation. |
+| `HARN-SUS-010` | A worker closed while suspended rejected a later resume. |
+
 ## Persistent store
 
 Six builtins provide a persistent key-value store backed by the resolved Harn

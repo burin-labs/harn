@@ -18,6 +18,8 @@ use std::rc::Rc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 
+use harn_parser::diagnostic_codes::Code;
+
 use self::agents_workers::{
     apply_worker_artifact_policy, apply_worker_transcript_policy, emit_worker_event,
     ensure_worker_config_session_ids, load_worker_state_snapshot, next_worker_id,
@@ -563,14 +565,14 @@ async fn suspend_agent_builtin(args: Vec<VmValue>) -> Result<VmValue, VmError> {
                 false,
             ));
         }
-        match worker.status.as_str() {
-            "completed" | "failed" | "cancelled" | "interrupted" => {
-                return Err(VmError::Runtime(format!(
-                    "suspend_agent: worker {} is already terminal (status={})",
+        if worker.status != "running" {
+            return Err(diagnostic_error(
+                Code::SuspendWorkerNotRunning,
+                format!(
+                    "suspend_agent: worker {} is not running (status={})",
                     worker.id, worker.status
-                )));
-            }
-            _ => {}
+                ),
+            ));
         }
         worker.suspend_signal.store(true, Ordering::SeqCst);
         worker.status = "suspended".to_string();
@@ -765,6 +767,30 @@ fn is_nil(value: &VmValue) -> bool {
     matches!(value, VmValue::Nil)
 }
 
+fn diagnostic_error(code: Code, message: impl Into<String>) -> VmError {
+    VmError::Runtime(format!("{}: {}", code.as_str(), message.into()))
+}
+
+fn resume_rejected_error(worker: &WorkerState) -> VmError {
+    if worker.status == "cancelled" {
+        diagnostic_error(
+            Code::ResumeWorkerClosed,
+            format!(
+                "resume_agent: worker {} was closed and cannot be resumed",
+                worker.id
+            ),
+        )
+    } else {
+        diagnostic_error(
+            Code::ResumeWorkerNotSuspended,
+            format!(
+                "resume_agent: worker {} is not suspended (status={})",
+                worker.id, worker.status
+            ),
+        )
+    }
+}
+
 fn parse_resume_options(args: &[VmValue]) -> WorkerResumeOptions {
     let mut options = WorkerResumeOptions::default();
     let Some(raw) = args.get(1) else {
@@ -857,50 +883,59 @@ async fn resume_agent_builtin(args: Vec<VmValue>) -> Result<VmValue, VmError> {
         .as_deref()
         .and_then(|id| WORKER_REGISTRY.with(|registry| registry.borrow().get(id).cloned()));
 
-    let state = if let Some(state) = registry_hit {
-        state
+    let (state, loaded_from_snapshot) = if let Some(state) = registry_hit {
+        (state, false)
     } else {
         let snapshot_target = target_value.display();
         if snapshot_target.is_empty() {
-            return Err(VmError::Runtime(
-                "resume_agent: missing worker id or snapshot path".to_string(),
+            return Err(diagnostic_error(
+                Code::ResumeSnapshotInvalid,
+                "resume_agent: missing worker id or snapshot path",
             ));
         }
-        cold_load_worker(&snapshot_target)?
+        (cold_load_worker(&snapshot_target)?, true)
     };
-    // A suspended worker — whether warm in the registry or just
-    // cold-loaded — gets transitioned back to running. Any other state
-    // is treated as "already where the caller wants it" and the resume
-    // call is a no-op summary read, matching the idempotent contract on
-    // the suspend side.
     if state.borrow().status == "suspended" {
         warm_resume_worker(state, options).await
-    } else {
+    } else if loaded_from_snapshot {
+        // A snapshot path can be used as a restore/read operation for
+        // completed or awaiting persisted workers. Keep that historical
+        // contract, but only warm-resume live registry handles when they
+        // are actually suspended.
         {
             let mut worker = state.borrow_mut();
             apply_resume_transcript_policy(&mut worker, options.continue_transcript);
-            apply_resume_input(&mut worker, options.resume_input.as_ref());
+            apply_resume_input(&mut worker, options.resume_input.as_ref())?;
             if worker.carry_policy.persist_state {
                 persist_worker_state_snapshot(&worker)?;
             }
         }
         worker_summary(&state.borrow())
+    } else {
+        Err(resume_rejected_error(&state.borrow()))
     }
 }
 
-/// Wire the optional resume input into a worker's task slot. Empty or
-/// absent input is a no-op so callers don't have to special-case the
-/// "resume without a new prompt" path.
-fn apply_resume_input(worker: &mut WorkerState, resume_input: Option<&VmValue>) {
+/// Wire the optional resume input into a worker's task slot. Absent input
+/// is a no-op; explicitly empty input is rejected so callers do not
+/// accidentally erase the next task prompt.
+fn apply_resume_input(
+    worker: &mut WorkerState,
+    resume_input: Option<&VmValue>,
+) -> Result<(), VmError> {
     let Some(input) = resume_input else {
-        return;
+        return Ok(());
     };
     let text = input.display();
-    if text.is_empty() {
-        return;
+    if text.trim().is_empty() {
+        return Err(diagnostic_error(
+            Code::ResumeInputInvalid,
+            "resume_agent: resume input must be nil or non-empty text",
+        ));
     }
     worker.task = text.clone();
     worker.history.push(text);
+    Ok(())
 }
 
 fn apply_resume_task_to_config(config: &mut WorkerConfig, task: &str) {
@@ -948,13 +983,13 @@ async fn warm_resume_worker(
     let (snapshot, suspension) = {
         let mut worker = state.borrow_mut();
         if worker.status != "suspended" {
-            // Non-suspended warm resume is a no-op: the worker is either
-            // running, awaiting input via a separate primitive, or already
-            // terminal. Returning the current summary keeps the call
-            // observably idempotent (same as suspend) and avoids
-            // surprising state transitions in caller code that doesn't
-            // pre-check the status field.
-            return worker_summary(&worker);
+            return Err(diagnostic_error(
+                Code::ConcurrentResumeConflict,
+                format!(
+                    "resume_agent: worker {} changed before resume could complete (status={})",
+                    worker.id, worker.status
+                ),
+            ));
         }
         worker.suspend_signal.store(false, Ordering::SeqCst);
         let suspension = worker.suspension.take();
@@ -962,7 +997,7 @@ async fn warm_resume_worker(
         worker.finished_at = None;
         worker.latest_error = None;
         apply_resume_transcript_policy(&mut worker, options.continue_transcript);
-        apply_resume_input(&mut worker, options.resume_input.as_ref());
+        apply_resume_input(&mut worker, options.resume_input.as_ref())?;
         let task = worker.task.clone();
         apply_resume_task_to_config(&mut worker.config, &task);
         if worker.carry_policy.persist_state {
@@ -1022,7 +1057,13 @@ async fn fail_suspended_worker_from_auto_resume_timeout(
     let (snapshot, summary, suspension) = {
         let mut worker = state.borrow_mut();
         if worker.status != "suspended" {
-            return worker_summary(&worker);
+            return Err(diagnostic_error(
+                Code::ConcurrentResumeConflict,
+                format!(
+                    "auto-resume timeout: worker {} is no longer suspended (status={})",
+                    worker.id, worker.status
+                ),
+            ));
         }
         worker.suspend_signal.store(false, Ordering::SeqCst);
         let suspension = worker.suspension.take();
@@ -1044,7 +1085,14 @@ async fn fail_suspended_worker_from_auto_resume_timeout(
 }
 
 fn cold_load_worker(snapshot_target: &str) -> Result<Rc<RefCell<WorkerState>>, VmError> {
-    let state = Rc::new(RefCell::new(load_worker_state_snapshot(snapshot_target)?));
+    let state = Rc::new(RefCell::new(
+        load_worker_state_snapshot(snapshot_target).map_err(|error| {
+            diagnostic_error(
+                Code::ResumeSnapshotInvalid,
+                format!("resume_agent: failed to load snapshot `{snapshot_target}`: {error}"),
+            )
+        })?,
+    ));
     let worker_id = state.borrow().id.clone();
     {
         let mut worker = state.borrow_mut();
@@ -1129,10 +1177,10 @@ fn list_agents_builtin(_args: &[VmValue], _out: &mut String) -> Result<VmValue, 
 }
 
 fn resume_conditions_error(field: &str, message: impl Into<String>) -> VmError {
-    VmError::Runtime(format!(
-        "HARN-SUS-002: invalid ResumeConditions.{field}: {}",
-        message.into()
-    ))
+    diagnostic_error(
+        Code::ResumeConditionsInvalid,
+        format!("invalid ResumeConditions.{field}: {}", message.into()),
+    )
 }
 
 fn parse_resume_trigger_condition(value: &VmValue) -> Result<Option<serde_json::Value>, VmError> {
@@ -1502,6 +1550,15 @@ mod suspend_tests {
             let worker = state.borrow();
             (worker.status.clone(), worker.task.clone())
         })
+    }
+
+    fn assert_error_code(error: VmError, code: Code) {
+        let message = error.to_string();
+        assert!(
+            message.contains(code.as_str()),
+            "expected {}, got: {message}",
+            code.as_str()
+        );
     }
 
     #[test]
@@ -2101,6 +2158,147 @@ mod suspend_tests {
     }
 
     #[tokio::test(flavor = "current_thread")]
+    async fn resume_rejects_live_non_suspended_workers() {
+        let _guard = suspend_test_lock().await;
+        let (worker_id, dir) = seed_test_worker("worker-resume-not-suspended");
+
+        let err = resume_agent_builtin(vec![handle_value(&worker_id)])
+            .await
+            .expect_err("running worker should reject warm resume");
+        assert_error_code(err, Code::ResumeWorkerNotSuspended);
+
+        teardown(&dir, &worker_id);
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn resume_rejects_closed_suspended_workers() {
+        let _guard = suspend_test_lock().await;
+        let (worker_id, dir) = seed_test_worker("worker-resume-closed");
+
+        suspend_agent_builtin(vec![
+            handle_value(&worker_id),
+            VmValue::String(Rc::from("park before close")),
+        ])
+        .await
+        .expect("suspend");
+        close_agent_builtin(vec![handle_value(&worker_id)])
+            .await
+            .expect("close");
+
+        let err = resume_agent_builtin(vec![handle_value(&worker_id)])
+            .await
+            .expect_err("closed worker should reject resume");
+        assert_error_code(err, Code::ResumeWorkerClosed);
+
+        teardown(&dir, &worker_id);
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn resume_rejects_empty_resume_input() {
+        let _guard = suspend_test_lock().await;
+        let (worker_id, dir) = seed_test_worker("worker-empty-resume-input");
+
+        suspend_agent_builtin(vec![
+            handle_value(&worker_id),
+            VmValue::String(Rc::from("park before empty input")),
+        ])
+        .await
+        .expect("suspend");
+        let err = resume_agent_builtin(vec![
+            handle_value(&worker_id),
+            VmValue::String(Rc::from("")),
+        ])
+        .await
+        .expect_err("empty resume input should be rejected");
+        assert_error_code(err, Code::ResumeInputInvalid);
+
+        teardown(&dir, &worker_id);
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn resume_missing_snapshot_reports_sus_004() {
+        let _guard = suspend_test_lock().await;
+        let dir = std::env::temp_dir().join(format!(
+            "harn-missing-snapshot-test-{}",
+            uuid::Uuid::now_v7()
+        ));
+        std::fs::create_dir_all(&dir).unwrap();
+        let missing = dir.join("missing-worker.json");
+
+        let err = resume_agent_builtin(vec![VmValue::String(Rc::from(
+            missing.display().to_string(),
+        ))])
+        .await
+        .expect_err("missing snapshot should reject resume");
+        assert_error_code(err, Code::ResumeSnapshotInvalid);
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn concurrent_warm_resume_reports_sus_006() {
+        let _guard = suspend_test_lock().await;
+        let (worker_id, dir) = seed_test_worker("worker-concurrent-resume");
+        let state = with_worker_state(&worker_id, |state| Ok(state.clone())).unwrap();
+
+        let err = warm_resume_worker(state, WorkerResumeOptions::default())
+            .await
+            .expect_err("non-suspended warm resume should be a conflict");
+        assert_error_code(err, Code::ConcurrentResumeConflict);
+
+        teardown(&dir, &worker_id);
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn raw_suspend_trigger_registration_reports_sus_007() {
+        let _guard = suspend_test_lock().await;
+        crate::triggers::clear_trigger_registry();
+        crate::stdlib::triggers_stdlib::reset_auto_resume_timeouts();
+        let (worker_id, dir) = seed_test_worker("worker-trigger-registration-error");
+        let invalid_trigger = VmValue::Dict(Rc::new(BTreeMap::from([(
+            "trigger".to_string(),
+            VmValue::Dict(Rc::new(BTreeMap::new())),
+        )])));
+
+        let err = suspend_agent_builtin(vec![
+            handle_value(&worker_id),
+            VmValue::String(Rc::from("bad trigger")),
+            suspend_options(invalid_trigger),
+        ])
+        .await
+        .expect_err("invalid raw trigger registration should fail");
+        assert_error_code(err, Code::ResumeTriggerRegistrationFailed);
+
+        teardown(&dir, &worker_id);
+        crate::triggers::clear_trigger_registry();
+        crate::stdlib::triggers_stdlib::reset_auto_resume_timeouts();
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn raw_suspend_timeout_action_reports_sus_008() {
+        let _guard = suspend_test_lock().await;
+        crate::triggers::clear_trigger_registry();
+        crate::stdlib::triggers_stdlib::reset_auto_resume_timeouts();
+        let (worker_id, dir) = seed_test_worker("worker-timeout-action-error");
+
+        let err = suspend_agent_builtin(vec![
+            handle_value(&worker_id),
+            VmValue::String(Rc::from("bad timeout")),
+            suspend_options(auto_resume_conditions_with_timeout(
+                "review.approved",
+                "explode",
+            )),
+        ])
+        .await
+        .expect_err("unsupported raw timeout action should fail");
+        assert_error_code(err, Code::ResumeTimeoutUnsupported);
+
+        teardown(&dir, &worker_id);
+        crate::triggers::clear_trigger_registry();
+        crate::stdlib::triggers_stdlib::reset_auto_resume_timeouts();
+    }
+
+    #[tokio::test(flavor = "current_thread")]
     async fn suspend_rejects_terminal_workers() {
         let _guard = suspend_test_lock().await;
         let (worker_id, dir) = seed_test_worker("worker-suspend-terminal");
@@ -2117,8 +2315,8 @@ mod suspend_tests {
         .expect_err("terminal worker should reject suspend");
         match err {
             VmError::Runtime(message) => assert!(
-                message.contains("terminal"),
-                "expected terminal-rejection message, got: {message}"
+                message.contains(Code::SuspendWorkerNotRunning.as_str()),
+                "expected HARN-SUS-001 terminal-rejection message, got: {message}"
             ),
             other => panic!("expected Runtime error, got {other:?}"),
         }

@@ -52,6 +52,11 @@
       "count": 1
     },
     {
+      "id": "SUS",
+      "title": "Suspend / resume lifecycle",
+      "count": 10
+    },
+    {
       "id": "LNT",
       "title": "Lint rules",
       "count": 53
@@ -1140,6 +1145,123 @@
       "summary": "reminder lifecycle option key is not recognized",
       "repairs": [],
       "related": [],
+      "explanationPresent": true,
+      "apiStability": "stable"
+    },
+    {
+      "code": "HARN-SUS-001",
+      "category": "SUS",
+      "summary": "suspend_agent target worker is not running",
+      "repairs": [],
+      "related": [
+        "HARN-SUS-003",
+        "HARN-SUS-010"
+      ],
+      "explanationPresent": true,
+      "apiStability": "stable"
+    },
+    {
+      "code": "HARN-SUS-002",
+      "category": "SUS",
+      "summary": "ResumeConditions validation failed",
+      "repairs": [],
+      "related": [
+        "HARN-SUS-007",
+        "HARN-SUS-008"
+      ],
+      "explanationPresent": true,
+      "apiStability": "stable"
+    },
+    {
+      "code": "HARN-SUS-003",
+      "category": "SUS",
+      "summary": "resume_agent target worker is not suspended",
+      "repairs": [],
+      "related": [
+        "HARN-SUS-001",
+        "HARN-SUS-006"
+      ],
+      "explanationPresent": true,
+      "apiStability": "stable"
+    },
+    {
+      "code": "HARN-SUS-004",
+      "category": "SUS",
+      "summary": "resume snapshot cannot be loaded or used",
+      "repairs": [],
+      "related": [
+        "HARN-SUS-003"
+      ],
+      "explanationPresent": true,
+      "apiStability": "stable"
+    },
+    {
+      "code": "HARN-SUS-005",
+      "category": "SUS",
+      "summary": "agent_await_resumption was invoked outside agent_loop structural handling",
+      "repairs": [],
+      "related": [
+        "HARN-SUS-002"
+      ],
+      "explanationPresent": true,
+      "apiStability": "stable"
+    },
+    {
+      "code": "HARN-SUS-006",
+      "category": "SUS",
+      "summary": "concurrent resume changed the worker before resume could complete",
+      "repairs": [],
+      "related": [
+        "HARN-SUS-003",
+        "HARN-SUS-010"
+      ],
+      "explanationPresent": true,
+      "apiStability": "stable"
+    },
+    {
+      "code": "HARN-SUS-007",
+      "category": "SUS",
+      "summary": "ResumeConditions trigger could not be registered",
+      "repairs": [],
+      "related": [
+        "HARN-SUS-002",
+        "HARN-SUS-008"
+      ],
+      "explanationPresent": true,
+      "apiStability": "stable"
+    },
+    {
+      "code": "HARN-SUS-008",
+      "category": "SUS",
+      "summary": "resume timeout action is unsupported",
+      "repairs": [],
+      "related": [
+        "HARN-SUS-002",
+        "HARN-SUS-007"
+      ],
+      "explanationPresent": true,
+      "apiStability": "stable"
+    },
+    {
+      "code": "HARN-SUS-009",
+      "category": "SUS",
+      "summary": "resume input failed agent_loop input validation",
+      "repairs": [],
+      "related": [
+        "HARN-SUS-003"
+      ],
+      "explanationPresent": true,
+      "apiStability": "stable"
+    },
+    {
+      "code": "HARN-SUS-010",
+      "category": "SUS",
+      "summary": "closed suspended worker cannot be resumed",
+      "repairs": [],
+      "related": [
+        "HARN-SUS-003",
+        "HARN-SUS-006"
+      ],
       "explanationPresent": true,
       "apiStability": "stable"
     },

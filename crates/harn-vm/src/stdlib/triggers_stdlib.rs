@@ -3,6 +3,7 @@ use std::collections::BTreeMap;
 use std::rc::Rc;
 use std::time::Duration;
 
+use harn_parser::diagnostic_codes::Code;
 use serde::{Deserialize, Serialize};
 use time::OffsetDateTime;
 use uuid::Uuid;
@@ -1196,6 +1197,10 @@ pub(crate) fn validate_resume_trigger_spec(
     parse_trigger_config(&normalized).map(|_| ())
 }
 
+fn suspend_diagnostic_error(code: Code, message: impl Into<String>) -> VmError {
+    VmError::Runtime(format!("{}: {}", code.as_str(), message.into()))
+}
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 struct AutoResumeTimeoutSpec {
     duration_minutes: u64,
@@ -1216,10 +1221,13 @@ pub(crate) async fn register_auto_resume_trigger(
         if matches!(trigger, VmValue::Nil) {
             return Ok(None);
         }
-        return Err(VmError::Runtime(format!(
-            "auto_resume: conditions.trigger must be a dict or nil, got {}",
-            trigger.type_name()
-        )));
+        return Err(suspend_diagnostic_error(
+            Code::ResumeConditionsInvalid,
+            format!(
+                "invalid ResumeConditions.trigger: expected dict or nil, got {}",
+                trigger.type_name()
+            ),
+        ));
     };
 
     let mut normalized = trigger_config.as_ref().clone();
@@ -1227,7 +1235,12 @@ pub(crate) async fn register_auto_resume_trigger(
         "handler".to_string(),
         VmValue::String(Rc::from("worker://__resume_auto_resume__")),
     );
-    let mut spec = parse_trigger_config(&normalized)?;
+    let mut spec = parse_trigger_config(&normalized).map_err(|error| {
+        suspend_diagnostic_error(
+            Code::ResumeTriggerRegistrationFailed,
+            format!("auto_resume: failed to parse conditions.trigger for registration: {error}"),
+        )
+    })?;
     let source_kind = spec.kind.clone();
     if spec.match_events.is_empty() {
         spec.match_events.push(source_kind);
@@ -1249,16 +1262,24 @@ pub(crate) async fn register_auto_resume_trigger(
     }))
     .unwrap_or_else(|_| format!("auto_resume:{worker_id}"));
 
-    let id = dynamic_register(spec)
-        .await
-        .map_err(trigger_registry_error)?;
-    let binding =
-        resolve_live_trigger_binding(id.as_str(), None).map_err(trigger_registry_error)?;
+    let timeout = auto_resume_timeout_spec(conditions)?;
+    let id = dynamic_register(spec).await.map_err(|error| {
+        suspend_diagnostic_error(
+            Code::ResumeTriggerRegistrationFailed,
+            format!("auto_resume: failed to register trigger: {error}"),
+        )
+    })?;
+    let binding = resolve_live_trigger_binding(id.as_str(), None).map_err(|error| {
+        suspend_diagnostic_error(
+            Code::ResumeTriggerRegistrationFailed,
+            format!("auto_resume: failed to resolve registered trigger: {error}"),
+        )
+    })?;
     let handle = AutoResumeTriggerHandle {
         id: id.as_str().to_string(),
         version: binding.version,
     };
-    if let Some(timeout) = auto_resume_timeout_spec(conditions)? {
+    if let Some(timeout) = timeout {
         schedule_auto_resume_timeout(handle.clone(), worker_id.to_string(), timeout);
     }
     Ok(Some(handle))
@@ -1306,19 +1327,22 @@ fn auto_resume_timeout_spec(
         if matches!(timeout, VmValue::Nil) {
             return Ok(None);
         }
-        return Err(VmError::Runtime(format!(
-            "auto_resume: conditions.timeout must be a dict or nil, got {}",
-            timeout.type_name()
-        )));
+        return Err(suspend_diagnostic_error(
+            Code::ResumeConditionsInvalid,
+            format!(
+                "invalid ResumeConditions.timeout: expected dict or nil, got {}",
+                timeout.type_name()
+            ),
+        ));
     };
     let duration_minutes = timeout
         .get("duration_minutes")
         .and_then(VmValue::as_int)
         .filter(|value| *value > 0)
         .ok_or_else(|| {
-            VmError::Runtime(
-                "auto_resume: conditions.timeout.duration_minutes must be a positive int"
-                    .to_string(),
+            suspend_diagnostic_error(
+                Code::ResumeConditionsInvalid,
+                "invalid ResumeConditions.timeout.duration_minutes: must be a positive int",
             )
         })? as u64;
     let on_timeout = match timeout.get("on_timeout") {
@@ -1331,11 +1355,23 @@ fn auto_resume_timeout_spec(
             value.to_string()
         }
         Some(VmValue::Nil) | None => "resume_with_summary".to_string(),
+        Some(VmValue::String(value)) => {
+            return Err(suspend_diagnostic_error(
+                Code::ResumeTimeoutUnsupported,
+                format!(
+                    "auto_resume: unsupported conditions.timeout.on_timeout `{}`; expected resume_with_summary, resume_with_input, or fail",
+                    value.as_ref()
+                ),
+            ))
+        }
         Some(other) => {
-            return Err(VmError::Runtime(format!(
-                "auto_resume: conditions.timeout.on_timeout must be resume_with_summary, resume_with_input, or fail; got {}",
-                other.type_name()
-            )))
+            return Err(suspend_diagnostic_error(
+                Code::ResumeTimeoutUnsupported,
+                format!(
+                    "auto_resume: conditions.timeout.on_timeout must be resume_with_summary, resume_with_input, or fail; got {}",
+                    other.type_name()
+                ),
+            ))
         }
     };
     Ok(Some(AutoResumeTimeoutSpec {
