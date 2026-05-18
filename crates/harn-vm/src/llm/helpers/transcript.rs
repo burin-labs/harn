@@ -4,6 +4,7 @@ use std::rc::Rc;
 use serde::{Deserialize, Serialize};
 use serde_json::Value as JsonValue;
 
+use crate::event_log::{active_event_log, EventLog, LogEvent, Topic};
 use crate::value::{VmError, VmValue};
 
 use super::blocks::{
@@ -14,6 +15,9 @@ use super::{vm_value_to_json, TRANSCRIPT_ASSET_TYPE, TRANSCRIPT_TYPE, TRANSCRIPT
 
 /// Canonical `kind` for a [`SystemReminder`] transcript event.
 pub(crate) const SYSTEM_REMINDER_EVENT_KIND: &str = "system_reminder";
+pub(crate) const REMINDER_LIFECYCLE_TOPIC: &str = "transcript.reminder.lifecycle";
+pub(crate) const REMINDER_DEDUPED_EVENT_KIND: &str = "transcript.reminder.deduped";
+pub(crate) const REMINDER_EXPIRED_EVENT_KIND: &str = "transcript.reminder.expired";
 pub(crate) const SUSPENSION_EVENT_KIND: &str = "suspension";
 pub(crate) const RESUMPTION_EVENT_KIND: &str = "resumption";
 pub(crate) const DRAIN_DECISION_EVENT_KIND: &str = "drain_decision";
@@ -585,6 +589,94 @@ pub(crate) fn transcript_reminder_event(reminder: &SystemReminder) -> VmValue {
     VmValue::Dict(Rc::new(event))
 }
 
+#[derive(Clone, Debug, Default)]
+pub(crate) struct ReminderPostTurnReport {
+    pub transcript: Option<VmValue>,
+    pub decremented_count: usize,
+    pub expired: Vec<SystemReminder>,
+    pub remaining_count: usize,
+}
+
+pub(crate) fn apply_reminder_post_turn(transcript: &VmValue, turn: i64) -> ReminderPostTurnReport {
+    let Some(dict) = transcript.as_dict() else {
+        return ReminderPostTurnReport::default();
+    };
+    let Some(VmValue::List(events)) = dict.get("events") else {
+        return ReminderPostTurnReport {
+            transcript: Some(transcript.clone()),
+            ..ReminderPostTurnReport::default()
+        };
+    };
+
+    let mut changed = false;
+    let mut decremented_count = 0;
+    let mut remaining_count = 0;
+    let mut expired = Vec::new();
+    let mut next_events = Vec::with_capacity(events.len());
+
+    for event in events.iter() {
+        let Some(reminder) = reminder_from_event(event) else {
+            next_events.push(event.clone());
+            continue;
+        };
+        match reminder.ttl_turns {
+            Some(ttl) if ttl <= 1 => {
+                changed = true;
+                expired.push(reminder);
+            }
+            Some(ttl) => {
+                let mut updated = reminder;
+                updated.ttl_turns = Some(ttl - 1);
+                next_events.push(replace_reminder_payload(event, &updated));
+                changed = true;
+                decremented_count += 1;
+                remaining_count += 1;
+            }
+            None => {
+                next_events.push(event.clone());
+                remaining_count += 1;
+            }
+        }
+    }
+
+    if !changed {
+        return ReminderPostTurnReport {
+            transcript: Some(transcript.clone()),
+            decremented_count,
+            expired,
+            remaining_count,
+        };
+    }
+
+    let mut next = dict.clone();
+    next.insert("events".to_string(), VmValue::List(Rc::new(next_events)));
+    if !expired.is_empty() {
+        let mut lifecycle = BTreeMap::new();
+        lifecycle.insert("last_post_turn".to_string(), VmValue::Int(turn));
+        next.insert(
+            "reminder_lifecycle".to_string(),
+            VmValue::Dict(Rc::new(lifecycle)),
+        );
+    }
+    ReminderPostTurnReport {
+        transcript: Some(VmValue::Dict(Rc::new(next))),
+        decremented_count,
+        expired,
+        remaining_count,
+    }
+}
+
+pub(crate) fn emit_reminder_lifecycle_event(kind: &str, payload: JsonValue) {
+    let Some(log) = active_event_log() else {
+        return;
+    };
+    let Ok(topic) = Topic::new(REMINDER_LIFECYCLE_TOPIC) else {
+        return;
+    };
+    let event = LogEvent::new(kind, payload);
+    let _ = futures::executor::block_on(log.append(&topic, event));
+}
+
 /// Convert a Harn dict (or any json-shaped value) into a normalized
 /// reminder event. Missing required fields fall back to protocol
 /// defaults (`propagate=session`, `role_hint=system`, `source=in_pipeline`,
@@ -750,6 +842,25 @@ fn reminder_from_vm_value(value: &VmValue) -> SystemReminder {
         body,
         fired_at_turn,
     }
+}
+
+fn reminder_from_event(event: &VmValue) -> Option<SystemReminder> {
+    let dict = event.as_dict()?;
+    if dict.get("kind").map(|value| value.display()).as_deref() != Some(SYSTEM_REMINDER_EVENT_KIND)
+    {
+        return None;
+    }
+    let reminder = dict.get("reminder")?;
+    serde_json::from_value(vm_value_to_json(reminder)).ok()
+}
+
+fn replace_reminder_payload(event: &VmValue, reminder: &SystemReminder) -> VmValue {
+    let reminder_json = serde_json::to_value(reminder).unwrap_or(JsonValue::Null);
+    let reminder_value = crate::stdlib::json_to_vm_value(&reminder_json);
+    let mut dict = event.as_dict().cloned().unwrap_or_default();
+    dict.insert("reminder".to_string(), reminder_value.clone());
+    dict.insert("metadata".to_string(), reminder_value);
+    VmValue::Dict(Rc::new(dict))
 }
 
 fn string_value(value: &VmValue) -> Option<String> {

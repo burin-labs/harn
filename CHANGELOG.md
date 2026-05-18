@@ -22,13 +22,14 @@ condensed series summaries instead of full per-patch history.
   Closes #1693.
 - **Transcript reminder transforms (#1817).** Adds
   `transcript.inject_reminder(transcript, options)` and
-  `transcript.clear_reminders(transcript, selector)` as pure transcript
-  transforms over pending `system_reminder` events. Injection validates
-  reminder options, appends a typed reminder event, and replaces older
-  pending reminders with the same `dedupe_key`; clearing removes
-  reminders by `id`, `tag`, or `dedupe_key` and reports the removal
-  count. This lands the deterministic transcript model without the later
-  EventLog expiry hooks or provider-rendering framework.
+  `transcript.clear_reminders(transcript, selector)` over pending
+  `system_reminder` events. Injection validates reminder options with
+  `HARN-RMD-001`, appends a typed reminder event, replaces older
+  pending reminders with the same `dedupe_key`, and emits
+  `transcript.reminder.deduped` when an EventLog is active. Agent
+  post-turn processing now decrements finite `ttl_turns`, removes
+  expired reminders, and emits `transcript.reminder.expired`; provider
+  rendering remains a follow-up.
 - **OAuth provider catalogue records (#1905).** Adds
   `std/oauth/providers` with ten preconfigured OAuth provider records
   (GitHub, Slack, Linear, Notion, Google, Microsoft, Atlassian,

@@ -1427,9 +1427,8 @@ artifacts through this builtin before the prompt is rendered.
 
 `transcript.inject_reminder(transcript, options)` appends a pending
 `system_reminder` event to a transcript and returns
-`{transcript, reminder_id, deduped_count}`. It is a pure transform: the
-input transcript is unchanged and the reminder is not added to durable
-messages.
+`{transcript, reminder_id, deduped_count}`. The input transcript is
+unchanged and the reminder is not added to durable messages.
 
 ```harn
 let injected = transcript.inject_reminder(transcript(), {
@@ -1448,7 +1447,8 @@ let t = injected.transcript
 `dedupe_key`, `ttl_turns`, `preserve_on_compact`, `propagate`, and
 `role_hint` fields are validated; unknown option keys fail fast. A new
 reminder with the same `dedupe_key` replaces pending reminders with
-that key.
+that key and emits `transcript.reminder.deduped` on
+`transcript.reminder.lifecycle` when an EventLog is active.
 
 `transcript.clear_reminders(transcript, selector)` removes pending
 reminders and returns `{transcript, removed_count}`. Select by `id`,
@@ -1459,6 +1459,10 @@ match.
 let cleared = transcript.clear_reminders(t, {tag: "token_pressure"})
 println(cleared.removed_count)
 ```
+
+During agent-session post-turn processing, finite `ttl_turns` values
+decrement. Reminders that reach zero are removed from transcript events
+and emit `transcript.reminder.expired` on the same lifecycle topic.
 
 ### `agent_turn`
 

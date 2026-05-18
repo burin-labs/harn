@@ -98,7 +98,7 @@ always available.
 Harn includes built-in modules that are compiled into the interpreter.
 Import them with the `std/` prefix:
 
-```harn
+```harn,ignore
 import "std/agent_state"
 import "std/agents"
 import "std/agent/user"
@@ -128,12 +128,11 @@ import "std/tui"
 import "std/vision"
 ```
 
-`std/oauth/providers` exports a `custom` factory that intentionally has the
-same short name as `std/experiments.custom`, so import it separately or use
-selective imports when a script needs both modules:
+`std/oauth/providers` exports a `custom` helper, which also exists in
+`std/experiments`. Use selective imports when combining those modules:
 
 ```harn
-import "std/oauth/providers"
+import { provider_catalog } from "std/oauth/providers"
 ```
 
 ### std/async

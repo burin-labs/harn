@@ -1,4 +1,7 @@
-import { agent_session_inject_feedback } from "std/agent/state"
+import {
+  agent_session_apply_reminder_post_turn,
+  agent_session_inject_feedback,
+} from "std/agent/state"
 
 fn __default_done_sentinel(opts) {
   return opts?.done_sentinel
@@ -328,6 +331,7 @@ pub fn agent_compute_post_turn(session, llm_result, dispatch, opts, iteration) {
     visible_text: text,
   }
   __host_fire_session_hook("post_turn", payload)
+  agent_session_apply_reminder_post_turn(session.session_id, iteration)
   if __sentinel_hit(sentinel_text, sentinel, parsed_done_marker) {
     return __completion_result(opts, payload, "sentinel")
   }

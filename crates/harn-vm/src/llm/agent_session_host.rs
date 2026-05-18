@@ -33,6 +33,7 @@ const HOST_SESSION_DRAIN_FEEDBACK: &str = "__host_agent_session_drain_feedback";
 const HOST_SESSION_TOTALS: &str = "__host_agent_session_totals";
 const HOST_SESSION_INJECT_FEEDBACK: &str = "__host_agent_session_inject_feedback";
 const HOST_SESSION_POST_EVENT: &str = "__host_agent_session_post_event";
+const HOST_SESSION_APPLY_REMINDER_POST_TURN: &str = "__host_agent_session_apply_reminder_post_turn";
 const HOST_SESSION_SET_ACTIVE_SKILLS: &str = "__host_agent_session_set_active_skills";
 const HOST_SESSION_ACTIVE_SKILLS: &str = "__host_agent_session_active_skills";
 const HOST_SESSION_RECORD_SKILL_EVENT: &str = "__host_agent_session_record_skill_event";
@@ -1069,6 +1070,24 @@ fn host_agent_session_post_event_builtin(
     Ok(VmValue::Nil)
 }
 
+fn host_agent_session_apply_reminder_post_turn_builtin(
+    args: &[VmValue],
+    _out: &mut String,
+) -> Result<VmValue, VmError> {
+    let session_id = match args.first() {
+        Some(VmValue::String(s)) if !s.is_empty() => s.to_string(),
+        _ => {
+            return Err(VmError::Runtime(format!(
+                "{HOST_SESSION_APPLY_REMINDER_POST_TURN}: session_id must be a non-empty string"
+            )))
+        }
+    };
+    let turn = args.get(1).and_then(VmValue::as_int).unwrap_or(0);
+    let report = crate::agent_sessions::apply_reminder_post_turn(&session_id, turn)
+        .map_err(VmError::Runtime)?;
+    Ok(crate::stdlib::json_to_vm_value(&report))
+}
+
 fn host_agent_session_set_active_skills_builtin(
     args: &[VmValue],
     _out: &mut String,
@@ -1926,6 +1945,13 @@ const HOST_SESSION_PRIMITIVES_SYNC: &[SyncBuiltin] = &[
         "Post an event into a running session's agent_inbox. Used by triggers, \
              connectors, and external host integrations to nudge a mid-loop session.",
     ),
+    SyncBuiltin::new(
+        HOST_SESSION_APPLY_REMINDER_POST_TURN,
+        host_agent_session_apply_reminder_post_turn_builtin,
+    )
+    .signature("__host_agent_session_apply_reminder_post_turn(session_id, turn?)")
+    .arity(VmBuiltinArity::Range { min: 1, max: 2 })
+    .doc("Apply reminder TTL lifecycle after an agent turn."),
     SyncBuiltin::new(
         HOST_SESSION_SET_ACTIVE_SKILLS,
         host_agent_session_set_active_skills_builtin,

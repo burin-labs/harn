@@ -12,7 +12,8 @@
 //!     categories,
 //!     [
 //!         "TYP", "PAR", "NAM", "CAP", "LLM", "ORC", "STD", "PRM",
-//!         "MOD", "LNT", "FMT", "IMP", "OWN", "RCV", "MAT", "POL",
+//!         "MOD", "RMD", "LNT", "FMT", "IMP", "OWN", "RCV", "MAT",
+//!         "POL",
 //!     ],
 //! );
 //! ```
@@ -32,6 +33,7 @@ pub enum Category {
     Std,
     Prm,
     Mod,
+    Rmd,
     Lnt,
     Fmt,
     Imp,
@@ -52,6 +54,7 @@ impl Category {
         Category::Std,
         Category::Prm,
         Category::Mod,
+        Category::Rmd,
         Category::Lnt,
         Category::Fmt,
         Category::Imp,
@@ -72,6 +75,7 @@ impl Category {
             Category::Std => "STD",
             Category::Prm => "PRM",
             Category::Mod => "MOD",
+            Category::Rmd => "RMD",
             Category::Lnt => "LNT",
             Category::Fmt => "FMT",
             Category::Imp => "IMP",
@@ -235,6 +239,7 @@ diagnostic_codes! {
     ModuleExportInvalid, "HARN-MOD-004", Mod, "module export is invalid";
     ModuleImportCollision, "HARN-MOD-005", Mod, "module imports expose colliding names";
     ModuleReExportConflict, "HARN-MOD-006", Mod, "module re-exports conflict";
+    ReminderUnknownOption, "HARN-RMD-001", Rmd, "reminder lifecycle option key is not recognized";
     LintRenamedStdlibSymbol, "HARN-LNT-001", Lnt, "renamed stdlib symbol lint";
     LintCyclomaticComplexity, "HARN-LNT-002", Lnt, "cyclomatic complexity lint";
     LintNamingConvention, "HARN-LNT-003", Lnt, "naming convention lint";
