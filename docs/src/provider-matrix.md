@@ -40,10 +40,10 @@ Regenerate with `make gen-provider-matrix` and verify with `make check-provider-
 | `fireworks` | `*qwen3.6*` | `any` | `enabled` | no | no | no | yes | no | `native` | `markdown` | `delimited` | no | `system` | `json` | `inline` | yes | no |
 | `fireworks` | `*qwen3p6*` | `any` | `enabled` | no | no | no | yes | no | `native` | `markdown` | `delimited` | no | `system` | `json` | `inline` | yes | no |
 | `fireworks` | `*qwen*` | `any` | `enabled` | no | no | no | yes | no | `native` | `markdown` | `delimited` | no | `system` | `json` | `inline` | yes | no |
-| `gemini` | `gemini-2.5*` | `any` | `enabled,adaptive,effort` | yes | yes | yes | yes | yes | no | `markdown` | `native_json` | no | `system` | `json` | `reasoning_summary` | no | no |
-| `gemini` | `models/gemini-2.5*` | `any` | `enabled,adaptive,effort` | yes | yes | yes | yes | yes | no | `markdown` | `native_json` | no | `system` | `json` | `reasoning_summary` | no | no |
-| `gemini` | `gemini-*` | `any` | no | yes | yes | yes | yes | yes | no | `markdown` | `native_json` | no | `system` | `json` | `none` | no | no |
-| `gemini` | `models/gemini-*` | `any` | no | yes | yes | yes | yes | yes | no | `markdown` | `native_json` | no | `system` | `json` | `none` | no | no |
+| `gemini` | `gemini-2.5*` | `any` | `enabled,adaptive,effort` | yes | yes | yes | yes | yes | no | `xml,markdown` | `native_json` | no | `system` | `json` | `reasoning_summary` | no | no |
+| `gemini` | `models/gemini-2.5*` | `any` | `enabled,adaptive,effort` | yes | yes | yes | yes | yes | no | `xml,markdown` | `native_json` | no | `system` | `json` | `reasoning_summary` | no | no |
+| `gemini` | `gemini-*` | `any` | no | yes | yes | yes | yes | yes | no | `xml,markdown` | `native_json` | no | `system` | `json` | `none` | no | no |
+| `gemini` | `models/gemini-*` | `any` | no | yes | yes | yes | yes | yes | no | `xml,markdown` | `native_json` | no | `system` | `json` | `none` | no | no |
 | `huggingface` | `qwen/qwen3.6*` | `any` | `enabled` | no | no | no | yes | no | `native` | `markdown` | `delimited` | no | `system` | `json` | `inline` | yes | no |
 | `huggingface` | `qwen/qwen3-coder*` | `any` | no | no | no | no | yes | no | `native` | `markdown` | `delimited` | no | `system` | `json` | `none` | yes | no |
 | `huggingface` | `qwen/*` | `any` | `enabled` | no | no | no | yes | no | `native` | `markdown` | `delimited` | no | `system` | `json` | `inline` | yes | no |
