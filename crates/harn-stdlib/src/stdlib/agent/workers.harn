@@ -208,7 +208,7 @@ fn __subagent_resume_tool(args) {
 }
 
 fn __agent_await_resumption_tool(_args) {
-  throw "agent_await_resumption: this tool is handled structurally by agent_loop"
+  throw "HARN-SUS-005: agent_await_resumption is handled structurally by agent_loop and cannot be invoked directly"
 }
 
 fn __agent_lifecycle_has_subagent_capability(registry, opts) {
@@ -389,14 +389,14 @@ pub fn parse_resume_conditions(conditions = nil) -> ResumeConditions? {
  *
  * @effects: [host]
  * @allocation: heap
- * @errors: [HARN-SUS-002]
+ * @errors: [HARN-SUS-002, HARN-SUS-005]
  * @api_stability: experimental
  * @example: agent_await_resumption("waiting on review", {timeout: {duration_minutes: 5}})
  */
 pub fn agent_await_resumption(reason, conditions = nil) -> AgentAwaitResumptionRequest {
   let normalized_reason = trim(to_string(reason ?? ""))
   if normalized_reason == "" {
-    throw "agent_await_resumption: reason is required"
+    throw "HARN-SUS-005: agent_await_resumption reason is required"
   }
   return {reason: normalized_reason, conditions: parse_resume_conditions(conditions)}
 }
@@ -476,7 +476,7 @@ pub fn close_agent(worker) {
  *
  * @effects: [host]
  * @allocation: heap
- * @errors: []
+ * @errors: [HARN-SUS-001, HARN-SUS-002, HARN-SUS-007, HARN-SUS-008]
  * @api_stability: experimental
  * @example: suspend_agent(worker, reason)
  */
@@ -495,7 +495,7 @@ pub fn suspend_agent(worker, reason = "", options = nil) {
  *
  * @effects: [host]
  * @allocation: heap
- * @errors: []
+ * @errors: [HARN-SUS-003, HARN-SUS-004, HARN-SUS-006, HARN-SUS-009, HARN-SUS-010]
  * @api_stability: experimental
  * @example: resume_agent(worker_or_snapshot, resume_input, continue_transcript)
  */

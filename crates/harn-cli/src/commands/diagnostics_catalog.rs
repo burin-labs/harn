@@ -370,6 +370,7 @@ const fn category_title(category: Category) -> &'static str {
         Category::Prm => "Prompt templates",
         Category::Mod => "Modules and exports",
         Category::Rmd => "Reminder lifecycle",
+        Category::Sus => "Suspend / resume lifecycle",
         Category::Lnt => "Lint rules",
         Category::Fmt => "Formatter",
         Category::Imp => "Import resolution",

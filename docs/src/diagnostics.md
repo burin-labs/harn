@@ -45,6 +45,7 @@ Repairs are tagged with a six-level safety class so `harn fix --apply --safety <
 | [`PRM`](#prm--prompt-templates) | Prompt templates | 7 |
 | [`MOD`](#mod--modules-and-exports) | Modules and exports | 6 |
 | [`RMD`](#rmd--reminder-lifecycle) | Reminder lifecycle | 1 |
+| [`SUS`](#sus--suspend--resume-lifecycle) | Suspend / resume lifecycle | 10 |
 | [`LNT`](#lnt--lint-rules) | Lint rules | 53 |
 | [`FMT`](#fmt--formatter) | Formatter | 3 |
 | [`IMP`](#imp--import-resolution) | Import resolution | 3 |
@@ -185,6 +186,21 @@ Repairs are tagged with a six-level safety class so `harn fix --apply --safety <
 | Code | Summary | Repair | Safety |
 |---|---|---|---|
 | [`HARN-RMD-001`](#harn-rmd-001) | reminder lifecycle option key is not recognized | — | — |
+
+## SUS — Suspend / resume lifecycle
+
+| Code | Summary | Repair | Safety |
+|---|---|---|---|
+| [`HARN-SUS-001`](#harn-sus-001) | suspend_agent target worker is not running | — | — |
+| [`HARN-SUS-002`](#harn-sus-002) | ResumeConditions validation failed | — | — |
+| [`HARN-SUS-003`](#harn-sus-003) | resume_agent target worker is not suspended | — | — |
+| [`HARN-SUS-004`](#harn-sus-004) | resume snapshot cannot be loaded or used | — | — |
+| [`HARN-SUS-005`](#harn-sus-005) | agent_await_resumption was invoked outside agent_loop structural handling | — | — |
+| [`HARN-SUS-006`](#harn-sus-006) | concurrent resume changed the worker before resume could complete | — | — |
+| [`HARN-SUS-007`](#harn-sus-007) | ResumeConditions trigger could not be registered | — | — |
+| [`HARN-SUS-008`](#harn-sus-008) | resume timeout action is unsupported | — | — |
+| [`HARN-SUS-009`](#harn-sus-009) | resume input failed agent_loop input validation | — | — |
+| [`HARN-SUS-010`](#harn-sus-010) | closed suspended worker cannot be resumed | — | — |
 
 ## LNT — Lint rules
 
@@ -2881,6 +2897,163 @@ Use only the documented `transcript.inject_reminder` keys: `body`, `tags`, `dedu
 `ttl_turns`, `preserve_on_compact`, `propagate`, and `role_hint`.
 
 For `transcript.clear_reminders`, use at least one selector from `id`, `tag`, or `dedupe_key`.
+
+### `HARN-SUS-001`
+
+**Category:** `SUS` (Suspend / resume lifecycle) &nbsp;·&nbsp; **API stability:** `stable`
+
+suspend_agent target worker is not running
+
+- **See also:** [`HARN-SUS-003`](#harn-sus-003), [`HARN-SUS-010`](#harn-sus-010)
+
+`suspend_agent(...)` can only create a new cooperative suspension for a
+running worker. A worker that is awaiting input, completed, failed, cancelled,
+or interrupted no longer has a running turn boundary where a suspend checkpoint
+can be installed.
+
+Use the worker summary status to branch before suspending. For terminal workers,
+spawn a fresh worker instead. Calling `suspend_agent(...)` again on an already
+suspended worker remains an idempotent summary read.
+
+### `HARN-SUS-002`
+
+**Category:** `SUS` (Suspend / resume lifecycle) &nbsp;·&nbsp; **API stability:** `stable`
+
+ResumeConditions validation failed
+
+- **See also:** [`HARN-SUS-007`](#harn-sus-007), [`HARN-SUS-008`](#harn-sus-008)
+
+`ResumeConditions` did not match the supported shape for a suspended agent.
+The object may contain `trigger`, `timeout`, and `on_event`. Trigger entries
+must parse as trigger specs, timeout entries need a positive
+`duration_minutes`, and event entries must be valid runtime event topics.
+
+Validate untrusted condition tables with `parse_resume_conditions(...)` or
+`agent_await_resumption(...)` before passing them to `suspend_agent(...)`.
+
+### `HARN-SUS-003`
+
+**Category:** `SUS` (Suspend / resume lifecycle) &nbsp;·&nbsp; **API stability:** `stable`
+
+resume_agent target worker is not suspended
+
+- **See also:** [`HARN-SUS-001`](#harn-sus-001), [`HARN-SUS-006`](#harn-sus-006)
+
+`resume_agent(...)` was called on a live worker that is not currently in the
+`suspended` state. Warm resume is only meaningful for workers with an active
+suspension envelope.
+
+Check the worker summary before resuming. Use `send_input(...)` for workers
+that are awaiting input, inspect terminal summaries directly, or load a
+snapshot path when you only need to restore persisted state.
+
+### `HARN-SUS-004`
+
+**Category:** `SUS` (Suspend / resume lifecycle) &nbsp;·&nbsp; **API stability:** `stable`
+
+resume snapshot cannot be loaded or used
+
+- **See also:** [`HARN-SUS-003`](#harn-sus-003)
+
+`resume_agent(...)` could not load the requested snapshot, or the snapshot was
+not usable as a worker state. The path may be missing, stale, unreadable, or
+from an incompatible worker-state format.
+
+Use the `snapshot_path` from the latest worker summary and keep the worker
+state directory available across process restarts. If the snapshot belongs to
+an older incompatible runtime, spawn a replacement worker instead of resuming.
+
+### `HARN-SUS-005`
+
+**Category:** `SUS` (Suspend / resume lifecycle) &nbsp;·&nbsp; **API stability:** `stable`
+
+agent_await_resumption was invoked outside agent_loop structural handling
+
+- **See also:** [`HARN-SUS-002`](#harn-sus-002)
+
+The model-facing `agent_await_resumption` tool is structural. `agent_loop`
+intercepts that tool call, records audit metadata, and turns it into a
+suspend checkpoint. Invoking the tool handler directly bypasses that control
+flow, so Harn rejects it.
+
+Call `agent_await_resumption(reason, conditions?)` only to build or normalize
+the request shape, or let an `agent_loop` turn handle the lifecycle tool call.
+
+### `HARN-SUS-006`
+
+**Category:** `SUS` (Suspend / resume lifecycle) &nbsp;·&nbsp; **API stability:** `stable`
+
+concurrent resume changed the worker before resume could complete
+
+- **See also:** [`HARN-SUS-003`](#harn-sus-003), [`HARN-SUS-010`](#harn-sus-010)
+
+A resume operation started while the worker looked suspended, but another
+operator, trigger, or timeout changed the worker state before the resume could
+finish. Harn rejects the later resume so callers do not accidentally treat a
+race as a successful wake-up.
+
+Refresh the worker summary and retry only if the worker is still suspended.
+For trigger-driven resumes, ensure only one trigger or timeout path remains
+armed for the suspension.
+
+### `HARN-SUS-007`
+
+**Category:** `SUS` (Suspend / resume lifecycle) &nbsp;·&nbsp; **API stability:** `stable`
+
+ResumeConditions trigger could not be registered
+
+- **See also:** [`HARN-SUS-002`](#harn-sus-002), [`HARN-SUS-008`](#harn-sus-008)
+
+The `conditions.trigger` entry was valid enough to request an auto-resume
+binding, but Harn could not register or resolve the trigger in the live
+dispatcher registry.
+
+Check the trigger kind, event matchers, and registry availability. Prefer
+normalizing the full `ResumeConditions` table before suspension so shape
+errors surface as `HARN-SUS-002`.
+
+### `HARN-SUS-008`
+
+**Category:** `SUS` (Suspend / resume lifecycle) &nbsp;·&nbsp; **API stability:** `stable`
+
+resume timeout action is unsupported
+
+- **See also:** [`HARN-SUS-002`](#harn-sus-002), [`HARN-SUS-007`](#harn-sus-007)
+
+An auto-resume timeout used an `on_timeout` action Harn does not implement.
+Supported actions are `resume_with_summary`, `resume_with_input`, and `fail`.
+
+Use `parse_resume_conditions(...)` to normalize timeout settings before
+suspending, or update the timeout table to one of the supported actions.
+
+### `HARN-SUS-009`
+
+**Category:** `SUS` (Suspend / resume lifecycle) &nbsp;·&nbsp; **API stability:** `stable`
+
+resume input failed agent_loop input validation
+
+- **See also:** [`HARN-SUS-003`](#harn-sus-003)
+
+`resume_agent(...)` received resume input that could not be converted into a
+non-empty task prompt for the resumed agent loop.
+
+Pass `nil` when resuming without new input, or pass a non-empty string or value
+whose string form is suitable as the next task prompt.
+
+### `HARN-SUS-010`
+
+**Category:** `SUS` (Suspend / resume lifecycle) &nbsp;·&nbsp; **API stability:** `stable`
+
+closed suspended worker cannot be resumed
+
+- **See also:** [`HARN-SUS-003`](#harn-sus-003), [`HARN-SUS-006`](#harn-sus-006)
+
+The target worker was closed or cancelled after being suspended. Closing a
+worker removes the suspension envelope and rejects future resume attempts
+against that live worker handle.
+
+Treat the worker as terminal. Spawn a new worker, or restore an explicit
+snapshot path only when you intentionally want to inspect persisted state.
 
 ### `HARN-LNT-001`
 

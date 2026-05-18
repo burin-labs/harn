@@ -1,0 +1,31 @@
+import {
+  agent_await_resumption,
+  agent_lifecycle_tools,
+  parse_resume_conditions,
+  resume_agent,
+} from "std/agent/workers"
+
+fn has_code(result, code) {
+  return is_err(result) && contains(to_string(unwrap_err(result)), code)
+}
+
+pipeline main() {
+  let bad_trigger_shape = try {
+    parse_resume_conditions({trigger: "not-a-trigger"})
+  }
+  println(has_code(bad_trigger_shape, "HARN-SUS-002"))
+  let bad_timeout_action = try {
+    agent_await_resumption("waiting on review", {timeout: {duration_minutes: 1, on_timeout: "explode"}})
+  }
+  println(has_code(bad_timeout_action, "HARN-SUS-002"))
+  let lifecycle = agent_lifecycle_tools(tool_registry())
+  let await_tool = tool_find(lifecycle, "agent_await_resumption")
+  let direct_tool_call = try {
+    await_tool.handler({reason: "outside agent loop"})
+  }
+  println(has_code(direct_tool_call, "HARN-SUS-005"))
+  let missing_snapshot = try {
+    resume_agent("/tmp/harn-suspend-diagnostics-missing-worker.json")
+  }
+  println(has_code(missing_snapshot, "HARN-SUS-004"))
+}
