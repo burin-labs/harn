@@ -1,0 +1,29 @@
+pipeline main() {
+  let evt = transcript_resumption_event(
+    {
+      handle: "worker://triage/42",
+      initiator: "drain_agent",
+      initiator_id: "settlement-session-1",
+      input: {approved: true},
+      input_hash: "sha256:abc",
+      continue_transcript: true,
+      trigger_match: {source: "github", event_id: "evt-1", filter_summary: "label matched"},
+      linked_suspension_span_id: "span-1",
+      resumed_at_turn: 6,
+    },
+  )
+  println(evt?.kind == "resumption")
+  println(evt?.role == "system")
+  println(evt?.visibility == "public")
+  println(evt?.text == "settlement-session-1")
+  println(evt?.resumption?.handle == "worker://triage/42")
+  println(evt?.resumption?.initiator == "drain_agent")
+  println(evt?.resumption?.initiator_id == "settlement-session-1")
+  println(evt?.resumption?.input?.approved)
+  println(evt?.resumption?.input_hash == "sha256:abc")
+  println(evt?.resumption?.continue_transcript)
+  println(evt?.resumption?.trigger_match?.event_id == "evt-1")
+  println(evt?.resumption?.linked_suspension_span_id == "span-1")
+  println(evt?.resumption?.resumed_at_turn == 6)
+  println(evt?.metadata?.input_hash == "sha256:abc")
+}

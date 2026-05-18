@@ -1,0 +1,25 @@
+pipeline main() {
+  let evt = transcript_suspension_event(
+    {
+      handle: "worker://triage/42",
+      initiator: "operator",
+      reason: "waiting for human approval",
+      conditions: {kind: "approval", approval_id: "approval-1"},
+      resume_by_mechanism: "ResumeBy.operator",
+      suspended_at_turn: 5,
+      span_id: "span-1",
+    },
+  )
+  println(evt?.kind == "suspension")
+  println(evt?.role == "system")
+  println(evt?.visibility == "public")
+  println(evt?.text == "waiting for human approval")
+  println(evt?.suspension?.handle == "worker://triage/42")
+  println(evt?.suspension?.initiator == "operator")
+  println(evt?.suspension?.reason == "waiting for human approval")
+  println(evt?.suspension?.conditions?.kind == "approval")
+  println(evt?.suspension?.resume_by_mechanism == "ResumeBy.operator")
+  println(evt?.suspension?.suspended_at_turn == 5)
+  println(evt?.suspension?.span_id == "span-1")
+  println(evt?.metadata?.handle == "worker://triage/42")
+}

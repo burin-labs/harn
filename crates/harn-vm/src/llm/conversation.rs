@@ -6,9 +6,11 @@ use crate::vm::Vm;
 
 use super::helpers::{
     extract_llm_options, is_transcript_value, new_transcript_with, new_transcript_with_events,
-    normalize_transcript_asset, transcript_asset_list, transcript_event, transcript_id,
-    transcript_message_list, transcript_reminder_event_from_value, transcript_summary_text,
-    vm_add_role_message, vm_message_value, vm_value_to_json,
+    normalize_transcript_asset, transcript_asset_list, transcript_drain_decision_event_from_value,
+    transcript_event, transcript_id, transcript_message_list, transcript_reminder_event_from_value,
+    transcript_resumption_event_from_value, transcript_summary_text,
+    transcript_suspension_event_from_value, vm_add_role_message, vm_message_value,
+    vm_value_to_json,
 };
 
 /// Extract and validate a transcript dict from the first argument.
@@ -115,6 +117,21 @@ pub(crate) fn register_conversation_builtins(vm: &mut Vm) {
     vm.register_builtin("transcript_reminder_event", |args, _out| {
         let value = args.first().cloned().unwrap_or(VmValue::Nil);
         Ok(transcript_reminder_event_from_value(&value))
+    });
+
+    vm.register_builtin("transcript_suspension_event", |args, _out| {
+        let value = args.first().cloned().unwrap_or(VmValue::Nil);
+        Ok(transcript_suspension_event_from_value(&value))
+    });
+
+    vm.register_builtin("transcript_resumption_event", |args, _out| {
+        let value = args.first().cloned().unwrap_or(VmValue::Nil);
+        Ok(transcript_resumption_event_from_value(&value))
+    });
+
+    vm.register_builtin("transcript_drain_decision_event", |args, _out| {
+        let value = args.first().cloned().unwrap_or(VmValue::Nil);
+        Ok(transcript_drain_decision_event_from_value(&value))
     });
 
     vm.register_builtin("transcript_summary", |args, _out| {

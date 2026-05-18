@@ -824,6 +824,21 @@ pub(crate) const SIGNATURES: &[BuiltinSignature] = &[
         TY_DICT,
     ),
     BuiltinSignature::simple(
+        "transcript_suspension_event",
+        &[Param::new("suspension", TY_DICT)],
+        TY_DICT,
+    ),
+    BuiltinSignature::simple(
+        "transcript_resumption_event",
+        &[Param::new("resumption", TY_DICT)],
+        TY_DICT,
+    ),
+    BuiltinSignature::simple(
+        "transcript_drain_decision_event",
+        &[Param::new("drain", TY_DICT)],
+        TY_DICT,
+    ),
+    BuiltinSignature::simple(
         "transcript_reset",
         &[Param::optional("opts", TY_DICT)],
         TRANSCRIPT,

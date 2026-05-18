@@ -1,0 +1,25 @@
+pipeline main() {
+  let evt = transcript_drain_decision_event(
+    {
+      pipeline_id: "pipeline-1",
+      item: {category: "suspended_subagent", id: "worker://triage/42", summary: "worker is suspended"},
+      action: "resume",
+      reason: "settlement agent selected continuation",
+      decided_at_turn: 7,
+      settlement_agent_session_id: "settlement-session-1",
+    },
+  )
+  println(evt?.kind == "drain_decision")
+  println(evt?.role == "system")
+  println(evt?.visibility == "public")
+  println(evt?.text == "settlement agent selected continuation")
+  println(evt?.drain?.pipeline_id == "pipeline-1")
+  println(evt?.drain?.item?.category == "suspended_subagent")
+  println(evt?.drain?.item?.id == "worker://triage/42")
+  println(evt?.drain?.item?.summary == "worker is suspended")
+  println(evt?.drain?.action == "resume")
+  println(evt?.drain?.reason == "settlement agent selected continuation")
+  println(evt?.drain?.decided_at_turn == 7)
+  println(evt?.drain?.settlement_agent_session_id == "settlement-session-1")
+  println(evt?.metadata?.pipeline_id == "pipeline-1")
+}

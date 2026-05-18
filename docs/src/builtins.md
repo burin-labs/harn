@@ -2691,6 +2691,9 @@ and offline analysis.
 | `transcript_events(transcript)` | transcript | list | Return canonical transcript events |
 | `transcript_events_by_kind(transcript, kind)` | transcript, kind | list | Filter transcript events by their `kind` field |
 | `transcript_reminder_event(reminder)` | reminder: dict | event dict | Build a normalized `system_reminder` event (see [System reminders](./system-reminders.md)) |
+| `transcript_suspension_event(suspension)` | suspension: dict | event dict | Build a normalized `suspension` lifecycle event |
+| `transcript_resumption_event(resumption)` | resumption: dict | event dict | Build a normalized `resumption` lifecycle event |
+| `transcript_drain_decision_event(drain)` | drain: dict | event dict | Build a normalized `drain_decision` lifecycle event |
 | `transcript_stats(transcript)` | transcript | dict | Count messages, tool calls, and visible events on a transcript |
 | `transcript_summary(transcript)` | transcript | string or nil | Return transcript summary |
 | `transcript_fork(transcript, options?)` | transcript, options | transcript | Fork transcript state |
