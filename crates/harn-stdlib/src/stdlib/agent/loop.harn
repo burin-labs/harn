@@ -27,6 +27,7 @@ import {
   agent_tool_search_inject_if_needed,
   agent_tool_search_record_results,
 } from "std/agent/tool_search"
+import { list_agents } from "std/agent/workers"
 import { llm_call_options } from "std/llm/options"
 
 fn __default_invoke_llm(message, turn_system, llm_opts) {
@@ -1042,6 +1043,62 @@ fn __agent_loop_finalize_failed(session, iteration) {
   }
 }
 
+fn __agent_loop_current_worker() {
+  let ctx = runtime_context()
+  let worker_id = ctx?.worker_id
+  if type_of(worker_id) != "string" || worker_id == "" {
+    return nil
+  }
+  for worker in list_agents() {
+    if worker?.id == worker_id {
+      return worker
+    }
+  }
+  return nil
+}
+
+fn __agent_loop_suspend_reminder_body(reason) {
+  if type_of(reason) == "string" && reason != "" {
+    return "Worker suspended before the next turn: " + reason
+  }
+  return "Worker suspended before the next turn."
+}
+
+fn __agent_loop_suspend_checkpoint(session, iteration) {
+  let worker = __agent_loop_current_worker()
+  if worker == nil || worker?.status != "suspended" {
+    return nil
+  }
+  let suspension = worker?.suspension ?? {}
+  let reason = to_string(suspension?.reason ?? "")
+  let initiator = to_string(suspension?.initiator ?? "operator")
+  let conditions = suspension?.conditions
+  let payload = {
+    status: "suspended",
+    handle: worker,
+    worker: worker,
+    reason: reason,
+    initiator: initiator,
+    conditions: conditions,
+    iterations_completed: iteration,
+    session_id: session.session_id,
+  }
+  agent_session_inject(
+    session.session_id,
+    transcript_reminder_event(
+      {
+        body: __agent_loop_suspend_reminder_body(reason),
+        source: "in_pipeline",
+        tags: ["agent_loop", "worker_suspend"],
+        dedupe_key: "worker_suspend:" + worker.id,
+        ttl_turns: 1,
+        fired_at_turn: iteration + 1,
+      },
+    ),
+  )
+  return payload
+}
+
 fn __requirement_missing(requirement, successful) {
   if type_of(requirement) == "list" {
     for candidate in requirement {
@@ -1386,6 +1443,7 @@ fn __agent_loop_run(message, session, initial_opts) {
     var fallback_index = 0
     var successful_tools_seen = []
     var rejected_tools_seen = []
+    var suspend_result = nil
     var stall_state = __stall_initial_state()
     var stall_enabled_seen = false
     let max_verify_attempts = opts?.max_verify_attempts ?? 20
@@ -1402,6 +1460,15 @@ fn __agent_loop_run(message, session, initial_opts) {
     var budget_decisions = []
     var last_tool_count = 0
     while iteration < current_max {
+      let checkpoint = __agent_loop_suspend_checkpoint(session, iteration)
+      if checkpoint != nil {
+        __drain_audit_flushes(audit_background_tasks)
+        audit_background_tasks = []
+        suspend_result = checkpoint
+        final_status = "suspended"
+        stop_reason = "suspended"
+        break
+      }
       if agent_budget_pre_call_blocked(session, opts) {
         final_status = "budget_exhausted"
         break
@@ -1670,9 +1737,14 @@ fn __agent_loop_run(message, session, initial_opts) {
     )
     session_finalized = true
     let result_with_stalls = __apply_stall_result(result, stall_enabled_seen, stall_state)
-    let enforced = __enforce_required_successful_tools(result_with_stalls, opts)
+    let enforced = if suspend_result != nil {
+      result_with_stalls
+    } else {
+      __enforce_required_successful_tools(result_with_stalls, opts)
+    }
+    var final_result = enforced
     if budget.expose_decisions {
-      enforced
+      final_result = final_result
         + {
         adaptive_budget: {
           mode: budget.mode,
@@ -1683,9 +1755,11 @@ fn __agent_loop_run(message, session, initial_opts) {
           decisions: budget_decisions,
         },
       }
-    } else {
-      enforced
     }
+    if suspend_result != nil {
+      final_result = final_result + suspend_result
+    }
+    final_result
   }
   if is_err(run) {
     __drain_audit_flushes(audit_background_tasks)

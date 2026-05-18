@@ -67,7 +67,7 @@ top-level keys before `v0.8`).
 
 | Field | Type | Description |
 |---|---|---|
-| `status` | string | Terminal state: `"done"` (natural completion), `"stuck"` (exceeded `max_nudges` consecutive text-only turns), `"budget_exhausted"` (hit `max_iterations` without any explicit break), `"provider_error"` (provider/tool-protocol request failed and was captured in `error`), `"idle"` (daemon yielded with no remaining wake source), `"watchdog"` (daemon idle-wait tripped the `idle_watchdog_attempts` limit), or `"failed"` (`require_successful_tools` not satisfied). |
+| `status` | string | Terminal state: `"done"` (natural completion), `"suspended"` (worker yielded at a cooperative suspend checkpoint), `"stuck"` (exceeded `max_nudges` consecutive text-only turns), `"budget_exhausted"` (hit `max_iterations` without any explicit break), `"provider_error"` (provider/tool-protocol request failed and was captured in `error`), `"idle"` (daemon yielded with no remaining wake source), `"watchdog"` (daemon idle-wait tripped the `idle_watchdog_attempts` limit), or `"failed"` (`require_successful_tools` not satisfied). |
 | `error` | dict or nil | Structured terminal failure for provider/tool-protocol failures: `{category, reason, kind, provider, model, message, phase, tool_format, after_tool_result}`. `after_tool_result` is true when the rejected model request included prior tool observations. |
 | `text` | string | Accumulated text output from all iterations |
 | `visible_text` | string | Human-visible accumulated output |
@@ -79,6 +79,11 @@ top-level keys before `v0.8`).
 | `task_ledger` | dict | Final task-ledger state (deliverables, nudges, etc.) |
 | `trace` | dict | Structured span/event summary for observability |
 | `transcript` | dict | Transcript of the full conversation state |
+| `handle` | dict | Present for `status: "suspended"`; resumable worker handle returned by `resume_agent(...)` |
+| `reason` | string | Present for `status: "suspended"`; suspend reason visible to the resumed turn as a `system_reminder` |
+| `initiator` | string | Present for `status: "suspended"`; one of `"self"`, `"parent"`, `"operator"`, or `"triggered"` |
+| `conditions` | dict or nil | Present for `status: "suspended"`; optional resume trigger conditions |
+| `iterations_completed` | int | Present for `status: "suspended"`; completed LLM turns before the checkpoint yielded |
 | `repeated_tool_calls` | int | Present when `stall_diagnostics` is enabled. Counts adjacent repeated tool calls with identical name and arguments after the first call in each streak |
 | `stall_warnings` | list | Present when `stall_diagnostics` is enabled. Diagnostic warning records emitted when a repeat streak reaches the configured threshold |
 | `suspected_loop` | bool | Present when `stall_diagnostics` is enabled. `true` when at least one stall warning fired |
