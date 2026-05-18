@@ -27,9 +27,64 @@ env:
   RUSTFLAGS: "-D warnings"
 
 jobs:
+  # Auto-route to a self-hosted Linux runner when one is online with the
+  # `harn-ci` label, else fall back to GitHub-hosted. Mirrors the pattern
+  # in burin-code and harn-cloud so spinning up a Linux runner anywhere in
+  # the org instantly accelerates this repo's CI too. Falls through cleanly
+  # (all outputs `false`) when the GitHub App token cannot be minted or the
+  # API call fails, so CI never breaks because of runner-detection issues.
+  runner-availability:
+    name: Detect self-hosted runner availability
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      linux: ${{ steps.detect.outputs.linux }}
+      windows: ${{ steps.detect.outputs.windows }}
+      macos: ${{ steps.detect.outputs.macos }}
+    steps:
+      - name: Mint GitHub App token
+        id: app-token
+        continue-on-error: true
+        uses: actions/create-github-app-token@1b10c78c7865c340bc4f6099eb2f838309f1e8c3 # v3.1.1
+        with:
+          app-id: ${{ secrets.RELEASE_APP_ID }}
+          private-key: ${{ secrets.RELEASE_APP_PRIVATE_KEY }}
+          owner: ${{ github.repository_owner }}
+      - id: detect
+        env:
+          GH_TOKEN: ${{ steps.app-token.outputs.token }}
+          OWNER: ${{ github.repository_owner }}
+          HARN_TAG: harn-ci
+        run: |
+          set -euo pipefail
+          if [ -z "${GH_TOKEN:-}" ]; then
+            {
+              echo "linux=false"
+              echo "windows=false"
+              echo "macos=false"
+            } >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          RUNNER_LIST="$(gh api "/orgs/${OWNER}/actions/runners?per_page=100" 2>/dev/null || true)"
+          if [ -z "$RUNNER_LIST" ] || ! echo "$RUNNER_LIST" | jq -e '.runners' > /dev/null 2>&1; then
+            {
+              echo "linux=false"
+              echo "windows=false"
+              echo "macos=false"
+            } >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          for OS_LABEL in Linux Windows macOS; do
+            AVAILABLE="$(echo "$RUNNER_LIST" | jq -r --arg os "$OS_LABEL" --arg tag "${HARN_TAG}" '[.runners[] | select(.status == "online") | select(any(.labels[].name; . == $tag)) | select(any(.labels[].name; . == $os))] | length > 0')"
+            KEY="$(echo "$OS_LABEL" | tr '[:upper:]' '[:lower:]')"
+            echo "${KEY}=${AVAILABLE}" >> "$GITHUB_OUTPUT"
+          done
+
   fmt:
     name: Format check
-    runs-on: ubuntu-latest
+    needs: runner-availability
+    runs-on: ${{ needs.runner-availability.outputs.linux == 'true' && fromJSON('["self-hosted", "Linux", "harn-ci"]') || 'ubuntu-latest' }}
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
       - uses: dtolnay/rust-toolchain@29eef336d9b2848a0b548edc03f92a220660cdb8 # stable
@@ -41,14 +96,16 @@ jobs:
 
   lint-md:
     name: Markdown lint
-    runs-on: ubuntu-latest
+    needs: runner-availability
+    runs-on: ${{ needs.runner-availability.outputs.linux == 'true' && fromJSON('["self-hosted", "Linux", "harn-ci"]') || 'ubuntu-latest' }}
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
       - uses: DavidAnson/markdownlint-cli2-action@ded1f9488f68a970bc66ea5619e13e9b52e601cd # v23.2.0
 
   rust:
     name: Rust (lint + test + conformance)
-    runs-on: ubuntu-latest
+    needs: runner-availability
+    runs-on: ${{ needs.runner-availability.outputs.linux == 'true' && fromJSON('["self-hosted", "Linux", "harn-ci"]') || 'ubuntu-latest' }}
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
@@ -110,7 +167,8 @@ jobs:
 
   changes:
     name: Detect code changes
-    runs-on: ubuntu-latest
+    needs: runner-availability
+    runs-on: ${{ needs.runner-availability.outputs.linux == 'true' && fromJSON('["self-hosted", "Linux", "harn-ci"]') || 'ubuntu-latest' }}
     outputs:
       windows: ${{ steps.filter.outputs.windows }}
     steps:
@@ -179,7 +237,8 @@ jobs:
 
   portal:
     name: Portal frontend
-    runs-on: ubuntu-latest
+    needs: runner-availability
+    runs-on: ${{ needs.runner-availability.outputs.linux == 'true' && fromJSON('["self-hosted", "Linux", "harn-ci"]') || 'ubuntu-latest' }}
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
       - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0
@@ -198,7 +257,8 @@ jobs:
 
   actions:
     name: GitHub Actions lint
-    runs-on: ubuntu-latest
+    needs: runner-availability
+    runs-on: ${{ needs.runner-availability.outputs.linux == 'true' && fromJSON('["self-hosted", "Linux", "harn-ci"]') || 'ubuntu-latest' }}
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
       - run: go install github.com/rhysd/actionlint/cmd/actionlint@v1.7.12
@@ -206,7 +266,8 @@ jobs:
 
   e2e:
     name: Slow E2E suite
-    runs-on: ubuntu-latest
+    needs: runner-availability
+    runs-on: ${{ needs.runner-availability.outputs.linux == 'true' && fromJSON('["self-hosted", "Linux", "harn-ci"]') || 'ubuntu-latest' }}
     if: >
       github.event_name == 'merge_group' ||
       (github.event_name == 'pull_request' && contains(github.event.pull_request.labels.*.name, 'e2e'))
@@ -229,9 +290,9 @@ jobs:
 
   ci-status:
     name: CI status
-    runs-on: ubuntu-latest
+    runs-on: ${{ needs.runner-availability.outputs.linux == 'true' && fromJSON('["self-hosted", "Linux", "harn-ci"]') || 'ubuntu-latest' }}
     if: always()
-    needs: [fmt, lint-md, rust, windows, portal, actions, e2e]
+    needs: [runner-availability, fmt, lint-md, rust, windows, portal, actions, e2e]
     steps:
       - name: Verify required CI jobs
         run: |
@@ -276,9 +337,9 @@ jobs:
 
   deploy-docs:
     name: Deploy docs
-    runs-on: ubuntu-latest
+    needs: [runner-availability, ci-status]
+    runs-on: ${{ needs.runner-availability.outputs.linux == 'true' && fromJSON('["self-hosted", "Linux", "harn-ci"]') || 'ubuntu-latest' }}
     if: github.ref == 'refs/heads/main'
-    needs: [ci-status]
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
