@@ -1359,7 +1359,7 @@ fn schedule_auto_resume_timeout(
 ) {
     cancel_auto_resume_timeout(handle.id.as_str());
     let event_log = ensure_trigger_event_log();
-    let base_vm = crate::vm::clone_async_builtin_child_vm().unwrap_or_else(Vm::new);
+    let base_vm = crate::vm::clone_async_builtin_child_vm().unwrap_or_default();
     let event = auto_resume_timeout_event(&handle, &worker_id, &timeout);
     let trigger_id = handle.id.clone();
     let version = handle.version;

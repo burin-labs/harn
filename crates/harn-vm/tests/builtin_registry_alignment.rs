@@ -126,6 +126,7 @@ const RUNTIME_ONLY_EXCEPTIONS: &[&str] = &[
     "__host_resume_conditions_parse",
     "__host_skill_score",
     "__host_tool_search_score",
+    "__host_top_level_agent_suspend",
     "__host_typed_checkpoint_trace",
     "__host_sub_agent_run",
     "__host_worker_close",
