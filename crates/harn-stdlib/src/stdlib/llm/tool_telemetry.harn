@@ -147,6 +147,12 @@ fn __tt_events(result, start_ms, end_ms) {
  *   extra_attributes:  dict   — additional attributes merged into `attributes`
  *   start_time_iso:    string — pre-sampled ISO timestamp matching start_ms
  *   end_time_iso:      string — pre-sampled ISO timestamp matching end_ms
+ *
+ * @effects: []
+ * @allocation: heap
+ * @errors: []
+ * @api_stability: stable
+ * @example: tool_call_span(call, result, start_ms, end_ms, extras)
  */
 pub fn tool_call_span(call, result, start_ms, end_ms, extras = nil) {
   let opts = __tt_dict(extras)
@@ -241,6 +247,12 @@ pub fn tool_call_span(call, result, start_ms, end_ms, extras = nil) {
  *
  * Each tool call POSTs synchronously. For high-throughput workloads,
  * wrap with `with_idempotency` upstream or batch via a custom sink.
+ *
+ * @effects: [net]
+ * @allocation: heap
+ * @errors: []
+ * @api_stability: stable
+ * @example: langfuse_sink(opts)
  */
 pub fn langfuse_sink(opts = nil) {
   let cfg = __tt_dict(opts)
@@ -302,6 +314,12 @@ pub fn langfuse_sink(opts = nil) {
  * Options:
  *   sink:   fn(otel_record) — custom emitter; default writes JSON to stderr
  *   prefix: string prefix on each stderr line (default "[otel] ")
+ *
+ * @effects: [stdio.write]
+ * @allocation: heap
+ * @errors: []
+ * @api_stability: stable
+ * @example: otel_sink(opts)
  */
 pub fn otel_sink(opts = nil) {
   let cfg = __tt_dict(opts)
@@ -346,6 +364,12 @@ pub fn otel_sink(opts = nil) {
  *
  * Options:
  *   prefix: string prefix on each line (default "[tool_telemetry] ")
+ *
+ * @effects: [stdio.write]
+ * @allocation: heap
+ * @errors: []
+ * @api_stability: stable
+ * @example: stderr_sink(opts)
  */
 pub fn stderr_sink(opts = nil) {
   let cfg = __tt_dict(opts)
@@ -357,6 +381,12 @@ pub fn stderr_sink(opts = nil) {
  * noop_sink() -> fn(span)
  *
  * Discards spans. Useful when telemetry is conditionally disabled.
+ *
+ * @effects: []
+ * @allocation: heap
+ * @errors: []
+ * @api_stability: stable
+ * @example: noop_sink()
  */
 pub fn noop_sink() {
   return { _span ->
@@ -421,6 +451,12 @@ fn __tt_compose_sinks(sinks) {
  *   "langfuse"|"otel"|"stderr"|"noop" — built-in sink with env defaults
  *   {sink: callable | string, ...opts}  — single sink with options
  *   {sinks: [...], ...opts}    — fan out to multiple sinks
+ *
+ * @effects: []
+ * @allocation: heap
+ * @errors: []
+ * @api_stability: stable
+ * @example: resolve_telemetry_sink(value)
  */
 pub fn resolve_telemetry_sink(value) {
   if value == nil {

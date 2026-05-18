@@ -37,12 +37,28 @@ type CorrectionQueryFilters = {
   limit: int?,
 }
 
-/** record appends a typed replay correction and returns its CorrectionId. */
+/**
+ * record appends a typed replay correction and returns its CorrectionId.
+ *
+ * @effects: []
+ * @allocation: heap
+ * @errors: []
+ * @api_stability: stable
+ * @example: record(correction)
+ */
 pub fn record(correction) -> CorrectionId {
   return corrections.record(correction)
 }
 
-/** query returns recorded replay corrections. */
+/**
+ * query returns recorded replay corrections.
+ *
+ * @effects: []
+ * @allocation: heap
+ * @errors: []
+ * @api_stability: stable
+ * @example: query(filters)
+ */
 pub fn query(filters = {}) -> list<CorrectionRecord> {
   return corrections.query(filters)
 }

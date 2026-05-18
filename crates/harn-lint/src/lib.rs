@@ -193,6 +193,7 @@ fn lint_full(
     if let Some(threshold) = options.complexity_threshold {
         linter.complexity_threshold = threshold;
     }
+    linter.require_stdlib_metadata = options.require_stdlib_metadata;
     linter
         .persona_step_allowlist
         .extend(options.persona_step_allowlist.iter().cloned());

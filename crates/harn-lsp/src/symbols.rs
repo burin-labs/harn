@@ -1,6 +1,7 @@
 use harn_lexer::Span;
 use harn_parser::{
-    format_type, Attribute, DictEntry, Node, SNode, ShapeField, TypeExpr, TypeParam,
+    format_type, parse_stdlib_metadata, Attribute, DictEntry, Node, SNode, ShapeField,
+    StdlibMetadata, TypeExpr, TypeParam,
 };
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -43,6 +44,11 @@ pub(crate) struct SymbolInfo {
     /// attached to the immediately-preceding declaration. Used by hover
     /// to surface Flow predicate metadata as a single source of truth.
     pub(crate) attributes: Vec<Attribute>,
+    /// Structured `@effects`/`@allocation`/`@errors`/`@api_stability`/
+    /// `@example` block parsed from the HarnDoc above the declaration.
+    /// `None` for declarations without a canonical doc block (private
+    /// helpers, user scripts, etc.).
+    pub(crate) stdlib_metadata: Option<StdlibMetadata>,
 }
 
 /// Walk the parsed AST and collect all definitions.
@@ -233,6 +239,7 @@ fn collect_symbols(
                 fields: Vec::new(),
                 enum_variants: Vec::new(),
                 attributes: Vec::new(),
+                stdlib_metadata: None,
             }
         };
     }
@@ -270,6 +277,7 @@ fn collect_symbols(
                 fields: Vec::new(),
                 enum_variants: Vec::new(),
                 attributes: pending_attrs.to_vec(),
+                stdlib_metadata: None,
             });
             // Params are plain strings (no individual spans), register them scoped to body.
             for p in params {
@@ -315,6 +323,8 @@ fn collect_symbols(
                 fields: Vec::new(),
                 enum_variants: Vec::new(),
                 attributes: pending_attrs.to_vec(),
+                stdlib_metadata: parse_stdlib_metadata(source, &snode.span)
+                    .filter(|meta| !meta.is_empty()),
             });
             for p in params {
                 symbols.push(simple_sym!(
@@ -359,6 +369,7 @@ fn collect_symbols(
                 fields: Vec::new(),
                 enum_variants: Vec::new(),
                 attributes: pending_attrs.to_vec(),
+                stdlib_metadata: None,
             });
             for p in params {
                 symbols.push(simple_sym!(
@@ -393,6 +404,7 @@ fn collect_symbols(
                 fields: Vec::new(),
                 enum_variants: Vec::new(),
                 attributes: Vec::new(),
+                stdlib_metadata: None,
             });
             for (_k, value) in fields {
                 recurse!(value, Some(snode.span));
@@ -424,6 +436,7 @@ fn collect_symbols(
                 fields: Vec::new(),
                 enum_variants: Vec::new(),
                 attributes: pending_attrs.to_vec(),
+                stdlib_metadata: None,
             });
             for (_k, value) in fields {
                 recurse!(value, Some(snode.span));
@@ -512,6 +525,7 @@ fn collect_symbols(
                     })
                     .collect(),
                 attributes: Vec::new(),
+                stdlib_metadata: None,
             });
         }
         Node::StructDecl {
@@ -558,6 +572,7 @@ fn collect_symbols(
                 fields: shape_fields,
                 enum_variants: Vec::new(),
                 attributes: Vec::new(),
+                stdlib_metadata: None,
             });
         }
         Node::InterfaceDecl {
@@ -605,6 +620,7 @@ fn collect_symbols(
                 fields: Vec::new(),
                 enum_variants: Vec::new(),
                 attributes: Vec::new(),
+                stdlib_metadata: None,
             });
         }
         Node::ImplBlock {
@@ -622,6 +638,7 @@ fn collect_symbols(
                 fields: Vec::new(),
                 enum_variants: Vec::new(),
                 attributes: Vec::new(),
+                stdlib_metadata: None,
             });
             for m in methods {
                 collect_symbols(m, symbols, Some(snode.span), source, Some(type_name), &[]);
@@ -927,6 +944,7 @@ fn collect_symbols(
                 fields: Vec::new(),
                 enum_variants: Vec::new(),
                 attributes: Vec::new(),
+                stdlib_metadata: None,
             });
             for s in body {
                 recurse!(s, Some(snode.span));

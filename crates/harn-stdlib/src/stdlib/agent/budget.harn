@@ -2,7 +2,15 @@ fn __budget_envelope(opts) {
   return opts?.budget
 }
 
-/** agent_budget_pre_call_blocked. */
+/**
+ * agent_budget_pre_call_blocked.
+ *
+ * @effects: [host]
+ * @allocation: heap
+ * @errors: []
+ * @api_stability: experimental
+ * @example: agent_budget_pre_call_blocked(session, opts)
+ */
 pub fn agent_budget_pre_call_blocked(session, opts) {
   let envelope = __budget_envelope(opts)
   if envelope == nil {
@@ -11,7 +19,15 @@ pub fn agent_budget_pre_call_blocked(session, opts) {
   return __host_agent_budget_pre_call_blocked(session.session_id, envelope)
 }
 
-/** agent_budget_post_call_blocked. */
+/**
+ * agent_budget_post_call_blocked.
+ *
+ * @effects: []
+ * @allocation: heap
+ * @errors: []
+ * @api_stability: experimental
+ * @example: agent_budget_post_call_blocked(totals, opts)
+ */
 pub fn agent_budget_post_call_blocked(totals, opts) {
   let envelope = __budget_envelope(opts)
   if envelope == nil && opts?.token_budget == nil {

@@ -65,6 +65,19 @@ condensed series summaries instead of full per-patch history.
   block on pool task handles. Foundation for the agent pool epic
   (#1883); queue strategies, backpressure, durability, channel
   composition, and OTel spans land in #1887..#1893.
+- **Per-symbol stdlib metadata contract (#1790).** Every public stdlib
+  function declares an `@effects`, `@allocation`, `@errors`,
+  `@api_stability`, and `@example` block above its `pub fn`. A new
+  `harn_parser::stdlib_metadata` module parses those fields, LSP hover
+  surfaces them as a markdown panel beneath the existing doc comment,
+  `harn graph --json` exposes the parsed block on each `public_symbols`
+  entry, and the `HARN-STD-101` lint (`missing-stdlib-metadata`) gates
+  the embedded `crates/harn-stdlib/src/stdlib/` tree so new public
+  surfaces cannot land without a declared contract. `make lint-harn`
+  blocks the release gate on any HARN-STD-101 warning. Coverage at
+  landing: 803 of 864 public stdlib functions (92.9%); the remaining
+  61 functions are exempt because their preceding doc block is missing
+  (separately tracked by HARN-LNT-024).
 - **`harn check --json` and `harn fmt --json` (#1759).** Adds
   standard `JsonEnvelope` reports for static checks and formatter
   runs, including per-file status, diagnostics, summary counts, and

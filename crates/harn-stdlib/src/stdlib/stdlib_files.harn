@@ -1,7 +1,15 @@
 // std/files — provider file upload helpers.
 //
 // Import with: import "std/files"
-/** Upload a local file to a provider Files API and return its reusable file_id. */
+/**
+ * Upload a local file to a provider Files API and return its reusable file_id.
+ *
+ * @effects: []
+ * @allocation: heap
+ * @errors: []
+ * @api_stability: stable
+ * @example: upload(path, provider)
+ */
 pub fn upload(path: string, provider: string) -> string {
   return __files_upload(path, provider)
 }

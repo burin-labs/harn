@@ -16,12 +16,28 @@ fn params_subset_match(expected, actual) {
   return true
 }
 
-/** clear_host_mocks. */
+/**
+ * clear_host_mocks.
+ *
+ * @effects: []
+ * @allocation: heap
+ * @errors: []
+ * @api_stability: stable
+ * @example: clear_host_mocks()
+ */
 pub fn clear_host_mocks() {
   return host_mock_clear()
 }
 
-/** mock_host_result. */
+/**
+ * mock_host_result.
+ *
+ * @effects: []
+ * @allocation: heap
+ * @errors: []
+ * @api_stability: stable
+ * @example: mock_host_result(cap, op, result, params)
+ */
 pub fn mock_host_result(cap: string, op: string, result, params) {
   if params == nil {
     return host_mock(cap, op, result)
@@ -29,7 +45,15 @@ pub fn mock_host_result(cap: string, op: string, result, params) {
   return host_mock(cap, op, result, params)
 }
 
-/** mock_host_error. */
+/**
+ * mock_host_error.
+ *
+ * @effects: []
+ * @allocation: heap
+ * @errors: []
+ * @api_stability: stable
+ * @example: mock_host_error(cap, op, message, params)
+ */
 pub fn mock_host_error(cap: string, op: string, message: string, params) {
   let config = {error: message}
   if params == nil {
@@ -38,33 +62,81 @@ pub fn mock_host_error(cap: string, op: string, message: string, params) {
   return host_mock(cap, op, config + {params: params})
 }
 
-/** mock_host_response. */
+/**
+ * mock_host_response.
+ *
+ * @effects: []
+ * @allocation: heap
+ * @errors: []
+ * @api_stability: stable
+ * @example: mock_host_response(cap, op, config)
+ */
 pub fn mock_host_response(cap: string, op: string, config) {
   return host_mock(cap, op, config)
 }
 
-/** host_calls. */
+/**
+ * host_calls.
+ *
+ * @effects: []
+ * @allocation: heap
+ * @errors: []
+ * @api_stability: stable
+ * @example: host_calls()
+ */
 pub fn host_calls() {
   return host_mock_calls()
 }
 
-/** host_calls_for. */
+/**
+ * host_calls_for.
+ *
+ * @effects: []
+ * @allocation: heap
+ * @errors: []
+ * @api_stability: stable
+ * @example: host_calls_for(cap, op)
+ */
 pub fn host_calls_for(cap: string, op: string) {
   return host_mock_calls()
     .filter({ call -> return call?.capability == cap && call?.operation == op })
 }
 
-/** host_call_count. */
+/**
+ * host_call_count.
+ *
+ * @effects: []
+ * @allocation: stack-only
+ * @errors: []
+ * @api_stability: stable
+ * @example: host_call_count()
+ */
 pub fn host_call_count() -> int {
   return len(host_mock_calls())
 }
 
-/** host_call_count_for. */
+/**
+ * host_call_count_for.
+ *
+ * @effects: []
+ * @allocation: stack-only
+ * @errors: []
+ * @api_stability: stable
+ * @example: host_call_count_for(cap, op)
+ */
 pub fn host_call_count_for(cap: string, op: string) -> int {
   return len(host_calls_for(cap, op))
 }
 
-/** host_was_called. */
+/**
+ * host_was_called.
+ *
+ * @effects: []
+ * @allocation: stack-only
+ * @errors: []
+ * @api_stability: stable
+ * @example: host_was_called(cap, op, expected_params)
+ */
 pub fn host_was_called(cap: string, op: string, expected_params) -> bool {
   for call in host_calls_for(cap, op) {
     if params_subset_match(expected_params, call?.params) {
@@ -74,7 +146,15 @@ pub fn host_was_called(cap: string, op: string, expected_params) -> bool {
   return false
 }
 
-/** assert_host_called. */
+/**
+ * assert_host_called.
+ *
+ * @effects: []
+ * @allocation: heap
+ * @errors: []
+ * @api_stability: stable
+ * @example: assert_host_called(cap, op, params, message)
+ */
 pub fn assert_host_called(cap: string, op: string, params = nil, message = nil) {
   if host_was_called(cap, op, params) {
     return nil
@@ -88,7 +168,15 @@ pub fn assert_host_called(cap: string, op: string, params = nil, message = nil) 
   return nil
 }
 
-/** assert_host_call_count. */
+/**
+ * assert_host_call_count.
+ *
+ * @effects: []
+ * @allocation: heap
+ * @errors: []
+ * @api_stability: stable
+ * @example: assert_host_call_count(expected_count, cap, op, message)
+ */
 pub fn assert_host_call_count(expected_count: int, cap: string, op: string, message = nil) {
   let actual_count = host_call_count_for(cap, op)
   let default_message = "Expected " + to_string(expected_count) + " host calls, got " + to_string(actual_count)
@@ -96,7 +184,15 @@ pub fn assert_host_call_count(expected_count: int, cap: string, op: string, mess
   return actual_count
 }
 
-/** assert_no_host_calls. */
+/**
+ * assert_no_host_calls.
+ *
+ * @effects: []
+ * @allocation: heap
+ * @errors: []
+ * @api_stability: stable
+ * @example: assert_no_host_calls(message)
+ */
 pub fn assert_no_host_calls(message = nil) {
   let actual_count = host_call_count()
   require actual_count == 0, message ?? "Expected no host calls, got " + to_string(actual_count)
@@ -133,6 +229,12 @@ fn apply_host_mock_entry(entry) {
  *
  * Returns whatever `body` returns. Re-raises any thrown error after
  * cleanup.
+ *
+ * @effects: []
+ * @allocation: heap
+ * @errors: []
+ * @api_stability: stable
+ * @example: with_host_mocks(mocks, body)
  */
 pub fn with_host_mocks(mocks, body) {
   host_mock_push_scope()
@@ -253,12 +355,28 @@ fn __testing_golden_match(expected, actual) -> bool {
   return expected == actual
 }
 
-/** llm_calls. Returns the LLM mock call log for the current scope. */
+/**
+ * llm_calls. Returns the LLM mock call log for the current scope.
+ *
+ * @effects: []
+ * @allocation: heap
+ * @errors: []
+ * @api_stability: stable
+ * @example: llm_calls()
+ */
 pub fn llm_calls() {
   return llm_mock_calls()
 }
 
-/** llm_call_count. Number of LLM calls recorded in the current scope. */
+/**
+ * llm_call_count. Number of LLM calls recorded in the current scope.
+ *
+ * @effects: []
+ * @allocation: stack-only
+ * @errors: []
+ * @api_stability: stable
+ * @example: llm_call_count()
+ */
 pub fn llm_call_count() -> int {
   return len(llm_mock_calls())
 }
@@ -272,6 +390,12 @@ pub fn llm_call_count() -> int {
  *
  * Returns whatever `body` returns. Re-raises any thrown error after
  * cleanup.
+ *
+ * @effects: []
+ * @allocation: heap
+ * @errors: []
+ * @api_stability: stable
+ * @example: with_llm_mocks(mocks, body)
  */
 pub fn with_llm_mocks(mocks, body) {
   llm_mock_push_scope()
@@ -297,6 +421,12 @@ pub fn with_llm_mocks(mocks, body) {
  * each shaped like the entries accepted by `with_host_mocks` and
  * `with_llm_mocks`. Both scopes are pushed before the body runs and
  * popped (in reverse order) after — including on thrown errors.
+ *
+ * @effects: []
+ * @allocation: heap
+ * @errors: []
+ * @api_stability: stable
+ * @example: with_mocks(config, body)
  */
 pub fn with_mocks(config, body) {
   let host_entries = config?.host_mocks ?? []
@@ -328,13 +458,29 @@ pub fn with_mocks(config, body) {
   }
 }
 
-/** Clear recorded persona step events. */
+/**
+ * Clear recorded persona step events.
+ *
+ * @effects: []
+ * @allocation: heap
+ * @errors: []
+ * @api_stability: stable
+ * @example: step_events_clear()
+ */
 pub fn step_events_clear() {
   __testing_step_events = []
   return nil
 }
 
-/** Return recorded PreStep/PostStep payloads captured by step_assertions_begin. */
+/**
+ * Return recorded PreStep/PostStep payloads captured by step_assertions_begin.
+ *
+ * @effects: []
+ * @allocation: heap
+ * @errors: []
+ * @api_stability: stable
+ * @example: step_events()
+ */
 pub fn step_events() {
   return __testing_step_events
 }
@@ -345,6 +491,12 @@ pub fn step_events() {
  * This resets existing persona hooks because the helper owns the hook
  * registrations during a conformance fixture. Register any fixture-specific
  * hooks after calling this helper.
+ *
+ * @effects: []
+ * @allocation: heap
+ * @errors: []
+ * @api_stability: stable
+ * @example: step_assertions_begin(persona_pattern)
  */
 pub fn step_assertions_begin(persona_pattern = "*") {
   clear_persona_hooks()
@@ -368,13 +520,29 @@ pub fn step_assertions_begin(persona_pattern = "*") {
   return nil
 }
 
-/** Stop recording persona step hook payloads. */
+/**
+ * Stop recording persona step hook payloads.
+ *
+ * @effects: []
+ * @allocation: heap
+ * @errors: []
+ * @api_stability: stable
+ * @example: step_assertions_end()
+ */
 pub fn step_assertions_end() {
   clear_persona_hooks()
   return nil
 }
 
-/** Assert the exact ordered list of @step names that ran. */
+/**
+ * Assert the exact ordered list of @step names that ran.
+ *
+ * @effects: []
+ * @allocation: heap
+ * @errors: []
+ * @api_stability: stable
+ * @example: assert_steps_ran(expected_names, message)
+ */
 pub fn assert_steps_ran(expected_names, message = nil) {
   var actual = []
   for event in __testing_step_events_for("PreStep") {
@@ -387,7 +555,15 @@ pub fn assert_steps_ran(expected_names, message = nil) {
   return actual
 }
 
-/** Assert that a step received an input matching a closure, dict subset, or value. */
+/**
+ * Assert that a step received an input matching a closure, dict subset, or value.
+ *
+ * @effects: []
+ * @allocation: heap
+ * @errors: []
+ * @api_stability: stable
+ * @example: assert_step_received(step_name, predicate, message)
+ */
 pub fn assert_step_received(step_name, predicate = nil, message = nil) {
   for event in __testing_step_events_for("PreStep") {
     if event.step_name == step_name && __testing_event_matches(event, predicate) {
@@ -398,7 +574,15 @@ pub fn assert_step_received(step_name, predicate = nil, message = nil) {
   return nil
 }
 
-/** Assert that a step emitted an output matching a closure, dict subset, or value. */
+/**
+ * Assert that a step emitted an output matching a closure, dict subset, or value.
+ *
+ * @effects: []
+ * @allocation: heap
+ * @errors: []
+ * @api_stability: stable
+ * @example: assert_step_emitted(step_name, predicate, message)
+ */
 pub fn assert_step_emitted(step_name, predicate = nil, message = nil) {
   for event in __testing_step_events_for("PostStep") {
     if event.step_name == step_name && __testing_event_matches(event, predicate) {
@@ -409,7 +593,15 @@ pub fn assert_step_emitted(step_name, predicate = nil, message = nil) {
   return nil
 }
 
-/** Assert that a handoff list or run record contains a handoff of kind and optional target. */
+/**
+ * Assert that a handoff list or run record contains a handoff of kind and optional target.
+ *
+ * @effects: []
+ * @allocation: heap
+ * @errors: []
+ * @api_stability: stable
+ * @example: assert_handoff_emitted(source, handoff_kind, target)
+ */
 pub fn assert_handoff_emitted(source, handoff_kind, target = nil) {
   let handoffs = source?.handoffs ?? source
   for item in handoffs ?? [] {
@@ -426,7 +618,15 @@ pub fn assert_handoff_emitted(source, handoff_kind, target = nil) {
   return nil
 }
 
-/** Assert an RFC 6901 JSON Pointer field inside a receipt or envelope. */
+/**
+ * Assert an RFC 6901 JSON Pointer field inside a receipt or envelope.
+ *
+ * @effects: []
+ * @allocation: heap
+ * @errors: []
+ * @api_stability: stable
+ * @example: assert_receipt_field(receipt, path, value)
+ */
 pub fn assert_receipt_field(receipt, path, value) {
   let actual = json_pointer(receipt, path)
   require actual == value, "receipt field " + path + " mismatch"
@@ -439,6 +639,12 @@ pub fn assert_receipt_field(receipt, path, value) {
  * The expected value may contain `<ms>`, `<uuid>`, or `<any>` sentinel strings.
  * Dict expected values are subset matches so tests can preserve the payload
  * fields that matter without pinning every implementation detail.
+ *
+ * @effects: []
+ * @allocation: heap
+ * @errors: []
+ * @api_stability: stable
+ * @example: assert_golden_transcript(expected, actual, message)
  */
 pub fn assert_golden_transcript(expected, actual, message = nil) {
   require __testing_golden_match(expected, actual), message ?? "golden transcript mismatch"

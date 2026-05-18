@@ -380,7 +380,15 @@ fn __autonomy_tier(value) {
   throw "autonomy_policy: tier must be one of shadow, suggest, act_with_approval, act_auto"
 }
 
-/** autonomy_policy returns the VM-enforced autonomy assignment for an agent. */
+/**
+ * autonomy_policy returns the VM-enforced autonomy assignment for an agent.
+ *
+ * @effects: []
+ * @allocation: heap
+ * @errors: []
+ * @api_stability: experimental
+ * @example: autonomy_policy(tier, options)
+ */
 pub fn autonomy_policy(tier = "act_auto", options = nil) {
   let opts = options ?? {}
   return {
@@ -393,7 +401,15 @@ pub fn autonomy_policy(tier = "act_auto", options = nil) {
   }
 }
 
-/** agent_loop_options. */
+/**
+ * agent_loop_options.
+ *
+ * @effects: []
+ * @allocation: heap
+ * @errors: []
+ * @api_stability: experimental
+ * @example: agent_loop_options(options)
+ */
 pub fn agent_loop_options(options = nil) {
   var opts = options ?? {}
   __validate_removed_agent_loop_options(opts)

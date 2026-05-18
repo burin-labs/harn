@@ -186,9 +186,7 @@ fn check_file_report_inner(
         path,
         &harn_lint::LintOptions {
             file_path: Some(path),
-            require_file_header: false,
-            complexity_threshold: None,
-            persona_step_allowlist: &[],
+            ..Default::default()
         },
     );
     diagnostic_count += lint_diagnostics.len();

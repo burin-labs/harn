@@ -18,7 +18,15 @@ fn __fs_with_newline(text, trailing_newline) {
   return text + "\n"
 }
 
-/** Create the parent directory for `path` when it is not `.` or empty. */
+/**
+ * Create the parent directory for `path` when it is not `.` or empty.
+ *
+ * @effects: []
+ * @allocation: heap
+ * @errors: []
+ * @api_stability: stable
+ * @example: ensure_parent_dir(path)
+ */
 pub fn ensure_parent_dir(path: string) {
   let parent = __fs_parent(path)
   if parent != "" && parent != "." {
@@ -26,7 +34,15 @@ pub fn ensure_parent_dir(path: string) {
   }
 }
 
-/** Read and parse a JSON file, returning `fallback` for missing or invalid files. */
+/**
+ * Read and parse a JSON file, returning `fallback` for missing or invalid files.
+ *
+ * @effects: []
+ * @allocation: heap
+ * @errors: []
+ * @api_stability: stable
+ * @example: read_json(path, fallback)
+ */
 pub fn read_json(path: string, fallback = nil) {
   if !file_exists(path) {
     return fallback
@@ -38,7 +54,15 @@ pub fn read_json(path: string, fallback = nil) {
   return parsed
 }
 
-/** Read and parse a JSON file, returning `{ok, value?, error?}`. */
+/**
+ * Read and parse a JSON file, returning `{ok, value?, error?}`.
+ *
+ * @effects: []
+ * @allocation: heap
+ * @errors: []
+ * @api_stability: stable
+ * @example: read_json_result(path)
+ */
 pub fn read_json_result(path: string) -> dict {
   if !file_exists(path) {
     return {ok: false, error: "file not found: " + path}
@@ -52,7 +76,15 @@ pub fn read_json_result(path: string) -> dict {
   return {ok: false, error: to_string(parsed)}
 }
 
-/** Write a JSON file with optional pretty formatting and parent-dir creation. */
+/**
+ * Write a JSON file with optional pretty formatting and parent-dir creation.
+ *
+ * @effects: []
+ * @allocation: heap
+ * @errors: []
+ * @api_stability: stable
+ * @example: write_json(path, value, options)
+ */
 pub fn write_json(path: string, value, options: WriteDataOptions = {}) {
   let opts = options ?? {}
   if opts.ensure_parent ?? true {
@@ -66,7 +98,15 @@ pub fn write_json(path: string, value, options: WriteDataOptions = {}) {
   write_file(path, __fs_with_newline(body, opts?.trailing_newline ?? true))
 }
 
-/** Read and parse a YAML file, returning `fallback` for missing or invalid files. */
+/**
+ * Read and parse a YAML file, returning `fallback` for missing or invalid files.
+ *
+ * @effects: []
+ * @allocation: heap
+ * @errors: []
+ * @api_stability: stable
+ * @example: read_yaml(path, fallback)
+ */
 pub fn read_yaml(path: string, fallback = nil) {
   if !file_exists(path) {
     return fallback
@@ -80,7 +120,15 @@ pub fn read_yaml(path: string, fallback = nil) {
   return fallback
 }
 
-/** Write a YAML file. */
+/**
+ * Write a YAML file.
+ *
+ * @effects: []
+ * @allocation: heap
+ * @errors: []
+ * @api_stability: stable
+ * @example: write_yaml(path, value, options)
+ */
 pub fn write_yaml(path: string, value, options: WriteDataOptions = {}) {
   let opts = options ?? {}
   if opts.ensure_parent ?? true {
@@ -89,7 +137,15 @@ pub fn write_yaml(path: string, value, options: WriteDataOptions = {}) {
   write_file(path, __fs_with_newline(yaml_stringify(value), opts?.trailing_newline ?? true))
 }
 
-/** Read and parse a TOML file, returning `fallback` for missing or invalid files. */
+/**
+ * Read and parse a TOML file, returning `fallback` for missing or invalid files.
+ *
+ * @effects: []
+ * @allocation: heap
+ * @errors: []
+ * @api_stability: stable
+ * @example: read_toml(path, fallback)
+ */
 pub fn read_toml(path: string, fallback = nil) {
   if !file_exists(path) {
     return fallback
@@ -103,7 +159,15 @@ pub fn read_toml(path: string, fallback = nil) {
   return fallback
 }
 
-/** Write a TOML file. */
+/**
+ * Write a TOML file.
+ *
+ * @effects: []
+ * @allocation: heap
+ * @errors: []
+ * @api_stability: stable
+ * @example: write_toml(path, value, options)
+ */
 pub fn write_toml(path: string, value, options: WriteDataOptions = {}) {
   let opts = options ?? {}
   if opts.ensure_parent ?? true {
@@ -112,7 +176,15 @@ pub fn write_toml(path: string, value, options: WriteDataOptions = {}) {
   write_file(path, __fs_with_newline(toml_stringify(value), opts?.trailing_newline ?? true))
 }
 
-/** Write a list of lines as a text file. */
+/**
+ * Write a list of lines as a text file.
+ *
+ * @effects: []
+ * @allocation: heap
+ * @errors: []
+ * @api_stability: stable
+ * @example: write_lines(path, lines, options)
+ */
 pub fn write_lines(path: string, lines: list<string>, options: WriteDataOptions = {}) {
   let opts = options ?? {}
   if opts.ensure_parent ?? true {
@@ -121,13 +193,29 @@ pub fn write_lines(path: string, lines: list<string>, options: WriteDataOptions 
   write_file(path, __fs_with_newline(join(lines ?? [], "\n"), opts?.trailing_newline ?? true))
 }
 
-/** Append one line to a text file. */
+/**
+ * Append one line to a text file.
+ *
+ * @effects: []
+ * @allocation: heap
+ * @errors: []
+ * @api_stability: stable
+ * @example: append_line(path, line)
+ */
 pub fn append_line(path: string, line: string) {
   let text = line ?? ""
   append_file(path, text + "\n")
 }
 
-/** Create a file if missing and update it to empty content only on first creation. */
+/**
+ * Create a file if missing and update it to empty content only on first creation.
+ *
+ * @effects: []
+ * @allocation: heap
+ * @errors: []
+ * @api_stability: stable
+ * @example: touch(path)
+ */
 pub fn touch(path: string) {
   if !file_exists(path) {
     ensure_parent_dir(path)
@@ -135,7 +223,15 @@ pub fn touch(path: string) {
   }
 }
 
-/** Return files matching `pattern` below `root`, using the host glob implementation. */
+/**
+ * Return files matching `pattern` below `root`, using the host glob implementation.
+ *
+ * @effects: []
+ * @allocation: heap
+ * @errors: []
+ * @api_stability: stable
+ * @example: find_files(root, pattern, options)
+ */
 pub fn find_files(root: string, pattern: string, options = {}) -> list<string> {
   let matches = glob(pattern, {base: root, long_running: options?.long_running ?? false})
   if options?.relative ?? false {
@@ -144,7 +240,15 @@ pub fn find_files(root: string, pattern: string, options = {}) -> list<string> {
   return matches
 }
 
-/** Return `path` relative to `root` when it is inside that root. */
+/**
+ * Return `path` relative to `root` when it is inside that root.
+ *
+ * @effects: []
+ * @allocation: heap
+ * @errors: []
+ * @api_stability: stable
+ * @example: relative_path(root, path)
+ */
 pub fn relative_path(root: string, path: string) -> string {
   let base_raw = __fs_norm(root)
   let target = __fs_norm(path)
@@ -159,7 +263,15 @@ pub fn relative_path(root: string, path: string) -> string {
   return target
 }
 
-/** Return whether `path` exists and is a regular file. */
+/**
+ * Return whether `path` exists and is a regular file.
+ *
+ * @effects: []
+ * @allocation: stack-only
+ * @errors: []
+ * @api_stability: stable
+ * @example: is_file(path)
+ */
 pub fn is_file(path: string) -> bool {
   let info = try {
     stat(path)
@@ -170,7 +282,15 @@ pub fn is_file(path: string) -> bool {
   return unwrap(info)?.is_file ?? false
 }
 
-/** Return whether `path` exists and is a directory. */
+/**
+ * Return whether `path` exists and is a directory.
+ *
+ * @effects: []
+ * @allocation: stack-only
+ * @errors: []
+ * @api_stability: stable
+ * @example: is_dir(path)
+ */
 pub fn is_dir(path: string) -> bool {
   let info = try {
     stat(path)
@@ -181,7 +301,15 @@ pub fn is_dir(path: string) -> bool {
   return unwrap(info)?.is_dir ?? false
 }
 
-/** Return a file size in bytes, or nil when the path cannot be statted. */
+/**
+ * Return a file size in bytes, or nil when the path cannot be statted.
+ *
+ * @effects: []
+ * @allocation: heap
+ * @errors: []
+ * @api_stability: stable
+ * @example: file_size(path)
+ */
 pub fn file_size(path: string) {
   let info = try {
     stat(path)

@@ -305,6 +305,12 @@ fn __refine_prompt_dict(opts) {
 /**
  * refine_prompt accepts the newer dict API and the legacy
  * refine_prompt(base_prompt, options?) form used by prompt optimization.
+ *
+ * @effects: [llm.call]
+ * @allocation: heap
+ * @errors: []
+ * @api_stability: stable
+ * @example: refine_prompt(input, options)
  */
 pub fn refine_prompt(input, options = nil) {
   if type_of(input) == "dict" {
@@ -332,6 +338,12 @@ pub fn refine_prompt(input, options = nil) {
  * deduplicated and returned with the base prompt first. Otherwise this calls an
  * LLM for JSON `{instructions: [...]}` using the supplied provider/model
  * options.
+ *
+ * @effects: [llm.call]
+ * @allocation: heap
+ * @errors: []
+ * @api_stability: stable
+ * @example: propose_instructions(base_prompt, options)
  */
 pub fn propose_instructions(base_prompt, options = nil) {
   if type_of(base_prompt) != "string" {
@@ -378,6 +390,12 @@ pub fn propose_instructions(base_prompt, options = nil) {
  * in a process-level dict at the rewriter layer. For multi-session isolation
  * pass `refine_opts.session` so refine_prompt can short-circuit via the
  * session-scoped cache.
+ *
+ * @effects: []
+ * @allocation: heap
+ * @errors: []
+ * @api_stability: stable
+ * @example: refine_caller(next, refine_opts)
  */
 pub fn refine_caller(next, refine_opts = nil) {
   let base_opts = if type_of(refine_opts) == "dict" {

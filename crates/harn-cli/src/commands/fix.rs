@@ -377,6 +377,7 @@ fn count_remaining_diagnostics(target: &Path) -> Result<usize, String> {
             require_file_header: commands::check::harn_lint_require_file_header(file),
             complexity_threshold: commands::check::harn_lint_complexity_threshold(file),
             persona_step_allowlist: &persona_step_allowlist,
+            require_stdlib_metadata: commands::check::path_is_stdlib_source(file),
         };
         count += harn_lint::lint_with_module_graph(
             &program,
@@ -445,6 +446,7 @@ fn collect_file_candidates(
         require_file_header: commands::check::harn_lint_require_file_header(file),
         complexity_threshold: commands::check::harn_lint_complexity_threshold(file),
         persona_step_allowlist: &persona_step_allowlist,
+        require_stdlib_metadata: commands::check::path_is_stdlib_source(file),
     };
     let lint_diagnostics = harn_lint::lint_with_module_graph(
         &program,

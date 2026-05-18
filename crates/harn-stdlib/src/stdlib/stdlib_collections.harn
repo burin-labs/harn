@@ -12,6 +12,12 @@ type PickKeysOptions = {drop_nil?: bool}
  * literal "null" string. Generic over the value type so a typed input
  * (`dict<string, V>` or a structural shape) projects back to a dict with the
  * same value contract instead of collapsing to untyped `dict`.
+ *
+ * @effects: []
+ * @allocation: heap
+ * @errors: []
+ * @api_stability: stable
+ * @example: filter_nil(d)
  */
 pub fn filter_nil<V>(d: dict<string, V>) -> dict<string, V> {
   return __dict_filter_nil(d ?? {})
@@ -21,6 +27,12 @@ pub fn filter_nil<V>(d: dict<string, V>) -> dict<string, V> {
  * Project a dict onto an explicit list of keys, preserving the original value
  * contract. Pass `{drop_nil: true}` to omit keys whose value resolves to nil
  * after lookup. Missing keys are silently dropped.
+ *
+ * @effects: []
+ * @allocation: heap
+ * @errors: []
+ * @api_stability: stable
+ * @example: pick_keys(d, selected_keys, options)
  */
 pub fn pick_keys<V>(d: dict<string, V>, selected_keys: list<string>, options: PickKeysOptions = {}) -> dict<string, V> {
   if type_of(d) != "dict" {
@@ -32,7 +44,15 @@ pub fn pick_keys<V>(d: dict<string, V>, selected_keys: list<string>, options: Pi
 
 // Check if a store key is stale (older than max_age_seconds).
 // Uses store_get/store_set convention: timestamps stored as key + "_ts".
-/** store_stale. */
+/**
+ * store_stale.
+ *
+ * @effects: [time, store.read]
+ * @allocation: heap
+ * @errors: []
+ * @api_stability: stable
+ * @example: store_stale(key, max_age_seconds)
+ */
 pub fn store_stale(key, max_age_seconds) {
   let ts = store_get(key + "_ts")
   if ts == nil {
@@ -42,7 +62,15 @@ pub fn store_stale(key, max_age_seconds) {
 }
 
 // Refresh a store key's timestamp to now.
-/** store_refresh. */
+/**
+ * store_refresh.
+ *
+ * @effects: [time, store.write]
+ * @allocation: heap
+ * @errors: []
+ * @api_stability: stable
+ * @example: store_refresh(key)
+ */
 pub fn store_refresh(key) {
   store_set(key + "_ts", timestamp())
 }

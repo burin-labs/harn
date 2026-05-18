@@ -4,6 +4,7 @@ pub mod builtin_signatures;
 pub mod diagnostic;
 pub mod diagnostic_codes;
 mod parser;
+pub mod stdlib_metadata;
 pub mod typechecker;
 pub mod visit;
 
@@ -13,6 +14,7 @@ pub use diagnostic_codes::{
     RepairId, RepairSafety, RepairTemplate, REPAIR_REGISTRY,
 };
 pub use parser::*;
+pub use stdlib_metadata::{parse_for_span as parse_stdlib_metadata, StdlibMetadata};
 pub use typechecker::{
     block_definitely_exits, format_type, stmt_definitely_exits, DiagnosticDetails,
     DiagnosticSeverity, InlayHintInfo, TypeChecker, TypeDiagnostic,

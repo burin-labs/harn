@@ -14,6 +14,12 @@ type SettledPartition = {oks: list, errs: list, ok_count: int, err_count: int}
  * Split a list of Result values into successful values and error payloads.
  * Returns `{oks, errs, ok_count, err_count}` so callers can count and
  * iterate without re-walking the list.
+ *
+ * @effects: []
+ * @allocation: heap
+ * @errors: []
+ * @api_stability: stable
+ * @example: partition(results)
  */
 pub fn partition(results: list) -> SettledPartition {
   var oks = []
@@ -28,7 +34,15 @@ pub fn partition(results: list) -> SettledPartition {
   return {oks: oks, errs: errs, ok_count: len(oks), err_count: len(errs)}
 }
 
-/** Return only the successful values (drops errors). */
+/**
+ * Return only the successful values (drops errors).
+ *
+ * @effects: []
+ * @allocation: heap
+ * @errors: []
+ * @api_stability: stable
+ * @example: oks(results)
+ */
 pub fn oks(results: list) -> list {
   var out = []
   for r in results {
@@ -39,7 +53,15 @@ pub fn oks(results: list) -> list {
   return out
 }
 
-/** Return only the error payloads (drops successes). */
+/**
+ * Return only the error payloads (drops successes).
+ *
+ * @effects: []
+ * @allocation: heap
+ * @errors: []
+ * @api_stability: stable
+ * @example: errs(results)
+ */
 pub fn errs(results: list) -> list {
   var out = []
   for r in results {
@@ -50,7 +72,15 @@ pub fn errs(results: list) -> list {
   return out
 }
 
-/** Count successful Results in the list. */
+/**
+ * Count successful Results in the list.
+ *
+ * @effects: []
+ * @allocation: stack-only
+ * @errors: []
+ * @api_stability: stable
+ * @example: count_oks(results)
+ */
 pub fn count_oks(results: list) -> int {
   var n = 0
   for r in results {
@@ -61,7 +91,15 @@ pub fn count_oks(results: list) -> int {
   return n
 }
 
-/** Count error Results in the list. */
+/**
+ * Count error Results in the list.
+ *
+ * @effects: []
+ * @allocation: stack-only
+ * @errors: []
+ * @api_stability: stable
+ * @example: count_errs(results)
+ */
 pub fn count_errs(results: list) -> int {
   var n = 0
   for r in results {
@@ -77,6 +115,12 @@ pub fn count_errs(results: list) -> int {
  * unified output list. The closures receive `(value, index)` for successes
  * and `(error, index)` for errors so callers can preserve the original
  * argument's position when reporting.
+ *
+ * @effects: []
+ * @allocation: heap
+ * @errors: []
+ * @api_stability: stable
+ * @example: map_settled(results, on_ok, on_err)
  */
 pub fn map_settled(results: list, on_ok, on_err) -> list {
   var out = []
@@ -96,6 +140,12 @@ pub fn map_settled(results: list, on_ok, on_err) -> list {
  * Group results by a string label produced by `classifier`. Errors are
  * passed through `classifier` after being unwrapped; if `classifier` is
  * nil, errors fall under the "error" bucket and successes under "ok".
+ *
+ * @effects: []
+ * @allocation: heap
+ * @errors: []
+ * @api_stability: stable
+ * @example: tally_by(results, classifier)
  */
 pub fn tally_by(results: list, classifier) -> dict<string, int> {
   var counts = {}
@@ -123,6 +173,12 @@ pub fn tally_by(results: list, classifier) -> dict<string, int> {
 /**
  * Iterate Results as `{ok, value, index}` records. Useful when callers want
  * one consolidated loop with both branches in scope at the same point.
+ *
+ * @effects: []
+ * @allocation: heap
+ * @errors: []
+ * @api_stability: stable
+ * @example: enumerate_settled(results)
  */
 pub fn enumerate_settled(results: list) -> list<dict> {
   var out = []
@@ -143,6 +199,12 @@ pub fn enumerate_settled(results: list) -> list<dict> {
  * Convert a settled-results list into `{any_failed, all_ok, ok_count,
  * err_count, total}` so harnesses can produce one-shot summary output
  * without re-walking the list.
+ *
+ * @effects: []
+ * @allocation: heap
+ * @errors: []
+ * @api_stability: stable
+ * @example: summary(results)
  */
 pub fn summary(results: list) -> dict {
   let counts = partition(results)

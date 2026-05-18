@@ -1707,7 +1707,15 @@ fn __agent_loop_run(message, session, initial_opts) {
 // MCP `notifications/progress`, GitHub PR merge trigger,
 // `command_policy` post-hook) firing in that window must be
 // visible in *this* turn's prompt, not the one after.
-/** agent_loop. */
+/**
+ * agent_loop.
+ *
+ * @effects: [host, agent]
+ * @allocation: heap
+ * @errors: []
+ * @api_stability: experimental
+ * @example: agent_loop(message, system_prompt, options)
+ */
 pub fn agent_loop(message, system_prompt = nil, options = nil) {
   var opts = agent_loop_options(agent_progress_apply_options(options))
   if system_prompt != nil && system_prompt != "" {

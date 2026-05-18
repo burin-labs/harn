@@ -12,7 +12,15 @@ fn __strip_signature_prefix(signature) {
   return trimmed
 }
 
-/** verify_hmac_signature. */
+/**
+ * verify_hmac_signature.
+ *
+ * @effects: []
+ * @allocation: heap
+ * @errors: []
+ * @api_stability: stable
+ * @example: verify_hmac_signature(body, signature, secret, algorithm)
+ */
 pub fn verify_hmac_signature(body, signature, secret, algorithm = "sha256") {
   let alg = lowercase(trim(algorithm ?? "sha256"))
   let provided = __strip_signature_prefix(signature)
@@ -26,7 +34,15 @@ pub fn verify_hmac_signature(body, signature, secret, algorithm = "sha256") {
   return constant_time_eq(expected, provided)
 }
 
-/** verify_jwt. */
+/**
+ * verify_jwt.
+ *
+ * @effects: [net]
+ * @allocation: heap
+ * @errors: []
+ * @api_stability: stable
+ * @example: verify_jwt(token, jwks_url, options)
+ */
 pub fn verify_jwt(token, jwks_url, options = nil) {
   let opts = options ?? {}
   var jwks = opts.inline_jwks
@@ -54,7 +70,15 @@ fn __form_body(params) {
   return join(parts, "&")
 }
 
-/** oauth2_token_refresh. */
+/**
+ * oauth2_token_refresh.
+ *
+ * @effects: [net]
+ * @allocation: heap
+ * @errors: []
+ * @api_stability: stable
+ * @example: oauth2_token_refresh(client_id, client_secret, refresh_token, token_url, options)
+ */
 pub fn oauth2_token_refresh(client_id, client_secret, refresh_token, token_url, options = nil) {
   let opts = options ?? {}
   let params = filter_nil(
@@ -80,7 +104,15 @@ pub fn oauth2_token_refresh(client_id, client_secret, refresh_token, token_url, 
   return merge(parsed ?? {body: response.body}, {ok: true, status: response.status})
 }
 
-/** rate_limit_token_bucket. */
+/**
+ * rate_limit_token_bucket.
+ *
+ * @effects: [time]
+ * @allocation: heap
+ * @errors: []
+ * @api_stability: stable
+ * @example: rate_limit_token_bucket(state, config, now_ms)
+ */
 pub fn rate_limit_token_bucket(state = nil, config = nil, now_ms = nil) {
   let cfg = config ?? {}
   var capacity = cfg.capacity ?? 60
@@ -126,7 +158,15 @@ fn __page_items(page, items_path) {
   return page.results ?? page.items ?? page.data ?? []
 }
 
-/** paginate_cursor. */
+/**
+ * paginate_cursor.
+ *
+ * @effects: []
+ * @allocation: heap
+ * @errors: []
+ * @api_stability: stable
+ * @example: paginate_cursor(initial_url, fetch_fn, cursor_path, options)
+ */
 pub fn paginate_cursor(initial_url, fetch_fn, cursor_path, options = nil) {
   let opts = options ?? {}
   let max_pages = opts.max_pages ?? 100

@@ -9,7 +9,15 @@ fn __llm_media_source_field(source, media_type) {
   return {base64: bytes_to_base64(read_file_bytes(source)), media_type: media_type}
 }
 
-/** media_type_for_path returns a best-effort MIME type from a filename extension. */
+/**
+ * media_type_for_path returns a best-effort MIME type from a filename extension.
+ *
+ * @effects: []
+ * @allocation: heap
+ * @errors: []
+ * @api_stability: stable
+ * @example: media_type_for_path(path, fallback)
+ */
 pub fn media_type_for_path(path, fallback = nil) {
   let ext = extname(path).lower()
   if ext == ".png" {
@@ -45,12 +53,28 @@ pub fn media_type_for_path(path, fallback = nil) {
   return fallback ?? "application/octet-stream"
 }
 
-/** text_content creates a provider-neutral text content block. */
+/**
+ * text_content creates a provider-neutral text content block.
+ *
+ * @effects: []
+ * @allocation: heap
+ * @errors: []
+ * @api_stability: stable
+ * @example: text_content(text)
+ */
 pub fn text_content(text) {
   return {type: "text", text: text}
 }
 
-/** image_content creates an llm_call-compatible image block from a URL or local path. */
+/**
+ * image_content creates an llm_call-compatible image block from a URL or local path.
+ *
+ * @effects: [llm.call]
+ * @allocation: heap
+ * @errors: []
+ * @api_stability: stable
+ * @example: image_content(source, options)
+ */
 pub fn image_content(source, options = nil) {
   if type_of(source) == "dict" {
     return source
@@ -69,6 +93,12 @@ pub fn image_content(source, options = nil) {
 
 /**
  * document_content creates an llm_call-compatible PDF/document block from a URL, file id, or path.
+ *
+ * @effects: [llm.call]
+ * @allocation: heap
+ * @errors: []
+ * @api_stability: stable
+ * @example: document_content(source, options)
  */
 pub fn document_content(source, options = nil) {
   if type_of(source) == "dict" {
@@ -86,7 +116,15 @@ pub fn document_content(source, options = nil) {
   return block
 }
 
-/** audio_content creates an llm_call-compatible audio block from a URL, file id, or path. */
+/**
+ * audio_content creates an llm_call-compatible audio block from a URL, file id, or path.
+ *
+ * @effects: [llm.call]
+ * @allocation: heap
+ * @errors: []
+ * @api_stability: stable
+ * @example: audio_content(source, options)
+ */
 pub fn audio_content(source, options = nil) {
   if type_of(source) == "dict" {
     return source
@@ -103,7 +141,15 @@ pub fn audio_content(source, options = nil) {
   return block
 }
 
-/** image_message builds a user message containing text plus one image. */
+/**
+ * image_message builds a user message containing text plus one image.
+ *
+ * @effects: []
+ * @allocation: heap
+ * @errors: []
+ * @api_stability: stable
+ * @example: image_message(source, prompt, options)
+ */
 pub fn image_message(source, prompt = "", options = nil) {
   let text = if prompt == nil || prompt == "" {
     "Analyze this image."
@@ -113,7 +159,15 @@ pub fn image_message(source, prompt = "", options = nil) {
   return {role: "user", content: [text_content(text), image_content(source, options)]}
 }
 
-/** image_vision_context returns OCR/vision output beside an LLM-ready image message. */
+/**
+ * image_vision_context returns OCR/vision output beside an LLM-ready image message.
+ *
+ * @effects: []
+ * @allocation: heap
+ * @errors: []
+ * @api_stability: stable
+ * @example: image_vision_context(source, options)
+ */
 pub fn image_vision_context(source, options = nil) {
   let opts = options ?? {}
   let image = image_content(source, opts?.image ?? opts)

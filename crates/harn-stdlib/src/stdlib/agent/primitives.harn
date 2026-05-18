@@ -2,27 +2,67 @@
 import { typed_output_checkpoint } from "std/checkpoint"
 import { llm_call_options } from "std/llm/options"
 
-/** agent_llm_turn. */
+/**
+ * agent_llm_turn.
+ *
+ * @effects: [llm.call]
+ * @allocation: heap
+ * @errors: []
+ * @api_stability: experimental
+ * @example: agent_llm_turn(prompt, system, options)
+ */
 pub fn agent_llm_turn(prompt, system = nil, options = nil) {
   return llm_call(prompt, system, llm_call_options(options))
 }
 
-/** agent_typed_output_checkpoint. */
+/**
+ * agent_typed_output_checkpoint.
+ *
+ * @effects: []
+ * @allocation: heap
+ * @errors: []
+ * @api_stability: experimental
+ * @example: agent_typed_output_checkpoint(name, prompt, schema, options, validator)
+ */
 pub fn agent_typed_output_checkpoint(name, prompt, schema, options = nil, validator = nil) {
   return typed_output_checkpoint(name, prompt, schema, options, validator)
 }
 
-/** agent_parse_tool_calls. */
+/**
+ * agent_parse_tool_calls.
+ *
+ * @effects: [host]
+ * @allocation: heap
+ * @errors: []
+ * @api_stability: experimental
+ * @example: agent_parse_tool_calls(text, tools)
+ */
 pub fn agent_parse_tool_calls(text, tools = nil) {
   return __host_agent_parse_tool_calls(text, tools)
 }
 
-/** agent_dispatch_tool_call. */
+/**
+ * agent_dispatch_tool_call.
+ *
+ * @effects: [host]
+ * @allocation: heap
+ * @errors: []
+ * @api_stability: experimental
+ * @example: agent_dispatch_tool_call(call, tools, options)
+ */
 pub fn agent_dispatch_tool_call(call, tools = nil, options = nil) {
   return __host_agent_dispatch_tool_call(call, tools, options ?? {})
 }
 
-/** agent_dispatch_tool_batch. */
+/**
+ * agent_dispatch_tool_batch.
+ *
+ * @effects: [host]
+ * @allocation: heap
+ * @errors: []
+ * @api_stability: experimental
+ * @example: agent_dispatch_tool_batch(calls, tools, options)
+ */
 pub fn agent_dispatch_tool_batch(calls, tools = nil, options = nil) {
   return __host_agent_dispatch_tool_batch(calls, tools, options ?? {})
 }

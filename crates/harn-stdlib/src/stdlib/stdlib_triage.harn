@@ -244,7 +244,15 @@ fn __triage_source_id(provider, source_url, input, payload, options) {
   return source_url
 }
 
-/** Build the stable triage-event dedupe key from provider-neutral source data. */
+/**
+ * Build the stable triage-event dedupe key from provider-neutral source data.
+ *
+ * @effects: []
+ * @allocation: heap
+ * @errors: []
+ * @api_stability: stable
+ * @example: triage_dedupe_key(provider, source_kind, source_url, source_id)
+ */
 pub fn triage_dedupe_key(provider, source_kind, source_url, source_id = nil) {
   let seed = lowercase(__triage_text(provider))
     + "\n"
@@ -550,7 +558,15 @@ fn __triage_default_action_intents(dedupe_key, source_url) {
   ]
 }
 
-/** Validate that a normalized triage event has mandatory provenance and gated write intents. */
+/**
+ * Validate that a normalized triage event has mandatory provenance and gated write intents.
+ *
+ * @effects: []
+ * @allocation: heap
+ * @errors: []
+ * @api_stability: stable
+ * @example: triage_validate(event)
+ */
 pub fn triage_validate(event: TriageEvent) -> TriageEvent {
   if event.schema != TRIAGE_EVENT_SCHEMA {
     throw "std/triage: unsupported schema " + __triage_text(event.schema)
@@ -569,7 +585,15 @@ pub fn triage_validate(event: TriageEvent) -> TriageEvent {
   return event
 }
 
-/** Normalize a provider payload or TriggerEvent into the portable triage envelope. */
+/**
+ * Normalize a provider payload or TriggerEvent into the portable triage envelope.
+ *
+ * @effects: []
+ * @allocation: heap
+ * @errors: []
+ * @api_stability: stable
+ * @example: triage_normalize(input, options)
+ */
 pub fn triage_normalize(input, options = nil) -> TriageEvent {
   let opts = options ?? {}
   let payload = __triage_payload(input)
@@ -609,7 +633,15 @@ pub fn triage_normalize(input, options = nil) -> TriageEvent {
   return triage_validate(event)
 }
 
-/** Drop duplicate triage events by stable `dedupe_key`, preserving first-seen order. */
+/**
+ * Drop duplicate triage events by stable `dedupe_key`, preserving first-seen order.
+ *
+ * @effects: []
+ * @allocation: heap
+ * @errors: []
+ * @api_stability: stable
+ * @example: triage_dedupe_events(events)
+ */
 pub fn triage_dedupe_events(events: list) -> list<TriageEvent> {
   var seen = {}
   var out = []
@@ -623,7 +655,15 @@ pub fn triage_dedupe_events(events: list) -> list<TriageEvent> {
   return out
 }
 
-/** Emit a normalized triage event to the EventLog and return an audit receipt. */
+/**
+ * Emit a normalized triage event to the EventLog and return an audit receipt.
+ *
+ * @effects: [transcript.write]
+ * @allocation: heap
+ * @errors: []
+ * @api_stability: stable
+ * @example: triage_emit(input, options)
+ */
 pub fn triage_emit(input, options = nil) -> TriageEmitReceipt {
   let opts = options ?? {}
   let event = input?.schema == TRIAGE_EVENT_SCHEMA ? triage_validate(input) : triage_normalize(input, opts)
@@ -647,6 +687,12 @@ pub fn triage_emit(input, options = nil) -> TriageEmitReceipt {
 /**
  * Build a small Start My Day feed from connector fixtures. Pass `{emit: true}`
  * to also serialize each unique event to the EventLog.
+ *
+ * @effects: []
+ * @allocation: heap
+ * @errors: []
+ * @api_stability: stable
+ * @example: triage_start_my_day(inputs, options)
  */
 pub fn triage_start_my_day(inputs: list, options = nil) {
   let opts = options ?? {}

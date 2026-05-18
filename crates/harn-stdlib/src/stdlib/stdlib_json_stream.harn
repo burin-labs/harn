@@ -20,6 +20,12 @@ type JsonStreamValidator = {
  * `feed(chunk)` returns JsonStreamStatus.Pending, JsonStreamStatus.Valid, or
  * JsonStreamStatus.Invalid({reason, path}). `value()` returns the parsed JSON
  * value after Valid and nil otherwise.
+ *
+ * @effects: []
+ * @allocation: heap
+ * @errors: []
+ * @api_stability: stable
+ * @example: stream_validator(schema)
  */
 pub fn stream_validator(schema) -> JsonStreamValidator {
   let handle = __json_stream_validator(schema)

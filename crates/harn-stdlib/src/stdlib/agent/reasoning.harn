@@ -190,7 +190,15 @@ fn __local_qwen_route(route) {
     && contains(model, "qwen3")
 }
 
-/** Resolve provider-aware automatic reasoning options for an agent loop. */
+/**
+ * Resolve provider-aware automatic reasoning options for an agent loop.
+ *
+ * @effects: []
+ * @allocation: heap
+ * @errors: []
+ * @api_stability: experimental
+ * @example: agent_reasoning_apply(opts)
+ */
 pub fn agent_reasoning_apply(opts) {
   if __caller_set_reasoning(opts) {
     return opts

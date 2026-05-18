@@ -259,7 +259,15 @@ fn __workflow_sort_artifacts(artifacts, policy) {
   return sorted
 }
 
-/** workflow_stage_context_policy. */
+/**
+ * workflow_stage_context_policy.
+ *
+ * @effects: []
+ * @allocation: heap
+ * @errors: []
+ * @api_stability: experimental
+ * @example: workflow_stage_context_policy(context_policy, input_contract)
+ */
 pub fn workflow_stage_context_policy(context_policy = nil, input_contract = nil) {
   let policy = context_policy ?? {}
   if len(__workflow_list(policy?.include_kinds)) > 0 {
@@ -272,7 +280,15 @@ pub fn workflow_stage_context_policy(context_policy = nil, input_contract = nil)
   return policy + {include_kinds: input_kinds}
 }
 
-/** workflow_select_artifacts. */
+/**
+ * workflow_select_artifacts.
+ *
+ * @effects: []
+ * @allocation: heap
+ * @errors: []
+ * @api_stability: experimental
+ * @example: workflow_select_artifacts(artifacts, policy)
+ */
 pub fn workflow_select_artifacts(artifacts = nil, policy = nil) {
   let opts = policy ?? {}
   var candidates = []
@@ -304,7 +320,15 @@ pub fn workflow_select_artifacts(artifacts = nil, policy = nil) {
   return selected
 }
 
-/** workflow_select_artifacts_adaptive. */
+/**
+ * workflow_select_artifacts_adaptive.
+ *
+ * @effects: []
+ * @allocation: heap
+ * @errors: []
+ * @api_stability: experimental
+ * @example: workflow_select_artifacts_adaptive(artifacts, policy)
+ */
 pub fn workflow_select_artifacts_adaptive(artifacts = nil, policy = nil) {
   let opts = policy ?? {}
   let fresh = __workflow_drop_stale_evidence_artifacts(__workflow_list(artifacts))
@@ -313,7 +337,15 @@ pub fn workflow_select_artifacts_adaptive(artifacts = nil, policy = nil) {
   return workflow_select_artifacts(compacted, opts)
 }
 
-/** workflow_select_stage_artifacts. */
+/**
+ * workflow_select_stage_artifacts.
+ *
+ * @effects: []
+ * @allocation: heap
+ * @errors: []
+ * @api_stability: experimental
+ * @example: workflow_select_stage_artifacts(config)
+ */
 pub fn workflow_select_stage_artifacts(config = nil) {
   let opts = config ?? {}
   let policy = workflow_stage_context_policy(opts?.context_policy ?? {}, opts?.input_contract ?? {})

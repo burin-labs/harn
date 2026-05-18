@@ -24,6 +24,12 @@
  * implementation.
  *
  * Tracking: harn#1854 (P-01), harn#1853 (epic).
+ *
+ * @effects: []
+ * @allocation: heap
+ * @errors: []
+ * @api_stability: stable
+ * @example: on_finish_abandon(_harness, return_value)
  */
 pub fn unsettled_state(harness) {
   return harness.unsettled_state()
@@ -70,6 +76,12 @@ pub fn on_finish_abandon(_harness, return_value) {
  * the preset behaves identically to `on_finish_abandon` so scripts that
  * opt into the canonical preset today keep working unchanged after the
  * settlement implementation lands.
+ *
+ * @effects: []
+ * @allocation: heap
+ * @errors: []
+ * @api_stability: stable
+ * @example: on_finish_drain(_harness, return_value)
  */
 pub fn on_finish_drain(_harness, return_value) {
   return return_value

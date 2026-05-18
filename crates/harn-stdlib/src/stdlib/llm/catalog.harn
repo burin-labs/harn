@@ -10,12 +10,26 @@
  * Wraps the llm_model_info(selector) Rust builtin. The runtime always
  * returns a dict; when the selector is unknown, the dict's `catalog`
  * field will be nil and the inferred provider will be the default.
+ *
+ * @effects: []
+ * @allocation: heap
+ * @errors: []
+ * @api_stability: stable
+ * @example: model_info(selector)
  */
 pub fn model_info(selector) {
   return llm_model_info(selector)
 }
 
-/** Wraps llm_resolved_options(opts). opts.model is required; throws otherwise. */
+/**
+ * Wraps llm_resolved_options(opts). opts.model is required; throws otherwise.
+ *
+ * @effects: []
+ * @allocation: heap
+ * @errors: []
+ * @api_stability: stable
+ * @example: resolved_options(opts)
+ */
 pub fn resolved_options(opts) {
   if type_of(opts) != "dict" {
     throw "resolved_options: opts must be a dict"
@@ -67,6 +81,12 @@ fn __capability_field(caps, capability) {
  * capability is one of: "thinking", "tool_search", "interleaved_thinking",
  * "prompt_caching", "vision", "audio", "pdf", "files_api",
  * "reasoning_effort", "native_tools". Returns false on unknown model.
+ *
+ * @effects: []
+ * @allocation: heap
+ * @errors: []
+ * @api_stability: stable
+ * @example: has_capability(model, capability)
  */
 pub fn has_capability(model, capability) {
   let info = llm_model_info(model)
@@ -116,6 +136,12 @@ fn __family_for_ollama(id) {
  * "anthropic_haiku", "anthropic_opus_adaptive", "anthropic_sonnet_opus",
  * "openai_gpt5_family", "openai_legacy", "gemini_flash", "gemini_pro",
  * "ollama_qwen3", "ollama_generic", or "generic".
+ *
+ * @effects: []
+ * @allocation: heap
+ * @errors: []
+ * @api_stability: stable
+ * @example: family_of(model_id)
  */
 pub fn family_of(model_id) {
   let info = llm_model_info(model_id)

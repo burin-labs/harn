@@ -11,7 +11,15 @@ fn __tool_spec_config(spec) {
   return config
 }
 
-/** tool_define_many adds a list of tool specs to a registry. */
+/**
+ * tool_define_many adds a list of tool specs to a registry.
+ *
+ * @effects: []
+ * @allocation: heap
+ * @errors: []
+ * @api_stability: stable
+ * @example: tool_define_many(registry, specs)
+ */
 pub fn tool_define_many(registry, specs = nil) {
   var target = registry
   var items = specs
@@ -37,7 +45,15 @@ pub fn tool_define_many(registry, specs = nil) {
   return tools
 }
 
-/** tool_registry_from creates a registry from a list of tool specs. */
+/**
+ * tool_registry_from creates a registry from a list of tool specs.
+ *
+ * @effects: []
+ * @allocation: heap
+ * @errors: []
+ * @api_stability: stable
+ * @example: tool_registry_from(specs)
+ */
 pub fn tool_registry_from(specs) {
   return tool_define_many(tool_registry(), specs)
 }

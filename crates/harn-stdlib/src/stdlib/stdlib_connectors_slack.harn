@@ -68,7 +68,15 @@ fn __slack_text_matches(payload, text) {
   return text == nil || contains(payload?.text ?? "", text)
 }
 
-/** message_source. */
+/**
+ * message_source.
+ *
+ * @effects: []
+ * @allocation: heap
+ * @errors: []
+ * @api_stability: stable
+ * @example: message_source(channel, options)
+ */
 pub fn message_source(channel = nil, options = nil) {
   return {
     label: "slack.message:" + to_string(channel ?? "*"),
@@ -99,7 +107,15 @@ pub fn message_source(channel = nil, options = nil) {
   }
 }
 
-/** reaction_source. */
+/**
+ * reaction_source.
+ *
+ * @effects: []
+ * @allocation: heap
+ * @errors: []
+ * @api_stability: stable
+ * @example: reaction_source(channel, reaction, options)
+ */
 pub fn reaction_source(channel = nil, reaction = nil, options = nil) {
   return {
     label: "slack.reaction:" + to_string(channel ?? "*") + ":" + to_string(reaction ?? "*"),
@@ -126,7 +142,15 @@ pub fn reaction_source(channel = nil, reaction = nil, options = nil) {
   }
 }
 
-/** wait_for_message. */
+/**
+ * wait_for_message.
+ *
+ * @effects: []
+ * @allocation: heap
+ * @errors: []
+ * @api_stability: stable
+ * @example: wait_for_message(channel, options)
+ */
 pub fn wait_for_message(channel = nil, options = nil) {
   return wait_for(
     merge(
@@ -136,7 +160,15 @@ pub fn wait_for_message(channel = nil, options = nil) {
   )
 }
 
-/** wait_for_reaction. */
+/**
+ * wait_for_reaction.
+ *
+ * @effects: []
+ * @allocation: heap
+ * @errors: []
+ * @api_stability: stable
+ * @example: wait_for_reaction(channel, reaction, options)
+ */
 pub fn wait_for_reaction(channel = nil, reaction = nil, options = nil) {
   return wait_for(
     merge(

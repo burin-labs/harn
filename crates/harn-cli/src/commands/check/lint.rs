@@ -27,6 +27,7 @@ pub(crate) fn lint_file_inner(
         require_file_header,
         complexity_threshold,
         persona_step_allowlist,
+        require_stdlib_metadata: path_is_stdlib_source(path),
     };
     let mut diagnostics = harn_lint::lint_with_module_graph(
         &program,
@@ -78,6 +79,7 @@ pub(crate) fn lint_fix_file(
         require_file_header,
         complexity_threshold,
         persona_step_allowlist,
+        require_stdlib_metadata: path_is_stdlib_source(path),
     };
     let lint_diags = harn_lint::lint_with_module_graph(
         &program,
@@ -158,6 +160,33 @@ pub(crate) fn lint_fix_file(
     applied
 }
 
+/// Stdlib metadata enforcement is path-driven: when `harn lint` runs over a
+/// canonical embedded source under `crates/harn-stdlib/src/stdlib/`, every
+/// `pub fn` must carry the `@effects` / `@allocation` / `@errors` /
+/// `@api_stability` / `@example` block (HARN-STD-101). Outside that tree
+/// the rule is dormant, so user scripts never trip on it.
+pub(crate) fn path_is_stdlib_source(path: &Path) -> bool {
+    use std::path::Component;
+    let mut prev: Option<&std::ffi::OsStr> = None;
+    let mut prev_prev: Option<&std::ffi::OsStr> = None;
+    for comp in path.components() {
+        if let Component::Normal(name) = comp {
+            if prev == Some(std::ffi::OsStr::new("src"))
+                && prev_prev == Some(std::ffi::OsStr::new("harn-stdlib"))
+                && name == std::ffi::OsStr::new("stdlib")
+            {
+                return true;
+            }
+            prev_prev = prev;
+            prev = Some(name);
+        } else {
+            prev_prev = prev;
+            prev = None;
+        }
+    }
+    false
+}
+
 fn type_check_for_lint(
     path: &Path,
     config: &CheckConfig,
@@ -176,4 +205,31 @@ fn type_check_for_lint(
         checker = checker.with_imported_callable_decls(imported);
     }
     checker.check_with_source(program, source)
+}
+
+#[cfg(test)]
+mod path_is_stdlib_source_tests {
+    use super::path_is_stdlib_source;
+    use std::path::Path;
+
+    #[test]
+    fn detects_canonical_embedded_layout() {
+        assert!(path_is_stdlib_source(Path::new(
+            "crates/harn-stdlib/src/stdlib/stdlib_fs.harn"
+        )));
+        assert!(path_is_stdlib_source(Path::new(
+            "/abs/path/crates/harn-stdlib/src/stdlib/agent/loop.harn"
+        )));
+    }
+
+    #[test]
+    fn rejects_non_stdlib_paths() {
+        assert!(!path_is_stdlib_source(Path::new("scripts/foo.harn")));
+        assert!(!path_is_stdlib_source(Path::new(
+            "crates/harn-vm/src/stdlib_acp.harn"
+        )));
+        assert!(!path_is_stdlib_source(Path::new(
+            "conformance/tests/foo.harn"
+        )));
+    }
 }

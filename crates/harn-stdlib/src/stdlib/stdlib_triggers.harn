@@ -945,28 +945,66 @@ type StreamLlmClassifyPlan = {
   options: dict,
 }
 
-/** list_providers. */
+/**
+ * list_providers.
+ *
+ * @effects: []
+ * @allocation: heap
+ * @errors: []
+ * @api_stability: stable
+ * @example: list_providers()
+ */
 pub fn list_providers() -> list<ProviderCatalogEntry> {
   return list_providers_native()
 }
 
-/** stream_fork returns a declarative fan-out plan for stream handlers. */
+/**
+ * stream_fork returns a declarative fan-out plan for stream handlers.
+ *
+ * @effects: []
+ * @allocation: heap
+ * @errors: []
+ * @api_stability: stable
+ * @example: stream_fork(source, branches)
+ */
 pub fn stream_fork(source, branches = []) -> StreamForkPlan {
   return {kind: "stream.fork", source: source, branches: branches}
 }
 
-/** stream_join returns a declarative fan-in plan for stream handlers. */
+/**
+ * stream_join returns a declarative fan-in plan for stream handlers.
+ *
+ * @effects: []
+ * @allocation: heap
+ * @errors: []
+ * @api_stability: stable
+ * @example: stream_join(source, join)
+ */
 pub fn stream_join(source, join = nil) -> StreamJoinPlan {
   return {kind: "stream.join", source: source, join: join ?? {}}
 }
 
-/** window_by groups stream events with the same manifest window shape. */
+/**
+ * window_by groups stream events with the same manifest window shape.
+ *
+ * @effects: []
+ * @allocation: heap
+ * @errors: []
+ * @api_stability: stable
+ * @example: window_by(events, window)
+ */
 pub fn window_by(events, window: StreamWindowSpec) -> StreamWindowPlan {
   return {kind: "stream.window", events: events, window: window}
 }
 
 /**
  * llm_classify describes a cached classifier step without forcing a provider call during planning.
+ *
+ * @effects: []
+ * @allocation: heap
+ * @errors: []
+ * @api_stability: stable
+ * @example: llm_classify(input, labels, options)
  */
 pub fn llm_classify(input, labels, options = nil) -> StreamLlmClassifyPlan {
   let config = options ?? {}

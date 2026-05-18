@@ -1,4 +1,12 @@
-/** composition_mcp_tools builds the compact Code Mode MCP profile registry. */
+/**
+ * composition_mcp_tools builds the compact Code Mode MCP profile registry.
+ *
+ * @effects: []
+ * @allocation: heap
+ * @errors: []
+ * @api_stability: stable
+ * @example: composition_mcp_tools(registry, options)
+ */
 pub fn composition_mcp_tools(registry = nil, options = nil) {
   let opts = options ?? {}
   var tools = registry ?? tool_registry()
@@ -37,7 +45,15 @@ pub fn composition_mcp_tools(registry = nil, options = nil) {
   return tools
 }
 
-/** composition_crystallization_input converts a composition report into a crystallization trace. */
+/**
+ * composition_crystallization_input converts a composition report into a crystallization trace.
+ *
+ * @effects: []
+ * @allocation: heap
+ * @errors: []
+ * @api_stability: stable
+ * @example: composition_crystallization_input(report, options)
+ */
 pub fn composition_crystallization_input(report, options = nil) {
   return composition_crystallization_trace(report, options ?? {})
 }

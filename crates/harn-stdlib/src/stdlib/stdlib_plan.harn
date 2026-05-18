@@ -32,17 +32,41 @@ type PlanArtifact = {
   approval: PlanApproval,
 }
 
-/** plan_from normalizes flexible model/user plan shapes into harn.plan.v1. */
+/**
+ * plan_from normalizes flexible model/user plan shapes into harn.plan.v1.
+ *
+ * @effects: []
+ * @allocation: heap
+ * @errors: []
+ * @api_stability: stable
+ * @example: plan_from(plan)
+ */
 pub fn plan_from(plan) -> PlanArtifact {
   return plan_artifact(plan)
 }
 
-/** plan_acp_entries returns ACP-compatible plan entries for a harn.plan.v1 artifact. */
+/**
+ * plan_acp_entries returns ACP-compatible plan entries for a harn.plan.v1 artifact.
+ *
+ * @effects: []
+ * @allocation: heap
+ * @errors: []
+ * @api_stability: stable
+ * @example: plan_acp_entries(plan)
+ */
 pub fn plan_acp_entries(plan) {
   return plan_entries(plan)
 }
 
-/** emit_plan_tool registers the Harn-owned terminal plan emission tool. */
+/**
+ * emit_plan_tool registers the Harn-owned terminal plan emission tool.
+ *
+ * @effects: []
+ * @allocation: heap
+ * @errors: []
+ * @api_stability: stable
+ * @example: emit_plan_tool(registry)
+ */
 pub fn emit_plan_tool(registry) {
   return tool_define(
     registry,
@@ -66,7 +90,15 @@ pub fn emit_plan_tool(registry) {
   )
 }
 
-/** update_plan_tool registers the incremental Harn-owned plan update tool. */
+/**
+ * update_plan_tool registers the incremental Harn-owned plan update tool.
+ *
+ * @effects: []
+ * @allocation: heap
+ * @errors: []
+ * @api_stability: stable
+ * @example: update_plan_tool(registry)
+ */
 pub fn update_plan_tool(registry) {
   return tool_define(
     registry,
@@ -87,7 +119,15 @@ pub fn update_plan_tool(registry) {
   )
 }
 
-/** plan_tools adds emit_plan and update_plan to a tool registry. */
+/**
+ * plan_tools adds emit_plan and update_plan to a tool registry.
+ *
+ * @effects: []
+ * @allocation: heap
+ * @errors: []
+ * @api_stability: stable
+ * @example: plan_tools(registry)
+ */
 pub fn plan_tools(registry = nil) {
   var tools = registry ?? tool_registry()
   tools = emit_plan_tool(tools)
@@ -95,7 +135,15 @@ pub fn plan_tools(registry = nil) {
   return tools
 }
 
-/** plan_approved returns a copy of plan with an approved/rejected approval state. */
+/**
+ * plan_approved returns a copy of plan with an approved/rejected approval state.
+ *
+ * @effects: []
+ * @allocation: heap
+ * @errors: []
+ * @api_stability: stable
+ * @example: plan_approved(plan, approval)
+ */
 pub fn plan_approved(plan, approval: ApprovalRecord) -> PlanArtifact {
   let artifact = plan_from(plan)
   let state = if approval.approved {
@@ -114,7 +162,15 @@ pub fn plan_approved(plan, approval: ApprovalRecord) -> PlanArtifact {
   }
 }
 
-/** request_plan_approval uses std/hitl approval primitives for plan approval/resume flows. */
+/**
+ * request_plan_approval uses std/hitl approval primitives for plan approval/resume flows.
+ *
+ * @effects: []
+ * @allocation: heap
+ * @errors: []
+ * @api_stability: stable
+ * @example: request_plan_approval(plan, options)
+ */
 pub fn request_plan_approval(plan, options = nil) -> PlanArtifact {
   let artifact = plan_from(plan)
   let action = options?.action ?? "Approve plan"

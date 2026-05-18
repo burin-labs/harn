@@ -17,6 +17,12 @@
  * embedding model. `options.embed_dim`, `options.bm25_weight`, and
  * `options.cosine_weight` are optional. Open events are append-only;
  * calling `memory_open` again replaces the active config.
+ *
+ * @effects: []
+ * @allocation: heap
+ * @errors: []
+ * @api_stability: stable
+ * @example: memory_open(namespace, options)
  */
 pub fn memory_open(namespace, options = nil) {
   return __memory_open(namespace, options)
@@ -28,6 +34,12 @@ pub fn memory_open(namespace, options = nil) {
  * Set `options.embed: true` (or open the namespace with backend
  * "vector"/"hybrid") to eagerly cache the record's embedding so later
  * semantic recall is cache-only.
+ *
+ * @effects: []
+ * @allocation: heap
+ * @errors: []
+ * @api_stability: stable
+ * @example: memory_store(namespace, key, value, tags, options)
  */
 pub fn memory_store(namespace, key, value, tags = nil, options = nil) {
   return __memory_store(namespace, key, value, tags, options)
@@ -39,17 +51,39 @@ pub fn memory_store(namespace, key, value, tags = nil, options = nil) {
  * Pass `options.mode` to override per call ("lexical", "semantic", or
  * "hybrid"). `options.embed_model_hint` overrides the namespace embedding
  * model for this query only.
+ *
+ * @effects: []
+ * @allocation: heap
+ * @errors: []
+ * @api_stability: stable
+ * @example: memory_recall(namespace, query, k, options)
  */
 pub fn memory_recall(namespace, query, k = nil, options = nil) {
   return __memory_recall(namespace, query, k, options)
 }
 
-/** memory_summarize. */
+/**
+ * memory_summarize.
+ *
+ * @effects: []
+ * @allocation: heap
+ * @errors: []
+ * @api_stability: stable
+ * @example: memory_summarize(namespace, window, options)
+ */
 pub fn memory_summarize(namespace, window = nil, options = nil) {
   return __memory_summarize(namespace, window, options)
 }
 
-/** memory_forget. */
+/**
+ * memory_forget.
+ *
+ * @effects: []
+ * @allocation: heap
+ * @errors: []
+ * @api_stability: stable
+ * @example: memory_forget(namespace, predicate, options)
+ */
 pub fn memory_forget(namespace, predicate, options = nil) {
   return __memory_forget(namespace, predicate, options)
 }

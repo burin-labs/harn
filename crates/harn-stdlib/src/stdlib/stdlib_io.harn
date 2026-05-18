@@ -3,7 +3,15 @@ type ReadLineOptions = {prompt?: string, timeout_ms?: int, trim?: bool, echo?: b
 
 type ReadLineResult = {ok: bool, value?: string, status?: string, error?: string}
 
-/** is_tty returns whether fd 0, 1, or 2 is attached to a terminal. */
+/**
+ * is_tty returns whether fd 0, 1, or 2 is attached to a terminal.
+ *
+ * @effects: []
+ * @allocation: stack-only
+ * @errors: []
+ * @api_stability: stable
+ * @example: is_tty(fd)
+ */
 pub fn is_tty(fd: int = 0) -> bool {
   if fd == 0 {
     return is_stdin_tty()
@@ -17,17 +25,41 @@ pub fn is_tty(fd: int = 0) -> bool {
   throw "std/io.is_tty: fd must be 0, 1, or 2"
 }
 
-/** read_line reads one line from stdin and reports ok/eof/timeout/interrupt/error. */
+/**
+ * read_line reads one line from stdin and reports ok/eof/timeout/interrupt/error.
+ *
+ * @effects: []
+ * @allocation: heap
+ * @errors: []
+ * @api_stability: stable
+ * @example: read_line(opts)
+ */
 pub fn read_line(opts: ReadLineOptions = {}) -> ReadLineResult {
   return __io_read_line(opts ?? {})
 }
 
-/** read_password reads one line with terminal echo disabled. */
+/**
+ * read_password reads one line with terminal echo disabled.
+ *
+ * @effects: []
+ * @allocation: heap
+ * @errors: []
+ * @api_stability: stable
+ * @example: read_password(prompt, timeout_ms)
+ */
 pub fn read_password(prompt: string = "", timeout_ms: int? = nil) -> ReadLineResult {
   return read_line({prompt: prompt, timeout_ms: timeout_ms, echo: false})
 }
 
-/** write_stderr writes text to stderr without appending a newline. */
+/**
+ * write_stderr writes text to stderr without appending a newline.
+ *
+ * @effects: []
+ * @allocation: heap
+ * @errors: []
+ * @api_stability: stable
+ * @example: write_stderr(text)
+ */
 pub fn write_stderr(text: string) {
   eprint(text)
 }

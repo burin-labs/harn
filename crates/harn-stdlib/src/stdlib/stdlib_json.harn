@@ -6,6 +6,12 @@ pub import "std/json/stream"
 /**
  * Pretty-print a value as indented JSON (2-space indent).
  * pretty.
+ *
+ * @effects: []
+ * @allocation: heap
+ * @errors: []
+ * @api_stability: stable
+ * @example: pretty(value)
  */
 pub fn pretty(value) {
   return json_stringify_pretty(value)
@@ -14,6 +20,12 @@ pub fn pretty(value) {
 /**
  * Safely parse JSON, returning nil on failure instead of throwing.
  * safe_parse.
+ *
+ * @effects: []
+ * @allocation: heap
+ * @errors: []
+ * @api_stability: stable
+ * @example: safe_parse(text)
  */
 pub fn safe_parse(text) {
   let result = try {
@@ -29,6 +41,12 @@ pub fn safe_parse(text) {
  * Shallow-merge two dicts. Keys in `b` override matching keys in `a`. Generic
  * over the value type so the resulting dict keeps the same value contract as
  * the inputs (`dict<string, V>` in, `dict<string, V>` out).
+ *
+ * @effects: []
+ * @allocation: heap
+ * @errors: []
+ * @api_stability: stable
+ * @example: merge(a, b)
  */
 pub fn merge<V>(a: dict<string, V>, b: dict<string, V>) -> dict<string, V> {
   return __dict_merge(a ?? {}, b ?? {})
@@ -38,6 +56,12 @@ pub fn merge<V>(a: dict<string, V>, b: dict<string, V>) -> dict<string, V> {
  * Pick the listed keys from `data`, dropping entries whose stored value is
  * `nil`. Generic over the value type — when called with a `dict<string, V>`
  * the projection keeps the same V.
+ *
+ * @effects: []
+ * @allocation: heap
+ * @errors: []
+ * @api_stability: stable
+ * @example: pick(data, keys)
  */
 pub fn pick<V>(data: dict<string, V>, keys: list<string>) -> dict<string, V> {
   return __dict_pick(data ?? {}, keys ?? [])
@@ -46,6 +70,12 @@ pub fn pick<V>(data: dict<string, V>, keys: list<string>) -> dict<string, V> {
 /**
  * Drop the listed keys from `data`. Generic over the value type — the
  * resulting dict keeps the same value contract as the input.
+ *
+ * @effects: []
+ * @allocation: heap
+ * @errors: []
+ * @api_stability: stable
+ * @example: omit(data, keys)
  */
 pub fn omit<V>(data: dict<string, V>, keys: list<string>) -> dict<string, V> {
   return __dict_omit(data ?? {}, keys ?? [])

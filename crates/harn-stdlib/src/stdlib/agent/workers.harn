@@ -32,7 +32,15 @@ fn __agent_option_keys() {
   ]
 }
 
-/** agent creates an agent spec dict. */
+/**
+ * agent creates an agent spec dict.
+ *
+ * @effects: []
+ * @allocation: heap
+ * @errors: []
+ * @api_stability: experimental
+ * @example: agent(name, config)
+ */
 pub fn agent(name, config = nil) {
   if type_of(name) != "string" {
     throw "agent: name must be a string"
@@ -44,7 +52,15 @@ pub fn agent(name, config = nil) {
   return cfg + {_type: "agent", name: name}
 }
 
-/** agent_name reads an agent spec name. */
+/**
+ * agent_name reads an agent spec name.
+ *
+ * @effects: []
+ * @allocation: heap
+ * @errors: []
+ * @api_stability: experimental
+ * @example: agent_name(agent)
+ */
 pub fn agent_name(agent) {
   if type_of(agent) != "dict" {
     throw "agent_name: argument must be an agent"
@@ -52,7 +68,15 @@ pub fn agent_name(agent) {
   return agent?.name
 }
 
-/** agent_config builds prompt/system/options for an agent spec. */
+/**
+ * agent_config builds prompt/system/options for an agent spec.
+ *
+ * @effects: [agent]
+ * @allocation: heap
+ * @errors: []
+ * @api_stability: experimental
+ * @example: agent_config(agent, prompt)
+ */
 pub fn agent_config(agent, prompt) {
   if type_of(agent) != "dict" || agent?._type != "agent" {
     throw "agent_config: first argument must be an agent (created with agent())"
@@ -115,17 +139,41 @@ fn __worker_config(config) {
   return __worker_stage_config(cfg)
 }
 
-/** spawn_agent. */
+/**
+ * spawn_agent.
+ *
+ * @effects: [host]
+ * @allocation: heap
+ * @errors: []
+ * @api_stability: experimental
+ * @example: spawn_agent(config)
+ */
 pub fn spawn_agent(config) {
   return __host_worker_spawn(__worker_config(config))
 }
 
-/** send_input. */
+/**
+ * send_input.
+ *
+ * @effects: [host]
+ * @allocation: heap
+ * @errors: []
+ * @api_stability: experimental
+ * @example: send_input(worker, task)
+ */
 pub fn send_input(worker, task) {
   return __host_worker_send_input(worker, task)
 }
 
-/** worker_trigger. */
+/**
+ * worker_trigger.
+ *
+ * @effects: [host]
+ * @allocation: heap
+ * @errors: []
+ * @api_stability: experimental
+ * @example: worker_trigger(worker, payload)
+ */
 pub fn worker_trigger(worker, payload) {
   return __host_worker_trigger(worker, payload)
 }
@@ -134,7 +182,15 @@ fn __is_pool_task(value) {
   return type_of(value) == "dict" && value?._type == "pool_task"
 }
 
-/** wait_agent. */
+/**
+ * wait_agent.
+ *
+ * @effects: [host]
+ * @allocation: heap
+ * @errors: []
+ * @api_stability: experimental
+ * @example: wait_agent(worker_or_workers)
+ */
 pub fn wait_agent(worker_or_workers) {
   if __is_pool_task(worker_or_workers) {
     return __pool_wait(worker_or_workers)
@@ -149,17 +205,41 @@ pub fn wait_agent(worker_or_workers) {
   return __host_worker_wait(worker_or_workers)
 }
 
-/** close_agent. */
+/**
+ * close_agent.
+ *
+ * @effects: [host]
+ * @allocation: heap
+ * @errors: []
+ * @api_stability: experimental
+ * @example: close_agent(worker)
+ */
 pub fn close_agent(worker) {
   return __host_worker_close(worker)
 }
 
-/** resume_agent. */
+/**
+ * resume_agent.
+ *
+ * @effects: [host]
+ * @allocation: heap
+ * @errors: []
+ * @api_stability: experimental
+ * @example: resume_agent(worker_or_snapshot)
+ */
 pub fn resume_agent(worker_or_snapshot) {
   return __host_worker_resume(worker_or_snapshot)
 }
 
-/** list_agents. */
+/**
+ * list_agents.
+ *
+ * @effects: [host]
+ * @allocation: heap
+ * @errors: []
+ * @api_stability: experimental
+ * @example: list_agents()
+ */
 pub fn list_agents() {
   return __host_worker_list()
 }
@@ -238,7 +318,15 @@ fn __sub_agent_options(opts, session_id, selected_tools) {
   return out
 }
 
-/** sub_agent_request builds the Harn-owned child-agent request envelope. */
+/**
+ * sub_agent_request builds the Harn-owned child-agent request envelope.
+ *
+ * @effects: []
+ * @allocation: heap
+ * @errors: []
+ * @api_stability: experimental
+ * @example: sub_agent_request(task, options)
+ */
 pub fn sub_agent_request(task, options = nil) {
   let task_text = __sub_agent_string(task)
   if task_text == "" {
@@ -266,7 +354,15 @@ pub fn sub_agent_request(task, options = nil) {
   )
 }
 
-/** sub_agent_run. */
+/**
+ * sub_agent_run.
+ *
+ * @effects: [host]
+ * @allocation: heap
+ * @errors: []
+ * @api_stability: experimental
+ * @example: sub_agent_run(task, options)
+ */
 pub fn sub_agent_run(task, options = nil) {
   return __host_sub_agent_run(sub_agent_request(task, options))
 }

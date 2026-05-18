@@ -63,4 +63,9 @@ pub struct LintOptions<'a> {
     /// Extra non-stdlib function names that persona bodies may call
     /// without requiring a `@step` declaration.
     pub persona_step_allowlist: &'a [String],
+    /// When true, the `HARN-STD-101` lint enforces a complete
+    /// `@effects`/`@allocation`/`@errors`/`@api_stability`/`@example`
+    /// block on every `pub fn`. Auto-enabled by `harn lint` for files
+    /// under `crates/harn-stdlib/src/stdlib/`.
+    pub require_stdlib_metadata: bool,
 }
