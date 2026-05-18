@@ -176,6 +176,30 @@ pub fn catalog() -> Vec<SchemaEntry> {
             schema_json: None,
         },
         SchemaEntry {
+            command: "check",
+            schema_version: crate::commands::check::CHECK_SCHEMA_VERSION,
+            description: "Per-file static check results with diagnostics and summary counts.",
+            schema_json: None,
+        },
+        SchemaEntry {
+            command: "fmt",
+            schema_version: crate::commands::check::FMT_SCHEMA_VERSION,
+            description: "Per-file formatting result report for write and check modes.",
+            schema_json: None,
+        },
+        SchemaEntry {
+            command: "check provider-matrix",
+            schema_version: crate::commands::check::provider_matrix::PROVIDER_MATRIX_SCHEMA_VERSION,
+            description: "Provider/model capability matrix rows.",
+            schema_json: None,
+        },
+        SchemaEntry {
+            command: "check connector-matrix",
+            schema_version: crate::commands::check::connector_matrix::CONNECTOR_MATRIX_SCHEMA_VERSION,
+            description: "Connector package capability matrix rows.",
+            schema_json: None,
+        },
+        SchemaEntry {
             command: "time run",
             schema_version: crate::commands::time::TIME_RUN_SCHEMA_VERSION,
             description:

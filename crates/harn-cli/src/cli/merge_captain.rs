@@ -28,6 +28,9 @@ pub(crate) struct MergeCaptainLadderArgs {
     /// Write the aggregate ladder report JSON to this path.
     #[arg(long = "report-out", value_name = "PATH")]
     pub report_out: Option<String>,
+    /// Pretty-print JSON to stdout. Replaces the deprecated `--format=json`.
+    #[arg(long)]
+    pub json: bool,
     /// Output format. Defaults to `text`.
     #[arg(long, value_enum, default_value_t = MergeCaptainLadderFormat::Text)]
     pub format: MergeCaptainLadderFormat,
@@ -60,6 +63,9 @@ pub(crate) struct MergeCaptainIterateArgs {
     /// Write the Markdown summary/diff to this path.
     #[arg(long = "markdown-out", value_name = "PATH")]
     pub markdown_out: Option<String>,
+    /// Pretty-print JSON to stdout. Replaces the deprecated `--format=json`.
+    #[arg(long)]
+    pub json: bool,
     /// Output format. Defaults to `text`.
     #[arg(long, value_enum, default_value_t = MergeCaptainIterateFormat::Text)]
     pub format: MergeCaptainIterateFormat,
@@ -229,6 +235,9 @@ pub(crate) struct MergeCaptainAuditArgs {
     /// Output format. Defaults to `text`.
     #[arg(long, value_enum, default_value_t = MergeCaptainAuditFormat::Text)]
     pub format: MergeCaptainAuditFormat,
+    /// Pretty-print JSON to stdout. Replaces the deprecated `--format=json`.
+    #[arg(long)]
+    pub json: bool,
     /// Treat warnings as errors. Useful in CI gates that want to
     /// flip on incomplete-transcript / state-out-of-order findings.
     #[arg(long)]

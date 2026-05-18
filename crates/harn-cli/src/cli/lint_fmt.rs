@@ -18,6 +18,9 @@ pub(crate) struct FmtArgs {
     /// Check formatting without rewriting files.
     #[arg(long)]
     pub check: bool,
+    /// Emit a structured `JsonEnvelope` report instead of human-readable output.
+    #[arg(long)]
+    pub json: bool,
     /// Maximum line width before wrapping. Overrides `[fmt] line_width` in harn.toml.
     #[arg(long = "line-width")]
     pub line_width: Option<usize>,

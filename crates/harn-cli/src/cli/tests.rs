@@ -841,9 +841,33 @@ fn test_parses_merge_captain_ladder_args() {
     };
     assert_eq!(ladder.manifest, "personas/merge_captain/harn.eval.toml");
     assert_eq!(ladder.report_out.as_deref(), Some("ladder-report.json"));
+    assert!(!ladder.json);
     assert!(matches!(
         ladder.format,
         crate::cli::MergeCaptainLadderFormat::Json
+    ));
+}
+
+#[test]
+fn test_parses_merge_captain_ladder_json_alias() {
+    let cli = Cli::parse_from([
+        "harn",
+        "merge-captain",
+        "ladder",
+        "personas/merge_captain/harn.eval.toml",
+        "--json",
+    ]);
+
+    let Command::MergeCaptain(args) = cli.command.unwrap() else {
+        panic!("expected merge-captain command");
+    };
+    let super::MergeCaptainCommand::Ladder(ladder) = args.command else {
+        panic!("expected merge-captain ladder command");
+    };
+    assert!(ladder.json);
+    assert!(matches!(
+        ladder.format,
+        crate::cli::MergeCaptainLadderFormat::Text
     ));
 }
 
@@ -874,6 +898,7 @@ fn test_parses_merge_captain_iterate_args() {
     );
     assert_eq!(iterate.report_out.as_deref(), Some("iteration-report.json"));
     assert_eq!(iterate.markdown_out.as_deref(), Some("iteration.md"));
+    assert!(!iterate.json);
     assert!(matches!(
         iterate.format,
         crate::cli::MergeCaptainIterateFormat::Json

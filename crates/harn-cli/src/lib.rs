@@ -233,18 +233,33 @@ async fn async_main() {
             }
         }
         Command::Check(args) => {
+            let json_format_alias =
+                !args.json && matches!(args.format, cli::CheckOutputFormat::Json);
+            let matrix_format = if args.json {
+                if !matches!(args.format, cli::CheckOutputFormat::Text) {
+                    command_error("`harn check` accepts either `--json` or `--format`, not both");
+                }
+                cli::CheckOutputFormat::Json
+            } else {
+                args.format
+            };
             if args.provider_matrix {
                 let cwd = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
                 let extensions = package::load_runtime_extensions(&cwd);
                 package::install_runtime_extensions(&extensions);
-                commands::check::provider_matrix::run(args.format, args.filter.as_deref());
+                commands::check::provider_matrix::run(
+                    matrix_format,
+                    args.filter.as_deref(),
+                    json_format_alias,
+                );
                 return;
             }
             if args.connector_matrix {
                 commands::check::connector_matrix::run(
-                    args.format,
+                    matrix_format,
                     args.filter.as_deref(),
                     &args.targets,
+                    json_format_alias,
                 );
                 return;
             }
@@ -272,6 +287,12 @@ async fn async_main() {
                 }
             }
             if target_strings.is_empty() {
+                if args.json {
+                    print_check_error(
+                        "missing_targets",
+                        "`harn check` requires at least one target path, or `--workspace` with `[workspace].pipelines`",
+                    );
+                }
                 command_error(
                     "`harn check` requires at least one target path, or `--workspace` with `[workspace].pipelines`",
                 );
@@ -279,17 +300,30 @@ async fn async_main() {
             for target in &target_strings {
                 if let Err(error) = package::validate_runtime_manifest_extensions(Path::new(target))
                 {
+                    if args.json {
+                        print_check_error(
+                            "manifest_extension_error",
+                            &format!("manifest extension validation failed: {error}"),
+                        );
+                    }
                     command_error(&format!("manifest extension validation failed: {error}"));
                 }
             }
             let targets: Vec<&str> = target_strings.iter().map(String::as_str).collect();
             let files = commands::check::collect_harn_targets(&targets);
             if files.is_empty() {
+                if args.json {
+                    print_check_error(
+                        "no_harn_files",
+                        "no .harn files found under the given target(s)",
+                    );
+                }
                 command_error("no .harn files found under the given target(s)");
             }
             let module_graph = commands::check::build_module_graph(&files);
             let cross_file_imports = commands::check::collect_cross_file_imports(&module_graph);
             let mut should_fail = false;
+            let mut json_files = Vec::new();
             for file in &files {
                 let mut config = package::load_check_config(Some(file));
                 if let Some(path) = args.host_capabilities.as_ref() {
@@ -304,14 +338,49 @@ async fn async_main() {
                 if let Some(sev) = args.preflight.as_deref() {
                     config.preflight_severity = Some(sev.to_string());
                 }
-                let outcome = commands::check::check_file_inner(
-                    file,
-                    &config,
-                    &cross_file_imports,
-                    &module_graph,
-                    args.invariants,
-                );
-                should_fail |= outcome.should_fail(config.strict);
+                if args.json {
+                    let report = commands::check::check_file_report(
+                        file,
+                        &config,
+                        &cross_file_imports,
+                        &module_graph,
+                        args.invariants,
+                    );
+                    should_fail |= report.outcome().should_fail(config.strict);
+                    json_files.push(report);
+                } else {
+                    let outcome = commands::check::check_file_inner(
+                        file,
+                        &config,
+                        &cross_file_imports,
+                        &module_graph,
+                        args.invariants,
+                    );
+                    should_fail |= outcome.should_fail(config.strict);
+                }
+            }
+            if args.json {
+                let report = commands::check::CheckReport::from_files(json_files);
+                let envelope = if should_fail {
+                    json_envelope::JsonEnvelope {
+                        schema_version: commands::check::CHECK_SCHEMA_VERSION,
+                        ok: false,
+                        data: Some(report),
+                        error: Some(json_envelope::JsonError {
+                            code: "check_failed".to_string(),
+                            message: "one or more files failed `harn check`".to_string(),
+                            details: serde_json::Value::Null,
+                        }),
+                        warnings: Vec::new(),
+                    }
+                } else {
+                    json_envelope::JsonEnvelope::ok(commands::check::CHECK_SCHEMA_VERSION, report)
+                };
+                println!("{}", json_envelope::to_string_pretty(&envelope));
+                if should_fail {
+                    process::exit(1);
+                }
+                return;
             }
             if should_fail {
                 process::exit(1);
@@ -449,11 +518,17 @@ async fn async_main() {
             if let Some(w) = args.separator_width {
                 opts.separator_width = w;
             }
-            commands::check::fmt_targets(
-                &targets,
-                commands::check::FmtMode::from_check_flag(args.check),
-                &opts,
-            );
+            let mode = commands::check::FmtMode::from_check_flag(args.check);
+            if args.json {
+                let envelope = commands::check::fmt_targets_json(&targets, mode, &opts);
+                let failed = !envelope.ok;
+                println!("{}", json_envelope::to_string_pretty(&envelope));
+                if failed {
+                    process::exit(1);
+                }
+            } else {
+                commands::check::fmt_targets(&targets, mode, &opts);
+            }
         }
         Command::Test(args) => {
             if args.target.as_deref() == Some("agents-conformance") {
@@ -1457,6 +1532,13 @@ fn command_error(message: &str) -> ! {
     Cli::command()
         .error(ErrorKind::ValueValidation, message)
         .exit()
+}
+
+fn print_check_error(code: &str, message: &str) -> ! {
+    let envelope: json_envelope::JsonEnvelope<commands::check::CheckReport> =
+        json_envelope::JsonEnvelope::err(commands::check::CHECK_SCHEMA_VERSION, code, message);
+    println!("{}", json_envelope::to_string_pretty(&envelope));
+    process::exit(1);
 }
 
 fn verify_provenance_receipt(path: &str, json: bool) -> Result<(), String> {
