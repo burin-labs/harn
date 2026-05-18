@@ -7,7 +7,7 @@ use std::collections::{HashMap, HashSet};
 
 use harn_lexer::{FixEdit, Span};
 use harn_parser::diagnostic::{
-    find_closest_match, harness_clock_replacement, renamed_stdlib_symbol,
+    find_closest_match, harness_clock_replacement, harness_stdio_replacement, renamed_stdlib_symbol,
 };
 use harn_parser::{BindingPattern, DiagnosticCode as Code, Node, SNode, TypeExpr, TypedParam};
 
@@ -238,6 +238,34 @@ impl<'a> Linter<'a> {
             severity: LintSeverity::Warning,
             suggestion: Some(suggestion),
             fix,
+        });
+    }
+
+    /// Flag ambient stdio builtins (`print`, `println`, `eprint`,
+    /// `eprintln`, `read_line`, `prompt_user`) so the E4.2 → E4.6 migration
+    /// can rewrite them to `harness.stdio.*`.
+    pub(super) fn check_ambient_stdio_builtin(&mut self, name: &str, span: Span) {
+        let Some(replacement) = harness_stdio_replacement(name) else {
+            return;
+        };
+        let harness_in_scope = self
+            .scopes
+            .iter()
+            .any(|scope| scope.contains("harness") || scope.contains("_harness"));
+        if !harness_in_scope {
+            return;
+        }
+        self.diagnostics.push(LintDiagnostic {
+            code: Code::LintAmbientStdioBuiltin,
+            rule: "ambient-stdio-builtin",
+            message: format!(
+                "ambient `{name}` is deprecated — capabilities now route through \
+                 `harness.stdio.*`"
+            ),
+            span,
+            severity: LintSeverity::Warning,
+            suggestion: Some(format!("replace `{name}` with `{replacement}`")),
+            fix: replace_identifier_text_fix(self.source, span, name, replacement),
         });
     }
 

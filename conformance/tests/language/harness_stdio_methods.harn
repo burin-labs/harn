@@ -1,0 +1,12 @@
+/** E4.2: HarnessStdio exposes the legacy stdio surface without ambient calls. */
+fn main(harness: Harness) {
+  mock_stdin("alpha\n  beta  \ngamma\n")
+  harness.stdio.print("prefix:")
+  harness.stdio.println(harness.stdio.read_line())
+  let structured = harness.stdio.read_line({trim: false})
+  harness.stdio.println(structured.ok)
+  harness.stdio.println(structured.status)
+  harness.stdio.println("[" + structured.value + "]")
+  harness.stdio.println(harness.stdio.prompt("answer: "))
+  unmock_stdin()
+}

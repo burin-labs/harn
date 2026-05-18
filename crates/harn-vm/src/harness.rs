@@ -13,9 +13,9 @@
 //!   * [`Harness::real`], the production constructor that wraps wall-clock
 //!     time, `tokio::fs`, `std::env`, `rand::thread_rng`, and `reqwest`. The
 //!     downstream migration tickets (E4.2-E4.4) populate the per-handle
-//!     method surface against this concrete state; for E4.1 only the
-//!     `stdio.println` / `stdio.eprintln` path is wired so the new
-//!     entrypoint convention has a working hello-world steel thread.
+//!     method surface against this concrete state; the E4.2 stdio surface is
+//!     wired while filesystem, environment, randomness, and network methods
+//!     still land in later slices.
 //!   * [`VmHarness`], the compact `VmValue` payload that carries the same
 //!     state through the bytecode VM and distinguishes the root handle from
 //!     its sub-handles via [`HarnessKind`].
@@ -501,7 +501,8 @@ impl Default for Harness {
     }
 }
 
-/// stdio sub-handle: `println`, `eprintln`, `prompt`, `read_line`.
+/// stdio sub-handle: `print`, `println`, `eprint`, `eprintln`, `prompt`,
+/// `read_line`.
 #[derive(Debug, Clone)]
 pub struct HarnessStdio {
     inner: Arc<HarnessInner>,

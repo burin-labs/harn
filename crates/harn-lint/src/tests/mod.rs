@@ -72,6 +72,7 @@ pub(super) fn lint_with_require_header(
 }
 
 mod ambient_clock;
+mod ambient_stdio;
 mod assert_pipeline;
 mod autofix;
 mod boolean_patterns;

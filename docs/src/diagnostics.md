@@ -44,7 +44,7 @@ Repairs are tagged with a six-level safety class so `harn fix --apply --safety <
 | [`STD`](#std--stdlib-usage) | Stdlib usage | 3 |
 | [`PRM`](#prm--prompt-templates) | Prompt templates | 7 |
 | [`MOD`](#mod--modules-and-exports) | Modules and exports | 6 |
-| [`LNT`](#lnt--lint-rules) | Lint rules | 52 |
+| [`LNT`](#lnt--lint-rules) | Lint rules | 53 |
 | [`FMT`](#fmt--formatter) | Formatter | 3 |
 | [`IMP`](#imp--import-resolution) | Import resolution | 3 |
 | [`OWN`](#own--ownership-and-mutability) | Ownership and mutability | 4 |
@@ -233,6 +233,7 @@ Repairs are tagged with a six-level safety class so `harn fix --apply --safety <
 | [`HARN-LNT-050`](#harn-lnt-050) | deprecated LLM options lint | `llm/migrate-deprecated-option` | `scope-local` |
 | [`HARN-LNT-051`](#harn-lnt-051) | unnecessary safe navigation lint | `expressions/simplify` | `behavior-preserving` |
 | [`HARN-LNT-052`](#harn-lnt-052) | ambient clock builtin replaced by `harness.clock.*` | `bindings/thread-harness-clock` | `scope-local` |
+| [`HARN-LNT-053`](#harn-lnt-053) | ambient stdio builtin replaced by `harness.stdio.*` | `bindings/thread-harness-stdio` | `scope-local` |
 
 ## FMT — Formatter
 
@@ -4385,6 +4386,48 @@ the migration is in flight, but every new call site should use the
 - If `harness` isn't reachable from the call site, first thread it through
   the enclosing fn via the `bindings/thread-harness` repair (which adds the
   `harness: Harness` parameter at the entrypoint), then re-run
+  `harn fix --apply` to swap the call.
+
+#### Stability
+
+This code is stable. Its identifier, category, and meaning will not change
+without a deprecation cycle. Cross-language tooling and IDE integrations can
+dispatch on it directly.
+
+### `HARN-LNT-053`
+
+**Category:** `LNT` (Lint rules) &nbsp;·&nbsp; **API stability:** `stable`
+
+ambient stdio builtin replaced by `harness.stdio.*`
+
+- **Repair:** `bindings/thread-harness-stdio` &nbsp;·&nbsp; **Safety:** `scope-local`
+- Replace the ambient stdio builtin with the corresponding `harness.stdio.*` method
+- **See also:** [`HARN-NAM-101`](#harn-nam-101), [`HARN-LNT-001`](#harn-lnt-001)
+
+**Category:** Lint (LNT)
+**Variant:** `Code::LintAmbientStdioBuiltin` (ambient stdio builtin)
+
+#### What it means
+
+The lint fires on calls to `print`, `println`, `eprint`, `eprintln`,
+`read_line`, and `prompt_user` when a `harness` binding is already in scope.
+These were ambient stdio-capability builtins in the pre-`Harness` runtime.
+Stdio access now routes through the `harness.stdio.*` sub-handle so capability
+requirements are visible in the type system.
+
+This is a lint, not a hard error. The legacy builtins still compile while
+the in-tree corpus migration is in flight, but new code should use
+`harness.stdio.print`, `harness.stdio.println`, `harness.stdio.eprint`,
+`harness.stdio.eprintln`, `harness.stdio.read_line`, or
+`harness.stdio.prompt`.
+
+#### How to fix
+
+- Run `harn fix --apply --safety scope-local` over the file. The
+  `bindings/thread-harness-stdio` repair rewrites every call site where a
+  `harness` binding is in scope.
+- If `harness` is not reachable from the call site, first thread it through
+  the enclosing function via the `bindings/thread-harness` repair, then re-run
   `harn fix --apply` to swap the call.
 
 #### Stability

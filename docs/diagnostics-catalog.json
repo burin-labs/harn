@@ -49,7 +49,7 @@
     {
       "id": "LNT",
       "title": "Lint rules",
-      "count": 52
+      "count": 53
     },
     {
       "id": "FMT",
@@ -1828,6 +1828,24 @@
           "id": "bindings/thread-harness-clock",
           "safety": "scope-local",
           "summary": "Replace the ambient clock builtin with the corresponding `harness.clock.*` method"
+        }
+      ],
+      "related": [
+        "HARN-NAM-101",
+        "HARN-LNT-001"
+      ],
+      "explanationPresent": true,
+      "apiStability": "stable"
+    },
+    {
+      "code": "HARN-LNT-053",
+      "category": "LNT",
+      "summary": "ambient stdio builtin replaced by `harness.stdio.*`",
+      "repairs": [
+        {
+          "id": "bindings/thread-harness-stdio",
+          "safety": "scope-local",
+          "summary": "Replace the ambient stdio builtin with the corresponding `harness.stdio.*` method"
         }
       ],
       "related": [
