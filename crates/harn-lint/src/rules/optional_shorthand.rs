@@ -445,6 +445,7 @@ impl<'a, 'd> State<'a, 'd> {
             }
             TypeExpr::Named(_) | TypeExpr::Never | TypeExpr::LitString(_) | TypeExpr::LitInt(_) => {
             }
+            TypeExpr::Owned(inner) => self.visit_type(inner, parent_span),
         }
     }
 

@@ -249,7 +249,7 @@ fn llm_config_builtins_publish_runtime_metadata() {
 fn migrated_stdlib_modules_publish_runtime_metadata() {
     let metadata = harn_vm::stdlib::stdlib_builtin_metadata();
     let migrated_categories = [
-        ("concurrency", 51usize),
+        ("concurrency", 52usize),
         ("fs", 18usize),
         ("io", 35usize),
         ("tui", 3usize),

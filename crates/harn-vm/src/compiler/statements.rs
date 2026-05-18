@@ -166,6 +166,7 @@ impl Compiler {
         // IterNext jumps to end if exhausted, else pushes the next item.
         let exit_jump_pos = self.chunk.emit_jump(Op::IterNext, self.line);
         self.begin_scope();
+        let finally_floor = self.finally_bodies.len();
         self.compile_destructuring(pattern, true)?;
         self.record_binding_type(pattern, item_type);
         for sn in body {
@@ -174,6 +175,7 @@ impl Compiler {
                 self.chunk.emit(Op::Pop, self.line);
             }
         }
+        self.drain_finallys_to_floor(finally_floor)?;
         self.end_scope();
         self.chunk.emit_u16(Op::Jump, loop_start as u16, self.line);
         self.chunk.patch_jump(exit_jump_pos);

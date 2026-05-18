@@ -421,6 +421,7 @@ impl<'a> Linter<'a> {
             }
             TypeExpr::Never => {}
             TypeExpr::LitString(_) | TypeExpr::LitInt(_) => {}
+            TypeExpr::Owned(inner) => self.record_type_expr_references(inner),
         }
     }
 

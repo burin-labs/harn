@@ -563,6 +563,11 @@ pub(crate) const SIGNATURES: &[BuiltinSignature] = &[
         TY_NIL,
     ),
     BuiltinSignature::simple(
+        "channel_is_closed",
+        &[Param::new("channel", Ty::Named("channel"))],
+        TY_BOOL,
+    ),
+    BuiltinSignature::simple(
         "color",
         &[
             Param::new("text", TY_STRING),
@@ -830,6 +835,12 @@ pub(crate) const SIGNATURES: &[BuiltinSignature] = &[
     BuiltinSignature::simple("delete_file", &[Param::new("path", TY_STRING)], TY_NIL),
     BuiltinSignature::simple("dim", &[Param::new("text", TY_STRING)], TY_STRING),
     BuiltinSignature::simple("dirname", &[Param::new("path", TY_STRING)], TY_STRING),
+    // `drop(handle)` — close a stdlib handle deterministically. Dispatch is
+    // by runtime value tag; values that don't carry a close hook are a
+    // silent no-op. Compiled in automatically for `owned<T>` bindings at
+    // scope exit; callers may also invoke explicitly in user `defer { ... }`
+    // blocks when they need fine-grained control.
+    BuiltinSignature::simple("drop", &[Param::new("handle", TY_ANY)], TY_NIL),
     BuiltinSignature::simple(
         "dual_control",
         &[

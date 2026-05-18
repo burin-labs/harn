@@ -202,6 +202,18 @@ impl TypeChecker {
         let expected = self.resolve_alias(expected, scope);
         let actual = self.resolve_alias(actual, scope);
 
+        // `owned<T>` is transparent to the underlying handle type at the type
+        // boundary: the ownership marker only influences scope-exit codegen
+        // and the HARN-OWN-005 leak lint, not assignment compatibility.
+        // Strip both sides so an `owned<channel>` annotation accepts a bare
+        // `channel`, an `owned<T>` flows into a `T` parameter, and so on.
+        if let TypeExpr::Owned(inner) = &expected {
+            return self.types_compatible_at(Polarity::Covariant, inner, &actual, scope);
+        }
+        if let TypeExpr::Owned(inner) = &actual {
+            return self.types_compatible_at(Polarity::Covariant, &expected, inner, scope);
+        }
+
         // Interface satisfaction: if expected names an interface, check method compatibility.
         if let Some(iface_name) = Self::base_type_name(&expected) {
             if let Some(interface_info) = scope.get_interface(iface_name) {
@@ -528,6 +540,7 @@ impl TypeChecker {
             TypeExpr::Never => TypeExpr::Never,
             TypeExpr::LitString(s) => TypeExpr::LitString(s.clone()),
             TypeExpr::LitInt(v) => TypeExpr::LitInt(*v),
+            TypeExpr::Owned(inner) => TypeExpr::Owned(Box::new(self.resolve_alias(inner, scope))),
         }
     }
 }

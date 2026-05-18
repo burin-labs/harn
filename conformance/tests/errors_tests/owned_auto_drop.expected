@@ -1,0 +1,21 @@
+[harn] inside: closed?
+[harn] false
+[harn] after block: closed?
+[harn] true
+[harn] before return: closed?
+[harn] false
+[harn] after return: closed?
+[harn] true
+[harn] block body
+[harn] user defer: closed before me?
+[harn] false
+[harn] after block: closed?
+[harn] true
+[harn] inside: a, b, c closed?
+[harn] false
+[harn] false
+[harn] false
+[harn] after: a, b, c closed?
+[harn] true
+[harn] true
+[harn] true

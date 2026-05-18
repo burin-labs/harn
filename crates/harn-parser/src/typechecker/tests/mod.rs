@@ -15,6 +15,7 @@ mod imports;
 mod interfaces;
 mod main_signature;
 mod narrowing;
+mod ownership;
 mod reachability;
 mod repair;
 mod strict_types;

@@ -1,20 +1,55 @@
 # HARN-OWN-003 — owned value escapes its valid scope
 
-**Category:** Ownership / mutability (OWN)  
+**Category:** Ownership / mutability (OWN)
 **Variant:** `Code::OwnershipEscape` (ownership escape)
 
 ## What it means
 
-Harn's binding-and-mutability discipline rejects this usage. Bindings declared
-`let` may not be reassigned; bindings declared `mut` should actually be
-reassigned somewhere.
+A binding annotated with `owned<T>` carries sole ownership of a drop-able
+resource (a file, channel, MCP session, transcript writer, sync permit). The
+compiler emits an implicit `defer { drop(x) }` at the binding's enclosing
+block so the resource closes deterministically when control leaves the scope.
 
-Specifically: owned value escapes its valid scope.
+Returning the binding by name — or otherwise transferring it out of the scope
+without declaring the transfer in the type — defeats that contract: the auto-
+drop never fires, and the resource leaks until the runtime garbage-collects
+the handle (which, for OS resources, may be never).
+
+```harn
+fn open_log(): channel {
+  let ch: owned<channel> = channel("log", 64)
+  return ch    // HARN-OWN-003: `ch` escapes; auto-drop is bypassed
+}
+```
 
 ## How to fix
 
-- Switch the binding kind (`let` ↔ `mut`) to match its actual use.
-- Restructure so owned values do not escape their scope.
+- **Transfer ownership explicitly** by declaring the function's return type as
+  `owned<T>`. The caller then receives an owned binding and is responsible for
+  dropping it (or transferring it on again):
+
+  ```harn
+  fn open_log(): owned<channel> {
+    let ch: owned<channel> = channel("log", 64)
+    return ch    // OK — ownership flows to the caller
+  }
+  ```
+
+- **Drop the value before returning** by wrapping the work in a block whose
+  exit triggers the auto-drop, then returning a non-owned summary:
+
+  ```harn
+  fn write_log(msg: string): nil {
+    {
+      let ch: owned<channel> = channel("log", 64)
+      send(ch, msg)
+    }   // `ch` drops here, before the function returns
+    nil
+  }
+  ```
+
+- **Drop the value explicitly** with `drop(x)` if you need to release earlier
+  than the enclosing block would close it.
 
 ## Stability
 

@@ -265,6 +265,7 @@ impl Compiler {
 
         if run_body && (!body.is_empty() || summarize.is_some()) {
             self.begin_scope();
+            let finally_floor = self.finally_bodies.len();
 
             let mut visible_fields = vec!["id".to_string(), "version".to_string()];
             for (field_name, _) in fields {
@@ -295,6 +296,7 @@ impl Compiler {
                     }
                 }
             }
+            self.drain_finallys_to_floor(finally_floor)?;
             self.end_scope();
         }
         Ok(())

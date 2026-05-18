@@ -1,4 +1,5 @@
 use std::rc::Rc;
+use std::sync::atomic::Ordering;
 
 use crate::value::{VmError, VmValue};
 use crate::vm::Vm;
@@ -151,5 +152,25 @@ pub(crate) fn register_type_builtins(vm: &mut Vm) {
         Ok(VmValue::String(Rc::from(crate::value::value_identity_key(
             v,
         ))))
+    });
+
+    // `drop(handle)` — close a stdlib handle deterministically. Dispatch is by
+    // runtime value tag: each handle variant maps to its existing close verb
+    // (`Channel` → mark closed, `SyncPermit` → release). Non-drop values are a
+    // silent no-op so callers can hand `drop` any value without guarding.
+    // `owned<T>` bindings call this implicitly at scope exit via a synthetic
+    // `defer { drop(<binding>) }`.
+    vm.register_builtin("drop", |args, _out| {
+        let v = args.first().unwrap_or(&VmValue::Nil);
+        match v {
+            VmValue::Channel(ch) => {
+                ch.closed.store(true, Ordering::SeqCst);
+            }
+            VmValue::SyncPermit(permit) => {
+                permit.release();
+            }
+            _ => {}
+        }
+        Ok(VmValue::Nil)
     });
 }

@@ -347,6 +347,7 @@ fn format_type_expr(ty: &TypeExpr) -> String {
         TypeExpr::Never => "Never".to_string(),
         TypeExpr::LitString(s) => format!("\"{s}\""),
         TypeExpr::LitInt(n) => n.to_string(),
+        TypeExpr::Owned(inner) => format!("owned<{}>", format_type_expr(inner)),
     }
 }
 

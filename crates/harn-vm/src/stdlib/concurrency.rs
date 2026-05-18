@@ -36,6 +36,10 @@ const CONCURRENCY_SYNC_PRIMITIVES: &[SyncBuiltin] = &[
         .signature("close_channel(channel)")
         .arity(VmBuiltinArity::Exact(1))
         .doc("Mark a channel closed."),
+    SyncBuiltin::new("channel_is_closed", channel_is_closed_builtin)
+        .signature("channel_is_closed(channel)")
+        .arity(VmBuiltinArity::Exact(1))
+        .doc("Return true if the channel has been marked closed."),
     SyncBuiltin::new("try_receive", try_receive_builtin)
         .signature("try_receive(channel)")
         .arity(VmBuiltinArity::Exact(1))
@@ -920,6 +924,15 @@ fn close_channel_builtin(args: &[VmValue], _out: &mut String) -> Result<VmValue,
         Err(VmError::Thrown(VmValue::String(Rc::from(
             "close_channel: first argument must be a channel",
         ))))
+    }
+}
+
+fn channel_is_closed_builtin(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
+    match args.first() {
+        Some(VmValue::Channel(ch)) => Ok(VmValue::Bool(ch.closed.load(Ordering::SeqCst))),
+        _ => Err(VmError::Thrown(VmValue::String(Rc::from(
+            "channel_is_closed: first argument must be a channel",
+        )))),
     }
 }
 

@@ -68,6 +68,7 @@ pub fn format_type(ty: &TypeExpr) -> String {
         TypeExpr::Never => "never".to_string(),
         TypeExpr::LitString(s) => format!("\"{}\"", s.replace('\\', "\\\\").replace('"', "\\\"")),
         TypeExpr::LitInt(v) => v.to_string(),
+        TypeExpr::Owned(inner) => format!("owned<{}>", format_type(inner)),
     }
 }
 
