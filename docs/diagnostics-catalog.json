@@ -47,6 +47,11 @@
       "count": 6
     },
     {
+      "id": "RMD",
+      "title": "Reminder lifecycle",
+      "count": 1
+    },
+    {
       "id": "LNT",
       "title": "Lint rules",
       "count": 53
@@ -1124,6 +1129,15 @@
       "code": "HARN-MOD-006",
       "category": "MOD",
       "summary": "module re-exports conflict",
+      "repairs": [],
+      "related": [],
+      "explanationPresent": true,
+      "apiStability": "stable"
+    },
+    {
+      "code": "HARN-RMD-001",
+      "category": "RMD",
+      "summary": "reminder lifecycle option key is not recognized",
       "repairs": [],
       "related": [],
       "explanationPresent": true,
