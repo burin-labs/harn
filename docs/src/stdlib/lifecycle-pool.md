@@ -6,19 +6,23 @@ entire pipeline, session, or tenant — for example, capping how many PR-review
 agents run at once, fairly draining a per-customer queue, or throttling a
 provider's API tier.
 
-This is PL-01, the foundation for the agent-pool epic
-([#1883](https://github.com/burin-labs/harn/issues/1883)). Queue strategies,
-backpressure policies, channel composition, durable state, and OTel spans land
-in [#1887..#1893](https://github.com/burin-labs/harn/issues?q=is%3Aissue+label%3Aarea%2Fflow-control).
+This is the PL-01/PL-02 foundation for the agent-pool epic
+([#1883](https://github.com/burin-labs/harn/issues/1883)). Queue strategies
+ship with the pool surface; backpressure policies, channel composition,
+durable state, and OTel spans land in later pool tickets.
 
 ```harn,ignore
-import { pool_create, pool_wait } from "std/lifecycle/pool"
+import { fair_round_robin, pool_create, pool_wait } from "std/lifecycle/pool"
 
-let pool = pool_create({name: "pr-review", max_concurrent: 5})
+let pool = pool_create({
+  name: "pr-review",
+  max_concurrent: 5,
+  queue: fair_round_robin("tenant_id"),
+})
 
 let handle = pool.submit({ ->
   return agent_loop("review this PR", system_prompt: "...")
-}, {key: "tenant-acme", priority: 10})
+}, {tenant_id: "tenant-acme", priority: 10})
 
 let result = pool_wait(handle)
 ```
@@ -33,9 +37,9 @@ pool errors; use `pool_get(name)` to reuse an existing one.
 |------------------|--------|------------------|------------------------------------------------|
 | `name`           | string | auto-generated   | Visible in `pool_list()` and snapshots.        |
 | `max_concurrent` | int    | `1`              | Hard cap on simultaneously running tasks.      |
-| `queue`          | any    | `nil` (FIFO)     | Reserved for [#1887](https://github.com/burin-labs/harn/issues/1887). |
+| `queue`          | dict/string | `priority()` | Queue strategy descriptor. |
 | `backpressure`   | any    | `nil`            | Reserved for [#1888](https://github.com/burin-labs/harn/issues/1888). |
-| `priority`       | any    | `nil`            | Reserved for [#1887](https://github.com/burin-labs/harn/issues/1887). |
+| `priority`       | any    | `nil`            | Reserved for later priority callbacks. |
 
 The returned handle is a dict with `_type: "pool"`, plus `submit`, `size`, and
 `snapshot` callable fields that close over the pool's id.
@@ -49,10 +53,33 @@ time options:
 | Option     | Type   | Default | Notes                                                            |
 |------------|--------|---------|------------------------------------------------------------------|
 | `priority` | int    | `0`     | Higher dequeues sooner; ties resolve by submission order (FIFO). |
-| `key`      | string | nil     | Stamped on the task for observability and future fair-key queues. |
+| `key`      | string | nil     | Fairness key for `fair_round_robin("key")` and task observability. |
+| custom key | string | nil     | When using `fair_round_robin("tenant_id")`, pass `tenant_id` here. |
 
 Each call returns a task handle (`_type: "pool_task"`) with `id`, `pool`,
 `pool_id`, `submitted_at`, and the optional `key`.
+
+## Queue Strategies
+
+`std/lifecycle/pool` exports four strategy factories:
+
+| Function | Behavior |
+|---|---|
+| `fifo()` | Dequeue oldest queued task first, ignoring submit priority. |
+| `priority()` | Dequeue highest submit-time `priority` first; equal priorities stay FIFO. This is the default. |
+| `lifo()` | Dequeue newest queued task first. |
+| `fair_round_robin(key = "key")` | Partition queued tasks by the submit option named by `key`, then rotate across distinct values while preserving FIFO inside each partition. |
+
+```harn,ignore
+import { QueueStrategy, pool_create } from "std/lifecycle/pool"
+
+let queue = QueueStrategy()
+let pool = pool_create({
+  name: "tenant-work",
+  max_concurrent: 2,
+  queue: queue.fair_round_robin("tenant_id"),
+})
+```
 
 ## Waiting
 

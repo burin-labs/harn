@@ -72,6 +72,12 @@ condensed series summaries instead of full per-patch history.
   block on pool task handles. Foundation for the agent pool epic
   (#1883); queue strategies, backpressure, durability, channel
   composition, and OTel spans land in #1887..#1893.
+- **Agent pool queue strategies (#1887).** Extends
+  `std/lifecycle/pool` with `fifo()`, `priority()`, `lifo()`,
+  `fair_round_robin(key?)`, and the `QueueStrategy()` namespace helper.
+  `pool_create({queue: ...})` now selects deterministic FIFO, LIFO,
+  priority, or key-partitioned fair round-robin dispatch while preserving
+  priority dispatch as the default for existing pools.
 - **Per-symbol stdlib metadata contract (#1790).** Every public stdlib
   function declares an `@effects`, `@allocation`, `@errors`,
   `@api_stability`, and `@example` block above its `pub fn`. A new

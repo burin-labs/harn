@@ -1,11 +1,10 @@
-//! Named agent thread pools (PL-01).
+//! Named agent thread pools (PL-01/PL-02).
 //!
 //! Foundation for the agent pool epic (#1883). Provides a thread-local
 //! registry of named pools that bound the number of concurrent Harn
-//! closure executions and queue excess submissions. Queue strategy,
-//! backpressure, durability, and channel composition arrive in later
-//! sub-tickets (#1887..#1893); this module focuses on the minimum that
-//! `pool_create(...) + pool.submit(closure) + pool.size/snapshot` need.
+//! closure executions and queue excess submissions. Queue strategy ships
+//! here; backpressure, durability, and channel composition arrive in later
+//! sub-tickets (#1888..#1893).
 
 use std::cell::RefCell;
 use std::collections::{BTreeMap, HashMap, VecDeque};
@@ -32,6 +31,7 @@ struct PendingTask {
     closure: Rc<VmClosure>,
     state: Rc<RefCell<TaskState>>,
     priority: i64,
+    key: Option<String>,
     /// Tiebreaker so FIFO order is preserved among equal priorities.
     seq: u64,
 }
@@ -83,12 +83,40 @@ struct PoolEntry {
     created_at: String,
     submit_counter: u64,
     queue: VecDeque<PendingTask>,
+    queue_strategy: QueueStrategy,
+    round_robin_after: Option<String>,
     active: HashMap<String, Rc<RefCell<TaskState>>>,
     tasks: BTreeMap<String, Rc<RefCell<TaskState>>>,
     /// Optional per-create user-supplied config (queue strategy, priority
-    /// fn, backpressure). PL-01 stores it for inspection / snapshot but
-    /// doesn't yet evaluate it — PL-02..PL-04 wire each strategy.
+    /// fn, backpressure). Queue strategy is evaluated by this module;
+    /// later pool tickets wire the other config knobs.
     config: BTreeMap<String, VmValue>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+enum QueueStrategy {
+    Fifo,
+    Priority,
+    Lifo,
+    FairRoundRobin { key_field: String },
+}
+
+impl QueueStrategy {
+    fn name(&self) -> &'static str {
+        match self {
+            QueueStrategy::Fifo => "fifo",
+            QueueStrategy::Priority => "priority",
+            QueueStrategy::Lifo => "lifo",
+            QueueStrategy::FairRoundRobin { .. } => "fair_round_robin",
+        }
+    }
+
+    fn key_field(&self) -> Option<&str> {
+        match self {
+            QueueStrategy::FairRoundRobin { key_field } => Some(key_field.as_str()),
+            _ => None,
+        }
+    }
 }
 
 thread_local! {
@@ -212,6 +240,75 @@ fn parse_key(opts: &BTreeMap<String, VmValue>) -> Result<Option<String>, VmError
     }
 }
 
+fn parse_submit_key(
+    opts: &BTreeMap<String, VmValue>,
+    queue_strategy: &QueueStrategy,
+) -> Result<Option<String>, VmError> {
+    if let Some(field) = queue_strategy.key_field() {
+        match opts.get(field) {
+            Some(VmValue::String(text)) => return Ok(Some(text.to_string())),
+            Some(VmValue::Nil) | None => {}
+            Some(other) => {
+                return Err(VmError::Runtime(format!(
+                    "pool.submit: {field} must be a string (got {})",
+                    other.type_name()
+                )));
+            }
+        }
+    }
+    parse_key(opts)
+}
+
+fn parse_queue_strategy(opts: &BTreeMap<String, VmValue>) -> Result<QueueStrategy, VmError> {
+    let Some(value) = opts.get("queue") else {
+        return Ok(QueueStrategy::Priority);
+    };
+    match value {
+        VmValue::Nil => Ok(QueueStrategy::Priority),
+        VmValue::String(text) => parse_queue_strategy_name(text),
+        VmValue::Dict(map) => {
+            let kind = map
+                .get("kind")
+                .or_else(|| map.get("strategy"))
+                .map(VmValue::display)
+                .filter(|name| !name.is_empty())
+                .ok_or_else(|| {
+                    VmError::Runtime("pool_create: queue strategy missing kind".to_string())
+                })?;
+            match kind.as_str() {
+                "fair_round_robin" => {
+                    let key_field = map
+                        .get("key")
+                        .or_else(|| map.get("key_field"))
+                        .map(VmValue::display)
+                        .filter(|name| !name.is_empty())
+                        .unwrap_or_else(|| "key".to_string());
+                    Ok(QueueStrategy::FairRoundRobin { key_field })
+                }
+                _ => parse_queue_strategy_name(&kind),
+            }
+        }
+        other => Err(VmError::Runtime(format!(
+            "pool_create: queue must be a strategy dict or string (got {})",
+            other.type_name()
+        ))),
+    }
+}
+
+fn parse_queue_strategy_name(name: &str) -> Result<QueueStrategy, VmError> {
+    match name {
+        "fifo" => Ok(QueueStrategy::Fifo),
+        "priority" => Ok(QueueStrategy::Priority),
+        "lifo" => Ok(QueueStrategy::Lifo),
+        "fair_round_robin" => Ok(QueueStrategy::FairRoundRobin {
+            key_field: "key".to_string(),
+        }),
+        other => Err(VmError::Runtime(format!(
+            "pool_create: unknown queue strategy '{other}'"
+        ))),
+    }
+}
+
 /// Public surface: snapshot dict mirroring the structure returned by
 /// `pool.snapshot()`. Pulled into its own helper so `__pool_create`,
 /// `__pool_snapshot`, `__pool_list`, and `__pool_get` stay byte-for-byte
@@ -257,6 +354,10 @@ fn pool_snapshot_value(pool: &PoolEntry) -> VmValue {
     snapshot.insert("completed".to_string(), VmValue::Int(completed));
     snapshot.insert("failed".to_string(), VmValue::Int(failed));
     snapshot.insert("total".to_string(), VmValue::Int(pool.tasks.len() as i64));
+    snapshot.insert(
+        "queue_strategy".to_string(),
+        VmValue::String(Rc::from(pool.queue_strategy.name())),
+    );
     snapshot.insert("tasks".to_string(), VmValue::List(Rc::new(tasks)));
     if !pool.config.is_empty() {
         snapshot.insert(
@@ -378,6 +479,7 @@ fn pool_create_sync(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmEr
         )));
     }
     let max_concurrent = parse_max_concurrent(&opts)?;
+    let queue_strategy = parse_queue_strategy(&opts)?;
     let id = next_pool_id();
     let entry = Rc::new(RefCell::new(PoolEntry {
         id: id.clone(),
@@ -386,6 +488,8 @@ fn pool_create_sync(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmEr
         created_at: uuid::Uuid::now_v7().to_string(),
         submit_counter: 0,
         queue: VecDeque::new(),
+        queue_strategy,
+        round_robin_after: None,
         active: HashMap::new(),
         tasks: BTreeMap::new(),
         config: ordered_pool_config(&opts),
@@ -476,12 +580,12 @@ async fn pool_submit_builtin(args: Vec<VmValue>) -> Result<VmValue, VmError> {
         }
     };
     let opts = parse_options(args.get(2), "pool.submit")?;
-    let key = parse_key(&opts)?;
     let priority = parse_priority(&opts)?;
 
     let entry = lookup_pool(&pool_id)?;
     let task = {
         let mut pool = entry.borrow_mut();
+        let key = parse_submit_key(&opts, &pool.queue_strategy)?;
         pool.submit_counter += 1;
         let seq = pool.submit_counter;
         let task_id = next_task_id(&pool);
@@ -507,6 +611,7 @@ async fn pool_submit_builtin(args: Vec<VmValue>) -> Result<VmValue, VmError> {
                 closure: closure.clone(),
                 state: state.clone(),
                 priority,
+                key,
                 seq,
             },
         );
@@ -518,30 +623,7 @@ async fn pool_submit_builtin(args: Vec<VmValue>) -> Result<VmValue, VmError> {
 }
 
 fn enqueue_task(pool: &mut PoolEntry, pending: PendingTask) {
-    let position = priority_insert_position(
-        pool.queue.iter().map(|p| (p.priority, p.seq)),
-        pending.priority,
-        pending.seq,
-    );
-    pool.queue.insert(position, pending);
-}
-
-/// Insertion position for FIFO-with-priority: higher priority dequeues
-/// first; ties dequeue by submission order (lower seq first). Pulled into
-/// its own helper so the queue ordering rule has a unit test independent
-/// of the rest of the pool plumbing.
-fn priority_insert_position<I>(existing: I, priority: i64, seq: u64) -> usize
-where
-    I: Iterator<Item = (i64, u64)>,
-{
-    let mut len = 0usize;
-    for (i, (p, s)) in existing.enumerate() {
-        len = i + 1;
-        if p < priority || (p == priority && s > seq) {
-            return i;
-        }
-    }
-    len
+    pool.queue.push_back(pending);
 }
 
 fn dispatch_ready(pool: &Rc<RefCell<PoolEntry>>) {
@@ -551,11 +633,70 @@ fn dispatch_ready(pool: &Rc<RefCell<PoolEntry>>) {
             if pool_ref.active.len() >= pool_ref.max_concurrent {
                 break;
             }
-            pool_ref.queue.pop_front()
+            pop_next_task(&mut pool_ref)
         };
         let Some(pending) = next else { break };
         spawn_task(pool.clone(), pending);
     }
+}
+
+fn pop_next_task(pool: &mut PoolEntry) -> Option<PendingTask> {
+    match &pool.queue_strategy {
+        QueueStrategy::Fifo => pool.queue.pop_front(),
+        QueueStrategy::Lifo => pool.queue.pop_back(),
+        QueueStrategy::Priority => {
+            let index = priority_queue_index(pool.queue.iter().map(|p| (p.priority, p.seq)))?;
+            pool.queue.remove(index)
+        }
+        QueueStrategy::FairRoundRobin { .. } => pop_fair_round_robin(pool),
+    }
+}
+
+fn priority_queue_index<I>(existing: I) -> Option<usize>
+where
+    I: Iterator<Item = (i64, u64)>,
+{
+    existing
+        .enumerate()
+        .max_by(
+            |(_, (left_priority, left_seq)), (_, (right_priority, right_seq))| {
+                left_priority
+                    .cmp(right_priority)
+                    .then_with(|| right_seq.cmp(left_seq))
+            },
+        )
+        .map(|(index, _)| index)
+}
+
+fn pop_fair_round_robin(pool: &mut PoolEntry) -> Option<PendingTask> {
+    if pool.queue.is_empty() {
+        return None;
+    }
+    let mut keys = Vec::<String>::new();
+    for pending in &pool.queue {
+        let key = fair_key(pending);
+        if !keys.contains(&key) {
+            keys.push(key);
+        }
+    }
+    let selected_key = match pool.round_robin_after.as_deref() {
+        Some(after) => keys
+            .iter()
+            .position(|key| key == after)
+            .map(|index| keys[(index + 1) % keys.len()].clone())
+            .unwrap_or_else(|| keys[0].clone()),
+        None => keys[0].clone(),
+    };
+    let index = pool
+        .queue
+        .iter()
+        .position(|pending| fair_key(pending) == selected_key)?;
+    pool.round_robin_after = Some(selected_key);
+    pool.queue.remove(index)
+}
+
+fn fair_key(pending: &PendingTask) -> String {
+    pending.key.clone().unwrap_or_default()
 }
 
 fn spawn_task(pool: Rc<RefCell<PoolEntry>>, pending: PendingTask) {
@@ -715,18 +856,19 @@ pub(crate) fn register_pool_builtins(vm: &mut Vm) {
 
 #[cfg(test)]
 mod tests {
-    use super::priority_insert_position;
+    use super::priority_queue_index;
 
-    /// Simulates `enqueue_task` over a vector of (priority, seq) tuples
+    /// Simulates priority dispatch over a vector of (priority, seq) tuples
     /// so the ordering rule can be exercised without standing up a real
     /// `VmClosure` or `PoolEntry`.
-    fn insert_all(items: &[(i64, u64)]) -> Vec<u64> {
-        let mut queue: Vec<(i64, u64)> = Vec::new();
-        for &(p, s) in items {
-            let position = priority_insert_position(queue.iter().copied(), p, s);
-            queue.insert(position, (p, s));
+    fn dispatch_all(items: &[(i64, u64)]) -> Vec<u64> {
+        let mut queue: Vec<(i64, u64)> = items.to_vec();
+        let mut out = Vec::new();
+        while let Some(index) = priority_queue_index(queue.iter().copied()) {
+            let (_, seq) = queue.remove(index);
+            out.push(seq);
         }
-        queue.into_iter().map(|(_, s)| s).collect()
+        out
     }
 
     #[test]
@@ -735,18 +877,18 @@ mod tests {
         // Expected dispatch order: 4 (highest), then 2 then 3 (older tie),
         // then 1 (lowest).
         assert_eq!(
-            insert_all(&[(0, 1), (5, 2), (5, 3), (10, 4)]),
+            dispatch_all(&[(0, 1), (5, 2), (5, 3), (10, 4)]),
             vec![4, 2, 3, 1]
         );
     }
 
     #[test]
     fn equal_priority_is_pure_fifo() {
-        assert_eq!(insert_all(&[(0, 1), (0, 2), (0, 3)]), vec![1, 2, 3]);
+        assert_eq!(dispatch_all(&[(0, 1), (0, 2), (0, 3)]), vec![1, 2, 3]);
     }
 
     #[test]
-    fn empty_queue_inserts_at_head() {
-        assert_eq!(priority_insert_position(std::iter::empty(), 7, 1), 0);
+    fn empty_priority_queue_has_no_next_task() {
+        assert_eq!(priority_queue_index(std::iter::empty()), None);
     }
 }
