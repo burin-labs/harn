@@ -99,8 +99,20 @@ struct ModuleInfo {
 
 #[derive(Debug, Clone)]
 struct ImportRef {
+    raw_path: String,
     path: Option<PathBuf>,
     selective_names: Option<HashSet<String>>,
+}
+
+/// Public import edge summary for static module graph consumers.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ModuleImport {
+    /// The import string as written in source.
+    pub raw_path: String,
+    /// Resolved module path when the import could be resolved.
+    pub resolved_path: Option<PathBuf>,
+    /// `None` for wildcard imports; otherwise the selected names.
+    pub selective_names: Option<Vec<String>>,
 }
 
 #[derive(Debug, Default, Deserialize)]
@@ -407,6 +419,50 @@ impl ModuleGraph {
             .collect();
         out.sort();
         out
+    }
+
+    /// Import edges declared by `file`, sorted by raw path and selected names.
+    pub fn imports_for_module(&self, file: &Path) -> Vec<ModuleImport> {
+        let file = normalize_path(file);
+        let Some(module) = self.modules.get(&file) else {
+            return Vec::new();
+        };
+        let mut imports: Vec<ModuleImport> = module
+            .imports
+            .iter()
+            .map(|import| {
+                let mut selective_names = import
+                    .selective_names
+                    .as_ref()
+                    .map(|names| names.iter().cloned().collect::<Vec<_>>());
+                if let Some(names) = selective_names.as_mut() {
+                    names.sort();
+                }
+                ModuleImport {
+                    raw_path: import.raw_path.clone(),
+                    resolved_path: import.path.as_ref().map(|path| normalize_path(path)),
+                    selective_names,
+                }
+            })
+            .collect();
+        imports.sort_by(|left, right| {
+            left.raw_path
+                .cmp(&right.raw_path)
+                .then_with(|| left.selective_names.cmp(&right.selective_names))
+                .then_with(|| left.resolved_path.cmp(&right.resolved_path))
+        });
+        imports
+    }
+
+    /// Exported symbol names for `file`, sorted alphabetically.
+    pub fn exports_for_module(&self, file: &Path) -> Vec<String> {
+        let file = normalize_path(file);
+        let Some(module) = self.modules.get(&file) else {
+            return Vec::new();
+        };
+        let mut exports: Vec<String> = module.exports.iter().cloned().collect();
+        exports.sort();
+        exports
     }
 
     /// Resolve wildcard imports for `file`.
@@ -948,6 +1004,7 @@ fn collect_module_info(file: &Path, snode: &SNode, module: &mut ModuleInfo) {
                 }
             }
             module.imports.push(ImportRef {
+                raw_path: path.clone(),
                 path: import_path,
                 selective_names: None,
             });
@@ -976,6 +1033,7 @@ fn collect_module_info(file: &Path, snode: &SNode, module: &mut ModuleInfo) {
             let names: HashSet<String> = names.iter().cloned().collect();
             module.selective_import_names.extend(names.iter().cloned());
             module.imports.push(ImportRef {
+                raw_path: path.clone(),
                 path: import_path,
                 selective_names: Some(names),
             });

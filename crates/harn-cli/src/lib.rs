@@ -838,6 +838,12 @@ async fn async_main() {
                 process::exit(1);
             }
         }
+        Command::Graph(args) => {
+            let code = commands::graph::run(args);
+            if code != 0 {
+                process::exit(code);
+            }
+        }
         Command::Routes(args) => {
             let code = commands::routes::run(args).await;
             if code != 0 {
