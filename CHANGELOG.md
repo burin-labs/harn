@@ -42,6 +42,11 @@ condensed series summaries instead of full per-patch history.
   `make check-diagnostics-catalog` CI gate fails on drift between the
   committed catalog and the in-binary registry. The hand-written tour of
   shape diagnostics moved to `docs/src/reading-shape-diagnostics.md`.
+- **`harn test conformance --json` conformance report (#1756).** The
+  conformance runner now emits a versioned `JsonEnvelope` with a stable
+  `snapshotKey`, per-fixture outcomes, summary counts, diagnostic-code
+  extraction, and machine-enforced `@xfail` handling where stale markers
+  surface as `xfail_unexpected_pass` failures.
 
 ## v0.8.25
 

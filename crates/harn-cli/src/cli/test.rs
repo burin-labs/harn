@@ -14,7 +14,7 @@ pub(crate) struct TestArgs {
     /// Restrict `harn test agents-conformance` to one category. Repeatable or comma-separated.
     #[arg(long = "category", value_name = "NAME")]
     pub agents_category: Vec<String>,
-    /// Emit the agents conformance leaderboard-shaped JSON report to stdout.
+    /// Emit structured JSON for conformance or agents-conformance runs.
     #[arg(long, action = ArgAction::SetTrue)]
     pub json: bool,
     /// Write the agents conformance leaderboard-shaped JSON report to this path.

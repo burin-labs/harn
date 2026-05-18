@@ -675,6 +675,7 @@ async fn async_main() {
                                 verbose: args.verbose,
                                 timing: args.timing,
                                 differential_optimizations: args.differential_optimizations,
+                                json: args.json,
                                 cli_skill_dirs: &cli_skill_dirs,
                             },
                         )

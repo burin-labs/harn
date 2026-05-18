@@ -200,6 +200,13 @@ pub fn catalog() -> Vec<SchemaEntry> {
             schema_json: None,
         },
         SchemaEntry {
+            command: "test conformance",
+            schema_version: crate::commands::test::CONFORMANCE_TEST_SCHEMA_VERSION,
+            description:
+                "Conformance test results with xfail accounting and a stable fixture snapshot key.",
+            schema_json: None,
+        },
+        SchemaEntry {
             command: "time run",
             schema_version: crate::commands::time::TIME_RUN_SCHEMA_VERSION,
             description:
