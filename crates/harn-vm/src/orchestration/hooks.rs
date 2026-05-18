@@ -68,6 +68,12 @@ pub enum HookEvent {
     SessionError,
     #[serde(rename = "SessionIdle")]
     SessionIdle,
+    #[serde(rename = "PreFinish")]
+    PreFinish,
+    #[serde(rename = "PostFinish")]
+    PostFinish,
+    #[serde(rename = "OnUnsettledDetected")]
+    OnUnsettledDetected,
 }
 
 impl HookEvent {
@@ -101,6 +107,9 @@ impl HookEvent {
             Self::FileEdited => "FileEdited",
             Self::SessionError => "SessionError",
             Self::SessionIdle => "SessionIdle",
+            Self::PreFinish => "PreFinish",
+            Self::PostFinish => "PostFinish",
+            Self::OnUnsettledDetected => "OnUnsettledDetected",
         }
     }
 
@@ -120,6 +129,9 @@ impl HookEvent {
             "FileEdited" | "file_edited" => Ok(Self::FileEdited),
             "SessionError" | "session_error" | "error" => Ok(Self::SessionError),
             "SessionIdle" | "session_idle" => Ok(Self::SessionIdle),
+            "PreFinish" | "pre_finish" => Ok(Self::PreFinish),
+            "PostFinish" | "post_finish" => Ok(Self::PostFinish),
+            "OnUnsettledDetected" | "on_unsettled_detected" => Ok(Self::OnUnsettledDetected),
             other => Err(format!("unknown session hook event `{other}`")),
         }
     }
@@ -443,6 +455,9 @@ pub fn clear_session_hooks() {
                     | HookEvent::FileEdited
                     | HookEvent::SessionError
                     | HookEvent::SessionIdle
+                    | HookEvent::PreFinish
+                    | HookEvent::PostFinish
+                    | HookEvent::OnUnsettledDetected
             )
         });
     });

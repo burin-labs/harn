@@ -368,6 +368,7 @@ pub fn reset_thread_local_state() {
     orchestration::clear_runtime_hooks();
     orchestration::clear_execution_policy_stacks();
     orchestration::clear_command_policies();
+    orchestration::clear_pipeline_on_finish();
     redact::clear_policy_stack();
     triggers::clear_dispatcher_state();
     triggers::clear_trigger_registry();

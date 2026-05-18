@@ -110,6 +110,10 @@ const WORKFLOW_SYNC_PRIMITIVES: &[SyncBuiltin] = &[
         .signature("clear_session_hooks()")
         .arity(VmBuiltinArity::Exact(0))
         .doc("Clear registered session-level lifecycle hooks."),
+    SyncBuiltin::new("pipeline_on_finish", pipeline_on_finish_builtin)
+        .signature("pipeline_on_finish(callback)")
+        .arity(VmBuiltinArity::Exact(1))
+        .doc("Register a callback invoked after the pipeline's declared steps complete. Signature: fn(harness, return_value). Last-write-wins; the callback's return replaces the pipeline's return value."),
     SyncBuiltin::new("notify_file_edited", notify_file_edited_builtin)
         .signature("notify_file_edited(path, metadata?)")
         .arity(VmBuiltinArity::Range { min: 1, max: 2 })

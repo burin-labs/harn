@@ -19,8 +19,88 @@ impl Vm {
     pub async fn execute(&mut self, chunk: &Chunk) -> Result<VmValue, VmError> {
         let span_id = crate::tracing::span_start(crate::tracing::SpanKind::Pipeline, "main".into());
         let result = self.run_chunk(chunk).await;
+        let result = match result {
+            Ok(value) => self.run_pipeline_finish_lifecycle(value).await,
+            Err(error) => {
+                crate::orchestration::clear_pipeline_on_finish();
+                Err(error)
+            }
+        };
         crate::tracing::span_end(span_id);
         result
+    }
+
+    /// Run the pipeline-finish lifecycle: `PreFinish`, optional
+    /// `OnUnsettledDetected`, the `on_finish` callback, `PostFinish`. The
+    /// callback (if registered) may transform the return value; everything
+    /// else is advisory.
+    ///
+    /// Tracked: <https://github.com/burin-labs/harn/issues/1854>.
+    async fn run_pipeline_finish_lifecycle(&mut self, value: VmValue) -> Result<VmValue, VmError> {
+        use crate::orchestration::{take_pipeline_on_finish, unsettled_state_snapshot, HookEvent};
+
+        let on_finish = take_pipeline_on_finish();
+        let unsettled = unsettled_state_snapshot();
+
+        let pre_payload = serde_json::json!({
+            "event": HookEvent::PreFinish.as_str(),
+            "return_value": crate::llm::vm_value_to_json(&value),
+            "unsettled": unsettled.to_json(),
+            "has_on_finish": on_finish.is_some(),
+        });
+        self.fire_finish_lifecycle_event(HookEvent::PreFinish, &pre_payload)
+            .await?;
+
+        if !unsettled.is_empty() {
+            let payload = serde_json::json!({
+                "event": HookEvent::OnUnsettledDetected.as_str(),
+                "unsettled": unsettled.to_json(),
+            });
+            self.fire_finish_lifecycle_event(HookEvent::OnUnsettledDetected, &payload)
+                .await?;
+        }
+
+        let final_value = if let Some(closure) = on_finish {
+            let harness_value = crate::harness::Harness::real().into_vm_value();
+            self.call_closure_pub(&closure, &[harness_value, value])
+                .await?
+        } else {
+            value
+        };
+
+        let post_payload = serde_json::json!({
+            "event": HookEvent::PostFinish.as_str(),
+            "return_value": crate::llm::vm_value_to_json(&final_value),
+            "unsettled": unsettled.to_json(),
+        });
+        self.fire_finish_lifecycle_event(HookEvent::PostFinish, &post_payload)
+            .await?;
+
+        Ok(final_value)
+    }
+
+    /// Dispatch a pipeline-finish lifecycle event by invoking matching
+    /// hook closures directly on `self`. The shared `run_lifecycle_hooks`
+    /// path clones a fresh child VM per call and discards its stdout —
+    /// fine for the agent-loop boundaries where hooks are advisory side-
+    /// channels, but the pipeline-finish boundary is the script's last
+    /// chance to print before `vm.output()` is captured, so the closures
+    /// run on `self` to keep their output visible.
+    async fn fire_finish_lifecycle_event(
+        &mut self,
+        event: crate::orchestration::HookEvent,
+        payload: &serde_json::Value,
+    ) -> Result<(), VmError> {
+        let invocations = crate::orchestration::matching_vm_lifecycle_hooks(event, payload);
+        if invocations.is_empty() {
+            return Ok(());
+        }
+        let arg = crate::stdlib::json_to_vm_value(payload);
+        for invocation in invocations {
+            self.call_closure_pub(&invocation.closure, &[arg.clone()])
+                .await?;
+        }
+        Ok(())
     }
 
     /// Convert a VmError into either a handled exception (returning Ok) or a propagated error.

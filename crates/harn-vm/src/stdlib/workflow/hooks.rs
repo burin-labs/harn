@@ -195,6 +195,19 @@ pub(super) fn clear_session_hooks_builtin(
     Ok(VmValue::Nil)
 }
 
+/// Register the callback `Vm::execute` invokes after the pipeline's
+/// declared steps complete (signature `fn(harness, return_value)`). Last-
+/// write-wins; the callback's return value replaces the pipeline's return
+/// value when the lifecycle runs.
+pub(super) fn pipeline_on_finish_builtin(
+    args: &[VmValue],
+    _out: &mut String,
+) -> Result<VmValue, VmError> {
+    let handler = required_hook_closure(args, 0, "pipeline_on_finish")?;
+    crate::orchestration::set_pipeline_on_finish(handler);
+    Ok(VmValue::Nil)
+}
+
 /// Fire a session-level lifecycle hook from Harn. Used by the
 /// Harn-driven agent loop (autocompact, file edits, etc.) to invoke
 /// hooks that are wired in Harn rather than from a Rust host primitive.
