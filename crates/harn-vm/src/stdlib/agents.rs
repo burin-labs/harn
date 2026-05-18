@@ -24,10 +24,12 @@ use self::agents_workers::{
     parse_worker_config, persist_worker_state_snapshot, spawn_worker_task, with_worker_state,
     worker_event_snapshot, worker_id_from_value, worker_request_for_config, worker_snapshot_path,
     worker_summary, worker_trigger_payload_text, worker_wait_blocks, SuspendInitiator,
-    WorkerConfig, WorkerState, WorkerSuspension, WORKER_REGISTRY,
+    WorkerCarryPolicy, WorkerConfig, WorkerExecutionProfile, WorkerState, WorkerSuspension,
+    WORKER_REGISTRY,
 };
 use self::sub_agent::{execute_sub_agent, parse_sub_agent_request};
-use crate::orchestration::ArtifactRecord;
+use crate::agent_events::WorkerEvent;
+use crate::orchestration::{ArtifactRecord, ContextPolicy, MutationSessionRecord};
 use crate::stdlib::registration::{
     async_builtin, register_builtin_group, AsyncBuiltin, BuiltinGroup, SyncBuiltin,
 };
@@ -79,6 +81,15 @@ const AGENT_ASYNC_PRIMITIVES: &[AsyncBuiltin] = &[
         .signature("__host_worker_suspend(worker, reason, options?)")
         .arity(VmBuiltinArity::Range { min: 1, max: 3 })
         .doc("Cooperatively suspend a host worker at the next turn boundary."),
+    async_builtin!(
+        "__host_top_level_agent_suspend",
+        top_level_agent_suspend_builtin
+    )
+    .signature(
+        "__host_top_level_agent_suspend(session_id, task, system, options, reason, conditions?, iteration?)",
+    )
+    .arity(VmBuiltinArity::Range { min: 5, max: 7 })
+    .doc("Persist a top-level agent_loop suspend checkpoint as a resumable worker."),
     async_builtin!("__host_worker_close", close_agent_builtin)
         .signature("__host_worker_close(worker)")
         .arity(VmBuiltinArity::Exact(1))
@@ -601,6 +612,126 @@ async fn suspend_agent_builtin(args: Vec<VmValue>) -> Result<VmValue, VmError> {
         }
         emit_worker_event(&snapshot, crate::agent_events::WorkerEvent::WorkerSuspended).await?;
     }
+    Ok(summary)
+}
+
+async fn top_level_agent_suspend_builtin(args: Vec<VmValue>) -> Result<VmValue, VmError> {
+    let session_id = args
+        .first()
+        .map(|value| value.display())
+        .filter(|value| !value.is_empty())
+        .ok_or_else(|| {
+            VmError::Runtime("top_level_agent_suspend: missing session_id".to_string())
+        })?;
+    let task = args.get(1).map(|value| value.display()).unwrap_or_default();
+    let system = match args.get(2) {
+        Some(VmValue::String(text)) if !text.is_empty() => Some(text.to_string()),
+        _ => None,
+    };
+    let options = args
+        .get(3)
+        .and_then(VmValue::as_dict)
+        .cloned()
+        .unwrap_or_default();
+    let reason = args.get(4).map(|value| value.display()).unwrap_or_default();
+    let conditions_value = args
+        .get(5)
+        .filter(|value| !matches!(value, VmValue::Nil))
+        .cloned();
+    let conditions = conditions_value.as_ref().map(crate::llm::vm_value_to_json);
+
+    let worker_id = next_worker_id();
+    let snapshot_path = worker_snapshot_path(&worker_id);
+    let now = uuid::Uuid::now_v7().to_string();
+    let name = "top-level-agent".to_string();
+    let config = WorkerConfig::SubAgent {
+        spec: Box::new(SubAgentRunSpec {
+            name: name.clone(),
+            task: task.clone(),
+            system: system.clone(),
+            options,
+            returns_schema: None,
+            session_id: session_id.clone(),
+            parent_session_id: None,
+        }),
+    };
+    let request = worker_request_for_config(&task, &config);
+    let transcript = crate::agent_sessions::transcript(&session_id);
+    let audit = MutationSessionRecord {
+        session_id: session_id.clone(),
+        worker_id: Some(worker_id.clone()),
+        execution_kind: Some("top_level_agent".to_string()),
+        mutation_scope: "read_only".to_string(),
+        ..Default::default()
+    }
+    .normalize();
+    let worker = WorkerState {
+        id: worker_id.clone(),
+        name,
+        task: task.clone(),
+        status: "suspended".to_string(),
+        created_at: now.clone(),
+        started_at: now.clone(),
+        finished_at: None,
+        awaiting_started_at: None,
+        awaiting_since: None,
+        mode: "top_level_agent".to_string(),
+        history: vec![task],
+        config,
+        handle: None,
+        cancel_token: Arc::new(AtomicBool::new(false)),
+        suspend_signal: Arc::new(AtomicBool::new(false)),
+        suspension: Some(WorkerSuspension {
+            reason,
+            initiator: SuspendInitiator::SelfInitiated,
+            suspended_at: now,
+            snapshot_ref: snapshot_path.clone(),
+            conditions,
+            auto_resume_trigger: None,
+        }),
+        request,
+        latest_payload: None,
+        latest_error: None,
+        transcript,
+        artifacts: Vec::new(),
+        parent_worker_id: None,
+        parent_stage_id: None,
+        child_run_id: None,
+        child_run_path: None,
+        carry_policy: WorkerCarryPolicy {
+            artifact_mode: "inherit".to_string(),
+            transcript_mode: "inherit".to_string(),
+            context_policy: ContextPolicy::default(),
+            resume_workflow: true,
+            persist_state: true,
+            retriggerable: false,
+            policy: None,
+        },
+        execution: WorkerExecutionProfile::default(),
+        snapshot_path,
+        audit,
+    };
+    persist_worker_state_snapshot(&worker)?;
+    let mut snapshot = worker_event_snapshot(&worker);
+    let mut summary = worker_summary(&worker)?;
+    let state = Rc::new(RefCell::new(worker));
+    WORKER_REGISTRY.with(|registry| {
+        registry.borrow_mut().insert(worker_id.clone(), state);
+    });
+    if let Some(auto_resume_trigger) =
+        super::triggers_stdlib::register_auto_resume_trigger(&worker_id, conditions_value.as_ref())
+            .await?
+    {
+        (snapshot, summary) = with_worker_state(&worker_id, |state| {
+            let mut worker = state.borrow_mut();
+            if let Some(suspension) = worker.suspension.as_mut() {
+                suspension.auto_resume_trigger = Some(auto_resume_trigger);
+            }
+            persist_worker_state_snapshot(&worker)?;
+            Ok((worker_event_snapshot(&worker), worker_summary(&worker)?))
+        })?;
+    }
+    emit_worker_event(&snapshot, WorkerEvent::WorkerSuspended).await?;
     Ok(summary)
 }
 
@@ -1575,6 +1706,46 @@ mod suspend_tests {
             .find(|binding| binding.id == trigger_id)
             .expect("auto-resume binding snapshot");
         assert_eq!(snapshot.state, crate::triggers::TriggerState::Terminated);
+
+        teardown(&dir, &worker_id);
+        crate::triggers::clear_trigger_registry();
+        crate::stdlib::triggers_stdlib::reset_auto_resume_timeouts();
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn top_level_suspend_registers_auto_resume_trigger() {
+        let _guard = suspend_test_lock().await;
+        crate::triggers::clear_trigger_registry();
+        crate::stdlib::triggers_stdlib::reset_auto_resume_timeouts();
+        let dir = std::env::temp_dir().join(format!(
+            "harn-top-level-suspend-test-{}",
+            uuid::Uuid::now_v7()
+        ));
+        std::fs::create_dir_all(&dir).unwrap();
+        unsafe { std::env::set_var("HARN_WORKER_STATE_DIR", &dir) };
+
+        let suspended = top_level_agent_suspend_builtin(vec![
+            VmValue::String(Rc::from("session-top-level-auto-resume")),
+            VmValue::String(Rc::from("continue the top-level task")),
+            VmValue::Nil,
+            VmValue::Dict(Rc::new(BTreeMap::new())),
+            VmValue::String(Rc::from("waiting for review")),
+            auto_resume_conditions("review.approved"),
+        ])
+        .await
+        .expect("top-level suspend with auto-resume trigger");
+        assert_eq!(summary_status(&suspended), "suspended");
+        let worker_id = suspended
+            .as_dict()
+            .and_then(|dict| dict.get("id"))
+            .map(VmValue::display)
+            .expect("worker id");
+        let trigger_id = auto_resume_trigger_id(&suspended);
+        let binding = crate::triggers::resolve_live_trigger_binding(&trigger_id, None)
+            .expect("registered top-level auto-resume binding");
+        assert_eq!(binding.kind, "auto_resume");
+        assert_eq!(binding.handler.kind(), "auto_resume");
+        assert_eq!(binding.match_events, vec!["review.approved".to_string()]);
 
         teardown(&dir, &worker_id);
         crate::triggers::clear_trigger_registry();

@@ -20,6 +20,7 @@ harn run --attest --receipt-out receipt.json <file.harn>
 harn run <bundle.harnpack>
 harn run --dry-run-verify <bundle.harnpack>
 harn run --allow-unsigned <bundle.harnpack>
+harn run --resume .harn/workers/worker_...json
 ```
 
 | Flag | Description |
@@ -29,6 +30,7 @@ harn run --allow-unsigned <bundle.harnpack>
 | `--profile-json <path>` | Write the categorical timing breakdown as JSON. Can also be set with `HARN_PROFILE_JSON=<path>` |
 | `--explain-cost` | Print static LLM token/cost estimates without executing the script |
 | `-e <code>` | Evaluate inline code instead of a file |
+| `--resume <handle-or-snapshot>` | Cold-restore a suspended top-level agent from its persisted worker snapshot |
 | `--deny <builtins>` | Deny specific builtins (comma-separated) |
 | `--allow <builtins>` | Allow only specific builtins (comma-separated) |
 | `--yes` | Accept first-run provider setup prompts, including local Ollama config seeding |

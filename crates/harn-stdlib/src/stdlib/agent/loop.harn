@@ -393,11 +393,11 @@ fn __agent_await_resumption_args(call) {
   return {reason: reason, conditions: parse_resume_conditions(args?.conditions ?? nil)}
 }
 
-fn __agent_loop_await_resumption(session, iteration, call) {
+fn __agent_loop_await_resumption(session, iteration, call, opts) {
   let parsed = __agent_await_resumption_args(call)
   let worker = __agent_loop_current_worker()
   if worker == nil {
-    throw "agent_await_resumption: current agent_loop is not running inside a worker"
+    return __agent_loop_await_resumption_top_level(session, iteration, call, parsed, opts)
   }
   agent_emit_event(
     session.session_id,
@@ -421,6 +421,57 @@ fn __agent_loop_await_resumption(session, iteration, call) {
     throw "agent_await_resumption: suspend checkpoint did not yield"
   }
   return checkpoint
+}
+
+fn __agent_loop_await_resumption_top_level(session, iteration, call, parsed, opts) {
+  agent_session_inject(
+    session.session_id,
+    transcript_reminder_event(
+      {
+        body: __agent_loop_suspend_reminder_body(parsed.reason),
+        source: "in_pipeline",
+        tags: ["agent_loop", "top_level_suspend"],
+        dedupe_key: "top_level_suspend:" + session.session_id,
+        ttl_turns: 1,
+        fired_at_turn: iteration + 1,
+      },
+    ),
+  )
+  let handle = __host_top_level_agent_suspend(
+    session.session_id,
+    session.task,
+    session.system,
+    opts,
+    parsed.reason,
+    parsed.conditions,
+    iteration,
+  )
+  agent_emit_event(
+    session.session_id,
+    "tool_call_audit",
+    {
+      tool_call_id: to_string(call?.id ?? call?.tool_call_id ?? ""),
+      tool_name: "agent_await_resumption",
+      audit: {
+        layer: "agent_lifecycle",
+        status: "suspended",
+        initiator: "self",
+        reason: parsed.reason,
+        worker_id: handle?.id,
+        conditions: parsed.conditions,
+      },
+    },
+  )
+  return {
+    status: "suspended",
+    handle: handle,
+    worker: handle,
+    reason: parsed.reason,
+    initiator: "self",
+    conditions: parsed.conditions,
+    iterations_completed: iteration,
+    session_id: session.session_id,
+  }
 }
 
 fn __stall_diagnostics_config(value) {
@@ -1593,7 +1644,7 @@ fn __agent_loop_run(message, session, initial_opts) {
       }
       let await_call = __agent_await_resumption_call(tool_calls)
       if await_call != nil {
-        suspend_result = __agent_loop_await_resumption(session, iteration, await_call)
+        suspend_result = __agent_loop_await_resumption(session, iteration, await_call, opts)
         let _totals = agent_session_record_usage(session.session_id, llm_result)
         agent_emit_event(
           session.session_id,
