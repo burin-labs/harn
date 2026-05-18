@@ -1,4 +1,4 @@
 fn main(harness: Harness) {
-  println(harness.clock.now_ms())
-  println(harness.clock.monotonic_ms())
+  harness.stdio.println(harness.clock.now_ms())
+  harness.stdio.println(harness.clock.monotonic_ms())
 }

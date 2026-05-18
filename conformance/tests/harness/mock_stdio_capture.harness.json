@@ -1,8 +1,9 @@
 {
   "mode": "mock",
-  "expect_stdio": "partial line\n",
+  "expect_stdio": "partial line\ndone\n",
   "expect_calls": [
     {"sub_handle": "stdio", "method": "print", "args": ["partial "]},
-    {"sub_handle": "stdio", "method": "println", "args": ["line"]}
+    {"sub_handle": "stdio", "method": "println", "args": ["line"]},
+    {"sub_handle": "stdio", "method": "println", "args": ["done"]}
   ]
 }

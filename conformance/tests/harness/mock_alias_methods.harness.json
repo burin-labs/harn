@@ -4,6 +4,8 @@
   "net_gets": {"https://alias.test": "alias body"},
   "expect_calls": [
     {"sub_handle": "random", "method": "u64", "args": []},
-    {"sub_handle": "net", "method": "http_get", "args": ["https://alias.test"]}
+    {"sub_handle": "stdio", "method": "println", "args": ["42"]},
+    {"sub_handle": "net", "method": "http_get", "args": ["https://alias.test"]},
+    {"sub_handle": "stdio", "method": "println", "args": ["alias body"]}
   ]
 }

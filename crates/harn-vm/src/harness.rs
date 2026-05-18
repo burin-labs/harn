@@ -135,7 +135,7 @@ impl HarnessInner {
 pub(crate) enum HarnessMode {
     Real,
     Null(NullHarnessState),
-    Mock(MockHarnessState),
+    Mock(Box<MockHarnessState>),
 }
 
 #[derive(Debug, Default)]
@@ -193,7 +193,9 @@ pub(crate) struct MockHarnessState {
     fs_reads: BTreeMap<String, Vec<u8>>,
     net_gets: BTreeMap<String, String>,
     random_u64: Mutex<VecDeque<u64>>,
+    stdin_lines: Mutex<VecDeque<String>>,
     stdio: Mutex<String>,
+    stderr: Mutex<String>,
 }
 
 impl MockHarnessState {
@@ -248,6 +250,24 @@ impl MockHarnessState {
     pub(crate) fn stdio(&self) -> String {
         self.stdio.lock().expect("stdio buffer poisoned").clone()
     }
+
+    pub(crate) fn push_stderr(&self, text: &str) {
+        self.stderr
+            .lock()
+            .expect("stderr buffer poisoned")
+            .push_str(text);
+    }
+
+    pub(crate) fn stderr(&self) -> String {
+        self.stderr.lock().expect("stderr buffer poisoned").clone()
+    }
+
+    pub(crate) fn pop_stdin_line(&self) -> Option<String> {
+        self.stdin_lines
+            .lock()
+            .expect("stdin queue poisoned")
+            .pop_front()
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -274,6 +294,7 @@ pub struct MockHarnessBuilder {
     fs_reads: BTreeMap<String, Vec<u8>>,
     net_gets: BTreeMap<String, String>,
     random_u64: Vec<u64>,
+    stdin_lines: Vec<String>,
 }
 
 impl MockHarnessBuilder {
@@ -284,6 +305,7 @@ impl MockHarnessBuilder {
             fs_reads: BTreeMap::new(),
             net_gets: BTreeMap::new(),
             random_u64: Vec::new(),
+            stdin_lines: Vec::new(),
         }
     }
 
@@ -317,19 +339,31 @@ impl MockHarnessBuilder {
         self
     }
 
+    /// Queue a line that `harness.stdio.read_line()` or
+    /// `harness.stdio.prompt(...)` will return next. Lines are dequeued
+    /// FIFO; once the queue is empty subsequent reads surface EOF
+    /// (`nil` for the unstructured form, `{ok: false, status: "eof"}`
+    /// for the structured form).
+    pub fn stdin_line(mut self, line: impl Into<String>) -> Self {
+        self.stdin_lines.push(line.into());
+        self
+    }
+
     pub fn build(self) -> Harness {
         let clock = self.clock;
         Harness::with_mode(
             clock.clone() as Arc<dyn Clock>,
-            HarnessMode::Mock(MockHarnessState {
+            HarnessMode::Mock(Box::new(MockHarnessState {
                 calls: Mutex::new(Vec::new()),
                 clock,
                 env: self.env,
                 fs_reads: self.fs_reads,
                 net_gets: self.net_gets,
                 random_u64: Mutex::new(self.random_u64.into()),
+                stdin_lines: Mutex::new(self.stdin_lines.into()),
                 stdio: Mutex::new(String::new()),
-            }),
+                stderr: Mutex::new(String::new()),
+            })),
         )
     }
 }
@@ -405,6 +439,13 @@ impl Harness {
     pub fn captured_stdio(&self) -> String {
         match self.inner.mode() {
             HarnessMode::Mock(state) => state.stdio(),
+            HarnessMode::Real | HarnessMode::Null(_) => String::new(),
+        }
+    }
+
+    pub fn captured_stderr(&self) -> String {
+        match self.inner.mode() {
+            HarnessMode::Mock(state) => state.stderr(),
             HarnessMode::Real | HarnessMode::Null(_) => String::new(),
         }
     }
@@ -909,6 +950,47 @@ fn main(harness: Harness) {
                 args: vec!["https://missing.test".to_string()],
             }]
         );
+    }
+
+    #[test]
+    fn mock_harness_captures_stderr_separately_from_stdout() {
+        let harness = Harness::mock().build();
+        run_harness_source(
+            r#"
+fn main(harness: Harness) {
+  harness.stdio.println("stdout line")
+  harness.stdio.eprint("err ")
+  harness.stdio.eprintln("trail")
+}
+"#,
+            harness.clone(),
+        )
+        .expect("stderr capture run succeeds");
+        assert_eq!(harness.captured_stdio(), "stdout line\n");
+        assert_eq!(harness.captured_stderr(), "err trail\n");
+    }
+
+    #[test]
+    fn mock_harness_replays_stdin_lines_for_read_and_prompt() {
+        let harness = Harness::mock()
+            .stdin_line("first")
+            .stdin_line("second")
+            .build();
+        let output = run_harness_source(
+            r#"
+fn main(harness: Harness) {
+  harness.stdio.println(harness.stdio.read_line())
+  harness.stdio.println(harness.stdio.prompt("answer: "))
+  let eof = harness.stdio.read_line({trim: false})
+  harness.stdio.println(eof.status)
+}
+"#,
+            harness.clone(),
+        )
+        .expect("stdin replay succeeds");
+        // All stdio writes route to the mock capture buffer; vm.output stays empty.
+        assert_eq!(output, "");
+        assert_eq!(harness.captured_stdio(), "first\nanswer: second\neof\n");
     }
 
     #[test]

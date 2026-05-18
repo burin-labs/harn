@@ -1,6 +1,7 @@
 {
   "mode": "mock",
   "expect_calls": [
-    {"sub_handle": "net", "method": "get", "args": ["https://missing.test"]}
+    {"sub_handle": "net", "method": "get", "args": ["https://missing.test"]},
+    {"sub_handle": "stdio", "method": "println", "args": ["caught"]}
   ]
 }

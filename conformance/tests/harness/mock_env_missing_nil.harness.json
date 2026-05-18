@@ -1,6 +1,7 @@
 {
   "mode": "mock",
   "expect_calls": [
-    {"sub_handle": "env", "method": "get", "args": ["MISSING"]}
+    {"sub_handle": "env", "method": "get", "args": ["MISSING"]},
+    {"sub_handle": "stdio", "method": "println", "args": ["true"]}
   ]
 }

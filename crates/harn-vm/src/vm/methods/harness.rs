@@ -222,7 +222,22 @@ impl crate::vm::Vm {
                     state.push_stdio(&msg);
                     Ok(VmValue::Nil)
                 }
-                "eprintln" | "eprint" => Ok(VmValue::Nil),
+                "eprintln" => {
+                    let msg = args.first().map(|a| a.display()).unwrap_or_default();
+                    state.push_stderr(&format!("{msg}\n"));
+                    Ok(VmValue::Nil)
+                }
+                "eprint" => {
+                    let msg = args.first().map(|a| a.display()).unwrap_or_default();
+                    state.push_stderr(&msg);
+                    Ok(VmValue::Nil)
+                }
+                "read_line" => Ok(mock_read_line_value(state, args)),
+                "prompt" => {
+                    let msg = args.first().map(|a| a.display()).unwrap_or_default();
+                    state.push_stdio(&msg);
+                    Ok(mock_read_line_value(state, &[]))
+                }
                 _ => Err(method_unsupported(handle, method)),
             },
             HarnessKind::Clock => {
@@ -451,5 +466,46 @@ fn string_arg<'a>(args: &'a [VmValue], index: usize, callee: &str) -> Result<&'a
             "{callee} expects string argument {}",
             index + 1
         ))),
+    }
+}
+
+/// Mock variant of `harness.stdio.read_line` / `prompt`. When called with
+/// no options dict, returns a plain string (or nil at EOF); when called
+/// with an options dict, returns the structured `{ok, status, value?}`
+/// dict that mirrors the real surface so tests can assert on either
+/// shape without re-mocking.
+fn mock_read_line_value(state: &crate::harness::MockHarnessState, args: &[VmValue]) -> VmValue {
+    let structured = matches!(args.first(), Some(VmValue::Dict(_)));
+    match state.pop_stdin_line() {
+        Some(line) => {
+            if structured {
+                let mut out = std::collections::BTreeMap::new();
+                out.insert("ok".to_string(), VmValue::Bool(true));
+                out.insert(
+                    "status".to_string(),
+                    VmValue::String(std::rc::Rc::from("ok")),
+                );
+                out.insert(
+                    "value".to_string(),
+                    VmValue::String(std::rc::Rc::from(line)),
+                );
+                VmValue::Dict(std::rc::Rc::new(out))
+            } else {
+                VmValue::String(std::rc::Rc::from(line))
+            }
+        }
+        None => {
+            if structured {
+                let mut out = std::collections::BTreeMap::new();
+                out.insert("ok".to_string(), VmValue::Bool(false));
+                out.insert(
+                    "status".to_string(),
+                    VmValue::String(std::rc::Rc::from("eof")),
+                );
+                VmValue::Dict(std::rc::Rc::new(out))
+            } else {
+                VmValue::Nil
+            }
+        }
     }
 }
