@@ -204,14 +204,42 @@ jobs:
         working-directory: crates/harn-cli/portal
 
   actions:
-    name: GitHub Actions lint
+    name: GitHub Actions hygiene
     # ~18 s job. `go install` + actionlint runs on ephemeral images quickly
     # enough; no win from a warm Go cache.
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      actions: read
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
-      - run: go install github.com/rhysd/actionlint/cmd/actionlint@v1.7.12
+        with:
+          persist-credentials: false
+      - name: Install actionlint
+        env:
+          ACTIONLINT_VERSION: "1.7.12"
+          ACTIONLINT_SHA256: "8aca8db96f1b94770f1b0d72b6dddcb1ebb8123cb3712530b08cc387b349a3d8"
+        run: |
+          set -euo pipefail
+          archive="${RUNNER_TEMP}/actionlint.tar.gz"
+          curl -fsSL \
+            -o "${archive}" \
+            "https://github.com/rhysd/actionlint/releases/download/v${ACTIONLINT_VERSION}/actionlint_${ACTIONLINT_VERSION}_linux_amd64.tar.gz"
+          echo "${ACTIONLINT_SHA256}  ${archive}" | sha256sum -c -
+          tar -xzf "${archive}" -C "${RUNNER_TEMP}" actionlint
+          mkdir -p "${HOME}/.local/bin"
+          install -m 0755 "${RUNNER_TEMP}/actionlint" "${HOME}/.local/bin/actionlint"
+          echo "${HOME}/.local/bin" >> "$GITHUB_PATH"
+          "${HOME}/.local/bin/actionlint" -version
       - run: make lint-actions
+      - name: Run zizmor
+        uses: zizmorcore/zizmor-action@e639db99335bc9038abc0e066dfcd72e23d26fb4 # v0.3.0
+        with:
+          version: "1.25.2"
+          advanced-security: false
+          annotations: true
+          min-severity: medium
+          min-confidence: medium
 
   e2e:
     name: Slow E2E suite
@@ -249,7 +277,7 @@ jobs:
             ["Markdown lint"]="${{ needs['lint-md'].result }}"
             ["Rust (lint + test + conformance)"]="${{ needs.rust.result }}"
             ["Portal frontend"]="${{ needs.portal.result }}"
-            ["GitHub Actions lint"]="${{ needs.actions.result }}"
+            ["GitHub Actions hygiene"]="${{ needs.actions.result }}"
           )
 
           # The Windows job is gated on `changes.outputs.windows` and is skipped
