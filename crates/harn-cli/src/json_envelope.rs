@@ -228,13 +228,13 @@ pub fn catalog() -> Vec<SchemaEntry> {
         SchemaEntry {
             command: "skills list",
             schema_version: 1,
-            description: "Embedded canonical Harn skill corpus, frontmatter only.",
+            description: "Canonical Harn skill corpus, frontmatter only.",
             schema_json: None,
         },
         SchemaEntry {
             command: "skills get",
             schema_version: 1,
-            description: "One embedded skill's frontmatter (and body with --full).",
+            description: "One canonical skill's frontmatter (and body with --full).",
             schema_json: None,
         },
         SchemaEntry {

@@ -4,18 +4,15 @@ This repository implements Harn, a programming language and runtime for orchestr
 
 ## For agents writing Harn scripts
 
-Before writing or editing `.harn` code, read the one-page Harn quickref. It covers syntax,
-concurrency primitives (`parallel each` / `parallel settle` with `max_concurrent`), the
-`llm_call` options table (including `schema_retries` + `provider: "auto"`), and the gotchas
-that repeatedly trip up first-time scripters.
+Before writing or editing `.harn` code, list the embedded Harn skills with
+`harn skills list --json` and fetch the narrowest matching guide with
+`harn skills get <name> --full`. Start with `harn-language` for syntax,
+types, concurrency primitives, `llm_call`, and first-time scripting gotchas;
+use `harn-orchestration` for trigger or agent workflow changes.
 
-- In-repo: `docs/llm/harn-quickref.md`
-- Trigger/orchestrator add-on: `docs/llm/harn-triggers-quickref.md`
-- Canonical URL: <https://harnlang.com/docs/llm/harn-quickref.html>
-- Trigger/orchestrator URL: <https://harnlang.com/docs/llm/harn-triggers-quickref.html>
-
-Claude Code users get these autoloaded via the `harn-scripting` skill
-at `.claude/skills/harn-scripting/SKILL.md`.
+Claude Code users get this discovery reminder via the `harn-scripting` stub
+at `.claude/skills/harn-scripting/SKILL.md`; the full content ships in the
+local `harn` binary so it matches the version in use.
 
 ## Dev environment tips
 

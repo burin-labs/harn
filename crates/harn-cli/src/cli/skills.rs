@@ -8,11 +8,11 @@ pub(crate) struct SkillsArgs {
 
 #[derive(Debug, Subcommand)]
 pub(crate) enum SkillsCommand {
-    /// List the embedded canonical Harn skill corpus.
+    /// List the active canonical Harn skill corpus.
     List(SkillsListArgs),
-    /// Print one embedded skill's frontmatter (or full body with `--full`).
+    /// Print one canonical skill's frontmatter (or full body with `--full`).
     Get(SkillsGetArgs),
-    /// Write the embedded skill corpus to disk for offline review.
+    /// Write the active canonical skill corpus to disk for offline review.
     Dump(SkillsDumpArgs),
     /// Show layered-resolution skills discovered from the filesystem.
     Resolved(SkillsResolvedArgs),
@@ -29,14 +29,14 @@ pub(crate) enum SkillsCommand {
 
 #[derive(Debug, Args)]
 pub(crate) struct SkillsListArgs {
-    /// Emit a [`JsonEnvelope`]-wrapped catalog of embedded skills.
+    /// Emit a [`JsonEnvelope`]-wrapped catalog of canonical skills.
     #[arg(long)]
     pub json: bool,
 }
 
 #[derive(Debug, Args)]
 pub(crate) struct SkillsGetArgs {
-    /// Embedded skill name (e.g. `harn-language`).
+    /// Canonical skill name (e.g. `harn-language`).
     pub name: String,
     /// Include the full SKILL.md body alongside the frontmatter.
     #[arg(long)]

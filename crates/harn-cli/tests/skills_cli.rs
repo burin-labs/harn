@@ -1,5 +1,5 @@
 //! End-to-end coverage for `harn skills list / get / dump` against
-//! the embedded canonical skill corpus shipped with the binary.
+//! the canonical skill corpus shipped with the binary or loaded from disk.
 //!
 //! These spawn the real `harn` binary so we exercise the clap parser
 //! and `JsonEnvelope` serialization paths that agents and CI consume.
@@ -7,7 +7,9 @@
 mod test_util;
 
 use std::collections::BTreeSet;
-use std::process::Output;
+use std::fs;
+use std::path::Path;
+use std::process::{Command, Output};
 
 use harn_cli::json_envelope::CATALOG_SCHEMA_VERSION;
 use harn_cli::tests::common::json_envelope::assert_envelope;
@@ -31,7 +33,7 @@ fn parse_json_stdout(out: &Output) -> Value {
 
 #[test]
 fn list_json_matches_embedded_corpus_count() {
-    let output = harn_e2e_command()
+    let output = harn_command_without_skills_dir()
         .args(["skills", "list", "--json"])
         .output()
         .expect("spawn harn skills list --json");
@@ -76,7 +78,7 @@ fn list_json_matches_embedded_corpus_count() {
 
 #[test]
 fn list_human_output_mentions_embedded_skills() {
-    let output = harn_e2e_command()
+    let output = harn_command_without_skills_dir()
         .args(["skills", "list"])
         .output()
         .expect("spawn harn skills list");
@@ -93,8 +95,61 @@ fn list_human_output_mentions_embedded_skills() {
 }
 
 #[test]
+fn list_json_uses_harn_skills_dir_when_it_contains_skills() {
+    let temp = TempDir::new().expect("temp dir");
+    write_disk_skill(&temp.path().join("custom").join("SKILL.md"), "custom-harn");
+
+    let output = harn_command_without_skills_dir()
+        .env("HARN_SKILLS_DIR", temp.path())
+        .args(["skills", "list", "--json"])
+        .output()
+        .expect("spawn harn skills list --json");
+    assert!(output.status.success(), "exit={:?}", output.status.code());
+
+    let parsed = parse_json_stdout(&output);
+    let data = assert_envelope(&parsed, SKILLS_LIST_SCHEMA_VERSION);
+    let skills = data["skills"].as_array().expect("data.skills is an array");
+    assert_eq!(skills.len(), 1, "expected only disk skill: {parsed}");
+    assert_eq!(skills[0]["name"], "custom-harn");
+}
+
+#[test]
+fn list_json_falls_back_to_embedded_when_harn_skills_dir_is_empty() {
+    let temp = TempDir::new().expect("temp dir");
+
+    let output = harn_command_without_skills_dir()
+        .env("HARN_SKILLS_DIR", temp.path())
+        .args(["skills", "list", "--json"])
+        .output()
+        .expect("spawn harn skills list --json");
+    assert!(output.status.success(), "exit={:?}", output.status.code());
+
+    let parsed = parse_json_stdout(&output);
+    let data = assert_envelope(&parsed, SKILLS_LIST_SCHEMA_VERSION);
+    let skills = data["skills"].as_array().expect("data.skills is an array");
+    assert_eq!(skills.len(), list_embedded_skills().len());
+}
+
+#[test]
+fn list_json_falls_back_to_embedded_when_harn_skills_dir_is_missing() {
+    let temp = TempDir::new().expect("temp dir");
+
+    let output = harn_command_without_skills_dir()
+        .env("HARN_SKILLS_DIR", temp.path().join("missing"))
+        .args(["skills", "list", "--json"])
+        .output()
+        .expect("spawn harn skills list --json");
+    assert!(output.status.success(), "exit={:?}", output.status.code());
+
+    let parsed = parse_json_stdout(&output);
+    let data = assert_envelope(&parsed, SKILLS_LIST_SCHEMA_VERSION);
+    let skills = data["skills"].as_array().expect("data.skills is an array");
+    assert_eq!(skills.len(), list_embedded_skills().len());
+}
+
+#[test]
 fn get_returns_frontmatter_without_body_by_default() {
-    let output = harn_e2e_command()
+    let output = harn_command_without_skills_dir()
         .args(["skills", "get", "harn-language", "--json"])
         .output()
         .expect("spawn harn skills get --json");
@@ -116,7 +171,7 @@ fn get_returns_frontmatter_without_body_by_default() {
 
 #[test]
 fn get_full_includes_body() {
-    let output = harn_e2e_command()
+    let output = harn_command_without_skills_dir()
         .args(["skills", "get", "harn-language", "--full", "--json"])
         .output()
         .expect("spawn harn skills get --full --json");
@@ -135,8 +190,34 @@ fn get_full_includes_body() {
 }
 
 #[test]
+fn get_full_uses_harn_skills_dir_body() {
+    let temp = TempDir::new().expect("temp dir");
+    write_disk_skill(
+        &temp.path().join("nested").join("custom").join("SKILL.md"),
+        "custom-harn",
+    );
+
+    let output = harn_command_without_skills_dir()
+        .env("HARN_SKILLS_DIR", temp.path())
+        .args(["skills", "get", "custom-harn", "--full", "--json"])
+        .output()
+        .expect("spawn harn skills get --full --json");
+    assert!(output.status.success(), "exit={:?}", output.status.code());
+
+    let parsed = parse_json_stdout(&output);
+    let data = assert_envelope(&parsed, SKILLS_GET_SCHEMA_VERSION);
+    assert_eq!(data["name"], "custom-harn");
+    assert_eq!(data["short"], "custom short");
+    let body = data["body"].as_str().expect("body is present");
+    assert!(
+        body.contains("Custom disk body"),
+        "body should come from HARN_SKILLS_DIR: {body}"
+    );
+}
+
+#[test]
 fn get_unknown_skill_emits_error_envelope_and_nonzero_exit() {
-    let output = harn_e2e_command()
+    let output = harn_command_without_skills_dir()
         .args(["skills", "get", "not-a-real-skill", "--json"])
         .output()
         .expect("spawn harn skills get not-a-real-skill --json");
@@ -155,7 +236,7 @@ fn get_unknown_skill_emits_error_envelope_and_nonzero_exit() {
 
 #[test]
 fn get_human_prints_frontmatter() {
-    let output = harn_e2e_command()
+    let output = harn_command_without_skills_dir()
         .args(["skills", "get", "harn-language"])
         .output()
         .expect("spawn harn skills get harn-language");
@@ -177,7 +258,7 @@ fn get_human_prints_frontmatter() {
 
 #[test]
 fn dump_requires_all_flag() {
-    let output = harn_e2e_command()
+    let output = harn_command_without_skills_dir()
         .args(["skills", "dump"])
         .output()
         .expect("spawn harn skills dump (no --all)");
@@ -194,7 +275,7 @@ fn dump_all_writes_every_skill_to_out_dir() {
     let temp = TempDir::new().expect("temp dir");
     let out = temp.path().join("dump-target");
 
-    let output = harn_e2e_command()
+    let output = harn_command_without_skills_dir()
         .args(["skills", "dump", "--all", "--out"])
         .arg(&out)
         .output()
@@ -219,12 +300,41 @@ fn dump_all_writes_every_skill_to_out_dir() {
 }
 
 #[test]
+fn dump_all_uses_harn_skills_dir_when_it_contains_skills() {
+    let temp = TempDir::new().expect("temp dir");
+    let source = temp
+        .path()
+        .join("disk-skills")
+        .join("custom")
+        .join("SKILL.md");
+    let out = temp.path().join("dump-target");
+    write_disk_skill(&source, "custom-harn");
+
+    let output = harn_command_without_skills_dir()
+        .env("HARN_SKILLS_DIR", temp.path().join("disk-skills"))
+        .args(["skills", "dump", "--all", "--out"])
+        .arg(&out)
+        .output()
+        .expect("spawn harn skills dump --all --out <dir>");
+    assert!(output.status.success(), "exit={:?}", output.status.code());
+
+    let dumped = out.join("custom-harn").join("SKILL.md");
+    let dumped_source = fs::read_to_string(&dumped).expect("read dumped disk skill");
+    let original_source = fs::read_to_string(&source).expect("read source disk skill");
+    assert_eq!(dumped_source, original_source);
+    assert!(
+        !out.join("harn-language").exists(),
+        "disk override should dump only disk skills"
+    );
+}
+
+#[test]
 fn dump_refuses_to_overwrite_without_force() {
     let temp = TempDir::new().expect("temp dir");
     let out = temp.path().join("dump-target");
 
     // First dump succeeds.
-    let first = harn_e2e_command()
+    let first = harn_command_without_skills_dir()
         .args(["skills", "dump", "--all", "--out"])
         .arg(&out)
         .output()
@@ -232,7 +342,7 @@ fn dump_refuses_to_overwrite_without_force() {
     assert!(first.status.success(), "first dump should succeed");
 
     // Second dump without --force should refuse.
-    let second = harn_e2e_command()
+    let second = harn_command_without_skills_dir()
         .args(["skills", "dump", "--all", "--out"])
         .arg(&out)
         .output()
@@ -243,7 +353,7 @@ fn dump_refuses_to_overwrite_without_force() {
     );
 
     // Third dump with --force should succeed.
-    let third = harn_e2e_command()
+    let third = harn_command_without_skills_dir()
         .args(["skills", "dump", "--all", "--force", "--out"])
         .arg(&out)
         .output()
@@ -253,7 +363,7 @@ fn dump_refuses_to_overwrite_without_force() {
 
 #[test]
 fn json_schemas_catalog_lists_skills_list_and_get() {
-    let output = harn_e2e_command()
+    let output = harn_command_without_skills_dir()
         .args(["--json-schemas"])
         .output()
         .expect("spawn harn --json-schemas");
@@ -269,4 +379,21 @@ fn json_schemas_catalog_lists_skills_list_and_get() {
         .collect();
     assert!(commands.contains("skills list"), "missing skills list");
     assert!(commands.contains("skills get"), "missing skills get");
+}
+
+fn write_disk_skill(path: &Path, name: &str) {
+    fs::create_dir_all(path.parent().expect("skill parent")).expect("create skill parent");
+    fs::write(
+        path,
+        format!(
+            "---\nname: {name}\nshort: custom short\ndescription: custom description\n---\n# Custom disk skill\n\nCustom disk body\n"
+        ),
+    )
+    .expect("write disk skill");
+}
+
+fn harn_command_without_skills_dir() -> Command {
+    let mut command = harn_e2e_command();
+    command.env_remove("HARN_SKILLS_DIR");
+    command
 }
