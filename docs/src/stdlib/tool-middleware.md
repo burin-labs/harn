@@ -159,6 +159,11 @@ callable sinks flush in the background after the tool result has been
 recorded; cloud receipt mirroring still remains attached to the tool
 result event.
 
+When the local sink is active, the middleware attaches a `file://`
+`receipt_uri` to `result.audit` and to the typed receipt's embedded
+`audit` dict so portal-style hosts can deep-link directly to the
+persisted JSONL line.
+
 ```harn,ignore
 let caller = compose_tool_callers([
   with_audit_log({sink: "both", redact: ["token", "content"]}),
