@@ -1009,6 +1009,15 @@ optional `conditions` with `parse_resume_conditions(...)`, calls the same suspen
 path as `suspend_agent(...)`, returns `status: "suspended"` to the parent, and
 does not dispatch the tool as an ordinary handler result.
 
+Top-level loops use the same result shape. If a root `agent_loop(...)` parks,
+Harn persists a resumable worker snapshot and returns
+`{status: "suspended", handle, reason, initiator: "self", ...}` to the direct
+caller. The CLI can cold-restore that snapshot with:
+
+```bash
+harn run --resume .harn/workers/worker_...json
+```
+
 Parent-side lifecycle control is opt-in. Pass `subagents: true` or
 `subagent_tools: true` in `agent_loop` options, or call
 `agent_lifecycle_tools(registry, {subagents: true})`, to add

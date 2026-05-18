@@ -538,6 +538,58 @@ pub(crate) async fn run_file_with_skill_dirs(
     }
 }
 
+#[allow(clippy::too_many_arguments)]
+pub(crate) async fn run_resume_with_skill_dirs(
+    target: &str,
+    trace: bool,
+    denied_builtins: HashSet<String>,
+    resume_argv: Vec<String>,
+    skill_dirs_raw: Vec<String>,
+    llm_mock_mode: CliLlmMockMode,
+    attestation: Option<RunAttestationOptions>,
+    profile: RunProfileOptions,
+    json: Option<RunJsonOptions>,
+) {
+    let source = r#"import { resume_agent, wait_agent } from "std/agent/workers"
+
+pipeline main(task) {
+  let input = if len(argv) > 1 {
+    argv[1]
+  } else {
+    nil
+  }
+  let handle = resume_agent(argv[0], input, true)
+  return wait_agent(handle)
+}
+"#;
+    let tmp = create_eval_temp_file().unwrap_or_else(|e| {
+        eprintln!("error: {e}");
+        process::exit(1);
+    });
+    let tmp_path = tmp.path().to_path_buf();
+    if let Err(error) = fs::write(&tmp_path, source) {
+        eprintln!("error: failed to write temp file for --resume: {error}");
+        process::exit(1);
+    }
+    let mut argv = Vec::with_capacity(resume_argv.len() + 1);
+    argv.push(target.to_string());
+    argv.extend(resume_argv);
+    let tmp_str = tmp_path.to_string_lossy().into_owned();
+    run_file_with_skill_dirs(
+        &tmp_str,
+        trace,
+        denied_builtins,
+        argv,
+        skill_dirs_raw,
+        llm_mock_mode,
+        attestation,
+        profile,
+        json,
+        HarnpackRunOptions::default(),
+    )
+    .await;
+}
+
 pub fn execute_explain_cost(path: &str) -> RunOutcome {
     let stdout = String::new();
     let mut stderr = String::new();

@@ -183,6 +183,22 @@ async fn async_main() {
                 dry_run_verify: args.dry_run_verify,
             };
 
+            if let Some(resume_target) = args.resume.as_deref() {
+                commands::run::run_resume_with_skill_dirs(
+                    resume_target,
+                    args.trace,
+                    denied,
+                    args.argv.clone(),
+                    args.skill_dir.clone(),
+                    llm_mock_mode,
+                    attestation,
+                    profile_options,
+                    json_options,
+                )
+                .await;
+                return;
+            }
+
             match (args.eval.as_deref(), args.file.as_deref()) {
                 (Some(code), None) => {
                     if args.allow_unsigned || args.dry_run_verify {
@@ -239,9 +255,9 @@ async fn async_main() {
                 (Some(_), Some(_)) => command_error(
                     "`harn run` accepts either `-e <code>` or `<file.harn>`, not both",
                 ),
-                (None, None) => {
-                    command_error("`harn run` requires either `-e <code>` or `<file.harn>`")
-                }
+                (None, None) => command_error(
+                    "`harn run` requires `--resume <snapshot>`, `-e <code>`, or `<file.harn>`",
+                ),
             }
         }
         Command::Check(args) => {

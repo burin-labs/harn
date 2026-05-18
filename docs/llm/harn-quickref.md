@@ -1659,8 +1659,9 @@ Parent-side tools are gated by subagent capability. Pass `subagents: true` or
 | `agent_await_resumption(reason, conditions?)` | Let the current worker self-park |
 
 Lifecycle invocations emit `tool_call_audit` telemetry with initiator and reason
-metadata. Top-level self-suspend uses the same tool surface but needs host-level
-resume plumbing beyond the current worker-backed path.
+metadata. Top-level loops use the same tool surface: `agent_loop(...)` returns a
+`status: "suspended"` payload with a persisted `handle.snapshot_path`, and the
+CLI can cold-restore it with `harn run --resume <snapshot_path>`.
 
 Pass `autonomy_budget` to cap how many autonomous decisions an agent can
 make per UTC hour / UTC day. The check fires at loop entry, before any

@@ -26,6 +26,13 @@ pub(crate) struct RunArgs {
     /// Evaluate inline Harn code instead of a file.
     #[arg(short = 'e')]
     pub eval: Option<String>,
+    /// Resume a suspended top-level agent from a worker handle or snapshot path.
+    #[arg(
+        long = "resume",
+        value_name = "HANDLE_OR_SNAPSHOT",
+        conflicts_with_all = ["eval", "file", "explain_cost", "allow_unsigned", "dry_run_verify"]
+    )]
+    pub resume: Option<String>,
     /// Extra skill-discovery roots. Repeatable; each path is a
     /// directory of `<name>/SKILL.md` bundles, equivalent to a
     /// single-entry `$HARN_SKILLS_PATH`. Highest-priority layer —

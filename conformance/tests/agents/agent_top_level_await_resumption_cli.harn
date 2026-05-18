@@ -1,0 +1,49 @@
+import "../_common"
+
+fn first_snapshot_line(text) {
+  let matches = regex_captures("snapshot=(.+)", text)
+  if len(matches) == 0 {
+    return nil
+  }
+  return matches[0].groups[0]
+}
+
+pipeline main() {
+  let repo_root = exec("git", "rev-parse", "--show-toplevel").stdout.trim()
+  let harn_bin = env_or("HARN_CONFORMANCE_HARN_BIN", resolve_harn_bin(repo_root))
+  let root = path_join(temp_dir(), "harn-top-level-resume-" + uuid_v7())
+  mkdir(root)
+  let script = path_join(root, "top_level_suspend.harn")
+  write_file(
+    script,
+    "pipeline main() {\n"
+      + "  llm_mock({tool_calls: [{id: \"park_1\", name: \"agent_await_resumption\", arguments: {reason: \"waiting on operator\"}}]})\n"
+      + "  let result = agent_loop(\"Park until the operator resumes.\", nil, {provider: \"mock\", tool_format: \"native\", max_iterations: 2, session_id: \"top-level-\" + uuid_v7()})\n"
+      + "  println(\"status=\" + result.status)\n"
+      + "  println(\"reason=\" + result.reason)\n"
+      + "  println(\"handle_status=\" + result.handle.status)\n"
+      + "  println(\"snapshot=\" + result.handle.snapshot_path)\n"
+      + "}\n",
+  )
+  let first = exec_at(root, harn_bin, "run", script)
+  println(first.success)
+  println(contains(first.stdout, "status=suspended"))
+  println(contains(first.stdout, "reason=waiting on operator"))
+  println(contains(first.stdout, "handle_status=suspended"))
+  let snapshot = first_snapshot_line(first.stdout)
+  require snapshot != nil, "top-level suspend did not print a snapshot path"
+  let snapshot_path = if path_is_absolute(snapshot) {
+    snapshot
+  } else {
+    path_join(root, snapshot)
+  }
+  println(file_exists(snapshot_path))
+  let second = exec_at(root, harn_bin, "run", "--resume", snapshot, "--json")
+  println(second.success)
+  let lines = second.stdout.trim().split("\n")
+  let final = json_parse(lines[len(lines) - 1])
+  println(final.data.event_type)
+  println(final.data.value.status)
+  println(contains(final.data.value.result.summary, "Mock response"))
+  println(final.data.value.has_transcript)
+}
