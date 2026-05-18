@@ -26,6 +26,7 @@ mod eval;
 mod explain;
 mod fix;
 mod flow;
+mod graph;
 mod init;
 mod lint_fmt;
 mod local;
@@ -103,6 +104,7 @@ pub(crate) use flow::{
     FlowArchivistCommand, FlowArchivistScanArgs, FlowArgs, FlowCommand, FlowReplayAuditArgs,
     FlowShipCommand, FlowShipWatchArgs,
 };
+pub(crate) use graph::GraphArgs;
 pub(crate) use init::{InitArgs, NewArgs, ProjectTemplate};
 pub(crate) use lint_fmt::{FmtArgs, PathTargetsArgs};
 pub(crate) use local::{
@@ -351,6 +353,8 @@ SCRIPTING
     Trigger(TriggerArgs),
     /// Statically enumerate declared trigger routes and their requirements.
     Routes(RoutesArgs),
+    /// Statically enumerate modules, symbols, imports, capabilities, effects, and host calls.
+    Graph(GraphArgs),
     /// Inspect Harn Flow atom, slice, and predicate audit state.
     Flow(FlowArgs),
     /// Validate, preview, and run portable workflow bundles.

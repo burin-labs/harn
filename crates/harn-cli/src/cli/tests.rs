@@ -94,6 +94,25 @@ fn test_parses_routes_json() {
 }
 
 #[test]
+fn test_parses_graph_json_and_module_filter() {
+    let cli = Cli::parse_from([
+        "harn",
+        "graph",
+        "fixtures/project",
+        "--json",
+        "--module",
+        "main",
+    ]);
+
+    let Command::Graph(args) = cli.command.unwrap() else {
+        panic!("expected graph command");
+    };
+    assert_eq!(args.root, PathBuf::from("fixtures/project"));
+    assert!(args.json);
+    assert_eq!(args.module.as_deref(), Some("main"));
+}
+
+#[test]
 fn test_parses_parse_and_tokens_json() {
     let parse = Cli::parse_from(["harn", "parse", "main.harn", "--json"]);
     let Command::Parse(parse_args) = parse.command.unwrap() else {
