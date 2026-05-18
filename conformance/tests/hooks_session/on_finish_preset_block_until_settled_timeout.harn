@@ -1,0 +1,26 @@
+/**
+ * When unsettled work outlives the timeout, `on_finish_block_until_settled`
+ * emits `settlement_timeout` and delegates to the fallback callback (default
+ * `on_finish_drain`). Unsettled state is simulated by recording a partial
+ * handoff envelope via `harness.handoff_to` before invoking the preset.
+ *
+ * Tracking: harn#1855 (P-02).
+ */
+import { lifecycle_audit_log_take, on_finish_block_until_settled } from "std/lifecycle"
+
+pipeline default() {
+  let preset = on_finish_block_until_settled(15s)
+  pipeline_on_finish(
+    { harness, return_value ->
+      harness.handoff_to("staging-pipeline", {note: "block test"})
+      let result = preset(harness, return_value)
+      let audits = lifecycle_audit_log_take()
+      harness.stdio.println("result_status=" + result.status)
+      harness.stdio.println("result_method=" + result.method)
+      harness.stdio.println("audit_count=" + to_string(len(audits)))
+      harness.stdio.println("kind_0=" + audits[0].kind)
+      return return_value
+    },
+  )
+  return 19
+}

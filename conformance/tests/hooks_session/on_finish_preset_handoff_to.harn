@@ -1,0 +1,27 @@
+/**
+ * `on_finish_handoff_to(target, options?)` packages unsettled work into
+ * an envelope and hands it to the target pipeline via
+ * `harness.handoff_to`. With nothing unsettled, the preset short-
+ * circuits to `pipeline_finalized` and returns the pipeline value
+ * unchanged — the typical case where the handoff pipeline does not need
+ * to run at all.
+ *
+ * Tracking: harn#1855 (P-02).
+ */
+import { lifecycle_audit_log_take, on_finish_handoff_to } from "std/lifecycle"
+
+pipeline default() {
+  let preset = on_finish_handoff_to("nightly-drain")
+  pipeline_on_finish(
+    { harness, return_value ->
+      let result = preset(harness, return_value)
+      let audits = lifecycle_audit_log_take()
+      harness.stdio.println("result=" + to_string(result))
+      harness.stdio.println("kind=" + audits[0].kind)
+      harness.stdio.println("reason=" + audits[0].payload.reason)
+      harness.stdio.println("skipped=" + audits[0].payload.handoff_skipped)
+      return result
+    },
+  )
+  return 23
+}

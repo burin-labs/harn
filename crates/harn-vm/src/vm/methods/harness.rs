@@ -114,10 +114,8 @@ impl crate::vm::Vm {
                 .and_then(|session| session.run_id.or(Some(session.session_id)))
                 .map(|id| VmValue::String(std::rc::Rc::from(id)))
                 .unwrap_or(VmValue::Nil)),
-            "handoff_to" => Ok(unsupported_harness_action(
-                method,
-                "partial handoff envelopes do not have a VM-level registry on this branch",
-            )),
+            "handoff_to" => Ok(record_handoff_envelope(args)),
+            "emit_audit" => Ok(record_emit_audit(args)),
             "acknowledge_trigger" | "defer_trigger" => Ok(unsupported_harness_action(
                 method,
                 "queued trigger items do not have an acknowledgement registry on this branch",
@@ -126,17 +124,13 @@ impl crate::vm::Vm {
                 method,
                 "partial handoff envelopes do not have an acknowledgement registry on this branch",
             )),
-            "emit_audit" => Ok(unsupported_harness_action(
-                method,
-                "LifecycleAuditEntry persistence is not available on this branch",
-            )),
             "finalize" => Ok(unsupported_harness_action(
                 method,
                 "pipeline disposition persistence is not available on this branch",
             )),
             "spawn_settlement_agent" => Ok(unsupported_harness_action(
                 method,
-                "settlement-agent spawning is deferred to the drain implementation",
+                "settlement-agent spawning is deferred to the drain implementation (P-03, harn#1856)",
             )),
             _ => Err(method_unsupported(handle, method)),
         }
@@ -379,6 +373,50 @@ fn unsupported_harness_action(method: &str, reason: &str) -> VmValue {
         "status": "unsupported",
         "method": method,
         "reason": reason,
+    }))
+}
+
+fn record_emit_audit(args: &[VmValue]) -> VmValue {
+    let kind = args
+        .first()
+        .map(|v| match v {
+            VmValue::String(s) => s.as_ref().to_string(),
+            other => other.display(),
+        })
+        .unwrap_or_default();
+    let payload = args
+        .get(1)
+        .map(crate::llm::vm_value_to_json)
+        .unwrap_or(serde_json::Value::Null);
+    let entry = crate::orchestration::record_lifecycle_audit(kind, payload);
+    crate::stdlib::json_to_vm_value(&serde_json::json!({
+        "status": "recorded",
+        "method": "emit_audit",
+        "entry": entry.to_json(),
+    }))
+}
+
+fn record_handoff_envelope(args: &[VmValue]) -> VmValue {
+    let Some(target_value) = args.first() else {
+        return crate::stdlib::json_to_vm_value(&serde_json::json!({
+            "status": "rejected",
+            "method": "handoff_to",
+            "reason": "missing target pipeline argument",
+        }));
+    };
+    let target = match target_value {
+        VmValue::String(s) => s.as_ref().to_string(),
+        other => other.display(),
+    };
+    let payload = args
+        .get(1)
+        .map(crate::llm::vm_value_to_json)
+        .unwrap_or(serde_json::Value::Null);
+    let envelope = crate::orchestration::record_partial_handoff(target, payload);
+    crate::stdlib::json_to_vm_value(&serde_json::json!({
+        "status": "queued",
+        "method": "handoff_to",
+        "envelope": envelope.to_json(),
     }))
 }
 

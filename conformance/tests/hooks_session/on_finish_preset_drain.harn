@@ -1,0 +1,26 @@
+/**
+ * `on_finish_drain` from `std/lifecycle` finalizes a pipeline with no
+ * unsettled work by emitting `pipeline_finalized` and returning the
+ * pipeline's value unchanged. When the harness has deferred work the
+ * preset delegates to `spawn_settlement_agent` (deferred to P-03, harn
+ * #1856); until that ticket ships the preset surfaces the typed
+ * unsupported receipt so callers can detect the gap deterministically.
+ *
+ * Tracking: harn#1855 (P-02).
+ */
+import { lifecycle_audit_log_take, on_finish_drain } from "std/lifecycle"
+
+pipeline default() {
+  pipeline_on_finish(
+    { harness, return_value ->
+      let result = on_finish_drain(harness, return_value)
+      let audits = lifecycle_audit_log_take()
+      harness.stdio.println("drain_result=" + to_string(result))
+      harness.stdio.println("audit_count=" + to_string(len(audits)))
+      harness.stdio.println("audit_kind=" + audits[0].kind)
+      harness.stdio.println("audit_reason=" + audits[0].payload.reason)
+      return result
+    },
+  )
+  return 7
+}

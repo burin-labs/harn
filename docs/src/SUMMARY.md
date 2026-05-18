@@ -50,6 +50,7 @@
 - [Current session builtin](./stdlib/agent_session_current_id.md)
 - [Monitor stdlib](./stdlib/monitors.md)
 - [Pool stdlib](./stdlib/lifecycle-pool.md)
+- [Pipeline lifecycle presets](./stdlib/lifecycle.md)
 - [GraphQL stdlib](./stdlib/graphql.md)
 - [Prompt library stdlib](./stdlib/prompt-library.md)
 - [Human in the loop](./hitl.md)

@@ -2267,27 +2267,49 @@ Three concentric surfaces:
   callback that runs between `pre_finish` and `post_finish` on the main
   VM (its stdout reaches the host capture buffer). The callback's
   return value replaces the pipeline's return value, so a custom
-  `on_finish` can wrap, redact, or audit the result. Presets ship in
-  `std/lifecycle`: `on_finish_abandon` (legacy no-op) and
-  `on_finish_drain` (settlement-agent stub — currently identical to
-  `abandon`; replaced by the P-02 settlement implementation under
-  harn#1853).
+  `on_finish` can wrap, redact, or audit the result. Four canonical
+  presets ship in `std/lifecycle`:
+  - `on_finish_abandon(harness, return_value)` — reproduces today's
+    no-callback behavior; emits `pipeline_abandoned_unsettled` when
+    work is left behind.
+  - `on_finish_drain(harness, return_value)` — recommended default;
+    emits `pipeline_finalized` when nothing is deferred, otherwise
+    delegates to `harness.spawn_settlement_agent` (settlement-agent
+    loop tracked under harn#1856).
+  - `on_finish_block_until_settled(timeout, fallback?)` — factory that
+    waits until everything settles or the timeout elapses, then
+    delegates to `fallback` (default `on_finish_drain`).
+  - `on_finish_handoff_to(target_pipeline, options?)` — factory that
+    packages unsettled state into an envelope and hands it to
+    `target_pipeline` via `harness.handoff_to`.
+
+  Presets are pure functions / pure factories; they compose freely. See
+  `docs/src/stdlib/lifecycle.md` for an example chain.
 - `harness.unsettled_state()` returns a stable dict with
   `suspended_subagents`, `queued_triggers`, `partial_handoffs`, and
   `in_flight_llm_calls` lists. `harness.is_empty(state?)`,
   `harness.counts(state?)`, and `harness.summary(state?)` summarize that
   shape; `std/lifecycle` exports equivalent `unsettled_state(harness)`,
   `is_empty(state)`, `counts(state)`, and `summary(state)` helpers. On
-  this branch, suspended subagents and in-flight LLM calls are populated
-  from live VM registries; trigger and handoff buckets stay typed empty
-  lists until their per-item registries land.
+  this branch, suspended subagents, in-flight LLM calls, and partial
+  handoffs are populated from live VM registries (the partial-handoff
+  registry is written by `harness.handoff_to`); the queued-trigger
+  bucket stays a typed empty list until its per-item registry lands.
 - Lifecycle action methods exist on the root harness for drain callbacks:
   `resume_subagent`, `cancel_subagent`, `handoff_to`, `acknowledge_trigger`,
   `defer_trigger`, `acknowledge_handoff`, `wait_for_any_settlement`,
   `emit_audit`, `finalize`, `spawn_settlement_agent`, and
   `current_pipeline_id`. `resume_subagent` and `cancel_subagent` delegate
-  to host worker primitives; methods whose backing registries are not yet
-  present return a typed `{status: "unsupported", method, reason}` result.
+  to host worker primitives; `emit_audit` and `handoff_to` record into
+  the per-pipeline-run lifecycle audit log and partial-handoff registry;
+  methods whose backing registries are not yet present return a typed
+  `{status: "unsupported", method, reason}` result.
+- `pipeline_lifecycle_audit_log_take()` and
+  `pipeline_lifecycle_audit_log_snapshot()` drain or peek at the
+  per-pipeline-run audit log that `harness.emit_audit` writes. Each
+  entry is `{seq, kind, payload, pipeline_id}`. `std/lifecycle`
+  re-exports them as `lifecycle_audit_log_take` /
+  `lifecycle_audit_log_snapshot`.
 
 ### Agent Pools
 

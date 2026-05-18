@@ -1,0 +1,5 @@
+result_status=queued
+target=nightly-drain
+priority=high
+envelopes_in_unsettled=2
+audit_count=0

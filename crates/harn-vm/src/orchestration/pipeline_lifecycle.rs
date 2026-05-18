@@ -9,14 +9,25 @@
 //!
 //! `unsettled_state_snapshot` exposes the pipeline-finish harness view of
 //! work that can outlive the main pipeline body.
+//!
+//! Beyond the snapshot, drain callbacks need two write-side surfaces:
+//! `record_lifecycle_audit` (which `harness.emit_audit` routes to) and
+//! `record_partial_handoff` (which `harness.handoff_to` routes to). Both are
+//! thread-local because pipeline execution is single-threaded per run and we
+//! want deterministic ordering for replay/conformance.
 
 use std::cell::RefCell;
 use std::rc::Rc;
+
+use serde_json::Value;
 
 use crate::value::VmClosure;
 
 thread_local! {
     static PIPELINE_ON_FINISH: RefCell<Option<Rc<VmClosure>>> = const { RefCell::new(None) };
+    static LIFECYCLE_AUDIT_LOG: RefCell<Vec<LifecycleAuditEntry>> = const { RefCell::new(Vec::new()) };
+    static PARTIAL_HANDOFF_REGISTRY: RefCell<Vec<PartialHandoffEnvelope>> = const { RefCell::new(Vec::new()) };
+    static LIFECYCLE_SEQ: RefCell<u64> = const { RefCell::new(0) };
 }
 
 /// Register the callback `Vm::execute` will invoke after the pipeline's
@@ -31,10 +42,17 @@ pub fn take_pipeline_on_finish() -> Option<Rc<VmClosure>> {
     PIPELINE_ON_FINISH.with(|slot| slot.borrow_mut().take())
 }
 
-/// Drop any pending callback. Called from `reset_thread_local_state` so test
-/// harnesses don't carry registrations across runs.
+/// Drop any pending callback and every captured lifecycle audit entry,
+/// partial-handoff envelope, and seq counter. Called from
+/// `reset_thread_local_state` so test harnesses don't carry registrations
+/// across runs, and from `Vm::execute` on the error exit path so a
+/// failed pipeline doesn't leak in-progress lifecycle state into the
+/// next run.
 pub fn clear_pipeline_on_finish() {
     PIPELINE_ON_FINISH.with(|slot| *slot.borrow_mut() = None);
+    LIFECYCLE_AUDIT_LOG.with(|log| log.borrow_mut().clear());
+    PARTIAL_HANDOFF_REGISTRY.with(|reg| reg.borrow_mut().clear());
+    LIFECYCLE_SEQ.with(|seq| *seq.borrow_mut() = 0);
 }
 
 /// Snapshot of unsettled work that the pipeline `on_finish` harness exposes.
@@ -45,10 +63,10 @@ pub fn clear_pipeline_on_finish() {
 /// empty list rather than inventing storage in the lifecycle layer.
 #[derive(Debug, Default, Clone)]
 pub struct UnsettledStateSnapshot {
-    pub suspended_subagents: Vec<serde_json::Value>,
-    pub queued_triggers: Vec<serde_json::Value>,
-    pub partial_handoffs: Vec<serde_json::Value>,
-    pub in_flight_llm_calls: Vec<serde_json::Value>,
+    pub suspended_subagents: Vec<Value>,
+    pub queued_triggers: Vec<Value>,
+    pub partial_handoffs: Vec<Value>,
+    pub in_flight_llm_calls: Vec<Value>,
 }
 
 impl UnsettledStateSnapshot {
@@ -59,7 +77,7 @@ impl UnsettledStateSnapshot {
             && self.in_flight_llm_calls.is_empty()
     }
 
-    pub fn to_json(&self) -> serde_json::Value {
+    pub fn to_json(&self) -> Value {
         serde_json::json!({
             "suspended_subagents": self.suspended_subagents,
             "queued_triggers": self.queued_triggers,
@@ -68,7 +86,7 @@ impl UnsettledStateSnapshot {
         })
     }
 
-    pub fn counts_json(&self) -> serde_json::Value {
+    pub fn counts_json(&self) -> Value {
         serde_json::json!({
             "suspended": self.suspended_subagents.len(),
             "queued": self.queued_triggers.len(),
@@ -98,7 +116,110 @@ pub fn unsettled_state_snapshot() -> UnsettledStateSnapshot {
     UnsettledStateSnapshot {
         suspended_subagents: crate::stdlib::agents::snapshot_suspended_subagents(),
         queued_triggers: Vec::new(),
-        partial_handoffs: Vec::new(),
+        partial_handoffs: partial_handoff_snapshot_json(),
         in_flight_llm_calls: crate::llm::snapshot_in_flight_llm_calls(),
     }
+}
+
+/// One recorded `harness.emit_audit` call. `seq` is a per-pipeline-run
+/// monotonic counter so conformance fixtures and replay can match entries by
+/// shape rather than wall-clock time.
+#[derive(Debug, Clone)]
+pub struct LifecycleAuditEntry {
+    pub seq: u64,
+    pub kind: String,
+    pub payload: Value,
+    pub pipeline_id: Option<String>,
+}
+
+impl LifecycleAuditEntry {
+    pub fn to_json(&self) -> Value {
+        serde_json::json!({
+            "seq": self.seq,
+            "kind": self.kind,
+            "payload": self.payload,
+            "pipeline_id": self.pipeline_id,
+        })
+    }
+}
+
+/// Record an audit entry from a lifecycle callback. Returns the entry's seq
+/// number so the caller can echo it back as a receipt.
+pub fn record_lifecycle_audit(kind: impl Into<String>, payload: Value) -> LifecycleAuditEntry {
+    let entry = LifecycleAuditEntry {
+        seq: next_seq(),
+        kind: kind.into(),
+        payload,
+        pipeline_id: crate::orchestration::current_mutation_session()
+            .and_then(|session| session.run_id.or(Some(session.session_id))),
+    };
+    LIFECYCLE_AUDIT_LOG.with(|log| log.borrow_mut().push(entry.clone()));
+    entry
+}
+
+/// Drain the audit log, returning all entries recorded since the last drain.
+/// Used by conformance fixtures and replay oracles.
+pub fn take_lifecycle_audit_log() -> Vec<LifecycleAuditEntry> {
+    LIFECYCLE_AUDIT_LOG.with(|log| std::mem::take(&mut *log.borrow_mut()))
+}
+
+/// Non-destructive read of the audit log for introspection.
+pub fn lifecycle_audit_log_snapshot() -> Vec<LifecycleAuditEntry> {
+    LIFECYCLE_AUDIT_LOG.with(|log| log.borrow().clone())
+}
+
+/// One recorded `harness.handoff_to` call. The runtime stores envelopes in
+/// the thread-local registry so a follow-on pipeline (or the conformance
+/// suite) can inspect them via `unsettled_state_snapshot()`.
+#[derive(Debug, Clone)]
+pub struct PartialHandoffEnvelope {
+    pub envelope_id: String,
+    pub target_pipeline: String,
+    pub origin_pipeline: Option<String>,
+    pub payload: Value,
+    pub seq: u64,
+}
+
+impl PartialHandoffEnvelope {
+    pub fn to_json(&self) -> Value {
+        serde_json::json!({
+            "envelope_id": self.envelope_id,
+            "target_pipeline": self.target_pipeline,
+            "origin_pipeline": self.origin_pipeline,
+            "payload": self.payload,
+            "seq": self.seq,
+        })
+    }
+}
+
+/// Record a partial-handoff envelope and return the entry. Allocates a
+/// deterministic envelope id derived from the lifecycle seq counter so test
+/// fixtures don't depend on wall-clock time or uuids.
+pub fn record_partial_handoff(
+    target_pipeline: impl Into<String>,
+    payload: Value,
+) -> PartialHandoffEnvelope {
+    let seq = next_seq();
+    let envelope = PartialHandoffEnvelope {
+        envelope_id: format!("envelope_{seq}"),
+        target_pipeline: target_pipeline.into(),
+        origin_pipeline: crate::orchestration::current_mutation_session()
+            .and_then(|session| session.run_id.or(Some(session.session_id))),
+        payload,
+        seq,
+    };
+    PARTIAL_HANDOFF_REGISTRY.with(|reg| reg.borrow_mut().push(envelope.clone()));
+    envelope
+}
+
+fn partial_handoff_snapshot_json() -> Vec<Value> {
+    PARTIAL_HANDOFF_REGISTRY.with(|reg| reg.borrow().iter().map(|e| e.to_json()).collect())
+}
+
+fn next_seq() -> u64 {
+    LIFECYCLE_SEQ.with(|seq| {
+        let mut slot = seq.borrow_mut();
+        *slot += 1;
+        *slot
+    })
 }

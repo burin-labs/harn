@@ -1,0 +1,27 @@
+/**
+ * With non-empty unsettled state, `on_finish_drain` returns the typed
+ * unsupported receipt from `spawn_settlement_agent`. P-03 (harn#1856)
+ * replaces the receipt with a real settlement-agent disposition.
+ *
+ * Unsettled state is simulated here by issuing a `harness.handoff_to`
+ * call inside the callback — that records a partial handoff envelope
+ * which the next `unsettled_state()` snapshot includes.
+ *
+ * Tracking: harn#1855 (P-02), harn#1856 (P-03).
+ */
+import { lifecycle_audit_log_take, on_finish_drain } from "std/lifecycle"
+
+pipeline default() {
+  pipeline_on_finish(
+    { harness, return_value ->
+      harness.handoff_to("staging-pipeline", {note: "drain test"})
+      let result = on_finish_drain(harness, return_value)
+      let audits = lifecycle_audit_log_take()
+      harness.stdio.println("result_status=" + result.status)
+      harness.stdio.println("result_method=" + result.method)
+      harness.stdio.println("audit_count=" + to_string(len(audits)))
+      return return_value
+    },
+  )
+  return 11
+}

@@ -1401,6 +1401,8 @@ pub(crate) const SIGNATURES: &[BuiltinSignature] = &[
     BuiltinSignature::variadic("pg_transaction", &[Param::new("args", TY_ANY)], TY_ANY),
     BuiltinSignature::variadic("pi", &[Param::new("args", TY_ANY)], TY_FLOAT),
     BuiltinSignature::variadic("pid", &[Param::new("args", TY_ANY)], TY_INT),
+    BuiltinSignature::simple("pipeline_lifecycle_audit_log_snapshot", &[], TY_LIST),
+    BuiltinSignature::simple("pipeline_lifecycle_audit_log_take", &[], TY_LIST),
     BuiltinSignature::simple(
         "pipeline_on_finish",
         &[Param::new("callback", TY_ANY)],

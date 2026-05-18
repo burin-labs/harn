@@ -114,6 +114,20 @@ const WORKFLOW_SYNC_PRIMITIVES: &[SyncBuiltin] = &[
         .signature("pipeline_on_finish(callback)")
         .arity(VmBuiltinArity::Exact(1))
         .doc("Register a callback invoked after the pipeline's declared steps complete. Signature: fn(harness, return_value). Last-write-wins; the callback's return replaces the pipeline's return value."),
+    SyncBuiltin::new(
+        "pipeline_lifecycle_audit_log_take",
+        pipeline_lifecycle_audit_log_take_builtin,
+    )
+    .signature("pipeline_lifecycle_audit_log_take()")
+    .arity(VmBuiltinArity::Exact(0))
+    .doc("Return and clear every entry recorded via harness.emit_audit during this pipeline run."),
+    SyncBuiltin::new(
+        "pipeline_lifecycle_audit_log_snapshot",
+        pipeline_lifecycle_audit_log_snapshot_builtin,
+    )
+    .signature("pipeline_lifecycle_audit_log_snapshot()")
+    .arity(VmBuiltinArity::Exact(0))
+    .doc("Return every entry recorded via harness.emit_audit without clearing the log."),
     SyncBuiltin::new("notify_file_edited", notify_file_edited_builtin)
         .signature("notify_file_edited(path, metadata?)")
         .arity(VmBuiltinArity::Range { min: 1, max: 2 })

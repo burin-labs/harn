@@ -1407,6 +1407,7 @@ fn pipeline_finish_events_round_trip_through_session_hook_parser() {
 
 #[test]
 fn unsettled_state_snapshot_starts_empty() {
+    clear_pipeline_on_finish();
     let snapshot = unsettled_state_snapshot();
     assert!(snapshot.is_empty());
     assert_eq!(
@@ -1422,6 +1423,57 @@ fn unsettled_state_snapshot_starts_empty() {
         snapshot.to_json()["in_flight_llm_calls"],
         serde_json::json!([])
     );
+}
+
+#[test]
+fn record_lifecycle_audit_assigns_monotonic_seq() {
+    clear_pipeline_on_finish();
+    let a = record_lifecycle_audit("first", serde_json::json!({"x": 1}));
+    let b = record_lifecycle_audit("second", serde_json::json!({"x": 2}));
+    assert!(
+        b.seq > a.seq,
+        "seq must be monotonic ({} < {})",
+        a.seq,
+        b.seq
+    );
+    assert_eq!(a.kind, "first");
+    assert_eq!(b.kind, "second");
+
+    let drained = take_lifecycle_audit_log();
+    assert_eq!(drained.len(), 2);
+    assert!(
+        take_lifecycle_audit_log().is_empty(),
+        "log drains exactly once"
+    );
+}
+
+#[test]
+fn record_partial_handoff_appears_in_unsettled_snapshot() {
+    clear_pipeline_on_finish();
+    let envelope = record_partial_handoff("downstream", serde_json::json!({"note": "x"}));
+    assert!(envelope.envelope_id.starts_with("envelope_"));
+    assert_eq!(envelope.target_pipeline, "downstream");
+
+    let snapshot = unsettled_state_snapshot();
+    assert!(!snapshot.is_empty());
+    assert_eq!(snapshot.partial_handoffs.len(), 1);
+    assert_eq!(
+        snapshot.partial_handoffs[0]["target_pipeline"],
+        "downstream"
+    );
+}
+
+#[test]
+fn clear_pipeline_on_finish_resets_audit_and_handoff_state() {
+    clear_pipeline_on_finish();
+    record_lifecycle_audit("kind", serde_json::Value::Null);
+    record_partial_handoff("downstream", serde_json::Value::Null);
+    assert!(!lifecycle_audit_log_snapshot().is_empty());
+    assert!(!unsettled_state_snapshot().partial_handoffs.is_empty());
+
+    clear_pipeline_on_finish();
+    assert!(lifecycle_audit_log_snapshot().is_empty());
+    assert!(unsettled_state_snapshot().partial_handoffs.is_empty());
 }
 
 #[test]

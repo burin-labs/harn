@@ -1,0 +1,4 @@
+result=23
+kind=pipeline_finalized
+reason=no_unsettled
+skipped=nightly-drain

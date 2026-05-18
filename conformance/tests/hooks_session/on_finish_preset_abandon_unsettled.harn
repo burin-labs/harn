@@ -1,0 +1,25 @@
+/**
+ * When unsettled state is non-empty, `on_finish_abandon` emits a
+ * `pipeline_abandoned_unsettled` audit so the lost work is at least
+ * observable before the pipeline exits. `return_value` is returned
+ * unchanged.
+ *
+ * Tracking: harn#1855 (P-02).
+ */
+import { lifecycle_audit_log_take, on_finish_abandon } from "std/lifecycle"
+
+pipeline default() {
+  pipeline_on_finish(
+    { harness, return_value ->
+      harness.handoff_to("staging-pipeline", {note: "abandon test"})
+      let result = on_finish_abandon(harness, return_value)
+      let audits = lifecycle_audit_log_take()
+      harness.stdio.println("result=" + to_string(result))
+      harness.stdio.println("audit_count=" + to_string(len(audits)))
+      harness.stdio.println("kind=" + audits[0].kind)
+      harness.stdio.println("partial_count=" + to_string(audits[0].payload.counts.partial))
+      return result
+    },
+  )
+  return 31
+}
