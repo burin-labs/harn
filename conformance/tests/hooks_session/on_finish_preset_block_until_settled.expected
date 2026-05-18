@@ -1,0 +1,4 @@
+result=17
+kind=pipeline_finalized
+reason=settled_within_timeout
+timeout_ms=15s

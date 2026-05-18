@@ -1,0 +1,38 @@
+/**
+ * The four presets compose. Here `on_finish_block_until_settled` is
+ * wired with `on_finish_handoff_to` as its fallback, which in turn falls
+ * back to `on_finish_abandon` only as a last resort. The unsettled
+ * state forces the timeout path, which delegates to `handoff_to`, which
+ * records the envelope — all three transitions appear in order in the
+ * audit log.
+ *
+ * Tracking: harn#1855 (P-02).
+ */
+import {
+  lifecycle_audit_log_take,
+  on_finish_abandon,
+  on_finish_block_until_settled,
+  on_finish_handoff_to,
+} from "std/lifecycle"
+
+pipeline default() {
+  let preset = on_finish_block_until_settled(15s, on_finish_handoff_to("nightly-drain"))
+  pipeline_on_finish(
+    { harness, return_value ->
+      harness.handoff_to("seed-pipeline", {note: "compose test"})
+      let result = preset(harness, return_value)
+      let audits = lifecycle_audit_log_take()
+      harness.stdio.println("audit_count=" + to_string(len(audits)))
+      harness.stdio.println("audit_kind_0=" + audits[0].kind)
+      harness.stdio.println("result_status=" + result.status)
+      harness.stdio.println("envelope_target=" + result.envelope.target_pipeline)
+      let final_state = harness.unsettled_state()
+      harness.stdio.println("envelopes=" + to_string(len(final_state.partial_handoffs)))
+      let _abandon = on_finish_abandon(harness, return_value)
+      let trailing = lifecycle_audit_log_take()
+      harness.stdio.println("abandon_kind=" + trailing[0].kind)
+      return return_value
+    },
+  )
+  return 41
+}

@@ -208,6 +208,30 @@ pub(super) fn pipeline_on_finish_builtin(
     Ok(VmValue::Nil)
 }
 
+/// Return all `harness.emit_audit` entries recorded since the last drain
+/// and clear the log. Surfaces the lifecycle audit channel to Harn so
+/// conformance fixtures, replay oracles, and presets can introspect what
+/// drain/abandon/handoff_to recorded without depending on Rust internals.
+pub(super) fn pipeline_lifecycle_audit_log_take_builtin(
+    _args: &[VmValue],
+    _out: &mut String,
+) -> Result<VmValue, VmError> {
+    let entries = crate::orchestration::take_lifecycle_audit_log();
+    let json = serde_json::Value::Array(entries.iter().map(|e| e.to_json()).collect());
+    Ok(crate::stdlib::json_to_vm_value(&json))
+}
+
+/// Non-destructive variant: read entries without consuming them. Used by
+/// presets that want to peek without disturbing the replay log.
+pub(super) fn pipeline_lifecycle_audit_log_snapshot_builtin(
+    _args: &[VmValue],
+    _out: &mut String,
+) -> Result<VmValue, VmError> {
+    let entries = crate::orchestration::lifecycle_audit_log_snapshot();
+    let json = serde_json::Value::Array(entries.iter().map(|e| e.to_json()).collect());
+    Ok(crate::stdlib::json_to_vm_value(&json))
+}
+
 /// Fire a session-level lifecycle hook from Harn. Used by the
 /// Harn-driven agent loop (autocompact, file edits, etc.) to invoke
 /// hooks that are wired in Harn rather than from a Rust host primitive.

@@ -1,0 +1,25 @@
+/**
+ * `on_finish_block_until_settled(timeout, fallback?)` returns a callback
+ * that waits for unsettled work to drain. When the harness reports
+ * `settled`, the preset emits `pipeline_finalized:settled_within_timeout`
+ * and returns the pipeline value unchanged.
+ *
+ * Tracking: harn#1855 (P-02).
+ */
+import { lifecycle_audit_log_take, on_finish_block_until_settled } from "std/lifecycle"
+
+pipeline default() {
+  let preset = on_finish_block_until_settled(15s)
+  pipeline_on_finish(
+    { harness, return_value ->
+      let result = preset(harness, return_value)
+      let audits = lifecycle_audit_log_take()
+      harness.stdio.println("result=" + to_string(result))
+      harness.stdio.println("kind=" + audits[0].kind)
+      harness.stdio.println("reason=" + audits[0].payload.reason)
+      harness.stdio.println("timeout_ms=" + to_string(audits[0].payload.timeout))
+      return result
+    },
+  )
+  return 17
+}

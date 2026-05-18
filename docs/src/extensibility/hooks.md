@@ -49,6 +49,9 @@ tool call.
 | `file_edited` | After `write_file` / `append_file` / `write_file_bytes` / `notify_file_edited` queues an edit. Drained at each agent-loop turn boundary | Advisory |
 | `session_error` | Before `session_end` when the loop ended with an error status or terminal error | Advisory |
 | `session_idle` | Each time the daemon-mode agent loop enters its `wake_interval_ms` wait between turns | Advisory |
+| `pre_finish` | Just before the pipeline's `on_finish` callback runs (or before pipeline return when no callback is registered) | Advisory |
+| `on_unsettled_detected` | Between `pre_finish` and `on_finish`, but only when `harness.unsettled_state()` is non-empty | Advisory |
+| `post_finish` | After the pipeline's `on_finish` callback returns, just before the pipeline value is yielded to the host | Advisory |
 
 ### Return-value protocol
 

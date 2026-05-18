@@ -1,0 +1,31 @@
+/**
+ * With unsettled work present, `on_finish_handoff_to` records a partial
+ * handoff envelope on the harness and returns its receipt. The target
+ * pipeline can later read the envelope back from
+ * `harness.unsettled_state().partial_handoffs`.
+ *
+ * Tracking: harn#1855 (P-02).
+ */
+import { lifecycle_audit_log_take, on_finish_handoff_to } from "std/lifecycle"
+
+pipeline default() {
+  let preset = on_finish_handoff_to("nightly-drain", {priority: "high"})
+  pipeline_on_finish(
+    { harness, return_value ->
+      harness.handoff_to("seed-pipeline", {note: "seed work"})
+      let result = preset(harness, return_value)
+      let audits = lifecycle_audit_log_take()
+      harness.stdio.println("result_status=" + result.status)
+      harness.stdio.println("target=" + result.envelope.target_pipeline)
+      harness.stdio.println("priority=" + result.envelope.payload.priority)
+      harness.stdio
+        .println(
+        "envelopes_in_unsettled="
+          + to_string(len(harness.unsettled_state().partial_handoffs)),
+      )
+      harness.stdio.println("audit_count=" + to_string(len(audits)))
+      return return_value
+    },
+  )
+  return 29
+}
