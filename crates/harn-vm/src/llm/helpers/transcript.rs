@@ -859,7 +859,7 @@ pub(crate) fn reminder_from_event(event: &VmValue) -> Option<SystemReminder> {
     serde_json::from_value(vm_value_to_json(reminder)).ok()
 }
 
-fn replace_reminder_payload(event: &VmValue, reminder: &SystemReminder) -> VmValue {
+pub(crate) fn replace_reminder_payload(event: &VmValue, reminder: &SystemReminder) -> VmValue {
     let reminder_json = serde_json::to_value(reminder).unwrap_or(JsonValue::Null);
     let reminder_value = crate::stdlib::json_to_vm_value(&reminder_json);
     let mut dict = event.as_dict().cloned().unwrap_or_default();

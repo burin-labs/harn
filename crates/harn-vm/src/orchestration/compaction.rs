@@ -66,6 +66,10 @@ pub struct AutoCompactConfig {
     pub hard_limit_strategy: CompactStrategy,
     /// Optional Harn callback used when a strategy is `custom`.
     pub custom_compactor: Option<VmValue>,
+    /// Pending reminders supplied to `custom_compactor` as a second
+    /// argument. Built-in compaction strategies decide reminder retention
+    /// before rebuilding the transcript, so they do not consume this list.
+    pub custom_compactor_reminders: Vec<VmValue>,
     /// Optional callback for domain-specific per-message masking during
     /// observation mask compaction. Called with a list of archived messages,
     /// returns a list of `Option<String>` — `Some(masked)` to override the
@@ -100,6 +104,7 @@ impl Default for AutoCompactConfig {
             hard_limit_tokens: None,
             hard_limit_strategy: CompactStrategy::Llm,
             custom_compactor: None,
+            custom_compactor_reminders: Vec::new(),
             mask_callback: None,
             compress_callback: None,
             summarize_prompt: None,
@@ -411,6 +416,7 @@ async fn custom_compaction_summary(
     old_messages: &[serde_json::Value],
     archived_count: usize,
     callback: &VmValue,
+    reminders: &[VmValue],
 ) -> Result<String, VmError> {
     let Some(VmValue::Closure(closure)) = Some(callback.clone()) else {
         return Err(VmError::Runtime(
@@ -428,7 +434,13 @@ async fn custom_compaction_summary(
             .map(crate::stdlib::json_to_vm_value)
             .collect(),
     ));
-    let result = vm.call_closure_pub(&closure, &[messages_vm]).await;
+    let result = if closure.func.params.len() >= 2 || closure.func.has_rest_param {
+        let reminders_vm = VmValue::List(Rc::new(reminders.to_vec()));
+        vm.call_closure_pub(&closure, &[messages_vm, reminders_vm])
+            .await
+    } else {
+        vm.call_closure_pub(&closure, &[messages_vm]).await
+    };
     let summary = compact_summary_text_from_value(&result?)?;
     if summary.trim().is_empty() {
         Ok(truncate_compaction_summary(old_messages, archived_count))
@@ -544,6 +556,7 @@ async fn apply_compaction_strategy(
     archived_count: usize,
     llm_opts: Option<&crate::llm::api::LlmCallOptions>,
     custom_compactor: Option<&VmValue>,
+    custom_compactor_reminders: &[VmValue],
     mask_callback: Option<&VmValue>,
     summarize_prompt: Option<&str>,
 ) -> Result<String, VmError> {
@@ -572,6 +585,7 @@ async fn apply_compaction_strategy(
                             .to_string(),
                     )
                 })?,
+                custom_compactor_reminders,
             )
             .await
         }
@@ -647,6 +661,7 @@ pub(crate) async fn auto_compact_messages(
         archived_count,
         llm_opts,
         config.custom_compactor.as_ref(),
+        &config.custom_compactor_reminders,
         config.mask_callback.as_ref(),
         config.summarize_prompt.as_deref(),
     )
@@ -668,6 +683,7 @@ pub(crate) async fn auto_compact_messages(
                 archived_count,
                 llm_opts,
                 config.custom_compactor.as_ref(),
+                &config.custom_compactor_reminders,
                 None,
                 config.summarize_prompt.as_deref(),
             )

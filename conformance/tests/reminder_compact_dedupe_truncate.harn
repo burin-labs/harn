@@ -1,0 +1,23 @@
+pipeline main() {
+  let old = transcript_reminder_event(
+    {body: "old duplicate", dedupe_key: "slot", ttl_turns: 3, preserve_on_compact: true},
+  )
+  let newest = transcript_reminder_event(
+    {body: "new duplicate", dedupe_key: "slot", ttl_turns: 3, preserve_on_compact: true},
+  )
+  let crafted = {
+    _type: "transcript",
+    messages: [
+      {role: "user", content: "one"},
+      {role: "assistant", content: "two"},
+      {role: "user", content: "three"},
+      {role: "assistant", content: "four"},
+    ],
+    events: [old, newest],
+  }
+  let compacted = transcript_compact(crafted, {strategy: "truncate", keep_last: 1, target_tokens: 1})
+  let reminders = transcript_events_by_kind(compacted, "system_reminder")
+  println(len(reminders))
+  println(reminders[0].reminder.body)
+  println(reminders[0].reminder.ttl_turns)
+}

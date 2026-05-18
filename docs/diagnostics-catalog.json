@@ -49,7 +49,7 @@
     {
       "id": "RMD",
       "title": "Reminder lifecycle",
-      "count": 3
+      "count": 4
     },
     {
       "id": "SUS",
@@ -1161,6 +1161,15 @@
       "code": "HARN-RMD-003",
       "category": "RMD",
       "summary": "user_block reminder role hint is not supported by the selected provider",
+      "repairs": [],
+      "related": [],
+      "explanationPresent": true,
+      "apiStability": "stable"
+    },
+    {
+      "code": "HARN-RMD-004",
+      "category": "RMD",
+      "summary": "discardable reminder has no TTL",
       "repairs": [],
       "related": [],
       "explanationPresent": true,

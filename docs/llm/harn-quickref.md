@@ -1463,6 +1463,12 @@ println(cleared.removed_count)
 During agent-session post-turn processing, finite `ttl_turns` values
 decrement. Reminders that reach zero are removed from transcript events
 and emit `transcript.reminder.expired` on the same lifecycle topic.
+`transcript_compact(...)` also decrements finite reminder TTLs at the
+pre-compaction boundary, drops expired reminders, dedupes matching
+`dedupe_key` values to the newest reminder, and preserves only
+`preserve_on_compact: true` reminders verbatim in the compacted
+transcript. Custom compactors receive surviving reminder payloads as a
+second closure argument: `{ messages, reminders -> ... }`.
 
 `agent_loop(...)` enables canonical reminder providers by default; bare
 `llm_call(...)` does not. Providers are:

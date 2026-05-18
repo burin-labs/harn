@@ -124,6 +124,15 @@ condensed series summaries instead of full per-patch history.
   lint` emits `HARN-RMD-003` when a pipeline hardcodes
   `role_hint: "user_block"` alongside a route that cannot preserve that
   shape.
+- **Compaction-aware reminder lifecycle (#1823).** `transcript_compact`
+  now treats pending `system_reminder` events as first-class lifecycle
+  state: finite `ttl_turns` values are decremented at the pre-compaction
+  boundary, expired reminders emit `transcript.reminder.expired`,
+  duplicate `dedupe_key` reminders collapse to the newest event, and only
+  `preserve_on_compact: true` reminders are copied verbatim into the
+  compacted transcript. Custom compactors receive surviving reminder
+  payloads as a second closure argument, and `harn lint` emits
+  `HARN-RMD-004` for discardable reminder literals with no finite TTL.
 - **OAuth provider catalogue records (#1905).** Adds
   `std/oauth/providers` with ten preconfigured OAuth provider records
   (GitHub, Slack, Linear, Notion, Google, Microsoft, Atlassian,
