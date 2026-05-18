@@ -22,8 +22,11 @@
 
 use std::fmt;
 use std::sync::Arc;
+use std::time::Duration;
 
-use harn_clock::{Clock, RealClock};
+use async_trait::async_trait;
+use harn_clock::{Clock, PausedClock, RealClock};
+use time::OffsetDateTime;
 
 /// Six capability slices exposed by a [`Harness`].
 ///
@@ -134,17 +137,48 @@ impl Harness {
     /// environment, randomness, and network access are layered on by the
     /// E4.2-E4.4 migration tickets; the constructor only needs to succeed
     /// without panicking today (per the E4.1 exit criteria).
+    ///
+    /// The production clock is wrapped in [`MockAwareClock`] so existing
+    /// `mock_time(...)` / `advance_time(...)` test fixtures observe
+    /// `harness.clock.*` reads identically to the ambient builtins. The
+    /// shim is part of the E4.3-E4.6 migration window and goes away once
+    /// the ambient `mock_time` test utility is retired by E4.5.
     pub fn real() -> Self {
-        Self::with_clock(RealClock::arc())
+        Self::with_clock(Arc::new(MockAwareClock::new(RealClock::new())))
     }
 
-    /// Build a handle wired to a caller-supplied clock. Test bootstraps that
-    /// want deterministic time without depending on the full `NullHarness`
-    /// surface (E4.5) drive this directly.
+    /// Build a handle wired to a caller-supplied clock. Most callers want
+    /// [`Self::test`] (which constructs the `PausedClock` for you);
+    /// reach for this when an existing `Arc<dyn Clock>` is already in
+    /// hand — e.g. a `RecordedClock` wrapper.
     pub fn with_clock(clock: Arc<dyn Clock>) -> Self {
         Self {
             inner: Arc::new(HarnessInner { clock }),
         }
+    }
+
+    /// Build a deterministic test handle wired to a fresh
+    /// [`PausedClock`] pinned at the Unix epoch.
+    ///
+    /// Returns the harness paired with the underlying `PausedClock` so
+    /// tests can drive virtual time through `PausedClock::advance`
+    /// while passing the same `Harness` value into the VM. The two
+    /// share the underlying `Arc<dyn Clock>`, so the harness reflects
+    /// every advance immediately.
+    ///
+    /// Pairs with [`PausedClock::advance`] / [`PausedClock::set`] — see
+    /// [`Self::with_paused_clock`] for picking a non-epoch origin.
+    pub fn test() -> (Self, Arc<PausedClock>) {
+        Self::with_paused_clock(OffsetDateTime::UNIX_EPOCH)
+    }
+
+    /// Like [`Self::test`], but pins the paused clock's wall origin to
+    /// `origin`. Lets tests anchor virtual time to a meaningful date
+    /// without manually advancing past the epoch first.
+    pub fn with_paused_clock(origin: OffsetDateTime) -> (Self, Arc<PausedClock>) {
+        let paused = PausedClock::new(origin);
+        let as_dyn: Arc<dyn Clock> = paused.clone();
+        (Self::with_clock(as_dyn), paused)
     }
 
     /// Field access for `harness.stdio`.
@@ -320,6 +354,68 @@ impl fmt::Debug for VmHarness {
     }
 }
 
+/// Clock wrapper that consults the crate-wide `clock_mock` thread-local
+/// before delegating to an inner [`Clock`]. Used by [`Harness::real`] so
+/// `harness.clock.*` reads honor `mock_time(...)` / `advance_time(...)`
+/// during the E4.3-E4.6 migration. New tests should prefer
+/// [`Harness::test`] / [`PausedClock`] directly.
+#[derive(Debug)]
+pub struct MockAwareClock<C: Clock + 'static> {
+    inner: C,
+}
+
+impl<C: Clock + 'static> MockAwareClock<C> {
+    pub fn new(inner: C) -> Self {
+        Self { inner }
+    }
+}
+
+#[async_trait]
+impl<C: Clock + 'static> Clock for MockAwareClock<C> {
+    fn now_utc(&self) -> OffsetDateTime {
+        if let Some(mock) = crate::clock_mock::active_mock_clock() {
+            return mock.now_utc();
+        }
+        self.inner.now_utc()
+    }
+
+    fn monotonic_ms(&self) -> i64 {
+        if let Some(mock) = crate::clock_mock::active_mock_clock() {
+            return mock.monotonic_ms();
+        }
+        self.inner.monotonic_ms()
+    }
+
+    async fn sleep(&self, duration: Duration) {
+        if duration.is_zero() {
+            return;
+        }
+        if let Some(mock) = crate::clock_mock::active_mock_clock() {
+            // Single-script tests under `mock_time(...)` rely on `sleep(...)`
+            // advancing the mock and returning immediately — the same
+            // semantics as the legacy ambient `sleep_ms` builtin. Waiting
+            // on `mock.sleep` would deadlock because nothing else is
+            // driving `advance(...)` in the same task.
+            mock.advance_std_sync(duration);
+            return;
+        }
+        self.inner.sleep(duration).await;
+    }
+
+    async fn sleep_until_utc(&self, deadline: OffsetDateTime) {
+        if let Some(mock) = crate::clock_mock::active_mock_clock() {
+            let now = mock.now_utc();
+            if deadline > now {
+                if let Ok(delta) = Duration::try_from(deadline - now) {
+                    mock.advance_std_sync(delta);
+                }
+            }
+            return;
+        }
+        self.inner.sleep_until_utc(deadline).await;
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -357,5 +453,31 @@ mod tests {
         assert_eq!(stdio.kind(), HarnessKind::Stdio);
         assert!(stdio.sub_handle("clock").is_none(), "nested access denied");
         assert!(root.sub_handle("not_a_field").is_none());
+    }
+
+    #[test]
+    fn test_constructor_clock_advances_under_paused_clock_advance() {
+        let (harness, paused) = Harness::test();
+        let clock = harness.clock();
+        let start_wall = clock.clock().now_utc();
+        assert_eq!(start_wall, OffsetDateTime::UNIX_EPOCH);
+        assert_eq!(clock.clock().monotonic_ms(), 0);
+
+        paused.advance(Duration::from_millis(1_500));
+        assert_eq!(clock.clock().monotonic_ms(), 1_500);
+        let after_wall = clock.clock().now_utc();
+        assert_eq!(after_wall - start_wall, time::Duration::milliseconds(1_500));
+    }
+
+    #[test]
+    fn with_paused_clock_pins_origin() {
+        let origin = OffsetDateTime::from_unix_timestamp(1_700_000_000).unwrap();
+        let (harness, paused) = Harness::with_paused_clock(origin);
+        assert_eq!(harness.clock().clock().now_utc(), origin);
+        paused.advance(Duration::from_secs(60));
+        assert_eq!(
+            harness.clock().clock().now_utc() - origin,
+            time::Duration::seconds(60)
+        );
     }
 }

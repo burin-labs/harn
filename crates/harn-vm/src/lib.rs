@@ -133,7 +133,7 @@ pub use corrections::{
 };
 pub use harness::{
     Harness, HarnessClock, HarnessEnv, HarnessFs, HarnessKind, HarnessNet, HarnessRandom,
-    HarnessStdio, VmHarness,
+    HarnessStdio, MockAwareClock, VmHarness,
 };
 pub use http::{register_http_builtins, reset_http_state};
 pub use llm::register_llm_builtins;
