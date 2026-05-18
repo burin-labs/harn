@@ -226,6 +226,10 @@ pub(crate) const BUILTINS: &[(&str, &str)] = &[
         "resume_agent",
         "resume_agent(worker_or_snapshot, resume_input?, continue_transcript?) -> dict",
     ),
+    (
+        "parse_resume_conditions",
+        "parse_resume_conditions(conditions?) -> dict?",
+    ),
     ("secret_scan", "secret_scan(content) -> list"),
     ("vision_ocr", "vision_ocr(image, options?) -> dict"),
     // MCP

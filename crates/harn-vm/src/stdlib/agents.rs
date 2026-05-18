@@ -34,11 +34,19 @@ use crate::stdlib::registration::{
 use crate::value::{VmError, VmValue};
 use crate::vm::{Vm, VmBuiltinArity};
 
-const AGENT_SYNC_PRIMITIVES: &[SyncBuiltin] =
-    &[SyncBuiltin::new("__host_worker_list", list_agents_builtin)
+const AGENT_SYNC_PRIMITIVES: &[SyncBuiltin] = &[
+    SyncBuiltin::new("__host_worker_list", list_agents_builtin)
         .signature("__host_worker_list()")
         .arity(VmBuiltinArity::Exact(0))
-        .doc("List local host worker summaries.")];
+        .doc("List local host worker summaries."),
+    SyncBuiltin::new(
+        "__host_resume_conditions_parse",
+        parse_resume_conditions_builtin,
+    )
+    .signature("__host_resume_conditions_parse(conditions?)")
+    .arity(VmBuiltinArity::Range { min: 0, max: 1 })
+    .doc("Validate and normalize agent resume conditions."),
+];
 
 const AGENT_ASYNC_PRIMITIVES: &[AsyncBuiltin] = &[
     async_builtin!("__host_sub_agent_run", sub_agent_run_builtin)
@@ -896,6 +904,173 @@ fn list_agents_builtin(_args: &[VmValue], _out: &mut String) -> Result<VmValue, 
     Ok(VmValue::List(Rc::new(workers)))
 }
 
+fn resume_conditions_error(field: &str, message: impl Into<String>) -> VmError {
+    VmError::Runtime(format!(
+        "HARN-SUS-002: invalid ResumeConditions.{field}: {}",
+        message.into()
+    ))
+}
+
+fn parse_resume_trigger_condition(value: &VmValue) -> Result<Option<serde_json::Value>, VmError> {
+    match value {
+        VmValue::Nil => Ok(None),
+        VmValue::Dict(map) => {
+            super::triggers_stdlib::validate_resume_trigger_spec(map)
+                .map_err(|error| resume_conditions_error("trigger", error.to_string()))?;
+            Ok(Some(crate::llm::vm_value_to_json(value)))
+        }
+        other => Err(resume_conditions_error(
+            "trigger",
+            format!("expected dict or nil, got {}", other.type_name()),
+        )),
+    }
+}
+
+fn parse_resume_timeout_condition(value: &VmValue) -> Result<Option<serde_json::Value>, VmError> {
+    let VmValue::Dict(map) = value else {
+        if matches!(value, VmValue::Nil) {
+            return Ok(None);
+        }
+        return Err(resume_conditions_error(
+            "timeout",
+            format!("expected dict or nil, got {}", value.type_name()),
+        ));
+    };
+    for key in map.keys() {
+        if key != "duration_minutes" && key != "on_timeout" {
+            return Err(resume_conditions_error(
+                &format!("timeout.{key}"),
+                "unknown field; expected duration_minutes or on_timeout",
+            ));
+        }
+    }
+    let duration = map
+        .get("duration_minutes")
+        .and_then(VmValue::as_int)
+        .ok_or_else(|| {
+            resume_conditions_error("timeout.duration_minutes", "must be a positive int")
+        })?;
+    if duration <= 0 {
+        return Err(resume_conditions_error(
+            "timeout.duration_minutes",
+            "must be a positive int",
+        ));
+    }
+    let on_timeout = match map.get("on_timeout") {
+        Some(VmValue::Nil) | None => "resume_with_summary".to_string(),
+        Some(VmValue::String(action))
+            if matches!(
+                action.as_ref(),
+                "resume_with_summary" | "fail" | "resume_with_input"
+            ) =>
+        {
+            action.to_string()
+        }
+        Some(VmValue::String(action)) => {
+            return Err(resume_conditions_error(
+                "timeout.on_timeout",
+                format!(
+                    "unsupported action `{action}`, expected resume_with_summary|fail|resume_with_input"
+                ),
+            ))
+        }
+        Some(other) => {
+            return Err(resume_conditions_error(
+                "timeout.on_timeout",
+                format!("expected string, got {}", other.type_name()),
+            ))
+        }
+    };
+    Ok(Some(serde_json::json!({
+        "duration_minutes": duration,
+        "on_timeout": on_timeout,
+    })))
+}
+
+fn parse_resume_event_condition(value: &VmValue) -> Result<Option<serde_json::Value>, VmError> {
+    match value {
+        VmValue::Nil => Ok(None),
+        VmValue::String(text) if !text.trim().is_empty() => {
+            let trimmed = text.trim();
+            crate::event_log::Topic::new(trimmed.to_string()).map_err(|error| {
+                resume_conditions_error(
+                    "on_event",
+                    format!("invalid runtime event channel: {error}"),
+                )
+            })?;
+            Ok(Some(serde_json::json!(trimmed.to_string())))
+        }
+        VmValue::String(_) => Err(resume_conditions_error(
+            "on_event",
+            "must be a non-empty string",
+        )),
+        other => Err(resume_conditions_error(
+            "on_event",
+            format!("expected string or nil, got {}", other.type_name()),
+        )),
+    }
+}
+
+fn parse_resume_conditions_value(value: Option<&VmValue>) -> Result<VmValue, VmError> {
+    let Some(value) = value else {
+        return Ok(VmValue::Nil);
+    };
+    if matches!(value, VmValue::Nil) {
+        return Ok(VmValue::Nil);
+    }
+    let VmValue::Dict(map) = value else {
+        return Err(resume_conditions_error(
+            "root",
+            format!("expected dict or nil, got {}", value.type_name()),
+        ));
+    };
+    let valid_keys = ["trigger", "timeout", "on_event"];
+    for key in map.keys() {
+        if !valid_keys.contains(&key.as_str()) {
+            return Err(resume_conditions_error(
+                key,
+                "unknown field; expected trigger, timeout, or on_event",
+            ));
+        }
+    }
+
+    let mut normalized = serde_json::Map::new();
+    if let Some(trigger) = map
+        .get("trigger")
+        .map(parse_resume_trigger_condition)
+        .transpose()?
+        .flatten()
+    {
+        normalized.insert("trigger".to_string(), trigger);
+    }
+    if let Some(timeout) = map
+        .get("timeout")
+        .map(parse_resume_timeout_condition)
+        .transpose()?
+        .flatten()
+    {
+        normalized.insert("timeout".to_string(), timeout);
+    }
+    if let Some(event) = map
+        .get("on_event")
+        .map(parse_resume_event_condition)
+        .transpose()?
+        .flatten()
+    {
+        normalized.insert("on_event".to_string(), event);
+    }
+    Ok(crate::stdlib::json_to_vm_value(&serde_json::Value::Object(
+        normalized,
+    )))
+}
+
+fn parse_resume_conditions_builtin(
+    args: &[VmValue],
+    _out: &mut String,
+) -> Result<VmValue, VmError> {
+    parse_resume_conditions_value(args.first())
+}
+
 pub(crate) fn snapshot_suspended_subagents() -> Vec<serde_json::Value> {
     WORKER_REGISTRY.with(|registry| {
         registry
@@ -1042,6 +1217,104 @@ mod suspend_tests {
             .and_then(|dict| dict.get("status"))
             .map(VmValue::display)
             .unwrap_or_default()
+    }
+
+    #[test]
+    fn resume_conditions_parse_round_trips_each_shape() {
+        let trigger = VmValue::Dict(Rc::new(BTreeMap::from([(
+            "trigger".to_string(),
+            VmValue::Dict(Rc::new(BTreeMap::from([
+                ("id".to_string(), VmValue::String(Rc::from("resume-review"))),
+                (
+                    "kind".to_string(),
+                    VmValue::String(Rc::from("review.approved")),
+                ),
+                ("provider".to_string(), VmValue::String(Rc::from("github"))),
+                (
+                    "handler".to_string(),
+                    VmValue::String(Rc::from("worker://auto-resume")),
+                ),
+                (
+                    "match".to_string(),
+                    VmValue::Dict(Rc::new(BTreeMap::from([(
+                        "events".to_string(),
+                        VmValue::List(Rc::new(vec![VmValue::String(Rc::from("review.approved"))])),
+                    )]))),
+                ),
+            ]))),
+        )])));
+        let trigger_json = crate::llm::vm_value_to_json(
+            &parse_resume_conditions_value(Some(&trigger)).expect("parse trigger"),
+        );
+        assert_eq!(trigger_json["trigger"]["kind"], "review.approved");
+
+        let timeout = VmValue::Dict(Rc::new(BTreeMap::from([(
+            "timeout".to_string(),
+            VmValue::Dict(Rc::new(BTreeMap::from([
+                ("duration_minutes".to_string(), VmValue::Int(15)),
+                (
+                    "on_timeout".to_string(),
+                    VmValue::String(Rc::from("resume_with_input")),
+                ),
+            ]))),
+        )])));
+        let timeout_json = crate::llm::vm_value_to_json(
+            &parse_resume_conditions_value(Some(&timeout)).expect("parse timeout"),
+        );
+        assert_eq!(timeout_json["timeout"]["duration_minutes"], 15);
+        assert_eq!(timeout_json["timeout"]["on_timeout"], "resume_with_input");
+
+        let event = VmValue::Dict(Rc::new(BTreeMap::from([(
+            "on_event".to_string(),
+            VmValue::String(Rc::from("operator.resume")),
+        )])));
+        let event_json = crate::llm::vm_value_to_json(
+            &parse_resume_conditions_value(Some(&event)).expect("parse event"),
+        );
+        assert_eq!(event_json["on_event"], "operator.resume");
+    }
+
+    #[test]
+    fn resume_conditions_parse_reports_harn_sus_002_field() {
+        let invalid = VmValue::Dict(Rc::new(BTreeMap::from([(
+            "timeout".to_string(),
+            VmValue::Dict(Rc::new(BTreeMap::from([(
+                "duration_minutes".to_string(),
+                VmValue::Int(0),
+            )]))),
+        )])));
+        let error = parse_resume_conditions_value(Some(&invalid)).expect_err("invalid timeout");
+        assert!(
+            error.to_string().contains("HARN-SUS-002")
+                && error.to_string().contains("timeout.duration_minutes"),
+            "expected HARN-SUS-002 timeout field error, got: {error}"
+        );
+
+        let unknown_timeout = VmValue::Dict(Rc::new(BTreeMap::from([(
+            "timeout".to_string(),
+            VmValue::Dict(Rc::new(BTreeMap::from([
+                ("duration_minutes".to_string(), VmValue::Int(1)),
+                ("extra".to_string(), VmValue::Bool(true)),
+            ]))),
+        )])));
+        let unknown_timeout_error =
+            parse_resume_conditions_value(Some(&unknown_timeout)).expect_err("unknown timeout key");
+        assert!(
+            unknown_timeout_error.to_string().contains("timeout.extra"),
+            "expected HARN-SUS-002 timeout.extra field error, got: {unknown_timeout_error}"
+        );
+
+        let invalid_event = VmValue::Dict(Rc::new(BTreeMap::from([(
+            "on_event".to_string(),
+            VmValue::String(Rc::from("bad channel")),
+        )])));
+        let event_error =
+            parse_resume_conditions_value(Some(&invalid_event)).expect_err("invalid event topic");
+        assert!(
+            event_error.to_string().contains("HARN-SUS-002")
+                && event_error.to_string().contains("on_event"),
+            "expected HARN-SUS-002 on_event field error, got: {event_error}"
+        );
     }
 
     #[tokio::test(flavor = "current_thread")]

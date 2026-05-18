@@ -2,8 +2,8 @@
 
 use super::shapes::{
     AGENT_SESSION_COMPACT_OPTS, AGENT_SESSION_SEED_OPTS, AGENT_SPAWN_CONFIG, LLM_CALL_OPTIONS,
-    LLM_CALL_RESULT, LLM_CALL_SAFE_RESULT, SESSION_ANCESTRY, SESSION_SNAPSHOT, SUB_AGENT_OPTIONS,
-    SUB_AGENT_RESULT, TRANSCRIPT, WORKER_SUMMARY,
+    LLM_CALL_RESULT, LLM_CALL_SAFE_RESULT, RESUME_CONDITIONS_OR_NIL, SESSION_ANCESTRY,
+    SESSION_SNAPSHOT, SUB_AGENT_OPTIONS, SUB_AGENT_RESULT, TRANSCRIPT, WORKER_SUMMARY,
 };
 use super::{
     BuiltinSignature, Param, Ty, TY_ANY, TY_BOOL, TY_CLOSURE, TY_DICT, TY_DICT_OR_NIL, TY_FLOAT,
@@ -651,6 +651,11 @@ pub(crate) const SIGNATURES: &[BuiltinSignature] = &[
         Ty::Named("channel"),
     ),
     BuiltinSignature::simple("llm_usage", &[], TY_DICT),
+    BuiltinSignature::simple(
+        "parse_resume_conditions",
+        &[Param::optional("conditions", RESUME_CONDITIONS_OR_NIL)],
+        RESUME_CONDITIONS_OR_NIL,
+    ),
     BuiltinSignature::simple(
         "resume_agent",
         &[

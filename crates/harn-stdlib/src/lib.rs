@@ -1086,6 +1086,17 @@ mod tests {
         );
         assert_eq!(resume.required_params, 1);
         assert_eq!(resume.total_params, 3);
+
+        let parse_resume = exports
+            .iter()
+            .find(|function| function.name == "parse_resume_conditions")
+            .expect("std/agent/workers should export parse_resume_conditions");
+        assert_eq!(
+            parse_resume.signature,
+            "parse_resume_conditions(conditions = nil) -> ResumeConditions?"
+        );
+        assert_eq!(parse_resume.required_params, 0);
+        assert_eq!(parse_resume.total_params, 1);
     }
 
     #[test]

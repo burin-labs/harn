@@ -1,0 +1,23 @@
+import { parse_resume_conditions } from "std/agent/workers"
+
+pipeline main() {
+  let trigger = parse_resume_conditions(
+    {
+      trigger: {
+        id: "resume-review",
+        kind: "review.approved",
+        provider: "github",
+        match: {events: ["review.approved"]},
+      },
+    },
+  )
+  println(trigger?.trigger?.kind)
+  println(trigger?.trigger?.match?.events[0])
+  let timeout = parse_resume_conditions({timeout: {duration_minutes: 15, on_timeout: "resume_with_input"}})
+  println(timeout?.timeout?.duration_minutes)
+  println(timeout?.timeout?.on_timeout)
+  let event = parse_resume_conditions({on_event: "operator.resume"})
+  println(event?.on_event)
+  let default_timeout = parse_resume_conditions({timeout: {duration_minutes: 5}})
+  println(default_timeout?.timeout?.on_timeout)
+}
