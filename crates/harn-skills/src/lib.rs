@@ -114,7 +114,19 @@ mod tests {
     #[test]
     fn lists_expected_initial_corpus() {
         let skills = list_embedded_skills();
-        assert!(skills.len() >= 7);
+        let names: Vec<&str> = skills.iter().map(|skill| skill.name).collect();
+        assert_eq!(
+            names,
+            [
+                "harn-agent",
+                "harn-diagnostics",
+                "harn-language",
+                "harn-orchestration",
+                "harn-providers",
+                "harn-testing",
+                "harn-tracing",
+            ]
+        );
         assert_eq!(skills.len(), SOURCES.len());
     }
 
@@ -183,5 +195,99 @@ mod tests {
             bytes <= 200 * 1024,
             "embedded corpus is {bytes} bytes, expected <= 200 KiB"
         );
+    }
+
+    #[test]
+    fn skill_bodies_are_focused_and_not_placeholders() {
+        let expectations = [
+            ("harn-agent", ["agent_loop", "session id", "approval"]),
+            ("harn-diagnostics", ["diagnostic", "repair", "conformance"]),
+            ("harn-language", ["quickref", "type", "conformance"]),
+            ("harn-orchestration", ["agent_loop", "workflow", "host"]),
+            ("harn-providers", ["llm_call", "provider", "schema"]),
+            (
+                "harn-testing",
+                ["conformance", "deterministic", "mock_time"],
+            ),
+            ("harn-tracing", ["replay", "receipts", "transcript"]),
+        ];
+
+        for (name, terms) in expectations {
+            let skill = get_embedded_skill(name).expect("expected embedded skill");
+            let body = skill.body.to_ascii_lowercase();
+            assert!(
+                !body.contains("embedded stub") && !body.contains("placeholder"),
+                "{name} should contain real guidance, not stub wording"
+            );
+            for term in terms {
+                assert!(
+                    body.contains(term),
+                    "{name} body should mention focused term `{term}`"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn skill_bodies_match_split_skill_contract() {
+        for skill in list_embedded_skills() {
+            let lines = skill.body.lines().count();
+            assert!(
+                lines >= 80,
+                "{} body is {lines} lines, expected at least 80",
+                skill.name
+            );
+            assert!(
+                lines <= 300,
+                "{} body is {lines} lines, expected at most 300",
+                skill.name
+            );
+        }
+    }
+
+    #[test]
+    fn skill_cross_links_resolve_to_embedded_skills() {
+        let names: BTreeSet<&str> = list_embedded_skills()
+            .iter()
+            .map(|skill| skill.name)
+            .collect();
+        for skill in list_embedded_skills() {
+            for reference in bracketed_skill_references(skill.body) {
+                assert!(
+                    names.contains(reference),
+                    "{} links to unknown embedded skill [[{}]]",
+                    skill.name,
+                    reference
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn diagnostics_skill_mentions_all_code_categories() {
+        let skill = get_embedded_skill("harn-diagnostics").expect("diagnostics skill");
+        for category in [
+            "TYP", "PAR", "NAM", "CAP", "LLM", "ORC", "STD", "PRM", "MOD", "LNT", "FMT", "IMP",
+            "OWN", "RCV", "MAT",
+        ] {
+            assert!(
+                skill.body.contains(&format!("`{category}`")),
+                "harn-diagnostics should mention diagnostic category `{category}`"
+            );
+        }
+    }
+
+    fn bracketed_skill_references(body: &str) -> Vec<&str> {
+        let mut references = Vec::new();
+        let mut rest = body;
+        while let Some(start) = rest.find("[[") {
+            rest = &rest[start + 2..];
+            let Some(end) = rest.find("]]") else {
+                break;
+            };
+            references.push(&rest[..end]);
+            rest = &rest[end + 2..];
+        }
+        references
     }
 }

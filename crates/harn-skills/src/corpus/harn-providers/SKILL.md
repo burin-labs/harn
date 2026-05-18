@@ -7,10 +7,96 @@ when_to_use: Use when wiring or debugging LLM providers, model routes, provider 
 
 # Harn providers
 
-This embedded stub reserves the canonical `harn-providers` skill in the bundled corpus.
+Use this skill when wiring or debugging LLM providers, model routes, structured
+output, connector providers, or provider readiness.
 
-Use this skill for provider configuration, model routing, provider readiness checks, provider capability
-matrices, structured-output support, and `llm_call` option behavior.
+Pair it with [[harn-orchestration]] for workflow behavior and [[harn-testing]] for deterministic provider fixtures.
 
-The detailed provider guidance is supplied by the granular skill corpus; until then, use the provider catalog,
-CLI provider commands, and provider tests as the source of truth.
+## Start here
+
+- `docs/llm/harn-quickref.md` documents `llm_call` and `llm_stream_call`.
+- The quickref also covers `provider: "auto"`, schemas, and retries.
+- `docs/llm/harn-triggers-quickref.md` documents connector provider manifests.
+- LLM configuration and routing live under `crates/harn-vm/src/`.
+- Package/provider manifest handling lives under `crates/harn-cli/src/package/`.
+- Provider capability rows are surfaced by CLI matrix commands.
+- Mock providers are the default for deterministic tests.
+- Never require live credentials in ordinary CI.
+
+## `llm_call` options
+
+- Keep `provider` explicit when behavior depends on a vendor.
+- Use `provider: "auto"` only when capability-based routing is acceptable.
+- Keep `model` optional only when routing policy can choose safely.
+- Preserve `schema` validation behavior.
+- Preserve `schema_retries`.
+- Preserve provider-specific structured-output modes.
+- Preserve tool-call format negotiation.
+- Preserve timeout and cost controls.
+- Preserve prompt scaffolding behavior.
+- Preserve mock-provider determinism.
+
+## Capability routing
+
+- Model capabilities should be data-driven.
+- Avoid hardcoding provider quirks in caller code.
+- Capability checks should describe both positive and negative support.
+- JSON schema support is not the same as native JSON support.
+- Vision, PDF, audio, tools, cache, and streaming support vary independently.
+- Prompt scaffolding may differ by provider.
+- Tool prompting may differ by provider.
+- Assistant prefill support may differ by provider.
+- Developer-role support may differ by provider.
+- When routing changes, update the matrix tests or docs that expose it.
+
+## Connector providers
+
+- Connector packages should declare provider ids.
+- Connector packages should declare supported event kinds.
+- Connector packages should declare payload schemas.
+- Inbound normalization should be deterministic.
+- Optional polling should be explicit.
+- Connector `call` behavior should be capability-gated.
+- Keep OAuth and secret handling out of docs and fixtures.
+- Do not embed tokens in package manifests.
+- Use package validation tests for manifest shape.
+- Use trigger quickref examples for user-facing behavior.
+
+## Cost and reliability
+
+- Cost ceilings should be caller-visible.
+- Retry behavior should be bounded.
+- Provider fallback should be explicit and auditable.
+- Do not silently change the chosen provider after a partial tool exchange.
+- Record enough provider metadata for debugging.
+- Avoid logging secrets or raw private prompts in public traces.
+- Keep failure messages actionable.
+- Map provider failures to stable diagnostics where possible.
+- Preserve transcript shape when provider calls are replayed.
+- Use [[harn-tracing]] for transcript and receipt implications.
+
+## Review checklist
+
+- Does this change affect `provider: "auto"`?
+- Does this change structured-output behavior?
+- Does this affect streaming?
+- Does this affect tool calls?
+- Does this affect provider catalogs?
+- Does this affect connector manifests?
+- Does this affect offline behavior?
+- Does this require docs or CLI help updates?
+- Does this need conformance or mock-provider fixtures?
+- Does this remain deterministic without network access?
+
+## Verify
+
+- Provider config: `cargo test -p harn-vm config`.
+- LLM behavior: targeted VM provider tests.
+- Provider matrix: the relevant `harn check --provider-matrix` path.
+- Connector manifests: package validation tests.
+- Connector package: `harn connector test . --provider <id>`.
+- Mock-provider fixtures: targeted conformance or CLI tests.
+- JSON surfaces: `harn --json-schemas --command <command>`.
+- Docs snippets: `make check-docs-snippets` when examples change.
+- Broad VM changes: `cargo test -p harn-vm`.
+- Cross-crate provider changes: `make test`.
