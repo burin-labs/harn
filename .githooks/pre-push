@@ -157,6 +157,25 @@ else
   echo "=== Pre-push: skipping highlight check (no lexer/stdlib changes) ==="
 fi
 
+if hook_paths_match "$changed" "$HOOK_DIAGCATALOG_PATTERN"; then
+  echo "=== Pre-push: checking diagnostic-code catalog ==="
+  if ! make -s check-diagnostics-catalog >/tmp/harn-prepush-diagcatalog.log 2>&1; then
+    cat /tmp/harn-prepush-diagcatalog.log >&2
+    rm -f /tmp/harn-prepush-diagcatalog.log
+    echo "" >&2
+    echo "  Fix:" >&2
+    echo "    make sync-diagnostics-catalog" >&2
+    echo "    git add docs/src/diagnostics.md docs/diagnostics-catalog.json" >&2
+    echo "    git commit" >&2
+    echo "" >&2
+    exit 1
+  fi
+  rm -f /tmp/harn-prepush-diagcatalog.log
+  echo "    Diagnostic-code catalog OK."
+else
+  echo "=== Pre-push: skipping diagnostic catalog check (no registry changes) ==="
+fi
+
 # Block retroactive edits to released CHANGELOG sections. New entries
 # belong under `## Unreleased` (or the in-progress next-version heading
 # in a release PR), not under a section that already shipped under a tag.

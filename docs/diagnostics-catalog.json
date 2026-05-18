@@ -1,0 +1,2041 @@
+{
+  "schemaVersion": 1,
+  "categories": [
+    {
+      "id": "TYP",
+      "title": "Type checker",
+      "count": 25
+    },
+    {
+      "id": "PAR",
+      "title": "Parser / lexer",
+      "count": 5
+    },
+    {
+      "id": "NAM",
+      "title": "Naming and resolution",
+      "count": 13
+    },
+    {
+      "id": "CAP",
+      "title": "Capabilities",
+      "count": 7
+    },
+    {
+      "id": "LLM",
+      "title": "LLM calls",
+      "count": 5
+    },
+    {
+      "id": "ORC",
+      "title": "Orchestration constructs",
+      "count": 10
+    },
+    {
+      "id": "STD",
+      "title": "Stdlib usage",
+      "count": 3
+    },
+    {
+      "id": "PRM",
+      "title": "Prompt templates",
+      "count": 7
+    },
+    {
+      "id": "MOD",
+      "title": "Modules and exports",
+      "count": 6
+    },
+    {
+      "id": "LNT",
+      "title": "Lint rules",
+      "count": 51
+    },
+    {
+      "id": "FMT",
+      "title": "Formatter",
+      "count": 3
+    },
+    {
+      "id": "IMP",
+      "title": "Import resolution",
+      "count": 3
+    },
+    {
+      "id": "OWN",
+      "title": "Ownership and mutability",
+      "count": 4
+    },
+    {
+      "id": "RCV",
+      "title": "Error recovery",
+      "count": 3
+    },
+    {
+      "id": "MAT",
+      "title": "Match exhaustiveness",
+      "count": 3
+    }
+  ],
+  "codes": [
+    {
+      "code": "HARN-TYP-001",
+      "category": "TYP",
+      "summary": "expected and actual types are incompatible",
+      "repairs": [
+        {
+          "id": "casts/insert-explicit-conversion",
+          "safety": "scope-local",
+          "summary": "Insert an explicit conversion or correct the operand type"
+        }
+      ],
+      "related": [
+        "HARN-TYP-005",
+        "HARN-TYP-006",
+        "HARN-TYP-004",
+        "HARN-TYP-007",
+        "HARN-TYP-009"
+      ],
+      "explanationPresent": true,
+      "apiStability": "stable"
+    },
+    {
+      "code": "HARN-TYP-002",
+      "category": "TYP",
+      "summary": "binary operator is not defined for the operand types",
+      "repairs": [],
+      "related": [],
+      "explanationPresent": true,
+      "apiStability": "stable"
+    },
+    {
+      "code": "HARN-TYP-003",
+      "category": "TYP",
+      "summary": "string concatenation should be rewritten as interpolation",
+      "repairs": [
+        {
+          "id": "style/string-interpolation",
+          "safety": "behavior-preserving",
+          "summary": "Rewrite string concatenation as an interpolation literal"
+        }
+      ],
+      "related": [],
+      "explanationPresent": true,
+      "apiStability": "stable"
+    },
+    {
+      "code": "HARN-TYP-004",
+      "category": "TYP",
+      "summary": "returned expression does not match the declared return type",
+      "repairs": [
+        {
+          "id": "casts/insert-explicit-conversion",
+          "safety": "scope-local",
+          "summary": "Insert an explicit conversion or correct the operand type"
+        }
+      ],
+      "related": [
+        "HARN-TYP-001",
+        "HARN-TYP-008"
+      ],
+      "explanationPresent": true,
+      "apiStability": "stable"
+    },
+    {
+      "code": "HARN-TYP-005",
+      "category": "TYP",
+      "summary": "assigned value does not match the target type",
+      "repairs": [
+        {
+          "id": "casts/insert-explicit-conversion",
+          "safety": "scope-local",
+          "summary": "Insert an explicit conversion or correct the operand type"
+        }
+      ],
+      "related": [
+        "HARN-TYP-001",
+        "HARN-TYP-007"
+      ],
+      "explanationPresent": true,
+      "apiStability": "stable"
+    },
+    {
+      "code": "HARN-TYP-006",
+      "category": "TYP",
+      "summary": "argument value does not match the parameter type",
+      "repairs": [
+        {
+          "id": "casts/insert-explicit-conversion",
+          "safety": "scope-local",
+          "summary": "Insert an explicit conversion or correct the operand type"
+        }
+      ],
+      "related": [
+        "HARN-TYP-001",
+        "HARN-TYP-012"
+      ],
+      "explanationPresent": true,
+      "apiStability": "stable"
+    },
+    {
+      "code": "HARN-TYP-007",
+      "category": "TYP",
+      "summary": "initializer does not match the declared variable type",
+      "repairs": [
+        {
+          "id": "casts/insert-explicit-conversion",
+          "safety": "scope-local",
+          "summary": "Insert an explicit conversion or correct the operand type"
+        }
+      ],
+      "related": [
+        "HARN-TYP-001",
+        "HARN-TYP-005"
+      ],
+      "explanationPresent": true,
+      "apiStability": "stable"
+    },
+    {
+      "code": "HARN-TYP-008",
+      "category": "TYP",
+      "summary": "closure return expression does not match its declared type",
+      "repairs": [
+        {
+          "id": "casts/insert-explicit-conversion",
+          "safety": "scope-local",
+          "summary": "Insert an explicit conversion or correct the operand type"
+        }
+      ],
+      "related": [
+        "HARN-TYP-004"
+      ],
+      "explanationPresent": true,
+      "apiStability": "stable"
+    },
+    {
+      "code": "HARN-TYP-009",
+      "category": "TYP",
+      "summary": "field value does not match its declared type",
+      "repairs": [
+        {
+          "id": "casts/insert-explicit-conversion",
+          "safety": "scope-local",
+          "summary": "Insert an explicit conversion or correct the operand type"
+        }
+      ],
+      "related": [
+        "HARN-TYP-001",
+        "HARN-TYP-022"
+      ],
+      "explanationPresent": true,
+      "apiStability": "stable"
+    },
+    {
+      "code": "HARN-TYP-010",
+      "category": "TYP",
+      "summary": "method receiver or result type is incompatible",
+      "repairs": [
+        {
+          "id": "casts/insert-explicit-conversion",
+          "safety": "scope-local",
+          "summary": "Insert an explicit conversion or correct the operand type"
+        }
+      ],
+      "related": [
+        "HARN-TYP-001",
+        "HARN-TYP-018"
+      ],
+      "explanationPresent": true,
+      "apiStability": "stable"
+    },
+    {
+      "code": "HARN-TYP-011",
+      "category": "TYP",
+      "summary": "callable does not accept type arguments",
+      "repairs": [],
+      "related": [
+        "HARN-TYP-012",
+        "HARN-TYP-013"
+      ],
+      "explanationPresent": true,
+      "apiStability": "stable"
+    },
+    {
+      "code": "HARN-TYP-012",
+      "category": "TYP",
+      "summary": "type argument does not satisfy the generic parameter",
+      "repairs": [],
+      "related": [
+        "HARN-TYP-013",
+        "HARN-TYP-015"
+      ],
+      "explanationPresent": true,
+      "apiStability": "stable"
+    },
+    {
+      "code": "HARN-TYP-013",
+      "category": "TYP",
+      "summary": "generic call has the wrong number of type arguments",
+      "repairs": [],
+      "related": [
+        "HARN-TYP-012",
+        "HARN-TYP-014"
+      ],
+      "explanationPresent": true,
+      "apiStability": "stable"
+    },
+    {
+      "code": "HARN-TYP-014",
+      "category": "TYP",
+      "summary": "declaration has the wrong number of type parameters",
+      "repairs": [],
+      "related": [
+        "HARN-TYP-013"
+      ],
+      "explanationPresent": true,
+      "apiStability": "stable"
+    },
+    {
+      "code": "HARN-TYP-015",
+      "category": "TYP",
+      "summary": "type argument does not satisfy a where-clause constraint",
+      "repairs": [],
+      "related": [
+        "HARN-TYP-012"
+      ],
+      "explanationPresent": true,
+      "apiStability": "stable"
+    },
+    {
+      "code": "HARN-TYP-016",
+      "category": "TYP",
+      "summary": "expression must be iterable",
+      "repairs": [],
+      "related": [],
+      "explanationPresent": true,
+      "apiStability": "stable"
+    },
+    {
+      "code": "HARN-TYP-017",
+      "category": "TYP",
+      "summary": "subscript index type is invalid",
+      "repairs": [
+        {
+          "id": "casts/insert-explicit-conversion",
+          "safety": "scope-local",
+          "summary": "Insert an explicit conversion or correct the operand type"
+        }
+      ],
+      "related": [],
+      "explanationPresent": true,
+      "apiStability": "stable"
+    },
+    {
+      "code": "HARN-TYP-018",
+      "category": "TYP",
+      "summary": "expression must be callable",
+      "repairs": [],
+      "related": [],
+      "explanationPresent": true,
+      "apiStability": "stable"
+    },
+    {
+      "code": "HARN-TYP-019",
+      "category": "TYP",
+      "summary": "cast cannot be proven valid",
+      "repairs": [
+        {
+          "id": "casts/remove-unchecked",
+          "safety": "scope-local",
+          "summary": "Remove the unchecked cast or guard it with a type test"
+        }
+      ],
+      "related": [],
+      "explanationPresent": true,
+      "apiStability": "stable"
+    },
+    {
+      "code": "HARN-TYP-020",
+      "category": "TYP",
+      "summary": "type name cannot be resolved",
+      "repairs": [
+        {
+          "id": "imports/fix-path",
+          "safety": "scope-local",
+          "summary": "Replace the import path with a resolvable target"
+        }
+      ],
+      "related": [],
+      "explanationPresent": true,
+      "apiStability": "stable"
+    },
+    {
+      "code": "HARN-TYP-021",
+      "category": "TYP",
+      "summary": "variant type is used in an invalid position",
+      "repairs": [],
+      "related": [],
+      "explanationPresent": true,
+      "apiStability": "stable"
+    },
+    {
+      "code": "HARN-TYP-022",
+      "category": "TYP",
+      "summary": "struct literal is invalid",
+      "repairs": [],
+      "related": [],
+      "explanationPresent": true,
+      "apiStability": "stable"
+    },
+    {
+      "code": "HARN-TYP-023",
+      "category": "TYP",
+      "summary": "enum construction is invalid",
+      "repairs": [],
+      "related": [],
+      "explanationPresent": true,
+      "apiStability": "stable"
+    },
+    {
+      "code": "HARN-TYP-024",
+      "category": "TYP",
+      "summary": "pattern binding is invalid for the expected type",
+      "repairs": [],
+      "related": [],
+      "explanationPresent": true,
+      "apiStability": "stable"
+    },
+    {
+      "code": "HARN-TYP-025",
+      "category": "TYP",
+      "summary": "optional access is invalid for the receiver type",
+      "repairs": [],
+      "related": [],
+      "explanationPresent": true,
+      "apiStability": "stable"
+    },
+    {
+      "code": "HARN-PAR-001",
+      "category": "PAR",
+      "summary": "parser found an unexpected token",
+      "repairs": [],
+      "related": [],
+      "explanationPresent": true,
+      "apiStability": "stable"
+    },
+    {
+      "code": "HARN-PAR-002",
+      "category": "PAR",
+      "summary": "parser reached end of file while expecting syntax",
+      "repairs": [],
+      "related": [],
+      "explanationPresent": true,
+      "apiStability": "stable"
+    },
+    {
+      "code": "HARN-PAR-003",
+      "category": "PAR",
+      "summary": "lexer found an unexpected character",
+      "repairs": [],
+      "related": [],
+      "explanationPresent": true,
+      "apiStability": "stable"
+    },
+    {
+      "code": "HARN-PAR-004",
+      "category": "PAR",
+      "summary": "string literal is unterminated",
+      "repairs": [],
+      "related": [],
+      "explanationPresent": true,
+      "apiStability": "stable"
+    },
+    {
+      "code": "HARN-PAR-005",
+      "category": "PAR",
+      "summary": "block comment is unterminated",
+      "repairs": [],
+      "related": [],
+      "explanationPresent": true,
+      "apiStability": "stable"
+    },
+    {
+      "code": "HARN-NAM-001",
+      "category": "NAM",
+      "summary": "variable name cannot be resolved",
+      "repairs": [
+        {
+          "id": "bindings/rename-to-closest",
+          "safety": "scope-local",
+          "summary": "Rename to the closest in-scope identifier"
+        }
+      ],
+      "related": [
+        "HARN-NAM-002",
+        "HARN-NAM-010"
+      ],
+      "explanationPresent": true,
+      "apiStability": "stable"
+    },
+    {
+      "code": "HARN-NAM-002",
+      "category": "NAM",
+      "summary": "function name cannot be resolved",
+      "repairs": [
+        {
+          "id": "bindings/rename-to-closest",
+          "safety": "scope-local",
+          "summary": "Rename to the closest in-scope identifier"
+        }
+      ],
+      "related": [
+        "HARN-NAM-008",
+        "HARN-NAM-010"
+      ],
+      "explanationPresent": true,
+      "apiStability": "stable"
+    },
+    {
+      "code": "HARN-NAM-003",
+      "category": "NAM",
+      "summary": "attribute name is not recognized",
+      "repairs": [],
+      "related": [
+        "HARN-NAM-012",
+        "HARN-NAM-011"
+      ],
+      "explanationPresent": true,
+      "apiStability": "stable"
+    },
+    {
+      "code": "HARN-NAM-004",
+      "category": "NAM",
+      "summary": "field name does not exist on the target type",
+      "repairs": [
+        {
+          "id": "bindings/rename-to-closest",
+          "safety": "scope-local",
+          "summary": "Rename to the closest in-scope identifier"
+        }
+      ],
+      "related": [
+        "HARN-NAM-005",
+        "HARN-TYP-022"
+      ],
+      "explanationPresent": true,
+      "apiStability": "stable"
+    },
+    {
+      "code": "HARN-NAM-005",
+      "category": "NAM",
+      "summary": "method name does not exist on the receiver type",
+      "repairs": [
+        {
+          "id": "bindings/rename-to-closest",
+          "safety": "scope-local",
+          "summary": "Rename to the closest in-scope identifier"
+        }
+      ],
+      "related": [
+        "HARN-NAM-004",
+        "HARN-TYP-018"
+      ],
+      "explanationPresent": true,
+      "apiStability": "stable"
+    },
+    {
+      "code": "HARN-NAM-006",
+      "category": "NAM",
+      "summary": "argument name is duplicated",
+      "repairs": [],
+      "related": [],
+      "explanationPresent": true,
+      "apiStability": "stable"
+    },
+    {
+      "code": "HARN-NAM-007",
+      "category": "NAM",
+      "summary": "option key is not recognized",
+      "repairs": [],
+      "related": [],
+      "explanationPresent": true,
+      "apiStability": "stable"
+    },
+    {
+      "code": "HARN-NAM-008",
+      "category": "NAM",
+      "summary": "builtin name cannot be resolved",
+      "repairs": [
+        {
+          "id": "bindings/rename-to-closest",
+          "safety": "scope-local",
+          "summary": "Rename to the closest in-scope identifier"
+        }
+      ],
+      "related": [],
+      "explanationPresent": true,
+      "apiStability": "stable"
+    },
+    {
+      "code": "HARN-NAM-009",
+      "category": "NAM",
+      "summary": "function call targets a deprecated declaration",
+      "repairs": [
+        {
+          "id": "stdlib/migrate-renamed",
+          "safety": "scope-local",
+          "summary": "Rename the call to the renamed stdlib symbol"
+        }
+      ],
+      "related": [],
+      "explanationPresent": true,
+      "apiStability": "stable"
+    },
+    {
+      "code": "HARN-NAM-010",
+      "category": "NAM",
+      "summary": "declaration reference cannot be resolved",
+      "repairs": [
+        {
+          "id": "bindings/rename-to-closest",
+          "safety": "scope-local",
+          "summary": "Rename to the closest in-scope identifier"
+        }
+      ],
+      "related": [],
+      "explanationPresent": true,
+      "apiStability": "stable"
+    },
+    {
+      "code": "HARN-NAM-011",
+      "category": "NAM",
+      "summary": "attribute is attached to an unsupported declaration",
+      "repairs": [],
+      "related": [
+        "HARN-NAM-003",
+        "HARN-NAM-012"
+      ],
+      "explanationPresent": true,
+      "apiStability": "stable"
+    },
+    {
+      "code": "HARN-NAM-012",
+      "category": "NAM",
+      "summary": "attribute argument is invalid",
+      "repairs": [],
+      "related": [
+        "HARN-NAM-003",
+        "HARN-NAM-011"
+      ],
+      "explanationPresent": true,
+      "apiStability": "stable"
+    },
+    {
+      "code": "HARN-NAM-101",
+      "category": "NAM",
+      "summary": "`main` entrypoint must take a single `harness: Harness` parameter",
+      "repairs": [
+        {
+          "id": "bindings/thread-harness",
+          "safety": "surface-changing",
+          "summary": "Rewrite the entrypoint as `fn main(harness: Harness)` so the runtime can thread its capability handle"
+        }
+      ],
+      "related": [],
+      "explanationPresent": true,
+      "apiStability": "stable"
+    },
+    {
+      "code": "HARN-CAP-001",
+      "category": "CAP",
+      "summary": "capability payload is invalid",
+      "repairs": [],
+      "related": [],
+      "explanationPresent": true,
+      "apiStability": "stable"
+    },
+    {
+      "code": "HARN-CAP-002",
+      "category": "CAP",
+      "summary": "human approval construct is missing policy",
+      "repairs": [],
+      "related": [],
+      "explanationPresent": true,
+      "apiStability": "stable"
+    },
+    {
+      "code": "HARN-CAP-003",
+      "category": "CAP",
+      "summary": "human approval argument is invalid",
+      "repairs": [],
+      "related": [],
+      "explanationPresent": true,
+      "apiStability": "stable"
+    },
+    {
+      "code": "HARN-CAP-004",
+      "category": "CAP",
+      "summary": "capability result must be checked",
+      "repairs": [
+        {
+          "id": "errors/check-or-rescue",
+          "safety": "scope-local",
+          "summary": "Check the result or wrap the call in a `rescue` block"
+        }
+      ],
+      "related": [
+        "HARN-RCV-001",
+        "HARN-RCV-002"
+      ],
+      "explanationPresent": true,
+      "apiStability": "stable"
+    },
+    {
+      "code": "HARN-CAP-005",
+      "category": "CAP",
+      "summary": "host capability operation is not declared",
+      "repairs": [],
+      "related": [
+        "HARN-CAP-006"
+      ],
+      "explanationPresent": true,
+      "apiStability": "stable"
+    },
+    {
+      "code": "HARN-CAP-006",
+      "category": "CAP",
+      "summary": "host capability call must use a static operation name",
+      "repairs": [],
+      "related": [],
+      "explanationPresent": true,
+      "apiStability": "stable"
+    },
+    {
+      "code": "HARN-CAP-007",
+      "category": "CAP",
+      "summary": "tool host capability binding is invalid",
+      "repairs": [
+        {
+          "id": "manual/review-capability-binding",
+          "safety": "needs-human",
+          "summary": "Review the capability binding; the fix is not mechanical"
+        }
+      ],
+      "related": [],
+      "explanationPresent": true,
+      "apiStability": "stable"
+    },
+    {
+      "code": "HARN-LLM-001",
+      "category": "LLM",
+      "summary": "LLM option key is not recognized",
+      "repairs": [],
+      "related": [
+        "HARN-LLM-002",
+        "HARN-LLM-004"
+      ],
+      "explanationPresent": true,
+      "apiStability": "stable"
+    },
+    {
+      "code": "HARN-LLM-002",
+      "category": "LLM",
+      "summary": "LLM option key is deprecated",
+      "repairs": [
+        {
+          "id": "llm/migrate-deprecated-option",
+          "safety": "scope-local",
+          "summary": "Replace the deprecated option with its supported equivalent"
+        }
+      ],
+      "related": [
+        "HARN-LLM-001"
+      ],
+      "explanationPresent": true,
+      "apiStability": "stable"
+    },
+    {
+      "code": "HARN-LLM-003",
+      "category": "LLM",
+      "summary": "LLM call is missing schema validation",
+      "repairs": [
+        {
+          "id": "llm/add-schema",
+          "safety": "surface-changing",
+          "summary": "Add a typed output schema to the LLM call"
+        }
+      ],
+      "related": [
+        "HARN-LLM-004",
+        "HARN-LLM-001"
+      ],
+      "explanationPresent": true,
+      "apiStability": "stable"
+    },
+    {
+      "code": "HARN-LLM-004",
+      "category": "LLM",
+      "summary": "LLM schema option is invalid",
+      "repairs": [],
+      "related": [
+        "HARN-LLM-003",
+        "HARN-LLM-001"
+      ],
+      "explanationPresent": true,
+      "apiStability": "stable"
+    },
+    {
+      "code": "HARN-LLM-005",
+      "category": "LLM",
+      "summary": "prompt branches on provider identity instead of capability flags",
+      "repairs": [
+        {
+          "id": "llm/use-capability-flag",
+          "safety": "capability-changing",
+          "summary": "Branch on a capability flag instead of provider identity"
+        }
+      ],
+      "related": [
+        "HARN-PRM-004"
+      ],
+      "explanationPresent": true,
+      "apiStability": "stable"
+    },
+    {
+      "code": "HARN-ORC-001",
+      "category": "ORC",
+      "summary": "orchestration construct has invalid arity",
+      "repairs": [],
+      "related": [],
+      "explanationPresent": true,
+      "apiStability": "stable"
+    },
+    {
+      "code": "HARN-ORC-002",
+      "category": "ORC",
+      "summary": "orchestration construct argument has invalid type",
+      "repairs": [],
+      "related": [],
+      "explanationPresent": true,
+      "apiStability": "stable"
+    },
+    {
+      "code": "HARN-ORC-003",
+      "category": "ORC",
+      "summary": "agent declaration is invalid",
+      "repairs": [],
+      "related": [],
+      "explanationPresent": true,
+      "apiStability": "stable"
+    },
+    {
+      "code": "HARN-ORC-004",
+      "category": "ORC",
+      "summary": "workflow declaration is invalid",
+      "repairs": [],
+      "related": [],
+      "explanationPresent": true,
+      "apiStability": "stable"
+    },
+    {
+      "code": "HARN-ORC-005",
+      "category": "ORC",
+      "summary": "tool declaration is invalid",
+      "repairs": [],
+      "related": [],
+      "explanationPresent": true,
+      "apiStability": "stable"
+    },
+    {
+      "code": "HARN-ORC-006",
+      "category": "ORC",
+      "summary": "pipeline declaration is invalid",
+      "repairs": [],
+      "related": [],
+      "explanationPresent": true,
+      "apiStability": "stable"
+    },
+    {
+      "code": "HARN-ORC-007",
+      "category": "ORC",
+      "summary": "select construct is invalid",
+      "repairs": [],
+      "related": [],
+      "explanationPresent": true,
+      "apiStability": "stable"
+    },
+    {
+      "code": "HARN-ORC-008",
+      "category": "ORC",
+      "summary": "statement cannot be reached",
+      "repairs": [
+        {
+          "id": "control-flow/remove-dead",
+          "safety": "behavior-preserving",
+          "summary": "Remove the unreachable code"
+        }
+      ],
+      "related": [],
+      "explanationPresent": true,
+      "apiStability": "stable"
+    },
+    {
+      "code": "HARN-ORC-009",
+      "category": "ORC",
+      "summary": "Flow invariant attribute set is invalid",
+      "repairs": [],
+      "related": [],
+      "explanationPresent": true,
+      "apiStability": "stable"
+    },
+    {
+      "code": "HARN-ORC-010",
+      "category": "ORC",
+      "summary": "execution target path cannot be found",
+      "repairs": [],
+      "related": [],
+      "explanationPresent": true,
+      "apiStability": "stable"
+    },
+    {
+      "code": "HARN-STD-001",
+      "category": "STD",
+      "summary": "stdlib symbol has been renamed or deprecated",
+      "repairs": [
+        {
+          "id": "stdlib/migrate-renamed",
+          "safety": "scope-local",
+          "summary": "Rename the call to the renamed stdlib symbol"
+        }
+      ],
+      "related": [],
+      "explanationPresent": true,
+      "apiStability": "stable"
+    },
+    {
+      "code": "HARN-STD-002",
+      "category": "STD",
+      "summary": "stdlib call is invalid",
+      "repairs": [],
+      "related": [],
+      "explanationPresent": true,
+      "apiStability": "stable"
+    },
+    {
+      "code": "HARN-STD-003",
+      "category": "STD",
+      "summary": "builtin call has invalid arity",
+      "repairs": [],
+      "related": [],
+      "explanationPresent": true,
+      "apiStability": "stable"
+    },
+    {
+      "code": "HARN-PRM-001",
+      "category": "PRM",
+      "summary": "prompt template cannot be parsed",
+      "repairs": [],
+      "related": [
+        "HARN-PRM-007"
+      ],
+      "explanationPresent": true,
+      "apiStability": "stable"
+    },
+    {
+      "code": "HARN-PRM-002",
+      "category": "PRM",
+      "summary": "prompt template has too many capability-aware branches",
+      "repairs": [
+        {
+          "id": "manual/needs-human",
+          "safety": "needs-human",
+          "summary": "Plan a human-led change; auto-apply is not safe here"
+        }
+      ],
+      "related": [
+        "HARN-LNT-044"
+      ],
+      "explanationPresent": true,
+      "apiStability": "stable"
+    },
+    {
+      "code": "HARN-PRM-003",
+      "category": "PRM",
+      "summary": "prompt construction risks direct injection",
+      "repairs": [
+        {
+          "id": "prompts/escape-injection",
+          "safety": "scope-local",
+          "summary": "Pass the untrusted input through a structured placeholder"
+        }
+      ],
+      "related": [
+        "HARN-LNT-026"
+      ],
+      "explanationPresent": true,
+      "apiStability": "stable"
+    },
+    {
+      "code": "HARN-PRM-004",
+      "category": "PRM",
+      "summary": "prompt template branches on provider identity",
+      "repairs": [
+        {
+          "id": "llm/use-capability-flag",
+          "safety": "capability-changing",
+          "summary": "Branch on a capability flag instead of provider identity"
+        }
+      ],
+      "related": [
+        "HARN-LLM-005",
+        "HARN-LNT-046"
+      ],
+      "explanationPresent": true,
+      "apiStability": "stable"
+    },
+    {
+      "code": "HARN-PRM-005",
+      "category": "PRM",
+      "summary": "prompt references a tool outside the declared surface",
+      "repairs": [
+        {
+          "id": "prompts/add-tool-to-surface",
+          "safety": "surface-changing",
+          "summary": "Add the referenced tool to the declared tool surface"
+        }
+      ],
+      "related": [],
+      "explanationPresent": true,
+      "apiStability": "stable"
+    },
+    {
+      "code": "HARN-PRM-006",
+      "category": "PRM",
+      "summary": "prompt references a deferred tool without tool search",
+      "repairs": [
+        {
+          "id": "prompts/add-tool-to-surface",
+          "safety": "surface-changing",
+          "summary": "Add the referenced tool to the declared tool surface"
+        }
+      ],
+      "related": [],
+      "explanationPresent": true,
+      "apiStability": "stable"
+    },
+    {
+      "code": "HARN-PRM-007",
+      "category": "PRM",
+      "summary": "prompt or template target cannot be found",
+      "repairs": [],
+      "related": [],
+      "explanationPresent": true,
+      "apiStability": "stable"
+    },
+    {
+      "code": "HARN-MOD-001",
+      "category": "MOD",
+      "summary": "module import cannot be resolved",
+      "repairs": [
+        {
+          "id": "imports/fix-path",
+          "safety": "scope-local",
+          "summary": "Replace the import path with a resolvable target"
+        }
+      ],
+      "related": [
+        "HARN-IMP-001",
+        "HARN-IMP-002"
+      ],
+      "explanationPresent": true,
+      "apiStability": "stable"
+    },
+    {
+      "code": "HARN-MOD-002",
+      "category": "MOD",
+      "summary": "module import is unused",
+      "repairs": [
+        {
+          "id": "imports/remove-unused",
+          "safety": "behavior-preserving",
+          "summary": "Remove the unused import"
+        }
+      ],
+      "related": [
+        "HARN-LNT-017"
+      ],
+      "explanationPresent": true,
+      "apiStability": "stable"
+    },
+    {
+      "code": "HARN-MOD-003",
+      "category": "MOD",
+      "summary": "module imports are not in canonical order",
+      "repairs": [
+        {
+          "id": "imports/reorder",
+          "safety": "format-only",
+          "summary": "Reorder imports into canonical grouping"
+        }
+      ],
+      "related": [],
+      "explanationPresent": true,
+      "apiStability": "stable"
+    },
+    {
+      "code": "HARN-MOD-004",
+      "category": "MOD",
+      "summary": "module export is invalid",
+      "repairs": [],
+      "related": [],
+      "explanationPresent": true,
+      "apiStability": "stable"
+    },
+    {
+      "code": "HARN-MOD-005",
+      "category": "MOD",
+      "summary": "module imports expose colliding names",
+      "repairs": [],
+      "related": [],
+      "explanationPresent": true,
+      "apiStability": "stable"
+    },
+    {
+      "code": "HARN-MOD-006",
+      "category": "MOD",
+      "summary": "module re-exports conflict",
+      "repairs": [],
+      "related": [],
+      "explanationPresent": true,
+      "apiStability": "stable"
+    },
+    {
+      "code": "HARN-LNT-001",
+      "category": "LNT",
+      "summary": "renamed stdlib symbol lint",
+      "repairs": [
+        {
+          "id": "stdlib/migrate-renamed",
+          "safety": "scope-local",
+          "summary": "Rename the call to the renamed stdlib symbol"
+        }
+      ],
+      "related": [
+        "HARN-STD-001"
+      ],
+      "explanationPresent": true,
+      "apiStability": "stable"
+    },
+    {
+      "code": "HARN-LNT-002",
+      "category": "LNT",
+      "summary": "cyclomatic complexity lint",
+      "repairs": [],
+      "related": [],
+      "explanationPresent": true,
+      "apiStability": "stable"
+    },
+    {
+      "code": "HARN-LNT-003",
+      "category": "LNT",
+      "summary": "naming convention lint",
+      "repairs": [
+        {
+          "id": "style/rename-to-convention",
+          "safety": "surface-changing",
+          "summary": "Rename to match the casing convention for this kind"
+        }
+      ],
+      "related": [],
+      "explanationPresent": true,
+      "apiStability": "stable"
+    },
+    {
+      "code": "HARN-LNT-004",
+      "category": "LNT",
+      "summary": "eager collection conversion lint",
+      "repairs": [
+        {
+          "id": "collections/prefer-lazy",
+          "safety": "scope-local",
+          "summary": "Replace the eager collection step with a lazy variant"
+        }
+      ],
+      "related": [],
+      "explanationPresent": true,
+      "apiStability": "stable"
+    },
+    {
+      "code": "HARN-LNT-005",
+      "category": "LNT",
+      "summary": "redundant clone lint",
+      "repairs": [
+        {
+          "id": "clones/remove-redundant",
+          "safety": "behavior-preserving",
+          "summary": "Remove the redundant clone"
+        }
+      ],
+      "related": [],
+      "explanationPresent": true,
+      "apiStability": "stable"
+    },
+    {
+      "code": "HARN-LNT-006",
+      "category": "LNT",
+      "summary": "long-running workflow cleanup lint",
+      "repairs": [
+        {
+          "id": "manual/needs-human",
+          "safety": "needs-human",
+          "summary": "Plan a human-led change; auto-apply is not safe here"
+        }
+      ],
+      "related": [],
+      "explanationPresent": true,
+      "apiStability": "stable"
+    },
+    {
+      "code": "HARN-LNT-007",
+      "category": "LNT",
+      "summary": "MCP tool annotations lint",
+      "repairs": [
+        {
+          "id": "manual/needs-human",
+          "safety": "needs-human",
+          "summary": "Plan a human-led change; auto-apply is not safe here"
+        }
+      ],
+      "related": [],
+      "explanationPresent": true,
+      "apiStability": "stable"
+    },
+    {
+      "code": "HARN-LNT-008",
+      "category": "LNT",
+      "summary": "PR open without secret scan lint",
+      "repairs": [],
+      "related": [],
+      "explanationPresent": true,
+      "apiStability": "stable"
+    },
+    {
+      "code": "HARN-LNT-009",
+      "category": "LNT",
+      "summary": "shadow variable lint",
+      "repairs": [
+        {
+          "id": "bindings/rename-shadow",
+          "safety": "scope-local",
+          "summary": "Rename the shadowing binding to a distinct name"
+        }
+      ],
+      "related": [],
+      "explanationPresent": true,
+      "apiStability": "stable"
+    },
+    {
+      "code": "HARN-LNT-010",
+      "category": "LNT",
+      "summary": "persona hook target lint",
+      "repairs": [],
+      "related": [],
+      "explanationPresent": true,
+      "apiStability": "stable"
+    },
+    {
+      "code": "HARN-LNT-011",
+      "category": "LNT",
+      "summary": "dead code after return lint",
+      "repairs": [
+        {
+          "id": "control-flow/remove-dead",
+          "safety": "behavior-preserving",
+          "summary": "Remove the unreachable code"
+        }
+      ],
+      "related": [],
+      "explanationPresent": true,
+      "apiStability": "stable"
+    },
+    {
+      "code": "HARN-LNT-012",
+      "category": "LNT",
+      "summary": "let then return lint",
+      "repairs": [
+        {
+          "id": "control-flow/flatten",
+          "safety": "behavior-preserving",
+          "summary": "Flatten the unnecessary control flow construct"
+        }
+      ],
+      "related": [],
+      "explanationPresent": true,
+      "apiStability": "stable"
+    },
+    {
+      "code": "HARN-LNT-013",
+      "category": "LNT",
+      "summary": "unhandled approval result lint",
+      "repairs": [
+        {
+          "id": "errors/check-or-rescue",
+          "safety": "scope-local",
+          "summary": "Check the result or wrap the call in a `rescue` block"
+        }
+      ],
+      "related": [],
+      "explanationPresent": true,
+      "apiStability": "stable"
+    },
+    {
+      "code": "HARN-LNT-014",
+      "category": "LNT",
+      "summary": "unused variable lint",
+      "repairs": [
+        {
+          "id": "bindings/rename-unused",
+          "safety": "behavior-preserving",
+          "summary": "Prefix the unused binding with `_` to silence the lint"
+        }
+      ],
+      "related": [],
+      "explanationPresent": true,
+      "apiStability": "stable"
+    },
+    {
+      "code": "HARN-LNT-015",
+      "category": "LNT",
+      "summary": "unused pattern binding lint",
+      "repairs": [
+        {
+          "id": "bindings/rename-unused",
+          "safety": "behavior-preserving",
+          "summary": "Prefix the unused binding with `_` to silence the lint"
+        }
+      ],
+      "related": [],
+      "explanationPresent": true,
+      "apiStability": "stable"
+    },
+    {
+      "code": "HARN-LNT-016",
+      "category": "LNT",
+      "summary": "unused parameter lint",
+      "repairs": [
+        {
+          "id": "bindings/rename-unused",
+          "safety": "behavior-preserving",
+          "summary": "Prefix the unused binding with `_` to silence the lint"
+        }
+      ],
+      "related": [],
+      "explanationPresent": true,
+      "apiStability": "stable"
+    },
+    {
+      "code": "HARN-LNT-017",
+      "category": "LNT",
+      "summary": "unused import lint",
+      "repairs": [
+        {
+          "id": "imports/remove-unused",
+          "safety": "behavior-preserving",
+          "summary": "Remove the unused import"
+        }
+      ],
+      "related": [
+        "HARN-MOD-002"
+      ],
+      "explanationPresent": true,
+      "apiStability": "stable"
+    },
+    {
+      "code": "HARN-LNT-018",
+      "category": "LNT",
+      "summary": "mutable never reassigned lint",
+      "repairs": [
+        {
+          "id": "bindings/make-immutable",
+          "safety": "behavior-preserving",
+          "summary": "Drop `mut` since the binding is never reassigned"
+        }
+      ],
+      "related": [
+        "HARN-OWN-002"
+      ],
+      "explanationPresent": true,
+      "apiStability": "stable"
+    },
+    {
+      "code": "HARN-LNT-019",
+      "category": "LNT",
+      "summary": "unused function lint",
+      "repairs": [
+        {
+          "id": "declarations/remove-unused",
+          "safety": "surface-changing",
+          "summary": "Remove the unused declaration"
+        }
+      ],
+      "related": [],
+      "explanationPresent": true,
+      "apiStability": "stable"
+    },
+    {
+      "code": "HARN-LNT-020",
+      "category": "LNT",
+      "summary": "unused type lint",
+      "repairs": [
+        {
+          "id": "declarations/remove-unused",
+          "safety": "surface-changing",
+          "summary": "Remove the unused declaration"
+        }
+      ],
+      "related": [],
+      "explanationPresent": true,
+      "apiStability": "stable"
+    },
+    {
+      "code": "HARN-LNT-021",
+      "category": "LNT",
+      "summary": "persona body must call steps lint",
+      "repairs": [],
+      "related": [],
+      "explanationPresent": true,
+      "apiStability": "stable"
+    },
+    {
+      "code": "HARN-LNT-022",
+      "category": "LNT",
+      "summary": "undefined function lint",
+      "repairs": [],
+      "related": [],
+      "explanationPresent": true,
+      "apiStability": "stable"
+    },
+    {
+      "code": "HARN-LNT-023",
+      "category": "LNT",
+      "summary": "pipeline return type lint",
+      "repairs": [],
+      "related": [],
+      "explanationPresent": true,
+      "apiStability": "stable"
+    },
+    {
+      "code": "HARN-LNT-024",
+      "category": "LNT",
+      "summary": "missing harndoc lint",
+      "repairs": [
+        {
+          "id": "doc/add-harndoc",
+          "safety": "behavior-preserving",
+          "summary": "Add a `///` doc comment describing this declaration"
+        }
+      ],
+      "related": [],
+      "explanationPresent": true,
+      "apiStability": "stable"
+    },
+    {
+      "code": "HARN-LNT-025",
+      "category": "LNT",
+      "summary": "assert outside test lint",
+      "repairs": [],
+      "related": [],
+      "explanationPresent": true,
+      "apiStability": "stable"
+    },
+    {
+      "code": "HARN-LNT-026",
+      "category": "LNT",
+      "summary": "prompt injection risk lint",
+      "repairs": [
+        {
+          "id": "prompts/escape-injection",
+          "safety": "scope-local",
+          "summary": "Pass the untrusted input through a structured placeholder"
+        }
+      ],
+      "related": [
+        "HARN-PRM-003"
+      ],
+      "explanationPresent": true,
+      "apiStability": "stable"
+    },
+    {
+      "code": "HARN-LNT-027",
+      "category": "LNT",
+      "summary": "connector effect policy lint",
+      "repairs": [],
+      "related": [],
+      "explanationPresent": true,
+      "apiStability": "stable"
+    },
+    {
+      "code": "HARN-LNT-028",
+      "category": "LNT",
+      "summary": "unnecessary cast lint",
+      "repairs": [
+        {
+          "id": "casts/remove-redundant",
+          "safety": "behavior-preserving",
+          "summary": "Remove the redundant cast"
+        }
+      ],
+      "related": [],
+      "explanationPresent": true,
+      "apiStability": "stable"
+    },
+    {
+      "code": "HARN-LNT-029",
+      "category": "LNT",
+      "summary": "untyped dict access lint",
+      "repairs": [
+        {
+          "id": "types/add-shape-annotation",
+          "safety": "surface-changing",
+          "summary": "Annotate the dict with a concrete shape type"
+        }
+      ],
+      "related": [],
+      "explanationPresent": true,
+      "apiStability": "stable"
+    },
+    {
+      "code": "HARN-LNT-030",
+      "category": "LNT",
+      "summary": "constant logical operand lint",
+      "repairs": [
+        {
+          "id": "expressions/simplify",
+          "safety": "behavior-preserving",
+          "summary": "Simplify the expression to its canonical form"
+        }
+      ],
+      "related": [],
+      "explanationPresent": true,
+      "apiStability": "stable"
+    },
+    {
+      "code": "HARN-LNT-031",
+      "category": "LNT",
+      "summary": "pointless comparison lint",
+      "repairs": [
+        {
+          "id": "expressions/simplify",
+          "safety": "behavior-preserving",
+          "summary": "Simplify the expression to its canonical form"
+        }
+      ],
+      "related": [],
+      "explanationPresent": true,
+      "apiStability": "stable"
+    },
+    {
+      "code": "HARN-LNT-032",
+      "category": "LNT",
+      "summary": "comparison to bool lint",
+      "repairs": [
+        {
+          "id": "expressions/simplify",
+          "safety": "behavior-preserving",
+          "summary": "Simplify the expression to its canonical form"
+        }
+      ],
+      "related": [],
+      "explanationPresent": true,
+      "apiStability": "stable"
+    },
+    {
+      "code": "HARN-LNT-033",
+      "category": "LNT",
+      "summary": "invalid binary operator literal lint",
+      "repairs": [],
+      "related": [],
+      "explanationPresent": true,
+      "apiStability": "stable"
+    },
+    {
+      "code": "HARN-LNT-034",
+      "category": "LNT",
+      "summary": "redundant nil ternary lint",
+      "repairs": [
+        {
+          "id": "expressions/simplify",
+          "safety": "behavior-preserving",
+          "summary": "Simplify the expression to its canonical form"
+        }
+      ],
+      "related": [],
+      "explanationPresent": true,
+      "apiStability": "stable"
+    },
+    {
+      "code": "HARN-LNT-035",
+      "category": "LNT",
+      "summary": "empty block lint",
+      "repairs": [
+        {
+          "id": "blocks/remove-empty",
+          "safety": "scope-local",
+          "summary": "Remove the empty block or fill in an explicit body"
+        }
+      ],
+      "related": [],
+      "explanationPresent": true,
+      "apiStability": "stable"
+    },
+    {
+      "code": "HARN-LNT-036",
+      "category": "LNT",
+      "summary": "unnecessary else return lint",
+      "repairs": [
+        {
+          "id": "control-flow/flatten",
+          "safety": "behavior-preserving",
+          "summary": "Flatten the unnecessary control flow construct"
+        }
+      ],
+      "related": [],
+      "explanationPresent": true,
+      "apiStability": "stable"
+    },
+    {
+      "code": "HARN-LNT-037",
+      "category": "LNT",
+      "summary": "duplicate match arm lint",
+      "repairs": [
+        {
+          "id": "match/remove-duplicate-arm",
+          "safety": "behavior-preserving",
+          "summary": "Remove the duplicated match arm"
+        }
+      ],
+      "related": [
+        "HARN-MAT-002"
+      ],
+      "explanationPresent": true,
+      "apiStability": "stable"
+    },
+    {
+      "code": "HARN-LNT-038",
+      "category": "LNT",
+      "summary": "require in test lint",
+      "repairs": [],
+      "related": [],
+      "explanationPresent": true,
+      "apiStability": "stable"
+    },
+    {
+      "code": "HARN-LNT-039",
+      "category": "LNT",
+      "summary": "break outside loop lint",
+      "repairs": [],
+      "related": [],
+      "explanationPresent": true,
+      "apiStability": "stable"
+    },
+    {
+      "code": "HARN-LNT-040",
+      "category": "LNT",
+      "summary": "template parse lint",
+      "repairs": [],
+      "related": [],
+      "explanationPresent": true,
+      "apiStability": "stable"
+    },
+    {
+      "code": "HARN-LNT-041",
+      "category": "LNT",
+      "summary": "blank line between items lint",
+      "repairs": [
+        {
+          "id": "format/reformat",
+          "safety": "format-only",
+          "summary": "Apply canonical formatting"
+        }
+      ],
+      "related": [],
+      "explanationPresent": true,
+      "apiStability": "stable"
+    },
+    {
+      "code": "HARN-LNT-042",
+      "category": "LNT",
+      "summary": "trailing comma lint",
+      "repairs": [
+        {
+          "id": "format/reformat",
+          "safety": "format-only",
+          "summary": "Apply canonical formatting"
+        }
+      ],
+      "related": [],
+      "explanationPresent": true,
+      "apiStability": "stable"
+    },
+    {
+      "code": "HARN-LNT-043",
+      "category": "LNT",
+      "summary": "unnecessary parentheses lint",
+      "repairs": [
+        {
+          "id": "format/reformat",
+          "safety": "format-only",
+          "summary": "Apply canonical formatting"
+        }
+      ],
+      "related": [],
+      "explanationPresent": true,
+      "apiStability": "stable"
+    },
+    {
+      "code": "HARN-LNT-044",
+      "category": "LNT",
+      "summary": "template variant explosion lint",
+      "repairs": [
+        {
+          "id": "manual/needs-human",
+          "safety": "needs-human",
+          "summary": "Plan a human-led change; auto-apply is not safe here"
+        }
+      ],
+      "related": [
+        "HARN-PRM-002"
+      ],
+      "explanationPresent": true,
+      "apiStability": "stable"
+    },
+    {
+      "code": "HARN-LNT-045",
+      "category": "LNT",
+      "summary": "require file header lint",
+      "repairs": [
+        {
+          "id": "format/reformat",
+          "safety": "format-only",
+          "summary": "Apply canonical formatting"
+        }
+      ],
+      "related": [],
+      "explanationPresent": true,
+      "apiStability": "stable"
+    },
+    {
+      "code": "HARN-LNT-046",
+      "category": "LNT",
+      "summary": "template provider identity branch lint",
+      "repairs": [
+        {
+          "id": "llm/use-capability-flag",
+          "safety": "capability-changing",
+          "summary": "Branch on a capability flag instead of provider identity"
+        }
+      ],
+      "related": [
+        "HARN-PRM-004"
+      ],
+      "explanationPresent": true,
+      "apiStability": "stable"
+    },
+    {
+      "code": "HARN-LNT-047",
+      "category": "LNT",
+      "summary": "import order lint",
+      "repairs": [
+        {
+          "id": "imports/reorder",
+          "safety": "format-only",
+          "summary": "Reorder imports into canonical grouping"
+        }
+      ],
+      "related": [],
+      "explanationPresent": true,
+      "apiStability": "stable"
+    },
+    {
+      "code": "HARN-LNT-048",
+      "category": "LNT",
+      "summary": "prefer optional shorthand lint",
+      "repairs": [
+        {
+          "id": "expressions/simplify",
+          "safety": "behavior-preserving",
+          "summary": "Simplify the expression to its canonical form"
+        }
+      ],
+      "related": [],
+      "explanationPresent": true,
+      "apiStability": "stable"
+    },
+    {
+      "code": "HARN-LNT-049",
+      "category": "LNT",
+      "summary": "legacy doc comment lint",
+      "repairs": [
+        {
+          "id": "doc/migrate-comment-style",
+          "safety": "format-only",
+          "summary": "Migrate the legacy comment to canonical doc syntax"
+        }
+      ],
+      "related": [],
+      "explanationPresent": true,
+      "apiStability": "stable"
+    },
+    {
+      "code": "HARN-LNT-050",
+      "category": "LNT",
+      "summary": "deprecated LLM options lint",
+      "repairs": [
+        {
+          "id": "llm/migrate-deprecated-option",
+          "safety": "scope-local",
+          "summary": "Replace the deprecated option with its supported equivalent"
+        }
+      ],
+      "related": [
+        "HARN-LLM-002",
+        "HARN-LLM-001"
+      ],
+      "explanationPresent": true,
+      "apiStability": "stable"
+    },
+    {
+      "code": "HARN-LNT-051",
+      "category": "LNT",
+      "summary": "unnecessary safe navigation lint",
+      "repairs": [
+        {
+          "id": "expressions/simplify",
+          "safety": "behavior-preserving",
+          "summary": "Simplify the expression to its canonical form"
+        }
+      ],
+      "related": [],
+      "explanationPresent": true,
+      "apiStability": "stable"
+    },
+    {
+      "code": "HARN-FMT-001",
+      "category": "FMT",
+      "summary": "formatter could not parse the source",
+      "repairs": [],
+      "related": [],
+      "explanationPresent": true,
+      "apiStability": "stable"
+    },
+    {
+      "code": "HARN-FMT-002",
+      "category": "FMT",
+      "summary": "source is not in canonical format",
+      "repairs": [
+        {
+          "id": "format/reformat",
+          "safety": "format-only",
+          "summary": "Apply canonical formatting"
+        }
+      ],
+      "related": [],
+      "explanationPresent": true,
+      "apiStability": "stable"
+    },
+    {
+      "code": "HARN-FMT-003",
+      "category": "FMT",
+      "summary": "formatter normalized trailing comma layout",
+      "repairs": [
+        {
+          "id": "format/reformat",
+          "safety": "format-only",
+          "summary": "Apply canonical formatting"
+        }
+      ],
+      "related": [],
+      "explanationPresent": true,
+      "apiStability": "stable"
+    },
+    {
+      "code": "HARN-IMP-001",
+      "category": "IMP",
+      "summary": "import target cannot be resolved",
+      "repairs": [
+        {
+          "id": "imports/fix-path",
+          "safety": "scope-local",
+          "summary": "Replace the import path with a resolvable target"
+        }
+      ],
+      "related": [
+        "HARN-MOD-001",
+        "HARN-IMP-002"
+      ],
+      "explanationPresent": true,
+      "apiStability": "stable"
+    },
+    {
+      "code": "HARN-IMP-002",
+      "category": "IMP",
+      "summary": "imported symbol does not exist",
+      "repairs": [],
+      "related": [],
+      "explanationPresent": true,
+      "apiStability": "stable"
+    },
+    {
+      "code": "HARN-IMP-003",
+      "category": "IMP",
+      "summary": "import graph contains a cycle",
+      "repairs": [],
+      "related": [
+        "HARN-IMP-001"
+      ],
+      "explanationPresent": true,
+      "apiStability": "stable"
+    },
+    {
+      "code": "HARN-OWN-001",
+      "category": "OWN",
+      "summary": "immutable binding is reassigned",
+      "repairs": [
+        {
+          "id": "bindings/make-mutable",
+          "safety": "scope-local",
+          "summary": "Mark the binding `mut` so it can be reassigned"
+        }
+      ],
+      "related": [
+        "HARN-OWN-002"
+      ],
+      "explanationPresent": true,
+      "apiStability": "stable"
+    },
+    {
+      "code": "HARN-OWN-002",
+      "category": "OWN",
+      "summary": "mutable binding is never reassigned",
+      "repairs": [
+        {
+          "id": "bindings/make-immutable",
+          "safety": "behavior-preserving",
+          "summary": "Drop `mut` since the binding is never reassigned"
+        }
+      ],
+      "related": [
+        "HARN-LNT-018"
+      ],
+      "explanationPresent": true,
+      "apiStability": "stable"
+    },
+    {
+      "code": "HARN-OWN-003",
+      "category": "OWN",
+      "summary": "owned value escapes its valid scope",
+      "repairs": [],
+      "related": [],
+      "explanationPresent": true,
+      "apiStability": "stable"
+    },
+    {
+      "code": "HARN-OWN-004",
+      "category": "OWN",
+      "summary": "unvalidated boundary value is used directly",
+      "repairs": [],
+      "related": [],
+      "explanationPresent": true,
+      "apiStability": "stable"
+    },
+    {
+      "code": "HARN-RCV-001",
+      "category": "RCV",
+      "summary": "rescue construct is outside a function body",
+      "repairs": [
+        {
+          "id": "errors/wrap-in-fn",
+          "safety": "surface-changing",
+          "summary": "Move the construct inside a function body"
+        }
+      ],
+      "related": [
+        "HARN-RCV-002",
+        "HARN-RCV-003"
+      ],
+      "explanationPresent": true,
+      "apiStability": "stable"
+    },
+    {
+      "code": "HARN-RCV-002",
+      "category": "RCV",
+      "summary": "try construct is outside a function body",
+      "repairs": [
+        {
+          "id": "errors/wrap-in-fn",
+          "safety": "surface-changing",
+          "summary": "Move the construct inside a function body"
+        }
+      ],
+      "related": [
+        "HARN-RCV-001"
+      ],
+      "explanationPresent": true,
+      "apiStability": "stable"
+    },
+    {
+      "code": "HARN-RCV-003",
+      "category": "RCV",
+      "summary": "rescue construct is invalid",
+      "repairs": [],
+      "related": [],
+      "explanationPresent": true,
+      "apiStability": "stable"
+    },
+    {
+      "code": "HARN-MAT-001",
+      "category": "MAT",
+      "summary": "match expression is not exhaustive",
+      "repairs": [
+        {
+          "id": "match/add-missing-arms",
+          "safety": "scope-local",
+          "summary": "Add arms covering the missing variants"
+        }
+      ],
+      "related": [
+        "HARN-MAT-003",
+        "HARN-MAT-002"
+      ],
+      "explanationPresent": true,
+      "apiStability": "stable"
+    },
+    {
+      "code": "HARN-MAT-002",
+      "category": "MAT",
+      "summary": "match expression contains a duplicate arm",
+      "repairs": [
+        {
+          "id": "match/remove-duplicate-arm",
+          "safety": "behavior-preserving",
+          "summary": "Remove the duplicated match arm"
+        }
+      ],
+      "related": [
+        "HARN-MAT-001",
+        "HARN-LNT-037"
+      ],
+      "explanationPresent": true,
+      "apiStability": "stable"
+    },
+    {
+      "code": "HARN-MAT-003",
+      "category": "MAT",
+      "summary": "match pattern is invalid",
+      "repairs": [],
+      "related": [],
+      "explanationPresent": true,
+      "apiStability": "stable"
+    }
+  ]
+}
