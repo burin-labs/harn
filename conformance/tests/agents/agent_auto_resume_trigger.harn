@@ -1,0 +1,41 @@
+import "std/agents"
+import "std/triggers"
+
+pipeline main() {
+  llm_mock(
+    {
+      tool_calls: [
+        {
+          id: "park_until_review",
+          name: "agent_await_resumption",
+          arguments: {reason: "waiting on review", conditions: {trigger: {kind: "review.approved", provider: "github"}}},
+        },
+      ],
+      input_tokens: 7,
+      output_tokens: 3,
+    },
+  )
+  llm_mock({text: "resumed after review"})
+  let handle = sub_agent_run(
+    "Park until review approval.",
+    {provider: "mock", background: true, tool_format: "native", max_iterations: 3},
+  )
+  let suspended = wait_agent(handle)
+  let trigger_handle = suspended?.suspension?.auto_resume_trigger
+  println(suspended?.status)
+  println(trigger_handle?.id != nil)
+  println(trigger_handle?.version != nil)
+  let fired: DispatchHandle = trigger_fire(
+    trigger_handle,
+    {
+      provider: "github",
+      kind: "review.approved",
+      payload: {decision: "approved"},
+      headers: {x_delivery: "auto-resume-conformance"},
+    },
+  )
+  println(fired.status)
+  let resumed = wait_agent(handle)
+  println(resumed?.status)
+  println(contains(resumed?.task ?? "", "approved"))
+}

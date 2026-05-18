@@ -151,6 +151,9 @@ pub enum TriggerHandlerSpec {
     Persona {
         binding: crate::PersonaRuntimeBinding,
     },
+    AutoResume {
+        worker_id: String,
+    },
 }
 
 impl std::fmt::Debug for TriggerHandlerSpec {
@@ -170,6 +173,10 @@ impl std::fmt::Debug for TriggerHandlerSpec {
                 .debug_struct("Persona")
                 .field("name", &binding.name)
                 .finish(),
+            Self::AutoResume { worker_id } => f
+                .debug_struct("AutoResume")
+                .field("worker_id", worker_id)
+                .finish(),
         }
     }
 }
@@ -181,6 +188,7 @@ impl TriggerHandlerSpec {
             Self::A2a { .. } => "a2a",
             Self::Worker { .. } => "worker",
             Self::Persona { .. } => "persona",
+            Self::AutoResume { .. } => "auto_resume",
         }
     }
 }

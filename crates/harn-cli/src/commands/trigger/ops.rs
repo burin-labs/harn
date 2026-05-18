@@ -720,6 +720,7 @@ fn handler_kind(binding: &harn_vm::triggers::registry::TriggerBinding) -> &'stat
         TriggerHandlerSpec::A2a { .. } => "a2a",
         TriggerHandlerSpec::Worker { .. } => "worker",
         TriggerHandlerSpec::Persona { .. } => "persona",
+        TriggerHandlerSpec::AutoResume { .. } => "auto_resume",
     }
 }
 
@@ -729,6 +730,7 @@ fn handler_label(binding: &harn_vm::triggers::registry::TriggerBinding) -> Strin
         TriggerHandlerSpec::A2a { target, .. } => target.clone(),
         TriggerHandlerSpec::Worker { queue } => queue.clone(),
         TriggerHandlerSpec::Persona { binding } => binding.name.clone(),
+        TriggerHandlerSpec::AutoResume { worker_id } => worker_id.clone(),
     }
 }
 
@@ -738,6 +740,7 @@ fn target_uri(binding: &harn_vm::triggers::registry::TriggerBinding) -> String {
         TriggerHandlerSpec::A2a { target, .. } => format!("a2a://{target}"),
         TriggerHandlerSpec::Worker { queue } => format!("worker://{queue}"),
         TriggerHandlerSpec::Persona { binding } => format!("persona://{}", binding.name),
+        TriggerHandlerSpec::AutoResume { worker_id } => format!("auto_resume://{worker_id}"),
     }
 }
 
