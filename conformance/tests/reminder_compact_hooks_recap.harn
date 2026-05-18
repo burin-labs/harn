@@ -1,0 +1,47 @@
+let pre_seen = atomic(0)
+
+let post_seen = atomic(0)
+
+pipeline main() {
+  clear_session_hooks()
+  let session = agent_session_open("reminder-compact-hooks-recap")
+  agent_session_reset(session)
+  agent_session_inject(session, {role: "user", content: "one"})
+  agent_session_inject(session, {role: "assistant", content: "two"})
+  agent_session_inject(session, {role: "user", content: "three"})
+  agent_session_inject(session, {role: "assistant", content: "four"})
+  register_session_hook(
+    "pre_compact",
+    { event ->
+      if event?.session?.id == session {
+        atomic_add(pre_seen, 1)
+      }
+      if atomic_get(pre_seen) == 1 {
+        return {block: true, reason: "first compaction intentionally vetoed"}
+      }
+      return nil
+    },
+  )
+  register_session_hook(
+    "post_compact",
+    { event ->
+      if event?.archived_messages ?? 0 > 0 {
+        atomic_add(post_seen, 1)
+      }
+      return nil
+    },
+  )
+  let opts = {strategy: "truncate", keep_last: 1, target_tokens: 1}
+  let snapshot = agent_session_snapshot(session) ?? {}
+  let blocked = transcript_compact(snapshot, opts)
+  let compacted = transcript_compact(snapshot, opts)
+  let reminders = transcript_events_by_kind(agent_session_snapshot(session), "system_reminder")
+  println(len(transcript_events_by_kind(blocked, "compaction")))
+  println(atomic_get(pre_seen))
+  println(atomic_get(post_seen))
+  println(len(reminders))
+  println(reminders[0].reminder.tags[0])
+  println(reminders[0].reminder.body.contains("Transcript compacted"))
+  println(len(transcript_events_by_kind(compacted, "compaction")))
+  clear_session_hooks()
+}

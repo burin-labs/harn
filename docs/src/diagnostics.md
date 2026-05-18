@@ -44,7 +44,7 @@ Repairs are tagged with a six-level safety class so `harn fix --apply --safety <
 | [`STD`](#std--stdlib-usage) | Stdlib usage | 4 |
 | [`PRM`](#prm--prompt-templates) | Prompt templates | 7 |
 | [`MOD`](#mod--modules-and-exports) | Modules and exports | 6 |
-| [`RMD`](#rmd--reminder-lifecycle) | Reminder lifecycle | 3 |
+| [`RMD`](#rmd--reminder-lifecycle) | Reminder lifecycle | 4 |
 | [`SUS`](#sus--suspend--resume-lifecycle) | Suspend / resume lifecycle | 10 |
 | [`LNT`](#lnt--lint-rules) | Lint rules | 53 |
 | [`FMT`](#fmt--formatter) | Formatter | 3 |
@@ -188,6 +188,7 @@ Repairs are tagged with a six-level safety class so `harn fix --apply --safety <
 | [`HARN-RMD-001`](#harn-rmd-001) | reminder lifecycle option key is not recognized | — | — |
 | [`HARN-RMD-002`](#harn-rmd-002) | reminder payload shape is invalid | — | — |
 | [`HARN-RMD-003`](#harn-rmd-003) | user_block reminder role hint is not supported by the selected provider | — | — |
+| [`HARN-RMD-004`](#harn-rmd-004) | discardable reminder has no TTL | — | — |
 
 ## SUS — Suspend / resume lifecycle
 
@@ -2931,6 +2932,21 @@ content blocks or OpenAI developer-role messages.
 Use `role_hint: "system"` or `role_hint: "developer"` for provider-neutral
 reminders, or branch on provider capability flags before selecting a
 provider-specific reminder shape.
+
+### `HARN-RMD-004`
+
+**Category:** `RMD` (Reminder lifecycle) &nbsp;·&nbsp; **API stability:** `stable`
+
+discardable reminder has no TTL
+
+**Variant:** `Code::ReminderInfiniteDiscardable`
+
+A reminder literal sets `preserve_on_compact: false` while leaving
+`ttl_turns` unset or `nil`. That reminder can live forever during normal
+turns, but it is allowed to disappear at the next transcript compaction.
+
+Set a finite `ttl_turns` for short-lived nudges, or set
+`preserve_on_compact: true` when the reminder must survive compaction.
 
 ### `HARN-SUS-001`
 

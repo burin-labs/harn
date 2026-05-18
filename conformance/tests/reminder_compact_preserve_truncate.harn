@@ -1,0 +1,26 @@
+pipeline main() {
+  let base = transcript_from_messages(
+    [
+      {role: "user", content: "one"},
+      {role: "assistant", content: "two"},
+      {role: "user", content: "three"},
+      {role: "assistant", content: "four"},
+    ],
+  )
+  let kept = transcript
+    .inject_reminder(
+    base,
+    {body: "keep me", dedupe_key: "keep", ttl_turns: 2, preserve_on_compact: true},
+  ).transcript
+  let mixed = transcript
+    .inject_reminder(
+    kept,
+    {body: "drop me", dedupe_key: "drop", ttl_turns: 2, preserve_on_compact: false},
+  ).transcript
+  let compacted = transcript_compact(mixed, {strategy: "truncate", keep_last: 1, target_tokens: 1})
+  let reminders = transcript_events_by_kind(compacted, "system_reminder")
+  println(len(reminders))
+  println(reminders[0].reminder.body)
+  println(reminders[0].reminder.ttl_turns)
+  println(transcript_summary(compacted).contains("auto-compacted"))
+}

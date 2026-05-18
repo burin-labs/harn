@@ -189,6 +189,12 @@ values. A reminder with `ttl_turns: 1` expires at the next post-turn
 boundary, is removed from the session transcript events, and emits a
 `transcript.reminder.expired` record on
 `transcript.reminder.lifecycle` when an active EventLog is installed.
+`transcript_compact(...)` applies the same TTL decrement at the
+pre-compaction boundary before it rebuilds the transcript. It drops
+expired reminders, dedupes matching `dedupe_key` values to the newest
+event, preserves only reminders with `preserve_on_compact: true`, and
+passes all surviving reminder payloads to custom compactors as their
+second argument.
 Hooks can inject reminders by returning `{reminder: {...}, then?: ...}`,
 a bare reminder spec such as `{body: "Refresh context"}`, or a
 session-hook effect list such as `[{reminder: {...}}]`. Bridge
