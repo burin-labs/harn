@@ -282,6 +282,10 @@ struct HarnessSidecar {
     expect_deny_events: Vec<HarnessEventExpectation>,
     #[serde(default)]
     expect_stdio: Option<String>,
+    #[serde(default)]
+    expect_stderr: Option<String>,
+    #[serde(default)]
+    stdin_lines: Vec<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -328,6 +332,9 @@ impl HarnessSidecar {
                 for value in &self.random_u64 {
                     builder = builder.random_u64(*value);
                 }
+                for line in &self.stdin_lines {
+                    builder = builder.stdin_line(line.as_str());
+                }
                 builder.build()
             }
         }
@@ -366,6 +373,15 @@ impl HarnessSidecar {
             if &actual != expected {
                 errors.push(format!(
                     "harness captured stdio differed: expected {:?}, actual {:?}",
+                    expected, actual
+                ));
+            }
+        }
+        if let Some(expected) = &self.expect_stderr {
+            let actual = harness.captured_stderr();
+            if &actual != expected {
+                errors.push(format!(
+                    "harness captured stderr differed: expected {:?}, actual {:?}",
                     expected, actual
                 ));
             }

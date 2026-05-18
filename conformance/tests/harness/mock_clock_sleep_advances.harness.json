@@ -3,9 +3,13 @@
   "clock_at_unix_ms": 1700000000000,
   "expect_calls": [
     {"sub_handle": "clock", "method": "now_ms", "args": []},
+    {"sub_handle": "stdio", "method": "println", "args": ["1700000000000"]},
     {"sub_handle": "clock", "method": "sleep_ms", "args": ["250"]},
     {"sub_handle": "clock", "method": "now_ms", "args": []},
+    {"sub_handle": "stdio", "method": "println", "args": ["1700000000250"]},
     {"sub_handle": "clock", "method": "monotonic_ms", "args": []},
-    {"sub_handle": "clock", "method": "elapsed", "args": []}
+    {"sub_handle": "stdio", "method": "println", "args": ["250"]},
+    {"sub_handle": "clock", "method": "elapsed", "args": []},
+    {"sub_handle": "stdio", "method": "println", "args": ["250"]}
   ]
 }
