@@ -479,7 +479,30 @@ Payload:
 ```
 
 A host may also wake the daemon by sending a queued `user_message`, `session/input`, or
-`agent/user_message` notification.
+`agent/user_message` notification. Those methods are always user-role input. To inject
+ambient context without pretending it is a user message, send `session/remind`:
+
+```json
+{
+  "body": "The workspace changed while you were idle; re-read src/lib.rs before editing.",
+  "tags": ["workspace"],
+  "dedupe_key": "workspace-change",
+  "ttl_turns": 2,
+  "role_hint": "system",
+  "mode": "interrupt_immediate",
+  "_meta": {
+    "harn": {
+      "origin": "file-watcher"
+    }
+  }
+}
+```
+
+`mode` accepts the same delivery values as queued user messages:
+`interrupt_immediate`, `finish_step`, and `wait_for_completion`. The reminder
+payload is validated as a reminder spec; non-standard host metadata belongs under
+`_meta`. Malformed reminder payloads are rejected with `HARN-RMD-002`; unknown
+top-level reminder options are rejected with `HARN-RMD-001`.
 
 ## Client-executed tool search
 

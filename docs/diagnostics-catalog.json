@@ -49,7 +49,7 @@
     {
       "id": "RMD",
       "title": "Reminder lifecycle",
-      "count": 1
+      "count": 2
     },
     {
       "id": "SUS",
@@ -1143,6 +1143,15 @@
       "code": "HARN-RMD-001",
       "category": "RMD",
       "summary": "reminder lifecycle option key is not recognized",
+      "repairs": [],
+      "related": [],
+      "explanationPresent": true,
+      "apiStability": "stable"
+    },
+    {
+      "code": "HARN-RMD-002",
+      "category": "RMD",
+      "summary": "reminder payload shape is invalid",
       "repairs": [],
       "related": [],
       "explanationPresent": true,

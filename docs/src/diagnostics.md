@@ -44,7 +44,7 @@ Repairs are tagged with a six-level safety class so `harn fix --apply --safety <
 | [`STD`](#std--stdlib-usage) | Stdlib usage | 4 |
 | [`PRM`](#prm--prompt-templates) | Prompt templates | 7 |
 | [`MOD`](#mod--modules-and-exports) | Modules and exports | 6 |
-| [`RMD`](#rmd--reminder-lifecycle) | Reminder lifecycle | 1 |
+| [`RMD`](#rmd--reminder-lifecycle) | Reminder lifecycle | 2 |
 | [`SUS`](#sus--suspend--resume-lifecycle) | Suspend / resume lifecycle | 10 |
 | [`LNT`](#lnt--lint-rules) | Lint rules | 53 |
 | [`FMT`](#fmt--formatter) | Formatter | 3 |
@@ -186,6 +186,7 @@ Repairs are tagged with a six-level safety class so `harn fix --apply --safety <
 | Code | Summary | Repair | Safety |
 |---|---|---|---|
 | [`HARN-RMD-001`](#harn-rmd-001) | reminder lifecycle option key is not recognized | — | — |
+| [`HARN-RMD-002`](#harn-rmd-002) | reminder payload shape is invalid | — | — |
 
 ## SUS — Suspend / resume lifecycle
 
@@ -2897,6 +2898,22 @@ Use only the documented `transcript.inject_reminder` keys: `body`, `tags`, `dedu
 `ttl_turns`, `preserve_on_compact`, `propagate`, and `role_hint`.
 
 For `transcript.clear_reminders`, use at least one selector from `id`, `tag`, or `dedupe_key`.
+
+### `HARN-RMD-002`
+
+**Category:** `RMD` (Reminder lifecycle) &nbsp;·&nbsp; **API stability:** `stable`
+
+reminder payload shape is invalid
+
+**Variant:** `Code::ReminderInvalidShape`
+
+The reminder payload shape is invalid.
+
+`session/remind` expects a typed reminder object, not a user-message payload.
+Provide a non-empty `body`, use string `tags`, a positive integer `ttl_turns`
+when present, boolean `preserve_on_compact`, and one of the documented
+`propagate` and `role_hint` values. Put host-specific extension fields under
+`_meta`.
 
 ### `HARN-SUS-001`
 

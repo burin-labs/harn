@@ -32,6 +32,7 @@ const ACP_AGENT_METHODS: &[&str] = &[
     "session/resume",
     "session/prompt",
     "session/truncate",
+    "session/remind",
     "session/close",
     "session/stop",
 ];

@@ -15,6 +15,8 @@ use std::time::Duration;
 use tokio::io::AsyncBufReadExt;
 use tokio::sync::{oneshot, Mutex, Notify};
 
+use harn_parser::diagnostic_codes::Code;
+
 use crate::orchestration::MutationSessionRecord;
 use crate::value::{ErrorCategory, VmClosure, VmError, VmValue};
 use crate::visible_text::VisibleTextState;
@@ -62,8 +64,8 @@ pub struct HostBridge {
     session_id: std::sync::Mutex<String>,
     /// Name of the currently executing Harn script (without .harn suffix).
     script_name: std::sync::Mutex<String>,
-    /// User messages injected by the host while a run is active.
-    queued_user_messages: Arc<Mutex<VecDeque<QueuedUserMessage>>>,
+    /// Transcript injections queued by the host while a run is active.
+    queued_transcript_injections: Arc<Mutex<VecDeque<QueuedTranscriptInjection>>>,
     /// Host-triggered resume signal for daemon agents.
     resume_requested: Arc<AtomicBool>,
     /// Host-triggered skill-registry invalidation signal. Set when the
@@ -214,7 +216,7 @@ impl InProcessHost {
     }
 }
 
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum QueuedUserMessageMode {
     InterruptImmediate,
     FinishStep,
@@ -244,6 +246,277 @@ pub struct QueuedUserMessage {
     pub mode: QueuedUserMessageMode,
 }
 
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct QueuedReminder {
+    pub reminder: crate::llm::helpers::SystemReminder,
+    pub mode: QueuedUserMessageMode,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum QueuedTranscriptInjection {
+    User(QueuedUserMessage),
+    Reminder(QueuedReminder),
+}
+
+impl QueuedTranscriptInjection {
+    fn mode(&self) -> QueuedUserMessageMode {
+        match self {
+            Self::User(message) => message.mode,
+            Self::Reminder(reminder) => reminder.mode,
+        }
+    }
+}
+
+fn queue_user_message_from_params(params: &serde_json::Value) -> Option<QueuedUserMessage> {
+    let content = params
+        .get("content")
+        .and_then(|v| v.as_str())
+        .unwrap_or("")
+        .to_string();
+    if content.is_empty() {
+        return None;
+    }
+    let mode = QueuedUserMessageMode::from_str(
+        params
+            .get("mode")
+            .and_then(|v| v.as_str())
+            .unwrap_or("wait_for_completion"),
+    );
+    Some(QueuedUserMessage { content, mode })
+}
+
+fn reminder_unknown_option_error(message: impl AsRef<str>) -> String {
+    format!(
+        "{}: {}",
+        Code::ReminderUnknownOption.as_str(),
+        message.as_ref()
+    )
+}
+
+fn session_remind_shape_error(message: impl AsRef<str>) -> String {
+    format!(
+        "{}: {}",
+        Code::ReminderInvalidShape.as_str(),
+        message.as_ref()
+    )
+}
+
+fn string_field(
+    map: &serde_json::Map<String, serde_json::Value>,
+    key: &str,
+    required: bool,
+) -> Result<Option<String>, String> {
+    match map.get(key) {
+        None | Some(serde_json::Value::Null) if required => Err(session_remind_shape_error(
+            format!("`{key}` must be a non-empty string"),
+        )),
+        None | Some(serde_json::Value::Null) => Ok(None),
+        Some(serde_json::Value::String(value)) if required && value.trim().is_empty() => Err(
+            session_remind_shape_error(format!("`{key}` must be a non-empty string")),
+        ),
+        Some(serde_json::Value::String(value)) => {
+            let trimmed = value.trim();
+            if trimmed.is_empty() {
+                Ok(None)
+            } else {
+                Ok(Some(trimmed.to_string()))
+            }
+        }
+        Some(other) => Err(session_remind_shape_error(format!(
+            "`{key}` must be a string, got {other}"
+        ))),
+    }
+}
+
+fn bool_field(
+    map: &serde_json::Map<String, serde_json::Value>,
+    key: &str,
+) -> Result<Option<bool>, String> {
+    match map.get(key) {
+        None | Some(serde_json::Value::Null) => Ok(None),
+        Some(serde_json::Value::Bool(value)) => Ok(Some(*value)),
+        Some(other) => Err(session_remind_shape_error(format!(
+            "`{key}` must be a bool, got {other}"
+        ))),
+    }
+}
+
+fn int_field(
+    map: &serde_json::Map<String, serde_json::Value>,
+    key: &str,
+) -> Result<Option<i64>, String> {
+    match map.get(key) {
+        None | Some(serde_json::Value::Null) => Ok(None),
+        Some(serde_json::Value::Number(value)) => {
+            let Some(value) = value.as_i64() else {
+                return Err(session_remind_shape_error(format!(
+                    "`{key}` must be an integer"
+                )));
+            };
+            Ok(Some(value))
+        }
+        Some(other) => Err(session_remind_shape_error(format!(
+            "`{key}` must be an int, got {other}"
+        ))),
+    }
+}
+
+fn tags_field(map: &serde_json::Map<String, serde_json::Value>) -> Result<Vec<String>, String> {
+    let Some(value) = map.get("tags") else {
+        return Ok(Vec::new());
+    };
+    if value.is_null() {
+        return Ok(Vec::new());
+    }
+    let Some(values) = value.as_array() else {
+        return Err(session_remind_shape_error("`tags` must be a list"));
+    };
+    let mut tags = Vec::new();
+    for value in values {
+        let Some(tag) = value.as_str() else {
+            return Err(session_remind_shape_error(format!(
+                "`tags` entries must be strings, got {value}"
+            )));
+        };
+        let tag = tag.trim();
+        if tag.is_empty() {
+            return Err(session_remind_shape_error(
+                "`tags` entries must be non-empty strings",
+            ));
+        }
+        if !tags.iter().any(|existing| existing == tag) {
+            tags.push(tag.to_string());
+        }
+    }
+    Ok(tags)
+}
+
+fn session_remind_payload_from_value(
+    value: &serde_json::Value,
+) -> Result<crate::llm::helpers::SystemReminder, String> {
+    let Some(map) = value.as_object() else {
+        return Err(session_remind_shape_error(
+            "session/remind payload must be a reminder object",
+        ));
+    };
+    const ALLOWED: &[&str] = &[
+        "_meta",
+        "body",
+        "dedupe_key",
+        "fired_at_turn",
+        "id",
+        "preserve_on_compact",
+        "propagate",
+        "role_hint",
+        "source",
+        "tags",
+        "ttl_turns",
+    ];
+    let unknown = map
+        .keys()
+        .filter(|key| !ALLOWED.contains(&key.as_str()))
+        .map(String::as_str)
+        .collect::<Vec<_>>();
+    if !unknown.is_empty() {
+        if unknown.contains(&"content") {
+            return Err(session_remind_shape_error(
+                "session/remind expects reminder `body`, not user-message `content`",
+            ));
+        }
+        return Err(reminder_unknown_option_error(format!(
+            "unknown reminder option(s): {}",
+            unknown.join(", ")
+        )));
+    }
+    if let Some(meta) = map.get("_meta") {
+        if !meta.is_null() && !meta.is_object() {
+            return Err(session_remind_shape_error("`_meta` must be an object"));
+        }
+    }
+    let ttl_turns = int_field(map, "ttl_turns")?;
+    if let Some(value) = ttl_turns {
+        if value <= 0 {
+            return Err(session_remind_shape_error("`ttl_turns` must be > 0"));
+        }
+    }
+    let fired_at_turn = int_field(map, "fired_at_turn")?.unwrap_or(0);
+    if fired_at_turn < 0 {
+        return Err(session_remind_shape_error(
+            "`fired_at_turn` must be >= 0 when provided",
+        ));
+    }
+    match string_field(map, "source", false)?.as_deref() {
+        None | Some("bridge") => {}
+        Some(_) => {
+            return Err(session_remind_shape_error(
+                "`source` for session/remind must be bridge when provided",
+            ))
+        }
+    }
+    let propagate = match string_field(map, "propagate", false)?.as_deref() {
+        None => crate::llm::helpers::ReminderPropagate::Session,
+        Some("all") => crate::llm::helpers::ReminderPropagate::All,
+        Some("session") => crate::llm::helpers::ReminderPropagate::Session,
+        Some("none") => crate::llm::helpers::ReminderPropagate::None,
+        Some(_) => {
+            return Err(session_remind_shape_error(
+                "`propagate` must be one of all, session, or none",
+            ))
+        }
+    };
+    let role_hint = match string_field(map, "role_hint", false)?.as_deref() {
+        None => crate::llm::helpers::ReminderRoleHint::System,
+        Some("system") => crate::llm::helpers::ReminderRoleHint::System,
+        Some("developer") => crate::llm::helpers::ReminderRoleHint::Developer,
+        Some("user_block") => crate::llm::helpers::ReminderRoleHint::UserBlock,
+        Some("ephemeral_cache") => crate::llm::helpers::ReminderRoleHint::EphemeralCache,
+        Some(_) => {
+            return Err(session_remind_shape_error(
+                "`role_hint` must be one of system, developer, user_block, or ephemeral_cache",
+            ))
+        }
+    };
+    Ok(crate::llm::helpers::SystemReminder {
+        id: string_field(map, "id", false)?.unwrap_or_else(|| uuid::Uuid::now_v7().to_string()),
+        tags: tags_field(map)?,
+        dedupe_key: string_field(map, "dedupe_key", false)?,
+        ttl_turns,
+        preserve_on_compact: bool_field(map, "preserve_on_compact")?.unwrap_or(false),
+        propagate,
+        role_hint,
+        source: crate::llm::helpers::ReminderSource::Bridge,
+        body: string_field(map, "body", true)?.unwrap_or_default(),
+        fired_at_turn,
+    })
+}
+
+fn queued_session_remind_from_params(params: &serde_json::Value) -> Result<QueuedReminder, String> {
+    let mode = QueuedUserMessageMode::from_str(
+        params
+            .get("mode")
+            .and_then(|value| value.as_str())
+            .unwrap_or("wait_for_completion"),
+    );
+    let reminder_value = if let Some(reminder) = params.get("reminder") {
+        reminder.clone()
+    } else {
+        let Some(params) = params.as_object() else {
+            return Err(session_remind_shape_error(
+                "session/remind params must be an object",
+            ));
+        };
+        let mut reminder = params.clone();
+        reminder.remove("mode");
+        reminder.remove("sessionId");
+        reminder.remove("session_id");
+        serde_json::Value::Object(reminder)
+    };
+    Ok(QueuedReminder {
+        reminder: session_remind_payload_from_value(&reminder_value)?,
+        mode,
+    })
+}
+
 // Default doesn't apply — new() spawns async tasks requiring a tokio LocalSet.
 #[allow(clippy::new_without_default)]
 impl HostBridge {
@@ -256,7 +529,7 @@ impl HostBridge {
             Arc::new(Mutex::new(HashMap::new()));
         let cancelled = Arc::new(AtomicBool::new(false));
         let cancel_notify = Arc::new(Notify::new());
-        let queued_user_messages: Arc<Mutex<VecDeque<QueuedUserMessage>>> =
+        let queued_transcript_injections: Arc<Mutex<VecDeque<QueuedTranscriptInjection>>> =
             Arc::new(Mutex::new(VecDeque::new()));
         let resume_requested = Arc::new(AtomicBool::new(false));
         let skills_reload_requested = Arc::new(AtomicBool::new(false));
@@ -266,7 +539,7 @@ impl HostBridge {
         let pending_clone = pending.clone();
         let cancelled_clone = cancelled.clone();
         let cancel_notify_clone = cancel_notify.clone();
-        let queued_clone = queued_user_messages.clone();
+        let queued_clone = queued_transcript_injections.clone();
         let resume_clone = resume_requested.clone();
         let skills_reload_clone = skills_reload_requested.clone();
         tokio::task::spawn_local(async move {
@@ -300,22 +573,19 @@ impl HostBridge {
                             || method == "agent/user_message"
                         {
                             let params = &msg["params"];
-                            let content = params
-                                .get("content")
-                                .and_then(|v| v.as_str())
-                                .unwrap_or("")
-                                .to_string();
-                            if !content.is_empty() {
-                                let mode = QueuedUserMessageMode::from_str(
-                                    params
-                                        .get("mode")
-                                        .and_then(|v| v.as_str())
-                                        .unwrap_or("wait_for_completion"),
-                                );
+                            if let Some(message) = queue_user_message_from_params(params) {
                                 queued_clone
                                     .lock()
                                     .await
-                                    .push_back(QueuedUserMessage { content, mode });
+                                    .push_back(QueuedTranscriptInjection::User(message));
+                            }
+                        } else if method == "session/remind" {
+                            let params = &msg["params"];
+                            if let Ok(reminder) = queued_session_remind_from_params(params) {
+                                queued_clone
+                                    .lock()
+                                    .await
+                                    .push_back(QueuedTranscriptInjection::Reminder(reminder));
                             }
                         }
                     }
@@ -343,7 +613,7 @@ impl HostBridge {
             writer: stdout_writer(Arc::new(std::sync::Mutex::new(()))),
             session_id: std::sync::Mutex::new(String::new()),
             script_name: std::sync::Mutex::new(String::new()),
-            queued_user_messages,
+            queued_transcript_injections,
             resume_requested,
             skills_reload_requested,
             daemon_idle,
@@ -398,7 +668,7 @@ impl HostBridge {
             writer,
             session_id: std::sync::Mutex::new(String::new()),
             script_name: std::sync::Mutex::new(String::new()),
-            queued_user_messages: Arc::new(Mutex::new(VecDeque::new())),
+            queued_transcript_injections: Arc::new(Mutex::new(VecDeque::new())),
             resume_requested: Arc::new(AtomicBool::new(false)),
             skills_reload_requested: Arc::new(AtomicBool::new(false)),
             daemon_idle: Arc::new(AtomicBool::new(false)),
@@ -421,7 +691,7 @@ impl HostBridge {
             writer: stdout_writer(Arc::new(std::sync::Mutex::new(()))),
             session_id: std::sync::Mutex::new(String::new()),
             script_name: std::sync::Mutex::new(String::new()),
-            queued_user_messages: Arc::new(Mutex::new(VecDeque::new())),
+            queued_transcript_injections: Arc::new(Mutex::new(VecDeque::new())),
             resume_requested: Arc::new(AtomicBool::new(false)),
             skills_reload_requested: Arc::new(AtomicBool::new(false)),
             daemon_idle: Arc::new(AtomicBool::new(false)),
@@ -659,13 +929,26 @@ impl HostBridge {
     }
 
     pub async fn push_queued_user_message(&self, content: String, mode: &str) {
-        self.queued_user_messages
+        self.queued_transcript_injections
             .lock()
             .await
-            .push_back(QueuedUserMessage {
+            .push_back(QueuedTranscriptInjection::User(QueuedUserMessage {
                 content,
                 mode: QueuedUserMessageMode::from_str(mode),
-            });
+            }));
+    }
+
+    pub async fn push_queued_session_remind_from_params(
+        &self,
+        params: &serde_json::Value,
+    ) -> Result<String, String> {
+        let reminder = queued_session_remind_from_params(params)?;
+        let reminder_id = reminder.reminder.id.clone();
+        self.queued_transcript_injections
+            .lock()
+            .await
+            .push_back(QueuedTranscriptInjection::Reminder(reminder));
+        Ok(reminder_id)
     }
 
     pub async fn take_queued_user_messages(
@@ -674,19 +957,43 @@ impl HostBridge {
         include_finish_step: bool,
         include_wait_for_completion: bool,
     ) -> Vec<QueuedUserMessage> {
-        let mut queue = self.queued_user_messages.lock().await;
+        let mut queue = self.queued_transcript_injections.lock().await;
         let mut selected = Vec::new();
         let mut retained = VecDeque::new();
-        while let Some(message) = queue.pop_front() {
-            let should_take = match message.mode {
+        while let Some(injection) = queue.pop_front() {
+            let should_take = match injection.mode() {
+                QueuedUserMessageMode::InterruptImmediate => include_interrupt_immediate,
+                QueuedUserMessageMode::FinishStep => include_finish_step,
+                QueuedUserMessageMode::WaitForCompletion => include_wait_for_completion,
+            };
+            match (should_take, injection) {
+                (true, QueuedTranscriptInjection::User(message)) => selected.push(message),
+                (_, injection) => retained.push_back(injection),
+            }
+        }
+        *queue = retained;
+        selected
+    }
+
+    pub async fn take_queued_transcript_injections(
+        &self,
+        include_interrupt_immediate: bool,
+        include_finish_step: bool,
+        include_wait_for_completion: bool,
+    ) -> Vec<QueuedTranscriptInjection> {
+        let mut queue = self.queued_transcript_injections.lock().await;
+        let mut selected = Vec::new();
+        let mut retained = VecDeque::new();
+        while let Some(injection) = queue.pop_front() {
+            let should_take = match injection.mode() {
                 QueuedUserMessageMode::InterruptImmediate => include_interrupt_immediate,
                 QueuedUserMessageMode::FinishStep => include_finish_step,
                 QueuedUserMessageMode::WaitForCompletion => include_wait_for_completion,
             };
             if should_take {
-                selected.push(message);
+                selected.push(injection);
             } else {
-                retained.push_back(message);
+                retained.push_back(injection);
             }
         }
         *queue = retained;
@@ -706,6 +1013,26 @@ impl HostBridge {
             }
             DeliveryCheckpoint::EndOfInteraction => {
                 self.take_queued_user_messages(false, false, true).await
+            }
+        }
+    }
+
+    pub async fn take_queued_transcript_injections_for(
+        &self,
+        checkpoint: DeliveryCheckpoint,
+    ) -> Vec<QueuedTranscriptInjection> {
+        match checkpoint {
+            DeliveryCheckpoint::InterruptImmediate => {
+                self.take_queued_transcript_injections(true, false, false)
+                    .await
+            }
+            DeliveryCheckpoint::AfterCurrentOperation => {
+                self.take_queued_transcript_injections(false, true, false)
+                    .await
+            }
+            DeliveryCheckpoint::EndOfInteraction => {
+                self.take_queued_transcript_injections(false, false, true)
+                    .await
             }
         }
     }
@@ -989,6 +1316,15 @@ fn parse_host_tools_list_response(
 mod tests {
     use super::*;
 
+    fn test_bridge() -> HostBridge {
+        HostBridge::from_parts(
+            Arc::new(Mutex::new(HashMap::new())),
+            Arc::new(AtomicBool::new(false)),
+            Arc::new(std::sync::Mutex::new(())),
+            1,
+        )
+    }
+
     #[test]
     fn test_json_rpc_request_format() {
         let request = crate::jsonrpc::request(
@@ -1095,12 +1431,7 @@ mod tests {
             .build()
             .unwrap();
         runtime.block_on(async {
-            let bridge = HostBridge::from_parts(
-                Arc::new(Mutex::new(HashMap::new())),
-                Arc::new(AtomicBool::new(false)),
-                Arc::new(std::sync::Mutex::new(())),
-                1,
-            );
+            let bridge = test_bridge();
             bridge
                 .push_queued_user_message("first".to_string(), "finish_step")
                 .await;
@@ -1116,6 +1447,158 @@ mod tests {
             assert_eq!(turn_end.len(), 1);
             assert_eq!(turn_end[0].content, "second");
         });
+    }
+
+    #[test]
+    fn queued_transcript_injections_preserve_user_reminder_separation() {
+        let runtime = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .unwrap();
+        runtime.block_on(async {
+            let bridge = test_bridge();
+            bridge
+                .push_queued_user_message("human follow-up".to_string(), "finish_step")
+                .await;
+            let reminder_id = bridge
+                .push_queued_session_remind_from_params(&serde_json::json!({
+                    "body": "Host-provided ambient context.",
+                    "tags": ["host"],
+                    "dedupe_key": "host-context",
+                    "ttl_turns": 2,
+                    "mode": "wait_for_completion",
+                    "_meta": {"harn": {"source": "test"}},
+                }))
+                .await
+                .expect("valid reminder");
+
+            let finish_step = bridge.take_queued_user_messages(false, true, false).await;
+            assert_eq!(finish_step.len(), 1);
+            assert_eq!(finish_step[0].content, "human follow-up");
+
+            let no_user_messages = bridge.take_queued_user_messages(false, false, true).await;
+            assert!(no_user_messages.is_empty());
+
+            let injections = bridge
+                .take_queued_transcript_injections_for(DeliveryCheckpoint::EndOfInteraction)
+                .await;
+            assert_eq!(injections.len(), 1);
+            let QueuedTranscriptInjection::Reminder(reminder) = &injections[0] else {
+                panic!("expected queued reminder");
+            };
+            assert_eq!(reminder.reminder.id, reminder_id);
+            assert_eq!(reminder.reminder.body, "Host-provided ambient context.");
+            assert_eq!(reminder.reminder.tags, vec!["host".to_string()]);
+            assert_eq!(
+                reminder.reminder.dedupe_key.as_deref(),
+                Some("host-context")
+            );
+            assert_eq!(reminder.reminder.ttl_turns, Some(2));
+            assert_eq!(
+                reminder.reminder.source,
+                crate::llm::helpers::ReminderSource::Bridge
+            );
+        });
+    }
+
+    #[test]
+    fn bridge_remind_modes_honor_delivery_checkpoints() {
+        let runtime = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .unwrap();
+        runtime.block_on(async {
+            let cases = [
+                (
+                    "interrupt_immediate",
+                    DeliveryCheckpoint::InterruptImmediate,
+                    DeliveryCheckpoint::AfterCurrentOperation,
+                ),
+                (
+                    "finish_step",
+                    DeliveryCheckpoint::AfterCurrentOperation,
+                    DeliveryCheckpoint::EndOfInteraction,
+                ),
+                (
+                    "wait_for_completion",
+                    DeliveryCheckpoint::EndOfInteraction,
+                    DeliveryCheckpoint::InterruptImmediate,
+                ),
+            ];
+
+            for (mode, expected_checkpoint, wrong_checkpoint) in cases {
+                let bridge = test_bridge();
+                bridge
+                    .push_queued_session_remind_from_params(&serde_json::json!({
+                        "body": format!("Reminder for {mode}"),
+                        "mode": mode,
+                    }))
+                    .await
+                    .expect("valid session/remind payload");
+
+                let premature = bridge
+                    .take_queued_transcript_injections_for(wrong_checkpoint)
+                    .await;
+                assert!(
+                    premature.is_empty(),
+                    "{mode} reminder must not be delivered at {wrong_checkpoint:?}"
+                );
+
+                let delivered = bridge
+                    .take_queued_transcript_injections_for(expected_checkpoint)
+                    .await;
+                assert_eq!(delivered.len(), 1, "{mode} reminder was not delivered");
+                let QueuedTranscriptInjection::Reminder(reminder) = &delivered[0] else {
+                    panic!("expected reminder for {mode}");
+                };
+                assert_eq!(reminder.reminder.body, format!("Reminder for {mode}"));
+            }
+        });
+    }
+
+    #[test]
+    fn bridge_session_input_path_never_produces_reminder() {
+        let runtime = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .unwrap();
+        runtime.block_on(async {
+            let bridge = test_bridge();
+            bridge
+                .push_queued_user_message("still user input".to_string(), "finish_step")
+                .await;
+
+            let delivered = bridge
+                .take_queued_transcript_injections_for(DeliveryCheckpoint::AfterCurrentOperation)
+                .await;
+            assert_eq!(delivered.len(), 1);
+            let QueuedTranscriptInjection::User(message) = &delivered[0] else {
+                panic!("session/input queue path must produce a user message");
+            };
+            assert_eq!(message.content, "still user input");
+        });
+    }
+
+    #[test]
+    fn session_remind_validation_rejects_user_message_shape() {
+        let err = queued_session_remind_from_params(&serde_json::json!({
+            "content": "this is still a user message",
+            "mode": "interrupt_immediate",
+        }))
+        .expect_err("session/remind must require a reminder body");
+        assert!(err.contains(Code::ReminderInvalidShape.as_str()));
+        assert!(err.contains("body"));
+    }
+
+    #[test]
+    fn session_remind_validation_rejects_unknown_options_separately() {
+        let err = queued_session_remind_from_params(&serde_json::json!({
+            "body": "valid body",
+            "unknown_host_field": true,
+        }))
+        .expect_err("session/remind must reject unknown top-level fields");
+        assert!(err.contains(Code::ReminderUnknownOption.as_str()));
+        assert!(err.contains("unknown_host_field"));
     }
 
     #[test]

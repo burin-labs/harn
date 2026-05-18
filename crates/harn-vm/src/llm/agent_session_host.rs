@@ -30,6 +30,7 @@ const HOST_SESSION_RECORD_ASSISTANT: &str = "__host_agent_session_record_assista
 const HOST_SESSION_RECORD_TOOL_RESULTS: &str = "__host_agent_session_record_tool_results";
 const HOST_SESSION_RECORD_USAGE: &str = "__host_agent_session_record_usage";
 const HOST_SESSION_DRAIN_FEEDBACK: &str = "__host_agent_session_drain_feedback";
+const HOST_SESSION_DRAIN_BRIDGE_INJECTIONS: &str = "__host_agent_session_drain_bridge_injections";
 const HOST_SESSION_TOTALS: &str = "__host_agent_session_totals";
 const HOST_SESSION_INJECT_FEEDBACK: &str = "__host_agent_session_inject_feedback";
 const HOST_SESSION_POST_EVENT: &str = "__host_agent_session_post_event";
@@ -1682,6 +1683,107 @@ fn host_agent_daemon_snapshot_builtin(
     Ok(json_to_vm(&value))
 }
 
+fn host_bridge_for_session(
+    session_id: &str,
+    builtin_name: &str,
+) -> Option<Rc<crate::bridge::HostBridge>> {
+    with_session(session_id, builtin_name, |session| {
+        Ok(session.host_bridge.clone())
+    })
+    .ok()
+    .flatten()
+    .or_else(super::agent_runtime::current_host_bridge)
+}
+
+fn bridge_delivery_checkpoint(value: &str) -> Result<crate::bridge::DeliveryCheckpoint, VmError> {
+    match value {
+        "interrupt_immediate" | "interrupt" => {
+            Ok(crate::bridge::DeliveryCheckpoint::InterruptImmediate)
+        }
+        "finish_step" | "after_current_operation" => {
+            Ok(crate::bridge::DeliveryCheckpoint::AfterCurrentOperation)
+        }
+        "wait_for_completion" | "end_of_interaction" => {
+            Ok(crate::bridge::DeliveryCheckpoint::EndOfInteraction)
+        }
+        other => Err(VmError::Runtime(format!(
+            "{HOST_SESSION_DRAIN_BRIDGE_INJECTIONS}: unsupported checkpoint `{other}`"
+        ))),
+    }
+}
+
+async fn drain_bridge_injections_for_checkpoint(
+    session_id: &str,
+    bridge: &crate::bridge::HostBridge,
+    checkpoint: crate::bridge::DeliveryCheckpoint,
+) -> (usize, Option<&'static str>) {
+    let queued = bridge
+        .take_queued_transcript_injections_for(checkpoint)
+        .await;
+    if queued.is_empty() {
+        return (0, None);
+    }
+    let mut saw_user_message = false;
+    let mut saw_reminder = false;
+    let mut delivered = 0;
+    for injection in queued {
+        match injection {
+            crate::bridge::QueuedTranscriptInjection::User(message) => {
+                saw_user_message = true;
+                delivered += 1;
+                let _ = crate::agent_sessions::inject_message(
+                    session_id,
+                    json_to_vm(&serde_json::json!({
+                        "role": "user",
+                        "content": message.content,
+                    })),
+                );
+            }
+            crate::bridge::QueuedTranscriptInjection::Reminder(reminder) => {
+                saw_reminder = true;
+                delivered += 1;
+                let _ = crate::agent_sessions::inject_reminder(session_id, reminder.reminder);
+            }
+        }
+    }
+    if saw_user_message {
+        (delivered, Some("message"))
+    } else if saw_reminder {
+        (delivered, Some("reminder"))
+    } else {
+        (delivered, None)
+    }
+}
+
+async fn host_agent_session_drain_bridge_injections(
+    args: Vec<VmValue>,
+) -> Result<VmValue, VmError> {
+    let session_id = args.first().map(|v| v.display()).unwrap_or_default();
+    if session_id.trim().is_empty() {
+        return Err(VmError::Runtime(format!(
+            "{HOST_SESSION_DRAIN_BRIDGE_INJECTIONS}: session_id must be a non-empty string"
+        )));
+    }
+    let checkpoint_arg = args
+        .get(1)
+        .map(|value| value.display())
+        .unwrap_or_else(|| "finish_step".to_string());
+    let checkpoint = bridge_delivery_checkpoint(&checkpoint_arg)?;
+    let Some(bridge) = host_bridge_for_session(&session_id, HOST_SESSION_DRAIN_BRIDGE_INJECTIONS)
+    else {
+        return Ok(json_to_vm(&serde_json::json!({
+            "delivered": 0,
+            "reason": "none",
+        })));
+    };
+    let (delivered, reason) =
+        drain_bridge_injections_for_checkpoint(&session_id, &bridge, checkpoint).await;
+    Ok(json_to_vm(&serde_json::json!({
+        "delivered": delivered,
+        "reason": reason.unwrap_or("none"),
+    })))
+}
+
 async fn host_agent_daemon_wait(args: Vec<VmValue>) -> Result<VmValue, VmError> {
     let session_id = args.first().map(|v| v.display()).unwrap_or_default();
     let timeout_ms = args
@@ -1689,12 +1791,7 @@ async fn host_agent_daemon_wait(args: Vec<VmValue>) -> Result<VmValue, VmError> 
         .and_then(VmValue::as_int)
         .map(|value| value.max(0) as u64)
         .unwrap_or(0);
-    let bridge = with_session(&session_id, HOST_DAEMON_WAIT, |session| {
-        Ok(session.host_bridge.clone())
-    })
-    .ok()
-    .flatten()
-    .or_else(super::agent_runtime::current_host_bridge);
+    let bridge = host_bridge_for_session(&session_id, HOST_DAEMON_WAIT);
     let has_bridge = bridge.is_some();
     if let Some(bridge) = bridge.as_ref() {
         bridge.set_daemon_idle(true);
@@ -1706,21 +1803,15 @@ async fn host_agent_daemon_wait(args: Vec<VmValue>) -> Result<VmValue, VmError> 
             bridge.set_daemon_idle(false);
             return Ok(json_to_vm(&serde_json::json!({"reason": "resume"})));
         }
-        let queued = bridge
-            .take_queued_user_messages_for(crate::bridge::DeliveryCheckpoint::InterruptImmediate)
-            .await;
-        if !queued.is_empty() {
-            for message in queued {
-                let _ = crate::agent_sessions::inject_message(
-                    &session_id,
-                    json_to_vm(&serde_json::json!({
-                        "role": "user",
-                        "content": message.content,
-                    })),
-                );
-            }
+        let (_, reason) = drain_bridge_injections_for_checkpoint(
+            &session_id,
+            bridge,
+            crate::bridge::DeliveryCheckpoint::InterruptImmediate,
+        )
+        .await;
+        if let Some(reason) = reason {
             bridge.set_daemon_idle(false);
-            return Ok(json_to_vm(&serde_json::json!({"reason": "message"})));
+            return Ok(json_to_vm(&serde_json::json!({"reason": reason})));
         }
     }
 
@@ -1729,21 +1820,15 @@ async fn host_agent_daemon_wait(args: Vec<VmValue>) -> Result<VmValue, VmError> 
     }
 
     if let Some(bridge) = bridge.as_ref() {
-        let queued = bridge
-            .take_queued_user_messages_for(crate::bridge::DeliveryCheckpoint::InterruptImmediate)
-            .await;
-        if !queued.is_empty() {
-            for message in queued {
-                let _ = crate::agent_sessions::inject_message(
-                    &session_id,
-                    json_to_vm(&serde_json::json!({
-                        "role": "user",
-                        "content": message.content,
-                    })),
-                );
-            }
+        let (_, reason) = drain_bridge_injections_for_checkpoint(
+            &session_id,
+            bridge,
+            crate::bridge::DeliveryCheckpoint::InterruptImmediate,
+        )
+        .await;
+        if let Some(reason) = reason {
             bridge.set_daemon_idle(false);
-            return Ok(json_to_vm(&serde_json::json!({"reason": "message"})));
+            return Ok(json_to_vm(&serde_json::json!({"reason": reason})));
         }
         bridge.set_daemon_idle(false);
     }
@@ -2065,6 +2150,18 @@ pub fn register_agent_session_host_primitives(vm: &mut Vm) {
         .doc_static("Check per-agent autonomy budget and return an approval-shaped denial.");
     vm.register_async_builtin_with_metadata(budget_check, |args| {
         Box::pin(async move { host_autonomy_budget_check(args).await })
+    });
+
+    let drain_bridge_injections =
+        VmBuiltinMetadata::async_static(HOST_SESSION_DRAIN_BRIDGE_INJECTIONS)
+            .signature_static(
+                "__host_agent_session_drain_bridge_injections(session_id, checkpoint)",
+            )
+            .arity(VmBuiltinArity::Exact(2))
+            .category_static("agent.host")
+            .doc_static("Drain queued bridge transcript injections for a delivery checkpoint.");
+    vm.register_async_builtin_with_metadata(drain_bridge_injections, |args| {
+        Box::pin(async move { host_agent_session_drain_bridge_injections(args).await })
     });
 
     let daemon_wait = VmBuiltinMetadata::async_static(HOST_DAEMON_WAIT)

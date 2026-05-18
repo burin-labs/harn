@@ -107,6 +107,13 @@ condensed series summaries instead of full per-patch history.
   that return the same reminder effects used by hooks, and
   `clear_reminder_providers()` clears user-defined providers for tests
   and isolated runs.
+- **Bridge `session/remind` reminder injection (#1821).** Bridge and ACP
+  hosts can queue typed system reminders with the same
+  `interrupt_immediate` / `finish_step` / `wait_for_completion` delivery
+  modes as queued user messages. `session/input`, `user_message`, and
+  `agent/user_message` remain user-role only; reminders validate the
+  reminder-spec payload, report malformed payloads as `HARN-RMD-002`, and
+  enter the transcript with `source: "bridge"`.
 - **OAuth provider catalogue records (#1905).** Adds
   `std/oauth/providers` with ten preconfigured OAuth provider records
   (GitHub, Slack, Linear, Notion, Google, Microsoft, Atlassian,

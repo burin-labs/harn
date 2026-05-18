@@ -15,10 +15,11 @@ events, plus EventLog-backed dedupe and post-turn TTL expiry audit
 records. R-03 lets tool, persona, step, and session hooks return reminder
 effects that inject into the active session transcript. R-04 adds the
 provider registry, four canonical stdlib providers, and
-`register_reminder_provider(...)` for Harn-defined providers. The rest
-of the lifecycle (the bridge `agent/inject_reminder` notification,
-compaction honoring TTL + `preserve_on_compact`, sub-agent propagation,
-and capability-aware rendering) lands in later tickets under epic
+`register_reminder_provider(...)` for Harn-defined providers. R-05 adds
+the bridge `session/remind` notification for host-injected reminder
+events without routing them through user-role input. The rest of the
+lifecycle (compaction honoring TTL + `preserve_on_compact`, sub-agent
+propagation, and capability-aware rendering) lands in later tickets under epic
 [#1815](https://github.com/burin-labs/harn/issues/1815).
 
 ## Event shape
