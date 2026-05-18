@@ -101,6 +101,7 @@ ACP_AGENT_METHODS: tuple = (
     "session/resume",
     "session/prompt",
     "session/truncate",
+    "session/remind",
     "session/close",
     "session/stop",
 )
@@ -320,6 +321,7 @@ class ACPAgentMethod(str, Enum):
     SESSION_RESUME = "session/resume"
     SESSION_PROMPT = "session/prompt"
     SESSION_TRUNCATE = "session/truncate"
+    SESSION_REMIND = "session/remind"
     SESSION_CLOSE = "session/close"
     SESSION_STOP = "session/stop"
 

@@ -1,0 +1,7 @@
+import { agent_session_drain_bridge_injections } from "std/agent/state"
+
+pipeline main() {
+  let result = agent_session_drain_bridge_injections("bridge-remind-conformance", "wait_for_completion")
+  println(result.delivered)
+  println(result.reason)
+}

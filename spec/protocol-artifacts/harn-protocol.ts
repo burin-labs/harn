@@ -10,6 +10,7 @@ export const ACP_AGENT_METHODS = [
   "session/resume",
   "session/prompt",
   "session/truncate",
+  "session/remind",
   "session/close",
   "session/stop",
 ] as const
@@ -22,6 +23,7 @@ export const ACP_AGENT_METHOD = {
   sessionResume: "session/resume",
   sessionPrompt: "session/prompt",
   sessionTruncate: "session/truncate",
+  sessionRemind: "session/remind",
   sessionClose: "session/close",
   /** @deprecated Use session/close; session/stop will be removed after one release. */
   sessionStop: "session/stop",

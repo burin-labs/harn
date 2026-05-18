@@ -35,6 +35,7 @@ var ACPAgentMethods = []ACPAgentMethod{
 	"session/resume",
 	"session/prompt",
 	"session/truncate",
+	"session/remind",
 	"session/close",
 	"session/stop",
 }

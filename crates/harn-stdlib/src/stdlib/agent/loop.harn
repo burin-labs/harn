@@ -14,6 +14,7 @@ import { agent_skills_match } from "std/agent/skills"
 import {
   agent_emit_event,
   agent_record_native_tool_fallback,
+  agent_session_drain_bridge_injections,
   agent_session_drain_feedback,
   agent_session_finalize,
   agent_session_init,
@@ -1522,6 +1523,14 @@ fn __apply_loop_command(state) {
   }
 }
 
+fn __agent_loop_drain_bridge_step(session_id) {
+  let immediate = agent_session_drain_bridge_injections(session_id, "interrupt_immediate")
+  let finish_step = agent_session_drain_bridge_injections(session_id, "finish_step")
+  let immediate_count = immediate?.delivered ?? 0
+  let finish_step_count = finish_step?.delivered ?? 0
+  return immediate_count + finish_step_count
+}
+
 @complexity(allow)
 fn __agent_loop_run(message, session, initial_opts) {
   var opts = initial_opts
@@ -1589,6 +1598,7 @@ fn __agent_loop_run(message, session, initial_opts) {
       } catch (e) {
         nil
       }
+      __agent_loop_drain_bridge_step(session.session_id)
       var turn_opts = agent_skills_match(session, opts, turn_index)
       turn_opts = agent_tool_search_inject_if_needed(turn_opts)
       let pending_pre = agent_session_drain_feedback(session.session_id)
@@ -1687,6 +1697,10 @@ fn __agent_loop_run(message, session, initial_opts) {
             "turn_end",
             {iteration: turn_index + 1, turn_info: {tool_count: tool_count, text: visible_text}},
           )
+          let bridge_step_delivered = __agent_loop_drain_bridge_step(session.session_id)
+          if bridge_step_delivered > 0 {
+            continue
+          }
           final_status = "done"
           stop_reason = "stalled_done_judge"
           break
@@ -1709,6 +1723,7 @@ fn __agent_loop_run(message, session, initial_opts) {
         "turn_end",
         {iteration: turn_index + 1, turn_info: {tool_count: tool_count, text: visible_text}},
       )
+      let bridge_step_delivered = __agent_loop_drain_bridge_step(session.session_id)
       if agent_budget_post_call_blocked(totals, turn_opts) {
         final_status = "budget_exhausted"
         break
@@ -1758,7 +1773,7 @@ fn __agent_loop_run(message, session, initial_opts) {
         turn_index,
       )
       opts = __apply_post_turn_options(opts, outcome)
-      var should_continue = outcome.kind == "continue"
+      var should_continue = outcome.kind == "continue" || bridge_step_delivered > 0
       var verdict_record = nil
       if should_continue {
         if opts?.daemon && len(tool_calls) == 0 {
@@ -1846,6 +1861,7 @@ fn __agent_loop_run(message, session, initial_opts) {
     } catch (e) {
       nil
     }
+    agent_session_drain_bridge_injections(session.session_id, "wait_for_completion")
     __drain_audit_flushes(audit_background_tasks)
     audit_background_tasks = []
     let result = agent_session_finalize(

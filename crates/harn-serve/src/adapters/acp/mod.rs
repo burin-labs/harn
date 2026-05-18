@@ -1278,6 +1278,47 @@ impl AcpServer {
         }
     }
 
+    async fn handle_session_remind(&self, id: &serde_json::Value, params: &serde_json::Value) {
+        let session_id = params
+            .get("sessionId")
+            .and_then(|v| v.as_str())
+            .or_else(|| self.sessions.keys().next().map(|s| s.as_str()));
+        let Some(session_id) = session_id else {
+            if !id.is_null() {
+                self.send_error(id, -32602, "session/remind requires sessionId");
+            }
+            return;
+        };
+        let Some(session) = self.sessions.get(session_id) else {
+            if !id.is_null() {
+                self.send_error(id, -32004, &format!("Session not found: {session_id}"));
+            }
+            return;
+        };
+        let Some(bridge) = session.host_bridge.clone() else {
+            if !id.is_null() {
+                self.send_error(
+                    id,
+                    -32004,
+                    &format!("Session has no active bridge: {session_id}"),
+                );
+            }
+            return;
+        };
+        match bridge.push_queued_session_remind_from_params(params).await {
+            Ok(reminder_id) => {
+                if !id.is_null() {
+                    self.send_response(id, serde_json::json!({"reminderId": reminder_id}));
+                }
+            }
+            Err(error) => {
+                if !id.is_null() {
+                    self.send_error(id, -32602, &format!("session/remind: {error}"));
+                }
+            }
+        }
+    }
+
     fn handle_agent_resume(&self, params: &serde_json::Value) {
         let session_id = params
             .get("sessionId")
@@ -2136,6 +2177,12 @@ impl AcpServer {
                     return;
                 }
                 self.handle_session_input(&params).await;
+            }
+            "session/remind" => {
+                if self.reject_unauthenticated(&id) {
+                    return;
+                }
+                self.handle_session_remind(&id, &params).await;
             }
             "agent/resume" => {
                 if self.reject_unauthenticated(&id) {

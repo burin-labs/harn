@@ -121,6 +121,150 @@ async fn start_acp_code_session_with_config(
     (request_tx, response_rx, server, session_id)
 }
 
+fn attach_test_host_bridge(
+    server: &mut AcpServer,
+    session_id: &str,
+) -> Rc<harn_vm::bridge::HostBridge> {
+    let host_bridge = Rc::new(harn_vm::bridge::HostBridge::from_parts(
+        std::sync::Arc::new(tokio::sync::Mutex::new(std::collections::HashMap::new())),
+        std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false)),
+        std::sync::Arc::new(std::sync::Mutex::new(())),
+        1,
+    ));
+    server
+        .sessions
+        .get_mut(session_id)
+        .expect("session")
+        .host_bridge = Some(host_bridge.clone());
+    host_bridge
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn session_remind_accepts_typed_reminder_payload() {
+    let (tx, mut rx) = mpsc::unbounded_channel();
+    let mut server = AcpServer::new_with_output(AcpServerConfig::new(None), AcpOutput::Channel(tx));
+
+    server
+        .handle_incoming_message(serde_json::json!({
+            "jsonrpc": "2.0",
+            "id": 1,
+            "method": "session/new",
+            "params": {"cwd": "."},
+        }))
+        .await;
+    let created = recv_json(&mut rx).await;
+    let session_id = created["result"]["sessionId"]
+        .as_str()
+        .expect("session id")
+        .to_string();
+    attach_test_host_bridge(&mut server, &session_id);
+
+    server
+        .handle_incoming_message(serde_json::json!({
+            "jsonrpc": "2.0",
+            "id": 2,
+            "method": "session/remind",
+            "params": {
+                "sessionId": session_id,
+                "body": "Host reminder",
+                "tags": ["host"],
+                "dedupe_key": "host-reminder",
+                "ttl_turns": 2,
+                "mode": "finish_step",
+                "_meta": {"harn": {"source": "test"}},
+            },
+        }))
+        .await;
+    let response = recv_json(&mut rx).await;
+    assert!(response["result"]["reminderId"]
+        .as_str()
+        .is_some_and(|id| !id.is_empty()));
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn session_remind_rejects_user_message_payload() {
+    let (tx, mut rx) = mpsc::unbounded_channel();
+    let mut server = AcpServer::new_with_output(AcpServerConfig::new(None), AcpOutput::Channel(tx));
+
+    server
+        .handle_incoming_message(serde_json::json!({
+            "jsonrpc": "2.0",
+            "id": 1,
+            "method": "session/new",
+            "params": {"cwd": "."},
+        }))
+        .await;
+    let created = recv_json(&mut rx).await;
+    let session_id = created["result"]["sessionId"]
+        .as_str()
+        .expect("session id")
+        .to_string();
+    attach_test_host_bridge(&mut server, &session_id);
+
+    server
+        .handle_incoming_message(serde_json::json!({
+            "jsonrpc": "2.0",
+            "id": 2,
+            "method": "session/remind",
+            "params": {
+                "sessionId": session_id,
+                "content": "This is user input, not a reminder.",
+                "mode": "finish_step",
+            },
+        }))
+        .await;
+    let response = recv_json(&mut rx).await;
+    assert_eq!(response["error"]["code"], -32602);
+    assert!(response["error"]["message"]
+        .as_str()
+        .unwrap_or_default()
+        .contains("HARN-RMD-002"));
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn session_input_roundtrip_never_produces_reminder() {
+    let (tx, mut rx) = mpsc::unbounded_channel();
+    let mut server = AcpServer::new_with_output(AcpServerConfig::new(None), AcpOutput::Channel(tx));
+
+    server
+        .handle_incoming_message(serde_json::json!({
+            "jsonrpc": "2.0",
+            "id": 1,
+            "method": "session/new",
+            "params": {"cwd": "."},
+        }))
+        .await;
+    let created = recv_json(&mut rx).await;
+    let session_id = created["result"]["sessionId"]
+        .as_str()
+        .expect("session id")
+        .to_string();
+    let bridge = attach_test_host_bridge(&mut server, &session_id);
+
+    server
+        .handle_incoming_message(serde_json::json!({
+            "jsonrpc": "2.0",
+            "method": "session/input",
+            "params": {
+                "sessionId": session_id,
+                "content": "This is still user input.",
+                "mode": "finish_step",
+            },
+        }))
+        .await;
+
+    let injections = bridge
+        .take_queued_transcript_injections_for(
+            harn_vm::bridge::DeliveryCheckpoint::AfterCurrentOperation,
+        )
+        .await;
+    assert_eq!(injections.len(), 1);
+    let harn_vm::bridge::QueuedTranscriptInjection::User(message) = &injections[0] else {
+        panic!("session/input must produce a user-message injection");
+    };
+    assert_eq!(message.content, "This is still user input.");
+}
+
 #[cfg(feature = "hostlib")]
 #[tokio::test(flavor = "current_thread")]
 async fn acp_fs_mode_and_commit_staged_apply_deferred_hostlib_writes() {

@@ -704,25 +704,45 @@ actually changes (re-pinning to the same selector is a silent ack).
 inherit), so a branch starts with the same effective model as the
 parent. Setting a different pin on the child stays local.
 
-### Queued user messages during agent execution
+### Queued user messages and reminders during agent execution
 
 ACP hosts can inject user follow-up messages while an agent is running.
 Harn owns the delivery semantics inside the runtime so product apps do
-not need to reimplement queue/orchestration logic.
+not need to reimplement queue/orchestration logic. User-message methods
+remain user-role only; ambient or system-style context uses `session/remind`.
 
 Supported notification methods:
 
 - `user_message`
 - `session/input`
 - `agent/user_message`
+- `session/remind`
 - `session/update` with `worker_update` content for delegated worker lifecycle events
 
-Payload shape:
+User-message payload shape:
 
 ```json
 {
   "content": "Please stop editing that file and explain first.",
   "mode": "interrupt_immediate"
+}
+```
+
+Reminder payload shape:
+
+```json
+{
+  "body": "The host noticed new repository instructions; re-read AGENTS.md.",
+  "tags": ["host_context"],
+  "dedupe_key": "repo-instructions",
+  "ttl_turns": 2,
+  "role_hint": "system",
+  "mode": "finish_step",
+  "_meta": {
+    "harn": {
+      "source": "workspace-index"
+    }
+  }
 }
 ```
 
@@ -734,7 +754,13 @@ Supported `mode` values:
 
 Runtime behavior:
 
-- `interrupt_immediate`: inject on the next agent loop boundary immediately
+- `interrupt_immediate`: inject on the next agent loop boundary immediately.
+- `finish_step`: deliver after the current operation finishes.
+- `wait_for_completion`: deliver at the end of the current interaction.
+- `session/remind`: queues a typed system reminder instead of a user-role
+  message. Malformed reminder payloads are rejected with `HARN-RMD-002`.
+  `session/input`, `user_message`, and `agent/user_message` never create
+  reminders.
 - Worker lifecycle updates are emitted as structured `session/update` payloads with
   worker id/name, status, lineage metadata, artifact counts, transcript presence,
   snapshot path, execution metadata, child run ids/paths, lifecycle summaries,

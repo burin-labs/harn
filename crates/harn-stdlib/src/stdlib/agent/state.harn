@@ -135,6 +135,19 @@ pub fn agent_session_drain_feedback(session_id) {
 }
 
 /**
+ * agent_session_drain_bridge_injections.
+ *
+ * @effects: [host]
+ * @allocation: heap
+ * @errors: []
+ * @api_stability: experimental
+ * @example: agent_session_drain_bridge_injections(session_id, "finish_step")
+ */
+pub fn agent_session_drain_bridge_injections(session_id, checkpoint) {
+  return __host_agent_session_drain_bridge_injections(session_id, checkpoint)
+}
+
+/**
  * agent_session_totals.
  *
  * @effects: [host]

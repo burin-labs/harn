@@ -98,6 +98,7 @@ surface as stdio ACP:
 - `session/truncate`
 - `session/close`
 - `session/input`
+- `session/remind`
 - `session/fork`
 - `session/set_mode`
 - `session/set_config_option`
