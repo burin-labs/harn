@@ -640,6 +640,21 @@ fn mock_required_args(tool_schema: &serde_json::Value) -> serde_json::Value {
     serde_json::Value::Object(args)
 }
 
+fn mock_tool_name(tool: &serde_json::Value) -> Option<&str> {
+    tool.get("name")
+        .or_else(|| {
+            tool.get("function")
+                .and_then(|function| function.get("name"))
+        })
+        .and_then(|name| name.as_str())
+}
+
+fn mock_auto_tool_candidate(tools: &[serde_json::Value]) -> Option<&serde_json::Value> {
+    tools
+        .iter()
+        .find(|tool| mock_tool_name(tool) != Some("agent_await_resumption"))
+}
+
 /// Mock LLM provider -- deterministic responses for testing without API keys.
 /// When configurable mocks have been registered via `llm_mock()`, those are
 /// checked first (FIFO queue, then pattern matching). Falls through to the
@@ -684,12 +699,8 @@ pub(crate) fn mock_llm_response(
     // Generate a mock tool call for the first tool, filling required
     // params with placeholders so the call passes schema validation.
     if let Some(tools) = native_tools {
-        if let Some(first_tool) = tools.first() {
-            let tool_name = first_tool
-                .get("name")
-                .or_else(|| first_tool.get("function").and_then(|f| f.get("name")))
-                .and_then(|n| n.as_str())
-                .unwrap_or("unknown");
+        if let Some(first_tool) = mock_auto_tool_candidate(tools) {
+            let tool_name = mock_tool_name(first_tool).unwrap_or("unknown");
             let mock_args = mock_required_args(first_tool);
             let mut result = LlmResult {
                 text: String::new(),

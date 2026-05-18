@@ -1,0 +1,53 @@
+import { agent_capture_events } from "std/agent/events"
+
+pipeline main() {
+  llm_mock(
+    {
+      tool_calls: [
+        {
+          id: "park_1",
+          name: "agent_await_resumption",
+          arguments: {
+            reason: "waiting on review",
+            conditions: {timeout: {duration_minutes: 5, on_timeout: "resume_with_summary"}},
+          },
+        },
+      ],
+      input_tokens: 7,
+      output_tokens: 3,
+    },
+  )
+  let session_id = "await-resumption-" + uuid()
+  let captured = agent_capture_events(
+    session_id,
+    fn() {
+      let handle = sub_agent_run(
+        "Park until a reviewer responds.",
+        {
+          provider: "mock",
+          background: true,
+          session_id: session_id,
+          tool_format: "native",
+          max_iterations: 3,
+        },
+      )
+      return wait_agent(handle)
+    },
+  )
+  let suspended = captured.result
+  let payload = suspended?.result
+  let audit = captured.events
+    .filter(
+    { event -> event.type == "tool_call_audit" && event.tool_name == "agent_await_resumption" },
+  )
+  println(suspended?.status)
+  println(payload?.status)
+  println(payload?.reason)
+  println(payload?.initiator)
+  println(payload?.conditions?.timeout?.duration_minutes)
+  println(payload?.conditions?.timeout?.on_timeout)
+  println(payload?.handle?.id == suspended?.id)
+  println(len(audit) == 1)
+  println(audit[0]?.audit?.reason)
+  println(audit[0]?.audit?.initiator)
+}

@@ -216,7 +216,9 @@ defaults, safe, prompts, catalog).
   lifecycle events. Worker handles retain immutable original `request`
   metadata plus normalized `provenance` so parent orchestration can recover
   research questions, action items, workflow stages, and verification steps
-  without positional rebinding.
+  without positional rebinding. Agent loops also expose lifecycle tools for
+  worker self-parking (`agent_await_resumption`) and opt-in parent-side
+  subagent pause/resume control.
 - Per-worker execution scoping on `spawn_agent(...)`: delegated workers inherit
   the current execution ceiling by default and can narrow it further with a
   `policy` dict or `tools: ["name", ...]` shorthand, with permission denials

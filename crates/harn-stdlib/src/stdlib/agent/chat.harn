@@ -26,6 +26,8 @@ fn __chat_agent_option_keys() {
     "problem_scale",
     "reasoning_task",
     "tools",
+    "subagents",
+    "subagent_tools",
     "tool_choice",
     "cache",
     "timeout",

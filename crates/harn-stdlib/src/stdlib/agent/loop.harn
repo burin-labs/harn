@@ -27,7 +27,12 @@ import {
   agent_tool_search_inject_if_needed,
   agent_tool_search_record_results,
 } from "std/agent/tool_search"
-import { list_agents } from "std/agent/workers"
+import {
+  agent_lifecycle_tools,
+  list_agents,
+  parse_resume_conditions,
+  suspend_agent,
+} from "std/agent/workers"
 import { llm_call_options } from "std/llm/options"
 
 fn __default_invoke_llm(message, turn_system, llm_opts) {
@@ -368,6 +373,54 @@ fn __resolve_tool_calls(llm_result, parsed) {
     return native_calls
   }
   return parsed?.calls ?? []
+}
+
+fn __agent_await_resumption_call(tool_calls) {
+  for call in tool_calls {
+    if __tool_call_name(call) == "agent_await_resumption" {
+      return call
+    }
+  }
+  return nil
+}
+
+fn __agent_await_resumption_args(call) {
+  let args = __tool_call_args(call)
+  let reason = trim(to_string(args?.reason ?? ""))
+  if reason == "" {
+    throw "agent_await_resumption: reason is required"
+  }
+  return {reason: reason, conditions: parse_resume_conditions(args?.conditions ?? nil)}
+}
+
+fn __agent_loop_await_resumption(session, iteration, call) {
+  let parsed = __agent_await_resumption_args(call)
+  let worker = __agent_loop_current_worker()
+  if worker == nil {
+    throw "agent_await_resumption: current agent_loop is not running inside a worker"
+  }
+  agent_emit_event(
+    session.session_id,
+    "tool_call_audit",
+    {
+      tool_call_id: to_string(call?.id ?? call?.tool_call_id ?? ""),
+      tool_name: "agent_await_resumption",
+      audit: {
+        layer: "agent_lifecycle",
+        status: "suspended",
+        initiator: "self",
+        reason: parsed.reason,
+        worker_id: worker?.id,
+        conditions: parsed.conditions,
+      },
+    },
+  )
+  suspend_agent(worker, parsed.reason, {initiator: "self", conditions: parsed.conditions})
+  let checkpoint = __agent_loop_suspend_checkpoint(session, iteration)
+  if checkpoint == nil {
+    throw "agent_await_resumption: suspend checkpoint did not yield"
+  }
+  return checkpoint
 }
 
 fn __stall_diagnostics_config(value) {
@@ -1064,6 +1117,14 @@ fn __agent_loop_suspend_reminder_body(reason) {
   return "Worker suspended before the next turn."
 }
 
+fn __agent_loop_suspend_initiator(value) {
+  let text = to_string(value ?? "operator")
+  if text == "self_initiated" {
+    return "self"
+  }
+  return text
+}
+
 fn __agent_loop_suspend_checkpoint(session, iteration) {
   let worker = __agent_loop_current_worker()
   if worker == nil || worker?.status != "suspended" {
@@ -1071,7 +1132,7 @@ fn __agent_loop_suspend_checkpoint(session, iteration) {
   }
   let suspension = worker?.suspension ?? {}
   let reason = to_string(suspension?.reason ?? "")
-  let initiator = to_string(suspension?.initiator ?? "operator")
+  let initiator = __agent_loop_suspend_initiator(suspension?.initiator)
   let conditions = suspension?.conditions
   let payload = {
     status: "suspended",
@@ -1530,6 +1591,19 @@ fn __agent_loop_run(message, session, initial_opts) {
       } else {
         __resolve_tool_calls(llm_result, parsed)
       }
+      let await_call = __agent_await_resumption_call(tool_calls)
+      if await_call != nil {
+        suspend_result = __agent_loop_await_resumption(session, iteration, await_call)
+        let _totals = agent_session_record_usage(session.session_id, llm_result)
+        agent_emit_event(
+          session.session_id,
+          "turn_end",
+          {iteration: turn_index + 1, turn_info: {tool_count: len(tool_calls), text: visible_text}},
+        )
+        final_status = "suspended"
+        stop_reason = "suspended"
+        break
+      }
       let stall_judge_due = __done_judge_stall_due(turn_opts, done_judge_invocations, turn_index + 1)
       let stall_observation = __stall_observe_tool_calls(
         session.session_id,
@@ -1792,6 +1866,7 @@ fn __agent_loop_run(message, session, initial_opts) {
  */
 pub fn agent_loop(message, system_prompt = nil, options = nil) {
   var opts = agent_loop_options(agent_progress_apply_options(options))
+  opts = opts + {tools: agent_lifecycle_tools(opts?.tools, opts)}
   if system_prompt != nil && system_prompt != "" {
     opts = opts + {system: system_prompt}
   }

@@ -10,6 +10,15 @@ condensed series summaries instead of full per-patch history.
 
 ### Added
 
+- **Agent lifecycle tools for self-parking and parent resume control (#1840).**
+  `agent_loop(...)` now registers `agent_await_resumption(reason,
+  conditions?)` on every loop and handles it structurally when the loop is
+  running inside a worker, reusing the worker suspend checkpoint path and
+  `parse_resume_conditions(...)`. Parent loops can opt into
+  `subagent_pause(handle, reason)` and `subagent_resume(handle, input?,
+  continue_transcript?)` with `subagents: true`, `subagent_tools: true`, or
+  `agent_lifecycle_tools(registry, {subagents: true})`; lifecycle tool calls
+  emit `tool_call_audit` metadata with the initiator and reason.
 - **`with_audit_log` local sink emits a `file://` `receipt_uri` (#1693).**
   When `with_audit_log({sink: "local"})` or `"both"` is active, the
   middleware now attaches a `file://` URI pointing at

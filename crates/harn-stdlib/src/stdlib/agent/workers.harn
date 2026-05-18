@@ -1,4 +1,5 @@
 // @harn-entrypoint-category agent.stdlib
+import { agent_emit_event } from "std/agent/state"
 import { filter_nil, pick_keys } from "std/collections"
 
 type ResumeTimeoutAction = "resume_with_summary" | "fail" | "resume_with_input"
@@ -24,6 +25,8 @@ fn __agent_option_keys() {
     "problem_scale",
     "reasoning_task",
     "tools",
+    "subagents",
+    "subagent_tools",
     "max_iterations",
     "max_nudges",
     "nudge",
@@ -120,6 +123,192 @@ fn __worker_resume_options(options) {
     return options
   }
   return options + {resume_when: parse_resume_conditions(options.resume_when)}
+}
+
+fn __agent_tool_entry_name(entry) {
+  if type_of(entry) != "dict" {
+    return ""
+  }
+  if entry?.name != nil {
+    return to_string(entry.name)
+  }
+  let func = entry?.function
+  if type_of(func) == "dict" {
+    return to_string(func?.name ?? "")
+  }
+  return ""
+}
+
+fn __agent_tool_registry_has(registry, name) {
+  let entries = registry?.tools ?? []
+  if type_of(entries) != "list" {
+    return false
+  }
+  for entry in entries {
+    if __agent_tool_entry_name(entry) == name {
+      return true
+    }
+  }
+  return false
+}
+
+fn __agent_lifecycle_tool_audit(tool_name, initiator, reason, handle = nil, conditions = nil) {
+  let session_id = agent_session_current_id()
+  if session_id == nil || session_id == "" {
+    return
+  }
+  let _ = try {
+    agent_emit_event(
+      session_id,
+      "tool_call_audit",
+      {
+        tool_call_id: "",
+        tool_name: tool_name,
+        audit: filter_nil(
+          {
+            layer: "agent_lifecycle",
+            status: "invoked",
+            initiator: initiator,
+            reason: reason,
+            handle: handle,
+            conditions: conditions,
+          },
+        ),
+      },
+    )
+  }
+}
+
+fn __subagent_pause_tool(args) {
+  let handle = args?.handle
+  if handle == nil || trim(to_string(handle)) == "" {
+    throw "subagent_pause: handle is required"
+  }
+  let reason = trim(to_string(args?.reason ?? ""))
+  if reason == "" {
+    throw "subagent_pause: reason is required"
+  }
+  __agent_lifecycle_tool_audit("subagent_pause", "parent", reason, handle)
+  return suspend_agent(handle, reason, {initiator: "parent"})
+}
+
+fn __subagent_resume_tool(args) {
+  let handle = args?.handle
+  if handle == nil || trim(to_string(handle)) == "" {
+    throw "subagent_resume: handle is required"
+  }
+  let continue_transcript = args?.continue_transcript ?? true
+  if type_of(continue_transcript) != "bool" {
+    throw "subagent_resume: continue_transcript must be a bool"
+  }
+  __agent_lifecycle_tool_audit("subagent_resume", "parent", "resume requested", handle)
+  return resume_agent(handle, args?.input, continue_transcript)
+}
+
+fn __agent_await_resumption_tool(_args) {
+  throw "agent_await_resumption: this tool is handled structurally by agent_loop"
+}
+
+fn __agent_lifecycle_has_subagent_capability(registry, opts) {
+  if opts?.subagents ?? false {
+    return true
+  }
+  if opts?.subagent_tools ?? false {
+    return true
+  }
+  return __agent_tool_registry_has(registry, "sub_agent_run")
+    || __agent_tool_registry_has(registry, "spawn_agent")
+}
+
+fn __agent_lifecycle_add_await_tool(registry) {
+  if __agent_tool_registry_has(registry, "agent_await_resumption") {
+    return registry
+  }
+  return tool_define(
+    registry,
+    "agent_await_resumption",
+    "Suspend this agent and return control to its caller until a parent, operator, or resume trigger wakes it.",
+    {
+      handler: __agent_await_resumption_tool,
+      parameters: {
+        reason: {type: "string", description: "Why this agent is parking."},
+        conditions: {
+          type: "object",
+          required: false,
+          description: "Optional ResumeConditions with trigger, timeout, or on_event fields.",
+        },
+      },
+      returns: {type: "object"},
+      annotations: {agent_lifecycle: true, structural: true, initiator: "self"},
+    },
+  )
+}
+
+fn __agent_lifecycle_add_subagent_tools(registry) {
+  var tools = registry
+  if !__agent_tool_registry_has(tools, "subagent_pause") {
+    tools = tool_define(
+      tools,
+      "subagent_pause",
+      "Cooperatively pause a running subagent after its current turn settles. Returns a resumable handle.",
+      {
+        handler: __subagent_pause_tool,
+        parameters: {
+          handle: {type: "string", description: "Worker id or worker handle to pause."},
+          reason: {type: "string", description: "Why the child should pause."},
+        },
+        returns: {type: "object"},
+        annotations: {agent_lifecycle: true, initiator: "parent"},
+      },
+    )
+  }
+  if !__agent_tool_registry_has(tools, "subagent_resume") {
+    tools = tool_define(
+      tools,
+      "subagent_resume",
+      "Resume a suspended subagent with optional input.",
+      {
+        handler: __subagent_resume_tool,
+        parameters: {
+          handle: {type: "string", description: "Worker id or worker handle to resume."},
+          input: {type: "any", required: false, description: "Optional input for the resumed turn."},
+          continue_transcript: {
+            type: "boolean",
+            required: false,
+            description: "Keep prior transcript context when resuming; defaults to true.",
+          },
+        },
+        returns: {type: "object"},
+        annotations: {agent_lifecycle: true, initiator: "parent"},
+      },
+    )
+  }
+  return tools
+}
+
+/**
+ * agent_lifecycle_tools adds model-facing suspend/resume lifecycle tools.
+ *
+ * Every returned registry includes `agent_await_resumption`. Parent-side
+ * `subagent_pause` and `subagent_resume` are added only when the caller opts
+ * into subagent lifecycle control with `{subagents: true}` or
+ * `{subagent_tools: true}`, or when the supplied registry already exposes a
+ * `sub_agent_run` / `spawn_agent` tool.
+ *
+ * @effects: []
+ * @allocation: heap
+ * @errors: []
+ * @api_stability: experimental
+ * @example: agent_lifecycle_tools(registry, options)
+ */
+pub fn agent_lifecycle_tools(registry = nil, options = nil) {
+  let opts = __worker_options(options, "agent_lifecycle_tools")
+  let base = registry ?? tool_registry()
+  var tools = __agent_lifecycle_add_await_tool(base)
+  if __agent_lifecycle_has_subagent_capability(base, opts) {
+    tools = __agent_lifecycle_add_subagent_tools(tools)
+  }
+  return tools
 }
 
 fn __worker_mode(config) {

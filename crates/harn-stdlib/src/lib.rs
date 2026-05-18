@@ -1097,6 +1097,17 @@ mod tests {
         );
         assert_eq!(parse_resume.required_params, 0);
         assert_eq!(parse_resume.total_params, 1);
+
+        let lifecycle = exports
+            .iter()
+            .find(|function| function.name == "agent_lifecycle_tools")
+            .expect("std/agent/workers should export agent_lifecycle_tools");
+        assert_eq!(
+            lifecycle.signature,
+            "agent_lifecycle_tools(registry = nil, options = nil)"
+        );
+        assert_eq!(lifecycle.required_params, 0);
+        assert_eq!(lifecycle.total_params, 2);
     }
 
     #[test]
