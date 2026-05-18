@@ -2,6 +2,7 @@ use std::collections::BTreeMap;
 use std::rc::Rc;
 
 use serde::{Deserialize, Serialize};
+use serde_json::Value as JsonValue;
 
 use crate::value::{VmError, VmValue};
 
@@ -9,10 +10,116 @@ use super::blocks::{
     default_visibility_for_role, normalize_message_blocks, overall_visibility, render_blocks_text,
 };
 use super::messages::json_messages_to_vm;
-use super::{TRANSCRIPT_ASSET_TYPE, TRANSCRIPT_TYPE, TRANSCRIPT_VERSION};
+use super::{vm_value_to_json, TRANSCRIPT_ASSET_TYPE, TRANSCRIPT_TYPE, TRANSCRIPT_VERSION};
 
 /// Canonical `kind` for a [`SystemReminder`] transcript event.
 pub(crate) const SYSTEM_REMINDER_EVENT_KIND: &str = "system_reminder";
+pub(crate) const SUSPENSION_EVENT_KIND: &str = "suspension";
+pub(crate) const RESUMPTION_EVENT_KIND: &str = "resumption";
+pub(crate) const DRAIN_DECISION_EVENT_KIND: &str = "drain_decision";
+
+#[allow(dead_code)] // schema surface reserved for lifecycle producers
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum SuspensionInitiator {
+    #[serde(rename = "self")]
+    Self_,
+    Parent,
+    Operator,
+    Triggered,
+}
+
+#[allow(dead_code)] // schema surface reserved for lifecycle producers
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ResumptionInitiator {
+    Parent,
+    Operator,
+    Triggered,
+    DrainAgent,
+}
+
+#[allow(dead_code)] // schema surface reserved for lifecycle producers
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum DrainDecisionItemCategory {
+    SuspendedSubagent,
+    QueuedTrigger,
+    PartialHandoff,
+    InFlightLlmCall,
+}
+
+#[allow(dead_code)] // schema surface reserved for lifecycle producers
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum DrainDecisionAction {
+    Resume,
+    Cancel,
+    Handoff,
+    Acknowledge,
+    Defer,
+    Wait,
+    Finalize,
+}
+
+#[allow(dead_code)] // schema surface reserved for lifecycle producers
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct Suspension {
+    pub handle: String,
+    pub initiator: SuspensionInitiator,
+    pub reason: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub conditions: Option<JsonValue>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub resume_by_mechanism: Option<String>,
+    pub suspended_at_turn: i64,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub span_id: Option<String>,
+}
+
+#[allow(dead_code)] // schema surface reserved for lifecycle producers
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct TriggerMatch {
+    pub source: String,
+    pub event_id: String,
+    pub filter_summary: String,
+}
+
+#[allow(dead_code)] // schema surface reserved for lifecycle producers
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct Resumption {
+    pub handle: String,
+    pub initiator: ResumptionInitiator,
+    pub initiator_id: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub input: Option<JsonValue>,
+    pub input_hash: String,
+    pub continue_transcript: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub trigger_match: Option<TriggerMatch>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub linked_suspension_span_id: Option<String>,
+    pub resumed_at_turn: i64,
+}
+
+#[allow(dead_code)] // schema surface reserved for lifecycle producers
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct DrainDecisionItem {
+    pub category: DrainDecisionItemCategory,
+    pub id: String,
+    pub summary: String,
+}
+
+#[allow(dead_code)] // schema surface reserved for lifecycle producers
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct DrainDecision {
+    pub pipeline_id: String,
+    pub item: DrainDecisionItem,
+    pub action: DrainDecisionAction,
+    pub reason: String,
+    pub decided_at_turn: i64,
+    pub settlement_agent_session_id: String,
+}
 
 /// How a [`SystemReminder`] propagates across sub-agent handoffs.
 ///
@@ -275,6 +382,21 @@ pub(crate) fn transcript_event_from_message(message: &VmValue) -> VmValue {
             return transcript_reminder_event_from_value(reminder);
         }
     }
+    if dict.get("kind").map(|v| v.display()).as_deref() == Some(SUSPENSION_EVENT_KIND) {
+        if let Some(suspension) = dict.get("suspension") {
+            return transcript_suspension_event_from_value(suspension);
+        }
+    }
+    if dict.get("kind").map(|v| v.display()).as_deref() == Some(RESUMPTION_EVENT_KIND) {
+        if let Some(resumption) = dict.get("resumption") {
+            return transcript_resumption_event_from_value(resumption);
+        }
+    }
+    if dict.get("kind").map(|v| v.display()).as_deref() == Some(DRAIN_DECISION_EVENT_KIND) {
+        if let Some(drain) = dict.get("drain") {
+            return transcript_drain_decision_event_from_value(drain);
+        }
+    }
     let role = dict
         .get("role")
         .map(|v| v.display())
@@ -474,6 +596,81 @@ pub(crate) fn transcript_reminder_event(reminder: &SystemReminder) -> VmValue {
 pub(crate) fn transcript_reminder_event_from_value(value: &VmValue) -> VmValue {
     let reminder = reminder_from_vm_value(value);
     transcript_reminder_event(&reminder)
+}
+
+#[allow(dead_code)] // typed constructor reserved for lifecycle producers
+pub(crate) fn transcript_suspension_event(suspension: &Suspension) -> VmValue {
+    let payload = serde_json::to_value(suspension).unwrap_or(JsonValue::Null);
+    lifecycle_transcript_event(
+        SUSPENSION_EVENT_KIND,
+        "suspension",
+        &payload,
+        suspension.reason.as_str(),
+    )
+}
+
+pub(crate) fn transcript_suspension_event_from_value(value: &VmValue) -> VmValue {
+    let payload = vm_value_to_json(value);
+    let text = payload
+        .get("reason")
+        .and_then(JsonValue::as_str)
+        .unwrap_or_default();
+    lifecycle_transcript_event(SUSPENSION_EVENT_KIND, "suspension", &payload, text)
+}
+
+#[allow(dead_code)] // typed constructor reserved for lifecycle producers
+pub(crate) fn transcript_resumption_event(resumption: &Resumption) -> VmValue {
+    let payload = serde_json::to_value(resumption).unwrap_or(JsonValue::Null);
+    lifecycle_transcript_event(
+        RESUMPTION_EVENT_KIND,
+        "resumption",
+        &payload,
+        resumption.initiator_id.as_str(),
+    )
+}
+
+pub(crate) fn transcript_resumption_event_from_value(value: &VmValue) -> VmValue {
+    let payload = vm_value_to_json(value);
+    let text = payload
+        .get("initiator_id")
+        .and_then(JsonValue::as_str)
+        .unwrap_or_default();
+    lifecycle_transcript_event(RESUMPTION_EVENT_KIND, "resumption", &payload, text)
+}
+
+#[allow(dead_code)] // typed constructor reserved for lifecycle producers
+pub(crate) fn transcript_drain_decision_event(drain: &DrainDecision) -> VmValue {
+    let payload = serde_json::to_value(drain).unwrap_or(JsonValue::Null);
+    lifecycle_transcript_event(
+        DRAIN_DECISION_EVENT_KIND,
+        "drain",
+        &payload,
+        drain.reason.as_str(),
+    )
+}
+
+pub(crate) fn transcript_drain_decision_event_from_value(value: &VmValue) -> VmValue {
+    let payload = vm_value_to_json(value);
+    let text = payload
+        .get("reason")
+        .and_then(JsonValue::as_str)
+        .unwrap_or_default();
+    lifecycle_transcript_event(DRAIN_DECISION_EVENT_KIND, "drain", &payload, text)
+}
+
+fn lifecycle_transcript_event(
+    kind: &str,
+    payload_key: &str,
+    payload: &JsonValue,
+    text: &str,
+) -> VmValue {
+    let envelope = transcript_event(kind, "system", "public", text, Some(payload.clone()));
+    let mut event = envelope.as_dict().cloned().unwrap_or_default();
+    event.insert(
+        payload_key.to_string(),
+        crate::stdlib::json_to_vm_value(payload),
+    );
+    VmValue::Dict(Rc::new(event))
 }
 
 fn reminder_from_vm_value(value: &VmValue) -> SystemReminder {
@@ -677,5 +874,200 @@ mod tests {
             reminder.get("source").map(|v| v.display()).as_deref(),
             Some("hook")
         );
+    }
+
+    #[test]
+    fn lifecycle_event_payloads_round_trip_through_serde() {
+        let suspension = Suspension {
+            handle: "worker://triage/42".to_string(),
+            initiator: SuspensionInitiator::Self_,
+            reason: "waiting for approval".to_string(),
+            conditions: Some(serde_json::json!({"kind": "approval"})),
+            resume_by_mechanism: Some("ResumeBy.trigger".to_string()),
+            suspended_at_turn: 5,
+            span_id: Some("span-1".to_string()),
+        };
+        let suspension_json = serde_json::to_value(&suspension).expect("serialize suspension");
+        assert_eq!(suspension_json["initiator"], "self");
+        let parsed_suspension: Suspension =
+            serde_json::from_value(suspension_json).expect("deserialize suspension");
+        assert_eq!(parsed_suspension, suspension);
+
+        let resumption = Resumption {
+            handle: "worker://triage/42".to_string(),
+            initiator: ResumptionInitiator::DrainAgent,
+            initiator_id: "session-settle-1".to_string(),
+            input: Some(serde_json::json!({"approved": true})),
+            input_hash: "sha256:abc".to_string(),
+            continue_transcript: true,
+            trigger_match: Some(TriggerMatch {
+                source: "github".to_string(),
+                event_id: "evt-1".to_string(),
+                filter_summary: "label matched".to_string(),
+            }),
+            linked_suspension_span_id: Some("span-1".to_string()),
+            resumed_at_turn: 6,
+        };
+        let resumption_json = serde_json::to_value(&resumption).expect("serialize resumption");
+        assert_eq!(resumption_json["initiator"], "drain_agent");
+        let parsed_resumption: Resumption =
+            serde_json::from_value(resumption_json).expect("deserialize resumption");
+        assert_eq!(parsed_resumption, resumption);
+
+        let drain = DrainDecision {
+            pipeline_id: "pipeline-1".to_string(),
+            item: DrainDecisionItem {
+                category: DrainDecisionItemCategory::InFlightLlmCall,
+                id: "call-1".to_string(),
+                summary: "model call still running".to_string(),
+            },
+            action: DrainDecisionAction::Wait,
+            reason: "allow in-flight call to settle".to_string(),
+            decided_at_turn: 7,
+            settlement_agent_session_id: "settle-session-1".to_string(),
+        };
+        let drain_json = serde_json::to_value(&drain).expect("serialize drain decision");
+        assert_eq!(drain_json["item"]["category"], "in_flight_llm_call");
+        let parsed_drain: DrainDecision =
+            serde_json::from_value(drain_json).expect("deserialize drain decision");
+        assert_eq!(parsed_drain, drain);
+    }
+
+    #[test]
+    fn lifecycle_events_carry_standard_envelope_and_typed_slots() {
+        let suspension = Suspension {
+            handle: "worker://triage/42".to_string(),
+            initiator: SuspensionInitiator::Parent,
+            reason: "parent paused worker".to_string(),
+            conditions: None,
+            resume_by_mechanism: None,
+            suspended_at_turn: 5,
+            span_id: None,
+        };
+        let suspension_event = transcript_suspension_event(&suspension);
+        assert_lifecycle_event_slot(
+            &suspension_event,
+            SUSPENSION_EVENT_KIND,
+            "suspension",
+            "parent paused worker",
+        );
+
+        let resumption = Resumption {
+            handle: "worker://triage/42".to_string(),
+            initiator: ResumptionInitiator::Operator,
+            initiator_id: "operator-1".to_string(),
+            input: None,
+            input_hash: "sha256:none".to_string(),
+            continue_transcript: false,
+            trigger_match: None,
+            linked_suspension_span_id: None,
+            resumed_at_turn: 6,
+        };
+        let resumption_event = transcript_resumption_event(&resumption);
+        assert_lifecycle_event_slot(
+            &resumption_event,
+            RESUMPTION_EVENT_KIND,
+            "resumption",
+            "operator-1",
+        );
+
+        let drain = DrainDecision {
+            pipeline_id: "pipeline-1".to_string(),
+            item: DrainDecisionItem {
+                category: DrainDecisionItemCategory::SuspendedSubagent,
+                id: "worker://triage/42".to_string(),
+                summary: "worker suspended".to_string(),
+            },
+            action: DrainDecisionAction::Resume,
+            reason: "settlement agent can continue it".to_string(),
+            decided_at_turn: 7,
+            settlement_agent_session_id: "settle-session-1".to_string(),
+        };
+        let drain_event = transcript_drain_decision_event(&drain);
+        assert_lifecycle_event_slot(
+            &drain_event,
+            DRAIN_DECISION_EVENT_KIND,
+            "drain",
+            "settlement agent can continue it",
+        );
+    }
+
+    #[test]
+    fn messages_with_lifecycle_kinds_promote_to_typed_events() {
+        let cases = [
+            (
+                SUSPENSION_EVENT_KIND,
+                "suspension",
+                serde_json::json!({
+                    "handle": "worker://triage/42",
+                    "initiator": "operator",
+                    "reason": "manual pause",
+                    "suspended_at_turn": 2
+                }),
+            ),
+            (
+                RESUMPTION_EVENT_KIND,
+                "resumption",
+                serde_json::json!({
+                    "handle": "worker://triage/42",
+                    "initiator": "parent",
+                    "initiator_id": "parent-1",
+                    "input_hash": "sha256:none",
+                    "continue_transcript": true,
+                    "resumed_at_turn": 3
+                }),
+            ),
+            (
+                DRAIN_DECISION_EVENT_KIND,
+                "drain",
+                serde_json::json!({
+                    "pipeline_id": "pipeline-1",
+                    "item": {
+                        "category": "queued_trigger",
+                        "id": "evt-1",
+                        "summary": "queued trigger"
+                    },
+                    "action": "defer",
+                    "reason": "wait for owner",
+                    "decided_at_turn": 4,
+                    "settlement_agent_session_id": "settle-session-1"
+                }),
+            ),
+        ];
+
+        for (kind, slot, payload) in cases {
+            let event = transcript_event_from_message(&VmValue::Dict(Rc::new(BTreeMap::from([
+                ("kind".to_string(), VmValue::String(Rc::from(kind))),
+                (slot.to_string(), crate::stdlib::json_to_vm_value(&payload)),
+            ]))));
+            let dict = event.as_dict().expect("event is dict");
+            assert_eq!(dict.get("kind").map(|v| v.display()).as_deref(), Some(kind));
+            assert_eq!(
+                dict.get("role").map(|v| v.display()).as_deref(),
+                Some("system")
+            );
+            assert_eq!(
+                dict.get("visibility").map(|v| v.display()).as_deref(),
+                Some("public")
+            );
+            assert!(dict.get(slot).and_then(VmValue::as_dict).is_some());
+            assert!(dict.get("metadata").and_then(VmValue::as_dict).is_some());
+        }
+    }
+
+    fn assert_lifecycle_event_slot(event: &VmValue, kind: &str, slot: &str, text: &str) {
+        let dict = event.as_dict().expect("event is a dict");
+        assert_eq!(dict.get("kind").map(|v| v.display()).as_deref(), Some(kind));
+        assert_eq!(
+            dict.get("role").map(|v| v.display()).as_deref(),
+            Some("system")
+        );
+        assert_eq!(
+            dict.get("visibility").map(|v| v.display()).as_deref(),
+            Some("public")
+        );
+        assert_eq!(dict.get("text").map(|v| v.display()).as_deref(), Some(text));
+        assert!(dict.get(slot).and_then(VmValue::as_dict).is_some());
+        assert!(dict.get("metadata").and_then(VmValue::as_dict).is_some());
     }
 }
