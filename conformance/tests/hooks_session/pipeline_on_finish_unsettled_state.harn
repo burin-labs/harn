@@ -1,0 +1,55 @@
+/**
+ * P-04 foundation: an on_finish callback can enumerate the harness
+ * unsettled-state shape and make deterministic per-category decisions.
+ */
+import { counts, is_empty, summary, unsettled_state } from "std/lifecycle"
+
+pipeline default() {
+  pipeline_on_finish(
+    { harness, return_value ->
+      let state = harness.unsettled_state()
+      let helper_state = unsettled_state(harness)
+      let direct_counts = harness.counts(state)
+      let helper_counts = counts(helper_state)
+      println("empty=" + to_string(harness.is_empty(state)) + "/" + to_string(is_empty(state)))
+      println(
+        "counts=" + to_string(direct_counts.suspended) + "," + to_string(helper_counts.queued)
+          + ","
+          + to_string(helper_counts.partial)
+          + ","
+          + to_string(direct_counts.in_flight),
+      )
+      let suspended_decision = if direct_counts.suspended == 0 {
+        "none"
+      } else {
+        "resume"
+      }
+      let trigger_decision = if helper_counts.queued == 0 {
+        "none"
+      } else {
+        "ack"
+      }
+      let handoff_decision = if helper_counts.partial == 0 {
+        "none"
+      } else {
+        "ack"
+      }
+      let llm_decision = if direct_counts.in_flight == 0 {
+        "none"
+      } else {
+        "wait"
+      }
+      println("suspended_decision=" + suspended_decision)
+      println("trigger_decision=" + trigger_decision)
+      println("handoff_decision=" + handoff_decision)
+      println("llm_decision=" + llm_decision)
+      println("summary=" + summary(state))
+      let ack = harness.acknowledge_trigger("missing-trigger")
+      let wait = harness.wait_for_any_settlement(0)
+      println("unsupported=" + ack.status)
+      println("wait=" + wait.status)
+      return return_value
+    },
+  )
+  return 5
+}

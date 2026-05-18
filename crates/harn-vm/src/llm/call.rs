@@ -1,3 +1,5 @@
+use std::cell::RefCell;
+use std::collections::BTreeMap;
 use std::rc::Rc;
 
 use crate::stdlib::{json_to_vm_value, schema_result_value};
@@ -10,6 +12,77 @@ use super::{
     api::{parse_schema_stream_abort, schema_stream_aborted_result_value, SchemaStreamAbort},
     helpers, routing, structural_experiments,
 };
+
+thread_local! {
+    static IN_FLIGHT_LLM_CALLS: RefCell<BTreeMap<String, InFlightLlmCall>> = const { RefCell::new(BTreeMap::new()) };
+}
+
+#[derive(Clone, Debug)]
+struct InFlightLlmCall {
+    call_id: String,
+    model: String,
+    role: String,
+    started_at_ms: i64,
+}
+
+struct InFlightLlmCallGuard {
+    call_id: String,
+}
+
+impl InFlightLlmCallGuard {
+    fn enter(opts: &api::LlmCallOptions) -> Self {
+        let call_id = format!("llm_call_{}", uuid::Uuid::now_v7());
+        let started_at_ms = crate::stdlib::clock::now_wall_ms();
+        let role = opts
+            .messages
+            .last()
+            .and_then(|message| message.get("role"))
+            .and_then(|role| role.as_str())
+            .unwrap_or("user")
+            .to_string();
+        let snapshot = InFlightLlmCall {
+            call_id: call_id.clone(),
+            model: opts.model.clone(),
+            role,
+            started_at_ms,
+        };
+        IN_FLIGHT_LLM_CALLS.with(|calls| {
+            calls.borrow_mut().insert(call_id.clone(), snapshot);
+        });
+        Self { call_id }
+    }
+}
+
+impl Drop for InFlightLlmCallGuard {
+    fn drop(&mut self) {
+        IN_FLIGHT_LLM_CALLS.with(|calls| {
+            calls.borrow_mut().remove(&self.call_id);
+        });
+    }
+}
+
+pub(crate) fn snapshot_in_flight_llm_calls() -> Vec<serde_json::Value> {
+    let now_ms = crate::stdlib::clock::now_wall_ms();
+    IN_FLIGHT_LLM_CALLS.with(|calls| {
+        calls
+            .borrow()
+            .values()
+            .map(|call| {
+                serde_json::json!({
+                    "call_id": call.call_id.clone(),
+                    "model": call.model.clone(),
+                    "role": call.role.clone(),
+                    "started_at_ms": call.started_at_ms,
+                    "age_ms": now_ms.saturating_sub(call.started_at_ms).max(0),
+                })
+            })
+            .collect()
+    })
+}
+
+pub(crate) fn clear_in_flight_llm_calls() {
+    IN_FLIGHT_LLM_CALLS.with(|calls| calls.borrow_mut().clear());
+}
 
 fn output_validation_mode(opts: &api::LlmCallOptions) -> &str {
     opts.output_validation.as_deref().unwrap_or("off")
@@ -361,6 +434,7 @@ pub(crate) async fn execute_llm_call(
     options: Option<std::collections::BTreeMap<String, VmValue>>,
     bridge: Option<&Rc<crate::bridge::HostBridge>>,
 ) -> Result<VmValue, VmError> {
+    let _in_flight_guard = InFlightLlmCallGuard::enter(&opts);
     if let Some(policy) = opts.routing_policy.clone() {
         return execute_with_routing_policy(policy, opts, bridge).await;
     }

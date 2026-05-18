@@ -2231,6 +2231,22 @@ Three concentric surfaces:
   `on_finish_drain` (settlement-agent stub — currently identical to
   `abandon`; replaced by the P-02 settlement implementation under
   harn#1853).
+- `harness.unsettled_state()` returns a stable dict with
+  `suspended_subagents`, `queued_triggers`, `partial_handoffs`, and
+  `in_flight_llm_calls` lists. `harness.is_empty(state?)`,
+  `harness.counts(state?)`, and `harness.summary(state?)` summarize that
+  shape; `std/lifecycle` exports equivalent `unsettled_state(harness)`,
+  `is_empty(state)`, `counts(state)`, and `summary(state)` helpers. On
+  this branch, suspended subagents and in-flight LLM calls are populated
+  from live VM registries; trigger and handoff buckets stay typed empty
+  lists until their per-item registries land.
+- Lifecycle action methods exist on the root harness for drain callbacks:
+  `resume_subagent`, `cancel_subagent`, `handoff_to`, `acknowledge_trigger`,
+  `defer_trigger`, `acknowledge_handoff`, `wait_for_any_settlement`,
+  `emit_audit`, `finalize`, `spawn_settlement_agent`, and
+  `current_pipeline_id`. `resume_subagent` and `cancel_subagent` delegate
+  to host worker primitives; methods whose backing registries are not yet
+  present return a typed `{status: "unsupported", method, reason}` result.
 
 ```harn
 register_session_hook("user_prompt_submit", { event ->

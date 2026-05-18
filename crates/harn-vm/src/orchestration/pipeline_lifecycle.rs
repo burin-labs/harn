@@ -7,9 +7,8 @@
 //! registered closure with `take_pipeline_on_finish` exactly once, so a stale
 //! registration cannot leak across consecutive runs.
 //!
-//! P-04 will populate `unsettled_state_snapshot` with suspended subagents,
-//! queued triggers, partial handoffs, and in-flight LLM calls. For P-01 the
-//! snapshot is always empty and `OnUnsettledDetected` therefore never fires.
+//! `unsettled_state_snapshot` exposes the pipeline-finish harness view of
+//! work that can outlive the main pipeline body.
 
 use std::cell::RefCell;
 use std::rc::Rc;
@@ -39,9 +38,11 @@ pub fn clear_pipeline_on_finish() {
 }
 
 /// Snapshot of unsettled work that the pipeline `on_finish` harness exposes.
-/// P-04 populates the four buckets; P-01 ships an always-empty snapshot so
-/// the lifecycle wiring is exercised without depending on suspend/resume,
-/// reactive triggers, handoff envelopes, or in-flight LLM tracking.
+///
+/// Buckets intentionally stay JSON-shaped at this boundary: each producer
+/// owns its richer Rust types, while callbacks need a stable Harn dict/list
+/// contract. Producers without a durable per-item registry yet return a typed
+/// empty list rather than inventing storage in the lifecycle layer.
 #[derive(Debug, Default, Clone)]
 pub struct UnsettledStateSnapshot {
     pub suspended_subagents: Vec<serde_json::Value>,
@@ -66,10 +67,38 @@ impl UnsettledStateSnapshot {
             "in_flight_llm_calls": self.in_flight_llm_calls,
         })
     }
+
+    pub fn counts_json(&self) -> serde_json::Value {
+        serde_json::json!({
+            "suspended": self.suspended_subagents.len(),
+            "queued": self.queued_triggers.len(),
+            "partial": self.partial_handoffs.len(),
+            "in_flight": self.in_flight_llm_calls.len(),
+        })
+    }
+
+    pub fn summary(&self) -> String {
+        let suspended = self.suspended_subagents.len();
+        let queued = self.queued_triggers.len();
+        let partial = self.partial_handoffs.len();
+        let in_flight = self.in_flight_llm_calls.len();
+        if suspended == 0 && queued == 0 && partial == 0 && in_flight == 0 {
+            "no unsettled work".to_string()
+        } else {
+            format!(
+                "unsettled work: {suspended} suspended subagents, {queued} queued triggers, {partial} partial handoffs, {in_flight} in-flight llm calls"
+            )
+        }
+    }
 }
 
-/// Return the current unsettled-state snapshot. Always empty until P-04
-/// wires in the per-bucket producers.
+/// Return the current unsettled-state snapshot. This is a single synchronous
+/// collection point for all currently available per-thread registries.
 pub fn unsettled_state_snapshot() -> UnsettledStateSnapshot {
-    UnsettledStateSnapshot::default()
+    UnsettledStateSnapshot {
+        suspended_subagents: crate::stdlib::agents::snapshot_suspended_subagents(),
+        queued_triggers: Vec::new(),
+        partial_handoffs: Vec::new(),
+        in_flight_llm_calls: crate::llm::snapshot_in_flight_llm_calls(),
+    }
 }
