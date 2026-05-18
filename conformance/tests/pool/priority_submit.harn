@@ -1,0 +1,42 @@
+import { pool_create, pool_wait } from "std/lifecycle/pool"
+
+/**
+ * Verifies that with max_concurrent=1, submission priority controls
+ * dequeue order: higher priority runs sooner, equal priorities tie-break
+ * by submission order (FIFO).
+ *
+ * The "gate" channel parks the warmup task until all subsequent
+ * submissions have landed in the queue — otherwise the warmup could
+ * complete before later submits arrive, freeing the slot and racing the
+ * priority order.
+ */
+pipeline default() {
+  let pool = pool_create({name: "priority-demo", max_concurrent: 1})
+  let order = atomic(0)
+  let gate = channel(nil, 1)
+  let warmup_body = { ->
+    receive(gate)
+    return atomic_add(order, 1)
+  }
+  let stamp = { -> atomic_add(order, 1) }
+  let warmup = pool.submit(warmup_body)
+  let low = pool.submit(stamp, {priority: 0})
+  let mid = pool.submit(stamp, {priority: 5})
+  let high = pool.submit(stamp, {priority: 10})
+  let mid_second = pool.submit(stamp, {priority: 5})
+  // All five tasks are now resident: warmup is parked, the others wait
+  // in priority order behind it. Open the gate so warmup completes.
+  send(gate, "go")
+  let results = pool_wait([warmup, low, mid, high, mid_second])
+  // Expected dispatch order:
+  //   warmup     (occupied the slot first)
+  //   high       (priority 10)
+  //   mid        (priority 5, submitted before mid_second)
+  //   mid_second (priority 5, FIFO tiebreak)
+  //   low        (priority 0)
+  log(results[0].result)  // warmup     -> 0
+  log(results[3].result)  // high       -> 1
+  log(results[2].result)  // mid        -> 2
+  log(results[4].result)  // mid_second -> 3
+  log(results[1].result)  // low        -> 4
+}

@@ -41,6 +41,7 @@ mod monitors;
 mod multipart;
 mod options;
 mod path;
+mod pool;
 mod postgres;
 pub mod process;
 mod project;
@@ -159,6 +160,7 @@ pub fn register_agent_stdlib(vm: &mut Vm) {
     waitpoint::register_waitpoint_builtins(vm);
     supervisor::register_supervisor_builtins(vm);
     agents::register_agent_builtins(vm);
+    pool::register_pool_builtins(vm);
     agent_sessions::register_agent_session_builtins(vm);
     workflow_messages::register_workflow_message_builtins(vm);
     transcript_compact::register_transcript_compaction_builtins(vm);

@@ -1,0 +1,36 @@
+import { pool_create, pool_wait } from "std/lifecycle/pool"
+
+/**
+ * Verifies that max_concurrent caps the number of tasks running at any
+ * instant. Each task atomically tracks the peak in-flight count; for
+ * max_concurrent=2 the peak must never exceed 2 regardless of how many
+ * tasks are submitted. The gate parks every running task until the main
+ * pipeline releases it, so concurrent siblings race against the cap
+ * instead of completing serially.
+ */
+pipeline default() {
+  let pool = pool_create({name: "cap-demo", max_concurrent: 2})
+  let in_flight = atomic(0)
+  let peak = atomic(0)
+  let gate = channel(nil, 8)
+  let body = { ->
+    let now = atomic_add(in_flight, 1) + 1
+    if now > atomic_get(peak) {
+      atomic_set(peak, now)
+    }
+    receive(gate)
+    atomic_add(in_flight, -1)
+    return now
+  }
+  var handles = []
+  for _i in 0 to 6 exclusive {
+    handles = handles.push(pool.submit(body))
+  }
+  for _i in 0 to 6 exclusive {
+    send(gate, "go")
+  }
+  pool_wait(handles)
+  log(atomic_get(peak) <= 2)
+  log(atomic_get(in_flight))
+  log(pool.size())
+}
