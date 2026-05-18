@@ -1,0 +1,25 @@
+import { agent_capture_events } from "std/agent/events"
+
+pipeline test(task) {
+  let session_id = "daemon-await-resumption-" + uuid()
+  llm_mock({text: "daemon idle"})
+  let captured = agent_capture_events(
+    session_id,
+    fn() { return agent_loop(
+      "Poll for background work",
+      nil,
+      {provider: "mock", daemon: true, max_iterations: 1, wake_interval_ms: 1, session_id: session_id},
+    ) },
+  )
+  let audit = captured.events
+    .filter(
+    { event -> event.type == "tool_call_audit" && event.tool_name == "agent_await_resumption" },
+  )
+  println(captured.result.status)
+  println(len(audit) == 1)
+  println(audit[0]?.audit?.status)
+  println(audit[0]?.audit?.reason)
+  println(audit[0]?.audit?.initiator)
+  println(audit[0]?.audit?.conditions?.timeout?.duration_minutes)
+  println(audit[0]?.audit?.conditions?.timeout?.on_timeout)
+}

@@ -1,6 +1,7 @@
 // @harn-entrypoint-category agent.stdlib
 import { daemon_timer_feedback_prompt, daemon_watch_feedback_prompt } from "std/agent/prompts"
-import { agent_session_inject_feedback } from "std/agent/state"
+import { agent_emit_event, agent_session_inject_feedback } from "std/agent/state"
+import { agent_await_resumption } from "std/agent/workers"
 
 fn __daemon_compaction_summary(opts) {
   if !(opts?.consolidate_on_idle ?? false) {
@@ -45,6 +46,52 @@ fn __agent_daemon_feedback(wake, opts) {
   return nil
 }
 
+fn __agent_daemon_timeout_condition(timeout_ms) {
+  if timeout_ms <= 0 {
+    return nil
+  }
+  return {
+    duration_minutes: to_int(max(1, ceil(timeout_ms * 1.0 / 60000.0))),
+    on_timeout: "resume_with_input",
+  }
+}
+
+fn __agent_daemon_raw_resume_conditions(opts, timeout_ms) {
+  var conditions = {}
+  let timeout = __agent_daemon_timeout_condition(timeout_ms)
+  if timeout != nil {
+    conditions = conditions + {timeout: timeout}
+  }
+  let event_topic = opts?.resume_event_topic ?? opts?.daemon_event_topic ?? nil
+  if event_topic != nil {
+    conditions = conditions + {on_event: event_topic}
+  }
+  if len(conditions.keys()) == 0 {
+    return nil
+  }
+  return conditions
+}
+
+fn __agent_daemon_await_resumption(session, opts, iteration, timeout_ms) {
+  let request = agent_await_resumption("daemon idle", __agent_daemon_raw_resume_conditions(opts, timeout_ms))
+  agent_emit_event(
+    session.session_id,
+    "tool_call_audit",
+    {
+      tool_call_id: "daemon_idle:" + to_string(iteration),
+      tool_name: "agent_await_resumption",
+      audit: {
+        layer: "agent_lifecycle",
+        status: "daemon_idle",
+        initiator: "self",
+        reason: request.reason,
+        conditions: request.conditions,
+      },
+    },
+  )
+  return request
+}
+
 /**
  * agent_daemon_snapshot.
  *
@@ -75,6 +122,7 @@ pub fn agent_daemon_snapshot(session, opts, daemon_state = "idle", iteration = 0
 pub fn agent_daemon_step(session, opts, iteration) {
   let snapshot = agent_daemon_snapshot(session, opts, "idle", iteration)
   let timeout = opts?.wake_interval_ms ?? 0
+  __agent_daemon_await_resumption(session, opts, iteration, timeout)
   __host_fire_session_hook(
     "session_idle",
     {

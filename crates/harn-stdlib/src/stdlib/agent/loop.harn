@@ -28,9 +28,9 @@ import {
   agent_tool_search_record_results,
 } from "std/agent/tool_search"
 import {
+  agent_await_resumption,
   agent_lifecycle_tools,
   list_agents,
-  parse_resume_conditions,
   suspend_agent,
 } from "std/agent/workers"
 import { llm_call_options } from "std/llm/options"
@@ -386,11 +386,7 @@ fn __agent_await_resumption_call(tool_calls) {
 
 fn __agent_await_resumption_args(call) {
   let args = __tool_call_args(call)
-  let reason = trim(to_string(args?.reason ?? ""))
-  if reason == "" {
-    throw "agent_await_resumption: reason is required"
-  }
-  return {reason: reason, conditions: parse_resume_conditions(args?.conditions ?? nil)}
+  return agent_await_resumption(args?.reason ?? "", args?.conditions ?? nil)
 }
 
 fn __agent_loop_await_resumption(session, iteration, call, opts) {

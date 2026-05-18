@@ -598,6 +598,11 @@ terminating on a text-only turn. Idle daemons can be woken by queued human
 messages, `agent/resume` bridge notifications, `wake_interval_ms`, or watched
 file changes from `watch_paths`.
 
+Daemon idle is a special case of `agent_await_resumption`: the stdlib records
+the same lifecycle audit and normalized `ResumeConditions` metadata, with
+`timeout` / `on_event` preconfigured from daemon options, while keeping the
+existing in-process idle wait so daemon-mode return behavior is unchanged.
+
 For MCP server tool catalogs, see [MCP server tools](./tools.md#mcp-server-tools).
 
 Native-tool stages also expose structured fallback / retry metadata in the
@@ -997,6 +1002,7 @@ Worker lifecycle builtins:
 | `suspend_agent(worker, reason?, options?)` | Cooperatively suspend a worker, persist a resumable snapshot, and return `status: "suspended"` with `suspension` metadata |
 | `resume_agent(worker_or_snapshot, resume_input?, continue_transcript?)` | Resume a suspended worker, optionally with new input; set `continue_transcript=false` to resume from the prior summary plus new input only |
 | `parse_resume_conditions(conditions?)` | Validate `trigger`, `timeout`, and `on_event` resume conditions for self-park and `spawn_agent({options: {resume_when}})` |
+| `agent_await_resumption(reason, conditions?)` | Normalize the lifecycle-tool request used by `agent_loop` and daemon idle; `agent_loop` performs the actual suspension when the model calls the tool |
 | `wait_agent(handle_or_list)` | Wait for one worker or a list of workers to finish |
 | `close_agent(handle)` | Cancel a worker and mark it terminal |
 | `list_agents()` | Return summaries for all known workers in the current runtime |
