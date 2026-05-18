@@ -10,6 +10,16 @@ condensed series summaries instead of full per-patch history.
 
 ### Added
 
+- **`with_audit_log` local sink emits a `file://` `receipt_uri` (#1693).**
+  When `with_audit_log({sink: "local"})` or `"both"` is active, the
+  middleware now attaches a `file://` URI pointing at
+  `.harn/receipts/<session_id>.jsonl` to both the in-process
+  `result.audit` envelope and the typed `ToolCallReceipt`'s embedded
+  `audit` dict. The portal's RunDetail view already rendered an
+  `audit.receipt_uri` deep-link when present; with this change the link
+  resolves to the persisted JSONL for any session that opts into the
+  local sink. Cloud-only sinks omit the URI (nothing wrote to disk).
+  Closes #1693.
 - **Transcript reminder transforms (#1817).** Adds
   `transcript.inject_reminder(transcript, options)` and
   `transcript.clear_reminders(transcript, selector)` as pure transcript

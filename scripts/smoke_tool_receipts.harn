@@ -60,4 +60,5 @@ pipeline default() {
   println("receipt_path=" + receipt_path)
   println("records=" + to_string(len(records)))
   println("reason=" + records[0].reason)
+  println("receipt_uri=" + to_string(records[0]?.audit?.receipt_uri ?? ""))
 }

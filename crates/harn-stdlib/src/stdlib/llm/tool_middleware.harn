@@ -521,13 +521,23 @@ pub fn local_receipt_sink(session_id) {
   let fallback = __tool_mw_optional_text(session_id) ?? "session"
   return { receipt ->
     let raw_session = __tool_mw_optional_text(receipt?.session_id) ?? fallback
-    let filename = raw_session.replace("/", "_").replace("\\", "_")
+    let filename = __tool_mw_local_receipt_filename(raw_session)
     let dir = path_join(".harn", "receipts")
     mkdir(dir)
     let path = path_join(dir, filename + ".jsonl")
     append_file(path, json_stringify(receipt) + "\n")
     return path
   }
+}
+
+fn __tool_mw_local_receipt_filename(session_id_text) -> string {
+  return session_id_text.replace("/", "_").replace("\\", "_")
+}
+
+fn __tool_mw_local_receipt_uri(session_id_value) -> string {
+  let raw = __tool_mw_optional_text(session_id_value) ?? "session"
+  let filename = __tool_mw_local_receipt_filename(raw)
+  return "file://" + path_join(cwd(), ".harn", "receipts", filename + ".jsonl")
 }
 
 fn __tool_mw_receipt_status(result) -> string {
@@ -682,6 +692,11 @@ fn __tool_mw_audit_log_return(result, cfg, receipt) {
  * Receipts carry hashes instead of raw args/results, so local and cloud
  * sinks can be queryable without leaking tool payloads.
  *
+ * When the local sink is active (`"local"` or `"both"`), the middleware
+ * also attaches a `file://` `receipt_uri` to `result.audit` and
+ * `receipt.audit`. Hosts (e.g. the portal RunDetail view) render that
+ * URI as a deep-link to the persisted JSONL line.
+ *
  * @effects: []
  * @allocation: heap
  * @errors: []
@@ -694,9 +709,24 @@ pub fn with_audit_log(sink_or_options) {
     let started = now_ms()
     let result = next(call)
     let duration = now_ms() - started
-    let receipt = __tool_mw_tool_call_receipt(call, result, duration, cfg.redact_keys)
+    let base_receipt = __tool_mw_tool_call_receipt(call, result, duration, cfg.redact_keys)
+    let receipt_uri = if cfg.mode == "local" || cfg.mode == "both" {
+      __tool_mw_local_receipt_uri(base_receipt.session_id)
+    } else {
+      nil
+    }
+    let receipt = if receipt_uri == nil {
+      base_receipt
+    } else {
+      base_receipt + {audit: __merge_audit(base_receipt?.audit, {receipt_uri: receipt_uri})}
+    }
+    let enriched_result = if receipt_uri == nil {
+      result
+    } else {
+      result + {audit: __merge_audit(result?.audit, {receipt_uri: receipt_uri})}
+    }
     if call?.turn?.prefetch_next_turn ?? false {
-      let returned = __tool_mw_audit_log_return(result, cfg, receipt)
+      let returned = __tool_mw_audit_log_return(enriched_result, cfg, receipt)
       if __tool_mw_audit_log_has_deferred_sink(cfg) {
         return returned
           + {_audit_flush: { -> __tool_mw_audit_log_flush(cfg, receipt) }}
@@ -704,7 +734,7 @@ pub fn with_audit_log(sink_or_options) {
       return returned
     }
     __tool_mw_audit_log_flush(cfg, receipt)
-    return __tool_mw_audit_log_return(result, cfg, receipt)
+    return __tool_mw_audit_log_return(enriched_result, cfg, receipt)
   }
 }
 
