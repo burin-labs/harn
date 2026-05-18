@@ -2881,10 +2881,20 @@ fn tool_call_error_category_values() -> Vec<String> {
 }
 
 fn worker_status_values() -> Vec<String> {
-    WorkerEvent::ALL
-        .iter()
-        .map(|event| event.as_status().to_string())
-        .collect()
+    // Multiple lifecycle events can share a wire status (e.g.
+    // `WorkerSpawned` and `WorkerResumed` both surface as `running`).
+    // The published vocabulary is a set, not a multiset — dedupe while
+    // preserving the first-seen order so downstream consumers see a
+    // stable list.
+    let mut seen = BTreeSet::new();
+    let mut out = Vec::new();
+    for event in WorkerEvent::ALL.iter() {
+        let status = event.as_status().to_string();
+        if seen.insert(status.clone()) {
+            out.push(status);
+        }
+    }
+    out
 }
 
 fn side_effect_level_values() -> Vec<String> {

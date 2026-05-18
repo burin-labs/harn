@@ -50,12 +50,17 @@ pub struct FsWatchEvent {
 /// retriggerable worker resuming from `awaiting_input`, or a workflow
 /// stage completing without ending the worker). `WaitingForInput` covers
 /// retriggerable workers that finish a cycle but stay alive pending the
-/// next host-supplied trigger payload.
+/// next host-supplied trigger payload. `Suspended`/`Resumed` cover
+/// cooperative mid-loop pause and warm resume (harn#1836); the
+/// `agent_loop` honors the pause signal at the next turn boundary,
+/// distinct from a hard `Cancelled` interrupt.
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Hash, Serialize, Deserialize)]
 pub enum WorkerEvent {
     WorkerSpawned,
     WorkerProgressed,
     WorkerWaitingForInput,
+    WorkerSuspended,
+    WorkerResumed,
     WorkerCompleted,
     WorkerFailed,
     WorkerCancelled,
@@ -66,10 +71,12 @@ impl WorkerEvent {
     /// the pattern used by `ToolCallStatus::ALL` so the protocol-artifact
     /// dumper can enumerate worker status wire values without
     /// special-casing each lifecycle event.
-    pub const ALL: [Self; 6] = [
+    pub const ALL: [Self; 8] = [
         Self::WorkerSpawned,
         Self::WorkerProgressed,
         Self::WorkerWaitingForInput,
+        Self::WorkerSuspended,
+        Self::WorkerResumed,
         Self::WorkerCompleted,
         Self::WorkerFailed,
         Self::WorkerCancelled,
@@ -78,7 +85,7 @@ impl WorkerEvent {
     /// Wire-level status string used by bridge `worker_update` payloads
     /// and ACP `worker_update` session updates. The four canonical
     /// states are mirrored from harn's internal worker `status` field
-    /// (`running`/`completed`/`failed`/`cancelled`), and the two newer
+    /// (`running`/`completed`/`failed`/`cancelled`), and the four newer
     /// lifecycle states pick names that don't collide with any existing
     /// status string.
     pub fn as_status(self) -> &'static str {
@@ -86,6 +93,8 @@ impl WorkerEvent {
             Self::WorkerSpawned => "running",
             Self::WorkerProgressed => "progressed",
             Self::WorkerWaitingForInput => "awaiting_input",
+            Self::WorkerSuspended => "suspended",
+            Self::WorkerResumed => "running",
             Self::WorkerCompleted => "completed",
             Self::WorkerFailed => "failed",
             Self::WorkerCancelled => "cancelled",
@@ -97,6 +106,8 @@ impl WorkerEvent {
             Self::WorkerSpawned => "WorkerSpawned",
             Self::WorkerProgressed => "WorkerProgressed",
             Self::WorkerWaitingForInput => "WorkerWaitingForInput",
+            Self::WorkerSuspended => "WorkerSuspended",
+            Self::WorkerResumed => "WorkerResumed",
             Self::WorkerCompleted => "WorkerCompleted",
             Self::WorkerFailed => "WorkerFailed",
             Self::WorkerCancelled => "WorkerCancelled",
@@ -104,9 +115,10 @@ impl WorkerEvent {
     }
 
     /// True for lifecycle events that mean the worker has reached a
-    /// final, non-resumable state. Retriggerable awaiting and
-    /// progressed milestones are *not* terminal — the worker keeps
-    /// running or is waiting for a trigger.
+    /// final, non-resumable state. Retriggerable awaiting, progressed,
+    /// and cooperative suspend/resume milestones are *not* terminal —
+    /// the worker keeps running, is waiting for a trigger, or is parked
+    /// awaiting an external resume.
     pub fn is_terminal(self) -> bool {
         matches!(
             self,
@@ -1623,6 +1635,8 @@ mod tests {
             WorkerEvent::WorkerWaitingForInput.as_status(),
             "awaiting_input"
         );
+        assert_eq!(WorkerEvent::WorkerSuspended.as_status(), "suspended");
+        assert_eq!(WorkerEvent::WorkerResumed.as_status(), "running");
         assert_eq!(WorkerEvent::WorkerCompleted.as_status(), "completed");
         assert_eq!(WorkerEvent::WorkerFailed.as_status(), "failed");
         assert_eq!(WorkerEvent::WorkerCancelled.as_status(), "cancelled");
@@ -1638,6 +1652,8 @@ mod tests {
             WorkerEvent::WorkerSpawned,
             WorkerEvent::WorkerProgressed,
             WorkerEvent::WorkerWaitingForInput,
+            WorkerEvent::WorkerSuspended,
+            WorkerEvent::WorkerResumed,
         ] {
             assert!(
                 !non_terminal.is_terminal(),
@@ -1658,6 +1674,8 @@ mod tests {
                 "running",
                 "progressed",
                 "awaiting_input",
+                "suspended",
+                "running",
                 "completed",
                 "failed",
                 "cancelled",

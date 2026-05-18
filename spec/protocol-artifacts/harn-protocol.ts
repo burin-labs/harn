@@ -169,6 +169,7 @@ export const HARN_WORKER_STATUSES = [
   "running",
   "progressed",
   "awaiting_input",
+  "suspended",
   "completed",
   "failed",
   "cancelled",

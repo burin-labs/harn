@@ -225,6 +225,7 @@ HARN_WORKER_STATUSES: tuple = (
     "running",
     "progressed",
     "awaiting_input",
+    "suspended",
     "completed",
     "failed",
     "cancelled",
@@ -409,6 +410,7 @@ class HarnWorkerStatus(str, Enum):
     RUNNING = "running"
     PROGRESSED = "progressed"
     AWAITING_INPUT = "awaiting_input"
+    SUSPENDED = "suspended"
     COMPLETED = "completed"
     FAILED = "failed"
     CANCELLED = "cancelled"

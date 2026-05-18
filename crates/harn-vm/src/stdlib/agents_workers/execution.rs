@@ -551,6 +551,8 @@ pub(in super::super) async fn execute_delegated_stage(
         config,
         handle: None,
         cancel_token: Arc::new(AtomicBool::new(false)),
+        suspend_signal: Arc::new(AtomicBool::new(false)),
+        suspension: None,
         request: original_request,
         latest_payload: None,
         latest_error: None,

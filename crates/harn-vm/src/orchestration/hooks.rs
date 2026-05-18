@@ -26,6 +26,10 @@ pub enum HookEvent {
     WorkerProgressed,
     #[serde(rename = "WorkerWaitingForInput")]
     WorkerWaitingForInput,
+    #[serde(rename = "WorkerSuspended")]
+    WorkerSuspended,
+    #[serde(rename = "WorkerResumed")]
+    WorkerResumed,
     #[serde(rename = "WorkerCompleted")]
     WorkerCompleted,
     #[serde(rename = "WorkerFailed")]
@@ -86,6 +90,8 @@ impl HookEvent {
             Self::WorkerSpawned => "WorkerSpawned",
             Self::WorkerProgressed => "WorkerProgressed",
             Self::WorkerWaitingForInput => "WorkerWaitingForInput",
+            Self::WorkerSuspended => "WorkerSuspended",
+            Self::WorkerResumed => "WorkerResumed",
             Self::WorkerCompleted => "WorkerCompleted",
             Self::WorkerFailed => "WorkerFailed",
             Self::WorkerCancelled => "WorkerCancelled",
@@ -141,6 +147,8 @@ impl HookEvent {
             WorkerEvent::WorkerSpawned => Self::WorkerSpawned,
             WorkerEvent::WorkerProgressed => Self::WorkerProgressed,
             WorkerEvent::WorkerWaitingForInput => Self::WorkerWaitingForInput,
+            WorkerEvent::WorkerSuspended => Self::WorkerSuspended,
+            WorkerEvent::WorkerResumed => Self::WorkerResumed,
             WorkerEvent::WorkerCompleted => Self::WorkerCompleted,
             WorkerEvent::WorkerFailed => Self::WorkerFailed,
             WorkerEvent::WorkerCancelled => Self::WorkerCancelled,
