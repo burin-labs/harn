@@ -78,6 +78,13 @@ condensed series summaries instead of full per-patch history.
   `pool_create({queue: ...})` now selects deterministic FIFO, LIFO,
   priority, or key-partitioned fair round-robin dispatch while preserving
   priority dispatch as the default for existing pools.
+- **Agent pool backpressure policies (#1888).** Adds
+  `Backpressure()` plus `backpressure_queue(max_depth, on_full)`,
+  `fail_fast()`, and `ring_buffer(capacity)` descriptors for bounding pool
+  queues. Full queues can block submitters, drop oldest/newest tasks,
+  fail immediately with `HARN-POL-001`, or reject fail-fast submissions
+  with `HARN-POL-002`; drop paths return rejected task handles and emit
+  `pool_drop` audit events on `lifecycle.pool.audit`.
 - **Per-symbol stdlib metadata contract (#1790).** Every public stdlib
   function declares an `@effects`, `@allocation`, `@errors`,
   `@api_stability`, and `@example` block above its `pub fn`. A new

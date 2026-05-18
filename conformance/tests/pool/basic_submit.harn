@@ -39,7 +39,8 @@ pipeline default() {
   log(again.name)
   log(again.id == pool.id)
   let pools = pool_list()
-  log(len(pools))
+  let listed = pools.find({ entry -> entry.name == "demo" })
+  log(listed.id == pool.id)
   // Failures surface as "failed" status with the error message.
   let boom = { ->
     throw "boom"

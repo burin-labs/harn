@@ -75,6 +75,11 @@
       "id": "MAT",
       "title": "Match exhaustiveness",
       "count": 3
+    },
+    {
+      "id": "POL",
+      "title": "Runtime policies",
+      "count": 2
     }
   ],
   "codes": [
@@ -2083,6 +2088,24 @@
       "code": "HARN-MAT-003",
       "category": "MAT",
       "summary": "match pattern is invalid",
+      "repairs": [],
+      "related": [],
+      "explanationPresent": true,
+      "apiStability": "stable"
+    },
+    {
+      "code": "HARN-POL-001",
+      "category": "POL",
+      "summary": "pool backpressure rejected a submit",
+      "repairs": [],
+      "related": [],
+      "explanationPresent": true,
+      "apiStability": "stable"
+    },
+    {
+      "code": "HARN-POL-002",
+      "category": "POL",
+      "summary": "fail-fast pool has no immediate capacity",
       "repairs": [],
       "related": [],
       "explanationPresent": true,

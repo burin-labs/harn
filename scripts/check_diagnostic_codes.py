@@ -25,6 +25,7 @@ CATEGORIES = {
     "Own",
     "Rcv",
     "Mat",
+    "Pol",
 }
 HELPERS = [
     "error_at_with_help",
@@ -112,6 +113,7 @@ def category_code(category: str) -> str:
         "Own": "OWN",
         "Rcv": "RCV",
         "Mat": "MAT",
+        "Pol": "POL",
     }[category]
 
 

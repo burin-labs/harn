@@ -1,0 +1,148 @@
+import { Backpressure, pool_create, pool_wait } from "std/lifecycle/pool"
+
+fn gated(gate, value) {
+  return { ->
+    receive(gate)
+    return value
+  }
+}
+
+fn constant(value) {
+  return { -> value }
+}
+
+fn drop_oldest_case(bp) {
+  let gate = channel(nil, 1)
+  let pool = pool_create({name: "bp-drop-oldest", max_concurrent: 1, backpressure: bp.queue(1, "drop_oldest")})
+  let warmup = pool.submit(gated(gate, "warmup"))
+  let old = pool.submit(constant("old"))
+  let newest = pool.submit(constant("newest"))
+  let saturated = pool.snapshot()
+  println(saturated.backpressure.on_full)
+  println(saturated.rejected)
+  println(saturated.queued)
+  send(gate, "go")
+  let results = pool_wait([warmup, old, newest])
+  println(results[1].status)
+  println(results[1].rejection_policy)
+  println(results[2].status)
+  println(results[2].result)
+}
+
+fn drop_newest_case(bp) {
+  let gate = channel(nil, 1)
+  let pool = pool_create({name: "bp-drop-newest", max_concurrent: 1, backpressure: bp.queue(1, "drop_newest")})
+  let warmup = pool.submit(gated(gate, "warmup"))
+  let old = pool.submit(constant("old"))
+  let newest = pool.submit(constant("newest"))
+  let saturated = pool.snapshot()
+  println(saturated.backpressure.on_full)
+  println(saturated.rejected)
+  println(saturated.queued)
+  send(gate, "go")
+  let results = pool_wait([warmup, old, newest])
+  println(results[1].status)
+  println(results[1].result)
+  println(results[2].status)
+  println(results[2].rejection_policy)
+}
+
+fn ring_buffer_case(bp) {
+  let gate = channel(nil, 1)
+  let pool = pool_create({name: "bp-ring-buffer", max_concurrent: 1, backpressure: bp.ring_buffer(1)})
+  let warmup = pool.submit(gated(gate, "warmup"))
+  let old = pool.submit(constant("old"))
+  let newest = pool.submit(constant("newest"))
+  let saturated = pool.snapshot()
+  println(saturated.backpressure.kind)
+  println(saturated.backpressure.max_depth)
+  println(saturated.rejected)
+  send(gate, "go")
+  let results = pool_wait([warmup, old, newest])
+  println(results[1].status)
+  println(results[1].rejection_policy)
+  println(results[2].status)
+  println(results[2].result)
+}
+
+fn fail_submitter_case(bp) {
+  let gate = channel(nil, 1)
+  let pool = pool_create(
+    {name: "bp-fail-submitter", max_concurrent: 1, backpressure: bp.queue(1, "fail_submitter")},
+  )
+  let warmup = pool.submit(gated(gate, "warmup"))
+  let queued = pool.submit(constant("queued"))
+  let failed = try {
+    pool.submit(constant("overflow"))
+  }
+  println(is_err(failed))
+  println(contains(to_string(unwrap_err(failed)), "HARN-POL-001"))
+  send(gate, "go")
+  let results = pool_wait([warmup, queued])
+  println(results[0].status)
+  println(results[1].result)
+}
+
+fn fail_fast_case(bp) {
+  let gate = channel(nil, 1)
+  let pool = pool_create({name: "bp-fail-fast", max_concurrent: 1, backpressure: bp.fail_fast})
+  let warmup = pool.submit(gated(gate, "warmup"))
+  let failed = try {
+    pool.submit(constant("overflow"))
+  }
+  println(is_err(failed))
+  println(contains(to_string(unwrap_err(failed)), "HARN-POL-002"))
+  send(gate, "go")
+  let result = pool_wait(warmup)
+  println(result.status)
+  println(result.result)
+}
+
+fn block_submitter_case(bp) {
+  let gate = channel(nil, 1)
+  let started = channel(nil, 1)
+  let returned = channel(nil, 1)
+  let pool = pool_create({name: "bp-block-submitter", max_concurrent: 1, backpressure: bp.queue(1)})
+  let warmup = pool.submit(gated(gate, "warmup"))
+  let queued = pool.submit(constant("queued"))
+  let submitter = spawn {
+    send(started, "started")
+    let late = pool.submit(constant("late"))
+    send(returned, "returned")
+    return late
+  }
+  receive(started)
+  println(try_receive(returned) == nil)
+  send(gate, "go")
+  let late = await(submitter)
+  println(receive(returned))
+  let results = pool_wait([warmup, queued, late])
+  println(results[0].status)
+  println(results[1].result)
+  println(results[2].result)
+}
+
+fn audit_case() {
+  let stream = event_log.subscribe({topic: "lifecycle.pool.audit"})
+  let first = stream.next().value
+  let second = stream.next().value
+  let third = stream.next().value
+  println(first.kind)
+  println(first.payload.policy)
+  println(first.headers.schema)
+  println(second.payload.policy)
+  println(third.payload.policy)
+}
+
+pipeline default() {
+  let bp = Backpressure()
+  println(bp.fail_fast.kind)
+  println(bp.queue(2, "block_submitter").max_depth)
+  drop_oldest_case(bp)
+  drop_newest_case(bp)
+  ring_buffer_case(bp)
+  fail_submitter_case(bp)
+  fail_fast_case(bp)
+  block_submitter_case(bp)
+  audit_case()
+}

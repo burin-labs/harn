@@ -86,8 +86,8 @@ described below (`std/text`, `std/json`, `std/math`, `std/collections`,
 `std/runtime`, `std/command`, `std/gha`, `std/tui`, `std/git`,
 `std/review`, `std/experiments`,
 `std/project`, `std/memory`, `std/prompt_library`, `std/monitors`,
-`std/triage`, `std/worktree`, `std/checkpoint`, `std/personas/prelude`,
-`std/personas/bulletins`,
+`std/oauth/providers`, `std/triage`, `std/worktree`, `std/checkpoint`,
+`std/personas/prelude`, `std/personas/bulletins`,
 `std/connectors/shared`, and provider-specific `std/connectors/...` modules).
 These add layered
 utilities on top of the core builtins; the core builtins themselves are
@@ -117,7 +117,6 @@ import "std/llm/budget"
 import "std/llm/prompts"
 import "std/math"
 import "std/monitors"
-import "std/oauth/providers"
 import "std/path"
 import "std/personas/bulletins"
 import "std/personas/prelude"
@@ -127,6 +126,14 @@ import "std/text"
 import "std/triage"
 import "std/tui"
 import "std/vision"
+```
+
+`std/oauth/providers` exports a `custom` factory that intentionally has the
+same short name as `std/experiments.custom`, so import it separately or use
+selective imports when a script needs both modules:
+
+```harn
+import "std/oauth/providers"
 ```
 
 ### std/async
