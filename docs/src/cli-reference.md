@@ -102,6 +102,34 @@ headers, signs the receipt with an Ed25519 key loaded through the configured
 secret provider chain, and writes the receipt under `.harn/receipts/` unless
 `--receipt-out` is set.
 
+## harn parse
+
+Parse a `.harn` file without type-checking or running it.
+
+```bash
+harn parse main.harn
+harn parse main.harn --json
+harn parse examples/hello.harn --json | jq .data.kind
+```
+
+Text mode prints the debug AST. `--json` emits a `JsonEnvelope` with
+`schemaVersion: 1`; `data.kind` is `Program`, `data.body[]` contains tagged
+AST nodes, and each node carries a byte span.
+
+## harn tokens
+
+Tokenize a `.harn` file.
+
+```bash
+harn tokens main.harn
+harn tokens main.harn --json
+```
+
+Text mode prints one token per line with line/column and byte ranges.
+`--json` emits a `JsonEnvelope` with `schemaVersion: 1`; `data[]` entries are
+`{ kind, lexeme, start, end, line, column }`. `start` and `end` are byte
+offsets into the original source.
+
 ## harn verify
 
 Verify a signed Harn provenance receipt.

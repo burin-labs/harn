@@ -6,6 +6,18 @@ Pre-0.6 highlights live in [CHANGELOG-pre-0.6.md](CHANGELOG-pre-0.6.md).
 Harn had no external users before 0.6.0, so that archive intentionally keeps
 condensed series summaries instead of full per-patch history.
 
+## Unreleased
+
+### Added
+
+- **`harn parse --json` and `harn tokens --json` (#1757).** Adds
+  parser and lexer inspection commands for tooling. `harn parse` prints
+  the AST in text mode or a tagged `Program` JSON tree with byte spans
+  in `--json` mode. `harn tokens` prints the lexer stream in text mode
+  or `{ kind, lexeme, start, end, line, column }` entries in `--json`
+  mode. Both structured surfaces use the standard `JsonEnvelope` and
+  register in `harn --json-schemas`.
+
 ## v0.8.25
 
 ### Added

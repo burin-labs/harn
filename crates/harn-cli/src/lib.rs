@@ -317,6 +317,16 @@ async fn async_main() {
                 process::exit(1);
             }
         }
+        Command::Parse(args) => {
+            if let Err(error) = commands::parse_tokens::run_parse(&args) {
+                command_error(&error);
+            }
+        }
+        Command::Tokens(args) => {
+            if let Err(error) = commands::parse_tokens::run_tokens(&args) {
+                command_error(&error);
+            }
+        }
         Command::Config(args) => {
             if let Err(error) = commands::config_cmd::run(args).await {
                 command_error(&error);

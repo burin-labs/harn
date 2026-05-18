@@ -35,6 +35,7 @@ mod models;
 mod orchestrator;
 mod pack;
 mod package;
+mod parse_tokens;
 mod persona;
 mod playground;
 mod portal;
@@ -136,6 +137,7 @@ pub(crate) use package::{
     AddArgs, InstallArgs, PackageArgs, PackageArtifactsCommand, PackageCacheCommand,
     PackageCommand, PublishArgs, RemoveArgs, UpdateArgs,
 };
+pub(crate) use parse_tokens::{ParseArgs, TokensArgs};
 pub(crate) use persona::{
     PersonaArgs, PersonaCheckArgs, PersonaCommand, PersonaControlArgs, PersonaDoctorArgs,
     PersonaInspectArgs, PersonaListArgs, PersonaNewArgs, PersonaSpendArgs, PersonaStatusArgs,
@@ -273,6 +275,10 @@ SCRIPTING
     Run(RunArgs),
     /// Type-check .harn files or directories without executing them.
     Check(CheckArgs),
+    /// Parse a .harn file and print its AST.
+    Parse(ParseArgs),
+    /// Tokenize a .harn file and print lexer tokens.
+    Tokens(TokensArgs),
     /// Inspect, validate, and emit schemas for layered Harn runtime config.
     Config(ConfigArgs),
     /// Explain a diagnostic. Pass a stable `HARN-<CAT>-<NNN>` code

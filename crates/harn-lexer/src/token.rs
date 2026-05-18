@@ -1,7 +1,7 @@
 use std::fmt;
 
 /// A segment of an interpolated string.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, serde::Serialize)]
 pub enum StringSegment {
     Literal(String),
     /// An interpolated expression with its source position (line, column).
@@ -18,7 +18,7 @@ impl fmt::Display for StringSegment {
 }
 
 /// Source location for error reporting.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize)]
 pub struct Span {
     /// Byte offset from start of source (inclusive).
     pub start: usize,

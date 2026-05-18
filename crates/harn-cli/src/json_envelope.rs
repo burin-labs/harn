@@ -164,6 +164,18 @@ pub fn catalog() -> Vec<SchemaEntry> {
             schema_json: None,
         },
         SchemaEntry {
+            command: "parse",
+            schema_version: crate::commands::parse_tokens::PARSE_JSON_SCHEMA_VERSION,
+            description: "Tagged Harn AST tree with byte spans for parser tooling.",
+            schema_json: None,
+        },
+        SchemaEntry {
+            command: "tokens",
+            schema_version: crate::commands::parse_tokens::TOKENS_JSON_SCHEMA_VERSION,
+            description: "Lexer token stream with source lexemes and byte spans.",
+            schema_json: None,
+        },
+        SchemaEntry {
             command: "time run",
             schema_version: crate::commands::time::TIME_RUN_SCHEMA_VERSION,
             description:
