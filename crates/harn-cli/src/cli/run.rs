@@ -64,6 +64,18 @@ pub(crate) struct RunArgs {
     /// See `docs/src/cli/run-json.md`.
     #[arg(long = "json", action = clap::ArgAction::SetTrue)]
     pub json: bool,
+    /// When running a `.harnpack`, accept bundles that carry no Ed25519
+    /// signature. The default refuses unsigned packs so a missing
+    /// signature can't be silently glossed over. Only meaningful for
+    /// `.harnpack` inputs; ignored for `.harn` sources.
+    #[arg(long = "allow-unsigned", action = clap::ArgAction::SetTrue)]
+    pub allow_unsigned: bool,
+    /// Verify the embedded signature and replay a `.harnpack` into the
+    /// content-addressed cache without executing the entrypoint. Exits
+    /// 0 on verify success, 1 on signature failure. Only meaningful
+    /// for `.harnpack` inputs.
+    #[arg(long = "dry-run-verify", action = clap::ArgAction::SetTrue)]
+    pub dry_run_verify: bool,
     /// Suppress `stdout` / `stderr` events when `--json` is active.
     /// Transcript, tool, hook, persona-stage, and the final result
     /// events still flow.

@@ -178,9 +178,19 @@ async fn async_main() {
             let json_options = args
                 .json
                 .then_some(commands::run::RunJsonOptions { quiet: args.quiet });
+            let harnpack_options = commands::run::harnpack::HarnpackRunOptions {
+                allow_unsigned: args.allow_unsigned,
+                dry_run_verify: args.dry_run_verify,
+            };
 
             match (args.eval.as_deref(), args.file.as_deref()) {
                 (Some(code), None) => {
+                    if args.allow_unsigned || args.dry_run_verify {
+                        command_error(
+                            "`--allow-unsigned` and `--dry-run-verify` apply to `.harnpack` inputs; \
+                             they cannot be combined with `-e`",
+                        );
+                    }
                     let (wrapped, tmp) = commands::run::prepare_eval_temp_file(code)
                         .unwrap_or_else(|e| command_error(&e));
                     let tmp_path: PathBuf = tmp.path().to_path_buf();
@@ -201,6 +211,7 @@ async fn async_main() {
                             attestation.clone(),
                             profile_options.clone(),
                             json_options.clone(),
+                            harnpack_options.clone(),
                         )
                         .await;
                     }
@@ -220,6 +231,7 @@ async fn async_main() {
                             attestation,
                             profile_options,
                             json_options,
+                            harnpack_options,
                         )
                         .await
                     }

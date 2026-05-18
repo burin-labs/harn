@@ -67,6 +67,15 @@ pub enum RunEventWire {
         stage: String,
         transition: String,
     },
+    PackRun {
+        seq: u64,
+        bundle_hash: String,
+        signature_verified: bool,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        key_id: Option<String>,
+        cache_hit: bool,
+        dry_run_verify: bool,
+    },
     Result {
         seq: u64,
         value: serde_json::Value,
@@ -89,6 +98,7 @@ impl RunEventWire {
             | Self::ToolResult { seq, .. }
             | Self::Hook { seq, .. }
             | Self::PersonaStage { seq, .. }
+            | Self::PackRun { seq, .. }
             | Self::Result { seq, .. }
             | Self::Error { seq, .. } => *seq,
         }
@@ -248,6 +258,20 @@ impl RunEventSink for NdjsonSink {
                 persona,
                 stage,
                 transition,
+            },
+            RunEvent::PackRun {
+                bundle_hash,
+                signature_verified,
+                key_id,
+                cache_hit,
+                dry_run_verify,
+            } => RunEventWire::PackRun {
+                seq,
+                bundle_hash,
+                signature_verified,
+                key_id,
+                cache_hit,
+                dry_run_verify,
             },
         };
         NdjsonEmitter::write_envelope(&self.inner, wire);

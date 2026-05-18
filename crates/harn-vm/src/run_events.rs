@@ -67,6 +67,19 @@ pub enum RunEvent {
         stage: String,
         transition: String,
     },
+    /// `harn run <bundle.harnpack>` resolved a pack to execute. Carries
+    /// the verified bundle hash, whether the embedded Ed25519 signature
+    /// verified end-to-end, the signing key fingerprint (when signed),
+    /// and whether the unpacked archive came from the content-addressed
+    /// cache or was extracted fresh on this run.
+    PackRun {
+        bundle_hash: String,
+        signature_verified: bool,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        key_id: Option<String>,
+        cache_hit: bool,
+        dry_run_verify: bool,
+    },
 }
 
 /// Receiver of [`RunEvent`]s. Implementations must be cheap (the VM

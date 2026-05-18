@@ -155,6 +155,29 @@ pub fn cache_dir() -> PathBuf {
     PathBuf::from(".harn-cache").join("bytecode")
 }
 
+/// Root for `.harnpack` archives unpacked by `harn run <bundle.harnpack>`.
+/// Each verified bundle is replayed into `<root>/<sanitized-bundle-hash>/`
+/// so re-runs reuse the unpacked tree. Honors `$HARN_CACHE_DIR/packs`
+/// when set, otherwise XDG / `$HOME/.cache/harn/packs`.
+pub fn packs_cache_dir() -> PathBuf {
+    if let Some(custom) = std::env::var_os(CACHE_DIR_ENV) {
+        return PathBuf::from(custom).join("packs");
+    }
+    if let Some(xdg) = std::env::var_os("XDG_CACHE_HOME") {
+        let xdg = PathBuf::from(xdg);
+        if !xdg.as_os_str().is_empty() {
+            return xdg.join("harn").join("packs");
+        }
+    }
+    if let Some(home) = std::env::var_os("HOME") {
+        return PathBuf::from(home)
+            .join(".cache")
+            .join("harn")
+            .join("packs");
+    }
+    PathBuf::from(".harn-cache").join("packs")
+}
+
 /// True when the cache is enabled by the current environment.
 pub fn cache_enabled() -> bool {
     match std::env::var(CACHE_ENABLED_ENV).ok().as_deref() {
