@@ -671,6 +671,13 @@ pub(super) async fn execute_sub_agent(
     };
     let tokens_used = transcript_tokens_used(&transcript);
 
+    if result.get("status").and_then(|value| value.as_str()) == Some("suspended") {
+        return Ok(SubAgentExecutionResult {
+            payload: result,
+            transcript,
+        });
+    }
+
     let wants_structured_output =
         spec.returns_schema.is_some() || option_requests_structured_output(&spec.options);
     let synthesized = synthesize_sub_agent_result(&result, &transcript, wants_structured_output);

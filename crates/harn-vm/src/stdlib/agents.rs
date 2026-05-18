@@ -649,10 +649,39 @@ fn apply_resume_input(worker: &mut WorkerState, resume_input: Option<&VmValue>) 
     worker.history.push(text);
 }
 
+fn apply_resume_task_to_config(config: &mut WorkerConfig, task: &str) {
+    if let WorkerConfig::SubAgent { spec } = config {
+        spec.task = task.to_string();
+    }
+}
+
+async fn join_checkpointed_worker_handle(state: Rc<RefCell<WorkerState>>) -> Result<(), VmError> {
+    let handle = {
+        let mut worker = state.borrow_mut();
+        let Some(handle) = worker.handle.as_ref() else {
+            return Ok(());
+        };
+        if !handle.is_finished() {
+            return Err(VmError::Runtime(format!(
+                "resume_agent: worker {} has not reached its suspend checkpoint yet",
+                worker.id
+            )));
+        }
+        worker.handle.take()
+    };
+    if let Some(handle) = handle {
+        let _ = handle
+            .await
+            .map_err(|error| VmError::Runtime(format!("resume_agent join error: {error}")))??;
+    }
+    Ok(())
+}
+
 async fn warm_resume_worker(
     state: Rc<RefCell<WorkerState>>,
     resume_input: Option<VmValue>,
 ) -> Result<VmValue, VmError> {
+    join_checkpointed_worker_handle(state.clone()).await?;
     let snapshot = {
         let mut worker = state.borrow_mut();
         if worker.status != "suspended" {
@@ -670,12 +699,17 @@ async fn warm_resume_worker(
         worker.finished_at = None;
         worker.latest_error = None;
         apply_resume_input(&mut worker, resume_input.as_ref());
+        let task = worker.task.clone();
+        apply_resume_task_to_config(&mut worker.config, &task);
         if worker.carry_policy.persist_state {
             persist_worker_state_snapshot(&worker)?;
         }
         worker_event_snapshot(&worker)
     };
     emit_worker_event(&snapshot, crate::agent_events::WorkerEvent::WorkerResumed).await?;
+    if crate::vm::clone_async_builtin_child_vm().is_some() {
+        respawn_worker_task(state.clone())?;
+    }
     let summary = worker_summary(&state.borrow())?;
     Ok(summary)
 }
@@ -1044,6 +1078,100 @@ mod suspend_tests {
             .await
             .expect("resume after restart");
         assert_eq!(summary_status(&resumed), "running");
+
+        teardown(&dir, &worker_id);
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn agent_loop_returns_suspended_checkpoint_for_current_worker() {
+        let _guard = suspend_test_lock().await;
+        let (worker_id, dir) = seed_test_worker("worker-loop-suspend");
+
+        suspend_agent_builtin(vec![
+            handle_value(&worker_id),
+            VmValue::String(Rc::from("pause before another model call")),
+        ])
+        .await
+        .expect("suspend");
+
+        let mut vm = crate::Vm::new();
+        crate::register_vm_stdlib(&mut vm);
+        let _vm_context = crate::vm::install_async_builtin_child_vm(vm);
+        let _runtime_context = crate::runtime_context::install_runtime_context_overlay(
+            crate::runtime_context::RuntimeContextOverlay {
+                worker_id: Some(worker_id.clone()),
+                ..Default::default()
+            },
+        );
+
+        let result = crate::stdlib::harn_entry::call_harn_export_by_name(
+            "std/agent/loop",
+            "agent_loop",
+            "agent_loop_suspend_test",
+            &[
+                VmValue::String(Rc::from("continue the task")),
+                VmValue::Nil,
+                VmValue::Dict(Rc::new(BTreeMap::from([(
+                    "max_iterations".to_string(),
+                    VmValue::Int(3),
+                )]))),
+            ],
+        )
+        .await
+        .expect("agent loop returns suspended checkpoint");
+        let json = crate::llm::vm_value_to_json(&result);
+
+        assert_eq!(json["status"], "suspended");
+        assert_eq!(json["final_status"], "suspended");
+        assert_eq!(json["reason"], "pause before another model call");
+        assert_eq!(json["initiator"], "operator");
+        assert_eq!(json["iterations_completed"], 0);
+        assert_eq!(json["handle"]["id"], worker_id);
+        assert!(
+            serde_json::to_string(&json)
+                .expect("serialize result")
+                .contains("Worker suspended before the next turn: pause before another model call"),
+            "suspend checkpoint should inject a resume-visible reminder"
+        );
+
+        teardown(&dir, &worker_id);
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn sub_agent_execution_preserves_suspended_loop_payload() {
+        let _guard = suspend_test_lock().await;
+        let (worker_id, dir) = seed_test_worker("worker-sub-agent-suspend");
+
+        suspend_agent_builtin(vec![
+            handle_value(&worker_id),
+            VmValue::String(Rc::from("checkpoint the child loop")),
+        ])
+        .await
+        .expect("suspend");
+
+        let mut vm = crate::Vm::new();
+        crate::register_vm_stdlib(&mut vm);
+        let _vm_context = crate::vm::install_async_builtin_child_vm(vm);
+        let _runtime_context = crate::runtime_context::install_runtime_context_overlay(
+            crate::runtime_context::RuntimeContextOverlay {
+                worker_id: Some(worker_id.clone()),
+                ..Default::default()
+            },
+        );
+
+        let result = execute_sub_agent(SubAgentRunSpec {
+            name: "worker-sub-agent-suspend".to_string(),
+            task: "continue the task".to_string(),
+            session_id: format!("session_{worker_id}"),
+            options: BTreeMap::from([("max_iterations".to_string(), VmValue::Int(3))]),
+            ..Default::default()
+        })
+        .await
+        .expect("sub-agent execution returns suspended checkpoint");
+
+        assert_eq!(result.payload["status"], "suspended");
+        assert_eq!(result.payload["reason"], "checkpoint the child loop");
+        assert_eq!(result.payload["handle"]["id"], worker_id);
 
         teardown(&dir, &worker_id);
     }

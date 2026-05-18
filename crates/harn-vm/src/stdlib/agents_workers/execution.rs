@@ -369,6 +369,11 @@ pub(in super::super) fn spawn_worker_task(state: Rc<RefCell<WorkerState>>) {
                 worker.awaiting_started_at = None;
                 match &result {
                     Ok(executed) => {
+                        let suspended = executed
+                            .payload
+                            .get("status")
+                            .and_then(|value| value.as_str())
+                            == Some("suspended");
                         worker.latest_payload = Some(executed.payload.clone());
                         worker.latest_error = None;
                         worker.transcript = executed.transcript.clone();
@@ -388,7 +393,10 @@ pub(in super::super) fn spawn_worker_task(state: Rc<RefCell<WorkerState>>) {
                         if let Some(run_id) = &worker.child_run_id {
                             worker.audit.run_id = Some(run_id.clone());
                         }
-                        if worker.carry_policy.retriggerable {
+                        if suspended {
+                            worker.status = "suspended".to_string();
+                            worker.finished_at = None;
+                        } else if worker.carry_policy.retriggerable {
                             worker.status = "awaiting".to_string();
                             worker.finished_at = None;
                             worker.awaiting_started_at = Some(uuid::Uuid::now_v7().to_string());
@@ -397,7 +405,7 @@ pub(in super::super) fn spawn_worker_task(state: Rc<RefCell<WorkerState>>) {
                             worker.status = "completed".to_string();
                             worker.finished_at = Some(uuid::Uuid::now_v7().to_string());
                         }
-                        if worker.carry_policy.persist_state {
+                        if worker.carry_policy.persist_state || suspended {
                             persist_worker_state_snapshot(&worker).ok();
                         }
                     }
@@ -422,6 +430,15 @@ pub(in super::super) fn spawn_worker_task(state: Rc<RefCell<WorkerState>>) {
                 }
                 let snapshot = worker_event_snapshot(&worker);
                 let event = match &result {
+                    Ok(executed)
+                        if executed
+                            .payload
+                            .get("status")
+                            .and_then(|value| value.as_str())
+                            == Some("suspended") =>
+                    {
+                        None
+                    }
                     // Retriggerable workers don't terminate when their
                     // current cycle completes; they go into `awaiting`
                     // and wait for the next host trigger. Surface that
