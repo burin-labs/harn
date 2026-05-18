@@ -1,5 +1,5 @@
 /**
- * std/lifecycle/pool — named, concurrency-bounded agent thread pools (PL-01).
+ * std/lifecycle/pool — named, concurrency-bounded agent thread pools (PL-01/PL-02).
  *
  * Foundation for the agent pool epic (#1883). Provides:
  *   - pool_create({...}) to allocate a named pool with a max_concurrent cap
@@ -8,13 +8,94 @@
  *   - pool.size() and pool.snapshot() for inspection
  *   - pool_wait(handle) to block until a submitted task reaches a terminal state
  *
- * Queue strategies, backpressure policies, channel composition, and durable
- * state arrive in #1887..#1893; this module ships the minimal steel-thread
- * surface and leaves room for those to land without an API break.
+ * Queue strategies are selected with the QueueStrategy descriptors below.
+ * Backpressure policies, channel composition, and durable state arrive in
+ * later pool tickets.
  *
  * Import:
- *   import { pool_create, pool_get, pool_list, pool_wait } from "std/lifecycle/pool"
+ *   import { pool_create, pool_get, pool_list, pool_wait, fifo } from "std/lifecycle/pool"
  */
+fn __queue_strategy(kind, options = nil) {
+  let base = {_type: "queue_strategy", kind: kind}
+  if options == nil {
+    return base
+  }
+  return base + options
+}
+
+/**
+ * fifo returns a queue strategy descriptor that dequeues oldest-first.
+ *
+ * @effects: []
+ * @allocation: heap
+ * @errors: []
+ * @api_stability: experimental
+ * @example: pool_create({queue: fifo()})
+ */
+pub fn fifo() {
+  return __queue_strategy("fifo")
+}
+
+/**
+ * priority returns a queue strategy descriptor that dequeues the highest
+ * submit-time `priority` first, with FIFO tiebreaks.
+ *
+ * @effects: []
+ * @allocation: heap
+ * @errors: []
+ * @api_stability: experimental
+ * @example: pool_create({queue: priority()})
+ */
+pub fn priority() {
+  return __queue_strategy("priority")
+}
+
+/**
+ * lifo returns a queue strategy descriptor that dequeues newest-first.
+ *
+ * @effects: []
+ * @allocation: heap
+ * @errors: []
+ * @api_stability: experimental
+ * @example: pool_create({queue: lifo()})
+ */
+pub fn lifo() {
+  return __queue_strategy("lifo")
+}
+
+/**
+ * fair_round_robin returns a strategy descriptor that partitions queued
+ * tasks by a submit option field and round-robins across distinct values.
+ *
+ * @effects: []
+ * @allocation: heap
+ * @errors: []
+ * @api_stability: experimental
+ * @example: pool_create({queue: fair_round_robin("tenant_id")})
+ */
+pub fn fair_round_robin(key = "key") {
+  return __queue_strategy("fair_round_robin", {key: key})
+}
+
+/**
+ * QueueStrategy returns the named queue strategy namespace as a dict for
+ * callers that prefer dotted local access.
+ *
+ * @effects: []
+ * @allocation: heap
+ * @errors: []
+ * @api_stability: experimental
+ * @example: let QueueStrategy = QueueStrategy()
+ */
+pub fn QueueStrategy() {
+  return {
+    fifo: fifo(),
+    priority: priority(),
+    lifo: lifo(),
+    fair_round_robin: fair_round_robin,
+  }
+}
+
 fn __pool_attach_methods(snapshot) {
   if type_of(snapshot) != "dict" {
     return snapshot
