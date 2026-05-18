@@ -244,6 +244,7 @@ diagnostic_codes! {
     ModuleReExportConflict, "HARN-MOD-006", Mod, "module re-exports conflict";
     ReminderUnknownOption, "HARN-RMD-001", Rmd, "reminder lifecycle option key is not recognized";
     ReminderInvalidShape, "HARN-RMD-002", Rmd, "reminder payload shape is invalid";
+    ReminderUnsupportedUserBlockRoleHint, "HARN-RMD-003", Rmd, "user_block reminder role hint is not supported by the selected provider";
     SuspendWorkerNotRunning, "HARN-SUS-001", Sus, "suspend_agent target worker is not running";
     ResumeConditionsInvalid, "HARN-SUS-002", Sus, "ResumeConditions validation failed";
     ResumeWorkerNotSuspended, "HARN-SUS-003", Sus, "resume_agent target worker is not suspended";
