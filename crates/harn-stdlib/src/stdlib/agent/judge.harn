@@ -154,7 +154,15 @@ fn __emit_judge_decision(session_id, iteration, verdict) {
   )
 }
 
-/** agent_verify_or_continue. */
+/**
+ * agent_verify_or_continue.
+ *
+ * @effects: []
+ * @allocation: heap
+ * @errors: []
+ * @api_stability: experimental
+ * @example: agent_verify_or_continue(session, opts, stop_reason, text, iteration)
+ */
 pub fn agent_verify_or_continue(session, opts, stop_reason, text, iteration = 0) {
   let payload = __judge_payload(session, opts, stop_reason, text, iteration)
   var verdict = {vetoed: false}

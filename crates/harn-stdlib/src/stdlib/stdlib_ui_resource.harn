@@ -194,7 +194,15 @@ fn __ui_csp(options) {
   }
 }
 
-/** Build a Content-Security-Policy header value from a CSP dict. */
+/**
+ * Build a Content-Security-Policy header value from a CSP dict.
+ *
+ * @effects: []
+ * @allocation: heap
+ * @errors: []
+ * @api_stability: stable
+ * @example: ui_resource_csp_header(csp)
+ */
 pub fn ui_resource_csp_header(csp: UiResourceCsp) -> string {
   var directives = []
   let entries = [
@@ -213,7 +221,15 @@ pub fn ui_resource_csp_header(csp: UiResourceCsp) -> string {
   return join(directives, "; ")
 }
 
-/** Build the `sandbox` attribute value for the host iframe. */
+/**
+ * Build the `sandbox` attribute value for the host iframe.
+ *
+ * @effects: []
+ * @allocation: heap
+ * @errors: []
+ * @api_stability: stable
+ * @example: ui_resource_sandbox_attr(csp)
+ */
 pub fn ui_resource_sandbox_attr(csp: UiResourceCsp) -> string {
   return join(csp.sandbox, " ")
 }
@@ -225,6 +241,12 @@ pub fn ui_resource_sandbox_attr(csp: UiResourceCsp) -> string {
  * base64. Validation always runs through `std/artifact/web` so resource
  * envelopes pin the same network/host-bridge/secret guarantees the rest of
  * Harn's artifact pipeline uses.
+ *
+ * @effects: []
+ * @allocation: heap
+ * @errors: []
+ * @api_stability: stable
+ * @example: ui_resource(uri, name, html, options)
  */
 pub fn ui_resource(uri, name, html, options = nil) -> UiResource {
   let opts = options ?? {}
@@ -274,6 +296,12 @@ pub fn ui_resource(uri, name, html, options = nil) -> UiResource {
  * MCP Apps hosts read `_meta.ui.resourceUri` from tool descriptions, so the
  * returned envelope mirrors the host-facing keys via `to_mcp_meta` for direct
  * inclusion in MCP `tools/list` payloads.
+ *
+ * @effects: []
+ * @allocation: heap
+ * @errors: []
+ * @api_stability: stable
+ * @example: ui_tool_meta(resource, options)
  */
 pub fn ui_tool_meta(resource: UiResource, options = nil) -> UiToolMeta {
   let opts = options ?? {}
@@ -295,7 +323,15 @@ pub fn ui_tool_meta(resource: UiResource, options = nil) -> UiToolMeta {
   return {schema: UI_TOOL_META_SCHEMA, ui: ui}
 }
 
-/** Serialize `ui_tool_meta` into the MCP Apps `_meta.ui` dict shape. */
+/**
+ * Serialize `ui_tool_meta` into the MCP Apps `_meta.ui` dict shape.
+ *
+ * @effects: []
+ * @allocation: heap
+ * @errors: []
+ * @api_stability: stable
+ * @example: ui_tool_meta_to_mcp(meta)
+ */
 pub fn ui_tool_meta_to_mcp(meta: UiToolMeta) -> dict {
   let ui = meta.ui
   return {
@@ -313,7 +349,15 @@ pub fn ui_tool_meta_to_mcp(meta: UiToolMeta) -> dict {
   }
 }
 
-/** Build a text fallback envelope for hosts without embedded UI support. */
+/**
+ * Build a text fallback envelope for hosts without embedded UI support.
+ *
+ * @effects: []
+ * @allocation: heap
+ * @errors: []
+ * @api_stability: stable
+ * @example: ui_text_fallback(content)
+ */
 pub fn ui_text_fallback(content) -> UiTextFallback {
   let text = __ui_text(content)
   if text == "" {
@@ -322,7 +366,15 @@ pub fn ui_text_fallback(content) -> UiTextFallback {
   return {schema: UI_TEXT_FALLBACK_SCHEMA, content: text}
 }
 
-/** Build a structured fallback envelope for hosts that prefer JSON results. */
+/**
+ * Build a structured fallback envelope for hosts that prefer JSON results.
+ *
+ * @effects: []
+ * @allocation: heap
+ * @errors: []
+ * @api_stability: stable
+ * @example: ui_structured_fallback(data, options)
+ */
 pub fn ui_structured_fallback(data, options = nil) -> UiStructuredFallback {
   if data == nil {
     throw "std/ui_resource: structured fallback data is required"
@@ -349,6 +401,12 @@ fn __ui_default_text_fallback(resource: UiResource, fallback_options) {
  * accompanying `_meta.ui`. Hosts without that capability still render either
  * the text fallback or the optional structured fallback. The text fallback is
  * mandatory so every host has a non-empty rendering path.
+ *
+ * @effects: []
+ * @allocation: heap
+ * @errors: []
+ * @api_stability: stable
+ * @example: ui_tool_result(resource, options)
  */
 pub fn ui_tool_result(resource: UiResource, options = nil) -> UiToolResult {
   let opts = options ?? {}
@@ -392,6 +450,12 @@ pub fn ui_tool_result(resource: UiResource, options = nil) -> UiToolResult {
  * SDK (`ui.apps = true` + `ui.profiles`), and bare `{apps: true}` flag shapes
  * all funnel through the same returned surface so downstream selection logic
  * does not need host-specific branches.
+ *
+ * @effects: []
+ * @allocation: heap
+ * @errors: []
+ * @api_stability: stable
+ * @example: ui_host_capabilities(input)
  */
 pub fn ui_host_capabilities(input = nil) -> UiHostCapabilities {
   let value = input ?? {}
@@ -411,7 +475,15 @@ pub fn ui_host_capabilities(input = nil) -> UiHostCapabilities {
   }
 }
 
-/** Return true if the host capabilities advertise MCP Apps support. */
+/**
+ * Return true if the host capabilities advertise MCP Apps support.
+ *
+ * @effects: []
+ * @allocation: stack-only
+ * @errors: []
+ * @api_stability: stable
+ * @example: ui_host_supports_apps(capabilities)
+ */
 pub fn ui_host_supports_apps(capabilities = nil) -> bool {
   let caps = ui_host_capabilities(capabilities)
   if !caps.apps {
@@ -430,6 +502,12 @@ pub fn ui_host_supports_apps(capabilities = nil) -> bool {
  * `"structured_fallback"`, or `"text_fallback"`. Hosts without UI support
  * receive the same envelope minus `ui_resource` so they still see the
  * fallbacks and provenance metadata.
+ *
+ * @effects: []
+ * @allocation: heap
+ * @errors: []
+ * @api_stability: stable
+ * @example: ui_select_for_host(result, capabilities)
  */
 pub fn ui_select_for_host(result: UiToolResult, capabilities = nil) -> UiToolResult {
   let supports_apps = ui_host_supports_apps(capabilities)
@@ -446,7 +524,15 @@ pub fn ui_select_for_host(result: UiToolResult, capabilities = nil) -> UiToolRes
   return result.merge({ui_resource: nil, selected: selected})
 }
 
-/** Build the host->guest JSON-RPC envelope a sandboxed UI sees over postMessage. */
+/**
+ * Build the host->guest JSON-RPC envelope a sandboxed UI sees over postMessage.
+ *
+ * @effects: []
+ * @allocation: heap
+ * @errors: []
+ * @api_stability: stable
+ * @example: ui_tool_call_envelope(name, params, options)
+ */
 pub fn ui_tool_call_envelope(name: string, params = nil, options = nil) -> UiToolCallEnvelope {
   let opts = options ?? {}
   let tool_name = __ui_text(name)
@@ -463,7 +549,15 @@ pub fn ui_tool_call_envelope(name: string, params = nil, options = nil) -> UiToo
   }
 }
 
-/** Build the guest->host JSON-RPC envelope used to update model-visible context. */
+/**
+ * Build the guest->host JSON-RPC envelope used to update model-visible context.
+ *
+ * @effects: []
+ * @allocation: heap
+ * @errors: []
+ * @api_stability: stable
+ * @example: ui_context_update_envelope(key, value, options)
+ */
 pub fn ui_context_update_envelope(key: string, value, options = nil) -> UiContextUpdateEnvelope {
   let opts = options ?? {}
   let context_key = __ui_text(key)
@@ -480,7 +574,15 @@ pub fn ui_context_update_envelope(key: string, value, options = nil) -> UiContex
   }
 }
 
-/** Validate a tool-result envelope and its inner shapes. */
+/**
+ * Validate a tool-result envelope and its inner shapes.
+ *
+ * @effects: []
+ * @allocation: heap
+ * @errors: []
+ * @api_stability: stable
+ * @example: ui_tool_result_validate(result)
+ */
 pub fn ui_tool_result_validate(result: UiToolResult) -> UiToolResult {
   if result.schema != UI_TOOL_RESULT_SCHEMA {
     throw "std/ui_resource: unsupported tool result schema " + __ui_text(result.schema)

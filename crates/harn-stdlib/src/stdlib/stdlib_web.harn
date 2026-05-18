@@ -133,6 +133,12 @@ fn __web_not_modified(source_url, response, previous, fetched_at) {
  *   - cache_key: override for the cache key.
  *   - conditional: set false to skip If-None-Match / If-Modified-Since.
  *   - fetched_at: deterministic timestamp override for fixtures.
+ *
+ * @effects: [net, time]
+ * @allocation: heap
+ * @errors: []
+ * @api_stability: stable
+ * @example: web_fetch(url, options)
  */
 pub fn web_fetch(url: string, options = nil) -> dict {
   let opts = options ?? {}
@@ -172,47 +178,119 @@ pub fn web_fetch(url: string, options = nil) -> dict {
   return envelope
 }
 
-/** Resolve a URL reference against a fetched source URL. */
+/**
+ * Resolve a URL reference against a fetched source URL.
+ *
+ * @effects: []
+ * @allocation: heap
+ * @errors: []
+ * @api_stability: stable
+ * @example: web_resolve_url(base_url, href)
+ */
 pub fn web_resolve_url(base_url: string, href: string) {
   return __web_resolve_url(base_url, href)
 }
 
-/** Return the origin URL with `path`, dropping query and fragment. */
+/**
+ * Return the origin URL with `path`, dropping query and fragment.
+ *
+ * @effects: []
+ * @allocation: heap
+ * @errors: []
+ * @api_stability: stable
+ * @example: web_origin_url(url, path)
+ */
 pub fn web_origin_url(url: string, path: string = "/") -> string {
   return __web_origin_url(url, path)
 }
 
-/** Parse title, meta, canonical URL, links, tables, JSON-LD, and plain text. */
+/**
+ * Parse title, meta, canonical URL, links, tables, JSON-LD, and plain text.
+ *
+ * @effects: []
+ * @allocation: heap
+ * @errors: []
+ * @api_stability: stable
+ * @example: web_parse_html(html, source_url)
+ */
 pub fn web_parse_html(html: string, source_url = nil) -> dict {
   return __web_extract_html(html, source_url)
 }
 
-/** Extract the HTML title. */
+/**
+ * Extract the HTML title.
+ *
+ * @effects: []
+ * @allocation: heap
+ * @errors: []
+ * @api_stability: stable
+ * @example: html_title(html)
+ */
 pub fn html_title(html: string) {
   return web_parse_html(html).title
 }
 
-/** Extract normalized HTML meta tags keyed by lower-case name/property. */
+/**
+ * Extract normalized HTML meta tags keyed by lower-case name/property.
+ *
+ * @effects: []
+ * @allocation: heap
+ * @errors: []
+ * @api_stability: stable
+ * @example: html_meta(html)
+ */
 pub fn html_meta(html: string) {
   return web_parse_html(html).meta
 }
 
-/** Extract resolved links from anchors. */
+/**
+ * Extract resolved links from anchors.
+ *
+ * @effects: []
+ * @allocation: heap
+ * @errors: []
+ * @api_stability: stable
+ * @example: html_links(html, source_url)
+ */
 pub fn html_links(html: string, source_url = nil) {
   return web_parse_html(html, source_url).links
 }
 
-/** Extract table captions, headers, and rows. */
+/**
+ * Extract table captions, headers, and rows.
+ *
+ * @effects: []
+ * @allocation: heap
+ * @errors: []
+ * @api_stability: stable
+ * @example: html_tables(html)
+ */
 pub fn html_tables(html: string) {
   return web_parse_html(html).tables
 }
 
-/** Extract parsed JSON-LD script blocks. */
+/**
+ * Extract parsed JSON-LD script blocks.
+ *
+ * @effects: []
+ * @allocation: heap
+ * @errors: []
+ * @api_stability: stable
+ * @example: html_json_ld(html)
+ */
 pub fn html_json_ld(html: string) {
   return web_parse_html(html).json_ld
 }
 
-/** Extract normalized visible text without script/style/noscript bodies. */
+/**
+ * Extract normalized visible text without script/style/noscript bodies.
+ *
+ * @effects: []
+ * @allocation: heap
+ * @errors: []
+ * @api_stability: stable
+ * @example: html_text(html)
+ */
 pub fn html_text(html: string) {
   return web_parse_html(html).text
 }
@@ -316,6 +394,12 @@ fn __web_path_for_robots(url) {
  * Missing or non-2xx robots files allow by default. Matching uses the
  * deterministic subset recurring CI workflows need: exact or `*` user-agent
  * groups, Allow/Disallow path prefixes, and longest-prefix precedence.
+ *
+ * @effects: [net]
+ * @allocation: stack-only
+ * @errors: []
+ * @api_stability: stable
+ * @example: robots_allowed(url, user_agent, options)
  */
 pub fn robots_allowed(url: string, user_agent: string = "*", options = nil) -> bool {
   let opts = options ?? {}
@@ -385,6 +469,12 @@ fn __web_sitemap_candidates(base_url, opts) {
  * Discover URLs from robots-advertised sitemaps or `/sitemap.xml`.
  *
  * Options: sitemap_urls, robots_url, fetch_options, max_sitemaps.
+ *
+ * @effects: [net]
+ * @allocation: heap
+ * @errors: []
+ * @api_stability: stable
+ * @example: sitemap_urls(base_url, options)
  */
 pub fn sitemap_urls(base_url: string, options = nil) -> list<string> {
   let opts = options ?? {}

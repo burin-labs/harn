@@ -22,7 +22,15 @@
 // completed stages are skipped automatically.
 import { agent_emit_event } from "std/agent/state"
 
-/** checkpoint_stage. */
+/**
+ * checkpoint_stage.
+ *
+ * @effects: []
+ * @allocation: heap
+ * @errors: []
+ * @api_stability: stable
+ * @example: checkpoint_stage(name, f)
+ */
 pub fn checkpoint_stage(name, f) {
   if checkpoint_exists(name) {
     return checkpoint_get(name)
@@ -40,7 +48,15 @@ pub fn checkpoint_stage(name, f) {
 //
 // Example:
 //   let data = checkpoint_stage_retry("fetch", 3, fn() { fetch_with_timeout(url) })
-/** checkpoint_stage_retry. */
+/**
+ * checkpoint_stage_retry.
+ *
+ * @effects: []
+ * @allocation: heap
+ * @errors: []
+ * @api_stability: stable
+ * @example: checkpoint_stage_retry(name, max_retries, f)
+ */
 pub fn checkpoint_stage_retry(name, max_retries, f) {
   if checkpoint_exists(name) {
     return checkpoint_get(name)
@@ -243,6 +259,12 @@ fn __typed_checkpoint_envelope(args) {
  * true/nil, a string, a list of messages, or `{ok, errors}`; rejected
  * outputs are re-prompted with those correction messages before any
  * caller-owned side effects run.
+ *
+ * @effects: []
+ * @allocation: heap
+ * @errors: []
+ * @api_stability: stable
+ * @example: typed_output_checkpoint(name, prompt, schema, options, validator)
  */
 pub fn typed_output_checkpoint(name, prompt, schema, options = nil, validator = nil) {
   let opts = options ?? {}
@@ -370,6 +392,12 @@ fn __typed_checkpoint_text_repair_prompt(name, raw_text, errors) {
  * deterministic validator. Validator repair prompts operate only on the
  * raw summary text, so callers can run this after side-effectful agent
  * work without replaying those side effects.
+ *
+ * @effects: []
+ * @allocation: heap
+ * @errors: []
+ * @api_stability: stable
+ * @example: typed_output_checkpoint_from_text(name, raw_text, schema, options, validator)
  */
 pub fn typed_output_checkpoint_from_text(name, raw_text, schema, options = nil, validator = nil) {
   let opts = options ?? {}

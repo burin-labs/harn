@@ -107,6 +107,10 @@ pub(crate) struct Linter<'a> {
     /// Registry variables mapped to `tool_define` calls that will need MCP
     /// annotations if the registry is later exposed through `mcp_tools`.
     pub(super) mcp_registry_missing_annotation_spans: HashMap<String, Vec<Span>>,
+    /// When set, public `fn` declarations must carry the structured
+    /// `@effects` / `@allocation` / `@errors` / `@api_stability` /
+    /// `@example` block. Enabled by callers linting stdlib sources.
+    pub(crate) require_stdlib_metadata: bool,
 }
 
 impl<'a> Linter<'a> {
@@ -146,6 +150,7 @@ impl<'a> Linter<'a> {
             connector_effect_export_stack: Vec::new(),
             long_running_cleanup_stack: Vec::new(),
             mcp_registry_missing_annotation_spans: HashMap::new(),
+            require_stdlib_metadata: false,
         }
     }
 
@@ -266,6 +271,49 @@ impl<'a> Linter<'a> {
             severity: LintSeverity::Warning,
             suggestion: Some(format!("replace `{name}` with `{replacement}`")),
             fix: replace_identifier_text_fix(self.source, span, name, replacement),
+        });
+    }
+
+    /// Warn when a public stdlib `pub fn` is missing one or more of the
+    /// declared metadata fields (`@effects`, `@allocation`, `@errors`,
+    /// `@api_stability`, `@example`). Only runs when callers opted in via
+    /// [`crate::LintOptions::require_stdlib_metadata`].
+    ///
+    /// Functions with no canonical `/** */` block at all are exempt — the
+    /// separate `missing-harndoc` lint (HARN-LNT-024) already covers them,
+    /// so reporting HARN-STD-101 in that case is redundant noise. Once a
+    /// doc block exists, this lint enforces metadata completeness on top.
+    pub(super) fn check_stdlib_metadata(&mut self, name: &str, span: Span) {
+        let Some(source) = self.source else {
+            return;
+        };
+        let Some(meta) = harn_parser::parse_stdlib_metadata(source, &span) else {
+            return;
+        };
+        if meta.is_complete() {
+            return;
+        }
+        let missing = meta.missing_fields();
+        let missing_list = missing.join(", ");
+        let message = if meta.is_empty() {
+            format!(
+                "public stdlib function `{name}` is missing the `@effects`/`@allocation`/`@errors`/`@api_stability`/`@example` metadata block"
+            )
+        } else {
+            format!(
+                "public stdlib function `{name}` is missing required metadata fields: {missing_list}"
+            )
+        };
+        self.diagnostics.push(LintDiagnostic {
+            code: Code::LintMissingStdlibMetadata,
+            rule: "missing-stdlib-metadata",
+            message,
+            span,
+            severity: LintSeverity::Warning,
+            suggestion: Some(format!(
+                "add the missing fields ({missing_list}) inside the `/** ... */` block above `pub fn {name}`"
+            )),
+            fix: None,
         });
     }
 

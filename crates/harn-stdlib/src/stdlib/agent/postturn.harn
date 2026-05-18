@@ -274,7 +274,15 @@ fn __post_turn_verdict_result(session, opts, verdict) {
   return nil
 }
 
-/** agent_extract_tool_calls. */
+/**
+ * agent_extract_tool_calls.
+ *
+ * @effects: []
+ * @allocation: heap
+ * @errors: []
+ * @api_stability: experimental
+ * @example: agent_extract_tool_calls(llm_result, opts)
+ */
 pub fn agent_extract_tool_calls(llm_result, opts) {
   if len(llm_result?.tool_calls ?? []) > 0 {
     return llm_result.tool_calls
@@ -286,7 +294,15 @@ pub fn agent_extract_tool_calls(llm_result, opts) {
   return parsed?.calls ?? []
 }
 
-/** agent_compute_post_turn. */
+/**
+ * agent_compute_post_turn.
+ *
+ * @effects: [host]
+ * @allocation: heap
+ * @errors: []
+ * @api_stability: experimental
+ * @example: agent_compute_post_turn(session, llm_result, dispatch, opts, iteration)
+ */
 pub fn agent_compute_post_turn(session, llm_result, dispatch, opts, iteration) {
   let sentinel = __default_done_sentinel(opts)
   let text = llm_result?.text ?? ""

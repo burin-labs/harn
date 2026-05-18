@@ -476,7 +476,15 @@ fn __agent_host_command_result_readers(options, read_name, tail_name) {
   return readers
 }
 
-/** agent_read_tools adds root-scoped read, directory, outline, search, and git inspection tools. */
+/**
+ * agent_read_tools adds root-scoped read, directory, outline, search, and git inspection tools.
+ *
+ * @effects: [agent]
+ * @allocation: heap
+ * @errors: []
+ * @api_stability: experimental
+ * @example: agent_read_tools(registry, options)
+ */
 pub fn agent_read_tools(registry = nil, options = nil) {
   let opts = __agent_host_options(options)
   let _enabled = hostlib_enable("tools:deterministic")
@@ -654,7 +662,15 @@ pub fn agent_read_tools(registry = nil, options = nil) {
   return tools
 }
 
-/** agent_command_tools adds argv-based run_command plus command-output artifact readers. */
+/**
+ * agent_command_tools adds argv-based run_command plus command-output artifact readers.
+ *
+ * @effects: [agent]
+ * @allocation: heap
+ * @errors: []
+ * @api_stability: experimental
+ * @example: agent_command_tools(registry, options)
+ */
 pub fn agent_command_tools(registry = nil, options = nil) {
   let opts = __agent_host_options(options)
   let _enabled = hostlib_enable("tools:deterministic")
@@ -782,7 +798,15 @@ pub fn agent_command_tools(registry = nil, options = nil) {
   return tools
 }
 
-/** agent_host_tools adds read/search/git inspection tools and argv-based command tools. */
+/**
+ * agent_host_tools adds read/search/git inspection tools and argv-based command tools.
+ *
+ * @effects: []
+ * @allocation: heap
+ * @errors: []
+ * @api_stability: experimental
+ * @example: agent_host_tools(registry, options)
+ */
 pub fn agent_host_tools(registry = nil, options = nil) {
   var tools = agent_read_tools(registry, options)
   tools = agent_command_tools(tools, options)

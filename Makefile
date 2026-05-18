@@ -149,6 +149,17 @@ lint-harn:
 	@cargo run --quiet --bin harn -- lint scripts/*.harn scripts/tests/*.harn
 	@echo "=== Linting bundled demo scenarios ==="
 	@cargo run --quiet --bin harn -- lint crates/harn-cli/assets/demo
+	@echo "=== Checking stdlib metadata contract (HARN-STD-101) ==="
+	@harn_bin=$$(cargo metadata --format-version=1 --no-deps | python3 -c 'import json,sys; meta=json.load(sys.stdin); suffix=".exe" if sys.platform == "win32" else ""; print(meta["target_directory"] + "/debug/harn" + suffix)'); \
+	tmp=$$(mktemp); \
+	find crates/harn-stdlib/src/stdlib -name '*.harn' -print0 | xargs -0 "$$harn_bin" lint > "$$tmp" 2>&1 || true; \
+	if grep -q 'HARN-STD-101' "$$tmp"; then \
+		grep -E 'HARN-STD-101|^crates/' "$$tmp" | head -40; \
+		rm -f "$$tmp"; \
+		echo "HARN-STD-101 warnings found above — fix or backfill (see scripts/backfill_stdlib_metadata.py)"; \
+		exit 1; \
+	fi; \
+	rm -f "$$tmp"
 	@echo "    Harn lint OK."
 
 # Check harn formatting on canonical stdlib sources and repo test fixtures.

@@ -283,7 +283,15 @@ fn __tool_search_build_tools(opts, state) {
   return __tool_search_synthetic_tool(registry, state)
 }
 
-/** agent_tool_search_inject_if_needed. */
+/**
+ * agent_tool_search_inject_if_needed.
+ *
+ * @effects: []
+ * @allocation: heap
+ * @errors: []
+ * @api_stability: experimental
+ * @example: agent_tool_search_inject_if_needed(opts)
+ */
 pub fn agent_tool_search_inject_if_needed(opts) {
   if !__tool_search_client_requested(opts) {
     return opts
@@ -296,7 +304,15 @@ fn __tool_search_call_id(call) {
   return call?.id ?? call?.tool_call_id ?? ""
 }
 
-/** agent_tool_search_emit_queries. */
+/**
+ * agent_tool_search_emit_queries.
+ *
+ * @effects: []
+ * @allocation: heap
+ * @errors: []
+ * @api_stability: experimental
+ * @example: agent_tool_search_emit_queries(session_id, tool_calls, opts)
+ */
 pub fn agent_tool_search_emit_queries(session_id, tool_calls, opts) {
   let state = opts?._tool_search_client
   if state == nil {
@@ -377,7 +393,15 @@ fn __tool_search_promoted_names(state, names) {
   return out
 }
 
-/** agent_tool_search_record_results. */
+/**
+ * agent_tool_search_record_results.
+ *
+ * @effects: []
+ * @allocation: heap
+ * @errors: []
+ * @api_stability: experimental
+ * @example: agent_tool_search_record_results(session_id, tool_calls, dispatch, opts)
+ */
 pub fn agent_tool_search_record_results(session_id, tool_calls, dispatch, opts) {
   var state = opts?._tool_search_client
   if state == nil {

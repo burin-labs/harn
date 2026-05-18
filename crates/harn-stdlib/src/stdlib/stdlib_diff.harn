@@ -156,7 +156,15 @@ fn __diff_color_line(line, options) {
   return line
 }
 
-/** Return a structured line diff `{changed, insertions, deletions, ops}`. */
+/**
+ * Return a structured line diff `{changed, insertions, deletions, ops}`.
+ *
+ * @effects: []
+ * @allocation: heap
+ * @errors: []
+ * @api_stability: stable
+ * @example: diff_lines(before, after)
+ */
 pub fn diff_lines(before: string, after: string) -> dict {
   let old_lines = __diff_lines_of(before)
   let new_lines = __diff_lines_of(after)
@@ -165,7 +173,15 @@ pub fn diff_lines(before: string, after: string) -> dict {
     + {ops: ops, old_lines: len(old_lines), new_lines: len(new_lines)}
 }
 
-/** Render a unified diff for two text values. */
+/**
+ * Render a unified diff for two text values.
+ *
+ * @effects: []
+ * @allocation: heap
+ * @errors: []
+ * @api_stability: stable
+ * @example: unified_diff(before, after, options)
+ */
 pub fn unified_diff(before: string, after: string, options: DiffOptions = {}) -> string {
   let opts = options ?? {}
   let path = opts.path
@@ -196,14 +212,30 @@ pub fn unified_diff(before: string, after: string, options: DiffOptions = {}) ->
   return join(lines.map({ line -> __diff_color_line(line, opts) }), "\n")
 }
 
-/** Apply ANSI coloring to an existing unified diff. */
+/**
+ * Apply ANSI coloring to an existing unified diff.
+ *
+ * @effects: []
+ * @allocation: heap
+ * @errors: []
+ * @api_stability: stable
+ * @example: colorize_diff(diff_text, options)
+ */
 pub fn colorize_diff(diff_text: string, options: DiffOptions = {}) -> string {
   let base = options ?? {}
   let opts = base + {color: true}
   return join(split(diff_text ?? "", "\n").map({ line -> __diff_color_line(line, opts) }), "\n")
 }
 
-/** Return a compact stat dict for two text values. */
+/**
+ * Return a compact stat dict for two text values.
+ *
+ * @effects: []
+ * @allocation: heap
+ * @errors: []
+ * @api_stability: stable
+ * @example: diff_summary(before, after)
+ */
 pub fn diff_summary(before: string, after: string) -> dict {
   let result = diff_lines(before, after)
   return {
@@ -215,7 +247,15 @@ pub fn diff_summary(before: string, after: string) -> dict {
   }
 }
 
-/** Render per-file diff stats from entries with `{path, before, after}` or stat fields. */
+/**
+ * Render per-file diff stats from entries with `{path, before, after}` or stat fields.
+ *
+ * @effects: []
+ * @allocation: heap
+ * @errors: []
+ * @api_stability: stable
+ * @example: render_diff_stat(entries, options)
+ */
 pub fn render_diff_stat(entries: list, options = {}) -> string {
   var rows = []
   for entry in entries ?? [] {

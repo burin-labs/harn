@@ -1,14 +1,38 @@
-/** render_workflow_prompt_asset. */
+/**
+ * render_workflow_prompt_asset.
+ *
+ * @effects: []
+ * @allocation: heap
+ * @errors: []
+ * @api_stability: experimental
+ * @example: render_workflow_prompt_asset(path, bindings)
+ */
 pub fn render_workflow_prompt_asset(path, bindings = nil) {
   return render_prompt("std/workflow/prompts/" + path, bindings ?? {})
 }
 
-/** workflow_stage_prompt. */
+/**
+ * workflow_stage_prompt.
+ *
+ * @effects: []
+ * @allocation: heap
+ * @errors: []
+ * @api_stability: experimental
+ * @example: workflow_stage_prompt(bindings)
+ */
 pub fn workflow_stage_prompt(bindings) {
   return render_workflow_prompt_asset("stage.harn.prompt", bindings)
 }
 
-/** workflow_verification_context_intro. */
+/**
+ * workflow_verification_context_intro.
+ *
+ * @effects: []
+ * @allocation: heap
+ * @errors: []
+ * @api_stability: experimental
+ * @example: workflow_verification_context_intro()
+ */
 pub fn workflow_verification_context_intro() {
   return render_workflow_prompt_asset("verification_context_intro.harn.prompt", {})
 }
@@ -77,7 +101,15 @@ fn __workflow_render_artifact_json(artifact) {
   )
 }
 
-/** workflow_render_artifacts_context. */
+/**
+ * workflow_render_artifacts_context.
+ *
+ * @effects: []
+ * @allocation: heap
+ * @errors: []
+ * @api_stability: experimental
+ * @example: workflow_render_artifacts_context(artifacts, policy)
+ */
 pub fn workflow_render_artifacts_context(artifacts = nil, policy = nil) {
   let render = policy?.render
   var parts = []
@@ -149,7 +181,15 @@ fn __workflow_render_contract(contract) {
   return out + "</contract>"
 }
 
-/** workflow_render_verification_context. */
+/**
+ * workflow_render_verification_context.
+ *
+ * @effects: []
+ * @allocation: heap
+ * @errors: []
+ * @api_stability: experimental
+ * @example: workflow_render_verification_context(contracts)
+ */
 pub fn workflow_render_verification_context(contracts = nil) {
   if len(contracts ?? []) == 0 {
     return ""
@@ -169,7 +209,15 @@ fn __workflow_stage_label(label) {
   return trimmed
 }
 
-/** workflow_prepare_stage_prompt. */
+/**
+ * workflow_prepare_stage_prompt.
+ *
+ * @effects: []
+ * @allocation: heap
+ * @errors: []
+ * @api_stability: experimental
+ * @example: workflow_prepare_stage_prompt(config)
+ */
 pub fn workflow_prepare_stage_prompt(config = nil) {
   let opts = config ?? {}
   let rendered_context = opts?.rendered_context

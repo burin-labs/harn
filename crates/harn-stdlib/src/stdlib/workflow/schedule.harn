@@ -45,7 +45,15 @@ fn __schedule_required_inputs(node, incoming_count) {
   return 1
 }
 
-/** workflow_join_readiness. */
+/**
+ * workflow_join_readiness.
+ *
+ * @effects: []
+ * @allocation: heap
+ * @errors: []
+ * @api_stability: experimental
+ * @example: workflow_join_readiness(config)
+ */
 pub fn workflow_join_readiness(config = nil) {
   let node_id = __schedule_string(config?.node_id, "")
   let node = config?.node ?? {}
@@ -69,7 +77,15 @@ fn __schedule_branch_matches(left, right) {
   return left == right
 }
 
-/** workflow_next_edges. */
+/**
+ * workflow_next_edges.
+ *
+ * @effects: []
+ * @allocation: heap
+ * @errors: []
+ * @api_stability: experimental
+ * @example: workflow_next_edges(config)
+ */
 pub fn workflow_next_edges(config = nil) {
   let graph = config?.graph ?? {}
   let current = __schedule_string(config?.current, "")

@@ -1,12 +1,28 @@
 // std/worktree — isolated git worktree helpers built on exec_at/shell_at.
 //
 // Import: import "std/worktree"
-/** worktree_default_path. */
+/**
+ * worktree_default_path.
+ *
+ * @effects: []
+ * @allocation: heap
+ * @errors: []
+ * @api_stability: stable
+ * @example: worktree_default_path(repo, name)
+ */
 pub fn worktree_default_path(repo, name) {
   return repo + "/.harn/worktrees/" + name
 }
 
-/** worktree_create. */
+/**
+ * worktree_create.
+ *
+ * @effects: []
+ * @allocation: heap
+ * @errors: []
+ * @api_stability: stable
+ * @example: worktree_create(repo, name, base_ref, path)
+ */
 pub fn worktree_create(repo, name, base_ref, path) {
   let target = if path == nil || path == "" {
     worktree_default_path(repo, name)
@@ -19,7 +35,15 @@ pub fn worktree_create(repo, name, base_ref, path) {
   return {repo: repo, name: name, path: target, base_ref: base_ref, result: result, success: result?.success}
 }
 
-/** worktree_remove. */
+/**
+ * worktree_remove.
+ *
+ * @effects: []
+ * @allocation: heap
+ * @errors: []
+ * @api_stability: stable
+ * @example: worktree_remove(repo, path, force)
+ */
 pub fn worktree_remove(repo, path, force) {
   if force {
     return exec_at(repo, "git", "worktree", "remove", "--force", path)
@@ -27,12 +51,28 @@ pub fn worktree_remove(repo, path, force) {
   return exec_at(repo, "git", "worktree", "remove", path)
 }
 
-/** worktree_status. */
+/**
+ * worktree_status.
+ *
+ * @effects: []
+ * @allocation: heap
+ * @errors: []
+ * @api_stability: stable
+ * @example: worktree_status(path)
+ */
 pub fn worktree_status(path) {
   return exec_at(path, "git", "status", "--short", "--branch")
 }
 
-/** worktree_diff. */
+/**
+ * worktree_diff.
+ *
+ * @effects: []
+ * @allocation: heap
+ * @errors: []
+ * @api_stability: stable
+ * @example: worktree_diff(path, base_ref)
+ */
 pub fn worktree_diff(path, base_ref) {
   if base_ref == nil || base_ref == "" {
     return exec_at(path, "git", "diff", "--stat")
@@ -40,7 +80,15 @@ pub fn worktree_diff(path, base_ref) {
   return exec_at(path, "git", "diff", base_ref + "...HEAD")
 }
 
-/** worktree_shell. */
+/**
+ * worktree_shell.
+ *
+ * @effects: []
+ * @allocation: heap
+ * @errors: []
+ * @api_stability: stable
+ * @example: worktree_shell(path, script)
+ */
 pub fn worktree_shell(path, script) {
   return shell_at(path, script)
 }

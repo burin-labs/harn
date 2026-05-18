@@ -354,6 +354,12 @@ fn __fill_unset(result, overlay) {
  * Side effect: when a knob conflicts with a known model constraint
  * (e.g. manual thinking on Opus 4.7), may emit an agent event tagged
  * "pack_thinking_stripped" if a session_id is present in opts.
+ *
+ * @effects: []
+ * @allocation: heap
+ * @errors: []
+ * @api_stability: stable
+ * @example: pack_for(opts)
  */
 pub fn pack_for(opts) {
   if type_of(opts) != "dict" {
@@ -423,43 +429,99 @@ pub fn pack_for(opts) {
   return result
 }
 
-/** pack_chat(model, opts) — convenience wrapper for task: "chat". */
+/**
+ * pack_chat(model, opts) — convenience wrapper for task: "chat".
+ *
+ * @effects: []
+ * @allocation: heap
+ * @errors: []
+ * @api_stability: stable
+ * @example: pack_chat(model, opts)
+ */
 pub fn pack_chat(model, opts = nil) {
   let base = opts ?? {}
   return pack_for(base + {model: model, task: "chat"})
 }
 
-/** pack_agent(model, opts) — convenience wrapper for task: "agent". */
+/**
+ * pack_agent(model, opts) — convenience wrapper for task: "agent".
+ *
+ * @effects: []
+ * @allocation: heap
+ * @errors: []
+ * @api_stability: stable
+ * @example: pack_agent(model, opts)
+ */
 pub fn pack_agent(model, opts = nil) {
   let base = opts ?? {}
   return pack_for(base + {model: model, task: "agent"})
 }
 
-/** pack_refine(model, opts) — convenience wrapper for task: "refine". */
+/**
+ * pack_refine(model, opts) — convenience wrapper for task: "refine".
+ *
+ * @effects: []
+ * @allocation: heap
+ * @errors: []
+ * @api_stability: stable
+ * @example: pack_refine(model, opts)
+ */
 pub fn pack_refine(model, opts = nil) {
   let base = opts ?? {}
   return pack_for(base + {model: model, task: "refine"})
 }
 
-/** pack_judge(model, opts) — convenience wrapper for task: "judge". */
+/**
+ * pack_judge(model, opts) — convenience wrapper for task: "judge".
+ *
+ * @effects: []
+ * @allocation: heap
+ * @errors: []
+ * @api_stability: stable
+ * @example: pack_judge(model, opts)
+ */
 pub fn pack_judge(model, opts = nil) {
   let base = opts ?? {}
   return pack_for(base + {model: model, task: "judge"})
 }
 
-/** pack_summarize(model, opts) — convenience wrapper for task: "summarize". */
+/**
+ * pack_summarize(model, opts) — convenience wrapper for task: "summarize".
+ *
+ * @effects: []
+ * @allocation: heap
+ * @errors: []
+ * @api_stability: stable
+ * @example: pack_summarize(model, opts)
+ */
 pub fn pack_summarize(model, opts = nil) {
   let base = opts ?? {}
   return pack_for(base + {model: model, task: "summarize"})
 }
 
-/** pack_code(model, opts) — convenience wrapper for task: "code". */
+/**
+ * pack_code(model, opts) — convenience wrapper for task: "code".
+ *
+ * @effects: []
+ * @allocation: heap
+ * @errors: []
+ * @api_stability: stable
+ * @example: pack_code(model, opts)
+ */
 pub fn pack_code(model, opts = nil) {
   let base = opts ?? {}
   return pack_for(base + {model: model, task: "code"})
 }
 
-/** pack_json(model, opts) — convenience wrapper for task: "json". */
+/**
+ * pack_json(model, opts) — convenience wrapper for task: "json".
+ *
+ * @effects: []
+ * @allocation: heap
+ * @errors: []
+ * @api_stability: stable
+ * @example: pack_json(model, opts)
+ */
 pub fn pack_json(model, opts = nil) {
   let base = opts ?? {}
   return pack_for(base + {model: model, task: "json"})

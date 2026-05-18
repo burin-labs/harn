@@ -92,12 +92,28 @@ fn __graphql_root_field_from_query(query) {
   return token
 }
 
-/** graphql_introspection_query. */
+/**
+ * graphql_introspection_query.
+ *
+ * @effects: []
+ * @allocation: heap
+ * @errors: []
+ * @api_stability: stable
+ * @example: graphql_introspection_query()
+ */
 pub fn graphql_introspection_query() {
   return "query HarnIntrospection { __schema { queryType { name } mutationType { name } subscriptionType { name } types { kind name description fields(includeDeprecated: true) { name description args { name type { kind name ofType { kind name ofType { kind name } } } defaultValue } type { kind name ofType { kind name ofType { kind name } } } isDeprecated deprecationReason } inputFields { name description type { kind name ofType { kind name ofType { kind name } } } defaultValue } enumValues(includeDeprecated: true) { name description isDeprecated deprecationReason } interfaces { kind name } possibleTypes { kind name } } directives { name description locations args { name type { kind name ofType { kind name } } defaultValue } } } }"
 }
 
-/** graphql_auth_headers. */
+/**
+ * graphql_auth_headers.
+ *
+ * @effects: []
+ * @allocation: heap
+ * @errors: []
+ * @api_stability: stable
+ * @example: graphql_auth_headers(auth, extra_headers)
+ */
 pub fn graphql_auth_headers(auth = nil, extra_headers = nil) {
   var headers = {"Content-Type": "application/json", Accept: "application/graphql-response+json, application/json"}
   if auth != nil {
@@ -117,7 +133,15 @@ pub fn graphql_auth_headers(auth = nil, extra_headers = nil) {
   return merge(headers, extra_headers ?? {})
 }
 
-/** graphql_rate_limit_meta. */
+/**
+ * graphql_rate_limit_meta.
+ *
+ * @effects: []
+ * @allocation: heap
+ * @errors: []
+ * @api_stability: stable
+ * @example: graphql_rate_limit_meta(headers)
+ */
 pub fn graphql_rate_limit_meta(headers = nil) {
   return filter_nil(
     {
@@ -139,7 +163,15 @@ pub fn graphql_rate_limit_meta(headers = nil) {
   )
 }
 
-/** graphql_persisted_query. */
+/**
+ * graphql_persisted_query.
+ *
+ * @effects: []
+ * @allocation: heap
+ * @errors: []
+ * @api_stability: stable
+ * @example: graphql_persisted_query(query, options)
+ */
 pub fn graphql_persisted_query(query, options = nil) {
   let version = options?.version ?? 1
   let hash = options?.sha256_hash ?? options?.sha256Hash ?? sha256(query)
@@ -150,7 +182,15 @@ pub fn graphql_persisted_query(query, options = nil) {
   }
 }
 
-/** graphql_request_body. */
+/**
+ * graphql_request_body.
+ *
+ * @effects: []
+ * @allocation: heap
+ * @errors: []
+ * @api_stability: stable
+ * @example: graphql_request_body(query, variables, options)
+ */
 pub fn graphql_request_body(query, variables = nil, options = nil) {
   var body = {}
   let persisted = options?.persisted_query ?? options?.persistedQuery
@@ -177,7 +217,15 @@ pub fn graphql_request_body(query, variables = nil, options = nil) {
   return body
 }
 
-/** graphql_normalize_response. */
+/**
+ * graphql_normalize_response.
+ *
+ * @effects: []
+ * @allocation: heap
+ * @errors: []
+ * @api_stability: stable
+ * @example: graphql_normalize_response(response, options)
+ */
 pub fn graphql_normalize_response(response, options = nil) {
   let payload = __graphql_payload(response)
   let status = response?.status ?? options?.status ?? 200
@@ -205,12 +253,28 @@ pub fn graphql_normalize_response(response, options = nil) {
   }
 }
 
-/** graphql_error_messages. */
+/**
+ * graphql_error_messages.
+ *
+ * @effects: []
+ * @allocation: heap
+ * @errors: []
+ * @api_stability: stable
+ * @example: graphql_error_messages(envelope)
+ */
 pub fn graphql_error_messages(envelope) {
   return __graphql_list(envelope?.errors).map({ error -> return error?.message ?? to_string(error) })
 }
 
-/** graphql_assert_ok. */
+/**
+ * graphql_assert_ok.
+ *
+ * @effects: []
+ * @allocation: heap
+ * @errors: []
+ * @api_stability: stable
+ * @example: graphql_assert_ok(envelope)
+ */
 pub fn graphql_assert_ok(envelope) {
   let messages = graphql_error_messages(envelope)
   if envelope?.ok || (envelope?.ok == nil && len(messages) == 0) {
@@ -222,7 +286,15 @@ pub fn graphql_assert_ok(envelope) {
   throw_error("GraphQL request failed: " + messages.join("; "))
 }
 
-/** graphql_extract. */
+/**
+ * graphql_extract.
+ *
+ * @effects: []
+ * @allocation: heap
+ * @errors: []
+ * @api_stability: stable
+ * @example: graphql_extract(envelope, field, schema)
+ */
 pub fn graphql_extract(envelope, field, schema = nil) {
   let value = envelope?.data?[field]
   if schema != nil {
@@ -235,7 +307,15 @@ pub fn graphql_extract(envelope, field, schema = nil) {
   return value
 }
 
-/** graphql_page_info. */
+/**
+ * graphql_page_info.
+ *
+ * @effects: []
+ * @allocation: heap
+ * @errors: []
+ * @api_stability: stable
+ * @example: graphql_page_info(connection)
+ */
 pub fn graphql_page_info(connection) {
   let page_info = connection?.pageInfo ?? {}
   let nodes = connection?.nodes ?? connection?.edges?.map({ edge -> return edge.node }) ?? []
@@ -249,7 +329,15 @@ pub fn graphql_page_info(connection) {
   }
 }
 
-/** graphql_next_page_variables. */
+/**
+ * graphql_next_page_variables.
+ *
+ * @effects: []
+ * @allocation: heap
+ * @errors: []
+ * @api_stability: stable
+ * @example: graphql_next_page_variables(variables, connection, cursor_key)
+ */
 pub fn graphql_next_page_variables(variables, connection, cursor_key = "after") {
   let page = graphql_page_info(connection)
   if !page.has_next_page || page.end_cursor == nil {
@@ -258,7 +346,15 @@ pub fn graphql_next_page_variables(variables, connection, cursor_key = "after") 
   return merge(variables ?? {}, {[cursor_key]: page.end_cursor})
 }
 
-/** graphql_request. */
+/**
+ * graphql_request.
+ *
+ * @effects: [net]
+ * @allocation: heap
+ * @errors: []
+ * @api_stability: stable
+ * @example: graphql_request(endpoint, query, variables, options)
+ */
 pub fn graphql_request(endpoint, query, variables = nil, options = nil) {
   let auth = options?.auth ?? options?.authorization
   let headers = graphql_auth_headers(auth, options?.headers)
@@ -284,7 +380,15 @@ pub fn graphql_request(endpoint, query, variables = nil, options = nil) {
   )
 }
 
-/** graphql_operation. */
+/**
+ * graphql_operation.
+ *
+ * @effects: []
+ * @allocation: heap
+ * @errors: []
+ * @api_stability: stable
+ * @example: graphql_operation(name, document, options)
+ */
 pub fn graphql_operation(name, document, options = nil) {
   return merge(
     options ?? {},
@@ -298,7 +402,15 @@ pub fn graphql_operation(name, document, options = nil) {
   )
 }
 
-/** graphql_execute_operation. */
+/**
+ * graphql_execute_operation.
+ *
+ * @effects: []
+ * @allocation: heap
+ * @errors: []
+ * @api_stability: stable
+ * @example: graphql_execute_operation(client, operation, variables, options)
+ */
 pub fn graphql_execute_operation(client, operation, variables = nil, options = nil) {
   let endpoint = if type_of(client) == "string" {
     client
@@ -371,7 +483,15 @@ fn __graphql_field_from_line(line) {
   return filter_nil({name: name, type: field_type})
 }
 
-/** graphql_parse_schema. */
+/**
+ * graphql_parse_schema.
+ *
+ * @effects: []
+ * @allocation: heap
+ * @errors: []
+ * @api_stability: stable
+ * @example: graphql_parse_schema(schema_text)
+ */
 pub fn graphql_parse_schema(schema_text) {
   var types = []
   var current = nil
@@ -407,7 +527,15 @@ pub fn graphql_parse_schema(schema_text) {
   return {format: "graphql-sdl", types: types}
 }
 
-/** graphql_schema_from_introspection. */
+/**
+ * graphql_schema_from_introspection.
+ *
+ * @effects: []
+ * @allocation: heap
+ * @errors: []
+ * @api_stability: stable
+ * @example: graphql_schema_from_introspection(payload)
+ */
 pub fn graphql_schema_from_introspection(payload) {
   let source = __graphql_payload(payload)
   let schema = source?.data?.__schema ?? source?.__schema ?? source
@@ -425,7 +553,15 @@ fn __graphql_harn_name(name) {
   return replace(replace(name, "-", "_"), " ", "_")
 }
 
-/** graphql_codegen_wrapper. */
+/**
+ * graphql_codegen_wrapper.
+ *
+ * @effects: []
+ * @allocation: heap
+ * @errors: []
+ * @api_stability: stable
+ * @example: graphql_codegen_wrapper(operation, client_param)
+ */
 pub fn graphql_codegen_wrapper(operation, client_param = "client") {
   let name = __graphql_harn_name(operation.name ?? operation.operation_name)
   let operation_json = json_stringify(operation)
@@ -440,7 +576,15 @@ pub fn graphql_codegen_wrapper(operation, client_param = "client") {
     + "}\n"
 }
 
-/** graphql_generate_client. */
+/**
+ * graphql_generate_client.
+ *
+ * @effects: []
+ * @allocation: heap
+ * @errors: []
+ * @api_stability: stable
+ * @example: graphql_generate_client(operations, options)
+ */
 pub fn graphql_generate_client(operations, options = nil) {
   var source = "import { graphql_execute_operation } from \"std/graphql\"\n\n"
   for operation in operations {

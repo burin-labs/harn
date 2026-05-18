@@ -148,6 +148,33 @@ mod tests {
     }
 
     #[test]
+    fn hover_fn_exposes_stdlib_metadata_block() {
+        let source = "\
+/**
+ * Read a file as UTF-8.
+ *
+ * @effects: [fs.read]
+ * @allocation: heap
+ * @errors: [FileNotFound, PermissionDenied]
+ * @api_stability: stable
+ * @example: let s = read_to_string(\"/tmp/x\")
+ */
+fn read_to_string(path: string) -> string {
+  return \"\"
+}
+";
+        let state = DocumentState::new(source.to_string());
+        let fn_sym = state
+            .symbols
+            .iter()
+            .find(|s| s.name == "read_to_string" && s.kind == HarnSymbolKind::Function)
+            .expect("should find fn");
+        let meta = fn_sym.stdlib_metadata.as_ref().expect("metadata present");
+        assert!(meta.is_complete(), "missing: {:?}", meta.missing_fields());
+        assert_eq!(meta.allocation.as_deref(), Some("heap"));
+    }
+
+    #[test]
     fn hover_fn_with_plain_comment_fallback() {
         let source = "// Greets a person by name.\nfn greet(name: string) -> string {\n  return \"Hello, \" + name\n}\n";
         let state = DocumentState::new(source.to_string());

@@ -37,7 +37,15 @@ fn __workflow_execute_enqueue_edges(queue, edges) {
   return next
 }
 
-/** workflow_execute. */
+/**
+ * workflow_execute.
+ *
+ * @effects: [llm.call, host]
+ * @allocation: heap
+ * @errors: []
+ * @api_stability: experimental
+ * @example: workflow_execute(task, graph, artifacts, options)
+ */
 pub fn workflow_execute(task, graph, artifacts = nil, options = nil) {
   let opts = options ?? {}
   var state = __host_workflow_prepare_run(task, graph, artifacts ?? [], opts)

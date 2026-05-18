@@ -422,6 +422,12 @@ fn __edit_apply_line_candidate(text, old_text, new_text, match_kind, candidates,
  * have a host-side validator that can re-check the result. Pass
  * `strip_line_numbers: true` to pre-strip `   N | ` line-number prefixes from
  * `old_text` when the model pasted them straight from a numbered file read.
+ *
+ * @effects: []
+ * @allocation: heap
+ * @errors: []
+ * @api_stability: stable
+ * @example: edit_apply_old_new_patch(text, old_text, new_text, options)
  */
 pub fn edit_apply_old_new_patch(text, old_text, new_text, options = nil) {
   let source = text ?? ""
@@ -503,7 +509,15 @@ pub fn edit_apply_old_new_patch(text, old_text, new_text, options = nil) {
   return __edit_error("no_match", "old_text did not match any safe patch region", source, old, new)
 }
 
-/** Splice a half-open 0-based line range and return patch metadata. */
+/**
+ * Splice a half-open 0-based line range and return patch metadata.
+ *
+ * @effects: []
+ * @allocation: heap
+ * @errors: []
+ * @api_stability: stable
+ * @example: edit_splice_lines(text, start_line, end_line_exclusive, new_text, options)
+ */
 pub fn edit_splice_lines(text, start_line, end_line_exclusive, new_text, options = nil) {
   let source = text ?? ""
   let lines = split(source, "\n")
@@ -562,7 +576,15 @@ fn __edit_hunk(before_start, after_start, before_end, after_end, next_before, ne
   }
 }
 
-/** Return deterministic line-level changed-region metadata. */
+/**
+ * Return deterministic line-level changed-region metadata.
+ *
+ * @effects: []
+ * @allocation: heap
+ * @errors: []
+ * @api_stability: stable
+ * @example: edit_changed_regions(before, after)
+ */
 pub fn edit_changed_regions(before, after) {
   let before_lines = split(before ?? "", "\n")
   let after_lines = split(after ?? "", "\n")
@@ -614,6 +636,12 @@ fn __edit_region_within(actual, expected) {
  *
  * The 60% threshold is intentional: a file that legitimately contains one or
  * two `N | …` lines (e.g. a docstring example) is left alone.
+ *
+ * @effects: []
+ * @allocation: heap
+ * @errors: []
+ * @api_stability: stable
+ * @example: edit_strip_line_number_prefixes(text)
  */
 pub fn edit_strip_line_number_prefixes(text) {
   let raw = text ?? ""
@@ -704,6 +732,12 @@ fn __edit_count_blank_lines(lines) {
  * `"your old_string had 1 extra blank line(s) that the file does not"`.
  * Returns `""` when needle and matched are identical or no dominant cause is
  * detectable.
+ *
+ * @effects: []
+ * @allocation: heap
+ * @errors: []
+ * @api_stability: stable
+ * @example: edit_explain_whitespace_difference(needle, matched)
  */
 pub fn edit_explain_whitespace_difference(needle, matched) {
   let needle_text = needle ?? ""
@@ -752,6 +786,12 @@ pub fn edit_explain_whitespace_difference(needle, matched) {
  * `edit_apply_old_new_patch`'s `lazy_placeholder` guardrail, which fires on
  * any placeholder in the patch region — this one is for whole-file rewrites
  * where placeholders by themselves are not a signal.
+ *
+ * @effects: []
+ * @allocation: heap
+ * @errors: []
+ * @api_stability: stable
+ * @example: edit_check_lazy_truncation(old_content, new_content, options)
  */
 pub fn edit_check_lazy_truncation(old_content, new_content, options = nil) {
   let opts = options ?? {}
@@ -804,6 +844,12 @@ pub fn edit_check_lazy_truncation(old_content, new_content, options = nil) {
 /**
  * Validate that before/after text differs only inside expected line regions.
  * Expected regions use inclusive `end_line` or half-open `end_line_exclusive`.
+ *
+ * @effects: []
+ * @allocation: heap
+ * @errors: []
+ * @api_stability: stable
+ * @example: edit_validate_changed_regions(before, after, expected_regions, options)
  */
 pub fn edit_validate_changed_regions(before, after, expected_regions, options = nil) {
   let actual = edit_changed_regions(before ?? "", after ?? "")

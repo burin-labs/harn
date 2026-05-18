@@ -130,7 +130,15 @@ fn __linear_state_matches(issue, target_state) {
     || issue?.state?.type == target_state
 }
 
-/** issue_state_source. */
+/**
+ * issue_state_source.
+ *
+ * @effects: []
+ * @allocation: heap
+ * @errors: []
+ * @api_stability: stable
+ * @example: issue_state_source(issue_id, target_state, options)
+ */
 pub fn issue_state_source(issue_id, target_state = nil, options = nil) {
   return {
     label: "linear.issue_state:" + to_string(issue_id) + ":" + to_string(target_state ?? "*"),
@@ -169,7 +177,15 @@ pub fn issue_state_source(issue_id, target_state = nil, options = nil) {
   }
 }
 
-/** wait_until_issue_state. */
+/**
+ * wait_until_issue_state.
+ *
+ * @effects: []
+ * @allocation: heap
+ * @errors: []
+ * @api_stability: stable
+ * @example: wait_until_issue_state(issue_id, target_state, options)
+ */
 pub fn wait_until_issue_state(issue_id, target_state, options = nil) {
   return wait_for(
     merge(

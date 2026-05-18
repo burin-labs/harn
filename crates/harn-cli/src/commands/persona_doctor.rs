@@ -313,9 +313,7 @@ fn lint_check(catalog: &ResolvedPersonaManifest, entry_source: &Option<PathBuf>)
     let module_graph = crate::commands::check::build_module_graph(&files);
     let options = harn_lint::LintOptions {
         file_path: Some(path),
-        require_file_header: false,
-        complexity_threshold: None,
-        persona_step_allowlist: &[],
+        ..Default::default()
     };
     let diagnostics = harn_lint::lint_with_module_graph(
         &program,

@@ -251,9 +251,8 @@ fn helper(ctx) {
     let allowlist: Vec<String> = Vec::new();
     let options = harn_lint::LintOptions {
         file_path: Some(&path),
-        require_file_header: false,
-        complexity_threshold: None,
         persona_step_allowlist: &allowlist,
+        ..Default::default()
     };
     let diagnostics = harn_lint::lint_with_module_graph(
         &program,

@@ -189,7 +189,15 @@ fn __stage_prepare_escalation(node_id, node, consumed_artifact_ids) {
   }
 }
 
-/** workflow_evaluate_verification. */
+/**
+ * workflow_evaluate_verification.
+ *
+ * @effects: []
+ * @allocation: heap
+ * @errors: []
+ * @api_stability: experimental
+ * @example: workflow_evaluate_verification(config)
+ */
 pub fn workflow_evaluate_verification(config = nil) {
   let verify = config?.verify
   let result = config?.result ?? {}
@@ -228,7 +236,15 @@ pub fn workflow_evaluate_verification(config = nil) {
   return {kind: "composite", ok: ok, checks: checks}
 }
 
-/** workflow_evaluate_condition. */
+/**
+ * workflow_evaluate_condition.
+ *
+ * @effects: []
+ * @allocation: heap
+ * @errors: []
+ * @api_stability: experimental
+ * @example: workflow_evaluate_condition(config)
+ */
 pub fn workflow_evaluate_condition(config = nil) {
   let artifacts = __stage_list(config?.artifacts)
   let metadata = config?.metadata ?? {}
@@ -248,7 +264,15 @@ pub fn workflow_evaluate_condition(config = nil) {
   return {matched: len(artifacts) > 0, consumed_artifact_ids: consumed}
 }
 
-/** workflow_classify_stage_outcome. */
+/**
+ * workflow_classify_stage_outcome.
+ *
+ * @effects: []
+ * @allocation: heap
+ * @errors: []
+ * @api_stability: experimental
+ * @example: workflow_classify_stage_outcome(config)
+ */
 pub fn workflow_classify_stage_outcome(config = nil) {
   let node_kind = __stage_string(config?.node_kind, "")
   let result = config?.result ?? {}
@@ -287,7 +311,15 @@ pub fn workflow_classify_stage_outcome(config = nil) {
   return {outcome: outcome, branch: branch}
 }
 
-/** workflow_stage_attempt_outcome. */
+/**
+ * workflow_stage_attempt_outcome.
+ *
+ * @effects: []
+ * @allocation: heap
+ * @errors: []
+ * @api_stability: experimental
+ * @example: workflow_stage_attempt_outcome(config)
+ */
 pub fn workflow_stage_attempt_outcome(config = nil) {
   let node = config?.node ?? {}
   let result = config?.result ?? {}
@@ -302,7 +334,15 @@ pub fn workflow_stage_attempt_outcome(config = nil) {
   return {outcome: classified.outcome, branch: classified.branch, verification: verification}
 }
 
-/** workflow_prepare_static_stage. */
+/**
+ * workflow_prepare_static_stage.
+ *
+ * @effects: []
+ * @allocation: heap
+ * @errors: []
+ * @api_stability: experimental
+ * @example: workflow_prepare_static_stage(config)
+ */
 pub fn workflow_prepare_static_stage(config = nil) {
   let node_id = __stage_string(config?.node_id, "stage")
   let node = config?.node ?? {}

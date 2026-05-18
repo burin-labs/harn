@@ -511,7 +511,7 @@ fn __agentic_user_remaining_llm_calls(answerer) {
 fn __agentic_user_call_once(answerer, prompts) {
   let result = llm_call(prompts.prompt, prompts.system, __agentic_user_base_llm_options(answerer))
   __sim_user_increment(answerer, "llm_calls")
-  return result?.text ?? result?.raw_text ?? json_stringify(result)
+  return result.text ?? result?.raw_text ?? json_stringify(result)
 }
 
 fn __agentic_user_call_loop(answerer, prompts) {
@@ -582,6 +582,12 @@ fn __sim_user_should_answer_post_turn(payload, options) {
 /**
  * agentic_user returns an answerer that uses an LLM, optionally with read tools,
  * to simulate the harness user during an eval.
+ *
+ * @effects: []
+ * @allocation: heap
+ * @errors: []
+ * @api_stability: experimental
+ * @example: agentic_user(task_or_config, behavior, tools, model, options)
  */
 pub fn agentic_user(task_or_config, behavior = nil, tools = nil, model = nil, options = nil) {
   let config = __sim_user_config(task_or_config, behavior, tools, model, options)
@@ -610,7 +616,15 @@ pub fn agentic_user(task_or_config, behavior = nil, tools = nil, model = nil, op
   return answerer
 }
 
-/** scripted_user returns a deterministic fixture answerer. */
+/**
+ * scripted_user returns a deterministic fixture answerer.
+ *
+ * @effects: []
+ * @allocation: heap
+ * @errors: []
+ * @api_stability: experimental
+ * @example: scripted_user(script, options)
+ */
 pub fn scripted_user(script, options = nil) {
   let opts = options ?? {}
   let state = __sim_user_atomic_state(opts?.state)
@@ -627,12 +641,28 @@ pub fn scripted_user(script, options = nil) {
   return answerer
 }
 
-/** fixture_user is an alias for deterministic eval fixtures. */
+/**
+ * fixture_user is an alias for deterministic eval fixtures.
+ *
+ * @effects: []
+ * @allocation: heap
+ * @errors: []
+ * @api_stability: experimental
+ * @example: fixture_user(script, options)
+ */
 pub fn fixture_user(script, options = nil) {
   return scripted_user(script, options)
 }
 
-/** simulated_user_respond asks an answerer for its next decision. */
+/**
+ * simulated_user_respond asks an answerer for its next decision.
+ *
+ * @effects: []
+ * @allocation: heap
+ * @errors: []
+ * @api_stability: experimental
+ * @example: simulated_user_respond(answerer, payload)
+ */
 pub fn simulated_user_respond(answerer, payload = nil) {
   if type_of(answerer) == "string" {
     return __sim_user_reply(answerer)
@@ -650,7 +680,15 @@ pub fn simulated_user_respond(answerer, payload = nil) {
   return __sim_user_normalize_decision(respond(payload))
 }
 
-/** simulated_user_status returns public state for assertions and eval reports. */
+/**
+ * simulated_user_status returns public state for assertions and eval reports.
+ *
+ * @effects: []
+ * @allocation: heap
+ * @errors: []
+ * @api_stability: experimental
+ * @example: simulated_user_status(answerer)
+ */
 pub fn simulated_user_status(answerer) {
   if type_of(answerer) != "dict" {
     return {}
@@ -664,7 +702,15 @@ pub fn simulated_user_status(answerer) {
   }
 }
 
-/** user_tools adds an ask_user tool backed by a simulated answerer. */
+/**
+ * user_tools adds an ask_user tool backed by a simulated answerer.
+ *
+ * @effects: []
+ * @allocation: heap
+ * @errors: []
+ * @api_stability: experimental
+ * @example: user_tools(answerer, registry, options)
+ */
 pub fn user_tools(answerer, registry = nil, options = nil) {
   let opts = options ?? {}
   let tools = registry ?? tool_registry()
@@ -702,7 +748,15 @@ pub fn user_tools(answerer, registry = nil, options = nil) {
   )
 }
 
-/** simulated_user_post_turn replies to plain-text clarification questions. */
+/**
+ * simulated_user_post_turn replies to plain-text clarification questions.
+ *
+ * @effects: []
+ * @allocation: heap
+ * @errors: []
+ * @api_stability: experimental
+ * @example: simulated_user_post_turn(answerer, options)
+ */
 pub fn simulated_user_post_turn(answerer, options = nil) {
   let opts = options ?? {}
   return { payload ->
@@ -730,7 +784,15 @@ pub fn simulated_user_post_turn(answerer, options = nil) {
   }
 }
 
-/** simulated_user_read_tools is a named alias for read-only research tools. */
+/**
+ * simulated_user_read_tools is a named alias for read-only research tools.
+ *
+ * @effects: []
+ * @allocation: heap
+ * @errors: []
+ * @api_stability: experimental
+ * @example: simulated_user_read_tools(registry, options)
+ */
 pub fn simulated_user_read_tools(registry = nil, options = nil) {
   return agent_read_tools(registry, options)
 }

@@ -150,6 +150,49 @@ fn graph_json_module_filter_focuses_modules_but_keeps_edge_targets() {
 }
 
 #[test]
+fn graph_json_surfaces_declared_stdlib_metadata_per_symbol() {
+    let temp = TempDir::new().unwrap();
+    let module = temp.path().join("annotated.harn");
+    fs::write(
+        &module,
+        r#"
+/**
+ * Read a file and return its contents.
+ *
+ * @effects: [fs.read]
+ * @allocation: heap
+ * @errors: [FileNotFound]
+ * @api_stability: stable
+ * @example: read_file("README.md")
+ */
+pub fn read_file(path: string) -> string {
+  return path
+}
+"#,
+    )
+    .unwrap();
+
+    let root = temp.path().to_str().unwrap();
+    let output = run_harn(&["graph", root, "--json"]);
+    assert!(output.status.success(), "exit={:?}", output.status.code());
+    let parsed = stdout_json(&output);
+
+    let symbols = parsed["data"]["modules"][0]["public_symbols"]
+        .as_array()
+        .expect("public_symbols array");
+    let read_file_sym = symbols
+        .iter()
+        .find(|s| s["name"] == "read_file")
+        .expect("read_file symbol");
+    let meta = &read_file_sym["metadata"];
+    assert_eq!(meta["effects"], serde_json::json!(["fs.read"]));
+    assert_eq!(meta["allocation"], "heap");
+    assert_eq!(meta["errors"], serde_json::json!(["FileNotFound"]));
+    assert_eq!(meta["api_stability"], "stable");
+    assert_eq!(meta["example"], "read_file(\"README.md\")");
+}
+
+#[test]
 fn graph_appears_in_json_schemas_catalog() {
     let output = run_harn(&["--json-schemas", "--command", "graph"]);
     assert!(output.status.success(), "exit={:?}", output.status.code());

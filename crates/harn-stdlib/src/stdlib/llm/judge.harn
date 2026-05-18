@@ -105,7 +105,15 @@ fn __rank(entries) {
   return ranked
 }
 
-/** Score candidate prompts against an eval set, evaluating cases in parallel. */
+/**
+ * Score candidate prompts against an eval set, evaluating cases in parallel.
+ *
+ * @effects: []
+ * @allocation: heap
+ * @errors: []
+ * @api_stability: stable
+ * @example: parallel_judge(candidates, eval_set, metric, options)
+ */
 pub fn parallel_judge(candidates, eval_set, metric, options = nil) {
   require metric != nil, "parallel_judge: metric closure is required"
   let candidate_rows = __candidate_rows(candidates)

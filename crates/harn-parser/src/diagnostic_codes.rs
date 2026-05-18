@@ -218,6 +218,7 @@ diagnostic_codes! {
     DeprecatedStdlibSymbol, "HARN-STD-001", Std, "stdlib symbol has been renamed or deprecated";
     StdlibUsageInvalid, "HARN-STD-002", Std, "stdlib call is invalid";
     BuiltinArity, "HARN-STD-003", Std, "builtin call has invalid arity";
+    LintMissingStdlibMetadata, "HARN-STD-101", Std, "public stdlib function is missing declared metadata";
     PromptTemplateParse, "HARN-PRM-001", Prm, "prompt template cannot be parsed";
     PromptVariantExplosion, "HARN-PRM-002", Prm, "prompt template has too many capability-aware branches";
     PromptInjectionRisk, "HARN-PRM-003", Prm, "prompt construction risks direct injection";
@@ -662,6 +663,7 @@ impl Code {
 
             // --- STD: stdlib usage ----------------------------------------
             Code::DeprecatedStdlibSymbol => Some(&REPAIR_STDLIB_MIGRATE_RENAMED),
+            Code::LintMissingStdlibMetadata => Some(&REPAIR_DOC_ADD_STDLIB_METADATA),
 
             // --- OWN: ownership & mutability ------------------------------
             Code::ImmutableAssignment => Some(&REPAIR_BINDINGS_MAKE_MUTABLE),
@@ -885,6 +887,12 @@ const REPAIR_DOC_ADD_HARNDOC: RepairTemplate = RepairTemplate {
     safety: RepairSafety::BehaviorPreserving,
 };
 
+const REPAIR_DOC_ADD_STDLIB_METADATA: RepairTemplate = RepairTemplate {
+    id: "doc/add-stdlib-metadata",
+    summary: "Add `@effects`, `@allocation`, `@errors`, `@api_stability`, and `@example` fields to the stdlib function's doc block",
+    safety: RepairSafety::BehaviorPreserving,
+};
+
 const REPAIR_BLOCK_REMOVE_EMPTY: RepairTemplate = RepairTemplate {
     id: "blocks/remove-empty",
     summary: "Remove the empty block or fill in an explicit body",
@@ -1007,6 +1015,7 @@ pub const REPAIR_REGISTRY: &[&RepairTemplate] = &[
     &REPAIR_FORMAT_REFORMAT,
     &REPAIR_DOC_COMMENT_MIGRATE,
     &REPAIR_DOC_ADD_HARNDOC,
+    &REPAIR_DOC_ADD_STDLIB_METADATA,
     &REPAIR_BLOCK_REMOVE_EMPTY,
     &REPAIR_CONTROL_FLOW_FLATTEN,
     &REPAIR_EXPRESSION_SIMPLIFY,

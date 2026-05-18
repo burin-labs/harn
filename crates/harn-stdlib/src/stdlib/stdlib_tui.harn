@@ -36,17 +36,41 @@ type SelectFromOptions = {
   header?: string,
 }
 
-/** page shows a text or markdown artifact through a pager when stdout is interactive. */
+/**
+ * page shows a text or markdown artifact through a pager when stdout is interactive.
+ *
+ * @effects: []
+ * @allocation: heap
+ * @errors: []
+ * @api_stability: stable
+ * @example: page(opts)
+ */
 pub fn page(opts: PageOptions) -> PageResult {
   return __tui_page(opts)
 }
 
-/** terminal_width returns the current terminal width, or default_width when unknown. */
+/**
+ * terminal_width returns the current terminal width, or default_width when unknown.
+ *
+ * @effects: []
+ * @allocation: stack-only
+ * @errors: []
+ * @api_stability: stable
+ * @example: terminal_width(default_width)
+ */
 pub fn terminal_width(default_width = 80) -> int {
   return __tui_terminal_width(default_width)
 }
 
-/** rule returns a repeated character line sized to width or the terminal width. */
+/**
+ * rule returns a repeated character line sized to width or the terminal width.
+ *
+ * @effects: []
+ * @allocation: heap
+ * @errors: []
+ * @api_stability: stable
+ * @example: rule(char, width)
+ */
 pub fn rule(char = "─", width = nil) -> string {
   let mark = if type_of(char) == "string" && len(char) > 0 {
     substring(char, 0, 1)
@@ -60,7 +84,15 @@ pub fn rule(char = "─", width = nil) -> string {
   return mark.repeat(resolved_width)
 }
 
-/** clear writes the ANSI clear-screen sequence to stdout. */
+/**
+ * clear writes the ANSI clear-screen sequence to stdout.
+ *
+ * @effects: []
+ * @allocation: heap
+ * @errors: []
+ * @api_stability: stable
+ * @example: clear()
+ */
 pub fn clear() {
   __tui_clear()
 }
@@ -444,6 +476,12 @@ fn __tui_gum_pick(items, labels, opts) -> dict {
  * `"none"`. `"auto"` probes fzf then gum then falls back to the
  * numbered menu (and short-circuits to numbered when stdout is not a
  * TTY, so harness tests with `mock_stdin` keep working).
+ *
+ * @effects: []
+ * @allocation: heap
+ * @errors: []
+ * @api_stability: stable
+ * @example: select_from(items, opts)
  */
 pub fn select_from(items: list, opts: SelectFromOptions = {}) -> dict {
   let options = opts ?? {}

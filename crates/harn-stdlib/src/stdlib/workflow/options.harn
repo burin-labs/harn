@@ -121,7 +121,15 @@ fn __workflow_autonomy_tier(value) -> WorkflowAutonomyTier {
   throw "workflow_autonomy_policy: tier must be one of shadow, suggest, act_with_approval, act_auto"
 }
 
-/** workflow_autonomy_policy normalizes tier policy for with_autonomy_policy. */
+/**
+ * workflow_autonomy_policy normalizes tier policy for with_autonomy_policy.
+ *
+ * @effects: []
+ * @allocation: heap
+ * @errors: []
+ * @api_stability: experimental
+ * @example: workflow_autonomy_policy(config)
+ */
 pub fn workflow_autonomy_policy(config: WorkflowAutonomyPolicyConfig = {}) -> WorkflowAutonomyPolicy {
   return {
     agent_id: config.agent_id ?? config.agent,
@@ -190,7 +198,15 @@ fn __workflow_agent_loop_options(
   return options + pick_keys(model_policy, loop_option_keys, {drop_nil: true})
 }
 
-/** workflow_stage_agent_options. */
+/**
+ * workflow_stage_agent_options.
+ *
+ * @effects: []
+ * @allocation: heap
+ * @errors: []
+ * @api_stability: experimental
+ * @example: workflow_stage_agent_options(config)
+ */
 pub fn workflow_stage_agent_options(config: WorkflowStageOptionsConfig = {}) -> WorkflowStageAgentOptions {
   let model_policy: WorkflowModelPolicy = config.model_policy ?? {}
   let host: WorkflowStageHostConfig = config.host ?? {}

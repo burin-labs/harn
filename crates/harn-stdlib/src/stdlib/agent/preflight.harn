@@ -287,7 +287,15 @@ fn __agent_has_system_prompt_options(opts) {
     || __agent_system_prompt_option_present(opts?.system_suffix)
 }
 
-/** agent_build_turn_system. */
+/**
+ * agent_build_turn_system.
+ *
+ * @effects: [agent, mcp]
+ * @allocation: heap
+ * @errors: []
+ * @api_stability: experimental
+ * @example: agent_build_turn_system(session, opts, iteration)
+ */
 pub fn agent_build_turn_system(session, opts, iteration) {
   var parts = []
   if opts?.system != nil && opts.system != "" {
@@ -331,7 +339,15 @@ pub fn agent_build_turn_system(session, opts, iteration) {
   return join(parts, "\n\n")
 }
 
-/** agent_build_turn_messages. */
+/**
+ * agent_build_turn_messages.
+ *
+ * @effects: [agent]
+ * @allocation: heap
+ * @errors: []
+ * @api_stability: experimental
+ * @example: agent_build_turn_messages(session, opts, iteration)
+ */
 pub fn agent_build_turn_messages(session, opts, iteration) {
   let messages = agent_session_messages(session.session_id)
   let decorator = opts?.message_decorator ?? opts?.decorate_message

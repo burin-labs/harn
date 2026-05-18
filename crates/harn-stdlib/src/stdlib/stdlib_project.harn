@@ -13,12 +13,28 @@ type ProjectFingerprint = {
   lockfile_paths: list<string>,
 }
 
-/** metadata_namespace. */
+/**
+ * metadata_namespace.
+ *
+ * @effects: []
+ * @allocation: heap
+ * @errors: []
+ * @api_stability: stable
+ * @example: metadata_namespace(dir, namespace)
+ */
 pub fn metadata_namespace(dir, namespace) {
   return metadata_resolve(dir, namespace) ?? {}
 }
 
-/** metadata_local_namespace. */
+/**
+ * metadata_local_namespace.
+ *
+ * @effects: []
+ * @allocation: heap
+ * @errors: []
+ * @api_stability: stable
+ * @example: metadata_local_namespace(dir, namespace)
+ */
 pub fn metadata_local_namespace(dir, namespace) {
   let normalized = if dir == "" {
     "."
@@ -33,12 +49,28 @@ pub fn metadata_local_namespace(dir, namespace) {
   return {}
 }
 
-/** project_inventory. */
+/**
+ * project_inventory.
+ *
+ * @effects: []
+ * @allocation: heap
+ * @errors: []
+ * @api_stability: stable
+ * @example: project_inventory(namespace)
+ */
 pub fn project_inventory(namespace) {
   return {entries: metadata_entries(namespace), status: metadata_status(namespace)}
 }
 
-/** project_root_package. */
+/**
+ * project_root_package.
+ *
+ * @effects: []
+ * @allocation: heap
+ * @errors: []
+ * @api_stability: stable
+ * @example: project_root_package()
+ */
 pub fn project_root_package() -> string {
   var root_package = ""
   let root_enrichment = metadata_get("", "enrichment")
@@ -63,32 +95,80 @@ pub fn project_root_package() -> string {
   return root_package
 }
 
-/** project_scan. */
+/**
+ * project_scan.
+ *
+ * @effects: []
+ * @allocation: heap
+ * @errors: []
+ * @api_stability: stable
+ * @example: project_scan(path, options)
+ */
 pub fn project_scan(path = ".", options = nil) {
   return project_scan_native(path, options ?? {})
 }
 
-/** project_scan_tree. */
+/**
+ * project_scan_tree.
+ *
+ * @effects: []
+ * @allocation: heap
+ * @errors: []
+ * @api_stability: stable
+ * @example: project_scan_tree(path, options)
+ */
 pub fn project_scan_tree(path = ".", options = nil) {
   return project_scan_tree_native(path, options ?? {})
 }
 
-/** project_catalog. */
+/**
+ * project_catalog.
+ *
+ * @effects: []
+ * @allocation: heap
+ * @errors: []
+ * @api_stability: stable
+ * @example: project_catalog()
+ */
 pub fn project_catalog() {
   return project_catalog_native()
 }
 
-/** project_enrich. */
+/**
+ * project_enrich.
+ *
+ * @effects: []
+ * @allocation: heap
+ * @errors: []
+ * @api_stability: stable
+ * @example: project_enrich(path, options)
+ */
 pub fn project_enrich(path = ".", options = nil) {
   return project_enrich_native(path, options ?? {})
 }
 
-/** project_scan_paths. */
+/**
+ * project_scan_paths.
+ *
+ * @effects: []
+ * @allocation: heap
+ * @errors: []
+ * @api_stability: stable
+ * @example: project_scan_paths(path, options)
+ */
 pub fn project_scan_paths(path = ".", options = nil) {
   return project_scan_tree(path, options).keys()
 }
 
-/** project_deep_scan. */
+/**
+ * project_deep_scan.
+ *
+ * @effects: []
+ * @allocation: heap
+ * @errors: []
+ * @api_stability: stable
+ * @example: project_deep_scan(path, options)
+ */
 pub fn project_deep_scan(path = ".", options = nil) {
   let opts = options ?? {}
   let namespace = opts?.namespace ?? "project-enrichment"
@@ -162,7 +242,15 @@ pub fn project_deep_scan(path = ".", options = nil) {
   return tree
 }
 
-/** project_deep_scan_status. */
+/**
+ * project_deep_scan_status.
+ *
+ * @effects: []
+ * @allocation: heap
+ * @errors: []
+ * @api_stability: stable
+ * @example: project_deep_scan_status(namespace, path)
+ */
 pub fn project_deep_scan_status(namespace, path = ".") {
   let scope_dir = __project_deep_scan_scope_dir(path)
   let local = metadata_local_namespace(scope_dir, namespace)
@@ -433,12 +521,28 @@ fn __project_deep_scan_last_refresh(current, next) {
   return current
 }
 
-/** project_stale. */
+/**
+ * project_stale.
+ *
+ * @effects: []
+ * @allocation: heap
+ * @errors: []
+ * @api_stability: stable
+ * @example: project_stale(namespace)
+ */
 pub fn project_stale(namespace) {
   return metadata_status(namespace).stale
 }
 
-/** project_stale_dirs. */
+/**
+ * project_stale_dirs.
+ *
+ * @effects: []
+ * @allocation: heap
+ * @errors: []
+ * @api_stability: stable
+ * @example: project_stale_dirs(namespace)
+ */
 pub fn project_stale_dirs(namespace) {
   let stale = project_stale(namespace)
   var dirs = []
@@ -451,7 +555,15 @@ pub fn project_stale_dirs(namespace) {
   return dirs
 }
 
-/** project_requires_refresh. */
+/**
+ * project_requires_refresh.
+ *
+ * @effects: []
+ * @allocation: heap
+ * @errors: []
+ * @api_stability: stable
+ * @example: project_requires_refresh(namespace)
+ */
 pub fn project_requires_refresh(namespace) {
   let status = metadata_status(namespace)
   if status.stale.any_stale {

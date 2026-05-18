@@ -228,7 +228,15 @@ fn __table_render_markdown(cols, matrix, widths, show_header) -> string {
   return join(lines, "\n")
 }
 
-/** Render rows as a stable plain-text or Markdown table. */
+/**
+ * Render rows as a stable plain-text or Markdown table.
+ *
+ * @effects: []
+ * @allocation: heap
+ * @errors: []
+ * @api_stability: stable
+ * @example: render_table(rows, options)
+ */
 pub fn render_table(rows: list, options: TableOptions = {}) -> string {
   let items = rows ?? []
   if len(items) == 0 {
@@ -248,13 +256,29 @@ pub fn render_table(rows: list, options: TableOptions = {}) -> string {
   return __table_render_plain(cols, matrix, widths, show_header)
 }
 
-/** Alias for `render_table(..., {format: "markdown"})`. */
+/**
+ * Alias for `render_table(..., {format: "markdown"})`.
+ *
+ * @effects: []
+ * @allocation: heap
+ * @errors: []
+ * @api_stability: stable
+ * @example: render_markdown_table(rows, options)
+ */
 pub fn render_markdown_table(rows: list, options: TableOptions = {}) -> string {
   let base = options ?? {}
   return render_table(rows, base + {format: "markdown"})
 }
 
-/** Render a dict as a two-column key/value table. */
+/**
+ * Render a dict as a two-column key/value table.
+ *
+ * @effects: []
+ * @allocation: heap
+ * @errors: []
+ * @api_stability: stable
+ * @example: render_kv_table(data, options)
+ */
 pub fn render_kv_table(data: dict, options: TableOptions = {}) -> string {
   var rows = []
   for key in keys(data ?? {}).sort() {

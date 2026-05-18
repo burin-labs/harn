@@ -251,6 +251,12 @@ fn __dispatch(arg, raw_argv, flag_index, positional_specs, cursor, state) {
  *   --opt=VALUE             (inline value)
  *   --                      (terminates flag parsing; rest is positional)
  *   --help / -h             (sets `_help` to true, parsing continues)
+ *
+ * @effects: []
+ * @allocation: heap
+ * @errors: []
+ * @api_stability: stable
+ * @example: parse_args(argv, spec)
  */
 pub fn parse_args(argv: list<string>, spec: list) -> dict {
   let validation = __spec_validate(spec)
@@ -307,6 +313,12 @@ pub fn parse_args(argv: list<string>, spec: list) -> dict {
  * Render a one-line help summary derived from the spec. Useful for
  * `--help` handlers that don't need full man-page fidelity. Each entry
  * contributes one indented line in the form `  <flags>  — <help>`.
+ *
+ * @effects: []
+ * @allocation: heap
+ * @errors: []
+ * @api_stability: stable
+ * @example: help_text(spec, program)
  */
 pub fn help_text(spec: list, program: string = "harn run script.harn") -> string {
   var lines = ["Usage: " + program + " [options] [positional]"]

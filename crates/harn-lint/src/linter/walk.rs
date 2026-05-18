@@ -105,6 +105,9 @@ impl<'a> Linter<'a> {
                         fix: None,
                     });
                 }
+                if *is_pub && self.require_stdlib_metadata {
+                    self.check_stdlib_metadata(name, snode.span);
+                }
                 self.record_param_type_references(params);
                 if let Some(type_expr) = return_type {
                     self.record_type_expr_references(type_expr);

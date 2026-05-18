@@ -169,6 +169,12 @@ fn __structured_judge(samples, opts) {
  *
  * Returns: {ok, best: {text, index, score?}, candidates, judge, reasoning}.
  * On all-fail: {ok: false, status: "all_samples_failed"}.
+ *
+ * @effects: []
+ * @allocation: heap
+ * @errors: []
+ * @api_stability: stable
+ * @example: best_of_n(prompt, system, opts)
  */
 pub fn best_of_n(prompt, system, opts = nil) {
   let cfg = if type_of(opts) == "dict" {
@@ -424,6 +430,12 @@ fn __build_distribution(keys_in_order, counts) {
  * Returns: {ok, answer, answer_count, total, distribution, candidates, entropy}.
  * Ties: lowest-index extracted answer wins; emits "self_consistency_tie".
  * No extractable answers: {ok: false, status: "no_extractable_answers"}.
+ *
+ * @effects: []
+ * @allocation: heap
+ * @errors: []
+ * @api_stability: stable
+ * @example: self_consistency(prompt, system, opts)
  */
 pub fn self_consistency(prompt, system, opts = nil) {
   let cfg = if type_of(opts) == "dict" {
@@ -498,6 +510,12 @@ pub fn self_consistency(prompt, system, opts = nil) {
  *   - max_concurrent: int (default 4)
  *   - on_error: "skip" | "fail_fast" | "collect" (default "collect")
  *   - on_progress: closure({index, total, item, verdict}) -> nil
+ *
+ * @effects: []
+ * @allocation: heap
+ * @errors: []
+ * @api_stability: stable
+ * @example: parallel_judge(items, judge_fn, opts)
  */
 pub fn parallel_judge(items, judge_fn, opts = nil) {
   let cfg = if type_of(opts) == "dict" {
@@ -920,6 +938,12 @@ fn __emit_stability_short_circuit(opts, stability) {
  * Run a multi-debater LLM debate. Set `adaptive_stop: true` to stop after
  * two consecutive stable rounds when every debater's response drift is below
  * `stability_threshold` (default `0.15`).
+ *
+ * @effects: []
+ * @allocation: heap
+ * @errors: []
+ * @api_stability: stable
+ * @example: debate(opts)
  */
 pub fn debate(opts) -> DebateResult {
   let config = __debate_options(opts)
@@ -1195,7 +1219,15 @@ fn __tot_search_beam(root, expand, evaluate, is_terminal, stop, k, max_depth, be
   return __tot_finalize("beam", k, max_depth, beam_width, nodes, best, stop_reason)
 }
 
-/** tree_of_thoughts searches explicitly expanded reasoning states with BFS, DFS, or beam search. */
+/**
+ * tree_of_thoughts searches explicitly expanded reasoning states with BFS, DFS, or beam search.
+ *
+ * @effects: []
+ * @allocation: heap
+ * @errors: []
+ * @api_stability: stable
+ * @example: tree_of_thoughts(opts)
+ */
 pub fn tree_of_thoughts(opts) {
   require type_of(opts) == "dict", "tree_of_thoughts: opts must be a dict"
   require opts.has("initial_state"), "tree_of_thoughts: opts.initial_state is required"

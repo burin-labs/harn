@@ -11,6 +11,12 @@
  * Render any value as a single string. Lists join their stringified items
  * with `separator`. Dicts are JSON-stringified. Primitives go through
  * `to_string`. Nil collapses to the empty string.
+ *
+ * @effects: []
+ * @allocation: heap
+ * @errors: []
+ * @api_stability: stable
+ * @example: to_string_lossy(value, separator)
  */
 pub fn to_string_lossy(value: any, separator: string = " ") -> string {
   if value == nil {
@@ -38,6 +44,12 @@ pub fn to_string_lossy(value: any, separator: string = " ") -> string {
  * list (or [] when blank). A list has each element coerced via
  * `to_string_lossy`. A dict becomes its JSON form wrapped in a list. The
  * result is truncated to `max_items`.
+ *
+ * @effects: []
+ * @allocation: heap
+ * @errors: []
+ * @api_stability: stable
+ * @example: to_string_list(value, max_items)
  */
 pub fn to_string_list(value: any, max_items: int = 256) -> list<string> {
   if value == nil {
@@ -68,12 +80,28 @@ pub fn to_string_list(value: any, max_items: int = 256) -> list<string> {
   return out
 }
 
-/** Parse an int-like value, returning fallback on failure. */
+/**
+ * Parse an int-like value, returning fallback on failure.
+ *
+ * @effects: []
+ * @allocation: stack-only
+ * @errors: []
+ * @api_stability: stable
+ * @example: to_int_or(value, fallback)
+ */
 pub fn to_int_or(value: any, fallback: int) -> int {
   return to_int(value) ?? fallback
 }
 
-/** Parse a float-like value, returning fallback on failure. */
+/**
+ * Parse a float-like value, returning fallback on failure.
+ *
+ * @effects: []
+ * @allocation: stack-only
+ * @errors: []
+ * @api_stability: stable
+ * @example: to_float_or(value, fallback)
+ */
 pub fn to_float_or(value: any, fallback: float) -> float {
   return to_float(value) ?? fallback
 }
@@ -82,6 +110,12 @@ pub fn to_float_or(value: any, fallback: float) -> float {
  * Coerce value to bool with a fallback. Recognizes the canonical
  * "true/false/yes/no/y/n/1/0" tokens (case-insensitive) on strings, treats
  * numeric zero as false, and treats empty list/dict as false.
+ *
+ * @effects: []
+ * @allocation: stack-only
+ * @errors: []
+ * @api_stability: stable
+ * @example: to_bool_or(value, fallback)
  */
 pub fn to_bool_or(value: any, fallback: bool) -> bool {
   if value == nil {
@@ -120,6 +154,12 @@ pub fn to_bool_or(value: any, fallback: bool) -> bool {
  * Case-insensitive nested dict lookup. Each path segment matches keys
  * case-insensitively against the current dict layer; returns nil on the
  * first miss or non-dict.
+ *
+ * @effects: []
+ * @allocation: heap
+ * @errors: []
+ * @api_stability: stable
+ * @example: dict_path_ci(d, path)
  */
 pub fn dict_path_ci(d: any, path: list<string>) -> any {
   var current = d
@@ -148,6 +188,12 @@ pub fn dict_path_ci(d: any, path: list<string>) -> any {
 /**
  * Return the first value in `values` that is not nil. If every entry is
  * nil, return `default`.
+ *
+ * @effects: []
+ * @allocation: heap
+ * @errors: []
+ * @api_stability: stable
+ * @example: first_non_nil(values, default)
  */
 pub fn first_non_nil(values: list, default: any = nil) -> any {
   for v in values {
@@ -162,6 +208,12 @@ pub fn first_non_nil(values: list, default: any = nil) -> any {
  * Return the first non-empty value in `values`. Strings, lists, and dicts
  * must have length > 0; primitives must be non-nil. Returns `default` when
  * nothing qualifies.
+ *
+ * @effects: []
+ * @allocation: heap
+ * @errors: []
+ * @api_stability: stable
+ * @example: first_present(values, default)
  */
 pub fn first_present(values: list, default: any = nil) -> any {
   for v in values {

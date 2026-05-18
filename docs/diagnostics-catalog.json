@@ -34,7 +34,7 @@
     {
       "id": "STD",
       "title": "Stdlib usage",
-      "count": 3
+      "count": 4
     },
     {
       "id": "PRM",
@@ -926,6 +926,21 @@
       "category": "STD",
       "summary": "builtin call has invalid arity",
       "repairs": [],
+      "related": [],
+      "explanationPresent": true,
+      "apiStability": "stable"
+    },
+    {
+      "code": "HARN-STD-101",
+      "category": "STD",
+      "summary": "public stdlib function is missing declared metadata",
+      "repairs": [
+        {
+          "id": "doc/add-stdlib-metadata",
+          "safety": "behavior-preserving",
+          "summary": "Add `@effects`, `@allocation`, `@errors`, `@api_stability`, and `@example` fields to the stdlib function's doc block"
+        }
+      ],
       "related": [],
       "explanationPresent": true,
       "apiStability": "stable"

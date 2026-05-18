@@ -38,7 +38,15 @@ type WaitpointCancelledError = {
   reason: string?,
 }
 
-/** create. */
+/**
+ * create.
+ *
+ * @effects: []
+ * @allocation: heap
+ * @errors: []
+ * @api_stability: stable
+ * @example: create(id_or_options)
+ */
 pub fn create(id_or_options = nil) {
   if id_or_options == nil {
     return __waitpoint_create()
@@ -46,7 +54,15 @@ pub fn create(id_or_options = nil) {
   return __waitpoint_create(id_or_options)
 }
 
-/** wait. */
+/**
+ * wait.
+ *
+ * @effects: []
+ * @allocation: heap
+ * @errors: []
+ * @api_stability: stable
+ * @example: wait(waitpoints, options)
+ */
 pub fn wait(waitpoints, options = nil) {
   if options == nil {
     return __waitpoint_wait(waitpoints)
@@ -54,7 +70,15 @@ pub fn wait(waitpoints, options = nil) {
   return __waitpoint_wait(waitpoints, options)
 }
 
-/** complete. */
+/**
+ * complete.
+ *
+ * @effects: []
+ * @allocation: heap
+ * @errors: []
+ * @api_stability: stable
+ * @example: complete(waitpoint, value, options)
+ */
 pub fn complete(waitpoint, value, options = nil) {
   if options == nil {
     return __waitpoint_complete(waitpoint, value)
@@ -62,7 +86,15 @@ pub fn complete(waitpoint, value, options = nil) {
   return __waitpoint_complete(waitpoint, value, options)
 }
 
-/** cancel. */
+/**
+ * cancel.
+ *
+ * @effects: []
+ * @allocation: heap
+ * @errors: []
+ * @api_stability: stable
+ * @example: cancel(waitpoint, options)
+ */
 pub fn cancel(waitpoint, options = nil) {
   if options == nil {
     return __waitpoint_cancel(waitpoint)

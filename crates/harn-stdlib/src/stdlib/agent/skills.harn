@@ -613,7 +613,15 @@ fn __opts_with_active_skills(opts, registry, active) {
   return next
 }
 
-/** agent_skills_match. */
+/**
+ * agent_skills_match.
+ *
+ * @effects: []
+ * @allocation: heap
+ * @errors: []
+ * @api_stability: experimental
+ * @example: agent_skills_match(session, opts, iteration)
+ */
 pub fn agent_skills_match(session, opts, iteration) {
   let registry = __skills_registry(opts)
   if registry == nil || len(__skills_entries(registry)) == 0 {

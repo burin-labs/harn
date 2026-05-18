@@ -151,6 +151,11 @@ impl HarnLsp {
                 hover_text.push_str(&format!("\n---\n\n{doc}"));
             }
 
+            if let Some(meta) = sym.stdlib_metadata.as_ref().filter(|m| !m.is_empty()) {
+                hover_text.push_str("\n\n---\n\n");
+                hover_text.push_str(&meta.to_markdown());
+            }
+
             if let Some(block) = format_flow_attributes_block(&sym.attributes) {
                 hover_text.push_str(&block);
             }

@@ -147,7 +147,15 @@ fn __web_annotate_regions(regions, kind) {
   return (regions ?? []).map({ region -> region.merge({kind: kind}) })
 }
 
-/** Extract script, style, and body fragments from a small HTML artifact. */
+/**
+ * Extract script, style, and body fragments from a small HTML artifact.
+ *
+ * @effects: []
+ * @allocation: heap
+ * @errors: []
+ * @api_stability: stable
+ * @example: web_artifact_extract(html)
+ */
 pub fn web_artifact_extract(html) {
   let source = html ?? ""
   let scripts = __web_tag_fragments(source, "script")
@@ -177,7 +185,15 @@ pub fn web_artifact_extract(html) {
   }
 }
 
-/** Create a plain-text fallback for hosts that cannot render the artifact. */
+/**
+ * Create a plain-text fallback for hosts that cannot render the artifact.
+ *
+ * @effects: []
+ * @allocation: heap
+ * @errors: []
+ * @api_stability: stable
+ * @example: web_artifact_text_fallback(html, options)
+ */
 pub fn web_artifact_text_fallback(html, options = nil) {
   let without_scripts = regex_replace("(?is)<script\\b[^>]*>.*?</script>", " ", html ?? "")
   let without_styles = regex_replace("(?is)<style\\b[^>]*>.*?</style>", " ", without_scripts)
@@ -203,6 +219,12 @@ pub fn web_artifact_text_fallback(html, options = nil) {
  *
  * The report is machine-readable and includes fragment summaries, warnings,
  * errors, stable hashes, and a text fallback.
+ *
+ * @effects: []
+ * @allocation: heap
+ * @errors: []
+ * @api_stability: stable
+ * @example: web_artifact_validate(html, options)
  */
 pub fn web_artifact_validate(html, options = nil) {
   let source = html ?? ""
@@ -388,7 +410,15 @@ pub fn web_artifact_validate(html, options = nil) {
   }
 }
 
-/** Apply an old/new patch to an artifact, then validate the resulting HTML. */
+/**
+ * Apply an old/new patch to an artifact, then validate the resulting HTML.
+ *
+ * @effects: []
+ * @allocation: heap
+ * @errors: []
+ * @api_stability: stable
+ * @example: web_artifact_apply_patch(html, old_text, new_text, options)
+ */
 pub fn web_artifact_apply_patch(html, old_text, new_text, options = nil) {
   let source = html ?? ""
   let opts = options ?? {}

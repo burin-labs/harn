@@ -1,18 +1,42 @@
 // std/calendar — civil date, timezone, country, and business-calendar helpers.
 //
 // Import with: import { add_business_days, country_info, start_of_week } from "std/calendar"
-/** Return timezone-local calendar fields, including ISO week and quarter. */
+/**
+ * Return timezone-local calendar fields, including ISO week and quarter.
+ *
+ * @effects: []
+ * @allocation: heap
+ * @errors: []
+ * @api_stability: stable
+ * @example: parts(timestamp, timezone)
+ */
 pub fn parts(timestamp, timezone: string = "UTC") -> dict {
   return __calendar_parts(timestamp, timezone)
 }
 
-/** Return `{year, week}` for the timestamp's ISO week in `timezone`. */
+/**
+ * Return `{year, week}` for the timestamp's ISO week in `timezone`.
+ *
+ * @effects: []
+ * @allocation: heap
+ * @errors: []
+ * @api_stability: stable
+ * @example: iso_week(timestamp, timezone)
+ */
 pub fn iso_week(timestamp, timezone: string = "UTC") -> dict {
   let p = parts(timestamp, timezone)
   return {year: p.iso_week_year, week: p.iso_week}
 }
 
-/** Return the calendar quarter number, 1-4, in `timezone`. */
+/**
+ * Return the calendar quarter number, 1-4, in `timezone`.
+ *
+ * @effects: []
+ * @allocation: stack-only
+ * @errors: []
+ * @api_stability: stable
+ * @example: quarter(timestamp, timezone)
+ */
 pub fn quarter(timestamp, timezone: string = "UTC") -> int {
   return parts(timestamp, timezone).quarter
 }
@@ -22,12 +46,26 @@ pub fn quarter(timestamp, timezone: string = "UTC") -> int {
  *
  * `disambiguation` controls repeated fall-back times: `"earlier"`, `"later"`,
  * or `"reject"`. Spring-forward gaps always reject.
+ *
+ * @effects: []
+ * @allocation: heap
+ * @errors: []
+ * @api_stability: stable
+ * @example: local_datetime(parts, timezone, disambiguation)
  */
 pub fn local_datetime(parts: dict, timezone: string = "UTC", disambiguation: string = "earlier") {
   return __calendar_from_local(parts, timezone, disambiguation)
 }
 
-/** Add calendar units in a timezone, preserving local clock fields. */
+/**
+ * Add calendar units in a timezone, preserving local clock fields.
+ *
+ * @effects: []
+ * @allocation: heap
+ * @errors: []
+ * @api_stability: stable
+ * @example: add_calendar_units(timestamp, amount, unit, timezone, disambiguation)
+ */
 pub fn add_calendar_units(
   timestamp,
   amount: int,
@@ -38,87 +76,223 @@ pub fn add_calendar_units(
   return __calendar_add(timestamp, amount, unit, timezone, disambiguation)
 }
 
-/** Return the start or end timestamp for a civil calendar unit. */
+/**
+ * Return the start or end timestamp for a civil calendar unit.
+ *
+ * @effects: []
+ * @allocation: heap
+ * @errors: []
+ * @api_stability: stable
+ * @example: boundary(timestamp, unit, edge, timezone)
+ */
 pub fn boundary(timestamp, unit: string, edge: string = "start", timezone: string = "UTC") {
   return __calendar_boundary(timestamp, unit, edge, timezone)
 }
 
-/** Return the local start of the day that contains `timestamp`. */
+/**
+ * Return the local start of the day that contains `timestamp`.
+ *
+ * @effects: []
+ * @allocation: heap
+ * @errors: []
+ * @api_stability: stable
+ * @example: start_of_day(timestamp, timezone)
+ */
 pub fn start_of_day(timestamp, timezone: string = "UTC") {
   return boundary(timestamp, "day", "start", timezone)
 }
 
-/** Return the local end of the day that contains `timestamp`. */
+/**
+ * Return the local end of the day that contains `timestamp`.
+ *
+ * @effects: []
+ * @allocation: heap
+ * @errors: []
+ * @api_stability: stable
+ * @example: end_of_day(timestamp, timezone)
+ */
 pub fn end_of_day(timestamp, timezone: string = "UTC") {
   return boundary(timestamp, "day", "end", timezone)
 }
 
-/** Return the Monday-local start of the week that contains `timestamp`. */
+/**
+ * Return the Monday-local start of the week that contains `timestamp`.
+ *
+ * @effects: []
+ * @allocation: heap
+ * @errors: []
+ * @api_stability: stable
+ * @example: start_of_week(timestamp, timezone)
+ */
 pub fn start_of_week(timestamp, timezone: string = "UTC") {
   return boundary(timestamp, "week", "start", timezone)
 }
 
-/** Return the Sunday-local end of the week that contains `timestamp`. */
+/**
+ * Return the Sunday-local end of the week that contains `timestamp`.
+ *
+ * @effects: []
+ * @allocation: heap
+ * @errors: []
+ * @api_stability: stable
+ * @example: end_of_week(timestamp, timezone)
+ */
 pub fn end_of_week(timestamp, timezone: string = "UTC") {
   return boundary(timestamp, "week", "end", timezone)
 }
 
-/** Return the local start of the month that contains `timestamp`. */
+/**
+ * Return the local start of the month that contains `timestamp`.
+ *
+ * @effects: []
+ * @allocation: heap
+ * @errors: []
+ * @api_stability: stable
+ * @example: start_of_month(timestamp, timezone)
+ */
 pub fn start_of_month(timestamp, timezone: string = "UTC") {
   return boundary(timestamp, "month", "start", timezone)
 }
 
-/** Return the local end of the month that contains `timestamp`. */
+/**
+ * Return the local end of the month that contains `timestamp`.
+ *
+ * @effects: []
+ * @allocation: heap
+ * @errors: []
+ * @api_stability: stable
+ * @example: end_of_month(timestamp, timezone)
+ */
 pub fn end_of_month(timestamp, timezone: string = "UTC") {
   return boundary(timestamp, "month", "end", timezone)
 }
 
-/** Return the local start of the quarter that contains `timestamp`. */
+/**
+ * Return the local start of the quarter that contains `timestamp`.
+ *
+ * @effects: []
+ * @allocation: heap
+ * @errors: []
+ * @api_stability: stable
+ * @example: start_of_quarter(timestamp, timezone)
+ */
 pub fn start_of_quarter(timestamp, timezone: string = "UTC") {
   return boundary(timestamp, "quarter", "start", timezone)
 }
 
-/** Return the local end of the quarter that contains `timestamp`. */
+/**
+ * Return the local end of the quarter that contains `timestamp`.
+ *
+ * @effects: []
+ * @allocation: heap
+ * @errors: []
+ * @api_stability: stable
+ * @example: end_of_quarter(timestamp, timezone)
+ */
 pub fn end_of_quarter(timestamp, timezone: string = "UTC") {
   return boundary(timestamp, "quarter", "end", timezone)
 }
 
-/** Return the local start of the year that contains `timestamp`. */
+/**
+ * Return the local start of the year that contains `timestamp`.
+ *
+ * @effects: []
+ * @allocation: heap
+ * @errors: []
+ * @api_stability: stable
+ * @example: start_of_year(timestamp, timezone)
+ */
 pub fn start_of_year(timestamp, timezone: string = "UTC") {
   return boundary(timestamp, "year", "start", timezone)
 }
 
-/** Return the local end of the year that contains `timestamp`. */
+/**
+ * Return the local end of the year that contains `timestamp`.
+ *
+ * @effects: []
+ * @allocation: heap
+ * @errors: []
+ * @api_stability: stable
+ * @example: end_of_year(timestamp, timezone)
+ */
 pub fn end_of_year(timestamp, timezone: string = "UTC") {
   return boundary(timestamp, "year", "end", timezone)
 }
 
-/** Return local calendar-unit ticks in the half-open range `[start, end)`. */
+/**
+ * Return local calendar-unit ticks in the half-open range `[start, end)`.
+ *
+ * @effects: []
+ * @allocation: heap
+ * @errors: []
+ * @api_stability: stable
+ * @example: date_range(start, end, unit, timezone, options)
+ */
 pub fn date_range(start, end, unit: string = "day", timezone: string = "UTC", options: dict = {}) -> list {
   return __calendar_date_range(start, end, unit, timezone, options)
 }
 
-/** Return the next matching weekday. Weekdays are ISO 1-7 or names. */
+/**
+ * Return the next matching weekday. Weekdays are ISO 1-7 or names.
+ *
+ * @effects: []
+ * @allocation: heap
+ * @errors: []
+ * @api_stability: stable
+ * @example: next_weekday(timestamp, weekday, timezone, include_today)
+ */
 pub fn next_weekday(timestamp, weekday, timezone: string = "UTC", include_today: bool = false) {
   return __calendar_next_weekday(timestamp, weekday, "next", timezone, include_today)
 }
 
-/** Return the previous matching weekday. Weekdays are ISO 1-7 or names. */
+/**
+ * Return the previous matching weekday. Weekdays are ISO 1-7 or names.
+ *
+ * @effects: []
+ * @allocation: heap
+ * @errors: []
+ * @api_stability: stable
+ * @example: previous_weekday(timestamp, weekday, timezone, include_today)
+ */
 pub fn previous_weekday(timestamp, weekday, timezone: string = "UTC", include_today: bool = false) {
   return __calendar_next_weekday(timestamp, weekday, "previous", timezone, include_today)
 }
 
-/** Return supported country metadata records. */
+/**
+ * Return supported country metadata records.
+ *
+ * @effects: []
+ * @allocation: heap
+ * @errors: []
+ * @api_stability: stable
+ * @example: countries()
+ */
 pub fn countries() -> list {
   return __calendar_countries()
 }
 
-/** Return country metadata for an ISO alpha-2 code, or nil when unsupported. */
+/**
+ * Return country metadata for an ISO alpha-2 code, or nil when unsupported.
+ *
+ * @effects: []
+ * @allocation: heap
+ * @errors: []
+ * @api_stability: stable
+ * @example: country_info(code)
+ */
 pub fn country_info(code: string) {
   return __calendar_country_info(code)
 }
 
-/** Return known IANA timezones for a supported country code, or nil. */
+/**
+ * Return known IANA timezones for a supported country code, or nil.
+ *
+ * @effects: []
+ * @allocation: heap
+ * @errors: []
+ * @api_stability: stable
+ * @example: country_timezones(code)
+ */
 pub fn country_timezones(code: string) {
   let info = country_info(code)
   if info == nil {
@@ -130,6 +304,12 @@ pub fn country_timezones(code: string) {
 /**
  * Return the only safe default timezone for a country, or nil when the country
  * is unsupported or has multiple plausible timezones.
+ *
+ * @effects: []
+ * @allocation: heap
+ * @errors: []
+ * @api_stability: stable
+ * @example: default_timezone_for_country(code)
  */
 pub fn default_timezone_for_country(code: string) {
   let info = country_info(code)
@@ -139,33 +319,81 @@ pub fn default_timezone_for_country(code: string) {
   return info.default_timezone
 }
 
-/** Return explicit v1 holiday calendars. */
+/**
+ * Return explicit v1 holiday calendars.
+ *
+ * @effects: []
+ * @allocation: heap
+ * @errors: []
+ * @api_stability: stable
+ * @example: supported_holiday_calendars()
+ */
 pub fn supported_holiday_calendars() -> list {
   return __calendar_supported_holiday_calendars()
 }
 
-/** Return observed holidays for `calendar` in `year`. */
+/**
+ * Return observed holidays for `calendar` in `year`.
+ *
+ * @effects: []
+ * @allocation: heap
+ * @errors: []
+ * @api_stability: stable
+ * @example: holidays(year, calendar)
+ */
 pub fn holidays(year: int, calendar: string = "US-FEDERAL") -> list {
   return __calendar_holidays(calendar, year)
 }
 
-/** Return true when `timestamp` falls on a supported or custom holiday. */
+/**
+ * Return true when `timestamp` falls on a supported or custom holiday.
+ *
+ * @effects: []
+ * @allocation: stack-only
+ * @errors: []
+ * @api_stability: stable
+ * @example: is_holiday(timestamp, calendar, timezone)
+ */
 pub fn is_holiday(timestamp, calendar = "US-FEDERAL", timezone = nil) -> bool {
   return __calendar_is_holiday(timestamp, calendar, timezone)
 }
 
-/** Return true for Saturday or Sunday in `timezone`. */
+/**
+ * Return true for Saturday or Sunday in `timezone`.
+ *
+ * @effects: []
+ * @allocation: stack-only
+ * @errors: []
+ * @api_stability: stable
+ * @example: is_weekend(timestamp, timezone)
+ */
 pub fn is_weekend(timestamp, timezone: string = "UTC") -> bool {
   let weekday = parts(timestamp, timezone).iso_weekday
   return weekday == 6 || weekday == 7
 }
 
-/** Return true when the local date is neither weekend nor holiday. */
+/**
+ * Return true when the local date is neither weekend nor holiday.
+ *
+ * @effects: []
+ * @allocation: stack-only
+ * @errors: []
+ * @api_stability: stable
+ * @example: is_business_day(timestamp, calendar, timezone)
+ */
 pub fn is_business_day(timestamp, calendar = "US-FEDERAL", timezone = nil) -> bool {
   return __calendar_is_business_day(timestamp, calendar, timezone)
 }
 
-/** Return the next business day, preserving the local time. */
+/**
+ * Return the next business day, preserving the local time.
+ *
+ * @effects: []
+ * @allocation: heap
+ * @errors: []
+ * @api_stability: stable
+ * @example: next_business_day(timestamp, calendar, timezone, include_today)
+ */
 pub fn next_business_day(
   timestamp,
   calendar = "US-FEDERAL",
@@ -175,22 +403,54 @@ pub fn next_business_day(
   return __calendar_next_business_day(timestamp, calendar, timezone, include_today)
 }
 
-/** Add signed business days, skipping weekends and holidays. */
+/**
+ * Add signed business days, skipping weekends and holidays.
+ *
+ * @effects: []
+ * @allocation: heap
+ * @errors: []
+ * @api_stability: stable
+ * @example: add_business_days(timestamp, days, calendar, timezone)
+ */
 pub fn add_business_days(timestamp, days: int, calendar = "US-FEDERAL", timezone = nil) {
   return __calendar_add_business_days(timestamp, days, calendar, timezone)
 }
 
-/** Count business days in the half-open local date range `[start, end)`. */
+/**
+ * Count business days in the half-open local date range `[start, end)`.
+ *
+ * @effects: []
+ * @allocation: stack-only
+ * @errors: []
+ * @api_stability: stable
+ * @example: business_days_between(start, end, calendar, timezone)
+ */
 pub fn business_days_between(start, end, calendar = "US-FEDERAL", timezone = nil) -> int {
   return __calendar_business_days_between(start, end, calendar, timezone)
 }
 
-/** Return a business-hours envelope for the timestamp. */
+/**
+ * Return a business-hours envelope for the timestamp.
+ *
+ * @effects: []
+ * @allocation: heap
+ * @errors: []
+ * @api_stability: stable
+ * @example: business_window(timestamp, calendar, options)
+ */
 pub fn business_window(timestamp, calendar = "US-FEDERAL", options: dict = {}) -> dict {
   return __calendar_business_window(timestamp, calendar, options)
 }
 
-/** Return true when the timestamp is inside the configured business window. */
+/**
+ * Return true when the timestamp is inside the configured business window.
+ *
+ * @effects: []
+ * @allocation: stack-only
+ * @errors: []
+ * @api_stability: stable
+ * @example: is_business_time(timestamp, calendar, options)
+ */
 pub fn is_business_time(timestamp, calendar = "US-FEDERAL", options: dict = {}) -> bool {
   return business_window(timestamp, calendar, options).inside
 }

@@ -115,7 +115,15 @@ fn __agent_turn_iteration_summaries(events) {
   return out
 }
 
-/** agent_turn. */
+/**
+ * agent_turn.
+ *
+ * @effects: [agent]
+ * @allocation: heap
+ * @errors: []
+ * @api_stability: experimental
+ * @example: agent_turn(prompt, options)
+ */
 pub fn agent_turn(prompt, options = nil) {
   let opts = options ?? {}
   let loop_opts = __agent_turn_options(opts)

@@ -41,7 +41,7 @@ Repairs are tagged with a six-level safety class so `harn fix --apply --safety <
 | [`CAP`](#cap--capabilities) | Capabilities | 7 |
 | [`LLM`](#llm--llm-calls) | LLM calls | 5 |
 | [`ORC`](#orc--orchestration-constructs) | Orchestration constructs | 10 |
-| [`STD`](#std--stdlib-usage) | Stdlib usage | 3 |
+| [`STD`](#std--stdlib-usage) | Stdlib usage | 4 |
 | [`PRM`](#prm--prompt-templates) | Prompt templates | 7 |
 | [`MOD`](#mod--modules-and-exports) | Modules and exports | 6 |
 | [`LNT`](#lnt--lint-rules) | Lint rules | 53 |
@@ -153,6 +153,7 @@ Repairs are tagged with a six-level safety class so `harn fix --apply --safety <
 | [`HARN-STD-001`](#harn-std-001) | stdlib symbol has been renamed or deprecated | `stdlib/migrate-renamed` | `scope-local` |
 | [`HARN-STD-002`](#harn-std-002) | stdlib call is invalid | — | — |
 | [`HARN-STD-003`](#harn-std-003) | builtin call has invalid arity | — | — |
+| [`HARN-STD-101`](#harn-std-101) | public stdlib function is missing declared metadata | `doc/add-stdlib-metadata` | `behavior-preserving` |
 
 ## PRM — Prompt templates
 
@@ -2386,6 +2387,66 @@ Specifically: builtin call has invalid arity.
 #### How to fix
 
 - Switch to the supported / renamed stdlib API listed in the diagnostic help text.
+
+#### Stability
+
+This code is stable. Its identifier, category, and meaning will not change
+without a deprecation cycle. Cross-language tooling and IDE integrations can
+dispatch on it directly.
+
+### `HARN-STD-101`
+
+**Category:** `STD` (Stdlib usage) &nbsp;·&nbsp; **API stability:** `stable`
+
+public stdlib function is missing declared metadata
+
+- **Repair:** `doc/add-stdlib-metadata` &nbsp;·&nbsp; **Safety:** `behavior-preserving`
+- Add `@effects`, `@allocation`, `@errors`, `@api_stability`, and `@example` fields to the stdlib function's doc block
+
+**Category:** Stdlib (STD)
+**Variant:** `Code::LintMissingStdlibMetadata`
+
+#### What it means
+
+Every public stdlib function ships with a declarative metadata block above
+its `pub fn` declaration so that `harn graph --json`, the LSP hover, generated
+docs, and downstream agents can read a single source of truth for the
+function's runtime contract.
+
+The required fields are:
+
+| Field            | Purpose                                                                                   |
+|------------------|-------------------------------------------------------------------------------------------|
+| `@effects`       | Capabilities the function may touch (e.g. `fs.read`, `stdio.write`, `llm.call`). `[]` means pure. |
+| `@allocation`    | Allocation profile — typically `stack-only` or `heap`.                                    |
+| `@errors`        | Error variants the function may surface. `[]` means infallible.                           |
+| `@api_stability` | Stability promise — `stable`, `experimental`, or `deprecated`.                            |
+| `@example`       | Minimal usage example (verbatim Harn).                                                    |
+
+The lint warns when a `pub fn` declared inside an embedded stdlib module
+(`crates/harn-stdlib/src/stdlib/**/*.harn`) is missing one or more of these
+fields from the `/** ... */` HarnDoc block immediately above it.
+
+#### How to fix
+
+Add the missing fields to the function's HarnDoc block:
+
+```harn,ignore
+/**
+ * Render the project README.
+ *
+ * @effects: [fs.read, fs.write]
+ * @allocation: heap
+ * @errors: [FileNotFound, PermissionDenied]
+ * @api_stability: stable
+ * @example: render_readme("README.md")
+ */
+pub fn render_readme(path: string) -> Result<string, FsError> { ... }
+```
+
+The lint considers `@effects: []` and `@errors: []` valid declarations — they
+explicitly assert "no effects" and "infallible" respectively, which is what
+agents need to read out of the graph.
 
 #### Stability
 

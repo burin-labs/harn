@@ -65,8 +65,19 @@ pub(super) fn lint_with_require_header(
     let options = LintOptions {
         file_path: path,
         require_file_header: true,
-        complexity_threshold: None,
-        persona_step_allowlist: &[],
+        ..Default::default()
+    };
+    lint_with_options(&program, &[], Some(source), &HashSet::new(), &options)
+}
+
+pub(super) fn lint_with_stdlib_metadata(source: &str) -> Vec<LintDiagnostic> {
+    let mut lexer = Lexer::new(source);
+    let tokens = lexer.tokenize().unwrap();
+    let mut parser = Parser::new(tokens);
+    let program = parser.parse().unwrap();
+    let options = LintOptions {
+        require_stdlib_metadata: true,
+        ..Default::default()
     };
     lint_with_options(&program, &[], Some(source), &HashSet::new(), &options)
 }
@@ -97,6 +108,7 @@ mod persona_steps;
 mod redundant_nil_ternary;
 mod secret_scan_rules;
 mod shadowing;
+mod stdlib_metadata;
 mod unnecessary_cast;
 mod unnecessary_parentheses;
 mod unreachable;

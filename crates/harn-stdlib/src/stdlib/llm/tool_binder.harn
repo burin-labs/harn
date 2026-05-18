@@ -300,6 +300,12 @@ fn __binder_passthrough(envelope, next, stripped_args, intent, ctx, skip_reason)
  *   temperature:                 float   (default 0.0)
  *   max_tokens:                  int     (default 256)
  *   binder_fn:                   fn      (test hook; defaults to llm_call)
+ *
+ * @effects: []
+ * @allocation: heap
+ * @errors: []
+ * @api_stability: stable
+ * @example: with_natural_language_executor(opts)
  */
 pub fn with_natural_language_executor(opts) {
   let ctx = __binder_validate_opts(__binder_dict(opts))

@@ -118,7 +118,15 @@ fn __compaction_enabled(opts) {
   return true
 }
 
-/** agent_autocompact_if_needed. */
+/**
+ * agent_autocompact_if_needed.
+ *
+ * @effects: [host]
+ * @allocation: heap
+ * @errors: []
+ * @api_stability: experimental
+ * @example: agent_autocompact_if_needed(session, opts)
+ */
 pub fn agent_autocompact_if_needed(session, opts) {
   if !__compaction_enabled(opts) {
     return nil

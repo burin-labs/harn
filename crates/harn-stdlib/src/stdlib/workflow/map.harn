@@ -209,7 +209,15 @@ fn __map_output_kind(node) {
   return "artifact"
 }
 
-/** workflow_map_stage_plan. */
+/**
+ * workflow_map_stage_plan.
+ *
+ * @effects: []
+ * @allocation: heap
+ * @errors: []
+ * @api_stability: experimental
+ * @example: workflow_map_stage_plan(config)
+ */
 pub fn workflow_map_stage_plan(config = nil) {
   let node = config?.node ?? {}
   let output_kind = __map_output_kind(node)
@@ -231,7 +239,15 @@ pub fn workflow_map_stage_plan(config = nil) {
   }
 }
 
-/** workflow_map_work_items. */
+/**
+ * workflow_map_work_items.
+ *
+ * @effects: []
+ * @allocation: heap
+ * @errors: []
+ * @api_stability: experimental
+ * @example: workflow_map_work_items(config)
+ */
 pub fn workflow_map_work_items(config = nil) {
   let node = config?.node ?? {}
   let map_policy = node?.map_policy ?? {}
@@ -256,7 +272,15 @@ pub fn workflow_map_work_items(config = nil) {
   return {items: __map_artifact_items(inputs), selected_artifact_ids: __map_artifact_ids(inputs)}
 }
 
-/** workflow_map_execution_plan. */
+/**
+ * workflow_map_execution_plan.
+ *
+ * @effects: []
+ * @allocation: heap
+ * @errors: []
+ * @api_stability: experimental
+ * @example: workflow_map_execution_plan(config)
+ */
 pub fn workflow_map_execution_plan(config = nil) {
   let node = config?.node ?? {}
   let stage_plan = workflow_map_stage_plan({node: node})
@@ -279,7 +303,15 @@ pub fn workflow_map_execution_plan(config = nil) {
   }
 }
 
-/** workflow_map_join_target. */
+/**
+ * workflow_map_join_target.
+ *
+ * @effects: []
+ * @allocation: heap
+ * @errors: []
+ * @api_stability: experimental
+ * @example: workflow_map_join_target(config)
+ */
 pub fn workflow_map_join_target(config = nil) {
   let total = max(__map_int(config?.total, 0), 0)
   if total == 0 {
@@ -296,7 +328,15 @@ pub fn workflow_map_join_target(config = nil) {
   return total
 }
 
-/** workflow_map_finalize. */
+/**
+ * workflow_map_finalize.
+ *
+ * @effects: []
+ * @allocation: heap
+ * @errors: []
+ * @api_stability: experimental
+ * @example: workflow_map_finalize(config)
+ */
 pub fn workflow_map_finalize(config = nil) {
   let strategy = __map_string(config?.strategy, "all")
   let total_items = max(__map_int(config?.total_items, 0), 0)
@@ -327,7 +367,15 @@ pub fn workflow_map_finalize(config = nil) {
   }
 }
 
-/** workflow_execute_map_stage. */
+/**
+ * workflow_execute_map_stage.
+ *
+ * @effects: [host]
+ * @allocation: heap
+ * @errors: []
+ * @api_stability: experimental
+ * @example: workflow_execute_map_stage(node_id, node, artifacts, opts)
+ */
 pub fn workflow_execute_map_stage(node_id, node, artifacts = nil, opts = nil) {
   let plan = __host_workflow_map_plan(node, __map_list(artifacts))
   let branches = parallel each plan.items with { max_concurrent: plan.max_concurrent } { item ->

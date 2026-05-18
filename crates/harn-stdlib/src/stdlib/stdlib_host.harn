@@ -1,9 +1,25 @@
-/** host_tools. */
+/**
+ * host_tools.
+ *
+ * @effects: []
+ * @allocation: heap
+ * @errors: []
+ * @api_stability: stable
+ * @example: host_tools()
+ */
 pub fn host_tools() {
   return host_tool_list()
 }
 
-/** host_tool_lookup. */
+/**
+ * host_tool_lookup.
+ *
+ * @effects: []
+ * @allocation: heap
+ * @errors: []
+ * @api_stability: stable
+ * @example: host_tool_lookup(name)
+ */
 pub fn host_tool_lookup(name: string) {
   for entry in host_tool_list() {
     if entry?.name == name {
@@ -13,7 +29,15 @@ pub fn host_tool_lookup(name: string) {
   return nil
 }
 
-/** host_tool_available. */
+/**
+ * host_tool_available.
+ *
+ * @effects: []
+ * @allocation: stack-only
+ * @errors: []
+ * @api_stability: stable
+ * @example: host_tool_available(name)
+ */
 pub fn host_tool_available(name: string) -> bool {
   return host_tool_lookup(name) != nil
 }

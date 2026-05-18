@@ -32,17 +32,41 @@ fn __gha_file_path(path, fallback) {
   return nil
 }
 
-/** Escape text for the data portion of a GitHub Actions workflow command. */
+/**
+ * Escape text for the data portion of a GitHub Actions workflow command.
+ *
+ * @effects: []
+ * @allocation: heap
+ * @errors: []
+ * @api_stability: stable
+ * @example: gha_escape_data(value)
+ */
 pub fn gha_escape_data(value) -> string {
   return __gha_escape_data(value)
 }
 
-/** Escape text for a GitHub Actions workflow-command property. */
+/**
+ * Escape text for a GitHub Actions workflow-command property.
+ *
+ * @effects: []
+ * @allocation: heap
+ * @errors: []
+ * @api_stability: stable
+ * @example: gha_escape_property(value)
+ */
 pub fn gha_escape_property(value) -> string {
   return __gha_escape_property(value)
 }
 
-/** Build a workflow annotation line (`::warning ...::message`). */
+/**
+ * Build a workflow annotation line (`::warning ...::message`).
+ *
+ * @effects: []
+ * @allocation: heap
+ * @errors: []
+ * @api_stability: stable
+ * @example: gha_annotation(kind, message, options)
+ */
 pub fn gha_annotation(kind: string, message: string, options: GhaAnnotationOptions = {}) -> string {
   let opts = options ?? {}
   var props = []
@@ -67,28 +91,68 @@ pub fn gha_annotation(kind: string, message: string, options: GhaAnnotationOptio
   return "::" + annotation_kind + suffix + "::" + __gha_escape_data(message)
 }
 
-/** Print a GitHub Actions notice. */
+/**
+ * Print a GitHub Actions notice.
+ *
+ * @effects: [stdio.write]
+ * @allocation: heap
+ * @errors: []
+ * @api_stability: stable
+ * @example: gha_notice(message, options)
+ */
 pub fn gha_notice(message: string, options: GhaAnnotationOptions = {}) {
   println(gha_annotation("notice", message, options))
 }
 
-/** Print a GitHub Actions warning. */
+/**
+ * Print a GitHub Actions warning.
+ *
+ * @effects: [stdio.write]
+ * @allocation: heap
+ * @errors: []
+ * @api_stability: stable
+ * @example: gha_warning(message, options)
+ */
 pub fn gha_warning(message: string, options: GhaAnnotationOptions = {}) {
   println(gha_annotation("warning", message, options))
 }
 
-/** Print a GitHub Actions error annotation. */
+/**
+ * Print a GitHub Actions error annotation.
+ *
+ * @effects: [stdio.write]
+ * @allocation: heap
+ * @errors: []
+ * @api_stability: stable
+ * @example: gha_error(message, options)
+ */
 pub fn gha_error(message: string, options: GhaAnnotationOptions = {}) {
   println(gha_annotation("error", message, options))
 }
 
-/** Build the multiline-safe entry used by `$GITHUB_OUTPUT` and `$GITHUB_ENV`. */
+/**
+ * Build the multiline-safe entry used by `$GITHUB_OUTPUT` and `$GITHUB_ENV`.
+ *
+ * @effects: []
+ * @allocation: heap
+ * @errors: []
+ * @api_stability: stable
+ * @example: gha_env_block(name, value, delimiter)
+ */
 pub fn gha_env_block(name: string, value, delimiter: string? = nil) -> string {
   let delim = delimiter ?? ("harn_" + uuid_v7())
   return name + "<<" + delim + "\n" + to_string(value ?? "") + "\n" + delim + "\n"
 }
 
-/** Append an output value to `$GITHUB_OUTPUT`, or to `path` when supplied. */
+/**
+ * Append an output value to `$GITHUB_OUTPUT`, or to `path` when supplied.
+ *
+ * @effects: []
+ * @allocation: stack-only
+ * @errors: []
+ * @api_stability: stable
+ * @example: gha_write_output(name, value, path)
+ */
 pub fn gha_write_output(name: string, value, path: string? = nil) -> bool {
   let target = __gha_file_path(path, env("GITHUB_OUTPUT"))
   if target == nil {
@@ -98,7 +162,15 @@ pub fn gha_write_output(name: string, value, path: string? = nil) -> bool {
   return true
 }
 
-/** Append an environment value to `$GITHUB_ENV`, or to `path` when supplied. */
+/**
+ * Append an environment value to `$GITHUB_ENV`, or to `path` when supplied.
+ *
+ * @effects: []
+ * @allocation: stack-only
+ * @errors: []
+ * @api_stability: stable
+ * @example: gha_write_env(name, value, path)
+ */
 pub fn gha_write_env(name: string, value, path: string? = nil) -> bool {
   let target = __gha_file_path(path, env("GITHUB_ENV"))
   if target == nil {
@@ -108,7 +180,15 @@ pub fn gha_write_env(name: string, value, path: string? = nil) -> bool {
   return true
 }
 
-/** Append Markdown to `$GITHUB_STEP_SUMMARY`, or to `path` when supplied. */
+/**
+ * Append Markdown to `$GITHUB_STEP_SUMMARY`, or to `path` when supplied.
+ *
+ * @effects: []
+ * @allocation: stack-only
+ * @errors: []
+ * @api_stability: stable
+ * @example: gha_append_summary(markdown, path)
+ */
 pub fn gha_append_summary(markdown: string, path: string? = nil) -> bool {
   let target = __gha_file_path(path, env("GITHUB_STEP_SUMMARY"))
   if target == nil {

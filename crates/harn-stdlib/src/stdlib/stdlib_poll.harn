@@ -45,6 +45,12 @@ fn __poll_options(options) {
  * nil once `timeout_ms` (default 30 s) elapses or `max_attempts` (when set
  * and > 0) is exhausted. The first probe runs immediately unless
  * `initial_delay_ms` is positive.
+ *
+ * @effects: []
+ * @allocation: heap
+ * @errors: []
+ * @api_stability: stable
+ * @example: poll_until(check, options)
  */
 pub fn poll_until(check, options: PollOptions = {}) -> any {
   let resolved = __poll_options(options)
@@ -79,6 +85,12 @@ pub fn poll_until(check, options: PollOptions = {}) -> any {
  * When `extractor` is nil, the probe value itself is treated as the
  * status — pass a closure like `{ row -> row?.status }` to drill into a
  * dict.
+ *
+ * @effects: []
+ * @allocation: heap
+ * @errors: []
+ * @api_stability: stable
+ * @example: wait_for_status(probe, terminal, options, extractor)
  */
 pub fn wait_for_status(probe, terminal: list<string>, options: PollOptions = {}, extractor = nil) -> any {
   let resolved = __poll_options(options)
@@ -161,6 +173,12 @@ fn __backoff_delay(base_ms: int, attempt: int, multiplier: float, cap_ms: int) -
  * non-success retries after `base_ms * multiplier^attempt` ms, capped at
  * `cap_ms`. Returns a structured RetryReport so callers can log or
  * propagate without re-wrapping.
+ *
+ * @effects: []
+ * @allocation: heap
+ * @errors: []
+ * @api_stability: stable
+ * @example: retry_with_result(action, options)
  */
 pub fn retry_with_result(action, options: RetryOptions = {}) -> RetryReport {
   let resolved = __retry_options(options)

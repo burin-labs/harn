@@ -85,7 +85,15 @@ pub fn plan(entries) {
   return {sessionUpdate: "plan", entries: entries}
 }
 
-/** harn_plan builds an ACP plan update from a harn.plan.v1 artifact. */
+/**
+ * harn_plan builds an ACP plan update from a harn.plan.v1 artifact.
+ *
+ * @effects: []
+ * @allocation: heap
+ * @errors: []
+ * @api_stability: stable
+ * @example: harn_plan(plan_artifact)
+ */
 pub fn harn_plan(plan_artifact) {
   return {sessionUpdate: "plan", entries: plan_entries(plan_artifact), harnPlan: plan_artifact}
 }

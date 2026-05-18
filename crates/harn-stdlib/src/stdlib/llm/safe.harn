@@ -8,6 +8,12 @@ import { agent_session_messages } from "std/agent/state"
  * Try-wrap llm_call into the canonical envelope shape:
  * {ok: true, value: <llm dict>} on success
  * {ok: false, status: <"budget_exhausted" | "exception">, error?} on error.
+ *
+ * @effects: [llm.call]
+ * @allocation: heap
+ * @errors: []
+ * @api_stability: stable
+ * @example: safe_call(prompt, system, options)
  */
 pub fn safe_call(prompt, system, options) {
   let result = try {
@@ -28,7 +34,15 @@ pub fn safe_call(prompt, system, options) {
   return {ok: false, status: "exception", error: err}
 }
 
-/** Direct case-insensitive single-key lookup on a dict. Returns nil on miss. */
+/**
+ * Direct case-insensitive single-key lookup on a dict. Returns nil on miss.
+ *
+ * @effects: []
+ * @allocation: heap
+ * @errors: []
+ * @api_stability: stable
+ * @example: dict_get_ci(d, key)
+ */
 pub fn dict_get_ci(d, key) {
   if type_of(d) != "dict" {
     return nil
@@ -62,6 +76,12 @@ fn __value_is_present(value) {
 /**
  * Case-insensitive top-level dict lookup. Tries each name in order; returns
  * the first non-nil non-empty value, else default. Top-level keys only.
+ *
+ * @effects: []
+ * @allocation: heap
+ * @errors: []
+ * @api_stability: stable
+ * @example: safe_field(envelope, names, default)
  */
 pub fn safe_field(envelope, names, default) {
   if type_of(envelope) != "dict" {
@@ -82,6 +102,12 @@ pub fn safe_field(envelope, names, default) {
 /**
  * Recursively normalize all dict keys to lowercase. Lists pass through
  * unchanged, but dicts within lists are recursed into. Idempotent.
+ *
+ * @effects: []
+ * @allocation: heap
+ * @errors: []
+ * @api_stability: stable
+ * @example: with_case_insensitive_keys(envelope)
  */
 pub fn with_case_insensitive_keys(envelope) {
   if type_of(envelope) == "dict" {
@@ -105,6 +131,12 @@ pub fn with_case_insensitive_keys(envelope) {
 /**
  * Merges defaults UNDER the envelope's data field. The envelope wins per-key.
  * If envelope.ok is false or envelope is nil, returns {ok: false, ...defaults}.
+ *
+ * @effects: []
+ * @allocation: heap
+ * @errors: []
+ * @api_stability: stable
+ * @example: structured_envelope_or_default(envelope, defaults)
  */
 pub fn structured_envelope_or_default(envelope, defaults) {
   let base = if type_of(defaults) == "dict" {
@@ -154,6 +186,12 @@ fn __session_tool_names(messages) {
  * callable from non-agent_loop contexts (e.g. parallel_judge in ensemble).
  * Returns {session_id, task, stop_reason, text, visible_text, last_text,
  * transcript, all_tools_used, successful_tools_used, iteration}.
+ *
+ * @effects: []
+ * @allocation: heap
+ * @errors: []
+ * @api_stability: stable
+ * @example: judge_payload(session, _opts, stop_reason, text, iteration)
  */
 pub fn judge_payload(session, _opts, stop_reason, text, iteration) {
   let session_id = session?.session_id ?? ""
@@ -188,6 +226,12 @@ pub fn judge_payload(session, _opts, stop_reason, text, iteration) {
  * Normalize a judge verdict string. Lowercases, trims, optionally maps via
  * alias_groups (a list of {canonical, aliases}). Returns the canonical form
  * or the lowered/trimmed original.
+ *
+ * @effects: []
+ * @allocation: heap
+ * @errors: []
+ * @api_stability: stable
+ * @example: verdict_normalize(text, alias_groups)
  */
 pub fn verdict_normalize(text, alias_groups) {
   let normalized = lowercase(trim(to_string(text ?? "")))
@@ -208,6 +252,12 @@ pub fn verdict_normalize(text, alias_groups) {
  * Build a deterministic schema-retry nudge string from a JSON Schema.
  * Lists required fields (sorted), enforces lowercase keys, no markdown,
  * no fences. Optional hint string is appended.
+ *
+ * @effects: []
+ * @allocation: heap
+ * @errors: []
+ * @api_stability: stable
+ * @example: schema_retry_nudge_for(schema, hint)
  */
 pub fn schema_retry_nudge_for(schema, hint) {
   let required = if type_of(schema) == "dict" && type_of(schema?.required) == "list" {
@@ -264,6 +314,12 @@ pub fn schema_retry_nudge_for(schema, hint) {
  *   repair.max_tokens-> 600
  *   repair.temperature -> 0.0
  *   schema_retry_nudge -> derived via `schema_retry_nudge_for`
+ *
+ * @effects: []
+ * @allocation: heap
+ * @errors: []
+ * @api_stability: stable
+ * @example: safe_structured_call(prompt, schema, options)
  */
 pub fn safe_structured_call(prompt, schema, options) {
   let user_options = if type_of(options) == "dict" {

@@ -1,4 +1,12 @@
-/** Capture agent events for session_id while body runs. */
+/**
+ * Capture agent events for session_id while body runs.
+ *
+ * @effects: [host]
+ * @allocation: heap
+ * @errors: []
+ * @api_stability: experimental
+ * @example: agent_capture_events(session_id, body)
+ */
 pub fn agent_capture_events(session_id, body) {
   return __host_agent_capture_events(session_id, body)
 }

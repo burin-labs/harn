@@ -3,7 +3,10 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 use harn_ir::{CallClassification, Capability, LiteralValue, NodeSemantics};
-use harn_parser::{format_type, Node, SNode, TypeParam, TypedParam, Variance, WhereClause};
+use harn_parser::{
+    format_type, parse_stdlib_metadata, Node, SNode, StdlibMetadata, TypeParam, TypedParam,
+    Variance, WhereClause,
+};
 use serde::Serialize;
 
 use crate::cli::GraphArgs;
@@ -32,6 +35,12 @@ pub(crate) struct GraphSymbol {
     pub name: String,
     pub kind: String,
     pub signature: String,
+    /// Declared `@effects`/`@allocation`/`@errors`/`@api_stability`/
+    /// `@example` block parsed from the HarnDoc above the declaration.
+    /// Surfaced for `harn graph --json` consumers (docs, IDE hover,
+    /// agents); absent when the author has not annotated the function.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub metadata: Option<StdlibMetadata>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -155,7 +164,7 @@ fn describe_module(
     let program = harn_parser::parse_source(&source)
         .map_err(|error| format!("failed to parse {}: {error}", path.display()))?;
     let exports: BTreeSet<String> = module_graph.exports_for_module(path).into_iter().collect();
-    let public_symbols = public_symbols(&program, &exports);
+    let public_symbols = public_symbols(&program, &exports, &source);
     let usage = module_usage(&program);
 
     Ok(GraphModule {
@@ -373,10 +382,10 @@ fn effect_label(capability: Capability, operation: &str) -> String {
     }
 }
 
-fn public_symbols(program: &[SNode], exports: &BTreeSet<String>) -> Vec<GraphSymbol> {
+fn public_symbols(program: &[SNode], exports: &BTreeSet<String>, source: &str) -> Vec<GraphSymbol> {
     let mut symbols = Vec::new();
     for node in program {
-        collect_public_symbol(node, exports, &mut symbols);
+        collect_public_symbol(node, exports, source, &mut symbols);
     }
     symbols.sort_by(|left, right| {
         left.name
@@ -386,9 +395,14 @@ fn public_symbols(program: &[SNode], exports: &BTreeSet<String>) -> Vec<GraphSym
     symbols
 }
 
-fn collect_public_symbol(node: &SNode, exports: &BTreeSet<String>, out: &mut Vec<GraphSymbol>) {
+fn collect_public_symbol(
+    node: &SNode,
+    exports: &BTreeSet<String>,
+    source: &str,
+    out: &mut Vec<GraphSymbol>,
+) {
     match &node.node {
-        Node::AttributedDecl { inner, .. } => collect_public_symbol(inner, exports, out),
+        Node::AttributedDecl { inner, .. } => collect_public_symbol(inner, exports, source, out),
         Node::FnDecl {
             name,
             type_params,
@@ -408,6 +422,7 @@ fn collect_public_symbol(node: &SNode, exports: &BTreeSet<String>, out: &mut Vec
                 return_type.as_ref(),
                 where_clauses,
             ),
+            metadata: parse_stdlib_metadata(source, &node.span).filter(|meta| !meta.is_empty()),
         }),
         Node::ToolDecl {
             name,
@@ -418,6 +433,7 @@ fn collect_public_symbol(node: &SNode, exports: &BTreeSet<String>, out: &mut Vec
             name: name.clone(),
             kind: "tool".to_string(),
             signature: callable_signature("tool", name, &[], params, return_type.as_ref(), &[]),
+            metadata: parse_stdlib_metadata(source, &node.span).filter(|meta| !meta.is_empty()),
         }),
         Node::Pipeline {
             name,
@@ -436,6 +452,7 @@ fn collect_public_symbol(node: &SNode, exports: &BTreeSet<String>, out: &mut Vec
                     .map(|ty| format!(" -> {}", format_type(ty)))
                     .unwrap_or_default()
             ),
+            metadata: None,
         }),
         Node::StructDecl {
             name, type_params, ..
@@ -443,6 +460,7 @@ fn collect_public_symbol(node: &SNode, exports: &BTreeSet<String>, out: &mut Vec
             name: name.clone(),
             kind: "struct".to_string(),
             signature: format!("struct {}{}", name, format_type_params(type_params)),
+            metadata: None,
         }),
         Node::EnumDecl {
             name, type_params, ..
@@ -450,6 +468,7 @@ fn collect_public_symbol(node: &SNode, exports: &BTreeSet<String>, out: &mut Vec
             name: name.clone(),
             kind: "enum".to_string(),
             signature: format!("enum {}{}", name, format_type_params(type_params)),
+            metadata: None,
         }),
         Node::InterfaceDecl {
             name, type_params, ..
@@ -457,6 +476,7 @@ fn collect_public_symbol(node: &SNode, exports: &BTreeSet<String>, out: &mut Vec
             name: name.clone(),
             kind: "interface".to_string(),
             signature: format!("interface {}{}", name, format_type_params(type_params)),
+            metadata: None,
         }),
         Node::TypeDecl {
             name,
@@ -471,11 +491,13 @@ fn collect_public_symbol(node: &SNode, exports: &BTreeSet<String>, out: &mut Vec
                 format_type_params(type_params),
                 format_type(type_expr)
             ),
+            metadata: None,
         }),
         Node::SkillDecl { name, .. } if exports.contains(name) => out.push(GraphSymbol {
             name: name.clone(),
             kind: "skill".to_string(),
             signature: format!("skill {name}"),
+            metadata: None,
         }),
         _ => {}
     }

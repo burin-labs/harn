@@ -137,7 +137,15 @@ fn __agent_progress_tool_config(value) {
   return value
 }
 
-/** agent_progress emits a structured progress_reported event for the current agent session. */
+/**
+ * agent_progress emits a structured progress_reported event for the current agent session.
+ *
+ * @effects: [agent]
+ * @allocation: heap
+ * @errors: []
+ * @api_stability: experimental
+ * @example: agent_progress(input)
+ */
 pub fn agent_progress(input) {
   let payload = __agent_progress_payload(input)
   let session_id = agent_session_current_id()
@@ -148,7 +156,15 @@ pub fn agent_progress(input) {
   return nil
 }
 
-/** agent_progress_tool adds a handler-backed agent_progress tool to a registry. */
+/**
+ * agent_progress_tool adds a handler-backed agent_progress tool to a registry.
+ *
+ * @effects: [agent]
+ * @allocation: heap
+ * @errors: []
+ * @api_stability: experimental
+ * @example: agent_progress_tool(registry, options)
+ */
 pub fn agent_progress_tool(registry = nil, options = nil) {
   let config = options ?? {}
   return tool_define(
@@ -176,7 +192,15 @@ pub fn agent_progress_tool(registry = nil, options = nil) {
   )
 }
 
-/** agent_progress_apply_options injects the progress tool when agent_loop opts in. */
+/**
+ * agent_progress_apply_options injects the progress tool when agent_loop opts in.
+ *
+ * @effects: [agent]
+ * @allocation: heap
+ * @errors: []
+ * @api_stability: experimental
+ * @example: agent_progress_apply_options(options)
+ */
 pub fn agent_progress_apply_options(options = nil) {
   let opts = options ?? {}
   let config = __agent_progress_tool_config(opts?.progress_tool)

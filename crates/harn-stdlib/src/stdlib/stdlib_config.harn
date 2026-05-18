@@ -10,7 +10,15 @@
 /** Result of `parse_model_id`: provider tag, the bare model name, and the raw input. */
 type ModelIdParts = {provider: string, model: string, raw: string}
 
-/** Read an env var as a non-empty string, returning nil when unset/blank. */
+/**
+ * Read an env var as a non-empty string, returning nil when unset/blank.
+ *
+ * @effects: []
+ * @allocation: heap
+ * @errors: []
+ * @api_stability: stable
+ * @example: env_str(key)
+ */
 pub fn env_str(key: string) -> any {
   let raw = env(key)
   if raw == nil {
@@ -22,7 +30,15 @@ pub fn env_str(key: string) -> any {
   return to_string(raw)
 }
 
-/** Read an env var as an int, falling back to `default` on missing/unparseable input. */
+/**
+ * Read an env var as an int, falling back to `default` on missing/unparseable input.
+ *
+ * @effects: []
+ * @allocation: stack-only
+ * @errors: []
+ * @api_stability: stable
+ * @example: env_int(key, default)
+ */
 pub fn env_int(key: string, default: int) -> int {
   let raw = env(key)
   if raw == nil {
@@ -31,7 +47,15 @@ pub fn env_int(key: string, default: int) -> int {
   return to_int(raw) ?? default
 }
 
-/** Read an env var as a float, falling back to `default` on missing/unparseable input. */
+/**
+ * Read an env var as a float, falling back to `default` on missing/unparseable input.
+ *
+ * @effects: []
+ * @allocation: stack-only
+ * @errors: []
+ * @api_stability: stable
+ * @example: env_float(key, default)
+ */
 pub fn env_float(key: string, default: float) -> float {
   let raw = env(key)
   if raw == nil {
@@ -44,6 +68,12 @@ pub fn env_float(key: string, default: float) -> float {
  * Read an env var as a bool. Recognizes "true/false/yes/no/y/n/1/0"
  * (case-insensitive) and falls back to `default` when missing or
  * unparseable.
+ *
+ * @effects: []
+ * @allocation: stack-only
+ * @errors: []
+ * @api_stability: stable
+ * @example: env_bool(key, default)
  */
 pub fn env_bool(key: string, default: bool) -> bool {
   let raw = env(key)
@@ -67,6 +97,12 @@ pub fn env_bool(key: string, default: bool) -> bool {
  * Read an env var as a list<string> by splitting on `separator` (default
  * `,`) and trimming each item. Empty entries are dropped. Returns the
  * empty list when the env var is unset or blank.
+ *
+ * @effects: []
+ * @allocation: heap
+ * @errors: []
+ * @api_stability: stable
+ * @example: env_list(key, separator, ")
  */
 pub fn env_list(key: string, separator: string = ",") -> list<string> {
   let raw = env(key)
@@ -97,6 +133,12 @@ pub fn env_list(key: string, separator: string = ",") -> list<string> {
  *
  * The "auto" provider is the documented sentinel that lets the runtime
  * choose based on the model registry.
+ *
+ * @effects: []
+ * @allocation: heap
+ * @errors: []
+ * @api_stability: stable
+ * @example: parse_model_id(id)
  */
 pub fn parse_model_id(id: string) -> ModelIdParts {
   let raw = id ?? ""
@@ -133,6 +175,12 @@ pub fn parse_model_id(id: string) -> ModelIdParts {
  * Resolve a model id from `env_key`, falling back to `default` when the
  * env var is unset or empty. The result is suitable for passing directly
  * to `parse_model_id` or to the `model` option of `llm_call`.
+ *
+ * @effects: []
+ * @allocation: heap
+ * @errors: []
+ * @api_stability: stable
+ * @example: model_from_env(env_key, default)
  */
 pub fn model_from_env(env_key: string, default: string) -> string {
   let resolved = env_str(env_key)

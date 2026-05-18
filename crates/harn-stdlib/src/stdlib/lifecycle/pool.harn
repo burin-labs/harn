@@ -29,12 +29,28 @@ fn __pool_attach_methods(snapshot) {
   return snapshot + methods
 }
 
-/** pool_create allocates a named pool and returns its handle. */
+/**
+ * pool_create allocates a named pool and returns its handle.
+ *
+ * @effects: [host]
+ * @allocation: heap
+ * @errors: []
+ * @api_stability: experimental
+ * @example: pool_create({name: "review", max_concurrent: 2})
+ */
 pub fn pool_create(options = nil) {
   return __pool_attach_methods(__pool_create(options))
 }
 
-/** pool_get looks up a pool by name or id; returns nil when not found. */
+/**
+ * pool_get looks up a pool by name or id; returns nil when not found.
+ *
+ * @effects: [host]
+ * @allocation: heap
+ * @errors: []
+ * @api_stability: experimental
+ * @example: pool_get("review")
+ */
 pub fn pool_get(name_or_id) {
   let snapshot = __pool_get(name_or_id)
   if snapshot == nil {
@@ -43,7 +59,15 @@ pub fn pool_get(name_or_id) {
   return __pool_attach_methods(snapshot)
 }
 
-/** pool_list returns every pool registered in the current runtime. */
+/**
+ * pool_list returns every pool registered in the current runtime.
+ *
+ * @effects: [host]
+ * @allocation: heap
+ * @errors: []
+ * @api_stability: experimental
+ * @example: pool_list()
+ */
 pub fn pool_list() {
   let snapshots = __pool_list()
   var out = []
@@ -53,7 +77,15 @@ pub fn pool_list() {
   return out
 }
 
-/** pool_wait blocks until one or more pool task handles complete. */
+/**
+ * pool_wait blocks until one or more pool task handles complete.
+ *
+ * @effects: [host]
+ * @allocation: heap
+ * @errors: []
+ * @api_stability: experimental
+ * @example: pool_wait(task)
+ */
 pub fn pool_wait(handle_or_handles) {
   return __pool_wait(handle_or_handles)
 }

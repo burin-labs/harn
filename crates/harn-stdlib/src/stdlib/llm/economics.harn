@@ -88,6 +88,12 @@ fn __billable_input(input_tokens, cache_read_tokens, cache_write_tokens) {
  * cache_write_per_mtok (or nil), provider, model, source. Returns nil
  * when the model has no priced entry and the provider has no provider-level
  * economics — callers should treat that as "unknown".
+ *
+ * @effects: []
+ * @allocation: heap
+ * @errors: []
+ * @api_stability: stable
+ * @example: pricing_for(provider, model)
  */
 pub fn pricing_for(provider, model = nil) {
   return __resolve_pricing_selector(provider, model)
@@ -101,6 +107,12 @@ pub fn pricing_for(provider, model = nil) {
  * Returns a dict with cost_usd, pricing_known, breakdown (per-bucket
  * dollar amounts), and the resolved pricing. When pricing is unknown the
  * cost_usd field is nil — branch on `pricing_known`.
+ *
+ * @effects: []
+ * @allocation: heap
+ * @errors: []
+ * @api_stability: stable
+ * @example: estimate_call_cost(opts)
  */
 pub fn estimate_call_cost(opts) {
   __ensure_dict(opts, "estimate_call_cost")
@@ -182,6 +194,12 @@ fn __aggregate_key(provider, model) {
  * output_tokens, cache_read_tokens?, cache_write_tokens?, calls?}. Returns
  * {total_cost_usd, known_cost_usd, total_calls, total_tokens,
  *  unknown_calls, per_model}. `per_model` is sorted descending by cost.
+ *
+ * @effects: []
+ * @allocation: heap
+ * @errors: []
+ * @api_stability: stable
+ * @example: estimate_session_cost(usage)
  */
 pub fn estimate_session_cost(usage) {
   if type_of(usage) != "list" {
@@ -246,6 +264,12 @@ pub fn estimate_session_cost(usage) {
  * dicts; opts has the same shape as estimate_call_cost minus `model`.
  * Returns the same shape as `llm_compare_costs`: a list sorted ascending
  * by projected cost, with unknown-pricing entries at the end.
+ *
+ * @effects: []
+ * @allocation: heap
+ * @errors: []
+ * @api_stability: stable
+ * @example: compare_model_costs(candidates, opts)
  */
 pub fn compare_model_costs(candidates, opts) {
   __ensure_dict(opts, "compare_model_costs")
@@ -263,6 +287,12 @@ pub fn compare_model_costs(candidates, opts) {
  * `break_even_calls` is nil when there are no savings, 1 when the cache
  * write is free (no recurring penalty), otherwise the integer number of
  * cache hits needed before the write pays for itself.
+ *
+ * @effects: []
+ * @allocation: heap
+ * @errors: []
+ * @api_stability: stable
+ * @example: cache_break_even(opts)
  */
 pub fn cache_break_even(opts) {
   __ensure_dict(opts, "cache_break_even")
@@ -333,6 +363,12 @@ pub fn cache_break_even(opts) {
  * `periods` defaults to 1. Convenient for daily / monthly volume sums.
  * Returns {pricing_known, total_calls, periods, calls_per_period,
  *          cost_per_call?, cost_per_period?, total_cost?, ...}.
+ *
+ * @effects: []
+ * @allocation: heap
+ * @errors: []
+ * @api_stability: stable
+ * @example: volume_cost(opts)
  */
 pub fn volume_cost(opts) {
   __ensure_dict(opts, "volume_cost")
@@ -379,6 +415,12 @@ pub fn volume_cost(opts) {
  * Format a USD amount as a string. Default precision auto-scales by
  * magnitude (2 decimals at $100+, 4 below $100, 6 below $1). Pass
  * {precision: N} or {sign: true} to override.
+ *
+ * @effects: []
+ * @allocation: heap
+ * @errors: []
+ * @api_stability: stable
+ * @example: format_usd(amount, options)
  */
 pub fn format_usd(amount, options = nil) {
   if options == nil {
