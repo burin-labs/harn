@@ -117,6 +117,7 @@ import "std/llm/budget"
 import "std/llm/prompts"
 import "std/math"
 import "std/monitors"
+import "std/oauth/providers"
 import "std/path"
 import "std/personas/bulletins"
 import "std/personas/prelude"
@@ -150,6 +151,19 @@ Connector package helpers for common provider plumbing:
 | `oauth2_token_refresh(client_id, client_secret, refresh_token, token_url, options?)` | Refresh an OAuth2 access token with form-encoded `grant_type=refresh_token` |
 | `rate_limit_token_bucket(state?, config?, now_ms?)` | Pure token-bucket transition for package-local quota decisions |
 | `paginate_cursor(initial_url, fetch_fn, cursor_path, options?)` | Collect cursor-paginated pages from a package-supplied fetch closure |
+
+### std/oauth/providers
+
+Static OAuth provider records and factory helpers for auth orchestration:
+
+| Function | Description |
+|---|---|
+| `provider_names()` | Return the ten named provider keys |
+| `provider(name, overrides?)` | Return one provider record with optional endpoint/scope overrides |
+| `provider_catalog(overrides?)` | Return all ten provider records, with optional per-provider overrides |
+| `providers(overrides?)` | Return a namespace containing the ten records plus `github_enterprise` and `custom` factories |
+| `github_enterprise(base_url, overrides?)` | Build a GitHub Enterprise Server record from an instance web base URL |
+| `custom(config, overrides?)` | Build a provider record for enterprise or niche OAuth providers |
 
 ### std/triage
 

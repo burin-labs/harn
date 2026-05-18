@@ -1,0 +1,617 @@
+import { merge } from "std/json"
+
+type OAuthRefreshHandling = {
+  strategy: string,
+  expires_in_field?: string,
+  expires_at_field?: string,
+  refresh_grant: string,
+  rotates_refresh_token: bool,
+  notes: list<string>,
+}
+
+type OAuthProvider = {
+  id: string,
+  label: string,
+  auth_url: string,
+  token_url: string,
+  device_code_url: string?,
+  revoke_url: string?,
+  userinfo_url: string?,
+  default_scopes: list<string>,
+  pkce_required: bool,
+  refresh_handling: OAuthRefreshHandling,
+  documented_quirks: list<string>,
+  documentation_url: string?,
+}
+
+fn __refresh(strategy, refresh_grant, rotates_refresh_token, notes) {
+  return {
+    strategy: strategy,
+    expires_in_field: "expires_in",
+    expires_at_field: nil,
+    refresh_grant: refresh_grant,
+    rotates_refresh_token: rotates_refresh_token,
+    notes: notes,
+  }
+}
+
+fn __with_overrides(record, overrides = nil) {
+  return merge(record, overrides ?? {})
+}
+
+fn __trim_trailing_slash(value) {
+  var text = trim(to_string(value ?? ""))
+  while ends_with(text, "/") {
+    text = substring(text, 0, len(text) - 1)
+  }
+  return text
+}
+
+fn __require_url(value, field) {
+  let text = trim(to_string(value ?? ""))
+  if text == "" {
+    throw "std/oauth/providers: " + field + " is required"
+  }
+  return text
+}
+
+fn __github_record() {
+  return {
+    id: "github",
+    label: "GitHub",
+    auth_url: "https://github.com/login/oauth/authorize",
+    token_url: "https://github.com/login/oauth/access_token",
+    device_code_url: "https://github.com/login/device/code",
+    revoke_url: "https://api.github.com/applications/{client_id}/token",
+    userinfo_url: "https://api.github.com/user",
+    default_scopes: ["read:user", "user:email"],
+    pkce_required: true,
+    refresh_handling: __refresh(
+      "use expires_in/expires_at when returned; otherwise treat OAuth app tokens as provider-revoked",
+      "provider_optional",
+      true,
+      [
+        "GitHub strongly recommends PKCE for code flow.",
+        "OAuth app access tokens may be long-lived; expiring user tokens return refresh metadata when enabled.",
+      ],
+    ),
+    documented_quirks: [
+      "Device flow must be enabled on the app registration before use.",
+      "Revocation uses the REST API app-token endpoint with client authentication.",
+    ],
+    documentation_url: "https://docs.github.com/apps/oauth-apps/building-oauth-apps/authorizing-oauth-apps",
+  }
+}
+
+/**
+ * github returns the preconfigured GitHub OAuth provider record.
+ *
+ * @effects: []
+ * @allocation: heap
+ * @errors: []
+ * @api_stability: experimental
+ * @example: github()
+ */
+pub fn github(overrides = nil) -> OAuthProvider {
+  return __with_overrides(__github_record(), overrides)
+}
+
+/**
+ * github_enterprise builds a GitHub Enterprise Server provider from its web base URL.
+ *
+ * @effects: []
+ * @allocation: heap
+ * @errors: [invalid_argument]
+ * @api_stability: experimental
+ * @example: github_enterprise("https://ghe.example.com")
+ */
+pub fn github_enterprise(base_url, overrides = nil) -> OAuthProvider {
+  let web_url = __trim_trailing_slash(base_url)
+  if web_url == "" {
+    throw "std/oauth/providers: github_enterprise base_url is required"
+  }
+  let api_url = __trim_trailing_slash(overrides?.api_url ?? (web_url + "/api/v3"))
+  return __with_overrides(
+    __github_record()
+      + {
+      id: "github_enterprise",
+      label: "GitHub Enterprise Server",
+      auth_url: web_url + "/login/oauth/authorize",
+      token_url: web_url + "/login/oauth/access_token",
+      device_code_url: web_url + "/login/device/code",
+      revoke_url: api_url + "/applications/{client_id}/token",
+      userinfo_url: api_url + "/user",
+      documentation_url: "https://docs.github.com/en/enterprise-server@latest/apps/oauth-apps/building-oauth-apps/authorizing-oauth-apps",
+      documented_quirks: __github_record().documented_quirks
+        + ["Use the instance web base URL for browser/device endpoints and /api/v3 for REST endpoints."],
+    },
+    overrides,
+  )
+}
+
+/**
+ * slack returns the preconfigured Slack OAuth v2 provider record.
+ *
+ * @effects: []
+ * @allocation: heap
+ * @errors: []
+ * @api_stability: experimental
+ * @example: slack()
+ */
+pub fn slack(overrides = nil) -> OAuthProvider {
+  return __with_overrides(
+    {
+      id: "slack",
+      label: "Slack",
+      auth_url: "https://slack.com/oauth/v2/authorize",
+      token_url: "https://slack.com/api/oauth.v2.access",
+      device_code_url: nil,
+      revoke_url: "https://slack.com/api/auth.revoke",
+      userinfo_url: "https://slack.com/api/users.identity",
+      default_scopes: ["identity.basic"],
+      pkce_required: false,
+      refresh_handling: __refresh(
+        "use oauth.v2.access with grant_type=refresh_token when token rotation is enabled",
+        "standard_refresh_token",
+        true,
+        [
+          "Refresh tokens are single-use when token rotation is enabled.",
+          "GovSlack installs use slack-gov.com endpoints instead of slack.com.",
+        ],
+      ),
+      documented_quirks: [
+        "Slack bot/user API scopes are separate from Sign in with Slack identity scopes.",
+        "auth.revoke revokes a single rotated token without removing the installation.",
+      ],
+      documentation_url: "https://docs.slack.dev/authentication/installing-with-oauth",
+    },
+    overrides,
+  )
+}
+
+/**
+ * linear returns the preconfigured Linear OAuth provider record.
+ *
+ * @effects: []
+ * @allocation: heap
+ * @errors: []
+ * @api_stability: experimental
+ * @example: linear()
+ */
+pub fn linear(overrides = nil) -> OAuthProvider {
+  return __with_overrides(
+    {
+      id: "linear",
+      label: "Linear",
+      auth_url: "https://linear.app/oauth/authorize",
+      token_url: "https://api.linear.app/oauth/token",
+      device_code_url: nil,
+      revoke_url: nil,
+      userinfo_url: "https://api.linear.app/graphql",
+      default_scopes: ["read"],
+      pkce_required: true,
+      refresh_handling: __refresh(
+        "use expires_in and refresh with grant_type=refresh_token",
+        "standard_refresh_token",
+        true,
+        ["Linear OAuth apps use rotating refresh tokens and return a replacement refresh_token on refresh."],
+      ),
+      documented_quirks: [
+        "Scopes are comma-separated in the authorization request.",
+        "Use a viewer query against the GraphQL API for user info.",
+      ],
+      documentation_url: "https://linear.app/developers/oauth-2-0-authentication",
+    },
+    overrides,
+  )
+}
+
+/**
+ * notion returns the preconfigured Notion public-connection OAuth provider record.
+ *
+ * @effects: []
+ * @allocation: heap
+ * @errors: []
+ * @api_stability: experimental
+ * @example: notion()
+ */
+pub fn notion(overrides = nil) -> OAuthProvider {
+  return __with_overrides(
+    {
+      id: "notion",
+      label: "Notion",
+      auth_url: "https://api.notion.com/v1/oauth/authorize",
+      token_url: "https://api.notion.com/v1/oauth/token",
+      device_code_url: nil,
+      revoke_url: nil,
+      userinfo_url: "https://api.notion.com/v1/users/me",
+      default_scopes: [],
+      pkce_required: false,
+      refresh_handling: __refresh(
+        "use token response expiry metadata and refresh through the Notion token endpoint when a refresh token is issued",
+        "standard_refresh_token",
+        true,
+        [
+          "Page/database access is selected by the user during the Notion page-picker flow, not by OAuth scopes.",
+        ],
+      ),
+      documented_quirks: [
+        "The authorize URL requires owner=user for user-owned public-connection installs.",
+        "Notion-Version must be sent on API requests after OAuth completes.",
+      ],
+      documentation_url: "https://developers.notion.com/docs/authorization",
+    },
+    overrides,
+  )
+}
+
+/**
+ * google returns the preconfigured Google OAuth/OIDC provider record.
+ *
+ * @effects: []
+ * @allocation: heap
+ * @errors: []
+ * @api_stability: experimental
+ * @example: google()
+ */
+pub fn google(overrides = nil) -> OAuthProvider {
+  return __with_overrides(
+    {
+      id: "google",
+      label: "Google",
+      auth_url: "https://accounts.google.com/o/oauth2/v2/auth",
+      token_url: "https://oauth2.googleapis.com/token",
+      device_code_url: "https://oauth2.googleapis.com/device/code",
+      revoke_url: "https://oauth2.googleapis.com/revoke",
+      userinfo_url: "https://openidconnect.googleapis.com/v1/userinfo",
+      default_scopes: ["openid", "email", "profile"],
+      pkce_required: true,
+      refresh_handling: __refresh(
+        "request offline access for refresh tokens and use expires_in for access-token expiry",
+        "standard_refresh_token",
+        false,
+        [
+          "Refresh tokens are not returned on every grant; request offline access and persist existing refresh tokens.",
+        ],
+      ),
+      documented_quirks: [
+        "Incremental authorization is preferred for product-specific Google API scopes.",
+        "Revocation accepts either access or refresh tokens.",
+      ],
+      documentation_url: "https://developers.google.com/identity/protocols/oauth2/web-server",
+    },
+    overrides,
+  )
+}
+
+/**
+ * microsoft returns the preconfigured Microsoft identity platform provider record.
+ *
+ * @effects: []
+ * @allocation: heap
+ * @errors: []
+ * @api_stability: experimental
+ * @example: microsoft()
+ */
+pub fn microsoft(overrides = nil) -> OAuthProvider {
+  return __with_overrides(
+    {
+      id: "microsoft",
+      label: "Microsoft",
+      auth_url: "https://login.microsoftonline.com/common/oauth2/v2.0/authorize",
+      token_url: "https://login.microsoftonline.com/common/oauth2/v2.0/token",
+      device_code_url: "https://login.microsoftonline.com/common/oauth2/v2.0/devicecode",
+      revoke_url: nil,
+      userinfo_url: "https://graph.microsoft.com/v1.0/me",
+      default_scopes: ["openid", "profile", "email", "offline_access", "User.Read"],
+      pkce_required: true,
+      refresh_handling: __refresh(
+        "use expires_in and refresh with grant_type=refresh_token; persist replacement refresh tokens when returned",
+        "standard_refresh_token",
+        true,
+        ["Use a tenant-specific URL instead of /common when an app is single-tenant or tenant-pinned."],
+      ),
+      documented_quirks: [
+        "Graph delegated scopes such as User.Read are resource permissions, not OIDC claims.",
+        "The Graph /me endpoint requires a Graph access token with User.Read or a stronger delegated permission.",
+      ],
+      documentation_url: "https://learn.microsoft.com/en-us/graph/auth-v2-user",
+    },
+    overrides,
+  )
+}
+
+/**
+ * atlassian returns the preconfigured Atlassian Cloud OAuth 2.0 3LO provider record.
+ *
+ * @effects: []
+ * @allocation: heap
+ * @errors: []
+ * @api_stability: experimental
+ * @example: atlassian()
+ */
+pub fn atlassian(overrides = nil) -> OAuthProvider {
+  return __with_overrides(
+    {
+      id: "atlassian",
+      label: "Atlassian",
+      auth_url: "https://auth.atlassian.com/authorize",
+      token_url: "https://auth.atlassian.com/oauth/token",
+      device_code_url: nil,
+      revoke_url: nil,
+      userinfo_url: "https://api.atlassian.com/me",
+      default_scopes: ["read:me", "offline_access"],
+      pkce_required: false,
+      refresh_handling: __refresh(
+        "request offline_access and use rotating refresh tokens through auth.atlassian.com/oauth/token",
+        "standard_refresh_token",
+        true,
+        ["Rotating refresh tokens issue a new limited-life refresh token on each refresh."],
+      ),
+      documented_quirks: [
+        "Authorization requests need audience=api.atlassian.com for product API access.",
+        "Product API calls use api.atlassian.com rather than the customer atlassian.net host.",
+      ],
+      documentation_url: "https://developer.atlassian.com/cloud/oauth/getting-started/implementing-oauth-3lo/",
+    },
+    overrides,
+  )
+}
+
+/**
+ * discord returns the preconfigured Discord OAuth provider record.
+ *
+ * @effects: []
+ * @allocation: heap
+ * @errors: []
+ * @api_stability: experimental
+ * @example: discord()
+ */
+pub fn discord(overrides = nil) -> OAuthProvider {
+  return __with_overrides(
+    {
+      id: "discord",
+      label: "Discord",
+      auth_url: "https://discord.com/oauth2/authorize",
+      token_url: "https://discord.com/api/oauth2/token",
+      device_code_url: nil,
+      revoke_url: "https://discord.com/api/oauth2/token/revoke",
+      userinfo_url: "https://discord.com/api/users/@me",
+      default_scopes: ["identify", "email"],
+      pkce_required: false,
+      refresh_handling: __refresh(
+        "use expires_in and refresh with grant_type=refresh_token",
+        "standard_refresh_token",
+        false,
+        ["Persist a replacement refresh_token if Discord returns one during refresh."],
+      ),
+      documented_quirks: [
+        "Token and revocation endpoints require application/x-www-form-urlencoded bodies.",
+        "The identify scope is enough for /users/@me without email; email adds the email field.",
+      ],
+      documentation_url: "https://docs.discord.com/developers/topics/oauth2",
+    },
+    overrides,
+  )
+}
+
+/**
+ * gitlab returns the preconfigured GitLab.com OAuth provider record.
+ *
+ * @effects: []
+ * @allocation: heap
+ * @errors: []
+ * @api_stability: experimental
+ * @example: gitlab()
+ */
+pub fn gitlab(overrides = nil) -> OAuthProvider {
+  return __with_overrides(
+    {
+      id: "gitlab",
+      label: "GitLab",
+      auth_url: "https://gitlab.com/oauth/authorize",
+      token_url: "https://gitlab.com/oauth/token",
+      device_code_url: "https://gitlab.com/oauth/authorize_device",
+      revoke_url: "https://gitlab.com/oauth/revoke",
+      userinfo_url: "https://gitlab.com/oauth/userinfo",
+      default_scopes: ["read_user", "openid", "profile", "email"],
+      pkce_required: true,
+      refresh_handling: __refresh(
+        "use expires_in and refresh with grant_type=refresh_token",
+        "standard_refresh_token",
+        true,
+        ["Refreshing invalidates the existing access token and refresh token and returns replacements."],
+      ),
+      documented_quirks: [
+        "Device authorization grant is available on GitLab 17.1+ and generally available in 17.9+.",
+        "Self-managed GitLab instances use the same /oauth paths on the instance base URL.",
+      ],
+      documentation_url: "https://docs.gitlab.com/api/oauth2/",
+    },
+    overrides,
+  )
+}
+
+/**
+ * bitbucket returns the preconfigured Bitbucket Cloud OAuth provider record.
+ *
+ * @effects: []
+ * @allocation: heap
+ * @errors: []
+ * @api_stability: experimental
+ * @example: bitbucket()
+ */
+pub fn bitbucket(overrides = nil) -> OAuthProvider {
+  return __with_overrides(
+    {
+      id: "bitbucket",
+      label: "Bitbucket Cloud",
+      auth_url: "https://bitbucket.org/site/oauth2/authorize",
+      token_url: "https://bitbucket.org/site/oauth2/access_token",
+      device_code_url: nil,
+      revoke_url: nil,
+      userinfo_url: "https://api.bitbucket.org/2.0/user",
+      default_scopes: ["account"],
+      pkce_required: false,
+      refresh_handling: __refresh(
+        "use expires_in and refresh with grant_type=refresh_token",
+        "standard_refresh_token",
+        true,
+        [
+          "A refreshed Bitbucket token response includes a new refresh token; the old one expires shortly after use.",
+        ],
+      ),
+      documented_quirks: [
+        "Bitbucket Cloud OAuth supports authorization-code and client-credentials grants, not device flow.",
+        "OAuth API requests should use api.bitbucket.org with a Bearer token.",
+      ],
+      documentation_url: "https://developer.atlassian.com/cloud/bitbucket/rest/intro/",
+    },
+    overrides,
+  )
+}
+
+/**
+ * provider_names returns the ten named provider keys in the catalogue.
+ *
+ * @effects: []
+ * @allocation: heap
+ * @errors: []
+ * @api_stability: experimental
+ * @example: provider_names()
+ */
+pub fn provider_names() -> list<string> {
+  return [
+    "github",
+    "slack",
+    "linear",
+    "notion",
+    "google",
+    "microsoft",
+    "atlassian",
+    "discord",
+    "gitlab",
+    "bitbucket",
+  ]
+}
+
+/**
+ * provider returns one named provider record with optional field overrides.
+ *
+ * @effects: []
+ * @allocation: heap
+ * @errors: [invalid_argument]
+ * @api_stability: experimental
+ * @example: provider("github", {default_scopes: ["read:user"]})
+ */
+pub fn provider(name, overrides = nil) -> OAuthProvider {
+  let key = lowercase(trim(to_string(name ?? "")))
+  if key == "github" {
+    return github(overrides)
+  }
+  if key == "slack" {
+    return slack(overrides)
+  }
+  if key == "linear" {
+    return linear(overrides)
+  }
+  if key == "notion" {
+    return notion(overrides)
+  }
+  if key == "google" {
+    return google(overrides)
+  }
+  if key == "microsoft" {
+    return microsoft(overrides)
+  }
+  if key == "atlassian" {
+    return atlassian(overrides)
+  }
+  if key == "discord" {
+    return discord(overrides)
+  }
+  if key == "gitlab" {
+    return gitlab(overrides)
+  }
+  if key == "bitbucket" {
+    return bitbucket(overrides)
+  }
+  throw "std/oauth/providers: unknown provider `" + key + "`"
+}
+
+/**
+ * provider_catalog returns the ten named provider records, with per-provider overrides.
+ *
+ * @effects: []
+ * @allocation: heap
+ * @errors: [invalid_argument]
+ * @api_stability: experimental
+ * @example: provider_catalog({github: {default_scopes: ["read:user"]}})
+ */
+pub fn provider_catalog(overrides = nil) {
+  var out = {}
+  for name in provider_names() {
+    out = out + {[name]: provider(name, overrides?[name])}
+  }
+  return out
+}
+
+/**
+ * providers returns the issue-style provider namespace: ten static records plus
+ * github_enterprise(base_url, overrides?) and custom(config, overrides?) factories.
+ *
+ * @effects: []
+ * @allocation: heap
+ * @errors: [invalid_argument]
+ * @api_stability: experimental
+ * @example: providers().github_enterprise("https://ghe.example.com")
+ */
+pub fn providers(overrides = nil) {
+  return provider_catalog(overrides)
+    + {
+    github_enterprise: { base_url, factory_overrides = nil -> github_enterprise(base_url, factory_overrides) },
+    custom: { config, factory_overrides = nil -> custom(config, factory_overrides) },
+  }
+}
+
+/**
+ * custom builds an OAuth provider record for enterprise or niche providers.
+ *
+ * @effects: []
+ * @allocation: heap
+ * @errors: [invalid_argument]
+ * @api_stability: experimental
+ * @example: custom({id: "acme", auth_url: "https://idp.example/authorize", token_url: "https://idp.example/token"})
+ */
+pub fn custom(config, overrides = nil) -> OAuthProvider {
+  if type_of(config) != "dict" {
+    throw "std/oauth/providers: custom config must be a dict"
+  }
+  let id = trim(to_string(config?.id ?? config?.name ?? "custom"))
+  if id == "" {
+    throw "std/oauth/providers: custom id is required"
+  }
+  return __with_overrides(
+    {
+      id: id,
+      label: to_string(config?.label ?? id),
+      auth_url: __require_url(config?.auth_url, "custom auth_url"),
+      token_url: __require_url(config?.token_url, "custom token_url"),
+      device_code_url: config?.device_code_url,
+      revoke_url: config?.revoke_url,
+      userinfo_url: config?.userinfo_url,
+      default_scopes: config?.default_scopes ?? [],
+      pkce_required: config?.pkce_required ?? false,
+      refresh_handling: config?.refresh_handling
+        ?? __refresh(
+        "custom provider; use token response metadata and provider documentation",
+        "custom",
+        false,
+        ["Validate endpoint, scope, refresh, and revocation behavior against the provider's primary docs."],
+      ),
+      documented_quirks: config?.documented_quirks ?? [],
+      documentation_url: config?.documentation_url,
+    },
+    overrides,
+  )
+}

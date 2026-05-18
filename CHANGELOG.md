@@ -19,6 +19,13 @@ condensed series summaries instead of full per-patch history.
   reminders by `id`, `tag`, or `dedupe_key` and reports the removal
   count. This lands the deterministic transcript model without the later
   EventLog expiry hooks or provider-rendering framework.
+- **OAuth provider catalogue records (#1905).** Adds
+  `std/oauth/providers` with ten preconfigured OAuth provider records
+  (GitHub, Slack, Linear, Notion, Google, Microsoft, Atlassian,
+  Discord, GitLab, Bitbucket), the `github_enterprise(base_url, ...)`
+  and `custom(config, ...)` factories, and override-friendly endpoint
+  fields for future OAuth orchestration work. The catalogue is static
+  and offline-only; it does not start a live OAuth flow.
 - **Pipeline `on_finish` callback + finish lifecycle hooks (#1854).**
   Adds the `pipeline_on_finish(callback)` builtin and three new
   session-level hook events — `PreFinish`, `PostFinish`, and

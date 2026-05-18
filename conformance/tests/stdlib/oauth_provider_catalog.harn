@@ -1,0 +1,152 @@
+import {
+  custom,
+  github,
+  github_enterprise,
+  provider,
+  provider_catalog,
+  provider_names,
+  providers,
+} from "std/oauth/providers"
+
+fn missing_core_fields(record) {
+  var missing = []
+  for field in [
+    "auth_url",
+    "token_url",
+    "device_code_url",
+    "revoke_url",
+    "userinfo_url",
+    "default_scopes",
+    "pkce_required",
+    "refresh_handling",
+    "documented_quirks",
+  ] {
+    if !record.keys().contains(field) {
+      missing = missing + [field]
+    }
+  }
+  return missing
+}
+
+fn mock_flow_for_provider(name) {
+  let base = "https://mock-oauth.example/" + name
+  let record = provider(
+    name,
+    {
+      auth_url: base + "/authorize",
+      token_url: base + "/token",
+      device_code_url: base + "/device",
+      revoke_url: base + "/revoke",
+      userinfo_url: base + "/userinfo",
+    },
+  )
+  let userinfo_url = record.userinfo_url ?? ""
+  let revoke_url = record.revoke_url ?? ""
+  require record.auth_url == base + "/authorize", name + " auth override"
+  require record.token_url == base + "/token", name + " token override"
+  require userinfo_url == base + "/userinfo", name + " userinfo override"
+  require revoke_url == base + "/revoke", name + " revoke override"
+  http_mock_clear()
+  http_mock(
+    "POST",
+    record.token_url,
+    {
+      status: 200,
+      body: "{\"access_token\":\"access-" + name + "\",\"refresh_token\":\"refresh-"
+        + name
+        + "\",\"expires_in\":3600}",
+      headers: {"content-type": "application/json"},
+    },
+  )
+  http_mock(
+    "GET",
+    userinfo_url,
+    {
+      status: 200,
+      body: "{\"provider\":\"" + name + "\",\"sub\":\"user-" + name + "\"}",
+      headers: {"content-type": "application/json"},
+    },
+  )
+  http_mock("POST", revoke_url, {status: 200, body: "{\"revoked\":true}", headers: {}})
+  let token_resp = http_post(
+    record.token_url,
+    "grant_type=authorization_code&code=code-" + name
+      + "&redirect_uri=https%3A%2F%2Fapp.example%2Fcallback",
+    {headers: {"Content-Type": "application/x-www-form-urlencoded"}},
+  )
+  require token_resp.status == 200, name + " token response"
+  let token = json_parse(token_resp.body)
+  require token.access_token == "access-" + name, name + " access token"
+  let profile_resp = http_get(userinfo_url, {headers: {Authorization: "Bearer " + token.access_token}})
+  require profile_resp.status == 200, name + " userinfo response"
+  let profile = json_parse(profile_resp.body)
+  require profile.provider == name, name + " profile provider"
+  let revoke_resp = http_post(
+    revoke_url,
+    "token=" + token.access_token,
+    {headers: {"Content-Type": "application/x-www-form-urlencoded"}},
+  )
+  require revoke_resp.status == 200, name + " revoke response"
+  let calls = http_mock_calls({include_sensitive: true})
+  require len(calls) == 3, name + " mock flow call count"
+  require calls[0].method == "POST", name + " token call method"
+  require contains(calls[0].body, "grant_type=authorization_code"), name + " token grant body"
+  require calls[1].headers.authorization == "Bearer access-" + name, name + " userinfo bearer"
+  require contains(calls[2].body, "token=access-" + name), name + " revoke body"
+  http_mock_clear()
+}
+
+pipeline test(task) {
+  let names = provider_names()
+  assert_eq(len(names), 10, "ten named providers")
+  assert(names.contains("github"), "github named provider")
+  assert(names.contains("bitbucket"), "bitbucket named provider")
+  let catalog = provider_catalog()
+  assert_eq(len(catalog.keys()), 10, "catalogue contains ten provider records")
+  for name in names {
+    assert_eq(missing_core_fields(catalog[name]), [], name + " carries core fields")
+    assert_eq(catalog[name].id, name, name + " id")
+    mock_flow_for_provider(name)
+  }
+  let gh = github()
+  assert_eq(gh.auth_url, "https://github.com/login/oauth/authorize", "github auth url")
+  assert_eq(gh.device_code_url, "https://github.com/login/device/code", "github device url")
+  assert(gh.default_scopes.contains("read:user"), "github default scope")
+  let ghes = github_enterprise("https://ghe.example.com/")
+  assert_eq(ghes.auth_url, "https://ghe.example.com/login/oauth/authorize", "ghes auth url")
+  assert_eq(ghes.token_url, "https://ghe.example.com/login/oauth/access_token", "ghes token url")
+  assert_eq(ghes.userinfo_url, "https://ghe.example.com/api/v3/user", "ghes api url")
+  let discord_override = provider(
+    "discord",
+    {auth_url: "https://discord.example/oauth2/authorize", default_scopes: ["identify"]},
+  )
+  assert_eq(
+    discord_override.auth_url,
+    "https://discord.example/oauth2/authorize",
+    "override auth url",
+  )
+  assert_eq(discord_override.default_scopes, ["identify"], "override scopes")
+  let namespace = providers()
+  assert_eq(namespace.github.id, "github", "Providers exposes github record")
+  assert_eq(
+    namespace.github_enterprise("https://gh.example").token_url,
+    "https://gh.example/login/oauth/access_token",
+    "Providers exposes GHES factory",
+  )
+  let custom_provider = custom(
+    {
+      id: "acme",
+      label: "Acme",
+      auth_url: "https://idp.example/authorize",
+      token_url: "https://idp.example/token",
+      default_scopes: ["read"],
+      pkce_required: true,
+    },
+    {revoke_url: "https://idp.example/revoke"},
+  )
+  assert_eq(custom_provider.id, "acme", "custom id")
+  assert_eq(custom_provider.default_scopes, ["read"], "custom scopes")
+  assert_eq(custom_provider.revoke_url, "https://idp.example/revoke", "custom override")
+  assert_eq(custom_provider.refresh_handling.refresh_grant, "custom", "custom refresh mode")
+  log("oauth provider catalog ok")
+}
