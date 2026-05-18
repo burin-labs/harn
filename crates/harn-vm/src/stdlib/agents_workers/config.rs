@@ -225,6 +225,7 @@ pub(in super::super) fn persist_worker_state_snapshot(state: &WorkerState) -> Re
         "execution": state.execution,
         "snapshot_path": state.snapshot_path,
         "audit": state.audit,
+        "suspension": state.suspension,
     });
     let path = PathBuf::from(&state.snapshot_path);
     if let Some(parent) = path.parent() {
@@ -290,11 +291,20 @@ pub(in super::super) fn load_worker_state_snapshot(target: &str) -> Result<Worke
         .get("status")
         .and_then(|value| value.as_str())
         .unwrap_or("interrupted");
+    // `running` snapshots come from in-flight workers whose Tokio handle
+    // didn't survive the process exit — they're rehydrated as
+    // `interrupted` so the operator must explicitly re-arm them. A
+    // `suspended` snapshot, by contrast, is a deliberate cooperative
+    // checkpoint (harn#1836); cold-restoring it must land back in the
+    // same suspended state so the resume primitive can warm it up.
     let normalized_status = if status == "running" {
         "interrupted".to_string()
     } else {
         status.to_string()
     };
+    let suspension: Option<super::WorkerSuspension> =
+        serde_json::from_value(payload.get("suspension").cloned().unwrap_or_default())
+            .unwrap_or_default();
     Ok(WorkerState {
         id: payload
             .get("id")
@@ -349,6 +359,8 @@ pub(in super::super) fn load_worker_state_snapshot(target: &str) -> Result<Worke
         config,
         handle: None,
         cancel_token: Arc::new(AtomicBool::new(false)),
+        suspend_signal: Arc::new(AtomicBool::new(false)),
+        suspension,
         request,
         latest_payload: payload.get("latest_payload").cloned(),
         latest_error: payload

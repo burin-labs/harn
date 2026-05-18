@@ -214,6 +214,7 @@ var HarnWorkerStatuses = []HarnWorkerStatus{
 	"running",
 	"progressed",
 	"awaiting_input",
+	"suspended",
 	"completed",
 	"failed",
 	"cancelled",

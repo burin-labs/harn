@@ -278,6 +278,7 @@ public enum HarnWorkerStatus: String, Codable, Sendable, CaseIterable {
     case running = "running"
     case progressed = "progressed"
     case awaitingInput = "awaiting_input"
+    case suspended = "suspended"
     case completed = "completed"
     case failed = "failed"
     case cancelled = "cancelled"
@@ -286,6 +287,7 @@ public enum HarnWorkerStatus: String, Codable, Sendable, CaseIterable {
         "running",
         "progressed",
         "awaiting_input",
+        "suspended",
         "completed",
         "failed",
         "cancelled",

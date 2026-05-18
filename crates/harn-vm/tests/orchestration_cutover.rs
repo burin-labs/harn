@@ -67,6 +67,7 @@ fn stdlib_facades_and_host_primitives_are_discoverable() {
         "__host_worker_wait",
         "__host_worker_close",
         "__host_worker_resume",
+        "__host_worker_suspend",
         "__host_worker_list",
         "__host_workflow_prepare_run",
         "__host_workflow_stage_prepare",

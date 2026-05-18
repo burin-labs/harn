@@ -54,6 +54,8 @@ fn worker_snapshot_round_trip_preserves_resume_fields() {
         },
         handle: None,
         cancel_token: Arc::new(AtomicBool::new(false)),
+        suspend_signal: Arc::new(AtomicBool::new(false)),
+        suspension: None,
         request: WorkerRequestRecord {
             task: "task".to_string(),
             system: Some("system".to_string()),
@@ -230,6 +232,8 @@ fn worker_summary_exposes_request_and_provenance() {
         },
         handle: None,
         cancel_token: Arc::new(AtomicBool::new(false)),
+        suspend_signal: Arc::new(AtomicBool::new(false)),
+        suspension: None,
         request: WorkerRequestRecord {
             task: "original task".to_string(),
             system: Some("system".to_string()),

@@ -99,6 +99,48 @@ pub(super) struct WorkerRequestRecord {
     pub(super) verification_steps: Vec<serde_json::Value>,
 }
 
+/// Origin of a cooperative worker suspension. Mirrored on the wire as
+/// snake_case so cloud/UX clients can render the source of a pause
+/// (self-park vs. operator/parent intervention vs. declarative trigger)
+/// without re-deriving it from log breadcrumbs.
+#[derive(Clone, Copy, Debug, Default, serde::Serialize, serde::Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub(crate) enum SuspendInitiator {
+    /// The worker's own loop asked to park (e.g. `agent_await_resumption`).
+    SelfInitiated,
+    /// A parent agent issued the pause via a tool call or stdlib helper.
+    Parent,
+    /// A human/operator invoked the suspend primitive (CLI, cloud API).
+    #[default]
+    Operator,
+    /// A declarative trigger spec fired the pause.
+    Triggered,
+}
+
+impl SuspendInitiator {
+    pub(crate) fn parse(value: &str) -> Self {
+        match value.trim() {
+            "self" | "self_initiated" => Self::SelfInitiated,
+            "parent" => Self::Parent,
+            "triggered" | "trigger" => Self::Triggered,
+            "operator" | "" => Self::Operator,
+            _ => Self::Operator,
+        }
+    }
+}
+
+/// Snapshot of the active suspension on a worker. Cleared on resume.
+#[derive(Clone, Debug, Default, serde::Serialize, serde::Deserialize, PartialEq, Eq)]
+#[serde(default)]
+pub(crate) struct WorkerSuspension {
+    pub(crate) reason: String,
+    pub(crate) initiator: SuspendInitiator,
+    pub(crate) suspended_at: String,
+    pub(crate) snapshot_ref: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub(crate) conditions: Option<serde_json::Value>,
+}
+
 #[derive(Clone, Debug, Default, serde::Serialize, serde::Deserialize, PartialEq, Eq)]
 #[serde(default)]
 pub(super) struct WorkerProvenanceRecord {
@@ -139,6 +181,13 @@ pub(super) struct WorkerState {
     pub(super) config: WorkerConfig,
     pub(super) handle: Option<tokio::task::JoinHandle<Result<WorkerExecutionResult, VmError>>>,
     pub(super) cancel_token: Arc<AtomicBool>,
+    /// Cooperative suspend flag. Set by `__host_worker_suspend`; read by
+    /// the `agent_loop` at turn boundaries (harn#1838) to checkpoint
+    /// and return a resumable handle. Cleared on resume.
+    pub(super) suspend_signal: Arc<AtomicBool>,
+    /// Active suspension metadata. Populated when `status == "suspended"`;
+    /// cleared on transition back to a non-suspended state.
+    pub(super) suspension: Option<WorkerSuspension>,
     pub(super) request: WorkerRequestRecord,
     pub(super) latest_payload: Option<serde_json::Value>,
     pub(super) latest_error: Option<String>,
@@ -399,6 +448,7 @@ pub(super) fn clone_worker_state(state: &WorkerState) -> serde_json::Value {
         "execution": state.execution,
         "snapshot_path": state.snapshot_path,
         "audit": state.audit,
+        "suspension": state.suspension,
     })
 }
 

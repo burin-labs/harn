@@ -23,8 +23,8 @@ use self::agents_workers::{
     ensure_worker_config_session_ids, load_worker_state_snapshot, next_worker_id,
     parse_worker_config, persist_worker_state_snapshot, spawn_worker_task, with_worker_state,
     worker_event_snapshot, worker_id_from_value, worker_request_for_config, worker_snapshot_path,
-    worker_summary, worker_trigger_payload_text, worker_wait_blocks, WorkerConfig, WorkerState,
-    WORKER_REGISTRY,
+    worker_summary, worker_trigger_payload_text, worker_wait_blocks, SuspendInitiator,
+    WorkerConfig, WorkerState, WorkerSuspension, WORKER_REGISTRY,
 };
 use self::sub_agent::{execute_sub_agent, parse_sub_agent_request};
 use crate::orchestration::ArtifactRecord;
@@ -34,16 +34,11 @@ use crate::stdlib::registration::{
 use crate::value::{VmError, VmValue};
 use crate::vm::{Vm, VmBuiltinArity};
 
-const AGENT_SYNC_PRIMITIVES: &[SyncBuiltin] = &[
-    SyncBuiltin::new("__host_worker_resume", resume_agent_builtin)
-        .signature("__host_worker_resume(worker_or_snapshot)")
-        .arity(VmBuiltinArity::Exact(1))
-        .doc("Resume a persisted worker into the local host worker registry."),
-    SyncBuiltin::new("__host_worker_list", list_agents_builtin)
+const AGENT_SYNC_PRIMITIVES: &[SyncBuiltin] =
+    &[SyncBuiltin::new("__host_worker_list", list_agents_builtin)
         .signature("__host_worker_list()")
         .arity(VmBuiltinArity::Exact(0))
-        .doc("List local host worker summaries."),
-];
+        .doc("List local host worker summaries.")];
 
 const AGENT_ASYNC_PRIMITIVES: &[AsyncBuiltin] = &[
     async_builtin!("__host_sub_agent_run", sub_agent_run_builtin)
@@ -66,6 +61,14 @@ const AGENT_ASYNC_PRIMITIVES: &[AsyncBuiltin] = &[
         .signature("__host_worker_wait(worker_or_workers)")
         .arity(VmBuiltinArity::Exact(1))
         .doc("Wait for one or more host workers to reach a terminal state."),
+    async_builtin!("__host_worker_resume", resume_agent_builtin)
+        .signature("__host_worker_resume(worker_or_snapshot, input?)")
+        .arity(VmBuiltinArity::Range { min: 1, max: 2 })
+        .doc("Resume a suspended or persisted worker into the local host worker registry."),
+    async_builtin!("__host_worker_suspend", suspend_agent_builtin)
+        .signature("__host_worker_suspend(worker, reason, options?)")
+        .arity(VmBuiltinArity::Range { min: 1, max: 3 })
+        .doc("Cooperatively suspend a host worker at the next turn boundary."),
     async_builtin!("__host_worker_close", close_agent_builtin)
         .signature("__host_worker_close(worker)")
         .arity(VmBuiltinArity::Exact(1))
@@ -313,6 +316,8 @@ async fn sub_agent_run_builtin(args: Vec<VmValue>) -> Result<VmValue, VmError> {
         config,
         handle: None,
         cancel_token: Arc::new(AtomicBool::new(false)),
+        suspend_signal: Arc::new(AtomicBool::new(false)),
+        suspension: None,
         request: original_request,
         latest_payload: None,
         latest_error: None,
@@ -394,6 +399,8 @@ async fn spawn_agent_builtin(args: Vec<VmValue>) -> Result<VmValue, VmError> {
         config: init.config,
         handle: None,
         cancel_token: Arc::new(AtomicBool::new(false)),
+        suspend_signal: Arc::new(AtomicBool::new(false)),
+        suspension: None,
         request: original_request,
         latest_payload: None,
         latest_error: None,
@@ -495,28 +502,200 @@ async fn worker_trigger_builtin(args: Vec<VmValue>) -> Result<VmValue, VmError> 
     with_worker_state(&worker_id, |state| worker_summary(&state.borrow()))
 }
 
-fn resume_agent_builtin(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
+/// Cooperative suspend (harn#1837 / S-01).
+///
+/// Sets the worker's `suspend_signal` flag — the `agent_loop` honors this
+/// at the next turn boundary (S-02) — records suspension metadata,
+/// persists a snapshot, and emits a `WorkerSuspended` lifecycle event.
+///
+/// Idempotent: calling on an already-suspended worker returns the
+/// existing summary without re-emitting the event or re-persisting the
+/// snapshot. Terminal states (`completed`/`failed`/`cancelled`/
+/// `interrupted`) are rejected — the caller can spawn a fresh worker
+/// instead.
+async fn suspend_agent_builtin(args: Vec<VmValue>) -> Result<VmValue, VmError> {
     let target = args
         .first()
+        .ok_or_else(|| VmError::Runtime("suspend_agent: missing worker handle".to_string()))?;
+    let worker_id = worker_id_from_value(target)?;
+    let reason = args.get(1).map(|value| value.display()).unwrap_or_default();
+    let options = args.get(2);
+    let initiator = options
+        .and_then(|value| value.as_dict())
+        .and_then(|dict| dict.get("initiator"))
         .map(|value| value.display())
-        .filter(|value| !value.is_empty())
-        .ok_or_else(|| {
-            VmError::Runtime("resume_agent: missing worker id or snapshot path".to_string())
-        })?;
-    let state = Rc::new(RefCell::new(load_worker_state_snapshot(&target)?));
+        .map(|text| SuspendInitiator::parse(&text))
+        .unwrap_or_default();
+    let conditions = options
+        .and_then(|value| value.as_dict())
+        .and_then(|dict| dict.get("conditions"))
+        .map(crate::llm::vm_value_to_json);
+
+    let (snapshot, summary, should_emit) = with_worker_state(&worker_id, |state| {
+        let mut worker = state.borrow_mut();
+        if worker.status == "suspended" {
+            return Ok((
+                worker_event_snapshot(&worker),
+                worker_summary(&worker)?,
+                false,
+            ));
+        }
+        match worker.status.as_str() {
+            "completed" | "failed" | "cancelled" | "interrupted" => {
+                return Err(VmError::Runtime(format!(
+                    "suspend_agent: worker {} is already terminal (status={})",
+                    worker.id, worker.status
+                )));
+            }
+            _ => {}
+        }
+        worker.suspend_signal.store(true, Ordering::SeqCst);
+        worker.status = "suspended".to_string();
+        worker.awaiting_started_at = None;
+        worker.awaiting_since = None;
+        worker.suspension = Some(WorkerSuspension {
+            reason: reason.clone(),
+            initiator,
+            suspended_at: uuid::Uuid::now_v7().to_string(),
+            snapshot_ref: worker.snapshot_path.clone(),
+            conditions: conditions.clone(),
+        });
+        // Always persist on suspend — the cooperative-pause contract
+        // demands a durable resumable handle, independent of the
+        // worker's general `persist_state` carry policy.
+        persist_worker_state_snapshot(&worker)?;
+        Ok((
+            worker_event_snapshot(&worker),
+            worker_summary(&worker)?,
+            true,
+        ))
+    })?;
+    if should_emit {
+        emit_worker_event(&snapshot, crate::agent_events::WorkerEvent::WorkerSuspended).await?;
+    }
+    Ok(summary)
+}
+
+/// Resume a suspended or persisted worker.
+///
+/// Accepts either:
+/// - A worker handle dict or task handle currently in the local registry —
+///   if it is in `suspended` state, clears the suspension and warm-resumes
+///   it (transitioning back to `running` and optionally wiring resume
+///   input into the next task slot).
+/// - A snapshot path or worker id whose snapshot lives on disk — rehydrates
+///   the snapshot into the registry. If the snapshot recorded a suspended
+///   state it is preserved (the caller can then re-issue resume to warm
+///   it up); otherwise it lands in the snapshot's terminal/awaiting state.
+async fn resume_agent_builtin(args: Vec<VmValue>) -> Result<VmValue, VmError> {
+    let target_value = args
+        .first()
+        .ok_or_else(|| VmError::Runtime("resume_agent: missing worker handle".to_string()))?
+        .clone();
+    let resume_input = args.get(1).cloned();
+
+    let warm_target_id = match &target_value {
+        VmValue::Dict(_) | VmValue::TaskHandle(_) => Some(worker_id_from_value(&target_value)?),
+        VmValue::String(text) => {
+            let text_str: &str = text.as_ref();
+            if text_str.contains('/') || text_str.ends_with(".json") {
+                None
+            } else {
+                Some(text_str.to_string())
+            }
+        }
+        _ => None,
+    };
+    let registry_hit = warm_target_id
+        .as_deref()
+        .and_then(|id| WORKER_REGISTRY.with(|registry| registry.borrow().get(id).cloned()));
+
+    let state = if let Some(state) = registry_hit {
+        state
+    } else {
+        let snapshot_target = target_value.display();
+        if snapshot_target.is_empty() {
+            return Err(VmError::Runtime(
+                "resume_agent: missing worker id or snapshot path".to_string(),
+            ));
+        }
+        cold_load_worker(&snapshot_target)?
+    };
+    // A suspended worker — whether warm in the registry or just
+    // cold-loaded — gets transitioned back to running. Any other state
+    // is treated as "already where the caller wants it" and the resume
+    // call is a no-op summary read, matching the idempotent contract on
+    // the suspend side.
+    if state.borrow().status == "suspended" {
+        warm_resume_worker(state, resume_input).await
+    } else {
+        apply_resume_input(&mut state.borrow_mut(), resume_input.as_ref());
+        worker_summary(&state.borrow())
+    }
+}
+
+/// Wire the optional resume input into a worker's task slot. Empty or
+/// absent input is a no-op so callers don't have to special-case the
+/// "resume without a new prompt" path.
+fn apply_resume_input(worker: &mut WorkerState, resume_input: Option<&VmValue>) {
+    let Some(input) = resume_input else {
+        return;
+    };
+    let text = input.display();
+    if text.is_empty() {
+        return;
+    }
+    worker.task = text.clone();
+    worker.history.push(text);
+}
+
+async fn warm_resume_worker(
+    state: Rc<RefCell<WorkerState>>,
+    resume_input: Option<VmValue>,
+) -> Result<VmValue, VmError> {
+    let snapshot = {
+        let mut worker = state.borrow_mut();
+        if worker.status != "suspended" {
+            // Non-suspended warm resume is a no-op: the worker is either
+            // running, awaiting input via a separate primitive, or already
+            // terminal. Returning the current summary keeps the call
+            // observably idempotent (same as suspend) and avoids
+            // surprising state transitions in caller code that doesn't
+            // pre-check the status field.
+            return worker_summary(&worker);
+        }
+        worker.suspend_signal.store(false, Ordering::SeqCst);
+        worker.suspension = None;
+        worker.status = "running".to_string();
+        worker.finished_at = None;
+        worker.latest_error = None;
+        apply_resume_input(&mut worker, resume_input.as_ref());
+        if worker.carry_policy.persist_state {
+            persist_worker_state_snapshot(&worker)?;
+        }
+        worker_event_snapshot(&worker)
+    };
+    emit_worker_event(&snapshot, crate::agent_events::WorkerEvent::WorkerResumed).await?;
+    let summary = worker_summary(&state.borrow())?;
+    Ok(summary)
+}
+
+fn cold_load_worker(snapshot_target: &str) -> Result<Rc<RefCell<WorkerState>>, VmError> {
+    let state = Rc::new(RefCell::new(load_worker_state_snapshot(snapshot_target)?));
     let worker_id = state.borrow().id.clone();
     {
         let mut worker = state.borrow_mut();
         ensure_worker_config_session_ids(&mut worker.config, &worker_id);
     }
     WORKER_REGISTRY.with(|registry| {
-        registry.borrow_mut().insert(worker_id, state.clone());
+        registry
+            .borrow_mut()
+            .insert(worker_id.clone(), state.clone());
     });
     if state.borrow().carry_policy.persist_state {
         persist_worker_state_snapshot(&state.borrow())?;
     }
-    let summary = worker_summary(&state.borrow())?;
-    Ok(summary)
+    Ok(state)
 }
 
 async fn wait_agent_builtin(args: Vec<VmValue>) -> Result<VmValue, VmError> {
@@ -549,6 +728,7 @@ async fn close_agent_builtin(args: Vec<VmValue>) -> Result<VmValue, VmError> {
     let (snapshot, summary) = {
         let mut worker = state.borrow_mut();
         worker.cancel_token.store(true, Ordering::SeqCst);
+        worker.suspend_signal.store(false, Ordering::SeqCst);
         if let Some(handle) = worker.handle.take() {
             handle.abort();
         }
@@ -556,6 +736,11 @@ async fn close_agent_builtin(args: Vec<VmValue>) -> Result<VmValue, VmError> {
         worker.finished_at = Some(uuid::Uuid::now_v7().to_string());
         worker.awaiting_started_at = None;
         worker.awaiting_since = None;
+        // Drop any prior suspension envelope — once the worker is
+        // closed the cooperative-pause contract no longer applies, and
+        // a stale `suspension` would mislead observers reading the
+        // worker summary post-cancel.
+        worker.suspension = None;
         worker.latest_error = Some("worker cancelled".to_string());
         if worker.carry_policy.persist_state {
             persist_worker_state_snapshot(&worker)?;
@@ -615,4 +800,277 @@ pub(crate) fn snapshot_suspended_subagents() -> Vec<serde_json::Value> {
             })
             .collect()
     })
+}
+
+#[cfg(test)]
+mod suspend_tests {
+    use super::*;
+    use crate::orchestration::MutationSessionRecord;
+    use std::path::Path;
+    use std::sync::OnceLock;
+    use tokio::sync::{Mutex, MutexGuard};
+
+    /// Suspend tests mutate the process-wide `HARN_WORKER_STATE_DIR`
+    /// env var. Serialize them to keep snapshot paths from one test
+    /// from leaking into another's worker construction. Held across
+    /// `.await` points, so a tokio-aware mutex is required.
+    async fn suspend_test_lock() -> MutexGuard<'static, ()> {
+        static LOCK: OnceLock<Mutex<()>> = OnceLock::new();
+        LOCK.get_or_init(|| Mutex::new(())).lock().await
+    }
+
+    /// Set up an isolated `.harn/workers/...` directory and seed a single
+    /// worker into the local registry. Returns the seeded worker id and
+    /// the test directory (callers clean both up on completion).
+    fn seed_test_worker(name: &str) -> (String, std::path::PathBuf) {
+        let dir = std::env::temp_dir().join(format!("harn-suspend-test-{}", uuid::Uuid::now_v7()));
+        std::fs::create_dir_all(&dir).unwrap();
+        unsafe { std::env::set_var("HARN_WORKER_STATE_DIR", &dir) };
+        let worker_id = format!("worker_{}", uuid::Uuid::now_v7());
+        let snapshot_path = worker_snapshot_path(&worker_id);
+        let state = Rc::new(RefCell::new(WorkerState {
+            id: worker_id.clone(),
+            name: name.to_string(),
+            task: "do the thing".to_string(),
+            status: "running".to_string(),
+            created_at: uuid::Uuid::now_v7().to_string(),
+            started_at: uuid::Uuid::now_v7().to_string(),
+            finished_at: None,
+            awaiting_started_at: None,
+            awaiting_since: None,
+            mode: "sub_agent".to_string(),
+            history: vec!["do the thing".to_string()],
+            config: WorkerConfig::SubAgent {
+                spec: Box::new(SubAgentRunSpec {
+                    name: name.to_string(),
+                    task: "do the thing".to_string(),
+                    session_id: format!("session_{worker_id}"),
+                    ..Default::default()
+                }),
+            },
+            handle: None,
+            cancel_token: Arc::new(AtomicBool::new(false)),
+            suspend_signal: Arc::new(AtomicBool::new(false)),
+            suspension: None,
+            request: Default::default(),
+            latest_payload: None,
+            latest_error: None,
+            transcript: None,
+            artifacts: Vec::new(),
+            parent_worker_id: None,
+            parent_stage_id: None,
+            child_run_id: None,
+            child_run_path: None,
+            carry_policy: agents_workers::WorkerCarryPolicy {
+                artifact_mode: "inherit".to_string(),
+                transcript_mode: "inherit".to_string(),
+                persist_state: true,
+                ..Default::default()
+            },
+            execution: Default::default(),
+            snapshot_path,
+            audit: MutationSessionRecord::default().normalize(),
+        }));
+        WORKER_REGISTRY.with(|registry| {
+            registry
+                .borrow_mut()
+                .insert(worker_id.clone(), state.clone());
+        });
+        (worker_id, dir)
+    }
+
+    fn teardown(dir: &Path, worker_id: &str) {
+        WORKER_REGISTRY.with(|registry| {
+            registry.borrow_mut().remove(worker_id);
+        });
+        let _ = std::fs::remove_dir_all(dir);
+        unsafe { std::env::remove_var("HARN_WORKER_STATE_DIR") };
+    }
+
+    fn handle_value(worker_id: &str) -> VmValue {
+        VmValue::TaskHandle(worker_id.to_string())
+    }
+
+    fn summary_status(summary: &VmValue) -> String {
+        summary
+            .as_dict()
+            .and_then(|dict| dict.get("status"))
+            .map(VmValue::display)
+            .unwrap_or_default()
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn suspend_then_resume_then_close_is_idempotent_and_emits_events() {
+        let _guard = suspend_test_lock().await;
+        let (worker_id, dir) = seed_test_worker("worker-suspend");
+
+        // Idempotency: second suspend on an already-suspended worker is
+        // a no-op summary read, and the suspension metadata recorded on
+        // the first call is preserved verbatim.
+        let first = suspend_agent_builtin(vec![
+            handle_value(&worker_id),
+            VmValue::String(Rc::from("waiting on external review")),
+        ])
+        .await
+        .expect("first suspend");
+        assert_eq!(summary_status(&first), "suspended");
+        let first_suspension = first.as_dict().unwrap().get("suspension").cloned();
+        assert!(
+            first_suspension.is_some() && first_suspension.as_ref().unwrap().display() != "nil"
+        );
+
+        let second = suspend_agent_builtin(vec![
+            handle_value(&worker_id),
+            VmValue::String(Rc::from("different reason — should be ignored")),
+        ])
+        .await
+        .expect("second suspend");
+        assert_eq!(summary_status(&second), "suspended");
+        let second_suspension = second.as_dict().unwrap().get("suspension").cloned();
+        // `VmValue` does not implement PartialEq for the dict branch, so
+        // compare the JSON projection — the same coast-to-coast equality
+        // contract clients see on the wire.
+        let to_json = |value: Option<VmValue>| value.map(|v| crate::llm::vm_value_to_json(&v));
+        assert_eq!(
+            to_json(first_suspension),
+            to_json(second_suspension),
+            "idempotent suspend must preserve the original suspension metadata"
+        );
+
+        // Resume transitions back to running and wires the resume input
+        // into the worker's task slot.
+        let resumed = resume_agent_builtin(vec![
+            handle_value(&worker_id),
+            VmValue::String(Rc::from("next: write the report")),
+        ])
+        .await
+        .expect("resume");
+        assert_eq!(summary_status(&resumed), "running");
+        assert!(
+            resumed.as_dict().unwrap().get("suspension").is_none()
+                || resumed
+                    .as_dict()
+                    .unwrap()
+                    .get("suspension")
+                    .unwrap()
+                    .display()
+                    == "nil"
+        );
+        assert_eq!(
+            resumed.as_dict().unwrap().get("task").map(VmValue::display),
+            Some("next: write the report".to_string())
+        );
+
+        // Closing a (re-)running worker still works the same way as
+        // before — proves that the close path is not gated on a
+        // specific upstream status.
+        let closed = close_agent_builtin(vec![handle_value(&worker_id)])
+            .await
+            .expect("close");
+        assert_eq!(summary_status(&closed), "cancelled");
+
+        teardown(&dir, &worker_id);
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn suspend_then_close_transitions_to_cancelled() {
+        let _guard = suspend_test_lock().await;
+        let (worker_id, dir) = seed_test_worker("worker-suspend-close");
+
+        suspend_agent_builtin(vec![
+            handle_value(&worker_id),
+            VmValue::String(Rc::from("park me")),
+        ])
+        .await
+        .expect("suspend");
+
+        let summary = close_agent_builtin(vec![handle_value(&worker_id)])
+            .await
+            .expect("close");
+        assert_eq!(summary_status(&summary), "cancelled");
+
+        teardown(&dir, &worker_id);
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn suspended_worker_survives_process_restart_via_snapshot() {
+        let _guard = suspend_test_lock().await;
+        let (worker_id, dir) = seed_test_worker("worker-suspend-restart");
+        let snapshot_path = WORKER_REGISTRY.with(|registry| {
+            registry
+                .borrow()
+                .get(&worker_id)
+                .unwrap()
+                .borrow()
+                .snapshot_path
+                .clone()
+        });
+
+        suspend_agent_builtin(vec![
+            handle_value(&worker_id),
+            VmValue::String(Rc::from("checkpoint before restart")),
+        ])
+        .await
+        .expect("suspend");
+
+        // Simulate process restart by evicting the in-memory registry
+        // entry and cold-loading the persisted snapshot. The wire
+        // contract is that suspended status survives the round trip;
+        // `interrupted` would be a regression because cooperative
+        // suspends are not synonymous with crash-while-running.
+        WORKER_REGISTRY.with(|registry| {
+            registry.borrow_mut().remove(&worker_id);
+        });
+        let reloaded =
+            agents_workers::load_worker_state_snapshot(&snapshot_path).expect("reload snapshot");
+        assert_eq!(reloaded.status, "suspended");
+        assert!(
+            reloaded.suspension.is_some(),
+            "snapshot must preserve suspension metadata"
+        );
+        assert_eq!(
+            reloaded.suspension.as_ref().unwrap().reason,
+            "checkpoint before restart"
+        );
+
+        // Rehydrate into the registry and warm-resume — the operator
+        // wakes the worker back up after restart.
+        WORKER_REGISTRY.with(|registry| {
+            registry
+                .borrow_mut()
+                .insert(worker_id.clone(), Rc::new(RefCell::new(reloaded)));
+        });
+        let resumed = resume_agent_builtin(vec![handle_value(&worker_id)])
+            .await
+            .expect("resume after restart");
+        assert_eq!(summary_status(&resumed), "running");
+
+        teardown(&dir, &worker_id);
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn suspend_rejects_terminal_workers() {
+        let _guard = suspend_test_lock().await;
+        let (worker_id, dir) = seed_test_worker("worker-suspend-terminal");
+        WORKER_REGISTRY.with(|registry| {
+            let state = registry.borrow().get(&worker_id).cloned().unwrap();
+            state.borrow_mut().status = "completed".to_string();
+        });
+
+        let err = suspend_agent_builtin(vec![
+            handle_value(&worker_id),
+            VmValue::String(Rc::from("late suspend")),
+        ])
+        .await
+        .expect_err("terminal worker should reject suspend");
+        match err {
+            VmError::Runtime(message) => assert!(
+                message.contains("terminal"),
+                "expected terminal-rejection message, got: {message}"
+            ),
+            other => panic!("expected Runtime error, got {other:?}"),
+        }
+
+        teardown(&dir, &worker_id);
+    }
 }
