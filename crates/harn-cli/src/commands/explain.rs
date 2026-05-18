@@ -3,7 +3,8 @@ use std::str::FromStr;
 use harn_parser::diagnostic_codes::Code;
 use serde::Serialize;
 
-use crate::cli::ExplainArgs;
+use crate::cli::{CatalogFormat, ExplainArgs};
+use crate::commands::diagnostics_catalog;
 use crate::parse_source_file;
 
 /// JSON envelope returned by `harn explain <CODE> --json`. Stable shape —
@@ -35,18 +36,32 @@ struct RepairEnvelope<'a> {
 }
 
 pub(crate) fn run_explain(args: &ExplainArgs) -> i32 {
+    if args.catalog {
+        return run_catalog(args.format);
+    }
+
     if let Some(invariant) = &args.invariant {
         return run_invariant_explain(invariant, args);
     }
 
-    let code = match Code::from_str(&args.target) {
+    // Without `--catalog` or `--invariant`, a target diagnostic code is
+    // required. Clap's ArgGroup enforces presence in the catalog-or-target
+    // dimension, so this branch only fires when neither catalog nor an
+    // invariant lookup was requested but the positional was supplied.
+    let Some(target) = args.target.as_deref() else {
+        eprintln!(
+            "`harn explain` needs a diagnostic code (e.g. `harn explain HARN-TYP-014`), \
+             `--catalog`, or `--invariant <NAME> <FN> <FILE>`."
+        );
+        return 2;
+    };
+    let code = match Code::from_str(target) {
         Ok(code) => code,
         Err(_) => {
             eprintln!(
-                "Unknown Harn diagnostic code `{}`. Expected `HARN-<CAT>-<NNN>` (e.g. `HARN-TYP-014`).",
-                args.target
+                "Unknown Harn diagnostic code `{target}`. Expected `HARN-<CAT>-<NNN>` (e.g. `HARN-TYP-014`).",
             );
-            eprintln!("Run `harn explain HARN-TYP-001` for an example, or check the catalog at <https://harnlang.com/diagnostics/>.");
+            eprintln!("Run `harn explain HARN-TYP-001` for an example, or `harn explain --catalog` for the full registry.");
             return 2;
         }
     };
@@ -56,6 +71,16 @@ pub(crate) fn run_explain(args: &ExplainArgs) -> i32 {
     } else {
         print_code_text(code)
     }
+}
+
+fn run_catalog(format: CatalogFormat) -> i32 {
+    let rendered = match format {
+        CatalogFormat::Markdown => diagnostics_catalog::render_markdown(),
+        CatalogFormat::Json => diagnostics_catalog::render_json(),
+        CatalogFormat::Text => diagnostics_catalog::render_text(),
+    };
+    print!("{rendered}");
+    0
 }
 
 fn print_code_text(code: Code) -> i32 {
@@ -119,6 +144,12 @@ fn print_code_json(code: Code) -> i32 {
 }
 
 fn run_invariant_explain(invariant: &str, args: &ExplainArgs) -> i32 {
+    let Some(target) = args.target.as_deref() else {
+        eprintln!(
+            "`--invariant` requires a handler / function / tool / pipeline name and a file path. Usage: `harn explain --invariant <NAME> <FUNCTION> <FILE>`"
+        );
+        return 2;
+    };
     let Some(file) = args.file.as_deref() else {
         eprintln!(
             "`--invariant` requires both a function name and a path. Usage: `harn explain --invariant <NAME> <FUNCTION> <FILE>`"
@@ -126,12 +157,12 @@ fn run_invariant_explain(invariant: &str, args: &ExplainArgs) -> i32 {
         return 2;
     };
     let (_, program) = parse_source_file(file);
-    match harn_ir::explain_handler_invariant(&program, &args.target, invariant) {
+    match harn_ir::explain_handler_invariant(&program, target, invariant) {
         Ok(diagnostics) => {
             if diagnostics.is_empty() {
                 println!(
                     "No `{}` violations found for `{}` in {}.",
-                    invariant, args.target, file
+                    invariant, target, file
                 );
                 return 0;
             }
@@ -166,7 +197,7 @@ fn run_invariant_explain(invariant: &str, args: &ExplainArgs) -> i32 {
 #[cfg(test)]
 mod tests {
     use super::run_explain;
-    use crate::cli::ExplainArgs;
+    use crate::cli::{CatalogFormat, ExplainArgs};
     use std::sync::atomic::{AtomicU64, Ordering};
 
     static TMP_COUNTER: AtomicU64 = AtomicU64::new(0);
@@ -179,9 +210,11 @@ mod tests {
 
     fn args_for_code(code: &str, json: bool) -> ExplainArgs {
         ExplainArgs {
-            target: code.to_string(),
+            target: Some(code.to_string()),
             file: None,
             invariant: None,
+            catalog: false,
+            format: CatalogFormat::Markdown,
             json,
         }
     }
@@ -291,9 +324,11 @@ fn handler() {
         .unwrap();
 
         let code = run_explain(&ExplainArgs {
-            target: "handler".to_string(),
+            target: Some("handler".to_string()),
             file: Some(file.to_string_lossy().into_owned()),
             invariant: Some("approval.reachability".to_string()),
+            catalog: false,
+            format: CatalogFormat::Markdown,
             json: false,
         });
 
@@ -317,13 +352,41 @@ fn handler() {
         .unwrap();
 
         let code = run_explain(&ExplainArgs {
-            target: "missing".to_string(),
+            target: Some("missing".to_string()),
             file: Some(file.to_string_lossy().into_owned()),
             invariant: Some("approval.reachability".to_string()),
+            catalog: false,
+            format: CatalogFormat::Markdown,
             json: false,
         });
 
         assert_eq!(code, 1);
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn explain_catalog_json_succeeds() {
+        let code = run_explain(&ExplainArgs {
+            target: None,
+            file: None,
+            invariant: None,
+            catalog: true,
+            format: CatalogFormat::Json,
+            json: false,
+        });
+        assert_eq!(code, 0);
+    }
+
+    #[test]
+    fn explain_catalog_markdown_succeeds() {
+        let code = run_explain(&ExplainArgs {
+            target: None,
+            file: None,
+            invariant: None,
+            catalog: true,
+            format: CatalogFormat::Markdown,
+            json: false,
+        });
+        assert_eq!(code, 0);
     }
 }

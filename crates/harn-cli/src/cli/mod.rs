@@ -97,7 +97,7 @@ pub use eval::{
     EvalArgs, EvalCommand, EvalPromptArgs, EvalPromptMode, EvalPromptOutput, EvalToolCallsArgs,
     EvalToolCallsCommand, EvalToolCallsRegressionArgs,
 };
-pub(crate) use explain::ExplainArgs;
+pub(crate) use explain::{CatalogFormat, ExplainArgs};
 pub(crate) use fix::FixArgs;
 pub(crate) use flow::{
     FlowArchivistCommand, FlowArchivistScanArgs, FlowArgs, FlowCommand, FlowReplayAuditArgs,

@@ -1,10 +1,10 @@
-.PHONY: setup install-hooks configure-merge-drivers build build-release sign-local check fmt fmt-harn fmt-harn-fix lint lint-md lint-actions lint-harn spec-lint test test-e2e test-cargo test-fast test-harn-scripts conformance protocol-conformance replay-oracle replay-bench eval-tool-calls bench-vm bench-vm-clone bench-llm bench-orchestration all release-gate release-smoke smoke-audit portal portal-check portal-demo gen-highlight check-highlight gen-protocol-artifacts check-protocol-artifacts check-bindings gen-session-bundle-schema check-session-bundle-schema gen-trigger-quickref check-trigger-quickref gen-provider-matrix check-provider-matrix gen-provider-catalog check-provider-catalog gen-connector-matrix check-connector-matrix check-trigger-examples check-docs-snippets check-docs-workflow-quickstart sync-language-spec check-language-spec lint-test-patterns lint-diagnostic-codes check-receipt-structs lint-no-rust-prompt-prose lint-no-xfail-regression check-provider-catalog-drift
+.PHONY: setup install-hooks configure-merge-drivers build build-release sign-local check fmt fmt-harn fmt-harn-fix lint lint-md lint-actions lint-harn spec-lint test test-e2e test-cargo test-fast test-harn-scripts conformance protocol-conformance replay-oracle replay-bench eval-tool-calls bench-vm bench-vm-clone bench-llm bench-orchestration all release-gate release-smoke smoke-audit portal portal-check portal-demo gen-highlight check-highlight gen-protocol-artifacts check-protocol-artifacts check-bindings gen-session-bundle-schema check-session-bundle-schema gen-trigger-quickref check-trigger-quickref gen-provider-matrix check-provider-matrix gen-provider-catalog check-provider-catalog gen-connector-matrix check-connector-matrix check-trigger-examples check-docs-snippets check-docs-workflow-quickstart sync-language-spec check-language-spec sync-diagnostics-catalog check-diagnostics-catalog lint-test-patterns lint-diagnostic-codes check-receipt-structs lint-no-rust-prompt-prose lint-no-xfail-regression check-provider-catalog-drift
 
 # Full quality check: format first, then lint/test in parallel.
 # Usage: make all -j       (parallel checks after formatting)
 #        make all           (sequential, also works)
 all: fmt
-	$(MAKE) lint lint-md lint-actions lint-harn spec-lint fmt-harn test test-harn-scripts conformance protocol-conformance replay-oracle replay-bench check-highlight check-protocol-artifacts check-bindings check-session-bundle-schema check-language-spec check-trigger-quickref check-provider-matrix check-provider-catalog check-connector-matrix check-trigger-examples check-docs-snippets check-docs-workflow-quickstart lint-test-patterns lint-diagnostic-codes check-receipt-structs check-provider-catalog-drift portal-check
+	$(MAKE) lint lint-md lint-actions lint-harn spec-lint fmt-harn test test-harn-scripts conformance protocol-conformance replay-oracle replay-bench check-highlight check-protocol-artifacts check-bindings check-session-bundle-schema check-language-spec check-trigger-quickref check-provider-matrix check-provider-catalog check-connector-matrix check-trigger-examples check-docs-snippets check-docs-workflow-quickstart check-diagnostics-catalog lint-test-patterns lint-diagnostic-codes check-receipt-structs check-provider-catalog-drift portal-check
 
 check: all
 
@@ -360,6 +360,38 @@ check-trigger-examples:
 		cargo run --quiet --bin harn -- check "$$dir/lib.harn"; \
 	done
 	@echo "    Trigger examples OK."
+
+# Regenerate the diagnostic-code catalog (markdown page + JSON sidecar)
+# from the in-binary registry in crates/harn-parser/src/diagnostic_codes.rs.
+# Run this whenever you add, rename, retire, or rewire a HARN-<CAT>-<NNN>
+# code or its repair template.
+sync-diagnostics-catalog:
+	cargo run --quiet --bin harn -- explain --catalog --format markdown > docs/src/diagnostics.md
+	cargo run --quiet --bin harn -- explain --catalog --format json > docs/diagnostics-catalog.json
+
+# CI guard: fail if docs/src/diagnostics.md or docs/diagnostics-catalog.json
+# drift from the in-binary registry. `make sync-diagnostics-catalog` fixes it.
+check-diagnostics-catalog:
+	@echo "=== Checking diagnostic-code catalog is up to date ==="
+	@set -e; \
+	tmp_md=$$(mktemp); \
+	tmp_json=$$(mktemp); \
+	trap 'rm -f "$$tmp_md" "$$tmp_json"' EXIT; \
+	cargo run --quiet --bin harn -- explain --catalog --format markdown > "$$tmp_md"; \
+	cargo run --quiet --bin harn -- explain --catalog --format json > "$$tmp_json"; \
+	if ! diff -u docs/src/diagnostics.md "$$tmp_md" >/dev/null; then \
+		echo "error: docs/src/diagnostics.md is stale relative to the diagnostic-code registry." >&2; \
+		echo "hint: run 'make sync-diagnostics-catalog' and commit the result." >&2; \
+		diff -u docs/src/diagnostics.md "$$tmp_md" >&2 || true; \
+		exit 1; \
+	fi; \
+	if ! diff -u docs/diagnostics-catalog.json "$$tmp_json" >/dev/null; then \
+		echo "error: docs/diagnostics-catalog.json is stale relative to the diagnostic-code registry." >&2; \
+		echo "hint: run 'make sync-diagnostics-catalog' and commit the result." >&2; \
+		diff -u docs/diagnostics-catalog.json "$$tmp_json" >&2 || true; \
+		exit 1; \
+	fi
+	@echo "    Diagnostic-code catalog OK."
 
 # CI guard: every ```harn block in docs/src/*.md must parse under
 # `harn check`. Blocks tagged ```harn,ignore are skipped.

@@ -89,6 +89,7 @@ jobs:
       - run: make check-connector-matrix
       - run: make check-trigger-examples
       - run: make check-docs-snippets
+      - run: make check-diagnostics-catalog
       # check-bindings runs the published Python and Go protocol bindings
       # against the committed JSON fixture. ubuntu-latest ships python3 and
       # go preinstalled, so no setup action is required.

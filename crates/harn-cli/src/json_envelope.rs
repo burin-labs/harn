@@ -248,6 +248,13 @@ pub fn catalog() -> Vec<SchemaEntry> {
             description: "Static trigger route, budget, capability, and vendor-lock inventory.",
             schema_json: None,
         },
+        SchemaEntry {
+            command: "explain --catalog",
+            schema_version: crate::commands::diagnostics_catalog::SCHEMA_VERSION,
+            description:
+                "Diagnostic-code catalog: per-code summary, repair, safety, related codes.",
+            schema_json: None,
+        },
     ]
 }
 

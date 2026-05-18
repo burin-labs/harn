@@ -31,6 +31,17 @@ condensed series summaries instead of full per-patch history.
   `quickfix.harn.<safety>` kinds and carry `{ repair_id, safety,
   diagnostic_code }` data so IDE clients can dispatch without parsing
   diagnostic prose.
+- **Diagnostic-code catalog: generated `docs/src/diagnostics.md` +
+  `docs/diagnostics-catalog.json` sidecar (#1751).** New
+  `harn explain --catalog [--format markdown|json|text]` dumps the
+  in-binary `HARN-<CAT>-<NNN>` registry as a complete catalog so agents,
+  editors, and hosted error pages dispatch on `schemaVersion: 1`
+  metadata (`code`, `category`, `summary`, `repairs[]`, `related[]`,
+  `explanationPresent`, `apiStability`) without parsing prose. The mdBook
+  catalog page is regenerated via `make sync-diagnostics-catalog`; a new
+  `make check-diagnostics-catalog` CI gate fails on drift between the
+  committed catalog and the in-binary registry. The hand-written tour of
+  shape diagnostics moved to `docs/src/reading-shape-diagnostics.md`.
 
 ## v0.8.25
 

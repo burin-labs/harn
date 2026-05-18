@@ -15,7 +15,8 @@
 
 - [Language basics](./language-basics.md)
 - [Error handling](./error-handling.md)
-- [Reading diagnostics](./diagnostics.md)
+- [Diagnostic codes catalog](./diagnostics.md)
+- [Reading shape diagnostics](./reading-shape-diagnostics.md)
 - [Modules and imports](./modules.md)
 - [Concurrency](./concurrency.md)
 - [Streams](./streams.md)
