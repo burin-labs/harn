@@ -4,6 +4,12 @@ Harn's daemon builtins wrap the existing `agent_loop(..., {daemon: true})`
 runtime so scripts can manage long-lived assistants without hand-assembling
 snapshot paths and resume options.
 
+Daemon idle is implemented as a special case of `agent_await_resumption` with
+`timeout` / `on_event` resume conditions preconfigured from daemon options. The
+runtime still waits in-process at the idle boundary, so existing daemon loops
+keep their `active -> idle -> active` behavior instead of returning a suspended
+handle to the caller.
+
 ## Builtins
 
 ### `daemon_spawn(config)`

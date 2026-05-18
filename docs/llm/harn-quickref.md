@@ -1829,7 +1829,8 @@ sentinel-only completion gate.
 
 Self-parking agents use a shared `ResumeConditions` shape for
 `agent_await_resumption(reason, conditions?)` and `spawn_agent({options: {resume_when:
-...}})`. Call `parse_resume_conditions(conditions?)` from
+...}})`. Call `parse_resume_conditions(conditions?)` or
+`agent_await_resumption(reason, conditions?)` from
 `std/agent/workers` when you need to validate or normalize the shape
 without spawning a worker.
 

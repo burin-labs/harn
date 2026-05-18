@@ -8,6 +8,8 @@ type ResumeTimeoutSpec = {duration_minutes: int, on_timeout: ResumeTimeoutAction
 
 type ResumeConditions = {trigger: dict?, timeout: ResumeTimeoutSpec?, on_event: string?}
 
+type AgentAwaitResumptionRequest = {reason: string, conditions: ResumeConditions?}
+
 fn __agent_option_keys() {
   return [
     "provider",
@@ -375,6 +377,28 @@ pub fn spawn_agent(config) {
  */
 pub fn parse_resume_conditions(conditions = nil) -> ResumeConditions? {
   return __host_resume_conditions_parse(conditions)
+}
+
+/**
+ * agent_await_resumption.
+ *
+ * Build the normalized request used by the model-facing
+ * `agent_await_resumption` lifecycle tool. `agent_loop` decides whether that
+ * request becomes a worker suspension, a top-level suspension checkpoint, or
+ * daemon idle metadata.
+ *
+ * @effects: [host]
+ * @allocation: heap
+ * @errors: [HARN-SUS-002]
+ * @api_stability: experimental
+ * @example: agent_await_resumption("waiting on review", {timeout: {duration_minutes: 5}})
+ */
+pub fn agent_await_resumption(reason, conditions = nil) -> AgentAwaitResumptionRequest {
+  let normalized_reason = trim(to_string(reason ?? ""))
+  if normalized_reason == "" {
+    throw "agent_await_resumption: reason is required"
+  }
+  return {reason: normalized_reason, conditions: parse_resume_conditions(conditions)}
 }
 
 /**
