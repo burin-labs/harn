@@ -103,6 +103,14 @@ pub(crate) const SIGNATURES: &[BuiltinSignature] = &[
         TY_DICT,
     ),
     BuiltinSignature::simple(
+        "agent_await_resumption",
+        &[
+            Param::new("reason", TY_ANY),
+            Param::optional("conditions", RESUME_CONDITIONS_OR_NIL),
+        ],
+        TY_DICT,
+    ),
+    BuiltinSignature::simple(
         "agent_config",
         &[Param::new("agent", TY_DICT), Param::new("prompt", TY_ANY)],
         TY_DICT,
