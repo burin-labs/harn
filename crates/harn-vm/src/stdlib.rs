@@ -2,7 +2,7 @@
 
 mod agent_sessions;
 pub mod agent_state;
-mod agents;
+pub(crate) mod agents;
 mod agents_daemon;
 pub(crate) mod assemble;
 pub mod asset_paths;

@@ -1,0 +1,9 @@
+empty=true/true
+counts=0,0,0,0
+suspended_decision=none
+trigger_decision=none
+handoff_decision=none
+llm_decision=none
+summary=no unsettled work
+unsupported=unsupported
+wait=settled

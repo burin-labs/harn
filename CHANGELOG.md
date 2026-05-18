@@ -38,6 +38,15 @@ condensed series summaries instead of full per-patch history.
   sorts results by rule priority, catalogue priority, then declaration
   order so downstream mode callbacks (TH-03) and the
   `preset_run_command` wrapper (TH-02) layer cleanly on top.
+- **Harness unsettled-state snapshot foundation (#1857).** Adds
+  `harness.unsettled_state()`, `harness.is_empty(state?)`,
+  `harness.counts(state?)`, and `harness.summary(state?)`, plus matching
+  `std/lifecycle` helpers for `on_finish` callbacks. Suspended subagents
+  and in-flight LLM calls now enumerate from live VM registries; trigger
+  and handoff buckets are stable typed empty lists until their per-item
+  registries land. Root harness action methods are present, with worker
+  resume/cancel delegated to host worker primitives and not-yet-backed
+  actions returning typed unsupported results.
 - **`harn check --json` and `harn fmt --json` (#1759).** Adds
   standard `JsonEnvelope` reports for static checks and formatter
   runs, including per-file status, diagnostics, summary counts, and

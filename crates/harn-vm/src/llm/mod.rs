@@ -52,6 +52,8 @@ mod transcript_stats;
 
 use std::sync::OnceLock;
 
+pub(crate) use call::snapshot_in_flight_llm_calls;
+
 /// Streaming client: no overall request timeout (per-chunk idle timeout
 /// handles stalls), connection pooling and TLS session reuse.
 pub(crate) fn shared_streaming_client() -> &'static reqwest::Client {
@@ -259,6 +261,7 @@ pub use self::trace::{
 
 /// Reset all thread-local LLM state (cost, trace, mock, rate limits). Call between test runs.
 pub fn reset_llm_state() {
+    call::clear_in_flight_llm_calls();
     cost::reset_cost_state();
     trace::reset_trace_state();
     trace::reset_agent_trace_state();

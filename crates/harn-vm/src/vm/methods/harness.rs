@@ -30,7 +30,7 @@ impl crate::vm::Vm {
             return self.call_mock_harness_method(handle, method, args).await;
         }
         match handle.kind() {
-            HarnessKind::Root => Err(method_unsupported(handle, method)),
+            HarnessKind::Root => self.call_harness_root_method(handle, method, args).await,
             HarnessKind::Stdio => self.call_harness_stdio_method(handle, method, args),
             HarnessKind::Clock => self.call_harness_clock_method(handle, method, args).await,
             HarnessKind::Fs | HarnessKind::Env | HarnessKind::Random | HarnessKind::Net => {
@@ -39,6 +39,106 @@ impl crate::vm::Vm {
                 handle.type_name(),
             )))
             }
+        }
+    }
+
+    async fn call_harness_root_method(
+        &mut self,
+        handle: &VmHarness,
+        method: &str,
+        args: &[VmValue],
+    ) -> Result<VmValue, VmError> {
+        match method {
+            "unsettled_state" => {
+                let snapshot = crate::orchestration::unsettled_state_snapshot();
+                Ok(crate::stdlib::json_to_vm_value(&snapshot.to_json()))
+            }
+            "is_empty" => {
+                let empty = match args.first() {
+                    Some(state) => state_counts(state)?.is_empty(),
+                    None => crate::orchestration::unsettled_state_snapshot().is_empty(),
+                };
+                Ok(VmValue::Bool(empty))
+            }
+            "counts" => match args.first() {
+                Some(state) => Ok(crate::stdlib::json_to_vm_value(
+                    &state_counts(state)?.to_json(),
+                )),
+                None => {
+                    let snapshot = crate::orchestration::unsettled_state_snapshot();
+                    Ok(crate::stdlib::json_to_vm_value(&snapshot.counts_json()))
+                }
+            },
+            "summary" => match args.first() {
+                Some(state) => Ok(VmValue::String(std::rc::Rc::from(
+                    state_counts(state)?.summary().as_str(),
+                ))),
+                None => {
+                    let snapshot = crate::orchestration::unsettled_state_snapshot();
+                    Ok(VmValue::String(std::rc::Rc::from(snapshot.summary())))
+                }
+            },
+            "resume_subagent" => {
+                let handle_arg = args.first().cloned().ok_or_else(|| {
+                    VmError::TypeError("Harness.resume_subagent expects a handle".to_string())
+                })?;
+                if let Some(input) = args.get(1).cloned() {
+                    self.call_named_builtin("__host_worker_send_input", vec![handle_arg, input])
+                        .await
+                } else {
+                    self.call_named_builtin("__host_worker_resume", vec![handle_arg])
+                        .await
+                }
+            }
+            "cancel_subagent" => {
+                let handle_arg = args.first().cloned().ok_or_else(|| {
+                    VmError::TypeError("Harness.cancel_subagent expects a handle".to_string())
+                })?;
+                self.call_named_builtin("__host_worker_close", vec![handle_arg])
+                    .await
+            }
+            "wait_for_any_settlement" => {
+                let snapshot = crate::orchestration::unsettled_state_snapshot();
+                let status = if snapshot.is_empty() {
+                    "settled"
+                } else {
+                    "unsettled"
+                };
+                Ok(crate::stdlib::json_to_vm_value(&serde_json::json!({
+                    "status": status,
+                    "timed_out": false,
+                    "state": snapshot.to_json(),
+                })))
+            }
+            "current_pipeline_id" => Ok(crate::orchestration::current_mutation_session()
+                .and_then(|session| session.run_id.or(Some(session.session_id)))
+                .map(|id| VmValue::String(std::rc::Rc::from(id)))
+                .unwrap_or(VmValue::Nil)),
+            "handoff_to" => Ok(unsupported_harness_action(
+                method,
+                "partial handoff envelopes do not have a VM-level registry on this branch",
+            )),
+            "acknowledge_trigger" | "defer_trigger" => Ok(unsupported_harness_action(
+                method,
+                "queued trigger items do not have an acknowledgement registry on this branch",
+            )),
+            "acknowledge_handoff" => Ok(unsupported_harness_action(
+                method,
+                "partial handoff envelopes do not have an acknowledgement registry on this branch",
+            )),
+            "emit_audit" => Ok(unsupported_harness_action(
+                method,
+                "LifecycleAuditEntry persistence is not available on this branch",
+            )),
+            "finalize" => Ok(unsupported_harness_action(
+                method,
+                "pipeline disposition persistence is not available on this branch",
+            )),
+            "spawn_settlement_agent" => Ok(unsupported_harness_action(
+                method,
+                "settlement-agent spawning is deferred to the drain implementation",
+            )),
+            _ => Err(method_unsupported(handle, method)),
         }
     }
 
@@ -210,6 +310,76 @@ impl crate::vm::Vm {
             },
         }
     }
+}
+
+#[derive(Clone, Copy)]
+struct UnsettledCounts {
+    suspended: usize,
+    queued: usize,
+    partial: usize,
+    in_flight: usize,
+}
+
+impl UnsettledCounts {
+    fn is_empty(self) -> bool {
+        self.suspended == 0 && self.queued == 0 && self.partial == 0 && self.in_flight == 0
+    }
+
+    fn to_json(self) -> serde_json::Value {
+        serde_json::json!({
+            "suspended": self.suspended,
+            "queued": self.queued,
+            "partial": self.partial,
+            "in_flight": self.in_flight,
+        })
+    }
+
+    fn summary(self) -> String {
+        if self.is_empty() {
+            "no unsettled work".to_string()
+        } else {
+            format!(
+                "unsettled work: {} suspended subagents, {} queued triggers, {} partial handoffs, {} in-flight llm calls",
+                self.suspended, self.queued, self.partial, self.in_flight
+            )
+        }
+    }
+}
+
+fn state_counts(state: &VmValue) -> Result<UnsettledCounts, VmError> {
+    let Some(dict) = state.as_dict() else {
+        return Err(VmError::TypeError(
+            "Harness unsettled-state helpers expect a state dict".to_string(),
+        ));
+    };
+    Ok(UnsettledCounts {
+        suspended: state_bucket_len(dict, "suspended_subagents")?,
+        queued: state_bucket_len(dict, "queued_triggers")?,
+        partial: state_bucket_len(dict, "partial_handoffs")?,
+        in_flight: state_bucket_len(dict, "in_flight_llm_calls")?,
+    })
+}
+
+fn state_bucket_len(
+    dict: &std::collections::BTreeMap<String, VmValue>,
+    key: &str,
+) -> Result<usize, VmError> {
+    match dict.get(key) {
+        Some(VmValue::List(items)) => Ok(items.len()),
+        Some(other) => Err(VmError::TypeError(format!(
+            "unsettled-state field `{key}` must be a list, got {}",
+            other.type_name()
+        ))),
+        None => Ok(0),
+    }
+}
+
+fn unsupported_harness_action(method: &str, reason: &str) -> VmValue {
+    crate::stdlib::json_to_vm_value(&serde_json::json!({
+        "status": "unsupported",
+        "method": method,
+        "reason": reason,
+    }))
 }
 
 fn method_unsupported(handle: &VmHarness, method: &str) -> VmError {

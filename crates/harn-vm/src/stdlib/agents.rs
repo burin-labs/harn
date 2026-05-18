@@ -578,3 +578,41 @@ fn list_agents_builtin(_args: &[VmValue], _out: &mut String) -> Result<VmValue, 
     })?;
     Ok(VmValue::List(Rc::new(workers)))
 }
+
+pub(crate) fn snapshot_suspended_subagents() -> Vec<serde_json::Value> {
+    WORKER_REGISTRY.with(|registry| {
+        registry
+            .borrow()
+            .values()
+            .filter_map(|state| {
+                let worker = state.borrow();
+                if worker.status != "awaiting" || worker.mode != "sub_agent" {
+                    return None;
+                }
+                let age_ms = worker
+                    .awaiting_since
+                    .map(|started| started.elapsed().as_millis().min(i64::MAX as u128) as i64)
+                    .unwrap_or(0);
+                Some(serde_json::json!({
+                    "handle": worker.id.clone(),
+                    "session_id": if worker.audit.session_id.is_empty() {
+                        serde_json::Value::Null
+                    } else {
+                        serde_json::json!(worker.audit.session_id.clone())
+                    },
+                    "reason": "awaiting_input",
+                    "conditions": {
+                        "status": worker.status.clone(),
+                        "retriggerable": worker.carry_policy.retriggerable,
+                        "awaiting_started_at": worker.awaiting_started_at.clone(),
+                    },
+                    "age_ms": age_ms,
+                    "initiator": worker
+                        .parent_worker_id
+                        .clone()
+                        .unwrap_or_else(|| "pipeline".to_string()),
+                }))
+            })
+            .collect()
+    })
+}
