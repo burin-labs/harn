@@ -1,0 +1,6 @@
+{
+  "mode": "null",
+  "expect_deny_events": [
+    {"sub_handle": "net", "method": "get", "args": ["https://example.test"]}
+  ]
+}

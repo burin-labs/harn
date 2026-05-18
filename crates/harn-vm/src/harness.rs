@@ -20,8 +20,10 @@
 //!     state through the bytecode VM and distinguishes the root handle from
 //!     its sub-handles via [`HarnessKind`].
 
+use std::collections::{BTreeMap, VecDeque};
 use std::fmt;
-use std::sync::Arc;
+use std::rc::Rc;
+use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use async_trait::async_trait;
@@ -116,11 +118,219 @@ impl HarnessKind {
 #[derive(Debug)]
 pub struct HarnessInner {
     clock: Arc<dyn Clock>,
+    mode: HarnessMode,
 }
 
 impl HarnessInner {
     pub fn clock(&self) -> &Arc<dyn Clock> {
         &self.clock
+    }
+
+    pub(crate) fn mode(&self) -> &HarnessMode {
+        &self.mode
+    }
+}
+
+#[derive(Debug)]
+pub(crate) enum HarnessMode {
+    Real,
+    Null(NullHarnessState),
+    Mock(MockHarnessState),
+}
+
+#[derive(Debug, Default)]
+pub(crate) struct NullHarnessState {
+    deny_events: Mutex<Vec<DenyEvent>>,
+}
+
+impl NullHarnessState {
+    pub(crate) fn record_deny(
+        &self,
+        sub_handle: HarnessKind,
+        method: &str,
+        args: &[crate::VmValue],
+    ) {
+        self.deny_events
+            .lock()
+            .expect("deny events poisoned")
+            .push(DenyEvent::new(
+                sub_handle,
+                method,
+                args.iter().map(crate::VmValue::display).collect(),
+            ));
+    }
+
+    pub(crate) fn deny_events(&self) -> Vec<DenyEvent> {
+        self.deny_events
+            .lock()
+            .expect("deny events poisoned")
+            .clone()
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct DenyEvent {
+    pub sub_handle: HarnessKind,
+    pub method: String,
+    pub args: Vec<String>,
+}
+
+impl DenyEvent {
+    fn new(sub_handle: HarnessKind, method: &str, args: Vec<String>) -> Self {
+        Self {
+            sub_handle,
+            method: method.to_string(),
+            args,
+        }
+    }
+}
+
+#[derive(Debug)]
+pub(crate) struct MockHarnessState {
+    calls: Mutex<Vec<HarnessCall>>,
+    clock: Arc<PausedClock>,
+    env: BTreeMap<String, String>,
+    fs_reads: BTreeMap<String, Vec<u8>>,
+    net_gets: BTreeMap<String, String>,
+    random_u64: Mutex<VecDeque<u64>>,
+    stdio: Mutex<String>,
+}
+
+impl MockHarnessState {
+    pub(crate) fn record_call(
+        &self,
+        sub_handle: HarnessKind,
+        method: &str,
+        args: &[crate::VmValue],
+    ) {
+        self.calls
+            .lock()
+            .expect("calls poisoned")
+            .push(HarnessCall::new(
+                sub_handle,
+                method,
+                args.iter().map(crate::VmValue::display).collect(),
+            ));
+    }
+
+    pub(crate) fn calls(&self) -> Vec<HarnessCall> {
+        self.calls.lock().expect("calls poisoned").clone()
+    }
+
+    pub(crate) fn env_get(&self, key: &str) -> Option<&str> {
+        self.env.get(key).map(String::as_str)
+    }
+
+    pub(crate) fn fs_read(&self, path: &str) -> Option<&[u8]> {
+        self.fs_reads.get(path).map(Vec::as_slice)
+    }
+
+    pub(crate) fn net_get(&self, url: &str) -> Option<&str> {
+        self.net_gets.get(url).map(String::as_str)
+    }
+
+    pub(crate) fn next_random_u64(&self) -> Option<u64> {
+        let mut values = self.random_u64.lock().expect("random values poisoned");
+        values.pop_front()
+    }
+
+    pub(crate) fn advance_clock(&self, duration: std::time::Duration) {
+        self.clock.advance(duration);
+    }
+
+    pub(crate) fn push_stdio(&self, text: &str) {
+        self.stdio
+            .lock()
+            .expect("stdio buffer poisoned")
+            .push_str(text);
+    }
+
+    pub(crate) fn stdio(&self) -> String {
+        self.stdio.lock().expect("stdio buffer poisoned").clone()
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct HarnessCall {
+    pub sub_handle: HarnessKind,
+    pub method: String,
+    pub args: Vec<String>,
+}
+
+impl HarnessCall {
+    fn new(sub_handle: HarnessKind, method: &str, args: Vec<String>) -> Self {
+        Self {
+            sub_handle,
+            method: method.to_string(),
+            args,
+        }
+    }
+}
+
+#[derive(Debug)]
+pub struct MockHarnessBuilder {
+    clock: Arc<PausedClock>,
+    env: BTreeMap<String, String>,
+    fs_reads: BTreeMap<String, Vec<u8>>,
+    net_gets: BTreeMap<String, String>,
+    random_u64: Vec<u64>,
+}
+
+impl MockHarnessBuilder {
+    fn new() -> Self {
+        Self {
+            clock: paused_clock_at_unix_ms(0),
+            env: BTreeMap::new(),
+            fs_reads: BTreeMap::new(),
+            net_gets: BTreeMap::new(),
+            random_u64: Vec::new(),
+        }
+    }
+
+    pub fn clock_at_unix_ms(mut self, unix_ms: i64) -> Self {
+        self.clock = paused_clock_at_unix_ms(unix_ms);
+        self
+    }
+
+    pub fn clock_at(mut self, origin: OffsetDateTime) -> Self {
+        self.clock = PausedClock::new(origin);
+        self
+    }
+
+    pub fn env(mut self, key: impl Into<String>, value: impl Into<String>) -> Self {
+        self.env.insert(key.into(), value.into());
+        self
+    }
+
+    pub fn fs_read(mut self, path: impl Into<String>, data: impl Into<Vec<u8>>) -> Self {
+        self.fs_reads.insert(path.into(), data.into());
+        self
+    }
+
+    pub fn net_get(mut self, url: impl Into<String>, body: impl Into<String>) -> Self {
+        self.net_gets.insert(url.into(), body.into());
+        self
+    }
+
+    pub fn random_u64(mut self, value: u64) -> Self {
+        self.random_u64.push(value);
+        self
+    }
+
+    pub fn build(self) -> Harness {
+        let clock = self.clock;
+        Harness::with_mode(
+            clock.clone() as Arc<dyn Clock>,
+            HarnessMode::Mock(MockHarnessState {
+                calls: Mutex::new(Vec::new()),
+                clock,
+                env: self.env,
+                fs_reads: self.fs_reads,
+                net_gets: self.net_gets,
+                random_u64: Mutex::new(self.random_u64.into()),
+                stdio: Mutex::new(String::new()),
+            }),
+        )
     }
 }
 
@@ -144,7 +354,24 @@ impl Harness {
     /// shim is part of the E4.3-E4.6 migration window and goes away once
     /// the ambient `mock_time` test utility is retired by E4.5.
     pub fn real() -> Self {
-        Self::with_clock(Arc::new(MockAwareClock::new(RealClock::new())))
+        Self::with_mode(
+            Arc::new(MockAwareClock::new(RealClock::new())),
+            HarnessMode::Real,
+        )
+    }
+
+    /// Build a deny-by-default test handle. Every sub-handle method records a
+    /// [`DenyEvent`] and fails with a categorized VM error.
+    pub fn null() -> Self {
+        Self::with_mode(
+            paused_clock_at_unix_ms(0) as Arc<dyn Clock>,
+            HarnessMode::Null(NullHarnessState::default()),
+        )
+    }
+
+    /// Build a record/replay test handle backed by a paused clock.
+    pub fn mock() -> MockHarnessBuilder {
+        MockHarnessBuilder::new()
     }
 
     /// Build a handle wired to a caller-supplied clock. Most callers want
@@ -152,8 +379,33 @@ impl Harness {
     /// reach for this when an existing `Arc<dyn Clock>` is already in
     /// hand — e.g. a `RecordedClock` wrapper.
     pub fn with_clock(clock: Arc<dyn Clock>) -> Self {
+        Self::with_mode(clock, HarnessMode::Real)
+    }
+
+    fn with_mode(clock: Arc<dyn Clock>, mode: HarnessMode) -> Self {
         Self {
-            inner: Arc::new(HarnessInner { clock }),
+            inner: Arc::new(HarnessInner { clock, mode }),
+        }
+    }
+
+    pub fn deny_events(&self) -> Vec<DenyEvent> {
+        match self.inner.mode() {
+            HarnessMode::Null(state) => state.deny_events(),
+            HarnessMode::Real | HarnessMode::Mock(_) => Vec::new(),
+        }
+    }
+
+    pub fn calls(&self) -> Vec<HarnessCall> {
+        match self.inner.mode() {
+            HarnessMode::Mock(state) => state.calls(),
+            HarnessMode::Real | HarnessMode::Null(_) => Vec::new(),
+        }
+    }
+
+    pub fn captured_stdio(&self) -> String {
+        match self.inner.mode() {
+            HarnessMode::Mock(state) => state.stdio(),
+            HarnessMode::Real | HarnessMode::Null(_) => String::new(),
         }
     }
 
@@ -230,6 +482,17 @@ impl Harness {
             kind: HarnessKind::Root,
         })
     }
+}
+
+fn paused_clock_at_unix_ms(unix_ms: i64) -> Arc<PausedClock> {
+    let nanos = (unix_ms as i128).saturating_mul(1_000_000);
+    let origin =
+        OffsetDateTime::from_unix_timestamp_nanos(nanos).unwrap_or(OffsetDateTime::UNIX_EPOCH);
+    PausedClock::new(origin)
+}
+
+pub(crate) fn vm_string(value: impl Into<String>) -> crate::VmValue {
+    crate::VmValue::String(Rc::from(value.into()))
 }
 
 impl Default for Harness {
@@ -479,5 +742,204 @@ mod tests {
             harness.clock().clock().now_utc() - origin,
             time::Duration::seconds(60)
         );
+    }
+
+    #[test]
+    fn null_harness_records_deny_events_for_every_sub_handle() {
+        let harness = Harness::null();
+        for source in [
+            r#"fn main(harness: Harness) { harness.stdio.println("blocked") }"#,
+            r#"fn main(harness: Harness) { harness.clock.now_ms() }"#,
+            r#"fn main(harness: Harness) { harness.fs.read_text("/x") }"#,
+            r#"fn main(harness: Harness) { harness.env.get("KEY") }"#,
+            r#"fn main(harness: Harness) { harness.random.gen_u64() }"#,
+            r#"fn main(harness: Harness) { harness.net.get("https://example.test") }"#,
+        ] {
+            let error = run_harness_source(source, harness.clone()).expect_err("call denied");
+            assert!(
+                error.contains("NullHarness denied"),
+                "unexpected deny error: {error}"
+            );
+        }
+
+        let events = harness.deny_events();
+        let observed: Vec<_> = events
+            .iter()
+            .map(|event| (event.sub_handle, event.method.as_str()))
+            .collect();
+        assert_eq!(
+            observed,
+            vec![
+                (HarnessKind::Stdio, "println"),
+                (HarnessKind::Clock, "now_ms"),
+                (HarnessKind::Fs, "read_text"),
+                (HarnessKind::Env, "get"),
+                (HarnessKind::Random, "gen_u64"),
+                (HarnessKind::Net, "get"),
+            ]
+        );
+        assert_eq!(events[0].args, vec!["blocked"]);
+        assert_eq!(events[2].args, vec!["/x"]);
+    }
+
+    #[test]
+    fn mock_harness_replays_canned_responses_and_records_calls() {
+        let harness = Harness::mock()
+            .clock_at_unix_ms(1_700_000_000_000)
+            .env("KEY", "value")
+            .fs_read("/x", b"data".to_vec())
+            .random_u64(42)
+            .net_get("https://example.test", "body")
+            .build();
+
+        let output = run_harness_source(
+            r#"
+fn main(harness: Harness) {
+  harness.stdio.print("partial ")
+  harness.stdio.println("line")
+  println(harness.clock.now_ms())
+  harness.clock.sleep_ms(250)
+  println(harness.clock.now_ms())
+  println(harness.clock.monotonic_ms())
+  println(harness.env.get("KEY"))
+  println(harness.fs.read_text("/x"))
+  println(harness.fs.exists("/missing"))
+  println(harness.random.gen_u64())
+  println(harness.net.get("https://example.test"))
+}
+"#,
+            harness.clone(),
+        )
+        .expect("mock harness run succeeds");
+
+        assert_eq!(harness.captured_stdio(), "partial line\n");
+        assert_eq!(
+            output,
+            "1700000000000\n1700000000250\n250\nvalue\ndata\nfalse\n42\nbody\n"
+        );
+        let observed: Vec<_> = harness
+            .calls()
+            .into_iter()
+            .map(|call| (call.sub_handle, call.method))
+            .collect();
+        assert_eq!(
+            observed,
+            vec![
+                (HarnessKind::Stdio, "print".to_string()),
+                (HarnessKind::Stdio, "println".to_string()),
+                (HarnessKind::Clock, "now_ms".to_string()),
+                (HarnessKind::Clock, "sleep_ms".to_string()),
+                (HarnessKind::Clock, "now_ms".to_string()),
+                (HarnessKind::Clock, "monotonic_ms".to_string()),
+                (HarnessKind::Env, "get".to_string()),
+                (HarnessKind::Fs, "read_text".to_string()),
+                (HarnessKind::Fs, "exists".to_string()),
+                (HarnessKind::Random, "gen_u64".to_string()),
+                (HarnessKind::Net, "get".to_string()),
+            ]
+        );
+    }
+
+    #[test]
+    fn mock_harness_replays_random_values_fifo() {
+        let harness = Harness::mock()
+            .random_u64(7)
+            .random_u64(11)
+            .random_u64(u64::MAX)
+            .build();
+
+        let output = run_harness_source(
+            r#"
+fn main(harness: Harness) {
+  println(harness.random.gen_u64())
+  println(harness.random.gen_u64())
+  println(harness.random.gen_u64())
+}
+"#,
+            harness,
+        )
+        .expect("mock random succeeds");
+
+        assert_eq!(output, "7\n11\n9223372036854775807\n");
+    }
+
+    #[test]
+    fn mock_harness_reports_missing_canned_responses() {
+        let cases = [
+            (
+                r#"fn main(harness: Harness) { harness.fs.read_text("/missing") }"#,
+                "MockHarness has no fs_read response for /missing",
+            ),
+            (
+                r#"fn main(harness: Harness) { harness.random.gen_u64() }"#,
+                "MockHarness has no random_u64 response",
+            ),
+            (
+                r#"fn main(harness: Harness) { harness.net.get("https://missing.test") }"#,
+                "MockHarness has no net_get response for https://missing.test",
+            ),
+        ];
+
+        for (source, expected) in cases {
+            let error = run_harness_source(source, Harness::mock().build())
+                .expect_err("missing mock response fails");
+            assert!(
+                error.contains(expected),
+                "expected `{expected}` in `{error}`"
+            );
+        }
+    }
+
+    #[test]
+    fn mock_harness_records_failed_calls() {
+        let harness = Harness::mock().build();
+        let error = run_harness_source(
+            r#"fn main(harness: Harness) { harness.net.get("https://missing.test") }"#,
+            harness.clone(),
+        )
+        .expect_err("missing mock response fails");
+
+        assert!(error.contains("MockHarness has no net_get response"));
+        assert_eq!(
+            harness.calls(),
+            vec![HarnessCall {
+                sub_handle: HarnessKind::Net,
+                method: "get".to_string(),
+                args: vec!["https://missing.test".to_string()],
+            }]
+        );
+    }
+
+    #[test]
+    fn mock_harness_rejects_wrong_argument_types() {
+        let error = run_harness_source(
+            r#"fn main(harness: Harness) { harness.fs.read_text(1) }"#,
+            Harness::mock().build(),
+        )
+        .expect_err("wrong argument type fails");
+
+        assert!(error.contains("HarnessFs.read_text expects string argument 1, got int"));
+    }
+
+    fn run_harness_source(source: &str, harness: Harness) -> Result<String, String> {
+        let rt = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .unwrap();
+        rt.block_on(async move {
+            let local = tokio::task::LocalSet::new();
+            local
+                .run_until(async move {
+                    let chunk = crate::compile_source(source)?;
+                    let mut vm = crate::Vm::new();
+                    crate::stdlib::register_vm_stdlib(&mut vm);
+                    vm.set_harness(harness);
+                    vm.execute(&chunk)
+                        .await
+                        .map_err(|error| error.to_string())?;
+                    Ok(vm.output().to_string())
+                })
+                .await
+        })
     }
 }

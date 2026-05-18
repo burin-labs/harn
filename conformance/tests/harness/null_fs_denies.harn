@@ -1,0 +1,7 @@
+fn main(harness: Harness) {
+  try {
+    harness.fs.read_text("/secret.txt")
+  } catch (e) {
+    println("caught")
+  }
+}

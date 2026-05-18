@@ -1,0 +1,7 @@
+{
+  "mode": "mock",
+  "net_gets": {"https://example.test": "network body"},
+  "expect_calls": [
+    {"sub_handle": "net", "method": "get", "args": ["https://example.test"]}
+  ]
+}

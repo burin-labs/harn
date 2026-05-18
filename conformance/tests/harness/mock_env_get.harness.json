@@ -1,0 +1,7 @@
+{
+  "mode": "mock",
+  "env": {"KEY": "value"},
+  "expect_calls": [
+    {"sub_handle": "env", "method": "get", "args": ["KEY"]}
+  ]
+}

@@ -1,0 +1,3 @@
+fn main(harness: Harness) {
+  println(harness.net.get("https://example.test"))
+}
