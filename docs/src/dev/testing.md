@@ -157,6 +157,65 @@ clock.advance(Duration::from_secs(60));
 Cron and trigger-dispatch logic inside the harness then run on the injected
 virtual clock.
 
+### `Harness::null()` and `Harness::mock()`
+
+For VM tests that exercise `fn main(harness: Harness)` entrypoints directly,
+prefer the test-mode harness constructors over ambient host access.
+
+Use `Harness::null()` for sandbox-violation tests. It denies every sub-handle
+method and records the typed deny event so the test can assert the exact
+capability surface the script tried to use:
+
+```rust
+let harness = harn_vm::Harness::null();
+vm.set_harness(harness.clone());
+let error = vm.execute(&chunk).await.expect_err("capability denied");
+
+let events = harness.deny_events();
+assert_eq!(events[0].sub_handle, harn_vm::HarnessKind::Fs);
+assert_eq!(events[0].method, "read_text");
+assert_eq!(events[0].args, ["/secrets"]);
+```
+
+Use `Harness::mock()` for deterministic happy-path tests. The builder installs
+a paused clock and canned responses; calls are recorded for assertions after
+the VM run:
+
+```rust
+let harness = harn_vm::Harness::mock()
+    .clock_at_unix_ms(1_700_000_000_000)
+    .env("KEY", "value")
+    .fs_read("/x", b"data".to_vec())
+    .random_u64(42)
+    .net_get("https://example.test", "body")
+    .build();
+
+vm.set_harness(harness.clone());
+vm.execute(&chunk).await?;
+
+assert_eq!(harness.captured_stdio(), "ok\n");
+assert_eq!(harness.calls()[0].sub_handle, harn_vm::HarnessKind::Stdio);
+```
+
+Conformance fixtures can opt into these handles with an adjacent
+`<name>.harness.json` sidecar. Keep the sidecar small: choose `"mode": "null"`
+or `"mode": "mock"`, provide only the canned responses needed by that fixture,
+and assert the recorded calls or deny events there.
+
+```json
+{
+  "mode": "mock",
+  "clock_at_unix_ms": 1700000000000,
+  "env": {"KEY": "value"},
+  "fs_reads": {"/x": "data"},
+  "random_u64": [42],
+  "net_gets": {"https://example.test": "body"},
+  "expect_calls": [
+    {"sub_handle": "env", "method": "get", "args": ["KEY"]}
+  ]
+}
+```
+
 ### `MockProcess`
 
 For subprocess tests that do not need real shell behavior, use `MockProcess`.

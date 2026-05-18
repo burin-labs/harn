@@ -1,0 +1,7 @@
+fn main(harness: Harness) {
+  try {
+    harness.net.get("https://example.test")
+  } catch (e) {
+    println("caught")
+  }
+}

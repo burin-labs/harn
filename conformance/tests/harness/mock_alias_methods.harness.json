@@ -1,0 +1,9 @@
+{
+  "mode": "mock",
+  "random_u64": [42],
+  "net_gets": {"https://alias.test": "alias body"},
+  "expect_calls": [
+    {"sub_handle": "random", "method": "u64", "args": []},
+    {"sub_handle": "net", "method": "http_get", "args": ["https://alias.test"]}
+  ]
+}

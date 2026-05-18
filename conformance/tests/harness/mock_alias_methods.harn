@@ -1,0 +1,4 @@
+fn main(harness: Harness) {
+  println(harness.random.u64())
+  println(harness.net.http_get("https://alias.test"))
+}

@@ -1,0 +1,7 @@
+fn main(harness: Harness) {
+  try {
+    harness.clock.now_ms()
+  } catch (e) {
+    println("caught")
+  }
+}

@@ -1,0 +1,4 @@
+fn main(harness: Harness) {
+  println(harness.fs.exists("/present.txt"))
+  println(harness.fs.exists("/missing.txt"))
+}

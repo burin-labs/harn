@@ -1,19 +1,19 @@
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
 use std::path::{Component, Path, PathBuf};
 use std::process::{self, Stdio};
 
 use regex::Regex;
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
 use crate::commands::run::{
     install_cli_llm_mock_mode, persist_cli_llm_mock_recording, CliLlmMockMode,
 };
 use crate::env_guard::ScopedEnvVar;
-use crate::execute_with_skill_dirs;
 use crate::json_envelope::{self, JsonEnvelope, JsonError};
 use crate::test_runner;
+use crate::{execute_with_skill_dirs, execute_with_skill_dirs_and_harness};
 
 pub(crate) const CONFORMANCE_TEST_SCHEMA_VERSION: u32 = 1;
 
@@ -224,15 +224,18 @@ fn conformance_llm_mock_mode(harn_file: &Path) -> CliLlmMockMode {
 /// - `<name>.testbench-tape` → expected event tape for fidelity check
 /// - `<name>.annotations.jsonl` → annotation sidecar; runner validates
 ///   against the emitted event tape
+/// - `<name>.harness.json` → install a `Harness::null()` / `Harness::mock()`
+///   test handle and assert recorded calls or deny events
 ///
-/// When any sidecar is present the runner also activates a paused clock
-/// (pinned at `CONFORMANCE_TESTBENCH_START_MS`) so clock-advancing
-/// replay behaves deterministically.
+/// When any testbench sidecar is present the runner also activates a paused
+/// clock (pinned at `CONFORMANCE_TESTBENCH_START_MS`) so clock-advancing replay
+/// behaves deterministically.
 struct TestbenchSidecarConfig {
     process_tape: Option<PathBuf>,
     fs_overlay: Option<PathBuf>,
     expected_tape: Option<PathBuf>,
     annotations: Option<PathBuf>,
+    harness: Option<PathBuf>,
 }
 
 impl TestbenchSidecarConfig {
@@ -249,12 +252,146 @@ fn conformance_testbench_config(harn_file: &Path) -> TestbenchSidecarConfig {
     let fs_overlay = harn_file.with_extension("fs-overlay");
     let expected_tape = harn_file.with_extension("testbench-tape");
     let annotations = harn_file.with_extension("annotations.jsonl");
+    let harness = harn_file.with_extension("harness.json");
     TestbenchSidecarConfig {
         process_tape: process_tape.is_file().then_some(process_tape),
         fs_overlay: fs_overlay.is_dir().then_some(fs_overlay),
         expected_tape: expected_tape.is_file().then_some(expected_tape),
         annotations: annotations.is_file().then_some(annotations),
+        harness: harness.is_file().then_some(harness),
     }
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct HarnessSidecar {
+    mode: HarnessSidecarMode,
+    #[serde(default)]
+    clock_at_unix_ms: Option<i64>,
+    #[serde(default)]
+    env: BTreeMap<String, String>,
+    #[serde(default)]
+    fs_reads: BTreeMap<String, String>,
+    #[serde(default)]
+    net_gets: BTreeMap<String, String>,
+    #[serde(default)]
+    random_u64: Vec<u64>,
+    #[serde(default)]
+    expect_calls: Vec<HarnessEventExpectation>,
+    #[serde(default)]
+    expect_deny_events: Vec<HarnessEventExpectation>,
+    #[serde(default)]
+    expect_stdio: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "snake_case")]
+enum HarnessSidecarMode {
+    Null,
+    Mock,
+}
+
+#[derive(Debug, Deserialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
+struct HarnessEventExpectation {
+    sub_handle: String,
+    method: String,
+    #[serde(default)]
+    args: Vec<String>,
+}
+
+impl HarnessSidecar {
+    fn load(path: &Path) -> Result<Self, String> {
+        let raw = fs::read_to_string(path)
+            .map_err(|error| format!("read harness sidecar {}: {error}", path.display()))?;
+        serde_json::from_str(&raw)
+            .map_err(|error| format!("parse harness sidecar {}: {error}", path.display()))
+    }
+
+    fn build_harness(&self) -> harn_vm::Harness {
+        match self.mode {
+            HarnessSidecarMode::Null => harn_vm::Harness::null(),
+            HarnessSidecarMode::Mock => {
+                let mut builder = harn_vm::Harness::mock();
+                if let Some(unix_ms) = self.clock_at_unix_ms {
+                    builder = builder.clock_at_unix_ms(unix_ms);
+                }
+                for (key, value) in &self.env {
+                    builder = builder.env(key.as_str(), value.as_str());
+                }
+                for (path, value) in &self.fs_reads {
+                    builder = builder.fs_read(path.as_str(), value.as_bytes().to_vec());
+                }
+                for (url, body) in &self.net_gets {
+                    builder = builder.net_get(url.as_str(), body.as_str());
+                }
+                for value in &self.random_u64 {
+                    builder = builder.random_u64(*value);
+                }
+                builder.build()
+            }
+        }
+    }
+
+    fn validate(&self, harness: &harn_vm::Harness) -> Vec<String> {
+        let mut errors = Vec::new();
+        if !self.expect_calls.is_empty() {
+            let actual = harness
+                .calls()
+                .into_iter()
+                .map(event_from_call)
+                .collect::<Vec<_>>();
+            if actual != self.expect_calls {
+                errors.push(format!(
+                    "harness calls differed: expected {:?}, actual {:?}",
+                    self.expect_calls, actual
+                ));
+            }
+        }
+        if !self.expect_deny_events.is_empty() {
+            let actual = harness
+                .deny_events()
+                .into_iter()
+                .map(event_from_deny)
+                .collect::<Vec<_>>();
+            if actual != self.expect_deny_events {
+                errors.push(format!(
+                    "harness deny events differed: expected {:?}, actual {:?}",
+                    self.expect_deny_events, actual
+                ));
+            }
+        }
+        if let Some(expected) = &self.expect_stdio {
+            let actual = harness.captured_stdio();
+            if &actual != expected {
+                errors.push(format!(
+                    "harness captured stdio differed: expected {:?}, actual {:?}",
+                    expected, actual
+                ));
+            }
+        }
+        errors
+    }
+}
+
+fn event_from_call(call: harn_vm::HarnessCall) -> HarnessEventExpectation {
+    HarnessEventExpectation {
+        sub_handle: harness_kind_name(call.sub_handle).to_string(),
+        method: call.method,
+        args: call.args,
+    }
+}
+
+fn event_from_deny(event: harn_vm::DenyEvent) -> HarnessEventExpectation {
+    HarnessEventExpectation {
+        sub_handle: harness_kind_name(event.sub_handle).to_string(),
+        method: event.method,
+        args: event.args,
+    }
+}
+
+fn harness_kind_name(kind: harn_vm::HarnessKind) -> &'static str {
+    kind.field_name().unwrap_or("root")
 }
 
 enum ConformanceExecution {
@@ -265,6 +402,7 @@ enum ConformanceExecution {
 struct ConformanceRun {
     execution: ConformanceExecution,
     duration_ms: u64,
+    sidecar_error: Option<String>,
 }
 
 /// Pinned testbench clock start, same constant the CLI uses, so
@@ -286,6 +424,12 @@ async fn execute_conformance_source(
     harn_vm::reset_thread_local_state();
     install_cli_llm_mock_mode(llm_mock_mode)
         .map_err(|error| format!("llm mock setup error: {error}"))?;
+    let harness_sidecar = match testbench.harness.as_ref() {
+        Some(path) => Some(HarnessSidecar::load(path)?),
+        None => None,
+    };
+    let harness = harness_sidecar.as_ref().map(HarnessSidecar::build_harness);
+    let harness_for_validation = harness.clone();
 
     // Activate testbench axes for any present sidecars. A paused clock is
     // included whenever any sidecar is active so subprocess duration_ms and
@@ -338,10 +482,20 @@ async fn execute_conformance_source(
     };
 
     let start = std::time::Instant::now();
-    let result = tokio::time::timeout(
-        std::time::Duration::from_millis(timeout_ms),
-        execute_with_skill_dirs(source, Some(harn_file), cli_skill_dirs),
-    )
+    let result = tokio::time::timeout(std::time::Duration::from_millis(timeout_ms), async {
+        match harness {
+            Some(harness) => {
+                execute_with_skill_dirs_and_harness(
+                    source,
+                    Some(harn_file),
+                    cli_skill_dirs,
+                    harness,
+                )
+                .await
+            }
+            None => execute_with_skill_dirs(source, Some(harn_file), cli_skill_dirs).await,
+        }
+    })
     .await;
     let duration_ms = start.elapsed().as_millis() as u64;
     harn_vm::llm::clear_cli_llm_mock_mode();
@@ -415,6 +569,9 @@ async fn execute_conformance_source(
             )),
         }
     }
+    if let (Some(sidecar), Some(harness)) = (&harness_sidecar, &harness_for_validation) {
+        sidecar_errors.extend(sidecar.validate(harness));
+    }
     let sidecar_error: Option<String> = if sidecar_errors.is_empty() {
         None
     } else {
@@ -422,18 +579,13 @@ async fn execute_conformance_source(
     };
 
     let execution = match result {
-        // Surface the script error first when both happen — sidecar
-        // divergences are usually a downstream symptom of a script failure.
-        Ok(inner_result) => match (inner_result, sidecar_error) {
-            (Err(error), _) => ConformanceExecution::Completed(Err(error)),
-            (Ok(_), Some(sidecar_err)) => ConformanceExecution::Completed(Err(sidecar_err)),
-            (Ok(output), None) => ConformanceExecution::Completed(Ok(output)),
-        },
+        Ok(inner_result) => ConformanceExecution::Completed(inner_result),
         Err(_) => ConformanceExecution::TimedOut,
     };
     Ok(ConformanceRun {
         execution,
         duration_ms,
+        sidecar_error,
     })
 }
 
@@ -751,6 +903,11 @@ fn conformance_snapshot_key(suite_root: &Path, selected_files: &[(PathBuf, Strin
             suite_root,
             &harn_file.with_extension("annotations.jsonl"),
         );
+        hash_file_if_present(
+            &mut hasher,
+            suite_root,
+            &harn_file.with_extension("harness.json"),
+        );
         hash_dir_if_present(
             &mut hasher,
             suite_root,
@@ -815,6 +972,12 @@ async fn evaluate_conformance_case(
             }
         };
         let duration_ms = run.duration_ms;
+        if let Some(sidecar_error) = run.sidecar_error {
+            return ConformanceCaseEvaluation::fail(
+                format!("{rel_path}: {sidecar_error}"),
+                duration_ms,
+            );
+        }
 
         return match run.execution {
             ConformanceExecution::Completed(Ok(output)) => {
@@ -898,6 +1061,12 @@ async fn evaluate_conformance_case(
             }
         };
         let duration_ms = run.duration_ms;
+        if let Some(sidecar_error) = run.sidecar_error {
+            return ConformanceCaseEvaluation::fail(
+                format!("{rel_path}: {sidecar_error}"),
+                duration_ms,
+            );
+        }
 
         return match run.execution {
             ConformanceExecution::Completed(Err(ref err)) if error_matches(err, &expected_error) => {
@@ -1709,50 +1878,39 @@ pub(crate) async fn run_watch_tests(
 #[cfg(test)]
 mod tests {
     use super::{
-        collect_harn_files_sorted, logical_path, parse_xfail_marker, resolve_conformance_selection,
+        collect_harn_files_sorted, evaluate_conformance_case, logical_path, parse_xfail_marker,
+        resolve_conformance_selection, ConformanceRunOptions,
     };
     use std::fs;
-    use std::path::{Path, PathBuf};
-    use std::time::{SystemTime, UNIX_EPOCH};
+    use std::path::Path;
 
     struct TempTestDir {
-        path: PathBuf,
+        dir: tempfile::TempDir,
     }
-
-    static TEMP_DIR_COUNTER: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
 
     impl TempTestDir {
         fn new() -> Self {
-            let unique = format!(
-                "harn-cli-test-{}-{}-{}",
-                std::process::id(),
-                SystemTime::now()
-                    .duration_since(UNIX_EPOCH)
-                    .unwrap()
-                    .as_nanos(),
-                TEMP_DIR_COUNTER.fetch_add(1, std::sync::atomic::Ordering::Relaxed),
-            );
-            let path = std::env::temp_dir().join(unique);
-            fs::create_dir_all(&path).unwrap();
-            Self { path }
+            let dir = tempfile::Builder::new()
+                .prefix("harn-cli-test-")
+                .tempdir()
+                .unwrap();
+            Self { dir }
         }
 
         fn write(&self, relative: &str) {
-            let path = self.path.join(relative);
+            self.write_content(relative, "// test");
+        }
+
+        fn write_content(&self, relative: &str, content: &str) {
+            let path = self.dir.path().join(relative);
             if let Some(parent) = path.parent() {
                 fs::create_dir_all(parent).unwrap();
             }
-            fs::write(path, "// test").unwrap();
+            fs::write(path, content).unwrap();
         }
 
         fn path(&self) -> &Path {
-            &self.path
-        }
-    }
-
-    impl Drop for TempTestDir {
-        fn drop(&mut self) {
-            let _ = fs::remove_dir_all(&self.path);
+            self.dir.path()
         }
     }
 
@@ -1870,5 +2028,65 @@ mod tests {
     fn parse_xfail_marker_recognizes_block_comment() {
         let src = "/* @xfail: tracked in #1239 */\nfn foo() {}\n";
         assert_eq!(parse_xfail_marker(src).as_deref(), Some("tracked in #1239"));
+    }
+
+    #[tokio::test]
+    async fn conformance_harness_sidecar_error_fails_expected_error_fixture() {
+        let temp = TempTestDir::new();
+        temp.write_content(
+            "conformance/tests/harness_sidecar_error.harn",
+            r#"fn main(harness: Harness) {
+  harness.env.get("TOKEN")
+}
+"#,
+        );
+        temp.write_content(
+            "conformance/tests/harness_sidecar_error.error",
+            "NullHarness denied",
+        );
+        temp.write_content(
+            "conformance/tests/harness_sidecar_error.harness.json",
+            r#"{
+  "mode": "null",
+  "expect_deny_events": [
+    {
+      "sub_handle": "env",
+      "method": "wrong",
+      "args": ["TOKEN"]
+    }
+  ]
+}
+"#,
+        );
+
+        let harn_file = temp
+            .path()
+            .join("conformance/tests/harness_sidecar_error.harn");
+        let expected_file = harn_file.with_extension("expected");
+        let error_file = harn_file.with_extension("error");
+        let options = ConformanceRunOptions {
+            verbose: false,
+            timing: false,
+            differential_optimizations: false,
+            json: false,
+            cli_skill_dirs: &[],
+        };
+
+        let evaluation = evaluate_conformance_case(
+            &harn_file,
+            &expected_file,
+            &error_file,
+            "tests/harness_sidecar_error.harn",
+            2_000,
+            &options,
+        )
+        .await;
+
+        assert!(!evaluation.passed);
+        let message = evaluation.message.unwrap_or_default();
+        assert!(
+            message.contains("harness deny events differed"),
+            "unexpected message: {message}"
+        );
     }
 }

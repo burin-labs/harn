@@ -1,0 +1,8 @@
+{
+  "mode": "mock",
+  "random_u64": [7, 11],
+  "expect_calls": [
+    {"sub_handle": "random", "method": "gen_u64", "args": []},
+    {"sub_handle": "random", "method": "gen_u64", "args": []}
+  ]
+}

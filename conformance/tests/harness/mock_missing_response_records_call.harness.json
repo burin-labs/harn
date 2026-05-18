@@ -1,0 +1,6 @@
+{
+  "mode": "mock",
+  "expect_calls": [
+    {"sub_handle": "net", "method": "get", "args": ["https://missing.test"]}
+  ]
+}

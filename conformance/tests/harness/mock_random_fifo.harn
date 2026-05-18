@@ -1,0 +1,4 @@
+fn main(harness: Harness) {
+  println(harness.random.gen_u64())
+  println(harness.random.gen_u64())
+}

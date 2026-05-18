@@ -1,0 +1,5 @@
+fn main(harness: Harness) {
+  harness.stdio.print("partial ")
+  harness.stdio.println("line")
+  println("done")
+}

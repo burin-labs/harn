@@ -132,8 +132,8 @@ pub use corrections::{
     CORRECTION_EVENT_KIND, CORRECTION_SCHEMA_V0,
 };
 pub use harness::{
-    Harness, HarnessClock, HarnessEnv, HarnessFs, HarnessKind, HarnessNet, HarnessRandom,
-    HarnessStdio, MockAwareClock, VmHarness,
+    DenyEvent, Harness, HarnessCall, HarnessClock, HarnessEnv, HarnessFs, HarnessKind, HarnessNet,
+    HarnessRandom, HarnessStdio, MockAwareClock, MockHarnessBuilder, VmHarness,
 };
 pub use http::{register_http_builtins, reset_http_state};
 pub use llm::register_llm_builtins;

@@ -1,0 +1,8 @@
+{
+  "mode": "mock",
+  "clock_at_unix_ms": 1700000000000,
+  "expect_calls": [
+    {"sub_handle": "clock", "method": "now_ms", "args": []},
+    {"sub_handle": "clock", "method": "monotonic_ms", "args": []}
+  ]
+}

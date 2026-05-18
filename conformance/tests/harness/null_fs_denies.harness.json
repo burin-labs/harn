@@ -1,0 +1,6 @@
+{
+  "mode": "null",
+  "expect_deny_events": [
+    {"sub_handle": "fs", "method": "read_text", "args": ["/secret.txt"]}
+  ]
+}

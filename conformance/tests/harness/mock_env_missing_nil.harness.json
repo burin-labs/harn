@@ -1,0 +1,6 @@
+{
+  "mode": "mock",
+  "expect_calls": [
+    {"sub_handle": "env", "method": "get", "args": ["MISSING"]}
+  ]
+}

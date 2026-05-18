@@ -2542,6 +2542,25 @@ pub(crate) async fn execute_with_skill_dirs(
     source_path: Option<&Path>,
     cli_skill_dirs: &[PathBuf],
 ) -> Result<String, String> {
+    execute_with_skill_dirs_and_optional_harness(source, source_path, cli_skill_dirs, None).await
+}
+
+pub(crate) async fn execute_with_skill_dirs_and_harness(
+    source: &str,
+    source_path: Option<&Path>,
+    cli_skill_dirs: &[PathBuf],
+    harness: harn_vm::Harness,
+) -> Result<String, String> {
+    execute_with_skill_dirs_and_optional_harness(source, source_path, cli_skill_dirs, Some(harness))
+        .await
+}
+
+async fn execute_with_skill_dirs_and_optional_harness(
+    source: &str,
+    source_path: Option<&Path>,
+    cli_skill_dirs: &[PathBuf],
+    harness: Option<harn_vm::Harness>,
+) -> Result<String, String> {
     let mut lexer = Lexer::new(source);
     let tokens = lexer.tokenize().map_err(|e| e.to_string())?;
     let mut parser = Parser::new(tokens);
@@ -2637,7 +2656,7 @@ pub(crate) async fn execute_with_skill_dirs(
             });
             skill_loader::emit_loader_warnings(&loaded.loader_warnings);
             skill_loader::install_skills_global(&mut vm, &loaded);
-            vm.set_harness(harn_vm::Harness::real());
+            vm.set_harness(harness.unwrap_or_else(harn_vm::Harness::real));
             if let Some(path) = source_path {
                 let extensions = package::load_runtime_extensions(path);
                 package::install_runtime_extensions(&extensions);
