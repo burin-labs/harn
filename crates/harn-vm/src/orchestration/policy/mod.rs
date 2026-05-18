@@ -1,6 +1,7 @@
 //! Policy types and capability-ceiling enforcement.
 
 mod approval_rules;
+mod effects;
 mod types;
 
 use std::cell::RefCell;
@@ -19,6 +20,9 @@ pub use approval_rules::{
     clear_all_approval_policy_repeat_counts, clear_approval_policy_repeat_counts,
     next_approval_policy_repeat_count, ApprovalShape, PolicyAction, PolicyEvaluation,
     PolicyMatchedRule, PolicyRule, PolicyRuleMatch,
+};
+pub use effects::{
+    compute_handoff_effects, effects_from_metadata, EffectKind, EffectRecord, EffectScope,
 };
 pub use types::{
     enforce_tool_arg_constraints, AutoCompactPolicy, BranchSemantics, CapabilityPolicy,

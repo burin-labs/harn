@@ -4,7 +4,8 @@ use std::collections::{BTreeMap, BTreeSet};
 use serde::{Deserialize, Serialize};
 
 use super::{
-    current_mutation_session, new_id, now_rfc3339, ArtifactRecord, CapabilityPolicy, RunRecord,
+    current_mutation_session, new_id, now_rfc3339, ArtifactRecord, CapabilityPolicy, EffectRecord,
+    RunRecord,
 };
 
 const HANDOFF_TYPE: &str = "handoff_artifact";
@@ -270,6 +271,15 @@ pub struct HandoffArtifact {
     pub allowed_side_effects: Vec<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub policy_override: Option<CapabilityPolicy>,
+    /// Typed effect set computed at child-spawn time from the spawn
+    /// config's capability declarations + transitive `harn graph --json`
+    /// analysis. Empty when the handoff predates effect tracking or the
+    /// producer has no analyzable entrypoint. Enforcement of the
+    /// parent-⊆-child relation lives in E5.4 (`HARN-CAP-301`); the
+    /// receipt-chain inclusion proof lives in E5.5
+    /// (`opentrustgraph/v0.1`).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub effects: Vec<EffectRecord>,
     pub budget_remaining: Option<HandoffBudgetRemainingRecord>,
     pub deadline_checkback: Option<HandoffDeadlineCheckbackRecord>,
     pub confidence: Option<f64>,
@@ -512,6 +522,9 @@ fn merge_handoffs(mut left: HandoffArtifact, right: HandoffArtifact) -> HandoffA
     }
     if left.policy_override.is_none() {
         left.policy_override = right.policy_override;
+    }
+    if left.effects.is_empty() {
+        left.effects = right.effects;
     }
     if left.budget_remaining.is_none() {
         left.budget_remaining = right.budget_remaining;
@@ -772,4 +785,139 @@ pub fn sync_run_handoffs(run: &mut RunRecord) {
         }
     }
     run.handoffs = handoffs;
+}
+
+/// Compute the effect set for a spawn-time handoff and attach it to the
+/// envelope. Mirrors what `agent_spawn` / `sub_agent_run` do when a child
+/// entrypoint module is statically known: the effect set is derived from
+/// the child's source via the same capability analysis backing
+/// `harn graph --json` and clamped to the spawn-config ceiling.
+///
+/// Pre-existing `effects` are preserved when the producer has already
+/// populated them; otherwise the computed set is installed. Empty source
+/// is a no-op so callers can route through this helper unconditionally.
+pub fn attach_spawn_handoff_effects(
+    handoff: &mut HandoffArtifact,
+    entrypoint_source: &str,
+    ceiling: Option<&CapabilityPolicy>,
+) {
+    if !handoff.effects.is_empty() {
+        return;
+    }
+    if entrypoint_source.trim().is_empty() {
+        return;
+    }
+    handoff.effects = crate::orchestration::compute_handoff_effects(entrypoint_source, ceiling);
+}
+
+#[cfg(test)]
+mod spawn_effect_tests {
+    use super::*;
+    use crate::orchestration::{
+        attach_spawn_handoff_effects, CapabilityPolicy, EffectKind, EffectRecord, EffectScope,
+        HandoffTargetRecord,
+    };
+
+    fn spawn_handoff(source_persona: &str) -> HandoffArtifact {
+        HandoffArtifact {
+            source_persona: source_persona.to_string(),
+            target_persona_or_human: HandoffTargetRecord {
+                kind: "persona".to_string(),
+                label: Some("research-worker".to_string()),
+                ..Default::default()
+            },
+            task: "summarize the page".to_string(),
+            reason: "needs network reach".to_string(),
+            ..Default::default()
+        }
+        .normalize()
+    }
+
+    #[test]
+    fn spawn_with_harness_net_child_attaches_net_effect() {
+        let source = r#"fn main(harness: Harness) { harness.net.get("https://example.test/api") }"#;
+        let mut handoff = spawn_handoff("planner");
+        attach_spawn_handoff_effects(&mut handoff, source, None);
+        assert!(
+            handoff
+                .effects
+                .iter()
+                .any(|effect| matches!(effect.kind, EffectKind::Net)),
+            "expected Net effect on spawn handoff, got {:?}",
+            handoff.effects
+        );
+    }
+
+    #[test]
+    fn spawn_ceiling_clamps_to_allowed_capabilities() {
+        let source = r#"fn main(harness: Harness) {
+            harness.net.get("https://example.test")
+            harness.fs.read_file("/tmp/input")
+        }"#;
+        let mut ceiling = CapabilityPolicy::default();
+        ceiling
+            .capabilities
+            .insert("workspace".to_string(), vec!["read_text".to_string()]);
+        let mut handoff = spawn_handoff("planner");
+        attach_spawn_handoff_effects(&mut handoff, source, Some(&ceiling));
+
+        assert!(
+            handoff
+                .effects
+                .iter()
+                .all(|effect| !matches!(effect.kind, EffectKind::Net)),
+            "ceiling should have dropped Net effect, got {:?}",
+            handoff.effects
+        );
+        assert!(
+            handoff
+                .effects
+                .iter()
+                .any(|effect| matches!(effect.kind, EffectKind::Fs)),
+            "ceiling should have kept Fs read, got {:?}",
+            handoff.effects
+        );
+    }
+
+    #[test]
+    fn spawn_handoff_effects_round_trip_via_serde() {
+        let mut handoff = spawn_handoff("planner");
+        handoff.effects.push(
+            EffectRecord::new(EffectKind::Net, EffectScope::Write)
+                .with_resource("https://api.example/v1/research"),
+        );
+        handoff.effects.push(EffectRecord::new(
+            EffectKind::Llm {
+                provider: Some("anthropic".to_string()),
+                model: Some("claude-3-7-sonnet".to_string()),
+            },
+            EffectScope::Write,
+        ));
+
+        let encoded = serde_json::to_string(&handoff).expect("encode");
+        let decoded: HandoffArtifact = serde_json::from_str(&encoded).expect("decode");
+        assert_eq!(decoded.effects, handoff.effects);
+    }
+
+    #[test]
+    fn attach_is_no_op_when_handoff_already_has_effects() {
+        let source = r#"fn main(harness: Harness) { harness.net.get("https://example.test") }"#;
+        let mut handoff = spawn_handoff("planner");
+        let preset = EffectRecord::new(
+            EffectKind::Persona {
+                id: "auditor".to_string(),
+            },
+            EffectScope::Observe,
+        );
+        handoff.effects.push(preset.clone());
+        attach_spawn_handoff_effects(&mut handoff, source, None);
+        assert_eq!(handoff.effects, vec![preset]);
+    }
+
+    #[test]
+    fn attach_is_no_op_when_source_is_empty() {
+        let mut handoff = spawn_handoff("planner");
+        attach_spawn_handoff_effects(&mut handoff, "", None);
+        assert!(handoff.effects.is_empty());
+    }
 }
