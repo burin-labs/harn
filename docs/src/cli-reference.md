@@ -1934,17 +1934,18 @@ harn remove my-lib
 
 ## harn pack
 
-Build a signed-ready `.harnpack` run bundle from a Harn entrypoint
+Build a `.harnpack` run bundle from a Harn entrypoint
 ([#1781][issue-1781]). The bundle is a deterministic tar.zst archive
 containing a v2 `WorkflowBundle` manifest (`harnpack.json`), every
 transitively-imported `.harn` source under `sources/`, every module's
 precompiled `.harnbc`/`.harnmod` artifact under `bytecode/`, a
 provider-catalog hash + stdlib version pin, an archived SPDX-lite 2.3
-SBOM (`sbom.spdx.json`), and a (future) Ed25519 signature slot.
+SBOM (`sbom.spdx.json`), and an optional Ed25519 signature slot.
 
 ```bash
 harn pack examples/hello.harn
 harn pack examples/hello.harn --out /tmp/hello.harnpack
+harn pack examples/hello.harn --sign --key ~/.harn/release-ed25519.pem
 harn pack examples/hello.harn --unsigned --json
 harn pack workflows/new-entry.harn --upgrade old.harnpack --out new.harnpack
 ```
@@ -1964,8 +1965,11 @@ id, name, version, triggers, workflow graph, and prompt capsules. The
 new `<entrypoint>` argument supplies the transitive-module + SBOM
 payload that the older schema lacked.
 
-Signing (`--sign --key <path>`) lands in a follow-up. Today the bundle
-ships unsigned; pass `--unsigned` to make that intent explicit.
+`--sign --key <path>` loads an Ed25519 PKCS#8 PEM private key, signs the
+canonical bundle hash, embeds the signature in the manifest, and appends an
+OpenTrustGraph `release` record. `--unsigned` skips the manifest signature but
+still appends the release record at autonomy tier `suggest`; this is also the
+default when neither signing flag is provided.
 
 [issue-1781]: https://github.com/burin-labs/harn/issues/1781
 

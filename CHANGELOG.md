@@ -220,8 +220,12 @@ condensed series summaries instead of full per-patch history.
   archive) and re-emits it under the v2 manifest, preserving the prior
   bundle's id, name, version, triggers, workflow graph, and prompt
   capsules while populating the new v2 fields from the entrypoint walk.
-  Signing (E6.3) and full SBOM enumeration (E6.4) land in follow-ups;
-  today the bundle ships unsigned. Companion: `harn-vm` exposes
+  `--sign --key <path>` signs the canonical bundle hash with an
+  Ed25519 PKCS#8 PEM key, embeds the manifest signature, and emits an
+  OpenTrustGraph `release` record; `--unsigned` skips the manifest
+  signature but still emits the release record at autonomy tier
+  `suggest`. Full SBOM enumeration (E6.4) lands in a follow-up.
+  Companion: `harn-vm` exposes
   `read_workflow_bundle_manifest_any_version` and
   `load_workflow_bundle_any_version` for relaxed-schema reads, and
   `bytecode_cache::serialize_chunk_artifact` /

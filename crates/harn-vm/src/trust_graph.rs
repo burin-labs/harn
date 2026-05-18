@@ -20,6 +20,7 @@ pub const TRUST_GRAPH_LEGACY_GLOBAL_TOPIC: &str = "trust.graph";
 pub const TRUST_GRAPH_TOPIC_PREFIX: &str = "trust_graph.";
 pub const TRUST_GRAPH_LEGACY_TOPIC_PREFIX: &str = "trust.graph.";
 pub const TRUST_GRAPH_EVENT_KIND: &str = "trust_recorded";
+pub const TRUST_ACTION_RELEASE: &str = "release";
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -85,6 +86,16 @@ pub struct TrustRecord {
     pub metadata: BTreeMap<String, serde_json::Value>,
 }
 
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum TrustRecordActionKind {
+    Release {
+        bundle_hash: String,
+        harn_version: String,
+        parent_trust_record_id: Option<String>,
+    },
+}
+
 impl TrustRecord {
     pub fn new(
         agent: impl Into<String>,
@@ -110,6 +121,47 @@ impl TrustRecord {
             entry_hash: String::new(),
             metadata: BTreeMap::new(),
         }
+    }
+
+    pub fn release(
+        agent: impl Into<String>,
+        bundle_hash: impl Into<String>,
+        harn_version: impl Into<String>,
+        parent_trust_record_id: Option<String>,
+        trace_id: impl Into<String>,
+        autonomy_tier: AutonomyTier,
+    ) -> Self {
+        let bundle_hash = bundle_hash.into();
+        let harn_version = harn_version.into();
+        let action_kind = TrustRecordActionKind::Release {
+            bundle_hash: bundle_hash.clone(),
+            harn_version: harn_version.clone(),
+            parent_trust_record_id: parent_trust_record_id.clone(),
+        };
+        let mut record = Self::new(
+            agent,
+            TRUST_ACTION_RELEASE,
+            None,
+            TrustOutcome::Success,
+            trace_id,
+            autonomy_tier,
+        );
+        record
+            .metadata
+            .insert("action_kind".to_string(), serde_json::json!(action_kind));
+        record
+            .metadata
+            .insert("bundle_hash".to_string(), serde_json::json!(bundle_hash));
+        record
+            .metadata
+            .insert("harn_version".to_string(), serde_json::json!(harn_version));
+        record.metadata.insert(
+            "parent_trust_record_id".to_string(),
+            parent_trust_record_id
+                .map(serde_json::Value::String)
+                .unwrap_or(serde_json::Value::Null),
+        );
+        record
     }
 }
 

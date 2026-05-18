@@ -1717,6 +1717,29 @@ fn test_parses_new_package_kind() {
 }
 
 #[test]
+fn test_parses_pack_signing_flags() {
+    let cli = Cli::parse_from([
+        "harn",
+        "pack",
+        "examples/hello.harn",
+        "--sign",
+        "--key",
+        "release.pem",
+        "--out",
+        "hello.harnpack",
+    ]);
+
+    let Command::Pack(args) = cli.command.unwrap() else {
+        panic!("expected pack command");
+    };
+    assert_eq!(args.entrypoint, PathBuf::from("examples/hello.harn"));
+    assert_eq!(args.key, Some(PathBuf::from("release.pem")));
+    assert_eq!(args.out, Some(PathBuf::from("hello.harnpack")));
+    assert!(args.sign);
+    assert!(!args.unsigned);
+}
+
+#[test]
 fn test_parses_pipeline_lab_template() {
     let cli = Cli::parse_from([
         "harn",

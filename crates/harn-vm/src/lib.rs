@@ -281,10 +281,11 @@ pub use trust_graph::{
     query_trust_graph_records, query_trust_records, resolve_agent_autonomy_tier,
     summarize_trust_records, topic_for_agent, trust_score_for, verify_trust_chain, AutonomyTier,
     TrustAgentSummary, TrustChainExport, TrustChainExportMetadata, TrustChainExportProducer,
-    TrustChainReport, TrustGraphRecord, TrustOutcome, TrustQueryFilters, TrustRecord, TrustScore,
-    TrustTraceGroup, OPENTRUSTGRAPH_CHAIN_SCHEMA_V0, OPENTRUSTGRAPH_SCHEMA_V0,
-    TRUST_GRAPH_GLOBAL_TOPIC, TRUST_GRAPH_LEGACY_GLOBAL_TOPIC, TRUST_GRAPH_LEGACY_TOPIC_PREFIX,
-    TRUST_GRAPH_RECORDS_TOPIC, TRUST_GRAPH_TOPIC_PREFIX,
+    TrustChainReport, TrustGraphRecord, TrustOutcome, TrustQueryFilters, TrustRecord,
+    TrustRecordActionKind, TrustScore, TrustTraceGroup, OPENTRUSTGRAPH_CHAIN_SCHEMA_V0,
+    OPENTRUSTGRAPH_SCHEMA_V0, TRUST_ACTION_RELEASE, TRUST_GRAPH_GLOBAL_TOPIC,
+    TRUST_GRAPH_LEGACY_GLOBAL_TOPIC, TRUST_GRAPH_LEGACY_TOPIC_PREFIX, TRUST_GRAPH_RECORDS_TOPIC,
+    TRUST_GRAPH_TOPIC_PREFIX,
 };
 pub use value::*;
 pub use vm::*;

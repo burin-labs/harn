@@ -6,6 +6,7 @@ use std::fs;
 use std::io::{Cursor, Read};
 use std::path::{Component, Path, PathBuf};
 
+use ed25519_dalek::{Signature, Verifier, VerifyingKey};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
@@ -417,6 +418,7 @@ pub enum WorkflowBundleErrorKind {
     InvalidArchive,
     DuplicateArchiveEntry,
     UnsafeArchivePath,
+    InvalidSignature,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -583,6 +585,58 @@ pub fn workflow_bundle_hash(
     Ok(blake3_digest_string(hasher.finalize()))
 }
 
+pub fn verify_workflow_bundle_signature(
+    bundle: &WorkflowBundle,
+    contents: &[HarnpackEntry],
+) -> Result<(), WorkflowBundleError> {
+    let signature = bundle.signature.as_ref().ok_or_else(|| {
+        WorkflowBundleError::new(
+            WorkflowBundleErrorKind::InvalidSignature,
+            "workflow bundle is unsigned",
+        )
+    })?;
+    if signature.algorithm != "ed25519" {
+        return Err(WorkflowBundleError::new(
+            WorkflowBundleErrorKind::InvalidSignature,
+            format!(
+                "unsupported workflow bundle signature algorithm {}",
+                signature.algorithm
+            ),
+        ));
+    }
+    let expected_hash = workflow_bundle_hash(bundle, contents)?;
+    if signature.manifest_hash_blake3 != expected_hash {
+        return Err(WorkflowBundleError::new(
+            WorkflowBundleErrorKind::InvalidSignature,
+            format!(
+                "workflow bundle signature hash mismatch; expected {expected_hash}, found {}",
+                signature.manifest_hash_blake3
+            ),
+        ));
+    }
+    let public_key_bytes = decode_hex_exact::<32>(
+        "workflow bundle signature public_key",
+        &signature.public_key,
+    )?;
+    let signature_bytes =
+        decode_hex_exact::<64>("workflow bundle signature", &signature.signature)?;
+    let verifying_key = VerifyingKey::from_bytes(&public_key_bytes).map_err(|error| {
+        WorkflowBundleError::new(
+            WorkflowBundleErrorKind::InvalidSignature,
+            format!("workflow bundle signature public_key is invalid Ed25519: {error}"),
+        )
+    })?;
+    let ed25519_signature = Signature::from_bytes(&signature_bytes);
+    verifying_key
+        .verify(expected_hash.as_bytes(), &ed25519_signature)
+        .map_err(|error| {
+            WorkflowBundleError::new(
+                WorkflowBundleErrorKind::InvalidSignature,
+                format!("workflow bundle signature failed Ed25519 verification: {error}"),
+            )
+        })
+}
+
 pub fn build_harnpack(
     bundle: &WorkflowBundle,
     contents: &[HarnpackEntry],
@@ -730,6 +784,24 @@ fn canonical_workflow_bundle_manifest(bundle: &WorkflowBundle) -> WorkflowBundle
         ))
     });
     canonical
+}
+
+fn decode_hex_exact<const N: usize>(
+    label: &str,
+    value: &str,
+) -> Result<[u8; N], WorkflowBundleError> {
+    let bytes = hex::decode(value).map_err(|error| {
+        WorkflowBundleError::new(
+            WorkflowBundleErrorKind::InvalidSignature,
+            format!("{label} is not hex: {error}"),
+        )
+    })?;
+    bytes.try_into().map_err(|bytes: Vec<u8>| {
+        WorkflowBundleError::new(
+            WorkflowBundleErrorKind::InvalidSignature,
+            format!("{label} must decode to {N} bytes, got {}", bytes.len()),
+        )
+    })
 }
 
 fn append_harnpack_entry<W: std::io::Write>(

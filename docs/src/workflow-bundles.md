@@ -34,7 +34,7 @@ Top-level bundle fields:
 | `provider_catalog_hash` | BLAKE3 hash of the provider catalog used at build time. |
 | `tool_manifest` | Tool names, providers, optional annotations, and schema hashes captured for review. |
 | `sbom` | SBOM document for package dependencies. |
-| `signature` | Optional Ed25519 signature slot; signing is filled by the signing workflow. |
+| `signature` | Optional Ed25519 signature over the canonical bundle hash. |
 | `parent_trust_record_id` | Optional link into a parent OpenTrustGraph chain. |
 | `id` / `version` | Stable bundle identity for hosts and importers. |
 | `triggers` | Declarations for GitHub, cron, delay, manual, webhook, or MCP wakeups. |
@@ -67,11 +67,13 @@ Bundle identity for `.harnpack` archives is BLAKE3 over the canonical manifest
 bytes plus the sorted content hashes. Re-packing the same manifest and content
 produces the same bundle hash.
 
+`harn pack --sign --key <private.pem>` signs the canonical bundle hash with an
+Ed25519 PKCS#8 PEM key, embeds the signature in `harnpack.json`, and appends an
+OpenTrustGraph `release` record. `harn pack --unsigned` skips the manifest
+signature but still appends the release record at autonomy tier `suggest`.
 `harn pack --json` emits a `JsonEnvelope` summary with the bundle hash, output
 path, archive size, signature presence, SBOM counts, bytecode/debug-symbol
-metadata, and the full manifest. Signing is represented as `{ present: false,
-algorithm: "ed25519" }` until the signing workflow fills the manifest
-signature slot.
+metadata, and the full manifest.
 
 ## Preview
 
