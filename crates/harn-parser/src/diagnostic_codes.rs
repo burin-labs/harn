@@ -1014,6 +1014,7 @@ pub const REPAIR_REGISTRY: &[&RepairTemplate] = &[
     &REPAIR_BINDINGS_RENAME_SHADOW,
     &REPAIR_BINDINGS_THREAD_HARNESS,
     &REPAIR_BINDINGS_THREAD_HARNESS_CLOCK,
+    &REPAIR_BINDINGS_THREAD_HARNESS_STDIO,
     &REPAIR_DECLARATIONS_REMOVE_UNUSED,
     &REPAIR_IMPORTS_FIX_PATH,
     &REPAIR_IMPORTS_REMOVE_UNUSED,
@@ -1301,6 +1302,23 @@ mod tests {
                 referenced.contains(template.id),
                 "repair {} is in REPAIR_REGISTRY but no Code maps to it",
                 template.id
+            );
+        }
+    }
+
+    #[test]
+    fn every_referenced_repair_template_is_in_registry() {
+        let registered: HashSet<&'static str> =
+            REPAIR_REGISTRY.iter().map(|template| template.id).collect();
+        for code in Code::ALL {
+            let Some(template) = code.repair_template() else {
+                continue;
+            };
+            assert!(
+                registered.contains(template.id),
+                "repair {} (used by {}) is missing from REPAIR_REGISTRY",
+                template.id,
+                code
             );
         }
     }

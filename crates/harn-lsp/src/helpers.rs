@@ -1,5 +1,7 @@
+use std::str::FromStr;
+
 use harn_lexer::{LexerError, Span};
-use harn_parser::{diagnostic, ParserError, Repair, TypeExpr};
+use harn_parser::{diagnostic, ParserError, Repair, RepairSafety, TypeExpr};
 use serde_json::{Map, Value};
 use tower_lsp::lsp_types::*;
 
@@ -55,7 +57,7 @@ pub(crate) fn diagnostic_data_value(
 
 pub(crate) fn repair_code_action_kind(repair: Option<&Repair>) -> CodeActionKind {
     repair
-        .map(|repair| repair_code_action_kind_for_safety(repair.safety.as_str()))
+        .map(|repair| code_action_kind_for_safety(repair.safety))
         .unwrap_or(CodeActionKind::QUICKFIX)
 }
 
@@ -77,7 +79,8 @@ pub(crate) fn diagnostic_repair_code_action_kind(diagnostic: &Diagnostic) -> Cod
         .as_ref()
         .and_then(|data| data.get("safety"))
         .and_then(|value| value.as_str())
-        .map(repair_code_action_kind_for_safety)
+        .and_then(|safety| RepairSafety::from_str(safety).ok())
+        .map(code_action_kind_for_safety)
         .unwrap_or(CodeActionKind::QUICKFIX)
 }
 
@@ -102,16 +105,22 @@ fn diagnostic_code_string(code: Option<&NumberOrString>) -> Option<String> {
     }
 }
 
-fn repair_code_action_kind_for_safety(safety: &str) -> CodeActionKind {
-    match safety {
-        "format-only" => CodeActionKind::new("quickfix.harn.format-only"),
-        "behavior-preserving" => CodeActionKind::new("quickfix.harn.behavior-preserving"),
-        "scope-local" => CodeActionKind::new("quickfix.harn.scope-local"),
-        "surface-changing" => CodeActionKind::new("quickfix.harn.surface-changing"),
-        "capability-changing" => CodeActionKind::new("quickfix.harn.capability-changing"),
-        "needs-human" => CodeActionKind::new("quickfix.harn.needs-human"),
-        _ => CodeActionKind::QUICKFIX,
-    }
+/// Map a [`RepairSafety`] to its `quickfix.harn.<class>` code-action kind.
+///
+/// The string suffix matches `RepairSafety::as_str()` so IDE clients that
+/// register handlers by safety class observe the same wire-format value
+/// they consume from `Diagnostic.data.safety`. `RepairSafety::as_str()`
+/// returns a stable `&'static str` so the kind constants below avoid an
+/// allocation on the diagnostic hot path.
+fn code_action_kind_for_safety(safety: RepairSafety) -> CodeActionKind {
+    CodeActionKind::new(match safety {
+        RepairSafety::FormatOnly => "quickfix.harn.format-only",
+        RepairSafety::BehaviorPreserving => "quickfix.harn.behavior-preserving",
+        RepairSafety::ScopeLocal => "quickfix.harn.scope-local",
+        RepairSafety::SurfaceChanging => "quickfix.harn.surface-changing",
+        RepairSafety::CapabilityChanging => "quickfix.harn.capability-changing",
+        RepairSafety::NeedsHuman => "quickfix.harn.needs-human",
+    })
 }
 
 /// Convert a 1-based Span to a 0-based LSP Range.
