@@ -16,7 +16,6 @@ on:
   schedule:
     - cron: '17 9 * * *'
   push:
-    branches: [main]
     tags: ['v*']
   workflow_dispatch:
 
