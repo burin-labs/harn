@@ -10,6 +10,8 @@ updates:
       day: "monday"
       time: "09:00"
       timezone: "America/Los_Angeles"
+    cooldown:
+      default-days: 7
 
   - package-ecosystem: "npm"
     directories:
@@ -27,6 +29,8 @@ updates:
         patterns:
           - "*"
         group-by: "dependency-name"
+    cooldown:
+      default-days: 7
 
   - package-ecosystem: "github-actions"
     directory: "/"
@@ -35,3 +39,5 @@ updates:
       day: "monday"
       time: "09:00"
       timezone: "America/Los_Angeles"
+    cooldown:
+      default-days: 7

@@ -16,8 +16,8 @@ on:
         default: false
 
 permissions:
-  contents: write
-  packages: write
+  contents: read
+  packages: read
 
 concurrency:
   group: build-release-binaries-${{ inputs.tag || github.ref_name }}
@@ -323,6 +323,9 @@ jobs:
     needs: setup
     if: needs.setup.outputs.should_publish_container == 'true'
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
@@ -374,6 +377,8 @@ jobs:
     needs: [setup, build]
     if: needs.setup.outputs.should_build_binaries == 'true' && !cancelled() && !failure()
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
