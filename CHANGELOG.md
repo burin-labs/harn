@@ -10,6 +10,15 @@ condensed series summaries instead of full per-patch history.
 
 ### Added
 
+- **Transcript reminder transforms (#1817).** Adds
+  `transcript.inject_reminder(transcript, options)` and
+  `transcript.clear_reminders(transcript, selector)` as pure transcript
+  transforms over pending `system_reminder` events. Injection validates
+  reminder options, appends a typed reminder event, and replaces older
+  pending reminders with the same `dedupe_key`; clearing removes
+  reminders by `id`, `tag`, or `dedupe_key` and reports the removal
+  count. This lands the deterministic transcript model without the later
+  EventLog expiry hooks or provider-rendering framework.
 - **Pipeline `on_finish` callback + finish lifecycle hooks (#1854).**
   Adds the `pipeline_on_finish(callback)` builtin and three new
   session-level hook events — `PreFinish`, `PostFinish`, and

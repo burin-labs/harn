@@ -721,6 +721,14 @@ pub(crate) const SIGNATURES: &[BuiltinSignature] = &[
         TRANSCRIPT,
     ),
     BuiltinSignature::simple(
+        "transcript.clear_reminders",
+        &[
+            Param::new("transcript", TRANSCRIPT),
+            Param::new("selector", TY_DICT),
+        ],
+        TY_DICT,
+    ),
+    BuiltinSignature::simple(
         "transcript_abandon",
         &[Param::new("transcript", TY_MESSAGES_OR_TRANSCRIPT)],
         TRANSCRIPT,
@@ -802,6 +810,14 @@ pub(crate) const SIGNATURES: &[BuiltinSignature] = &[
         "transcript_import",
         &[Param::new("text", TY_STRING)],
         TY_ANY,
+    ),
+    BuiltinSignature::simple(
+        "transcript.inject_reminder",
+        &[
+            Param::new("transcript", TRANSCRIPT),
+            Param::new("options", TY_DICT),
+        ],
+        TY_DICT,
     ),
     BuiltinSignature::simple(
         "transcript_messages",

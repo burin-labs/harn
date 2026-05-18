@@ -1657,6 +1657,8 @@ llm_mock_clear()
 | `transcript_export(transcript)` | transcript: dict | string | Export transcript as JSON |
 | `transcript_import(json_text)` | json_text: string | dict | Import transcript JSON |
 | `transcript_fork(transcript, options?)` | transcript: dict, options: dict | transcript | Fork transcript, optionally dropping messages or summary |
+| `transcript.inject_reminder(transcript, options)` | transcript: dict, options: dict | dict | Return `{transcript, reminder_id, deduped_count}` after appending a pending `system_reminder` event. `body` is required; `tags`, `dedupe_key`, `ttl_turns`, `preserve_on_compact`, `propagate`, and `role_hint` are optional and validated. A matching `dedupe_key` replaces older pending reminders. |
+| `transcript.clear_reminders(transcript, selector)` | transcript: dict, selector: dict | dict | Return `{transcript, removed_count}` after removing pending reminders selected by `id`, `tag`, or `dedupe_key`; multiple selectors are combined with AND semantics. |
 | `transcript_summarize(transcript, options?)` | transcript: dict, options: dict | transcript | Summarize and compact a transcript via `llm_call` |
 | `transcript_compact(transcript, options?)` | transcript: dict, options: dict | transcript | Compact a transcript with the runtime compaction engine, preserving durable artifacts and compaction events. `strategy: "custom"` requires `custom_compactor`, a closure that returns the replacement transcript state |
 | `transcript_auto_compact(messages, options?)` | messages: list, options: dict | list | Apply the agent-loop compaction pipeline to a message list using `llm`, `truncate`, or `custom` strategy |
@@ -2691,6 +2693,8 @@ and offline analysis.
 | `transcript_events(transcript)` | transcript | list | Return canonical transcript events |
 | `transcript_events_by_kind(transcript, kind)` | transcript, kind | list | Filter transcript events by their `kind` field |
 | `transcript_reminder_event(reminder)` | reminder: dict | event dict | Build a normalized `system_reminder` event (see [System reminders](./system-reminders.md)) |
+| `transcript.inject_reminder(transcript, options)` | transcript, options | dict | Pure transcript transform that appends a pending reminder event and returns `{transcript, reminder_id, deduped_count}`. |
+| `transcript.clear_reminders(transcript, selector)` | transcript, selector | dict | Pure transcript transform that removes pending reminders by `id`, `tag`, or `dedupe_key` and returns `{transcript, removed_count}`. |
 | `transcript_suspension_event(suspension)` | suspension: dict | event dict | Build a normalized `suspension` lifecycle event |
 | `transcript_resumption_event(resumption)` | resumption: dict | event dict | Build a normalized `resumption` lifecycle event |
 | `transcript_drain_decision_event(drain)` | drain: dict | event dict | Build a normalized `drain_decision` lifecycle event |

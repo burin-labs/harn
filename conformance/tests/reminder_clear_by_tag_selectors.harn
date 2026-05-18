@@ -1,0 +1,22 @@
+pipeline main() {
+  let first = transcript
+    .inject_reminder(transcript(), {body: "clear by id", tags: ["id_tag"], dedupe_key: "id-key"})
+  let second = transcript
+    .inject_reminder(
+    first.transcript,
+    {body: "clear by dedupe", tags: ["dedupe_tag"], dedupe_key: "dedupe-key"},
+  )
+  let third = transcript
+    .inject_reminder(
+    second.transcript,
+    {body: "clear by tag", tags: ["tagged"], dedupe_key: "tag-key"},
+  )
+  let by_id = transcript.clear_reminders(third.transcript, {id: first.reminder_id})
+  let by_dedupe = transcript.clear_reminders(by_id.transcript, {dedupe_key: "dedupe-key"})
+  let by_tag = transcript.clear_reminders(by_dedupe.transcript, {tag: "tagged"})
+  let events = transcript_events_by_kind(by_tag.transcript, "system_reminder")
+  println(by_id.removed_count)
+  println(by_dedupe.removed_count)
+  println(by_tag.removed_count)
+  println(len(events))
+}

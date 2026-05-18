@@ -1423,6 +1423,43 @@ the default ranker uses keyword overlap against `query`. Workflow
 nodes may set `context_assembler: {...}` to route the stage's selected
 artifacts through this builtin before the prompt is rendered.
 
+### Transcript reminders
+
+`transcript.inject_reminder(transcript, options)` appends a pending
+`system_reminder` event to a transcript and returns
+`{transcript, reminder_id, deduped_count}`. It is a pure transform: the
+input transcript is unchanged and the reminder is not added to durable
+messages.
+
+```harn
+let injected = transcript.inject_reminder(transcript(), {
+  body: "Approaching context window cap.",
+  tags: ["token_pressure"],
+  dedupe_key: "token_pressure",
+  ttl_turns: 3,
+  preserve_on_compact: true,
+  propagate: "session",
+  role_hint: "developer",
+})
+let t = injected.transcript
+```
+
+`body` is required and must be non-empty. Optional `tags`,
+`dedupe_key`, `ttl_turns`, `preserve_on_compact`, `propagate`, and
+`role_hint` fields are validated; unknown option keys fail fast. A new
+reminder with the same `dedupe_key` replaces pending reminders with
+that key.
+
+`transcript.clear_reminders(transcript, selector)` removes pending
+reminders and returns `{transcript, removed_count}`. Select by `id`,
+`tag`, or `dedupe_key`; when multiple selectors are present, all must
+match.
+
+```harn
+let cleared = transcript.clear_reminders(t, {tag: "token_pressure"})
+println(cleared.removed_count)
+```
+
 ### `agent_turn`
 
 `agent_turn(prompt, options?)` is the high-level wrapper for the common
