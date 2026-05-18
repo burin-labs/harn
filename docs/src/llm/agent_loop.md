@@ -992,6 +992,7 @@ Worker lifecycle builtins:
 | `spawn_agent(config)` | Start a worker from a workflow graph or delegated stage |
 | `sub_agent_request(task, options?)` | Build the normalized child-agent request used by `sub_agent_run` |
 | `sub_agent_run(task, options?)` | Run an isolated child agent loop and return a single clean result envelope to the parent |
+| `agent_lifecycle_tools(registry?, options?)` | Add model-facing lifecycle tools to a registry |
 | `send_input(handle, task)` | Re-run a completed worker with a new task, carrying transcript/artifacts forward when applicable |
 | `suspend_agent(worker, reason?, options?)` | Cooperatively suspend a worker, persist a resumable snapshot, and return `status: "suspended"` with `suspension` metadata |
 | `resume_agent(worker_or_snapshot, resume_input?, continue_transcript?)` | Resume a suspended worker, optionally with new input; set `continue_transcript=false` to resume from the prior summary plus new input only |
@@ -999,6 +1000,20 @@ Worker lifecycle builtins:
 | `wait_agent(handle_or_list)` | Wait for one worker or a list of workers to finish |
 | `close_agent(handle)` | Cancel a worker and mark it terminal |
 | `list_agents()` | Return summaries for all known workers in the current runtime |
+
+### Agent Lifecycle Tools
+
+`agent_loop(...)` automatically exposes `agent_await_resumption` as a model tool.
+When an agent is running as a worker, that tool is structural: the loop validates
+optional `conditions` with `parse_resume_conditions(...)`, calls the same suspend
+path as `suspend_agent(...)`, returns `status: "suspended"` to the parent, and
+does not dispatch the tool as an ordinary handler result.
+
+Parent-side lifecycle control is opt-in. Pass `subagents: true` or
+`subagent_tools: true` in `agent_loop` options, or call
+`agent_lifecycle_tools(registry, {subagents: true})`, to add
+`subagent_pause(handle, reason)` and
+`subagent_resume(handle, input?, continue_transcript? = true)`.
 
 ### `sub_agent_run`
 

@@ -191,6 +191,14 @@ pub(crate) const SIGNATURES: &[BuiltinSignature] = &[
         TY_DICT,
     ),
     BuiltinSignature::simple(
+        "agent_lifecycle_tools",
+        &[
+            Param::optional("registry", TY_DICT_OR_NIL),
+            Param::optional("options", TY_DICT_OR_NIL),
+        ],
+        TY_DICT,
+    ),
+    BuiltinSignature::simple(
         "agent_parse_tool_calls",
         &[
             Param::new("text", TY_STRING),

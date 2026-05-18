@@ -1639,6 +1639,29 @@ dict and return `false`, `true`, `{grant: "once"}`, or `{grant: "session"}`.
 Child agents still intersect with the parent capability policy; escalation
 cannot widen a parent ceiling.
 
+### Agent lifecycle tools
+
+`agent_loop(...)` registers `agent_await_resumption(reason, conditions?)` as a
+model-facing lifecycle tool. When the loop is running inside a worker, that call
+is intercepted before normal tool dispatch, validates `conditions` with
+`parse_resume_conditions(...)`, suspends the worker, and returns
+`status: "suspended"` with `handle`, `reason`, `initiator: "self"`,
+`conditions`, and `iterations_completed`.
+
+Parent-side tools are gated by subagent capability. Pass `subagents: true` or
+`subagent_tools: true` in loop options, or call
+`agent_lifecycle_tools(registry, {subagents: true})`, to expose:
+
+| Tool | Use |
+|---|---|
+| `subagent_pause(handle, reason)` | Pause a running child after its current turn settles |
+| `subagent_resume(handle, input?, continue_transcript? = true)` | Resume a suspended child |
+| `agent_await_resumption(reason, conditions?)` | Let the current worker self-park |
+
+Lifecycle invocations emit `tool_call_audit` telemetry with initiator and reason
+metadata. Top-level self-suspend uses the same tool surface but needs host-level
+resume plumbing beyond the current worker-backed path.
+
 Pass `autonomy_budget` to cap how many autonomous decisions an agent can
 make per UTC hour / UTC day. The check fires at loop entry, before any
 LLM/MCP work — scripts can't bypass it. When the cap is exhausted,
@@ -1804,7 +1827,7 @@ sentinel-only completion gate.
 ### Resume conditions
 
 Self-parking agents use a shared `ResumeConditions` shape for
-`agent_await_resumption` and `spawn_agent({options: {resume_when:
+`agent_await_resumption(reason, conditions?)` and `spawn_agent({options: {resume_when:
 ...}})`. Call `parse_resume_conditions(conditions?)` from
 `std/agent/workers` when you need to validate or normalize the shape
 without spawning a worker.

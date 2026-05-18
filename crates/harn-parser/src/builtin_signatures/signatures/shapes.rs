@@ -162,6 +162,8 @@ pub(crate) const SUB_AGENT_OPTIONS: Ty = Ty::Shape(&[
     ShapeFieldDescriptor::optional("reasoning_task", TY_STRING),
     ShapeFieldDescriptor::optional("task_kind", TY_STRING),
     ShapeFieldDescriptor::optional("tools", TY_TOOL_REGISTRY_OR_LIST),
+    ShapeFieldDescriptor::optional("subagents", TY_BOOL),
+    ShapeFieldDescriptor::optional("subagent_tools", TY_BOOL),
     ShapeFieldDescriptor::optional("tool_format", TY_STRING),
     ShapeFieldDescriptor::optional("native_tool_fallback", TY_STRING),
     ShapeFieldDescriptor::optional("tool_search", TY_DICT),

@@ -219,6 +219,10 @@ pub(crate) const BUILTINS: &[(&str, &str)] = &[
         "agent_loop(prompt, system?, options?) -> dict",
     ),
     (
+        "agent_lifecycle_tools",
+        "agent_lifecycle_tools(registry?, options?) -> dict",
+    ),
+    (
         "suspend_agent",
         "suspend_agent(worker, reason?, options?) -> dict",
     ),

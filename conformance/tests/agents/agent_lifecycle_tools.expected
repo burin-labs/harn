@@ -1,0 +1,7 @@
+agent_await_resumption
+true
+true
+agent_await_resumption
+subagent_pause
+subagent_resume
+true
