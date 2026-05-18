@@ -1,13 +1,15 @@
 //! Method dispatch for the `Harness` capability handle and its six
-//! sub-handles. E4.1 ships the stdio surface end-to-end (`println`,
-//! `eprintln`) so the new entrypoint convention has a working
-//! hello-world; subsequent tickets (E4.2-E4.4) replace the stub bodies
-//! on the other sub-handles with real implementations.
+//! sub-handles. The stdio and clock slices are wired end-to-end; subsequent
+//! tickets replace the stub bodies on the remaining sub-handles with real
+//! implementations.
 
 use std::time::Duration;
 
 use crate::harness::{vm_string, HarnessKind, HarnessMode, VmHarness};
-use crate::stdlib::io::{write_stderr, write_stdout};
+use crate::stdlib::io::{
+    prompt_user_value, read_line_legacy_value, read_line_structured_value, write_stderr,
+    write_stdout,
+};
 use crate::value::{ErrorCategory, VmError, VmValue};
 
 impl crate::vm::Vm {
@@ -67,6 +69,14 @@ impl crate::vm::Vm {
                 write_stderr(&msg);
                 Ok(VmValue::Nil)
             }
+            "read_line" => {
+                if args.is_empty() {
+                    Ok(read_line_legacy_value())
+                } else {
+                    read_line_structured_value(args)
+                }
+            }
+            "prompt" => prompt_user_value(args, &mut self.output),
             _ => Err(method_unsupported(handle, method)),
         }
     }

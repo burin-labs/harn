@@ -1,5 +1,6 @@
 use std::cell::RefCell;
 use std::collections::{BTreeMap, VecDeque};
+#[cfg(not(unix))]
 use std::io::BufRead;
 use std::io::{IsTerminal, Read, Write};
 use std::rc::Rc;
@@ -758,25 +759,33 @@ fn read_stdin_builtin(_args: &[VmValue], _out: &mut String) -> Result<VmValue, V
     }
 }
 
-fn read_line_builtin(_args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
+pub(crate) fn read_line_legacy_value() -> VmValue {
     let options = ReadLineOptions {
         trim: false,
         ..ReadLineOptions::default()
     };
     match read_line_from_mock_or_real(&options) {
-        ReadLineOutcome::Ok(line) => Ok(VmValue::String(Rc::from(line))),
-        ReadLineOutcome::Eof => Ok(VmValue::Nil),
+        ReadLineOutcome::Ok(line) => VmValue::String(Rc::from(line)),
+        ReadLineOutcome::Eof => VmValue::Nil,
         #[cfg(unix)]
-        ReadLineOutcome::Timeout => Ok(VmValue::Nil),
+        ReadLineOutcome::Timeout => VmValue::Nil,
         #[cfg(unix)]
-        ReadLineOutcome::Interrupt => Ok(VmValue::Nil),
-        ReadLineOutcome::Error(_) => Ok(VmValue::Nil),
+        ReadLineOutcome::Interrupt => VmValue::Nil,
+        ReadLineOutcome::Error(_) => VmValue::Nil,
     }
 }
 
-fn io_read_line_builtin(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
+fn read_line_builtin(_args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
+    Ok(read_line_legacy_value())
+}
+
+pub(crate) fn read_line_structured_value(args: &[VmValue]) -> Result<VmValue, VmError> {
     let options = parse_read_line_options(args)?;
     Ok(read_line_result(read_line_from_mock_or_real(&options)))
+}
+
+fn io_read_line_builtin(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
+    read_line_structured_value(args)
 }
 
 fn is_stdin_tty_builtin(_args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
@@ -876,15 +885,26 @@ fn uuid_nil_builtin(_args: &[VmValue], _out: &mut String) -> Result<VmValue, VmE
     Ok(VmValue::String(Rc::from(uuid::Uuid::nil().to_string())))
 }
 
-fn prompt_user_builtin(args: &[VmValue], out: &mut String) -> Result<VmValue, VmError> {
+pub(crate) fn prompt_user_value(args: &[VmValue], out: &mut String) -> Result<VmValue, VmError> {
     let msg = args.first().map(|a| a.display()).unwrap_or_default();
     write_stdout(out, &msg);
-    let mut input = String::new();
-    if std::io::stdin().lock().read_line(&mut input).is_ok() {
-        Ok(VmValue::String(Rc::from(input.trim_end())))
-    } else {
-        Ok(VmValue::Nil)
+    let options = ReadLineOptions {
+        trim: false,
+        ..ReadLineOptions::default()
+    };
+    match read_line_from_mock_or_real(&options) {
+        ReadLineOutcome::Ok(line) => Ok(VmValue::String(Rc::from(line.trim_end().to_string()))),
+        ReadLineOutcome::Eof => Ok(VmValue::Nil),
+        #[cfg(unix)]
+        ReadLineOutcome::Timeout => Ok(VmValue::Nil),
+        #[cfg(unix)]
+        ReadLineOutcome::Interrupt => Ok(VmValue::Nil),
+        ReadLineOutcome::Error(_) => Ok(VmValue::Nil),
     }
+}
+
+fn prompt_user_builtin(args: &[VmValue], out: &mut String) -> Result<VmValue, VmError> {
+    prompt_user_value(args, out)
 }
 
 fn log_debug_builtin(args: &[VmValue], out: &mut String) -> Result<VmValue, VmError> {

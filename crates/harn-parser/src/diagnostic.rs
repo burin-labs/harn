@@ -118,6 +118,21 @@ pub fn harness_clock_replacement(name: &str) -> Option<&'static str> {
     }
 }
 
+/// Map an ambient stdio-capability builtin to its `harness.stdio.*`
+/// replacement so the `bindings/thread-harness-stdio` repair can replace
+/// the call when a harness binding is already in scope.
+pub fn harness_stdio_replacement(name: &str) -> Option<&'static str> {
+    match name {
+        "print" => Some("harness.stdio.print"),
+        "println" => Some("harness.stdio.println"),
+        "eprint" => Some("harness.stdio.eprint"),
+        "eprintln" => Some("harness.stdio.eprintln"),
+        "read_line" => Some("harness.stdio.read_line"),
+        "prompt_user" => Some("harness.stdio.prompt"),
+        _ => None,
+    }
+}
+
 /// Render a Rust-style diagnostic message.
 ///
 /// Example output:

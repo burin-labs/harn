@@ -283,6 +283,7 @@ diagnostic_codes! {
     LintDeprecatedLlmOptions, "HARN-LNT-050", Lnt, "deprecated LLM options lint";
     LintUnnecessarySafeNavigation, "HARN-LNT-051", Lnt, "unnecessary safe navigation lint";
     LintAmbientClockBuiltin, "HARN-LNT-052", Lnt, "ambient clock builtin replaced by `harness.clock.*`";
+    LintAmbientStdioBuiltin, "HARN-LNT-053", Lnt, "ambient stdio builtin replaced by `harness.stdio.*`";
     FormatterParseFailed, "HARN-FMT-001", Fmt, "formatter could not parse the source";
     FormatterWouldReformat, "HARN-FMT-002", Fmt, "source is not in canonical format";
     FormatterTrailingComma, "HARN-FMT-003", Fmt, "formatter normalized trailing comma layout";
@@ -401,6 +402,9 @@ impl Code {
             Code::LintTemplateProviderIdentityBranch => &[Code::PromptProviderIdentityBranch],
             Code::LintRenamedStdlibSymbol => &[Code::DeprecatedStdlibSymbol],
             Code::LintAmbientClockBuiltin => {
+                &[Code::InvalidMainSignature, Code::LintRenamedStdlibSymbol]
+            }
+            Code::LintAmbientStdioBuiltin => {
                 &[Code::InvalidMainSignature, Code::LintRenamedStdlibSymbol]
             }
             Code::LintMutableNeverReassigned => &[Code::MutableNeverReassigned],
@@ -706,6 +710,7 @@ impl Code {
             Code::LintDeadCodeAfterReturn => Some(&REPAIR_DEAD_CODE_REMOVE),
             Code::LintRenamedStdlibSymbol => Some(&REPAIR_STDLIB_MIGRATE_RENAMED),
             Code::LintAmbientClockBuiltin => Some(&REPAIR_BINDINGS_THREAD_HARNESS_CLOCK),
+            Code::LintAmbientStdioBuiltin => Some(&REPAIR_BINDINGS_THREAD_HARNESS_STDIO),
             Code::LintDeprecatedLlmOptions => Some(&REPAIR_LLM_MIGRATE_DEPRECATED_OPTION),
             Code::LintTemplateProviderIdentityBranch => Some(&REPAIR_LLM_USE_CAPABILITY_FLAG),
             Code::LintPromptInjectionRisk => Some(&REPAIR_PROMPTS_ESCAPE_INJECTION),
@@ -805,6 +810,12 @@ const REPAIR_BINDINGS_THREAD_HARNESS: RepairTemplate = RepairTemplate {
 const REPAIR_BINDINGS_THREAD_HARNESS_CLOCK: RepairTemplate = RepairTemplate {
     id: "bindings/thread-harness-clock",
     summary: "Replace the ambient clock builtin with the corresponding `harness.clock.*` method",
+    safety: RepairSafety::ScopeLocal,
+};
+
+const REPAIR_BINDINGS_THREAD_HARNESS_STDIO: RepairTemplate = RepairTemplate {
+    id: "bindings/thread-harness-stdio",
+    summary: "Replace the ambient stdio builtin with the corresponding `harness.stdio.*` method",
     safety: RepairSafety::ScopeLocal,
 };
 
