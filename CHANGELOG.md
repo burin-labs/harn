@@ -52,6 +52,22 @@ condensed series summaries instead of full per-patch history.
   to the spawn-config declared ceiling. Enforcement of the ⊆ relation
   lands in E5.4 (`HARN-CAP-301`); the OpenTrustGraph receipt-chain
   embedding lands in E5.5.
+- **`owned<T>` + scope-exit auto-drop (#1789).** A new `owned<T>` type
+  modifier marks a binding as carrying sole ownership of a drop-able stdlib
+  handle (channels, sync permits, future MCP/ACP/file handles). The compiler
+  emits an implicit `defer { drop(<binding>) }` at the binding's enclosing
+  block so the resource closes deterministically on normal exit, early
+  `return`, `break` / `continue`, and uncaught throws — no manual
+  `close_channel` / `mcp_disconnect`. `drop()` is a new builtin that
+  dispatches on the runtime value tag; unknown values are a silent no-op so
+  callers can hand it any value. The existing `defer { ... }` block is now
+  also block-scoped (it previously leaked to function scope), running at the
+  end of its innermost `{ ... }` and at each loop-body iteration. A new
+  `channel_is_closed(channel) -> bool` builtin makes channel lifecycle
+  observable from tests. `HARN-OWN-003` (`OwnershipEscape`) warns when an
+  `owned<T>` binding escapes via `return` without the function declaring
+  `owned<T>` as its return type; widening the return type signals an
+  explicit ownership transfer.
 - **Transcript reminder transforms (#1817).** Adds
   `transcript.inject_reminder(transcript, options)` and
   `transcript.clear_reminders(transcript, selector)` over pending

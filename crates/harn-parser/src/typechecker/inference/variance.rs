@@ -269,6 +269,11 @@ impl TypeChecker {
                 }
             }
             TypeExpr::Never | TypeExpr::LitString(_) | TypeExpr::LitInt(_) => {}
+            TypeExpr::Owned(inner) => {
+                // `owned<T>` is invariant in T: the wrapped handle's identity
+                // matters for drop dispatch.
+                self.walk_variance(decl_kind, inner, Polarity::Invariant, declared, span);
+            }
         }
     }
 }

@@ -1374,11 +1374,16 @@ defer {
 }
 ```
 
-Registers a block to run when the enclosing scope exits, whether by
-normal return or by a thrown error. Multiple `defer` blocks in the same
-scope execute in LIFO (last-registered, first-executed) order, similar
-to Go's `defer`. The deferred block runs in the scope where it was
-declared.
+Registers a block to run when the enclosing lexical scope exits — on normal
+fallthrough, on `return`, on `break` / `continue` out of an enclosing loop,
+or on an uncaught throw. Multiple `defer` blocks in the same scope execute
+in LIFO (last-registered, first-executed) order, similar to Zig's `defer`.
+The deferred block runs in the scope where it was declared.
+
+Scope here is the innermost `{ ... }`, not the enclosing function. A `defer`
+inside an `if` block fires when control leaves that `if`. A `defer` inside a
+`for` body fires at the end of each iteration as well as on `break` /
+`continue`.
 
 ```harn
 fn open(path) { path }
@@ -1387,6 +1392,38 @@ let f = open("data.txt")
 defer { close(f) }
 // ... use f ...
 // close(f) runs automatically on scope exit
+```
+
+### owned\<T\> and drop()
+
+```harn
+let ch: owned<channel> = channel("log", 64)
+// implicit: defer { drop(ch) } registered at this `let`
+```
+
+`owned<T>` marks a binding as carrying sole ownership of a drop-able stdlib
+handle. The compiler emits an implicit `defer { drop(<binding>) }` at the
+`let` / `var` so the resource closes deterministically at lexical scope exit
+— no manual `close_channel` / `mcp_disconnect` / etc. and no reliance on GC
+finalisation. `drop()` is a builtin that dispatches on the runtime value tag:
+channels close, sync permits release, future handle types add their own
+hooks; unknown values are a silent no-op.
+
+`owned<T>` is transparent for type compatibility: an `owned<channel>` value
+flows into a parameter declared `channel`, and a `channel` value satisfies an
+`owned<channel>` annotation. The marker only influences scope-exit codegen
+and the ownership-escape lint below.
+
+Returning an `owned<T>` binding by name from a function whose declared
+return type is not also `owned<T>` defeats the auto-drop and fires
+`HARN-OWN-003`. To **transfer ownership** to the caller, declare the
+return type as `owned<T>`:
+
+```harn
+fn open_log() -> owned<channel> {
+  let ch: owned<channel> = channel("log", 64)
+  return ch                              // ownership transfers to caller
+}
 ```
 
 ### spawn/await/cancel

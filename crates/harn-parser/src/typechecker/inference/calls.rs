@@ -640,6 +640,9 @@ impl TypeChecker {
             TypeExpr::Never => TypeExpr::Never,
             TypeExpr::LitString(s) => TypeExpr::LitString(s.clone()),
             TypeExpr::LitInt(v) => TypeExpr::LitInt(*v),
+            TypeExpr::Owned(inner) => {
+                TypeExpr::Owned(Box::new(Self::apply_type_bindings(inner, bindings)))
+            }
         }
     }
 

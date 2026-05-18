@@ -1,0 +1,26 @@
+[harn] before block
+[harn] inside if
+[harn] if-block exit
+[harn] after block
+[harn] body
+[harn] third
+[harn] second
+[harn] first
+[harn] outside
+[harn] 1
+[harn] end iter
+[harn] 2
+[harn] end iter
+[harn] 3
+[harn] end iter
+[harn] loop done
+[harn] 1
+[harn] iter cleanup
+[harn] iter cleanup
+[harn] after break
+[harn] 1
+[harn] iter cleanup
+[harn] iter cleanup
+[harn] 3
+[harn] iter cleanup
+[harn] after continue

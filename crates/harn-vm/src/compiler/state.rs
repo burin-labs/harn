@@ -127,6 +127,7 @@ impl Compiler {
             TypeExpr::Never => TypeExpr::Never,
             TypeExpr::LitString(s) => TypeExpr::LitString(s.clone()),
             TypeExpr::LitInt(v) => TypeExpr::LitInt(*v),
+            TypeExpr::Owned(inner) => TypeExpr::Owned(Box::new(self.expand_alias(inner))),
         }
     }
 
@@ -540,6 +541,7 @@ impl Compiler {
                 ("type".to_string(), VmValue::String(Rc::from("int"))),
                 ("const".to_string(), VmValue::Int(*v)),
             ])))),
+            harn_parser::TypeExpr::Owned(inner) => Self::type_expr_to_schema_value(inner),
         }
     }
 
@@ -800,11 +802,13 @@ impl Compiler {
 
     pub(super) fn compile_scoped_block(&mut self, stmts: &[SNode]) -> Result<(), CompileError> {
         self.begin_scope();
+        let finally_floor = self.finally_bodies.len();
         if stmts.is_empty() {
             self.chunk.emit(Op::Nil, self.line);
         } else {
             self.compile_block(stmts)?;
         }
+        self.drain_finallys_to_floor(finally_floor)?;
         self.end_scope();
         Ok(())
     }
@@ -814,14 +818,68 @@ impl Compiler {
         stmts: &[SNode],
     ) -> Result<(), CompileError> {
         self.begin_scope();
+        let finally_floor = self.finally_bodies.len();
         for sn in stmts {
             self.compile_node(sn)?;
             if Self::produces_value(&sn.node) {
                 self.chunk.emit(Op::Pop, self.line);
             }
         }
+        self.drain_finallys_to_floor(finally_floor)?;
         self.end_scope();
         Ok(())
+    }
+
+    /// Drain pending `defer` bodies down to a saved floor and run each inline
+    /// in LIFO order. Each defer body is popped *before* its code is emitted so
+    /// any `return` / `break` lowering inside the body sees the remaining
+    /// pending defers (not itself).
+    pub(super) fn drain_finallys_to_floor(&mut self, floor: usize) -> Result<(), CompileError> {
+        while self.finally_bodies.len() > floor {
+            let entry = self.finally_bodies.pop().expect("non-empty by guard");
+            if let FinallyEntry::Finally(body) = entry {
+                self.compile_finally_inline(&body)?;
+            }
+        }
+        Ok(())
+    }
+
+    /// Register an auto-drop defer for an `owned<T>` binding. The drop runs
+    /// at scope exit alongside any user-written `defer { ... }` blocks (LIFO
+    /// order) and on `return` / `break` / `continue` / `throw` via the
+    /// existing finally-unwinding machinery.
+    pub(super) fn maybe_register_owned_drop(
+        &mut self,
+        pattern: &harn_parser::BindingPattern,
+        type_ann: Option<&TypeExpr>,
+        span: harn_lexer::Span,
+    ) {
+        // Auto-drop only fires when the user explicitly opted in via
+        // `owned<T>` on a single-identifier binding. Destructured patterns
+        // (`{a, b}`, `[a, b]`, pairs) aren't auto-dropped: ownership of a
+        // composite isn't well-defined, and users can wrap individual fields
+        // with `owned<T>` and bind them separately if needed.
+        let Some(ty) = type_ann else {
+            return;
+        };
+        if !matches!(ty, TypeExpr::Owned(_)) {
+            return;
+        }
+        let harn_parser::BindingPattern::Identifier(name) = pattern else {
+            return;
+        };
+        if harn_parser::is_discard_name(name) {
+            return;
+        }
+        let call = harn_parser::spanned(
+            Node::FunctionCall {
+                name: "drop".to_string(),
+                args: vec![harn_parser::spanned(Node::Identifier(name.clone()), span)],
+                type_args: Vec::new(),
+            },
+            span,
+        );
+        self.finally_bodies.push(FinallyEntry::Finally(vec![call]));
     }
 
     pub(super) fn compile_block(&mut self, stmts: &[SNode]) -> Result<(), CompileError> {
@@ -843,6 +901,7 @@ impl Compiler {
     /// Compile a match arm body, ensuring it always pushes exactly one value.
     pub(super) fn compile_match_body(&mut self, body: &[SNode]) -> Result<(), CompileError> {
         self.begin_scope();
+        let finally_floor = self.finally_bodies.len();
         if body.is_empty() {
             self.chunk.emit(Op::Nil, self.line);
         } else {
@@ -851,6 +910,7 @@ impl Compiler {
                 self.chunk.emit(Op::Nil, self.line);
             }
         }
+        self.drain_finallys_to_floor(finally_floor)?;
         self.end_scope();
         Ok(())
     }

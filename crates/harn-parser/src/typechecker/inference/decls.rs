@@ -229,6 +229,29 @@ impl TypeChecker {
                         );
                     }
                 }
+                // Returning an `owned<T>` binding by name silently disables
+                // the auto-drop: the value escapes the scope where the
+                // synthetic `defer { drop(x) }` would have fired. Surface
+                // this as `HARN-OWN-003` so the author can either change the
+                // return signature to `owned<T>` (declaring an ownership
+                // transfer) or pick a different value.
+                if let Node::Identifier(name) = &val.node {
+                    if let Some(Some(declared)) = scope.get_var(name) {
+                        if matches!(declared, TypeExpr::Owned(_))
+                            && !matches!(expected, TypeExpr::Owned(_))
+                        {
+                            self.warning_at(
+                                Code::OwnershipEscape,
+                                format!(
+                                    "owned binding `{name}` escapes its scope via `return`; \
+                                     either return `owned<…>` to transfer ownership or drop \
+                                     the value before returning"
+                                ),
+                                val.span,
+                            );
+                        }
+                    }
+                }
             }
             Node::IfElse {
                 condition,

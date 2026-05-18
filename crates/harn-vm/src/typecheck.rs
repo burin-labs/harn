@@ -235,6 +235,12 @@ fn matches_type_with_generics(
         TypeExpr::Never => false,
         TypeExpr::LitString(s) => matches!(value, VmValue::String(rs) if rs.as_ref() == s),
         TypeExpr::LitInt(i) => matches!(value, VmValue::Int(rv) if rv == i),
+        TypeExpr::Owned(inner) => {
+            // `owned<T>` is transparent at runtime — only the wrapped type
+            // shape is checked. Ownership semantics live in lints and the
+            // compiler's auto-drop lowering.
+            matches_type_with_generics(value, inner, type_params, nominal_type_names)
+        }
     }
 }
 

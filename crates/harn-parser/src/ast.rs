@@ -578,6 +578,12 @@ pub enum TypeExpr {
     Generator(Box<TypeExpr>),
     /// An asynchronous stream type: `Stream<int>`. Produced by `gen fn`.
     Stream(Box<TypeExpr>),
+    /// An owned handle type: `owned<File>`. Marks the binding as carrying
+    /// sole ownership of a drop-able resource. The compiler emits an
+    /// auto-`drop()` at the binding's enclosing block exit; the lint
+    /// `HARN-OWN-005` flags ownership leaks (e.g. returning the value or
+    /// storing it in a non-owned field).
+    Owned(Box<TypeExpr>),
     /// A generic type application: `Option<int>`, `Result<string, int>`.
     Applied { name: String, args: Vec<TypeExpr> },
     /// A function type: `fn(int, string) -> bool`.

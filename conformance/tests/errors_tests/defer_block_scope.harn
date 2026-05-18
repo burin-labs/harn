@@ -1,0 +1,71 @@
+pipeline test(task) {
+  // Defer is block-scoped: runs at end of its enclosing { ... } block,
+  // not at end of the surrounding function.
+  fn block_scoped() {
+    log("before block")
+    if true {
+      defer {
+        log("if-block exit")
+      }
+      log("inside if")
+    }
+    log("after block")
+  }
+  block_scoped()
+  // Block-scoped defer + LIFO order inside the same block.
+  fn lifo_in_block() {
+    if true {
+      defer {
+        log("first")
+      }
+      defer {
+        log("second")
+      }
+      defer {
+        log("third")
+      }
+      log("body")
+    }
+    log("outside")
+  }
+  lifo_in_block()
+  // Defer inside a for-body runs at each iteration's end (block-scope).
+  fn loop_per_iteration() {
+    for i in [1, 2, 3] {
+      defer {
+        log("end iter")
+      }
+      log(i)
+    }
+    log("loop done")
+  }
+  loop_per_iteration()
+  // Break still runs pending defers in the loop body before exiting.
+  fn break_runs_defers() {
+    for i in [1, 2, 3] {
+      defer {
+        log("iter cleanup")
+      }
+      if i == 2 {
+        break
+      }
+      log(i)
+    }
+    log("after break")
+  }
+  break_runs_defers()
+  // Continue runs pending defers in the loop body before continuing.
+  fn continue_runs_defers() {
+    for i in [1, 2, 3] {
+      defer {
+        log("iter cleanup")
+      }
+      if i == 2 {
+        continue
+      }
+      log(i)
+    }
+    log("after continue")
+  }
+  continue_runs_defers()
+}

@@ -101,7 +101,7 @@
       "patterns": [
         {
           "name": "support.type.harn",
-          "match": "\\b(int|float|string|bool|list|dict|any|void)\\b"
+          "match": "\\b(int|float|string|bool|list|dict|any|void|owned)\\b"
         },
         {
           "name": "entity.name.type.harn",

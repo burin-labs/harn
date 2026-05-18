@@ -396,8 +396,9 @@ deadline 30s {
 
 ## Defer
 
-Register cleanup code that runs when the enclosing scope exits, whether
-by normal return or by a thrown error:
+Register cleanup code that runs when the enclosing lexical scope exits —
+on normal fallthrough, on `return`, on `break` or `continue` out of a
+loop, or on an uncaught throw:
 
 ```harn
 fn open(path) { return path }
@@ -409,8 +410,47 @@ defer { close(f) }
 // close(f) runs automatically on scope exit
 ```
 
-Multiple `defer` blocks execute in LIFO (last-registered, first-executed)
-order, similar to Go's `defer`.
+Multiple `defer` blocks in the same scope execute in LIFO
+(last-registered, first-executed) order, similar to Zig's `defer`. Scope
+is the innermost `{ ... }` (an `if` block, a loop body, a `try` block),
+not the enclosing function — a `defer` inside a `for` body fires at the
+end of each iteration.
+
+## Owned handles and `drop()`
+
+For stdlib handle types that need deterministic cleanup, annotate the
+binding with `owned<T>` so the compiler registers an implicit
+`defer { drop(<binding>) }` for you:
+
+```harn
+let ch: owned<channel> = channel("log", 64)
+// equivalent to: let ch = channel("log", 64); defer { drop(ch) }
+```
+
+`drop()` is a builtin that dispatches on the runtime value tag — it
+closes channels, releases sync permits, and falls through silently for
+values that don't carry a close hook. The auto-drop fires alongside
+user-written `defer` blocks in LIFO order, so:
+
+```harn
+let ch: owned<channel> = channel("log", 64)
+defer { log("user defer first (LIFO)") }
+// At scope exit: "user defer first (LIFO)" runs, then drop(ch).
+```
+
+`owned<T>` is transparent to the type system — an `owned<channel>` flows
+into a parameter declared `channel` and vice versa. The marker only
+influences scope-exit codegen and the `HARN-OWN-003` ownership-escape
+lint, which fires when an `owned<T>` binding is returned from a function
+whose return type is not also `owned<T>`. Widen the return type to
+`owned<T>` to signal an explicit ownership transfer:
+
+```harn
+fn open_log() -> owned<channel> {
+  let ch: owned<channel> = channel("log", 64)
+  return ch        // ownership flows to the caller; auto-drop suppressed
+}
+```
 
 ## Capping in-flight work with `max_concurrent`
 

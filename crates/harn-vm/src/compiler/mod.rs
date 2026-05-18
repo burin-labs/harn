@@ -206,7 +206,8 @@ impl Compiler {
                 };
                 self.compile_node(value)?;
                 self.compile_destructuring(pattern, false)?;
-                self.record_binding_type(pattern, binding_type);
+                self.record_binding_type(pattern, binding_type.clone());
+                self.maybe_register_owned_drop(pattern, binding_type.as_ref(), snode.span);
             }
             Node::VarBinding { pattern, value, .. } => {
                 let binding_type = match &snode.node {
@@ -218,7 +219,8 @@ impl Compiler {
                 };
                 self.compile_node(value)?;
                 self.compile_destructuring(pattern, true)?;
-                self.record_binding_type(pattern, binding_type);
+                self.record_binding_type(pattern, binding_type.clone());
+                self.maybe_register_owned_drop(pattern, binding_type.as_ref(), snode.span);
             }
             Node::Assignment {
                 target, value, op, ..
@@ -434,6 +436,7 @@ impl Compiler {
             }
             Node::MutexBlock { body } => {
                 self.begin_scope();
+                let finally_floor = self.finally_bodies.len();
                 let key_idx = self
                     .chunk
                     .add_constant(Constant::String("__default__".to_string()));
@@ -444,6 +447,7 @@ impl Compiler {
                         self.chunk.emit(Op::Pop, self.line);
                     }
                 }
+                self.drain_finallys_to_floor(finally_floor)?;
                 self.chunk.emit(Op::Nil, self.line);
                 self.end_scope();
             }

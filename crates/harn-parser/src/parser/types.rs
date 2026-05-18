@@ -253,6 +253,8 @@ impl Parser {
                 return Ok(TypeExpr::Generator(Box::new(type_args.remove(0))));
             } else if (name == "Stream" || name == "stream") && type_args.len() == 1 {
                 return Ok(TypeExpr::Stream(Box::new(type_args.remove(0))));
+            } else if name == "owned" && type_args.len() == 1 {
+                return Ok(TypeExpr::Owned(Box::new(type_args.remove(0))));
             }
             return Ok(TypeExpr::Applied {
                 name,
