@@ -10,6 +10,14 @@ condensed series summaries instead of full per-patch history.
 
 ### Added
 
+- **`harn check --json` and `harn fmt --json` (#1759).** Adds
+  standard `JsonEnvelope` reports for static checks and formatter
+  runs, including per-file status, diagnostics, summary counts, and
+  schema catalog entries. Provider and connector matrix JSON output
+  now uses the same envelope; `--format=json` remains as a deprecated
+  alias for the matrix commands for one patch release. Merge Captain
+  ladder, iterate, and audit commands now accept `--json` with
+  `--format=json` kept as a deprecated alias.
 - **`harn parse --json` and `harn tokens --json` (#1757).** Adds
   parser and lexer inspection commands for tooling. `harn parse` prints
   the AST in text mode or a tagged `Program` JSON tree with byte spans

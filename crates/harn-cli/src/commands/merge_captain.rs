@@ -123,7 +123,10 @@ pub(crate) fn run_ladder(args: &MergeCaptainLadderArgs) -> i32 {
         }
     }
 
-    match args.format {
+    let Some(format) = ladder_output_format(args) else {
+        return 2;
+    };
+    match format {
         MergeCaptainLadderFormat::Json => print_json_value(&report),
         MergeCaptainLadderFormat::Text => print_ladder_report(&report),
     }
@@ -186,7 +189,10 @@ pub(crate) fn run_iterate(args: &MergeCaptainIterateArgs) -> i32 {
         }
     }
 
-    match args.format {
+    let Some(format) = iterate_output_format(args) else {
+        return 2;
+    };
+    match format {
         MergeCaptainIterateFormat::Json => print_json_value(&report),
         MergeCaptainIterateFormat::Text => print!("{markdown}"),
     }
@@ -236,7 +242,10 @@ fn run_iteration_diff(args: &MergeCaptainIterateArgs) -> i32 {
             return 1;
         }
     }
-    match args.format {
+    let Some(format) = iterate_output_format(args) else {
+        return 2;
+    };
+    match format {
         MergeCaptainIterateFormat::Json => print_json_value(&diff),
         MergeCaptainIterateFormat::Text => print!("{markdown}"),
     }
@@ -407,7 +416,10 @@ pub(crate) fn run_audit(args: &MergeCaptainAuditArgs) -> i32 {
     let mut report = audit_transcript(&loaded.events, golden.as_ref());
     report.source_path = Some(loaded.source_path.display().to_string());
 
-    match args.format {
+    let Some(format) = audit_output_format(args) else {
+        return 2;
+    };
+    match format {
         MergeCaptainAuditFormat::Json => {
             print_json(&report);
         }
@@ -425,6 +437,51 @@ pub(crate) fn run_audit(args: &MergeCaptainAuditArgs) -> i32 {
 
 fn print_json(report: &AuditReport) {
     print_json_value(report);
+}
+
+fn ladder_output_format(args: &MergeCaptainLadderArgs) -> Option<MergeCaptainLadderFormat> {
+    if args.json {
+        if !matches!(args.format, MergeCaptainLadderFormat::Text) {
+            eprintln!("error: merge-captain ladder accepts either --json or --format, not both");
+            return None;
+        }
+        Some(MergeCaptainLadderFormat::Json)
+    } else {
+        if matches!(args.format, MergeCaptainLadderFormat::Json) {
+            eprintln!("WARNING: `merge-captain ladder --format=json` is deprecated; use `--json`");
+        }
+        Some(args.format)
+    }
+}
+
+fn iterate_output_format(args: &MergeCaptainIterateArgs) -> Option<MergeCaptainIterateFormat> {
+    if args.json {
+        if !matches!(args.format, MergeCaptainIterateFormat::Text) {
+            eprintln!("error: merge-captain iterate accepts either --json or --format, not both");
+            return None;
+        }
+        Some(MergeCaptainIterateFormat::Json)
+    } else {
+        if matches!(args.format, MergeCaptainIterateFormat::Json) {
+            eprintln!("WARNING: `merge-captain iterate --format=json` is deprecated; use `--json`");
+        }
+        Some(args.format)
+    }
+}
+
+fn audit_output_format(args: &MergeCaptainAuditArgs) -> Option<MergeCaptainAuditFormat> {
+    if args.json {
+        if !matches!(args.format, MergeCaptainAuditFormat::Text) {
+            eprintln!("error: merge-captain audit accepts either --json or --format, not both");
+            return None;
+        }
+        Some(MergeCaptainAuditFormat::Json)
+    } else {
+        if matches!(args.format, MergeCaptainAuditFormat::Json) {
+            eprintln!("WARNING: `merge-captain audit --format=json` is deprecated; use `--json`");
+        }
+        Some(args.format)
+    }
 }
 
 fn print_json_value<T: serde::Serialize>(value: &T) {

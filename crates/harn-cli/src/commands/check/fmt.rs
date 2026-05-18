@@ -2,6 +2,49 @@ use std::process;
 
 use harn_fmt::{format_source_opts, FmtOptions};
 use harn_parser::DiagnosticCode as Code;
+use serde::Serialize;
+
+use crate::json_envelope::{JsonEnvelope, JsonError};
+
+pub(crate) const FMT_SCHEMA_VERSION: u32 = 1;
+
+#[derive(Debug, Clone, Serialize)]
+pub(crate) struct FmtReport {
+    pub files: Vec<FmtFileReport>,
+    pub summary: FmtSummary,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub(crate) struct FmtFileReport {
+    pub path: String,
+    pub status: FmtFileStatus,
+    pub diff_lines_changed: usize,
+    pub diagnostics: Vec<FmtDiagnostic>,
+}
+
+#[derive(Debug, Clone, Copy, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub(crate) enum FmtFileStatus {
+    Formatted,
+    AlreadyFormatted,
+    #[allow(dead_code)]
+    Skipped,
+    Error,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub(crate) struct FmtDiagnostic {
+    pub code: String,
+    pub message: String,
+}
+
+#[derive(Debug, Clone, Default, Serialize)]
+pub(crate) struct FmtSummary {
+    pub formatted: usize,
+    pub already_formatted: usize,
+    pub skipped: usize,
+    pub errors: usize,
+}
 
 /// Whether `harn fmt` should rewrite files in place or just report drift.
 #[derive(Clone, Copy, Debug)]
@@ -28,6 +71,37 @@ impl FmtMode {
 
 /// Format one or more files or directories. Accepts multiple targets.
 pub(crate) fn fmt_targets(targets: &[&str], mode: FmtMode, opts: &FmtOptions) {
+    let report = fmt_targets_report(targets, mode, opts);
+    print_text_report(&report);
+    if report.summary.errors > 0 {
+        process::exit(1);
+    }
+}
+
+pub(crate) fn fmt_targets_json(
+    targets: &[&str],
+    mode: FmtMode,
+    opts: &FmtOptions,
+) -> JsonEnvelope<FmtReport> {
+    let report = fmt_targets_report(targets, mode, opts);
+    if report.summary.errors > 0 {
+        JsonEnvelope {
+            schema_version: FMT_SCHEMA_VERSION,
+            ok: false,
+            data: Some(report),
+            error: Some(JsonError {
+                code: "fmt_failed".to_string(),
+                message: "one or more files failed formatting checks".to_string(),
+                details: serde_json::Value::Null,
+            }),
+            warnings: Vec::new(),
+        }
+    } else {
+        JsonEnvelope::ok(FMT_SCHEMA_VERSION, report)
+    }
+}
+
+pub(crate) fn fmt_targets_report(targets: &[&str], mode: FmtMode, opts: &FmtOptions) -> FmtReport {
     let mut files = Vec::new();
     for target in targets {
         let path = std::path::Path::new(target);
@@ -38,55 +112,120 @@ pub(crate) fn fmt_targets(targets: &[&str], mode: FmtMode, opts: &FmtOptions) {
         }
     }
     if files.is_empty() {
-        eprintln!("No .harn files found");
-        process::exit(1);
+        return FmtReport {
+            files: Vec::new(),
+            summary: FmtSummary {
+                errors: 1,
+                ..FmtSummary::default()
+            },
+        };
     }
-    let mut has_error = false;
-    for file in &files {
+    let mut report = FmtReport {
+        files: Vec::new(),
+        summary: FmtSummary::default(),
+    };
+    for file in files {
         let path_str = file.to_string_lossy();
-        if !fmt_file_inner(&path_str, mode, opts) {
-            has_error = true;
+        let file_report = fmt_file_inner(&path_str, mode, opts);
+        match file_report.status {
+            FmtFileStatus::Formatted => report.summary.formatted += 1,
+            FmtFileStatus::AlreadyFormatted => report.summary.already_formatted += 1,
+            FmtFileStatus::Skipped => report.summary.skipped += 1,
+            FmtFileStatus::Error => report.summary.errors += 1,
         }
+        report.files.push(file_report);
     }
-    if has_error {
-        process::exit(1);
-    }
+    report
 }
 
-/// Format a single file. Returns true on success, false on error.
-fn fmt_file_inner(path: &str, mode: FmtMode, opts: &FmtOptions) -> bool {
+/// Format a single file.
+fn fmt_file_inner(path: &str, mode: FmtMode, opts: &FmtOptions) -> FmtFileReport {
     let source = match std::fs::read_to_string(path) {
-        Ok(s) => s,
-        Err(e) => {
-            eprintln!("Error reading {path}: {e}");
-            return false;
-        }
+        Ok(source) => source,
+        Err(error) => return fmt_error(path, "io", format!("Error reading {path}: {error}")),
     };
 
     let formatted = match format_source_opts(&source, opts) {
-        Ok(f) => f,
-        Err(e) => {
-            eprintln!("{path}: {e}");
-            return false;
-        }
+        Ok(formatted) => formatted,
+        Err(error) => return fmt_error(path, "format", format!("{path}: {error}")),
     };
 
     if mode.is_check() {
         if source != formatted {
-            eprintln!(
-                "{path}: {}: would be reformatted",
-                Code::FormatterWouldReformat
-            );
-            return false;
+            return FmtFileReport {
+                path: path.to_string(),
+                status: FmtFileStatus::Error,
+                diff_lines_changed: diff_lines_changed(&source, &formatted),
+                diagnostics: vec![FmtDiagnostic {
+                    code: Code::FormatterWouldReformat.to_string(),
+                    message: "would be reformatted".to_string(),
+                }],
+            };
         }
     } else if source != formatted {
-        match std::fs::write(path, &formatted) {
-            Ok(()) => println!("formatted {path}"),
-            Err(e) => {
-                eprintln!("Error writing {path}: {e}");
-                return false;
+        if let Err(error) = std::fs::write(path, &formatted) {
+            return fmt_error(path, "io", format!("Error writing {path}: {error}"));
+        }
+        return FmtFileReport {
+            path: path.to_string(),
+            status: FmtFileStatus::Formatted,
+            diff_lines_changed: diff_lines_changed(&source, &formatted),
+            diagnostics: Vec::new(),
+        };
+    }
+
+    FmtFileReport {
+        path: path.to_string(),
+        status: FmtFileStatus::AlreadyFormatted,
+        diff_lines_changed: 0,
+        diagnostics: Vec::new(),
+    }
+}
+
+fn fmt_error(path: &str, code: &str, message: String) -> FmtFileReport {
+    FmtFileReport {
+        path: path.to_string(),
+        status: FmtFileStatus::Error,
+        diff_lines_changed: 0,
+        diagnostics: vec![FmtDiagnostic {
+            code: code.to_string(),
+            message,
+        }],
+    }
+}
+
+fn print_text_report(report: &FmtReport) {
+    if report.files.is_empty() {
+        eprintln!("No .harn files found");
+        return;
+    }
+    for file in &report.files {
+        match file.status {
+            FmtFileStatus::Formatted => println!("formatted {}", file.path),
+            FmtFileStatus::Error => {
+                for diagnostic in &file.diagnostics {
+                    if diagnostic.code == Code::FormatterWouldReformat.to_string() {
+                        eprintln!(
+                            "{}: {}: {}",
+                            file.path,
+                            Code::FormatterWouldReformat,
+                            diagnostic.message
+                        );
+                    } else {
+                        eprintln!("{}", diagnostic.message);
+                    }
+                }
             }
+            FmtFileStatus::AlreadyFormatted | FmtFileStatus::Skipped => {}
         }
     }
-    true
+}
+
+fn diff_lines_changed(before: &str, after: &str) -> usize {
+    let before_lines: Vec<&str> = before.lines().collect();
+    let after_lines: Vec<&str> = after.lines().collect();
+    let max_len = before_lines.len().max(after_lines.len());
+    (0..max_len)
+        .filter(|index| before_lines.get(*index) != after_lines.get(*index))
+        .count()
 }

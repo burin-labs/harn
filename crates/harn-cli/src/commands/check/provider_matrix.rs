@@ -3,6 +3,9 @@ use std::process;
 use harn_vm::llm::capabilities::ProviderCapabilityMatrixRow;
 
 use crate::cli::CheckOutputFormat;
+use crate::json_envelope::{to_string_pretty, JsonEnvelope};
+
+pub(crate) const PROVIDER_MATRIX_SCHEMA_VERSION: u32 = 1;
 
 const FEATURES: &[&str] = &[
     "thinking",
@@ -24,11 +27,11 @@ const FEATURES: &[&str] = &[
     "cache",
 ];
 
-pub(crate) fn run(format: CheckOutputFormat, filter: Option<&str>) {
+pub(crate) fn run(format: CheckOutputFormat, filter: Option<&str>, deprecated_json_format: bool) {
     let rows = filtered_rows(filter);
     match format {
         CheckOutputFormat::Text => print_text(&rows),
-        CheckOutputFormat::Json => print_json(&rows),
+        CheckOutputFormat::Json => print_json(&rows, deprecated_json_format),
         CheckOutputFormat::Markdown => print!("{}", generate_markdown(&rows)),
     }
 }
@@ -186,14 +189,15 @@ fn print_row<const N: usize>(cells: &[String; N], widths: &[usize]) {
     println!();
 }
 
-fn print_json(rows: &[ProviderCapabilityMatrixRow]) {
-    println!(
-        "{}",
-        serde_json::to_string_pretty(rows).unwrap_or_else(|error| {
-            eprintln!("error: failed to serialize provider matrix: {error}");
-            process::exit(1);
-        })
-    );
+fn print_json(rows: &[ProviderCapabilityMatrixRow], deprecated_json_format: bool) {
+    let mut envelope = JsonEnvelope::ok(PROVIDER_MATRIX_SCHEMA_VERSION, rows);
+    if deprecated_json_format {
+        envelope = envelope.with_warning(
+            "deprecated.flag",
+            "`harn check --provider-matrix --format=json` is deprecated; use `--json`",
+        );
+    }
+    println!("{}", to_string_pretty(&envelope));
 }
 
 fn thinking_cell(row: &ProviderCapabilityMatrixRow) -> String {

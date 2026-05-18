@@ -5,10 +5,13 @@ use std::process;
 use serde::Serialize;
 
 use crate::cli::CheckOutputFormat;
+use crate::json_envelope::{to_string_pretty, JsonEnvelope};
 use crate::package::{
     find_nearest_manifest, normalize_connector_capability, read_manifest_from_path,
     ConnectorCapabilities, Manifest,
 };
+
+pub(crate) const CONNECTOR_MATRIX_SCHEMA_VERSION: u32 = 1;
 
 const DEFAULT_CONNECTOR_MATRIX_SOURCE: &str = "conformance/fixtures/connectors/contract-v1";
 
@@ -27,11 +30,16 @@ pub(crate) struct ConnectorCapabilityMatrixRow {
     pub manifest_path: String,
 }
 
-pub(crate) fn run(format: CheckOutputFormat, filter: Option<&str>, targets: &[String]) {
+pub(crate) fn run(
+    format: CheckOutputFormat,
+    filter: Option<&str>,
+    targets: &[String],
+    deprecated_json_format: bool,
+) {
     let rows = filtered_rows(load_rows_for_cli(targets), filter);
     match format {
         CheckOutputFormat::Text => print_text(&rows),
-        CheckOutputFormat::Json => print_json(&rows),
+        CheckOutputFormat::Json => print_json(&rows, deprecated_json_format),
         CheckOutputFormat::Markdown => print!("{}", generate_markdown(&rows)),
     }
 }
@@ -365,14 +373,15 @@ fn print_row<const N: usize>(cells: &[String; N], widths: &[usize]) {
     println!();
 }
 
-fn print_json(rows: &[ConnectorCapabilityMatrixRow]) {
-    println!(
-        "{}",
-        serde_json::to_string_pretty(rows).unwrap_or_else(|error| {
-            eprintln!("error: failed to serialize connector matrix: {error}");
-            process::exit(1);
-        })
-    );
+fn print_json(rows: &[ConnectorCapabilityMatrixRow], deprecated_json_format: bool) {
+    let mut envelope = JsonEnvelope::ok(CONNECTOR_MATRIX_SCHEMA_VERSION, rows);
+    if deprecated_json_format {
+        envelope = envelope.with_warning(
+            "deprecated.flag",
+            "`harn check --connector-matrix --format=json` is deprecated; use `--json`",
+        );
+    }
+    println!("{}", to_string_pretty(&envelope));
 }
 
 fn package_cell(row: &ConnectorCapabilityMatrixRow) -> String {

@@ -13,6 +13,10 @@ pub(crate) struct CheckArgs {
     /// Print the connector package capability matrix instead of checking files.
     #[arg(long = "connector-matrix")]
     pub connector_matrix: bool,
+    /// Emit a structured `JsonEnvelope` report. For matrix commands, replaces
+    /// the deprecated `--format=json` spelling.
+    #[arg(long)]
+    pub json: bool,
     /// Output format for matrix commands.
     #[arg(long = "format", value_enum, default_value_t = CheckOutputFormat::Text, requires = "matrix")]
     pub format: CheckOutputFormat,
