@@ -1,5 +1,6 @@
 use harn_lexer::{LexerError, Span};
 use harn_parser::{diagnostic, ParserError, Repair, TypeExpr};
+use serde_json::{Map, Value};
 use tower_lsp::lsp_types::*;
 
 use crate::symbols::SymbolInfo;
@@ -21,6 +22,96 @@ pub(crate) fn repair_data_value(repair: Option<&Repair>) -> Option<serde_json::V
             "safety": repair.safety.as_str(),
         }
     }))
+}
+
+/// Serialize the stable diagnostic metadata that rides on
+/// `Diagnostic.data`. The nested `repair` envelope is retained for
+/// existing clients; the flat fields are the newer code-action contract
+/// consumed by IDEs that dispatch directly on repair safety.
+pub(crate) fn diagnostic_data_value(
+    code: impl Into<String>,
+    repair: Option<&Repair>,
+) -> serde_json::Value {
+    let code = code.into();
+    let mut data = Map::new();
+    data.insert("code".to_string(), Value::String(code));
+    if let Some(repair) = repair {
+        data.insert(
+            "repair_id".to_string(),
+            Value::String(repair.id.as_str().to_string()),
+        );
+        data.insert(
+            "safety".to_string(),
+            Value::String(repair.safety.as_str().to_string()),
+        );
+        if let Some(mut repair_data) = repair_data_value(Some(repair)) {
+            if let Some(repair_payload) = repair_data.get_mut("repair") {
+                data.insert("repair".to_string(), std::mem::take(repair_payload));
+            }
+        }
+    }
+    Value::Object(data)
+}
+
+pub(crate) fn repair_code_action_kind(repair: Option<&Repair>) -> CodeActionKind {
+    repair
+        .map(|repair| repair_code_action_kind_for_safety(repair.safety.as_str()))
+        .unwrap_or(CodeActionKind::QUICKFIX)
+}
+
+pub(crate) fn repair_code_action_data(
+    diagnostic: &Diagnostic,
+    repair: Option<&Repair>,
+) -> Option<serde_json::Value> {
+    let repair = repair?;
+    Some(serde_json::json!({
+        "repair_id": repair.id.as_str(),
+        "safety": repair.safety.as_str(),
+        "diagnostic_code": diagnostic_code_string(diagnostic.code.as_ref()),
+    }))
+}
+
+pub(crate) fn diagnostic_repair_code_action_kind(diagnostic: &Diagnostic) -> CodeActionKind {
+    diagnostic
+        .data
+        .as_ref()
+        .and_then(|data| data.get("safety"))
+        .and_then(|value| value.as_str())
+        .map(repair_code_action_kind_for_safety)
+        .unwrap_or(CodeActionKind::QUICKFIX)
+}
+
+pub(crate) fn diagnostic_repair_code_action_data(
+    diagnostic: &Diagnostic,
+) -> Option<serde_json::Value> {
+    let data = diagnostic.data.as_ref()?;
+    let repair_id = data.get("repair_id")?.as_str()?;
+    let safety = data.get("safety")?.as_str()?;
+    Some(serde_json::json!({
+        "repair_id": repair_id,
+        "safety": safety,
+        "diagnostic_code": diagnostic_code_string(diagnostic.code.as_ref()),
+    }))
+}
+
+fn diagnostic_code_string(code: Option<&NumberOrString>) -> Option<String> {
+    match code {
+        Some(NumberOrString::String(code)) => Some(code.clone()),
+        Some(NumberOrString::Number(code)) => Some(code.to_string()),
+        None => None,
+    }
+}
+
+fn repair_code_action_kind_for_safety(safety: &str) -> CodeActionKind {
+    match safety {
+        "format-only" => CodeActionKind::new("quickfix.harn.format-only"),
+        "behavior-preserving" => CodeActionKind::new("quickfix.harn.behavior-preserving"),
+        "scope-local" => CodeActionKind::new("quickfix.harn.scope-local"),
+        "surface-changing" => CodeActionKind::new("quickfix.harn.surface-changing"),
+        "capability-changing" => CodeActionKind::new("quickfix.harn.capability-changing"),
+        "needs-human" => CodeActionKind::new("quickfix.harn.needs-human"),
+        _ => CodeActionKind::QUICKFIX,
+    }
 }
 
 /// Convert a 1-based Span to a 0-based LSP Range.

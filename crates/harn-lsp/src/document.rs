@@ -3,7 +3,7 @@ use harn_parser::{Parser, SNode, TypeChecker};
 use tower_lsp::lsp_types::*;
 
 use crate::helpers::{
-    lexer_error_to_diagnostic, parser_error_to_diagnostic, repair_data_value, span_to_range,
+    diagnostic_data_value, lexer_error_to_diagnostic, parser_error_to_diagnostic, span_to_range,
 };
 use crate::symbols::{build_symbol_table, SymbolInfo};
 
@@ -99,7 +99,10 @@ impl DocumentState {
                 source: Some("harn-typecheck".to_string()),
                 code: Some(NumberOrString::String(diag.code.to_string())),
                 message: diag.message.clone(),
-                data: repair_data_value(diag.repair.as_ref()),
+                data: Some(diagnostic_data_value(
+                    diag.code.to_string(),
+                    diag.repair.as_ref(),
+                )),
                 ..Default::default()
             });
         }
@@ -132,7 +135,10 @@ impl DocumentState {
                 source: Some("harn-lint".to_string()),
                 code: Some(NumberOrString::String(ld.code.to_string())),
                 message: format!("[{}] {}", ld.rule, ld.message),
-                data: repair_data_value(lint_repair.as_ref()),
+                data: Some(diagnostic_data_value(
+                    ld.code.to_string(),
+                    lint_repair.as_ref(),
+                )),
                 ..Default::default()
             });
         }
@@ -216,6 +222,14 @@ fn handler() {
             })
             .expect("expected ImmutableAssignment diagnostic");
         let data = diag.data.as_ref().expect("repair data should be attached");
+        assert_eq!(
+            data.get("code").and_then(|v| v.as_str()),
+            Some("HARN-OWN-001")
+        );
+        assert_eq!(
+            data.get("repair_id").and_then(|v| v.as_str()),
+            Some("bindings/make-mutable")
+        );
         let repair = data.get("repair").expect("data.repair should be present");
         assert_eq!(
             repair.get("id").and_then(|v| v.as_str()),
