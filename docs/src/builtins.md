@@ -2443,7 +2443,7 @@ directory. `workflow.update(...)` polls for a response until
 
 | Function | Parameters | Returns | Description |
 |---|---|---|---|
-| `register_tool_hook(config)` | config: dict | nil | Register a pre/post hook for tool calls matching `pattern` (glob). `deny` string blocks matching tools; `max_output` int truncates results |
+| `register_tool_hook(config)` | config: dict | nil | Register a pre/post hook for tool calls matching `pattern` (glob). `deny` string blocks matching tools; `max_output` int truncates results; `pre`/`post` closures can return tool actions or reminder effects |
 | `clear_tool_hooks()` | none | nil | Remove all registered tool hooks |
 
 ### Session lifecycle hooks

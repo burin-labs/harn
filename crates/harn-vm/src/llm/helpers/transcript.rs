@@ -844,7 +844,7 @@ fn reminder_from_vm_value(value: &VmValue) -> SystemReminder {
     }
 }
 
-fn reminder_from_event(event: &VmValue) -> Option<SystemReminder> {
+pub(crate) fn reminder_from_event(event: &VmValue) -> Option<SystemReminder> {
     let dict = event.as_dict()?;
     if dict.get("kind").map(|value| value.display()).as_deref() != Some(SYSTEM_REMINDER_EVENT_KIND)
     {

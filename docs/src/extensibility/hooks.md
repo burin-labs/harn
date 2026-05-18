@@ -13,11 +13,20 @@ byte.
 `PreToolUse` and `PostToolUse` fire around each tool dispatch.
 `PreToolUse` returns `{deny: reason}` to refuse the call or
 `{args: replacement}` to rewrite the arguments; `PostToolUse` returns a
-string or `{result: replacement}` to rewrite the result.
+string or `{result: replacement}` to rewrite the result. For custom
+logic, pass `pre` and/or `post` closures in the config table.
 
 ```harn
 register_tool_hook({pattern: "exec_*", deny: "exec is gated"})
 register_tool_hook({pattern: "*", max_output: 4000})
+register_tool_hook(
+  {
+    pattern: "fetch_*",
+    pre: { event ->
+      return {reminder: {body: "Network fetch is about to run", tags: ["tool"]}}
+    },
+  },
+)
 ```
 
 ## Persona / step lifecycle hooks (`register_persona_hook`, `register_step_hook`)
@@ -28,6 +37,20 @@ Persona-scoped hooks observe `PreStep`, `PostStep`,
 matching pair (`persona_pattern`, `step_name`) and accept the same
 events; both can deny via `{deny: reason}` or rewrite via `{args}` /
 `{output}`.
+
+Hook closures may also return a reminder effect for the active session
+transcript. The reminder spec uses the same keys as
+`transcript.inject_reminder`: `body`, `tags`, `dedupe_key`,
+`ttl_turns`, `preserve_on_compact`, `propagate`, and `role_hint`.
+
+```harn,ignore
+register_step_hook("merge_*", "audit", "PreStep", { ctx ->
+  return {
+    reminder: {body: "Audit step is running", tags: ["audit"]},
+    then: {args: ctx.step.args},
+  }
+})
+```
 
 ## Session lifecycle hooks (`register_session_hook`)
 
@@ -61,6 +84,9 @@ tool call.
 | `false` | Veto (same as `{block: true}`) |
 | `{block: true, reason: ...}` | Veto |
 | `{decision: "allow"\|"deny"\|"ask", reason?: ...}` | Permission short-circuit (only honoured for `permission_asked`) |
+| `{reminder: {...}, then?: ...}` | Inject a `system_reminder`, then apply the optional inner control/action |
+| `{body: "...", tags?: [...], dedupe_key?: ...}` | Inject a reminder and otherwise allow/pass |
+| `[{reminder: {...}}, ...]` | Session hook effect list; reminders are injected in order and deduped by `dedupe_key` |
 
 Any other return shape raises a runtime error so misuse fails loudly.
 

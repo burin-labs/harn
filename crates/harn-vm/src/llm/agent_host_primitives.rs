@@ -653,20 +653,17 @@ async fn host_agent_dispatch_tool_call(
         Some(_) => {}
     }
 
-    match crate::orchestration::run_pre_tool_hooks(&tool_name, &tool_args).await? {
-        crate::orchestration::PreToolAction::Allow => {}
-        crate::orchestration::PreToolAction::Deny(reason) => {
-            return Ok(json_to_vm_value(&agent_primitive_denied_tool(
-                &tool_name,
-                &tool_id,
-                &tool_args,
-                reason,
-                crate::agent_events::ToolCallErrorCategory::PermissionDenied,
-            )));
-        }
-        crate::orchestration::PreToolAction::Modify(new_args) => {
-            tool_args = new_args;
-        }
+    let pre_tool_action = crate::orchestration::run_pre_tool_hooks(&tool_name, &tool_args).await?;
+    if let Some(reason) =
+        crate::orchestration::apply_pre_tool_action(pre_tool_action, &mut tool_args)?
+    {
+        return Ok(json_to_vm_value(&agent_primitive_denied_tool(
+            &tool_name,
+            &tool_id,
+            &tool_args,
+            reason,
+            crate::agent_events::ToolCallErrorCategory::PermissionDenied,
+        )));
     }
 
     let tool_schemas = tools::collect_tool_schemas(tools, None);
