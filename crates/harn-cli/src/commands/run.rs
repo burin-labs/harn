@@ -20,8 +20,10 @@ use crate::skill_loader::{
 };
 
 mod explain_cost;
+pub mod harnpack;
 pub mod json_events;
 
+use self::harnpack::{HarnpackError, HarnpackRunOptions, PreparedHarnpack};
 use self::json_events::NdjsonEmitter;
 
 /// JSON event-stream configuration for `--json` runs.
@@ -389,6 +391,7 @@ struct ExecuteRunInputs<'a> {
     interrupt_tokens: Option<RunInterruptTokens>,
     json: Option<(RunJsonOptions, Box<dyn io::Write + Send>)>,
     timing: Option<&'a mut RunTiming>,
+    harnpack: HarnpackRunOptions,
 }
 
 /// Captured outcome of an in-process `execute_run` invocation. Tests use this
@@ -464,6 +467,7 @@ pub(crate) async fn run_file(
         attestation,
         profile,
         None,
+        HarnpackRunOptions::default(),
     )
     .await;
 }
@@ -492,6 +496,7 @@ pub(crate) async fn run_file_with_skill_dirs(
     attestation: Option<RunAttestationOptions>,
     profile: RunProfileOptions,
     json: Option<RunJsonOptions>,
+    harnpack: HarnpackRunOptions,
 ) {
     // Graceful shutdown: flush run records before exit on SIGINT/SIGTERM.
     let interrupt_tokens = install_signal_shutdown_handler();
@@ -511,6 +516,7 @@ pub(crate) async fn run_file_with_skill_dirs(
         interrupt_tokens: Some(interrupt_tokens.clone()),
         json: json_with_stdout,
         timing: None,
+        harnpack,
     })
     .await;
 
@@ -662,6 +668,36 @@ pub async fn execute_run(
     attestation: Option<RunAttestationOptions>,
     profile: RunProfileOptions,
 ) -> RunOutcome {
+    execute_run_with_harnpack_options(
+        path,
+        trace,
+        denied_builtins,
+        script_argv,
+        skill_dirs_raw,
+        llm_mock_mode,
+        attestation,
+        profile,
+        HarnpackRunOptions::default(),
+    )
+    .await
+}
+
+/// [`execute_run`] for callers that want to opt-in to the `.harnpack`
+/// verify-replay-execute path. Used by `harn run <bundle.harnpack>`
+/// integration tests and by the binary entry once it has parsed the
+/// `--allow-unsigned` / `--dry-run-verify` flags.
+#[allow(clippy::too_many_arguments)]
+pub async fn execute_run_with_harnpack_options(
+    path: &str,
+    trace: bool,
+    denied_builtins: HashSet<String>,
+    script_argv: Vec<String>,
+    skill_dirs_raw: Vec<String>,
+    llm_mock_mode: CliLlmMockMode,
+    attestation: Option<RunAttestationOptions>,
+    profile: RunProfileOptions,
+    harnpack: HarnpackRunOptions,
+) -> RunOutcome {
     execute_run_inner(ExecuteRunInputs {
         path,
         trace,
@@ -674,6 +710,7 @@ pub async fn execute_run(
         interrupt_tokens: None,
         json: None,
         timing: None,
+        harnpack,
     })
     .await
 }
@@ -708,6 +745,7 @@ pub async fn execute_run_json(
         interrupt_tokens: None,
         json: Some((options, out)),
         timing: None,
+        harnpack: HarnpackRunOptions::default(),
     })
     .await
 }
@@ -732,6 +770,7 @@ pub(crate) async fn execute_run_with_timing(
         interrupt_tokens: None,
         json: None,
         timing,
+        harnpack: HarnpackRunOptions::default(),
     })
     .await
 }
@@ -752,6 +791,7 @@ async fn execute_run_inner(inputs: ExecuteRunInputs<'_>) -> RunOutcome {
         interrupt_tokens,
         json,
         mut timing,
+        harnpack,
     } = inputs;
 
     // `--json` installs an in-process sink that diverts every
@@ -764,8 +804,34 @@ async fn execute_run_inner(inputs: ExecuteRunInputs<'_>) -> RunOutcome {
     let mut stderr = String::new();
     let mut stdout = String::new();
 
+    // `.harnpack` preflight: verify signature + replay archive into the
+    // content-addressed cache before we touch the chunk loader. The
+    // outcome path (entrypoint inside the unpacked tree) replaces the
+    // CLI-supplied `path` for everything below.
+    let owned_run_path: String;
+    let resolved_path: &str = if harnpack::looks_like_harnpack(Path::new(path)) {
+        let outcome = match harnpack::prepare_harnpack(Path::new(path), &harnpack, &mut stderr) {
+            Ok(prepared) => prepared,
+            Err(err) => return finalize_harnpack_error(stderr, json_session, err),
+        };
+        harn_vm::run_events::emit(harn_vm::run_events::RunEvent::PackRun {
+            bundle_hash: outcome.bundle_hash.clone(),
+            signature_verified: outcome.signature_verified,
+            key_id: outcome.key_id.clone(),
+            cache_hit: outcome.cache_hit,
+            dry_run_verify: harnpack.dry_run_verify,
+        });
+        if harnpack.dry_run_verify {
+            return finalize_harnpack_dry_run(stderr, json_session, &outcome);
+        }
+        owned_run_path = outcome.entrypoint_path.to_string_lossy().into_owned();
+        owned_run_path.as_str()
+    } else {
+        path
+    };
+
     let Some(LoadedChunk { source, chunk }) =
-        compile_or_load_chunk_with_timing(path, &mut stderr, timing.as_deref_mut())
+        compile_or_load_chunk_with_timing(resolved_path, &mut stderr, timing.as_deref_mut())
     else {
         if let Some(session) = json_session {
             return session.finalize_error("compile_error", stderr, 1);
@@ -776,6 +842,7 @@ async fn execute_run_inner(inputs: ExecuteRunInputs<'_>) -> RunOutcome {
             exit_code: 1,
         };
     };
+    let path = resolved_path;
 
     // Bracket the VM-setup phase explicitly. `run_setup` covers
     // everything between the bytecode compile and the first VM
@@ -1214,6 +1281,57 @@ impl Drop for JsonRunSession {
             }
             None => harn_vm::run_events::clear_sink(),
         }
+    }
+}
+
+/// Translate a preflight failure into either the `--json` error event
+/// stream or a plain stderr message plus exit-code 1. Keeps the
+/// `.harnpack` verify path's error reporting consistent with the rest
+/// of `harn run`.
+fn finalize_harnpack_error(
+    mut stderr: String,
+    json_session: Option<JsonRunSession>,
+    err: HarnpackError,
+) -> RunOutcome {
+    stderr.push_str(&format!("error: {}\n", err.message));
+    if let Some(session) = json_session {
+        return session.finalize_error(err.code, err.message, 1);
+    }
+    RunOutcome {
+        stdout: String::new(),
+        stderr,
+        exit_code: 1,
+    }
+}
+
+/// Successful `--dry-run-verify` path. Reports the bundle hash and
+/// signature outcome on stderr (since stdout belongs to the script) and
+/// emits a terminal `result` event when `--json` is active so consumers
+/// see the run complete.
+fn finalize_harnpack_dry_run(
+    mut stderr: String,
+    json_session: Option<JsonRunSession>,
+    prepared: &PreparedHarnpack,
+) -> RunOutcome {
+    let summary = format!(
+        "[harn] harnpack verify ok: bundle_hash={}, signature_verified={}, cache_hit={}\n",
+        prepared.bundle_hash, prepared.signature_verified, prepared.cache_hit
+    );
+    stderr.push_str(&summary);
+    if let Some(session) = json_session {
+        let value = serde_json::json!({
+            "bundle_hash": prepared.bundle_hash,
+            "signature_verified": prepared.signature_verified,
+            "key_id": prepared.key_id,
+            "cache_hit": prepared.cache_hit,
+            "dry_run_verify": true,
+        });
+        return session.finalize_result(value, 0);
+    }
+    RunOutcome {
+        stdout: String::new(),
+        stderr,
+        exit_code: 0,
     }
 }
 

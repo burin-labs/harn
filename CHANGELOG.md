@@ -20,6 +20,22 @@ condensed series summaries instead of full per-patch history.
   resolves to the persisted JSONL for any session that opts into the
   local sink. Cloud-only sinks omit the URI (nothing wrote to disk).
   Closes #1693.
+- **`harn run <bundle.harnpack>` verify + replay + execute (#1784).**
+  Closes the `.harnpack` epic (#1779) by wiring the `harn run` command
+  to accept a signed content-addressed bundle. Detection is by
+  `.harnpack` extension or zstd magic header; the runner verifies the
+  embedded Ed25519 signature through the OpenTrustGraph trust store,
+  re-derives the bundle hash, checks `harn_version` compatibility
+  (patch mismatch warns, minor/major refuses), replays the archive into
+  `$HARN_CACHE_DIR/packs/<bundle_hash>/` (atomic, so concurrent runs
+  share a cache slot), and executes the manifest entrypoint with
+  `Harness::real()`. Unsigned bundles are refused by default; pass
+  `--allow-unsigned` to override (intended for local development).
+  `--dry-run-verify` performs verification and replay without executing,
+  useful for deployment gates. A new `pack_run` event flows through the
+  `harn run --json` NDJSON stream carrying the bundle hash, signature
+  outcome, signing key id, cache-hit status, and dry-run flag so agents
+  can audit pack execution without rereading the archive.
 - **Transcript reminder transforms (#1817).** Adds
   `transcript.inject_reminder(transcript, options)` and
   `transcript.clear_reminders(transcript, selector)` over pending

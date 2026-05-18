@@ -17,6 +17,9 @@ harn run --yes <file.harn>
 harn run --explain-cost <file.harn>
 harn run --attest <file.harn>
 harn run --attest --receipt-out receipt.json <file.harn>
+harn run <bundle.harnpack>
+harn run --dry-run-verify <bundle.harnpack>
+harn run --allow-unsigned <bundle.harnpack>
 ```
 
 | Flag | Description |
@@ -34,6 +37,8 @@ harn run --attest --receipt-out receipt.json <file.harn>
 | `--attest-agent <id>` | Agent id used to load or create the Ed25519 signing key |
 | `--json` | Emit a versioned NDJSON event stream on stdout instead of mixed pipeline output |
 | `--quiet` | When `--json` is set, drop `stdout` and `stderr` events (transcript/tool/hook/persona/result still flow) |
+| `--allow-unsigned` | When running a `.harnpack`, accept bundles that carry no Ed25519 signature (local-dev override) |
+| `--dry-run-verify` | When running a `.harnpack`, verify the signature and replay into the cache without executing the entrypoint |
 
 ### `--json` event stream
 
@@ -55,6 +60,7 @@ Event types (the `event_type` discriminator lives at
 | `tool_result` | `{ call_id, ok: bool, result }` — outcome of a tool invocation. |
 | `hook` | `{ name, phase, payload? }` — session lifecycle hook fired during the run. |
 | `persona_stage` | `{ persona, stage, transition }` — persona-stage transition (`started` / `completed` / `handoff_started` / …). |
+| `pack_run` | `{ bundle_hash, signature_verified: bool, key_id?: string, cache_hit: bool, dry_run_verify: bool }` — emitted once when `harn run <bundle.harnpack>` resolves a pack to execute. |
 | `result` | `{ value, exit_code: int }` — terminal event for successful runs. |
 | `error` | `{ error: { code, message, details? } }` — terminal event when a fatal error prevents a `result`. |
 
@@ -101,6 +107,27 @@ EventLog, stamps each record with `prev_hash` and `record_hash` provenance
 headers, signs the receipt with an Ed25519 key loaded through the configured
 secret provider chain, and writes the receipt under `.harn/receipts/` unless
 `--receipt-out` is set.
+
+### Running a `.harnpack`
+
+`harn run <bundle.harnpack>` accepts a signed content-addressed bundle
+produced by `harn pack`. Detection is by `.harnpack` extension and a
+zstd magic-byte fallback so renamed bundles still resolve. The runner:
+
+1. Reads the manifest and embedded contents.
+2. Verifies the Ed25519 signature against the bundle hash through the
+   OpenTrustGraph trust store.
+3. Checks `harn_version` compatibility — patch mismatches warn, minor
+   or major mismatches refuse the run.
+4. Replays the archive into `$HARN_CACHE_DIR/packs/<bundle_hash>/`
+   atomically (the bundle hash is content-addressed, so a second run
+   reuses the unpacked tree).
+5. Executes the manifest's entrypoint with `Harness::real()`.
+
+The verifier refuses to run an unsigned bundle. Pass `--allow-unsigned`
+to opt out (intended for local-dev only). `--dry-run-verify` performs
+verification and replay but stops before execution, useful for
+deployment gates.
 
 ## harn parse
 
