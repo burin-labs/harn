@@ -1,0 +1,76 @@
+// std/oauth/device_flow: authorization_pending retries until success.
+//
+// Mocks the token endpoint to return two authorization_pending errors
+// before the final success. Asserts that the client polls at the
+// server-supplied interval honoring mock_time (no real sleep) and that
+// each retry sends the same device_code.
+import { device_flow } from "std/oauth/device_flow"
+import { custom } from "std/oauth/providers"
+import { memory } from "std/oauth/storage"
+
+pipeline test(task) {
+  let _ = mock_time(1700000000000)
+  let store = memory()
+  let provider = custom(
+    {
+      id: "mockPending",
+      auth_url: "https://idp.example/authorize",
+      token_url: "https://idp.example/token",
+      device_code_url: "https://idp.example/device",
+      default_scopes: ["read"],
+    },
+  )
+  http_mock_clear()
+  http_mock(
+    "POST",
+    "https://idp.example/device",
+    {
+      status: 200,
+      body: "{\"device_code\":\"DEV-PENDING\",\"user_code\":\"USER-PEND\",\"verification_uri\":\"https://idp.example/activate\",\"interval\":2,\"expires_in\":900}",
+      headers: {"content-type": "application/json"},
+    },
+  )
+  http_mock(
+    "POST",
+    "https://idp.example/token",
+    {
+      responses: [
+        {
+          status: 400,
+          body: "{\"error\":\"authorization_pending\"}",
+          headers: {"content-type": "application/json"},
+        },
+        {
+          status: 400,
+          body: "{\"error\":\"authorization_pending\"}",
+          headers: {"content-type": "application/json"},
+        },
+        {
+          status: 200,
+          body: "{\"access_token\":\"OK-PEND\",\"expires_in\":3600,\"token_type\":\"Bearer\"}",
+          headers: {"content-type": "application/json"},
+        },
+      ],
+    },
+  )
+  let token_set = device_flow(provider, {client_id: "cli-id", storage: store, on_user_code: { _u, _v -> nil }})
+  assert_eq(
+    token_set.access_token,
+    "OK-PEND",
+    "device_flow returns final access token after pending retries",
+  )
+  let stored = store.get("mockPending")
+  assert_eq(stored.access_token, "OK-PEND", "token persisted after pending retries")
+  let calls = http_mock_calls({include_sensitive: true})
+  // 1 device call + 3 token polls.
+  assert_eq(len(calls), 4, "device + three token polls")
+  assert(contains(calls[0].url, "/device"), "first call to device endpoint")
+  assert(contains(calls[1].url, "/token"), "first poll to token endpoint")
+  assert(contains(calls[1].body, "device_code=DEV-PENDING"), "first poll body has device_code")
+  assert(contains(calls[2].url, "/token"), "second poll to token endpoint")
+  assert(contains(calls[2].body, "device_code=DEV-PENDING"), "second poll body has device_code")
+  assert(contains(calls[3].url, "/token"), "third poll to token endpoint")
+  assert(contains(calls[3].body, "device_code=DEV-PENDING"), "third poll body has device_code")
+  let _ = unmock_time()
+  log("oauth device flow pending ok")
+}

@@ -1,0 +1,108 @@
+// std/oauth/device_flow: RFC 8628 happy path.
+//
+// Drives the full device authorization grant against the mocked
+// http_mock surface. Asserts that:
+//   - The /device call carries client_id + scopes.
+//   - The on_user_code handler is invoked with the device's user code
+//     and verification URI from the device-code response.
+//   - The token endpoint is polled and the resulting TokenSet is
+//     persisted to the storage backend so OAuth.client() reads it back.
+//   - An oauth.device_flow.audit `token_obtained` event is emitted
+//     without leaking the access_token / refresh_token / device_code /
+//     user_code.
+import { device_flow } from "std/oauth/device_flow"
+import { custom } from "std/oauth/providers"
+import { memory } from "std/oauth/storage"
+
+pipeline test(task) {
+  let topic = "oauth.device_flow.audit"
+  let cursor = event_log.latest(topic) ?? 0
+  let _ = mock_time(1700000000000)
+  let store = memory()
+  let provider = custom(
+    {
+      id: "mockDevice",
+      auth_url: "https://idp.example/authorize",
+      token_url: "https://idp.example/token",
+      device_code_url: "https://idp.example/device",
+      default_scopes: ["repo"],
+    },
+  )
+  http_mock_clear()
+  http_mock(
+    "POST",
+    "https://idp.example/device",
+    {
+      status: 200,
+      body: "{\"device_code\":\"DEV-XYZ\",\"user_code\":\"USER-123\",\"verification_uri\":\"https://idp.example/activate\",\"verification_uri_complete\":\"https://idp.example/activate?user_code=USER-123\",\"interval\":1,\"expires_in\":900}",
+      headers: {"content-type": "application/json"},
+    },
+  )
+  http_mock(
+    "POST",
+    "https://idp.example/token",
+    {
+      status: 200,
+      body: "{\"access_token\":\"AAA\",\"refresh_token\":\"RRR\",\"expires_in\":3600,\"token_type\":\"Bearer\"}",
+      headers: {"content-type": "application/json"},
+    },
+  )
+  let handler_topic = "oauth.device_flow.test.handler"
+  let handler_cursor = event_log.latest(handler_topic) ?? 0
+  let on_user_code = { user_code, verification_uri ->
+    let _ = event_log
+      .emit(
+      handler_topic,
+      "called",
+      {user_code: user_code, verification_uri: verification_uri},
+      {provider: "mockDevice"},
+    )
+    nil
+  }
+  let token_set = device_flow(
+    provider,
+    {client_id: "cli-id", scopes: ["repo", "user"], storage: store, on_user_code: on_user_code},
+  )
+  let handler_stream = event_log.subscribe({topic: handler_topic, from_cursor: handler_cursor})
+  let handler_event = handler_stream.next().value
+  assert_eq(handler_event.kind, "called", "on_user_code was invoked")
+  assert_eq(handler_event.payload.user_code, "USER-123", "on_user_code receives user_code")
+  assert_eq(
+    handler_event.payload.verification_uri,
+    "https://idp.example/activate",
+    "on_user_code receives verification_uri",
+  )
+  assert_eq(token_set.access_token, "AAA", "device_flow returns access token")
+  assert_eq(token_set.refresh_token, "RRR", "device_flow returns refresh token")
+  assert_eq(token_set.token_type, "Bearer", "token_type recorded")
+  assert_eq(token_set.expires_in, 3600, "expires_in propagated")
+  let stored = store.get("mockDevice")
+  assert_eq(stored.access_token, "AAA", "token persisted under provider id")
+  assert_eq(stored.refresh_token, "RRR", "refresh token persisted")
+  let calls = http_mock_calls({include_sensitive: true})
+  assert_eq(len(calls), 2, "device + token calls, no polling needed")
+  assert_eq(calls[0].method, "POST", "first call hits device endpoint")
+  assert(contains(calls[0].url, "/device"), "device endpoint URL")
+  assert(contains(calls[0].body, "client_id=cli-id"), "client_id in device body")
+  assert(contains(calls[0].body, "scope=repo%20user"), "scopes in device body")
+  assert_eq(calls[1].method, "POST", "second call hits token endpoint")
+  assert(contains(calls[1].url, "/token"), "token endpoint URL")
+  assert(
+    contains(calls[1].body, "grant_type=urn%3Aietf%3Aparams%3Aoauth%3Agrant-type%3Adevice_code"),
+    "device-code grant type in token body",
+  )
+  assert(contains(calls[1].body, "device_code=DEV-XYZ"), "device_code in token body")
+  let stream = event_log.subscribe({topic: topic, from_cursor: cursor})
+  let logged = stream.next().value
+  assert_eq(logged.kind, "token_obtained", "audit event kind")
+  assert_eq(logged.payload.provider, "mockDevice", "audit provider id")
+  assert_eq(logged.payload.storage_key, "mockDevice", "audit storage_key")
+  assert_eq(logged.payload.next.has_access_token, true, "audit records access presence")
+  assert_eq(logged.payload.next.has_refresh_token, true, "audit records refresh presence")
+  assert(logged.payload.next?.access_token == nil, "audit does NOT leak access_token")
+  assert(logged.payload.next?.refresh_token == nil, "audit does NOT leak refresh_token")
+  assert(logged.payload?.device_code == nil, "audit does NOT include device_code")
+  assert(logged.payload?.user_code == nil, "audit does NOT include user_code")
+  let _ = unmock_time()
+  log("oauth device flow happy path ok")
+}

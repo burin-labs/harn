@@ -73,6 +73,27 @@ condensed series summaries instead of full per-patch history.
   callers. Conformance coverage at
   `conformance/tests/on_budget_{terminate,graceful_exit,warn_and_continue,compose}.harn`.
   Part of epic #1853 (Pipeline lifecycle).
+- **`std/oauth/device_flow` RFC 8628 device authorization grant (#1903).**
+  Adds `OAuth.device_flow(provider, opts)` for headless contexts (CI
+  runners, daemons, IDE side panes) where a browser redirect is
+  impractical. Posts to the provider's device authorization endpoint,
+  hands `(user_code, verification_uri)` to a caller-supplied
+  `on_user_code` handler (defaults to `eprintln(...)` with the URL and
+  code), polls the token endpoint at the server-supplied `interval`,
+  honors `slow_down` by adding 5 s to the cadence, treats
+  `authorization_pending` as a soft retry, and raises a deterministic
+  error on `expired_token` / `access_denied`. On success, builds a
+  TokenSet (mirroring the `std/oauth/client` exchange path) and persists
+  it through the OA-03 storage handle so `OAuth.client(...)` reads the
+  same token + refresh metadata back. Emits an
+  `oauth.device_flow.audit` `token_obtained` event log entry whose
+  payload includes provider, storage key, and token presence flags but
+  never the access token, refresh token, device code, or user code. The
+  polling sleep routes through the standard `sleep(ms)` builtin so
+  tests under `mock_time(...)` / `advance_time(...)` exercise the
+  cadence without real wall-clock waits. Conformance:
+  `conformance/tests/stdlib/oauth_device_flow_{happy_path,pending,slow_down,expired}.harn`.
+  Part of epic #1885 (OAuth stdlib).
 - **Pool state durability (#1890).** `Pool.create({scope: ...})` now
   routes to three durability backends following the channel scope
   contract: `session` (default, in-memory only — lost on session close);

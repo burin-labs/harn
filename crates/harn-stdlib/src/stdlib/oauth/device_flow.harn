@@ -1,0 +1,386 @@
+/**
+ * std/oauth/device_flow — RFC 8628 device authorization grant.
+ *
+ * `device_flow(provider, opts)` performs the full RFC 8628 dance for
+ * headless contexts (CI runners, daemons, IDE side panes) where a
+ * browser redirect is impractical. The function:
+ *
+ *   1. POSTs to the provider's device authorization endpoint and
+ *      receives a `{device_code, user_code, verification_uri, interval,
+ *      expires_in}` envelope (`verification_uri_complete` is accepted
+ *      and surfaced when present).
+ *   2. Hands `(user_code, verification_uri)` to `opts.on_user_code` —
+ *      defaults to a `stderr` message instructing the operator to open
+ *      the URL and enter the code.
+ *   3. Polls the token endpoint at the cadence the server returned
+ *      (`interval`, default 5s). Honors `slow_down` by adding 5s to the
+ *      interval, treats `authorization_pending` as a soft retry, and
+ *      raises on `expired_token`, `access_denied`, or any other terminal
+ *      error.
+ *   4. On success, builds a `TokenSet` (mirroring
+ *      `std/oauth/client.__build_token_set`) and persists it through the
+ *      caller-supplied storage handle so subsequent
+ *      `OAuth.client(...)` calls see the same token + refresh metadata.
+ *
+ *     import { providers } from "std/oauth/providers"
+ *     import { memory } from "std/oauth/storage"
+ *     import { device_flow } from "std/oauth/device_flow"
+ *
+ *     let token = device_flow(
+ *       providers().github,
+ *       {
+ *         client_id: env("GITHUB_CLIENT_ID"),
+ *         scopes: ["read:user"],
+ *         storage: memory(),
+ *         on_user_code: { user_code, verification_uri ->
+ *           eprintln("Open " + verification_uri + " and enter " + user_code)
+ *         },
+ *       },
+ *     )
+ *
+ * Audit: every successful exchange emits an `oauth.device_flow.audit`
+ * `token_obtained` event log entry containing the provider id, storage
+ * key, and token presence flags. The `device_code` and `user_code` are
+ * never persisted or logged.
+ *
+ * Cancellation: polling honors VM cancellation between intervals —
+ * each `sleep(...)` between polls is itself cancellable, so a parent
+ * fiber that aborts the script will not be stuck waiting for an
+ * outstanding poll.
+ *
+ * Concurrency / time mocking: the polling sleep routes through the
+ * standard `sleep(ms)` builtin and so honors `mock_time(...)` /
+ * `advance_time(...)` in tests.
+ */
+let __DEFAULT_INTERVAL_SECONDS = 5
+
+let __SLOW_DOWN_BUMP_SECONDS = 5
+
+let __DEFAULT_TOKEN_KEY = "access-token"
+
+let __AUDIT_TOPIC = "oauth.device_flow.audit"
+
+let __AUDIT_KIND_OBTAINED = "token_obtained"
+
+let __ERROR_AUTHORIZATION_PENDING = "authorization_pending"
+
+let __ERROR_SLOW_DOWN = "slow_down"
+
+let __ERROR_EXPIRED_TOKEN = "expired_token"
+
+let __ERROR_ACCESS_DENIED = "access_denied"
+
+fn __require_string(value, field) {
+  let text = to_string(value ?? "")
+  if text == "" {
+    throw "std/oauth/device_flow: " + field + " is required"
+  }
+  return text
+}
+
+fn __require_provider(provider) {
+  if type_of(provider) != "dict" {
+    throw "std/oauth/device_flow: provider must be a dict (use std/oauth/providers)"
+  }
+  let device_url = provider?.device_code_url
+  if device_url == nil || to_string(device_url) == "" {
+    let id = to_string(provider?.id ?? "custom")
+    throw "std/oauth/device_flow: provider `" + id + "` does not declare a device_code_url"
+  }
+  let token_url = provider?.token_url
+  if token_url == nil || to_string(token_url) == "" {
+    throw "std/oauth/device_flow: provider.token_url is required"
+  }
+  return provider
+}
+
+fn __require_storage(storage) {
+  if type_of(storage) != "dict" {
+    throw "std/oauth/device_flow: opts.storage is required (use std/oauth/storage)"
+  }
+  let g = storage?.get
+  let s = storage?.set
+  let d = storage?.delete
+  if type_of(g) != "closure" && type_of(g) != "builtin" {
+    throw "std/oauth/device_flow: opts.storage.get must be a function"
+  }
+  if type_of(s) != "closure" && type_of(s) != "builtin" {
+    throw "std/oauth/device_flow: opts.storage.set must be a function"
+  }
+  if type_of(d) != "closure" && type_of(d) != "builtin" {
+    throw "std/oauth/device_flow: opts.storage.delete must be a function"
+  }
+  return storage
+}
+
+fn __scope_separator(provider) {
+  let id = lowercase(to_string(provider?.id ?? ""))
+  if id == "linear" {
+    return ","
+  }
+  return " "
+}
+
+fn __join_scopes(scopes, separator) {
+  var parts = []
+  if scopes != nil {
+    for raw in scopes {
+      let text = trim(to_string(raw ?? ""))
+      if text != "" {
+        parts = parts + [text]
+      }
+    }
+  }
+  if len(parts) == 0 {
+    return nil
+  }
+  return join(parts, separator)
+}
+
+fn __url_encode_value(value) {
+  return url_encode(to_string(value ?? ""))
+}
+
+fn __form_body(params) {
+  var parts = []
+  for entry in params {
+    parts = parts + [url_encode(entry.key) + "=" + __url_encode_value(entry.value)]
+  }
+  return join(parts, "&")
+}
+
+fn __safe_json_parse(text) {
+  let s = to_string(text ?? "")
+  if s == "" {
+    return nil
+  }
+  try {
+    return json_parse(s)
+  } catch (_err) {
+    return nil
+  }
+}
+
+fn __now_seconds() {
+  return to_int(timestamp())
+}
+
+fn __default_on_user_code(user_code, verification_uri) {
+  let _ = eprintln(
+    "To authorize this device, open " + to_string(verification_uri) + " and enter code: "
+      + to_string(user_code),
+  )
+  return nil
+}
+
+fn __invoke_user_code_handler(handler, user_code, verification_uri) {
+  if handler == nil {
+    return __default_on_user_code(user_code, verification_uri)
+  }
+  if type_of(handler) != "closure" && type_of(handler) != "builtin" {
+    throw "std/oauth/device_flow: opts.on_user_code must be a function"
+  }
+  return handler(to_string(user_code), to_string(verification_uri))
+}
+
+fn __redact_token(token) {
+  if token == nil {
+    return nil
+  }
+  return {
+    has_access_token: token?.access_token != nil && to_string(token?.access_token) != "",
+    has_refresh_token: token?.refresh_token != nil && to_string(token?.refresh_token) != "",
+    expires_at_unix: token?.expires_at_unix,
+    issued_at_unix: token?.issued_at_unix,
+    scopes: token?.scopes,
+    token_type: token?.token_type,
+  }
+}
+
+fn __build_token_set(parsed, scopes, issued_at) {
+  var token_set = {access_token: to_string(parsed.access_token), issued_at_unix: issued_at}
+  let token_type = parsed?.token_type
+  if token_type != nil {
+    token_set = token_set + {token_type: to_string(token_type)}
+  }
+  let expires_in = parsed?.expires_in
+  if expires_in != nil {
+    let ttl_s = to_int(expires_in)
+    token_set = token_set + {expires_in: ttl_s, expires_at_unix: issued_at + ttl_s}
+  } else if parsed?.expires_at_unix != nil {
+    token_set = token_set + {expires_at_unix: to_int(parsed.expires_at_unix)}
+  }
+  let refresh = parsed?.refresh_token
+  if refresh != nil && to_string(refresh) != "" {
+    token_set = token_set + {refresh_token: to_string(refresh)}
+  }
+  let returned_scope = parsed?.scope
+  if returned_scope != nil && to_string(returned_scope) != "" {
+    token_set = token_set + {scopes: split(to_string(returned_scope), " ")}
+  } else if scopes != nil && len(scopes) > 0 {
+    token_set = token_set + {scopes: scopes}
+  }
+  return token_set
+}
+
+fn __audit_obtained(provider_id, storage_key, token_set) {
+  let payload = {
+    provider: to_string(provider_id),
+    storage_key: to_string(storage_key),
+    next: __redact_token(token_set),
+  }
+  let _ = event_log.emit(__AUDIT_TOPIC, __AUDIT_KIND_OBTAINED, payload, {provider: to_string(provider_id)})
+}
+
+fn __request_device_code(cfg) {
+  var form = [{key: "client_id", value: cfg.client_id}]
+  let scopes_str = __join_scopes(cfg.scopes, cfg.scope_separator)
+  if scopes_str != nil {
+    form = form + [{key: "scope", value: scopes_str}]
+  }
+  if cfg.audience != nil && to_string(cfg.audience) != "" {
+    form = form + [{key: "audience", value: cfg.audience}]
+  }
+  let headers = {"Content-Type": "application/x-www-form-urlencoded", Accept: "application/json"}
+  let response = http_post(cfg.device_code_url, __form_body(form), {headers: headers})
+  if !(response?.ok ?? false) {
+    let parsed = __safe_json_parse(response?.body ?? "")
+    let detail = parsed?.error_description ?? parsed?.error ?? "device authorization endpoint returned status "
+      + to_string(response?.status ?? 0)
+    throw "std/oauth/device_flow: device authorization request failed: " + to_string(detail)
+  }
+  let parsed = __safe_json_parse(response?.body ?? "")
+  if parsed == nil {
+    throw "std/oauth/device_flow: device authorization endpoint did not return JSON"
+  }
+  let device_code = to_string(parsed?.device_code ?? "")
+  let user_code = to_string(parsed?.user_code ?? "")
+  let verification_uri = to_string(parsed?.verification_uri ?? parsed?.verification_url ?? "")
+  if device_code == "" || user_code == "" || verification_uri == "" {
+    throw "std/oauth/device_flow: device authorization response missing required fields"
+  }
+  let verification_uri_complete = parsed?.verification_uri_complete
+  let interval_raw = parsed?.interval ?? __DEFAULT_INTERVAL_SECONDS
+  let interval_seconds = to_int(interval_raw)
+  let expires_in_raw = parsed?.expires_in ?? 0
+  let expires_in_seconds = to_int(expires_in_raw)
+  return {
+    device_code: device_code,
+    user_code: user_code,
+    verification_uri: verification_uri,
+    verification_uri_complete: verification_uri_complete == nil ? nil : to_string(verification_uri_complete),
+    interval_seconds: interval_seconds <= 0 ? __DEFAULT_INTERVAL_SECONDS : interval_seconds,
+    expires_in_seconds: expires_in_seconds,
+  }
+}
+
+fn __poll_once(cfg, device_code) {
+  var form = [
+    {key: "grant_type", value: "urn:ietf:params:oauth:grant-type:device_code"},
+    {key: "device_code", value: device_code},
+    {key: "client_id", value: cfg.client_id},
+  ]
+  if cfg.client_secret != nil && to_string(cfg.client_secret) != "" {
+    form = form + [{key: "client_secret", value: cfg.client_secret}]
+  }
+  let headers = {"Content-Type": "application/x-www-form-urlencoded", Accept: "application/json"}
+  let response = http_post(cfg.token_url, __form_body(form), {headers: headers})
+  let status = to_int(response?.status ?? 0)
+  let parsed = __safe_json_parse(response?.body ?? "") ?? {}
+  if response?.ok ?? false && parsed?.access_token != nil {
+    return {kind: "ok", parsed: parsed}
+  }
+  let error_code = to_string(parsed?.error ?? "")
+  if error_code == __ERROR_AUTHORIZATION_PENDING {
+    return {kind: "pending"}
+  }
+  if error_code == __ERROR_SLOW_DOWN {
+    return {kind: "slow_down"}
+  }
+  if error_code == __ERROR_EXPIRED_TOKEN {
+    throw "std/oauth/device_flow: device code expired before authorization completed"
+  }
+  if error_code == __ERROR_ACCESS_DENIED {
+    throw "std/oauth/device_flow: user denied the device authorization request"
+  }
+  let detail = parsed?.error_description ?? error_code ?? "token endpoint returned status " + to_string(status)
+  let prefix = error_code == "" ? "token endpoint error: " : "token endpoint error `" + error_code + "`: "
+  throw "std/oauth/device_flow: " + prefix + to_string(detail)
+}
+
+fn __poll_until_done(cfg, device_code, initial_interval_seconds, expires_in_seconds) {
+  var interval_seconds = initial_interval_seconds
+  var elapsed_seconds = 0
+  while true {
+    let outcome = __poll_once(cfg, device_code)
+    if outcome.kind == "ok" {
+      return outcome.parsed
+    }
+    if outcome.kind == "slow_down" {
+      interval_seconds = interval_seconds + __SLOW_DOWN_BUMP_SECONDS
+    }
+    // Sleep for the current interval and re-poll.
+    if expires_in_seconds > 0 && elapsed_seconds + interval_seconds > expires_in_seconds {
+      throw "std/oauth/device_flow: device code expired before authorization completed"
+    }
+    sleep(interval_seconds * 1000)
+    elapsed_seconds = elapsed_seconds + interval_seconds
+  }
+  throw "std/oauth/device_flow: unreachable polling exit"
+}
+
+/**
+ * device_flow runs the RFC 8628 device authorization grant against
+ * `provider` and returns the resulting TokenSet. The token is persisted
+ * to `opts.storage` under `opts.storage_key` (defaults to the provider
+ * id) so the same client / storage pair used by `OAuth.client(...)` can
+ * read it back for downstream HTTP calls.
+ *
+ * Required `opts`:
+ *   - client_id:    OAuth client identifier.
+ *   - storage:      a handle from `std/oauth/storage`.
+ *
+ * Optional `opts`:
+ *   - client_secret:    confidential-client device flows.
+ *   - scopes:           list<string>; defaults to provider.default_scopes.
+ *   - storage_key:      per-installation key; defaults to provider id.
+ *   - audience:         extra `audience=` parameter on /device.
+ *   - on_user_code:     fn(user_code, verification_uri[, verification_uri_complete]) -> any.
+ *                       Defaults to `eprintln(...)` with the URL and code.
+ *
+ * @effects: [time, net, stderr]
+ * @allocation: heap
+ * @errors: [invalid_argument]
+ * @api_stability: experimental
+ * @example: device_flow(providers().github, {client_id: id, storage: memory()})
+ */
+pub fn device_flow(provider, opts) {
+  if type_of(opts) != "dict" {
+    throw "std/oauth/device_flow: opts must be a dict"
+  }
+  let provider_record = __require_provider(provider)
+  let storage = __require_storage(opts?.storage)
+  let client_id = __require_string(opts?.client_id, "opts.client_id")
+  let client_secret = opts?.client_secret
+  let scopes = opts?.scopes ?? provider_record?.default_scopes ?? []
+  let scope_separator = __scope_separator(provider_record)
+  let storage_key = to_string(opts?.storage_key ?? provider_record?.id ?? __DEFAULT_TOKEN_KEY)
+  let cfg = {
+    provider_id: to_string(provider_record?.id ?? "custom"),
+    device_code_url: to_string(provider_record.device_code_url),
+    token_url: to_string(provider_record.token_url),
+    client_id: client_id,
+    client_secret: client_secret == nil ? nil : to_string(client_secret),
+    scopes: scopes,
+    scope_separator: scope_separator,
+    audience: opts?.audience,
+  }
+  let device = __request_device_code(cfg)
+  let _ = __invoke_user_code_handler(opts?.on_user_code, device.user_code, device.verification_uri)
+  let parsed = __poll_until_done(cfg, device.device_code, device.interval_seconds, device.expires_in_seconds)
+  let issued_at = __now_seconds()
+  let token_set = __build_token_set(parsed, scopes, issued_at)
+  storage.set(storage_key, token_set)
+  __audit_obtained(cfg.provider_id, storage_key, token_set)
+  return token_set
+}

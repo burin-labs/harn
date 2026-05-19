@@ -1,0 +1,62 @@
+// std/oauth/device_flow: `slow_down` bumps the polling interval +5s.
+//
+// The server returns one `slow_down` and then succeeds. The implementation
+// must add 5 seconds to the interval after a slow_down. This test uses
+// mock_time so the actual elapsed wall-clock stays zero.
+import { device_flow } from "std/oauth/device_flow"
+import { custom } from "std/oauth/providers"
+import { memory } from "std/oauth/storage"
+
+pipeline test(task) {
+  let _ = mock_time(1700000000000)
+  let store = memory()
+  let provider = custom(
+    {
+      id: "mockSlowDown",
+      auth_url: "https://idp.example/authorize",
+      token_url: "https://idp.example/token",
+      device_code_url: "https://idp.example/device",
+      default_scopes: ["read"],
+    },
+  )
+  http_mock_clear()
+  http_mock(
+    "POST",
+    "https://idp.example/device",
+    {
+      status: 200,
+      body: "{\"device_code\":\"DEV-SLOW\",\"user_code\":\"USER-SLOW\",\"verification_uri\":\"https://idp.example/activate\",\"interval\":3,\"expires_in\":900}",
+      headers: {"content-type": "application/json"},
+    },
+  )
+  http_mock(
+    "POST",
+    "https://idp.example/token",
+    {
+      responses: [
+        {status: 400, body: "{\"error\":\"slow_down\"}", headers: {"content-type": "application/json"}},
+        {
+          status: 200,
+          body: "{\"access_token\":\"OK-SLOW\",\"expires_in\":3600,\"token_type\":\"Bearer\"}",
+          headers: {"content-type": "application/json"},
+        },
+      ],
+    },
+  )
+  let start_ts = to_int(timestamp())
+  let token_set = device_flow(provider, {client_id: "cli-id", storage: store, on_user_code: { _u, _v -> nil }})
+  let end_ts = to_int(timestamp())
+  assert_eq(token_set.access_token, "OK-SLOW", "device_flow returns token after slow_down")
+  // Initial interval=3s; slow_down bumps it to 3+5=8s; one sleep of 8s
+  // happens before the successful retry. mock_time advances on sleep, so
+  // (end - start) should be at least 8 seconds.
+  let elapsed = end_ts - start_ts
+  assert(
+    elapsed >= 8,
+    "polling honored slow_down bump (elapsed >= 8s, was " + to_string(elapsed) + ")",
+  )
+  let calls = http_mock_calls({include_sensitive: true})
+  assert_eq(len(calls), 3, "device + 2 token polls")
+  let _ = unmock_time()
+  log("oauth device flow slow_down ok")
+}

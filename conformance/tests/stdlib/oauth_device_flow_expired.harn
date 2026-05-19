@@ -1,0 +1,50 @@
+// std/oauth/device_flow: `expired_token` raises a deterministic error.
+//
+// The server returns `expired_token` on the first poll. device_flow
+// must surface it as a thrown error without persisting any token to
+// storage.
+import { device_flow } from "std/oauth/device_flow"
+import { custom } from "std/oauth/providers"
+import { memory } from "std/oauth/storage"
+
+pipeline test(task) {
+  let _ = mock_time(1700000000000)
+  let store = memory()
+  let provider = custom(
+    {
+      id: "mockExpired",
+      auth_url: "https://idp.example/authorize",
+      token_url: "https://idp.example/token",
+      device_code_url: "https://idp.example/device",
+      default_scopes: ["read"],
+    },
+  )
+  http_mock_clear()
+  http_mock(
+    "POST",
+    "https://idp.example/device",
+    {
+      status: 200,
+      body: "{\"device_code\":\"DEV-EXP\",\"user_code\":\"USER-EXP\",\"verification_uri\":\"https://idp.example/activate\",\"interval\":1,\"expires_in\":900}",
+      headers: {"content-type": "application/json"},
+    },
+  )
+  http_mock(
+    "POST",
+    "https://idp.example/token",
+    {status: 400, body: "{\"error\":\"expired_token\"}", headers: {"content-type": "application/json"}},
+  )
+  var threw = false
+  try {
+    let _ = device_flow(provider, {client_id: "cli-id", storage: store, on_user_code: { _u, _v -> nil }})
+  } catch (err) {
+    if contains(to_string(err), "expired") {
+      threw = true
+    }
+  }
+  assert(threw, "expired_token should have thrown an error")
+  let stored = store.get("mockExpired")
+  assert(stored == nil, "no token persisted on expired_token error")
+  let _ = unmock_time()
+  log("oauth device flow expired ok")
+}
