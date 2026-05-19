@@ -78,7 +78,7 @@ pub(super) async fn sleep_or_cancel_or_request(
     }
 }
 
-pub(super) fn build_batched_event(
+pub(crate) fn build_batched_event(
     events: Vec<TriggerEvent>,
 ) -> Result<TriggerEvent, DispatchError> {
     let mut iter = events.into_iter();

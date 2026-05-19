@@ -1,0 +1,42 @@
+import "std/triggers"
+
+/**
+ * CH-04 (#1875): `expire_action: "discard"` drops the buffer when the
+ * window elapses without reaching `count`. The handler is not invoked
+ * and the buffered events are not preserved.
+ */
+fn handle_batch(event) {
+  emit_channel("batch.discard.fired", {})
+}
+
+pipeline test(task) {
+  mock_time(2000000)
+  let unique = to_string(to_int(timestamp())) + "-" + to_string(random_int(100000, 999999))
+  let _ = trigger_register(
+    {
+      id: "batch-discard-" + unique,
+      kind: "channel.emit",
+      provider: "channel",
+      autonomy_tier: "act_auto",
+      handler: handle_batch,
+      when: nil,
+      retry: nil,
+      match: {events: ["channel:batch.discard.input"]},
+      events: nil,
+      dedupe_key: nil,
+      filter: nil,
+      batch: {count: 5, window: "30s", expire_action: "discard"},
+      budget: nil,
+      manifest_path: nil,
+      package_name: "conformance",
+    },
+  )
+  let _ = emit_channel("batch.discard.input", {seq: 1})
+  let _ = emit_channel("batch.discard.input", {seq: 2})
+  let _ = emit_channel("batch.discard.input", {seq: 3})
+  let _ = advance_time(60000)
+  flush_trigger_aggregations()
+  let fired = channel_events("batch.discard.fired")
+  println("after-window:" + to_string(len(fired)))
+  unmock_time()
+}

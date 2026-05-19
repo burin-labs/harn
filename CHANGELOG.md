@@ -74,6 +74,27 @@ condensed series summaries instead of full per-patch history.
   this enables declarative "every N events OR every T time" reminder
   injection without user-side counter state. Conformance:
   `conformance/tests/triggers/trigger_reminder_inject_{targets_concrete_session,only_targets_named_session,missing_target_drops_with_audit,closure_target}.harn`.
+- **Aggregation triggers — `batch { count, window, key, expire_action }` filter (#1875).**
+  Implements CH-04 from epic #1870. New optional `batch` field on the
+  trigger DSL accumulates matching channel events into a per-(binding,
+  partition_key) buffer; the handler fires with a batched
+  [`TriggerEvent`](https://github.com/burin-labs/harn) (`event.batch`
+  populated) once `count` is reached or the `window` elapses. `key` is a
+  dot-path into the channel payload (e.g. `"repo"`,
+  `"pull_request.user.login"`); missing path = single global counter for
+  the binding. `expire_action` defaults to `"fire_partial"` (handler
+  invoked with the partial batch) and can be set to `"discard"` to drop
+  the buffer silently. Window expiration is driven by an implicit sweep
+  during the next `emit_channel(...)` and by the explicit
+  `flush_trigger_aggregations()` builtin (deterministic + paired with
+  `mock_time` / `advance_time` for replay-clean tests). Buffers are
+  capped at 1024 events per partition and overflow is reported as a
+  structured `triggers.aggregation.buffer_overflow` warning. Bad config
+  (count ≤ 0, missing/unparseable `window`, unknown `expire_action`,
+  wrong types) raises `HARN-CHN-005` at registration. Inngest-shape
+  primitive — no other major durable-execution or agent system has
+  first-class fire-after-N-events. Conformance:
+  `conformance/tests/triggers/trigger_batch_{count_fires_on_threshold,window_expire_fires_partial,window_expire_discards,key_partitions_independently,back_to_back_resets_buffer,malformed_count_errors}.harn`.
 - **Channel scope resolver completes the four-tier hierarchy (#1874).**
   Formalises the `session < pipeline < tenant < org` scope chain for
   `emit_channel(...)` and `channel_events(...)`, building on the producer

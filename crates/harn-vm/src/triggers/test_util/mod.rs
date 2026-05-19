@@ -1611,6 +1611,7 @@ fn manifest_spec(id: &str, fingerprint: &str) -> TriggerBindingSpec {
         on_budget_exhausted: crate::TriggerBudgetExhaustionStrategy::False,
         max_concurrent: Some(2),
         flow_control: crate::triggers::TriggerFlowControlConfig::default(),
+        aggregation: None,
         manifest_path: Some(PathBuf::from("runtime://trigger-harness")),
         package_name: Some("trigger-harness".to_string()),
         definition_fingerprint: fingerprint.to_string(),

@@ -1050,6 +1050,7 @@ pub(crate) const SIGNATURES: &[BuiltinSignature] = &[
         ],
         TY_LIST,
     ),
+    BuiltinSignature::simple("flush_trigger_aggregations", &[], TY_NIL),
     BuiltinSignature::simple(
         "event_log_emit",
         &[

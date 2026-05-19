@@ -815,6 +815,7 @@ mod tests {
             on_budget_exhausted: crate::triggers::TriggerBudgetExhaustionStrategy::False,
             max_concurrent: None,
             flow_control: crate::triggers::TriggerFlowControlConfig::default(),
+            aggregation: None,
             manifest_path: None,
             package_name: Some("workspace".to_string()),
             definition_fingerprint: "stream-window-handler:v1".to_string(),

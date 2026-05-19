@@ -1,0 +1,53 @@
+import "std/triggers"
+
+/**
+ * CH-04 (#1875): `key` partitions events by JSON path. Each distinct key
+ * value maintains its own counter + window. Repo-A reaches `count` first
+ * and fires immediately; repo-B fires later when its own threshold is
+ * reached.
+ */
+fn handle_batch(event) {
+  let batch_len = if event.batch == nil {
+    0
+  } else {
+    len(event.batch)
+  }
+  let first = event.batch[0]
+  let repo = first.provider_payload.payload.repo
+  emit_channel("batch.key.fired", {repo: repo, batch_size: batch_len})
+}
+
+pipeline test(task) {
+  let unique = to_string(to_int(timestamp())) + "-" + to_string(random_int(100000, 999999))
+  let _ = trigger_register(
+    {
+      id: "batch-key-" + unique,
+      kind: "channel.emit",
+      provider: "channel",
+      autonomy_tier: "act_auto",
+      handler: handle_batch,
+      when: nil,
+      retry: nil,
+      match: {events: ["channel:batch.key.input"]},
+      events: nil,
+      dedupe_key: nil,
+      filter: nil,
+      batch: {count: 2, window: "10m", key: "repo"},
+      budget: nil,
+      manifest_path: nil,
+      package_name: "conformance",
+    },
+  )
+  let _ = emit_channel("batch.key.input", {repo: "repoA", seq: 1})
+  let _ = emit_channel("batch.key.input", {repo: "repoB", seq: 1})
+  let only_a = channel_events("batch.key.fired")
+  println("after-one-each:" + to_string(len(only_a)))
+  let _ = emit_channel("batch.key.input", {repo: "repoA", seq: 2})
+  let one_fired = channel_events("batch.key.fired")
+  println("after-repoA-pair:" + to_string(len(one_fired)))
+  println("first-fired-repo:" + one_fired[0].payload.repo)
+  let _ = emit_channel("batch.key.input", {repo: "repoB", seq: 2})
+  let both_fired = channel_events("batch.key.fired")
+  println("after-repoB-pair:" + to_string(len(both_fired)))
+  println("second-fired-repo:" + both_fired[1].payload.repo)
+}

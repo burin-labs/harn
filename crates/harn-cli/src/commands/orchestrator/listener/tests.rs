@@ -50,6 +50,7 @@ fn manifest_binding_spec(id: &str, fingerprint: &str) -> TriggerBindingSpec {
         on_budget_exhausted: harn_vm::TriggerBudgetExhaustionStrategy::False,
         max_concurrent: None,
         flow_control: harn_vm::TriggerFlowControlConfig::default(),
+        aggregation: None,
         manifest_path: None,
         package_name: Some("listener-test".to_string()),
         definition_fingerprint: fingerprint.to_string(),

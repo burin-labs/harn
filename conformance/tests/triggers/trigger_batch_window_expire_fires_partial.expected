@@ -1,0 +1,3 @@
+before-window:0
+after-window:1
+batch_size:3
