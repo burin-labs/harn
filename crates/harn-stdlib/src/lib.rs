@@ -454,6 +454,10 @@ pub const STDLIB_SOURCES: &[StdlibSource] = &[
         source: include_str!("stdlib/stdlib_lifecycle.harn"),
     },
     StdlibSource {
+        module: "tool_hooks",
+        source: include_str!("stdlib/stdlib_tool_hooks.harn"),
+    },
+    StdlibSource {
         module: "personas/prelude",
         source: include_str!("stdlib/stdlib_personas_prelude.harn"),
     },

@@ -744,6 +744,14 @@ pub(crate) const SIGNATURES: &[BuiltinSignature] = &[
         TY_STRING,
     ),
     BuiltinSignature::simple(
+        "tool_hooks_filter",
+        &[
+            Param::new("registry", TY_DICT),
+            Param::optional("stacks", TY_ANY),
+        ],
+        TY_DICT,
+    ),
+    BuiltinSignature::simple(
         "tool_hooks_list",
         &[Param::new("registry", TY_DICT)],
         TY_LIST,

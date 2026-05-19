@@ -1,0 +1,30 @@
+rewrite
+rust.cargo.target_dir
+harn-canon/rust
+warning
+cargo build --release
+cargo build --release --target-dir target-shared
+true
+cargo build --release --target-dir target-shared
+true
+find . -name foo
+rewrite
+cargo test --target-dir target-shared
+rust.cargo.target_dir
+deny
+custom.git_push_force
+preset_run_command/custom
+error
+Use --force-with-lease
+deny
+rust.cargo.target_dir
+passthrough
+python.find_versus_rg
+find . -name 'x'
+find . -name 'x'
+find . -name 'x'
+rewrite
+rg --files
+rg --files
+true
+true
