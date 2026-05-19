@@ -1,0 +1,110 @@
+// std/oauth/dynamic_registration: well-known metadata builders.
+//
+// Exercises the OA-05 metadata documents that an embedder serves at
+// /.well-known/oauth-client.json and /.well-known/oauth-authorization-server.json.
+// Verifies RFC 7591 defaulting (response_types, grant_types,
+// token_endpoint_auth_method), RFC 8414 derivation from a provider record,
+// override merging, and the well_known_response envelope.
+import {
+  authorization_server_metadata,
+  client_metadata,
+  validate_metadata,
+  well_known_paths,
+  well_known_response,
+} from "std/oauth/dynamic_registration"
+import { custom } from "std/oauth/providers"
+
+pipeline test(task) {
+  let metadata = client_metadata(
+    {
+      redirect_uris: ["https://app.example/callback"],
+      client_name: "Harn Conformance Client",
+      scope: "read write",
+    },
+  )
+  assert_eq(metadata.redirect_uris, ["https://app.example/callback"], "redirect_uris preserved")
+  assert(metadata.grant_types.contains("authorization_code"), "grant_types default applied")
+  assert(metadata.response_types.contains("code"), "response_types default applied")
+  assert_eq(metadata.token_endpoint_auth_method, "client_secret_basic", "auth method default applied")
+  assert_eq(metadata.client_name, "Harn Conformance Client", "client_name passthrough")
+  assert_eq(metadata.scope, "read write", "scope passthrough")
+  let validation = validate_metadata({redirect_uris: ["https://app.example/callback"]})
+  assert_eq(validation.ok, true, "valid metadata reports ok=true")
+  assert_eq(len(validation.errors), 0, "valid metadata reports no errors")
+  let provider = custom(
+    {
+      id: "mock",
+      label: "Mock IdP",
+      auth_url: "https://mock-idp.example/authorize",
+      token_url: "https://mock-idp.example/token",
+      device_code_url: "https://mock-idp.example/device",
+      revoke_url: "https://mock-idp.example/revoke",
+      userinfo_url: "https://mock-idp.example/userinfo",
+      default_scopes: ["read", "write"],
+      pkce_required: true,
+    },
+  )
+  let server_metadata = authorization_server_metadata(
+    provider,
+    {registration_endpoint: "https://mock-idp.example/register"},
+  )
+  assert_eq(server_metadata.issuer, "https://mock-idp.example", "issuer derived from auth_url")
+  assert_eq(
+    server_metadata.authorization_endpoint,
+    "https://mock-idp.example/authorize",
+    "authorization_endpoint",
+  )
+  assert_eq(server_metadata.token_endpoint, "https://mock-idp.example/token", "token_endpoint")
+  assert_eq(
+    server_metadata.device_authorization_endpoint,
+    "https://mock-idp.example/device",
+    "device authorization endpoint",
+  )
+  assert_eq(
+    server_metadata.revocation_endpoint,
+    "https://mock-idp.example/revoke",
+    "revocation endpoint",
+  )
+  assert_eq(
+    server_metadata.userinfo_endpoint,
+    "https://mock-idp.example/userinfo",
+    "userinfo endpoint",
+  )
+  assert(server_metadata.response_types_supported.contains("code"), "response_types_supported")
+  assert(
+    server_metadata.grant_types_supported.contains("authorization_code"),
+    "auth code grant supported",
+  )
+  assert(
+    server_metadata.grant_types_supported.contains("urn:ietf:params:oauth:grant-type:device_code"),
+    "device code grant supported",
+  )
+  assert(server_metadata.code_challenge_methods_supported.contains("S256"), "S256 PKCE supported")
+  assert_eq(server_metadata.scopes_supported, ["read", "write"], "scopes_supported propagated")
+  assert_eq(
+    server_metadata.registration_endpoint,
+    "https://mock-idp.example/register",
+    "override merged",
+  )
+  let paths = well_known_paths()
+  assert_eq(paths.client_metadata, "/.well-known/oauth-client.json", "default client path")
+  assert_eq(
+    paths.authorization_server_metadata,
+    "/.well-known/oauth-authorization-server.json",
+    "default server path",
+  )
+  assert_eq(paths.registration, "/register", "default registration path")
+  let custom_paths = well_known_paths({registration: "/oauth/register"})
+  assert_eq(custom_paths.registration, "/oauth/register", "override registration path")
+  assert_eq(
+    custom_paths.client_metadata,
+    "/.well-known/oauth-client.json",
+    "default client path retained on partial override",
+  )
+  let response = well_known_response(metadata)
+  assert_eq(response.status, 200, "200 OK")
+  assert_eq(response.content_type, "application/json", "json content type")
+  assert_eq(response.headers["cache-control"], "no-store", "no-store cache control")
+  assert(contains(response.body, "redirect_uris"), "body carries metadata")
+  log("oauth dynamic registration metadata ok")
+}

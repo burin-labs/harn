@@ -40,6 +40,7 @@ mod math;
 mod memory;
 mod monitors;
 mod multipart;
+mod oauth_dynreg;
 mod oauth_storage;
 mod options;
 mod path;
@@ -166,6 +167,7 @@ pub fn register_agent_stdlib(vm: &mut Vm) {
     agents::register_agent_builtins(vm);
     pool::register_pool_builtins(vm);
     oauth_storage::register_oauth_storage_builtins(vm);
+    oauth_dynreg::register_oauth_dynreg_builtins(vm);
     token_redaction::register_token_redaction_builtins(vm);
     agent_sessions::register_agent_session_builtins(vm);
     workflow_messages::register_workflow_message_builtins(vm);

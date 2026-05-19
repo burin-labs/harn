@@ -52,6 +52,45 @@ condensed series summaries instead of full per-patch history.
   `on_finish_preset_*`, `combinator_*`, `lifecycle_hook_events_*`,
   `lifecycle_event_shape_*`, and `on_budget_*` fixtures the lifecycle
   surface is now executable spec end-to-end.
+- **OAuth dynamic client registration + auto-hosted metadata (#1906).**
+  Closes OA-05 on epic #1885 with the worker-side dual of `std/oauth/client`:
+  a new `std/oauth/dynamic_registration` module that builds RFC 7591
+  client metadata, RFC 8414 authorization-server metadata, and runs an
+  in-process RFC 7591 dynamic registration store. `client_metadata(opts)`
+  validates + defaults a candidate document for serving at
+  `/.well-known/oauth-client.json`; `authorization_server_metadata(provider,
+  overrides?)` derives the server document from a `std/oauth/providers`
+  record for `/.well-known/oauth-authorization-server.json`;
+  `dynamic_registration_store()` + `register_client(store, metadata)` issue
+  fresh `client_id` / `client_secret` pairs (256-bit URL-safe base64) with
+  RFC 7591 §5.1 server-side latitude to reject non-HTTPS redirect URIs
+  (except RFC 8252 §7.3 loopback), fragments, and non-spec
+  `grant_types` / `response_types` / `token_endpoint_auth_method` values.
+  All rejections thread through a stable `HARN-OAU-005:` diagnostic
+  prefix. The `client_secret` is only returned by `register_client`;
+  subsequent `get_client` reads omit it, and the `oauth.dynreg.audit`
+  `client_registered` event carries only the redacted shape
+  (`redirect_uri_count`, `grant_types`, `has_client_secret`) — never the
+  credential material. `well_known_paths()` + `well_known_response()`
+  return the canonical URL paths and an HTTP envelope that embedders
+  (harn-cloud, future `harn serve --oauth-resource ...`) can mount
+  directly. New Rust builtins (`__oauth_dynreg_store_handle`,
+  `__oauth_dynreg_register`, `__oauth_dynreg_get`, `__oauth_dynreg_list`,
+  `__oauth_dynreg_validate_metadata`, `__oauth_dynreg_build_client_metadata`,
+  `__oauth_dynreg_build_authorization_server_metadata`) are registered
+  in the parser signature table and live in
+  `crates/harn-vm/src/stdlib/oauth_dynreg.rs`; `client_id_issued_at`
+  routes through `stdlib::clock` for mock-clock-deterministic
+  conformance. Three new fixtures under `conformance/tests/stdlib/`
+  (`oauth_dynamic_registration_metadata`, `..._register`, `..._rejects`)
+  cover well-known builder defaulting, happy-path registration with
+  audit-shape redaction, and the RFC 7591 §5.1 / §2 rejection matrix.
+  Intentional cut: the harn-serve port-wiring (a `/well-known` route
+  group + `POST /register` handler) is deferred to a follow-up so this
+  PR can ship the stdlib + validation surface that both harn-cloud and
+  harn-serve will share without coupling the two. Embedders consume the
+  artifacts produced here as opaque `{status, content_type, headers,
+  body}` envelopes.
 - **Pool conformance gap-fill: `pool_unsettled_state_integration` (#1892).**
   PL-07 (epic #1883) is the comprehensive pool conformance suite. Eight of
   the ten spec scenarios were already covered by fixtures landed alongside

@@ -506,6 +506,10 @@ pub const STDLIB_SOURCES: &[StdlibSource] = &[
         source: include_str!("stdlib/oauth/redaction.harn"),
     },
     StdlibSource {
+        module: "oauth/dynamic_registration",
+        source: include_str!("stdlib/oauth/dynamic_registration.harn"),
+    },
+    StdlibSource {
         module: "connectors/github",
         source: include_str!("stdlib/stdlib_connectors_github.harn"),
     },

@@ -1,0 +1,290 @@
+/**
+ * std/oauth/dynamic_registration (OA-05) — worker-side OAuth metadata
+ * publishing + RFC 7591 dynamic client registration.
+ *
+ * This module is the dual of `std/oauth/client`: it covers the side of
+ * the OAuth handshake where Harn *is* the resource (or auxiliary
+ * service) that other agents / services / humans register clients
+ * against. It does NOT itself host an HTTP server — it produces the
+ * RFC 7591 / RFC 8414 metadata documents, validates incoming client
+ * registrations, and stores them in an in-process catalogue. Embedders
+ * (harn-cloud, `harn serve`, custom hosts) plug those outputs into the
+ * routes they already serve.
+ *
+ * ## Surface
+ *
+ *   - `client_metadata(opts)` — build & validate an RFC 7591 client
+ *     metadata document. Returned dict is safe to serve at
+ *     `/.well-known/oauth-client.json`.
+ *   - `authorization_server_metadata(provider, overrides?)` — build an
+ *     RFC 8414 authorization-server metadata document from a provider
+ *     record (see `std/oauth/providers`). Returned dict is safe to
+ *     serve at `/.well-known/oauth-authorization-server.json`.
+ *   - `validate_metadata(metadata)` — check candidate metadata against
+ *     the RFC 7591 §2 conformance rules. Returns
+ *     `{ok: bool, errors: list<string>}`. Each error is prefixed
+ *     `HARN-OAU-005:` so callers can pattern-match.
+ *   - `dynamic_registration_store()` — opens an in-process store handle
+ *     for issuing client_ids. Backed by a thread-safe `BTreeMap` keyed
+ *     by handle id. Suitable for harn-serve and conformance fixtures;
+ *     production deployments should layer a durable backend on top via
+ *     the embedder host capabilities.
+ *   - `register_client(store, metadata)` — validate + register a
+ *     client. Returns the RFC 7591 §3.2.1 success body including the
+ *     freshly minted `client_id` and `client_secret`. Emits
+ *     `oauth.dynreg.audit` `client_registered` with no credential
+ *     material — counts + the registered redirect_uris only.
+ *   - `get_client(store, client_id)` — read back the registration
+ *     without `client_secret`. Returns nil for unknown ids.
+ *   - `list_clients(store)` — list registered client_ids.
+ *   - `well_known_paths(opts?)` — the canonical well-known URL paths;
+ *     embedders use this to mount the metadata documents.
+ *   - `well_known_response(metadata)` — wraps a metadata dict in the
+ *     `{content_type, body}` shape an HTTP layer can return without
+ *     re-serializing.
+ *
+ * ## Security
+ *
+ * Validation is strict by default per RFC 7591 §5.1 — the server is
+ * explicitly allowed to reject otherwise-conforming registrations:
+ *
+ *   - `redirect_uris` must be a non-empty list of absolute `https://`
+ *     URIs, or loopback `http://localhost` / `http://127.0.0.1` per
+ *     RFC 8252 §7.3, and may not carry a fragment.
+ *   - `grant_types`, `response_types`, `token_endpoint_auth_method`
+ *     are restricted to the spec-blessed enums.
+ *
+ * The `client_secret` is only returned from the original
+ * `register_client` call. Subsequent `get_client` reads omit it, so a
+ * stray log of the read result cannot leak credentials. Audit events
+ * carry only a counted shape (`{has_client_secret, redirect_uri_count,
+ * grant_types}`) — never the secret material.
+ *
+ * ## Disable on local runs
+ *
+ * Local `harn run` scripts that do not act as a resource server should
+ * simply not call into this module. Embedders that host the well-known
+ * endpoints (harn-cloud, `harn serve --oauth-resource ...`) read a
+ * boolean toggle from their own configuration before mounting; this
+ * module deliberately does not introduce a global on/off switch
+ * because the source of truth lives at the transport layer.
+ */
+let __AUDIT_TOPIC = "oauth.dynreg.audit"
+
+let __AUDIT_KIND_REGISTERED = "client_registered"
+
+let __DEFAULT_CLIENT_METADATA_PATH = "/.well-known/oauth-client.json"
+
+let __DEFAULT_AUTH_SERVER_METADATA_PATH = "/.well-known/oauth-authorization-server.json"
+
+let __DEFAULT_REGISTRATION_PATH = "/register"
+
+let __CONTENT_TYPE_JSON = "application/json"
+
+fn __require_dict(value, field) {
+  if type_of(value) != "dict" {
+    throw "std/oauth/dynamic_registration: " + field + " must be a dict, got " + type_of(value)
+  }
+  return value
+}
+
+fn __safe_get(dict, key) {
+  let keys = dict.keys()
+  if keys.contains(key) {
+    return dict[key]
+  }
+  return nil
+}
+
+/**
+ * validate_metadata checks an RFC 7591 candidate metadata dict and
+ * returns `{ok: bool, errors: list<string>}`. Each error is prefixed
+ * `HARN-OAU-005:` so callers can match on a stable diagnostic code.
+ *
+ * @effects: []
+ * @allocation: heap
+ * @errors: [invalid_argument]
+ * @api_stability: experimental
+ * @example: validate_metadata({redirect_uris: ["https://app.example/cb"]})
+ */
+pub fn validate_metadata(metadata) -> dict {
+  return __oauth_dynreg_validate_metadata(__require_dict(metadata, "metadata"))
+}
+
+/**
+ * client_metadata returns a fully-defaulted RFC 7591 client metadata
+ * dict for serving at `/.well-known/oauth-client.json`. Required field:
+ * `redirect_uris` (list of absolute https URIs, or loopback http).
+ * Optional fields are passed through verbatim. Raises an error if any
+ * field violates RFC 7591 §2.
+ *
+ * @effects: []
+ * @allocation: heap
+ * @errors: [invalid_argument]
+ * @api_stability: experimental
+ * @example: client_metadata({redirect_uris: ["https://app.example/cb"], client_name: "Harn"})
+ */
+pub fn client_metadata(opts) -> dict {
+  return __oauth_dynreg_build_client_metadata(__require_dict(opts, "opts"))
+}
+
+/**
+ * authorization_server_metadata returns an RFC 8414 authorization-server
+ * metadata document derived from a provider record (see
+ * `std/oauth/providers`). Pass `overrides` to set e.g. the
+ * `registration_endpoint` for the dynamic registration URL the
+ * embedding HTTP server will mount.
+ *
+ * @effects: []
+ * @allocation: heap
+ * @errors: [invalid_argument]
+ * @api_stability: experimental
+ * @example: authorization_server_metadata(providers().github, {registration_endpoint: "/register"})
+ */
+pub fn authorization_server_metadata(provider, overrides = nil) -> dict {
+  let provider_dict = __require_dict(provider, "provider")
+  if overrides == nil {
+    return __oauth_dynreg_build_authorization_server_metadata(provider_dict, nil)
+  }
+  return __oauth_dynreg_build_authorization_server_metadata(
+    provider_dict,
+    __require_dict(overrides, "overrides"),
+  )
+}
+
+/**
+ * dynamic_registration_store opens an in-process store handle for
+ * issuing RFC 7591 client registrations. Returned dict carries
+ * `kind: "oauth_dynreg_store"`, an opaque `id`, and three convenience
+ * closures (`register`, `get`, `list`).
+ *
+ * @effects: []
+ * @allocation: heap
+ * @errors: []
+ * @api_stability: experimental
+ * @example: dynamic_registration_store()
+ */
+pub fn dynamic_registration_store() -> dict {
+  let inner = __oauth_dynreg_store_handle()
+  return inner
+    + {
+    _namespace: "oauth_dynreg",
+    register: { metadata -> register_client(inner, metadata) },
+    get: { client_id -> get_client(inner, client_id) },
+    list: { -> list_clients(inner) },
+  }
+}
+
+fn __redact_shape(metadata, response) {
+  let redirect_uris = __safe_get(metadata, "redirect_uris") ?? []
+  let grant_types = __safe_get(response, "grant_types") ?? []
+  let has_secret = __safe_get(response, "client_secret") != nil
+  return {
+    redirect_uri_count: len(redirect_uris),
+    grant_types: grant_types,
+    has_client_secret: has_secret,
+    token_endpoint_auth_method: __safe_get(response, "token_endpoint_auth_method"),
+  }
+}
+
+/**
+ * register_client validates a candidate RFC 7591 metadata dict and, if
+ * acceptable, registers it on the supplied store. Returns the RFC 7591
+ * §3.2.1 success body — `{client_id, client_secret,
+ * client_id_issued_at, client_secret_expires_at, ...metadata}`. Emits
+ * an `oauth.dynreg.audit` `client_registered` event log entry with the
+ * registration *shape* (`redirect_uri_count`, `grant_types`,
+ * `has_client_secret`) — never the secret material itself.
+ *
+ * @effects: []
+ * @allocation: heap
+ * @errors: [invalid_argument]
+ * @api_stability: experimental
+ * @example: register_client(store, {redirect_uris: ["https://app.example/cb"]})
+ */
+pub fn register_client(store, metadata) -> dict {
+  let store_dict = __require_dict(store, "store")
+  let metadata_dict = __require_dict(metadata, "metadata")
+  let response = __oauth_dynreg_register(store_dict, metadata_dict)
+  let payload = {
+    client_id: __safe_get(response, "client_id"),
+    issued_at: __safe_get(response, "client_id_issued_at"),
+    redacted: __redact_shape(metadata_dict, response),
+  }
+  let _ = event_log.emit(__AUDIT_TOPIC, __AUDIT_KIND_REGISTERED, payload, {dynreg: "true"})
+  return response
+}
+
+/**
+ * get_client reads a previously registered client from the store. The
+ * returned dict does NOT include `client_secret` — that is only ever
+ * returned once, by `register_client`. Returns nil for unknown ids.
+ *
+ * @effects: []
+ * @allocation: heap
+ * @errors: []
+ * @api_stability: experimental
+ * @example: get_client(store, "abc123")
+ */
+pub fn get_client(store, client_id) -> dict {
+  return __oauth_dynreg_get(__require_dict(store, "store"), client_id)
+}
+
+/**
+ * list_clients returns the list of registered client ids on the store.
+ *
+ * @effects: []
+ * @allocation: heap
+ * @errors: []
+ * @api_stability: experimental
+ * @example: list_clients(store)
+ */
+pub fn list_clients(store) -> list<string> {
+  return __oauth_dynreg_list(__require_dict(store, "store"))
+}
+
+/**
+ * well_known_paths returns the canonical well-known URL paths used by
+ * `client_metadata` and `authorization_server_metadata`. Pass overrides
+ * to swap the default `/.well-known/oauth-*` paths for embeddings that
+ * mount under a different prefix.
+ *
+ * @effects: []
+ * @allocation: heap
+ * @errors: []
+ * @api_stability: experimental
+ * @example: well_known_paths()
+ */
+pub fn well_known_paths(overrides = nil) -> dict {
+  let defaults = {
+    client_metadata: __DEFAULT_CLIENT_METADATA_PATH,
+    authorization_server_metadata: __DEFAULT_AUTH_SERVER_METADATA_PATH,
+    registration: __DEFAULT_REGISTRATION_PATH,
+  }
+  if overrides == nil {
+    return defaults
+  }
+  return defaults + __require_dict(overrides, "overrides")
+}
+
+/**
+ * well_known_response wraps a metadata dict as an HTTP response envelope
+ * with `content_type: "application/json"` and a `body` string. This is
+ * the shape embedders feed into harn-serve or harn-cloud route
+ * handlers — no extra serialization on the embedder side.
+ *
+ * @effects: []
+ * @allocation: heap
+ * @errors: [invalid_argument]
+ * @api_stability: experimental
+ * @example: well_known_response(client_metadata({redirect_uris: ["https://a/cb"]}))
+ */
+pub fn well_known_response(metadata) -> dict {
+  let dict = __require_dict(metadata, "metadata")
+  return {
+    status: 200,
+    content_type: __CONTENT_TYPE_JSON,
+    headers: {"content-type": __CONTENT_TYPE_JSON, "cache-control": "no-store"},
+    body: json_stringify(dict),
+  }
+}
