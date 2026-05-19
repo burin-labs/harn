@@ -82,6 +82,20 @@ pub enum HookEvent {
     PostFinish,
     #[serde(rename = "OnUnsettledDetected")]
     OnUnsettledDetected,
+    #[serde(rename = "PreSuspend")]
+    PreSuspend,
+    #[serde(rename = "PostSuspend")]
+    PostSuspend,
+    #[serde(rename = "PreResume")]
+    PreResume,
+    #[serde(rename = "PostResume")]
+    PostResume,
+    #[serde(rename = "PreDrain")]
+    PreDrain,
+    #[serde(rename = "PostDrain")]
+    PostDrain,
+    #[serde(rename = "OnDrainDecision")]
+    OnDrainDecision,
 }
 
 impl HookEvent {
@@ -120,6 +134,13 @@ impl HookEvent {
             Self::PreFinish => "PreFinish",
             Self::PostFinish => "PostFinish",
             Self::OnUnsettledDetected => "OnUnsettledDetected",
+            Self::PreSuspend => "PreSuspend",
+            Self::PostSuspend => "PostSuspend",
+            Self::PreResume => "PreResume",
+            Self::PostResume => "PostResume",
+            Self::PreDrain => "PreDrain",
+            Self::PostDrain => "PostDrain",
+            Self::OnDrainDecision => "OnDrainDecision",
         }
     }
 
@@ -142,6 +163,13 @@ impl HookEvent {
             "PreFinish" | "pre_finish" => Ok(Self::PreFinish),
             "PostFinish" | "post_finish" => Ok(Self::PostFinish),
             "OnUnsettledDetected" | "on_unsettled_detected" => Ok(Self::OnUnsettledDetected),
+            "PreSuspend" | "pre_suspend" => Ok(Self::PreSuspend),
+            "PostSuspend" | "post_suspend" => Ok(Self::PostSuspend),
+            "PreResume" | "pre_resume" => Ok(Self::PreResume),
+            "PostResume" | "post_resume" => Ok(Self::PostResume),
+            "PreDrain" | "pre_drain" => Ok(Self::PreDrain),
+            "PostDrain" | "post_drain" => Ok(Self::PostDrain),
+            "OnDrainDecision" | "on_drain_decision" => Ok(Self::OnDrainDecision),
             other => Err(format!("unknown session hook event `{other}`")),
         }
     }
@@ -176,10 +204,18 @@ impl HookEvent {
 
 /// Control flow returned by a session-level lifecycle hook.
 ///
-/// Most session events are advisory (`Allow`). The two veto-capable
-/// events — `UserPromptSubmit` and `PreCompact` — accept `Block`.
-/// `PermissionAsked` additionally accepts a `Decision` short-circuit so
-/// hooks can override the dynamic permission policy entirely.
+/// Most session events are advisory (`Allow`). Veto-capable events —
+/// `UserPromptSubmit`, `PreCompact`, plus the lifecycle gates
+/// `PreSuspend` / `PreResume` / `PreDrain` / `OnDrainDecision` /
+/// `OnUnsettledDetected` — accept `Block`. `PermissionAsked` accepts a
+/// `Decision` short-circuit so hooks can override the dynamic
+/// permission policy entirely. Lifecycle gates that support payload
+/// rewriting (PreSuspend / PreResume / PreDrain / OnDrainDecision /
+/// OnUnsettledDetected) accept `Modify { payload }` to amend the
+/// dispatched event — the dispatcher applies the modified payload
+/// before resuming the lifecycle step. `PreFinish` rejects `Block`
+/// explicitly; the runtime surfaces a dedicated error pointing at
+/// `OnFinish.block_until_settled`.
 #[derive(Clone, Debug)]
 pub enum HookControl {
     Allow,
@@ -190,6 +226,9 @@ pub enum HookControl {
         kind: String,
         reason: Option<String>,
     },
+    Modify {
+        payload: serde_json::Value,
+    },
 }
 
 impl HookControl {
@@ -197,6 +236,7 @@ impl HookControl {
         match self {
             Self::Allow => "allow",
             Self::Block { .. } => "block",
+            Self::Modify { .. } => "modify",
             Self::Decision { kind, .. } => match kind.as_str() {
                 "allow" => "decision_allow",
                 "deny" => "decision_deny",
@@ -510,6 +550,13 @@ pub fn clear_session_hooks() {
                     | HookEvent::PreFinish
                     | HookEvent::PostFinish
                     | HookEvent::OnUnsettledDetected
+                    | HookEvent::PreSuspend
+                    | HookEvent::PostSuspend
+                    | HookEvent::PreResume
+                    | HookEvent::PostResume
+                    | HookEvent::PreDrain
+                    | HookEvent::PostDrain
+                    | HookEvent::OnDrainDecision
             )
         });
     });
@@ -1309,6 +1356,13 @@ pub async fn run_lifecycle_hooks(
 /// to the caller. Hook invocations and decisions are captured on the
 /// active session's transcript under `hook_call`, `hook_returned`, and
 /// `hook_vetoed` so a replay reproduces the same control flow.
+///
+/// `Modify` does not short-circuit: subsequent hooks see the rewritten
+/// payload, and the final `HookControl::Modify` returned by the chain
+/// carries the merged payload back to the dispatcher so the recording
+/// layer captures the post-modify shape (replay determinism). If a
+/// later hook in the same chain returns `Allow`, the merged
+/// `Modify { payload }` from earlier hooks is still surfaced.
 pub async fn run_lifecycle_hooks_with_control(
     event: HookEvent,
     payload: &serde_json::Value,
@@ -1322,18 +1376,23 @@ pub async fn run_lifecycle_hooks_with_control(
             "session lifecycle hook requires an async builtin VM context".to_string(),
         ));
     };
-    let arg = crate::stdlib::json_to_vm_value(payload);
     let session_id = payload
         .get("session")
         .and_then(|v| v.get("id"))
         .and_then(|v| v.as_str())
         .unwrap_or("")
         .to_string();
+    let mut current_payload = payload.clone();
+    let mut accumulated_modify: Option<serde_json::Value> = None;
     for registration in registrations {
-        record_hook_call(&session_id, event, &registration.handler_name, payload);
-        let raw = vm
-            .call_closure_pub(&registration.closure, &[arg.clone()])
-            .await?;
+        let arg = crate::stdlib::json_to_vm_value(&current_payload);
+        record_hook_call(
+            &session_id,
+            event,
+            &registration.handler_name,
+            &current_payload,
+        );
+        let raw = vm.call_closure_pub(&registration.closure, &[arg]).await?;
         let outcome = parse_hook_outcome(event, &raw)?;
         record_hook_returned(
             &session_id,
@@ -1343,17 +1402,23 @@ pub async fn run_lifecycle_hooks_with_control(
             &raw,
         );
         inject_hook_effects(session_id.as_str(), outcome.effects)?;
-        if !matches!(outcome.control, HookControl::Allow) {
-            record_hook_vetoed(
-                &session_id,
-                event,
-                &registration.handler_name,
-                &outcome.control,
-            );
-            return Ok(outcome.control);
+        match outcome.control {
+            HookControl::Allow => continue,
+            HookControl::Modify { payload: modified } => {
+                current_payload = modified.clone();
+                accumulated_modify = Some(modified);
+            }
+            other @ (HookControl::Block { .. } | HookControl::Decision { .. }) => {
+                record_hook_vetoed(&session_id, event, &registration.handler_name, &other);
+                return Ok(other);
+            }
         }
     }
-    Ok(HookControl::Allow)
+    if let Some(payload) = accumulated_modify {
+        Ok(HookControl::Modify { payload })
+    } else {
+        Ok(HookControl::Allow)
+    }
 }
 
 fn parse_hook_outcome(event: HookEvent, value: &VmValue) -> Result<HookOutcome, VmError> {
@@ -1365,6 +1430,18 @@ fn parse_hook_outcome(event: HookEvent, value: &VmValue) -> Result<HookOutcome, 
     };
     let control = parse_hook_control(event, &action_value)?;
     Ok(HookOutcome { control, effects })
+}
+
+/// Public alias for the internal `parse_hook_control`. Used by the
+/// pipeline-finish dispatcher (`fire_finish_lifecycle_event`) to
+/// translate the action half of a hook return value into a control
+/// signal so it can honor the lifecycle table (PreFinish rejects
+/// Block, OnUnsettledDetected respects Block, etc.).
+pub fn parse_hook_control_for_finish(
+    event: HookEvent,
+    value: &VmValue,
+) -> Result<HookControl, VmError> {
+    parse_hook_control(event, value)
 }
 
 fn parse_hook_control(event: HookEvent, value: &VmValue) -> Result<HookControl, VmError> {
@@ -1399,6 +1476,11 @@ fn parse_hook_control(event: HookEvent, value: &VmValue) -> Result<HookControl, 
                     .map(|v| v.display())
                     .unwrap_or_else(|| format!("{} hook blocked the operation", event.as_str()));
                 return Ok(HookControl::Block { reason });
+            }
+            if let Some(modify) = map.get("modify") {
+                return Ok(HookControl::Modify {
+                    payload: crate::llm::vm_value_to_json(modify),
+                });
             }
             Ok(HookControl::Allow)
         }
@@ -1489,6 +1571,7 @@ fn record_hook_vetoed(session_id: &str, event: HookEvent, handler: &str, control
             reason.clone().unwrap_or_else(|| format!("decision={kind}")),
             Some(kind.clone()),
         ),
+        HookControl::Modify { .. } => return,
     };
     let metadata = serde_json::json!({
         "event": event.as_str(),

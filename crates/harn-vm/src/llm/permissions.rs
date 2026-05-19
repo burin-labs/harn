@@ -380,6 +380,8 @@ async fn check_one_dynamic_permission(
             }
             _ => {}
         },
+        // `PermissionAsked` does not support payload Modify; ignore.
+        crate::orchestration::HookControl::Modify { .. } => {}
     }
 
     let Some(on_escalation) = policy.on_escalation.as_ref() else {

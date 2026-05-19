@@ -625,7 +625,7 @@ async fn suspend_agent_builtin(args: Vec<VmValue>) -> Result<VmValue, VmError> {
         .first()
         .ok_or_else(|| VmError::Runtime("suspend_agent: missing worker handle".to_string()))?;
     let worker_id = worker_id_from_value(target)?;
-    let reason = args.get(1).map(|value| value.display()).unwrap_or_default();
+    let mut reason = args.get(1).map(|value| value.display()).unwrap_or_default();
     let options = args.get(2);
     let initiator = options
         .and_then(|value| value.as_dict())
@@ -639,6 +639,49 @@ async fn suspend_agent_builtin(args: Vec<VmValue>) -> Result<VmValue, VmError> {
         .filter(|value| !is_nil(value))
         .cloned();
     let conditions = conditions_value.as_ref().map(crate::llm::vm_value_to_json);
+
+    // PreSuspend lifecycle gate (harn#1859). Allow/Deny (cancel suspend,
+    // worker keeps running)/Modify (rewrite reason)/Reminder.
+    let pre_payload = serde_json::json!({
+        "event": crate::orchestration::HookEvent::PreSuspend.as_str(),
+        "worker": { "id": &worker_id },
+        "reason": &reason,
+        "initiator": serde_json::to_value(initiator).unwrap_or(serde_json::Value::Null),
+        "conditions": conditions.clone().unwrap_or(serde_json::Value::Null),
+    });
+    match crate::orchestration::run_lifecycle_hooks_with_control(
+        crate::orchestration::HookEvent::PreSuspend,
+        &pre_payload,
+    )
+    .await?
+    {
+        crate::orchestration::HookControl::Allow => {}
+        crate::orchestration::HookControl::Block {
+            reason: block_reason,
+        } => {
+            // PreSuspend Deny: cancel suspend, return current summary.
+            return with_worker_state(&worker_id, |state| {
+                let mut summary = worker_summary(&state.borrow())?;
+                if let VmValue::Dict(map) = &mut summary {
+                    let mut entries = (**map).clone();
+                    entries.insert(
+                        "pre_suspend_denied".to_string(),
+                        VmValue::String(Rc::from(block_reason.clone())),
+                    );
+                    *map = Rc::new(entries);
+                }
+                Ok(summary)
+            });
+        }
+        crate::orchestration::HookControl::Modify { payload } => {
+            if let Some(new_reason) = payload.get("reason").and_then(|v| v.as_str()) {
+                reason = new_reason.to_string();
+            }
+        }
+        crate::orchestration::HookControl::Decision { .. } => {
+            // Decision is not a defined return for PreSuspend; treat as Allow.
+        }
+    }
 
     let mut suspension_span: Option<LifecycleSpanGuard> = None;
     let (mut snapshot, mut summary, should_emit) = with_worker_state(&worker_id, |state| {
@@ -719,6 +762,19 @@ async fn suspend_agent_builtin(args: Vec<VmValue>) -> Result<VmValue, VmError> {
             span.end();
         }
         emit_worker_event(&snapshot, crate::agent_events::WorkerEvent::WorkerSuspended).await?;
+        // PostSuspend lifecycle event (harn#1859). Advisory only; the
+        // snapshot has already been persisted by persist_worker_state_snapshot.
+        let post_payload = serde_json::json!({
+            "event": crate::orchestration::HookEvent::PostSuspend.as_str(),
+            "worker": { "id": &worker_id },
+            "reason": &reason,
+            "snapshot_path": snapshot.metadata.get("snapshot_path").cloned().unwrap_or(serde_json::Value::Null),
+        });
+        crate::orchestration::run_lifecycle_hooks(
+            crate::orchestration::HookEvent::PostSuspend,
+            &post_payload,
+        )
+        .await?;
     }
     Ok(summary)
 }
@@ -1324,9 +1380,51 @@ async fn join_checkpointed_worker_handle(state: Rc<RefCell<WorkerState>>) -> Res
 
 async fn warm_resume_worker(
     state: Rc<RefCell<WorkerState>>,
-    options: WorkerResumeOptions,
+    mut options: WorkerResumeOptions,
 ) -> Result<VmValue, VmError> {
     join_checkpointed_worker_handle(state.clone()).await?;
+    // PreResume lifecycle gate (harn#1859). Allow/Deny (stay suspended)/
+    // Modify (amend resume input)/Reminder.
+    let pre_worker_id = state.borrow().id.clone();
+    let pre_payload = serde_json::json!({
+        "event": crate::orchestration::HookEvent::PreResume.as_str(),
+        "worker": { "id": &pre_worker_id },
+        "resume_input": options
+            .resume_input
+            .as_ref()
+            .map(crate::llm::vm_value_to_json)
+            .unwrap_or(serde_json::Value::Null),
+        "continue_transcript": options.continue_transcript,
+    });
+    match crate::orchestration::run_lifecycle_hooks_with_control(
+        crate::orchestration::HookEvent::PreResume,
+        &pre_payload,
+    )
+    .await?
+    {
+        crate::orchestration::HookControl::Allow => {}
+        crate::orchestration::HookControl::Block { reason } => {
+            // PreResume Deny: do not transition out of suspended.
+            let mut summary = worker_summary(&state.borrow())?;
+            if let VmValue::Dict(map) = &mut summary {
+                let mut entries = (**map).clone();
+                entries.insert(
+                    "pre_resume_denied".to_string(),
+                    VmValue::String(Rc::from(reason)),
+                );
+                *map = Rc::new(entries);
+            }
+            return Ok(summary);
+        }
+        crate::orchestration::HookControl::Modify { payload } => {
+            if let Some(new_input) = payload.get("resume_input") {
+                if !new_input.is_null() {
+                    options.resume_input = Some(crate::stdlib::json_to_vm_value(new_input));
+                }
+            }
+        }
+        crate::orchestration::HookControl::Decision { .. } => {}
+    }
     let resume_digest = if options.continue_transcript {
         None
     } else {
@@ -1408,6 +1506,17 @@ async fn warm_resume_worker(
     if crate::vm::clone_async_builtin_child_vm().is_some() {
         respawn_worker_task(state.clone())?;
     }
+    // PostResume lifecycle event (harn#1859). Advisory only; the turn is
+    // about to start.
+    let post_payload = serde_json::json!({
+        "event": crate::orchestration::HookEvent::PostResume.as_str(),
+        "worker": { "id": &worker_id },
+    });
+    crate::orchestration::run_lifecycle_hooks(
+        crate::orchestration::HookEvent::PostResume,
+        &post_payload,
+    )
+    .await?;
     let summary = worker_summary(&state.borrow())?;
     Ok(summary)
 }

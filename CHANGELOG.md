@@ -38,6 +38,23 @@ condensed series summaries instead of full per-patch history.
 
 [acp-1224]: https://github.com/agentclientprotocol/agent-client-protocol/discussions/1224
 
+- **Lifecycle hook events for suspend / resume / drain phases (#1859).**
+  Adds seven new `HookEvent` variants — `PreSuspend`, `PostSuspend`,
+  `PreResume`, `PostResume`, `PreDrain`, `PostDrain`, `OnDrainDecision`
+  — wired through `register_session_hook` (snake_case names) and the
+  shared dispatcher. The control surface gains `HookControl::Modify`
+  so lifecycle gates can rewrite the dispatched payload before
+  downstream consumers see it (rewrite suspend reason, amend resume
+  input, amend drain spec, rewrite drain tool call, amend unsettled
+  snapshot). `Block` cancels the gated operation where applicable
+  (`PreSuspend`, `PreResume`, `PreDrain`, `OnDrainDecision`,
+  `OnUnsettledDetected`); `PreFinish` explicitly rejects `Block` and
+  surfaces a runtime error pointing the user at
+  `OnFinish.block_until_settled`. Reminder effects continue to be
+  inject-only. See `docs/llm/harn-quickref.md` for the per-event
+  return-semantics table and `conformance/tests/hooks_session/
+  lifecycle_hook_events_*` for executable spec coverage. Settlement
+  agent spawning itself remains the P-03 deferred stub (harn#1856).
 - **`std/oauth/storage` token storage backends (#1904).** Five
   interchangeable backends for the OAuth client (#1885 OA-03):
   `memory()` (per-VM, ephemeral), `file(path, encryption_key)` (single

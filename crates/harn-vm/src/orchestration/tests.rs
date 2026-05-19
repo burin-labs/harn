@@ -1406,6 +1406,33 @@ fn pipeline_finish_events_round_trip_through_session_hook_parser() {
 }
 
 #[test]
+fn lifecycle_hook_events_round_trip_through_session_hook_parser() {
+    // harn#1859: the 7 new lifecycle events (suspend, resume, drain
+    // phases) round-trip through the session-hook parser using both
+    // their canonical PascalCase and Harn-facing snake_case spellings.
+    for (input, expected) in [
+        ("pre_suspend", HookEvent::PreSuspend),
+        ("PreSuspend", HookEvent::PreSuspend),
+        ("post_suspend", HookEvent::PostSuspend),
+        ("PostSuspend", HookEvent::PostSuspend),
+        ("pre_resume", HookEvent::PreResume),
+        ("PreResume", HookEvent::PreResume),
+        ("post_resume", HookEvent::PostResume),
+        ("PostResume", HookEvent::PostResume),
+        ("pre_drain", HookEvent::PreDrain),
+        ("PreDrain", HookEvent::PreDrain),
+        ("post_drain", HookEvent::PostDrain),
+        ("PostDrain", HookEvent::PostDrain),
+        ("on_drain_decision", HookEvent::OnDrainDecision),
+        ("OnDrainDecision", HookEvent::OnDrainDecision),
+    ] {
+        let parsed = HookEvent::parse_session_event(input)
+            .unwrap_or_else(|err| panic!("{input} should parse as a session event: {err}"));
+        assert_eq!(parsed, expected, "{input} should map to {expected:?}");
+    }
+}
+
+#[test]
 fn unsettled_state_snapshot_starts_empty() {
     clear_pipeline_on_finish();
     let snapshot = unsettled_state_snapshot();

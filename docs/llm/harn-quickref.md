@@ -2412,10 +2412,35 @@ Three concentric surfaces:
   `session_start`, `session_end`, `user_prompt_submit`, `pre_compact`,
   `post_compact`, `post_turn`, `permission_asked`, `permission_replied`,
   `file_edited`, `session_error`, `session_idle`, `pre_finish`,
-  `post_finish`, `on_unsettled_detected`. Veto with
-  `{block: true, reason}`; short-circuit a permission with
-  `{decision: "allow"|"deny"|"ask", reason}`. Tape captures every
-  invocation under `hook_call` / `hook_returned` / `hook_vetoed`.
+  `post_finish`, `on_unsettled_detected`, plus the agent-lifecycle
+  events `pre_suspend`, `post_suspend`, `pre_resume`, `post_resume`,
+  `pre_drain`, `post_drain`, `on_drain_decision` (harn#1859). Veto
+  with `{block: true, reason}`; short-circuit a permission with
+  `{decision: "allow"|"deny"|"ask", reason}`. Lifecycle-gate events
+  also accept `{modify: payload}` to rewrite the dispatched event
+  (`pre_suspend` rewrites the reason, `pre_resume` amends the resume
+  input, `pre_drain` amends the drain spec, `on_drain_decision`
+  rewrites the tool call, `on_unsettled_detected` amends the unsettled
+  snapshot). `pre_finish` rejects `{block: true}` and surfaces a
+  runtime error pointing at `OnFinish.block_until_settled`; use that
+  preset to delay finish until unsettled work clears. The full
+  per-event return semantics:
+
+  | Event                  | Allow | Deny / Block                            | Modify                  | Reminder    |
+  |------------------------|-------|-----------------------------------------|-------------------------|-------------|
+  | `pre_suspend`          | yes   | cancel suspend, worker keeps running    | rewrite reason          | inject only |
+  | `post_suspend`         | yes   | n/a                                     | n/a                     | inject only |
+  | `pre_resume`           | yes   | stay suspended                          | amend resume input      | inject only |
+  | `post_resume`          | yes   | n/a                                     | n/a                     | inject only |
+  | `pre_drain`            | yes   | skip drain                              | amend drain spec        | inject only |
+  | `post_drain`           | yes   | n/a                                     | n/a                     | inject only |
+  | `on_drain_decision`    | yes   | block tool call                         | rewrite tool call       | inject only |
+  | `on_unsettled_detected`| yes   | block finish until settled              | amend unsettled payload | inject only |
+  | `pre_finish`           | yes   | INVALID — use `OnFinish.block_until_settled` | n/a                | inject only |
+  | `post_finish`          | yes   | n/a (advisory)                          | n/a                     | inject only |
+
+  Tape captures every invocation under `hook_call` / `hook_returned` /
+  `hook_vetoed`.
 - Any tool, persona, step, or session hook can also emit a typed reminder
   for the active session transcript. Return `{reminder: {body, tags?,
   dedupe_key?, ttl_turns?, preserve_on_compact?, propagate?, role_hint?},

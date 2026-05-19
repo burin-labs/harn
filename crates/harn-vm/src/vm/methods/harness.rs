@@ -132,12 +132,12 @@ impl crate::vm::Vm {
                 .map(|id| VmValue::String(std::rc::Rc::from(id)))
                 .unwrap_or(VmValue::Nil)),
             "handoff_to" => Ok(record_handoff_envelope(args)),
-            "emit_audit" => Ok(record_emit_audit(args)),
+            "emit_audit" => Ok(record_emit_audit_with_hooks(args).await),
             "acknowledge_trigger" => Ok(acknowledge_trigger(args).await),
             "defer_trigger" => Ok(defer_trigger(args).await),
             "acknowledge_handoff" => Ok(acknowledge_handoff(args)),
             "finalize" => Ok(finalize_pipeline(args)),
-            "spawn_settlement_agent" => Ok(record_spawn_settlement_agent_gap(args)),
+            "spawn_settlement_agent" => Ok(record_spawn_settlement_agent_with_hooks(args).await),
             _ => Err(method_unsupported(handle, method)),
         }
     }
@@ -636,7 +636,12 @@ fn vm_value_string(value: &VmValue) -> String {
     }
 }
 
-fn record_emit_audit(args: &[VmValue]) -> VmValue {
+/// Persist a `harness.emit_audit` call. When the audit kind is
+/// `drain_decision`, fires the `OnDrainDecision` lifecycle hook
+/// (harn#1859) first: Allow proceeds, Block returns a `blocked` receipt
+/// so the drain agent can short-circuit the tool call, Modify rewrites
+/// the audit payload before persisting.
+async fn record_emit_audit_with_hooks(args: &[VmValue]) -> VmValue {
     let kind = args
         .first()
         .map(|v| match v {
@@ -644,11 +649,47 @@ fn record_emit_audit(args: &[VmValue]) -> VmValue {
             other => other.display(),
         })
         .unwrap_or_default();
-    let payload = args
+    let mut payload = args
         .get(1)
         .map(crate::llm::vm_value_to_json)
         .unwrap_or(serde_json::Value::Null);
     if kind == "drain_decision" {
+        let hook_payload = serde_json::json!({
+            "event": crate::orchestration::HookEvent::OnDrainDecision.as_str(),
+            "action": payload.get("action").cloned().unwrap_or(serde_json::Value::Null),
+            "item": payload.get("item").cloned().unwrap_or(serde_json::Value::Null),
+            "payload": payload.clone(),
+        });
+        match crate::orchestration::run_lifecycle_hooks_with_control(
+            crate::orchestration::HookEvent::OnDrainDecision,
+            &hook_payload,
+        )
+        .await
+        {
+            Ok(crate::orchestration::HookControl::Allow) => {}
+            Ok(crate::orchestration::HookControl::Block { reason }) => {
+                return crate::stdlib::json_to_vm_value(&serde_json::json!({
+                    "status": "blocked",
+                    "method": "emit_audit",
+                    "kind": kind,
+                    "reason": reason,
+                }));
+            }
+            Ok(crate::orchestration::HookControl::Modify { payload: modified }) => {
+                if let Some(p) = modified.get("payload") {
+                    payload = p.clone();
+                }
+            }
+            Ok(crate::orchestration::HookControl::Decision { .. }) => {}
+            Err(err) => {
+                return crate::stdlib::json_to_vm_value(&serde_json::json!({
+                    "status": "error",
+                    "method": "emit_audit",
+                    "kind": kind,
+                    "error": err.to_string(),
+                }));
+            }
+        }
         record_drain_decision_span(&payload);
     }
     let entry = crate::orchestration::record_lifecycle_audit(kind, payload);
@@ -689,6 +730,76 @@ fn record_spawn_settlement_agent_gap(args: &[VmValue]) -> VmValue {
         "spawn_settlement_agent",
         "settlement-agent spawning is deferred to the drain implementation (P-03, harn#1856)",
     )
+}
+
+/// Async wrapper around `record_spawn_settlement_agent_gap` that fires
+/// `PreDrain` (Allow/Deny/Modify) before spawning the drain stub and
+/// `PostDrain` (advisory) after. The drain stub itself remains
+/// deferred to harn#1856; once a real settlement-agent loop lands, the
+/// loop body will continue to be sandwiched by these hooks.
+async fn record_spawn_settlement_agent_with_hooks(args: &[VmValue]) -> VmValue {
+    let mut unsettled = args
+        .first()
+        .map(crate::llm::vm_value_to_json)
+        .unwrap_or(serde_json::Value::Null);
+    let return_value = args
+        .get(1)
+        .map(crate::llm::vm_value_to_json)
+        .unwrap_or(serde_json::Value::Null);
+    let pre_payload = serde_json::json!({
+        "event": crate::orchestration::HookEvent::PreDrain.as_str(),
+        "unsettled": unsettled.clone(),
+        "return_value": return_value.clone(),
+    });
+    match crate::orchestration::run_lifecycle_hooks_with_control(
+        crate::orchestration::HookEvent::PreDrain,
+        &pre_payload,
+    )
+    .await
+    {
+        Ok(crate::orchestration::HookControl::Allow) => {}
+        Ok(crate::orchestration::HookControl::Block { reason }) => {
+            return crate::stdlib::json_to_vm_value(&serde_json::json!({
+                "status": "skipped",
+                "method": "spawn_settlement_agent",
+                "reason": reason,
+            }));
+        }
+        Ok(crate::orchestration::HookControl::Modify { payload }) => {
+            if let Some(new_unsettled) = payload.get("unsettled") {
+                unsettled = new_unsettled.clone();
+            }
+        }
+        Ok(crate::orchestration::HookControl::Decision { .. }) => {}
+        Err(err) => {
+            return crate::stdlib::json_to_vm_value(&serde_json::json!({
+                "status": "error",
+                "method": "spawn_settlement_agent",
+                "error": err.to_string(),
+            }));
+        }
+    }
+    let outcome = record_spawn_settlement_agent_gap(std::slice::from_ref(
+        &crate::stdlib::json_to_vm_value(&unsettled),
+    ));
+    let post_payload = serde_json::json!({
+        "event": crate::orchestration::HookEvent::PostDrain.as_str(),
+        "unsettled": unsettled,
+        "outcome": crate::llm::vm_value_to_json(&outcome),
+    });
+    if let Err(err) = crate::orchestration::run_lifecycle_hooks(
+        crate::orchestration::HookEvent::PostDrain,
+        &post_payload,
+    )
+    .await
+    {
+        return crate::stdlib::json_to_vm_value(&serde_json::json!({
+            "status": "error",
+            "method": "spawn_settlement_agent",
+            "error": err.to_string(),
+        }));
+    }
+    outcome
 }
 
 fn record_drain_decision_span(payload: &serde_json::Value) {
