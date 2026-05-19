@@ -29,6 +29,15 @@ on:
     branches: [main]
     paths:
       - CHANGELOG.md
+  # Required-status-check gating: the org-level `release drift required`
+  # ruleset names `drift` as a required check on the default branch, which
+  # means the merge queue waits for this job to produce a status on every
+  # merge_group ref. Without this trigger the queue stalls indefinitely.
+  # In merge_group context the workflow runs as a no-op pass — the queue's
+  # own auto-rebase already handles CHANGELOG drift for non-release PRs,
+  # and a release PR in queue has already been drift-checked at PR-event
+  # time.
+  merge_group:
 
 permissions:
   contents: read
@@ -36,7 +45,7 @@ permissions:
   pull-requests: read
 
 concurrency:
-  group: release-pr-drift-${{ github.event.pull_request.number || github.sha }}
+  group: release-pr-drift-${{ github.event.pull_request.number || github.event.merge_group.head_sha || github.sha }}
   cancel-in-progress: true
 
 jobs:
@@ -69,6 +78,13 @@ jobs:
               echo '[]' > targets.json
               echo "Head ref '$PR_HEAD_REF' is not a release branch; nothing to check." >> "$GITHUB_STEP_SUMMARY"
             fi
+          elif [ "$EVENT" = "merge_group" ]; then
+            # No-op in queue context. The `drift` status check exists so
+            # the required-status-check ruleset has something to gate on
+            # for every merge_group ref; the actual drift comparison runs
+            # on PR-event and push-to-main events.
+            echo '[]' > targets.json
+            echo "merge_group event — drift check is a no-op pass." >> "$GITHUB_STEP_SUMMARY"
           else
             gh pr list \
               --repo "$GITHUB_REPOSITORY" \
