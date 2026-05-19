@@ -1,0 +1,19 @@
+/**
+ * E5.4 (HARN-CAP-301): edge case — when a spawned child has no inline
+ * effect-bearing surface (the spawn config carries no harness method
+ * calls or known effect-producing builtins), the static analyzer has
+ * nothing to enforce and the spawn proceeds. Runtime enforcement (E5.4)
+ * remains in effect for any opaque child surface that does request
+ * effects at execution time, but this fixture exercises the silent
+ * pass-through path.
+ */
+pipeline main() {
+  let _worker = spawn_agent(
+    {
+      name: "opaque-child",
+      task: "compute",
+      node: {kind: "subagent", mode: "llm", model_policy: {provider: "mock"}},
+    },
+  )
+  println("opaque ok")
+}

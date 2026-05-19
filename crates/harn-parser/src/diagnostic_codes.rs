@@ -222,6 +222,7 @@ diagnostic_codes! {
     CapabilityUnknownOperation, "HARN-CAP-005", Cap, "host capability operation is not declared";
     CapabilityCallStaticNameRequired, "HARN-CAP-006", Cap, "host capability call must use a static operation name";
     CapabilityBindingInvalid, "HARN-CAP-007", Cap, "tool host capability binding is invalid";
+    EffectInheritanceViolation, "HARN-CAP-301", Cap, "child agent effect set exceeds the parent's declared effects";
     UnknownLlmOption, "HARN-LLM-001", Llm, "LLM option key is not recognized";
     DeprecatedLlmOption, "HARN-LLM-002", Llm, "LLM option key is deprecated";
     LlmSchemaMissing, "HARN-LLM-003", Llm, "LLM call is missing schema validation";
@@ -427,6 +428,10 @@ impl Code {
                 &[Code::RescueOutsideFunction, Code::TryOutsideFunction]
             }
             Code::CapabilityUnknownOperation => &[Code::CapabilityCallStaticNameRequired],
+            Code::EffectInheritanceViolation => &[
+                Code::CapabilityPayloadInvalid,
+                Code::CapabilityBindingInvalid,
+            ],
             // Recovery / match.
             Code::RescueOutsideFunction => {
                 &[Code::TryOutsideFunction, Code::InvalidRescueConstruct]
@@ -740,6 +745,7 @@ impl Code {
             // --- CAP / RCV: capabilities & error recovery -----------------
             Code::CapabilityResultUnchecked => Some(&REPAIR_ERRORS_CHECK_OR_RESCUE),
             Code::CapabilityBindingInvalid => Some(&REPAIR_MANUAL_REVIEW_CAPABILITY),
+            Code::EffectInheritanceViolation => Some(&REPAIR_POLICY_NARROW_CHILD_EFFECTS),
             Code::RescueOutsideFunction | Code::TryOutsideFunction => {
                 Some(&REPAIR_ERRORS_WRAP_IN_FN)
             }
@@ -1078,6 +1084,12 @@ const REPAIR_MANUAL_REVIEW_CAPABILITY: RepairTemplate = RepairTemplate {
     safety: RepairSafety::NeedsHuman,
 };
 
+const REPAIR_POLICY_NARROW_CHILD_EFFECTS: RepairTemplate = RepairTemplate {
+    id: "policy/narrow-child-effects",
+    summary: "Narrow the child agent's effects to a subset of the parent's, or widen the parent's declared effects",
+    safety: RepairSafety::SurfaceChanging,
+};
+
 const REPAIR_MANUAL_NEEDS_HUMAN: RepairTemplate = RepairTemplate {
     id: "manual/needs-human",
     summary: "Plan a human-led change; auto-apply is not safe here",
@@ -1128,6 +1140,7 @@ pub const REPAIR_REGISTRY: &[&RepairTemplate] = &[
     &REPAIR_TYPES_ADD_SHAPE_ANNOTATION,
     &REPAIR_MANUAL_REVIEW_CAPABILITY,
     &REPAIR_MANUAL_NEEDS_HUMAN,
+    &REPAIR_POLICY_NARROW_CHILD_EFFECTS,
 ];
 
 #[cfg(test)]

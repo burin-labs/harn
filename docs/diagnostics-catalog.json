@@ -19,7 +19,7 @@
     {
       "id": "CAP",
       "title": "Capabilities",
-      "count": 7
+      "count": 8
     },
     {
       "id": "LLM",
@@ -747,6 +747,24 @@
         }
       ],
       "related": [],
+      "explanationPresent": true,
+      "apiStability": "stable"
+    },
+    {
+      "code": "HARN-CAP-301",
+      "category": "CAP",
+      "summary": "child agent effect set exceeds the parent's declared effects",
+      "repairs": [
+        {
+          "id": "policy/narrow-child-effects",
+          "safety": "surface-changing",
+          "summary": "Narrow the child agent's effects to a subset of the parent's, or widen the parent's declared effects"
+        }
+      ],
+      "related": [
+        "HARN-CAP-001",
+        "HARN-CAP-007"
+      ],
       "explanationPresent": true,
       "apiStability": "stable"
     },

@@ -1,0 +1,21 @@
+/**
+ * E5.4 (HARN-CAP-301): when a child agent's effect set is a subset of
+ * the parent's, the dispatcher accepts the spawn. The parent declares
+ * (via static analysis) a workspace + spawn surface; the child uses a
+ * strict subset (workspace only) so subset ⊆ holds and the existing
+ * spawn_agent path runs normally.
+ */
+fn parent() {
+  let _worker = spawn_agent(
+    {
+      name: "subset-child",
+      task: "read only",
+      node: {kind: "subagent", mode: "llm", model_policy: {provider: "mock"}},
+    },
+  )
+  println("spawn ok")
+}
+
+pipeline main() {
+  parent()
+}

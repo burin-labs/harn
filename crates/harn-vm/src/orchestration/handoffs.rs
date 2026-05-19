@@ -4,8 +4,8 @@ use std::collections::{BTreeMap, BTreeSet};
 use serde::{Deserialize, Serialize};
 
 use super::{
-    current_mutation_session, new_id, now_rfc3339, ArtifactRecord, CapabilityPolicy, EffectRecord,
-    RunRecord,
+    current_mutation_session, effect_record_summary, effect_subset_violations, new_id, now_rfc3339,
+    ArtifactRecord, CapabilityPolicy, EffectRecord, RunRecord,
 };
 
 const HANDOFF_TYPE: &str = "handoff_artifact";
@@ -815,9 +815,135 @@ pub fn attach_spawn_handoff_effects(
     handoff.effects = crate::orchestration::compute_handoff_effects(entrypoint_source, ceiling);
 }
 
+/// Typed deny payload returned when a child handoff exceeds the parent's
+/// declared effect set. The dispatcher (E5.4) emits this as the body of
+/// an `EffectInheritanceViolation` event and refuses the spawn. The same
+/// `repair_id` is suggested by `harn check`'s static `HARN-CAP-301` path,
+/// so a user can dispatch one `harn fix --apply` strategy regardless of
+/// which path surfaced the failure.
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+pub struct EffectInheritanceViolation {
+    /// Stable name for the deny payload — matches the variant carried on
+    /// the deny event so downstream consumers can route by string.
+    #[serde(rename = "_type")]
+    pub type_name: String,
+    /// Handoff that requested the over-granted effects.
+    pub handoff_id: String,
+    /// Source persona that produced the child handoff.
+    pub source_persona: String,
+    /// Display label for the target child the handoff would have spawned.
+    pub target_label: String,
+    /// Effects the child requested that the parent does not cover.
+    pub violations: Vec<EffectRecord>,
+    /// Stable diagnostic code shared with the static analyzer.
+    pub diagnostic_code: String,
+    /// Stable repair id suggested for `harn fix --apply`.
+    pub repair_id: String,
+    /// Repair safety class (matches `RepairSafety::SurfaceChanging`).
+    pub repair_safety: String,
+    /// Human-readable summary used by transcripts and the friction log.
+    pub message: String,
+}
+
+const EFFECT_INHERITANCE_VIOLATION_TYPE: &str = "effect_inheritance_violation";
+const EFFECT_INHERITANCE_DIAGNOSTIC_CODE: &str = "HARN-CAP-301";
+const EFFECT_INHERITANCE_REPAIR_ID: &str = "policy/narrow-child-effects";
+const EFFECT_INHERITANCE_REPAIR_SAFETY: &str = "surface-changing";
+
+impl EffectInheritanceViolation {
+    /// Render the violation as a one-line dispatcher-deny message. Kept
+    /// stable so log scrapers + the `harn check` CLI can pattern-match.
+    pub fn message(&self) -> &str {
+        &self.message
+    }
+
+    /// Build a violation payload from a (handoff, violations) pair.
+    pub fn for_handoff(handoff: &HandoffArtifact, violations: Vec<EffectRecord>) -> Self {
+        let summaries: Vec<String> = violations.iter().map(effect_record_summary).collect();
+        let target_label = handoff.target_persona_or_human.display_name();
+        let message = format!(
+            "EffectInheritanceViolation: child handoff '{handoff_id}' to '{target}' \
+             requests effects outside the parent's declared set: {effects} \
+             [{code}, repair={repair} ({safety})]",
+            handoff_id = handoff.id,
+            target = target_label,
+            effects = summaries.join(", "),
+            code = EFFECT_INHERITANCE_DIAGNOSTIC_CODE,
+            repair = EFFECT_INHERITANCE_REPAIR_ID,
+            safety = EFFECT_INHERITANCE_REPAIR_SAFETY,
+        );
+        EffectInheritanceViolation {
+            type_name: EFFECT_INHERITANCE_VIOLATION_TYPE.to_string(),
+            handoff_id: handoff.id.clone(),
+            source_persona: handoff.source_persona.clone(),
+            target_label,
+            violations,
+            diagnostic_code: EFFECT_INHERITANCE_DIAGNOSTIC_CODE.to_string(),
+            repair_id: EFFECT_INHERITANCE_REPAIR_ID.to_string(),
+            repair_safety: EFFECT_INHERITANCE_REPAIR_SAFETY.to_string(),
+            message,
+        }
+    }
+}
+
+/// Runtime guard that mirrors the static `HARN-CAP-301` check. When a
+/// spawn-time handoff carries `effects` that are not covered by the
+/// parent's declared `effects`, return a typed violation that the
+/// dispatcher surfaces as an `EffectInheritanceViolation` deny event and
+/// refuses to spawn the child. When `parent_effects` is `None` no
+/// enforcement is performed — the parent has no statically derivable
+/// effect surface so over-granting is impossible to prove at this layer
+/// and the next stage of the pipeline (receipts in E5.5) takes over.
+pub fn enforce_spawn_handoff_effects(
+    handoff: &HandoffArtifact,
+    parent_effects: Option<&[EffectRecord]>,
+) -> Result<(), EffectInheritanceViolation> {
+    let violations = effect_subset_violations(parent_effects, &handoff.effects);
+    if violations.is_empty() {
+        return Ok(());
+    }
+    Err(EffectInheritanceViolation::for_handoff(handoff, violations))
+}
+
+/// Convenience wrapper: emit a structured deny log alongside the typed
+/// payload so transcripts and observability sinks pick it up without
+/// every caller re-emitting the same `log_warn_meta` call.
+pub fn report_effect_inheritance_violation(violation: &EffectInheritanceViolation) {
+    let mut metadata = BTreeMap::new();
+    metadata.insert(
+        "handoff_id".to_string(),
+        serde_json::Value::String(violation.handoff_id.clone()),
+    );
+    metadata.insert(
+        "source_persona".to_string(),
+        serde_json::Value::String(violation.source_persona.clone()),
+    );
+    metadata.insert(
+        "target_label".to_string(),
+        serde_json::Value::String(violation.target_label.clone()),
+    );
+    metadata.insert(
+        "diagnostic_code".to_string(),
+        serde_json::Value::String(violation.diagnostic_code.clone()),
+    );
+    metadata.insert(
+        "repair_id".to_string(),
+        serde_json::Value::String(violation.repair_id.clone()),
+    );
+    metadata.insert(
+        "repair_safety".to_string(),
+        serde_json::Value::String(violation.repair_safety.clone()),
+    );
+    metadata.insert(
+        "violations".to_string(),
+        serde_json::to_value(&violation.violations).unwrap_or(serde_json::Value::Null),
+    );
+    crate::events::log_warn_meta("policy.effect_inheritance", violation.message(), metadata);
+}
+
 #[cfg(test)]
 mod spawn_effect_tests {
-    use super::*;
+    use super::{enforce_spawn_handoff_effects, EffectInheritanceViolation, *};
     use crate::orchestration::{
         attach_spawn_handoff_effects, CapabilityPolicy, EffectKind, EffectRecord, EffectScope,
         HandoffTargetRecord,
@@ -924,5 +1050,65 @@ mod spawn_effect_tests {
         let mut handoff = spawn_handoff("planner");
         attach_spawn_handoff_effects(&mut handoff, "", None);
         assert!(handoff.effects.is_empty());
+    }
+
+    #[test]
+    fn enforce_returns_ok_when_no_parent_ceiling() {
+        let mut handoff = spawn_handoff("planner");
+        handoff
+            .effects
+            .push(EffectRecord::new(EffectKind::Net, EffectScope::Write));
+        assert!(enforce_spawn_handoff_effects(&handoff, None).is_ok());
+    }
+
+    #[test]
+    fn enforce_returns_ok_when_child_is_subset() {
+        let parent = vec![EffectRecord::new(EffectKind::Net, EffectScope::Write)];
+        let mut handoff = spawn_handoff("planner");
+        handoff.effects.push(
+            EffectRecord::new(EffectKind::Net, EffectScope::Write)
+                .with_resource("https://api.example/v1"),
+        );
+        assert!(enforce_spawn_handoff_effects(&handoff, Some(&parent)).is_ok());
+    }
+
+    #[test]
+    fn enforce_returns_violation_when_child_over_grants() {
+        let parent = vec![EffectRecord::new(EffectKind::Fs, EffectScope::Read)];
+        let mut handoff = spawn_handoff("planner");
+        handoff
+            .effects
+            .push(EffectRecord::new(EffectKind::Net, EffectScope::Write));
+        let violation = enforce_spawn_handoff_effects(&handoff, Some(&parent))
+            .expect_err("over-granted child should fail");
+        assert_eq!(violation.diagnostic_code, "HARN-CAP-301");
+        assert_eq!(violation.repair_id, "policy/narrow-child-effects");
+        assert_eq!(violation.repair_safety, "surface-changing");
+        assert_eq!(violation.violations.len(), 1);
+        assert!(matches!(violation.violations[0].kind, EffectKind::Net));
+        assert!(violation.message.contains("EffectInheritanceViolation"));
+        assert!(violation.message.contains("HARN-CAP-301"));
+    }
+
+    #[test]
+    fn enforce_violation_serde_round_trips() {
+        let parent = vec![EffectRecord::new(EffectKind::Stdio, EffectScope::Observe)];
+        let mut handoff = spawn_handoff("planner");
+        handoff
+            .effects
+            .push(EffectRecord::new(EffectKind::Net, EffectScope::Write));
+        let violation = enforce_spawn_handoff_effects(&handoff, Some(&parent))
+            .expect_err("over-granted child should fail");
+        let encoded = serde_json::to_string(&violation).expect("encode");
+        let decoded: EffectInheritanceViolation = serde_json::from_str(&encoded).expect("decode");
+        assert_eq!(decoded, violation);
+        assert_eq!(decoded.type_name, "effect_inheritance_violation");
+    }
+
+    #[test]
+    fn enforce_empty_child_effects_always_ok() {
+        let parent = vec![EffectRecord::new(EffectKind::Fs, EffectScope::Read)];
+        let handoff = spawn_handoff("planner");
+        assert!(enforce_spawn_handoff_effects(&handoff, Some(&parent)).is_ok());
     }
 }
