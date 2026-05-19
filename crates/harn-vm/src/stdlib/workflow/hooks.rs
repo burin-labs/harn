@@ -404,6 +404,7 @@ pub(super) async fn fire_session_hook_builtin(args: Vec<VmValue>) -> Result<VmVa
             crate::orchestration::HookControl::Allow => "allow".to_string(),
             crate::orchestration::HookControl::Block { .. } => "block".to_string(),
             crate::orchestration::HookControl::Decision { kind, .. } => format!("decision:{kind}"),
+            crate::orchestration::HookControl::Modify { .. } => "modify".to_string(),
         },
         payload: payload.clone(),
     });
@@ -422,6 +423,13 @@ pub(super) async fn fire_session_hook_builtin(args: Vec<VmValue>) -> Result<VmVa
             if let Some(reason) = reason {
                 out.insert("reason".to_string(), VmValue::String(Rc::from(reason)));
             }
+        }
+        crate::orchestration::HookControl::Modify { payload: modified } => {
+            out.insert("control".to_string(), VmValue::String(Rc::from("modify")));
+            out.insert(
+                "modify".to_string(),
+                crate::stdlib::json_to_vm_value(&modified),
+            );
         }
     }
     Ok(VmValue::Dict(Rc::new(out)))

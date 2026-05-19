@@ -1,0 +1,14 @@
+/**
+ * P-06 (harn#1859): PreFinish does NOT support Block. The pipeline
+ * finish lifecycle dispatcher rejects `{block: true}` returns from a
+ * PreFinish hook with a runtime error pointing the user at
+ * `OnFinish.block_until_settled` (the supported delay mechanism).
+ */
+pipeline default() {
+  clear_session_hooks()
+  register_session_hook(
+    "pre_finish",
+    { _event -> return {block: true, reason: "not allowed"} },
+  )
+  return 1
+}

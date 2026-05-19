@@ -88,26 +88,63 @@ impl Vm {
     /// channels, but the pipeline-finish boundary is the script's last
     /// chance to print before `vm.output()` is captured, so the closures
     /// run on `self` to keep their output visible.
+    ///
+    /// Honors the lifecycle control contract (harn#1859):
+    ///   * `PreFinish` rejects `Block` outright — surfaces a runtime
+    ///     error pointing the user at `OnFinish.block_until_settled`.
+    ///     `PostFinish` ignores any control return (advisory only).
+    ///   * `OnUnsettledDetected` honors `Block` to abort the finish
+    ///     lifecycle until the unsettled work clears.
+    ///   * Modify returns are recorded but not consumed at this boundary
+    ///     (the dispatcher already replays subsequent hooks with the
+    ///     post-modify payload via `run_lifecycle_hooks_with_control`).
     async fn fire_finish_lifecycle_event(
         &mut self,
         event: crate::orchestration::HookEvent,
         payload: &serde_json::Value,
     ) -> Result<(), VmError> {
+        use crate::orchestration::{HookControl, HookEvent};
         let invocations = crate::orchestration::matching_vm_lifecycle_hooks(event, payload);
         if invocations.is_empty() {
             return Ok(());
         }
-        let arg = crate::stdlib::json_to_vm_value(payload);
+        let mut current_payload = payload.clone();
         for invocation in invocations {
-            let raw = self
-                .call_closure_pub(&invocation.closure, &[arg.clone()])
-                .await?;
-            let (_action, effects) = crate::orchestration::collect_hook_effects_and_action(
+            let arg = crate::stdlib::json_to_vm_value(&current_payload);
+            let raw = self.call_closure_pub(&invocation.closure, &[arg]).await?;
+            let (action, effects) = crate::orchestration::collect_hook_effects_and_action(
                 event,
                 raw,
                 crate::value::VmValue::Nil,
             )?;
             crate::orchestration::inject_hook_effects_into_current_session(effects)?;
+            let control = crate::orchestration::parse_hook_control_for_finish(event, &action)?;
+            match control {
+                HookControl::Allow => {}
+                HookControl::Block { reason } => {
+                    if matches!(event, HookEvent::PreFinish) {
+                        return Err(VmError::Runtime(format!(
+                            "PreFinish hook returned block, which is not a valid control: {reason}. \
+                             To delay pipeline finish until unsettled work clears, use \
+                             OnFinish.block_until_settled (std/lifecycle) or return Modify/Allow \
+                             from PreFinish."
+                        )));
+                    }
+                    if matches!(event, HookEvent::PostFinish) {
+                        // Advisory only; ignore block returns from PostFinish.
+                        continue;
+                    }
+                    // OnUnsettledDetected: block aborts the finish lifecycle.
+                    return Err(VmError::Runtime(format!(
+                        "{} hook blocked pipeline finish: {reason}",
+                        event.as_str()
+                    )));
+                }
+                HookControl::Modify { payload: modified } => {
+                    current_payload = modified;
+                }
+                HookControl::Decision { .. } => {}
+            }
         }
         Ok(())
     }

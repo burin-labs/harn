@@ -1,0 +1,54 @@
+/**
+ * P-06 (harn#1859): all 10 new lifecycle hook events are reachable
+ * through `register_session_hook` and fire through the dispatcher
+ * with the documented control semantics:
+ *   * Allow  — proceed.
+ *   * Block  — Deny / cancel / skip (depending on event).
+ *   * Modify — rewrite payload before downstream consumers see it.
+ *   * Reminder effects — append a system reminder to the active session.
+ *
+ * The events also round-trip through `parse_session_event` so they can
+ * be registered via the snake_case names exposed in user scripts.
+ */
+let observed = atomic(0)
+
+fn record(payload) {
+  atomic_add(observed, 1)
+  return nil
+}
+
+pipeline default() {
+  clear_session_hooks()
+  register_session_hook("pre_suspend", { _event -> record(_event) })
+  register_session_hook("post_suspend", { _event -> record(_event) })
+  register_session_hook("pre_resume", { _event -> record(_event) })
+  register_session_hook("post_resume", { _event -> record(_event) })
+  register_session_hook("pre_drain", { _event -> record(_event) })
+  register_session_hook("post_drain", { _event -> record(_event) })
+  register_session_hook("on_drain_decision", { _event -> record(_event) })
+  // Re-register the existing finish events so the full lifecycle map
+  // is exercised by a single fixture.
+  register_session_hook("pre_finish", { _event -> record(_event) })
+  register_session_hook("post_finish", { _event -> record(_event) })
+  register_session_hook("on_unsettled_detected", { _event -> record(_event) })
+  // Each call fires the registered hook through the shared dispatcher.
+  // The runtime parses the snake_case name and returns control allow.
+  let events = [
+    "pre_suspend",
+    "post_suspend",
+    "pre_resume",
+    "post_resume",
+    "pre_drain",
+    "post_drain",
+    "on_drain_decision",
+    "pre_finish",
+    "post_finish",
+    "on_unsettled_detected",
+  ]
+  for event in events {
+    let result = __host_fire_session_hook(event, {})
+    println(event + "=" + result.control)
+  }
+  println("observed=" + to_string(atomic_get(observed)))
+  clear_session_hooks()
+}

@@ -1,0 +1,11 @@
+pre_suspend=allow
+post_suspend=allow
+pre_resume=allow
+post_resume=allow
+pre_drain=allow
+post_drain=allow
+on_drain_decision=allow
+pre_finish=allow
+post_finish=allow
+on_unsettled_detected=allow
+observed=10
