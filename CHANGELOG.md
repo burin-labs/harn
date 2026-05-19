@@ -10,6 +10,24 @@ condensed series summaries instead of full per-patch history.
 
 ### Added
 
+- **OAuth docs + provider cookbook (OA-08, #1909).** Adds
+  `docs/src/oauth.md` as the user-facing reference for the full OAuth
+  stack (`std/oauth/{providers,storage,client,device_flow,dynamic_registration,redaction}`),
+  with per-provider cookbook recipes for GitHub, Slack, Linear, Notion,
+  Google, Microsoft, Atlassian, Discord, GitLab (cloud + self-hosted),
+  and Bitbucket, plus cross-cutting recipes for headless CI agents
+  (device flow), org-shared bots (`harn_cloud_org` storage), and
+  custom enterprise OIDC providers. Each recipe includes a
+  provider-specific gotcha (Slack single-use refresh, Linear
+  comma-separated scopes + GraphQL userinfo, Notion page-picker scoping,
+  Google offline_access + prompt=consent, Microsoft Graph delegated
+  scopes vs OIDC claims, Atlassian rotating refresh + cloudid lookup,
+  Discord bot-vs-user token split, GitLab dual-rotation, Bitbucket
+  workspace + client-credentials guidance). Adds an `Authentication`
+  pointer + dedicated device-flow / dynamic-registration / redaction
+  subsections to `docs/llm/harn-quickref.md`, an OAuth subsection
+  (including the `HARN-OAU-*` diagnostic code appendix) to
+  `spec/HARN_SPEC.md`, and wires the new page into `docs/src/SUMMARY.md`.
 - **DAP subagent threads + suspend/resume integration (S-17, #1868).**
   `harn-dap` now bridges spawned subagents onto DAP's `Thread`/`stopped`/
   `continued` event model. Each `agent_loop` / `sub_agent_run` worker

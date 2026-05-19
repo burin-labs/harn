@@ -3059,6 +3059,28 @@ value ledger and crystallization receipts read these back.
 
 Full reference: [`docs/src/stdlib/cache.md`](https://harnlang.com/docs/stdlib/cache.html).
 
+## Authentication (OAuth)
+
+Harn ships a full OAuth stack: provider catalogue, five interchangeable
+storage backends, an authorization-code client with PKCE + transparent
+refresh, RFC 8628 device flow, RFC 7591 dynamic registration, and a
+token-redaction catalog. The five modules under `std/oauth/*` compose
+freely — pick a provider, pick a storage, then pick a grant.
+
+```harn,ignore
+import { providers } from "std/oauth/providers"             // github, slack, linear, notion,
+                                                            // google, microsoft, atlassian,
+                                                            // discord, gitlab, bitbucket,
+                                                            // github_enterprise, custom
+import { memory } from "std/oauth/storage"                  // memory, file, harn_cloud_*,
+                                                            // custom
+import { client, request, token } from "std/oauth/client"   // RFC 6749 + 7636 + 9700
+import { device_flow } from "std/oauth/device_flow"         // RFC 8628 (CI / headless)
+import { register_pattern } from "std/oauth/redaction"      // HARN-OAU-001 catalog
+```
+
+Full reference + per-provider cookbook: [`docs/src/oauth.md`](https://harnlang.com/docs/oauth.html).
+
 ## OAuth client (`std/oauth/client`)
 
 RFC 6749 authorization-code + RFC 7636 PKCE S256 + RFC 9700
@@ -3149,6 +3171,104 @@ mem.delete("github")
   `harn-cloud`) rather than a captured local.
 
 Full reference: [`docs/src/stdlib/oauth-storage.md`](https://harnlang.com/docs/stdlib/oauth-storage.html).
+
+## OAuth device flow (`std/oauth/device_flow`)
+
+RFC 8628 device authorization grant for headless contexts (CI runners,
+daemons, IDE side panes). Persists the TokenSet into the same storage
+the authorization-code client reads from, so subsequent
+`OAuth.client(...)` calls see the same token without re-running the
+dance.
+
+```harn,ignore
+import { device_flow } from "std/oauth/device_flow"
+import { providers } from "std/oauth/providers"
+import { file } from "std/oauth/storage"
+
+let token_set = device_flow(providers().github, {
+  client_id: env("GH_CLIENT_ID"),
+  scopes: ["read:user", "repo"],
+  storage: file("/var/lib/harn/ci.bin", env("HARN_OAUTH_KEY")),
+  on_user_code: { user_code, verification_uri ->
+    eprintln("Open " + verification_uri + " and enter " + user_code)
+  },
+})
+```
+
+- **Polling honors the server's `interval`.** `authorization_pending`
+  is treated as a soft retry; `slow_down` bumps the interval by 5s;
+  `expired_token` and `access_denied` raise.
+- **Cancellable.** Each inter-poll sleep is a cancellable point.
+- **Time-mock-friendly.** Polling routes through `sleep(ms)`, which
+  honors `mock_time(...)` / `advance_time(...)` for tests.
+- **Audit.** `oauth.device_flow.audit` `token_obtained` with presence
+  flags only — never the `device_code` / `user_code` / access tokens.
+- **Provider support.** GitHub, Google, Microsoft, GitLab — the rest
+  of the catalog has `device_code_url: nil` and will raise.
+
+## OAuth dynamic registration (`std/oauth/dynamic_registration`)
+
+The server side of OAuth. Build RFC 7591 client metadata + RFC 8414
+authorization-server metadata, validate incoming registrations, and
+issue `client_id` / `client_secret` pairs from an in-process store.
+Embedders (`harn serve`, harn-cloud, custom hosts) mount the well-known
+endpoints + the registration handler; this module does not host HTTP
+itself.
+
+```harn,ignore
+import { providers } from "std/oauth/providers"
+import {
+  authorization_server_metadata, client_metadata, dynamic_registration_store,
+  register_client, validate_metadata, well_known_paths, well_known_response,
+} from "std/oauth/dynamic_registration"
+
+let paths = well_known_paths()  // {client_metadata, authorization_server_metadata, registration}
+let oas = authorization_server_metadata(providers().github, {registration_endpoint: paths.registration})
+let envelope = well_known_response(oas)  // {status, content_type, headers, body}
+
+let store = dynamic_registration_store()
+let result = register_client(store, {redirect_uris: ["https://app.example/cb"]})
+// result.client_id, result.client_secret (returned ONCE), result.client_id_issued_at
+```
+
+- **Strict validation.** `redirect_uris` must be absolute `https://` or
+  loopback `http://` per RFC 8252 §7.3; grant / response types and
+  `token_endpoint_auth_method` are restricted to spec-blessed enums.
+  Each validation error is prefixed `HARN-OAU-005:` for pattern
+  matching.
+- **Secret returned once.** `register_client` includes `client_secret`;
+  `get_client(store, id)` does not. Audit events carry counts only —
+  never the secret.
+- **Validation surface.** `validate_metadata(metadata)` returns
+  `{ok: bool, errors: list<string>}` without registering.
+
+## OAuth redaction (`std/oauth/redaction`)
+
+Runtime ships a default catalog of high-confidence token patterns (JWT,
+GitHub PAT classic + fine-grained, Slack `xox*`, AWS `AKIA`, OpenAI
+`sk-`, Stripe `sk_live_`/`sk_test_`, GitLab `glpat-`, npm `npm_`,
+`Authorization: Bearer ...`). Persisted transcripts / receipts /
+OTel attrs / system reminders replace matches with
+`<redacted:<pattern>:<len>>`. The original token still flows to the
+underlying tool — redaction is display-only.
+
+```harn,ignore
+import { default_patterns, drain_audit, redact, register_pattern } from "std/oauth/redaction"
+
+register_pattern("acme_api_key", "\\bACME-[A-Z0-9]{12}\\b")
+let display = redact("Bearer ghp_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa")
+for entry in drain_audit() {
+  // entry.code == "HARN-OAU-001"
+  // entry.pattern, entry.match_count, entry.bytes_redacted
+}
+```
+
+- **Per-thread custom patterns** via `register_pattern(name, regex)`.
+  Anchor with `\b` to avoid chewing unrelated identifiers.
+- **`drain_audit()` is the authoritative compliance contract** — works
+  on every execution backend. Audit entries also fan out to the live
+  event sink and (when multi-threaded Tokio is available) to the
+  `audit.token_redaction` event-log topic.
 
 ## Gotchas (friction-log distilled)
 
