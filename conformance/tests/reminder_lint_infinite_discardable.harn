@@ -1,0 +1,3 @@
+pipeline main() {
+  transcript.inject_reminder(transcript(), {body: "heads up", preserve_on_compact: false})
+}

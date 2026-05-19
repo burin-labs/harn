@@ -246,6 +246,10 @@ diagnostic_codes! {
     ReminderInvalidShape, "HARN-RMD-002", Rmd, "reminder payload shape is invalid";
     ReminderUnsupportedUserBlockRoleHint, "HARN-RMD-003", Rmd, "user_block reminder role hint is not supported by the selected provider";
     ReminderInfiniteDiscardable, "HARN-RMD-004", Rmd, "discardable reminder has no TTL";
+    ReminderUnknownPropagate, "HARN-RMD-005", Rmd, "reminder propagate value is not recognized";
+    ReminderProviderMalformedSpec, "HARN-RMD-006", Rmd, "reminder provider returned a malformed reminder spec";
+    ReminderProviderBloat, "HARN-RMD-007", Rmd, "too many reminder providers are enabled";
+    ReminderUnsupportedHookEvent, "HARN-RMD-008", Rmd, "hook event does not support reminder effects";
     SuspendWorkerNotRunning, "HARN-SUS-001", Sus, "suspend_agent target worker is not running";
     ResumeConditionsInvalid, "HARN-SUS-002", Sus, "ResumeConditions validation failed";
     ResumeWorkerNotSuspended, "HARN-SUS-003", Sus, "resume_agent target worker is not suspended";
@@ -449,6 +453,21 @@ impl Code {
                 Code::ResumeWorkerNotSuspended,
                 Code::ConcurrentResumeConflict,
             ],
+            // Reminder lifecycle diagnostics share the same payload shape and
+            // propagation field, so nearby codes help route runtime vs lint
+            // failures to the right fix.
+            Code::ReminderUnknownOption => {
+                &[Code::ReminderInvalidShape, Code::ReminderUnknownPropagate]
+            }
+            Code::ReminderInvalidShape => {
+                &[Code::ReminderUnknownOption, Code::ReminderUnknownPropagate]
+            }
+            Code::ReminderUnknownPropagate => {
+                &[Code::ReminderUnknownOption, Code::ReminderInvalidShape]
+            }
+            Code::ReminderProviderMalformedSpec => &[Code::ReminderInvalidShape],
+            Code::ReminderProviderBloat => &[Code::ReminderInfiniteDiscardable],
+            Code::ReminderUnsupportedHookEvent => &[Code::ReminderProviderMalformedSpec],
             // Ownership.
             Code::ImmutableAssignment => &[Code::MutableNeverReassigned],
             Code::MutableNeverReassigned => &[Code::LintMutableNeverReassigned],

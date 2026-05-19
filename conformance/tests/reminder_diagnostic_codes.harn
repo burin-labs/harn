@@ -1,0 +1,31 @@
+import { agent_reminder_providers_fire } from "std/agent/state"
+
+fn has_code(result, code) {
+  return is_err(result) && contains(to_string(unwrap_err(result)), code)
+}
+
+pipeline main() {
+  let invalid_type = try {
+    transcript.inject_reminder(transcript(), {body: 1})
+  }
+  println(has_code(invalid_type, "HARN-RMD-001"))
+  let bad_propagate = try {
+    transcript.inject_reminder(transcript(), {body: "remember", propagate: "workspace"})
+  }
+  println(has_code(bad_propagate, "HARN-RMD-005"))
+  clear_reminder_providers()
+  register_reminder_provider(
+    {
+      id: "bad_spec",
+      subscribes_to: "session_idle",
+      evaluate: { _ctx -> return {reminder: {tags: ["bad"]}} },
+    },
+  )
+  let session = agent_session_open("reminder-diagnostic-codes")
+  agent_session_reset(session)
+  let bad_provider = try {
+    agent_reminder_providers_fire(session, "session_idle", {session: {id: session}}, {})
+  }
+  println(has_code(bad_provider, "HARN-RMD-006"))
+  clear_reminder_providers()
+}

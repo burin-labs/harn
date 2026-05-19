@@ -44,7 +44,7 @@ Repairs are tagged with a six-level safety class so `harn fix --apply --safety <
 | [`STD`](#std--stdlib-usage) | Stdlib usage | 4 |
 | [`PRM`](#prm--prompt-templates) | Prompt templates | 7 |
 | [`MOD`](#mod--modules-and-exports) | Modules and exports | 6 |
-| [`RMD`](#rmd--reminder-lifecycle) | Reminder lifecycle | 4 |
+| [`RMD`](#rmd--reminder-lifecycle) | Reminder lifecycle | 8 |
 | [`SUS`](#sus--suspend--resume-lifecycle) | Suspend / resume lifecycle | 10 |
 | [`LNT`](#lnt--lint-rules) | Lint rules | 53 |
 | [`FMT`](#fmt--formatter) | Formatter | 3 |
@@ -189,6 +189,10 @@ Repairs are tagged with a six-level safety class so `harn fix --apply --safety <
 | [`HARN-RMD-002`](#harn-rmd-002) | reminder payload shape is invalid | — | — |
 | [`HARN-RMD-003`](#harn-rmd-003) | user_block reminder role hint is not supported by the selected provider | — | — |
 | [`HARN-RMD-004`](#harn-rmd-004) | discardable reminder has no TTL | — | — |
+| [`HARN-RMD-005`](#harn-rmd-005) | reminder propagate value is not recognized | — | — |
+| [`HARN-RMD-006`](#harn-rmd-006) | reminder provider returned a malformed reminder spec | — | — |
+| [`HARN-RMD-007`](#harn-rmd-007) | too many reminder providers are enabled | — | — |
+| [`HARN-RMD-008`](#harn-rmd-008) | hook event does not support reminder effects | — | — |
 
 ## SUS — Suspend / resume lifecycle
 
@@ -2891,6 +2895,8 @@ dispatch on it directly.
 
 reminder lifecycle option key is not recognized
 
+- **See also:** [`HARN-RMD-002`](#harn-rmd-002), [`HARN-RMD-005`](#harn-rmd-005)
+
 **Variant:** `Code::ReminderUnknownOption` (reminder lifecycle option key is not recognized)
 
 Reminder lifecycle option tables reject unknown keys so reminder shape stays stable across
@@ -2906,6 +2912,8 @@ For `transcript.clear_reminders`, use at least one selector from `id`, `tag`, or
 **Category:** `RMD` (Reminder lifecycle) &nbsp;·&nbsp; **API stability:** `stable`
 
 reminder payload shape is invalid
+
+- **See also:** [`HARN-RMD-001`](#harn-rmd-001), [`HARN-RMD-005`](#harn-rmd-005)
 
 **Variant:** `Code::ReminderInvalidShape`
 
@@ -2947,6 +2955,108 @@ turns, but it is allowed to disappear at the next transcript compaction.
 
 Set a finite `ttl_turns` for short-lived nudges, or set
 `preserve_on_compact: true` when the reminder must survive compaction.
+
+### `HARN-RMD-005`
+
+**Category:** `RMD` (Reminder lifecycle) &nbsp;·&nbsp; **API stability:** `stable`
+
+reminder propagate value is not recognized
+
+- **See also:** [`HARN-RMD-001`](#harn-rmd-001), [`HARN-RMD-002`](#harn-rmd-002)
+
+**Variant:** `Code::ReminderUnknownPropagate`
+
+A reminder specified an unsupported `propagate` value. Reminder propagation must
+be one of `all`, `session`, or `none`.
+
+Use `all` for reminders that should follow child agents, `session` for the
+current session only, and `none` for reminders that should never propagate.
+
+Example fix:
+
+```harn
+transcript.inject_reminder(transcript(), {
+  body: "Check the task ledger before continuing.",
+  propagate: "session",
+})
+```
+
+### `HARN-RMD-006`
+
+**Category:** `RMD` (Reminder lifecycle) &nbsp;·&nbsp; **API stability:** `stable`
+
+reminder provider returned a malformed reminder spec
+
+- **See also:** [`HARN-RMD-002`](#harn-rmd-002)
+
+**Variant:** `Code::ReminderProviderMalformedSpec`
+
+A reminder provider closure returned a value that could not be parsed as a
+`ReminderSpec`. Provider closures may return `nil`, a reminder spec, an effect
+such as `{reminder: {...}}`, or a list of those effects.
+
+Return a dict with a non-empty `body` and only supported reminder fields.
+
+Example fix:
+
+```harn
+register_reminder_provider({
+  id: "custom",
+  subscribes_to: ["session_idle"],
+  evaluate: { _ctx ->
+    return {reminder: {body: "Re-check current session state.", ttl_turns: 1}}
+  },
+})
+```
+
+### `HARN-RMD-007`
+
+**Category:** `RMD` (Reminder lifecycle) &nbsp;·&nbsp; **API stability:** `stable`
+
+too many reminder providers are enabled
+
+- **See also:** [`HARN-RMD-004`](#harn-rmd-004)
+
+**Variant:** `Code::ReminderProviderBloat`
+
+An `agent_loop` enables more than eight distinct reminder providers. Many
+providers can inject overlapping ambient context and increase prompt size.
+
+Disable providers that are not useful for the loop, or split the loop into
+smaller stages with different reminder settings.
+
+Example fix:
+
+```harn
+agent_loop(task, nil, {
+  reminders: {providers: ["token_pressure", "idle_nudge"]},
+})
+```
+
+### `HARN-RMD-008`
+
+**Category:** `RMD` (Reminder lifecycle) &nbsp;·&nbsp; **API stability:** `stable`
+
+hook event does not support reminder effects
+
+- **See also:** [`HARN-RMD-006`](#harn-rmd-006)
+
+**Variant:** `Code::ReminderUnsupportedHookEvent`
+
+A hook handler returned a reminder effect from a lifecycle event that cannot
+inject reminders. Worker lifecycle events are observational and must not mutate
+the active transcript with reminder effects.
+
+Move the reminder to a session, tool, step, or persona hook that runs at a
+turn-boundary mutation point.
+
+Example fix:
+
+```harn
+register_session_hook("post_turn", { _event ->
+  return {reminder: {body: "Review worker progress before continuing."}}
+})
+```
 
 ### `HARN-SUS-001`
 
