@@ -52,6 +52,7 @@
 - [Pool stdlib](./stdlib/lifecycle-pool.md)
 - [Pipeline lifecycle presets](./stdlib/lifecycle.md)
 - [GraphQL stdlib](./stdlib/graphql.md)
+- [OAuth storage stdlib](./stdlib/oauth-storage.md)
 - [Prompt library stdlib](./stdlib/prompt-library.md)
 - [Human in the loop](./hitl.md)
 - [Trust graph](./trust-graph.md)

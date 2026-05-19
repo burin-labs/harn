@@ -2943,6 +2943,40 @@ value ledger and crystallization receipts read these back.
 
 Full reference: [`docs/src/stdlib/cache.md`](https://harnlang.com/docs/stdlib/cache.html).
 
+## OAuth storage (`std/oauth/storage`)
+
+Token store for the OAuth client with five interchangeable backends.
+Every handle is a dict with three closures (`get`, `set`, `delete`) so
+the client doesn't know the difference between in-process memory, an
+encrypted file, harn-cloud, or a vault.
+
+```harn
+import { memory, file, harn_cloud_session, harn_cloud_org, custom } from "std/oauth/storage"
+
+let mem = memory()                                       // ephemeral
+let disk = file("/var/lib/harn/oauth.bin", env("KEY"))   // AES-256-GCM
+let cloud = harn_cloud_session()                          // per-session
+let shared = harn_cloud_org()                             // org-scoped
+let vault = custom({get: my_get, set: my_set, delete: my_delete})
+
+mem.set("github", {access_token: "abc"}, 3600)
+let token = mem.get("github")                            // -> TokenSet | nil
+mem.delete("github")
+```
+
+- `memory()` lives in a thread-local map and never escapes the VM.
+- `file(path, key)` writes a single AES-256-GCM envelope; the 32-byte
+  AEAD key is derived via HKDF-SHA256 from `key`. Pass high-entropy
+  bytes, not a user passphrase.
+- `harn_cloud_*()` route through the `oauth_storage` host capability
+  (`cloud_get / cloud_set / cloud_delete`); harn-cloud enforces RLS.
+- `custom({get, set, delete, id?})` validates that the three handlers
+  are callables and then dispatches to them. Closure capture is
+  by-value, so back the closures with a real store (HTTP, MCP,
+  `harn-cloud`) rather than a captured local.
+
+Full reference: [`docs/src/stdlib/oauth-storage.md`](https://harnlang.com/docs/stdlib/oauth-storage.html).
+
 ## Gotchas (friction-log distilled)
 
 - Heredoc `<<TAG ... TAG` is **not** a source-level string. Use

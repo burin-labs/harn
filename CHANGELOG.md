@@ -6,6 +6,28 @@ Pre-0.6 highlights live in [CHANGELOG-pre-0.6.md](CHANGELOG-pre-0.6.md).
 Harn had no external users before 0.6.0, so that archive intentionally keeps
 condensed series summaries instead of full per-patch history.
 
+## Unreleased
+
+### Added
+
+- **`std/oauth/storage` token storage backends (#1904).** Five
+  interchangeable backends for the OAuth client (#1885 OA-03):
+  `memory()` (per-VM, ephemeral), `file(path, encryption_key)` (single
+  AES-256-GCM envelope with HKDF-SHA256 key derivation, atomic
+  temp-file write + rename), `harn_cloud_session()` /
+  `harn_cloud_org()` (route through the new `oauth_storage`
+  `cloud_get / cloud_set / cloud_delete` host capability so the
+  embedder enforces RLS), and `custom({get, set, delete, id?})` for
+  vault / KMS integrations. Each backend exposes the same
+  `store.get / store.set / store.delete` closures on the handle dict,
+  letting the upcoming OAuth client treat storage as a single
+  protocol. File-handle encryption keys live in a thread-local map
+  off the user-visible handle so a stray `to_string(handle)` cannot
+  exfiltrate the secret. See
+  [`docs/src/stdlib/oauth-storage.md`](docs/src/stdlib/oauth-storage.md)
+  for the full reference and conformance coverage at
+  `conformance/tests/stdlib/oauth_storage.harn`.
+
 ## v0.8.26
 
 ### Added
