@@ -2420,10 +2420,11 @@ impl Dispatcher {
                 "matched_at": event_json.get("received_at").cloned().unwrap_or(serde_json::Value::Null),
             })),
         );
-        if let Some(batch_value) = event_json
-            .get("provider_payload")
-            .and_then(|p| p.get("batch"))
-        {
+        if let Some(batch_value) = event_json.get("batch").or_else(|| {
+            event_json
+                .get("provider_payload")
+                .and_then(|payload| payload.get("batch"))
+        }) {
             bindings.insert(
                 "batch".to_string(),
                 crate::schema::json_to_vm_value(batch_value),
