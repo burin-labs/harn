@@ -10,6 +10,24 @@ condensed series summaries instead of full per-patch history.
 
 ### Added
 
+- **Channel scope resolver completes the four-tier hierarchy (#1874).**
+  Formalises the `session < pipeline < tenant < org` scope chain for
+  `emit_channel(...)` and `channel_events(...)`, building on the producer
+  (#1871) and trigger-source consumer (#1872) halves. The resolver is now
+  fully deterministic: bare names default to tenant scope; explicit prefixes
+  are honoured; `pipeline:` outside a pipeline context fails with
+  `HARN-CHN-001`; cross-tenant emits without a grant and any `org:` use fail
+  with `HARN-CHN-002`; malformed scope strings fail with `HARN-CHN-003`; and
+  a new `HARN-CHN-004` fires when `options.session_id` or
+  `options.pipeline_id` explicitly disagrees with the active runtime
+  context (previously, an explicit option would silently override the
+  context — a quiet path to cross-session leakage). Cross-scope isolation is
+  enforced by the topic shape (`channels.<scope>.<scope-id>.<name>`), so
+  readers against a different `tenant_id`, `session_id`, or `pipeline_id`
+  see an empty view rather than a leaked event. Conformance coverage:
+  `conformance/tests/stdlib/channel_scope_{bare_defaults_to_tenant,pipeline_outside_pipeline_errors,cross_tenant_isolation,cross_session_isolation}.harn`
+  plus the existing `emit_channel_scope_resolution.harn`. Part of epic
+  #1870.
 - **Pool state durability (#1890).** `Pool.create({scope: ...})` now
   routes to three durability backends following the channel scope
   contract: `session` (default, in-memory only — lost on session close);
