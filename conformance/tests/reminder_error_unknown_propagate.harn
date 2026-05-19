@@ -1,0 +1,3 @@
+pipeline main() {
+  transcript.inject_reminder(transcript(), {body: "bad", propagate: "workspace"})
+}

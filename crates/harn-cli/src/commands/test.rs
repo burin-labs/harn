@@ -797,6 +797,15 @@ impl ConformanceCaseEvaluation {
         }
     }
 
+    fn pass_with_diagnostic_codes(diagnostic_codes: Vec<String>, duration_ms: u64) -> Self {
+        Self {
+            passed: true,
+            message: None,
+            diagnostic_codes,
+            duration_ms,
+        }
+    }
+
     fn fail(message: impl Into<String>, duration_ms: u64) -> Self {
         let message = message.into();
         Self {
@@ -806,6 +815,38 @@ impl ConformanceCaseEvaluation {
             duration_ms,
         }
     }
+}
+
+fn lint_severity_label(severity: harn_lint::LintSeverity) -> &'static str {
+    match severity {
+        harn_lint::LintSeverity::Info => "info",
+        harn_lint::LintSeverity::Warning => "warning",
+        harn_lint::LintSeverity::Error => "error",
+    }
+}
+
+fn format_conformance_lint_diagnostics(diagnostics: &[harn_lint::LintDiagnostic]) -> String {
+    diagnostics
+        .iter()
+        .map(|diag| {
+            format!(
+                "{} {} lint[{}]: {}",
+                diag.code,
+                lint_severity_label(diag.severity),
+                diag.rule,
+                diag.message
+            )
+        })
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
+fn lint_output_matches(actual: &str, expected_spec: &str) -> bool {
+    expected_spec
+        .lines()
+        .map(str::trim)
+        .filter(|line| !line.is_empty())
+        .all(|line| actual.contains(line))
 }
 
 fn extract_diagnostic_codes(message: &str) -> Vec<String> {
@@ -899,6 +940,7 @@ fn conformance_snapshot_key(suite_root: &Path, selected_files: &[(PathBuf, Strin
             &harn_file.with_extension("expected"),
         );
         hash_file_if_present(&mut hasher, suite_root, &harn_file.with_extension("error"));
+        hash_file_if_present(&mut hasher, suite_root, &harn_file.with_extension("lint"));
         hash_file_if_present(
             &mut hasher,
             suite_root,
@@ -946,6 +988,7 @@ async fn evaluate_conformance_case(
     harn_file: &Path,
     expected_file: &Path,
     error_file: &Path,
+    lint_file: &Path,
     rel_path: &str,
     timeout_ms: u64,
     options: &ConformanceRunOptions<'_>,
@@ -1119,7 +1162,57 @@ async fn evaluate_conformance_case(
         };
     }
 
-    ConformanceCaseEvaluation::fail(format!("{rel_path}: missing .expected or .error file"), 0)
+    if lint_file.exists() {
+        let source = match fs::read_to_string(harn_file) {
+            Ok(s) => s,
+            Err(e) => {
+                return ConformanceCaseEvaluation::fail(
+                    format!("{rel_path}: IO error reading source: {e}"),
+                    0,
+                );
+            }
+        };
+        let expected_lint = match fs::read_to_string(lint_file) {
+            Ok(s) => s.trim_end().to_string(),
+            Err(e) => {
+                return ConformanceCaseEvaluation::fail(
+                    format!("{rel_path}: IO error reading expected lint: {e}"),
+                    0,
+                );
+            }
+        };
+        let program = match harn_parser::parse_source(&source) {
+            Ok(program) => program,
+            Err(error) => {
+                return ConformanceCaseEvaluation::fail(
+                    format!("{rel_path}: parse error while linting: {error}"),
+                    0,
+                );
+            }
+        };
+        let diagnostics = harn_lint::lint_with_source(&program, &source);
+        let actual = format_conformance_lint_diagnostics(&diagnostics);
+        return if lint_output_matches(&actual, &expected_lint) {
+            ConformanceCaseEvaluation::pass_with_diagnostic_codes(
+                extract_diagnostic_codes(&actual),
+                0,
+            )
+        } else {
+            ConformanceCaseEvaluation::fail(
+                format!(
+                    "{rel_path}:\n  expected lint containing:\n    {}\n  actual lint:\n    {}",
+                    expected_lint.lines().collect::<Vec<_>>().join("\n    "),
+                    actual.lines().collect::<Vec<_>>().join("\n    "),
+                ),
+                0,
+            )
+        };
+    }
+
+    ConformanceCaseEvaluation::fail(
+        format!("{rel_path}: missing .expected, .error, or .lint file"),
+        0,
+    )
 }
 
 pub(crate) async fn run_conformance_tests(
@@ -1208,6 +1301,7 @@ pub(crate) async fn run_conformance_tests(
     for (harn_file, rel_path) in &selected_harn_files {
         let expected_file = harn_file.with_extension("expected");
         let error_file = harn_file.with_extension("error");
+        let lint_file = harn_file.with_extension("lint");
 
         // Honor `// @xfail: <reason>` markers in the first 50 lines of a
         // conformance test. Text mode preserves the historical skip behavior.
@@ -1223,7 +1317,7 @@ pub(crate) async fn run_conformance_tests(
             }
         }
 
-        if !expected_file.exists() && !error_file.exists() {
+        if !expected_file.exists() && !error_file.exists() && !lint_file.exists() {
             continue;
         }
 
@@ -1231,6 +1325,7 @@ pub(crate) async fn run_conformance_tests(
             harn_file,
             &expected_file,
             &error_file,
+            &lint_file,
             rel_path,
             timeout_ms,
             &options,
@@ -2080,6 +2175,7 @@ mod tests {
             .join("conformance/tests/harness_sidecar_error.harn");
         let expected_file = harn_file.with_extension("expected");
         let error_file = harn_file.with_extension("error");
+        let lint_file = harn_file.with_extension("lint");
         let options = ConformanceRunOptions {
             verbose: false,
             timing: false,
@@ -2092,6 +2188,7 @@ mod tests {
             &harn_file,
             &expected_file,
             &error_file,
+            &lint_file,
             "tests/harness_sidecar_error.harn",
             2_000,
             &options,

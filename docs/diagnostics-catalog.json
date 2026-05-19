@@ -49,7 +49,7 @@
     {
       "id": "RMD",
       "title": "Reminder lifecycle",
-      "count": 4
+      "count": 8
     },
     {
       "id": "SUS",
@@ -1144,7 +1144,10 @@
       "category": "RMD",
       "summary": "reminder lifecycle option key is not recognized",
       "repairs": [],
-      "related": [],
+      "related": [
+        "HARN-RMD-002",
+        "HARN-RMD-005"
+      ],
       "explanationPresent": true,
       "apiStability": "stable"
     },
@@ -1153,7 +1156,10 @@
       "category": "RMD",
       "summary": "reminder payload shape is invalid",
       "repairs": [],
-      "related": [],
+      "related": [
+        "HARN-RMD-001",
+        "HARN-RMD-005"
+      ],
       "explanationPresent": true,
       "apiStability": "stable"
     },
@@ -1172,6 +1178,51 @@
       "summary": "discardable reminder has no TTL",
       "repairs": [],
       "related": [],
+      "explanationPresent": true,
+      "apiStability": "stable"
+    },
+    {
+      "code": "HARN-RMD-005",
+      "category": "RMD",
+      "summary": "reminder propagate value is not recognized",
+      "repairs": [],
+      "related": [
+        "HARN-RMD-001",
+        "HARN-RMD-002"
+      ],
+      "explanationPresent": true,
+      "apiStability": "stable"
+    },
+    {
+      "code": "HARN-RMD-006",
+      "category": "RMD",
+      "summary": "reminder provider returned a malformed reminder spec",
+      "repairs": [],
+      "related": [
+        "HARN-RMD-002"
+      ],
+      "explanationPresent": true,
+      "apiStability": "stable"
+    },
+    {
+      "code": "HARN-RMD-007",
+      "category": "RMD",
+      "summary": "too many reminder providers are enabled",
+      "repairs": [],
+      "related": [
+        "HARN-RMD-004"
+      ],
+      "explanationPresent": true,
+      "apiStability": "stable"
+    },
+    {
+      "code": "HARN-RMD-008",
+      "category": "RMD",
+      "summary": "hook event does not support reminder effects",
+      "repairs": [],
+      "related": [
+        "HARN-RMD-006"
+      ],
       "explanationPresent": true,
       "apiStability": "stable"
     },

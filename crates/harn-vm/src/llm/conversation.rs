@@ -736,11 +736,16 @@ fn require_reminder_options<'a>(
 ) -> Result<&'a BTreeMap<String, VmValue>, VmError> {
     match args.get(index) {
         Some(VmValue::Dict(dict)) => Ok(dict),
-        Some(other) => Err(reminder_error(
+        Some(other) => Err(reminder_code_error(
             context,
+            Code::ReminderUnknownOption,
             format!("options must be a dict, got {}", other.type_name()),
         )),
-        None => Err(reminder_error(context, "options are required")),
+        None => Err(reminder_code_error(
+            context,
+            Code::ReminderUnknownOption,
+            "options are required",
+        )),
     }
 }
 
@@ -757,13 +762,10 @@ fn ensure_known_reminder_keys(
     if unknown.is_empty() {
         Ok(())
     } else {
-        Err(reminder_error(
+        Err(reminder_code_error(
             context,
-            format!(
-                "{}: unknown option(s): {}",
-                Code::ReminderUnknownOption.as_str(),
-                unknown.join(", ")
-            ),
+            Code::ReminderUnknownOption,
+            format!("unknown option(s): {}", unknown.join(", ")),
         ))
     }
 }
@@ -831,8 +833,9 @@ fn parse_clear_reminder_selector(
         dedupe_key: optional_reminder_string(options, "dedupe_key", context)?,
     };
     if selector.id.is_none() && selector.tag.is_none() && selector.dedupe_key.is_none() {
-        return Err(reminder_error(
+        return Err(reminder_code_error(
             context,
+            Code::ReminderUnknownOption,
             "at least one of id, tag, or dedupe_key is required",
         ));
     }
@@ -846,12 +849,14 @@ fn required_reminder_string(
 ) -> Result<String, VmError> {
     match options.get(key) {
         Some(VmValue::String(value)) if !value.trim().is_empty() => Ok(value.to_string()),
-        Some(VmValue::String(_)) | None | Some(VmValue::Nil) => Err(reminder_error(
+        Some(VmValue::String(_)) | None | Some(VmValue::Nil) => Err(reminder_code_error(
             context,
+            Code::ReminderUnknownOption,
             format!("`{key}` must be a non-empty string"),
         )),
-        Some(other) => Err(reminder_error(
+        Some(other) => Err(reminder_code_error(
             context,
+            Code::ReminderUnknownOption,
             format!("`{key}` must be a string, got {}", other.type_name()),
         )),
     }
@@ -872,8 +877,9 @@ fn optional_reminder_string(
                 Ok(Some(trimmed.to_string()))
             }
         }
-        Some(other) => Err(reminder_error(
+        Some(other) => Err(reminder_code_error(
             context,
+            Code::ReminderUnknownOption,
             format!("`{key}` must be a string or nil, got {}", other.type_name()),
         )),
     }
@@ -889,15 +895,17 @@ fn reminder_tags(
             let mut tags = Vec::new();
             for value in values.iter() {
                 let VmValue::String(tag) = value else {
-                    return Err(reminder_error(
+                    return Err(reminder_code_error(
                         context,
+                        Code::ReminderUnknownOption,
                         format!("`tags` entries must be strings, got {}", value.type_name()),
                     ));
                 };
                 let trimmed = tag.trim();
                 if trimmed.is_empty() {
-                    return Err(reminder_error(
+                    return Err(reminder_code_error(
                         context,
+                        Code::ReminderUnknownOption,
                         "`tags` entries must be non-empty strings",
                     ));
                 }
@@ -907,8 +915,9 @@ fn reminder_tags(
             }
             Ok(tags)
         }
-        Some(other) => Err(reminder_error(
+        Some(other) => Err(reminder_code_error(
             context,
+            Code::ReminderUnknownOption,
             format!("`tags` must be a list or nil, got {}", other.type_name()),
         )),
     }
@@ -922,8 +931,9 @@ fn optional_reminder_bool(
     match options.get(key) {
         None | Some(VmValue::Nil) => Ok(None),
         Some(VmValue::Bool(value)) => Ok(Some(*value)),
-        Some(other) => Err(reminder_error(
+        Some(other) => Err(reminder_code_error(
             context,
+            Code::ReminderUnknownOption,
             format!("`{key}` must be a bool or nil, got {}", other.type_name()),
         )),
     }
@@ -936,9 +946,14 @@ fn optional_reminder_ttl(
     match options.get("ttl_turns") {
         None | Some(VmValue::Nil) => Ok(None),
         Some(VmValue::Int(value)) if *value > 0 => Ok(Some(*value)),
-        Some(VmValue::Int(_)) => Err(reminder_error(context, "`ttl_turns` must be > 0")),
-        Some(other) => Err(reminder_error(
+        Some(VmValue::Int(_)) => Err(reminder_code_error(
             context,
+            Code::ReminderUnknownOption,
+            "`ttl_turns` must be > 0",
+        )),
+        Some(other) => Err(reminder_code_error(
+            context,
+            Code::ReminderUnknownOption,
             format!(
                 "`ttl_turns` must be an int or nil, got {}",
                 other.type_name()
@@ -956,8 +971,9 @@ fn optional_reminder_propagate(
             "all" => Ok(ReminderPropagate::All),
             "session" => Ok(ReminderPropagate::Session),
             "none" => Ok(ReminderPropagate::None),
-            _ => Err(reminder_error(
+            _ => Err(reminder_code_error(
                 context,
+                Code::ReminderUnknownPropagate,
                 "`propagate` must be one of all, session, or none",
             )),
         })
@@ -974,8 +990,9 @@ fn optional_reminder_role_hint(
             "developer" => Ok(ReminderRoleHint::Developer),
             "user_block" => Ok(ReminderRoleHint::UserBlock),
             "ephemeral_cache" => Ok(ReminderRoleHint::EphemeralCache),
-            _ => Err(reminder_error(
+            _ => Err(reminder_code_error(
                 context,
+                Code::ReminderUnknownOption,
                 "`role_hint` must be one of system, developer, user_block, or ephemeral_cache",
             )),
         })
@@ -1003,6 +1020,10 @@ fn reminder_error(context: &str, message: impl Into<String>) -> VmError {
         "{context}: {}",
         message.into()
     ))))
+}
+
+fn reminder_code_error(context: &str, code: Code, message: impl Into<String>) -> VmError {
+    reminder_error(context, format!("{}: {}", code.as_str(), message.into()))
 }
 
 #[cfg(test)]
@@ -1146,7 +1167,43 @@ mod tests {
         .expect_err("unknown key should fail");
         match err {
             VmError::Thrown(VmValue::String(message)) => {
+                assert!(message.contains(Code::ReminderUnknownOption.as_str()));
                 assert!(message.contains("typo_key"), "{message}");
+            }
+            other => panic!("expected thrown reminder error, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn invalid_reminder_option_type_reports_code() {
+        let base = new_transcript_with(None, Vec::new(), None, None);
+        let err =
+            transcript_inject_reminder_builtin(&[base, dict(vec![("body", VmValue::Int(1))])])
+                .expect_err("invalid body type should fail");
+        match err {
+            VmError::Thrown(VmValue::String(message)) => {
+                assert!(message.contains(Code::ReminderUnknownOption.as_str()));
+                assert!(message.contains("body"), "{message}");
+            }
+            other => panic!("expected thrown reminder error, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn unknown_reminder_propagate_reports_specific_code() {
+        let base = new_transcript_with(None, Vec::new(), None, None);
+        let err = transcript_inject_reminder_builtin(&[
+            base,
+            dict(vec![
+                ("body", vm_string("hello")),
+                ("propagate", vm_string("workspace")),
+            ]),
+        ])
+        .expect_err("unknown propagate should fail");
+        match err {
+            VmError::Thrown(VmValue::String(message)) => {
+                assert!(message.contains(Code::ReminderUnknownPropagate.as_str()));
+                assert!(message.contains("propagate"), "{message}");
             }
             other => panic!("expected thrown reminder error, got {other:?}"),
         }

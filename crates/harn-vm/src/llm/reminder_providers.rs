@@ -6,6 +6,8 @@ use std::rc::Rc;
 
 use serde_json::Value as JsonValue;
 
+use harn_parser::diagnostic_codes::Code;
+
 use crate::llm::helpers::{ReminderPropagate, ReminderRoleHint, ReminderSource, SystemReminder};
 use crate::orchestration::{HookEffect, HookEvent, ReminderSpec};
 use crate::value::{VmClosure, VmError, VmValue};
@@ -212,6 +214,16 @@ pub fn parse_provider_event(name: &str) -> Result<HookEvent, String> {
         "OnBudgetThreshold" | "on_budget_threshold" => Ok(HookEvent::OnBudgetThreshold),
         "SessionIdle" | "session_idle" => Ok(HookEvent::SessionIdle),
         "PostCompact" | "post_compact" => Ok(HookEvent::PostCompact),
+        "WorkerSpawned" | "worker_spawned" => Ok(HookEvent::WorkerSpawned),
+        "WorkerProgressed" | "worker_progressed" => Ok(HookEvent::WorkerProgressed),
+        "WorkerWaitingForInput" | "worker_waiting_for_input" => {
+            Ok(HookEvent::WorkerWaitingForInput)
+        }
+        "WorkerSuspended" | "worker_suspended" => Ok(HookEvent::WorkerSuspended),
+        "WorkerResumed" | "worker_resumed" => Ok(HookEvent::WorkerResumed),
+        "WorkerCompleted" | "worker_completed" => Ok(HookEvent::WorkerCompleted),
+        "WorkerFailed" | "worker_failed" => Ok(HookEvent::WorkerFailed),
+        "WorkerCancelled" | "worker_cancelled" => Ok(HookEvent::WorkerCancelled),
         other => HookEvent::parse_session_event(other)
             .map_err(|_| format!("unknown reminder provider event `{other}`")),
     }
@@ -385,7 +397,18 @@ async fn evaluate_vm_provider(
         "config": provider_config_json(ctx, &provider.id).cloned().unwrap_or(JsonValue::Null),
     }));
     let raw = vm.call_closure_pub(&provider.evaluate, &[arg]).await?;
-    let effects = crate::orchestration::parse_hook_effects(ctx.event, &raw)?;
+    let effects = crate::orchestration::parse_hook_effects(ctx.event, &raw).map_err(|error| {
+        let message = error.to_string();
+        if message.contains("HARN-RMD-") {
+            error
+        } else {
+            VmError::Runtime(format!(
+                "{}: provider `{}` returned malformed ReminderSpec: {message}",
+                Code::ReminderProviderMalformedSpec.as_str(),
+                provider.id
+            ))
+        }
+    })?;
     let fired_at_turn = fired_at_turn(ctx);
     let mut reminders = Vec::new();
     for effect in effects {
