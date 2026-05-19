@@ -1,0 +1,246 @@
+/**
+ * std/tool_hooks — preset `run_command` wrapper for the catalogue-driven
+ * "command faux-pas" library (epic #1884).
+ *
+ * `preset_run_command(config)` returns a closure usable as a `run_command`
+ * tool handler. The closure matches each command against:
+ *   1. `custom_rules` — user-priority overrides matched before anything else.
+ *   2. The catalogues registered on `config.registry`, narrowed to the
+ *      `config.stacks` opt-in list.
+ * On a match the configured `mode` callback decides the action; without a
+ * match the closure forwards to `inner` (or returns a passthrough envelope
+ * when `inner` is omitted). Three shipped modes cover the v1 contract from
+ * the epic:
+ *
+ *   * `tool_hooks_mode_rewrite_with_audit` (default) — invoke the rule's
+ *     `rewrite` callback, forward the rewritten command to `inner`, and
+ *     wrap the result with audit metadata. Falls back to the original
+ *     command when the rule has no rewriter.
+ *   * `tool_hooks_mode_deny_with_explanation` — return an error envelope
+ *     so the agent retries with a corrected command. Never invokes
+ *     `inner`.
+ *   * `tool_hooks_mode_passthrough_only_audit` — run `inner` with the
+ *     original command and tag the result with audit metadata so the
+ *     match is observable without changing behavior.
+ *
+ * Decision envelopes are uniform across modes so downstream audit
+ * tooling (TH-06) can render them consistently:
+ *   `{action, command, original_command, rule_id, catalogue_id,
+ *     severity, explanation, references, result?}`.
+ *
+ * Tracking: harn#1895 (TH-02), epic #1884.
+ *
+ * @effects: []
+ * @allocation: heap
+ * @errors: []
+ * @api_stability: experimental
+ * @example: preset_run_command({stacks: ["rust"], inner: shell_runner})
+ */
+fn __preset_command_text(args) -> string {
+  let kind = type_of(args)
+  if kind == "string" {
+    return args
+  }
+  if kind == "dict" {
+    return to_string(args?.command ?? args?.cmd ?? args?.run ?? "")
+  }
+  return to_string(args)
+}
+
+fn __preset_rewritten_args(args, rewritten_command) {
+  if type_of(args) == "dict" {
+    return args + {command: rewritten_command}
+  }
+  return {command: rewritten_command}
+}
+
+fn __preset_envelope(rule, original_command, command) {
+  return {
+    rule_id: rule?.rule_id ?? "",
+    catalogue_id: rule?.catalogue_id ?? "",
+    severity: rule?.severity ?? "warning",
+    explanation: rule?.explanation ?? "",
+    references: rule?.references ?? [],
+    original_command: original_command,
+    command: command,
+  }
+}
+
+fn __preset_invoke_rewrite(rewrite_fn, original_command, rule) -> string {
+  if rewrite_fn == nil {
+    return original_command
+  }
+  let context = {
+    rule_id: rule?.rule_id ?? "",
+    catalogue_id: rule?.catalogue_id ?? "",
+    severity: rule?.severity ?? "warning",
+  }
+  let rewritten = rewrite_fn(original_command, context)
+  if type_of(rewritten) == "dict" {
+    return to_string(rewritten?.command ?? original_command)
+  }
+  if rewritten == nil {
+    return original_command
+  }
+  return to_string(rewritten)
+}
+
+/**
+ * Default rewrite-and-audit mode. Calls the matched rule's `rewrite`
+ * callable (if any), forwards the rewritten command to `inner`, and
+ * returns `{action: "rewrite", ...envelope, result}`. When the rewrite
+ * is identical to the original command the envelope still flows so
+ * audit consumers know a rule fired.
+ *
+ * @effects: []
+ * @allocation: heap
+ * @errors: []
+ * @api_stability: experimental
+ * @example: preset_run_command({mode: tool_hooks_mode_rewrite_with_audit})
+ */
+pub fn tool_hooks_mode_rewrite_with_audit(rule, args, inner) {
+  let original_command = __preset_command_text(args)
+  let rewritten_command = __preset_invoke_rewrite(rule?.rewrite, original_command, rule)
+  let envelope = __preset_envelope(rule, original_command, rewritten_command)
+  if inner == nil {
+    return envelope + {action: "rewrite"}
+  }
+  let rewritten_args = __preset_rewritten_args(args, rewritten_command)
+  let result = inner(rewritten_args)
+  return envelope + {action: "rewrite", result: result}
+}
+
+/**
+ * Deny-with-explanation mode. Refuses to dispatch the command and
+ * returns `{action: "deny", ...envelope}` so the caller can surface a
+ * tool_error / system_reminder to the agent.
+ *
+ * @effects: []
+ * @allocation: heap
+ * @errors: []
+ * @api_stability: experimental
+ * @example: preset_run_command({mode: tool_hooks_mode_deny_with_explanation})
+ */
+pub fn tool_hooks_mode_deny_with_explanation(rule, args, _inner) {
+  let original_command = __preset_command_text(args)
+  let envelope = __preset_envelope(rule, original_command, original_command)
+  return envelope + {action: "deny"}
+}
+
+/**
+ * Passthrough-with-audit mode. Forwards the original command to `inner`
+ * and tags the result with the matched rule so audit consumers see
+ * which rule would have fired without altering behavior. When `inner`
+ * is nil the envelope alone is returned so the call-site can audit
+ * without executing.
+ *
+ * @effects: []
+ * @allocation: heap
+ * @errors: []
+ * @api_stability: experimental
+ * @example: preset_run_command({mode: tool_hooks_mode_passthrough_only_audit})
+ */
+pub fn tool_hooks_mode_passthrough_only_audit(rule, args, inner) {
+  let original_command = __preset_command_text(args)
+  let envelope = __preset_envelope(rule, original_command, original_command)
+  if inner == nil {
+    return envelope + {action: "passthrough"}
+  }
+  let result = inner(args)
+  return envelope + {action: "passthrough", result: result}
+}
+
+fn __preset_no_match(args, inner) {
+  let original_command = __preset_command_text(args)
+  if inner == nil {
+    return {action: "passthrough", command: original_command, original_command: original_command}
+  }
+  return inner(args)
+}
+
+fn __preset_custom_registry(custom_rules) {
+  // Build a synthetic catalogue when the caller supplied custom rules.
+  // The catalogue is stack-agnostic (no `stack` field) so it survives
+  // the catalogue-stack filter below, and individual rule `applies_to`
+  // lists still drive per-rule stack scoping.
+  return tool_hooks_register(
+    tool_hooks_registry(),
+    catalogue({id: "preset_run_command/custom", rules: custom_rules}),
+  )
+}
+
+/**
+ * Build a tool wrapper closure for `run_command` invocations. The
+ * returned closure is shaped `(args) -> result` and routes each call
+ * through the configured catalogues + custom rules. See the module
+ * doc-comment for the full envelope shape and mode semantics.
+ *
+ * Recognized config keys:
+ *   * `stacks` — opt-in list (e.g. `["rust", "python"]`). Defaults to `[]`,
+ *     which keeps every registered catalogue and every rule whose
+ *     `applies_to` is empty.
+ *   * `registry` — a `tool_hooks_registry()` value. Defaults to an empty
+ *     registry, so a caller using only `custom_rules` does not have to
+ *     materialize an empty registry by hand.
+ *   * `custom_rules` — list of `tool_rule(...)` values matched before the
+ *     registry, with priority over registered catalogues.
+ *   * `mode` — match-dispatch callable shaped `(rule, args, inner) -> result`,
+ *     where `rule` is one of the `tool_hooks_match` records (carries
+ *     `rule_id`, `catalogue_id`, `severity`, `explanation`, `rewrite`,
+ *     etc.). Defaults to `tool_hooks_mode_rewrite_with_audit`.
+ *   * `inner` — underlying executor shaped `(args) -> result`, invoked on
+ *     passthrough (or, for rewrite/audit modes, with the final
+ *     command). Optional — when omitted the wrapper returns decision
+ *     envelopes so the caller can run the executor itself.
+ *   * `llm_classifier` — TH-05 opt-in. Accepted but currently must be
+ *     `nil`; pass a non-nil value and the wrapper rejects construction
+ *     so callers don't silently miss the future hook.
+ *
+ * @effects: []
+ * @allocation: heap
+ * @errors: ["preset_run_command: llm_classifier is not yet supported"]
+ * @api_stability: experimental
+ * @example: agent_loop(message, tools: {tools: [{name: "run_command", handler: preset_run_command({stacks: ["rust"]})}]})
+ */
+pub fn preset_run_command(config = nil) {
+  let cfg = config ?? {}
+  if type_of(cfg) != "dict" {
+    throw "preset_run_command: config must be a dict"
+  }
+  let stacks = cfg?.stacks ?? []
+  if type_of(stacks) != "list" {
+    throw "preset_run_command: `stacks` must be a list of strings"
+  }
+  let registry = cfg?.registry ?? tool_hooks_registry()
+  let custom_rules = cfg?.custom_rules ?? []
+  if type_of(custom_rules) != "list" {
+    throw "preset_run_command: `custom_rules` must be a list of tool_rule values"
+  }
+  let mode = cfg?.mode ?? tool_hooks_mode_rewrite_with_audit
+  let inner = cfg?.inner
+  if cfg?.llm_classifier != nil {
+    throw "preset_run_command: llm_classifier is not yet supported (TH-05 / #1898)"
+  }
+  let filtered_registry = tool_hooks_filter(registry, stacks)
+  let has_custom = len(custom_rules) > 0
+  let custom_registry = if has_custom {
+    __preset_custom_registry(custom_rules)
+  } else {
+    nil
+  }
+  let context = {stacks: stacks}
+  return { args ->
+    let command = __preset_command_text(args)
+    if has_custom {
+      let custom_matches = tool_hooks_match(custom_registry, command, context)
+      if len(custom_matches) > 0 {
+        return mode(custom_matches[0], args, inner)
+      }
+    }
+    let matches = tool_hooks_match(filtered_registry, command, context)
+    if len(matches) > 0 {
+      return mode(matches[0], args, inner)
+    }
+    return __preset_no_match(args, inner)
+  }
+}

@@ -1,11 +1,18 @@
-//! Tool-hook catalogue primitive (epic #1884, ticket TH-01 #1894).
+//! Tool-hook catalogue primitive (epic #1884).
 //!
 //! Exposes the foundational schema for "command faux-pas" rules: a
 //! [`ToolRule`] declares a single matchable pattern + rewrite/explanation, a
 //! [`Catalogue`] bundles rules with provenance metadata, and a
 //! [`ToolHooksRegistry`] composes catalogues so downstream tickets
-//! (TH-02 `preset_run_command`, TH-03 mode callbacks, TH-04 seed catalogues)
-//! can layer on without re-defining the data model.
+//! (TH-04 seed catalogues, TH-05 LLM classifier, etc.) can layer on
+//! without re-defining the data model.
+//!
+//! Ticket coverage:
+//! * TH-01 (#1894): [`ToolRule`] + [`Catalogue`] schema, registry
+//!   register/unregister/list, linear `tool_hooks_match` sweep.
+//! * TH-02 (#1895): `tool_hooks_filter` catalogue-stack pre-filter helper
+//!   consumed by the `preset_run_command` Harn facade in
+//!   `crates/harn-stdlib/src/stdlib/stdlib_tool_hooks.harn`.
 //!
 //! Schema follows the established tagged-dict convention (`_type`) used by
 //! `tool_registry` and `skill_registry`. Values are plain Harn dicts so they
@@ -633,6 +640,66 @@ pub(crate) fn register_tool_hooks_builtins(vm: &mut Vm) {
         Ok(VmValue::Dict(Rc::new(next)))
     });
 
+    vm.register_builtin("tool_hooks_filter", |args, _out| {
+        let registry = require_tagged(
+            args.first()
+                .ok_or_else(|| err("tool_hooks_filter: requires a registry"))?,
+            REGISTRY_TYPE,
+            "tool_hooks_filter",
+            "first argument",
+        )?
+        .clone();
+        let stacks = match args.get(1) {
+            Some(VmValue::List(items)) => {
+                let mut out = Vec::with_capacity(items.len());
+                for item in items.iter() {
+                    match item {
+                        VmValue::String(s) => out.push(s.to_string()),
+                        other => {
+                            return Err(err(format!(
+                                "tool_hooks_filter: stacks entries must be strings, got {}",
+                                other.type_name()
+                            )));
+                        }
+                    }
+                }
+                out
+            }
+            Some(VmValue::String(s)) => vec![s.to_string()],
+            Some(VmValue::Nil) | None => Vec::new(),
+            Some(other) => {
+                return Err(err(format!(
+                    "tool_hooks_filter: stacks must be a list of strings or string, got {}",
+                    other.type_name()
+                )));
+            }
+        };
+        // Empty stacks list is a no-op so callers can pass through an
+        // unfiltered registry without branching on the call-site.
+        let filtered: Vec<VmValue> = if stacks.is_empty() {
+            registry_catalogues(&registry).to_vec()
+        } else {
+            registry_catalogues(&registry)
+                .iter()
+                .filter(|entry| match entry {
+                    VmValue::Dict(dict) => match dict.get("stack") {
+                        // Catalogues with no declared stack act as "match any" —
+                        // they ship rules that aren't language-specific.
+                        Some(VmValue::String(s)) if !s.is_empty() => {
+                            stacks.iter().any(|requested| requested == s.as_ref())
+                        }
+                        _ => true,
+                    },
+                    _ => false,
+                })
+                .cloned()
+                .collect()
+        };
+        let mut next = registry;
+        next.insert("catalogues".to_string(), VmValue::List(Rc::new(filtered)));
+        Ok(VmValue::Dict(Rc::new(next)))
+    });
+
     vm.register_builtin("tool_hooks_list", |args, _out| {
         let registry = require_tagged(
             args.first()
@@ -947,6 +1014,81 @@ mod tests {
 
         assert!(context_stacks(None).is_empty());
         assert!(context_stacks(Some(&VmValue::Nil)).is_empty());
+    }
+
+    #[test]
+    fn registry_filter_keeps_matching_and_stackless_catalogues() {
+        let vm = vm_with_stdlib();
+        let rule = call_sync(&vm, "tool_rule", &[sample_rule_config()]).expect("rule");
+        let rust_cat =
+            call_sync(&vm, "catalogue", &[sample_catalogue_config(rule.clone())]).expect("cat");
+        let mut shell_cfg: BTreeMap<String, VmValue> = BTreeMap::new();
+        shell_cfg.insert(
+            "id".to_string(),
+            VmValue::String(Rc::from("harn-canon/shell")),
+        );
+        // Stackless catalogue: matches every requested stack — universal rules.
+        shell_cfg.insert(
+            "rules".to_string(),
+            VmValue::List(Rc::new(vec![rule.clone()])),
+        );
+        let shell_cat =
+            call_sync(&vm, "catalogue", &[VmValue::Dict(Rc::new(shell_cfg))]).expect("cat");
+        let mut python_cfg: BTreeMap<String, VmValue> = BTreeMap::new();
+        python_cfg.insert(
+            "id".to_string(),
+            VmValue::String(Rc::from("harn-canon/python")),
+        );
+        python_cfg.insert("stack".to_string(), VmValue::String(Rc::from("python")));
+        python_cfg.insert("rules".to_string(), VmValue::List(Rc::new(vec![rule])));
+        let py_cat =
+            call_sync(&vm, "catalogue", &[VmValue::Dict(Rc::new(python_cfg))]).expect("cat");
+
+        let registry = call_sync(&vm, "tool_hooks_registry", &[]).expect("registry");
+        let r1 = call_sync(&vm, "tool_hooks_register", &[registry, rust_cat]).expect("r1");
+        let r2 = call_sync(&vm, "tool_hooks_register", &[r1, shell_cat]).expect("r2");
+        let r3 = call_sync(&vm, "tool_hooks_register", &[r2, py_cat]).expect("r3");
+
+        // Empty stacks filter is a no-op — every catalogue survives.
+        let unfiltered = call_sync(
+            &vm,
+            "tool_hooks_filter",
+            &[r3.clone(), VmValue::List(Rc::new(Vec::new()))],
+        )
+        .expect("unfiltered");
+        assert_eq!(
+            match call_sync(&vm, "tool_hooks_list", &[unfiltered]).expect("list") {
+                VmValue::List(items) => items.len(),
+                _ => panic!("list"),
+            },
+            3,
+        );
+
+        let only_rust = call_sync(
+            &vm,
+            "tool_hooks_filter",
+            &[
+                r3.clone(),
+                VmValue::List(Rc::new(vec![VmValue::String(Rc::from("rust"))])),
+            ],
+        )
+        .expect("filtered");
+        let listed = call_sync(&vm, "tool_hooks_list", &[only_rust]).expect("list");
+        let items = match listed {
+            VmValue::List(items) => items,
+            _ => panic!("expected list"),
+        };
+        // rust catalogue + stackless shell catalogue remain; python drops.
+        assert_eq!(items.len(), 2);
+        let ids: Vec<String> = items
+            .iter()
+            .filter_map(|v| match v {
+                VmValue::Dict(d) => d.get("id").map(|id| id.display()),
+                _ => None,
+            })
+            .collect();
+        assert!(ids.iter().any(|id| id == "harn-canon/rust"));
+        assert!(ids.iter().any(|id| id == "harn-canon/shell"));
     }
 
     #[test]

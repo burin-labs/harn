@@ -2807,6 +2807,61 @@ chips alongside the standard `tool_call_update` stream.
 
 Full reference: [`docs/src/stdlib/tool-middleware.md`](https://harnlang.com/docs/stdlib/tool-middleware.html).
 
+### Catalogue-driven `run_command` hooks
+
+`tool_rule`, `catalogue`, and `tool_hooks_registry` (TH-01) declare a
+versionable corpus of "command faux-pas" rules — rewrite-able shell
+mistakes (`find . -name`, `cargo build` without `--target-dir`,
+`git push --force`, etc.) that any agent's `run_command` handler can
+filter through. `preset_run_command(...)` (TH-02) is the shipped
+wrapper that turns a registry into a tool handler.
+
+```harn
+import { preset_run_command, tool_hooks_mode_rewrite_with_audit } from "std/tool_hooks"
+
+let rust_cat = catalogue({
+  id: "harn-canon/rust",
+  stack: "rust",
+  rules: [
+    tool_rule({
+      id: "rust.cargo.target_dir",
+      pattern: "^cargo (build|test)\\b",
+      applies_to: ["rust"],
+      severity: "warning",
+      explanation: "use --target-dir to avoid lockfile thrash",
+      rewrite: { command, _context -> command + " --target-dir target-shared" },
+    }),
+  ],
+})
+let registry = tool_hooks_register(tool_hooks_registry(), rust_cat)
+
+let run_command = preset_run_command({
+  stacks: ["rust"],
+  registry: registry,
+  custom_rules: [],                                 // matched before the registry
+  mode: tool_hooks_mode_rewrite_with_audit,         // default
+  inner: { args -> shell(args.command) },           // underlying executor
+})
+agent_loop(message, tools: {tools: [{name: "run_command", handler: run_command}]})
+```
+
+- `stacks` opts catalogues in via `tool_hooks_filter` (catalogues with
+  no `stack` field are universal; per-rule `applies_to` filters further).
+- `custom_rules` are matched before the registry so harness authors can
+  unconditionally override registered behavior.
+- Three shipped modes cover the epic's v1 contract:
+  `tool_hooks_mode_rewrite_with_audit` (rewrite + run inner),
+  `tool_hooks_mode_deny_with_explanation` (refuse to dispatch), and
+  `tool_hooks_mode_passthrough_only_audit` (run inner unchanged, tag
+  the result). All three return the same envelope shape so audit
+  consumers can render them uniformly: `{action, command,
+  original_command, rule_id, catalogue_id, severity, explanation,
+  references, result?}`.
+- Omit `inner` to get decision envelopes without execution — useful
+  for previewing rewrites or testing rule coverage.
+- `llm_classifier` is reserved for TH-05 (#1898) and currently rejects
+  non-nil values so callers don't silently miss the future hook.
+
 ## Cancellation
 
 `llm_call` and `agent_loop` cooperate with the VM's cancellation token,
