@@ -1,0 +1,12 @@
+channel_emit_receipt
+channel_match_receipt
+harn.channel_match_receipt.v1
+true
+tenant:default:ch.replay.match.input
+tenant
+true
+local
+succeeded
+hmac-sha256
+local-session
+true

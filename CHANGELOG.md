@@ -63,6 +63,52 @@ condensed series summaries instead of full per-patch history.
   explicit `allow`, and cache replay), and
   `tool_hooks_llm_classifier_error_recovery`. Part of epic #1884
   (Preset tool hooks library).
+- **Channel replay determinism receipts + diagnostics (#1878).** CH-07 of
+  the channels epic (#1870) closes the audit/replay gap by giving every
+  `emit_channel(...)` and every channel-source trigger match a durable
+  receipt on the new `lifecycle.channel.audit` event-log topic. Adds
+  two receipt types: `ChannelEmitReceipt` carries the resolved name,
+  scope, scope id, the full emit payload, a canonical-JSON SHA-256
+  `payload_hash`, the signed `emitted_at` timestamp (reusing the
+  per-session HMAC salt from CH-01 / #1872), the active emit span id,
+  and the pipeline/session/tenant correlation fields; and
+  `ChannelMatchReceipt` carries the same `event_id` (so the cached
+  match keys off the emit's id rather than re-evaluating the filter
+  spec on replay), the recorded `trigger_id` + `binding_key` +
+  `handler_kind`, a `handler_result` summary recorded after the
+  dispatcher returns (`status` / `attempt_count` / `error` /
+  `dispatch_failed`), the signed `matched_at` timestamp bound to the
+  `(event_id, trigger_id)` pair, and a `batch.constituent_event_ids`
+  list for aggregation/batched triggers (CH-04 / #1875) so replay
+  reconstructs the batch from those ids. Each audit append rides the
+  active event log (`active_event_log()`) so receipts inherit the
+  pipeline's durability — in-memory in tests, durable in production.
+  The match dispatch path also resolves `event_id` from the trigger
+  event's `dedupe_key` (which carries the channel's emit id) rather
+  than the freshly-minted `trigger_evt_*` UUID, so the receipt chain
+  links emit -> match by stable id. In parallel, extends the
+  replay-oracle (`crates/harn-vm/src/orchestration/replay_oracle.rs`)
+  with a first-class `channel_receipts` section on `ReplayTraceRun`
+  (and matching `ReplayTraceRunCounts` + `replay_bench.rs` runtime-cost
+  metrics + section list) so multi-agent channel exchanges round-trip
+  byte-identically across two runs of the same workload; and adds the
+  typed `ChannelReplayDiagnostic` enum surfaced via
+  `diagnose_channel_replay_drift(...)` with three codes:
+  `HARN-REP-CHN-001` (replay matched an `event_id` with no recorded
+  emit), `HARN-REP-CHN-002` (replay emit `payload_hash` drifted from
+  the recorded hash — producer code drift), and `HARN-REP-CHN-003`
+  (batched-match `constituent_event_ids` composition drifted between
+  runs). Three new conformance fixtures under
+  `conformance/tests/triggers/trigger_channel_replay_*` cover the
+  emit-receipt shape + signed timestamp, the emit -> match
+  `event_id` linkage with `handler_result.status="succeeded"`, and the
+  payload-hash stability/drift contract (identical payloads produce
+  identical hashes; flipped fields produce different hashes; dict key
+  ordering is canonicalized so iteration order can't poison the
+  oracle). Five new unit tests under `replay_oracle::tests` cover the
+  diagnostic codes end-to-end. Unblocks CH-08 conformance and the
+  end-to-end multi-agent replay / audit / compliance use cases the
+  epic was driving toward.
 - **OTel suspend-end / resume-link wiring (S-18, #1867).** Wires the
   `SpanKind::Suspension` and `SpanKind::Resume` spans (added in P-05,
   #1858) into the cooperative `suspend_agent` / `resume_agent` paths.
