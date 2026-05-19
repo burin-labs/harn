@@ -671,7 +671,7 @@ pub fn tool_hooks_seed_registry(stacks = nil) {
     if type_of(stack) != "string" {
       continue
     }
-    if seen[stack] == true {
+    if seen[stack] ?? false {
       continue
     }
     seen = seen + {[stack]: true}
