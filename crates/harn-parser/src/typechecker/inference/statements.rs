@@ -615,16 +615,27 @@ impl TypeChecker {
                     }
                     Err(err) => {
                         use crate::const_eval::ConstEvalErrorKind as K;
-                        let code = match err.kind {
-                            K::Disallowed => Code::ConstEvalDisallowedExpression,
-                            K::StepLimit => Code::ConstEvalStepLimit,
-                            K::RecursionLimit => Code::ConstEvalRecursionLimit,
-                            K::SandboxViolation => Code::ConstEvalSandboxViolation,
-                            K::RuntimeError => Code::ConstEvalRuntimeError,
-                        };
                         let message =
                             format!("const `{name}` initializer rejected: {}", err.detail);
-                        self.error_at(code, message, err.span);
+                        match err.kind {
+                            K::Disallowed => self.error_at(
+                                Code::ConstEvalDisallowedExpression,
+                                message,
+                                err.span,
+                            ),
+                            K::StepLimit => {
+                                self.error_at(Code::ConstEvalStepLimit, message, err.span)
+                            }
+                            K::RecursionLimit => {
+                                self.error_at(Code::ConstEvalRecursionLimit, message, err.span)
+                            }
+                            K::SandboxViolation => {
+                                self.error_at(Code::ConstEvalSandboxViolation, message, err.span)
+                            }
+                            K::RuntimeError => {
+                                self.error_at(Code::ConstEvalRuntimeError, message, err.span)
+                            }
+                        }
                     }
                 }
             }
