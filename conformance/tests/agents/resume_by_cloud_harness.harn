@@ -1,0 +1,38 @@
+import { ResumeBy } from "std/agent/resume_by"
+import { lifecycle_audit_log_take } from "std/lifecycle"
+
+/**
+ * ResumeBy.cloud_harness defers to the harn-cloud webhook receiver.
+ * Without a bound cloud session (the default in conformance), it
+ * declines with `{handled: false, reason: "no_cloud_session"}` and
+ * records a `resume_by_declined` audit so a composed
+ * `first_available(...)` chain can fall through to the in-process
+ * dispatcher or the parent LLM.
+ *
+ * Tracking: harn#1864 (S-14).
+ */
+pipeline default() {
+  let RB = ResumeBy()
+  pipeline_on_finish(
+    { harness, return_value ->
+      let result = RB
+        .cloud_harness(
+        harness,
+        {
+          handle: "worker://triage/cloud",
+          reason: "waiting on cloud webhook",
+          conditions: {trigger: {kind: "issue.closed", provider: "github"}},
+        },
+      )
+      let audits = lifecycle_audit_log_take()
+      harness.stdio.println("handled=" + to_string(result.handled))
+      harness.stdio.println("mechanism=" + result.mechanism)
+      harness.stdio.println("reason=" + result.reason)
+      harness.stdio.println("audit_kind=" + audits[0].kind)
+      harness.stdio.println("audit_reason=" + audits[0].payload.reason)
+      harness.stdio.println("audit_mechanism=" + audits[0].payload.mechanism)
+      return return_value
+    },
+  )
+  return 0
+}

@@ -1,0 +1,29 @@
+import { ResumeBy } from "std/agent/resume_by"
+import { lifecycle_audit_log_take } from "std/lifecycle"
+
+/**
+ * ResumeBy().parent_llm always returns
+ * `{handled: true, mechanism: "ResumeBy.parent_llm"}` and emits a
+ * `resume_by_dispatched` audit so the parent's LLM owns the resume
+ * path. Use it as the terminal entry in a `first_available(...)` chain.
+ *
+ * Tracking: harn#1864 (S-14).
+ */
+pipeline default() {
+  let RB = ResumeBy()
+  pipeline_on_finish(
+    { harness, return_value ->
+      let suspension = {handle: "worker://triage/parent", reason: "waiting on parent decision", conditions: nil}
+      let result = RB.parent_llm(harness, suspension)
+      let audits = lifecycle_audit_log_take()
+      harness.stdio.println("handled=" + to_string(result.handled))
+      harness.stdio.println("mechanism=" + result.mechanism)
+      harness.stdio.println("audit_count=" + to_string(len(audits)))
+      harness.stdio.println("audit_kind=" + audits[0].kind)
+      harness.stdio.println("audit_mechanism=" + audits[0].payload.mechanism)
+      harness.stdio.println("audit_handle=" + audits[0].payload.handle)
+      return return_value
+    },
+  )
+  return 0
+}

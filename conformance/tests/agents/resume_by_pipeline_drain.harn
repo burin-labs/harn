@@ -1,0 +1,29 @@
+import { ResumeBy } from "std/agent/resume_by"
+import { lifecycle_audit_log_take } from "std/lifecycle"
+
+/**
+ * ResumeBy.pipeline_drain hands the resume responsibility to the
+ * enclosing pipeline's drain step (P-02 / #1853). It is always
+ * `{handled: true}` so it is safe as the terminal entry in a chain
+ * that wants drain ownership.
+ *
+ * Tracking: harn#1864 (S-14), harn#1853 (epic).
+ */
+pipeline default() {
+  let RB = ResumeBy()
+  pipeline_on_finish(
+    { harness, return_value ->
+      let result = RB
+        .pipeline_drain(harness, {handle: "worker://triage/drain", reason: "deferred to drain"})
+      let audits = lifecycle_audit_log_take()
+      harness.stdio.println("handled=" + to_string(result.handled))
+      harness.stdio.println("mechanism=" + result.mechanism)
+      harness.stdio.println("audit_kind=" + audits[0].kind)
+      harness.stdio.println("audit_mechanism=" + audits[0].payload.mechanism)
+      harness.stdio.println("audit_handle=" + audits[0].payload.handle)
+      harness.stdio.println("audit_reason=" + audits[0].payload.reason)
+      return return_value
+    },
+  )
+  return 0
+}

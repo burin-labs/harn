@@ -389,7 +389,7 @@ fn __agent_await_resumption_call(tool_calls) {
 
 fn __agent_await_resumption_args(call) {
   let args = __tool_call_args(call)
-  return agent_await_resumption(args?.reason ?? "", args?.conditions ?? nil)
+  return agent_await_resumption(args?.reason ?? "", args?.conditions ?? nil, args?.resume_by ?? nil)
 }
 
 fn __agent_loop_await_resumption(session, iteration, call, opts) {
@@ -468,6 +468,7 @@ fn __agent_loop_await_resumption_top_level(session, iteration, call, parsed, opt
     reason: parsed.reason,
     initiator: "self",
     conditions: parsed.conditions,
+    resume_by: parsed?.resume_by,
     iterations_completed: iteration,
     session_id: session.session_id,
   }

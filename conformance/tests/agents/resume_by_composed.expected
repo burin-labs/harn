@@ -1,0 +1,9 @@
+mechanism=ResumeBy.local_runtime
+handled=true
+audit_count=2
+first_kind=resume_by_declined
+first_mechanism=ResumeBy.cloud_harness
+second_kind=resume_by_dispatched
+second_mechanism=ResumeBy.local_runtime
+nil_fallback_mechanism=ResumeBy.parent_llm
+nil_fallback_kind=resume_by_dispatched
