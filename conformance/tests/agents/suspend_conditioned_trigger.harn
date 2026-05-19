@@ -1,0 +1,65 @@
+/**
+ * S-11 (#1847): a self-park with `conditions.trigger` registers an
+ * auto-resume trigger handle, and firing a synthetic event against that
+ * handle drives the suspended worker to completion via the runtime
+ * auto-resume path (initiator: "triggered"). No operator `resume_agent`
+ * call is required — the loop wakes itself.
+ *
+ * Asserts:
+ *   - Suspension is reported with `conditions.trigger` round-tripped
+ *     (kind + provider) and `auto_resume_trigger` populated with a
+ *     non-nil dispatcher handle id.
+ *   - `trigger_fire` against the registered handle reports `dispatched`.
+ *   - The auto-resumed loop reaches `completed` without any explicit
+ *     `resume_agent` call from the test pipeline.
+ *
+ * This is the "synthetic trigger fires; runtime auto-resumes" leg of
+ * the suspend/resume contract (see docs/src/agent-lifecycle.md §
+ * Conditioned resume).
+ */
+import "std/agents"
+import "std/triggers"
+
+pipeline main() {
+  llm_mock_clear()
+  llm_mock(
+    {
+      tool_calls: [
+        {
+          id: "park_trigger",
+          name: "agent_await_resumption",
+          arguments: {reason: "waiting on pr.merged", conditions: {trigger: {kind: "pr.merged", provider: "github"}}},
+        },
+      ],
+      input_tokens: 7,
+      output_tokens: 3,
+    },
+  )
+  llm_mock({text: "auto-resumed by trigger"})
+  let handle = sub_agent_run(
+    "Park until the PR is merged.",
+    {provider: "mock", background: true, tool_format: "native", max_iterations: 3},
+  )
+  let suspended = wait_agent(handle)
+  let trigger_handle = suspended?.suspension?.auto_resume_trigger
+  println("status=" + suspended.status)
+  println("conditions_trigger_kind=" + suspended?.suspension?.conditions?.trigger?.kind ?? "")
+  println(
+    "conditions_trigger_provider="
+      + suspended?.suspension?.conditions?.trigger?.provider ?? "",
+  )
+  println("has_trigger_handle=" + to_string(trigger_handle?.id != nil))
+  let fired: DispatchHandle = trigger_fire(
+    trigger_handle,
+    {
+      provider: "github",
+      kind: "pr.merged",
+      payload: {number: 42, merged: true},
+      headers: {x_delivery: "suspend-conditioned-trigger"},
+    },
+  )
+  println("dispatch_status=" + fired.status)
+  let done = wait_agent(handle)
+  println("final_status=" + done.status)
+  println("has_transcript=" + to_string(done.has_transcript))
+}

@@ -1,0 +1,44 @@
+/**
+ * S-11 (#1847): a subagent that self-parks via
+ * `agent_await_resumption("blocked")` with no `conditions` enters the
+ * "open" parked state — no auto-resume trigger is registered, the
+ * snapshot has no auto_resume_trigger metadata, and only an explicit
+ * operator/parent `resume_agent(handle)` can drive it forward.
+ *
+ * Asserts:
+ *   - The suspension surface reports `initiator: "self"` and
+ *     `reason: "blocked"` exactly as supplied by the model.
+ *   - `suspension.conditions` is nil (no trigger, no timeout, no
+ *     on_event).
+ *   - `suspension.auto_resume_trigger` is nil — the open park does not
+ *     register a trigger handle with the dispatcher.
+ *   - An operator-style `resume_agent(handle)` with no input drives the
+ *     loop to completion.
+ */
+pipeline main() {
+  llm_mock_clear()
+  llm_mock(
+    {
+      tool_calls: [{id: "park_open", name: "agent_await_resumption", arguments: {reason: "blocked"}}],
+      input_tokens: 7,
+      output_tokens: 3,
+    },
+  )
+  llm_mock({text: "resumed by operator"})
+  let handle = sub_agent_run(
+    "Park open until an operator resumes.",
+    {provider: "mock", background: true, tool_format: "native", max_iterations: 3},
+  )
+  let suspended = wait_agent(handle)
+  println("status=" + suspended.status)
+  println("initiator=" + suspended?.suspension?.initiator ?? "")
+  println("reason=" + suspended?.suspension?.reason ?? "")
+  println("has_conditions=" + to_string(suspended?.suspension?.conditions != nil))
+  println("has_auto_trigger=" + to_string(suspended?.suspension?.auto_resume_trigger != nil))
+  // Operator-style resume: no input, default continue_transcript=true.
+  let resumed = resume_agent(handle)
+  let done = wait_agent(handle)
+  println("resume_status=" + resumed.status)
+  println("final_status=" + done.status)
+  println("has_transcript=" + to_string(done.has_transcript))
+}

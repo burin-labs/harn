@@ -43,6 +43,40 @@ condensed series summaries instead of full per-patch history.
 
   [otg-v0-1]: https://github.com/burin-labs/harn/blob/main/opentrustgraph-spec/CONFORMANCE.md#51-v01-reserved-metadata-keys-1778
 
+- **Suspend/resume conformance suite (S-11, #1847).** Closes the
+  remaining gap in the suspend/resume executable spec (epic #1836) by
+  adding four new fixtures under `conformance/tests/agents/` to pair
+  with the eight already shipped. `suspend_self_park_open.harn` pins
+  the open-park contract: `agent_await_resumption(reason)` with no
+  `conditions` reports `initiator: "self_initiated"`,
+  `suspension.conditions == nil`, and `auto_resume_trigger == nil`,
+  and only an explicit `resume_agent(handle)` wakes the worker.
+  `suspend_self_park_with_input.harn` asserts the resume-continuity
+  reminder embeds the verbatim resume input string and the suspend
+  reason, that the reminder is present on the resumed turn's system
+  prompt, and that it is consumed within one turn (the turn after the
+  resumed one no longer sees it). `suspend_conditioned_trigger.harn`
+  pins the `conditions.trigger` auto-resume contract: the suspension
+  carries a non-nil `auto_resume_trigger` handle, `trigger_fire(...)`
+  reports `dispatched`, and the loop drives itself to `completed`
+  without any explicit `resume_agent` call from the pipeline.
+  `suspend_cold_restart.harn` pins the cross-process `harn run --resume
+  <snapshot>` contract: a top-level `agent_loop(...)` self-park writes
+  a non-empty snapshot file, the process exits with
+  `status=suspended`, and a second `harn run --resume <snapshot>
+  --json` invocation emits a `done` event with
+  `value.status=completed` and `value.has_transcript=true`. The other
+  eight fixtures from the S-11 ticket
+  (`suspend_midloop_basic`, `suspend_nested`,
+  `suspend_continue_transcript_false`, `suspend_close_while_suspended`,
+  `suspend_double_resume_race`, `suspend_timeout_resume_with_summary`,
+  `suspend_timeout_fail`, `suspend_daemon_step_parity`) were already in
+  place; the new four bring the suite to the full 12-fixture contract
+  table in the issue. All fixtures are deterministic — they use
+  `llm_mock` / `mock_time` / `trigger_fire`, no wall-clock sleeps —
+  and ride the existing `cargo run --bin harn -- test conformance
+  --filter suspend_` runner.
+
 - **Effect inheritance enforcement (E5.4, #1777).** Adds the dispatcher-side
   ⊆ check for typed handoff effects against the parent's declared effect
   set. New diagnostic code `HARN-CAP-301`

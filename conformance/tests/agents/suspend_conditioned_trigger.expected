@@ -1,0 +1,7 @@
+status=suspended
+conditions_trigger_kind=pr.merged
+conditions_trigger_provider=github
+has_trigger_handle=true
+dispatch_status=dispatched
+final_status=completed
+has_transcript=true
