@@ -144,7 +144,7 @@ fn generate_file() -> String {
     out.push_str("Audit a project before deploy with `harn routes <root> --json`; it reports each declarative trigger's route path, handler module, budgets, inferred host capabilities, vendor-lock disclosure, and prompt/template overhead without executing handler code.\n\n");
 
     out.push_str("## Handler variants\n\n");
-    out.push_str("`handler:` accepts a closure (in-process), an `a2a://` or `worker://` URI string, or a handler-variant dict. The dict form covers compositions that need more than a single callable; today only `SpawnToPool` ships, more variants will plug into the same syntax over time.\n\n");
+    out.push_str("`handler:` accepts a closure (in-process), an `a2a://` or `worker://` URI string, or a handler-variant dict. The dict form covers compositions that need more than a single callable; `SpawnToPool` and `ReminderInject` ship today, more variants will plug into the same syntax over time.\n\n");
     out.push_str("```harn\n");
     out.push_str("import { SpawnToPool } from \"std/triggers\"\n");
     out.push_str("import { pool_create } from \"std/lifecycle/pool\"\n\n");
@@ -162,6 +162,23 @@ fn generate_file() -> String {
     out.push_str("})\n");
     out.push_str("```\n\n");
     out.push_str("The dispatcher invokes `task_factory(event)` per match, extracts priority + fair-queue key from the event payload (missing paths fall back to default priority 0 / null key), and submits the resulting closure to the named pool under its queue strategy + backpressure policy. Pool rejections (`drop_newest`, etc.) reuse the `lifecycle.pool.audit` channel that direct `pool.submit` calls emit on. The dispatch result is shaped as a `pool_task` handle so handlers can call `pool_wait(dispatch.result)` directly.\n\n");
+
+    out.push_str("```harn\n");
+    out.push_str("import { ReminderInject } from \"std/triggers\"\n\n");
+    out.push_str("trigger_register({\n");
+    out.push_str("  kind: \"channel.emit\",\n");
+    out.push_str("  provider: \"channel\",\n");
+    out.push_str("  match: {events: [\"channel:pr.merged\"]},\n");
+    out.push_str("  handler: ReminderInject({\n");
+    out.push_str("    target: \"current\",                       // \"current\", \"parent\", a literal session id, or a closure\n");
+    out.push_str("    body: \"PR {{ event.provider_payload.payload.number }} merged. Consider cutting a patch release.\",\n");
+    out.push_str("    tags: [\"release_reminder\"],\n");
+    out.push_str("    ttl_turns: 1,\n");
+    out.push_str("    dedupe_key: \"release_reminder\",\n");
+    out.push_str("  }),\n");
+    out.push_str("})\n");
+    out.push_str("```\n\n");
+    out.push_str("`ReminderInject` (#1876) injects a `SystemReminder` (#1815) into the target running session at its next turn boundary — no spawn, no resume, no signal. `target` resolves at dispatch time: `\"current\"` walks the owning session, `\"parent\"` walks its parent in the session lineage, any other string is a literal session id, and a closure `event -> string?` lets the trigger pick a target dynamically. `body` is a `.harn.prompt` template rendered against `{{ event }}` (the full trigger event), `{{ match }}` (`matched_at`), and `{{ batch }}` (when flow-control batching is in effect). `tags`, `ttl_turns`, `dedupe_key`, `propagate`, `role_hint`, and `preserve_on_compact` mirror `transcript.inject_reminder`. Missing target sessions are dropped gracefully with a `triggers.reminder_inject.audit` audit entry instead of failing the dispatch.\n\n");
 
     out.push_str("## Provider catalog\n\n");
     out.push_str("This table is generated from `std/triggers::list_providers()` / `ProviderCatalog` metadata.\n\n");

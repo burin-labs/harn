@@ -47,7 +47,7 @@ Audit a project before deploy with `harn routes <root> --json`; it reports each 
 
 ## Handler variants
 
-`handler:` accepts a closure (in-process), an `a2a://` or `worker://` URI string, or a handler-variant dict. The dict form covers compositions that need more than a single callable; today only `SpawnToPool` ships, more variants will plug into the same syntax over time.
+`handler:` accepts a closure (in-process), an `a2a://` or `worker://` URI string, or a handler-variant dict. The dict form covers compositions that need more than a single callable; `SpawnToPool` and `ReminderInject` ship today, more variants will plug into the same syntax over time.
 
 ```harn
 import { SpawnToPool } from "std/triggers"
@@ -69,6 +69,25 @@ trigger_register({
 ```
 
 The dispatcher invokes `task_factory(event)` per match, extracts priority + fair-queue key from the event payload (missing paths fall back to default priority 0 / null key), and submits the resulting closure to the named pool under its queue strategy + backpressure policy. Pool rejections (`drop_newest`, etc.) reuse the `lifecycle.pool.audit` channel that direct `pool.submit` calls emit on. The dispatch result is shaped as a `pool_task` handle so handlers can call `pool_wait(dispatch.result)` directly.
+
+```harn
+import { ReminderInject } from "std/triggers"
+
+trigger_register({
+  kind: "channel.emit",
+  provider: "channel",
+  match: {events: ["channel:pr.merged"]},
+  handler: ReminderInject({
+    target: "current",                       // "current", "parent", a literal session id, or a closure
+    body: "PR {{ event.provider_payload.payload.number }} merged. Consider cutting a patch release.",
+    tags: ["release_reminder"],
+    ttl_turns: 1,
+    dedupe_key: "release_reminder",
+  }),
+})
+```
+
+`ReminderInject` (#1876) injects a `SystemReminder` (#1815) into the target running session at its next turn boundary — no spawn, no resume, no signal. `target` resolves at dispatch time: `"current"` walks the owning session, `"parent"` walks its parent in the session lineage, any other string is a literal session id, and a closure `event -> string?` lets the trigger pick a target dynamically. `body` is a `.harn.prompt` template rendered against `{{ event }}` (the full trigger event), `{{ match }}` (`matched_at`), and `{{ batch }}` (when flow-control batching is in effect). `tags`, `ttl_turns`, `dedupe_key`, `propagate`, `role_hint`, and `preserve_on_compact` mirror `transcript.inject_reminder`. Missing target sessions are dropped gracefully with a `triggers.reminder_inject.audit` audit entry instead of failing the dispatch.
 
 ## Provider catalog
 

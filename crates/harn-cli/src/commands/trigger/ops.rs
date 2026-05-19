@@ -722,6 +722,7 @@ fn handler_kind(binding: &harn_vm::triggers::registry::TriggerBinding) -> &'stat
         TriggerHandlerSpec::Persona { .. } => "persona",
         TriggerHandlerSpec::AutoResume { .. } => "auto_resume",
         TriggerHandlerSpec::SpawnToPool { .. } => "spawn_to_pool",
+        TriggerHandlerSpec::ReminderInject { .. } => "reminder_inject",
     }
 }
 
@@ -733,6 +734,7 @@ fn handler_label(binding: &harn_vm::triggers::registry::TriggerBinding) -> Strin
         TriggerHandlerSpec::Persona { binding } => binding.name.clone(),
         TriggerHandlerSpec::AutoResume { worker_id } => worker_id.clone(),
         TriggerHandlerSpec::SpawnToPool { pool, .. } => pool.clone(),
+        TriggerHandlerSpec::ReminderInject { target, .. } => target.kind().to_string(),
     }
 }
 
@@ -744,6 +746,12 @@ fn target_uri(binding: &harn_vm::triggers::registry::TriggerBinding) -> String {
         TriggerHandlerSpec::Persona { binding } => format!("persona://{}", binding.name),
         TriggerHandlerSpec::AutoResume { worker_id } => format!("auto_resume://{worker_id}"),
         TriggerHandlerSpec::SpawnToPool { pool, .. } => format!("pool://{pool}"),
+        TriggerHandlerSpec::ReminderInject { target, .. } => match target {
+            harn_vm::triggers::registry::TargetExpr::Concrete(id) => {
+                format!("reminder_inject://concrete/{id}")
+            }
+            other => format!("reminder_inject://{}", other.kind()),
+        },
     }
 }
 
