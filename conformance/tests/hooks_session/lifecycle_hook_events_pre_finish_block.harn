@@ -6,9 +6,6 @@
  */
 pipeline default() {
   clear_session_hooks()
-  register_session_hook(
-    "pre_finish",
-    { _event -> return {block: true, reason: "not allowed"} },
-  )
+  register_session_hook("pre_finish", { _event -> return {block: true, reason: "not allowed"} })
   return 1
 }
