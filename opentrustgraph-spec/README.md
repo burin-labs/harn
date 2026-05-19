@@ -16,14 +16,29 @@ inventing another envelope.
 
 ## Version markers
 
-- Trust record: `opentrustgraph/v0`
-- Chain export: `opentrustgraph-chain/v0`
+- Trust record: `opentrustgraph/v0.1` (current). `opentrustgraph/v0`
+  records still validate for one patch release window per
+  [`CONFORMANCE.md` §5](./CONFORMANCE.md#5-versioning).
+- Chain export: `opentrustgraph-chain/v0` (unchanged in v0.1 — the bump
+  is additive at the record metadata layer).
+
+`v0.1` reserves three additional keys under `TrustRecord.metadata`:
+`effects_grant` (typed effect list the parent extended to this record),
+`effects_used` (typed effect list the action actually exercised), and
+`parent_record_id` (pointer to the parent record's `record_id`).
+Verifiers MUST check that a child's `effects_used` is a subset of the
+parent's `effects_grant`.
 
 ## Contents
 
 - `CONFORMANCE.md`: RFC 2119 conformance requirements for producers,
   consumers, and verifiers.
-- `schemas/trust-record.v0.schema.json`: JSON Schema for one v0 trust record.
+- `schemas/trust-record.v0.1.schema.json`: JSON Schema for the current
+  v0.1 trust record. Accepts both `opentrustgraph/v0.1` and
+  `opentrustgraph/v0` discriminators.
+- `schemas/trust-record.v0.schema.json`: JSON Schema for the legacy
+  v0 trust record; retained for the back-compat window so consumers can
+  validate older records directly.
 - `schemas/trust-chain.v0.schema.json`: JSON Schema for a v0 chain export with
   chain metadata and ordered records.
 - `schemas/trust-record.v0.proto`: Protocol Buffers wire-format mirror for
@@ -34,6 +49,10 @@ inventing another envelope.
   transition and approval-backed action.
 - `fixtures/invalid/tampered-chain.json`: a chain with a self-consistent record
   hash but invalid previous-hash linkage.
+- `fixtures/valid/effect-inheritance-chain.json`: a v0.1 three-agent chain
+  (parent → child → grandchild) that demonstrates the effect-inheritance
+  invariant `effects_used ⊆ child.effects_grant ⊆ parent.effects_grant`,
+  plus `parent_record_id` linkage.
 - `fixtures/invalid/missing-approval.json`: a record that declares approval was
   required but omits the approver/signature evidence.
 - `examples/python/verify_chain.py`: reference, stdlib-only verifier in pure

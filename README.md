@@ -8,9 +8,12 @@ workflows, policies, capabilities, and UI hooks, while Harn owns transcripts,
 context assembly, retries, tool routing, persistence, replay, and provider
 normalization.
 
-Harn also emits portable `opentrustgraph/v0` trust records for autonomy
-decisions, approval gates, and tier transitions. The public schema and fixtures
-live in [`opentrustgraph-spec/`](./opentrustgraph-spec/).
+Harn also emits portable `opentrustgraph/v0.1` trust records for autonomy
+decisions, approval gates, and tier transitions. `v0.1` adds three
+reserved `metadata` keys (`effects_grant`, `effects_used`,
+`parent_record_id`) so chain validators can prove that a child agent's
+`effects_used` stayed inside the parent's `effects_grant`. The public
+schema and fixtures live in [`opentrustgraph-spec/`](./opentrustgraph-spec/).
 
 ## Install
 

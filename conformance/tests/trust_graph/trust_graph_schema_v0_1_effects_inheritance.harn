@@ -1,0 +1,71 @@
+import "std/triggers"
+
+/**
+ * Verifies the v0.1 schema bump (#1778): a 3-agent chain
+ * (parent → child → grandchild) round-trips `effects_grant`,
+ * `effects_used`, and `parent_record_id` end-to-end through the
+ * stdlib `trust_graph_record` / `trust_query` surface, and the
+ * inheritance invariant `effects_used ⊆ child.effects_grant ⊆
+ * parent.effects_grant` holds.
+ */
+pipeline test(task) {
+  let unique = to_string(to_int(timestamp())) + "-" + to_string(random_int(100000, 999999))
+  let parent_grant = [
+    {kind: {kind: "net"}, scope: "write", resource: "https://api.example"},
+    {kind: {kind: "fs"}, scope: "read", resource: "/workspace/src"},
+    {kind: {kind: "fs"}, scope: "write", resource: "/workspace/tmp"},
+  ]
+  let child_grant = [
+    {kind: {kind: "net"}, scope: "write", resource: "https://api.example"},
+    {kind: {kind: "fs"}, scope: "read", resource: "/workspace/src"},
+  ]
+  let grandchild_used = [{kind: {kind: "fs"}, scope: "read", resource: "/workspace/src"}]
+  let parent_agent = "trust-graph-v0-1-parent-" + unique
+  let child_agent = "trust-graph-v0-1-child-" + unique
+  let grandchild_agent = "trust-graph-v0-1-grandchild-" + unique
+  let parent_id: TrustEntryId = trust_graph_record(
+    {
+      agent: parent_agent,
+      action: "agent.spawn",
+      approver: nil,
+      outcome: "success",
+      trace_id: "trace-parent-" + unique,
+      autonomy_tier: "act_auto",
+      metadata: {effects_grant: parent_grant},
+    },
+  )
+  let child_id: TrustEntryId = trust_graph_record(
+    {
+      agent: child_agent,
+      action: "agent.spawn",
+      approver: nil,
+      outcome: "success",
+      trace_id: "trace-child-" + unique,
+      autonomy_tier: "act_auto",
+      metadata: {effects_grant: child_grant, parent_record_id: parent_id},
+    },
+  )
+  let _grandchild_id: TrustEntryId = trust_graph_record(
+    {
+      agent: grandchild_agent,
+      action: "fs.read",
+      approver: nil,
+      outcome: "success",
+      trace_id: "trace-grandchild-" + unique,
+      autonomy_tier: "act_auto",
+      metadata: {effects_used: grandchild_used, parent_record_id: child_id},
+    },
+  )
+  let parent: list<TrustRecord> = trust_query({agent: parent_agent})
+  let child: list<TrustRecord> = trust_query({agent: child_agent})
+  let grandchild: list<TrustRecord> = trust_query({agent: grandchild_agent})
+  let report: TrustChainReport = trust_graph_verify_chain()
+  println(len(parent) == 1 && len(child) == 1 && len(grandchild) == 1)
+  println(parent[0].schema == "opentrustgraph/v0.1")
+  println(child[0].metadata?.parent_record_id == parent_id)
+  println(grandchild[0].metadata?.parent_record_id == child_id)
+  println(len(parent[0].metadata?.effects_grant) == 3)
+  println(len(child[0].metadata?.effects_grant) == 2)
+  println(len(grandchild[0].metadata?.effects_used) == 1)
+  println(report.verified)
+}

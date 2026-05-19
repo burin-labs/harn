@@ -10,10 +10,35 @@ use crate::event_log::{
     active_event_log, sanitize_topic_component, AnyEventLog, EventId, EventLog, LogError, LogEvent,
     Topic,
 };
-use crate::orchestration::CapabilityPolicy;
+use crate::orchestration::{CapabilityPolicy, EffectRecord};
 
 pub const OPENTRUSTGRAPH_SCHEMA_V0: &str = "opentrustgraph/v0";
+/// OpenTrustGraph v0.1: additive metadata schema (#1778). Adds the
+/// `effects_grant`, `effects_used`, and `parent_record_id` reserved keys
+/// under `TrustRecord.metadata` so chain validators can prove that a
+/// child agent's `effects_used ⊆ parent.effects_grant` (E5.5).
+///
+/// Backwards compatible: v0 records are still accepted (the new keys are
+/// optional). One patch release window after this bump, v0 will be
+/// dropped per `opentrustgraph-spec/CONFORMANCE.md` §5.
+pub const OPENTRUSTGRAPH_SCHEMA_V0_1: &str = "opentrustgraph/v0.1";
+/// Set of schema discriminators accepted by the v0.1 validator. v0 stays
+/// here for one patch release window before being retired.
+pub const OPENTRUSTGRAPH_ACCEPTED_SCHEMAS: &[&str] =
+    &[OPENTRUSTGRAPH_SCHEMA_V0_1, OPENTRUSTGRAPH_SCHEMA_V0];
 pub const OPENTRUSTGRAPH_CHAIN_SCHEMA_V0: &str = "opentrustgraph-chain/v0";
+
+/// Reserved metadata key for the effect grant attached to a record by its
+/// spawning parent. v0.1 addition (#1778).
+pub const METADATA_KEY_EFFECTS_GRANT: &str = "effects_grant";
+/// Reserved metadata key for the effects the recorded action actually
+/// exercised. Must be a subset of the parent's `effects_grant`. v0.1
+/// addition (#1778).
+pub const METADATA_KEY_EFFECTS_USED: &str = "effects_used";
+/// Reserved metadata key pointing at the parent record's `record_id`.
+/// Lets verifiers reconstruct the agent chain without scanning the whole
+/// stream. v0.1 addition (#1778).
+pub const METADATA_KEY_PARENT_RECORD_ID: &str = "parent_record_id";
 pub const TRUST_GRAPH_RECORDS_TOPIC: &str = "trust_graph.records";
 pub const TRUST_GRAPH_GLOBAL_TOPIC: &str = "trust_graph";
 pub const TRUST_GRAPH_LEGACY_GLOBAL_TOPIC: &str = "trust.graph";
@@ -106,7 +131,7 @@ impl TrustRecord {
         autonomy_tier: AutonomyTier,
     ) -> Self {
         Self {
-            schema: OPENTRUSTGRAPH_SCHEMA_V0.to_string(),
+            schema: OPENTRUSTGRAPH_SCHEMA_V0_1.to_string(),
             record_id: Uuid::now_v7().to_string(),
             agent: agent.into(),
             action: action.into(),
@@ -163,6 +188,87 @@ impl TrustRecord {
         );
         record
     }
+
+    /// Attach the typed effect grant a parent extended to this record. v0.1
+    /// (#1778). Empty grants are skipped so legacy `metadata` shape is
+    /// preserved when there is nothing to record.
+    pub fn with_effects_grant(mut self, effects: Vec<EffectRecord>) -> Self {
+        self.set_effects_grant(effects);
+        self
+    }
+
+    pub fn set_effects_grant(&mut self, effects: Vec<EffectRecord>) {
+        if effects.is_empty() {
+            self.metadata.remove(METADATA_KEY_EFFECTS_GRANT);
+            return;
+        }
+        self.metadata.insert(
+            METADATA_KEY_EFFECTS_GRANT.to_string(),
+            serde_json::to_value(effects).expect("EffectRecord is serializable"),
+        );
+    }
+
+    pub fn effects_grant(&self) -> Vec<EffectRecord> {
+        decode_effect_list(self.metadata.get(METADATA_KEY_EFFECTS_GRANT))
+    }
+
+    /// Attach the typed effect set the action actually exercised. v0.1
+    /// (#1778). Verifiers must check `effects_used ⊆ effects_grant` (and
+    /// transitively up the parent chain).
+    pub fn with_effects_used(mut self, effects: Vec<EffectRecord>) -> Self {
+        self.set_effects_used(effects);
+        self
+    }
+
+    pub fn set_effects_used(&mut self, effects: Vec<EffectRecord>) {
+        if effects.is_empty() {
+            self.metadata.remove(METADATA_KEY_EFFECTS_USED);
+            return;
+        }
+        self.metadata.insert(
+            METADATA_KEY_EFFECTS_USED.to_string(),
+            serde_json::to_value(effects).expect("EffectRecord is serializable"),
+        );
+    }
+
+    pub fn effects_used(&self) -> Vec<EffectRecord> {
+        decode_effect_list(self.metadata.get(METADATA_KEY_EFFECTS_USED))
+    }
+
+    /// Point this record at its parent's `record_id`. v0.1 (#1778). The
+    /// existing release-record key (`parent_trust_record_id`) is retained
+    /// for the release flow; this is the generic spawn-lineage pointer.
+    pub fn with_parent_record_id(mut self, parent_record_id: impl Into<String>) -> Self {
+        self.set_parent_record_id(Some(parent_record_id.into()));
+        self
+    }
+
+    pub fn set_parent_record_id(&mut self, parent_record_id: Option<String>) {
+        match parent_record_id {
+            Some(id) if !id.is_empty() => {
+                self.metadata.insert(
+                    METADATA_KEY_PARENT_RECORD_ID.to_string(),
+                    serde_json::Value::String(id),
+                );
+            }
+            _ => {
+                self.metadata.remove(METADATA_KEY_PARENT_RECORD_ID);
+            }
+        }
+    }
+
+    pub fn parent_record_id(&self) -> Option<String> {
+        self.metadata
+            .get(METADATA_KEY_PARENT_RECORD_ID)
+            .and_then(|value| value.as_str())
+            .map(str::to_string)
+    }
+}
+
+fn decode_effect_list(value: Option<&serde_json::Value>) -> Vec<EffectRecord> {
+    value
+        .and_then(|value| serde_json::from_value::<Vec<EffectRecord>>(value.clone()).ok())
+        .unwrap_or_default()
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -956,11 +1062,15 @@ mod tests {
 
     const RECORD_SCHEMA_JSON: &str =
         include_str!("trust_graph/schemas/trust-record.v0.schema.json");
+    const RECORD_SCHEMA_V0_1_JSON: &str =
+        include_str!("trust_graph/schemas/trust-record.v0.1.schema.json");
     const CHAIN_SCHEMA_JSON: &str = include_str!("trust_graph/schemas/trust-chain.v0.schema.json");
     const VALID_DECISION_CHAIN_JSON: &str =
         include_str!("trust_graph/fixtures/valid/decision-chain.json");
     const VALID_TIER_TRANSITION_JSON: &str =
         include_str!("trust_graph/fixtures/valid/tier-transition.json");
+    const VALID_EFFECT_INHERITANCE_CHAIN_JSON: &str =
+        include_str!("trust_graph/fixtures/valid/effect-inheritance-chain.json");
     const INVALID_TAMPERED_CHAIN_JSON: &str =
         include_str!("trust_graph/fixtures/invalid/tampered-chain.json");
     const INVALID_MISSING_APPROVAL_JSON: &str =
@@ -993,6 +1103,10 @@ mod tests {
 
         for (relative, embedded) in [
             ("schemas/trust-record.v0.schema.json", RECORD_SCHEMA_JSON),
+            (
+                "schemas/trust-record.v0.1.schema.json",
+                RECORD_SCHEMA_V0_1_JSON,
+            ),
             ("schemas/trust-chain.v0.schema.json", CHAIN_SCHEMA_JSON),
             (
                 "fixtures/valid/decision-chain.json",
@@ -1001,6 +1115,10 @@ mod tests {
             (
                 "fixtures/valid/tier-transition.json",
                 VALID_TIER_TRANSITION_JSON,
+            ),
+            (
+                "fixtures/valid/effect-inheritance-chain.json",
+                VALID_EFFECT_INHERITANCE_CHAIN_JSON,
             ),
             (
                 "fixtures/invalid/tampered-chain.json",
@@ -1277,11 +1395,24 @@ mod tests {
     #[test]
     fn opentrustgraph_schema_files_are_parseable_and_match_runtime_enums() {
         let record_schema: serde_json::Value = serde_json::from_str(RECORD_SCHEMA_JSON).unwrap();
+        let record_schema_v0_1: serde_json::Value =
+            serde_json::from_str(RECORD_SCHEMA_V0_1_JSON).unwrap();
         let chain_schema: serde_json::Value = serde_json::from_str(CHAIN_SCHEMA_JSON).unwrap();
 
         assert_eq!(
             record_schema["properties"]["schema"]["const"],
             serde_json::json!(OPENTRUSTGRAPH_SCHEMA_V0)
+        );
+        let v0_1_schema_enum = record_schema_v0_1["properties"]["schema"]["enum"]
+            .as_array()
+            .expect("v0.1 record schema declares schema as an enum");
+        assert!(
+            v0_1_schema_enum.contains(&serde_json::json!(OPENTRUSTGRAPH_SCHEMA_V0_1)),
+            "v0.1 record schema must accept {OPENTRUSTGRAPH_SCHEMA_V0_1}: {v0_1_schema_enum:?}"
+        );
+        assert!(
+            v0_1_schema_enum.contains(&serde_json::json!(OPENTRUSTGRAPH_SCHEMA_V0)),
+            "v0.1 record schema must still accept v0 (one-release back-compat): {v0_1_schema_enum:?}"
         );
         assert_eq!(
             chain_schema["properties"]["schema"]["const"],
@@ -1318,6 +1449,10 @@ mod tests {
         for (name, fixture) in [
             ("decision-chain", VALID_DECISION_CHAIN_JSON),
             ("tier-transition", VALID_TIER_TRANSITION_JSON),
+            (
+                "effect-inheritance-chain",
+                VALID_EFFECT_INHERITANCE_CHAIN_JSON,
+            ),
         ] {
             let fixture = parse_chain_fixture(fixture);
             let errors = validate_chain_fixture(&fixture);
@@ -1358,7 +1493,7 @@ mod tests {
 
     fn validate_chain_fixture(fixture: &TrustChainFixture) -> Vec<String> {
         let mut errors = Vec::new();
-        if fixture.schema != "opentrustgraph-chain/v0" {
+        if fixture.schema != OPENTRUSTGRAPH_CHAIN_SCHEMA_V0 {
             errors.push(format!("unsupported chain schema {}", fixture.schema));
         }
         if fixture.chain.topic.trim().is_empty() {
@@ -1409,7 +1544,7 @@ mod tests {
     fn validate_fixture_record_contract(index: usize, record: &TrustRecord) -> Vec<String> {
         let mut errors = Vec::new();
         let label = format!("record {index}");
-        if record.schema != OPENTRUSTGRAPH_SCHEMA_V0 {
+        if !OPENTRUSTGRAPH_ACCEPTED_SCHEMAS.contains(&record.schema.as_str()) {
             errors.push(format!("{label}: unsupported schema {}", record.schema));
         }
         if record.record_id.trim().is_empty() {
@@ -1510,5 +1645,198 @@ mod tests {
             .and_then(|signatures| signatures.as_array())
             .map(Vec::len)
             .unwrap_or(0)
+    }
+
+    // ----- OpenTrustGraph v0.1 schema bump (#1778) -----
+
+    use crate::orchestration::{EffectKind, EffectScope};
+
+    #[test]
+    fn new_trust_record_defaults_to_v0_1_schema() {
+        let record = TrustRecord::new(
+            "agent",
+            "deploy.preview",
+            None,
+            TrustOutcome::Success,
+            "trace-1",
+            AutonomyTier::Suggest,
+        );
+        assert_eq!(record.schema, OPENTRUSTGRAPH_SCHEMA_V0_1);
+    }
+
+    #[test]
+    fn v0_records_still_parse_for_backward_compat() {
+        let record_v0 = serde_json::json!({
+            "schema": "opentrustgraph/v0",
+            "record_id": "01966f4c-0f31-7b5d-b44b-f7f8e7e1d384",
+            "agent": "legacy-bot",
+            "action": "github.issue.opened",
+            "approver": null,
+            "outcome": "success",
+            "trace_id": "trace-legacy",
+            "autonomy_tier": "suggest",
+            "timestamp": "2026-04-19T18:42:11Z",
+            "cost_usd": null,
+            "chain_index": 1,
+            "previous_hash": null,
+            "entry_hash": "sha256:84facae7d56fd304e040ea18d80bd019e274ad86ddd5a4d732f3ac3d984c48ec",
+            "metadata": {"provider": "github"}
+        });
+        let decoded: TrustRecord = serde_json::from_value(record_v0).unwrap();
+        assert_eq!(decoded.schema, OPENTRUSTGRAPH_SCHEMA_V0);
+        assert!(OPENTRUSTGRAPH_ACCEPTED_SCHEMAS.contains(&decoded.schema.as_str()));
+        assert!(decoded.effects_grant().is_empty());
+        assert!(decoded.effects_used().is_empty());
+        assert!(decoded.parent_record_id().is_none());
+    }
+
+    #[test]
+    fn v0_1_effect_metadata_round_trips_through_json() {
+        let grant = vec![
+            EffectRecord::new(EffectKind::Net, EffectScope::Write)
+                .with_resource("https://api.example"),
+            EffectRecord::new(EffectKind::Fs, EffectScope::Read).with_resource("/workspace/src"),
+        ];
+        let used =
+            vec![EffectRecord::new(EffectKind::Fs, EffectScope::Read)
+                .with_resource("/workspace/src")];
+        let record = TrustRecord::new(
+            "child-agent",
+            "fs.read",
+            None,
+            TrustOutcome::Success,
+            "trace-effects-1",
+            AutonomyTier::ActAuto,
+        )
+        .with_effects_grant(grant.clone())
+        .with_effects_used(used.clone())
+        .with_parent_record_id("parent-record-001");
+
+        let encoded = serde_json::to_string(&record).unwrap();
+        let decoded: TrustRecord = serde_json::from_str(&encoded).unwrap();
+        assert_eq!(decoded.schema, OPENTRUSTGRAPH_SCHEMA_V0_1);
+        assert_eq!(decoded.effects_grant(), grant);
+        assert_eq!(decoded.effects_used(), used);
+        assert_eq!(
+            decoded.parent_record_id().as_deref(),
+            Some("parent-record-001")
+        );
+    }
+
+    #[test]
+    fn effect_helpers_remove_keys_on_empty_input() {
+        let mut record = TrustRecord::new(
+            "agent",
+            "noop",
+            None,
+            TrustOutcome::Success,
+            "trace-1",
+            AutonomyTier::Suggest,
+        )
+        .with_effects_grant(vec![EffectRecord::new(EffectKind::Net, EffectScope::Write)])
+        .with_parent_record_id("parent-1");
+        assert!(record.metadata.contains_key(METADATA_KEY_EFFECTS_GRANT));
+        assert!(record.metadata.contains_key(METADATA_KEY_PARENT_RECORD_ID));
+
+        record.set_effects_grant(Vec::new());
+        record.set_parent_record_id(None);
+        assert!(!record.metadata.contains_key(METADATA_KEY_EFFECTS_GRANT));
+        assert!(!record.metadata.contains_key(METADATA_KEY_PARENT_RECORD_ID));
+    }
+
+    #[tokio::test]
+    async fn three_agent_chain_proves_effects_subset_inheritance() {
+        let log: Arc<AnyEventLog> = Arc::new(AnyEventLog::Memory(MemoryEventLog::new(16)));
+
+        let parent_grant = vec![
+            EffectRecord::new(EffectKind::Net, EffectScope::Write)
+                .with_resource("https://api.example"),
+            EffectRecord::new(EffectKind::Fs, EffectScope::Read).with_resource("/workspace/src"),
+            EffectRecord::new(EffectKind::Fs, EffectScope::Write).with_resource("/workspace/tmp"),
+        ];
+        let parent = append_trust_record(
+            &log,
+            &TrustRecord::new(
+                "parent",
+                "agent.spawn",
+                None,
+                TrustOutcome::Success,
+                "trace-parent",
+                AutonomyTier::ActAuto,
+            )
+            .with_effects_grant(parent_grant.clone()),
+        )
+        .await
+        .unwrap();
+
+        let child_grant = vec![
+            EffectRecord::new(EffectKind::Net, EffectScope::Write)
+                .with_resource("https://api.example"),
+            EffectRecord::new(EffectKind::Fs, EffectScope::Read).with_resource("/workspace/src"),
+        ];
+        let child = append_trust_record(
+            &log,
+            &TrustRecord::new(
+                "child",
+                "agent.spawn",
+                None,
+                TrustOutcome::Success,
+                "trace-child",
+                AutonomyTier::ActAuto,
+            )
+            .with_effects_grant(child_grant.clone())
+            .with_parent_record_id(parent.record_id.clone()),
+        )
+        .await
+        .unwrap();
+
+        let grandchild_used =
+            vec![EffectRecord::new(EffectKind::Fs, EffectScope::Read)
+                .with_resource("/workspace/src")];
+        let grandchild = append_trust_record(
+            &log,
+            &TrustRecord::new(
+                "grandchild",
+                "fs.read",
+                None,
+                TrustOutcome::Success,
+                "trace-grandchild",
+                AutonomyTier::ActAuto,
+            )
+            .with_effects_used(grandchild_used.clone())
+            .with_parent_record_id(child.record_id.clone()),
+        )
+        .await
+        .unwrap();
+
+        // grandchild.effects_used ⊆ child.effects_grant
+        for effect in &grandchild_used {
+            assert!(
+                child_grant.contains(effect),
+                "grandchild used {effect:?} not in child grant"
+            );
+        }
+        // child.effects_grant ⊆ parent.effects_grant
+        for effect in &child_grant {
+            assert!(
+                parent_grant.contains(effect),
+                "child grant {effect:?} not in parent grant"
+            );
+        }
+
+        assert_eq!(
+            grandchild.parent_record_id().as_deref(),
+            Some(child.record_id.as_str())
+        );
+        assert_eq!(
+            child.parent_record_id().as_deref(),
+            Some(parent.record_id.as_str())
+        );
+        assert!(parent.parent_record_id().is_none());
+
+        // The chain still verifies cleanly (additive metadata change).
+        let report = verify_trust_chain(&log).await.unwrap();
+        assert!(report.verified, "verification errors: {:?}", report.errors);
+        assert_eq!(report.total, 3);
     }
 }

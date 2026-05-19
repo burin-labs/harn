@@ -1,12 +1,16 @@
-# OpenTrustGraph v0 conformance
+# OpenTrustGraph v0.1 conformance
 
 This document defines what a runtime, consumer, or verifier must do to be
-"OpenTrustGraph v0 conformant". The wording follows RFC 2119: MUST, MUST
+"OpenTrustGraph v0.1 conformant". The wording follows RFC 2119: MUST, MUST
 NOT, SHOULD, MAY.
 
 The normative artifacts are:
 
-- `schemas/trust-record.v0.schema.json` — JSON Schema for a single record.
+- `schemas/trust-record.v0.1.schema.json` — JSON Schema for a single
+  record at the current `v0.1` version. Accepts both `opentrustgraph/v0.1`
+  and `opentrustgraph/v0` discriminators during the back-compat window.
+- `schemas/trust-record.v0.schema.json` — JSON Schema for legacy `v0`
+  records. Retained for the back-compat window described in §5.
 - `schemas/trust-chain.v0.schema.json` — JSON Schema for a chain export.
 - `schemas/trust-record.v0.proto` — Protocol Buffers wire format mirror.
 - `fixtures/valid/*.json` — chains that MUST validate.
@@ -118,9 +122,47 @@ mentions either `previous_hash mismatch`, `entry_hash mismatch`, or
 ## 5. Versioning
 
 - The schema version moves with the on-disk shape. Adding a new optional
-  property is backwards compatible and remains v0.
+  property at the top level is backwards compatible. Reserving new
+  metadata keys (as `v0.1` does for `effects_grant`, `effects_used`, and
+  `parent_record_id`) is also additive and gets a minor bump.
+- A minor bump (`v0.1`) MUST stay record-shape compatible with the prior
+  minor version. Consumers MUST continue to accept the prior minor
+  version's discriminator for one patch release window after the bump
+  ships; producers MAY emit either discriminator during that window.
+  After the window, the prior discriminator MAY be rejected. The Harn
+  reference impl tracks the accepted discriminator set in
+  `OPENTRUSTGRAPH_ACCEPTED_SCHEMAS`.
 - Removing a property, renaming an enum, or changing the hash contract
   is a breaking change and MUST bump to `opentrustgraph/v1` (and
   `opentrustgraph-chain/v1` for the envelope).
 - Multiple major versions MAY coexist on the same stream; consumers
   dispatch on the `schema` discriminator.
+
+### 5.1 v0.1 reserved metadata keys (#1778)
+
+`v0.1` adds three reserved keys under `TrustRecord.metadata`. Producers
+MAY omit them; consumers MUST preserve them when re-emitting records.
+
+| Key                 | Type                          | Meaning                                                                              |
+| ------------------- | ----------------------------- | ------------------------------------------------------------------------------------ |
+| `effects_grant`     | array of `EffectRecord`       | Typed effect set the parent extended to this record at spawn time.                   |
+| `effects_used`      | array of `EffectRecord`       | Typed effect set the action actually exercised.                                      |
+| `parent_record_id`  | string (UUID) or null/absent  | Pointer at the parent record's `record_id`. `null`/absent for root records.          |
+
+`EffectRecord` follows the shape defined in
+`schemas/trust-record.v0.1.schema.json#/$defs/effectRecord`, which mirrors
+the `EffectRecord` type used by the Harn dispatcher (E5.4) for capability
+enforcement.
+
+A v0.1-conformant chain verifier MUST, in addition to §2.3, check that
+for every record `r` carrying `effects_used` and a `parent_record_id`
+referencing `p`:
+
+```text
+r.effects_used ⊆ p.effects_grant
+```
+
+Verifiers report failures with an error message containing the substring
+`effects_used escaped grant` so operators can triage them quickly. The
+subset check uses structural equality of the canonical `EffectRecord`
+shape (`kind`, `scope`, `resource`).

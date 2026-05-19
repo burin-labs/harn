@@ -119,7 +119,7 @@ client, or host integration. If Harn persisted the run, the portal can inspect
 it.
 
 For autonomy supervision, the portal's trust-graph API exposes the same
-`opentrustgraph/v0` records documented in
+`opentrustgraph/v0.1` records documented in
 [`opentrustgraph-spec/`](../../opentrustgraph-spec/). Harn Cloud receipt views
 and Burin supervision surfaces can use that artifact as the stable public
 format reference while projecting portal verification metadata into

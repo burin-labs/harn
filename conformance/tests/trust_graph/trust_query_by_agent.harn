@@ -11,7 +11,7 @@ pipeline test(task) {
   let failures: list<TrustRecord> = trust_query({agent: agent_a, outcome: "failure"})
   let denied: list<TrustRecord> = trust_query({agent: agent_b, outcome: "denied"})
   let suggest_records: list<TrustRecord> = trust_query({agent: agent_a, tier: "suggest"})
-  println(first.schema == "opentrustgraph/v0")
+  println(first.schema == "opentrustgraph/v0.1")
   println(second.outcome == "failure")
   println(third.autonomy_tier == "shadow")
   println(len(alpha_records) == 2)

@@ -13,7 +13,8 @@ explicit promotion and demotion events recorded by `harn trust promote` and
 
 Each record carries:
 
-- `schema` (`"opentrustgraph/v0"`)
+- `schema` (`"opentrustgraph/v0.1"`; v0 records still parse for one patch
+  release window — see [OpenTrustGraph CONFORMANCE.md §5][otg-versioning])
 - `record_id`
 - `agent`
 - `action`
@@ -26,7 +27,11 @@ Each record carries:
 - `chain_index`
 - `previous_hash`
 - `entry_hash`
-- `metadata`
+- `metadata` (v0.1 reserves `effects_grant`, `effects_used`, and
+  `parent_record_id` so chain validators can prove that a child agent's
+  `effects_used ⊆ parent.effects_grant`)
+
+[otg-versioning]: https://github.com/burin-labs/harn/blob/main/opentrustgraph-spec/CONFORMANCE.md#5-versioning
 
 The `trust_graph.records` projection carries the runtime query shape:
 

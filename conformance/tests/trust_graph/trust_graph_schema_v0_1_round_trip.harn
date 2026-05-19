@@ -1,0 +1,28 @@
+import "std/triggers"
+
+/**
+ * Verifies the v0.1 schema bump (#1778): newly-appended records carry
+ * the `opentrustgraph/v0.1` discriminator end-to-end, and the chain still
+ * verifies cleanly.
+ */
+pipeline test(task) {
+  let unique = to_string(to_int(timestamp())) + "-" + to_string(random_int(100000, 999999))
+  let agent_id = "trust-graph-v0-1-roundtrip-" + unique
+  trust_graph_record(
+    {
+      agent: agent_id,
+      action: "deploy.preview",
+      approver: nil,
+      outcome: "success",
+      trace_id: "trace-" + unique,
+      autonomy_tier: "act_auto",
+      metadata: {ticket: "INC-1"},
+    },
+  )
+  let records: list<TrustRecord> = trust_query({agent: agent_id})
+  let report: TrustChainReport = trust_graph_verify_chain()
+  println(len(records) == 1)
+  println(records[0].schema == "opentrustgraph/v0.1")
+  println(records[0].entry_hash != "")
+  println(report.verified)
+}
