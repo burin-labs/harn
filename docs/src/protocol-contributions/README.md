@@ -32,11 +32,22 @@ The Harn convention for cross-protocol primitives is:
 
 ## Current RFCs
 
+### Ambient reminder injection ([#1829][1829])
+
 | RFC | Upstream | Status | Reference impl |
 |---|---|---|---|
 | [ACP `session/inject_reminder`](./acp-session-inject-reminder.md) | agentclientprotocol/agent-client-protocol | Discussion open ([ACP #1224](https://github.com/agentclientprotocol/agent-client-protocol/discussions/1224)) | `session/remind` JSON-RPC method + `_meta.harn.reminder`-decorated transcript events |
 | [A2A `Message.kind: "Reminder"`](./a2a-message-kind-reminder.md) | a2aproject/A2A | Draft (not yet filed upstream) | `_meta.harn.reminder` on outbound A2A task messages |
 | [MCP `notifications/reminder`](./mcp-notifications-reminder.md) | modelcontextprotocol/specification | Draft (not yet filed upstream) | `_meta.harn.reminder` on MCP server-emitted notifications |
+
+### Suspend / resume + paused state ([#1848][1848])
+
+| RFC | Upstream | Status | Reference impl |
+|---|---|---|---|
+| [ACP `session/suspend`](./acp-session-suspend.md) | agentclientprotocol/agent-client-protocol | Draft (not yet filed upstream) | `__host_worker_suspend` builtin + `_meta.harn.suspend`-decorated session updates; sibling to the already-shipped `session/resume` ([ACP #1726](https://github.com/agentclientprotocol/agent-client-protocol/discussions/1726)) |
+| [A2A `TaskState.PAUSED`](./a2a-paused-state.md) | a2aproject/A2A | Draft (not yet filed upstream) | `metadata.harn.pause`-decorated `tasks/statusUpdate` SSE events |
+
+[1848]: https://github.com/burin-labs/harn/issues/1848
 
 ## Scope
 
@@ -54,7 +65,11 @@ work that remains open.
   authoritative list of Harn-owned `_meta` fields that ride alongside
   upstream protocol payloads today.
 - [System reminders](../system-reminders.md) — the language-level
-  reminder primitive these RFCs are proposing to standardize.
+  reminder primitive the reminder-injection RFCs are proposing to
+  standardize.
 - [Transcript architecture](../transcript-architecture.md) — the
   underlying transcript event model that produces and consumes
   reminders.
+- [`suspend_agent` / `resume_agent` builtins](../builtins.md) — the
+  language-level cooperative suspend primitive the
+  suspend/resume RFCs are proposing to standardize.
