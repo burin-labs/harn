@@ -917,6 +917,55 @@ pub fn resolve_live_trigger_binding(
     })
 }
 
+/// Snapshot active channel-source trigger bindings whose `channel:` selector
+/// in `match_events[0]` matches the supplied (scope, scope_id, name) tuple.
+///
+/// Used by [`crate::channels`] fan-out (CH-02 / #1872). Returns bindings
+/// sorted by id then version so dispatch ordering is deterministic.
+pub(crate) fn channel_bindings_matching(
+    scope: &str,
+    scope_id: &str,
+    name: &str,
+) -> Vec<Arc<TriggerBinding>> {
+    TRIGGER_REGISTRY.with(|slot| {
+        let registry = slot.borrow();
+        let Some(binding_ids) = registry.by_provider.get("channel") else {
+            return Vec::new();
+        };
+        let mut bindings = Vec::new();
+        for id in binding_ids {
+            let Some(versions) = registry.bindings.get(id) else {
+                continue;
+            };
+            for binding in versions {
+                if binding.state_snapshot() != TriggerState::Active {
+                    continue;
+                }
+                let Some(selector_raw) = binding.match_events.first() else {
+                    continue;
+                };
+                let Ok(selector) = crate::channels::ChannelSelector::parse(selector_raw) else {
+                    continue;
+                };
+                // For tenant-default ("Current") selectors we resolve "current"
+                // to the scope_id of the emit, since the trigger and the
+                // emitter share the same registry / runtime context.
+                if !selector.matches(scope, scope_id, name, scope_id) {
+                    continue;
+                }
+                bindings.push(binding.clone());
+            }
+        }
+        bindings.sort_by(|left, right| {
+            left.id
+                .as_str()
+                .cmp(right.id.as_str())
+                .then(left.version.cmp(&right.version))
+        });
+        bindings
+    })
+}
+
 pub(crate) fn matching_bindings(event: &super::TriggerEvent) -> Vec<Arc<TriggerBinding>> {
     TRIGGER_REGISTRY.with(|slot| {
         let registry = slot.borrow();

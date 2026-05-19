@@ -635,6 +635,32 @@ pub struct StreamEventPayload {
     pub raw: JsonValue,
 }
 
+/// Payload emitted by `emit_channel(...)` to channel-source triggers.
+///
+/// The dispatcher fan-out path (CH-02 / #1872) synthesizes one
+/// [`TriggerEvent`](crate::triggers::TriggerEvent) per matching channel
+/// trigger using `provider = "channel"` and `kind = "channel.emit"`. The
+/// resolved channel coordinates (`scope`, `scope_id`, `name`, fully
+/// qualified `name_resolved`) and the user-supplied `payload` ride along
+/// here so handlers can read them off the trigger event without re-parsing
+/// the resolved name string.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct ChannelEventPayload {
+    pub id: String,
+    pub name: String,
+    pub name_resolved: String,
+    pub scope: String,
+    pub scope_id: String,
+    pub payload: JsonValue,
+    pub emitted_by: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub tenant_id: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub session_id: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub pipeline_id: Option<String>,
+}
+
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct ExtensionProviderPayload {
     pub provider: String,
@@ -688,6 +714,8 @@ pub enum KnownProviderPayload {
     Email(StreamEventPayload),
     #[serde(rename = "websocket")]
     Websocket(StreamEventPayload),
+    #[serde(rename = "channel")]
+    Channel(ChannelEventPayload),
 }
 
 impl KnownProviderPayload {
@@ -706,6 +734,7 @@ impl KnownProviderPayload {
             Self::PostgresCdc(_) => "postgres-cdc",
             Self::Email(_) => "email",
             Self::Websocket(_) => "websocket",
+            Self::Channel(_) => "channel",
         }
     }
 }

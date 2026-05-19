@@ -861,6 +861,9 @@ fn normalized_event_payload(payload: &ProviderPayload) -> JsonValue {
         | ProviderPayload::Known(harn_vm::triggers::event::KnownProviderPayload::Websocket(
             payload,
         )) => payload.raw.clone(),
+        ProviderPayload::Known(harn_vm::triggers::event::KnownProviderPayload::Channel(
+            payload,
+        )) => payload.payload.clone(),
         ProviderPayload::Extension(payload) => payload.raw.clone(),
     }
 }
