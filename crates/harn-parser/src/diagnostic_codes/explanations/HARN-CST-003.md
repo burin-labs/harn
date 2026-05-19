@@ -12,7 +12,7 @@ effect. Even a syntactically reachable call into one of those surfaces
 is rejected before evaluation runs — the const-eval sandbox refuses to
 mediate I/O or non-determinism.
 
-```harn
+```harn,ignore
 // Rejected:
 const X = read_file("/etc/passwd")
 const Y = env("HOME")

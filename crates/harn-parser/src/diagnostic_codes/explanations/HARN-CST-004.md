@@ -11,7 +11,7 @@ overflow on a literal arithmetic, division by zero, indexing past the
 end of a literal list, an undefined identifier the const-eval
 environment cannot resolve, or a type mismatch on a binary operator.
 
-```harn
+```harn,ignore
 // Rejected at compile time:
 const ZERO = 1 / 0
 const OOB = [1, 2, 3][9]

@@ -11,7 +11,7 @@ exceeds `MAX_STEPS` (default 100,000), evaluation is aborted with this
 diagnostic. The cap is enforced on every step, not amortized, so a
 hostile or accidental quadratic expression cannot stall the compiler.
 
-```harn
+```harn,ignore
 // Rejected (would expand far beyond the step budget):
 const HUGE = sum_to(1_000_000)
 ```
