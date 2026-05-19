@@ -1,0 +1,685 @@
+/**
+ * std/tool_hooks_catalogues — seed catalogues for the preset `run_command`
+ * tool-hook library (epic #1884, TH-04 #1897).
+ *
+ * Each `tool_hooks_catalogue_<stack>()` returns a `catalogue(...)` value
+ * carrying the well-known "command faux-pas" rules for that ecosystem.
+ * `tool_hooks_seed_registry(stacks)` composes the requested stacks into a
+ * `tool_hooks_registry()` and always includes the universal catalogue, so
+ * deny-rules (e.g. `git push --force` against `main`, `rm -rf /`) apply
+ * regardless of language opt-in.
+ *
+ * The catalogues are stack-tagged so `tool_hooks_filter(registry, [...])`
+ * scoping continues to work when callers compose their own registries by
+ * hand. The universal catalogue intentionally has no `stack` field — the
+ * filter's "match-any when stackless" branch keeps it active for every
+ * opt-in.
+ *
+ * Wiring: `preset_run_command(config)` auto-seeds via this module when no
+ * explicit `registry` is supplied. Callers can still pass a custom
+ * registry to override the defaults (e.g. for tests or vendor patches).
+ *
+ * Pattern strategy: the Harn regex engine (Rust `regex` crate) does not
+ * support lookaround. Rules that need "matches X but not when Y is also
+ * present" use a callable `(command, _context) -> bool` predicate
+ * instead. The shared `__cat_pred_*` helpers in this module keep those
+ * predicates DRY across catalogues.
+ *
+ * Rule conventions:
+ *   * `id` — `<stack>.<tool>.<short>` so audit consumers and dashboards
+ *     can group by stack and tool.
+ *   * `pattern` — anchor on the leading command (`^cmd\b`) wherever
+ *     possible so siblings like `cargo testify` or `git pushup` don't
+ *     trip the rule.
+ *   * `severity` — `error` (deny), `warning` (rewrite), `info` (audit-only).
+ *   * `rewrite` — closure `(command, _context) -> string|dict|nil`.
+ *     Return `nil` or the same command to skip the rewrite; return a new
+ *     string to substitute. Dict form is reserved for future structured
+ *     arg overrides.
+ *   * `explanation` — single sentence the agent can paraphrase back to
+ *     the user.
+ *   * `references` — links to upstream docs, RFCs, or post-mortems.
+ *
+ * @effects: []
+ * @allocation: heap
+ * @errors: []
+ * @api_stability: experimental
+ * @example: preset_run_command({stacks: ["rust", "python"]})
+ */
+
+// -------------------------------------------------------------------------------------------------
+// shared helpers
+// -------------------------------------------------------------------------------------------------
+
+/* Boolean regex test wrapper. The Harn stdlib exposes `regex_match`
+ * which returns a list of matches or nil; this helper collapses the
+ * two cases into a clean predicate for catalogue rules. */
+fn __cat_re(pattern, text) -> bool {
+  return regex_match(pattern, text) != nil
+}
+
+/* Append a flag to a command only when it isn't already present. The
+ * naive concat is sufficient because rewrites flow through
+ * `__preset_invoke_rewrite`, which forwards the final string to `inner`. */
+fn __cat_append_flag(command, flag) -> string {
+  if contains(command, flag) {
+    return command
+  }
+  return command + " " + flag
+}
+
+/* Rewrite shell `find . -name '*.<ext>'` invocations to the equivalent
+ * `rg --files -t <type>` form. Used by both python and typescript
+ * catalogues to stay DRY. Falls back to an untyped `rg --files` when no
+ * extension is detected so the rewrite is still safe to dispatch. */
+fn __cat_find_to_rg(command, file_type) -> string {
+  // The ripgrep equivalent only needs the type tag, since `rg --files`
+  // walks the cwd by default and respects `.gitignore`. The original
+  // `command` is intentionally discarded — `find .` callers rarely
+  // depend on extra `-name` predicates beyond the extension we're
+  // re-encoding as `-t`.
+  let _ = command
+  if file_type == nil || file_type == "" {
+    return "rg --files"
+  }
+  return "rg --files -t " + file_type
+}
+
+/* Build a catalogue dict using a uniform shape so authors only pass the
+ * rule list. Each catalogue advertises `source: "harn-canon"` so audit
+ * consumers know the provenance even after JSON round-trip. */
+fn __cat_build(id, stack, rules) {
+  return catalogue({id: id, stack: stack, version: "0.1.0", source: "harn-canon", rules: rules})
+}
+
+/* Build a stackless universal catalogue. Stackless catalogues survive
+ * `tool_hooks_filter`, so universal denies fire regardless of which
+ * `stacks: [...]` the caller opted into. */
+fn __cat_build_universal(id, rules) {
+  // priority: 100 places deny-rules ahead of stack-specific rewrites
+  // on ambiguous commands during the linear sweep in tool_hooks_match.
+  return catalogue({id: id, version: "0.1.0", source: "harn-canon", priority: 100, rules: rules})
+}
+
+/* Pattern predicate factory: "matches the given regex prefix AND lacks
+ * any of the given suppress markers (as plain substrings)". The Rust
+ * regex engine has no lookaround so we substring-check the suppress
+ * markers in Harn. Bails early when the prefix doesn't match, then
+ * short-circuits as soon as any suppress marker is present in the
+ * command. Used by every stack catalogue with a "trigger on bare X, but
+ * skip when the user already supplied the corrected flag" shape. */
+fn __cat_pred_prefix(prefix_re, suppress_markers) {
+  return { command, _context ->
+    if !__cat_re(prefix_re, command) {
+      return false
+    }
+    for marker in suppress_markers {
+      if contains(command, marker) {
+        return false
+      }
+    }
+    return true
+  }
+}
+
+/* `find . -name '*.<ext>'` predicate used by both python and typescript
+ * catalogues. Matches `find .` with a `-name '*.ext'` filter, with the
+ * pattern optionally single-, double-, or unquoted. The leading `find .`
+ * anchor keeps grep-style `find` invocations in other contexts from
+ * tripping. */
+fn __cat_pred_find_for_ext(extensions) {
+  let ext_re = "(?:" + join(extensions, "|") + ")"
+  // The trailing `(?:[\"']|\\s|$)` is essential: without an anchor on
+  // the extension's right side, `*.js` would match `*.json` because
+  // the closing quote is optional. Requiring quote / whitespace /
+  // EOS after the extension preserves the prefix-extension safety.
+  return "^find \\.(?:\\s|$).*-name\\s+[\"']?\\*\\." + ext_re + "(?:[\"']|\\s|$)"
+}
+
+/* Force-push deny predicate. A command is denied iff:
+ *   1. It starts with `git push`.
+ *   2. It carries a force flag: `--force`, `--force=...`,
+ *      `--force-with-lease=false`, or a bare `-f` short flag (alone or
+ *      bundled in `-fX`). `--force-with-lease` WITHOUT `=false` is the
+ *      safe form and is intentionally NOT denied.
+ *   3. It targets a ref named `main` or `master` (as a separate token,
+ *      so `mainline` doesn't trip).
+ *   4. The escape-hatch env var HARN_TOOL_HOOKS_ALLOW_FORCE_PUSH is not
+ *      "1" / "true". Read via `env_or` so test contexts can opt out.
+ */
+fn __cat_pred_force_push_main(command, _context) -> bool {
+  if !__cat_re("^git push\\b", command) {
+    return false
+  }
+  let allow = env_or("HARN_TOOL_HOOKS_ALLOW_FORCE_PUSH", "")
+  if allow == "1" || allow == "true" {
+    return false
+  }
+  // `--force-with-lease=false|0` is treated as the unsafe long --force.
+  // Any other `--force-with-lease` (no value, or non-falsey value) is
+  // the safe form and short-circuits the deny.
+  let force_lease_false = __cat_re("--force-with-lease=(?:false|0)\\b", command)
+  let safe_lease = !force_lease_false && contains(command, "--force-with-lease")
+  // Long `--force` (boolean / `--force=true` form), but NOT
+  // `--force-with-lease` which contains "--force" as a substring.
+  let force_long = __cat_re("--force(?:\\s|=|$)", command) && !safe_lease
+  // Short -f / bundled (-rf, -fx, etc.). Suppressed when the only
+  // force flag is the safe `--force-with-lease`.
+  let force_short = __cat_re("(?:^|\\s)-[a-zA-Z]*f[a-zA-Z]*\\b", command) && !safe_lease
+  let forced = force_long || force_lease_false || force_short
+  if !forced {
+    return false
+  }
+  // Target check: a `\b`-anchored "main" or "master" token so
+  // `mainline` / `mastery` don't trip the rule.
+  return __cat_re("\\b(?:main|master)\\b", command)
+}
+
+/* Recursive-delete deny predicate. Matches `rm` invocations carrying
+ * BOTH a recursive flag (-r / -R / --recursive) AND a force flag
+ * (-f / --force), regardless of order or whether the flags are bundled,
+ * targeting a root-adjacent path:
+ *
+ *   /, ~, .., $HOME, ${HOME}, *
+ *
+ * Defeats quoting bypasses (`rm -rf "/"` , `rm -rf '/'`, `rm -rf  /`)
+ * by anchoring on the path token itself with optional surrounding
+ * quotes/whitespace. */
+fn __cat_pred_rm_rf_root(command, _context) -> bool {
+  if !__cat_re("^rm\\b", command) {
+    return false
+  }
+  // Recursive flag: short -r / -R / bundled with other letters, or
+  // long --recursive.
+  let recursive = __cat_re("(?:^|\\s)-[a-zA-Z]*[rR][a-zA-Z]*\\b", command)
+    || __cat_re("--recursive\\b", command)
+  // Force flag: short -f / bundled, or long --force.
+  let forced = __cat_re("(?:^|\\s)-[a-zA-Z]*f[a-zA-Z]*\\b", command)
+    || __cat_re("--force\\b", command)
+  if !(recursive && forced) {
+    return false
+  }
+  // Dangerous path tokens. Each is allowed to be wrapped in single or
+  // double quotes and surrounded by whitespace or end-of-string.
+  let dangerous = [
+    "[\\s\"'=]/(?:\\s|[\"']|$)",
+    "[\\s\"'=]~(?:\\s|[\"']|$)",
+    "[\\s\"'=]\\.\\.(?:\\s|[\"']|$)",
+    "[\\s\"'=]\\$\\{?HOME\\}?(?:\\s|[\"']|$)",
+    "[\\s\"'=]\\*(?:\\s|[\"']|$)",
+  ]
+  // Pad the command with a leading space so the path token at the
+  // very start of the argv (e.g. `rm -rf /`) is preceded by whitespace
+  // for the regex.
+  let padded = " " + command + " "
+  for pat in dangerous {
+    if __cat_re(pat, padded) {
+      return true
+    }
+  }
+  return false
+}
+
+// -------------------------------------------------------------------------------------------------
+// rust
+// -------------------------------------------------------------------------------------------------
+
+/**
+ * Rust seed catalogue. Targets cargo/clippy/fmt patterns that an agent
+ * is likely to run in a multi-process workspace.
+ *
+ * Rules:
+ *   * `rust.cargo.target_dir_conflict` — append a per-invocation
+ *     `--target-dir target-shared` to bare `cargo build|test|check|run`
+ *     calls so parallel invocations don't thrash the lockfile.
+ *   * `rust.cargo.test_no_capture_default` — append `-- --nocapture` to
+ *     `cargo test` calls that lack any custom test arg so an agent can
+ *     read `println!` output.
+ *   * `rust.cargo.clippy_full_workspace` — add `--workspace` to bare
+ *     `cargo clippy` so sibling crates are linted.
+ *   * `rust.cargo.fmt_check_vs_apply` — warn (no rewrite) when `cargo
+ *     fmt` lands without `--check` in a pre-merge / review context so
+ *     the agent can confirm intent before mutating files.
+ *
+ * @effects: []
+ * @allocation: heap
+ * @errors: []
+ * @api_stability: experimental
+ * @example: tool_hooks_register(tool_hooks_registry(), tool_hooks_catalogue_rust())
+ */
+pub fn tool_hooks_catalogue_rust() {
+  let target_dir_rule = tool_rule(
+    {
+      id: "rust.cargo.target_dir_conflict",
+      pattern: __cat_pred_prefix("^cargo (?:\\+[\\w.-]+ )?(?:build|test|check|run)(?:\\s|$)", ["--target-dir"]),
+      applies_to: ["rust"],
+      severity: "warning",
+      explanation: "Concurrent cargo runs without --target-dir thrash the workspace lockfile; pin a shared target dir so parallel invocations stay deterministic.",
+      references: [
+        "https://github.com/rust-lang/cargo/issues/4282",
+        "https://doc.rust-lang.org/cargo/reference/config.html#buildtarget-dir",
+      ],
+      rewrite: { command, _context -> __cat_append_flag(command, "--target-dir target-shared") },
+    },
+  )
+  let test_capture_rule = tool_rule(
+    {
+      id: "rust.cargo.test_no_capture_default",
+      pattern: __cat_pred_prefix("^cargo (?:\\+[\\w.-]+ )?test(?:\\s|$)", ["-- ", "--nocapture"]),
+      applies_to: ["rust"],
+      severity: "info",
+      explanation: "`cargo test` swallows print debugging by default; appending `-- --nocapture` keeps `println!` output visible for the agent to inspect.",
+      references: [
+        "https://doc.rust-lang.org/cargo/commands/cargo-test.html",
+        "https://doc.rust-lang.org/cargo/reference/config.html#testharness",
+      ],
+      rewrite: { command, _context -> __cat_append_flag(command, "-- --nocapture") },
+    },
+  )
+  let clippy_workspace_rule = tool_rule(
+    {
+      id: "rust.cargo.clippy_full_workspace",
+      pattern: __cat_pred_prefix("^cargo (?:\\+[\\w.-]+ )?clippy(?:\\s|$)", ["--workspace"]),
+      applies_to: ["rust"],
+      severity: "warning",
+      explanation: "`cargo clippy` defaults to the current package; sibling crates in a workspace go unchecked. Add `--workspace` to catch regressions across the tree.",
+      references: [
+        "https://doc.rust-lang.org/cargo/commands/cargo-clippy.html",
+        "https://github.com/rust-lang/rust-clippy/blob/master/book/src/usage.md",
+      ],
+      rewrite: { command, _context -> __cat_append_flag(command, "--workspace") },
+    },
+  )
+  let fmt_check_rule = tool_rule(
+    {
+      id: "rust.cargo.fmt_check_vs_apply",
+      pattern: __cat_pred_prefix("^cargo (?:\\+[\\w.-]+ )?fmt(?:\\s|$)", ["--check"]),
+      applies_to: ["rust"],
+      severity: "info",
+      explanation: "Bare `cargo fmt` rewrites files in place. Prefer `cargo fmt --check` in CI / review contexts so the agent surfaces diffs before mutating the worktree.",
+      references: [
+        "https://github.com/rust-lang/rustfmt#checking-style-on-a-cargo-project",
+        "https://rust-lang.github.io/rustfmt/?version=v1.7.0&search=#check",
+      ],
+    },
+  )
+  return __cat_build(
+    "harn-canon/rust",
+    "rust",
+    [target_dir_rule, test_capture_rule, clippy_workspace_rule, fmt_check_rule],
+  )
+}
+
+// -------------------------------------------------------------------------------------------------
+// python
+// -------------------------------------------------------------------------------------------------
+
+/**
+ * Python seed catalogue.
+ *
+ * Rules:
+ *   * `python.find_versus_rg` — rewrite `find . -name '*.py'` to a
+ *     `.gitignore`-aware `rg --files -t py` call.
+ *   * `python.pip_install_no_user` — warn on system-wide `pip install`
+ *     outside a venv; suggest `--user` or activating an environment.
+ *   * `python.pytest_no_capture` — append `-s` to bare `pytest` so the
+ *     agent can read `print` output.
+ *
+ * @effects: []
+ * @allocation: heap
+ * @errors: []
+ * @api_stability: experimental
+ * @example: tool_hooks_register(tool_hooks_registry(), tool_hooks_catalogue_python())
+ */
+pub fn tool_hooks_catalogue_python() {
+  let find_rule = tool_rule(
+    {
+      id: "python.find_versus_rg",
+      pattern: __cat_pred_find_for_ext(["py"]),
+      applies_to: ["python"],
+      severity: "info",
+      explanation: "`rg --files -t py` walks the tree faster than `find` and respects `.gitignore`, so it doesn't surface `.venv/` or build artifacts.",
+      references: [
+        "https://github.com/BurntSushi/ripgrep/blob/master/FAQ.md#what-is-the-difference-between-ripgrep-and-find",
+        "https://github.com/BurntSushi/ripgrep/blob/master/GUIDE.md#file-types",
+      ],
+      rewrite: { command, _context -> __cat_find_to_rg(command, "py") },
+    },
+  )
+  let pip_user_rule = tool_rule(
+    {
+      id: "python.pip_install_no_user",
+      pattern: __cat_pred_prefix(
+        "^(?:pip|pip3|python -m pip|python3 -m pip) install(?:\\s|$)",
+        ["--user", "-e .", "--editable"],
+      ),
+      applies_to: ["python"],
+      severity: "warning",
+      explanation: "Global `pip install` mutates the system interpreter. Activate a venv or pass `--user` so the install stays scoped to the agent's workspace.",
+      references: [
+        "https://pip.pypa.io/en/stable/user_guide/#user-installs",
+        "https://packaging.python.org/en/latest/guides/installing-using-pip-and-virtual-environments/",
+      ],
+    },
+  )
+  let pytest_capture_rule = tool_rule(
+    {
+      id: "python.pytest_no_capture",
+      pattern: __cat_pred_prefix(
+        "^(?:pytest|python -m pytest|python3 -m pytest)(?:\\s|$)",
+        ["-s ", "--capture=no", "-s\n"],
+      ),
+      applies_to: ["python"],
+      severity: "info",
+      explanation: "`pytest` swallows stdout by default; `-s` (alias for `--capture=no`) keeps `print` output visible for the agent to read.",
+      references: ["https://docs.pytest.org/en/stable/how-to/capture-stdout-stderr.html"],
+      rewrite: { command, _context -> __cat_append_flag(command, "-s") },
+    },
+  )
+  return __cat_build("harn-canon/python", "python", [find_rule, pip_user_rule, pytest_capture_rule])
+}
+
+// -------------------------------------------------------------------------------------------------
+// typescript
+// -------------------------------------------------------------------------------------------------
+
+/**
+ * TypeScript seed catalogue.
+ *
+ * Rules:
+ *   * `ts.find_versus_rg` — symmetric to the python rule for `.ts` /
+ *     `.tsx`.
+ *   * `ts.npm_install_force_resolution` — warn on `npm install --force` /
+ *     `--legacy-peer-deps`, which silently mint unresolved peer-dep
+ *     graphs and ship footguns to production.
+ *
+ * @effects: []
+ * @allocation: heap
+ * @errors: []
+ * @api_stability: experimental
+ * @example: tool_hooks_register(tool_hooks_registry(), tool_hooks_catalogue_typescript())
+ */
+pub fn tool_hooks_catalogue_typescript() {
+  let find_rule = tool_rule(
+    {
+      id: "ts.find_versus_rg",
+      pattern: __cat_pred_find_for_ext(["ts", "tsx", "js", "jsx", "mjs", "cjs"]),
+      applies_to: ["typescript"],
+      severity: "info",
+      explanation: "`rg --files -t ts` is faster than `find` and respects `.gitignore`, so it skips `node_modules/` and `dist/` by default.",
+      references: ["https://github.com/BurntSushi/ripgrep/blob/master/GUIDE.md#file-types"],
+      rewrite: { command, _context -> __cat_find_to_rg(command, "ts") },
+    },
+  )
+  let force_resolution_rule = tool_rule(
+    {
+      id: "ts.npm_install_force_resolution",
+      pattern: { command, _context ->
+        if !__cat_re("^npm (?:install|i|add)(?:\\s|$)", command) {
+          return false
+        }
+        return contains(command, "--force") || contains(command, "--legacy-peer-deps")
+      },
+      applies_to: ["typescript"],
+      severity: "warning",
+      explanation: "`npm install --force` and `--legacy-peer-deps` paper over peer-dep mismatches by skipping the resolver; the project ends up with an unverifiable dep graph. Resolve the conflict explicitly or pin a compatible version.",
+      references: [
+        "https://docs.npmjs.com/cli/v10/commands/npm-install#force",
+        "https://docs.npmjs.com/cli/v10/commands/npm-install#legacy-peer-deps",
+      ],
+    },
+  )
+  return __cat_build("harn-canon/typescript", "typescript", [find_rule, force_resolution_rule])
+}
+
+// -------------------------------------------------------------------------------------------------
+// swift
+// -------------------------------------------------------------------------------------------------
+
+/**
+ * Swift seed catalogue.
+ *
+ * Rules:
+ *   * `swift.swift_build_clean_cache_misuse` — warn on `swift build
+ *     --clean` / `swift package clean` invocations that purge the build
+ *     cache without an obvious reason; a fresh rebuild can take minutes
+ *     in a non-trivial package.
+ *
+ * @effects: []
+ * @allocation: heap
+ * @errors: []
+ * @api_stability: experimental
+ * @example: tool_hooks_register(tool_hooks_registry(), tool_hooks_catalogue_swift())
+ */
+pub fn tool_hooks_catalogue_swift() {
+  let clean_rule = tool_rule(
+    {
+      id: "swift.swift_build_clean_cache_misuse",
+      pattern: "^swift (?:build\\s+--clean\\b|package\\s+clean\\b)",
+      applies_to: ["swift"],
+      severity: "warning",
+      explanation: "`swift build --clean` / `swift package clean` deletes `.build/`, forcing a full rebuild that can take several minutes. Confirm a stale-cache symptom first, or use `--target` / `--product` to scope.",
+      references: [
+        "https://github.com/swiftlang/swift-package-manager/blob/main/Sources/Commands/PackageCommands/Clean.swift",
+        "https://www.swift.org/documentation/package-manager/",
+      ],
+    },
+  )
+  return __cat_build("harn-canon/swift", "swift", [clean_rule])
+}
+
+// -------------------------------------------------------------------------------------------------
+// sql
+// -------------------------------------------------------------------------------------------------
+
+/**
+ * SQL seed catalogue.
+ *
+ * Rules:
+ *   * `sql.select_star_warning` — warn (no rewrite) when an agent
+ *     issues a bare `SELECT *` against a table without a `LIMIT`,
+ *     `WHERE`, or aggregation clause; large-table scans burn budget and
+ *     leak columns the agent didn't intend to expose.
+ *
+ * @effects: []
+ * @allocation: heap
+ * @errors: []
+ * @api_stability: experimental
+ * @example: tool_hooks_register(tool_hooks_registry(), tool_hooks_catalogue_sql())
+ */
+pub fn tool_hooks_catalogue_sql() {
+  let select_star_rule = tool_rule(
+    {
+      id: "sql.select_star_warning",
+      pattern: { command, _context ->
+        let lc = lowercase(command)
+        if !__cat_re("^\\s*select\\s+\\*\\s+from\\s+\\S+", lc) {
+          return false
+        }
+        if contains(lc, " where ") || contains(lc, " limit ") || contains(lc, "count(") {
+          return false
+        }
+        return true
+      },
+      applies_to: ["sql"],
+      severity: "warning",
+      explanation: "Unbounded `SELECT *` scans full tables, returns columns the agent may not need, and breaks downstream consumers when the schema gains a column. Prefer an explicit column list and add a `WHERE` / `LIMIT` clause.",
+      references: [
+        "https://www.postgresql.org/docs/current/sql-select.html",
+        "https://learn.microsoft.com/en-us/sql/t-sql/queries/select-clause-transact-sql",
+      ],
+    },
+  )
+  return __cat_build("harn-canon/sql", "sql", [select_star_rule])
+}
+
+// -------------------------------------------------------------------------------------------------
+// harn
+// -------------------------------------------------------------------------------------------------
+
+/**
+ * Harn (this repo's tooling) seed catalogue.
+ *
+ * Rules:
+ *   * `harn.cargo_run_quiet` — agents running the Harn CLI through
+ *     `cargo run --bin harn` flood the terminal with build chatter
+ *     unless `--quiet` is passed; the CLAUDE.md guidance is to always
+ *     use `cargo run --quiet --bin harn`.
+ *
+ * @effects: []
+ * @allocation: heap
+ * @errors: []
+ * @api_stability: experimental
+ * @example: tool_hooks_register(tool_hooks_registry(), tool_hooks_catalogue_harn())
+ */
+pub fn tool_hooks_catalogue_harn() {
+  let cargo_quiet_rule = tool_rule(
+    {
+      id: "harn.cargo_run_quiet",
+      pattern: { command, _context ->
+        if !__cat_re("^cargo (?:\\+[\\w.-]+ )?run(?:\\s|$)", command) {
+          return false
+        }
+        if !__cat_re("--bin\\s+harn\\b", command) {
+          return false
+        }
+        if contains(command, "--quiet") || __cat_re("(?:^|\\s)-q(?:\\s|$)", command) {
+          return false
+        }
+        return true
+      },
+      applies_to: ["harn"],
+      severity: "info",
+      explanation: "`cargo run --bin harn` prints build progress to stderr which interleaves with `harn` output. Pass `--quiet` to silence the build chatter so agents can parse the program's stdout cleanly.",
+      references: ["https://doc.rust-lang.org/cargo/commands/cargo-run.html#option-cargo-run--quiet"],
+      rewrite: { command, _context -> regex_replace("^cargo ", "cargo --quiet ", command) },
+    },
+  )
+  return __cat_build("harn-canon/harn", "harn", [cargo_quiet_rule])
+}
+
+// -------------------------------------------------------------------------------------------------
+// universal
+// -------------------------------------------------------------------------------------------------
+
+/**
+ * Universal catalogue (always seeded). Holds high-severity deny rules
+ * that apply regardless of language opt-in.
+ *
+ * Rules:
+ *   * `universal.git_push_force_main` — DENY `git push --force` /
+ *     `--force-with-lease=false` targeting `main` / `master` unless
+ *     `HARN_TOOL_HOOKS_ALLOW_FORCE_PUSH=1` is set. Catches `-f` short
+ *     form too. `--force-with-lease` (no `=false`) is the safe form and
+ *     is intentionally allowed.
+ *   * `universal.rm_rf_root_adjacent` — DENY recursive deletes of `/`,
+ *     `~`, `..`, `$HOME`, `${HOME}`, or `*`. Catches `-rf`, `-fr`,
+ *     `-Rf`, `--recursive --force`, etc., and defeats quoting
+ *     bypasses by anchoring on the path token itself.
+ *
+ * Both rules are intentionally severity=error so a host that respects
+ * `tool_hooks_mode_deny_with_explanation` blocks the call entirely.
+ *
+ * @effects: []
+ * @allocation: heap
+ * @errors: []
+ * @api_stability: experimental
+ * @example: tool_hooks_register(tool_hooks_registry(), tool_hooks_catalogue_universal())
+ */
+pub fn tool_hooks_catalogue_universal() {
+  let force_push_rule = tool_rule(
+    {
+      id: "universal.git_push_force_main",
+      pattern: __cat_pred_force_push_main,
+      severity: "error",
+      explanation: "Force-pushing to main/master rewrites history for every downstream clone. Set HARN_TOOL_HOOKS_ALLOW_FORCE_PUSH=1 only after coordinating with the team, or use `--force-with-lease` (which fails safely on remote drift).",
+      references: [
+        "https://git-scm.com/docs/git-push#Documentation/git-push.txt---force",
+        "https://git-scm.com/docs/git-push#Documentation/git-push.txt---force-with-lease",
+        "https://blog.developer.atlassian.com/force-with-lease/",
+      ],
+      priority: 1000,
+    },
+  )
+  let rm_rf_rule = tool_rule(
+    {
+      id: "universal.rm_rf_root_adjacent",
+      pattern: __cat_pred_rm_rf_root,
+      severity: "error",
+      explanation: "Recursive deletes against /, ~, .., $HOME, or unquoted * are almost always a mistake and irreversible without backups. If you really need to remove a tree, target an absolute path under your worktree.",
+      references: [
+        "https://man7.org/linux/man-pages/man1/rm.1.html",
+        "https://github.com/valvesoftware/steam-for-linux/issues/3671",
+      ],
+      priority: 1000,
+    },
+  )
+  return __cat_build_universal("harn-canon/universal", [force_push_rule, rm_rf_rule])
+}
+
+// -------------------------------------------------------------------------------------------------
+// seed registry
+// -------------------------------------------------------------------------------------------------
+
+/* Map a stack name to its catalogue builder. Returns `nil` for unknown
+ * stacks so the seeder can silently skip them — callers may legitimately
+ * pass stacks that have no shipped catalogue yet. */
+fn __cat_for_stack(stack) {
+  if stack == "rust" {
+    return tool_hooks_catalogue_rust()
+  }
+  if stack == "python" {
+    return tool_hooks_catalogue_python()
+  }
+  if stack == "typescript" || stack == "ts" {
+    return tool_hooks_catalogue_typescript()
+  }
+  if stack == "swift" {
+    return tool_hooks_catalogue_swift()
+  }
+  if stack == "sql" {
+    return tool_hooks_catalogue_sql()
+  }
+  if stack == "harn" {
+    return tool_hooks_catalogue_harn()
+  }
+  return nil
+}
+
+/**
+ * Build a `tool_hooks_registry()` pre-populated with the universal
+ * catalogue plus one catalogue per requested stack. Unknown stacks are
+ * silently skipped so older scripts opting into a future stack name
+ * don't break.
+ *
+ * @effects: []
+ * @allocation: heap
+ * @errors: []
+ * @api_stability: experimental
+ * @example: tool_hooks_seed_registry(["rust", "python"])
+ */
+pub fn tool_hooks_seed_registry(stacks = nil) {
+  let opt_in = if type_of(stacks) == "list" {
+    stacks
+  } else {
+    []
+  }
+  let registry = tool_hooks_register(tool_hooks_registry(), tool_hooks_catalogue_universal())
+  var seen = {}
+  var acc = registry
+  for stack in opt_in {
+    if type_of(stack) != "string" {
+      continue
+    }
+    if seen[stack] == true {
+      continue
+    }
+    seen = seen + {[stack]: true}
+    let cat = __cat_for_stack(stack)
+    if cat == nil {
+      continue
+    }
+    acc = tool_hooks_register(acc, cat)
+  }
+  return acc
+}

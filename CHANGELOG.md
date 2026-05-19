@@ -28,6 +28,29 @@ condensed series summaries instead of full per-patch history.
   Crash safety uses atomic temp-file rename for compaction and
   `sync_data()` per append. See
   `conformance/tests/pool_durability/*.harn`. Part of epic #1883.
+- **Tool-hook seed catalogues for the preset library (#1897).** Ships
+  the initial "command faux-pas" rule sets that back
+  `preset_run_command(stacks: [...])`. Seven catalogues land under
+  `crates/harn-stdlib/src/stdlib/stdlib_tool_hooks_catalogues.harn`:
+  `harn-canon/rust` (cargo target-dir, test capture, clippy workspace,
+  fmt --check), `python` (find vs rg, pip install --user, pytest
+  capture), `typescript` (find vs rg, npm install --force /
+  --legacy-peer-deps), `swift` (swift build/package clean), `sql`
+  (unbounded `SELECT *`), `harn` (cargo run --bin harn missing
+  --quiet), and a stackless `universal` catalogue carrying two
+  severity=error deny rules — `git push --force` against `main` /
+  `master` (with a `HARN_TOOL_HOOKS_ALLOW_FORCE_PUSH=1` escape hatch
+  and `--force-with-lease` allowlist) and recursive `rm -rf` against
+  root-adjacent paths (`/`, `~`, `..`, `$HOME`, `${HOME}`, `*`,
+  resistant to quoting bypasses). A new
+  `tool_hooks_seed_registry(stacks)` helper composes the requested
+  catalogues plus universal; `preset_run_command(...)` auto-seeds from
+  it when no explicit `registry:` override is passed, so opting into a
+  stack is a one-liner. Each rule carries an `explanation` the agent
+  can paraphrase and a `references` list pointing at upstream docs /
+  RFCs / post-mortems. Conformance coverage:
+  `conformance/tests/stdlib/tool_hooks_catalogue_{rust,python,typescript,swift,sql,harn,universal,auto_seed}.harn`.
+  Part of epic #1884 (preset tool hooks library).
 - **Tool-hook mode callback side effects (#1896).** The three shipped
   `tool_hooks_mode_*` callbacks (`rewrite_with_audit`,
   `deny_with_explanation`, `passthrough_only_audit`) now emit lifecycle

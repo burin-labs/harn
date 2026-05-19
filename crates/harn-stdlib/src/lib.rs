@@ -458,6 +458,10 @@ pub const STDLIB_SOURCES: &[StdlibSource] = &[
         source: include_str!("stdlib/stdlib_lifecycle.harn"),
     },
     StdlibSource {
+        module: "tool_hooks_catalogues",
+        source: include_str!("stdlib/stdlib_tool_hooks_catalogues.harn"),
+    },
+    StdlibSource {
         module: "tool_hooks",
         source: include_str!("stdlib/stdlib_tool_hooks.harn"),
     },

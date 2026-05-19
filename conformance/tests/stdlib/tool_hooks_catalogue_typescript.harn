@@ -1,0 +1,30 @@
+import { tool_hooks_seed_registry } from "std/tool_hooks_catalogues"
+
+/**
+ * TypeScript seed catalogue (TH-04 #1897). Verifies find/npm rules
+ * fire on real-world invocations and respect their negative cases.
+ */
+fn probe(reg, cmd) {
+  let m = tool_hooks_match(reg, cmd, {stacks: ["typescript"]})
+  if len(m) > 0 {
+    println(m[0].rule_id + " " + m[0].severity)
+  } else {
+    println("miss")
+  }
+}
+
+pipeline default() {
+  let reg = tool_hooks_seed_registry(["typescript"])
+  /* find_versus_rg: covers .ts/.tsx/.js/.jsx/.mjs/.cjs. */
+  probe(reg, "find . -name '*.ts'")
+  probe(reg, "find . -name '*.tsx'")
+  probe(reg, "find . -name '*.mjs'")
+  /* Negative: .json files aren't covered by the TS family rule. */
+  probe(reg, "find . -name '*.json'")
+  /* npm_install_force_resolution: --force or --legacy-peer-deps fire. */
+  probe(reg, "npm install --force lodash")
+  probe(reg, "npm i --legacy-peer-deps")
+  probe(reg, "npm add some-pkg --force")
+  /* Negative: vanilla `npm install` is fine. */
+  probe(reg, "npm install lodash")
+}
