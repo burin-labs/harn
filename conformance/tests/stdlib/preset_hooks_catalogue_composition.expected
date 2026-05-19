@@ -1,0 +1,9 @@
+3
+deny.git_push_force_deny
+team/deny
+error
+mid.git_push_force_rewrite
+low.git_push_force_rewrite
+2
+mid.git_push_force_rewrite
+low.git_push_force_rewrite

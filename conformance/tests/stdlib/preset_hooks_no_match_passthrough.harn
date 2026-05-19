@@ -1,0 +1,27 @@
+import { preset_run_command } from "std/tool_hooks"
+
+/**
+ * preset_hooks_no_match_passthrough (TH-07 #1900).
+ *
+ * No rule (registered, custom, or universal) matches the command. The
+ * wrapper bypasses mode dispatch entirely and runs `inner` with the
+ * original command. No audit entries are emitted because there is
+ * nothing to report.
+ */
+pipeline default() {
+  pipeline_lifecycle_audit_log_take()
+  let inner = { args -> {ok: true, ran: args.command} }
+  let wrapper = preset_run_command({stacks: ["rust"], inner: inner})
+  let result = wrapper({command: "echo hello world"})
+  /* `inner` ran with the command unchanged. */
+  println(result.ok)
+  println(result.ran)
+  /* When `inner` is omitted the wrapper still returns a no-match
+   * passthrough envelope so callers can drive the executor themselves. */
+  let preview_wrapper = preset_run_command({stacks: ["rust"]})
+  let preview = preview_wrapper({command: "echo hello world"})
+  println(preview.action)
+  println(preview.command)
+  /* Either way, no rule matched so the lifecycle audit log stays empty. */
+  println(len(pipeline_lifecycle_audit_log_take()))
+}

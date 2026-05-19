@@ -1,0 +1,32 @@
+import { preset_run_command, tool_hooks_mode_deny_with_explanation } from "std/tool_hooks"
+
+/**
+ * preset_hooks_deny_mode (TH-07 #1900).
+ *
+ * Deny-with-explanation mode: a registered rule fires, the wrapper
+ * returns a deny envelope carrying the rule's explanation, `inner` is
+ * never invoked, and a `tool_denied` lifecycle audit is logged.
+ */
+pipeline default() {
+  pipeline_lifecycle_audit_log_take()
+  /* `inner` records whether it ran into a closure-captured ref via the
+   * result envelope; on deny the envelope must omit `result` entirely. */
+  let inner = { args -> {ok: true, ran: args.command} }
+  let wrapper = preset_run_command({stacks: ["rust"], mode: tool_hooks_mode_deny_with_explanation, inner: inner})
+  let result = wrapper({command: "cargo test"})
+  println(result.action)
+  println(result.rule_id)
+  println(result.catalogue_id)
+  println(result.severity)
+  println(contains(result.explanation, "--target-dir"))
+  /* inner stays uninvoked. */
+  println(result?.result == nil)
+  /* Deny mode emits one audit entry: tool_denied with the rule, the
+   * command we refused, and the severity. */
+  let log = pipeline_lifecycle_audit_log_take()
+  println(len(log))
+  println(log[0].kind)
+  println(log[0].payload.rule_id)
+  println(log[0].payload.command)
+  println(log[0].payload.severity)
+}

@@ -1,0 +1,36 @@
+import { preset_run_command } from "std/tool_hooks"
+
+/**
+ * preset_hooks_per_stack_filtering (TH-07 #1900).
+ *
+ * `preset_run_command` calls `tool_hooks_filter(registry, stacks)`
+ * before matching, so only rules whose catalogue stack is in the
+ * opt-in list (or whose catalogue is stackless, e.g. universal) get a
+ * chance to fire. Verified by running a python-flavored command
+ * against both a rust-only wrapper (no match) and a python+rust
+ * wrapper (match).
+ */
+pipeline default() {
+  let inner = { args -> {ok: true, ran: args.command} }
+  let rust_only = preset_run_command({stacks: ["rust"], inner: inner})
+  /* A python `find . -name '*.py'` command would normally fire
+   * `python.find_versus_rg`, but the python catalogue is filtered
+   * out by the rust-only opt-in, so the wrapper falls through to
+   * `inner` with the original command. */
+  let py_against_rust = rust_only({command: "find . -name '*.py'"})
+  println(py_against_rust.ok)
+  println(py_against_rust.ran)
+  /* Symmetric: a rust `cargo build` against a python-only wrapper. */
+  let py_only = preset_run_command({stacks: ["python"], inner: inner})
+  let rust_against_py = py_only({command: "cargo build"})
+  println(rust_against_py.ok)
+  println(rust_against_py.ran)
+  /* Opt-in to both stacks and each command hits its own rule. */
+  let both = preset_run_command({stacks: ["rust", "python"], inner: inner})
+  let py_hit = both({command: "find . -name '*.py'"})
+  println(py_hit.action)
+  println(py_hit.rule_id)
+  let rust_hit = both({command: "cargo build"})
+  println(rust_hit.action)
+  println(rust_hit.rule_id)
+}

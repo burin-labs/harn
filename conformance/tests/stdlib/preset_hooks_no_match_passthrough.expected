@@ -1,0 +1,5 @@
+true
+echo hello world
+passthrough
+echo hello world
+0

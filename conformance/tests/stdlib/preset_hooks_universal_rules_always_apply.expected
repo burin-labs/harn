@@ -1,0 +1,11 @@
+deny
+universal.rm_rf_root_adjacent
+deny
+universal.git_push_force_main
+deny
+universal.rm_rf_root_adjacent
+deny
+universal.rm_rf_root_adjacent
+deny
+universal.rm_rf_root_adjacent
+ls -la

@@ -1,0 +1,30 @@
+import { preset_run_command, tool_hooks_mode_passthrough_only_audit } from "std/tool_hooks"
+
+/**
+ * preset_hooks_passthrough_audit (TH-07 #1900).
+ *
+ * Passthrough-only-audit mode: a registered rule fires but the wrapper
+ * lets the original command flow through to `inner` unchanged. The
+ * audit log captures a `tool_rule_warning` entry naming the rule and
+ * severity, and no `tool_rewritten` reminder is queued (passthrough
+ * does not mutate behaviour).
+ */
+pipeline default() {
+  pipeline_lifecycle_audit_log_take()
+  let inner = { args -> {ok: true, ran: args.command} }
+  let wrapper = preset_run_command({stacks: ["python"], mode: tool_hooks_mode_passthrough_only_audit, inner: inner})
+  let result = wrapper({command: "find . -name '*.py'"})
+  println(result.action)
+  println(result.rule_id)
+  println(result.original_command)
+  /* original_command and command are identical — no rewrite applied. */
+  println(result.command)
+  println(result.result.ran)
+  /* Exactly one audit entry, kind tool_rule_warning. No
+   * tool_hooks.reminder_injected — passthrough is observability-only. */
+  let log = pipeline_lifecycle_audit_log_take()
+  println(len(log))
+  println(log[0].kind)
+  println(log[0].payload.rule_id)
+  println(log[0].payload.severity)
+}

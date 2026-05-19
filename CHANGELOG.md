@@ -10,6 +10,28 @@ condensed series summaries instead of full per-patch history.
 
 ### Added
 
+- **Tool-hook conformance suite (TH-07, #1900).** Adds nine focused
+  `conformance/tests/stdlib/preset_hooks_*` fixtures that gap-fill the
+  TH-* surface against the spec's named scenarios:
+  `preset_hooks_basic_rewrite`, `preset_hooks_deny_mode`,
+  `preset_hooks_passthrough_audit`, `preset_hooks_no_match_passthrough`,
+  `preset_hooks_catalogue_composition`,
+  `preset_hooks_custom_rule_priority`,
+  `preset_hooks_per_stack_filtering`,
+  `preset_hooks_llm_classifier_confidence`, and
+  `preset_hooks_universal_rules_always_apply`. Each fixture isolates a
+  single contract (mode dispatch, rule-priority resolution across
+  catalogues, custom-rule precedence, stack filtering, LLM-classifier
+  threshold gating, universal-rule stack independence) so a regression
+  in any one surface points at the right TH-0X fix rather than a
+  broad-coverage test. The pre-existing
+  `tool_hooks_catalogue_{rust,python,typescript,swift,sql,harn,universal}`
+  fixtures already satisfy the spec's "two real-command fixtures per
+  catalogue" rider with multi-probe coverage of every shipped rule.
+  Combined suite runtime stays well under the 40-second budget
+  (~4.5s for the 9 new fixtures; ~25 fixtures total in the
+  tool/preset hook namespace). Part of epic #1884 (Preset tool hooks
+  library).
 - **Pool tasks wired into `harness.unsettled_state()` (#2007).** Closes
   the PL-07 follow-up from #2008: `UnsettledStateSnapshot` now carries a
   `pool_pending_tasks` bucket fed by a new
