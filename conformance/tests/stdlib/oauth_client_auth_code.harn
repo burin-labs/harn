@@ -1,0 +1,94 @@
+// std/oauth/client: authorization-code flow with PKCE S256.
+//
+// Hits the token endpoint via the sealed http_mock surface — no real
+// network. Asserts the authorize URL carries PKCE+state, the token
+// exchange persists a TokenSet to storage, the post-exchange call to
+// token() returns the access token without re-hitting the network,
+// and a token_exchanged audit event is emitted without leaking the
+// access token.
+import { client, exchange_code, start_authorization, token } from "std/oauth/client"
+import { custom } from "std/oauth/providers"
+import { memory } from "std/oauth/storage"
+
+pipeline test(task) {
+  let topic = "oauth.client.audit"
+  let cursor = event_log.latest(topic) ?? 0
+  let store = memory()
+  let provider = custom(
+    {
+      id: "mock",
+      auth_url: "https://mock-idp.example/authorize",
+      token_url: "https://mock-idp.example/token",
+      default_scopes: ["repo"],
+    },
+  )
+  let cli = client(
+    provider,
+    {
+      client_id: "cli-id",
+      client_secret: "cli-secret",
+      redirect_uri: "http://127.0.0.1:9999/callback",
+      scopes: ["repo", "user"],
+      storage: store,
+      token_auth_method: "client_secret_post",
+    },
+  )
+  let pkce = start_authorization(cli)
+  assert(contains(pkce.url, "code_challenge_method=S256"), "S256 challenge method in URL")
+  assert(contains(pkce.url, "code_challenge="), "code_challenge param present")
+  assert(contains(pkce.url, "response_type=code"), "response_type=code")
+  assert(contains(pkce.url, "client_id=cli-id"), "client_id param present")
+  assert(contains(pkce.url, "state=" + pkce.state), "state echoed into URL")
+  assert(contains(pkce.url, "scope=repo%20user"), "space-delimited scopes")
+  assert(len(pkce.code_verifier) >= 43, "verifier length >= 43")
+  assert(len(pkce.code_verifier) <= 128, "verifier length <= 128")
+  assert_eq(pkce.code_challenge_method, "S256", "PKCE method")
+  http_mock_clear()
+  http_mock(
+    "POST",
+    "https://mock-idp.example/token",
+    {
+      status: 200,
+      body: "{\"access_token\":\"AAA\",\"refresh_token\":\"RRR\",\"expires_in\":3600,\"token_type\":\"Bearer\"}",
+      headers: {"content-type": "application/json"},
+    },
+  )
+  let token_set = exchange_code(cli, pkce, "abc123", pkce.state)
+  assert_eq(token_set.access_token, "AAA", "access token returned to caller")
+  assert_eq(token_set.refresh_token, "RRR", "refresh token returned to caller")
+  assert_eq(token_set.token_type, "Bearer", "token_type recorded")
+  assert_eq(token_set.expires_in, 3600, "expires_in propagated")
+  let calls = http_mock_calls({include_sensitive: true})
+  assert_eq(len(calls), 1, "single token exchange call")
+  assert_eq(calls[0].method, "POST", "exchange was POST")
+  let body = calls[0].body
+  assert(contains(body, "grant_type=authorization_code"), "grant_type body")
+  assert(contains(body, "code=abc123"), "code body")
+  assert(contains(body, "code_verifier=" + pkce.code_verifier), "verifier in body")
+  assert(contains(body, "client_secret=cli-secret"), "client_secret in body for client_secret_post")
+  assert(contains(body, "redirect_uri="), "redirect_uri in body")
+  assert(contains(body, "scope=repo%20user"), "scopes in body")
+  let access = token(cli)
+  assert_eq(access, "AAA", "token() returns stored access token without refreshing")
+  let calls_after_token = http_mock_calls({include_sensitive: true})
+  assert_eq(len(calls_after_token), 1, "token() did not re-issue token call")
+  let stream = event_log.subscribe({topic: topic, from_cursor: cursor})
+  let logged = stream.next().value
+  assert_eq(logged.kind, "token_exchanged", "audit event kind")
+  assert_eq(logged.payload.provider, "mock", "audit provider id")
+  assert_eq(logged.payload.storage_key, "mock", "audit storage_key")
+  assert_eq(logged.payload.next.has_access_token, true, "audit records access presence")
+  assert_eq(logged.payload.next.has_refresh_token, true, "audit records refresh presence")
+  assert(logged.payload.next?.access_token == nil, "audit does NOT leak access_token")
+  assert(logged.payload.next?.refresh_token == nil, "audit does NOT leak refresh_token")
+  var threw = false
+  try {
+    let _ = exchange_code(cli, pkce, "abc123", "WRONG-STATE")
+  } catch (err) {
+    if contains(to_string(err), "state mismatch") {
+      threw = true
+    }
+  }
+  assert(threw, "state mismatch should have thrown")
+  log("oauth client auth code ok")
+}

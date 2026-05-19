@@ -518,6 +518,11 @@ pub(crate) const SIGNATURES: &[BuiltinSignature] = &[
         &[Param::new("input", TY_BYTES)],
         TY_STRING,
     ),
+    BuiltinSignature::simple(
+        "bytes_to_base64url",
+        &[Param::new("input", Ty::Union(&[TY_BYTES, TY_STRING]))],
+        TY_STRING,
+    ),
     BuiltinSignature::simple("bytes_to_hex", &[Param::new("input", TY_BYTES)], TY_STRING),
     BuiltinSignature::simple(
         "bytes_to_string",
@@ -770,6 +775,7 @@ pub(crate) const SIGNATURES: &[BuiltinSignature] = &[
         TY_STRING,
     ),
     BuiltinSignature::simple("cos", &[Param::new("value", TY_NUMBER)], TY_FLOAT),
+    BuiltinSignature::simple("crypto_random_bytes", &[Param::new("n", TY_INT)], TY_BYTES),
     BuiltinSignature::simple("current_policy", &[], TY_ANY),
     BuiltinSignature::simple(
         "csv_parse",
@@ -1619,6 +1625,11 @@ pub(crate) const SIGNATURES: &[BuiltinSignature] = &[
     BuiltinSignature::variadic("session_verify", &[Param::new("args", TY_ANY)], TY_DICT),
     BuiltinSignature::variadic("sha224", &[Param::new("args", TY_ANY)], TY_STRING),
     BuiltinSignature::variadic("sha256", &[Param::new("args", TY_ANY)], TY_STRING),
+    BuiltinSignature::simple(
+        "sha256_base64url",
+        &[Param::new("input", Ty::Union(&[TY_STRING, TY_BYTES]))],
+        TY_STRING,
+    ),
     BuiltinSignature::variadic("sha384", &[Param::new("args", TY_ANY)], TY_STRING),
     BuiltinSignature::variadic("sha512", &[Param::new("args", TY_ANY)], TY_STRING),
     BuiltinSignature::variadic("sha512_256", &[Param::new("args", TY_ANY)], TY_STRING),

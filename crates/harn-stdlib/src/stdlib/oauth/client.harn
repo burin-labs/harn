@@ -1,0 +1,668 @@
+/**
+ * std/oauth/client — RFC 6749 + RFC 7636 OAuth client with PKCE +
+ * transparent refresh per RFC 9700 BCP.
+ *
+ * `client(provider, opts)` builds a client handle around a provider
+ * record from `std/oauth/providers` (or any compatible dict) and a
+ * storage backend from `std/oauth/storage`. The handle exposes
+ * authorization-code helpers, an explicit refresh, and a
+ * `request(method, url, opts?)` wrapper that injects a Bearer token,
+ * detects 401, and refreshes + retries once.
+ *
+ * `token(client)` is the convenience that returns a valid access token
+ * string and refreshes transparently when the stored token is past 75%
+ * of its TTL. Tokens never travel through closure captures —
+ * `token()` always reads the storage backend as the source of truth so
+ * concurrent in-process callers see the latest refresh.
+ *
+ *     import { providers } from "std/oauth/providers"
+ *     import { memory } from "std/oauth/storage"
+ *     import { client, token } from "std/oauth/client"
+ *
+ *     let cli = client(
+ *       providers().github,
+ *       {
+ *         client_id: env("GITHUB_CLIENT_ID"),
+ *         client_secret: env("GITHUB_CLIENT_SECRET"),
+ *         scopes: ["read:user", "user:email"],
+ *         redirect_uri: "http://127.0.0.1:8765/callback",
+ *         storage: memory(),
+ *       },
+ *     )
+ *
+ *     // Human-authorization phase (run once, then exchange the code):
+ *     let pkce = cli.start_authorization()
+ *     // open pkce.url in a browser, capture the redirect code + state,
+ *     // then:
+ *     cli.exchange_code(pkce, redirect_code, redirect_state)
+ *
+ *     // Subsequent calls: get a valid access token (auto-refresh):
+ *     let access = token(cli)
+ *
+ *     // Or let the client drive HTTP and retry once on 401:
+ *     let response = cli.request("GET", "https://api.github.com/user")
+ *
+ * Audit: every successful refresh emits an `oauth.client.audit`
+ * `token_refreshed` event log entry containing the provider id,
+ * storage key, and pre/post expiry — never the new access token.
+ *
+ * Concurrency: storage IS the source of truth. Two concurrent
+ * `token(cli)` calls may both observe staleness and both issue a
+ * refresh; the second `set` wins and both callers see the same
+ * fresh-enough token afterwards. Pre-refresh at 75% TTL keeps that
+ * window narrow.
+ */
+import { merge } from "std/json"
+
+let __DEFAULT_PKCE_VERIFIER_BYTES = 64
+
+let __DEFAULT_STATE_BYTES = 16
+
+let __TTL_PREREFRESH_NUMERATOR = 3
+
+let __TTL_PREREFRESH_DENOMINATOR = 4
+
+let __DEFAULT_TOKEN_KEY = "access-token"
+
+let __AUDIT_TOPIC = "oauth.client.audit"
+
+let __AUDIT_KIND_REFRESH = "token_refreshed"
+
+let __AUDIT_KIND_EXCHANGE = "token_exchanged"
+
+type OAuthClient = dict
+
+fn __require_string(value, field) {
+  let text = to_string(value ?? "")
+  if text == "" {
+    throw "std/oauth/client: " + field + " is required"
+  }
+  return text
+}
+
+fn __require_url(value, field) {
+  return __require_string(value, field)
+}
+
+fn __require_provider(provider) {
+  if type_of(provider) != "dict" {
+    throw "std/oauth/client: provider must be a dict (use std/oauth/providers)"
+  }
+  let _ = __require_url(provider?.auth_url, "provider.auth_url")
+  let _ = __require_url(provider?.token_url, "provider.token_url")
+  return provider
+}
+
+fn __require_storage(storage) {
+  if type_of(storage) != "dict" {
+    throw "std/oauth/client: opts.storage is required (use std/oauth/storage)"
+  }
+  let g = storage?.get
+  let s = storage?.set
+  let d = storage?.delete
+  if type_of(g) != "closure" && type_of(g) != "builtin" {
+    throw "std/oauth/client: opts.storage.get must be a function"
+  }
+  if type_of(s) != "closure" && type_of(s) != "builtin" {
+    throw "std/oauth/client: opts.storage.set must be a function"
+  }
+  if type_of(d) != "closure" && type_of(d) != "builtin" {
+    throw "std/oauth/client: opts.storage.delete must be a function"
+  }
+  return storage
+}
+
+fn __pkce_verifier_string(n_bytes) {
+  // base64url-no-pad over CSPRNG bytes. RFC 7636 §4.1 requires 43..128
+  // chars from the URL-safe alphabet; 64 random bytes encode to ~86
+  // chars, well inside the band.
+  return bytes_to_base64url(crypto_random_bytes(n_bytes))
+}
+
+fn __pkce_challenge(verifier) {
+  // SHA-256 over the ASCII verifier, base64url-no-pad encoded —
+  // RFC 7636 §4.2 S256 method.
+  return sha256_base64url(verifier)
+}
+
+fn __random_state(n_bytes) {
+  return bytes_to_base64url(crypto_random_bytes(n_bytes))
+}
+
+fn __scope_separator(provider) {
+  let id = lowercase(to_string(provider?.id ?? ""))
+  if id == "linear" {
+    return ","
+  }
+  return " "
+}
+
+fn __join_scopes(scopes, separator) {
+  var parts = []
+  if scopes != nil {
+    for raw in scopes {
+      let text = trim(to_string(raw ?? ""))
+      if text != "" {
+        parts = parts + [text]
+      }
+    }
+  }
+  if len(parts) == 0 {
+    return nil
+  }
+  return join(parts, separator)
+}
+
+fn __url_encode_value(value) {
+  return url_encode(to_string(value ?? ""))
+}
+
+fn __form_body(params) {
+  var parts = []
+  for entry in params {
+    parts = parts + [url_encode(entry.key) + "=" + __url_encode_value(entry.value)]
+  }
+  return join(parts, "&")
+}
+
+fn __append_query(url, pairs) {
+  var sep = "?"
+  if contains(url, "?") {
+    sep = "&"
+  }
+  var built = url
+  var first = true
+  for entry in pairs {
+    let value = entry.value
+    if value == nil {
+      continue
+    }
+    let prefix = first ? sep : "&"
+    built = built + prefix + url_encode(entry.key) + "=" + __url_encode_value(value)
+    first = false
+  }
+  return built
+}
+
+fn __token_auth_method(opts, has_secret) {
+  let explicit = opts?.token_auth_method
+  if explicit != nil && to_string(explicit) != "" {
+    return to_string(explicit)
+  }
+  if has_secret {
+    return "client_secret_post"
+  }
+  return "none"
+}
+
+fn __validate_auth_method(method) {
+  if method == "none" || method == "client_secret_post" || method == "client_secret_basic" {
+    return method
+  }
+  throw "std/oauth/client: unsupported token_auth_method `" + method + "`"
+}
+
+fn __now_seconds() {
+  return to_int(timestamp())
+}
+
+fn __token_expires_at(token, now_s) {
+  let stored = token?.expires_at_unix
+  if stored != nil {
+    return to_int(stored)
+  }
+  let ttl = token?.expires_in
+  if ttl != nil {
+    return now_s + to_int(ttl)
+  }
+  return nil
+}
+
+fn __token_is_stale(token, now_s) {
+  if token == nil {
+    return true
+  }
+  let access = to_string(token?.access_token ?? "")
+  if access == "" {
+    return true
+  }
+  let issued = token?.issued_at_unix
+  let expires = __token_expires_at(token, now_s)
+  if expires == nil {
+    return false
+  }
+  if now_s >= expires {
+    return true
+  }
+  if issued == nil {
+    return false
+  }
+  let lifetime = expires - to_int(issued)
+  if lifetime <= 0 {
+    return false
+  }
+  let threshold = to_int(issued) + lifetime * __TTL_PREREFRESH_NUMERATOR / __TTL_PREREFRESH_DENOMINATOR
+  return now_s >= threshold
+}
+
+fn __redact_token(token) {
+  if token == nil {
+    return nil
+  }
+  return {
+    has_access_token: token?.access_token != nil && to_string(token?.access_token) != "",
+    has_refresh_token: token?.refresh_token != nil && to_string(token?.refresh_token) != "",
+    expires_at_unix: token?.expires_at_unix,
+    issued_at_unix: token?.issued_at_unix,
+    scopes: token?.scopes,
+    token_type: token?.token_type,
+  }
+}
+
+fn __redact_endpoint(url) {
+  // Token endpoints are not secrets, but we strip query strings just
+  // in case a custom provider embeds a tenant token in a query param.
+  if url == nil {
+    return nil
+  }
+  let text = to_string(url)
+  if !contains(text, "?") {
+    return text
+  }
+  return split(text, "?")[0]
+}
+
+fn __post_token_request(token_url, client_id, client_secret, auth_method, form_pairs) {
+  let method = __validate_auth_method(auth_method)
+  var headers = {"Content-Type": "application/x-www-form-urlencoded", Accept: "application/json"}
+  var pairs = form_pairs + [{key: "client_id", value: client_id}]
+  if method == "client_secret_basic" {
+    if client_secret == nil {
+      throw "std/oauth/client: client_secret_basic requires client_secret"
+    }
+    let blob = to_string(client_id) + ":" + to_string(client_secret)
+    headers = merge(headers, {Authorization: "Basic " + base64_encode(blob)})
+  } else if method == "client_secret_post" {
+    if client_secret == nil {
+      throw "std/oauth/client: client_secret_post requires client_secret"
+    }
+    pairs = pairs + [{key: "client_secret", value: client_secret}]
+  }
+  let body = __form_body(pairs)
+  let response = http_post(token_url, body, {headers: headers})
+  if !(response?.ok ?? false) {
+    let parsed = __safe_json_parse(response?.body ?? "")
+    let detail = parsed?.error_description ?? parsed?.error ?? "token endpoint returned status "
+      + to_string(response?.status ?? 0)
+    throw "std/oauth/client: token request failed: " + to_string(detail)
+  }
+  let parsed = __safe_json_parse(response?.body ?? "")
+  if parsed == nil {
+    throw "std/oauth/client: token endpoint did not return JSON"
+  }
+  let access = parsed?.access_token
+  if access == nil || to_string(access) == "" {
+    let err_msg = parsed?.error_description ?? parsed?.error ?? "missing access_token"
+    throw "std/oauth/client: token response invalid: " + to_string(err_msg)
+  }
+  return parsed
+}
+
+fn __safe_json_parse(text) {
+  let s = to_string(text ?? "")
+  if s == "" {
+    return nil
+  }
+  try {
+    return json_parse(s)
+  } catch (_err) {
+    return nil
+  }
+}
+
+fn __build_token_set(parsed, scopes, issued_at, prev_refresh) {
+  var token_set = {access_token: to_string(parsed.access_token), issued_at_unix: issued_at}
+  let token_type = parsed?.token_type
+  if token_type != nil {
+    token_set = token_set + {token_type: to_string(token_type)}
+  }
+  let expires_in = parsed?.expires_in
+  if expires_in != nil {
+    let ttl_s = to_int(expires_in)
+    token_set = token_set + {expires_in: ttl_s, expires_at_unix: issued_at + ttl_s}
+  } else if parsed?.expires_at_unix != nil {
+    token_set = token_set + {expires_at_unix: to_int(parsed.expires_at_unix)}
+  }
+  let new_refresh = parsed?.refresh_token
+  if new_refresh != nil && to_string(new_refresh) != "" {
+    token_set = token_set + {refresh_token: to_string(new_refresh)}
+  } else if prev_refresh != nil && to_string(prev_refresh) != "" {
+    // Preserve the prior refresh token on grants that don't rotate.
+    token_set = token_set + {refresh_token: to_string(prev_refresh)}
+  }
+  let returned_scope = parsed?.scope
+  if returned_scope != nil && to_string(returned_scope) != "" {
+    token_set = token_set + {scopes: split(to_string(returned_scope), " ")}
+  } else if scopes != nil && len(scopes) > 0 {
+    token_set = token_set + {scopes: scopes}
+  }
+  return token_set
+}
+
+fn __audit_refresh(provider_id, storage_key, prev, next, reason) {
+  // Audit MUST NOT include the access token. Only timing and presence.
+  let payload = {
+    provider: to_string(provider_id),
+    storage_key: to_string(storage_key),
+    reason: to_string(reason),
+    prev: __redact_token(prev),
+    next: __redact_token(next),
+  }
+  let _ = event_log.emit(__AUDIT_TOPIC, __AUDIT_KIND_REFRESH, payload, {provider: to_string(provider_id)})
+}
+
+fn __audit_exchange(provider_id, storage_key, next) {
+  let payload = {provider: to_string(provider_id), storage_key: to_string(storage_key), next: __redact_token(next)}
+  let _ = event_log.emit(__AUDIT_TOPIC, __AUDIT_KIND_EXCHANGE, payload, {provider: to_string(provider_id)})
+}
+
+fn __refresh_locked(cfg, prev_token, reason) {
+  let refresh = prev_token?.refresh_token
+  if refresh == nil || to_string(refresh) == "" {
+    throw "std/oauth/client: no refresh_token available; re-run authorization"
+  }
+  var form = [{key: "grant_type", value: "refresh_token"}, {key: "refresh_token", value: refresh}]
+  let scopes_str = __join_scopes(cfg.scopes, cfg.scope_separator)
+  if scopes_str != nil {
+    form = form + [{key: "scope", value: scopes_str}]
+  }
+  let issued_at = __now_seconds()
+  let parsed = __post_token_request(cfg.token_url, cfg.client_id, cfg.client_secret, cfg.token_auth_method, form)
+  let next_token = __build_token_set(parsed, cfg.scopes, issued_at, refresh)
+  cfg.storage.set(cfg.storage_key, next_token)
+  __audit_refresh(cfg.provider_id, cfg.storage_key, prev_token, next_token, reason)
+  return next_token
+}
+
+fn __maybe_refresh(cfg, reason) {
+  let stored = cfg.storage.get(cfg.storage_key)
+  if stored == nil {
+    throw "std/oauth/client: no token in storage; run authorization first"
+  }
+  let now_s = __now_seconds()
+  if !__token_is_stale(stored, now_s) && reason != "forced" && reason != "post_401" {
+    return stored
+  }
+  return __refresh_locked(cfg, stored, reason)
+}
+
+fn __get_valid_token(cfg) {
+  let stored = cfg.storage.get(cfg.storage_key)
+  let now_s = __now_seconds()
+  if stored != nil && !__token_is_stale(stored, now_s) {
+    return stored
+  }
+  return __maybe_refresh(cfg, "ttl_threshold")
+}
+
+fn __start_authorization(cfg) {
+  let verifier = __pkce_verifier_string(__DEFAULT_PKCE_VERIFIER_BYTES)
+  let challenge = __pkce_challenge(verifier)
+  let state = __random_state(__DEFAULT_STATE_BYTES)
+  let scopes_str = __join_scopes(cfg.scopes, cfg.scope_separator)
+  var pairs = [
+    {key: "response_type", value: "code"},
+    {key: "client_id", value: cfg.client_id},
+    {key: "redirect_uri", value: cfg.redirect_uri},
+    {key: "state", value: state},
+    {key: "code_challenge", value: challenge},
+    {key: "code_challenge_method", value: "S256"},
+  ]
+  if scopes_str != nil {
+    pairs = pairs + [{key: "scope", value: scopes_str}]
+  }
+  if cfg.audience != nil && to_string(cfg.audience) != "" {
+    pairs = pairs + [{key: "audience", value: cfg.audience}]
+  }
+  if cfg.extra_auth_params != nil {
+    for k in cfg.extra_auth_params.keys() {
+      pairs = pairs + [{key: k, value: cfg.extra_auth_params[k]}]
+    }
+  }
+  let url = __append_query(cfg.auth_url, pairs)
+  return {
+    url: url,
+    state: state,
+    code_verifier: verifier,
+    code_challenge: challenge,
+    code_challenge_method: "S256",
+    redirect_uri: cfg.redirect_uri,
+  }
+}
+
+fn __exchange_code(cfg, pkce, code, state) {
+  if pkce == nil || type_of(pkce) != "dict" {
+    throw "std/oauth/client: exchange_code requires the pkce dict from start_authorization"
+  }
+  let expected_state = to_string(pkce?.state ?? "")
+  let supplied_state = to_string(state ?? "")
+  if expected_state == "" || supplied_state == "" || expected_state != supplied_state {
+    throw "std/oauth/client: OAuth state mismatch; aborting exchange"
+  }
+  let verifier = to_string(pkce?.code_verifier ?? "")
+  if verifier == "" {
+    throw "std/oauth/client: missing PKCE code_verifier in pkce dict"
+  }
+  let code_str = to_string(code ?? "")
+  if code_str == "" {
+    throw "std/oauth/client: authorization code is required"
+  }
+  var form = [
+    {key: "grant_type", value: "authorization_code"},
+    {key: "code", value: code_str},
+    {key: "redirect_uri", value: cfg.redirect_uri},
+    {key: "code_verifier", value: verifier},
+  ]
+  let scopes_str = __join_scopes(cfg.scopes, cfg.scope_separator)
+  if scopes_str != nil {
+    form = form + [{key: "scope", value: scopes_str}]
+  }
+  let issued_at = __now_seconds()
+  let parsed = __post_token_request(cfg.token_url, cfg.client_id, cfg.client_secret, cfg.token_auth_method, form)
+  let token_set = __build_token_set(parsed, cfg.scopes, issued_at, nil)
+  cfg.storage.set(cfg.storage_key, token_set)
+  __audit_exchange(cfg.provider_id, cfg.storage_key, token_set)
+  return token_set
+}
+
+fn __with_bearer(headers, access_token) {
+  let base = headers ?? {}
+  return merge(base, {Authorization: "Bearer " + to_string(access_token)})
+}
+
+fn __token_request(cfg, method, url, opts) {
+  let opts_dict = opts ?? {}
+  let access = __get_valid_token(cfg)
+  let headers = __with_bearer(opts_dict?.headers ?? {}, access.access_token)
+  let body = opts_dict?.body
+  let http_opts = merge(opts_dict, {headers: headers})
+  let response = http_request(method, url, http_opts)
+  if to_int(response?.status ?? 0) != 401 {
+    return response
+  }
+  // 401 on a token-bearing call -> refresh + retry once.
+  let refreshed = __maybe_refresh(cfg, "post_401")
+  let retried_headers = __with_bearer(opts_dict?.headers ?? {}, refreshed.access_token)
+  let retried_opts = merge(opts_dict, {headers: retried_headers})
+  return http_request(method, url, retried_opts)
+}
+
+/**
+ * client builds an OAuth client handle around a provider record and a
+ * storage backend. `opts` requires `client_id` and `storage`; the rest
+ * are optional and default from the provider record.
+ *
+ * Required `opts`:
+ *   - client_id:    OAuth client identifier.
+ *   - storage:      a handle from `std/oauth/storage`.
+ *
+ * Optional `opts`:
+ *   - client_secret:        non-nil enables confidential-client flows.
+ *   - scopes:               list<string>; defaults to provider.default_scopes.
+ *   - redirect_uri:         required for authorization-code flow.
+ *   - storage_key:          per-installation key; defaults to provider id.
+ *   - token_auth_method:    "none" | "client_secret_post" |
+ *                           "client_secret_basic".
+ *   - audience:             extra `audience=` parameter on /authorize.
+ *   - extra_auth_params:    additional key/value pairs on /authorize.
+ *
+ * @effects: [time, net]
+ * @allocation: heap
+ * @errors: [invalid_argument]
+ * @api_stability: experimental
+ * @example: client(providers().github, {client_id: id, storage: memory()})
+ */
+pub fn client(provider, opts) -> OAuthClient {
+  if type_of(opts) != "dict" {
+    throw "std/oauth/client: opts must be a dict"
+  }
+  let provider_record = __require_provider(provider)
+  let storage = __require_storage(opts?.storage)
+  let client_id = __require_string(opts?.client_id, "opts.client_id")
+  let client_secret = opts?.client_secret
+  let secret_str = client_secret == nil ? nil : to_string(client_secret)
+  let has_secret = secret_str != nil && secret_str != ""
+  let token_auth_method = __validate_auth_method(__token_auth_method(opts, has_secret))
+  let scopes = opts?.scopes ?? provider_record?.default_scopes ?? []
+  let scope_separator = __scope_separator(provider_record)
+  let storage_key = to_string(opts?.storage_key ?? provider_record?.id ?? __DEFAULT_TOKEN_KEY)
+  let cfg = {
+    provider_id: to_string(provider_record?.id ?? "custom"),
+    auth_url: to_string(provider_record.auth_url),
+    token_url: to_string(provider_record.token_url),
+    revoke_url: provider_record?.revoke_url,
+    client_id: client_id,
+    client_secret: has_secret ? secret_str : nil,
+    scopes: scopes,
+    scope_separator: scope_separator,
+    redirect_uri: opts?.redirect_uri == nil ? nil : to_string(opts.redirect_uri),
+    token_auth_method: token_auth_method,
+    storage: storage,
+    storage_key: storage_key,
+    audience: opts?.audience,
+    extra_auth_params: opts?.extra_auth_params,
+  }
+  return {
+    _namespace: "oauth_client",
+    provider_id: cfg.provider_id,
+    storage_key: storage_key,
+    scopes: scopes,
+    redirect_uri: cfg.redirect_uri,
+    token_auth_method: token_auth_method,
+    token_endpoint: __redact_endpoint(cfg.token_url),
+    auth_endpoint: __redact_endpoint(cfg.auth_url),
+    start_authorization: { -> __start_authorization(cfg) },
+    exchange_code: { pkce, code, state -> __exchange_code(cfg, pkce, code, state) },
+    refresh: { -> __maybe_refresh(cfg, "forced") },
+    token: { -> __get_valid_token(cfg).access_token },
+    current_token: { -> cfg.storage.get(cfg.storage_key) },
+    request: { method, url, http_opts = nil -> __token_request(cfg, method, url, http_opts) },
+    revoke: { -> cfg.storage.delete(cfg.storage_key) },
+  }
+}
+
+/**
+ * token returns a valid access token for `client`, refreshing
+ * transparently when the stored token is past 75% of its TTL or
+ * already expired. Routes through the client's storage backend on
+ * every call so concurrent in-process callers see the latest refresh.
+ *
+ * @effects: [time, net]
+ * @allocation: heap
+ * @errors: [invalid_argument]
+ * @api_stability: experimental
+ * @example: token(cli)
+ */
+pub fn token(cli) -> string {
+  if type_of(cli) != "dict" || cli?._namespace != "oauth_client" {
+    throw "std/oauth/client: token() requires an OAuth client handle"
+  }
+  let getter = cli.token
+  return to_string(getter())
+}
+
+/**
+ * refresh forces a refresh of the stored token, ignoring TTL. Useful
+ * when a downstream caller has separately observed token revocation.
+ *
+ * @effects: [time, net]
+ * @allocation: heap
+ * @errors: [invalid_argument]
+ * @api_stability: experimental
+ * @example: refresh(cli)
+ */
+pub fn refresh(cli) {
+  if type_of(cli) != "dict" || cli?._namespace != "oauth_client" {
+    throw "std/oauth/client: refresh() requires an OAuth client handle"
+  }
+  return cli.refresh()
+}
+
+/**
+ * request performs a token-bearing HTTP call through the client.
+ * Mirrors `http_request(method, url, opts)` with two additions:
+ * a Bearer token is injected on every call, and a single retry on 401
+ * issues a forced refresh and replays the request. Returns the same
+ * shape as `http_request`.
+ *
+ * @effects: [time, net]
+ * @allocation: heap
+ * @errors: [invalid_argument]
+ * @api_stability: experimental
+ * @example: request(cli, "GET", "https://api.github.com/user")
+ */
+pub fn request(cli, method, url, opts = nil) {
+  if type_of(cli) != "dict" || cli?._namespace != "oauth_client" {
+    throw "std/oauth/client: request() requires an OAuth client handle"
+  }
+  return cli.request(method, url, opts)
+}
+
+/**
+ * start_authorization builds an authorization URL plus the PKCE pair
+ * required to exchange the resulting code. The caller is responsible
+ * for sending the user to `pkce.url` and capturing the redirected
+ * `code` and `state`.
+ *
+ * @effects: []
+ * @allocation: heap
+ * @errors: [invalid_argument]
+ * @api_stability: experimental
+ * @example: start_authorization(cli)
+ */
+pub fn start_authorization(cli) {
+  if type_of(cli) != "dict" || cli?._namespace != "oauth_client" {
+    throw "std/oauth/client: start_authorization() requires an OAuth client handle"
+  }
+  if cli.redirect_uri == nil || to_string(cli.redirect_uri) == "" {
+    throw "std/oauth/client: redirect_uri is required for authorization-code flow"
+  }
+  return cli.start_authorization()
+}
+
+/**
+ * exchange_code completes the authorization-code flow by trading the
+ * redirected `code` for a token set, validating PKCE and `state`.
+ *
+ * @effects: [time, net]
+ * @allocation: heap
+ * @errors: [invalid_argument]
+ * @api_stability: experimental
+ * @example: exchange_code(cli, pkce, code, state)
+ */
+pub fn exchange_code(cli, pkce, code, state) {
+  if type_of(cli) != "dict" || cli?._namespace != "oauth_client" {
+    throw "std/oauth/client: exchange_code() requires an OAuth client handle"
+  }
+  return cli.exchange_code(pkce, code, state)
+}

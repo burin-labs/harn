@@ -1,0 +1,73 @@
+// std/oauth/client: pre-refresh at 75% of TTL.
+//
+// Seeds a TokenSet that expires in 1h with mocked time pinned to
+// issue, then advances the mocked clock past 75% TTL and asserts
+// that token() proactively refreshes against the mocked token
+// endpoint. A second token() before the threshold returns the
+// cached value without a network call.
+import { client, token } from "std/oauth/client"
+import { custom } from "std/oauth/providers"
+import { memory } from "std/oauth/storage"
+
+pipeline test(task) {
+  let topic = "oauth.client.audit"
+  let cursor = event_log.latest(topic) ?? 0
+  let _ = mock_time(1700000000000)
+  let store = memory()
+  let provider = custom(
+    {
+      id: "mockTTL",
+      auth_url: "https://idp.example/authorize",
+      token_url: "https://idp.example/token",
+      default_scopes: ["read"],
+    },
+  )
+  let now = to_int(timestamp())
+  let ttl_seconds = 3600
+  store
+    .set(
+    "mockTTL",
+    {
+      access_token: "ACCESS-1",
+      refresh_token: "REFRESH-1",
+      issued_at_unix: now,
+      expires_at_unix: now + ttl_seconds,
+      token_type: "Bearer",
+    },
+  )
+  let cli = client(provider, {client_id: "cli-id", redirect_uri: "http://127.0.0.1:9999/cb", storage: store})
+  http_mock_clear()
+  http_mock(
+    "POST",
+    "https://idp.example/token",
+    {
+      status: 200,
+      body: "{\"access_token\":\"ACCESS-2\",\"refresh_token\":\"REFRESH-2\",\"expires_in\":3600,\"token_type\":\"Bearer\"}",
+      headers: {"content-type": "application/json"},
+    },
+  )
+  // Well before 75% TTL: no refresh expected.
+  let _ = advance_time(60 * 60 * 1000 / 2)
+  let access_before = token(cli)
+  assert_eq(access_before, "ACCESS-1", "token() before TTL threshold returns cached access")
+  let calls_before = http_mock_calls({include_sensitive: true})
+  assert_eq(len(calls_before), 0, "no token endpoint call before threshold")
+  // Past 75% TTL: pre-refresh must fire.
+  let _ = advance_time(60 * 60 * 1000 * 30 / 100)
+  let access_after = token(cli)
+  assert_eq(access_after, "ACCESS-2", "token() past 75% TTL returns rotated access")
+  let calls_after = http_mock_calls({include_sensitive: true})
+  assert_eq(len(calls_after), 1, "exactly one token endpoint call after threshold")
+  assert(contains(calls_after[0].body, "grant_type=refresh_token"), "refresh grant used")
+  assert(contains(calls_after[0].body, "refresh_token=REFRESH-1"), "old refresh token sent")
+  let after = store.get("mockTTL")
+  assert_eq(after.access_token, "ACCESS-2", "storage rotated")
+  assert_eq(after.refresh_token, "REFRESH-2", "storage rotated refresh token")
+  let stream = event_log.subscribe({topic: topic, from_cursor: cursor})
+  let logged = stream.next().value
+  assert_eq(logged.kind, "token_refreshed", "audit kind near TTL")
+  assert_eq(logged.payload.reason, "ttl_threshold", "audit reason for pre-refresh")
+  assert(logged.payload.next?.access_token == nil, "audit never includes new access token")
+  let _ = unmock_time()
+  log("oauth client refresh near ttl ok")
+}

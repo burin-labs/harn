@@ -630,6 +630,64 @@ pub(crate) fn register_crypto_builtins(vm: &mut Vm) {
             Err(e) => Err(VmError::Runtime(format!("base64url decode error: {e}"))),
         }
     });
+    // bytes_to_base64url(bytes) -> base64url-no-pad string. Accepts bytes
+    // or a string (treated as UTF-8 bytes). Use for PKCE S256 challenges,
+    // JWT segments, and any other URL-safe encoding of raw bytes.
+    vm.register_builtin("bytes_to_base64url", |args, _out| {
+        use base64::Engine;
+        let bytes = match args.first() {
+            Some(VmValue::Bytes(bytes)) => bytes.as_slice().to_vec(),
+            Some(other) => other.display().into_bytes(),
+            None => Vec::new(),
+        };
+        Ok(VmValue::String(Rc::from(
+            base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(bytes),
+        )))
+    });
+    // sha256_base64url(input) -> base64url-no-pad encoding of SHA-256.
+    // Convenience for RFC 7636 PKCE S256 challenges so callers do not
+    // round-trip through hex.
+    vm.register_builtin("sha256_base64url", |args, _out| {
+        use base64::Engine;
+        use sha2::Digest;
+        let bytes = match args.first() {
+            Some(VmValue::Bytes(bytes)) => bytes.as_slice().to_vec(),
+            Some(other) => other.display().into_bytes(),
+            None => Vec::new(),
+        };
+        let digest = sha2::Sha256::digest(&bytes);
+        Ok(VmValue::String(Rc::from(
+            base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(digest),
+        )))
+    });
+    // crypto_random_bytes(n) -> VmValue::Bytes of length n drawn from a
+    // CSPRNG. Used by OAuth.client to build PKCE verifiers and state
+    // tokens with strong entropy. n must be a positive integer.
+    vm.register_builtin("crypto_random_bytes", |args, _out| {
+        use rand::Rng as _;
+        let n = match args.first() {
+            Some(VmValue::Int(value)) if *value > 0 => *value as usize,
+            Some(other) => {
+                return Err(VmError::Runtime(format!(
+                    "crypto_random_bytes: n must be a positive integer, got {}",
+                    other.type_name()
+                )));
+            }
+            None => {
+                return Err(VmError::Runtime(
+                    "crypto_random_bytes: n is required".to_string(),
+                ));
+            }
+        };
+        if n > 1024 {
+            return Err(VmError::Runtime(format!(
+                "crypto_random_bytes: n must be <= 1024, got {n}"
+            )));
+        }
+        let mut out = vec![0u8; n];
+        rand::rng().fill_bytes(&mut out);
+        Ok(VmValue::Bytes(Rc::new(out)))
+    });
     vm.register_builtin("base32_encode", |args, _out| {
         let val = display_arg(args);
         Ok(VmValue::String(Rc::from(

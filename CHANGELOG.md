@@ -87,6 +87,30 @@ condensed series summaries instead of full per-patch history.
   `pool_task` handle so handlers can call `pool_wait(dispatch.result)`
   directly. Conformance:
   `conformance/tests/triggers/trigger_spawn_to_pool_*`.
+- **`std/oauth/client` PKCE-S256 client + transparent refresh (#1902).**
+  Adds `OAuth.client(provider, opts)` and `OAuth.token(client)` per
+  RFC 6749 (authorization-code) + RFC 7636 (PKCE S256, always
+  enforced) + RFC 9700 BCP refresh guidance. The client builds on the
+  OA-04 `std/oauth/providers` catalogue and the OA-03
+  `std/oauth/storage` backends so token persistence and rotation use
+  the same primitives as the rest of the stack. `start_authorization`
+  builds the PKCE-protected `/authorize` URL plus a one-shot
+  `code_verifier / state` pair; `exchange_code` validates state, sends
+  the code + verifier, and writes the resulting TokenSet to storage.
+  `token(cli)` always reads storage as the source of truth so two
+  in-process callers see the latest refresh, and pre-refreshes when
+  the stored TokenSet is past 75% of its TTL. `request(cli, method,
+  url, opts?)` injects a Bearer token and retries exactly once after a
+  401, forcing a refresh between attempts. Every successful refresh
+  or exchange emits a `token_refreshed` / `token_exchanged` event on
+  the `oauth.client.audit` topic; audit payloads carry only presence
+  flags + timestamps and never include the new access/refresh tokens.
+  New supporting builtins in `std/crypto`: `bytes_to_base64url`,
+  `sha256_base64url`, and `crypto_random_bytes(n)` (CSPRNG, capped at
+  1024 bytes). Conformance coverage:
+  `conformance/tests/stdlib/oauth_client_auth_code.harn`,
+  `oauth_client_refresh_on_401.harn`,
+  `oauth_client_refresh_near_ttl.harn`.
 - **`std/oauth/storage` token storage backends (#1904).** Five
   interchangeable backends for the OAuth client (#1885 OA-03):
   `memory()` (per-VM, ephemeral), `file(path, encryption_key)` (single

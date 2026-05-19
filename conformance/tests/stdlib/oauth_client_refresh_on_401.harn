@@ -1,0 +1,83 @@
+// std/oauth/client: a 401 from a token-bearing call refreshes the
+// access token and retries the original request exactly once.
+//
+// Seeds a stored TokenSet via the storage backend (no auth-code dance),
+// mocks the protected resource to return [401, 200] across two calls,
+// mocks the token endpoint to issue a rotated token, and asserts that
+// `request()` returns the second 200 response, persists the rotated
+// token, and emits a `token_refreshed` audit event whose payload omits
+// access/refresh token values.
+import { client, request } from "std/oauth/client"
+import { custom } from "std/oauth/providers"
+import { memory } from "std/oauth/storage"
+
+pipeline test(task) {
+  let topic = "oauth.client.audit"
+  let cursor = event_log.latest(topic) ?? 0
+  let store = memory()
+  let provider = custom(
+    {
+      id: "mock401",
+      auth_url: "https://idp.example/authorize",
+      token_url: "https://idp.example/token",
+      default_scopes: ["read"],
+    },
+  )
+  let now = to_int(timestamp())
+  let stored = {
+    access_token: "ACCESS-OLD",
+    refresh_token: "REFRESH-1",
+    expires_at_unix: now + 3600,
+    issued_at_unix: now,
+    token_type: "Bearer",
+  }
+  store.set("mock401", stored)
+  let cli = client(provider, {client_id: "cli-id", redirect_uri: "http://127.0.0.1:9999/cb", storage: store})
+  http_mock_clear()
+  http_mock(
+    "POST",
+    "https://idp.example/token",
+    {
+      status: 200,
+      body: "{\"access_token\":\"ACCESS-NEW\",\"refresh_token\":\"REFRESH-2\",\"expires_in\":3600,\"token_type\":\"Bearer\"}",
+      headers: {"content-type": "application/json"},
+    },
+  )
+  http_mock(
+    "GET",
+    "https://api.example.test/me",
+    {
+      responses: [
+        {status: 401, body: "{\"error\":\"token expired\"}", headers: {"content-type": "application/json"}},
+        {status: 200, body: "{\"user\":\"agent\"}", headers: {"content-type": "application/json"}},
+      ],
+    },
+  )
+  let response = request(cli, "GET", "https://api.example.test/me")
+  assert_eq(response.status, 200, "final response after refresh + retry should be 200")
+  assert(contains(response.body, "agent"), "final response body propagated")
+  let calls = http_mock_calls({include_sensitive: true})
+  assert_eq(len(calls), 3, "expected GET + POST(token) + GET")
+  assert_eq(calls[0].method, "GET", "first call is the original protected GET")
+  assert_eq(calls[0].headers.authorization, "Bearer ACCESS-OLD", "first GET used stale token")
+  assert_eq(calls[1].method, "POST", "second call is the refresh")
+  assert(contains(calls[1].url, "/token"), "second call hits token endpoint")
+  assert(contains(calls[1].body, "grant_type=refresh_token"), "refresh body has grant_type")
+  assert(contains(calls[1].body, "refresh_token=REFRESH-1"), "refresh body has old refresh token")
+  assert_eq(calls[2].method, "GET", "third call retries the original GET")
+  assert_eq(calls[2].headers.authorization, "Bearer ACCESS-NEW", "retry used rotated token")
+  let after = store.get("mock401")
+  assert_eq(after.access_token, "ACCESS-NEW", "storage updated to rotated access token")
+  assert_eq(after.refresh_token, "REFRESH-2", "storage updated to rotated refresh token")
+  let stream = event_log.subscribe({topic: topic, from_cursor: cursor})
+  let logged = stream.next().value
+  assert_eq(logged.kind, "token_refreshed", "audit kind")
+  assert_eq(logged.payload.reason, "post_401", "audit reason")
+  assert_eq(logged.payload.provider, "mock401", "audit provider")
+  assert_eq(logged.payload.prev.has_refresh_token, true, "audit prev refresh presence")
+  assert_eq(logged.payload.next.has_access_token, true, "audit next access presence")
+  assert(logged.payload.next?.access_token == nil, "audit NEVER includes new access token")
+  assert(logged.payload.next?.refresh_token == nil, "audit NEVER includes new refresh token")
+  assert(logged.payload.prev?.access_token == nil, "audit NEVER includes prev access token")
+  log("oauth client refresh on 401 ok")
+}
