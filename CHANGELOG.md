@@ -10,6 +10,20 @@ condensed series summaries instead of full per-patch history.
 
 ### Added
 
+- **Pool conformance gap-fill: `pool_unsettled_state_integration` (#1892).**
+  PL-07 (epic #1883) is the comprehensive pool conformance suite. Eight of
+  the ten spec scenarios were already covered by fixtures landed alongside
+  PL-01..PL-06: concurrency cap (`pool/max_concurrent_caps_in_flight`),
+  priority + LIFO + fair round-robin (`pool/priority_submit`,
+  `pool/queue_strategy_submit`), the full backpressure matrix including
+  block/drop-oldest/drop-newest/fail-fast/fail-submitter/ring-buffer plus
+  drop-receipt audit (`pool/backpressure_policies`), durable pipeline-scope
+  restart (`pool_durability/pipeline_survives_restart`), and trigger →
+  pool fan-in (`triggers/trigger_spawn_to_pool_*`). The new
+  `conformance/tests/pool_unsettled_state_integration.harn` covers the last
+  scenario — pool tasks visible in `harness.unsettled_state()` so on_finish
+  presets can act on them — and is marked `@xfail` referencing follow-up
+  #2007 until the runtime wiring lands.
 - **Channel scope resolver completes the four-tier hierarchy (#1874).**
   Formalises the `session < pipeline < tenant < org` scope chain for
   `emit_channel(...)` and `channel_events(...)`, building on the producer

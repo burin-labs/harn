@@ -1,0 +1,38 @@
+// @xfail: pool tasks not yet plumbed into harness.unsettled_state() — tracked in #2007
+/**
+ * PL-07: a pipeline that submits pool work and returns without draining
+ * should surface those tasks in `harness.unsettled_state()` so on_finish
+ * presets (drain, abandon, handoff) can act on them.
+ *
+ * This fixture asserts the post-wiring shape: pool work shows up under a
+ * dedicated `pool_pending_tasks` bucket with one entry per non-terminal
+ * task (queued + running). The bucket does not exist today; once #2007
+ * lands and the field is populated, drop the @xfail marker.
+ */
+import { pool_create } from "std/lifecycle/pool"
+
+pipeline default() {
+  let gate = channel(nil, 1)
+  let pool = pool_create({name: "unsettled-integration", max_concurrent: 1})
+  // One task occupies the slot (parked on `gate`), two more sit in the
+  // queue. None reach a terminal state before on_finish runs.
+  let _running = pool
+    .submit(
+    { ->
+      receive(gate)
+      return "done"
+    },
+  )
+  let _queued_a = pool.submit({ -> "a" }, {priority: 5})
+  let _queued_b = pool.submit({ -> "b" }, {priority: 10})
+  pipeline_on_finish(
+    { harness, return_value ->
+      let state = harness.unsettled_state()
+      let pending = state?.pool_pending_tasks ?? []
+      harness.stdio.println("pool_pending=" + to_string(len(pending)))
+      send(gate, "go")
+      return return_value
+    },
+  )
+  return "ok"
+}
