@@ -9,6 +9,8 @@ use crate::event_log::{
     EventId, EventLog, LogEvent, Topic,
 };
 use crate::llm::vm_value_to_json;
+use crate::triggers::event::{ChannelEventPayload, KnownProviderPayload};
+use crate::triggers::{ProviderId, ProviderPayload, SignatureStatus, TenantId, TriggerEvent};
 use crate::value::{VmError, VmValue};
 
 const CHANNEL_QUEUE_DEPTH: usize = 128;
@@ -185,7 +187,7 @@ pub(crate) async fn emit_channel_from_vm(args: Vec<VmValue>) -> Result<VmValue, 
         resolved.scope.as_str().to_string(),
     );
     headers.insert(SCOPE_ID_HEADER.to_string(), resolved.scope_id.clone());
-    headers.insert(EMITTED_BY_HEADER.to_string(), emitted_by);
+    headers.insert(EMITTED_BY_HEADER.to_string(), emitted_by.clone());
 
     let log = log_for_scope(resolved.scope);
     let mut log_event = LogEvent::new(
@@ -205,6 +207,33 @@ pub(crate) async fn emit_channel_from_vm(args: Vec<VmValue>) -> Result<VmValue, 
         &outcome.event,
         outcome.inserted,
     )?;
+    // CH-02 (#1872): fan out the emit to channel-source triggers. Only fresh
+    // appends fan out; idempotent duplicates short-circuit because the producer
+    // already saw the original delivery.
+    if outcome.inserted {
+        let payload_json = outcome
+            .event
+            .payload
+            .get("payload")
+            .cloned()
+            .unwrap_or(serde_json::Value::Null);
+        let context_for_fanout = ChannelContext::current();
+        let fanout_payload = ChannelEventPayload {
+            id: event_id.clone(),
+            name: parse_name(&name)
+                .map(|parsed| parsed.name)
+                .unwrap_or_else(|_| resolved.resolved_name.clone()),
+            name_resolved: resolved.resolved_name.clone(),
+            scope: resolved.scope.as_str().to_string(),
+            scope_id: resolved.scope_id.clone(),
+            payload: payload_json,
+            emitted_by: emitted_by.clone(),
+            tenant_id: context_for_fanout.tenant_id_for_receipt(&resolved),
+            session_id: context_for_fanout.session_id_for_receipt(&resolved),
+            pipeline_id: context_for_fanout.pipeline_id_for_receipt(&resolved),
+        };
+        dispatch_channel_emit_to_triggers(&resolved, fanout_payload).await?;
+    }
     Ok(crate::stdlib::json_to_vm_value(&receipt))
 }
 
@@ -721,6 +750,279 @@ fn channel_log_error(error: crate::event_log::LogError) -> VmError {
     VmError::Runtime(format!("channel event log: {error}"))
 }
 
+/// Parsed channel-source trigger selector.
+///
+/// Trigger DSL strings look like `channel:<scope>:<scope-id>:<name>` with
+/// shorthand forms for tenant-default and session/pipeline scopes. The
+/// `scope_id_pattern` is `None` for "current" (e.g. `channel:foo` against
+/// the trigger's tenant) or `Some("*")` for an explicit wildcard
+/// (`channel:tenant:*:foo`).
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ChannelSelector {
+    scope: ChannelScope,
+    scope_id_pattern: ScopeIdPattern,
+    name: String,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+enum ScopeIdPattern {
+    /// Match the current tenant/session/pipeline of the trigger registry
+    /// (no explicit scope id supplied in the selector string).
+    Current,
+    /// Explicit scope id from the selector string.
+    Exact(String),
+    /// Wildcard, e.g. `tenant:*:foo` — match any scope id within the
+    /// trigger's entitled boundary (today: the current tenant only).
+    Wildcard,
+}
+
+impl ChannelSelector {
+    /// Parse a `channel:...` trigger source string.
+    ///
+    /// Accepted shapes:
+    /// - `channel:<name>` — tenant scope (current tenant), exact `<name>`
+    /// - `channel:session:<name>` — session scope, exact `<name>`
+    /// - `channel:pipeline:<name>` — pipeline scope, exact `<name>`
+    /// - `channel:tenant:<tenant-id>:<name>` — explicit tenant
+    /// - `channel:tenant:*:<name>` — tenant wildcard (within entitlement)
+    /// - `channel:org:<org-id>:<name>` — explicit org (currently disabled)
+    pub fn parse(input: &str) -> Result<Self, String> {
+        let input = input.trim();
+        let rest = input
+            .strip_prefix("channel:")
+            .ok_or_else(|| format!("channel selector must start with `channel:`, got `{input}`"))?;
+        if rest.is_empty() {
+            return Err("channel selector cannot be empty after `channel:` prefix".to_string());
+        }
+
+        let (head, tail_opt) = match rest.split_once(':') {
+            Some((head, tail)) => (head, Some(tail)),
+            None => (rest, None),
+        };
+        let parsed_scope = ChannelScope::parse(head).ok();
+        match (parsed_scope, tail_opt) {
+            // `channel:<name>` — tenant default.
+            (None, _) => {
+                let name = rest.to_string();
+                validate_selector_name(&name)?;
+                Ok(Self {
+                    scope: ChannelScope::Tenant,
+                    scope_id_pattern: ScopeIdPattern::Current,
+                    name,
+                })
+            }
+            (Some(scope @ (ChannelScope::Session | ChannelScope::Pipeline)), Some(name))
+                if !name.is_empty() =>
+            {
+                if name.contains(':') {
+                    return Err(format!(
+                        "channel selector `{input}`: {} scope expects `<name>` with no extra colons",
+                        scope.as_str()
+                    ));
+                }
+                validate_selector_name(name)?;
+                Ok(Self {
+                    scope,
+                    scope_id_pattern: ScopeIdPattern::Current,
+                    name: name.to_string(),
+                })
+            }
+            (Some(scope @ (ChannelScope::Tenant | ChannelScope::Org)), Some(tail))
+                if !tail.is_empty() =>
+            {
+                let Some((scope_id, name)) = tail.split_once(':') else {
+                    // `channel:tenant:foo` — treat as `<name>` in tenant default.
+                    if matches!(scope, ChannelScope::Tenant) {
+                        validate_selector_name(tail)?;
+                        return Ok(Self {
+                            scope,
+                            scope_id_pattern: ScopeIdPattern::Current,
+                            name: tail.to_string(),
+                        });
+                    }
+                    return Err(format!(
+                        "channel selector `{input}`: org scope requires `<org-id>:<name>`"
+                    ));
+                };
+                if scope_id.is_empty() || name.is_empty() {
+                    return Err(format!(
+                        "channel selector `{input}`: scope id and name must be non-empty"
+                    ));
+                }
+                validate_selector_name(name)?;
+                let pattern = if scope_id == "*" {
+                    ScopeIdPattern::Wildcard
+                } else {
+                    ScopeIdPattern::Exact(scope_id.to_string())
+                };
+                Ok(Self {
+                    scope,
+                    scope_id_pattern: pattern,
+                    name: name.to_string(),
+                })
+            }
+            (Some(scope), _) => Err(format!(
+                "channel selector `{input}`: {} scope requires `<name>` segment",
+                scope.as_str()
+            )),
+        }
+    }
+
+    pub fn scope(&self) -> &'static str {
+        self.scope.as_str()
+    }
+
+    pub fn name(&self) -> &str {
+        &self.name
+    }
+
+    /// Returns true if the supplied emit (scope, scope_id, name) matches this
+    /// selector. `current_tenant` lets the matcher resolve the implicit
+    /// "current tenant" boundary used by both `Current` and `Wildcard` modes.
+    pub fn matches(&self, scope: &str, scope_id: &str, name: &str, current_tenant: &str) -> bool {
+        if self.scope.as_str() != scope || self.name != name {
+            return false;
+        }
+        match &self.scope_id_pattern {
+            ScopeIdPattern::Current => match self.scope {
+                ChannelScope::Tenant => scope_id == current_tenant,
+                ChannelScope::Session | ChannelScope::Pipeline => {
+                    // For session/pipeline, "current" means trigger and emit
+                    // share a runtime context. In v1 (in-process registry)
+                    // this is implicit: both producer and consumer run in the
+                    // same VM, so any scope_id within this scope type matches.
+                    true
+                }
+                ChannelScope::Org => false,
+            },
+            ScopeIdPattern::Exact(value) => scope_id == value,
+            ScopeIdPattern::Wildcard => match self.scope {
+                ChannelScope::Tenant => true,
+                // Session/pipeline wildcards aren't entitled yet; org wildcards disabled.
+                _ => false,
+            },
+        }
+    }
+}
+
+fn validate_selector_name(name: &str) -> Result<(), String> {
+    if name.trim().is_empty()
+        || name.contains(':')
+        || name.chars().any(|ch| ch.is_control() || ch.is_whitespace())
+    {
+        return Err(format!("channel selector name `{name}` is malformed"));
+    }
+    Ok(())
+}
+
+/// Dispatch a freshly emitted channel event to any registered triggers whose
+/// `channel:` source selector matches the (scope, scope_id, name) tuple.
+///
+/// This is the consumer side of the `emit_channel` ↔ trigger plumbing
+/// (CH-02 / #1872). Errors from individual handlers do not abort the
+/// emit; they surface in the dispatcher's DLQ + retry pipeline.
+async fn dispatch_channel_emit_to_triggers(
+    resolved: &ResolvedChannel,
+    payload: ChannelEventPayload,
+) -> Result<(), VmError> {
+    // Snapshot matching bindings outside of any async work so the registry
+    // borrow is short-lived.
+    let bindings = crate::triggers::registry::channel_bindings_matching(
+        resolved.scope.as_str(),
+        &resolved.scope_id,
+        &payload.name,
+    );
+    if bindings.is_empty() {
+        return Ok(());
+    }
+    let Some(base_vm) = crate::vm::clone_async_builtin_child_vm() else {
+        // No host VM (e.g. raw test path); nothing to dispatch.
+        return Ok(());
+    };
+    let log = active_event_log()
+        .unwrap_or_else(|| install_memory_for_current_thread(CHANNEL_QUEUE_DEPTH));
+    let dispatcher = crate::triggers::Dispatcher::with_event_log(base_vm, log);
+    for binding in bindings {
+        // Filter (#1872 acceptance): JSON-path-equality on payload.
+        if let Some(filter_str) = binding.filter.as_ref() {
+            if !channel_filter_matches(filter_str, &payload.payload) {
+                continue;
+            }
+        }
+        let event = build_channel_trigger_event(&payload);
+        let _ = dispatcher
+            .dispatch(&binding, event)
+            .await
+            .map_err(|error| VmError::Runtime(format!("emit_channel dispatch: {error}")));
+    }
+    Ok(())
+}
+
+fn build_channel_trigger_event(payload: &ChannelEventPayload) -> TriggerEvent {
+    let mut event = TriggerEvent::new(
+        ProviderId::from("channel"),
+        "channel.emit",
+        None,
+        payload.id.clone(),
+        payload.tenant_id.clone().map(TenantId::new),
+        BTreeMap::new(),
+        ProviderPayload::Known(KnownProviderPayload::Channel(payload.clone())),
+        SignatureStatus::Unsigned,
+    );
+    event.headers.insert(
+        "harn_channel_name".to_string(),
+        payload.name_resolved.clone(),
+    );
+    event
+        .headers
+        .insert("harn_channel_scope".to_string(), payload.scope.clone());
+    event.headers.insert(
+        "harn_channel_scope_id".to_string(),
+        payload.scope_id.clone(),
+    );
+    event
+}
+
+/// Evaluate the trigger filter spec (CH-02 / #1872) against the channel payload.
+///
+/// Supported syntax v1: JSON dict (`{"repo": "harn"}`) — each key is a
+/// dot-path into the payload that must equality-match the value. Missing
+/// path = no match. Non-dict filter strings are treated as no-op (return
+/// true) so we don't regress pre-existing trigger `filter:` semantics that
+/// reuse this field for other purposes.
+fn channel_filter_matches(filter_raw: &str, payload: &serde_json::Value) -> bool {
+    let trimmed = filter_raw.trim();
+    if trimmed.is_empty() {
+        return true;
+    }
+    let parsed: serde_json::Value = match serde_json::from_str(trimmed) {
+        Ok(value) => value,
+        Err(_) => return true,
+    };
+    let Some(map) = parsed.as_object() else {
+        return true;
+    };
+    map.iter()
+        .all(|(key, expected)| match payload_path(payload, key) {
+            Some(actual) => actual == expected,
+            None => false,
+        })
+}
+
+fn payload_path<'a>(value: &'a serde_json::Value, path: &str) -> Option<&'a serde_json::Value> {
+    let mut current = value;
+    for segment in path.split('.') {
+        if segment.is_empty() {
+            return None;
+        }
+        current = match current {
+            serde_json::Value::Object(map) => map.get(segment)?,
+            _ => return None,
+        };
+    }
+    Some(current)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -770,5 +1072,67 @@ mod tests {
         )
         .unwrap_err();
         assert!(err.0.contains("HARN-CHN-002"));
+    }
+
+    #[test]
+    fn channel_selector_parses_tenant_default_shorthand() {
+        let selector = ChannelSelector::parse("channel:pr.merged").expect("parses");
+        assert_eq!(selector.scope(), "tenant");
+        assert_eq!(selector.name(), "pr.merged");
+        assert!(selector.matches("tenant", "default", "pr.merged", "default"));
+        assert!(!selector.matches("tenant", "default", "other.event", "default"));
+        assert!(!selector.matches("session", "default", "pr.merged", "default"));
+    }
+
+    #[test]
+    fn channel_selector_parses_session_scope() {
+        let selector = ChannelSelector::parse("channel:session:my-event").expect("parses");
+        assert_eq!(selector.scope(), "session");
+        assert_eq!(selector.name(), "my-event");
+        assert!(selector.matches("session", "any-session-id", "my-event", "any-session-id"));
+        assert!(!selector.matches("tenant", "any", "my-event", "any"));
+    }
+
+    #[test]
+    fn channel_selector_parses_explicit_tenant() {
+        let selector =
+            ChannelSelector::parse("channel:tenant:burin-labs:pr.merged").expect("parses");
+        assert!(selector.matches("tenant", "burin-labs", "pr.merged", "default"));
+        assert!(!selector.matches("tenant", "other-tenant", "pr.merged", "default"));
+    }
+
+    #[test]
+    fn channel_selector_parses_tenant_wildcard() {
+        let selector = ChannelSelector::parse("channel:tenant:*:pr.merged").expect("parses");
+        assert!(selector.matches("tenant", "burin-labs", "pr.merged", "default"));
+        assert!(selector.matches("tenant", "other-tenant", "pr.merged", "default"));
+        assert!(!selector.matches("tenant", "any", "different-event", "default"));
+        assert!(!selector.matches("session", "any", "pr.merged", "default"));
+    }
+
+    #[test]
+    fn channel_selector_rejects_malformed_inputs() {
+        assert!(ChannelSelector::parse("not-a-channel").is_err());
+        assert!(ChannelSelector::parse("channel:").is_err());
+        assert!(ChannelSelector::parse("channel:session:").is_err());
+        assert!(ChannelSelector::parse("channel:session:has:extra:colons").is_err());
+        assert!(ChannelSelector::parse("channel:org:no-name").is_err());
+        assert!(ChannelSelector::parse("channel:tenant::missing-id").is_err());
+        assert!(ChannelSelector::parse("channel:tenant:foo:").is_err());
+    }
+
+    #[test]
+    fn channel_filter_matches_equality_paths() {
+        let payload = serde_json::json!({"repo": "harn", "nested": {"k": "v"}});
+        assert!(channel_filter_matches("{\"repo\": \"harn\"}", &payload));
+        assert!(!channel_filter_matches("{\"repo\": \"other\"}", &payload));
+        assert!(channel_filter_matches("{\"nested.k\": \"v\"}", &payload));
+        assert!(!channel_filter_matches("{\"nested.k\": \"x\"}", &payload));
+        // Missing path → no match.
+        assert!(!channel_filter_matches("{\"missing\": \"x\"}", &payload));
+        // Empty filter → permissive.
+        assert!(channel_filter_matches("", &payload));
+        // Non-dict filter → permissive (back-compat with legacy `filter:` field).
+        assert!(channel_filter_matches("just-a-string", &payload));
     }
 }

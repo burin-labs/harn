@@ -1159,6 +1159,24 @@ fn parse_trigger_config(config: &BTreeMap<String, VmValue>) -> Result<TriggerBin
     }))
     .unwrap_or_else(|_| format!("{}:{}:{}", id, kind, provider.as_str()));
 
+    // CH-02 (#1872): channel-source triggers parse their selector strings
+    // at registration so malformed selectors fail loudly before any emit.
+    if provider.as_str() == "channel" {
+        if match_events.is_empty() {
+            return Err(VmError::Runtime(
+                "trigger_register: provider=\"channel\" requires `match.events: [\"channel:<scope>:<name>\"]`"
+                    .to_string(),
+            ));
+        }
+        for selector in &match_events {
+            crate::channels::ChannelSelector::parse(selector).map_err(|error| {
+                VmError::Runtime(format!(
+                    "trigger_register: invalid channel selector: {error}"
+                ))
+            })?;
+        }
+    }
+
     Ok(TriggerBindingSpec {
         id,
         source: TriggerBindingSource::Dynamic,

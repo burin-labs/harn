@@ -51,6 +51,21 @@ condensed series summaries instead of full per-patch history.
   RFCs / post-mortems. Conformance coverage:
   `conformance/tests/stdlib/tool_hooks_catalogue_{rust,python,typescript,swift,sql,harn,universal,auto_seed}.harn`.
   Part of epic #1884 (preset tool hooks library).
+- **Channel-source triggers (#1872).** The trigger DSL now recognizes a
+  `provider: "channel"` source with a `match.events: ["channel:<scope>:<name>"]`
+  selector, completing the consumer half of the durable channel API shipped
+  in #1871. Supported selector shapes: `channel:<name>` (tenant-default),
+  `channel:session:<name>`, `channel:pipeline:<name>`,
+  `channel:tenant:<tenant-id>:<name>`, `channel:tenant:*:<name>` (tenant
+  wildcard), and `channel:org:<org-id>:<name>` (rejected until org grants
+  ship, mirroring the producer-side `HARN-CHN-002`). Each `emit_channel(...)`
+  that successfully appends to the event log synchronously fans out to all
+  matching active bindings; idempotent duplicates short-circuit the
+  fan-out. An optional dict-shaped `filter:` (e.g. `"{\"repo\": \"harn\"}"`)
+  evaluates dot-path equality against the emit payload before dispatch.
+  Conformance coverage:
+  `conformance/tests/triggers/trigger_source_channel_{basic,session,wildcard,filter,fan_out}.harn`.
+  Part of epic #1870.
 - **Tool-hook mode callback side effects (#1896).** The three shipped
   `tool_hooks_mode_*` callbacks (`rewrite_with_audit`,
   `deny_with_explanation`, `passthrough_only_audit`) now emit lifecycle
