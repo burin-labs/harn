@@ -274,6 +274,7 @@ module.exports = grammar({
     _statement: ($) =>
       choice(
         $.let_binding,
+        $.const_binding,
         $.var_binding,
         $.if_statement,
         $.for_statement,
@@ -326,6 +327,18 @@ module.exports = grammar({
       seq(
         "var",
         field("name", $._binding_pattern),
+        optional(seq(":", field("type", $.type_annotation))),
+        "=",
+        field("value", choice($.struct_construct, $._expression))
+      ),
+
+    // Compile-time-evaluated binding (`const NAME [: Type] = EXPR`).
+    // The right-hand side must fold under the bounded const-evaluator;
+    // see issue #1791 for the sandbox rules.
+    const_binding: ($) =>
+      seq(
+        "const",
+        field("name", $.identifier),
         optional(seq(":", field("type", $.type_annotation))),
         "=",
         field("value", choice($.struct_construct, $._expression))

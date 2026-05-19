@@ -348,6 +348,9 @@ fn summarize_node(node: &SNode) -> String {
                 inline_label(value)
             )
         }
+        Node::ConstBinding { name, value, .. } => {
+            format!("const {} = {}", name, inline_label(value))
+        }
         Node::ImportDecl { path, is_pub } => {
             let prefix = if *is_pub { "pub " } else { "" };
             format!("{prefix}import \"{}\"", truncate(path))

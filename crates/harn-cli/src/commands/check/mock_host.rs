@@ -581,7 +581,9 @@ fn collect_mock_host_capabilities_from_node(
                 );
             }
         }
-        Node::LetBinding { value, .. } | Node::VarBinding { value, .. } => {
+        Node::LetBinding { value, .. }
+        | Node::VarBinding { value, .. }
+        | Node::ConstBinding { value, .. } => {
             collect_mock_host_capabilities_from_node(
                 value,
                 file_path,

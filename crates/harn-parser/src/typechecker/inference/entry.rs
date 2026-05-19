@@ -323,6 +323,13 @@ impl TypeChecker {
                         }
                     }
                 }
+                Node::ConstBinding { name, .. } => {
+                    // Module-scope `const` bindings need the same
+                    // forward-ref placeholder treatment so a later use
+                    // resolves under the strict cross-module check.
+                    scope.define_var(name, None);
+                    scope.clear_nil_widenable(name);
+                }
                 _ => {}
             }
         }

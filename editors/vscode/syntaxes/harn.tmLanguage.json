@@ -85,7 +85,7 @@
       "patterns": [
         {
           "name": "storage.type.harn",
-          "match": "\\b(let|var)\\b"
+          "match": "\\b(let|const|var)\\b"
         }
       ]
     },

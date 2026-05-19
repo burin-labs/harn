@@ -599,6 +599,15 @@ impl Formatter<'_> {
                 let val = self.format_expr(value, indent);
                 format!("var {pat}{type_str} = {val}")
             }
+            Node::ConstBinding {
+                name,
+                type_ann,
+                value,
+            } => {
+                let type_str = format_type_ann(type_ann);
+                let val = self.format_expr(value, indent);
+                format!("const {name}{type_str} = {val}")
+            }
             Node::ImportDecl { path, is_pub } => {
                 let prefix = if *is_pub { "pub " } else { "" };
                 format!("{prefix}import \"{path}\"")

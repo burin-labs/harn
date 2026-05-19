@@ -13,7 +13,7 @@
 //!     [
 //!         "TYP", "PAR", "NAM", "CAP", "LLM", "ORC", "STD", "PRM",
 //!         "MOD", "RMD", "SUS", "LNT", "FMT", "IMP", "OWN", "RCV",
-//!         "MAT", "POL",
+//!         "MAT", "POL", "MET", "CST",
 //!     ],
 //! );
 //! ```
@@ -42,6 +42,14 @@ pub enum Category {
     Rcv,
     Mat,
     Pol,
+    /// Meta — restrictions on what may appear in compile-time-evaluated
+    /// positions (e.g. `const` initializers). Reserved by issue #1791
+    /// (bounded const-eval).
+    Met,
+    /// Const-eval sandbox — bounded compile-time interpreter limits and
+    /// capability violations (steps, recursion depth, fs/net/env/process
+    /// denial). Reserved by issue #1791.
+    Cst,
 }
 
 impl Category {
@@ -64,6 +72,8 @@ impl Category {
         Category::Rcv,
         Category::Mat,
         Category::Pol,
+        Category::Met,
+        Category::Cst,
     ];
 
     pub const fn as_str(self) -> &'static str {
@@ -86,6 +96,8 @@ impl Category {
             Category::Rcv => "RCV",
             Category::Mat => "MAT",
             Category::Pol => "POL",
+            Category::Met => "MET",
+            Category::Cst => "CST",
         }
     }
 }
@@ -334,6 +346,11 @@ diagnostic_codes! {
     InvalidMatchPattern, "HARN-MAT-003", Mat, "match pattern is invalid";
     PoolBackpressureFull, "HARN-POL-001", Pol, "pool backpressure rejected a submit";
     PoolFailFastFull, "HARN-POL-002", Pol, "fail-fast pool has no immediate capacity";
+    ConstEvalDisallowedExpression, "HARN-MET-001", Met, "expression is not permitted in a const initializer";
+    ConstEvalStepLimit, "HARN-CST-001", Cst, "const initializer exceeded the step budget";
+    ConstEvalRecursionLimit, "HARN-CST-002", Cst, "const initializer exceeded the recursion depth budget";
+    ConstEvalSandboxViolation, "HARN-CST-003", Cst, "const initializer attempted a sandboxed capability";
+    ConstEvalRuntimeError, "HARN-CST-004", Cst, "const initializer raised a runtime error during evaluation";
 }
 
 impl Code {

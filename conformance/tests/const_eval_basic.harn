@@ -1,0 +1,18 @@
+// Bounded const-eval — issue #1791. Verifies the happy path: literal
+// arithmetic, string concat, list len, and reads of earlier const
+// bindings all fold at compile time and observably equal the same
+// expression evaluated at runtime.
+const X: int = 5 + 3
+
+const Y: int = X * 2 + 1
+
+const COUNT: int = len([10, 20, 30, 40])
+
+const GREETING: string = "hello" + "-" + "world"
+
+pipeline main() {
+  log(X)
+  log(Y)
+  log(COUNT)
+  log(GREETING)
+}

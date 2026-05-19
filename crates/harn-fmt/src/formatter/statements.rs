@@ -190,6 +190,15 @@ impl Formatter<'_> {
                 let val = self.format_expr(value, indent_level);
                 format!("var {pat}{type_str} = {val}")
             }
+            Node::ConstBinding {
+                name,
+                type_ann,
+                value,
+            } => {
+                let type_str = format_type_ann(type_ann);
+                let val = self.format_expr(value, indent_level);
+                format!("const {name}{type_str} = {val}")
+            }
             Node::TryCatch {
                 body,
                 has_catch,

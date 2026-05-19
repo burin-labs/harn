@@ -265,6 +265,20 @@ impl<'a> Linter<'a> {
                 self.declare_pattern_variables(pattern, snode.span, true);
             }
 
+            Node::ConstBinding {
+                name,
+                type_ann,
+                value,
+            } => {
+                self.record_mcp_registry_binding(name, value);
+                self.lint_node(value);
+                if let Some(ann) = type_ann {
+                    self.check_eager_collection_conversion(ann, value);
+                }
+                let pattern = harn_parser::BindingPattern::Identifier(name.clone());
+                self.declare_pattern_variables(&pattern, snode.span, false);
+            }
+
             Node::Assignment { target, value, .. } => {
                 if let Some(name) = Self::root_var_name(target) {
                     self.record_mcp_registry_binding(&name, value);

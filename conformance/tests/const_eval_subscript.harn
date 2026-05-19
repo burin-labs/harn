@@ -1,0 +1,15 @@
+// Bounded const-eval — issue #1791. Subscript over a literal list / dict
+// folds at compile time, mirroring what compile-time prompt-template
+// specialization would consume.
+const PRIMES: list = [2, 3, 5, 7, 11]
+
+const THIRD: int = PRIMES[2]
+
+const META: dict = {name: "harn", version: 1}
+
+const NAME: string = META["name"]
+
+pipeline main() {
+  log(THIRD)
+  log(NAME)
+}

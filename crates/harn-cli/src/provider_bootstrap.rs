@@ -309,6 +309,7 @@ fn node_uses_provider_llm(node: &SNode, shadows: &HashSet<String>) -> bool {
         Node::LetBinding { pattern, value, .. } | Node::VarBinding { pattern, value, .. } => {
             pattern_uses_provider_llm(pattern, shadows) || node_uses_provider_llm(value, shadows)
         }
+        Node::ConstBinding { value, .. } => node_uses_provider_llm(value, shadows),
         Node::IfElse {
             condition,
             then_body,
