@@ -10,7 +10,7 @@
     {"sub_handle": "stdio", "method": "println", "args": ["0"]},
     {"sub_handle": "stdio", "method": "println", "args": ["unknown"]},
     {"sub_handle": "stdio", "method": "println", "args": ["mock"]},
-    {"sub_handle": "stdio", "method": "println", "args": ["aarch64"]}
+    {"sub_handle": "stdio", "method": "println", "args": ["mock"]}
   ],
-  "expect_stdio": "dict\n1\nmock-cpu\n0\nunknown\nmock\naarch64\n"
+  "expect_stdio": "dict\n1\nmock-cpu\n0\nunknown\nmock\nmock\n"
 }
