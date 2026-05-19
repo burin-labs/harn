@@ -1,0 +1,28 @@
+import { tool_hooks_seed_registry } from "std/tool_hooks_catalogues"
+
+/**
+ * SQL seed catalogue (TH-04 #1897). Warns on unbounded `SELECT *`
+ * scans; stays quiet when a WHERE / LIMIT / aggregate caps the result
+ * set or when the literal text appears in a non-leading context.
+ */
+fn probe(reg, cmd) {
+  let m = tool_hooks_match(reg, cmd, {stacks: ["sql"]})
+  if len(m) > 0 {
+    println(m[0].rule_id + " " + m[0].severity)
+  } else {
+    println("miss")
+  }
+}
+
+pipeline default() {
+  let reg = tool_hooks_seed_registry(["sql"])
+  /* Unbounded scans — fire. */
+  probe(reg, "SELECT * FROM users")
+  probe(reg, "select * from logs")
+  /* Bounded — quiet. */
+  probe(reg, "SELECT * FROM users WHERE id = 1")
+  probe(reg, "SELECT * FROM users LIMIT 10")
+  probe(reg, "SELECT COUNT(*) FROM users")
+  /* Non-leading usage (e.g. inside a shell echo) — quiet. */
+  probe(reg, "echo SELECT * FROM users")
+}

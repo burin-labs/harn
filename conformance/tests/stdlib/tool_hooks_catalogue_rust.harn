@@ -1,0 +1,40 @@
+import { tool_hooks_seed_registry } from "std/tool_hooks_catalogues"
+
+/**
+ * Rust seed catalogue (TH-04 #1897). Verifies that each of the four
+ * shipped Rust rules fires on a representative real-world command and
+ * stays quiet on the negative-case variants the rule was designed to
+ * skip (already-corrected commands, sibling subcommands, etc.).
+ */
+fn probe(reg, cmd) {
+  let m = tool_hooks_match(reg, cmd, {stacks: ["rust"]})
+  if len(m) > 0 {
+    println(m[0].rule_id + " " + m[0].severity)
+  } else {
+    println("miss")
+  }
+}
+
+pipeline default() {
+  let reg = tool_hooks_seed_registry(["rust"])
+  /* target_dir_conflict: bare cargo build/test/check/run all fire. */
+  probe(reg, "cargo build --release")
+  probe(reg, "cargo check")
+  /* already corrected: --target-dir suppresses. */
+  probe(reg, "cargo build --target-dir target-x")
+  /* test_no_capture_default: cargo test fires the higher-priority
+   * target_dir_conflict rule first (warning > info). Pinning the
+   * target dir lets the info-severity test rule surface. */
+  probe(reg, "cargo test --target-dir target-x")
+  /* explicit -- args suppress the test rule. */
+  probe(reg, "cargo test --target-dir target-x -- --nocapture")
+  /* clippy_full_workspace: bare clippy fires, --workspace suppresses. */
+  probe(reg, "cargo clippy")
+  probe(reg, "cargo clippy --workspace -- -D warnings")
+  /* fmt_check_vs_apply: bare fmt fires, --check suppresses. */
+  probe(reg, "cargo fmt")
+  probe(reg, "cargo fmt --check")
+  /* Negative: sibling subcommand starting with `cargo test...` but
+   * not actually `cargo test` — must not fire the test rule. */
+  probe(reg, "cargo testify --release")
+}

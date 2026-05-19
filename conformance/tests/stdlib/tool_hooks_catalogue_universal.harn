@@ -1,0 +1,43 @@
+import { tool_hooks_seed_registry } from "std/tool_hooks_catalogues"
+
+/**
+ * Universal catalogue (TH-04 #1897). High-severity deny rules that
+ * apply regardless of stack opt-in. The catalogue is stackless so it
+ * survives `tool_hooks_filter`. Verifies real-world variants are
+ * blocked and that safe rewordings (e.g. `--force-with-lease` without
+ * `=false`, deletes targeting non-root paths) stay allowed.
+ */
+fn probe(reg, cmd) {
+  /* Empty stacks so we exercise the "filter pass-through for stackless
+   * catalogues" branch. */
+  let m = tool_hooks_match(reg, cmd, {stacks: []})
+  if len(m) > 0 {
+    println(m[0].rule_id + " " + m[0].severity)
+  } else {
+    println("miss")
+  }
+}
+
+pipeline default() {
+  let reg = tool_hooks_seed_registry([])
+  /* git_push_force_main: long, short, in-place force-with-lease=false,
+   * and trailing-position --force all denied. */
+  probe(reg, "git push --force origin main")
+  probe(reg, "git push -f origin master")
+  probe(reg, "git push --force-with-lease=false origin main")
+  probe(reg, "git push origin main --force")
+  /* Safe forms — quiet. */
+  probe(reg, "git push --force-with-lease origin main")
+  probe(reg, "git push origin feature --force")
+  probe(reg, "git push origin mainline --force")
+  /* rm_rf_root_adjacent: bundled/split flags, quoted/unquoted paths. */
+  probe(reg, "rm -rf /")
+  probe(reg, "rm -fr /")
+  probe(reg, "rm -Rf '/'")
+  probe(reg, "rm --recursive --force ..")
+  probe(reg, "rm --force --recursive ~")
+  /* Safe forms — quiet. */
+  probe(reg, "rm -rf ./target")
+  probe(reg, "rm -rf /tmp/build")
+  probe(reg, "rm myfile.txt")
+}

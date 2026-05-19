@@ -1,3 +1,5 @@
+import { tool_hooks_seed_registry } from "std/tool_hooks_catalogues"
+
 /**
  * std/tool_hooks — preset `run_command` wrapper for the catalogue-driven
  * "command faux-pas" library (epic #1884).
@@ -284,7 +286,13 @@ pub fn preset_run_command(config = nil) {
   if type_of(stacks) != "list" {
     throw "preset_run_command: `stacks` must be a list of strings"
   }
-  let registry = cfg?.registry ?? tool_hooks_registry()
+  /* Auto-seed the catalogue registry when the caller did not pass one
+   * explicitly. The seed includes the universal catalogue (deny-rules
+   * for force-push to main, root-adjacent `rm -rf`, etc.) plus one
+   * catalogue per opted-in stack. Callers that supply `registry:` keep
+   * full control — tests, vendor overrides, and migration paths are
+   * unaffected. (TH-04 #1897) */
+  let registry = cfg?.registry ?? tool_hooks_seed_registry(stacks)
   let custom_rules = cfg?.custom_rules ?? []
   if type_of(custom_rules) != "list" {
     throw "preset_run_command: `custom_rules` must be a list of tool_rule values"

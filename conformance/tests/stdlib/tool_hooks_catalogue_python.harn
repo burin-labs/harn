@@ -1,0 +1,33 @@
+import { tool_hooks_seed_registry } from "std/tool_hooks_catalogues"
+
+/**
+ * Python seed catalogue (TH-04 #1897). Verifies find/pip/pytest rules
+ * fire on real-world invocations and stay quiet on already-corrected
+ * variants.
+ */
+fn probe(reg, cmd) {
+  let m = tool_hooks_match(reg, cmd, {stacks: ["python"]})
+  if len(m) > 0 {
+    println(m[0].rule_id + " " + m[0].severity)
+  } else {
+    println("miss")
+  }
+}
+
+pipeline default() {
+  let reg = tool_hooks_seed_registry(["python"])
+  /* find_versus_rg: quoted and unquoted *.py patterns. */
+  probe(reg, "find . -name '*.py'")
+  probe(reg, "find . -name *.py")
+  /* Negative: a non-.py extension on the python stack doesn't match. */
+  probe(reg, "find . -name '*.txt'")
+  /* pip_install_no_user: bare install fires; --user / -e . suppress. */
+  probe(reg, "pip install requests")
+  probe(reg, "pip3 install --user requests")
+  probe(reg, "python -m pip install -e .")
+  /* pytest_no_capture: bare pytest fires; -s suppresses. */
+  probe(reg, "pytest tests/integration")
+  probe(reg, "pytest -s tests/")
+  /* Negative: pytest-cov sub-binary shouldn't trip. */
+  probe(reg, "pytest-cov --version")
+}
