@@ -74,6 +74,7 @@
 - [Sessions](./sessions.md)
 - [Session bundles](./session-bundles.md)
 - [Agent state](./agent-state.md)
+- [Agent lifecycle: suspend, resume, self-park](./agent-lifecycle.md)
 - [Memory](./memory.md)
 - [Transcript architecture](./transcript-architecture.md)
 - [System reminders](./system-reminders.md)
