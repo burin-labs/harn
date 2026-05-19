@@ -786,6 +786,7 @@ fn parse_inject_reminder_options(
         source: ReminderSource::InPipeline,
         body: required_reminder_string(options, "body", context)?,
         fired_at_turn: 0,
+        originating_agent_id: None,
     })
 }
 

@@ -228,6 +228,7 @@ fn worker_summary_exposes_request_and_provenance() {
                 returns_schema: None,
                 session_id: "session_worker".to_string(),
                 parent_session_id: Some("session_parent".to_string()),
+                reminder_propagation: Vec::new(),
             }),
         },
         handle: None,

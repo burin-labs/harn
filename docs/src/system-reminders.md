@@ -70,15 +70,25 @@ metadata slot see reminder context without learning a second field.
 | `dedupe_key` | string or `nil` | optional | When set, a newer reminder with the same key supersedes older ones in the same transcript. |
 | `ttl_turns` | int or `nil` | optional | Reminder expires after this many agent turns. `nil` means "persist until removed or compacted away." |
 | `preserve_on_compact` | bool | yes | Hint to [`transcript_compact`](./builtins.md): when `true`, reminder events survive compaction. |
-| `propagate` | `"all" \| "session" \| "none"` | yes | Sub-agent inheritance policy. `all` rides every spawned sub-agent transcript; `session` stays inside the originating session tree; `none` is opaque to children. |
+| `propagate` | `"all" \| "session" \| "none"` | yes | Sub-agent inheritance policy. `all` rides every spawned sub-agent transcript; `session` reaches direct child sub-agents from the originating session but is not re-forwarded by inherited copies; `none` is opaque to children. |
 | `role_hint` | `"system" \| "developer" \| "user_block" \| "ephemeral_cache"` | yes | Preferred provider rendering slot. The final wire role is decided at render time by the capability-aware dispatcher (R-06). |
-| `source` | `"stdlib_provider" \| "hook" \| "bridge" \| "in_pipeline"` | yes | Where the reminder originated. |
+| `source` | `"stdlib_provider" \| "hook" \| "bridge" \| "in_pipeline" \| "inherited"` | yes | Where the reminder originated. Child sessions receive propagated reminders with `source: "inherited"`. |
 | `body` | string | yes | The reminder text. Mirrored into `event.text` and `event.blocks[0].text`. |
 | `fired_at_turn` | int | yes | Turn index when the reminder was fired. Pipelines with no turn counter pass `0`. |
+| `originating_agent_id` | string or `nil` | optional | Set on inherited reminders to the session id that originally emitted the reminder. |
 
 `visibility` on the outer event defaults to `"public"` — reminders are
 meant to influence the next turn — but reminders are never folded into
 the durable `messages` list. They ride on the event log only.
+
+When a parent agent hands work to a sub-agent, Harn filters pending
+reminders into the handoff envelope's `reminder_propagation` field. The
+child session seeds those reminders into its transcript before its first
+turn. Inherited copies rewrite `source` to `"inherited"` and keep
+`originating_agent_id` pointed at the session that first emitted the
+reminder. `propagate: "all"` inherited reminders can continue to deeper
+sub-agents; inherited `propagate: "session"` reminders stop at that
+child boundary.
 
 ## Building a reminder event
 
@@ -212,10 +222,10 @@ Canonical providers:
 
 | Provider | Event | Reminder |
 |---|---|---|
-| `token_pressure` | `on_budget_threshold` | Fires near 70/85/95% of the context window; tag `token_pressure`, dedupe key `token_pressure`, `ttl_turns: 2`, and `preserve_on_compact: true` at the critical threshold. |
-| `idle_nudge` | `session_idle` | Fires after the daemon idle interval reaches the configured threshold (default 60s); tag `idle`, `ttl_turns: 1`. |
-| `tool_output_truncated` | `post_tool_use` | Fires when post-tool hooks compact or truncate output before it reaches the model; tag `truncation`, `ttl_turns: 1`. |
-| `post_compact_recap` | `post_compact` | Fires after transcript compaction with the current recap; tag `recap`, `ttl_turns: 2`. |
+| `token_pressure` | `on_budget_threshold` | Fires near 70/85/95% of the context window; tag `token_pressure`, dedupe key `token_pressure`, `ttl_turns: 2`, `propagate: "session"`, and `preserve_on_compact: true` at the critical threshold. |
+| `idle_nudge` | `session_idle` | Fires after the daemon idle interval reaches the configured threshold (default 60s); tag `idle`, `ttl_turns: 1`, `propagate: "none"`. |
+| `tool_output_truncated` | `post_tool_use` | Fires when post-tool hooks compact or truncate output before it reaches the model; tag `truncation`, `ttl_turns: 1`, `propagate: "none"`. |
+| `post_compact_recap` | `post_compact` | Fires after transcript compaction with the current recap; tag `recap`, `ttl_turns: 2`, `propagate: "session"`. |
 
 Disable providers per loop with the `reminders.providers` opt-out list:
 

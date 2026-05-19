@@ -180,6 +180,7 @@ pub enum ReminderSource {
     Hook,
     Bridge,
     InPipeline,
+    Inherited,
 }
 
 impl ReminderSource {
@@ -190,6 +191,7 @@ impl ReminderSource {
             Self::Hook => "hook",
             Self::Bridge => "bridge",
             Self::InPipeline => "in_pipeline",
+            Self::Inherited => "inherited",
         }
     }
 }
@@ -237,6 +239,8 @@ pub struct SystemReminder {
     pub source: ReminderSource,
     pub body: String,
     pub fired_at_turn: i64,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub originating_agent_id: Option<String>,
 }
 
 impl SystemReminder {
@@ -255,6 +259,7 @@ impl SystemReminder {
             source,
             body: body.into(),
             fired_at_turn,
+            originating_agent_id: None,
         }
     }
 }
@@ -823,6 +828,7 @@ fn reminder_from_vm_value(value: &VmValue) -> SystemReminder {
             "hook" => Some(ReminderSource::Hook),
             "bridge" => Some(ReminderSource::Bridge),
             "in_pipeline" => Some(ReminderSource::InPipeline),
+            "inherited" => Some(ReminderSource::Inherited),
             _ => None,
         })
         .unwrap_or(ReminderSource::InPipeline);
@@ -834,6 +840,10 @@ fn reminder_from_vm_value(value: &VmValue) -> SystemReminder {
             _ => None,
         })
         .unwrap_or(0);
+    let originating_agent_id = dict
+        .get("originating_agent_id")
+        .and_then(string_value)
+        .filter(|s| !s.is_empty());
 
     SystemReminder {
         id,
@@ -846,6 +856,7 @@ fn reminder_from_vm_value(value: &VmValue) -> SystemReminder {
         source,
         body,
         fired_at_turn,
+        originating_agent_id,
     }
 }
 
@@ -857,6 +868,48 @@ pub(crate) fn reminder_from_event(event: &VmValue) -> Option<SystemReminder> {
     }
     let reminder = dict.get("reminder")?;
     serde_json::from_value(vm_value_to_json(reminder)).ok()
+}
+
+fn reminder_propagates_to_handoff(reminder: &SystemReminder) -> bool {
+    match reminder.propagate {
+        ReminderPropagate::All => true,
+        ReminderPropagate::Session => reminder.source != ReminderSource::Inherited,
+        ReminderPropagate::None => false,
+    }
+}
+
+pub(crate) fn inherited_reminder_for_handoff(
+    mut reminder: SystemReminder,
+    source_agent_id: &str,
+) -> SystemReminder {
+    if reminder.originating_agent_id.is_none() {
+        reminder.originating_agent_id = Some(source_agent_id.to_string());
+    }
+    reminder.source = ReminderSource::Inherited;
+    reminder
+}
+
+pub(crate) fn reminder_propagation_from_transcript(
+    transcript: &VmValue,
+    source_agent_id: &str,
+) -> Vec<SystemReminder> {
+    let Some(events) = transcript
+        .as_dict()
+        .and_then(|dict| dict.get("events"))
+        .and_then(|events| match events {
+            VmValue::List(events) => Some(events),
+            _ => None,
+        })
+    else {
+        return Vec::new();
+    };
+
+    events
+        .iter()
+        .filter_map(reminder_from_event)
+        .filter(reminder_propagates_to_handoff)
+        .map(|reminder| inherited_reminder_for_handoff(reminder, source_agent_id))
+        .collect()
 }
 
 pub(crate) fn replace_reminder_payload(event: &VmValue, reminder: &SystemReminder) -> VmValue {
@@ -893,6 +946,7 @@ mod tests {
             source: ReminderSource::StdlibProvider,
             body: "Approaching context window cap.".to_string(),
             fired_at_turn: 4,
+            originating_agent_id: None,
         };
         let json = serde_json::to_value(&reminder).expect("serialize reminder");
         assert_eq!(json["propagate"], "session");
@@ -990,6 +1044,45 @@ mod tests {
             reminder.get("source").map(|v| v.display()).as_deref(),
             Some("hook")
         );
+    }
+
+    #[test]
+    fn reminder_propagation_filters_and_rewrites_inherited_copies() {
+        let mut all = SystemReminder::new("all reminder", ReminderSource::InPipeline, 1);
+        all.propagate = ReminderPropagate::All;
+        let mut session = SystemReminder::new("session reminder", ReminderSource::InPipeline, 1);
+        session.propagate = ReminderPropagate::Session;
+        let mut none = SystemReminder::new("none reminder", ReminderSource::InPipeline, 1);
+        none.propagate = ReminderPropagate::None;
+        let inherited_session = inherited_reminder_for_handoff(session.clone(), "root-parent");
+
+        let transcript = new_transcript_with_events(
+            Some("parent".to_string()),
+            Vec::new(),
+            None,
+            None,
+            vec![
+                transcript_reminder_event(&all),
+                transcript_reminder_event(&session),
+                transcript_reminder_event(&none),
+                transcript_reminder_event(&inherited_session),
+            ],
+            Vec::new(),
+            None,
+        );
+        let propagated = reminder_propagation_from_transcript(&transcript, "parent");
+        let bodies = propagated
+            .iter()
+            .map(|reminder| reminder.body.as_str())
+            .collect::<Vec<_>>();
+
+        assert_eq!(bodies, vec!["all reminder", "session reminder"]);
+        assert!(propagated
+            .iter()
+            .all(|reminder| reminder.source == ReminderSource::Inherited));
+        assert!(propagated
+            .iter()
+            .all(|reminder| reminder.originating_agent_id.as_deref() == Some("parent")));
     }
 
     #[test]

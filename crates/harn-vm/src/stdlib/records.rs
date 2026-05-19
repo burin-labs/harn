@@ -71,6 +71,20 @@ fn emit_handoff_event(artifact: &ArtifactRecord) {
     });
 }
 
+fn attach_current_reminder_propagation(handoff: &mut crate::orchestration::HandoffArtifact) {
+    if !handoff.reminder_propagation.is_empty() {
+        return;
+    }
+    let Some(session_id) = crate::llm::current_agent_session_id() else {
+        return;
+    };
+    let Some(transcript) = crate::agent_sessions::transcript(&session_id) else {
+        return;
+    };
+    handoff.reminder_propagation =
+        crate::llm::helpers::reminder_propagation_from_transcript(&transcript, &session_id);
+}
+
 pub(crate) fn parse_artifact_list(value: Option<&VmValue>) -> Result<Vec<ArtifactRecord>, VmError> {
     match value {
         Some(VmValue::List(list)) => list.iter().map(normalize_artifact).collect(),
@@ -282,9 +296,10 @@ pub(crate) fn register_record_builtins(vm: &mut Vm) {
             .first()
             .ok_or_else(|| VmError::Runtime("handoff: missing payload".to_string()))?;
         let json = crate::llm::vm_value_to_json(value);
-        let handoff = handoff_from_json_value(&json)
+        let mut handoff = handoff_from_json_value(&json)
             .or_else(|| normalize_handoff_artifact_json(json.clone()).ok())
             .ok_or_else(|| VmError::Runtime("handoff: invalid handoff payload".to_string()))?;
+        attach_current_reminder_propagation(&mut handoff);
         to_vm(&handoff)
     });
 

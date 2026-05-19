@@ -1,0 +1,50 @@
+fn parent_tools(child_session) {
+  var tools = tool_registry()
+  tools = tool_define(
+    tools,
+    "delegate_child",
+    "Run a child sub-agent",
+    {
+      handler: { _args -> sub_agent_run(
+        "Child task.",
+        {provider: "mock", session_id: child_session, max_iterations: 1, done_judge: nil},
+      ) },
+      parameters: {},
+      returns: {type: "object"},
+    },
+  )
+  return tools
+}
+
+pipeline main() {
+  llm_mock_clear()
+  let parent = agent_session_open("reminder-propagate-none-parent")
+  let child = "reminder-propagate-none-child"
+  agent_session_open(child)
+  agent_session_reset(parent)
+  agent_session_reset(child)
+  agent_session_inject(
+    parent,
+    transcript_reminder_event(
+      {body: "none reminder", tags: ["none"], dedupe_key: "none-key", propagate: "none"},
+    ),
+  )
+  llm_mock({tool_calls: [{id: "parent_delegate", name: "delegate_child", arguments: {}}]})
+  llm_mock({text: "child done"})
+  llm_mock({text: "parent done"})
+  agent_loop(
+    "Run child.",
+    nil,
+    {
+      provider: "mock",
+      session_id: parent,
+      tools: parent_tools(child),
+      tool_format: "native",
+      max_iterations: 2,
+      done_judge: nil,
+    },
+  )
+  let child_reminders = transcript_events_by_kind(agent_session_snapshot(child), "system_reminder")
+  println(len(child_reminders))
+  llm_mock_clear()
+}

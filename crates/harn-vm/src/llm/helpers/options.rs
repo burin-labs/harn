@@ -2174,6 +2174,7 @@ mod reminder_render_tests {
             source: crate::llm::helpers::ReminderSource::InPipeline,
             body: body.to_string(),
             fired_at_turn: 0,
+            originating_agent_id: None,
         }
     }
 

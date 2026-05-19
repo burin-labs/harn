@@ -2633,6 +2633,9 @@ Options mirror `agent_loop` where relevant (`provider`, `model`, `tools`,
 
 - `allowed_tools: ["name", ...]` to narrow the child tool registry and
   capability ceiling
+- `reminder_propagation: [...]` to explicitly seed inherited system reminders;
+  when omitted, pending parent reminders are filtered by their `propagate`
+  policy and inherited automatically
 - `response_format: "json"` to parse structured child JSON into `data` from the
   final successful transcript when possible
 - `returns: {schema: ...}` to validate that structured child JSON against a

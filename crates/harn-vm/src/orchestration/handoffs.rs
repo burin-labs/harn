@@ -271,6 +271,8 @@ pub struct HandoffArtifact {
     pub allowed_side_effects: Vec<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub policy_override: Option<CapabilityPolicy>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub reminder_propagation: Vec<crate::llm::helpers::SystemReminder>,
     /// Typed effect set computed at child-spawn time from the spawn
     /// config's capability declarations + transitive `harn graph --json`
     /// analysis. Empty when the handoff predates effect tracking or the
@@ -522,6 +524,9 @@ fn merge_handoffs(mut left: HandoffArtifact, right: HandoffArtifact) -> HandoffA
     }
     if left.policy_override.is_none() {
         left.policy_override = right.policy_override;
+    }
+    if left.reminder_propagation.is_empty() {
+        left.reminder_propagation = right.reminder_propagation;
     }
     if left.effects.is_empty() {
         left.effects = right.effects;

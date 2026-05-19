@@ -26,6 +26,7 @@ pipeline main() {
   println(second.reports[0].deduped_count)
   println(len(before))
   println(before[0].reminder.tags[0])
+  println(before[0].reminder.propagate)
   println(before[0].reminder.ttl_turns)
   println(ttl.expired_count)
   println(len(after))

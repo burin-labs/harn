@@ -14,16 +14,25 @@ handoff_dispatch({
     tools: ["read_note", "comment_on_pr"],
     side_effect_level: "workspace_write",
   },
+  reminder_propagation: [],
 })
 ```
 
 `handoff(...)`, `handoff_routed(...)`, and `with_handoff_artifact(...)` preserve
-the field on the typed envelope as `handoff.policy_override`. When
+`policy_override` on the typed envelope as `handoff.policy_override`. When
 `handoff_dispatch(...)` invokes a target persona/sub-agent dispatcher, it pushes
 that policy as a replacement execution-policy frame for the duration of the
 target invocation. Replacement matters: the override is the active target policy
 for that handoff run, rather than a merge with the target's previous session
 policy.
+
+The same handoff envelope can carry `reminder_propagation`, a filtered list of
+pending system reminders inherited by the target. If the field is omitted,
+`handoff(...)` fills it from the active parent session: `propagate: "all"`
+reminders are forwarded through every descendant, `propagate: "session"`
+reminders reach direct child sub-agents only, and `propagate: "none"` reminders
+stay local. Inherited copies use `source: "inherited"` and carry
+`originating_agent_id` for audit.
 
 Dispatch also attaches `audit.scope.source_handoff = handoff_id` to the queued
 payload and dispatch receipt. Target-side receipts and tool audits should carry

@@ -80,6 +80,28 @@ fn non_empty_raw_string(value: Option<String>) -> Option<String> {
     value.filter(|text| !text.trim().is_empty())
 }
 
+fn parse_reminder_propagation_value(
+    value: &VmValue,
+) -> Result<crate::llm::helpers::SystemReminder, VmError> {
+    serde_json::from_value(crate::llm::vm_value_to_json(value)).map_err(|error| {
+        VmError::Runtime(format!(
+            "{SUB_AGENT_RUN_FN}: reminder_propagation parse error: {error}"
+        ))
+    })
+}
+
+fn inherited_reminders_from_parent(
+    parent_session_id: Option<&str>,
+) -> Vec<crate::llm::helpers::SystemReminder> {
+    let Some(parent_session_id) = parent_session_id else {
+        return Vec::new();
+    };
+    let Some(transcript) = crate::agent_sessions::transcript(parent_session_id) else {
+        return Vec::new();
+    };
+    crate::llm::helpers::reminder_propagation_from_transcript(&transcript, parent_session_id)
+}
+
 pub(super) fn parse_sub_agent_request(args: &[VmValue]) -> Result<ParsedSubAgentRequest, VmError> {
     let request = validate_sub_agent_request_envelope(args)?;
     let mut parser = OptionsParser::new(SUB_AGENT_RUN_FN, request, ErrorKind::Runtime);
@@ -97,6 +119,14 @@ pub(super) fn parse_sub_agent_request(args: &[VmValue]) -> Result<ParsedSubAgent
         prepare_sub_agent_options(&mut parser, &session_id, policies.requested_policy.as_ref())?;
     let name = non_empty_raw_string(parser.optional_string_raw("name")?)
         .unwrap_or_else(|| "sub-agent".to_string());
+    let parent_session_id = crate::llm::current_agent_session_id();
+    let reminder_propagation = match parser.optional_list("reminder_propagation")? {
+        Some(reminders) => reminders
+            .iter()
+            .map(parse_reminder_propagation_value)
+            .collect::<Result<Vec<_>, _>>()?,
+        None => inherited_reminders_from_parent(parent_session_id.as_deref()),
+    };
     parser.finish_strict(&[])?;
 
     Ok(ParsedSubAgentRequest {
@@ -107,7 +137,8 @@ pub(super) fn parse_sub_agent_request(args: &[VmValue]) -> Result<ParsedSubAgent
             options,
             returns_schema,
             session_id,
-            parent_session_id: crate::llm::current_agent_session_id(),
+            parent_session_id,
+            reminder_propagation,
         },
         background,
         carry_policy: policies.carry_policy,
@@ -283,6 +314,14 @@ fn append_parent_sub_agent_event(parent_session_id: Option<&str>, event: VmValue
             &format!("parent_session_id={parent_session_id} child event append failed: {err}"),
         );
     }
+}
+
+fn seed_child_reminder_propagation(spec: &SubAgentRunSpec) -> Result<(), VmError> {
+    for reminder in &spec.reminder_propagation {
+        crate::agent_sessions::inject_reminder(&spec.session_id, reminder.clone())
+            .map_err(VmError::Runtime)?;
+    }
+    Ok(())
 }
 
 fn sub_agent_start_event(spec: &SubAgentRunSpec) -> VmValue {
@@ -593,6 +632,7 @@ pub(super) async fn execute_sub_agent(
     } else {
         crate::agent_sessions::open_or_create(Some(spec.session_id.clone()));
     }
+    seed_child_reminder_propagation(&spec)?;
     append_parent_sub_agent_event(
         spec.parent_session_id.as_deref(),
         sub_agent_start_event(&spec),
@@ -967,6 +1007,7 @@ mod tests {
             returns_schema: None,
             session_id: "child-subagent".to_string(),
             parent_session_id: Some(parent.clone()),
+            reminder_propagation: Vec::new(),
         };
 
         let mut vm = crate::Vm::new();
