@@ -685,6 +685,7 @@ async fn suspend_agent_builtin(args: Vec<VmValue>) -> Result<VmValue, VmError> {
             snapshot_ref: worker.snapshot_path.clone(),
             prior_span_link,
             pipeline_span_link,
+            suspended_at_turn: None,
             conditions: conditions.clone(),
             auto_resume_trigger: None,
         });
@@ -810,6 +811,7 @@ async fn top_level_agent_suspend_builtin(args: Vec<VmValue>) -> Result<VmValue, 
             snapshot_ref: snapshot_path.clone(),
             prior_span_link,
             pipeline_span_link,
+            suspended_at_turn: args.get(6).and_then(VmValue::as_int),
             conditions,
             auto_resume_trigger: None,
         }),
@@ -875,6 +877,8 @@ async fn top_level_agent_suspend_builtin(args: Vec<VmValue>) -> Result<VmValue, 
 struct WorkerResumeOptions {
     resume_input: Option<VmValue>,
     continue_transcript: bool,
+    initiator: Option<String>,
+    trigger_event: Option<serde_json::Value>,
 }
 
 impl Default for WorkerResumeOptions {
@@ -882,6 +886,8 @@ impl Default for WorkerResumeOptions {
         Self {
             resume_input: None,
             continue_transcript: true,
+            initiator: None,
+            trigger_event: None,
         }
     }
 }
@@ -922,7 +928,10 @@ fn parse_resume_options(args: &[VmValue]) -> WorkerResumeOptions {
     if let VmValue::Dict(dict) = raw {
         let has_options = dict.contains_key("input")
             || dict.contains_key("resume_input")
-            || dict.contains_key("continue_transcript");
+            || dict.contains_key("continue_transcript")
+            || dict.contains_key("initiator")
+            || dict.contains_key("resume_initiator")
+            || dict.contains_key("trigger_event");
         if has_options {
             options.resume_input = dict
                 .get("input")
@@ -935,6 +944,16 @@ fn parse_resume_options(args: &[VmValue]) -> WorkerResumeOptions {
             {
                 options.continue_transcript = flag.is_truthy();
             }
+            options.initiator = dict
+                .get("initiator")
+                .or_else(|| dict.get("resume_initiator"))
+                .filter(|value| !is_nil(value))
+                .map(VmValue::display)
+                .filter(|value| !value.trim().is_empty());
+            options.trigger_event = dict
+                .get("trigger_event")
+                .filter(|value| !is_nil(value))
+                .map(crate::llm::vm_value_to_json);
         } else {
             options.resume_input = Some(raw.clone());
         }
@@ -960,11 +979,14 @@ fn summary_message(summary: &str) -> VmValue {
     ])))
 }
 
-fn summary_only_resume_transcript(transcript: Option<VmValue>) -> Option<VmValue> {
+fn summary_only_resume_transcript(
+    transcript: Option<VmValue>,
+    digest_override: Option<String>,
+) -> Option<VmValue> {
     let transcript = transcript?;
     let dict = transcript.as_dict()?;
-    let summary = crate::llm::helpers::transcript_summary_text(dict)?;
-    let summary = summary.trim();
+    let summary = digest_override.or_else(|| crate::llm::helpers::transcript_summary_text(dict));
+    let summary = summary.as_deref()?.trim();
     if summary.is_empty() {
         return None;
     }
@@ -976,11 +998,56 @@ fn summary_only_resume_transcript(transcript: Option<VmValue>) -> Option<VmValue
     ))
 }
 
-fn apply_resume_transcript_policy(worker: &mut WorkerState, continue_transcript: bool) {
+async fn resume_digest_from_transcript(
+    transcript: Option<&VmValue>,
+) -> Result<Option<String>, VmError> {
+    let Some(transcript) = transcript else {
+        return Ok(None);
+    };
+    let Some(dict) = transcript.as_dict() else {
+        return Ok(None);
+    };
+    if let Some(summary) = crate::llm::helpers::transcript_summary_text(dict) {
+        let summary = summary.trim();
+        if !summary.is_empty() {
+            return Ok(Some(summary.to_string()));
+        }
+    }
+    let messages = crate::llm::helpers::transcript_message_list(dict)?;
+    if messages.is_empty() {
+        return Ok(None);
+    }
+    let mut json_messages = messages
+        .iter()
+        .map(crate::llm::helpers::vm_value_to_json)
+        .collect::<Vec<_>>();
+    let config = crate::orchestration::AutoCompactConfig {
+        token_threshold: 0,
+        keep_last: 0,
+        compact_strategy: crate::orchestration::CompactStrategy::Truncate,
+        policy_strategy: crate::orchestration::compact_strategy_name(
+            &crate::orchestration::CompactStrategy::Truncate,
+        )
+        .to_string(),
+        ..Default::default()
+    };
+    Ok(
+        crate::orchestration::auto_compact_messages(&mut json_messages, &config, None)
+            .await?
+            .map(|summary| summary.trim().to_string())
+            .filter(|summary| !summary.is_empty()),
+    )
+}
+
+fn apply_resume_transcript_policy(
+    worker: &mut WorkerState,
+    continue_transcript: bool,
+    digest: Option<String>,
+) {
     if continue_transcript {
         return;
     }
-    worker.transcript = summary_only_resume_transcript(worker.transcript.take());
+    worker.transcript = summary_only_resume_transcript(worker.transcript.take(), digest);
 }
 
 async fn resume_agent_builtin(args: Vec<VmValue>) -> Result<VmValue, VmError> {
@@ -1027,7 +1094,7 @@ async fn resume_agent_builtin(args: Vec<VmValue>) -> Result<VmValue, VmError> {
         // are actually suspended.
         {
             let mut worker = state.borrow_mut();
-            apply_resume_transcript_policy(&mut worker, options.continue_transcript);
+            apply_resume_transcript_policy(&mut worker, options.continue_transcript, None);
             apply_resume_input(&mut worker, options.resume_input.as_ref())?;
             if worker.carry_policy.persist_state {
                 persist_worker_state_snapshot(&worker)?;
@@ -1067,6 +1134,163 @@ fn apply_resume_task_to_config(config: &mut WorkerConfig, task: &str) {
     }
 }
 
+fn resume_input_rendered(input: Option<&VmValue>) -> Option<String> {
+    let input = input?;
+    let text = input.display();
+    (!text.trim().is_empty()).then_some(text)
+}
+
+fn inferred_resume_initiator(options: &WorkerResumeOptions) -> String {
+    if let Some(initiator) = options
+        .initiator
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+    {
+        return initiator.to_string();
+    }
+    if crate::agent_sessions::current_session_id().is_some() {
+        "parent".to_string()
+    } else {
+        "operator".to_string()
+    }
+}
+
+fn latest_payload_i64(payload: Option<&serde_json::Value>, key: &str) -> Option<i64> {
+    payload.and_then(|payload| {
+        payload.get(key).and_then(|value| {
+            value
+                .as_i64()
+                .or_else(|| value.as_u64().and_then(|value| i64::try_from(value).ok()))
+        })
+    })
+}
+
+fn suspended_at_turn(worker: &WorkerState, suspension: Option<&WorkerSuspension>) -> Option<i64> {
+    suspension
+        .and_then(|suspension| suspension.suspended_at_turn)
+        .or_else(|| latest_payload_i64(worker.latest_payload.as_ref(), "iterations_completed"))
+        .or_else(|| latest_payload_i64(worker.latest_payload.as_ref(), "iterations"))
+}
+
+fn install_resume_continuity_payload(
+    worker: &mut WorkerState,
+    suspension: Option<&WorkerSuspension>,
+    options: &WorkerResumeOptions,
+    digest: Option<&str>,
+) {
+    let session_id = match &worker.config {
+        WorkerConfig::SubAgent { spec } => spec.session_id.clone(),
+        _ => return,
+    };
+    let suspended_turn = suspended_at_turn(worker, suspension);
+    let trigger_id = worker
+        .suspension
+        .as_ref()
+        .or(suspension)
+        .and_then(|suspension| suspension.auto_resume_trigger.as_ref())
+        .map(|trigger| trigger.id.clone());
+    let worker_id = worker.id.clone();
+    let worker_name = worker.name.clone();
+    let worker_mode = worker.mode.clone();
+    let reason = worker
+        .suspension
+        .as_ref()
+        .or(suspension)
+        .map(|suspension| suspension.reason.clone())
+        .unwrap_or_default();
+    let suspension_initiator = worker
+        .suspension
+        .as_ref()
+        .or(suspension)
+        .map(|suspension| suspension.initiator);
+    let suspended_at = worker
+        .suspension
+        .as_ref()
+        .or(suspension)
+        .map(|suspension| suspension.suspended_at.clone());
+    let snapshot_ref = worker
+        .suspension
+        .as_ref()
+        .or(suspension)
+        .map(|suspension| suspension.snapshot_ref.clone());
+    let conditions = worker
+        .suspension
+        .as_ref()
+        .or(suspension)
+        .and_then(|suspension| suspension.conditions.clone());
+    let initiator = inferred_resume_initiator(options);
+    let input_rendered = resume_input_rendered(options.resume_input.as_ref());
+    let input_json = options
+        .resume_input
+        .as_ref()
+        .map(crate::llm::vm_value_to_json);
+    let trigger_event = options.trigger_event.clone();
+    let trigger = trigger_event.as_ref().map(|event| {
+        serde_json::json!({
+            "id": trigger_id,
+            "event_id": event.get("id").and_then(|value| value.as_str()),
+            "kind": event.get("kind").and_then(|value| value.as_str()),
+            "provider": event.get("provider").and_then(|value| value.as_str()),
+            "dedupe_key": event.get("dedupe_key").and_then(|value| value.as_str()),
+            "timeout_action": event
+                .get("provider_payload")
+                .and_then(|payload| payload.get("raw"))
+                .and_then(|raw| raw.get("on_timeout"))
+                .and_then(|value| value.as_str()),
+        })
+    });
+    let resume_initiator = if initiator == "timeout" {
+        "timeout".to_string()
+    } else if trigger.is_some() && initiator != "parent" && initiator != "operator" {
+        "triggered".to_string()
+    } else {
+        initiator
+    };
+    let payload = serde_json::json!({
+        "session_id": session_id.clone(),
+        "session": {"id": session_id},
+        "worker": {
+            "id": worker_id,
+            "name": worker_name,
+            "mode": worker_mode,
+        },
+        "suspension": {
+            "reason": reason.clone(),
+            "initiator": suspension_initiator,
+            "suspended_at": suspended_at,
+            "snapshot_ref": snapshot_ref,
+            "suspended_at_turn": suspended_turn,
+            "conditions": conditions,
+        },
+        "reason": reason,
+        "suspended_at_turn": suspended_turn.unwrap_or(0),
+        "resume": {
+            "initiator": resume_initiator.clone(),
+            "input": input_json.clone(),
+            "input_rendered": input_rendered.clone(),
+            "input_present": options.resume_input.is_some(),
+            "continue_transcript": options.continue_transcript,
+            "digest": digest,
+            "trigger": trigger,
+        },
+        "initiator": resume_initiator,
+        "input": input_json,
+        "input_rendered": input_rendered,
+        "input_present": options.resume_input.is_some(),
+        "continue_transcript": options.continue_transcript,
+        "digest": digest,
+        "turn": 0,
+        "iteration": 0,
+    });
+    if let WorkerConfig::SubAgent { spec } = &mut worker.config {
+        spec.options.insert(
+            "_resume_continuity".to_string(),
+            crate::stdlib::json_to_vm_value(&payload),
+        );
+    }
+}
+
 async fn unregister_suspension_auto_resume(
     suspension: Option<WorkerSuspension>,
 ) -> Result<(), VmError> {
@@ -1103,6 +1327,12 @@ async fn warm_resume_worker(
     options: WorkerResumeOptions,
 ) -> Result<VmValue, VmError> {
     join_checkpointed_worker_handle(state.clone()).await?;
+    let resume_digest = if options.continue_transcript {
+        None
+    } else {
+        let transcript = state.borrow().transcript.clone();
+        resume_digest_from_transcript(transcript.as_ref()).await?
+    };
     let (worker_id, span_links) = {
         let worker = state.borrow();
         if worker.status != "suspended" {
@@ -1153,10 +1383,20 @@ async fn warm_resume_worker(
         worker.status = "running".to_string();
         worker.finished_at = None;
         worker.latest_error = None;
-        apply_resume_transcript_policy(&mut worker, options.continue_transcript);
+        apply_resume_transcript_policy(
+            &mut worker,
+            options.continue_transcript,
+            resume_digest.clone(),
+        );
         apply_resume_input(&mut worker, options.resume_input.as_ref())?;
         let task = worker.task.clone();
         apply_resume_task_to_config(&mut worker.config, &task);
+        install_resume_continuity_payload(
+            &mut worker,
+            suspension.as_ref(),
+            &options,
+            resume_digest.as_deref(),
+        );
         if worker.carry_policy.persist_state {
             persist_worker_state_snapshot(&worker)?;
         }
@@ -1188,6 +1428,15 @@ pub(crate) async fn resume_worker_from_auto_resume_trigger(
     let options = WorkerResumeOptions {
         resume_input,
         continue_transcript: timeout_action.as_deref() != Some("resume_with_summary"),
+        initiator: Some(
+            if timeout_action.as_deref() == Some("resume_with_summary") {
+                "timeout"
+            } else {
+                "triggered"
+            }
+            .to_string(),
+        ),
+        trigger_event: Some(serde_json::to_value(event).unwrap_or(serde_json::Value::Null)),
     };
     let state = with_worker_state(worker_id, |state| Ok(state.clone()))?;
     warm_resume_worker(state, options).await
@@ -2265,6 +2514,27 @@ mod suspend_tests {
                 .map(VmValue::display),
             Some("Prior digest".to_string())
         );
+        let resume_context = WORKER_REGISTRY
+            .with(|registry| {
+                let state = registry.borrow().get(&worker_id).cloned().unwrap();
+                let worker = state.borrow();
+                match &worker.config {
+                    WorkerConfig::SubAgent { spec } => {
+                        spec.options.get("_resume_continuity").cloned()
+                    }
+                    _ => None,
+                }
+            })
+            .expect("resume continuity payload");
+        let resume_context = crate::llm::vm_value_to_json(&resume_context);
+        assert_eq!(
+            resume_context["continue_transcript"],
+            serde_json::json!(false)
+        );
+        assert_eq!(resume_context["reason"], "park before fresh prompt");
+        assert_eq!(resume_context["suspended_at_turn"], 0);
+        assert_eq!(resume_context["digest"], "Prior digest");
+        assert_eq!(resume_context["input_rendered"], "fresh prompt");
 
         teardown(&dir, &worker_id);
     }
