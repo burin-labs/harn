@@ -1238,6 +1238,15 @@ condensed series summaries instead of full per-patch history.
   `reminder_emitted` under `_meta.harn.reminder`, and hook-origin
   reminder metadata is carried on tool-call receipts.
 
+### Changed
+
+- **Natural-language tool binder defaults reflect the empirical run
+  envelope (#1696).** `with_natural_language_executor` now defaults to a
+  `500ms` wall-clock budget and `1024` response tokens. The larger token
+  budget gives reasoning binders room to emit structured JSON after their
+  reasoning preamble; the timeout remains a bounded opt-in hop and still
+  degrades to passthrough on overrun.
+
 ## v0.8.26
 
 ### Added

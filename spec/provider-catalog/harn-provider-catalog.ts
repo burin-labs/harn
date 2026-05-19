@@ -247,7 +247,7 @@ export const harnProviderCatalog: HarnProviderCatalog = {
         "native_tools"
       ],
       "caveats": [],
-      "latency_p50_ms": 80
+      "latency_p50_ms": 150
     },
     {
       "id": "dashscope",

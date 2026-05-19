@@ -12,6 +12,9 @@ ok
 hello
 false
 100
+ok
+500
+1024
 true
 timeout
 true
@@ -19,7 +22,7 @@ false
 false
 schema_violation
 schema_error
-false
+true
 true
 ok
 /var/log/syslog

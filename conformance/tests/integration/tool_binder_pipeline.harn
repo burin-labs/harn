@@ -1,7 +1,7 @@
 /**
  * std/llm/tool_binder::with_natural_language_executor — middleware coverage.
  *
- * Verifies five scenarios through the composable tool-caller seam, using
+ * Verifies seven scenarios through the composable tool-caller seam, using
  * an injected `binder_fn` so the test doesn't need a live provider and
  * `mock_time` so timeout semantics are deterministic:
  *
@@ -10,10 +10,12 @@
  *   2. Passthrough when no natural-language intent is supplied.
  *   3. Successful binder dispatch — intent is bound into structured args
  *      via the binder LLM, original args are replaced before next().
- *   4. Timeout → audit.binder.status = "timeout"; envelope passes
+ *   4. Default binder limits reach the injected binder substrate.
+ *   5. Timeout → audit.binder.status = "timeout"; envelope passes
  *      through unchanged with the stripped args.
- *   5. on_failure: "reject" — schema-error from binder short-circuits
+ *   6. on_failure: "reject" — schema-error from binder short-circuits
  *      with a `schema_violation` error and never reaches next().
+ *   7. compose_tool_callers stacks cleanly with the binder.
  */
 import { with_natural_language_executor } from "std/llm/tool_binder"
 import { compose_tool_callers } from "std/llm/tool_middleware"
@@ -111,7 +113,35 @@ pipeline default() {
   // `llm_call` (which now recognizes `timeout_ms`) can apply an HTTP-level
   // backstop in addition to the middleware's post-call wall-clock check.
   println(atomic_get(captured_timeout_ms))
-  // (4) Timeout: binder takes longer than timeout_ms; envelope passes through.
+  // (4) Defaults: the production defaults should be usable with reasoning
+  // binder models without callers having to remember the empirical token
+  // and latency budget.
+  let captured_default_timeout_ms = atomic(0)
+  let captured_default_max_tokens = atomic(0)
+  let default_binder = { _prompt, _system, opts ->
+    let _ = atomic_set(captured_default_timeout_ms, to_int(opts?.timeout_ms ?? 0))
+    let _ = atomic_set(captured_default_max_tokens, to_int(opts?.max_tokens ?? 0))
+    return {
+      text: "{\"path\":\"/var/log/syslog\",\"contents\":\"hello\"}",
+      model: "mock",
+      provider: "mock",
+      input_tokens: 0,
+      output_tokens: 0,
+    }
+  }
+  let mw_defaults = with_natural_language_executor(
+    {provider: "cerebras", model: "gpt-oss-120b", binder_fn: default_binder},
+  )
+  let _ = mock_time(0)
+  let r_defaults = mw_defaults(
+    envelope("file_read", {_nl_intent: "read /var/log/syslog and append hello"}, schema),
+    next,
+  )
+  let _ = unmock_time()
+  println(r_defaults.audit.binder.status)
+  println(atomic_get(captured_default_timeout_ms))
+  println(atomic_get(captured_default_max_tokens))
+  // (5) Timeout: binder takes longer than timeout_ms; envelope passes through.
   let slow_binder = { _prompt, _system, _opts ->
     let _ = advance_time(250)
     return {
@@ -133,7 +163,7 @@ pipeline default() {
   println(r4.audit.binder.latency_ms >= 100)
   // Stripped args reach next() — intent is gone, original args (empty here) pass through.
   println(contains(r4.arguments.keys(), "_nl_intent"))
-  // (5) on_failure: "reject" — bad binder JSON short-circuits with schema_violation.
+  // (6) on_failure: "reject" — bad binder JSON short-circuits with schema_violation.
   let bad_binder = { _prompt, _system, _opts -> return {text: "not json at all", model: "mock", provider: "mock", input_tokens: 0, output_tokens: 0} }
   let was_dispatched = atomic(0)
   let watch_next = { call ->
@@ -153,8 +183,8 @@ pipeline default() {
   println(r5.ok)
   println(r5.error_category)
   println(r5.audit.binder.status)
-  println(atomic_get(was_dispatched) == 1)
-  // (6) compose_tool_callers stacks cleanly with the binder.
+  println(atomic_get(was_dispatched) == 0)
+  // (7) compose_tool_callers stacks cleanly with the binder.
   let composed = compose_tool_callers([mw_ok])
   let _ = mock_time(0)
   let r6 = composed(envelope("file_read", {_nl_intent: "read /var/log/syslog and append hello"}, schema), next)

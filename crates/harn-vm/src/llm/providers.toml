@@ -152,11 +152,12 @@ latency_p50_ms = 450
 method = "GET"
 path = "/models"
 
-# Cerebras — OpenAI-compatible wafer-scale inference. Headline ~3,000 tok/s
-# on gpt-oss-120b and ~2,100 tok/s on Llama 3.3 70B, fast enough to keep
-# binder-style single-tool-call hops under ~50ms p50. Provider-level
-# pricing here is a coarse default; per-model rows under [models.X] hold
-# the authoritative numbers from the Cerebras pricing page.
+# Cerebras — OpenAI-compatible wafer-scale inference. High token throughput
+# makes it a strong fit for latency-budgeted binder workloads; end-to-end
+# p50 still includes client/provider round-trip time, so callers should keep
+# their own wall-clock budget. Provider-level pricing here is a coarse
+# default; per-model rows under [models.X] hold the authoritative numbers
+# from the Cerebras pricing page.
 [providers.cerebras]
 base_url = "https://api.cerebras.ai/v1"
 base_url_env = "CEREBRAS_BASE_URL"
@@ -166,7 +167,7 @@ chat_endpoint = "/chat/completions"
 completion_endpoint = "/completions"
 cost_per_1k_in = 0.00025
 cost_per_1k_out = 0.00069
-latency_p50_ms = 80
+latency_p50_ms = 150
 features = ["native_tools"]
 
 [providers.cerebras.healthcheck]
@@ -884,11 +885,11 @@ context_window = 131072
 capabilities = ["tools", "streaming"]
 pricing = { input_per_mtok = 0.15, output_per_mtok = 0.60 }
 
-# Cerebras-hosted open-weight models. Pricing snapshot from
-# https://www.cerebras.ai/pricing (2026-05). The headline binder-substrate
-# candidate is gpt-oss-120b at ~3,000 tok/s; Llama 3.3 70B trails at
-# ~2,100 tok/s but is included as a fallback when the binder hop wants
-# function-calling-trained Llama instead of GPT-OSS.
+# Cerebras-hosted open-weight models. Per-model pricing mirrors the public
+# pricing catalog. The headline binder-substrate candidate is gpt-oss-120b
+# at very high token throughput; Llama 3.3 70B is included as a fallback
+# when the binder hop wants function-calling-trained Llama instead of
+# GPT-OSS.
 #
 # Catalog keys are bare wire IDs (Cerebras's /v1/chat/completions wants
 # the raw model name). Users routing via `model: "cerebras/<name>"` get

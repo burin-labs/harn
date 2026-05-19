@@ -2975,12 +2975,15 @@ Nine opinionated modules wrap common LLM patterns:
 - `std/llm/tool_binder` — experimental natural-language tool binder
   middleware (`with_natural_language_executor`). OFF by default; opt in
   via `compose_tool_callers`. Hands the planner-emitted intent + tool
-  JSON Schema to a sub-100ms binder LLM (Cerebras GPT-OSS-120B is the
-  primary substrate) and replaces `tool_args` with the binder's
-  structured output. Hard wall-clock budget — overruns drop the hop and
-  pass through unchanged with `audit.binder.status = "timeout"`. See
-  the parent epic [#1696](https://github.com/burin-labs/harn/issues/1696)
-  for the experimental contract.
+  JSON Schema to a latency-budgeted binder LLM (Cerebras GPT-OSS-120B is
+  the primary accuracy substrate) and replaces `tool_args` with the
+  binder's structured output. Default `timeout_ms` is `500`; overruns
+  drop the hop and pass through unchanged with
+  `audit.binder.status = "timeout"`. Default `max_tokens` is `1024` so
+  reasoning binders have room to emit structured JSON after their
+  reasoning preamble. See the parent epic
+  [#1696](https://github.com/burin-labs/harn/issues/1696) for the
+  experimental contract.
 - `std/llm/ensemble` — multi-call quality strategies: `best_of_n`,
   `self_consistency`, `parallel_judge`, `debate`. Cites Wang 2022
   (arxiv:2203.11171) and Du 2023 (arxiv:2305.14325).
