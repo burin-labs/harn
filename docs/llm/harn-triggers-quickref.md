@@ -9,6 +9,8 @@
 
 Use this with `docs/llm/harn-quickref.md` when writing trigger, connector, or orchestrator code. It covers manifest shape, provider catalog metadata, the pure-Harn connector contract, and example-library commands.
 
+**Reminders ≠ triggers.** Triggers spawn or schedule tasks from external or timed events; system reminders modify a running agent session by injecting typed ambient context. See `docs/src/system-reminders.md` and the Reminders section in `docs/llm/harn-quickref.md`.
+
 ## Trigger manifest
 
 ```toml

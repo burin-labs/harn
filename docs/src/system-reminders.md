@@ -1,39 +1,67 @@
 # System reminders
 
-A **system reminder** is a typed transcript event with declared
-lifecycle: visibility, persistence policy, dedupe key, time-to-live in
-turns, sub-agent propagation policy, and a provider-rendering hint.
-Reminders are the primitive Harn uses to inject ambient, ephemeral,
-turn-boundary nudges into a running agent — token-pressure warnings,
-file-changed alerts, post-tool truncation hints, post-compact awareness
-prompts — without abusing the `user` role or polluting the durable
-message history.
+System reminders are typed, ephemeral transcript injections for a running
+agent session. They let Harn add ambient context at turn boundaries, such
+as token-pressure warnings, idle-session nudges, truncated-tool-output
+notices, post-compact recaps, or host file-change alerts, without
+pretending that context came from the user and without adding it to the
+durable message list.
 
-R-01 shipped the **schema and event envelope**. R-02 adds deterministic
-in-Harn transcript transforms for injecting and clearing pending reminder
-events, plus EventLog-backed dedupe and post-turn TTL expiry audit
-records. R-03 lets tool, persona, step, and session hooks return reminder
-effects that inject into the active session transcript. R-04 adds the
-provider registry, four canonical stdlib providers, and
-`register_reminder_provider(...)` for Harn-defined providers. R-05 adds
-the bridge `session/remind` notification for host-injected reminder
-events without routing them through user-role input. The rest of the
-lifecycle (compaction honoring TTL + `preserve_on_compact`, sub-agent
-propagation, and capability-aware rendering) lands in later tickets under epic
-[#1815](https://github.com/burin-labs/harn/issues/1815).
+A reminder is always a structured `system_reminder` transcript event. It
+has a stable lifecycle shape, can be deduped, can expire after a finite
+number of turns, can choose whether it survives compaction, and can state
+how far it should propagate to sub-agents. Rendering is provider-aware:
+the same reminder can become developer-role content, system prompt text,
+or an Anthropic-style `<system-reminder>` user content block depending on
+the selected model route.
 
-## Event shape
+## What and why
 
-A reminder rides on the canonical transcript event envelope
-(`{id, kind, role, visibility, text, blocks}`), so consumers that key
-off the generic event shape ignore reminders cleanly. The lifecycle
-fields live under `reminder`, and the same payload is mirrored under
-`metadata` so observers that already key off the generic transcript-event
-metadata slot see reminder context without learning a second field.
+Use reminders when the current agent should keep going, but needs fresh
+ambient context before its next model turn. Triggers are the different
+primitive: they start or schedule work. Reminders modify an already
+running session.
+
+Good reminder candidates are transient facts that should be visible now
+but not preserved forever:
+
+- context-window pressure
+- a file changed while the agent was idle
+- a tool result was truncated before the model saw it
+- compaction replaced older turns with a recap
+- workspace memory produced a temporary caution for the current task
+
+Do not use reminders for durable user requirements, audit records,
+long-lived memory, or background task dispatch. Put those in the normal
+user/system prompt path, receipts, memory, or triggers.
+
+## ReminderSpec shape
+
+Every producer ultimately normalizes to the same `ReminderSpec` lifecycle
+fields:
+
+| Field | Type | Default | Meaning |
+|---|---|---|---|
+| `body` | string | required | Reminder text rendered into the next model turn. Must be non-empty for strict producer APIs. |
+| `tags` | list of strings | `[]` | Tags for querying, clearing, diagnostics, and provider conventions. |
+| `dedupe_key` | string or `nil` | `nil` | Newer pending reminders with the same key replace older pending reminders. |
+| `ttl_turns` | positive int or `nil` | `nil` | Finite reminders expire after this many post-turn lifecycle passes. `nil` persists until cleared or compacted away. |
+| `preserve_on_compact` | bool | `false` | When `true`, compaction copies the reminder event into the compacted transcript. |
+| `propagate` | `"all"`, `"session"`, or `"none"` | `"session"` | Controls sub-agent inheritance. |
+| `role_hint` | `"system"`, `"developer"`, `"user_block"`, or `"ephemeral_cache"` | `"system"` | Preferred rendering slot; provider capabilities still decide the final wire shape. |
+| `source` | `"stdlib_provider"`, `"hook"`, `"bridge"`, `"in_pipeline"`, or `"inherited"` | producer-specific | Origin marker used by audit and propagation. |
+| `fired_at_turn` | int | producer-specific | Turn index when the reminder was created. Pipelines without a turn counter use `0`. |
+| `id` | string | generated | Stable reminder id for audit, replay, and clearing. |
+| `originating_agent_id` | string or `nil` | `nil` | Set when a reminder is inherited from a parent session. |
+
+The transcript event uses the standard event envelope plus a typed
+`reminder` payload. `metadata` mirrors that payload so generic transcript
+observers can inspect the same fields without special-casing the
+`reminder` slot.
 
 ```json
 {
-  "id": "0190abcd-…",
+  "id": "0190abcd-...",
   "kind": "system_reminder",
   "role": "developer",
   "visibility": "public",
@@ -46,7 +74,7 @@ metadata slot see reminder context without learning a second field.
     }
   ],
   "reminder": {
-    "id": "0190abcd-…",
+    "id": "0190abcd-...",
     "tags": ["token_pressure"],
     "dedupe_key": "token_pressure",
     "ttl_turns": 3,
@@ -57,99 +85,33 @@ metadata slot see reminder context without learning a second field.
     "body": "Approaching context window cap.",
     "fired_at_turn": 4
   },
-  "metadata": { "/* mirrors reminder */": "" }
+  "metadata": {
+    "id": "0190abcd-...",
+    "tags": ["token_pressure"],
+    "dedupe_key": "token_pressure",
+    "ttl_turns": 3,
+    "preserve_on_compact": true,
+    "propagate": "session",
+    "role_hint": "developer",
+    "source": "stdlib_provider",
+    "body": "Approaching context window cap.",
+    "fired_at_turn": 4
+  }
 }
 ```
 
-### Lifecycle fields
+`transcript_reminder_event({...})` is the lenient event builder for
+pipeline code that already has a normalized reminder-like dict. The
+stricter producer APIs below validate required fields and enum values.
 
-| Field | Type | Required | Meaning |
-|---|---|---|---|
-| `id` | string (uuid) | yes | Stable identifier for de-duplication, audit, and replay. |
-| `tags` | list of strings | yes (may be empty) | Free-form tag set. Canonical built-in tags include `token_pressure`, `file_changed`, `memory`, `post_tool`, `post_compact`. |
-| `dedupe_key` | string or `nil` | optional | When set, a newer reminder with the same key supersedes older ones in the same transcript. |
-| `ttl_turns` | int or `nil` | optional | Reminder expires after this many agent turns. `nil` means "persist until removed or compacted away." |
-| `preserve_on_compact` | bool | yes | Hint to [`transcript_compact`](./builtins.md): when `true`, reminder events survive compaction. |
-| `propagate` | `"all" \| "session" \| "none"` | yes | Sub-agent inheritance policy. `all` rides every spawned sub-agent transcript; `session` reaches direct child sub-agents from the originating session but is not re-forwarded by inherited copies; `none` is opaque to children. |
-| `role_hint` | `"system" \| "developer" \| "user_block" \| "ephemeral_cache"` | yes | Preferred provider rendering slot. The final wire role is decided at render time by the capability-aware dispatcher (R-06). |
-| `source` | `"stdlib_provider" \| "hook" \| "bridge" \| "in_pipeline" \| "inherited"` | yes | Where the reminder originated. Child sessions receive propagated reminders with `source: "inherited"`. |
-| `body` | string | yes | The reminder text. Mirrored into `event.text` and `event.blocks[0].text`. |
-| `fired_at_turn` | int | yes | Turn index when the reminder was fired. Pipelines with no turn counter pass `0`. |
-| `originating_agent_id` | string or `nil` | optional | Set on inherited reminders to the session id that originally emitted the reminder. |
+## Producing reminders
 
-`visibility` on the outer event defaults to `"public"` — reminders are
-meant to influence the next turn — but reminders are never folded into
-the durable `messages` list. They ride on the event log only.
+### From a pipeline
 
-When a parent agent hands work to a sub-agent, Harn filters pending
-reminders into the handoff envelope's `reminder_propagation` field. The
-child session seeds those reminders into its transcript before its first
-turn. Inherited copies rewrite `source` to `"inherited"` and keep
-`originating_agent_id` pointed at the session that first emitted the
-reminder. `propagate: "all"` inherited reminders can continue to deeper
-sub-agents; inherited `propagate: "session"` reminders stop at that
-child boundary.
-
-## Building a reminder event
-
-Pipelines build reminder events with the `transcript_reminder_event`
-builtin. The dict accepts any subset of the lifecycle fields above and
-fills in protocol defaults for the rest.
-
-```harn,ignore
-let evt = transcript_reminder_event({
-  body: "Approaching context window cap.",
-  tags: ["token_pressure"],
-  dedupe_key: "token_pressure",
-  ttl_turns: 3,
-  preserve_on_compact: true,
-  propagate: "session",
-  role_hint: "developer",
-  source: "stdlib_provider",
-  fired_at_turn: 4,
-})
-```
-
-Defaults applied when fields are omitted:
-
-- `propagate` → `"session"`
-- `role_hint` → `"system"`
-- `source` → `"in_pipeline"`
-- `preserve_on_compact` → `false`
-- `tags` → `[]`
-- `fired_at_turn` → `0`
-
-Hosts and stdlib reminder providers reuse the same shape — the typed
-[`SystemReminder`](https://docs.rs/harn-vm) Rust struct serde-round-trips
-into and out of this dict.
-
-## Rendering pending reminders
-
-`llm_call(...)` reads pending `system_reminder` events from the active
-`session_id` transcript and renders them after `system_prompt_parts` and
-the primary system prompt, but before `system_appendix` / `system_suffix`.
-The final wire shape is capability-aware:
-
-| Capability / hint | Rendering |
-|---|---|
-| `prefers_role_developer` | Separate `role: "developer"` messages. |
-| Anthropic `role_hint: "user_block"` | A user content block containing `<system-reminder>...</system-reminder>`. |
-| Anthropic `role_hint: "ephemeral_cache"` | Same user content block, with `cache_control: {type: "ephemeral"}` when prompt caching is supported. |
-| `prefers_xml_scaffolding` | System-prompt text wrapped in `<system-reminder>` tags. |
-| Fallback providers | Plain system-prompt text prefixed with `System reminder:`. |
-
-Pipeline authors can pick a semantic `role_hint` once; provider
-capabilities decide whether it becomes a developer message, a user content
-block, XML system text, or plain system text.
-`harn lint` emits `HARN-RMD-003` when a pipeline hardcodes
-`role_hint: "user_block"` while also hardcoding a provider/model route
-that cannot preserve that user-block shape.
-
-## Injecting and clearing pending reminders
-
-Use `transcript.inject_reminder(transcript, options)` when a Harn
-pipeline wants to add a pending reminder to a transcript. It returns an
-envelope instead of mutating the input:
+Use `transcript.inject_reminder(transcript, options)` to append a pending
+reminder event to a transcript. It is a pure transform: the input
+transcript is unchanged and the returned `transcript` contains the new
+event.
 
 ```harn,ignore
 let injected = transcript.inject_reminder(transcript(), {
@@ -163,24 +125,13 @@ let injected = transcript.inject_reminder(transcript(), {
 })
 
 let next_transcript = injected.transcript
-let reminder_id = injected.reminder_id
+println(injected.reminder_id)
+println(injected.deduped_count)
 ```
 
-The returned transcript has one additional `system_reminder` event and
-the same durable message list as the input transcript. `body` is
-required and must be non-empty. Optional `tags`, `dedupe_key`,
-`ttl_turns`, `preserve_on_compact`, `propagate`, and `role_hint` fields
-are validated; unknown option keys fail fast.
-
-When `dedupe_key` is set, injection first removes any pending reminder
-events with the same key from the input transcript. The new reminder is
-then appended, and `deduped_count` reports how many older reminders were
-replaced. When an active EventLog is installed, replacement also emits a
-`transcript.reminder.deduped` record on
-`transcript.reminder.lifecycle`.
-
-Use `transcript.clear_reminders(transcript, selector)` to remove
-pending reminders:
+Use `transcript.clear_reminders(transcript, selector)` to remove pending
+reminders by `id`, `tag`, or `dedupe_key`. Multiple selectors are
+combined with AND semantics.
 
 ```harn,ignore
 let cleared = transcript.clear_reminders(next_transcript, {
@@ -189,59 +140,131 @@ let cleared = transcript.clear_reminders(next_transcript, {
 println(cleared.removed_count)
 ```
 
-Selectors support `id`, `tag`, and `dedupe_key`. At least one selector
-is required. If multiple selectors are present, a reminder must match
-all of them to be removed. This builtin is also a pure transform and
-returns `{transcript, removed_count}`.
+### From a hook
 
-Agent-session post-turn processing decrements finite `ttl_turns`
-values. A reminder with `ttl_turns: 1` expires at the next post-turn
-boundary, is removed from the session transcript events, and emits a
-`transcript.reminder.expired` record on
-`transcript.reminder.lifecycle` when an active EventLog is installed.
-`transcript_compact(...)` applies the same TTL decrement at the
-pre-compaction boundary before it rebuilds the transcript. It drops
-expired reminders, dedupes matching `dedupe_key` values to the newest
-event, preserves only reminders with `preserve_on_compact: true`, and
-passes all surviving reminder payloads to custom compactors as their
-second argument.
-Hooks can inject reminders by returning `{reminder: {...}, then?: ...}`,
-a bare reminder spec such as `{body: "Refresh context"}`, or a
-session-hook effect list such as `[{reminder: {...}}]`. Bridge
-notifications use the same reminder spec and provider-specific rendering
-happens at the next LLM call.
+Tool, persona, step, and session hooks can return reminder effects from
+events that support transcript mutation. A hook may return
+`{reminder: {...}, then?: ...}`, a bare reminder spec, or a session-level
+effect list.
 
-## Reminder providers
+```harn,ignore
+register_tool_hook({
+  pattern: "read_file",
+  post: { ctx ->
+    if ctx.result.truncated {
+      return {
+        reminder: {
+          body: "The file read was truncated; inspect the specific range before editing.",
+          tags: ["truncation"],
+          dedupe_key: "read_file:truncated",
+          ttl_turns: 1,
+          propagate: "none",
+        },
+      }
+    }
+  },
+})
+```
 
-`agent_loop(...)` enables stdlib reminder providers by default. Providers
-observe lifecycle events and inject pending `system_reminder` events into
-the active session transcript. Bare `llm_call(...)` does not fire
-providers.
+Worker lifecycle events are observational and reject reminder effects with
+`HARN-RMD-008`. Move mutating reminders to a session, tool, step, or
+persona hook.
 
-Canonical providers:
+### From a provider
 
-| Provider | Event | Reminder |
-|---|---|---|
-| `token_pressure` | `on_budget_threshold` | Fires near 70/85/95% of the context window; tag `token_pressure`, dedupe key `token_pressure`, `ttl_turns: 2`, `propagate: "session"`, and `preserve_on_compact: true` at the critical threshold. |
-| `idle_nudge` | `session_idle` | Fires after the daemon idle interval reaches the configured threshold (default 60s); tag `idle`, `ttl_turns: 1`, `propagate: "none"`. |
-| `tool_output_truncated` | `post_tool_use` | Fires when post-tool hooks compact or truncate output before it reaches the model; tag `truncation`, `ttl_turns: 1`, `propagate: "none"`. |
-| `post_compact_recap` | `post_compact` | Fires after transcript compaction with the current recap; tag `recap`, `ttl_turns: 2`, `propagate: "session"`. |
+`agent_loop(...)` evaluates canonical reminder providers by default.
+Register a custom provider with `register_reminder_provider({id,
+subscribes_to, evaluate})`. The `evaluate` closure receives
+`{event, session, session_id, payload, options, config}` and may return
+`nil`, a bare reminder spec, a `{reminder: {...}}` effect, or a list of
+effects.
 
-Disable providers per loop with the `reminders.providers` opt-out list:
+```harn,ignore
+register_reminder_provider({
+  id: "workspace_guard",
+  subscribes_to: ["session_idle"],
+  evaluate: { ctx ->
+    if ctx.config?.enabled == false {
+      return nil
+    }
+    return {
+      reminder: {
+        body: "Workspace may have changed while idle; re-check touched files.",
+        tags: ["workspace"],
+        dedupe_key: "workspace:idled",
+        ttl_turns: 1,
+        propagate: "session",
+      },
+    }
+  },
+})
+
+agent_loop(task, system, {
+  reminders: {
+    config: {
+      workspace_guard: {enabled: true},
+    },
+  },
+})
+```
+
+`clear_reminder_providers()` removes user-defined providers, mainly for
+tests. Canonical stdlib providers remain available through `agent_loop`
+unless disabled with reminder options.
+
+### From a host bridge
+
+Bridge and ACP-style hosts inject ambient context with the `session/remind`
+JSON-RPC notification. This is distinct from `session/input` and
+`agent/user_message`, which are always user-role input.
+
+```json
+{
+  "jsonrpc": "2.0",
+  "method": "session/remind",
+  "params": {
+    "body": "The workspace changed while you were idle; re-read src/lib.rs before editing.",
+    "tags": ["workspace"],
+    "dedupe_key": "workspace-change",
+    "ttl_turns": 2,
+    "role_hint": "system",
+    "mode": "interrupt_immediate",
+    "_meta": {
+      "harn": {
+        "origin": "file-watcher"
+      }
+    }
+  }
+}
+```
+
+`mode` accepts the same delivery values as queued user messages:
+`interrupt_immediate`, `finish_step`, and `wait_for_completion`.
+Host-specific extension fields belong under `_meta`. Invalid reminder
+payloads fail with `HARN-RMD-002`; unknown top-level reminder options
+fail with `HARN-RMD-001`.
+
+## Canonical stdlib providers
+
+Canonical providers are enabled by default inside `agent_loop(...)`.
+Bare `llm_call(...)` renders pending reminders from the selected session
+but does not evaluate providers.
+
+| Provider | Subscribes to | Config keys | Reminder behavior |
+|---|---|---|---|
+| `token_pressure` | `on_budget_threshold` | `context_window` | Fires at about 70%, 85%, and 95% context use. Uses tag and dedupe key `token_pressure`, `ttl_turns: 2`, `role_hint: "developer"`, `propagate: "session"`, and sets `preserve_on_compact: true` at the critical threshold. |
+| `idle_nudge` | `session_idle` | `idle_seconds` or `seconds` | Fires when daemon idle wake interval reaches the threshold, defaulting to 60 seconds. Uses tag `idle`, dedupe key `idle_nudge`, `ttl_turns: 1`, and `propagate: "none"`. |
+| `tool_output_truncated` | `post_tool_use` | none | Fires when tool output was truncated or compacted before the model saw it. Uses tag `truncation`, dedupe key `tool_output_truncated:<tool_name>`, `ttl_turns: 1`, and `propagate: "none"`. |
+| `post_compact_recap` | `post_compact` | none | Fires after compaction archives messages. Uses tag `recap`, dedupe key `post_compact_recap`, `ttl_turns: 2`, and `propagate: "session"`. |
+
+Disable every provider with `reminders: false` or
+`reminders: {enabled: false}`. Disable selected providers by prefixing the
+provider id with `-`:
 
 ```harn,ignore
 agent_loop(task, system, {
   reminders: {
     providers: ["-token_pressure", "-idle_nudge"],
-  },
-})
-```
-
-Provider-specific configuration lives under `reminders.config`:
-
-```harn,ignore
-agent_loop(task, system, {
-  reminders: {
     config: {
       token_pressure: {context_window: 128000},
       idle_nudge: {idle_seconds: 120},
@@ -250,45 +273,241 @@ agent_loop(task, system, {
 })
 ```
 
-Register a Harn provider with `register_reminder_provider({id,
-subscribes_to, evaluate})`. The `evaluate` closure receives
-`{event, session, session_id, payload, options, config}` and returns a
-reminder effect, a bare reminder spec, an effect list, or `nil`:
+The provider list has a hard diagnostic guard: enabling more than eight
+distinct providers raises `HARN-RMD-007`.
+
+## Capability-aware rendering
+
+`llm_call(...)` loads pending reminders from the active `session_id`
+transcript, renders them after `system_prompt_parts` and the primary
+system prompt, and before `system_appendix` / `system_suffix`.
+
+Rendering follows provider capabilities first, then `role_hint`:
+
+| Provider capability / reminder hint | Wire shape |
+|---|---|
+| `prefers_role_developer` | Separate `role: "developer"` message containing `System reminder:\n...`. This wins for all hints. |
+| Anthropic wire format plus `role_hint: "user_block"` | Prepended user content block containing `<system-reminder>...</system-reminder>`. |
+| Anthropic wire format plus `role_hint: "ephemeral_cache"` | Same user content block, with `cache_control: {"type": "ephemeral"}` when prompt caching is supported. |
+| `prefers_xml_scaffolding` | System prompt text wrapped in `<system-reminder>` tags. |
+| Fallback providers | Plain system prompt text prefixed with `System reminder:`. |
+
+`role_hint` is a request, not a guarantee. Use provider-neutral
+`"system"` or `"developer"` unless the script is intentionally targeting
+an Anthropic-style user block. `HARN-RMD-003` reports hardcoded
+`role_hint: "user_block"` with a provider route that cannot preserve that
+shape.
+
+## Compaction interaction
+
+Reminders live in transcript events, not durable messages. Normal
+agent-session post-turn processing decrements finite `ttl_turns`.
+`ttl_turns: 1` expires at the next post-turn boundary and emits an expiry
+lifecycle event when an EventLog is active.
+
+`transcript_compact(...)` applies reminder lifecycle processing before it
+rebuilds the transcript:
+
+- finite TTLs decrement at the pre-compaction boundary
+- expired reminders are dropped
+- reminders sharing a `dedupe_key` collapse to the newest event
+- only `preserve_on_compact: true` reminders are copied into the compacted
+  transcript
+- custom compactors receive surviving reminder payloads as their second
+  argument
 
 ```harn,ignore
-register_reminder_provider({
-  id: "custom_echo",
-  subscribes_to: ["session_idle"],
-  evaluate: { ctx -> return {
-    reminder: {
-      body: "Custom reminder: " + ctx.payload.note,
-      tags: ["custom"],
-      dedupe_key: "custom_echo",
-      ttl_turns: 2,
-    },
-  } },
+let compacted = transcript_compact(snapshot, {
+  strategy: "custom",
+  custom_compactor: { messages, reminders ->
+    return transcript({
+      messages: [
+        {role: "system", content: "Summary plus " + str(len(reminders)) + " active reminders."},
+      ],
+    })
+  },
 })
 ```
 
-## Reading reminders off a transcript
+Common gotcha: `preserve_on_compact: false` plus no finite `ttl_turns`
+creates a reminder that can live forever during normal turns but vanish
+at the next compaction. `HARN-RMD-004` flags this shape. Add a finite
+TTL, or set `preserve_on_compact: true` when the reminder is meant to be
+durable across compaction.
 
-Reminder events are returned by the generic `transcript_events` and
-`transcript_events_by_kind` builtins:
+## Sub-agent propagation
+
+When a parent agent hands work to a child session, Harn filters pending
+reminders into the handoff envelope's `reminder_propagation` field. The
+child seeds inherited reminders into its transcript before its first
+turn. Inherited copies rewrite `source` to `"inherited"` and set
+`originating_agent_id` to the session that first emitted the reminder.
+
+| `propagate` | Behavior |
+|---|---|
+| `"all"` | Inherit into direct children and allow inherited copies to continue into deeper descendants. |
+| `"session"` | Inherit into direct children from the originating session only; inherited copies are not re-forwarded. |
+| `"none"` | Keep local to the current session. |
+
+Use `"all"` sparingly for durable policy context. Use `"session"` for
+task-scoped context that direct helpers need. Use `"none"` for local
+observations such as truncated tool output or daemon idle nudges.
+
+## Diagnostic codes
+
+The reminder lifecycle diagnostic family is `HARN-RMD-NNN`. Use
+`harn explain HARN-RMD-005` or the
+[diagnostic catalog](./diagnostics.md#rmd--reminder-lifecycle) for the
+current explanation and remediation.
+
+| Code | Meaning |
+|---|---|
+| `HARN-RMD-001` | Unknown option key or invalid strict producer option shape. |
+| `HARN-RMD-002` | Invalid bridge reminder payload shape. |
+| `HARN-RMD-003` | `user_block` role hint is unsupported by the selected provider route. |
+| `HARN-RMD-004` | Discardable reminder has no finite TTL. |
+| `HARN-RMD-005` | Unknown `propagate` value. |
+| `HARN-RMD-006` | Reminder provider returned a malformed reminder spec. |
+| `HARN-RMD-007` | Too many reminder providers are enabled. |
+| `HARN-RMD-008` | Hook event does not support reminder effects. |
+
+## EventLog events
+
+Current reminder lifecycle events are emitted on the
+`transcript.reminder.lifecycle` topic when an EventLog is active:
+
+| Event kind | Emitted when | Key payload fields |
+|---|---|---|
+| `transcript.reminder.deduped` | A new reminder replaces older pending reminders with the same `dedupe_key`, or compaction collapses duplicate pending reminders. | `transcript_id`, `reminder_id`, `dedupe_key`, `boundary`, `dropped_reminder_ids`, `dropped_count`; `boundary` is present for compaction dedupe. |
+| `transcript.reminder.expired` | A finite-TTL reminder expires during post-turn processing or compaction. | `transcript_id`, `reminder_id`, `tags`, `dedupe_key`, `ttl_turns_before`, `expired_at_turn`, `expired_at_boundary`, `phase`; boundary fields are present for compaction expiry. |
+
+Issue [#1828](https://github.com/burin-labs/harn/issues/1828) tracks the
+broader lifecycle stream for injected, fired, dropped, inherited, and
+provider-evaluated reminders plus the ACP `SessionUpdate` extension.
+
+## Cookbook
+
+### Token-pressure thresholds
+
+Use the canonical provider and override only the context window when the
+route or harness cannot infer it.
 
 ```harn,ignore
-let reminders = transcript_events_by_kind(transcript, "system_reminder")
-for evt in reminders {
-  println(evt.reminder.body)
+agent_loop(task, system, {
+  reminders: {
+    config: {
+      token_pressure: {context_window: 128000},
+    },
+  },
+})
+```
+
+### File-changed reminder from a hook
+
+Use a dedupe key per file so repeated file-watcher events collapse into
+one pending nudge.
+
+```harn,ignore
+register_session_hook("file_edited", { event ->
+  let path = to_string(event?.path ?? "")
+  return {
+    reminder: {
+      body: "File changed externally: " + path + ". Re-read it before editing.",
+      tags: ["workspace", "file_changed"],
+      dedupe_key: "file_changed:" + path,
+      ttl_turns: 2,
+      propagate: "session",
+    },
+  }
+})
+```
+
+### Memory-derived reminder
+
+Use `propagate: "all"` only when downstream agents need the same caution.
+
+```harn,ignore
+let memory_warning = "Customer prefers patch-sized PRs and explicit verification."
+let injected = transcript.inject_reminder(transcript(), {
+  body: memory_warning,
+  tags: ["memory"],
+  dedupe_key: "memory:customer-pr-style",
+  ttl_turns: 4,
+  preserve_on_compact: true,
+  propagate: "all",
+  role_hint: "developer",
+})
+```
+
+### Clear stale reminders after the condition resolves
+
+Clear by `dedupe_key` for singleton reminders and by `tag` for groups.
+
+```harn,ignore
+let cleared = transcript.clear_reminders(current_transcript, {
+  dedupe_key: "workspace-change",
+})
+```
+
+### Host-injected idle workspace nudge
+
+Bridge hosts should use `session/remind`, not `session/input`, when the
+content is ambient context rather than user text.
+
+```json
+{
+  "jsonrpc": "2.0",
+  "method": "session/remind",
+  "params": {
+    "body": "Dependencies changed while the agent was idle; rerun the narrow test before continuing.",
+    "tags": ["workspace", "deps"],
+    "dedupe_key": "workspace:deps",
+    "ttl_turns": 1,
+    "propagate": "none",
+    "mode": "finish_step"
+  }
 }
+```
+
+### Provider-specific ephemeral cache hint
+
+Use `ephemeral_cache` only when the route supports Anthropic-style user
+content blocks and prompt caching.
+
+```harn,ignore
+transcript.inject_reminder(transcript(), {
+  body: "Large policy excerpt applies for this turn only.",
+  tags: ["policy"],
+  dedupe_key: "policy:turn",
+  ttl_turns: 1,
+  role_hint: "ephemeral_cache",
+  propagate: "none",
+})
+```
+
+### Custom compactor reads reminders
+
+Custom compactors receive the surviving reminder payloads after TTL and
+dedupe processing.
+
+```harn,ignore
+transcript_compact(snapshot, {
+  strategy: "custom",
+  custom_compactor: { messages, reminders ->
+    for reminder in reminders {
+      println(reminder.body)
+    }
+    return transcript({messages: messages})
+  },
+})
 ```
 
 ## Cross-references
 
-- Epic: [#1815 — System Reminders & Ambient Context Injection](https://github.com/burin-labs/harn/issues/1815).
-- Foundation ticket: [#1816 — SystemReminder transcript event kind + lifecycle schema](https://github.com/burin-labs/harn/issues/1816).
-- Transform builtins: [#1817 — `transcript.inject_reminder()` + `transcript.clear_reminders()`](https://github.com/burin-labs/harn/issues/1817).
-- Capability flags driving the `role_hint` → wire-role dispatch:
-  [#1665](https://github.com/burin-labs/harn/issues/1665).
-- Hook return variants that surface reminders alongside `Allow` /
-  `Deny` / `Modify`: see
-  [Hooks (tool, persona, session lifecycle)](./extensibility/hooks.md).
+- Epic: [#1815 -- System Reminders and Ambient Context Injection](https://github.com/burin-labs/harn/issues/1815)
+- Provider capability flags: [#1665](https://github.com/burin-labs/harn/issues/1665)
+- Host-neutral context envelope: [#1680](https://github.com/burin-labs/harn/issues/1680)
+- Hook recipes and background context maintenance: [#1681](https://github.com/burin-labs/harn/issues/1681)
+- Hooks reference: [Hooks (tool, persona, session lifecycle)](./extensibility/hooks.md)
+- Bridge reminder injection: [Bridge protocol](./bridge-protocol.md#daemon-idleresume-notifications)
+- Builtin reference: [Builtin functions](./builtins.md)
