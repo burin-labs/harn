@@ -259,12 +259,21 @@ impl EventSink for OtelSink {
     fn emit_log(&self, event: &LogEvent) {
         use opentelemetry::trace::{Tracer, TracerProvider};
         let tracer = self.provider.tracer("harn");
+        // Apply the unified redaction policy to attribute values
+        // before they leave the process. The active policy includes
+        // the OAuth token catalog (HARN-OAU-001) so a Bearer header
+        // or provider token that snuck into a log message gets
+        // scrubbed before it lands at the OTel collector.
+        let policy = crate::redact::current_policy();
         // Log events are zero-duration spans — start and immediately drop.
         let _span = tracer
             .span_builder(format!("log.{}", event.category))
             .with_attributes(vec![
                 opentelemetry::KeyValue::new("level", format!("{:?}", event.level)),
-                opentelemetry::KeyValue::new("message", event.message.clone()),
+                opentelemetry::KeyValue::new(
+                    "message",
+                    policy.redact_string(&event.message).into_owned(),
+                ),
                 opentelemetry::KeyValue::new("category", event.category.clone()),
             ])
             .start(&tracer);
@@ -286,11 +295,16 @@ impl EventSink for OtelSink {
     fn emit_span_end(&self, span_id: u64, metadata: &BTreeMap<String, serde_json::Value>) {
         use opentelemetry::trace::Span;
         if let Some(mut span) = self.active_spans.borrow_mut().remove(&span_id) {
+            // OTel span attributes are the fourth sink covered by the
+            // OA-06 token-redaction policy (transcripts, audit
+            // receipts, OTel, and system reminders). Stringify the
+            // value, then route through the active redaction policy
+            // so a leaked Bearer token never reaches the collector.
+            let policy = crate::redact::current_policy();
             for (key, value) in metadata {
-                span.set_attribute(opentelemetry::KeyValue::new(
-                    key.clone(),
-                    format!("{value}"),
-                ));
+                let raw = format!("{value}");
+                let redacted = policy.redact_string(&raw).into_owned();
+                span.set_attribute(opentelemetry::KeyValue::new(key.clone(), redacted));
             }
             span.end();
         }

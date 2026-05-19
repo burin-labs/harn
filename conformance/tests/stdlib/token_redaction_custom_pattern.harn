@@ -1,0 +1,42 @@
+// std/oauth/redaction (OA-06): register a per-tenant token pattern,
+// confirm it is introspectable, redacts on the next persistence sink
+// pass, and can be cleared so subsequent scans do not match.
+import {
+  clear_custom_patterns,
+  custom_patterns,
+  redact,
+  register_pattern,
+} from "std/oauth/redaction"
+
+pipeline test(task) {
+  // Start from a clean thread — prior conformance cases may have
+  // installed their own patterns.
+  clear_custom_patterns()
+  if len(custom_patterns()) != 0 {
+    throw "custom_patterns should start empty: " + to_string(custom_patterns())
+  }
+  register_pattern("acme_api_key", "\\bACME-[A-Z0-9]{12}\\b")
+  let names = custom_patterns()
+  if !contains(to_string(names), "acme_api_key") {
+    throw "expected acme_api_key in custom_patterns, got: " + to_string(names)
+  }
+  // Redaction wraps the match with the named placeholder.
+  let scrubbed = redact("token ACME-ABCDEF123456 tail")
+  if contains(scrubbed, "ACME-ABCDEF123456") {
+    throw "raw acme token leaked: " + scrubbed
+  }
+  if !contains(scrubbed, "<redacted:acme_api_key:") {
+    throw "expected named acme_api_key placeholder, got: " + scrubbed
+  }
+  // Clearing custom patterns drops the rule so a follow-up scan no
+  // longer recognizes the same input.
+  clear_custom_patterns()
+  if len(custom_patterns()) != 0 {
+    throw "custom patterns should be empty after clear: " + to_string(custom_patterns())
+  }
+  let after = redact("token ACME-ABCDEF123456 tail")
+  if !contains(after, "ACME-ABCDEF123456") {
+    throw "after clearing, ACME tokens should not be scrubbed: " + after
+  }
+  log("token_redaction custom ok")
+}

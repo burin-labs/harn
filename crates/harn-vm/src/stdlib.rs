@@ -63,6 +63,7 @@ pub(crate) mod supervisor;
 pub mod template;
 mod testbench;
 mod testing;
+pub mod token_redaction;
 pub(crate) mod tool_hooks;
 pub(crate) mod tools;
 pub mod tracing;
@@ -165,6 +166,7 @@ pub fn register_agent_stdlib(vm: &mut Vm) {
     agents::register_agent_builtins(vm);
     pool::register_pool_builtins(vm);
     oauth_storage::register_oauth_storage_builtins(vm);
+    token_redaction::register_token_redaction_builtins(vm);
     agent_sessions::register_agent_session_builtins(vm);
     workflow_messages::register_workflow_message_builtins(vm);
     transcript_compact::register_transcript_compaction_builtins(vm);

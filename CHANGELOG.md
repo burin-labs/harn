@@ -66,6 +66,23 @@ condensed series summaries instead of full per-patch history.
   Conformance coverage:
   `conformance/tests/triggers/trigger_source_channel_{basic,session,wildcard,filter,fan_out}.harn`.
   Part of epic #1870.
+- **OAuth token redaction in transcripts and audit (#1907).** Persisted
+  transcripts, audit receipts, OTel span attributes, and system reminders
+  now route through a named token-pattern catalog so a leaked OAuth bearer,
+  GitHub PAT (classic or fine-grained), Slack `xox*`, AWS `AKIA…`, Stripe
+  key, OpenAI `sk-…`, JWT, GitLab `glpat-…`, or npm `npm_…` token is
+  scrubbed to `<redacted:<pattern>:<len>>` on every display sink. The
+  underlying tool/host call still receives the raw token — redaction is
+  display-only. Each redaction synchronously records an `HARN-OAU-001`
+  audit entry in a per-thread ring drainable via the new
+  `std/oauth/redaction` stdlib (`register_pattern`, `redact`,
+  `default_patterns`, `custom_patterns`, `clear_custom_patterns`,
+  `drain_audit`). When a multi-threaded Tokio runtime is available the
+  default sink also appends to the `audit.token_redaction` event-log
+  topic. Inputs over 256 KiB short-circuit to a passthrough as defense
+  against catastrophic regex behavior. Conformance:
+  `conformance/tests/stdlib/token_redaction_{default_patterns,custom_pattern,tool_passthrough}.harn`.
+  Part of epic #1885 (OAuth stdlib).
 - **Tool-hook mode callback side effects (#1896).** The three shipped
   `tool_hooks_mode_*` callbacks (`rewrite_with_audit`,
   `deny_with_explanation`, `passthrough_only_audit`) now emit lifecycle
