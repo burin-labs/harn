@@ -1,0 +1,21 @@
+/**
+ * CH-03 (#1874): session-scoped emits from one session MUST NOT fan out to
+ * readers in another session. The resolver produces topic
+ * `channels.session.<session-id>.<name>`, so distinct `session_id` values
+ * own distinct topics.
+ */
+pipeline default() {
+  let _ = emit_channel("agent.done", {turn: 1}, {scope: "session", session_id: "sess-A", id: "A-1"})
+  let _ = emit_channel("agent.done", {turn: 99}, {scope: "session", session_id: "sess-B", id: "B-1"})
+  let sess_a = channel_events("agent.done", {scope: "session", session_id: "sess-A"})
+  let sess_b = channel_events("agent.done", {scope: "session", session_id: "sess-B"})
+  let sess_c = channel_events("agent.done", {scope: "session", session_id: "sess-C"})
+  println(len(sess_a))
+  println(sess_a[0].payload.turn)
+  println(sess_a[0].scope_id)
+  println(len(sess_b))
+  println(sess_b[0].payload.turn)
+  println(sess_b[0].scope_id)
+  // Session C is empty — no leakage.
+  println(len(sess_c))
+}

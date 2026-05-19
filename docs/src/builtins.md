@@ -1502,6 +1502,19 @@ Every stored event includes a signed `emitted_at` timestamp, `emitted_by`, the
 fully resolved name, any available `pipeline_id`, `session_id`, or `tenant_id`,
 and `ttl_ms` when `options.ttl` is provided.
 
+The resolver enforces a four-tier hierarchy (`session` < `pipeline` < `tenant`
+< `org`) deterministically. Cross-scope isolation is automatic: distinct
+`tenant_id`, `session_id`, or `pipeline_id` values resolve to distinct topics,
+so a reader against a different scope id sees an empty view. Diagnostic codes
+emitted by the resolver:
+
+| Code | When |
+|---|---|
+| `HARN-CHN-001` | `pipeline:` scope used outside any pipeline context. |
+| `HARN-CHN-002` | Cross-tenant emit without a grant, or `org:` scope (disabled in v1). |
+| `HARN-CHN-003` | Malformed channel name, scope prefix, or scope id. |
+| `HARN-CHN-004` | Scope ambiguous — explicit `options.session_id` or `options.pipeline_id` conflicts with the active runtime context. |
+
 ## Concurrency primitives
 
 ### Channels

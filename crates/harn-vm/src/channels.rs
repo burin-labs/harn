@@ -134,6 +134,10 @@ impl ChannelError {
     fn malformed(message: impl Into<String>) -> Self {
         Self(message.into())
     }
+
+    fn scope_ambiguous(message: impl Into<String>) -> Self {
+        Self(format!("HARN-CHN-004 {}", message.into()))
+    }
 }
 
 impl From<ChannelError> for VmError {
@@ -281,23 +285,48 @@ impl ChannelContext {
         context
     }
 
-    fn session_id(&self, options: &ChannelOptions) -> String {
-        options
+    fn session_id(&self, options: &ChannelOptions) -> Result<String, ChannelError> {
+        // CH-03 (#1874): an explicit `options.session_id` that disagrees with the
+        // active session is HARN-CHN-004 ambiguity, not a silent override. The
+        // resolver MUST be deterministic for a given runtime context.
+        if let Some(requested) = options.session_id.as_deref() {
+            if let Some(active) = self.agent_session_id.as_deref() {
+                if active != requested {
+                    return Err(ChannelError::scope_ambiguous(format!(
+                        "session scope ambiguous: options.session_id '{requested}' \
+                         conflicts with active session '{active}'"
+                    )));
+                }
+            }
+        }
+        Ok(options
             .session_id
             .clone()
             .or_else(|| self.agent_session_id.clone())
             .or_else(|| self.root_agent_session_id.clone())
             .or_else(|| self.scope_id.clone())
             .or_else(|| self.root_task_id.clone())
-            .unwrap_or_else(|| "session".to_string())
+            .unwrap_or_else(|| "session".to_string()))
     }
 
     fn pipeline_id(&self, options: &ChannelOptions) -> Result<String, ChannelError> {
+        // CH-03 (#1874): explicit `options.pipeline_id` that conflicts with the
+        // active workflow/run is HARN-CHN-004. Two pipelines cannot share a
+        // resolved channel without an explicit disambiguation.
+        let active = self.workflow_id.clone().or_else(|| self.run_id.clone());
+        if let (Some(requested), Some(active)) = (options.pipeline_id.as_deref(), active.as_deref())
+        {
+            if requested != active {
+                return Err(ChannelError::scope_ambiguous(format!(
+                    "pipeline scope ambiguous: options.pipeline_id '{requested}' \
+                     conflicts with active pipeline '{active}'"
+                )));
+            }
+        }
         options
             .pipeline_id
             .clone()
-            .or_else(|| self.workflow_id.clone())
-            .or_else(|| self.run_id.clone())
+            .or(active)
             .ok_or_else(ChannelError::missing_pipeline)
     }
 
@@ -377,10 +406,10 @@ fn resolve_channel(
 
     validate_channel_name(&parsed.name)?;
     let scope_id = match scope {
-        ChannelScope::Session => parsed
-            .scope_id
-            .clone()
-            .unwrap_or_else(|| context.session_id(options)),
+        ChannelScope::Session => match parsed.scope_id.clone() {
+            Some(id) => id,
+            None => context.session_id(options)?,
+        },
         ChannelScope::Pipeline => context.pipeline_id(options)?,
         ChannelScope::Tenant => context.tenant_id(options, parsed.scope_id.as_deref())?,
         ChannelScope::Org => unreachable!("org scope returned above"),
@@ -1069,6 +1098,106 @@ mod tests {
             "org:burin-labs:pr.merged",
             &ChannelOptions::default(),
             &context(),
+        )
+        .unwrap_err();
+        assert!(err.0.contains("HARN-CHN-002"));
+    }
+
+    #[test]
+    fn explicit_session_id_matching_context_resolves() {
+        let ctx = ChannelContext {
+            agent_session_id: Some("sess-A".to_string()),
+            ..context()
+        };
+        let options = ChannelOptions {
+            session_id: Some("sess-A".to_string()),
+            ..ChannelOptions::default()
+        };
+        let resolved = resolve_channel("session:agent.done", &options, &ctx).unwrap();
+        assert_eq!(resolved.scope, ChannelScope::Session);
+        assert_eq!(resolved.resolved_name, "session:sess-A:agent.done");
+    }
+
+    #[test]
+    fn explicit_session_id_conflict_reports_ambiguity() {
+        let ctx = ChannelContext {
+            agent_session_id: Some("sess-A".to_string()),
+            ..context()
+        };
+        let options = ChannelOptions {
+            session_id: Some("sess-B".to_string()),
+            ..ChannelOptions::default()
+        };
+        let err = resolve_channel("session:agent.done", &options, &ctx).unwrap_err();
+        assert!(
+            err.0.contains("HARN-CHN-004"),
+            "expected HARN-CHN-004, got: {}",
+            err.0
+        );
+    }
+
+    #[test]
+    fn explicit_pipeline_id_conflict_reports_ambiguity() {
+        let ctx = ChannelContext {
+            workflow_id: Some("pipe-A".to_string()),
+            ..context()
+        };
+        let options = ChannelOptions {
+            pipeline_id: Some("pipe-B".to_string()),
+            ..ChannelOptions::default()
+        };
+        let err = resolve_channel("pipeline:stage.done", &options, &ctx).unwrap_err();
+        assert!(
+            err.0.contains("HARN-CHN-004"),
+            "expected HARN-CHN-004, got: {}",
+            err.0
+        );
+    }
+
+    #[test]
+    fn explicit_tenant_mismatch_reports_cross_tenant() {
+        let ctx = ChannelContext {
+            tenant_id: Some("tenant-A".to_string()),
+            ..context()
+        };
+        let options = ChannelOptions {
+            tenant_id: Some("tenant-B".to_string()),
+            ..ChannelOptions::default()
+        };
+        let err = resolve_channel("pr.merged", &options, &ctx).unwrap_err();
+        assert!(
+            err.0.contains("HARN-CHN-002"),
+            "expected HARN-CHN-002, got: {}",
+            err.0
+        );
+    }
+
+    #[test]
+    fn explicit_tenant_in_name_matching_context_resolves() {
+        let ctx = ChannelContext {
+            tenant_id: Some("tenant-A".to_string()),
+            ..context()
+        };
+        let resolved = resolve_channel(
+            "tenant:tenant-A:pr.merged",
+            &ChannelOptions::default(),
+            &ctx,
+        )
+        .unwrap();
+        assert_eq!(resolved.scope, ChannelScope::Tenant);
+        assert_eq!(resolved.resolved_name, "tenant:tenant-A:pr.merged");
+    }
+
+    #[test]
+    fn cross_tenant_via_name_prefix_is_rejected() {
+        let ctx = ChannelContext {
+            tenant_id: Some("tenant-A".to_string()),
+            ..context()
+        };
+        let err = resolve_channel(
+            "tenant:tenant-B:pr.merged",
+            &ChannelOptions::default(),
+            &ctx,
         )
         .unwrap_err();
         assert!(err.0.contains("HARN-CHN-002"));

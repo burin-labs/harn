@@ -1,0 +1,10 @@
+/**
+ * CH-03 (#1874): bare `emit_channel("foo", ...)` resolves to
+ * `tenant:<current-or-default-tenant>:foo`.
+ */
+pipeline default() {
+  let receipt = emit_channel("pr.merged", {n: 1}, {id: "bare-1"})
+  println(receipt.scope)
+  println(receipt.scope_id)
+  println(receipt.name_resolved)
+}

@@ -1729,7 +1729,12 @@ in the active event log. Bare names default to tenant scope:
 `tenant:<current-or-default-tenant>:pr.merged`. Prefixes select a scope:
 `session:foo`, `pipeline:foo`, `tenant:foo`, `tenant:<tenant_id>:foo`, or
 `org:<org_id>:foo`; org scope currently fails with `HARN-CHN-002` until org
-grants exist.
+grants exist. Distinct `tenant_id`, `session_id`, or `pipeline_id` values
+resolve to distinct topics, so cross-scope readers see an empty view. The
+resolver also returns `HARN-CHN-001` for `pipeline:` outside a pipeline,
+`HARN-CHN-003` for malformed names, and `HARN-CHN-004` when an explicit
+`options.session_id` or `options.pipeline_id` conflicts with the active
+context.
 
 ```harn
 let receipt = emit_channel("session:worker.ready", {worker: "lint"}, {
