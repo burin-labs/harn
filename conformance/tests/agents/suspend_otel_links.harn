@@ -1,0 +1,66 @@
+import "std/agents"
+
+/**
+ * S-18 (#1867): the cooperative suspend path ends the in-flight
+ * lifecycle span and persists its link into the worker snapshot.
+ * The matching resume path opens a fresh `SpanKind::Resume` span that
+ * links — not parents — back to the prior suspension and to the
+ * pipeline span that was active when suspend ran. This is the
+ * Temporal-community-recommended shape: never carry one root span
+ * across a multi-day pause.
+ *
+ * The fixture mirrors the runtime contract:
+ *   1. Suspend produces a closed `suspension` span carrying the
+ *      canonical attribute bag (`handle`, `reason`, `initiator`,
+ *      `pipeline_id`).
+ *   2. Resume produces a closed `resume` span carrying its own
+ *      attribute bag plus outbound links back to the suspension and
+ *      the pipeline.
+ *   3. The resume span is detached (no parent) so future pipelines
+ *      do not become re-children of the original parent on warm
+ *      resume.
+ *
+ * The worker is driven into a suspended state via a model-issued
+ * `agent_await_resumption` tool call, matching the auto-resume
+ * conformance fixture.
+ */
+pipeline main() {
+  enable_tracing(true)
+  llm_mock(
+    {
+      tool_calls: [
+        {id: "park_until_review", name: "agent_await_resumption", arguments: {reason: "waiting on review"}},
+      ],
+      input_tokens: 7,
+      output_tokens: 3,
+    },
+  )
+  llm_mock({text: "resumed and finished"})
+  let handle = sub_agent_run(
+    "Park until review.",
+    {provider: "mock", background: true, tool_format: "native", max_iterations: 3},
+  )
+  let suspended = wait_agent(handle)
+  println(suspended?.status)
+  let resumed_handle = resume_agent(handle)
+  println(resumed_handle?.status)
+  let resumed = wait_agent(handle)
+  println(resumed?.status)
+  let spans = trace_spans()
+  let suspension_spans = spans.filter({ s -> s.kind == "suspension" })
+  let resume_spans = spans.filter({ s -> s.kind == "resume" })
+  println(len(suspension_spans) >= 1)
+  println(len(resume_spans) >= 1)
+  let suspension = suspension_spans[0]
+  let resume = resume_spans[0]
+  println(suspension.metadata?.handle != nil)
+  println(suspension.metadata?.reason != nil)
+  println(suspension.metadata?.initiator != nil)
+  println(resume.metadata?.handle != nil)
+  println(resume.metadata?.continue_transcript != nil)
+  println(resume.metadata?.had_resume_input != nil)
+  println(resume.parent_id == nil)
+  println(resume.links != nil)
+  println(len(resume.links) >= 1)
+  enable_tracing(false)
+}

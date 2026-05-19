@@ -10,6 +10,26 @@ condensed series summaries instead of full per-patch history.
 
 ### Added
 
+- **OTel suspend-end / resume-link wiring (S-18, #1867).** Wires the
+  `SpanKind::Suspension` and `SpanKind::Resume` spans (added in P-05,
+  #1858) into the cooperative `suspend_agent` / `resume_agent` paths.
+  The suspension span is now closed before the snapshot is persisted
+  (Temporal community best-practice — never carry one root span across
+  a multi-day pause) and the resume path opens a fresh detached
+  `SpanKind::Resume` span that links — not parents — back to the prior
+  suspension span and the pipeline span that was active at suspend
+  time. Adds the canonical attribute bag to both spans: suspend carries
+  `handle`, `reason`, `initiator`, `has_conditions`, `pipeline_id`
+  (alias of `pipeline_span_id`), and `parent_worker_id`; resume carries
+  `handle`, `initiator`, `continue_transcript`, `had_resume_input`, and
+  `linked_suspension_count`. Privacy: the `resume_input` value itself
+  is deliberately never serialised onto resume-span attributes — only a
+  boolean flag — and the existing `WorkerSuspension` JSON round-trip
+  already preserved `prior_span_link` + `pipeline_span_link` from
+  P-05, so cross-process cold resume continues to link to the closed
+  pre-restart span. New `suspend_otel_links` conformance fixture
+  exercises the warm suspend → resume cycle from script land. Part of
+  epic #1836 (Agent suspend/resume).
 - **Pool conformance gap-fill: `pool_unsettled_state_integration` (#1892).**
   PL-07 (epic #1883) is the comprehensive pool conformance suite. Eight of
   the ten spec scenarios were already covered by fixtures landed alongside
