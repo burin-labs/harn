@@ -1,0 +1,83 @@
+// std/oauth/client: explicit revoke() POSTs the RFC 7009 hint, deletes
+// the stored TokenSet, and forces a re-authorization on subsequent use.
+//
+// Seeds a TokenSet, calls revoke(cli) once, then asserts:
+//   - The provider's revoke_url received a POST containing
+//     `token=<access_token>` and `client_id=<id>` (RFC 7009 §2.1).
+//   - Storage is empty afterwards (the storage delete is the
+//     authoritative local discard).
+//   - An `oauth.client.audit` `token_revoked` event is emitted with
+//     provider/storage_key + redacted prev token shape; the access
+//     token is never carried in the audit payload.
+//   - A subsequent `token(cli)` raises `HARN-OAU-002` (no refresh
+//     token available; re-run authorization) instead of silently
+//     succeeding.
+import { client, revoke, token } from "std/oauth/client"
+import { custom } from "std/oauth/providers"
+import { memory } from "std/oauth/storage"
+
+pipeline test(task) {
+  let topic = "oauth.client.audit"
+  let cursor = event_log.latest(topic) ?? 0
+  let _ = mock_time(1700000000000)
+  let store = memory()
+  let provider = custom(
+    {
+      id: "mockRevoke",
+      auth_url: "https://idp.example/authorize",
+      token_url: "https://idp.example/token",
+      revoke_url: "https://idp.example/revoke",
+      default_scopes: ["read"],
+    },
+  )
+  let now = to_int(timestamp())
+  let stored = {
+    access_token: "ACCESS-LIVE",
+    refresh_token: "REFRESH-LIVE",
+    issued_at_unix: now,
+    expires_at_unix: now + 3600,
+    token_type: "Bearer",
+  }
+  store.set("mockRevoke", stored)
+  let cli = client(provider, {client_id: "cli-id", redirect_uri: "http://127.0.0.1:9999/cb", storage: store})
+  http_mock_clear()
+  http_mock("POST", "https://idp.example/revoke", {status: 200, body: "", headers: {}})
+  revoke(cli)
+  let calls = http_mock_calls({include_sensitive: true})
+  assert_eq(len(calls), 1, "exactly one POST to the revoke endpoint")
+  assert_eq(calls[0].method, "POST", "revoke is a POST")
+  assert(contains(calls[0].url, "/revoke"), "hit revoke endpoint")
+  assert(contains(calls[0].body, "token=ACCESS-LIVE"), "RFC 7009 token= form param")
+  assert(contains(calls[0].body, "client_id=cli-id"), "client_id included in revoke body")
+  let after = store.get("mockRevoke")
+  assert(after == nil, "storage cleared after revoke")
+  let stream = event_log.subscribe({topic: topic, from_cursor: cursor})
+  let logged = stream.next().value
+  assert_eq(logged.kind, "token_revoked", "audit event kind")
+  assert_eq(logged.payload.provider, "mockRevoke", "audit provider id")
+  assert_eq(logged.payload.storage_key, "mockRevoke", "audit storage_key")
+  assert_eq(
+    logged.payload.revoke_endpoint,
+    "https://idp.example/revoke",
+    "audit records contacted endpoint",
+  )
+  assert_eq(logged.payload.prev.has_access_token, true, "audit records prev access presence")
+  assert_eq(logged.payload.prev.has_refresh_token, true, "audit records prev refresh presence")
+  assert(logged.payload.prev?.access_token == nil, "audit NEVER includes prev access token")
+  assert(logged.payload.prev?.refresh_token == nil, "audit NEVER includes prev refresh token")
+  // Subsequent use must force re-authorization with the HARN-OAU-002
+  // diagnostic so callers can distinguish "no token at all" from a
+  // transient network failure.
+  var threw = false
+  var msg = ""
+  try {
+    let _ = token(cli)
+  } catch (err) {
+    msg = to_string(err)
+    threw = true
+  }
+  assert(threw, "post-revoke token() should have thrown")
+  assert(contains(msg, "HARN-OAU-002"), "post-revoke error must carry HARN-OAU-002, got: " + msg)
+  let _ = unmock_time()
+  log("oauth revoke ok")
+}

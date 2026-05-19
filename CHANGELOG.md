@@ -24,6 +24,33 @@ condensed series summaries instead of full per-patch history.
   scenario — pool tasks visible in `harness.unsettled_state()` so on_finish
   presets can act on them — and is marked `@xfail` referencing follow-up
   #2007 until the runtime wiring lands.
+- **OAuth conformance suite + explicit revoke + `HARN-OAU-002` (#1908).**
+  Closes the OA-07 gap-fill on top of the OA-01..OA-06 surface: adds
+  three new conformance fixtures — `oauth_refresh_token_expired`
+  (server returns `invalid_grant` on the refresh-grant call, raises
+  the dedicated `HARN-OAU-002` diagnostic and leaves the stored
+  TokenSet untouched), `oauth_revoke` (RFC 7009 best-effort POST to
+  the provider's `revoke_url`, authoritative local storage delete,
+  `oauth.client.audit` `token_revoked` event with redacted prev shape,
+  and a forced `HARN-OAU-002` on the next `token(cli)` call), and
+  `oauth_pkce_validates` (mocks the server's mismatched-verifier
+  rejection and asserts the error_description threads through with
+  no audit and no persisted TokenSet). Promotes the previously
+  private `cli.revoke()` storage-delete shim into a real
+  `pub fn revoke(cli)` that issues the RFC 7009 token-revocation POST
+  on a best-effort basis (network failures never block the local
+  discard) and emits an audit event. Tags both the
+  no-refresh-token-in-storage and the failed-refresh-grant paths in
+  `std/oauth/client` with the new `HARN-OAU-002` diagnostic prefix so
+  scripts can pattern-match on a single, stable string instead of
+  parsing freeform error text. The fifteen `oauth_*` conformance
+  fixtures together cover authorization-code + PKCE, device flow
+  (happy/pending/slow-down/expired), refresh on 401, pre-emptive
+  refresh at 75 % TTL, refresh-token expiry, revoke, PKCE mismatch,
+  storage round-trip across all four backends (memory/file/cloud
+  session/cloud org/custom), the provider catalogue against ten
+  preconfigured providers, and the OA-06 redaction patterns. Part of
+  epic #1885 (OAuth stdlib).
 - **Channel scope resolver completes the four-tier hierarchy (#1874).**
   Formalises the `session < pipeline < tenant < org` scope chain for
   `emit_channel(...)` and `channel_events(...)`, building on the producer
