@@ -1,4 +1,3 @@
-// @xfail: HARN-DRN-001 ordering enforcement lands with settlement-agent loop — tracked in #1856
 /**
  * Spec contract: the drain loop must finalize suspended subagents BEFORE
  * channels BEFORE triggers ("avoid the drain ordering footgun"). A
@@ -7,10 +6,13 @@
  * can correct course; the harness returns a rejected receipt and no
  * audit is appended.
  *
- * The settlement-agent loop itself is a stub (P-03, harn#1856) — this
- * fixture asserts the post-wiring shape. Once `acknowledge_trigger`
- * grows the precondition check, drop the `@xfail` marker and the
- * fixture starts gating real ordering behavior.
+ * The fixture seeds a partial-handoff envelope via `harness.handoff_to`
+ * as a stand-in for a suspended subagent (suspending a real subagent
+ * from a conformance fixture is heavier than the test warrants). The
+ * runtime treats either a non-empty `suspended_subagents` bucket or a
+ * non-empty `partial_handoffs` bucket as "earlier work pending" and
+ * rejects with the spec-named HARN-DRN-001 wording, so this fixture
+ * exercises the post-wiring ordering enforcement directly.
  *
  * Tracking: harn#1862 (P-09), harn#1853 (epic), harn#1856 (P-03).
  */

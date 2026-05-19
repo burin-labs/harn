@@ -374,6 +374,21 @@ pub(super) fn pipeline_lifecycle_audit_log_snapshot_builtin(
     Ok(crate::stdlib::json_to_vm_value(&json))
 }
 
+/// Report whether the settlement-agent drain loop (#1856 P-03) is
+/// currently active on this thread. Exposed as a Harn-facing builtin so
+/// conformance fixtures can verify the constrained-surface gate flips
+/// on while the loop runs and back off when it exits. Lifecycle hooks
+/// fired from within the loop (e.g. `OnDrainDecision`) observe this as
+/// true.
+pub(super) fn settlement_agent_active_builtin(
+    _args: &[VmValue],
+    _out: &mut String,
+) -> Result<VmValue, VmError> {
+    Ok(VmValue::Bool(
+        crate::orchestration::settlement_agent_active(),
+    ))
+}
+
 /// Fire a session-level lifecycle hook from Harn. Used by the
 /// Harn-driven agent loop (autocompact, file edits, etc.) to invoke
 /// hooks that are wired in Harn rather than from a Rust host primitive.

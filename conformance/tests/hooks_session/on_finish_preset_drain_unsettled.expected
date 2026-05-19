@@ -1,3 +1,3 @@
-result_status=unsupported
+result_status=completed
 result_method=spawn_settlement_agent
-audit_count=0
+audit_count=3

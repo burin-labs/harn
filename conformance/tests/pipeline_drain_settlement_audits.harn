@@ -1,0 +1,35 @@
+/**
+ * Settlement-agent drain loop (#1856 P-03) records a `drain_decision`
+ * audit per dispositioned item, then a terminal `pipeline_finalized`
+ * audit when the snapshot drains. The fixture seeds two partial-handoff
+ * envelopes via `harness.handoff_to`, calls the drain preset, and
+ * asserts the per-item audit shape plus the terminal status.
+ *
+ * Tracking: harn#1856 (P-03), harn#1853 (epic).
+ */
+import { lifecycle_audit_log_take, on_finish_drain } from "std/lifecycle"
+
+pipeline default() {
+  pipeline_on_finish(
+    { harness, return_value ->
+      harness.handoff_to("nightly-drain", {note: "first"})
+      harness.handoff_to("nightly-drain", {note: "second"})
+      let result = on_finish_drain(harness, return_value)
+      let audits = lifecycle_audit_log_take()
+      harness.stdio.println("status=" + result.status)
+      harness.stdio.println("items_processed=" + to_string(result.items_processed))
+      let drain_decisions = audits.filter({ entry -> entry.kind == "drain_decision" })
+      let finalized = audits.filter({ entry -> entry.kind == "pipeline_finalized" })
+      harness.stdio.println("drain_decisions=" + to_string(len(drain_decisions)))
+      harness.stdio.println("finalized=" + to_string(len(finalized)))
+      harness.stdio.println("first_action=" + drain_decisions[0].payload.action)
+      harness.stdio.println("first_category=" + drain_decisions[0].payload.item.category)
+      harness.stdio.println("finalized_reason=" + finalized[0].payload.reason)
+      return result.return_value
+    },
+  )
+  return "ok"
+}
+// The orchestration primitive emits its own `handoff_acknowledged`
+// audit; the loop emits a `drain_decision` audit alongside it, then
+// a terminal `pipeline_finalized` once the snapshot drains.

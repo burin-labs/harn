@@ -1,0 +1,7 @@
+status=completed
+items_processed=2
+drain_decisions=2
+finalized=1
+first_action=acknowledge
+first_category=partial_handoff
+finalized_reason=drained

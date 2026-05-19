@@ -30,6 +30,9 @@ pub use hooks::*;
 mod pipeline_lifecycle;
 pub use pipeline_lifecycle::*;
 
+mod settlement_agent;
+pub use settlement_agent::*;
+
 mod lifecycle_receipts;
 pub use lifecycle_receipts::*;
 

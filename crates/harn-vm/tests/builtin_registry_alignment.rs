@@ -126,6 +126,7 @@ const RUNTIME_ONLY_EXCEPTIONS: &[&str] = &[
     "__host_mcp_bootstrap",
     "__host_mcp_disconnect",
     "__host_resume_conditions_parse",
+    "__host_settlement_agent_active",
     "__host_skill_score",
     "__host_tool_search_score",
     "__host_top_level_agent_suspend",
