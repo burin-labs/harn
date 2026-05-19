@@ -45,7 +45,7 @@ Repairs are tagged with a six-level safety class so `harn fix --apply --safety <
 | [`PRM`](#prm--prompt-templates) | Prompt templates | 7 |
 | [`MOD`](#mod--modules-and-exports) | Modules and exports | 6 |
 | [`RMD`](#rmd--reminder-lifecycle) | Reminder lifecycle | 8 |
-| [`SUS`](#sus--suspend--resume-lifecycle) | Suspend / resume lifecycle | 10 |
+| [`SUS`](#sus--suspend--resume-lifecycle) | Suspend / resume lifecycle | 13 |
 | [`LNT`](#lnt--lint-rules) | Lint rules | 53 |
 | [`FMT`](#fmt--formatter) | Formatter | 3 |
 | [`IMP`](#imp--import-resolution) | Import resolution | 3 |
@@ -208,6 +208,9 @@ Repairs are tagged with a six-level safety class so `harn fix --apply --safety <
 | [`HARN-SUS-008`](#harn-sus-008) | resume timeout action is unsupported | — | — |
 | [`HARN-SUS-009`](#harn-sus-009) | resume input failed agent_loop input validation | — | — |
 | [`HARN-SUS-010`](#harn-sus-010) | closed suspended worker cannot be resumed | — | — |
+| [`HARN-SUS-011`](#harn-sus-011) | replay resume input hash diverges from journaled suspension | — | — |
+| [`HARN-SUS-012`](#harn-sus-012) | replay drain decision prompt hash diverges from journaled receipt | — | — |
+| [`HARN-SUS-013`](#harn-sus-013) | lifecycle receipt signed timestamp failed verification | — | — |
 
 ## LNT — Lint rules
 
@@ -3214,6 +3217,93 @@ against that live worker handle.
 
 Treat the worker as terminal. Spawn a new worker, or restore an explicit
 snapshot path only when you intentionally want to inspect persisted state.
+
+### `HARN-SUS-011`
+
+**Category:** `SUS` (Suspend / resume lifecycle) &nbsp;·&nbsp; **API stability:** `stable`
+
+replay resume input hash diverges from journaled suspension
+
+The replay runtime computed a different resume-input fingerprint than the
+one captured in the original run's [`ResumptionReceipt`]. Lifecycle replay
+must be deterministic: the second run must feed the suspended worker the
+exact same payload it received the first time, because the worker's
+post-resume trajectory was hashed into the journaled state.
+
+Common causes:
+
+- A pipeline that used to depend on wall-clock time or another
+  non-deterministic input now produces a different resume payload on
+  replay. Capture the payload itself (or use `mock_time(...)`) so the
+  replayed runtime can reproduce the original value.
+- The journal entry was edited after the original run completed. The
+  signed timestamp on the receipt detects this — verify the receipt's
+  signature with `verify_lifecycle_receipt_signature(...)` before
+  blaming the runtime.
+- The settlement agent (drain phase) changed its mind and produced a
+  different resume input. Record a fresh `ResumptionReceipt` in the
+  current run instead of replaying the stale one.
+
+If the new payload is intentionally different (eg. you are running a
+deliberate counterfactual, not a determinism replay), open the trace as
+a fresh recording rather than feeding it back through the replay oracle.
+
+### `HARN-SUS-012`
+
+**Category:** `SUS` (Suspend / resume lifecycle) &nbsp;·&nbsp; **API stability:** `stable`
+
+replay drain decision prompt hash diverges from journaled receipt
+
+The replay runtime tried to memoize a settlement-agent drain decision
+against a [`DrainDecisionReceipt`] whose `prompt_hash` does not match the
+candidate prompt the second run computed. Drain decisions are journaled
+so that replay can skip the settlement agent's LLM call — but if the
+prompt drifts, the recorded `action` no longer reflects what the agent
+would actually decide.
+
+Common causes:
+
+- The pipeline's settlement-agent prompt template or its inputs (the
+  unsettled-state snapshot, the budget summary, the worker list) changed
+  between record and replay. Either re-record the trace or roll the
+  template back to its recorded form.
+- The drain item set itself changed shape (eg. a new suspended subagent
+  appeared on replay). Fix the upstream determinism gap first, then the
+  drain receipt will line up.
+
+The recorded receipt is still safe to inspect via
+`lifecycle_receipts_snapshot()`, and its signed timestamp tells you
+when the original decision was minted. Treat the mismatch as a signal
+that the replay is no longer a determinism check.
+
+### `HARN-SUS-013`
+
+**Category:** `SUS` (Suspend / resume lifecycle) &nbsp;·&nbsp; **API stability:** `stable`
+
+lifecycle receipt signed timestamp failed verification
+
+A [`SuspensionReceipt`], [`ResumptionReceipt`], or [`DrainDecisionReceipt`]
+carries a `SignedLifecycleTimestamp` whose HMAC signature does not match
+the receipt's identifying fields under the per-process signing salt.
+
+The signature binds `(kind, at_ms, subject_id, initiator_id)`, so any of
+the following will trip this diagnostic:
+
+- The receipt was minted by a *different* `harn` process and is now
+  being verified after a restart. Per-process salts are intentional —
+  cross-process verification requires migrating to the longer-lived
+  `provenance` chain (see `build_signed_receipt`).
+- The journal entry was edited after the fact (eg. someone hand-tweaked
+  `at_ms` or `initiator_id` in the on-disk record). The replay oracle
+  rejects the tampered receipt before relying on it.
+- The signing algorithm or key id changed across a Harn upgrade. The
+  current algorithm is `hmac-sha256` with key id `local-session`.
+
+If the original process is gone but you still need to read the
+receipts, treat the on-disk payloads as advisory only — the unsigned
+fields (`handle`, `reason`, `input_hash`, `action`) are still
+informational, but `replay_resume_input` / `replay_drain_decision` will
+refuse to memoize against an unverified receipt.
 
 ### `HARN-LNT-001`
 

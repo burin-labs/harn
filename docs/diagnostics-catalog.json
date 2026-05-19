@@ -54,7 +54,7 @@
     {
       "id": "SUS",
       "title": "Suspend / resume lifecycle",
-      "count": 10
+      "count": 13
     },
     {
       "id": "LNT",
@@ -1340,6 +1340,33 @@
         "HARN-SUS-003",
         "HARN-SUS-006"
       ],
+      "explanationPresent": true,
+      "apiStability": "stable"
+    },
+    {
+      "code": "HARN-SUS-011",
+      "category": "SUS",
+      "summary": "replay resume input hash diverges from journaled suspension",
+      "repairs": [],
+      "related": [],
+      "explanationPresent": true,
+      "apiStability": "stable"
+    },
+    {
+      "code": "HARN-SUS-012",
+      "category": "SUS",
+      "summary": "replay drain decision prompt hash diverges from journaled receipt",
+      "repairs": [],
+      "related": [],
+      "explanationPresent": true,
+      "apiStability": "stable"
+    },
+    {
+      "code": "HARN-SUS-013",
+      "category": "SUS",
+      "summary": "lifecycle receipt signed timestamp failed verification",
+      "repairs": [],
+      "related": [],
       "explanationPresent": true,
       "apiStability": "stable"
     },

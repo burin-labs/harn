@@ -34,6 +34,7 @@ pub(crate) mod json;
 mod json_query;
 pub(crate) mod json_stream;
 mod junit;
+mod lifecycle_receipts;
 mod logging;
 pub mod long_running;
 mod math;
@@ -121,6 +122,7 @@ pub fn register_core_stdlib(vm: &mut Vm) {
     shapes::register_shape_builtins(vm);
     testing::register_testing_builtins(vm);
     flow::register_flow_builtins(vm);
+    lifecycle_receipts::register_lifecycle_receipt_builtins(vm);
 }
 
 /// Register I/O builtins (requires OS access).

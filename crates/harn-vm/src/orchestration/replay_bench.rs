@@ -132,6 +132,8 @@ pub struct ReplayRuntimeCostMetrics {
     /// CH-07 (#1878): channel emit/match audit receipts.
     #[serde(default)]
     pub channel_receipts: usize,
+    #[serde(default)]
+    pub lifecycle_receipts: usize,
     pub llm_input_tokens: u64,
     pub llm_output_tokens: u64,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -448,6 +450,7 @@ fn counts_by_section(counts: &ReplayTraceRunCounts) -> BTreeMap<&'static str, us
         ("policy_decisions", counts.policy_decisions),
         // CH-07 (#1878).
         ("channel_receipts", counts.channel_receipts),
+        ("lifecycle_receipts", counts.lifecycle_receipts),
     ])
 }
 
@@ -523,6 +526,7 @@ fn runtime_cost_metrics(
         final_artifacts: first.final_artifacts + second.final_artifacts,
         policy_decisions: first.policy_decisions + second.policy_decisions,
         channel_receipts: first.channel_receipts + second.channel_receipts,
+        lifecycle_receipts: first.lifecycle_receipts + second.lifecycle_receipts,
         llm_input_tokens: token_total(first_run, "input_tokens")
             + token_total(second_run, "input_tokens"),
         llm_output_tokens: token_total(first_run, "output_tokens")
@@ -543,6 +547,7 @@ fn trace_material_count(counts: &ReplayTraceRunCounts) -> usize {
         + counts.final_artifacts
         + counts.policy_decisions
         + counts.channel_receipts
+        + counts.lifecycle_receipts
 }
 
 fn token_total(run: &ReplayTraceRun, token_key: &str) -> u64 {

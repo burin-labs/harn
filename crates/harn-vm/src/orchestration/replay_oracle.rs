@@ -71,6 +71,12 @@ pub struct ReplayTraceRun {
     /// workload. Each entry is the JSON-encoded
     /// `ChannelEmitReceipt` / `ChannelMatchReceipt`.
     pub channel_receipts: Vec<JsonValue>,
+    /// Lifecycle receipts (suspension / resumption / drain decisions) as
+    /// journaled by `crate::orchestration::lifecycle_receipts`. First-class
+    /// replay material per #1861 P-08 so the oracle treats a drift in
+    /// `input_hash`, `action`, or signed timestamps as a determinism
+    /// failure.
+    pub lifecycle_receipts: Vec<JsonValue>,
 }
 
 impl ReplayTraceRun {
@@ -87,6 +93,7 @@ impl ReplayTraceRun {
             final_artifacts: self.final_artifacts.len(),
             policy_decisions: self.policy_decisions.len(),
             channel_receipts: self.channel_receipts.len(),
+            lifecycle_receipts: self.lifecycle_receipts.len(),
         }
     }
 }
@@ -106,6 +113,7 @@ pub struct ReplayTraceRunCounts {
     pub policy_decisions: usize,
     /// CH-07 (#1878).
     pub channel_receipts: usize,
+    pub lifecycle_receipts: usize,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
@@ -260,6 +268,7 @@ fn trace_material_count(run: &ReplayTraceRun) -> usize {
         + counts.final_artifacts
         + counts.policy_decisions
         + counts.channel_receipts
+        + counts.lifecycle_receipts
 }
 
 fn apply_allowlist_rule(
@@ -935,6 +944,85 @@ mod tests {
         assert!(report.passed, "{report:?}");
         assert_eq!(report.first_run_counts.channel_receipts, 1);
         assert_eq!(report.second_run_counts.channel_receipts, 1);
+    }
+
+    #[test]
+    fn lifecycle_receipts_are_first_class_replay_material() {
+        let mut trace = base_trace();
+        trace.allowlist.push(ReplayAllowlistRule {
+            path: "/lifecycle_receipts/*/payload/suspended_at/signature".to_string(),
+            reason: "per-process signing salt".to_string(),
+            replacement: Some(JsonValue::String("<signature>".to_string())),
+        });
+        trace.allowlist.push(ReplayAllowlistRule {
+            path: "/lifecycle_receipts/*/payload/suspended_at/at_ms".to_string(),
+            reason: "wall-clock at_ms varies per record".to_string(),
+            replacement: Some(JsonValue::String("<at-ms>".to_string())),
+        });
+        trace.allowlist.push(ReplayAllowlistRule {
+            path: "/lifecycle_receipts/*/payload/suspended_at/at".to_string(),
+            reason: "wall-clock at varies per record".to_string(),
+            replacement: Some(JsonValue::String("<at>".to_string())),
+        });
+        let receipt = json!({
+            "seq": 1,
+            "kind": "suspension_receipt",
+            "payload": {
+                "handle": "worker://x/1",
+                "session_id": null,
+                "initiator": "operator",
+                "initiator_id": "op-1",
+                "reason": "stop",
+                "suspended_at": {
+                    "at_ms": 100,
+                    "at": "1970-01-01T00:00:00.1Z",
+                    "algorithm": "hmac-sha256",
+                    "key_id": "local-session",
+                    "signature": "sha256:deadbeef",
+                },
+            },
+        });
+        trace.first_run.lifecycle_receipts = vec![receipt.clone()];
+        trace.second_run.lifecycle_receipts = vec![receipt];
+
+        let report = run_replay_oracle_trace(&trace).expect("oracle succeeds");
+
+        assert!(report.passed, "{report:?}");
+        assert_eq!(report.first_run_counts.lifecycle_receipts, 1);
+        assert_eq!(report.second_run_counts.lifecycle_receipts, 1);
+    }
+
+    #[test]
+    fn lifecycle_receipt_input_hash_drift_is_detected() {
+        let mut trace = base_trace();
+        trace.first_run.lifecycle_receipts = vec![json!({
+            "seq": 1,
+            "kind": "resumption_receipt",
+            "payload": {
+                "handle": "worker://x/1",
+                "initiator": "operator",
+                "initiator_id": "op-1",
+                "input_hash": "sha256:aaaa",
+                "continue_transcript": true,
+            },
+        })];
+        trace.second_run.lifecycle_receipts = vec![json!({
+            "seq": 1,
+            "kind": "resumption_receipt",
+            "payload": {
+                "handle": "worker://x/1",
+                "initiator": "operator",
+                "initiator_id": "op-1",
+                "input_hash": "sha256:bbbb",
+                "continue_transcript": true,
+            },
+        })];
+
+        let report = run_replay_oracle_trace(&trace).expect("oracle succeeds");
+
+        assert!(!report.passed);
+        let divergence = report.divergence.expect("drift is reported");
+        assert_eq!(divergence.path, "/lifecycle_receipts/0/payload/input_hash");
     }
 
     #[test]

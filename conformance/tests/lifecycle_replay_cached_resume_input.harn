@@ -1,0 +1,45 @@
+/**
+ * Cached resume input replay (P-08, #1861).
+ *
+ * On replay the runtime feeds the journaled resume payload back into
+ * the suspended worker instead of re-prompting. The cached payload's
+ * `input_hash` is computed against the *original* value, so a stale or
+ * drifted input surfaces `HARN-SUS-011` and the replay refuses to
+ * memoize. The hash is canonical (insensitive to map-key order), so
+ * the same logical payload can re-validate even if a serializer reorders
+ * keys.
+ */
+pipeline default() {
+  let _ = mock_time(1700000001000)
+  let original_input = {approved: true, comment: "ship it", reviewer: "alice"}
+  let receipt = lifecycle_receipt_record_resumption(
+    {
+      handle: "worker://triage/42",
+      session_id: "session-a",
+      initiator: "operator",
+      initiator_id: "op-1",
+      input: original_input,
+      continue_transcript: true,
+    },
+  )
+  // Replay with identical payload — succeeds, returns cached input.
+  let hit = lifecycle_replay_resume_input(receipt.payload, original_input)
+  println("hit_ok=" + to_string(hit.ok))
+  println("hit_input_approved=" + to_string(hit.input?.approved))
+  println("hit_input_reviewer=" + hit.input?.reviewer)
+  // Replay with reordered keys — canonical hash matches.
+  let reordered = {reviewer: "alice", approved: true, comment: "ship it"}
+  let reorder_hit = lifecycle_replay_resume_input(receipt.payload, reordered)
+  println("reorder_ok=" + to_string(reorder_hit.ok))
+  // Replay with a drifted payload — mismatch, HARN-SUS-011.
+  let drifted = {approved: false, comment: "ship it", reviewer: "alice"}
+  let miss = lifecycle_replay_resume_input(receipt.payload, drifted)
+  println("miss_ok=" + to_string(miss.ok))
+  println("miss_code=" + miss.code)
+  // Hash is stable across orderings.
+  let h1 = lifecycle_resume_input_hash(original_input)
+  let h2 = lifecycle_resume_input_hash(reordered)
+  println("hash_canonical=" + to_string(h1 == h2))
+  let _ = unmock_time()
+  return "ok"
+}

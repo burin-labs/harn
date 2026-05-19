@@ -30,6 +30,9 @@ pub use hooks::*;
 mod pipeline_lifecycle;
 pub use pipeline_lifecycle::*;
 
+mod lifecycle_receipts;
+pub use lifecycle_receipts::*;
+
 mod command_policy;
 pub use command_policy::*;
 
