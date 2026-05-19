@@ -1752,6 +1752,75 @@ Each stored event includes `id`, fully resolved `name`, `payload`,
 original `event_id`. Use `channel_events(name, options?)` for tests and local
 inspection.
 
+Subscribe to channel emits with a `channel.emit` trigger (provider
+`channel`). `match.events` accepts `"channel:<name>"` selectors:
+
+```harn,ignore
+import { trigger_register } from "std/triggers"
+
+trigger_register({
+  id: "release-on-pr-merge",
+  kind: "channel.emit",
+  provider: "channel",
+  match: {events: ["channel:pr.merged"]},
+  handler: { event -> kick_release(event.provider_payload.payload) },
+})
+```
+
+Add `batch: {count, window, key?, expire_action?}` to fire after N
+matching emits (Inngest-shape fire-after-N — no other major durable-
+execution platform owns this primitive). `key` is a dotted JSON path
+that partitions counters; `expire_action` is `"fire_partial"` (default)
+or `"discard"`. On dispatch `event.batch` holds the constituent events;
+the buffer is per-process thread-local, capped at 1024 events per
+partition, and replay reconstructs the batch from the recorded
+`constituent_event_ids`.
+
+```harn,ignore
+trigger_register({
+  id: "release-on-3-merges",
+  kind: "channel.emit",
+  provider: "channel",
+  match: {events: ["channel:pr.merged"]},
+  batch: {count: 3, window: "1h", key: "repo"},
+  handler: { event -> cut_release(event.batch) },
+})
+```
+
+Pair `batch` with `ReminderInject({target, body, tags?, ttl_turns?,
+dedupe_key?})` to land a periodic reminder on a running session
+without spawning or resuming it. `target` is `"current"`, `"parent"`,
+a literal session id, or a closure; `body` is a `.harn.prompt`
+template against `{{ event }}`, `{{ match }}`, and `{{ batch }}`.
+Missing targets drop gracefully with a `triggers.reminder_inject.audit`
+audit entry. See `docs/src/agent-channels.md` for the full surface
+and `docs/src/cookbooks/channels.md` for runnable recipes.
+
+Pick the right primitive:
+
+| Goal | Use |
+|---|---|
+| Hand off to one specific agent | Handoffs (`handoff(...)`, `@handoff`) |
+| Wait for an external event (GitHub, Slack, cron) | Provider trigger |
+| Park one agent until a specific event with a declared resume condition | Suspend/resume (`agent_await_resumption(reason, conditions)`) |
+| Emit a typed event to many subscribers | **Channels** (`emit_channel(...)`) |
+| Periodic reminder into a running loop | **Channels + `batch` + `ReminderInject`** |
+
+Diagnostic codes: `HARN-CHN-001` (`pipeline:` outside a pipeline),
+`HARN-CHN-002` (cross-tenant emit / disabled `org:`), `HARN-CHN-003`
+(malformed name), `HARN-CHN-004` (scope ambiguous —
+`options.session_id`/`pipeline_id` conflicts with active context),
+`HARN-CHN-005` (malformed `batch` config). Replay-oracle codes are
+`HARN-REP-CHN-001..003` — see `docs/src/observability/replay-benchmarks.md`.
+
+Channel guardrails (`channel_guardrail_register(config)` and
+`std/channel_guardrails` presets) run before the durable journal
+append. Each guardrail returns `allow` / `warn` / `block`; worst
+verdict wins; blocked emits never persist but the block decision does
+on `lifecycle.channel.audit`. Built-ins ship `prompt_injection_scanner`
+and `llm_risk_classifier`; `register_guardrail` accepts any custom
+closure.
+
 Pass `autonomy_budget` to cap how many autonomous decisions an agent can
 make per UTC hour / UTC day. The check fires at loop entry, before any
 LLM/MCP work — scripts can't bypass it. When the cap is exhausted,

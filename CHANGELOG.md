@@ -33,6 +33,30 @@ condensed series summaries instead of full per-patch history.
 
 [acp-1726]: https://github.com/agentclientprotocol/agent-client-protocol/discussions/1726
 
+- **Channels docs + cookbook (CH-09, #1880).** Adds the user-facing
+  reference + cookbook for durable agent channels (epic #1870). New
+  mdBook page `docs/src/agent-channels.md` covers the emit surface
+  (scopes, idempotency, signed timestamps), the `channel.emit`
+  trigger source, the `batch { count, window, key, expire_action }`
+  aggregation primitive, the `ReminderInject` handler variant, the
+  guardrails middleware layer (CH-11), three observability topics,
+  the `HARN-CHN-*` diagnostic codes, and a SOTA comparison table
+  (Inngest, Temporal, Restate, A2A) explaining the design rationale.
+  New `docs/src/cookbooks/channels.md` ships five end-to-end recipes:
+  release handshake (PR agent → batched release agent →
+  merge-captain subscribers), periodic check-in via batched tool-call
+  counting + `ReminderInject`, multi-agent feedback loop (planner +
+  reviewers), tenant-scoped pipeline progress dashboard, and
+  cross-pipeline coordination via drain handoff. Extends the "Durable
+  agent channels" section in `docs/llm/harn-quickref.md` with the
+  trigger + batch + ReminderInject surface, a four-row pick-the-right-
+  primitive comparison table (handoffs vs triggers vs suspend/resume
+  vs channels vs channels+batch+reminder), the `HARN-CHN-*` and
+  `HARN-REP-CHN-*` code lists, and a guardrails one-liner. Adds a
+  "Durable agent channels" subsection to `spec/HARN_SPEC.md` (with
+  formal `ChannelScope`, `BatchFilter`, `ReminderInjectHandler`
+  shapes) plus the `HARN-CHN-*` block in the diagnostic appendix.
+  Wires the new pages into `docs/src/SUMMARY.md` under Orchestration.
 - **OAuth docs + provider cookbook (OA-08, #1909).** Adds
   `docs/src/oauth.md` as the user-facing reference for the full OAuth
   stack (`std/oauth/{providers,storage,client,device_flow,dynamic_registration,redaction}`),
