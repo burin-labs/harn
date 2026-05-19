@@ -210,6 +210,10 @@ pub const STDLIB_SOURCES: &[StdlibSource] = &[
         source: include_str!("stdlib/lifecycle/pool.harn"),
     },
     StdlibSource {
+        module: "lifecycle/combinators",
+        source: include_str!("stdlib/lifecycle/combinators.harn"),
+    },
+    StdlibSource {
         module: "agent/prompts",
         source: include_str!("stdlib/agent/prompts.harn"),
     },

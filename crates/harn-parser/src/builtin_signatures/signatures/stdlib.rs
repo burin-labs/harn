@@ -226,6 +226,16 @@ pub(crate) const SIGNATURES: &[BuiltinSignature] = &[
         TY_BOOL,
     ),
     BuiltinSignature::simple(
+        "__lifecycle_span_end",
+        &[Param::new("span_id", TY_INT)],
+        TY_NIL,
+    ),
+    BuiltinSignature::simple(
+        "__lifecycle_span_start",
+        &[Param::new("name", TY_STRING)],
+        TY_INT,
+    ),
+    BuiltinSignature::simple(
         "__llm_cache_key",
         &[
             Param::new("prompt", TY_ANY),

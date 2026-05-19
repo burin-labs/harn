@@ -2473,6 +2473,25 @@ Three concentric surfaces:
 
   Presets are pure functions / pure factories; they compose freely. See
   `docs/src/stdlib/lifecycle.md` for an example chain.
+- `std/lifecycle/combinators` exports six pure factories that wrap any
+  `(harness, return_value) -> return_value`-shaped callback (hook
+  handler, `resume_by`, `on_finish`, ...):
+  - `compose(callbacks)` — invoke each callback sequentially, threading
+    each return value into the next callback's `return_value`; returns
+    the last entry's value.
+  - `first_available(callbacks)` — invoke in order; return the first
+    non-nil result. Skips remaining callbacks after the first non-nil.
+  - `with_telemetry(callback, span_name?)` — wrap with a `SpanKind::FnCall`
+    OTel span and paired `{span_name}_started` / `_completed` /
+    `_errored` audit entries.
+  - `with_timeout(callback, ms)` — soft, clock-aware deadline; on
+    overrun returns `{__timed_out: true, timeout_ms, elapsed_ms,
+    return_value}` and emits a `lifecycle_callback_timed_out` audit.
+  - `if_unsettled(callback)` — only invoke when
+    `harness.unsettled_state()` is non-empty; one snapshot per call.
+  - `when(predicate, callback)` — only invoke when
+    `predicate(harness, return_value)` is truthy; otherwise pass the
+    inbound value through unchanged.
 - `harness.unsettled_state()` returns a stable dict with
   `suspended_subagents`, `queued_triggers`, `partial_handoffs`, and
   `in_flight_llm_calls` lists. `harness.is_empty(state?)`,

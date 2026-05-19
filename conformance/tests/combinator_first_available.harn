@@ -1,0 +1,45 @@
+import { lifecycle_audit_log_take } from "std/lifecycle"
+/**
+ * `first_available([cb1, cb2, cb3])` invokes callbacks in order and
+ * returns the first non-nil result. Callbacks past the first non-nil
+ * responder are not invoked. An all-nil chain returns nil.
+ *
+ * Tracking: harn#1860 (P-07).
+ */
+import { first_available } from "std/lifecycle/combinators"
+
+pipeline default() {
+  let nil_cb = { harness, _return_value ->
+    harness.emit_audit("nil_called", {})
+    return nil
+  }
+  let value_cb = { harness, _return_value ->
+    harness.emit_audit("value_called", {})
+    return "from_value"
+  }
+  let never_cb = { harness, _return_value ->
+    harness.emit_audit("never_called", {})
+    return "never"
+  }
+  pipeline_on_finish(
+    { harness, return_value ->
+      let chain = first_available([nil_cb, value_cb, never_cb])
+      let result = chain(harness, return_value)
+      let audits = lifecycle_audit_log_take()
+      harness.stdio.println("result=" + result)
+      harness.stdio.println("audit_count=" + to_string(len(audits)))
+      harness.stdio.println("kind_order=" + audits[0].kind + "," + audits[1].kind)
+      let only_nils = first_available([nil_cb, nil_cb])
+      let none = only_nils(harness, return_value)
+      let trailing = lifecycle_audit_log_take()
+      harness.stdio.println("none=" + to_string(none == nil))
+      harness.stdio.println("trailing_count=" + to_string(len(trailing)))
+      let empty = first_available([])
+      harness.stdio.println("empty=" + to_string(empty(harness, return_value) == nil))
+      return return_value
+    },
+  )
+  return 0
+}
+// All-nil chain returns nil and visits every callback.
+// Empty list returns nil immediately.
