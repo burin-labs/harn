@@ -220,6 +220,46 @@ pub(crate) const SIGNATURES: &[BuiltinSignature] = &[
         ],
         TY_NIL,
     ),
+    BuiltinSignature::simple(
+        "__oauth_dynreg_build_authorization_server_metadata",
+        &[
+            Param::new("provider", TY_DICT),
+            Param::optional("overrides", TY_DICT_OR_NIL),
+        ],
+        TY_DICT,
+    ),
+    BuiltinSignature::simple(
+        "__oauth_dynreg_build_client_metadata",
+        &[Param::new("metadata", TY_DICT)],
+        TY_DICT,
+    ),
+    BuiltinSignature::simple(
+        "__oauth_dynreg_get",
+        &[
+            Param::new("handle", TY_DICT),
+            Param::new("client_id", TY_STRING),
+        ],
+        TY_DICT_OR_NIL,
+    ),
+    BuiltinSignature::simple(
+        "__oauth_dynreg_list",
+        &[Param::new("handle", TY_DICT)],
+        TY_LIST,
+    ),
+    BuiltinSignature::simple(
+        "__oauth_dynreg_register",
+        &[
+            Param::new("handle", TY_DICT),
+            Param::new("metadata", TY_DICT),
+        ],
+        TY_DICT,
+    ),
+    BuiltinSignature::simple("__oauth_dynreg_store_handle", &[], TY_DICT),
+    BuiltinSignature::simple(
+        "__oauth_dynreg_validate_metadata",
+        &[Param::new("metadata", TY_DICT)],
+        TY_DICT,
+    ),
     BuiltinSignature::simple("__token_redaction_clear_custom_patterns", &[], TY_NIL),
     BuiltinSignature::simple("__token_redaction_custom_patterns", &[], TY_LIST),
     BuiltinSignature::simple("__token_redaction_default_patterns", &[], TY_LIST),

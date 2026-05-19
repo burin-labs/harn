@@ -1,0 +1,87 @@
+// std/oauth/dynamic_registration: RFC 7591 validation rejections.
+//
+// Asserts that the dynamic registration endpoint rejects malformed or
+// security-violating metadata per RFC 7591 §5.1 + RFC 8252 §7.3.
+// Each rejection threads through the stable HARN-OAU-005 diagnostic
+// prefix and never mutates the store.
+import {
+  dynamic_registration_store,
+  list_clients,
+  register_client,
+  validate_metadata,
+} from "std/oauth/dynamic_registration"
+
+fn expect_reject(label, metadata, marker) {
+  let validation = validate_metadata(metadata)
+  if validation.ok {
+    throw label + ": expected validate_metadata to report ok=false"
+  }
+  if len(validation.errors) == 0 {
+    throw label + ": expected at least one error"
+  }
+  let first_error = validation.errors[0]
+  if !contains(first_error, "HARN-OAU-005") {
+    throw label + ": expected HARN-OAU-005 diagnostic prefix, got `" + first_error + "`"
+  }
+  if marker != "" && !contains(first_error, marker) {
+    throw label + ": expected marker `" + marker + "` in `" + first_error + "`"
+  }
+}
+
+pipeline test(task) {
+  let store = dynamic_registration_store()
+  let cursor_before = len(list_clients(store))
+  // Missing redirect_uris.
+  expect_reject("missing redirect_uris", {}, "redirect_uris is required")
+  // Empty redirect_uris list.
+  expect_reject("empty redirect_uris", {redirect_uris: []}, "at least one")
+  // Non-loopback http (security violation per RFC 8252 §7.3).
+  expect_reject(
+    "non-loopback http",
+    {redirect_uris: ["http://attacker.example/callback"]},
+    "loopback",
+  )
+  // Fragment in redirect URI (banned by RFC 7591 §2).
+  expect_reject(
+    "fragment in redirect",
+    {redirect_uris: ["https://app.example/callback#frag"]},
+    "fragment",
+  )
+  // Unsupported scheme.
+  expect_reject("ftp scheme", {redirect_uris: ["ftp://app.example/callback"]}, "ftp")
+  // Unknown grant_type.
+  expect_reject(
+    "unknown grant_type",
+    {redirect_uris: ["https://app.example/cb"], grant_types: ["password"]},
+    "password",
+  )
+  // Unknown token_endpoint_auth_method.
+  expect_reject(
+    "unknown auth method",
+    {
+      redirect_uris: ["https://app.example/cb"],
+      token_endpoint_auth_method: "client_secret_carrier_pigeon",
+    },
+    "client_secret_carrier_pigeon",
+  )
+  // Wrong type for redirect_uris.
+  expect_reject("redirect_uris as dict", {redirect_uris: {primary: "https://app.example/cb"}}, "list")
+  // Validation never mutates the store.
+  assert_eq(len(list_clients(store)), cursor_before, "store unchanged by validation calls")
+  // register_client must also reject and not insert.
+  var caught = false
+  try {
+    let _ = register_client(store, {redirect_uris: ["http://attacker.example/cb"]})
+  } catch (err) {
+    if contains(to_string(err), "HARN-OAU-005") {
+      caught = true
+    }
+  }
+  assert(caught, "register_client must throw HARN-OAU-005 on bad metadata")
+  assert_eq(len(list_clients(store)), cursor_before, "store unchanged after rejected registration")
+  // A valid registration after rejections still works.
+  let good = register_client(store, {redirect_uris: ["https://app.example/ok"]})
+  assert(good.client_id != nil, "valid registration after rejections succeeds")
+  assert_eq(len(list_clients(store)), cursor_before + 1, "valid registration appears in store")
+  log("oauth dynamic registration rejects ok")
+}
