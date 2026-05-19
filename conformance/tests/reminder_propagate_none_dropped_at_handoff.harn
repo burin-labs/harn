@@ -1,0 +1,69 @@
+fn tools() {
+  var registry = tool_registry()
+  registry = tool_define(
+    registry,
+    "emit_handoff",
+    "Emit a handoff artifact",
+    {
+      handler: { _args ->
+        let record = handoff(
+          {
+            source_persona: "parent",
+            target_persona_or_human: {kind: "persona", id: "child", label: "child"},
+            task: "Run inherited reminder work",
+            reason: "Verifying propagate=none is dropped at handoff",
+          },
+        )
+        println(len(record.reminder_propagation))
+        println(record.reminder_propagation[0].body)
+        println(record.reminder_propagation[0].source)
+        var saw_none = false
+        for entry in record.reminder_propagation {
+          if entry.body == "dropped at handoff" {
+            saw_none = true
+          }
+        }
+        println(saw_none)
+        record
+      },
+      parameters: {},
+      returns: {type: "object"},
+    },
+  )
+  return registry
+}
+
+pipeline main() {
+  // The handoff envelope must omit propagate=none reminders, keeping
+  // only the propagate=all entry.
+  llm_mock_clear()
+  let parent = agent_session_open("reminder-propagate-none-dropped-at-handoff")
+  agent_session_reset(parent)
+  agent_session_inject(
+    parent,
+    transcript_reminder_event(
+      {body: "carried into handoff", tags: ["all"], dedupe_key: "all-key", propagate: "all"},
+    ),
+  )
+  agent_session_inject(
+    parent,
+    transcript_reminder_event(
+      {body: "dropped at handoff", tags: ["none"], dedupe_key: "none-key", propagate: "none"},
+    ),
+  )
+  llm_mock({tool_calls: [{id: "handoff_call", name: "emit_handoff", arguments: {}}]})
+  llm_mock({text: "done"})
+  agent_loop(
+    "Emit a handoff.",
+    nil,
+    {
+      provider: "mock",
+      session_id: parent,
+      tools: tools(),
+      tool_format: "native",
+      max_iterations: 2,
+      done_judge: nil,
+    },
+  )
+  llm_mock_clear()
+}

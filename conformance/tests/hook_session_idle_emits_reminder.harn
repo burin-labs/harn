@@ -1,0 +1,20 @@
+pipeline main() {
+  clear_session_hooks()
+  let session = agent_session_open("hook-session-idle-emits-reminder")
+  agent_session_reset(session)
+  register_session_hook(
+    "session_idle",
+    { _event -> return {reminder: {body: "idle hook reminder", tags: ["session_idle"], dedupe_key: "session-idle-hook"}} },
+  )
+  // Fire the session_idle hook directly without relying on real timers.
+  __host_fire_session_hook(
+    "session_idle",
+    {session: {id: session}, iteration: 1, wake_interval_ms: 0},
+  )
+  let events = transcript_events_by_kind(agent_session_snapshot(session), "system_reminder")
+  println(len(events))
+  println(events[0].reminder.body)
+  println(events[0].reminder.tags[0])
+  println(events[0].reminder.source)
+  clear_session_hooks()
+}

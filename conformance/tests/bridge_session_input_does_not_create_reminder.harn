@@ -1,0 +1,22 @@
+import { agent_session_drain_bridge_injections } from "std/agent/state"
+
+/**
+ * Conformance smoke check for the session-input vs session-remind contract:
+ * when no host bridge is installed, the drain helper returns no injections
+ * regardless of checkpoint. The Rust-side unit test
+ * `bridge_session_input_path_never_produces_reminder` in
+ * `crates/harn-vm/src/bridge.rs` covers the full lifecycle where queued
+ * session/input payloads route to user messages, never to reminders.
+ */
+pipeline main() {
+  let immediate = agent_session_drain_bridge_injections("bridge-session-input-no-reminder", "interrupt_immediate")
+  let finish_step = agent_session_drain_bridge_injections("bridge-session-input-no-reminder", "finish_step")
+  let session = agent_session_open("bridge-session-input-no-reminder")
+  agent_session_reset(session)
+  let events = transcript_events_by_kind(agent_session_snapshot(session), "system_reminder")
+  println(immediate.delivered)
+  println(immediate.reason)
+  println(finish_step.delivered)
+  println(finish_step.reason)
+  println(len(events))
+}

@@ -1,0 +1,28 @@
+import { agent_reminder_providers_fire } from "std/agent/state"
+
+pipeline main() {
+  let enabled_session = agent_session_open("provider-opt-out-enabled")
+  agent_session_reset(enabled_session)
+  let payload = {session: {id: enabled_session}, iteration: 1, wake_interval_ms: 65000}
+  let enabled = agent_reminder_providers_fire(
+    enabled_session,
+    "session_idle",
+    payload,
+    {reminders: {config: {idle_nudge: {idle_seconds: 60}}}},
+  )
+  let enabled_reminders = transcript_events_by_kind(agent_session_snapshot(enabled_session), "system_reminder")
+  // Opt out by listing the negated provider name.
+  let opted_out_session = agent_session_open("provider-opt-out-disabled")
+  agent_session_reset(opted_out_session)
+  let opted_out = agent_reminder_providers_fire(
+    opted_out_session,
+    "session_idle",
+    {session: {id: opted_out_session}, iteration: 1, wake_interval_ms: 65000},
+    {reminders: {providers: ["-idle_nudge"], config: {idle_nudge: {idle_seconds: 60}}}},
+  )
+  let opted_out_reminders = transcript_events_by_kind(agent_session_snapshot(opted_out_session), "system_reminder")
+  println(enabled.fired_count)
+  println(len(enabled_reminders))
+  println(opted_out.fired_count)
+  println(len(opted_out_reminders))
+}

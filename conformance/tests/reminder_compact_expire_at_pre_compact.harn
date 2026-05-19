@@ -1,0 +1,26 @@
+pipeline main() {
+  let topic = "transcript.reminder.lifecycle"
+  let cursor = event_log.latest(topic)
+  let base = transcript_from_messages(
+    [
+      {role: "user", content: "one"},
+      {role: "assistant", content: "two"},
+      {role: "user", content: "three"},
+      {role: "assistant", content: "four"},
+    ],
+  )
+  let with_reminder = transcript
+    .inject_reminder(
+    base,
+    {body: "expire at compaction boundary", dedupe_key: "ttl", ttl_turns: 1, preserve_on_compact: true},
+  ).transcript
+  let compacted = transcript_compact(with_reminder, {strategy: "truncate", keep_last: 1, target_tokens: 1})
+  let reminders = transcript_events_by_kind(compacted, "system_reminder")
+  let stream = event_log.subscribe({topic: topic, from_cursor: cursor})
+  let logged = stream.next().value
+  println(len(reminders))
+  println(logged.kind)
+  println(logged.payload.reminder_id != "")
+  println(logged.payload.ttl_turns_before)
+  println(logged.payload.expired_at_boundary)
+}

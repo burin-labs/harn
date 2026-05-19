@@ -1,0 +1,31 @@
+import { agent_session_apply_reminder_post_turn } from "std/agent/state"
+
+pipeline main() {
+  let session = agent_session_open("reminder-propagate-session-within-session")
+  agent_session_reset(session)
+  agent_session_inject(
+    session,
+    transcript_reminder_event(
+      {
+        body: "stays in session",
+        tags: ["session"],
+        dedupe_key: "session",
+        propagate: "session",
+        ttl_turns: 5,
+      },
+    ),
+  )
+  let after_inject = transcript_events_by_kind(agent_session_snapshot(session), "system_reminder")
+  // Advance two turns. Session-scoped reminders survive within the same
+  // session as long as their TTL has not lapsed.
+  agent_session_apply_reminder_post_turn(session, 1)
+  agent_session_apply_reminder_post_turn(session, 2)
+  let after_turns = transcript_events_by_kind(agent_session_snapshot(session), "system_reminder")
+  println(len(after_inject))
+  println(after_inject[0].reminder.propagate)
+  println(after_inject[0].reminder.ttl_turns)
+  println(len(after_turns))
+  println(after_turns[0].reminder.body)
+  // Two post-turn decrements should leave the TTL at 3.
+  println(after_turns[0].reminder.ttl_turns)
+}

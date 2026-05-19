@@ -1,0 +1,12 @@
+pipeline main() {
+  let a = transcript
+    .inject_reminder(transcript(), {body: "remove", dedupe_key: "slot-x"})
+  let b = transcript
+    .inject_reminder(a.transcript, {body: "keep", dedupe_key: "slot-y"})
+  let cleared = transcript.clear_reminders(b.transcript, {dedupe_key: "slot-x"})
+  let events = transcript_events_by_kind(cleared.transcript, "system_reminder")
+  println(cleared.removed_count)
+  println(len(events))
+  println(events[0].reminder.body)
+  println(events[0].reminder.dedupe_key)
+}

@@ -1,0 +1,11 @@
+pipeline main() {
+  let first = transcript
+    .inject_reminder(transcript(), {body: "first", dedupe_key: "k1"})
+  let second = transcript
+    .inject_reminder(first.transcript, {body: "second", dedupe_key: "k2"})
+  let cleared = transcript.clear_reminders(second.transcript, {id: first.reminder_id})
+  let events = transcript_events_by_kind(cleared.transcript, "system_reminder")
+  println(cleared.removed_count)
+  println(len(events))
+  println(events[0].reminder.body)
+}

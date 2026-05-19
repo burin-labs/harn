@@ -1,0 +1,41 @@
+fn pre_hook_tools() {
+  let registry = tool_registry()
+  return tool_define(
+    registry,
+    "pre_hook_tool",
+    "Return a marker for pre-tool hook tests.",
+    {parameters: {}, handler: { _args -> "tool-result" }},
+  )
+}
+
+pipeline main() {
+  clear_tool_hooks()
+  register_tool_hook(
+    {
+      pattern: "pre_hook_tool",
+      pre: { _event -> return {reminder: {body: "pre tool reminder", tags: ["pre"], dedupe_key: "pre-hook"}} },
+    },
+  )
+  llm_mock_clear()
+  llm_mock({tool_calls: [{id: "pre_tool_1", name: "pre_hook_tool", arguments: {}}]})
+  llm_mock({text: "<done>##DONE##</done>"})
+  let result = agent_loop(
+    "call the pre-hook tool",
+    nil,
+    {
+      provider: "mock",
+      tools: pre_hook_tools(),
+      tool_format: "native",
+      max_iterations: 2,
+      loop_until_done: true,
+      session_id: "hook-pre-tool-emits-reminder",
+    },
+  )
+  let events = transcript_events_by_kind(result.transcript, "system_reminder")
+  println(result.status)
+  println(len(events))
+  println(events[0].reminder.body)
+  println(events[0].reminder.tags[0])
+  println(events[0].reminder.source)
+  clear_tool_hooks()
+}

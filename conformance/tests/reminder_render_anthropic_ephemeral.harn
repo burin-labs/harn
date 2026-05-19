@@ -1,0 +1,35 @@
+import { agent_reminder_providers_fire, agent_session_messages } from "std/agent/state"
+
+pipeline main() {
+  clear_reminder_providers()
+  register_reminder_provider(
+    {
+      id: "render_anthropic_ephemeral",
+      subscribes_to: ["session_idle"],
+      evaluate: { _ctx -> return {reminder: {body: "anthropic ephemeral reminder", role_hint: "ephemeral_cache"}} },
+    },
+  )
+  let session = agent_session_open("reminder-render-anthropic-ephemeral")
+  agent_session_reset(session)
+  agent_session_inject(session, {role: "user", content: "hello"})
+  agent_reminder_providers_fire(session, "session_idle", {session: {id: session}}, {})
+  llm_mock_clear()
+  llm_mock({text: "ok"})
+  llm_call(
+    "ignored",
+    nil,
+    {
+      provider: "mock",
+      model: "claude-sonnet-4-7",
+      messages: agent_session_messages(session),
+      session_id: session,
+    },
+  )
+  let call = llm_mock_calls()[0]
+  println(call.messages[0].role)
+  println(contains(call.messages[0].content[0].text, "<system-reminder>"))
+  println(contains(call.messages[0].content[0].text, "anthropic ephemeral reminder"))
+  // ephemeral_cache hint sets cache_control.type = "ephemeral".
+  println(call.messages[0].content[0].cache_control.type)
+  clear_reminder_providers()
+}

@@ -1,0 +1,12 @@
+pipeline main() {
+  let first = transcript
+    .inject_reminder(transcript(), {body: "old", dedupe_key: "slot", ttl_turns: 2})
+  let second = transcript
+    .inject_reminder(first.transcript, {body: "new", dedupe_key: "slot", ttl_turns: 3})
+  let events = transcript_events_by_kind(second.transcript, "system_reminder")
+  println(second.deduped_count)
+  println(len(events))
+  println(events[0].text)
+  println(events[0].reminder.body)
+  println(events[0].reminder.ttl_turns)
+}
