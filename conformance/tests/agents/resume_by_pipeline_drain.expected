@@ -1,0 +1,6 @@
+handled=true
+mechanism=ResumeBy.pipeline_drain
+audit_kind=resume_by_dispatched
+audit_mechanism=ResumeBy.pipeline_drain
+audit_handle=worker://triage/drain
+audit_reason=deferred to drain

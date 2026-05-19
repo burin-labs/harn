@@ -1,0 +1,44 @@
+import { ResumeBy } from "std/agent/resume_by"
+import { lifecycle_audit_log_take } from "std/lifecycle"
+
+/**
+ * ResumeBy.local_runtime registers the suspension's conditions with
+ * the in-process trigger dispatcher and reports
+ * `{handled: true, mechanism: "ResumeBy.local_runtime"}`. When no
+ * conditions are present the callback declines with
+ * `{handled: false, reason: "no_conditions"}` so a composed chain can
+ * fall through to the parent LLM safety net.
+ *
+ * Tracking: harn#1864 (S-14).
+ */
+pipeline default() {
+  let RB = ResumeBy()
+  pipeline_on_finish(
+    { harness, return_value ->
+      let with_conditions = RB
+        .local_runtime(
+        harness,
+        {
+          handle: "worker://triage/local",
+          reason: "waiting on pr review",
+          conditions: {trigger: {kind: "review.approved", provider: "github"}},
+        },
+      )
+      let audits_with = lifecycle_audit_log_take()
+      harness.stdio.println("with_handled=" + to_string(with_conditions.handled))
+      harness.stdio.println("with_mechanism=" + with_conditions.mechanism)
+      harness.stdio.println("with_audit_kind=" + audits_with[0].kind)
+      harness.stdio
+        .println("with_audit_has_conditions=" + to_string(audits_with[0].payload.conditions != nil))
+      let without_conditions = RB
+        .local_runtime(harness, {handle: "worker://triage/no-cond", reason: "no conditions"})
+      let audits_without = lifecycle_audit_log_take()
+      harness.stdio.println("without_handled=" + to_string(without_conditions.handled))
+      harness.stdio.println("without_reason=" + without_conditions.reason)
+      harness.stdio.println("without_audit_kind=" + audits_without[0].kind)
+      harness.stdio.println("without_audit_reason=" + audits_without[0].payload.reason)
+      return return_value
+    },
+  )
+  return 0
+}

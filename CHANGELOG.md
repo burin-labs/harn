@@ -28,6 +28,28 @@ condensed series summaries instead of full per-patch history.
   `conformance/tests/stdlib/channel_scope_{bare_defaults_to_tenant,pipeline_outside_pipeline_errors,cross_tenant_isolation,cross_session_isolation}.harn`
   plus the existing `emit_channel_scope_resolution.harn`. Part of epic
   #1870.
+- **Callback-first `ResumeBy.*` exports (#1864).** The new
+  `std/agent/resume_by` module replaces implicit resume-responsibility
+  inference with four explicit `(harness, suspension) -> dict`
+  callbacks: `ResumeBy().parent_llm` (surface the suspension to the
+  parent transcript and let the parent's LLM resume),
+  `ResumeBy().local_runtime` (register conditions with the in-process
+  #152 dispatcher; declines with `no_conditions` when none are set),
+  `ResumeBy().cloud_harness` (register with the harn-cloud webhook
+  receiver; declines with `no_cloud_session` until HC-07..HC-09 wire
+  the back end), and `ResumeBy().pipeline_drain` (defer to the
+  enclosing pipeline's drain step). Each callback emits a
+  `resume_by_dispatched` or `resume_by_declined` audit through
+  `harness.emit_audit` for observability, and the
+  `agent_await_resumption(reason, conditions, resume_by)` request now
+  carries the callback for the agent loop to invoke at suspend time
+  with `invoke_resume_by(...)` (with a `parent_llm` safety-net
+  fallback). `first_handled([...])` and `default_resume_by({...})`
+  helpers ship in the same module so chains like
+  `first_handled([ResumeBy().cloud_harness, ResumeBy().local_runtime])`
+  compose with the existing `std/lifecycle/combinators`. Conformance:
+  `conformance/tests/agents/resume_by_{parent_llm,local_runtime,cloud_harness,pipeline_drain,composed,default}.harn`.
+  Part of epic #1836 (agent suspend/resume) and #1853 (callback-first).
 - **Pool state durability (#1890).** `Pool.create({scope: ...})` now
   routes to three durability backends following the channel scope
   contract: `session` (default, in-memory only — lost on session close);

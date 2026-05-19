@@ -387,18 +387,26 @@ pub fn parse_resume_conditions(conditions = nil) -> ResumeConditions? {
  * request becomes a worker suspension, a top-level suspension checkpoint, or
  * daemon idle metadata.
  *
+ * The optional `resume_by` argument names the callback that owns this
+ * suspension's resume responsibility (S-14, harn#1864). Pass any
+ * `(harness, suspension) -> {handled, mechanism}` closure — typically
+ * one of the four `ResumeBy.*` presets from `std/agent/resume_by`, or a
+ * `first_available(...)` chain. When omitted, the runtime calls
+ * `default_resume_by(...)` to pick a sensible default based on the
+ * presence of `conditions` and the active cloud session.
+ *
  * @effects: [host]
  * @allocation: heap
  * @errors: [HARN-SUS-002, HARN-SUS-005]
  * @api_stability: experimental
  * @example: agent_await_resumption("waiting on review", {timeout: {duration_minutes: 5}})
  */
-pub fn agent_await_resumption(reason, conditions = nil) -> AgentAwaitResumptionRequest {
+pub fn agent_await_resumption(reason, conditions = nil, resume_by = nil) -> AgentAwaitResumptionRequest {
   let normalized_reason = trim(to_string(reason ?? ""))
   if normalized_reason == "" {
     throw "HARN-SUS-005: agent_await_resumption reason is required"
   }
-  return {reason: normalized_reason, conditions: parse_resume_conditions(conditions)}
+  return {reason: normalized_reason, conditions: parse_resume_conditions(conditions), resume_by: resume_by}
 }
 
 /**

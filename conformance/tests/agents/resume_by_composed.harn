@@ -1,0 +1,50 @@
+import { ResumeBy, first_handled, invoke_resume_by } from "std/agent/resume_by"
+import { lifecycle_audit_log_take } from "std/lifecycle"
+
+/**
+ * ResumeBy.* callbacks share the `(harness, suspension)` signature with
+ * `std/lifecycle/combinators`, so chains like
+ *
+ *   first_handled([
+ *     ResumeBy().cloud_harness,    # durable, preferred
+ *     ResumeBy().local_runtime,    # in-process fallback
+ *     ResumeBy().parent_llm,       # safety net
+ *   ])
+ *
+ * compose cleanly. `first_handled` walks the chain and returns the
+ * first dispatch whose `handled` field is true — when `cloud_harness`
+ * declines (no cloud session) and `local_runtime` accepts (conditions
+ * present), the chain resolves to `ResumeBy.local_runtime`. The
+ * combinator preserves the decline audits so observers can see every
+ * link in the chain.
+ *
+ * Tracking: harn#1864 (S-14), harn#1860 (P-07).
+ */
+pipeline default() {
+  let RB = ResumeBy()
+  pipeline_on_finish(
+    { harness, return_value ->
+      let chain = first_handled([RB.cloud_harness, RB.local_runtime, RB.parent_llm])
+      let suspension = {
+        handle: "worker://triage/composed",
+        reason: "compose escalates through ResumeBy.*",
+        conditions: {trigger: {kind: "review.approved", provider: "github"}},
+      }
+      let result = chain(harness, suspension)
+      let audits = lifecycle_audit_log_take()
+      harness.stdio.println("mechanism=" + result.mechanism)
+      harness.stdio.println("handled=" + to_string(result.handled))
+      harness.stdio.println("audit_count=" + to_string(len(audits)))
+      harness.stdio.println("first_kind=" + audits[0].kind)
+      harness.stdio.println("first_mechanism=" + audits[0].payload.mechanism)
+      harness.stdio.println("second_kind=" + audits[1].kind)
+      harness.stdio.println("second_mechanism=" + audits[1].payload.mechanism)
+      let fallback = invoke_resume_by(nil, harness, suspension)
+      let fallback_audits = lifecycle_audit_log_take()
+      harness.stdio.println("nil_fallback_mechanism=" + fallback.mechanism)
+      harness.stdio.println("nil_fallback_kind=" + fallback_audits[0].kind)
+      return return_value
+    },
+  )
+  return 0
+}
