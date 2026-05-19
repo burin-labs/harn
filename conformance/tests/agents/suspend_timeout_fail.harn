@@ -1,0 +1,58 @@
+/**
+ * S-11 (#1847): a timeout-conditioned suspension with
+ * `on_timeout: "fail"` marks the worker as failed when the deadline
+ * elapses, rather than resuming the loop. The failure path records
+ * `latest_error` and emits a `WorkerFailed` lifecycle event; future
+ * resume attempts against the live handle are rejected.
+ *
+ * The timeout is fired deterministically via `mock_time` +
+ * `advance_time`.
+ */
+pipeline main() {
+  llm_mock_clear()
+  let _ = mock_time(1700000100000)
+  llm_mock(
+    {
+      tool_calls: [
+        {
+          id: "park_fail",
+          name: "agent_await_resumption",
+          arguments: {
+            reason: "fail on review timeout",
+            conditions: {
+              trigger: {kind: "review.approved", provider: "github"},
+              timeout: {duration_minutes: 5, on_timeout: "fail"},
+            },
+          },
+        },
+      ],
+    },
+  )
+  let handle = sub_agent_run(
+    "Park until the review timeout fails the worker.",
+    {provider: "mock", background: true, tool_format: "native", max_iterations: 3},
+  )
+  let suspended = wait_agent(handle)
+  println("status=" + suspended.status)
+  println("has_auto_trigger=" + to_string(suspended?.suspension?.auto_resume_trigger != nil))
+  // Advance past the deadline so the spawned timeout task wakes and
+  // marks the worker failed (no resume attempt).
+  let _ = advance_time(6 * 60 * 1000)
+  yield_now()
+  yield_now()
+  yield_now()
+  let failed = wait_agent(handle)
+  println("post_timeout_status=" + failed.status)
+  println("has_latest_error=" + to_string(failed?.error != nil))
+  println(
+    "error_mentions_timeout="
+      + to_string(contains(failed?.error ?? "", "timeout")),
+  )
+  // A subsequent resume against the failed worker is rejected with
+  // HARN-SUS-001 (worker is not suspended).
+  let resume_attempt = try {
+    resume_agent(handle)
+  }
+  println("resume_failed=" + to_string(is_err(resume_attempt)))
+  let _ = unmock_time()
+}

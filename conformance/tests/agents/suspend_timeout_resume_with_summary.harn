@@ -1,0 +1,55 @@
+/**
+ * S-11 (#1847): a timeout-conditioned suspension auto-resumes when
+ * the deadline elapses. With `on_timeout: "resume_with_summary"`
+ * (the default), the runtime fires a synthetic `auto_resume.timeout`
+ * trigger event, the loop resumes with `initiator: "timeout"`, and
+ * the worker drives to completion via the next mock LLM turn.
+ *
+ * The timeout is fired deterministically via `mock_time` +
+ * `advance_time`: the underlying `clock::sleep` honours the unified
+ * mock clock so no wall-clock sleep is involved. The trigger condition
+ * is required because timeout scheduling is keyed off the trigger
+ * registration (see `register_auto_resume_trigger`).
+ */
+pipeline main() {
+  llm_mock_clear()
+  let _ = mock_time(1700000000000)
+  llm_mock(
+    {
+      tool_calls: [
+        {
+          id: "park_timeout",
+          name: "agent_await_resumption",
+          arguments: {
+            reason: "waiting on review",
+            conditions: {
+              trigger: {kind: "review.approved", provider: "github"},
+              timeout: {duration_minutes: 5, on_timeout: "resume_with_summary"},
+            },
+          },
+        },
+      ],
+    },
+  )
+  llm_mock({text: "resumed after timeout"})
+  let handle = sub_agent_run(
+    "Park until the review timeout fires.",
+    {provider: "mock", background: true, tool_format: "native", max_iterations: 3},
+  )
+  let suspended = wait_agent(handle)
+  println("status=" + suspended.status)
+  println("has_auto_trigger=" + to_string(suspended?.suspension?.auto_resume_trigger != nil))
+  // Advance the mock clock past the 5-minute timeout. The spawned
+  // auto-resume timeout task wakes from `clock::sleep`, fires the
+  // synthetic auto_resume.timeout event, and the agent loop resumes.
+  let _ = advance_time(6 * 60 * 1000)
+  // Yield so the timeout task can run, dispatch, and the resumed
+  // worker can complete its next turn.
+  yield_now()
+  yield_now()
+  yield_now()
+  let resumed = wait_agent(handle)
+  println("post_timeout_status=" + resumed.status)
+  println("has_transcript=" + to_string(resumed.has_transcript))
+  let _ = unmock_time()
+}

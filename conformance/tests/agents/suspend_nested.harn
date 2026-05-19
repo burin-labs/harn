@@ -1,0 +1,57 @@
+/**
+ * S-11 (#1847): nested suspend/resume. Two independent background
+ * workers each self-park at turn 1 and can be resumed independently.
+ *
+ * Asserts that:
+ *   - The worker registry tracks two simultaneously-suspended workers
+ *     with distinct ids and distinct snapshot paths.
+ *   - Resuming worker A does not affect worker B's suspension state.
+ *   - Each worker resumes from its own snapshot to completion.
+ *
+ * Workers are spawned serially so the FIFO `llm_mock` queue stays
+ * deterministic. The two suspended workers coexist between the second
+ * `wait_agent` and the first `resume_agent`.
+ */
+pipeline main() {
+  llm_mock_clear()
+  // Stage worker A: park, then complete.
+  llm_mock(
+    {
+      tool_calls: [{id: "park_a", name: "agent_await_resumption", arguments: {reason: "worker A parks"}}],
+    },
+  )
+  let handle_a = sub_agent_run(
+    "Worker A: park until resumed.",
+    {provider: "mock", background: true, tool_format: "native", max_iterations: 3},
+  )
+  let suspended_a = wait_agent(handle_a)
+  // Stage worker B: park, then complete. Queue B's mocks only after
+  // A has reached suspension so the FIFO is unambiguous.
+  llm_mock(
+    {
+      tool_calls: [{id: "park_b", name: "agent_await_resumption", arguments: {reason: "worker B parks"}}],
+    },
+  )
+  let handle_b = sub_agent_run(
+    "Worker B: park until resumed.",
+    {provider: "mock", background: true, tool_format: "native", max_iterations: 3},
+  )
+  let suspended_b = wait_agent(handle_b)
+  println("a_suspended=" + suspended_a.status)
+  println("b_suspended=" + suspended_b.status)
+  println("distinct_ids=" + to_string(suspended_a.id != suspended_b.id))
+  println("distinct_snapshots=" + to_string(suspended_a.snapshot_path != suspended_b.snapshot_path))
+  // Resume A first. B must remain suspended.
+  llm_mock({text: "worker A completed"})
+  let _resumed_a = resume_agent(handle_a)
+  let done_a = wait_agent(handle_a)
+  let still_b = wait_agent(handle_b)
+  println("a_after_resume=" + done_a.status)
+  println("b_still_suspended=" + still_b.status)
+  // Resume B independently.
+  llm_mock({text: "worker B completed"})
+  let _resumed_b = resume_agent(handle_b)
+  let done_b = wait_agent(handle_b)
+  println("b_after_resume=" + done_b.status)
+  println("a_unchanged=" + done_a.status)
+}

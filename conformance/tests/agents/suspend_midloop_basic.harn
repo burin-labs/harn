@@ -1,0 +1,51 @@
+/**
+ * S-11 (#1847): parent-initiated pause/resume crosses the worker
+ * registry and the snapshot persistence layer cleanly.
+ *
+ * The parent spawns a background subagent that self-parks at turn 1.
+ * The parent then drives the documented `subagent_pause` / `subagent_resume`
+ * lifecycle tool handlers against the suspended handle to confirm:
+ *   - `subagent_pause` on an already-suspended worker is idempotent and
+ *     returns the suspended summary (no rejection, no re-emit).
+ *   - `subagent_resume` resumes the worker with parent-initiator audit
+ *     and drives it to completion.
+ *   - Transcript continuity is preserved across the resume because
+ *     `continue_transcript` defaults to true (the resume-continuity
+ *     reminder is consumed on the next turn, not re-applied).
+ */
+import { agent_lifecycle_tools } from "std/agent/workers"
+
+pipeline main() {
+  llm_mock_clear()
+  llm_mock(
+    {
+      tool_calls: [{id: "park_1", name: "agent_await_resumption", arguments: {reason: "park for parent"}}],
+      input_tokens: 7,
+      output_tokens: 3,
+    },
+  )
+  llm_mock({text: "child finished after parent resume"})
+  let handle = sub_agent_run(
+    "Park until parent resumes.",
+    {provider: "mock", background: true, tool_format: "native", max_iterations: 4},
+  )
+  let suspended = wait_agent(handle)
+  let lifecycle = agent_lifecycle_tools(tool_registry(), {subagents: true})
+  let pause_tool = tool_find(lifecycle, "subagent_pause")
+  let resume_tool = tool_find(lifecycle, "subagent_resume")
+  // Idempotent re-pause: already-suspended worker returns same summary.
+  let pause_again = pause_tool.handler({handle: handle.id, reason: "parent re-pauses"})
+  // Parent-driven resume drives the child to completion.
+  let resumed = resume_tool.handler({handle: handle.id})
+  let done = wait_agent(handle)
+  println("suspended_status=" + suspended.status)
+  println("pause_again_status=" + pause_again.status)
+  println("resume_status=" + resumed.status)
+  println("final_status=" + done.status)
+  println("has_transcript=" + to_string(done.has_transcript))
+  // The resume-continuity reminder is single-shot: after the resumed
+  // turn it has been delivered and no longer rides on the transcript.
+  let continuity = transcript_events_by_kind(done.transcript, "system_reminder")
+    .filter({ event -> event.reminder.dedupe_key == "resume_continuity" })
+  println("continuity_left=" + to_string(len(continuity)))
+}

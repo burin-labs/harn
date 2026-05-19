@@ -1,0 +1,6 @@
+pre_race_status=suspended
+first_resume_status=running
+post_first_status=completed
+second_resume_failed=true
+second_err_has_sus_code=true
+second_err_mentions_not_suspended=true

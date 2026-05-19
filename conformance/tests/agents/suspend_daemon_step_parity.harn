@@ -1,0 +1,53 @@
+/**
+ * S-11 (#1847): the daemon-loop suspend path (S-07) produces the
+ * same persisted snapshot shape that the agent_loop suspend path
+ * does. The pre-refactor baseline emitted `{daemon_state, total_iterations,
+ * transcript_summary?}` fields on the daemon snapshot. This fixture
+ * pins the field set so any future divergence between
+ * `agent_daemon_snapshot` (the snapshot writer) and the agent_loop's
+ * own snapshot writer fails conformance.
+ *
+ * The test runs `agent_loop` in daemon mode for two iterations with
+ * an `auto_compact` callback that injects a deterministic summary,
+ * then asserts the snapshot fields directly.
+ */
+pipeline main() {
+  llm_mock_clear()
+  let unique = to_string(to_int(timestamp())) + "-" + to_string(random_int(100000, 999999))
+  let dir = path_join(temp_dir(), "harn-daemon-parity-" + unique)
+  mkdir(dir)
+  let snapshot_path = path_join(dir, "daemon.json")
+  let result = agent_loop(
+    "Poll for background work",
+    "You are helpful",
+    {
+      provider: "mock",
+      daemon: true,
+      max_iterations: 2,
+      wake_interval_ms: 1,
+      persist_path: snapshot_path,
+      consolidate_on_idle: true,
+      auto_compact: true,
+      compact_threshold: 1,
+      compact_keep_last: 1,
+      compact_strategy: "custom",
+      compact_callback: { archived -> {summary: "daemon parity summary " + to_string(len(archived))} },
+    },
+  )
+  let saved = json_parse(read_file(snapshot_path))
+  // Loop-level shape parity (matches the existing daemon test).
+  println("loop_status=" + result.status)
+  println("loop_daemon_state=" + result.daemon_state)
+  println("loop_snapshot_matches=" + to_string(result.daemon_snapshot_path == snapshot_path))
+  // Snapshot-level field-set parity: each of these fields must be
+  // populated by the post-S-07 writer the same way the pre-refactor
+  // writer populated them. Any add/remove/rename trips this fixture.
+  println("snap_daemon_state=" + saved.daemon_state)
+  println("snap_has_iterations=" + to_string(saved.total_iterations >= 1))
+  println(
+    "snap_summary_seeded="
+      + to_string(contains(saved.transcript_summary ?? "", "daemon parity summary")),
+  )
+  println("snap_has_summary_field=" + to_string(saved.transcript_summary != nil))
+  delete_file(dir)
+}

@@ -1,0 +1,5 @@
+pre_close_status=suspended
+post_close_status=cancelled
+resume_failed=true
+resume_err_has_code=true
+reclose_status=cancelled

@@ -55,6 +55,25 @@ condensed series summaries instead of full per-patch history.
   `mock_time(...)` / `advance_time(...)` / `flush_trigger_aggregations()`
   pattern — no wall-clock sleeps. Brings the `cargo run --bin harn --
   test conformance --filter channel` count from 23 to 28.
+- **Suspend/resume conformance gap-fill (S-11, #1847).** Adds seven
+  paired `.harn` / `.expected` fixtures under
+  `conformance/tests/agents/` covering the spec table from #1847 that
+  was not already exercised by existing fixtures:
+  `suspend_midloop_basic` (parent-driven `subagent_pause` /
+  `subagent_resume` against a self-parked child),
+  `suspend_nested` (two simultaneously-suspended workers resumed
+  independently), `suspend_timeout_resume_with_summary` and
+  `suspend_timeout_fail` (auto-resume timeout firing under
+  `mock_time` + `advance_time`, exercising both `on_timeout` actions),
+  `suspend_continue_transcript_false` (agent-loop level transcript
+  reset on resume), `suspend_close_while_suspended` (close + resume
+  rejects with HARN-SUS-010), `suspend_double_resume_race`
+  (serialised double-resume rejects with HARN-SUS-003 — the pure-Harn
+  observable surface of the HARN-SUS-006 race that Rust unit tests
+  cover concurrently), and `suspend_daemon_step_parity` (post-S-07
+  daemon snapshot field-set). All fixtures are deterministic — no
+  wall-clock sleeps; the timeout path uses the unified mock clock
+  through `clock::sleep`.
 - **Pool tasks wired into `harness.unsettled_state()` (#2007).** Closes
   the PL-07 follow-up from #2008: `UnsettledStateSnapshot` now carries a
   `pool_pending_tasks` bucket fed by a new
