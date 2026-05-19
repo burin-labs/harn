@@ -10,6 +10,14 @@ condensed series summaries instead of full per-patch history.
 
 ### Added
 
+- **Lifecycle span links for suspend/resume and drain scaffolding (#1858).**
+  VM tracing now has `suspension`, `resume`, `drain`, and
+  `drain_decision` span kinds plus causal span links. Worker suspension
+  snapshots persist `prior_span_link` plus the closed pipeline span link
+  so cold resumes can link the fresh resume span to closed lifecycle spans
+  instead of parenting across process boundaries. The OTel helper layer
+  now exposes `set_span_link` beside `set_span_parent`, with no-op
+  behavior in non-OTel builds.
 - **Sub-agent reminder propagation via handoff envelopes (#1824).**
   Handoff artifacts and sub-agent requests now carry
   `reminder_propagation` beside `policy_override`; `handoff(...)` derives

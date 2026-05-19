@@ -682,6 +682,7 @@ pub fn tool_fixture_hash(tool_name: &str, args: &serde_json::Value) -> String {
 #[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(default)]
 pub struct RunTraceSpanRecord {
+    pub trace_id: String,
     pub span_id: u64,
     pub parent_id: Option<u64>,
     pub kind: String,
@@ -689,6 +690,7 @@ pub struct RunTraceSpanRecord {
     pub start_ms: u64,
     pub duration_ms: u64,
     pub metadata: BTreeMap<String, serde_json::Value>,
+    pub links: Vec<crate::tracing::SpanLink>,
 }
 
 #[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq, Eq)]

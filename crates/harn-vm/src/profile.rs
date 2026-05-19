@@ -355,6 +355,7 @@ mod tests {
 
     fn span(span_id: u64, parent_id: Option<u64>, kind: SpanKind, name: &str, dur: u64) -> Span {
         Span {
+            trace_id: "trace_test".to_string(),
             span_id,
             parent_id,
             kind,
@@ -362,6 +363,7 @@ mod tests {
             start_ms: 0,
             duration_ms: dur,
             metadata: BTreeMap::new(),
+            links: Vec::new(),
         }
     }
 
