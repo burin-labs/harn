@@ -26,7 +26,11 @@ import sys
 from typing import Any, Iterator, List
 
 CHAIN_SCHEMA = "opentrustgraph-chain/v0"
-RECORD_SCHEMA = "opentrustgraph/v0"
+# v0.1 is the current record discriminator. v0 is accepted for one patch
+# release window (see CONFORMANCE.md §5).
+RECORD_SCHEMA_V0_1 = "opentrustgraph/v0.1"
+RECORD_SCHEMA_V0 = "opentrustgraph/v0"
+RECORD_SCHEMAS = {RECORD_SCHEMA_V0_1, RECORD_SCHEMA_V0}
 
 
 def _canonicalize(value: Any) -> Any:
@@ -74,10 +78,14 @@ def verify_chain(envelope: dict[str, Any]) -> List[str]:
             f"chain.total mismatch: declared {declared_total!r}, found {len(records)}"
         )
 
+    # `by_id` lets us check v0.1 effect-inheritance invariants for
+    # records that carry `parent_record_id`. Older v0 chains skip this
+    # block because no record carries the new metadata key.
+    by_id: dict[str, dict[str, Any]] = {}
     previous_hash: str | None = None
     for index, record in enumerate(records):
         label = f"record {index}"
-        if record.get("schema") != RECORD_SCHEMA:
+        if record.get("schema") not in RECORD_SCHEMAS:
             errors.append(f"{label}: unsupported record schema {record.get('schema')!r}")
         expected_index = index + 1
         if record.get("chain_index") != expected_index:
@@ -107,6 +115,35 @@ def verify_chain(envelope: dict[str, Any]) -> List[str]:
                 errors.append(f"{label}: approval required but approver is empty")
             if not signatures:
                 errors.append(f"{label}: approval required but signatures are empty")
+
+        # v0.1: when a record claims `effects_used` and points at a
+        # parent record via `parent_record_id`, the used set MUST be a
+        # subset of the parent's `effects_grant`. See CONFORMANCE.md §5.1.
+        metadata = record.get("metadata") or {}
+        parent_id = metadata.get("parent_record_id")
+        effects_used = metadata.get("effects_used") or []
+        if parent_id and effects_used:
+            parent_record = by_id.get(parent_id)
+            if parent_record is None:
+                errors.append(
+                    f"{label}: parent_record_id {parent_id!r} not found in chain"
+                )
+            else:
+                parent_grant = (parent_record.get("metadata") or {}).get(
+                    "effects_grant"
+                ) or []
+                canonical_parent_grant = [_canonicalize(e) for e in parent_grant]
+                for effect in effects_used:
+                    if _canonicalize(effect) not in canonical_parent_grant:
+                        errors.append(
+                            f"{label}: effects_used escaped grant from parent "
+                            f"{parent_id!r}: {effect!r}"
+                        )
+
+        record_id = record.get("record_id")
+        if isinstance(record_id, str) and record_id:
+            by_id[record_id] = record
+
         previous_hash = record.get("entry_hash")
 
     declared_root = chain.get("root_hash")

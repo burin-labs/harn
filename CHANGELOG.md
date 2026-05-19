@@ -10,6 +10,39 @@ condensed series summaries instead of full per-patch history.
 
 ### Added
 
+- **OpenTrustGraph schema v0.1 (#1778).** Bumps the trust-record schema
+  discriminator from `opentrustgraph/v0` to `opentrustgraph/v0.1` and
+  reserves three additional keys under `TrustRecord.metadata`:
+  `effects_grant` (typed `EffectRecord` list extended by the parent),
+  `effects_used` (typed `EffectRecord` list the action actually
+  exercised), and `parent_record_id` (pointer at the parent record's
+  `record_id`). Verifiers can now prove that a child agent's
+  `effects_used ⊆ parent.effects_grant`, closing the receipt-chain
+  inclusion proof flagged in E5.5. Backwards compatible at the record
+  layer: `TrustRecord` deserialization still accepts the older
+  `opentrustgraph/v0` discriminator for one patch release window per
+  the new [`opentrustgraph-spec/CONFORMANCE.md` §5.1][otg-v0-1] before
+  v0 is retired. The chain hash inputs and chain-export envelope
+  (`opentrustgraph-chain/v0`) are unchanged because metadata was
+  already hash-covered. Ships the new `v0.1` JSON Schema at
+  `opentrustgraph-spec/schemas/trust-record.v0.1.schema.json`, a new
+  3-agent fixture
+  `opentrustgraph-spec/fixtures/valid/effect-inheritance-chain.json`
+  demonstrating the inheritance invariant end-to-end, and extends the
+  pure-Python reference verifier (`examples/python/verify_chain.py`) to
+  enforce the subset check. New helpers on `TrustRecord`
+  (`with_effects_grant`, `with_effects_used`, `with_parent_record_id`,
+  plus matching getters and setters) keep callers from poking at the
+  reserved metadata keys by hand. Exposes new public constants
+  (`OPENTRUSTGRAPH_SCHEMA_V0_1`, `OPENTRUSTGRAPH_ACCEPTED_SCHEMAS`,
+  `METADATA_KEY_EFFECTS_GRANT`, `METADATA_KEY_EFFECTS_USED`,
+  `METADATA_KEY_PARENT_RECORD_ID`) and the matching re-exports from
+  `harn_vm`. The harn-cloud receipt-store replatform is tracked
+  separately (paired ticket under epic #1773); both versions are
+  accepted on ingest until then.
+
+  [otg-v0-1]: https://github.com/burin-labs/harn/blob/main/opentrustgraph-spec/CONFORMANCE.md#51-v01-reserved-metadata-keys-1778
+
 - **Suspend/resume docs (S-13, #1849).** Adds the user-facing
   reference for the agent suspend/resume primitive (epic #1836). New
   mdBook page `docs/src/agent-lifecycle.md` covers the lifecycle

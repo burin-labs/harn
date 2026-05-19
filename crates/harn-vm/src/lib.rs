@@ -285,10 +285,11 @@ pub use trust_graph::{
     summarize_trust_records, topic_for_agent, trust_score_for, verify_trust_chain, AutonomyTier,
     TrustAgentSummary, TrustChainExport, TrustChainExportMetadata, TrustChainExportProducer,
     TrustChainReport, TrustGraphRecord, TrustOutcome, TrustQueryFilters, TrustRecord,
-    TrustRecordActionKind, TrustScore, TrustTraceGroup, OPENTRUSTGRAPH_CHAIN_SCHEMA_V0,
-    OPENTRUSTGRAPH_SCHEMA_V0, TRUST_ACTION_RELEASE, TRUST_GRAPH_GLOBAL_TOPIC,
-    TRUST_GRAPH_LEGACY_GLOBAL_TOPIC, TRUST_GRAPH_LEGACY_TOPIC_PREFIX, TRUST_GRAPH_RECORDS_TOPIC,
-    TRUST_GRAPH_TOPIC_PREFIX,
+    TrustRecordActionKind, TrustScore, TrustTraceGroup, METADATA_KEY_EFFECTS_GRANT,
+    METADATA_KEY_EFFECTS_USED, METADATA_KEY_PARENT_RECORD_ID, OPENTRUSTGRAPH_ACCEPTED_SCHEMAS,
+    OPENTRUSTGRAPH_CHAIN_SCHEMA_V0, OPENTRUSTGRAPH_SCHEMA_V0, OPENTRUSTGRAPH_SCHEMA_V0_1,
+    TRUST_ACTION_RELEASE, TRUST_GRAPH_GLOBAL_TOPIC, TRUST_GRAPH_LEGACY_GLOBAL_TOPIC,
+    TRUST_GRAPH_LEGACY_TOPIC_PREFIX, TRUST_GRAPH_RECORDS_TOPIC, TRUST_GRAPH_TOPIC_PREFIX,
 };
 pub use value::*;
 pub use vm::*;

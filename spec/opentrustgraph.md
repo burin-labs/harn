@@ -1,4 +1,4 @@
-# OpenTrustGraph v0
+# OpenTrustGraph v0.1
 
 `OpenTrustGraph` is a portable event schema for recording autonomy and approval
 decisions around agent dispatch. Harn emits these records onto `trust_graph`
@@ -12,12 +12,22 @@ workflow engines can adopt the same stream shape.
 Version markers:
 
 ```json
-{"schema":"opentrustgraph/v0"}
+{"schema":"opentrustgraph/v0.1"}
 ```
 
 ```json
 {"schema":"opentrustgraph-chain/v0"}
 ```
+
+`v0.1` is an additive bump over `v0`. It reserves three new keys under
+`TrustRecord.metadata` — `effects_grant`, `effects_used`, and
+`parent_record_id` — so chain validators can prove that a child agent's
+`effects_used ⊆ parent.effects_grant`. The chain hash inputs are
+unchanged because metadata was already hash-covered. `v0` records still
+parse for one patch release window per
+[`opentrustgraph-spec/CONFORMANCE.md` §5](../opentrustgraph-spec/CONFORMANCE.md#5-versioning),
+then are dropped. The chain export envelope (`opentrustgraph-chain/v0`)
+is unchanged.
 
 ## TrustRecord
 
@@ -47,7 +57,10 @@ Each dispatch or control-plane autonomy change appends one `TrustRecord`.
 
 Fields:
 
-- `schema`: schema/version discriminator. Current value: `opentrustgraph/v0`.
+- `schema`: schema/version discriminator. Current value:
+  `opentrustgraph/v0.1`. Older `opentrustgraph/v0` records still validate
+  for one patch release window per
+  [`opentrustgraph-spec/CONFORMANCE.md` §5](../opentrustgraph-spec/CONFORMANCE.md#5-versioning).
 - `record_id`: globally unique record identifier. UUIDv7 is recommended.
 - `agent`: logical agent identifier, handler id, or runtime-owned agent name.
 - `action`: action class being evaluated, such as `issue.label`,
@@ -62,7 +75,18 @@ Fields:
 - `previous_hash`: prior record's `entry_hash`, or `null` for the first record.
 - `entry_hash`: SHA-256 hash over the canonical record with `entry_hash`
   removed. Harn stores it with the `sha256:` prefix.
-- `metadata`: extensible runtime-specific detail bag.
+- `metadata`: extensible runtime-specific detail bag. `v0.1` reserves
+  three keys at this layer:
+  - `effects_grant`: typed `EffectRecord` list (`kind`, `scope`, optional
+    `resource`) the parent extended to this record.
+  - `effects_used`: typed `EffectRecord` list the action actually
+    exercised. Verifiers MUST check `effects_used ⊆ effects_grant` (taken
+    from the parent record referenced via `parent_record_id`).
+  - `parent_record_id`: pointer at the parent record's `record_id`
+    (`null`/absent for root records). The release-record flow keeps the
+    separate `parent_trust_record_id` key for the
+    [`harn release`](release.md) lineage; `parent_record_id` is the
+    generic spawn-lineage pointer.
 
 Outcome enum:
 
@@ -130,7 +154,12 @@ Fields:
 JSON is canonical. The normative wire-format files live in the public
 artifact directory:
 
+- [`opentrustgraph-spec/schemas/trust-record.v0.1.schema.json`](../opentrustgraph-spec/schemas/trust-record.v0.1.schema.json)
+  — current record schema (`v0.1`). Accepts both `opentrustgraph/v0.1`
+  and `opentrustgraph/v0` discriminators for one patch release window.
 - [`opentrustgraph-spec/schemas/trust-record.v0.schema.json`](../opentrustgraph-spec/schemas/trust-record.v0.schema.json)
+  — previous record schema (`v0`); retained for one patch release
+  window so consumers can validate legacy records.
 - [`opentrustgraph-spec/schemas/trust-chain.v0.schema.json`](../opentrustgraph-spec/schemas/trust-chain.v0.schema.json)
 - [`opentrustgraph-spec/schemas/trust-record.v0.proto`](../opentrustgraph-spec/schemas/trust-record.v0.proto)
   — Protocol Buffers mirror for runtimes that prefer a binary stream
