@@ -1,0 +1,56 @@
+import { agent_reminder_providers_fire } from "std/agent/state"
+
+pipeline main() {
+  let session = agent_session_open("reminder-provider-resume-continuity")
+  agent_session_reset(session)
+  let payload = {
+    session: {id: session},
+    worker: {id: "worker-1"},
+    suspension: {reason: "waiting on review", suspended_at_turn: 2},
+    resume: {
+      initiator: "operator",
+      input_rendered: "approved",
+      input_present: true,
+      continue_transcript: false,
+      digest: "Prior digest",
+    },
+    reason: "waiting on review",
+    suspended_at_turn: 2,
+    input_rendered: "approved",
+    input_present: true,
+    continue_transcript: false,
+    digest: "Prior digest",
+    turn: 0,
+  }
+  let first = agent_reminder_providers_fire(session, "worker_resumed", payload, {})
+  let second = agent_reminder_providers_fire(
+    session,
+    "worker_resumed",
+    payload
+      + {input_rendered: "approved again", resume: payload.resume + {input_rendered: "approved again"}},
+    {},
+  )
+  let reminders = transcript_events_by_kind(agent_session_snapshot(session), "system_reminder")
+  let disabled_session = agent_session_open("reminder-provider-resume-continuity-disabled")
+  agent_session_reset(disabled_session)
+  let disabled = agent_reminder_providers_fire(
+    disabled_session,
+    "worker_resumed",
+    payload + {session: {id: disabled_session}, session_id: disabled_session},
+    {reminders: {providers: ["-resume_continuity"]}},
+  )
+  println(first.fired_count)
+  println(second.reports[0].deduped_count)
+  println(len(reminders))
+  println(reminders[0].reminder.tags[0])
+  println(reminders[0].reminder.dedupe_key)
+  println(reminders[0].reminder.ttl_turns)
+  println(reminders[0].reminder.preserve_on_compact)
+  println(reminders[0].reminder.propagate)
+  println(reminders[0].reminder.source)
+  println(contains(reminders[0].reminder.body, "You were suspended at turn 2"))
+  println(contains(reminders[0].reminder.body, "You have been resumed by the operator"))
+  println(contains(reminders[0].reminder.body, "The resumer provided input: approved again"))
+  println(contains(reminders[0].reminder.body, "Pre-suspend conversation digest: Prior digest"))
+  println(disabled.fired_count)
+}

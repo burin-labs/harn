@@ -256,6 +256,7 @@ but does not evaluate providers.
 | `idle_nudge` | `session_idle` | `idle_seconds` or `seconds` | Fires when daemon idle wake interval reaches the threshold, defaulting to 60 seconds. Uses tag `idle`, dedupe key `idle_nudge`, `ttl_turns: 1`, and `propagate: "none"`. |
 | `tool_output_truncated` | `post_tool_use` | none | Fires when tool output was truncated or compacted before the model saw it. Uses tag `truncation`, dedupe key `tool_output_truncated:<tool_name>`, `ttl_turns: 1`, and `propagate: "none"`. |
 | `post_compact_recap` | `post_compact` | none | Fires after compaction archives messages. Uses tag `recap`, dedupe key `post_compact_recap`, `ttl_turns: 2`, and `propagate: "session"`. |
+| `resume_continuity` | `worker_resumed` | none | Fires before the first resumed `agent_loop` turn. Uses tag and dedupe key `resume_continuity`, `ttl_turns: 1`, `preserve_on_compact: true`, and `propagate: "none"`; includes suspension reason, resume cause, optional resume input, and a pre-suspend digest for `continue_transcript: false`. |
 
 Disable every provider with `reminders: false` or
 `reminders: {enabled: false}`. Disable selected providers by prefixing the

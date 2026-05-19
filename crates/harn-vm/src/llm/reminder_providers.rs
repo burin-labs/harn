@@ -16,11 +16,13 @@ const TOKEN_PRESSURE_ID: &str = "token_pressure";
 const IDLE_NUDGE_ID: &str = "idle_nudge";
 const TOOL_OUTPUT_TRUNCATED_ID: &str = "tool_output_truncated";
 const POST_COMPACT_RECAP_ID: &str = "post_compact_recap";
+const RESUME_CONTINUITY_ID: &str = "resume_continuity";
 
 const TOKEN_PRESSURE_EVENTS: &[HookEvent] = &[HookEvent::OnBudgetThreshold];
 const IDLE_NUDGE_EVENTS: &[HookEvent] = &[HookEvent::SessionIdle];
 const TOOL_OUTPUT_TRUNCATED_EVENTS: &[HookEvent] = &[HookEvent::PostToolUse];
 const POST_COMPACT_RECAP_EVENTS: &[HookEvent] = &[HookEvent::PostCompact];
+const RESUME_CONTINUITY_EVENTS: &[HookEvent] = &[HookEvent::WorkerResumed];
 
 /// Context passed to reminder providers.
 #[derive(Clone, Debug)]
@@ -53,6 +55,7 @@ struct TokenPressureProvider;
 struct IdleNudgeProvider;
 struct ToolOutputTruncatedProvider;
 struct PostCompactRecapProvider;
+struct ResumeContinuityProvider;
 
 impl ReminderProvider for TokenPressureProvider {
     fn id(&self) -> &'static str {
@@ -208,6 +211,60 @@ impl ReminderProvider for PostCompactRecapProvider {
     }
 }
 
+impl ReminderProvider for ResumeContinuityProvider {
+    fn id(&self) -> &'static str {
+        RESUME_CONTINUITY_ID
+    }
+
+    fn subscribes_to(&self) -> &'static [HookEvent] {
+        RESUME_CONTINUITY_EVENTS
+    }
+
+    fn evaluate(&self, ctx: &ProviderContext) -> Option<ReminderSpec> {
+        let reason = json_path_str(&ctx.payload, &["suspension", "reason"])
+            .or_else(|| json_str(&ctx.payload, "reason"))
+            .map(clean_inline_text)
+            .filter(|value| !value.is_empty())
+            .unwrap_or_else(|| "unspecified".to_string());
+        let suspended_at_turn = json_i64(&ctx.payload, "suspended_at_turn")
+            .or_else(|| json_path_i64(&ctx.payload, &["suspension", "suspended_at_turn"]))
+            .unwrap_or(0);
+        let input_presentation = if json_bool(&ctx.payload, "input_present").unwrap_or(false) {
+            let input = json_str(&ctx.payload, "input_rendered")
+                .or_else(|| json_path_str(&ctx.payload, &["resume", "input_rendered"]))
+                .map(clean_inline_text)
+                .filter(|value| !value.is_empty())
+                .unwrap_or_else(|| "<unrenderable input>".to_string());
+            format!("The resumer provided input: {input}")
+        } else {
+            "No input was provided".to_string()
+        };
+        let mut body = format!(
+            "You were suspended at turn {suspended_at_turn} for reason: '{reason}'. {}. {input_presentation}.",
+            resume_cause(ctx),
+        );
+        if !json_bool(&ctx.payload, "continue_transcript").unwrap_or(true) {
+            if let Some(digest) = json_str(&ctx.payload, "digest")
+                .or_else(|| json_path_str(&ctx.payload, &["resume", "digest"]))
+                .map(clean_inline_text)
+                .filter(|value| !value.is_empty())
+            {
+                body.push_str(" Pre-suspend conversation digest: ");
+                body.push_str(&digest);
+            }
+        }
+
+        let mut reminder = provider_reminder(body, RESUME_CONTINUITY_ID, ctx);
+        reminder.tags = vec![RESUME_CONTINUITY_ID.to_string()];
+        reminder.dedupe_key = Some(RESUME_CONTINUITY_ID.to_string());
+        reminder.ttl_turns = Some(1);
+        reminder.preserve_on_compact = true;
+        reminder.propagate = ReminderPropagate::None;
+        reminder.role_hint = ReminderRoleHint::System;
+        Some(reminder)
+    }
+}
+
 pub fn parse_provider_event(name: &str) -> Result<HookEvent, String> {
     match name.trim() {
         "PostToolUse" | "post_tool_use" => Ok(HookEvent::PostToolUse),
@@ -298,12 +355,13 @@ pub async fn evaluate_and_inject(
     }))
 }
 
-fn canonical_providers() -> [&'static dyn ReminderProvider; 4] {
+fn canonical_providers() -> [&'static dyn ReminderProvider; 5] {
     [
         &TokenPressureProvider,
         &IdleNudgeProvider,
         &ToolOutputTruncatedProvider,
         &PostCompactRecapProvider,
+        &ResumeContinuityProvider,
     ]
 }
 
@@ -370,12 +428,13 @@ fn enabled_provider_ids(
     enabled
 }
 
-fn canonical_provider_ids() -> [&'static str; 4] {
+fn canonical_provider_ids() -> [&'static str; 5] {
     [
         TOKEN_PRESSURE_ID,
         IDLE_NUDGE_ID,
         TOOL_OUTPUT_TRUNCATED_ID,
         POST_COMPACT_RECAP_ID,
+        RESUME_CONTINUITY_ID,
     ]
 }
 
@@ -482,6 +541,32 @@ fn model_context_window(ctx: &ProviderContext) -> Option<i64> {
         })
 }
 
+fn resume_cause(ctx: &ProviderContext) -> String {
+    let initiator = json_path_str(&ctx.payload, &["resume", "initiator"])
+        .or_else(|| json_str(&ctx.payload, "initiator"))
+        .unwrap_or_else(|| "operator".to_string());
+    match initiator.as_str() {
+        "parent" => "You have been resumed by your parent agent".to_string(),
+        "timeout" => "Your timeout elapsed; resuming with summary".to_string(),
+        "triggered" | "trigger" => {
+            let trigger_id = json_path_str(&ctx.payload, &["resume", "trigger", "id"])
+                .or_else(|| json_path_str(&ctx.payload, &["trigger", "id"]))
+                .or_else(|| json_str(&ctx.payload, "trigger_id"))
+                .unwrap_or_else(|| "unknown".to_string());
+            let event_id = json_path_str(&ctx.payload, &["resume", "trigger", "event_id"])
+                .or_else(|| json_path_str(&ctx.payload, &["trigger", "event_id"]))
+                .or_else(|| json_str(&ctx.payload, "event_id"))
+                .unwrap_or_else(|| "unknown".to_string());
+            format!("You have been resumed by trigger {trigger_id} matching event {event_id}")
+        }
+        _ => "You have been resumed by the operator".to_string(),
+    }
+}
+
+fn clean_inline_text(value: String) -> String {
+    value.split_whitespace().collect::<Vec<_>>().join(" ")
+}
+
 fn provider_config_i64(ctx: &ProviderContext, provider_id: &str, keys: &[&str]) -> Option<i64> {
     let config = provider_config_json(ctx, provider_id)?;
     for key in keys {
@@ -506,6 +591,36 @@ fn provider_config_json<'a>(ctx: &'a ProviderContext, provider_id: &str) -> Opti
 
 fn json_i64(value: &JsonValue, key: &str) -> Option<i64> {
     value.get(key).and_then(|value| {
+        value
+            .as_i64()
+            .or_else(|| value.as_u64().and_then(|value| i64::try_from(value).ok()))
+            .or_else(|| value.as_f64().map(|value| value as i64))
+    })
+}
+
+fn json_path<'a>(value: &'a JsonValue, path: &[&str]) -> Option<&'a JsonValue> {
+    let mut current = value;
+    for key in path {
+        current = current.get(*key)?;
+    }
+    Some(current)
+}
+
+fn json_str(value: &JsonValue, key: &str) -> Option<String> {
+    value
+        .get(key)
+        .and_then(JsonValue::as_str)
+        .map(str::to_string)
+}
+
+fn json_path_str(value: &JsonValue, path: &[&str]) -> Option<String> {
+    json_path(value, path)
+        .and_then(JsonValue::as_str)
+        .map(str::to_string)
+}
+
+fn json_path_i64(value: &JsonValue, path: &[&str]) -> Option<i64> {
+    json_path(value, path).and_then(|value| {
         value
             .as_i64()
             .or_else(|| value.as_u64().and_then(|value| i64::try_from(value).ok()))

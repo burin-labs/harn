@@ -41,6 +41,13 @@ condensed series summaries instead of full per-patch history.
   instead of parenting across process boundaries. The OTel helper layer
   now exposes `set_span_link` beside `set_span_parent`, with no-op
   behavior in non-OTel builds.
+- **Resume-continuity system reminder provider (#1845).**
+  `agent_loop(...)` now fires the canonical `resume_continuity` provider
+  before the first turn after `resume_agent(...)`. The one-shot reminder
+  identifies the suspension turn and reason, resume cause, optional
+  resumer input, and the pre-suspend digest when resuming with
+  `continue_transcript: false`; it is dedupe-keyed, non-propagating, and
+  honors the standard reminder provider opt-out list.
 
 ## v0.8.26
 

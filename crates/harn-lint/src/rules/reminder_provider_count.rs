@@ -16,6 +16,7 @@ const CANONICAL_PROVIDERS: &[&str] = &[
     "idle_nudge",
     "tool_output_truncated",
     "post_compact_recap",
+    "resume_continuity",
 ];
 
 pub(crate) fn check_reminder_provider_count(

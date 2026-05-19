@@ -14,6 +14,7 @@ import { agent_skills_match } from "std/agent/skills"
 import {
   agent_emit_event,
   agent_record_native_tool_fallback,
+  agent_reminder_providers_fire,
   agent_session_drain_bridge_injections,
   agent_session_drain_feedback,
   agent_session_finalize,
@@ -34,6 +35,7 @@ import {
   list_agents,
   suspend_agent,
 } from "std/agent/workers"
+import { omit } from "std/json"
 import { llm_call_options } from "std/llm/options"
 
 fn __default_invoke_llm(message, turn_system, llm_opts) {
@@ -1531,6 +1533,26 @@ fn __agent_loop_drain_bridge_step(session_id) {
   return immediate_count + finish_step_count
 }
 
+fn __agent_loop_fire_resume_continuity(session, opts) {
+  let payload = opts?._resume_continuity
+  if type_of(payload) != "dict" {
+    return opts
+  }
+  let _ = agent_reminder_providers_fire(
+    session.session_id,
+    "worker_resumed",
+    payload
+      + {
+      session_id: session.session_id,
+      session: {id: session.session_id},
+      turn: payload?.turn ?? 0,
+      iteration: payload?.iteration ?? 0,
+    },
+    opts,
+  )
+  return omit(opts, ["_resume_continuity"])
+}
+
 @complexity(allow)
 fn __agent_loop_run(message, session, initial_opts) {
   var opts = initial_opts
@@ -1944,5 +1966,6 @@ pub fn agent_loop(message, system_prompt = nil, options = nil) {
     } catch (e) {
     }
   }
+  opts = __agent_loop_fire_resume_continuity(session, opts)
   return __agent_loop_run(message, session, opts)
 }

@@ -1,0 +1,54 @@
+import "std/agents"
+
+fn resume_tools() {
+  var tools = tool_registry()
+  tools = tool_define(
+    tools,
+    "noop",
+    "Return a short observation.",
+    {handler: { _args -> "ok" }, parameters: {}, returns: {type: "string"}},
+  )
+  return tools
+}
+
+pipeline main() {
+  llm_mock_clear()
+  llm_mock(
+    {
+      tool_calls: [{id: "park_1", name: "agent_await_resumption", arguments: {reason: "waiting on review"}}],
+      input_tokens: 7,
+      output_tokens: 3,
+    },
+  )
+  let session_id = "resume-continuity-" + uuid()
+  let handle = sub_agent_run(
+    "Park until an operator resumes you.",
+    {
+      provider: "mock",
+      background: true,
+      session_id: session_id,
+      tools: resume_tools(),
+      tool_format: "native",
+      max_iterations: 3,
+    },
+  )
+  let suspended = wait_agent(handle)
+  llm_mock({tool_calls: [{id: "noop_1", name: "noop", arguments: {}}]})
+  llm_mock({text: "done"})
+  let resumed = resume_agent(suspended, "operator says go", true)
+  let completed = wait_agent(handle)
+  let calls = llm_mock_calls()
+  let resumed_system = calls[1].system
+  let next_system = calls[2].system
+  let remaining = transcript_events_by_kind(completed.transcript, "system_reminder")
+    .filter({ event -> event.reminder.dedupe_key == "resume_continuity" })
+  println(suspended.status)
+  println(resumed.status)
+  println(completed.status)
+  println(contains(resumed_system, "You were suspended at turn"))
+  println(contains(resumed_system, "waiting on review"))
+  println(contains(resumed_system, "You have been resumed by the operator"))
+  println(contains(resumed_system, "The resumer provided input: operator says go"))
+  println(!contains(next_system, "You were suspended at turn"))
+  println(len(remaining))
+}

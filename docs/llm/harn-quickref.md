@@ -1475,8 +1475,12 @@ println(cleared.removed_count)
 - `tool_output_truncated` on `post_tool_use` when tool output was
   compacted/truncated before the model saw it.
 - `post_compact_recap` on `post_compact` with the latest recap.
-- `idle_nudge` and `tool_output_truncated` use `propagate: "none"`;
-  `post_compact_recap` uses `propagate: "session"`.
+- `resume_continuity` on `worker_resumed`, visible only to the first
+  resumed turn. It names the suspend turn, reason, resume cause, and
+  optional resume input; when `continue_transcript: false`, it also
+  carries the pre-suspend digest.
+- `idle_nudge`, `tool_output_truncated`, and `resume_continuity` use
+  `propagate: "none"`; `post_compact_recap` uses `propagate: "session"`.
 
 Opt out per loop:
 
