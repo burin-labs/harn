@@ -20,6 +20,7 @@ pub(super) fn print_lint_diagnostics(
     let mut has_error = false;
     for diag in diagnostics {
         let severity = match diag.severity {
+            LintSeverity::Info => "info",
             LintSeverity::Warning => "warning",
             LintSeverity::Error => {
                 has_error = true;

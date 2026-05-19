@@ -7,6 +7,8 @@ use std::rc::Rc;
 use regex::Regex;
 use serde::{Deserialize, Serialize};
 
+use harn_parser::diagnostic_codes::Code;
+
 use crate::agent_events::WorkerEvent;
 use crate::llm::helpers::{ReminderPropagate, ReminderRoleHint, ReminderSource, SystemReminder};
 use crate::value::{VmClosure, VmError, VmValue};
@@ -155,6 +157,20 @@ impl HookEvent {
             WorkerEvent::WorkerFailed => Self::WorkerFailed,
             WorkerEvent::WorkerCancelled => Self::WorkerCancelled,
         }
+    }
+
+    pub fn supports_reminder_effects(self) -> bool {
+        !matches!(
+            self,
+            Self::WorkerSpawned
+                | Self::WorkerProgressed
+                | Self::WorkerWaitingForInput
+                | Self::WorkerSuspended
+                | Self::WorkerResumed
+                | Self::WorkerCompleted
+                | Self::WorkerFailed
+                | Self::WorkerCancelled
+        )
     }
 }
 
@@ -692,6 +708,21 @@ fn reminder_error(context: &str, message: impl Into<String>) -> VmError {
     VmError::Runtime(format!("{context}: {}", message.into()))
 }
 
+fn reminder_code_error(context: &str, code: Code, message: impl Into<String>) -> VmError {
+    reminder_error(context, format!("{}: {}", code.as_str(), message.into()))
+}
+
+fn unsupported_reminder_event_error(event: HookEvent, context: &str) -> VmError {
+    reminder_code_error(
+        context,
+        Code::ReminderUnsupportedHookEvent,
+        format!(
+            "{} does not support reminder effects; use a session, tool, step, or persona hook",
+            event.as_str()
+        ),
+    )
+}
+
 fn required_reminder_spec_string(
     options: &BTreeMap<String, VmValue>,
     key: &str,
@@ -809,8 +840,9 @@ fn optional_reminder_spec_propagate(
             "all" => Ok(ReminderPropagate::All),
             "session" => Ok(ReminderPropagate::Session),
             "none" => Ok(ReminderPropagate::None),
-            _ => Err(reminder_error(
+            _ => Err(reminder_code_error(
                 context,
+                Code::ReminderUnknownPropagate,
                 "`propagate` must be one of all, session, or none",
             )),
         })
@@ -857,8 +889,9 @@ fn parse_reminder_spec(value: &VmValue, context: &str) -> Result<ReminderSpec, V
         .map(String::as_str)
         .collect::<Vec<_>>();
     if !unknown.is_empty() {
-        return Err(reminder_error(
+        return Err(reminder_code_error(
             context,
+            Code::ReminderUnknownOption,
             format!("unknown reminder option(s): {}", unknown.join(", ")),
         ));
     }
@@ -897,6 +930,9 @@ fn parse_hook_effect_item(event: HookEvent, value: &VmValue) -> Result<HookEffec
     let context = format!("{} hook reminder", event.as_str());
     if let Some(map) = value.as_dict() {
         if let Some(reminder) = map.get("reminder") {
+            if !event.supports_reminder_effects() {
+                return Err(unsupported_reminder_event_error(event, &context));
+            }
             return Ok(HookEffect::Reminder(parse_reminder_spec(
                 reminder, &context,
             )?));
@@ -908,6 +944,9 @@ fn parse_hook_effect_item(event: HookEvent, value: &VmValue) -> Result<HookEffec
                 .as_deref(),
             Some("reminder" | "Reminder")
         ) {
+            if !event.supports_reminder_effects() {
+                return Err(unsupported_reminder_event_error(event, &context));
+            }
             let spec = map
                 .get("spec")
                 .or_else(|| map.get("reminder"))
@@ -915,6 +954,9 @@ fn parse_hook_effect_item(event: HookEvent, value: &VmValue) -> Result<HookEffec
             return Ok(HookEffect::Reminder(parse_reminder_spec(spec, &context)?));
         }
         if looks_like_reminder_spec(map) {
+            if !event.supports_reminder_effects() {
+                return Err(unsupported_reminder_event_error(event, &context));
+            }
             return Ok(HookEffect::Reminder(parse_reminder_spec(value, &context)?));
         }
     }
@@ -948,11 +990,17 @@ pub fn parse_hook_effects(event: HookEvent, value: &VmValue) -> Result<Vec<HookE
     }
     if let Some(reminder) = map.get("reminder") {
         let context = format!("{} hook reminder", event.as_str());
+        if !event.supports_reminder_effects() {
+            return Err(unsupported_reminder_event_error(event, &context));
+        }
         effects.push(HookEffect::Reminder(parse_reminder_spec(
             reminder, &context,
         )?));
     } else if effects.is_empty() && looks_like_reminder_spec(map) {
         let context = format!("{} hook reminder", event.as_str());
+        if !event.supports_reminder_effects() {
+            return Err(unsupported_reminder_event_error(event, &context));
+        }
         effects.push(HookEffect::Reminder(parse_reminder_spec(value, &context)?));
     }
     Ok(effects)
@@ -1495,4 +1543,68 @@ fn matching_vm_lifecycle_registrations(
             })
             .collect()
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn vm_string(value: &str) -> VmValue {
+        VmValue::String(Rc::from(value))
+    }
+
+    fn dict(entries: Vec<(&str, VmValue)>) -> VmValue {
+        VmValue::Dict(Rc::new(
+            entries
+                .into_iter()
+                .map(|(key, value)| (key.to_string(), value))
+                .collect(),
+        ))
+    }
+
+    fn error_message(result: Result<Vec<HookEffect>, VmError>) -> String {
+        match result.expect_err("expected hook reminder parse error") {
+            VmError::Runtime(message) => message,
+            other => panic!("expected runtime error, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn unknown_reminder_option_reports_code() {
+        let value = dict(vec![(
+            "reminder",
+            dict(vec![
+                ("body", vm_string("remember this")),
+                ("typo_key", VmValue::Bool(true)),
+            ]),
+        )]);
+        let message = error_message(parse_hook_effects(HookEvent::PostTurn, &value));
+        assert!(message.contains(Code::ReminderUnknownOption.as_str()));
+        assert!(message.contains("typo_key"), "{message}");
+    }
+
+    #[test]
+    fn unknown_reminder_propagate_reports_specific_code() {
+        let value = dict(vec![(
+            "reminder",
+            dict(vec![
+                ("body", vm_string("remember this")),
+                ("propagate", vm_string("workspace")),
+            ]),
+        )]);
+        let message = error_message(parse_hook_effects(HookEvent::PostTurn, &value));
+        assert!(message.contains(Code::ReminderUnknownPropagate.as_str()));
+        assert!(message.contains("propagate"), "{message}");
+    }
+
+    #[test]
+    fn worker_events_reject_reminder_effects_with_specific_code() {
+        let value = dict(vec![(
+            "reminder",
+            dict(vec![("body", vm_string("worker lifecycle"))]),
+        )]);
+        let message = error_message(parse_hook_effects(HookEvent::WorkerSpawned, &value));
+        assert!(message.contains(Code::ReminderUnsupportedHookEvent.as_str()));
+        assert!(message.contains("WorkerSpawned"), "{message}");
+    }
 }

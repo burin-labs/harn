@@ -35,6 +35,7 @@ impl LintDiagnostic {
 /// Severity level for lint diagnostics.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum LintSeverity {
+    Info,
     Warning,
     Error,
 }

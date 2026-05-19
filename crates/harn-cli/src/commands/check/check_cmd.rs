@@ -311,6 +311,7 @@ fn type_severity_label(severity: DiagnosticSeverity) -> &'static str {
 
 fn lint_severity_label(severity: LintSeverity) -> &'static str {
     match severity {
+        LintSeverity::Info => "info",
         LintSeverity::Error => "error",
         LintSeverity::Warning => "warning",
     }

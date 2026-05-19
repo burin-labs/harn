@@ -301,6 +301,14 @@ fn session_remind_shape_error(message: impl AsRef<str>) -> String {
     )
 }
 
+fn reminder_unknown_propagate_error(message: impl AsRef<str>) -> String {
+    format!(
+        "{}: {}",
+        Code::ReminderUnknownPropagate.as_str(),
+        message.as_ref()
+    )
+}
+
 fn string_field(
     map: &serde_json::Map<String, serde_json::Value>,
     key: &str,
@@ -459,7 +467,7 @@ fn session_remind_payload_from_value(
         Some("session") => crate::llm::helpers::ReminderPropagate::Session,
         Some("none") => crate::llm::helpers::ReminderPropagate::None,
         Some(_) => {
-            return Err(session_remind_shape_error(
+            return Err(reminder_unknown_propagate_error(
                 "`propagate` must be one of all, session, or none",
             ))
         }
@@ -1600,6 +1608,17 @@ mod tests {
         .expect_err("session/remind must reject unknown top-level fields");
         assert!(err.contains(Code::ReminderUnknownOption.as_str()));
         assert!(err.contains("unknown_host_field"));
+    }
+
+    #[test]
+    fn session_remind_validation_rejects_unknown_propagate_with_specific_code() {
+        let err = queued_session_remind_from_params(&serde_json::json!({
+            "body": "valid body",
+            "propagate": "workspace",
+        }))
+        .expect_err("session/remind must reject unknown propagate values");
+        assert!(err.contains(Code::ReminderUnknownPropagate.as_str()));
+        assert!(err.contains("propagate"));
     }
 
     #[test]
