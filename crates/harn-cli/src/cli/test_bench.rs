@@ -179,8 +179,9 @@ pub(crate) struct TestBenchFidelityArgs {
     /// it under testbench replay before computing fidelity.
     #[arg(long = "against", value_name = "PATH")]
     pub against: Option<String>,
-    /// `byte-identical` (default), `semantic`, or `outcome`. See
-    /// `docs/src/dev/tape-format.md` for the per-mode semantics.
+    /// `byte-identical` (default), `semantic`, `outcome`, or
+    /// `phase-aware`. See `docs/src/dev/tape-format.md` for the
+    /// per-mode semantics.
     #[arg(long = "mode", default_value = "byte-identical", value_name = "MODE")]
     pub mode: String,
     /// Write the structured fidelity report (JSON) to this path.

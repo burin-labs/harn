@@ -3,9 +3,10 @@
 //! A tape is the canonical artifact behind `harn test-bench --emit-tape`.
 //! Every non-deterministic input the script consumed — clock advances,
 //! LLM responses, FS reads/writes, subprocess spawns — lands as a typed
-//! [`TapeRecord`] with a logical sequence number and a virtual-time
-//! stamp. The tape is what the [`fidelity`] oracle compares; it is what
-//! `harn test-bench replay` reads to drive a deterministic re-run.
+//! [`TapeRecord`] with a logical sequence number, execution phase, and a
+//! virtual-time stamp. The tape is what the [`fidelity`] oracle compares;
+//! it is what `harn test-bench replay` reads to drive a deterministic
+//! re-run.
 //!
 //! [`fidelity`]: super::fidelity
 //!
@@ -42,7 +43,7 @@
 use std::cell::RefCell;
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::atomic::{AtomicU64, AtomicU8, Ordering};
 use std::sync::{Arc, Mutex};
 
 use serde::{Deserialize, Serialize};
@@ -116,6 +117,11 @@ enum TapeLine {
 pub struct TapeRecord {
     /// Monotonic logical sequence number assigned at record time.
     pub seq: u64,
+    /// Execution phase that produced the record. The fidelity oracle
+    /// uses this to keep script-visible boundaries strict while letting
+    /// runtime finalization evolve without regenerating user fixtures.
+    #[serde(default)]
+    pub phase: TapePhase,
     /// Wall-clock value (UNIX-epoch ms) observed at record time. Reads
     /// from the unified mock clock when one is installed.
     pub virtual_time_ms: i64,
@@ -125,6 +131,41 @@ pub struct TapeRecord {
     pub monotonic_ms: i64,
     /// The actual event.
     pub kind: TapeRecordKind,
+}
+
+/// Coarse execution phase for host-boundary tape records.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum TapePhase {
+    /// Records produced while evaluating the user-authored script body.
+    #[default]
+    UserScript,
+    /// Records produced while the runtime drains finish/resume/finalizer
+    /// lifecycle work after the script body has yielded its result.
+    RuntimeFinalize,
+}
+
+impl TapePhase {
+    fn as_u8(self) -> u8 {
+        match self {
+            Self::UserScript => 0,
+            Self::RuntimeFinalize => 1,
+        }
+    }
+
+    fn from_u8(value: u8) -> Self {
+        match value {
+            1 => Self::RuntimeFinalize,
+            _ => Self::UserScript,
+        }
+    }
+
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::UserScript => "user_script",
+            Self::RuntimeFinalize => "runtime_finalize",
+        }
+    }
 }
 
 /// Discriminated union of every record kind the v1 tape captures. New
@@ -469,6 +510,7 @@ fn visit_payloads(kind: &TapeRecordKind, mut visit: impl FnMut(&TapePayload)) {
 #[derive(Debug)]
 pub struct TapeRecorder {
     next_seq: AtomicU64,
+    phase: AtomicU8,
     started_at: clock_mock::ClockInstant,
     inner: Mutex<RecorderInner>,
 }
@@ -489,6 +531,7 @@ impl TapeRecorder {
     pub fn new() -> Self {
         Self {
             next_seq: AtomicU64::new(0),
+            phase: AtomicU8::new(TapePhase::UserScript.as_u8()),
             started_at: clock_mock::instant_now(),
             inner: Mutex::new(RecorderInner::default()),
         }
@@ -505,6 +548,7 @@ impl TapeRecorder {
             .min(i64::MAX as u128) as i64;
         let record = TapeRecord {
             seq,
+            phase: TapePhase::from_u8(self.phase.load(Ordering::SeqCst)),
             virtual_time_ms,
             monotonic_ms,
             kind,
@@ -514,6 +558,10 @@ impl TapeRecorder {
             .expect("tape recorder mutex poisoned")
             .records
             .push(record);
+    }
+
+    fn swap_phase(&self, phase: TapePhase) -> TapePhase {
+        TapePhase::from_u8(self.phase.swap(phase.as_u8(), Ordering::SeqCst))
     }
 
     /// Convenience wrapper: build a [`TapePayload`] from `bytes` (spilling
@@ -569,6 +617,27 @@ pub fn active_recorder() -> Option<Arc<TapeRecorder>> {
     ACTIVE_RECORDER.with(|slot| slot.borrow().clone())
 }
 
+/// RAII guard that temporarily changes the phase stamped onto records
+/// from the active recorder.
+pub struct TapePhaseGuard {
+    recorder: Arc<TapeRecorder>,
+    previous: TapePhase,
+}
+
+impl Drop for TapePhaseGuard {
+    fn drop(&mut self) {
+        self.recorder.swap_phase(self.previous);
+    }
+}
+
+/// Enter `phase` for subsequent records emitted by the active recorder.
+/// Returns `None` when tape recording is off.
+pub fn enter_phase(phase: TapePhase) -> Option<TapePhaseGuard> {
+    let recorder = active_recorder()?;
+    let previous = recorder.swap_phase(phase);
+    Some(TapePhaseGuard { recorder, previous })
+}
+
 /// Push a record if a recorder is active. The closure is only evaluated
 /// when recording is on, so the per-axis hooks pay nothing in production.
 pub fn with_active_recorder<F>(build: F)
@@ -591,6 +660,7 @@ mod tests {
     fn small_record(seq: u64, dur: u64) -> TapeRecord {
         TapeRecord {
             seq,
+            phase: TapePhase::UserScript,
             virtual_time_ms: seq as i64 * 1000,
             monotonic_ms: seq as i64 * 1000,
             kind: TapeRecordKind::ClockSleep { duration_ms: dur },
@@ -621,6 +691,34 @@ mod tests {
     }
 
     #[test]
+    fn recorder_phase_guard_stamps_and_restores() {
+        let recorder = Arc::new(TapeRecorder::new());
+        let _recorder_guard = install_recorder(Arc::clone(&recorder));
+
+        with_active_recorder(|_| Some(TapeRecordKind::ClockSleep { duration_ms: 1 }));
+        {
+            let _phase_guard = enter_phase(TapePhase::RuntimeFinalize).unwrap();
+            with_active_recorder(|_| Some(TapeRecordKind::ClockSleep { duration_ms: 2 }));
+        }
+        with_active_recorder(|_| Some(TapeRecordKind::ClockSleep { duration_ms: 3 }));
+
+        let tape = recorder.snapshot(TapeHeader::current(None, None, Vec::new()));
+        let phases = tape
+            .records
+            .iter()
+            .map(|record| record.phase)
+            .collect::<Vec<_>>();
+        assert_eq!(
+            phases,
+            vec![
+                TapePhase::UserScript,
+                TapePhase::RuntimeFinalize,
+                TapePhase::UserScript
+            ]
+        );
+    }
+
+    #[test]
     fn large_payloads_spill_to_cas_and_round_trip() {
         let temp = TempDir::new().unwrap();
         let path = temp.path().join("run.tape");
@@ -639,6 +737,7 @@ mod tests {
         };
         tape.records.push(TapeRecord {
             seq: 0,
+            phase: TapePhase::UserScript,
             virtual_time_ms: 0,
             monotonic_ms: 0,
             kind,

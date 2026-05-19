@@ -531,7 +531,7 @@ async fn execute_conformance_source(
             use harn_vm::testbench::tape::EventTape;
             match (EventTape::load(tape_path), EventTape::load(expected_path)) {
                 (Ok(actual), Ok(expected)) => {
-                    let report = compare(&expected, &actual, FidelityMode::ByteIdentical);
+                    let report = compare(&expected, &actual, FidelityMode::PhaseAware);
                     if !report.is_byte_identical() {
                         sidecar_errors.push(format!(
                             "tape fidelity: {} divergence(s) vs {}",

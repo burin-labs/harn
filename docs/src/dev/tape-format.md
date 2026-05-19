@@ -42,6 +42,7 @@ run.tape.cas/      # content-addressed sidecar (BLAKE3 hex names)
   {
     "type": "record",
     "seq": 0,
+    "phase": "user_script",
     "virtual_time_ms": 1700000000000,
     "monotonic_ms": 0,
     "kind": "clock_sleep",
@@ -72,6 +73,9 @@ fidelity checkers still produce a structured report.
 Every record carries the wrapping fields:
 
 - `seq` — monotonic logical sequence number (assigned at record time).
+- `phase` — `user_script` for records produced by the script body, or
+  `runtime_finalize` for records produced while the runtime drains
+  finish/resume/finalizer lifecycle work.
 - `virtual_time_ms` — UNIX-epoch ms observed via the unified mock clock.
 - `monotonic_ms` — ms since the testbench session activated.
 
@@ -122,7 +126,7 @@ below.
 
 ## Fidelity oracle
 
-`harn test-bench fidelity` compares two tapes under one of three modes:
+`harn test-bench fidelity` compares two tapes under one of four modes:
 
 - **`byte-identical`** (default, strictest). Every record matches by
   position, kind, content hash, and timing. The mode CI uses to gate
@@ -134,6 +138,11 @@ below.
   observable result: the final FS write set, the exit status of the
   last subprocess, and the count of LLM calls. Useful for stochastic
   LLM runs where intermediate token streams legitimately diverge.
+- **`phase-aware`**. Compares `user_script` records byte-identically and
+  `runtime_finalize` records semantically. Runtime-finalize clock reads
+  are ignored so internal lifecycle observability can grow without
+  regenerating user-script fidelity fixtures; runtime finalization
+  file/process/LLM effects still participate in the semantic diff.
 
 The CLI emits a structured JSON report (a [`FidelityReport`][report])
 listing every diverging record with a stable category tag. CI pipelines

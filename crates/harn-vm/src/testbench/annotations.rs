@@ -749,7 +749,7 @@ pub fn annotation_to_friction_event(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::testbench::tape::{TapeHeader, TapeRecord, TapeRecordKind};
+    use crate::testbench::tape::{TapeHeader, TapePhase, TapeRecord, TapeRecordKind};
     use tempfile::TempDir;
 
     fn sample_tape() -> EventTape {
@@ -761,6 +761,7 @@ mod tests {
         for seq in 0..3 {
             tape.records.push(TapeRecord {
                 seq,
+                phase: TapePhase::UserScript,
                 virtual_time_ms: 0,
                 monotonic_ms: 0,
                 kind: TapeRecordKind::ClockSleep { duration_ms: 1 },

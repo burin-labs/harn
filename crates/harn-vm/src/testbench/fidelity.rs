@@ -25,12 +25,18 @@
 //!   status of the last subprocess, and the count of LLM calls. Useful
 //!   for stochastic LLM runs where intermediate token streams legitimately
 //!   diverge between record and replay.
+//!
+//! - **`PhaseAware`**. Compares `UserScript` records byte-identically and
+//!   `RuntimeFinalize` records semantically, while ignoring
+//!   runtime-finalize clock reads. This keeps user-script replay fixtures
+//!   strict without making internal lifecycle observability changes
+//!   regenerate every golden tape.
 
 use std::collections::BTreeMap;
 
 use serde::{Deserialize, Serialize};
 
-use super::tape::{EventTape, TapeRecord, TapeRecordKind};
+use super::tape::{EventTape, TapePhase, TapeRecord, TapeRecordKind};
 
 /// Strictness of the comparison. The CLI surface picks one.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -39,6 +45,7 @@ pub enum FidelityMode {
     ByteIdentical,
     Semantic,
     Outcome,
+    PhaseAware,
 }
 
 impl FidelityMode {
@@ -47,8 +54,11 @@ impl FidelityMode {
             "byte" | "byte-identical" | "byte_identical" => Ok(Self::ByteIdentical),
             "semantic" => Ok(Self::Semantic),
             "outcome" => Ok(Self::Outcome),
+            "phase-aware" | "phase_aware" | "byte-user-semantic-runtime" => {
+                Ok(Self::PhaseAware)
+            }
             other => Err(format!(
-                "unknown fidelity mode `{other}` — expected `byte-identical`, `semantic`, or `outcome`"
+                "unknown fidelity mode `{other}` — expected `byte-identical`, `semantic`, `outcome`, or `phase-aware`"
             )),
         }
     }
@@ -79,8 +89,8 @@ impl FidelityReport {
     }
 }
 
-/// Single divergence between two tapes. Records are paired by sequence
-/// number for byte-identical / semantic modes; outcome mode emits one
+/// Single divergence between two tapes. Records are paired by position
+/// for byte-identical / semantic modes; outcome mode emits one
 /// of these per outcome facet that disagreed.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct Divergence {
@@ -101,10 +111,11 @@ pub fn compare(recorded: &EventTape, replay: &EventTape, mode: FidelityMode) -> 
         FidelityMode::ByteIdentical => compare_record_by_record(recorded, replay, true),
         FidelityMode::Semantic => compare_record_by_record(recorded, replay, false),
         FidelityMode::Outcome => compare_outcome(recorded, replay),
+        FidelityMode::PhaseAware => compare_phase_aware(recorded, replay),
     };
     let baseline = recorded.records.len().max(replay.records.len()).max(1);
     let score = match mode {
-        FidelityMode::ByteIdentical | FidelityMode::Semantic => {
+        FidelityMode::ByteIdentical | FidelityMode::Semantic | FidelityMode::PhaseAware => {
             1.0 - (divergences.len() as f32 / baseline as f32).min(1.0)
         }
         FidelityMode::Outcome => {
@@ -124,22 +135,61 @@ pub fn compare(recorded: &EventTape, replay: &EventTape, mode: FidelityMode) -> 
     }
 }
 
+fn compare_phase_aware(recorded: &EventTape, replay: &EventTape) -> Vec<Divergence> {
+    let mut out = Vec::new();
+    out.extend(compare_record_slices(
+        &phase_records(recorded, TapePhase::UserScript, false),
+        &phase_records(replay, TapePhase::UserScript, false),
+        true,
+    ));
+    out.extend(compare_record_slices(
+        &phase_records(recorded, TapePhase::RuntimeFinalize, true),
+        &phase_records(replay, TapePhase::RuntimeFinalize, true),
+        false,
+    ));
+    out
+}
+
+fn phase_records(
+    tape: &EventTape,
+    phase: TapePhase,
+    omit_runtime_clock_reads: bool,
+) -> Vec<TapeRecord> {
+    tape.records
+        .iter()
+        .filter(|record| {
+            record.phase == phase
+                && !(omit_runtime_clock_reads
+                    && matches!(record.kind, TapeRecordKind::ClockRead { .. }))
+        })
+        .cloned()
+        .collect()
+}
+
 fn compare_record_by_record(
     recorded: &EventTape,
     replay: &EventTape,
     byte_strict: bool,
 ) -> Vec<Divergence> {
+    compare_record_slices(&recorded.records, &replay.records, byte_strict)
+}
+
+fn compare_record_slices(
+    recorded: &[TapeRecord],
+    replay: &[TapeRecord],
+    byte_strict: bool,
+) -> Vec<Divergence> {
     let mut out = Vec::new();
-    let max = recorded.records.len().max(replay.records.len());
+    let max = recorded.len().max(replay.len());
     for idx in 0..max {
-        match (recorded.records.get(idx), replay.records.get(idx)) {
+        match (recorded.get(idx), replay.get(idx)) {
             (Some(rec), Some(rep)) => compare_pair(rec, rep, byte_strict, &mut out),
             (Some(rec), None) => out.push(Divergence {
                 seq: Some(rec.seq),
                 category: "missing_in_replay".to_string(),
                 message: format!(
                     "replay tape ended at #{idx}; recorded had {} more record(s)",
-                    recorded.records.len() - idx
+                    recorded.len() - idx
                 ),
             }),
             (None, Some(rep)) => out.push(Divergence {
@@ -173,6 +223,17 @@ fn compare_pair(
             ),
         });
         return;
+    }
+    if byte_strict && recorded.phase != replay.phase {
+        out.push(Divergence {
+            seq: Some(recorded.seq),
+            category: "phase_mismatch".to_string(),
+            message: format!(
+                "record phase diverged: recorded={} replay={}",
+                recorded.phase.label(),
+                replay.phase.label(),
+            ),
+        });
     }
     if byte_strict && recorded.virtual_time_ms != replay.virtual_time_ms {
         out.push(Divergence {
@@ -573,7 +634,7 @@ fn record_kind_tag(kind: &TapeRecordKind) -> &'static str {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::testbench::tape::{TapeHeader, TapePayload, TapeRecord};
+    use crate::testbench::tape::{ClockSource, TapeHeader, TapePayload, TapeRecord};
 
     fn empty_tape() -> EventTape {
         EventTape::new(TapeHeader::current(None, None, Vec::new()))
@@ -582,6 +643,7 @@ mod tests {
     fn record(seq: u64, kind: TapeRecordKind) -> TapeRecord {
         TapeRecord {
             seq,
+            phase: TapePhase::UserScript,
             virtual_time_ms: 0,
             monotonic_ms: 0,
             kind,
@@ -622,6 +684,7 @@ mod tests {
         let mut b = empty_tape();
         let make = |seq: u64, vt: i64| TapeRecord {
             seq,
+            phase: TapePhase::UserScript,
             virtual_time_ms: vt,
             monotonic_ms: vt,
             kind: TapeRecordKind::FileWrite {
@@ -712,6 +775,80 @@ mod tests {
     }
 
     #[test]
+    fn phase_aware_ignores_extra_runtime_finalize_clock_reads() {
+        let mut recorded = empty_tape();
+        let mut replay = empty_tape();
+        recorded
+            .records
+            .push(record(0, TapeRecordKind::ClockSleep { duration_ms: 5 }));
+        replay
+            .records
+            .push(record(0, TapeRecordKind::ClockSleep { duration_ms: 5 }));
+
+        let mut finalize_read = record(
+            1,
+            TapeRecordKind::ClockRead {
+                source: ClockSource::Wall,
+                value_ms: 123,
+            },
+        );
+        finalize_read.phase = TapePhase::RuntimeFinalize;
+        replay.records.push(finalize_read);
+
+        let strict = compare(&recorded, &replay, FidelityMode::ByteIdentical);
+        assert_eq!(strict.divergences[0].category, "missing_in_recorded");
+
+        let phase_aware = compare(&recorded, &replay, FidelityMode::PhaseAware);
+        assert!(
+            phase_aware.is_byte_identical(),
+            "runtime finalize clock reads should not force tape regeneration: {phase_aware:?}"
+        );
+    }
+
+    #[test]
+    fn phase_aware_flags_extra_user_script_clock_reads() {
+        let mut recorded = empty_tape();
+        let mut replay = empty_tape();
+        recorded
+            .records
+            .push(record(0, TapeRecordKind::ClockSleep { duration_ms: 5 }));
+        replay
+            .records
+            .push(record(0, TapeRecordKind::ClockSleep { duration_ms: 5 }));
+        replay.records.push(record(
+            1,
+            TapeRecordKind::ClockRead {
+                source: ClockSource::Wall,
+                value_ms: 123,
+            },
+        ));
+
+        let report = compare(&recorded, &replay, FidelityMode::PhaseAware);
+        assert_eq!(report.divergences.len(), 1);
+        assert_eq!(report.divergences[0].category, "missing_in_recorded");
+    }
+
+    #[test]
+    fn phase_aware_flags_runtime_finalize_effect_drift() {
+        let recorded = empty_tape();
+        let mut replay = empty_tape();
+        let mut replay_write = record(
+            0,
+            TapeRecordKind::FileWrite {
+                path: "/tmp/finalized".to_string(),
+                content_hash: "abc".to_string(),
+                len_bytes: 3,
+            },
+        );
+        replay_write.phase = TapePhase::RuntimeFinalize;
+        replay.records.push(replay_write);
+
+        let report = compare(&recorded, &replay, FidelityMode::PhaseAware);
+        assert_eq!(report.divergences.len(), 1);
+        assert_eq!(report.divergences[0].category, "missing_in_recorded");
+    }
+
+    #[test]
     fn parse_mode_accepts_aliases() {
         assert_eq!(
             FidelityMode::parse("byte").unwrap(),
@@ -728,6 +865,10 @@ mod tests {
         assert_eq!(
             FidelityMode::parse("outcome").unwrap(),
             FidelityMode::Outcome
+        );
+        assert_eq!(
+            FidelityMode::parse("phase-aware").unwrap(),
+            FidelityMode::PhaseAware
         );
         assert!(FidelityMode::parse("nope").is_err());
     }
