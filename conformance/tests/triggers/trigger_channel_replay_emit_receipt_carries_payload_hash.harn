@@ -1,0 +1,34 @@
+import "std/triggers"
+
+/**
+ * CH-07 (#1878): `emit_channel(...)` persists a durable
+ * `channel_emit_receipt` on the `lifecycle.channel.audit` topic carrying
+ * the full payload, a SHA-256 `payload_hash`, the signed `emitted_at`
+ * timestamp, and the resolved scope correlation fields. The receipt is
+ * the cached emit row replay tooling reads to reproduce the chain
+ * (drift in the producer code surfaces as `HARN-REP-CHN-002`).
+ */
+pipeline default() {
+  let audit = event_log.subscribe({topic: "lifecycle.channel.audit"})
+  let _ = emit_channel("ch.replay.input", {repo: "harn", attempt: 1})
+  let entry = audit.next().value
+  println(entry.kind)
+  println(entry.headers.schema)
+  println(entry.payload.name_resolved)
+  println(entry.payload.scope)
+  println(entry.payload.scope_id)
+  println(entry.payload.payload.repo)
+  println(entry.payload.payload.attempt)
+  println(entry.payload.inserted)
+  // Payload hash is a stable canonical-JSON SHA-256 — both runs of the
+  // same producer code must emit the same hash for the same payload.
+  let hash = entry.payload.payload_hash
+  println(starts_with(hash, "sha256:"))
+  println(len(hash) > 10)
+  // Signed timestamp carries the algorithm + key id used by the
+  // replay-oracle verifier; the actual `at_ms` is wall-clock and
+  // intentionally elided from this fixture.
+  println(entry.payload.emitted_at.algorithm)
+  println(entry.payload.emitted_at.key_id)
+  println(starts_with(entry.payload.emitted_at.signature, "sha256:"))
+}

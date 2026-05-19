@@ -1,0 +1,43 @@
+import "std/triggers"
+
+fn handle_channel(event) {
+  return event.provider_payload.name
+}
+
+pipeline default() {
+  let audit = event_log.subscribe({topic: "lifecycle.channel.audit"})
+  let unique = to_string(to_int(timestamp())) + "-" + to_string(random_int(100000, 999999))
+  let _ = trigger_register(
+    {
+      id: "channel-replay-match-" + unique,
+      kind: "channel.emit",
+      provider: "channel",
+      autonomy_tier: "act_auto",
+      handler: handle_channel,
+      when: nil,
+      retry: nil,
+      match: {events: ["channel:ch.replay.match.input"]},
+      events: nil,
+      dedupe_key: nil,
+      filter: nil,
+      budget: nil,
+      manifest_path: nil,
+      package_name: "conformance",
+    },
+  )
+  let _ = emit_channel("ch.replay.match.input", {repo: "harn"})
+  let emit_entry = audit.next().value
+  let match_entry = audit.next().value
+  println(emit_entry.kind)
+  println(match_entry.kind)
+  println(match_entry.headers.schema)
+  println(emit_entry.payload.event_id == match_entry.payload.event_id)
+  println(match_entry.payload.name_resolved)
+  println(match_entry.payload.scope)
+  println(starts_with(match_entry.payload.trigger_id, "channel-replay-match-"))
+  println(match_entry.payload.handler_kind)
+  println(match_entry.payload.handler_result.status)
+  println(match_entry.payload.matched_at.algorithm)
+  println(match_entry.payload.matched_at.key_id)
+  println(starts_with(match_entry.payload.matched_at.signature, "sha256:"))
+}

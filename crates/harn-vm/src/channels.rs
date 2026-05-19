@@ -2,6 +2,7 @@ use std::collections::BTreeMap;
 use std::sync::{Arc, Mutex, OnceLock};
 
 use serde::{Deserialize, Serialize};
+use sha2::{Digest, Sha256};
 use time::format_description::well_known::Rfc3339;
 
 use crate::event_log::{
@@ -27,6 +28,20 @@ const EMITTED_BY_HEADER: &str = "harn.channel.emitted_by";
 pub(crate) const CHANNEL_TRANSCRIPT_TOPIC: &str = "transcript.channel.lifecycle";
 pub(crate) const CHANNEL_EMIT_TRANSCRIPT_KIND: &str = "transcript.channel.emit";
 pub(crate) const CHANNEL_MATCH_TRANSCRIPT_KIND: &str = "transcript.channel.match";
+
+/// CH-07 (#1878): durable audit topic for the replay-determinism receipts
+/// emitted alongside every channel emit + every channel match. Consumers
+/// drive replay/audit tooling off this topic instead of the lossy
+/// `transcript.channel.lifecycle` summary topic — receipts carry the full
+/// payload, signed timestamps, and cached match linkage so the
+/// `replay_oracle` can byte-compare two runs of the same workload.
+pub const CHANNEL_AUDIT_TOPIC: &str = "lifecycle.channel.audit";
+pub(crate) const CHANNEL_EMIT_RECEIPT_KIND: &str = "channel_emit_receipt";
+pub(crate) const CHANNEL_MATCH_RECEIPT_KIND: &str = "channel_match_receipt";
+/// CH-07 (#1878): receipt schema header so downstream tooling can
+/// version-gate parsers (mirrors `harn.pool_submit.v1` from PL-06 / #1891).
+const CHANNEL_EMIT_RECEIPT_SCHEMA: &str = "harn.channel_emit_receipt.v1";
+const CHANNEL_MATCH_RECEIPT_SCHEMA: &str = "harn.channel_match_receipt.v1";
 
 /// CH-06 (#1877): per-event headers stamped on the `TriggerEvent` so the
 /// channel-match dispatcher can link the `ChannelMatch` span back to the
@@ -104,13 +119,13 @@ struct ResolvedChannel {
     retention: &'static str,
 }
 
-#[derive(Clone, Debug, Serialize, Deserialize)]
-struct SignedTimestamp {
-    at_ms: i64,
-    at: String,
-    algorithm: String,
-    key_id: String,
-    signature: String,
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
+pub struct SignedTimestamp {
+    pub at_ms: i64,
+    pub at: String,
+    pub algorithm: String,
+    pub key_id: String,
+    pub signature: String,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -131,6 +146,110 @@ struct StoredChannelEvent {
     retention: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     ttl_ms: Option<i64>,
+}
+
+/// CH-07 (#1878): durable replay-determinism receipt for a single
+/// `emit_channel(...)` call. Pairs 1:1 with the `ChannelEmit` span (CH-06
+/// / #1877) and with the durable journal append. Persisted to the
+/// `lifecycle.channel.audit` event-log topic so the `replay_oracle` can
+/// reproduce the entire emit chain across two runs of the same workload.
+///
+/// `payload_hash` lets the oracle detect producer-side drift
+/// (`HARN-REP-CHN-002`) without having to canonicalize the full payload
+/// during comparison; `payload` carries the verbatim value for byte
+/// equality + replay reconstruction.
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
+pub struct ChannelEmitReceipt {
+    pub event_id: String,
+    pub name_resolved: String,
+    pub scope: String,
+    pub scope_id: String,
+    pub payload_hash: String,
+    pub payload: serde_json::Value,
+    pub emitted_at: SignedTimestamp,
+    pub emitted_by: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub pipeline_id: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub session_id: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub tenant_id: Option<String>,
+    pub topic: String,
+    pub inserted: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub span_id: Option<u64>,
+}
+
+/// CH-07 (#1878): durable replay-determinism receipt for a single channel
+/// match — one per `(binding, event)` pair the dispatcher fires. For
+/// aggregation/batched triggers (CH-04 / #1875) the receipt carries
+/// `batch.constituent_event_ids` so the replay oracle can verify the
+/// full batch composition matches across runs (`HARN-REP-CHN-003`).
+///
+/// `event_id` doubles as the cached-match key: on replay the dispatcher
+/// looks up the recorded match by `event_id` instead of re-evaluating
+/// the filter spec, preserving "the journal IS the spec" determinism.
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
+pub struct ChannelMatchReceipt {
+    pub event_id: String,
+    pub trigger_id: String,
+    pub binding_key: String,
+    pub name_resolved: String,
+    pub scope: String,
+    pub scope_id: String,
+    pub matched_at: SignedTimestamp,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub matched_in_session_id: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub batch: Option<ChannelMatchBatchInfo>,
+    pub handler_kind: String,
+    pub handler_result: ChannelMatchResultSummary,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub span_id: Option<u64>,
+}
+
+/// CH-07 (#1878): batched-dispatch summary stamped onto
+/// `ChannelMatchReceipt`. The `constituent_event_ids` list is the full
+/// recorded composition; replay reconstructs the batch from those ids.
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
+pub struct ChannelMatchBatchInfo {
+    pub count: usize,
+    pub constituent_event_ids: Vec<String>,
+}
+
+/// CH-07 (#1878): summary of the handler invocation outcome. Mirrors the
+/// shape of the dispatcher's `DispatchOutcome` but kept lightweight so
+/// the receipt stays compact and self-contained — replay tooling never
+/// needs to cross-reference the dispatcher log to interpret a match.
+#[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq)]
+pub struct ChannelMatchResultSummary {
+    pub status: String,
+    pub attempt_count: u32,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub error: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub dispatch_failed: Option<bool>,
+}
+
+impl ChannelMatchResultSummary {
+    fn from_dispatch(
+        outcome: &Result<crate::triggers::DispatchOutcome, crate::triggers::DispatchError>,
+    ) -> Self {
+        match outcome {
+            Ok(outcome) => Self {
+                status: outcome.status.as_str().to_string(),
+                attempt_count: outcome.attempt_count,
+                error: outcome.error.clone(),
+                dispatch_failed: None,
+            },
+            Err(error) => Self {
+                status: "dispatch_error".to_string(),
+                attempt_count: 0,
+                error: Some(error.to_string()),
+                dispatch_failed: Some(true),
+            },
+        }
+    }
 }
 
 #[derive(Debug)]
@@ -245,6 +364,11 @@ pub(crate) async fn emit_channel_from_vm(args: Vec<VmValue>) -> Result<VmValue, 
     // CH-06 (#1877): emit the transcript event whether the append was fresh
     // or idempotent — both outcomes are first-class observability signals.
     emit_channel_emit_transcript(&record, &resolved, outcome.inserted, emit_span_id);
+    // CH-07 (#1878): persist the durable emit receipt on the
+    // `lifecycle.channel.audit` topic so the replay oracle has the full
+    // emit chain (payload hash, signed timestamp, scope correlation)
+    // independently of the lossy transcript summary topic.
+    record_channel_emit_receipt(&record, &resolved, outcome.inserted, emit_span_id).await;
     // CH-02 (#1872): fan out the emit to channel-source triggers. Only fresh
     // appends fan out; idempotent duplicates short-circuit because the producer
     // already saw the original delivery.
@@ -629,6 +753,217 @@ fn signing_salt() -> &'static [u8] {
             .into_bytes()
         })
         .as_slice()
+}
+
+/// CH-07 (#1878): signed timestamp for a channel match. Mirrors the emit
+/// timestamp algorithm in `signed_timestamp` so the replay oracle can
+/// verify match timestamps with the same `signing_salt()` key material.
+/// Including `event_id` + `trigger_id` in the signing material binds the
+/// timestamp to this specific (emit, binding) pair so a replayed match
+/// can't be re-stamped onto a different binding.
+fn signed_match_timestamp(
+    resolved: &ResolvedChannel,
+    event_id: &str,
+    trigger_id: &str,
+) -> SignedTimestamp {
+    let at = crate::clock_mock::now_utc();
+    let at_ms = (at.unix_timestamp_nanos() / 1_000_000) as i64;
+    let at_text = at.format(&Rfc3339).unwrap_or_else(|_| at.to_string());
+    let material = format!(
+        "harn.channel.match_timestamp.v1\nat_ms={at_ms}\nevent_id={event_id}\ntrigger_id={trigger_id}\nname={}\nscope={}\nscope_id={}\n",
+        resolved.resolved_name,
+        resolved.scope.as_str(),
+        resolved.scope_id
+    );
+    let signature = hex::encode(crate::connectors::hmac::hmac_sha256(
+        signing_salt(),
+        material.as_bytes(),
+    ));
+    SignedTimestamp {
+        at_ms,
+        at: at_text,
+        algorithm: "hmac-sha256".to_string(),
+        key_id: "local-session".to_string(),
+        signature: format!("sha256:{signature}"),
+    }
+}
+
+/// CH-07 (#1878): SHA-256 of the canonical JSON encoding of a channel
+/// emit payload. `serde_json::to_string` sorts object keys
+/// deterministically when the value originates from `serde_json::Value`
+/// (BTreeMap-backed `Map` with `preserve_order` disabled — the default
+/// for this crate). Used by the replay oracle to detect producer-side
+/// drift (`HARN-REP-CHN-002`).
+pub fn channel_payload_hash(payload: &serde_json::Value) -> String {
+    let canonical = canonical_json_string(payload);
+    let digest = Sha256::digest(canonical.as_bytes());
+    format!("sha256:{}", hex::encode(digest))
+}
+
+/// CH-07 (#1878): canonicalize a JSON value to a deterministic string so
+/// the SHA-256 hash on `ChannelEmitReceipt.payload_hash` is stable
+/// across reruns. Recursively sorts object keys; arrays preserve their
+/// (semantically meaningful) order. Mirrors the canonicalization rule
+/// `replay_oracle::canonicalize_run` relies on for cross-run diffs.
+fn canonical_json_string(value: &serde_json::Value) -> String {
+    match value {
+        serde_json::Value::Object(map) => {
+            let mut sorted: std::collections::BTreeMap<&String, &serde_json::Value> =
+                std::collections::BTreeMap::new();
+            for (key, value) in map {
+                sorted.insert(key, value);
+            }
+            let parts: Vec<String> = sorted
+                .iter()
+                .map(|(key, value)| {
+                    format!(
+                        "{}:{}",
+                        serde_json::to_string(key).unwrap_or_else(|_| key.to_string()),
+                        canonical_json_string(value)
+                    )
+                })
+                .collect();
+            format!("{{{}}}", parts.join(","))
+        }
+        serde_json::Value::Array(items) => {
+            let parts: Vec<String> = items.iter().map(canonical_json_string).collect();
+            format!("[{}]", parts.join(","))
+        }
+        other => serde_json::to_string(other).unwrap_or_else(|_| "null".to_string()),
+    }
+}
+
+/// CH-07 (#1878): append a channel audit receipt to the durable
+/// `lifecycle.channel.audit` topic. Mirrors `emit_pool_*_receipt`
+/// (PL-06 / #1891). The audit log uses `active_event_log()` so receipts
+/// inherit the pipeline's durability (in-memory in tests; durable
+/// SQLite/etc. in production). Best-effort: receipt append errors do not
+/// fail the emit/match — the emit's user-visible receipt is the source
+/// of truth for caller behavior. Audit consumers learn about gaps via
+/// the canonical event-log read API.
+async fn append_channel_audit_event(
+    kind: &'static str,
+    schema: &'static str,
+    payload: serde_json::Value,
+) {
+    let topic = match Topic::new(CHANNEL_AUDIT_TOPIC) {
+        Ok(topic) => topic,
+        Err(_) => return,
+    };
+    let log = active_event_log()
+        .unwrap_or_else(|| install_memory_for_current_thread(CHANNEL_QUEUE_DEPTH));
+    let mut headers = BTreeMap::new();
+    headers.insert("schema".to_string(), schema.to_string());
+    let _ = log
+        .append(&topic, LogEvent::new(kind, payload).with_headers(headers))
+        .await;
+}
+
+/// CH-07 (#1878): build + persist the emit receipt on the audit topic.
+/// Called from `emit_channel_from_vm` immediately after the durable
+/// journal append succeeds (whether the append was fresh or
+/// idempotent-suppressed — both outcomes are first-class audit signals).
+async fn record_channel_emit_receipt(
+    record: &StoredChannelEvent,
+    resolved: &ResolvedChannel,
+    inserted: bool,
+    span_id: u64,
+) {
+    let receipt = ChannelEmitReceipt {
+        event_id: record.id.clone(),
+        name_resolved: resolved.resolved_name.clone(),
+        scope: resolved.scope.as_str().to_string(),
+        scope_id: resolved.scope_id.clone(),
+        payload_hash: channel_payload_hash(&record.payload),
+        payload: record.payload.clone(),
+        emitted_at: record.emitted_at.clone(),
+        emitted_by: record.emitted_by.clone(),
+        pipeline_id: record.pipeline_id.clone(),
+        session_id: record.session_id.clone(),
+        tenant_id: record.tenant_id.clone(),
+        topic: resolved.topic.as_str().to_string(),
+        inserted,
+        span_id: if span_id == 0 { None } else { Some(span_id) },
+    };
+    let payload = match serde_json::to_value(&receipt) {
+        Ok(value) => value,
+        Err(_) => return,
+    };
+    append_channel_audit_event(
+        CHANNEL_EMIT_RECEIPT_KIND,
+        CHANNEL_EMIT_RECEIPT_SCHEMA,
+        payload,
+    )
+    .await;
+}
+
+/// CH-07 (#1878): build + persist the match receipt on the audit topic.
+/// Called from `fire_channel_match` after the dispatcher returns, so
+/// `handler_result` reflects the recorded outcome (succeeded / failed /
+/// dlq / cancelled / ...) and replay tooling can verify the same handler
+/// shape fires on every replay.
+#[allow(clippy::too_many_arguments)]
+async fn record_channel_match_receipt(
+    trigger_id: &str,
+    binding_key: &str,
+    handler_kind: &str,
+    resolved: &ResolvedChannel,
+    event_id: &str,
+    matched_in_session_id: Option<&str>,
+    batch: Option<ChannelMatchBatchInfo>,
+    span_id: u64,
+    dispatch_outcome: &Result<crate::triggers::DispatchOutcome, crate::triggers::DispatchError>,
+) {
+    let receipt = ChannelMatchReceipt {
+        event_id: event_id.to_string(),
+        trigger_id: trigger_id.to_string(),
+        binding_key: binding_key.to_string(),
+        name_resolved: resolved.resolved_name.clone(),
+        scope: resolved.scope.as_str().to_string(),
+        scope_id: resolved.scope_id.clone(),
+        matched_at: signed_match_timestamp(resolved, event_id, trigger_id),
+        matched_in_session_id: matched_in_session_id.map(|s| s.to_string()),
+        batch,
+        handler_kind: handler_kind.to_string(),
+        handler_result: ChannelMatchResultSummary::from_dispatch(dispatch_outcome),
+        span_id: if span_id == 0 { None } else { Some(span_id) },
+    };
+    let payload = match serde_json::to_value(&receipt) {
+        Ok(value) => value,
+        Err(_) => return,
+    };
+    append_channel_audit_event(
+        CHANNEL_MATCH_RECEIPT_KIND,
+        CHANNEL_MATCH_RECEIPT_SCHEMA,
+        payload,
+    )
+    .await;
+}
+
+/// CH-07 (#1878): extract `ChannelMatchBatchInfo` from the transcript
+/// `batch_summary` JSON the dispatcher already builds for batched
+/// triggers. Returns `None` for non-batched dispatch.
+fn batch_info_from_summary(
+    batch_summary: Option<&serde_json::Value>,
+) -> Option<ChannelMatchBatchInfo> {
+    let summary = batch_summary?.as_object()?;
+    let count = summary
+        .get("count")
+        .and_then(|v| v.as_u64())
+        .map(|n| n as usize)?;
+    let constituent_event_ids = summary
+        .get("constituent_event_ids")
+        .and_then(|v| v.as_array())
+        .map(|arr| {
+            arr.iter()
+                .filter_map(|v| v.as_str().map(|s| s.to_string()))
+                .collect()
+        })
+        .unwrap_or_default();
+    Some(ChannelMatchBatchInfo {
+        count,
+        constituent_event_ids,
+    })
 }
 
 fn emitted_by(context: &ChannelContext) -> String {
@@ -1348,7 +1683,16 @@ async fn fire_channel_match(
 ) {
     let trigger_id = binding.id.as_str().to_string();
     let handler_kind = binding.handler.kind().to_string();
-    let event_id = event.id.0.clone();
+    // CH-07 (#1878): use the channel emit's id (carried as the trigger
+    // event's `dedupe_key`) so the match receipt links back to the
+    // original `ChannelEmitReceipt.event_id`. `TriggerEvent::new` mints
+    // a fresh `trigger_evt_*` id for its own `event.id` field that does
+    // not correlate to the emit chain.
+    let event_id = if event.dedupe_key.is_empty() {
+        event.id.0.clone()
+    } else {
+        event.dedupe_key.clone()
+    };
     let mut match_span = ChannelSpanGuard::start_detached(
         crate::tracing::SpanKind::ChannelMatch,
         format!("channel.match {}", resolved.resolved_name),
@@ -1373,12 +1717,33 @@ async fn fire_channel_match(
         matched_at_ms,
         matched_in_session_id.as_deref(),
         span_id,
-        batch_summary,
+        batch_summary.clone(),
     );
-    let _ = dispatcher
-        .dispatch(&binding, event)
-        .await
-        .map_err(|error| VmError::Runtime(format!("emit_channel dispatch: {error}")));
+    // CH-07 (#1878): capture the dispatch outcome BEFORE writing the
+    // match receipt so the receipt records the recorded handler result
+    // (succeeded/failed/dlq/...) — replay tooling treats the receipt as
+    // the cached match: on replay the dispatcher looks up the receipt
+    // by `event_id` instead of re-evaluating the filter spec.
+    let dispatch_outcome = dispatcher.dispatch(&binding, event).await;
+    let binding_key = binding.binding_key();
+    let batch_info = batch_info_from_summary(batch_summary.as_ref());
+    record_channel_match_receipt(
+        &trigger_id,
+        &binding_key,
+        &handler_kind,
+        resolved,
+        &event_id,
+        matched_in_session_id.as_deref(),
+        batch_info,
+        span_id,
+        &dispatch_outcome,
+    )
+    .await;
+    // Pre-CH-07 the dispatch error was discarded with `let _ = ...`. The
+    // CH-07 match receipt now records the failure with
+    // `dispatch_failed: true` so audit consumers don't lose the signal —
+    // we keep the same fire-and-forget callsite semantics here.
+    drop(dispatch_outcome);
     match_span.end();
 }
 
@@ -1766,5 +2131,36 @@ mod tests {
         assert!(channel_filter_matches("", &payload));
         // Non-dict filter → permissive (back-compat with legacy `filter:` field).
         assert!(channel_filter_matches("just-a-string", &payload));
+    }
+
+    // CH-07 (#1878): `channel_payload_hash` is the byte signal the
+    // replay-oracle's `HARN-REP-CHN-002` diagnostic compares across
+    // runs. The hash MUST be deterministic across object-key iteration
+    // order (so the test in `replay_oracle` and the conformance fixture
+    // both rely on canonical ordering) and MUST change when the payload
+    // changes.
+    #[test]
+    fn channel_payload_hash_is_deterministic_across_key_order() {
+        let a = serde_json::json!({"a": 1, "b": 2, "nested": {"x": 10, "y": 20}});
+        let b = serde_json::json!({"nested": {"y": 20, "x": 10}, "b": 2, "a": 1});
+        assert_eq!(channel_payload_hash(&a), channel_payload_hash(&b));
+    }
+
+    #[test]
+    fn channel_payload_hash_changes_with_value_drift() {
+        let baseline = serde_json::json!({"repo": "harn", "attempt": 1});
+        let drifted = serde_json::json!({"repo": "harn", "attempt": 2});
+        assert_ne!(
+            channel_payload_hash(&baseline),
+            channel_payload_hash(&drifted)
+        );
+    }
+
+    #[test]
+    fn channel_payload_hash_is_sha256_prefixed_hex() {
+        let value = serde_json::json!({"k": "v"});
+        let hash = channel_payload_hash(&value);
+        assert!(hash.starts_with("sha256:"));
+        assert_eq!(hash.len(), "sha256:".len() + 64);
     }
 }

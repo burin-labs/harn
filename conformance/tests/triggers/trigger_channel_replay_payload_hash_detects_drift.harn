@@ -1,0 +1,39 @@
+import "std/triggers"
+
+/**
+ * CH-07 (#1878): the SHA-256 `payload_hash` stamped on every
+ * `channel_emit_receipt` is the byte-level signal the replay-oracle
+ * uses for the `HARN-REP-CHN-002` diagnostic. Two emits of the same
+ * payload must produce identical hashes (so a clean replay stays
+ * deterministic), and any drift in the producer payload — even a
+ * single field flip — must produce a different hash.
+ */
+pipeline default() {
+  let audit = event_log
+    .subscribe({topic: "lifecycle.channel.audit", kind_prefix: "channel_emit_receipt"})
+  // Two emits with identical payloads — `payload_hash` must match
+  // so the replay oracle sees deterministic producer output.
+  let _ = emit_channel("ch.replay.hash.stable", {repo: "harn", attempt: 1})
+  let _ = emit_channel("ch.replay.hash.stable", {repo: "harn", attempt: 1})
+  let first = audit.next().value
+  let second = audit.next().value
+  // Each `emit_channel` mints a fresh `event_id` so the two emits are
+  // distinct rows in the audit log even when their payloads are
+  // identical. The replay oracle relies on `event_id` to anchor cached
+  // matches, but on `payload_hash` to detect drift.
+  println(first.payload.event_id == second.payload.event_id)
+  println(first.payload.payload_hash == second.payload.payload_hash)
+  // Now flip a single field. Hash must change — proving
+  // `HARN-REP-CHN-002` will trip on real producer drift.
+  let _ = emit_channel("ch.replay.hash.drift", {repo: "harn", attempt: 2})
+  let third = audit.next().value
+  println(third.payload.payload_hash == first.payload.payload_hash)
+  // Hashes are deterministic across key-ordering — `{a, b}` and
+  // `{b, a}` produce the same canonical-JSON hash so dict iteration
+  // order can't poison the oracle.
+  let _ = emit_channel("ch.replay.hash.order", {a: 1, b: 2})
+  let _ = emit_channel("ch.replay.hash.order", {b: 2, a: 1})
+  let key_first = audit.next().value
+  let key_second = audit.next().value
+  println(key_first.payload.payload_hash == key_second.payload.payload_hash)
+}

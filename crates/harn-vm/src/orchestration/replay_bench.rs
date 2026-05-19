@@ -17,7 +17,7 @@ pub const OPENCODE_JSONL_ADAPTER_ID: &str = "opencode-jsonl";
 pub const OPENCODE_JSONL_ADAPTER_SCHEMA_VERSION: &str =
     "harn.replay_benchmark.adapter.opencode_jsonl.v1";
 
-const REPLAY_TRACE_SECTIONS: [&str; 10] = [
+const REPLAY_TRACE_SECTIONS: [&str; 11] = [
     "event_log_entries",
     "trigger_firings",
     "llm_interactions",
@@ -28,6 +28,8 @@ const REPLAY_TRACE_SECTIONS: [&str; 10] = [
     "agent_transcript_deltas",
     "final_artifacts",
     "policy_decisions",
+    // CH-07 (#1878): channel emit/match audit receipts.
+    "channel_receipts",
 ];
 
 const TOOL_DRIFT_SECTIONS: [&str; 3] = [
@@ -127,6 +129,9 @@ pub struct ReplayRuntimeCostMetrics {
     pub agent_transcript_deltas: usize,
     pub final_artifacts: usize,
     pub policy_decisions: usize,
+    /// CH-07 (#1878): channel emit/match audit receipts.
+    #[serde(default)]
+    pub channel_receipts: usize,
     pub llm_input_tokens: u64,
     pub llm_output_tokens: u64,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -320,6 +325,7 @@ fn summarize_replay_benchmark(fixtures: &[ReplayBenchmarkFixtureReport]) -> Repl
             acc.agent_transcript_deltas += runtime.agent_transcript_deltas;
             acc.final_artifacts += runtime.final_artifacts;
             acc.policy_decisions += runtime.policy_decisions;
+            acc.channel_receipts += runtime.channel_receipts;
             acc.llm_input_tokens += runtime.llm_input_tokens;
             acc.llm_output_tokens += runtime.llm_output_tokens;
             acc.observed_cost_usd =
@@ -440,6 +446,8 @@ fn counts_by_section(counts: &ReplayTraceRunCounts) -> BTreeMap<&'static str, us
         ("agent_transcript_deltas", counts.agent_transcript_deltas),
         ("final_artifacts", counts.final_artifacts),
         ("policy_decisions", counts.policy_decisions),
+        // CH-07 (#1878).
+        ("channel_receipts", counts.channel_receipts),
     ])
 }
 
@@ -514,6 +522,7 @@ fn runtime_cost_metrics(
         agent_transcript_deltas: first.agent_transcript_deltas + second.agent_transcript_deltas,
         final_artifacts: first.final_artifacts + second.final_artifacts,
         policy_decisions: first.policy_decisions + second.policy_decisions,
+        channel_receipts: first.channel_receipts + second.channel_receipts,
         llm_input_tokens: token_total(first_run, "input_tokens")
             + token_total(second_run, "input_tokens"),
         llm_output_tokens: token_total(first_run, "output_tokens")
@@ -533,6 +542,7 @@ fn trace_material_count(counts: &ReplayTraceRunCounts) -> usize {
         + counts.agent_transcript_deltas
         + counts.final_artifacts
         + counts.policy_decisions
+        + counts.channel_receipts
 }
 
 fn token_total(run: &ReplayTraceRun, token_key: &str) -> u64 {

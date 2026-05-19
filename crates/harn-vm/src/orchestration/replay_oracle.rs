@@ -64,6 +64,13 @@ pub struct ReplayTraceRun {
     pub agent_transcript_deltas: Vec<JsonValue>,
     pub final_artifacts: Vec<JsonValue>,
     pub policy_decisions: Vec<JsonValue>,
+    /// CH-07 (#1878): durable channel emit/match receipts captured from
+    /// the `lifecycle.channel.audit` topic. First-class replay material
+    /// alongside `effect_receipts` so multi-agent channel exchanges
+    /// round-trip byte-identically across two runs of the same
+    /// workload. Each entry is the JSON-encoded
+    /// `ChannelEmitReceipt` / `ChannelMatchReceipt`.
+    pub channel_receipts: Vec<JsonValue>,
 }
 
 impl ReplayTraceRun {
@@ -79,6 +86,7 @@ impl ReplayTraceRun {
             agent_transcript_deltas: self.agent_transcript_deltas.len(),
             final_artifacts: self.final_artifacts.len(),
             policy_decisions: self.policy_decisions.len(),
+            channel_receipts: self.channel_receipts.len(),
         }
     }
 }
@@ -96,6 +104,8 @@ pub struct ReplayTraceRunCounts {
     pub agent_transcript_deltas: usize,
     pub final_artifacts: usize,
     pub policy_decisions: usize,
+    /// CH-07 (#1878).
+    pub channel_receipts: usize,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
@@ -249,6 +259,7 @@ fn trace_material_count(run: &ReplayTraceRun) -> usize {
         + counts.agent_transcript_deltas
         + counts.final_artifacts
         + counts.policy_decisions
+        + counts.channel_receipts
 }
 
 fn apply_allowlist_rule(
@@ -464,6 +475,254 @@ fn divergence(
     }
 }
 
+/// CH-07 (#1878): typed channel replay diagnostic codes. Surfaced by
+/// `diagnose_channel_replay_drift` so audit/compliance tooling can
+/// distinguish "missing match cache" from "producer drift" from
+/// "batch composition drift" without parsing free-form messages.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "code")]
+pub enum ChannelReplayDiagnostic {
+    /// `HARN-REP-CHN-001`: replay encountered a match for an `event_id`
+    /// that isn't in the recorded emit log. Either the replay generated a
+    /// new emit between baseline and replay, or the baseline lost an
+    /// emit receipt mid-flight.
+    #[serde(rename = "HARN-REP-CHN-001")]
+    MatchWithoutEmit {
+        event_id: String,
+        trigger_id: String,
+    },
+    /// `HARN-REP-CHN-002`: the replay's emit `payload_hash` doesn't
+    /// match the recorded hash for the same `event_id`. Producer code
+    /// drifted between runs.
+    #[serde(rename = "HARN-REP-CHN-002")]
+    PayloadHashMismatch {
+        event_id: String,
+        recorded_hash: String,
+        replay_hash: String,
+    },
+    /// `HARN-REP-CHN-003`: the replay's batched-match composition
+    /// (`constituent_event_ids`) doesn't match the recorded batch.
+    /// Aggregation policy or upstream emit ordering drifted.
+    #[serde(rename = "HARN-REP-CHN-003")]
+    BatchCompositionDrift {
+        event_id: String,
+        trigger_id: String,
+        recorded: Vec<String>,
+        replay: Vec<String>,
+    },
+}
+
+impl ChannelReplayDiagnostic {
+    pub fn code(&self) -> &'static str {
+        match self {
+            Self::MatchWithoutEmit { .. } => "HARN-REP-CHN-001",
+            Self::PayloadHashMismatch { .. } => "HARN-REP-CHN-002",
+            Self::BatchCompositionDrift { .. } => "HARN-REP-CHN-003",
+        }
+    }
+
+    pub fn message(&self) -> String {
+        match self {
+            Self::MatchWithoutEmit {
+                event_id,
+                trigger_id,
+            } => format!(
+                "HARN-REP-CHN-001: replay matched event {event_id} for trigger \
+                 {trigger_id} but no corresponding emit receipt was recorded"
+            ),
+            Self::PayloadHashMismatch {
+                event_id,
+                recorded_hash,
+                replay_hash,
+            } => format!(
+                "HARN-REP-CHN-002: emit payload drift for event {event_id} \
+                 (recorded {recorded_hash}, replay {replay_hash})"
+            ),
+            Self::BatchCompositionDrift {
+                event_id,
+                trigger_id,
+                recorded,
+                replay,
+            } => format!(
+                "HARN-REP-CHN-003: batched-match composition drift for trigger {trigger_id} \
+                 anchor event {event_id} (recorded {recorded:?}, replay {replay:?})"
+            ),
+        }
+    }
+}
+
+/// CH-07 (#1878): compare two captured channel-receipt sequences and
+/// return the first replay-determinism violation, if any. Designed to
+/// run after `run_replay_oracle_trace` so the canonical JSON diff catches
+/// structural drift first; this function adds the channel-specific typed
+/// codes (HARN-REP-CHN-001/002/003) that downstream audit tooling
+/// consumes.
+///
+/// Returns `Ok(None)` when the two runs are channel-determinism
+/// equivalent. Returns `Err(ReplayOracleError::Serialization)` only
+/// when a receipt entry can't be parsed.
+pub fn diagnose_channel_replay_drift(
+    recorded_receipts: &[JsonValue],
+    replay_receipts: &[JsonValue],
+) -> Result<Option<ChannelReplayDiagnostic>, ReplayOracleError> {
+    let recorded = ChannelReceiptIndex::from_entries(recorded_receipts)?;
+    let replay = ChannelReceiptIndex::from_entries(replay_receipts)?;
+
+    // HARN-REP-CHN-002: producer drift. Walk each replay emit and check
+    // its hash against the recorded one.
+    for (event_id, replay_hash) in &replay.emit_hashes {
+        if let Some(recorded_hash) = recorded.emit_hashes.get(event_id) {
+            if recorded_hash != replay_hash {
+                return Ok(Some(ChannelReplayDiagnostic::PayloadHashMismatch {
+                    event_id: event_id.clone(),
+                    recorded_hash: recorded_hash.clone(),
+                    replay_hash: replay_hash.clone(),
+                }));
+            }
+        }
+    }
+
+    // HARN-REP-CHN-001: replay matched an event_id that no recorded
+    // emit announced. Indicates either an extra emit on replay or a lost
+    // emit receipt in the baseline.
+    for (event_id, trigger_id) in &replay.match_triggers {
+        if !recorded.emit_hashes.contains_key(event_id) {
+            return Ok(Some(ChannelReplayDiagnostic::MatchWithoutEmit {
+                event_id: event_id.clone(),
+                trigger_id: trigger_id.clone(),
+            }));
+        }
+    }
+
+    // HARN-REP-CHN-003: batched-match composition drift. Compare the
+    // `constituent_event_ids` for matching (event_id, trigger_id) pairs.
+    for ((event_id, trigger_id), recorded_batch) in &recorded.match_batches {
+        if let Some(replay_batch) = replay
+            .match_batches
+            .get(&(event_id.clone(), trigger_id.clone()))
+        {
+            if recorded_batch != replay_batch {
+                return Ok(Some(ChannelReplayDiagnostic::BatchCompositionDrift {
+                    event_id: event_id.clone(),
+                    trigger_id: trigger_id.clone(),
+                    recorded: recorded_batch.clone(),
+                    replay: replay_batch.clone(),
+                }));
+            }
+        }
+    }
+
+    Ok(None)
+}
+
+/// Internal index for `diagnose_channel_replay_drift`. Separates the
+/// emit-hash lookup from the match-trigger / match-batch lookups so each
+/// diagnostic walks the relevant slice only.
+struct ChannelReceiptIndex {
+    /// `event_id` -> `payload_hash` for every emit receipt in the run.
+    emit_hashes: std::collections::BTreeMap<String, String>,
+    /// `event_id` -> first observed `trigger_id` for every match
+    /// receipt. Used by HARN-REP-CHN-001 — we only need to know that
+    /// *some* match fired, not which one.
+    match_triggers: std::collections::BTreeMap<String, String>,
+    /// `(event_id, trigger_id)` -> sorted `constituent_event_ids` for
+    /// every batched-match receipt. Empty list for non-batched matches
+    /// (those don't carry a `batch.constituent_event_ids` array).
+    match_batches: std::collections::BTreeMap<(String, String), Vec<String>>,
+}
+
+impl ChannelReceiptIndex {
+    fn from_entries(entries: &[JsonValue]) -> Result<Self, ReplayOracleError> {
+        let mut emit_hashes = std::collections::BTreeMap::new();
+        let mut match_triggers = std::collections::BTreeMap::new();
+        let mut match_batches = std::collections::BTreeMap::new();
+        for entry in entries {
+            let map = entry.as_object().ok_or_else(|| {
+                ReplayOracleError::Serialization(format!(
+                    "channel receipt entry is not an object: {entry}"
+                ))
+            })?;
+            // Tolerate two shapes: the raw receipt JSON
+            // (`ChannelEmitReceipt`/`ChannelMatchReceipt`), and an
+            // `event_log.subscribe(...)` envelope where the receipt
+            // lives under `payload` and `kind` classifies the variant.
+            let (kind, payload) = if let Some(kind) = map.get("kind").and_then(|v| v.as_str()) {
+                let payload = map.get("payload").cloned().unwrap_or_else(|| entry.clone());
+                (Some(kind.to_string()), payload)
+            } else if map.contains_key("payload_hash") {
+                (Some("channel_emit_receipt".to_string()), entry.clone())
+            } else if map.contains_key("matched_at") {
+                (Some("channel_match_receipt".to_string()), entry.clone())
+            } else {
+                (None, entry.clone())
+            };
+            let Some(kind) = kind else {
+                continue;
+            };
+            let payload_map = payload.as_object();
+            match kind.as_str() {
+                "channel_emit_receipt" => {
+                    let Some(payload_map) = payload_map else {
+                        continue;
+                    };
+                    let event_id = match payload_map.get("event_id").and_then(|v| v.as_str()) {
+                        Some(value) => value.to_string(),
+                        None => continue,
+                    };
+                    let hash = payload_map
+                        .get("payload_hash")
+                        .and_then(|v| v.as_str())
+                        .unwrap_or_default()
+                        .to_string();
+                    emit_hashes.entry(event_id).or_insert(hash);
+                }
+                "channel_match_receipt" => {
+                    let Some(payload_map) = payload_map else {
+                        continue;
+                    };
+                    let event_id = match payload_map.get("event_id").and_then(|v| v.as_str()) {
+                        Some(value) => value.to_string(),
+                        None => continue,
+                    };
+                    let trigger_id = payload_map
+                        .get("trigger_id")
+                        .and_then(|v| v.as_str())
+                        .unwrap_or_default()
+                        .to_string();
+                    match_triggers
+                        .entry(event_id.clone())
+                        .or_insert(trigger_id.clone());
+                    let batch_ids = payload_map
+                        .get("batch")
+                        .and_then(|v| v.as_object())
+                        .and_then(|b| b.get("constituent_event_ids"))
+                        .and_then(|v| v.as_array())
+                        .map(|arr| {
+                            let mut ids: Vec<String> = arr
+                                .iter()
+                                .filter_map(|v| v.as_str().map(|s| s.to_string()))
+                                .collect();
+                            ids.sort();
+                            ids
+                        })
+                        .unwrap_or_default();
+                    if !batch_ids.is_empty() {
+                        match_batches
+                            .entry((event_id, trigger_id))
+                            .or_insert(batch_ids);
+                    }
+                }
+                _ => {}
+            }
+        }
+        Ok(Self {
+            emit_hashes,
+            match_triggers,
+            match_batches,
+        })
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -563,6 +822,119 @@ mod tests {
 
         assert!(report.passed);
         assert!(report.divergence.is_some());
+    }
+
+    fn channel_emit_receipt(event_id: &str, payload_hash: &str) -> JsonValue {
+        json!({
+            "kind": "channel_emit_receipt",
+            "payload": {
+                "event_id": event_id,
+                "payload_hash": payload_hash,
+                "name_resolved": "tenant:default:ch.test",
+                "scope": "tenant",
+                "scope_id": "default",
+                "topic": "channels.tenant.default.ch.test",
+                "inserted": true,
+            },
+        })
+    }
+
+    fn channel_match_receipt(
+        event_id: &str,
+        trigger_id: &str,
+        constituent_ids: Option<Vec<&str>>,
+    ) -> JsonValue {
+        let mut payload = serde_json::Map::new();
+        payload.insert("event_id".to_string(), json!(event_id));
+        payload.insert("trigger_id".to_string(), json!(trigger_id));
+        payload.insert("handler_kind".to_string(), json!("local"));
+        if let Some(ids) = constituent_ids {
+            payload.insert(
+                "batch".to_string(),
+                json!({
+                    "count": ids.len(),
+                    "constituent_event_ids": ids,
+                }),
+            );
+        }
+        json!({
+            "kind": "channel_match_receipt",
+            "payload": JsonValue::Object(payload),
+        })
+    }
+
+    #[test]
+    fn channel_replay_diagnostic_clean_runs_have_no_drift() {
+        let recorded = vec![
+            channel_emit_receipt("evt-1", "sha256:a"),
+            channel_match_receipt("evt-1", "trig-x", None),
+        ];
+        let replay = recorded.clone();
+        let diagnostic = diagnose_channel_replay_drift(&recorded, &replay).unwrap();
+        assert!(diagnostic.is_none(), "{diagnostic:?}");
+    }
+
+    #[test]
+    fn channel_replay_diagnostic_001_match_without_emit() {
+        let recorded = vec![channel_emit_receipt("evt-1", "sha256:a")];
+        // Replay matched a different event id with no emit recorded for it.
+        let replay = vec![
+            channel_emit_receipt("evt-1", "sha256:a"),
+            channel_match_receipt("evt-2", "trig-x", None),
+        ];
+        let diagnostic = diagnose_channel_replay_drift(&recorded, &replay)
+            .unwrap()
+            .expect("drift");
+        assert_eq!(diagnostic.code(), "HARN-REP-CHN-001");
+        assert!(matches!(
+            diagnostic,
+            ChannelReplayDiagnostic::MatchWithoutEmit { ref event_id, .. } if event_id == "evt-2"
+        ));
+    }
+
+    #[test]
+    fn channel_replay_diagnostic_002_payload_hash_drift() {
+        let recorded = vec![channel_emit_receipt("evt-1", "sha256:a")];
+        let replay = vec![channel_emit_receipt("evt-1", "sha256:b")];
+        let diagnostic = diagnose_channel_replay_drift(&recorded, &replay)
+            .unwrap()
+            .expect("drift");
+        assert_eq!(diagnostic.code(), "HARN-REP-CHN-002");
+        let message = diagnostic.message();
+        assert!(message.contains("HARN-REP-CHN-002"));
+        assert!(message.contains("evt-1"));
+    }
+
+    #[test]
+    fn channel_replay_diagnostic_003_batch_composition_drift() {
+        let recorded = vec![
+            channel_emit_receipt("evt-1", "sha256:a"),
+            channel_emit_receipt("evt-2", "sha256:b"),
+            channel_emit_receipt("evt-3", "sha256:c"),
+            channel_match_receipt("evt-1", "trig-x", Some(vec!["evt-1", "evt-2", "evt-3"])),
+        ];
+        let replay = vec![
+            channel_emit_receipt("evt-1", "sha256:a"),
+            channel_emit_receipt("evt-2", "sha256:b"),
+            channel_emit_receipt("evt-3", "sha256:c"),
+            // Replay aggregated a different subset.
+            channel_match_receipt("evt-1", "trig-x", Some(vec!["evt-1", "evt-2"])),
+        ];
+        let diagnostic = diagnose_channel_replay_drift(&recorded, &replay)
+            .unwrap()
+            .expect("drift");
+        assert_eq!(diagnostic.code(), "HARN-REP-CHN-003");
+    }
+
+    #[test]
+    fn channel_receipts_count_first_class_replay_material() {
+        let mut trace = base_trace();
+        trace.first_run.channel_receipts = vec![channel_emit_receipt("evt-1", "sha256:a")];
+        trace.second_run.channel_receipts = trace.first_run.channel_receipts.clone();
+        let report = run_replay_oracle_trace(&trace).expect("oracle succeeds");
+        assert!(report.passed, "{report:?}");
+        assert_eq!(report.first_run_counts.channel_receipts, 1);
+        assert_eq!(report.second_run_counts.channel_receipts, 1);
     }
 
     #[test]
