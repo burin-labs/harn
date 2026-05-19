@@ -3034,6 +3034,63 @@ value ledger and crystallization receipts read these back.
 
 Full reference: [`docs/src/stdlib/cache.md`](https://harnlang.com/docs/stdlib/cache.html).
 
+## OAuth client (`std/oauth/client`)
+
+RFC 6749 authorization-code + RFC 7636 PKCE S256 + RFC 9700
+transparent refresh. Build on top of `std/oauth/providers` and
+`std/oauth/storage`; the client knows nothing about which storage
+backend it's holding.
+
+```harn
+import { providers } from "std/oauth/providers"
+import { memory } from "std/oauth/storage"
+import { client, exchange_code, start_authorization, token, request } from "std/oauth/client"
+
+let cli = client(
+  providers().github,
+  {
+    client_id: env("GH_CLIENT_ID"),
+    client_secret: env("GH_CLIENT_SECRET"),
+    scopes: ["read:user", "user:email"],
+    redirect_uri: "http://127.0.0.1:8765/callback",
+    storage: memory(),
+  },
+)
+
+// One-shot authorization-code dance (host drives the browser):
+let pkce = start_authorization(cli)            // pkce.url, pkce.state, pkce.code_verifier
+let token_set = exchange_code(cli, pkce, code, state)
+
+// Subsequent calls auto-refresh past 75% TTL:
+let access = token(cli)                        // -> string, valid access token
+
+// Or let the client own HTTP, with 1x retry on 401:
+let response = request(cli, "GET", "https://api.github.com/user")
+```
+
+- **PKCE always enforced.** `start_authorization` generates a fresh
+  64-byte CSPRNG verifier (base64url-no-pad → ~86 chars) and a SHA-256
+  S256 challenge. `code_challenge_method=S256` is hardcoded.
+- **State always enforced.** `exchange_code` raises on `state`
+  mismatch before issuing the token request.
+- **Refresh transparency.** `token(cli)` re-reads storage every call
+  and refreshes if the stored TokenSet is past 75% TTL or already
+  expired. `request(cli, ...)` additionally retries once on 401
+  (forces a refresh between attempts).
+- **Audit log.** Every successful refresh / exchange emits
+  `oauth.client.audit` with `token_refreshed` / `token_exchanged`. The
+  payload carries presence flags + expiry timestamps; it never
+  includes the new access or refresh token.
+- **Concurrency.** Storage is the source of truth. Two concurrent
+  `token(cli)` calls may both observe staleness and both refresh; the
+  later `set` wins and both callers see the same token. Pre-refresh
+  at 75% TTL keeps that window narrow.
+- **Storage key.** Defaults to `provider.id`; pass `storage_key` to
+  fan out multiple installations of the same provider.
+
+Full reference: conformance fixtures at
+`conformance/tests/stdlib/oauth_client_*.harn`.
+
 ## OAuth storage (`std/oauth/storage`)
 
 Token store for the OAuth client with five interchangeable backends.
