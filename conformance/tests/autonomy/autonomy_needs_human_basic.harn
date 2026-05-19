@@ -1,0 +1,61 @@
+/**
+ * `needs-human` is a transverse autonomy class: side effects tagged
+ * `needs-human` raise a structured `HARN-AUT-NEEDS-HUMAN` deny regardless
+ * of the resolved `AutonomyTier`. Even at `act_auto` (which normally
+ * auto-applies every side effect) a `needs-human`-tagged write is
+ * forbidden, a pending approval request is queued with the autonomy
+ * class flowing through `detail.autonomy_class`, and the trust-graph
+ * record carries `metadata.autonomy_class = "needs-human"` plus
+ * `metadata.requires_human = true`.
+ *
+ * Tracking: harn#1792.
+ */
+fn attempt_write(target: string) -> dict {
+  try {
+    write_file(target, "should never land")
+    return {caught: nil, wrote: true}
+  } catch (e) {
+    return {caught: to_string(e), wrote: false}
+  }
+}
+
+pipeline test(task) {
+  mkdir(".harn")
+  let unique = to_string(to_int(timestamp())) + "-" + to_string(random_int(100000, 999999))
+  let agent = "needs-human-" + unique
+  let target = path_join(".harn", "needs_human_" + unique + ".txt")
+  let outcome = with_autonomy_policy(
+    {
+      agent_id: agent,
+      autonomy_tier: "act_auto",
+      reviewers: ["ops-lead"],
+      requires_human_actions: ["fs.write"],
+    },
+    fn() { return attempt_write(target) },
+  )
+  // 1. The structured deny fired and the file was never written, even
+  //    though the resolved tier is `act_auto`.
+  println(outcome.caught != nil && !file_exists(target))
+  println(contains(outcome.caught, "HARN-AUT-NEEDS-HUMAN"))
+  println(contains(outcome.caught, "tool_rejected"))
+  // 2. A trust-graph record was appended with outcome `denied` and the
+  //    autonomy class flowing through metadata.
+  let records: list<TrustRecord> = trust_query({agent: agent, action: "fs.write"})
+  println(len(records) == 1)
+  println(records[0].outcome == "denied")
+  println(records[0].metadata.autonomy_class == "needs-human")
+  println(records[0].metadata.requires_human)
+  println(records[0].metadata.deny_code == "HARN-AUT-NEEDS-HUMAN")
+  println(records[0].metadata["autonomy.enforcement"] == "needs_human_denied")
+  // 3. An approval-request was queued with the `needs-human` tag in the
+  //    payload so reviewers can render it distinctly from a normal
+  //    tier-driven approval ask.
+  let pending = hitl_pending({}).filter({ row -> row.agent == agent })
+  println(len(pending) == 1)
+  println(pending[0].metadata.detail.autonomy_class == "needs-human")
+  println(pending[0].metadata.detail.requires_human)
+  println(pending[0].metadata.detail.deny_code == "HARN-AUT-NEEDS-HUMAN")
+  if file_exists(target) {
+    delete_file(target)
+  }
+}

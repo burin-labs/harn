@@ -1,0 +1,54 @@
+/**
+ * The `needs-human` autonomy class can be applied via three shapes on
+ * `AutonomyPolicy`:
+ *   - blanket: `requires_human: true` (every action denies)
+ *   - per-agent: `requires_human_agents: ["a"]`
+ *   - per-action/per-class: `requires_human_actions: ["fs.write"]` (covered
+ *     by the basic fixture)
+ *
+ * This fixture exercises the first two shapes to lock the policy contract
+ * in place.
+ *
+ * Tracking: harn#1792.
+ */
+fn attempt_write(target: string) -> dict {
+  try {
+    write_file(target, "should never land")
+    return {caught: nil, wrote: true}
+  } catch (e) {
+    return {caught: to_string(e), wrote: false}
+  }
+}
+
+pipeline test(task) {
+  mkdir(".harn")
+  let unique = to_string(to_int(timestamp())) + "-" + to_string(random_int(100000, 999999))
+  // Shape 1: blanket `requires_human` flag flips the whole policy into
+  // needs-human, even when the resolved tier is `act_auto`.
+  let blanket_agent = "needs-human-blanket-" + unique
+  let blanket_target = path_join(".harn", "needs_human_blanket_" + unique + ".txt")
+  let blanket_outcome = with_autonomy_policy(
+    {agent_id: blanket_agent, autonomy_tier: "act_auto", requires_human: true},
+    fn() { return attempt_write(blanket_target) },
+  )
+  println(blanket_outcome.caught != nil && !file_exists(blanket_target))
+  println(contains(blanket_outcome.caught, "HARN-AUT-NEEDS-HUMAN"))
+  let blanket_records: list<TrustRecord> = trust_query({agent: blanket_agent, action: "fs.write"})
+  println(len(blanket_records) == 1 && blanket_records[0].metadata.autonomy_class == "needs-human")
+  // Shape 2: per-agent tag flips just one agent into needs-human while
+  // other agents under the same policy continue to auto-apply.
+  let scoped_agent = "needs-human-agent-" + unique
+  let scoped_target = path_join(".harn", "needs_human_agent_" + unique + ".txt")
+  let scoped_outcome = with_autonomy_policy(
+    {agent_id: scoped_agent, autonomy_tier: "act_auto", requires_human_agents: [scoped_agent]},
+    fn() { return attempt_write(scoped_target) },
+  )
+  println(scoped_outcome.caught != nil && !file_exists(scoped_target))
+  let scoped_records: list<TrustRecord> = trust_query({agent: scoped_agent, action: "fs.write"})
+  println(len(scoped_records) == 1 && scoped_records[0].metadata.requires_human)
+  for path in [blanket_target, scoped_target] {
+    if file_exists(path) {
+      delete_file(path)
+    }
+  }
+}
