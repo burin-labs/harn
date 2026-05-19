@@ -111,6 +111,11 @@ jobs:
           CARGO_VERSION="$(grep '^version' Cargo.toml | head -1 | sed 's/.*"\(.*\)".*/\1/')"
           LATEST_TAG="$(git tag --list 'v[0-9]*.[0-9]*.[0-9]*' --sort=-v:refname | head -1)"
           LATEST_VERSION="${LATEST_TAG#v}"
+          version_gt() {
+            local left="$1"
+            local right="$2"
+            [[ "$left" != "$right" ]] && [[ "$(printf '%s\n%s\n' "$right" "$left" | sort -V | tail -n 1)" == "$left" ]]
+          }
 
           # Tag-push trigger ("tag is truth"). The release harness pushed
           # vX.Y.Z at the pinned commit before the Release PR merged.
@@ -136,9 +141,12 @@ jobs:
           if [[ -z "$LATEST_TAG" ]]; then
             DRIFT=true
             echo "::notice::No vX.Y.Z tags exist yet; treating Cargo.toml=$CARGO_VERSION as drift (first release)."
-          elif [[ "$CARGO_VERSION" != "$LATEST_VERSION" ]]; then
+          elif version_gt "$CARGO_VERSION" "$LATEST_VERSION"; then
             DRIFT=true
             echo "::notice::Cargo.toml=$CARGO_VERSION ahead of latest tag $LATEST_TAG → finalize needed."
+          elif [[ "$CARGO_VERSION" != "$LATEST_VERSION" ]]; then
+            DRIFT=false
+            echo "::notice::Cargo.toml=$CARGO_VERSION is behind latest tag $LATEST_TAG → publish job will skip."
           else
             DRIFT=false
             # No drift on push-to-main: tag was already published by the
