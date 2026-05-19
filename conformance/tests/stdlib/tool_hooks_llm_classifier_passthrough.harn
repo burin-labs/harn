@@ -1,0 +1,61 @@
+import { preset_run_command } from "std/tool_hooks"
+
+/**
+ * LLM classifier — sub-threshold verdict and cache replay (TH-05 #1898).
+ *
+ * Three scenarios in one fixture:
+ *   1. Confidence below threshold → audit + passthrough to `inner`.
+ *   2. Explicit `allow` verdict → audit + passthrough.
+ *   3. Cache hit replays the prior verdict without re-querying the model.
+ */
+pipeline default() {
+  pipeline_lifecycle_audit_log_take()
+  __tool_hooks_classifier_cache_clear()
+  llm_mock_clear()
+  /* Scenario 1: below-threshold rewrite. The classifier says rewrite but
+   * confidence (0.4) < threshold (0.8) so the wrapper falls through to
+   * `inner` with the original command. */
+  llm_mock(
+    {
+      text: "{\"kind\": \"rewrite\", \"confidence\": 0.4,"
+        + " \"rewritten\": \"never-applied\", \"explanation\": \"low confidence\"}",
+    },
+  )
+  let inner = { args -> {ok: true, ran: args.command} }
+  let wrapper = preset_run_command(
+    {
+      llm_classifier: {model: "haiku", provider: "mock", threshold: 0.8, cache: {ttl_ms: 60000}},
+      inner: inner,
+    },
+  )
+  let r1 = wrapper({command: "echo hello"})
+  println(r1.ok)
+  println(r1.ran)
+  /* Scenario 2: explicit allow verdict — auditing the fact that the
+   * classifier ran and said allow, but no command rewrite. */
+  llm_mock({text: "{\"kind\": \"allow\", \"confidence\": 0.99, \"explanation\": \"safe\"}"})
+  let r2 = wrapper({command: "ls -la"})
+  println(r2.ok)
+  println(r2.ran)
+  /* Scenario 3: cache hit. Repeat scenario 1's command — the classifier
+   * cache should return the prior low-confidence verdict without
+   * invoking the model again. Compare llm_mock_calls() before vs after. */
+  let calls_before = len(llm_mock_calls())
+  let r3 = wrapper({command: "echo hello"})
+  println(r3.ok)
+  println(r3.ran)
+  let calls_after = len(llm_mock_calls())
+  /* The mock recorder counts every invocation, so the delta must be
+   * zero on a cache hit. */
+  println(calls_after - calls_before)
+  /* Each invocation (cache hit or miss) still audits a classifier
+   * verdict — that's the "audited even on passthrough" contract. */
+  let log = pipeline_lifecycle_audit_log_take()
+  println(len(log))
+  println(log[0].payload.action)
+  println(log[0].payload.cache_hit)
+  println(log[1].payload.action)
+  println(log[1].payload.cache_hit)
+  println(log[2].payload.action)
+  println(log[2].payload.cache_hit)
+}

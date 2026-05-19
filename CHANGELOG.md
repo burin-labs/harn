@@ -29,6 +29,40 @@ condensed series summaries instead of full per-patch history.
   `conformance/tests/pool_unsettled_state_integration.harn` (now
   asserting `pool_pending=3` end-to-end) and decrements
   `scripts/xfail_threshold.txt` from 2 to 1.
+- **Tool-hook LLM classifier (TH-05, #1898).** Adds the opt-in
+  `llm_classifier` config to `ToolHooks.preset_run_command(...)` so
+  ad-hoc commands that don't match any deterministic rule can be
+  reviewed by a small model. The classifier is given the command +
+  configurable `meta_prompt` and must return a one-line JSON verdict
+  `{kind: "rewrite"|"deny"|"allow", confidence, rewritten?,
+  explanation?}`. Confident `rewrite` / `deny` verdicts dispatch
+  through the existing `tool_hooks_mode_*` callbacks (so audit log and
+  reminder hooks fire exactly as for catalogue-matched rules);
+  sub-threshold and `allow` verdicts audit + pass through to `inner`.
+  Every invocation — including transport errors and cache hits — emits
+  a `tool_hook_classifier_verdict` lifecycle audit entry
+  (`{scope, model, command, normalized_command, kind, confidence,
+  threshold, cache_hit, action, error?}`) so operators can observe
+  classifier decisions in `pipeline_lifecycle_audit_log_take()` and
+  event-log replay. Verdicts are cached in a thread-local map keyed by
+  `<scope>:<sha256(normalized command)>` with optional
+  `cache.ttl_ms` / `cache.ttl_seconds` so repeat commands skip the
+  extra model call entirely. Transport errors (e.g. provider 5xx) are
+  handled via `llm_call_safe` and degrade silently to passthrough
+  rather than throwing. Trust contract: the raw command text + the
+  meta-prompt are sent to the configured model, so callers must redact
+  secrets in the same way they already do for `run_command`. Budget:
+  each classifier call counts against the session's standard LLM cost
+  telemetry (`peek_total_cost`, autonomy budget) — keep the classifier
+  model small (the spec defaults to `claude-haiku-4-5-20251001`). The
+  TH-02 rejection check is replaced by a config validator that throws
+  on empty `model` or out-of-range `threshold` at wrapper-build time.
+  New conformance fixtures: `tool_hooks_llm_classifier_rewrite`,
+  `tool_hooks_llm_classifier_deny`,
+  `tool_hooks_llm_classifier_passthrough` (covers below-threshold,
+  explicit `allow`, and cache replay), and
+  `tool_hooks_llm_classifier_error_recovery`. Part of epic #1884
+  (Preset tool hooks library).
 - **OTel suspend-end / resume-link wiring (S-18, #1867).** Wires the
   `SpanKind::Suspension` and `SpanKind::Resume` spans (added in P-05,
   #1858) into the cooperative `suspend_agent` / `resume_agent` paths.

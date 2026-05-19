@@ -233,6 +233,278 @@ fn __preset_no_match(args, inner) {
   return inner(args)
 }
 
+// -------------------------------------------------------------------------------------------------
+
+// TH-05 (#1898): optional LLM classifier for ad-hoc commands that don't
+// match any deterministic rule. Calls a small model with a meta-prompt,
+// parses a JSON verdict, and dispatches to the configured mode when the
+// confidence clears the threshold. Sub-threshold verdicts fall through to
+// `inner` (audited so observers can see "we asked, low confidence"). The
+// classifier is strictly opt-in — when `config.llm_classifier == nil` the
+// wrapper preserves TH-02 passthrough semantics byte-for-byte.
+
+// -------------------------------------------------------------------------------------------------
+
+fn __classifier_default_meta_prompt() -> string {
+  return "You are a shell-command safety reviewer. Given a single command and an optional"
+    + " context, decide whether it should be:\n"
+    + "  * `rewrite` — change to a safer or more idiomatic form,\n"
+    + "  * `deny` — refuse outright (irreversible or destructive),\n"
+    + "  * `allow` — pass through unchanged.\n"
+    + "Respond ONLY with a JSON object on a single line, no markdown fences, shaped:\n"
+    + "  {\"kind\": \"rewrite\" | \"deny\" | \"allow\","
+    + " \"confidence\": <0..1 float>,"
+    + " \"rewritten\": <string, only for rewrite>,"
+    + " \"explanation\": <string>,"
+    + " \"references\": [<optional doc links>]}\n"
+    + "Be conservative: when unsure, return `allow` with low confidence."
+}
+
+fn __classifier_validate_config(cfg) {
+  if type_of(cfg) != "dict" {
+    throw "preset_run_command: llm_classifier must be a dict"
+  }
+  let model = cfg?.model ?? ""
+  if type_of(model) != "string" || len(model) == 0 {
+    throw "preset_run_command: llm_classifier.model must be a non-empty string"
+  }
+  let threshold = cfg?.threshold ?? 0.8
+  let threshold_kind = type_of(threshold)
+  if threshold_kind != "float" && threshold_kind != "int" {
+    throw "preset_run_command: llm_classifier.threshold must be a number"
+  }
+  let threshold_f = to_float(threshold)
+  if threshold_f < 0.0 || threshold_f > 1.0 {
+    throw "preset_run_command: llm_classifier.threshold must be between 0 and 1"
+  }
+  let meta_prompt = cfg?.meta_prompt ?? __classifier_default_meta_prompt()
+  if type_of(meta_prompt) != "string" {
+    throw "preset_run_command: llm_classifier.meta_prompt must be a string"
+  }
+  let provider = cfg?.provider ?? nil
+  if provider != nil && type_of(provider) != "string" {
+    throw "preset_run_command: llm_classifier.provider must be a string"
+  }
+  let cache = cfg?.cache ?? nil
+  let cache_ttl_ms = if cache == nil {
+    0
+  } else {
+    if type_of(cache) != "dict" {
+      throw "preset_run_command: llm_classifier.cache must be a dict"
+    }
+    let ttl_ms = cache?.ttl_ms ?? 0
+    let ttl_seconds = cache?.ttl_seconds ?? 0
+    if type_of(ttl_ms) != "int" {
+      throw "preset_run_command: llm_classifier.cache.ttl_ms must be an int"
+    }
+    if type_of(ttl_seconds) != "int" {
+      throw "preset_run_command: llm_classifier.cache.ttl_seconds must be an int"
+    }
+    if ttl_ms > 0 {
+      ttl_ms
+    } else {
+      ttl_seconds * 1000
+    }
+  }
+  /* Stable per-config scope so independent wrappers don't share verdict
+   * cache. Caller-supplied `id` wins; otherwise we synthesize a key
+   * from (model, threshold) which keeps tests deterministic. */
+  let scope = if cfg?.id != nil {
+    to_string(cfg.id)
+  } else {
+    "tool_hooks_classifier:" + to_string(model) + ":" + to_string(threshold_f)
+  }
+  return {
+    model: model,
+    provider: provider,
+    threshold: threshold_f,
+    meta_prompt: meta_prompt,
+    cache_ttl_ms: cache_ttl_ms,
+    scope: scope,
+    llm_options: cfg?.llm_options ?? {},
+  }
+}
+
+/* Accept either ttl_ms (preferred for tests / determinism) or
+     * ttl_seconds (more readable for prod configs). The legacy spec
+     * mentions strings like "24h" — leave that as a follow-up so we
+     * don't smuggle a duration parser into stdlib here. */
+/* Forward `llm_options` verbatim so callers can pin temperature,
+     * seed, retries, etc. without us re-marshalling each knob. */
+fn __classifier_normalize_command(command) -> string {
+  /* Collapse all whitespace runs so trivial reformatting doesn't bust the
+   * cache (e.g. `cargo  build` vs `cargo build`). Trimmed for the same
+   * reason. */
+  return trim(regex_replace("\\s+", to_string(command), " "))
+}
+
+fn __classifier_cache_key(scope, command) -> string {
+  return to_string(scope) + ":" + sha256(__classifier_normalize_command(command))
+}
+
+fn __classifier_build_options(classifier_cfg) {
+  /* Merge order: caller `llm_options` first so they can override our
+   * defaults; then pin `model` (and `provider` when supplied) so the
+   * classifier never silently falls back to the default agent model. */
+  let merged = classifier_cfg.llm_options + {model: classifier_cfg.model}
+  if classifier_cfg.provider != nil {
+    return merged + {provider: classifier_cfg.provider}
+  }
+  return merged
+}
+
+fn __classifier_extract_text(envelope) -> string {
+  /* `llm_call_safe` returns `{ok, response, error}` where `response`
+   * holds the full `llm_call` result dict (`{text, data?, ...}`). We
+   * accept the text channel as the canonical verdict transport so the
+   * classifier works against providers that don't offer structured
+   * output. */
+  if envelope?.ok {
+    return to_string(envelope?.response?.text ?? "")
+  }
+  return ""
+}
+
+fn __classifier_parse_verdict(text) {
+  let trimmed = trim(to_string(text))
+  if len(trimmed) == 0 {
+    return {kind: "error", error: "empty classifier response"}
+  }
+  let parsed = try {
+    json_parse(trimmed)
+  }
+  if is_err(parsed) {
+    return {kind: "error", error: "non-JSON classifier response: " + to_string(unwrap_err(parsed))}
+  }
+  let value = unwrap(parsed)
+  if type_of(value) != "dict" {
+    return {kind: "error", error: "classifier response is not a dict"}
+  }
+  let kind = to_string(value?.kind ?? "")
+  if kind != "rewrite" && kind != "deny" && kind != "allow" {
+    return {kind: "error", error: "classifier kind must be rewrite|deny|allow"}
+  }
+  let confidence_raw = value?.confidence ?? 0.0
+  let confidence_kind = type_of(confidence_raw)
+  let confidence = if confidence_kind == "float" || confidence_kind == "int" {
+    to_float(confidence_raw)
+  } else {
+    0.0
+  }
+  return {
+    kind: kind,
+    confidence: confidence,
+    rewritten: to_string(value?.rewritten ?? ""),
+    explanation: to_string(value?.explanation ?? ""),
+    references: value?.references ?? [],
+  }
+}
+
+fn __classifier_synth_rule(verdict, classifier_cfg, original_command) {
+  /* Wrap the verdict in the same shape `tool_hooks_match` returns so the
+   * configured `mode` callback can handle it uniformly. The synthetic
+   * rule's `rewrite` is a constant closure returning the model's
+   * proposal — the default rewrite-with-audit mode forwards that text
+   * to `inner`. */
+  let rewritten = if verdict.kind == "rewrite" && len(verdict.rewritten) > 0 {
+    verdict.rewritten
+  } else {
+    original_command
+  }
+  let severity = if verdict.kind == "deny" {
+    "error"
+  } else {
+    "warning"
+  }
+  return {
+    rule_id: classifier_cfg.scope,
+    catalogue_id: "tool_hooks/llm_classifier",
+    severity: severity,
+    explanation: verdict.explanation,
+    references: verdict.references,
+    rewrite: { _cmd, _ctx -> rewritten },
+  }
+}
+
+fn __classifier_audit_payload(classifier_cfg, command, verdict, cache_hit, action) {
+  return {
+    scope: classifier_cfg.scope,
+    model: classifier_cfg.model,
+    command: command,
+    normalized_command: __classifier_normalize_command(command),
+    kind: verdict?.kind ?? "error",
+    confidence: verdict?.confidence ?? 0.0,
+    threshold: classifier_cfg.threshold,
+    rewritten: verdict?.rewritten ?? "",
+    explanation: verdict?.explanation ?? "",
+    error: verdict?.error ?? "",
+    cache_hit: cache_hit,
+    action: action,
+  }
+}
+
+fn __classifier_run(classifier_cfg, args, inner) {
+  let original_command = __preset_command_text(args)
+  let cache_key = __classifier_cache_key(classifier_cfg.scope, original_command)
+  let now = now_ms()
+  let cached = if classifier_cfg.cache_ttl_ms > 0 {
+    __tool_hooks_classifier_cache_get(cache_key, now)
+  } else {
+    nil
+  }
+  let verdict = if cached != nil {
+    cached
+  } else {
+    let envelope = llm_call_safe(
+      original_command,
+      classifier_cfg.meta_prompt,
+      __classifier_build_options(classifier_cfg),
+    )
+    let text = __classifier_extract_text(envelope)
+    let parsed = __classifier_parse_verdict(text)
+    if parsed.kind != "error" && classifier_cfg.cache_ttl_ms > 0 {
+      __tool_hooks_classifier_cache_put(cache_key, parsed, now, classifier_cfg.cache_ttl_ms)
+    }
+    parsed
+  }
+  let cache_hit = cached != nil
+  /* Error verdicts always audit + passthrough — privacy escape hatch:
+   * the audit payload echoes the command but the classifier never
+   * blocks the caller's dispatch on its own faults. */
+  if verdict.kind == "error" {
+    tool_hooks_emit_audit(
+      "tool_hook_classifier_verdict",
+      __classifier_audit_payload(classifier_cfg, original_command, verdict, cache_hit, "passthrough"),
+    )
+    return __preset_no_match(args, inner)
+  }
+  /* Below-threshold or `allow` verdicts → passthrough, audited so the
+   * observer can verify "we asked, model wasn't sure / said allow". */
+  if verdict.kind == "allow" || verdict.confidence < classifier_cfg.threshold {
+    tool_hooks_emit_audit(
+      "tool_hook_classifier_verdict",
+      __classifier_audit_payload(classifier_cfg, original_command, verdict, cache_hit, "passthrough"),
+    )
+    return __preset_no_match(args, inner)
+  }
+  /* Confident verdict: dispatch via the configured mode. We use
+   * `tool_hooks_mode_rewrite_with_audit` for `rewrite` and
+   * `tool_hooks_mode_deny_with_explanation` for `deny` regardless of
+   * the wrapper's primary `mode` — the classifier verdict expresses
+   * the desired action explicitly. */
+  let synth_rule = __classifier_synth_rule(verdict, classifier_cfg, original_command)
+  tool_hooks_emit_audit(
+    "tool_hook_classifier_verdict",
+    __classifier_audit_payload(classifier_cfg, original_command, verdict, cache_hit, verdict.kind),
+  )
+  if verdict.kind == "deny" {
+    return tool_hooks_mode_deny_with_explanation(synth_rule, args, inner)
+  }
+  return tool_hooks_mode_rewrite_with_audit(synth_rule, args, inner)
+}
+
+/* `llm_call_safe` keeps the wrapper resilient: on transport errors
+     * we audit + passthrough rather than blowing up the dispatch loop. */
 fn __preset_custom_registry(custom_rules) {
   // Build a synthetic catalogue when the caller supplied custom rules.
   // The catalogue is stack-agnostic (no `stack` field) so it survives
@@ -267,13 +539,32 @@ fn __preset_custom_registry(custom_rules) {
  *     passthrough (or, for rewrite/audit modes, with the final
  *     command). Optional — when omitted the wrapper returns decision
  *     envelopes so the caller can run the executor itself.
- *   * `llm_classifier` — TH-05 opt-in. Accepted but currently must be
- *     `nil`; pass a non-nil value and the wrapper rejects construction
- *     so callers don't silently miss the future hook.
+ *   * `llm_classifier` — TH-05 opt-in. Pass a dict shaped
+ *     `{model, threshold?, meta_prompt?, provider?, cache?, llm_options?}`
+ *     to run a small-model classifier against any command that did not
+ *     hit a deterministic rule. The classifier returns
+ *     `{kind: "rewrite"|"deny"|"allow", confidence, rewritten?,
+ *     explanation?}`; verdicts below `threshold` (default 0.8) audit
+ *     and fall through to `inner` so the loop stays usable when the
+ *     model is unsure. Every classifier invocation emits a
+ *     `tool_hook_classifier_verdict` audit (kind, confidence, scope,
+ *     cache hit/miss, action) regardless of outcome, so observers can
+ *     follow which decisions were model-driven. Cache TTL accepts
+ *     either `cache.ttl_ms` (preferred for tests) or
+ *     `cache.ttl_seconds`; omitting both disables caching.
  *
- * @effects: []
+ *     Trust contract: the classifier sends the raw command text + the
+ *     `meta_prompt` to the configured model, so callers must redact
+ *     secrets in the command (the same contract `run_command` already
+ *     has with the underlying shell). Latency cost: one extra
+ *     `llm_call_safe` per cache miss; transport errors degrade
+ *     gracefully to passthrough. Budget: each call counts against the
+ *     session's normal LLM cost telemetry (`peek_total_cost`,
+ *     autonomy budget, etc.) — keep the classifier model small.
+ *
+ * @effects: [llm]
  * @allocation: heap
- * @errors: ["preset_run_command: llm_classifier is not yet supported"]
+ * @errors: ["preset_run_command: llm_classifier.model must be a non-empty string"]
  * @api_stability: experimental
  * @example: agent_loop(message, tools: {tools: [{name: "run_command", handler: preset_run_command({stacks: ["rust"]})}]})
  */
@@ -299,8 +590,10 @@ pub fn preset_run_command(config = nil) {
   }
   let mode = cfg?.mode ?? tool_hooks_mode_rewrite_with_audit
   let inner = cfg?.inner
-  if cfg?.llm_classifier != nil {
-    throw "preset_run_command: llm_classifier is not yet supported (TH-05 / #1898)"
+  let classifier_cfg = if cfg?.llm_classifier == nil {
+    nil
+  } else {
+    __classifier_validate_config(cfg.llm_classifier)
   }
   let filtered_registry = tool_hooks_filter(registry, stacks)
   let has_custom = len(custom_rules) > 0
@@ -322,6 +615,12 @@ pub fn preset_run_command(config = nil) {
     if len(matches) > 0 {
       return mode(matches[0], args, inner)
     }
+    if classifier_cfg != nil {
+      return __classifier_run(classifier_cfg, args, inner)
+    }
     return __preset_no_match(args, inner)
   }
 }
+/* No deterministic rule matched. If the caller opted in to an LLM
+     * classifier, run it now; otherwise fall straight through to the
+     * passthrough/inner path TH-02 shipped. */

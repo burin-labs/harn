@@ -1,0 +1,31 @@
+import { preset_run_command } from "std/tool_hooks"
+
+/**
+ * LLM classifier — non-JSON response degrades to passthrough (TH-05 #1898).
+ *
+ * Defensive contract: if the classifier returns garbage (non-JSON, missing
+ * required fields, transport error), the wrapper still runs `inner` with the
+ * original command. The verdict audit captures the error so the operator can
+ * spot the failure mode without the dispatcher blowing up.
+ */
+pipeline default() {
+  pipeline_lifecycle_audit_log_take()
+  __tool_hooks_classifier_cache_clear()
+  llm_mock_clear()
+  /* Non-JSON model output — the parser should classify as kind=error
+   * and the wrapper should passthrough rather than throw. */
+  llm_mock({text: "I am a chatty model and I do not return JSON."})
+  let inner = { args -> {ok: true, ran: args.command} }
+  let wrapper = preset_run_command(
+    {llm_classifier: {model: "haiku", provider: "mock", threshold: 0.5}, inner: inner},
+  )
+  let r = wrapper({command: "echo hi"})
+  println(r.ok)
+  println(r.ran)
+  let log = pipeline_lifecycle_audit_log_take()
+  println(len(log))
+  println(log[0].kind)
+  println(log[0].payload.kind)
+  println(log[0].payload.action)
+  println(contains(to_string(log[0].payload.error), "non-JSON"))
+}

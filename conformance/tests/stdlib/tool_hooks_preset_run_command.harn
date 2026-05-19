@@ -117,11 +117,22 @@ pipeline default() {
   println(stringed.action)
   println(stringed.command)
   println(stringed.result.ran)
-  /* llm_classifier is reserved for TH-05 — non-nil rejects up front so
-   * callers don't silently miss the future hook. */
-  let llm_result = try {
-    preset_run_command({llm_classifier: {model: "local"}})
+  /* llm_classifier (TH-05): construction validates the config shape so
+   * obvious typos surface at wrapper-build time rather than first
+   * dispatch. Empty model, out-of-range threshold, etc. all throw. */
+  let bad_model = try {
+    preset_run_command({llm_classifier: {model: ""}})
   }
-  println(is_err(llm_result))
-  println(contains(to_string(unwrap_err(llm_result)), "llm_classifier"))
+  println(is_err(bad_model))
+  println(contains(to_string(unwrap_err(bad_model)), "llm_classifier.model"))
+  let bad_threshold = try {
+    preset_run_command({llm_classifier: {model: "haiku", threshold: 1.5}})
+  }
+  println(is_err(bad_threshold))
+  println(contains(to_string(unwrap_err(bad_threshold)), "threshold"))
+  /* Valid classifier config: constructor accepts and returns a closure. */
+  let cls_wrapper = preset_run_command(
+    {llm_classifier: {model: "haiku", provider: "mock", threshold: 0.5}, inner: inner},
+  )
+  println(type_of(cls_wrapper))
 }

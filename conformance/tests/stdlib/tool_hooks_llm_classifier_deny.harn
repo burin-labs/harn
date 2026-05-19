@@ -1,0 +1,42 @@
+import { preset_run_command } from "std/tool_hooks"
+
+/**
+ * LLM classifier — confident `deny` verdict above threshold (TH-05 #1898).
+ *
+ * The classifier returns kind=deny with confidence > threshold. The wrapper
+ * dispatches via the deny-with-explanation mode, returns the denial envelope
+ * without ever calling `inner`, and records the verdict + the `tool_denied`
+ * lifecycle audit.
+ */
+pipeline default() {
+  pipeline_lifecycle_audit_log_take()
+  __tool_hooks_classifier_cache_clear()
+  llm_mock_clear()
+  llm_mock(
+    {
+      text: "{\"kind\": \"deny\", \"confidence\": 0.95,"
+        + " \"explanation\": \"rm against /etc is dangerous\"}",
+    },
+  )
+  /* `inner` would record ran; we expect it to stay silent because the
+   * deny mode never invokes the underlying executor. */
+  let inner = { args -> {ok: true, ran: args.command} }
+  let wrapper = preset_run_command(
+    {llm_classifier: {model: "haiku", provider: "mock", threshold: 0.7}, inner: inner},
+  )
+  let result = wrapper({command: "rm -rf /etc/foo"})
+  println(result.action)
+  println(result.catalogue_id)
+  println(result.severity)
+  println(result.explanation)
+  println(result.original_command)
+  println(result.command)
+  /* `result.result` should be absent on deny since `inner` was not run. */
+  println(result?.result == nil)
+  let log = pipeline_lifecycle_audit_log_take()
+  println(len(log))
+  println(log[0].kind)
+  println(log[0].payload.kind)
+  println(log[0].payload.action)
+  println(log[1].kind)
+}

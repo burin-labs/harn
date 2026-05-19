@@ -1,0 +1,14 @@
+true
+echo hello
+true
+ls -la
+true
+echo hello
+0
+3
+passthrough
+false
+passthrough
+false
+passthrough
+true
