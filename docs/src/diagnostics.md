@@ -5522,17 +5522,24 @@ construct (spawn / parallel / select / try / yield / emit / await), a
 loop, an assignment, or any builtin outside the curated const-friendly
 allowlist.
 
-```harn
-// Rejected:
+Rejected:
+
+```harn,ignore
 const Z = harness.clock.now()              // host capability
 const W = spawn { 1 }                      // runtime construct
 const Q = some_user_fn()                   // user function call
+```
 
-// Accepted:
+Accepted:
+
+```harn
 const X: int = 5 + 3
-const Y: string = "hello-${X}"
+const Y: string = format("hello-{}", X)
 const NS: list = [1, 2, X]
 const COUNT: int = len([1, 2, 3])
+
+// reads to silence the unused-variable lint in the example
+let _ = [X, Y, NS, COUNT]
 ```
 
 #### How to fix
@@ -5566,7 +5573,7 @@ exceeds `MAX_STEPS` (default 100,000), evaluation is aborted with this
 diagnostic. The cap is enforced on every step, not amortized, so a
 hostile or accidental quadratic expression cannot stall the compiler.
 
-```harn
+```harn,ignore
 // Rejected (would expand far beyond the step budget):
 const HUGE = sum_to(1_000_000)
 ```
@@ -5627,7 +5634,7 @@ effect. Even a syntactically reachable call into one of those surfaces
 is rejected before evaluation runs — the const-eval sandbox refuses to
 mediate I/O or non-determinism.
 
-```harn
+```harn,ignore
 // Rejected:
 const X = read_file("/etc/passwd")
 const Y = env("HOME")
@@ -5664,7 +5671,7 @@ overflow on a literal arithmetic, division by zero, indexing past the
 end of a literal list, an undefined identifier the const-eval
 environment cannot resolve, or a type mismatch on a binary operator.
 
-```harn
+```harn,ignore
 // Rejected at compile time:
 const ZERO = 1 / 0
 const OOB = [1, 2, 3][9]

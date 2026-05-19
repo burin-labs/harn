@@ -13,17 +13,24 @@ construct (spawn / parallel / select / try / yield / emit / await), a
 loop, an assignment, or any builtin outside the curated const-friendly
 allowlist.
 
-```harn
-// Rejected:
+Rejected:
+
+```harn,ignore
 const Z = harness.clock.now()              // host capability
 const W = spawn { 1 }                      // runtime construct
 const Q = some_user_fn()                   // user function call
+```
 
-// Accepted:
+Accepted:
+
+```harn
 const X: int = 5 + 3
-const Y: string = "hello-${X}"
+const Y: string = format("hello-{}", X)
 const NS: list = [1, 2, X]
 const COUNT: int = len([1, 2, 3])
+
+// reads to silence the unused-variable lint in the example
+let _ = [X, Y, NS, COUNT]
 ```
 
 ## How to fix
