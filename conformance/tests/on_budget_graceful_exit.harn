@@ -1,0 +1,40 @@
+/**
+ * `OnBudget.graceful_exit` emits a `budget_graceful_exit` audit entry
+ * and returns a structured exit envelope (does NOT throw) so the
+ * pipeline's `on_finish` chain or downstream combinator can drain
+ * in-flight work and surface the envelope as the pipeline's value.
+ *
+ * Tracking: harn#1914 (P-11).
+ */
+import { lifecycle_audit_log_take } from "std/lifecycle"
+import { graceful_exit } from "std/lifecycle/on_budget"
+
+pipeline default() {
+  pipeline_on_finish(
+    { harness, return_value ->
+      let state = {
+        kind: "cost",
+        limit: "total_budget_usd",
+        limit_value: 0.5,
+        consumed_cost_usd: 0.75,
+        threshold_pct: 1.5,
+      }
+      let envelope = graceful_exit(harness, state)
+      harness.stdio.println("status=" + envelope.status)
+      harness.stdio.println("strategy=" + envelope.strategy)
+      harness.stdio.println("reason=" + envelope.reason)
+      harness.stdio.println("state_kind=" + envelope.budget_state.kind)
+      harness.stdio.println("state_consumed=" + to_string(envelope.budget_state.consumed_cost_usd))
+      harness.stdio.println("message_contains_clean=" + to_string(envelope.message != nil))
+      let audits = lifecycle_audit_log_take()
+      harness.stdio.println("audit_count=" + to_string(len(audits)))
+      harness.stdio.println("audit_kind=" + audits[0].kind)
+      harness.stdio.println("audit_strategy=" + audits[0].payload.strategy)
+      harness.stdio
+        .println("audit_consumed=" + to_string(audits[0].payload.budget_state.consumed_cost_usd))
+      return return_value
+    },
+  )
+  return 0
+}
+// Default message uses the fallback (state.message was unset).

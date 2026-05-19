@@ -2497,6 +2497,25 @@ Three concentric surfaces:
   - `when(predicate, callback)` — only invoke when
     `predicate(harness, return_value)` is truthy; otherwise pass the
     inbound value through unchanged.
+- `std/lifecycle/on_budget` exports three named callback strategies for
+  the `OnBudgetThreshold` event. Each takes `(harness, budget_state)`
+  and composes with the combinators above:
+  - `terminate(harness, budget_state)` — emits a `budget_exceeded`
+    audit, then throws `{category: "budget_exceeded", kind: "terminal",
+    reason: "on_budget_terminate", strategy: "terminate", budget_state,
+    message}` so the surrounding agent loop / pipeline unwinds.
+  - `graceful_exit(harness, budget_state)` — emits a
+    `budget_graceful_exit` audit; returns a deterministic envelope
+    `{status: "budget_exhausted", strategy: "graceful_exit", reason:
+    "on_budget_graceful_exit", budget_state, message}` instead of
+    throwing.
+  - `warn_and_continue(harness, budget_state)` — emits a
+    `budget_warn_and_continue` audit, injects a 1-turn
+    `budget_warning` system_reminder via `tool_hooks_inject_reminder`,
+    and returns the original `budget_state` unchanged (passthrough for
+    combinator chains).
+  - `OnBudget()` returns the namespace dict so callers can use
+    dotted access (`OnBudget.terminate`, etc.) after a single import.
 - `harness.unsettled_state()` returns a stable dict with
   `suspended_subagents`, `queued_triggers`, `partial_handoffs`, and
   `in_flight_llm_calls` lists. `harness.is_empty(state?)`,

@@ -50,6 +50,29 @@ condensed series summaries instead of full per-patch history.
   compose with the existing `std/lifecycle/combinators`. Conformance:
   `conformance/tests/agents/resume_by_{parent_llm,local_runtime,cloud_harness,pipeline_drain,composed,default}.harn`.
   Part of epic #1836 (agent suspend/resume) and #1853 (callback-first).
+- **`OnBudget.*` callback strategies (#1914).** Adds three named callback
+  strategies for the existing `OnBudgetThreshold` lifecycle event in a
+  new `std/lifecycle/on_budget` module: `OnBudget.terminate` (emits
+  `budget_exceeded` audit, throws a structured `budget_exceeded`
+  exception so the surrounding agent loop / pipeline unwinds),
+  `OnBudget.graceful_exit` (emits `budget_graceful_exit` audit, returns
+  a deterministic `{status: "budget_exhausted", strategy:
+  "graceful_exit", reason, budget_state, message}` envelope so the
+  `on_finish` chain can drain in-flight work and surface the envelope
+  as the pipeline's value), and `OnBudget.warn_and_continue` (emits
+  `budget_warn_and_continue` audit, injects a 1-turn `budget_warning`
+  system_reminder via `tool_hooks_inject_reminder`, and returns the
+  original `budget_state` unchanged so combinator chains see a
+  passthrough). All three follow the same `(harness, budget_state) ->
+  result` shape that the rest of the lifecycle layer uses, so they
+  compose freely with `std/lifecycle/combinators` —
+  e.g. `compose([OnBudget.warn_and_continue, custom_logger])` threads
+  the dispatcher's snapshot through both entries. A
+  `OnBudget()` namespace factory mirrors the `QueueStrategy()` /
+  `Backpressure()` factories in `std/lifecycle/pool` for dotted-access
+  callers. Conformance coverage at
+  `conformance/tests/on_budget_{terminate,graceful_exit,warn_and_continue,compose}.harn`.
+  Part of epic #1853 (Pipeline lifecycle).
 - **Pool state durability (#1890).** `Pool.create({scope: ...})` now
   routes to three durability backends following the channel scope
   contract: `session` (default, in-memory only — lost on session close);

@@ -1,0 +1,197 @@
+/**
+ * std/lifecycle/on_budget — named callback strategies for budget exhaustion.
+ *
+ * The runtime fires the `OnBudgetThreshold` lifecycle event whenever an
+ * agent loop / pipeline crosses a configured budget threshold (cents,
+ * tokens, thinking-tokens, etc.). Users register a handler closure to
+ * decide what happens next. This module ships three canonical
+ * strategies so the common cases stay one-liners:
+ *
+ *   * `OnBudget.terminate` — hard stop. Emits a `budget_exceeded` audit
+ *     entry and throws a structured `budget_exceeded` exception so the
+ *     enclosing agent loop / pipeline unwinds immediately.
+ *   * `OnBudget.graceful_exit` — schedules a clean finish. Emits a
+ *     `budget_graceful_exit` audit entry and returns a structured exit
+ *     envelope ({status, reason, budget_state, message}) so the
+ *     pipeline's `on_finish` chain can drain in-flight work and return
+ *     the envelope as the pipeline's value instead of throwing.
+ *   * `OnBudget.warn_and_continue` — soft-warn. Emits a
+ *     `budget_warn_and_continue` audit entry, injects a 1-turn
+ *     `budget_warning` system_reminder so the agent's next turn sees
+ *     the overrun, and returns `budget_state` unchanged so combinator
+ *     chains see a passthrough.
+ *
+ * All three follow the `(harness, budget_state) -> result` shape, which
+ * is identical to the `(harness, return_value) -> return_value` contract
+ * the rest of the lifecycle layer uses. That means every callback in
+ * this module composes freely with `std/lifecycle/combinators`:
+ *
+ *   import { OnBudget } from "std/lifecycle/on_budget"
+ *   import { compose, with_telemetry } from "std/lifecycle/combinators"
+ *
+ *   register_persona_hook(
+ *     "*",
+ *     "OnBudgetThreshold",
+ *     compose([OnBudget.warn_and_continue, with_telemetry(my_logger)]),
+ *   )
+ *
+ * `budget_state` is whatever the dispatcher delivers — typically a
+ * dict shaped roughly `{kind, limit, limit_value, consumed_cost_usd,
+ * consumed_tokens, threshold_pct, message?, ...}`. The callbacks treat
+ * it as opaque and copy the whole snapshot into their audit + reminder
+ * payloads so downstream consumers see the original shape.
+ *
+ * Tracking: harn#1914 (P-11), harn#1853 (epic).
+ */
+fn __on_budget_snapshot(budget_state) {
+  if budget_state == nil {
+    return {}
+  }
+  if type_of(budget_state) == "dict" {
+    return budget_state
+  }
+  return {value: budget_state}
+}
+
+fn __on_budget_default_message(state, fallback) -> string {
+  if type_of(state) == "dict" && state?.message != nil {
+    return to_string(state.message)
+  }
+  return fallback
+}
+
+fn __on_budget_emit_audit(harness, kind, strategy, state) {
+  let snapshot = __on_budget_snapshot(state)
+  let payload = {
+    strategy: strategy,
+    budget_state: snapshot,
+    message: __on_budget_default_message(snapshot, "budget threshold crossed"),
+  }
+  return harness.emit_audit(kind, payload)
+}
+
+fn __on_budget_terminate_error(state) {
+  let snapshot = __on_budget_snapshot(state)
+  return {
+    category: "budget_exceeded",
+    kind: "terminal",
+    reason: "on_budget_terminate",
+    strategy: "terminate",
+    budget_state: snapshot,
+    message: __on_budget_default_message(snapshot, "budget exceeded; OnBudget.terminate aborting"),
+  }
+}
+
+/**
+ * Hard-stop budget strategy. Emits `budget_exceeded` to the lifecycle
+ * audit log (capturing the full `budget_state` snapshot) and then
+ * throws a structured `budget_exceeded` exception so the enclosing
+ * agent loop / pipeline unwinds immediately. The exception payload
+ * carries `{category: "budget_exceeded", kind: "terminal", reason:
+ * "on_budget_terminate", strategy: "terminate", budget_state, message}`
+ * so error_boundary policies and host-side handlers can route on it
+ * the same way they route the runtime's own preflight
+ * budget-exceeded throws.
+ *
+ * Use this when crossing the budget is a fatal contract violation.
+ * Never returns; never reaches downstream combinators.
+ *
+ * @effects: [host]
+ * @allocation: heap
+ * @errors: ["budget_exceeded"]
+ * @api_stability: experimental
+ * @example: register_persona_hook("*", "OnBudgetThreshold", OnBudget.terminate)
+ */
+pub fn terminate(harness, budget_state) {
+  __on_budget_emit_audit(harness, "budget_exceeded", "terminate", budget_state)
+  throw __on_budget_terminate_error(budget_state)
+}
+
+/**
+ * Graceful-exit budget strategy. Emits `budget_graceful_exit` to the
+ * lifecycle audit log and returns a structured exit envelope shaped
+ * `{status: "budget_exhausted", strategy: "graceful_exit", reason:
+ * "on_budget_graceful_exit", budget_state, message}`. Unlike
+ * `terminate`, this does *not* throw — the envelope becomes the
+ * callback's return value, which means downstream combinators (and the
+ * pipeline's own `on_finish` chain) can drain in-flight work and
+ * return the envelope as the pipeline's value. Callers who want a
+ * hard abort should chain `OnBudget.terminate` after this preset.
+ *
+ * The envelope keys are deterministic so host-side renderers can pin
+ * on `status == "budget_exhausted"` without parsing free-form text.
+ *
+ * @effects: [host]
+ * @allocation: heap
+ * @errors: []
+ * @api_stability: experimental
+ * @example: register_persona_hook("*", "OnBudgetThreshold", OnBudget.graceful_exit)
+ */
+pub fn graceful_exit(harness, budget_state) {
+  __on_budget_emit_audit(harness, "budget_graceful_exit", "graceful_exit", budget_state)
+  let snapshot = __on_budget_snapshot(budget_state)
+  return {
+    status: "budget_exhausted",
+    strategy: "graceful_exit",
+    reason: "on_budget_graceful_exit",
+    budget_state: snapshot,
+    message: __on_budget_default_message(
+      snapshot,
+      "budget exceeded; OnBudget.graceful_exit scheduling clean shutdown",
+    ),
+  }
+}
+
+/**
+ * Soft-warn budget strategy. Emits a `budget_warn_and_continue` audit
+ * entry, injects a 1-turn `budget_warning` system_reminder so the
+ * agent's next turn observes the overrun, and returns the original
+ * `budget_state` unchanged. The passthrough return value is the
+ * essential property that lets combinator chains like
+ * `compose([OnBudget.warn_and_continue, custom_logger])` thread the
+ * dispatcher's snapshot through every entry in the chain without
+ * re-shaping it.
+ *
+ * The injected reminder uses dedupe_key `on_budget.warning` so
+ * repeated triggers within a single turn collapse to one reminder
+ * (the dedupe contract on `inject_reminder`). When no active agent
+ * session exists the reminder still records a
+ * `tool_hooks.reminder_injected` audit entry, so headless pipelines
+ * and conformance fixtures can observe the side effect deterministically.
+ *
+ * @effects: [host]
+ * @allocation: heap
+ * @errors: []
+ * @api_stability: experimental
+ * @example: register_persona_hook("*", "OnBudgetThreshold", OnBudget.warn_and_continue)
+ */
+pub fn warn_and_continue(harness, budget_state) {
+  __on_budget_emit_audit(harness, "budget_warn_and_continue", "warn_and_continue", budget_state)
+  let snapshot = __on_budget_snapshot(budget_state)
+  let body = __on_budget_default_message(
+    snapshot,
+    "Your budget is exhausted (OnBudget.warn_and_continue). Consider wrapping up or asking for a budget extension.",
+  )
+  tool_hooks_inject_reminder(
+    {tags: ["budget_warning", "on_budget"], body: body, dedupe_key: "on_budget.warning", ttl_turns: 1},
+  )
+  return budget_state
+}
+
+/**
+ * `OnBudget()` returns the named-strategy namespace as a dict so
+ * callers can use dotted access (e.g. `OnBudget.terminate`) after a
+ * single import. This mirrors the `QueueStrategy()` / `Backpressure()`
+ * factories in `std/lifecycle/pool` and keeps the `OnBudget.xxx`
+ * spelling consistent with the rest of the lifecycle namespace
+ * pattern.
+ *
+ * @effects: []
+ * @allocation: heap
+ * @errors: []
+ * @api_stability: experimental
+ * @example: let OnBudget = OnBudget()
+ */
+pub fn OnBudget() {
+  return {terminate: terminate, graceful_exit: graceful_exit, warn_and_continue: warn_and_continue}
+}
