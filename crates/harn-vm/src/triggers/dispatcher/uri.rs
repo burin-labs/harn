@@ -57,6 +57,14 @@ pub enum DispatchUri {
         target_kind: &'static str,
         target_session_id: Option<String>,
     },
+    /// CH-10 (#1910): emergency panic broadcast. The descriptor carries the
+    /// scope-mode label and (for the `Concrete` form) the explicit worker
+    /// count so the URI stays serializable and comparable; the closure /
+    /// concrete worker-id list lives on the `TriggerHandlerSpec`.
+    InterruptAndSuspend {
+        scope_kind: &'static str,
+        concrete_count: Option<usize>,
+    },
 }
 
 impl DispatchUri {
@@ -125,6 +133,7 @@ impl DispatchUri {
             Self::AutoResume { .. } => "auto_resume",
             Self::SpawnToPool { .. } => "spawn_to_pool",
             Self::ReminderInject { .. } => "reminder_inject",
+            Self::InterruptAndSuspend { .. } => "interrupt_and_suspend",
         }
     }
 
@@ -143,6 +152,13 @@ impl DispatchUri {
                 Some(id) => format!("reminder_inject://{target_kind}/{id}"),
                 None => format!("reminder_inject://{target_kind}"),
             },
+            Self::InterruptAndSuspend {
+                scope_kind,
+                concrete_count,
+            } => match concrete_count {
+                Some(n) => format!("interrupt_and_suspend://{scope_kind}/{n}"),
+                None => format!("interrupt_and_suspend://{scope_kind}"),
+            },
         }
     }
 
@@ -155,6 +171,7 @@ impl DispatchUri {
             Self::AutoResume { .. } => "local_process",
             Self::SpawnToPool { .. } => "local_process",
             Self::ReminderInject { .. } => "local_process",
+            Self::InterruptAndSuspend { .. } => "local_process",
         }
     }
 
@@ -167,6 +184,7 @@ impl DispatchUri {
             Self::AutoResume { .. } => "in_process",
             Self::SpawnToPool { .. } => "pool_queued",
             Self::ReminderInject { .. } => "in_process",
+            Self::InterruptAndSuspend { .. } => "in_process",
         }
     }
 
@@ -237,6 +255,16 @@ impl From<&TriggerHandlerSpec> for DispatchUri {
                 Self::ReminderInject {
                     target_kind: target.kind(),
                     target_session_id,
+                }
+            }
+            TriggerHandlerSpec::InterruptAndSuspend { target_agents, .. } => {
+                let concrete_count = match target_agents {
+                    crate::triggers::registry::AgentScope::Concrete(ids) => Some(ids.len()),
+                    _ => None,
+                };
+                Self::InterruptAndSuspend {
+                    scope_kind: target_agents.kind(),
+                    concrete_count,
                 }
             }
         }

@@ -723,6 +723,7 @@ fn handler_kind(binding: &harn_vm::triggers::registry::TriggerBinding) -> &'stat
         TriggerHandlerSpec::AutoResume { .. } => "auto_resume",
         TriggerHandlerSpec::SpawnToPool { .. } => "spawn_to_pool",
         TriggerHandlerSpec::ReminderInject { .. } => "reminder_inject",
+        TriggerHandlerSpec::InterruptAndSuspend { .. } => "interrupt_and_suspend",
     }
 }
 
@@ -735,6 +736,9 @@ fn handler_label(binding: &harn_vm::triggers::registry::TriggerBinding) -> Strin
         TriggerHandlerSpec::AutoResume { worker_id } => worker_id.clone(),
         TriggerHandlerSpec::SpawnToPool { pool, .. } => pool.clone(),
         TriggerHandlerSpec::ReminderInject { target, .. } => target.kind().to_string(),
+        TriggerHandlerSpec::InterruptAndSuspend { target_agents, .. } => {
+            target_agents.kind().to_string()
+        }
     }
 }
 
@@ -751,6 +755,12 @@ fn target_uri(binding: &harn_vm::triggers::registry::TriggerBinding) -> String {
                 format!("reminder_inject://concrete/{id}")
             }
             other => format!("reminder_inject://{}", other.kind()),
+        },
+        TriggerHandlerSpec::InterruptAndSuspend { target_agents, .. } => match target_agents {
+            harn_vm::triggers::registry::AgentScope::Concrete(ids) => {
+                format!("interrupt_and_suspend://concrete/{}", ids.len())
+            }
+            other => format!("interrupt_and_suspend://{}", other.kind()),
         },
     }
 }

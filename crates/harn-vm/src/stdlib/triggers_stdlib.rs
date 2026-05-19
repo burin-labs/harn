@@ -13,7 +13,7 @@ use crate::event_log::{
 };
 use crate::triggers::dispatcher::current_dispatch_context;
 use crate::triggers::dispatcher::DEFAULT_MAX_ATTEMPTS;
-use crate::triggers::registry::TargetExpr;
+use crate::triggers::registry::{AgentScope, TargetExpr};
 use crate::triggers::test_util::{clock, run_trigger_harness_fixture};
 use crate::triggers::{
     deregister_webhook_intake, dynamic_deregister, dynamic_register, feed_webhook_intake,
@@ -1909,10 +1909,94 @@ fn parse_handler_dict(
             ))
         }
         "reminder_inject" => parse_reminder_inject_handler(map, builtin),
+        "interrupt_and_suspend" => parse_interrupt_and_suspend_handler(map, builtin),
         other => Err(VmError::Runtime(format!(
-            "{builtin}: unsupported handler variant '{other}'; expected 'spawn_to_pool' or 'reminder_inject'"
+            "{builtin}: unsupported handler variant '{other}'; expected 'spawn_to_pool', 'reminder_inject', or 'interrupt_and_suspend'"
         ))),
     }
+}
+
+/// CH-10 (#1910): parse the `InterruptAndSuspend` handler dict. `target_agents`
+/// resolution is one of: the string `"all"` (panic-broadcast every running
+/// worker in the local registry), a list of concrete worker-id strings, or a
+/// closure that returns a worker-id list at dispatch time (the closure form
+/// lets a single trigger registration pick targets dynamically — e.g. all
+/// workers tagged with a given org / tenant). `reason` is propagated to every
+/// suspended worker's `WorkerSuspension::reason` and audit entry.
+fn parse_interrupt_and_suspend_handler(
+    map: &BTreeMap<String, VmValue>,
+    builtin: &str,
+) -> Result<(TriggerHandlerSpec, serde_json::Value), VmError> {
+    let target_value = map.get("target_agents").or_else(|| map.get("target"));
+    let target_agents = match target_value {
+        None | Some(VmValue::Nil) => AgentScope::All,
+        Some(VmValue::String(s)) => match s.as_ref() {
+            "all" | "all_in_scope" => AgentScope::All,
+            other if !other.is_empty() => AgentScope::Concrete(vec![other.to_string()]),
+            _ => {
+                return Err(VmError::Runtime(format!(
+                    "{builtin}: InterruptAndSuspend `target_agents` string must be 'all' or a non-empty worker id"
+                )));
+            }
+        },
+        Some(VmValue::List(items)) => {
+            let mut ids = Vec::with_capacity(items.len());
+            for item in items.iter() {
+                let VmValue::String(text) = item else {
+                    return Err(VmError::Runtime(format!(
+                        "{builtin}: InterruptAndSuspend `target_agents` list entries must be strings, got {}",
+                        item.type_name()
+                    )));
+                };
+                let trimmed = text.trim();
+                if trimmed.is_empty() {
+                    return Err(VmError::Runtime(format!(
+                        "{builtin}: InterruptAndSuspend `target_agents` list entries must be non-empty strings"
+                    )));
+                }
+                ids.push(trimmed.to_string());
+            }
+            AgentScope::Concrete(ids)
+        }
+        Some(VmValue::Closure(closure)) => AgentScope::Closure(closure.clone()),
+        Some(other) => {
+            return Err(VmError::Runtime(format!(
+                "{builtin}: InterruptAndSuspend `target_agents` must be the string 'all', a list of worker-id strings, or a closure returning a list, got {}",
+                other.type_name()
+            )));
+        }
+    };
+
+    let reason = match map.get("reason") {
+        Some(VmValue::String(s)) => s.to_string(),
+        None | Some(VmValue::Nil) => "panic".to_string(),
+        Some(other) => {
+            return Err(VmError::Runtime(format!(
+                "{builtin}: InterruptAndSuspend `reason` must be a string, got {}",
+                other.type_name()
+            )));
+        }
+    };
+
+    let scope_kind = target_agents.kind();
+    let concrete_count = match &target_agents {
+        AgentScope::Concrete(ids) => Some(ids.len()),
+        _ => None,
+    };
+    let descriptor = serde_json::json!({
+        "kind": "interrupt_and_suspend",
+        "scope_kind": scope_kind,
+        "concrete_count": concrete_count,
+        "reason": &reason,
+    });
+
+    Ok((
+        TriggerHandlerSpec::InterruptAndSuspend {
+            target_agents,
+            reason,
+        },
+        descriptor,
+    ))
 }
 
 /// Parse the ReminderInject (#1876) handler dict. `target` resolution is

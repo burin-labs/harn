@@ -88,6 +88,13 @@ pub(super) fn dispatch_success_outcome(
             Some("dropped") => "reminder_dropped",
             _ => "reminder_injected",
         },
+        // InterruptAndSuspend (#1910) — `broadcast` whether or not any
+        // workers were actually suspended. Observers tell empty broadcasts
+        // (`suspended_count: 0`) apart from no-op broadcasts by reading the
+        // result blob; both shapes emit
+        // `triggers.interrupt_and_suspend.audit` audits for the per-worker
+        // breakdown.
+        DispatchUri::InterruptAndSuspend { .. } => "panic_broadcast",
     }
 }
 
@@ -265,6 +272,16 @@ pub(super) fn dispatch_node_metadata(
             metadata.insert("target_session_id".to_string(), serde_json::json!(id));
         }
     }
+    if let DispatchUri::InterruptAndSuspend {
+        scope_kind,
+        concrete_count,
+    } = route
+    {
+        metadata.insert("scope_kind".to_string(), serde_json::json!(scope_kind));
+        if let Some(count) = concrete_count {
+            metadata.insert("concrete_count".to_string(), serde_json::json!(count));
+        }
+    }
     metadata
 }
 
@@ -330,6 +347,20 @@ pub(super) fn dispatch_success_metadata(
                 "target_kind",
                 "reminder_id",
                 "deduped_count",
+                "reason",
+            ] {
+                if let Some(value) = result.get(field).cloned() {
+                    metadata.insert(field.to_string(), value);
+                }
+            }
+        }
+        DispatchUri::InterruptAndSuspend { .. } => {
+            for field in [
+                "status",
+                "scope_kind",
+                "target_count",
+                "suspended_count",
+                "skipped_count",
                 "reason",
             ] {
                 if let Some(value) = result.get(field).cloned() {

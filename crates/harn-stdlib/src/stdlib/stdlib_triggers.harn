@@ -1033,6 +1033,43 @@ pub fn ReminderInject(options: dict) -> dict {
 }
 
 /**
+ * InterruptAndSuspend builds a handler-variant dict that, on match, broadcasts
+ * an emergency "panic" signal to a set of running workers and suspends each
+ * one synchronously via the cooperative-suspend pipeline (#1910). Unlike
+ * `ReminderInject` (next-turn-boundary) and `Local`/`Worker` (spawns a fresh
+ * task), this variant bypasses the normal turn-boundary delivery contract —
+ * it is the org-scoped "stop everything" override.
+ *
+ * `target_agents` accepts the string `"all"` (every worker in the local
+ * registry — the default), a list of concrete worker-id strings, or a
+ * closure `event -> list<string>` that returns the worker-id list at
+ * dispatch time. The closure form lets a single trigger registration pick
+ * targets dynamically based on the event payload (e.g. all workers tagged
+ * with a given org or tenant).
+ *
+ * `reason` is propagated to every suspended worker's `WorkerSuspension`
+ * envelope, the `WorkerSuspended` lifecycle event, and the
+ * `triggers.interrupt_and_suspend.audit` audit entries. Defaults to
+ * `"panic"`.
+ *
+ * Already-suspended or terminal workers are skipped (no double-suspend,
+ * no error); unknown worker ids returned by a closure are skipped
+ * gracefully so a stale id never fails the broadcast. An empty target list
+ * records a single roll-up audit and returns a successful
+ * `status: "broadcast"` with `suspended_count: 0` — graceful no-op rather
+ * than dispatch failure.
+ *
+ * @effects: []
+ * @allocation: heap
+ * @errors: []
+ * @api_stability: experimental
+ * @example: trigger_register({handler: InterruptAndSuspend({target_agents: "all", reason: "build_storm"})})
+ */
+pub fn InterruptAndSuspend(options: dict) -> dict {
+  return {kind: "interrupt_and_suspend", target_agents: options?.target_agents, reason: options?.reason}
+}
+
+/**
  * list_providers.
  *
  * @effects: []

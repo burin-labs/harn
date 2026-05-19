@@ -1,0 +1,60 @@
+import { lifecycle_audit_log_take } from "std/lifecycle"
+import "std/triggers"
+
+/**
+ * Verifies the InterruptAndSuspend (#1910) handler's `target_agents: "all"`
+ * default scope: when no workers are registered, the dispatcher returns
+ * a successful `broadcast` dispatch with `target_count: 0` and emits
+ * exactly one roll-up audit (no per-worker audits). This is the
+ * org-scoped "panic into an empty registry" path — the trigger fired but
+ * the registry was empty, which is success rather than failure.
+ */
+pipeline test(task) {
+  let _ = lifecycle_audit_log_take()
+  let unique = to_string(to_int(timestamp())) + "-" + to_string(random_int(100000, 999999))
+  let handle: TriggerHandle = trigger_register(
+    {
+      id: "trigger-interrupt-all-empty-" + unique,
+      kind: "issue.opened",
+      provider: "github",
+      handler: InterruptAndSuspend({target_agents: "all", reason: "build_storm"}),
+      when: nil,
+      retry: nil,
+      match: {events: ["issue.opened"]},
+      events: nil,
+      dedupe_key: nil,
+      filter: nil,
+      budget: nil,
+      manifest_path: nil,
+      package_name: "conformance",
+    },
+  )
+  let dispatch = trigger_fire(
+    handle,
+    {provider: "github", kind: "issue.opened", headers: {x_delivery: "evt-" + unique}},
+  )
+  println(dispatch.status == "dispatched")
+  println(dispatch.result?.status == "broadcast")
+  println(dispatch.result?.scope_kind == "all")
+  println(dispatch.result?.target_count)
+  println(dispatch.result?.suspended_count)
+  println(dispatch.result?.skipped_count)
+  println(dispatch.result?.reason == "build_storm")
+  let audits = lifecycle_audit_log_take()
+  var audit_count = 0
+  var outcome = ""
+  var scope_kind = ""
+  var reason = ""
+  for audit in audits {
+    if audit.kind == "triggers.interrupt_and_suspend.audit" {
+      audit_count = audit_count + 1
+      outcome = audit.payload.outcome
+      scope_kind = audit.payload.scope_kind
+      reason = audit.payload.reason
+    }
+  }
+  println(audit_count)
+  println(outcome)
+  println(scope_kind)
+  println(reason)
+}

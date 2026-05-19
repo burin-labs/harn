@@ -74,6 +74,33 @@ condensed series summaries instead of full per-patch history.
   daemon snapshot field-set). All fixtures are deterministic — no
   wall-clock sleeps; the timeout path uses the unified mock clock
   through `clock::sleep`.
+- **`InterruptAndSuspend` trigger handler variant (#1910).** Adds a new
+  `TriggerHandlerSpec::InterruptAndSuspend` variant + the matching
+  `InterruptAndSuspend({...})` constructor in `std/triggers`, completing the
+  CH-10 leg of epic #1870 (Agent channels & periodic prompts). Unlike
+  `Local`/`Worker`/`SpawnToPool` (which spawn new work) and
+  `ReminderInject` (which delivers at the next turn boundary), this is the
+  org-scoped "panic" broadcast: when the trigger matches, every running
+  worker in the resolved `target_agents` scope is cooperatively suspended
+  synchronously via the same `suspend_signal` + `WorkerSuspension` pipeline
+  used by `suspend_agent` (#1837), bypassing the normal turn-boundary
+  approval gate. `target_agents` accepts the string `"all"` (every worker
+  in the local registry — the default), a list of concrete worker-id
+  strings, or a closure `event -> list<string>` for dynamic resolution.
+  `reason` is propagated to every suspended worker's `WorkerSuspension`
+  envelope, the `WorkerSuspended` lifecycle event, and the per-suspension
+  `triggers.interrupt_and_suspend.audit` audit entry. Already-suspended
+  and terminal workers are skipped as `already_suspended` / `not_running`
+  (no double-suspend, no overwritten reason), and stale ids returned by a
+  closure are skipped as `unknown` rather than failing the broadcast.
+  Empty target lists record a single roll-up audit and return a
+  successful `status: "broadcast"` with `suspended_count: 0`. The
+  per-worker iteration walks the registry in `BTreeMap` (sorted) order so
+  the panic broadcast is deterministic across replay. Conformance:
+  `conformance/tests/triggers/trigger_interrupt_and_suspend_{empty_scope_records_audit,all_scope_with_empty_registry,closure_scope}.harn`;
+  Rust unit tests in `crates/harn-vm/src/stdlib/agents.rs` cover the
+  per-worker `Suspended` / `AlreadySuspended` / `NotRunning` / `Unknown`
+  outcomes and the deterministic registry-enumeration contract.
 - **Pool tasks wired into `harness.unsettled_state()` (#2007).** Closes
   the PL-07 follow-up from #2008: `UnsettledStateSnapshot` now carries a
   `pool_pending_tasks` bucket fed by a new
