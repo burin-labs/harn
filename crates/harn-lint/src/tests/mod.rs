@@ -82,6 +82,7 @@ pub(super) fn lint_with_stdlib_metadata(source: &str) -> Vec<LintDiagnostic> {
     lint_with_options(&program, &[], Some(source), &HashSet::new(), &options)
 }
 
+mod ambient_capabilities;
 mod ambient_clock;
 mod ambient_stdio;
 mod assert_pipeline;
