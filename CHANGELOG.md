@@ -10,6 +10,22 @@ condensed series summaries instead of full per-patch history.
 
 ### Added
 
+- **Tool-hook mode callback side effects (#1896).** The three shipped
+  `tool_hooks_mode_*` callbacks (`rewrite_with_audit`,
+  `deny_with_explanation`, `passthrough_only_audit`) now emit lifecycle
+  audit entries (`tool_rewrite`, `tool_denied`, `tool_rule_warning`)
+  observable via `lifecycle_audit_log_take()`. The rewrite mode also
+  queues a 1-turn `tool_rewritten` system reminder via the new
+  `tool_hooks_inject_reminder(...)` primitive so the agent's next turn
+  learns the corrected command shape. Without an active agent session
+  the reminder still records a `tool_hooks.reminder_injected` audit
+  entry, so headless pipelines and conformance fixtures can verify
+  every side effect deterministically. Two new top-level builtins,
+  `tool_hooks_emit_audit(kind, payload)` and
+  `tool_hooks_inject_reminder(options)`, are exposed so user-defined
+  mode callbacks can hook into the same plumbing. See
+  `conformance/tests/stdlib/tool_hooks_mode_callbacks.harn` for the
+  executable spec. Part of epic #1884 (preset tool hooks library).
 - **`std/oauth/storage` token storage backends (#1904).** Five
   interchangeable backends for the OAuth client (#1885 OA-03):
   `memory()` (per-VM, ephemeral), `file(path, encryption_key)` (single

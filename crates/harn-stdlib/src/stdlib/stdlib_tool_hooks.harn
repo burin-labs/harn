@@ -85,14 +85,58 @@ fn __preset_invoke_rewrite(rewrite_fn, original_command, rule) -> string {
   return to_string(rewritten)
 }
 
+fn __preset_audit_payload(rule, original_command, command) {
+  return {
+    rule_id: rule?.rule_id ?? "",
+    catalogue_id: rule?.catalogue_id ?? "",
+    severity: rule?.severity ?? "warning",
+    explanation: rule?.explanation ?? "",
+    original_command: original_command,
+    command: command,
+  }
+}
+
+fn __preset_reminder_body(rule, original_command, command, action) {
+  let rid = rule?.rule_id ?? ""
+  let explanation = rule?.explanation ?? ""
+  if action == "rewrite" {
+    return "Your command was rewritten per rule " + rid + ": " + explanation
+      + " Original: "
+      + original_command
+      + " Rewritten: "
+      + command
+      + "."
+  }
+  if action == "deny" {
+    return "Your command was denied per rule " + rid + ": " + explanation
+      + " Command: "
+      + original_command
+      + "."
+  }
+  return "Tool-hook rule " + rid + " matched (audit-only): " + explanation
+    + " Command: "
+    + original_command
+    + "."
+}
+
 /**
- * Default rewrite-and-audit mode. Calls the matched rule's `rewrite`
- * callable (if any), forwards the rewritten command to `inner`, and
- * returns `{action: "rewrite", ...envelope, result}`. When the rewrite
- * is identical to the original command the envelope still flows so
- * audit consumers know a rule fired.
+ * Default rewrite-and-audit mode (TH-03 #1896). Invokes the matched
+ * rule's `rewrite` callable (if any), records a `tool_rewrite`
+ * lifecycle audit entry, queues a one-turn system reminder so the
+ * agent learns the corrected shape, and forwards the rewritten
+ * command to `inner`. Returns `{action: "rewrite", ...envelope,
+ * result}`. When the rewrite is identical to the original command the
+ * envelope still flows so audit consumers know a rule fired.
  *
- * @effects: []
+ * Side effects:
+ *   * `tool_hooks_emit_audit("tool_rewrite", payload)` records the
+ *     rule + original + rewritten command on the lifecycle audit log.
+ *   * `tool_hooks_inject_reminder({tags: ["tool_rewritten"], ...})`
+ *     queues a 1-turn reminder summarizing the rewrite for the agent's
+ *     next turn (no-op outside an active agent session, but always
+ *     produces a `tool_hooks.reminder_injected` audit entry).
+ *
+ * @effects: [host]
  * @allocation: heap
  * @errors: []
  * @api_stability: experimental
@@ -102,6 +146,17 @@ pub fn tool_hooks_mode_rewrite_with_audit(rule, args, inner) {
   let original_command = __preset_command_text(args)
   let rewritten_command = __preset_invoke_rewrite(rule?.rewrite, original_command, rule)
   let envelope = __preset_envelope(rule, original_command, rewritten_command)
+  tool_hooks_emit_audit(
+    "tool_rewrite",
+    __preset_audit_payload(rule, original_command, rewritten_command),
+  )
+  tool_hooks_inject_reminder(
+    {
+      tags: ["tool_rewritten"],
+      body: __preset_reminder_body(rule, original_command, rewritten_command, "rewrite"),
+      ttl_turns: 1,
+    },
+  )
   if inner == nil {
     return envelope + {action: "rewrite"}
   }
@@ -111,11 +166,16 @@ pub fn tool_hooks_mode_rewrite_with_audit(rule, args, inner) {
 }
 
 /**
- * Deny-with-explanation mode. Refuses to dispatch the command and
- * returns `{action: "deny", ...envelope}` so the caller can surface a
- * tool_error / system_reminder to the agent.
+ * Deny-with-explanation mode (TH-03 #1896). Refuses to dispatch the
+ * command, records a `tool_denied` lifecycle audit entry, and returns
+ * `{action: "deny", ...envelope}` so the caller can surface a
+ * tool_error / system_reminder to the agent. Never invokes `inner`.
  *
- * @effects: []
+ * Side effects:
+ *   * `tool_hooks_emit_audit("tool_denied", payload)` records the
+ *     denied rule + command on the lifecycle audit log.
+ *
+ * @effects: [host]
  * @allocation: heap
  * @errors: []
  * @api_stability: experimental
@@ -124,17 +184,26 @@ pub fn tool_hooks_mode_rewrite_with_audit(rule, args, inner) {
 pub fn tool_hooks_mode_deny_with_explanation(rule, args, _inner) {
   let original_command = __preset_command_text(args)
   let envelope = __preset_envelope(rule, original_command, original_command)
+  tool_hooks_emit_audit(
+    "tool_denied",
+    __preset_audit_payload(rule, original_command, original_command),
+  )
   return envelope + {action: "deny"}
 }
 
 /**
- * Passthrough-with-audit mode. Forwards the original command to `inner`
- * and tags the result with the matched rule so audit consumers see
- * which rule would have fired without altering behavior. When `inner`
- * is nil the envelope alone is returned so the call-site can audit
- * without executing.
+ * Passthrough-with-audit mode (TH-03 #1896). Forwards the original
+ * command to `inner` unchanged, records a `tool_rule_warning`
+ * lifecycle audit entry, and tags the result with the matched rule so
+ * audit consumers see which rule would have fired without altering
+ * behavior. When `inner` is nil the envelope alone is returned so the
+ * call-site can audit without executing.
  *
- * @effects: []
+ * Side effects:
+ *   * `tool_hooks_emit_audit("tool_rule_warning", payload)` records
+ *     the matched rule + command on the lifecycle audit log.
+ *
+ * @effects: [host]
  * @allocation: heap
  * @errors: []
  * @api_stability: experimental
@@ -143,6 +212,10 @@ pub fn tool_hooks_mode_deny_with_explanation(rule, args, _inner) {
 pub fn tool_hooks_mode_passthrough_only_audit(rule, args, inner) {
   let original_command = __preset_command_text(args)
   let envelope = __preset_envelope(rule, original_command, original_command)
+  tool_hooks_emit_audit(
+    "tool_rule_warning",
+    __preset_audit_payload(rule, original_command, original_command),
+  )
   if inner == nil {
     return envelope + {action: "passthrough"}
   }

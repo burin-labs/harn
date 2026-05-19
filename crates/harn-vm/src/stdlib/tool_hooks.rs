@@ -13,6 +13,15 @@
 //! * TH-02 (#1895): `tool_hooks_filter` catalogue-stack pre-filter helper
 //!   consumed by the `preset_run_command` Harn facade in
 //!   `crates/harn-stdlib/src/stdlib/stdlib_tool_hooks.harn`.
+//! * TH-03 (#1896): `tool_hooks_emit_audit` + `tool_hooks_inject_reminder`
+//!   side-effect helpers used by the `tool_hooks_mode_*` callbacks. The
+//!   audit helper routes through `record_lifecycle_audit` so existing
+//!   `lifecycle_audit_log_take` / `pipeline_lifecycle_audit_log_*`
+//!   surfaces observe the entry; the reminder helper builds a typed
+//!   [`SystemReminder`], injects it into the active agent session when
+//!   one exists, and records a `tool_hooks.reminder_injected` audit
+//!   entry regardless so conformance and replay can verify the
+//!   side-effect even from headless pipelines.
 //!
 //! Schema follows the established tagged-dict convention (`_type`) used by
 //! `tool_registry` and `skill_registry`. Values are plain Harn dicts so they
@@ -821,6 +830,110 @@ pub(crate) fn register_tool_hooks_builtins(vm: &mut Vm) {
                 .collect(),
         )))
     });
+
+    // TH-03 side-effect helpers used by the `tool_hooks_mode_*` callbacks
+    // in `crates/harn-stdlib/src/stdlib/stdlib_tool_hooks.harn`. Exposed as
+    // top-level builtins so the mode functions don't need access to a
+    // `harness` handle or transcript — they can run inside any tool
+    // dispatch, including bare unit tests where no agent session exists.
+    vm.register_builtin("tool_hooks_emit_audit", |args, _out| {
+        let kind = match args.first() {
+            Some(VmValue::String(s)) if !s.is_empty() => s.to_string(),
+            Some(VmValue::String(_)) => {
+                return Err(err(
+                    "tool_hooks_emit_audit: kind must be a non-empty string",
+                ));
+            }
+            Some(other) => {
+                return Err(err(format!(
+                    "tool_hooks_emit_audit: kind must be a string, got {}",
+                    other.type_name()
+                )));
+            }
+            None => return Err(err("tool_hooks_emit_audit: requires a kind string")),
+        };
+        let payload = args
+            .get(1)
+            .map(crate::llm::vm_value_to_json)
+            .unwrap_or(serde_json::Value::Null);
+        let entry = crate::orchestration::record_lifecycle_audit(kind, payload);
+        Ok(crate::stdlib::json_to_vm_value(&entry.to_json()))
+    });
+
+    vm.register_builtin("tool_hooks_inject_reminder", |args, _out| {
+        let options = require_dict(
+            args.first()
+                .ok_or_else(|| err("tool_hooks_inject_reminder: requires an options dict"))?,
+            "tool_hooks_inject_reminder",
+            "options",
+        )?;
+        let body = match options.get("body") {
+            Some(VmValue::String(s)) if !s.is_empty() => s.to_string(),
+            _ => {
+                return Err(err(
+                    "tool_hooks_inject_reminder: options.body must be a non-empty string",
+                ));
+            }
+        };
+        // Build the typed reminder via the canonical helper so dedupe/
+        // ttl/propagate/role_hint semantics stay in lockstep with
+        // `transcript.inject_reminder`. We pass the dict directly; the
+        // helper applies the same protocol defaults.
+        let reminder =
+            crate::llm::helpers::reminder_from_vm_value(&VmValue::Dict(Rc::new(options.clone())));
+        // Body cannot be empty from the helper either, since we already
+        // validated above. Replace whatever the helper produced with the
+        // validated body to keep one source of truth.
+        let reminder = crate::llm::helpers::SystemReminder { body, ..reminder };
+        let reminder_id = reminder.id.clone();
+
+        // Attach to the active agent session when one exists so the
+        // reminder shows up in the next turn's transcript. Headless
+        // pipelines (no session) silently skip the session write but
+        // still record the audit entry below, so conformance can
+        // observe the side-effect either way.
+        let mut session_attached = false;
+        let mut deduped_count: i64 = 0;
+        if let Some(session_id) = crate::agent_sessions::current_session_id() {
+            match crate::agent_sessions::inject_reminder(&session_id, reminder.clone()) {
+                Ok(report) => {
+                    session_attached = true;
+                    deduped_count = report.deduped_count as i64;
+                }
+                Err(_) => {
+                    // Session no longer exists — fall through to the
+                    // audit-only path rather than throwing, since the
+                    // tool-hook callback is best-effort.
+                }
+            }
+        }
+
+        // Always record an audit entry so the side-effect is observable
+        // via `lifecycle_audit_log_take()` / event-log replay even when
+        // no live session is attached.
+        let audit_payload = serde_json::json!({
+            "reminder_id": &reminder_id,
+            "tags": &reminder.tags,
+            "body": &reminder.body,
+            "ttl_turns": reminder.ttl_turns,
+            "dedupe_key": &reminder.dedupe_key,
+            "session_attached": session_attached,
+            "deduped_count": deduped_count,
+        });
+        crate::orchestration::record_lifecycle_audit("tool_hooks.reminder_injected", audit_payload);
+
+        let mut out = BTreeMap::new();
+        out.insert(
+            "reminder_id".to_string(),
+            VmValue::String(Rc::from(reminder_id.as_str())),
+        );
+        out.insert("deduped_count".to_string(), VmValue::Int(deduped_count));
+        out.insert(
+            "session_attached".to_string(),
+            VmValue::Bool(session_attached),
+        );
+        Ok(VmValue::Dict(Rc::new(out)))
+    });
 }
 
 #[cfg(test)]
@@ -1107,5 +1220,117 @@ mod tests {
             &["rust".to_string()],
             &["python".to_string()]
         ));
+    }
+
+    // TH-03: emit_audit + inject_reminder side-effect helpers.
+
+    fn audit_payload(rule_id: &str, command: &str) -> VmValue {
+        let mut payload: BTreeMap<String, VmValue> = BTreeMap::new();
+        payload.insert("rule_id".to_string(), VmValue::String(Rc::from(rule_id)));
+        payload.insert("command".to_string(), VmValue::String(Rc::from(command)));
+        VmValue::Dict(Rc::new(payload))
+    }
+
+    fn reminder_options(body: &str, tag: &str, ttl: i64) -> VmValue {
+        let mut options: BTreeMap<String, VmValue> = BTreeMap::new();
+        options.insert("body".to_string(), VmValue::String(Rc::from(body)));
+        options.insert(
+            "tags".to_string(),
+            VmValue::List(Rc::new(vec![VmValue::String(Rc::from(tag))])),
+        );
+        options.insert("ttl_turns".to_string(), VmValue::Int(ttl));
+        VmValue::Dict(Rc::new(options))
+    }
+
+    #[test]
+    fn tool_hooks_emit_audit_records_lifecycle_entry() {
+        let vm = vm_with_stdlib();
+        // Drain anything in the log so other tests don't bleed in.
+        let _ = crate::orchestration::take_lifecycle_audit_log();
+        let entry = call_sync(
+            &vm,
+            "tool_hooks_emit_audit",
+            &[
+                VmValue::String(Rc::from("tool_rewrite")),
+                audit_payload("rust.cargo.target_dir", "cargo build"),
+            ],
+        )
+        .expect("emit_audit ok");
+        let dict = entry.as_dict().expect("entry dict");
+        assert_eq!(dict_string(dict, "kind"), "tool_rewrite");
+        let drained = crate::orchestration::take_lifecycle_audit_log();
+        assert_eq!(drained.len(), 1, "exactly one audit entry recorded");
+        assert_eq!(drained[0].kind, "tool_rewrite");
+        assert_eq!(
+            drained[0].payload.get("rule_id").and_then(|v| v.as_str()),
+            Some("rust.cargo.target_dir")
+        );
+    }
+
+    #[test]
+    fn tool_hooks_emit_audit_rejects_empty_kind() {
+        let vm = vm_with_stdlib();
+        let result = call_sync(
+            &vm,
+            "tool_hooks_emit_audit",
+            &[VmValue::String(Rc::from("")), VmValue::Nil],
+        );
+        let Err(VmError::Thrown(VmValue::String(message))) = result else {
+            panic!("expected thrown error, got {result:?}");
+        };
+        assert!(message.contains("non-empty"));
+    }
+
+    #[test]
+    fn tool_hooks_inject_reminder_records_audit_when_no_session() {
+        let vm = vm_with_stdlib();
+        let _ = crate::orchestration::take_lifecycle_audit_log();
+        let report = call_sync(
+            &vm,
+            "tool_hooks_inject_reminder",
+            &[reminder_options("heads up", "tool_rewritten", 1)],
+        )
+        .expect("inject_reminder ok");
+        let dict = report.as_dict().expect("report dict");
+        // No active session in this unit test, so session_attached is false
+        // but the audit entry still records the side-effect.
+        assert!(
+            matches!(dict.get("session_attached"), Some(VmValue::Bool(false))),
+            "no live session in unit test"
+        );
+        assert!(
+            matches!(dict.get("reminder_id"), Some(VmValue::String(s)) if !s.is_empty()),
+            "reminder_id populated"
+        );
+        let drained = crate::orchestration::take_lifecycle_audit_log();
+        assert_eq!(drained.len(), 1);
+        assert_eq!(drained[0].kind, "tool_hooks.reminder_injected");
+        assert_eq!(
+            drained[0].payload.get("body").and_then(|v| v.as_str()),
+            Some("heads up")
+        );
+        assert_eq!(
+            drained[0].payload.get("ttl_turns").and_then(|v| v.as_i64()),
+            Some(1)
+        );
+    }
+
+    #[test]
+    fn tool_hooks_inject_reminder_requires_body() {
+        let vm = vm_with_stdlib();
+        let mut options: BTreeMap<String, VmValue> = BTreeMap::new();
+        options.insert(
+            "tags".to_string(),
+            VmValue::List(Rc::new(vec![VmValue::String(Rc::from("x"))])),
+        );
+        let result = call_sync(
+            &vm,
+            "tool_hooks_inject_reminder",
+            &[VmValue::Dict(Rc::new(options))],
+        );
+        let Err(VmError::Thrown(VmValue::String(message))) = result else {
+            panic!("expected thrown error, got {result:?}");
+        };
+        assert!(message.contains("body"));
     }
 }
