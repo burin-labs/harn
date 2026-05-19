@@ -91,6 +91,41 @@ condensed series summaries instead of full per-patch history.
   harn-serve will share without coupling the two. Embedders consume the
   artifacts produced here as opaque `{status, content_type, headers,
   body}` envelopes.
+- **Channel emit/match transcript events + OTel spans (#1877).** CH-06 of
+  the channels epic (#1870) closes the debuggability gap for channels by
+  giving every emit and match first-class observability on the same
+  primitives the rest of the runtime uses. Adds two new `SpanKind`
+  variants — `ChannelEmit` (opened at `emit_channel(...)`, closed once
+  the durable append + trigger fan-out finishes) and `ChannelMatch`
+  (opened just before the channel-source trigger dispatcher invokes the
+  handler, closed when dispatch returns) — surfaced through
+  `trace_spans()` and the OTel exporter. `ChannelMatch` spans link back
+  to the originating `ChannelEmit` span via `set_span_link` (P-05 /
+  #1858) using the Harn `harn.channel.emit_trace_id` /
+  `harn.channel.emit_span_id` headers stashed on the trigger event; for
+  aggregation/batched triggers (CH-04 / #1875) the match span
+  multi-links to every constituent emit span so the trace tree shows
+  the full fan-in. In parallel, emits two new transcript event kinds —
+  `transcript.channel.emit` (every append, whether fresh or
+  idempotent-duplicate, with `payload_summary`, `inserted`, `duplicate`,
+  `emitted_at`, `emitted_by`, scope/session/pipeline/tenant correlation,
+  and the live `span_id`) and `transcript.channel.match` (every handler
+  dispatch, with `trigger_id`, `handler_kind`, `matched_at_ms`,
+  `matched_in_session_id`, the live `span_id`, and a `batch` summary
+  carrying `count` + `constituent_event_ids` for aggregated dispatch) —
+  on the new `transcript.channel.lifecycle` event-log topic, mirroring
+  the `transcript.reminder.lifecycle` pattern from S-15 (#1865).
+  Window-expire flushes of aggregation buffers (`fire_partial` /
+  `discard` paths) reconstruct the `ResolvedChannel` from the first
+  buffered event so the match span carries the right scope + name even
+  when the flush dispatches off a background sweep. Three new
+  conformance fixtures under
+  `conformance/tests/triggers/trigger_channel_otel_*` cover the
+  single-event emit/match link, the batched multi-link multi-emit
+  case, and the idempotent re-emit (transcript event still fires with
+  `inserted=false`, but fan-out is suppressed so no follow-on match
+  event lands). Unblocks CH-07 audit, CH-08 conformance, and B-08 IDE
+  rendering.
 - **Pool conformance gap-fill: `pool_unsettled_state_integration` (#1892).**
   PL-07 (epic #1883) is the comprehensive pool conformance suite. Eight of
   the ten spec scenarios were already covered by fixtures landed alongside

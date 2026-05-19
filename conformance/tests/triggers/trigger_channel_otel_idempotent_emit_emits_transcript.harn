@@ -1,0 +1,53 @@
+import "std/triggers"
+
+/**
+ * CH-06 (#1877): an idempotent re-emit (same explicit `id`) still emits
+ * a `transcript.channel.emit` event with `inserted=false` /
+ * `duplicate=true`. Trigger fan-out is suppressed on the duplicate
+ * (existing CH-01 contract), so no `transcript.channel.match` event
+ * follows the duplicate even though the first emit produces one. This
+ * gives auditors a visible trail of attempts without re-firing
+ * downstream handlers.
+ */
+fn handle_event(event) {
+  // no-op — the test asserts on the transcript stream, not handler effects
+  let _ = event
+}
+
+pipeline default() {
+  enable_tracing(true)
+  let stream = event_log.subscribe({topic: "transcript.channel.lifecycle"})
+  let unique = to_string(to_int(timestamp())) + "-" + to_string(random_int(100000, 999999))
+  let _ = trigger_register(
+    {
+      id: "channel-otel-idem-" + unique,
+      kind: "channel.emit",
+      provider: "channel",
+      autonomy_tier: "act_auto",
+      handler: handle_event,
+      when: nil,
+      retry: nil,
+      match: {events: ["channel:ch.otel.idem.input"]},
+      events: nil,
+      dedupe_key: nil,
+      filter: nil,
+      budget: nil,
+      manifest_path: nil,
+      package_name: "conformance",
+    },
+  )
+  let event_id = "fixed-event-id-" + unique
+  let _ = emit_channel("ch.otel.idem.input", {seq: 1}, {id: event_id})
+  let _ = emit_channel("ch.otel.idem.input", {seq: 1}, {id: event_id})
+  let first = stream.next().value
+  let second = stream.next().value
+  let third = stream.next().value
+  println(first.kind)
+  println(first.payload.inserted)
+  println(first.payload.duplicate)
+  println(second.kind)
+  println(third.kind)
+  println(third.payload.inserted)
+  println(third.payload.duplicate)
+  enable_tracing(false)
+}
