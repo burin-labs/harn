@@ -19,7 +19,10 @@ pipeline test(task) {
       backpressure: bp.queue(1, "drop_newest"),
     },
   )
-  let stream = event_log.subscribe({topic: "lifecycle.pool.audit"})
+  // Filter to drop receipts so the assertion ignores the `pool_submit`
+  // and `pool_dequeue` receipts emitted on the same topic by PL-06.
+  let stream = event_log
+    .subscribe({topic: "lifecycle.pool.audit", kind_prefix: "pool_drop"})
   let task_factory = { _event -> return { ->
     receive(gate)
     return "ok"

@@ -94,6 +94,25 @@ condensed series summaries instead of full per-patch history.
   cadence without real wall-clock waits. Conformance:
   `conformance/tests/stdlib/oauth_device_flow_{happy_path,pending,slow_down,expired}.harn`.
   Part of epic #1885 (OAuth stdlib).
+- **Pool OTel spans + audit receipts (#1891).** Adds two new
+  `SpanKind` variants — `PoolSubmit` (fires at `pool.submit()`, carries
+  `pool` / `pool_id` / `priority` / `key` / `idempotency_key` /
+  `task_id` / `status` metadata) and `PoolDequeue` (fires when the
+  dispatcher pulls a task out of the queue, carries the same
+  `pool` / `pool_id` / `task_id` plus `queued_for_ms` and `slot_index`,
+  and links back to the originating `PoolSubmit` span via
+  `set_span_link` from P-05 / #1858 so submit → dequeue stays
+  correlated across the async boundary). Three audit receipts now land
+  on the existing `lifecycle.pool.audit` topic: `pool_submit`
+  (`harn.pool_submit.v1`), `pool_dequeue` (`harn.pool_dequeue.v1`),
+  and `pool_drop` (`harn.pool_drop.v1`, already shipped in PL-03).
+  All three respect the disabled-tracing fast path (the span guards
+  return id 0 when tracing is off). The `event_log.subscribe`
+  `kind_prefix` filter lets observers narrow the topic to a specific
+  receipt kind (the existing backpressure-audit fixtures use
+  `kind_prefix: "pool_drop"` so they ignore the new receipts).
+  Conformance coverage: `conformance/tests/pool_otel/*.harn`. Part of
+  epic #1883.
 - **Pool state durability (#1890).** `Pool.create({scope: ...})` now
   routes to three durability backends following the channel scope
   contract: `session` (default, in-memory only — lost on session close);

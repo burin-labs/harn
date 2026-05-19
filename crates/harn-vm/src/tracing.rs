@@ -36,6 +36,12 @@ pub enum SpanKind {
     Drain,
     /// One drain settlement decision.
     DrainDecision,
+    /// `pool.submit()` boundary — accepted, rejected, or queued (PL-06).
+    PoolSubmit,
+    /// Pool worker picks the task out of the queue (PL-06). Links back to
+    /// the originating `PoolSubmit` span across the async boundary so
+    /// queue dwell time can be reconstructed from a single trace.
+    PoolDequeue,
 }
 
 impl SpanKind {
@@ -54,6 +60,8 @@ impl SpanKind {
             Self::Resume => "resume",
             Self::Drain => "drain",
             Self::DrainDecision => "drain_decision",
+            Self::PoolSubmit => "pool_submit",
+            Self::PoolDequeue => "pool_dequeue",
         }
     }
 }

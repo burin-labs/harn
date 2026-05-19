@@ -93,6 +93,19 @@ struct TaskState {
     /// pipeline-scope pool reload: any task whose `heartbeat_at_ms` is
     /// older than `stale_after_ms` at load time is re-enqueued.
     heartbeat_at_ms: i64,
+    /// Wall-clock ms snapshot taken at submission, used to compute
+    /// `queued_for_ms` on the `PoolDequeueReceipt` when the task is
+    /// finally plucked from the queue (PL-06).
+    submitted_at_ms: i64,
+    /// Live span link to the `PoolSubmit` span. Populated when tracing is
+    /// enabled at submit time so the deferred `PoolDequeue` span can link
+    /// back across the async boundary (PL-06 / `set_span_link` from
+    /// harn#1858).
+    submit_span_link: Option<crate::tracing::SpanLink>,
+    /// Caller identifier captured at submit time (`workflow_id`,
+    /// `agent_session_id`, or `worker_id` when set; otherwise "user").
+    /// Stamped on the `PoolSubmitReceipt`.
+    submitted_by: String,
     /// Senders wake every `pool_wait` future the moment the task reaches
     /// a terminal state. The Sender side is dropped to fire the signal.
     waiters: Vec<tokio::sync::oneshot::Sender<()>>,
@@ -514,6 +527,123 @@ struct PoolDropAudit {
     queue_depth: usize,
     max_depth: Option<usize>,
     occurred_at: String,
+}
+
+/// `PoolSubmitReceipt` (PL-06 / #1891). One per accepted submission.
+/// Pairs 1:1 with a `PoolSubmit` span on the audit timeline.
+#[derive(Clone)]
+struct PoolSubmitReceipt {
+    pool_id: String,
+    pool_name: String,
+    task_id: String,
+    submitted_at: String,
+    priority: i64,
+    key: Option<String>,
+    idempotency_key: Option<String>,
+    submitted_by: String,
+}
+
+/// `PoolDequeueReceipt` (PL-06 / #1891). One per task plucked out of the
+/// queue by the dispatcher. Pairs 1:1 with a `PoolDequeue` span that
+/// links back to the originating `PoolSubmit` span.
+#[derive(Clone)]
+struct PoolDequeueReceipt {
+    pool_id: String,
+    pool_name: String,
+    task_id: String,
+    dequeued_at: String,
+    queued_for_ms: i64,
+    /// Sequential slot index inside `pool.active` at the moment of
+    /// dispatch. Useful when correlating dequeue receipts with
+    /// `max_concurrent` capacity exhaustion.
+    slot_index: usize,
+}
+
+/// RAII guard around a pool tracing span. Mirrors the
+/// `LifecycleSpanGuard` pattern used by P-05 (#1858): we open both a
+/// thread-local Harn span (for `trace_spans()` introspection) and an
+/// OTel `tracing::Span` (for the exporter), wire OTel span links via
+/// `crate::observability::otel::set_span_link`, and close them both on
+/// `end()` / `Drop`. Disabled-tracing path is a no-op because
+/// `crate::tracing::span_start_*` returns id 0 and short-circuits.
+struct PoolSpanGuard {
+    span_id: u64,
+    otel_span: tracing::Span,
+}
+
+impl PoolSpanGuard {
+    fn start(
+        kind: crate::tracing::SpanKind,
+        name: String,
+        links: Vec<crate::tracing::SpanLink>,
+    ) -> Self {
+        Self::start_with_parenting(kind, name, links, true)
+    }
+
+    fn start_detached(
+        kind: crate::tracing::SpanKind,
+        name: String,
+        links: Vec<crate::tracing::SpanLink>,
+    ) -> Self {
+        Self::start_with_parenting(kind, name, links, false)
+    }
+
+    fn start_with_parenting(
+        kind: crate::tracing::SpanKind,
+        name: String,
+        links: Vec<crate::tracing::SpanLink>,
+        inherit_parent: bool,
+    ) -> Self {
+        let span_id = if inherit_parent {
+            crate::tracing::span_start_with_links(kind, name.clone(), links.clone())
+        } else {
+            crate::tracing::span_start_detached_with_links(kind, name.clone(), links.clone())
+        };
+        let otel_span = tracing::info_span!(
+            target: "harn.vm.pool",
+            "harn.pool",
+            harn.kind = kind.as_str(),
+            harn.name = %name,
+        );
+        for link in links {
+            let trace_id = crate::TraceId(link.trace_id);
+            let mut attributes: std::collections::HashMap<String, String> =
+                link.attributes.into_iter().collect();
+            attributes
+                .entry("harn.link.kind".to_string())
+                .or_insert_with(|| "pool_submit".to_string());
+            let _ = crate::observability::otel::set_span_link(
+                &otel_span,
+                &trace_id,
+                &link.span_id,
+                Some(attributes),
+            );
+        }
+        Self { span_id, otel_span }
+    }
+
+    fn link(&self) -> Option<crate::tracing::SpanLink> {
+        crate::observability::otel::current_span_context_hex(&self.otel_span)
+            .map(|(trace_id, span_id)| crate::tracing::SpanLink::new(trace_id, span_id))
+            .or_else(|| crate::tracing::span_link(self.span_id))
+    }
+
+    fn set_metadata(&self, key: &str, value: serde_json::Value) {
+        crate::tracing::span_set_metadata(self.span_id, key, value);
+    }
+
+    fn end(&mut self) {
+        if self.span_id != 0 {
+            crate::tracing::span_end(self.span_id);
+            self.span_id = 0;
+        }
+    }
+}
+
+impl Drop for PoolSpanGuard {
+    fn drop(&mut self) {
+        self.end();
+    }
 }
 
 impl QueueStrategy {
@@ -1453,7 +1583,33 @@ async fn submit_to_pool_entry(
             return Ok(existing);
         }
     }
+    let submitted_by = current_submitter();
+    let (pool_id_for_span, pool_name_for_span) = {
+        let pool = entry.borrow();
+        (pool.id.clone(), pool.name.clone())
+    };
     loop {
+        // Open the PoolSubmit span just-in-time for each attempt loop:
+        // a single submitter that is blocked under `block_submitter`
+        // backpressure may try several times before placing the task in
+        // the queue. We span every attempt so the trace records the
+        // submitter's queue-wait dwell explicitly.
+        let mut submit_span = PoolSpanGuard::start(
+            crate::tracing::SpanKind::PoolSubmit,
+            format!("pool.submit {pool_name_for_span}"),
+            Vec::new(),
+        );
+        submit_span.set_metadata("pool", serde_json::json!(pool_name_for_span));
+        submit_span.set_metadata("pool_id", serde_json::json!(pool_id_for_span));
+        submit_span.set_metadata("priority", serde_json::json!(priority));
+        if let Some(key) = &key {
+            submit_span.set_metadata("key", serde_json::json!(key));
+        }
+        if let Some(idem) = &idempotency_key {
+            submit_span.set_metadata("idempotency_key", serde_json::json!(idem));
+        }
+        let submit_link = submit_span.link();
+
         let attempt = {
             let mut pool = entry.borrow_mut();
             submit_or_wait(
@@ -1462,22 +1618,68 @@ async fn submit_to_pool_entry(
                 key.clone(),
                 priority,
                 idempotency_key.clone(),
+                submit_link.clone(),
+                submitted_by.clone(),
             )
         };
         match attempt {
             SubmitAttempt::Submitted { task, audits } => {
+                {
+                    let task_ref = task.borrow();
+                    submit_span.set_metadata("task_id", serde_json::json!(task_ref.id));
+                    submit_span.set_metadata("status", serde_json::json!(task_ref.status.as_str()));
+                }
+                let receipt = {
+                    let task_ref = task.borrow();
+                    pool_submit_receipt(&entry.borrow(), &task_ref)
+                };
+                emit_pool_submit_receipt(receipt).await;
                 for audit in audits {
                     emit_pool_drop(audit).await;
                 }
+                submit_span.end();
                 dispatch_ready(entry);
                 return Ok(task);
             }
             SubmitAttempt::Wait(receiver) => {
+                submit_span.set_metadata("blocked", serde_json::json!(true));
+                submit_span.end();
                 let _ = receiver.await;
             }
-            SubmitAttempt::Fail(error) => return Err(error),
+            SubmitAttempt::Fail(error) => {
+                submit_span.set_metadata("error", serde_json::json!(error.to_string()));
+                submit_span.end();
+                return Err(error);
+            }
         }
     }
+}
+
+/// Resolve the best-available identifier for who submitted a task. Mirrors
+/// the runtime-context lookups in `runtime_context_value` so the
+/// `PoolSubmitReceipt.submitted_by` field aligns with the rest of the
+/// observability stack (workflow span, agent session, mutation session,
+/// active worker). Falls back to `"user"` when no better identifier is
+/// in scope (e.g. submission from a CLI smoke test).
+fn current_submitter() -> String {
+    if let Some(vm) = crate::vm::clone_async_builtin_child_vm() {
+        if let VmValue::Dict(values) = crate::runtime_context::runtime_context_value(&vm) {
+            for key in [
+                "agent_session_id",
+                "worker_id",
+                "workflow_id",
+                "run_id",
+                "task_id",
+            ] {
+                if let Some(VmValue::String(text)) = values.get(key) {
+                    if !text.is_empty() {
+                        return text.to_string();
+                    }
+                }
+            }
+        }
+    }
+    "user".to_string()
 }
 
 fn lookup_idempotency_match(
@@ -1498,15 +1700,26 @@ enum SubmitAttempt {
     Fail(VmError),
 }
 
+#[allow(clippy::too_many_arguments)]
 fn submit_or_wait(
     pool: &mut PoolEntry,
     closure: Rc<VmClosure>,
     key: Option<String>,
     priority: i64,
     idempotency_key: Option<String>,
+    submit_span_link: Option<crate::tracing::SpanLink>,
+    submitted_by: String,
 ) -> SubmitAttempt {
     if can_accept_now(pool) {
-        let (state, pending) = create_pending_task(pool, closure, key, priority, idempotency_key);
+        let (state, pending) = create_pending_task(
+            pool,
+            closure,
+            key,
+            priority,
+            idempotency_key,
+            submit_span_link,
+            submitted_by,
+        );
         enqueue_task(pool, pending);
         return SubmitAttempt::Submitted {
             task: state,
@@ -1516,8 +1729,15 @@ fn submit_or_wait(
 
     match pool.backpressure.clone() {
         BackpressureStrategy::Unbounded => {
-            let (state, pending) =
-                create_pending_task(pool, closure, key, priority, idempotency_key);
+            let (state, pending) = create_pending_task(
+                pool,
+                closure,
+                key,
+                priority,
+                idempotency_key,
+                submit_span_link,
+                submitted_by,
+            );
             enqueue_task(pool, pending);
             SubmitAttempt::Submitted {
                 task: state,
@@ -1541,6 +1761,8 @@ fn submit_or_wait(
             key,
             priority,
             idempotency_key,
+            submit_span_link,
+            submitted_by,
             "drop_oldest_queue_full",
             QueueOnFullPolicy::DropOldest.as_str(),
             Some(max_depth),
@@ -1554,6 +1776,8 @@ fn submit_or_wait(
             key,
             priority,
             idempotency_key,
+            submit_span_link,
+            submitted_by,
             "drop_newest_queue_full",
             QueueOnFullPolicy::DropNewest.as_str(),
             Some(max_depth),
@@ -1581,6 +1805,8 @@ fn submit_or_wait(
             key,
             priority,
             idempotency_key,
+            submit_span_link,
+            submitted_by,
             "ring_buffer_drop_oldest",
             "ring_buffer",
             Some(capacity),
@@ -1607,12 +1833,22 @@ fn submit_with_oldest_drop(
     key: Option<String>,
     priority: i64,
     idempotency_key: Option<String>,
+    submit_span_link: Option<crate::tracing::SpanLink>,
+    submitted_by: String,
     reason: &str,
     policy: &str,
     max_depth: Option<usize>,
 ) -> SubmitAttempt {
     let queue_depth = pool.queue.len();
-    let (state, pending) = create_pending_task(pool, closure, key, priority, idempotency_key);
+    let (state, pending) = create_pending_task(
+        pool,
+        closure,
+        key,
+        priority,
+        idempotency_key,
+        submit_span_link,
+        submitted_by,
+    );
     let replacement_task_id = state.borrow().id.clone();
     let mut audits = Vec::new();
     if let Some(dropped) = pool.queue.pop_front() {
@@ -1640,12 +1876,22 @@ fn submit_with_newest_drop(
     key: Option<String>,
     priority: i64,
     idempotency_key: Option<String>,
+    submit_span_link: Option<crate::tracing::SpanLink>,
+    submitted_by: String,
     reason: &str,
     policy: &str,
     max_depth: Option<usize>,
 ) -> SubmitAttempt {
     let queue_depth = pool.queue.len();
-    let (state, _pending) = create_pending_task(pool, closure, key, priority, idempotency_key);
+    let (state, _pending) = create_pending_task(
+        pool,
+        closure,
+        key,
+        priority,
+        idempotency_key,
+        submit_span_link,
+        submitted_by,
+    );
     let task_id = state.borrow().id.clone();
     let waiters = reject_task_state(&state, reason, policy);
     wake_task_waiters(waiters);
@@ -1663,10 +1909,13 @@ fn create_pending_task(
     key: Option<String>,
     priority: i64,
     idempotency_key: Option<String>,
+    submit_span_link: Option<crate::tracing::SpanLink>,
+    submitted_by: String,
 ) -> (Rc<RefCell<TaskState>>, PendingTask) {
     pool.submit_counter += 1;
     let seq = pool.submit_counter;
     let task_id = next_task_id(pool);
+    let now_ms = now_ms_for_pool();
     let state = Rc::new(RefCell::new(TaskState {
         id: task_id.clone(),
         pool_id: pool.id.clone(),
@@ -1682,7 +1931,10 @@ fn create_pending_task(
         rejection_reason: None,
         rejection_policy: None,
         idempotency_key: idempotency_key.clone(),
-        heartbeat_at_ms: now_ms_for_pool(),
+        heartbeat_at_ms: now_ms,
+        submitted_at_ms: now_ms,
+        submit_span_link,
+        submitted_by,
         waiters: Vec::new(),
     }));
     if let Some(idem) = &idempotency_key {
@@ -1870,6 +2122,15 @@ fn task_state_from_persisted(
         rejection_policy,
         idempotency_key: persisted.idempotency_key.clone(),
         heartbeat_at_ms: persisted.heartbeat_at_ms,
+        // Rehydrated tasks predate the live VM's tracing context: the
+        // submit span belongs to the prior process. Treat as no span;
+        // the dequeue receipt's `queued_for_ms` is computed from the
+        // persisted heartbeat instead.
+        submitted_at_ms: persisted.heartbeat_at_ms,
+        submit_span_link: None,
+        // No live submitter context after a reload; receipts emitted on
+        // re-execution take the live caller's identity at that point.
+        submitted_by: "reloaded".to_string(),
         waiters: Vec::new(),
     }))
 }
@@ -2001,6 +2262,81 @@ async fn emit_pool_drop(audit: PoolDropAudit) {
         .await;
 }
 
+fn pool_submit_receipt(pool: &PoolEntry, task: &TaskState) -> PoolSubmitReceipt {
+    PoolSubmitReceipt {
+        pool_id: pool.id.clone(),
+        pool_name: pool.name.clone(),
+        task_id: task.id.clone(),
+        submitted_at: task.submitted_at.clone(),
+        priority: task.priority,
+        key: task.key.clone(),
+        idempotency_key: task.idempotency_key.clone(),
+        submitted_by: task.submitted_by.clone(),
+    }
+}
+
+async fn emit_pool_submit_receipt(receipt: PoolSubmitReceipt) {
+    let topic = Topic::new(POOL_AUDIT_TOPIC).expect("static pool audit topic is valid");
+    let mut headers = BTreeMap::new();
+    headers.insert("schema".to_string(), "harn.pool_submit.v1".to_string());
+    let payload = json!({
+        "pool_id": receipt.pool_id,
+        "pool": receipt.pool_name,
+        "task_id": receipt.task_id,
+        "submitted_at": receipt.submitted_at,
+        "priority": receipt.priority,
+        "key": receipt.key,
+        "idempotency_key": receipt.idempotency_key,
+        "submitted_by": receipt.submitted_by,
+    });
+    let _ = ensure_pool_event_log()
+        .append(
+            &topic,
+            LogEvent::new("pool_submit", payload).with_headers(headers),
+        )
+        .await;
+}
+
+fn pool_dequeue_receipt(
+    pool: &PoolEntry,
+    task: &TaskState,
+    slot_index: usize,
+) -> PoolDequeueReceipt {
+    let now_ms = now_ms_for_pool();
+    let queued_for_ms = now_ms.saturating_sub(task.submitted_at_ms);
+    PoolDequeueReceipt {
+        pool_id: pool.id.clone(),
+        pool_name: pool.name.clone(),
+        task_id: task.id.clone(),
+        dequeued_at: task
+            .started_at
+            .clone()
+            .unwrap_or_else(|| uuid::Uuid::now_v7().to_string()),
+        queued_for_ms,
+        slot_index,
+    }
+}
+
+async fn emit_pool_dequeue_receipt(receipt: PoolDequeueReceipt) {
+    let topic = Topic::new(POOL_AUDIT_TOPIC).expect("static pool audit topic is valid");
+    let mut headers = BTreeMap::new();
+    headers.insert("schema".to_string(), "harn.pool_dequeue.v1".to_string());
+    let payload = json!({
+        "pool_id": receipt.pool_id,
+        "pool": receipt.pool_name,
+        "task_id": receipt.task_id,
+        "dequeued_at": receipt.dequeued_at,
+        "queued_for_ms": receipt.queued_for_ms,
+        "slot_index": receipt.slot_index,
+    });
+    let _ = ensure_pool_event_log()
+        .append(
+            &topic,
+            LogEvent::new("pool_dequeue", payload).with_headers(headers),
+        )
+        .await;
+}
+
 fn ensure_pool_event_log() -> Arc<crate::event_log::AnyEventLog> {
     active_event_log()
         .unwrap_or_else(|| install_memory_for_current_thread(POOL_EVENT_LOG_QUEUE_DEPTH))
@@ -2076,17 +2412,61 @@ fn spawn_task(pool: Rc<RefCell<PoolEntry>>, pending: PendingTask) {
         state,
         ..
     } = pending;
+
+    // PoolDequeue span (PL-06). Opened detached so it stands on its own
+    // in the trace tree — the dispatcher fires it from whatever caller
+    // happens to free a slot (submit, wait, or another task finishing),
+    // and the natural parent of that work is the submitter's pipeline,
+    // not the unrelated current span. Linking back to the submit span
+    // via `set_span_link` is what stitches the trace tree together.
+    let submit_link = state.borrow().submit_span_link.clone();
+    let span_links: Vec<crate::tracing::SpanLink> = submit_link
+        .into_iter()
+        .map(|link| {
+            link.with_attributes(BTreeMap::from([(
+                "harn.link.kind".to_string(),
+                "pool_submit".to_string(),
+            )]))
+        })
+        .collect();
+    let (pool_id_for_span, pool_name_for_span) = {
+        let pool_ref = pool.borrow();
+        (pool_ref.id.clone(), pool_ref.name.clone())
+    };
+    let mut dequeue_span = PoolSpanGuard::start_detached(
+        crate::tracing::SpanKind::PoolDequeue,
+        format!("pool.dequeue {pool_name_for_span}"),
+        span_links,
+    );
+    dequeue_span.set_metadata("pool", serde_json::json!(pool_name_for_span));
+    dequeue_span.set_metadata("pool_id", serde_json::json!(pool_id_for_span));
+    dequeue_span.set_metadata("task_id", serde_json::json!(task_id));
+
     {
         let mut state_ref = state.borrow_mut();
         state_ref.status = TaskStatus::Running;
         state_ref.started_at = Some(uuid::Uuid::now_v7().to_string());
         state_ref.heartbeat_at_ms = now_ms_for_pool();
     }
-    {
+    let dequeue_receipt = {
         let mut pool_ref = pool.borrow_mut();
         pool_ref.active.insert(task_id.clone(), state.clone());
+        let slot_index = pool_ref.active.len().saturating_sub(1);
+        let receipt = pool_dequeue_receipt(&pool_ref, &state.borrow(), slot_index);
         persist_task_if_durable(&pool_ref, &state.borrow());
-    }
+        receipt
+    };
+
+    dequeue_span.set_metadata(
+        "queued_for_ms",
+        serde_json::json!(dequeue_receipt.queued_for_ms),
+    );
+    dequeue_span.set_metadata("slot_index", serde_json::json!(dequeue_receipt.slot_index));
+
+    // Hand the dequeue receipt off to a tokio task. Append is async; we
+    // already hold a sync borrow on the pool registry here so awaiting in
+    // place would deadlock the next caller of `dispatch_ready`.
+    tokio::task::spawn_local(emit_pool_dequeue_receipt(dequeue_receipt));
 
     // Snapshot the active async-builtin VM now (synchronously, while the
     // submit builtin is still on the stack). The cloned VM moves into the
@@ -2096,6 +2476,7 @@ fn spawn_task(pool: Rc<RefCell<PoolEntry>>, pending: PendingTask) {
         // Pool submissions are always called from an async builtin
         // (`__pool_submit`), so the slot should never be empty here.
         // Fail the task cleanly instead of leaving it stuck "running".
+        dequeue_span.end();
         finalize_task(
             &pool,
             &state,
@@ -2103,6 +2484,12 @@ fn spawn_task(pool: Rc<RefCell<PoolEntry>>, pending: PendingTask) {
         );
         return;
     };
+
+    // Close the dequeue span before handing off to the spawned future:
+    // the span tracks dispatcher work (slot reservation + child-VM clone),
+    // not the runtime of the user closure itself. The closure executes
+    // under whatever spans it opens for its own work.
+    dequeue_span.end();
 
     tokio::task::spawn_local(async move {
         let outcome = child_vm
