@@ -1697,29 +1697,121 @@ dict and return `false`, `true`, `{grant: "once"}`, or `{grant: "session"}`.
 Child agents still intersect with the parent capability policy; escalation
 cannot widen a parent ceiling.
 
-### Agent lifecycle tools
+### Agent lifecycle: pause, resume, self-park
 
-`agent_loop(...)` registers `agent_await_resumption(reason, conditions?)` as a
-model-facing lifecycle tool. When the loop is running inside a worker, that call
-is intercepted before normal tool dispatch, validates `conditions` with
-`parse_resume_conditions(...)`, suspends the worker, and returns
-`status: "suspended"` with `handle`, `reason`, `initiator: "self"`,
-`conditions`, and `iterations_completed`.
+`spawn_agent`, `wait_agent`, `resume_agent`, `suspend_agent`, and
+`list_agents` from `std/agent/workers` are the script-level lifecycle
+surface for delegated work. Layered on top, `agent_loop(...)` exposes a
+model-facing **lifecycle tool** so the agent can park itself between turns
+and so a parent loop can pause/resume children. Full reference:
+`docs/src/agent-lifecycle.md`.
 
-Parent-side tools are gated by subagent capability. Pass `subagents: true` or
-`subagent_tools: true` in loop options, or call
-`agent_lifecycle_tools(registry, {subagents: true})`, to expose:
+Three model-facing tools:
 
 | Tool | Use |
 |---|---|
-| `subagent_pause(handle, reason)` | Pause a running child after its current turn settles |
-| `subagent_resume(handle, input?, continue_transcript? = true)` | Resume a suspended child |
-| `agent_await_resumption(reason, conditions?)` | Let the current worker self-park |
+| `agent_await_resumption(reason, conditions?)` | The current worker self-parks. Registered automatically by `agent_loop(...)`. |
+| `subagent_pause(handle, reason)` | Parent loop pauses a running child after its current turn settles. Opt-in via `subagents: true`. |
+| `subagent_resume(handle, input?, continue_transcript? = true)` | Parent loop resumes a suspended child. Opt-in via `subagents: true`. |
 
-Lifecycle invocations emit `tool_call_audit` telemetry with initiator and reason
-metadata. Top-level loops use the same tool surface: `agent_loop(...)` returns a
-`status: "suspended"` payload with a persisted `handle.snapshot_path`, and the
-CLI can cold-restore it with `harn run --resume <snapshot_path>`.
+When the model calls `agent_await_resumption(...)` inside an `agent_loop`
+running as a worker, the call is intercepted *before* normal tool dispatch:
+the loop validates `conditions` with `parse_resume_conditions(...)`,
+persists a snapshot, emits `WorkerSuspended`, and returns
+`{status: "suspended", handle, reason, initiator: "self", conditions,
+iterations_completed}` to the parent. Lifecycle calls emit
+`tool_call_audit` telemetry with `initiator` (one of `"self"`, `"parent"`,
+`"operator"`, `"triggered"`) and the supplied `reason`.
+
+Top-level loops use the same shape: a root `agent_loop(...)` that parks
+returns `status: "suspended"` with `handle.snapshot_path`, and the CLI
+cold-restores it with `harn run --resume <snapshot_path>`.
+
+```harn,ignore
+// Self-park mid-loop until a review approval lands or 30 minutes pass.
+import { agent_await_resumption } from "std/agent/workers"
+
+let result = agent_loop("Wait for the maintainer's review.", nil, {
+  provider: "openai",
+  model: "gpt-5",
+  tool_format: "native",
+})
+
+if result.status == "suspended" {
+  println(result.reason)               // model-supplied
+  println(result.handle.snapshot_path) // resumable snapshot on disk
+}
+```
+
+```harn,ignore
+// Parent-driven pause/resume of a background child.
+let handle = sub_agent_run("Draft the changelog.", {
+  background: true,
+  provider: "openai",
+})
+suspend_agent(handle, "operator pulled context")
+// ... other work ...
+resume_agent(handle, "Pick up where you left off.")
+let final = wait_agent(handle)
+```
+
+```harn,ignore
+// Conditioned self-park: trigger + timeout.
+agent_await_resumption("waiting on review", {
+  trigger: {
+    kind: "review.approved",
+    provider: "github",
+    match: {events: ["review.approved"]},
+  },
+  timeout: {duration_minutes: 30, on_timeout: "resume_with_summary"},
+})
+```
+
+Resume responsibility is named by an optional `resume_by` callback (third
+arg to `agent_await_resumption`). The four presets in `std/agent/resume_by`
+are `ResumeBy.parent_llm`, `ResumeBy.local_runtime`, `ResumeBy.cloud_harness`,
+and `ResumeBy.pipeline_drain`. They compose with
+`std/lifecycle/combinators::first_available`. `default_resume_by(...)`
+picks one based on whether `conditions` were supplied and whether a cloud
+session is bound:
+
+- `conditions == nil` → `ResumeBy.parent_llm`
+- `conditions != nil`, no cloud session → `ResumeBy.local_runtime`
+- `conditions != nil`, cloud session → `first_handled([cloud_harness, local_runtime])`
+
+Transcript continuity: `resume_agent(...)` defaults to
+`continue_transcript: true` — the resumed worker keeps its full transcript
+and the runtime injects a single-shot `system_reminder` with
+`dedupe_key: "resume_continuity"` summarizing the gap. Pass
+`continue_transcript: false` to restart from the prior summary plus new
+input only.
+
+Daemon idle is a degenerate case: `agent_loop(..., {daemon: true})` and
+the `daemon_*` stdlib wrappers (see `docs/src/llm/agent_loop.md#daemon-stdlib-wrappers`)
+internally call `agent_await_resumption(...)` when no wake source is
+queued. The snapshot carries daemon-specific fields
+(`pending_event_count`, `wake_interval_ms`, `watch_paths`) alongside the
+standard suspend metadata, so `daemon_resume(path)` cold-restores the
+loop identically.
+
+Common gotchas:
+
+- **Suspend is cooperative**, not preemptive. The flag is honored at the
+  next turn boundary — not mid-tool-call, not mid-LLM-request. Cap
+  long-running tools with `tool_call_timeout`.
+- **Conditions are optional.** A bare `agent_await_resumption("waiting")`
+  parks the worker open; only the parent agent, an operator, or
+  `resume_agent(...)` can wake it.
+- **Snapshots survive process restart.** Both the snapshot file and any
+  registered trigger conditions are durable. `harn run --resume <path>`
+  rehydrates the worker in a fresh process.
+- **Double-resume is detected** (`HARN-SUS-006`); the second caller can
+  retry against the now-running handle.
+- **Closing a suspended worker is terminal** — a later `resume_agent`
+  raises `HARN-SUS-010`.
+
+Diagnostic codes for the suspend/resume namespace are `HARN-SUS-001..010`
+— see `docs/src/agent-lifecycle.md#diagnostic-codes` for the full table.
 
 ### Durable agent channels
 

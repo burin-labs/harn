@@ -10,6 +10,37 @@ condensed series summaries instead of full per-patch history.
 
 ### Added
 
+- **Suspend/resume docs (S-13, #1849).** Adds the user-facing
+  reference for the agent suspend/resume primitive (epic #1836). New
+  mdBook page `docs/src/agent-lifecycle.md` covers the lifecycle
+  builtins (`suspend_agent`, `resume_agent`,
+  `parse_resume_conditions`, `agent_await_resumption`,
+  `agent_lifecycle_tools`), the `ResumeConditions` shape (trigger /
+  timeout / on_event), self-park mid-loop, parent-driven
+  pause/resume via `subagent_pause` / `subagent_resume`, conditioned
+  resume with trigger + timeout, the four `ResumeBy.*` callbacks and
+  the `default_resume_by(...)` policy, transcript continuity (the
+  single-shot `resume_continuity` system reminder vs
+  `continue_transcript: false`), top-level loop cold-restore via
+  `harn run --resume <snapshot_path>`, daemon idle as a degenerate
+  case, the `HARN-SUS-*` diagnostic codes, and the cooperative-pause
+  gotchas. Replaces the terse "Agent lifecycle tools" subsection in
+  `docs/llm/harn-quickref.md` with an expanded "Agent lifecycle:
+  pause, resume, self-park" section that lists the three model-facing
+  tools, ships three executable snippets (self-park, parent-driven,
+  conditioned), summarizes resume responsibility and `ResumeBy.*`,
+  documents transcript continuity, and surfaces the gotchas.
+  Adds an "Agent lifecycle (suspend/resume)" section to
+  `spec/HARN_SPEC.md` with the formal state machine
+  (`running -> suspended -> running / closed -> done`), the
+  `Suspension` / `ResumeConditions` /
+  `AgentAwaitResumptionRequest` shapes, the four canonical
+  `ResumeBy.*` presets with `default_resume_by(...)` decision tree,
+  the `PreSuspend` / `PostSuspend` / `PreResume` / `PostResume` hook
+  contract, the top-level cold-restore contract, the daemon-idle
+  reduction, and the cooperative cancellation contract. Wires the
+  new mdBook page into `docs/src/SUMMARY.md` under Agent runtime
+  next to Agent state.
 - **Pool docs + cookbook (PL-08, #1893).** Adds the user-facing
   reference + cookbook for agent pools (epic #1883). New mdBook page
   `docs/src/agent-pools.md` covers pool creation (`pool_create`
