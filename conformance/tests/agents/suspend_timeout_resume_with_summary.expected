@@ -1,0 +1,4 @@
+status=suspended
+has_auto_trigger=true
+post_timeout_status=completed
+has_transcript=true

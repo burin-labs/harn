@@ -1,0 +1,6 @@
+status=suspended
+has_auto_trigger=true
+post_timeout_status=failed
+has_latest_error=true
+error_mentions_timeout=true
+resume_failed=true

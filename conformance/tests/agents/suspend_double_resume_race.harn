@@ -1,0 +1,48 @@
+/**
+ * S-11 (#1847): a second resume against a worker whose state has
+ * already advanced past `suspended` is rejected with a diagnostic
+ * code. This is the user-visible shape of the concurrent-resume race
+ * (HARN-SUS-006 in the Rust unit test
+ * `concurrent_warm_resume_reports_sus_006`).
+ *
+ * Pure-Harn conformance can't deterministically race two pipeline
+ * branches against the same handle, so the fixture serialises the
+ * race: the first `resume_agent` wins and transitions the worker
+ * out of `suspended`; the second call then observes the new state
+ * and surfaces HARN-SUS-003 (worker is not suspended). The same
+ * code path is exercised either way — only one resume can win.
+ */
+pipeline main() {
+  llm_mock_clear()
+  llm_mock(
+    {
+      tool_calls: [{id: "park_race", name: "agent_await_resumption", arguments: {reason: "park before race"}}],
+    },
+  )
+  llm_mock({text: "first resume wins"})
+  let handle = sub_agent_run(
+    "Park then race two resumes.",
+    {provider: "mock", background: true, tool_format: "native", max_iterations: 3},
+  )
+  let suspended = wait_agent(handle)
+  println("pre_race_status=" + suspended.status)
+  // First resume wins and drives the worker to completion.
+  let first = resume_agent(handle)
+  let done = wait_agent(handle)
+  println("first_resume_status=" + first.status)
+  println("post_first_status=" + done.status)
+  // Second resume sees the worker is no longer suspended and rejects.
+  let second = try {
+    resume_agent(handle)
+  }
+  println("second_resume_failed=" + to_string(is_err(second)))
+  let err_text = to_string(unwrap_err(second))
+  println(
+    "second_err_has_sus_code="
+      + to_string(contains(err_text, "HARN-SUS-003") || contains(err_text, "HARN-SUS-006")),
+  )
+  println(
+    "second_err_mentions_not_suspended="
+      + to_string(contains(err_text, "not suspended")),
+  )
+}

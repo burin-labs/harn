@@ -1,0 +1,7 @@
+loop_status=budget_exhausted
+loop_daemon_state=budget_exhausted
+loop_snapshot_matches=true
+snap_daemon_state=budget_exhausted
+snap_has_iterations=true
+snap_summary_seeded=true
+snap_has_summary_field=true
