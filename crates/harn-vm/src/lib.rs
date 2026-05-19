@@ -14,6 +14,7 @@ pub mod autonomy;
 pub mod bridge;
 mod builtin_id;
 pub mod bytecode_cache;
+pub mod channels;
 pub mod checkpoint;
 mod chunk;
 mod compiler;
@@ -363,6 +364,7 @@ pub fn reset_thread_local_state() {
     llm::reset_llm_state();
     llm_config::clear_user_overrides();
     http::reset_http_state();
+    channels::reset_channel_state();
     event_log::reset_active_event_log();
     stdlib::reset_stdlib_state();
     connectors::clear_active_connector_clients();

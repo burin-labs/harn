@@ -1717,6 +1717,32 @@ metadata. Top-level loops use the same tool surface: `agent_loop(...)` returns a
 `status: "suspended"` payload with a persisted `handle.snapshot_path`, and the
 CLI can cold-restore it with `harn run --resume <snapshot_path>`.
 
+### Durable agent channels
+
+Use `emit_channel(name, payload, options?)` for cross-run facts that should land
+in the active event log. Bare names default to tenant scope:
+`emit_channel("pr.merged", payload)` resolves to
+`tenant:<current-or-default-tenant>:pr.merged`. Prefixes select a scope:
+`session:foo`, `pipeline:foo`, `tenant:foo`, `tenant:<tenant_id>:foo`, or
+`org:<org_id>:foo`; org scope currently fails with `HARN-CHN-002` until org
+grants exist.
+
+```harn
+let receipt = emit_channel("session:worker.ready", {worker: "lint"}, {
+  id: "worker-ready-lint",
+  ttl: 10m,
+})
+println(receipt.event_id)
+println(receipt.emitted_at.signature.starts_with("sha256:"))
+```
+
+Each stored event includes `id`, fully resolved `name`, `payload`,
+`emitted_at` (signed), `emitted_by`, available `pipeline_id`, `session_id`, or
+`tenant_id`, and `ttl_ms` when `options.ttl` is provided. Reusing the same
+`options.id` on the same resolved channel is idempotent and returns the
+original `event_id`. Use `channel_events(name, options?)` for tests and local
+inspection.
+
 Pass `autonomy_budget` to cap how many autonomous decisions an agent can
 make per UTC hour / UTC day. The check fires at loop entry, before any
 LLM/MCP work — scripts can't bypass it. When the cap is exhausted,

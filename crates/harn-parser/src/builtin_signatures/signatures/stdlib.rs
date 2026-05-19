@@ -1001,6 +1001,23 @@ pub(crate) const SIGNATURES: &[BuiltinSignature] = &[
         Ty::Named("stream"),
     ),
     BuiltinSignature::simple(
+        "emit_channel",
+        &[
+            Param::new("name", TY_STRING),
+            Param::new("payload", TY_ANY),
+            Param::optional("options", TY_DICT_OR_NIL),
+        ],
+        TY_DICT,
+    ),
+    BuiltinSignature::simple(
+        "channel_events",
+        &[
+            Param::new("name", TY_STRING),
+            Param::optional("options", TY_DICT_OR_NIL),
+        ],
+        TY_LIST,
+    ),
+    BuiltinSignature::simple(
         "event_log_emit",
         &[
             Param::new("topic", TY_STRING),

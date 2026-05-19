@@ -1480,6 +1480,28 @@ denied unless `allow_recursive: true`.
 |---|---|---|---|
 | `sleep(duration)` | duration: int (ms) or duration literal | nil | Pause execution |
 
+## Durable agent channels
+
+Durable channels publish structured agent/runtime facts into the active event
+log instead of an in-process `channel(...)` handle. Use them when a fact should
+be visible to trigger orchestration, later workers, or audit readers.
+
+| Function | Parameters | Returns | Description |
+|---|---|---|---|
+| `emit_channel(name, payload, options?)` | name: string, payload: any, options: `{id?: string, scope?: "session" \| "pipeline" \| "tenant" \| "org", tenant_id?: string, session_id?: string, pipeline_id?: string, ttl?: duration}` | dict | Append a durable channel event and return `{event_id, id, name_resolved, scope, scope_id, emitted_at, emitted_by, retention, duplicate}`. Bare names default to tenant scope. Reusing the same `id` on the same resolved channel is a no-op and returns the original `event_id`. |
+| `channel_events(name, options?)` | name: string, options: `{scope?: string, from_cursor?: int, cursor?: int, limit?: int}` | list | Read stored channel events for the resolved channel, oldest first. Intended for tests, diagnostics, and local orchestration inspection. |
+
+Channel names resolve to `scope:scope_id:name`. Bare
+`emit_channel("pr.merged", payload)` resolves to
+`tenant:<current-or-default-tenant>:pr.merged`. Prefixes select a scope:
+`session:foo`, `pipeline:foo`, `tenant:foo`, `tenant:<tenant_id>:foo`, and
+`org:<org_id>:foo`. Session events are retained in the current process,
+pipeline and tenant events use the active durable event log, and org-scoped
+channels currently fail with `HARN-CHN-002` until org grants are available.
+Every stored event includes a signed `emitted_at` timestamp, `emitted_by`, the
+fully resolved name, any available `pipeline_id`, `session_id`, or `tenant_id`,
+and `ttl_ms` when `options.ttl` is provided.
+
 ## Concurrency primitives
 
 ### Channels

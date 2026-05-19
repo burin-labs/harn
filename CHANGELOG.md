@@ -27,6 +27,12 @@ condensed series summaries instead of full per-patch history.
   [`docs/src/stdlib/oauth-storage.md`](docs/src/stdlib/oauth-storage.md)
   for the full reference and conformance coverage at
   `conformance/tests/stdlib/oauth_storage.harn`.
+- **Durable agent channel emits (#1871).** Adds `emit_channel(name, payload,
+  options?)` with tenant-default scope resolution, session/pipeline/tenant
+  prefixes, signed `emitted_at` timestamps, and idempotent `options.id`
+  handling backed by the event log. A `channel_events(...)` inspection helper
+  covers conformance and local diagnostics; org-scoped channels resolve but
+  return `HARN-CHN-002` until org grants land.
 
 ## v0.8.26
 
