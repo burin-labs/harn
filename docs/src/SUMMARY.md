@@ -98,6 +98,10 @@
 - [Agents Protocol v1](./spec/agents-protocol/v1.md)
 - [Agents Protocol Receipt Format](./spec/agents-protocol/receipt-format-v1.md)
 - [Agents Protocol Replay Contract](./spec/agents-protocol/replay-v1.md)
+- [Protocol contribution RFCs](./protocol-contributions/README.md)
+  - [ACP: `session/inject_reminder`](./protocol-contributions/acp-session-inject-reminder.md)
+  - [A2A: `tasks/inject_reminder`](./protocol-contributions/a2a-message-kind-reminder.md)
+  - [MCP: `notifications/reminder`](./protocol-contributions/mcp-notifications-reminder.md)
 
 # Orchestration
 

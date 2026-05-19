@@ -26,6 +26,18 @@ condensed series summaries instead of full per-patch history.
   mode callbacks can hook into the same plumbing. See
   `conformance/tests/stdlib/tool_hooks_mode_callbacks.harn` for the
   executable spec. Part of epic #1884 (preset tool hooks library).
+- **Protocol contribution RFCs for reminders (#1829).** Authored three
+  upstream-proposal documents under `docs/src/protocol-contributions/`:
+  ACP `session/inject_reminder` + `SessionUpdate::ReminderEmitted` (the
+  schema-edit follow-up to [ACP #1224][acp-1224]), A2A
+  `tasks/inject_reminder`, and MCP `notifications/reminder`. Each RFC
+  describes the proposed wire format, migration path from our existing
+  `_meta.harn.reminder` envelope, reference-impl status, and open
+  questions for upstream maintainers. Upstream filings remain a
+  maintainer action — see #1829 for the outstanding work.
+
+[acp-1224]: https://github.com/agentclientprotocol/agent-client-protocol/discussions/1224
+
 - **`std/oauth/storage` token storage backends (#1904).** Five
   interchangeable backends for the OAuth client (#1885 OA-03):
   `memory()` (per-VM, ephemeral), `file(path, encryption_key)` (single
