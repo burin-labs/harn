@@ -736,6 +736,18 @@ fn run_install_import_smoke(package_dir: &Path, metadata_ok: bool) -> ConnectorG
             details: vec!["skipped because package metadata did not pass".to_string()],
         };
     }
+    let package_dependency_path = match package_dependency_path(package_dir) {
+        Ok(path) => path,
+        Err(message) => {
+            return gate_check_from_findings(
+                "package install/import smoke",
+                started,
+                vec![message],
+                Vec::new(),
+            );
+        }
+    };
+    let package_dir = PathBuf::from(&package_dependency_path);
     let manifest_path = package_dir.join("harn.toml");
     let manifest_source = match fs::read_to_string(&manifest_path) {
         Ok(source) => source,
@@ -804,7 +816,7 @@ fn run_install_import_smoke(package_dir: &Path, metadata_ok: bool) -> ConnectorG
     let manifest = format!(
         "[package]\nname = \"connector-smoke-consumer\"\nversion = \"0.0.0\"\n\n[dependencies]\n\"{}\" = {{ path = \"{}\" }}\n",
         toml_escape_basic_string(&package_name),
-        toml_escape_basic_string(&package_dir.display().to_string())
+        toml_escape_basic_string(&package_dependency_path)
     );
     if let Err(error) = fs::write(consumer.join("harn.toml"), manifest) {
         return gate_check_from_findings(
@@ -865,6 +877,18 @@ fn manifest_exports_sorted(manifest_source: &str) -> Vec<String> {
     toml::from_str::<package::Manifest>(manifest_source)
         .map(|manifest| manifest.exports.keys().cloned().collect())
         .unwrap_or_default()
+}
+
+fn package_dependency_path(package_dir: &Path) -> Result<String, String> {
+    package_dir
+        .canonicalize()
+        .map(|path| path.display().to_string())
+        .map_err(|error| {
+            format!(
+                "failed to canonicalize package directory {}: {error}",
+                package_dir.display()
+            )
+        })
 }
 
 fn toml_escape_basic_string(value: &str) -> String {
@@ -1704,6 +1728,20 @@ transient_provider_outage = "Retry after the provider is reachable."
         fs::write(&nested, "").unwrap();
 
         assert_eq!(package_dir_from_anchor(&nested), dir.path());
+    }
+
+    #[test]
+    fn package_dependency_path_canonicalizes_relative_package_dir() {
+        let cwd = std::env::current_dir().unwrap();
+        let dir = tempfile::Builder::new()
+            .prefix("connector-relative-smoke-")
+            .tempdir_in(&cwd)
+            .unwrap();
+        let relative = dir.path().strip_prefix(&cwd).unwrap();
+
+        let dependency_path = package_dependency_path(relative).unwrap();
+
+        assert_eq!(dependency_path, dir.path().display().to_string());
     }
 
     #[tokio::test]
