@@ -8,6 +8,7 @@ pub(crate) mod assemble;
 pub mod asset_paths;
 mod bytes;
 mod calendar;
+mod channel_guardrails;
 mod channels;
 pub(crate) mod clock;
 mod collections;
@@ -119,6 +120,7 @@ pub fn register_core_stdlib(vm: &mut Vm) {
     iter::register_iter_builtins(vm);
     event_log::register_event_log_builtins(vm);
     channels::register_channel_builtins(vm);
+    channel_guardrails::register_channel_guardrail_builtins(vm);
     shapes::register_shape_builtins(vm);
     testing::register_testing_builtins(vm);
     flow::register_flow_builtins(vm);

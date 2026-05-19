@@ -1091,6 +1091,20 @@ pub(crate) const SIGNATURES: &[BuiltinSignature] = &[
         TY_LIST,
     ),
     BuiltinSignature::simple("flush_trigger_aggregations", &[], TY_NIL),
+    // CH-11 (#1911): channel guardrails middleware. Register/list/unregister
+    // run synchronously; the actual scan executes inside `emit_channel(...)`.
+    BuiltinSignature::simple(
+        "channel_guardrail_register",
+        &[Param::new("config", TY_DICT)],
+        TY_STRING,
+    ),
+    BuiltinSignature::simple(
+        "channel_guardrail_unregister",
+        &[Param::new("id", TY_STRING)],
+        TY_BOOL,
+    ),
+    BuiltinSignature::simple("channel_guardrail_list", &[], TY_LIST),
+    BuiltinSignature::simple("channel_guardrail_clear", &[], TY_NIL),
     BuiltinSignature::simple(
         "event_log_emit",
         &[
