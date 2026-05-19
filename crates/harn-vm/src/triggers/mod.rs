@@ -48,7 +48,7 @@ pub use registry::{
     pause, pin_trigger_binding, record_predicate_cost_sample, reset_binding_budget_windows,
     resolve_live_or_as_of, resolve_live_trigger_binding, resolve_trigger_binding_as_of, resume,
     snapshot_orchestrator_budget, snapshot_trigger_bindings, unpin_trigger_binding, usd_to_micros,
-    OrchestratorBudgetConfig, OrchestratorBudgetSnapshot, RecordedTriggerBinding,
+    AgentScope, OrchestratorBudgetConfig, OrchestratorBudgetSnapshot, RecordedTriggerBinding,
     TriggerBindingSnapshot, TriggerBindingSource, TriggerBindingSpec,
     TriggerBudgetExhaustionStrategy, TriggerDispatchOutcome, TriggerHandlerSpec, TriggerId,
     TriggerMetricsSnapshot, TriggerPredicateSpec, TriggerPredicateState, TriggerRegistryError,

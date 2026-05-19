@@ -860,6 +860,129 @@ async fn suspend_agent_builtin(args: Vec<VmValue>) -> Result<VmValue, VmError> {
     Ok(summary)
 }
 
+/// Outcome of a single panic-broadcast suspension attempt against one
+/// worker. The dispatcher rolls these up into the
+/// `triggers.interrupt_and_suspend.audit` audit entries and the
+/// dispatch-result blob; observers tell what happened per target without
+/// re-reading the worker registry.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum PanicSuspendOutcome {
+    /// Worker was running and is now suspended; `WorkerSuspended` event
+    /// emitted, snapshot persisted, suspension envelope installed.
+    Suspended,
+    /// Worker was already in the `suspended` state — no-op, no second
+    /// `WorkerSuspended` event. Avoids double-suspend audit noise when a
+    /// panic broadcast races with an in-flight `suspend_agent` call.
+    AlreadySuspended,
+    /// Worker exists but is in a terminal state (`completed`/`failed`/
+    /// `cancelled`/`interrupted`) or otherwise not running — skipped.
+    NotRunning,
+    /// Worker id is not registered. Skipped — closure-form scopes can
+    /// return stale ids and we never want a panic to fail because one of
+    /// them does not resolve.
+    Unknown,
+}
+
+impl PanicSuspendOutcome {
+    pub(crate) fn as_str(self) -> &'static str {
+        match self {
+            Self::Suspended => "suspended",
+            Self::AlreadySuspended => "already_suspended",
+            Self::NotRunning => "not_running",
+            Self::Unknown => "unknown",
+        }
+    }
+}
+
+/// CH-10 (#1910) panic-broadcast helper. Cooperative-suspend a single
+/// worker as part of an `InterruptAndSuspend` trigger dispatch.
+///
+/// Behavior parallels `suspend_agent_builtin` minus the
+/// `PreSuspend`/`PostSuspend` lifecycle hooks and the auto-resume trigger
+/// registration. Panic is by-design synchronous and bypasses the
+/// approval/turn-boundary contract — wiring it through the hook gate would
+/// let one rogue PreSuspend Deny block the org-wide emergency. The
+/// suspension envelope carries the panic `reason` verbatim and uses
+/// `SuspendInitiator::Triggered` (the closest fit on the existing receipts
+/// schema; no schema bump required to ship this variant).
+///
+/// Returns the structured outcome so the dispatcher can build the per-worker
+/// audit entries; returns `Err(...)` only on persistence/event-emission
+/// failure (a real I/O fault — never on the "worker is unknown" /
+/// "worker already suspended" / "worker is terminal" cases, which roll up
+/// as outcomes instead).
+pub(crate) async fn panic_suspend_worker(
+    worker_id: &str,
+    reason: &str,
+) -> Result<PanicSuspendOutcome, VmError> {
+    let Ok(state) = with_worker_state(worker_id, |state| Ok(state.clone())) else {
+        return Ok(PanicSuspendOutcome::Unknown);
+    };
+
+    let (snapshot, outcome) = {
+        let mut worker = state.borrow_mut();
+        if worker.status == "suspended" {
+            return Ok(PanicSuspendOutcome::AlreadySuspended);
+        }
+        if worker.status != "running" {
+            return Ok(PanicSuspendOutcome::NotRunning);
+        }
+        let pipeline_span_link = crate::tracing::current_span_link();
+        let span = LifecycleSpanGuard::start(
+            crate::tracing::SpanKind::Suspension,
+            format!("panic_suspend {}", worker.id),
+            Vec::new(),
+        );
+        annotate_suspension_span(
+            &span,
+            &worker.id,
+            reason,
+            SuspendInitiator::Triggered,
+            pipeline_span_link.as_ref(),
+            worker.parent_worker_id.as_deref(),
+            false,
+        );
+        let prior_span_link = span.link();
+        worker.suspend_signal.store(true, Ordering::SeqCst);
+        worker.status = "suspended".to_string();
+        worker.awaiting_started_at = None;
+        worker.awaiting_since = None;
+        worker.suspension = Some(WorkerSuspension {
+            reason: reason.to_string(),
+            initiator: SuspendInitiator::Triggered,
+            suspended_at: uuid::Uuid::now_v7().to_string(),
+            snapshot_ref: worker.snapshot_path.clone(),
+            prior_span_link,
+            pipeline_span_link,
+            suspended_at_turn: None,
+            conditions: None,
+            auto_resume_trigger: None,
+        });
+        // Same durability contract as `suspend_agent_builtin`: panic
+        // suspends MUST persist a resumable handle. A panic with no
+        // snapshot is worse than no panic at all — the operator has no
+        // way to bring the agent back.
+        persist_worker_state_snapshot(&worker)?;
+        (
+            worker_event_snapshot(&worker),
+            PanicSuspendOutcome::Suspended,
+        )
+    };
+
+    emit_worker_event(&snapshot, crate::agent_events::WorkerEvent::WorkerSuspended).await?;
+    Ok(outcome)
+}
+
+/// CH-10 (#1910): enumerate every worker id currently registered in the
+/// local worker registry. Used by `InterruptAndSuspend` to materialize the
+/// `AgentScope::All` target list. Ordering is the registry's stable
+/// `BTreeMap` iteration order so a panic broadcast is deterministic across
+/// replays — the dispatcher's audit log records the same worker order on
+/// re-run.
+pub(crate) fn all_registered_worker_ids() -> Vec<String> {
+    WORKER_REGISTRY.with(|registry| registry.borrow().keys().cloned().collect())
+}
+
 async fn top_level_agent_suspend_builtin(args: Vec<VmValue>) -> Result<VmValue, VmError> {
     let session_id = args
         .first()
@@ -2370,6 +2493,124 @@ mod suspend_tests {
         );
 
         teardown(&dir, &worker_id);
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn panic_suspend_worker_suspends_running_worker_and_emits_event() {
+        let _guard = suspend_test_lock().await;
+        let (worker_id, dir) = seed_test_worker("worker-panic-running");
+
+        let outcome = panic_suspend_worker(&worker_id, "build_storm")
+            .await
+            .expect("panic suspend running worker");
+        assert_eq!(outcome, PanicSuspendOutcome::Suspended);
+
+        // Verify the worker is in the suspended state with the panic
+        // reason recorded and the WorkerSuspension envelope installed.
+        with_worker_state(&worker_id, |state| {
+            let worker = state.borrow();
+            assert_eq!(worker.status, "suspended");
+            assert!(worker.suspend_signal.load(Ordering::SeqCst));
+            let suspension = worker.suspension.as_ref().expect("suspension envelope");
+            assert_eq!(suspension.reason, "build_storm");
+            assert_eq!(suspension.initiator, SuspendInitiator::Triggered);
+            Ok(())
+        })
+        .unwrap();
+
+        // Verify the unsettled snapshot also exposes the panic suspension
+        // (the same observability surface operators use to see paused
+        // workers via `harn agents list --suspended`).
+        let snapshot = snapshot_suspended_subagents();
+        let item = snapshot
+            .iter()
+            .find(|item| item["handle"] == worker_id)
+            .expect("panic-suspended worker visible in unsettled snapshot");
+        assert_eq!(item["status"], "suspended");
+        assert_eq!(item["reason"], "build_storm");
+        assert_eq!(item["initiator"], "triggered");
+
+        teardown(&dir, &worker_id);
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn panic_suspend_worker_skips_already_suspended_and_terminal_and_unknown() {
+        let _guard = suspend_test_lock().await;
+
+        // Already-suspended: first suspend via the normal path, then
+        // verify the panic broadcast is a no-op (no double-suspend, no
+        // overwritten reason, no second event).
+        let (already_suspended, dir1) = seed_test_worker("worker-panic-already-suspended");
+        suspend_agent_builtin(vec![
+            handle_value(&already_suspended),
+            VmValue::String(Rc::from("operator pause")),
+        ])
+        .await
+        .expect("operator-suspend first");
+
+        let outcome = panic_suspend_worker(&already_suspended, "build_storm")
+            .await
+            .expect("panic against already-suspended");
+        assert_eq!(outcome, PanicSuspendOutcome::AlreadySuspended);
+
+        // Reason from the original suspension MUST be preserved — the
+        // panic broadcast must never silently rewrite a pre-existing
+        // suspension reason.
+        with_worker_state(&already_suspended, |state| {
+            let suspension = state
+                .borrow()
+                .suspension
+                .clone()
+                .expect("original suspension still present");
+            assert_eq!(suspension.reason, "operator pause");
+            Ok(())
+        })
+        .unwrap();
+
+        // Terminal (manually flipped): a worker that is no longer running
+        // must be skipped with a `not_running` outcome.
+        let (terminal, dir2) = seed_test_worker("worker-panic-terminal");
+        with_worker_state(&terminal, |state| {
+            state.borrow_mut().status = "completed".to_string();
+            Ok(())
+        })
+        .unwrap();
+        let outcome = panic_suspend_worker(&terminal, "build_storm")
+            .await
+            .expect("panic against terminal worker");
+        assert_eq!(outcome, PanicSuspendOutcome::NotRunning);
+
+        // Unknown: stale worker id never crashes the broadcast.
+        let outcome = panic_suspend_worker("worker-does-not-exist", "build_storm")
+            .await
+            .expect("panic against unknown worker");
+        assert_eq!(outcome, PanicSuspendOutcome::Unknown);
+
+        teardown(&dir1, &already_suspended);
+        teardown(&dir2, &terminal);
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn all_registered_worker_ids_returns_btreemap_order() {
+        let _guard = suspend_test_lock().await;
+        let (a, dir_a) = seed_test_worker("worker-broadcast-A");
+        let (b, dir_b) = seed_test_worker("worker-broadcast-B");
+
+        let ids = all_registered_worker_ids();
+        // BTreeMap iteration order is sorted by key — deterministic
+        // across replay, which the dispatcher relies on for the
+        // panic-broadcast per-worker audit order.
+        assert!(ids.contains(&a), "registry must include seeded worker A");
+        assert!(ids.contains(&b), "registry must include seeded worker B");
+        let mut sorted = ids.clone();
+        sorted.sort();
+        assert_eq!(
+            ids, sorted,
+            "all_registered_worker_ids must return a deterministic (sorted) order"
+        );
+
+        teardown(&dir_a, &a);
+        teardown(&dir_b, &b);
     }
 
     #[tokio::test(flavor = "current_thread")]

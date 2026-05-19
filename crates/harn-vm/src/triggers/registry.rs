@@ -183,6 +183,56 @@ pub enum TriggerHandlerSpec {
         role_hint: crate::llm::helpers::ReminderRoleHint,
         preserve_on_compact: bool,
     },
+    /// CH-10 (#1910): emergency "panic" broadcast. When the trigger fires,
+    /// every running worker matched by `target_agents` is suspended
+    /// synchronously via the cooperative suspend pipeline used by
+    /// `suspend_agent` (#1837), bypassing the normal turn-boundary
+    /// delivery contract. Already-suspended or terminal workers are skipped
+    /// (no double-suspend, no error). `reason` is propagated to the
+    /// suspension envelope, the `WorkerSuspended` event, and the
+    /// `triggers.interrupt_and_suspend.audit` audit entry per suspension.
+    /// A no-target dispatch records a single roll-up audit entry and
+    /// returns a `broadcast` result with `suspended_count: 0` — graceful
+    /// no-op rather than dispatch failure, mirroring the `ReminderInject`
+    /// missing-target contract.
+    InterruptAndSuspend {
+        target_agents: AgentScope,
+        reason: String,
+    },
+}
+
+/// Resolution mode for the target worker set of a
+/// [`TriggerHandlerSpec::InterruptAndSuspend`] dispatch. `All` enumerates
+/// every entry in the local worker registry (the org-scoped "panic"
+/// broadcast); `Concrete` carries an explicit worker-id list from the
+/// registration; `Closure` defers resolution to a user closure that runs at
+/// dispatch time with the event payload bound to its first argument and
+/// must return a list of worker-id strings.
+#[derive(Clone)]
+pub enum AgentScope {
+    All,
+    Concrete(Vec<String>),
+    Closure(Rc<VmClosure>),
+}
+
+impl AgentScope {
+    pub fn kind(&self) -> &'static str {
+        match self {
+            Self::All => "all",
+            Self::Concrete(_) => "concrete",
+            Self::Closure(_) => "closure",
+        }
+    }
+}
+
+impl std::fmt::Debug for AgentScope {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::All => f.write_str("All"),
+            Self::Concrete(ids) => f.debug_tuple("Concrete").field(ids).finish(),
+            Self::Closure(_) => f.write_str("Closure(<vm_closure>)"),
+        }
+    }
 }
 
 /// Resolution mode for the target session of a [`TriggerHandlerSpec::ReminderInject`]
@@ -273,6 +323,14 @@ impl std::fmt::Debug for TriggerHandlerSpec {
                 .field("role_hint", role_hint)
                 .field("preserve_on_compact", preserve_on_compact)
                 .finish(),
+            Self::InterruptAndSuspend {
+                target_agents,
+                reason,
+            } => f
+                .debug_struct("InterruptAndSuspend")
+                .field("target_agents", target_agents)
+                .field("reason", reason)
+                .finish(),
         }
     }
 }
@@ -287,6 +345,7 @@ impl TriggerHandlerSpec {
             Self::AutoResume { .. } => "auto_resume",
             Self::SpawnToPool { .. } => "spawn_to_pool",
             Self::ReminderInject { .. } => "reminder_inject",
+            Self::InterruptAndSuspend { .. } => "interrupt_and_suspend",
         }
     }
 }
