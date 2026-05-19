@@ -260,6 +260,9 @@ diagnostic_codes! {
     ResumeTimeoutUnsupported, "HARN-SUS-008", Sus, "resume timeout action is unsupported";
     ResumeInputInvalid, "HARN-SUS-009", Sus, "resume input failed agent_loop input validation";
     ResumeWorkerClosed, "HARN-SUS-010", Sus, "closed suspended worker cannot be resumed";
+    ReplayResumeInputHashMismatch, "HARN-SUS-011", Sus, "replay resume input hash diverges from journaled suspension";
+    ReplayDrainDecisionPromptHashMismatch, "HARN-SUS-012", Sus, "replay drain decision prompt hash diverges from journaled receipt";
+    LifecycleSignatureMismatch, "HARN-SUS-013", Sus, "lifecycle receipt signed timestamp failed verification";
     LintRenamedStdlibSymbol, "HARN-LNT-001", Lnt, "renamed stdlib symbol lint";
     LintCyclomaticComplexity, "HARN-LNT-002", Lnt, "cyclomatic complexity lint";
     LintNamingConvention, "HARN-LNT-003", Lnt, "naming convention lint";

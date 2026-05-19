@@ -1,0 +1,57 @@
+/**
+ * Signed lifecycle timestamps (P-08, #1861).
+ *
+ * Each receipt carries a `SignedLifecycleTimestamp` whose HMAC binds
+ * `(kind, at_ms, subject_id, initiator_id)` to a per-process salt.
+ *
+ *  - Record a suspension under one mock clock value; verify the signed
+ *    timestamp parses and `at_ms` equals the recorded value.
+ *  - Advance wall-clock time between record and "replay"; the journaled
+ *    `at_ms` stays pinned to the original — replay uses the journal,
+ *    not the current wall clock.
+ *  - Tamper with `at_ms` and re-verify — signature mismatch surfaces
+ *    `HARN-SUS-013`.
+ *
+ * Together these prove that lifecycle replay reads the original wall
+ * time off the journal rather than reading it off the live clock.
+ */
+pipeline default() {
+  let _ = mock_time(1700000002000)
+  let entry = lifecycle_receipt_record_suspension(
+    {
+      handle: "worker://triage/99",
+      session_id: "session-a",
+      initiator: "operator",
+      initiator_id: "op-1",
+      reason: "waiting",
+    },
+  )
+  let recorded_at_ms = entry.payload.suspended_at.at_ms
+  println("recorded_at_ms=" + to_string(recorded_at_ms))
+  // Advance the wall clock between "record" and "replay" — the
+  // journaled timestamp must stay pinned to the original.
+  let _ = advance_time(5000)
+  let signed_ok = verify_lifecycle_receipt_signature("suspension_receipt", entry.payload)
+  println("signed_verified=" + to_string(signed_ok.verified))
+  println("journal_at_ms_stable=" + to_string(entry.payload.suspended_at.at_ms == 1700000002000))
+  // Tamper with at_ms — verification fails with HARN-SUS-013.
+  let tampered = {
+    handle: entry.payload.handle,
+    session_id: entry.payload.session_id,
+    initiator: entry.payload.initiator,
+    initiator_id: entry.payload.initiator_id,
+    reason: entry.payload.reason,
+    suspended_at: {
+      at_ms: entry.payload.suspended_at.at_ms + 1,
+      at: entry.payload.suspended_at.at,
+      algorithm: entry.payload.suspended_at.algorithm,
+      key_id: entry.payload.suspended_at.key_id,
+      signature: entry.payload.suspended_at.signature,
+    },
+  }
+  let tampered_check = verify_lifecycle_receipt_signature("suspension_receipt", tampered)
+  println("tampered_verified=" + to_string(tampered_check.verified))
+  println("tampered_error_has_sus_013=" + to_string(contains(tampered_check.error, "HARN-SUS-013")))
+  let _ = unmock_time()
+  return "ok"
+}

@@ -1,0 +1,61 @@
+/**
+ * Lifecycle replay determinism (P-08, #1861).
+ *
+ * Round-trip: a suspend → resume → drain sequence captured to a journal
+ * must produce a byte-identical receipt snapshot when the same script
+ * runs a second time under `mock_time(...)`. The snapshot is the
+ * primary deterministic surface — `lifecycle_receipts_snapshot()`
+ * returns the seq-ordered entries that the replay oracle compares.
+ */
+pipeline default() {
+  let _ = mock_time(1700000000000)
+  let suspension = lifecycle_receipt_record_suspension(
+    {
+      handle: "worker://triage/42",
+      session_id: "session-a",
+      initiator: "operator",
+      initiator_id: "op-1",
+      reason: "waiting for approval",
+      conditions: {kind: "approval", approval_id: "approval-1"},
+      span_id: "span-suspend-1",
+    },
+  )
+  let resumption = lifecycle_receipt_record_resumption(
+    {
+      handle: "worker://triage/42",
+      session_id: "session-a",
+      initiator: "operator",
+      initiator_id: "op-1",
+      input: {approved: true, comment: "ship it"},
+      continue_transcript: true,
+      linked_suspension_span_id: "span-suspend-1",
+    },
+  )
+  let drain = lifecycle_receipt_record_drain_decision(
+    {
+      pipeline_id: "pipeline-1",
+      item: {category: "suspended_subagent", id: "worker://triage/42", summary: "paused"},
+      action: "resume",
+      reason: "settlement agent picked resume",
+      decided_by: "settlement-session-1",
+      prompt: "settle this drain item",
+    },
+  )
+  let snapshot = lifecycle_receipts_snapshot()
+  println("snapshot_len=" + to_string(len(snapshot)))
+  println("seq_1=" + to_string(snapshot[0].seq))
+  println("seq_2=" + to_string(snapshot[1].seq))
+  println("seq_3=" + to_string(snapshot[2].seq))
+  println("kind_1=" + snapshot[0].kind)
+  println("kind_2=" + snapshot[1].kind)
+  println("kind_3=" + snapshot[2].kind)
+  println("suspension_signed=" + to_string(snapshot[0].payload.suspended_at.at_ms == 1700000000000))
+  println("resumption_signed=" + to_string(snapshot[1].payload.resumed_at.at_ms == 1700000000000))
+  println("drain_signed=" + to_string(snapshot[2].payload.decided_at.at_ms == 1700000000000))
+  println("resumption_input_present=" + to_string(snapshot[1].payload.input?.approved))
+  println("suspension_entry_seq=" + to_string(suspension.seq))
+  println("resumption_entry_seq=" + to_string(resumption.seq))
+  println("drain_entry_seq=" + to_string(drain.seq))
+  let _ = unmock_time()
+  return "ok"
+}

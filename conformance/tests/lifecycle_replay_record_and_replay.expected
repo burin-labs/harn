@@ -1,0 +1,14 @@
+snapshot_len=3
+seq_1=1
+seq_2=2
+seq_3=3
+kind_1=suspension_receipt
+kind_2=resumption_receipt
+kind_3=drain_decision_receipt
+suspension_signed=true
+resumption_signed=true
+drain_signed=true
+resumption_input_present=true
+suspension_entry_seq=1
+resumption_entry_seq=2
+drain_entry_seq=3

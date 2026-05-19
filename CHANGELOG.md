@@ -109,6 +109,39 @@ condensed series summaries instead of full per-patch history.
   diagnostic codes end-to-end. Unblocks CH-08 conformance and the
   end-to-end multi-agent replay / audit / compliance use cases the
   epic was driving toward.
+- **Lifecycle replay determinism (P-08, #1861).** Closes the
+  pipeline-lifecycle epic's #1853 replay-determinism leg with the
+  journal entry types every SOTA replay engine (Temporal, Restate,
+  Inngest, Azure Durable, Cadence) ships: `SuspensionReceipt`,
+  `ResumptionReceipt`, and `DrainDecisionReceipt`, each carrying a
+  `SignedLifecycleTimestamp` whose HMAC binds
+  `(kind, at_ms, subject_id, initiator_id)` under a per-process salt.
+  `ResumptionReceipt` records both the cached resume input and its
+  canonical-JSON `input_hash` so replay can re-feed the same payload
+  into the suspended worker instead of re-prompting; map-key order
+  drift is absorbed by the canonical hash. `DrainDecisionReceipt`
+  captures the settlement agent's chosen `action` and an optional
+  `prompt_hash` so replay can short-circuit the LLM call. New Rust
+  builtins `lifecycle_receipt_record_{suspension,resumption,drain_decision}`,
+  `lifecycle_receipts_snapshot`, `verify_lifecycle_receipt_signature`,
+  `lifecycle_resume_input_hash`, `lifecycle_drain_decision_prompt_hash`,
+  `lifecycle_replay_resume_input`, and `lifecycle_replay_drain_decision`
+  wire the receipt model into Harn pipelines. Drift surfaces three new
+  diagnostic codes — `HARN-SUS-011` (resume input hash mismatch),
+  `HARN-SUS-012` (drain decision prompt hash mismatch), and
+  `HARN-SUS-013` (lifecycle signature verification failure) — and the
+  replay oracle treats `lifecycle_receipts` as first-class trace
+  material alongside event log entries and llm interactions. Three
+  conformance fixtures (`lifecycle_replay_record_and_replay`,
+  `lifecycle_replay_cached_resume_input`,
+  `lifecycle_replay_signed_timestamps`) pin the determinism contract:
+  byte-identical receipt snapshot across record/replay, cached resume
+  input round-trip with canonical-hash drift detection, and signed
+  timestamps that stay pinned to the original wall clock even after
+  the live clock has advanced. Privacy: `ResumptionReceipt` supports
+  an optional `RedactionPolicy` that scrubs sensitive paths from the
+  persisted `input` while leaving the hash computed against the
+  original — replay still works, secrets do not land in the journal.
 - **OTel suspend-end / resume-link wiring (S-18, #1867).** Wires the
   `SpanKind::Suspension` and `SpanKind::Resume` spans (added in P-05,
   #1858) into the cooperative `suspend_agent` / `resume_agent` paths.
