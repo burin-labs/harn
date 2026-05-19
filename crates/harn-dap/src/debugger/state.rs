@@ -5,6 +5,7 @@ use std::time::Duration;
 
 use harn_vm::{DebugState, Vm, VmValue};
 
+use super::subagents::{SubagentSinkRegistration, SubagentTracker};
 use crate::host_bridge::DapHostBridge;
 
 /// Execution state for stepping.
@@ -150,10 +151,37 @@ pub struct Debugger {
     /// wire format is already session-accurate — a future multi-VM
     /// implementation only has to swap the value when routing requests.
     pub(crate) current_thread_id: u64,
+    /// Subagent ↔ DAP-thread bridge (issue #1868). The tracker owns the
+    /// queue + worker→thread map; the sink lives on the wildcard
+    /// `AgentEventSink` registry and pushes `WorkerUpdate` events into
+    /// the queue from the VM's runtime. Drained between VM steps by
+    /// [`Debugger::drain_subagent_events`].
+    pub(crate) subagent_tracker: SubagentTracker,
+    /// Active wildcard-sink registration. Dropped with the debugger so
+    /// the sink never outlives the session that installed it.
+    pub(crate) _subagent_sink: SubagentSinkRegistration,
+    /// Active `break-on-suspend` filter. Mirrors the value in
+    /// `exception_filters` so suspend-event emission doesn't have to
+    /// scan that map on every event. Updated by
+    /// `handle_set_exception_breakpoints` when the issue #1868 filter
+    /// ids round-trip in/out.
+    pub(crate) break_on_subagent_suspend: bool,
+    /// Active `break-on-resume` filter. When true, every
+    /// `WorkerResumed` event additionally pauses the *main* debugger
+    /// thread so the user can step through the resume continuation.
+    pub(crate) break_on_subagent_resume: bool,
+    /// Active `break-on-drain-decision` filter. Registered for parity
+    /// with the issue spec; surfaces ambient lifecycle events but does
+    /// not currently force a main-thread stop because drain decisions
+    /// flow through the lifecycle-hook path, not `AgentEvent`. Kept on
+    /// the struct so a future P-03 wire-up has the toggle in hand.
+    pub(crate) break_on_drain_decision: bool,
 }
 
 impl Debugger {
     pub fn new() -> Self {
+        let subagent_tracker = SubagentTracker::new();
+        let subagent_sink = SubagentSinkRegistration::install(subagent_tracker.clone());
         Self {
             seq: 1,
             source_path: None,
@@ -195,6 +223,11 @@ impl Debugger {
             session_to_thread: BTreeMap::new(),
             next_thread_id: 2,
             current_thread_id: 1,
+            subagent_tracker,
+            _subagent_sink: subagent_sink,
+            break_on_subagent_suspend: false,
+            break_on_subagent_resume: false,
+            break_on_drain_decision: false,
         }
     }
 

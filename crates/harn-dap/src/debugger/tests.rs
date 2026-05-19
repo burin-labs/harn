@@ -457,8 +457,9 @@ fn test_initialize_has_exception_breakpoint_filters() {
     let body = responses[0].body.as_ref().unwrap();
     assert_eq!(body["supportsExceptionBreakpointFilters"], true);
     let filters = body["exceptionBreakpointFilters"].as_array().unwrap();
-    // #111 expanded the list: "all" plus four per-kind filters.
-    assert_eq!(filters.len(), 5);
+    // #111 expanded the list to "all" plus four per-kind filters;
+    // #1868 (DAP subagents) appended three more lifecycle filters.
+    assert_eq!(filters.len(), 8);
     let filter_ids: Vec<_> = filters
         .iter()
         .filter_map(|f| f["filter"].as_str())
@@ -468,6 +469,9 @@ fn test_initialize_has_exception_breakpoint_filters() {
     assert!(filter_ids.contains(&"llm_refusal"));
     assert!(filter_ids.contains(&"budget_exceeded"));
     assert!(filter_ids.contains(&"parse_failure"));
+    assert!(filter_ids.contains(&"break-on-suspend"));
+    assert!(filter_ids.contains(&"break-on-resume"));
+    assert!(filter_ids.contains(&"break-on-drain-decision"));
     let all_filter = filters
         .iter()
         .find(|f| f["filter"].as_str() == Some("all"))
@@ -1203,4 +1207,328 @@ fn test_hit_condition_matches_parses_all_forms() {
     // Garbage → None so the caller can surface a diagnostic.
     assert_eq!(hit_condition_matches("hello", 1), None);
     assert_eq!(hit_condition_matches("= =1", 1), None);
+}
+
+// ---------------------------------------------------------------
+// Subagent ↔ DAP thread bridging (issue #1868)
+// ---------------------------------------------------------------
+
+mod subagent_bridge {
+    use super::*;
+    use harn_vm::agent_events::{AgentEvent, WorkerEvent};
+
+    fn worker_update(
+        worker_id: &str,
+        worker_name: &str,
+        event: WorkerEvent,
+        parent: Option<&str>,
+        suspend_reason: Option<&str>,
+    ) -> AgentEvent {
+        let mut metadata = serde_json::Map::new();
+        if let Some(p) = parent {
+            metadata.insert("parent_worker_id".to_string(), json!(p));
+        }
+        if let Some(r) = suspend_reason {
+            metadata.insert("suspension".to_string(), json!({ "reason": r }));
+        }
+        AgentEvent::WorkerUpdate {
+            session_id: "session-test".to_string(),
+            worker_id: worker_id.to_string(),
+            worker_name: worker_name.to_string(),
+            worker_task: "demo".to_string(),
+            worker_mode: "background".to_string(),
+            event,
+            status: event.as_status().to_string(),
+            metadata: serde_json::Value::Object(metadata),
+            audit: None,
+        }
+    }
+
+    #[test]
+    fn capabilities_advertise_new_lifecycle_filters() {
+        let mut dbg = Debugger::new();
+        let responses = dbg.handle_message(make_request(1, "initialize", None));
+        let init = &responses[0];
+        let filters = init.body.as_ref().unwrap()["exceptionBreakpointFilters"]
+            .as_array()
+            .unwrap();
+        let filter_ids: Vec<&str> = filters
+            .iter()
+            .map(|f| f["filter"].as_str().unwrap())
+            .collect();
+        for required in [
+            "break-on-suspend",
+            "break-on-resume",
+            "break-on-drain-decision",
+        ] {
+            assert!(
+                filter_ids.contains(&required),
+                "missing filter id {required}; have {filter_ids:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn set_exception_breakpoints_toggles_subagent_filter_flags() {
+        let mut dbg = Debugger::new();
+        assert!(!dbg.break_on_subagent_suspend);
+        assert!(!dbg.break_on_subagent_resume);
+        assert!(!dbg.break_on_drain_decision);
+
+        dbg.handle_message(make_request(
+            1,
+            "setExceptionBreakpoints",
+            Some(json!({
+                "filters": ["break-on-suspend", "break-on-drain-decision"],
+            })),
+        ));
+        assert!(dbg.break_on_subagent_suspend);
+        assert!(!dbg.break_on_subagent_resume);
+        assert!(dbg.break_on_drain_decision);
+
+        // Clearing the filter list flips the toggles back off.
+        dbg.handle_message(make_request(
+            2,
+            "setExceptionBreakpoints",
+            Some(json!({ "filters": [] })),
+        ));
+        assert!(!dbg.break_on_subagent_suspend);
+        assert!(!dbg.break_on_drain_decision);
+    }
+
+    #[test]
+    fn drain_emits_thread_started_then_stopped_suspend() {
+        let mut dbg = Debugger::new();
+        // Simulate the sink getting these from the VM.
+        dbg.subagent_tracker
+            .upsert_thread("w-1", "researcher", None, "running");
+        // Push two raw observations onto the queue.
+        {
+            let mut guard = dbg.subagent_tracker.inner_for_test();
+            guard
+                .pending
+                .push(super::super::subagents::SubagentObservation {
+                    worker_id: "w-1".to_string(),
+                    worker_name: "researcher".to_string(),
+                    event: WorkerEvent::WorkerSpawned,
+                    status: "running".to_string(),
+                    parent_worker_id: None,
+                    suspend_reason: None,
+                });
+            guard
+                .pending
+                .push(super::super::subagents::SubagentObservation {
+                    worker_id: "w-1".to_string(),
+                    worker_name: "researcher".to_string(),
+                    event: WorkerEvent::WorkerSuspended,
+                    status: "suspended".to_string(),
+                    parent_worker_id: None,
+                    suspend_reason: Some("awaiting human approval".to_string()),
+                });
+        }
+
+        let events = dbg.drain_subagent_events();
+        assert_eq!(events.len(), 2);
+        assert_eq!(events[0].event.as_deref(), Some("thread"));
+        let body0 = events[0].body.as_ref().unwrap();
+        assert_eq!(body0["reason"], "started");
+        let thread_id = body0["threadId"].as_i64().unwrap();
+        assert!(thread_id >= 100, "subagent thread ids start at 100");
+
+        assert_eq!(events[1].event.as_deref(), Some("stopped"));
+        let body1 = events[1].body.as_ref().unwrap();
+        assert_eq!(body1["reason"], "suspend");
+        assert_eq!(body1["description"], "awaiting human approval");
+        assert_eq!(body1["threadId"], thread_id);
+        // Suspended subagents must not freeze the rest of the debug
+        // session; the IDE keeps focus on what the user was looking at.
+        assert_eq!(body1["allThreadsStopped"], false);
+    }
+
+    #[test]
+    fn drain_resume_emits_continued_and_clears_suspend_reason() {
+        let mut dbg = Debugger::new();
+        let thread = dbg
+            .subagent_tracker
+            .upsert_thread("w-1", "researcher", None, "running");
+        dbg.subagent_tracker.mark_suspended("w-1", Some("timer"));
+        {
+            let mut guard = dbg.subagent_tracker.inner_for_test();
+            guard
+                .pending
+                .push(super::super::subagents::SubagentObservation {
+                    worker_id: "w-1".to_string(),
+                    worker_name: "researcher".to_string(),
+                    event: WorkerEvent::WorkerResumed,
+                    status: "running".to_string(),
+                    parent_worker_id: None,
+                    suspend_reason: None,
+                });
+        }
+
+        let events = dbg.drain_subagent_events();
+        assert_eq!(events.len(), 1);
+        assert_eq!(events[0].event.as_deref(), Some("continued"));
+        let body = events[0].body.as_ref().unwrap();
+        assert_eq!(body["threadId"], thread.thread_id as i64);
+        assert_eq!(body["allThreadsContinued"], false);
+
+        // The threads response must now report `running` again, no
+        // stale suspend reason hanging around.
+        let snapshot = dbg.subagent_tracker.snapshot_threads();
+        assert_eq!(snapshot[0].1.last_status, "running");
+        assert_eq!(snapshot[0].1.suspend_reason, None);
+    }
+
+    #[test]
+    fn drain_resume_with_break_on_resume_filter_pauses_main_thread() {
+        let mut dbg = Debugger::new();
+        dbg.break_on_subagent_resume = true;
+        {
+            let mut guard = dbg.subagent_tracker.inner_for_test();
+            guard
+                .pending
+                .push(super::super::subagents::SubagentObservation {
+                    worker_id: "w-1".to_string(),
+                    worker_name: "researcher".to_string(),
+                    event: WorkerEvent::WorkerResumed,
+                    status: "running".to_string(),
+                    parent_worker_id: None,
+                    suspend_reason: None,
+                });
+        }
+        let events = dbg.drain_subagent_events();
+        // continued event still fires for the subagent thread...
+        assert!(events
+            .iter()
+            .any(|r| r.event.as_deref() == Some("continued")));
+        // ...and the main-thread pause is deferred to the next
+        // step_running_vm tick via pending_pause.
+        assert!(
+            dbg.pending_pause,
+            "break-on-resume must arm pending_pause so the main thread stops on the next step"
+        );
+    }
+
+    #[test]
+    fn handle_threads_surfaces_subagent_lineage() {
+        let mut dbg = Debugger::new();
+        let parent = dbg
+            .subagent_tracker
+            .upsert_thread("w-1", "parent-agent", None, "running");
+        let child =
+            dbg.subagent_tracker
+                .upsert_thread("w-2", "child-agent", Some("w-1"), "suspended");
+        dbg.subagent_tracker
+            .mark_suspended("w-2", Some("escalated to operator"));
+
+        let responses = dbg.handle_message(make_request(1, "threads", None));
+        let body = responses[0].body.as_ref().unwrap();
+        let threads = body["threads"].as_array().unwrap();
+        // main + 2 subagents
+        assert_eq!(threads.len(), 3);
+
+        let parent_row = threads
+            .iter()
+            .find(|t| t["id"] == parent.thread_id as i64)
+            .expect("parent thread missing");
+        assert_eq!(parent_row["name"], "parent-agent");
+        assert_eq!(parent_row["status"], "running");
+        assert!(parent_row.get("parentId").is_none());
+
+        let child_row = threads
+            .iter()
+            .find(|t| t["id"] == child.thread_id as i64)
+            .expect("child thread missing");
+        assert_eq!(child_row["name"], "child-agent");
+        assert_eq!(child_row["status"], "suspended");
+        assert_eq!(child_row["parentId"], parent.thread_id as i64);
+        assert_eq!(child_row["suspendReason"], "escalated to operator");
+    }
+
+    #[test]
+    fn drain_failed_emits_stopped_exception_then_thread_exited() {
+        let mut dbg = Debugger::new();
+        dbg.subagent_tracker
+            .upsert_thread("w-1", "demo", None, "running");
+        {
+            let mut guard = dbg.subagent_tracker.inner_for_test();
+            guard
+                .pending
+                .push(super::super::subagents::SubagentObservation {
+                    worker_id: "w-1".to_string(),
+                    worker_name: "demo".to_string(),
+                    event: WorkerEvent::WorkerFailed,
+                    status: "failed".to_string(),
+                    parent_worker_id: None,
+                    suspend_reason: Some("OOM in tool".to_string()),
+                });
+        }
+        let events = dbg.drain_subagent_events();
+        assert_eq!(events.len(), 2);
+        assert_eq!(events[0].event.as_deref(), Some("stopped"));
+        assert_eq!(events[0].body.as_ref().unwrap()["reason"], "exception");
+        assert_eq!(events[1].event.as_deref(), Some("thread"));
+        assert_eq!(events[1].body.as_ref().unwrap()["reason"], "exited");
+    }
+
+    #[test]
+    fn drain_progressed_events_are_silent() {
+        let mut dbg = Debugger::new();
+        dbg.subagent_tracker
+            .upsert_thread("w-1", "demo", None, "running");
+        {
+            let mut guard = dbg.subagent_tracker.inner_for_test();
+            for _ in 0..5 {
+                guard
+                    .pending
+                    .push(super::super::subagents::SubagentObservation {
+                        worker_id: "w-1".to_string(),
+                        worker_name: "demo".to_string(),
+                        event: WorkerEvent::WorkerProgressed,
+                        status: "progressed".to_string(),
+                        parent_worker_id: None,
+                        suspend_reason: None,
+                    });
+            }
+        }
+        let events = dbg.drain_subagent_events();
+        assert!(
+            events.is_empty(),
+            "WorkerProgressed must be silent on DAP; got {events:?}"
+        );
+    }
+
+    #[test]
+    fn subagent_sink_handle_event_pushes_into_tracker() {
+        // Verify the SubagentEventSink correctly translates a
+        // WorkerUpdate AgentEvent into an observation on the
+        // tracker's queue. Bypasses the global wildcard-sink
+        // registry (which is process-global and would otherwise
+        // require test serialization to avoid cross-test leaks
+        // under cargo's parallel test runner).
+        use super::super::subagents::{SubagentEventSink, SubagentTracker};
+        use harn_vm::agent_events::AgentEventSink;
+        let tracker = SubagentTracker::new();
+        let sink = SubagentEventSink::new(tracker.clone());
+        sink.handle_event(&worker_update(
+            "w-1",
+            "alpha",
+            WorkerEvent::WorkerSpawned,
+            None,
+            None,
+        ));
+        sink.handle_event(&worker_update(
+            "w-1",
+            "alpha",
+            WorkerEvent::WorkerSuspended,
+            None,
+            Some("manual"),
+        ));
+        let drained = tracker.drain();
+        assert_eq!(drained.len(), 2);
+        assert_eq!(drained[0].event, WorkerEvent::WorkerSpawned);
+        assert_eq!(drained[1].event, WorkerEvent::WorkerSuspended);
+        assert_eq!(drained[1].suspend_reason.as_deref(), Some("manual"));
+    }
 }

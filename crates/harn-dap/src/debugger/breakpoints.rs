@@ -224,6 +224,14 @@ impl Debugger {
         // Vm::Thrown path today — the filter gate in step_running_vm
         // then narrows to the selected kinds.
         self.break_on_exceptions = !self.exception_filters.is_empty();
+        // Issue #1868: hoist the subagent-lifecycle filter flags off
+        // the map so the WorkerSuspended/WorkerResumed emission path
+        // doesn't have to re-scan it on every event.
+        self.break_on_subagent_suspend = self.exception_filters.contains_key("break-on-suspend");
+        self.break_on_subagent_resume = self.exception_filters.contains_key("break-on-resume");
+        self.break_on_drain_decision = self
+            .exception_filters
+            .contains_key("break-on-drain-decision");
 
         let seq = self.next_seq();
         vec![DapResponse::success(

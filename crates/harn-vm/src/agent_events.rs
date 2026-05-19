@@ -1082,6 +1082,7 @@ pub fn reset_all_sinks() {
             !sinks.is_empty()
         });
         crate::agent_sessions::reset_session_store();
+        reset_wildcard_sinks();
     }
     #[cfg(not(test))]
     {
@@ -1090,6 +1091,10 @@ pub fn reset_all_sinks() {
             .expect("sink registry poisoned")
             .clear();
         crate::agent_sessions::reset_session_store();
+        wildcard_sinks()
+            .write()
+            .expect("wildcard registry poisoned")
+            .clear();
     }
 }
 
@@ -1136,6 +1141,13 @@ pub fn mirror_session_sinks(source_session_id: &str, target_session_id: &str) {
 /// Emit an event to external sinks registered for this session. Pipeline
 /// closure subscribers are NOT called by this function — the agent
 /// loop owns that path because it needs its async VM context.
+///
+/// Wildcard sinks registered via [`register_wildcard_sink`] also receive
+/// the event regardless of `session_id`. Wildcard delivery is intended
+/// for cross-session observers (e.g. the DAP debugger watching every
+/// subagent lifecycle in a session-agnostic process) and runs after the
+/// session-scoped fan-out so per-session sinks always see the event
+/// first when ordering matters.
 pub fn emit_event(event: &AgentEvent) {
     let sinks: Vec<Arc<dyn AgentEventSink>> = {
         let reg = external_sinks().read().expect("sink registry poisoned");
@@ -1160,6 +1172,106 @@ pub fn emit_event(event: &AgentEvent) {
     for sink in sinks {
         sink.handle_event(event);
     }
+    let wildcard_sinks: Vec<Arc<dyn AgentEventSink>> = {
+        let reg = wildcard_sinks().read().expect("wildcard registry poisoned");
+        #[cfg(test)]
+        {
+            let owner = std::thread::current().id();
+            reg.iter()
+                .filter(|entry| entry.owner == owner)
+                .map(|entry| entry.sink.clone())
+                .collect()
+        }
+        #[cfg(not(test))]
+        {
+            reg.iter().map(|entry| entry.sink.clone()).collect()
+        }
+    };
+    for sink in wildcard_sinks {
+        sink.handle_event(event);
+    }
+}
+
+/// Opaque handle returned by [`register_wildcard_sink`]. Pass back to
+/// [`unregister_wildcard_sink`] to drop the registration without
+/// disturbing other wildcard observers. Cloneable so a sink owner can
+/// stash the handle alongside the sink itself.
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Hash)]
+pub struct WildcardSinkHandle(u64);
+
+#[cfg(test)]
+#[derive(Clone)]
+struct WildcardSinkEntry {
+    handle: WildcardSinkHandle,
+    owner: std::thread::ThreadId,
+    sink: Arc<dyn AgentEventSink>,
+}
+
+#[cfg(not(test))]
+#[derive(Clone)]
+struct WildcardSinkEntry {
+    handle: WildcardSinkHandle,
+    sink: Arc<dyn AgentEventSink>,
+}
+
+type WildcardSinkRegistry = RwLock<Vec<WildcardSinkEntry>>;
+
+fn wildcard_sinks() -> &'static WildcardSinkRegistry {
+    static REGISTRY: OnceLock<WildcardSinkRegistry> = OnceLock::new();
+    REGISTRY.get_or_init(|| RwLock::new(Vec::new()))
+}
+
+fn next_wildcard_handle() -> WildcardSinkHandle {
+    use std::sync::atomic::{AtomicU64, Ordering};
+    static COUNTER: AtomicU64 = AtomicU64::new(1);
+    WildcardSinkHandle(COUNTER.fetch_add(1, Ordering::SeqCst))
+}
+
+/// Register a sink that receives **every** emitted `AgentEvent`
+/// regardless of `session_id`. Intended for cross-session observers
+/// such as the DAP debugger, which surfaces every subagent's lifecycle
+/// without knowing the session id ahead of time.
+///
+/// Returns a [`WildcardSinkHandle`] the caller passes to
+/// [`unregister_wildcard_sink`] when shutting down. Without that pairing
+/// the sink leaks for the lifetime of the process — caller-managed
+/// drop is the contract because the registry is process-global.
+pub fn register_wildcard_sink(sink: Arc<dyn AgentEventSink>) -> WildcardSinkHandle {
+    let handle = next_wildcard_handle();
+    let mut reg = wildcard_sinks()
+        .write()
+        .expect("wildcard registry poisoned");
+    #[cfg(test)]
+    let entry = WildcardSinkEntry {
+        handle,
+        owner: std::thread::current().id(),
+        sink,
+    };
+    #[cfg(not(test))]
+    let entry = WildcardSinkEntry { handle, sink };
+    reg.push(entry);
+    handle
+}
+
+/// Drop the wildcard sink registered under `handle`. Idempotent — no-op
+/// when the handle is unknown (already-unregistered or never-issued).
+pub fn unregister_wildcard_sink(handle: WildcardSinkHandle) {
+    let mut reg = wildcard_sinks()
+        .write()
+        .expect("wildcard registry poisoned");
+    reg.retain(|entry| entry.handle != handle);
+}
+
+/// Test-only: clear every wildcard sink. Mirrors
+/// [`reset_all_sinks`] for the per-session registry so test setups can
+/// guarantee a clean baseline without retaining stray handles.
+#[cfg(test)]
+pub fn reset_wildcard_sinks() {
+    let owner = std::thread::current().id();
+    let mut reg = wildcard_sinks()
+        .write()
+        .expect("wildcard registry poisoned");
+    reg.retain(|entry| entry.owner != owner);
 }
 
 fn now_ms() -> i64 {
@@ -1972,5 +2084,55 @@ mod tests {
         let json = serde_json::to_value(&event).unwrap();
         assert_eq!(json["receipt"], serde_json::to_value(receipt).unwrap());
         assert_eq!(json["receipt"]["args_hash"], "0".repeat(64));
+    }
+
+    #[test]
+    fn wildcard_sink_receives_events_across_sessions() {
+        // Wildcard sinks (issue #1868) observe every emit regardless
+        // of session_id. The cfg(test) owner filter keeps tests on
+        // other threads from polluting each other.
+        reset_wildcard_sinks();
+        let counter = Arc::new(AtomicUsize::new(0));
+        let handle = register_wildcard_sink(Arc::new(CountingSink(counter.clone())));
+        emit_event(&AgentEvent::TurnStart {
+            session_id: "session-w".into(),
+            iteration: 0,
+        });
+        emit_event(&AgentEvent::TurnEnd {
+            session_id: "session-w-other".into(),
+            iteration: 0,
+            turn_info: serde_json::json!({}),
+        });
+        assert_eq!(counter.load(Ordering::SeqCst), 2);
+        unregister_wildcard_sink(handle);
+        emit_event(&AgentEvent::TurnStart {
+            session_id: "session-w".into(),
+            iteration: 1,
+        });
+        assert_eq!(
+            counter.load(Ordering::SeqCst),
+            2,
+            "unregister stops delivery"
+        );
+        reset_wildcard_sinks();
+    }
+
+    #[test]
+    fn wildcard_sink_unregister_unknown_handle_is_noop() {
+        reset_wildcard_sinks();
+        let counter = Arc::new(AtomicUsize::new(0));
+        let handle = register_wildcard_sink(Arc::new(CountingSink(counter.clone())));
+        unregister_wildcard_sink(handle);
+        // Second unregister of the same handle is harmless.
+        unregister_wildcard_sink(handle);
+        // And a completely-made-up handle is also a no-op.
+        let bogus = WildcardSinkHandle(u64::MAX);
+        unregister_wildcard_sink(bogus);
+        emit_event(&AgentEvent::TurnStart {
+            session_id: "s".into(),
+            iteration: 0,
+        });
+        assert_eq!(counter.load(Ordering::SeqCst), 0);
+        reset_wildcard_sinks();
     }
 }
