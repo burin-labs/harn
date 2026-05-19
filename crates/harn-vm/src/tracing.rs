@@ -42,6 +42,14 @@ pub enum SpanKind {
     /// the originating `PoolSubmit` span across the async boundary so
     /// queue dwell time can be reconstructed from a single trace.
     PoolDequeue,
+    /// `emit_channel(...)` boundary — opened at `emit_channel`, closed
+    /// after the durable append + trigger fan-out finishes (CH-06 / #1877).
+    ChannelEmit,
+    /// Channel-source trigger match boundary — opened at trigger fan-out
+    /// just before the handler is invoked, closed once dispatch finishes.
+    /// Links back to the originating `ChannelEmit` span (multi-link for
+    /// batched / aggregated triggers).
+    ChannelMatch,
 }
 
 impl SpanKind {
@@ -62,6 +70,8 @@ impl SpanKind {
             Self::DrainDecision => "drain_decision",
             Self::PoolSubmit => "pool_submit",
             Self::PoolDequeue => "pool_dequeue",
+            Self::ChannelEmit => "channel_emit",
+            Self::ChannelMatch => "channel_match",
         }
     }
 }

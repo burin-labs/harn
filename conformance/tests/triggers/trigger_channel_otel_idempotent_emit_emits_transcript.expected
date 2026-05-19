@@ -1,0 +1,7 @@
+transcript.channel.emit
+true
+false
+transcript.channel.match
+transcript.channel.emit
+false
+true

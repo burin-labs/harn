@@ -21,6 +21,20 @@ const SCOPE_HEADER: &str = "harn.channel.scope";
 const SCOPE_ID_HEADER: &str = "harn.channel.scope_id";
 const EMITTED_BY_HEADER: &str = "harn.channel.emitted_by";
 
+/// CH-06 (#1877): topic for `transcript.channel.emit` / `transcript.channel.match`
+/// transcript events. Consumers subscribe to this topic to render channel
+/// activity alongside reminder/suspension lifecycle events.
+pub(crate) const CHANNEL_TRANSCRIPT_TOPIC: &str = "transcript.channel.lifecycle";
+pub(crate) const CHANNEL_EMIT_TRANSCRIPT_KIND: &str = "transcript.channel.emit";
+pub(crate) const CHANNEL_MATCH_TRANSCRIPT_KIND: &str = "transcript.channel.match";
+
+/// CH-06 (#1877): per-event headers stamped on the `TriggerEvent` so the
+/// channel-match dispatcher can link the `ChannelMatch` span back to the
+/// originating `ChannelEmit` span across the async boundary (also through
+/// the aggregation buffer for batched triggers).
+const EMIT_TRACE_ID_HEADER: &str = "harn.channel.emit_trace_id";
+const EMIT_SPAN_ID_HEADER: &str = "harn.channel.emit_span_id";
+
 static SESSION_CHANNEL_LOG: OnceLock<Mutex<Option<Arc<AnyEventLog>>>> = OnceLock::new();
 static SIGNING_SALT: OnceLock<Vec<u8>> = OnceLock::new();
 
@@ -183,6 +197,23 @@ pub(crate) async fn emit_channel_from_vm(args: Vec<VmValue>) -> Result<VmValue, 
         ttl_ms: options.ttl_ms,
     };
 
+    // CH-06 (#1877): open the ChannelEmit span around the durable append +
+    // trigger fan-out. The span captures emit-time metadata (scope, name,
+    // payload summary) and its trace/span id is stashed on the trigger
+    // event headers so the downstream ChannelMatch span can link back.
+    let mut emit_span = ChannelSpanGuard::start(
+        crate::tracing::SpanKind::ChannelEmit,
+        format!("channel.emit {}", resolved.resolved_name),
+        Vec::new(),
+    );
+    emit_span.set_metadata("event_id", serde_json::json!(record.id));
+    emit_span.set_metadata("scope", serde_json::json!(resolved.scope.as_str()));
+    emit_span.set_metadata("scope_id", serde_json::json!(resolved.scope_id));
+    emit_span.set_metadata("name_resolved", serde_json::json!(resolved.resolved_name));
+    emit_span.set_metadata("payload_summary", summarize_payload(&record.payload));
+    let emit_span_id = crate::tracing::current_span_id().unwrap_or(0);
+    let emit_link = emit_span.link();
+
     let mut headers = BTreeMap::new();
     headers.insert(IDEMPOTENCY_HEADER.to_string(), event_id.clone());
     headers.insert(NAME_HEADER.to_string(), resolved.resolved_name.clone());
@@ -196,7 +227,7 @@ pub(crate) async fn emit_channel_from_vm(args: Vec<VmValue>) -> Result<VmValue, 
     let log = log_for_scope(resolved.scope);
     let mut log_event = LogEvent::new(
         CHANNEL_EVENT_KIND,
-        serde_json::to_value(record)
+        serde_json::to_value(&record)
             .map_err(|error| VmError::Runtime(format!("emit_channel: encode event: {error}")))?,
     )
     .with_headers(headers);
@@ -211,6 +242,9 @@ pub(crate) async fn emit_channel_from_vm(args: Vec<VmValue>) -> Result<VmValue, 
         &outcome.event,
         outcome.inserted,
     )?;
+    // CH-06 (#1877): emit the transcript event whether the append was fresh
+    // or idempotent — both outcomes are first-class observability signals.
+    emit_channel_emit_transcript(&record, &resolved, outcome.inserted, emit_span_id);
     // CH-02 (#1872): fan out the emit to channel-source triggers. Only fresh
     // appends fan out; idempotent duplicates short-circuit because the producer
     // already saw the original delivery.
@@ -236,8 +270,9 @@ pub(crate) async fn emit_channel_from_vm(args: Vec<VmValue>) -> Result<VmValue, 
             session_id: context_for_fanout.session_id_for_receipt(&resolved),
             pipeline_id: context_for_fanout.pipeline_id_for_receipt(&resolved),
         };
-        dispatch_channel_emit_to_triggers(&resolved, fanout_payload).await?;
+        dispatch_channel_emit_to_triggers(&resolved, fanout_payload, emit_link).await?;
     }
+    emit_span.end();
     Ok(crate::stdlib::json_to_vm_value(&receipt))
 }
 
@@ -779,6 +814,257 @@ fn channel_log_error(error: crate::event_log::LogError) -> VmError {
     VmError::Runtime(format!("channel event log: {error}"))
 }
 
+/// CH-06 (#1877): RAII guard around channel emit/match tracing spans.
+///
+/// Mirrors `PoolSpanGuard` (PL-06 / #1891): opens both a thread-local
+/// Harn span (visible to `trace_spans()`) and an OTel `tracing::Span`
+/// (visible to the exporter), wires OTel span links via
+/// `crate::observability::otel::set_span_link`, and closes them both on
+/// `end()` / `Drop`. Disabled-tracing path is a no-op because
+/// `crate::tracing::span_start_*` returns id 0 and short-circuits.
+struct ChannelSpanGuard {
+    span_id: u64,
+    otel_span: tracing::Span,
+}
+
+impl ChannelSpanGuard {
+    fn start(
+        kind: crate::tracing::SpanKind,
+        name: String,
+        links: Vec<crate::tracing::SpanLink>,
+    ) -> Self {
+        Self::start_with_parenting(kind, name, links, true)
+    }
+
+    fn start_detached(
+        kind: crate::tracing::SpanKind,
+        name: String,
+        links: Vec<crate::tracing::SpanLink>,
+    ) -> Self {
+        Self::start_with_parenting(kind, name, links, false)
+    }
+
+    fn start_with_parenting(
+        kind: crate::tracing::SpanKind,
+        name: String,
+        links: Vec<crate::tracing::SpanLink>,
+        inherit_parent: bool,
+    ) -> Self {
+        let span_id = if inherit_parent {
+            crate::tracing::span_start_with_links(kind, name.clone(), links.clone())
+        } else {
+            crate::tracing::span_start_detached_with_links(kind, name.clone(), links.clone())
+        };
+        let otel_span = tracing::info_span!(
+            target: "harn.vm.channel",
+            "harn.channel",
+            harn.kind = kind.as_str(),
+            harn.name = %name,
+        );
+        for link in links {
+            let trace_id = crate::TraceId(link.trace_id);
+            let mut attributes: std::collections::HashMap<String, String> =
+                link.attributes.into_iter().collect();
+            attributes
+                .entry("harn.link.kind".to_string())
+                .or_insert_with(|| "channel_emit".to_string());
+            let _ = crate::observability::otel::set_span_link(
+                &otel_span,
+                &trace_id,
+                &link.span_id,
+                Some(attributes),
+            );
+        }
+        Self { span_id, otel_span }
+    }
+
+    fn link(&self) -> Option<crate::tracing::SpanLink> {
+        crate::observability::otel::current_span_context_hex(&self.otel_span)
+            .map(|(trace_id, span_id)| crate::tracing::SpanLink::new(trace_id, span_id))
+            .or_else(|| crate::tracing::span_link(self.span_id))
+    }
+
+    fn set_metadata(&self, key: &str, value: serde_json::Value) {
+        crate::tracing::span_set_metadata(self.span_id, key, value);
+    }
+
+    fn end(&mut self) {
+        if self.span_id != 0 {
+            crate::tracing::span_end(self.span_id);
+            self.span_id = 0;
+        }
+    }
+}
+
+impl Drop for ChannelSpanGuard {
+    fn drop(&mut self) {
+        self.end();
+    }
+}
+
+/// CH-06 (#1877): summarize an emit payload for the transcript event so
+/// downstream renderers / audit feeds don't have to ingest the full
+/// payload. Numbers/bools render verbatim; strings are truncated; dicts
+/// and lists collapse to their top-level field count. Keeps the
+/// transcript log compact while preserving enough context for human
+/// inspection.
+fn summarize_payload(payload: &serde_json::Value) -> serde_json::Value {
+    const MAX_STRING_LEN: usize = 120;
+    match payload {
+        serde_json::Value::Null => serde_json::json!({"kind": "null"}),
+        serde_json::Value::Bool(value) => serde_json::json!({"kind": "bool", "value": value}),
+        serde_json::Value::Number(value) => serde_json::json!({"kind": "number", "value": value}),
+        serde_json::Value::String(value) => {
+            let truncated: String = value.chars().take(MAX_STRING_LEN).collect();
+            let len = value.chars().count();
+            serde_json::json!({
+                "kind": "string",
+                "value": truncated,
+                "truncated": len > MAX_STRING_LEN,
+                "length": len,
+            })
+        }
+        serde_json::Value::Array(items) => {
+            serde_json::json!({"kind": "array", "length": items.len()})
+        }
+        serde_json::Value::Object(map) => {
+            let fields: Vec<&String> = map.keys().take(8).collect();
+            serde_json::json!({
+                "kind": "object",
+                "field_count": map.len(),
+                "fields": fields,
+            })
+        }
+    }
+}
+
+/// CH-06 (#1877): append a channel transcript lifecycle event onto the
+/// active event log. No-op when no log is installed (e.g. unit tests
+/// running outside a VM context) so emission stays infallible from the
+/// caller's perspective.
+fn emit_channel_transcript_event(kind: &'static str, payload: serde_json::Value) {
+    let Some(log) = active_event_log() else {
+        return;
+    };
+    let Ok(topic) = Topic::new(CHANNEL_TRANSCRIPT_TOPIC) else {
+        return;
+    };
+    let event = LogEvent::new(kind, payload);
+    if tokio::runtime::Handle::try_current().is_ok() {
+        if let Ok(join) = std::thread::Builder::new()
+            .name("harn-channel-transcript".to_string())
+            .spawn(move || {
+                let _ = futures::executor::block_on(log.append(&topic, event));
+            })
+        {
+            let _ = join.join();
+        }
+    } else {
+        let _ = futures::executor::block_on(log.append(&topic, event));
+    }
+}
+
+/// CH-06 (#1877): emit the `transcript.channel.emit` lifecycle event the
+/// moment the durable append succeeds (whether the append was fresh or
+/// idempotent). Carries the emit span id when tracing is on so the
+/// transcript log can be stitched against the OTel trace.
+fn emit_channel_emit_transcript(
+    record: &StoredChannelEvent,
+    resolved: &ResolvedChannel,
+    inserted: bool,
+    span_id: u64,
+) {
+    let payload = serde_json::json!({
+        "event_id": record.id,
+        "name": record.name,
+        "name_resolved": resolved.resolved_name,
+        "scope": record.scope,
+        "scope_id": record.scope_id,
+        "payload_summary": summarize_payload(&record.payload),
+        "emitted_at": record.emitted_at,
+        "emitted_at_ms": record.emitted_at.at_ms,
+        "emitted_by": record.emitted_by,
+        "session_id": record.session_id,
+        "pipeline_id": record.pipeline_id,
+        "tenant_id": record.tenant_id,
+        "inserted": inserted,
+        "duplicate": !inserted,
+        "span_id": if span_id == 0 { serde_json::Value::Null } else { serde_json::json!(span_id) },
+    });
+    emit_channel_transcript_event(CHANNEL_EMIT_TRANSCRIPT_KIND, payload);
+}
+
+/// CH-06 (#1877): emit the `transcript.channel.match` lifecycle event
+/// just before the dispatcher invokes the handler. Carries the match
+/// span id and, for batched triggers, the constituent event ids so the
+/// transcript can render the full batch context inline.
+#[allow(clippy::too_many_arguments)]
+fn emit_channel_match_transcript(
+    trigger_id: &str,
+    handler_kind: &str,
+    resolved: &ResolvedChannel,
+    event_id: &str,
+    matched_at_ms: i64,
+    matched_in_session_id: Option<&str>,
+    span_id: u64,
+    batch: Option<serde_json::Value>,
+) {
+    let mut payload = serde_json::json!({
+        "event_id": event_id,
+        "name_resolved": resolved.resolved_name,
+        "scope": resolved.scope.as_str(),
+        "scope_id": resolved.scope_id,
+        "trigger_id": trigger_id,
+        "handler_kind": handler_kind,
+        "matched_at_ms": matched_at_ms,
+        "matched_in_session_id": matched_in_session_id,
+        "span_id": if span_id == 0 { serde_json::Value::Null } else { serde_json::json!(span_id) },
+    });
+    if let Some(batch) = batch {
+        if let Some(map) = payload.as_object_mut() {
+            map.insert("batch".to_string(), batch);
+        }
+    }
+    emit_channel_transcript_event(CHANNEL_MATCH_TRANSCRIPT_KIND, payload);
+}
+
+/// CH-06 (#1877): collect the originating-emit span links stashed on a
+/// batch of `TriggerEvent`s. The non-batched dispatch path uses the
+/// single-event variant directly; the aggregated/batched path threads
+/// the per-event headers through the buffer and rebuilds the link list
+/// here so the resulting `ChannelMatch` span multi-links to every
+/// constituent emit.
+fn emit_links_from_event(event: &TriggerEvent) -> Vec<crate::tracing::SpanLink> {
+    let mut links = Vec::new();
+    if let (Some(trace_id), Some(span_id)) = (
+        event.headers.get(EMIT_TRACE_ID_HEADER),
+        event.headers.get(EMIT_SPAN_ID_HEADER),
+    ) {
+        links.push(
+            crate::tracing::SpanLink::new(trace_id.clone(), span_id.clone()).with_attributes(
+                BTreeMap::from([("harn.link.kind".to_string(), "channel_emit".to_string())]),
+            ),
+        );
+    }
+    links
+}
+
+fn emit_links_from_batch(events: &[TriggerEvent]) -> Vec<crate::tracing::SpanLink> {
+    let mut links = Vec::new();
+    for event in events {
+        links.extend(emit_links_from_event(event));
+    }
+    links
+}
+
+fn batch_summary_for_transcript(events: &[TriggerEvent]) -> serde_json::Value {
+    let constituent_ids: Vec<String> = events.iter().map(|event| event.id.0.clone()).collect();
+    serde_json::json!({
+        "count": events.len(),
+        "constituent_event_ids": constituent_ids,
+    })
+}
+
 /// Parsed channel-source trigger selector.
 ///
 /// Trigger DSL strings look like `channel:<scope>:<scope-id>:<name>` with
@@ -960,6 +1246,7 @@ fn validate_selector_name(name: &str) -> Result<(), String> {
 async fn dispatch_channel_emit_to_triggers(
     resolved: &ResolvedChannel,
     payload: ChannelEventPayload,
+    emit_link: Option<crate::tracing::SpanLink>,
 ) -> Result<(), VmError> {
     // Snapshot matching bindings outside of any async work so the registry
     // borrow is short-lived.
@@ -996,7 +1283,7 @@ async fn dispatch_channel_emit_to_triggers(
                 continue;
             }
         }
-        let event = build_channel_trigger_event(&payload);
+        let event = build_channel_trigger_event(&payload, emit_link.as_ref());
 
         // CH-04 (#1875): aggregation path. When the binding declared
         // `batch`, accumulate into the per-(binding, partition_key)
@@ -1014,6 +1301,11 @@ async fn dispatch_channel_emit_to_triggers(
                 event,
             );
             if let crate::triggers::aggregation::AccumulateOutcome::Ready(events) = outcome {
+                // CH-06 (#1877): the ChannelMatch span for a batched
+                // trigger multi-links to ALL constituent ChannelEmit
+                // spans so the trace tree shows the aggregation fan-in.
+                let links = emit_links_from_batch(&events);
+                let batch_summary = batch_summary_for_transcript(&events);
                 let batched = match crate::triggers::dispatcher::build_batched_event_public(events)
                 {
                     Ok(batched) => batched,
@@ -1023,20 +1315,71 @@ async fn dispatch_channel_emit_to_triggers(
                         )));
                     }
                 };
-                let _ = dispatcher
-                    .dispatch(&binding, batched)
-                    .await
-                    .map_err(|error| VmError::Runtime(format!("emit_channel dispatch: {error}")));
+                fire_channel_match(
+                    &dispatcher,
+                    binding.clone(),
+                    batched,
+                    resolved,
+                    links,
+                    Some(batch_summary),
+                )
+                .await;
             }
             continue;
         }
 
-        let _ = dispatcher
-            .dispatch(&binding, event)
-            .await
-            .map_err(|error| VmError::Runtime(format!("emit_channel dispatch: {error}")));
+        let links = emit_links_from_event(&event);
+        fire_channel_match(&dispatcher, binding.clone(), event, resolved, links, None).await;
     }
     Ok(())
+}
+
+/// CH-06 (#1877): open a `ChannelMatch` span, emit the transcript
+/// lifecycle event, and dispatch the trigger handler. The span links
+/// back to the originating ChannelEmit span (multi-link for batched
+/// triggers) via `set_span_link` from P-05 (#1858).
+async fn fire_channel_match(
+    dispatcher: &crate::triggers::Dispatcher,
+    binding: std::sync::Arc<crate::triggers::registry::TriggerBinding>,
+    event: TriggerEvent,
+    resolved: &ResolvedChannel,
+    links: Vec<crate::tracing::SpanLink>,
+    batch_summary: Option<serde_json::Value>,
+) {
+    let trigger_id = binding.id.as_str().to_string();
+    let handler_kind = binding.handler.kind().to_string();
+    let event_id = event.id.0.clone();
+    let mut match_span = ChannelSpanGuard::start_detached(
+        crate::tracing::SpanKind::ChannelMatch,
+        format!("channel.match {}", resolved.resolved_name),
+        links,
+    );
+    match_span.set_metadata("event_id", serde_json::json!(event_id));
+    match_span.set_metadata("trigger_id", serde_json::json!(trigger_id));
+    match_span.set_metadata("handler_kind", serde_json::json!(handler_kind));
+    match_span.set_metadata("name_resolved", serde_json::json!(resolved.resolved_name));
+    if let Some(summary) = batch_summary.as_ref() {
+        match_span.set_metadata("batch", summary.clone());
+    }
+    let span_id = crate::tracing::current_span_id().unwrap_or(0);
+    let matched_at_ms = crate::clock_mock::now_utc().unix_timestamp_nanos() as i64 / 1_000_000;
+    let matched_in_session_id = crate::agent_sessions::current_session_id()
+        .or_else(|| event.tenant_id.as_ref().map(|t| t.0.clone()));
+    emit_channel_match_transcript(
+        &trigger_id,
+        &handler_kind,
+        resolved,
+        &event_id,
+        matched_at_ms,
+        matched_in_session_id.as_deref(),
+        span_id,
+        batch_summary,
+    );
+    let _ = dispatcher
+        .dispatch(&binding, event)
+        .await
+        .map_err(|error| VmError::Runtime(format!("emit_channel dispatch: {error}")));
+    match_span.end();
 }
 
 /// Drain all expired aggregation buffers and dispatch them. Exposed as
@@ -1074,16 +1417,68 @@ pub(crate) async fn flush_expired_aggregations_inner() {
         else {
             continue;
         };
+        // CH-06 (#1877): rebuild the channel-resolved metadata from the
+        // first buffered event so the ChannelMatch span carries the
+        // right scope/name even for window-expire flushes.
+        let resolved_for_match = resolved_from_first_event(&expired.events);
+        let links = emit_links_from_batch(&expired.events);
+        let batch_summary = batch_summary_for_transcript(&expired.events);
         let batched = match crate::triggers::dispatcher::build_batched_event_public(expired.events)
         {
             Ok(batched) => batched,
             Err(_) => continue,
         };
-        let _ = dispatcher.dispatch(&binding, batched).await;
+        match resolved_for_match {
+            Some(resolved) => {
+                fire_channel_match(
+                    &dispatcher,
+                    binding,
+                    batched,
+                    &resolved,
+                    links,
+                    Some(batch_summary),
+                )
+                .await;
+            }
+            None => {
+                let _ = dispatcher.dispatch(&binding, batched).await;
+            }
+        }
     }
 }
 
-fn build_channel_trigger_event(payload: &ChannelEventPayload) -> TriggerEvent {
+/// CH-06 (#1877): synthesize a `ResolvedChannel` from the first buffered
+/// trigger event when a window-expire flush dispatches without going
+/// back through `resolve_channel`. Returns `None` if the event payload
+/// isn't a known channel payload (defensive — should not happen in
+/// practice since the dispatcher only buffers channel events).
+fn resolved_from_first_event(events: &[TriggerEvent]) -> Option<ResolvedChannel> {
+    let first = events.first()?;
+    let ProviderPayload::Known(KnownProviderPayload::Channel(payload)) = &first.provider_payload
+    else {
+        return None;
+    };
+    let scope = ChannelScope::parse(&payload.scope).ok()?;
+    let topic = Topic::new(format!(
+        "channels.{}.{}.{}",
+        payload.scope,
+        sanitize_topic_component(&payload.scope_id),
+        sanitize_topic_component(&payload.name),
+    ))
+    .ok()?;
+    Some(ResolvedChannel {
+        scope,
+        scope_id: payload.scope_id.clone(),
+        resolved_name: payload.name_resolved.clone(),
+        topic,
+        retention: retention_for_scope(scope),
+    })
+}
+
+fn build_channel_trigger_event(
+    payload: &ChannelEventPayload,
+    emit_link: Option<&crate::tracing::SpanLink>,
+) -> TriggerEvent {
     let mut event = TriggerEvent::new(
         ProviderId::from("channel"),
         "channel.emit",
@@ -1105,6 +1500,18 @@ fn build_channel_trigger_event(payload: &ChannelEventPayload) -> TriggerEvent {
         "harn_channel_scope_id".to_string(),
         payload.scope_id.clone(),
     );
+    // CH-06 (#1877): stash the ChannelEmit span coordinates on the trigger
+    // event so the downstream ChannelMatch span can link back via
+    // `set_span_link` — even after travelling through an aggregation
+    // buffer or being serialized into a batched envelope.
+    if let Some(link) = emit_link {
+        event
+            .headers
+            .insert(EMIT_TRACE_ID_HEADER.to_string(), link.trace_id.clone());
+        event
+            .headers
+            .insert(EMIT_SPAN_ID_HEADER.to_string(), link.span_id.clone());
+    }
     event
 }
 
