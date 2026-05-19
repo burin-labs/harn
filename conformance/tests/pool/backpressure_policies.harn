@@ -123,7 +123,10 @@ fn block_submitter_case(bp) {
 }
 
 fn audit_case() {
-  let stream = event_log.subscribe({topic: "lifecycle.pool.audit"})
+  // Filter to drop receipts so the assertion ignores the `pool_submit`
+  // and `pool_dequeue` receipts emitted on the same topic by PL-06.
+  let stream = event_log
+    .subscribe({topic: "lifecycle.pool.audit", kind_prefix: "pool_drop"})
   let first = stream.next().value
   let second = stream.next().value
   let third = stream.next().value

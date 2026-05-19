@@ -1,0 +1,11 @@
+pool_drop
+harn.pool_drop.v1
+drop_newest
+drop_newest_queue_full
+otel-drop-demo
+1
+1
+completed
+queued
+rejected
+drop_newest

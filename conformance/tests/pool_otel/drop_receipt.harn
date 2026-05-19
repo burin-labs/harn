@@ -1,0 +1,43 @@
+import { Backpressure, pool_create, pool_wait } from "std/lifecycle/pool"
+
+/**
+ * PL-06 (#1891): backpressure-rejected submissions emit a `pool_drop`
+ * receipt on `lifecycle.pool.audit` carrying `reason`, `policy`, and the
+ * dropped + replacement task ids — alongside the standard `pool_submit`
+ * receipt that fires on every accepted submit.
+ */
+pipeline default() {
+  let bp = Backpressure()
+  // Filter to drop receipts so the cursor is anchored to backpressure
+  // events even though `pool_submit` / `pool_dequeue` receipts also fan
+  // out on the same audit topic.
+  let drops = event_log
+    .subscribe({topic: "lifecycle.pool.audit", kind_prefix: "pool_drop"})
+  let gate = channel(nil, 1)
+  let pool = pool_create({name: "otel-drop-demo", max_concurrent: 1, backpressure: bp.queue(1, "drop_newest")})
+  let warmup = pool
+    .submit(
+    { ->
+      receive(gate)
+      return "warmup"
+    },
+  )
+  let queued = pool.submit({ -> "queued" })
+  let dropped = pool.submit({ -> "dropped" })
+  // The drop_newest policy rejects the third submission immediately.
+  let drop_receipt = drops.next().value
+  println(drop_receipt.kind)
+  println(drop_receipt.headers.schema)
+  println(drop_receipt.payload.policy)
+  println(drop_receipt.payload.reason)
+  println(drop_receipt.payload.pool)
+  println(drop_receipt.payload.max_depth)
+  println(drop_receipt.payload.queue_depth)
+  // Drain so the two surviving tasks finish.
+  send(gate, "go")
+  let results = pool_wait([warmup, queued, dropped])
+  println(results[0].status)
+  println(results[1].result)
+  println(results[2].status)
+  println(results[2].rejection_policy)
+}
