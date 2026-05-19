@@ -57,6 +57,31 @@ condensed series summaries instead of full per-patch history.
   formal `ChannelScope`, `BatchFilter`, `ReminderInjectHandler`
   shapes) plus the `HARN-CHN-*` block in the diagnostic appendix.
   Wires the new pages into `docs/src/SUMMARY.md` under Orchestration.
+- **`needs-human` autonomy class (T8, #1792).** Formalizes `needs-human` as
+  a first-class, transverse autonomy discipline on top of the existing
+  `AutonomyTier` (`Shadow` / `Suggest` / `ActWithApproval` / `ActAuto`).
+  Any operation tagged `needs-human` is now denied with the structured
+  `HARN-AUT-NEEDS-HUMAN` deny code regardless of the resolved tier —
+  even an `ActAuto`-tier caller cannot auto-apply a `needs-human`
+  side effect. `AutonomyPolicy` grows three additive fields for tagging:
+  `requires_human: bool` (blanket), `requires_human_agents: BTreeSet<String>`
+  (per-agent), and `requires_human_actions: BTreeSet<String>` (per-builtin
+  or per-action-class, e.g. `"write_file"` or `"fs.write"`). The dispatcher
+  emits a non-blocking approval-request with `detail.autonomy_class =
+  "needs-human"`, `detail.requires_human = true`, and `detail.deny_code =
+  "HARN-AUT-NEEDS-HUMAN"` so approval surfaces (Slack-approval, IDE,
+  portal, `hitl_pending`) can render the row distinctly from a normal
+  tier-driven approval ask. The corresponding `TrustRecord` is appended
+  with `outcome = "denied"`, `metadata.autonomy_class = "needs-human"`,
+  `metadata.requires_human = true`, `metadata.deny_code =
+  "HARN-AUT-NEEDS-HUMAN"`, and `metadata["autonomy.enforcement"] =
+  "needs_human_denied"`. The autonomy-class string mirrors
+  `RepairSafety::NeedsHuman.as_str()` from `harn-parser` so the
+  autonomy-surface and the repair-safety surface stay in lockstep with
+  E1.2 (#1747). Conformance: `conformance/tests/autonomy/autonomy_needs_human_basic.harn`
+  (per-action tag denies under `act_auto`, approval-request and trust
+  record carry the tag) and `autonomy_needs_human_blanket.harn` (blanket
+  and per-agent shapes).
 - **OAuth docs + provider cookbook (OA-08, #1909).** Adds
   `docs/src/oauth.md` as the user-facing reference for the full OAuth
   stack (`std/oauth/{providers,storage,client,device_flow,dynamic_registration,redaction}`),
