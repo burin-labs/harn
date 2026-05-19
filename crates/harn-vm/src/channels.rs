@@ -950,6 +950,13 @@ fn validate_selector_name(name: &str) -> Result<(), String> {
 /// This is the consumer side of the `emit_channel` ↔ trigger plumbing
 /// (CH-02 / #1872). Errors from individual handlers do not abort the
 /// emit; they surface in the dispatcher's DLQ + retry pipeline.
+///
+/// CH-04 (#1875): bindings with `batch { count, window, key, expire_action }`
+/// route events through an aggregation buffer instead of dispatching one
+/// event at a time. When the buffer hits `count`, the dispatcher fires
+/// the handler with a batched event (`event.batch` populated). When the
+/// `window` elapses with fewer than `count` events, the dispatcher
+/// either fires a partial batch (default) or discards the buffer.
 async fn dispatch_channel_emit_to_triggers(
     resolved: &ResolvedChannel,
     payload: ChannelEventPayload,
@@ -961,6 +968,15 @@ async fn dispatch_channel_emit_to_triggers(
         &resolved.scope_id,
         &payload.name,
     );
+
+    // CH-04 (#1875): flush any aggregation buffers whose window has
+    // elapsed BEFORE this emit so old batches go out in order. The
+    // implicit sweep runs even for emits that don't match any binding so
+    // a stale buffer can't outlive the trigger lifecycle. Tests can also
+    // call `flush_trigger_aggregations()` directly for deterministic
+    // window-expire coverage.
+    flush_expired_aggregations_inner().await;
+
     if bindings.is_empty() {
         return Ok(());
     }
@@ -973,18 +989,98 @@ async fn dispatch_channel_emit_to_triggers(
     let dispatcher = crate::triggers::Dispatcher::with_event_log(base_vm, log);
     for binding in bindings {
         // Filter (#1872 acceptance): JSON-path-equality on payload.
+        // Applied BEFORE aggregation so the buffer only collects events
+        // the handler actually cares about.
         if let Some(filter_str) = binding.filter.as_ref() {
             if !channel_filter_matches(filter_str, &payload.payload) {
                 continue;
             }
         }
         let event = build_channel_trigger_event(&payload);
+
+        // CH-04 (#1875): aggregation path. When the binding declared
+        // `batch`, accumulate into the per-(binding, partition_key)
+        // buffer; only dispatch once the threshold is reached.
+        if let Some(aggregation_config) = binding.aggregation.as_ref() {
+            let partition_key = crate::triggers::aggregation::partition_key_for_event(
+                aggregation_config,
+                &payload.payload,
+            );
+            let binding_key = binding.binding_key();
+            let outcome = crate::triggers::aggregation::accumulate(
+                &binding_key,
+                aggregation_config,
+                partition_key.as_deref(),
+                event,
+            );
+            if let crate::triggers::aggregation::AccumulateOutcome::Ready(events) = outcome {
+                let batched = match crate::triggers::dispatcher::build_batched_event_public(events)
+                {
+                    Ok(batched) => batched,
+                    Err(error) => {
+                        return Err(VmError::Runtime(format!(
+                            "emit_channel aggregation batch: {error}"
+                        )));
+                    }
+                };
+                let _ = dispatcher
+                    .dispatch(&binding, batched)
+                    .await
+                    .map_err(|error| VmError::Runtime(format!("emit_channel dispatch: {error}")));
+            }
+            continue;
+        }
+
         let _ = dispatcher
             .dispatch(&binding, event)
             .await
             .map_err(|error| VmError::Runtime(format!("emit_channel dispatch: {error}")));
     }
     Ok(())
+}
+
+/// Drain all expired aggregation buffers and dispatch them. Exposed as
+/// the `flush_trigger_aggregations()` builtin so Harn scripts (and the
+/// production runtime) can deterministically advance window-expire
+/// processing.
+pub(crate) async fn flush_expired_aggregations_inner() {
+    let expirations = crate::triggers::aggregation::drain_expired_aggregations();
+    if expirations.is_empty() {
+        return;
+    }
+    let Some(base_vm) = crate::vm::clone_async_builtin_child_vm() else {
+        return;
+    };
+    let log = active_event_log()
+        .unwrap_or_else(|| install_memory_for_current_thread(CHANNEL_QUEUE_DEPTH));
+    let dispatcher = crate::triggers::Dispatcher::with_event_log(base_vm, log);
+    for expired in expirations {
+        if matches!(
+            expired.action,
+            crate::triggers::aggregation::ExpireAction::Discard
+        ) {
+            continue;
+        }
+        // Resolve the binding by parsing the binding_key (id@vN). Skip
+        // if the binding has been terminated since the buffer was opened.
+        let Some((trigger_id, version_str)) = expired.binding_key.rsplit_once("@v") else {
+            continue;
+        };
+        let Ok(version) = version_str.parse::<u32>() else {
+            continue;
+        };
+        let Ok(binding) =
+            crate::triggers::registry::resolve_live_trigger_binding(trigger_id, Some(version))
+        else {
+            continue;
+        };
+        let batched = match crate::triggers::dispatcher::build_batched_event_public(expired.events)
+        {
+            Ok(batched) => batched,
+            Err(_) => continue,
+        };
+        let _ = dispatcher.dispatch(&binding, batched).await;
+    }
 }
 
 fn build_channel_trigger_event(payload: &ChannelEventPayload) -> TriggerEvent {

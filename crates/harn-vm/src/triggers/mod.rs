@@ -1,3 +1,4 @@
+pub mod aggregation;
 pub mod dispatcher;
 pub mod event;
 pub mod flow_control;
@@ -10,6 +11,11 @@ pub mod topics;
 pub mod webhook_intake;
 pub mod worker_queue;
 
+pub use aggregation::{
+    accumulate as accumulate_aggregation, clear_aggregation_state, drain_expired_aggregations,
+    drop_binding_aggregation, partition_key_for_event, AccumulateOutcome, ExpireAction,
+    ExpiredFlush, TriggerAggregationConfig,
+};
 pub use dispatcher::{
     append_dispatch_cancel_request, clear_dispatcher_state, snapshot_dispatcher_stats,
     DispatchCancelRequest, DispatchError, DispatchOutcome, DispatchStatus, Dispatcher,

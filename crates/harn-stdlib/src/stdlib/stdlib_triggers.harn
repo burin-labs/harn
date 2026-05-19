@@ -768,6 +768,23 @@ type AutonomyTier = "shadow" | "suggest" | "act_with_approval" | "act_auto"
 
 type TrustOutcome = "success" | "failure" | "denied" | "timeout"
 
+/**
+ * CH-04 (#1875): aggregation buffer attached to a trigger. The runtime
+ * collects matching events per (binding, partition_key) and dispatches
+ * the handler with a batched event when `count` is reached or `window`
+ * elapses.
+ *
+ * - `count`: fire after this many matching events.
+ * - `window`: bucket size (e.g. "10m", "1h"). Required.
+ * - `key`: optional dot-path into the channel payload; events with the
+ *   same value at this path accumulate in the same bucket. Missing path
+ *   = global bucket.
+ * - `expire_action`: `"fire_partial"` (default) invokes the handler with
+ *   the partial batch; `"discard"` drops it. The legacy alias `"fire"`
+ *   is accepted as a synonym for `"fire_partial"`.
+ */
+type TriggerBatchSpec = {count: int, window: string, key: string?, expire_action: string?}
+
 type TriggerConfig = {
   id: string?,
   kind: string,
@@ -781,6 +798,7 @@ type TriggerConfig = {
   events: list<string>?,
   dedupe_key: string?,
   filter: string?,
+  batch: TriggerBatchSpec?,
   allow_cleartext: bool?,
   budget: TriggerBudget?,
   manifest_path: string?,

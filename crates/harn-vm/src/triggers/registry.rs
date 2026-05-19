@@ -16,6 +16,7 @@ use crate::triggers::test_util::clock;
 use crate::trust_graph::AutonomyTier;
 use crate::value::VmClosure;
 
+use super::aggregation::TriggerAggregationConfig;
 use super::dispatcher::TriggerRetryConfig;
 use super::flow_control::TriggerFlowControlConfig;
 use super::ProviderId;
@@ -327,6 +328,11 @@ pub struct TriggerBindingSpec {
     pub on_budget_exhausted: TriggerBudgetExhaustionStrategy,
     pub max_concurrent: Option<u32>,
     pub flow_control: TriggerFlowControlConfig,
+    /// CH-04 (#1875): optional aggregation buffer. When set, the
+    /// dispatcher accumulates matching events into a per-(binding,
+    /// partition_key) buffer and dispatches the handler with a batched
+    /// event when `count` is reached or the `window` elapses.
+    pub aggregation: Option<TriggerAggregationConfig>,
     pub manifest_path: Option<PathBuf>,
     pub package_name: Option<String>,
     pub definition_fingerprint: String,
@@ -404,6 +410,10 @@ pub struct TriggerBinding {
     pub on_budget_exhausted: TriggerBudgetExhaustionStrategy,
     pub max_concurrent: Option<u32>,
     pub flow_control: TriggerFlowControlConfig,
+    /// CH-04 (#1875): see `TriggerBindingSpec::aggregation`. Cloned at
+    /// registration so the dispatcher does not need to lock the registry
+    /// for every emit.
+    pub aggregation: Option<TriggerAggregationConfig>,
     pub manifest_path: Option<PathBuf>,
     pub package_name: Option<String>,
     pub definition_fingerprint: String,
@@ -481,6 +491,7 @@ impl TriggerBinding {
             on_budget_exhausted: spec.on_budget_exhausted,
             max_concurrent: spec.max_concurrent,
             flow_control: spec.flow_control,
+            aggregation: spec.aggregation,
             manifest_path: spec.manifest_path,
             package_name: spec.package_name,
             definition_fingerprint: spec.definition_fingerprint,
@@ -634,6 +645,7 @@ pub fn clear_trigger_registry() {
         *slot.borrow_mut() = TriggerRegistry::default();
     });
     clear_orchestrator_budget();
+    super::aggregation::clear_aggregation_state();
 }
 
 pub fn install_orchestrator_budget(config: OrchestratorBudgetConfig) {
@@ -1620,6 +1632,14 @@ impl TriggerRegistry {
         }
         *state = next;
         drop(state);
+        // CH-04 (#1875): drop any pending aggregation buffers when the
+        // binding terminates so a long-lived buffer doesn't fire after
+        // the trigger has been removed. Leftover events are discarded —
+        // matches the in-flight drain contract elsewhere in the
+        // registry (the trigger is gone; we'd have nowhere to dispatch).
+        if next == TriggerState::Terminated && binding.aggregation.is_some() {
+            let _ = super::aggregation::drop_binding_aggregation(&binding.binding_key());
+        }
         lifecycle.push(lifecycle_event(binding, Some(previous), next));
     }
 }
@@ -1728,6 +1748,7 @@ mod tests {
             on_budget_exhausted: crate::TriggerBudgetExhaustionStrategy::False,
             max_concurrent: Some(10),
             flow_control: crate::triggers::TriggerFlowControlConfig::default(),
+            aggregation: None,
             manifest_path: None,
             package_name: Some("workspace".to_string()),
             definition_fingerprint: fingerprint.to_string(),
@@ -1759,6 +1780,7 @@ mod tests {
             on_budget_exhausted: crate::TriggerBudgetExhaustionStrategy::False,
             max_concurrent: None,
             flow_control: crate::triggers::TriggerFlowControlConfig::default(),
+            aggregation: None,
             manifest_path: None,
             package_name: None,
             definition_fingerprint: format!("dynamic:{id}"),

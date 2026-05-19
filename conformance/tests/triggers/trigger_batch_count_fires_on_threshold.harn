@@ -1,0 +1,48 @@
+import "std/triggers"
+
+/**
+ * CH-04 (#1875): aggregation trigger fires once the `count` threshold is
+ * reached. The handler receives a batched event (`event.batch` populated)
+ * with the buffered list of channel events.
+ */
+fn handle_batch(event) {
+  let batch_len = if event.batch == nil {
+    0
+  } else {
+    len(event.batch)
+  }
+  emit_channel("batch.count.fired", {batch_size: batch_len})
+}
+
+pipeline test(task) {
+  let unique = to_string(to_int(timestamp())) + "-" + to_string(random_int(100000, 999999))
+  let _ = trigger_register(
+    {
+      id: "batch-count-" + unique,
+      kind: "channel.emit",
+      provider: "channel",
+      autonomy_tier: "act_auto",
+      handler: handle_batch,
+      when: nil,
+      retry: nil,
+      match: {events: ["channel:batch.count.input"]},
+      events: nil,
+      dedupe_key: nil,
+      filter: nil,
+      batch: {count: 5, window: "10m"},
+      budget: nil,
+      manifest_path: nil,
+      package_name: "conformance",
+    },
+  )
+  let _ = emit_channel("batch.count.input", {seq: 1})
+  let _ = emit_channel("batch.count.input", {seq: 2})
+  let _ = emit_channel("batch.count.input", {seq: 3})
+  let _ = emit_channel("batch.count.input", {seq: 4})
+  let before = channel_events("batch.count.fired")
+  println("before-threshold:" + to_string(len(before)))
+  let _ = emit_channel("batch.count.input", {seq: 5})
+  let after = channel_events("batch.count.fired")
+  println("after-threshold:" + to_string(len(after)))
+  println("batch_size:" + to_string(after[0].payload.batch_size))
+}

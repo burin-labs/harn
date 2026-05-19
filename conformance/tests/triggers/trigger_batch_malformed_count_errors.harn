@@ -1,0 +1,32 @@
+import "std/triggers"
+
+/**
+ * CH-04 (#1875): malformed `batch.count` (<= 0) raises `HARN-CHN-005` at
+ * registration time so the trigger never enters the registry with a
+ * useless config.
+ */
+fn handler(event) {
+  return nil
+}
+
+pipeline test(task) {
+  let _ = trigger_register(
+    {
+      id: "batch-bad-count",
+      kind: "channel.emit",
+      provider: "channel",
+      autonomy_tier: "act_auto",
+      handler: handler,
+      when: nil,
+      retry: nil,
+      match: {events: ["channel:batch.bad.input"]},
+      events: nil,
+      dedupe_key: nil,
+      filter: nil,
+      batch: {count: 0, window: "10m"},
+      budget: nil,
+      manifest_path: nil,
+      package_name: "conformance",
+    },
+  )
+}

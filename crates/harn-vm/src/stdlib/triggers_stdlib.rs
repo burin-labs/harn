@@ -1133,6 +1133,21 @@ fn parse_trigger_config(config: &BTreeMap<String, VmValue>) -> Result<TriggerBin
     let manifest_path = optional_string(config, "manifest_path").map(std::path::PathBuf::from);
     let package_name = optional_string(config, "package_name");
     let retry = parse_retry_config(retry.map(|value| &**value), "trigger_register")?;
+
+    // CH-04 (#1875): parse the optional `batch` aggregation field.
+    let aggregation = match config.get("batch") {
+        Some(value) => crate::triggers::aggregation::parse_aggregation_config(value)?,
+        None => None,
+    };
+    let aggregation_fingerprint = aggregation.as_ref().map(|cfg| {
+        serde_json::json!({
+            "count": cfg.count,
+            "window_ms": cfg.window.as_millis() as u64,
+            "key": cfg.key_path,
+            "expire_action": cfg.expire_action.as_str(),
+        })
+    });
+
     let fingerprint = serde_json::to_string(&serde_json::json!({
         "id": id,
         "kind": kind,
@@ -1155,6 +1170,7 @@ fn parse_trigger_config(config: &BTreeMap<String, VmValue>) -> Result<TriggerBin
         "max_autonomous_decisions_per_day": max_autonomous_decisions_per_day,
         "on_budget_exhausted": on_budget_exhausted.as_str(),
         "max_concurrent": max_concurrent,
+        "aggregation": aggregation_fingerprint,
         "manifest_path": manifest_path.as_ref().map(|path| path.display().to_string()),
         "package_name": package_name,
     }))
@@ -1200,6 +1216,7 @@ fn parse_trigger_config(config: &BTreeMap<String, VmValue>) -> Result<TriggerBin
         on_budget_exhausted,
         max_concurrent,
         flow_control: crate::triggers::TriggerFlowControlConfig::default(),
+        aggregation,
         manifest_path,
         package_name,
         definition_fingerprint: fingerprint,
@@ -2564,6 +2581,7 @@ mod tests {
             on_budget_exhausted: crate::TriggerBudgetExhaustionStrategy::False,
             max_concurrent: None,
             flow_control: crate::triggers::TriggerFlowControlConfig::default(),
+            aggregation: None,
             manifest_path: None,
             package_name: Some("workspace".to_string()),
             definition_fingerprint: fingerprint.to_string(),

@@ -68,6 +68,15 @@ pub use util::{
     snapshot_dispatcher_stats,
 };
 
+/// Public wrapper for [`util::build_batched_event`]. Used by
+/// `crate::channels` (CH-04 / #1875) to package aggregated events into a
+/// single [`TriggerEvent`] before dispatch.
+pub fn build_batched_event_public(
+    events: Vec<TriggerEvent>,
+) -> Result<TriggerEvent, DispatchError> {
+    util::build_batched_event(events)
+}
+
 pub(crate) use state::{
     current_dispatch_context, current_dispatch_is_replay, current_dispatch_wait_lease,
 };
