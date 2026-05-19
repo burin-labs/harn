@@ -684,7 +684,7 @@ struct MemoryState {
 }
 
 pub struct MemoryEventLog {
-    state: tokio::sync::Mutex<MemoryState>,
+    state: Mutex<MemoryState>,
     broadcasts: BroadcastMap,
     queue_depth: usize,
 }
@@ -692,14 +692,20 @@ pub struct MemoryEventLog {
 impl MemoryEventLog {
     pub fn new(queue_depth: usize) -> Self {
         Self {
-            state: tokio::sync::Mutex::new(MemoryState::default()),
+            state: Mutex::new(MemoryState::default()),
             broadcasts: BroadcastMap::default(),
             queue_depth: queue_depth.max(1),
         }
     }
 
+    fn state(&self) -> Result<std::sync::MutexGuard<'_, MemoryState>, LogError> {
+        self.state
+            .lock()
+            .map_err(|_| LogError::Io("memory event log state poisoned".to_string()))
+    }
+
     async fn topics(&self) -> Result<Vec<Topic>, LogError> {
-        let state = self.state.lock().await;
+        let state = self.state()?;
         let mut topics = state
             .topics
             .keys()
@@ -716,7 +722,7 @@ impl MemoryEventLog {
         value: &str,
         event: LogEvent,
     ) -> Result<AppendOutcome, LogError> {
-        let mut state = self.state.lock().await;
+        let mut state = self.state()?;
         if let Some((event_id, existing)) = state
             .topics
             .get(topic.as_str())
@@ -771,7 +777,7 @@ impl EventLog for MemoryEventLog {
     }
 
     async fn append(&self, topic: &Topic, event: LogEvent) -> Result<EventId, LogError> {
-        let mut state = self.state.lock().await;
+        let mut state = self.state()?;
         let event_id = state.latest.get(topic.as_str()).copied().unwrap_or(0) + 1;
         let previous = state
             .topics
@@ -802,7 +808,7 @@ impl EventLog for MemoryEventLog {
         limit: usize,
     ) -> Result<Vec<(EventId, LogEvent)>, LogError> {
         let from = from.unwrap_or(0);
-        let state = self.state.lock().await;
+        let state = self.state()?;
         let events = state
             .topics
             .get(topic.as_str())
@@ -831,7 +837,7 @@ impl EventLog for MemoryEventLog {
         consumer: &ConsumerId,
         up_to: EventId,
     ) -> Result<(), LogError> {
-        let mut state = self.state.lock().await;
+        let mut state = self.state()?;
         state.consumers.insert(
             (topic.as_str().to_string(), consumer.as_str().to_string()),
             up_to,
@@ -844,7 +850,7 @@ impl EventLog for MemoryEventLog {
         topic: &Topic,
         consumer: &ConsumerId,
     ) -> Result<Option<EventId>, LogError> {
-        let state = self.state.lock().await;
+        let state = self.state()?;
         Ok(state
             .consumers
             .get(&(topic.as_str().to_string(), consumer.as_str().to_string()))
@@ -852,12 +858,12 @@ impl EventLog for MemoryEventLog {
     }
 
     async fn latest(&self, topic: &Topic) -> Result<Option<EventId>, LogError> {
-        let state = self.state.lock().await;
+        let state = self.state()?;
         Ok(state.latest.get(topic.as_str()).copied())
     }
 
     async fn compact(&self, topic: &Topic, before: EventId) -> Result<CompactReport, LogError> {
-        let mut state = self.state.lock().await;
+        let mut state = self.state()?;
         let Some(events) = state.topics.get_mut(topic.as_str()) else {
             return Ok(CompactReport::default());
         };

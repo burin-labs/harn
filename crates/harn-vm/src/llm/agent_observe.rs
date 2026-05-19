@@ -870,6 +870,7 @@ pub(crate) async fn observed_llm_call(
     offthread: bool,
     streaming_detector: Option<StreamingDetectorContext>,
 ) -> Result<super::api::LlmResult, VmError> {
+    let _in_flight_guard = super::call::InFlightLlmCallGuard::enter(opts);
     let effective_tool_format = tool_format
         .map(str::to_string)
         .or_else(|| {

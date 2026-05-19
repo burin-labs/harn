@@ -738,6 +738,47 @@ impl WorkerQueue {
             .await
     }
 
+    pub async fn ack_job(
+        &self,
+        queue: &str,
+        job_event_id: u64,
+        consumer_id: &str,
+    ) -> Result<bool, LogError> {
+        let queue_name = queue.trim();
+        if queue_name.is_empty() {
+            return Err(LogError::Config(
+                "worker queue name cannot be empty".to_string(),
+            ));
+        }
+        let state = self.queue_state(queue_name).await?;
+        let Some(job) = state
+            .jobs
+            .iter()
+            .find(|job| job.job_event_id == job_event_id)
+        else {
+            return Ok(false);
+        };
+        if job.acked || job.purged {
+            return Ok(false);
+        }
+        self.event_log
+            .append(
+                &claims_topic(queue_name)?,
+                LogEvent::new(
+                    "job_acked",
+                    serde_json::to_value(WorkerQueueAckRecord {
+                        job_event_id,
+                        claim_id: String::new(),
+                        consumer_id: consumer_id.to_string(),
+                        acked_at_ms: now_ms(),
+                    })
+                    .map_err(|error| LogError::Serde(error.to_string()))?,
+                ),
+            )
+            .await?;
+        Ok(true)
+    }
+
     pub async fn purge_unclaimed(
         &self,
         queue: &str,
@@ -996,6 +1037,37 @@ mod tests {
         assert_eq!(summary.in_flight, 0);
         assert_eq!(summary.acked, 1);
         assert_eq!(summary.responses, 1);
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn ack_job_acknowledges_without_active_claim() {
+        let log = Arc::new(AnyEventLog::Memory(MemoryEventLog::new(32)));
+        let queue = WorkerQueue::new(log);
+        let receipt = queue
+            .enqueue(&test_job(
+                "triage",
+                "incoming-review-task",
+                "evt-1",
+                WorkerQueuePriority::Normal,
+            ))
+            .await
+            .unwrap();
+
+        assert!(queue
+            .ack_job("triage", receipt.job_event_id, "pipeline_lifecycle")
+            .await
+            .unwrap());
+        let state = queue.queue_state("triage").await.unwrap();
+        let summary = state.summary(now_ms());
+        assert_eq!(summary.ready, 0);
+        assert_eq!(summary.acked, 1);
+        assert!(
+            !queue
+                .ack_job("triage", receipt.job_event_id, "pipeline_lifecycle")
+                .await
+                .unwrap(),
+            "already acknowledged jobs should not produce a second settlement"
+        );
     }
 
     #[tokio::test(flavor = "current_thread")]
