@@ -6,9 +6,7 @@ pipeline main() {
     {
       id: "malformed_spec",
       subscribes_to: ["session_idle"],
-      evaluate: { _ctx ->
-        return {reminder: {tags: ["bad"]}}
-      },
+      evaluate: { _ctx -> return {reminder: {tags: ["bad"]}} },
     },
   )
   let session = agent_session_open("reminder-provider-malformed-spec")

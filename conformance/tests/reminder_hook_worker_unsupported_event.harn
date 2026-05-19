@@ -6,9 +6,7 @@ pipeline main() {
     {
       id: "worker_spawn_reminder",
       subscribes_to: ["WorkerSpawned"],
-      evaluate: { _ctx ->
-        return {reminder: {body: "worker spawned"}}
-      },
+      evaluate: { _ctx -> return {reminder: {body: "worker spawned"}} },
     },
   )
   let session = agent_session_open("reminder-hook-worker-unsupported-event")
