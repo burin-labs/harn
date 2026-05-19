@@ -1,0 +1,15 @@
+import { agent_session_apply_reminder_post_turn } from "std/agent/state"
+
+pipeline main() {
+  let session = agent_session_open("reminder-inject-ttl-expires")
+  agent_session_reset(session)
+  agent_session_inject(session, transcript_reminder_event({body: "expire me", ttl_turns: 1}))
+  let before = transcript_events_by_kind(agent_session_snapshot(session), "system_reminder")
+  let report = agent_session_apply_reminder_post_turn(session, 1)
+  let after = transcript_events_by_kind(agent_session_snapshot(session), "system_reminder")
+  println(len(before))
+  println(before[0].reminder.ttl_turns)
+  println(report.expired_count)
+  println(report.decremented_count)
+  println(len(after))
+}

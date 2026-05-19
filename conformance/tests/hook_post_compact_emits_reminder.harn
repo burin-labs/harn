@@ -1,0 +1,28 @@
+pipeline main() {
+  clear_session_hooks()
+  let session = agent_session_open("hook-post-compact-emits-reminder")
+  agent_session_reset(session)
+  agent_session_inject(session, {role: "user", content: "one"})
+  agent_session_inject(session, {role: "assistant", content: "two"})
+  agent_session_inject(session, {role: "user", content: "three"})
+  agent_session_inject(session, {role: "assistant", content: "four"})
+  register_session_hook(
+    "post_compact",
+    { _event -> return {reminder: {body: "compaction observed", tags: ["post_compact"], dedupe_key: "post-compact-hook"}} },
+  )
+  let snapshot = agent_session_snapshot(session) ?? {}
+  transcript_compact(snapshot, {strategy: "truncate", keep_last: 1, target_tokens: 1})
+  let events = transcript_events_by_kind(agent_session_snapshot(session), "system_reminder")
+  // Two reminders fire post-compact: our hook reminder plus the built-in
+  // compaction recap. Assert ours is present and tagged correctly.
+  let hook_event = if events[0].reminder.dedupe_key == "post-compact-hook" {
+    events[0]
+  } else {
+    events[1]
+  }
+  println(len(events) >= 1)
+  println(hook_event.reminder.body)
+  println(hook_event.reminder.tags[0])
+  println(hook_event.reminder.source)
+  clear_session_hooks()
+}

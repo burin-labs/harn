@@ -1,0 +1,31 @@
+pipeline main() {
+  let base = transcript_from_messages(
+    [
+      {role: "user", content: "one"},
+      {role: "assistant", content: "two"},
+      {role: "user", content: "three"},
+      {role: "assistant", content: "four"},
+    ],
+  )
+  let with_keeper = transcript
+    .inject_reminder(
+    base,
+    {body: "preserved across compaction", dedupe_key: "keeper", ttl_turns: 5, preserve_on_compact: true},
+  ).transcript
+  let with_discard = transcript
+    .inject_reminder(
+    with_keeper,
+    {
+      body: "discarded during compaction",
+      dedupe_key: "discard",
+      ttl_turns: 5,
+      preserve_on_compact: false,
+    },
+  ).transcript
+  let compacted = transcript_compact(with_discard, {strategy: "truncate", keep_last: 1, target_tokens: 1})
+  let reminders = transcript_events_by_kind(compacted, "system_reminder")
+  println(len(reminders))
+  println(reminders[0].reminder.body)
+  println(reminders[0].reminder.preserve_on_compact)
+  println(reminders[0].reminder.ttl_turns)
+}
