@@ -53,11 +53,12 @@ pub fn is_empty(state) {
     && len(state?.queued_triggers ?? []) == 0
     && len(state?.partial_handoffs ?? []) == 0
     && len(state?.in_flight_llm_calls ?? []) == 0
+    && len(state?.pool_pending_tasks ?? []) == 0
 }
 
 /**
  * Return per-bucket counts for an `UnsettledState` snapshot as a dict
- * shaped `{suspended, queued, partial, in_flight}`.
+ * shaped `{suspended, queued, partial, in_flight, pool_pending}`.
  *
  * @effects: []
  * @allocation: heap
@@ -71,6 +72,7 @@ pub fn counts(state) {
     queued: len(state?.queued_triggers ?? []),
     partial: len(state?.partial_handoffs ?? []),
     in_flight: len(state?.in_flight_llm_calls ?? []),
+    pool_pending: len(state?.pool_pending_tasks ?? []),
   }
 }
 
@@ -86,7 +88,8 @@ pub fn counts(state) {
  */
 pub fn summary(state) {
   let c = counts(state)
-  if c.suspended == 0 && c.queued == 0 && c.partial == 0 && c.in_flight == 0 {
+  if c.suspended == 0 && c.queued == 0 && c.partial == 0 && c.in_flight == 0
+    && c.pool_pending == 0 {
     return "no unsettled work"
   }
   return "unsettled work: " + to_string(c.suspended) + " suspended subagents, "
@@ -95,7 +98,9 @@ pub fn summary(state) {
     + to_string(c.partial)
     + " partial handoffs, "
     + to_string(c.in_flight)
-    + " in-flight llm calls"
+    + " in-flight llm calls, "
+    + to_string(c.pool_pending)
+    + " pool pending tasks"
 }
 
 /**

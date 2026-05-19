@@ -18,12 +18,14 @@ pipeline default() {
 
 ## Harness lifecycle methods
 
-`harness.unsettled_state()` returns one snapshot dict with four lists:
-`suspended_subagents`, `queued_triggers`, `partial_handoffs`, and
-`in_flight_llm_calls`. Suspended subagents come from the host worker
-registry, queued triggers come from the trigger inbox and worker queue
-event-log records, partial handoffs come from `harness.handoff_to`, and
-in-flight LLM calls come from the live LLM call registry.
+`harness.unsettled_state()` returns one snapshot dict with five lists:
+`suspended_subagents`, `queued_triggers`, `partial_handoffs`,
+`in_flight_llm_calls`, and `pool_pending_tasks`. Suspended subagents
+come from the host worker registry, queued triggers come from the
+trigger inbox and worker queue event-log records, partial handoffs come
+from `harness.handoff_to`, in-flight LLM calls come from the live LLM
+call registry, and pool pending tasks come from the thread-local pool
+registry (queued + running tasks created by `pool.submit(...)`).
 
 `harness.is_empty(state?)` returns `true` when every unsettled bucket is
 empty. Pass an already-captured snapshot to keep decisions consistent
@@ -31,9 +33,9 @@ inside one callback, or omit the argument to ask the harness for a fresh
 snapshot.
 
 `harness.counts(state?)` returns `{suspended, queued, partial,
-in_flight}` for either the supplied snapshot or a fresh harness snapshot.
-Use it for audit payloads and branch decisions instead of recomputing
-bucket lengths manually.
+in_flight, pool_pending}` for either the supplied snapshot or a fresh
+harness snapshot. Use it for audit payloads and branch decisions instead
+of recomputing bucket lengths manually.
 
 `harness.summary(state?)` returns a single operator-readable line such
 as `no unsettled work` or a per-bucket count summary. It is intended for

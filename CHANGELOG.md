@@ -10,6 +10,25 @@ condensed series summaries instead of full per-patch history.
 
 ### Added
 
+- **Pool tasks wired into `harness.unsettled_state()` (#2007).** Closes
+  the PL-07 follow-up from #2008: `UnsettledStateSnapshot` now carries a
+  `pool_pending_tasks` bucket fed by a new
+  `crate::stdlib::pool::snapshot_pending_tasks()` helper that walks the
+  thread-local pool registry and emits one entry per queued or running
+  task (terminal tasks are skipped). The bucket exposes `pool_id`,
+  `pool_name`, `task_id`, `status`, `priority`, optional `key` /
+  `idempotency_key`, `submitted_at` / `submitted_at_ms`,
+  `submitted_by`, optional `started_at`, and an `age_ms` derived from
+  the wall clock at snapshot time. `harness.is_empty(state?)`,
+  `harness.counts(state?)`, and `harness.summary(state?)` learn the
+  new `pool_pending` count; `std/lifecycle`'s `is_empty(state)`,
+  `counts(state)`, and `summary(state)` helpers learn the same field
+  so script-land callbacks observe pool work alongside suspended
+  sub-agents, queued triggers, partial handoffs, and in-flight LLM
+  calls. Drops the `@xfail` marker on
+  `conformance/tests/pool_unsettled_state_integration.harn` (now
+  asserting `pool_pending=3` end-to-end) and decrements
+  `scripts/xfail_threshold.txt` from 2 to 1.
 - **OTel suspend-end / resume-link wiring (S-18, #1867).** Wires the
   `SpanKind::Suspension` and `SpanKind::Resume` spans (added in P-05,
   #1858) into the cooperative `suspend_agent` / `resume_agent` paths.

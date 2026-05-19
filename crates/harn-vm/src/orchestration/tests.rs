@@ -1450,6 +1450,10 @@ fn unsettled_state_snapshot_starts_empty() {
         snapshot.to_json()["in_flight_llm_calls"],
         serde_json::json!([])
     );
+    assert_eq!(
+        snapshot.to_json()["pool_pending_tasks"],
+        serde_json::json!([])
+    );
 }
 
 #[test]
