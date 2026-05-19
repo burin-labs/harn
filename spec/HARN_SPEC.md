@@ -6160,6 +6160,98 @@ The core VM emits normalized hook payloads with `event`, `target`,
 run inside the step body, so low-level tool policy and high-level
 persona policy compose in execution order.
 
+### Preset `run_command` tool hooks
+
+The `std/tool_hooks` module ships a catalogue-driven wrapper for
+`run_command`-shaped tool handlers. Rules describe shell-command
+faux-pas (rewriteable mistakes such as `find . -name '*.py'`, `cargo
+build` without `--target-dir`, or denyable irreversible commands like
+`git push --force main`). The shipped catalogues (`harn-canon/*`) live
+in `crates/harn-stdlib/src/stdlib/stdlib_tool_hooks_catalogues.harn`
+and cover the universal deny set plus per-stack rules for `rust`,
+`python`, `typescript`/`ts`, `swift`, `sql`, and `harn`.
+
+`tool_rule(config)` validates a rule at construction:
+
+| Field | Type | Required | Notes |
+|---|---|---|---|
+| `id` | `string` | yes | Convention `<stack>.<tool>.<short>`; unique within the catalogue. |
+| `pattern` | `string` regex or `(command, context) -> bool` callable | yes | Predicate. Regex strings have no lookaround; callables run on every dispatch and must be pure. |
+| `applies_to` | `list<string>` | no | Per-rule stack scoping. `[]` matches every opt-in. |
+| `severity` | `"error" \| "warning" \| "info"` | no, default `"warning"` | Drives audit-side rendering and shipped-mode dispatch. |
+| `explanation` | `string` | no | Single sentence; agent paraphrases it back. |
+| `references` | `list<string>` | no | Doc / RFC / post-mortem URLs surfaced in the audit envelope. |
+| `priority` | `int` | no, default `0` | Sort key during the linear sweep; higher fires first. |
+| `rewrite` | `(command, context) -> string \| dict \| nil` | no | Optional rewriter; `nil`/identical returns skip the rewrite but the audit envelope still flows. |
+
+`catalogue(config)` accepts `{id, rules, stack?, version?, source?, priority?}`.
+Stackless catalogues survive `tool_hooks_filter`; stack-tagged
+catalogues fire only when the caller opts into the matching `stacks`
+list. The shipped catalogues advertise `source: "harn-canon"`.
+
+`preset_run_command(config)` returns an `(args) -> result` closure
+shaped for `agent_loop`'s tool registry. Recognized keys:
+
+- `stacks` (`list<string>`, default `[]`) — drives both
+  `tool_hooks_filter` and registry auto-seed.
+- `registry` (`tool_hooks_registry()` value, default
+  `tool_hooks_seed_registry(stacks)`) — explicit override.
+- `custom_rules` (`list<tool_rule>`, default `[]`) — matched before
+  the registry regardless of stack scoping.
+- `mode` (`(rule, args, inner) -> result`, default
+  `tool_hooks_mode_rewrite_with_audit`) — match-dispatch callable.
+- `inner` (`(args) -> result`, default `nil`) — underlying executor.
+  When omitted the wrapper returns decision envelopes without
+  executing.
+- `llm_classifier` (dict, default `nil`) — optional small-model
+  classifier consulted when no deterministic rule matched.
+
+Three shipped modes return a uniform decision envelope:
+
+```text
+{action: "rewrite" | "deny" | "passthrough",
+ command: <string>,
+ original_command: <string>,
+ rule_id: <string>,
+ catalogue_id: <string>,
+ severity: <string>,
+ explanation: <string>,
+ references: [<string>, ...],
+ result?: <inner's return>}
+```
+
+- `tool_hooks_mode_rewrite_with_audit` invokes the rule's `rewrite`,
+  forwards to `inner`, records a `tool_rewrite` lifecycle audit
+  entry, and queues a one-turn `tool_rewritten` system reminder via
+  `tool_hooks_inject_reminder`. When the rewrite is identical to the
+  original command the envelope still flows.
+- `tool_hooks_mode_deny_with_explanation` refuses to dispatch, records
+  a `tool_denied` lifecycle audit entry, and never invokes `inner`.
+- `tool_hooks_mode_passthrough_only_audit` invokes `inner` with the
+  original command unchanged and records a `tool_rule_warning`
+  lifecycle audit entry.
+
+Custom modes call the same `tool_hooks_emit_audit(kind, payload)` and
+`tool_hooks_inject_reminder({tags, body, ttl_turns, ...})` primitives
+and return any envelope shape the caller wants — unknown `action`
+strings are treated as advisory extensions by replay tooling.
+
+The optional `llm_classifier` runs a small model against any command
+that didn't hit a deterministic rule. Verdicts shape:
+`{kind: "rewrite" | "deny" | "allow", confidence, rewritten?, explanation?, references?}`.
+Verdicts at or above the configured `threshold` (default `0.8`)
+dispatch via the verdict's own mode (`rewrite` →
+`tool_hooks_mode_rewrite_with_audit`, `deny` →
+`tool_hooks_mode_deny_with_explanation`); `allow` and sub-threshold
+verdicts fall through to `inner`. Every classifier invocation emits a
+`tool_hook_classifier_verdict` audit regardless of outcome. Transport
+errors and non-JSON responses degrade gracefully to passthrough.
+
+The user-facing reference is `docs/src/tool-hooks.md`; runnable
+recipes live in `docs/src/cookbooks/tool-hooks.md`; the contribution
+guide for harn-canon rules is in
+`docs/src/contributing/preset-hooks.md`.
+
 ### `[lint]` — lint configuration
 
 ```toml

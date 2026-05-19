@@ -77,6 +77,50 @@ condensed series summaries instead of full per-patch history.
   re-syncs `docs/src/language-spec.md` via `make sync-language-spec`.
   Closes the docs gap for the lifecycle epic; user-facing GA is now
   unblocked.
+- **Tool hooks docs + harn-canon contribution guide (TH-08, #1901).**
+  Adds the user-facing reference, cookbook, and contributing guide for
+  the `preset_run_command` wrapper shipped under epic #1884. New
+  mdBook page `docs/src/tool-hooks.md` covers the full
+  `preset_run_command(config)` surface: the `stacks` / `registry` /
+  `custom_rules` / `mode` / `inner` / `llm_classifier` keys, the
+  decision-envelope shape, the three shipped modes
+  (`tool_hooks_mode_rewrite_with_audit` / `_deny_with_explanation` /
+  `_passthrough_only_audit`), custom-mode authoring with
+  `tool_hooks_emit_audit` and `tool_hooks_inject_reminder`, the
+  `ToolRule` / `Catalogue` / `Registry` schemas with field-level
+  tables, the seven shipped catalogues (`harn-canon/universal`,
+  `/rust`, `/python`, `/typescript`, `/swift`, `/sql`, `/harn`) with
+  their rule rosters, the LLM classifier opt-in (verdict shape,
+  threshold dispatch, cache TTL, transport-error degradation, trust
+  contract), the lifecycle audit kinds (`tool_rewrite`, `tool_denied`,
+  `tool_rule_warning`, `tool_hook_classifier_verdict`,
+  `tool_hooks.reminder_injected`), and composition with the broader
+  `register_tool_hook` PreToolUse / PostToolUse surface. New
+  `docs/src/cookbooks/tool-hooks.md` ships ten recipes: per-stack
+  agents (rust, python, typescript, swift, sql, harn), a polyglot
+  agent with classifier fallback, audit-only rollout, no-`inner`
+  preview, and composition with `register_tool_hook`. New
+  `docs/src/contributing/preset-hooks.md` documents the harness-local
+  → per-package → harn-canon promotion ladder, the harn-canon bar
+  (stack-canonical / universally beneficial / cheap / stable /
+  recoverable), the rule-add / new-stack workflows, the local gate
+  checklist (`make conformance`, `make lint-md`,
+  `make check-docs-snippets`, `mdbook build docs`), the catalogue
+  authoring gotchas (no regex lookaround, leading-command anchor,
+  prefix-extension overlap, `env_or` escape hatches, idempotent
+  rewrites, no `now()`/`shell()` in predicates), and a reviewer
+  checklist. Expands the "Catalogue-driven `run_command` hooks"
+  section of `docs/llm/harn-quickref.md` with the catalogue auto-seed
+  contract, the full classifier opt-in, and cross-references to the
+  new pages; replaces the stale TH-05-is-reserved sentence with the
+  shipped classifier docs. Adds a "Preset `run_command` tool hooks"
+  subsection to `spec/HARN_SPEC.md` (formal `ToolRule` / `Catalogue`
+  field tables, `preset_run_command` config keys, the three shipped
+  modes' side effects, the classifier verdict shape, and the uniform
+  decision-envelope schema). Wires the new pages into
+  `docs/src/SUMMARY.md` under "Hooks (tool, persona, session
+  lifecycle)" so the reference, cookbook, and contributing guide
+  appear together.
 - **Pool docs + cookbook (PL-08, #1893).** Adds the user-facing
   reference + cookbook for agent pools (epic #1883). New mdBook page
   `docs/src/agent-pools.md` covers pool creation (`pool_create`
