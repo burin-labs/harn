@@ -937,12 +937,17 @@ fn redact_json_with_manifest(
         JsonValue::String(text) => {
             let redacted = policy.redact_string(text);
             if let Cow::Owned(replacement) = redacted {
+                // Record the actual replacement string (now a named
+                // `<redacted:<pattern>:<len>>` placeholder from the
+                // OA-06 catalog) in the manifest so audit consumers
+                // can attribute the leak to a specific provider.
+                let manifest_replacement = replacement.clone();
                 *text = replacement;
                 entries.push(RedactionEntry {
                     path: path.to_string(),
                     class: "secret_pattern_or_url".to_string(),
                     action: "replaced".to_string(),
-                    replacement: Some(REDACTED_PLACEHOLDER.to_string()),
+                    replacement: Some(manifest_replacement),
                 });
             }
         }

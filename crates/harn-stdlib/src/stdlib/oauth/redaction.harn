@@ -1,0 +1,138 @@
+/**
+ * std/oauth/redaction (OA-06) — OAuth token redaction.
+ *
+ * The Harn runtime ships with a catalog of high-confidence token
+ * patterns (JWT, GitHub PAT classic + fine-grained, Slack `xox*`,
+ * AWS `AKIA`, OpenAI `sk-`, Stripe `sk_live_`/`sk_test_`, GitLab
+ * `glpat-`, npm `npm_`, and `Authorization: Bearer ...` headers).
+ * Any of those that leak into a persisted transcript, an audit
+ * receipt, an OTel span attribute, or a system reminder are
+ * automatically replaced with `<redacted:<pattern>:<len>>` and an
+ * `HARN-OAU-001` audit event is recorded for compliance review.
+ *
+ * The original token still flows to the underlying tool — redaction
+ * is display-only.
+ *
+ * This module exposes the script-facing surface so callers can:
+ *
+ *   - inspect the default catalog,
+ *   - register a custom pattern for in-house token shapes,
+ *   - test whether a string would be redacted,
+ *   - drain the per-thread audit ring for compliance reporting.
+ *
+ * ## Custom patterns
+ *
+ *     import { register_pattern } from "std/oauth/redaction"
+ *     register_pattern("acme_api_key", "\\bACME-[A-Z0-9]{12}\\b")
+ *
+ * ## Inspection
+ *
+ *     import { default_patterns, custom_patterns, redact } from "std/oauth/redaction"
+ *     let names = default_patterns()
+ *     let display = redact("Bearer ghp_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa")
+ *
+ * ## Audit
+ *
+ *     import { drain_audit } from "std/oauth/redaction"
+ *     for entry in drain_audit() {
+ *       // entry.code == "HARN-OAU-001"
+ *       // entry.pattern, entry.match_count, entry.bytes_redacted
+ *     }
+ */
+/**
+ * Register a custom named redaction pattern on the current execution
+ * thread. Subsequent persistence sinks (transcripts, audit receipts,
+ * OTel spans, system reminders) will replace matches of the regex with
+ * `<redacted:<name>:<len>>`.
+ *
+ * - `name` must be non-empty and is used as the placeholder identifier
+ *   and the audit-event `pattern` field.
+ * - `regex_source` is a Rust-regex source string. Anchoring with `\b`
+ *   keeps matches from chewing unrelated identifiers.
+ *
+ * @effects: []
+ * @allocation: heap
+ * @errors: [invalid_argument]
+ * @api_stability: experimental
+ * @example: register_pattern("acme_api_key", "\\bACME-[A-Z0-9]{12}\\b")
+ */
+pub fn register_pattern(name, regex_source) {
+  return __token_redaction_register_pattern(name, regex_source)
+}
+
+/**
+ * Clear every custom pattern registered on the calling thread.
+ * Default patterns are unaffected.
+ *
+ * @effects: []
+ * @allocation: none
+ * @errors: []
+ * @api_stability: experimental
+ * @example: clear_custom_patterns()
+ */
+pub fn clear_custom_patterns() {
+  return __token_redaction_clear_custom_patterns()
+}
+
+/**
+ * Apply the active redaction policy to a string and return the
+ * scrubbed form. Convenient for tests; production sinks invoke the
+ * policy automatically. Each pattern that matched is recorded in the
+ * per-thread audit ring as an `HARN-OAU-001` entry.
+ *
+ * @effects: []
+ * @allocation: heap
+ * @errors: []
+ * @api_stability: experimental
+ * @example: redact("Authorization: Bearer abcdef1234567890")
+ */
+pub fn redact(text) {
+  return __token_redaction_redact(text)
+}
+
+/**
+ * Names of every default pattern in catalog order.
+ *
+ * @effects: []
+ * @allocation: heap
+ * @errors: []
+ * @api_stability: stable
+ * @example: default_patterns()
+ */
+pub fn default_patterns() {
+  return __token_redaction_default_patterns()
+}
+
+/**
+ * Names of every custom pattern installed on the current thread.
+ *
+ * @effects: []
+ * @allocation: heap
+ * @errors: []
+ * @api_stability: experimental
+ * @example: custom_patterns()
+ */
+pub fn custom_patterns() {
+  return __token_redaction_custom_patterns()
+}
+
+/**
+ * Drain every pending `HARN-OAU-001` audit entry recorded since the
+ * last drain on the calling thread. Each entry is a dict with
+ * `code`, `pattern`, `match_count`, and `bytes_redacted` fields.
+ *
+ * Audit entries are also forwarded to the live event-sink pipeline
+ * (Stderr/Otel/etc.) and, when a multi-threaded Tokio runtime is
+ * available, appended to the `audit.token_redaction` event-log
+ * topic. The synchronous drain returned here is the authoritative
+ * compliance contract — it works on every execution backend.
+ *
+ * @effects: []
+ * @allocation: heap
+ * @errors: []
+ * @api_stability: experimental
+ * @example: drain_audit()
+ */
+pub fn drain_audit() {
+  return __token_redaction_drain_audit()
+}

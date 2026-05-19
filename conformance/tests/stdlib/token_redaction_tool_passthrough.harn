@@ -1,0 +1,62 @@
+// std/oauth/redaction (OA-06): redaction is display-only. The
+// underlying variable still holds the raw token so a downstream
+// tool/host call receives the real bytes, while the persisted
+// transcript or audit projection shows the named placeholder. Each
+// redaction is auditable as HARN-OAU-001.
+import { drain_audit, redact } from "std/oauth/redaction"
+
+pipeline test(task) {
+  // Drop any audit entries left by earlier conformance cases so we
+  // can attribute the entries appended below to this scan.
+  let _ = drain_audit()
+  // Synthesize a token at runtime so the file does not itself
+  // contain a string that secret scanners flag in code review.
+  let token = "ghp_" + "1234567890abcdefghijklmnopqrstuvwxyz"
+  let header = "Authorization: Bearer " + token
+  // The variable still carries the original bytes — a tool call
+  // forwarding `token` would see the real secret.
+  if !contains(header, token) {
+    throw "original token must remain in the in-memory variable"
+  }
+  if len(token) != 40 {
+    throw "raw token length should be 40, got " + to_string(len(token))
+  }
+  // The display projection (via `redact`) hides the secret behind
+  // the canonical `<redacted:<pattern>:<len>>` placeholder. The
+  // catalog runs default patterns in order, so a `Bearer ghp_…`
+  // string is attributed to whichever specific pattern fires first
+  // (typically `github_token` for `ghp_*` prefixes).
+  let display = redact(header)
+  if contains(display, token) {
+    throw "redacted display leaked the raw token: " + display
+  }
+  if !contains(display, "<redacted:") {
+    throw "expected named placeholder in display, got: " + display
+  }
+  // The OA-06 contract emits one HARN-OAU-001 audit entry per
+  // pattern that matched. At least one entry must reference a
+  // catalog pattern with the canonical diagnostic code.
+  let entries = drain_audit()
+  if len(entries) == 0 {
+    throw "expected at least one HARN-OAU-001 audit entry"
+  }
+  var found = false
+  for entry in entries {
+    if entry.code == "HARN-OAU-001" {
+      if entry.match_count <= 0 {
+        throw "audit entry must report a positive match_count, got " + to_string(entry.match_count)
+      }
+      if entry.bytes_redacted <= 0 {
+        throw "audit entry must report positive bytes_redacted, got " + to_string(entry.bytes_redacted)
+      }
+      if entry.pattern == "" {
+        throw "audit entry must name a pattern"
+      }
+      found = true
+    }
+  }
+  if !found {
+    throw "expected HARN-OAU-001 audit entry, got " + to_string(entries)
+  }
+  log("token_redaction passthrough ok")
+}

@@ -1,0 +1,72 @@
+// std/oauth/redaction (OA-06): default OAuth token catalog scrubs every
+// shipped provider into the `<redacted:<pattern>:<len>>` placeholder
+// without the raw token leaking through.
+import { default_patterns, redact } from "std/oauth/redaction"
+
+fn expect_redacted(label, input, expected_pattern, expected_raw_substring) {
+  let out = redact(input)
+  if contains(out, expected_raw_substring) {
+    throw label + ": raw token leaked into redacted output: " + out
+  }
+  let needle = "<redacted:" + expected_pattern + ":"
+  if !contains(out, needle) {
+    throw label + ": expected `" + needle + "` in output, got `" + out + "`"
+  }
+}
+
+pipeline test(task) {
+  // The catalog must include every default provider so audit
+  // consumers can rely on the names being stable across releases.
+  let catalog = default_patterns()
+  let expected_names = ["jwt", "github_token", "github_pat_fine", "slack_token", "aws_access_key", "bearer_token"]
+  for name in expected_names {
+    if !contains(to_string(catalog), name) {
+      throw "default catalog missing `" + name + "`: " + to_string(catalog)
+    }
+  }
+  // JWT: three base64url segments; the leading `eyJ` anchors the
+  // regex so unrelated dotted strings do not chew the placeholder.
+  expect_redacted(
+    "jwt",
+    "auth=eyJabcd1234.eyJefghPayload.signature_pad_extra now",
+    "jwt",
+    "eyJabcd1234.eyJefghPayload.signature_pad_extra",
+  )
+  // GitHub classic OAuth/app/installation token.
+  expect_redacted(
+    "github_token",
+    "header ghp_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa trailer",
+    "github_token",
+    "ghp_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+  )
+  // GitHub fine-grained PAT.
+  expect_redacted(
+    "github_pat_fine",
+    "value github_pat_aaaaaaaaaaaaaaaaaaaaaa end",
+    "github_pat_fine",
+    "github_pat_aaaaaaaaaaaaaaaaaaaaaa",
+  )
+  // Slack token (any of `xox[bpsar]-...`).
+  expect_redacted(
+    "slack_token",
+    "slack=xoxb-1234567890-abcdefABC ok",
+    "slack_token",
+    "xoxb-1234567890-abcdefABC",
+  )
+  // AWS access key id.
+  expect_redacted(
+    "aws_access_key",
+    "creds AKIAABCDEFGHIJKLMNOP go",
+    "aws_access_key",
+    "AKIAABCDEFGHIJKLMNOP",
+  )
+  // `Authorization: Bearer <token>` header form. Using a non-prefixed
+  // opaque token here so no earlier provider-specific pattern wins.
+  expect_redacted(
+    "bearer_token",
+    "Authorization: Bearer abcdef123456_extra-pad",
+    "bearer_token",
+    "abcdef123456_extra-pad",
+  )
+  log("token_redaction defaults ok")
+}

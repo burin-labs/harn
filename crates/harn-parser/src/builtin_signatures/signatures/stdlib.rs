@@ -220,6 +220,23 @@ pub(crate) const SIGNATURES: &[BuiltinSignature] = &[
         ],
         TY_NIL,
     ),
+    BuiltinSignature::simple("__token_redaction_clear_custom_patterns", &[], TY_NIL),
+    BuiltinSignature::simple("__token_redaction_custom_patterns", &[], TY_LIST),
+    BuiltinSignature::simple("__token_redaction_default_patterns", &[], TY_LIST),
+    BuiltinSignature::simple("__token_redaction_drain_audit", &[], TY_LIST),
+    BuiltinSignature::simple(
+        "__token_redaction_redact",
+        &[Param::new("text", TY_STRING)],
+        TY_STRING,
+    ),
+    BuiltinSignature::simple(
+        "__token_redaction_register_pattern",
+        &[
+            Param::new("name", TY_STRING),
+            Param::new("regex", TY_STRING),
+        ],
+        TY_NIL,
+    ),
     BuiltinSignature::simple(
         "__ansi_enabled",
         &[Param::optional("stream", TY_STRING)],

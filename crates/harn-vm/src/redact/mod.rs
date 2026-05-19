@@ -39,7 +39,11 @@ use std::collections::{BTreeMap, BTreeSet};
 use serde_json::Value as JsonValue;
 use url::Url;
 
-pub use patterns::scan_secret_patterns;
+pub use patterns::{
+    clear_audit_ring, clear_custom_patterns, custom_pattern_names, default_pattern_names,
+    drain_audit_ring, install_audit_sink, register_custom_pattern, scan_secret_patterns, AuditSink,
+    NamedPattern, RedactionEvent, TOKEN_REDACTION_AUDIT_TOPIC, TOKEN_REDACTION_DIAGNOSTIC,
+};
 
 /// Placeholder string used everywhere a redacted value would otherwise
 /// appear. Kept as a single constant so portal CSS, downstream parsers,
@@ -439,11 +443,15 @@ pub fn pop_policy() {
     });
 }
 
-/// Drop all installed policies. Used by `reset_thread_local_state` so
-/// test runs that share a thread cannot leak policy overrides into
-/// each other.
+/// Drop all installed policies, custom token-redaction patterns, the
+/// audit sink, and the per-thread audit ring. Used by
+/// `reset_thread_local_state` so test runs that share a thread cannot
+/// leak policy overrides into each other.
 pub fn clear_policy_stack() {
     REDACTION_POLICY_STACK.with(|stack| stack.borrow_mut().clear());
+    patterns::clear_custom_patterns();
+    let _ = patterns::install_audit_sink(None);
+    patterns::clear_audit_ring();
 }
 
 /// Return the currently installed policy, falling back to
@@ -573,7 +581,13 @@ mod tests {
         assert_eq!(value["list"][0]["auth_token"], REDACTED_PLACEHOLDER);
         assert_eq!(value["list"][0]["name"], "alice");
         let free_form = value["free_form"].as_str().unwrap();
-        assert!(free_form.contains(REDACTED_PLACEHOLDER));
+        // Free-form pattern matches now produce the OA-06 named
+        // placeholder `<redacted:<pattern>:<len>>` so audit logs can
+        // attribute leaks to a specific provider.
+        assert!(
+            free_form.contains("<redacted:"),
+            "expected named placeholder, got: {free_form}"
+        );
         assert!(!free_form.contains("ghp_abcdefghijklmnopqrstuvwxyz0123456789ABCD"));
     }
 
@@ -595,7 +609,10 @@ mod tests {
         let input =
             "use sk-proj-abcdefghijklmnopqrstuvwxyz0123456789ABCD or AKIAABCDEFGHIJKLMNOP for now";
         let out = policy.redact_string(input);
-        assert!(out.contains(REDACTED_PLACEHOLDER));
+        // Each provider pattern emits its own `<redacted:<name>:<len>>`
+        // placeholder so audit logs can attribute the leak.
+        assert!(out.contains("<redacted:openai_key:"));
+        assert!(out.contains("<redacted:aws_access_key:"));
         assert!(!out.contains("AKIAABCDEFGHIJKLMNOP"));
         assert!(!out.contains("sk-proj-abcdefghijklmnopqrstuvwxyz0123456789ABCD"));
     }
