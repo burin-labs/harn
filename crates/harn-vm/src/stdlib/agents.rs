@@ -220,6 +220,78 @@ impl Drop for LifecycleSpanGuard {
     }
 }
 
+/// S-18 (harn#1867): apply the canonical attribute bag to a suspension
+/// lifecycle span. Kept in one helper so suspend_agent_builtin and
+/// top_level_agent_suspend_builtin emit identically shaped spans for
+/// OTel exporters and downstream queries.
+///
+/// Privacy: `reason` is a short human-facing label already broadcast on
+/// WorkerSuspended events and PreSuspend/PostSuspend hook payloads, so
+/// mirroring it onto the span attributes does not widen exposure.
+/// Conditions are summarised as a boolean — the condition payload itself
+/// is intentionally NOT placed on the span.
+fn annotate_suspension_span(
+    span: &LifecycleSpanGuard,
+    worker_id: &str,
+    reason: &str,
+    initiator: SuspendInitiator,
+    pipeline_span_link: Option<&crate::tracing::SpanLink>,
+    parent_worker_id: Option<&str>,
+    has_conditions: bool,
+) {
+    span.set_metadata("worker_id", serde_json::json!(worker_id));
+    // `handle` is the canonical OTel attribute name per the issue spec
+    // (#1867 acceptance criteria); we keep `worker_id` for back-compat
+    // with the P-05/P-06 attributes already shipped.
+    span.set_metadata("handle", serde_json::json!(worker_id));
+    span.set_metadata("reason", serde_json::json!(reason));
+    span.set_metadata(
+        "initiator",
+        serde_json::json!(serde_json::to_value(initiator).unwrap_or(serde_json::Value::Null)),
+    );
+    span.set_metadata("has_conditions", serde_json::json!(has_conditions));
+    if let Some(pipeline_span_link) = pipeline_span_link {
+        // `pipeline_id` is the issue's spec-level attribute; we use the
+        // active pipeline span's id since worker state does not carry a
+        // distinct pipeline identifier. `pipeline_span_id` is preserved
+        // for back-compat with the P-05 attribute.
+        span.set_metadata(
+            "pipeline_span_id",
+            serde_json::json!(pipeline_span_link.span_id),
+        );
+        span.set_metadata("pipeline_id", serde_json::json!(pipeline_span_link.span_id));
+    }
+    if let Some(parent_worker_id) = parent_worker_id {
+        span.set_metadata("parent_worker_id", serde_json::json!(parent_worker_id));
+    }
+}
+
+/// S-18 (harn#1867): apply the canonical attribute bag to a resume
+/// lifecycle span. Booleans describe the shape of the resume (transcript
+/// continuity, fresh resume input) without exposing transcript text or
+/// the resume payload itself.
+fn annotate_resume_span(
+    span: &LifecycleSpanGuard,
+    worker_id: &str,
+    initiator: &str,
+    continue_transcript: bool,
+    had_resume_input: bool,
+    linked_suspension_count: usize,
+) {
+    span.set_metadata("worker_id", serde_json::json!(worker_id));
+    span.set_metadata("handle", serde_json::json!(worker_id));
+    span.set_metadata("initiator", serde_json::json!(initiator));
+    span.set_metadata(
+        "continue_transcript",
+        serde_json::json!(continue_transcript),
+    );
+    span.set_metadata("had_resume_input", serde_json::json!(had_resume_input));
+    span.set_metadata(
+        "linked_suspension_count",
+        serde_json::json!(linked_suspension_count),
+    );
+}
+
 fn restart_worker_run(
     worker: &mut WorkerState,
     next_task: &str,
@@ -708,13 +780,22 @@ async fn suspend_agent_builtin(args: Vec<VmValue>) -> Result<VmValue, VmError> {
             format!("suspend {}", worker.id),
             Vec::new(),
         );
-        span.set_metadata("worker_id", serde_json::json!(worker.id));
-        if let Some(pipeline_span_link) = &pipeline_span_link {
-            span.set_metadata(
-                "pipeline_span_id",
-                serde_json::json!(pipeline_span_link.span_id),
-            );
-        }
+        // S-18 (harn#1867): attach the structured suspend metadata that
+        // OTel consumers need to render a paused agent without joining
+        // back to the worker registry. `reason` and `initiator` are already
+        // public via WorkerSuspended events and PreSuspend/PostSuspend
+        // hook payloads; we deliberately do NOT include transcript
+        // content, resume_input, or condition payloads (see issue #1867
+        // privacy callout).
+        annotate_suspension_span(
+            &span,
+            &worker.id,
+            &reason,
+            initiator,
+            pipeline_span_link.as_ref(),
+            worker.parent_worker_id.as_deref(),
+            conditions.is_some(),
+        );
         let prior_span_link = span.link();
         suspension_span = Some(span);
         worker.suspend_signal.store(true, Ordering::SeqCst);
@@ -814,13 +895,20 @@ async fn top_level_agent_suspend_builtin(args: Vec<VmValue>) -> Result<VmValue, 
         format!("suspend {worker_id}"),
         Vec::new(),
     );
-    suspension_span.set_metadata("worker_id", serde_json::json!(worker_id));
-    if let Some(pipeline_span_link) = &pipeline_span_link {
-        suspension_span.set_metadata(
-            "pipeline_span_id",
-            serde_json::json!(pipeline_span_link.span_id),
-        );
-    }
+    // S-18 (harn#1867): mirror the metadata captured in
+    // `suspend_agent_builtin` for top-level (script-level) suspensions.
+    // The initiator for the top-level path is always `SelfInitiated`
+    // because only the active agent loop can drive the synchronous
+    // checkpoint return path.
+    annotate_suspension_span(
+        &suspension_span,
+        &worker_id,
+        &reason,
+        SuspendInitiator::SelfInitiated,
+        pipeline_span_link.as_ref(),
+        None,
+        conditions.is_some(),
+    );
     let prior_span_link = suspension_span.link();
     let config = WorkerConfig::SubAgent {
         spec: Box::new(SubAgentRunSpec {
@@ -1459,12 +1547,25 @@ async fn warm_resume_worker(
         }
         (worker.id.clone(), span_links)
     };
+    let link_count = span_links.len();
     let mut resume_span = LifecycleSpanGuard::start_detached(
         crate::tracing::SpanKind::Resume,
         format!("resume {worker_id}"),
         span_links,
     );
-    resume_span.set_metadata("worker_id", serde_json::json!(worker_id));
+    // S-18 (harn#1867): annotate the resume span with the per-resume
+    // shape (initiator, transcript continuity, presence of fresh input)
+    // and a count of the linked-not-parented prior spans. We do NOT
+    // include the resume_input value itself — it can contain transcript
+    // text or user data — only a boolean flag.
+    annotate_resume_span(
+        &resume_span,
+        &worker_id,
+        &inferred_resume_initiator(&options),
+        options.continue_transcript,
+        options.resume_input.is_some(),
+        link_count,
+    );
     let (snapshot, suspension) = {
         let mut worker = state.borrow_mut();
         if worker.status != "suspended" {
@@ -2817,6 +2918,150 @@ mod suspend_tests {
         assert_eq!(suspension_link.span_id, prior_span_link.span_id);
         assert_eq!(pipeline_link.trace_id, pipeline_span_link.trace_id);
         assert_eq!(pipeline_link.span_id, pipeline_span_link.span_id);
+
+        teardown(&dir, &worker_id);
+        crate::tracing::set_tracing_enabled(false);
+        crate::tracing::reset_tracing();
+    }
+
+    /// S-18 (harn#1867): verify the suspension / resume spans carry the
+    /// documented attribute bag (`handle`, `reason`, `initiator`,
+    /// `pipeline_id` on suspend; `handle`, `initiator`,
+    /// `continue_transcript`, `had_resume_input`,
+    /// `linked_suspension_count` on resume). These attributes let OTel
+    /// consumers slice paused agents without joining back to the worker
+    /// registry. The test also doubles as a privacy check: resume_input
+    /// content must not appear on the resume span.
+    #[tokio::test(flavor = "current_thread")]
+    async fn suspend_resume_spans_carry_canonical_attribute_bag() {
+        let _guard = suspend_test_lock().await;
+        crate::tracing::reset_tracing();
+        crate::tracing::set_tracing_enabled(true);
+        let (worker_id, dir) = seed_test_worker("worker-suspend-resume-attributes");
+
+        let pipeline_span_id =
+            crate::tracing::span_start(crate::tracing::SpanKind::Pipeline, "pipeline".to_string());
+        suspend_agent_builtin(vec![
+            handle_value(&worker_id),
+            VmValue::String(Rc::from("waiting on review")),
+            VmValue::Dict(Rc::new(BTreeMap::from([(
+                "initiator".to_string(),
+                VmValue::String(Rc::from("triggered")),
+            )]))),
+        ])
+        .await
+        .expect("suspend");
+        crate::tracing::span_end(pipeline_span_id);
+
+        resume_agent_builtin(vec![
+            handle_value(&worker_id),
+            VmValue::Dict(Rc::new(BTreeMap::from([
+                (
+                    "input".to_string(),
+                    VmValue::String(Rc::from("CONFIDENTIAL_DO_NOT_LEAK_INTO_SPAN_ATTRS")),
+                ),
+                ("continue_transcript".to_string(), VmValue::Bool(false)),
+            ]))),
+        ])
+        .await
+        .expect("resume");
+
+        let spans = crate::tracing::peek_spans();
+        let suspension = spans
+            .iter()
+            .find(|span| span.kind == crate::tracing::SpanKind::Suspension)
+            .expect("suspension span");
+        assert_eq!(
+            suspension.metadata.get("handle").and_then(|v| v.as_str()),
+            Some(worker_id.as_str()),
+            "suspend span exposes handle"
+        );
+        assert_eq!(
+            suspension
+                .metadata
+                .get("worker_id")
+                .and_then(|v| v.as_str()),
+            Some(worker_id.as_str()),
+            "suspend span preserves back-compat worker_id"
+        );
+        assert_eq!(
+            suspension.metadata.get("reason").and_then(|v| v.as_str()),
+            Some("waiting on review")
+        );
+        assert_eq!(
+            suspension
+                .metadata
+                .get("initiator")
+                .and_then(|v| v.as_str()),
+            Some("triggered"),
+            "initiator parsed and exposed"
+        );
+        assert_eq!(
+            suspension
+                .metadata
+                .get("pipeline_id")
+                .and_then(|v| v.as_str()),
+            Some(pipeline_span_id.to_string()).as_deref(),
+            "pipeline_id alias of pipeline_span_id is present"
+        );
+        assert_eq!(
+            suspension
+                .metadata
+                .get("pipeline_span_id")
+                .and_then(|v| v.as_str()),
+            Some(pipeline_span_id.to_string()).as_deref(),
+            "back-compat pipeline_span_id is present"
+        );
+        assert_eq!(
+            suspension
+                .metadata
+                .get("has_conditions")
+                .and_then(|v| v.as_bool()),
+            Some(false)
+        );
+
+        let resume = spans
+            .iter()
+            .find(|span| span.kind == crate::tracing::SpanKind::Resume)
+            .expect("resume span");
+        assert_eq!(
+            resume.metadata.get("handle").and_then(|v| v.as_str()),
+            Some(worker_id.as_str())
+        );
+        assert!(
+            resume.metadata.contains_key("initiator"),
+            "resume span has initiator"
+        );
+        assert_eq!(
+            resume
+                .metadata
+                .get("continue_transcript")
+                .and_then(|v| v.as_bool()),
+            Some(false)
+        );
+        assert_eq!(
+            resume
+                .metadata
+                .get("had_resume_input")
+                .and_then(|v| v.as_bool()),
+            Some(true),
+            "resume span flags presence of resume_input without leaking value"
+        );
+        assert_eq!(
+            resume
+                .metadata
+                .get("linked_suspension_count")
+                .and_then(|v| v.as_u64()),
+            Some(2)
+        );
+
+        // Privacy guard: the resume_input value itself must not be
+        // serialised into any resume-span attribute.
+        let serialized = serde_json::to_string(&resume.metadata).expect("serialize metadata");
+        assert!(
+            !serialized.contains("CONFIDENTIAL_DO_NOT_LEAK_INTO_SPAN_ATTRS"),
+            "resume_input content leaked into span metadata: {serialized}"
+        );
 
         teardown(&dir, &worker_id);
         crate::tracing::set_tracing_enabled(false);
