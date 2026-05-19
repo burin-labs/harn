@@ -1,0 +1,8 @@
+true
+find . -name '*.py'
+true
+cargo build
+rewrite
+python.find_versus_rg
+rewrite
+rust.cargo.target_dir_conflict

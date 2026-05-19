@@ -1,0 +1,8 @@
+deny
+custom.deny_git_push_force
+preset_run_command/custom
+error
+deny
+custom.deny_cargo_build
+preset_run_command/custom
+true

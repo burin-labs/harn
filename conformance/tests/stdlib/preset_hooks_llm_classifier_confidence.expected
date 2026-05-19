@@ -1,0 +1,12 @@
+rewrite
+echo confident
+echo confident
+true
+echo below
+tool_hook_classifier_verdict
+rewrite
+rewrite
+4
+tool_hook_classifier_verdict
+passthrough
+rewrite

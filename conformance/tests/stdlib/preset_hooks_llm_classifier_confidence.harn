@@ -1,0 +1,63 @@
+import { preset_run_command } from "std/tool_hooks"
+
+/**
+ * preset_hooks_llm_classifier_confidence (TH-07 #1900).
+ *
+ * Synthetic classifier responses driven by `llm_mock`. Threshold
+ * gating: a high-confidence verdict above the configured threshold
+ * dispatches via the requested mode (rewrite); a verdict with the same
+ * kind but confidence below the threshold falls through to `inner`
+ * with the original command. Both invocations still emit a
+ * `tool_hook_classifier_verdict` audit so the gating decision is
+ * observable.
+ */
+pipeline default() {
+  pipeline_lifecycle_audit_log_take()
+  __tool_hooks_classifier_cache_clear()
+  llm_mock_clear()
+  /* Above threshold: classifier asks for a rewrite with confidence 0.95;
+   * threshold is 0.7 so the rewrite mode fires. */
+  llm_mock(
+    {
+      text: "{\"kind\": \"rewrite\", \"confidence\": 0.95,"
+        + " \"rewritten\": \"echo confident\","
+        + " \"explanation\": \"safe to rewrite\"}",
+    },
+  )
+  let inner = { args -> {ok: true, ran: args.command} }
+  let wrapper = preset_run_command(
+    {llm_classifier: {model: "haiku", provider: "mock", threshold: 0.7}, inner: inner},
+  )
+  let above = wrapper({command: "echo above"})
+  println(above.action)
+  println(above.command)
+  println(above.result.ran)
+  /* Below threshold: same kind, confidence 0.4. Wrapper audits the
+   * verdict but runs `inner` with the unaltered command. */
+  llm_mock(
+    {
+      text: "{\"kind\": \"rewrite\", \"confidence\": 0.4,"
+        + " \"rewritten\": \"never-applied\","
+        + " \"explanation\": \"low confidence\"}",
+    },
+  )
+  let below = wrapper({command: "echo below"})
+  println(below.ok)
+  println(below.ran)
+  /* Two classifier verdicts logged, one above-threshold (action="rewrite")
+   * and one below (action="passthrough"). */
+  let log = pipeline_lifecycle_audit_log_take()
+  println(log[0].kind)
+  println(log[0].payload.kind)
+  println(log[0].payload.action)
+  /* The below-threshold call's verdict is the last entry in the log:
+   * passthrough emits no further audit entries. Above-threshold
+   * rewrite emits classifier_verdict + tool_rewrite +
+   * tool_hooks.reminder_injected = 3, then the passthrough adds 1 for
+   * a total of 4. */
+  println(len(log))
+  let last = log[len(log) - 1]
+  println(last.kind)
+  println(last.payload.action)
+  println(last.payload.kind)
+}

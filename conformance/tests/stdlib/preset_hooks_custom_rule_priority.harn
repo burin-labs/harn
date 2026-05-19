@@ -1,0 +1,65 @@
+import { preset_run_command, tool_hooks_mode_deny_with_explanation } from "std/tool_hooks"
+
+/**
+ * preset_hooks_custom_rule_priority (TH-07 #1900).
+ *
+ * `preset_run_command` evaluates `custom_rules` BEFORE the registered
+ * catalogues, so an inline custom rule can short-circuit a less-strict
+ * registered rule that would otherwise have matched. Tests both
+ * variants:
+ *   1. Custom rule matches a command no registered rule would match —
+ *      the custom rule fires with `catalogue_id: preset_run_command/custom`.
+ *   2. Custom rule matches a command for which a registered rule also
+ *      fires — the custom rule wins and the registered rule never
+ *      surfaces.
+ */
+pipeline default() {
+  let inner = { args -> {ok: true, ran: args.command} }
+  let custom_rule = tool_rule(
+    {
+      id: "custom.deny_git_push_force",
+      pattern: "git push.* --force",
+      severity: "error",
+      explanation: "Use --force-with-lease",
+    },
+  )
+  let wrapper = preset_run_command(
+    {
+      stacks: ["rust"],
+      custom_rules: [custom_rule],
+      mode: tool_hooks_mode_deny_with_explanation,
+      inner: inner,
+    },
+  )
+  /* (1) Custom rule fires for a non-registered command. */
+  let r1 = wrapper({command: "git push origin main --force"})
+  println(r1.action)
+  println(r1.rule_id)
+  println(r1.catalogue_id)
+  println(r1.severity)
+  /* (2) Custom rule wins over the registered rust catalogue rule. The
+   * `cargo build` command would normally fire `rust.cargo.target_dir_conflict`,
+   * but a custom rule with the same pattern jumps the queue. */
+  let cargo_custom = tool_rule(
+    {
+      id: "custom.deny_cargo_build",
+      pattern: "^cargo build",
+      severity: "error",
+      explanation: "cargo build is forbidden here, use cargo check",
+    },
+  )
+  let wrapper2 = preset_run_command(
+    {
+      stacks: ["rust"],
+      custom_rules: [cargo_custom],
+      mode: tool_hooks_mode_deny_with_explanation,
+      inner: inner,
+    },
+  )
+  let r2 = wrapper2({command: "cargo build --release"})
+  println(r2.action)
+  println(r2.rule_id)
+  println(r2.catalogue_id)
+  /* The custom rule's explanation surfaces, not the registered one. */
+  println(contains(r2.explanation, "cargo check"))
+}
