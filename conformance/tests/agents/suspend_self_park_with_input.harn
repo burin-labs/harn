@@ -1,0 +1,81 @@
+/**
+ * S-11 (#1847): a self-parked subagent resumed with a non-nil
+ * `input` observes that input via the single-shot resume-continuity
+ * reminder on the next turn's system prompt.
+ *
+ * The reminder line is the documented "The resumer provided input: ..."
+ * sentence (also exercised by `agent_resume_continuity_reminder`); this
+ * fixture pins the contract specifically for the self-park entry path
+ * where `agent_await_resumption(reason)` (no conditions) produced the
+ * suspension.
+ *
+ * Asserts:
+ *   - The reminder embeds the verbatim resume input string.
+ *   - The reminder also carries the suspend reason (so the model has
+ *     context for why it parked).
+ *   - The reminder is consumed on the very next turn — the turn after
+ *     the resumed one does not see it.
+ *   - Final loop status is `completed` with transcript continuity
+ *     preserved (default `continue_transcript: true`).
+ */
+import "std/agents"
+
+fn resume_tools() {
+  var tools = tool_registry()
+  tools = tool_define(
+    tools,
+    "noop",
+    "Return a short observation.",
+    {handler: { _args -> "ok" }, parameters: {}, returns: {type: "string"}},
+  )
+  return tools
+}
+
+pipeline main() {
+  llm_mock_clear()
+  llm_mock(
+    {
+      tool_calls: [{id: "park_input", name: "agent_await_resumption", arguments: {reason: "needs operator brief"}}],
+      input_tokens: 7,
+      output_tokens: 3,
+    },
+  )
+  let session_id = "self-park-with-input-" + uuid()
+  let handle = sub_agent_run(
+    "Park then wait for an operator brief.",
+    {
+      provider: "mock",
+      background: true,
+      session_id: session_id,
+      tools: resume_tools(),
+      tool_format: "native",
+      max_iterations: 3,
+    },
+  )
+  let suspended = wait_agent(handle)
+  // Stage a follow-up tool turn so we can observe the turn-after-resume
+  // system prompt and confirm the continuity reminder is consumed.
+  llm_mock({tool_calls: [{id: "noop_1", name: "noop", arguments: {}}]})
+  llm_mock({text: "operator brief acknowledged"})
+  let resumed = resume_agent(handle, "operator brief: ship the patch", true)
+  let done = wait_agent(handle)
+  let calls = llm_mock_calls()
+  let resumed_system = calls[1].system
+  let next_system = calls[2].system
+  println("suspended_status=" + suspended.status)
+  println("resume_status=" + resumed.status)
+  println("final_status=" + done.status)
+  println(
+    "input_in_reminder="
+      + to_string(contains(resumed_system, "operator brief: ship the patch")),
+  )
+  println("reason_in_reminder=" + to_string(contains(resumed_system, "needs operator brief")))
+  println(
+    "reminder_present_on_resumed_turn="
+      + to_string(contains(resumed_system, "You were suspended at turn")),
+  )
+  println(
+    "reminder_consumed_after_one_turn="
+      + to_string(!contains(next_system, "You were suspended at turn")),
+  )
+}

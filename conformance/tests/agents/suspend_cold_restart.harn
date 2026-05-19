@@ -1,0 +1,67 @@
+/**
+ * S-11 (#1847): a top-level `agent_loop(...)` that self-parks
+ * persists a snapshot file on disk, the process exits cleanly with
+ * `status=suspended`, and a second `harn run --resume <snapshot>`
+ * invocation continues the same loop to completion.
+ *
+ * This is the cross-process cold-restart contract: the snapshot is
+ * portable, the resume CLI rehydrates it, and the resumed loop emits a
+ * `done` event with `status: "completed"` so callers can pipe the JSON
+ * output without parsing prose.
+ *
+ * Asserts:
+ *   - The first invocation prints `status=suspended` and a snapshot
+ *     path that actually exists on disk.
+ *   - The snapshot file is non-empty JSON (the persisted resumable
+ *     state).
+ *   - The second invocation (`harn run --resume <snapshot> --json`)
+ *     emits a `done` JSON event whose `value.status == "completed"`.
+ *   - The resumed loop reports `has_transcript=true` (transcript
+ *     continuity preserved across the cold restart by default).
+ */
+import "../_common"
+
+fn first_snapshot_line(text) {
+  let matches = regex_captures("snapshot=(.+)", text)
+  if len(matches) == 0 {
+    return nil
+  }
+  return matches[0].groups[0]
+}
+
+pipeline main() {
+  let repo_root = exec("git", "rev-parse", "--show-toplevel").stdout.trim()
+  let harn_bin = env_or("HARN_CONFORMANCE_HARN_BIN", resolve_harn_bin(repo_root))
+  let root = path_join(temp_dir(), "harn-suspend-cold-restart-" + uuid_v7())
+  mkdir(root)
+  let script = path_join(root, "cold_restart_suspend.harn")
+  write_file(
+    script,
+    "pipeline main() {\n"
+      + "  llm_mock({tool_calls: [{id: \"park_cold\", name: \"agent_await_resumption\", arguments: {reason: \"cold restart park\"}}]})\n"
+      + "  let result = agent_loop(\"Park until a cold restart resumes you.\", nil, {provider: \"mock\", tool_format: \"native\", max_iterations: 2, session_id: \"cold-restart-\" + uuid_v7()})\n"
+      + "  println(\"status=\" + result.status)\n"
+      + "  println(\"snapshot=\" + result.handle.snapshot_path)\n"
+      + "}\n",
+  )
+  let first = exec_at(root, harn_bin, "run", script)
+  println("first_ok=" + to_string(first.success))
+  println("first_suspended=" + to_string(contains(first.stdout, "status=suspended")))
+  let snapshot = first_snapshot_line(first.stdout)
+  require snapshot != nil, "cold restart suspend did not print a snapshot path"
+  let snapshot_path = if path_is_absolute(snapshot) {
+    snapshot
+  } else {
+    path_join(root, snapshot)
+  }
+  println("snapshot_exists=" + to_string(file_exists(snapshot_path)))
+  let snapshot_text = read_file(snapshot_path)
+  println("snapshot_nonempty=" + to_string(len(snapshot_text) > 0))
+  let second = exec_at(root, harn_bin, "run", "--resume", snapshot, "--json")
+  println("second_ok=" + to_string(second.success))
+  let lines = second.stdout.trim().split("\n")
+  let final = json_parse(lines[len(lines) - 1])
+  println("event_type=" + to_string(final.data.event_type))
+  println("resumed_status=" + to_string(final.data.value.status))
+  println("has_transcript=" + to_string(final.data.value.has_transcript))
+}
