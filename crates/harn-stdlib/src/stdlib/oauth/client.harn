@@ -70,6 +70,10 @@ let __AUDIT_KIND_REFRESH = "token_refreshed"
 
 let __AUDIT_KIND_EXCHANGE = "token_exchanged"
 
+let __AUDIT_KIND_REVOKED = "token_revoked"
+
+let __DIAGNOSTIC_REFRESH_EXPIRED = "HARN-OAU-002"
+
 type OAuthClient = dict
 
 fn __require_string(value, field) {
@@ -366,10 +370,55 @@ fn __audit_exchange(provider_id, storage_key, next) {
   let _ = event_log.emit(__AUDIT_TOPIC, __AUDIT_KIND_EXCHANGE, payload, {provider: to_string(provider_id)})
 }
 
+fn __audit_revoked(provider_id, storage_key, prev, revoke_url_used) {
+  // Audit MUST NOT include the access token. Records presence + the
+  // (sanitised) endpoint that was contacted so compliance reviewers
+  // can confirm the RFC 7009 hint was used.
+  let payload = {
+    provider: to_string(provider_id),
+    storage_key: to_string(storage_key),
+    revoke_endpoint: __redact_endpoint(revoke_url_used),
+    prev: __redact_token(prev),
+  }
+  let _ = event_log.emit(__AUDIT_TOPIC, __AUDIT_KIND_REVOKED, payload, {provider: to_string(provider_id)})
+}
+
+fn __try_revoke_remote(cfg, token_value) {
+  // Best-effort RFC 7009 revoke. We never let a remote failure block
+  // the local storage delete: revocation is a hygiene step on top of
+  // discarding the credential locally, and the storage delete is the
+  // authoritative client-side action.
+  if cfg.revoke_url == nil {
+    return nil
+  }
+  let url_text = to_string(cfg.revoke_url)
+  if url_text == "" {
+    return nil
+  }
+  let headers = {"Content-Type": "application/x-www-form-urlencoded", Accept: "application/json"}
+  let body = __form_body([{key: "token", value: token_value}, {key: "client_id", value: cfg.client_id}])
+  try {
+    let _ = http_post(url_text, body, {headers: headers})
+  } catch (_err) {
+    let _ = nil
+  }
+  return url_text
+}
+
+fn __revoke_locked(cfg) {
+  let prev = cfg.storage.get(cfg.storage_key)
+  let access = prev?.access_token
+  let remote_url = access == nil || to_string(access) == "" ? nil : __try_revoke_remote(cfg, to_string(access))
+  cfg.storage.delete(cfg.storage_key)
+  __audit_revoked(cfg.provider_id, cfg.storage_key, prev, remote_url)
+  return nil
+}
+
 fn __refresh_locked(cfg, prev_token, reason) {
   let refresh = prev_token?.refresh_token
   if refresh == nil || to_string(refresh) == "" {
-    throw "std/oauth/client: no refresh_token available; re-run authorization"
+    throw __DIAGNOSTIC_REFRESH_EXPIRED
+      + ": std/oauth/client: no refresh_token available; re-run authorization"
   }
   var form = [{key: "grant_type", value: "refresh_token"}, {key: "refresh_token", value: refresh}]
   let scopes_str = __join_scopes(cfg.scopes, cfg.scope_separator)
@@ -377,7 +426,16 @@ fn __refresh_locked(cfg, prev_token, reason) {
     form = form + [{key: "scope", value: scopes_str}]
   }
   let issued_at = __now_seconds()
-  let parsed = __post_token_request(cfg.token_url, cfg.client_id, cfg.client_secret, cfg.token_auth_method, form)
+  var parsed = nil
+  try {
+    parsed = __post_token_request(cfg.token_url, cfg.client_id, cfg.client_secret, cfg.token_auth_method, form)
+  } catch (err) {
+    // Refresh-grant failures are special: the stored refresh token is
+    // gone (expired, revoked, or rotated by another caller). Surface
+    // the dedicated HARN-OAU-002 diagnostic so scripts can pattern-
+    // match on it and re-run authorization rather than retrying.
+    throw __DIAGNOSTIC_REFRESH_EXPIRED + ": std/oauth/client: refresh failed (" + to_string(err) + ")"
+  }
   let next_token = __build_token_set(parsed, cfg.scopes, issued_at, refresh)
   cfg.storage.set(cfg.storage_key, next_token)
   __audit_refresh(cfg.provider_id, cfg.storage_key, prev_token, next_token, reason)
@@ -387,7 +445,8 @@ fn __refresh_locked(cfg, prev_token, reason) {
 fn __maybe_refresh(cfg, reason) {
   let stored = cfg.storage.get(cfg.storage_key)
   if stored == nil {
-    throw "std/oauth/client: no token in storage; run authorization first"
+    throw __DIAGNOSTIC_REFRESH_EXPIRED
+      + ": std/oauth/client: no token in storage; run authorization first"
   }
   let now_s = __now_seconds()
   if !__token_is_stale(stored, now_s) && reason != "forced" && reason != "post_401" {
@@ -567,7 +626,7 @@ pub fn client(provider, opts) -> OAuthClient {
     token: { -> __get_valid_token(cfg).access_token },
     current_token: { -> cfg.storage.get(cfg.storage_key) },
     request: { method, url, http_opts = nil -> __token_request(cfg, method, url, http_opts) },
-    revoke: { -> cfg.storage.delete(cfg.storage_key) },
+    revoke: { -> __revoke_locked(cfg) },
   }
 }
 
@@ -665,4 +724,28 @@ pub fn exchange_code(cli, pkce, code, state) {
     throw "std/oauth/client: exchange_code() requires an OAuth client handle"
   }
   return cli.exchange_code(pkce, code, state)
+}
+
+/**
+ * revoke discards the locally-stored token and, when the provider
+ * declares a `revoke_url`, sends a best-effort RFC 7009 revocation
+ * POST so the server can invalidate the access token. The storage
+ * delete is authoritative on the client side — remote revocation
+ * failures are swallowed and never block the local discard.
+ *
+ * Subsequent calls to `token(cli)` or `request(cli, ...)` will throw
+ * `HARN-OAU-002` (no refresh_token available) until a new
+ * authorization flow is run.
+ *
+ * @effects: [time, net]
+ * @allocation: heap
+ * @errors: [invalid_argument]
+ * @api_stability: experimental
+ * @example: revoke(cli)
+ */
+pub fn revoke(cli) {
+  if type_of(cli) != "dict" || cli?._namespace != "oauth_client" {
+    throw "std/oauth/client: revoke() requires an OAuth client handle"
+  }
+  return cli.revoke()
 }

@@ -1,0 +1,73 @@
+// std/oauth/client: PKCE verifier mismatch surfaces the server's
+// rejection.
+//
+// RFC 7636 §4.6 puts PKCE validation on the authorization server: the
+// client always sends `code_verifier`, the server recomputes the
+// challenge from it, and on mismatch returns `invalid_grant`. This
+// fixture mocks that rejection (status 400, `invalid_grant`,
+// description "PKCE code_verifier mismatch") and asserts that:
+//
+//   - exchange_code() propagates the server's error_description so the
+//     operator sees the real cause instead of a generic 4xx,
+//   - no TokenSet is persisted to storage on a failed exchange,
+//   - no `token_exchanged` audit event is emitted (audit is the
+//     compliance contract — failures must not show up as successes),
+//   - the client did POST a `code_verifier=` form parameter so we know
+//     the contract on the wire is intact end-to-end.
+import { client, exchange_code, start_authorization } from "std/oauth/client"
+import { custom } from "std/oauth/providers"
+import { memory } from "std/oauth/storage"
+
+pipeline test(task) {
+  let topic = "oauth.client.audit"
+  let cursor = event_log.latest(topic) ?? 0
+  let store = memory()
+  let provider = custom(
+    {
+      id: "mockPkce",
+      auth_url: "https://idp.example/authorize",
+      token_url: "https://idp.example/token",
+      default_scopes: ["read"],
+    },
+  )
+  let cli = client(
+    provider,
+    {client_id: "cli-id", redirect_uri: "http://127.0.0.1:9999/cb", scopes: ["read"], storage: store},
+  )
+  let pkce = start_authorization(cli)
+  http_mock_clear()
+  http_mock(
+    "POST",
+    "https://idp.example/token",
+    {
+      status: 400,
+      body: "{\"error\":\"invalid_grant\",\"error_description\":\"PKCE code_verifier mismatch\"}",
+      headers: {"content-type": "application/json"},
+    },
+  )
+  var threw = false
+  var msg = ""
+  try {
+    let _ = exchange_code(cli, pkce, "auth-code-123", pkce.state)
+  } catch (err) {
+    msg = to_string(err)
+    threw = true
+  }
+  assert(threw, "PKCE mismatch should have thrown")
+  assert(
+    contains(msg, "PKCE code_verifier mismatch") || contains(msg, "invalid_grant"),
+    "server error_description must be surfaced, got: " + msg,
+  )
+  let after = store.get("mockPkce")
+  assert(after == nil, "no TokenSet persisted on failed exchange")
+  // Confirm the client did send the verifier on the wire so the
+  // server had something to validate against.
+  let calls = http_mock_calls({include_sensitive: true})
+  assert_eq(len(calls), 1, "one POST to token endpoint")
+  assert(contains(calls[0].body, "code_verifier=" + pkce.code_verifier), "code_verifier sent in body")
+  assert(contains(calls[0].body, "grant_type=authorization_code"), "auth-code grant type")
+  // No audit event must fire on a failed exchange.
+  let latest_after = event_log.latest(topic) ?? 0
+  assert_eq(latest_after, cursor, "no token_exchanged audit on failed exchange")
+  log("oauth pkce validates ok")
+}
