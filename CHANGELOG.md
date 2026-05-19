@@ -486,6 +486,19 @@ condensed series summaries instead of full per-patch history.
   HARN-DRN-001 contract (xfail threshold drops from 1 to 0). Part of
   epic #1853 (declarative agent lifecycle).
 
+### Fixed
+
+- **`harness.system.platform()` mock arch leak.** The mock-mode
+  `platform()` snapshot in `vm/methods/harness.rs` was reading the host
+  CPU architecture via `std::env::consts::ARCH` instead of a fixed
+  placeholder, so the `harness/system_basic` conformance fixture passed
+  on the Apple Silicon dev machines that recorded it (`aarch64`) but
+  failed on the x86_64 Linux CI runners. Mock mode now returns a
+  deterministic `"arch": "mock"` matching the rest of the snapshot
+  (`os`, `kernel`, `hostname`, …), so the fixture is portable across
+  architectures. The real (non-mock) `platform_snapshot()` still
+  returns the live host arch.
+
 ## v0.8.27
 
 ### Added

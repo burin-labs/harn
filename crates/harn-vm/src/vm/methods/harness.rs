@@ -380,7 +380,7 @@ impl crate::vm::Vm {
                     "temperature" => serde_json::json!({"components": []}),
                     "platform" => serde_json::json!({
                         "os": "mock",
-                        "arch": std::env::consts::ARCH,
+                        "arch": "mock",
                         "version": "mock",
                         "kernel": "mock",
                         "long_os_version": "mock",
