@@ -94,15 +94,24 @@ pub(super) fn params_to_json_schema(params: Option<&VmValue>) -> serde_json::Val
 
     for (param_name, param_def) in params_dict.iter() {
         if let VmValue::Dict(def) = param_def {
-            let mut prop = serde_json::Map::new();
-            if let Some(VmValue::String(t)) = def.get("type") {
-                prop.insert("type".into(), serde_json::Value::String(t.to_string()));
-            }
+            let mut prop = if let Some(VmValue::Dict(schema)) = def.get("schema") {
+                vm_value_to_json(&VmValue::Dict(schema.clone()))
+                    .as_object()
+                    .cloned()
+                    .unwrap_or_default()
+            } else {
+                def.iter()
+                    .filter_map(|(key, value)| {
+                        if key == "required" {
+                            return None;
+                        }
+                        Some((key.clone(), vm_value_to_json(value)))
+                    })
+                    .collect::<serde_json::Map<_, _>>()
+            };
             if let Some(VmValue::String(d)) = def.get("description") {
-                prop.insert(
-                    "description".into(),
-                    serde_json::Value::String(d.to_string()),
-                );
+                prop.entry("description")
+                    .or_insert_with(|| serde_json::Value::String(d.to_string()));
             }
             if matches!(def.get("required"), Some(VmValue::Bool(true))) {
                 required.push(serde_json::Value::String(param_name.clone()));

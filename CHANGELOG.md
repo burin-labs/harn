@@ -50,6 +50,17 @@ condensed series summaries instead of full per-patch history.
   at `docs/src/cli-json-contract.md`; a condensed cheatsheet ships in
   `docs/llm/harn-quickref.md`. Stdout stays single-document parseable;
   progress, warnings, and human-readable logs route to stderr.
+- **Experimental MCP file inputs (#1916).** Adds a default-off
+  `harn.mcp.configure({experimental: {file_upload: ...}})` opt-in for the
+  current draft MCP file-input proposal, SEP-2356. Client code can call
+  `harn.mcp.upload_file(client, path, options?)` to encode a local file as an
+  RFC 2397 `data:` URI for an `x-mcp-file` schema field, while Harn MCP
+  servers can declare those fields with `harn.mcp.file_input(...)`. Both the
+  VM MCP server and `harn-serve` MCP adapter validate incoming `data:` URI
+  scheme, media-type, and decoded-size constraints before dispatching the tool
+  handler. The implementation redacts inline file payloads from replay keys
+  and is explicitly tagged as speculative until upstream MCP ratifies the final
+  file-input shape.
 
 ## v0.8.27
 

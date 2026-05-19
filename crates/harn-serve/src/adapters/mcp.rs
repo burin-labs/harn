@@ -580,17 +580,28 @@ impl McpServer {
                 "tools/call",
             ));
         }
-        if self.catalog.function(&tool_name).is_none() {
+        let Some(function) = self.catalog.function(&tool_name) else {
             return Err(harn_vm::jsonrpc::error_response(
                 request_id,
                 -32602,
                 &format!("Unknown tool: {tool_name}"),
             ));
-        }
+        };
         let arguments = params
             .get("arguments")
             .cloned()
             .unwrap_or_else(|| json!({}));
+        // SPECULATIVE: validates draft MCP SEP-2356 file inputs.
+        // Revisit this when the MCP proposal is ratified.
+        if let Err(message) = harn_vm::mcp_file_upload::validate_file_inputs_for_call(
+            &arguments,
+            &function.input_schema,
+        ) {
+            return Err(harn_vm::jsonrpc::response(
+                request_id,
+                tool_call_error(message),
+            ));
+        }
         let progress_token = params
             .pointer("/_meta/progressToken")
             .cloned()

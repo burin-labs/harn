@@ -142,7 +142,26 @@ pub(crate) const SIGNATURES: &[BuiltinSignature] = &[
         ],
         TY_DICT,
     ),
+    BuiltinSignature::simple(
+        "harn.mcp.configure",
+        &[Param::optional("config", TY_DICT)],
+        TY_DICT,
+    ),
+    BuiltinSignature::simple(
+        "harn.mcp.file_input",
+        &[Param::optional("options", TY_DICT)],
+        TY_DICT,
+    ),
     BuiltinSignature::simple("harn.mcp.roots", &[], TY_LIST),
+    BuiltinSignature::simple(
+        "harn.mcp.upload_file",
+        &[
+            Param::new("server", TY_ANY),
+            Param::new("file_path", TY_STRING),
+            Param::optional("options", TY_DICT),
+        ],
+        TY_STRING,
+    ),
     BuiltinSignature::simple(
         "host_call",
         &[
@@ -465,6 +484,11 @@ pub(crate) const SIGNATURES: &[BuiltinSignature] = &[
         TY_ANY,
     ),
     BuiltinSignature::simple(
+        "mcp_configure",
+        &[Param::optional("config", TY_DICT)],
+        TY_DICT,
+    ),
+    BuiltinSignature::simple(
         "mcp_connect",
         &[
             Param::new("command", TY_STRING),
@@ -478,6 +502,11 @@ pub(crate) const SIGNATURES: &[BuiltinSignature] = &[
         "mcp_ensure_active",
         &[Param::new("name", TY_STRING)],
         TY_ANY,
+    ),
+    BuiltinSignature::simple(
+        "mcp_file_input",
+        &[Param::optional("options", TY_DICT)],
+        TY_DICT,
     ),
     BuiltinSignature::simple(
         "mcp_get_prompt",
@@ -531,6 +560,15 @@ pub(crate) const SIGNATURES: &[BuiltinSignature] = &[
     ),
     BuiltinSignature::simple("mcp_server_info", &[Param::new("client", TY_ANY)], TY_DICT),
     BuiltinSignature::simple("mcp_tools", &[Param::new("registry", TY_DICT)], TY_NIL),
+    BuiltinSignature::simple(
+        "mcp_upload_file",
+        &[
+            Param::new("server", TY_ANY),
+            Param::new("file_path", TY_STRING),
+            Param::optional("options", TY_DICT),
+        ],
+        TY_STRING,
+    ),
     BuiltinSignature::simple(
         "prompt_user",
         &[Param::optional("message", TY_STRING)],

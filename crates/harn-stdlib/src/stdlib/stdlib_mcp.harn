@@ -1,0 +1,41 @@
+// std/mcp — MCP convenience helpers.
+//
+// Import with: import "std/mcp"
+/**
+ * Configure experimental MCP behavior for the current VM.
+ *
+ * @effects: [mcp]
+ * @allocation: heap
+ * @errors: []
+ * @api_stability: experimental
+ * @example: configure({experimental: {file_upload: {spec_revision: "modelcontextprotocol/modelcontextprotocol#2356"}}})
+ */
+pub fn configure(config: dict = {}) -> dict {
+  return mcp_configure(config)
+}
+
+/**
+ * Return a JSON Schema property for an MCP SEP-2356 file input.
+ *
+ * @effects: []
+ * @allocation: heap
+ * @errors: []
+ * @api_stability: experimental
+ * @example: file_input({accept: ["image/png"], max_size: 5242880})
+ */
+pub fn file_input(options: dict = {}) -> dict {
+  return mcp_file_input(options ?? {})
+}
+
+/**
+ * Encode a local file as the RFC 2397 data URI carried by an MCP file input.
+ *
+ * @effects: [fs, mcp]
+ * @allocation: heap
+ * @errors: []
+ * @api_stability: experimental
+ * @example: upload_file(client, "photo.png", {accept: ["image/png"]})
+ */
+pub fn upload_file(server, file_path: string, options: dict = {}) -> string {
+  return mcp_upload_file(server, file_path, options ?? {})
+}

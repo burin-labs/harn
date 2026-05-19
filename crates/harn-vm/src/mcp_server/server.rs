@@ -334,6 +334,20 @@ impl McpServer {
             .get("arguments")
             .cloned()
             .unwrap_or(serde_json::json!({}));
+        // SPECULATIVE: validates draft MCP SEP-2356 file inputs.
+        // Revisit this when the MCP proposal is ratified.
+        if let Err(message) =
+            crate::mcp_file_upload::validate_file_inputs_for_call(&arguments, &tool.input_schema)
+        {
+            return serde_json::json!({
+                "jsonrpc": "2.0",
+                "id": id,
+                "result": {
+                    "content": [{ "type": "text", "text": message }],
+                    "isError": true
+                }
+            });
+        }
         let args_vm = json_to_vm_value(&arguments);
 
         // Bind a per-call progress context so the handler (and any

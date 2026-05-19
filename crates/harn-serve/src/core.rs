@@ -274,8 +274,21 @@ impl DispatchCore {
 
     fn default_replay_key(&self, request: &CallRequest) -> ReplayKey {
         let rendered_args = match &request.arguments {
-            CallArguments::Named(values) => serde_json::to_string(values).unwrap_or_default(),
-            CallArguments::Positional(values) => serde_json::to_string(values).unwrap_or_default(),
+            CallArguments::Named(values) => {
+                let value = serde_json::Value::Object(
+                    values
+                        .iter()
+                        .map(|(key, value)| (key.clone(), value.clone()))
+                        .collect(),
+                );
+                serde_json::to_string(&harn_vm::mcp_file_upload::redact_data_uris_for_logs(&value))
+                    .unwrap_or_default()
+            }
+            CallArguments::Positional(values) => {
+                let value = serde_json::Value::Array(values.clone());
+                serde_json::to_string(&harn_vm::mcp_file_upload::redact_data_uris_for_logs(&value))
+                    .unwrap_or_default()
+            }
         };
         ReplayKey(format!(
             "{}:{}:{}",
@@ -711,6 +724,53 @@ pub fn greet(name: string) -> string {
 
         assert_eq!(response.value, serde_json::json!("cached"));
         assert!(response.cached);
+    }
+
+    #[test]
+    fn default_replay_key_redacts_data_uri_payloads() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let script = dir.path().join("server.harn");
+        std::fs::write(
+            &script,
+            r#"
+pub fn inspect(upload: string) -> string {
+  return upload
+}
+"#,
+        )
+        .expect("write script");
+
+        let core = DispatchCore::new(DispatchCoreConfig::for_script(&script)).expect("core");
+        let request = |payload: serde_json::Value| CallRequest {
+            adapter: "mcp".to_string(),
+            function: "inspect".to_string(),
+            arguments: CallArguments::Named(BTreeMap::from([("upload".to_string(), payload)])),
+            auth: AuthRequest::default(),
+            caller: "tester".to_string(),
+            replay_key: None,
+            trace_id: None,
+            parent_span_id: None,
+            metadata: BTreeMap::new(),
+            cancel_token: None,
+            agent_session_id: None,
+            progress: None,
+        };
+
+        let first = core
+            .default_replay_key(&request(serde_json::json!(
+                "data:text/plain;base64,aGVsbG8="
+            )))
+            .0;
+        let second = core
+            .default_replay_key(&request(serde_json::json!(
+                "data:text/plain;base64,d29ybGQ="
+            )))
+            .0;
+
+        assert!(first.contains("data:text/plain;redacted;sha256="));
+        assert!(!first.contains("aGVsbG8="));
+        assert!(!second.contains("d29ybGQ="));
+        assert_ne!(first, second);
     }
 
     #[tokio::test]
