@@ -103,6 +103,8 @@
   - [ACP: `session/inject_reminder`](./protocol-contributions/acp-session-inject-reminder.md)
   - [A2A: `tasks/inject_reminder`](./protocol-contributions/a2a-message-kind-reminder.md)
   - [MCP: `notifications/reminder`](./protocol-contributions/mcp-notifications-reminder.md)
+  - [ACP: `session/suspend`](./protocol-contributions/acp-session-suspend.md)
+  - [A2A: `TaskState.PAUSED`](./protocol-contributions/a2a-paused-state.md)
 
 # Orchestration
 

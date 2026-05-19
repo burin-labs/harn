@@ -10,6 +10,29 @@ condensed series summaries instead of full per-patch history.
 
 ### Added
 
+- **Suspend/resume protocol contribution RFCs (S-12, #1848).** Authors
+  two new upstream-proposal documents under
+  `docs/src/protocol-contributions/`: ACP `session/suspend` +
+  `session/await_resumption` (the suspend-side companion to the
+  already-shipped `session/resume`, [ACP #1726][acp-1726]) and A2A
+  explicit `TaskState.PAUSED_BY_CLIENT` / `PAUSED_BY_AGENT` with
+  matching `tasks/pause` / `tasks/await_resumption` / `tasks/resume`
+  JSON-RPC methods. Each RFC describes the proposed wire format,
+  migration path from our existing `_meta.harn.suspend` /
+  `metadata.harn.pause` envelopes, reference-impl status against the
+  shipped `__host_worker_suspend` + `WorkerSuspension` primitive,
+  and open questions for upstream maintainers. Both RFCs deliberately
+  share field names (`handle`, `reason`, `conditions`, `cause`,
+  `continueTranscript`) so cross-protocol bridges can round-trip
+  pauses verbatim. Wires the two new RFCs into
+  `docs/src/SUMMARY.md` and the
+  `docs/src/protocol-contributions/README.md` index (now grouped by
+  RFC family: reminder injection under #1829, suspend/resume under
+  #1848). Upstream filings remain a maintainer action — see #1848 for
+  the outstanding work.
+
+[acp-1726]: https://github.com/agentclientprotocol/agent-client-protocol/discussions/1726
+
 - **OAuth docs + provider cookbook (OA-08, #1909).** Adds
   `docs/src/oauth.md` as the user-facing reference for the full OAuth
   stack (`std/oauth/{providers,storage,client,device_flow,dynamic_registration,redaction}`),
