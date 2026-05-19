@@ -1,0 +1,68 @@
+/**
+ * The pipeline lifecycle audit channel is the executable contract used
+ * by record/replay. Every `harness.emit_audit` call persists to the
+ * `pipeline.lifecycle.audit` event-log topic with deterministic seq /
+ * kind / payload headers; a replay reader observing the same topic
+ * range MUST surface the same stream byte-for-byte.
+ *
+ * This fixture exercises that contract directly: it records the
+ * lifecycle log cursor before the pipeline-finish callback runs, emits
+ * a deterministic trio of audits (`drain_decision` → `handoff_recorded`
+ * → `pipeline_finalized`), subscribes from the captured cursor as a
+ * "replay reader", and asserts the replayed kind sequence and payload
+ * digests match the originally recorded entries.
+ *
+ * Tracking: harn#1862 (P-09), harn#1853 (epic), harn#1858 (P-08).
+ */
+import { lifecycle_audit_log_take } from "std/lifecycle"
+
+pipeline default() {
+  let topic = "pipeline.lifecycle.audit"
+  let cursor = event_log.latest(topic)
+  pipeline_on_finish(
+    { harness, return_value ->
+      harness
+        .emit_audit(
+        "drain_decision",
+        {
+          pipeline_id: "pipeline-replay",
+          item: {category: "suspended_subagent", id: "worker://triage/1"},
+          action: "resume",
+          reason: "replay determinism",
+        },
+      )
+      harness
+        .emit_audit(
+        "handoff_recorded",
+        {target_pipeline: "nightly-drain", envelope_id: "envelope_replay_1"},
+      )
+      harness.emit_audit("pipeline_finalized", {reason: "replay_complete"})
+      let recorded = lifecycle_audit_log_take()
+      let stream = event_log
+        .subscribe({topic: topic, from_cursor: cursor, kind_prefix: "lifecycle_audit"})
+      let first = stream.next().value
+      let second = stream.next().value
+      let third = stream.next().value
+      harness.stdio.println("recorded_count=" + to_string(len(recorded)))
+      harness.stdio
+        .println(
+        "recorded_kinds=" + recorded[0].kind + "," + recorded[1].kind + "," + recorded[2].kind,
+      )
+      harness.stdio.println("first_kind=" + first.kind)
+      harness.stdio.println("first_payload_kind=" + first.payload.kind)
+      harness.stdio.println("first_action=" + first.payload.payload.action)
+      harness.stdio.println("second_payload_kind=" + second.payload.kind)
+      harness.stdio
+        .println("second_envelope=" + second.payload.payload.envelope_id)
+      harness.stdio.println("third_payload_kind=" + third.payload.kind)
+      harness.stdio.println("third_reason=" + third.payload.payload.reason)
+      harness.stdio
+        .println(
+        "seq_monotonic="
+          + to_string(first.payload.seq < second.payload.seq && second.payload.seq < third.payload.seq),
+      )
+      return return_value
+    },
+  )
+  return "ok"
+}

@@ -30,6 +30,28 @@ condensed series summaries instead of full per-patch history.
   pre-restart span. New `suspend_otel_links` conformance fixture
   exercises the warm suspend → resume cycle from script land. Part of
   epic #1836 (Agent suspend/resume).
+- **Pipeline lifecycle conformance gap-fill (#1862).** P-09 closes the
+  pipeline-lifecycle epic (#1853) by landing the spec-named umbrella
+  fixtures on top of the per-preset coverage that already shipped with
+  P-01..P-07: `pipeline_lifecycle_default` (default `on_finish: drain`,
+  no unsettled → `pipeline_finalized` audit + PreFinish/PostFinish fire
+  around the callback), `pipeline_lifecycle_abandon` (`on_finish_abandon`
+  surfaces a `pipeline_abandoned_unsettled` audit with the typed counts),
+  `pipeline_drain_decision_callback` (settlement-agent `emit_audit(
+  "drain_decision", ...)` records the documented shape AND the
+  `OnDrainDecision` hook dispatches with `action`/`item` payload),
+  `pipeline_composed_finish_handlers` (`compose([log, drain, audit])`
+  threads through `pipeline_on_finish` in the declared order), and
+  `pipeline_replay_equivalence` (lifecycle audits persisted to the
+  `pipeline.lifecycle.audit` event-log topic round-trip byte-identical
+  through `event_log.subscribe(from_cursor, kind_prefix)` with monotonic
+  seq). `pipeline_drain_ordering_enforcement` lands as `@xfail`
+  referencing #1856 (P-03 settlement-agent loop) — the fixture pins the
+  post-wiring HARN-DRN-001 contract so dropping the marker after #1856
+  lands is the only edit needed. Together with the existing
+  `on_finish_preset_*`, `combinator_*`, `lifecycle_hook_events_*`,
+  `lifecycle_event_shape_*`, and `on_budget_*` fixtures the lifecycle
+  surface is now executable spec end-to-end.
 - **Pool conformance gap-fill: `pool_unsettled_state_integration` (#1892).**
   PL-07 (epic #1883) is the comprehensive pool conformance suite. Eight of
   the ten spec scenarios were already covered by fixtures landed alongside

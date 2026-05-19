@@ -1,0 +1,38 @@
+// @xfail: HARN-DRN-001 ordering enforcement lands with settlement-agent loop — tracked in #1856
+/**
+ * Spec contract: the drain loop must finalize suspended subagents BEFORE
+ * channels BEFORE triggers ("avoid the drain ordering footgun"). A
+ * settlement agent that calls `acknowledge_trigger` while suspended
+ * subagents are still pending must surface `HARN-DRN-001` so the loop
+ * can correct course; the harness returns a rejected receipt and no
+ * audit is appended.
+ *
+ * The settlement-agent loop itself is a stub (P-03, harn#1856) — this
+ * fixture asserts the post-wiring shape. Once `acknowledge_trigger`
+ * grows the precondition check, drop the `@xfail` marker and the
+ * fixture starts gating real ordering behavior.
+ *
+ * Tracking: harn#1862 (P-09), harn#1853 (epic), harn#1856 (P-03).
+ */
+import { lifecycle_audit_log_take } from "std/lifecycle"
+
+pipeline default() {
+  pipeline_on_finish(
+    { harness, return_value ->
+      harness.handoff_to("triage-pipeline", {subagent: "worker://triage/42"})
+      let ack = harness.acknowledge_trigger("trigger://inbox/event-1")
+      harness.stdio.println("ack_status=" + ack.status)
+      harness.stdio.println("ack_reason=" + ack.reason)
+      let audits = lifecycle_audit_log_take()
+      harness.stdio.println("audit_count=" + to_string(len(audits)))
+      return return_value
+    },
+  )
+  return "ok"
+}
+// Simulate the precondition: a suspended subagent is in the
+// unsettled snapshot. We seed a partial-handoff envelope as a
+// stand-in until the real subagent snapshot wiring lands.
+// Attempt the out-of-order acknowledge: a still-pending subagent
+// must block trigger acknowledgement.
+// Verify nothing was recorded.

@@ -1,0 +1,44 @@
+/**
+ * `Combinator.compose([log, drain, audit])` registered through
+ * `pipeline_on_finish` invokes each callback sequentially with
+ * `(harness, return_value)`, threading the result through the chain in
+ * the order the list declares. The recorded audit log mirrors that
+ * order so downstream consumers can verify exactly which callback fired
+ * and when.
+ *
+ * This fixture composes a log callback, the canonical `on_finish_drain`
+ * preset, and a trailing audit callback. With nothing unsettled, `drain`
+ * short-circuits to `pipeline_finalized` and the trailing audit appends
+ * a final `composed_after_drain` entry. The audit kinds, payloads, and
+ * counts make the ordering observable.
+ *
+ * Tracking: harn#1862 (P-09), harn#1853 (epic), harn#1860 (P-07).
+ */
+import { lifecycle_audit_log_take, on_finish_drain } from "std/lifecycle"
+import { compose } from "std/lifecycle/combinators"
+
+pipeline default() {
+  let log_cb = { harness, return_value ->
+    harness.emit_audit("composed_log_step", {value: return_value})
+    return return_value
+  }
+  let audit_cb = { harness, return_value ->
+    harness.emit_audit("composed_after_drain", {value: return_value})
+    return return_value
+  }
+  pipeline_on_finish(
+    { harness, return_value ->
+      let chained = compose([log_cb, on_finish_drain, audit_cb])
+      let result = chained(harness, return_value)
+      let audits = lifecycle_audit_log_take()
+      harness.stdio.println("audit_count=" + to_string(len(audits)))
+      harness.stdio.println("kind_order=" + audits[0].kind + "," + audits[1].kind + "," + audits[2].kind)
+      harness.stdio.println("log_value=" + to_string(audits[0].payload.value))
+      harness.stdio.println("drain_reason=" + audits[1].payload.reason)
+      harness.stdio.println("audit_value=" + to_string(audits[2].payload.value))
+      harness.stdio.println("result=" + to_string(result))
+      return result
+    },
+  )
+  return 42
+}

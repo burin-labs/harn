@@ -1,0 +1,43 @@
+/**
+ * Asserts the documented default `on_finish: drain` shape against a clean
+ * pipeline (no unsettled work). The runtime fires `PreFinish`, the
+ * registered `on_finish_drain` callback emits a `pipeline_finalized` audit
+ * with `reason: "no_unsettled"`, returns the inbound `return_value`
+ * unchanged, and `PostFinish` fires last. Together this is the canonical
+ * happy-path lifecycle surface every pipeline observes when nothing is
+ * deferred.
+ *
+ * Tracking: harn#1862 (P-09), harn#1853 (epic), harn#1854 (P-01),
+ * harn#1855 (P-02).
+ */
+import { lifecycle_audit_log_take, on_finish_drain } from "std/lifecycle"
+
+pipeline default() {
+  clear_session_hooks()
+  register_session_hook(
+    "pre_finish",
+    { event ->
+      println("pre_finish has_on_finish=" + to_string(event.has_on_finish))
+      return nil
+    },
+  )
+  register_session_hook(
+    "post_finish",
+    { event ->
+      println("post_finish return_value=" + to_string(event.return_value))
+      return nil
+    },
+  )
+  pipeline_on_finish(
+    { harness, return_value ->
+      let result = on_finish_drain(harness, return_value)
+      let audits = lifecycle_audit_log_take()
+      harness.stdio.println("audit_count=" + to_string(len(audits)))
+      harness.stdio.println("audit_kind=" + audits[0].kind)
+      harness.stdio.println("audit_reason=" + audits[0].payload.reason)
+      harness.stdio.println("result=" + to_string(result))
+      return result
+    },
+  )
+  return 7
+}
