@@ -1,0 +1,31 @@
+/**
+ * `on_finish_abandon` reproduces today's no-callback behavior — the
+ * pipeline exits without draining unsettled work — but with a single
+ * `pipeline_abandoned_unsettled` audit so the lost work is observable.
+ * The fixture seeds a partial-handoff envelope via `harness.handoff_to`
+ * so the snapshot is non-empty, applies the preset, and asserts the
+ * audit kind plus `counts.partial`. `return_value` flows through
+ * unchanged.
+ *
+ * Tracking: harn#1862 (P-09), harn#1853 (epic), harn#1855 (P-02).
+ */
+import { lifecycle_audit_log_take, on_finish_abandon } from "std/lifecycle"
+
+pipeline default() {
+  pipeline_on_finish(
+    { harness, return_value ->
+      harness.handoff_to("nightly-drain", {note: "abandon lifecycle"})
+      let pre_state = harness.unsettled_state()
+      harness.stdio
+        .println("pre_partial=" + to_string(len(pre_state.partial_handoffs)))
+      let result = on_finish_abandon(harness, return_value)
+      let audits = lifecycle_audit_log_take()
+      harness.stdio.println("audit_count=" + to_string(len(audits)))
+      harness.stdio.println("audit_kind=" + audits[0].kind)
+      harness.stdio.println("partial=" + to_string(audits[0].payload.counts.partial))
+      harness.stdio.println("result=" + to_string(result))
+      return result
+    },
+  )
+  return 31
+}

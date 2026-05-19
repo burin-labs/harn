@@ -1,0 +1,5 @@
+pre_partial=1
+audit_count=1
+audit_kind=pipeline_abandoned_unsettled
+partial=1
+result=31

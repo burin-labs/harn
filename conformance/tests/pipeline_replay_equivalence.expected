@@ -1,0 +1,10 @@
+recorded_count=3
+recorded_kinds=drain_decision,handoff_recorded,pipeline_finalized
+first_kind=lifecycle_audit
+first_payload_kind=drain_decision
+first_action=resume
+second_payload_kind=handoff_recorded
+second_envelope=envelope_replay_1
+third_payload_kind=pipeline_finalized
+third_reason=replay_complete
+seq_monotonic=true

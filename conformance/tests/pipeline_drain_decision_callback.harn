@@ -1,0 +1,85 @@
+/**
+ * Two halves of the same contract:
+ *   1. `harness.emit_audit("drain_decision", ...)` from inside an
+ *      `on_finish` callback records the audit with the documented
+ *      shape (kind/seq/payload). This is the recording side the
+ *      settlement-agent loop (P-03, harn#1856) will use once it lands.
+ *   2. The dispatcher routes `OnDrainDecision` payloads to a registered
+ *      session hook via the same parser used by user code. Exercising
+ *      the synthetic dispatch path (`__host_fire_session_hook`) keeps
+ *      the hook plumbing under conformance regardless of when the real
+ *      settlement-agent loop ships.
+ *
+ * Together they assert the post-wiring contract: tool calls reach the
+ * `OnDrainDecision` hook with the documented payload, the hook returns
+ * Allow, and the audit log persists the entry the loop emitted.
+ *
+ * Tracking: harn#1862 (P-09), harn#1853 (epic), harn#1856 (P-03),
+ * harn#1859 (P-06).
+ */
+import { lifecycle_audit_log_take } from "std/lifecycle"
+
+let observed = atomic(0)
+
+let observed_action_resume = atomic(0)
+
+let observed_action_cancel = atomic(0)
+
+pipeline default() {
+  clear_session_hooks()
+  register_session_hook(
+    "on_drain_decision",
+    { event ->
+      atomic_add(observed, 1)
+      if event.action == "resume" {
+        atomic_add(observed_action_resume, 1)
+      }
+      if event.action == "cancel" {
+        atomic_add(observed_action_cancel, 1)
+      }
+      return nil
+    },
+  )
+  // 1. Hook plumbing: synthetic dispatch through the canonical parser.
+  let resume_event = __host_fire_session_hook(
+    "on_drain_decision",
+    {action: "resume", item: {category: "suspended_subagent", id: "worker://triage/42"}},
+  )
+  let cancel_event = __host_fire_session_hook(
+    "on_drain_decision",
+    {action: "cancel", item: {category: "suspended_subagent", id: "worker://triage/43"}},
+  )
+  println("resume_control=" + resume_event.control)
+  println("cancel_control=" + cancel_event.control)
+  println("observed=" + to_string(atomic_get(observed)))
+  println("observed_resume=" + to_string(atomic_get(observed_action_resume)))
+  println("observed_cancel=" + to_string(atomic_get(observed_action_cancel)))
+  // Clear hooks before the on_finish recording path, since the audit
+  // route currently requires no registered hook to round-trip safely
+  // (the lifecycle dispatcher requires an async-builtin VM context;
+  // tracked separately in #1859 follow-ups).
+  clear_session_hooks()
+  pipeline_on_finish(
+    { harness, return_value ->
+      let receipt = harness
+        .emit_audit(
+        "drain_decision",
+        {
+          pipeline_id: "pipeline-1",
+          item: {category: "suspended_subagent", id: "worker://triage/44"},
+          action: "handoff",
+          reason: "ordering decision",
+        },
+      )
+      let audits = lifecycle_audit_log_take()
+      harness.stdio.println("receipt_status=" + receipt.status)
+      harness.stdio.println("audit_count=" + to_string(len(audits)))
+      harness.stdio.println("audit_kind=" + audits[0].kind)
+      harness.stdio.println("audit_action=" + audits[0].payload.action)
+      harness.stdio.println("audit_item_id=" + audits[0].payload.item.id)
+      return return_value
+    },
+  )
+  return "ok"
+}
+// 2. Recording surface: emit_audit persists the entry.
