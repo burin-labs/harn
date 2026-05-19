@@ -3348,8 +3348,31 @@ agent_loop(message, tools: {tools: [{name: "run_command", handler: run_command}]
 - Omit `inner` to get decision envelopes without execution — useful
   for previewing rewrites or testing rule coverage. The audit +
   reminder side effects still fire in preview mode.
-- `llm_classifier` is reserved for TH-05 (#1898) and currently rejects
-  non-nil values so callers don't silently miss the future hook.
+- Catalogue auto-seed (TH-04 #1897): omit `registry` and the wrapper
+  builds one from `stacks` via `tool_hooks_seed_registry(stacks)`. The
+  universal catalogue (`git push --force main`, `rm -rf` against `/`,
+  `~`, `..`, `$HOME`, `*`) is always included; per-stack catalogues
+  ship for `rust`, `python`, `typescript` (aliased `ts`), `swift`,
+  `sql`, and `harn`. Unknown stacks are silently skipped so callers
+  opting into a future name don't break.
+- Optional LLM classifier (TH-05 #1898): pass
+  `llm_classifier: {model, threshold?, meta_prompt?, provider?, cache?, llm_options?}`
+  to consult a small model on any command that didn't hit a
+  deterministic rule. Verdicts at or above `threshold` (default 0.8)
+  dispatch via the mode the verdict implies (`rewrite` →
+  `tool_hooks_mode_rewrite_with_audit`, `deny` →
+  `tool_hooks_mode_deny_with_explanation`); lower confidence or `allow`
+  falls through to `inner` so the loop stays usable when the model is
+  unsure. Every call emits a `tool_hook_classifier_verdict` audit
+  (kind, confidence, scope, cache hit/miss, action) regardless of
+  outcome. Cache TTL accepts `cache.ttl_ms` (preferred for tests) or
+  `cache.ttl_seconds`. The classifier sends the raw command + meta
+  prompt to the model, so redact secrets the same way `run_command`
+  already requires; transport errors degrade gracefully to passthrough.
+
+Full reference: [`docs/src/tool-hooks.md`](https://harnlang.com/docs/tool-hooks.html).
+Recipes per stack: [`docs/src/cookbooks/tool-hooks.md`](https://harnlang.com/docs/cookbooks/tool-hooks.html).
+Contributing rules: [`docs/src/contributing/preset-hooks.md`](https://harnlang.com/docs/contributing/preset-hooks.html).
 
 ## Cancellation
 
