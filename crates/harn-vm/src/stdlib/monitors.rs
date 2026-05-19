@@ -706,7 +706,7 @@ pipeline test(task) {
             .await;
     }
 
-    #[tokio::test(flavor = "current_thread")]
+    #[tokio::test(flavor = "current_thread", start_paused = true)]
     async fn monitor_wait_replays_recorded_terminal_result() {
         tokio::task::LocalSet::new()
             .run_until(async {
