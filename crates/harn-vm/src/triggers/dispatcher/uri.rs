@@ -48,6 +48,15 @@ pub enum DispatchUri {
         priority_from: Option<String>,
         key_from: Option<String>,
     },
+    /// Dispatcher injects a `SystemReminder` into the target running session
+    /// when the trigger matches (#1876). The descriptor carries the
+    /// resolution-mode label and (for the `Concrete` form) the literal
+    /// session id so the URI stays serializable and comparable; the body
+    /// template + reminder metadata live on the `TriggerHandlerSpec`.
+    ReminderInject {
+        target_kind: &'static str,
+        target_session_id: Option<String>,
+    },
 }
 
 impl DispatchUri {
@@ -115,6 +124,7 @@ impl DispatchUri {
             Self::Persona { .. } => "persona",
             Self::AutoResume { .. } => "auto_resume",
             Self::SpawnToPool { .. } => "spawn_to_pool",
+            Self::ReminderInject { .. } => "reminder_inject",
         }
     }
 
@@ -126,6 +136,13 @@ impl DispatchUri {
             Self::Persona { name } => format!("persona://{name}"),
             Self::AutoResume { worker_id } => format!("auto_resume://{worker_id}"),
             Self::SpawnToPool { pool, .. } => format!("pool://{pool}"),
+            Self::ReminderInject {
+                target_kind,
+                target_session_id,
+            } => match target_session_id {
+                Some(id) => format!("reminder_inject://{target_kind}/{id}"),
+                None => format!("reminder_inject://{target_kind}"),
+            },
         }
     }
 
@@ -137,6 +154,7 @@ impl DispatchUri {
             Self::Persona { .. } => "persona_runtime",
             Self::AutoResume { .. } => "local_process",
             Self::SpawnToPool { .. } => "local_process",
+            Self::ReminderInject { .. } => "local_process",
         }
     }
 
@@ -148,6 +166,7 @@ impl DispatchUri {
             Self::Persona { .. } => "managed_persona",
             Self::AutoResume { .. } => "in_process",
             Self::SpawnToPool { .. } => "pool_queued",
+            Self::ReminderInject { .. } => "in_process",
         }
     }
 
@@ -210,6 +229,16 @@ impl From<&TriggerHandlerSpec> for DispatchUri {
                 priority_from: priority_from.clone(),
                 key_from: key_from.clone(),
             },
+            TriggerHandlerSpec::ReminderInject { target, .. } => {
+                let target_session_id = match target {
+                    crate::triggers::registry::TargetExpr::Concrete(id) => Some(id.clone()),
+                    _ => None,
+                };
+                Self::ReminderInject {
+                    target_kind: target.kind(),
+                    target_session_id,
+                }
+            }
         }
     }
 }

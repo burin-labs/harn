@@ -973,6 +973,48 @@ pub fn SpawnToPool(options: dict) -> dict {
 }
 
 /**
+ * ReminderInject builds a handler-variant dict that injects a
+ * `SystemReminder` (#1815) into the target running session when the trigger
+ * matches (#1876). Unlike Local/Worker handlers, no new task is spawned —
+ * the reminder appears at the target session's next turn boundary.
+ *
+ * `target` accepts the string `"current"` (the trigger's owning session,
+ * the default), `"parent"` (the parent of the owning session), any other
+ * string as a concrete session id, or a closure `event -> string?` that
+ * returns the session id at dispatch time. The closure form lets the
+ * trigger pick a target dynamically from the event payload.
+ *
+ * `body` is a `.harn.prompt` template rendered against `{{ event }}`,
+ * `{{ match }}` (`matched_at`), and `{{ batch }}` when flow-control
+ * batching is in effect.
+ *
+ * `tags`, `ttl_turns`, `dedupe_key`, `propagate`, `role_hint`, and
+ * `preserve_on_compact` mirror `transcript.inject_reminder` (#1815 R-02);
+ * see `docs/src/system-reminders.md`. Missing target sessions are dropped
+ * gracefully with a `triggers.reminder_inject.audit` audit entry instead
+ * of failing the dispatch.
+ *
+ * @effects: []
+ * @allocation: heap
+ * @errors: []
+ * @api_stability: experimental
+ * @example: trigger_register({handler: ReminderInject({target: "current", body: "{{ event.kind }} arrived"})})
+ */
+pub fn ReminderInject(options: dict) -> dict {
+  return {
+    kind: "reminder_inject",
+    target: options?.target,
+    body: options.body,
+    tags: options?.tags,
+    ttl_turns: options?.ttl_turns,
+    dedupe_key: options?.dedupe_key,
+    propagate: options?.propagate,
+    role_hint: options?.role_hint,
+    preserve_on_compact: options?.preserve_on_compact,
+  }
+}
+
+/**
  * list_providers.
  *
  * @effects: []

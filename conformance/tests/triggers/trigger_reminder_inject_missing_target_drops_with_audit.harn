@@ -1,0 +1,53 @@
+import { lifecycle_audit_log_take } from "std/lifecycle"
+import "std/triggers"
+
+/**
+ * Verifies the ReminderInject (#1876) handler's failure-mode contract: a
+ * target session that does not exist is dropped gracefully with a
+ * `triggers.reminder_inject.audit` audit entry tagged `target_unknown_session`
+ * rather than failing the dispatch. The trigger remains active for future
+ * dispatches.
+ */
+pipeline test(task) {
+  let _ = lifecycle_audit_log_take()
+  let unique = to_string(to_int(timestamp())) + "-" + to_string(random_int(100000, 999999))
+  let handle: TriggerHandle = trigger_register(
+    {
+      id: "trigger-reminder-inject-missing-" + unique,
+      kind: "issue.opened",
+      provider: "github",
+      handler: ReminderInject({target: "does-not-exist-" + unique, body: "Should never be injected."}),
+      when: nil,
+      retry: nil,
+      match: {events: ["issue.opened"]},
+      events: nil,
+      dedupe_key: nil,
+      filter: nil,
+      budget: nil,
+      manifest_path: nil,
+      package_name: "conformance",
+    },
+  )
+  let dispatch = trigger_fire(
+    handle,
+    {provider: "github", kind: "issue.opened", headers: {x_delivery: "evt-" + unique}},
+  )
+  println(dispatch.status == "dispatched")
+  println(dispatch.result?.status == "dropped")
+  println(dispatch.result?.reason == "target_unknown_session")
+  println(dispatch.result?.target_kind == "concrete")
+  let audits = lifecycle_audit_log_take()
+  var drop_audits = 0
+  var outcome = ""
+  var reason = ""
+  for audit in audits {
+    if audit.kind == "triggers.reminder_inject.audit" {
+      drop_audits = drop_audits + 1
+      outcome = audit.payload.outcome
+      reason = audit.payload.reason
+    }
+  }
+  println(drop_audits)
+  println(outcome)
+  println(reason)
+}

@@ -13,6 +13,7 @@ use crate::event_log::{
 };
 use crate::triggers::dispatcher::current_dispatch_context;
 use crate::triggers::dispatcher::DEFAULT_MAX_ATTEMPTS;
+use crate::triggers::registry::TargetExpr;
 use crate::triggers::test_util::{clock, run_trigger_harness_fixture};
 use crate::triggers::{
     deregister_webhook_intake, dynamic_deregister, dynamic_register, feed_webhook_intake,
@@ -1828,9 +1829,9 @@ fn parse_handler_value(
     }
 }
 
-/// Parse handler-variant dicts. Today only `SpawnToPool` (#1889) takes this
-/// shape; future variants (e.g. `ReminderInject` from #1876) plug in here so
-/// the trigger DSL keeps a single uniform `handler:` syntax.
+/// Parse handler-variant dicts. `SpawnToPool` (#1889) and `ReminderInject`
+/// (#1876) both ship as dict-shaped handlers so the trigger DSL keeps a
+/// single uniform `handler:` syntax; future variants plug in here too.
 fn parse_handler_dict(
     map: &BTreeMap<String, VmValue>,
     builtin: &str,
@@ -1890,8 +1891,203 @@ fn parse_handler_dict(
                 descriptor,
             ))
         }
+        "reminder_inject" => parse_reminder_inject_handler(map, builtin),
         other => Err(VmError::Runtime(format!(
-            "{builtin}: unsupported handler variant '{other}'; expected 'spawn_to_pool'"
+            "{builtin}: unsupported handler variant '{other}'; expected 'spawn_to_pool' or 'reminder_inject'"
+        ))),
+    }
+}
+
+/// Parse the ReminderInject (#1876) handler dict. `target` resolution is
+/// one of: a string literal (`"current"`, `"parent"`, or any other value
+/// interpreted as a concrete session id), or a closure that returns the
+/// session id at dispatch time. Reminder metadata mirrors the
+/// `transcript.inject_reminder` (#1815 R-02) shape so authors can reuse
+/// the same mental model.
+fn parse_reminder_inject_handler(
+    map: &BTreeMap<String, VmValue>,
+    builtin: &str,
+) -> Result<(TriggerHandlerSpec, serde_json::Value), VmError> {
+    let target_value = map.get("target").or_else(|| map.get("target_session_id"));
+    let target = match target_value {
+        None | Some(VmValue::Nil) => TargetExpr::Current,
+        Some(VmValue::String(s)) => match s.as_ref() {
+            "current" => TargetExpr::Current,
+            "parent" => TargetExpr::Parent,
+            other if !other.is_empty() => TargetExpr::Concrete(other.to_string()),
+            _ => {
+                return Err(VmError::Runtime(format!(
+                    "{builtin}: ReminderInject `target` string must be 'current', 'parent', or a non-empty session id"
+                )));
+            }
+        },
+        Some(VmValue::Closure(closure)) => TargetExpr::Closure(closure.clone()),
+        Some(other) => {
+            return Err(VmError::Runtime(format!(
+                "{builtin}: ReminderInject `target` must be a string ('current'/'parent'/session id) or a closure returning a session id, got {}",
+                other.type_name()
+            )));
+        }
+    };
+
+    let body = match map.get("body") {
+        Some(VmValue::String(s)) => s.to_string(),
+        None | Some(VmValue::Nil) => {
+            return Err(VmError::Runtime(format!(
+                "{builtin}: ReminderInject handler requires `body` (string template)"
+            )));
+        }
+        Some(other) => {
+            return Err(VmError::Runtime(format!(
+                "{builtin}: ReminderInject `body` must be a string, got {}",
+                other.type_name()
+            )));
+        }
+    };
+
+    let tags = parse_reminder_tags(map, builtin)?;
+    let ttl_turns = parse_reminder_ttl_turns(map, builtin)?;
+    let dedupe_key = optional_path_string(map, "dedupe_key", "ReminderInject")?;
+    let propagate = parse_reminder_propagate(map, builtin)?;
+    let role_hint = parse_reminder_role_hint(map, builtin)?;
+    let preserve_on_compact = match map.get("preserve_on_compact") {
+        None | Some(VmValue::Nil) => false,
+        Some(VmValue::Bool(b)) => *b,
+        Some(other) => {
+            return Err(VmError::Runtime(format!(
+                "{builtin}: ReminderInject `preserve_on_compact` must be a bool, got {}",
+                other.type_name()
+            )));
+        }
+    };
+
+    let descriptor = serde_json::json!({
+        "kind": "reminder_inject",
+        "target": target.kind(),
+        "target_session_id": match &target {
+            TargetExpr::Concrete(id) => serde_json::Value::String(id.clone()),
+            _ => serde_json::Value::Null,
+        },
+        "body": &body,
+        "tags": &tags,
+        "ttl_turns": ttl_turns,
+        "dedupe_key": &dedupe_key,
+        "propagate": propagate.as_str(),
+        "role_hint": role_hint.as_str(),
+        "preserve_on_compact": preserve_on_compact,
+    });
+
+    Ok((
+        TriggerHandlerSpec::ReminderInject {
+            target,
+            body,
+            tags,
+            ttl_turns,
+            dedupe_key,
+            propagate,
+            role_hint,
+            preserve_on_compact,
+        },
+        descriptor,
+    ))
+}
+
+fn parse_reminder_tags(
+    map: &BTreeMap<String, VmValue>,
+    builtin: &str,
+) -> Result<Vec<String>, VmError> {
+    match map.get("tags") {
+        None | Some(VmValue::Nil) => Ok(Vec::new()),
+        Some(VmValue::List(list)) => {
+            let mut tags = Vec::with_capacity(list.len());
+            for item in list.iter() {
+                let VmValue::String(text) = item else {
+                    return Err(VmError::Runtime(format!(
+                        "{builtin}: ReminderInject `tags` entries must be strings, got {}",
+                        item.type_name()
+                    )));
+                };
+                let trimmed = text.trim();
+                if trimmed.is_empty() {
+                    return Err(VmError::Runtime(format!(
+                        "{builtin}: ReminderInject `tags` entries must be non-empty strings"
+                    )));
+                }
+                let tag = trimmed.to_string();
+                if !tags.contains(&tag) {
+                    tags.push(tag);
+                }
+            }
+            Ok(tags)
+        }
+        Some(other) => Err(VmError::Runtime(format!(
+            "{builtin}: ReminderInject `tags` must be a list of strings, got {}",
+            other.type_name()
+        ))),
+    }
+}
+
+fn parse_reminder_ttl_turns(
+    map: &BTreeMap<String, VmValue>,
+    builtin: &str,
+) -> Result<Option<i64>, VmError> {
+    match map.get("ttl_turns") {
+        None | Some(VmValue::Nil) => Ok(None),
+        Some(VmValue::Int(value)) => {
+            if *value <= 0 {
+                Err(VmError::Runtime(format!(
+                    "{builtin}: ReminderInject `ttl_turns` must be > 0"
+                )))
+            } else {
+                Ok(Some(*value))
+            }
+        }
+        Some(other) => Err(VmError::Runtime(format!(
+            "{builtin}: ReminderInject `ttl_turns` must be an int or nil, got {}",
+            other.type_name()
+        ))),
+    }
+}
+
+fn parse_reminder_propagate(
+    map: &BTreeMap<String, VmValue>,
+    builtin: &str,
+) -> Result<crate::llm::helpers::ReminderPropagate, VmError> {
+    match map.get("propagate") {
+        None | Some(VmValue::Nil) => Ok(crate::llm::helpers::ReminderPropagate::Session),
+        Some(VmValue::String(s)) => match s.as_ref() {
+            "all" => Ok(crate::llm::helpers::ReminderPropagate::All),
+            "session" => Ok(crate::llm::helpers::ReminderPropagate::Session),
+            "none" => Ok(crate::llm::helpers::ReminderPropagate::None),
+            other => Err(VmError::Runtime(format!(
+                "{builtin}: ReminderInject `propagate` must be 'all', 'session', or 'none', got '{other}'"
+            ))),
+        },
+        Some(other) => Err(VmError::Runtime(format!(
+            "{builtin}: ReminderInject `propagate` must be a string, got {}",
+            other.type_name()
+        ))),
+    }
+}
+
+fn parse_reminder_role_hint(
+    map: &BTreeMap<String, VmValue>,
+    builtin: &str,
+) -> Result<crate::llm::helpers::ReminderRoleHint, VmError> {
+    match map.get("role_hint") {
+        None | Some(VmValue::Nil) => Ok(crate::llm::helpers::ReminderRoleHint::System),
+        Some(VmValue::String(s)) => match s.as_ref() {
+            "system" => Ok(crate::llm::helpers::ReminderRoleHint::System),
+            "developer" => Ok(crate::llm::helpers::ReminderRoleHint::Developer),
+            "user_block" => Ok(crate::llm::helpers::ReminderRoleHint::UserBlock),
+            "ephemeral_cache" => Ok(crate::llm::helpers::ReminderRoleHint::EphemeralCache),
+            other => Err(VmError::Runtime(format!(
+                "{builtin}: ReminderInject `role_hint` must be 'system', 'developer', 'user_block', or 'ephemeral_cache', got '{other}'"
+            ))),
+        },
+        Some(other) => Err(VmError::Runtime(format!(
+            "{builtin}: ReminderInject `role_hint` must be a string, got {}",
+            other.type_name()
         ))),
     }
 }

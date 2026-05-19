@@ -79,6 +79,15 @@ pub(super) fn dispatch_success_outcome(
             Some("rejected") => "pool_rejected",
             _ => "pool_enqueued",
         },
+        // ReminderInject (#1876) — `injected` for a normal inject, `dropped`
+        // for a graceful no-op (target missing or unknown session). The
+        // dispatcher emits a `triggers.reminder_inject.audit` audit entry for
+        // both shapes, so observers don't need to re-derive the outcome from
+        // the result blob.
+        DispatchUri::ReminderInject { .. } => match result.get("status").and_then(|v| v.as_str()) {
+            Some("dropped") => "reminder_dropped",
+            _ => "reminder_injected",
+        },
     }
 }
 
@@ -246,6 +255,16 @@ pub(super) fn dispatch_node_metadata(
             metadata.insert("key_from".to_string(), serde_json::json!(path));
         }
     }
+    if let DispatchUri::ReminderInject {
+        target_kind,
+        target_session_id,
+    } = route
+    {
+        metadata.insert("target_kind".to_string(), serde_json::json!(target_kind));
+        if let Some(id) = target_session_id {
+            metadata.insert("target_session_id".to_string(), serde_json::json!(id));
+        }
+    }
     metadata
 }
 
@@ -302,6 +321,20 @@ pub(super) fn dispatch_success_metadata(
             }
             if let Some(priority) = result.get("priority").cloned() {
                 metadata.insert("priority".to_string(), priority);
+            }
+        }
+        DispatchUri::ReminderInject { .. } => {
+            for field in [
+                "status",
+                "target_session_id",
+                "target_kind",
+                "reminder_id",
+                "deduped_count",
+                "reason",
+            ] {
+                if let Some(value) = result.get(field).cloned() {
+                    metadata.insert(field.to_string(), value);
+                }
             }
         }
         DispatchUri::Local { .. } | DispatchUri::AutoResume { .. } => {}

@@ -164,6 +164,60 @@ pub enum TriggerHandlerSpec {
         key_from: Option<String>,
         task_factory: Rc<VmClosure>,
     },
+    /// Composes triggers (#1870) with the reminder pipeline (#1815) by
+    /// injecting a `SystemReminder` into a target agent session's transcript
+    /// when the trigger matches (CH-05 / #1876). The reminder appears at the
+    /// session's next turn boundary — same as any other reminder. No spawn,
+    /// no resume, no signal. `body` is a prompt-template string rendered
+    /// against `{event}` / `{batch.events}` per match. `target` resolution
+    /// happens at dispatch time via [`TargetExpr`]; missing-target dispatches
+    /// are recorded as audit events rather than crashing the trigger.
+    ReminderInject {
+        target: TargetExpr,
+        body: String,
+        tags: Vec<String>,
+        ttl_turns: Option<i64>,
+        dedupe_key: Option<String>,
+        propagate: crate::llm::helpers::ReminderPropagate,
+        role_hint: crate::llm::helpers::ReminderRoleHint,
+        preserve_on_compact: bool,
+    },
+}
+
+/// Resolution mode for the target session of a [`TriggerHandlerSpec::ReminderInject`]
+/// dispatch. `Current` walks the current-session thread-local; `Parent` resolves
+/// the active session's parent in the agent-session lineage; `Concrete` carries
+/// a literal session id from the registration; `Closure` defers resolution to
+/// a user closure that runs at dispatch time with the event payload bound to
+/// its first argument and must return the session id as a string.
+#[derive(Clone)]
+pub enum TargetExpr {
+    Current,
+    Parent,
+    Concrete(String),
+    Closure(Rc<VmClosure>),
+}
+
+impl TargetExpr {
+    pub fn kind(&self) -> &'static str {
+        match self {
+            Self::Current => "current",
+            Self::Parent => "parent",
+            Self::Concrete(_) => "concrete",
+            Self::Closure(_) => "closure",
+        }
+    }
+}
+
+impl std::fmt::Debug for TargetExpr {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Current => f.write_str("Current"),
+            Self::Parent => f.write_str("Parent"),
+            Self::Concrete(id) => f.debug_tuple("Concrete").field(id).finish(),
+            Self::Closure(_) => f.write_str("Closure(<vm_closure>)"),
+        }
+    }
 }
 
 impl std::fmt::Debug for TriggerHandlerSpec {
@@ -198,6 +252,26 @@ impl std::fmt::Debug for TriggerHandlerSpec {
                 .field("priority_from", priority_from)
                 .field("key_from", key_from)
                 .finish(),
+            Self::ReminderInject {
+                target,
+                body,
+                tags,
+                ttl_turns,
+                dedupe_key,
+                propagate,
+                role_hint,
+                preserve_on_compact,
+            } => f
+                .debug_struct("ReminderInject")
+                .field("target", target)
+                .field("body", body)
+                .field("tags", tags)
+                .field("ttl_turns", ttl_turns)
+                .field("dedupe_key", dedupe_key)
+                .field("propagate", propagate)
+                .field("role_hint", role_hint)
+                .field("preserve_on_compact", preserve_on_compact)
+                .finish(),
         }
     }
 }
@@ -211,6 +285,7 @@ impl TriggerHandlerSpec {
             Self::Persona { .. } => "persona",
             Self::AutoResume { .. } => "auto_resume",
             Self::SpawnToPool { .. } => "spawn_to_pool",
+            Self::ReminderInject { .. } => "reminder_inject",
         }
     }
 }

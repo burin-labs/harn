@@ -51,6 +51,29 @@ condensed series summaries instead of full per-patch history.
   session/cloud org/custom), the provider catalogue against ten
   preconfigured providers, and the OA-06 redaction patterns. Part of
   epic #1885 (OAuth stdlib).
+- **`ReminderInject` trigger handler variant (#1876).** Adds a new
+  `TriggerHandlerSpec::ReminderInject` variant + the matching
+  `ReminderInject({...})` constructor in `std/triggers`, completing the
+  CH-05 leg of epic #1870 (Agent channels & periodic prompts). Unlike
+  Local/Worker/SpawnToPool handlers, ReminderInject does not spawn a
+  task: when the trigger matches, the dispatcher resolves a target
+  session (`"current"`, `"parent"`, a literal session id, or a closure
+  `event -> string?`), renders a `.harn.prompt` body template against
+  `{{ event }}` / `{{ match }}` / `{{ batch }}`, builds a
+  `SystemReminder` (#1815) carrying the rendered body plus the
+  binding's `tags` / `ttl_turns` / `dedupe_key` / `propagate` /
+  `role_hint` / `preserve_on_compact` metadata, and injects it via
+  `agent_sessions::inject_reminder`. The reminder surfaces at the
+  target session's next turn boundary — same path as
+  `transcript.inject_reminder` — so existing dedupe, TTL, and
+  capability-aware rendering all apply. Missing target sessions are
+  recorded as `triggers.reminder_inject.audit` lifecycle audit entries
+  (outcome `dropped`, reason `target_missing` or
+  `target_unknown_session`) and the dispatch returns a `dropped`
+  result rather than failing the trigger. Combined with CH-04 batching
+  this enables declarative "every N events OR every T time" reminder
+  injection without user-side counter state. Conformance:
+  `conformance/tests/triggers/trigger_reminder_inject_{targets_concrete_session,only_targets_named_session,missing_target_drops_with_audit,closure_target}.harn`.
 - **Channel scope resolver completes the four-tier hierarchy (#1874).**
   Formalises the `session < pipeline < tenant < org` scope chain for
   `emit_channel(...)` and `channel_events(...)`, building on the producer
