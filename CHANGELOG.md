@@ -6,7 +6,7 @@ Pre-0.6 highlights live in [CHANGELOG-pre-0.6.md](CHANGELOG-pre-0.6.md).
 Harn had no external users before 0.6.0, so that archive intentionally keeps
 condensed series summaries instead of full per-patch history.
 
-## Unreleased
+## v0.8.27
 
 ### Added
 
@@ -519,24 +519,6 @@ condensed series summaries instead of full per-patch history.
   `pipeline_drain_ordering_enforcement` fixture now gates the real
   HARN-DRN-001 contract (xfail threshold drops from 1 to 0). Part of
   epic #1853 (declarative agent lifecycle).
-
-### Fixed
-
-- **`harness.system.platform()` mock arch leak.** The mock-mode
-  `platform()` snapshot in `vm/methods/harness.rs` was reading the host
-  CPU architecture via `std::env::consts::ARCH` instead of a fixed
-  placeholder, so the `harness/system_basic` conformance fixture passed
-  on the Apple Silicon dev machines that recorded it (`aarch64`) but
-  failed on the x86_64 Linux CI runners. Mock mode now returns a
-  deterministic `"arch": "mock"` matching the rest of the snapshot
-  (`os`, `kernel`, `hostname`, …), so the fixture is portable across
-  architectures. The real (non-mock) `platform_snapshot()` still
-  returns the live host arch.
-
-## v0.8.27
-
-### Added
-
 - **Tool-hook conformance suite (TH-07, #1900).** Adds nine focused
   `conformance/tests/stdlib/preset_hooks_*` fixtures that gap-fill the
   TH-* surface against the spec's named scenarios:
@@ -1293,6 +1275,19 @@ condensed series summaries instead of full per-patch history.
   budget gives reasoning binders room to emit structured JSON after their
   reasoning preamble; the timeout remains a bounded opt-in hop and still
   degrades to passthrough on overrun.
+
+### Fixed
+
+- **`harness.system.platform()` mock arch leak.** The mock-mode
+  `platform()` snapshot in `vm/methods/harness.rs` was reading the host
+  CPU architecture via `std::env::consts::ARCH` instead of a fixed
+  placeholder, so the `harness/system_basic` conformance fixture passed
+  on the Apple Silicon dev machines that recorded it (`aarch64`) but
+  failed on the x86_64 Linux CI runners. Mock mode now returns a
+  deterministic `"arch": "mock"` matching the rest of the snapshot
+  (`os`, `kernel`, `hostname`, …), so the fixture is portable across
+  architectures. The real (non-mock) `platform_snapshot()` still
+  returns the live host arch.
 
 ## v0.8.26
 
