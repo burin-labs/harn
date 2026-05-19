@@ -1,7 +1,8 @@
 /**
- * With non-empty unsettled state, `on_finish_drain` returns the typed
- * unsupported receipt from `spawn_settlement_agent`. P-03 (harn#1856)
- * replaces the receipt with a real settlement-agent disposition.
+ * With non-empty unsettled state, `on_finish_drain` invokes the
+ * settlement-agent loop (#1856 P-03), which drains each item with a
+ * default disposition, records a `drain_decision` audit per item, and
+ * returns a `completed` receipt once the snapshot is empty.
  *
  * Unsettled state is simulated here by issuing a `harness.handoff_to`
  * call inside the callback — that records a partial handoff envelope

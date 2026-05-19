@@ -1,0 +1,33 @@
+/**
+ * Settlement-agent drain loop (#1856 P-03) processes unsettled items
+ * in deterministic order. Within a single bucket it drains
+ * insertion-order (first-in-first-out) so replay is byte-stable. The
+ * fixture seeds three partial-handoff envelopes with distinct notes,
+ * then asserts the `drain_decision` audits cite the seeded items in
+ * the same order. This is the bucket-level half of the cross-bucket
+ * ordering contract that `pipeline_drain_ordering_enforcement.harn`
+ * pins for the HARN-DRN-001 error path.
+ *
+ * Tracking: harn#1856 (P-03), harn#1853 (epic).
+ */
+import { lifecycle_audit_log_take, on_finish_drain } from "std/lifecycle"
+
+pipeline default() {
+  pipeline_on_finish(
+    { harness, return_value ->
+      harness.handoff_to("nightly-drain", {note: "alpha"})
+      harness.handoff_to("nightly-drain", {note: "beta"})
+      harness.handoff_to("nightly-drain", {note: "gamma"})
+      let result = on_finish_drain(harness, return_value)
+      let audits = lifecycle_audit_log_take()
+      let drain_decisions = audits.filter({ entry -> entry.kind == "drain_decision" })
+      harness.stdio.println("status=" + result.status)
+      harness.stdio.println("count=" + to_string(len(drain_decisions)))
+      harness.stdio.println("first=" + drain_decisions[0].payload.item.summary.payload.note)
+      harness.stdio.println("second=" + drain_decisions[1].payload.item.summary.payload.note)
+      harness.stdio.println("third=" + drain_decisions[2].payload.item.summary.payload.note)
+      return result.return_value
+    },
+  )
+  return "ok"
+}

@@ -136,6 +136,13 @@ const WORKFLOW_SYNC_PRIMITIVES: &[SyncBuiltin] = &[
     .signature("pipeline_lifecycle_audit_log_snapshot()")
     .arity(VmBuiltinArity::Exact(0))
     .doc("Return every entry recorded via harness.emit_audit without clearing the log."),
+    SyncBuiltin::new(
+        "__host_settlement_agent_active",
+        settlement_agent_active_builtin,
+    )
+    .signature("__host_settlement_agent_active()")
+    .arity(VmBuiltinArity::Exact(0))
+    .doc("Return true while the settlement-agent drain loop (#1856) is running on this thread; false otherwise."),
     SyncBuiltin::new("notify_file_edited", notify_file_edited_builtin)
         .signature("notify_file_edited(path, metadata?)")
         .arity(VmBuiltinArity::Range { min: 1, max: 2 })

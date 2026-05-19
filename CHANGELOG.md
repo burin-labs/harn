@@ -56,6 +56,45 @@ condensed series summaries instead of full per-patch history.
   cross-pollute each other. The DAP debugger is the first consumer
   (issue #1868); other cross-session observers (the upcoming portal
   live view, audit ledger sinks) can drop in without further plumbing.
+- **Settlement-agent drain loop (P-03, #1856).** Lands the real
+  implementation behind `harness.spawn_settlement_agent` that
+  `on_finish_drain` (P-02) and the `PreDrain` / `PostDrain` / `OnDrainDecision`
+  hook seam (P-06) were already wired against. The loop is a bounded,
+  deterministic walk over the unsettled-state snapshot in the documented
+  order — suspended subagents → queued triggers → partial handoffs →
+  in-flight LLM calls → pool pending — applying a default disposition
+  per item (cancel suspended subagents, acknowledge stale triggers,
+  acknowledge partial handoffs as `deferred`, drain in-flight LLM calls,
+  defer pool tasks). Each disposition records a `drain_decision`
+  lifecycle audit and fires the `OnDrainDecision` hook chain (Allow /
+  Block / Modify), so VM-side hooks observe the disposition before it
+  persists. The loop terminates when the snapshot drains or when the
+  per-call budget (default 5, configurable via the third arg to
+  `spawn_settlement_agent`, hard-capped at 20) is exhausted; on
+  exhaustion a `drain_unsettled_remaining` audit captures the remainder.
+  HARN-DRN-001 ordering enforcement now ships alongside the loop:
+  `harness.acknowledge_trigger` and `harness.acknowledge_handoff` reject
+  out-of-order calls with the documented `HARN-DRN-001` reason so a
+  caller (or a future LLM-driven settlement variant) cannot finalize a
+  later category while earlier work is still pending. A new
+  `__host_settlement_agent_active()` builtin exposes the
+  constrained-surface flag so conformance fixtures and IDE hosts can
+  observe when the loop is in scope. Five new conformance fixtures pin
+  the contract: `pipeline_drain_settlement_audits` (per-item
+  `drain_decision` audits + terminal `pipeline_finalized`),
+  `pipeline_drain_settlement_ordering` (FIFO bucket processing),
+  `pipeline_drain_settlement_max_iterations` (budget enforcement + the
+  `drain_unsettled_remaining` audit), and
+  `pipeline_drain_settlement_constrained_surface` (active flag scoped
+  to the loop body). The previously-`@xfail`ed
+  `pipeline_drain_ordering_enforcement` fixture now gates the real
+  HARN-DRN-001 contract (xfail threshold drops from 1 to 0). Part of
+  epic #1853 (declarative agent lifecycle).
+
+## v0.8.27
+
+### Added
+
 - **Tool-hook conformance suite (TH-07, #1900).** Adds nine focused
   `conformance/tests/stdlib/preset_hooks_*` fixtures that gap-fill the
   TH-* surface against the spec's named scenarios:

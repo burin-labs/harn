@@ -1,0 +1,39 @@
+/**
+ * Settlement-agent drain loop (#1856 P-03) honors a configurable
+ * iteration budget. The default budget is 5; this fixture overrides it
+ * down to 1 via the third argument to `harness.spawn_settlement_agent`,
+ * seeds three partial-handoff envelopes, and verifies the loop exits
+ * with `status: "exhausted"` after a single iteration, recording a
+ * `drain_unsettled_remaining` audit that captures the un-dispositioned
+ * remainder.
+ *
+ * Tracking: harn#1856 (P-03), harn#1853 (epic).
+ */
+import { lifecycle_audit_log_take } from "std/lifecycle"
+
+pipeline default() {
+  pipeline_on_finish(
+    { harness, return_value ->
+      harness.handoff_to("nightly-drain", {note: "one"})
+      harness.handoff_to("nightly-drain", {note: "two"})
+      harness.handoff_to("nightly-drain", {note: "three"})
+      let snapshot = harness.unsettled_state()
+      let result = harness
+        .spawn_settlement_agent(snapshot, return_value, {drain_budget_iterations: 1})
+      let audits = lifecycle_audit_log_take()
+      harness.stdio.println("status=" + result.status)
+      harness.stdio.println("iterations=" + to_string(result.iterations))
+      harness.stdio.println("budget=" + to_string(result.budget))
+      harness.stdio.println("items_processed=" + to_string(result.items_processed))
+      let remaining = audits
+        .filter({ entry -> entry.kind == "drain_unsettled_remaining" })
+      harness.stdio.println("remaining_audits=" + to_string(len(remaining)))
+      harness.stdio
+        .println(
+        "remaining_partial=" + to_string(len(remaining[0].payload.remaining.partial_handoffs)),
+      )
+      return result.return_value
+    },
+  )
+  return "ok"
+}
