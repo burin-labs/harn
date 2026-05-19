@@ -264,6 +264,7 @@ fn build_run_detail_joins_tool_call_audit_onto_matching_activity() {
                 "call_id".to_string(),
                 serde_json::json!("call-with-audit"),
             )]),
+            ..Default::default()
         },
         harn_vm::orchestration::RunTraceSpanRecord {
             span_id: 2,
@@ -276,6 +277,7 @@ fn build_run_detail_joins_tool_call_audit_onto_matching_activity() {
                 "call_id".to_string(),
                 serde_json::json!("call-without-audit"),
             )]),
+            ..Default::default()
         },
     ];
 

@@ -13,7 +13,7 @@ mod sub_agent;
 pub(super) mod workflow;
 
 use std::cell::RefCell;
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, HashMap};
 use std::rc::Rc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
@@ -135,6 +135,85 @@ struct WorkerReplayCarry {
     resume_workflow: bool,
     child_run_path: Option<String>,
     reset_sub_agent_session: bool,
+}
+
+struct LifecycleSpanGuard {
+    span_id: u64,
+    otel_span: tracing::Span,
+}
+
+impl LifecycleSpanGuard {
+    fn start(
+        kind: crate::tracing::SpanKind,
+        name: String,
+        links: Vec<crate::tracing::SpanLink>,
+    ) -> Self {
+        Self::start_with_parenting(kind, name, links, true)
+    }
+
+    fn start_detached(
+        kind: crate::tracing::SpanKind,
+        name: String,
+        links: Vec<crate::tracing::SpanLink>,
+    ) -> Self {
+        Self::start_with_parenting(kind, name, links, false)
+    }
+
+    fn start_with_parenting(
+        kind: crate::tracing::SpanKind,
+        name: String,
+        links: Vec<crate::tracing::SpanLink>,
+        inherit_parent: bool,
+    ) -> Self {
+        let span_id = if inherit_parent {
+            crate::tracing::span_start_with_links(kind, name.clone(), links.clone())
+        } else {
+            crate::tracing::span_start_detached_with_links(kind, name.clone(), links.clone())
+        };
+        let otel_span = tracing::info_span!(
+            target: "harn.vm.lifecycle",
+            "harn.lifecycle",
+            harn.kind = kind.as_str(),
+            harn.name = %name,
+        );
+        for link in links {
+            let trace_id = crate::TraceId(link.trace_id);
+            let mut attributes: HashMap<String, String> = link.attributes.into_iter().collect();
+            attributes
+                .entry("harn.link.kind".to_string())
+                .or_insert_with(|| "causal".to_string());
+            let _ = crate::observability::otel::set_span_link(
+                &otel_span,
+                &trace_id,
+                &link.span_id,
+                Some(attributes),
+            );
+        }
+        Self { span_id, otel_span }
+    }
+
+    fn link(&self) -> Option<crate::tracing::SpanLink> {
+        crate::observability::otel::current_span_context_hex(&self.otel_span)
+            .map(|(trace_id, span_id)| crate::tracing::SpanLink::new(trace_id, span_id))
+            .or_else(|| crate::tracing::span_link(self.span_id))
+    }
+
+    fn set_metadata(&self, key: &str, value: serde_json::Value) {
+        crate::tracing::span_set_metadata(self.span_id, key, value);
+    }
+
+    fn end(&mut self) {
+        if self.span_id != 0 {
+            crate::tracing::span_end(self.span_id);
+            self.span_id = 0;
+        }
+    }
+}
+
+impl Drop for LifecycleSpanGuard {
+    fn drop(&mut self) {
+        self.end();
+    }
 }
 
 fn restart_worker_run(
@@ -557,6 +636,7 @@ async fn suspend_agent_builtin(args: Vec<VmValue>) -> Result<VmValue, VmError> {
         .cloned();
     let conditions = conditions_value.as_ref().map(crate::llm::vm_value_to_json);
 
+    let mut suspension_span: Option<LifecycleSpanGuard> = None;
     let (mut snapshot, mut summary, should_emit) = with_worker_state(&worker_id, |state| {
         let mut worker = state.borrow_mut();
         if worker.status == "suspended" {
@@ -575,6 +655,21 @@ async fn suspend_agent_builtin(args: Vec<VmValue>) -> Result<VmValue, VmError> {
                 ),
             ));
         }
+        let pipeline_span_link = crate::tracing::current_span_link();
+        let span = LifecycleSpanGuard::start(
+            crate::tracing::SpanKind::Suspension,
+            format!("suspend {}", worker.id),
+            Vec::new(),
+        );
+        span.set_metadata("worker_id", serde_json::json!(worker.id));
+        if let Some(pipeline_span_link) = &pipeline_span_link {
+            span.set_metadata(
+                "pipeline_span_id",
+                serde_json::json!(pipeline_span_link.span_id),
+            );
+        }
+        let prior_span_link = span.link();
+        suspension_span = Some(span);
         worker.suspend_signal.store(true, Ordering::SeqCst);
         worker.status = "suspended".to_string();
         worker.awaiting_started_at = None;
@@ -584,6 +679,8 @@ async fn suspend_agent_builtin(args: Vec<VmValue>) -> Result<VmValue, VmError> {
             initiator,
             suspended_at: uuid::Uuid::now_v7().to_string(),
             snapshot_ref: worker.snapshot_path.clone(),
+            prior_span_link,
+            pipeline_span_link,
             conditions: conditions.clone(),
             auto_resume_trigger: None,
         });
@@ -612,6 +709,9 @@ async fn suspend_agent_builtin(args: Vec<VmValue>) -> Result<VmValue, VmError> {
                 persist_worker_state_snapshot(&worker)?;
                 Ok((worker_event_snapshot(&worker), worker_summary(&worker)?))
             })?;
+        }
+        if let Some(span) = suspension_span.as_mut() {
+            span.end();
         }
         emit_worker_event(&snapshot, crate::agent_events::WorkerEvent::WorkerSuspended).await?;
     }
@@ -647,6 +747,20 @@ async fn top_level_agent_suspend_builtin(args: Vec<VmValue>) -> Result<VmValue, 
     let snapshot_path = worker_snapshot_path(&worker_id);
     let now = uuid::Uuid::now_v7().to_string();
     let name = "top-level-agent".to_string();
+    let pipeline_span_link = crate::tracing::current_span_link();
+    let mut suspension_span = LifecycleSpanGuard::start(
+        crate::tracing::SpanKind::Suspension,
+        format!("suspend {worker_id}"),
+        Vec::new(),
+    );
+    suspension_span.set_metadata("worker_id", serde_json::json!(worker_id));
+    if let Some(pipeline_span_link) = &pipeline_span_link {
+        suspension_span.set_metadata(
+            "pipeline_span_id",
+            serde_json::json!(pipeline_span_link.span_id),
+        );
+    }
+    let prior_span_link = suspension_span.link();
     let config = WorkerConfig::SubAgent {
         spec: Box::new(SubAgentRunSpec {
             name: name.clone(),
@@ -690,6 +804,8 @@ async fn top_level_agent_suspend_builtin(args: Vec<VmValue>) -> Result<VmValue, 
             initiator: SuspendInitiator::SelfInitiated,
             suspended_at: now,
             snapshot_ref: snapshot_path.clone(),
+            prior_span_link,
+            pipeline_span_link,
             conditions,
             auto_resume_trigger: None,
         }),
@@ -735,6 +851,7 @@ async fn top_level_agent_suspend_builtin(args: Vec<VmValue>) -> Result<VmValue, 
             Ok((worker_event_snapshot(&worker), worker_summary(&worker)?))
         })?;
     }
+    suspension_span.end();
     emit_worker_event(&snapshot, WorkerEvent::WorkerSuspended).await?;
     Ok(summary)
 }
@@ -982,6 +1099,40 @@ async fn warm_resume_worker(
     options: WorkerResumeOptions,
 ) -> Result<VmValue, VmError> {
     join_checkpointed_worker_handle(state.clone()).await?;
+    let (worker_id, span_links) = {
+        let worker = state.borrow();
+        if worker.status != "suspended" {
+            return Err(diagnostic_error(
+                Code::ConcurrentResumeConflict,
+                format!(
+                    "resume_agent: worker {} changed before resume could complete (status={})",
+                    worker.id, worker.status
+                ),
+            ));
+        }
+        let mut span_links = Vec::new();
+        if let Some(suspension) = &worker.suspension {
+            if let Some(link) = suspension.prior_span_link.clone() {
+                span_links.push(link.with_attributes(BTreeMap::from([(
+                    "harn.link.kind".to_string(),
+                    "suspension".to_string(),
+                )])));
+            }
+            if let Some(link) = suspension.pipeline_span_link.clone() {
+                span_links.push(link.with_attributes(BTreeMap::from([(
+                    "harn.link.kind".to_string(),
+                    "pipeline".to_string(),
+                )])));
+            }
+        }
+        (worker.id.clone(), span_links)
+    };
+    let mut resume_span = LifecycleSpanGuard::start_detached(
+        crate::tracing::SpanKind::Resume,
+        format!("resume {worker_id}"),
+        span_links,
+    );
+    resume_span.set_metadata("worker_id", serde_json::json!(worker_id));
     let (snapshot, suspension) = {
         let mut worker = state.borrow_mut();
         if worker.status != "suspended" {
@@ -1009,6 +1160,7 @@ async fn warm_resume_worker(
     };
     unregister_suspension_auto_resume(suspension).await?;
     emit_worker_event(&snapshot, crate::agent_events::WorkerEvent::WorkerResumed).await?;
+    resume_span.end();
     if crate::vm::clone_async_builtin_child_vm().is_some() {
         respawn_worker_task(state.clone())?;
     }
@@ -2063,6 +2215,105 @@ mod suspend_tests {
         assert_eq!(summary_status(&resumed), "running");
 
         teardown(&dir, &worker_id);
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn suspend_resume_links_lifecycle_spans_across_snapshot_reload() {
+        let _guard = suspend_test_lock().await;
+        crate::tracing::reset_tracing();
+        crate::tracing::set_tracing_enabled(true);
+        let (worker_id, dir) = seed_test_worker("worker-suspend-resume-trace-link");
+        let snapshot_path = WORKER_REGISTRY.with(|registry| {
+            registry
+                .borrow()
+                .get(&worker_id)
+                .unwrap()
+                .borrow()
+                .snapshot_path
+                .clone()
+        });
+
+        let pipeline_span_id =
+            crate::tracing::span_start(crate::tracing::SpanKind::Pipeline, "pipeline".to_string());
+        let pipeline_span_link =
+            crate::tracing::span_link(pipeline_span_id).expect("open pipeline span link");
+        suspend_agent_builtin(vec![
+            handle_value(&worker_id),
+            VmValue::String(Rc::from("checkpoint before restart")),
+        ])
+        .await
+        .expect("suspend");
+        crate::tracing::span_end(pipeline_span_id);
+
+        WORKER_REGISTRY.with(|registry| {
+            registry.borrow_mut().remove(&worker_id);
+        });
+        let reloaded =
+            agents_workers::load_worker_state_snapshot(&snapshot_path).expect("reload snapshot");
+        let suspension_record = reloaded.suspension.as_ref().expect("snapshot suspension");
+        let prior_span_link = suspension_record
+            .prior_span_link
+            .clone()
+            .expect("snapshot preserves prior span link");
+        let reloaded_pipeline_span_link = suspension_record
+            .pipeline_span_link
+            .clone()
+            .expect("snapshot preserves pipeline span link");
+        assert!(!prior_span_link.trace_id.is_empty());
+        assert!(!prior_span_link.span_id.is_empty());
+        assert_eq!(
+            reloaded_pipeline_span_link.trace_id,
+            pipeline_span_link.trace_id
+        );
+        assert_eq!(
+            reloaded_pipeline_span_link.span_id,
+            pipeline_span_link.span_id
+        );
+
+        WORKER_REGISTRY.with(|registry| {
+            registry
+                .borrow_mut()
+                .insert(worker_id.clone(), Rc::new(RefCell::new(reloaded)));
+        });
+        resume_agent_builtin(vec![handle_value(&worker_id)])
+            .await
+            .expect("resume after restart");
+
+        let spans = crate::tracing::peek_spans();
+        let suspension = spans
+            .iter()
+            .find(|span| span.kind == crate::tracing::SpanKind::Suspension)
+            .expect("suspension span");
+        let resume = spans
+            .iter()
+            .find(|span| span.kind == crate::tracing::SpanKind::Resume)
+            .expect("resume span");
+        assert_eq!(suspension.name, format!("suspend {worker_id}"));
+        assert_eq!(resume.name, format!("resume {worker_id}"));
+        assert_eq!(resume.parent_id, None);
+        assert_eq!(resume.links.len(), 2);
+        let suspension_link = resume
+            .links
+            .iter()
+            .find(|link| {
+                link.attributes.get("harn.link.kind").map(String::as_str) == Some("suspension")
+            })
+            .expect("resume links to suspension");
+        let pipeline_link = resume
+            .links
+            .iter()
+            .find(|link| {
+                link.attributes.get("harn.link.kind").map(String::as_str) == Some("pipeline")
+            })
+            .expect("resume links to pipeline");
+        assert_eq!(suspension_link.trace_id, prior_span_link.trace_id);
+        assert_eq!(suspension_link.span_id, prior_span_link.span_id);
+        assert_eq!(pipeline_link.trace_id, pipeline_span_link.trace_id);
+        assert_eq!(pipeline_link.span_id, pipeline_span_link.span_id);
+
+        teardown(&dir, &worker_id);
+        crate::tracing::set_tracing_enabled(false);
+        crate::tracing::reset_tracing();
     }
 
     #[tokio::test(flavor = "current_thread")]

@@ -1,6 +1,4 @@
-use std::collections::BTreeMap;
-#[cfg(feature = "otel")]
-use std::collections::HashMap;
+use std::collections::{BTreeMap, HashMap};
 use std::fs::{self, OpenOptions};
 use std::io::{self, Write};
 use std::path::PathBuf;
@@ -21,6 +19,8 @@ use crate::TraceId;
 pub const OTEL_PARENT_SPAN_ID_HEADER: &str = "otel_parent_span_id";
 pub const OTEL_TRACEPARENT_HEADER: &str = "traceparent";
 pub const OTEL_TRACESTATE_HEADER: &str = "tracestate";
+pub type SpanRef = tracing::Span;
+pub type SpanId = String;
 
 static OBSERVABILITY_INIT: std::sync::OnceLock<()> = std::sync::OnceLock::new();
 
@@ -385,6 +385,37 @@ pub fn set_span_parent(
 }
 
 #[cfg(feature = "otel")]
+pub fn set_span_link(
+    span: &SpanRef,
+    linked_trace_id: &TraceId,
+    linked_span_id: &SpanId,
+    attributes: Option<HashMap<String, String>>,
+) -> Result<(), String> {
+    use tracing_opentelemetry::OpenTelemetrySpanExt as _;
+
+    let attributes = attributes
+        .unwrap_or_default()
+        .into_iter()
+        .map(|(key, value)| opentelemetry::KeyValue::new(key, value))
+        .collect();
+    span.add_link_with_attributes(
+        span_context(linked_trace_id, Some(linked_span_id.as_str())),
+        attributes,
+    );
+    Ok(())
+}
+
+#[cfg(not(feature = "otel"))]
+pub fn set_span_link(
+    _span: &SpanRef,
+    _linked_trace_id: &TraceId,
+    _linked_span_id: &SpanId,
+    _attributes: Option<HashMap<String, String>>,
+) -> Result<(), String> {
+    Ok(())
+}
+
+#[cfg(feature = "otel")]
 pub fn current_span_id_hex(span: &tracing::Span) -> Option<String> {
     use opentelemetry::trace::TraceContextExt as _;
     use tracing_opentelemetry::OpenTelemetrySpanExt as _;
@@ -399,6 +430,27 @@ pub fn current_span_id_hex(span: &tracing::Span) -> Option<String> {
 
 #[cfg(not(feature = "otel"))]
 pub fn current_span_id_hex(_span: &tracing::Span) -> Option<String> {
+    None
+}
+
+#[cfg(feature = "otel")]
+pub fn current_span_context_hex(span: &tracing::Span) -> Option<(String, String)> {
+    use opentelemetry::trace::TraceContextExt as _;
+    use tracing_opentelemetry::OpenTelemetrySpanExt as _;
+
+    let context = span.context();
+    let binding = context.span();
+    let span_context = binding.span_context();
+    span_context.is_valid().then(|| {
+        (
+            span_context.trace_id().to_string(),
+            span_context.span_id().to_string(),
+        )
+    })
+}
+
+#[cfg(not(feature = "otel"))]
+pub fn current_span_context_hex(_span: &tracing::Span) -> Option<(String, String)> {
     None
 }
 
@@ -651,6 +703,40 @@ fn parse_headers(raw: &str) -> HashMap<String, String> {
 #[cfg(all(test, feature = "otel"))]
 mod tests {
     use super::*;
+    use opentelemetry::trace::TracerProvider as _;
+    use opentelemetry_sdk::error::OTelSdkResult;
+    use opentelemetry_sdk::trace::{SdkTracerProvider, SpanData, SpanExporter, Tracer};
+    use std::sync::{Arc, Mutex};
+
+    #[derive(Clone, Default, Debug)]
+    struct TestExporter(Arc<Mutex<Vec<SpanData>>>);
+
+    impl SpanExporter for TestExporter {
+        async fn export(&self, mut batch: Vec<SpanData>) -> OTelSdkResult {
+            let mut spans = self.0.lock().expect("test exporter lock");
+            spans.append(&mut batch);
+            Ok(())
+        }
+    }
+
+    fn test_tracer() -> (
+        Tracer,
+        SdkTracerProvider,
+        TestExporter,
+        impl tracing::Subscriber,
+    ) {
+        let exporter = TestExporter::default();
+        let provider = SdkTracerProvider::builder()
+            .with_simple_exporter(exporter.clone())
+            .build();
+        let tracer = provider.tracer("harn-test");
+        let subscriber = tracing_subscriber::registry().with(
+            tracing_opentelemetry::layer()
+                .with_tracer(tracer.clone())
+                .with_filter(LevelFilter::INFO),
+        );
+        (tracer, provider, exporter, subscriber)
+    }
 
     #[test]
     fn normalizes_trace_endpoint_suffix() {
@@ -709,5 +795,40 @@ mod tests {
         assert!(error.contains("forwarder"), "{error}");
         assert!(error.contains("batch"), "{error}");
         assert!(error.contains("simple"), "{error}");
+    }
+
+    #[test]
+    fn set_span_link_exports_link_without_parenting() {
+        let (_tracer, provider, exporter, subscriber) = test_tracer();
+        let linked_trace_id = TraceId("1234567890abcdef1234567890abcdef".to_string());
+        let linked_span_id: SpanId = "1234567890abcdef".to_string();
+
+        tracing::subscriber::with_default(subscriber, || {
+            let span = tracing::info_span!(target: "harn.vm.lifecycle", "resume");
+            set_span_link(
+                &span,
+                &linked_trace_id,
+                &linked_span_id,
+                Some(HashMap::from([(
+                    "harn.link.kind".to_string(),
+                    "suspension".to_string(),
+                )])),
+            )
+            .expect("set span link");
+            span.in_scope(|| {});
+        });
+
+        provider.force_flush().expect("flush spans");
+        drop(provider);
+        let spans = exporter.0.lock().expect("exported spans lock");
+        assert_eq!(spans.len(), 1);
+        let resume = &spans[0];
+        assert_eq!(resume.parent_span_id, opentelemetry::trace::SpanId::INVALID);
+        assert_eq!(resume.links.len(), 1);
+        let link = &resume.links[0];
+        assert_eq!(link.span_context.trace_id().to_string(), linked_trace_id.0);
+        assert_eq!(link.span_context.span_id().to_string(), linked_span_id);
+        assert_eq!(link.attributes.len(), 1);
+        assert_eq!(link.attributes[0].key.as_str(), "harn.link.kind");
     }
 }

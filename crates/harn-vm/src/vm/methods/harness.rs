@@ -128,10 +128,7 @@ impl crate::vm::Vm {
                 method,
                 "pipeline disposition persistence is not available on this branch",
             )),
-            "spawn_settlement_agent" => Ok(unsupported_harness_action(
-                method,
-                "settlement-agent spawning is deferred to the drain implementation (P-03, harn#1856)",
-            )),
+            "spawn_settlement_agent" => Ok(record_spawn_settlement_agent_gap(args)),
             _ => Err(method_unsupported(handle, method)),
         }
     }
@@ -403,12 +400,77 @@ fn record_emit_audit(args: &[VmValue]) -> VmValue {
         .get(1)
         .map(crate::llm::vm_value_to_json)
         .unwrap_or(serde_json::Value::Null);
+    if kind == "drain_decision" {
+        record_drain_decision_span(&payload);
+    }
     let entry = crate::orchestration::record_lifecycle_audit(kind, payload);
     crate::stdlib::json_to_vm_value(&serde_json::json!({
         "status": "recorded",
         "method": "emit_audit",
         "entry": entry.to_json(),
     }))
+}
+
+fn record_spawn_settlement_agent_gap(args: &[VmValue]) -> VmValue {
+    let unsettled = args
+        .first()
+        .map(crate::llm::vm_value_to_json)
+        .unwrap_or(serde_json::Value::Null);
+    let links = crate::tracing::current_span_link()
+        .map(|link| {
+            link.with_attributes(std::collections::BTreeMap::from([(
+                "harn.link.kind".to_string(),
+                "pipeline".to_string(),
+            )]))
+        })
+        .into_iter()
+        .collect();
+    let span_id = crate::tracing::span_start_detached_with_links(
+        crate::tracing::SpanKind::Drain,
+        "settlement_agent".to_string(),
+        links,
+    );
+    if span_id != 0 {
+        if let Ok(counts) = state_counts(&crate::stdlib::json_to_vm_value(&unsettled)) {
+            crate::tracing::span_set_metadata(span_id, "counts", counts.to_json());
+        }
+        crate::tracing::span_set_metadata(span_id, "status", serde_json::json!("unsupported"));
+        crate::tracing::span_end(span_id);
+    }
+    unsupported_harness_action(
+        "spawn_settlement_agent",
+        "settlement-agent spawning is deferred to the drain implementation (P-03, harn#1856)",
+    )
+}
+
+fn record_drain_decision_span(payload: &serde_json::Value) {
+    let links = crate::tracing::current_span_link()
+        .map(|link| {
+            link.with_attributes(std::collections::BTreeMap::from([(
+                "harn.link.kind".to_string(),
+                "drain".to_string(),
+            )]))
+        })
+        .into_iter()
+        .collect();
+    let span_id = crate::tracing::span_start_detached_with_links(
+        crate::tracing::SpanKind::DrainDecision,
+        payload
+            .get("action")
+            .and_then(|value| value.as_str())
+            .unwrap_or("drain_decision")
+            .to_string(),
+        links,
+    );
+    if span_id != 0 {
+        if let Some(action) = payload.get("action").and_then(|value| value.as_str()) {
+            crate::tracing::span_set_metadata(span_id, "action", serde_json::json!(action));
+        }
+        if let Some(item) = payload.pointer("/item/id").and_then(|value| value.as_str()) {
+            crate::tracing::span_set_metadata(span_id, "item_id", serde_json::json!(item));
+        }
+        crate::tracing::span_end(span_id);
+    }
 }
 
 fn record_handoff_envelope(args: &[VmValue]) -> VmValue {

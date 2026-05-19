@@ -138,6 +138,10 @@ pub(crate) struct WorkerSuspension {
     pub(crate) suspended_at: String,
     pub(crate) snapshot_ref: String,
     #[serde(skip_serializing_if = "Option::is_none")]
+    pub(crate) prior_span_link: Option<crate::tracing::SpanLink>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub(crate) pipeline_span_link: Option<crate::tracing::SpanLink>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub(crate) conditions: Option<serde_json::Value>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub(crate) auto_resume_trigger: Option<crate::stdlib::triggers_stdlib::AutoResumeTriggerHandle>,
