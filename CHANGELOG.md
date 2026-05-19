@@ -33,11 +33,6 @@ condensed series summaries instead of full per-patch history.
   handling backed by the event log. A `channel_events(...)` inspection helper
   covers conformance and local diagnostics; org-scoped channels resolve but
   return `HARN-CHN-002` until org grants land.
-
-## v0.8.26
-
-### Added
-
 - **Lifecycle span links for suspend/resume and drain scaffolding (#1858).**
   VM tracing now has `suspension`, `resume`, `drain`, and
   `drain_decision` span kinds plus causal span links. Worker suspension
@@ -46,6 +41,11 @@ condensed series summaries instead of full per-patch history.
   instead of parenting across process boundaries. The OTel helper layer
   now exposes `set_span_link` beside `set_span_parent`, with no-op
   behavior in non-OTel builds.
+
+## v0.8.26
+
+### Added
+
 - **Sub-agent reminder propagation via handoff envelopes (#1824).**
   Handoff artifacts and sub-agent requests now carry
   `reminder_propagation` beside `policy_override`; `handoff(...)` derives
