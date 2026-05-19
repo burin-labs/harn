@@ -1,0 +1,12 @@
+fn main(harness: Harness) {
+  let cpu = harness.system.cpu()
+  let mem = harness.system.memory()
+  let plat = harness.system.platform()
+  harness.stdio.println(type_of(cpu))
+  harness.stdio.println(cpu["count"])
+  harness.stdio.println(cpu["model"])
+  harness.stdio.println(mem["total_bytes"])
+  harness.stdio.println(mem["pressure"])
+  harness.stdio.println(plat["os"])
+  harness.stdio.println(plat["arch"])
+}

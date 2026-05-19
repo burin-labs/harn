@@ -1,0 +1,16 @@
+{
+  "mode": "mock",
+  "expect_calls": [
+    {"sub_handle": "system", "method": "cpu", "args": []},
+    {"sub_handle": "system", "method": "memory", "args": []},
+    {"sub_handle": "system", "method": "platform", "args": []},
+    {"sub_handle": "stdio", "method": "println", "args": ["dict"]},
+    {"sub_handle": "stdio", "method": "println", "args": ["1"]},
+    {"sub_handle": "stdio", "method": "println", "args": ["mock-cpu"]},
+    {"sub_handle": "stdio", "method": "println", "args": ["0"]},
+    {"sub_handle": "stdio", "method": "println", "args": ["unknown"]},
+    {"sub_handle": "stdio", "method": "println", "args": ["mock"]},
+    {"sub_handle": "stdio", "method": "println", "args": ["aarch64"]}
+  ],
+  "expect_stdio": "dict\n1\nmock-cpu\n0\nunknown\nmock\naarch64\n"
+}

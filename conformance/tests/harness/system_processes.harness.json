@@ -1,0 +1,12 @@
+{
+  "mode": "mock",
+  "expect_calls": [
+    {"sub_handle": "system", "method": "processes", "args": []},
+    {"sub_handle": "stdio", "method": "println", "args": ["list"]},
+    {"sub_handle": "stdio", "method": "println", "args": ["true"]},
+    {"sub_handle": "stdio", "method": "println", "args": ["true"]},
+    {"sub_handle": "stdio", "method": "println", "args": ["true"]},
+    {"sub_handle": "stdio", "method": "println", "args": ["harn"]}
+  ],
+  "expect_stdio": "list\ntrue\ntrue\ntrue\nharn\n"
+}

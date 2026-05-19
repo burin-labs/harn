@@ -43,6 +43,43 @@ condensed series summaries instead of full per-patch history.
   `SpawnToPoolHandler` shapes) plus the `HARN-POL-*` block in the
   diagnostic appendix. Wires the new pages into `docs/src/SUMMARY.md`
   under Orchestration next to Agent channels.
+- **`harness.system.*` host introspection (E4.8, #1912).** Adds a seventh
+  capability slice under the `Harness` handle that lets scripts read
+  cross-platform host metadata without ambient OS access. New methods on
+  `harness.system`: `cpu()` returns `{count, physical_count, model,
+  frequency_mhz, usage_pct}`; `memory()` returns
+  `{total_bytes, used_bytes, available_bytes, total_gb, used_gb,
+  available_gb, pressure}` with `pressure` bucketed to
+  `low|medium|high|unknown`; `gpus()` returns a (currently empty) list
+  so scripts can write `if !gpus.is_empty()` portably while richer
+  NVML / Metal / OpenCL detection lands as a follow-up; `temperature()`
+  returns `{components: [{label, celsius, max_celsius,
+  critical_celsius}, ...]}` with an empty list on hosts whose `sysinfo`
+  backend doesn't expose thermal sensors (notably Apple Silicon and
+  most containers); `platform()` returns `{os, arch, version, kernel,
+  long_os_version, hostname}`; `processes()` returns a list of
+  `{pid, name, ...}` entries with the current Harn process always
+  included and tagged `is_self: true` / `is_harn_owned: true`, plus
+  `parent_pid`, `cpu_pct`, `mem_bytes` on harn-owned entries. Peer
+  processes appear as bare `{pid, name, is_harn_owned: false}` entries
+  — we deliberately do **not** leak `command_line`, `environ`, or
+  `cwd` for other processes to avoid exfiltrating credentials and
+  prompts from peer agents. New `harness_system::register_harn_owned_pid`
+  / `unregister_harn_owned_pid` helpers let subprocess spawners tag
+  detached children so they keep their harn-owned status even after
+  the parent->child link is broken. The surface is gated by the harness
+  handle just like the other sub-handles: `Harness::null()` denies
+  every call and records a `DenyEvent`; `Harness::mock()` returns
+  deterministic synthetic snapshots so conformance fixtures can
+  exercise the shape without observing the real host. Wires
+  `HarnessKind::System` into the typechecker (`harness.system` maps to
+  `HarnessSystem`), the effect-policy analyzer (system reads produce
+  no `EffectRecord` since they're pure host reads gated by the
+  capability handle), the property-access error message, and the
+  null-deny test fixture. New backing crate dependency: `sysinfo`
+  (default-features-off). Conformance: `harness/system_basic`,
+  `harness/system_gpus_temperature`, `harness/system_processes`, and
+  `harness/null_system_denies`.
 - **Suspend/resume protocol contribution RFCs (S-12, #1848).** Authors
   two new upstream-proposal documents under
   `docs/src/protocol-contributions/`: ACP `session/suspend` +

@@ -203,7 +203,7 @@ impl super::super::Vm {
                 None => {
                     return Err(VmError::TypeError(format!(
                         "cannot access property `{name}` on {} — Harness exposes `stdio`, \
-                         `clock`, `fs`, `env`, `random`, `net`",
+                         `clock`, `fs`, `env`, `random`, `net`, `system`",
                         handle.type_name(),
                     )));
                 }

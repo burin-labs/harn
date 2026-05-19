@@ -422,6 +422,13 @@ fn harness_method_effect(node: &SNode) -> Option<EffectRecord> {
         ("fs", "delete_file" | "delete" | "remove") => (EffectKind::Fs, EffectScope::Mutate),
         ("fs", _) => (EffectKind::Fs, EffectScope::Read),
         ("net", _) => (EffectKind::Net, EffectScope::Write),
+        // System-introspection methods (`cpu`, `memory`, `gpus`,
+        // `temperature`, `platform`, `processes`) are pure host reads
+        // — no state mutation, no resource consumed. They're gated by
+        // the harness capability handle itself, so deny-by-default
+        // policies still block them, but they don't produce a typed
+        // effect record for child grant enforcement.
+        ("system", _) => return None,
         _ => return None,
     };
     Some(EffectRecord::new(kind, scope))
