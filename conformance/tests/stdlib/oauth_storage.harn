@@ -1,0 +1,186 @@
+import {
+  custom,
+  file,
+  harn_cloud_org,
+  harn_cloud_session,
+  memory,
+  storage,
+} from "std/oauth/storage"
+
+fn require_token(label, value, expected_access) {
+  if value == nil {
+    throw label + ": expected TokenSet, got nil"
+  }
+  let access = value?.access_token ?? ""
+  if access != expected_access {
+    throw label + ": expected access_token=" + expected_access + ", got " + access
+  }
+}
+
+fn require_nil(label, value) {
+  if value != nil {
+    throw label + ": expected nil, got " + to_string(value)
+  }
+}
+
+fn exercise_backend(label, store, expect_kind) {
+  if store.kind != expect_kind {
+    throw label + ": expected kind=" + expect_kind + ", got " + store.kind
+  }
+  let primary = {access_token: "tok-primary", refresh_token: "rfr-primary", expires_at_unix: 100}
+  let secondary = {access_token: "tok-secondary"}
+  store.set("primary", primary, 3600)
+  store.set("secondary", secondary)
+  require_token(label + ".get(primary)", store.get("primary"), "tok-primary")
+  require_token(label + ".get(secondary)", store.get("secondary"), "tok-secondary")
+  // Refresh: overwrite the entry and confirm the new value is returned.
+  store.set("primary", {access_token: "tok-primary-v2", refresh_token: "rfr-primary-v2"}, 7200)
+  require_token(label + ".get(primary refreshed)", store.get("primary"), "tok-primary-v2")
+  store.delete("primary")
+  require_nil(label + ".get(primary after delete)", store.get("primary"))
+  store.delete("secondary")
+  require_nil(label + ".get(secondary after delete)", store.get("secondary"))
+  require_nil(label + ".get(missing)", store.get("never-stored"))
+}
+
+fn exercise_memory() {
+  exercise_backend("memory", memory(), "memory")
+  // Independent memory handles do not share state.
+  let a = memory()
+  let b = memory()
+  a.set("shared-key", {access_token: "from-a"}, 60)
+  require_nil("memory.isolation", b.get("shared-key"))
+}
+
+fn exercise_file() {
+  let path = path_join(temp_dir(), "harn-oauth-storage-" + uuid() + ".bin")
+  let key = "high-entropy-test-key-must-be-long-enough"
+  let s = file(path, key)
+  exercise_backend("file", s, "file")
+  // After exercise_backend deletes both keys the file should be gone.
+  if file_exists(path) {
+    throw "file: expected file to be removed once empty"
+  }
+  // Persistence + at-rest encryption: re-open with the same key.
+  let s2 = file(path, key)
+  s2.set("github", {access_token: "persistent"}, 600)
+  let raw = read_file(path)
+  if contains(raw, "persistent") {
+    throw "file: plaintext token leaked into ciphertext on disk"
+  }
+  let envelope = json_parse(raw)
+  if envelope.version != 1 {
+    throw "file: envelope version should be 1, got " + to_string(envelope.version)
+  }
+  let s3 = file(path, key)
+  require_token("file.persistence", s3.get("github"), "persistent")
+  // Wrong key fails fast.
+  let bad = file(path, "wrong-key")
+  var saw_error = false
+  try {
+    let _ = bad.get("github")
+  } catch (err) {
+    saw_error = true
+  }
+  if !saw_error {
+    throw "file: decryption with wrong key should fail"
+  }
+  s3.delete("github")
+}
+
+fn exercise_custom() {
+  // Delegate to an in-process memory backend so the user-supplied
+  // closures exercise real state without relying on closure capture
+  // semantics. The contract is what matters here: get/set/delete are
+  // dispatched to the closures the caller registered.
+  let inner = memory()
+  let s = custom(
+    {
+      get: { key -> inner.get(key) },
+      set: { key, tok, ttl = nil -> inner.set(key, tok, ttl) },
+      delete: { key -> inner.delete(key) },
+      id: "test-vault",
+    },
+  )
+  if s.id != "test-vault" {
+    throw "custom: expected id=test-vault, got " + s.id
+  }
+  exercise_backend("custom", s, "custom")
+}
+
+fn exercise_cloud(scope, factory, expect_kind) {
+  host_mock_clear()
+  host_mock("oauth_storage", "cloud_set", {result: nil})
+  host_mock("oauth_storage", "cloud_delete", {result: nil})
+  host_mock(
+    "oauth_storage",
+    "cloud_get",
+    {result: {access_token: "cloud-tok", refresh_token: "cloud-rfr", scopes: ["repo"]}},
+  )
+  let s = factory()
+  if s.scope != scope {
+    throw "cloud[" + scope + "]: expected scope field, got " + to_string(s.scope)
+  }
+  if s.kind != expect_kind {
+    throw "cloud[" + scope + "]: expected kind=" + expect_kind + ", got " + s.kind
+  }
+  s.set("github", {access_token: "tok"}, 3600)
+  require_token("cloud[" + scope + "].get", s.get("github"), "cloud-tok")
+  s.delete("github")
+  let calls = host_mock_calls()
+  if len(calls) != 3 {
+    throw "cloud[" + scope + "]: expected 3 host calls, got " + to_string(len(calls))
+  }
+  if calls[0].operation != "cloud_set" {
+    throw "cloud[" + scope + "]: first call should be cloud_set, got " + calls[0].operation
+  }
+  if calls[0].params.scope != scope {
+    throw "cloud[" + scope + "]: cloud_set carried scope=" + to_string(calls[0].params.scope)
+  }
+  if calls[1].operation != "cloud_get" || calls[1].params.scope != scope {
+    throw "cloud[" + scope + "]: cloud_get call shape mismatch"
+  }
+  if calls[2].operation != "cloud_delete" || calls[2].params.scope != scope {
+    throw "cloud[" + scope + "]: cloud_delete call shape mismatch"
+  }
+  host_mock_clear()
+}
+
+fn exercise_namespace() {
+  let ns = storage()
+  if ns.memory.kind != "memory" {
+    throw "storage(): expected memory handle on namespace"
+  }
+  if ns.harn_cloud_session.kind != "harn_cloud_session" {
+    throw "storage(): expected harn_cloud_session handle on namespace"
+  }
+  if ns.harn_cloud_org.kind != "harn_cloud_org" {
+    throw "storage(): expected harn_cloud_org handle on namespace"
+  }
+  let path = path_join(temp_dir(), "harn-oauth-storage-ns-" + uuid() + ".bin")
+  let s = ns.file(path, "ns-key")
+  s.set("ns", {access_token: "ns-tok"}, 60)
+  require_token("namespace.file", s.get("ns"), "ns-tok")
+  s.delete("ns")
+  let inner = memory()
+  let cs = ns
+    .custom(
+    {
+      get: { key -> inner.get(key) },
+      set: { key, tok, ttl = nil -> inner.set(key, tok, ttl) },
+      delete: { key -> inner.delete(key) },
+    },
+  )
+  cs.set("ns", {access_token: "ns-custom"}, 60)
+  require_token("namespace.custom", cs.get("ns"), "ns-custom")
+}
+
+pipeline test(task) {
+  exercise_memory()
+  exercise_file()
+  exercise_custom()
+  exercise_cloud("session", harn_cloud_session, "harn_cloud_session")
+  exercise_cloud("org", harn_cloud_org, "harn_cloud_org")
+  exercise_namespace()
+  log("oauth storage ok")
+}

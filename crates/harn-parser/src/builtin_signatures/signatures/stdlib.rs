@@ -187,6 +187,40 @@ pub(crate) const SIGNATURES: &[BuiltinSignature] = &[
         TY_ANY,
     ),
     BuiltinSignature::simple(
+        "__oauth_storage_cloud_handle",
+        &[Param::new("scope", TY_STRING)],
+        TY_DICT,
+    ),
+    BuiltinSignature::simple(
+        "__oauth_storage_delete",
+        &[Param::new("handle", TY_DICT), Param::new("key", TY_STRING)],
+        TY_NIL,
+    ),
+    BuiltinSignature::simple(
+        "__oauth_storage_file_handle",
+        &[
+            Param::new("path", TY_STRING),
+            Param::new("encryption_key", Ty::Union(&[TY_STRING, TY_BYTES])),
+        ],
+        TY_DICT,
+    ),
+    BuiltinSignature::simple(
+        "__oauth_storage_get",
+        &[Param::new("handle", TY_DICT), Param::new("key", TY_STRING)],
+        TY_DICT_OR_NIL,
+    ),
+    BuiltinSignature::simple("__oauth_storage_memory_handle", &[], TY_DICT),
+    BuiltinSignature::simple(
+        "__oauth_storage_set",
+        &[
+            Param::new("handle", TY_DICT),
+            Param::new("key", TY_STRING),
+            Param::new("token_set", TY_DICT),
+            Param::optional("ttl_seconds", Ty::Union(&[TY_INT, TY_DURATION, TY_NIL])),
+        ],
+        TY_NIL,
+    ),
+    BuiltinSignature::simple(
         "__ansi_enabled",
         &[Param::optional("stream", TY_STRING)],
         TY_BOOL,

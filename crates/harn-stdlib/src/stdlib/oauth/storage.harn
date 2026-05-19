@@ -1,0 +1,175 @@
+/**
+ * std/oauth/storage — token storage backends for the OAuth client.
+ *
+ * Each backend factory returns a `Storage` record whose `get / set /
+ * delete` closures speak the same protocol regardless of backend:
+ *
+ *     storage.get(key) -> TokenSet | nil
+ *     storage.set(key, token_set, ttl_seconds = nil) -> nil
+ *     storage.delete(key) -> nil
+ *
+ * The OAuth client and end users call those three closures; this
+ * module is responsible for dispatching them to the right backend.
+ *
+ * Backends:
+ *   - memory()                              ephemeral, per-session
+ *   - file(path, encryption_key)            local disk, AES-256-GCM
+ *   - harn_cloud_session()                  cloud-managed, per-session
+ *   - harn_cloud_org()                      cloud-managed, org-scoped
+ *   - custom({get, set, delete})            user-supplied (vault, KMS)
+ *
+ * `storage()` returns the namespace dict matching the `OAuth.Storage.*`
+ * shape from the OAuth epic: `memory` / `harn_cloud_*` as ready
+ * handles, `file` / `custom` as factory closures.
+ */
+type TokenSet = {
+  access_token: string,
+  refresh_token?: string,
+  expires_at_unix?: int,
+  token_type?: string,
+  scopes?: list<string>,
+  metadata?: dict,
+}
+
+/**
+ * Storage is the handle dict returned by each backend factory. It
+ * carries `kind` plus three closures (`get`, `set`, `delete`) and any
+ * backend-specific fields. Callers should treat the rest as opaque.
+ */
+type Storage = dict
+
+fn __wrap_host_handle(inner) {
+  return inner
+    + {
+    _namespace: "oauth_storage",
+    get: { key -> __oauth_storage_get(inner, key) },
+    set: { key, token_set, ttl_seconds = nil -> __oauth_storage_set(inner, key, token_set, ttl_seconds) },
+    delete: { key -> __oauth_storage_delete(inner, key) },
+  }
+}
+
+/**
+ * memory returns an ephemeral storage handle backed by an in-process
+ * BTreeMap. Tokens stored here are lost when the VM exits.
+ *
+ * @effects: []
+ * @allocation: heap
+ * @errors: []
+ * @api_stability: experimental
+ * @example: memory()
+ */
+pub fn memory() -> Storage {
+  return __wrap_host_handle(__oauth_storage_memory_handle())
+}
+
+/**
+ * file returns a storage handle that persists tokens to `path`,
+ * encrypted with AES-256-GCM. The `encryption_key` may be any
+ * high-entropy bytes/string — the runtime derives a 32-byte key via
+ * HKDF-SHA256. Pass a value from a key-management system or
+ * `crypto.random_bytes(32)` rather than a user passphrase.
+ *
+ * @effects: [file_io]
+ * @allocation: heap
+ * @errors: [invalid_argument]
+ * @api_stability: experimental
+ * @example: file("/var/lib/harn/tokens.bin", env("HARN_OAUTH_KEY"))
+ */
+pub fn file(path, encryption_key) -> Storage {
+  if type_of(path) != "string" || path == "" {
+    throw "std/oauth/storage: file path must be a non-empty string"
+  }
+  return __wrap_host_handle(__oauth_storage_file_handle(path, encryption_key))
+}
+
+/**
+ * harn_cloud_session returns a handle routing through the cloud
+ * `oauth_storage.cloud_*` host capability with `scope = "session"`.
+ * The embedder (e.g. harn-cloud) is responsible for tenant-scoped
+ * storage and per-session isolation.
+ *
+ * @effects: [host_call]
+ * @allocation: heap
+ * @errors: []
+ * @api_stability: experimental
+ * @example: harn_cloud_session()
+ */
+pub fn harn_cloud_session() -> Storage {
+  return __wrap_host_handle(__oauth_storage_cloud_handle("session"))
+}
+
+/**
+ * harn_cloud_org returns a handle routing through the cloud
+ * `oauth_storage.cloud_*` host capability with `scope = "org"`. The
+ * embedder (e.g. harn-cloud) is responsible for org-scoped storage so
+ * multiple agents in the same org share the same authenticated
+ * client.
+ *
+ * @effects: [host_call]
+ * @allocation: heap
+ * @errors: []
+ * @api_stability: experimental
+ * @example: harn_cloud_org()
+ */
+pub fn harn_cloud_org() -> Storage {
+  return __wrap_host_handle(__oauth_storage_cloud_handle("org"))
+}
+
+/**
+ * custom returns a handle that dispatches `get / set / delete` to
+ * caller-supplied closures. Use this to integrate vaults, KMS, or
+ * platform-native secret stores. `handlers` is a dict containing:
+ *   - get:    fn(key) -> TokenSet|nil
+ *   - set:    fn(key, token_set, ttl_seconds|nil) -> nil
+ *   - delete: fn(key) -> nil
+ * The returned handle carries an optional `id` field (defaults to
+ * `"custom"`) so multiple custom backends are distinguishable in
+ * diagnostics.
+ *
+ * @effects: []
+ * @allocation: heap
+ * @errors: [invalid_argument]
+ * @api_stability: experimental
+ * @example: custom({get: my_get, set: my_set, delete: my_delete})
+ */
+pub fn custom(handlers) -> Storage {
+  if type_of(handlers) != "dict" {
+    throw "std/oauth/storage: custom handlers must be a dict"
+  }
+  let get_fn = handlers?.get
+  let set_fn = handlers?.set
+  let delete_fn = handlers?.delete
+  if type_of(get_fn) != "closure" && type_of(get_fn) != "builtin" {
+    throw "std/oauth/storage: custom.get must be a function"
+  }
+  if type_of(set_fn) != "closure" && type_of(set_fn) != "builtin" {
+    throw "std/oauth/storage: custom.set must be a function"
+  }
+  if type_of(delete_fn) != "closure" && type_of(delete_fn) != "builtin" {
+    throw "std/oauth/storage: custom.delete must be a function"
+  }
+  let id = trim(to_string(handlers?.id ?? "custom"))
+  return {_namespace: "oauth_storage", kind: "custom", id: id, get: get_fn, set: set_fn, delete: delete_fn}
+}
+
+/**
+ * storage returns the `OAuth.Storage.*` namespace dict matching the
+ * epic API surface. `memory` / `harn_cloud_session` /
+ * `harn_cloud_org` fields hold ready-to-use handles; `file` and
+ * `custom` are factory closures.
+ *
+ * @effects: [host_call]
+ * @allocation: heap
+ * @errors: []
+ * @api_stability: experimental
+ * @example: storage().file("/var/lib/harn/tokens.bin", key)
+ */
+pub fn storage() {
+  return {
+    memory: memory(),
+    file: { path, encryption_key -> file(path, encryption_key) },
+    harn_cloud_session: harn_cloud_session(),
+    harn_cloud_org: harn_cloud_org(),
+    custom: { handlers -> custom(handlers) },
+  }
+}
