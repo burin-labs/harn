@@ -823,6 +823,87 @@ async fn pool_submit_builtin(args: Vec<VmValue>) -> Result<VmValue, VmError> {
         parse_submit_key(&opts, &pool.queue_strategy)?
     };
 
+    let state = submit_to_pool_entry(&entry, closure, key, priority).await?;
+    let handle = task_handle_value(&state.borrow());
+    Ok(handle)
+}
+
+/// Resolve a registered pool by name (or id) without producing a snapshot.
+/// Returns `None` when no pool matches. Used by the trigger dispatcher's
+/// SpawnToPool handler (#1889) so it can route inbound events into named
+/// pools without going through the Harn-level builtin surface.
+fn lookup_pool_by_name_or_id(name_or_id: &str) -> Option<Rc<RefCell<PoolEntry>>> {
+    let id = POOL_NAMES
+        .with(|names| names.borrow().get(name_or_id).cloned())
+        .or_else(|| {
+            POOLS.with(|pools| {
+                pools
+                    .borrow()
+                    .contains_key(name_or_id)
+                    .then(|| name_or_id.to_string())
+            })
+        })?;
+    POOLS.with(|pools| pools.borrow().get(&id).cloned())
+}
+
+/// Public submission outcome returned by [`submit_closure_to_named_pool`].
+/// The dispatcher inspects this to distinguish accepted-and-running tasks
+/// from accepted-but-dropped (drop_newest) tasks so it can emit the right
+/// audit and dispatch outcome.
+pub struct PoolSubmitOutcome {
+    /// Stable pool id (e.g. `pool_018f...`). Pair with `task_id` to build a
+    /// `pool_wait` handle on the Harn side.
+    pub pool_id: String,
+    /// Human-friendly pool name (i.e. the registration argument).
+    pub pool_name: String,
+    /// Assigned task id; also stable across the lifetime of the pool.
+    pub task_id: String,
+    /// Status the task is in once `submit_closure_to_named_pool` returns:
+    /// `"queued"`, `"running"`, or `"rejected"` (for the `drop_newest` case
+    /// when the newly-submitted task is the one that gets evicted).
+    pub status: &'static str,
+    /// Set when `status == "rejected"` so the dispatcher can surface the
+    /// pool's policy-driven drop reason in audit + action graph metadata.
+    pub rejection_reason: Option<String>,
+}
+
+/// Submit a closure to a named pool from a non-Harn caller (e.g. the trigger
+/// dispatcher). Honors the pool's queue strategy + backpressure policy in the
+/// same way as `pool.submit` from Harn code. Returns an error when the pool
+/// does not exist or the policy fails the submitter (fail_fast /
+/// fail_submitter); awaits when the policy blocks the submitter.
+pub async fn submit_closure_to_named_pool(
+    pool_name: &str,
+    closure: Rc<VmClosure>,
+    priority: i64,
+    key: Option<String>,
+) -> Result<PoolSubmitOutcome, VmError> {
+    let entry = lookup_pool_by_name_or_id(pool_name).ok_or_else(|| {
+        VmError::Runtime(format!(
+            "pool: pool '{pool_name}' not found; create it with pool_create first"
+        ))
+    })?;
+    let state = submit_to_pool_entry(&entry, closure, key, priority).await?;
+    let task = state.borrow();
+    Ok(PoolSubmitOutcome {
+        pool_id: task.pool_id.clone(),
+        pool_name: task.pool_name.clone(),
+        task_id: task.id.clone(),
+        status: task.status.as_str(),
+        rejection_reason: task.rejection_reason.clone(),
+    })
+}
+
+/// Shared inner submission loop used by both `pool.submit` (Harn builtin)
+/// and `submit_closure_to_named_pool` (dispatcher). Honors the pool's
+/// backpressure policy: blocks on `BlockSubmitter`, drops oldest/newest in
+/// the corresponding policies, and fails on `FailFast`/`FailSubmitter`.
+async fn submit_to_pool_entry(
+    entry: &Rc<RefCell<PoolEntry>>,
+    closure: Rc<VmClosure>,
+    key: Option<String>,
+    priority: i64,
+) -> Result<Rc<RefCell<TaskState>>, VmError> {
     loop {
         let attempt = {
             let mut pool = entry.borrow_mut();
@@ -833,9 +914,8 @@ async fn pool_submit_builtin(args: Vec<VmValue>) -> Result<VmValue, VmError> {
                 for audit in audits {
                     emit_pool_drop(audit).await;
                 }
-                dispatch_ready(&entry);
-                let handle = task_handle_value(&task.borrow());
-                return Ok(handle);
+                dispatch_ready(entry);
+                return Ok(task);
             }
             SubmitAttempt::Wait(receiver) => {
                 let _ = receiver.await;

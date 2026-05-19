@@ -154,6 +154,16 @@ pub enum TriggerHandlerSpec {
     AutoResume {
         worker_id: String,
     },
+    /// Composes triggers (#1870) with named agent pools (#1883). On match,
+    /// the dispatcher resolves `pool` by name, invokes `task_factory(event)`
+    /// to build the per-event closure, and submits it to the pool with the
+    /// pool's queue strategy + backpressure policy applied (PL-04 / #1889).
+    SpawnToPool {
+        pool: String,
+        priority_from: Option<String>,
+        key_from: Option<String>,
+        task_factory: Rc<VmClosure>,
+    },
 }
 
 impl std::fmt::Debug for TriggerHandlerSpec {
@@ -177,6 +187,17 @@ impl std::fmt::Debug for TriggerHandlerSpec {
                 .debug_struct("AutoResume")
                 .field("worker_id", worker_id)
                 .finish(),
+            Self::SpawnToPool {
+                pool,
+                priority_from,
+                key_from,
+                ..
+            } => f
+                .debug_struct("SpawnToPool")
+                .field("pool", pool)
+                .field("priority_from", priority_from)
+                .field("key_from", key_from)
+                .finish(),
         }
     }
 }
@@ -189,6 +210,7 @@ impl TriggerHandlerSpec {
             Self::Worker { .. } => "worker",
             Self::Persona { .. } => "persona",
             Self::AutoResume { .. } => "auto_resume",
+            Self::SpawnToPool { .. } => "spawn_to_pool",
         }
     }
 }

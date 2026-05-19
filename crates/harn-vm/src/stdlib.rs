@@ -43,7 +43,7 @@ mod multipart;
 mod oauth_storage;
 mod options;
 mod path;
-mod pool;
+pub(crate) mod pool;
 mod postgres;
 pub mod process;
 mod project;

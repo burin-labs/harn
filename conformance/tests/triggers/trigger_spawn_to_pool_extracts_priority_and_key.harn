@@ -1,0 +1,73 @@
+import { fair_round_robin, pool_create, pool_wait } from "std/lifecycle/pool"
+import "std/triggers"
+
+/**
+ * Verifies SpawnToPool's `priority_from` and `key_from` extractors (#1889)
+ * read dotted JSON paths from the trigger event before the pool sees it,
+ * and that the named pool then composes correctly with priority + fair
+ * round-robin queue strategies (PL-02).
+ */
+fn factory_for(tag) {
+  return { _event -> return { -> tag } }
+}
+
+pipeline test(task) {
+  let _pool = pool_create(
+    {name: "spawn-to-pool-extractor-demo", max_concurrent: 1, queue: fair_round_robin("key")},
+  )
+  let unique = to_string(to_int(timestamp())) + "-" + to_string(random_int(100000, 999999))
+  let trigger_id = "trigger-spawn-to-pool-extract-" + unique
+  let handle: TriggerHandle = trigger_register(
+    {
+      id: trigger_id,
+      kind: "issue.opened",
+      provider: "github",
+      handler: SpawnToPool(
+        {
+          pool: "spawn-to-pool-extractor-demo",
+          priority_from: "headers.priority",
+          key_from: "tenant_id",
+          task_factory: factory_for("seed"),
+        },
+      ),
+      when: nil,
+      retry: nil,
+      match: {events: ["issue.opened"]},
+      events: nil,
+      dedupe_key: nil,
+      filter: nil,
+      budget: nil,
+      manifest_path: nil,
+      package_name: "conformance",
+    },
+  )
+  let fired = trigger_fire(
+    handle,
+    {
+      provider: "github",
+      kind: "issue.opened",
+      tenant_id: "acme",
+      headers: {priority: "7", x_delivery: "evt-" + unique},
+    },
+  )
+  // The dispatcher surfaces the extracted priority + key in the dispatch
+  // result so observers (audit, action graph) can correlate the pool task
+  // back to the originating event without re-parsing the payload.
+  println(fired.status == "dispatched")
+  println(fired.result?.pool == "spawn-to-pool-extractor-demo")
+  println(fired.result?.priority == 7)
+  println(fired.result?.key == "acme")
+  // Missing paths fall back to defaults (priority 0, no key) rather than
+  // failing the dispatch.
+  let fallback = trigger_fire(
+    handle,
+    {provider: "github", kind: "issue.opened", headers: {x_delivery: "evt-fallback-" + unique}},
+  )
+  println(fallback.status == "dispatched")
+  println(fallback.result?.priority == 0)
+  println(fallback.result?.key == nil)
+  let results = pool_wait([fired.result, fallback.result])
+  println(len(results) == 2)
+  println(results[0].result == "seed")
+  println(results[1].result == "seed")
+}
