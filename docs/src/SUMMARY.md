@@ -50,6 +50,8 @@
 - [Current session builtin](./stdlib/agent_session_current_id.md)
 - [Monitor stdlib](./stdlib/monitors.md)
 - [Pool stdlib](./stdlib/lifecycle-pool.md)
+- [Pipeline lifecycle](./pipeline-lifecycle.md)
+  - [Lifecycle cookbook](./cookbooks/lifecycle.md)
 - [Pipeline lifecycle presets](./stdlib/lifecycle.md)
 - [GraphQL stdlib](./stdlib/graphql.md)
 - [OAuth client + provider cookbook](./oauth.md)
