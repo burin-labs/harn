@@ -381,6 +381,13 @@ impl Debugger {
         for tele in self.drain_telemetry_events() {
             responses.push(tele);
         }
+        // Issue #1868 — surface subagent thread/stopped/continued
+        // events right after the VM step that emitted them. Keeps the
+        // IDE in sync with worker lifecycle without waiting for the
+        // next user-driven request.
+        for sub_event in self.drain_subagent_events() {
+            responses.push(sub_event);
+        }
         self.maybe_progress_update(&mut responses);
 
         match step_result {

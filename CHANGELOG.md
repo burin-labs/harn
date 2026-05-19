@@ -10,6 +10,52 @@ condensed series summaries instead of full per-patch history.
 
 ### Added
 
+- **DAP subagent threads + suspend/resume integration (S-17, #1868).**
+  `harn-dap` now bridges spawned subagents onto DAP's `Thread`/`stopped`/
+  `continued` event model. Each `agent_loop` / `sub_agent_run` worker
+  becomes its own DAP thread (ids start at 100 to keep them visually
+  distinct from `main`=1 and ACP-session threads in the 2.. range);
+  `parent_worker_id` propagates onto a `parentId` extension so IDEs can
+  render lineage trees; `last_status` / `suspend_reason` ride alongside
+  on the `threads` response. `WorkerSuspended` raises a per-thread
+  `stopped { reason: "suspend", description: <suspension reason>,
+  allThreadsStopped: false }` so the suspended subagent shows as paused
+  without freezing the user's debug session, and `WorkerResumed` emits
+  a matching `continued`. `WorkerWaitingForInput` maps to
+  `stopped(reason: "pause")`, `WorkerCompleted`/`WorkerCancelled` emit
+  `thread { reason: "exited" }`, `WorkerFailed` emits both a
+  `stopped(exception)` and an exit, and `WorkerProgressed` is silent so
+  the IDE doesn't flood with no-op churn. The `initialize`
+  capabilities advertise three new `exceptionBreakpointFilters`:
+  `break-on-suspend`, `break-on-resume` (forces a main-thread pause so
+  the user can step through the resume continuation), and
+  `break-on-drain-decision` (registered for issue spec parity; drain
+  decisions today flow through the lifecycle-hook path rather than
+  `AgentEvent`, so the filter currently surfaces ambient events
+  without forcing a stop — documented as a known limitation).
+  Privacy: only worker id, name, mode, status, parent id, and the
+  short human-readable suspend reason flow through DAP — transcripts,
+  conditions, and arbitrary metadata blobs are deliberately filtered
+  per issue #1867. New module `crates/harn-dap/src/debugger/subagents.rs`
+  owns the `SubagentTracker` (queue + `worker_id` → DAP-thread map)
+  and the `SubagentEventSink` that captures `AgentEvent::WorkerUpdate`
+  observations between VM steps; the registration drops with the
+  debugger so a session never leaks a wildcard sink. Powers the
+  burin-code#940 (B-06) consumer side. Coverage: nine new unit tests
+  exercising filter registration, drain → DAP event mapping, suspend
+  description propagation, `break-on-resume` pause arming, parent
+  lineage in `handle_threads`, `WorkerFailed` two-event sequence,
+  `WorkerProgressed` silence, and direct sink-to-tracker handoff.
+- **Cross-session wildcard `AgentEventSink` (#1868 support).**
+  New `harn_vm::agent_events::register_wildcard_sink` / `unregister_wildcard_sink`
+  / `WildcardSinkHandle` API lets a process-global observer subscribe
+  to every emitted `AgentEvent` regardless of `session_id`. Wildcards
+  fan out *after* the session-scoped registry so per-session ordering
+  stays intact for existing consumers. Test-only thread-owner filtering
+  mirrors the per-session sink registry so parallel tests don't
+  cross-pollute each other. The DAP debugger is the first consumer
+  (issue #1868); other cross-session observers (the upcoming portal
+  live view, audit ledger sinks) can drop in without further plumbing.
 - **Tool-hook conformance suite (TH-07, #1900).** Adds nine focused
   `conformance/tests/stdlib/preset_hooks_*` fixtures that gap-fill the
   TH-* surface against the spec's named scenarios:

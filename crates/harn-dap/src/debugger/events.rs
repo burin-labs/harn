@@ -1,3 +1,4 @@
+use harn_vm::agent_events::WorkerEvent;
 use harn_vm::llm::{take_agent_trace, AgentTraceEvent};
 use serde_json::json;
 
@@ -86,6 +87,165 @@ impl Debugger {
                         "output": body_str,
                     })),
                 ));
+            }
+        }
+        out
+    }
+
+    /// Issue #1868 — drain queued subagent observations and translate
+    /// them into DAP `thread`/`stopped`/`continued` events. Called
+    /// between VM steps from `step_running_vm` so subagent lifecycle
+    /// surfaces on the IDE in the same frame the worker emitted it.
+    ///
+    /// Event mapping (see also the table in `subagents.rs`):
+    /// - `WorkerSpawned` → `thread { reason: "started" }`
+    /// - `WorkerSuspended` → `stopped { reason: "suspend",
+    ///   description: <reason>, threadId: <subagent>,
+    ///   allThreadsStopped: false }`
+    /// - `WorkerWaitingForInput` → `stopped { reason: "pause", ... }`
+    /// - `WorkerResumed` → `continued { allThreadsContinued: false }`
+    /// - `WorkerCompleted` / `WorkerCancelled` → `thread { reason: "exited" }`
+    /// - `WorkerFailed` → `stopped { reason: "exception" }` then
+    ///   `thread { reason: "exited" }`
+    /// - `WorkerProgressed` → no DAP emission (too noisy)
+    ///
+    /// When the `break-on-resume` exception filter is active, a
+    /// `WorkerResumed` additionally emits a `stopped { reason:
+    /// "pause", threadId: main }` so the user can step through the
+    /// resume continuation on the main thread.
+    pub(crate) fn drain_subagent_events(&mut self) -> Vec<DapResponse> {
+        let observations = self.subagent_tracker.drain();
+        if observations.is_empty() {
+            return Vec::new();
+        }
+        let mut out = Vec::new();
+        for obs in observations {
+            // Upsert the thread first so every emitted event references
+            // a stable `threadId`. Idempotent for the second+ event on
+            // the same worker.
+            let record = self.subagent_tracker.upsert_thread(
+                &obs.worker_id,
+                &obs.worker_name,
+                obs.parent_worker_id.as_deref(),
+                &obs.status,
+            );
+            let thread_id = record.thread_id as i64;
+            // Spawn → emit `thread started` once. Subsequent events for
+            // the same worker still upsert (above) but don't re-emit
+            // the start.
+            match obs.event {
+                WorkerEvent::WorkerSpawned => {
+                    let seq = self.next_seq();
+                    out.push(DapResponse::event(
+                        seq,
+                        "thread",
+                        Some(json!({
+                            "reason": "started",
+                            "threadId": thread_id,
+                        })),
+                    ));
+                }
+                WorkerEvent::WorkerProgressed => {
+                    // Intentionally silent — progress milestones map
+                    // poorly to DAP runtime states and would flood the
+                    // IDE with no-op stopped/continued churn.
+                }
+                WorkerEvent::WorkerWaitingForInput => {
+                    self.subagent_tracker
+                        .mark_suspended(&obs.worker_id, Some("awaiting input"));
+                    let seq = self.next_seq();
+                    out.push(DapResponse::event(
+                        seq,
+                        "stopped",
+                        Some(json!({
+                            "reason": "pause",
+                            "description": "awaiting input",
+                            "threadId": thread_id,
+                            "allThreadsStopped": false,
+                            "preserveFocusHint": true,
+                        })),
+                    ));
+                }
+                WorkerEvent::WorkerSuspended => {
+                    self.subagent_tracker
+                        .mark_suspended(&obs.worker_id, obs.suspend_reason.as_deref());
+                    let description = obs
+                        .suspend_reason
+                        .clone()
+                        .unwrap_or_else(|| "suspended".to_string());
+                    let seq = self.next_seq();
+                    out.push(DapResponse::event(
+                        seq,
+                        "stopped",
+                        Some(json!({
+                            "reason": "suspend",
+                            "description": description,
+                            "threadId": thread_id,
+                            "allThreadsStopped": false,
+                            "preserveFocusHint": !self.break_on_subagent_suspend,
+                        })),
+                    ));
+                }
+                WorkerEvent::WorkerResumed => {
+                    self.subagent_tracker.mark_resumed(&obs.worker_id);
+                    let seq = self.next_seq();
+                    out.push(DapResponse::event(
+                        seq,
+                        "continued",
+                        Some(json!({
+                            "threadId": thread_id,
+                            "allThreadsContinued": false,
+                        })),
+                    ));
+                    if self.break_on_subagent_resume {
+                        // Force a stop on the main debugger thread so
+                        // the user can step through the resume
+                        // continuation. The next step_running_vm tick
+                        // honours pending_pause and emits a proper
+                        // `stopped(pause)` event for the main thread.
+                        self.pending_pause = true;
+                    }
+                }
+                WorkerEvent::WorkerCompleted | WorkerEvent::WorkerCancelled => {
+                    self.subagent_tracker.mark_exited(&obs.worker_id);
+                    let seq = self.next_seq();
+                    out.push(DapResponse::event(
+                        seq,
+                        "thread",
+                        Some(json!({
+                            "reason": "exited",
+                            "threadId": thread_id,
+                        })),
+                    ));
+                }
+                WorkerEvent::WorkerFailed => {
+                    self.subagent_tracker.mark_exited(&obs.worker_id);
+                    let description = obs
+                        .suspend_reason
+                        .clone()
+                        .unwrap_or_else(|| "worker failed".to_string());
+                    let seq = self.next_seq();
+                    out.push(DapResponse::event(
+                        seq,
+                        "stopped",
+                        Some(json!({
+                            "reason": "exception",
+                            "description": description,
+                            "threadId": thread_id,
+                            "allThreadsStopped": false,
+                            "preserveFocusHint": true,
+                        })),
+                    ));
+                    let seq = self.next_seq();
+                    out.push(DapResponse::event(
+                        seq,
+                        "thread",
+                        Some(json!({
+                            "reason": "exited",
+                            "threadId": thread_id,
+                        })),
+                    ));
+                }
             }
         }
         out

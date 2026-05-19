@@ -3,6 +3,7 @@ mod events;
 mod sources;
 pub(crate) mod state;
 mod stepping;
+pub(crate) mod subagents;
 mod variables;
 
 #[cfg(test)]
@@ -149,11 +150,52 @@ impl Debugger {
 
     fn handle_threads(&mut self, msg: &DapMessage) -> Vec<DapResponse> {
         let seq = self.next_seq();
-        let threads: Vec<_> = self
+        // Top-level threads (synthetic `main` + any ACP-session
+        // threads). These have no parentId; status/suspend defaults stay
+        // unset because their state model is "running iff the VM is
+        // stepping" — not the per-worker suspend ladder.
+        let mut threads: Vec<serde_json::Value> = self
             .threads
             .iter()
-            .map(|(id, name)| json!({ "id": *id as i64, "name": name }))
+            .map(|(id, name)| {
+                json!({
+                    "id": *id as i64,
+                    "name": name,
+                })
+            })
             .collect();
+        // Subagent threads (issue #1868). The tracker keeps lineage,
+        // status, and the most-recent suspend reason; we surface all
+        // three so IDEs that understand the Harn extensions can render
+        // a worker tree with badges, and IDEs that don't fall back to
+        // a flat list with id+name. A single tracker snapshot drives
+        // both the row emission and parent-id resolution so the two
+        // views stay consistent.
+        let subagent_rows = self.subagent_tracker.snapshot_threads();
+        for (_worker_id, record) in &subagent_rows {
+            let parent_id = record.parent_worker_id.as_deref().and_then(|pid| {
+                subagent_rows
+                    .iter()
+                    .find(|(wid, _)| wid == pid)
+                    .map(|(_, t)| t.thread_id as i64)
+            });
+            let mut row = json!({
+                "id": record.thread_id as i64,
+                "name": if record.name.is_empty() {
+                    "subagent".to_string()
+                } else {
+                    record.name.clone()
+                },
+                "status": record.last_status,
+            });
+            if let Some(pid) = parent_id {
+                row["parentId"] = json!(pid);
+            }
+            if let Some(reason) = record.suspend_reason.as_deref() {
+                row["suspendReason"] = json!(reason);
+            }
+            threads.push(row);
+        }
         vec![DapResponse::success(
             seq,
             msg.seq,

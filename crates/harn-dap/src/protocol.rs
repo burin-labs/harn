@@ -154,6 +154,29 @@ impl Default for Capabilities {
                     label: "Parse failures".to_string(),
                     default: false,
                 },
+                // Subagent lifecycle filters (issue #1868). Each lets
+                // the user opt in to a forced main-thread stop on the
+                // matching subagent lifecycle event. When unselected,
+                // the adapter still emits ambient `thread` /
+                // `stopped(suspend)` / `continued` events on the
+                // subagent thread itself — the DAP runtime-state
+                // model treats a suspended worker as a Stopped thread
+                // regardless of the IDE's debug-session focus.
+                ExceptionBreakpointFilter {
+                    filter: "break-on-suspend".to_string(),
+                    label: "Subagent suspended".to_string(),
+                    default: false,
+                },
+                ExceptionBreakpointFilter {
+                    filter: "break-on-resume".to_string(),
+                    label: "Subagent resumed".to_string(),
+                    default: false,
+                },
+                ExceptionBreakpointFilter {
+                    filter: "break-on-drain-decision".to_string(),
+                    label: "Drain-agent decision".to_string(),
+                    default: false,
+                },
             ],
         }
     }
