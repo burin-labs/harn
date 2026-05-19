@@ -602,6 +602,7 @@ mod tests {
             stream: true,
             provider_overrides: None,
             prefill: None,
+            reminder_lifecycle: Vec::new(),
         }
     }
 

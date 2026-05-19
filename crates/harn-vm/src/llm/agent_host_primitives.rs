@@ -221,6 +221,34 @@ fn agent_primitive_denied_tool(
     })
 }
 
+fn attach_hook_reminder_audit(
+    mut result: serde_json::Value,
+    reports: Vec<serde_json::Value>,
+) -> serde_json::Value {
+    if reports.is_empty() {
+        return result;
+    }
+    let Some(obj) = result.as_object_mut() else {
+        return result;
+    };
+    let audit = obj
+        .entry("audit".to_string())
+        .or_insert_with(|| serde_json::json!({}));
+    if !audit.is_object() {
+        *audit = serde_json::json!({});
+    }
+    if let Some(audit_obj) = audit.as_object_mut() {
+        audit_obj.insert(
+            "reminders".to_string(),
+            serde_json::json!({
+                "origin": "tool_hook",
+                "lifecycle": reports,
+            }),
+        );
+    }
+    result
+}
+
 async fn host_agent_parse_tool_calls_impl(args: Vec<VmValue>) -> Result<VmValue, VmError> {
     let text = match args.first() {
         Some(VmValue::String(text)) => text.to_string(),
@@ -380,10 +408,13 @@ async fn host_agent_dispatch_tool_call(
             ))
         }
     };
-    let tool_id = match call.get("id") {
-        Some(VmValue::String(id)) => id.to_string(),
-        _ => String::new(),
-    };
+    let tool_id = ["id", "tool_call_id", "call_id"]
+        .iter()
+        .find_map(|key| match call.get(*key) {
+            Some(VmValue::String(id)) if !id.is_empty() => Some(id.to_string()),
+            _ => None,
+        })
+        .unwrap_or_default();
     let raw_args = call
         .get("arguments")
         .map(helpers::vm_value_to_json)
@@ -653,28 +684,45 @@ async fn host_agent_dispatch_tool_call(
         Some(_) => {}
     }
 
-    let pre_tool_action = crate::orchestration::run_pre_tool_hooks(&tool_name, &tool_args).await?;
-    if let Some(reason) =
-        crate::orchestration::apply_pre_tool_action(pre_tool_action, &mut tool_args)?
-    {
-        return Ok(json_to_vm_value(&agent_primitive_denied_tool(
+    let mut hook_reminder_reports = Vec::new();
+    let (pre_tool_action, reports) = crate::orchestration::scope_hook_reminder_reports(
+        crate::agent_sessions::scope_current_tool_call(tool_id.clone(), async {
+            crate::orchestration::run_pre_tool_hooks(&tool_name, &tool_args).await
+        }),
+    )
+    .await;
+    hook_reminder_reports.extend(reports);
+    let pre_tool_action = pre_tool_action?;
+    let (pre_tool_result, reports) = crate::orchestration::scope_hook_reminder_reports(
+        crate::agent_sessions::scope_current_tool_call(tool_id.clone(), async {
+            crate::orchestration::apply_pre_tool_action(pre_tool_action, &mut tool_args)
+        }),
+    )
+    .await;
+    hook_reminder_reports.extend(reports);
+    if let Some(reason) = pre_tool_result? {
+        let denied = agent_primitive_denied_tool(
             &tool_name,
             &tool_id,
             &tool_args,
             reason,
             crate::agent_events::ToolCallErrorCategory::PermissionDenied,
-        )));
+        );
+        let denied = attach_hook_reminder_audit(denied, hook_reminder_reports);
+        return Ok(json_to_vm_value(&denied));
     }
 
     let tool_schemas = tools::collect_tool_schemas(tools, None);
     if let Err(message) = tools::validate_tool_args(&tool_name, &tool_args, &tool_schemas) {
-        return Ok(json_to_vm_value(&agent_primitive_denied_tool(
+        let denied = agent_primitive_denied_tool(
             &tool_name,
             &tool_id,
             &tool_args,
             message,
             crate::agent_events::ToolCallErrorCategory::SchemaValidation,
-        )));
+        );
+        let denied = attach_hook_reminder_audit(denied, hook_reminder_reports);
+        return Ok(json_to_vm_value(&denied));
     }
 
     let started = std::time::Instant::now();
@@ -716,12 +764,19 @@ async fn host_agent_dispatch_tool_call(
     match outcome.result {
         Ok(raw_result) => {
             let rendered_before_hooks = agent_tools::render_tool_result(&raw_result);
-            let rendered = crate::orchestration::run_post_tool_hooks(
-                &tool_name,
-                &tool_args,
-                &rendered_before_hooks,
+            let (rendered, reports) = crate::orchestration::scope_hook_reminder_reports(
+                crate::agent_sessions::scope_current_tool_call(tool_id.clone(), async {
+                    crate::orchestration::run_post_tool_hooks(
+                        &tool_name,
+                        &tool_args,
+                        &rendered_before_hooks,
+                    )
+                    .await
+                }),
             )
-            .await?;
+            .await;
+            hook_reminder_reports.extend(reports);
+            let rendered = rendered?;
             let output_truncated = rendered.len() < rendered_before_hooks.len();
             let reminder_payload = serde_json::json!({
                 "event": crate::orchestration::HookEvent::PostToolUse.as_str(),
@@ -753,7 +808,7 @@ async fn host_agent_dispatch_tool_call(
                 result = rendered
             );
             let error = denied.then(|| rendered.clone());
-            Ok(json_to_vm_value(&serde_json::json!({
+            let result = serde_json::json!({
                 "ok": !denied,
                 "status": if denied { "error" } else { "ok" },
                 "tool_name": tool_name.clone(),
@@ -771,7 +826,9 @@ async fn host_agent_dispatch_tool_call(
                 "original_size": rendered_before_hooks.len(),
                 "final_size": rendered.len(),
                 "reminder_provider_report": reminder_report,
-            })))
+            });
+            let result = attach_hook_reminder_audit(result, hook_reminder_reports);
+            Ok(json_to_vm_value(&result))
         }
         Err(error) => {
             let category = crate::value::error_to_category(&error);
@@ -784,7 +841,7 @@ async fn host_agent_dispatch_tool_call(
                 name = tool_name,
                 error = error_text
             );
-            Ok(json_to_vm_value(&serde_json::json!({
+            let result = serde_json::json!({
                 "ok": false,
                 "status": "error",
                 "tool_name": tool_name,
@@ -798,7 +855,9 @@ async fn host_agent_dispatch_tool_call(
                 "executor": executor,
                 "approval": approval_status,
                 "execution_duration_ms": execution_duration_ms,
-            })))
+            });
+            let result = attach_hook_reminder_audit(result, hook_reminder_reports);
+            Ok(json_to_vm_value(&result))
         }
     }
 }

@@ -640,6 +640,7 @@ aws_secret_access_key = dev-secret
             provider_overrides: None,
             prefill: None,
             session_id: None,
+            reminder_lifecycle: Vec::new(),
         }
     }
 }

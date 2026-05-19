@@ -18,6 +18,10 @@ pipeline main() {
   println(reminders[0].reminder.ttl_turns)
   println(logged.kind)
   println(logged.payload.reminder_id != "")
+  println(logged.payload.session_id == session)
+  println(logged.payload.agent_id == session)
+  println(logged.payload.task_id == nil)
+  println(logged.payload.reason)
   println(logged.payload.ttl_turns_before)
   println(logged.payload.expired_at_turn)
 }

@@ -1702,7 +1702,7 @@ export const harnProviderCatalog: HarnProviderCatalog = {
       },
       "structured_output": "none",
       "format_preferences": {
-        "prefers_xml_scaffolding": false,
+        "prefers_xml_scaffolding": true,
         "prefers_markdown_scaffolding": true,
         "structured_output_mode": "native_json",
         "supports_assistant_prefill": false,
@@ -1767,7 +1767,7 @@ export const harnProviderCatalog: HarnProviderCatalog = {
       },
       "structured_output": "none",
       "format_preferences": {
-        "prefers_xml_scaffolding": false,
+        "prefers_xml_scaffolding": true,
         "prefers_markdown_scaffolding": true,
         "structured_output_mode": "native_json",
         "supports_assistant_prefill": false,

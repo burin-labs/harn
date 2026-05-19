@@ -15,6 +15,7 @@ public enum HarnProtocolConstants {
         "hitl_resolved",
         "log",
         "progress",
+        "reminder_emitted",
         "skill_activated",
         "skill_deactivated",
         "skill_scope_tools",
@@ -142,6 +143,7 @@ public enum HarnACPSessionUpdate: String, Codable, Sendable, CaseIterable {
     case hitlResolved = "hitl_resolved"
     case log = "log"
     case progress = "progress"
+    case reminderEmitted = "reminder_emitted"
     case skillActivated = "skill_activated"
     case skillDeactivated = "skill_deactivated"
     case skillScopeTools = "skill_scope_tools"
@@ -168,6 +170,7 @@ public enum HarnACPSessionUpdate: String, Codable, Sendable, CaseIterable {
         "hitl_resolved",
         "log",
         "progress",
+        "reminder_emitted",
         "skill_activated",
         "skill_deactivated",
         "skill_scope_tools",

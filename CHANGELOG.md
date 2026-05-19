@@ -111,6 +111,14 @@ condensed series summaries instead of full per-patch history.
   resumer input, and the pre-suspend digest when resuming with
   `continue_transcript: false`; it is dedupe-keyed, non-propagating, and
   honors the standard reminder provider opt-out list.
+- **Reminder lifecycle telemetry and ACP updates (#1828).** Reminder
+  injections, render-time firings, dedupe replacements, TTL/compaction/
+  clear expiry, malformed drops, sub-agent inheritance, and provider
+  evaluation now emit `transcript.reminder.*` EventLog records with
+  `session_id`, `task_id`, and `agent_id` correlation fields. Rendered
+  reminders also surface through ACP `session/update` as
+  `reminder_emitted` under `_meta.harn.reminder`, and hook-origin
+  reminder metadata is carried on tool-call receipts.
 
 ## v0.8.26
 

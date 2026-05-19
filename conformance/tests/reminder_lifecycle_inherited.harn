@@ -1,0 +1,48 @@
+pipeline main() {
+  let topic = "transcript.reminder.lifecycle"
+  let child = "reminder-lifecycle-inherited-child"
+  agent_session_open(child)
+  agent_session_reset(child)
+  let cursor = event_log.latest(topic)
+  llm_mock_clear()
+  llm_mock({text: "child done"})
+  sub_agent_run(
+    "Child task.",
+    {
+      provider: "mock",
+      model: "mock",
+      session_id: child,
+      max_iterations: 1,
+      done_judge: nil,
+      reminder_propagation: [
+        {
+          id: "inherited-reminder-1",
+          tags: ["handoff"],
+          dedupe_key: "handoff-reminder",
+          ttl_turns: 2,
+          preserve_on_compact: false,
+          propagate: "all",
+          role_hint: "system",
+          source: "inherited",
+          body: "Carry parent context.",
+          fired_at_turn: 0,
+          originating_agent_id: "parent-agent",
+        },
+      ],
+    },
+  )
+  let stream = event_log
+    .subscribe({topic: topic, from_cursor: cursor, kind_prefix: "transcript.reminder."})
+  let injected = stream.next().value
+  let inherited = stream.next().value
+  let fired = stream.next().value
+  println(injected.kind)
+  println(injected.payload.reminder_id)
+  println(inherited.kind)
+  println(inherited.payload.originating_agent_id)
+  println(inherited.payload.sub_agent_id)
+  println(inherited.payload.propagate)
+  println(fired.kind)
+  println(fired.payload.session_id == child)
+  println(fired.payload.rendered_role)
+}

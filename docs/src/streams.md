@@ -84,7 +84,8 @@ streaming are separate runtime features layered on top of this base
 value type.
 
 The `event_log` namespace exposes the active runtime EventLog as stream
-values. `event_log.subscribe({topic, from_cursor})` returns a
-`Stream<dict>` whose events include `{id, cursor, topic, kind, payload,
-headers, occurred_at_ms}`. Dropping the stream closes the underlying
-subscription.
+values. `event_log.subscribe({topic, from_cursor, kind_prefix?})`
+returns a `Stream<dict>` whose events include `{id, cursor, topic, kind,
+payload, headers, occurred_at_ms}`. `kind_prefix` filters the stream to
+matching event kinds before delivery. Dropping the stream closes the
+underlying subscription.

@@ -119,6 +119,31 @@
       "update": {
         "_meta": {
           "harn": {
+            "reminder": {
+              "body": "Refresh the compacted context before answering.",
+              "reminderId": "reminder-1",
+              "renderedRole": "developer",
+              "roleHint": "developer",
+              "source": "stdlib_provider",
+              "tags": [
+                "token_pressure"
+              ],
+              "ttlTurns": 2
+            }
+          }
+        },
+        "sessionUpdate": "reminder_emitted"
+      }
+    }
+  },
+  {
+    "jsonrpc": "2.0",
+    "method": "session/update",
+    "params": {
+      "sessionId": "session-1",
+      "update": {
+        "_meta": {
+          "harn": {
             "artifactId": "artifact-1",
             "handoff": {
               "_type": "handoff_artifact",

@@ -334,7 +334,9 @@ pub async fn evaluate_and_inject(
         if !enabled.contains(provider.id()) || !subscribes_to(provider.subscribes_to(), event) {
             continue;
         }
-        if let Some(reminder) = provider.evaluate(&ctx) {
+        let reminder = provider.evaluate(&ctx);
+        emit_provider_evaluated(&ctx, provider.id(), reminder.is_some(), None);
+        if let Some(reminder) = reminder {
             reports.push(inject_report(session_id, provider.id(), reminder)?);
         }
     }
@@ -344,8 +346,17 @@ pub async fn evaluate_and_inject(
         {
             continue;
         }
-        for reminder in evaluate_vm_provider(&provider, &ctx).await? {
-            reports.push(inject_report(session_id, &provider.id, reminder)?);
+        match evaluate_vm_provider(&provider, &ctx).await {
+            Ok(reminders) => {
+                emit_provider_evaluated(&ctx, &provider.id, !reminders.is_empty(), None);
+                for reminder in reminders {
+                    reports.push(inject_report(session_id, &provider.id, reminder)?);
+                }
+            }
+            Err(error) => {
+                emit_provider_evaluated(&ctx, &provider.id, false, Some(error.to_string()));
+                return Err(error);
+            }
         }
     }
 
@@ -494,6 +505,29 @@ fn inject_report(
         "reminder_id": report.reminder_id,
         "deduped_count": report.deduped_count,
     }))
+}
+
+fn emit_provider_evaluated(
+    ctx: &ProviderContext,
+    provider_id: &str,
+    fired: bool,
+    error: Option<String>,
+) {
+    let mut payload = serde_json::json!({
+        "session_id": &ctx.session_id,
+        "provider_id": provider_id,
+        "event": ctx.event.as_str(),
+        "fired": fired,
+    });
+    if let Some(error) = error {
+        if let Some(obj) = payload.as_object_mut() {
+            obj.insert("error".to_string(), JsonValue::String(error));
+        }
+    }
+    crate::llm::helpers::emit_reminder_lifecycle_event(
+        crate::llm::helpers::REMINDER_PROVIDER_EVALUATED_EVENT_KIND,
+        payload,
+    );
 }
 
 fn provider_reminder(

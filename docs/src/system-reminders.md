@@ -13,7 +13,8 @@ number of turns, can choose whether it survives compaction, and can state
 how far it should propagate to sub-agents. Rendering is provider-aware:
 the same reminder can become developer-role content, system prompt text,
 or an Anthropic-style `<system-reminder>` user content block depending on
-the selected model route.
+the selected model route. Lifecycle events are observable through
+EventLog records and host-facing ACP `session/update` metadata.
 
 ## What and why
 
@@ -129,9 +130,22 @@ println(injected.reminder_id)
 println(injected.deduped_count)
 ```
 
-Use `transcript.clear_reminders(transcript, selector)` to remove pending
-reminders by `id`, `tag`, or `dedupe_key`. Multiple selectors are
-combined with AND semantics.
+The returned transcript has one additional `system_reminder` event and
+the same durable message list as the input transcript. `body` is
+required and must be non-empty. Optional `tags`, `dedupe_key`,
+`ttl_turns`, `preserve_on_compact`, `propagate`, and `role_hint` fields
+are validated; unknown option keys fail fast.
+
+When `dedupe_key` is set, injection first removes any pending reminder
+events with the same key from the input transcript. The new reminder is
+then appended, and `deduped_count` reports how many older reminders were
+replaced. When an active EventLog is installed, replacement also emits a
+`transcript.reminder.deduped` record on
+`transcript.reminder.lifecycle`; every successful injection emits
+`transcript.reminder.injected`.
+
+Use `transcript.clear_reminders(transcript, selector)` to remove
+pending reminders:
 
 ```harn,ignore
 let cleared = transcript.clear_reminders(next_transcript, {
@@ -139,6 +153,11 @@ let cleared = transcript.clear_reminders(next_transcript, {
 })
 println(cleared.removed_count)
 ```
+
+Selectors support `id`, `tag`, and `dedupe_key`. At least one selector
+is required. If multiple selectors are present, a reminder must match all
+of them to be removed. This builtin is also a pure transform and returns
+`{transcript, removed_count}`.
 
 ### From a hook
 
@@ -374,17 +393,31 @@ current explanation and remediation.
 
 ## EventLog events
 
-Current reminder lifecycle events are emitted on the
-`transcript.reminder.lifecycle` topic when an EventLog is active:
+Reminder producers and lifecycle boundaries emit audit records on the
+`transcript.reminder.lifecycle` topic when an EventLog is active. Each
+payload carries `session_id`, `task_id`, and `agent_id` so host and
+replay tooling can correlate reminder state with the active agent turn
+and tool call. Use `event_log.subscribe(...)` with
+`kind_prefix: "transcript.reminder."` to stream only reminder lifecycle
+events.
 
 | Event kind | Emitted when | Key payload fields |
 |---|---|---|
-| `transcript.reminder.deduped` | A new reminder replaces older pending reminders with the same `dedupe_key`, or compaction collapses duplicate pending reminders. | `transcript_id`, `reminder_id`, `dedupe_key`, `boundary`, `dropped_reminder_ids`, `dropped_count`; `boundary` is present for compaction dedupe. |
-| `transcript.reminder.expired` | A finite-TTL reminder expires during post-turn processing or compaction. | `transcript_id`, `reminder_id`, `tags`, `dedupe_key`, `ttl_turns_before`, `expired_at_turn`, `expired_at_boundary`, `phase`; boundary fields are present for compaction expiry. |
+| `transcript.reminder.injected` | A new reminder enters the pending queue. | `reminder_id`, `tags`, `dedupe_key`, `source`, `role_hint`, `ttl_turns`, `propagate` |
+| `transcript.reminder.fired` | A pending reminder is rendered into the next provider request. | `reminder_id`, `turn_number`, `rendered_role` |
+| `transcript.reminder.deduped` | A new reminder or compaction replaces older pending reminders with the same `dedupe_key`. | `replaced_id`, `replacing_id`, `dedupe_key` |
+| `transcript.reminder.expired` | A reminder is removed by TTL expiry, compaction, or an explicit clear operation. | `reminder_id`, `reason` (`ttl`, `compaction`, or `cleared`) |
+| `transcript.reminder.dropped` | A malformed or unrenderable reminder cannot be used for the next provider request. | `reminder_id`, `reason` (`invalid` or `capability_mismatch`) |
+| `transcript.reminder.inherited` | A child session receives an inherited reminder. | `reminder_id`, `originating_agent_id`, `sub_agent_id`, `propagate` |
+| `transcript.reminder.provider_evaluated` | A registered provider evaluated against a hook event. | `provider_id`, `event`, `fired` |
 
-Issue [#1828](https://github.com/burin-labs/harn/issues/1828) tracks the
-broader lifecycle stream for injected, fired, dropped, inherited, and
-provider-evaluated reminders plus the ACP `SessionUpdate` extension.
+Rendered reminders also surface to ACP clients as `session/update`
+notifications with `sessionUpdate: "reminder_emitted"` and
+`_meta.harn.reminder` metadata. Tool-call hook reminders attach a compact
+lifecycle report to `ToolCallReceipt.audit.reminders` when
+`with_audit_log(...)` is active. The receipt report identifies the hook
+event, tool call, reminder id, tags, dedupe key, source, role hint, TTL,
+and dedupe count without copying the reminder body into the receipt.
 
 ## Cookbook
 

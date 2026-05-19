@@ -17,10 +17,13 @@ pipeline main() {
   let compacted = transcript_compact(with_reminder, {strategy: "truncate", keep_last: 1, target_tokens: 1})
   let reminders = transcript_events_by_kind(compacted, "system_reminder")
   let stream = event_log.subscribe({topic: topic, from_cursor: cursor})
+  let injected = stream.next().value
   let logged = stream.next().value
   println(len(reminders))
+  println(injected.kind)
   println(logged.kind)
   println(logged.payload.reminder_id != "")
+  println(logged.payload.reason)
   println(logged.payload.ttl_turns_before)
   println(logged.payload.expired_at_boundary)
 }

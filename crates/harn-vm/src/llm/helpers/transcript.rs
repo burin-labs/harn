@@ -16,8 +16,14 @@ use super::{vm_value_to_json, TRANSCRIPT_ASSET_TYPE, TRANSCRIPT_TYPE, TRANSCRIPT
 /// Canonical `kind` for a [`SystemReminder`] transcript event.
 pub(crate) const SYSTEM_REMINDER_EVENT_KIND: &str = "system_reminder";
 pub(crate) const REMINDER_LIFECYCLE_TOPIC: &str = "transcript.reminder.lifecycle";
+pub(crate) const REMINDER_INJECTED_EVENT_KIND: &str = "transcript.reminder.injected";
+pub(crate) const REMINDER_FIRED_EVENT_KIND: &str = "transcript.reminder.fired";
 pub(crate) const REMINDER_DEDUPED_EVENT_KIND: &str = "transcript.reminder.deduped";
 pub(crate) const REMINDER_EXPIRED_EVENT_KIND: &str = "transcript.reminder.expired";
+pub(crate) const REMINDER_DROPPED_EVENT_KIND: &str = "transcript.reminder.dropped";
+pub(crate) const REMINDER_INHERITED_EVENT_KIND: &str = "transcript.reminder.inherited";
+pub(crate) const REMINDER_PROVIDER_EVALUATED_EVENT_KIND: &str =
+    "transcript.reminder.provider_evaluated";
 pub(crate) const SUSPENSION_EVENT_KIND: &str = "suspension";
 pub(crate) const RESUMPTION_EVENT_KIND: &str = "resumption";
 pub(crate) const DRAIN_DECISION_EVENT_KIND: &str = "drain_decision";
@@ -676,15 +682,106 @@ pub(crate) fn apply_reminder_post_turn(transcript: &VmValue, turn: i64) -> Remin
     }
 }
 
-pub(crate) fn emit_reminder_lifecycle_event(kind: &str, payload: JsonValue) {
+fn json_string_field(payload: &JsonValue, key: &str) -> Option<String> {
+    payload
+        .get(key)
+        .and_then(JsonValue::as_str)
+        .map(str::to_string)
+        .filter(|value| !value.is_empty())
+}
+
+fn ensure_reminder_correlation(payload: &mut JsonValue) {
+    let session_id = json_string_field(payload, "session_id")
+        .or_else(|| json_string_field(payload, "transcript_id"))
+        .or_else(crate::agent_sessions::current_session_id);
+    let task_id =
+        json_string_field(payload, "task_id").or_else(crate::agent_sessions::current_tool_call_id);
+    let agent_id = json_string_field(payload, "agent_id").or_else(|| session_id.clone());
+    let Some(obj) = payload.as_object_mut() else {
+        return;
+    };
+
+    if obj
+        .get("session_id")
+        .and_then(JsonValue::as_str)
+        .is_none_or(str::is_empty)
+    {
+        obj.insert(
+            "session_id".to_string(),
+            session_id
+                .clone()
+                .map(JsonValue::String)
+                .unwrap_or(JsonValue::Null),
+        );
+    }
+    if obj
+        .get("task_id")
+        .and_then(JsonValue::as_str)
+        .is_none_or(str::is_empty)
+    {
+        obj.insert(
+            "task_id".to_string(),
+            task_id
+                .clone()
+                .map(JsonValue::String)
+                .unwrap_or(JsonValue::Null),
+        );
+    }
+    if obj
+        .get("agent_id")
+        .and_then(JsonValue::as_str)
+        .is_none_or(str::is_empty)
+    {
+        obj.insert(
+            "agent_id".to_string(),
+            agent_id
+                .clone()
+                .map(JsonValue::String)
+                .unwrap_or(JsonValue::Null),
+        );
+    }
+}
+
+pub(crate) fn reminder_lifecycle_payload(
+    session_id: Option<&str>,
+    reminder: &SystemReminder,
+) -> JsonValue {
+    let mut payload = serde_json::json!({
+        "session_id": session_id,
+        "reminder_id": &reminder.id,
+        "tags": &reminder.tags,
+        "dedupe_key": &reminder.dedupe_key,
+        "source": reminder.source.as_str(),
+        "role_hint": reminder.role_hint.as_str(),
+        "ttl_turns": &reminder.ttl_turns,
+        "propagate": reminder.propagate.as_str(),
+        "originating_agent_id": &reminder.originating_agent_id,
+    });
+    ensure_reminder_correlation(&mut payload);
+    payload
+}
+
+pub(crate) fn emit_reminder_lifecycle_event(kind: &str, mut payload: JsonValue) {
     let Some(log) = active_event_log() else {
         return;
     };
     let Ok(topic) = Topic::new(REMINDER_LIFECYCLE_TOPIC) else {
         return;
     };
+    ensure_reminder_correlation(&mut payload);
     let event = LogEvent::new(kind, payload);
-    let _ = futures::executor::block_on(log.append(&topic, event));
+    if tokio::runtime::Handle::try_current().is_ok() {
+        if let Ok(join) = std::thread::Builder::new()
+            .name("harn-reminder-event-log".to_string())
+            .spawn(move || {
+                let _ = futures::executor::block_on(log.append(&topic, event));
+            })
+        {
+            let _ = join.join();
+        }
+    } else {
+        let _ = futures::executor::block_on(log.append(&topic, event));
+    }
 }
 
 /// Convert a Harn dict (or any json-shaped value) into a normalized

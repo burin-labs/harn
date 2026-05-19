@@ -836,6 +836,52 @@ pub fn store_transcript(id: &str, transcript: VmValue) {
     });
 }
 
+/// Remove malformed reminder events after their drop audit has been emitted.
+/// Pending-reminder rendering scans the transcript on every LLM call; pruning
+/// invalid entries makes the drop event one-shot instead of noisy per turn.
+pub fn prune_invalid_reminder_events(id: &str) -> usize {
+    SESSIONS.with(|s| {
+        let mut map = s.borrow_mut();
+        let Some(state) = map.get_mut(id) else {
+            return 0;
+        };
+        let Some(dict) = state.transcript.as_dict().cloned() else {
+            return 0;
+        };
+        let Some(VmValue::List(events)) = dict.get("events") else {
+            return 0;
+        };
+        let mut pruned = 0_usize;
+        let mut kept = Vec::with_capacity(events.len());
+        for event in events.iter().cloned() {
+            let is_reminder = event
+                .as_dict()
+                .and_then(|event| event.get("kind"))
+                .map(VmValue::display)
+                .as_deref()
+                == Some(crate::llm::helpers::SYSTEM_REMINDER_EVENT_KIND);
+            if !is_reminder {
+                kept.push(event);
+                continue;
+            }
+            let valid = crate::llm::helpers::reminder_from_event(&event)
+                .is_some_and(|reminder| !reminder.body.trim().is_empty());
+            if valid {
+                kept.push(event);
+            } else {
+                pruned += 1;
+            }
+        }
+        if pruned > 0 {
+            let mut next = dict;
+            next.insert("events".to_string(), VmValue::List(Rc::new(kept)));
+            state.transcript = VmValue::Dict(Rc::new(next));
+            state.last_accessed = Instant::now();
+        }
+        pruned
+    })
+}
+
 /// Apply the reminder TTL lifecycle that runs once per completed agent
 /// turn. Reminders with `ttl_turns = 1` expire and are removed; larger
 /// finite TTLs are decremented in place. Expiry audit events are emitted
@@ -859,16 +905,25 @@ pub fn apply_reminder_post_turn(id: &str, turn: i64) -> Result<serde_json::Value
     })?;
 
     for reminder in &report.expired {
+        let mut payload = crate::llm::helpers::reminder_lifecycle_payload(Some(id), reminder);
+        if let Some(obj) = payload.as_object_mut() {
+            obj.insert(
+                "transcript_id".to_string(),
+                serde_json::Value::String(id.to_string()),
+            );
+            obj.insert(
+                "reason".to_string(),
+                serde_json::Value::String("ttl".to_string()),
+            );
+            obj.insert(
+                "ttl_turns_before".to_string(),
+                serde_json::json!(&reminder.ttl_turns),
+            );
+            obj.insert("expired_at_turn".to_string(), serde_json::json!(turn));
+        }
         crate::llm::helpers::emit_reminder_lifecycle_event(
             crate::llm::helpers::REMINDER_EXPIRED_EVENT_KIND,
-            serde_json::json!({
-                "transcript_id": id,
-                "reminder_id": &reminder.id,
-                "tags": &reminder.tags,
-                "dedupe_key": &reminder.dedupe_key,
-                "ttl_turns_before": &reminder.ttl_turns,
-                "expired_at_turn": turn,
-            }),
+            payload,
         );
     }
 
@@ -939,14 +994,23 @@ pub fn inject_reminder(
         crate::llm::helpers::emit_reminder_lifecycle_event(
             crate::llm::helpers::REMINDER_DEDUPED_EVENT_KIND,
             serde_json::json!({
+                "session_id": id,
                 "transcript_id": id,
                 "reminder_id": &reminder_id,
+                "replacing_id": &reminder_id,
+                "replaced_id": deduped_reminder_ids.first(),
+                "replaced_ids": &deduped_reminder_ids,
                 "dedupe_key": &dedupe_key,
                 "dropped_reminder_ids": &deduped_reminder_ids,
                 "dropped_count": dropped_count,
             }),
         );
     }
+
+    crate::llm::helpers::emit_reminder_lifecycle_event(
+        crate::llm::helpers::REMINDER_INJECTED_EVENT_KIND,
+        crate::llm::helpers::reminder_lifecycle_payload(Some(id), &reminder),
+    );
 
     Ok(ReminderInjectionReport {
         reminder_id,

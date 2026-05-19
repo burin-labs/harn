@@ -2,6 +2,7 @@
 
 use std::cell::RefCell;
 use std::collections::BTreeMap;
+use std::future::Future;
 use std::rc::Rc;
 
 use regex::Regex;
@@ -12,6 +13,26 @@ use harn_parser::diagnostic_codes::Code;
 use crate::agent_events::WorkerEvent;
 use crate::llm::helpers::{ReminderPropagate, ReminderRoleHint, ReminderSource, SystemReminder};
 use crate::value::{VmClosure, VmError, VmValue};
+
+tokio::task_local! {
+    static HOOK_REMINDER_REPORTS_TASK: Rc<RefCell<Vec<serde_json::Value>>>;
+}
+
+fn record_hook_reminder_report(report: serde_json::Value) {
+    let _ = HOOK_REMINDER_REPORTS_TASK.try_with(|reports| reports.borrow_mut().push(report));
+}
+
+pub async fn scope_hook_reminder_reports<F, T>(future: F) -> (T, Vec<serde_json::Value>)
+where
+    F: Future<Output = T>,
+{
+    let reports = Rc::new(RefCell::new(Vec::new()));
+    let output = HOOK_REMINDER_REPORTS_TASK
+        .scope(reports.clone(), future)
+        .await;
+    let reports = std::mem::take(&mut *reports.borrow_mut());
+    (output, reports)
+}
 
 /// Manifest / runtime hook event names.
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Hash, Serialize, Deserialize)]
@@ -746,7 +767,7 @@ async fn invoke_vm_lifecycle_hooks(
             &HookControl::Allow,
             &raw,
         );
-        inject_hook_effects(session_id.as_str(), effects)?;
+        inject_hook_effects(session_id.as_str(), effects, Some(event))?;
     }
     Ok(())
 }
@@ -1103,7 +1124,11 @@ pub fn collect_hook_effects_and_action(
     )))
 }
 
-fn inject_hook_effects(session_id: &str, effects: Vec<HookEffect>) -> Result<(), VmError> {
+fn inject_hook_effects(
+    session_id: &str,
+    effects: Vec<HookEffect>,
+    event: Option<HookEvent>,
+) -> Result<(), VmError> {
     if effects.is_empty() {
         return Ok(());
     }
@@ -1118,8 +1143,26 @@ fn inject_hook_effects(session_id: &str, effects: Vec<HookEffect>) -> Result<(),
     for effect in effects {
         match effect {
             HookEffect::Reminder(spec) => {
-                crate::agent_sessions::inject_reminder(&target_session, spec)
+                let reminder_id = spec.id.clone();
+                let tags = spec.tags.clone();
+                let dedupe_key = spec.dedupe_key.clone();
+                let role_hint = spec.role_hint.as_str();
+                let source = spec.source.as_str();
+                let ttl_turns = spec.ttl_turns;
+                let report = crate::agent_sessions::inject_reminder(&target_session, spec)
                     .map_err(VmError::Runtime)?;
+                record_hook_reminder_report(serde_json::json!({
+                    "hook_event": event.map(|event| event.as_str()),
+                    "session_id": &target_session,
+                    "tool_call_id": crate::agent_sessions::current_tool_call_id(),
+                    "reminder_id": reminder_id,
+                    "tags": tags,
+                    "dedupe_key": dedupe_key,
+                    "role_hint": role_hint,
+                    "source": source,
+                    "ttl_turns": ttl_turns,
+                    "deduped_count": report.deduped_count,
+                }));
             }
         }
     }
@@ -1127,7 +1170,7 @@ fn inject_hook_effects(session_id: &str, effects: Vec<HookEffect>) -> Result<(),
 }
 
 pub fn inject_hook_effects_into_current_session(effects: Vec<HookEffect>) -> Result<(), VmError> {
-    inject_hook_effects("", effects)
+    inject_hook_effects("", effects, None)
 }
 
 fn wrap_pre_tool_effects(effects: Vec<HookEffect>, mut action: PreToolAction) -> PreToolAction {
@@ -1222,7 +1265,11 @@ pub fn apply_pre_tool_action(
             Ok(None)
         }
         PreToolAction::Reminder { spec, then } => {
-            inject_hook_effects_into_current_session(vec![HookEffect::Reminder(spec)])?;
+            inject_hook_effects(
+                "",
+                vec![HookEffect::Reminder(spec)],
+                Some(HookEvent::PreToolUse),
+            )?;
             apply_pre_tool_action(*then, current_args)
         }
     }
@@ -1233,7 +1280,11 @@ fn apply_post_tool_action(action: PostToolAction, current: String) -> Result<Str
         PostToolAction::Pass => Ok(current),
         PostToolAction::Modify(new_result) => Ok(new_result),
         PostToolAction::Reminder { spec, then } => {
-            inject_hook_effects_into_current_session(vec![HookEffect::Reminder(spec)])?;
+            inject_hook_effects(
+                "",
+                vec![HookEffect::Reminder(spec)],
+                Some(HookEvent::PostToolUse),
+            )?;
             apply_post_tool_action(*then, current)
         }
     }
@@ -1253,7 +1304,9 @@ pub async fn run_pre_tool_hooks(
                 "tool": {
                     "name": tool_name,
                     "args": current_args.clone(),
+                    "tool_call_id": crate::agent_sessions::current_tool_call_id(),
                 },
+                "tool_call_id": crate::agent_sessions::current_tool_call_id(),
             }))
         } else {
             None
@@ -1301,7 +1354,9 @@ pub async fn run_post_tool_hooks(
                 "tool": {
                     "name": tool_name,
                     "args": args,
+                    "tool_call_id": crate::agent_sessions::current_tool_call_id(),
                 },
+                "tool_call_id": crate::agent_sessions::current_tool_call_id(),
                 "result": {
                     "text": current.clone(),
                 },
@@ -1332,7 +1387,11 @@ pub async fn run_post_tool_hooks(
                 current = new_result;
             }
             PostToolAction::Reminder { spec, then } => {
-                inject_hook_effects_into_current_session(vec![HookEffect::Reminder(spec)])?;
+                inject_hook_effects(
+                    "",
+                    vec![HookEffect::Reminder(spec)],
+                    Some(HookEvent::PostToolUse),
+                )?;
                 current = apply_post_tool_action(*then, current)?;
             }
         }
@@ -1401,7 +1460,7 @@ pub async fn run_lifecycle_hooks_with_control(
             &outcome.control,
             &raw,
         );
-        inject_hook_effects(session_id.as_str(), outcome.effects)?;
+        inject_hook_effects(session_id.as_str(), outcome.effects, Some(event))?;
         match outcome.control {
             HookControl::Allow => continue,
             HookControl::Modify { payload: modified } => {
