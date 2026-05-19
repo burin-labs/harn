@@ -4528,6 +4528,39 @@ programs.
 | `HARN-SUS-009` | Resume input failed `agent_loop` input validation. |
 | `HARN-SUS-010` | A worker closed while suspended rejected a later resume. |
 
+#### OAuth diagnostics (`HARN-OAU-*`)
+
+| Code | Description |
+|---|---|
+| `HARN-OAU-001` | A persisted sink redacted an OAuth-shaped token (transcript / receipt / OTel / system reminder). The original value still flows through to the tool — redaction is display-only. |
+| `HARN-OAU-002` | `std/oauth/client` cannot refresh because no `refresh_token` is in storage (or the server rejected the refresh). Re-run `start_authorization` / `device_flow`. |
+| `HARN-OAU-005` | `std/oauth/dynamic_registration` rejected a candidate client metadata document under RFC 7591 §2. |
+
+## OAuth
+
+Programs may compose OAuth flows by importing from `std/oauth/*`. The
+stack is portable across providers: there is no provider-specific Rust
+code in the language runtime.
+
+| Module | Purpose |
+|---|---|
+| `std/oauth/providers` | Provider catalogue (10 built-ins plus `custom(...)` + `github_enterprise(...)`). Each record carries `auth_url`, `token_url`, `device_code_url?`, `revoke_url?`, `userinfo_url?`, `default_scopes`, `pkce_required`, `refresh_handling`, and `documented_quirks`. |
+| `std/oauth/storage` | Token-storage trait with five interchangeable backends (`memory`, `file`, `harn_cloud_session`, `harn_cloud_org`, `custom`). Each backend exposes `get(key) -> TokenSet \| nil`, `set(key, token_set, ttl_seconds = nil) -> nil`, and `delete(key) -> nil`. |
+| `std/oauth/client` | Authorization-code grant with mandatory PKCE S256 and CSRF `state`, transparent refresh at >=75% TTL, RFC 7009 best-effort `revoke`, and a 401-bounded one-shot retry on `request(...)`. Refreshes that fail emit diagnostic `HARN-OAU-002`. |
+| `std/oauth/device_flow` | RFC 8628 device authorization grant for headless contexts. Persists the resulting TokenSet into the same storage backend the authorization-code client reads from. |
+| `std/oauth/dynamic_registration` | RFC 7591 client registration + RFC 8414 authorization-server metadata. Validation errors carry diagnostic `HARN-OAU-005`. |
+| `std/oauth/redaction` | Per-thread custom regex pattern registration on top of the runtime's default token-shape catalog. Each match emits diagnostic `HARN-OAU-001` to the audit ring drained via `drain_audit()`. |
+
+Successful exchanges and refreshes emit audit events on the
+`oauth.client.audit`, `oauth.device_flow.audit`, and
+`oauth.dynreg.audit` event-log topics. Audit payloads carry presence
+flags + expiry timestamps and never include access tokens, refresh
+tokens, device codes, user codes, or registered `client_secret`s.
+
+The user-facing reference, including per-provider cookbook recipes, is
+`docs/src/oauth.md`. The CLI surface (`harn connect <provider>`) is
+documented in `docs/src/orchestrator/oauth.md`.
+
 ## Persistent store
 
 Six builtins provide a persistent key-value store backed by the resolved Harn
