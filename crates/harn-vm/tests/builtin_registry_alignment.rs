@@ -158,6 +158,7 @@ const RUNTIME_ONLY_EXCEPTIONS: &[&str] = &[
     "__pool_create",
     "__pool_get",
     "__pool_list",
+    "__pool_simulate_restart",
     "__pool_size",
     "__pool_snapshot",
     "__pool_submit",

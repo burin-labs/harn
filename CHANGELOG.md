@@ -10,6 +10,24 @@ condensed series summaries instead of full per-patch history.
 
 ### Added
 
+- **Pool state durability (#1890).** `Pool.create({scope: ...})` now
+  routes to three durability backends following the channel scope
+  contract: `session` (default, in-memory only — lost on session close);
+  `pipeline`, which appends task metadata to a crash-safe JSONL log
+  under `.harn/pools/<pipeline_id>__<name>__<hash>.jsonl` and reloads
+  the queue + terminal state on next `pool_create`; and `tenant` / `org`,
+  reserved for the harn-cloud host (see harn-cloud#306) and rejected
+  today with a clear host-routed diagnostic. Submissions accept a new
+  `idempotency_key` option that dedupes both within a session and
+  across pipeline-scope reloads. In-flight tasks observed on reload are
+  classified as `failed` with a stale-restart marker (closures cannot
+  cross a process boundary); idempotent re-submission lets the new
+  process re-run the work. A `pool_simulate_restart()` builtin drops
+  the in-process registry so conformance fixtures can exercise the
+  "kill process → restart → verify completion" path without forking.
+  Crash safety uses atomic temp-file rename for compaction and
+  `sync_data()` per append. See
+  `conformance/tests/pool_durability/*.harn`. Part of epic #1883.
 - **Tool-hook mode callback side effects (#1896).** The three shipped
   `tool_hooks_mode_*` callbacks (`rewrite_with_audit`,
   `deny_with_explanation`, `passthrough_only_audit`) now emit lifecycle

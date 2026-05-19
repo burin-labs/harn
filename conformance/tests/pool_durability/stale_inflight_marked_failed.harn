@@ -1,0 +1,56 @@
+// Tasks that were in-flight when the previous process exited are
+// reloaded as `failed` with a stale-restart marker — closures cannot
+// resume across a process boundary, but idempotent re-submission lets
+// the new process re-run the work.
+import { fail_fast, pool_create, pool_simulate_restart, pool_wait } from "std/lifecycle/pool"
+
+pipeline default() {
+  let dir = path_join(temp_dir(), "harn-pool-durability-stale-" + uuid())
+  let pool = pool_create(
+    {
+      name: "stale-demo",
+      scope: "pipeline",
+      pipeline_id: "pipe_stale",
+      max_concurrent: 1,
+      backpressure: fail_fast(),
+      dir: dir,
+    },
+  )
+  let h1 = pool.submit({ -> 7 }, {idempotency_key: "task-A"})
+  let r1 = pool_wait(h1)
+  log(r1.status)
+  log(r1.result)
+  // Forge an in-flight record on disk via a side-channel append. The
+  // simulate_restart helper then drops the live registry, and a fresh
+  // pool_create re-hydrates: terminal "task-A" stays completed, the
+  // forged in-flight "task-B" is re-classified as failed (process gone).
+  let forged_path = path_join(dir, list_dir(dir)[0])
+  let _now = now_ms()
+  let stale = "{\"kind\":\"task\",\"task\":{\"id\":\"stale_task\",\"pool_id\":\"" + pool.id
+    + "\",\"pool_name\":\"stale-demo\",\"priority\":0,\"status\":\"running\",\"submitted_at\":\"forged\",\"started_at\":\"forged\",\"idempotency_key\":\"task-B\",\"heartbeat_at_ms\":0,\"seq\":99}}\n"
+  write_file(forged_path, read_file(forged_path) + stale)
+  pool_simulate_restart()
+  let resumed = pool_create(
+    {
+      name: "stale-demo",
+      scope: "pipeline",
+      pipeline_id: "pipe_stale",
+      max_concurrent: 1,
+      backpressure: fail_fast(),
+      dir: dir,
+    },
+  )
+  log(resumed.completed)
+  log(resumed.failed)
+  log(resumed.total)
+  // Re-submitting under "task-A" still dedupes (completed).
+  let h2 = resumed.submit({ -> 0 }, {idempotency_key: "task-A"})
+  let r2 = pool_wait(h2)
+  log(r2.status)
+  log(r2.result)
+  // The forged "task-B" came back failed; a re-submit with the same
+  // idempotency_key short-circuits to that failed snapshot too.
+  let h3 = resumed.submit({ -> 0 }, {idempotency_key: "task-B"})
+  let r3 = pool_wait(h3)
+  log(r3.status)
+}

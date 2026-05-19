@@ -231,3 +231,19 @@ pub fn pool_list() {
 pub fn pool_wait(handle_or_handles) {
   return __pool_wait(handle_or_handles)
 }
+
+/**
+ * pool_simulate_restart drops the in-process pool registry. Pipeline-scope
+ * pools reload their persisted state from `.harn/pools/` on the next
+ * `pool_create({scope: "pipeline", ...})` call. Intended for conformance
+ * fixtures and durability tests — production code should not need this.
+ *
+ * @effects: [host]
+ * @allocation: heap
+ * @errors: []
+ * @api_stability: experimental
+ * @example: pool_simulate_restart()
+ */
+pub fn pool_simulate_restart() {
+  return __pool_simulate_restart()
+}
