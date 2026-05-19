@@ -672,6 +672,7 @@ impl Lexer {
             "extends" => TokenKind::Extends,
             "override" => TokenKind::Override,
             "let" => TokenKind::Let,
+            "const" => TokenKind::Const,
             "var" => TokenKind::Var,
             "if" => TokenKind::If,
             "else" => TokenKind::Else,

@@ -126,6 +126,10 @@ pub struct TypeChecker {
     /// Callable declarations imported from other modules. Only their
     /// signatures are registered; bodies stay owned by the defining module.
     imported_callable_decls: Vec<SNode>,
+    /// Compile-time environment populated by every successfully folded
+    /// `const` binding. Later const initializers see earlier values so
+    /// expressions like `const Y = X + 1` work.
+    const_env: crate::const_eval::ConstEnv,
 }
 
 impl TypeChecker {
@@ -159,6 +163,7 @@ impl TypeChecker {
             imported_names: None,
             imported_type_decls: Vec::new(),
             imported_callable_decls: Vec::new(),
+            const_env: crate::const_eval::ConstEnv::new(),
         }
     }
 
@@ -178,6 +183,7 @@ impl TypeChecker {
             imported_names: None,
             imported_type_decls: Vec::new(),
             imported_callable_decls: Vec::new(),
+            const_env: crate::const_eval::ConstEnv::new(),
         }
     }
 

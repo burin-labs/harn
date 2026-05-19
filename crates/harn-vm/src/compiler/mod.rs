@@ -222,6 +222,24 @@ impl Compiler {
                 self.record_binding_type(pattern, binding_type.clone());
                 self.maybe_register_owned_drop(pattern, binding_type.as_ref(), snode.span);
             }
+            Node::ConstBinding {
+                name,
+                type_ann,
+                value,
+            } => {
+                // `const` lowers to the same bytecode as a let-binding
+                // over a simple identifier. The compile-time const-eval
+                // pass in the typechecker has already proven the
+                // initializer is pure and within budget, so re-running
+                // it through the VM is guaranteed to produce the same
+                // value byte-for-byte.
+                let binding_type = type_ann.clone().or_else(|| self.infer_expr_type(value));
+                self.compile_node(value)?;
+                let pattern = harn_parser::BindingPattern::Identifier(name.clone());
+                self.compile_destructuring(&pattern, false)?;
+                self.record_binding_type(&pattern, binding_type.clone());
+                self.maybe_register_owned_drop(&pattern, binding_type.as_ref(), snode.span);
+            }
             Node::Assignment {
                 target, value, op, ..
             } => {

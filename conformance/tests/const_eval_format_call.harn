@@ -1,0 +1,10 @@
+// Bounded const-eval — issue #1791. `format(...)` with positional
+// placeholders is on the const-eval allowlist; this fixture pins the
+// surface the exit criteria reference (`format!("{}-{}", "hello", X)`).
+const X: int = 42
+
+const Y: string = format("{}-{}", "hello", X)
+
+pipeline main() {
+  log(Y)
+}

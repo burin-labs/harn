@@ -53,6 +53,8 @@ Repairs are tagged with a six-level safety class so `harn fix --apply --safety <
 | [`RCV`](#rcv--error-recovery) | Error recovery | 3 |
 | [`MAT`](#mat--match-exhaustiveness) | Match exhaustiveness | 3 |
 | [`POL`](#pol--runtime-policies) | Runtime policies | 2 |
+| [`MET`](#met--compile-time-meta-restrictions) | Compile-time meta restrictions | 1 |
+| [`CST`](#cst--const-eval-sandbox) | Const-eval sandbox | 4 |
 
 ## TYP — Type checker
 
@@ -317,6 +319,21 @@ Repairs are tagged with a six-level safety class so `harn fix --apply --safety <
 |---|---|---|---|
 | [`HARN-POL-001`](#harn-pol-001) | pool backpressure rejected a submit | — | — |
 | [`HARN-POL-002`](#harn-pol-002) | fail-fast pool has no immediate capacity | — | — |
+
+## MET — Compile-time meta restrictions
+
+| Code | Summary | Repair | Safety |
+|---|---|---|---|
+| [`HARN-MET-001`](#harn-met-001) | expression is not permitted in a const initializer | — | — |
+
+## CST — Const-eval sandbox
+
+| Code | Summary | Repair | Safety |
+|---|---|---|---|
+| [`HARN-CST-001`](#harn-cst-001) | const initializer exceeded the step budget | — | — |
+| [`HARN-CST-002`](#harn-cst-002) | const initializer exceeded the recursion depth budget | — | — |
+| [`HARN-CST-003`](#harn-cst-003) | const initializer attempted a sandboxed capability | — | — |
+| [`HARN-CST-004`](#harn-cst-004) | const initializer raised a runtime error during evaluation | — | — |
 
 ## Code reference
 
@@ -5485,3 +5502,181 @@ Fail-fast pools do not queue work.
 Catch the error if rejection is expected, raise `max_concurrent`, or use
 `Backpressure().queue(...)` when callers should wait, drop, or retain a
 bounded queue instead.
+
+### `HARN-MET-001`
+
+**Category:** `MET` (Compile-time meta restrictions) &nbsp;·&nbsp; **API stability:** `stable`
+
+expression is not permitted in a const initializer
+
+**Category:** Meta (MET)
+**Variant:** `Code::ConstEvalDisallowedExpression`
+
+#### What it means
+
+A `const` binding's right-hand side must be a pure expression that can be
+folded at compile time by the bounded const-evaluator. The expression
+referenced something the evaluator does not permit: a call into a non-const
+function, a property access on a host object such as `harness`, a runtime
+construct (spawn / parallel / select / try / yield / emit / await), a
+loop, an assignment, or any builtin outside the curated const-friendly
+allowlist.
+
+```harn
+// Rejected:
+const Z = harness.clock.now()              // host capability
+const W = spawn { 1 }                      // runtime construct
+const Q = some_user_fn()                   // user function call
+
+// Accepted:
+const X: int = 5 + 3
+const Y: string = "hello-${X}"
+const NS: list = [1, 2, X]
+const COUNT: int = len([1, 2, 3])
+```
+
+#### How to fix
+
+- Move the side-effecting computation into a regular `let` binding inside a
+  pipeline or function body.
+- If the value really is a compile-time constant, restructure it as
+  arithmetic, string concatenation, literal collections, or reads of
+  earlier `const` bindings.
+
+#### Stability
+
+This code is stable. Adding additional pure builtins to the const-eval
+allowlist remains backwards-compatible — newly permitted expressions
+simply stop being rejected.
+
+### `HARN-CST-001`
+
+**Category:** `CST` (Const-eval sandbox) &nbsp;·&nbsp; **API stability:** `stable`
+
+const initializer exceeded the step budget
+
+**Category:** Const-eval sandbox (CST)
+**Variant:** `Code::ConstEvalStepLimit`
+
+#### What it means
+
+The bounded compile-time evaluator counts every reduction step it
+performs while folding a `const` initializer. When the running count
+exceeds `MAX_STEPS` (default 100,000), evaluation is aborted with this
+diagnostic. The cap is enforced on every step, not amortized, so a
+hostile or accidental quadratic expression cannot stall the compiler.
+
+```harn
+// Rejected (would expand far beyond the step budget):
+const HUGE = sum_to(1_000_000)
+```
+
+#### How to fix
+
+- Pre-compute the value off-line and embed a literal.
+- Reduce the expression to a smaller closed form.
+- If the work genuinely belongs at runtime, switch from `const` to `let`.
+
+#### Stability
+
+This code is stable. The default budget may grow over time; tightening it
+would require a deprecation cycle.
+
+### `HARN-CST-002`
+
+**Category:** `CST` (Const-eval sandbox) &nbsp;·&nbsp; **API stability:** `stable`
+
+const initializer exceeded the recursion depth budget
+
+**Category:** Const-eval sandbox (CST)
+**Variant:** `Code::ConstEvalRecursionLimit`
+
+#### What it means
+
+The compile-time evaluator tracks how deeply it has recursed into nested
+expressions or conditionals. Exceeding `MAX_DEPTH` (default 256) aborts
+evaluation with this diagnostic. The cap protects the compiler thread's
+stack and prevents pathological deeply-nested literals from creating an
+unbounded stack frame chain.
+
+#### How to fix
+
+- Flatten deeply-nested literals (e.g. a 1,000-level nested ternary).
+- Break the constant into intermediate `const` bindings.
+
+#### Stability
+
+This code is stable. The default budget may grow over time; tightening it
+would require a deprecation cycle.
+
+### `HARN-CST-003`
+
+**Category:** `CST` (Const-eval sandbox) &nbsp;·&nbsp; **API stability:** `stable`
+
+const initializer attempted a sandboxed capability
+
+**Category:** Const-eval sandbox (CST)
+**Variant:** `Code::ConstEvalSandboxViolation`
+
+#### What it means
+
+The compile-time evaluator denies any expression that would touch the
+filesystem, network, environment, the current process, host bindings
+(`harness.*`), the orchestration runtime, or any other ambient side
+effect. Even a syntactically reachable call into one of those surfaces
+is rejected before evaluation runs — the const-eval sandbox refuses to
+mediate I/O or non-determinism.
+
+```harn
+// Rejected:
+const X = read_file("/etc/passwd")
+const Y = env("HOME")
+const Z = spawn { ... }
+const W = harness.clock.now()
+```
+
+#### How to fix
+
+- Move the impure expression into a `let` binding inside a pipeline.
+- Replace I/O with a literal value or with a pure transformation of
+  already-folded constants.
+
+#### Stability
+
+This code is stable. The denylist is enforced by allowlist (only listed
+pure builtins are accepted), so newly added stdlib functions stay
+sandboxed by default.
+
+### `HARN-CST-004`
+
+**Category:** `CST` (Const-eval sandbox) &nbsp;·&nbsp; **API stability:** `stable`
+
+const initializer raised a runtime error during evaluation
+
+**Category:** Const-eval sandbox (CST)
+**Variant:** `Code::ConstEvalRuntimeError`
+
+#### What it means
+
+The expression was syntactically eligible for compile-time evaluation,
+but the evaluator hit a value-level error during folding: integer
+overflow on a literal arithmetic, division by zero, indexing past the
+end of a literal list, an undefined identifier the const-eval
+environment cannot resolve, or a type mismatch on a binary operator.
+
+```harn
+// Rejected at compile time:
+const ZERO = 1 / 0
+const OOB = [1, 2, 3][9]
+const BAD = "a" + 1
+```
+
+#### How to fix
+
+- Inspect the offending operand and supply a valid value.
+- If the expression depends on a value that is only known at runtime,
+  use `let` instead of `const`.
+
+#### Stability
+
+This code is stable.

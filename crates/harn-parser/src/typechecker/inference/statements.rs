@@ -567,6 +567,68 @@ impl TypeChecker {
                 }
             }
 
+            Node::ConstBinding {
+                name,
+                type_ann,
+                value,
+            } => {
+                // Walk and infer the value just like a let-binding so
+                // existing diagnostics (undefined names, type mismatches)
+                // still fire. The bounded const-eval pass below runs on
+                // top of that — its failures land as HARN-MET-* /
+                // HARN-CST-* diagnostics.
+                self.check_node(value, scope);
+                let inferred = self.infer_type(value, scope);
+                if let Some(expected) = type_ann {
+                    if let Some(actual) = &inferred {
+                        if !self.types_compatible(expected, actual, scope) {
+                            self.type_mismatch_at(
+                                Code::VariableTypeMismatch,
+                                format!("const binding `{name}`"),
+                                expected,
+                                actual,
+                                value.span,
+                                (
+                                    Some((span, "expected type declared here".to_string())),
+                                    Some(value.span),
+                                ),
+                                scope,
+                            );
+                        }
+                    }
+                }
+                let ty = type_ann.clone().or(inferred);
+                scope.define_var(name, ty);
+                if type_ann.is_some() {
+                    scope.mark_annotated(name);
+                }
+                scope.clear_nil_widenable(name);
+
+                // Run the bounded sandbox interpreter. A successful fold
+                // registers the value for later const initializers in
+                // the same module; a failure emits a diagnostic keyed
+                // off the failure kind so editor/CLI integrations can
+                // dispatch on it.
+                match crate::const_eval::const_eval(value, &self.const_env) {
+                    Ok(folded) => {
+                        self.const_env.insert(name.clone(), folded);
+                    }
+                    Err(err) => {
+                        use crate::const_eval::ConstEvalErrorKind as K;
+                        let code = match err.kind {
+                            K::Disallowed => Code::ConstEvalDisallowedExpression,
+                            K::StepLimit => Code::ConstEvalStepLimit,
+                            K::RecursionLimit => Code::ConstEvalRecursionLimit,
+                            K::SandboxViolation => Code::ConstEvalSandboxViolation,
+                            K::RuntimeError => Code::ConstEvalRuntimeError,
+                        };
+                        let message =
+                            format!("const `{name}` initializer rejected: {}", err.detail);
+                        self.error_at(code, message, err.span);
+                    }
+                }
+            }
+
             Node::FnDecl {
                 name,
                 type_params,

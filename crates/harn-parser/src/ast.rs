@@ -114,6 +114,23 @@ pub enum Node {
         type_ann: Option<TypeExpr>,
         value: Box<SNode>,
     },
+    /// `const NAME [: Type] = EXPR` — compile-time-evaluated binding.
+    ///
+    /// The initializer is run through `harn_parser::const_eval` during
+    /// typecheck under a strict, bounded sandbox: pure arithmetic, string
+    /// concatenation, literal lists/dicts, ternaries, and reads of earlier
+    /// `const` identifiers are permitted; any call to host capabilities,
+    /// fs/net/env/process bridges, mutation, or unbounded loops/recursion
+    /// is rejected with a `HARN-CST-*` or `HARN-MET-001` diagnostic. At
+    /// runtime the binding behaves like a `let` binding — the same
+    /// expression is re-evaluated by the VM so the runtime value matches
+    /// the compile-time fold byte-for-byte (the sandbox subset is a
+    /// strict subset of runtime semantics for pure expressions).
+    ConstBinding {
+        name: String,
+        type_ann: Option<TypeExpr>,
+        value: Box<SNode>,
+    },
     OverrideDecl {
         name: String,
         params: Vec<String>,

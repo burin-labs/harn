@@ -114,6 +114,7 @@ impl Parser {
             self.current_kind(),
             Some(
                 TokenKind::Let
+                    | TokenKind::Const
                     | TokenKind::Var
                     | TokenKind::If
                     | TokenKind::For
@@ -305,6 +306,7 @@ impl Parser {
             TokenKind::Extends => "extends",
             TokenKind::Override => "override",
             TokenKind::Let => "let",
+            TokenKind::Const => "const",
             TokenKind::Var => "var",
             TokenKind::If => "if",
             TokenKind::Else => "else",

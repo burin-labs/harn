@@ -378,6 +378,8 @@ const fn category_title(category: Category) -> &'static str {
         Category::Rcv => "Error recovery",
         Category::Mat => "Match exhaustiveness",
         Category::Pol => "Runtime policies",
+        Category::Met => "Compile-time meta restrictions",
+        Category::Cst => "Const-eval sandbox",
     }
 }
 

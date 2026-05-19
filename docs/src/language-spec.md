@@ -67,6 +67,7 @@ The following identifiers are reserved:
 | `extends` | `.extends` |
 | `override` | `.overrideKw` |
 | `let` | `.letKw` |
+| `const` | `.constKw` |
 | `var` | `.varKw` |
 | `if` | `.ifKw` |
 | `else` | `.elseKw` |
@@ -441,6 +442,7 @@ filesystem access.
 
 ```ebnf
 statement          ::= let_binding
+                     | const_binding
                      | var_binding
                      | if_else
                      | for_in
@@ -471,6 +473,7 @@ statement          ::= let_binding
                      | expression_statement
 
 let_binding        ::= 'let' binding_pattern [':' type_expr] '=' expression
+const_binding      ::= 'const' IDENTIFIER [':' type_expr] '=' expression
 var_binding        ::= 'var' binding_pattern [':' type_expr] '=' expression
 if_else            ::= 'if' expression '{' block '}'
                        ['else' (if_else | '{' block '}')]
@@ -750,6 +753,19 @@ Returns `nil` (which becomes `.nilValue`) if not found anywhere.
 ### Variable definition
 
 - `let name = value` -- defines `name` as immutable in the current scope.
+- `const NAME = value` -- defines `NAME` as immutable, with the
+  initializer additionally folded at compile time by the bounded
+  const-evaluator. Only pure expressions are accepted: literal
+  arithmetic, string concatenation, literal lists/dicts, ternary /
+  if-else, subscript access, and calls into a small whitelist of pure
+  stdlib builtins (`len`, `format`, `min`, `max`, `abs`, `floor`,
+  `ceil`, `round`, `lowercase`, `uppercase`, `trim`, `concat`, `join`).
+  Any reference to `harness.*`, runtime constructs (`spawn`, `parallel`,
+  `select`, `try`, `yield`, `emit`, `await`, …), user-defined
+  functions, loops, or assignment is rejected with a `HARN-MET-001`,
+  `HARN-CST-001`, `HARN-CST-002`, `HARN-CST-003`, or `HARN-CST-004`
+  diagnostic depending on the failure mode. Issue #1791 carries the
+  full design and rationale.
 - `var name = value` -- defines `name` as mutable in the current scope.
 - `var name = nil` -- leaves `name` widenable until the first non-`nil`
   assignment, which fixes the slot to `T | nil`. The explicit form

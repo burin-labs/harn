@@ -71,6 +71,27 @@ condensed series summaries instead of full per-patch history.
   register/list/unregister surface. Rust-side coverage adds eight
   unit tests exercising nested-string walking, registration replace-
   on-duplicate, applies_to filtering, and short-circuit-on-block.
+- **Bounded sandboxed const-evaluator (T7, #1791).** New `const NAME [: Type] = EXPR`
+  binding form runs its initializer through a strict compile-time
+  evaluator in `crates/harn-parser/src/const_eval/`. Folding is
+  allowlist-based: literal arithmetic, string concatenation, literal
+  lists/dicts, ternary / if-else, subscript access, and a small set of
+  pure stdlib builtins (`len`, `format`, `min`, `max`, `abs`, `floor`,
+  `ceil`, `round`, `lowercase`, `uppercase`, `trim`, `concat`, `join`)
+  are accepted. Step (`MAX_STEPS = 100_000`) and recursion
+  (`MAX_DEPTH = 256`) caps are checked on every reduction, never
+  amortized. Sandbox violations (`harness.*`, fs / net / env / process /
+  spawn / parallel / select / try / yield / emit, user functions,
+  mutation, loops) are rejected with new diagnostic codes:
+  `HARN-MET-001` (disallowed expression shape), `HARN-CST-001` (step
+  budget), `HARN-CST-002` (recursion depth), `HARN-CST-003` (sandbox
+  violation), `HARN-CST-004` (value-level runtime error during folding).
+  At runtime the binding lowers to a `let`-equivalent — the same
+  expression is re-evaluated by the VM and byte-equality with the
+  compile-time fold is guaranteed by construction (pure subset).
+  Pre-positions compile-time prompt template specialization, schema
+  derivation from types, and `harn graph --json` static facts; no
+  immediate consumer in this release.
 - **DAP subagent threads + suspend/resume integration (S-17, #1868).**
   `harn-dap` now bridges spawned subagents onto DAP's `Thread`/`stopped`/
   `continued` event model. Each `agent_loop` / `sub_agent_run` worker

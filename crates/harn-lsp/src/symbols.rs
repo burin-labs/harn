@@ -488,6 +488,23 @@ fn collect_symbols(
             }
             recurse!(value, scope_span);
         }
+        Node::ConstBinding {
+            name,
+            type_ann,
+            value,
+        } => {
+            symbols.push(simple_sym!(
+                name.clone(),
+                HarnSymbolKind::Variable,
+                snode.span,
+                type_ann
+                    .clone()
+                    .or_else(|| infer_symbol_type(value, symbols)),
+                None,
+                scope_span
+            ));
+            recurse!(value, scope_span);
+        }
         Node::EnumDecl {
             name,
             type_params,

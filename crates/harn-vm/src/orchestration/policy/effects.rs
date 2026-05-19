@@ -530,6 +530,9 @@ fn child_nodes(node: &SNode) -> Vec<&SNode> {
         Node::LetBinding { value, .. } | Node::VarBinding { value, .. } => {
             children.push(value.as_ref());
         }
+        Node::ConstBinding { value, .. } => {
+            children.push(value.as_ref());
+        }
         Node::DeadlineBlock { duration, body } => {
             children.push(duration.as_ref());
             children.extend(body.iter());

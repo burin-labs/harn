@@ -68,6 +68,7 @@ pub fn token_kind_name(kind: &TokenKind) -> &'static str {
         TokenKind::Extends => "Extends",
         TokenKind::Override => "Override",
         TokenKind::Let => "Let",
+        TokenKind::Const => "Const",
         TokenKind::Var => "Var",
         TokenKind::If => "If",
         TokenKind::Else => "Else",

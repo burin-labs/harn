@@ -3,6 +3,7 @@
 "extends" @keyword
 "override" @keyword
 "let" @keyword
+"const" @keyword
 "var" @keyword
 "if" @keyword.conditional
 "else" @keyword.conditional

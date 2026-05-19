@@ -66,6 +66,14 @@ impl<'a, 'd> State<'a, 'd> {
                 }
                 self.visit_node(value);
             }
+            Node::ConstBinding {
+                type_ann, value, ..
+            } => {
+                if let Some(ty) = type_ann {
+                    self.visit_type(ty, span);
+                }
+                self.visit_node(value);
+            }
             Node::FnDecl {
                 params,
                 return_type,

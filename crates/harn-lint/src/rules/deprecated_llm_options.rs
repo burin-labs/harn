@@ -62,6 +62,9 @@ fn visit_node(node: &SNode, diagnostics: &mut Vec<LintDiagnostic>) {
         Node::LetBinding { value, .. } | Node::VarBinding { value, .. } => {
             visit_node(value, diagnostics);
         }
+        Node::ConstBinding { value, .. } => {
+            visit_node(value, diagnostics);
+        }
         Node::ImplBlock { methods, .. } => visit_nodes(methods, diagnostics),
         Node::IfElse {
             condition,

@@ -1,6 +1,7 @@
 mod ast;
 pub mod ast_json;
 pub mod builtin_signatures;
+pub mod const_eval;
 pub mod diagnostic;
 pub mod diagnostic_codes;
 mod parser;

@@ -57,6 +57,9 @@ pub fn walk_children(node: &SNode, visitor: &mut impl FnMut(&SNode)) {
             walk_binding_pattern(pattern, visitor);
             walk_node(value, visitor);
         }
+        Node::ConstBinding { value, .. } => {
+            walk_node(value, visitor);
+        }
         Node::EnumDecl { .. }
         | Node::StructDecl { .. }
         | Node::InterfaceDecl { .. }

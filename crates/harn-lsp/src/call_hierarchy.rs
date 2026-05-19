@@ -599,6 +599,7 @@ fn collect_calls(node: &SNode, calls: &mut Vec<CallSite>) {
         }
         Node::LetBinding { value, .. }
         | Node::VarBinding { value, .. }
+        | Node::ConstBinding { value, .. }
         | Node::ThrowStmt { value }
         | Node::EmitExpr { value } => collect_calls(value, calls),
         Node::ReturnStmt { value } | Node::YieldExpr { value } => {

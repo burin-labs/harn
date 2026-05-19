@@ -32,6 +32,7 @@ impl Parser {
         match &tok.kind {
             TokenKind::At => self.parse_attributed_decl(),
             TokenKind::Let => self.parse_let_binding(),
+            TokenKind::Const => self.parse_const_binding(),
             TokenKind::Var => self.parse_var_binding(),
             TokenKind::If => self.parse_if_else(),
             TokenKind::For => self.parse_for_in(),
@@ -129,6 +130,30 @@ impl Parser {
         Ok(spanned(
             Node::LetBinding {
                 pattern,
+                type_ann,
+                value: Box::new(value),
+            },
+            Span::merge(start, end),
+        ))
+    }
+
+    /// Parse `const NAME [: Type] = EXPR`. Const bindings are restricted to a
+    /// simple identifier on the left-hand side — destructuring patterns are
+    /// disallowed because each constant must have a single, statically known
+    /// name addressable by the const-eval cache. The right-hand side is
+    /// stored verbatim; bounded sandbox validation happens during typecheck
+    /// via `harn_parser::const_eval`.
+    pub(super) fn parse_const_binding(&mut self) -> Result<SNode, ParserError> {
+        let start = self.current_span();
+        self.consume(&TokenKind::Const, "const")?;
+        let name = self.consume_identifier("const binding name")?;
+        let type_ann = self.try_parse_type_annotation()?;
+        self.consume(&TokenKind::Assign, "=")?;
+        let value = self.parse_expression()?;
+        let end = value.span;
+        Ok(spanned(
+            Node::ConstBinding {
+                name,
                 type_ann,
                 value: Box::new(value),
             },

@@ -244,6 +244,7 @@ fn collect_static_tool_surface_from_node(
         }
         Node::LetBinding { value, .. }
         | Node::VarBinding { value, .. }
+        | Node::ConstBinding { value, .. }
         | Node::Assignment { value, .. }
         | Node::ThrowStmt { value }
         | Node::EmitExpr { value }
@@ -1661,7 +1662,9 @@ fn scan_node_preflight(
                 );
             }
         }
-        Node::LetBinding { value, .. } | Node::VarBinding { value, .. } => {
+        Node::LetBinding { value, .. }
+        | Node::VarBinding { value, .. }
+        | Node::ConstBinding { value, .. } => {
             scan_node_preflight(
                 value,
                 file_path,

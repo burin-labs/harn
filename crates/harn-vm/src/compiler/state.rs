@@ -959,7 +959,10 @@ impl Compiler {
         // match list. Keep in step with the import-time init path in
         // `crates/harn-vm/src/vm/imports.rs` (`module_state` construction).
         for sn in program {
-            if matches!(&sn.node, Node::LetBinding { .. } | Node::VarBinding { .. }) {
+            if matches!(
+                &sn.node,
+                Node::LetBinding { .. } | Node::VarBinding { .. } | Node::ConstBinding { .. }
+            ) {
                 self.compile_node(sn)?;
             }
         }
@@ -1197,6 +1200,7 @@ impl Compiler {
         match node {
             Node::LetBinding { .. }
             | Node::VarBinding { .. }
+            | Node::ConstBinding { .. }
             | Node::Assignment { .. }
             | Node::ReturnStmt { .. }
             | Node::FnDecl { .. }

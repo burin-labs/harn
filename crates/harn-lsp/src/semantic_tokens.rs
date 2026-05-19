@@ -49,6 +49,7 @@ fn token_kind_to_semantic(kind: &TokenKind) -> Option<u32> {
         | TokenKind::Extends
         | TokenKind::Override
         | TokenKind::Let
+        | TokenKind::Const
         | TokenKind::Var
         | TokenKind::If
         | TokenKind::Else

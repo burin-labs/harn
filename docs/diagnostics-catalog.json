@@ -90,6 +90,16 @@
       "id": "POL",
       "title": "Runtime policies",
       "count": 2
+    },
+    {
+      "id": "MET",
+      "title": "Compile-time meta restrictions",
+      "count": 1
+    },
+    {
+      "id": "CST",
+      "title": "Const-eval sandbox",
+      "count": 4
     }
   ],
   "codes": [
@@ -2347,6 +2357,51 @@
       "code": "HARN-POL-002",
       "category": "POL",
       "summary": "fail-fast pool has no immediate capacity",
+      "repairs": [],
+      "related": [],
+      "explanationPresent": true,
+      "apiStability": "stable"
+    },
+    {
+      "code": "HARN-MET-001",
+      "category": "MET",
+      "summary": "expression is not permitted in a const initializer",
+      "repairs": [],
+      "related": [],
+      "explanationPresent": true,
+      "apiStability": "stable"
+    },
+    {
+      "code": "HARN-CST-001",
+      "category": "CST",
+      "summary": "const initializer exceeded the step budget",
+      "repairs": [],
+      "related": [],
+      "explanationPresent": true,
+      "apiStability": "stable"
+    },
+    {
+      "code": "HARN-CST-002",
+      "category": "CST",
+      "summary": "const initializer exceeded the recursion depth budget",
+      "repairs": [],
+      "related": [],
+      "explanationPresent": true,
+      "apiStability": "stable"
+    },
+    {
+      "code": "HARN-CST-003",
+      "category": "CST",
+      "summary": "const initializer attempted a sandboxed capability",
+      "repairs": [],
+      "related": [],
+      "explanationPresent": true,
+      "apiStability": "stable"
+    },
+    {
+      "code": "HARN-CST-004",
+      "category": "CST",
+      "summary": "const initializer raised a runtime error during evaluation",
       "repairs": [],
       "related": [],
       "explanationPresent": true,
