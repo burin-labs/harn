@@ -1423,12 +1423,18 @@ the default ranker uses keyword overlap against `query`. Workflow
 nodes may set `context_assembler: {...}` to route the stage's selected
 artifacts through this builtin before the prompt is rendered.
 
-### Transcript reminders
+## Reminders
+
+System reminders are typed, ephemeral `system_reminder` transcript events
+for nudging a running agent without pretending the nudge is user input
+and without adding it to durable messages. They support `ttl_turns`,
+`dedupe_key`, `preserve_on_compact`, `propagate`, and provider-aware
+`role_hint` rendering. Full reference:
+`docs/src/system-reminders.md`.
 
 `transcript.inject_reminder(transcript, options)` appends a pending
-`system_reminder` event to a transcript and returns
-`{transcript, reminder_id, deduped_count}`. The input transcript is
-unchanged and the reminder is not added to durable messages.
+reminder and returns `{transcript, reminder_id, deduped_count}`. The
+input transcript is unchanged.
 
 ```harn
 let injected = transcript.inject_reminder(transcript(), {
@@ -1450,14 +1456,6 @@ reminder with the same `dedupe_key` replaces pending reminders with
 that key and emits `transcript.reminder.deduped` on
 `transcript.reminder.lifecycle` when an EventLog is active.
 
-Sub-agent handoffs carry a filtered `reminder_propagation` list. A
-reminder with `propagate: "all"` is inherited by every descendant
-sub-agent; `propagate: "session"` reaches direct child sub-agents from
-the originating session but inherited copies are not re-forwarded; and
-`propagate: "none"` stays local. Inherited reminders are seeded into the
-child transcript with `source: "inherited"` and
-`originating_agent_id` set to the session that first emitted them.
-
 `transcript.clear_reminders(transcript, selector)` removes pending
 reminders and returns `{transcript, removed_count}`. Select by `id`,
 `tag`, or `dedupe_key`; when multiple selectors are present, all must
@@ -1468,22 +1466,11 @@ let cleared = transcript.clear_reminders(t, {tag: "token_pressure"})
 println(cleared.removed_count)
 ```
 
-During agent-session post-turn processing, finite `ttl_turns` values
-decrement. Reminders that reach zero are removed from transcript events
-and emit `transcript.reminder.expired` on the same lifecycle topic.
-`transcript_compact(...)` also decrements finite reminder TTLs at the
-pre-compaction boundary, drops expired reminders, dedupes matching
-`dedupe_key` values to the newest reminder, and preserves only
-`preserve_on_compact: true` reminders verbatim in the compacted
-transcript. Custom compactors receive surviving reminder payloads as a
-second closure argument: `{ messages, reminders -> ... }`.
-
 `agent_loop(...)` enables canonical reminder providers by default; bare
 `llm_call(...)` does not. Providers are:
 
-- `token_pressure` on `on_budget_threshold` at ~70/85/95% context use
-  (`ttl_turns: 2`, `propagate: "session"`, critical threshold
-  preserves across compaction).
+- `token_pressure` on `on_budget_threshold` at about 70/85/95% context
+  use (`ttl_turns: 2`, critical threshold preserves across compaction).
 - `idle_nudge` on `session_idle` after `idle_seconds` (default 60).
 - `tool_output_truncated` on `post_tool_use` when tool output was
   compacted/truncated before the model saw it.
@@ -1505,6 +1492,29 @@ idle_nudge: {idle_seconds: 120}}}}`. Register Harn-defined providers
 with `register_reminder_provider({id, subscribes_to, evaluate})`; the
 closure receives `{event, session, session_id, payload, options,
 config}` and returns a reminder effect, bare spec, effect list, or `nil`.
+
+Hooks can return `{reminder: {...}, then?: ...}`, a bare reminder spec,
+or a session-hook effect list. Hosts inject ambient context with the
+bridge `session/remind` notification; `session/input` and
+`agent/user_message` remain user-role input.
+
+Rendering is capability-aware: routes that prefer developer-role
+instructions get separate developer messages; Anthropic routes can use
+`role_hint: "user_block"` or `"ephemeral_cache"` as
+`<system-reminder>` user content blocks; XML providers get
+`<system-reminder>` system text; fallback providers get plain
+`System reminder:` system text.
+
+Sub-agent handoffs carry a filtered `reminder_propagation` list.
+`propagate: "all"` reaches descendants, `"session"` reaches direct
+children only, and `"none"` stays local. Compaction decrements finite
+TTLs, drops expired reminders, dedupes by `dedupe_key`, preserves only
+`preserve_on_compact: true`, and passes surviving reminders to custom
+compactors. Gotcha: `preserve_on_compact: false` with no finite
+`ttl_turns` can live forever during normal turns but vanish on
+compaction; `HARN-RMD-004` flags that shape.
+
+## Agent runtime
 
 ### `agent_turn`
 
