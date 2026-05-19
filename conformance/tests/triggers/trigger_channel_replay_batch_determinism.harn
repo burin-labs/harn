@@ -1,0 +1,77 @@
+import "std/triggers"
+
+/**
+ * CH-08 (#1879): the `payload_hash` stamped on every
+ * `channel_emit_receipt` (CH-07 / #1878) is fully content-derived and
+ * independent of trigger flow control, so each constituent emit in a
+ * batched-trigger run produces the same hash on replay as on first
+ * dispatch. Re-emitting the identical payload — even after the
+ * batched-trigger fire that consumed the earlier emits — must produce
+ * the same `payload_hash`. This is the deterministic-replay invariant
+ * the oracle leans on: two runs with identical producer output produce
+ * identical hash sequences, even when intermediate aggregation logic
+ * sits between the emits and the handler.
+ */
+fn handle_batch(event) {
+  let batch_len = if event.batch == nil {
+    0
+  } else {
+    len(event.batch)
+  }
+  emit_channel("ch.replay.batch.fired", {batch_size: batch_len})
+}
+
+pipeline default() {
+  let audit = event_log
+    .subscribe({topic: "lifecycle.channel.audit", kind_prefix: "channel_emit_receipt"})
+  let unique = to_string(to_int(timestamp())) + "-" + to_string(random_int(100000, 999999))
+  let _ = trigger_register(
+    {
+      id: "channel-replay-batch-" + unique,
+      kind: "channel.emit",
+      provider: "channel",
+      autonomy_tier: "act_auto",
+      handler: handle_batch,
+      when: nil,
+      retry: nil,
+      match: {events: ["channel:ch.replay.batch.input"]},
+      events: nil,
+      dedupe_key: nil,
+      filter: nil,
+      batch: {count: 3, window: "10m"},
+      budget: nil,
+      manifest_path: nil,
+      package_name: "conformance",
+    },
+  )
+  // First "wall" of batched emits — fires the handler once.
+  let _ = emit_channel("ch.replay.batch.input", {repo: "harn", seq: 1})
+  let _ = emit_channel("ch.replay.batch.input", {repo: "harn", seq: 2})
+  let _ = emit_channel("ch.replay.batch.input", {repo: "harn", seq: 3})
+  let first_a = audit.next().value
+  let first_b = audit.next().value
+  let first_c = audit.next().value
+  // Drain the nested `ch.replay.batch.fired` receipt the handler emits.
+  let _ = audit.next().value
+  // Replay-equivalent producer wall: identical payloads in identical
+  // order. payload_hash must match the first wall byte-for-byte; only
+  // event_ids differ because emit_channel mints a fresh id per call.
+  let _ = emit_channel("ch.replay.batch.input", {repo: "harn", seq: 1})
+  let _ = emit_channel("ch.replay.batch.input", {repo: "harn", seq: 2})
+  let _ = emit_channel("ch.replay.batch.input", {repo: "harn", seq: 3})
+  let second_a = audit.next().value
+  let second_b = audit.next().value
+  let second_c = audit.next().value
+  // Per-constituent payload_hash equality across runs.
+  println(first_a.payload.payload_hash == second_a.payload.payload_hash)
+  println(first_b.payload.payload_hash == second_b.payload.payload_hash)
+  println(first_c.payload.payload_hash == second_c.payload.payload_hash)
+  // Cross-constituent inequality — distinct payloads inside a single
+  // batch keep distinct hashes, so the oracle can pinpoint which
+  // constituent drifted on a future replay.
+  println(first_a.payload.payload_hash == first_b.payload.payload_hash)
+  println(first_b.payload.payload_hash == first_c.payload.payload_hash)
+  // event_ids are always fresh per emit, even on a "replay" wall, so
+  // the oracle anchors via event_id but compares via payload_hash.
+  println(first_a.payload.event_id == second_a.payload.event_id)
+}

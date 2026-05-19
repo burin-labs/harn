@@ -32,6 +32,29 @@ condensed series summaries instead of full per-patch history.
   (~4.5s for the 9 new fixtures; ~25 fixtures total in the
   tool/preset hook namespace). Part of epic #1884 (Preset tool hooks
   library).
+- **Channel conformance suite (CH-08, #1879).** Closes the channels
+  primitive's executable-spec gap with five new paired fixtures that
+  fill out the CH-01..CH-07 coverage map: `channel_emit_idempotent`
+  (duplicate `emit_channel` with the same explicit `id` is a no-op for
+  trigger fan-out — first emit fires the handler exactly once, second
+  returns `duplicate=true`), `channel_scope_pipeline_siblings`
+  (`scope: "pipeline"` with an explicit `pipeline_id` routes through a
+  shared topic so sibling readers see each other's emits; distinct
+  pipeline ids stay isolated), `trigger_channel_reminder_inject_current`
+  (`ReminderInject` with `target: "current"` gracefully drops with a
+  `target_missing` audit when no agent session is on the current-session
+  stack — the documented failure-mode contract), `trigger_channel_reminder_inject_batched`
+  (a batched channel trigger paired with `ReminderInject` lands exactly
+  one `SystemReminder` per batch dispatch, not per constituent event,
+  and the batch counter resets cleanly after a fire), and
+  `trigger_channel_replay_batch_determinism` (constituent
+  `payload_hash` values match byte-for-byte across "first" and
+  "replay" walls of identical batched emits, while distinct payloads
+  inside a single batch keep distinct hashes so the replay oracle can
+  pinpoint which constituent drifted). All fixtures use the deterministic
+  `mock_time(...)` / `advance_time(...)` / `flush_trigger_aggregations()`
+  pattern — no wall-clock sleeps. Brings the `cargo run --bin harn --
+  test conformance --filter channel` count from 23 to 28.
 - **Pool tasks wired into `harness.unsettled_state()` (#2007).** Closes
   the PL-07 follow-up from #2008: `UnsettledStateSnapshot` now carries a
   `pool_pending_tasks` bucket fed by a new
