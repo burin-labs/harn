@@ -1911,6 +1911,175 @@ Regular functions that contain `yield` keep producing `Generator<T>`;
 `gen fn` produces `Stream<T>`. Throws inside a stream body propagate to
 the consumer at the pull site (`for`, `.next()`, or `.iter()`).
 
+### Durable agent channels
+
+Durable agent channels (epic #1870) are distinct from the in-process
+`channel(...)` primitive above. Where in-process channels are typed
+mailboxes between concurrent tasks inside one VM, durable channels are
+a typed pub/sub primitive that writes to the active EventLog and fans
+each emit out to every matching `channel.emit` trigger binding. They
+survive process restarts, feed the replay oracle, and show up in the
+action graph alongside webhook and cron events.
+
+#### Emit
+
+The runtime exposes two builtins. `emit_channel(name, payload,
+options?)` appends one event to the channel's EventLog topic and
+returns a `ChannelEmitReceipt`. `channel_events(name, options?)` reads
+the topic oldest-first for tests and diagnostics. Reference shapes are
+in `docs/src/builtins.md`; full prose is in `docs/src/agent-channels.md`.
+
+A channel `name` resolves into the canonical form
+`<scope>:<scope_id>:<name>`. Bare names default to **tenant** scope
+(`tenant:<current-tenant-or-default>:<name>`). Prefixes select an
+explicit scope: `session:<name>`, `pipeline:<name>`, `tenant:<name>`,
+`tenant:<tenant_id>:<name>`. The `org:<org_id>:<name>` prefix is
+reserved but currently rejected with `HARN-CHN-002` until org grants
+ship.
+
+#### `ChannelScope`
+
+The scope enum is:
+
+```text
+ChannelScope ::= "session" | "pipeline" | "tenant" | "org"
+```
+
+- `session` events live in a per-process in-memory log; they are
+  cleared by `reset_channel_state()` and do not cross process boundaries.
+- `pipeline` and `tenant` events use the active durable EventLog; the
+  resolver returns `HARN-CHN-001` if `pipeline:` is used without an
+  active pipeline context.
+- `org` is reserved; v1 always returns `HARN-CHN-002`.
+
+Cross-scope isolation is automatic: distinct `tenant_id`, `session_id`,
+or `pipeline_id` values resolve to distinct topics, so readers against
+the wrong scope id see an empty view. Explicit `options.session_id` or
+`options.pipeline_id` that conflict with the active runtime context
+fail with `HARN-CHN-004` rather than silently overriding.
+
+#### Idempotency and signed timestamps
+
+`options.id` makes the emit idempotent. Re-emitting the same
+(`name_resolved`, `id`) pair returns the original `event_id` with
+`duplicate: true`. The receipt's `emitted_at` field is a signed
+timestamp: HMAC-SHA-256 over `(at_ms, event_id, name_resolved, scope,
+scope_id, emitted_by)` with a per-process salt and `algorithm:
+"hmac-sha256"`. The replay oracle uses this to detect timestamp
+tampering across runs.
+
+#### `channel.emit` trigger source
+
+Trigger bindings subscribe to channel events with `provider: "channel"`,
+`kind: "channel.emit"`, and `match.events: ["channel:<selector>"]`.
+The selector accepts the same scope prefixes as `emit_channel`:
+
+```text
+ChannelSelector ::= "channel:" Name
+                  | "channel:session:" Name
+                  | "channel:pipeline:" Name
+                  | "channel:tenant:" TenantId ":" Name
+```
+
+The dispatched `TriggerEvent` carries the emit's `payload` verbatim at
+`event.provider_payload.payload`; `event.batch` is `nil` for ordinary
+single-event dispatches and populated for batched bindings (next
+section).
+
+#### `batch { count, window, key?, expire_action? }` (`BatchFilter`)
+
+A trigger binding may declare aggregation:
+
+```text
+BatchFilter ::= {
+  count: int (> 0),
+  window: DurationString,
+  key?: string,                  // dotted JSON path into payload
+  expire_action?: "fire_partial" | "discard"   // default "fire_partial"
+}
+```
+
+Semantics:
+
+- Each filter-passing event increments a per-(`binding`, `partition_key`)
+  counter. Reaching `count` invokes the handler with `event.batch`
+  populated to the buffered list and resets the counter.
+- `key` partitions counters by the stringified value at that JSON path
+  into the channel payload. Missing paths fall back to one shared
+  bucket (matches `SpawnToPool`'s "missing path = default" pattern).
+- When the window elapses without reaching `count`, `expire_action`
+  decides: `fire_partial` invokes the handler with whatever was
+  buffered; `discard` drops the buffer silently.
+- Buffers are per-process thread-local and capped at 1024 events per
+  partition. Overflow drops the oldest entries with a structured
+  `triggers.aggregation.buffer_overflow` warning.
+- Window expiration is driven by an implicit sweep at every emit and
+  by the explicit `flush_trigger_aggregations()` builtin; the latter
+  is the test affordance and pairs with `mock_time(...)` /
+  `advance_time(...)`.
+
+Malformed configs (missing fields, non-positive `count`, unknown
+`expire_action`, wrong-typed `key`) raise `HARN-CHN-005`.
+
+#### `ReminderInjectHandler`
+
+`ReminderInject(options)` (from `std/triggers`) constructs a handler-
+variant dict that, on match, injects a `SystemReminder` event (see
+`docs/src/system-reminders.md`) into the target session's transcript
+at the next turn boundary. It is the orthogonal counterpart to
+`SpawnToPool` — no spawn, no resume, no signal; the target session
+keeps running and receives the typed context at the next post-turn
+lifecycle pass.
+
+```text
+ReminderInjectHandler ::= {
+  kind: "reminder_inject",
+  target: "current" | "parent" | SessionId | (event -> SessionId?),
+  body: PromptTemplate,                    // .harn.prompt
+  tags?: list<string>,
+  ttl_turns?: int,
+  dedupe_key?: string,
+  propagate?: "none" | "session",
+  role_hint?: "user" | "developer",
+  preserve_on_compact?: bool
+}
+```
+
+`body` is rendered against `{{ event }}` (the full `TriggerEvent`),
+`{{ match }}` (`matched_at`), and `{{ batch }}` (the constituent list
+when batching is in effect). Missing target sessions are dropped
+gracefully with a `triggers.reminder_inject.audit` audit entry rather
+than failing dispatch.
+
+#### Observability
+
+Channel activity is published on three EventLog topics:
+
+| Topic | Schema | Purpose |
+|---|---|---|
+| `lifecycle.channel.audit` | `harn.channel_emit_receipt.v1`, `harn.channel_match_receipt.v1`, `harn.channel_guardrail_audit.v1` | Durable replay/audit. One receipt per emit, per match, and per guardrail verdict. |
+| `transcript.channel.lifecycle` | `transcript.channel.emit`, `transcript.channel.match` | Per-emit and per-match transcript events for live rendering. |
+| `channels.<scope>.<scope_id>.<name>` | `StoredChannelEvent` | The events themselves, addressable via `event_log.subscribe(...)`. |
+
+Every emit opens an OTel `channel.emit <name_resolved>` span; every
+match opens `channel.match <name_resolved>` and links back to the
+emit span via trace/span ids propagated on the trigger event headers
+(this propagation passes through `batch` aggregation, so a batched
+match links to all constituent emit spans).
+
+#### Replay determinism
+
+The replay oracle consumes `lifecycle.channel.audit` to detect:
+
+- `HARN-REP-CHN-001` — replay matched an `event_id` with no recorded receipt.
+- `HARN-REP-CHN-002` — payload hash drift on a replayed emit (producer-
+  side nondeterminism).
+- `HARN-REP-CHN-003` — batched match constituent ids differ across runs.
+
+See `docs/src/observability/replay-benchmarks.md` for the oracle
+interface. The user-facing reference is `docs/src/agent-channels.md`;
+runnable patterns live in `docs/src/cookbooks/channels.md`.
+
 ## Error model
 
 ### throw
@@ -4551,6 +4720,16 @@ programs.
 | `HARN-OAU-001` | A persisted sink redacted an OAuth-shaped token (transcript / receipt / OTel / system reminder). The original value still flows through to the tool — redaction is display-only. |
 | `HARN-OAU-002` | `std/oauth/client` cannot refresh because no `refresh_token` is in storage (or the server rejected the refresh). Re-run `start_authorization` / `device_flow`. |
 | `HARN-OAU-005` | `std/oauth/dynamic_registration` rejected a candidate client metadata document under RFC 7591 §2. |
+
+#### Durable agent channels diagnostics (`HARN-CHN-*`)
+
+| Code | Description |
+|---|---|
+| `HARN-CHN-001` | `pipeline:` scope used outside any active pipeline context. |
+| `HARN-CHN-002` | Cross-tenant `emit_channel` without a grant, or `org:` scope (disabled in v1 until org grants are available). |
+| `HARN-CHN-003` | Malformed channel name, scope prefix, or scope id. |
+| `HARN-CHN-004` | Scope ambiguous — explicit `options.session_id` or `options.pipeline_id` conflicts with the active runtime context. |
+| `HARN-CHN-005` | Malformed `batch` config on a `trigger_register` call (missing `count`/`window`, non-positive `count`, unknown `expire_action`, or wrong-typed `key`). |
 
 ## OAuth
 

@@ -116,6 +116,8 @@
 - [Trigger dispatcher](./triggers/dispatcher.md)
 - [Trigger registry](./triggers/registry.md)
 - [Webhook intake substrate](./triggers/webhook-intake.md)
+- [Agent channels](./agent-channels.md)
+  - [Channel cookbook](./cookbooks/channels.md)
 - [Orchestrator](./orchestrator.md)
 - [Hot reload](./orchestrator/hot-reload.md)
 - [Orchestrator DLQ management](./orchestrator/dlq.md)
