@@ -206,6 +206,13 @@ pub struct CompactReport {
     pub checkpointed: bool,
 }
 
+#[derive(Clone, Debug, PartialEq)]
+pub struct AppendOutcome {
+    pub event_id: EventId,
+    pub event: LogEvent,
+    pub inserted: bool,
+}
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct EventLogDescription {
     pub backend: EventLogBackendKind,
@@ -439,6 +446,28 @@ impl AnyEventLog {
             Self::Sqlite(log) => log.topics(),
         }
     }
+
+    pub async fn append_idempotent_by_header(
+        &self,
+        topic: &Topic,
+        header: &str,
+        value: &str,
+        event: LogEvent,
+    ) -> Result<AppendOutcome, LogError> {
+        if header.trim().is_empty() {
+            return Err(LogError::Config(
+                "idempotent append header cannot be empty".to_string(),
+            ));
+        }
+        match self {
+            Self::Memory(log) => {
+                log.append_idempotent_by_header(topic, header, value, event)
+                    .await
+            }
+            Self::File(log) => log.append_idempotent_by_header(topic, header, value, event),
+            Self::Sqlite(log) => log.append_idempotent_by_header(topic, header, value, event),
+        }
+    }
 }
 
 impl EventLog for AnyEventLog {
@@ -629,6 +658,24 @@ fn stream_from_broadcast(
     Box::pin(ReceiverStream::new(rx))
 }
 
+fn prepare_event_after(
+    topic: &Topic,
+    event_id: EventId,
+    previous: Option<(EventId, &LogEvent)>,
+    event: LogEvent,
+) -> Result<LogEvent, LogError> {
+    let previous_hash = previous
+        .map(|(previous_id, previous_event)| {
+            crate::provenance::event_record_hash_from_headers(
+                topic.as_str(),
+                previous_id,
+                previous_event,
+            )
+        })
+        .transpose()?;
+    crate::provenance::prepare_event_for_append(topic.as_str(), event_id, previous_hash, event)
+}
+
 #[derive(Default)]
 struct MemoryState {
     topics: HashMap<String, VecDeque<(EventId, LogEvent)>>,
@@ -661,6 +708,56 @@ impl MemoryEventLog {
         topics.sort_by(|left, right| left.as_str().cmp(right.as_str()));
         Ok(topics)
     }
+
+    async fn append_idempotent_by_header(
+        &self,
+        topic: &Topic,
+        header: &str,
+        value: &str,
+        event: LogEvent,
+    ) -> Result<AppendOutcome, LogError> {
+        let mut state = self.state.lock().await;
+        if let Some((event_id, existing)) = state
+            .topics
+            .get(topic.as_str())
+            .into_iter()
+            .flat_map(|events| events.iter())
+            .find(|(_, event)| {
+                event
+                    .headers
+                    .get(header)
+                    .is_some_and(|found| found == value)
+            })
+        {
+            return Ok(AppendOutcome {
+                event_id: *event_id,
+                event: existing.clone(),
+                inserted: false,
+            });
+        }
+
+        let event_id = state.latest.get(topic.as_str()).copied().unwrap_or(0) + 1;
+        let previous = state
+            .topics
+            .get(topic.as_str())
+            .and_then(|events| events.back())
+            .map(|(previous_id, previous_event)| (*previous_id, previous_event));
+        let event = prepare_event_after(topic, event_id, previous, event)?;
+        state.latest.insert(topic.as_str().to_string(), event_id);
+        state
+            .topics
+            .entry(topic.as_str().to_string())
+            .or_default()
+            .push_back((event_id, event.clone()));
+        drop(state);
+        self.broadcasts
+            .publish(topic, self.queue_depth, (event_id, event.clone()));
+        Ok(AppendOutcome {
+            event_id,
+            event,
+            inserted: true,
+        })
+    }
 }
 
 impl EventLog for MemoryEventLog {
@@ -676,24 +773,12 @@ impl EventLog for MemoryEventLog {
     async fn append(&self, topic: &Topic, event: LogEvent) -> Result<EventId, LogError> {
         let mut state = self.state.lock().await;
         let event_id = state.latest.get(topic.as_str()).copied().unwrap_or(0) + 1;
-        let previous_hash = state
+        let previous = state
             .topics
             .get(topic.as_str())
             .and_then(|events| events.back())
-            .map(|(previous_id, previous_event)| {
-                crate::provenance::event_record_hash_from_headers(
-                    topic.as_str(),
-                    *previous_id,
-                    previous_event,
-                )
-            })
-            .transpose()?;
-        let event = crate::provenance::prepare_event_for_append(
-            topic.as_str(),
-            event_id,
-            previous_hash,
-            event,
-        )?;
+            .map(|(previous_id, previous_event)| (*previous_id, previous_event));
+        let event = prepare_event_after(topic, event_id, previous, event)?;
         state.latest.insert(topic.as_str().to_string(), event_id);
         state
             .topics
@@ -906,6 +991,77 @@ impl FileEventLog {
         topics.sort_by(|left, right| left.as_str().cmp(right.as_str()));
         Ok(topics)
     }
+
+    fn append_idempotent_by_header(
+        &self,
+        topic: &Topic,
+        header: &str,
+        value: &str,
+        event: LogEvent,
+    ) -> Result<AppendOutcome, LogError> {
+        let _guard = self
+            .write_lock
+            .lock()
+            .expect("file event log write lock poisoned");
+        let existing_events = self.read_range_sync(topic, None, usize::MAX)?;
+        if let Some((event_id, existing)) = existing_events.iter().find(|(_, event)| {
+            event
+                .headers
+                .get(header)
+                .is_some_and(|found| found == value)
+        }) {
+            return Ok(AppendOutcome {
+                event_id: *event_id,
+                event: existing.clone(),
+                inserted: false,
+            });
+        }
+
+        let next_id = self.latest_id_for_topic(topic)? + 1;
+        let previous = existing_events
+            .last()
+            .map(|(previous_id, previous_event)| (*previous_id, previous_event));
+        let event = prepare_event_after(topic, next_id, previous, event)?;
+        self.append_record_locked(topic, next_id, event)
+    }
+
+    fn append_record_locked(
+        &self,
+        topic: &Topic,
+        event_id: EventId,
+        event: LogEvent,
+    ) -> Result<AppendOutcome, LogError> {
+        let record = FileRecord {
+            id: event_id,
+            event: event.clone(),
+        };
+        let path = self.topic_path(topic);
+        if let Some(parent) = path.parent() {
+            std::fs::create_dir_all(parent)
+                .map_err(|error| LogError::Io(format!("event log mkdir error: {error}")))?;
+        }
+        let line = serde_json::to_string(&record)
+            .map_err(|error| LogError::Serde(format!("event log encode error: {error}")))?;
+        use std::io::Write as _;
+        let mut file = std::fs::OpenOptions::new()
+            .create(true)
+            .append(true)
+            .open(&path)
+            .map_err(|error| LogError::Io(format!("event log open error: {error}")))?;
+        writeln!(file, "{line}")
+            .map_err(|error| LogError::Io(format!("event log write error: {error}")))?;
+        self.latest_ids
+            .lock()
+            .expect("file event log latest ids poisoned")
+            .insert(topic.as_str().to_string(), event_id);
+        self.broadcasts
+            .publish(topic, self.queue_depth, (event_id, event.clone()));
+        Ok(AppendOutcome {
+            event_id,
+            event,
+            inserted: true,
+        })
+    }
 }
 
 fn read_file_records(path: &Path) -> Result<Vec<FileRecord>, LogError> {
@@ -952,49 +1108,13 @@ impl EventLog for FileEventLog {
             .lock()
             .expect("file event log write lock poisoned");
         let next_id = self.latest_id_for_topic(topic)? + 1;
-        let previous_hash = self
-            .read_range_sync(topic, None, usize::MAX)?
+        let existing_events = self.read_range_sync(topic, None, usize::MAX)?;
+        let previous = existing_events
             .last()
-            .map(|(previous_id, previous_event)| {
-                crate::provenance::event_record_hash_from_headers(
-                    topic.as_str(),
-                    *previous_id,
-                    previous_event,
-                )
-            })
-            .transpose()?;
-        let event = crate::provenance::prepare_event_for_append(
-            topic.as_str(),
-            next_id,
-            previous_hash,
-            event,
-        )?;
-        let record = FileRecord {
-            id: next_id,
-            event: event.clone(),
-        };
-        let path = self.topic_path(topic);
-        if let Some(parent) = path.parent() {
-            std::fs::create_dir_all(parent)
-                .map_err(|error| LogError::Io(format!("event log mkdir error: {error}")))?;
-        }
-        let line = serde_json::to_string(&record)
-            .map_err(|error| LogError::Serde(format!("event log encode error: {error}")))?;
-        use std::io::Write as _;
-        let mut file = std::fs::OpenOptions::new()
-            .create(true)
-            .append(true)
-            .open(&path)
-            .map_err(|error| LogError::Io(format!("event log open error: {error}")))?;
-        writeln!(file, "{line}")
-            .map_err(|error| LogError::Io(format!("event log write error: {error}")))?;
-        self.latest_ids
-            .lock()
-            .expect("file event log latest ids poisoned")
-            .insert(topic.as_str().to_string(), next_id);
-        self.broadcasts
-            .publish(topic, self.queue_depth, (next_id, event));
-        Ok(next_id)
+            .map(|(previous_id, previous_event)| (*previous_id, previous_event));
+        let event = prepare_event_after(topic, next_id, previous, event)?;
+        self.append_record_locked(topic, next_id, event)
+            .map(|outcome| outcome.event_id)
     }
 
     async fn flush(&self) -> Result<(), LogError> {
@@ -1172,6 +1292,14 @@ impl SqliteEventLog {
                     cursor INTEGER NOT NULL,
                     updated_at_ms INTEGER NOT NULL,
                     PRIMARY KEY (topic, consumer_id)
+                );
+                CREATE TABLE IF NOT EXISTS event_idempotency_keys (
+                    topic TEXT NOT NULL,
+                    key TEXT NOT NULL,
+                    value TEXT NOT NULL,
+                    event_id INTEGER NOT NULL,
+                    PRIMARY KEY (topic, key, value),
+                    FOREIGN KEY (topic, event_id) REFERENCES events(topic, event_id)
                 );",
             )
             .map_err(|error| LogError::Sqlite(format!("event log schema error: {error}")))?;
@@ -1203,6 +1331,166 @@ impl SqliteEventLog {
             })?)?);
         }
         Ok(topics)
+    }
+
+    fn append_idempotent_by_header(
+        &self,
+        topic: &Topic,
+        header: &str,
+        value: &str,
+        event: LogEvent,
+    ) -> Result<AppendOutcome, LogError> {
+        let mut connection = self
+            .connection
+            .lock()
+            .expect("sqlite event log connection poisoned");
+        let tx = connection
+            .transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)
+            .map_err(|error| LogError::Sqlite(format!("event log transaction error: {error}")))?;
+
+        let existing = tx
+            .query_row(
+                "SELECT e.event_id, e.kind, e.payload, e.headers, e.occurred_at_ms
+                 FROM event_idempotency_keys k
+                 JOIN events e ON e.topic = k.topic AND e.event_id = k.event_id
+                 WHERE k.topic = ?1 AND k.key = ?2 AND k.value = ?3",
+                params![topic.as_str(), header, value],
+                |row| {
+                    let payload = sqlite_json_bytes_for_row(row, 2, "payload")?;
+                    let headers: String = row.get(3)?;
+                    Ok((
+                        sqlite_i64_to_event_id_for_row(row.get::<_, i64>(0)?)?,
+                        LogEvent {
+                            kind: row.get(1)?,
+                            payload: serde_json::from_slice(&payload).map_err(|error| {
+                                rusqlite::Error::FromSqlConversionFailure(
+                                    payload.len(),
+                                    rusqlite::types::Type::Blob,
+                                    Box::new(error),
+                                )
+                            })?,
+                            headers: serde_json::from_str(&headers).map_err(|error| {
+                                rusqlite::Error::FromSqlConversionFailure(
+                                    headers.len(),
+                                    rusqlite::types::Type::Text,
+                                    Box::new(error),
+                                )
+                            })?,
+                            occurred_at_ms: row.get(4)?,
+                        },
+                    ))
+                },
+            )
+            .optional()
+            .map_err(|error| {
+                LogError::Sqlite(format!("event log idempotency read error: {error}"))
+            })?;
+
+        if let Some((event_id, event)) = existing {
+            return Ok(AppendOutcome {
+                event_id,
+                event,
+                inserted: false,
+            });
+        }
+
+        tx.execute(
+            "INSERT OR IGNORE INTO topic_heads(topic, last_id) VALUES (?1, 0)",
+            params![topic.as_str()],
+        )
+        .map_err(|error| LogError::Sqlite(format!("event log head init error: {error}")))?;
+        tx.execute(
+            "UPDATE topic_heads SET last_id = last_id + 1 WHERE topic = ?1",
+            params![topic.as_str()],
+        )
+        .map_err(|error| LogError::Sqlite(format!("event log head update error: {error}")))?;
+        let event_id = tx
+            .query_row(
+                "SELECT last_id FROM topic_heads WHERE topic = ?1",
+                params![topic.as_str()],
+                |row| row.get::<_, i64>(0),
+            )
+            .map_err(|error| LogError::Sqlite(format!("event log head read error: {error}")))
+            .and_then(sqlite_i64_to_event_id)?;
+        let event_id_sql = event_id_to_sqlite_i64(event_id)?;
+        let previous = tx
+            .query_row(
+                "SELECT event_id, kind, payload, headers, occurred_at_ms
+                 FROM events
+                 WHERE topic = ?1 AND event_id < ?2
+                 ORDER BY event_id DESC
+                 LIMIT 1",
+                params![topic.as_str(), event_id_sql],
+                |row| {
+                    let payload = sqlite_json_bytes_for_row(row, 2, "payload")?;
+                    let headers: String = row.get(3)?;
+                    Ok((
+                        sqlite_i64_to_event_id_for_row(row.get::<_, i64>(0)?)?,
+                        LogEvent {
+                            kind: row.get(1)?,
+                            payload: serde_json::from_slice(&payload).map_err(|error| {
+                                rusqlite::Error::FromSqlConversionFailure(
+                                    payload.len(),
+                                    rusqlite::types::Type::Blob,
+                                    Box::new(error),
+                                )
+                            })?,
+                            headers: serde_json::from_str(&headers).map_err(|error| {
+                                rusqlite::Error::FromSqlConversionFailure(
+                                    headers.len(),
+                                    rusqlite::types::Type::Text,
+                                    Box::new(error),
+                                )
+                            })?,
+                            occurred_at_ms: row.get(4)?,
+                        },
+                    ))
+                },
+            )
+            .optional()
+            .map_err(|error| LogError::Sqlite(format!("event log previous read error: {error}")))?;
+        let event = prepare_event_after(
+            topic,
+            event_id,
+            previous
+                .as_ref()
+                .map(|(previous_id, previous_event)| (*previous_id, previous_event)),
+            event,
+        )?;
+        tx.execute(
+            "INSERT INTO events(topic, event_id, kind, payload, headers, occurred_at_ms)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+            params![
+                topic.as_str(),
+                event_id_sql,
+                event.kind,
+                serde_json::to_vec(&event.payload).map_err(|error| LogError::Serde(format!(
+                    "event log payload encode error: {error}"
+                )))?,
+                serde_json::to_string(&event.headers).map_err(|error| LogError::Serde(format!(
+                    "event log headers encode error: {error}"
+                )))?,
+                event.occurred_at_ms
+            ],
+        )
+        .map_err(|error| LogError::Sqlite(format!("event log insert error: {error}")))?;
+        tx.execute(
+            "INSERT INTO event_idempotency_keys(topic, key, value, event_id)
+             VALUES (?1, ?2, ?3, ?4)",
+            params![topic.as_str(), header, value, event_id_sql],
+        )
+        .map_err(|error| {
+            LogError::Sqlite(format!("event log idempotency insert error: {error}"))
+        })?;
+        tx.commit()
+            .map_err(|error| LogError::Sqlite(format!("event log commit error: {error}")))?;
+        self.broadcasts
+            .publish(topic, self.queue_depth, (event_id, event.clone()));
+        Ok(AppendOutcome {
+            event_id,
+            event,
+            inserted: true,
+        })
     }
 }
 
@@ -1279,20 +1567,12 @@ impl EventLog for SqliteEventLog {
             )
             .optional()
             .map_err(|error| LogError::Sqlite(format!("event log previous read error: {error}")))?;
-        let previous_hash = previous
-            .as_ref()
-            .map(|(previous_id, previous_event)| {
-                crate::provenance::event_record_hash_from_headers(
-                    topic.as_str(),
-                    *previous_id,
-                    previous_event,
-                )
-            })
-            .transpose()?;
-        let event = crate::provenance::prepare_event_for_append(
-            topic.as_str(),
+        let event = prepare_event_after(
+            topic,
             event_id,
-            previous_hash,
+            previous
+                .as_ref()
+                .map(|(previous_id, previous_event)| (*previous_id, previous_event)),
             event,
         )?;
         tx.execute(
@@ -1511,6 +1791,14 @@ impl EventLog for SqliteEventLog {
             .lock()
             .expect("sqlite event log connection poisoned");
         let before_sql = event_id_to_sqlite_i64(before)?;
+        connection
+            .execute(
+                "DELETE FROM event_idempotency_keys WHERE topic = ?1 AND event_id <= ?2",
+                params![topic.as_str(), before_sql],
+            )
+            .map_err(|error| {
+                LogError::Sqlite(format!("event log idempotency compact error: {error}"))
+            })?;
         let removed = connection
             .execute(
                 "DELETE FROM events WHERE topic = ?1 AND event_id <= ?2",
@@ -1703,6 +1991,44 @@ mod tests {
         assert_eq!(events.last().unwrap().0, 10_000);
     }
 
+    async fn exercise_idempotent_append(log: Arc<AnyEventLog>) {
+        let topic = Topic::new("channel.tenant.default.pr").unwrap();
+        let mut first_headers = BTreeMap::new();
+        first_headers.insert("harn.channel.id".to_string(), "event-1".to_string());
+        let first = log
+            .append_idempotent_by_header(
+                &topic,
+                "harn.channel.id",
+                "event-1",
+                LogEvent::new("channel.emit", serde_json::json!({"n": 1}))
+                    .with_headers(first_headers),
+            )
+            .await
+            .unwrap();
+        assert!(first.inserted);
+        assert_eq!(first.event_id, 1);
+
+        let mut duplicate_headers = BTreeMap::new();
+        duplicate_headers.insert("harn.channel.id".to_string(), "event-1".to_string());
+        let duplicate = log
+            .append_idempotent_by_header(
+                &topic,
+                "harn.channel.id",
+                "event-1",
+                LogEvent::new("channel.emit", serde_json::json!({"n": 2}))
+                    .with_headers(duplicate_headers),
+            )
+            .await
+            .unwrap();
+        assert!(!duplicate.inserted);
+        assert_eq!(duplicate.event_id, first.event_id);
+        assert_eq!(duplicate.event.payload, serde_json::json!({"n": 1}));
+
+        let events = log.read_range(&topic, None, usize::MAX).await.unwrap();
+        assert_eq!(events.len(), 1);
+        assert_eq!(events[0].0, first.event_id);
+    }
+
     #[tokio::test(flavor = "current_thread")]
     async fn memory_backend_supports_append_read_subscribe_and_compact() {
         let log = Arc::new(AnyEventLog::Memory(MemoryEventLog::new(8)));
@@ -1734,6 +2060,12 @@ mod tests {
         let compact = log.compact(&topic, first).await.unwrap();
         assert_eq!(compact.removed, 1);
         assert_eq!(compact.remaining, 1);
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn memory_backend_idempotent_append_returns_original_event() {
+        let log = Arc::new(AnyEventLog::Memory(MemoryEventLog::new(8)));
+        exercise_idempotent_append(log).await;
     }
 
     #[tokio::test(flavor = "current_thread")]
@@ -1807,6 +2139,15 @@ mod tests {
     }
 
     #[tokio::test(flavor = "current_thread")]
+    async fn file_backend_idempotent_append_returns_original_event() {
+        let dir = tempfile::tempdir().unwrap();
+        let log = Arc::new(AnyEventLog::File(
+            FileEventLog::open(dir.path().to_path_buf(), 8).unwrap(),
+        ));
+        exercise_idempotent_append(log).await;
+    }
+
+    #[tokio::test(flavor = "current_thread")]
     async fn sqlite_backend_persists_and_checkpoints_after_compact() {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("events.sqlite");
@@ -1845,6 +2186,50 @@ mod tests {
         assert!(compact.checkpointed);
         let wal = PathBuf::from(format!("{}-wal", path.display()));
         assert!(file_size(&wal) == 0 || !wal.exists());
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn sqlite_backend_idempotent_append_returns_original_event() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("events.sqlite");
+        let log = Arc::new(AnyEventLog::Sqlite(SqliteEventLog::open(path, 8).unwrap()));
+        exercise_idempotent_append(log).await;
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn sqlite_backend_compacts_idempotency_keys_with_events() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("events.sqlite");
+        let log = Arc::new(AnyEventLog::Sqlite(SqliteEventLog::open(path, 8).unwrap()));
+        let topic = Topic::new("channel.tenant.default.compacted").unwrap();
+        let mut headers = BTreeMap::new();
+        headers.insert("harn.channel.id".to_string(), "event-1".to_string());
+        let first = log
+            .append_idempotent_by_header(
+                &topic,
+                "harn.channel.id",
+                "event-1",
+                LogEvent::new("channel.emit", serde_json::json!({"n": 1})).with_headers(headers),
+            )
+            .await
+            .unwrap();
+        log.compact(&topic, first.event_id).await.unwrap();
+
+        let mut replacement_headers = BTreeMap::new();
+        replacement_headers.insert("harn.channel.id".to_string(), "event-1".to_string());
+        let replacement = log
+            .append_idempotent_by_header(
+                &topic,
+                "harn.channel.id",
+                "event-1",
+                LogEvent::new("channel.emit", serde_json::json!({"n": 2}))
+                    .with_headers(replacement_headers),
+            )
+            .await
+            .unwrap();
+        assert!(replacement.inserted);
+        assert!(replacement.event_id > first.event_id);
+        assert_eq!(replacement.event.payload, serde_json::json!({"n": 2}));
     }
 
     #[tokio::test(flavor = "current_thread")]

@@ -1,0 +1,17 @@
+pipeline default() {
+  let session = emit_channel("scoped.session", {}, {scope: "session", id: "scope-session"})
+  let prefixed = emit_channel("session:scoped.prefixed", {}, {id: "scope-prefix"})
+  println(session.name_resolved)
+  println(prefixed.name_resolved)
+  println(channel_events("scoped.session", {scope: "session"})[0].id)
+  let missing_pipeline = try {
+    emit_channel("pipeline:needs.context", {}, {id: "scope-pipeline"})
+  }
+  println(is_err(missing_pipeline))
+  println(contains(to_string(unwrap_err(missing_pipeline)), "HARN-CHN-001"))
+  let org_disabled = try {
+    emit_channel("org:burin-labs:pr.merged", {}, {id: "scope-org"})
+  }
+  println(is_err(org_disabled))
+  println(contains(to_string(unwrap_err(org_disabled)), "HARN-CHN-002"))
+}

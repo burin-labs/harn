@@ -1,0 +1,7 @@
+session:task_root:scoped.session
+session:task_root:scoped.prefixed
+scope-session
+true
+true
+true
+true
