@@ -73,6 +73,7 @@ pub struct UnsettledStateSnapshot {
     pub queued_triggers: Vec<Value>,
     pub partial_handoffs: Vec<Value>,
     pub in_flight_llm_calls: Vec<Value>,
+    pub pool_pending_tasks: Vec<Value>,
 }
 
 impl UnsettledStateSnapshot {
@@ -81,6 +82,7 @@ impl UnsettledStateSnapshot {
             && self.queued_triggers.is_empty()
             && self.partial_handoffs.is_empty()
             && self.in_flight_llm_calls.is_empty()
+            && self.pool_pending_tasks.is_empty()
     }
 
     pub fn to_json(&self) -> Value {
@@ -89,6 +91,7 @@ impl UnsettledStateSnapshot {
             "queued_triggers": self.queued_triggers,
             "partial_handoffs": self.partial_handoffs,
             "in_flight_llm_calls": self.in_flight_llm_calls,
+            "pool_pending_tasks": self.pool_pending_tasks,
         })
     }
 
@@ -98,6 +101,7 @@ impl UnsettledStateSnapshot {
             "queued": self.queued_triggers.len(),
             "partial": self.partial_handoffs.len(),
             "in_flight": self.in_flight_llm_calls.len(),
+            "pool_pending": self.pool_pending_tasks.len(),
         })
     }
 
@@ -106,11 +110,12 @@ impl UnsettledStateSnapshot {
         let queued = self.queued_triggers.len();
         let partial = self.partial_handoffs.len();
         let in_flight = self.in_flight_llm_calls.len();
-        if suspended == 0 && queued == 0 && partial == 0 && in_flight == 0 {
+        let pool_pending = self.pool_pending_tasks.len();
+        if suspended == 0 && queued == 0 && partial == 0 && in_flight == 0 && pool_pending == 0 {
             "no unsettled work".to_string()
         } else {
             format!(
-                "unsettled work: {suspended} suspended subagents, {queued} queued triggers, {partial} partial handoffs, {in_flight} in-flight llm calls"
+                "unsettled work: {suspended} suspended subagents, {queued} queued triggers, {partial} partial handoffs, {in_flight} in-flight llm calls, {pool_pending} pool pending tasks"
             )
         }
     }
@@ -136,6 +141,7 @@ fn unsettled_state_snapshot_base(queued_triggers: Vec<Value>) -> UnsettledStateS
         queued_triggers,
         partial_handoffs: partial_handoff_snapshot_json(),
         in_flight_llm_calls: crate::llm::snapshot_in_flight_llm_calls(),
+        pool_pending_tasks: crate::stdlib::pool::snapshot_pending_tasks(),
     }
 }
 

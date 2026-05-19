@@ -2635,6 +2635,69 @@ pub fn reset_pool_state() {
     POOL_NAMES.with(|names| names.borrow_mut().clear());
 }
 
+/// Snapshot every pool task that has not yet reached a terminal state.
+///
+/// Powers the `pool_pending_tasks` bucket on
+/// `UnsettledStateSnapshot` so pipeline `on_finish` callbacks (drain,
+/// abandon, handoff presets) can observe pool work alongside suspended
+/// sub-agents, queued triggers, partial handoffs, and in-flight LLM
+/// calls. Walks the thread-local `POOLS` registry once, emitting one
+/// JSON entry per task whose status is `queued` or `running`. Order is
+/// pool-id ascending, then queued tasks in queue order followed by
+/// running tasks in `tasks` btree order, so successive snapshots within
+/// a single thread are deterministic.
+pub(crate) fn snapshot_pending_tasks() -> Vec<serde_json::Value> {
+    let now_ms = crate::stdlib::clock::now_wall_ms();
+    POOLS.with(|pools| {
+        let registry = pools.borrow();
+        let mut ordered: Vec<(&String, &Rc<RefCell<PoolEntry>>)> = registry.iter().collect();
+        ordered.sort_by(|a, b| a.0.cmp(b.0));
+        let mut out = Vec::new();
+        for (_pool_id, entry) in ordered {
+            let pool = entry.borrow();
+            for pending in &pool.queue {
+                let task = pending.state.borrow();
+                if task.status.is_terminal() {
+                    continue;
+                }
+                out.push(pending_task_snapshot_json(&pool, &task, now_ms));
+            }
+            for state in pool.tasks.values() {
+                let task = state.borrow();
+                if task.status != TaskStatus::Running {
+                    continue;
+                }
+                out.push(pending_task_snapshot_json(&pool, &task, now_ms));
+            }
+        }
+        out
+    })
+}
+
+fn pending_task_snapshot_json(
+    pool: &PoolEntry,
+    task: &TaskState,
+    now_ms: i64,
+) -> serde_json::Value {
+    let queued_at_ms = task.submitted_at_ms;
+    let age_ms = now_ms.saturating_sub(queued_at_ms).max(0);
+    serde_json::json!({
+        "id": task.id.clone(),
+        "task_id": task.id.clone(),
+        "pool_id": pool.id.clone(),
+        "pool_name": pool.name.clone(),
+        "status": task.status.as_str(),
+        "priority": task.priority,
+        "key": task.key.clone(),
+        "idempotency_key": task.idempotency_key.clone(),
+        "submitted_at": task.submitted_at.clone(),
+        "submitted_at_ms": queued_at_ms,
+        "submitted_by": task.submitted_by.clone(),
+        "started_at": task.started_at.clone(),
+        "age_ms": age_ms,
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::priority_queue_index;

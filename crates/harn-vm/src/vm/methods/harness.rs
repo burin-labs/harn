@@ -333,11 +333,16 @@ struct UnsettledCounts {
     queued: usize,
     partial: usize,
     in_flight: usize,
+    pool_pending: usize,
 }
 
 impl UnsettledCounts {
     fn is_empty(self) -> bool {
-        self.suspended == 0 && self.queued == 0 && self.partial == 0 && self.in_flight == 0
+        self.suspended == 0
+            && self.queued == 0
+            && self.partial == 0
+            && self.in_flight == 0
+            && self.pool_pending == 0
     }
 
     fn to_json(self) -> serde_json::Value {
@@ -346,6 +351,7 @@ impl UnsettledCounts {
             "queued": self.queued,
             "partial": self.partial,
             "in_flight": self.in_flight,
+            "pool_pending": self.pool_pending,
         })
     }
 
@@ -354,8 +360,8 @@ impl UnsettledCounts {
             "no unsettled work".to_string()
         } else {
             format!(
-                "unsettled work: {} suspended subagents, {} queued triggers, {} partial handoffs, {} in-flight llm calls",
-                self.suspended, self.queued, self.partial, self.in_flight
+                "unsettled work: {} suspended subagents, {} queued triggers, {} partial handoffs, {} in-flight llm calls, {} pool pending tasks",
+                self.suspended, self.queued, self.partial, self.in_flight, self.pool_pending
             )
         }
     }
@@ -372,6 +378,7 @@ fn state_counts(state: &VmValue) -> Result<UnsettledCounts, VmError> {
         queued: state_bucket_len(dict, "queued_triggers")?,
         partial: state_bucket_len(dict, "partial_handoffs")?,
         in_flight: state_bucket_len(dict, "in_flight_llm_calls")?,
+        pool_pending: state_bucket_len(dict, "pool_pending_tasks")?,
     })
 }
 

@@ -2517,12 +2517,13 @@ Three concentric surfaces:
   - `OnBudget()` returns the namespace dict so callers can use
     dotted access (`OnBudget.terminate`, etc.) after a single import.
 - `harness.unsettled_state()` returns a stable dict with
-  `suspended_subagents`, `queued_triggers`, `partial_handoffs`, and
-  `in_flight_llm_calls` lists. `harness.is_empty(state?)`,
-  `harness.counts(state?)`, and `harness.summary(state?)` summarize that
-  shape; `std/lifecycle` exports equivalent `unsettled_state(harness)`,
-  `is_empty(state)`, `counts(state)`, and `summary(state)` helpers.
-  Suspended subagents, partial handoffs, and in-flight LLM calls are
+  `suspended_subagents`, `queued_triggers`, `partial_handoffs`,
+  `in_flight_llm_calls`, and `pool_pending_tasks` lists.
+  `harness.is_empty(state?)`, `harness.counts(state?)`, and
+  `harness.summary(state?)` summarize that shape; `std/lifecycle` exports
+  equivalent `unsettled_state(harness)`, `is_empty(state)`,
+  `counts(state)`, and `summary(state)` helpers. Suspended subagents,
+  partial handoffs, in-flight LLM calls, and pool pending tasks are
   populated from live VM registries, while queued triggers are
   reconstructed from the active trigger inbox and worker-queue event-log
   records.

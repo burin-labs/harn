@@ -1,13 +1,10 @@
-// @xfail: pool tasks not yet plumbed into harness.unsettled_state() — tracked in #2007
 /**
  * PL-07: a pipeline that submits pool work and returns without draining
  * should surface those tasks in `harness.unsettled_state()` so on_finish
  * presets (drain, abandon, handoff) can act on them.
  *
- * This fixture asserts the post-wiring shape: pool work shows up under a
- * dedicated `pool_pending_tasks` bucket with one entry per non-terminal
- * task (queued + running). The bucket does not exist today; once #2007
- * lands and the field is populated, drop the @xfail marker.
+ * Pool work shows up under the dedicated `pool_pending_tasks` bucket
+ * with one entry per non-terminal task (queued + running).
  */
 import { pool_create } from "std/lifecycle/pool"
 
