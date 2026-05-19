@@ -2896,8 +2896,22 @@ agent_loop(message, tools: {tools: [{name: "run_command", handler: run_command}]
   consumers can render them uniformly: `{action, command,
   original_command, rule_id, catalogue_id, severity, explanation,
   references, result?}`.
+- Side effects (TH-03 #1896): each shipped mode records a
+  `tool_rewrite` / `tool_denied` / `tool_rule_warning` lifecycle audit
+  entry observable via `lifecycle_audit_log_take()`. The rewrite mode
+  also queues a one-turn `tool_rewritten` system reminder via
+  `tool_hooks_inject_reminder(...)` so the next agent turn sees the
+  corrected command shape. When no agent session is active (headless
+  pipelines, unit tests) the reminder still produces a
+  `tool_hooks.reminder_injected` audit entry so conformance can verify
+  the side effect either way. The underlying primitives
+  `tool_hooks_emit_audit(kind, payload)` and
+  `tool_hooks_inject_reminder({tags, body, ttl_turns, ...})` are
+  exported for custom mode callbacks that want the same
+  audit/reminder plumbing.
 - Omit `inner` to get decision envelopes without execution — useful
-  for previewing rewrites or testing rule coverage.
+  for previewing rewrites or testing rule coverage. The audit +
+  reminder side effects still fire in preview mode.
 - `llm_classifier` is reserved for TH-05 (#1898) and currently rejects
   non-nil values so callers don't silently miss the future hook.
 

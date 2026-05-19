@@ -775,7 +775,7 @@ fn lifecycle_transcript_event(
     VmValue::Dict(Rc::new(event))
 }
 
-fn reminder_from_vm_value(value: &VmValue) -> SystemReminder {
+pub(crate) fn reminder_from_vm_value(value: &VmValue) -> SystemReminder {
     let dict = value.as_dict().cloned().unwrap_or_default();
     let id = dict
         .get("id")
