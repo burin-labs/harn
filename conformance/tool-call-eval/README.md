@@ -21,11 +21,15 @@ Run a planner+binder cell with real providers:
 ```sh
 cargo run --bin harn -- eval tool-calls \
   --dataset conformance/tool-call-eval \
-  --planner provider=openrouter,model=google/gemma-4-26b-a4b-it \
+  --planner provider=openrouter,model=meta-llama/llama-3.1-8b-instruct \
   --binder provider=cerebras,model=gpt-oss-120b \
   --judge-model anthropic:claude-haiku-4-5 \
-  --output .harn-runs/tool-call-eval/gemma-cerebras
+  --output .harn-runs/tool-call-eval/llama31-cerebras
 ```
+
+The checked-in middleware defaults use a `500ms` binder budget and `1024`
+response tokens. Keep those defaults unless the run is specifically measuring
+stricter latency behavior.
 
 The command writes:
 

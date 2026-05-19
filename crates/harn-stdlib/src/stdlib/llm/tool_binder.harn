@@ -14,25 +14,26 @@
 //     with_natural_language_executor({
 //       provider: "cerebras",
 //       model: "gpt-oss-120b",
-//       timeout_ms: 100,
+//       timeout_ms: 500,
 //     }),
 //     default_tool_caller(),
 //   ])
 //   agent_loop(prompt, system, {tools: registry, tool_caller: caller})
 //
-// Contract (the parent epic — #1696 — restated here):
+// Contract:
 //
-//   - `timeout_ms` is a HARD wall-clock budget. If the binder hop overruns
-//     it, the envelope passes through unchanged and `audit.binder.status`
-//     is `"timeout"`. We do not cancel mid-flight (cancellation belongs in
-//     `agent_loop({deadline_ms})`); we observe the breach.
+//   - `timeout_ms` is a wall-clock budget for an opt-in latency hop. If the
+//     binder overruns it, the envelope passes through unchanged and
+//     `audit.binder.status` is `"timeout"`. We do not cancel mid-flight
+//     (cancellation belongs in `agent_loop({deadline_ms})`); we observe the
+//     breach.
 //   - Off by default. There is no implicit registration anywhere in the
 //     default agent pipeline. Activation requires explicit composition.
 //   - The middleware NEVER falls back to a second binder hop. Retries
 //     defeat the latency win; if the model needs more shots, raise
 //     `temperature` or pick a better model — don't retry on the hot path.
-//     `max_retries` is reserved for forward compatibility (default 0) and
-//     intentionally rejected if non-zero today.
+//     `max_retries` is accepted only as 0 so configs fail loudly instead
+//     of silently adding a second inference hop.
 //
 // Audit shape (lands under `audit.binder`, broadcast through
 // `tool_call_audit` events the same way `with_required_reason` surfaces
@@ -64,13 +65,51 @@ fn __binder_is_callable(value) -> bool {
 }
 
 fn __binder_drop_key(args, field) {
+  let source = __binder_dict(args)
   var cleaned = {}
-  for key in args.keys() {
+  for key in source.keys() {
     if key != field {
-      cleaned = cleaned + {[key]: args[key]}
+      cleaned = cleaned + {[key]: source[key]}
     }
   }
   return cleaned
+}
+
+fn __binder_positive_int(value, default_value, name) -> int {
+  if value == nil {
+    return default_value
+  }
+  let parsed = to_int(value)
+  if parsed == nil {
+    throw "with_natural_language_executor: `" + name + "` must be an integer; got "
+      + type_of(value)
+  }
+  if parsed <= 0 {
+    throw "with_natural_language_executor: `" + name + "` must be > 0; got " + to_string(parsed)
+  }
+  return parsed
+}
+
+fn __binder_int(value, default_value, name) -> int {
+  if value == nil {
+    return default_value
+  }
+  let parsed = to_int(value)
+  if parsed == nil {
+    throw "with_natural_language_executor: `" + name + "` must be an integer; got "
+      + type_of(value)
+  }
+  return parsed
+}
+
+fn __binder_bool(value, default_value, name) -> bool {
+  if value == nil {
+    return default_value
+  }
+  if type_of(value) != "bool" {
+    throw "with_natural_language_executor: `" + name + "` must be bool; got " + type_of(value)
+  }
+  return value
 }
 
 fn __binder_short_circuit(envelope, reason) {
@@ -216,11 +255,8 @@ fn __binder_validate_opts(cfg) {
   if model == "" {
     throw "with_natural_language_executor: `model` is required"
   }
-  let timeout_ms = to_int(cfg?.timeout_ms ?? 100) ?? 100
-  if timeout_ms <= 0 {
-    throw "with_natural_language_executor: `timeout_ms` must be > 0; got " + to_string(timeout_ms)
-  }
-  let max_retries = to_int(cfg?.max_retries ?? 0) ?? 0
+  let timeout_ms = __binder_positive_int(cfg?.timeout_ms, 500, "timeout_ms")
+  let max_retries = __binder_int(cfg?.max_retries, 0, "max_retries")
   if max_retries != 0 {
     throw "with_natural_language_executor: `max_retries` must be 0 — retries defeat the latency win; got "
       + to_string(max_retries)
@@ -238,15 +274,19 @@ fn __binder_validate_opts(cfg) {
   } else {
     { binder_prompt, binder_system, binder_opts -> llm_call(binder_prompt, binder_system, binder_opts) }
   }
+  let intent_field = trim(to_string(cfg?.intent_field ?? "_nl_intent"))
+  if intent_field == "" {
+    throw "with_natural_language_executor: `intent_field` must not be empty"
+  }
   return {
     provider: provider,
     model: model,
     timeout_ms: timeout_ms,
-    intent_field: to_string(cfg?.intent_field ?? "_nl_intent"),
-    passthrough_when_args_valid: cfg?.passthrough_when_args_valid ?? true,
+    intent_field: intent_field,
+    passthrough_when_args_valid: __binder_bool(cfg?.passthrough_when_args_valid, true, "passthrough_when_args_valid"),
     on_failure: on_failure,
     temperature: cfg?.temperature ?? 0.0,
-    max_tokens: to_int(cfg?.max_tokens ?? 256) ?? 256,
+    max_tokens: __binder_positive_int(cfg?.max_tokens, 1024, "max_tokens"),
     system_prompt: to_string(cfg?.system ?? __binder_default_system()),
     binder_fn: binder_fn,
   }
@@ -267,9 +307,9 @@ fn __binder_skip_reason(intent, schema_provided, already_valid) {
   return nil
 }
 
-fn __binder_passthrough(envelope, next, stripped_args, intent, ctx, skip_reason) {
+fn __binder_passthrough(envelope, next, original_args, stripped_args, intent, ctx, skip_reason) {
   let next_args = if intent == "" {
-    envelope.tool_args
+    original_args
   } else {
     stripped_args
   }
@@ -282,8 +322,8 @@ fn __binder_passthrough(envelope, next, stripped_args, intent, ctx, skip_reason)
  * with_natural_language_executor(opts) -> caller
  *
  * Intercepts a tool call, hands the planner-emitted natural-language
- * intent + the tool's JSON Schema to a sub-100ms binder LLM, and
- * replaces the envelope's `tool_args` with the binder's structured
+ * intent + the tool's JSON Schema to a latency-budgeted binder LLM,
+ * and replaces the envelope's `tool_args` with the binder's structured
  * output before dispatching downstream.
  *
  * Required options:
@@ -291,14 +331,14 @@ fn __binder_passthrough(envelope, next, stripped_args, intent, ctx, skip_reason)
  *   model:      string   // binder LLM model    (e.g. "gpt-oss-120b")
  *
  * Optional knobs (all conservative defaults):
- *   timeout_ms:                  int     (default 100; hard wall-clock budget — see header)
+ *   timeout_ms:                  int     (default 500; wall-clock budget — see header)
  *   max_retries:                 int     (default 0; non-zero rejected — retries defeat latency)
  *   intent_field:                string  (default "_nl_intent")
  *   passthrough_when_args_valid: bool    (default true; skip the hop when args already validate)
  *   on_failure:                  string  (default "passthrough"; "passthrough"|"reject"|"raise")
  *   system:                      string  (binder system prompt; sensible default supplied)
  *   temperature:                 float   (default 0.0)
- *   max_tokens:                  int     (default 256)
+ *   max_tokens:                  int     (default 1024)
  *   binder_fn:                   fn      (test hook; defaults to llm_call)
  *
  * @effects: []
@@ -310,14 +350,15 @@ fn __binder_passthrough(envelope, next, stripped_args, intent, ctx, skip_reason)
 pub fn with_natural_language_executor(opts) {
   let ctx = __binder_validate_opts(__binder_dict(opts))
   return { envelope, next ->
-    let raw_intent = envelope.tool_args?[ctx.intent_field]
+    let tool_args = __binder_dict(envelope.tool_args)
+    let raw_intent = tool_args[ctx.intent_field]
     let intent = if type_of(raw_intent) == "string" {
       trim(raw_intent)
     } else {
       ""
     }
     let schema = envelope.schema
-    let stripped_args = __binder_drop_key(envelope.tool_args, ctx.intent_field)
+    let stripped_args = __binder_drop_key(tool_args, ctx.intent_field)
     let schema_provided = schema != nil
     let already_valid = if schema_provided && ctx.passthrough_when_args_valid {
       schema_is(stripped_args, schema)
@@ -326,7 +367,7 @@ pub fn with_natural_language_executor(opts) {
     }
     let skip = __binder_skip_reason(intent, schema_provided, already_valid)
     if skip != nil {
-      return __binder_passthrough(envelope, next, stripped_args, intent, ctx, skip)
+      return __binder_passthrough(envelope, next, tool_args, stripped_args, intent, ctx, skip)
     }
     let prompt = __binder_prompt(envelope, intent, stripped_args)
     let invoke_cfg = {

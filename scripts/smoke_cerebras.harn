@@ -3,8 +3,9 @@
  *
  * Issues `iterations` single-tool-call binder-style llm_call invocations
  * against `cerebras/gpt-oss-120b`, then reports p50, p99, and mean
- * wall-clock round-trip in milliseconds. Used as the empirical floor
- * for issue #1696's ≤100ms binder-budget claim.
+ * wall-clock round-trip in milliseconds. Keep the output tiny so the
+ * result reflects the provider + network floor before a binder prompt
+ * adds work.
  *
  * Run with `CEREBRAS_API_KEY` exported (e.g. via burin-code/.env):
  *
