@@ -235,7 +235,10 @@ fn resolve_re_exports(modules: &mut HashMap<PathBuf, ModuleInfo>) {
 /// module graph model stdlib symbols even though they have no on-disk
 /// location.
 pub fn resolve_import_path(current_file: &Path, import_path: &str) -> Option<PathBuf> {
-    if let Some(module) = import_path.strip_prefix("std/") {
+    if let Some(module) = import_path
+        .strip_prefix("std/")
+        .or_else(|| (import_path == "observability").then_some("observability"))
+    {
         if stdlib::get_stdlib_source(module).is_some() {
             return Some(stdlib::stdlib_virtual_path(module));
         }

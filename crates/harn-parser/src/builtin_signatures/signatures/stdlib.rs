@@ -292,6 +292,14 @@ pub(crate) const SIGNATURES: &[BuiltinSignature] = &[
         &[Param::new("name", TY_STRING)],
         TY_INT,
     ),
+    BuiltinSignature::variadic("__obs_auto_backend", &[Param::new("args", TY_ANY)], TY_DICT),
+    BuiltinSignature::variadic("__obs_configure", &[Param::new("args", TY_ANY)], TY_NIL),
+    BuiltinSignature::variadic("__obs_emit", &[Param::new("args", TY_ANY)], TY_LIST),
+    BuiltinSignature::variadic("__obs_end_span", &[Param::new("args", TY_ANY)], TY_NIL),
+    BuiltinSignature::variadic("__obs_events", &[Param::new("args", TY_ANY)], TY_LIST),
+    BuiltinSignature::variadic("__obs_events_take", &[Param::new("args", TY_ANY)], TY_LIST),
+    BuiltinSignature::variadic("__obs_reset", &[Param::new("args", TY_ANY)], TY_NIL),
+    BuiltinSignature::variadic("__obs_start_span", &[Param::new("args", TY_ANY)], TY_DICT),
     BuiltinSignature::simple(
         "__llm_cache_key",
         &[

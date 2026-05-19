@@ -1,0 +1,9 @@
+import { obs } from "observability"
+
+pipeline default() {
+  let o = obs()
+  o.reset()
+  o.configure({backend: o.Backend.test()})
+  o.log("alias")
+  println(o.events_take()[0].payload.message)
+}
