@@ -22,7 +22,8 @@ pub use approval_rules::{
     PolicyMatchedRule, PolicyRule, PolicyRuleMatch,
 };
 pub use effects::{
-    compute_handoff_effects, effects_from_metadata, EffectKind, EffectRecord, EffectScope,
+    compute_handoff_effects, effect_kind_label, effect_record_summary, effect_subset_violations,
+    effects_from_metadata, EffectKind, EffectRecord, EffectScope,
 };
 pub use types::{
     enforce_tool_arg_constraints, AutoCompactPolicy, BranchSemantics, CapabilityPolicy,

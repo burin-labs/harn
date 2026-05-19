@@ -742,6 +742,140 @@ pub fn effects_from_metadata(metadata: &BTreeMap<String, serde_json::Value>) -> 
         .unwrap_or_default()
 }
 
+/// Decide whether `child` is covered by `parent`. An effect is covered
+/// when the parent declares another record with the same kind family
+/// and a scope that is at least as permissive. `resource` is treated
+/// best-effort: when the parent carries a non-empty resource it must
+/// match the child's resource exactly (and the child's resource must be
+/// known); when the parent has no resource it covers any resource the
+/// child names. This is the core of E5.4's `HARN-CAP-301` enforcement —
+/// the dispatcher and the static analyzer share one implementation so
+/// preflight and runtime never disagree.
+fn parent_covers_child(parent: &EffectRecord, child: &EffectRecord) -> bool {
+    if !effect_kind_family_matches(&parent.kind, &child.kind) {
+        return false;
+    }
+    if !effect_scope_covers(parent.scope, child.scope) {
+        return false;
+    }
+    match (parent.resource.as_deref(), child.resource.as_deref()) {
+        (Some(""), _) => true,
+        (Some(parent_resource), Some(child_resource)) => parent_resource == child_resource,
+        (Some(_), None) => false,
+        (None, _) => true,
+    }
+}
+
+fn effect_kind_family_matches(parent: &EffectKind, child: &EffectKind) -> bool {
+    match (parent, child) {
+        (EffectKind::Stdio, EffectKind::Stdio)
+        | (EffectKind::Fs, EffectKind::Fs)
+        | (EffectKind::Net, EffectKind::Net)
+        | (EffectKind::Spawn, EffectKind::Spawn) => true,
+        (EffectKind::Llm { .. }, EffectKind::Llm { .. }) => true,
+        (
+            EffectKind::Tool {
+                name: parent_name, ..
+            },
+            EffectKind::Tool {
+                name: child_name, ..
+            },
+        ) => parent_name.is_empty() || parent_name == child_name,
+        (
+            EffectKind::Hostcall {
+                name: parent_name, ..
+            },
+            EffectKind::Hostcall {
+                name: child_name, ..
+            },
+        ) => parent_name.is_empty() || parent_name == child_name,
+        (EffectKind::Persona { id: parent_id }, EffectKind::Persona { id: child_id }) => {
+            parent_id.is_empty() || parent_id == child_id
+        }
+        _ => false,
+    }
+}
+
+fn effect_scope_covers(parent: EffectScope, child: EffectScope) -> bool {
+    fn rank(scope: EffectScope) -> u8 {
+        match scope {
+            EffectScope::Read => 1,
+            EffectScope::Observe => 1,
+            EffectScope::Write => 2,
+            EffectScope::Mutate => 3,
+        }
+    }
+    rank(parent) >= rank(child)
+}
+
+/// Compute the subset of `child` effects that are not covered by any
+/// record in `parent`. An empty parent set is treated as "no declared
+/// effects" — under E5.4 the dispatcher takes that to mean every child
+/// effect is a violation, because a child can never out-grant an
+/// undeclared parent. When `parent` is `None` enforcement is skipped
+/// entirely (the caller has decided no static ceiling applies).
+pub fn effect_subset_violations(
+    parent: Option<&[EffectRecord]>,
+    child: &[EffectRecord],
+) -> Vec<EffectRecord> {
+    let Some(parent) = parent else {
+        return Vec::new();
+    };
+    child
+        .iter()
+        .filter(|effect| {
+            !parent
+                .iter()
+                .any(|allowed| parent_covers_child(allowed, effect))
+        })
+        .cloned()
+        .collect()
+}
+
+/// Short human-readable label for `effect.kind` used in
+/// `EffectInheritanceViolation` messages and `HARN-CAP-301` diagnostics.
+pub fn effect_kind_label(kind: &EffectKind) -> String {
+    match kind {
+        EffectKind::Stdio => "stdio".to_string(),
+        EffectKind::Fs => "fs".to_string(),
+        EffectKind::Net => "net".to_string(),
+        EffectKind::Llm { provider, model } => match (provider.as_deref(), model.as_deref()) {
+            (Some(provider), Some(model)) => format!("llm:{provider}/{model}"),
+            (Some(provider), None) => format!("llm:{provider}"),
+            (None, Some(model)) => format!("llm:{model}"),
+            (None, None) => "llm".to_string(),
+        },
+        EffectKind::Tool { name } if !name.is_empty() => format!("tool:{name}"),
+        EffectKind::Tool { .. } => "tool".to_string(),
+        EffectKind::Hostcall { name } if !name.is_empty() => format!("hostcall:{name}"),
+        EffectKind::Hostcall { .. } => "hostcall".to_string(),
+        EffectKind::Persona { id } if !id.is_empty() => format!("persona:{id}"),
+        EffectKind::Persona { .. } => "persona".to_string(),
+        EffectKind::Spawn => "spawn".to_string(),
+    }
+}
+
+/// One-line summary suitable for diagnostic messages and deny events.
+pub fn effect_record_summary(effect: &EffectRecord) -> String {
+    let scope = match effect.scope {
+        EffectScope::Read => "read",
+        EffectScope::Write => "write",
+        EffectScope::Mutate => "mutate",
+        EffectScope::Observe => "observe",
+    };
+    match effect.resource.as_deref() {
+        Some(resource) if !resource.is_empty() => {
+            format!(
+                "{}:{} ({})",
+                effect_kind_label(&effect.kind),
+                scope,
+                resource
+            )
+        }
+        _ => format!("{}:{}", effect_kind_label(&effect.kind), scope),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -892,6 +1026,108 @@ mod tests {
             serde_json::to_value(&effects).expect("encode"),
         );
         assert_eq!(effects_from_metadata(&metadata), effects);
+    }
+
+    #[test]
+    fn subset_violations_returns_empty_when_child_covered() {
+        let parent = vec![
+            EffectRecord::new(EffectKind::Net, EffectScope::Write),
+            EffectRecord::new(EffectKind::Fs, EffectScope::Read).with_resource("/workspace"),
+        ];
+        let child = vec![
+            EffectRecord::new(EffectKind::Net, EffectScope::Write)
+                .with_resource("https://example.test"),
+            EffectRecord::new(EffectKind::Fs, EffectScope::Read).with_resource("/workspace"),
+        ];
+        assert!(effect_subset_violations(Some(&parent), &child).is_empty());
+    }
+
+    #[test]
+    fn subset_violations_flags_unmatched_kinds() {
+        let parent = vec![EffectRecord::new(EffectKind::Fs, EffectScope::Read)];
+        let child = vec![EffectRecord::new(EffectKind::Net, EffectScope::Write)
+            .with_resource("https://example.test")];
+        let violations = effect_subset_violations(Some(&parent), &child);
+        assert_eq!(violations.len(), 1);
+        assert!(matches!(violations[0].kind, EffectKind::Net));
+    }
+
+    #[test]
+    fn subset_violations_flags_scope_escalations() {
+        let parent = vec![EffectRecord::new(EffectKind::Fs, EffectScope::Read)];
+        let child = vec![EffectRecord::new(EffectKind::Fs, EffectScope::Mutate)];
+        let violations = effect_subset_violations(Some(&parent), &child);
+        assert_eq!(violations.len(), 1);
+        assert_eq!(violations[0].scope, EffectScope::Mutate);
+    }
+
+    #[test]
+    fn subset_violations_treats_missing_parent_resource_as_wildcard() {
+        let parent = vec![EffectRecord::new(EffectKind::Net, EffectScope::Write)];
+        let child = vec![EffectRecord::new(EffectKind::Net, EffectScope::Write)
+            .with_resource("https://api.example/v1")];
+        assert!(effect_subset_violations(Some(&parent), &child).is_empty());
+    }
+
+    #[test]
+    fn subset_violations_requires_resource_match_when_parent_declares_one() {
+        let parent = vec![EffectRecord::new(EffectKind::Net, EffectScope::Write)
+            .with_resource("https://allowed.test")];
+        let child = vec![EffectRecord::new(EffectKind::Net, EffectScope::Write)
+            .with_resource("https://disallowed.test")];
+        let violations = effect_subset_violations(Some(&parent), &child);
+        assert_eq!(violations.len(), 1);
+    }
+
+    #[test]
+    fn subset_violations_skip_when_parent_is_none() {
+        let child = vec![EffectRecord::new(EffectKind::Net, EffectScope::Write)];
+        assert!(effect_subset_violations(None, &child).is_empty());
+    }
+
+    #[test]
+    fn subset_violations_empty_parent_flags_every_child_effect() {
+        let parent: Vec<EffectRecord> = Vec::new();
+        let child = vec![
+            EffectRecord::new(EffectKind::Net, EffectScope::Write),
+            EffectRecord::new(EffectKind::Fs, EffectScope::Read),
+        ];
+        let violations = effect_subset_violations(Some(&parent), &child);
+        assert_eq!(violations.len(), 2);
+    }
+
+    #[test]
+    fn subset_violations_empty_child_is_always_allowed() {
+        let parent = vec![EffectRecord::new(EffectKind::Net, EffectScope::Write)];
+        assert!(effect_subset_violations(Some(&parent), &[]).is_empty());
+    }
+
+    #[test]
+    fn effect_kind_label_shape() {
+        assert_eq!(effect_kind_label(&EffectKind::Net), "net");
+        assert_eq!(
+            effect_kind_label(&EffectKind::Llm {
+                provider: Some("anthropic".to_string()),
+                model: Some("claude-3-7-sonnet".to_string()),
+            }),
+            "llm:anthropic/claude-3-7-sonnet"
+        );
+        assert_eq!(
+            effect_kind_label(&EffectKind::Tool {
+                name: "search".to_string()
+            }),
+            "tool:search"
+        );
+    }
+
+    #[test]
+    fn effect_record_summary_includes_resource() {
+        let effect = EffectRecord::new(EffectKind::Net, EffectScope::Write)
+            .with_resource("https://example.test/api");
+        assert_eq!(
+            effect_record_summary(&effect),
+            "net:write (https://example.test/api)"
+        );
     }
 
     #[test]

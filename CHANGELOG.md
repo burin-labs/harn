@@ -43,6 +43,33 @@ condensed series summaries instead of full per-patch history.
 
   [otg-v0-1]: https://github.com/burin-labs/harn/blob/main/opentrustgraph-spec/CONFORMANCE.md#51-v01-reserved-metadata-keys-1778
 
+- **Effect inheritance enforcement (E5.4, #1777).** Adds the dispatcher-side
+  ⊆ check for typed handoff effects against the parent's declared effect
+  set. New diagnostic code `HARN-CAP-301`
+  (`Code::EffectInheritanceViolation`) surfaces from `harn check`'s
+  preflight pass when a `spawn_agent({...})` call inside a parent
+  function/pipeline body grants effects the parent does not declare;
+  parent and child sets are derived from the same `compute_handoff_effects`
+  analyzer the runtime guard uses. New runtime guard
+  `enforce_spawn_handoff_effects(handoff, parent_effects)` in
+  `crates/harn-vm/src/orchestration/handoffs.rs` returns a typed
+  `EffectInheritanceViolation` payload (with stable `_type`,
+  `handoff_id`, `source_persona`, `target_label`, `violations`,
+  `diagnostic_code`, `repair_id`, `repair_safety`, `message` fields) that
+  the dispatcher emits as an `EffectInheritanceViolation` deny event;
+  `report_effect_inheritance_violation(...)` emits the matching
+  structured log under the `policy.effect_inheritance` category. New
+  shared library helpers in `crates/harn-vm/src/orchestration/policy/effects.rs`:
+  `effect_subset_violations(parent, child)` (the core ⊆ check),
+  `effect_kind_label(...)` and `effect_record_summary(...)` (used by
+  both diagnostic messages and deny payloads). Both static and runtime
+  paths suggest the same repair (`policy/narrow-child-effects`,
+  `safety: surface-changing`). Coverage: 16 new policy/effect unit
+  tests, 4 new preflight integration tests in
+  `crates/harn-cli/src/commands/check/tests.rs`, and two conformance
+  fixtures (`conformance/tests/agents/effects_inheritance_subset_allowed.harn`,
+  `…/effects_inheritance_empty_child.harn`) exercising the subset-allowed
+  and empty-child paths.
 - **Suspend/resume docs (S-13, #1849).** Adds the user-facing
   reference for the agent suspend/resume primitive (epic #1836). New
   mdBook page `docs/src/agent-lifecycle.md` covers the lifecycle
