@@ -1,0 +1,44 @@
+import { register_guardrail } from "std/channel_guardrails"
+
+/**
+ * CH-11 (#1911): a custom guardrail (Harn closure) is invoked on
+ * every emit and its returned verdict is honored. Exercises all three
+ * return shapes (dict, string, nil) and verifies that the warn audit
+ * is written before the durable append while the emit proceeds.
+ */
+pipeline default() {
+  pipeline_lifecycle_audit_log_take()
+  channel_guardrail_clear()
+  /* Closure scanner: blocks payloads with `secret_key`, warns when
+   * the channel is `panic`, allows everything else. */
+  let scan = { payload, ctx ->
+    if payload?.secret_key != nil {
+      return {verdict: "block", reason: "secret_key field is reserved"}
+    }
+    if ctx?.name_resolved != nil && contains(to_string(ctx.name_resolved), "panic") {
+      return {verdict: "warn", reason: "panic channel under review"}
+    }
+    return "allow"
+  }
+  let id = register_guardrail({id: "policy", scan_fn: scan})
+  println(id)
+  /* Block path: dict verdict drops the emit + writes blocked audit. */
+  let denied = emit_channel("ch.guardrail.policy", {ok: false, secret_key: "exfil-payload"})
+  println(denied?.blocked)
+  println(denied?.block_reason)
+  /* Warn path: emit proceeds + writes a warning audit. */
+  let warned = emit_channel("ch.guardrail.panic", {reason: "drain timeout"})
+  println(warned?.inserted)
+  println(warned?.blocked ?? false)
+  /* Allow path: emit proceeds silently. */
+  let normal = emit_channel("ch.guardrail.policy", {reason: "normal"})
+  println(normal?.inserted)
+  println(normal?.blocked ?? false)
+  /* Audit log: block then warn (in registration order). */
+  let audit = pipeline_lifecycle_audit_log_take()
+  println(len(audit))
+  println(audit[0].kind)
+  println(audit[0].payload.fired[0].reason)
+  println(audit[1].kind)
+  println(audit[1].payload.fired[0].reason)
+}

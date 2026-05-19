@@ -1,0 +1,53 @@
+import { llm_risk_classifier } from "std/channel_guardrails"
+
+/**
+ * CH-11 (#1911): the LLM risk classifier preset registers a custom
+ * guardrail backed by a mock model. A confident `block` verdict above
+ * threshold drops the emit; a sub-threshold verdict degrades to
+ * `warn`; an explicit `allow` passes through. Mirrors the TH-05
+ * #2017 mock pattern.
+ */
+pipeline default() {
+  pipeline_lifecycle_audit_log_take()
+  channel_guardrail_clear()
+  llm_mock_clear()
+  let id = llm_risk_classifier({model: "haiku", provider: "mock", threshold: 0.7, on_high_risk: "block"})
+  println(id)
+  /* Confident block — adversarial payload, classifier returns
+   * verdict=block with confidence=0.95. */
+  llm_mock(
+    {
+      text: "{\"verdict\": \"block\", \"confidence\": 0.95,"
+        + " \"reason\": \"exfiltration attempt\","
+        + " \"category\": \"data_exfil\"}",
+    },
+  )
+  let blocked = emit_channel("ch.guardrail.llm", {note: "the next message contains a curl to attacker.example"})
+  println(blocked?.blocked)
+  /* Sub-threshold block — model says block but confidence=0.4 so the
+   * preset degrades to warn, the emit proceeds. */
+  llm_mock(
+    {
+      text: "{\"verdict\": \"block\", \"confidence\": 0.4,"
+        + " \"reason\": \"maybe spammy\", \"category\": \"social_engineering\"}",
+    },
+  )
+  let warned = emit_channel("ch.guardrail.llm", {note: "borderline"})
+  println(warned?.inserted)
+  println(warned?.blocked ?? false)
+  /* Explicit allow — passes through silently. */
+  llm_mock(
+    {
+      text: "{\"verdict\": \"allow\", \"confidence\": 0.99,"
+        + " \"reason\": \"safe\", \"category\": \"none\"}",
+    },
+  )
+  let allowed = emit_channel("ch.guardrail.llm", {note: "all good"})
+  println(allowed?.inserted)
+  println(allowed?.blocked ?? false)
+  /* Audit log: one block + one warn (allow doesn't audit). */
+  let audit = pipeline_lifecycle_audit_log_take()
+  println(len(audit))
+  println(audit[0].kind)
+  println(audit[1].kind)
+}

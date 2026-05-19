@@ -28,6 +28,49 @@ condensed series summaries instead of full per-patch history.
   subsections to `docs/llm/harn-quickref.md`, an OAuth subsection
   (including the `HARN-OAU-*` diagnostic code appendix) to
   `spec/HARN_SPEC.md`, and wires the new page into `docs/src/SUMMARY.md`.
+- **Channel guardrails middleware (CH-11, #1911).** Inter-agent
+  `emit_channel(...)` calls now run through a pluggable middleware
+  layer before the durable journal append. Each guardrail returns one
+  of three verdicts — `allow` (silent passthrough), `warn` (emit
+  proceeds and a `channel_guardrail_warning` lifecycle audit is
+  recorded), or `block` (emit is dropped, the caller receives a
+  synthetic `{blocked: true, block_reason, guardrail_fired}` receipt,
+  and a `channel_guardrail_blocked` audit is persisted to the
+  `lifecycle.channel.audit` topic AND the in-process lifecycle audit
+  log so the block itself is durable + observable). Worst verdict
+  across every registered guardrail wins; a `block` short-circuits
+  remaining guardrails so they cannot suggest the emit went through.
+  New Rust builtins: `channel_guardrail_register(config_dict) ->
+  id_string`, `channel_guardrail_unregister(id) -> bool`,
+  `channel_guardrail_list() -> [string]`, `channel_guardrail_clear()`.
+  The registry is thread-local so peer pipelines on other threads
+  cannot poison each other; `reset_channel_state()` clears the
+  registry alongside the per-thread channel log. Two scanner kinds
+  ship in v1: `prompt_injection_signature` (heuristic regex sweep
+  over every string in the payload tree — recursively walks dicts /
+  lists so nested adversarial text cannot hide; eleven seed patterns
+  cover instruction-override, system-prompt spoof, role redefinition,
+  data-exfil request, and jailbreak-banner families; the audit
+  records a coarse family label rather than the matched regex so the
+  attack fingerprint does not leak back to the producer) and
+  `custom` (user-supplied Harn closure returning `nil` /
+  `"allow"|"warn"|"block"` / `{verdict, reason?}`; evaluated via the
+  async-builtin child VM, so closure-bound side effects work the
+  same as in `tool_hooks_match`). A new `std/channel_guardrails`
+  module exposes ergonomic presets: `prompt_injection_scanner(opts)`,
+  `llm_risk_classifier(opts)` (mirrors the TH-05 #2017 pattern with a
+  JSON-verdict meta-prompt, sub-threshold-degrades-to-warn safety
+  net, and transport-error-degrades-to-allow so a flaky model cannot
+  DoS the channel), and `register_guardrail(opts)` for raw custom
+  closures. Conformance: four new fixtures under
+  `conformance/tests/triggers/trigger_channel_guardrail_*` cover the
+  signature scanner blocking adversarial payloads while letting safe
+  ones through, custom-closure verdict honoring across all three
+  shapes, LLM classifier mock with confident-block + sub-threshold +
+  explicit-allow, and the allow-passthrough silence contract +
+  register/list/unregister surface. Rust-side coverage adds eight
+  unit tests exercising nested-string walking, registration replace-
+  on-duplicate, applies_to filtering, and short-circuit-on-block.
 - **DAP subagent threads + suspend/resume integration (S-17, #1868).**
   `harn-dap` now bridges spawned subagents onto DAP's `Thread`/`stopped`/
   `continued` event model. Each `agent_loop` / `sub_agent_run` worker

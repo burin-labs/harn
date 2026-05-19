@@ -1,0 +1,28 @@
+import { prompt_injection_scanner } from "std/channel_guardrails"
+
+/**
+ * CH-11 (#1911): an `allow` verdict passes through silently — no
+ * audit row is written and the receipt looks identical to an emit
+ * without any guardrails registered.
+ */
+pipeline default() {
+  pipeline_lifecycle_audit_log_take()
+  channel_guardrail_clear()
+  let _ = prompt_injection_scanner({})
+  let receipt = emit_channel("ch.guardrail.allow", {value: 42})
+  println(receipt?.inserted)
+  println(receipt?.blocked ?? false)
+  println(receipt?.duplicate)
+  /* Confirm the durable journal has the entry. */
+  let history = channel_events("ch.guardrail.allow")
+  println(len(history))
+  println(history[0].payload.value)
+  /* No guardrail audit fired. */
+  let audit = pipeline_lifecycle_audit_log_take()
+  println(len(audit))
+  /* Listing returns the registered guardrail id. */
+  let ids = channel_guardrail_list()
+  println(len(ids))
+  println(channel_guardrail_unregister(ids[0]))
+  println(len(channel_guardrail_list()))
+}

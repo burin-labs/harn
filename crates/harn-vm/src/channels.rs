@@ -43,6 +43,14 @@ pub(crate) const CHANNEL_MATCH_RECEIPT_KIND: &str = "channel_match_receipt";
 const CHANNEL_EMIT_RECEIPT_SCHEMA: &str = "harn.channel_emit_receipt.v1";
 const CHANNEL_MATCH_RECEIPT_SCHEMA: &str = "harn.channel_match_receipt.v1";
 
+/// CH-11 (#1911): event kinds + schema header for guardrail middleware
+/// audit entries. Block + warn outcomes both write to the same
+/// `lifecycle.channel.audit` topic so security review tooling reads a
+/// single stream and discriminates on `kind`.
+pub(crate) const CHANNEL_GUARDRAIL_BLOCKED_KIND: &str = "channel_guardrail_blocked";
+pub(crate) const CHANNEL_GUARDRAIL_WARNING_KIND: &str = "channel_guardrail_warning";
+const CHANNEL_GUARDRAIL_AUDIT_SCHEMA: &str = "harn.channel_guardrail_audit.v1";
+
 /// CH-06 (#1877): per-event headers stamped on the `TriggerEvent` so the
 /// channel-match dispatcher can link the `ChannelMatch` span back to the
 /// originating `ChannelEmit` span across the async boundary (also through
@@ -283,6 +291,10 @@ pub fn reset_channel_state() {
     if let Some(slot) = SESSION_CHANNEL_LOG.get() {
         *slot.lock().expect("channel session log poisoned") = None;
     }
+    // CH-11 (#1911): clear the per-thread guardrail registry so the
+    // next pipeline starts with a clean slate. Mirrors how
+    // SESSION_CHANNEL_LOG is reset above.
+    crate::channel_guardrails::clear();
 }
 
 pub(crate) async fn emit_channel_from_vm(args: Vec<VmValue>) -> Result<VmValue, VmError> {
@@ -301,6 +313,47 @@ pub(crate) async fn emit_channel_from_vm(args: Vec<VmValue>) -> Result<VmValue, 
     let emitted_by = emitted_by(&context);
     let emitted_at = signed_timestamp(&resolved, &event_id, &emitted_by);
     let occurred_at_ms = emitted_at.at_ms;
+
+    // CH-11 (#1911): channel guardrails middleware. Runs BEFORE the
+    // durable journal append so a blocked payload never gets persisted
+    // (the block itself IS persisted on the lifecycle.channel.audit
+    // topic so the audit trail is durable). Warn verdicts proceed but
+    // record an audit. The aggregate decision is the worst verdict
+    // across every registered guardrail.
+    let guardrail_context = serde_json::json!({
+        "name": name,
+        "name_resolved": resolved.resolved_name,
+        "scope": resolved.scope.as_str(),
+        "scope_id": resolved.scope_id,
+        "event_id": event_id,
+        "emitted_by": emitted_by,
+    });
+    let decision =
+        crate::channel_guardrails::evaluate(&payload, &guardrail_context, &resolved.resolved_name)
+            .await?;
+    if matches!(
+        decision.verdict,
+        crate::channel_guardrails::Verdict::Block { .. }
+    ) {
+        return handle_blocked_emit(
+            &name,
+            &resolved,
+            &event_id,
+            &emitted_by,
+            &emitted_at,
+            &payload,
+            &decision,
+        )
+        .await;
+    }
+    record_guardrail_warnings(
+        &resolved,
+        &event_id,
+        &emitted_by,
+        &payload,
+        decision.fired.as_slice(),
+    )
+    .await;
     let record = StoredChannelEvent {
         id: event_id.clone(),
         name: resolved.resolved_name.clone(),
@@ -857,6 +910,144 @@ async fn append_channel_audit_event(
     let _ = log
         .append(&topic, LogEvent::new(kind, payload).with_headers(headers))
         .await;
+}
+
+/// CH-11 (#1911): emit a guardrail-blocked / -warned audit entry to
+/// the durable channel-audit topic AND to the in-process lifecycle
+/// audit log. The lifecycle entry is what `pipeline_lifecycle_audit_log_take()`
+/// surfaces to test fixtures; the event-log entry is what production
+/// audit consumers tail. Both echo the verbatim payload (callers
+/// concerned about PII should layer `redact::*` on top of the
+/// guardrail). Best-effort; audit write errors do not propagate.
+async fn record_guardrail_audit(
+    kind: &'static str,
+    resolved: &ResolvedChannel,
+    event_id: &str,
+    emitted_by: &str,
+    payload: &serde_json::Value,
+    fired: &[crate::channel_guardrails::FiredGuardrail],
+) {
+    let fired_json: Vec<serde_json::Value> = fired
+        .iter()
+        .map(|entry| {
+            serde_json::json!({
+                "id": entry.id,
+                "kind": entry.kind,
+                "verdict_label": entry.verdict_label,
+                "reason": entry.reason,
+            })
+        })
+        .collect();
+    let audit_payload = serde_json::json!({
+        "event_id": event_id,
+        "name_resolved": resolved.resolved_name,
+        "scope": resolved.scope.as_str(),
+        "scope_id": resolved.scope_id,
+        "emitted_by": emitted_by,
+        "payload_hash": channel_payload_hash(payload),
+        "payload": payload,
+        "fired": fired_json,
+    });
+    append_channel_audit_event(kind, CHANNEL_GUARDRAIL_AUDIT_SCHEMA, audit_payload.clone()).await;
+    // Mirror to the lifecycle audit log so tests using
+    // `pipeline_lifecycle_audit_log_take()` see the entry without
+    // having to scan the event log directly.
+    crate::orchestration::record_lifecycle_audit(kind, audit_payload);
+}
+
+/// CH-11 (#1911): record a warning audit for every Warn verdict that
+/// fired. A no-op when there were no Warn-level fires (the common
+/// case). Called BEFORE the durable append so the warning order
+/// matches the dispatch order.
+async fn record_guardrail_warnings(
+    resolved: &ResolvedChannel,
+    event_id: &str,
+    emitted_by: &str,
+    payload: &serde_json::Value,
+    fired: &[crate::channel_guardrails::FiredGuardrail],
+) {
+    if fired.is_empty() {
+        return;
+    }
+    record_guardrail_audit(
+        CHANNEL_GUARDRAIL_WARNING_KIND,
+        resolved,
+        event_id,
+        emitted_by,
+        payload,
+        fired,
+    )
+    .await;
+}
+
+/// CH-11 (#1911): record a `channel_guardrail_blocked` audit and
+/// return the synthetic "blocked" receipt so the caller can
+/// distinguish a guardrail block from a successful append or an
+/// idempotent dedupe. No durable journal append happens for a blocked
+/// emit; the audit log entry IS the durable artifact.
+async fn handle_blocked_emit(
+    raw_name: &str,
+    resolved: &ResolvedChannel,
+    event_id: &str,
+    emitted_by: &str,
+    emitted_at: &SignedTimestamp,
+    payload: &serde_json::Value,
+    decision: &crate::channel_guardrails::GuardrailDecision,
+) -> Result<VmValue, VmError> {
+    record_guardrail_audit(
+        CHANNEL_GUARDRAIL_BLOCKED_KIND,
+        resolved,
+        event_id,
+        emitted_by,
+        payload,
+        decision.fired.as_slice(),
+    )
+    .await;
+    let block_reason = decision
+        .fired
+        .iter()
+        .rev()
+        .find_map(|f| {
+            if f.verdict_label == CHANNEL_GUARDRAIL_BLOCKED_KIND
+                || f.verdict_label.contains("block")
+            {
+                Some(f.reason.clone())
+            } else {
+                None
+            }
+        })
+        .unwrap_or_else(|| "guardrail blocked".to_string());
+    let fired_json: Vec<serde_json::Value> = decision
+        .fired
+        .iter()
+        .map(|entry| {
+            serde_json::json!({
+                "id": entry.id,
+                "kind": entry.kind,
+                "verdict_label": entry.verdict_label,
+                "reason": entry.reason,
+            })
+        })
+        .collect();
+    let receipt = serde_json::json!({
+        "event_id": event_id,
+        "cursor": serde_json::Value::Null,
+        "id": event_id,
+        "name": raw_name,
+        "name_resolved": resolved.resolved_name,
+        "scope": resolved.scope.as_str(),
+        "scope_id": resolved.scope_id,
+        "emitted_at": emitted_at,
+        "emitted_by": emitted_by,
+        "retention": resolved.retention,
+        "topic": resolved.topic.as_str(),
+        "inserted": false,
+        "duplicate": false,
+        "blocked": true,
+        "block_reason": block_reason,
+        "guardrail_fired": fired_json,
+    });
+    Ok(crate::stdlib::json_to_vm_value(&receipt))
 }
 
 /// CH-07 (#1878): build + persist the emit receipt on the audit topic.

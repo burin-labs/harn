@@ -14,6 +14,7 @@ pub mod autonomy;
 pub mod bridge;
 mod builtin_id;
 pub mod bytecode_cache;
+pub mod channel_guardrails;
 pub mod channels;
 pub mod checkpoint;
 mod chunk;
