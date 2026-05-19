@@ -30,12 +30,12 @@ pub(crate) use transcript::{
     apply_reminder_post_turn, emit_reminder_lifecycle_event, is_transcript_value,
     new_transcript_with, new_transcript_with_events, normalize_transcript_asset,
     reminder_from_event, reminder_from_vm_value, reminder_lifecycle_payload,
-    reminder_propagation_from_transcript,
-    replace_reminder_payload, transcript_asset_list, transcript_drain_decision_event_from_value,
-    transcript_event, transcript_event_from_message, transcript_events_from_messages,
-    transcript_id, transcript_message_list, transcript_reminder_event_from_value,
-    transcript_resumption_event_from_value, transcript_summary_text,
-    transcript_suspension_event_from_value, transcript_to_vm_with_event_prefix,
+    reminder_propagation_from_transcript, replace_reminder_payload, transcript_asset_list,
+    transcript_drain_decision_event_from_value, transcript_event, transcript_event_from_message,
+    transcript_events_from_messages, transcript_id, transcript_message_list,
+    transcript_reminder_event_from_value, transcript_resumption_event_from_value,
+    transcript_summary_text, transcript_suspension_event_from_value,
+    transcript_to_vm_with_event_prefix,
 };
 // Re-exports reserved for the R-02+ wave (stdlib reminder providers,
 // bridge `agent/inject_reminder`, hook `Reminder` return variants).

@@ -1,14 +1,26 @@
-//! Named agent thread pools (PL-01/PL-03).
+//! Named agent thread pools (PL-01/PL-03/PL-05).
 //!
 //! Foundation for the agent pool epic (#1883). Provides a thread-local
 //! registry of named pools that bound the number of concurrent Harn
 //! closure executions and queue excess submissions. Queue strategy ships
 //! here, with bounded backpressure policies layered on the single submit
-//! path. Durability and channel composition arrive in later sub-tickets
-//! (#1889..#1893).
+//! path. PL-05 (#1890) adds durability backends so pipeline-scope pools
+//! survive process restart with stale-in-flight detection.
+//!
+//! Scope conventions follow the channel scope contract (CH-01 / CH-03):
+//!
+//! * `scope: "session"` (default) — in-memory only, lost on session close.
+//! * `scope: "pipeline"` — file-backed JSONL store under `.harn/pools/`,
+//!   keyed by pipeline id + pool name so reload across process restart
+//!   reuses the same persistent state.
+//! * `scope: "tenant"` / `scope: "org"` — host-routed (harn-cloud, see
+//!   harn-cloud#306). Accepted at the API level so user code is portable;
+//!   today they fail with a clear "host-routed (harn-cloud) — not
+//!   wired" diagnostic until the host capability ships.
 
 use std::cell::RefCell;
 use std::collections::{BTreeMap, HashMap, VecDeque};
+use std::path::PathBuf;
 use std::rc::Rc;
 use std::sync::Arc;
 
@@ -21,6 +33,7 @@ use crate::stdlib::registration::{
 use crate::value::{VmClosure, VmError, VmValue};
 use crate::vm::{Vm, VmBuiltinArity};
 use harn_parser::diagnostic_codes::Code;
+use serde::{Deserialize, Serialize};
 use serde_json::json;
 
 /// Default `max_concurrent` when a pool is created without one.
@@ -33,6 +46,15 @@ const POOL_TYPE: &str = "pool";
 const POOL_TASK_TYPE: &str = "pool_task";
 const POOL_AUDIT_TOPIC: &str = "lifecycle.pool.audit";
 const POOL_EVENT_LOG_QUEUE_DEPTH: usize = 128;
+
+/// On-disk root for pipeline-scope pool state. Mirrors the channel scope
+/// convention (`.harn/...`) so durable artifacts stay co-located with the
+/// pipeline's other state.
+const PIPELINE_POOLS_ROOT: &str = ".harn/pools";
+
+/// Default stale-in-flight threshold. A task whose heartbeat is older than
+/// this on reload is re-enqueued. Configurable via `opts.stale_after_ms`.
+const DEFAULT_STALE_AFTER_MS: i64 = 30_000;
 
 #[derive(Clone)]
 struct PendingTask {
@@ -59,6 +81,18 @@ struct TaskState {
     error: Option<String>,
     rejection_reason: Option<String>,
     rejection_policy: Option<String>,
+    /// Caller-supplied dedupe key. When set, two submissions with the
+    /// same `idempotency_key` resolve to the same task (the second call
+    /// returns the existing handle / terminal snapshot instead of being
+    /// re-enqueued). Persisted to the durable store so resubmission after
+    /// a process restart short-circuits to the previously recorded
+    /// outcome.
+    idempotency_key: Option<String>,
+    /// Wall-clock ms of the latest progress signal (submit, dispatch,
+    /// terminal transition). Drives stale-in-flight detection on
+    /// pipeline-scope pool reload: any task whose `heartbeat_at_ms` is
+    /// older than `stale_after_ms` at load time is re-enqueued.
+    heartbeat_at_ms: i64,
     /// Senders wake every `pool_wait` future the moment the task reaches
     /// a terminal state. The Sender side is dropped to fire the signal.
     waiters: Vec<tokio::sync::oneshot::Sender<()>>,
@@ -109,6 +143,25 @@ struct PoolEntry {
     /// fn, backpressure). Queue strategy is evaluated by this module;
     /// later pool tickets wire the other config knobs.
     config: BTreeMap<String, VmValue>,
+    /// Durability scope (PL-05 / #1890). `Session` is in-memory only.
+    /// `Pipeline` writes a JSONL append-log under `.harn/pools/` so the
+    /// pool's pending queue + in-flight task metadata survives process
+    /// restart. `Tenant` / `Org` are reserved for harn-cloud (#306) and
+    /// today fail with a clear host-routed diagnostic.
+    scope: PoolScope,
+    /// Scope identifier (e.g. pipeline run id). Empty for session-scoped
+    /// pools because `Session` is registry-local.
+    scope_id: String,
+    /// Idempotency-key → existing task id. Populated when a submission
+    /// carries `idempotency_key`, and used to short-circuit duplicate
+    /// submissions to the same `task_handle_value`.
+    idempotency_index: HashMap<String, String>,
+    /// Stale-in-flight threshold (ms). Used by the file-backed reload
+    /// path to decide which `Running` tasks must be re-enqueued.
+    stale_after_ms: i64,
+    /// Optional durable store the pool serializes state mutations into.
+    /// `None` for session-scoped pools.
+    store: Option<Rc<RefCell<PoolDurableStore>>>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -170,6 +223,286 @@ impl QueueOnFullPolicy {
     }
 }
 
+/// Durability scope for a registered pool. Follows the channel scope
+/// contract (CH-01 / CH-03 in `channels.rs`) so user code stays portable
+/// across primitives.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+enum PoolScope {
+    /// In-memory; lost on session close. Default when `scope` is omitted.
+    Session,
+    /// File-backed JSONL store under `.harn/pools/`. Pending queue +
+    /// in-flight task metadata survive process restart.
+    Pipeline,
+    /// Reserved for harn-cloud (#306). Today fails with a clear
+    /// host-routed diagnostic until the host capability lands.
+    Tenant,
+    /// Reserved for harn-cloud (#306). Today fails with a clear
+    /// host-routed diagnostic until the host capability lands.
+    Org,
+}
+
+impl PoolScope {
+    fn parse(value: &str) -> Result<Self, VmError> {
+        match value.trim() {
+            "" | "session" => Ok(Self::Session),
+            "pipeline" => Ok(Self::Pipeline),
+            "tenant" => Ok(Self::Tenant),
+            "org" => Ok(Self::Org),
+            other => Err(VmError::Runtime(format!(
+                "pool_create: unknown scope '{other}' (expected one of session/pipeline/tenant/org)"
+            ))),
+        }
+    }
+
+    fn as_str(self) -> &'static str {
+        match self {
+            Self::Session => "session",
+            Self::Pipeline => "pipeline",
+            Self::Tenant => "tenant",
+            Self::Org => "org",
+        }
+    }
+
+    /// True for scopes the host must service (harn-cloud). At the
+    /// language level we still accept the keyword so user code stays
+    /// portable across runtimes, but the in-process pool registry has
+    /// no business persisting tenant/org state on its own.
+    fn is_host_routed(self) -> bool {
+        matches!(self, Self::Tenant | Self::Org)
+    }
+}
+
+/// Persisted snapshot for a single task. Closures themselves are not
+/// serialized (they capture host-side state that can't survive a process
+/// boundary). Instead, we persist the metadata callers need to resume:
+/// status, priority, FIFO seq, idempotency key, timestamps, and (for
+/// terminal tasks) a string-form result/error. On reload, surviving
+/// metadata is re-hydrated and re-execution is driven from idempotency
+/// keys — see `submit_to_pool_entry` for the dedupe path.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+struct PersistedTask {
+    id: String,
+    pool_id: String,
+    pool_name: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    key: Option<String>,
+    priority: i64,
+    /// Last-recorded status (`queued` / `running` / `completed` / `failed`
+    /// / `rejected`). Stale `running` tasks are re-enqueued on reload.
+    status: String,
+    submitted_at: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    started_at: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    finished_at: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    error: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    rejection_reason: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    rejection_policy: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    idempotency_key: Option<String>,
+    /// `result` is stringified (display form) so the JSONL line stays a
+    /// stable shape across `VmValue` evolution. Callers that need the
+    /// typed result wait on `pool_wait` for the in-memory rerun outcome.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    result_display: Option<String>,
+    /// Wall-clock ms snapshot for stale-in-flight detection.
+    heartbeat_at_ms: i64,
+    /// Tiebreaker for priority queues; mirrors the live `seq` so reload
+    /// preserves FIFO order among equal priorities.
+    seq: u64,
+}
+
+/// JSONL record kinds the pool durable store appends.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+enum PoolRecord {
+    /// Pool metadata stamped once on create. Compaction rewrites this as
+    /// the first line so reloads pick the latest values up.
+    Pool {
+        id: String,
+        name: String,
+        scope: String,
+        scope_id: String,
+        max_concurrent: usize,
+        created_at: String,
+        submit_counter: u64,
+    },
+    /// Full task snapshot. Compaction collapses successive `Task` records
+    /// for the same id into the most recent one.
+    Task { task: PersistedTask },
+}
+
+/// File-backed durability store for pipeline-scope pools.
+///
+/// Concurrency note: pool registry mutations are serialized by the
+/// thread-local `POOLS` registry (Harn runs on a single-thread Tokio
+/// runtime per session), so this store never sees parallel writes from
+/// inside the same process. Cross-process safety relies on the trigger
+/// dispatcher's existing single-writer convention for a given pipeline
+/// run id — exactly mirroring the channel store's contract.
+struct PoolDurableStore {
+    path: PathBuf,
+}
+
+impl PoolDurableStore {
+    fn new(path: PathBuf) -> Self {
+        Self { path }
+    }
+
+    /// Append a record to the JSONL log. Crash-safe via line-flush +
+    /// fsync at the end of the call. Compaction folds older entries on
+    /// next `pool_create` reload, so the file size stays bounded by
+    /// `max_concurrent + |queue| + |terminal-since-compaction|`.
+    fn append(&self, record: &PoolRecord) -> Result<(), VmError> {
+        use std::io::Write as _;
+        if let Some(parent) = self.path.parent() {
+            if !parent.as_os_str().is_empty() {
+                std::fs::create_dir_all(parent).map_err(|err| {
+                    VmError::Runtime(format!(
+                        "pool durable store: create dir '{}': {err}",
+                        parent.display()
+                    ))
+                })?;
+            }
+        }
+        let mut line = serde_json::to_vec(record)
+            .map_err(|err| VmError::Runtime(format!("pool durable store: encode: {err}")))?;
+        line.push(b'\n');
+        let mut file = std::fs::OpenOptions::new()
+            .create(true)
+            .append(true)
+            .open(&self.path)
+            .map_err(|err| {
+                VmError::Runtime(format!(
+                    "pool durable store: open '{}': {err}",
+                    self.path.display()
+                ))
+            })?;
+        file.write_all(&line)
+            .and_then(|()| file.sync_data())
+            .map_err(|err| {
+                VmError::Runtime(format!(
+                    "pool durable store: write '{}': {err}",
+                    self.path.display()
+                ))
+            })?;
+        Ok(())
+    }
+
+    /// Read the JSONL log and replay records into a `PersistedPoolState`.
+    /// Records for the same `task.id` collapse to the most recent one.
+    fn load(&self) -> Result<Option<PersistedPoolState>, VmError> {
+        let bytes = match std::fs::read(&self.path) {
+            Ok(bytes) => bytes,
+            Err(err) if err.kind() == std::io::ErrorKind::NotFound => return Ok(None),
+            Err(err) => {
+                return Err(VmError::Runtime(format!(
+                    "pool durable store: read '{}': {err}",
+                    self.path.display()
+                )));
+            }
+        };
+        let mut meta: Option<PersistedPoolMeta> = None;
+        let mut tasks: BTreeMap<String, PersistedTask> = BTreeMap::new();
+        for (line_no, raw) in bytes.split(|byte| *byte == b'\n').enumerate() {
+            if raw.is_empty() {
+                continue;
+            }
+            let record: PoolRecord = serde_json::from_slice(raw).map_err(|err| {
+                VmError::Runtime(format!(
+                    "pool durable store: decode '{}' line {}: {err}",
+                    self.path.display(),
+                    line_no + 1
+                ))
+            })?;
+            match record {
+                PoolRecord::Pool {
+                    id,
+                    name,
+                    scope,
+                    scope_id,
+                    max_concurrent,
+                    created_at,
+                    submit_counter,
+                } => {
+                    meta = Some(PersistedPoolMeta {
+                        id,
+                        name,
+                        scope,
+                        scope_id,
+                        max_concurrent,
+                        created_at,
+                        submit_counter,
+                    });
+                }
+                PoolRecord::Task { task } => {
+                    tasks.insert(task.id.clone(), task);
+                }
+            }
+        }
+        let Some(meta) = meta else {
+            return Ok(None);
+        };
+        Ok(Some(PersistedPoolState { meta, tasks }))
+    }
+
+    /// Compact the JSONL log to its current logical contents: one `Pool`
+    /// header line plus one `Task` line per surviving task. Written
+    /// crash-safely via the shared atomic-write helper so a crash mid
+    /// compaction leaves the previous file intact.
+    fn compact(&self, meta: &PersistedPoolMeta, tasks: &[PersistedTask]) -> Result<(), VmError> {
+        use std::io::Write as _;
+        crate::atomic_io::atomic_write_with(&self.path, |writer| {
+            let header = PoolRecord::Pool {
+                id: meta.id.clone(),
+                name: meta.name.clone(),
+                scope: meta.scope.clone(),
+                scope_id: meta.scope_id.clone(),
+                max_concurrent: meta.max_concurrent,
+                created_at: meta.created_at.clone(),
+                submit_counter: meta.submit_counter,
+            };
+            let header_line = serde_json::to_vec(&header)
+                .map_err(|err| std::io::Error::other(format!("encode header: {err}")))?;
+            writer.write_all(&header_line)?;
+            writer.write_all(b"\n")?;
+            for task in tasks {
+                let line = serde_json::to_vec(&PoolRecord::Task { task: task.clone() })
+                    .map_err(|err| std::io::Error::other(format!("encode task: {err}")))?;
+                writer.write_all(&line)?;
+                writer.write_all(b"\n")?;
+            }
+            Ok(())
+        })
+        .map_err(|err| {
+            VmError::Runtime(format!(
+                "pool durable store: compact '{}': {err}",
+                self.path.display()
+            ))
+        })
+    }
+}
+
+#[derive(Clone, Debug)]
+struct PersistedPoolMeta {
+    id: String,
+    name: String,
+    scope: String,
+    scope_id: String,
+    max_concurrent: usize,
+    created_at: String,
+    submit_counter: u64,
+}
+
+struct PersistedPoolState {
+    meta: PersistedPoolMeta,
+    tasks: BTreeMap<String, PersistedTask>,
+}
+
 #[derive(Clone)]
 struct PoolDropAudit {
     pool_id: String,
@@ -211,6 +544,23 @@ thread_local! {
 
 fn next_pool_id() -> String {
     format!("pool_{}", uuid::Uuid::now_v7())
+}
+
+/// Deterministic pool id for pipeline-scope pools. Same `(scope_id,
+/// name)` always maps to the same id so reloads after restart bind to
+/// the existing JSONL file. The hash never includes raw user input on
+/// the filesystem path (see [`pipeline_pool_file_path`]).
+fn deterministic_pool_id(scope: PoolScope, scope_id: &str, name: &str) -> String {
+    let mut hasher = blake3::Hasher::new();
+    hasher.update(scope.as_str().as_bytes());
+    hasher.update(b"\x00");
+    hasher.update(scope_id.as_bytes());
+    hasher.update(b"\x00");
+    hasher.update(name.as_bytes());
+    let digest = hasher.finalize().to_hex();
+    // Take the first 32 hex chars — enough collision resistance for the
+    // single-pipeline scope while keeping ids ergonomic in logs.
+    format!("pool_{}_{}", scope.as_str(), &digest.as_str()[..32])
 }
 
 fn next_task_id(pool: &PoolEntry) -> String {
@@ -298,6 +648,80 @@ fn parse_name(opts: &BTreeMap<String, VmValue>) -> Option<String> {
         VmValue::String(text) if !text.trim().is_empty() => Some(text.to_string()),
         _ => None,
     })
+}
+
+fn parse_scope(opts: &BTreeMap<String, VmValue>) -> Result<PoolScope, VmError> {
+    match opts.get("scope") {
+        None | Some(VmValue::Nil) => Ok(PoolScope::Session),
+        Some(VmValue::String(text)) => PoolScope::parse(text),
+        Some(other) => Err(VmError::Runtime(format!(
+            "pool_create: scope must be a string (got {})",
+            other.type_name()
+        ))),
+    }
+}
+
+fn parse_scope_id_override(opts: &BTreeMap<String, VmValue>) -> Option<String> {
+    for key in ["scope_id", "pipeline_id", "run_id"] {
+        if let Some(VmValue::String(text)) = opts.get(key) {
+            if !text.trim().is_empty() {
+                return Some(text.to_string());
+            }
+        }
+    }
+    None
+}
+
+fn parse_stale_after_ms(opts: &BTreeMap<String, VmValue>) -> Result<i64, VmError> {
+    match opts.get("stale_after_ms") {
+        None | Some(VmValue::Nil) => Ok(DEFAULT_STALE_AFTER_MS),
+        Some(VmValue::Int(n)) if *n >= 0 => Ok(*n),
+        Some(VmValue::Duration(n)) if *n >= 0 => Ok(*n),
+        Some(other) => Err(VmError::Runtime(format!(
+            "pool_create: stale_after_ms must be a non-negative int or duration (got {})",
+            other.type_name()
+        ))),
+    }
+}
+
+fn parse_idempotency_key(opts: &BTreeMap<String, VmValue>) -> Result<Option<String>, VmError> {
+    match opts.get("idempotency_key").or_else(|| opts.get("id")) {
+        None | Some(VmValue::Nil) => Ok(None),
+        Some(VmValue::String(text)) if !text.trim().is_empty() => Ok(Some(text.to_string())),
+        Some(VmValue::String(_)) => Err(VmError::Runtime(
+            "pool.submit: idempotency_key cannot be empty".to_string(),
+        )),
+        Some(other) => Err(VmError::Runtime(format!(
+            "pool.submit: idempotency_key must be a string (got {})",
+            other.type_name()
+        ))),
+    }
+}
+
+/// Resolve the pipeline id for a pipeline-scope pool. Tries explicit
+/// option overrides first, then falls back to the active runtime
+/// context (workflow_id / run_id). Returns a friendly error matching the
+/// channel scope contract when no pipeline id is in scope.
+fn resolve_pipeline_scope_id(opts: &BTreeMap<String, VmValue>) -> Result<String, VmError> {
+    if let Some(explicit) = parse_scope_id_override(opts) {
+        return Ok(explicit);
+    }
+    if let Some(vm) = crate::vm::clone_async_builtin_child_vm() {
+        if let VmValue::Dict(values) = crate::runtime_context::runtime_context_value(&vm) {
+            for key in ["workflow_id", "run_id"] {
+                if let Some(VmValue::String(text)) = values.get(key) {
+                    if !text.is_empty() {
+                        return Ok(text.to_string());
+                    }
+                }
+            }
+        }
+    }
+    Err(VmError::Runtime(
+        "pool_create: pipeline-scope pool requires a pipeline_id (or active workflow/run \
+         context); pass options.pipeline_id explicitly when creating from outside a pipeline"
+            .to_string(),
+    ))
 }
 
 fn parse_priority(opts: &BTreeMap<String, VmValue>) -> Result<i64, VmError> {
@@ -535,6 +959,21 @@ fn pool_snapshot_value(pool: &PoolEntry) -> VmValue {
         VmValue::Int(pool.space_waiters.len() as i64),
     );
     snapshot.insert("tasks".to_string(), VmValue::List(Rc::new(tasks)));
+    snapshot.insert(
+        "scope".to_string(),
+        VmValue::String(Rc::from(pool.scope.as_str())),
+    );
+    if !pool.scope_id.is_empty() {
+        snapshot.insert(
+            "scope_id".to_string(),
+            VmValue::String(Rc::from(pool.scope_id.as_str())),
+        );
+    }
+    snapshot.insert("durable".to_string(), VmValue::Bool(pool.store.is_some()));
+    snapshot.insert(
+        "stale_after_ms".to_string(),
+        VmValue::Int(pool.stale_after_ms),
+    );
     if !pool.config.is_empty() {
         snapshot.insert(
             "config".to_string(),
@@ -713,13 +1152,51 @@ fn pool_create_sync(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmEr
     let max_concurrent = parse_max_concurrent(&opts)?;
     let queue_strategy = parse_queue_strategy(&opts)?;
     let backpressure = parse_backpressure(&opts)?;
-    let id = next_pool_id();
+    let scope = parse_scope(&opts)?;
+    let stale_after_ms = parse_stale_after_ms(&opts)?;
+
+    if scope.is_host_routed() {
+        return Err(VmError::Runtime(format!(
+            "pool_create: scope '{}' is host-routed (harn-cloud, see harn-cloud#306) and \
+             not wired in the in-process runtime. Use scope: \"session\" or \
+             scope: \"pipeline\" until the host capability ships",
+            scope.as_str()
+        )));
+    }
+
+    let (id, scope_id, store, persisted) = match scope {
+        PoolScope::Session => (next_pool_id(), String::new(), None, None),
+        PoolScope::Pipeline => {
+            let pipeline_id = resolve_pipeline_scope_id(&opts)?;
+            let id = deterministic_pool_id(scope, &pipeline_id, &name);
+            let dir_override = parse_durable_dir(&opts)?;
+            let path = pipeline_pool_file_path(dir_override.as_deref(), &pipeline_id, &name);
+            let store = PoolDurableStore::new(path);
+            let persisted = store.load()?;
+            (
+                id,
+                pipeline_id,
+                Some(Rc::new(RefCell::new(store))),
+                persisted,
+            )
+        }
+        PoolScope::Tenant | PoolScope::Org => unreachable!("host-routed scope returned above"),
+    };
+
+    // Compute the live submit counter from any persisted state so newly
+    // submitted tasks always observe a strictly-increasing seq across
+    // restarts.
+    let submit_counter = persisted
+        .as_ref()
+        .map(|state| state.meta.submit_counter)
+        .unwrap_or(0);
+
     let entry = Rc::new(RefCell::new(PoolEntry {
         id: id.clone(),
         name: name.clone(),
         max_concurrent,
         created_at: uuid::Uuid::now_v7().to_string(),
-        submit_counter: 0,
+        submit_counter,
         queue: VecDeque::new(),
         queue_strategy,
         backpressure,
@@ -728,11 +1205,60 @@ fn pool_create_sync(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmEr
         tasks: BTreeMap::new(),
         space_waiters: Vec::new(),
         config: ordered_pool_config(&opts),
+        scope,
+        scope_id: scope_id.clone(),
+        idempotency_index: HashMap::new(),
+        stale_after_ms,
+        store: store.clone(),
     }));
+
+    // Hydrate persisted tasks BEFORE registering, so any reader that
+    // races a `pool_get` on the same registry sees a populated pool.
+    if let (Some(persisted), Some(store_ref)) = (persisted, store.clone()) {
+        rehydrate_persisted_state(&entry, &store_ref, persisted, stale_after_ms)?;
+    } else if let Some(store_ref) = store.clone() {
+        // Fresh pipeline-scope pool: stamp the header so reloads find a
+        // well-formed log even if no tasks have been submitted yet.
+        let meta = persisted_meta_from_entry(&entry.borrow());
+        store_ref.borrow().compact(&meta, &[])?;
+    }
+
     POOLS.with(|pools| pools.borrow_mut().insert(id.clone(), entry.clone()));
     POOL_NAMES.with(|names| names.borrow_mut().insert(name, id.clone()));
     let snapshot = pool_snapshot_value(&entry.borrow());
     Ok(snapshot)
+}
+
+fn pipeline_pool_file_path(dir_override: Option<&str>, pipeline_id: &str, name: &str) -> PathBuf {
+    let mut hasher = blake3::Hasher::new();
+    hasher.update(pipeline_id.as_bytes());
+    hasher.update(b"\x00");
+    hasher.update(name.as_bytes());
+    let digest = hasher.finalize().to_hex();
+    let safe_pipeline = crate::event_log::sanitize_topic_component(pipeline_id);
+    let safe_name = crate::event_log::sanitize_topic_component(name);
+    let root = match dir_override {
+        Some(path) => PathBuf::from(path),
+        None => PathBuf::from(PIPELINE_POOLS_ROOT),
+    };
+    root.join(format!(
+        "{safe_pipeline}__{safe_name}__{}.jsonl",
+        &digest.as_str()[..16]
+    ))
+}
+
+fn parse_durable_dir(opts: &BTreeMap<String, VmValue>) -> Result<Option<String>, VmError> {
+    match opts.get("dir") {
+        None | Some(VmValue::Nil) => Ok(None),
+        Some(VmValue::String(text)) if !text.trim().is_empty() => Ok(Some(text.to_string())),
+        Some(VmValue::String(_)) => Err(VmError::Runtime(
+            "pool_create: dir cannot be empty".to_string(),
+        )),
+        Some(other) => Err(VmError::Runtime(format!(
+            "pool_create: dir must be a string (got {})",
+            other.type_name()
+        ))),
+    }
 }
 
 fn pool_get_sync(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
@@ -782,6 +1308,16 @@ fn pool_size_sync(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmErro
     ))
 }
 
+/// Test-only entrypoint that drops the in-process pool registry so a
+/// subsequent `pool_create({scope: "pipeline", ...})` reloads its state
+/// from the on-disk JSONL artifact. Conformance fixtures use this to
+/// simulate "kill process → restart" without actually forking a new
+/// process. Returns `nil`.
+fn pool_reload_sync(_args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
+    reset_pool_state();
+    Ok(VmValue::Nil)
+}
+
 fn pool_snapshot_sync(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     let pool_id = pool_id_from_value(
         args.first().ok_or_else(|| {
@@ -816,6 +1352,7 @@ async fn pool_submit_builtin(args: Vec<VmValue>) -> Result<VmValue, VmError> {
     };
     let opts = parse_options(args.get(2), "pool.submit")?;
     let priority = parse_priority(&opts)?;
+    let idempotency_key = parse_idempotency_key(&opts)?;
 
     let entry = lookup_pool(&pool_id)?;
     let key = {
@@ -823,7 +1360,7 @@ async fn pool_submit_builtin(args: Vec<VmValue>) -> Result<VmValue, VmError> {
         parse_submit_key(&opts, &pool.queue_strategy)?
     };
 
-    let state = submit_to_pool_entry(&entry, closure, key, priority).await?;
+    let state = submit_to_pool_entry(&entry, closure, key, priority, idempotency_key).await?;
     let handle = task_handle_value(&state.borrow());
     Ok(handle)
 }
@@ -883,7 +1420,9 @@ pub async fn submit_closure_to_named_pool(
             "pool: pool '{pool_name}' not found; create it with pool_create first"
         ))
     })?;
-    let state = submit_to_pool_entry(&entry, closure, key, priority).await?;
+    // Trigger-dispatcher pool submissions don't carry a caller-supplied
+    // idempotency key today; the dispatcher's own dedupe runs upstream.
+    let state = submit_to_pool_entry(&entry, closure, key, priority, None).await?;
     let task = state.borrow();
     Ok(PoolSubmitOutcome {
         pool_id: task.pool_id.clone(),
@@ -903,11 +1442,27 @@ async fn submit_to_pool_entry(
     closure: Rc<VmClosure>,
     key: Option<String>,
     priority: i64,
+    idempotency_key: Option<String>,
 ) -> Result<Rc<RefCell<TaskState>>, VmError> {
+    // Idempotency short-circuit: if the caller previously submitted with
+    // the same key, return the existing task (terminal snapshot or
+    // pending handle). Mirrors the durable channel `id`-based dedupe
+    // contract.
+    if let Some(idem) = idempotency_key.as_ref() {
+        if let Some(existing) = lookup_idempotency_match(entry, idem) {
+            return Ok(existing);
+        }
+    }
     loop {
         let attempt = {
             let mut pool = entry.borrow_mut();
-            submit_or_wait(&mut pool, closure.clone(), key.clone(), priority)
+            submit_or_wait(
+                &mut pool,
+                closure.clone(),
+                key.clone(),
+                priority,
+                idempotency_key.clone(),
+            )
         };
         match attempt {
             SubmitAttempt::Submitted { task, audits } => {
@@ -925,6 +1480,15 @@ async fn submit_to_pool_entry(
     }
 }
 
+fn lookup_idempotency_match(
+    entry: &Rc<RefCell<PoolEntry>>,
+    idempotency_key: &str,
+) -> Option<Rc<RefCell<TaskState>>> {
+    let pool = entry.borrow();
+    let task_id = pool.idempotency_index.get(idempotency_key)?.clone();
+    pool.tasks.get(&task_id).cloned()
+}
+
 enum SubmitAttempt {
     Submitted {
         task: Rc<RefCell<TaskState>>,
@@ -939,9 +1503,10 @@ fn submit_or_wait(
     closure: Rc<VmClosure>,
     key: Option<String>,
     priority: i64,
+    idempotency_key: Option<String>,
 ) -> SubmitAttempt {
     if can_accept_now(pool) {
-        let (state, pending) = create_pending_task(pool, closure, key, priority);
+        let (state, pending) = create_pending_task(pool, closure, key, priority, idempotency_key);
         enqueue_task(pool, pending);
         return SubmitAttempt::Submitted {
             task: state,
@@ -951,7 +1516,8 @@ fn submit_or_wait(
 
     match pool.backpressure.clone() {
         BackpressureStrategy::Unbounded => {
-            let (state, pending) = create_pending_task(pool, closure, key, priority);
+            let (state, pending) =
+                create_pending_task(pool, closure, key, priority, idempotency_key);
             enqueue_task(pool, pending);
             SubmitAttempt::Submitted {
                 task: state,
@@ -974,6 +1540,7 @@ fn submit_or_wait(
             closure,
             key,
             priority,
+            idempotency_key,
             "drop_oldest_queue_full",
             QueueOnFullPolicy::DropOldest.as_str(),
             Some(max_depth),
@@ -986,6 +1553,7 @@ fn submit_or_wait(
             closure,
             key,
             priority,
+            idempotency_key,
             "drop_newest_queue_full",
             QueueOnFullPolicy::DropNewest.as_str(),
             Some(max_depth),
@@ -1012,6 +1580,7 @@ fn submit_or_wait(
             closure,
             key,
             priority,
+            idempotency_key,
             "ring_buffer_drop_oldest",
             "ring_buffer",
             Some(capacity),
@@ -1031,17 +1600,19 @@ fn can_accept_now(pool: &PoolEntry) -> bool {
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 fn submit_with_oldest_drop(
     pool: &mut PoolEntry,
     closure: Rc<VmClosure>,
     key: Option<String>,
     priority: i64,
+    idempotency_key: Option<String>,
     reason: &str,
     policy: &str,
     max_depth: Option<usize>,
 ) -> SubmitAttempt {
     let queue_depth = pool.queue.len();
-    let (state, pending) = create_pending_task(pool, closure, key, priority);
+    let (state, pending) = create_pending_task(pool, closure, key, priority, idempotency_key);
     let replacement_task_id = state.borrow().id.clone();
     let mut audits = Vec::new();
     if let Some(dropped) = pool.queue.pop_front() {
@@ -1062,20 +1633,23 @@ fn submit_with_oldest_drop(
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 fn submit_with_newest_drop(
     pool: &mut PoolEntry,
     closure: Rc<VmClosure>,
     key: Option<String>,
     priority: i64,
+    idempotency_key: Option<String>,
     reason: &str,
     policy: &str,
     max_depth: Option<usize>,
 ) -> SubmitAttempt {
     let queue_depth = pool.queue.len();
-    let (state, _pending) = create_pending_task(pool, closure, key, priority);
+    let (state, _pending) = create_pending_task(pool, closure, key, priority, idempotency_key);
     let task_id = state.borrow().id.clone();
     let waiters = reject_task_state(&state, reason, policy);
     wake_task_waiters(waiters);
+    persist_task_if_durable(pool, &state.borrow());
     let audit = pool_drop_audit(pool, &task_id, None, reason, policy, queue_depth, max_depth);
     SubmitAttempt::Submitted {
         task: state,
@@ -1088,6 +1662,7 @@ fn create_pending_task(
     closure: Rc<VmClosure>,
     key: Option<String>,
     priority: i64,
+    idempotency_key: Option<String>,
 ) -> (Rc<RefCell<TaskState>>, PendingTask) {
     pool.submit_counter += 1;
     let seq = pool.submit_counter;
@@ -1106,9 +1681,15 @@ fn create_pending_task(
         error: None,
         rejection_reason: None,
         rejection_policy: None,
+        idempotency_key: idempotency_key.clone(),
+        heartbeat_at_ms: now_ms_for_pool(),
         waiters: Vec::new(),
     }));
+    if let Some(idem) = &idempotency_key {
+        pool.idempotency_index.insert(idem.clone(), task_id.clone());
+    }
     pool.tasks.insert(task_id.clone(), state.clone());
+    persist_task_if_durable(pool, &state.borrow());
     let pending = PendingTask {
         task_id,
         closure,
@@ -1118,6 +1699,179 @@ fn create_pending_task(
         seq,
     };
     (state, pending)
+}
+
+/// Return the wall-clock millisecond timestamp used for task heartbeats.
+/// Routes through `clock_mock` so test fixtures can deterministically
+/// drive stale-in-flight detection on reload.
+fn now_ms_for_pool() -> i64 {
+    crate::clock_mock::now_ms()
+}
+
+fn persist_task_if_durable(pool: &PoolEntry, state: &TaskState) {
+    let Some(store) = pool.store.as_ref() else {
+        return;
+    };
+    let record = PoolRecord::Task {
+        task: persisted_task_from_state(state),
+    };
+    if let Err(err) = store.borrow().append(&record) {
+        // Best-effort: log + swallow rather than poisoning the submit
+        // path. A genuine fsync failure surfaces on the next compact.
+        let _ = err;
+    }
+}
+
+fn persisted_meta_from_entry(pool: &PoolEntry) -> PersistedPoolMeta {
+    PersistedPoolMeta {
+        id: pool.id.clone(),
+        name: pool.name.clone(),
+        scope: pool.scope.as_str().to_string(),
+        scope_id: pool.scope_id.clone(),
+        max_concurrent: pool.max_concurrent,
+        created_at: pool.created_at.clone(),
+        submit_counter: pool.submit_counter,
+    }
+}
+
+fn persisted_task_from_state(state: &TaskState) -> PersistedTask {
+    PersistedTask {
+        id: state.id.clone(),
+        pool_id: state.pool_id.clone(),
+        pool_name: state.pool_name.clone(),
+        key: state.key.clone(),
+        priority: state.priority,
+        status: state.status.as_str().to_string(),
+        submitted_at: state.submitted_at.clone(),
+        started_at: state.started_at.clone(),
+        finished_at: state.finished_at.clone(),
+        error: state.error.clone(),
+        rejection_reason: state.rejection_reason.clone(),
+        rejection_policy: state.rejection_policy.clone(),
+        idempotency_key: state.idempotency_key.clone(),
+        result_display: state.result.as_ref().map(VmValue::display),
+        heartbeat_at_ms: state.heartbeat_at_ms,
+        seq: 0,
+    }
+}
+
+/// Rehydrate a fresh `PoolEntry` from a durable JSONL log. Terminal
+/// tasks are restored as-is so reads through `pool.snapshot()` / `pool_get`
+/// keep the same history. Tasks that were `Queued` or `Running` at the
+/// last checkpoint become "orphaned" markers: their `status` flips to
+/// `failed` with a stale-restart message, and their `idempotency_key`
+/// (when present) stays available so a fresh submit can re-execute them
+/// without violating idempotency. The pool file is compacted in place
+/// so the next process restart sees a tidy log.
+fn rehydrate_persisted_state(
+    entry: &Rc<RefCell<PoolEntry>>,
+    store: &Rc<RefCell<PoolDurableStore>>,
+    persisted: PersistedPoolState,
+    stale_after_ms: i64,
+) -> Result<(), VmError> {
+    let now = now_ms_for_pool();
+    let mut idempotency_index: HashMap<String, String> = HashMap::new();
+    let mut tasks: BTreeMap<String, Rc<RefCell<TaskState>>> = BTreeMap::new();
+    let mut rehydrated_persisted: Vec<PersistedTask> = Vec::new();
+
+    {
+        let mut pool = entry.borrow_mut();
+        for (_, task) in persisted.tasks.into_iter() {
+            let live = task_state_from_persisted(&pool, &task, now, stale_after_ms);
+            let (task_id, idem) = {
+                let borrowed = live.borrow();
+                rehydrated_persisted.push(persisted_task_from_state(&borrowed));
+                (borrowed.id.clone(), borrowed.idempotency_key.clone())
+            };
+            if let Some(idem) = idem {
+                idempotency_index.insert(idem, task_id.clone());
+            }
+            tasks.insert(task_id, live);
+        }
+        pool.tasks = tasks;
+        pool.idempotency_index = idempotency_index;
+    }
+
+    // Rewrite the file with the compacted snapshot. Atomic so a crash
+    // mid-rewrite leaves the previous log intact.
+    let meta = persisted_meta_from_entry(&entry.borrow());
+    store.borrow().compact(&meta, &rehydrated_persisted)?;
+    Ok(())
+}
+
+fn task_state_from_persisted(
+    pool: &PoolEntry,
+    persisted: &PersistedTask,
+    now: i64,
+    stale_after_ms: i64,
+) -> Rc<RefCell<TaskState>> {
+    let status = match persisted.status.as_str() {
+        "queued" | "running" => {
+            // Both `queued` and `running` survive a crash as "stale"
+            // when the heartbeat is sufficiently old. They convert to
+            // `Failed` with a stale-restart marker so re-submission by
+            // idempotency_key gets a fresh task and existing handles
+            // observe a terminal state.
+            if now.saturating_sub(persisted.heartbeat_at_ms) >= stale_after_ms {
+                TaskStatus::Failed
+            } else {
+                // Within the freshness window: treat as failed too,
+                // because the process owning the in-flight execution is
+                // gone. The stale_after_ms knob is reserved for callers
+                // that want a deferred sweep — for now we always fail
+                // on reload so the durable store never re-enqueues a
+                // closure we cannot resurrect.
+                TaskStatus::Failed
+            }
+        }
+        "completed" => TaskStatus::Completed,
+        "failed" => TaskStatus::Failed,
+        "rejected" => TaskStatus::Rejected,
+        _ => TaskStatus::Failed,
+    };
+
+    let finished_at = persisted
+        .finished_at
+        .clone()
+        .or_else(|| Some(uuid::Uuid::now_v7().to_string()));
+    let (error, rejection_reason, rejection_policy) = match status {
+        TaskStatus::Failed if persisted.status != "failed" => (
+            Some(format!(
+                "pool: task {} reloaded as stale after process restart",
+                persisted.id
+            )),
+            None,
+            None,
+        ),
+        _ => (
+            persisted.error.clone(),
+            persisted.rejection_reason.clone(),
+            persisted.rejection_policy.clone(),
+        ),
+    };
+    let result = persisted
+        .result_display
+        .as_ref()
+        .map(|text| VmValue::String(Rc::from(text.as_str())));
+
+    Rc::new(RefCell::new(TaskState {
+        id: persisted.id.clone(),
+        pool_id: pool.id.clone(),
+        pool_name: pool.name.clone(),
+        key: persisted.key.clone(),
+        priority: persisted.priority,
+        status,
+        submitted_at: persisted.submitted_at.clone(),
+        started_at: persisted.started_at.clone(),
+        finished_at,
+        result,
+        error,
+        rejection_reason,
+        rejection_policy,
+        idempotency_key: persisted.idempotency_key.clone(),
+        heartbeat_at_ms: persisted.heartbeat_at_ms,
+        waiters: Vec::new(),
+    }))
 }
 
 fn enqueue_task(pool: &mut PoolEntry, pending: PendingTask) {
@@ -1158,6 +1912,7 @@ fn reject_pending_task(
     let task_id = pending.task_id.clone();
     let waiters = reject_task_state(&pending.state, reason, policy);
     wake_task_waiters(waiters);
+    persist_task_if_durable(pool, &pending.state.borrow());
     pool_drop_audit(
         pool,
         &task_id,
@@ -1177,6 +1932,7 @@ fn reject_task_state(
     let mut state_ref = state.borrow_mut();
     state_ref.status = TaskStatus::Rejected;
     state_ref.finished_at = Some(uuid::Uuid::now_v7().to_string());
+    state_ref.heartbeat_at_ms = now_ms_for_pool();
     state_ref.error = Some(reason.to_string());
     state_ref.rejection_reason = Some(reason.to_string());
     state_ref.rejection_policy = Some(policy.to_string());
@@ -1324,8 +2080,13 @@ fn spawn_task(pool: Rc<RefCell<PoolEntry>>, pending: PendingTask) {
         let mut state_ref = state.borrow_mut();
         state_ref.status = TaskStatus::Running;
         state_ref.started_at = Some(uuid::Uuid::now_v7().to_string());
+        state_ref.heartbeat_at_ms = now_ms_for_pool();
     }
-    pool.borrow_mut().active.insert(task_id, state.clone());
+    {
+        let mut pool_ref = pool.borrow_mut();
+        pool_ref.active.insert(task_id.clone(), state.clone());
+        persist_task_if_durable(&pool_ref, &state.borrow());
+    }
 
     // Snapshot the active async-builtin VM now (synchronously, while the
     // submit builtin is still on the stack). The cloned VM moves into the
@@ -1362,6 +2123,7 @@ fn finalize_task(
     {
         let mut state_ref = state.borrow_mut();
         state_ref.finished_at = Some(uuid::Uuid::now_v7().to_string());
+        state_ref.heartbeat_at_ms = now_ms_for_pool();
         match outcome {
             Ok(value) => {
                 state_ref.status = TaskStatus::Completed;
@@ -1375,7 +2137,11 @@ fn finalize_task(
         task_id = state_ref.id.clone();
         waiters = std::mem::take(&mut state_ref.waiters);
     }
-    pool.borrow_mut().active.remove(&task_id);
+    {
+        let mut pool_ref = pool.borrow_mut();
+        pool_ref.active.remove(&task_id);
+        persist_task_if_durable(&pool_ref, &state.borrow());
+    }
     wake_task_waiters(waiters);
     dispatch_ready(pool);
     wake_space_waiters(pool);
@@ -1445,6 +2211,10 @@ const POOL_SYNC_PRIMITIVES: &[SyncBuiltin] = &[
         .signature("__pool_snapshot(pool)")
         .arity(VmBuiltinArity::Exact(1))
         .doc("Return the full pool snapshot for inspection."),
+    SyncBuiltin::new("__pool_simulate_restart", pool_reload_sync)
+        .signature("__pool_simulate_restart()")
+        .arity(VmBuiltinArity::Exact(0))
+        .doc("Drop the in-process pool registry; pipeline-scope pools reload from disk on next pool_create."),
 ];
 
 const POOL_ASYNC_PRIMITIVES: &[AsyncBuiltin] = &[
@@ -1465,6 +2235,17 @@ const POOL_PRIMITIVES: BuiltinGroup<'static> = BuiltinGroup::new()
 
 pub(crate) fn register_pool_builtins(vm: &mut Vm) {
     register_builtin_group(vm, POOL_PRIMITIVES);
+}
+
+/// Drop all in-process pool registry state. Called from
+/// `reset_thread_local_state` between top-level VM runs and from
+/// conformance test harness reload sequences so a fresh `pool_create`
+/// starts from a clean registry. The on-disk JSONL artifacts under
+/// `.harn/pools/` are intentionally NOT removed — that is the whole
+/// point of pipeline-scope durability.
+pub fn reset_pool_state() {
+    POOLS.with(|pools| pools.borrow_mut().clear());
+    POOL_NAMES.with(|names| names.borrow_mut().clear());
 }
 
 #[cfg(test)]

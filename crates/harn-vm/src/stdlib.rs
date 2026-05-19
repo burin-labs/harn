@@ -260,6 +260,7 @@ pub fn reset_stdlib_state() {
     waitpoint::reset_waitpoint_state();
     triggers_stdlib::reset_auto_resume_timeouts();
     agents::reset_agent_worker_state();
+    pool::reset_pool_state();
     postgres::reset_postgres_state();
     supervisor::reset_supervisor_state();
     agents::records::reset_eval_metrics();
