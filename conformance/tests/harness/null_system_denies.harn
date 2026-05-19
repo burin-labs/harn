@@ -2,6 +2,13 @@ fn main(harness: Harness) {
   try {
     harness.system.cpu()
   } catch (e) {
-    harness.stdio.println("caught")
+  }
+  try {
+    harness.system.memory()
+  } catch (e) {
+  }
+  try {
+    harness.system.processes()
+  } catch (e) {
   }
 }
