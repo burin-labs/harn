@@ -102,6 +102,7 @@ pub(crate) const SUB_AGENT_OPTIONS: Ty = Ty::Shape(&[
     ShapeFieldDescriptor::optional("carry", TY_DICT),
     ShapeFieldDescriptor::optional("allowed_tools", TY_LIST),
     ShapeFieldDescriptor::optional("policy", TY_ANY),
+    ShapeFieldDescriptor::optional("reminder_propagation", TY_LIST),
     ShapeFieldDescriptor::optional("resume_when", RESUME_CONDITIONS),
     ShapeFieldDescriptor::optional("returns_schema", TY_ANY),
     ShapeFieldDescriptor::optional("returns", TY_DICT),

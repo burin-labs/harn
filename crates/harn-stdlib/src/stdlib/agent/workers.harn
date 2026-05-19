@@ -580,6 +580,7 @@ fn __sub_agent_options(opts, session_id, selected_tools) {
     "system",
     "session_id",
     "policy",
+    "reminder_propagation",
   ]
   for key in opts.keys() {
     if !contains(internal, key) {
@@ -624,6 +625,7 @@ pub fn sub_agent_request(task, options = nil) {
       carry: opts?.carry,
       execution: opts?.execution,
       policy: opts?.policy,
+      reminder_propagation: opts?.reminder_propagation,
       allowed_tools: allowed_tools,
     },
   )

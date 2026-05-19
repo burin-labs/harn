@@ -1,0 +1,70 @@
+fn tools() {
+  var registry = tool_registry()
+  registry = tool_define(
+    registry,
+    "emit_handoff",
+    "Emit a handoff artifact",
+    {
+      handler: { _args ->
+        let record = handoff(
+          {
+            source_persona: "parent",
+            target_persona_or_human: {kind: "persona", id: "child", label: "child"},
+            task: "Run inherited reminder work",
+            reason: "Testing reminder propagation envelope",
+          },
+        )
+        println(len(record.reminder_propagation))
+        println(record.reminder_propagation[0].body)
+        println(record.reminder_propagation[0].source)
+        println(record.reminder_propagation[0].originating_agent_id == "reminder-propagate-handoff-parent")
+        println(record.reminder_propagation[1].body)
+        println(record.reminder_propagation[1].source)
+        println(record.reminder_propagation[1].originating_agent_id == "reminder-propagate-handoff-parent")
+        record
+      },
+      parameters: {},
+      returns: {type: "object"},
+    },
+  )
+  return registry
+}
+
+pipeline main() {
+  llm_mock_clear()
+  let parent = agent_session_open("reminder-propagate-handoff-parent")
+  agent_session_reset(parent)
+  agent_session_inject(
+    parent,
+    transcript_reminder_event(
+      {body: "all reminder", tags: ["all"], dedupe_key: "all-key", propagate: "all"},
+    ),
+  )
+  agent_session_inject(
+    parent,
+    transcript_reminder_event(
+      {body: "session reminder", tags: ["session"], dedupe_key: "session-key", propagate: "session"},
+    ),
+  )
+  agent_session_inject(
+    parent,
+    transcript_reminder_event(
+      {body: "none reminder", tags: ["none"], dedupe_key: "none-key", propagate: "none"},
+    ),
+  )
+  llm_mock({tool_calls: [{id: "handoff_call", name: "emit_handoff", arguments: {}}]})
+  llm_mock({text: "done"})
+  agent_loop(
+    "Emit a handoff.",
+    nil,
+    {
+      provider: "mock",
+      session_id: parent,
+      tools: tools(),
+      tool_format: "native",
+      max_iterations: 2,
+      done_judge: nil,
+    },
+  )
+  llm_mock_clear()
+}

@@ -10,6 +10,16 @@ condensed series summaries instead of full per-patch history.
 
 ### Added
 
+- **Sub-agent reminder propagation via handoff envelopes (#1824).**
+  Handoff artifacts and sub-agent requests now carry
+  `reminder_propagation` beside `policy_override`; `handoff(...)` derives
+  it from the active session's pending reminders when omitted. Child
+  sessions seed inherited reminders before their first turn, rewrite
+  `source` to `"inherited"`, and retain `originating_agent_id` for
+  audit. `propagate: "all"` continues through descendants,
+  `propagate: "session"` stops after direct children, and
+  `propagate: "none"` remains local. Canonical `idle_nudge` and
+  `tool_output_truncated` reminders now default to `propagate: "none"`.
 - **Agent lifecycle tools for self-parking and parent resume control (#1840).**
   `agent_loop(...)` now registers `agent_await_resumption(reason,
   conditions?)` on every loop and handles it structurally when the loop is

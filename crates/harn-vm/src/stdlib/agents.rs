@@ -119,6 +119,7 @@ pub(super) struct SubAgentRunSpec {
     pub(super) returns_schema: Option<VmValue>,
     pub(super) session_id: String,
     pub(super) parent_session_id: Option<String>,
+    pub(super) reminder_propagation: Vec<crate::llm::helpers::SystemReminder>,
 }
 
 pub(super) struct SubAgentExecutionResult {
@@ -655,6 +656,7 @@ async fn top_level_agent_suspend_builtin(args: Vec<VmValue>) -> Result<VmValue, 
             returns_schema: None,
             session_id: session_id.clone(),
             parent_session_id: None,
+            reminder_propagation: Vec::new(),
         }),
     };
     let request = worker_request_for_config(&task, &config);

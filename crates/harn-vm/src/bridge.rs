@@ -487,6 +487,7 @@ fn session_remind_payload_from_value(
         source: crate::llm::helpers::ReminderSource::Bridge,
         body: string_field(map, "body", true)?.unwrap_or_default(),
         fired_at_turn,
+        originating_agent_id: None,
     })
 }
 

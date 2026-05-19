@@ -119,6 +119,7 @@ impl ReminderProvider for IdleNudgeProvider {
         reminder.tags = vec!["idle".to_string()];
         reminder.dedupe_key = Some(IDLE_NUDGE_ID.to_string());
         reminder.ttl_turns = Some(1);
+        reminder.propagate = ReminderPropagate::None;
         Some(reminder)
     }
 }
@@ -164,6 +165,7 @@ impl ReminderProvider for ToolOutputTruncatedProvider {
         reminder.tags = vec!["truncation".to_string()];
         reminder.dedupe_key = Some(format!("{TOOL_OUTPUT_TRUNCATED_ID}:{tool_name}"));
         reminder.ttl_turns = Some(1);
+        reminder.propagate = ReminderPropagate::None;
         Some(reminder)
     }
 }

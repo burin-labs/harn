@@ -1450,6 +1450,14 @@ reminder with the same `dedupe_key` replaces pending reminders with
 that key and emits `transcript.reminder.deduped` on
 `transcript.reminder.lifecycle` when an EventLog is active.
 
+Sub-agent handoffs carry a filtered `reminder_propagation` list. A
+reminder with `propagate: "all"` is inherited by every descendant
+sub-agent; `propagate: "session"` reaches direct child sub-agents from
+the originating session but inherited copies are not re-forwarded; and
+`propagate: "none"` stays local. Inherited reminders are seeded into the
+child transcript with `source: "inherited"` and
+`originating_agent_id` set to the session that first emitted them.
+
 `transcript.clear_reminders(transcript, selector)` removes pending
 reminders and returns `{transcript, removed_count}`. Select by `id`,
 `tag`, or `dedupe_key`; when multiple selectors are present, all must
@@ -1474,11 +1482,14 @@ second closure argument: `{ messages, reminders -> ... }`.
 `llm_call(...)` does not. Providers are:
 
 - `token_pressure` on `on_budget_threshold` at ~70/85/95% context use
-  (`ttl_turns: 2`, critical threshold preserves across compaction).
+  (`ttl_turns: 2`, `propagate: "session"`, critical threshold
+  preserves across compaction).
 - `idle_nudge` on `session_idle` after `idle_seconds` (default 60).
 - `tool_output_truncated` on `post_tool_use` when tool output was
   compacted/truncated before the model saw it.
 - `post_compact_recap` on `post_compact` with the latest recap.
+- `idle_nudge` and `tool_output_truncated` use `propagate: "none"`;
+  `post_compact_recap` uses `propagate: "session"`.
 
 Opt out per loop:
 

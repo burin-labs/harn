@@ -876,6 +876,7 @@ fn parse_reminder_spec(value: &VmValue, context: &str) -> Result<ReminderSpec, V
         source: ReminderSource::Hook,
         body: required_reminder_spec_string(options, "body", context)?,
         fired_at_turn: 0,
+        originating_agent_id: None,
     })
 }
 

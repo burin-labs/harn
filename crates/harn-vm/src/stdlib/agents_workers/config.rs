@@ -67,6 +67,7 @@ fn sub_agent_spec_to_json(spec: &SubAgentRunSpec) -> serde_json::Value {
             .map(crate::llm::vm_value_to_json),
         "session_id": &spec.session_id,
         "parent_session_id": &spec.parent_session_id,
+        "reminder_propagation": &spec.reminder_propagation,
     })
 }
 
@@ -112,6 +113,23 @@ fn sub_agent_spec_from_json(value: &serde_json::Value) -> Result<SubAgentRunSpec
             .get("parent_session_id")
             .and_then(|value| value.as_str())
             .map(|value| value.to_string()),
+        reminder_propagation: dict
+            .get("reminder_propagation")
+            .and_then(|value| value.as_array())
+            .map(|items| {
+                items
+                    .iter()
+                    .map(|item| {
+                        serde_json::from_value(item.clone()).map_err(|error| {
+                            VmError::Runtime(format!(
+                                "worker snapshot sub-agent reminder_propagation parse error: {error}"
+                            ))
+                        })
+                    })
+                    .collect::<Result<Vec<_>, _>>()
+            })
+            .transpose()?
+            .unwrap_or_default(),
     })
 }
 

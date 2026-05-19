@@ -27,6 +27,7 @@ pipeline main() {
   println(len(before))
   println(before[0].reminder.tags[0])
   println(before[0].reminder.source)
+  println(before[0].reminder.propagate)
   println(before[0].reminder.preserve_on_compact)
   println(ttl.decremented_count)
   println(after[0].reminder.ttl_turns)

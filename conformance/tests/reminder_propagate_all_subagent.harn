@@ -1,0 +1,100 @@
+fn grandchild_tools() {
+  return tool_registry()
+}
+
+fn child_tools(grandchild_session) {
+  var tools = tool_registry()
+  tools = tool_define(
+    tools,
+    "delegate_grandchild",
+    "Run a grandchild sub-agent",
+    {
+      handler: { _args -> sub_agent_run(
+        "Grandchild task.",
+        {
+          provider: "mock",
+          session_id: grandchild_session,
+          tools: grandchild_tools(),
+          tool_format: "native",
+          max_iterations: 1,
+          done_judge: nil,
+        },
+      ) },
+      parameters: {},
+      returns: {type: "object"},
+    },
+  )
+  return tools
+}
+
+fn parent_tools(child_session, grandchild_session) {
+  var tools = tool_registry()
+  tools = tool_define(
+    tools,
+    "delegate_child",
+    "Run a child sub-agent",
+    {
+      handler: { _args -> sub_agent_run(
+        "Child task.",
+        {
+          provider: "mock",
+          session_id: child_session,
+          tools: child_tools(grandchild_session),
+          tool_format: "native",
+          max_iterations: 2,
+          done_judge: nil,
+        },
+      ) },
+      parameters: {},
+      returns: {type: "object"},
+    },
+  )
+  return tools
+}
+
+pipeline main() {
+  llm_mock_clear()
+  let parent = agent_session_open("reminder-propagate-all-parent")
+  let child = "reminder-propagate-all-child"
+  let grandchild = "reminder-propagate-all-grandchild"
+  agent_session_open(child)
+  agent_session_open(grandchild)
+  agent_session_reset(parent)
+  agent_session_reset(child)
+  agent_session_reset(grandchild)
+  agent_session_inject(
+    parent,
+    transcript_reminder_event(
+      {body: "all reminder", tags: ["all"], dedupe_key: "all-key", propagate: "all"},
+    ),
+  )
+  llm_mock({tool_calls: [{id: "parent_delegate", name: "delegate_child", arguments: {}}]})
+  llm_mock({tool_calls: [{id: "child_delegate", name: "delegate_grandchild", arguments: {}}]})
+  llm_mock({text: "grandchild done"})
+  llm_mock({text: "child done"})
+  llm_mock({text: "parent done"})
+  agent_loop(
+    "Run child.",
+    nil,
+    {
+      provider: "mock",
+      session_id: parent,
+      tools: parent_tools(child, grandchild),
+      tool_format: "native",
+      max_iterations: 2,
+      done_judge: nil,
+    },
+  )
+  let child_reminders = transcript_events_by_kind(agent_session_snapshot(child), "system_reminder")
+  let grandchild_reminders = transcript_events_by_kind(agent_session_snapshot(grandchild), "system_reminder")
+  println(len(child_reminders))
+  println(child_reminders[0].reminder.body)
+  println(child_reminders[0].reminder.source)
+  println(child_reminders[0].reminder.originating_agent_id == parent)
+  println(len(grandchild_reminders))
+  println(grandchild_reminders[0].reminder.body)
+  println(grandchild_reminders[0].reminder.source)
+  println(grandchild_reminders[0].reminder.originating_agent_id == parent)
+  println(grandchild_reminders[0].reminder.propagate)
+  llm_mock_clear()
+}

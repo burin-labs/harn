@@ -1066,6 +1066,12 @@ The parent transcript only records the outer tool call and tool result. The
 child keeps its own session and transcript, linked by `session_id` / parent
 lineage metadata.
 
+Pending parent `system_reminder` events are filtered into the child handoff
+before the child loop starts. `propagate: "all"` reminders continue through
+descendant sub-agents, `propagate: "session"` reaches direct children only, and
+`propagate: "none"` remains local to the parent. Inherited reminders appear in
+the child transcript with `source: "inherited"` and `originating_agent_id`.
+
 `sub_agent_run(...)` returns an envelope with:
 
 - `ok`
