@@ -154,6 +154,28 @@ pub(crate) fn register_tracing_builtins(vm: &mut Vm) {
         Ok(VmValue::String(Rc::from(crate::tracing::format_summary())))
     });
 
+    // Bridge into the OTel-aware span system from Harn for lifecycle
+    // combinators (`std/lifecycle/combinators::with_telemetry`). Emits a
+    // `SpanKind::FnCall` span linked to the current parent span and
+    // returns the numeric span id; pair with `__lifecycle_span_end`.
+    vm.register_builtin("__lifecycle_span_start", |args, _out| {
+        let name = args.first().map(|a| a.display()).unwrap_or_default();
+        let id = crate::tracing::span_start(crate::tracing::SpanKind::FnCall, name);
+        Ok(VmValue::Int(id as i64))
+    });
+
+    vm.register_builtin("__lifecycle_span_end", |args, _out| {
+        let span_id = match args.first().and_then(|v| v.as_int()) {
+            Some(id) => id,
+            None => return Ok(VmValue::Nil),
+        };
+        if span_id < 0 {
+            return Ok(VmValue::Nil);
+        }
+        crate::tracing::span_end(span_id as u64);
+        Ok(VmValue::Nil)
+    });
+
     vm.register_builtin("llm_usage", |_args, _out| {
         let (total_input, total_output, total_duration, call_count) =
             crate::llm::peek_trace_summary();

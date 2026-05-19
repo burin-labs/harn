@@ -55,6 +55,24 @@ condensed series summaries instead of full per-patch history.
   return-semantics table and `conformance/tests/hooks_session/
   lifecycle_hook_events_*` for executable spec coverage. Settlement
   agent spawning itself remains the P-03 deferred stub (harn#1856).
+- **`std/lifecycle/combinators` callback combinator stdlib (#1860).**
+  Six pure factories for wrapping `(harness, return_value)`-shaped
+  callbacks (hook handlers, `resume_by`, `on_finish`, anywhere a
+  function-shaped value reaches user code). `compose(callbacks)` runs
+  callbacks sequentially and threads the return value through the
+  chain; `first_available(callbacks)` returns the first non-nil
+  responder; `with_telemetry(cb, span_name?)` opens a
+  `SpanKind::FnCall` OTel span (via new `__lifecycle_span_start` /
+  `__lifecycle_span_end` bridge builtins) and emits paired
+  `{span_name}_started` / `_completed` / `_errored` audits;
+  `with_timeout(cb, ms)` is a soft, clock-aware deadline that
+  measures via `harness.clock.now_ms()` and returns a
+  `{__timed_out, timeout_ms, elapsed_ms, return_value}` sentinel on
+  overrun; `if_unsettled(cb)` only fires when `harness.unsettled_state()`
+  has pending work (one snapshot per call); `when(predicate, cb)`
+  guards on an arbitrary predicate. Conformance coverage at
+  `conformance/tests/combinator_*.harn`. Part of the pipeline
+  lifecycle epic (#1853, P-07).
 - **`std/oauth/storage` token storage backends (#1904).** Five
   interchangeable backends for the OAuth client (#1885 OA-03):
   `memory()` (per-VM, ephemeral), `file(path, encryption_key)` (single

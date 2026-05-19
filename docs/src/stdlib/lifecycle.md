@@ -203,6 +203,53 @@ entries live on a per-pipeline-run audit log that conformance fixtures
 and replay oracles can drain via `lifecycle_audit_log_take()` (or peek
 at without consuming via `lifecycle_audit_log_snapshot()`).
 
+## Callback combinators (`std/lifecycle/combinators`)
+
+The combinators in `std/lifecycle/combinators` wrap any
+`(harness, return_value) -> return_value`-shaped callback — hook
+handlers, `resume_by` callbacks, the presets above, and any custom
+`on_finish` body. All six are pure factories that return closures with
+no captured mutable state, so they nest freely:
+
+- `compose([cb, ...])` runs each callback sequentially, threading the
+  prior callback's return value into the next callback's
+  `return_value`.
+- `first_available([cb, ...])` invokes callbacks in order and returns
+  the first non-nil result (fallback chains).
+- `with_telemetry(cb, span_name?)` opens a `SpanKind::FnCall` OTel
+  span and emits paired `{span_name}_started` / `_completed` /
+  `_errored` audit entries.
+- `with_timeout(cb, ms)` is a soft, clock-aware deadline. On overrun
+  the wrapper returns a sentinel dict
+  `{__timed_out: true, timeout_ms, elapsed_ms, return_value}` and
+  emits a `lifecycle_callback_timed_out` audit.
+- `if_unsettled(cb)` invokes the wrapped callback only when
+  `harness.unsettled_state()` reports pending work (exactly one
+  snapshot per call).
+- `when(predicate, cb)` guards on an arbitrary
+  `predicate(harness, return_value)` and short-circuits to the
+  inbound return value when false.
+
+A realistic composition wraps `on_finish_drain` with telemetry, a
+soft deadline, and an unsettled-state guard so the drain only runs
+when there is real work to do:
+
+```harn
+import {
+  compose, if_unsettled, with_telemetry, with_timeout,
+} from "std/lifecycle/combinators"
+import { on_finish_drain } from "std/lifecycle"
+
+pipeline default() {
+  pipeline_on_finish(
+    if_unsettled(
+      with_telemetry(with_timeout(on_finish_drain, 30000), "drain"),
+    ),
+  )
+  return "ok"
+}
+```
+
 ## Inspecting unsettled state directly
 
 Custom `on_finish` callbacks have full access to the harness:

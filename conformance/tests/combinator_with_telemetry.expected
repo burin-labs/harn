@@ -1,0 +1,8 @@
+result=seed_done
+audit_count=2
+started_kind=happy_cb_started
+completed_kind=happy_cb_completed
+completed_summary=string:seed_done
+errored_kind=sad_cb_errored
+errored_message=boom
+rethrew=true

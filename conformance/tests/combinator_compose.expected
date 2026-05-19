@@ -1,0 +1,7 @@
+result=22
+audit_count=3
+a_value=0
+b_value=1
+c_value=11
+kind_order=step_a,step_b,step_c
+empty=42
