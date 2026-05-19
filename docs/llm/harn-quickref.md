@@ -2615,9 +2615,13 @@ Three concentric surfaces:
   re-exports them as `lifecycle_audit_log_take` /
   `lifecycle_audit_log_snapshot`.
 
-### Agent Pools
+### Agent pools
 
-`std/lifecycle/pool` provides named, concurrency-bounded pools:
+`std/lifecycle/pool` provides named, concurrency-bounded thread pools.
+One named pool, one shared concurrency budget across every submitter.
+Use a pool when many independent call sites need to share a cap; use
+`parallel each ... with { max_concurrent: N }` when one call site
+needs a local cap.
 
 ```harn
 import { Backpressure, fair_round_robin, pool_create, pool_wait } from "std/lifecycle/pool"
@@ -2630,16 +2634,95 @@ let pool = pool_create({
   backpressure: backpressure.queue(100, "fail_submitter"),
 })
 
-let handle = pool.submit({ -> agent_loop("review", {provider: "mock"}) }, {tenant_id: "acme"})
+let handle = pool.submit({ -> agent_loop("review", "You are a reviewer.") }, {
+  tenant_id: "acme",
+  priority: 10,
+  idempotency_key: "review-pr-1984",
+})
 let result = pool_wait(handle)
 ```
+
+Pick-the-right-primitive:
+
+| Need | Use |
+|---|---|
+| Bound concurrency at one call site | `parallel each ... with { max_concurrent }` |
+| Bound concurrency across many call sites in one process | Pool, `scope: "session"` (default) |
+| Bound across pipeline runs that survive restart | Pool, `scope: "pipeline"` (state in `.harn/pools/`) |
+| Bound across tenants/orgs (cloud) | Pool, `scope: "tenant"` / `"org"` (host-routed; harn-cloud#306) |
+| Route trigger events through a shared budget | `SpawnToPool` handler (see below) |
+
+Queue strategies (factories from `std/lifecycle/pool`):
+
+| Factory | Behavior |
+|---|---|
+| `fifo()` | Oldest queued first. |
+| `priority()` | Highest submit `priority` first, FIFO tiebreak. Default. |
+| `lifo()` | Newest queued first. |
+| `fair_round_robin(key = "key")` | Partition by `options.<key>` on submit; round-robin across distinct partitions. Missing field shares a default partition. |
 
 Backpressure descriptors are `backpressure.queue(max_depth, on_full)`,
 `backpressure.fail_fast`, and `backpressure.ring_buffer(capacity)`.
 `on_full` accepts `block_submitter`, `drop_oldest`, `drop_newest`, or
-`fail_submitter`. Drop policies return rejected task handles and emit
-`pool_drop` audit events on `lifecycle.pool.audit`; fail paths raise
-`HARN-POL-001` or `HARN-POL-002`.
+`fail_submitter`. Drop policies return rejected task handles
+(`status: "rejected"`, `rejection_reason`, `rejection_policy`) and
+emit `pool_drop` audits on `lifecycle.pool.audit`; fail paths raise
+`HARN-POL-001` (`fail_submitter`) or `HARN-POL-002` (`fail_fast`).
+
+Submit options:
+
+| Option | Notes |
+|---|---|
+| `priority` | int; higher dequeues sooner under `priority()`. |
+| `key` | string; generic fairness key for `fair_round_robin("key")`. |
+| custom key (e.g. `tenant_id`) | When using `fair_round_robin("tenant_id")`, pass the partition under that name. |
+| `idempotency_key` | Two submits with the same `(pool_id, key)` return the *same* task handle. Pipeline-scope pools persist the index so resubmit after restart short-circuits. |
+
+`pool.submit` returns a task handle (`_type: "pool_task"`) with `id`,
+`pool`, `pool_id`, `status`, `submitted_at`, `key`, `priority`, and
+(when terminal) `result` / `error` / `rejection_reason`.
+`pool_wait(handle)` (or a list of handles) blocks until terminal and
+returns the final snapshot. `wait_agent(handle)` from
+`std/agent/workers` recognises pool task handles transparently.
+
+Inspection: `pool.size()`, `pool.snapshot()` (full dict with
+`active`, `queued`, `completed`, `failed`, `rejected`,
+`blocked_submitters`, `total`, selected `queue` / `backpressure`,
+per-task list, original `config`), `pool_get(name_or_id)`,
+`pool_list()`. Pipeline-scope pools also reload in-flight tasks past
+`stale_after_ms` as re-enqueued attempts; `pool_simulate_restart()`
+drops the in-process registry for conformance tests.
+
+Route trigger events through a pool with the `SpawnToPool` handler
+variant from `std/triggers` (one trigger, one drain rate):
+
+```harn,ignore
+import { trigger_register, SpawnToPool } from "std/triggers"
+
+trigger_register({
+  id: "webhook-router",
+  kind: "channel.emit",
+  provider: "channel",
+  match: {events: ["channel:webhook.received"]},
+  handler: SpawnToPool({
+    pool: "webhook-work",
+    key_from: "provider_payload.payload.source",
+    priority_from: "provider_payload.payload.urgency",
+    task_factory: { event -> { -> handle_webhook(event) } },
+  }),
+})
+```
+
+`key_from` / `priority_from` are dotted JSON paths into the trigger
+event. Missing paths fall back to the default partition and `0`
+priority. The dispatcher records the resulting pool task id on the
+match receipt so replay verifies the same event mapped to the same
+task across runs.
+
+Full prose: `docs/src/agent-pools.md`. Cookbook recipes (webhook
+rate-limit, GPU pool, cross-customer fairness, burst absorber):
+`docs/src/cookbooks/pools.md`. Stdlib API reference:
+`docs/src/stdlib/lifecycle-pool.md`.
 
 ```harn
 register_session_hook("user_prompt_submit", { event ->

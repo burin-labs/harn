@@ -10,6 +10,39 @@ condensed series summaries instead of full per-patch history.
 
 ### Added
 
+- **Pool docs + cookbook (PL-08, #1893).** Adds the user-facing
+  reference + cookbook for agent pools (epic #1883). New mdBook page
+  `docs/src/agent-pools.md` covers pool creation (`pool_create`
+  options, the handle shape), submit semantics (priority, fairness
+  key, idempotency, task-handle shape), the four queue strategies
+  (`fifo`, `priority`, `lifo`, `fair_round_robin`), backpressure
+  policies (`backpressure_queue` with `block_submitter` /
+  `drop_oldest` / `drop_newest` / `fail_submitter`, `fail_fast`,
+  `ring_buffer`), the four durability scopes (`session`, `pipeline`,
+  `tenant`, `org`) with the pipeline reload + `stale_after_ms`
+  contract, the `SpawnToPool` trigger handler, inspection surface
+  (`pool.size`, `pool.snapshot`, `pool_get`, `pool_list`,
+  `harness.unsettled_state().pool_pending_tasks`), the
+  `lifecycle.pool.audit` topic + OTel spans, the `HARN-POL-*`
+  diagnostic codes, a pick-the-right-primitive table
+  (`parallel each` vs pool vs scope tiers), and a SOTA comparison
+  table (Temporal, Inngest, Restate) explaining the design rationale.
+  New `docs/src/cookbooks/pools.md` ships four end-to-end recipes:
+  rate-limited webhook processor with per-source fair queue +
+  ring-buffer overflow, GPU-routed inference pool sized to the GPU
+  count with `scope: "tenant"` for harn-cloud worker-tier routing,
+  cross-customer fairness with 20-wide pool +
+  `fair_round_robin("tenant_id")`, and a burst absorber for nightly
+  batch jobs with a 50000-deep queue + idempotency keyed by
+  `(date, customer)`. Expands the "Agent pools" section in
+  `docs/llm/harn-quickref.md` with the full submit-option set,
+  queue-strategy + backpressure tables, scope tiers, the
+  `SpawnToPool` snippet, and cross-references. Adds an "Agent pools"
+  subsection to `spec/HARN_SPEC.md` (with formal `PoolHandle`,
+  `PoolTaskHandle`, `QueueStrategy`, `Backpressure`, `PoolScope`, and
+  `SpawnToPoolHandler` shapes) plus the `HARN-POL-*` block in the
+  diagnostic appendix. Wires the new pages into `docs/src/SUMMARY.md`
+  under Orchestration next to Agent channels.
 - **Suspend/resume protocol contribution RFCs (S-12, #1848).** Authors
   two new upstream-proposal documents under
   `docs/src/protocol-contributions/`: ACP `session/suspend` +

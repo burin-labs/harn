@@ -2080,6 +2080,191 @@ See `docs/src/observability/replay-benchmarks.md` for the oracle
 interface. The user-facing reference is `docs/src/agent-channels.md`;
 runnable patterns live in `docs/src/cookbooks/channels.md`.
 
+### Agent pools
+
+Agent pools (epic #1883) are named, concurrency-bounded thread pools
+for agent work. They sit between `parallel each ... with {
+max_concurrent: N }` (a local, call-site bound) and host worker tiers
+(a deployment-time bound), filling the "many independent submitters
+share one budget" gap. Pools are exposed through `std/lifecycle/pool`
+and the host-call group registered at
+`crates/harn-vm/src/stdlib/pool.rs`.
+
+#### `Pool`
+
+```text
+PoolHandle ::= {
+  _type: "pool",
+  id: string,                 // deterministic = sha256(scope || scope_id || name)
+  name: string,
+  max_concurrent: int (>= 1),
+  scope: PoolScope,
+  created_at: ISO8601String,
+  submit: (closure, options?) -> PoolTaskHandle,
+  size: () -> int,
+  snapshot: () -> PoolSnapshot,
+}
+
+PoolScope ::= "session" | "pipeline" | "tenant" | "org"
+```
+
+`pool_create(options?)` allocates a handle; `pool_get(name_or_id)`
+returns an existing one or `nil`; `pool_list()` enumerates the
+runtime registry. Re-creating the same `(scope, scope_id, name)` is
+idempotent and returns the existing handle, so reload across process
+restart binds to the same id.
+
+#### `PoolTaskHandle`
+
+```text
+PoolTaskHandle ::= {
+  _type: "pool_task",
+  id: string,
+  pool: string,                       // pool name
+  pool_id: string,
+  status: "queued" | "running" | "completed" | "failed" | "rejected",
+  submitted_at: ISO8601String,
+  priority: int,
+  key: string | nil,
+  // terminal-only:
+  result: any,
+  error: string | nil,
+  rejection_reason: string | nil,
+  rejection_policy: string | nil      // "fail_fast" | "fail_submitter" | "drop_oldest" | "drop_newest"
+}
+```
+
+`pool_wait(handle_or_handles)` blocks until terminal and returns the
+final snapshot (or list of snapshots). `wait_agent(handle)` from
+`std/agent/workers` accepts pool task handles transparently by
+matching on `_type == "pool_task"`.
+
+#### Queue strategies
+
+`pool_create({queue: <descriptor>})` selects how the pool dequeues
+work when a worker slot frees:
+
+```text
+QueueStrategy ::= {_type: "queue_strategy", kind: "fifo" | "priority" | "lifo" | "fair_round_robin", key?: string}
+```
+
+Semantics:
+
+- `fifo` — oldest queued first, ignoring submit `priority`.
+- `priority` (default) — highest submit `priority` first, FIFO
+  tiebreak.
+- `lifo` — newest queued first.
+- `fair_round_robin{key}` — partition queued tasks by the
+  stringified value at `options.<key>` on each submit. Missing field
+  shares one default partition. The runtime walks distinct
+  partitions in stable order, dequeuing one task per visit; FIFO
+  inside a partition.
+
+Factories (`std/lifecycle/pool`): `fifo()`, `priority()`, `lifo()`,
+`fair_round_robin(key = "key")`. `QueueStrategy()` returns the four
+as a dict for dotted access.
+
+#### Backpressure
+
+`pool_create({backpressure: <descriptor>})` bounds the queue and
+selects the overflow policy:
+
+```text
+Backpressure ::= {_type: "backpressure", kind: "queue" | "fail_fast" | "ring_buffer", max_depth?: int, on_full?: OnFullPolicy, capacity?: int}
+
+OnFullPolicy ::= "block_submitter" | "drop_oldest" | "drop_newest" | "fail_submitter"
+```
+
+Semantics:
+
+- `queue{max_depth, on_full}` — bound queued tasks at `max_depth`.
+  `block_submitter` (default) parks the submitting fiber until a
+  slot frees. `drop_oldest` evicts the oldest queued task as a
+  `rejected` handle and accepts the new submit. `drop_newest`
+  rejects the new submit. `fail_submitter` raises `HARN-POL-001` at
+  the submit call site.
+- `fail_fast{}` — raise `HARN-POL-002` synchronously when no worker
+  slot is immediately free; no queue is retained.
+- `ring_buffer{capacity}` — retain the newest `capacity` queued
+  tasks by evicting the oldest queued task on overflow.
+
+Drop policies (`drop_oldest`, `drop_newest`, `ring_buffer`) emit a
+`pool_drop` audit on `lifecycle.pool.audit` with the pool name,
+evicted task id, policy, queue depth, and max depth. The submitter
+sees a task handle whose terminal snapshot is
+`{status: "rejected", rejection_reason, rejection_policy}`.
+
+#### Scopes and durability
+
+| Scope | Storage | Survives | Notes |
+|---|---|---|---|
+| `session` | In-memory thread-local registry. | Process lifetime. | Default. Zero I/O. |
+| `pipeline` | JSONL append-log under `.harn/pools/<pipeline_id>__<pool_name>.jsonl`. | Process restart, within one pipeline. | Pending queue + in-flight task metadata reload on next `pool_create({scope: "pipeline", ...})`. |
+| `tenant`, `org` | Host-routed (harn-cloud, [#306][harn-cloud-306]). | Tenant / org lifetime. | Currently rejected with a `host-routed (harn-cloud) — not wired` diagnostic. |
+
+[harn-cloud-306]: https://github.com/burin-labs/harn-cloud/issues/306
+
+On pipeline-scope reload, any `Running` task whose `heartbeat_at_ms`
+is older than `stale_after_ms` (default 30000 ms; configurable via
+`opts.stale_after_ms`) is re-enqueued at the head of its partition.
+The store compacts opportunistically when
+`max_concurrent + |queue| + |terminal-since-compaction|` exceeds an
+internal threshold. `pool_simulate_restart()` drops the in-process
+registry without touching disk and is the conformance affordance for
+reload tests.
+
+#### Idempotency
+
+`pool.submit(closure, {idempotency_key: K, ...})` short-circuits when
+`(pool_id, K)` already exists in the idempotency index. The second
+call returns the *same* task handle (`id` matches the first) and, if
+the first task is terminal, the terminal snapshot. Pipeline-scope
+pools persist the index so resubmit across restart preserves the
+contract.
+
+#### `spawn_to_pool` trigger handler
+
+A trigger binding may route matched events into a named pool by
+declaring a `SpawnToPool` handler (from `std/triggers`):
+
+```text
+SpawnToPoolHandler ::= {
+  kind: "spawn_to_pool",
+  pool: string,                             // pool name or id
+  task_factory: (event -> closure),         // builds the per-event closure
+  priority_from?: string,                   // dotted JSON path; missing -> 0
+  key_from?: string                         // dotted JSON path; missing -> default partition
+}
+```
+
+The dispatcher resolves `pool` via `pool_get`, invokes
+`task_factory(event)`, and submits the resulting closure under the
+pool's queue strategy + backpressure policy. The resulting pool task
+id is recorded on the trigger match receipt so the replay oracle can
+verify the same event maps to the same task across runs. A missing
+pool name lands in `trigger.dlq`.
+
+#### Observability
+
+Pool activity is published on one EventLog topic:
+
+| Topic | Records |
+|---|---|
+| `lifecycle.pool.audit` | `pool_create`, `pool_submit`, `pool_dispatch`, `pool_complete`, `pool_drop` |
+
+Every submit opens an OTel `pool.submit <pool_name>` span; every
+dispatch opens `pool.dispatch <pool_name>` and links back to the
+submit span via `set_span_link` (#1858) so async-boundary traces
+remain stitched.
+
+Pool tasks surface in pipeline lifecycle drains:
+`harness.unsettled_state().pool_pending_tasks` lists tasks blocking
+pipeline finalization (see `docs/src/stdlib/lifecycle.md`).
+
+The user-facing reference is `docs/src/agent-pools.md`; the stdlib
+reference is `docs/src/stdlib/lifecycle-pool.md`; runnable patterns
+live in `docs/src/cookbooks/pools.md`.
+
 ## Error model
 
 ### throw
@@ -4730,6 +4915,13 @@ programs.
 | `HARN-CHN-003` | Malformed channel name, scope prefix, or scope id. |
 | `HARN-CHN-004` | Scope ambiguous — explicit `options.session_id` or `options.pipeline_id` conflicts with the active runtime context. |
 | `HARN-CHN-005` | Malformed `batch` config on a `trigger_register` call (missing `count`/`window`, non-positive `count`, unknown `expire_action`, or wrong-typed `key`). |
+
+#### Agent pool diagnostics (`HARN-POL-*`)
+
+| Code | Description |
+|---|---|
+| `HARN-POL-001` | A `backpressure_queue(..., "fail_submitter")` pool was full at submit time. Drop policies do not raise — they return a `rejected` task handle and emit a `pool_drop` audit on `lifecycle.pool.audit`. |
+| `HARN-POL-002` | A `fail_fast()` pool had no immediate capacity at submit time. The submitter receives the error synchronously; no task is enqueued. |
 
 ## OAuth
 

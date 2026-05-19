@@ -118,6 +118,8 @@
 - [Webhook intake substrate](./triggers/webhook-intake.md)
 - [Agent channels](./agent-channels.md)
   - [Channel cookbook](./cookbooks/channels.md)
+- [Agent pools](./agent-pools.md)
+  - [Pool cookbook](./cookbooks/pools.md)
 - [Orchestrator](./orchestrator.md)
 - [Hot reload](./orchestrator/hot-reload.md)
 - [Orchestrator DLQ management](./orchestrator/dlq.md)
