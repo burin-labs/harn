@@ -12,7 +12,7 @@
  */
 let observed = atomic(0)
 
-fn record(payload) {
+fn record(_payload) {
   atomic_add(observed, 1)
   return nil
 }
