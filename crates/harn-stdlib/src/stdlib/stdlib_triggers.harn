@@ -946,6 +946,33 @@ type StreamLlmClassifyPlan = {
 }
 
 /**
+ * SpawnToPool builds a handler-variant dict that routes matched events into
+ * a named agent pool (#1883) instead of spawning a fresh worker per event.
+ *
+ * The dispatcher resolves `pool` by name, invokes `task_factory(event)` to
+ * build the per-event closure, and submits that closure under the pool's
+ * queue strategy + backpressure policy. `priority_from` and `key_from` are
+ * dotted paths into the trigger event JSON (e.g. `"tenant_id"`,
+ * `"provider_payload.urgency"`). Missing paths fall back to the default
+ * priority (0) and a null fair-queue key.
+ *
+ * @effects: []
+ * @allocation: heap
+ * @errors: []
+ * @api_stability: experimental
+ * @example: trigger_register({handler: SpawnToPool({pool: "pr-review", task_factory: { event -> { -> review(event) } }})})
+ */
+pub fn SpawnToPool(options: dict) -> dict {
+  return {
+    kind: "spawn_to_pool",
+    pool: options.pool,
+    priority_from: options?.priority_from,
+    key_from: options?.key_from,
+    task_factory: options.task_factory,
+  }
+}
+
+/**
  * list_providers.
  *
  * @effects: []

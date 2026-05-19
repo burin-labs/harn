@@ -71,6 +71,14 @@ pub(super) fn dispatch_success_outcome(
         DispatchUri::A2a { .. } => "completed",
         DispatchUri::Local { .. } => "success",
         DispatchUri::AutoResume { .. } => "resumed",
+        // SpawnToPool reports the same accept/reject distinction we record
+        // on the dispatch metadata so observers (run viewer, audit log) can
+        // tell the difference between "queued behind the cap" and "dropped
+        // by drop_newest" without reparsing the result blob (#1889).
+        DispatchUri::SpawnToPool { .. } => match result.get("status").and_then(|v| v.as_str()) {
+            Some("rejected") => "pool_rejected",
+            _ => "pool_enqueued",
+        },
     }
 }
 
@@ -224,6 +232,20 @@ pub(super) fn dispatch_node_metadata(
     if let DispatchUri::Persona { name } = route {
         metadata.insert("persona".to_string(), serde_json::json!(name));
     }
+    if let DispatchUri::SpawnToPool {
+        pool,
+        priority_from,
+        key_from,
+    } = route
+    {
+        metadata.insert("pool".to_string(), serde_json::json!(pool));
+        if let Some(path) = priority_from {
+            metadata.insert("priority_from".to_string(), serde_json::json!(path));
+        }
+        if let Some(path) = key_from {
+            metadata.insert("key_from".to_string(), serde_json::json!(path));
+        }
+    }
     metadata
 }
 
@@ -269,6 +291,17 @@ pub(super) fn dispatch_success_metadata(
             }
             if let Some(status) = result.get("status").and_then(|value| value.as_str()) {
                 metadata.insert("status".to_string(), serde_json::json!(status));
+            }
+        }
+        DispatchUri::SpawnToPool { pool, .. } => {
+            metadata.insert("pool".to_string(), serde_json::json!(pool));
+            for field in ["task_id", "status", "rejection_reason", "key"] {
+                if let Some(value) = result.get(field).cloned() {
+                    metadata.insert(field.to_string(), value);
+                }
+            }
+            if let Some(priority) = result.get("priority").cloned() {
+                metadata.insert("priority".to_string(), priority);
             }
         }
         DispatchUri::Local { .. } | DispatchUri::AutoResume { .. } => {}

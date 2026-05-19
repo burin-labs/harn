@@ -39,6 +39,15 @@ pub enum DispatchUri {
     AutoResume {
         worker_id: String,
     },
+    /// Dispatcher composes triggers with named agent pools (#1889). The
+    /// closure handed to the pool is built per-event by the binding's
+    /// `task_factory`; the descriptor here carries only routing metadata so
+    /// the URI stays serializable and comparable.
+    SpawnToPool {
+        pool: String,
+        priority_from: Option<String>,
+        key_from: Option<String>,
+    },
 }
 
 impl DispatchUri {
@@ -78,6 +87,18 @@ impl DispatchUri {
                 name: name.to_string(),
             });
         }
+        if let Some(pool) = raw.strip_prefix("pool://") {
+            if pool.is_empty() {
+                return Err(DispatchUriError::MissingTarget {
+                    scheme: "pool".to_string(),
+                });
+            }
+            return Ok(Self::SpawnToPool {
+                pool: pool.to_string(),
+                priority_from: None,
+                key_from: None,
+            });
+        }
         if let Some((scheme, _)) = raw.split_once("://") {
             return Err(DispatchUriError::UnknownScheme(scheme.to_string()));
         }
@@ -93,6 +114,7 @@ impl DispatchUri {
             Self::Worker { .. } => "worker",
             Self::Persona { .. } => "persona",
             Self::AutoResume { .. } => "auto_resume",
+            Self::SpawnToPool { .. } => "spawn_to_pool",
         }
     }
 
@@ -103,6 +125,7 @@ impl DispatchUri {
             Self::Worker { queue } => format!("worker://{queue}"),
             Self::Persona { name } => format!("persona://{name}"),
             Self::AutoResume { worker_id } => format!("auto_resume://{worker_id}"),
+            Self::SpawnToPool { pool, .. } => format!("pool://{pool}"),
         }
     }
 
@@ -113,6 +136,7 @@ impl DispatchUri {
             Self::Worker { .. } => "event_log_worker_queue",
             Self::Persona { .. } => "persona_runtime",
             Self::AutoResume { .. } => "local_process",
+            Self::SpawnToPool { .. } => "local_process",
         }
     }
 
@@ -123,6 +147,7 @@ impl DispatchUri {
             Self::Worker { .. } => "queued",
             Self::Persona { .. } => "managed_persona",
             Self::AutoResume { .. } => "in_process",
+            Self::SpawnToPool { .. } => "pool_queued",
         }
     }
 
@@ -174,6 +199,16 @@ impl From<&TriggerHandlerSpec> for DispatchUri {
             },
             TriggerHandlerSpec::AutoResume { worker_id } => Self::AutoResume {
                 worker_id: worker_id.clone(),
+            },
+            TriggerHandlerSpec::SpawnToPool {
+                pool,
+                priority_from,
+                key_from,
+                ..
+            } => Self::SpawnToPool {
+                pool: pool.clone(),
+                priority_from: priority_from.clone(),
+                key_from: key_from.clone(),
             },
         }
     }

@@ -1802,8 +1802,99 @@ fn parse_handler_value(
                 "{builtin}: `{field_name}` string must use `a2a://` or `worker://` URI syntax"
             )))
         }
+        VmValue::Dict(map) => parse_handler_dict(map, builtin, field_name),
         other => Err(VmError::Runtime(format!(
-            "{builtin}: `{field_name}` must be a closure or handler URI string, got {}",
+            "{builtin}: `{field_name}` must be a closure, handler URI string, or handler-variant dict, got {}",
+            other.type_name()
+        ))),
+    }
+}
+
+/// Parse handler-variant dicts. Today only `SpawnToPool` (#1889) takes this
+/// shape; future variants (e.g. `ReminderInject` from #1876) plug in here so
+/// the trigger DSL keeps a single uniform `handler:` syntax.
+fn parse_handler_dict(
+    map: &BTreeMap<String, VmValue>,
+    builtin: &str,
+    field_name: &str,
+) -> Result<(TriggerHandlerSpec, serde_json::Value), VmError> {
+    let kind = map
+        .get("kind")
+        .or_else(|| map.get("_kind"))
+        .map(VmValue::display)
+        .filter(|name| !name.is_empty())
+        .ok_or_else(|| {
+            VmError::Runtime(format!(
+                "{builtin}: `{field_name}` handler dict missing `kind`"
+            ))
+        })?;
+    match kind.as_str() {
+        "spawn_to_pool" => {
+            let pool = map
+                .get("pool")
+                .map(VmValue::display)
+                .filter(|name| !name.is_empty())
+                .ok_or_else(|| {
+                    VmError::Runtime(format!(
+                        "{builtin}: SpawnToPool handler requires `pool` (string)"
+                    ))
+                })?;
+            let priority_from = optional_path_string(map, "priority_from", "SpawnToPool")?;
+            let key_from = optional_path_string(map, "key_from", "SpawnToPool")?;
+            let task_factory = map
+                .get("task_factory")
+                .ok_or_else(|| {
+                    VmError::Runtime(format!(
+                        "{builtin}: SpawnToPool handler requires `task_factory` closure"
+                    ))
+                })
+                .and_then(|value| match value {
+                    VmValue::Closure(closure) => Ok(closure.clone()),
+                    other => Err(VmError::Runtime(format!(
+                        "{builtin}: SpawnToPool.task_factory must be a closure, got {}",
+                        other.type_name()
+                    ))),
+                })?;
+            let descriptor = serde_json::json!({
+                "kind": "spawn_to_pool",
+                "pool": pool,
+                "priority_from": priority_from,
+                "key_from": key_from,
+                "task_factory": task_factory.func.name.clone(),
+            });
+            Ok((
+                TriggerHandlerSpec::SpawnToPool {
+                    pool,
+                    priority_from,
+                    key_from,
+                    task_factory,
+                },
+                descriptor,
+            ))
+        }
+        other => Err(VmError::Runtime(format!(
+            "{builtin}: unsupported handler variant '{other}'; expected 'spawn_to_pool'"
+        ))),
+    }
+}
+
+fn optional_path_string(
+    map: &BTreeMap<String, VmValue>,
+    field: &str,
+    variant: &str,
+) -> Result<Option<String>, VmError> {
+    match map.get(field) {
+        None | Some(VmValue::Nil) => Ok(None),
+        Some(VmValue::String(text)) => {
+            let trimmed = text.trim();
+            if trimmed.is_empty() {
+                Ok(None)
+            } else {
+                Ok(Some(trimmed.to_string()))
+            }
+        }
+        Some(other) => Err(VmError::Runtime(format!(
+            "{variant}: `{field}` must be a string path or nil, got {}",
             other.type_name()
         ))),
     }

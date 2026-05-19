@@ -1,0 +1,71 @@
+import { pool_create, pool_wait } from "std/lifecycle/pool"
+import "std/triggers"
+
+/**
+ * Verifies the SpawnToPool trigger handler (#1889) composes triggers with
+ * named agent pools (#1883): the dispatcher submits each matched event into
+ * the named pool via its task_factory, and the pool's max_concurrent cap
+ * bounds in-flight closures regardless of the inbound event rate.
+ */
+pipeline test(task) {
+  let gate = channel(nil, 32)
+  let inflight = atomic(0)
+  let peak = atomic(0)
+  let completed = atomic(0)
+  let _pool = pool_create({name: "spawn-to-pool-cap-demo", max_concurrent: 3})
+  let task_factory = { _event -> return { ->
+    let now = atomic_add(inflight, 1) + 1
+    if now > atomic_get(peak) {
+      atomic_set(peak, now)
+    }
+    receive(gate)
+    atomic_add(inflight, -1)
+    atomic_add(completed, 1)
+    return now
+  } }
+  let unique = to_string(to_int(timestamp())) + "-" + to_string(random_int(100000, 999999))
+  let trigger_id = "trigger-spawn-to-pool-" + unique
+  let handle: TriggerHandle = trigger_register(
+    {
+      id: trigger_id,
+      kind: "issue.opened",
+      provider: "github",
+      handler: SpawnToPool({pool: "spawn-to-pool-cap-demo", task_factory: task_factory}),
+      when: nil,
+      retry: nil,
+      match: {events: ["issue.opened"]},
+      events: nil,
+      dedupe_key: nil,
+      filter: nil,
+      budget: nil,
+      manifest_path: nil,
+      package_name: "conformance",
+    },
+  )
+  // Fire 8 events. With max_concurrent=3 the pool must keep at most three
+  // closures running concurrently regardless of inbound event rate.
+  var handles = []
+  for i in 0 to 8 exclusive {
+    let dispatch: DispatchHandle = trigger_fire(
+      handle,
+      {
+        provider: "github",
+        kind: "issue.opened",
+        headers: {x_delivery: "evt-" + to_string(i) + "-" + unique},
+      },
+    )
+    if dispatch.status == "dispatched" && dispatch.result?.pool == "spawn-to-pool-cap-demo" {
+      handles = handles.push(dispatch.result)
+    }
+  }
+  println(len(handles) == 8)
+  // Release the gate so each pool task can complete.
+  for _i in 0 to 8 exclusive {
+    send(gate, "go")
+  }
+  let results = pool_wait(handles)
+  println(len(results) == 8)
+  println(atomic_get(peak) <= 3)
+  println(atomic_get(inflight) == 0)
+  println(atomic_get(completed) == 8)
+}

@@ -393,6 +393,68 @@ pub(super) async fn recv_cancel(cancel_rx: &mut broadcast::Receiver<()>) {
     let _ = cancel_rx.recv().await;
 }
 
+/// Resolve a simple dotted JSON path (e.g. `"tenant_id"`,
+/// `"provider_payload.urgency"`, `"headers.x_priority"`) against the
+/// serialized event. Returns `None` when any segment is missing or when an
+/// array index is out of range. Used by the SpawnToPool trigger handler
+/// (#1889) to pluck priority + fair-queue key from event payloads.
+///
+/// Numeric segments index into arrays; everything else looks up object
+/// fields. Bracketed forms (`payload[0]`) are not supported; users that need
+/// richer extraction should pre-shape the event in `task_factory`.
+pub(super) fn extract_event_path(
+    value: &serde_json::Value,
+    path: &str,
+) -> Option<serde_json::Value> {
+    let trimmed = path.trim();
+    if trimmed.is_empty() {
+        return None;
+    }
+    let mut current = value;
+    for segment in trimmed.split('.') {
+        if segment.is_empty() {
+            return None;
+        }
+        match current {
+            serde_json::Value::Object(map) => {
+                current = map.get(segment)?;
+            }
+            serde_json::Value::Array(items) => {
+                let index = segment.parse::<usize>().ok()?;
+                current = items.get(index)?;
+            }
+            _ => return None,
+        }
+    }
+    Some(current.clone())
+}
+
+/// Coerce an extracted JSON value into an i64 priority. Floats truncate
+/// (matching the i64 cast on the Harn side), strings parse, booleans map to
+/// 0/1, and null/objects/arrays return `None` so the dispatcher falls back
+/// to the default priority instead of failing the dispatch.
+pub(super) fn extracted_priority_value(value: serde_json::Value) -> Option<i64> {
+    match value {
+        serde_json::Value::Number(n) => n.as_i64().or_else(|| n.as_f64().map(|f| f as i64)),
+        serde_json::Value::String(s) => s.trim().parse::<i64>().ok(),
+        serde_json::Value::Bool(b) => Some(if b { 1 } else { 0 }),
+        _ => None,
+    }
+}
+
+/// Coerce an extracted JSON value into a fair-queue key string. Scalars
+/// stringify; null and complex values return `None` so the pool sees no key
+/// (which round-robin treats as the default bucket).
+pub(super) fn extracted_key_value(value: serde_json::Value) -> Option<String> {
+    match value {
+        serde_json::Value::String(s) => Some(s),
+        serde_json::Value::Number(n) => Some(n.to_string()),
+        serde_json::Value::Bool(b) => Some(b.to_string()),
+        serde_json::Value::Null => None,
+        other => Some(other.to_string()),
+    }
+}
+
 pub async fn append_dispatch_cancel_request(
     event_log: &Arc<AnyEventLog>,
     request: &DispatchCancelRequest,

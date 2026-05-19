@@ -143,6 +143,26 @@ fn generate_file() -> String {
     out.push_str("Key fields: `id`, `kind`, `provider`, `handler`, `path` or `match.path`, `match.events`, `when`, `dedupe_key`, `retry`, `budget`, `secrets`, `schedule`, `timezone`, and provider-specific config tables such as `poll`.\n\n");
     out.push_str("Audit a project before deploy with `harn routes <root> --json`; it reports each declarative trigger's route path, handler module, budgets, inferred host capabilities, vendor-lock disclosure, and prompt/template overhead without executing handler code.\n\n");
 
+    out.push_str("## Handler variants\n\n");
+    out.push_str("`handler:` accepts a closure (in-process), an `a2a://` or `worker://` URI string, or a handler-variant dict. The dict form covers compositions that need more than a single callable; today only `SpawnToPool` ships, more variants will plug into the same syntax over time.\n\n");
+    out.push_str("```harn\n");
+    out.push_str("import { SpawnToPool } from \"std/triggers\"\n");
+    out.push_str("import { pool_create } from \"std/lifecycle/pool\"\n\n");
+    out.push_str("pool_create({name: \"pr-review-pool\", max_concurrent: 4})\n\n");
+    out.push_str("trigger_register({\n");
+    out.push_str("  kind: \"issue.opened\",\n");
+    out.push_str("  provider: \"github\",\n");
+    out.push_str("  handler: SpawnToPool({\n");
+    out.push_str("    pool: \"pr-review-pool\",\n");
+    out.push_str("    priority_from: \"headers.priority\",     // optional dotted JSON path\n");
+    out.push_str("    key_from: \"tenant_id\",                 // optional dotted JSON path\n");
+    out.push_str("    task_factory: { event -> { -> review(event) } },\n");
+    out.push_str("  }),\n");
+    out.push_str("  match: {events: [\"issue.opened\"]},\n");
+    out.push_str("})\n");
+    out.push_str("```\n\n");
+    out.push_str("The dispatcher invokes `task_factory(event)` per match, extracts priority + fair-queue key from the event payload (missing paths fall back to default priority 0 / null key), and submits the resulting closure to the named pool under its queue strategy + backpressure policy. Pool rejections (`drop_newest`, etc.) reuse the `lifecycle.pool.audit` channel that direct `pool.submit` calls emit on. The dispatch result is shaped as a `pool_task` handle so handlers can call `pool_wait(dispatch.result)` directly.\n\n");
+
     out.push_str("## Provider catalog\n\n");
     out.push_str("This table is generated from `std/triggers::list_providers()` / `ProviderCatalog` metadata.\n\n");
     out.push_str(

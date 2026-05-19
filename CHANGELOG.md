@@ -73,6 +73,20 @@ condensed series summaries instead of full per-patch history.
   guards on an arbitrary predicate. Conformance coverage at
   `conformance/tests/combinator_*.harn`. Part of the pipeline
   lifecycle epic (#1853, P-07).
+- **`SpawnToPool` trigger handler variant (#1889).** Triggers now compose
+  with named agent pools (#1883) via a new `TriggerHandlerSpec::SpawnToPool`
+  variant, surfaced through the Harn DSL as
+  `handler: SpawnToPool({pool: "pr-review", priority_from: "headers.priority",
+  key_from: "tenant_id", task_factory: { event -> { -> review(event) } }})`.
+  The dispatcher invokes `task_factory(event)` per matched event, extracts
+  priority + fair-queue key via simple dotted JSON paths into the event
+  payload (missing paths fall back to defaults rather than erroring), and
+  submits the resulting closure to the pool under its configured queue
+  strategy + backpressure policy. `drop_newest` rejections reuse the existing
+  `lifecycle.pool.audit` channel, and the dispatch result is shaped as a
+  `pool_task` handle so handlers can call `pool_wait(dispatch.result)`
+  directly. Conformance:
+  `conformance/tests/triggers/trigger_spawn_to_pool_*`.
 - **`std/oauth/storage` token storage backends (#1904).** Five
   interchangeable backends for the OAuth client (#1885 OA-03):
   `memory()` (per-VM, ephemeral), `file(path, encryption_key)` (single
