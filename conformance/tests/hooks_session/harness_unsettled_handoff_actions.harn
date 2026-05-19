@@ -1,0 +1,26 @@
+/**
+ * P-04 action surface: a custom on_finish callback can create, inspect,
+ * acknowledge, and finalize partial handoff state through the Harness API.
+ */
+pipeline default() {
+  pipeline_on_finish(
+    { harness, return_value ->
+      let queued = harness.handoff_to("nightly-drain", {work: "finish"})
+      harness.stdio.println("handoff=" + queued.status)
+      let state = harness.unsettled_state()
+      let counts = harness.counts(state)
+      let handoff = state.partial_handoffs[0]
+      harness.stdio.println("partial=" + to_string(counts.partial))
+      harness.stdio.println("to=" + handoff.to)
+      harness.stdio.println("summary=" + handoff.payload_summary)
+      let ack = harness.acknowledge_handoff(handoff.envelope_id, {decision: "accepted"})
+      let after = harness.counts(harness.unsettled_state())
+      harness.stdio.println("ack=" + ack.status)
+      harness.stdio.println("after=" + to_string(after.partial))
+      let finalized = harness.finalize({status: "completed"})
+      harness.stdio.println("final=" + finalized.status)
+      return return_value
+    },
+  )
+  return "ok"
+}

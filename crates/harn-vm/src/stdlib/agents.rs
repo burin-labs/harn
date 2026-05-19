@@ -23,11 +23,11 @@ use harn_parser::diagnostic_codes::Code;
 use self::agents_workers::{
     apply_worker_artifact_policy, apply_worker_transcript_policy, emit_worker_event,
     ensure_worker_config_session_ids, load_worker_state_snapshot, next_worker_id,
-    parse_worker_config, persist_worker_state_snapshot, spawn_worker_task, with_worker_state,
-    worker_event_snapshot, worker_id_from_value, worker_request_for_config, worker_snapshot_path,
-    worker_summary, worker_trigger_payload_text, worker_wait_blocks, SuspendInitiator,
-    WorkerCarryPolicy, WorkerConfig, WorkerExecutionProfile, WorkerState, WorkerSuspension,
-    WORKER_REGISTRY,
+    parse_worker_config, persist_worker_state_snapshot, reset_worker_registry, spawn_worker_task,
+    with_worker_state, worker_event_snapshot, worker_id_from_value, worker_request_for_config,
+    worker_snapshot_path, worker_summary, worker_trigger_payload_text, worker_wait_blocks,
+    SuspendInitiator, WorkerCarryPolicy, WorkerConfig, WorkerExecutionProfile, WorkerState,
+    WorkerSuspension, WORKER_REGISTRY,
 };
 use self::sub_agent::{execute_sub_agent, parse_sub_agent_request};
 use crate::agent_events::WorkerEvent;
@@ -102,6 +102,10 @@ const AGENT_PRIMITIVES: BuiltinGroup<'static> = BuiltinGroup::new()
     .category("agent.worker")
     .sync(AGENT_SYNC_PRIMITIVES)
     .async_(AGENT_ASYNC_PRIMITIVES);
+
+pub(crate) fn reset_agent_worker_state() {
+    reset_worker_registry();
+}
 
 pub(crate) use self::records::{parse_artifact_list, parse_context_policy};
 fn to_vm<T: serde::Serialize>(value: &T) -> Result<VmValue, VmError> {
@@ -1504,6 +1508,41 @@ pub(crate) fn snapshot_suspended_subagents() -> Vec<serde_json::Value> {
             .values()
             .filter_map(|state| {
                 let worker = state.borrow();
+                if worker.status == "suspended" {
+                    let suspension = worker.suspension.as_ref();
+                    let suspended_at_ms =
+                        suspension.and_then(|value| uuid_v7_unix_ms(&value.suspended_at));
+                    let age_ms = suspended_at_ms
+                        .map(|started| crate::stdlib::clock::now_wall_ms().saturating_sub(started))
+                        .unwrap_or(0)
+                        .max(0);
+                    return Some(serde_json::json!({
+                        "handle": worker.id.clone(),
+                        "session_id": worker_session_id_json(&worker),
+                        "reason": suspension
+                            .map(|value| value.reason.clone())
+                            .filter(|value| !value.trim().is_empty())
+                            .unwrap_or_else(|| "suspended".to_string()),
+                        "conditions": suspension
+                            .and_then(|value| value.conditions.clone())
+                            .unwrap_or(serde_json::Value::Null),
+                        "age_ms": age_ms,
+                        "initiator": suspension
+                            .and_then(|value| serde_json::to_value(value.initiator).ok())
+                            .unwrap_or_else(|| serde_json::json!("operator")),
+                        "mode": worker.mode.clone(),
+                        "status": worker.status.clone(),
+                        "suspended_at": suspension
+                            .map(|value| value.suspended_at.clone())
+                            .unwrap_or_default(),
+                        "snapshot_ref": suspension
+                            .map(|value| value.snapshot_ref.clone())
+                            .unwrap_or_else(|| worker.snapshot_path.clone()),
+                        "auto_resume_trigger": suspension
+                            .and_then(|value| value.auto_resume_trigger.as_ref())
+                            .and_then(|value| serde_json::to_value(value).ok()),
+                    }));
+                }
                 if worker.status != "awaiting" || worker.mode != "sub_agent" {
                     return None;
                 }
@@ -1513,11 +1552,7 @@ pub(crate) fn snapshot_suspended_subagents() -> Vec<serde_json::Value> {
                     .unwrap_or(0);
                 Some(serde_json::json!({
                     "handle": worker.id.clone(),
-                    "session_id": if worker.audit.session_id.is_empty() {
-                        serde_json::Value::Null
-                    } else {
-                        serde_json::json!(worker.audit.session_id.clone())
-                    },
+                    "session_id": worker_session_id_json(&worker),
                     "reason": "awaiting_input",
                     "conditions": {
                         "status": worker.status.clone(),
@@ -1529,10 +1564,37 @@ pub(crate) fn snapshot_suspended_subagents() -> Vec<serde_json::Value> {
                         .parent_worker_id
                         .clone()
                         .unwrap_or_else(|| "pipeline".to_string()),
+                    "mode": worker.mode.clone(),
+                    "status": worker.status.clone(),
                 }))
             })
             .collect()
     })
+}
+
+fn worker_session_id_json(worker: &WorkerState) -> serde_json::Value {
+    let session_id = if worker.audit.session_id.is_empty() {
+        match &worker.config {
+            WorkerConfig::SubAgent { spec } if !spec.session_id.is_empty() => {
+                Some(spec.session_id.clone())
+            }
+            _ => None,
+        }
+    } else {
+        Some(worker.audit.session_id.clone())
+    };
+    session_id
+        .map(serde_json::Value::String)
+        .unwrap_or(serde_json::Value::Null)
+}
+
+fn uuid_v7_unix_ms(value: &str) -> Option<i64> {
+    let uuid = uuid::Uuid::parse_str(value).ok()?;
+    let (seconds, nanos) = uuid.get_timestamp()?.to_unix();
+    let millis = seconds
+        .checked_mul(1_000)?
+        .checked_add(u64::from(nanos / 1_000_000))?;
+    i64::try_from(millis).ok()
 }
 
 #[cfg(test)]
@@ -1811,6 +1873,72 @@ mod suspend_tests {
                 && event_error.to_string().contains("on_event"),
             "expected HARN-SUS-002 on_event field error, got: {event_error}"
         );
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn suspended_subagent_snapshot_includes_active_suspension_metadata() {
+        let _guard = suspend_test_lock().await;
+        let (worker_id, dir) = seed_test_worker("worker-suspend-snapshot");
+
+        suspend_agent_builtin(vec![
+            handle_value(&worker_id),
+            VmValue::String(Rc::from("waiting on external review")),
+            VmValue::Dict(Rc::new(BTreeMap::from([(
+                "initiator".to_string(),
+                VmValue::String(Rc::from("parent")),
+            )]))),
+        ])
+        .await
+        .expect("suspend worker");
+
+        let snapshot = snapshot_suspended_subagents();
+        let item = snapshot
+            .iter()
+            .find(|item| item["handle"] == worker_id)
+            .expect("suspended worker should be in unsettled snapshot");
+        assert_eq!(item["status"], "suspended");
+        assert_eq!(item["reason"], "waiting on external review");
+        assert_eq!(item["initiator"], "parent");
+        assert!(
+            item["age_ms"].as_i64().unwrap_or(-1) >= 0,
+            "snapshot age must be a non-negative duration"
+        );
+        assert!(
+            item["snapshot_ref"]
+                .as_str()
+                .is_some_and(|path| !path.is_empty()),
+            "suspended workers should expose their durable snapshot path"
+        );
+
+        teardown(&dir, &worker_id);
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn reset_agent_worker_state_clears_suspended_snapshot() {
+        let _guard = suspend_test_lock().await;
+        let (worker_id, dir) = seed_test_worker("worker-reset-snapshot");
+
+        suspend_agent_builtin(vec![
+            handle_value(&worker_id),
+            VmValue::String(Rc::from("waiting on external review")),
+        ])
+        .await
+        .expect("suspend worker");
+        assert!(
+            snapshot_suspended_subagents()
+                .iter()
+                .any(|item| item["handle"] == worker_id),
+            "seeded suspension should be visible before reset"
+        );
+
+        reset_agent_worker_state();
+
+        assert!(
+            snapshot_suspended_subagents().is_empty(),
+            "stdlib reset should not leave workers visible to later lifecycle snapshots"
+        );
+        let _ = std::fs::remove_dir_all(&dir);
+        unsafe { std::env::remove_var("HARN_WORKER_STATE_DIR") };
     }
 
     #[tokio::test(flavor = "current_thread")]

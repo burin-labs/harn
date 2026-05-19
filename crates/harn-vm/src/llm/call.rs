@@ -25,12 +25,12 @@ struct InFlightLlmCall {
     started_at_ms: i64,
 }
 
-struct InFlightLlmCallGuard {
+pub(crate) struct InFlightLlmCallGuard {
     call_id: String,
 }
 
 impl InFlightLlmCallGuard {
-    fn enter(opts: &api::LlmCallOptions) -> Self {
+    pub(crate) fn enter(opts: &api::LlmCallOptions) -> Self {
         let call_id = format!("llm_call_{}", uuid::Uuid::now_v7());
         let started_at_ms = crate::stdlib::clock::now_wall_ms();
         let role = opts
@@ -62,10 +62,13 @@ impl Drop for InFlightLlmCallGuard {
 }
 
 pub(crate) fn snapshot_in_flight_llm_calls() -> Vec<serde_json::Value> {
-    let now_ms = crate::stdlib::clock::now_wall_ms();
     IN_FLIGHT_LLM_CALLS.with(|calls| {
+        let calls = calls.borrow();
+        if calls.is_empty() {
+            return Vec::new();
+        }
+        let now_ms = crate::stdlib::clock::now_wall_ms();
         calls
-            .borrow()
             .values()
             .map(|call| {
                 serde_json::json!({
@@ -434,7 +437,6 @@ pub(crate) async fn execute_llm_call(
     options: Option<std::collections::BTreeMap<String, VmValue>>,
     bridge: Option<&Rc<crate::bridge::HostBridge>>,
 ) -> Result<VmValue, VmError> {
-    let _in_flight_guard = InFlightLlmCallGuard::enter(&opts);
     if let Some(policy) = opts.routing_policy.clone() {
         return execute_with_routing_policy(policy, opts, bridge).await;
     }
@@ -920,6 +922,26 @@ mod schema_stream_abort_retry_tests {
         opts.tool_choice = None;
         opts.provider_overrides = None;
         opts
+    }
+
+    #[test]
+    fn in_flight_llm_guard_snapshots_and_clears() {
+        clear_in_flight_llm_calls();
+        let mut opts = fake_opts_with_schema();
+        opts.messages = vec![serde_json::json!({"role": "assistant", "content": "thinking"})];
+
+        let guard = InFlightLlmCallGuard::enter(&opts);
+        let calls = snapshot_in_flight_llm_calls();
+        assert_eq!(calls.len(), 1);
+        assert_eq!(calls[0]["model"], "fake-stream");
+        assert_eq!(calls[0]["role"], "assistant");
+        assert!(
+            calls[0]["age_ms"].as_i64().unwrap_or(-1) >= 0,
+            "age must be a non-negative duration"
+        );
+
+        drop(guard);
+        assert!(snapshot_in_flight_llm_calls().is_empty());
     }
 
     #[test]

@@ -5,5 +5,5 @@ trigger_decision=none
 handoff_decision=none
 llm_decision=none
 summary=no unsettled work
-unsupported=unsupported
+ack=not_found
 wait=settled

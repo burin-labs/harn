@@ -16,6 +16,83 @@ pipeline default() {
 }
 ```
 
+## Harness lifecycle methods
+
+`harness.unsettled_state()` returns one snapshot dict with four lists:
+`suspended_subagents`, `queued_triggers`, `partial_handoffs`, and
+`in_flight_llm_calls`. Suspended subagents come from the host worker
+registry, queued triggers come from the trigger inbox and worker queue
+event-log records, partial handoffs come from `harness.handoff_to`, and
+in-flight LLM calls come from the live LLM call registry.
+
+`harness.is_empty(state?)` returns `true` when every unsettled bucket is
+empty. Pass an already-captured snapshot to keep decisions consistent
+inside one callback, or omit the argument to ask the harness for a fresh
+snapshot.
+
+`harness.counts(state?)` returns `{suspended, queued, partial,
+in_flight}` for either the supplied snapshot or a fresh harness snapshot.
+Use it for audit payloads and branch decisions instead of recomputing
+bucket lengths manually.
+
+`harness.summary(state?)` returns a single operator-readable line such
+as `no unsettled work` or a per-bucket count summary. It is intended for
+logs and audit records, not as a machine-readable contract.
+
+`harness.resume_subagent(handle, input?)` delegates to the host worker
+resume primitive for suspended workers. When `input` is supplied and the
+worker is an awaiting retriggerable subagent, the harness falls back to
+the existing send-input primitive.
+
+`harness.cancel_subagent(handle, reason?)` delegates to
+`__host_worker_close` and returns that primitive's worker summary or
+error. The optional reason is reserved for callers that want to include
+the reason in their own audit payload before cancelling.
+
+`harness.handoff_to(target_pipeline, payload?)` records a partial
+handoff envelope and returns `{status: "queued", envelope}`. The envelope
+appears in subsequent `partial_handoffs` snapshots with `from`, `to`,
+`payload_summary`, `queued_at_ms`, and `age_ms` fields.
+
+`harness.acknowledge_trigger(id)` settles one queued trigger item. Worker
+queue items are acknowledged with the existing queue ack event, while
+trigger inbox items are settled by appending the existing dispatcher
+cancel request; missing ids return `{status: "not_found"}`.
+
+`harness.defer_trigger(id, target_pipeline?)` acknowledges the queued
+trigger and records a partial handoff envelope for the supplied target
+(default `deferred-triggers`). If the trigger cannot be acknowledged,
+the returned receipt keeps the failed acknowledgement result.
+
+`harness.acknowledge_handoff(envelope_id, decision?)` removes a partial
+handoff envelope from the unsettled registry and emits a
+`handoff_acknowledged` lifecycle audit entry with the caller's decision
+payload.
+
+`harness.wait_for_any_settlement(max_duration?)` takes a fresh snapshot
+and returns `{status, timed_out, state}`. It returns `settled` when the
+snapshot is empty and `unsettled` otherwise; callers that need a richer
+drain loop should delegate to the drain preset or settlement agent.
+
+`harness.emit_audit(kind, payload?)` records a typed
+`LifecycleAuditEntry` with a monotonic per-run `seq` number. When an
+active event log exists, the same entry is persisted to the
+`pipeline.lifecycle.audit` topic alongside run-record data.
+
+`harness.finalize(disposition?)` stores the pipeline disposition for the
+current lifecycle run and emits a `pipeline_finalized` audit entry. The
+receipt is shaped `{status: "finalized", method: "finalize", entry}`.
+
+`harness.spawn_settlement_agent(unsettled, return_value)` is the handoff
+point used by `on_finish_drain` when unsettled work remains. The
+settlement-agent loop and constrained drain tool surface are tracked by
+harn#1856; until that lands this method returns a typed unsupported
+receipt rather than silently dropping the work.
+
+`harness.current_pipeline_id()` returns the current run id when a
+mutation session is installed, otherwise the session id, otherwise
+`nil`. Handoff producers use this to stamp the origin pipeline.
+
 Four canonical presets ship from `std/lifecycle`. Each is a pure
 function (or a pure factory returning one) with no captured state, so
 chaining and reuse are safe.

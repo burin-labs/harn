@@ -37,10 +37,12 @@ impl Vm {
     ///
     /// Tracked: <https://github.com/burin-labs/harn/issues/1854>.
     async fn run_pipeline_finish_lifecycle(&mut self, value: VmValue) -> Result<VmValue, VmError> {
-        use crate::orchestration::{take_pipeline_on_finish, unsettled_state_snapshot, HookEvent};
+        use crate::orchestration::{
+            take_pipeline_on_finish, unsettled_state_snapshot_async, HookEvent,
+        };
 
         let on_finish = take_pipeline_on_finish();
-        let unsettled = unsettled_state_snapshot();
+        let unsettled = unsettled_state_snapshot_async().await;
 
         let pre_payload = serde_json::json!({
             "event": HookEvent::PreFinish.as_str(),

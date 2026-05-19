@@ -2,7 +2,7 @@ use super::*;
 use std::cell::{Cell, RefCell};
 use std::collections::BTreeMap;
 use std::rc::Rc;
-use std::sync::atomic::AtomicBool;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::time::Instant;
 
@@ -220,6 +220,22 @@ pub(super) fn next_worker_id() -> String {
         counter.set(next);
         format!("worker_{}", uuid::Uuid::now_v7())
     })
+}
+
+pub(super) fn reset_worker_registry() {
+    WORKER_REGISTRY.with(|registry| {
+        let mut registry = registry.borrow_mut();
+        for state in registry.values() {
+            let mut worker = state.borrow_mut();
+            worker.cancel_token.store(true, Ordering::SeqCst);
+            worker.suspend_signal.store(true, Ordering::SeqCst);
+            if let Some(handle) = worker.handle.take() {
+                handle.abort();
+            }
+        }
+        registry.clear();
+    });
+    WORKER_COUNTER.with(|counter| counter.set(0));
 }
 
 pub(super) fn worker_trigger_payload_text(value: &VmValue) -> String {

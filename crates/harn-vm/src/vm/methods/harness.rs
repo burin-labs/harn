@@ -50,13 +50,15 @@ impl crate::vm::Vm {
     ) -> Result<VmValue, VmError> {
         match method {
             "unsettled_state" => {
-                let snapshot = crate::orchestration::unsettled_state_snapshot();
+                let snapshot = crate::orchestration::unsettled_state_snapshot_async().await;
                 Ok(crate::stdlib::json_to_vm_value(&snapshot.to_json()))
             }
             "is_empty" => {
                 let empty = match args.first() {
                     Some(state) => state_counts(state)?.is_empty(),
-                    None => crate::orchestration::unsettled_state_snapshot().is_empty(),
+                    None => crate::orchestration::unsettled_state_snapshot_async()
+                        .await
+                        .is_empty(),
                 };
                 Ok(VmValue::Bool(empty))
             }
@@ -65,7 +67,7 @@ impl crate::vm::Vm {
                     &state_counts(state)?.to_json(),
                 )),
                 None => {
-                    let snapshot = crate::orchestration::unsettled_state_snapshot();
+                    let snapshot = crate::orchestration::unsettled_state_snapshot_async().await;
                     Ok(crate::stdlib::json_to_vm_value(&snapshot.counts_json()))
                 }
             },
@@ -74,7 +76,7 @@ impl crate::vm::Vm {
                     state_counts(state)?.summary().as_str(),
                 ))),
                 None => {
-                    let snapshot = crate::orchestration::unsettled_state_snapshot();
+                    let snapshot = crate::orchestration::unsettled_state_snapshot_async().await;
                     Ok(VmValue::String(std::rc::Rc::from(snapshot.summary())))
                 }
             },
@@ -83,8 +85,23 @@ impl crate::vm::Vm {
                     VmError::TypeError("Harness.resume_subagent expects a handle".to_string())
                 })?;
                 if let Some(input) = args.get(1).cloned() {
-                    self.call_named_builtin("__host_worker_send_input", vec![handle_arg, input])
+                    match self
+                        .call_named_builtin(
+                            "__host_worker_resume",
+                            vec![handle_arg.clone(), input.clone()],
+                        )
                         .await
+                    {
+                        Ok(value) => Ok(value),
+                        Err(error) if error.to_string().contains("not suspended") => {
+                            self.call_named_builtin(
+                                "__host_worker_send_input",
+                                vec![handle_arg, input],
+                            )
+                            .await
+                        }
+                        Err(error) => Err(error),
+                    }
                 } else {
                     self.call_named_builtin("__host_worker_resume", vec![handle_arg])
                         .await
@@ -98,7 +115,7 @@ impl crate::vm::Vm {
                     .await
             }
             "wait_for_any_settlement" => {
-                let snapshot = crate::orchestration::unsettled_state_snapshot();
+                let snapshot = crate::orchestration::unsettled_state_snapshot_async().await;
                 let status = if snapshot.is_empty() {
                     "settled"
                 } else {
@@ -106,7 +123,7 @@ impl crate::vm::Vm {
                 };
                 Ok(crate::stdlib::json_to_vm_value(&serde_json::json!({
                     "status": status,
-                    "timed_out": false,
+                    "timed_out": !snapshot.is_empty(),
                     "state": snapshot.to_json(),
                 })))
             }
@@ -116,18 +133,10 @@ impl crate::vm::Vm {
                 .unwrap_or(VmValue::Nil)),
             "handoff_to" => Ok(record_handoff_envelope(args)),
             "emit_audit" => Ok(record_emit_audit(args)),
-            "acknowledge_trigger" | "defer_trigger" => Ok(unsupported_harness_action(
-                method,
-                "queued trigger items do not have an acknowledgement registry on this branch",
-            )),
-            "acknowledge_handoff" => Ok(unsupported_harness_action(
-                method,
-                "partial handoff envelopes do not have an acknowledgement registry on this branch",
-            )),
-            "finalize" => Ok(unsupported_harness_action(
-                method,
-                "pipeline disposition persistence is not available on this branch",
-            )),
+            "acknowledge_trigger" => Ok(acknowledge_trigger(args).await),
+            "defer_trigger" => Ok(defer_trigger(args).await),
+            "acknowledge_handoff" => Ok(acknowledge_handoff(args)),
+            "finalize" => Ok(finalize_pipeline(args)),
             "spawn_settlement_agent" => Ok(record_spawn_settlement_agent_gap(args)),
             _ => Err(method_unsupported(handle, method)),
         }
@@ -386,6 +395,245 @@ fn unsupported_harness_action(method: &str, reason: &str) -> VmValue {
         "method": method,
         "reason": reason,
     }))
+}
+
+async fn acknowledge_trigger(args: &[VmValue]) -> VmValue {
+    let Some(id) = args
+        .first()
+        .map(vm_value_string)
+        .filter(|id| !id.is_empty())
+    else {
+        return json_receipt("rejected", "acknowledge_trigger", "missing trigger id");
+    };
+    let receipt = acknowledge_trigger_id(&id).await;
+    crate::stdlib::json_to_vm_value(&receipt)
+}
+
+async fn defer_trigger(args: &[VmValue]) -> VmValue {
+    let Some(id) = args
+        .first()
+        .map(vm_value_string)
+        .filter(|id| !id.is_empty())
+    else {
+        return json_receipt("rejected", "defer_trigger", "missing trigger id");
+    };
+    let target = args
+        .get(1)
+        .map(vm_value_string)
+        .filter(|target| !target.trim().is_empty())
+        .unwrap_or_else(|| "deferred-triggers".to_string());
+    let acknowledgement = acknowledge_trigger_id(&id).await;
+    if acknowledgement
+        .get("status")
+        .and_then(serde_json::Value::as_str)
+        != Some("acknowledged")
+    {
+        return crate::stdlib::json_to_vm_value(&serde_json::json!({
+            "status": acknowledgement
+                .get("status")
+                .and_then(serde_json::Value::as_str)
+                .unwrap_or("rejected"),
+            "method": "defer_trigger",
+            "trigger_id": id,
+            "acknowledgement": acknowledgement,
+        }));
+    }
+    let envelope = crate::orchestration::record_partial_handoff(
+        target,
+        serde_json::json!({
+            "deferred_trigger": acknowledgement.get("item").cloned().unwrap_or(serde_json::Value::Null),
+            "acknowledgement": acknowledgement.clone(),
+        }),
+    );
+    crate::orchestration::record_lifecycle_audit(
+        "trigger_deferred",
+        serde_json::json!({
+            "trigger_id": id,
+            "envelope_id": envelope.envelope_id.clone(),
+        }),
+    );
+    crate::stdlib::json_to_vm_value(&serde_json::json!({
+        "status": "deferred",
+        "method": "defer_trigger",
+        "trigger_id": id,
+        "acknowledgement": acknowledgement,
+        "envelope": envelope.to_json(),
+    }))
+}
+
+async fn acknowledge_trigger_id(id: &str) -> serde_json::Value {
+    let snapshot = crate::orchestration::unsettled_state_snapshot_async().await;
+    let Some(item) = snapshot
+        .queued_triggers
+        .iter()
+        .find(|item| item.get("id").and_then(serde_json::Value::as_str) == Some(id))
+        .cloned()
+    else {
+        return serde_json::json!({
+            "status": "not_found",
+            "method": "acknowledge_trigger",
+            "trigger_id": id,
+        });
+    };
+    let Some(log) = crate::event_log::active_event_log() else {
+        return serde_json::json!({
+            "status": "rejected",
+            "method": "acknowledge_trigger",
+            "trigger_id": id,
+            "reason": "no active event log is installed",
+            "item": item,
+        });
+    };
+    let result = match item.get("source").and_then(serde_json::Value::as_str) {
+        Some("worker_queue") => {
+            let queue = item
+                .get("queue")
+                .and_then(serde_json::Value::as_str)
+                .unwrap_or_default();
+            let job_event_id = item
+                .get("job_event_id")
+                .and_then(serde_json::Value::as_u64)
+                .unwrap_or_default();
+            match crate::triggers::WorkerQueue::new(log)
+                .ack_job(queue, job_event_id, "pipeline_lifecycle")
+                .await
+            {
+                Ok(true) => serde_json::json!({"status": "acknowledged"}),
+                Ok(false) => serde_json::json!({"status": "not_found"}),
+                Err(error) => serde_json::json!({
+                    "status": "rejected",
+                    "reason": error.to_string(),
+                }),
+            }
+        }
+        Some("trigger_inbox") => {
+            let Some(binding_key) = item
+                .get("binding_key")
+                .and_then(serde_json::Value::as_str)
+                .filter(|value| !value.is_empty())
+            else {
+                return serde_json::json!({
+                    "status": "rejected",
+                    "method": "acknowledge_trigger",
+                    "trigger_id": id,
+                    "reason": "queued trigger is missing binding_key",
+                    "item": item,
+                });
+            };
+            let Some(event_id) = item
+                .get("event_id")
+                .and_then(serde_json::Value::as_str)
+                .filter(|value| !value.is_empty())
+            else {
+                return serde_json::json!({
+                    "status": "rejected",
+                    "method": "acknowledge_trigger",
+                    "trigger_id": id,
+                    "reason": "queued trigger is missing event_id",
+                    "item": item,
+                });
+            };
+            let request = crate::triggers::DispatchCancelRequest {
+                binding_key: binding_key.to_string(),
+                event_id: event_id.to_string(),
+                requested_at: crate::clock_mock::now_utc(),
+                requested_by: Some("pipeline_lifecycle".to_string()),
+                audit_id: None,
+            };
+            match crate::triggers::append_dispatch_cancel_request(&log, &request).await {
+                Ok(_) => serde_json::json!({"status": "acknowledged"}),
+                Err(error) => serde_json::json!({
+                    "status": "rejected",
+                    "reason": error.to_string(),
+                }),
+            }
+        }
+        Some(source) => serde_json::json!({
+            "status": "rejected",
+            "reason": format!("unknown queued trigger source `{source}`"),
+        }),
+        None => serde_json::json!({
+            "status": "rejected",
+            "reason": "queued trigger is missing source",
+        }),
+    };
+    if result.get("status").and_then(serde_json::Value::as_str) == Some("acknowledged") {
+        crate::orchestration::record_lifecycle_audit(
+            "trigger_acknowledged",
+            serde_json::json!({
+                "trigger_id": id,
+                "item": item.clone(),
+            }),
+        );
+    }
+    let mut receipt = serde_json::Map::new();
+    receipt.insert(
+        "status".to_string(),
+        result
+            .get("status")
+            .cloned()
+            .unwrap_or_else(|| serde_json::json!("rejected")),
+    );
+    receipt.insert(
+        "method".to_string(),
+        serde_json::json!("acknowledge_trigger"),
+    );
+    receipt.insert("trigger_id".to_string(), serde_json::json!(id));
+    receipt.insert("item".to_string(), item);
+    if let Some(reason) = result.get("reason").cloned() {
+        receipt.insert("reason".to_string(), reason);
+    }
+    serde_json::Value::Object(receipt)
+}
+
+fn acknowledge_handoff(args: &[VmValue]) -> VmValue {
+    let Some(envelope_id) = args
+        .first()
+        .map(vm_value_string)
+        .filter(|id| !id.is_empty())
+    else {
+        return json_receipt("rejected", "acknowledge_handoff", "missing envelope id");
+    };
+    let decision = args
+        .get(1)
+        .map(crate::llm::vm_value_to_json)
+        .unwrap_or(serde_json::Value::Null);
+    match crate::orchestration::acknowledge_partial_handoff(&envelope_id, decision) {
+        Some(envelope) => crate::stdlib::json_to_vm_value(&serde_json::json!({
+            "status": "acknowledged",
+            "method": "acknowledge_handoff",
+            "envelope": envelope.to_json(),
+        })),
+        None => crate::stdlib::json_to_vm_value(&serde_json::json!({
+            "status": "not_found",
+            "method": "acknowledge_handoff",
+            "envelope_id": envelope_id,
+        })),
+    }
+}
+
+fn finalize_pipeline(args: &[VmValue]) -> VmValue {
+    let disposition = args
+        .first()
+        .map(crate::llm::vm_value_to_json)
+        .unwrap_or(serde_json::Value::Null);
+    let receipt = crate::orchestration::finalize_pipeline_disposition(disposition);
+    crate::stdlib::json_to_vm_value(&receipt)
+}
+
+fn json_receipt(status: &str, method: &str, reason: &str) -> VmValue {
+    crate::stdlib::json_to_vm_value(&serde_json::json!({
+        "status": status,
+        "method": method,
+        "reason": reason,
+    }))
+}
+
+fn vm_value_string(value: &VmValue) -> String {
+    match value {
+        VmValue::String(text) => text.as_ref().to_string(),
+        other => other.display(),
+    }
 }
 
 fn record_emit_audit(args: &[VmValue]) -> VmValue {

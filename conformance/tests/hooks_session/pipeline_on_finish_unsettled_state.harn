@@ -11,8 +11,10 @@ pipeline default() {
       let helper_state = unsettled_state(harness)
       let direct_counts = harness.counts(state)
       let helper_counts = counts(helper_state)
-      println("empty=" + to_string(harness.is_empty(state)) + "/" + to_string(is_empty(state)))
-      println(
+      harness.stdio
+        .println("empty=" + to_string(harness.is_empty(state)) + "/" + to_string(is_empty(state)))
+      harness.stdio
+        .println(
         "counts=" + to_string(direct_counts.suspended) + "," + to_string(helper_counts.queued)
           + ","
           + to_string(helper_counts.partial)
@@ -39,15 +41,15 @@ pipeline default() {
       } else {
         "wait"
       }
-      println("suspended_decision=" + suspended_decision)
-      println("trigger_decision=" + trigger_decision)
-      println("handoff_decision=" + handoff_decision)
-      println("llm_decision=" + llm_decision)
-      println("summary=" + summary(state))
+      harness.stdio.println("suspended_decision=" + suspended_decision)
+      harness.stdio.println("trigger_decision=" + trigger_decision)
+      harness.stdio.println("handoff_decision=" + handoff_decision)
+      harness.stdio.println("llm_decision=" + llm_decision)
+      harness.stdio.println("summary=" + summary(state))
       let ack = harness.acknowledge_trigger("missing-trigger")
       let wait = harness.wait_for_any_settlement(0)
-      println("unsupported=" + ack.status)
-      println("wait=" + wait.status)
+      harness.stdio.println("ack=" + ack.status)
+      harness.stdio.println("wait=" + wait.status)
       return return_value
     },
   )

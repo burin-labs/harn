@@ -2449,20 +2449,23 @@ Three concentric surfaces:
   `in_flight_llm_calls` lists. `harness.is_empty(state?)`,
   `harness.counts(state?)`, and `harness.summary(state?)` summarize that
   shape; `std/lifecycle` exports equivalent `unsettled_state(harness)`,
-  `is_empty(state)`, `counts(state)`, and `summary(state)` helpers. On
-  this branch, suspended subagents, in-flight LLM calls, and partial
-  handoffs are populated from live VM registries (the partial-handoff
-  registry is written by `harness.handoff_to`); the queued-trigger
-  bucket stays a typed empty list until its per-item registry lands.
+  `is_empty(state)`, `counts(state)`, and `summary(state)` helpers.
+  Suspended subagents, partial handoffs, and in-flight LLM calls are
+  populated from live VM registries, while queued triggers are
+  reconstructed from the active trigger inbox and worker-queue event-log
+  records.
 - Lifecycle action methods exist on the root harness for drain callbacks:
   `resume_subagent`, `cancel_subagent`, `handoff_to`, `acknowledge_trigger`,
   `defer_trigger`, `acknowledge_handoff`, `wait_for_any_settlement`,
   `emit_audit`, `finalize`, `spawn_settlement_agent`, and
   `current_pipeline_id`. `resume_subagent` and `cancel_subagent` delegate
-  to host worker primitives; `emit_audit` and `handoff_to` record into
-  the per-pipeline-run lifecycle audit log and partial-handoff registry;
-  methods whose backing registries are not yet present return a typed
-  `{status: "unsupported", method, reason}` result.
+  to host worker primitives; trigger acknowledgements use existing
+  dispatcher cancel requests or worker-queue ack records; handoff
+  acknowledgement removes the partial envelope; `emit_audit`,
+  `handoff_to`, and `finalize` record into the per-pipeline-run lifecycle
+  registries. `spawn_settlement_agent` remains the P-03 handoff point and
+  returns a typed `{status: "unsupported", method, reason}` receipt until
+  harn#1856 lands.
 - `pipeline_lifecycle_audit_log_take()` and
   `pipeline_lifecycle_audit_log_snapshot()` drain or peek at the
   per-pipeline-run audit log that `harness.emit_audit` writes. Each
