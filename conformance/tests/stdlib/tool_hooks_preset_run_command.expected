@@ -28,3 +28,6 @@ rg --files
 rg --files
 true
 true
+true
+true
+closure

@@ -22,6 +22,13 @@
 //!   one exists, and records a `tool_hooks.reminder_injected` audit
 //!   entry regardless so conformance and replay can verify the
 //!   side-effect even from headless pipelines.
+//! * TH-05 (#1898): `__tool_hooks_classifier_cache_get` /
+//!   `__tool_hooks_classifier_cache_put` thread-local cache helpers
+//!   backing the opt-in LLM classifier in `preset_run_command`. Keyed by
+//!   normalized-command hash + classifier scope id so independent
+//!   wrappers don't share verdicts; entries optionally expire after
+//!   `ttl_seconds` so callers can refresh long-running daemons without
+//!   restarting the process.
 //!
 //! Schema follows the established tagged-dict convention (`_type`) used by
 //! `tool_registry` and `skill_registry`. Values are plain Harn dicts so they
@@ -29,6 +36,7 @@
 //! handling, and the matching engine runs as a single linear sweep over
 //! catalogues × rules (TH-01 acceptance criterion).
 
+use std::cell::RefCell;
 use std::collections::BTreeMap;
 use std::rc::Rc;
 
@@ -934,6 +942,121 @@ pub(crate) fn register_tool_hooks_builtins(vm: &mut Vm) {
         );
         Ok(VmValue::Dict(Rc::new(out)))
     });
+
+    // TH-05 (#1898) classifier cache: thread-local map keyed by
+    // `<scope>:<normalized_command>`. Optional TTL expires entries lazily
+    // on read so we don't need a background sweeper. The Harn-side
+    // `preset_run_command` wrapper builds the keys and decides what to
+    // cache; the Rust helpers stay dumb on purpose so callers can swap
+    // hashing / scope strategies without crossing the FFI boundary.
+    vm.register_builtin("__tool_hooks_classifier_cache_get", |args, _out| {
+        let key = match args.first() {
+            Some(VmValue::String(s)) if !s.is_empty() => s.to_string(),
+            _ => {
+                return Err(err(
+                    "__tool_hooks_classifier_cache_get: key must be a non-empty string",
+                ));
+            }
+        };
+        let now_ms = match args.get(1) {
+            Some(VmValue::Int(n)) => *n,
+            Some(VmValue::Nil) | None => 0,
+            Some(other) => {
+                return Err(err(format!(
+                    "__tool_hooks_classifier_cache_get: now_ms must be an int, got {}",
+                    other.type_name()
+                )));
+            }
+        };
+        Ok(classifier_cache_get(&key, now_ms))
+    });
+
+    vm.register_builtin("__tool_hooks_classifier_cache_put", |args, _out| {
+        let key = match args.first() {
+            Some(VmValue::String(s)) if !s.is_empty() => s.to_string(),
+            _ => {
+                return Err(err(
+                    "__tool_hooks_classifier_cache_put: key must be a non-empty string",
+                ));
+            }
+        };
+        let value = args.get(1).cloned().unwrap_or(VmValue::Nil);
+        let now_ms = match args.get(2) {
+            Some(VmValue::Int(n)) => *n,
+            Some(VmValue::Nil) | None => 0,
+            Some(other) => {
+                return Err(err(format!(
+                    "__tool_hooks_classifier_cache_put: now_ms must be an int, got {}",
+                    other.type_name()
+                )));
+            }
+        };
+        let ttl_ms = match args.get(3) {
+            Some(VmValue::Int(n)) if *n > 0 => Some(*n),
+            Some(VmValue::Nil) | None => None,
+            Some(VmValue::Int(_)) => None,
+            Some(other) => {
+                return Err(err(format!(
+                    "__tool_hooks_classifier_cache_put: ttl_ms must be an int or nil, got {}",
+                    other.type_name()
+                )));
+            }
+        };
+        classifier_cache_put(key, value, now_ms, ttl_ms);
+        Ok(VmValue::Nil)
+    });
+
+    vm.register_builtin("__tool_hooks_classifier_cache_clear", |_args, _out| {
+        classifier_cache_clear();
+        Ok(VmValue::Nil)
+    });
+}
+
+#[derive(Clone)]
+struct ClassifierCacheEntry {
+    value: VmValue,
+    /// Wall-clock ms at which the entry expires. `None` means no TTL.
+    expires_at_ms: Option<i64>,
+}
+
+thread_local! {
+    static CLASSIFIER_CACHE: RefCell<BTreeMap<String, ClassifierCacheEntry>> =
+        const { RefCell::new(BTreeMap::new()) };
+}
+
+fn classifier_cache_get(key: &str, now_ms: i64) -> VmValue {
+    CLASSIFIER_CACHE.with(|cell| {
+        let mut cache = cell.borrow_mut();
+        let expired = matches!(
+            cache.get(key),
+            Some(entry) if entry.expires_at_ms.is_some_and(|exp| now_ms >= exp)
+        );
+        if expired {
+            cache.remove(key);
+            return VmValue::Nil;
+        }
+        cache
+            .get(key)
+            .map(|entry| entry.value.clone())
+            .unwrap_or(VmValue::Nil)
+    })
+}
+
+fn classifier_cache_put(key: String, value: VmValue, now_ms: i64, ttl_ms: Option<i64>) {
+    let expires_at_ms = ttl_ms.map(|t| now_ms.saturating_add(t));
+    CLASSIFIER_CACHE.with(|cell| {
+        cell.borrow_mut().insert(
+            key,
+            ClassifierCacheEntry {
+                value,
+                expires_at_ms,
+            },
+        );
+    });
+}
+
+fn classifier_cache_clear() {
+    CLASSIFIER_CACHE.with(|cell| cell.borrow_mut().clear());
 }
 
 #[cfg(test)]
@@ -1332,5 +1455,94 @@ mod tests {
             panic!("expected thrown error, got {result:?}");
         };
         assert!(message.contains("body"));
+    }
+
+    // TH-05: classifier cache helpers.
+
+    fn verdict_value(kind: &str) -> VmValue {
+        let mut dict: BTreeMap<String, VmValue> = BTreeMap::new();
+        dict.insert("kind".to_string(), VmValue::String(Rc::from(kind)));
+        dict.insert("confidence".to_string(), VmValue::Float(0.9));
+        VmValue::Dict(Rc::new(dict))
+    }
+
+    #[test]
+    fn classifier_cache_roundtrips_value() {
+        let vm = vm_with_stdlib();
+        // Clean slate so prior tests don't bleed in via the thread-local map.
+        call_sync(&vm, "__tool_hooks_classifier_cache_clear", &[]).expect("clear");
+        let put = call_sync(
+            &vm,
+            "__tool_hooks_classifier_cache_put",
+            &[
+                VmValue::String(Rc::from("scope:hashA")),
+                verdict_value("rewrite"),
+                VmValue::Int(0),
+                VmValue::Nil,
+            ],
+        )
+        .expect("put");
+        assert!(matches!(put, VmValue::Nil));
+        let got = call_sync(
+            &vm,
+            "__tool_hooks_classifier_cache_get",
+            &[VmValue::String(Rc::from("scope:hashA")), VmValue::Int(0)],
+        )
+        .expect("get");
+        let dict = got.as_dict().expect("verdict dict");
+        assert_eq!(dict_string(dict, "kind"), "rewrite");
+    }
+
+    #[test]
+    fn classifier_cache_expires_entries_after_ttl() {
+        let vm = vm_with_stdlib();
+        call_sync(&vm, "__tool_hooks_classifier_cache_clear", &[]).expect("clear");
+        call_sync(
+            &vm,
+            "__tool_hooks_classifier_cache_put",
+            &[
+                VmValue::String(Rc::from("scope:expiring")),
+                verdict_value("deny"),
+                VmValue::Int(1_000),
+                VmValue::Int(500), // 500ms TTL → expires at 1_500.
+            ],
+        )
+        .expect("put");
+        // Within window → returns the verdict.
+        let fresh = call_sync(
+            &vm,
+            "__tool_hooks_classifier_cache_get",
+            &[
+                VmValue::String(Rc::from("scope:expiring")),
+                VmValue::Int(1_200),
+            ],
+        )
+        .expect("get fresh");
+        assert!(matches!(fresh, VmValue::Dict(_)));
+        // At/after expiry → nil (and the entry is evicted on read).
+        let expired = call_sync(
+            &vm,
+            "__tool_hooks_classifier_cache_get",
+            &[
+                VmValue::String(Rc::from("scope:expiring")),
+                VmValue::Int(1_600),
+            ],
+        )
+        .expect("get expired");
+        assert!(matches!(expired, VmValue::Nil));
+    }
+
+    #[test]
+    fn classifier_cache_rejects_empty_key() {
+        let vm = vm_with_stdlib();
+        let result = call_sync(
+            &vm,
+            "__tool_hooks_classifier_cache_get",
+            &[VmValue::String(Rc::from("")), VmValue::Int(0)],
+        );
+        let Err(VmError::Thrown(VmValue::String(message))) = result else {
+            panic!("expected thrown error, got {result:?}");
+        };
+        assert!(message.contains("non-empty"));
     }
 }

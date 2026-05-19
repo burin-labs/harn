@@ -1,0 +1,12 @@
+deny
+tool_hooks/llm_classifier
+error
+rm against /etc is dangerous
+rm -rf /etc/foo
+rm -rf /etc/foo
+true
+2
+tool_hook_classifier_verdict
+deny
+deny
+tool_denied

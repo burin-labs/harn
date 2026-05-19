@@ -743,6 +743,25 @@ pub(crate) const SIGNATURES: &[BuiltinSignature] = &[
         &[Param::new("name", TY_STRING), Param::new("result", TY_ANY)],
         TY_STRING,
     ),
+    BuiltinSignature::simple("__tool_hooks_classifier_cache_clear", &[], TY_NIL),
+    BuiltinSignature::simple(
+        "__tool_hooks_classifier_cache_get",
+        &[
+            Param::new("key", TY_STRING),
+            Param::optional("now_ms", TY_INT),
+        ],
+        TY_ANY,
+    ),
+    BuiltinSignature::simple(
+        "__tool_hooks_classifier_cache_put",
+        &[
+            Param::new("key", TY_STRING),
+            Param::new("value", TY_ANY),
+            Param::optional("now_ms", TY_INT),
+            Param::optional("ttl_ms", TY_INT),
+        ],
+        TY_NIL,
+    ),
     BuiltinSignature::simple(
         "tool_hooks_emit_audit",
         &[
