@@ -498,6 +498,10 @@ pub const STDLIB_SOURCES: &[StdlibSource] = &[
         source: include_str!("stdlib/oauth/client.harn"),
     },
     StdlibSource {
+        module: "oauth/device_flow",
+        source: include_str!("stdlib/oauth/device_flow.harn"),
+    },
+    StdlibSource {
         module: "oauth/redaction",
         source: include_str!("stdlib/oauth/redaction.harn"),
     },
