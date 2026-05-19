@@ -561,6 +561,38 @@ impl AgentEventSink for AcpAgentEventSink {
                     "update": update,
                 }));
             }
+            AgentEvent::ReminderEmitted {
+                session_id,
+                reminder_id,
+                tags,
+                body,
+                role_hint,
+                rendered_role,
+                source,
+                ttl_turns,
+            } => {
+                let mut update = serde_json::json!({
+                    "sessionUpdate": "reminder_emitted",
+                });
+                let mut harn_meta = serde_json::Map::new();
+                harn_meta.insert(
+                    "reminder".to_string(),
+                    serde_json::json!({
+                        "reminderId": reminder_id,
+                        "tags": tags,
+                        "body": body,
+                        "roleHint": role_hint,
+                        "renderedRole": rendered_role,
+                        "source": source,
+                        "ttlTurns": ttl_turns,
+                    }),
+                );
+                merge_harn_meta(&mut update, harn_meta);
+                self.write_notification(serde_json::json!({
+                    "sessionId": session_id,
+                    "update": update,
+                }));
+            }
             AgentEvent::Handoff {
                 session_id,
                 artifact_id,

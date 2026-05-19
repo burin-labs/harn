@@ -47,12 +47,21 @@ pub(crate) fn register_event_log_builtins(vm: &mut Vm) {
             .await
             .map_err(log_error)?;
         let topic_name = options.topic.as_str().to_string();
+        let kind_prefix = options.kind_prefix.clone();
         let (tx, rx) = tokio::sync::mpsc::channel::<Result<VmValue, VmError>>(1);
 
         tokio::task::spawn_local(async move {
             while let Some(next) = events.next().await {
                 let value = match next {
-                    Ok((event_id, event)) => Ok(event_to_value(&topic_name, event_id, event)),
+                    Ok((event_id, event)) => {
+                        if kind_prefix
+                            .as_deref()
+                            .is_some_and(|prefix| !event.kind.starts_with(prefix))
+                        {
+                            continue;
+                        }
+                        Ok(event_to_value(&topic_name, event_id, event))
+                    }
                     Err(error) => Err(log_error(error)),
                 };
                 if tx.send(value).await.is_err() {
@@ -92,6 +101,7 @@ fn register_event_log_namespace(vm: &mut Vm) {
 struct SubscribeOptions {
     topic: Topic,
     from_cursor: Option<u64>,
+    kind_prefix: Option<String>,
 }
 
 fn parse_subscribe_options(args: &[VmValue]) -> Result<SubscribeOptions, VmError> {
@@ -105,11 +115,21 @@ fn parse_subscribe_options(args: &[VmValue]) -> Result<SubscribeOptions, VmError
                     .or_else(|| options.get("from")),
                 "event_log.subscribe",
             )?;
-            Ok(SubscribeOptions { topic, from_cursor })
+            let kind_prefix = optional_string(
+                options.get("kind_prefix"),
+                "event_log.subscribe",
+                "kind_prefix",
+            )?;
+            Ok(SubscribeOptions {
+                topic,
+                from_cursor,
+                kind_prefix,
+            })
         }
         other => Ok(SubscribeOptions {
             topic: parse_topic(other, "event_log.subscribe")?,
             from_cursor: parse_cursor(args.get(1), "event_log.subscribe")?,
+            kind_prefix: None,
         }),
     }
 }
@@ -142,6 +162,21 @@ fn required_string(value: Option<&VmValue>, builtin: &str, name: &str) -> Result
             other.type_name()
         ))),
         None => Err(VmError::TypeError(format!("{builtin}: missing {name}"))),
+    }
+}
+
+fn optional_string(
+    value: Option<&VmValue>,
+    builtin: &str,
+    name: &str,
+) -> Result<Option<String>, VmError> {
+    match value {
+        None | Some(VmValue::Nil) => Ok(None),
+        Some(VmValue::String(value)) => Ok(Some(value.to_string())),
+        Some(other) => Err(VmError::TypeError(format!(
+            "{builtin}: {name} must be a string or nil, got {}",
+            other.type_name()
+        ))),
     }
 }
 

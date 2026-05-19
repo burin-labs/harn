@@ -54,6 +54,21 @@ fn run_receipt_agent(session, audit_options) {
 }
 
 pipeline default() {
+  clear_tool_hooks()
+  register_tool_hook(
+    {
+      pattern: "echo_receipt",
+      pre: { _event -> return {
+        reminder: {
+          body: "receipt hook reminder",
+          tags: ["receipt"],
+          dedupe_key: "receipt-hook",
+          ttl_turns: 1,
+          role_hint: "developer",
+        },
+      } },
+    },
+  )
   let local_session = "receipt-local-" + uuid()
   let local_path = path_join(".harn", "receipts", local_session + ".jsonl")
   if file_exists(local_path) {
@@ -67,6 +82,8 @@ pipeline default() {
   let records = read_jsonl(local_path, {strict: true})
   let receipt = records[0]
   let receipt_json = json_stringify(receipt)
+  let reminder_audit = receipt?.audit?.reminders ?? {}
+  let reminder_lifecycle = reminder_audit?.lifecycle ?? []
   let expected_args_hash = sha256("{\"message\":\"hello\",\"reason\":\"Need a receipt\"}")
   let expected_receipt_uri = "file://" + path_join(cwd(), local_path)
   let local_audit_events = local_captured.events.filter({ event -> event.type == "tool_call_audit" })
@@ -84,6 +101,16 @@ pipeline default() {
       + to_string(to_string(receipt?.audit?.receipt_uri ?? "") == expected_receipt_uri),
   )
   println("receipt_uri_in_audit_event=" + to_string(local_audit_uri == expected_receipt_uri))
+  println("reminder_audit_origin=" + to_string(reminder_audit?.origin ?? ""))
+  println("reminder_lifecycle_count=" + to_string(len(reminder_lifecycle)))
+  println("reminder_hook_event=" + to_string(reminder_lifecycle[0]?.hook_event ?? ""))
+  println(
+    "reminder_tool_call_id="
+      + to_string(reminder_lifecycle[0]?.tool_call_id == receipt.tool_call_id),
+  )
+  println("reminder_source=" + to_string(reminder_lifecycle[0]?.source ?? ""))
+  println("reminder_role_hint=" + to_string(reminder_lifecycle[0]?.role_hint ?? ""))
+  println("reminder_tag=" + to_string(reminder_lifecycle[0]?.tags[0] ?? ""))
   let cloud_session = "receipt-cloud-" + uuid()
   let captured = agent_capture_events(
     cloud_session,
@@ -95,4 +122,9 @@ pipeline default() {
   println(
     "cloud_omits_receipt_uri=" + to_string(receipt_events[0]?.receipt?.audit?.receipt_uri == nil),
   )
+  println(
+    "cloud_reminder_audit="
+      + to_string(receipt_events[0]?.receipt?.audit?.reminders?.origin == "tool_hook"),
+  )
+  clear_tool_hooks()
 }

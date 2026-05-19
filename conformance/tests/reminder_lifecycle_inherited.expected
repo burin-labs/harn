@@ -1,0 +1,9 @@
+transcript.reminder.injected
+inherited-reminder-1
+transcript.reminder.inherited
+parent-agent
+reminder-lifecycle-inherited-child
+all
+transcript.reminder.fired
+true
+system

@@ -620,6 +620,7 @@ mod tests {
             routing_policy: None,
             session_id: None,
             reminders: None,
+            reminder_lifecycle: Vec::new(),
             messages: Vec::new(),
             system: None,
             transcript_summary: None,

@@ -29,7 +29,8 @@ pub(crate) use transcript::transcript_to_vm_with_events;
 pub(crate) use transcript::{
     apply_reminder_post_turn, emit_reminder_lifecycle_event, is_transcript_value,
     new_transcript_with, new_transcript_with_events, normalize_transcript_asset,
-    reminder_from_event, reminder_from_vm_value, reminder_propagation_from_transcript,
+    reminder_from_event, reminder_from_vm_value, reminder_lifecycle_payload,
+    reminder_propagation_from_transcript,
     replace_reminder_payload, transcript_asset_list, transcript_drain_decision_event_from_value,
     transcript_event, transcript_event_from_message, transcript_events_from_messages,
     transcript_id, transcript_message_list, transcript_reminder_event_from_value,
@@ -47,9 +48,10 @@ pub(crate) use transcript::{
     transcript_suspension_event, DrainDecision, DrainDecisionAction, DrainDecisionItem,
     DrainDecisionItemCategory, ReminderPropagate, ReminderRoleHint, ReminderSource, Resumption,
     ResumptionInitiator, Suspension, SuspensionInitiator, SystemReminder,
-    DRAIN_DECISION_EVENT_KIND, REMINDER_DEDUPED_EVENT_KIND, REMINDER_EXPIRED_EVENT_KIND,
-    REMINDER_LIFECYCLE_TOPIC, RESUMPTION_EVENT_KIND, SUSPENSION_EVENT_KIND,
-    SYSTEM_REMINDER_EVENT_KIND,
+    DRAIN_DECISION_EVENT_KIND, REMINDER_DEDUPED_EVENT_KIND, REMINDER_DROPPED_EVENT_KIND,
+    REMINDER_EXPIRED_EVENT_KIND, REMINDER_FIRED_EVENT_KIND, REMINDER_INHERITED_EVENT_KIND,
+    REMINDER_INJECTED_EVENT_KIND, REMINDER_LIFECYCLE_TOPIC, REMINDER_PROVIDER_EVALUATED_EVENT_KIND,
+    RESUMPTION_EVENT_KIND, SUSPENSION_EVENT_KIND, SYSTEM_REMINDER_EVENT_KIND,
 };
 
 pub(super) const TRANSCRIPT_TYPE: &str = "transcript";

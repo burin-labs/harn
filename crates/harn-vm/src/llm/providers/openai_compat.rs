@@ -704,6 +704,7 @@ thinking_modes = ["enabled"]
             stream: false,
             provider_overrides: None,
             prefill: None,
+            reminder_lifecycle: Vec::new(),
         }
     }
 }

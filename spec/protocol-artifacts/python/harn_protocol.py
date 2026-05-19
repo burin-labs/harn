@@ -135,6 +135,7 @@ ACP_SESSION_UPDATES: tuple = (
     "hitl_resolved",
     "log",
     "progress",
+    "reminder_emitted",
     "skill_activated",
     "skill_deactivated",
     "skill_scope_tools",
@@ -151,6 +152,7 @@ HARN_ACP_SESSION_UPDATE_EXTENSIONS: tuple = (
     "hitl_resolved",
     "log",
     "progress",
+    "reminder_emitted",
     "skill_activated",
     "skill_deactivated",
     "skill_scope_tools",
@@ -358,6 +360,7 @@ class ACPSessionUpdate(str, Enum):
     HITL_RESOLVED = "hitl_resolved"
     LOG = "log"
     PROGRESS = "progress"
+    REMINDER_EMITTED = "reminder_emitted"
     SKILL_ACTIVATED = "skill_activated"
     SKILL_DEACTIVATED = "skill_deactivated"
     SKILL_SCOPE_TOOLS = "skill_scope_tools"

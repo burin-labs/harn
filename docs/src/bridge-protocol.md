@@ -53,6 +53,7 @@ are advertised during `initialize` under
 - `hitl_resolved`
 - `log`
 - `progress`
+- `reminder_emitted`
 - `skill_activated`
 - `skill_deactivated`
 - `skill_scope_tools`
@@ -113,11 +114,35 @@ that route on it keep working unchanged. Concretely:
 | `tool_search_result`   | `toolUseId`, `promoted`, `strategy`, `mode`                                                                                            |
 | `hitl_request`         | `requestId`, `kind`, `payload`                                                                                                         |
 | `hitl_resolved`        | `requestId`, `kind`, `outcome`                                                                                                         |
+| `reminder_emitted`     | `reminder`                                                                                                                             |
 
 Hosts migrating from pre-#905 builds must read these fields from
 `_meta.harn.<field>` instead of the update root. The fixture
 `crates/harn-serve/tests/fixtures/acp/session_update_extensions.json`
 pins the new wire shape verbatim.
+
+`reminder_emitted` is sent when a pending system reminder is rendered
+into the next model request. Its payload lives at
+`update._meta.harn.reminder`:
+
+```json
+{
+  "sessionUpdate": "reminder_emitted",
+  "_meta": {
+    "harn": {
+      "reminder": {
+        "reminderId": "reminder-1",
+        "tags": ["token_pressure"],
+        "body": "Refresh the compacted context before answering.",
+        "roleHint": "developer",
+        "renderedRole": "developer",
+        "source": "stdlib_provider",
+        "ttlTurns": 2
+      }
+    }
+  }
+}
+```
 
 Content extensions (`visible_text` and `visible_delta` on the
 `agent_message_chunk` content block, advertised via

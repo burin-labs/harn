@@ -157,6 +157,7 @@
         { "$ref": "#/$defs/ToolSearchQuery" },
         { "$ref": "#/$defs/ToolSearchResult" },
         { "$ref": "#/$defs/TranscriptCompacted" },
+        { "$ref": "#/$defs/ReminderEmitted" },
         { "$ref": "#/$defs/Handoff" },
         { "$ref": "#/$defs/FsWatch" },
         { "$ref": "#/$defs/WorkerUpdate" },
@@ -412,6 +413,57 @@
         "sessionUpdate": { "const": "transcript_compacted" },
         "mode": { "type": "string" },
         "strategy": { "type": "string" }
+      }
+    },
+    "ReminderEmitted": {
+      "type": "object",
+      "required": ["sessionUpdate", "_meta"],
+      "additionalProperties": false,
+      "properties": {
+        "sessionUpdate": { "const": "reminder_emitted" },
+        "_meta": {
+          "type": "object",
+          "required": ["harn"],
+          "additionalProperties": true,
+          "properties": {
+            "harn": {
+              "type": "object",
+              "required": ["reminder"],
+              "additionalProperties": true,
+              "properties": {
+                "reminder": {
+                  "type": "object",
+                  "required": [
+                    "reminderId",
+                    "tags",
+                    "body",
+                    "roleHint",
+                    "renderedRole",
+                    "source",
+                    "ttlTurns"
+                  ],
+                  "additionalProperties": true,
+                  "properties": {
+                    "reminderId": { "type": "string", "minLength": 1 },
+                    "tags": {
+                      "type": "array",
+                      "items": { "type": "string" }
+                    },
+                    "body": { "type": "string" },
+                    "roleHint": {
+                      "enum": ["system", "developer", "user_block", "ephemeral_cache"]
+                    },
+                    "renderedRole": { "enum": ["system", "developer", "user"] },
+                    "source": {
+                      "enum": ["stdlib_provider", "hook", "bridge", "in_pipeline", "inherited"]
+                    },
+                    "ttlTurns": { "type": ["integer", "null"] }
+                  }
+                }
+              }
+            }
+          }
+        }
       }
     },
     "Handoff": {

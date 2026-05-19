@@ -527,6 +527,19 @@ pub enum AgentEvent {
         estimated_tokens_after: usize,
         snapshot_asset_id: Option<String>,
     },
+    /// Emitted when a pending `system_reminder` is rendered into the
+    /// next provider request. ACP clients show these in a reminder lane
+    /// instead of mixing them into assistant text chunks.
+    ReminderEmitted {
+        session_id: String,
+        reminder_id: String,
+        tags: Vec<String>,
+        body: String,
+        role_hint: String,
+        rendered_role: String,
+        source: String,
+        ttl_turns: Option<i64>,
+    },
     Handoff {
         session_id: String,
         artifact_id: String,
@@ -723,6 +736,7 @@ impl AgentEvent {
             | Self::ToolSearchQuery { session_id, .. }
             | Self::ToolSearchResult { session_id, .. }
             | Self::TranscriptCompacted { session_id, .. }
+            | Self::ReminderEmitted { session_id, .. }
             | Self::Handoff { session_id, .. }
             | Self::FsWatch { session_id, .. }
             | Self::StagedWritesPending { session_id, .. }

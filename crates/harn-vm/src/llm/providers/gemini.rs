@@ -293,6 +293,7 @@ mod tests {
             provider_overrides: None,
             prefill: None,
             session_id: None,
+            reminder_lifecycle: Vec::new(),
         }
     }
 
@@ -338,6 +339,7 @@ mod tests {
             provider_overrides: None,
             prefill: None,
             session_id: None,
+            reminder_lifecycle: Vec::new(),
         };
         let body = GeminiProvider::build_request_body(&payload);
         assert_eq!(body["contents"][0]["parts"][0]["text"], "caption");
@@ -388,6 +390,7 @@ mod tests {
             provider_overrides: None,
             prefill: None,
             session_id: None,
+            reminder_lifecycle: Vec::new(),
         };
         payload.system = Some("system".to_string());
 
@@ -444,6 +447,7 @@ mod tests {
             provider_overrides: None,
             prefill: None,
             session_id: None,
+            reminder_lifecycle: Vec::new(),
         };
 
         let body = GeminiProvider::build_request_body(&payload);

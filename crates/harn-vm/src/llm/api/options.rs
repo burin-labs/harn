@@ -211,6 +211,64 @@ pub(crate) struct LlmRouteFallback {
     pub model: String,
 }
 
+/// Reminder lifecycle metadata carried to the transport boundary.
+///
+/// Option extraction decides how each reminder renders for the selected
+/// route; the API layer emits the lifecycle record only once preflight
+/// gates have passed and a request is about to be served.
+#[derive(Clone, Debug)]
+pub(crate) struct ReminderLifecycleEmission {
+    pub session_id: Option<String>,
+    pub turn_number: i64,
+    pub reminder_id: String,
+    pub tags: Vec<String>,
+    pub body: String,
+    pub dedupe_key: Option<String>,
+    pub source: String,
+    pub role_hint: String,
+    pub rendered_role: String,
+    pub ttl_turns: Option<i64>,
+    pub propagate: String,
+    pub originating_agent_id: Option<String>,
+}
+
+impl ReminderLifecycleEmission {
+    pub(crate) fn emit(&self) {
+        let payload = serde_json::json!({
+            "session_id": &self.session_id,
+            "turn_number": self.turn_number,
+            "reminder_id": &self.reminder_id,
+            "tags": &self.tags,
+            "dedupe_key": &self.dedupe_key,
+            "source": &self.source,
+            "role_hint": &self.role_hint,
+            "rendered_role": &self.rendered_role,
+            "ttl_turns": &self.ttl_turns,
+            "propagate": &self.propagate,
+            "originating_agent_id": &self.originating_agent_id,
+        });
+        crate::llm::helpers::emit_reminder_lifecycle_event(
+            crate::llm::helpers::REMINDER_FIRED_EVENT_KIND,
+            payload,
+        );
+
+        if let Some(session_id) = self.session_id.as_deref().filter(|id| !id.is_empty()) {
+            crate::llm::agent_runtime::emit_agent_event_sync(
+                &crate::agent_events::AgentEvent::ReminderEmitted {
+                    session_id: session_id.to_string(),
+                    reminder_id: self.reminder_id.clone(),
+                    tags: self.tags.clone(),
+                    body: self.body.clone(),
+                    role_hint: self.role_hint.clone(),
+                    rendered_role: self.rendered_role.clone(),
+                    source: self.source.clone(),
+                    ttl_turns: self.ttl_turns,
+                },
+            );
+        }
+    }
+}
+
 /// All options for an LLM API call, extracted once from user-facing args.
 #[derive(Clone)]
 pub(crate) struct LlmCallOptions {
@@ -244,6 +302,10 @@ pub(crate) struct LlmCallOptions {
     /// not evaluate reminder providers.
     #[allow(dead_code)]
     pub reminders: Option<serde_json::Value>,
+    /// Pending reminder lifecycle records for this call. The API layer
+    /// emits them after preflight validation succeeds and before the
+    /// request is served by a mock, fake, replay, or real provider.
+    pub reminder_lifecycle: Vec<ReminderLifecycleEmission>,
 
     // --- Conversation ---
     pub messages: Vec<serde_json::Value>,
@@ -425,11 +487,22 @@ pub(crate) struct LlmRequestPayload {
     /// can fire `AgentEvent::ToolCall` / `AgentEvent::ToolCallUpdate`
     /// against the right session. `None` for non-agent-loop calls.
     pub session_id: Option<String>,
+    /// See `LlmCallOptions::reminder_lifecycle`. Skipped in serialized
+    /// transport snapshots because the prompt already contains the rendered
+    /// reminder text and this is local audit routing metadata.
+    #[serde(skip_serializing)]
+    pub reminder_lifecycle: Vec<ReminderLifecycleEmission>,
 }
 
 impl LlmRequestPayload {
     pub(crate) fn resolve_timeout(&self) -> u64 {
         resolve_timeout(self.timeout)
+    }
+
+    pub(crate) fn emit_reminder_lifecycle(&self) {
+        for reminder in &self.reminder_lifecycle {
+            reminder.emit();
+        }
     }
 }
 
@@ -469,6 +542,7 @@ impl From<&LlmCallOptions> for LlmRequestPayload {
             provider_overrides: opts.provider_overrides.clone(),
             prefill: opts.prefill.clone(),
             session_id: opts.session_id.clone(),
+            reminder_lifecycle: opts.reminder_lifecycle.clone(),
         };
         apply_thinking_disable_directive(&mut payload);
         payload
@@ -527,6 +601,7 @@ pub(crate) fn base_opts(provider: &str) -> LlmCallOptions {
         routing_policy: None,
         session_id: None,
         reminders: None,
+        reminder_lifecycle: Vec::new(),
         messages: vec![serde_json::json!({"role": "user", "content": "hello"})],
         system: None,
         transcript_summary: Some("summary".to_string()),

@@ -539,6 +539,7 @@ mod tests {
             provider_overrides: None,
             prefill: None,
             session_id: None,
+            reminder_lifecycle: Vec::new(),
         }
     }
 

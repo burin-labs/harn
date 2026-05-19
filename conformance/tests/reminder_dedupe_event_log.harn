@@ -9,11 +9,15 @@ pipeline main() {
     {body: "new reminder", dedupe_key: "context-slot", ttl_turns: 3},
   )
   let stream = event_log.subscribe({topic: topic, from_cursor: cursor})
+  let injected = stream.next().value
   let logged = stream.next().value
   println(second.deduped_count)
+  println(injected.kind)
   println(logged.kind)
   println(logged.payload.dedupe_key)
   println(logged.payload.reminder_id == second.reminder_id)
+  println(logged.payload.replacing_id == second.reminder_id)
+  println(logged.payload.replaced_id == first.reminder_id)
   println(logged.payload.dropped_count)
   println(len(logged.payload.dropped_reminder_ids))
 }

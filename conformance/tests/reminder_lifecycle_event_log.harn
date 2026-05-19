@@ -1,0 +1,37 @@
+pipeline main() {
+  let topic = "transcript.reminder.lifecycle"
+  let cursor = event_log.latest(topic)
+  let first = transcript
+    .inject_reminder(
+    transcript(),
+    {body: "first", tags: ["lifecycle"], dedupe_key: "slot", ttl_turns: 2},
+  )
+  let second = transcript
+    .inject_reminder(
+    first.transcript,
+    {body: "second", tags: ["lifecycle"], dedupe_key: "slot", ttl_turns: 3},
+  )
+  let _cleared = transcript.clear_reminders(second.transcript, {id: second.reminder_id})
+  let stream = event_log
+    .subscribe({topic: topic, from_cursor: cursor, kind_prefix: "transcript.reminder."})
+  let first_injected = stream.next().value
+  let deduped = stream.next().value
+  let second_injected = stream.next().value
+  let cleared = stream.next().value
+  println(first_injected.kind)
+  println(first_injected.payload.reminder_id == first.reminder_id)
+  println(first_injected.payload.tags[0])
+  println(first_injected.payload.source)
+  println(first_injected.payload.role_hint)
+  println(first_injected.payload.propagate)
+  println(contains(json_stringify(first_injected.payload), "\"session_id\""))
+  println(contains(json_stringify(first_injected.payload), "\"agent_id\""))
+  println(deduped.kind)
+  println(deduped.payload.replaced_id == first.reminder_id)
+  println(deduped.payload.replacing_id == second.reminder_id)
+  println(second_injected.kind)
+  println(second_injected.payload.reminder_id == second.reminder_id)
+  println(cleared.kind)
+  println(cleared.payload.reason)
+  println(cleared.payload.reminder_id == second.reminder_id)
+}

@@ -456,6 +456,7 @@ pub(crate) const LLM_CALL_OPTIONS: Ty = Ty::Shape(&[
     // Legacy/runtime-adjacent keys handled at the boundary.
     ShapeFieldDescriptor::optional("transcript", TY_ANY),
     ShapeFieldDescriptor::optional("metadata", TY_DICT),
+    ShapeFieldDescriptor::optional("_turn_iteration", TY_INT),
 ]);
 
 // ---------------------------------------------------------------------------

@@ -104,7 +104,7 @@ Required exports for a pure-Harn connector package:
 
 Connector-only builtins available during connector export execution: `secret_get`, `event_log_emit`, and `metrics_inc`. The hot-path `normalize_inbound` effect policy rejects network calls, LLM calls, process execution, host calls, MCP calls, and ambient filesystem/project access.
 
-Runtime scripts can observe EventLog topics directly with `event_log.subscribe({topic, from_cursor})`, which returns a `Stream<dict>` of `{id, cursor, topic, kind, payload, headers, occurred_at_ms}` records. Use `event_log.latest(topic)` before subscribing to tail new events only, or persist the `cursor` field to resume after a reconnect.
+Runtime scripts can observe EventLog topics directly with `event_log.subscribe({topic, from_cursor, kind_prefix?})`, which returns a `Stream<dict>` of `{id, cursor, topic, kind, payload, headers, occurred_at_ms}` records. Use `event_log.latest(topic)` before subscribing to tail new events only, pass `kind_prefix` to receive only matching event kinds, or persist the `cursor` field to resume after a reconnect.
 
 ## Package fixtures
 

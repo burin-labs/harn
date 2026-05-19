@@ -7,9 +7,10 @@ use std::collections::BTreeMap;
 use crate::value::{VmError, VmValue};
 
 use super::{
-    opt_bool, opt_float, opt_int, opt_str, provider_key_available, reminder_from_event,
-    resolve_api_key, vm_messages_to_json, vm_resolve_model, vm_resolve_provider,
-    vm_value_dict_to_json, vm_value_to_json, ReminderRoleHint, SystemReminder,
+    emit_reminder_lifecycle_event, opt_bool, opt_float, opt_int, opt_str, provider_key_available,
+    reminder_from_event, resolve_api_key, vm_messages_to_json, vm_resolve_model,
+    vm_resolve_provider, vm_value_dict_to_json, vm_value_to_json, ReminderRoleHint, SystemReminder,
+    REMINDER_DROPPED_EVENT_KIND, SYSTEM_REMINDER_EVENT_KIND,
 };
 
 pub(crate) fn extract_json(text: &str) -> String {
@@ -822,6 +823,19 @@ pub(crate) enum RenderedReminder {
     Message(serde_json::Value),
 }
 
+impl RenderedReminder {
+    fn rendered_role(&self) -> String {
+        match self {
+            Self::SystemText(_) => "system".to_string(),
+            Self::Message(message) => message
+                .get("role")
+                .and_then(serde_json::Value::as_str)
+                .unwrap_or("system")
+                .to_string(),
+        }
+    }
+}
+
 fn escape_xml_text(input: &str) -> String {
     input
         .replace('&', "&amp;")
@@ -904,6 +918,46 @@ pub(crate) fn render_pending_reminders(
         .collect()
 }
 
+fn rendered_reminder_lifecycle(
+    session_id: Option<&str>,
+    turn_number: i64,
+    reminders: &[SystemReminder],
+    rendered: &[RenderedReminder],
+) -> Vec<crate::llm::api::ReminderLifecycleEmission> {
+    reminders
+        .iter()
+        .zip(rendered.iter())
+        .map(|(reminder, rendered)| {
+            let rendered_role = rendered.rendered_role();
+            crate::llm::api::ReminderLifecycleEmission {
+                session_id: session_id.map(str::to_string),
+                turn_number,
+                reminder_id: reminder.id.clone(),
+                tags: reminder.tags.clone(),
+                body: reminder.body.clone(),
+                dedupe_key: reminder.dedupe_key.clone(),
+                source: reminder.source.as_str().to_string(),
+                role_hint: reminder.role_hint.as_str().to_string(),
+                rendered_role,
+                ttl_turns: reminder.ttl_turns,
+                propagate: reminder.propagate.as_str().to_string(),
+                originating_agent_id: reminder.originating_agent_id.clone(),
+            }
+        })
+        .collect()
+}
+
+fn emit_dropped_reminder_lifecycle(session_id: &str, reminder_id: String, reason: &str) {
+    emit_reminder_lifecycle_event(
+        REMINDER_DROPPED_EVENT_KIND,
+        serde_json::json!({
+            "session_id": session_id,
+            "reminder_id": reminder_id,
+            "reason": reason,
+        }),
+    );
+}
+
 fn pending_reminders_from_session(session_id: Option<&str>) -> Vec<SystemReminder> {
     let Some(session_id) = session_id.filter(|id| !id.is_empty()) else {
         return Vec::new();
@@ -915,10 +969,46 @@ fn pending_reminders_from_session(session_id: Option<&str>) -> Vec<SystemReminde
         return Vec::new();
     };
     let events = dict.get("events").or_else(|| dict.get("messages"));
-    match events {
-        Some(VmValue::List(items)) => items.iter().filter_map(reminder_from_event).collect(),
-        _ => Vec::new(),
+    let Some(VmValue::List(items)) = events else {
+        return Vec::new();
+    };
+    let mut reminders = Vec::new();
+    let mut invalid_count = 0;
+    for event in items.iter() {
+        if let Some(reminder) = reminder_from_event(event) {
+            if reminder.body.trim().is_empty() {
+                invalid_count += 1;
+                emit_dropped_reminder_lifecycle(session_id, reminder.id, "invalid");
+                continue;
+            }
+            reminders.push(reminder);
+            continue;
+        }
+        let Some(dict) = event.as_dict() else {
+            continue;
+        };
+        if dict.get("kind").map(VmValue::display).as_deref() != Some(SYSTEM_REMINDER_EVENT_KIND) {
+            continue;
+        }
+        invalid_count += 1;
+        let reminder_id = dict
+            .get("reminder")
+            .and_then(VmValue::as_dict)
+            .and_then(|reminder| reminder.get("id"))
+            .map(VmValue::display)
+            .filter(|id| !id.is_empty())
+            .or_else(|| {
+                dict.get("id")
+                    .map(VmValue::display)
+                    .filter(|id| !id.is_empty())
+            })
+            .unwrap_or_else(|| "invalid-reminder".to_string());
+        emit_dropped_reminder_lifecycle(session_id, reminder_id, "invalid");
     }
+    if invalid_count > 0 {
+        crate::agent_sessions::prune_invalid_reminder_events(session_id);
+    }
+    reminders
 }
 
 fn prepend_content_blocks(content: &mut serde_json::Value, mut blocks: Vec<serde_json::Value>) {
@@ -1140,6 +1230,12 @@ pub(crate) fn extract_llm_options(
         .or_else(crate::agent_sessions::current_session_id);
     let pending_reminders = pending_reminders_from_session(session_id.as_deref());
     let rendered_reminders = render_pending_reminders(&caps, &pending_reminders);
+    let reminder_lifecycle = rendered_reminder_lifecycle(
+        session_id.as_deref(),
+        opt_int(&options, "_turn_iteration").unwrap_or(0),
+        &pending_reminders,
+        &rendered_reminders,
+    );
     let system =
         compose_system_prompt_with_reminders(system, options.as_ref(), &rendered_reminders)?;
     let enforce_capability_gates = !crate::llm::mock::cli_llm_mock_replay_active()
@@ -1563,6 +1659,7 @@ pub(crate) fn extract_llm_options(
         routing_policy,
         session_id,
         reminders,
+        reminder_lifecycle,
         messages,
         system,
         transcript_summary: None,

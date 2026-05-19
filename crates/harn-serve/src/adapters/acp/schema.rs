@@ -24,6 +24,7 @@ pub const HARN_SESSION_UPDATE_EXTENSIONS: &[&str] = &[
     "hitl_resolved",
     "log",
     "progress",
+    "reminder_emitted",
     "skill_activated",
     "skill_deactivated",
     "skill_scope_tools",

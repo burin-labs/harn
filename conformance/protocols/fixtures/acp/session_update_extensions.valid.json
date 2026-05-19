@@ -23,6 +23,29 @@
       "params": {
         "sessionId": "session-1",
         "update": {
+          "sessionUpdate": "reminder_emitted",
+          "_meta": {
+            "harn": {
+              "reminder": {
+                "reminderId": "reminder-1",
+                "tags": ["token_pressure"],
+                "body": "Refresh the compacted context before answering.",
+                "roleHint": "developer",
+                "renderedRole": "developer",
+                "source": "stdlib_provider",
+                "ttlTurns": 2
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "jsonrpc": "2.0",
+      "method": "session/update",
+      "params": {
+        "sessionId": "session-1",
+        "update": {
           "sessionUpdate": "session_truncated",
           "keptTurnCount": 1,
           "removedTurnCount": 2,

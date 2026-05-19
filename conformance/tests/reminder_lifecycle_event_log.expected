@@ -1,0 +1,16 @@
+transcript.reminder.injected
+true
+lifecycle
+in_pipeline
+system
+session
+true
+true
+transcript.reminder.deduped
+true
+true
+transcript.reminder.injected
+true
+transcript.reminder.expired
+cleared
+true

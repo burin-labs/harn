@@ -49,7 +49,8 @@ pub(crate) use openai_normalize::normalize_openai_style_messages;
 pub(crate) use options::{
     push_unique_anthropic_beta_feature, DeltaSender, LlmCallOptions, LlmRequestPayload,
     LlmRouteAlternative, LlmRouteFallback, LlmRoutePolicy, LlmRoutingDecision, OutputFormat,
-    ReasoningEffort, ThinkingConfig, ToolSearchConfig, ToolSearchMode, ToolSearchVariant,
+    ReasoningEffort, ReminderLifecycleEmission, ThinkingConfig, ToolSearchConfig, ToolSearchMode,
+    ToolSearchVariant,
 };
 pub use readiness::{
     probe_openai_compatible_model, selected_model_for_provider, supports_model_readiness_probe,
@@ -108,6 +109,22 @@ pub(crate) async fn vm_call_llm_full_streaming_offthread(
 ) -> Result<LlmResult, VmError> {
     super::cost::check_llm_preflight_budget(opts)?;
     let request = LlmRequestPayload::from(opts);
+    let cached = super::trigger_predicate::lookup_cached_result(&request).is_some();
+    let intercepted = crate::llm::providers::MockProvider::should_intercept(&request.provider)
+        || crate::llm::fake::FakeLlmProvider::should_intercept(&request.provider);
+    let replay_mode = get_replay_mode();
+    if !cached && !intercepted && replay_mode == LlmReplayMode::Replay {
+        let hash = fixture_hash(&request.model, &request.messages, request.system.as_deref());
+        if load_fixture(&hash).is_none() {
+            return Err(VmError::Thrown(VmValue::String(Rc::from(format!(
+                "No fixture found for LLM call (hash: {hash}). Run with --record first."
+            )))));
+        }
+    }
+    if !cached && !intercepted && replay_mode != LlmReplayMode::Replay {
+        super::ensure_real_llm_allowed(&request.provider)?;
+    }
+    request.emit_reminder_lifecycle();
     let result = tokio::task::spawn(async move {
         vm_call_llm_full_inner_offthread(&request, Some(delta_tx)).await
     })
@@ -140,6 +157,7 @@ async fn vm_call_llm_full_inner_request(
     delta_tx: Option<DeltaSender>,
 ) -> Result<LlmResult, VmError> {
     if let Some(result) = super::trigger_predicate::lookup_cached_result(request) {
+        request.emit_reminder_lifecycle();
         record_cli_llm_result(&result);
         if let Some(tx) = delta_tx {
             if !result.text.is_empty() {
@@ -150,6 +168,7 @@ async fn vm_call_llm_full_inner_request(
     }
 
     if crate::llm::providers::MockProvider::should_intercept(&request.provider) {
+        request.emit_reminder_lifecycle();
         let result = mock_llm_response(
             &request.messages,
             request.system.as_deref(),
@@ -172,6 +191,7 @@ async fn vm_call_llm_full_inner_request(
     if crate::llm::fake::FakeLlmProvider::should_intercept(&request.provider) {
         // Bypass fixture/replay so the script-driven fake never collides
         // with HARN_LLM_REPLAY/RECORD being set from an outer harness.
+        request.emit_reminder_lifecycle();
         let result = crate::llm::fake::FakeLlmProvider
             .chat_impl(request, delta_tx)
             .await?;
@@ -185,6 +205,7 @@ async fn vm_call_llm_full_inner_request(
 
     if replay_mode == LlmReplayMode::Replay {
         if let Some(result) = load_fixture(&hash) {
+            request.emit_reminder_lifecycle();
             super::trigger_predicate::note_result(request, &result);
             return Ok(result);
         }
@@ -194,6 +215,7 @@ async fn vm_call_llm_full_inner_request(
     }
 
     super::ensure_real_llm_allowed(&request.provider)?;
+    request.emit_reminder_lifecycle();
 
     let result = vm_call_llm_api(request, delta_tx).await;
 

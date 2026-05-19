@@ -7,13 +7,14 @@ use harn_parser::diagnostic_codes::Code;
 
 use super::helpers::{
     emit_reminder_lifecycle_event, extract_llm_options, is_transcript_value, new_transcript_with,
-    new_transcript_with_events, normalize_transcript_asset, transcript_asset_list,
-    transcript_drain_decision_event_from_value, transcript_event, transcript_id,
-    transcript_message_list, transcript_reminder_event, transcript_reminder_event_from_value,
-    transcript_resumption_event_from_value, transcript_summary_text,
-    transcript_suspension_event_from_value, vm_add_role_message, vm_message_value,
-    vm_value_to_json, ReminderPropagate, ReminderRoleHint, ReminderSource, SystemReminder,
-    REMINDER_DEDUPED_EVENT_KIND, SYSTEM_REMINDER_EVENT_KIND,
+    new_transcript_with_events, normalize_transcript_asset, reminder_from_event,
+    reminder_lifecycle_payload, transcript_asset_list, transcript_drain_decision_event_from_value,
+    transcript_event, transcript_id, transcript_message_list, transcript_reminder_event,
+    transcript_reminder_event_from_value, transcript_resumption_event_from_value,
+    transcript_summary_text, transcript_suspension_event_from_value, vm_add_role_message,
+    vm_message_value, vm_value_to_json, ReminderPropagate, ReminderRoleHint, ReminderSource,
+    SystemReminder, REMINDER_DEDUPED_EVENT_KIND, REMINDER_EXPIRED_EVENT_KIND,
+    REMINDER_INJECTED_EVENT_KIND, SYSTEM_REMINDER_EVENT_KIND,
 };
 
 const INJECT_REMINDER_KEYS: &[&str] = &[
@@ -659,6 +660,7 @@ fn transcript_inject_reminder_builtin(args: &[VmValue]) -> Result<VmValue, VmErr
 
     let reminder_id = reminder.id.clone();
     let reminder_event = transcript_reminder_event(&reminder);
+    let transcript_id = transcript_id(transcript);
     let next = rebuild_transcript_with_preserved_events(
         transcript,
         transcript_message_list(transcript)?,
@@ -674,14 +676,22 @@ fn transcript_inject_reminder_builtin(args: &[VmValue]) -> Result<VmValue, VmErr
         emit_reminder_lifecycle_event(
             REMINDER_DEDUPED_EVENT_KIND,
             serde_json::json!({
-                "transcript_id": transcript_id(transcript),
+                "transcript_id": &transcript_id,
                 "reminder_id": &reminder_id,
+                "replacing_id": &reminder_id,
+                "replaced_id": deduped_reminder_ids.first(),
+                "replaced_ids": &deduped_reminder_ids,
                 "dedupe_key": &reminder.dedupe_key,
                 "dropped_reminder_ids": &deduped_reminder_ids,
                 "dropped_count": dropped_count,
             }),
         );
     }
+
+    emit_reminder_lifecycle_event(
+        REMINDER_INJECTED_EVENT_KIND,
+        reminder_lifecycle_payload(transcript_id.as_deref(), &reminder),
+    );
 
     Ok(VmValue::Dict(Rc::new(BTreeMap::from([
         ("transcript".to_string(), next),
@@ -704,10 +714,14 @@ fn transcript_clear_reminders_builtin(args: &[VmValue]) -> Result<VmValue, VmErr
     let selector = parse_clear_reminder_selector(options, context)?;
 
     let mut removed_count = 0_i64;
+    let mut removed = Vec::new();
     let mut preserved = Vec::new();
     for event in transcript_extra_events(transcript) {
         if reminder_payload(&event).is_some_and(|payload| selector.matches(payload)) {
             removed_count += 1;
+            if let Some(reminder) = reminder_from_event(&event) {
+                removed.push(reminder);
+            }
         } else {
             preserved.push(event);
         }
@@ -722,6 +736,18 @@ fn transcript_clear_reminders_builtin(args: &[VmValue]) -> Result<VmValue, VmErr
         Vec::new(),
         transcript_state(transcript),
     );
+
+    let transcript_id = transcript_id(transcript);
+    for reminder in &removed {
+        let mut payload = reminder_lifecycle_payload(transcript_id.as_deref(), reminder);
+        if let Some(obj) = payload.as_object_mut() {
+            obj.insert(
+                "reason".to_string(),
+                serde_json::Value::String("cleared".to_string()),
+            );
+        }
+        emit_reminder_lifecycle_event(REMINDER_EXPIRED_EVENT_KIND, payload);
+    }
 
     Ok(VmValue::Dict(Rc::new(BTreeMap::from([
         ("transcript".to_string(), next),

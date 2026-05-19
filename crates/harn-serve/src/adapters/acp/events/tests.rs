@@ -173,6 +173,16 @@ fn extension_fixture_events() -> Vec<AgentEvent> {
             estimated_tokens_after: 40,
             snapshot_asset_id: Some("asset-1".to_string()),
         },
+        AgentEvent::ReminderEmitted {
+            session_id: "session-1".to_string(),
+            reminder_id: "reminder-1".to_string(),
+            tags: vec!["token_pressure".to_string()],
+            body: "Refresh the compacted context before answering.".to_string(),
+            role_hint: "developer".to_string(),
+            rendered_role: "developer".to_string(),
+            source: "stdlib_provider".to_string(),
+            ttl_turns: Some(2),
+        },
         AgentEvent::Handoff {
             session_id: "session-1".to_string(),
             artifact_id: "artifact-1".to_string(),
@@ -1283,6 +1293,7 @@ async fn vendor_extension_session_update_fields_live_under_meta_harn() {
                 "snapshotAssetId",
             ],
         ),
+        ("reminder_emitted", &["reminder"]),
         ("handoff", &["handoffId", "artifactId", "handoff"]),
         ("fs_watch", &["subscriptionId", "events"]),
         (

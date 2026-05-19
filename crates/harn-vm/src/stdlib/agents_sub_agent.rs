@@ -320,6 +320,26 @@ fn seed_child_reminder_propagation(spec: &SubAgentRunSpec) -> Result<(), VmError
     for reminder in &spec.reminder_propagation {
         crate::agent_sessions::inject_reminder(&spec.session_id, reminder.clone())
             .map_err(VmError::Runtime)?;
+        let mut payload =
+            crate::llm::helpers::reminder_lifecycle_payload(Some(&spec.session_id), reminder);
+        if let Some(obj) = payload.as_object_mut() {
+            obj.insert(
+                "originating_agent_id".to_string(),
+                reminder
+                    .originating_agent_id
+                    .as_ref()
+                    .map(|id| serde_json::Value::String(id.clone()))
+                    .unwrap_or(serde_json::Value::Null),
+            );
+            obj.insert(
+                "sub_agent_id".to_string(),
+                serde_json::Value::String(spec.session_id.clone()),
+            );
+        }
+        crate::llm::helpers::emit_reminder_lifecycle_event(
+            crate::llm::helpers::REMINDER_INHERITED_EVENT_KIND,
+            payload,
+        );
     }
     Ok(())
 }
