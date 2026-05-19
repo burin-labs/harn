@@ -1,0 +1,75 @@
+import { lifecycle_audit_log_take } from "std/lifecycle"
+import "std/triggers"
+
+/**
+ * CH-08 (#1879): ReminderInject (#1876) with `target: "current"` resolves
+ * against the active agent-session stack at dispatch time. When the trigger
+ * fires *outside* any agent session (e.g. ambient channel emit with no
+ * agent_loop on the stack), `current_session_id()` returns `None` and the
+ * dispatcher drops the inject with a `target_missing` audit entry — the
+ * same graceful drop semantics as a concrete-but-unknown target. This is
+ * the failure-mode contract for the "current" target form: it never
+ * crashes the dispatcher, even when there is no session to inject into.
+ * Successful current-session injection is exercised at the integration
+ * layer (via agent_loop, which pushes onto the current-session stack).
+ */
+pipeline test(task) {
+  let _ = lifecycle_audit_log_take()
+  let unique = to_string(to_int(timestamp())) + "-" + to_string(random_int(100000, 999999))
+  let handle: TriggerHandle = trigger_register(
+    {
+      id: "trigger-channel-reminder-current-" + unique,
+      kind: "channel.emit",
+      provider: "channel",
+      autonomy_tier: "act_auto",
+      handler: ReminderInject(
+        {
+          target: "current",
+          body: "Heads up: {{ event.provider_payload.name }} just fired.",
+          tags: ["channel_reminder"],
+        },
+      ),
+      when: nil,
+      retry: nil,
+      match: {events: ["channel:ch.reminder.current.input"]},
+      events: nil,
+      dedupe_key: nil,
+      filter: nil,
+      budget: nil,
+      manifest_path: nil,
+      package_name: "conformance",
+    },
+  )
+  let dispatch = trigger_fire(
+    handle,
+    {
+      provider: "channel",
+      kind: "channel.emit",
+      headers: {x_delivery: "evt-" + unique},
+      payload: {name: "ch.reminder.current.input"},
+    },
+  )
+  // Dispatch itself succeeds (no crash); the inject is dropped with a
+  // structured `target_missing` outcome and a matching lifecycle audit.
+  println(dispatch.status == "dispatched")
+  println(dispatch.result?.status == "dropped")
+  println(dispatch.result?.reason == "target_missing")
+  println(dispatch.result?.target_kind == "current")
+  let audits = lifecycle_audit_log_take()
+  var inject_audit_count = 0
+  var outcome = ""
+  var reason = ""
+  var target_kind = ""
+  for audit in audits {
+    if audit.kind == "triggers.reminder_inject.audit" {
+      inject_audit_count = inject_audit_count + 1
+      outcome = audit.payload.outcome
+      reason = audit.payload.reason
+      target_kind = audit.payload.target_kind
+    }
+  }
+  println(inject_audit_count)
+  println(outcome)
+  println(reason)
+  println(target_kind)
+}

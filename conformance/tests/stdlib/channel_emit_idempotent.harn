@@ -1,0 +1,45 @@
+import "std/triggers"
+
+/**
+ * CH-08 (#1879): a duplicate `emit_channel(name, payload, {id: ...})` with the
+ * same explicit event id is a no-op for trigger fan-out. The first emit fires
+ * the handler exactly once; the second emit returns `duplicate=true` and does
+ * NOT re-invoke any matching trigger binding. This is the user-facing
+ * idempotency contract for channels: producers can safely retry an emit
+ * without double-dispatching downstream handlers.
+ */
+fn handle_event(event) {
+  emit_channel("ch.idem.fired", {seq: event.provider_payload.payload.seq})
+}
+
+pipeline test(task) {
+  let unique = to_string(to_int(timestamp())) + "-" + to_string(random_int(100000, 999999))
+  let _ = trigger_register(
+    {
+      id: "channel-idempotent-" + unique,
+      kind: "channel.emit",
+      provider: "channel",
+      autonomy_tier: "act_auto",
+      handler: handle_event,
+      when: nil,
+      retry: nil,
+      match: {events: ["channel:ch.idem.input"]},
+      events: nil,
+      dedupe_key: nil,
+      filter: nil,
+      budget: nil,
+      manifest_path: nil,
+      package_name: "conformance",
+    },
+  )
+  let event_id = "fixed-emit-" + unique
+  let first = emit_channel("ch.idem.input", {seq: 1}, {id: event_id})
+  let second = emit_channel("ch.idem.input", {seq: 2}, {id: event_id})
+  println(first.duplicate)
+  println(second.duplicate)
+  println(first.event_id == second.event_id)
+  // Only one fired handler invocation despite two emits.
+  let fired = channel_events("ch.idem.fired")
+  println(len(fired))
+  println(fired[0].payload.seq)
+}

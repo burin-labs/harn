@@ -1,0 +1,5 @@
+before-threshold:0
+after-threshold:1
+Batch landed.
+batched_reminder
+after-second-batch:2

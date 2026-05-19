@@ -1,0 +1,24 @@
+/**
+ * CH-08 (#1879): pipeline-scoped emits with an explicit `pipeline_id` route
+ * through the same `channels.pipeline.<id>.<name>` topic, so sibling
+ * readers in the same pipeline see each others' emits. Distinct
+ * `pipeline_id` values are isolated — the resolver namespaces by id, so a
+ * sibling reader on pipeline P2 cannot see emits made on P1.
+ */
+pipeline default() {
+  let _ = emit_channel("stage.done", {stage: "build"}, {scope: "pipeline", pipeline_id: "pipe-A", id: "pA-1"})
+  let _ = emit_channel("stage.done", {stage: "test"}, {scope: "pipeline", pipeline_id: "pipe-A", id: "pA-2"})
+  let _ = emit_channel("stage.done", {stage: "build"}, {scope: "pipeline", pipeline_id: "pipe-B", id: "pB-1"})
+  let pipe_a = channel_events("stage.done", {scope: "pipeline", pipeline_id: "pipe-A"})
+  let pipe_b = channel_events("stage.done", {scope: "pipeline", pipeline_id: "pipe-B"})
+  let pipe_c = channel_events("stage.done", {scope: "pipeline", pipeline_id: "pipe-C"})
+  println(len(pipe_a))
+  println(pipe_a[0].payload.stage)
+  println(pipe_a[1].payload.stage)
+  println(pipe_a[0].scope)
+  println(pipe_a[0].scope_id)
+  println(len(pipe_b))
+  println(pipe_b[0].payload.stage)
+  // Pipeline C never emitted — its sibling view is empty.
+  println(len(pipe_c))
+}
