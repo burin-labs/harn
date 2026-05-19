@@ -2,19 +2,21 @@
  * Script performs deterministic work under a mocked LLM and paused
  * clock. The .testbench-tape sidecar contains the golden tape from the
  * first run; the conformance runner records a fresh tape on every
- * subsequent run and compares it byte-for-byte against the golden
- * version via the fidelity oracle.
+ * subsequent run and compares the user-script phase byte-for-byte
+ * against the golden version via the fidelity oracle.
  *
- * A byte-identical comparison passing means: given the same fixture and
- * the same paused clock, the runtime always produces the same sequence
- * of host-boundary events.
+ * A passing comparison means: given the same fixture and the same
+ * paused clock, the runtime always produces the same user-script
+ * sequence of host-boundary events. Runtime-finalize records are
+ * checked semantically so internal lifecycle observability can evolve
+ * without regenerating this fixture.
  *
- * REGENERATING THE TAPE: when a deliberate runtime change adds or
- * removes a host-boundary record (e.g. a new lifecycle hook reads the
- * clock), this fixture fails with a "missing_in_recorded" /
- * "missing_in_replay" divergence. To regenerate: temporarily edit
- * crates/harn-cli/src/commands/test.rs to `std::fs::copy(tape_path,
- * "/tmp/actual.tape")` on divergence, run the filter, then
+ * REGENERATING THE TAPE: when a deliberate script-observable change
+ * adds or removes a host-boundary record, this fixture fails with a
+ * "missing_in_recorded" / "missing_in_replay" divergence. To
+ * regenerate: temporarily edit crates/harn-cli/src/commands/test.rs to
+ * `std::fs::copy(tape_path, "/tmp/actual.tape")` on divergence, run
+ * the filter, then
  * `cp /tmp/actual.tape conformance/tests/testbench/testbench_replay_fidelity.testbench-tape`
  * (normalize the absolute script_path to the relative form first).
  * Revert the debug edit before committing. The brittleness here is the

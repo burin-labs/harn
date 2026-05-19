@@ -247,7 +247,7 @@ when sidecar files are present next to the `.harn` test:
 |---|---|
 | `<name>.process-tape.json` | Activates subprocess replay against the tape; a `cwd: null` entry acts as a wildcard for portable fixtures |
 | `<name>.fs-overlay/` (directory) | Mounts the directory as the overlay root for the run; `testbench_fs_diff()` returns the in-memory diff |
-| `<name>.testbench-tape` | Records a fresh unified tape during the run and compares it byte-for-byte against the fixture via the fidelity oracle |
+| `<name>.testbench-tape` | Records a fresh unified tape during the run and compares `user_script` records byte-for-byte, with runtime-finalize records checked semantically |
 
 Any sidecar's presence also activates a paused clock pinned at
 `2026-01-01T00:00:00Z` so `now_ms()`, `sleep(...)`, and recorded

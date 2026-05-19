@@ -40,6 +40,8 @@ impl Vm {
         use crate::orchestration::{
             take_pipeline_on_finish, unsettled_state_snapshot_async, HookEvent,
         };
+        let _tape_phase =
+            crate::testbench::tape::enter_phase(crate::testbench::tape::TapePhase::RuntimeFinalize);
 
         let on_finish = take_pipeline_on_finish();
         let unsettled = unsettled_state_snapshot_async().await;
