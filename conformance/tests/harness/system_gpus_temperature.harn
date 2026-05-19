@@ -1,0 +1,8 @@
+fn main(harness: Harness) {
+  let gpus = harness.system.gpus()
+  let temp = harness.system.temperature()
+  harness.stdio.println(type_of(gpus))
+  harness.stdio.println(len(gpus))
+  harness.stdio.println(type_of(temp))
+  harness.stdio.println(len(temp["components"]))
+}

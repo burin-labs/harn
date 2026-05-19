@@ -30,7 +30,7 @@ use async_trait::async_trait;
 use harn_clock::{Clock, PausedClock, RealClock};
 use time::OffsetDateTime;
 
-/// Six capability slices exposed by a [`Harness`].
+/// Seven capability slices exposed by a [`Harness`].
 ///
 /// `Root` is the parent handle; the others are the typed sub-handles users
 /// reach through field access (`harness.stdio`, `harness.clock`, ...).
@@ -43,6 +43,7 @@ pub enum HarnessKind {
     Env,
     Random,
     Net,
+    System,
 }
 
 impl HarnessKind {
@@ -58,6 +59,7 @@ impl HarnessKind {
             HarnessKind::Env => "HarnessEnv",
             HarnessKind::Random => "HarnessRandom",
             HarnessKind::Net => "HarnessNet",
+            HarnessKind::System => "HarnessSystem",
         }
     }
 
@@ -72,6 +74,7 @@ impl HarnessKind {
             HarnessKind::Env => Some("env"),
             HarnessKind::Random => Some("random"),
             HarnessKind::Net => Some("net"),
+            HarnessKind::System => Some("system"),
         }
     }
 
@@ -84,11 +87,12 @@ impl HarnessKind {
             "env" => Some(HarnessKind::Env),
             "random" => Some(HarnessKind::Random),
             "net" => Some(HarnessKind::Net),
+            "system" => Some(HarnessKind::System),
             _ => None,
         }
     }
 
-    /// All six sub-handle kinds, in the canonical field order.
+    /// All seven sub-handle kinds, in the canonical field order.
     pub const SUB_HANDLES: &'static [HarnessKind] = &[
         HarnessKind::Stdio,
         HarnessKind::Clock,
@@ -96,6 +100,7 @@ impl HarnessKind {
         HarnessKind::Env,
         HarnessKind::Random,
         HarnessKind::Net,
+        HarnessKind::System,
     ];
 
     /// Every kind a Harn-script type annotation may reference.
@@ -107,6 +112,7 @@ impl HarnessKind {
         HarnessKind::Env,
         HarnessKind::Random,
         HarnessKind::Net,
+        HarnessKind::System,
     ];
 }
 
@@ -516,6 +522,13 @@ impl Harness {
         }
     }
 
+    /// Field access for `harness.system`.
+    pub fn system(&self) -> HarnessSystem {
+        HarnessSystem {
+            inner: Arc::clone(&self.inner),
+        }
+    }
+
     /// Lower this handle into the `VmValue::Harness` payload.
     pub fn into_vm_value(self) -> crate::value::VmValue {
         crate::value::VmValue::Harness(VmHarness {
@@ -586,6 +599,16 @@ pub struct HarnessNet {
     inner: Arc<HarnessInner>,
 }
 
+/// system sub-handle: `cpu`, `memory`, `gpus`, `temperature`, `platform`,
+/// `processes`. Read-only host introspection — no side effects on the host
+/// system. Gated by the harness handle so scripts running under
+/// `Harness::null()` or restricted policies cannot fingerprint the runner
+/// without an explicit grant (issue #1912 / epic #1765).
+#[derive(Debug, Clone)]
+pub struct HarnessSystem {
+    inner: Arc<HarnessInner>,
+}
+
 macro_rules! sub_handle_inner {
     ($($ty:ty),* $(,)?) => {
         $(
@@ -604,6 +627,7 @@ sub_handle_inner!(
     HarnessEnv,
     HarnessRandom,
     HarnessNet,
+    HarnessSystem,
 );
 
 impl HarnessClock {
@@ -796,6 +820,7 @@ mod tests {
             r#"fn main(harness: Harness) { harness.env.get("KEY") }"#,
             r#"fn main(harness: Harness) { harness.random.gen_u64() }"#,
             r#"fn main(harness: Harness) { harness.net.get("https://example.test") }"#,
+            r#"fn main(harness: Harness) { harness.system.cpu() }"#,
         ] {
             let error = run_harness_source(source, harness.clone()).expect_err("call denied");
             assert!(
@@ -818,6 +843,7 @@ mod tests {
                 (HarnessKind::Env, "get"),
                 (HarnessKind::Random, "gen_u64"),
                 (HarnessKind::Net, "get"),
+                (HarnessKind::System, "cpu"),
             ]
         );
         assert_eq!(events[0].args, vec!["blocked"]);

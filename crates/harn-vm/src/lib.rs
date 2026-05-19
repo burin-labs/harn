@@ -28,6 +28,7 @@ pub mod event_log;
 pub mod events;
 pub mod flow;
 pub mod harness;
+pub mod harness_system;
 mod http;
 pub mod jsonrpc;
 pub mod llm;
@@ -135,7 +136,7 @@ pub use corrections::{
 };
 pub use harness::{
     DenyEvent, Harness, HarnessCall, HarnessClock, HarnessEnv, HarnessFs, HarnessKind, HarnessNet,
-    HarnessRandom, HarnessStdio, MockAwareClock, MockHarnessBuilder, VmHarness,
+    HarnessRandom, HarnessStdio, HarnessSystem, MockAwareClock, MockHarnessBuilder, VmHarness,
 };
 pub use http::{register_http_builtins, reset_http_state};
 pub use llm::register_llm_builtins;

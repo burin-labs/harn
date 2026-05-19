@@ -879,6 +879,7 @@ impl TypeChecker {
                 "env" => Some(TypeExpr::Named("HarnessEnv".into())),
                 "random" => Some(TypeExpr::Named("HarnessRandom".into())),
                 "net" => Some(TypeExpr::Named("HarnessNet".into())),
+                "system" => Some(TypeExpr::Named("HarnessSystem".into())),
                 _ if optional => Some(TypeExpr::Named("nil".into())),
                 _ => None,
             },

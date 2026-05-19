@@ -33,6 +33,7 @@ impl crate::vm::Vm {
             HarnessKind::Root => self.call_harness_root_method(handle, method, args).await,
             HarnessKind::Stdio => self.call_harness_stdio_method(handle, method, args),
             HarnessKind::Clock => self.call_harness_clock_method(handle, method, args).await,
+            HarnessKind::System => self.call_harness_system_method(handle, method, args),
             HarnessKind::Fs | HarnessKind::Env | HarnessKind::Random | HarnessKind::Net => {
                 Err(VmError::TypeError(format!(
                 "{}::{method} is not yet implemented — wired by the E4.2-E4.4 migration tickets",
@@ -40,6 +41,25 @@ impl crate::vm::Vm {
             )))
             }
         }
+    }
+
+    fn call_harness_system_method(
+        &mut self,
+        handle: &VmHarness,
+        method: &str,
+        _args: &[VmValue],
+    ) -> Result<VmValue, VmError> {
+        use crate::harness_system as sys;
+        let json = match method {
+            "cpu" => sys::cpu_snapshot(),
+            "memory" => sys::memory_snapshot(),
+            "gpus" | "gpu" => sys::gpus_snapshot(),
+            "temperature" => sys::temperature_snapshot(),
+            "platform" => sys::platform_snapshot(),
+            "processes" => sys::processes_snapshot(),
+            _ => return Err(method_unsupported(handle, method)),
+        };
+        Ok(crate::stdlib::json_to_vm_value(&json))
     }
 
     async fn call_harness_root_method(
@@ -333,6 +353,52 @@ impl crate::vm::Vm {
                 }
                 _ => Err(method_unsupported(handle, method)),
             },
+            HarnessKind::System => {
+                // Mock mode returns deterministic synthetic snapshots so
+                // conformance fixtures can exercise the surface without
+                // observing the real host. Methods mirror the real names
+                // exactly, with the same JSON shape, but populated with
+                // fixed placeholder values.
+                let json = match method {
+                    "cpu" => serde_json::json!({
+                        "count": 1,
+                        "physical_count": 1,
+                        "model": "mock-cpu",
+                        "frequency_mhz": 0u64,
+                        "usage_pct": 0.0,
+                    }),
+                    "memory" => serde_json::json!({
+                        "total_bytes": 0u64,
+                        "used_bytes": 0u64,
+                        "available_bytes": 0u64,
+                        "total_gb": 0.0,
+                        "used_gb": 0.0,
+                        "available_gb": 0.0,
+                        "pressure": "unknown",
+                    }),
+                    "gpus" | "gpu" => serde_json::Value::Array(Vec::new()),
+                    "temperature" => serde_json::json!({"components": []}),
+                    "platform" => serde_json::json!({
+                        "os": "mock",
+                        "arch": std::env::consts::ARCH,
+                        "version": "mock",
+                        "kernel": "mock",
+                        "long_os_version": "mock",
+                        "hostname": "mock",
+                    }),
+                    "processes" => serde_json::Value::Array(vec![serde_json::json!({
+                        "pid": 1,
+                        "parent_pid": serde_json::Value::Null,
+                        "name": "harn",
+                        "cpu_pct": 0.0,
+                        "mem_bytes": 0u64,
+                        "is_harn_owned": true,
+                        "is_self": true,
+                    })]),
+                    _ => return Err(method_unsupported(handle, method)),
+                };
+                Ok(crate::stdlib::json_to_vm_value(&json))
+            }
         }
     }
 }
