@@ -2707,6 +2707,125 @@ Three concentric surfaces:
   re-exports them as `lifecycle_audit_log_take` /
   `lifecycle_audit_log_snapshot`.
 
+### Pipeline lifecycle: drain, on_finish, composable handlers
+
+Every lifecycle boundary in a Harn pipeline is a callback. Presets in
+`std/lifecycle` cover the common dispositions; combinators in
+`std/lifecycle/combinators` compose them; the harness exposes a single
+read-side surface (`unsettled_state`) and a dozen write-side actions
+for custom drain logic. Full prose: `docs/src/pipeline-lifecycle.md`.
+Cookbook recipes: `docs/src/cookbooks/lifecycle.md`. Per-preset stdlib
+reference: `docs/src/stdlib/lifecycle.md`.
+
+`pipeline_on_finish(callback)` registers a `fn(harness, return_value)`
+that runs between `pre_finish` and `post_finish` on the main VM. The
+return value replaces the pipeline's return value. Registration is
+last-write-wins and one-shot per run — a stale registration cannot
+leak.
+
+`OnFinish.*` presets (`std/lifecycle`):
+
+| Preset | Behavior |
+|---|---|
+| `on_finish_abandon` | Today's default. Emits `pipeline_abandoned_unsettled` when work survives. |
+| `on_finish_drain` | Recommended. Walks unsettled buckets via `harness.spawn_settlement_agent` in canonical order with per-item `drain_decision` audits. |
+| `on_finish_block_until_settled(timeout, fallback?)` | Polls `harness.wait_for_any_settlement` until drained or timeout, then delegates to `fallback` (default `on_finish_drain`). |
+| `on_finish_handoff_to(target_pipeline, options?)` | Packages unsettled state into a typed envelope and hands it to `target_pipeline` via `harness.handoff_to`. |
+
+```harn,ignore
+import { on_finish_drain, on_finish_handoff_to, on_finish_block_until_settled } from "std/lifecycle"
+
+pipeline_on_finish(on_finish_drain)
+pipeline_on_finish(on_finish_handoff_to("nightly-drain"))
+pipeline_on_finish(on_finish_block_until_settled(30s, on_finish_drain))
+```
+
+`Combinator.*` factories (`std/lifecycle/combinators`) wrap any
+`(harness, return_value) -> return_value` callback (presets, hook
+handlers, `resume_by`, custom drain). All six are pure factories:
+
+| Combinator | Behavior |
+|---|---|
+| `compose([cb, ...])` | Sequential; threads each return value into the next. |
+| `first_available([cb, ...])` | Returns the first non-nil result. |
+| `with_telemetry(cb, span_name?)` | OTel `SpanKind::FnCall` + paired `{span_name}_started` / `_completed` / `_errored` audits. |
+| `with_timeout(cb, ms)` | Soft deadline; on overrun returns `{__timed_out, timeout_ms, elapsed_ms, return_value}` and emits `lifecycle_callback_timed_out`. |
+| `if_unsettled(cb)` | Only when `harness.unsettled_state()` is non-empty (one snapshot per call). |
+| `when(predicate, cb)` | Only when `predicate(harness, return_value)` is truthy. |
+
+```harn,ignore
+import { on_finish_drain } from "std/lifecycle"
+import { compose, if_unsettled, with_telemetry, with_timeout } from "std/lifecycle/combinators"
+
+pipeline_on_finish(
+  if_unsettled(with_telemetry(with_timeout(on_finish_drain, 30000), "drain")),
+)
+```
+
+The drain step is the per-item disposition loop behind
+`on_finish_drain`. The settlement-agent walks buckets in the
+documented order — suspended subagents → queued triggers → partial
+handoffs → in-flight LLM calls → pool pending — applying a default
+disposition (cancel / acknowledge / defer) per item and firing
+`OnDrainDecision` for each. The constrained drain tool surface is
+exposed when `__host_settlement_agent_active()` returns true. The
+loop is bounded by a per-call budget (default 5, hard-cap 20); on
+exhaustion a `drain_unsettled_remaining` audit captures the
+remainder. `harness.acknowledge_trigger` and `acknowledge_handoff`
+reject out-of-order calls with `HARN-DRN-001`.
+
+`OnBudget.*` strategies (`std/lifecycle/on_budget`) for the
+`OnBudgetThreshold` event, all `(harness, budget_state) -> result`:
+
+| Strategy | Behavior |
+|---|---|
+| `OnBudget.terminate` | Emits `budget_exceeded`; throws structured terminal error. |
+| `OnBudget.graceful_exit` | Emits `budget_graceful_exit`; returns deterministic exit envelope (no throw). |
+| `OnBudget.warn_and_continue` | Emits `budget_warn_and_continue`; injects a 1-turn `budget_warning` reminder; passes `budget_state` through. |
+
+Hook-event table for lifecycle gates (`register_session_hook`):
+
+| Event | Allow | Deny / Block | Modify | Reminder |
+|---|---|---|---|---|
+| `pre_finish` | yes | INVALID — use `OnFinish.block_until_settled` | n/a | inject only |
+| `post_finish` | yes | n/a (advisory) | n/a | inject only |
+| `on_unsettled_detected` | yes | block finish until settled | amend unsettled payload | inject only |
+| `pre_suspend` | yes | cancel suspend | rewrite reason | inject only |
+| `post_suspend` | yes | n/a | n/a | inject only |
+| `pre_resume` | yes | stay suspended | amend resume input | inject only |
+| `post_resume` | yes | n/a | n/a | inject only |
+| `pre_drain` | yes | skip drain | amend drain spec | inject only |
+| `post_drain` | yes | n/a | n/a | inject only |
+| `on_drain_decision` | yes | block tool call | rewrite tool call | inject only |
+
+Common patterns:
+
+```harn,ignore
+// Hand unsettled to a nightly settlement pipeline.
+import { on_finish_handoff_to } from "std/lifecycle"
+pipeline_on_finish(on_finish_handoff_to("nightly-settle"))
+
+// Drain with custom audit per disposition.
+import { on_finish_drain } from "std/lifecycle"
+register_session_hook("on_drain_decision", { event ->
+  external_audit_push(event)
+  return nil
+})
+pipeline_on_finish(on_finish_drain)
+
+// Abort cleanly on unsettled state (no silent loss).
+import { on_finish_block_until_settled } from "std/lifecycle"
+pipeline_on_finish(
+  on_finish_block_until_settled(60s, { harness, rv ->
+    harness.emit_audit("aborted_with_unsettled", {state: harness.unsettled_state()})
+    throw {category: "unsettled_at_finish", reason: "timeout"}
+  }),
+)
+```
+
+Cross-ref: the suspend/resume primitive that drives
+`suspended_subagents` is the agent-lifecycle entry above (harn#1836).
+
 ### Agent pools
 
 `std/lifecycle/pool` provides named, concurrency-bounded thread pools.

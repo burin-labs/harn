@@ -41,6 +41,42 @@ condensed series summaries instead of full per-patch history.
   reduction, and the cooperative cancellation contract. Wires the
   new mdBook page into `docs/src/SUMMARY.md` under Agent runtime
   next to Agent state.
+- **Pipeline lifecycle docs (P-10, #1863).** Documents the callback-first
+  pipeline lifecycle (epic #1853). New mdBook page
+  `docs/src/pipeline-lifecycle.md` covers the lifecycle event order
+  (`PreFinish` → `on_finish` → `OnUnsettledDetected` → `PostFinish`),
+  the harness read/write surface (`unsettled_state` plus the 11 drain
+  methods), the four `OnFinish` presets (`on_finish_abandon`,
+  `on_finish_drain`, `on_finish_block_until_settled`,
+  `on_finish_handoff_to`), the six composable combinators (`compose`,
+  `first_available`, `with_telemetry`, `with_timeout`, `if_unsettled`,
+  `when`), the three `OnBudget` strategies, the full hook-event tables
+  for the finish / suspend-resume / drain gates, and a Design rationale
+  section that explains the callback-first vs enum-dispatch decision
+  with cross-refs to Temporal `wait_condition` and Restate sagas.
+  New `docs/src/cookbooks/lifecycle.md` ships five end-to-end recipes:
+  nightly settlement handoff with `on_finish_handoff_to`, custom audit
+  per drain decision via an `on_drain_decision` session hook +
+  `with_telemetry(on_finish_drain)`, long-paused agent with a
+  `post_resume` operator telemetry hook, business-hours `pre_suspend`
+  deny chain with a paired 1-turn reminder, and a replay-deterministic
+  multi-suspend test harness using `mock_time` /
+  `flush_trigger_aggregations` / `pipeline_lifecycle_audit_log_take`.
+  Adds a "Pipeline lifecycle: drain, on_finish, composable handlers"
+  section to `docs/llm/harn-quickref.md` with preset / combinator /
+  budget / hook-event tables, three common-pattern snippets (nightly
+  handoff, custom audit, clean abort), and cross-refs to the
+  suspend/resume primitive (harn#1836). Adds a Pipeline lifecycle
+  subsection to `spec/HARN_SPEC.md` with formal definitions of the
+  `Pipeline.on_finish` semantic, the `Harness` type, the `DrainAgent`
+  constrained tool surface + `HARN-DRN-001` ordering enforcement, the
+  40-event lifecycle event taxonomy, and the four replay-determinism
+  rules (cached resume input, memoized drain decisions, signed
+  timestamps, one-shot registration). Adds a "Pipeline lifecycle" +
+  "Lifecycle cookbook" entry pair to `docs/src/SUMMARY.md` and
+  re-syncs `docs/src/language-spec.md` via `make sync-language-spec`.
+  Closes the docs gap for the lifecycle epic; user-facing GA is now
+  unblocked.
 - **Pool docs + cookbook (PL-08, #1893).** Adds the user-facing
   reference + cookbook for agent pools (epic #1883). New mdBook page
   `docs/src/agent-pools.md` covers pool creation (`pool_create`
