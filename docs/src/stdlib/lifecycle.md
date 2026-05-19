@@ -250,6 +250,49 @@ pipeline default() {
 }
 ```
 
+## Budget-threshold callbacks (`std/lifecycle/on_budget`)
+
+`std/lifecycle/on_budget` ships three named callback strategies for the
+`OnBudgetThreshold` lifecycle event. Each follows the same
+`(harness, budget_state) -> result` shape as the rest of the lifecycle
+layer, so they compose freely with `std/lifecycle/combinators`:
+
+- `terminate(harness, budget_state)` emits a `budget_exceeded` audit
+  entry and then throws a structured `budget_exceeded` exception so
+  the enclosing agent loop / pipeline unwinds. The thrown payload
+  carries `{category: "budget_exceeded", kind: "terminal", reason:
+  "on_budget_terminate", strategy: "terminate", budget_state,
+  message}`.
+- `graceful_exit(harness, budget_state)` emits a
+  `budget_graceful_exit` audit entry and returns a deterministic exit
+  envelope shaped `{status: "budget_exhausted", strategy:
+  "graceful_exit", reason: "on_budget_graceful_exit", budget_state,
+  message}`. Unlike `terminate` it does not throw — the envelope
+  becomes the callback's return value so downstream combinators and
+  the pipeline's `on_finish` chain can drain in-flight work and
+  surface it as the pipeline's value.
+- `warn_and_continue(harness, budget_state)` emits a
+  `budget_warn_and_continue` audit entry, injects a 1-turn
+  `budget_warning` system_reminder via `tool_hooks_inject_reminder`,
+  and returns the original `budget_state` unchanged so combinator
+  chains see a passthrough.
+
+The `OnBudget()` factory returns a dict of all three strategies so
+callers can use dotted access (`OnBudget.terminate`,
+`OnBudget.graceful_exit`, `OnBudget.warn_and_continue`) after a single
+import, mirroring the `QueueStrategy()` / `Backpressure()` factories.
+
+```harn
+import { OnBudget, warn_and_continue } from "std/lifecycle/on_budget"
+import { compose, with_telemetry } from "std/lifecycle/combinators"
+
+register_persona_hook(
+  "*",
+  "OnBudgetThreshold",
+  compose([warn_and_continue, with_telemetry(my_logger)]),
+)
+```
+
 ## Inspecting unsettled state directly
 
 Custom `on_finish` callbacks have full access to the harness:

@@ -1,0 +1,11 @@
+passthrough_kind=tokens
+passthrough_consumed=4500
+same_keys=true
+audit_count=2
+audit_kind_0=budget_warn_and_continue
+audit_strategy=warn_and_continue
+audit_kind_1=tool_hooks.reminder_injected
+reminder_has_tag_0=budget_warning
+reminder_has_tag_1=on_budget
+reminder_dedupe_key=on_budget.warning
+reminder_ttl_turns=1

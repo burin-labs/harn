@@ -1,0 +1,10 @@
+status=budget_exhausted
+strategy=graceful_exit
+reason=on_budget_graceful_exit
+state_kind=cost
+state_consumed=0.75
+message_contains_clean=true
+audit_count=1
+audit_kind=budget_graceful_exit
+audit_strategy=graceful_exit
+audit_consumed=0.75

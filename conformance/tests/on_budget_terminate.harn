@@ -1,0 +1,57 @@
+/**
+ * `OnBudget.terminate` emits a `budget_exceeded` audit entry and then
+ * throws a structured `budget_exceeded` exception so the surrounding
+ * agent loop / pipeline unwinds immediately.
+ *
+ * Tracking: harn#1914 (P-11).
+ */
+import { lifecycle_audit_log_take } from "std/lifecycle"
+import { OnBudget, terminate } from "std/lifecycle/on_budget"
+
+pipeline default() {
+  pipeline_on_finish(
+    { harness, return_value ->
+      let state = {
+        kind: "tokens",
+        limit: "max_input_tokens",
+        limit_value: 1000.0,
+        consumed_tokens: 1500,
+        consumed_cost_usd: 0.25,
+        threshold_pct: 1.5,
+        message: "tokens budget tripped at 150% (1500 of 1000)",
+      }
+      var caught = nil
+      try {
+        terminate(harness, state)
+      } catch (e) {
+        caught = e
+      }
+      harness.stdio.println("threw=" + to_string(caught != nil))
+      harness.stdio.println("category=" + caught.category)
+      harness.stdio.println("kind=" + caught.kind)
+      harness.stdio.println("reason=" + caught.reason)
+      harness.stdio.println("strategy=" + caught.strategy)
+      harness.stdio.println("state_kind=" + caught.budget_state.kind)
+      harness.stdio.println("state_limit_value=" + to_string(caught.budget_state.limit_value))
+      harness.stdio.println("message_passthrough=" + caught.message)
+      let audits = lifecycle_audit_log_take()
+      harness.stdio.println("audit_count=" + to_string(len(audits)))
+      harness.stdio.println("audit_kind=" + audits[0].kind)
+      harness.stdio.println("audit_strategy=" + audits[0].payload.strategy)
+      harness.stdio
+        .println(
+        "audit_consumed_tokens=" + to_string(audits[0].payload.budget_state.consumed_tokens),
+      )
+      let ns = OnBudget()
+      harness.stdio.println("ns_has_terminate=" + to_string(type_of(ns.terminate) == "closure"))
+      harness.stdio.println("ns_has_graceful_exit=" + to_string(type_of(ns.graceful_exit) == "closure"))
+      harness.stdio
+        .println(
+        "ns_has_warn_and_continue=" + to_string(type_of(ns.warn_and_continue) == "closure"),
+      )
+      return return_value
+    },
+  )
+  return 0
+}
+// Dotted-namespace lookup returns a callable matching the bare export.

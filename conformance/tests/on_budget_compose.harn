@@ -1,0 +1,50 @@
+/**
+ * `compose([OnBudget.warn_and_continue, custom])` threads
+ * `warn_and_continue`'s passthrough return value into a downstream
+ * custom callback. This is the canonical "first audit, then react"
+ * composition the epic calls out for callback-first strategies.
+ *
+ * Tracking: harn#1914 (P-11).
+ */
+import { lifecycle_audit_log_take } from "std/lifecycle"
+import { compose } from "std/lifecycle/combinators"
+import { warn_and_continue } from "std/lifecycle/on_budget"
+
+pipeline default() {
+  pipeline_on_finish(
+    { harness, return_value ->
+      let custom = { h, state ->
+        h
+          .emit_audit(
+          "custom_after_warn",
+          {observed_kind: state.kind, observed_threshold: state.threshold_pct},
+        )
+        return state + {custom_observed: true}
+      }
+      let chained = compose([warn_and_continue, custom])
+      let state = {
+        kind: "thinking_tokens",
+        limit: "max_thinking_tokens",
+        limit_value: 8000.0,
+        consumed_tokens: 9000,
+        threshold_pct: 1.125,
+      }
+      let result = chained(harness, state)
+      harness.stdio.println("result_kind=" + result.kind)
+      harness.stdio.println("result_consumed=" + to_string(result.consumed_tokens))
+      harness.stdio.println("result_custom_observed=" + to_string(result.custom_observed))
+      let audits = lifecycle_audit_log_take()
+      harness.stdio.println("audit_count=" + to_string(len(audits)))
+      harness.stdio.println("audit_0=" + audits[0].kind)
+      harness.stdio.println("audit_0_strategy=" + audits[0].payload.strategy)
+      harness.stdio.println("audit_1=" + audits[1].kind)
+      harness.stdio.println("audit_2=" + audits[2].kind)
+      harness.stdio.println("audit_2_kind_observed=" + audits[2].payload.observed_kind)
+      return return_value
+    },
+  )
+  return 0
+}
+// Custom callback receives the passthrough budget_state and
+// records its own audit so we can prove ordering + threading.
+// Order: warn audit -> reminder bookkeeping -> custom audit.
