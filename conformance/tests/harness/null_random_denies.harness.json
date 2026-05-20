@@ -1,0 +1,6 @@
+{
+  "mode": "null",
+  "expect_deny_events": [
+    {"sub_handle": "random", "method": "gen_u64", "args": []}
+  ]
+}

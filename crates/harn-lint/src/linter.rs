@@ -7,7 +7,9 @@ use std::collections::{HashMap, HashSet};
 
 use harn_lexer::{FixEdit, Span};
 use harn_parser::diagnostic::{
-    find_closest_match, harness_clock_replacement, harness_stdio_replacement, renamed_stdlib_symbol,
+    find_closest_match, harness_clock_replacement, harness_env_replacement, harness_fs_replacement,
+    harness_net_replacement, harness_random_replacement, harness_stdio_replacement,
+    renamed_stdlib_symbol,
 };
 use harn_parser::{BindingPattern, DiagnosticCode as Code, Node, SNode, TypeExpr, TypedParam};
 
@@ -31,6 +33,21 @@ use crate::rules::trailing_comma::check_trailing_comma;
 use crate::rules::unnecessary_parentheses::check_unnecessary_parentheses;
 
 mod walk;
+
+/// Inputs threaded into [`Linter::check_ambient_capability_builtin`].
+/// One value per ambient call site keeps the per-sub-handle wrappers
+/// (`check_ambient_clock_builtin`, etc.) tiny: they only carry the
+/// per-capability replacement table, diagnostic code, rule name, and
+/// the `require_harness_in_scope` switch.
+struct AmbientCapabilityLint<'a> {
+    name: &'a str,
+    span: Span,
+    replacement: Option<&'static str>,
+    code: Code,
+    rule: &'static str,
+    sub_handle: &'static str,
+    require_harness_in_scope: bool,
+}
 
 /// The linter walks the AST and collects diagnostics.
 pub(crate) struct Linter<'a> {
@@ -215,20 +232,112 @@ impl<'a> Linter<'a> {
     /// otherwise the suggestion points users at the
     /// `bindings/thread-harness` repair that adds the parameter.
     pub(super) fn check_ambient_clock_builtin(&mut self, name: &str, span: Span) {
-        let Some(replacement) = harness_clock_replacement(name) else {
+        self.check_ambient_capability_builtin(AmbientCapabilityLint {
+            name,
+            span,
+            replacement: harness_clock_replacement(name),
+            code: Code::LintAmbientClockBuiltin,
+            rule: "ambient-clock-builtin",
+            sub_handle: "clock",
+            require_harness_in_scope: false,
+        });
+    }
+
+    /// Flag ambient stdio builtins (`print`, `println`, `eprint`,
+    /// `eprintln`, `read_line`, `prompt_user`) so the E4.2 → E4.6
+    /// migration can rewrite them to `harness.stdio.*`.
+    pub(super) fn check_ambient_stdio_builtin(&mut self, name: &str, span: Span) {
+        self.check_ambient_capability_builtin(AmbientCapabilityLint {
+            name,
+            span,
+            replacement: harness_stdio_replacement(name),
+            code: Code::LintAmbientStdioBuiltin,
+            rule: "ambient-stdio-builtin",
+            sub_handle: "stdio",
+            require_harness_in_scope: true,
+        });
+    }
+
+    /// Flag ambient fs builtins (`read_file`, `write_file`, ...) so the
+    /// E4.4 → E4.6 migration can rewrite them to `harness.fs.*`.
+    pub(super) fn check_ambient_fs_builtin(&mut self, name: &str, span: Span) {
+        self.check_ambient_capability_builtin(AmbientCapabilityLint {
+            name,
+            span,
+            replacement: harness_fs_replacement(name),
+            code: Code::LintAmbientFsBuiltin,
+            rule: "ambient-fs-builtin",
+            sub_handle: "fs",
+            require_harness_in_scope: false,
+        });
+    }
+
+    /// Flag ambient env builtins (`env`, `env_or`) so the E4.4 → E4.6
+    /// migration can rewrite them to `harness.env.*`.
+    pub(super) fn check_ambient_env_builtin(&mut self, name: &str, span: Span) {
+        self.check_ambient_capability_builtin(AmbientCapabilityLint {
+            name,
+            span,
+            replacement: harness_env_replacement(name),
+            code: Code::LintAmbientEnvBuiltin,
+            rule: "ambient-env-builtin",
+            sub_handle: "env",
+            require_harness_in_scope: false,
+        });
+    }
+
+    /// Flag ambient random builtins (`random`, `random_int`,
+    /// `random_choice`, `random_shuffle`) so the E4.4 → E4.6 migration
+    /// can rewrite them to `harness.random.*`.
+    pub(super) fn check_ambient_random_builtin(&mut self, name: &str, span: Span) {
+        self.check_ambient_capability_builtin(AmbientCapabilityLint {
+            name,
+            span,
+            replacement: harness_random_replacement(name),
+            code: Code::LintAmbientRandomBuiltin,
+            rule: "ambient-random-builtin",
+            sub_handle: "random",
+            require_harness_in_scope: false,
+        });
+    }
+
+    /// Flag ambient net builtins (`http_get`, `http_post`, ...) so the
+    /// E4.4 → E4.6 migration can rewrite them to `harness.net.*`.
+    pub(super) fn check_ambient_net_builtin(&mut self, name: &str, span: Span) {
+        self.check_ambient_capability_builtin(AmbientCapabilityLint {
+            name,
+            span,
+            replacement: harness_net_replacement(name),
+            code: Code::LintAmbientNetBuiltin,
+            rule: "ambient-net-builtin",
+            sub_handle: "net",
+            require_harness_in_scope: false,
+        });
+    }
+
+    /// Shared implementation for every ambient-capability lint. The
+    /// per-sub-handle wrappers above just supply the replacement table,
+    /// diagnostic code, rule slug, and surface name. The `stdio` variant
+    /// is unique in suppressing the lint entirely when `harness` is not
+    /// yet in scope (because the bare `print`/`println` shape is
+    /// ambiguous with user-defined free fns); every other capability
+    /// surfaces the lint and points users at `bindings/thread-harness`.
+    fn check_ambient_capability_builtin(&mut self, lint: AmbientCapabilityLint<'_>) {
+        let Some(replacement) = lint.replacement else {
             return;
         };
         let harness_in_scope = self
             .scopes
             .iter()
             .any(|scope| scope.contains("harness") || scope.contains("_harness"));
-        let fix = if harness_in_scope {
-            replace_identifier_text_fix(self.source, span, name, replacement)
-        } else {
-            None
-        };
+        if lint.require_harness_in_scope && !harness_in_scope {
+            return;
+        }
+        let fix = harness_in_scope
+            .then(|| replace_identifier_text_fix(self.source, lint.span, lint.name, replacement))
+            .flatten();
         let suggestion = if harness_in_scope {
-            format!("replace `{name}` with `{replacement}`")
+            format!("replace `{}` with `{}`", lint.name, replacement)
         } else {
             format!(
                 "thread `harness: Harness` through the enclosing fn (see repair \
@@ -236,44 +345,16 @@ impl<'a> Linter<'a> {
             )
         };
         self.diagnostics.push(LintDiagnostic {
-            code: Code::LintAmbientClockBuiltin,
-            rule: "ambient-clock-builtin",
+            code: lint.code,
+            rule: lint.rule,
             message: format!(
-                "ambient `{name}` is deprecated — capabilities now route through \
-                 `harness.clock.*`"
+                "ambient `{}` is deprecated — capabilities now route through `harness.{}.*`",
+                lint.name, lint.sub_handle,
             ),
-            span,
+            span: lint.span,
             severity: LintSeverity::Warning,
             suggestion: Some(suggestion),
             fix,
-        });
-    }
-
-    /// Flag ambient stdio builtins (`print`, `println`, `eprint`,
-    /// `eprintln`, `read_line`, `prompt_user`) so the E4.2 → E4.6 migration
-    /// can rewrite them to `harness.stdio.*`.
-    pub(super) fn check_ambient_stdio_builtin(&mut self, name: &str, span: Span) {
-        let Some(replacement) = harness_stdio_replacement(name) else {
-            return;
-        };
-        let harness_in_scope = self
-            .scopes
-            .iter()
-            .any(|scope| scope.contains("harness") || scope.contains("_harness"));
-        if !harness_in_scope {
-            return;
-        }
-        self.diagnostics.push(LintDiagnostic {
-            code: Code::LintAmbientStdioBuiltin,
-            rule: "ambient-stdio-builtin",
-            message: format!(
-                "ambient `{name}` is deprecated — capabilities now route through \
-                 `harness.stdio.*`"
-            ),
-            span,
-            severity: LintSeverity::Warning,
-            suggestion: Some(format!("replace `{name}` with `{replacement}`")),
-            fix: replace_identifier_text_fix(self.source, span, name, replacement),
         });
     }
 

@@ -50,6 +50,35 @@ condensed series summaries instead of full per-patch history.
   at `docs/src/cli-json-contract.md`; a condensed cheatsheet ships in
   `docs/llm/harn-quickref.md`. Stdout stays single-document parseable;
   progress, warnings, and human-readable logs route to stderr.
+- **fs / env / random / net `harness.*` sub-handles (E4.4, #1769).**
+  The `harness.fs.*`, `harness.env.*`, `harness.random.*`, and
+  `harness.net.*` method surfaces are now wired end-to-end in real
+  mode. Each sub-handle delegates to the existing ambient builtin
+  (and through it, to the existing sandbox path enforcement, egress
+  allowlist, transcript tagging, and tape replay machinery), so a
+  script that rewrites `read_file("notes.txt")` as
+  `harness.fs.read_text("notes.txt")` keeps every guard rail. The
+  parser gains four new lint codes (`HARN-LNT-054`..`HARN-LNT-057`)
+  paired with four new repair templates
+  (`bindings/thread-harness-{fs,env,random,net}`); `harn fix` rewrites
+  every call site once `harness` is in scope and points users at the
+  surface-changing `bindings/thread-harness` repair otherwise. A new
+  `HARN-CAP-201` diagnostic (`sandbox capability denied by active
+  sandbox profile`) is attached to runtime errors raised by harness
+  sub-handle calls when the active `CapabilityPolicy` rejects the
+  path or URL — both the `CategorizedError` (`sandbox violation: ...`)
+  shape and the `Thrown(Dict { type: "EgressBlocked", ... })` shape
+  pick up the code so scripts can pattern-match on it. `harn-ir`
+  attributes `harness.<sub_handle>.<method>` calls back to the
+  canonical ambient builtin so `harn graph --json` and the
+  routes/invariants pipelines see them as having the same effect
+  surface as the legacy ambient call. Conformance fixtures cover the
+  null-deny path for `random` (the previously-missing piece in
+  `conformance/tests/harness/null_*_denies`), a real-mode
+  filesystem roundtrip, deterministic random ranges, and missing-env
+  defaults. Actual removal of the ambient `read_file`, `env`,
+  `random`, and `http_*` builtins is intentionally deferred to E4.6,
+  which migrates the conformance corpus in lockstep.
 
 ### Security
 

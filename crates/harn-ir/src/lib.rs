@@ -1665,14 +1665,16 @@ impl<'a> HandlerIrBuilder<'a> {
                 self.build_function_call(node, name, args, incoming)
             }
             Node::HitlExpr { kind, args } => self.build_hitl_expr(node, *kind, args, incoming),
-            Node::MethodCall { object, args, .. }
-            | Node::OptionalMethodCall { object, args, .. } => {
-                let mut exits = self.build_expr(object, incoming);
-                for arg in args {
-                    exits = self.build_expr(arg, exits);
-                }
-                exits
+            Node::MethodCall {
+                object,
+                method,
+                args,
             }
+            | Node::OptionalMethodCall {
+                object,
+                method,
+                args,
+            } => self.build_method_call(node, object, method, args, incoming),
             Node::PropertyAccess { object, .. }
             | Node::OptionalPropertyAccess { object, .. }
             | Node::Spread(object)
@@ -1812,6 +1814,45 @@ impl<'a> HandlerIrBuilder<'a> {
         vec![call_id]
     }
 
+    /// Lower a method call. The common case is a pass-through (walk the
+    /// receiver + args). When the receiver is a `harness.<sub_handle>`
+    /// access, we synthesize the ambient builtin name so capability
+    /// classification (`harn graph --json`, routes, IR analysis) sees
+    /// `harness.fs.read_text("x")` as having the same effect surface as
+    /// the legacy `read_file("x")`. This is the single place the IR
+    /// needs to know about the `Harness` sub-handle shape; everything
+    /// downstream (`direct_capabilities`, `classify_call`) keeps using
+    /// the canonical ambient name table.
+    fn build_method_call(
+        &mut self,
+        node: &SNode,
+        object: &SNode,
+        method: &str,
+        args: &[SNode],
+        incoming: Vec<NodeId>,
+    ) -> Vec<NodeId> {
+        let mut exits = self.build_expr(object, incoming);
+        for arg in args {
+            exits = self.build_expr(arg, exits);
+        }
+        if let Some((sub_handle, ambient)) = harness_sub_handle_for(object, method) {
+            let call = CallSemantics {
+                name: ambient.to_string(),
+                display_name: format!("harness.{sub_handle}.{method}"),
+                classification: classify_call(ambient, args).classification,
+                literal_args: literal_args(args),
+            };
+            let call_id = self.push_node(
+                node.span,
+                format!("call {}", call.display_name),
+                NodeSemantics::Call(call),
+            );
+            self.connect_all(&exits, call_id);
+            return vec![call_id];
+        }
+        exits
+    }
+
     fn build_policy_scope_call(
         &mut self,
         node: &SNode,
@@ -1940,6 +1981,137 @@ fn scoped_policy_call(name: &str) -> Option<PolicyScopeKind> {
         "with_command_policy" => Some(PolicyScopeKind::Command),
         "with_autonomy_policy" => Some(PolicyScopeKind::Autonomy),
         "with_dynamic_permissions" => Some(PolicyScopeKind::DynamicPermissions),
+        _ => None,
+    }
+}
+
+/// Collect the literal-arg vector for a synthesized harness CallSemantics
+/// node. Mirrors the equivalent line in [`classify_call`] but avoids
+/// re-running the classifier — the caller already supplies the ambient
+/// name to dispatch through.
+fn literal_args(args: &[SNode]) -> Vec<LiteralValue> {
+    args.iter().map(literal_value).collect()
+}
+
+/// If `object` is the `harness.<sub_handle>` chain and `method` maps
+/// to an ambient builtin via the per-sub-handle dispatch table, return
+/// the sub-handle name and the ambient builtin to attribute the call
+/// to. Returns `None` for arbitrary method calls so the existing
+/// pass-through walk continues to handle them.
+fn harness_sub_handle_for(object: &SNode, method: &str) -> Option<(&'static str, &'static str)> {
+    let (sub_handle, root) = match &object.node {
+        Node::PropertyAccess { object, property }
+        | Node::OptionalPropertyAccess { object, property } => (property.as_str(), object.as_ref()),
+        _ => return None,
+    };
+    let Node::Identifier(receiver) = &root.node else {
+        return None;
+    };
+    if receiver != "harness" && receiver != "_harness" {
+        return None;
+    }
+    HARNESS_SUB_HANDLE_DISPATCH
+        .iter()
+        .find(|(slug, _)| *slug == sub_handle)
+        .and_then(|(slug, lookup)| lookup(method).map(|ambient| (*slug, ambient)))
+}
+
+/// Function pointer matching every `harness_<sub_handle>_ambient`
+/// resolver: takes a method name, returns the ambient builtin to
+/// classify the call as (or `None` for an unknown method).
+type HarnessAmbientResolver = fn(&str) -> Option<&'static str>;
+
+/// Per-sub-handle ambient resolvers. Keeping them as a slice of
+/// `(slug, fn)` pairs lets `harness_sub_handle_for` dispatch in one
+/// step and means new sub-handles only need to register here plus
+/// supply the resolver fn below.
+const HARNESS_SUB_HANDLE_DISPATCH: &[(&str, HarnessAmbientResolver)] = &[
+    ("stdio", harness_stdio_ambient),
+    ("clock", harness_clock_ambient),
+    ("fs", harness_fs_ambient),
+    ("env", harness_env_ambient),
+    ("random", harness_random_ambient),
+    ("net", harness_net_ambient),
+];
+
+/// Inverse of the parser's `harness_stdio_replacement`: map a
+/// `harness.stdio.<method>` call back to the ambient builtin it routes
+/// to. Used by `harn graph --json` and other IR consumers to attribute
+/// capability requirements through the existing ambient-builtin name
+/// catalog. Aliases match the runtime's tolerant method dispatch.
+fn harness_stdio_ambient(method: &str) -> Option<&'static str> {
+    match method {
+        "print" => Some("print"),
+        "println" => Some("println"),
+        "eprint" => Some("eprint"),
+        "eprintln" => Some("eprintln"),
+        "read_line" => Some("read_line"),
+        "prompt" => Some("prompt_user"),
+        _ => None,
+    }
+}
+
+fn harness_clock_ambient(method: &str) -> Option<&'static str> {
+    match method {
+        "now_ms" => Some("now_ms"),
+        "monotonic_ms" | "elapsed" => Some("monotonic_ms"),
+        "sleep_ms" => Some("sleep_ms"),
+        "timestamp" => Some("timestamp"),
+        _ => None,
+    }
+}
+
+fn harness_fs_ambient(method: &str) -> Option<&'static str> {
+    match method {
+        "read_text" | "read" | "read_file" => Some("read_file"),
+        "read_text_result" | "read_result" => Some("read_file_result"),
+        "read_bytes" | "read_file_bytes" => Some("read_file_bytes"),
+        "write_text" | "write" | "write_file" => Some("write_file"),
+        "write_bytes" | "write_file_bytes" => Some("write_file_bytes"),
+        "exists" | "file_exists" => Some("file_exists"),
+        "delete" | "delete_file" | "remove" => Some("delete_file"),
+        "append" | "append_file" => Some("append_file"),
+        "list_dir" | "list" => Some("list_dir"),
+        "mkdir" | "create_dir" => Some("mkdir"),
+        "copy" | "copy_file" => Some("copy_file"),
+        "temp_dir" => Some("temp_dir"),
+        "stat" => Some("stat"),
+        "rename" | "move" | "move_file" => Some("move_file"),
+        "read_lines" => Some("read_lines"),
+        "walk" | "walk_dir" => Some("walk_dir"),
+        "glob" => Some("glob"),
+        _ => None,
+    }
+}
+
+fn harness_env_ambient(method: &str) -> Option<&'static str> {
+    match method {
+        "get" => Some("env"),
+        "get_or" => Some("env_or"),
+        _ => None,
+    }
+}
+
+fn harness_random_ambient(method: &str) -> Option<&'static str> {
+    match method {
+        "gen_f64" | "f64" | "random" => Some("random"),
+        "gen_range" | "range" | "random_int" | "int" => Some("random_int"),
+        "choice" | "random_choice" => Some("random_choice"),
+        "shuffle" | "random_shuffle" => Some("random_shuffle"),
+        "gen_u64" | "u64" => Some("random_int"),
+        _ => None,
+    }
+}
+
+fn harness_net_ambient(method: &str) -> Option<&'static str> {
+    match method {
+        "get" | "http_get" => Some("http_get"),
+        "post" | "http_post" => Some("http_post"),
+        "put" | "http_put" => Some("http_put"),
+        "patch" | "http_patch" => Some("http_patch"),
+        "delete" | "http_delete" => Some("http_delete"),
+        "request" | "http_request" => Some("http_request"),
+        "download" | "http_download" => Some("http_download"),
         _ => None,
     }
 }
@@ -2417,6 +2589,57 @@ mod tests {
             .iter()
             .filter(|diag| diag.invariant == invariant)
             .collect()
+    }
+
+    fn handler_call_names(report: &AnalysisReport) -> Vec<String> {
+        report
+            .handlers
+            .iter()
+            .flat_map(|h| h.nodes.iter())
+            .filter_map(|node| match &node.semantics {
+                NodeSemantics::Call(call) => Some(call.name.clone()),
+                _ => None,
+            })
+            .collect()
+    }
+
+    #[test]
+    fn harness_fs_method_call_is_attributed_to_read_file() {
+        let report = analyze(
+            r#"
+fn main(harness: Harness) {
+  let body = harness.fs.read_text("notes.txt")
+  harness.stdio.println(body)
+}
+"#,
+        );
+
+        let calls = handler_call_names(&report);
+        assert!(
+            calls.iter().any(|name| name == "read_file"),
+            "expected harness.fs.read_text to lower to ambient read_file, got: {calls:?}"
+        );
+        assert!(
+            calls.iter().any(|name| name == "println"),
+            "expected harness.stdio.println to lower to ambient println, got: {calls:?}"
+        );
+    }
+
+    #[test]
+    fn harness_net_method_call_is_attributed_to_http_get() {
+        let report = analyze(
+            r#"
+fn main(harness: Harness) {
+  harness.net.get("https://api.example.com")
+}
+"#,
+        );
+
+        let calls = handler_call_names(&report);
+        assert!(
+            calls.iter().any(|name| name == "http_get"),
+            "expected harness.net.get to lower to ambient http_get, got: {calls:?}"
+        );
     }
 
     #[test]

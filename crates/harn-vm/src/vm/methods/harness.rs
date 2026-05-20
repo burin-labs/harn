@@ -1,8 +1,12 @@
 //! Method dispatch for the `Harness` capability handle and its six
-//! sub-handles. The stdio and clock slices are wired end-to-end; subsequent
-//! tickets replace the stub bodies on the remaining sub-handles with real
-//! implementations.
+//! sub-handles. Every sub-handle (`stdio`, `clock`, `fs`, `env`,
+//! `random`, `net`) is wired end-to-end in real, mock, and null modes;
+//! sandbox / egress rejections raised inside a sub-handle method are
+//! tagged with the `HARN-CAP-201` diagnostic code so callers can
+//! attribute the error to the active capability profile rather than an
+//! opaque tool rejection.
 
+use std::collections::BTreeMap;
 use std::time::Duration;
 
 use crate::harness::{vm_string, HarnessKind, HarnessMode, VmHarness};
@@ -74,12 +78,10 @@ impl crate::vm::Vm {
             HarnessKind::Stdio => self.call_harness_stdio_method(handle, method, args),
             HarnessKind::Clock => self.call_harness_clock_method(handle, method, args).await,
             HarnessKind::System => self.call_harness_system_method(handle, method, args),
-            HarnessKind::Fs | HarnessKind::Env | HarnessKind::Random | HarnessKind::Net => {
-                Err(VmError::TypeError(format!(
-                "{}::{method} is not yet implemented — wired by the E4.2-E4.4 migration tickets",
-                handle.type_name(),
-            )))
-            }
+            HarnessKind::Fs => self.call_harness_fs_method(handle, method, args).await,
+            HarnessKind::Env => self.call_harness_env_method(handle, method, args),
+            HarnessKind::Random => self.call_harness_random_method(handle, method, args),
+            HarnessKind::Net => self.call_harness_net_method(handle, method, args).await,
         }
     }
 
@@ -421,6 +423,190 @@ impl crate::vm::Vm {
         }
     }
 
+    /// Dispatch `harness.fs.*` in real mode by delegating to the existing
+    /// fs builtin with the same name surface. Method names are normalized
+    /// (e.g. `harness.fs.read_text` → `read_file`, `harness.fs.delete`
+    /// → `delete_file`) so the migration target reads like the new
+    /// language API while the actual implementation — sandbox path
+    /// enforcement, overlay handling, transcript tagging — remains the
+    /// single canonical copy in `stdlib::fs`.
+    async fn call_harness_fs_method(
+        &mut self,
+        handle: &VmHarness,
+        method: &str,
+        args: &[VmValue],
+    ) -> Result<VmValue, VmError> {
+        let builtin = match method {
+            "read_text" | "read" | "read_file" => "read_file",
+            "read_text_result" | "read_result" => "read_file_result",
+            "read_bytes" | "read_file_bytes" => "read_file_bytes",
+            "write_text" | "write" | "write_file" => "write_file",
+            "write_bytes" | "write_file_bytes" => "write_file_bytes",
+            "exists" | "file_exists" => "file_exists",
+            "delete" | "delete_file" | "remove" => "delete_file",
+            "append" | "append_file" => "append_file",
+            "list_dir" | "list" => "list_dir",
+            "mkdir" | "create_dir" => "mkdir",
+            "path_join" => "path_join",
+            "copy" | "copy_file" => "copy_file",
+            "temp_dir" => "temp_dir",
+            "stat" => "stat",
+            "rename" | "move" | "move_file" => "move_file",
+            "read_lines" => "read_lines",
+            "walk" | "walk_dir" => "walk_dir",
+            "glob" => "glob",
+            _ => return Err(method_unsupported(handle, method)),
+        };
+        self.call_named_builtin(builtin, args.to_vec())
+            .await
+            .map_err(tag_sandbox_denied)
+    }
+
+    /// Dispatch `harness.env.*` in real mode against the same execution
+    /// context overlay (HARN_REPLAY etc.) the ambient `env` builtin
+    /// reads from. Read-only by design — process env mutation belongs
+    /// in policy, not language surface, so there is intentionally no
+    /// `set` method.
+    fn call_harness_env_method(
+        &mut self,
+        handle: &VmHarness,
+        method: &str,
+        args: &[VmValue],
+    ) -> Result<VmValue, VmError> {
+        match method {
+            "get" => {
+                let name = string_arg(args, 0, "HarnessEnv.get")?;
+                Ok(crate::stdlib::process::read_env_value(name)
+                    .map(vm_string)
+                    .unwrap_or(VmValue::Nil))
+            }
+            "get_or" => {
+                let name = string_arg(args, 0, "HarnessEnv.get_or")?;
+                let default = args.get(1).cloned().unwrap_or(VmValue::Nil);
+                Ok(crate::stdlib::process::read_env_value(name)
+                    .map(vm_string)
+                    .unwrap_or(default))
+            }
+            _ => Err(method_unsupported(handle, method)),
+        }
+    }
+
+    /// Dispatch `harness.random.*` in real mode. The handle is intentionally
+    /// stateless (process-wide `rand::rng()`); explicit `Rng` handles
+    /// remain available via the ambient `Rng.*` surface for replay
+    /// tests that need a seeded stream.
+    fn call_harness_random_method(
+        &mut self,
+        handle: &VmHarness,
+        method: &str,
+        args: &[VmValue],
+    ) -> Result<VmValue, VmError> {
+        use rand::seq::SliceRandom;
+        use rand::RngExt;
+        match method {
+            "gen_f64" | "f64" | "random" => Ok(VmValue::Float(rand::rng().random())),
+            "gen_u64" | "u64" => {
+                let value: u64 = rand::rng().random();
+                Ok(VmValue::Int(value.min(i64::MAX as u64) as i64))
+            }
+            "gen_range" | "range" | "random_int" | "int" => {
+                let min = args.first().and_then(|v| v.as_int()).ok_or_else(|| {
+                    VmError::TypeError(
+                        "HarnessRandom.gen_range expects an integer min argument".to_string(),
+                    )
+                })?;
+                let max = args.get(1).and_then(|v| v.as_int()).ok_or_else(|| {
+                    VmError::TypeError(
+                        "HarnessRandom.gen_range expects an integer max argument".to_string(),
+                    )
+                })?;
+                if min > max {
+                    return Ok(VmValue::Nil);
+                }
+                Ok(VmValue::Int(rand::rng().random_range(min..=max)))
+            }
+            "choice" | "random_choice" => {
+                let Some(VmValue::List(items)) = args.first() else {
+                    return Ok(VmValue::Nil);
+                };
+                if items.is_empty() {
+                    return Ok(VmValue::Nil);
+                }
+                let idx = rand::rng().random_range(0..items.len());
+                Ok(items[idx].clone())
+            }
+            "shuffle" | "random_shuffle" => {
+                let Some(VmValue::List(items)) = args.first() else {
+                    return Ok(VmValue::Nil);
+                };
+                let mut shuffled = items.as_ref().clone();
+                shuffled.shuffle(&mut rand::rng());
+                Ok(VmValue::List(std::rc::Rc::new(shuffled)))
+            }
+            _ => Err(method_unsupported(handle, method)),
+        }
+    }
+
+    /// Dispatch `harness.net.*` in real mode through the same egress
+    /// allowlist and retry pipeline as the legacy `http_*` builtins.
+    async fn call_harness_net_method(
+        &mut self,
+        handle: &VmHarness,
+        method: &str,
+        args: &[VmValue],
+    ) -> Result<VmValue, VmError> {
+        let verb = match method {
+            "get" | "http_get" => Some(("GET", false)),
+            "post" | "http_post" => Some(("POST", true)),
+            "put" | "http_put" => Some(("PUT", true)),
+            "patch" | "http_patch" => Some(("PATCH", true)),
+            "delete" | "http_delete" => Some(("DELETE", false)),
+            _ => None,
+        };
+        if let Some((http_method, has_body)) = verb {
+            let url = string_arg(args, 0, &format!("HarnessNet.{method}"))?.to_string();
+            let mut options: BTreeMap<String, VmValue> = BTreeMap::new();
+            if has_body {
+                match (args.get(1), args.get(2)) {
+                    (Some(VmValue::Dict(d)), None) => options = (**d).clone(),
+                    (_, Some(VmValue::Dict(d))) => options = (**d).clone(),
+                    _ => {}
+                }
+                if !(matches!(args.get(1), Some(VmValue::Dict(_))) && args.get(2).is_none()) {
+                    if let Some(body) = args.get(1) {
+                        options.insert(
+                            "body".to_string(),
+                            VmValue::String(std::rc::Rc::from(body.display())),
+                        );
+                    }
+                }
+            } else if let Some(VmValue::Dict(d)) = args.get(1) {
+                options = (**d).clone();
+            }
+            return crate::http::execute_http_request(http_method, &url, &options)
+                .await
+                .map_err(tag_sandbox_denied);
+        }
+        match method {
+            "request" | "http_request" => {
+                let http_method = string_arg(args, 0, "HarnessNet.request")?.to_string();
+                let url = string_arg(args, 1, "HarnessNet.request")?.to_string();
+                let options = match args.get(2) {
+                    Some(VmValue::Dict(d)) => (**d).clone(),
+                    _ => BTreeMap::new(),
+                };
+                crate::http::execute_http_request(&http_method.to_uppercase(), &url, &options)
+                    .await
+                    .map_err(tag_sandbox_denied)
+            }
+            "download" | "http_download" => self
+                .call_named_builtin("http_download", args.to_vec())
+                .await
+                .map_err(tag_sandbox_denied),
+            _ => Err(method_unsupported(handle, method)),
+        }
+    }
+
     async fn call_mock_harness_method(
         &mut self,
         handle: &VmHarness,
@@ -514,6 +700,11 @@ impl crate::vm::Vm {
                 "get" => {
                     let key = string_arg(args, 0, "HarnessEnv.get")?;
                     Ok(state.env_get(key).map(vm_string).unwrap_or(VmValue::Nil))
+                }
+                "get_or" => {
+                    let key = string_arg(args, 0, "HarnessEnv.get_or")?;
+                    let default = args.get(1).cloned().unwrap_or(VmValue::Nil);
+                    Ok(state.env_get(key).map(vm_string).unwrap_or(default))
                 }
                 _ => Err(method_unsupported(handle, method)),
             },
@@ -1159,6 +1350,67 @@ fn record_handoff_envelope(args: &[VmValue]) -> VmValue {
         "method": "handoff_to",
         "envelope": envelope.to_json(),
     }))
+}
+
+/// Decorate sandbox/egress rejections raised inside a harness sub-handle
+/// call with the `HARN-CAP-201` diagnostic code so callers (and the
+/// portal) can attribute the error to the harness capability profile
+/// instead of an opaque tool rejection.
+///
+/// Two error shapes need decoration:
+///   * `CategorizedError { ToolRejected, "sandbox violation: ..." }` —
+///     filesystem path enforcement, process cwd enforcement.
+///   * `Thrown(Dict { type: "EgressBlocked", ... })` — net allowlist
+///     denial raised by `crate::egress::enforce_url_allowed`.
+///
+/// Errors unrelated to sandbox enforcement (`TypeError`, plain
+/// `Thrown`, `Runtime`) pass through untouched so the harness method
+/// surface keeps the original diagnostic. Already-tagged errors are
+/// idempotent — the check avoids double prefixing under nested
+/// dispatch.
+fn tag_sandbox_denied(error: VmError) -> VmError {
+    match error {
+        VmError::CategorizedError { message, category }
+            if matches!(category, ErrorCategory::ToolRejected)
+                && message.contains("sandbox violation")
+                && !message.contains(HARN_CAP_201_CODE) =>
+        {
+            VmError::CategorizedError {
+                message: format!("{HARN_CAP_201_CODE}: {message}"),
+                category,
+            }
+        }
+        VmError::Thrown(VmValue::Dict(dict)) if is_egress_blocked_dict(&dict) => {
+            VmError::Thrown(VmValue::Dict(tag_egress_dict(dict)))
+        }
+        other => other,
+    }
+}
+
+const HARN_CAP_201_CODE: &str = "HARN-CAP-201";
+
+fn is_egress_blocked_dict(dict: &std::collections::BTreeMap<String, VmValue>) -> bool {
+    matches!(
+        dict.get("type"),
+        Some(VmValue::String(value)) if value.as_ref() == "EgressBlocked"
+    )
+}
+
+fn tag_egress_dict(
+    dict: std::rc::Rc<std::collections::BTreeMap<String, VmValue>>,
+) -> std::rc::Rc<std::collections::BTreeMap<String, VmValue>> {
+    let mut next = (*dict).clone();
+    if matches!(
+        next.get("code"),
+        Some(VmValue::String(value)) if value.as_ref() == HARN_CAP_201_CODE
+    ) {
+        return std::rc::Rc::new(next);
+    }
+    next.insert(
+        "code".to_string(),
+        VmValue::String(std::rc::Rc::from(HARN_CAP_201_CODE)),
+    );
+    std::rc::Rc::new(next)
 }
 
 fn method_unsupported(handle: &VmHarness, method: &str) -> VmError {
