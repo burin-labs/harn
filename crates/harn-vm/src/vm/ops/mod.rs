@@ -114,6 +114,14 @@ impl super::Vm {
             // and fall through to `execute_call_async` without touching
             // `ip`.
             Op::Call => return self.execute_call_sync(),
+            // CallBuiltin is the opcode `f(x)` compiles to and the
+            // actual hot dispatch for user closures. The sync fast path
+            // peeks the name from the inline operand, skips
+            // runtime-construct names (`await`/`cancel`/...), generators,
+            // and `@step`-decorated functions, then pushes the closure
+            // frame inline. Builtins and the listed escape hatches fall
+            // through to `execute_call_builtin_async` with `ip` untouched.
+            Op::CallBuiltin => return self.execute_call_builtin_sync(),
             Op::Throw => self.execute_throw(),
             Op::TryCatchSetup => {
                 self.execute_try_catch_setup();
@@ -178,8 +186,7 @@ impl super::Vm {
             // `execute_op_async`. Keeping these in a single explicit arm
             // keeps the sync/async classification visible alongside the
             // sync dispatch table.
-            Op::CallBuiltin
-            | Op::CallBuiltinSpread
+            Op::CallBuiltinSpread
             | Op::TailCall
             | Op::MethodCall
             | Op::MethodCallOpt
@@ -204,7 +211,7 @@ impl super::Vm {
     pub(super) async fn execute_op_async(&mut self, op: Op) -> Result<(), VmError> {
         match op {
             Op::Call => self.execute_call_async().await,
-            Op::CallBuiltin => self.execute_call_builtin().await,
+            Op::CallBuiltin => self.execute_call_builtin_async().await,
             Op::CallBuiltinSpread => self.execute_call_builtin_spread().await,
             Op::TailCall => self.execute_tail_call().await,
             Op::MethodCall => self.execute_method_call(false).await,

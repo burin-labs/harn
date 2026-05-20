@@ -724,7 +724,71 @@ impl super::super::Vm {
         Ok(())
     }
 
-    pub(super) async fn execute_call_builtin(&mut self) -> Result<(), VmError> {
+    /// Sync fast path for `Op::CallBuiltin` — the opcode user-level `f(x)`
+    /// calls compile to via [`Compiler::emit_named_call`]. Peeks the
+    /// operand (`u64 id + u16 name_idx + u8 argc` = 11 bytes) without
+    /// touching `ip`; if the name resolves to a regular non-generator
+    /// user closure with no `@step` definition attached, pushes the
+    /// closure frame inline and returns `Some(Ok(()))`. Returns `None`
+    /// without advancing the frame when the call needs the async path
+    /// (special-name builtins like `await`/`cancel`, generators, step-
+    /// decorated functions, or names that resolve to a registered
+    /// builtin instead of a user closure).
+    ///
+    /// Mirrors [`execute_call_sync`] and [`execute_iter_next_sync`]:
+    /// since `ip` is untouched on the `None` hand-off, the async path
+    /// reads the operand exactly once. Collapses the same five-async-
+    /// state-machine chain (`execute_call_builtin` →
+    /// `call_named_value` → `try_call_special_name` →
+    /// `resolve_named_closure` → `call_user_closure` →
+    /// `run_step_pre_hooks`) that the steady-state untracked
+    /// user-closure call would otherwise traverse, each of which
+    /// resolves synchronously in the hot case but still pays the
+    /// future-state-machine tax.
+    pub(super) fn execute_call_builtin_sync(&mut self) -> Option<Result<(), VmError>> {
+        let frame = self.frames.last().unwrap();
+        let name_idx = frame.chunk.read_u16(frame.ip + 8) as usize;
+        let argc = frame.chunk.code[frame.ip + 10] as usize;
+        let name = Self::const_str(&frame.chunk.constants[name_idx]).ok()?;
+
+        // Names handled by `try_call_special_name` are runtime constructs
+        // (`await`, `cancel`, ...) that must run on the async path even if
+        // the user happens to define a function with the same name —
+        // matching the async dispatcher's first-check semantics.
+        if matches!(
+            name,
+            "await"
+                | "cancel"
+                | "cancel_graceful"
+                | "is_cancelled"
+                | "__signal_on_interrupt"
+                | "__signal_off_interrupt"
+                | "__signal_interrupted"
+                | "__signal_raise"
+        ) {
+            return None;
+        }
+
+        let closure = self.resolve_named_closure(name)?;
+        if closure.func.is_generator {
+            return None;
+        }
+        if crate::step_runtime::step_definition_for_function(&closure.func.name).is_some() {
+            return None;
+        }
+
+        let frame = self.frames.last_mut().unwrap();
+        frame.ip += 11;
+        let args: Vec<VmValue> = self.stack.split_off(self.stack.len().saturating_sub(argc));
+        Some(self.push_closure_frame(&closure, &args))
+    }
+
+    /// Async slow path for `Op::CallBuiltin`. Identical in behavior to
+    /// the pre-split `execute_call_builtin`. The caller
+    /// (`execute_op_async`) reaches this only after
+    /// [`execute_call_builtin_sync`] returned `None` without touching
+    /// `ip`, so this path reads the operand exactly once.
+    pub(super) async fn execute_call_builtin_async(&mut self) -> Result<(), VmError> {
         let frame = self.frames.last_mut().unwrap();
         let id = BuiltinId::from_raw(frame.chunk.read_u64(frame.ip));
         frame.ip += 8;
