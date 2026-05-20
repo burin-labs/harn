@@ -146,7 +146,7 @@ fn first_child_with_message<'a>(
         let close_pos = body[header_end..]
             .find(&close_open)
             .map(|i| header_end + i)?;
-        body[header_end + 1..close_pos].trim().to_string()
+        unescape_xml(body[header_end + 1..close_pos].trim())
     };
     Some((tag, message, body_text))
 }
@@ -157,7 +157,7 @@ fn first_child_text(body: &str, tag: &str) -> Option<String> {
     let pos = body.find(open.as_str())?;
     let header_end = body[pos..].find('>').map(|i| pos + i)?;
     let close_pos = body[header_end..].find(&close).map(|i| header_end + i)?;
-    Some(body[header_end + 1..close_pos].trim().to_string())
+    Some(unescape_xml(body[header_end + 1..close_pos].trim()))
 }
 
 fn combined_message(message: Option<String>, body_text: String) -> String {
@@ -169,15 +169,58 @@ fn combined_message(message: Option<String>, body_text: String) -> String {
 }
 
 fn attr(header: &str, key: &str) -> Option<String> {
-    // Require a leading space so we don't match `name="..."` inside
-    // `classname="..."` and friends. XML attribute names always follow a
-    // space (or the tag name itself), so this is safe for well-formed
-    // input.
-    let needle = format!(" {key}=\"");
-    let start = header.find(&needle)?;
-    let after = &header[start + needle.len()..];
-    let end = after.find('"')?;
-    Some(unescape_xml(&after[..end]))
+    let bytes = header.as_bytes();
+    let mut idx = 0;
+    while idx < bytes.len() {
+        while idx < bytes.len() && bytes[idx].is_ascii_whitespace() {
+            idx += 1;
+        }
+        if idx >= bytes.len() {
+            break;
+        }
+        if bytes[idx] == b'<' || bytes[idx] == b'/' {
+            idx += 1;
+            continue;
+        }
+        let name_start = idx;
+        while idx < bytes.len()
+            && (bytes[idx].is_ascii_alphanumeric()
+                || matches!(bytes[idx], b'_' | b'-' | b':' | b'.'))
+        {
+            idx += 1;
+        }
+        let name = &header[name_start..idx];
+        while idx < bytes.len() && bytes[idx].is_ascii_whitespace() {
+            idx += 1;
+        }
+        if idx >= bytes.len() || bytes[idx] != b'=' {
+            if idx == name_start || idx >= bytes.len() || matches!(bytes[idx], b'>' | b'/') {
+                idx += 1;
+            }
+            continue;
+        }
+        idx += 1;
+        while idx < bytes.len() && bytes[idx].is_ascii_whitespace() {
+            idx += 1;
+        }
+        if idx >= bytes.len() || !matches!(bytes[idx], b'"' | b'\'') {
+            continue;
+        }
+        let quote = bytes[idx];
+        idx += 1;
+        let value_start = idx;
+        while idx < bytes.len() && bytes[idx] != quote {
+            idx += 1;
+        }
+        if idx >= bytes.len() {
+            break;
+        }
+        if name == key {
+            return Some(unescape_xml(&header[value_start..idx]));
+        }
+        idx += 1;
+    }
+    None
 }
 
 fn unescape_xml(text: &str) -> String {
@@ -313,6 +356,25 @@ mod tests {
         assert_eq!(records[1].status, Status::Failed);
         assert!(records[1].message.as_deref().unwrap().contains("boom"));
         assert_eq!(records[2].status, Status::Skipped);
+    }
+
+    #[test]
+    fn parses_junit_single_quoted_attrs_and_unescapes_text() {
+        let xml = r#"<testsuite>
+  <testcase classname = 'pkg.Suite' name = 'actual' time = '0.003'>
+    <failure message = 'a &amp; b'>left &lt; right</failure>
+    <system-out>hello &amp; goodbye</system-out>
+  </testcase>
+</testsuite>"#;
+        let records = parse_junit_xml(xml.as_bytes()).unwrap();
+        assert_eq!(records.len(), 1);
+        assert_eq!(records[0].name, "pkg.Suite::actual");
+        assert_eq!(records[0].duration_ms, 3);
+        assert_eq!(records[0].status, Status::Failed);
+        let message = records[0].message.as_deref().unwrap();
+        assert!(message.contains("a & b"));
+        assert!(message.contains("left < right"));
+        assert_eq!(records[0].stdout.as_deref(), Some("hello & goodbye"));
     }
 
     #[test]

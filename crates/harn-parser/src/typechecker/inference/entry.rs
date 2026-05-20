@@ -92,11 +92,10 @@ impl TypeChecker {
                         child.clear_nil_widenable(p);
                     }
                     self.fn_depth += 1;
-                    let ret_scope_base = return_type.as_ref().map(|_| child.child());
                     self.check_block(body, &mut child);
-                    if let (Some(ret_type), Some(mut ret_scope)) =
-                        (return_type.as_ref(), ret_scope_base)
-                    {
+                    if let Some(ret_type) = return_type.as_ref() {
+                        let mut ret_scope = child.clone();
+                        ret_scope.restore_narrowed_vars();
                         for stmt in body {
                             self.check_return_type(stmt, ret_type, inner_node.span, &mut ret_scope);
                         }

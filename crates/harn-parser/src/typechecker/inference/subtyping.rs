@@ -8,7 +8,7 @@
 //! interface satisfaction by structurally matching impl-block method
 //! signatures against the interface declaration.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, HashSet};
 
 use crate::ast::*;
 
@@ -460,23 +460,38 @@ impl TypeChecker {
         ty: &'a TypeExpr,
         scope: &'a TypeScope,
     ) -> TypeExpr {
+        let mut visiting = HashSet::new();
+        self.resolve_alias_inner(ty, scope, &mut visiting)
+    }
+
+    fn resolve_alias_inner(
+        &self,
+        ty: &TypeExpr,
+        scope: &TypeScope,
+        visiting: &mut HashSet<String>,
+    ) -> TypeExpr {
         match ty {
             TypeExpr::Named(name) => {
                 if let Some(resolved) = scope.resolve_type(name) {
-                    return self.resolve_alias(resolved, scope);
+                    if !visiting.insert(name.clone()) {
+                        return ty.clone();
+                    }
+                    let resolved = self.resolve_alias_inner(resolved, scope, visiting);
+                    visiting.remove(name);
+                    return resolved;
                 }
                 ty.clone()
             }
             TypeExpr::Union(types) => TypeExpr::Union(
                 types
                     .iter()
-                    .map(|ty| self.resolve_alias(ty, scope))
+                    .map(|ty| self.resolve_alias_inner(ty, scope, visiting))
                     .collect(),
             ),
             TypeExpr::Intersection(types) => TypeExpr::Intersection(
                 types
                     .iter()
-                    .map(|ty| self.resolve_alias(ty, scope))
+                    .map(|ty| self.resolve_alias_inner(ty, scope, visiting))
                     .collect(),
             ),
             TypeExpr::Shape(fields) => TypeExpr::Shape(
@@ -484,20 +499,26 @@ impl TypeChecker {
                     .iter()
                     .map(|field| ShapeField {
                         name: field.name.clone(),
-                        type_expr: self.resolve_alias(&field.type_expr, scope),
+                        type_expr: self.resolve_alias_inner(&field.type_expr, scope, visiting),
                         optional: field.optional,
                     })
                     .collect(),
             ),
-            TypeExpr::List(inner) => TypeExpr::List(Box::new(self.resolve_alias(inner, scope))),
-            TypeExpr::Iter(inner) => TypeExpr::Iter(Box::new(self.resolve_alias(inner, scope))),
-            TypeExpr::Generator(inner) => {
-                TypeExpr::Generator(Box::new(self.resolve_alias(inner, scope)))
+            TypeExpr::List(inner) => {
+                TypeExpr::List(Box::new(self.resolve_alias_inner(inner, scope, visiting)))
             }
-            TypeExpr::Stream(inner) => TypeExpr::Stream(Box::new(self.resolve_alias(inner, scope))),
+            TypeExpr::Iter(inner) => {
+                TypeExpr::Iter(Box::new(self.resolve_alias_inner(inner, scope, visiting)))
+            }
+            TypeExpr::Generator(inner) => {
+                TypeExpr::Generator(Box::new(self.resolve_alias_inner(inner, scope, visiting)))
+            }
+            TypeExpr::Stream(inner) => {
+                TypeExpr::Stream(Box::new(self.resolve_alias_inner(inner, scope, visiting)))
+            }
             TypeExpr::DictType(key, value) => TypeExpr::DictType(
-                Box::new(self.resolve_alias(key, scope)),
-                Box::new(self.resolve_alias(value, scope)),
+                Box::new(self.resolve_alias_inner(key, scope, visiting)),
+                Box::new(self.resolve_alias_inner(value, scope, visiting)),
             ),
             TypeExpr::FnType {
                 params,
@@ -505,14 +526,14 @@ impl TypeChecker {
             } => TypeExpr::FnType {
                 params: params
                     .iter()
-                    .map(|param| self.resolve_alias(param, scope))
+                    .map(|param| self.resolve_alias_inner(param, scope, visiting))
                     .collect(),
-                return_type: Box::new(self.resolve_alias(return_type, scope)),
+                return_type: Box::new(self.resolve_alias_inner(return_type, scope, visiting)),
             },
             TypeExpr::Applied { name, args } => {
                 let resolved_args: Vec<TypeExpr> = args
                     .iter()
-                    .map(|arg| self.resolve_alias(arg, scope))
+                    .map(|arg| self.resolve_alias_inner(arg, scope, visiting))
                     .collect();
                 // If the constructor is a `type T<...> = ...` alias (as
                 // opposed to an enum/struct/interface), expand it by
@@ -525,11 +546,19 @@ impl TypeChecker {
                 // its own `T`.
                 if let Some(info) = scope.resolve_type_alias(name) {
                     if info.type_params.len() == resolved_args.len() {
+                        if !visiting.insert(name.clone()) {
+                            return TypeExpr::Applied {
+                                name: name.clone(),
+                                args: resolved_args,
+                            };
+                        }
                         let names: Vec<String> =
                             info.type_params.iter().map(|tp| tp.name.clone()).collect();
                         let expanded =
                             instantiate_alias_distributive(&info.body, &names, &resolved_args);
-                        return self.resolve_alias(&expanded, scope);
+                        let resolved = self.resolve_alias_inner(&expanded, scope, visiting);
+                        visiting.remove(name);
+                        return resolved;
                     }
                 }
                 TypeExpr::Applied {
@@ -540,7 +569,9 @@ impl TypeChecker {
             TypeExpr::Never => TypeExpr::Never,
             TypeExpr::LitString(s) => TypeExpr::LitString(s.clone()),
             TypeExpr::LitInt(v) => TypeExpr::LitInt(*v),
-            TypeExpr::Owned(inner) => TypeExpr::Owned(Box::new(self.resolve_alias(inner, scope))),
+            TypeExpr::Owned(inner) => {
+                TypeExpr::Owned(Box::new(self.resolve_alias_inner(inner, scope, visiting)))
+            }
         }
     }
 }

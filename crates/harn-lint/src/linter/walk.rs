@@ -1177,6 +1177,11 @@ impl<'a> Linter<'a> {
                 type_expr,
             } => {
                 self.lint_type_name("type", name, snode.span);
+                self.type_declarations.push(TypeDeclaration {
+                    name: name.clone(),
+                    span: snode.span,
+                    kind: "type",
+                });
                 self.record_type_expr_references(type_expr);
             }
 

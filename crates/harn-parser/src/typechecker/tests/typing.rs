@@ -24,6 +24,22 @@ fn test_type_mismatch_let() {
 }
 
 #[test]
+fn test_cyclic_type_aliases_do_not_recurse_forever() {
+    let errs = errors(
+        r#"
+type A = B
+type B = A
+
+pipeline t(task) {
+  let x: A = 1
+}
+"#,
+    );
+    assert_eq!(errs.len(), 1, "expected one mismatch, got: {errs:?}");
+    assert!(errs[0].contains("found int"), "{errs:?}");
+}
+
+#[test]
 fn test_match_expression_infers_common_arm_type() {
     let errs = errors(
         r#"pipeline t(task) {

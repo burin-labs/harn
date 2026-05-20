@@ -295,6 +295,113 @@ async fn http_download_mock_writes_file() {
 }
 
 #[tokio::test]
+async fn http_download_mock_retries_retryable_status() {
+    reset_http_state();
+    let temp = TempDir::new().expect("tempdir");
+    let path = temp.path().join("download.bin");
+    push_http_mock(
+        "GET",
+        "https://api.example.com/download-retry",
+        vec![
+            HttpMockResponse::new(503, "busy").with_header("retry-after", "0"),
+            HttpMockResponse::new(200, "downloaded"),
+        ],
+    );
+
+    let response = vm_http_download(
+        "https://api.example.com/download-retry",
+        &path.display().to_string(),
+        &BTreeMap::from([(
+            "retry".to_string(),
+            VmValue::Dict(Rc::new(BTreeMap::from([
+                ("max".to_string(), VmValue::Int(1)),
+                ("backoff_ms".to_string(), VmValue::Int(0)),
+            ]))),
+        )]),
+    )
+    .await
+    .expect("download response after retry");
+
+    let response = response.as_dict().expect("response dict");
+    assert_eq!(response["status"].as_int(), Some(200));
+    assert_eq!(
+        std::fs::read_to_string(path).expect("downloaded file"),
+        "downloaded"
+    );
+    assert_eq!(http_mock_calls_snapshot().len(), 2);
+    reset_http_state();
+}
+
+#[tokio::test]
+async fn http_download_mock_enforces_max_response_bytes() {
+    reset_http_state();
+    let temp = TempDir::new().expect("tempdir");
+    let path = temp.path().join("download.bin");
+    push_http_mock(
+        "GET",
+        "https://api.example.com/download-too-large",
+        vec![HttpMockResponse::new(200, "too-large")],
+    );
+
+    let error = vm_http_download(
+        "https://api.example.com/download-too-large",
+        &path.display().to_string(),
+        &BTreeMap::from([("max_response_bytes".to_string(), VmValue::Int(3))]),
+    )
+    .await
+    .expect_err("oversized mock body should fail");
+
+    assert!(error
+        .to_string()
+        .contains("response body exceeded max_response_bytes"));
+    assert!(
+        !path.exists(),
+        "oversized mock response must be rejected before creating the destination"
+    );
+    reset_http_state();
+}
+
+#[tokio::test]
+async fn http_download_oversize_stream_preserves_existing_file() {
+    reset_http_state();
+    let temp = TempDir::new().expect("tempdir");
+    let path = temp.path().join("download.bin");
+    std::fs::write(&path, "original").expect("seed existing file");
+
+    let listener = TcpListener::bind("127.0.0.1:0").expect("bind listener");
+    let port = listener.local_addr().expect("listener addr").port();
+    let thread = std::thread::spawn(move || {
+        let (mut stream, _) = listener.accept().expect("accept client");
+        let request = read_http_request_generic(&mut stream);
+        assert!(request.starts_with("GET /oversize HTTP/1.1\r\n"));
+        stream
+            .write_all(
+                b"HTTP/1.1 200 OK\r\ncontent-type: text/plain\r\nconnection: close\r\n\r\nab",
+            )
+            .expect("write response");
+        stream.flush().expect("flush response");
+    });
+
+    let error = vm_http_download(
+        &format!("http://127.0.0.1:{port}/oversize"),
+        &path.display().to_string(),
+        &BTreeMap::from([("max_response_bytes".to_string(), VmValue::Int(1))]),
+    )
+    .await
+    .expect_err("oversized stream should fail");
+
+    assert!(error
+        .to_string()
+        .contains("response body exceeded max_response_bytes"));
+    assert_eq!(
+        std::fs::read_to_string(&path).expect("existing file"),
+        "original"
+    );
+    thread.join().expect("server thread");
+    reset_http_state();
+}
+
+#[tokio::test]
 async fn http_proxy_routes_requests_through_configured_proxy() {
     reset_http_state();
     let proxy =

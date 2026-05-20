@@ -1,6 +1,8 @@
 use std::cell::RefCell;
 use std::collections::{BTreeMap, HashMap, VecDeque};
+use std::fs::{File, OpenOptions};
 use std::io::Write;
+use std::path::{Path, PathBuf};
 use std::rc::Rc;
 use std::time::{Duration, SystemTime};
 
@@ -1146,91 +1148,245 @@ pub(super) async fn vm_http_download(
         .to_uppercase();
     let parts = parse_http_request_parts(&method, options)?;
     let final_url = final_http_url(url, options, "http_download")?;
-    if let Some(mock_response) = consume_http_mock(
-        &method,
-        &final_url,
-        parts.recorded_headers.clone(),
-        parts.body.clone(),
-    ) {
-        let resolved = resolve_http_path(
-            "http_download",
-            dst_path,
-            crate::stdlib::sandbox::FsAccess::Write,
-        )?;
-        std::fs::write(&resolved, mock_response.body.as_bytes()).map_err(|error| {
-            vm_error(format!(
-                "http_download: failed to write {}: {error}",
-                resolved.display()
-            ))
-        })?;
-        return Ok(build_http_download_response(
-            mock_response.status,
-            mock_response.headers,
-            mock_response.body.len() as u64,
-        ));
-    }
-
-    if !final_url.starts_with("http://") && !final_url.starts_with("https://") {
-        return Err(vm_error(format!(
-            "http_download: URL must start with http:// or https://, got '{url}'"
-        )));
-    }
-    crate::egress::enforce_url_allowed("http_download", &final_url).await?;
     let config = parse_http_options(options);
-    let client = if let Some(session_id) = session_from_options(options) {
-        HTTP_SESSIONS
-            .with(|sessions| sessions.borrow().get(&session_id).cloned())
-            .map(|session| session.client)
-            .ok_or_else(|| {
-                vm_error(format!(
-                    "http_download: unknown HTTP session '{session_id}'"
-                ))
-            })?
-    } else {
-        pooled_http_client(&config)?
-    };
-    let mut request = client
-        .request(parts.method, &final_url)
-        .headers(parts.headers)
-        .timeout(Duration::from_millis(config.total_timeout_ms));
-    if let Some(multipart) = &parts.multipart {
-        request = request.multipart(multipart_form(multipart)?);
-    } else if let Some(body) = parts.body {
-        request = request.body(body);
-    }
-    let mut response = request
-        .send()
-        .await
-        .map_err(|error| vm_error(format!("http_download: request failed: {error}")))?;
-    verify_tls_pin(&response, &config.tls.pinned_sha256)?;
-    let status = response.status().as_u16() as i64;
-    let headers = response_headers(response.headers());
     let resolved = resolve_http_path(
         "http_download",
         dst_path,
         crate::stdlib::sandbox::FsAccess::Write,
     )?;
-    let mut file = std::fs::File::create(&resolved).map_err(|error| {
+    let mut egress_checked = false;
+    let mut client = None;
+
+    for attempt in 0..=config.retry.max {
+        if let Some(mock_response) = consume_http_mock(
+            &method,
+            &final_url,
+            parts.recorded_headers.clone(),
+            parts.body.clone(),
+        ) {
+            let status = mock_response.status.clamp(0, u16::MAX as i64) as u16;
+            if should_retry_response(&config, &parts.method, status, attempt) {
+                let retry_after = if config.retry.respect_retry_after {
+                    mock_retry_after(status, &mock_response.headers)
+                } else {
+                    None
+                };
+                tokio::time::sleep(compute_retry_delay(
+                    attempt,
+                    config.retry.backoff_ms,
+                    retry_after,
+                ))
+                .await;
+                continue;
+            }
+
+            ensure_response_body_within_limit(mock_response.body.len(), config.max_response_bytes)?;
+            std::fs::write(&resolved, mock_response.body.as_bytes()).map_err(|error| {
+                vm_error(format!(
+                    "http_download: failed to write {}: {error}",
+                    resolved.display()
+                ))
+            })?;
+            return Ok(build_http_download_response(
+                mock_response.status,
+                mock_response.headers,
+                mock_response.body.len() as u64,
+            ));
+        }
+
+        if !egress_checked {
+            if !final_url.starts_with("http://") && !final_url.starts_with("https://") {
+                return Err(vm_error(format!(
+                    "http_download: URL must start with http:// or https://, got '{url}'"
+                )));
+            }
+            crate::egress::enforce_url_allowed("http_download", &final_url).await?;
+            egress_checked = true;
+        }
+
+        if client.is_none() {
+            let next = if let Some(session_id) = session_from_options(options) {
+                HTTP_SESSIONS
+                    .with(|sessions| sessions.borrow().get(&session_id).cloned())
+                    .map(|session| session.client)
+                    .ok_or_else(|| {
+                        vm_error(format!(
+                            "http_download: unknown HTTP session '{session_id}'"
+                        ))
+                    })?
+            } else {
+                pooled_http_client(&config)?
+            };
+            client = Some(next);
+        }
+        let active_client = client
+            .clone()
+            .ok_or_else(|| vm_error("http_download: failed to initialize HTTP client"))?;
+
+        let mut request = active_client
+            .request(parts.method.clone(), &final_url)
+            .headers(parts.headers.clone())
+            .timeout(Duration::from_millis(config.total_timeout_ms));
+        if let Some(multipart) = &parts.multipart {
+            request = request.multipart(multipart_form(multipart)?);
+        } else if let Some(body) = &parts.body {
+            request = request.body(body.clone());
+        }
+
+        match request.send().await {
+            Ok(response) => {
+                verify_tls_pin(&response, &config.tls.pinned_sha256)?;
+                let status = response.status().as_u16();
+                if should_retry_response(&config, &parts.method, status, attempt) {
+                    let retry_after = response_retry_after(
+                        status,
+                        response.headers(),
+                        config.retry.respect_retry_after,
+                    );
+                    tokio::time::sleep(compute_retry_delay(
+                        attempt,
+                        config.retry.backoff_ms,
+                        retry_after,
+                    ))
+                    .await;
+                    continue;
+                }
+
+                let headers = response_headers(response.headers());
+                let bytes_written =
+                    write_http_download_response(response, &resolved, config.max_response_bytes)
+                        .await?;
+                return Ok(build_http_download_response(
+                    status as i64,
+                    headers,
+                    bytes_written,
+                ));
+            }
+            Err(error) => {
+                if should_retry_transport(&config, &parts.method, &error, attempt) {
+                    tokio::time::sleep(compute_retry_delay(attempt, config.retry.backoff_ms, None))
+                        .await;
+                    continue;
+                }
+                return Err(vm_error(format!("http_download: request failed: {error}")));
+            }
+        }
+    }
+
+    Err(vm_error("http_download: request failed"))
+}
+
+async fn write_http_download_response(
+    mut response: reqwest::Response,
+    resolved: &Path,
+    max_response_bytes: usize,
+) -> Result<u64, VmError> {
+    if response
+        .content_length()
+        .is_some_and(|len| len > max_response_bytes as u64)
+    {
+        return Err(vm_error(format!(
+            "http: response body exceeded max_response_bytes ({max_response_bytes})"
+        )));
+    }
+
+    let (tmp_path, mut file) = create_http_download_temp(resolved)?;
+    let mut bytes_written = 0_u64;
+    let write_result = async {
+        while let Some(chunk) = response.chunk().await.map_err(|error| {
+            vm_error(format!(
+                "http_download: failed to read response body: {error}"
+            ))
+        })? {
+            let next_len = (bytes_written as usize)
+                .checked_add(chunk.len())
+                .ok_or_else(|| vm_error("http_download: response body length overflow"))?;
+            ensure_response_body_within_limit(next_len, max_response_bytes)?;
+            file.write_all(&chunk).map_err(|error| {
+                vm_error(format!(
+                    "http_download: failed to write {}: {error}",
+                    resolved.display()
+                ))
+            })?;
+            bytes_written += chunk.len() as u64;
+        }
+        Ok(bytes_written)
+    }
+    .await;
+
+    match write_result {
+        Ok(bytes_written) => {
+            finalize_http_download_temp(file, &tmp_path, resolved)?;
+            Ok(bytes_written)
+        }
+        Err(error) => {
+            drop(file);
+            let _ = std::fs::remove_file(&tmp_path);
+            Err(error)
+        }
+    }
+}
+
+fn create_http_download_temp(resolved: &Path) -> Result<(PathBuf, File), VmError> {
+    let parent = resolved
+        .parent()
+        .filter(|path| !path.as_os_str().is_empty());
+    if let Some(parent) = parent {
+        std::fs::create_dir_all(parent).map_err(|error| {
+            vm_error(format!(
+                "http_download: failed to create parent directory {}: {error}",
+                parent.display()
+            ))
+        })?;
+    }
+
+    let file_name = resolved
+        .file_name()
+        .and_then(|value| value.to_str())
+        .unwrap_or("download");
+    let tmp_name = format!(".{file_name}.{}.tmp", uuid::Uuid::now_v7());
+    let tmp_path = parent
+        .map(|parent| parent.join(&tmp_name))
+        .unwrap_or_else(|| PathBuf::from(tmp_name));
+    let file = OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .open(&tmp_path)
+        .map_err(|error| {
+            vm_error(format!(
+                "http_download: failed to create temp file {}: {error}",
+                tmp_path.display()
+            ))
+        })?;
+    Ok((tmp_path, file))
+}
+
+fn finalize_http_download_temp(
+    mut file: File,
+    tmp_path: &Path,
+    resolved: &Path,
+) -> Result<(), VmError> {
+    file.flush().map_err(|error| {
         vm_error(format!(
-            "http_download: failed to create {}: {error}",
+            "http_download: failed to flush temp file {}: {error}",
+            tmp_path.display()
+        ))
+    })?;
+    file.sync_all().map_err(|error| {
+        vm_error(format!(
+            "http_download: failed to sync temp file {}: {error}",
+            tmp_path.display()
+        ))
+    })?;
+    drop(file);
+    std::fs::rename(tmp_path, resolved).map_err(|error| {
+        let _ = std::fs::remove_file(tmp_path);
+        vm_error(format!(
+            "http_download: failed to finalize {}: {error}",
             resolved.display()
         ))
     })?;
-    let mut bytes_written = 0_u64;
-    while let Some(chunk) = response.chunk().await.map_err(|error| {
-        vm_error(format!(
-            "http_download: failed to read response body: {error}"
-        ))
-    })? {
-        file.write_all(&chunk).map_err(|error| {
-            vm_error(format!(
-                "http_download: failed to write {}: {error}",
-                resolved.display()
-            ))
-        })?;
-        bytes_written += chunk.len() as u64;
-    }
-    Ok(build_http_download_response(status, headers, bytes_written))
+    Ok(())
 }
 
 pub(super) async fn vm_http_stream_open(

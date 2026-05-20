@@ -72,7 +72,8 @@ pub(crate) fn register_regex_builtins(vm: &mut Vm) {
             let pattern = args[0].display();
             let replacement = args[1].display();
             let text = args[2].display();
-            let re = get_cached_regex(&pattern, "")?;
+            let flags = args.get(3).map(VmValue::display).unwrap_or_default();
+            let re = get_cached_regex(&pattern, &flags)?;
             return Ok(VmValue::String(Rc::from(
                 re.replace_all(&text, replacement.as_str()).into_owned(),
             )));
@@ -251,6 +252,18 @@ mod tests {
         )
         .unwrap();
         assert_eq!(result.display(), "world hello");
+    }
+
+    #[test]
+    fn replace_honors_optional_flags() {
+        let mut vm = vm();
+        let result = call(
+            &mut vm,
+            "regex_replace",
+            vec![s("hello"), s("hi"), s("HeLLo HELLO"), s("i")],
+        )
+        .unwrap();
+        assert_eq!(result.display(), "hi hi");
     }
 
     #[test]

@@ -335,7 +335,7 @@ fn __classifier_normalize_command(command) -> string {
   /* Collapse all whitespace runs so trivial reformatting doesn't bust the
    * cache (e.g. `cargo  build` vs `cargo build`). Trimmed for the same
    * reason. */
-  return trim(regex_replace("\\s+", to_string(command), " "))
+  return trim(regex_replace("\\s+", " ", to_string(command)))
 }
 
 fn __classifier_cache_key(scope, command) -> string {

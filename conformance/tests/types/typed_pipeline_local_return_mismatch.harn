@@ -1,0 +1,4 @@
+pipeline test(task) -> int {
+  let local = "not an int"
+  return local
+}
