@@ -50,6 +50,30 @@ condensed series summaries instead of full per-patch history.
   at `docs/src/cli-json-contract.md`; a condensed cheatsheet ships in
   `docs/llm/harn-quickref.md`. Stdout stays single-document parseable;
   progress, warnings, and human-readable logs route to stderr.
+- **`harn pack` signed content-addressed run bundles (#1779).** Promotes
+  `harn pack` to a parent command with a `verify` subcommand and adds
+  `--exclude-secrets` to the build path. `harn pack verify <bundle.harnpack>`
+  reads a `.harnpack`, recomputes the canonical bundle hash, runs the
+  embedded Ed25519 signature check (refusing unsigned bundles without
+  `--allow-unsigned`), and cross-checks every per-module
+  `source_hash_blake3` / `harnbc_hash_blake3` against the in-archive payload.
+  Exits non-zero on any mismatch with stable structured error codes
+  (`verify.signature_failed`, `verify.source_mismatch`,
+  `verify.bytecode_mismatch`, `verify.recorded_hash_mismatch`,
+  `verify.archive_failed`, `verify.unsigned`). `--exclude-secrets` refuses
+  to bundle entrypoints whose path matches a conservative secret-bearing
+  glob (`.env`, `.env.*`, `*.pem`, `*.key`, `credentials*`, anything under
+  `secrets/`); pass `--include-secrets` to be explicit about the historical
+  default. Both surfaces emit `JsonEnvelope` payloads under `--json` and
+  register with `harn --json-schemas` (`pack verify` schema v1). The
+  verifier also accepts `--trust-policy <policy.json>` plus
+  `--require-trusted-signer` so compliance pipelines can reject bundles
+  signed by unknown or allowlist-mismatched keys with the structured
+  `verify.untrusted_signer` error code. The local/registry trust model is
+  reused from the existing skill-provenance signer workflow. The
+  conformance suite covers happy path, byte-deterministic re-pack, signed
+  bundle roundtrip, signed-bundle tamper detection, secrets gate, and the
+  JSON envelope contract under `conformance/tests/harn_pack/`.
 - **fs / env / random / net `harness.*` sub-handles (E4.4, #1769).**
   The `harness.fs.*`, `harness.env.*`, `harness.random.*`, and
   `harness.net.*` method surfaces are now wired end-to-end in real

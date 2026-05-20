@@ -1763,11 +1763,55 @@ fn test_parses_pack_signing_flags() {
     let Command::Pack(args) = cli.command.unwrap() else {
         panic!("expected pack command");
     };
-    assert_eq!(args.entrypoint, PathBuf::from("examples/hello.harn"));
+    assert!(args.command.is_none(), "build path takes no subcommand");
+    assert_eq!(args.entrypoint, Some(PathBuf::from("examples/hello.harn")));
     assert_eq!(args.key, Some(PathBuf::from("release.pem")));
     assert_eq!(args.out, Some(PathBuf::from("hello.harnpack")));
     assert!(args.sign);
     assert!(!args.unsigned);
+}
+
+#[test]
+fn test_parses_pack_exclude_secrets_flag() {
+    let cli = Cli::parse_from([
+        "harn",
+        "pack",
+        "examples/hello.harn",
+        "--unsigned",
+        "--exclude-secrets",
+    ]);
+    let Command::Pack(args) = cli.command.unwrap() else {
+        panic!("expected pack command");
+    };
+    assert!(args.exclude_secrets);
+    assert!(!args.include_secrets);
+}
+
+#[test]
+fn test_parses_pack_verify_subcommand() {
+    use crate::cli::PackCommand;
+    let cli = Cli::parse_from([
+        "harn",
+        "pack",
+        "verify",
+        "bundle.harnpack",
+        "--allow-unsigned",
+        "--trust-policy",
+        "policy.json",
+        "--require-trusted-signer",
+        "--json",
+    ]);
+    let Command::Pack(args) = cli.command.unwrap() else {
+        panic!("expected pack command");
+    };
+    let Some(PackCommand::Verify(verify)) = args.command else {
+        panic!("expected pack verify subcommand");
+    };
+    assert_eq!(verify.bundle, PathBuf::from("bundle.harnpack"));
+    assert!(verify.allow_unsigned);
+    assert_eq!(verify.trust_policy, Some(PathBuf::from("policy.json")));
+    assert!(verify.require_trusted_signer);
+    assert!(verify.json);
 }
 
 #[test]
