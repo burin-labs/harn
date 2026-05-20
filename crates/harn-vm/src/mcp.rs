@@ -1352,7 +1352,7 @@ pub fn register_mcp_builtins(vm: &mut Vm) {
         };
 
         let handle = mcp_connect_stdio_impl(&command, &cmd_args, &BTreeMap::new()).await?;
-        Ok(VmValue::McpClient(handle))
+        Ok(VmValue::mcp_client(handle))
     });
 
     // Lazy registry: ensure a registered server is booted and return its
@@ -1370,7 +1370,7 @@ pub fn register_mcp_builtins(vm: &mut Vm) {
             ))));
         }
         let handle = crate::mcp_registry::ensure_active(&name).await?;
-        Ok(VmValue::McpClient(handle))
+        Ok(VmValue::mcp_client(handle))
     });
 
     // Decrement the binder refcount for a registered server. Called by

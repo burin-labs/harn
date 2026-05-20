@@ -644,10 +644,9 @@ fn invalid_type_start(
 
 fn schema_validation_error(value: &VmValue, schema: &VmValue, path: &str) -> Option<EarlyInvalid> {
     match schema::schema_result_value(value, schema, false) {
-        VmValue::EnumVariant {
-            variant, fields, ..
-        } if variant.as_ref() == "Err" => {
-            let reason = fields
+        VmValue::EnumVariant(enum_variant) if enum_variant.is_variant("Result", "Err") => {
+            let reason = enum_variant
+                .fields
                 .first()
                 .and_then(VmValue::as_dict)
                 .and_then(|payload| payload.get("message"))
@@ -852,7 +851,7 @@ mod tests {
 
     fn status_variant(value: &VmValue) -> String {
         match value {
-            VmValue::EnumVariant { variant, .. } => variant.to_string(),
+            VmValue::EnumVariant(enum_variant) => enum_variant.variant.to_string(),
             other => panic!("expected enum status, got {other:?}"),
         }
     }

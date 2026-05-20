@@ -266,7 +266,7 @@ impl super::super::Vm {
                     cancel.subscribe(),
                     "Parallel map stream error",
                 ));
-                self.stack.push(VmValue::Stream(VmStream {
+                self.stack.push(VmValue::stream(VmStream {
                     done: Rc::new(std::cell::Cell::new(false)),
                     receiver: Rc::new(tokio::sync::Mutex::new(rx)),
                     cancel: Some(cancel),
@@ -367,7 +367,7 @@ impl super::super::Vm {
                     cancel_token,
                 },
             );
-            self.stack.push(VmValue::TaskHandle(task_id));
+            self.stack.push(VmValue::task_handle(task_id));
         } else {
             self.stack.push(VmValue::Nil);
         }

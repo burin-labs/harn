@@ -168,22 +168,14 @@ pub fn values_equal(a: &VmValue, b: &VmValue) -> bool {
                     .zip(b.iter())
                     .all(|((k1, v1), (k2, v2))| k1 == k2 && values_equal(v1, v2))
         }
-        (
-            VmValue::EnumVariant {
-                enum_name: a_e,
-                variant: a_v,
-                fields: a_f,
-            },
-            VmValue::EnumVariant {
-                enum_name: b_e,
-                variant: b_v,
-                fields: b_f,
-            },
-        ) => {
-            a_e == b_e
-                && a_v == b_v
-                && a_f.len() == b_f.len()
-                && a_f.iter().zip(b_f.iter()).all(|(x, y)| values_equal(x, y))
+        (VmValue::EnumVariant(a), VmValue::EnumVariant(b)) => {
+            a.enum_name == b.enum_name
+                && a.variant == b.variant
+                && a.fields.len() == b.fields.len()
+                && a.fields
+                    .iter()
+                    .zip(b.fields.iter())
+                    .all(|(x, y)| values_equal(x, y))
         }
         (
             VmValue::StructInstance {

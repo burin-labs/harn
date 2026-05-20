@@ -437,20 +437,13 @@ fn spawn_parallel_race_task(
 ) {
     join_set.spawn_local(async move {
         match vm.call_callable_value(&callable, &[item]).await {
-            Ok(VmValue::EnumVariant {
-                enum_name,
-                variant,
-                fields,
-            }) if enum_name.as_ref() == "Result" && variant.as_ref() == "Ok" => {
-                Ok(fields.first().cloned().unwrap_or(VmValue::Nil))
+            Ok(VmValue::EnumVariant(enum_variant)) if enum_variant.is_variant("Result", "Ok") => {
+                Ok(enum_variant.fields.first().cloned().unwrap_or(VmValue::Nil))
             }
-            Ok(VmValue::EnumVariant {
-                enum_name,
-                variant,
-                fields,
-            }) if enum_name.as_ref() == "Result" && variant.as_ref() == "Err" => {
+            Ok(VmValue::EnumVariant(enum_variant)) if enum_variant.is_variant("Result", "Err") => {
                 let mut message = String::new();
-                fields
+                enum_variant
+                    .fields
                     .first()
                     .cloned()
                     .unwrap_or(VmValue::Nil)

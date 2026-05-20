@@ -972,7 +972,7 @@ fn synthesize_tool_spec(input: Option<&VmValue>) -> Result<SynthesizedToolSpec, 
                 ))));
             }
             let client = match config.get("mcp_client") {
-                Some(VmValue::McpClient(client)) => Some(client.clone()),
+                Some(VmValue::McpClient(client)) => Some(client.as_ref().clone()),
                 Some(VmValue::Nil) | None => None,
                 _ => {
                     return Err(VmError::Thrown(VmValue::String(Rc::from(

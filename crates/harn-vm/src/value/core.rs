@@ -76,12 +76,30 @@ impl StructLayout {
     }
 }
 
+/// Runtime payload for a Harn enum variant.
+#[derive(Debug, Clone)]
+pub struct VmEnumVariant {
+    pub enum_name: Rc<str>,
+    pub variant: Rc<str>,
+    pub fields: Rc<Vec<VmValue>>,
+}
+
+impl VmEnumVariant {
+    pub fn has_enum_name(&self, enum_name: &str) -> bool {
+        self.enum_name.as_ref() == enum_name
+    }
+
+    pub fn is_variant(&self, enum_name: &str, variant: &str) -> bool {
+        self.has_enum_name(enum_name) && self.variant.as_ref() == variant
+    }
+}
+
 /// VM runtime value.
 ///
-/// Rare compound payloads use shared pointers so cloning or moving common
-/// values does not pay for the largest enum alternatives. Unsafe layouts such
-/// as NaN boxing or tagged pointers are deliberately deferred until Harn has a
-/// stronger object/heap story.
+/// Rare compound payloads use shared pointers so stack/local-slot traffic is
+/// bounded by the common scalar and pointer-sized value shapes. Unsafe layouts
+/// such as NaN boxing or tagged pointers are deliberately deferred until Harn
+/// has a stronger object/heap story.
 #[derive(Debug, Clone)]
 pub enum VmValue {
     Int(i64),
@@ -104,24 +122,20 @@ pub enum VmValue {
         name: Rc<str>,
     },
     Duration(i64),
-    EnumVariant {
-        enum_name: Rc<str>,
-        variant: Rc<str>,
-        fields: Rc<Vec<VmValue>>,
-    },
+    EnumVariant(Rc<VmEnumVariant>),
     StructInstance {
         layout: Rc<StructLayout>,
         fields: Rc<Vec<Option<VmValue>>>,
     },
-    TaskHandle(String),
-    Channel(VmChannelHandle),
-    Atomic(VmAtomicHandle),
-    Rng(VmRngHandle),
-    SyncPermit(VmSyncPermitHandle),
-    McpClient(VmMcpClientHandle),
+    TaskHandle(Rc<str>),
+    Channel(Rc<VmChannelHandle>),
+    Atomic(Rc<VmAtomicHandle>),
+    Rng(Rc<VmRngHandle>),
+    SyncPermit(Rc<VmSyncPermitHandle>),
+    McpClient(Rc<VmMcpClientHandle>),
     Set(Rc<Vec<VmValue>>),
-    Generator(VmGenerator),
-    Stream(VmStream),
+    Generator(Rc<VmGenerator>),
+    Stream(Rc<VmStream>),
     Range(VmRange),
     /// Lazy iterator handle. Single-pass, fused. See `crate::vm::iter::VmIter`.
     Iter(Rc<RefCell<crate::vm::iter::VmIter>>),
@@ -132,9 +146,9 @@ pub enum VmValue {
     Pair(Rc<(VmValue, VmValue)>),
     /// Capability handle threaded into `main(harness: Harness)`. The same
     /// variant carries the root handle and each typed sub-handle (`stdio`,
-    /// `clock`, `fs`, `env`, `random`, `net`) so they share one inline
-    /// payload but stay distinguishable via `VmHarness::kind`.
-    Harness(VmHarness),
+    /// `clock`, `fs`, `env`, `random`, `net`) so they share one value shape
+    /// but stay distinguishable via `VmHarness::kind`.
+    Harness(Rc<VmHarness>),
 }
 
 impl VmValue {
@@ -143,11 +157,47 @@ impl VmValue {
         variant: impl Into<Rc<str>>,
         fields: Vec<VmValue>,
     ) -> Self {
-        VmValue::EnumVariant {
+        VmValue::EnumVariant(Rc::new(VmEnumVariant {
             enum_name: enum_name.into(),
             variant: variant.into(),
             fields: Rc::new(fields),
-        }
+        }))
+    }
+
+    pub fn task_handle(id: impl Into<Rc<str>>) -> Self {
+        VmValue::TaskHandle(id.into())
+    }
+
+    pub fn channel(handle: VmChannelHandle) -> Self {
+        VmValue::Channel(Rc::new(handle))
+    }
+
+    pub fn atomic(handle: VmAtomicHandle) -> Self {
+        VmValue::Atomic(Rc::new(handle))
+    }
+
+    pub fn rng(handle: VmRngHandle) -> Self {
+        VmValue::Rng(Rc::new(handle))
+    }
+
+    pub fn sync_permit(handle: VmSyncPermitHandle) -> Self {
+        VmValue::SyncPermit(Rc::new(handle))
+    }
+
+    pub fn mcp_client(handle: VmMcpClientHandle) -> Self {
+        VmValue::McpClient(Rc::new(handle))
+    }
+
+    pub fn generator(generator: VmGenerator) -> Self {
+        VmValue::Generator(Rc::new(generator))
+    }
+
+    pub fn stream(stream: VmStream) -> Self {
+        VmValue::Stream(Rc::new(stream))
+    }
+
+    pub fn harness(handle: VmHarness) -> Self {
+        VmValue::Harness(Rc::new(handle))
     }
 
     pub fn struct_instance(
@@ -171,7 +221,7 @@ impl VmValue {
             VmValue::BuiltinRef(_) => true,
             VmValue::BuiltinRefId { .. } => true,
             VmValue::Duration(ms) => *ms != 0,
-            VmValue::EnumVariant { .. } => true,
+            VmValue::EnumVariant(_) => true,
             VmValue::StructInstance { .. } => true,
             VmValue::TaskHandle(_) => true,
             VmValue::Channel(_) => true,
@@ -205,7 +255,7 @@ impl VmValue {
             VmValue::BuiltinRef(_) => "builtin",
             VmValue::BuiltinRefId { .. } => "builtin",
             VmValue::Duration(_) => "duration",
-            VmValue::EnumVariant { .. } => "enum",
+            VmValue::EnumVariant(_) => "enum",
             VmValue::StructInstance { .. } => "struct",
             VmValue::TaskHandle(_) => "task_handle",
             VmValue::Channel(_) => "channel",
@@ -399,16 +449,12 @@ impl VmValue {
                     let _ = write!(out, "{}{}ms", sign, abs_ms);
                 }
             }
-            VmValue::EnumVariant {
-                enum_name,
-                variant,
-                fields,
-            } => {
-                if fields.is_empty() {
-                    let _ = write!(out, "{enum_name}.{variant}");
+            VmValue::EnumVariant(enum_variant) => {
+                if enum_variant.fields.is_empty() {
+                    let _ = write!(out, "{}.{}", enum_variant.enum_name, enum_variant.variant);
                 } else {
-                    let _ = write!(out, "{enum_name}.{variant}(");
-                    for (i, v) in fields.iter().enumerate() {
+                    let _ = write!(out, "{}.{}(", enum_variant.enum_name, enum_variant.variant);
+                    for (i, v) in enum_variant.fields.iter().enumerate() {
                         if i > 0 {
                             out.push_str(", ");
                         }

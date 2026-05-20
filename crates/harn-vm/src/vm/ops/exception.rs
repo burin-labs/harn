@@ -35,14 +35,10 @@ impl super::super::Vm {
     pub(super) fn execute_try_unwrap(&mut self) -> Result<(), VmError> {
         let val = self.pop()?;
         match &val {
-            VmValue::EnumVariant {
-                enum_name,
-                variant,
-                fields,
-            } if enum_name.as_ref() == "Result" => {
-                if variant.as_ref() == "Ok" {
+            VmValue::EnumVariant(enum_variant) if enum_variant.has_enum_name("Result") => {
+                if enum_variant.is_variant("Result", "Ok") {
                     self.stack
-                        .push(fields.first().cloned().unwrap_or(VmValue::Nil));
+                        .push(enum_variant.fields.first().cloned().unwrap_or(VmValue::Nil));
                     Ok(())
                 } else {
                     Err(VmError::Return(val))
@@ -58,7 +54,7 @@ impl super::super::Vm {
     pub(super) fn execute_try_wrap_ok(&mut self) -> Result<(), VmError> {
         let val = self.pop()?;
         match &val {
-            VmValue::EnumVariant { enum_name, .. } if enum_name.as_ref() == "Result" => {
+            VmValue::EnumVariant(enum_variant) if enum_variant.has_enum_name("Result") => {
                 self.stack.push(val);
             }
             _ => {

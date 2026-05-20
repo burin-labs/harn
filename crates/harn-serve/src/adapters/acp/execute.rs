@@ -263,7 +263,7 @@ pub(super) async fn load_host_mcp_clients(
         match harn_vm::connect_mcp_server_from_json(server).await {
             Ok(handle) => {
                 eprintln!("[harn] mcp: connected to '{}'", handle.name);
-                mcp_dict.insert(handle.name.clone(), harn_vm::VmValue::McpClient(handle));
+                mcp_dict.insert(handle.name.clone(), harn_vm::VmValue::mcp_client(handle));
             }
             Err(err) => {
                 let name = server

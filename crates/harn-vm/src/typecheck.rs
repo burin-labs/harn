@@ -143,7 +143,7 @@ fn matches_type_with_generics(
             "sync_permit" => matches!(value, VmValue::SyncPermit(_)),
             "mcp_client" => matches!(value, VmValue::McpClient(_)),
             "pair" => matches!(value, VmValue::Pair(_)),
-            "enum" => matches!(value, VmValue::EnumVariant { .. }),
+            "enum" => matches!(value, VmValue::EnumVariant(_)),
             "struct" => matches!(value, VmValue::StructInstance { .. }),
             "closure" => matches!(
                 value,
@@ -156,7 +156,7 @@ fn matches_type_with_generics(
                     value
                         .struct_name()
                         .is_some_and(|struct_name| struct_name == name)
-                        || matches!(value, VmValue::EnumVariant { enum_name, .. } if enum_name.as_ref() == name)
+                        || matches!(value, VmValue::EnumVariant(enum_variant) if enum_variant.has_enum_name(name))
                 }
             }
         },

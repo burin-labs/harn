@@ -51,7 +51,7 @@ pub(super) async fn llm_stream_builtin(args: Vec<VmValue>) -> Result<VmValue, Vm
         receiver: Arc::new(tokio::sync::Mutex::new(rx)),
         closed,
     };
-    Ok(VmValue::Channel(handle))
+    Ok(VmValue::channel(handle))
 }
 
 fn llm_stream_chunk(
@@ -182,7 +182,7 @@ pub(super) async fn llm_stream_call_impl(args: Vec<VmValue>) -> Result<VmValue, 
         }
     });
 
-    Ok(VmValue::Stream(VmStream {
+    Ok(VmValue::stream(VmStream {
         done: Rc::new(std::cell::Cell::new(false)),
         receiver: Rc::new(tokio::sync::Mutex::new(stream_rx)),
         cancel: Some(cancel),

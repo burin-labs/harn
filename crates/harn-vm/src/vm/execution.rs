@@ -177,8 +177,8 @@ impl Vm {
             if !handler.error_type.is_empty() {
                 // Typed catch: only match when the thrown enum's type equals the declared type.
                 let matches = match &thrown_value {
-                    VmValue::EnumVariant { enum_name, .. } => {
-                        enum_name.as_ref() == handler.error_type
+                    VmValue::EnumVariant(enum_variant) => {
+                        enum_variant.has_enum_name(&handler.error_type)
                     }
                     _ => false,
                 };
