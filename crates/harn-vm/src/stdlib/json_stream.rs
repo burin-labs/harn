@@ -191,6 +191,50 @@ pub(crate) fn register_json_stream_builtins(vm: &mut Vm) {
         let handle = handle_arg(args, "__json_stream_validator_status")?;
         with_validator(&handle, |validator| Ok(status_value(&validator.status)))
     });
+
+    // `std/json/stream_validate` (E5.1, #1773): plain-dict verdict API
+    // built on top of the same `JsonStreamValidator` storage that the
+    // `stream_validator` closure-bag uses. The verdict shape is
+    // intentionally provider-agnostic (`{verdict: "pending"|"valid"|"invalid",
+    // reason?, path?}`) so streaming agents can dispatch on it without
+    // pattern-matching enum variants.
+    vm.register_builtin("__json_stream_validate_create", |args, _out| {
+        let schema = args.first().ok_or_else(|| {
+            thrown("__json_stream_validate_create: requires a schema argument".to_string())
+        })?;
+        let schema = schema::schema_from_json_schema_value(schema)?;
+        let handle = next_handle();
+        JSON_STREAM_VALIDATORS.with(|validators| {
+            validators.borrow_mut().insert(
+                handle.clone(),
+                JsonStreamValidator {
+                    schema,
+                    buffer: String::new(),
+                    scan: JsonStreamScan::default(),
+                    status: JsonStreamStatus::Pending,
+                    value: None,
+                },
+            );
+        });
+        Ok(VmValue::String(Rc::from(handle)))
+    });
+
+    vm.register_builtin("__json_stream_validate_chunk", |args, _out| {
+        let handle = handle_arg(args, "__json_stream_validate_chunk")?;
+        let chunk = chunk_arg(args, "__json_stream_validate_chunk")?;
+        with_validator(&handle, |validator| {
+            validator.feed(&chunk);
+            Ok(verdict_value(&validator.status))
+        })
+    });
+
+    vm.register_builtin("__json_stream_validate_finalize", |args, _out| {
+        let handle = handle_arg(args, "__json_stream_validate_finalize")?;
+        with_validator(&handle, |validator| {
+            validator.finalize();
+            Ok(verdict_value(&validator.status))
+        })
+    });
 }
 
 impl JsonStreamValidator {
@@ -260,6 +304,22 @@ impl JsonStreamValidator {
             path: path.into(),
         };
         self.value = None;
+    }
+
+    /// Close out a stream. If the validator is still `Pending` and the
+    /// buffer holds a partial document, transition to `Invalid` with an
+    /// "incomplete JSON document" reason. An empty/whitespace-only
+    /// buffer (nothing arrived) stays `Pending` so callers can tell
+    /// "no document yet" apart from "partial document arrived"; an
+    /// already `Valid` or `Invalid` status is left alone.
+    fn finalize(&mut self) {
+        if !matches!(self.status, JsonStreamStatus::Pending) {
+            return;
+        }
+        if self.buffer.trim().is_empty() {
+            return;
+        }
+        self.invalidate("incomplete JSON document at end of stream".to_string(), "$");
     }
 }
 
@@ -439,6 +499,32 @@ fn status_value(status: &JsonStreamStatus) -> VmValue {
             )
         }
     }
+}
+
+/// Plain-dict verdict shape used by the `std/json/stream_validate.*`
+/// builtins. Agents dispatch on the string `verdict` field rather than
+/// pattern-matching an enum variant, which keeps the surface stable for
+/// downstream consumers that build on top of it (SSE adapters,
+/// WebSocket frame validators, etc.).
+fn verdict_value(status: &JsonStreamStatus) -> VmValue {
+    let mut dict = BTreeMap::new();
+    match status {
+        JsonStreamStatus::Pending => {
+            dict.insert("verdict".to_string(), VmValue::String(Rc::from("pending")));
+        }
+        JsonStreamStatus::Valid => {
+            dict.insert("verdict".to_string(), VmValue::String(Rc::from("valid")));
+        }
+        JsonStreamStatus::Invalid { reason, path } => {
+            dict.insert("verdict".to_string(), VmValue::String(Rc::from("invalid")));
+            dict.insert(
+                "reason".to_string(),
+                VmValue::String(Rc::from(reason.as_str())),
+            );
+            dict.insert("path".to_string(), VmValue::String(Rc::from(path.as_str())));
+        }
+    }
+    VmValue::Dict(Rc::new(dict))
 }
 
 fn early_invalid(buffer: &str, schema: &VmValue) -> Option<EarlyInvalid> {
@@ -835,6 +921,123 @@ mod tests {
         assert_eq!(status_variant(&valid), "Valid");
         let invalid = call("__json_stream_validator_feed", vec![handle, string("2")]);
         assert_eq!(status_variant(&invalid), "Invalid");
+    }
+
+    #[test]
+    fn stream_validate_verdict_progresses_pending_to_valid() {
+        reset_json_stream_state();
+        let schema = dict([
+            ("type", string("dict")),
+            ("required", list(vec![string("name")])),
+            (
+                "properties",
+                dict([("name", dict([("type", string("string"))]))]),
+            ),
+        ]);
+        let handle = call("__json_stream_validate_create", vec![schema]);
+        let pending = call(
+            "__json_stream_validate_chunk",
+            vec![handle.clone(), string("{\"name\":")],
+        );
+        let pending_map = pending.as_dict().expect("pending dict");
+        assert_eq!(
+            pending_map.get("verdict").map(VmValue::display).as_deref(),
+            Some("pending")
+        );
+        let valid = call(
+            "__json_stream_validate_chunk",
+            vec![handle, string("\"Ada\"}")],
+        );
+        let valid_map = valid.as_dict().expect("valid dict");
+        assert_eq!(
+            valid_map.get("verdict").map(VmValue::display).as_deref(),
+            Some("valid")
+        );
+    }
+
+    #[test]
+    fn stream_validate_chunk_surfaces_invalid_reason_and_path() {
+        reset_json_stream_state();
+        let schema = dict([
+            ("type", string("dict")),
+            ("required", list(vec![string("age")])),
+            (
+                "properties",
+                dict([("age", dict([("type", string("int"))]))]),
+            ),
+        ]);
+        let handle = call("__json_stream_validate_create", vec![schema]);
+        let invalid = call(
+            "__json_stream_validate_chunk",
+            vec![handle, string("{\"age\":\"")],
+        );
+        let invalid_map = invalid.as_dict().expect("invalid dict");
+        assert_eq!(
+            invalid_map.get("verdict").map(VmValue::display).as_deref(),
+            Some("invalid")
+        );
+        assert!(invalid_map.contains_key("reason"));
+        assert!(invalid_map.contains_key("path"));
+    }
+
+    #[test]
+    fn stream_validate_finalize_invalidates_incomplete_partial() {
+        reset_json_stream_state();
+        let schema = dict([("type", string("dict"))]);
+        let handle = call("__json_stream_validate_create", vec![schema]);
+        let pending = call(
+            "__json_stream_validate_chunk",
+            vec![handle.clone(), string("{\"a\":")],
+        );
+        assert_eq!(
+            pending
+                .as_dict()
+                .and_then(|d| d.get("verdict"))
+                .map(VmValue::display)
+                .as_deref(),
+            Some("pending")
+        );
+        let finalized = call("__json_stream_validate_finalize", vec![handle]);
+        let finalized_map = finalized.as_dict().expect("finalize dict");
+        assert_eq!(
+            finalized_map
+                .get("verdict")
+                .map(VmValue::display)
+                .as_deref(),
+            Some("invalid")
+        );
+        assert_eq!(
+            finalized_map.get("reason").map(VmValue::display).as_deref(),
+            Some("incomplete JSON document at end of stream")
+        );
+    }
+
+    #[test]
+    fn stream_validate_finalize_keeps_valid_intact() {
+        reset_json_stream_state();
+        let schema = dict([("type", string("int"))]);
+        let handle = call("__json_stream_validate_create", vec![schema]);
+        let valid = call(
+            "__json_stream_validate_chunk",
+            vec![handle.clone(), string("42")],
+        );
+        assert_eq!(
+            valid
+                .as_dict()
+                .and_then(|d| d.get("verdict"))
+                .map(VmValue::display)
+                .as_deref(),
+            Some("valid")
+        );
+        let finalized = call("__json_stream_validate_finalize", vec![handle]);
+        assert_eq!(
+            finalized
+                .as_dict()
+                .and_then(|d| d.get("verdict"))
+                .map(VmValue::display)
+                .as_deref(),
+            Some("valid")
+        );
     }
 
     #[test]

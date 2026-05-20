@@ -498,6 +498,7 @@ JSON utility patterns:
 | `pretty(value)` | Pretty-print a value as indented JSON |
 | `safe_parse(text)` | Safely parse JSON, returning nil on failure instead of throwing |
 | `stream_validator(schema)` | Incrementally validate JSON string or bytes chunks against a schema; `feed(chunk)` returns `Pending`, `Valid`, or `Invalid({reason, path})`, and `value()` returns the parsed JSON once valid |
+| `stream_validate_create(schema)` / `stream_validate_chunk(handle, chunk)` / `stream_validate_finalize(handle)` | Standalone partial-JSON validation: each call returns a plain-dict verdict `{verdict: "pending"\|"valid"\|"invalid", reason?, path?}` so streaming agents (SSE chunks, WebSocket frames) can dispatch on string verdicts without pattern-matching enum variants. `stream_validate()` returns a namespace record exposing the same trio as `create`/`chunk`/`finalize` keys |
 | `merge<V>(a: dict<string, V>, b: dict<string, V>)` | Shallow-merge two dicts (keys in b override); preserves the value type |
 | `pick<V>(data: dict<string, V>, keys)` | Pick specific keys from a dict, dropping nil values; preserves the value type |
 | `omit<V>(data: dict<string, V>, keys)` | Omit specific keys from a dict; preserves the value type |
@@ -509,6 +510,12 @@ let data = safe_parse("{\"x\": 1}")   // {x: 1}, or nil on bad input
 let validator = stream_validator({type: "dict", required: ["x"], properties: {x: {type: "int"}}})
 let status = validator.feed("{\"x\": 1}")  // JsonStreamStatus.Valid
 let parsed = validator.value()             // {x: 1}
+
+// std/json/stream_validate — plain-dict verdicts for streaming agents:
+let handle = stream_validate_create({type: "dict", required: ["x"], properties: {x: {type: "int"}}})
+let r1 = stream_validate_chunk(handle, "{\"x\":")    // {verdict: "pending"}
+let r2 = stream_validate_chunk(handle, "1}")          // {verdict: "valid"}
+let r3 = stream_validate_finalize(handle)             // {verdict: "valid"}
 let merged = merge({a: 1}, {b: 2})    // {a: 1, b: 2}
 let subset = pick({a: 1, b: 2, c: 3}, ["a", "c"])  // {a: 1, c: 3}
 let rest = omit({a: 1, b: 2, c: 3}, ["b"])          // {a: 1, c: 3}
