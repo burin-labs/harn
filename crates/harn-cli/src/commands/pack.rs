@@ -16,6 +16,7 @@ use std::path::{Component, Path, PathBuf};
 use std::process;
 
 use ed25519_dalek::Signer;
+use ed25519_dalek::VerifyingKey;
 use harn_parser::DiagnosticSeverity;
 use harn_vm::bytecode_cache;
 use harn_vm::module_artifact;
@@ -1020,6 +1021,8 @@ pub fn verify_json_schema() -> serde_json::Value {
                     "bundle_hash",
                     "signature_present",
                     "signature_verified",
+                    "recorded_bundle_hash",
+                    "key_id",
                     "schema_version",
                     "entrypoint",
                     "module_count",
@@ -1115,6 +1118,12 @@ pub fn verify(args: &PackVerifyArgs) -> Result<PackVerifyJsonData, PackError> {
         )
     })?;
 
+    let trust_policy = args
+        .trust_policy
+        .as_deref()
+        .map(skill_provenance::load_trust_policy)
+        .transpose()
+        .map_err(|err| PackError::new("verify.trust_policy_failed", err))?;
     let signature_present = manifest.signature.is_some();
     let mut signature_verified = false;
     let mut key_id = None;
@@ -1122,7 +1131,56 @@ pub fn verify(args: &PackVerifyArgs) -> Result<PackVerifyJsonData, PackError> {
         key_id = signature.key_id.clone();
         verify_workflow_bundle_signature(manifest, contents)
             .map_err(|err| PackError::new("verify.signature_failed", err.message.clone()))?;
+        if args.require_trusted_signer {
+            let signer_fingerprint = bundle_signer_fingerprint(signature).map_err(|err| {
+                PackError::new(
+                    "verify.signature_failed",
+                    format!("invalid bundle signer: {err}"),
+                )
+            })?;
+            match skill_provenance::check_trusted_signer(&signer_fingerprint, trust_policy.as_ref())
+                .map_err(|err| PackError::new("verify.trust_policy_failed", err))?
+            {
+                skill_provenance::TrustedSignerStatus::Trusted => {}
+                skill_provenance::TrustedSignerStatus::MissingSigner => {
+                    return Err(PackError::new(
+                        "verify.untrusted_signer",
+                        format!(
+                            "bundle {} was signed by {}, but that signer is not present in the trusted signer registry",
+                            args.bundle.display(),
+                            signer_fingerprint
+                        ),
+                    ));
+                }
+                skill_provenance::TrustedSignerStatus::UntrustedSigner => {
+                    return Err(PackError::new(
+                        "verify.untrusted_signer",
+                        format!(
+                            "bundle {} was signed by {}, which is not in the trust policy's trusted_signers allowlist",
+                            args.bundle.display(),
+                            signer_fingerprint
+                        ),
+                    ));
+                }
+            }
+        }
         signature_verified = true;
+        key_id.get_or_insert(
+            signer_fingerprint_from_public_key(&signature.public_key).map_err(|err| {
+                PackError::new(
+                    "verify.signature_failed",
+                    format!("invalid bundle signer: {err}"),
+                )
+            })?,
+        );
+    } else if args.require_trusted_signer {
+        return Err(PackError::new(
+            "verify.untrusted_signer",
+            format!(
+                "bundle {} is unsigned and cannot satisfy --require-trusted-signer",
+                args.bundle.display()
+            ),
+        ));
     } else if !args.allow_unsigned {
         return Err(PackError::new(
             "verify.unsigned",
@@ -1229,4 +1287,40 @@ pub fn verify(args: &PackVerifyArgs) -> Result<PackVerifyJsonData, PackError> {
         module_count: manifest.transitive_modules.len(),
         content_entry_count: contents.len(),
     })
+}
+
+fn bundle_signer_fingerprint(signature: &Ed25519Signature) -> Result<String, String> {
+    match signature.key_id.as_deref() {
+        Some(key_id) if !key_id.trim().is_empty() => Ok(key_id.to_string()),
+        _ => signer_fingerprint_from_public_key(&signature.public_key),
+    }
+}
+
+fn signer_fingerprint_from_public_key(public_key_hex: &str) -> Result<String, String> {
+    let public_key_bytes = decode_hex_32(public_key_hex)?;
+    let verifying_key = VerifyingKey::from_bytes(&public_key_bytes).map_err(|error| {
+        format!("workflow bundle signature public_key is invalid Ed25519: {error}")
+    })?;
+    Ok(skill_provenance::fingerprint_for_key(&verifying_key))
+}
+
+fn decode_hex_32(raw: &str) -> Result<[u8; 32], String> {
+    let trimmed = raw.trim();
+    if trimmed.len() != 64 {
+        return Err(format!(
+            "workflow bundle signature public_key must be 64 hex characters, found {}",
+            trimmed.len()
+        ));
+    }
+    let mut bytes = [0_u8; 32];
+    for (idx, slot) in bytes.iter_mut().enumerate() {
+        let start = idx * 2;
+        let end = start + 2;
+        *slot = u8::from_str_radix(&trimmed[start..end], 16).map_err(|error| {
+            format!(
+                "workflow bundle signature public_key contains invalid hex at byte {idx}: {error}"
+            )
+        })?;
+    }
+    Ok(bytes)
 }

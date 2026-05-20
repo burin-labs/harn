@@ -47,6 +47,14 @@ pub(crate) struct VerifyOptions {
     pub allowed_endorsers: Vec<String>,
 }
 
+#[derive(Debug, Clone, Default, Deserialize)]
+pub(crate) struct TrustPolicy {
+    #[serde(default, alias = "registry_url")]
+    pub signer_registry_url: Option<String>,
+    #[serde(default)]
+    pub trusted_signers: Vec<String>,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum VerificationStatus {
     Verified,
@@ -607,6 +615,36 @@ pub(crate) fn configured_registry_url(anchor: Option<&Path>) -> Option<String> {
         }
     }
     load_skills_config(anchor).and_then(|resolved| resolved.config.signer_registry_url)
+}
+
+pub(crate) fn load_trust_policy(path: &Path) -> Result<TrustPolicy, String> {
+    let raw = fs::read_to_string(path)
+        .map_err(|error| format!("failed to read {}: {error}", path.display()))?;
+    serde_json::from_str(&raw)
+        .map_err(|error| format!("failed to parse trust policy {}: {error}", path.display()))
+}
+
+pub(crate) enum TrustedSignerStatus {
+    Trusted,
+    MissingSigner,
+    UntrustedSigner,
+}
+
+pub(crate) fn check_trusted_signer(
+    fingerprint: &str,
+    policy: Option<&TrustPolicy>,
+) -> Result<TrustedSignerStatus, String> {
+    let registry_url = policy.and_then(|policy| policy.signer_registry_url.as_deref());
+    let Some(_) = resolve_verifying_key(fingerprint, registry_url)? else {
+        return Ok(TrustedSignerStatus::MissingSigner);
+    };
+    if policy.is_some_and(|policy| {
+        !policy.trusted_signers.is_empty()
+            && !policy.trusted_signers.iter().any(|id| id == fingerprint)
+    }) {
+        return Ok(TrustedSignerStatus::UntrustedSigner);
+    }
+    Ok(TrustedSignerStatus::Trusted)
 }
 
 pub(crate) fn signature_path_for(skill_path: &Path) -> PathBuf {

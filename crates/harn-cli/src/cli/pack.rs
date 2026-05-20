@@ -96,6 +96,18 @@ pub struct PackVerifyArgs {
     #[arg(long, default_value_t = false)]
     pub allow_unsigned: bool,
 
+    /// JSON trust policy describing the signer registry URL and
+    /// optional trusted signer allowlist to enforce during
+    /// verification.
+    #[arg(long, value_name = "PATH")]
+    pub trust_policy: Option<PathBuf>,
+
+    /// Require the bundle signer to resolve from the trusted signer
+    /// registry and, when `--trust-policy` supplies a
+    /// `trusted_signers` allowlist, appear in that allowlist too.
+    #[arg(long, default_value_t = false)]
+    pub require_trusted_signer: bool,
+
     /// Emit a `JsonEnvelope` summary instead of a human-readable
     /// one-liner. Schema: `harn --json-schemas --command "pack verify"`.
     #[arg(long, default_value_t = false)]

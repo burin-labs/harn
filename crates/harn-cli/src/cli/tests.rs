@@ -1765,6 +1765,9 @@ fn test_parses_pack_verify_subcommand() {
         "verify",
         "bundle.harnpack",
         "--allow-unsigned",
+        "--trust-policy",
+        "policy.json",
+        "--require-trusted-signer",
         "--json",
     ]);
     let Command::Pack(args) = cli.command.unwrap() else {
@@ -1775,6 +1778,8 @@ fn test_parses_pack_verify_subcommand() {
     };
     assert_eq!(verify.bundle, PathBuf::from("bundle.harnpack"));
     assert!(verify.allow_unsigned);
+    assert_eq!(verify.trust_policy, Some(PathBuf::from("policy.json")));
+    assert!(verify.require_trusted_signer);
     assert!(verify.json);
 }
 

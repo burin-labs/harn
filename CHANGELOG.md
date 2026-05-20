@@ -66,6 +66,11 @@ condensed series summaries instead of full per-patch history.
   `secrets/`); pass `--include-secrets` to be explicit about the historical
   default. Both surfaces emit `JsonEnvelope` payloads under `--json` and
   register with `harn --json-schemas` (`pack verify` schema v1). The
+  verifier also accepts `--trust-policy <policy.json>` plus
+  `--require-trusted-signer` so compliance pipelines can reject bundles
+  signed by unknown or allowlist-mismatched keys with the structured
+  `verify.untrusted_signer` error code. The local/registry trust model is
+  reused from the existing skill-provenance signer workflow. The
   conformance suite covers happy path, byte-deterministic re-pack, signed
   bundle roundtrip, signed-bundle tamper detection, secrets gate, and the
   JSON envelope contract under `conformance/tests/harn_pack/`.
