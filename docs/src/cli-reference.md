@@ -1786,6 +1786,7 @@ Start a workflow server through one of the outbound transport adapters.
 harn serve a2a agent.harn                  # explicit A2A
 harn serve agent.harn                      # legacy A2A shorthand
 harn serve --port 3000 agent.harn          # legacy A2A shorthand with custom port
+harn serve a2a --bind 0.0.0.0:3000 --api-key "$HARN_SERVE_API_KEY" agent.harn
 harn serve acp agent.harn                  # ACP session server over stdio
 harn serve acp --profile-json /tmp/acp.ndjson agent.harn
 harn serve api agent.harn                  # local OpenAPI + SSE Agents API
@@ -1828,7 +1829,9 @@ AgentCard at `/.well-known/agent-card.json`, keeps the legacy
 `/.well-known/a2a-agent`, `/.well-known/agent.json`, and `/agent/card` aliases,
 and supports task send, send-and-wait, streaming/resubscribe, push callback
 registration, and cancel propagation. The legacy shorthand `harn serve <file>`
-is preserved and rewrites internally to `harn serve a2a <file>`.
+is preserved and rewrites internally to `harn serve a2a <file>`. The listener
+binds to `127.0.0.1:8080` by default; use `--bind 0.0.0.0:PORT` only with
+explicit auth and TLS or a trusted edge proxy.
 
 `harn serve acp` starts the packaged ACP adapter on stdio for editor and IDE
 hosts. It creates ACP sessions, executes the target pipeline for each

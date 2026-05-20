@@ -1,12 +1,13 @@
 use std::cell::RefCell;
-use std::path::{Path, PathBuf};
+use std::path::Path;
+use std::process::Stdio;
 use std::rc::Rc;
 
 use async_trait::async_trait;
 use base64::Engine;
 use serde::Serialize;
 use sha2::Digest;
-use tokio::process::Command;
+use tokio::io::AsyncWriteExt;
 
 use crate::event_log::{active_event_log, EventLog, LogEvent, Topic};
 use crate::value::{VmError, VmValue};
@@ -207,16 +208,6 @@ trait OcrBackend {
 
 struct TesseractCliBackend;
 
-struct TempInputFile {
-    path: PathBuf,
-}
-
-impl Drop for TempInputFile {
-    fn drop(&mut self) {
-        let _ = std::fs::remove_file(&self.path);
-    }
-}
-
 pub(crate) fn reset_vision_state() {
     OCR_BACKEND_OVERRIDE.with(|slot| {
         *slot.borrow_mut() = None;
@@ -340,6 +331,11 @@ fn normalized_input_from_path(
     mime_type: Option<String>,
 ) -> Result<NormalizedImageInput, VmError> {
     let resolved = crate::stdlib::process::resolve_source_relative_path(path);
+    crate::stdlib::sandbox::enforce_fs_path(
+        "vision_ocr",
+        &resolved,
+        crate::stdlib::sandbox::FsAccess::Read,
+    )?;
     let bytes = std::fs::read(&resolved).map_err(|error| {
         VmError::Runtime(format!(
             "vision_ocr: failed to read image {}: {error}",
@@ -451,21 +447,6 @@ fn guess_mime_type_from_path(path: &Path) -> String {
         _ => "application/octet-stream",
     }
     .to_string()
-}
-
-fn extension_for_mime(mime_type: &str) -> &'static str {
-    match mime_type {
-        "image/png" => "png",
-        "image/jpeg" => "jpg",
-        "image/tiff" => "tiff",
-        "image/bmp" => "bmp",
-        "image/gif" => "gif",
-        "image/webp" => "webp",
-        "image/x-portable-bitmap" => "pbm",
-        "image/x-portable-graymap" => "pgm",
-        "image/x-portable-pixmap" => "ppm",
-        _ => "bin",
-    }
 }
 
 fn normalized_source(input: &NormalizedImageInput) -> StructuredSource {
@@ -669,7 +650,6 @@ async fn audit_vision_ocr_active(
             "mime_type": input.mime_type,
             "byte_len": input.bytes.len(),
             "sha256": input.sha256,
-            "bytes_base64": base64::engine::general_purpose::STANDARD.encode(&input.bytes),
         },
         "options": options,
         "output": structured,
@@ -701,30 +681,45 @@ impl OcrBackend for TesseractCliBackend {
         input: &NormalizedImageInput,
         options: &OcrOptions,
     ) -> Result<Vec<OcrWordText>, String> {
-        let mut temp_file = None;
-        let input_path = if let Some(path) = input.path.as_ref() {
-            PathBuf::from(path)
+        let (input_arg, stdin_payload) = if let Some(path) = input.path.as_ref() {
+            (path.clone(), None)
         } else {
-            let temp = write_temp_input(input).map_err(|error| error.to_string())?;
-            let path = temp.path.clone();
-            temp_file = Some(temp);
-            path
+            ("stdin".to_string(), Some(input.bytes.as_slice()))
         };
-        let mut command = Command::new("tesseract");
-        command.arg(&input_path).arg("stdout");
+        let mut args = vec![input_arg, "stdout".to_string()];
         if let Some(language) = options.language.as_deref() {
-            command.arg("-l").arg(language);
+            args.push("-l".to_string());
+            args.push(language.to_string());
         }
-        command.arg("tsv");
+        args.push("tsv".to_string());
 
-        let output = command.output().await.map_err(|error| {
+        let mut command = crate::stdlib::sandbox::tokio_command_for("tesseract", &args)
+            .map_err(|error| error.to_string())?;
+        if stdin_payload.is_some() {
+            command.stdin(Stdio::piped());
+        }
+        let mut child = command.spawn().map_err(|error| {
             if error.kind() == std::io::ErrorKind::NotFound {
                 "tesseract executable not found on PATH".to_string()
             } else {
                 format!("failed to launch tesseract: {error}")
             }
         })?;
-        drop(temp_file);
+        if let Some(bytes) = stdin_payload {
+            let mut stdin = child
+                .stdin
+                .take()
+                .ok_or_else(|| "failed to open tesseract stdin".to_string())?;
+            stdin
+                .write_all(bytes)
+                .await
+                .map_err(|error| format!("failed to write image to tesseract stdin: {error}"))?;
+            drop(stdin);
+        }
+        let output = child
+            .wait_with_output()
+            .await
+            .map_err(|error| format!("failed to wait for tesseract: {error}"))?;
 
         if !output.status.success() {
             let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
@@ -739,17 +734,6 @@ impl OcrBackend for TesseractCliBackend {
             .map_err(|error| format!("tesseract returned non-UTF8 TSV output: {error}"))?;
         parse_tesseract_tsv(&stdout)
     }
-}
-
-fn write_temp_input(input: &NormalizedImageInput) -> std::io::Result<TempInputFile> {
-    let mut path = std::env::temp_dir();
-    path.push(format!(
-        "harn-vision-ocr-{}.{}",
-        uuid::Uuid::now_v7(),
-        extension_for_mime(&input.mime_type)
-    ));
-    std::fs::write(&path, &input.bytes)?;
-    Ok(TempInputFile { path })
 }
 
 fn parse_tesseract_tsv(tsv: &str) -> Result<Vec<OcrWordText>, String> {
@@ -942,6 +926,41 @@ mod tests {
     }
 
     #[test]
+    fn normalize_image_input_rejects_path_outside_workspace_roots() {
+        let allowed = tempfile::tempdir().unwrap();
+        let outside = tempfile::tempdir().unwrap();
+        let outside_image = outside.path().join("secret.png");
+        std::fs::write(&outside_image, b"fake").unwrap();
+        let policy = crate::orchestration::CapabilityPolicy {
+            capabilities: std::collections::BTreeMap::from([
+                ("vision".to_string(), vec!["ocr".to_string()]),
+                ("process".to_string(), vec!["exec".to_string()]),
+            ]),
+            workspace_roots: vec![allowed.path().display().to_string()],
+            side_effect_level: Some("process_exec".to_string()),
+            ..Default::default()
+        };
+        let input = VmValue::String(Rc::from(outside_image.display().to_string()));
+
+        crate::orchestration::push_execution_policy(policy);
+        let result = normalize_image_input(Some(&input));
+        crate::orchestration::pop_execution_policy();
+
+        let err = result.unwrap_err();
+        assert!(matches!(
+            err,
+            VmError::CategorizedError {
+                category: crate::value::ErrorCategory::ToolRejected,
+                ..
+            }
+        ));
+        assert!(
+            err.to_string().contains("sandbox violation"),
+            "expected sandbox violation, got {err}"
+        );
+    }
+
+    #[test]
     fn build_structured_text_groups_blocks_lines_and_offsets() {
         let structured = build_structured_text(
             &[
@@ -1024,7 +1043,12 @@ mod tests {
         assert_eq!(events.len(), 1);
         assert_eq!(events[0].1.kind, "ocr_completed");
         assert_eq!(events[0].1.payload["output"]["text"], "Alpha Beta");
-        assert_eq!(events[0].1.payload["input"]["bytes_base64"], "ZmFrZQ==");
+        assert!(
+            events[0].1.payload["input"]
+                .as_object()
+                .is_some_and(|input| !input.contains_key("bytes_base64")),
+            "audit events should keep OCR metadata without retaining raw image bytes"
+        );
 
         reset_vision_state();
         crate::event_log::reset_active_event_log();

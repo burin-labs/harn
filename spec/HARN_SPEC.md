@@ -6325,6 +6325,11 @@ When a workflow or handler runs under an active `CapabilityPolicy`,
 Harn also enforces `workspace_roots` at runtime for filesystem builtins.
 Attempts to read, write, create, copy, stat, list, or delete paths outside
 the declared roots fail as typed `tool_rejected` sandbox violations.
+File-backed prompt-template rendering (`render`, `render_prompt`,
+`render_with_provenance`, `template.render`, and `include`) follows the
+same read boundary. Embedded `std/...` prompt assets are not filesystem
+reads.
+Path-backed `vision_ocr(...)` image inputs follow the same read boundary.
 Process cwd escapes through `exec_at` / `shell_at` are rejected the same way.
 
 Pure-compute handlers can run through the WASM sandbox entrypoint exposed
@@ -6340,7 +6345,9 @@ workspace-root path enforcement plus best-effort OS confinement, with
 the platform mechanism is unavailable. Pipelines opt into
 `sandbox_profile: "os_hardened"` to make the OS confinement required —
 spawns return `tool_rejected` if the platform mechanism is missing,
-regardless of `HARN_HANDLER_SANDBOX`. The per-platform mechanisms are:
+regardless of `HARN_HANDLER_SANDBOX`. The Tesseract subprocess used by
+`vision_ocr(...)` is launched through the same sandbox entrypoint. The
+per-platform mechanisms are:
 
 - **Linux**: a Landlock LSM ruleset derived from `workspace_roots` and
   the workspace capability set, plus a seccomp-bpf blocklist of

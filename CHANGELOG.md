@@ -51,6 +51,34 @@ condensed series summaries instead of full per-patch history.
   `docs/llm/harn-quickref.md`. Stdout stays single-document parseable;
   progress, warnings, and human-readable logs route to stderr.
 
+### Security
+
+- **Template render sandbox hardening.** File-backed `render(...)`,
+  `render_prompt(...)`, `render_with_provenance(...)`, `{{ include ... }}`,
+  and `host_call("template.render", ...)` now enforce the active
+  `workspace_roots` read boundary before reading template files. This closes
+  a policy bypass where template rendering could read arbitrary readable files
+  even when `read_file(...)` was correctly blocked.
+
+- **Vision OCR sandbox and audit hardening.** Path-backed `vision_ocr(...)`
+  inputs now enforce the same active `workspace_roots` read boundary before
+  loading image bytes, the Tesseract backend runs through the runtime process
+  sandbox, and `audit.vision_ocr` records image metadata and hashes without
+  retaining the raw image payload.
+
+- **A2A access-control hardening.** `harn serve a2a` now enforces configured
+  API-key/HMAC auth before any non-discovery A2A RPC or REST operation creates,
+  reads, cancels, subscribes to, or mutates task state. Unauthenticated callers
+  receive HTTP 401 plus `WWW-Authenticate` instead of leaving rejected task
+  history behind or reaching task-management and push-callback operations.
+  The A2A listener also defaults to loopback; use `--bind 0.0.0.0:PORT`
+  explicitly for public deployments behind auth and TLS or a trusted edge.
+
+- **MCP HTTP session teardown hardening.** Script-driven MCP Streamable HTTP
+  now applies the same Origin and `mcp-protocol-version` checks to `DELETE
+  /mcp` as it already applied to POST/GET, preventing cross-origin session
+  teardown when a browser-visible session id is present.
+
 ## v0.8.27
 
 ### Added

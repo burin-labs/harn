@@ -91,6 +91,12 @@ impl TemplateAsset {
     }
 
     pub(crate) fn filesystem(path: PathBuf, read_prefix: &str) -> Result<Self, String> {
+        crate::stdlib::sandbox::enforce_fs_path(
+            "template.render",
+            &path,
+            crate::stdlib::sandbox::FsAccess::Read,
+        )
+        .map_err(|error| error.to_string())?;
         let source = std::fs::read_to_string(&path)
             .map_err(|error| format!("{read_prefix} {}: {error}", path.display()))?;
         Ok(Self::from_filesystem_source(path, source))

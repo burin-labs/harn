@@ -841,6 +841,9 @@ through timestamp arithmetic.
 |---|---|---|---|
 | `vision_ocr(image, options?)` | image: string or dict, options: dict | dict | Run deterministic OCR over an image and return `StructuredText` with `text`, `blocks`, `lines`, `tokens`, `source`, `backend`, and `stats`. `image` may be a path string, `{path, ...}`, `{storage: {path}, ...}`, `{bytes_base64, mime_type, name?}`, or `{data_url, name?}`. `options.language` sets the Tesseract language code when the default backend is in use |
 
+Path-backed inputs obey the active handler `workspace_roots` read boundary.
+Audit events record image metadata and hashes, not raw image bytes.
+
 Example:
 
 ```harn

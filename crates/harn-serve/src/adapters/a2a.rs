@@ -89,7 +89,7 @@ pub struct A2aHttpServeOptions {
 impl Default for A2aHttpServeOptions {
     fn default() -> Self {
         Self {
-            bind: "0.0.0.0:8080".parse().expect("valid bind addr"),
+            bind: "127.0.0.1:8080".parse().expect("valid bind addr"),
             public_url: None,
             tls: HttpTlsConfig::plain(),
         }
