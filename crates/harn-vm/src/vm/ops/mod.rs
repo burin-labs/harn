@@ -108,6 +108,12 @@ impl super::Vm {
             // we hand off to `execute_op_async` for Channel/Generator/
             // Stream/VmIter without having touched `ip`.
             Op::IterNext => return self.execute_iter_next_sync(),
+            // Call is split: the sync fast path handles non-generator
+            // user closures with no `@step` definition attached. Other
+            // callee variants (string, builtin ref, etc.) return `None`
+            // and fall through to `execute_call_async` without touching
+            // `ip`.
+            Op::Call => return self.execute_call_sync(),
             Op::Throw => self.execute_throw(),
             Op::TryCatchSetup => {
                 self.execute_try_catch_setup();
@@ -172,8 +178,7 @@ impl super::Vm {
             // `execute_op_async`. Keeping these in a single explicit arm
             // keeps the sync/async classification visible alongside the
             // sync dispatch table.
-            Op::Call
-            | Op::CallBuiltin
+            Op::CallBuiltin
             | Op::CallBuiltinSpread
             | Op::TailCall
             | Op::MethodCall
@@ -198,7 +203,7 @@ impl super::Vm {
     /// catch-all is a coverage bug between the two dispatch tables.
     pub(super) async fn execute_op_async(&mut self, op: Op) -> Result<(), VmError> {
         match op {
-            Op::Call => self.execute_call().await,
+            Op::Call => self.execute_call_async().await,
             Op::CallBuiltin => self.execute_call_builtin().await,
             Op::CallBuiltinSpread => self.execute_call_builtin_spread().await,
             Op::TailCall => self.execute_tail_call().await,
