@@ -39,9 +39,13 @@ logs and progress always go to stderr.
 ## Files and execution
 
 - File extension: `.harn`.
-- Entry points: a file can either declare `pipeline default() { ... }`
-  (pipeline mode — `compile_top_level_declarations` runs first, then
-  the pipeline body) or be a bare script with top-level statements.
+- Entry points:
+  - Preferred capability-aware script entrypoint:
+    `fn main(harness: Harness) { ... }`.
+  - Workflow entrypoint: `pipeline default() { ... }` (pipeline mode —
+    `compile_top_level_declarations` runs first, then the pipeline
+    body).
+  - Bare script with top-level statements for tiny one-off files.
 - Run: `harn run script.harn`.
 - Inline: `harn run -e 'log("hi")'`. The snippet is wrapped in
   `pipeline main(task) { ... }`; leading `import "..."` /
