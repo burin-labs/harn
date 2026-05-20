@@ -1,3 +1,4 @@
+use std::cell::Cell;
 use std::collections::{BTreeMap, HashSet};
 use std::path::Path;
 use std::rc::Rc;
@@ -1296,6 +1297,37 @@ fn test_parallel_each_basic() {
     assert_eq!(out, "[harn] [1, 4, 9]");
 }
 
+#[tokio::test(flavor = "current_thread", start_paused = true)]
+async fn test_parallel_each_stream_break_cancels_remaining_work() {
+    let local = tokio::task::LocalSet::new();
+    local
+        .run_until(async {
+            let handle = tokio::task::spawn_local(async {
+                run_harn_result_async(
+                    r#"pipeline t(task) {
+let completed = atomic(0)
+let results = parallel each [1, 2, 3] with { max_concurrent: 1 } { item ->
+  sleep(1s)
+  atomic_add(completed, 1)
+  return item
+} as stream
+for item in results {
+  break
+}
+sleep(3s)
+log(atomic_get(completed))
+}"#,
+                )
+                .await
+            });
+            tokio::task::yield_now().await;
+            tokio::time::advance(Duration::from_secs(4)).await;
+            let (output, _) = handle.await.expect("join VM task").expect("run Harn");
+            assert_eq!(output.trim_end(), "[harn] 1");
+        })
+        .await;
+}
+
 #[test]
 fn test_spawn_await() {
     let out = run_output(
@@ -1525,6 +1557,58 @@ try {
             tokio::time::advance(Duration::from_millis(50)).await;
             let (output, _) = handle.await.expect("join VM task").expect("run Harn");
             assert_eq!(output.trim_end(), "[harn] caught");
+        })
+        .await;
+}
+
+#[tokio::test(flavor = "current_thread", start_paused = true)]
+async fn test_cancel_during_await_aborts_spawned_task() {
+    let local = tokio::task::LocalSet::new();
+    local
+        .run_until(async {
+            let source = r#"pipeline t(task) {
+let handle = spawn {
+  sleep(1s)
+  mark()
+}
+await(handle)
+}"#;
+            let mut lexer = Lexer::new(source);
+            let tokens = lexer.tokenize().unwrap();
+            let mut parser = Parser::new(tokens);
+            let program = parser.parse().unwrap();
+            let chunk = Compiler::new().compile(&program).unwrap();
+
+            let marker = Rc::new(Cell::new(false));
+            let marker_for_builtin = marker.clone();
+            let cancel_token = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+            let vm_cancel_token = cancel_token.clone();
+            let handle = tokio::task::spawn_local(async move {
+                let mut vm = Vm::new();
+                register_vm_stdlib(&mut vm);
+                vm.register_builtin("mark", move |_, _| {
+                    marker_for_builtin.set(true);
+                    Ok(VmValue::Nil)
+                });
+                vm.install_cancel_token(vm_cancel_token);
+                let result = vm.execute(&chunk).await;
+                (vm.output().to_string(), result)
+            });
+
+            tokio::task::yield_now().await;
+            cancel_token.store(true, std::sync::atomic::Ordering::SeqCst);
+            tokio::time::advance(Duration::from_millis(300)).await;
+            let (output, result) = handle.await.expect("join VM task");
+            assert!(output.is_empty());
+            let error = result.expect_err("parent await should be cancelled");
+            assert!(error.to_string().contains("kind:cancelled"));
+
+            tokio::time::advance(Duration::from_secs(1)).await;
+            tokio::task::yield_now().await;
+            assert!(
+                !marker.get(),
+                "spawned task should be aborted when parent await is cancelled"
+            );
         })
         .await;
 }

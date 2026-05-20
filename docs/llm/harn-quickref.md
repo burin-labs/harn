@@ -902,7 +902,7 @@ log(response.logprobs)       // present when requested and returned
 |---|---|---|---|
 | `provider` | string | `"auto"` | Explicit provider wins. `"auto"` infers from `model`; see the resolution table below. |
 | `model` | string | (inferred) | `local:gemma-4-e4b-it` strips the `local:` transport prefix and routes through Ollama. |
-| `max_tokens` | int | 4096 | |
+| `max_tokens` | int | 16384 | |
 | `temperature` | float | provider default | |
 | `logprobs` | bool | false | Request token log probabilities when the selected provider route supports them. |
 | `top_logprobs` | int | nil | Request top alternative token log probabilities where supported. |

@@ -1012,7 +1012,7 @@ module.exports = grammar({
 
     float_literal: (_) => /\d+\.\d+/,
 
-    duration_literal: (_) => /\d+(ms|s|m|h)/,
+    duration_literal: (_) => /\d+(ms|s|m|h|d|w)/,
 
     true: (_) => "true",
     false: (_) => "false",

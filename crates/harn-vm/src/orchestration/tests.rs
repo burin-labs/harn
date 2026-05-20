@@ -2,6 +2,7 @@
 
 use super::records::{myers_diff, DiffOp};
 use super::*;
+use futures::StreamExt;
 use std::collections::BTreeMap;
 use std::rc::Rc;
 
@@ -799,6 +800,9 @@ async fn save_run_record_publishes_action_graph_updates_to_event_log() {
     let temp_dir = tempfile::tempdir().unwrap();
     let run_path = temp_dir.path().join("run.json");
     crate::event_log::install_default_for_base_dir(temp_dir.path()).expect("install event log");
+    let topic = crate::event_log::Topic::new("observability.action_graph").unwrap();
+    let log = crate::event_log::active_event_log().expect("active event log");
+    let mut stream = log.clone().subscribe(&topic, None).await.unwrap();
 
     let mut run = RunRecord {
         id: "run_event_log".to_string(),
@@ -842,14 +846,10 @@ async fn save_run_record_publishes_action_graph_updates_to_event_log() {
     save_run_record(&run, Some(run_path.to_str().unwrap())).unwrap();
     run.status = "completed".to_string();
     save_run_record(&run, Some(run_path.to_str().unwrap())).unwrap();
-    // Yield to the spawned event-log writer. With paused virtual time the
-    // sleep auto-advances so the runtime can poll the spawned task to
-    // completion without burning wall-clock.
-    tokio::time::sleep(std::time::Duration::from_millis(25)).await;
-
-    let topic = crate::event_log::Topic::new("observability.action_graph").unwrap();
-    let log = crate::event_log::active_event_log().expect("active event log");
-    let events = log.read_range(&topic, None, usize::MAX).await.unwrap();
+    let events = [
+        stream.next().await.unwrap().unwrap(),
+        stream.next().await.unwrap().unwrap(),
+    ];
     assert_eq!(events.len(), 2);
     assert!(events
         .iter()

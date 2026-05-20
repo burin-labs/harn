@@ -86,6 +86,7 @@ described below (`std/text`, `std/json`, `std/math`, `std/collections`,
 `std/runtime`, `std/command`, `std/gha`, `std/tui`, `std/git`,
 `std/review`, `std/experiments`,
 `std/project`, `std/memory`, `std/prompt_library`, `std/monitors`,
+`std/net_policy`,
 `std/oauth/providers`, `std/triage`, `std/worktree`, `std/checkpoint`,
 `std/personas/prelude`, `std/personas/bulletins`,
 `std/connectors/shared`, and provider-specific `std/connectors/...` modules).
@@ -117,6 +118,7 @@ import "std/llm/budget"
 import "std/llm/prompts"
 import "std/math"
 import "std/monitors"
+import "std/net_policy"
 import "std/path"
 import "std/personas/bulletins"
 import "std/personas/prelude"

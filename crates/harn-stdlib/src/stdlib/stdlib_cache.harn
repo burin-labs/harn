@@ -10,7 +10,7 @@
 // hit/miss counters and, when configured with a `session_id`, emits cache
 // events on the agent event tape so testbench replay can pin them.
 //
-// See docs/src/cache.md for adoption recipes (persona caller, context-pack
+// See docs/src/stdlib/cache.md for adoption recipes (persona caller, context-pack
 // query, crystallization shadow-run fixture).
 import { agent_emit_event } from "std/agent/state"
 

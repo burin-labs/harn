@@ -35,8 +35,7 @@ pipeline default() {
   let peak = atomic(0)
   let work = [1, 2, 3, 4, 5, 6, 7, 8]
   parallel each work with { max_concurrent: 2 } { _ ->
-    let now = atomic_add(in_flight, 1)
-    // atomic_add returns the new value, so we compare directly.
+    let now = atomic_add(in_flight, 1) + 1
     if now > atomic_get(peak) {
       atomic_set(peak, now)
     }
@@ -44,4 +43,5 @@ pipeline default() {
     atomic_add(in_flight, -1)
   }
   __io_println(atomic_get(peak) <= 2)
+  __io_println(atomic_get(peak) == 2)
 }

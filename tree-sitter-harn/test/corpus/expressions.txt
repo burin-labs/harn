@@ -1,4 +1,36 @@
 ==================
+Const Keyword Property And Long Durations
+==================
+
+pipeline test() {
+  const wait = 1d
+  log(config.const)
+  sleep(2w)
+}
+
+---
+
+(source_file
+  (pipeline_declaration
+    name: (identifier)
+    (block
+      (const_binding
+        name: (identifier)
+        value: (duration_literal))
+      (expression_statement
+        (call_expression
+          function: (identifier)
+          (argument_list
+            (property_access
+              object: (identifier)
+              property: (keyword_identifier)))))
+      (expression_statement
+        (call_expression
+          function: (identifier)
+          (argument_list
+            (duration_literal)))))))
+
+==================
 Generic Call Type Arguments
 ==================
 

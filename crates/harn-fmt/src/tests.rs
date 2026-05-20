@@ -247,6 +247,8 @@ fn test_format_duration() {
     assert_eq!(format_duration(5000), "5s");
     assert_eq!(format_duration(60000), "1m");
     assert_eq!(format_duration(3600000), "1h");
+    assert_eq!(format_duration(86_400_000), "1d");
+    assert_eq!(format_duration(604_800_000), "1w");
     assert_eq!(format_duration(500), "500ms");
 }
 

@@ -5,8 +5,8 @@ pipeline test(task) {
   log(30m)
   log(2h)
   // New: days and weeks
-  log(24h)
-  log(48h)
-  log(168h)
-  log(336h)
+  log(1d)
+  log(2d)
+  log(1w)
+  log(2w)
 }

@@ -6,7 +6,7 @@ use super::dto::{
     PortalStorySection, PortalTemplateBranch, PortalTemplateRender, PortalTranscriptMessage,
     PortalTranscriptStep,
 };
-use super::util::preview_text;
+use super::util::{preview_text, redacted_json_value, redacted_string};
 
 pub(super) fn discover_transcript_steps(
     run_dir: &Path,
@@ -334,25 +334,31 @@ pub(super) fn build_story(run: &harn_vm::orchestration::RunRecord) -> Vec<Portal
     let mut story = Vec::new();
 
     if let Some(transcript) = &run.transcript {
-        collect_story_sections(transcript, "Run transcript", "run", &mut story);
+        collect_story_sections(
+            &redacted_json_value(transcript),
+            "Run transcript",
+            "run",
+            &mut story,
+        );
     }
 
     for stage in &run.stages {
         if let Some(transcript) = &stage.transcript {
             collect_story_sections(
-                transcript,
+                &redacted_json_value(transcript),
                 &format!("Stage {}", stage.node_id),
                 "stage",
                 &mut story,
             );
         } else if let Some(text) = &stage.visible_text {
+            let text = redacted_string(text);
             story.push(PortalStorySection {
                 title: format!("Stage {}", stage.node_id),
                 scope: "stage".to_string(),
                 role: "assistant".to_string(),
                 source: "visible_text".to_string(),
-                preview: preview_text(text),
-                text: text.clone(),
+                preview: preview_text(&text),
+                text,
             });
         }
     }

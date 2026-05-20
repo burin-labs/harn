@@ -433,6 +433,16 @@ fn launch_output_logs_keeps_only_tail_for_large_outputs() {
 }
 
 #[test]
+fn launch_output_logs_redacts_secrets() {
+    let logs = launch_output_logs(
+        b"stdout ok",
+        b"failed with authorization=Bearer sk-proj-abcdefghijklmnopqrstuvwxyz1234567890",
+    );
+    assert!(logs.contains("redacted"));
+    assert!(!logs.contains("sk-proj-abcdefghijklmnopqrstuvwxyz1234567890"));
+}
+
+#[test]
 fn prune_completed_launch_jobs_keeps_running_jobs() {
     let mut jobs = HashMap::new();
     for idx in 0..205 {
@@ -662,15 +672,21 @@ async fn api_dlq_lists_filters_and_details_entries() {
                     "id": "trigger_evt_dlq",
                     "provider": "github",
                     "kind": "issues.opened",
-                    "headers": {"x-delivery": "delivery-1"},
-                    "provider_payload": {"issue": {"number": 7}}
+                    "headers": {
+                        "x-delivery": "delivery-1",
+                        "authorization": "Bearer dlq-secret-token"
+                    },
+                    "provider_payload": {
+                        "issue": {"number": 7},
+                        "access_token": "payload-secret-token"
+                    }
                 },
                 "attempts": [
                     {
                         "attempt": 1,
                         "completed_at": "2026-04-24T10:00:00Z",
                         "outcome": "failed",
-                        "error_msg": "provider returned 500"
+                        "error_msg": "provider returned 500 with sk-proj-abcdefghijklmnopqrstuvwxyz1234567890"
                     }
                 ]
             }),
@@ -686,7 +702,8 @@ async fn api_dlq_lists_filters_and_details_entries() {
             serde_json::json!({
                 "event_id": "trigger_evt_dlq",
                 "result": false,
-                "reason": "fixture"
+                "reason": "fixture",
+                "access_token": "predicate-secret-token"
             }),
         ),
     )
@@ -717,11 +734,28 @@ async fn api_dlq_lists_filters_and_details_entries() {
     );
     assert_eq!(payload["entries"][0]["error_class"], "provider_5xx");
     assert_eq!(
+        payload["entries"][0]["headers"]["authorization"],
+        harn_vm::redact::REDACTED_PLACEHOLDER
+    );
+    assert_eq!(
+        payload["entries"][0]["payload"]["access_token"],
+        harn_vm::redact::REDACTED_PLACEHOLDER
+    );
+    let attempt_error = payload["entries"][0]["attempt_history"][0]["error"]
+        .as_str()
+        .unwrap();
+    assert!(attempt_error.contains("redacted"));
+    assert!(!attempt_error.contains("sk-proj-abcdefghijklmnopqrstuvwxyz1234567890"));
+    assert_eq!(
         payload["entries"][0]["predicate_trace"]
             .as_array()
             .unwrap()
             .len(),
         1
+    );
+    assert_eq!(
+        payload["entries"][0]["predicate_trace"][0]["payload"]["access_token"],
+        harn_vm::redact::REDACTED_PLACEHOLDER
     );
 
     let response = app

@@ -437,10 +437,11 @@ pub(crate) async fn execute_llm_call(
     options: Option<std::collections::BTreeMap<String, VmValue>>,
     bridge: Option<&Rc<crate::bridge::HostBridge>>,
 ) -> Result<VmValue, VmError> {
-    if let Some(policy) = opts.routing_policy.clone() {
-        return execute_with_routing_policy(policy, opts, bridge).await;
-    }
-    let outcome = execute_schema_retry_loop(opts, options, bridge).await?;
+    let outcome = if let Some(policy) = opts.routing_policy.clone() {
+        execute_routing_schema_retry_loop(policy, opts, options, bridge).await?
+    } else {
+        execute_schema_retry_loop(opts, options, bridge).await?
+    };
     if outcome.errors.is_empty() {
         return Ok(outcome.vm_result);
     }
@@ -472,19 +473,98 @@ pub(crate) async fn execute_llm_call(
 /// racing, and per-call / session budget enforcement; the winning
 /// link's result is wrapped in the standard `llm_call` envelope plus
 /// a `routing` block summarizing every attempt.
-async fn execute_with_routing_policy(
+async fn execute_routing_schema_retry_loop(
     policy: Rc<routing::RoutingPolicyConfig>,
     mut opts: api::LlmCallOptions,
+    options: Option<std::collections::BTreeMap<String, VmValue>>,
     bridge: Option<&Rc<crate::bridge::HostBridge>>,
-) -> Result<VmValue, VmError> {
-    let (result, trace) = routing::execute_with_routing(&policy, opts.clone(), bridge).await?;
-    // Snap option metadata to the winning link so transcript / portal
-    // payloads describe the call that actually ran.
-    opts.provider = result.provider.clone();
-    opts.model = result.model.clone();
-    opts.routing_decision = Some(routing::trace_to_decision(&trace, &policy));
-    let envelope = agent_config::build_llm_call_result(&result, &opts);
-    Ok(attach_routing_block(envelope, &trace, &policy))
+) -> Result<SchemaLoopOutcome, VmError> {
+    let _ = structural_experiments::apply_structural_experiment(&mut opts, None).await?;
+    let schema_retries = helpers::opt_int(&options, "schema_retries")
+        .unwrap_or(1)
+        .max(0) as usize;
+    let nudge_mode = parse_schema_nudge(&options);
+    let output_validation_mode = output_validation_mode(&opts).to_string();
+    let expects_structured = helpers::expects_structured_output(&opts);
+    let original_messages = opts.messages.clone();
+
+    for attempt in 0..=schema_retries {
+        let (vm_result, raw_text, errors) =
+            match routing::execute_with_routing(&policy, opts.clone(), bridge).await {
+                Ok((result, trace)) => {
+                    let raw_text = result.text.clone();
+                    // Snap option metadata to the winning link so transcript / portal
+                    // payloads describe the call that actually ran.
+                    opts.provider = result.provider.clone();
+                    opts.model = result.model.clone();
+                    opts.routing_decision = Some(routing::trace_to_decision(&trace, &policy));
+                    let envelope = attach_routing_block(
+                        agent_config::build_llm_call_result(&result, &opts),
+                        &trace,
+                        &policy,
+                    );
+                    if !expects_structured {
+                        return Ok(SchemaLoopOutcome {
+                            vm_result: envelope,
+                            raw_text,
+                            errors: Vec::new(),
+                            attempts: attempt + 1,
+                            schema_retries_budget: schema_retries,
+                            output_validation_mode,
+                        });
+                    }
+                    let errors = structured_output_errors(&envelope, &opts);
+                    (envelope, raw_text, errors)
+                }
+                Err(error) => match parse_schema_stream_abort(&error) {
+                    Some(abort) => {
+                        let errors = vec![schema_stream_abort_message(&abort)];
+                        let vm_result = schema_stream_aborted_result_value(&abort);
+                        (vm_result, String::new(), errors)
+                    }
+                    None => return Err(error),
+                },
+            };
+        if errors.is_empty() {
+            return Ok(SchemaLoopOutcome {
+                vm_result,
+                raw_text,
+                errors,
+                attempts: attempt + 1,
+                schema_retries_budget: schema_retries,
+                output_validation_mode,
+            });
+        }
+
+        let more_attempts = attempt < schema_retries;
+        if more_attempts {
+            let nudge = build_schema_nudge(&errors, opts.output_schema.as_ref(), &nudge_mode);
+            emit_agent_event(AgentTraceEvent::SchemaRetry {
+                attempt: attempt + 1,
+                errors: errors.clone(),
+                nudge_used: !nudge.is_empty(),
+                correction_prompt: nudge.clone(),
+            });
+            opts.messages = original_messages.clone();
+            if !nudge.is_empty() {
+                opts.messages.push(serde_json::json!({
+                    "role": "user",
+                    "content": nudge,
+                }));
+            }
+            continue;
+        }
+
+        return Ok(SchemaLoopOutcome {
+            vm_result,
+            raw_text,
+            errors,
+            attempts: attempt + 1,
+            schema_retries_budget: schema_retries,
+            output_validation_mode,
+        });
+    }
+    unreachable!("routing schema retry loop exited without returning");
 }
 
 fn attach_routing_block(
@@ -869,9 +949,9 @@ pub(crate) fn structured_safe_envelope_err(err: &VmError) -> VmValue {
 
 #[cfg(test)]
 mod schema_stream_abort_retry_tests {
-    //! Integration coverage for the `schema_stream_abort` ↔ `schema_retries`
-    //! handshake (harn#1775 E5.2). Drives [`execute_schema_retry_loop`]
-    //! through the in-process `FakeLlmProvider` so we can script:
+    //! Integration coverage for treating early streaming schema aborts as
+    //! ordinary schema retry failures. The tests drive the retry loop through
+    //! the in-process `FakeLlmProvider` so we can script:
     //!
     //! 1. an attempt that emits schema-violating tokens mid-stream
     //!    (triggers the abort, fires a `SchemaStreamAborted` event, and
@@ -922,6 +1002,23 @@ mod schema_stream_abort_retry_tests {
         opts.tool_choice = None;
         opts.provider_overrides = None;
         opts
+    }
+
+    fn fake_routing_policy() -> Rc<routing::RoutingPolicyConfig> {
+        routing::clear_policy_registry();
+        let chain = VmValue::List(Rc::new(vec![VmValue::Dict(Rc::new(BTreeMap::from([
+            ("provider".to_string(), VmValue::String(Rc::from("fake"))),
+            (
+                "model".to_string(),
+                VmValue::String(Rc::from("fake-stream")),
+            ),
+        ])))]));
+        let tagged = routing::build_routing_policy(&BTreeMap::from([("chain".to_string(), chain)]))
+            .expect("routing policy validates");
+        let options = BTreeMap::from([("routing".to_string(), tagged)]);
+        routing::extract_routing_policy(Some(&options))
+            .expect("routing policy extracts")
+            .expect("routing policy present")
     }
 
     #[test]
@@ -1031,6 +1128,54 @@ mod schema_stream_abort_retry_tests {
                 "retry nudge should cite the abort path; got {:?}",
                 retries[0]
             );
+
+            reset_agent_trace_state();
+        });
+    }
+
+    #[test]
+    fn routed_call_uses_schema_retry_loop() {
+        let runtime = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .expect("runtime");
+        runtime.block_on(async {
+            reset_agent_trace_state();
+
+            let _script_guard = install_fake_llm_script(
+                FakeLlmScript::new()
+                    .push(FakeLlmTurn::stream(vec![
+                        FakeLlmEvent::Token("{\"age\":\"twenty\"}".into()),
+                        FakeLlmEvent::Done(FakeStopReason::EndTurn),
+                    ]))
+                    .push(FakeLlmTurn::stream(vec![
+                        FakeLlmEvent::Token("{\"age\":20}".into()),
+                        FakeLlmEvent::Done(FakeStopReason::EndTurn),
+                    ])),
+            );
+
+            let mut opts = fake_opts_with_schema();
+            opts.routing_policy = Some(fake_routing_policy());
+            let result = execute_llm_call(opts, Some(options_with_retries(1)), None)
+                .await
+                .expect("routed schema retry should recover");
+
+            let dict = result.as_dict().expect("result dict");
+            let data = dict.get("data").expect("validated data");
+            let data = data.as_dict().expect("validated data dict");
+            match data.get("age") {
+                Some(VmValue::Int(age)) => assert_eq!(*age, 20),
+                other => panic!("expected age=20, got {other:?}"),
+            }
+            assert!(
+                dict.contains_key("routing"),
+                "routed result should preserve routing diagnostics"
+            );
+            let retries = peek_agent_trace()
+                .iter()
+                .filter(|event| matches!(event, AgentTraceEvent::SchemaRetry { .. }))
+                .count();
+            assert_eq!(retries, 1);
 
             reset_agent_trace_state();
         });
