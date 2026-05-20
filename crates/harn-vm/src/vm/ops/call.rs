@@ -831,7 +831,143 @@ impl super::super::Vm {
         self.call_named_value(&name, args, Some(id)).await
     }
 
-    pub(super) async fn execute_tail_call(&mut self) -> Result<(), VmError> {
+    /// Sync TCO body shared between [`execute_tail_call_sync`] and
+    /// [`execute_tail_call_async`]: validate arity/types, reuse the current
+    /// frame's stack base and saved env, then push the callee's frame in
+    /// place. Callers must have already advanced `ip`, popped the callee,
+    /// and confirmed neither the current frame nor the callee is tracked
+    /// (so PreStep/PostStep boundaries aren't elided by TCO).
+    fn perform_tail_call_tco(
+        &mut self,
+        closure: Rc<VmClosure>,
+        args: Vec<VmValue>,
+    ) -> Result<(), VmError> {
+        crate::typecheck::validate_user_call(&closure.func, &args, None)?;
+        if closure.func.is_generator {
+            // Generators cannot be tail-call optimized.
+            let gen = self.create_generator(&closure, &args);
+            return Err(VmError::Return(gen));
+        }
+        let mut call_env = self.closure_call_env_for_current_frame(&closure);
+        // TCO: reuse the current frame's stack_base / saved_env.
+        let popped = self.frames.pop().unwrap();
+        let stack_base = popped.stack_base;
+        let parent_env = popped.saved_env;
+
+        if let Some(ref dir) = popped.saved_source_dir {
+            crate::stdlib::set_thread_source_dir(dir);
+        }
+
+        self.stack.truncate(stack_base);
+
+        let saved_source_dir = if let Some(ref dir) = closure.source_dir {
+            let prev = crate::stdlib::process::VM_SOURCE_DIR.with(|sd| sd.borrow().clone());
+            crate::stdlib::set_thread_source_dir(dir);
+            prev
+        } else {
+            None
+        };
+
+        call_env.push_scope();
+        let debugger = self.debugger_attached();
+        let initial_env = if debugger {
+            Some(call_env.clone())
+        } else {
+            None
+        };
+        self.env = call_env;
+        let mut local_slots = Self::fresh_local_slots(&closure.func.chunk);
+        Self::bind_param_slots(&mut local_slots, &closure.func, &args, false);
+        let initial_local_slots = if debugger {
+            Some(local_slots.clone())
+        } else {
+            None
+        };
+
+        // Inherit the popped frame's iterator depth so iterators pushed by
+        // for-loops inside the caller (`return f(...)` from inside
+        // `for x in xs { ... }`) get torn down when the tail-called callee
+        // eventually returns, instead of leaking into the caller's caller.
+        let saved_iterator_depth = popped.saved_iterator_depth;
+        self.iterators.truncate(saved_iterator_depth);
+        let argc = args.len();
+        self.frames.push(CallFrame {
+            chunk: Rc::clone(&closure.func.chunk),
+            ip: 0,
+            stack_base,
+            saved_env: parent_env,
+            initial_env,
+            initial_local_slots,
+            saved_iterator_depth,
+            fn_name: closure.func.name.clone(),
+            argc,
+            saved_source_dir,
+            module_functions: closure.module_functions.clone(),
+            module_state: closure.module_state.clone(),
+            local_slots,
+            local_scope_base: self.env.scope_depth().saturating_sub(1),
+            local_scope_depth: 0,
+        });
+        Ok(())
+    }
+
+    /// Sync fast path for `Op::TailCall`. Peeks the callee on the stack
+    /// **before** touching `ip`; if it resolves to a non-generator user
+    /// closure and neither the current frame nor the callee is tracked
+    /// by the persona/step registries, it performs the TCO frame reuse
+    /// inline and returns `Some(Ok(()))`. Anything that needs the slow
+    /// path (non-resolvable callee, generator, tracked frame, tracked
+    /// callee) returns `None` without touching `ip`, so the caller falls
+    /// through to [`execute_tail_call_async`] which reads the argc
+    /// operand exactly once.
+    ///
+    /// Both direct `Closure` callees and the `String` form emitted by
+    /// `compile_return_stmt` (`Op::Constant <name>` + `Op::TailCall`) are
+    /// handled here: [`Vm::resolve_named_closure`] is itself synchronous,
+    /// so the steady-state user-level tail call — the only shape
+    /// `recursive_countdown.harn` exercises — stays on the sync path.
+    ///
+    /// The tracked-function guards mirror the async path's check at the
+    /// top of [`execute_tail_call_async`]: persona/step lifecycle state
+    /// is frame-owned, and TCO that elides a frame must not skip the
+    /// PreStep/PostStep hook boundaries that a non-tail call would
+    /// observe.
+    pub(super) fn execute_tail_call_sync(&mut self) -> Option<Result<(), VmError>> {
+        let frame = self.frames.last().unwrap();
+        if crate::step_runtime::is_tracked_function(&frame.fn_name) {
+            return None;
+        }
+        let argc = frame.chunk.code[frame.ip] as usize;
+        let callee_idx = self.stack.len().checked_sub(argc + 1)?;
+        let resolved = match self.stack.get(callee_idx)? {
+            VmValue::Closure(c) => Ok(Rc::clone(c)),
+            VmValue::String(name) => Err(Rc::clone(name)),
+            _ => return None,
+        };
+        let closure = match resolved {
+            Ok(closure) => closure,
+            Err(name) => self.resolve_named_closure(&name)?,
+        };
+        if closure.func.is_generator {
+            return None;
+        }
+        if crate::step_runtime::is_tracked_function(&closure.func.name) {
+            return None;
+        }
+
+        let frame = self.frames.last_mut().unwrap();
+        frame.ip += 1;
+        let args: Vec<VmValue> = self.stack.split_off(self.stack.len() - argc);
+        let _ = self.stack.pop();
+        Some(self.perform_tail_call_tco(closure, args))
+    }
+
+    /// Async slow path for `Op::TailCall`. Identical in behavior to the
+    /// pre-split `execute_tail_call`. The caller (`execute_op_async`)
+    /// reaches this only after [`execute_tail_call_sync`] returned `None`
+    /// without touching `ip`, so this path reads the argc operand exactly
+    /// once.
+    pub(super) async fn execute_tail_call_async(&mut self) -> Result<(), VmError> {
         let frame = self.frames.last_mut().unwrap();
         let argc = frame.chunk.code[frame.ip] as usize;
         frame.ip += 1;
@@ -861,73 +997,7 @@ impl super::super::Vm {
                 return Ok(());
             }
 
-            crate::typecheck::validate_user_call(&closure.func, &args, None)?;
-            if closure.func.is_generator {
-                // Generators cannot be tail-call optimized.
-                let gen = self.create_generator(&closure, &args);
-                return Err(VmError::Return(gen));
-            }
-            let mut call_env = self.closure_call_env_for_current_frame(&closure);
-            // TCO: reuse the current frame's stack_base / saved_env.
-            let popped = self.frames.pop().unwrap();
-            let stack_base = popped.stack_base;
-            let parent_env = popped.saved_env;
-
-            if let Some(ref dir) = popped.saved_source_dir {
-                crate::stdlib::set_thread_source_dir(dir);
-            }
-
-            self.stack.truncate(stack_base);
-
-            let saved_source_dir = if let Some(ref dir) = closure.source_dir {
-                let prev = crate::stdlib::process::VM_SOURCE_DIR.with(|sd| sd.borrow().clone());
-                crate::stdlib::set_thread_source_dir(dir);
-                prev
-            } else {
-                None
-            };
-
-            call_env.push_scope();
-            let debugger = self.debugger_attached();
-            let initial_env = if debugger {
-                Some(call_env.clone())
-            } else {
-                None
-            };
-            self.env = call_env;
-            let mut local_slots = Self::fresh_local_slots(&closure.func.chunk);
-            Self::bind_param_slots(&mut local_slots, &closure.func, &args, false);
-            let initial_local_slots = if debugger {
-                Some(local_slots.clone())
-            } else {
-                None
-            };
-
-            // Inherit the popped frame's iterator depth so iterators
-            // pushed by for-loops inside the caller (`return f(...)` from
-            // inside `for x in xs { ... }`) get torn down when the
-            // tail-called callee eventually returns, instead of leaking
-            // into the caller's caller.
-            let saved_iterator_depth = popped.saved_iterator_depth;
-            self.iterators.truncate(saved_iterator_depth);
-            let argc = args.len();
-            self.frames.push(CallFrame {
-                chunk: Rc::clone(&closure.func.chunk),
-                ip: 0,
-                stack_base,
-                saved_env: parent_env,
-                initial_env,
-                initial_local_slots,
-                saved_iterator_depth,
-                fn_name: closure.func.name.clone(),
-                argc,
-                saved_source_dir,
-                module_functions: closure.module_functions.clone(),
-                module_state: closure.module_state.clone(),
-                local_slots,
-                local_scope_base: self.env.scope_depth().saturating_sub(1),
-                local_scope_depth: 0,
-            });
+            self.perform_tail_call_tco(closure, args)?;
         } else {
             match callee {
                 VmValue::String(name) => {
