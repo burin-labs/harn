@@ -8,6 +8,10 @@ pub(crate) struct PathTargetsArgs {
     /// Force-enable the `require-file-header` rule (overrides harn.toml).
     #[arg(long = "require-file-header")]
     pub require_file_header: bool,
+    /// Emit a structured `JsonEnvelope` report instead of human-readable output.
+    /// See `docs/src/cli-json-contract.md` for the envelope shape.
+    #[arg(long)]
+    pub json: bool,
     /// One or more .harn files or directories.
     #[arg(required = true)]
     pub targets: Vec<String>,

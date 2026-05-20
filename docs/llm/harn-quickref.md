@@ -15,6 +15,27 @@ Keep the two in lockstep when syntax changes.
 For trigger manifests, connector contract v1, and the provider catalog, also
 load `docs/llm/harn-triggers-quickref.md`.
 
+## `--json` cheatsheet (agent-driven Harn)
+
+Every machine-readable mode returns a versioned envelope:
+`{ "schemaVersion": N, "ok": bool, "data": ..., "error": ..., "warnings": [] }`.
+Stdout is one parseable JSON document (or one NDJSON event per line);
+logs and progress always go to stderr.
+
+- Discover supported commands and their current schema versions:
+  `harn --json-schemas` (filter with `--command <name>`).
+- Per-command shape reference: `docs/src/cli-json-contract.md`.
+- Common pairs an agent will use:
+  - `harn version --json` — build metadata (`name`, `version`, `description`).
+  - `harn upgrade --check --json` — resolve target release without downloading.
+  - `harn lint --json <path>` — structured lint diagnostics + summary; pair with
+    `harn lint --fix <path>` (no `--json`) to apply the recommended edits.
+  - `harn replay --json <run.json>` — per-stage replay summary + fixture verdict.
+  - `harn check --json <path>` / `harn fmt --json <path>` — type-check and format
+    reports with the same `CheckDiagnostic` shape.
+  - `harn run --json script.harn` — NDJSON event stream (one envelope per line).
+  - `harn doctor --json` — capability matrix for host / targets / providers.
+
 ## Files and execution
 
 - File extension: `.harn`.

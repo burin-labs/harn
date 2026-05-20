@@ -199,6 +199,7 @@
 # Reference
 
 - [CLI reference](./cli-reference.md)
+- [CLI `--json` contract](./cli-json-contract.md)
 - [Builtin functions](./builtins.md)
 - [Postgres](./postgres.md)
 - [Project scanning](./project-scan.md)
