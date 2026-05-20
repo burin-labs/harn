@@ -13,7 +13,7 @@ fn parent() {
       node: {kind: "subagent", mode: "llm", model_policy: {provider: "mock"}},
     },
   )
-  println("spawn ok")
+  __io_println("spawn ok")
 }
 
 pipeline main() {

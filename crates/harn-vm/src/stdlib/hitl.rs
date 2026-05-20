@@ -1884,7 +1884,7 @@ mod tests {
 pipeline test(task) {
   host_mock("hitl", "question", {answer: "9"})
   let answer: int = ask_user("Pick a number", {default: 0})
-  println(answer)
+  __io_println(answer)
 }
 "#;
                 let (
@@ -1926,10 +1926,10 @@ pipeline test(task) {
     "deploy production",
     {quorum: 2, reviewers: ["alice", "bob", "carol"]},
   )
-  println(record.approved)
-  println(len(record.reviewers))
-  println(record.reviewers[0])
-  println(record.reviewers[1])
+  __io_println(record.approved)
+  __io_println(len(record.reviewers))
+  __io_println(record.reviewers[0])
+  __io_println(record.reviewers[1])
 }
 "#;
                 let (_, _, approval_events, _, _) = execute_hitl_script(dir.path(), source)
@@ -2004,9 +2004,9 @@ pipeline test(task) {
   let denied = try {
     request_approval("drop table", {reviewers: ["alice"]})
   }
-  println(is_err(denied))
-  println(unwrap_err(denied).name)
-  println(unwrap_err(denied).reason)
+  __io_println(is_err(denied))
+  __io_println(unwrap_err(denied).name)
+  __io_println(unwrap_err(denied).reason)
 }
 "#;
                 let (output, _, approval_events, _, _) = execute_hitl_script(dir.path(), source)
@@ -2037,7 +2037,7 @@ pipeline test(task) {
     {approved: true, reviewer: "bob"},
   ])
   let result = dual_control(2, 3, { -> "launched" }, ["alice", "bob", "carol"])
-  println(result)
+  __io_println(result)
 }
 "#;
                 let (output, _, _, dual_control_events, _) =
@@ -2068,8 +2068,8 @@ pipeline test(task) {
 pipeline test(task) {
   host_mock("hitl", "escalation", {accepted: true, reviewer: "lead", reason: "taking over"})
   let handle = escalate_to("admin", "need override")
-  println(handle.status)
-  println(handle.reviewer)
+  __io_println(handle.status)
+  __io_println(handle.reviewer)
 }
 "#;
                 let (output, _, _, _, escalation_events) = execute_hitl_script(dir.path(), source)
@@ -2130,7 +2130,7 @@ pipeline test(task) {
 pipeline test(task) {
   host_mock("hitl", "question", {answer: "ok"})
   let answer: string = ask_user("Are you sure?", {default: "no"})
-  println(answer)
+  __io_println(answer)
 }
 "#;
                 let chunk = crate::compile_source(source).expect("compile source");

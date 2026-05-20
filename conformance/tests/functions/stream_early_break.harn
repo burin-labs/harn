@@ -5,8 +5,8 @@ pipeline test(task) {
     emit 3
   }
   for n in many() {
-    println(n)
+    __io_println(n)
     break
   }
-  println("after break")
+  __io_println("after break")
 }

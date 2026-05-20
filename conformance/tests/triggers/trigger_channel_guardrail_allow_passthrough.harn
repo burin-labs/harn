@@ -10,19 +10,19 @@ pipeline default() {
   channel_guardrail_clear()
   let _ = prompt_injection_scanner({})
   let receipt = emit_channel("ch.guardrail.allow", {value: 42})
-  println(receipt?.inserted)
-  println(receipt?.blocked ?? false)
-  println(receipt?.duplicate)
+  __io_println(receipt?.inserted)
+  __io_println(receipt?.blocked ?? false)
+  __io_println(receipt?.duplicate)
   /* Confirm the durable journal has the entry. */
   let history = channel_events("ch.guardrail.allow")
-  println(len(history))
-  println(history[0].payload.value)
+  __io_println(len(history))
+  __io_println(history[0].payload.value)
   /* No guardrail audit fired. */
   let audit = pipeline_lifecycle_audit_log_take()
-  println(len(audit))
+  __io_println(len(audit))
   /* Listing returns the registered guardrail id. */
   let ids = channel_guardrail_list()
-  println(len(ids))
-  println(channel_guardrail_unregister(ids[0]))
-  println(len(channel_guardrail_list()))
+  __io_println(len(ids))
+  __io_println(channel_guardrail_unregister(ids[0]))
+  __io_println(len(channel_guardrail_list()))
 }

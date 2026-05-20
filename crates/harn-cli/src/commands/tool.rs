@@ -176,7 +176,7 @@ pipeline default() {{
   if !result.ok {{
     throw (result.error?.message ?? "tool call failed")
   }}
-  println(result.rendered_result)
+  log(result.rendered_result)
 }}
 "#
             ),

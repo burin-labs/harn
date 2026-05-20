@@ -244,7 +244,7 @@ fn read_to_string(path: string) -> string {
 
     #[test]
     fn hover_pipeline() {
-        let source = "// Main entry point.\npipeline main() {\n  println(\"hello\")\n}\n";
+        let source = "// Main entry point.\npipeline main() {\n  __io_println(\"hello\")\n}\n";
         let state = DocumentState::new(source.to_string());
         let sym = state
             .symbols

@@ -7,9 +7,9 @@ pipeline default() {
   let schema = {type: "object", required: ["k"], properties: {k: {type: "string"}}}
   llm_mock({text: "Sure thing!\n```json\n{\"k\": \"v\"}\n```\nDone."})
   let r = llm_call_structured_result("Q?", schema, {provider: "mock"})
-  println(r.ok)
-  println(r.data.k)
-  println(r.extracted_json)
-  println(r.attempts)
-  println(r.repaired)
+  __io_println(r.ok)
+  __io_println(r.data.k)
+  __io_println(r.extracted_json)
+  __io_println(r.attempts)
+  __io_println(r.repaired)
 }

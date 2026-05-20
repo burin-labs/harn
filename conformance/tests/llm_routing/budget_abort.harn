@@ -18,7 +18,7 @@ pipeline test(task) {
   } catch (e) {
     {caught: true, category: e.category, limit: e.limit}
   }
-  println(result.caught)
-  println(result.category)
-  println(result.limit)
+  __io_println(result.caught)
+  __io_println(result.category)
+  __io_println(result.limit)
 }

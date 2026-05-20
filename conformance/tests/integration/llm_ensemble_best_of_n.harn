@@ -24,9 +24,9 @@ pipeline default() {
       judge_opts: {provider: "mock"},
     },
   )
-  println(result.ok)
-  println(result.best.index)
-  println(result.best.text)
-  println(result.judge)
-  println(result.reasoning)
+  __io_println(result.ok)
+  __io_println(result.best.index)
+  __io_println(result.best.text)
+  __io_println(result.judge)
+  __io_println(result.reasoning)
 }

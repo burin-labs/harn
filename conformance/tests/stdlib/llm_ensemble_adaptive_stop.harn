@@ -29,13 +29,13 @@ pipeline default() {
     },
   )
   let event = events.next().value
-  println(result.completed_rounds)
-  println(result.stopped_early)
-  println(result.stop_reason)
-  println(llm_call_count())
-  println(event.kind)
-  println(event.payload.round)
-  println(event.payload.requested_rounds)
-  println(event.payload.consecutive_stable_rounds)
-  println(event.payload.max_round_drift < 0.15)
+  __io_println(result.completed_rounds)
+  __io_println(result.stopped_early)
+  __io_println(result.stop_reason)
+  __io_println(llm_call_count())
+  __io_println(event.kind)
+  __io_println(event.payload.round)
+  __io_println(event.payload.requested_rounds)
+  __io_println(event.payload.consecutive_stable_rounds)
+  __io_println(event.payload.max_round_drift < 0.15)
 }

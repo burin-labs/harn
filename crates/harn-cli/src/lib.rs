@@ -2936,7 +2936,7 @@ mod main_tests {
     fn conformance_skips_connector_clients_unless_fixture_uses_connectors() {
         let path = Path::new("conformance/tests/language/basic.harn");
         assert!(!should_install_default_connector_clients(
-            "println(1)",
+            "__io_println(1)",
             Some(path)
         ));
         assert!(!should_install_default_connector_clients(
@@ -2948,7 +2948,7 @@ mod main_tests {
             Some(path)
         ));
         assert!(should_install_default_connector_clients(
-            "println(1)",
+            "__io_println(1)",
             Some(Path::new("examples/demo.harn"))
         ));
     }

@@ -18,14 +18,14 @@ pipeline default() {
   let slack_event = triage_normalize(slack)
   let notion_event = triage_normalize(notion)
   let github_retry_event = triage_normalize(github_retry)
-  println(github_event.schema)
-  println(github_event.provider + ":" + github_event.source_kind)
-  println(slack_event.source_url.starts_with("slack://channel"))
-  println(notion_event.source_url.starts_with("https://www.notion.so/"))
-  println(github_event.dedupe_key == github_retry_event.dedupe_key)
-  println(github_event.id == github_retry_event.id)
-  println(github_event.raw_payload.issue.title)
-  println(
+  __io_println(github_event.schema)
+  __io_println(github_event.provider + ":" + github_event.source_kind)
+  __io_println(slack_event.source_url.starts_with("slack://channel"))
+  __io_println(notion_event.source_url.starts_with("https://www.notion.so/"))
+  __io_println(github_event.dedupe_key == github_retry_event.dedupe_key)
+  __io_println(github_event.id == github_retry_event.id)
+  __io_println(github_event.raw_payload.issue.title)
+  __io_println(
     github_event.action_intents.find({ intent -> intent.kind == "convert_to_task" }).requires_approval,
   )
   let missing_source = try {
@@ -33,7 +33,7 @@ pipeline default() {
       {provider: "slack", kind: "message", provider_payload: {provider: "slack", event: "message"}},
     )
   }
-  println(is_err(missing_source))
+  __io_println(is_err(missing_source))
   let ungated_write = try {
     triage_normalize(
       github,
@@ -50,17 +50,17 @@ pipeline default() {
       },
     )
   }
-  println(is_err(ungated_write))
+  __io_println(is_err(ungated_write))
   let feed = triage_start_my_day(
     [github, slack, notion, github_retry],
     {emit: true, topic: "triage.inbox.test", generated_at: "fixture"},
   )
-  println(len(feed.events))
-  println(len(feed.receipts))
+  __io_println(len(feed.events))
+  __io_println(len(feed.receipts))
   let receipt = triage_emit(github_event, {topic: "triage.inbox.test.single"})
   let stream = event_log.subscribe({topic: "triage.inbox.test.single", from_cursor: receipt.event_log_id - 1})
   let logged = stream.next().value
-  println(logged.kind)
-  println(logged.payload.provider)
-  println(logged.headers.schema)
+  __io_println(logged.kind)
+  __io_println(logged.payload.provider)
+  __io_println(logged.headers.schema)
 }

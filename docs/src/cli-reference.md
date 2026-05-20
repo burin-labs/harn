@@ -10,7 +10,7 @@ Execute a `.harn` file.
 harn run <file.harn>
 harn run --trace <file.harn>
 harn run --profile --profile-json profile.json <file.harn>
-harn run -e 'println("hello")'
+harn run -e 'log("hello")'
 harn run --deny shell,exec <file.harn>
 harn run --allow read_file,write_file <file.harn>
 harn run --yes <file.harn>
@@ -92,7 +92,7 @@ and run as a temp file in the current directory, so:
   are hoisted out of the wrapper. They must come first; imports that
   appear after another statement are not lifted.
 - Relative imports resolve against the working directory:
-  `harn run -e $'import "./lib"\nprintln(answer())'` looks for
+  `harn run -e $'import "./lib"\nlog(answer())'` looks for
   `./lib.harn` next to where you invoked `harn`.
 - Stdlib imports (`import "std/..."`) work the same as in a file.
 - A read-only working directory falls back to the system temp dir;
@@ -364,7 +364,7 @@ and per-tool-call latency. Today only `harn time run` is supported.
 harn time run main.harn
 harn time run main.harn --json
 harn time run main.harn --json --no-cache
-harn time run -e 'println("hi")' --json
+harn time run -e 'log("hi")' --json
 harn time run script.harn -- arg1 arg2
 ```
 

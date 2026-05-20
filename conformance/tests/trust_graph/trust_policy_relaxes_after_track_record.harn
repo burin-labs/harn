@@ -30,6 +30,6 @@ pipeline test(task) {
   }
   let policy: CapabilityPolicy = policy_for(actor_id)
   let records: list<TrustGraphRecord> = query({actor_id: actor_id, action: "merge_pr"})
-  println(len(records) == 10)
-  println(policy.side_effect_level == "network")
+  __io_println(len(records) == 10)
+  __io_println(policy.side_effect_level == "network")
 }

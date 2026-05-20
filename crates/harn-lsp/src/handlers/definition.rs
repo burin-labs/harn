@@ -429,7 +429,7 @@ mod tests {
         let source = r#"
 pipeline test() {
   let x = render_prompt("@/prompts/foo.harn.prompt", {})
-  println(x)
+  __io_println(x)
 }
 "#;
         let program = parse_source(source).expect("parse");
@@ -444,7 +444,7 @@ pipeline test() {
     fn ignores_other_function_calls() {
         let source = r#"
 pipeline test() {
-  let x = println("@/not-a-prompt")
+  let x = __io_println("@/not-a-prompt")
 }
 "#;
         let program = parse_source(source).expect("parse");

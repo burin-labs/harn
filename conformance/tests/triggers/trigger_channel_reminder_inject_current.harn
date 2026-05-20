@@ -51,10 +51,10 @@ pipeline test(task) {
   )
   // Dispatch itself succeeds (no crash); the inject is dropped with a
   // structured `target_missing` outcome and a matching lifecycle audit.
-  println(dispatch.status == "dispatched")
-  println(dispatch.result?.status == "dropped")
-  println(dispatch.result?.reason == "target_missing")
-  println(dispatch.result?.target_kind == "current")
+  __io_println(dispatch.status == "dispatched")
+  __io_println(dispatch.result?.status == "dropped")
+  __io_println(dispatch.result?.reason == "target_missing")
+  __io_println(dispatch.result?.target_kind == "current")
   let audits = lifecycle_audit_log_take()
   var inject_audit_count = 0
   var outcome = ""
@@ -68,8 +68,8 @@ pipeline test(task) {
       target_kind = audit.payload.target_kind
     }
   }
-  println(inject_audit_count)
-  println(outcome)
-  println(reason)
-  println(target_kind)
+  __io_println(inject_audit_count)
+  __io_println(outcome)
+  __io_println(reason)
+  __io_println(target_kind)
 }

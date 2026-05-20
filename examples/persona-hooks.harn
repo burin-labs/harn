@@ -25,5 +25,5 @@ pipeline default() {
       return nil
     },
   )
-  println(merge_captain({pr: "burin-labs/harn#1075"}))
+  __io_println(merge_captain({pr: "burin-labs/harn#1075"}))
 }

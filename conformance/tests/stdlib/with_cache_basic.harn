@@ -22,8 +22,8 @@ pipeline default() {
     },
     opts,
   )
-  println("first.hit=" + to_string(first.hit))
-  println("first.value=" + json_stringify(first.value))
+  __io_println("first.hit=" + to_string(first.hit))
+  __io_println("first.value=" + json_stringify(first.value))
   let second = with_cache_envelope(
     "key",
     fn() {
@@ -32,12 +32,12 @@ pipeline default() {
     },
     opts,
   )
-  println("second.hit=" + to_string(second.hit))
-  println("second.value=" + json_stringify(second.value))
-  println("compute_count=" + to_string(atomic_get(compute_count)))
+  __io_println("second.hit=" + to_string(second.hit))
+  __io_println("second.value=" + json_stringify(second.value))
+  __io_println("compute_count=" + to_string(atomic_get(compute_count)))
   // Transparent (non-envelope) form returns just the value.
   let plain = with_cache("key", fn() { return {answer: 999} }, opts)
-  println("plain=" + json_stringify(plain))
+  __io_println("plain=" + json_stringify(plain))
   // TTL via the unified clock: advancing past 5s evicts the entry on read.
   mock_time(1000000000000)
   let ttl_store = mem_cache({namespace: "with-cache-ttl-" + uuid(), ttl: "5s"})
@@ -45,10 +45,10 @@ pipeline default() {
   cache_clear(ttl_opts)
   with_cache_envelope("ttl-key", fn() { return "stored-once" }, ttl_opts)
   let fresh = with_cache_envelope("ttl-key", fn() { return "would-recompute" }, ttl_opts)
-  println("fresh.hit=" + to_string(fresh.hit))
+  __io_println("fresh.hit=" + to_string(fresh.hit))
   advance_time(6000)
   let stale = with_cache_envelope("ttl-key", fn() { return "recomputed" }, ttl_opts)
-  println("stale.hit=" + to_string(stale.hit))
-  println("stale.value=" + to_string(stale.value))
+  __io_println("stale.hit=" + to_string(stale.hit))
+  __io_println("stale.value=" + to_string(stale.value))
   unmock_time()
 }

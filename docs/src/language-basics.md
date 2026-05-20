@@ -9,12 +9,12 @@ runtime wraps it in an implicit pipeline automatically:
 
 ```harn
 let x = 1 + 2
-println(x)
+log(x)
 
 fn double(n) {
   return n * 2
 }
-println(double(5))
+log(double(5))
 ```
 
 This is convenient for scripts, experiments, and small programs.
@@ -26,11 +26,11 @@ executes the pipeline named `default`, or the first one declared.
 
 ```harn
 pipeline default(task) {
-  println("Hello from the default pipeline")
+  log("Hello from the default pipeline")
 }
 
 pipeline other(task) {
-  println("This only runs if called or if there's no default")
+  log("This only runs if called or if there's no default")
 }
 ```
 
@@ -59,10 +59,10 @@ let status = "outer"
 
 if true {
   let status = "inner"
-  println(status)  // inner
+  log(status)  // inner
 }
 
-println(status)    // outer
+log(status)    // outer
 ```
 
 If you want to update an outer binding from inside a block, declare it with
@@ -148,8 +148,8 @@ These values are falsy: `false`, `nil`, `0`, `0.0`, `""`, `[]`, `{}`. Everything
 
 ```harn
 let name = "world"
-println("Hello, ${name}!")
-println("2 + 2 = ${2 + 2}")
+log("Hello, ${name}!")
+log("2 + 2 = ${2 + 2}")
 ```
 
 Any expression works inside `${}`.
@@ -237,11 +237,11 @@ nil instead of erroring when the receiver is nil:
 
 ```harn
 let user = nil
-println(user?.name)           // nil (no error)
-println(user?.greet("hi"))    // nil (method not called)
+log(user?.name)           // nil (no error)
+log(user?.greet("hi"))    // nil (method not called)
 
 let d = {name: "Alice"}
-println(d?.name)              // Alice
+log(d?.name)              // Alice
 ```
 
 Chains propagate nil: `a?.b?.c` returns nil if any step is nil.
@@ -252,14 +252,14 @@ Extract sublists or substrings using slice syntax:
 
 ```harn
 let items = [10, 20, 30, 40, 50]
-println(items[1:3])   // [20, 30]
-println(items[:2])    // [10, 20]
-println(items[3:])    // [40, 50]
-println(items[-2:])   // [40, 50]
+log(items[1:3])   // [20, 30]
+log(items[:2])    // [10, 20]
+log(items[3:])    // [40, 50]
+log(items[-2:])   // [40, 50]
 
 let s = "hello world"
-println(s[0:5])       // hello
-println(s[-5:])       // world
+log(s[0:5])       // hello
+log(s[-5:])       // world
 ```
 
 Negative indices count from the end. Omit start for 0, omit end for
@@ -289,8 +289,8 @@ fn compute_zero(x) {
   return Ok(result + 10)
 }
 
-println(compute(20))       // Result.Ok(20)
-println(compute_zero(20))  // Result.Err(division by zero)
+log(compute(20))       // Result.Ok(20)
+log(compute_zero(20))  // Result.Err(division by zero)
 ```
 
 Multiple `?` calls can be chained in a single function to build
@@ -302,22 +302,22 @@ Test whether a value is contained in a collection:
 
 ```harn
 // Lists
-println(3 in [1, 2, 3])          // true
-println(6 not in [1, 2, 3])      // true
+log(3 in [1, 2, 3])          // true
+log(6 not in [1, 2, 3])      // true
 
 // Strings (substring containment)
-println("world" in "hello world") // true
-println("xyz" not in "hello")     // true
+log("world" in "hello world") // true
+log("xyz" not in "hello")     // true
 
 // Dicts (key membership)
 let data = {name: "Alice", age: 30}
-println("name" in data)           // true
-println("email" not in data)      // true
+log("name" in data)           // true
+log("email" not in data)      // true
 
 // Sets
 let s = set(1, 2, 3)
-println(2 in s)                   // true
-println(5 not in s)               // true
+log(2 in s)                   // true
+log(5 not in s)               // true
 ```
 
 ## Control flow
@@ -326,11 +326,11 @@ println(5 not in s)               // true
 
 ```harn
 if score > 90 {
-  println("A")
+  log("A")
 } else if score > 80 {
-  println("B")
+  log("B")
 } else {
-  println("C")
+  log("C")
 }
 ```
 
@@ -340,12 +340,12 @@ Can be used as an expression: `let grade = if score > 90 { "A" } else { "B" }`
 
 ```harn
 for item in [1, 2, 3] {
-  println(item)
+  log(item)
 }
 
 // Dict iteration yields {key, value} entries sorted by key
 for entry in {a: 1, b: 2} {
-  println("${entry.key}: ${entry.value}")
+  log("${entry.key}: ${entry.value}")
 }
 ```
 
@@ -354,7 +354,7 @@ for entry in {a: 1, b: 2} {
 ```harn
 var i = 0
 while i < 10 {
-  println(i)
+  log(i)
   i = i + 1
 }
 ```
@@ -365,8 +365,8 @@ Safety limit of 10,000 iterations.
 
 ```harn
 match status {
-  "active" -> { println("Running") }
-  "stopped" -> { println("Halted") }
+  "active" -> { log("Running") }
+  "stopped" -> { log("Halted") }
 }
 ```
 
@@ -391,11 +391,11 @@ aloud. Add the trailing `exclusive` modifier when you want the half-open form.
 
 ```harn
 for i in 1 to 5 {              // inclusive: 1, 2, 3, 4, 5
-  println(i)
+  log(i)
 }
 
 for i in 0 to 3 exclusive {    // half-open: 0, 1, 2
-  println(i)
+  log(i)
 }
 ```
 
@@ -404,8 +404,8 @@ builtin. `range(n)` is equivalent to `0 to n exclusive`; `range(a, b)` is
 `a to b exclusive`. Both forms always produce half-open integer ranges.
 
 ```harn
-for i in range(5) { println(i) }        // 0, 1, 2, 3, 4
-for i in range(3, 7) { println(i) }      // 3, 4, 5, 6
+for i in range(5) { log(i) }        // 0, 1, 2, 3, 4
+for i in range(3, 7) { log(i) }      // 3, 4, 5, 6
 ```
 
 ### Iteration patterns
@@ -416,17 +416,17 @@ read better and avoid off-by-one bugs.
 ```harn
 // enumerate(): yields a list of {index, value} dicts.
 for {index, value} in ["a", "b", "c"].enumerate() {
-  println("${index}: ${value}")
+  log("${index}: ${value}")
 }
 
 // zip(): yields [a, b] pairs — use list destructuring.
 for [name, score] in names.zip(scores) {
-  println("${name}: ${score}")
+  log("${name}: ${score}")
 }
 
 // Dict iteration yields {key, value} entries sorted by key.
 for {key, value} in {a: 1, b: 2}.entries() {
-  println("${key} -> ${value}")
+  log("${key} -> ${value}")
 }
 ```
 
@@ -465,10 +465,10 @@ fn sum(...nums) {
   }
   return total
 }
-println(sum(1, 2, 3))  // 6
+log(sum(1, 2, 3))  // 6
 
 fn log(level, ...parts) {
-  println("[${level}] ${join(parts, " ")}")
+  log("[${level}] ${join(parts, " ")}")
 }
 log("INFO", "server", "started")  // [INFO] server started
 ```
@@ -484,8 +484,8 @@ only integer extras and binds `nums` as `list<int>`.
 let square = { x -> x * x }
 let add = { a, b -> a + b }
 
-println(square(4))     // 16
-println(add(2, 3))     // 5
+log(square(4))     // 16
+log(add(2, 3))     // 5
 ```
 
 Closures capture their lexical environment at definition time. Parameters are immutable.
@@ -525,7 +525,7 @@ let first_three_doubled_evens = xs
   .map({ x -> x * 2 })
   .take(3)
   .to_list()
-println(first_three_doubled_evens)  // [4, 8, 12]
+log(first_three_doubled_evens)  // [4, 8, 12]
 ```
 
 Use `.enumerate()` to get `(index, value)` pairs in a for-loop:
@@ -533,7 +533,7 @@ Use `.enumerate()` to get `(index, value)` pairs in a for-loop:
 ```harn,ignore
 let items = ["a", "b", "c"]
 for (i, x) in items.iter().enumerate() {
-  println("${i}: ${x}")
+  log("${i}: ${x}")
 }
 ```
 
@@ -542,7 +542,7 @@ them in a for-loop:
 
 ```harn,ignore
 for (k, v) in {a: 1, b: 2}.iter() {
-  println("${k}: ${v}")
+  log("${k}: ${v}")
 }
 ```
 
@@ -651,11 +651,11 @@ real variable.
 ```harn
 let person = {name: "Alice", age: 30}
 let {name, age} = person
-println(name)  // "Alice"
-println(age)   // 30
+log(name)  // "Alice"
+log(age)   // 30
 
 let {name, debug: _} = {name: "Alice", debug: true}
-println(name)  // "Alice"
+log(name)  // "Alice"
 ```
 
 ### List destructuring
@@ -663,11 +663,11 @@ println(name)  // "Alice"
 ```harn
 let items = [1, 2, 3, 4, 5]
 let [first, ...rest] = items
-println(first)  // 1
-println(rest)   // [2, 3, 4, 5]
+log(first)  // 1
+log(rest)   // [2, 3, 4, 5]
 
 let [_, second, _] = [10, 20, 30]
-println(second)  // 20
+log(second)  // 20
 ```
 
 ### Renaming
@@ -677,7 +677,7 @@ Use `:` to bind a dict field to a different variable name:
 ```harn
 let data = {name: "Alice"}
 let {name: user_name} = data
-println(user_name)  // "Alice"
+log(user_name)  // "Alice"
 ```
 
 ### Destructuring in for-in loops
@@ -685,11 +685,11 @@ println(user_name)  // "Alice"
 ```harn
 let entries = [{key: "a", value: 1}, {key: "b", value: 2}]
 for {key, value} in entries {
-  println("${key}: ${value}")
+  log("${key}: ${value}")
 }
 
 for [_, value] in [[0, "x"], [1, "y"]] {
-  println(value)
+  log(value)
 }
 ```
 
@@ -700,15 +700,15 @@ the value would otherwise be `nil`:
 
 ```harn
 let { name = "anon", role = "user" } = { name: "Alice" }
-println(name)  // Alice
-println(role)  // user
+log(name)  // Alice
+log(role)  // user
 
 let [a = 0, b = 0, c = 0] = [1, 2]
-println(c)     // 0
+log(c)     // 0
 
 // Combine with renaming
 let { name: display = "Unknown" } = {}
-println(display)  // Unknown
+log(display)  // Unknown
 ```
 
 ### Missing keys and empty rest
@@ -718,10 +718,10 @@ pattern with no remaining items gives an empty collection:
 
 ```harn
 let {name, email} = {name: "Alice"}
-println(email)  // nil
+log(email)  // nil
 
 let [only, ...rest] = [42]
-println(rest)   // []
+log(rest)   // []
 ```
 
 ## Collections
@@ -805,7 +805,7 @@ var sum = 0
 for item in set(10, 20, 30) {
   sum = sum + item
 }
-println(sum)  // 60
+log(sum)  // 60
 ```
 
 Convert a set to a list with `to_list()`:
@@ -829,8 +829,8 @@ enum Status {
 
 let s = Status.Pending("waiting")
 match s.variant {
-  "Pending" -> { println(s.fields[0]) }
-  "Active" -> { println("ok") }
+  "Pending" -> { log(s.fields[0]) }
+  "Active" -> { log("ok") }
 }
 ```
 
@@ -843,7 +843,7 @@ struct Point {
 }
 
 let p = {x: 10, y: 20}
-println(p.x)
+log(p.x)
 ```
 
 Structs can also be constructed with the struct name as a constructor,
@@ -856,7 +856,7 @@ struct Point {
 }
 
 let p = Point { x: 10, y: 20 }
-println(p.x)  // 10
+log(p.x)  // 10
 ```
 
 Structs can declare type parameters when fields should stay connected:
@@ -868,7 +868,7 @@ struct Pair<A, B> {
 }
 
 let pair: Pair<int, string> = Pair { first: 1, second: "two" }
-println(pair.second)  // two
+log(pair.second)  // two
 ```
 
 ### Impl blocks
@@ -891,8 +891,8 @@ impl Point {
 }
 
 let p = Point { x: 3, y: 4 }
-println(p.distance())       // 5.0
-println(p.translate(10, 20)) // Point({x: 13, y: 24})
+log(p.distance())       // 5.0
+log(p.translate(10, 20)) // Point({x: 13, y: 24})
 ```
 
 The first parameter must be `self`, which receives the struct instance.
@@ -975,7 +975,7 @@ Now you can write a function that accepts any `Displayable`:
 
 ```harn,ignore
 fn introduce(animal: Displayable) {
-  println("Meet: ${animal.display()}")
+  log("Meet: ${animal.display()}")
 }
 
 let d = Dog({name: "Rex", breed: "Labrador"})
@@ -1026,7 +1026,7 @@ You can also use interfaces as constraints on generic type parameters:
 
 ```harn
 fn log_item<T>(item: T) where T: Displayable {
-  println("[LOG] ${item.display()}")
+  log("[LOG] ${item.display()}")
 }
 ```
 
@@ -1072,7 +1072,7 @@ fn add(a, b, c) {
 }
 
 let nums = [1, 2, 3]
-println(add(...nums))  // 6
+log(add(...nums))  // 6
 ```
 
 You can mix regular arguments and spread arguments:
@@ -1083,7 +1083,7 @@ fn add(a, b, c) {
 }
 
 let rest = [2, 3]
-println(add(1, ...rest))  // 6
+log(add(1, ...rest))  // 6
 ```
 
 Spread works in method calls too:
@@ -1133,7 +1133,7 @@ let answer = ask {
   system: "You are a helpful assistant.",
   user: "What is 2 + 2?"
 }
-println(answer)
+log(answer)
 ```
 
 Common fields include `system` (system prompt), `user` (user message),
@@ -1156,8 +1156,8 @@ Durations can be passed to `sleep()` and used in `deadline` blocks.
 `pi` and `e` are global constants (not functions):
 
 ```harn
-println(pi)    // 3.141592653589793
-println(e)     // 2.718281828459045
+log(pi)    // 3.141592653589793
+log(e)     // 2.718281828459045
 
 let area = pi * r * r
 ```
@@ -1169,10 +1169,10 @@ The `format` builtin supports both positional `{}` placeholders and named
 
 ```harn
 // Positional
-println(format("Hello, {}!", "world"))
+log(format("Hello, {}!", "world"))
 
 // Named
-println(format("Hello {name}, you are {age}.", {name: "Alice", age: 30}))
+log(format("Hello {name}, you are {age}.", {name: "Alice", age: 30}))
 ```
 
 For simple cases, string interpolation with `${}` is usually more
@@ -1180,7 +1180,7 @@ convenient:
 
 ```harn
 let name = "Alice"
-println("Hello, ${name}!")
+log("Hello, ${name}!")
 ```
 
 ## Comments

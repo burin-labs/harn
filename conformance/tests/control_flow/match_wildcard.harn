@@ -7,7 +7,7 @@ pipeline default() {
     2 -> { result = "two" }
     _ -> { result = "other" }
   }
-  println(result)
+  __io_println(result)
   // Wildcard with strings
   let s = "hello"
   var r2 = ""
@@ -15,5 +15,5 @@ pipeline default() {
     "bye" -> { r2 = "farewell" }
     _ -> { r2 = "catch-all" }
   }
-  println(r2)
+  __io_println(r2)
 }

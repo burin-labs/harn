@@ -4,8 +4,8 @@ pipeline test(task) {
       throw "boom"
     }
   }
-  println(is_err(result))
+  __io_println(is_err(result))
   let permit = sync_mutex_acquire("__default__", 0)
-  println(permit != nil)
+  __io_println(permit != nil)
   sync_release(permit)
 }

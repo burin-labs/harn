@@ -1,11 +1,11 @@
 pipeline default() {
   // exec with args
   let result = exec("echo", "hello from exec")
-  println(result.success)
-  println(result.stdout.trim())
-  println(result.status)
+  __io_println(result.success)
+  __io_println(result.stdout.trim())
+  __io_println(result.status)
   // shell command
   let result2 = shell("echo 'shell works'")
-  println(result2.success)
-  println(result2.stdout.trim())
+  __io_println(result2.success)
+  __io_println(result2.stdout.trim())
 }

@@ -7,12 +7,12 @@ pipeline default() {
       done = shared_cas(counter, snap, snap.value + 1)
     }
   }
-  println(shared_get(counter))
+  __io_println(shared_get(counter))
   let stale = shared_snapshot(counter)
   shared_set(counter, 99)
-  println(shared_cas(counter, stale, 100))
+  __io_println(shared_cas(counter, stale, 100))
   let metrics = shared_metrics(counter)
-  println(metrics.cas_success_count >= 10)
-  println(metrics.cas_failure_count >= 1)
-  println(metrics.stale_read_count >= 1)
+  __io_println(metrics.cas_success_count >= 10)
+  __io_println(metrics.cas_failure_count >= 1)
+  __io_println(metrics.stale_read_count >= 1)
 }

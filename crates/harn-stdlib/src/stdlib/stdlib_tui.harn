@@ -238,7 +238,7 @@ fn __tui_print_menu(items, labels: list<string>, opts) {
   let prompt = opts?.prompt ?? "Select"
   let header = opts?.header
   if header != nil && trim(__tui_to_string(header)) != "" {
-    println(__tui_to_string(header))
+    __io_write_stdout(__tui_to_string(header) + "\n")
   }
   var idx = 0
   for label in labels {
@@ -248,7 +248,7 @@ fn __tui_print_menu(items, labels: list<string>, opts) {
     } else {
       "  "
     }
-    println(to_string(human) + ")" + marker + label)
+    __io_write_stdout(to_string(human) + ")" + marker + label + "\n")
     idx = idx + 1
   }
   let multi = opts?.multi ?? false
@@ -257,16 +257,16 @@ fn __tui_print_menu(items, labels: list<string>, opts) {
   } else {
     " (1-" + to_string(len(items)) + "; q to exit)"
   }
-  print(__tui_to_string(prompt) + hint + "> ")
+  __io_write_stdout(__tui_to_string(prompt) + hint + "> ")
 }
 
 fn __tui_numbered_pick(items, labels, opts) -> dict {
   __tui_print_menu(items, labels, opts)
-  let line_raw = read_line()
-  if line_raw == nil {
+  let line_result = __io_read_line({})
+  if !line_result.ok {
     return __tui_eof(opts)
   }
-  let line = trim(line_raw)
+  let line = trim(line_result.value)
   if contains(__TUI_CANCEL_TOKENS, lowercase(line)) {
     return __tui_cancelled(opts)
   }
@@ -286,7 +286,7 @@ fn __tui_numbered_pick(items, labels, opts) -> dict {
   if multi {
     let indices = __tui_parse_multi(line, len(items))
     if indices == nil {
-      return __tui_error(opts, "invalid selection: " + line_raw)
+      return __tui_error(opts, "invalid selection: " + line)
     }
     var picked = []
     for i in indices {
@@ -296,7 +296,7 @@ fn __tui_numbered_pick(items, labels, opts) -> dict {
   }
   let idx = __tui_parse_index(line, len(items))
   if idx == nil {
-    return __tui_error(opts, "invalid selection: " + line_raw)
+    return __tui_error(opts, "invalid selection: " + line)
   }
   return __tui_result(true, items[idx], "selected")
 }

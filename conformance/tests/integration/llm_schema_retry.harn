@@ -19,27 +19,27 @@ pipeline default() {
       response_format: "json",
     },
   )
-  println(r.data.verdict)
+  __io_println(r.data.verdict)
   // Exactly two calls happened — one initial + one retry.
   let calls = llm_mock_calls()
-  println(len(calls))
+  __io_println(len(calls))
   // The second call's message list must end with the corrective user
   // nudge containing the word "schema".
   let second_msgs = calls[1].messages
   let last_msg = second_msgs[len(second_msgs) - 1]
-  println(contains(last_msg.content, "schema"))
+  __io_println(contains(last_msg.content, "schema"))
   // Issue #533: the invalid response is NOT persisted on retry.
   // The second call replays the original messages + one correction
   // user turn, so the message count grows by exactly 1 vs. the first
   // call, and no "assistant" role appears among the replayed turns.
-  println(len(second_msgs) == len(calls[0].messages) + 1)
+  __io_println(len(second_msgs) == len(calls[0].messages) + 1)
   var has_assistant = false
   for msg in second_msgs {
     if msg.role == "assistant" {
       has_assistant = true
     }
   }
-  println(has_assistant)
+  __io_println(has_assistant)
   // Issue #533: SchemaRetry trace events carry both the validation
   // errors AND the correction prompt text, so a transcript reader can
   // see why a retry happened and what the model received.
@@ -50,11 +50,11 @@ pipeline default() {
       retry_event = ev
     }
   }
-  println(retry_event != nil)
-  println(retry_event.attempt)
-  println(len(retry_event.errors) > 0)
-  println(contains(retry_event.correction_prompt, "schema"))
-  println(retry_event.nudge_used)
+  __io_println(retry_event != nil)
+  __io_println(retry_event.attempt)
+  __io_println(len(retry_event.errors) > 0)
+  __io_println(contains(retry_event.correction_prompt, "schema"))
+  __io_println(retry_event.nudge_used)
   // schema_retries: 0 — no retry; invalid JSON surfaces as an error.
   llm_mock_clear()
   llm_mock({text: "{\"improvement\": \"try again\"}"})
@@ -71,8 +71,8 @@ pipeline default() {
       },
     )
   }
-  println(contains(unwrap_err(err).message, "schema"))
-  println(len(llm_mock_calls()))
+  __io_println(contains(unwrap_err(err).message, "schema"))
+  __io_println(len(llm_mock_calls()))
   // `schema_retry_nudge: false` still retries; it just omits the
   // corrective user message.
   llm_mock_clear()
@@ -90,15 +90,15 @@ pipeline default() {
       response_format: "json",
     },
   )
-  println(bare.data.verdict)
+  __io_println(bare.data.verdict)
   let bare_calls = llm_mock_calls()
-  println(len(bare_calls))
+  __io_println(len(bare_calls))
   let bare_second = bare_calls[1].messages
   // schema_retry_nudge: false replays the original messages exactly;
   // the invalid response is NOT persisted as an assistant turn, so
   // the last role on the retry call is still "user".
-  println(bare_second[len(bare_second) - 1].role)
-  println(len(bare_second) == len(bare_calls[0].messages))
+  __io_println(bare_second[len(bare_second) - 1].role)
+  __io_println(len(bare_second) == len(bare_calls[0].messages))
   // Exhausted prose-only retries surface as hard schema failures.
   llm_mock_clear()
   llm_mock({text: "Analyzing the user task"})
@@ -116,5 +116,5 @@ pipeline default() {
       },
     )
   }
-  println(contains(unwrap_err(prose_err).message, "parseable JSON"))
+  __io_println(contains(unwrap_err(prose_err).message, "parseable JSON"))
 }

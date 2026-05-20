@@ -456,19 +456,19 @@ mod tests {
 
     #[test]
     fn validator_marks_unclosed_delimiters_incomplete() {
-        let state = scan_input_state("if ready {\n  println(\"ok\")");
+        let state = scan_input_state("if ready {\n  __io_println(\"ok\")");
         assert!(state.is_incomplete());
     }
 
     #[test]
     fn validator_ignores_delimiters_inside_strings_and_comments() {
-        let state = scan_input_state("println(\"{\") // }\nlet xs = [1, 2]");
+        let state = scan_input_state("__io_println(\"{\") // }\nlet xs = [1, 2]");
         assert!(!state.is_incomplete());
     }
 
     #[test]
     fn validator_tracks_unclosed_strings() {
-        let state = scan_input_state("println(\"hello");
+        let state = scan_input_state("__io_println(\"hello");
         assert!(state.is_incomplete());
     }
 
@@ -490,7 +490,7 @@ mod tests {
         assert!(matches!(reedline::Signal::CtrlC, reedline::Signal::CtrlC));
         assert!(matches!(reedline::Signal::CtrlD, reedline::Signal::CtrlD));
         assert!(!matches!(
-            reedline::Signal::Success("println(1)".into()),
+            reedline::Signal::Success("__io_println(1)".into()),
             reedline::Signal::CtrlC | reedline::Signal::CtrlD
         ));
     }

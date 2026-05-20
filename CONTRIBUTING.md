@@ -187,7 +187,7 @@ is a `.harn` file paired with a `.expected` (output match) or `.error`
 
 ```bash
 # Add a new test (pick the subdirectory that matches the feature area, e.g. language/, stdlib/)
-echo 'pipeline default() { println("hello") }' > conformance/tests/language/my_test.harn
+echo 'pipeline default() { log("hello") }' > conformance/tests/language/my_test.harn
 echo 'hello' > conformance/tests/language/my_test.expected
 
 # Run it

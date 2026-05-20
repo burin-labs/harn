@@ -6,11 +6,11 @@ pipeline default() {
   // .model / .input_tokens / .output_tokens. Scripts that want the
   // user-visible answer should read .prose.
   let response = llm_call("Hello world", nil, {provider: "mock"})
-  println(response.prose)
+  __io_println(response.prose)
   // Mock with agent_loop terminates immediately via ##DONE##.
   // agent_loop exposes `.visible_text` which is the prose from the final
   // iteration (tool call expressions stripped, `<done>` sentinel wrapped
   // as a tag downstream viewers can strip).
   let result = agent_loop("Do the task", "You are helpful", {provider: "mock"})
-  println(result?.visible_text)
+  __io_println(result?.visible_text)
 }

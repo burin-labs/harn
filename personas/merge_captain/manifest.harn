@@ -145,7 +145,7 @@ pipeline run(task) {
       status: "policy_load_failed",
       errors: policies_load.errors,
     }
-    println(json_stringify(summary))
+    __io_println(json_stringify(summary))
     return summary
   }
   let adapter = _adapter_for(input)
@@ -160,7 +160,7 @@ pipeline run(task) {
     },
   )
   let visible = "merge_captain swept ${to_string(summary.pr_count)} PRs across ${to_string(len(policies_load.policies))} repos (dry_run=${to_string(input.dry_run)})"
-  println(visible)
-  println(json_stringify(summary))
+  __io_println(visible)
+  __io_println(json_stringify(summary))
   return summary
 }

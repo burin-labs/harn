@@ -121,17 +121,17 @@ pipeline default() {
       tool_caller: stack,
     },
   )
-  println(result.status)
+  __io_println(result.status)
   // Three tool dispatches: each fired audit + telemetry sinks once.
-  println(atomic_get(audit_records))
-  println(atomic_get(telemetry_records))
+  __io_println(atomic_get(audit_records))
+  __io_println(atomic_get(telemetry_records))
   // Exactly one handoff was emitted (the third call).
-  println(atomic_get(handoff_records))
+  __io_println(atomic_get(handoff_records))
   // All three calls succeeded as far as the agent loop is concerned —
   // the dry-run layer returns ok=true with status="dry_run" instead of
   // dispatching the underlying handler.
-  println(len(result.tools.successful))
-  println(contains(result.tools.successful, "read"))
-  println(contains(result.tools.successful, "edit"))
-  println(contains(result.tools.successful, "escalate"))
+  __io_println(len(result.tools.successful))
+  __io_println(contains(result.tools.successful, "read"))
+  __io_println(contains(result.tools.successful, "edit"))
+  __io_println(contains(result.tools.successful, "escalate"))
 }

@@ -58,17 +58,17 @@ pipeline default() {
     },
   )
   let r1 = mw(envelope("escalate"), next_with_result({__handoff: full_handoff_payload()}))
-  println(r1.ok)
-  println(r1.audit.kind)
-  println(r1.audit.handoff.source_persona)
-  println(r1.audit.handoff.target_persona_or_human.id)
-  println(r1.audit.handoff.task)
-  println(atomic_get(captured))
+  __io_println(r1.ok)
+  __io_println(r1.audit.kind)
+  __io_println(r1.audit.handoff.source_persona)
+  __io_println(r1.audit.handoff.target_persona_or_human.id)
+  __io_println(r1.audit.handoff.task)
+  __io_println(atomic_get(captured))
   // (2) Tool returned a plain result — no handoff emission, no sink fire.
   let r2 = mw(envelope("read_file"), next_with_result("contents"))
-  println(r2.ok)
-  println(r2.audit?.handoff == nil)
-  println(atomic_get(captured))
+  __io_println(r2.ok)
+  __io_println(r2.audit?.handoff == nil)
+  __io_println(atomic_get(captured))
   // (3) custom detect closure: pull the handoff out of an unconventional
   // result key.
   let mw2 = with_handoff_artifact(
@@ -83,8 +83,8 @@ pipeline default() {
     },
   )
   let r3 = mw2(envelope("rollup"), next_with_result({escalation: full_handoff_payload()}))
-  println(r3.audit.handoff.target_persona_or_human.id)
-  println(r3.audit.handoff.source_persona)
+  __io_println(r3.audit.handoff.target_persona_or_human.id)
+  __io_println(r3.audit.handoff.source_persona)
   // (4) source override populates source_persona when the payload omits it.
   let mw3 = with_handoff_artifact({source: "ship_captain"})
   let abbreviated = {
@@ -93,6 +93,6 @@ pipeline default() {
     reason: "Rollback pending",
   }
   let r4 = mw3(envelope("escalate"), next_with_result({__handoff: abbreviated}))
-  println(r4.audit.handoff.source_persona)
-  println(r4.audit.handoff.target_persona_or_human.kind)
+  __io_println(r4.audit.handoff.source_persona)
+  __io_println(r4.audit.handoff.target_persona_or_human.kind)
 }

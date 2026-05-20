@@ -29,9 +29,9 @@ pipeline main() {
   )
   let ceiling = {tools: ["read"], capabilities: {workspace: ["read_text"]}, side_effect_level: "read_only"}
   let report = workflow_validate(flow, ceiling)
-  println(!report?.valid)
-  println(len(report?.errors) >= 1)
-  println(contains(join(report?.errors, "\n"), "host ceiling"))
+  __io_println(!report?.valid)
+  __io_println(len(report?.errors) >= 1)
+  __io_println(contains(join(report?.errors, "\n"), "host ceiling"))
   let policy = workflow_policy_report(flow, ceiling)
-  println(!policy?.validation?.valid)
+  __io_println(!policy?.validation?.valid)
 }

@@ -39,39 +39,39 @@ pipeline default() {
   // Allowed tool passes; audit.scope records the stage + allowlist.
   let research_mw = with_scoped_executor({stage: "research", allowed_tools: ["search_files", "read_file"]})
   let ok = research_mw(envelope("search_files"), next)
-  println(ok.ok)
-  println(ok.audit.scope.stage)
-  println(join(ok.audit.scope.allowed_tools, ","))
-  println(ok.audit.layers[0].status)
+  __io_println(ok.ok)
+  __io_println(ok.audit.scope.stage)
+  __io_println(join(ok.audit.scope.allowed_tools, ","))
+  __io_println(ok.audit.layers[0].status)
   // Disallowed tool short-circuits with `scope_violation`.
   let reject = research_mw(envelope("write_file"), next)
-  println(reject.ok)
-  println(reject.status)
-  println(reject.error_category)
-  println(reject.error)
-  println(reject.audit.layers[0].status)
+  __io_println(reject.ok)
+  __io_println(reject.status)
+  __io_println(reject.error_category)
+  __io_println(reject.error)
+  __io_println(reject.audit.layers[0].status)
   // `on_violation: "raise"` throws instead of short-circuiting.
   let raising_mw = with_scoped_executor({stage: "plan", allowed_tools: ["sketch_plan"], on_violation: "raise"})
   try {
     raising_mw(envelope("edit_file"), next)
-    println("no-throw")
+    __io_println("no-throw")
   } catch (e) {
-    println("caught")
-    println(e)
+    __io_println("caught")
+    __io_println(e)
   }
   // Missing `allowed_tools` skips the preemptive check; the middleware
   // still pushes a side_effect_level for the duration of `next`.
   let ceiling_mw = with_scoped_executor({stage: "edit", side_effect_level: "workspace_write"})
   let r3 = ceiling_mw(envelope("anything"), next)
-  println(r3.ok)
-  println(r3.audit.scope.stage)
-  println(contains(r3.audit.scope.keys(), "allowed_tools"))
+  __io_println(r3.ok)
+  __io_println(r3.audit.scope.stage)
+  __io_println(contains(r3.audit.scope.keys(), "allowed_tools"))
   // Invalid on_violation rejects at middleware-construction time.
   try {
     with_scoped_executor({stage: "x", allowed_tools: ["y"], on_violation: "log"})
-    println("no-throw-ctor")
+    __io_println("no-throw-ctor")
   } catch (e) {
-    println("caught-ctor")
+    __io_println("caught-ctor")
   }
   // Defense-in-depth: the pushed CapabilityPolicy is visible to the
   // runtime's `enforce_current_policy_for_tool`, so even if a caller
@@ -106,6 +106,6 @@ pipeline default() {
   // Envelope advertises an allowed name; `next` rewrites to the denied
   // name to simulate a misbehaving inner layer.
   let runtime_deny = dispatch_mw(envelope("read_note"), dispatch_next)
-  println(runtime_deny.ok)
-  println(runtime_deny.error_category)
+  __io_println(runtime_deny.ok)
+  __io_println(runtime_deny.error_category)
 }

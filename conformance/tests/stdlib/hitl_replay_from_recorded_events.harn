@@ -47,13 +47,13 @@ pipeline test(task) {
     handle,
     {provider: "github", kind: "issue.opened", headers: {x_delivery: "evt-hitl-replay"}},
   )
-  println(fired.status == "dispatched")
-  println(contains(json_stringify(fired.result ?? {}), "\"verdict\":\"approved\""))
+  __io_println(fired.status == "dispatched")
+  __io_println(contains(json_stringify(fired.result ?? {}), "\"verdict\":\"approved\""))
   clear_host_mocks()
   let replay: DispatchHandle = trigger_replay(fired.event_id)
-  println(replay.status == "dispatched")
-  println(contains(json_stringify(replay.result ?? {}), "\"verdict\":\"approved\""))
-  println(replay.result?.first_reviewer == "alice")
-  println(replay.result?.first_signed_at == fired.result?.first_signed_at)
-  println(replay.result?.first_signature == fired.result?.first_signature)
+  __io_println(replay.status == "dispatched")
+  __io_println(contains(json_stringify(replay.result ?? {}), "\"verdict\":\"approved\""))
+  __io_println(replay.result?.first_reviewer == "alice")
+  __io_println(replay.result?.first_signed_at == fired.result?.first_signed_at)
+  __io_println(replay.result?.first_signature == fired.result?.first_signature)
 }

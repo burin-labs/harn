@@ -3,8 +3,8 @@
 pipeline default(task) {
   llm_mock({error: {category: "rate_limit", message: "429 Too Many Requests"}})
   let r = llm_call_safe("hello", nil, {provider: "mock", llm_retries: 0})
-  println(r.ok)
-  println(r.response == nil)
-  println(r.error.category)
-  println(r.error.message.contains("429"))
+  __io_println(r.ok)
+  __io_println(r.response == nil)
+  __io_println(r.error.category)
+  __io_println(r.error.message.contains("429"))
 }

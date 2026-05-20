@@ -60,17 +60,17 @@ fn edit_phase_step(ctx) {
 pipeline main() {
   let tools = stage_tools()
   let outcome = scoped_persona({tools: tools})
-  println(outcome.research.in_scope.ok)
-  println(outcome.research.in_scope.rendered_result)
-  println(outcome.research.out_of_scope.ok)
-  println(outcome.research.out_of_scope.error_category)
-  println(outcome.edit.in_scope.ok)
-  println(outcome.edit.in_scope.rendered_result)
-  println(outcome.edit.out_of_scope.ok)
-  println(outcome.edit.out_of_scope.error_category)
+  __io_println(outcome.research.in_scope.ok)
+  __io_println(outcome.research.in_scope.rendered_result)
+  __io_println(outcome.research.out_of_scope.ok)
+  __io_println(outcome.research.out_of_scope.error_category)
+  __io_println(outcome.edit.in_scope.ok)
+  __io_println(outcome.edit.in_scope.rendered_result)
+  __io_println(outcome.edit.out_of_scope.ok)
+  __io_println(outcome.edit.out_of_scope.error_category)
   // After every stage unwinds the per-stage policy is gone, so an ambient
   // dispatch should pass.
   let ambient = agent_dispatch_tool_call({name: "edit", arguments: {}}, tools)
-  println(ambient.ok)
-  println(ambient.rendered_result)
+  __io_println(ambient.ok)
+  __io_println(ambient.rendered_result)
 }

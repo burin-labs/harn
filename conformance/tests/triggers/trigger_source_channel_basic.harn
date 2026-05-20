@@ -30,11 +30,11 @@ pipeline test(task) {
       package_name: "conformance",
     },
   )
-  println(handle.provider)
-  println(handle.kind)
+  __io_println(handle.provider)
+  __io_println(handle.kind)
   let _ = emit_channel("ch.basic.input", {repo: "harn"})
   let fired = channel_events("ch.basic.fired")
-  println(len(fired))
-  println(fired[0].payload.name)
-  println(fired[0].payload.repo)
+  __io_println(len(fired))
+  __io_println(fired[0].payload.name)
+  __io_println(fired[0].payload.repo)
 }

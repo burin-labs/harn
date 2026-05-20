@@ -17,9 +17,9 @@ pipeline default() {
   llm_mock_clear()
   llm_mock({text: "ok"})
   agent_loop("hi", nil, {provider: "mock"})
-  println(atomic_get(observed))
+  __io_println(atomic_get(observed))
   let err = try {
     register_session_hook("PreToolUse", { _ev -> return nil })
   }
-  println(is_err(err))
+  __io_println(is_err(err))
 }

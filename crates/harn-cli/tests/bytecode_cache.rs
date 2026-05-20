@@ -94,7 +94,7 @@ fn source_edit_invalidates_cache() {
     let workdir = TempDir::new().unwrap();
     let cache = TempDir::new().unwrap();
     let script = workdir.path().join("entry.harn");
-    fs::write(&script, "println(\"alpha\")\n").unwrap();
+    fs::write(&script, "__io_println(\"alpha\")\n").unwrap();
 
     let first = run_harn(cache.path(), &script);
     assert_eq!(first.exit_code, 0, "first run failed: {}", first.stderr);
@@ -105,7 +105,7 @@ fn source_edit_invalidates_cache() {
         "expected one cache entry"
     );
 
-    fs::write(&script, "println(\"bravo\")\n").unwrap();
+    fs::write(&script, "__io_println(\"bravo\")\n").unwrap();
     let second = run_harn(cache.path(), &script);
     assert_eq!(second.exit_code, 0, "second run failed: {}", second.stderr);
     assert!(
@@ -192,7 +192,7 @@ fn precompile_then_run_skips_compile() {
     let workdir = TempDir::new().unwrap();
     let cache = TempDir::new().unwrap();
     let script = workdir.path().join("entry.harn");
-    fs::write(&script, "println(\"precompiled\")\n").unwrap();
+    fs::write(&script, "__io_println(\"precompiled\")\n").unwrap();
 
     run_in_harn_runtime({
         let target = script.clone();
@@ -290,7 +290,7 @@ fn disabled_cache_does_not_write_files() {
     let workdir = TempDir::new().unwrap();
     let cache = TempDir::new().unwrap();
     let script = workdir.path().join("entry.harn");
-    fs::write(&script, "println(\"no cache\")\n").unwrap();
+    fs::write(&script, "__io_println(\"no cache\")\n").unwrap();
 
     let script = script.clone();
     let cache_dir = cache.path().to_path_buf();

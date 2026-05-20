@@ -9,46 +9,46 @@ pipeline default() {
   let verification = workflow_evaluate_verification(
     {verify: {assert_text: "ok", expect_status: 0}, result: {visible_text: "all ok", exit_status: 0}},
   )
-  println(verification.kind)
-  println(verification.ok)
-  println(len(verification.checks))
+  __io_println(verification.kind)
+  __io_println(verification.ok)
+  __io_println(len(verification.checks))
   let failed_verification = workflow_evaluate_verification(
     {verify: {assert_text: "missing", expect_status: 1}, result: {text: "present", exit_status: 0}},
   )
-  println(failed_verification.ok)
-  println(failed_verification.checks[1].actual)
+  __io_println(failed_verification.ok)
+  __io_println(failed_verification.checks[1].actual)
   let condition = workflow_evaluate_condition(
     {
       metadata: {contains_text: "needle"},
       artifacts: [{id: "a", kind: "summary", text: "hay"}, {id: "b", kind: "summary", text: "needle here"}],
     },
   )
-  println(condition.matched)
-  println(json_stringify(condition.consumed_artifact_ids))
+  __io_println(condition.matched)
+  __io_println(json_stringify(condition.consumed_artifact_ids))
   let kind_condition = workflow_evaluate_condition(
     {metadata: {artifact_kind: "diff"}, artifacts: [{id: "d", kind: "diff"}]},
   )
-  println(kind_condition.matched)
+  __io_println(kind_condition.matched)
   let verify_outcome = workflow_classify_stage_outcome(
     {node_kind: "verify", result: {status: "completed"}, verification: {ok: false}},
   )
-  println(verify_outcome.outcome)
-  println(verify_outcome.branch)
+  __io_println(verify_outcome.outcome)
+  __io_println(verify_outcome.branch)
   let stuck_outcome = workflow_classify_stage_outcome(
     {node_kind: "stage", result: {status: "stuck"}, verification: {ok: true}},
   )
-  println(stuck_outcome.outcome)
-  println(stuck_outcome.branch)
+  __io_println(stuck_outcome.outcome)
+  __io_println(stuck_outcome.branch)
   let done_outcome = workflow_classify_stage_outcome(
     {node_kind: "stage", result: {status: "done"}, verification: {ok: true}},
   )
-  println(done_outcome.outcome)
-  println(done_outcome.branch)
+  __io_println(done_outcome.outcome)
+  __io_println(done_outcome.branch)
   let subagent_outcome = workflow_classify_stage_outcome(
     {node_kind: "subagent", result: {status: "completed"}, verification: {ok: true}},
   )
-  println(subagent_outcome.outcome)
-  println(subagent_outcome.branch)
+  __io_println(subagent_outcome.outcome)
+  __io_println(subagent_outcome.branch)
   let static_condition = workflow_prepare_static_stage(
     {
       node_id: "gate",
@@ -56,8 +56,8 @@ pipeline default() {
       artifacts: [{id: "s", kind: "summary", text: "ok"}],
     },
   )
-  println(static_condition.result.text)
-  println(static_condition.outcome)
+  __io_println(static_condition.result.text)
+  __io_println(static_condition.outcome)
   let static_reduce = workflow_prepare_static_stage(
     {
       node_id: "reduce",
@@ -65,9 +65,9 @@ pipeline default() {
       artifacts: [{id: "a", kind: "summary", text: "one"}, {id: "b", kind: "summary", text: "two"}],
     },
   )
-  println(static_reduce.result.text)
-  println(static_reduce.artifacts[0].kind)
-  println(json_stringify(static_reduce.artifacts[0].lineage))
+  __io_println(static_reduce.result.text)
+  __io_println(static_reduce.artifacts[0].kind)
+  __io_println(json_stringify(static_reduce.artifacts[0].lineage))
   let static_escalation = workflow_prepare_static_stage(
     {
       node_id: "escalate",
@@ -75,7 +75,7 @@ pipeline default() {
       artifacts: [{id: "input", kind: "plan", text: "blocked"}],
     },
   )
-  println(static_escalation.result.text)
-  println(static_escalation.artifacts[0].data.queue)
-  println(static_escalation.branch)
+  __io_println(static_escalation.result.text)
+  __io_println(static_escalation.artifacts[0].data.queue)
+  __io_println(static_escalation.branch)
 }

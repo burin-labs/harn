@@ -29,9 +29,9 @@ pipeline default() {
     {llm_classifier: {model: "haiku", provider: "mock", threshold: 0.7}, inner: inner},
   )
   let above = wrapper({command: "echo above"})
-  println(above.action)
-  println(above.command)
-  println(above.result.ran)
+  __io_println(above.action)
+  __io_println(above.command)
+  __io_println(above.result.ran)
   /* Below threshold: same kind, confidence 0.4. Wrapper audits the
    * verdict but runs `inner` with the unaltered command. */
   llm_mock(
@@ -42,22 +42,22 @@ pipeline default() {
     },
   )
   let below = wrapper({command: "echo below"})
-  println(below.ok)
-  println(below.ran)
+  __io_println(below.ok)
+  __io_println(below.ran)
   /* Two classifier verdicts logged, one above-threshold (action="rewrite")
    * and one below (action="passthrough"). */
   let log = pipeline_lifecycle_audit_log_take()
-  println(log[0].kind)
-  println(log[0].payload.kind)
-  println(log[0].payload.action)
+  __io_println(log[0].kind)
+  __io_println(log[0].payload.kind)
+  __io_println(log[0].payload.action)
   /* The below-threshold call's verdict is the last entry in the log:
    * passthrough emits no further audit entries. Above-threshold
    * rewrite emits classifier_verdict + tool_rewrite +
    * tool_hooks.reminder_injected = 3, then the passthrough adds 1 for
    * a total of 4. */
-  println(len(log))
+  __io_println(len(log))
   let last = log[len(log) - 1]
-  println(last.kind)
-  println(last.payload.action)
-  println(last.payload.kind)
+  __io_println(last.kind)
+  __io_println(last.payload.action)
+  __io_println(last.payload.kind)
 }

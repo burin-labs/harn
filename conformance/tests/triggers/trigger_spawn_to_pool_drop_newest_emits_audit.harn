@@ -60,20 +60,20 @@ pipeline test(task) {
     handle,
     {provider: "github", kind: "issue.opened", headers: {x_delivery: "newest-" + unique}},
   )
-  println(warmup.status == "dispatched")
-  println(queued.status == "dispatched")
-  println(newest.status == "dispatched")
-  println(newest.result?.status == "rejected")
-  println(newest.result?.rejection_reason)
+  __io_println(warmup.status == "dispatched")
+  __io_println(queued.status == "dispatched")
+  __io_println(newest.status == "dispatched")
+  __io_println(newest.result?.status == "rejected")
+  __io_println(newest.result?.rejection_reason)
   // The pool emits its standard audit so trigger dispatch and direct
   // `pool.submit` callers see the same drop event.
   let audit = stream.next().value
-  println(audit.payload.policy)
-  println(audit.headers.schema)
+  __io_println(audit.payload.policy)
+  __io_println(audit.headers.schema)
   // Drain the gate so the two surviving tasks finish.
   send(gate, "go")
   send(gate, "go")
   let results = pool_wait([warmup.result, queued.result])
-  println(results[0].status)
-  println(results[1].status)
+  __io_println(results[0].status)
+  __io_println(results[1].status)
 }

@@ -14,10 +14,10 @@ pipeline test(task) {
     schema,
     {provider: "mock", model: "mock-model", system: "you are a judge", max_tokens: 200},
   )
-  println(envelope.ok)
-  println(envelope.status)
-  println(envelope.value.verdict)
-  println(len(envelope.value.bullets))
-  println(envelope.value.bullets[0])
-  println(envelope.attempts)
+  __io_println(envelope.ok)
+  __io_println(envelope.status)
+  __io_println(envelope.value.verdict)
+  __io_println(len(envelope.value.bullets))
+  __io_println(envelope.value.bullets[0])
+  __io_println(envelope.attempts)
 }

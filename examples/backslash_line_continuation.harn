@@ -1,5 +1,5 @@
 pipeline main() {
   let same_worker = true
-  println(same_worker)
-  println(true)
+  __io_println(same_worker)
+  __io_println(true)
 }

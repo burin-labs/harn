@@ -9,15 +9,15 @@ pipeline default() {
     {separator: "\n--\n"},
   )
   let rendered = context_render(ctx)
-  println(rendered)
+  __io_println(rendered)
   let prompt = prompt_compose("Fix it", ctx, {system: "You are helpful", task_label: "Work"})
-  println(prompt?.system)
-  println(contains(prompt?.prompt, "[repo]"))
+  __io_println(prompt?.system)
+  __io_println(contains(prompt?.prompt, "[repo]"))
   // The prompt wraps the task in a <workflow_task> / <label> /
   // <instructions> block. Assert both pieces are present.
-  println(contains(prompt?.prompt, "<label>Work</label>") && contains(prompt?.prompt, "Fix it"))
+  __io_println(contains(prompt?.prompt, "<label>Work</label>") && contains(prompt?.prompt, "Fix it"))
   let raw = context_render({sections: [{name: "raw", content: "Visible"}]})
-  println(raw)
+  __io_println(raw)
   let added = context_add(context([section("one", "1")]), section("two", "2"))
-  println(len(added?.sections))
+  __io_println(len(added?.sections))
 }

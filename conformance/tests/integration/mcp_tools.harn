@@ -13,5 +13,5 @@ pipeline test(task) {
   )
   let result = mcp_tools(tools)
   assert(result == nil, "mcp_tools should return nil")
-  println("mcp_tools accepted tool_registry with annotations")
+  __io_println("mcp_tools accepted tool_registry with annotations")
 }

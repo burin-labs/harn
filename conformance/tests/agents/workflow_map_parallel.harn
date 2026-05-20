@@ -13,7 +13,7 @@ pipeline main() {
     },
   )
   let all_result = workflow_execute("map all", all_flow, [], {max_steps: 1})
-  println(len(all_result?.artifacts))
+  __io_println(len(all_result?.artifacts))
   let first_flow = workflow_graph(
     {
       entry: "map",
@@ -28,7 +28,7 @@ pipeline main() {
     },
   )
   let first_result = workflow_execute("map first", first_flow, [], {max_steps: 1})
-  println(len(first_result?.artifacts))
+  __io_println(len(first_result?.artifacts))
   let quorum_flow = workflow_graph(
     {
       entry: "map",
@@ -43,5 +43,5 @@ pipeline main() {
     },
   )
   let quorum_result = workflow_execute("map quorum", quorum_flow, [], {max_steps: 1})
-  println(len(quorum_result?.artifacts))
+  __io_println(len(quorum_result?.artifacts))
 }

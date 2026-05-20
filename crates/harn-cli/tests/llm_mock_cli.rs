@@ -156,8 +156,8 @@ fn llm_mock_replays_fifo_fixtures_for_non_mock_provider() {
         "script.harn",
         r#"
 pipeline default() {
-  println(llm_call("same prompt", nil, {provider: env_or("TEST_PROVIDER", "mock")}).text)
-  println(llm_call("same prompt", nil, {provider: env_or("TEST_PROVIDER", "mock")}).text)
+  __io_println(llm_call("same prompt", nil, {provider: env_or("TEST_PROVIDER", "mock")}).text)
+  __io_println(llm_call("same prompt", nil, {provider: env_or("TEST_PROVIDER", "mock")}).text)
 }
 "#,
     );
@@ -197,8 +197,8 @@ fn llm_mock_reuses_glob_matches() {
         "script.harn",
         r#"
 pipeline default() {
-  println(llm_call("say hello please", nil, {provider: env_or("TEST_PROVIDER", "mock")}).text)
-  println(llm_call("say hello again", nil, {provider: env_or("TEST_PROVIDER", "mock")}).text)
+  __io_println(llm_call("say hello please", nil, {provider: env_or("TEST_PROVIDER", "mock")}).text)
+  __io_println(llm_call("say hello again", nil, {provider: env_or("TEST_PROVIDER", "mock")}).text)
 }
 "#,
     );
@@ -237,7 +237,7 @@ fn llm_mock_reports_unmatched_prompt_snippet() {
         "script.harn",
         r#"
 pipeline default() {
-  println(llm_call("this prompt is intentionally unmatched for fixture coverage", nil, {provider: env_or("TEST_PROVIDER", "mock")}).text)
+  __io_println(llm_call("this prompt is intentionally unmatched for fixture coverage", nil, {provider: env_or("TEST_PROVIDER", "mock")}).text)
 }
 "#,
     );
@@ -287,7 +287,7 @@ fn llm_mock_record_replays_identical_output() {
 pipeline default() {
   let provider = env_or("TEST_PROVIDER", "mock")
   let result = llm_call("hello world", nil, {provider: provider})
-  println(transcript_render_full(result.transcript))
+  __io_println(transcript_render_full(result.transcript))
 }
 "#,
     );
@@ -353,7 +353,7 @@ pipeline default() {
   let result = llm_call(build_prompt(env_or("HARN_TASK", "")), nil, {
     provider: env_or("TEST_PROVIDER", "mock"),
   })
-  println(result.text)
+  __io_println(result.text)
 }
 "#,
     );
@@ -401,7 +401,7 @@ pub fn build_prompt(task) {
 pipeline default() {
   let provider = env_or("TEST_PROVIDER", "mock")
   let result = llm_call(build_prompt(env_or("HARN_TASK", "")), nil, {provider: provider})
-  println(transcript_render_full(result.transcript))
+  __io_println(transcript_render_full(result.transcript))
 }
 "#,
     );
@@ -498,8 +498,8 @@ pipeline default() {
       max_iterations: 2,
     },
   )
-  println(result.summary)
-  println(json_stringify(result))
+  __io_println(result.summary)
+  __io_println(json_stringify(result))
 }
 "#,
     );
@@ -598,7 +598,7 @@ pipeline default() {
       max_iterations: 2,
     },
   )
-  println(result.summary)
+  __io_println(result.summary)
 }
 "#,
     );
@@ -683,7 +683,7 @@ pipeline default() {
       max_iterations: 2,
     },
   )
-  println(result.summary)
+  __io_println(result.summary)
 }
 "#,
     );

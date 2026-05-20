@@ -42,14 +42,16 @@ pipeline default() {
     },
   )
   let warning_events = transcript_events_by_kind(stalled.transcript, "agent_loop_stall_warning")
-  println(stalled.status)
-  println(stalled.repeated_tool_calls)
-  println(stalled.suspected_loop)
-  println(len(stalled.stall_warnings))
-  println(len(warning_events))
-  println(warning_events[0].metadata.tool_name)
-  println(warning_events[0].metadata.repeat_count)
-  println(stalled.stall_warnings[0].arguments_digest == warning_events[0].metadata.arguments_digest)
+  __io_println(stalled.status)
+  __io_println(stalled.repeated_tool_calls)
+  __io_println(stalled.suspected_loop)
+  __io_println(len(stalled.stall_warnings))
+  __io_println(len(warning_events))
+  __io_println(warning_events[0].metadata.tool_name)
+  __io_println(warning_events[0].metadata.repeat_count)
+  __io_println(
+    stalled.stall_warnings[0].arguments_digest == warning_events[0].metadata.arguments_digest,
+  )
   llm_mock_clear()
   llm_mock({tool_calls: [{id: "p1", name: "poll", arguments: {key: "job-1"}}]})
   llm_mock({tool_calls: [{id: "p2", name: "poll", arguments: {key: "job-1"}}]})
@@ -67,8 +69,8 @@ pipeline default() {
       stall_diagnostics: {threshold: 3, exempt_tools: ["poll"]},
     },
   )
-  println(polling.status)
-  println(polling.repeated_tool_calls)
-  println(polling.suspected_loop)
-  println(len(polling.stall_warnings))
+  __io_println(polling.status)
+  __io_println(polling.repeated_tool_calls)
+  __io_println(polling.suspected_loop)
+  __io_println(len(polling.stall_warnings))
 }

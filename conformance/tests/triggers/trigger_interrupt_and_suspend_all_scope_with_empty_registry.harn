@@ -33,13 +33,13 @@ pipeline test(task) {
     handle,
     {provider: "github", kind: "issue.opened", headers: {x_delivery: "evt-" + unique}},
   )
-  println(dispatch.status == "dispatched")
-  println(dispatch.result?.status == "broadcast")
-  println(dispatch.result?.scope_kind == "all")
-  println(dispatch.result?.target_count)
-  println(dispatch.result?.suspended_count)
-  println(dispatch.result?.skipped_count)
-  println(dispatch.result?.reason == "build_storm")
+  __io_println(dispatch.status == "dispatched")
+  __io_println(dispatch.result?.status == "broadcast")
+  __io_println(dispatch.result?.scope_kind == "all")
+  __io_println(dispatch.result?.target_count)
+  __io_println(dispatch.result?.suspended_count)
+  __io_println(dispatch.result?.skipped_count)
+  __io_println(dispatch.result?.reason == "build_storm")
   let audits = lifecycle_audit_log_take()
   var audit_count = 0
   var outcome = ""
@@ -53,8 +53,8 @@ pipeline test(task) {
       reason = audit.payload.reason
     }
   }
-  println(audit_count)
-  println(outcome)
-  println(scope_kind)
-  println(reason)
+  __io_println(audit_count)
+  __io_println(outcome)
+  __io_println(scope_kind)
+  __io_println(reason)
 }

@@ -25,6 +25,7 @@
  *     import { providers } from "std/oauth/providers"
  *     import { memory } from "std/oauth/storage"
  *     import { device_flow } from "std/oauth/device_flow"
+ *     import { write_stderr } from "std/io"
  *
  *     let token = device_flow(
  *       providers().github,
@@ -33,7 +34,7 @@
  *         scopes: ["read:user"],
  *         storage: memory(),
  *         on_user_code: { user_code, verification_uri ->
- *           eprintln("Open " + verification_uri + " and enter " + user_code)
+ *           write_stderr("Open " + verification_uri + " and enter " + user_code + "\n")
  *         },
  *       },
  *     )
@@ -166,9 +167,10 @@ fn __now_seconds() {
 }
 
 fn __default_on_user_code(user_code, verification_uri) {
-  let _ = eprintln(
+  let _ = __io_write_stderr(
     "To authorize this device, open " + to_string(verification_uri) + " and enter code: "
-      + to_string(user_code),
+      + to_string(user_code)
+      + "\n",
   )
   return nil
 }
@@ -346,7 +348,7 @@ fn __poll_until_done(cfg, device_code, initial_interval_seconds, expires_in_seco
  *   - storage_key:      per-installation key; defaults to provider id.
  *   - audience:         extra `audience=` parameter on /device.
  *   - on_user_code:     fn(user_code, verification_uri[, verification_uri_complete]) -> any.
- *                       Defaults to `eprintln(...)` with the URL and code.
+ *                       Defaults to `stderr` output with the URL and code.
  *
  * @effects: [time, net, stderr]
  * @allocation: heap

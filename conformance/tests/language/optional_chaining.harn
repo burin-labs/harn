@@ -1,26 +1,26 @@
 pipeline default() {
   // Optional chaining on nil returns nil
   let x = nil
-  println(x?.count)
-  println(x?.name)
+  __io_println(x?.count)
+  __io_println(x?.name)
   // Optional chaining on non-nil works normally
   let d = {name: "Alice", age: 30}
-  println(d?.name)
-  println(d?.age)
+  __io_println(d?.name)
+  __io_println(d?.age)
   // Chained optional access
   let nested = {inner: {value: 42}}
-  println(nested?.inner?.value)
+  __io_println(nested?.inner?.value)
   // Optional on list
   let items = [1, 2, 3]
-  println(items?.count)
-  println(items?.first)
+  __io_println(items?.count)
+  __io_println(items?.first)
   // Nil propagation through chain
   let empty = nil
-  println(empty?.inner?.value)
+  __io_println(empty?.inner?.value)
   // Optional chaining on non-dict types returns nil for unknown props
   let n = 42
-  println(n?.foo)
+  __io_println(n?.foo)
   let s = "hello"
-  println(s?.count)
-  println(s?.foo)
+  __io_println(s?.count)
+  __io_println(s?.foo)
 }

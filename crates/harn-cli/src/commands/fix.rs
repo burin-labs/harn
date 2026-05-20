@@ -6,7 +6,8 @@ use std::path::Path;
 use harn_lexer::{FixEdit, Span};
 use harn_lint::LintSeverity;
 use harn_parser::{
-    DiagnosticCode as Code, DiagnosticSeverity, Repair, RepairSafety, SNode, TypeChecker,
+    visit, DiagnosticCode as Code, DiagnosticSeverity, Node, Repair, RepairSafety, SNode,
+    TypeChecker, TypeExpr, TypedParam,
 };
 use serde::Serialize;
 
@@ -110,6 +111,31 @@ struct RepairCandidate {
     span: Option<Span>,
     repair: Repair,
     edits: Vec<FixEdit>,
+}
+
+#[derive(Debug, Clone)]
+struct CallableInfo {
+    name: String,
+    span: Span,
+    is_pub: bool,
+    insert_offset: usize,
+    has_params: bool,
+    param_names: BTreeSet<String>,
+    harness_binding: Option<String>,
+    calls: Vec<CallSite>,
+    ambient_stdio_calls: Vec<AmbientStdioCall>,
+}
+
+#[derive(Debug, Clone)]
+struct CallSite {
+    callee: String,
+    span: Span,
+}
+
+#[derive(Debug, Clone)]
+struct AmbientStdioCall {
+    name: String,
+    span: Span,
 }
 
 pub(crate) fn run(args: &FixArgs) -> Result<(), String> {
@@ -290,7 +316,8 @@ pub(crate) fn apply_repairs(
 
     if !dry_run {
         for (path, edits) in &edits_by_file {
-            apply_file_edits(Path::new(path), edits)?;
+            let edits = dedupe_wire_edits(edits);
+            apply_file_edits(Path::new(path), &edits)?;
         }
     }
 
@@ -458,7 +485,7 @@ fn collect_file_candidates(
         &options,
     );
     for diag in &lint_diagnostics {
-        let Some(repair) = diag.repair() else {
+        let Some((repair, edits)) = lint_candidate_repair(diag, &source, &program) else {
             continue;
         };
         if !repair_allowed(&repair, safety_ceiling) {
@@ -472,11 +499,351 @@ fn collect_file_candidates(
             message: diag.message.clone(),
             span: Some(diag.span),
             repair,
-            edits: diag.fix.clone().unwrap_or_default(),
+            edits,
         });
     }
 
     collect_preflight_candidates(file, &source, &program, &config, safety_ceiling, out);
+}
+
+fn lint_candidate_repair(
+    diag: &harn_lint::LintDiagnostic,
+    source: &str,
+    program: &[SNode],
+) -> Option<(Repair, Vec<FixEdit>)> {
+    if diag.code == Code::LintAmbientStdioBuiltin {
+        return synthesize_stdio_repair(diag, source, program);
+    }
+    let repair = diag.repair()?;
+    Some((repair, diag.fix.clone().unwrap_or_default()))
+}
+
+fn synthesize_stdio_repair(
+    diag: &harn_lint::LintDiagnostic,
+    source: &str,
+    program: &[SNode],
+) -> Option<(Repair, Vec<FixEdit>)> {
+    let infos = collect_callable_infos(program, source);
+    let owner_idx = infos.iter().position(|info| {
+        info.ambient_stdio_calls
+            .iter()
+            .any(|call| call.span.start == diag.span.start && call.span.end == diag.span.end)
+    })?;
+    let owner = &infos[owner_idx];
+    let ambient = owner
+        .ambient_stdio_calls
+        .iter()
+        .find(|call| call.span.start == diag.span.start && call.span.end == diag.span.end)?;
+    let replacement_binding = owner
+        .harness_binding
+        .clone()
+        .or_else(|| harness_param_name_for_insert(owner).map(str::to_string));
+    let replacement = ambient_replacement(&ambient.name, replacement_binding.as_deref())?;
+    let mut edits =
+        replace_identifier_within_span_fix(source, diag.span, &ambient.name, &replacement)?;
+
+    if owner.harness_binding.is_some() {
+        return Some((
+            Repair::from_template(Code::LintAmbientStdioBuiltin.repair_template()?),
+            edits,
+        ));
+    }
+
+    let reverse_callers = build_reverse_callers(&infos);
+    let needed = propagate_harness_requirements(&infos, &reverse_callers, owner_idx);
+    let primary_call_start = owner
+        .ambient_stdio_calls
+        .iter()
+        .map(|call| call.span.start)
+        .min()
+        .unwrap_or(diag.span.start);
+    if diag.span.start != primary_call_start {
+        return Some((
+            repair_for_stdio_plan(&infos, &reverse_callers, &needed)?,
+            edits,
+        ));
+    }
+
+    for &idx in &needed {
+        let info = &infos[idx];
+        edits.push(add_harness_param_edit(info)?);
+    }
+    for (callee_idx, callers) in reverse_callers.iter().enumerate() {
+        if !needed.contains(&callee_idx) {
+            continue;
+        }
+        for &(caller_idx, call_idx) in callers {
+            let caller = &infos[caller_idx];
+            let arg_name = match caller.harness_binding.as_deref() {
+                Some(binding) => binding,
+                None if needed.contains(&caller_idx) => harness_param_name_for_insert(caller)?,
+                None => continue,
+            };
+            edits.push(add_call_argument_edit(
+                source,
+                &caller.calls[call_idx].span,
+                arg_name,
+            )?);
+        }
+    }
+
+    Some((
+        repair_for_stdio_plan(&infos, &reverse_callers, &needed)?,
+        dedupe_edits(edits),
+    ))
+}
+
+fn ambient_replacement(name: &str, binding: Option<&str>) -> Option<String> {
+    let replacement = harn_parser::diagnostic::harness_stdio_replacement(name)?;
+    Some(replacement.replacen("harness", binding.unwrap_or("harness"), 1))
+}
+
+fn collect_callable_infos(program: &[SNode], source: &str) -> Vec<CallableInfo> {
+    let mut infos = Vec::new();
+    for node in program {
+        let inner = match &node.node {
+            Node::AttributedDecl { inner, .. } => inner.as_ref(),
+            _ => node,
+        };
+        match &inner.node {
+            Node::FnDecl {
+                name,
+                params,
+                is_pub,
+                ..
+            }
+            | Node::ToolDecl {
+                name,
+                params,
+                is_pub,
+                ..
+            } => {
+                let mut calls = Vec::new();
+                let mut ambient_stdio_calls = Vec::new();
+                visit_callable_body(inner, &mut |child| {
+                    if let Node::FunctionCall { name, .. } = &child.node {
+                        calls.push(CallSite {
+                            callee: name.clone(),
+                            span: child.span,
+                        });
+                        if harn_parser::diagnostic::harness_stdio_replacement(name).is_some() {
+                            ambient_stdio_calls.push(AmbientStdioCall {
+                                name: name.clone(),
+                                span: child.span,
+                            });
+                        }
+                    }
+                });
+                let Some((insert_offset, has_params)) = callable_param_insert(source, inner.span)
+                else {
+                    continue;
+                };
+                infos.push(CallableInfo {
+                    name: name.clone(),
+                    span: inner.span,
+                    is_pub: *is_pub,
+                    insert_offset,
+                    has_params: has_params || !params.is_empty(),
+                    param_names: params.iter().map(|param| param.name.clone()).collect(),
+                    harness_binding: harness_param_name(params).map(str::to_string),
+                    calls,
+                    ambient_stdio_calls,
+                });
+            }
+            _ => {}
+        }
+    }
+    infos
+}
+
+fn visit_callable_body(node: &SNode, visitor: &mut impl FnMut(&SNode)) {
+    let body = match &node.node {
+        Node::FnDecl { body, .. } | Node::ToolDecl { body, .. } => body,
+        _ => return,
+    };
+    for stmt in body {
+        visit::walk_node(stmt, visitor);
+    }
+}
+
+fn callable_param_insert(source: &str, span: Span) -> Option<(usize, bool)> {
+    let region = source.get(span.start..span.end)?;
+    let header_end = region.find('{').unwrap_or(region.len());
+    let header = &region[..header_end];
+    let open_paren = header.find('(')?;
+    let close_paren = header[open_paren + 1..].find(')')? + open_paren + 1;
+    let has_params = !header[open_paren + 1..close_paren].trim().is_empty();
+    Some((span.start + open_paren + 1, has_params))
+}
+
+fn harness_param_name(params: &[TypedParam]) -> Option<&str> {
+    params.iter().find_map(|param| {
+        let TypeExpr::Named(name) = param.type_expr.as_ref()? else {
+            return None;
+        };
+        if name == "Harness" && matches!(param.name.as_str(), "harness" | "_harness") {
+            Some(param.name.as_str())
+        } else {
+            None
+        }
+    })
+}
+
+fn build_reverse_callers(infos: &[CallableInfo]) -> Vec<Vec<(usize, usize)>> {
+    let by_name = infos
+        .iter()
+        .enumerate()
+        .map(|(idx, info)| (info.name.as_str(), idx))
+        .collect::<BTreeMap<_, _>>();
+    let mut reverse = vec![Vec::new(); infos.len()];
+    for (caller_idx, info) in infos.iter().enumerate() {
+        for (call_idx, call) in info.calls.iter().enumerate() {
+            let Some(&callee_idx) = by_name.get(call.callee.as_str()) else {
+                continue;
+            };
+            reverse[callee_idx].push((caller_idx, call_idx));
+        }
+    }
+    reverse
+}
+
+fn propagate_harness_requirements(
+    infos: &[CallableInfo],
+    reverse_callers: &[Vec<(usize, usize)>],
+    owner_idx: usize,
+) -> BTreeSet<usize> {
+    let mut needed = BTreeSet::from([owner_idx]);
+    let mut changed = true;
+    while changed {
+        changed = false;
+        let snapshot = needed.iter().copied().collect::<Vec<_>>();
+        for callee_idx in snapshot {
+            for &(caller_idx, _) in &reverse_callers[callee_idx] {
+                if infos[caller_idx].harness_binding.is_none() && needed.insert(caller_idx) {
+                    changed = true;
+                }
+            }
+        }
+    }
+    needed
+}
+
+fn repair_for_stdio_plan(
+    infos: &[CallableInfo],
+    reverse_callers: &[Vec<(usize, usize)>],
+    needed: &BTreeSet<usize>,
+) -> Option<Repair> {
+    let surface_changing = needed.iter().any(|&idx| {
+        let info = &infos[idx];
+        info.is_pub || info.name == "main" || reverse_callers[idx].is_empty()
+    });
+    if surface_changing {
+        Some(Repair::from_template(
+            Code::InvalidMainSignature.repair_template()?,
+        ))
+    } else {
+        Some(Repair::from_template(
+            Code::LintAmbientStdioBuiltin.repair_template()?,
+        ))
+    }
+}
+
+fn add_harness_param_edit(info: &CallableInfo) -> Option<FixEdit> {
+    let name = harness_param_name_for_insert(info)?;
+    Some(FixEdit {
+        span: Span::with_offsets(
+            info.insert_offset,
+            info.insert_offset,
+            info.span.line,
+            info.span.column,
+        ),
+        replacement: if info.has_params {
+            format!("{name}: Harness, ")
+        } else {
+            format!("{name}: Harness")
+        },
+    })
+}
+
+fn harness_param_name_for_insert(info: &CallableInfo) -> Option<&'static str> {
+    if !info.param_names.contains("harness") {
+        return Some("harness");
+    }
+    if !info.param_names.contains("_harness") {
+        return Some("_harness");
+    }
+    None
+}
+
+fn add_call_argument_edit(source: &str, span: &Span, arg_name: &str) -> Option<FixEdit> {
+    let region = source.get(span.start..span.end)?;
+    let open_paren = region.find('(')?;
+    let close_paren = region[open_paren + 1..].find(')')? + open_paren + 1;
+    let has_args = !region[open_paren + 1..close_paren].trim().is_empty();
+    let insert_at = span.start + open_paren + 1;
+    Some(FixEdit {
+        span: Span::with_offsets(insert_at, insert_at, span.line, span.column),
+        replacement: if has_args {
+            format!("{arg_name}, ")
+        } else {
+            arg_name.to_string()
+        },
+    })
+}
+
+fn dedupe_edits(edits: Vec<FixEdit>) -> Vec<FixEdit> {
+    let mut seen = BTreeSet::new();
+    let mut out = Vec::new();
+    for edit in edits {
+        let key = (edit.span.start, edit.span.end, edit.replacement.clone());
+        if seen.insert(key) {
+            out.push(edit);
+        }
+    }
+    out
+}
+
+fn dedupe_wire_edits(edits: &[FixEditWire]) -> Vec<FixEditWire> {
+    let mut seen = BTreeSet::new();
+    let mut out = Vec::new();
+    for edit in edits {
+        let key = (edit.span.start, edit.span.end, edit.replacement.clone());
+        if seen.insert(key) {
+            out.push(edit.clone());
+        }
+    }
+    out
+}
+
+fn replace_identifier_within_span_fix(
+    source: &str,
+    span: Span,
+    old: &str,
+    new: &str,
+) -> Option<Vec<FixEdit>> {
+    let region = source.get(span.start..span.end)?;
+    let offset = region.match_indices(old).find_map(|(offset, _)| {
+        let before_ok = offset == 0
+            || !region
+                .as_bytes()
+                .get(offset.wrapping_sub(1))
+                .is_some_and(|byte| is_ident_byte(*byte));
+        let end = offset + old.len();
+        let after_ok = region
+            .as_bytes()
+            .get(end)
+            .is_none_or(|byte| !is_ident_byte(*byte));
+        (before_ok && after_ok).then_some(offset)
+    })?;
+    let start = span.start + offset;
+    Some(vec![FixEdit {
+        span: Span::with_offsets(start, start + old.len(), span.line, span.column + offset),
+        replacement: new.to_string(),
+    }])
+}
+
+fn is_ident_byte(byte: u8) -> bool {
+    byte.is_ascii_alphanumeric() || byte == b'_'
 }
 
 fn collect_preflight_candidates(
@@ -567,12 +934,18 @@ fn candidates_overlap(left: &RepairCandidate, right: &RepairCandidate) -> bool {
         right
             .edits
             .iter()
-            .any(|right_edit| spans_overlap(left_edit.span, right_edit.span))
+            .any(|right_edit| edits_conflict(left_edit, right_edit))
     })
 }
 
-fn spans_overlap(left: Span, right: Span) -> bool {
-    left.start < right.end && left.end > right.start
+fn edits_conflict(left: &FixEdit, right: &FixEdit) -> bool {
+    let same_zero_width = left.span.start == left.span.end
+        && right.span.start == right.span.end
+        && left.span.start == right.span.start;
+    if same_zero_width {
+        return left.replacement != right.replacement;
+    }
+    left.span.start < right.span.end && left.span.end > right.span.start
 }
 
 fn print_human_plan(plan: &RepairPlan) {
@@ -806,6 +1179,161 @@ mod tests {
         assert!(
             error.contains("needs-human") && error.contains("--plan --json"),
             "unexpected error: {error}"
+        );
+    }
+
+    #[test]
+    fn plan_threads_existing_harness_for_stdio_repairs() {
+        let temp = tempfile::TempDir::new().unwrap();
+        let script = temp.path().join("stdio_threading.harn");
+        fs::write(
+            &script,
+            "fn helper() {\n  println(\"hi\")\n}\n\nfn main(harness: Harness) {\n  helper()\n}\n",
+        )
+        .unwrap();
+
+        let plan = build_plan(&script, None).unwrap();
+        let repair = plan
+            .repairs
+            .iter()
+            .find(|repair| repair.diagnostic_code == Code::LintAmbientStdioBuiltin.to_string())
+            .expect("ambient stdio repair should be present");
+
+        assert_eq!(repair.repair.id, "bindings/thread-harness");
+        assert_eq!(repair.repair.safety, "scope-local");
+        let replacements = repair
+            .edits
+            .iter()
+            .map(|edit| edit.replacement.as_str())
+            .collect::<Vec<_>>();
+        assert!(
+            replacements.contains(&"harness.stdio.println"),
+            "expected direct call rewrite in edits: {replacements:?}"
+        );
+        assert!(
+            replacements.contains(&"harness: Harness"),
+            "expected helper parameter insertion in edits: {replacements:?}"
+        );
+        assert!(
+            replacements.contains(&"harness"),
+            "expected caller argument threading in edits: {replacements:?}"
+        );
+    }
+
+    #[test]
+    fn plan_marks_stdio_repairs_surface_changing_when_harness_is_unreachable() {
+        let temp = tempfile::TempDir::new().unwrap();
+        let script = temp.path().join("stdio_needs_param.harn");
+        fs::write(&script, "fn helper() {\n  println(\"hi\")\n}\n").unwrap();
+
+        let plan = build_plan(&script, None).unwrap();
+        let repair = plan
+            .repairs
+            .iter()
+            .find(|repair| repair.diagnostic_code == Code::LintAmbientStdioBuiltin.to_string())
+            .expect("ambient stdio repair should be present");
+
+        assert_eq!(repair.repair.id, "bindings/thread-harness-needs-param");
+        assert_eq!(repair.repair.safety, "surface-changing");
+    }
+
+    #[test]
+    fn apply_scope_local_threads_harness_for_stdio_migration() {
+        let temp = tempfile::TempDir::new().unwrap();
+        let script = temp.path().join("stdio_apply.harn");
+        fs::write(
+            &script,
+            "fn helper() {\n  println(\"hi\")\n}\n\nfn main(harness: Harness) {\n  helper()\n}\n",
+        )
+        .unwrap();
+
+        let result = apply_repairs(&script, RepairSafety::ScopeLocal, false).unwrap();
+        assert!(
+            result.applied.iter().any(|repair| {
+                repair.diagnostic_code == Code::LintAmbientStdioBuiltin.to_string()
+                    && repair.repair_id == "bindings/thread-harness"
+            }),
+            "{result:#?}"
+        );
+
+        let updated = fs::read_to_string(&script).unwrap();
+        assert!(
+            updated.contains("fn helper(harness: Harness)"),
+            "expected helper to gain a harness parameter: {updated}"
+        );
+        assert!(
+            updated.contains("helper(harness)"),
+            "expected main to thread harness into helper: {updated}"
+        );
+        assert!(
+            updated.contains("harness.stdio.println(\"hi\")"),
+            "expected ambient stdio call to migrate: {updated}"
+        );
+    }
+
+    #[test]
+    fn apply_dedupes_shared_stdio_threading_edits() {
+        let temp = tempfile::TempDir::new().unwrap();
+        let script = temp.path().join("stdio_shared.harn");
+        fs::write(
+            &script,
+            "fn leaf_a() {\n  println(\"a\")\n}\n\nfn leaf_b() {\n  println(\"b\")\n}\n\nfn middle() {\n  leaf_a()\n  leaf_b()\n}\n\nfn main(harness: Harness) {\n  middle()\n}\n",
+        )
+        .unwrap();
+
+        let result = apply_repairs(&script, RepairSafety::ScopeLocal, false).unwrap();
+        assert!(
+            result.applied.iter().any(|repair| {
+                repair.diagnostic_code == Code::LintAmbientStdioBuiltin.to_string()
+                    && repair.repair_id == "bindings/thread-harness"
+            }),
+            "{result:#?}"
+        );
+
+        let updated = fs::read_to_string(&script).unwrap();
+        assert!(
+            updated.contains("fn middle(harness: Harness)"),
+            "expected middle to receive exactly one harness parameter: {updated}"
+        );
+        assert!(
+            !updated.contains("fn middle(harness: Harness, harness: Harness"),
+            "shared threading edits should not duplicate params: {updated}"
+        );
+        assert!(
+            updated.contains("leaf_a(harness)") && updated.contains("leaf_b(harness)"),
+            "expected both leaf calls to receive harness: {updated}"
+        );
+    }
+
+    #[test]
+    fn plan_uses_underscore_harness_when_harness_name_is_taken() {
+        let temp = tempfile::TempDir::new().unwrap();
+        let script = temp.path().join("stdio_taken_name.harn");
+        fs::write(
+            &script,
+            "fn helper(harness: string) {\n  println(harness)\n}\n",
+        )
+        .unwrap();
+
+        let plan = build_plan(&script, None).unwrap();
+        let repair = plan
+            .repairs
+            .iter()
+            .find(|repair| repair.diagnostic_code == Code::LintAmbientStdioBuiltin.to_string())
+            .expect("ambient stdio repair should be present");
+
+        let replacements = repair
+            .edits
+            .iter()
+            .map(|edit| edit.replacement.as_str())
+            .collect::<Vec<_>>();
+        assert!(
+            replacements.contains(&"_harness: Harness, "),
+            "expected inserted capability parameter to avoid duplicate `harness`: {replacements:?}"
+        );
+        assert!(
+            replacements.contains(&"_harness.stdio.println"),
+            "expected call rewrite to use the inserted capability parameter: {replacements:?}"
         );
     }
 }

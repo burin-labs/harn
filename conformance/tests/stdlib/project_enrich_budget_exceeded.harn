@@ -28,8 +28,8 @@ pipeline test(task) {
       include_operator_meta: false,
     },
   )
-  println(result.budget_exceeded)
-  println(result.package_name == "project-enrich-budget")
-  println(result.languages[0] == "rust")
-  println(len(llm_mock_calls()) == 0)
+  __io_println(result.budget_exceeded)
+  __io_println(result.package_name == "project-enrich-budget")
+  __io_println(result.languages[0] == "rust")
+  __io_println(len(llm_mock_calls()) == 0)
 }

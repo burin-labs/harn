@@ -21,11 +21,11 @@ pipeline main() {
   agent_session_apply_reminder_post_turn(session, 1)
   agent_session_apply_reminder_post_turn(session, 2)
   let after_turns = transcript_events_by_kind(agent_session_snapshot(session), "system_reminder")
-  println(len(after_inject))
-  println(after_inject[0].reminder.propagate)
-  println(after_inject[0].reminder.ttl_turns)
-  println(len(after_turns))
-  println(after_turns[0].reminder.body)
+  __io_println(len(after_inject))
+  __io_println(after_inject[0].reminder.propagate)
+  __io_println(after_inject[0].reminder.ttl_turns)
+  __io_println(len(after_turns))
+  __io_println(after_turns[0].reminder.body)
   // Two post-turn decrements should leave the TTL at 3.
-  println(after_turns[0].reminder.ttl_turns)
+  __io_println(after_turns[0].reminder.ttl_turns)
 }

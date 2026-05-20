@@ -31,7 +31,7 @@ pipeline default() {
     "",
     {n: 3, parallel: false, judge: longest_judge, call_opts: {provider: "mock"}},
   )
-  println("winner index = " + to_string(result.best.index))
-  println("winner text  = " + result.best.text)
-  println("reasoning    = " + result.reasoning)
+  __io_println("winner index = " + to_string(result.best.index))
+  __io_println("winner text  = " + result.best.text)
+  __io_println("reasoning    = " + result.reasoning)
 }

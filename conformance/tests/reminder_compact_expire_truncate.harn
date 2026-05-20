@@ -19,11 +19,11 @@ pipeline main() {
   let stream = event_log.subscribe({topic: topic, from_cursor: cursor})
   let injected = stream.next().value
   let logged = stream.next().value
-  println(len(reminders))
-  println(injected.kind)
-  println(logged.kind)
-  println(logged.payload.reminder_id != "")
-  println(logged.payload.reason)
-  println(logged.payload.ttl_turns_before)
-  println(logged.payload.expired_at_boundary)
+  __io_println(len(reminders))
+  __io_println(injected.kind)
+  __io_println(logged.kind)
+  __io_println(logged.payload.reminder_id != "")
+  __io_println(logged.payload.reason)
+  __io_println(logged.payload.ttl_turns_before)
+  __io_println(logged.payload.expired_at_boundary)
 }

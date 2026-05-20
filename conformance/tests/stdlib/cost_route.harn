@@ -20,5 +20,5 @@ pipeline test(task) {
   assert_eq(explicit.provider, "mock")
   assert_eq(explicit.model, "mock")
   assert_eq(llm_call_count(), 2)
-  println("ok")
+  __io_println("ok")
 }

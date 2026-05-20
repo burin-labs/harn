@@ -28,10 +28,10 @@ pipeline default() {
       ],
     },
   )
-  println(len(artifact_plan.items))
-  println(artifact_plan.items[0].kind)
-  println(artifact_plan.items[0].artifact.id)
-  println(json_stringify(artifact_plan.selected_artifact_ids))
+  __io_println(len(artifact_plan.items))
+  __io_println(artifact_plan.items[0].kind)
+  __io_println(artifact_plan.items[0].artifact.id)
+  __io_println(json_stringify(artifact_plan.selected_artifact_ids))
   let explicit_plan = workflow_map_work_items(
     {
       node: {
@@ -42,20 +42,22 @@ pipeline default() {
       artifacts: [{id: "summary", kind: "summary", text: "s"}],
     },
   )
-  println(len(explicit_plan.items))
-  println(json_stringify(item_kinds(explicit_plan.items)))
-  println(explicit_plan.items[1].value.name)
-  println(explicit_plan.items[0].artifact_kind)
-  println(json_stringify(explicit_plan.selected_artifact_ids))
-  println(workflow_map_join_target({join_policy: {strategy: "all"}, total: 3}))
-  println(workflow_map_join_target({join_policy: {strategy: "first"}, total: 3}))
-  println(workflow_map_join_target({join_policy: {strategy: "quorum", min_completed: 2}, total: 3}))
+  __io_println(len(explicit_plan.items))
+  __io_println(json_stringify(item_kinds(explicit_plan.items)))
+  __io_println(explicit_plan.items[1].value.name)
+  __io_println(explicit_plan.items[0].artifact_kind)
+  __io_println(json_stringify(explicit_plan.selected_artifact_ids))
+  __io_println(workflow_map_join_target({join_policy: {strategy: "all"}, total: 3}))
+  __io_println(workflow_map_join_target({join_policy: {strategy: "first"}, total: 3}))
+  __io_println(
+    workflow_map_join_target({join_policy: {strategy: "quorum", min_completed: 2}, total: 3}),
+  )
   let direct_plan = workflow_map_stage_plan(
     {node: {map_policy: {output_kind: "work"}, output_contract: {output_kinds: ["summary"]}}},
   )
-  println(direct_plan.runs_stage)
-  println(direct_plan.output_kind)
-  println(direct_plan.stage_node == nil)
+  __io_println(direct_plan.runs_stage)
+  __io_println(direct_plan.output_kind)
+  __io_println(direct_plan.stage_node == nil)
   let stage_plan = workflow_map_stage_plan(
     {
       node: {
@@ -68,11 +70,11 @@ pipeline default() {
       },
     },
   )
-  println(stage_plan.runs_stage)
-  println(stage_plan.stage_node.kind)
-  println(json_stringify(stage_plan.stage_node.map_policy))
-  println(json_stringify(stage_plan.stage_node.join_policy))
-  println(stage_plan.stage_node.output_contract.output_kinds[0])
+  __io_println(stage_plan.runs_stage)
+  __io_println(stage_plan.stage_node.kind)
+  __io_println(json_stringify(stage_plan.stage_node.map_policy))
+  __io_println(json_stringify(stage_plan.stage_node.join_policy))
+  __io_println(stage_plan.stage_node.output_contract.output_kinds[0])
   let completed = workflow_map_finalize(
     {
       strategy: "quorum",
@@ -82,10 +84,10 @@ pipeline default() {
       failures: [],
     },
   )
-  println(completed.result.status)
-  println(completed.result.text)
-  println(completed.outcome)
-  println(completed.branch)
+  __io_println(completed.result.status)
+  __io_println(completed.result.text)
+  __io_println(completed.outcome)
+  __io_println(completed.branch)
   let failed = workflow_map_finalize(
     {
       strategy: "all",
@@ -95,7 +97,7 @@ pipeline default() {
       failures: [{status: "failed"}, {status: "failed"}],
     },
   )
-  println(failed.result.status)
-  println(failed.result.text)
-  println(failed.branch)
+  __io_println(failed.result.status)
+  __io_println(failed.result.text)
+  __io_println(failed.branch)
 }

@@ -16,25 +16,25 @@ import {
 pipeline default() {
   let results = [Ok({status: "pass"}), Err("bad-input"), Ok({status: "fail"}), Err("timeout"), Ok({status: "pass"})]
   let parts = partition(results)
-  println(parts.ok_count)
-  println(parts.err_count)
-  println(len(parts.oks))
-  println(len(parts.errs))
-  println(len(oks(results)))
-  println(len(errs(results)))
-  println(count_oks(results))
-  println(count_errs(results))
+  __io_println(parts.ok_count)
+  __io_println(parts.err_count)
+  __io_println(len(parts.oks))
+  __io_println(len(parts.errs))
+  __io_println(len(oks(results)))
+  __io_println(len(errs(results)))
+  __io_println(count_oks(results))
+  __io_println(count_errs(results))
   let summarized = summary(results)
-  println(summarized.total)
-  println(summarized.any_failed)
-  println(summarized.all_ok)
+  __io_println(summarized.total)
+  __io_println(summarized.any_failed)
+  __io_println(summarized.all_ok)
   let mapped = map_settled(
     results,
     fn(value, idx) { return "ok#" + to_string(idx) + ":" + value.status },
     fn(error, idx) { return "err#" + to_string(idx) + ":" + to_string(error) },
   )
   for row in mapped {
-    println(row)
+    __io_println(row)
   }
   let by_status = tally_by(
     results,
@@ -45,11 +45,11 @@ pipeline default() {
       return "error"
     },
   )
-  println(by_status?.pass)
-  println(by_status?.fail)
-  println(by_status?.error)
+  __io_println(by_status?.pass)
+  __io_println(by_status?.fail)
+  __io_println(by_status?.error)
   let rows = enumerate_settled(results)
-  println(rows[0].ok)
-  println(rows[1].ok)
-  println(rows[1].error)
+  __io_println(rows[0].ok)
+  __io_println(rows[1].ok)
+  __io_println(rows[1].error)
 }

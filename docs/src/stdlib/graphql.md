@@ -44,7 +44,7 @@ pipeline default() {
     {first: 25},
   )
   let page = graphql_page_info(envelope.result)
-  println(page.end_cursor)
+  log(page.end_cursor)
 }
 ```
 

@@ -18,9 +18,9 @@ pipeline test(task) {
     wait(wp).value + "-5"
   }
   complete(wp, "go")
-  println(await(first))
-  println(await(second))
-  println(await(third))
-  println(await(fourth))
-  println(await(fifth))
+  __io_println(await(first))
+  __io_println(await(second))
+  __io_println(await(third))
+  __io_println(await(fourth))
+  __io_println(await(fifth))
 }

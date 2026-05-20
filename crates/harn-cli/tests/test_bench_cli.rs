@@ -115,7 +115,7 @@ pipeline default() {
     sleep(3600000)
   }
   let advanced = now_ms() - start
-  println("advanced_ms=${advanced}")
+  __io_println("advanced_ms=${advanced}")
 }
 "#,
     );
@@ -147,9 +147,9 @@ fn fs_overlay_writes_do_not_touch_underlying_tree() {
         "writer.harn",
         r#"
 pipeline default() {
-  println(read_file("seed.txt"))
+  __io_println(read_file("seed.txt"))
   write_file("new-file.txt", "hello from overlay")
-  println(read_file("new-file.txt"))
+  __io_println(read_file("new-file.txt"))
 }
 "#,
     );
@@ -383,7 +383,7 @@ fn unified_tape_flags_unpinned_clock_divergence() {
         "drifty.harn",
         r#"
 pipeline default() {
-  println("now=${now_ms()}")
+  __io_println("now=${now_ms()}")
 }
 "#,
     );
@@ -598,7 +598,7 @@ pipeline default() {
   let start = now_ms()
   sleep(86400000)
   let delta = now_ms() - start
-  println("delta=${delta}")
+  __io_println("delta=${delta}")
 }
 "#,
     );
@@ -628,8 +628,8 @@ pipeline default() {
     sleep(item * 100)
     item * item
   }
-  println("succeeded=${outcome.succeeded}")
-  println("failed=${outcome.failed}")
+  __io_println("succeeded=${outcome.succeeded}")
+  __io_println("failed=${outcome.failed}")
 }
 "#,
     );
@@ -685,7 +685,7 @@ pipeline default() {
   let t0 = now_ms()
   advance_time(5000)
   let t1 = now_ms()
-  println("delta=${t1 - t0}")
+  __io_println("delta=${t1 - t0}")
 }
 "#,
     );
@@ -741,7 +741,7 @@ pipeline default() {
   let start = now_ms()
   sleep(500)
   let after = now_ms()
-  println("delta=${after - start}")
+  __io_println("delta=${after - start}")
 }
 "#,
         );

@@ -109,10 +109,10 @@ let result = agent_loop("Wait for the maintainer's review.", nil, {
 
 // The model decided to park; `result.status == "suspended"`.
 if result.status == "suspended" {
-  println(result.reason)                      // model-supplied
-  println(result.initiator)                   // "self"
-  println(result.conditions?.timeout?.duration_minutes)
-  println(result.handle.snapshot_path)        // persisted snapshot
+  log(result.reason)                      // model-supplied
+  log(result.initiator)                   // "self"
+  log(result.conditions?.timeout?.duration_minutes)
+  log(result.handle.snapshot_path)        // persisted snapshot
 }
 ```
 
@@ -169,8 +169,8 @@ let snapshot = suspend_agent(handle, "operator pulled context")
 // ... do other work ...
 let resumed = resume_agent(handle, "Pick up where you left off.")
 let final = wait_agent(handle)
-println(final.status)         // "done"
-println(final.has_transcript) // true — transcript continuity preserved
+log(final.status)         // "done"
+log(final.has_transcript) // true — transcript continuity preserved
 ```
 
 `subagent_pause` and `subagent_resume` emit `tool_call_audit` telemetry

@@ -10,25 +10,25 @@ pipeline test(task) {
   }
   let suspended_gate = with_approval_gate("merge", fn() { return "ran" }, opts)
   let suspended = suspended_gate()
-  println(suspended.status)
-  println(suspended.approval_required)
+  __io_println(suspended.status)
+  __io_println(suspended.approval_required)
   let approved_gate = with_approval_gate(
     "merge",
     fn() { return "ran" },
     opts + {approval: {approved: true, reviewers: ["alice"], reason: "ok"}},
   )
   let approved = approved_gate()
-  println(approved.status)
-  println(approved.result)
-  println(len(approved.receipt.approvals))
-  println(approved.receipt.status)
+  __io_println(approved.status)
+  __io_println(approved.result)
+  __io_println(len(approved.receipt.approvals))
+  __io_println(approved.receipt.status)
   let denied_gate = with_approval_gate(
     "merge",
     fn() { return "should-not-run" },
     opts + {approval: {approved: false, reviewers: ["alice"], reason: "unsafe"}},
   )
   let denied = denied_gate()
-  println(denied.status)
-  println(denied.result == nil)
-  println(denied.error.message)
+  __io_println(denied.status)
+  __io_println(denied.result == nil)
+  __io_println(denied.error.message)
 }

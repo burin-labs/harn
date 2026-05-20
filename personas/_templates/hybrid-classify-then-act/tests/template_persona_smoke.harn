@@ -6,6 +6,6 @@ pipeline test_template_persona_smoke(task) {
   assert_eq(result.status, "success")
   assert_eq(result.result.action, "draft_plan")
   assert_eq(result.receipt.schema, "harn.receipt.v1")
-  println(true)
-  println(result.receipt.schema)
+  __io_println(true)
+  __io_println(result.receipt.schema)
 }

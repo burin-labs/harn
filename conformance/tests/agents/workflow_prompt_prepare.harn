@@ -17,15 +17,15 @@ pipeline default() {
     },
   ]
   let xml_context = workflow_render_artifacts_context(artifacts, {})
-  println(contains(xml_context, "<title>src/main.rs</title>"))
-  println(contains(xml_context, "<source>stage&lt;a&gt;</source>"))
-  println(contains(xml_context, "<freshness>fresh&amp;ready</freshness>"))
-  println(contains(xml_context, "fn main() {}"))
+  __io_println(contains(xml_context, "<title>src/main.rs</title>"))
+  __io_println(contains(xml_context, "<source>stage&lt;a&gt;</source>"))
+  __io_println(contains(xml_context, "<freshness>fresh&amp;ready</freshness>"))
+  __io_println(contains(xml_context, "fn main() {}"))
   let json_context = workflow_render_artifacts_context(
     [{id: "artifact-2", kind: "summary", data: {b: 2, a: 1}}],
     {render: "json"},
   )
-  println(contains(json_context, "\"text\":\"{"))
+  __io_println(contains(json_context, "\"text\":\"{"))
   let verification = workflow_render_verification_context(
     [
       {
@@ -35,9 +35,9 @@ pipeline default() {
       },
     ],
   )
-  println(contains(verification, "<source_node>build</source_node>"))
-  println(contains(verification, "- rate&lt;Limit"))
-  println(contains(verification, "- command: cargo test (must pass)"))
+  __io_println(contains(verification, "<source_node>build</source_node>"))
+  __io_println(contains(verification, "- rate&lt;Limit"))
+  __io_println(contains(verification, "- command: cargo test (must pass)"))
   let prepared = workflow_prepare_stage_prompt(
     {
       task: "  Ship it  ",
@@ -47,10 +47,10 @@ pipeline default() {
       verification_contracts: [],
     },
   )
-  println(contains(prepared.prompt, "<label>Implement &lt;X&gt;</label>"))
-  println(contains(prepared.prompt, "Ship it"))
-  println(prepared.rendered_context == xml_context)
-  println(prepared.rendered_verification == "")
+  __io_println(contains(prepared.prompt, "<label>Implement &lt;X&gt;</label>"))
+  __io_println(contains(prepared.prompt, "Ship it"))
+  __io_println(prepared.rendered_context == xml_context)
+  __io_println(prepared.rendered_verification == "")
   let ordered = workflow_prepare_stage_prompt(
     {
       task: "Create the missing test file with one edit call.",
@@ -59,24 +59,24 @@ pipeline default() {
       verification_contracts: [{required_identifiers: ["rateLimit"]}],
     },
   )
-  println(
+  __io_println(
     ordered.prompt.index_of("<workflow_task>") < ordered.prompt.index_of("<workflow_verification>"),
   )
-  println(
+  __io_println(
     ordered.prompt.index_of("<workflow_verification>")
       < ordered.prompt.index_of("<workflow_context>"),
   )
-  println(contains(ordered.prompt, "<label>Create Required Outputs</label>"))
-  println(contains(ordered.prompt, "Create the missing test file with one edit call."))
-  println(contains(ordered.prompt, "rateLimit"))
-  println(trim(ordered.prompt).ends_with("</workflow_response_contract>"))
-  println(contains(ordered.prompt, "Treat `<workflow_context>` as supporting evidence"))
-  println(
+  __io_println(contains(ordered.prompt, "<label>Create Required Outputs</label>"))
+  __io_println(contains(ordered.prompt, "Create the missing test file with one edit call."))
+  __io_println(contains(ordered.prompt, "rateLimit"))
+  __io_println(trim(ordered.prompt).ends_with("</workflow_response_contract>"))
+  __io_println(contains(ordered.prompt, "Treat `<workflow_context>` as supporting evidence"))
+  __io_println(
     contains(ordered.prompt, "do only what the current workflow task and system prompt authorize"),
   )
-  println(contains(ordered.prompt, "When the current stage is complete, stop"))
+  __io_println(contains(ordered.prompt, "When the current stage is complete, stop"))
   let prepared_override = workflow_prepare_stage_prompt(
     {task: "Task", rendered_context: "override", verification_contracts: []},
   )
-  println(prepared_override.rendered_context)
+  __io_println(prepared_override.rendered_context)
 }

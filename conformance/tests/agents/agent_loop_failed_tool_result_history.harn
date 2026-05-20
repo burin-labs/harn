@@ -33,11 +33,11 @@ pipeline main() {
       done_judge: nil,
     },
   )
-  println(result.status)
-  println(result.tools.successful == [])
-  println(contains(result.tools.rejected, "explode"))
+  __io_println(result.status)
+  __io_println(result.tools.successful == [])
+  __io_println(contains(result.tools.rejected, "explode"))
   let calls = llm_mock_calls()
   let second_turn = json_stringify(calls[1].messages)
-  println(contains(second_turn, "boom from tool handler"))
-  println(contains(second_turn, "error"))
+  __io_println(contains(second_turn, "boom from tool handler"))
+  __io_println(contains(second_turn, "error"))
 }

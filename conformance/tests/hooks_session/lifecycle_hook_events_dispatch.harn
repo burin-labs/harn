@@ -47,8 +47,8 @@ pipeline default() {
   ]
   for event in events {
     let result = __host_fire_session_hook(event, {})
-    println(event + "=" + result.control)
+    __io_println(event + "=" + result.control)
   }
-  println("observed=" + to_string(atomic_get(observed)))
+  __io_println("observed=" + to_string(atomic_get(observed)))
   clear_session_hooks()
 }

@@ -78,10 +78,10 @@ pipeline default(_task) {
     }
     let row = {repo: pr.repo, pr: pr.number, title: pr.title, decision: decision, reasoning: llm_response}
     decisions = decisions + [row]
-    println("[#${pr.number}] ${pr.title}")
-    println("    decision: ${decision}")
-    println("    reasoning: ${llm_response}")
-    println("")
+    __io_println("[#${pr.number}] ${pr.title}")
+    __io_println("    decision: ${decision}")
+    __io_println("    reasoning: ${llm_response}")
+    __io_println("")
   }
   let receipt = {
     persona: "merge_captain",
@@ -91,7 +91,7 @@ pipeline default(_task) {
     decisions: decisions,
     receipt_kind: "merge_supervision_receipt",
   }
-  println("=== merge_captain receipt ===")
-  println(json_stringify(receipt))
+  __io_println("=== merge_captain receipt ===")
+  __io_println(json_stringify(receipt))
   return receipt
 }

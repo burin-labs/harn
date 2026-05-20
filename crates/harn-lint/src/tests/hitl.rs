@@ -21,7 +21,7 @@ fn request_approval_bound_result_is_handled() {
         r#"
 pipeline deploy(task) {
   let approval = request_approval("deploy prod", {reviewers: ["alice"]})
-  println(approval.approved)
+  __io_println(approval.approved)
 }
 "#,
     );
@@ -39,7 +39,7 @@ pipeline deploy(task) {
   let result = try {
     request_approval("deploy prod", {reviewers: ["alice"]})
   }
-  println(is_ok(result))
+  __io_println(is_ok(result))
 }
 "#,
     );

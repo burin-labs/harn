@@ -35,11 +35,11 @@ pipeline test(task) {
   let event_id = "fixed-emit-" + unique
   let first = emit_channel("ch.idem.input", {seq: 1}, {id: event_id})
   let second = emit_channel("ch.idem.input", {seq: 2}, {id: event_id})
-  println(first.duplicate)
-  println(second.duplicate)
-  println(first.event_id == second.event_id)
+  __io_println(first.duplicate)
+  __io_println(second.duplicate)
+  __io_println(first.event_id == second.event_id)
   // Only one fired handler invocation despite two emits.
   let fired = channel_events("ch.idem.fired")
-  println(len(fired))
-  println(fired[0].payload.seq)
+  __io_println(len(fired))
+  __io_println(fired[0].payload.seq)
 }

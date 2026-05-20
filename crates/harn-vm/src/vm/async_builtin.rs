@@ -23,7 +23,7 @@ pub fn clone_async_builtin_child_vm() -> Option<Vm> {
 /// async-builtin's host stack entry. The dispatch loop drains that entry's
 /// output back to the original parent VM after the async builtin returns.
 ///
-/// Without this hook, `log()`/`print()` calls inside `post_turn_callback`
+/// Without this hook, `log()`/`__io_print()` calls inside `post_turn_callback`
 /// closures, tool handlers, and other VM-side closures invoked from async
 /// builtins would silently disappear because the transient cb_vm.output
 /// buffer is dropped on scope exit.

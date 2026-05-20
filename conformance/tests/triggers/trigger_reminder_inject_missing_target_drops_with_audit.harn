@@ -32,10 +32,10 @@ pipeline test(task) {
     handle,
     {provider: "github", kind: "issue.opened", headers: {x_delivery: "evt-" + unique}},
   )
-  println(dispatch.status == "dispatched")
-  println(dispatch.result?.status == "dropped")
-  println(dispatch.result?.reason == "target_unknown_session")
-  println(dispatch.result?.target_kind == "concrete")
+  __io_println(dispatch.status == "dispatched")
+  __io_println(dispatch.result?.status == "dropped")
+  __io_println(dispatch.result?.reason == "target_unknown_session")
+  __io_println(dispatch.result?.target_kind == "concrete")
   let audits = lifecycle_audit_log_take()
   var drop_audits = 0
   var outcome = ""
@@ -47,7 +47,7 @@ pipeline test(task) {
       reason = audit.payload.reason
     }
   }
-  println(drop_audits)
-  println(outcome)
-  println(reason)
+  __io_println(drop_audits)
+  __io_println(outcome)
+  __io_println(reason)
 }

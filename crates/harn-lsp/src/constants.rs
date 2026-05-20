@@ -5,8 +5,6 @@ use std::sync::OnceLock;
 /// Each entry is (name, detail) where detail shows the parameter signature.
 pub(crate) const BUILTINS: &[(&str, &str)] = &[
     // I/O
-    ("println", "println(msg) -> nil"),
-    ("print", "print(msg) -> nil"),
     ("log", "log(msg) -> nil"),
     // Type conversion
     ("type_of", "type_of(value) -> string"),
@@ -398,8 +396,6 @@ pub(crate) const BUILTINS: &[(&str, &str)] = &[
         "tool_format_result",
         "tool_format_result(name, result) -> string",
     ),
-    // User interaction
-    ("prompt_user", "prompt_user(msg) -> string"),
     // Host interop
     ("host_call", "host_call(name, args) -> value"),
     // LLM introspection
@@ -744,8 +740,6 @@ pub(crate) const TYPE_NAMES: &[&str] = &[
 pub(crate) fn builtin_doc(name: &str) -> Option<String> {
     let doc = match name {
         "log" => "**log(value)** — Print value to stdout with `[harn]` prefix",
-        "print" => "**print(value)** — Print value to stdout (no newline)",
-        "println" => "**println(value)** — Print value to stdout with newline",
         "type_of" => "**type_of(value)** → string — Returns the type name",
         "to_string" => "**to_string(value)** → string — Convert to string",
         "to_int" => "**to_int(value)** → int — Convert to integer",
@@ -863,7 +857,6 @@ pub(crate) fn builtin_doc(name: &str) -> Option<String> {
         "atomic_add" => "**atomic_add(a, n)** → int — Atomically add, returns previous value",
         "atomic_cas" => "**atomic_cas(a, expected, new)** → bool — Compare-and-swap",
         "select" => "**select(ch1, ch2, ...)** → dict — Wait for first channel with data: {index, value, channel}",
-        "prompt_user" => "**prompt_user(message?)** → string — Read a line from stdin",
         "llm_info" => "**llm_info()** → dict — LLM configuration: {provider, model, api_key_set}",
         "llm_usage" => "**llm_usage()** → dict — Cumulative LLM usage: {input_tokens, output_tokens, total_duration_ms, call_count, total_calls}",
         "timer_start" => "**timer_start(name?)** → dict — Start a named timer, returns timer handle",

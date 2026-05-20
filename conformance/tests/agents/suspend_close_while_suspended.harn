@@ -20,19 +20,19 @@ pipeline main() {
     {provider: "mock", background: true, tool_format: "native", max_iterations: 3},
   )
   let suspended = wait_agent(handle)
-  println("pre_close_status=" + suspended.status)
+  __io_println("pre_close_status=" + suspended.status)
   let closed = close_agent(handle)
-  println("post_close_status=" + closed.status)
+  __io_println("post_close_status=" + closed.status)
   // Resume attempt should reject with HARN-SUS-010.
   let resume_attempt = try {
     resume_agent(handle)
   }
-  println("resume_failed=" + to_string(is_err(resume_attempt)))
-  println(
+  __io_println("resume_failed=" + to_string(is_err(resume_attempt)))
+  __io_println(
     "resume_err_has_code="
       + to_string(contains(to_string(unwrap_err(resume_attempt)), "HARN-SUS-010")),
   )
   // Idempotent re-close — does not panic, returns terminal summary.
   let closed_again = close_agent(handle)
-  println("reclose_status=" + closed_again.status)
+  __io_println("reclose_status=" + closed_again.status)
 }

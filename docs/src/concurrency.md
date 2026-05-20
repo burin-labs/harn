@@ -13,7 +13,7 @@ let handle = spawn {
 }
 
 let result = await(handle)  // blocks until complete
-println(result)                 // "done"
+log(result)                 // "done"
 ```
 
 Cancel a task before it finishes:
@@ -63,7 +63,7 @@ let results = parallel each [30, 5, 10] with { max_concurrent: 2 } { ms ->
 } as stream
 
 for result in results {
-  println(result)
+  log(result)
 }
 ```
 
@@ -85,14 +85,14 @@ let outcome = parallel settle items { item ->
   item * 10
 }
 
-println(outcome.succeeded)  // 2
-println(outcome.failed)     // 1
+log(outcome.succeeded)  // 2
+log(outcome.failed)     // 1
 
 for r in outcome.results {
   if is_ok(r) {
-    println(unwrap(r))
+    log(unwrap(r))
   } else {
-    println(unwrap_err(r))
+    log(unwrap_err(r))
   }
 }
 ```
@@ -148,7 +148,7 @@ spawn {
 }
 
 for chunk in ch {
-  println(chunk)
+  log(chunk)
 }
 // prints "chunk 1" then "chunk 2", then the loop ends
 ```
@@ -159,7 +159,7 @@ of response chunks:
 ```harn
 let stream = llm_stream("Tell me a story", "You are a storyteller")
 for chunk in stream {
-  print(chunk)
+  log(chunk)
 }
 ```
 
@@ -187,7 +187,7 @@ parallel 10 { i ->
   }
 }
 
-println(shared_get(budget)) // 10
+log(shared_get(budget)) // 10
 ```
 
 Scopes are explicit:
@@ -243,7 +243,7 @@ spawn {
 }
 
 let msg = mailbox_receive(inbox)
-println(msg.kind)
+log(msg.kind)
 ```
 
 `mailbox_send(target, value)` returns `false` when the target does not exist or
@@ -287,13 +287,13 @@ Thread-safe counters:
 
 ```harn
 let counter = atomic(0)
-println(atomic_get(counter))         // 0
+log(atomic_get(counter))         // 0
 
 let c2 = atomic_add(counter, 5)
-println(atomic_get(c2))              // 5
+log(atomic_get(c2))              // 5
 
 let c3 = atomic_set(c2, 100)
-println(atomic_get(c3))              // 100
+log(atomic_get(c3))              // 100
 ```
 
 Atomic operations return new atomic values (they don't mutate in place).
@@ -351,9 +351,9 @@ primitives:
 
 ```harn
 let m = sync_metrics("gate", "workflow-runner")
-println(m?.acquisition_count)
-println(m?.timeout_count)
-println(m?.current_queue_depth)
+log(m?.acquisition_count)
+log(m?.timeout_count)
+log(m?.current_queue_depth)
 ```
 
 Metrics include `acquisition_count`, `timeout_count`,

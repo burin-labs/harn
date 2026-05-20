@@ -4,24 +4,24 @@ pipeline default() {
   let server_path = path_join(root, "conformance/helpers/mcp_echo_server.py")
   let client = mcp_connect("python3", [server_path])
   // Check type
-  println(type_of(client))
+  __io_println(type_of(client))
   // List tools
   let tools = mcp_list_tools(client)
-  println(tools.count)
+  __io_println(tools.count)
   // Get tool names
   for t in tools {
-    println(t.name)
+    __io_println(t.name)
   }
   // Call echo tool
   let result = mcp_call(client, "echo", {message: "hello from harn"})
-  println(result)
+  __io_println(result)
   // Call add tool
   let sum = mcp_call(client, "add", {a: 3, b: 7})
-  println(sum)
+  __io_println(sum)
   // Server info
   let info = mcp_server_info(client)
-  println(info.connected)
-  println(info.instructions.contains("echo server tools"))
+  __io_println(info.connected)
+  __io_println(info.instructions.contains("echo server tools"))
   // Disconnect
   mcp_disconnect(client)
 }

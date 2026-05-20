@@ -30,10 +30,10 @@ pipeline default() {
   let encoded = json_stringify(messages)
   let judges = judge_events(captured.events)
   require len(judges) == 1, "done_judge should emit one decision"
-  println(captured.result.status)
-  println(len(messages))
-  println(contains(encoded, "isolated final answer"))
-  println(!contains(encoded, "\"verdict\""))
-  println(!contains(encoded, "complete"))
-  println(len(llm_mock_calls()))
+  __io_println(captured.result.status)
+  __io_println(len(messages))
+  __io_println(contains(encoded, "isolated final answer"))
+  __io_println(!contains(encoded, "\"verdict\""))
+  __io_println(!contains(encoded, "complete"))
+  __io_println(len(llm_mock_calls()))
 }

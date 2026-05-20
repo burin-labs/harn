@@ -28,7 +28,7 @@ pipeline test(task) {
   let body = "{\"kind\":\"a2a.task.received\",\"task\":{\"id\":\"task-123\"}}"
   let json_headers = {"Content-Type": "application/json"}
   let unauth = http_request("POST", url + "/a2a/review", {body: body, headers: json_headers})
-  println(unauth.status == 401)
+  __io_println(unauth.status == 401)
   let ts = to_string(to_int(timestamp()))
   let wrong_hmac = http_request(
     "POST",
@@ -41,13 +41,13 @@ pipeline test(task) {
       },
     },
   )
-  println(wrong_hmac.status == 401)
+  __io_println(wrong_hmac.status == 401)
   let bearer = http_request(
     "POST",
     url + "/a2a/review",
     {body: body, headers: {"Content-Type": "application/json", Authorization: "Bearer test-key-2"}},
   )
-  println(bearer.status == 200)
+  __io_println(bearer.status == 200)
   let _ = shell("kill -TERM " + pid)
   wait_for_exit(pid)
   delete_file(root)

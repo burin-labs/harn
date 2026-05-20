@@ -22,10 +22,10 @@ pipeline test(task) {
     },
   )
   let calls = llm_mock_calls()
-  println(len(keys(first)) == 1)
-  println(first["."].enriched.purpose == "root")
-  println(len(calls) == 1)
-  println(contains(calls[0].messages[0].content, "Return valid JSON only."))
+  __io_println(len(keys(first)) == 1)
+  __io_println(first["."].enriched.purpose == "root")
+  __io_println(len(calls) == 1)
+  __io_println(contains(calls[0].messages[0].content, "Return valid JSON only."))
   let second = project_deep_scan(
     root,
     {
@@ -42,9 +42,9 @@ pipeline test(task) {
     },
   )
   let second_status = project_deep_scan_status(namespace, root)
-  println(second["."].enriched.purpose == "root")
-  println(second_status.total_dirs == 1)
-  println(second_status.cache_hits == 1)
-  println(len(llm_mock_calls()) == 1)
+  __io_println(second["."].enriched.purpose == "root")
+  __io_println(second_status.total_dirs == 1)
+  __io_println(second_status.cache_hits == 1)
+  __io_println(len(llm_mock_calls()) == 1)
   delete_file(root)
 }

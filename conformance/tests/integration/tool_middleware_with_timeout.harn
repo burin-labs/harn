@@ -61,20 +61,20 @@ pipeline default() {
   // (1) Generous budget — call passes, layer status "ok".
   let mw_ok = with_timeout({max_ms: 60000})
   let r1 = mw_ok(envelope("read"), fast_next())
-  println(r1.ok)
-  println(r1.audit.layers[0].name)
-  println(r1.audit.layers[0].status)
+  __io_println(r1.ok)
+  __io_println(r1.audit.layers[0].name)
+  __io_println(r1.audit.layers[0].status)
   // (2) max_ms = 0 — every call breaches; tag and pass-through preserved.
   let mw_strict = with_timeout({max_ms: 0, message: "tool over budget"})
   let r2 = mw_strict(envelope("write"), slow_next(50))
-  println(r2.ok)
-  println(r2.error_category)
-  println(r2.audit.layers[0].status)
+  __io_println(r2.ok)
+  __io_println(r2.error_category)
+  __io_println(r2.audit.layers[0].status)
   // (3) per_tool override — `read` keeps the generous budget; `write`
   // gets the strict 0 budget that breaches.
   let mw_mixed = with_timeout({max_ms: 60000, per_tool: {write: 0}})
   let r3 = mw_mixed(envelope("read"), fast_next())
   let r4 = mw_mixed(envelope("write"), fast_next())
-  println(r3.ok)
-  println(r4.error_category)
+  __io_println(r3.ok)
+  __io_println(r4.error_category)
 }

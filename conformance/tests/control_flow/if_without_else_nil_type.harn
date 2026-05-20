@@ -9,15 +9,15 @@ pipeline default() {
   let maybe: int? = if cond {
     42
   }
-  println(maybe)
+  __io_println(maybe)
   let with_default: int = if cond {
     7
   }
     ?? 0
-  println(with_default + 1)
+  __io_println(with_default + 1)
   let cond2 = false
   let none: int? = if cond2 {
     9
   }
-  println(none)
+  __io_println(none)
 }

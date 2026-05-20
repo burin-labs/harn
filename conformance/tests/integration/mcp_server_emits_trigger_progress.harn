@@ -26,6 +26,6 @@ pipeline default() {
   )
   assert(result.success, "mcp helper failed")
   let payload = json_parse(result.stdout.trim())
-  println(payload.result.status == "dispatched")
-  println(payload.progress_count >= 1)
+  __io_println(payload.result.status == "dispatched")
+  __io_println(payload.progress_count >= 1)
 }

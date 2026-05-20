@@ -9,9 +9,9 @@
  */
 pipeline test(task) {
   let git_out = exec("git", "status")
-  println(git_out.success)
-  println(trim(git_out.stdout))
+  __io_println(git_out.success)
+  __io_println(trim(git_out.stdout))
   let echo_out = exec("echo", "hi")
-  println(echo_out.success)
-  println(trim(echo_out.stdout))
+  __io_println(echo_out.success)
+  __io_println(trim(echo_out.stdout))
 }

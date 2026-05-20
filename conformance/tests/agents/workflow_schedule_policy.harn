@@ -12,9 +12,9 @@ pipeline default() {
   let wait_all = workflow_join_readiness(
     {graph: graph, node_id: "join", node: {join_policy: {strategy: "all"}}, completed_nodes: ["a"]},
   )
-  println(wait_all.ready)
-  println(wait_all.required)
-  println(wait_all.completed_inputs)
+  __io_println(wait_all.ready)
+  __io_println(wait_all.required)
+  __io_println(wait_all.completed_inputs)
   let quorum = workflow_join_readiness(
     {
       graph: graph,
@@ -23,12 +23,12 @@ pipeline default() {
       completed_nodes: ["a"],
     },
   )
-  println(quorum.ready)
-  println(quorum.required)
+  __io_println(quorum.ready)
+  __io_println(quorum.required)
   let exact = workflow_next_edges({graph: graph, current: "gate", branch: "true"})
-  println(len(exact))
-  println(exact[0].to)
+  __io_println(len(exact))
+  __io_println(exact[0].to)
   let fallback = workflow_next_edges({graph: graph, current: "gate", branch: "false"})
-  println(len(fallback))
-  println(fallback[0].to)
+  __io_println(len(fallback))
+  __io_println(fallback[0].to)
 }

@@ -20,5 +20,5 @@ pipeline default() {
   assert_eq(tail.eof, true)
   let range = command_output_range({path: result.output_path}, {offset: 10, length: 5})
   assert_eq(range.content, "01234")
-  println("ok")
+  __io_println("ok")
 }

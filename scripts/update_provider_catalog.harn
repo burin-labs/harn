@@ -281,8 +281,8 @@ fn __check_against_golden(outcome, update) -> int {
   if update {
     write_file(EXPECTED_REPORT_PATH, outcome.report)
     write_file(EXPECTED_CANDIDATE_PATH, outcome.candidate)
-    println("Updated " + EXPECTED_REPORT_PATH)
-    println("Updated " + EXPECTED_CANDIDATE_PATH)
+    __io_println("Updated " + EXPECTED_REPORT_PATH)
+    __io_println("Updated " + EXPECTED_CANDIDATE_PATH)
     return 0
   }
   let expected_report = if file_exists(EXPECTED_REPORT_PATH) {
@@ -296,13 +296,13 @@ fn __check_against_golden(outcome, update) -> int {
     ""
   }
   if outcome.report != expected_report {
-    eprintln("provider catalog drift report drifted from " + EXPECTED_REPORT_PATH)
-    eprintln("Run scripts/update_provider_catalog.harn -- --check --update after reviewing.")
+    __io_eprintln("provider catalog drift report drifted from " + EXPECTED_REPORT_PATH)
+    __io_eprintln("Run scripts/update_provider_catalog.harn -- --check --update after reviewing.")
     return 1
   }
   if outcome.candidate != expected_candidate {
-    eprintln("provider catalog candidate TOML drifted from " + EXPECTED_CANDIDATE_PATH)
-    eprintln("Run scripts/update_provider_catalog.harn -- --check --update after reviewing.")
+    __io_eprintln("provider catalog candidate TOML drifted from " + EXPECTED_CANDIDATE_PATH)
+    __io_eprintln("Run scripts/update_provider_catalog.harn -- --check --update after reviewing.")
     return 1
   }
   return 0
@@ -345,7 +345,7 @@ pipeline main(task) {
     return __check_against_golden(outcome, update)
   }
   __write_outputs(outcome)
-  println("wrote " + path_join(RUN_OUTPUT_DIR, "drift-report.md"))
-  println("wrote " + path_join(RUN_OUTPUT_DIR, "candidate.toml"))
+  __io_println("wrote " + path_join(RUN_OUTPUT_DIR, "drift-report.md"))
+  __io_println("wrote " + path_join(RUN_OUTPUT_DIR, "candidate.toml"))
   return 0
 }

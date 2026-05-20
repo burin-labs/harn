@@ -21,24 +21,24 @@ pipeline default() {
     return "allow"
   }
   let id = register_guardrail({id: "policy", scan_fn: scan})
-  println(id)
+  __io_println(id)
   /* Block path: dict verdict drops the emit + writes blocked audit. */
   let denied = emit_channel("ch.guardrail.policy", {ok: false, secret_key: "exfil-payload"})
-  println(denied?.blocked)
-  println(denied?.block_reason)
+  __io_println(denied?.blocked)
+  __io_println(denied?.block_reason)
   /* Warn path: emit proceeds + writes a warning audit. */
   let warned = emit_channel("ch.guardrail.panic", {reason: "drain timeout"})
-  println(warned?.inserted)
-  println(warned?.blocked ?? false)
+  __io_println(warned?.inserted)
+  __io_println(warned?.blocked ?? false)
   /* Allow path: emit proceeds silently. */
   let normal = emit_channel("ch.guardrail.policy", {reason: "normal"})
-  println(normal?.inserted)
-  println(normal?.blocked ?? false)
+  __io_println(normal?.inserted)
+  __io_println(normal?.blocked ?? false)
   /* Audit log: block then warn (in registration order). */
   let audit = pipeline_lifecycle_audit_log_take()
-  println(len(audit))
-  println(audit[0].kind)
-  println(audit[0].payload.fired[0].reason)
-  println(audit[1].kind)
-  println(audit[1].payload.fired[0].reason)
+  __io_println(len(audit))
+  __io_println(audit[0].kind)
+  __io_println(audit[0].payload.fired[0].reason)
+  __io_println(audit[1].kind)
+  __io_println(audit[1].payload.fired[0].reason)
 }

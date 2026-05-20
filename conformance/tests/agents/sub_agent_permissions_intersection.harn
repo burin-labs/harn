@@ -26,8 +26,8 @@ pipeline main() {
       permissions: {allow: {write_note: { args -> true }}},
     },
   )
-  println(!denied?.ok)
-  println(denied?.error?.category == "permission_denied")
-  println(denied?.error?.tool == "write_note")
-  println(len(transcript_events_by_kind(denied?.transcript, "PermissionDeny")) == 1)
+  __io_println(!denied?.ok)
+  __io_println(denied?.error?.category == "permission_denied")
+  __io_println(denied?.error?.tool == "write_note")
+  __io_println(len(transcript_events_by_kind(denied?.transcript, "PermissionDeny")) == 1)
 }

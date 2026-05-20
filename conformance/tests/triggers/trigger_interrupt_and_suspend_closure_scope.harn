@@ -40,16 +40,16 @@ pipeline test(task) {
     handle,
     {provider: "github", kind: "issue.opened", headers: {x_delivery: "evt-" + unique}},
   )
-  println(dispatch.status == "dispatched")
-  println(dispatch.result?.status == "broadcast")
-  println(dispatch.result?.scope_kind == "closure")
-  println(dispatch.result?.target_count)
-  println(dispatch.result?.suspended_count)
-  println(dispatch.result?.skipped_count)
-  println(dispatch.result?.reason == "scoped_panic")
-  println(len(dispatch.result?.targets))
-  println(dispatch.result?.targets[0]?.outcome == "unknown")
-  println(dispatch.result?.targets[1]?.outcome == "unknown")
+  __io_println(dispatch.status == "dispatched")
+  __io_println(dispatch.result?.status == "broadcast")
+  __io_println(dispatch.result?.scope_kind == "closure")
+  __io_println(dispatch.result?.target_count)
+  __io_println(dispatch.result?.suspended_count)
+  __io_println(dispatch.result?.skipped_count)
+  __io_println(dispatch.result?.reason == "scoped_panic")
+  __io_println(len(dispatch.result?.targets))
+  __io_println(dispatch.result?.targets[0]?.outcome == "unknown")
+  __io_println(dispatch.result?.targets[1]?.outcome == "unknown")
   let audits = lifecycle_audit_log_take()
   var summary_audits = 0
   var per_worker_audits = 0
@@ -62,6 +62,6 @@ pipeline test(task) {
       }
     }
   }
-  println(summary_audits)
-  println(per_worker_audits)
+  __io_println(summary_audits)
+  __io_println(per_worker_audits)
 }

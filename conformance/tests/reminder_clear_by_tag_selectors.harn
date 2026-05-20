@@ -15,8 +15,8 @@ pipeline main() {
   let by_dedupe = transcript.clear_reminders(by_id.transcript, {dedupe_key: "dedupe-key"})
   let by_tag = transcript.clear_reminders(by_dedupe.transcript, {tag: "tagged"})
   let events = transcript_events_by_kind(by_tag.transcript, "system_reminder")
-  println(by_id.removed_count)
-  println(by_dedupe.removed_count)
-  println(by_tag.removed_count)
-  println(len(events))
+  __io_println(by_id.removed_count)
+  __io_println(by_dedupe.removed_count)
+  __io_println(by_tag.removed_count)
+  __io_println(len(events))
 }

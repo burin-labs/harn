@@ -14,18 +14,18 @@ pipeline default() {
   // summarize task: clamp = max(256, ceil(used * 0.30)).
   // For a ~1000-token prompt, expect roughly 300 (>=256).
   let r_sum = recommend_max_output_tokens({prompt: s, model: "claude-sonnet-4-20250514", task_kind: "summarize"})
-  println(r_sum >= 256 && r_sum <= 600)
+  __io_println(r_sum >= 256 && r_sum <= 600)
   // code task: cap is min(remaining, 8192). For a small prompt, expect 8192.
   let r_code = recommend_max_output_tokens(
     {prompt: "small prompt", model: "claude-sonnet-4-20250514", task_kind: "code"},
   )
-  println(r_code == 8192)
+  __io_println(r_code == 8192)
   // chat (default): expect 1024.
   let r_chat = recommend_max_output_tokens({prompt: "hi", model: "claude-sonnet-4-20250514"})
-  println(r_chat == 1024)
+  __io_println(r_chat == 1024)
   // floor at 64.
   let r_min = recommend_max_output_tokens(
     {prompt: "x", model: "claude-sonnet-4-20250514", task_kind: "summarize"},
   )
-  println(r_min >= 64)
+  __io_println(r_min >= 64)
 }

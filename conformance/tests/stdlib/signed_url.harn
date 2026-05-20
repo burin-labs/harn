@@ -34,5 +34,5 @@ pipeline test(task) {
   assert(contains(path_link, "/artifacts/run%201?"), "signed paths are encoded")
   assert(contains(path_link, "download=true"), "signed paths are supported")
   assert(contains(path_link, "sig="), "signed path includes signature")
-  println("signed_url_ok")
+  __io_println("signed_url_ok")
 }

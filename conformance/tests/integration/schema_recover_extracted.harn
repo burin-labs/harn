@@ -11,13 +11,13 @@ pipeline default() {
   }
   let raw = "Sure, here's the answer:\n```json\n{\"verdict\": \"pass\", \"note\": \"clean\"}\n```\nLet me know if you need more."
   let r = schema_recover(raw, schema, {llm_repair: false})
-  println(r.ok)
-  println(r.stage)
+  __io_println(r.ok)
+  __io_println(r.stage)
   let data = r.data
   if data != nil {
-    println(data.verdict)
-    println(data.note)
+    __io_println(data.verdict)
+    __io_println(data.note)
   }
-  println(r.attempts)
-  println(r.repaired)
+  __io_println(r.attempts)
+  __io_println(r.repaired)
 }

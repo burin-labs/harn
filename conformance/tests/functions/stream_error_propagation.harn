@@ -5,9 +5,9 @@ pipeline test(task) {
   }
   try {
     for n in broken() {
-      println(n)
+      __io_println(n)
     }
   } catch (err) {
-    println("caught ${err}")
+    __io_println("caught ${err}")
   }
 }

@@ -19,9 +19,9 @@ pipeline main() {
   let stream = event_log
     .subscribe({topic: topic, from_cursor: cursor, kind_prefix: "transcript.reminder.expired"})
   let logged = stream.next().value
-  println(len(reminders))
-  println(logged.kind)
-  println(logged.payload.reminder_id != "")
-  println(logged.payload.ttl_turns_before)
-  println(logged.payload.expired_at_boundary)
+  __io_println(len(reminders))
+  __io_println(logged.kind)
+  __io_println(logged.payload.reminder_id != "")
+  __io_println(logged.payload.ttl_turns_before)
+  __io_println(logged.payload.expired_at_boundary)
 }

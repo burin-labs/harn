@@ -52,8 +52,8 @@ pipeline test(task) {
   )
   let _ = emit_channel("fanout.input", {repo: "harn"})
   let fired = channel_events("ch.fanout.fired")
-  println(len(fired))
+  __io_println(len(fired))
   // Bindings dispatch in id-sorted order: `-a-` before `-b-`.
-  println(fired[0].payload.who)
-  println(fired[1].payload.who)
+  __io_println(fired[0].payload.who)
+  __io_println(fired[1].payload.who)
 }

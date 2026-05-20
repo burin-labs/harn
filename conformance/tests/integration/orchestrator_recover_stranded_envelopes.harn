@@ -61,7 +61,7 @@ pipeline test(task) {
     let _ = shell("kill -KILL " + crash_pid)
     wait_for_exit(crash_pid)
   }
-  println(response.status == 200 && crash_exited)
+  __io_println(response.status == 200 && crash_exited)
   let restart = shell_at(
     root,
     "nohup env HARN_SECRET_PROVIDERS=env HARN_EVENT_LOG_BACKEND=file HARN_ORCHESTRATOR_API_KEYS=test-key HARN_ORCHESTRATOR_HMAC_SECRET=shared-secret "
@@ -84,7 +84,7 @@ pipeline test(task) {
       + " --state-dir "
       + state_dir,
   )
-  println(
+  __io_println(
     queue.success
       && queue.stdout.contains("stranded_envelopes=1")
       && queue.stdout.contains("Stranded envelopes:")
@@ -100,7 +100,7 @@ pipeline test(task) {
       + state_dir
       + " --envelope-age 0s --dry-run",
   )
-  println(
+  __io_println(
     recover.success
       && recover.stdout.contains("stranded_envelopes=1")
       && recover.stdout.contains("Candidates:")

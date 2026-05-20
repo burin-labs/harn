@@ -33,14 +33,14 @@ pipeline main() {
       max_nudges: 2,
     },
   )
-  println(result.status)
-  println(result.stop_reason)
-  println(result.llm.iterations)
-  println(result.text)
-  println(!contains(result.text, "##DONE##"))
+  __io_println(result.status)
+  __io_println(result.stop_reason)
+  __io_println(result.llm.iterations)
+  __io_println(result.text)
+  __io_println(!contains(result.text, "##DONE##"))
   let calls = llm_mock_calls()
-  println(contains(calls[0].system, "##DONE##"))
-  println(contains(calls[1].system, "##DONE##"))
-  println(contains(calls[2].system, "##DONE##"))
-  println(!contains(calls[0].system, "<user_response>"))
+  __io_println(contains(calls[0].system, "##DONE##"))
+  __io_println(contains(calls[1].system, "##DONE##"))
+  __io_println(contains(calls[2].system, "##DONE##"))
+  __io_println(!contains(calls[0].system, "<user_response>"))
 }

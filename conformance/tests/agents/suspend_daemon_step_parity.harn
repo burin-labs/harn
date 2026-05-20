@@ -36,18 +36,18 @@ pipeline main() {
   )
   let saved = json_parse(read_file(snapshot_path))
   // Loop-level shape parity (matches the existing daemon test).
-  println("loop_status=" + result.status)
-  println("loop_daemon_state=" + result.daemon_state)
-  println("loop_snapshot_matches=" + to_string(result.daemon_snapshot_path == snapshot_path))
+  __io_println("loop_status=" + result.status)
+  __io_println("loop_daemon_state=" + result.daemon_state)
+  __io_println("loop_snapshot_matches=" + to_string(result.daemon_snapshot_path == snapshot_path))
   // Snapshot-level field-set parity: each of these fields must be
   // populated by the post-S-07 writer the same way the pre-refactor
   // writer populated them. Any add/remove/rename trips this fixture.
-  println("snap_daemon_state=" + saved.daemon_state)
-  println("snap_has_iterations=" + to_string(saved.total_iterations >= 1))
-  println(
+  __io_println("snap_daemon_state=" + saved.daemon_state)
+  __io_println("snap_has_iterations=" + to_string(saved.total_iterations >= 1))
+  __io_println(
     "snap_summary_seeded="
       + to_string(contains(saved.transcript_summary ?? "", "daemon parity summary")),
   )
-  println("snap_has_summary_field=" + to_string(saved.transcript_summary != nil))
+  __io_println("snap_has_summary_field=" + to_string(saved.transcript_summary != nil))
   delete_file(dir)
 }

@@ -5,12 +5,12 @@ import { with_case_insensitive_keys } from "std/llm/safe"
 pipeline default() {
   let nested = {Outer: {Inner: 1, BLOB: [1, 2, {ChildKey: "v"}]}, Top: "ok"}
   let normalized = with_case_insensitive_keys(nested)
-  println(normalized.outer.inner)
-  println(normalized.outer.blob[2].childkey)
-  println(normalized.top)
+  __io_println(normalized.outer.inner)
+  __io_println(normalized.outer.blob[2].childkey)
+  __io_println(normalized.top)
   let again = with_case_insensitive_keys(normalized)
-  println(again.outer.inner)
-  println(again.outer.blob[2].childkey == "v")
+  __io_println(again.outer.inner)
+  __io_println(again.outer.blob[2].childkey == "v")
   // primitives pass through
-  println(with_case_insensitive_keys("plain"))
+  __io_println(with_case_insensitive_keys("plain"))
 }

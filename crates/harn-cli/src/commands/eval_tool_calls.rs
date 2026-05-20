@@ -611,7 +611,7 @@ fn planner_script(
       max_tokens: {max_tokens}\n\
     }},\n\
   )\n\
-  println(json_stringify(response))\n\
+  __io_println(json_stringify(response))\n\
 }}\n"
     )
 }
@@ -641,7 +641,7 @@ fn binder_script(
       max_tokens: {max_tokens}\n\
     }},\n\
   )\n\
-  println(json_stringify(response))\n\
+  __io_println(json_stringify(response))\n\
 }}\n"
     )
 }
@@ -672,7 +672,7 @@ fn predicate_judge_script(
       max_tokens: {max_tokens}\n\
     }},\n\
   )\n\
-  println(json_stringify(response))\n\
+  __io_println(json_stringify(response))\n\
 }}\n"
     )
 }

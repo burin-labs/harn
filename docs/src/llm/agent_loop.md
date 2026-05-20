@@ -20,8 +20,8 @@ let result = agent_turn("Summarize the current project risks.", {
   provider: "openai",
   model: "gpt-5-mini",
 })
-println(result.visible_text)
-println(result.judge_decisions[0].verdict)
+log(result.visible_text)
+log(result.judge_decisions[0].verdict)
 ```
 
 ## agent_loop
@@ -39,9 +39,9 @@ let result = agent_loop(
   "You are a senior engineer.",
   {loop_until_done: true}
 )
-println(result.text)           // the accumulated output
-println(result.status)         // "done", "stuck", "budget_exhausted", "idle", "watchdog", or "failed"
-println(result.llm.iterations) // number of LLM round-trips
+log(result.text)           // the accumulated output
+log(result.status)         // "done", "stuck", "budget_exhausted", "idle", "watchdog", or "failed"
+log(result.llm.iterations) // number of LLM round-trips
 ```
 
 ### How it works
@@ -186,6 +186,7 @@ unless `close_session: false` is set.
 
 ```harn,ignore
 import { agent_chat_loop, agent_chat_route_input } from "std/agent/chat"
+import { read_line } from "std/io"
 
 let result = agent_chat_loop({
   session_id: "review-chat",
@@ -195,10 +196,10 @@ let result = agent_chat_loop({
   tool_format: "native",
   on_user_input: { state ->
     let line = read_line()
-    if line == nil {
-      return {kind: "exit", reason: "timeout"}
+    if !line.ok {
+      return {kind: "exit", reason: line.status ?? "closed"}
     }
-    return agent_chat_route_input(line, state, {
+    return agent_chat_route_input(line.value, state, {
       "/runs": { req -> {kind: "handled", message: render_recent_runs(req.state)} },
     })
   },
@@ -449,10 +450,10 @@ All decisions are recorded:
 
 ```harn
 let result = agent_loop(prompt, system, {iteration_budget: {mode: "adaptive", initial: 4, max: 12}})
-println(result.adaptive_budget.extensions_used)
-println(result.adaptive_budget.final_limit)
+log(result.adaptive_budget.extensions_used)
+log(result.adaptive_budget.final_limit)
 for decision in result.adaptive_budget.decisions {
-  println(decision.action + ": " + decision.reason)
+  log(decision.action + ": " + decision.reason)
 }
 ```
 
@@ -685,7 +686,7 @@ let daemon = daemon_spawn({
 
 daemon_trigger(daemon, {kind: "file_changed", path: "src/lib.rs"})
 let snap = daemon_snapshot(daemon)
-println(snap.pending_event_count)
+log(snap.pending_event_count)
 daemon_stop(daemon)
 let resumed = daemon_resume(".harn/daemons/reviewer")
 ```
@@ -823,7 +824,7 @@ retry 3 {
       model: "claude-sonnet-4-20250514"
     }
   )
-  println(result.text)
+  log(result.text)
 }
 ```
 
@@ -950,7 +951,7 @@ let worker = spawn_agent({
 })
 
 let done = wait_agent(worker)
-println(done.status)
+log(done.status)
 ```
 
 `spawn_agent(...)` accepts either:
@@ -1056,9 +1057,9 @@ let result = sub_agent_run("Find the config entrypoints.", {
 })
 
 if result.ok {
-  println(result.data.paths)
+  log(result.data.paths)
 } else {
-  println(result.error.category)
+  log(result.error.category)
 }
 ```
 

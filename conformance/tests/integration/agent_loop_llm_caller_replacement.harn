@@ -15,6 +15,6 @@ pipeline default() {
     },
   } }
   let result = agent_loop("hi", nil, {provider: "mock", llm_caller: fake_caller})
-  println(result.status)
-  println(result.visible_text)
+  __io_println(result.status)
+  __io_println(result.visible_text)
 }

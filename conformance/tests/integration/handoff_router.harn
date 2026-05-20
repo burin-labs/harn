@@ -44,14 +44,16 @@ pipeline main() {
     [handoff_artifact(routed)],
     {},
   )
-  println(routed?.target_persona_or_human?.id == "review_captain")
-  println(routed?.route_decision?.matched_when == "always")
-  println(dispatch?.dispatch_status == "enqueued")
-  println(dispatch?.dispatch_receipt?.topic == "handoff.persona.invocations")
-  println(dispatch?.dispatch_receipt?.invocation_result?.persona == "review_captain")
-  println(dispatch?.dispatch_receipt?.invocation_result?.received_handoff_kind == "merge_receipt")
-  println(exhausted?.target_persona_or_human?.kind == "human")
-  println(exhausted?.target_persona_or_human?.id == "maintainers")
-  println(run?.handoffs[0]?.kind == "merge_receipt")
-  println(run?.handoffs[0]?.route_decision?.target == "review_captain")
+  __io_println(routed?.target_persona_or_human?.id == "review_captain")
+  __io_println(routed?.route_decision?.matched_when == "always")
+  __io_println(dispatch?.dispatch_status == "enqueued")
+  __io_println(dispatch?.dispatch_receipt?.topic == "handoff.persona.invocations")
+  __io_println(dispatch?.dispatch_receipt?.invocation_result?.persona == "review_captain")
+  __io_println(
+    dispatch?.dispatch_receipt?.invocation_result?.received_handoff_kind == "merge_receipt",
+  )
+  __io_println(exhausted?.target_persona_or_human?.kind == "human")
+  __io_println(exhausted?.target_persona_or_human?.id == "maintainers")
+  __io_println(run?.handoffs[0]?.kind == "merge_receipt")
+  __io_println(run?.handoffs[0]?.route_decision?.target == "review_captain")
 }

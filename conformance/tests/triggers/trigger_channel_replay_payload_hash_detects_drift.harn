@@ -21,13 +21,13 @@ pipeline default() {
   // distinct rows in the audit log even when their payloads are
   // identical. The replay oracle relies on `event_id` to anchor cached
   // matches, but on `payload_hash` to detect drift.
-  println(first.payload.event_id == second.payload.event_id)
-  println(first.payload.payload_hash == second.payload.payload_hash)
+  __io_println(first.payload.event_id == second.payload.event_id)
+  __io_println(first.payload.payload_hash == second.payload.payload_hash)
   // Now flip a single field. Hash must change — proving
   // `HARN-REP-CHN-002` will trip on real producer drift.
   let _ = emit_channel("ch.replay.hash.drift", {repo: "harn", attempt: 2})
   let third = audit.next().value
-  println(third.payload.payload_hash == first.payload.payload_hash)
+  __io_println(third.payload.payload_hash == first.payload.payload_hash)
   // Hashes are deterministic across key-ordering — `{a, b}` and
   // `{b, a}` produce the same canonical-JSON hash so dict iteration
   // order can't poison the oracle.
@@ -35,5 +35,5 @@ pipeline default() {
   let _ = emit_channel("ch.replay.hash.order", {b: 2, a: 1})
   let key_first = audit.next().value
   let key_second = audit.next().value
-  println(key_first.payload.payload_hash == key_second.payload.payload_hash)
+  __io_println(key_first.payload.payload_hash == key_second.payload.payload_hash)
 }

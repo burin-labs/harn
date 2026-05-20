@@ -173,6 +173,6 @@ pipeline test() {
     },
   )
   step_assertions_end()
-  println("persona_steel_thread release")
-  println(result.pr.result.auto_merge_requested)
+  __io_println("persona_steel_thread release")
+  __io_println(result.pr.result.auto_merge_requested)
 }

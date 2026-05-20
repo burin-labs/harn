@@ -213,6 +213,6 @@ pipeline default() {
   let resumed = agent_state_resume(".harn/state", "review-42", {
     writer_id: "implement"
   })
-  println(agent_state_read(resumed, "plan.md"))
+  log(agent_state_read(resumed, "plan.md"))
 }
 ```

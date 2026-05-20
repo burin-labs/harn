@@ -16,5 +16,5 @@ pipeline test(task) {
     [{approved: true, reviewer: "alice"}, {approved: true, reviewer: "bob"}],
   )
   let result = dual_control(n: 2, m: 3, action: destructive_step, approvers: ["alice", "bob", "carol"])
-  println(result)
+  __io_println(result)
 }

@@ -30,7 +30,7 @@ let result = tree_of_thoughts({
 })
 
 if result.ok {
-  println(result.best_path.last().steps)
+  log(result.best_path.last().steps)
 }
 ```
 

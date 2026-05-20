@@ -3,9 +3,9 @@ import { stream_validate_chunk, stream_validate_create, stream_validate_finalize
 pipeline default(task) {
   let validator = stream_validate_create({type: "dict"})
   let r1 = stream_validate_chunk(validator, "{\"a\":")
-  println(r1.verdict)
+  __io_println(r1.verdict)
   let r2 = stream_validate_finalize(validator)
-  println(r2.verdict)
-  println(r2.reason)
-  println(r2.path)
+  __io_println(r2.verdict)
+  __io_println(r2.reason)
+  __io_println(r2.path)
 }

@@ -8,11 +8,11 @@ pipeline main() {
   let invalid_type = try {
     transcript.inject_reminder(transcript(), {body: 1})
   }
-  println(has_code(invalid_type, "HARN-RMD-001"))
+  __io_println(has_code(invalid_type, "HARN-RMD-001"))
   let bad_propagate = try {
     transcript.inject_reminder(transcript(), {body: "remember", propagate: "workspace"})
   }
-  println(has_code(bad_propagate, "HARN-RMD-005"))
+  __io_println(has_code(bad_propagate, "HARN-RMD-005"))
   clear_reminder_providers()
   register_reminder_provider(
     {
@@ -26,6 +26,6 @@ pipeline main() {
   let bad_provider = try {
     agent_reminder_providers_fire(session, "session_idle", {session: {id: session}}, {})
   }
-  println(has_code(bad_provider, "HARN-RMD-006"))
+  __io_println(has_code(bad_provider, "HARN-RMD-006"))
   clear_reminder_providers()
 }

@@ -13,8 +13,8 @@ pipeline default() {
       provider: "mock",
     },
   )
-  println(result.ok)
-  println(result.refined)
-  println(result.diff_summary)
-  println(result.style)
+  __io_println(result.ok)
+  __io_println(result.refined)
+  __io_println(result.diff_summary)
+  __io_println(result.style)
 }

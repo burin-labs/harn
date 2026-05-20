@@ -6,7 +6,7 @@ pipeline default() {
   llm_mock_clear()
   llm_mock({text: "all done"})
   let result = agent_loop("hi", nil, {provider: "mock"})
-  println(result.status)
-  println(result.visible_text)
-  println(len(llm_mock_calls()))
+  __io_println(result.status)
+  __io_println(result.visible_text)
+  __io_println(len(llm_mock_calls()))
 }

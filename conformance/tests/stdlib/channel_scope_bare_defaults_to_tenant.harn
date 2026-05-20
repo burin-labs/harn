@@ -4,7 +4,7 @@
  */
 pipeline default() {
   let receipt = emit_channel("pr.merged", {n: 1}, {id: "bare-1"})
-  println(receipt.scope)
-  println(receipt.scope_id)
-  println(receipt.name_resolved)
+  __io_println(receipt.scope)
+  __io_println(receipt.scope_id)
+  __io_println(receipt.name_resolved)
 }

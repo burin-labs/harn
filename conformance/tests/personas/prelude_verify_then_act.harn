@@ -9,13 +9,13 @@ pipeline test(task) {
     completed_at: "2026-05-03T00:00:00Z",
   }
   let accepted = verify_then_act(fn() { return Ok({clean: true}) }, fn() { return "merged" }, receipt_options)
-  println(accepted.status)
-  println(accepted.verified)
-  println(accepted.acted)
-  println(accepted.result)
-  println(accepted.receipt.schema)
-  println(accepted.receipt.status)
-  println(len(accepted.receipt.tool_calls))
+  __io_println(accepted.status)
+  __io_println(accepted.verified)
+  __io_println(accepted.acted)
+  __io_println(accepted.result)
+  __io_println(accepted.receipt.schema)
+  __io_println(accepted.receipt.status)
+  __io_println(len(accepted.receipt.tool_calls))
   let blocked = verify_then_act(
     fn() { return false },
     fn() {
@@ -23,7 +23,7 @@ pipeline test(task) {
     },
     receipt_options,
   )
-  println(blocked.status)
-  println(blocked.acted)
-  println(blocked.result == nil)
+  __io_println(blocked.status)
+  __io_println(blocked.acted)
+  __io_println(blocked.result == nil)
 }

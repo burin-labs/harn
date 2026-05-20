@@ -11,5 +11,5 @@ fn pick_keys<V>(d: dict<string, V>, keys: list<string>, options: PickKeysOptions
 pipeline test(task) {
   let counts = {a: 1, b: 2}
   let bad = pick_keys(counts, ["a"], {drop_nil: "yes"})
-  println(bad.a)
+  __io_println(bad.a)
 }

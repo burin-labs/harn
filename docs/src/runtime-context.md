@@ -8,9 +8,9 @@ raw OS thread IDs are not part of the stable language surface.
 
 ```harn
 let ctx = runtime_context()
-println(ctx.task_id)
-println(ctx.parent_task_id)
-println(ctx.root_task_id)
+log(ctx.task_id)
+log(ctx.parent_task_id)
+log(ctx.root_task_id)
 ```
 
 ## Stable fields

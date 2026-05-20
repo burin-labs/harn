@@ -2153,7 +2153,11 @@ mod tests {
             "import PackageDescription\nlet package = Package(name: \"App\")\n",
         )
         .unwrap();
-        std::fs::write(dir.path().join("Sources/App/main.swift"), "print(\"hi\")\n").unwrap();
+        std::fs::write(
+            dir.path().join("Sources/App/main.swift"),
+            "__io_print(\"hi\")\n",
+        )
+        .unwrap();
         std::fs::write(
             dir.path().join("Tests/AppTests/AppTests.swift"),
             "import XCTest\n",

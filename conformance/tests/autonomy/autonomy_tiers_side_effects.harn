@@ -40,22 +40,22 @@ pipeline test(task) {
   let shadow_agent = "autonomy-shadow-" + unique
   let shadow = fire_tier(register_tier_agent(shadow_agent, "shadow"), "shadow-" + unique)
   let shadow_records: list<TrustRecord> = trust_query({agent: shadow_agent, action: "fs.write", tier: "shadow"})
-  println(shadow.status == "dispatched" && shadow.result?.tier == "shadow")
-  println(
+  __io_println(shadow.status == "dispatched" && shadow.result?.tier == "shadow")
+  __io_println(
     !shadow.result?.file_exists && len(shadow_records) == 1 && shadow_records[0].outcome == "denied",
   )
   let suggest_agent = "autonomy-suggest-" + unique
   let suggest = fire_tier(register_tier_agent(suggest_agent, "suggest"), "suggest-" + unique)
   let suggest_pending = hitl_pending({}).filter({ row -> row.agent == suggest_agent })
   let suggest_records: list<TrustRecord> = trust_query({agent: suggest_agent, action: "fs.write", tier: "suggest"})
-  println(suggest.status == "dispatched" && suggest.result?.tier == "suggest")
-  println(!suggest.result?.file_exists && len(suggest_pending) == 1 && len(suggest_records) == 1)
+  __io_println(suggest.status == "dispatched" && suggest.result?.tier == "suggest")
+  __io_println(!suggest.result?.file_exists && len(suggest_pending) == 1 && len(suggest_records) == 1)
   mock_host_response("hitl", "approval", {approved: true, reviewer: "lead", reason: "ok"})
   let approval_agent = "autonomy-approval-" + unique
   let approved = fire_tier(register_tier_agent(approval_agent, "act_with_approval"), "approval-" + unique)
   let approved_records: list<TrustRecord> = trust_query({agent: approval_agent, action: "fs.write", tier: "act_with_approval"})
-  println(approved.status == "dispatched" && approved.result?.tier == "act_with_approval")
-  println(
+  __io_println(approved.status == "dispatched" && approved.result?.tier == "act_with_approval")
+  __io_println(
     approved.result?.file_exists && len(approved_records) == 1
       && approved_records[0].outcome == "success",
   )
@@ -63,8 +63,8 @@ pipeline test(task) {
   let auto_agent = "autonomy-auto-" + unique
   let auto = fire_tier(register_tier_agent(auto_agent, "act_auto"), "auto-" + unique)
   let auto_records: list<TrustRecord> = trust_query({agent: auto_agent, action: "fs.write"})
-  println(auto.status == "dispatched" && auto.result?.tier == "act_auto")
-  println(auto.result?.file_exists && len(auto_records) == 0)
+  __io_println(auto.status == "dispatched" && auto.result?.tier == "act_auto")
+  __io_println(auto.result?.file_exists && len(auto_records) == 0)
   let scoped_agent = "autonomy-scoped-" + unique
   let scoped_path = path_join(".harn", "autonomy_tier_scoped_" + unique + ".txt")
   with_autonomy_policy(
@@ -72,7 +72,7 @@ pipeline test(task) {
     fn() { write_file(scoped_path, "scoped") },
   )
   let scoped_records: list<TrustRecord> = trust_query({agent: scoped_agent, action: "fs.write", tier: "shadow"})
-  println(
+  __io_println(
     !file_exists(scoped_path) && len(scoped_records) == 1 && scoped_records[0].outcome == "denied",
   )
   for path in [

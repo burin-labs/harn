@@ -14,6 +14,6 @@ pub fn full_greeting() -> string {
 // raised "Undefined variable: GREETING" — the compiler silently dropped
 // module-level bindings in pipeline mode.
 pipeline default() {
-  println(greet())
-  println(full_greeting())
+  __io_println(greet())
+  __io_println(full_greeting())
 }

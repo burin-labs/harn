@@ -26,9 +26,9 @@ pipeline main() {
     },
   )
   let call = llm_mock_calls()[0]
-  println(contains(call.system, "base system"))
-  println(contains(call.system, "<system-reminder>"))
-  println(contains(call.system, "gemini reminder"))
-  println(call.messages[0].role)
+  __io_println(contains(call.system, "base system"))
+  __io_println(contains(call.system, "<system-reminder>"))
+  __io_println(contains(call.system, "gemini reminder"))
+  __io_println(call.messages[0].role)
   clear_reminder_providers()
 }

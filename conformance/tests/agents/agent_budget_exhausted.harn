@@ -16,7 +16,7 @@ pipeline test(task) {
       max_nudges: 5,
     },
   )
-  println(result.status)
+  __io_println(result.status)
   assert(result.status == "budget_exhausted", "status should be budget_exhausted")
   assert(result.llm.iterations >= 1, "should have run at least one iteration")
 }

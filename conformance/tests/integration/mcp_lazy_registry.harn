@@ -4,16 +4,16 @@
 pipeline default() {
   // Empty registry reports no servers.
   let status = mcp_registry_status()
-  println(status.count)
+  __io_println(status.count)
   // Ensuring an unknown server throws — catch + print.
   try {
     mcp_ensure_active("not-registered")
-    println("unreachable")
+    __io_println("unreachable")
   } catch (e) {
     // Error text should mention the missing name.
-    println(e.contains("not-registered"))
+    __io_println(e.contains("not-registered"))
   }
   // Release of an unknown server is a silent no-op.
   mcp_release("also-not-registered")
-  println("ok")
+  __io_println("ok")
 }

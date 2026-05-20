@@ -240,7 +240,7 @@ pipeline default(task) {
   let result = agent_loop(task, {tools: {tools: [{name: "run_command", handler: run_command}]}})
   let audits = lifecycle_audit_log_take()
   let warnings = audits |> filter({ a -> a.kind == "tool_rule_warning" })
-  println("matched (audit-only): " + to_string(len(warnings)))
+  log("matched (audit-only): " + to_string(len(warnings)))
 }
 ```
 
@@ -260,10 +260,10 @@ import { preset_run_command } from "std/tool_hooks"
 pipeline default() {
   let preview = preset_run_command({stacks: ["rust"]})
   let envelope = preview("cargo build --release")
-  println(envelope.action)        // "rewrite"
-  println(envelope.command)       // "cargo build --release --target-dir target-shared"
-  println(envelope.rule_id)       // "rust.cargo.target_dir_conflict"
-  println(envelope.severity)      // "warning"
+  log(envelope.action)        // "rewrite"
+  log(envelope.command)       // "cargo build --release --target-dir target-shared"
+  log(envelope.rule_id)       // "rust.cargo.target_dir_conflict"
+  log(envelope.severity)      // "warning"
 }
 ```
 

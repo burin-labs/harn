@@ -103,19 +103,19 @@ fn run_output(source: &str) -> String {
 fn optimizer_differential_success_programs_match() {
     let programs = [
         r#"pipeline test(task) {
-  println(2 + 3 * 4)
-  println("ha" * 2)
-  println(([1] + [2, 3])[2])
-  println(({a: 1} + {b: 2}).b)
-  println((true && false) || !false)
+  __io_println(2 + 3 * 4)
+  __io_println("ha" * 2)
+  __io_println(([1] + [2, 3])[2])
+  __io_println(({a: 1} + {b: 2}).b)
+  __io_println((true && false) || !false)
 }"#,
         r#"pipeline test(task) {
   fn add(a: int, b: int = 4) {
     return a + b
   }
   let base = 3
-  println(add(base))
-  println(add(1 + 1, 2 + 2))
+  __io_println(add(base))
+  __io_println(add(1 + 1, 2 + 2))
 }"#,
     ];
 
@@ -131,7 +131,7 @@ fn optimizer_differential_success_programs_match() {
 
 #[test]
 fn optimizer_differential_errors_match() {
-    let source = "pipeline test(task) { println(1 / 0) }";
+    let source = "pipeline test(task) { __io_println(1 / 0) }";
     let optimized =
         run_harn_result_display_with_options(source, CompilerOptions::optimized()).unwrap_err();
     let unoptimized =
@@ -2126,7 +2126,7 @@ fn package_export_import_executes_through_manifest_alias() {
 import "acme/capabilities"
 
 pipeline main(task) {
-  println(exported_capability())
+  __io_println(exported_capability())
 }
 "#;
 

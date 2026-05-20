@@ -5,13 +5,13 @@ pipeline default() {
     "process.shell_invocation",
     {shell_id: default_shell?.id, command: "printf shell-contract"},
   )
-  println(len(catalog?.shells) > 0)
-  println(catalog?.default_shell_id == default_shell?.id)
-  println(invocation?.program == default_shell?.path)
-  println(invocation?.args != nil)
+  __io_println(len(catalog?.shells) > 0)
+  __io_println(catalog?.default_shell_id == default_shell?.id)
+  __io_println(invocation?.program == default_shell?.path)
+  __io_println(invocation?.args != nil)
   let result = host_call(
     "process.exec",
     {mode: "shell", shell_id: default_shell?.id, command: "printf shell-contract"},
   )
-  println(result?.stdout)
+  __io_println(result?.stdout)
 }

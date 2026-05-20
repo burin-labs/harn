@@ -14,7 +14,7 @@ pipeline default(task) {
     "Explain the builder pattern in three sentences.",
     "You are a software engineering tutor. Be concise."
   )
-  println(response)
+  log(response)
 }
 ```
 
@@ -27,7 +27,7 @@ pipeline default(task) {
     "You are a software engineering tutor. Be concise.",
     {provider: "openai", model: "gpt-4o", max_tokens: 512}
   )
-  println(response)
+  log(response)
 }
 ```
 
@@ -66,7 +66,7 @@ pipeline default(task) {
     let calls = tool_parse_call(response.text)
 
     if calls.count() == 0 {
-      println(response)
+      log(response)
       done = true
     } else {
       var tool_output = ""
@@ -101,8 +101,8 @@ pipeline default(task) {
   }
 
   for i in 0 to files.count exclusive {
-    println("=== ${files[i]} ===")
-    println(reviews[i])
+    log("=== ${files[i]} ===")
+    log(reviews[i])
   }
 }
 ```
@@ -123,7 +123,7 @@ pipeline default(task) {
   }
 
   for r in results {
-    println(r)
+    log(r)
   }
 }
 ```
@@ -139,22 +139,22 @@ pipeline default(task) {
 
   // Check connection
   let info = mcp_server_info(client)
-  println("Connected to: ${info.name}")
+  log("Connected to: ${info.name}")
 
   // List available tools
   let tools = mcp_list_tools(client)
   for t in tools {
-    println("Tool: ${t.name} - ${t.description}")
+    log("Tool: ${t.name} - ${t.description}")
   }
 
   // Write a file, then read it back
   mcp_call(client, "write_file", {path: "/tmp/hello.txt", content: "Hello from Harn!"})
   let content = mcp_call(client, "read_file", {path: "/tmp/hello.txt"})
-  println("File content: ${content}")
+  log("File content: ${content}")
 
   // List directory
   let entries = mcp_call(client, "list_directory", {path: "/tmp"})
-  println(entries)
+  log(entries)
 
   mcp_disconnect(client)
 }
@@ -186,7 +186,7 @@ pipeline default(task) {
     ext in allowed_extensions
   })
 
-  println("Relevant files: ${relevant}")
+  log("Relevant files: ${relevant}")
 
   // Exclude specific keys from a config dict
   let config = {host: "localhost", port: 8080, debug: true, secret: "abc"}
@@ -195,7 +195,7 @@ pipeline default(task) {
   let safe = {}
   for entry in config {
     if entry.key not in sensitive {
-      println("${entry.key}: ${entry.value}")
+      log("${entry.key}: ${entry.value}")
     }
   }
 }
@@ -231,7 +231,7 @@ pipeline review(task) {
   let ctx = gather_context(task)
   let prompt = "Review this project.\n\nREADME:\n${ctx.readme}\n\nTask: ${ctx.task}"
   let result = llm_call(prompt, "You are a code reviewer.")
-  println(result)
+  log(result)
 }
 ```
 
@@ -242,7 +242,7 @@ import "lib/review"
 
 pipeline default(task) extends review {
   override setup() {
-    println("Starting custom review pipeline")
+    log("Starting custom review pipeline")
   }
 }
 ```
@@ -266,7 +266,7 @@ pipeline default(task) {
         let raw = llm_call(prompt, system)
         return json_parse(raw.text)
       } catch (e) {
-        println("LLM call failed: ${e}")
+        log("LLM call failed: ${e}")
         throw AgentError.LlmFailure(to_string(e))
       }
     }
@@ -277,18 +277,18 @@ pipeline default(task) {
       "Return a JSON object with keys 'summary' and 'score'.",
       "You are an evaluator. Always respond with valid JSON only."
     )
-    println("Summary: ${result.summary}")
-    println("Score: ${result.score}")
+    log("Summary: ${result.summary}")
+    log("Score: ${result.score}")
   } catch (e) {
     // Harn supports a single catch per try; branch on the error type here.
     if type_of(e) == "enum" {
       match e.variant {
-        "LlmFailure" -> { println("LLM failed after retries: ${e.fields[0]}") }
-        "ParseFailure" -> { println("Could not parse LLM output: ${e.fields[0]}") }
-        "Timeout" -> { println("Timed out after ${e.fields[0]}s") }
+        "LlmFailure" -> { log("LLM failed after retries: ${e.fields[0]}") }
+        "ParseFailure" -> { log("Could not parse LLM output: ${e.fields[0]}") }
+        "Timeout" -> { log("Timed out after ${e.fields[0]}s") }
       }
     } else {
-      println("Unexpected error: ${e}")
+      log("Unexpected error: ${e}")
     }
   }
 }
@@ -338,10 +338,10 @@ pipeline default(task) {
   while collecting {
     let msg = receive(results_ch)
     if msg.starts_with("COMPLETE:") {
-      println(msg)
+      log(msg)
       collecting = false
     } else {
-      println(msg)
+      log(msg)
     }
   }
 }
@@ -384,7 +384,7 @@ pipeline default(task) {
   }
 
   let result = llm_call(prompt, "You are a helpful assistant. Use the provided files as context.")
-  println(result)
+  log(result)
 }
 ```
 
@@ -426,10 +426,10 @@ Respond with ONLY a JSON array of objects, each with "step" (string) and
   if plan != nil {
     let sorted = plan.filter({ s -> s.priority <= 3 })
     for step in sorted {
-      println("[P${step.priority}] ${step.step}")
+      log("[P${step.priority}] ${step.step}")
     }
   } else {
-    println("Failed to get a valid plan after retries")
+    log("Failed to get a valid plan after retries")
   }
 }
 ```
@@ -452,14 +452,14 @@ pipeline default(task) {
 
   // Deduplicate with set(), then convert back to a list
   let unique_urls = to_list(set(urls))
-  println("${len(unique_urls)} unique URLs out of ${len(urls)} total")
+  log("${len(unique_urls)} unique URLs out of ${len(urls)} total")
 
   // Track which URLs have been processed
   var visited = set()
 
   for url in unique_urls {
     if !set_contains(visited, url) {
-      println("Processing: ${url}")
+      log("Processing: ${url}")
       visited = set_add(visited, url)
     }
   }
@@ -471,7 +471,7 @@ pipeline default(task) {
   let already_done = set_intersect(batch_a, batch_b)
   let new_work = set_difference(batch_b, batch_a)
 
-  println("Overlap: ${len(already_done)}, New: ${len(new_work)}")
+  log("Overlap: ${len(already_done)}, New: ${len(new_work)}")
 }
 ```
 
@@ -492,14 +492,14 @@ pipeline default(task) {
     return "${join(truncated, " ")}..."
   }
 
-  println(summarize("The quick brown fox jumps over the lazy dog", 5))
+  log(summarize("The quick brown fox jumps over the lazy dog", 5))
 
   // Catch type errors gracefully. `harn check` rejects this call statically
   // before the catch can run — the example is shown for illustration only.
   try {
     summarize(42, "not a number")
   } catch (e) {
-    println("Caught: ${e}")
+    log("Caught: ${e}")
     // -> TypeError: parameter 'text' expected string, got int (42)
   }
 
@@ -507,10 +507,10 @@ pipeline default(task) {
   fn process_batch(items: list, verbose: bool) {
     for item in items {
       if verbose {
-        println("Processing: ${item}")
+        log("Processing: ${item}")
       }
     }
-    println("Done: ${len(items)} items")
+    log("Done: ${len(items)} items")
   }
 
   process_batch(["a", "b", "c"], true)
@@ -547,7 +547,7 @@ pipeline default(task) {
     }
   )
 
-  println(result.text)
+  log(result.text)
   mcp_disconnect(client)
 }
 ```
@@ -582,8 +582,8 @@ pipeline default(task) {
   let plans = process(items, [])
 
   for p in plans {
-    println("=== ${p.task} ===")
-    println(p.plan)
+    log("=== ${p.task} ===")
+    log(p.plan)
   }
 }
 ```
@@ -599,7 +599,7 @@ pipeline default(task) {
     return sum_to(n - 1, acc + n)
   }
 
-  println(sum_to(10000, 0))
+  log(sum_to(10000, 0))
 }
 ```
 

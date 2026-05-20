@@ -7,8 +7,6 @@ Complete reference for all built-in functions available in Harn.
 | Function | Parameters | Returns | Description |
 |---|---|---|---|
 | `log(msg)` | msg: any | nil | Print with `[harn]` prefix and newline |
-| `print(msg)` | msg: any | nil | Print without prefix or newline |
-| `println(msg)` | msg: any | nil | Print with newline, no prefix |
 | `progress(phase, message, progress?, total?)` | phase: string, message: string, optional numeric progress | nil | Emit standalone progress output. Dict options support `mode: "spinner"` with `step`, or `mode: "bar"` with `current`, `total`, and optional `width` |
 | `color(text, name)` | text: any, name: string | string | Wrap text with an ANSI foreground color code |
 | `bold(text)` | text: any | string | Wrap text with ANSI bold styling |
@@ -36,7 +34,7 @@ body executes.
 
 ```harn,ignore
 fn greet(u: {name: string, age: int}) {
-  println("${u.name} is ${u.age}")
+  log("${u.name} is ${u.age}")
 }
 
 greet({name: "Alice", age: 30})   // OK
@@ -69,12 +67,12 @@ Example:
 let good = Ok(42)
 let bad = Err("something went wrong")
 
-println(is_ok(good))             // true
-println(is_err(bad))             // true
+log(is_ok(good))             // true
+log(is_err(bad))             // true
 
-println(unwrap(good))            // 42
-println(unwrap_or(bad, 0))       // 0
-println(unwrap_err(bad))         // something went wrong
+log(unwrap(good))            // 42
+log(unwrap_or(bad, 0))       // 0
+log(unwrap_err(bad))         // something went wrong
 ```
 
 ## JSON
@@ -184,9 +182,9 @@ let user_schema = {
 }
 
 let parsed = schema_parse({name: "Ada", age: 36}, user_schema)
-println(is_ok(parsed))
-println(unwrap(parsed).role)
-println(schema_to_json_schema(user_schema).type)
+log(is_ok(parsed))
+log(unwrap(parsed).role)
+log(schema_to_json_schema(user_schema).type)
 ```
 
 `schema_is(...)` is useful for dynamic checks and can participate in static
@@ -279,8 +277,8 @@ let form = multipart_parse(fixture.body, fixture.content_type, {
 
 let title = multipart_field_text(form.fields[0])
 let uploaded = multipart_field_bytes(form.fields[1])
-println(title)
-println(bytes_to_hex(uploaded))
+log(title)
+log(bytes_to_hex(uploaded))
 ```
 
 ## Math
@@ -645,22 +643,22 @@ Example:
 
 ```harn
 let encoded = base64_encode("Hello, World!")
-println(encoded)                  // SGVsbG8sIFdvcmxkIQ==
-println(base64_decode(encoded))   // Hello, World!
+log(encoded)                  // SGVsbG8sIFdvcmxkIQ==
+log(base64_decode(encoded))   // Hello, World!
 ```
 
 ```harn
-println(base64url_encode(">>>???///"))     // Pj4-Pz8_Ly8v
-println(base32_encode("foobar"))           // MZXW6YTBOI======
-println(hex_encode("hello"))               // 68656c6c6f
-println(hex_decode("68656c6c6f"))          // hello
+log(base64url_encode(">>>???///"))     // Pj4-Pz8_Ly8v
+log(base32_encode("foobar"))           // MZXW6YTBOI======
+log(hex_encode("hello"))               // 68656c6c6f
+log(hex_decode("68656c6c6f"))          // hello
 ```
 
 ```harn
-println(url_encode("hello world"))         // hello%20world
-println(url_decode("hello%20world"))       // hello world
-println(url_encode("a=1&b=2"))             // a%3D1%26b%3D2
-println(url_decode("hello+world"))         // hello world
+log(url_encode("hello world"))         // hello%20world
+log(url_decode("hello%20world"))       // hello world
+log(url_encode("a=1&b=2"))             // a%3D1%26b%3D2
+log(url_decode("hello+world"))         // hello world
 ```
 
 ## Hashing
@@ -673,8 +671,8 @@ println(url_decode("hello+world"))         // hello world
 Example:
 
 ```harn
-println(sha256("hello"))  // 2cf24dba5fb0a30e26e83b2ac5b9e29e1b161e5c1fa7425e73043362938b9824
-println(md5("hello"))     // 5d41402abc4b2a76b9719d911017c592
+log(sha256("hello"))  // 2cf24dba5fb0a30e26e83b2ac5b9e29e1b161e5c1fa7425e73043362938b9824
+log(md5("hello"))     // 5d41402abc4b2a76b9719d911017c592
 ```
 
 ### HMAC and signature comparison
@@ -770,8 +768,8 @@ all observed values in wire order.
 
 ```harn
 let parsed = cookie_parse("sid=abc; theme=light; sid=old")
-println(parsed.cookies.sid)       // abc
-println(parsed.duplicates.sid[1]) // old
+log(parsed.cookies.sid)       // abc
+log(parsed.duplicates.sid[1]) // old
 ```
 
 `cookie_serialize` validates names and values before writing a `Set-Cookie`
@@ -850,9 +848,9 @@ Example:
 import "std/vision"
 
 let text = ocr("fixtures/receipt.png", {language: "eng"})
-println(text.text)
-println(text.tokens[0]?.text)
-println(text.source.sha256)
+log(text.text)
+log(text.tokens[0]?.text)
+log(text.source.sha256)
 ```
 
 ## Testing
@@ -1000,7 +998,7 @@ pipeline main(task) {
   })
 
   let response = http_get("https://api.example.com/v1/status")
-  println(response.status)
+  log(response.status)
 }
 ```
 
@@ -1060,8 +1058,8 @@ let store = mem_cache({namespace: "weekly-doc-monitor"})
 let page = web_fetch("https://docs.example.com/models", {store: store})
 if page.cache_status != "not_modified" && robots_allowed(page.final_url) {
   let parsed = web_parse_html(page.body, page.final_url)
-  println(parsed.title)
-  println(sitemap_urls(page.final_url))
+  log(parsed.title)
+  log(sitemap_urls(page.final_url))
 }
 ```
 
@@ -1182,7 +1180,7 @@ pipeline default() {
     body: "{\"ok\":true}",
     client_ip: "203.0.113.10",
   })
-  println(probe.status)
+  log(probe.status)
 }
 ```
 
@@ -1314,15 +1312,15 @@ examples.
 
 | Function | Parameters | Returns | Description |
 |---|---|---|---|
-| `eprint(msg)` | msg: any | nil | Write text to stderr without a trailing newline |
-| `eprintln(msg)` | msg: any | nil | Write text to stderr with a trailing newline |
 | `read_stdin()` | — | string or nil | Read the remaining stdin contents |
-| `read_line()` | — | string or nil | Read one stdin line without the trailing newline |
 | `is_stdin_tty()` / `is_stdout_tty()` / `is_stderr_tty()` | — | bool | Return whether the corresponding process stream is attached to a terminal |
-| `prompt_user(msg)` | msg: string (optional) | string | Display message, read line from stdin |
 
-For structured interactive input, import `read_line`, `read_password`,
-`is_tty`, and `write_stderr` from `std/io`.
+Ambient stdio helpers were removed. Use `harness.stdio.print`,
+`harness.stdio.println`, `harness.stdio.eprint`,
+`harness.stdio.eprintln`, `harness.stdio.read_line`, and
+`harness.stdio.prompt` from code that already has a `Harness` handle. For
+structured interactive input outside a harness entrypoint, import
+`read_line`, `read_password`, `is_tty`, and `write_stderr` from `std/io`.
 
 ## Host interop
 
@@ -1780,7 +1778,7 @@ circuit_breaker("api", 3, 10000)
 
 for i in 0 to 5 exclusive {
   if circuit_check("api") == "open" {
-    println("circuit open, skipping call")
+    log("circuit open, skipping call")
   } else {
     try {
       let resp = http_get("https://api.example.com/data")
@@ -1830,7 +1828,7 @@ let span = trace_start("fetch_data")
 // ... do work ...
 trace_end(span)
 
-println(trace_summary())
+log(trace_summary())
 ```
 
 ### Agent trace events
@@ -1849,8 +1847,8 @@ Example:
 ```harn,ignore
 let result = agent_loop("summarize this file", tools: [read_file])
 let summary = agent_trace_summary()
-println("LLM calls: " + str(summary.llm_calls))
-println("Tools used: " + str(summary.tools_used))
+log("LLM calls: " + str(summary.llm_calls))
+log("Tools used: " + str(summary.tools_used))
 ```
 
 ## Error classification
@@ -1871,9 +1869,9 @@ try {
   throw_error("request timed out", "timeout")
 } catch e {
   if is_timeout(e) {
-    println("will retry after backoff")
+    log("will retry after backoff")
   }
-  println(error_category(e))  // "timeout"
+  log(error_category(e))  // "timeout"
 }
 ```
 
@@ -2019,10 +2017,10 @@ Example:
 ```harn
 let client = mcp_connect("npx", ["-y", "@modelcontextprotocol/server-filesystem", "/tmp"])
 let tools = mcp_list_tools(client)
-println(tools)
+log(tools)
 
 let result = mcp_call(client, "read_file", {"path": "/tmp/hello.txt"})
-println(result)
+log(result)
 
 mcp_disconnect(client)
 ```
@@ -2085,10 +2083,10 @@ The connected clients are available as properties on the `mcp` global dict:
 ```harn
 pipeline default() {
   let tools = mcp_list_tools(mcp.filesystem)
-  println(tools)
+  log(tools)
 
   let result = mcp_call(mcp.github, "list_issues", {repo: "harn"})
-  println(result)
+  log(result)
 }
 ```
 

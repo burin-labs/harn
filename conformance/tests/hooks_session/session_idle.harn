@@ -25,7 +25,7 @@ pipeline default() {
     nil,
     {provider: "mock", daemon: true, max_iterations: 2, wake_interval_ms: 1},
   )
-  println(result.status)
-  println(atomic_get(idle_seen) >= 1)
+  __io_println(result.status)
+  __io_println(atomic_get(idle_seen) >= 1)
   clear_session_hooks()
 }

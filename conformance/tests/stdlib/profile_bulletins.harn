@@ -36,12 +36,12 @@ pipeline default() {
       review_after: "2026-08-11T00:00:00.000Z",
     },
   )
-  println(proposed.schema)
-  println(proposed.status)
-  println(proposed.scope)
-  println(proposed.confidence)
-  println(proposed.privacy.sync)
-  println(len(proposed.evidence))
+  __io_println(proposed.schema)
+  __io_println(proposed.status)
+  __io_println(proposed.scope)
+  __io_println(proposed.confidence)
+  __io_println(proposed.privacy.sync)
+  __io_println(len(proposed.evidence))
   let stable_id = bulletin_id(
     "user",
     "kenneth@example.com",
@@ -49,21 +49,21 @@ pipeline default() {
     "prefers concise responses without trailing summaries",
     "burin_home",
   )
-  println(proposed.id == stable_id)
+  __io_println(proposed.id == stable_id)
   let validated = bulletin_validate(proposed)
-  println(validated.id == proposed.id)
+  __io_println(validated.id == proposed.id)
   let proposal_receipt = bulletin_emit(proposed, {topic: "personas.bulletins.test.proposed"})
-  println(proposal_receipt.schema)
-  println(proposal_receipt.kind)
-  println(proposal_receipt.bulletin.status)
+  __io_println(proposal_receipt.schema)
+  __io_println(proposal_receipt.kind)
+  __io_println(proposal_receipt.bulletin.status)
   let proposal_stream = event_log
     .subscribe(
     {topic: "personas.bulletins.test.proposed", from_cursor: proposal_receipt.event_log_id - 1},
   )
   let proposal_event = proposal_stream.next().value
-  println(proposal_event.kind)
-  println(proposal_event.headers.schema)
-  println(proposal_event.payload.scope)
+  __io_println(proposal_event.kind)
+  __io_println(proposal_event.headers.schema)
+  __io_println(proposal_event.payload.scope)
   let accept_receipt = bulletin_accept(
     proposed,
     {
@@ -73,25 +73,25 @@ pipeline default() {
       rationale: "Matches stated preference",
     },
   )
-  println(accept_receipt.decision.action)
-  println(accept_receipt.decision.status)
-  println(accept_receipt.decision.decided_by)
+  __io_println(accept_receipt.decision.action)
+  __io_println(accept_receipt.decision.status)
+  __io_println(accept_receipt.decision.decided_by)
   let decision_stream = event_log
     .subscribe(
     {topic: "personas.bulletins.test.decisions", from_cursor: accept_receipt.event_log_id - 1},
   )
   let decision_event = decision_stream.next().value
-  println(decision_event.kind)
-  println(decision_event.headers.action)
+  __io_println(decision_event.kind)
+  __io_println(decision_event.headers.action)
   let updated = bulletin_apply_decisions([proposed], [accept_receipt.decision])
-  println(updated[0].status)
+  __io_println(updated[0].status)
   let partitioned = bulletin_partition(updated)
-  println(len(partitioned.accepted))
-  println(len(partitioned.proposed))
+  __io_println(len(partitioned.accepted))
+  __io_println(len(partitioned.proposed))
   let expired_proposed = proposed + {expires_at: "2020-01-01T00:00:00.000Z"}
   let expired_after_accept = bulletin_apply_decisions([expired_proposed], [accept_receipt.decision])
   let active = bulletin_active(expired_after_accept, "2026-05-11T16:10:00.000Z")
-  println(len(active))
+  __io_println(len(active))
   let second = bulletin_propose(
     {
       scope: "user",
@@ -104,11 +104,11 @@ pipeline default() {
     },
   )
   let rendered = bulletin_render_for_prompt(updated + [second])
-  println(rendered)
+  __io_println(rendered)
   let rendered_accepted_only = bulletin_render_for_prompt(updated + [second], {include_proposed: false})
-  println(rendered_accepted_only)
+  __io_println(rendered_accepted_only)
   let dedup = bulletin_dedupe([proposed, proposed, second])
-  println(len(dedup))
+  __io_println(len(dedup))
   let supersede_receipt = bulletin_supersede(
     second,
     [proposed.id],
@@ -118,9 +118,9 @@ pipeline default() {
       topic: "personas.bulletins.test.decisions",
     },
   )
-  println(supersede_receipt.decision.action)
-  println(supersede_receipt.decision.supersedes[0] == proposed.id)
-  println(supersede_receipt.topic == "personas.bulletins.test.decisions")
+  __io_println(supersede_receipt.decision.action)
+  __io_println(supersede_receipt.decision.supersedes[0] == proposed.id)
+  __io_println(supersede_receipt.topic == "personas.bulletins.test.decisions")
   let reject_receipt = bulletin_reject(
     proposed,
     {
@@ -130,7 +130,7 @@ pipeline default() {
       topic: "personas.bulletins.test.decisions",
     },
   )
-  println(reject_receipt.decision.status)
+  __io_println(reject_receipt.decision.status)
   let expire_receipt = bulletin_expire(
     proposed,
     {
@@ -139,28 +139,28 @@ pipeline default() {
       topic: "personas.bulletins.test.decisions",
     },
   )
-  println(expire_receipt.decision.status)
+  __io_println(expire_receipt.decision.status)
   let bad_scope = try {
     bulletin_propose({scope: "weird", scope_key: "x", subject: "x", assertion: "x", confidence: 0.5})
   }
-  println(is_err(bad_scope))
+  __io_println(is_err(bad_scope))
   let bad_confidence = try {
     bulletin_propose({scope: "user", scope_key: "x", subject: "x", assertion: "x", confidence: 1.5})
   }
-  println(is_err(bad_confidence))
+  __io_println(is_err(bad_confidence))
   let missing_assertion = try {
     bulletin_propose({scope: "user", scope_key: "x", subject: "x", confidence: 0.5})
   }
-  println(is_err(missing_assertion))
+  __io_println(is_err(missing_assertion))
   let supersede_missing = try {
     bulletin_decide(second, "supersede", {})
   }
-  println(is_err(supersede_missing))
+  __io_println(is_err(supersede_missing))
   let invalid_decision: any = {schema: "not.real.v1", bulletin_id: "x"}
   let bad_decision_schema = try {
     bulletin_emit_decision(invalid_decision)
   }
-  println(is_err(bad_decision_schema))
+  __io_println(is_err(bad_decision_schema))
   let bad_sync = try {
     bulletin_propose(
       {
@@ -173,5 +173,5 @@ pipeline default() {
       },
     )
   }
-  println(is_err(bad_sync))
+  __io_println(is_err(bad_sync))
 }

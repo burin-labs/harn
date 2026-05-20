@@ -125,7 +125,7 @@ async fn acp_authenticate_uses_shared_auth_policy() {
                     "method": "session/prompt",
                     "params": {
                         "sessionId": session_id,
-                        "prompt": [{"type": "text", "text": "println(\"allowed\")"}],
+                        "prompt": [{"type": "text", "text": "__io_println(\"allowed\")"}],
                     },
                 }))
                 .expect("send authenticated prompt");

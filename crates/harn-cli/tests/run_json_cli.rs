@@ -39,9 +39,9 @@ fn run_json_emits_monotonic_seq_with_typed_events() {
         "hello.harn",
         r#"
 pipeline main(_) {
-    println("hello")
-    println("world")
-    println("!")
+    __io_println("hello")
+    __io_println("world")
+    __io_println("!")
 }
 "#,
     );
@@ -122,7 +122,7 @@ fn run_json_quiet_suppresses_stdout_events() {
         "quiet.harn",
         r#"
 pipeline main(_) {
-    println("noisy")
+    __io_println("noisy")
 }
 "#,
     );

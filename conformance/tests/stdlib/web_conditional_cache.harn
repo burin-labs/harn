@@ -74,5 +74,5 @@ pipeline test(task) {
   let query_calls = http_mock_calls({redact_sensitive: false})
   assert_eq(query_calls[3].url, "https://example.com/item?id=2")
   assert_eq(query_calls[3].headers["if-none-match"], nil)
-  println("web_conditional_cache_ok")
+  __io_println("web_conditional_cache_ok")
 }

@@ -20,5 +20,5 @@ pipeline default() {
     "",
     {n: 3, parallel: false, call_opts: {provider: "mock"}, judge_opts: {provider: "mock"}},
   )
-  println("winner: " + result.best.text)
+  __io_println("winner: " + result.best.text)
 }

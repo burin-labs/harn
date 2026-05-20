@@ -253,7 +253,7 @@ Execute a .harn file or an inline expression.
 
 USAGE
     harn run script.harn
-    harn run -e 'println(\"hello\")'
+    harn run -e 'log(\"hello\")'
     harn run script.harn -- arg1 arg2   (script reads `argv` as list<string>)
 
 CONCURRENCY

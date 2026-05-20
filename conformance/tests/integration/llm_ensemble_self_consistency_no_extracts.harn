@@ -19,6 +19,6 @@ pipeline default() {
       extract: { _text -> nil },
     },
   )
-  println(result.ok)
-  println(result.status)
+  __io_println(result.ok)
+  __io_println(result.status)
 }

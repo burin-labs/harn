@@ -11,8 +11,8 @@ pipeline test(task) {
   let before = now_ms()
   sleep_ms(86400000)
   let after = now_ms()
-  println(before == start_ms)
-  println(after == start_ms + 86400000)
-  println(after - before == 86400000)
+  __io_println(before == start_ms)
+  __io_println(after == start_ms + 86400000)
+  __io_println(after - before == 86400000)
   unmock_time()
 }

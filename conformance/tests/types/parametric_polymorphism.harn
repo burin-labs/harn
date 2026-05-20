@@ -56,10 +56,10 @@ pipeline default() {
   let labeled: Result<string, string> = result_map<int, string, string>(Result.Ok(total), label)
   let fallback: string = result_unwrap_or<string, string>(Result.Err("missing"), "fallback")
   let pair: Pair<int, string> = Pair {first: total, second: result_unwrap_or(labeled, "none")}
-  println(mapped[2])
-  println(filtered[1])
-  println(total)
-  println(fallback)
-  println(pair.first)
-  println(pair.second)
+  __io_println(mapped[2])
+  __io_println(filtered[1])
+  __io_println(total)
+  __io_println(fallback)
+  __io_println(pair.first)
+  __io_println(pair.second)
 }

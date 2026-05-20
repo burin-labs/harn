@@ -16,10 +16,10 @@ pipeline test(task) {
     fn(result) { return result.label == "maybe" },
     opts,
   )
-  println(escalated.status)
-  println(escalated.escalated)
-  println(escalated.result.label)
-  println(len(escalated.receipt.tool_calls))
+  __io_println(escalated.status)
+  __io_println(escalated.escalated)
+  __io_println(escalated.result.label)
+  __io_println(len(escalated.receipt.tool_calls))
   let cheap = cheap_classify_then_escalate(
     "PR-43",
     fn(input) { return {label: "ignore", confidence: 0.95, input: input} },
@@ -27,8 +27,8 @@ pipeline test(task) {
     fn(result) { return result.label == "maybe" },
     opts,
   )
-  println(cheap.status)
-  println(cheap.escalated)
-  println(cheap.result.label)
-  println(len(cheap.receipt.tool_calls))
+  __io_println(cheap.status)
+  __io_println(cheap.escalated)
+  __io_println(cheap.result.label)
+  __io_println(len(cheap.receipt.tool_calls))
 }

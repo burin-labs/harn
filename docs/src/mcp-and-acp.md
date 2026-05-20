@@ -24,7 +24,7 @@ initialize handshake:
 let client = mcp_connect("npx", ["-y", "@modelcontextprotocol/server-filesystem", "/tmp"])
 
 let info = mcp_server_info(client)
-println("Connected to: ${info.name}")
+log("Connected to: ${info.name}")
 ```
 
 `mcp_server_info(...)` also exposes the raw initialize response and an
@@ -38,11 +38,11 @@ harness wants to keep server-provided advice out of model context.
 ```harn
 let tools = mcp_list_tools(client)
 for t in tools {
-  println("${t.name}: ${t.description}")
+  log("${t.name}: ${t.description}")
 }
 
 let content = mcp_call(client, "read_file", {path: "/tmp/data.txt"})
-println(content)
+log(content)
 ```
 
 `mcp_call` returns a string for single-text results, a list of content
@@ -73,7 +73,7 @@ let image = harn.mcp.upload_file(client, "photo.png", {
   max_size: 5242880,
 })
 let result = mcp_call(client, "describe_image", {image: image})
-println(result)
+log(result)
 ```
 
 `harn.mcp.upload_file(...)` reads a local file, enforces the normal Harn
@@ -212,7 +212,7 @@ mcp_release("github")
 // Inspect current state.
 let status = mcp_registry_status()
 for s in status {
-  println("${s.name}: lazy=${s.lazy} active=${s.active} refs=${s.ref_count}")
+  log("${s.name}: lazy=${s.lazy} active=${s.active} refs=${s.ref_count}")
 }
 ```
 
@@ -244,9 +244,9 @@ Fetch it from a pipeline:
 ```harn,ignore
 // Look up by registered server name.
 let card = mcp_server_card("notion")
-println(card.description)
+log(card.description)
 for t in card.tools {
-  println("- ${t.name}")
+  log("- ${t.name}")
 }
 
 // Or pass a URL / path directly.
@@ -298,7 +298,7 @@ Use them in your pipeline:
 pipeline default(task) {
   let tools = mcp_list_tools(mcp.filesystem)
   let content = mcp_call(mcp.filesystem, "read_file", {path: "/tmp/data.txt"})
-  println(content)
+  log(content)
 }
 ```
 
@@ -339,10 +339,10 @@ let client = mcp_connect("npx", ["-y", "@modelcontextprotocol/server-filesystem"
 
 mcp_call(client, "write_file", {path: "/tmp/hello.txt", content: "Hello from Harn!"})
 let content = mcp_call(client, "read_file", {path: "/tmp/hello.txt"})
-println(content)
+log(content)
 
 let entries = mcp_call(client, "list_directory", {path: "/tmp"})
-println(entries)
+log(entries)
 
 mcp_disconnect(client)
 ```

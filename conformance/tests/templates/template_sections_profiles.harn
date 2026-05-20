@@ -18,19 +18,19 @@ pipeline default() {
       {name: "print_tree", description: "Print the final tree"},
     ],
   }
-  println("--- claude-xml ---")
+  __io_println("--- claude-xml ---")
   __push_llm_render_context("anthropic", "claude-opus-4-7")
-  println(render_string(template, bindings))
+  __io_println(render_string(template, bindings))
   __pop_llm_render_context()
-  println("--- gpt-markdown ---")
+  __io_println("--- gpt-markdown ---")
   __push_llm_render_context("openai", "gpt-5.4")
-  println(render_string(template, bindings))
-  println(render("fixtures/template/section_partial.prompt", {name: "Alice"}))
+  __io_println(render_string(template, bindings))
+  __io_println(render("fixtures/template/section_partial.prompt", {name: "Alice"}))
   __pop_llm_render_context()
-  println("--- qwen-text-tools ---")
+  __io_println("--- qwen-text-tools ---")
   __push_llm_render_context("ollama", "qwen3.6:35b-a3b-coding-nvfp4")
-  println(render_string(template, bindings))
+  __io_println(render_string(template, bindings))
   __pop_llm_render_context()
-  println("--- generic-fallback ---")
-  println(render_string(template, bindings))
+  __io_println("--- generic-fallback ---")
+  __io_println(render_string(template, bindings))
 }

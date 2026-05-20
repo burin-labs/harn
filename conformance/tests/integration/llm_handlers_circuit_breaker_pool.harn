@@ -10,41 +10,41 @@ pipeline default() {
   try {
     pooled(bad_call)
   } catch (e1) {
-    println(error_category(e1))
+    __io_println(error_category(e1))
   }
-  println(circuit_check("llm:mock:bad-model"))
+  __io_println(circuit_check("llm:mock:bad-model"))
   llm_mock({error: {category: "server_error", message: "bad model failed twice"}})
   try {
     pooled(bad_call)
   } catch (e2) {
-    println(error_category(e2))
+    __io_println(error_category(e2))
   }
-  println(circuit_check("llm:mock:bad-model"))
-  println(circuit_check("llm:mock:good-model"))
+  __io_println(circuit_check("llm:mock:bad-model"))
+  __io_println(circuit_check("llm:mock:good-model"))
   llm_mock({text: "healthy"})
-  println(pooled(good_call).text)
-  println(circuit_check("llm:mock:good-model"))
+  __io_println(pooled(good_call).text)
+  __io_println(circuit_check("llm:mock:good-model"))
   try {
     pooled(bad_call)
   } catch (e3) {
-    println(e3.category)
-    println(e3.circuit)
+    __io_println(e3.category)
+    __io_println(e3.circuit)
   }
-  println(len(llm_mock_calls()))
+  __io_println(len(llm_mock_calls()))
   let shared = with_circuit_breaker(raw_handler, {name: "shared-model-circuit", threshold: 1, reset_ms: 60000})
   llm_mock({error: {category: "server_error", message: "shared circuit failed"}})
   try {
     shared(bad_call)
   } catch (e4) {
-    println(error_category(e4))
+    __io_println(error_category(e4))
   }
   try {
     shared(good_call)
   } catch (e5) {
-    println(e5.category)
-    println(e5.circuit)
+    __io_println(e5.category)
+    __io_println(e5.circuit)
   }
-  println(len(llm_mock_calls()))
+  __io_println(len(llm_mock_calls()))
   let unset = with_circuit_breaker(
     fn(_call) {
       throw "missing route failed"
@@ -54,7 +54,7 @@ pipeline default() {
   try {
     unset({prompt: "missing route", opts: {}})
   } catch (e6) {
-    println(error_category(e6))
+    __io_println(error_category(e6))
   }
-  println(circuit_check("llm:<unset>:<unset>"))
+  __io_println(circuit_check("llm:<unset>:<unset>"))
 }

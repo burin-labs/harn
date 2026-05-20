@@ -43,7 +43,7 @@ pipeline test(task) {
   mkdir(root)
   write_file(
     path_join(root, "receiver.harn"),
-    "pipeline default(task) {\n  let envelope = json_parse(task)\n  println(json_stringify({trace_id: envelope.event.trace_id, target_agent: envelope.target_agent}))\n}\n",
+    "pipeline default(task) {\n  let envelope = json_parse(task)\n  __io_println(json_stringify({trace_id: envelope.event.trace_id, target_agent: envelope.target_agent}))\n}\n",
   )
   let repo_root = exec("git", "rev-parse", "--show-toplevel").stdout.trim()
   let harn_bin = env_or("HARN_CONFORMANCE_HARN_BIN", resolve_harn_bin(repo_root))
@@ -173,19 +173,21 @@ pipeline test(task) {
   let _ = shell("kill -TERM " + pid)
   wait_for_exit(pid)
   delete_file(root)
-  println(local_fire.status == "dispatched" && worker_fire.status == "dispatched")
-  println(retry_fire.status == "dlq" && contains(retry_fire.error ?? "", "graph-fail:issue.opened"))
-  println(a2a_fire.status == "dispatched" && a2a_fire.result?.trace_id == a2a_trace)
-  println(action_graph_has_node(local_trace, "trigger"))
-  println(action_graph_has_node(local_trace, "predicate"))
-  println(action_graph_has_node(local_trace, "dispatch"))
-  println(action_graph_has_node(worker_trace, "worker_enqueue"))
-  println(action_graph_has_node(retry_trace, "retry"))
-  println(action_graph_has_node(retry_trace, "dlq"))
-  println(action_graph_has_node(a2a_trace, "a2a_hop"))
-  println(action_graph_has_edge(local_trace, "trigger_dispatch"))
-  println(action_graph_has_edge(local_trace, "predicate_gate"))
-  println(action_graph_has_edge(retry_trace, "retry"))
-  println(action_graph_has_edge(retry_trace, "dlq_move"))
-  println(action_graph_has_edge(a2a_trace, "a2a_dispatch"))
+  __io_println(local_fire.status == "dispatched" && worker_fire.status == "dispatched")
+  __io_println(
+    retry_fire.status == "dlq" && contains(retry_fire.error ?? "", "graph-fail:issue.opened"),
+  )
+  __io_println(a2a_fire.status == "dispatched" && a2a_fire.result?.trace_id == a2a_trace)
+  __io_println(action_graph_has_node(local_trace, "trigger"))
+  __io_println(action_graph_has_node(local_trace, "predicate"))
+  __io_println(action_graph_has_node(local_trace, "dispatch"))
+  __io_println(action_graph_has_node(worker_trace, "worker_enqueue"))
+  __io_println(action_graph_has_node(retry_trace, "retry"))
+  __io_println(action_graph_has_node(retry_trace, "dlq"))
+  __io_println(action_graph_has_node(a2a_trace, "a2a_hop"))
+  __io_println(action_graph_has_edge(local_trace, "trigger_dispatch"))
+  __io_println(action_graph_has_edge(local_trace, "predicate_gate"))
+  __io_println(action_graph_has_edge(retry_trace, "retry"))
+  __io_println(action_graph_has_edge(retry_trace, "dlq_move"))
+  __io_println(action_graph_has_edge(a2a_trace, "a2a_dispatch"))
 }

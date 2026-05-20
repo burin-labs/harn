@@ -14,16 +14,16 @@ fn tools() {
             reason: "Verifying propagate=none is dropped at handoff",
           },
         )
-        println(len(record.reminder_propagation))
-        println(record.reminder_propagation[0].body)
-        println(record.reminder_propagation[0].source)
+        __io_println(len(record.reminder_propagation))
+        __io_println(record.reminder_propagation[0].body)
+        __io_println(record.reminder_propagation[0].source)
         var saw_none = false
         for entry in record.reminder_propagation {
           if entry.body == "dropped at handoff" {
             saw_none = true
           }
         }
-        println(saw_none)
+        __io_println(saw_none)
         record
       },
       parameters: {},

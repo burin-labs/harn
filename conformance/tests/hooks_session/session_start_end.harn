@@ -27,7 +27,7 @@ pipeline default() {
   llm_mock_clear()
   llm_mock({text: "ok"})
   let result = agent_loop("hi", nil, {provider: "mock"})
-  println(result.status)
-  println(atomic_get(observed))
+  __io_println(result.status)
+  __io_println(atomic_get(observed))
   clear_session_hooks()
 }

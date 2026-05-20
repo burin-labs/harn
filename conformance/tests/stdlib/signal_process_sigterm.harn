@@ -7,7 +7,7 @@ pipeline default() {
   let log_path = path_join(root, "sigterm.log")
   write_file(
     script_path,
-    "import \"std/signal\"\n\npipeline default() {\n  on_interrupt({ -> println(\"term\") }, {signals: [\"SIGTERM\"], once: false})\n  println(\"ready\")\n  try {\n    sleep(duration_seconds(30))\n  } catch (e) {\n    println(\"caught\")\n  }\n  println(interrupted())\n}\n",
+    "import \"std/signal\"\n\npipeline default() {\n  on_interrupt({ -> __io_println(\"term\") }, {signals: [\"SIGTERM\"], once: false})\n  __io_println(\"ready\")\n  try {\n    sleep(duration_seconds(30))\n  } catch (e) {\n    __io_println(\"caught\")\n  }\n  __io_println(interrupted())\n}\n",
   )
   let repo_root = exec("git", "rev-parse", "--show-toplevel").stdout.trim()
   let harn_bin = env_or("HARN_CONFORMANCE_HARN_BIN", resolve_harn_bin(repo_root))
@@ -21,7 +21,7 @@ pipeline default() {
   let _ = shell("kill -TERM " + pid + " >/dev/null 2>&1 || true")
   require exited, "child did not exit after SIGTERM"
   let log = read_file(log_path)
-  println(contains(log, "\nterm\n"))
-  println(contains(log, "\ncaught\n"))
-  println(contains(log, "\ntrue\n"))
+  __io_println(contains(log, "\nterm\n"))
+  __io_println(contains(log, "\ncaught\n"))
+  __io_println(contains(log, "\ntrue\n"))
 }

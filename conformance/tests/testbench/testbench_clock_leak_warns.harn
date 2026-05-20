@@ -11,8 +11,8 @@ pipeline test(task) {
   let _stamp = date_iso()
   let _stamp_again = date_iso()
   let leaks = testbench_clock_leaks()
-  println(len(leaks) == 1)
-  println(leaks[0].capability == "stdlib/date_iso")
-  println(leaks[0].count == 2)
+  __io_println(len(leaks) == 1)
+  __io_println(leaks[0].capability == "stdlib/date_iso")
+  __io_println(leaks[0].count == 2)
   unmock_time()
 }

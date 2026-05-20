@@ -3,7 +3,7 @@ import { stream_validate } from "std/json"
 pipeline default(task) {
   let sv = stream_validate()
   let validator = sv.create({type: "list", items: {type: "int"}})
-  println(sv.chunk(validator, "[1,").verdict)
-  println(sv.chunk(validator, "2,3]").verdict)
-  println(sv.finalize(validator).verdict)
+  __io_println(sv.chunk(validator, "[1,").verdict)
+  __io_println(sv.chunk(validator, "2,3]").verdict)
+  __io_println(sv.finalize(validator).verdict)
 }

@@ -127,8 +127,8 @@ let run = action_graph_run("Fix parser diagnostics", plan, {
   verify: {command: "cargo test --workspace --quiet", expect_status: 0}
 })
 
-println(run.status)
-println(len(run.batches))
+log(run.status)
+log(len(run.batches))
 ```
 
 ### Artifacts and resources
@@ -192,9 +192,9 @@ let run = workflow_execute(
   {max_steps: 8}
 )
 
-println(run.status)
-println(run.path)
-println(run.run.stages)
+log(run.status)
+log(run.path)
+log(run.run.stages)
 ```
 
 `verify` nodes can also run deterministic checks without an LLM loop:
@@ -342,8 +342,8 @@ workflow.signal(workflow_id, "customer_joined", {customer_id: 7})
 workflow.publish_query(workflow_id, "progress_pct", 25)
 
 let next = workflow.receive(workflow_id)
-println(next?.kind == "signal")
-println(workflow.query(workflow_id, "progress_pct"))
+log(next?.kind == "signal")
+log(workflow.query(workflow_id, "progress_pct"))
 ```
 
 `workflow.update(...)` enqueues a request and waits until
@@ -357,7 +357,7 @@ let response = workflow.update(
   {max_usd: 10},
   {timeout_ms: 5000}
 )
-println(response?.approved)
+log(response?.approved)
 ```
 
 Pause and resume are durable state transitions, not ephemeral process-local

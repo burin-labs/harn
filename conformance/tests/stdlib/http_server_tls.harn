@@ -32,5 +32,5 @@ pipeline test(task) {
     http_server_tls_pem(path_join(dir, "missing.pem"), key_path)
   }
   assert(is_err(missing))
-  println("http_server_tls_ok")
+  __io_println("http_server_tls_ok")
 }

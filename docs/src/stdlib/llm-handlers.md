@@ -261,7 +261,7 @@ let envelope = caller({
   opts: {provider: "auto", model: "claude-sonnet-4-5"},
   turn: {iteration: 0, session_id: "", attempt: 1},
 })
-if envelope.ok { println(envelope.value.text) }
+if envelope.ok { log(envelope.value.text) }
 ```
 
 `std/async.retry_with_backoff` is **not** the same surface — it
@@ -294,8 +294,8 @@ let result = best_of_n(
   "You are a poet.",
   {n: 5, sampler_opts: {temperature: 1.0}},
 )
-println(result.best.text)
-println(result.reasoning)
+log(result.best.text)
+log(result.reasoning)
 ```
 
 ### Composition with `agent_loop`
@@ -346,8 +346,8 @@ let r = refine_prompt({
   target_size: "small",
   keep: ["MUST cite section numbers"],
 })
-println(r.refined)
-println(r.diff_summary)
+log(r.refined)
+log(r.diff_summary)
 ```
 
 The session cache is best-effort: pass `opts.session = {...}` and

@@ -543,13 +543,13 @@ pipeline default() {
     final_response = "Planner never reached a concrete action list.\n\nLatest plan summary: ${planning?.plan_summary ?? "none"}"
   }
   let report_path = write_report(root, profile, request, planning, facts, execution, verdict, final_response)
-  println("task_id=${profile?.id}")
-  println("plan_ready=${planning?.ready}")
-  println("research_items=${len(facts)}")
-  println("action_items=${len(planning?.actions ?? [])}")
-  println("workflow_status=${execution?.runtime?.status ?? "skipped"}")
-  println("verdict=${verdict}")
-  println("report=${report_path}")
-  println("")
-  println(final_response)
+  __io_println("task_id=${profile?.id}")
+  __io_println("plan_ready=${planning?.ready}")
+  __io_println("research_items=${len(facts)}")
+  __io_println("action_items=${len(planning?.actions ?? [])}")
+  __io_println("workflow_status=${execution?.runtime?.status ?? "skipped"}")
+  __io_println("verdict=${verdict}")
+  __io_println("report=${report_path}")
+  __io_println("")
+  __io_println(final_response)
 }

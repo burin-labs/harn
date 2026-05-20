@@ -10,22 +10,22 @@ pipeline default() {
   llm_mock_clear()
   llm_mock({text: "all done"})
   let normal = agent_loop("hi", nil, {provider: "mock"})
-  println(normal.acp_stop_reason)
+  __io_println(normal.acp_stop_reason)
   // Provider truncated the response → max_tokens.
   llm_mock_clear()
   llm_mock({text: "truncated", stop_reason: "max_tokens"})
   let truncated = agent_loop("hi", nil, {provider: "mock"})
-  println(truncated.acp_stop_reason)
+  __io_println(truncated.acp_stop_reason)
   // OpenAI-style finish_reason "length" maps to the same canonical value.
   llm_mock_clear()
   llm_mock({text: "truncated", stop_reason: "length"})
   let length = agent_loop("hi", nil, {provider: "mock"})
-  println(length.acp_stop_reason)
+  __io_println(length.acp_stop_reason)
   // Anthropic refusal → refusal.
   llm_mock_clear()
   llm_mock({text: "I cannot assist with that.", stop_reason: "refusal"})
   let refused = agent_loop("hi", nil, {provider: "mock"})
-  println(refused.acp_stop_reason)
+  __io_println(refused.acp_stop_reason)
   // Iteration cap → max_turn_requests. Persistent + text-only keeps the
   // loop going until max_iterations, which the loop reports as
   // budget_exhausted; finalize maps that to max_turn_requests when the
@@ -34,5 +34,5 @@ pipeline default() {
   llm_mock({text: "still working"})
   llm_mock({text: "still working"})
   let capped = agent_loop("hi", nil, {provider: "mock", loop_until_done: true, max_iterations: 1})
-  println(capped.acp_stop_reason)
+  __io_println(capped.acp_stop_reason)
 }

@@ -9,12 +9,12 @@ pipeline default() {
     Result.Ok(v) -> { output = "got: " + to_string(v) }
     Result.Err(msg) -> { output = "error: " + msg }
   }
-  println(output)
+  __io_println(output)
   let err = Result.Err("not found")
   var output2 = ""
   match err {
     Result.Ok(v) -> { output2 = "got: " + to_string(v) }
     Result.Err(msg) -> { output2 = "error: " + msg }
   }
-  println(output2)
+  __io_println(output2)
 }

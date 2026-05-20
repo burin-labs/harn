@@ -39,19 +39,19 @@ pipeline run() {
   let persona = middleware(router)
   // First call — under budget, default route.
   let env1 = persona({prompt: "p1", system: "", opts: {}, turn: {iteration: 0, session_id: "", attempt: 1}})
-  println(env1.value.text)
-  println(env1.route_name)
+  __io_println(env1.value.text)
+  __io_println(env1.route_name)
   // Second call — escalates to frontier.
   let env2 = persona(
     {prompt: "p2", system: "", opts: {escalate: true}, turn: {iteration: 0, session_id: "", attempt: 1}},
   )
-  println(env2.value.text)
-  println(env2.route_name)
+  __io_println(env2.value.text)
+  __io_println(env2.route_name)
   // Third call — budget exhausted.
   let env3 = persona({prompt: "p3", system: "", opts: {}, turn: {iteration: 0, session_id: "", attempt: 1}})
-  println(env3.ok)
-  println(env3.status)
-  println(atomic_get(cheap_calls))
-  println(atomic_get(frontier_calls))
-  println(atomic_get(log_records))
+  __io_println(env3.ok)
+  __io_println(env3.status)
+  __io_println(atomic_get(cheap_calls))
+  __io_println(atomic_get(frontier_calls))
+  __io_println(atomic_get(log_records))
 }

@@ -306,7 +306,7 @@ let result = try {
   request_approval("deploy production", {quorum: 2, reviewers: ["alice", "bob"]})
 }
 if is_err(result) && unwrap_err(result).name == "ApprovalDeniedError" {
-  println("deployment denied")
+  log("deployment denied")
 }
 ```
 

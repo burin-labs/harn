@@ -86,14 +86,6 @@ const IO_SYNC_PRIMITIVES: &[SyncBuiltin] = &[
         .signature("log(message)")
         .arity(VmBuiltinArity::Exact(1))
         .doc("Write a Harn-prefixed message to stdout."),
-    SyncBuiltin::new("print", print_builtin)
-        .signature("print(args...)")
-        .arity(VmBuiltinArity::Variadic)
-        .doc("Write text to stdout without appending a newline."),
-    SyncBuiltin::new("println", println_builtin)
-        .signature("println(args...)")
-        .arity(VmBuiltinArity::Variadic)
-        .doc("Write text to stdout and append a newline."),
     SyncBuiltin::new("color", color_builtin)
         .signature("color(text, color)")
         .arity(VmBuiltinArity::Exact(2))
@@ -114,26 +106,38 @@ const IO_SYNC_PRIMITIVES: &[SyncBuiltin] = &[
         .signature("__ansi_enabled(stream?)")
         .arity(VmBuiltinArity::Range { min: 0, max: 1 })
         .doc("Return whether ANSI styling is enabled for stdin, stdout, or stderr."),
-    SyncBuiltin::new("eprint", eprint_builtin)
-        .signature("eprint(message)")
-        .arity(VmBuiltinArity::Exact(1))
-        .doc("Write text to stderr without appending a newline."),
-    SyncBuiltin::new("eprintln", eprintln_builtin)
-        .signature("eprintln(message)")
-        .arity(VmBuiltinArity::Exact(1))
-        .doc("Write text to stderr and append a newline."),
     SyncBuiltin::new("read_stdin", read_stdin_builtin)
         .signature("read_stdin()")
         .arity(VmBuiltinArity::Exact(0))
         .doc("Read all remaining stdin as a string."),
-    SyncBuiltin::new("read_line", read_line_builtin)
-        .signature("read_line()")
-        .arity(VmBuiltinArity::Exact(0))
-        .doc("Read one line from stdin or return nil at EOF."),
     SyncBuiltin::new("__io_read_line", io_read_line_builtin)
         .signature("__io_read_line(options?)")
         .arity(VmBuiltinArity::Range { min: 0, max: 1 })
         .doc("Read one line from stdin with structured status metadata."),
+    SyncBuiltin::new("__io_write_stderr", io_write_stderr_builtin)
+        .signature("__io_write_stderr(message)")
+        .arity(VmBuiltinArity::Exact(1))
+        .doc("Write text to stderr without appending a newline."),
+    SyncBuiltin::new("__io_write_stdout", io_write_stdout_builtin)
+        .signature("__io_write_stdout(message)")
+        .arity(VmBuiltinArity::Exact(1))
+        .doc("Write text to stdout without appending a newline."),
+    SyncBuiltin::new("__io_print", io_print_builtin)
+        .signature("__io_print(args...)")
+        .arity(VmBuiltinArity::Variadic)
+        .doc("Internal compatibility bridge for stdout without newline."),
+    SyncBuiltin::new("__io_println", io_println_builtin)
+        .signature("__io_println(args...)")
+        .arity(VmBuiltinArity::Variadic)
+        .doc("Internal compatibility bridge for stdout with newline."),
+    SyncBuiltin::new("__io_eprint", io_eprint_builtin)
+        .signature("__io_eprint(message)")
+        .arity(VmBuiltinArity::Exact(1))
+        .doc("Internal compatibility bridge for stderr without newline."),
+    SyncBuiltin::new("__io_eprintln", io_eprintln_builtin)
+        .signature("__io_eprintln(message)")
+        .arity(VmBuiltinArity::Exact(1))
+        .doc("Internal compatibility bridge for stderr with newline."),
     SyncBuiltin::new("is_stdin_tty", is_stdin_tty_builtin)
         .signature("is_stdin_tty()")
         .arity(VmBuiltinArity::Exact(0))
@@ -190,10 +194,6 @@ const IO_SYNC_PRIMITIVES: &[SyncBuiltin] = &[
         .signature("uuid_nil()")
         .arity(VmBuiltinArity::Exact(0))
         .doc("Return the nil UUID."),
-    SyncBuiltin::new("prompt_user", prompt_user_builtin)
-        .signature("prompt_user(message?)")
-        .arity(VmBuiltinArity::Range { min: 0, max: 1 })
-        .doc("Prompt on stdout and read one line from stdin."),
     SyncBuiltin::new("log_debug", log_debug_builtin)
         .signature("log_debug(message, fields?)")
         .arity(VmBuiltinArity::Range { min: 1, max: 2 })
@@ -663,18 +663,6 @@ fn log_builtin(args: &[VmValue], out: &mut String) -> Result<VmValue, VmError> {
     Ok(VmValue::Nil)
 }
 
-fn print_builtin(args: &[VmValue], out: &mut String) -> Result<VmValue, VmError> {
-    let msg = args.first().map(|a| a.display()).unwrap_or_default();
-    write_stdout(out, &msg);
-    Ok(VmValue::Nil)
-}
-
-fn println_builtin(args: &[VmValue], out: &mut String) -> Result<VmValue, VmError> {
-    let msg = args.first().map(|a| a.display()).unwrap_or_default();
-    write_stdout(out, &format!("{msg}\n"));
-    Ok(VmValue::Nil)
-}
-
 fn color_builtin(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     let text = args.first().map(|a| a.display()).unwrap_or_default();
     let name = args.get(1).map(|a| a.display()).unwrap_or_default();
@@ -733,18 +721,6 @@ fn ansi_enabled_builtin(args: &[VmValue], _out: &mut String) -> Result<VmValue, 
     }
 }
 
-fn eprint_builtin(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
-    let msg = args.first().map(|a| a.display()).unwrap_or_default();
-    write_stderr(&msg);
-    Ok(VmValue::Nil)
-}
-
-fn eprintln_builtin(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
-    let msg = args.first().map(|a| a.display()).unwrap_or_default();
-    write_stderr(&format!("{msg}\n"));
-    Ok(VmValue::Nil)
-}
-
 fn read_stdin_builtin(_args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     // Drain any remaining mocked stdin first.
     let mocked = STDIN_MOCK.with(|s| s.borrow_mut().take());
@@ -775,10 +751,6 @@ pub(crate) fn read_line_legacy_value() -> VmValue {
     }
 }
 
-fn read_line_builtin(_args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
-    Ok(read_line_legacy_value())
-}
-
 pub(crate) fn read_line_structured_value(args: &[VmValue]) -> Result<VmValue, VmError> {
     let options = parse_read_line_options(args)?;
     Ok(read_line_result(read_line_from_mock_or_real(&options)))
@@ -786,6 +758,42 @@ pub(crate) fn read_line_structured_value(args: &[VmValue]) -> Result<VmValue, Vm
 
 fn io_read_line_builtin(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
     read_line_structured_value(args)
+}
+
+fn io_write_stderr_builtin(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
+    let msg = args.first().map(|a| a.display()).unwrap_or_default();
+    write_stderr(&msg);
+    Ok(VmValue::Nil)
+}
+
+fn io_write_stdout_builtin(args: &[VmValue], out: &mut String) -> Result<VmValue, VmError> {
+    let msg = args.first().map(|a| a.display()).unwrap_or_default();
+    write_stdout(out, &msg);
+    Ok(VmValue::Nil)
+}
+
+fn io_print_builtin(args: &[VmValue], out: &mut String) -> Result<VmValue, VmError> {
+    let msg = args.first().map(|a| a.display()).unwrap_or_default();
+    write_stdout(out, &msg);
+    Ok(VmValue::Nil)
+}
+
+fn io_println_builtin(args: &[VmValue], out: &mut String) -> Result<VmValue, VmError> {
+    let msg = args.first().map(|a| a.display()).unwrap_or_default();
+    write_stdout(out, &format!("{msg}\n"));
+    Ok(VmValue::Nil)
+}
+
+fn io_eprint_builtin(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
+    let msg = args.first().map(|a| a.display()).unwrap_or_default();
+    write_stderr(&msg);
+    Ok(VmValue::Nil)
+}
+
+fn io_eprintln_builtin(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
+    let msg = args.first().map(|a| a.display()).unwrap_or_default();
+    write_stderr(&format!("{msg}\n"));
+    Ok(VmValue::Nil)
 }
 
 fn is_stdin_tty_builtin(_args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
@@ -901,10 +909,6 @@ pub(crate) fn prompt_user_value(args: &[VmValue], out: &mut String) -> Result<Vm
         ReadLineOutcome::Interrupt => Ok(VmValue::Nil),
         ReadLineOutcome::Error(_) => Ok(VmValue::Nil),
     }
-}
-
-fn prompt_user_builtin(args: &[VmValue], out: &mut String) -> Result<VmValue, VmError> {
-    prompt_user_value(args, out)
 }
 
 fn log_debug_builtin(args: &[VmValue], out: &mut String) -> Result<VmValue, VmError> {

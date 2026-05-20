@@ -136,6 +136,6 @@ pipeline run(task) {
   let request = _resolve_request()
   let policy = _resolve_policy(request)
   let receipt = review_pr(request, policy, nil)
-  println(json_stringify(receipt))
+  __io_println(json_stringify(receipt))
   return receipt
 }

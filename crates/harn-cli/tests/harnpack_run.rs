@@ -133,7 +133,7 @@ fn build_pack(args: &PackArgs) -> pack::PackOutcome {
 
 #[test]
 fn signed_harnpack_runs_end_to_end_and_reuses_cache() {
-    let fixture = HarnpackFixture::new("println(\"signed-pack-greeting\")\n");
+    let fixture = HarnpackFixture::new("__io_println(\"signed-pack-greeting\")\n");
     let outcome = build_pack(&fixture.pack_args(true));
     let sanitized_hash = outcome.bundle_hash.replace(':', "_");
 
@@ -186,7 +186,7 @@ fn signed_harnpack_runs_end_to_end_and_reuses_cache() {
 
 #[test]
 fn unsigned_harnpack_is_rejected_by_default() {
-    let fixture = HarnpackFixture::new("println(\"unsigned\")\n");
+    let fixture = HarnpackFixture::new("__io_println(\"unsigned\")\n");
     build_pack(&fixture.pack_args(false));
 
     let outcome = execute(
@@ -214,7 +214,7 @@ fn unsigned_harnpack_is_rejected_by_default() {
 
 #[test]
 fn unsigned_harnpack_runs_with_allow_unsigned() {
-    let fixture = HarnpackFixture::new("println(\"local-dev\")\n");
+    let fixture = HarnpackFixture::new("__io_println(\"local-dev\")\n");
     build_pack(&fixture.pack_args(false));
 
     let outcome = execute(
@@ -235,7 +235,7 @@ fn unsigned_harnpack_runs_with_allow_unsigned() {
 
 #[test]
 fn tampered_harnpack_fails_verification() {
-    let fixture = HarnpackFixture::new("println(\"original\")\n");
+    let fixture = HarnpackFixture::new("__io_println(\"original\")\n");
     build_pack(&fixture.pack_args(true));
 
     // Decompose + tamper + re-emit: flip a source byte without touching
@@ -248,7 +248,7 @@ fn tampered_harnpack_fails_verification() {
         .iter_mut()
         .find(|entry| entry.path == Path::new("sources/hello.harn"))
         .expect("source entry");
-    target.bytes = b"println(\"tampered\")\n".to_vec();
+    target.bytes = b"__io_println(\"tampered\")\n".to_vec();
     let tampered_bytes =
         build_harnpack(&archive.manifest, &archive.contents).expect("rebuild archive");
     fs::write(&fixture.pack_path, &tampered_bytes).unwrap();
@@ -325,7 +325,7 @@ fn dry_run_verify_returns_without_executing() {
 
 #[test]
 fn missing_signature_with_dry_run_still_refuses() {
-    let fixture = HarnpackFixture::new("println(\"x\")\n");
+    let fixture = HarnpackFixture::new("__io_println(\"x\")\n");
     build_pack(&fixture.pack_args(false));
 
     let outcome = execute(

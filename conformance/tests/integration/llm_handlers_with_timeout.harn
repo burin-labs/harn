@@ -19,9 +19,9 @@ pipeline default() {
   let _ = mock_time(0)
   let fast_caller = with_timeout(fast, {ms: 1000})
   let fast_env = fast_caller({prompt: "p", system: "", opts: {}, turn: {iteration: 0, session_id: "", attempt: 1}})
-  println(fast_env.ok)
-  println(fast_env.value.text)
-  println(atomic_get(seen_timeout))
+  __io_println(fast_env.ok)
+  __io_println(fast_env.value.text)
+  __io_println(atomic_get(seen_timeout))
   // Slow success that overran the deadline: relabel to timeout.
   let slow = { _call ->
     let _ = advance_time(2000)
@@ -32,10 +32,10 @@ pipeline default() {
   }
   let slow_caller = with_timeout(slow, {ms: 500})
   let slow_env = slow_caller({prompt: "p", system: "", opts: {}, turn: {iteration: 0, session_id: "", attempt: 1}})
-  println(slow_env.ok)
-  println(slow_env.status)
-  println(slow_env.error.timeout_ms)
-  println(slow_env.error.elapsed_ms >= 500)
+  __io_println(slow_env.ok)
+  __io_println(slow_env.status)
+  __io_println(slow_env.error.timeout_ms)
+  __io_println(slow_env.error.elapsed_ms >= 500)
   // Slow failure with relabel_failures: false preserves the original status.
   let slow_failure = { _call ->
     let _ = advance_time(2000)
@@ -43,8 +43,8 @@ pipeline default() {
   }
   let preserve = with_timeout(slow_failure, {ms: 500, relabel_failures: false})
   let preserve_env = preserve({prompt: "p", system: "", opts: {}, turn: {iteration: 0, session_id: "", attempt: 1}})
-  println(preserve_env.ok)
-  println(preserve_env.status)
-  println(preserve_env.elapsed_ms >= 500)
+  __io_println(preserve_env.ok)
+  __io_println(preserve_env.status)
+  __io_println(preserve_env.elapsed_ms >= 500)
   let _ = unmock_time()
 }

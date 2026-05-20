@@ -46,11 +46,11 @@ pipeline main() {
   let done_keep = wait_agent(handle_keep)
   let kept_calls = llm_mock_calls()
   let kept_resumed_system = kept_calls[1].system
-  println("keep_status=" + done_keep.status)
-  println(
+  __io_println("keep_status=" + done_keep.status)
+  __io_println(
     "keep_resumed_at_turn=" + to_string(contains(kept_resumed_system, "You were suspended at turn")),
   )
-  println(
+  __io_println(
     "keep_no_digest_marker="
       + to_string(!contains(kept_resumed_system, "Prior conversation digest")),
   )
@@ -79,8 +79,8 @@ pipeline main() {
   let done_reset = wait_agent(handle_reset)
   let reset_calls = llm_mock_calls()
   let reset_resumed_system = reset_calls[1].system
-  println("reset_status=" + done_reset.status)
-  println(
+  __io_println("reset_status=" + done_reset.status)
+  __io_println(
     "reset_resumed_at_turn="
       + to_string(contains(reset_resumed_system, "You were suspended at turn")),
   )
@@ -89,14 +89,14 @@ pipeline main() {
   // wired into background subagents we assert the reset path differs
   // observably from the keep path by emitting its own continuity reminder
   // for the second turn.
-  println(
+  __io_println(
     "reset_continuity_emitted="
       + to_string(
       contains(reset_resumed_system, "Prior conversation")
         || contains(reset_resumed_system, "You were suspended at turn"),
     ),
   )
-  println(
+  __io_println(
     "paths_differ_in_input="
       + to_string(
       contains(kept_resumed_system, "operator says go")

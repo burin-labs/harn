@@ -17,12 +17,12 @@ pipeline main() {
       {type: "text", text: "review this diagram", visibility: "public"},
     ],
   )
-  println(len(transcript_assets(multimodal)) == 1)
-  println(transcript_messages(multimodal)[0].content[0].asset_id == asset_id)
-  println(contains(transcript_render_visible(multimodal), "diagram.png"))
+  __io_println(len(transcript_assets(multimodal)) == 1)
+  __io_println(transcript_messages(multimodal)[0].content[0].asset_id == asset_id)
+  __io_println(contains(transcript_render_visible(multimodal), "diagram.png"))
   let forked = transcript_fork(multimodal)
-  println(len(transcript_assets(forked)) == 1)
+  __io_println(len(transcript_assets(forked)) == 1)
   let imported = transcript_import(transcript_export(multimodal))
   let imported_assets = transcript_assets(imported)
-  println(len(imported_assets) == 1)
+  __io_println(len(imported_assets) == 1)
 }

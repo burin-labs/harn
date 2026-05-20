@@ -351,7 +351,7 @@ pub fn otel_sink(opts = nil) {
         custom(record)
       }
     } else {
-      eprintln(prefix + json_stringify(record))
+      __io_write_stderr(prefix + json_stringify(record) + "\n")
     }
   }
 }
@@ -374,7 +374,7 @@ pub fn otel_sink(opts = nil) {
 pub fn stderr_sink(opts = nil) {
   let cfg = __tt_dict(opts)
   let prefix = to_string(cfg?.prefix ?? "[tool_telemetry] ")
-  return { span -> eprintln(prefix + json_stringify(span)) }
+  return { span -> __io_write_stderr(prefix + json_stringify(span) + "\n") }
 }
 
 /**

@@ -33,8 +33,8 @@ pipeline main() {
     {provider: "mock", background: true, tool_format: "native", max_iterations: 3},
   )
   let suspended = wait_agent(handle)
-  println("status=" + suspended.status)
-  println("has_auto_trigger=" + to_string(suspended?.suspension?.auto_resume_trigger != nil))
+  __io_println("status=" + suspended.status)
+  __io_println("has_auto_trigger=" + to_string(suspended?.suspension?.auto_resume_trigger != nil))
   // Advance past the deadline so the spawned timeout task wakes and
   // marks the worker failed (no resume attempt).
   let _ = advance_time(6 * 60 * 1000)
@@ -42,9 +42,9 @@ pipeline main() {
   yield_now()
   yield_now()
   let failed = wait_agent(handle)
-  println("post_timeout_status=" + failed.status)
-  println("has_latest_error=" + to_string(failed?.error != nil))
-  println(
+  __io_println("post_timeout_status=" + failed.status)
+  __io_println("has_latest_error=" + to_string(failed?.error != nil))
+  __io_println(
     "error_mentions_timeout="
       + to_string(contains(failed?.error ?? "", "timeout")),
   )
@@ -53,6 +53,6 @@ pipeline main() {
   let resume_attempt = try {
     resume_agent(handle)
   }
-  println("resume_failed=" + to_string(is_err(resume_attempt)))
+  __io_println("resume_failed=" + to_string(is_err(resume_attempt)))
   let _ = unmock_time()
 }

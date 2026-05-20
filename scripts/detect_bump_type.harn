@@ -77,13 +77,13 @@ pipeline main(task) {
     let current = read_cargo_version()
     let target = read_changelog_top_version()
     if current == target {
-      eprintln("warning: Cargo.toml and CHANGELOG.md both at ${current}; nothing to bump")
+      __io_eprintln("warning: Cargo.toml and CHANGELOG.md both at ${current}; nothing to bump")
       return 2
     }
-    println(detect(current, target))
+    __io_println(detect(current, target))
     return 0
   } catch (e) {
-    eprintln("error: ${e}")
+    __io_eprintln("error: ${e}")
     return 1
   }
 }

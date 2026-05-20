@@ -51,5 +51,5 @@ pipeline test(task) {
   }
   assert(is_err(ws_blocked))
   assert_eq(unwrap_err(ws_blocked).type, "EgressBlocked")
-  println("egress_policy_ok")
+  __io_println("egress_policy_ok")
 }

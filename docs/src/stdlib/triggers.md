@@ -304,9 +304,9 @@ let fired = trigger_fire(handle, {provider: "github", kind: "issue.opened"})
 let dlq = trigger_inspect_dlq().filter({ entry -> entry.binding_id == handle.id })
 let replay = trigger_replay(fired.event_id)
 
-println(fired.status)                  // "dlq"
-println(len(dlq[0].retry_history))     // 1
-println(replay.replay_of_event_id)     // original event id
+log(fired.status)                  // "dlq"
+log(len(dlq[0].retry_history))     // 1
+log(replay.replay_of_event_id)     // original event id
 ```
 
 ## Notes

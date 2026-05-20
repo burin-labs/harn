@@ -7,5 +7,5 @@ pipeline default() {
     obj: {a: 1, b: 2},
     block: "line1\nline2\nline3",
   }
-  println(render("fixtures/template/filters.prompt", data))
+  __io_println(render("fixtures/template/filters.prompt", data))
 }

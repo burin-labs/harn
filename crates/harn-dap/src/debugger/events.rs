@@ -252,7 +252,7 @@ impl Debugger {
     }
 
     /// Drain any new VM stdout into `output` DAP events. Used by the
-    /// stop/terminate paths so the IDE doesn't lose trailing print()s.
+    /// stop/terminate paths so the IDE doesn't lose trailing __io_print()s.
     pub(crate) fn flush_output_into(&mut self, responses: &mut Vec<DapResponse>) {
         let output = self.vm.as_ref().unwrap().output().to_string();
         if !output.is_empty() && output != self.output {

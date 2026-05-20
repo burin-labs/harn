@@ -751,8 +751,8 @@ mod tests {
 
     #[test]
     fn header_round_trips_chunk() {
-        let chunk = compile_source("println(\"hello\")").expect("compile");
-        let key = CacheKey::from_source(Path::new("/tmp/example.harn"), "println(\"hello\")");
+        let chunk = compile_source("__io_println(\"hello\")").expect("compile");
+        let key = CacheKey::from_source(Path::new("/tmp/example.harn"), "__io_println(\"hello\")");
         let tmp = tempfile::tempdir().unwrap();
         let path = tmp.path().join("entry.harnbc");
         store_at(&path, &key, &chunk).expect("write");
@@ -767,8 +767,8 @@ mod tests {
         // bundle). The contract is: the resulting bytes match what
         // `store_at` would have written for the same key+chunk, so the
         // shipped artifact is byte-identical to the on-disk cache form.
-        let chunk = compile_source("println(\"hi\")").expect("compile");
-        let key = CacheKey::from_source(Path::new("/tmp/pack.harn"), "println(\"hi\")");
+        let chunk = compile_source("__io_println(\"hi\")").expect("compile");
+        let key = CacheKey::from_source(Path::new("/tmp/pack.harn"), "__io_println(\"hi\")");
         let tmp = tempfile::tempdir().unwrap();
         let on_disk = tmp.path().join("pack.harnbc");
         store_at(&on_disk, &key, &chunk).expect("write");

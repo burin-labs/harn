@@ -16,18 +16,18 @@ pipeline default() {
   register_session_hook(
     "pre_finish",
     { event ->
-      println("pre_finish saw " + to_string(event.return_value))
+      __io_println("pre_finish saw " + to_string(event.return_value))
       return nil
     },
   )
   register_session_hook(
     "post_finish",
     { event ->
-      println("post_finish saw " + to_string(event.return_value))
+      __io_println("post_finish saw " + to_string(event.return_value))
       return nil
     },
   )
   pipeline_on_finish(on_finish_abandon)
-  println("body done")
+  __io_println("body done")
   return 42
 }

@@ -32,5 +32,5 @@ pipeline default(task) {
     failed_rows: rows.count - passed,
     rows: normalized,
   }
-  println(json_stringify(report))
+  __io_println(json_stringify(report))
 }

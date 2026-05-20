@@ -32,5 +32,5 @@ pipeline default() {
       done_sentinel: "STOP",
     },
   )
-  println(result.status)
+  __io_println(result.status)
 }

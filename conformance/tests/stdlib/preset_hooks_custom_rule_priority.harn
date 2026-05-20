@@ -33,10 +33,10 @@ pipeline default() {
   )
   /* (1) Custom rule fires for a non-registered command. */
   let r1 = wrapper({command: "git push origin main --force"})
-  println(r1.action)
-  println(r1.rule_id)
-  println(r1.catalogue_id)
-  println(r1.severity)
+  __io_println(r1.action)
+  __io_println(r1.rule_id)
+  __io_println(r1.catalogue_id)
+  __io_println(r1.severity)
   /* (2) Custom rule wins over the registered rust catalogue rule. The
    * `cargo build` command would normally fire `rust.cargo.target_dir_conflict`,
    * but a custom rule with the same pattern jumps the queue. */
@@ -57,9 +57,9 @@ pipeline default() {
     },
   )
   let r2 = wrapper2({command: "cargo build --release"})
-  println(r2.action)
-  println(r2.rule_id)
-  println(r2.catalogue_id)
+  __io_println(r2.action)
+  __io_println(r2.rule_id)
+  __io_println(r2.catalogue_id)
   /* The custom rule's explanation surfaces, not the registered one. */
-  println(contains(r2.explanation, "cargo check"))
+  __io_println(contains(r2.explanation, "cargo check"))
 }

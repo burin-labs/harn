@@ -62,19 +62,19 @@ pipeline main() {
   let calls = llm_mock_calls()
   let resumed_system = calls[1].system
   let next_system = calls[2].system
-  println("suspended_status=" + suspended.status)
-  println("resume_status=" + resumed.status)
-  println("final_status=" + done.status)
-  println(
+  __io_println("suspended_status=" + suspended.status)
+  __io_println("resume_status=" + resumed.status)
+  __io_println("final_status=" + done.status)
+  __io_println(
     "input_in_reminder="
       + to_string(contains(resumed_system, "operator brief: ship the patch")),
   )
-  println("reason_in_reminder=" + to_string(contains(resumed_system, "needs operator brief")))
-  println(
+  __io_println("reason_in_reminder=" + to_string(contains(resumed_system, "needs operator brief")))
+  __io_println(
     "reminder_present_on_resumed_turn="
       + to_string(contains(resumed_system, "You were suspended at turn")),
   )
-  println(
+  __io_println(
     "reminder_consumed_after_one_turn="
       + to_string(!contains(next_system, "You were suspended at turn")),
   )

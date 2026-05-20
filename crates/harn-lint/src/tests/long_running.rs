@@ -6,7 +6,7 @@ fn long_running_flag_without_cleanup_warns() {
         r#"
 pipeline main() {
   let handle = walk_dir(".", {long_running: true})
-  println(handle.handle_id)
+  __io_println(handle.handle_id)
 }
 "#,
     );

@@ -5,5 +5,5 @@ pipeline default() {
   o.reset()
   o.configure({backend: o.Backend.test()})
   o.log("alias")
-  println(o.events_take()[0].payload.message)
+  __io_println(o.events_take()[0].payload.message)
 }

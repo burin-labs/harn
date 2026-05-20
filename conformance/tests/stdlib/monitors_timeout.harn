@@ -10,6 +10,6 @@ pipeline test(task) {
       condition: { state -> state.ready },
     },
   )
-  println(result.status == "timed_out")
-  println(result.reason != nil)
+  __io_println(result.status == "timed_out")
+  __io_println(result.reason != nil)
 }

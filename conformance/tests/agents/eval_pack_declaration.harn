@@ -30,15 +30,15 @@ pipeline main() {
     rubrics: [{id: "status", kind: "deterministic", assertions: [{kind: "run-status", expected: "completed"}]}]
     cases: [{id: "case_1", run: "candidate-run", rubrics: ["status"]}]
     for case in cases {
-      println(case.id)
+      __io_println(case.id)
     }
     summarize {
       let report = eval_pack_run(pack)
-      println(report.pass)
-      println(report.total)
-      println(report.cases[0].comparison.identical)
+      __io_println(report.pass)
+      __io_println(report.total)
+      __io_println(report.cases[0].comparison.identical)
     }
   }
-  println(pack.id)
-  println(pack.version)
+  __io_println(pack.id)
+  __io_println(pack.version)
 }

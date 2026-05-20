@@ -8,13 +8,13 @@ pipeline main(task) {
   let public_session = agent_session_open("prefill-feedback-public")
   agent_inject_feedback(public_session, "prefill_assistant", "<done>##DONE##</done>")
   let public_messages = agent_session_snapshot(public_session).messages
-  println(public_messages[0].role)
-  println(!contains(public_messages[0].content, "runtime_feedback"))
+  __io_println(public_messages[0].role)
+  __io_println(!contains(public_messages[0].content, "runtime_feedback"))
   let control = agent_session_init("task", nil, {provider: "mock", session_id: "prefill-feedback-host"})
   agent_session_inject_feedback(control.session_id, "prefill_assistant", "<done>##DONE##</done>")
   let host_messages = agent_session_snapshot(control.session_id).messages
-  println(host_messages[1].role)
-  println(!contains(host_messages[1].content, "runtime_feedback"))
+  __io_println(host_messages[1].role)
+  __io_println(!contains(host_messages[1].content, "runtime_feedback"))
   agent_session_finalize(
     control.session_id,
     {final_status: "done", stop_reason: "test", iterations: 0},

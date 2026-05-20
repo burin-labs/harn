@@ -36,13 +36,13 @@ pipeline main() {
   let injected = stream.next().value
   let inherited = stream.next().value
   let fired = stream.next().value
-  println(injected.kind)
-  println(injected.payload.reminder_id)
-  println(inherited.kind)
-  println(inherited.payload.originating_agent_id)
-  println(inherited.payload.sub_agent_id)
-  println(inherited.payload.propagate)
-  println(fired.kind)
-  println(fired.payload.session_id == child)
-  println(fired.payload.rendered_role)
+  __io_println(injected.kind)
+  __io_println(injected.payload.reminder_id)
+  __io_println(inherited.kind)
+  __io_println(inherited.payload.originating_agent_id)
+  __io_println(inherited.payload.sub_agent_id)
+  __io_println(inherited.payload.propagate)
+  __io_println(fired.kind)
+  __io_println(fired.payload.session_id == child)
+  __io_println(fired.payload.rendered_role)
 }

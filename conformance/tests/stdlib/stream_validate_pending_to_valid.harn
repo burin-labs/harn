@@ -5,11 +5,11 @@ pipeline default(task) {
     {type: "dict", required: ["name", "age"], properties: {name: {type: "string"}, age: {type: "int"}}},
   )
   let r1 = stream_validate_chunk(validator, "{\"name\":")
-  println(r1.verdict)
+  __io_println(r1.verdict)
   let r2 = stream_validate_chunk(validator, "\"Alice\",\"age\":")
-  println(r2.verdict)
+  __io_println(r2.verdict)
   let r3 = stream_validate_chunk(validator, "30}")
-  println(r3.verdict)
+  __io_println(r3.verdict)
   let r4 = stream_validate_finalize(validator)
-  println(r4.verdict)
+  __io_println(r4.verdict)
 }

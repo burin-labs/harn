@@ -5,7 +5,7 @@ import { estimate_text_tokens } from "std/llm/budget"
 
 fn in_range(name, actual, low, high) {
   if actual < low || actual > high {
-    println(
+    __io_println(
       name + " out of range: " + to_string(actual) + " not in [" + to_string(low) + ", "
         + to_string(high)
         + "]",
@@ -18,14 +18,14 @@ fn in_range(name, actual, low, high) {
 pipeline default() {
   // English: ~98 chars → ~25 tokens. Allow 20-30.
   let english = "the quick brown fox jumps over the lazy dog and then keeps on running through fields and trees end"
-  println(in_range("english", estimate_text_tokens(english, "any"), 20, 30))
+  __io_println(in_range("english", estimate_text_tokens(english, "any"), 20, 30))
   // Code: braces and parens push it into the code branch (length/3.5).
   let code = "fn foo() { let bar = (1 + 2) * 3; if (bar > 0) { return bar } else { return 0 } }"
-  println(in_range("code", estimate_text_tokens(code, "any"), 20, 30))
+  __io_println(in_range("code", estimate_text_tokens(code, "any"), 20, 30))
   // CJK: 10 chars all in U+4E00..U+9FFF → ~10 tokens (length * 1.0).
   let cjk = "你好世界一二三四五六"
-  println(in_range("cjk", estimate_text_tokens(cjk, "any"), 8, 12))
+  __io_println(in_range("cjk", estimate_text_tokens(cjk, "any"), 8, 12))
   // empty
-  println(estimate_text_tokens("", "any"))
-  println(estimate_text_tokens(nil, "any"))
+  __io_println(estimate_text_tokens("", "any"))
+  __io_println(estimate_text_tokens(nil, "any"))
 }

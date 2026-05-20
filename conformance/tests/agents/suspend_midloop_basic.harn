@@ -38,14 +38,14 @@ pipeline main() {
   // Parent-driven resume drives the child to completion.
   let resumed = resume_tool.handler({handle: handle.id})
   let done = wait_agent(handle)
-  println("suspended_status=" + suspended.status)
-  println("pause_again_status=" + pause_again.status)
-  println("resume_status=" + resumed.status)
-  println("final_status=" + done.status)
-  println("has_transcript=" + to_string(done.has_transcript))
+  __io_println("suspended_status=" + suspended.status)
+  __io_println("pause_again_status=" + pause_again.status)
+  __io_println("resume_status=" + resumed.status)
+  __io_println("final_status=" + done.status)
+  __io_println("has_transcript=" + to_string(done.has_transcript))
   // The resume-continuity reminder is single-shot: after the resumed
   // turn it has been delivered and no longer rides on the transcript.
   let continuity = transcript_events_by_kind(done.transcript, "system_reminder")
     .filter({ event -> event.reminder.dedupe_key == "resume_continuity" })
-  println("continuity_left=" + to_string(len(continuity)))
+  __io_println("continuity_left=" + to_string(len(continuity)))
 }

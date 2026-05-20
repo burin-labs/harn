@@ -25,8 +25,8 @@ pipeline main() {
       approval_policy: {auto_deny: ["shell*"]},
     },
   )
-  println(denied?.tools?.rejected[0] == "shell_exec")
+  __io_println(denied?.tools?.rejected[0] == "shell_exec")
   let transcript = json_stringify(transcript_messages(denied?.transcript))
-  println(transcript.contains("permission_denied"))
-  println(transcript.contains("auto_denied") || transcript.contains("deny pattern"))
+  __io_println(transcript.contains("permission_denied"))
+  __io_println(transcript.contains("auto_denied") || transcript.contains("deny pattern"))
 }

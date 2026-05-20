@@ -10,7 +10,7 @@ import { preset_run_command, tool_hooks_mode_deny_with_explanation } from "std/t
 fn run(wrapper, cmd) {
   let result = wrapper({command: cmd})
   let rid = result?.rule_id ?? ""
-  println(result.action + " " + rid)
+  __io_println(result.action + " " + rid)
 }
 
 pipeline default() {
@@ -25,6 +25,6 @@ pipeline default() {
   run(deny_wrapper, "rm -rf /")
   /* Sibling-of-deny command passes through unscathed. */
   let pt = rust_wrapper({command: "echo hello"})
-  println(pt.ok)
-  println(pt.ran)
+  __io_println(pt.ok)
+  __io_println(pt.ran)
 }

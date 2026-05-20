@@ -52,7 +52,7 @@ pipeline default() {
   let port = env_or("HARN_DEMO_REMOTE_PORT", "8787")
   let local = fire(register_local(), "local")
   let remote = fire(register_remote(port), "a2a")
-  println(
+  __io_println(
     json_stringify(
       {
         local_status: local.status,

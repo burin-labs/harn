@@ -5,7 +5,7 @@ pipeline default() {
   let harn_bin = env_or("HARN_CONFORMANCE_HARN_BIN", resolve_harn_bin(repo_root))
   let root = path_join(temp_dir(), "harn_pack_untrusted_signer_" + uuid_v7())
   mkdir(root)
-  write_file(path_join(root, "hello.harn"), "println(\"signed\")\n")
+  write_file(path_join(root, "hello.harn"), "__io_println(\"signed\")\n")
   write_file(
     path_join(root, "release-key.pem"),
     "-----BEGIN PRIVATE KEY-----\nMC4CAQAwBQYDK2VwBCIEIDmsNDO8iZqiMmA/b7I7lwGXNKe68o+gDno6R5riUcDC\n-----END PRIVATE KEY-----\n",
@@ -21,13 +21,13 @@ pipeline default() {
     "--out",
     path_join(root, "hello.harnpack"),
   )
-  println(pack.success)
+  __io_println(pack.success)
   let permissive = exec_at(root, harn_bin, "pack", "verify", path_join(root, "hello.harnpack"), "--json")
   let permissive_data = json_parse(permissive.stdout)
   let signer = permissive_data.data.key_id
   let signers = path_join(root, "signers")
   mkdir(signers)
-  println(
+  __io_println(
     exec_at(
       root,
       "openssl",
@@ -54,8 +54,8 @@ pipeline default() {
     path_join(root, "trust-policy.json"),
     "--json",
   )
-  println(verify.success)
+  __io_println(verify.success)
   let verify_data = json_parse(verify.stdout)
-  println(verify_data.ok)
-  println(verify_data.error.code)
+  __io_println(verify_data.ok)
+  __io_println(verify_data.error.code)
 }

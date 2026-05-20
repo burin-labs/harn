@@ -686,9 +686,9 @@ pipeline default() {
     path_join(dir, "step-transcript.json"),
     json_stringify({transcript: result?.transcript, task_ledger: result?.task_ledger}),
   )
-  println("[qmode] step=${outcome} status=${diag?.status} iterations=${diag?.iterations}")
+  __io_println("[qmode] step=${outcome} status=${diag?.status} iterations=${diag?.iterations}")
   if outcome == "no_terminal" {
-    println("[qmode] WARN: model never called a terminal tool. visible_text:")
-    println(diag.visible_text)
+    __io_println("[qmode] WARN: model never called a terminal tool. visible_text:")
+    __io_println(diag.visible_text)
   }
 }

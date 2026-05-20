@@ -19,7 +19,7 @@ pipeline test(task) {
   complete(points[3], "d")
   complete(points[4], "e")
   let result = await(waiter)
-  println(result.count)
-  println(result.first)
-  println(result.last)
+  __io_println(result.count)
+  __io_println(result.first)
+  __io_println(result.last)
 }

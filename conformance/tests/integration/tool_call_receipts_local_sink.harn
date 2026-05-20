@@ -88,41 +88,41 @@ pipeline default() {
   let expected_receipt_uri = "file://" + path_join(cwd(), local_path)
   let local_audit_events = local_captured.events.filter({ event -> event.type == "tool_call_audit" })
   let local_audit_uri = to_string(local_audit_events[0]?.audit?.receipt_uri ?? "")
-  println("local_status=" + local_result.status)
-  println("local_records=" + to_string(len(records)))
-  println("schema_version=" + to_string(receipt.schema_version))
-  println("reason=" + receipt.reason)
-  println("receipt_status=" + receipt.status)
-  println("secret_redacted=" + to_string(!contains(receipt_json, "hide-me")))
-  println("args_hash_redacted=" + to_string(receipt.args_hash == expected_args_hash))
-  println("result_hash_present=" + to_string(len(to_string(receipt.result_hash ?? "")) == 64))
-  println(
+  __io_println("local_status=" + local_result.status)
+  __io_println("local_records=" + to_string(len(records)))
+  __io_println("schema_version=" + to_string(receipt.schema_version))
+  __io_println("reason=" + receipt.reason)
+  __io_println("receipt_status=" + receipt.status)
+  __io_println("secret_redacted=" + to_string(!contains(receipt_json, "hide-me")))
+  __io_println("args_hash_redacted=" + to_string(receipt.args_hash == expected_args_hash))
+  __io_println("result_hash_present=" + to_string(len(to_string(receipt.result_hash ?? "")) == 64))
+  __io_println(
     "receipt_uri_in_receipt="
       + to_string(to_string(receipt?.audit?.receipt_uri ?? "") == expected_receipt_uri),
   )
-  println("receipt_uri_in_audit_event=" + to_string(local_audit_uri == expected_receipt_uri))
-  println("reminder_audit_origin=" + to_string(reminder_audit?.origin ?? ""))
-  println("reminder_lifecycle_count=" + to_string(len(reminder_lifecycle)))
-  println("reminder_hook_event=" + to_string(reminder_lifecycle[0]?.hook_event ?? ""))
-  println(
+  __io_println("receipt_uri_in_audit_event=" + to_string(local_audit_uri == expected_receipt_uri))
+  __io_println("reminder_audit_origin=" + to_string(reminder_audit?.origin ?? ""))
+  __io_println("reminder_lifecycle_count=" + to_string(len(reminder_lifecycle)))
+  __io_println("reminder_hook_event=" + to_string(reminder_lifecycle[0]?.hook_event ?? ""))
+  __io_println(
     "reminder_tool_call_id="
       + to_string(reminder_lifecycle[0]?.tool_call_id == receipt.tool_call_id),
   )
-  println("reminder_source=" + to_string(reminder_lifecycle[0]?.source ?? ""))
-  println("reminder_role_hint=" + to_string(reminder_lifecycle[0]?.role_hint ?? ""))
-  println("reminder_tag=" + to_string(reminder_lifecycle[0]?.tags[0] ?? ""))
+  __io_println("reminder_source=" + to_string(reminder_lifecycle[0]?.source ?? ""))
+  __io_println("reminder_role_hint=" + to_string(reminder_lifecycle[0]?.role_hint ?? ""))
+  __io_println("reminder_tag=" + to_string(reminder_lifecycle[0]?.tags[0] ?? ""))
   let cloud_session = "receipt-cloud-" + uuid()
   let captured = agent_capture_events(
     cloud_session,
     fn() { return run_receipt_agent(cloud_session, {sink: "cloud", redact: ["secret"]}) },
   )
   let receipt_events = captured.events.filter({ event -> event.type == "tool_call_audit" && event?.receipt != nil })
-  println("cloud_receipts=" + to_string(len(receipt_events)))
-  println("cloud_reason=" + receipt_events[0].receipt.reason)
-  println(
+  __io_println("cloud_receipts=" + to_string(len(receipt_events)))
+  __io_println("cloud_reason=" + receipt_events[0].receipt.reason)
+  __io_println(
     "cloud_omits_receipt_uri=" + to_string(receipt_events[0]?.receipt?.audit?.receipt_uri == nil),
   )
-  println(
+  __io_println(
     "cloud_reminder_audit="
       + to_string(receipt_events[0]?.receipt?.audit?.reminders?.origin == "tool_hook"),
   )

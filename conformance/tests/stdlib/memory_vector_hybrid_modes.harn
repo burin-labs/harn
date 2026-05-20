@@ -57,19 +57,19 @@ pipeline default() {
   // Cosine-only weights → query "rust" routes to alice via the explicit
   // mocked vector.
   let rust_hits = memory_recall("agent/hybrid", "rust", 5, {root: root})
-  println(rust_hits[0].key)
-  println(rust_hits[0].score >= 0.999)
+  __io_println(rust_hits[0].key)
+  __io_println(rust_hits[0].score >= 0.999)
   // Semantic override picks the same record regardless of namespace
   // hybrid config.
   let semantic_only = memory_recall("agent/hybrid", "typescript", 5, {root: root, mode: "semantic"})
-  println(semantic_only[0].key)
+  __io_println(semantic_only[0].key)
   // Lexical override drops cosine entirely; BM25 on "rust" matches alice
   // by tag boost.
   let lexical = memory_recall("agent/hybrid", "rust", 5, {root: root, mode: "lexical"})
-  println(lexical[0].key)
+  __io_println(lexical[0].key)
   // Re-open with a different default mode flips the default behavior.
   memory_open("agent/hybrid", {backend: "bm25", root: root})
   let default_now_lexical = memory_recall("agent/hybrid", "typescript", 5, {root: root})
-  println(default_now_lexical[0].key)
+  __io_println(default_now_lexical[0].key)
   delete_file(root)
 }

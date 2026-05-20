@@ -43,7 +43,7 @@ pub pipeline main() {
     agent_session_inject(sid, {role: "user", content: prompt})
   }
   let snap = agent_session_snapshot(sid)
-  println(
+  __io_println(
     json_stringify({
       session_id: sid,
       len: len(snap["messages"]),
@@ -354,7 +354,7 @@ pub pipeline main() {
   let sid = agent_session_current_id()
   guard sid != nil else { throw "ACP prompt installs the current session id" }
   let snap = agent_session_snapshot(sid)
-  println(
+  __io_println(
     json_stringify({
       session_id: sid,
       pinned_model: snap["pinned_model"],

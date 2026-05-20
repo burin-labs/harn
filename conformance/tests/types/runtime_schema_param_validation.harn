@@ -11,17 +11,17 @@ pipeline test(task) {
   try {
     take_union(json_parse("true"))
   } catch (e) {
-    println(to_string(e).contains("expected string|int"))
+    __io_println(to_string(e).contains("expected string|int"))
   }
   try {
     take_nums(json_parse("[1, \"x\"]"))
   } catch (e2) {
-    println(to_string(e2).contains("[1]") && to_string(e2).contains("expected type 'int'"))
+    __io_println(to_string(e2).contains("[1]") && to_string(e2).contains("expected type 'int'"))
   }
   try {
     take_counts(json_parse("{\"a\": 1, \"b\": \"x\"}"))
   } catch (e3) {
-    println(
+    __io_println(
       to_string(e3).contains("b")
         && (to_string(e3).contains("expected int") || to_string(e3).contains("expected type 'int'")),
     )

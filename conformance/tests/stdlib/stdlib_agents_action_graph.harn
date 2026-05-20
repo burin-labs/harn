@@ -13,18 +13,18 @@ pipeline default() {
       ],
     },
   )
-  println(normalized?._type == "action_graph")
-  println(len(normalized.actions) == 4)
-  println(normalized.actions[1].phase == "execute")
-  println(normalized.actions[1].depends_on[0] == "action-1")
-  println(normalized.actions[3].depends_on[0] == "action-2")
+  __io_println(normalized?._type == "action_graph")
+  __io_println(len(normalized.actions) == 4)
+  __io_println(normalized.actions[1].phase == "execute")
+  __io_println(normalized.actions[1].depends_on[0] == "action-1")
+  __io_println(normalized.actions[3].depends_on[0] == "action-2")
   let batches = action_graph_batches(normalized)
-  println(len(batches) == 3)
-  println(batches[1].count == 2)
-  println(batches[1].tool_class == "write")
+  __io_println(len(batches) == 3)
+  __io_println(batches[1].count == 2)
+  __io_println(batches[1].tool_class == "write")
   let rendered = action_graph_render(normalized)
-  println(contains(rendered, "## RESEARCH"))
-  println(contains(rendered, "depends on: action-1"))
+  __io_println(contains(rendered, "## RESEARCH"))
+  __io_println(contains(rendered, "depends on: action-1"))
   let execution_plan = action_graph(
     {
       task: "Fix parser diagnostics",
@@ -44,7 +44,7 @@ pipeline default() {
   }
   let flow = action_graph_flow(execution_plan, config)
   let report = workflow_validate(flow)
-  println(report.valid)
+  __io_println(report.valid)
   llm_mock_clear()
   llm_mock({text: "Research complete."})
   llm_mock({text: "Implementation batch complete."})
@@ -55,9 +55,9 @@ pipeline default() {
     config,
     {max_steps: 8, persist_path: "/tmp/harn-action-graph-runtime.json"},
   )
-  println(result.status == "completed")
-  println(result.run?._type == "run_record")
-  println(len(result.run.stages) == 4)
-  println(result.run.stages[2].kind == "verify")
-  println(result.batches[1].count == 2)
+  __io_println(result.status == "completed")
+  __io_println(result.run?._type == "run_record")
+  __io_println(len(result.run.stages) == 4)
+  __io_println(result.run.stages[2].kind == "verify")
+  __io_println(result.batches[1].count == 2)
 }

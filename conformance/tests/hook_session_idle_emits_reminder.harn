@@ -12,9 +12,9 @@ pipeline main() {
     {session: {id: session}, iteration: 1, wake_interval_ms: 0},
   )
   let events = transcript_events_by_kind(agent_session_snapshot(session), "system_reminder")
-  println(len(events))
-  println(events[0].reminder.body)
-  println(events[0].reminder.tags[0])
-  println(events[0].reminder.source)
+  __io_println(len(events))
+  __io_println(events[0].reminder.body)
+  __io_println(events[0].reminder.tags[0])
+  __io_println(events[0].reminder.source)
   clear_session_hooks()
 }

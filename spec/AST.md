@@ -77,7 +77,7 @@ fn add(a: int, b: int) -> int {
 }
 
 fn process<T>(item: T) where T: Displayable {
-  println(item.display())
+  log(item.display())
 }
 ```
 

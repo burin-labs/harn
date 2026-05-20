@@ -58,14 +58,14 @@ pipeline test(task) {
       handles = handles.push(dispatch.result)
     }
   }
-  println(len(handles) == 8)
+  __io_println(len(handles) == 8)
   // Release the gate so each pool task can complete.
   for _i in 0 to 8 exclusive {
     send(gate, "go")
   }
   let results = pool_wait(handles)
-  println(len(results) == 8)
-  println(atomic_get(peak) <= 3)
-  println(atomic_get(inflight) == 0)
-  println(atomic_get(completed) == 8)
+  __io_println(len(results) == 8)
+  __io_println(atomic_get(peak) <= 3)
+  __io_println(atomic_get(inflight) == 0)
+  __io_println(atomic_get(completed) == 8)
 }

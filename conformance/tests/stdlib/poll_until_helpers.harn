@@ -18,8 +18,8 @@ pipeline default() {
     },
     {timeout_ms: 60000, interval_ms: 100},
   )
-  println(value)
-  println(store_get("probe_counter"))
+  __io_println(value)
+  __io_println(store_get("probe_counter"))
   store_set("status_counter", 0)
   let row = wait_for_status(
     fn() {
@@ -37,11 +37,11 @@ pipeline default() {
     {timeout_ms: 60000, interval_ms: 50},
     fn(row) { return row?.status },
   )
-  println(row.status)
-  println(row.url)
-  println(store_get("status_counter"))
+  __io_println(row.status)
+  __io_println(row.url)
+  __io_println(store_get("status_counter"))
   let timed_out = poll_until(fn() { return nil }, {timeout_ms: 200, interval_ms: 50})
-  println(timed_out == nil)
+  __io_println(timed_out == nil)
   store_set("retry_counter", 0)
   let retry_report = retry_with_result(
     fn(attempt) {
@@ -54,13 +54,13 @@ pipeline default() {
     },
     {max_attempts: 5, base_ms: 10, multiplier: 2.0, cap_ms: 100},
   )
-  println(retry_report.ok)
-  println(retry_report.attempts)
-  println(retry_report.value.attempt)
+  __io_println(retry_report.ok)
+  __io_println(retry_report.attempts)
+  __io_println(retry_report.value.attempt)
   let exhausted = retry_with_result(fn(attempt) { return Err("permanent") }, {max_attempts: 2, base_ms: 5})
-  println(exhausted.ok)
-  println(exhausted.attempts)
-  println(exhausted.error)
+  __io_println(exhausted.ok)
+  __io_println(exhausted.attempts)
+  __io_println(exhausted.error)
   store_delete("probe_counter")
   store_delete("status_counter")
   store_delete("retry_counter")

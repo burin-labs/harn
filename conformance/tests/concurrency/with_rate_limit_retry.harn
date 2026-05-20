@@ -10,6 +10,6 @@ pipeline default(task) {
     fn() { llm_call("hello", nil, {provider: "mock", llm_retries: 0}) },
     {backoff_ms: 1, max_retries: 5},
   )
-  println(r.text)
-  println(len(llm_mock_calls()))
+  __io_println(r.text)
+  __io_println(len(llm_mock_calls()))
 }

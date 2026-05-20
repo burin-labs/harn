@@ -112,16 +112,16 @@ pipeline default() {
   )
   ui_tool_result_validate(result)
   let mcp_meta = ui_tool_meta_to_mcp(result.meta)
-  println("resource.uri=" + resource.uri)
-  println("resource.permissions=" + to_string(resource.permissions))
-  println("resource.validation.ok=" + to_string(resource.validation.ok))
-  println("meta.visibility=" + mcp_meta.ui.visibility)
-  println("meta.resourceUri=" + mcp_meta.ui.resourceUri)
+  __io_println("resource.uri=" + resource.uri)
+  __io_println("resource.permissions=" + to_string(resource.permissions))
+  __io_println("resource.validation.ok=" + to_string(resource.validation.ok))
+  __io_println("meta.visibility=" + mcp_meta.ui.visibility)
+  __io_println("meta.resourceUri=" + mcp_meta.ui.resourceUri)
   let apps_host = ui_select_for_host(result, {apps: true, profiles: ["mcp-app"]})
   let text_host = ui_select_for_host(result, nil)
-  println("apps_host.selected=" + apps_host.selected)
-  println("text_host.selected=" + text_host.selected)
-  println("text_host.fallback=" + text_host.text_fallback.content)
+  __io_println("apps_host.selected=" + apps_host.selected)
+  __io_println("text_host.selected=" + text_host.selected)
+  __io_println("text_host.fallback=" + text_host.text_fallback.content)
   // Document the message envelopes the iframe emits — useful when wiring a
   // host bridge or writing host tests.
   let demo_call = ui_tool_call_envelope(
@@ -130,8 +130,8 @@ pipeline default() {
     {id: "submit-1"},
   )
   let demo_ctx = ui_context_update_envelope("review.summary", "Signature library swap is mechanical", {id: "ctx-1"})
-  println("submit.method=" + demo_call.method)
-  println("submit.params.name=" + demo_call.params.name)
-  println("ctx.method=" + demo_ctx.method)
-  println("ctx.params.model_visible=" + to_string(demo_ctx.params.model_visible))
+  __io_println("submit.method=" + demo_call.method)
+  __io_println("submit.params.name=" + demo_call.params.name)
+  __io_println("ctx.method=" + demo_ctx.method)
+  __io_println("ctx.params.model_visible=" + to_string(demo_ctx.params.model_visible))
 }

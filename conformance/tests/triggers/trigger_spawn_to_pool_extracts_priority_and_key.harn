@@ -53,21 +53,21 @@ pipeline test(task) {
   // The dispatcher surfaces the extracted priority + key in the dispatch
   // result so observers (audit, action graph) can correlate the pool task
   // back to the originating event without re-parsing the payload.
-  println(fired.status == "dispatched")
-  println(fired.result?.pool == "spawn-to-pool-extractor-demo")
-  println(fired.result?.priority == 7)
-  println(fired.result?.key == "acme")
+  __io_println(fired.status == "dispatched")
+  __io_println(fired.result?.pool == "spawn-to-pool-extractor-demo")
+  __io_println(fired.result?.priority == 7)
+  __io_println(fired.result?.key == "acme")
   // Missing paths fall back to defaults (priority 0, no key) rather than
   // failing the dispatch.
   let fallback = trigger_fire(
     handle,
     {provider: "github", kind: "issue.opened", headers: {x_delivery: "evt-fallback-" + unique}},
   )
-  println(fallback.status == "dispatched")
-  println(fallback.result?.priority == 0)
-  println(fallback.result?.key == nil)
+  __io_println(fallback.status == "dispatched")
+  __io_println(fallback.result?.priority == 0)
+  __io_println(fallback.result?.key == nil)
   let results = pool_wait([fired.result, fallback.result])
-  println(len(results) == 2)
-  println(results[0].result == "seed")
-  println(results[1].result == "seed")
+  __io_println(len(results) == 2)
+  __io_println(results[0].result == "seed")
+  __io_println(results[1].result == "seed")
 }

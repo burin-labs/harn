@@ -25,23 +25,23 @@ pipeline main() {
     {provider: "mock", background: true, tool_format: "native", max_iterations: 3},
   )
   let suspended = wait_agent(handle)
-  println("pre_race_status=" + suspended.status)
+  __io_println("pre_race_status=" + suspended.status)
   // First resume wins and drives the worker to completion.
   let first = resume_agent(handle)
   let done = wait_agent(handle)
-  println("first_resume_status=" + first.status)
-  println("post_first_status=" + done.status)
+  __io_println("first_resume_status=" + first.status)
+  __io_println("post_first_status=" + done.status)
   // Second resume sees the worker is no longer suspended and rejects.
   let second = try {
     resume_agent(handle)
   }
-  println("second_resume_failed=" + to_string(is_err(second)))
+  __io_println("second_resume_failed=" + to_string(is_err(second)))
   let err_text = to_string(unwrap_err(second))
-  println(
+  __io_println(
     "second_err_has_sus_code="
       + to_string(contains(err_text, "HARN-SUS-003") || contains(err_text, "HARN-SUS-006")),
   )
-  println(
+  __io_println(
     "second_err_mentions_not_suspended="
       + to_string(contains(err_text, "not suspended")),
   )

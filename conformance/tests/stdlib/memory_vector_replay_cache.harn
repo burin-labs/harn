@@ -21,17 +21,17 @@ pipeline default() {
     {root: root, now: "2026-05-15T00:00:01Z"},
   )
   let first_recall = memory_recall("agent/replay", "topic", 5, {root: root})
-  println(len(first_recall))
+  __io_println(len(first_recall))
   let first_calls = host_mock_calls().count
-  println(first_calls >= 3)
+  __io_println(first_calls >= 3)
   // Replay: clear mocks entirely. Cached embeddings on disk must satisfy
   // recall without re-calling the host.
   host_mock_clear()
   let second_recall = memory_recall("agent/replay", "topic", 5, {root: root})
-  println(len(second_recall) == len(first_recall))
-  println(host_mock_calls().count == 0)
+  __io_println(len(second_recall) == len(first_recall))
+  __io_println(host_mock_calls().count == 0)
   // Same (namespace, query, mode, model_hint, top_k) tape → same order.
-  println(first_recall[0].id == second_recall[0].id)
-  println(first_recall[1].id == second_recall[1].id)
+  __io_println(first_recall[0].id == second_recall[0].id)
+  __io_println(first_recall[1].id == second_recall[1].id)
   delete_file(root)
 }

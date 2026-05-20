@@ -32,6 +32,6 @@ pipeline test(task) {
   let _ = emit_channel("filter.input", {repo: "harn"})
   let _ = emit_channel("filter.input", {repo: "burin"})
   let fired = channel_events("ch.filter.fired")
-  println(len(fired))
-  println(fired[0].payload.repo)
+  __io_println(len(fired))
+  __io_println(fired[0].payload.repo)
 }

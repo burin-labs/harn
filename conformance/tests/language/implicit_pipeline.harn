@@ -1,18 +1,18 @@
 // Test: top-level code executes without a pipeline block
 let x = 1 + 2
 
-println(x)
+__io_println(x)
 
 fn double(n) {
   return n * 2
 }
 
-println(double(5))
+__io_println(double(5))
 
 let items = [1, 2, 3]
 
 for item in items {
-  print("${item} ")
+  __io_print("${item} ")
 }
 
-println("")
+__io_println("")

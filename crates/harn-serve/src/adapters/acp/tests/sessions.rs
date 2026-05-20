@@ -239,7 +239,7 @@ async fn acp_server_handles_session_flow_and_prompt_updates() {
                     "method": "session/prompt",
                     "params": {
                         "sessionId": session_id,
-                        "prompt": [{"type": "text", "text": "println(\"hello from acp\")"}],
+                        "prompt": [{"type": "text", "text": "__io_println(\"hello from acp\")"}],
                     },
                 }))
                 .expect("send session/prompt");
@@ -303,7 +303,7 @@ let sid = agent_session_current_id()
 guard sid != nil else { throw "missing session id" }
 agent_session_inject(sid, {role: "user", content: "alpha"})
 let snap = agent_session_snapshot(sid)
-println(json_stringify({len: len(snap["messages"]), messages: snap["messages"]}))
+__io_println(json_stringify({len: len(snap["messages"]), messages: snap["messages"]}))
 "#,
             )
             .await;
@@ -318,7 +318,7 @@ let sid = agent_session_current_id()
 guard sid != nil else { throw "missing session id" }
 agent_session_inject(sid, {role: "user", content: "beta"})
 let snap = agent_session_snapshot(sid)
-println(json_stringify({len: len(snap["messages"]), messages: snap["messages"]}))
+__io_println(json_stringify({len: len(snap["messages"]), messages: snap["messages"]}))
 "#,
             )
             .await;
@@ -373,7 +373,7 @@ println(json_stringify({len: len(snap["messages"]), messages: snap["messages"]})
 let sid = agent_session_current_id()
 guard sid != nil else { throw "missing session id" }
 let snap = agent_session_snapshot(sid)
-println(json_stringify({len: len(snap["messages"]), messages: snap["messages"]}))
+__io_println(json_stringify({len: len(snap["messages"]), messages: snap["messages"]}))
 "#,
             )
             .await;
@@ -453,7 +453,7 @@ async fn acp_profile_json_appends_one_line_per_prompt_turn() {
                         "method": "session/prompt",
                         "params": {
                             "sessionId": session_id.clone(),
-                            "prompt": [{"type": "text", "text": "println(\"profiled\")"}],
+                            "prompt": [{"type": "text", "text": "__io_println(\"profiled\")"}],
                         },
                     }))
                     .expect("send session/prompt");
@@ -566,7 +566,7 @@ async fn acp_session_close_and_stop_alias_free_active_session() {
                         "method": "session/prompt",
                         "params": {
                             "sessionId": session_id,
-                            "prompt": [{"type": "text", "text": "println(\"closed\")"}],
+                            "prompt": [{"type": "text", "text": "__io_println(\"closed\")"}],
                         },
                     }))
                     .expect("send session/prompt");
@@ -596,7 +596,7 @@ async fn acp_session_close_cancels_pending_host_bridge_call() {
                     "method": "session/prompt",
                     "params": {
                         "sessionId": session_id.clone(),
-                        "prompt": [{"type": "text", "text": "println(\"after host capabilities\")"}],
+                        "prompt": [{"type": "text", "text": "__io_println(\"after host capabilities\")"}],
                     },
                 }))
                 .expect("send session/prompt");
@@ -652,16 +652,16 @@ async fn acp_file_backed_vm_baseline_keeps_prompt_turns_isolated() {
                 r#"
 pipeline default(task) {
   let cell = shared_cell({scope: "task_group", key: "turn", initial: prompt})
-  println(prompt)
-  println(shared_get(cell))
+  __io_println(prompt)
+  __io_println(shared_get(cell))
   shared_set(cell, "dirty")
   let held = sync_gate_acquire("runner", 1)
   let blocked = sync_gate_acquire("runner", 1, 0)
-  println(blocked == nil)
+  __io_println(blocked == nil)
   sync_release(held)
   let metrics = sync_metrics("gate", "runner")
-  println(metrics.acquisition_count)
-  println(host_has("project", "read_file"))
+  __io_println(metrics.acquisition_count)
+  __io_println(host_has("project", "read_file"))
 }"#,
             )
             .expect("write pipeline");
@@ -737,15 +737,15 @@ async fn acp_session_prompt_exposes_multimodal_prompt_messages() {
   llm_mock({text: "ok"})
   llm_call("", nil, {provider: "mock", messages: prompt_messages})
   let blocks = llm_mock_calls()[0].messages[0].content
-  println(blocks[0].text == "Please inspect this context.")
-  println(blocks[1].type == "image")
-  println(blocks[1].base64 == "iVBORw0KGgo=")
-  println(blocks[1].media_type == "image/png")
-  println(blocks[2].type == "audio")
-  println(blocks[2].base64 == "UklGRiQ=")
-  println(blocks[2].media_type == "audio/wav")
-  println(contains(blocks[3].text, "file:///tmp/example.txt"))
-  println(contains(blocks[3].text, "hello from embedded context"))
+  __io_println(blocks[0].text == "Please inspect this context.")
+  __io_println(blocks[1].type == "image")
+  __io_println(blocks[1].base64 == "iVBORw0KGgo=")
+  __io_println(blocks[1].media_type == "image/png")
+  __io_println(blocks[2].type == "audio")
+  __io_println(blocks[2].base64 == "UklGRiQ=")
+  __io_println(blocks[2].media_type == "audio/wav")
+  __io_println(contains(blocks[3].text, "file:///tmp/example.txt"))
+  __io_println(contains(blocks[3].text, "hello from embedded context"))
 }"#,
             )
             .expect("write pipeline");

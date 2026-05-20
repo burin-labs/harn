@@ -23,7 +23,7 @@ fn show(result) {
   } else {
     to_string(result.value)
   }
-  println("ok=" + to_string(result.ok) + " status=" + result.status + " value=" + value_repr)
+  __io_println("ok=" + to_string(result.ok) + " status=" + result.status + " value=" + value_repr)
 }
 
 pipeline default() {

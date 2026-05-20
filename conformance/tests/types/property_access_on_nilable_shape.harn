@@ -5,5 +5,5 @@ type User = {name: string, email: string}
 
 pipeline default(_) {
   let maybe: User? = nil
-  println(maybe.name)
+  __io_println(maybe.name)
 }

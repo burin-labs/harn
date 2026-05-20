@@ -5,19 +5,19 @@ pipeline default() {
   host_mock("runtime", "pipeline_input", {message: "hello"})
   host_mock("runtime", "dry_run", true)
   host_mock("runtime", "approved_plan", "ship it")
-  println(runtime_task())
-  println(runtime_pipeline_input()?.message)
-  println(runtime_dry_run())
-  println(runtime_approved_plan())
+  __io_println(runtime_task())
+  __io_println(runtime_pipeline_input()?.message)
+  __io_println(runtime_dry_run())
+  __io_println(runtime_approved_plan())
   let result = process_shell("printf ok")
-  println(result?.success)
-  println(result?.combined)
+  __io_println(result?.success)
+  __io_println(result?.combined)
   let argv = if platform() == "windows" {
     ["cmd", "/C", "echo|set /p=argv-ok"]
   } else {
     ["printf", "argv-ok"]
   }
   let argv_result = process_run(argv, {timeout_ms: 5000})
-  println(argv_result?.success)
-  println(process_result_text(argv_result))
+  __io_println(argv_result?.success)
+  __io_println(process_result_text(argv_result))
 }

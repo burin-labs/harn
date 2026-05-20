@@ -6,25 +6,27 @@
 ## What it means
 
 The lint fires on calls to `print`, `println`, `eprint`, `eprintln`,
-`read_line`, and `prompt_user` when a `harness` binding is already in scope.
-These were ambient stdio-capability builtins in the pre-`Harness` runtime.
-Stdio access now routes through the `harness.stdio.*` sub-handle so capability
-requirements are visible in the type system.
+`read_line`, and `prompt_user`. These were ambient stdio-capability builtins
+in the pre-`Harness` runtime. Stdio access now routes through the
+`harness.stdio.*` sub-handle so capability requirements are visible in the
+type system.
 
-This is a lint, not a hard error. The legacy builtins still compile while
-the in-tree corpus migration is in flight, but new code should use
-`harness.stdio.print`, `harness.stdio.println`, `harness.stdio.eprint`,
-`harness.stdio.eprintln`, `harness.stdio.read_line`, or
-`harness.stdio.prompt`.
+This lint is emitted during auto-repair planning so existing call sites can be
+migrated before the removed builtin produces an unknown-name diagnostic. New
+code should use `harness.stdio.print`, `harness.stdio.println`,
+`harness.stdio.eprint`, `harness.stdio.eprintln`,
+`harness.stdio.read_line`, or `harness.stdio.prompt`.
 
 ## How to fix
 
 - Run `harn fix --apply --safety scope-local` over the file. The
-  `bindings/thread-harness-stdio` repair rewrites every call site where a
-  `harness` binding is in scope.
-- If `harness` is not reachable from the call site, first thread it through
-  the enclosing function via the `bindings/thread-harness` repair, then re-run
-  `harn fix --apply` to swap the call.
+  `bindings/thread-harness` repair rewrites every call site where a
+  `harness` binding is already in scope, and can thread that existing binding
+  down same-file synchronous helper chains.
+- If `harness` is not reachable from the call site, `harn fix --plan` will
+  surface the `bindings/thread-harness-needs-param` repair instead. That path
+  adds a `harness: Harness` parameter and updates local callers, so it is
+  marked `surface-changing`.
 
 ## Stability
 

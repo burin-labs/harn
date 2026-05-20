@@ -1,4 +1,4 @@
 /** Test that date_format supports negative pre-epoch timestamps */
 pipeline default(task) {
-  println(date_format(-1000, "%Y-%m-%d %H:%M:%S"))
+  __io_println(date_format(-1000, "%Y-%m-%d %H:%M:%S"))
 }

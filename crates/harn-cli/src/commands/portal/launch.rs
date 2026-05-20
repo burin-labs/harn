@@ -448,8 +448,8 @@ fn build_playground_source(
     [seed, workspace_note],
     {{max_steps: 4, persist_path: {:?}}},
   )
-  println(result?.status)
-  println(result?.run?.persisted_path)
+  __io_println(result?.status)
+  __io_println(result?.run?.persisted_path)
 }}"#,
         persist_path.display().to_string()
     )

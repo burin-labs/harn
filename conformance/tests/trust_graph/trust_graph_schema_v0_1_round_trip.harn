@@ -21,8 +21,8 @@ pipeline test(task) {
   )
   let records: list<TrustRecord> = trust_query({agent: agent_id})
   let report: TrustChainReport = trust_graph_verify_chain()
-  println(len(records) == 1)
-  println(records[0].schema == "opentrustgraph/v0.1")
-  println(records[0].entry_hash != "")
-  println(report.verified)
+  __io_println(len(records) == 1)
+  __io_println(records[0].schema == "opentrustgraph/v0.1")
+  __io_println(records[0].entry_hash != "")
+  __io_println(report.verified)
 }

@@ -557,7 +557,7 @@ fn sum(...nums) {
 sum(1, 2, 3)  // 6
 
 fn log(level, ...parts) {
-  println("[${level}] ${join(parts, " ")}")
+  log("[${level}] ${join(parts, " ")}")
 }
 log("INFO", "server", "started")  // [INFO] server started
 ```
@@ -891,12 +891,12 @@ Destructuring patterns work in `for`-`in` loops to unpack each element:
 ```harn
 let entries = [{name: "X", val: 1}, {name: "Y", val: 2}]
 for {name, val} in entries {
-  println("${name}=${val}")
+  log("${name}=${val}")
 }
 
 let pairs = [[1, 2], [3, 4]]
 for [a, b] in pairs {
-  println("${a}+${b}")
+  log("${a}+${b}")
 }
 ```
 
@@ -1335,7 +1335,7 @@ let results = parallel each list with { max_concurrent: 4 } { item ->
 } as stream
 
 for result in results {
-  println(result)
+  log(result)
 }
 ```
 
@@ -1791,7 +1791,7 @@ spawn {
   close_channel(ch)
 }
 for item in ch {
-  println(item)    // prints "a", then "b"
+  log(item)    // prints "a", then "b"
 }
 // loop exits after channel is closed and all items are consumed
 ```
@@ -1899,7 +1899,7 @@ gen fn numbers(start: int, end: int) -> Stream<int> {
 }
 
 for n in numbers(1, 4) {
-  println(n)
+  log(n)
 }
 ```
 
@@ -3335,7 +3335,7 @@ the interface:
 
 ```harn,ignore
 fn show(item: Displayable) {
-  println(item.display())
+  log(item.display())
 }
 
 let d = Dog({name: "Rex"})
@@ -3348,7 +3348,7 @@ Interfaces can be used as generic constraints via `where` clauses:
 
 ```harn
 fn process<T>(item: T) where T: Displayable {
-  println(item.display())
+  log(item.display())
 }
 ```
 
@@ -4166,7 +4166,7 @@ fn grade<T>(prompt: string, schema: Schema<T>) -> T {
 }
 
 let out: GraderOut = grade("Grade this", schema_of(GraderOut))
-println(out.verdict)
+log(out.verdict)
 ```
 
 narrows `out` to `GraderOut` at the call site without any
@@ -4563,7 +4563,7 @@ required fields and that each field has the expected type.
 
 ```harn,ignore
 fn process(user: {name: string, age: int}) {
-  println("${user.name} is ${user.age}")
+  log("${user.name} is ${user.age}")
 }
 
 process({name: "Alice", age: 30})     // OK
@@ -4725,8 +4725,8 @@ let form = multipart_parse(fixture.body, fixture.content_type, {
 
 let title = multipart_field_text(form.fields[0])
 let uploaded = multipart_field_bytes(form.fields[1])
-println(title)
-println(bytes_to_hex(uploaded))
+log(title)
+log(bytes_to_hex(uploaded))
 ```
 
 `signed_url` is the canonical helper for short-lived Harn-hosted receipt and

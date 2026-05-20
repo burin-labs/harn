@@ -8,10 +8,10 @@ pipeline default() {
   // newest-first tiebreak, which is enough to verify the wire-up.
   host_mock("memory", "embed", {result: {vector: [0.5, 0.5, 0.5], dim: 3, model: "test"}})
   let opened = memory_open("agent/vector", {backend: "vector", embed_dim: 3, embed_model_hint: "test", root: root})
-  println(opened._type)
-  println(opened.backend)
-  println(opened.embed_dim)
-  println(opened.embed_model_hint)
+  __io_println(opened._type)
+  __io_println(opened.backend)
+  __io_println(opened.embed_dim)
+  __io_println(opened.embed_model_hint)
   memory_store(
     "agent/vector",
     "alice",
@@ -27,18 +27,18 @@ pipeline default() {
     {root: root, now: "2026-05-15T00:00:01Z"},
   )
   let recalled = memory_recall("agent/vector", "preferences", 5, {root: root})
-  println(len(recalled))
-  println(recalled[0]._type)
-  println(recalled[0].score >= 0.999)
-  println(recalled[1].score >= 0.999)
+  __io_println(len(recalled))
+  __io_println(recalled[0]._type)
+  __io_println(recalled[0].score >= 0.999)
+  __io_println(recalled[1].score >= 0.999)
   // Newer record wins on tie.
-  println(recalled[0].key)
+  __io_println(recalled[0].key)
   // Explicit lexical override should ignore embeddings entirely.
   let lexical = memory_recall("agent/vector", "rust profile", 5, {root: root, mode: "lexical"})
-  println(lexical[0].key)
+  __io_println(lexical[0].key)
   // The embedding cache should now contain both stored records plus the
   // last query. Verify entries exist for the configured model.
   let cache_entries = list_dir(path_join(root, "agent", "vector", "vectors", "test"))
-  println(len(cache_entries) >= 3)
+  __io_println(len(cache_entries) >= 3)
   delete_file(root)
 }

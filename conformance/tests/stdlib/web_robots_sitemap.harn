@@ -70,5 +70,5 @@ pipeline test(task) {
     sitemap_urls("https://example.com/docs"),
     ["https://example.com/", "https://example.com/docs"],
   )
-  println("web_robots_sitemap_ok")
+  __io_println("web_robots_sitemap_ok")
 }

@@ -15,7 +15,7 @@ fn ids(artifacts) {
 
 pipeline default() {
   let stage_policy = workflow_stage_context_policy({}, {input_kinds: ["summary"]})
-  println(stage_policy.include_kinds[0])
+  __io_println(stage_policy.include_kinds[0])
   let selected = workflow_select_stage_artifacts(
     {
       context_policy: {},
@@ -26,7 +26,7 @@ pipeline default() {
       ],
     },
   )
-  println(json_stringify(ids(selected.artifacts)))
+  __io_println(json_stringify(ids(selected.artifacts)))
   let ordered = workflow_select_artifacts(
     [
       {id: "low", kind: "summary", priority: 1, relevance: 1.0, estimated_tokens: 10},
@@ -35,7 +35,7 @@ pipeline default() {
     ],
     {pinned_ids: ["pin"], prioritize_kinds: ["verification_result"], max_artifacts: 2},
   )
-  println(json_stringify(ids(ordered)))
+  __io_println(json_stringify(ids(ordered)))
   let adaptive = workflow_select_artifacts_adaptive(
     [
       {
@@ -59,14 +59,14 @@ pipeline default() {
     ],
     {},
   )
-  println(json_stringify(ids(adaptive)))
-  println(!contains(ids(adaptive), "old-index"))
-  println(contains(ids(adaptive), "dup-high"))
-  println(!contains(ids(adaptive), "dup-low"))
+  __io_println(json_stringify(ids(adaptive)))
+  __io_println(!contains(ids(adaptive), "old-index"))
+  __io_println(contains(ids(adaptive), "dup-high"))
+  __io_println(!contains(ids(adaptive), "dup-low"))
   let oversized = workflow_select_artifacts_adaptive(
     [{id: "big", kind: "summary", text: "0123456789".repeat(300), estimated_tokens: 1000, priority: 1}],
     {max_tokens: 400},
   )
-  println(oversized[0].estimated_tokens == 400)
-  println(len(oversized[0].text) < 3000)
+  __io_println(oversized[0].estimated_tokens == 400)
+  __io_println(len(oversized[0].text) < 3000)
 }

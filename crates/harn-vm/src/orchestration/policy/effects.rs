@@ -188,10 +188,12 @@ fn effects_from_call(call: &harn_ir::CallSemantics) -> Vec<EffectRecord> {
 fn builtin_effect(name: &str) -> Option<EffectRecord> {
     match name {
         // stdio
-        "print" | "println" | "eprint" | "eprintln" | "write_stdout" | "write_stderr" => {
-            Some(EffectRecord::new(EffectKind::Stdio, EffectScope::Observe))
+        "print" | "println" | "eprint" | "eprintln" | "write_stdout" | "write_stderr"
+        | "__io_print" | "__io_println" | "__io_eprint" | "__io_eprintln" | "__io_write_stdout"
+        | "__io_write_stderr" => Some(EffectRecord::new(EffectKind::Stdio, EffectScope::Observe)),
+        "read_stdin" | "__io_read_line" => {
+            Some(EffectRecord::new(EffectKind::Stdio, EffectScope::Read))
         }
-        "read_stdin" => Some(EffectRecord::new(EffectKind::Stdio, EffectScope::Read)),
 
         // fs reads
         "read_file"
@@ -972,7 +974,7 @@ mod tests {
     fn ceiling_side_effect_level_clamps_writes() {
         let source = r#"fn main(harness: Harness) {
             harness.net.get("https://example.test")
-            println("hi")
+            __io_println("hi")
         }"#;
         let ceiling = CapabilityPolicy {
             side_effect_level: Some("read_only".to_string()),

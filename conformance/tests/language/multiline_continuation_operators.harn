@@ -1,17 +1,17 @@
 pipeline default() {
   let fallback = nil
     ?? "fallback"
-  println(fallback)
+  __io_println(fallback)
   let same = 1
     == 1
-  println(same)
+  __io_println(same)
   let different = 1
     != 2
-  println(different)
+  __io_println(different)
   let smaller = 1
     < 2
-  println(smaller)
+  __io_println(smaller)
   let larger_or_equal = 2
     >= 2
-  println(larger_or_equal)
+  __io_println(larger_or_equal)
 }

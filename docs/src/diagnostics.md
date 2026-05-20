@@ -112,7 +112,7 @@ Repairs are tagged with a six-level safety class so `harn fix --apply --safety <
 | [`HARN-NAM-010`](#harn-nam-010) | declaration reference cannot be resolved | `bindings/rename-to-closest` | `scope-local` |
 | [`HARN-NAM-011`](#harn-nam-011) | attribute is attached to an unsupported declaration | — | — |
 | [`HARN-NAM-012`](#harn-nam-012) | attribute argument is invalid | — | — |
-| [`HARN-NAM-101`](#harn-nam-101) | `main` entrypoint must take a single `harness: Harness` parameter | `bindings/thread-harness` | `surface-changing` |
+| [`HARN-NAM-101`](#harn-nam-101) | `main` entrypoint must take a single `harness: Harness` parameter | `bindings/thread-harness-needs-param` | `surface-changing` |
 
 ## CAP — Capabilities
 
@@ -272,7 +272,7 @@ Repairs are tagged with a six-level safety class so `harn fix --apply --safety <
 | [`HARN-LNT-050`](#harn-lnt-050) | deprecated LLM options lint | `llm/migrate-deprecated-option` | `scope-local` |
 | [`HARN-LNT-051`](#harn-lnt-051) | unnecessary safe navigation lint | `expressions/simplify` | `behavior-preserving` |
 | [`HARN-LNT-052`](#harn-lnt-052) | ambient clock builtin replaced by `harness.clock.*` | `bindings/thread-harness-clock` | `scope-local` |
-| [`HARN-LNT-053`](#harn-lnt-053) | ambient stdio builtin replaced by `harness.stdio.*` | `bindings/thread-harness-stdio` | `scope-local` |
+| [`HARN-LNT-053`](#harn-lnt-053) | ambient stdio builtin replaced by `harness.stdio.*` | `bindings/thread-harness` | `scope-local` |
 | [`HARN-LNT-054`](#harn-lnt-054) | ambient fs builtin replaced by `harness.fs.*` | `bindings/thread-harness-fs` | `scope-local` |
 | [`HARN-LNT-055`](#harn-lnt-055) | ambient env builtin replaced by `harness.env.*` | `bindings/thread-harness-env` | `scope-local` |
 | [`HARN-LNT-056`](#harn-lnt-056) | ambient random builtin replaced by `harness.random.*` | `bindings/thread-harness-random` | `scope-local` |
@@ -1661,8 +1661,8 @@ dispatch on it directly.
 
 `main` entrypoint must take a single `harness: Harness` parameter
 
-- **Repair:** `bindings/thread-harness` &nbsp;·&nbsp; **Safety:** `surface-changing`
-- Rewrite the entrypoint as `fn main(harness: Harness)` so the runtime can thread its capability handle
+- **Repair:** `bindings/thread-harness-needs-param` &nbsp;·&nbsp; **Safety:** `surface-changing`
+- Add a `harness: Harness` parameter where the stdio capability handle is required and update local callers
 
 **Category:** Name resolution (NAM)
 **Variant:** `Code::InvalidMainSignature` (invalid `main` signature)
@@ -5062,8 +5062,8 @@ dispatch on it directly.
 
 ambient stdio builtin replaced by `harness.stdio.*`
 
-- **Repair:** `bindings/thread-harness-stdio` &nbsp;·&nbsp; **Safety:** `scope-local`
-- Replace the ambient stdio builtin with the corresponding `harness.stdio.*` method
+- **Repair:** `bindings/thread-harness` &nbsp;·&nbsp; **Safety:** `scope-local`
+- Thread the existing `harness` binding through local helper calls and replace the ambient stdio builtin with `harness.stdio.*`
 - **See also:** [`HARN-NAM-101`](#harn-nam-101), [`HARN-LNT-001`](#harn-lnt-001)
 
 **Category:** Lint (LNT)
@@ -5072,25 +5072,27 @@ ambient stdio builtin replaced by `harness.stdio.*`
 #### What it means
 
 The lint fires on calls to `print`, `println`, `eprint`, `eprintln`,
-`read_line`, and `prompt_user` when a `harness` binding is already in scope.
-These were ambient stdio-capability builtins in the pre-`Harness` runtime.
-Stdio access now routes through the `harness.stdio.*` sub-handle so capability
-requirements are visible in the type system.
+`read_line`, and `prompt_user`. These were ambient stdio-capability builtins
+in the pre-`Harness` runtime. Stdio access now routes through the
+`harness.stdio.*` sub-handle so capability requirements are visible in the
+type system.
 
-This is a lint, not a hard error. The legacy builtins still compile while
-the in-tree corpus migration is in flight, but new code should use
-`harness.stdio.print`, `harness.stdio.println`, `harness.stdio.eprint`,
-`harness.stdio.eprintln`, `harness.stdio.read_line`, or
-`harness.stdio.prompt`.
+This lint is emitted during auto-repair planning so existing call sites can be
+migrated before the removed builtin produces an unknown-name diagnostic. New
+code should use `harness.stdio.print`, `harness.stdio.println`,
+`harness.stdio.eprint`, `harness.stdio.eprintln`,
+`harness.stdio.read_line`, or `harness.stdio.prompt`.
 
 #### How to fix
 
 - Run `harn fix --apply --safety scope-local` over the file. The
-  `bindings/thread-harness-stdio` repair rewrites every call site where a
-  `harness` binding is in scope.
-- If `harness` is not reachable from the call site, first thread it through
-  the enclosing function via the `bindings/thread-harness` repair, then re-run
-  `harn fix --apply` to swap the call.
+  `bindings/thread-harness` repair rewrites every call site where a
+  `harness` binding is already in scope, and can thread that existing binding
+  down same-file synchronous helper chains.
+- If `harness` is not reachable from the call site, `harn fix --plan` will
+  surface the `bindings/thread-harness-needs-param` repair instead. That path
+  adds a `harness: Harness` parameter and updates local callers, so it is
+  marked `surface-changing`.
 
 #### Stability
 

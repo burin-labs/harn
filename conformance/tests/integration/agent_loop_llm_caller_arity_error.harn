@@ -6,5 +6,5 @@ pipeline default() {
   let result = try {
     agent_loop("hi", nil, {provider: "mock", llm_caller: 42})
   }
-  println(unwrap_err(result))
+  __io_println(unwrap_err(result))
 }

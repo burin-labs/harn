@@ -33,8 +33,8 @@ pipeline default() {
   wait_for_file(state_path, 100)
   process_shell("kill $(cat \"" + pid_path + "\") >/dev/null 2>&1 || true")
   let state = json_parse(read_file(state_path))
-  println(response.body)
-  println(state.method)
-  println(state.target)
-  println(state.headers["proxy-authorization"])
+  __io_println(response.body)
+  __io_println(state.method)
+  __io_println(state.target)
+  __io_println(state.headers["proxy-authorization"])
 }

@@ -16,49 +16,49 @@ pipeline default() {
   let dlq_created = events.find({ event -> event.kind == "dlq.created" })
   let receipt_available = events.find({ event -> event.kind == "receipt.available" })
   let replay_available = events.find({ event -> event.kind == "replay_fixture.available" })
-  println(events[0].schema)
-  println(events[0].source_clock.kind)
-  println(cloud_event.source.environment + ":" + cloud_event.source_clock.kind)
-  println(approval_requested.status)
-  println(approval_requested.approval.request_id)
-  println(
+  __io_println(events[0].schema)
+  __io_println(events[0].source_clock.kind)
+  __io_println(cloud_event.source.environment + ":" + cloud_event.source_clock.kind)
+  __io_println(approval_requested.status)
+  __io_println(approval_requested.approval.request_id)
+  __io_println(
     approval_requested.action_intents.find({ intent -> intent.kind == "review_approval" }).requires_approval,
   )
-  println(dlq_created.status)
-  println(dlq_created.dlq.error_class)
-  println(
+  __io_println(dlq_created.status)
+  __io_println(dlq_created.dlq.error_class)
+  __io_println(
     dlq_created.action_intents.find({ intent -> intent.kind == "replay_dlq" }).requires_approval,
   )
-  println(receipt_available.receipt_refs[0].url)
-  println(replay_available.replay_refs[0].id)
+  __io_println(receipt_available.receipt_refs[0].url)
+  __io_println(replay_available.replay_refs[0].id)
   let view = dashboard_jobs_view(
     events.push(cloud_event),
     {generated_at: "fixture", emit: true, topic: "dashboard.jobs.test"},
   )
-  println(view.schema)
-  println(len(view.jobs))
+  __io_println(view.schema)
+  __io_println(len(view.jobs))
   let digest = view.jobs.find({ job -> job.job_id == "daily-digest" })
   let stale = view.jobs.find({ job -> job.job_id == "stale-pr-nudger" })
   let cloud = view.jobs.find({ job -> job.job_id == "cloud-triage-feed" })
-  println(digest.status)
-  println(digest.queue_depth == 0)
-  println(digest.last_result.cards)
-  println(digest.approval.status)
-  println(len(digest.receipt_refs))
-  println(stale.status)
-  println(stale.dlq.dlq_id)
-  println(len(stale.replay_refs))
-  println(stale.action_intents.find({ intent -> intent.kind == "replay_dlq" }).requires_approval)
-  println(
+  __io_println(digest.status)
+  __io_println(digest.queue_depth == 0)
+  __io_println(digest.last_result.cards)
+  __io_println(digest.approval.status)
+  __io_println(len(digest.receipt_refs))
+  __io_println(stale.status)
+  __io_println(stale.dlq.dlq_id)
+  __io_println(len(stale.replay_refs))
+  __io_println(stale.action_intents.find({ intent -> intent.kind == "replay_dlq" }).requires_approval)
+  __io_println(
     !stale.action_intents.find({ intent -> intent.kind == "open_replay_fixture" }).requires_approval,
   )
-  println(cloud.status)
-  println(len(view.receipts))
+  __io_println(cloud.status)
+  __io_println(len(view.receipts))
   let stream = event_log.subscribe({topic: "dashboard.jobs.test", from_cursor: view.receipts[0].event_log_id - 1})
   let logged = stream.next().value
-  println(logged.kind)
-  println(logged.payload.job_id)
-  println(logged.headers.schema)
+  __io_println(logged.kind)
+  __io_println(logged.payload.job_id)
+  __io_println(logged.headers.schema)
   let clock_object = dashboard_job_event(
     "run.started",
     {
@@ -67,7 +67,7 @@ pipeline default() {
       source_clock: {kind: "remote-clock", timestamp: "2026-05-11T14:00:01Z"},
     },
   )
-  println(clock_object.source_clock.kind + ":" + clock_object.source_clock.timestamp)
+  __io_println(clock_object.source_clock.kind + ":" + clock_object.source_clock.timestamp)
   let redacted = dashboard_job_event(
     "run.started",
     {
@@ -78,11 +78,11 @@ pipeline default() {
     },
     {raw_payload_retained: false},
   )
-  println(len(redacted.raw_payload.keys()) == 0)
+  __io_println(len(redacted.raw_payload.keys()) == 0)
   let missing_timestamp = try {
     dashboard_job_event("run.started", {job_id: "missing-timestamp", run_id: "run-missing"})
   }
-  println(is_err(missing_timestamp))
+  __io_println(is_err(missing_timestamp))
   let ungated_action = try {
     dashboard_job_event(
       "dlq.created",
@@ -105,7 +105,7 @@ pipeline default() {
       },
     )
   }
-  println(is_err(ungated_action))
+  __io_println(is_err(ungated_action))
   let missing_action_target = try {
     dashboard_job_event(
       "run.started",
@@ -119,12 +119,12 @@ pipeline default() {
       },
     )
   }
-  println(is_err(missing_action_target))
+  __io_println(is_err(missing_action_target))
   let missing_receipt = try {
     dashboard_job_event(
       "receipt.available",
       {job_id: "missing-receipt", run_id: "run-missing-receipt", source_timestamp: "2026-05-11T14:00:00Z"},
     )
   }
-  println(is_err(missing_receipt))
+  __io_println(is_err(missing_receipt))
 }

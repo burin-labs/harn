@@ -572,7 +572,7 @@ mod tests {
     #[test]
     fn detects_llm_calls_without_matching_strings() {
         assert!(!source_text_uses_provider_llm(
-            r#"println("llm_call(\"x\")")"#
+            r#"__io_println("llm_call(\"x\")")"#
         ));
         assert!(source_text_uses_provider_llm(
             r#"let response = llm_call("prompt", "system")"#
@@ -607,13 +607,13 @@ mod tests {
 fn llm_call(prompt, system) {
   return "local"
 }
-println(llm_call("prompt", "system"))
+__io_println(llm_call("prompt", "system"))
 "#
         ));
         assert!(!source_text_uses_provider_llm(
             r#"
 let llm_call = { prompt, system -> "local" }
-println(llm_call("prompt", "system"))
+__io_println(llm_call("prompt", "system"))
 "#
         ));
     }

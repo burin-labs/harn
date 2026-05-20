@@ -9,11 +9,11 @@ pipeline default() {
   let schema = {type: "object", required: ["verdict"], properties: {verdict: {type: "string"}}}
   llm_mock({text: "{\"verdict\": \"pass\"}"})
   let r = schema_recover("model said pass but failed to format it", schema, {provider: "mock"})
-  println(r.ok)
-  println(r.stage)
+  __io_println(r.ok)
+  __io_println(r.stage)
   let data = r.data
   if data != nil {
-    println(data.verdict)
+    __io_println(data.verdict)
   }
-  println(r.repaired)
+  __io_println(r.repaired)
 }

@@ -11,6 +11,6 @@ pipeline default() {
   // type-check without an explicit schema_is guard.
   let v: "pass" | "fail" = r.data.verdict
   let s: string = r.data.summary
-  println(v)
-  println(s)
+  __io_println(v)
+  __io_println(s)
 }

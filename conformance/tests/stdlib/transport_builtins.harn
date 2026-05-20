@@ -36,5 +36,5 @@ pipeline test(task) {
   assert(is_err(limit_result))
   assert(websocket_close(limited))
   assert_eq(len(transport_mock_calls()), 6)
-  println("transport_builtins_ok")
+  __io_println("transport_builtins_ok")
 }

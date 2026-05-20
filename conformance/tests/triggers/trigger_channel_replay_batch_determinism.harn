@@ -63,15 +63,15 @@ pipeline default() {
   let second_b = audit.next().value
   let second_c = audit.next().value
   // Per-constituent payload_hash equality across runs.
-  println(first_a.payload.payload_hash == second_a.payload.payload_hash)
-  println(first_b.payload.payload_hash == second_b.payload.payload_hash)
-  println(first_c.payload.payload_hash == second_c.payload.payload_hash)
+  __io_println(first_a.payload.payload_hash == second_a.payload.payload_hash)
+  __io_println(first_b.payload.payload_hash == second_b.payload.payload_hash)
+  __io_println(first_c.payload.payload_hash == second_c.payload.payload_hash)
   // Cross-constituent inequality — distinct payloads inside a single
   // batch keep distinct hashes, so the oracle can pinpoint which
   // constituent drifted on a future replay.
-  println(first_a.payload.payload_hash == first_b.payload.payload_hash)
-  println(first_b.payload.payload_hash == first_c.payload.payload_hash)
+  __io_println(first_a.payload.payload_hash == first_b.payload.payload_hash)
+  __io_println(first_b.payload.payload_hash == first_c.payload.payload_hash)
   // event_ids are always fresh per emit, even on a "replay" wall, so
   // the oracle anchors via event_id but compares via payload_hash.
-  println(first_a.payload.event_id == second_a.payload.event_id)
+  __io_println(first_a.payload.event_id == second_a.payload.event_id)
 }

@@ -14,13 +14,17 @@ fn tools() {
             reason: "Testing reminder propagation envelope",
           },
         )
-        println(len(record.reminder_propagation))
-        println(record.reminder_propagation[0].body)
-        println(record.reminder_propagation[0].source)
-        println(record.reminder_propagation[0].originating_agent_id == "reminder-propagate-handoff-parent")
-        println(record.reminder_propagation[1].body)
-        println(record.reminder_propagation[1].source)
-        println(record.reminder_propagation[1].originating_agent_id == "reminder-propagate-handoff-parent")
+        __io_println(len(record.reminder_propagation))
+        __io_println(record.reminder_propagation[0].body)
+        __io_println(record.reminder_propagation[0].source)
+        __io_println(
+          record.reminder_propagation[0].originating_agent_id == "reminder-propagate-handoff-parent",
+        )
+        __io_println(record.reminder_propagation[1].body)
+        __io_println(record.reminder_propagation[1].source)
+        __io_println(
+          record.reminder_propagation[1].originating_agent_id == "reminder-propagate-handoff-parent",
+        )
         record
       },
       parameters: {},

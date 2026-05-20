@@ -6,7 +6,7 @@ pipeline default() {
   for item in ch1 {
     count = count + 1
   }
-  println(count)
+  __io_println(count)
   // Send items, close, then iterate — should drain all items
   let ch2 = channel("test2", 5)
   send(ch2, "a")
@@ -17,14 +17,14 @@ pipeline default() {
   for item in ch2 {
     items = items + [item]
   }
-  println(items)
+  __io_println(items)
   // try_receive on empty channel returns nil
   let ch3 = channel("test3", 5)
   let result = try_receive(ch3)
-  println(result)
+  __io_println(result)
   // send after close returns false
   let ch4 = channel("test4", 5)
   close_channel(ch4)
   let sent = send(ch4, "too_late")
-  println(sent)
+  __io_println(sent)
 }

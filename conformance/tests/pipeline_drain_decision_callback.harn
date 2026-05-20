@@ -49,11 +49,11 @@ pipeline default() {
     "on_drain_decision",
     {action: "cancel", item: {category: "suspended_subagent", id: "worker://triage/43"}},
   )
-  println("resume_control=" + resume_event.control)
-  println("cancel_control=" + cancel_event.control)
-  println("observed=" + to_string(atomic_get(observed)))
-  println("observed_resume=" + to_string(atomic_get(observed_action_resume)))
-  println("observed_cancel=" + to_string(atomic_get(observed_action_cancel)))
+  __io_println("resume_control=" + resume_event.control)
+  __io_println("cancel_control=" + cancel_event.control)
+  __io_println("observed=" + to_string(atomic_get(observed)))
+  __io_println("observed_resume=" + to_string(atomic_get(observed_action_resume)))
+  __io_println("observed_cancel=" + to_string(atomic_get(observed_action_cancel)))
   // Clear hooks before the on_finish recording path, since the audit
   // route currently requires no registered hook to round-trip safely
   // (the lifecycle dispatcher requires an async-builtin VM context;

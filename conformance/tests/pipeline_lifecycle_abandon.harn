@@ -16,8 +16,7 @@ pipeline default() {
     { harness, return_value ->
       harness.handoff_to("nightly-drain", {note: "abandon lifecycle"})
       let pre_state = harness.unsettled_state()
-      harness.stdio
-        .println("pre_partial=" + to_string(len(pre_state.partial_handoffs)))
+      harness.stdio.println("pre_partial=" + to_string(len(pre_state.partial_handoffs)))
       let result = on_finish_abandon(harness, return_value)
       let audits = lifecycle_audit_log_take()
       harness.stdio.println("audit_count=" + to_string(len(audits)))

@@ -12,16 +12,16 @@ pipeline default() {
   llm_mock({text: "cached answer", model: "mock-model", provider: "mock"})
   llm_mock({text: "fresh answer", model: "mock-model", provider: "mock"})
   let opts = {provider: "mock", model: "mock-model", store: store, stream: false}
-  println(llm_cache_key("same prompt", "same system", opts).starts_with("sha256:"))
+  __io_println(llm_cache_key("same prompt", "same system", opts).starts_with("sha256:"))
   let first = with_cache("same prompt", "same system", opts)
   let second = with_cache("same prompt", "same system", opts)
-  println(first.text)
-  println(second.text)
-  println(json_stringify(first) == json_stringify(second))
-  println(len(llm_mock_calls()) == 1)
+  __io_println(first.text)
+  __io_println(second.text)
+  __io_println(json_stringify(first) == json_stringify(second))
+  __io_println(len(llm_mock_calls()) == 1)
   let skipped = with_cache("same prompt", "same system", opts + {tools: []})
-  println(skipped.text)
-  println(len(llm_mock_calls()) == 2)
+  __io_println(skipped.text)
+  __io_println(len(llm_mock_calls()) == 2)
   let fs_store = {
     backend: "fs",
     namespace: "with-cache-fs-" + uuid(),
@@ -33,7 +33,7 @@ pipeline default() {
   let fs_opts = {provider: "mock", model: "mock-model", store: fs_store, stream: false}
   let fs_first = with_cache("fs prompt", nil, fs_opts)
   let fs_second = with_cache("fs prompt", nil, fs_opts)
-  println(fs_first.text)
-  println(fs_second.text)
-  println(len(llm_mock_calls()) == 1)
+  __io_println(fs_first.text)
+  __io_println(fs_second.text)
+  __io_println(len(llm_mock_calls()) == 1)
 }

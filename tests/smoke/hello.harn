@@ -5,5 +5,5 @@
  * stdout on every platform.
  */
 pipeline default() {
-  println("harn-release-smoke ok")
+  __io_println("harn-release-smoke ok")
 }

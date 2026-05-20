@@ -26,10 +26,10 @@ pipeline main() {
     },
   )
   let call = llm_mock_calls()[0]
-  println(call.messages[0].role)
-  println(contains(call.messages[0].content[0].text, "<system-reminder>"))
-  println(contains(call.messages[0].content[0].text, "anthropic ephemeral reminder"))
+  __io_println(call.messages[0].role)
+  __io_println(contains(call.messages[0].content[0].text, "<system-reminder>"))
+  __io_println(contains(call.messages[0].content[0].text, "anthropic ephemeral reminder"))
   // ephemeral_cache hint sets cache_control.type = "ephemeral".
-  println(call.messages[0].content[0].cache_control.type)
+  __io_println(call.messages[0].content[0].cache_control.type)
   clear_reminder_providers()
 }

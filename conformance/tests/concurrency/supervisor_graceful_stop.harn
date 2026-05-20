@@ -26,7 +26,7 @@ pipeline default() {
   )
   sleep(1ms)
   let stopped = supervisor_stop(sup, 50ms)
-  println(stopped.status)
-  println(stopped.children[0].status)
-  println(atomic_get(drained))
+  __io_println(stopped.status)
+  __io_println(stopped.children[0].status)
+  __io_println(atomic_get(drained))
 }

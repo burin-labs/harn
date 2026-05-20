@@ -1,21 +1,21 @@
 pipeline default() {
   let op = {type: "read_file", name: "test"}
-  println(op.type)
-  println(op.name)
+  __io_println(op.type)
+  __io_println(op.name)
   let cfg = {match: "pattern", for: "user", enum: "status"}
-  println(cfg.match)
-  println(cfg.for)
-  println(cfg.enum)
+  __io_println(cfg.match)
+  __io_println(cfg.for)
+  __io_println(cfg.enum)
   let gates = {request_approval: true, ask_user: "owner", dual_control: 2, escalate_to: "frontier"}
-  println(gates.request_approval)
-  println(gates.ask_user)
-  println(gates.dual_control)
-  println(gates.escalate_to)
+  __io_println(gates.request_approval)
+  __io_println(gates.ask_user)
+  __io_println(gates.dual_control)
+  __io_println(gates.escalate_to)
   let flow = {finally: "cleanup", require: "policy", select: "ready", skill: "review", eval_pack: "smoke"}
-  println(flow.finally)
-  println(flow.require)
-  println(flow.select)
-  println(flow.skill)
-  println(flow.eval_pack)
-  println(json_stringify({eval_pack: "smoke"}))
+  __io_println(flow.finally)
+  __io_println(flow.require)
+  __io_println(flow.select)
+  __io_println(flow.skill)
+  __io_println(flow.eval_pack)
+  __io_println(json_stringify({eval_pack: "smoke"}))
 }

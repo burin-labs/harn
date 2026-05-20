@@ -25,16 +25,16 @@ fn prompt_for(name: string, model: string) -> string {
 
 pipeline default(_task) {
   let prompt = "Race 3 providers on a one-sentence question and pick the lowest-latency winner."
-  println("=== provider-race · prompt ===")
-  println(prompt)
-  println("")
+  __io_println("=== provider-race · prompt ===")
+  __io_println(prompt)
+  __io_println("")
   let prov = provider_meta()
   // `parallel each` races the LLM calls; the returned strings are
   // zipped back to the provider metadata serially below. Splitting the
   // race result into a single typed string avoids the type checker
   // widening every per-row dict field to `_`.
   let responses: list<string> = parallel each prov { p ->
-    println("[start ${p.name}]")
+    __io_println("[start ${p.name}]")
     let envelope = llm_call(prompt_for(p.name, p.model), "Be concise. Answer in one sentence.")
     envelope.text
   }
@@ -65,9 +65,9 @@ pipeline default(_task) {
     total_cost = total_cost + r.est_cost_usd
   }
   for r in results {
-    println("[${r.provider}] latency=${r.latency_ms}ms cost=$${r.est_cost_usd}")
-    println("    ${r.response}")
-    println("")
+    __io_println("[${r.provider}] latency=${r.latency_ms}ms cost=$${r.est_cost_usd}")
+    __io_println("    ${r.response}")
+    __io_println("")
   }
   let attribution = {
     persona: "routing_policy",
@@ -79,7 +79,7 @@ pipeline default(_task) {
     races_completed: len(results),
     per_provider: results,
   }
-  println("=== routing_policy receipt ===")
-  println(json_stringify(attribution))
+  __io_println("=== routing_policy receipt ===")
+  __io_println(json_stringify(attribution))
   return attribution
 }

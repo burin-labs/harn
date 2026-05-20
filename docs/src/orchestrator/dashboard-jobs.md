@@ -20,7 +20,7 @@ let event = dashboard_job_event(
 )
 
 let view = dashboard_jobs_view([event])
-println(view.jobs[0].status)
+log(view.jobs[0].status)
 ```
 
 ## Event envelope
@@ -90,7 +90,7 @@ let events = [
 ]
 let view = dashboard_jobs_view(events, {emit: true, topic: "dashboard.jobs.events"})
 for job in view.jobs {
-  println(job.job_id + ": " + job.status)
+  log(job.job_id + ": " + job.status)
 }
 ```
 

@@ -22,5 +22,5 @@ pipeline default() {
   let composed = factory(base)
   let env = composed({prompt: "p", system: "", opts: {}, turn: {iteration: 0, session_id: "", attempt: 1}})
   // Order: c is innermost, runs first, then b, then a appends last.
-  println(env.value.text)
+  __io_println(env.value.text)
 }

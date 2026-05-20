@@ -25,8 +25,8 @@ pipeline test(task) {
       policy: {tool_arg_constraints: [{tool: "list_directory", arg_key: "path", arg_patterns: ["src/*"]}]},
     },
   )
-  println(result?.tools?.rejected[0])
-  println(
+  log(result?.tools?.rejected[0])
+  log(
     json_stringify(transcript_messages(result?.transcript)).contains("does not match allowed patterns"),
   )
 }

@@ -48,7 +48,7 @@ pipeline test(task) {
   let state_dir = path_join(root, "state")
   let config_path = path_join(root, "harn.toml")
   let inspect = exec(harn_bin, "orchestrator", "inspect", "--config", config_path, "--state-dir", state_dir)
-  println(
+  __io_println(
     inspect.success
       && inspect.stdout.contains("cron-heartbeat provider=cron kind=cron state=active")
       && inspect.stdout.contains("manual-replay provider=a2a-push kind=a2a-push state=active")
@@ -67,7 +67,7 @@ pipeline test(task) {
     state_dir,
   )
   let inspect_data = json_parse(inspect_json.stdout)
-  println(
+  __io_println(
     inspect_json.success
       && len(inspect_data.triggers ?? []) == 3
       && inspect_data.snapshot?.status == "stopped"
@@ -97,7 +97,7 @@ pipeline test(task) {
   )
   let replay_event_id = first_group("event_id=(\\S+)", fire_replay.stdout)
   assert(replay_event_id != nil, "missing replay event id")
-  println(
+  __io_println(
     fire_replay.success
       && fire_replay.stdout.contains("status=dlq")
       && fire_discard.success
@@ -108,7 +108,7 @@ pipeline test(task) {
   let discard_entry_id = first_group("(?m)^- (dlq_\\S+) binding=manual-discard", dlq_list.stdout)
   assert(replay_entry_id != nil, "missing replay dlq entry id")
   assert(discard_entry_id != nil, "missing discard dlq entry id")
-  println(
+  __io_println(
     dlq_list.success
       && dlq_list.stdout.contains("binding=manual-replay")
       && dlq_list.stdout.contains("binding=manual-discard"),
@@ -125,7 +125,7 @@ pipeline test(task) {
     state_dir,
   )
   let dlq_data = json_parse(dlq_list_json.stdout)
-  println(
+  __io_println(
     dlq_list_json.success
       && dlq_data.pending_entries == 2
       && len(dlq_data.entries ?? []) == 2
@@ -133,7 +133,7 @@ pipeline test(task) {
       && contains(json_stringify(dlq_data.entries ?? []), "\"binding_id\":\"manual-discard\""),
   )
   let inspect_after = exec(harn_bin, "orchestrator", "inspect", "--config", config_path, "--state-dir", state_dir)
-  println(
+  __io_println(
     inspect_after.success
       && inspect_after.stdout.contains("dispatch_failed trigger=manual-replay")
       && inspect_after.stdout.contains("dispatch_failed trigger=manual-discard"),
@@ -150,7 +150,7 @@ pipeline test(task) {
     "--state-dir",
     state_dir,
   )
-  println(dlq_replay.success && dlq_replay.stdout.contains("status=dispatched"))
+  __io_println(dlq_replay.success && dlq_replay.stdout.contains("status=dispatched"))
   let direct_replay = exec(
     harn_bin,
     "orchestrator",
@@ -163,7 +163,7 @@ pipeline test(task) {
     state_dir,
   )
   let direct_replay_data = json_parse(direct_replay.stdout)
-  println(
+  __io_println(
     direct_replay.success
       && direct_replay_data.status == "dispatched"
       && direct_replay_data.replay_of_event_id == replay_event_id
@@ -180,15 +180,15 @@ pipeline test(task) {
     "--state-dir",
     state_dir,
   )
-  println(discard.success && discard.stdout.contains("state=discarded"))
+  __io_println(discard.success && discard.stdout.contains("state=discarded"))
   let dlq_after = exec(harn_bin, "orchestrator", "dlq", "--list", "--config", config_path, "--state-dir", state_dir)
-  println(dlq_after.success && dlq_after.stdout.contains("pending_entries=0"))
+  __io_println(dlq_after.success && dlq_after.stdout.contains("pending_entries=0"))
   let queue = exec(harn_bin, "orchestrator", "queue", "--config", config_path, "--state-dir", state_dir)
-  println(
+  __io_println(
     queue.success
       && queue.stdout.contains("dispatcher_in_flight=0")
       && queue.stdout.contains("inferred_pending_retries=0"),
   )
-  println(len(regex_captures("inbox_claims_written=([1-9][0-9]*)", queue.stdout)) == 1)
-  println(len(regex_captures("inbox_active_entries=([1-9][0-9]*)", queue.stdout)) == 1)
+  __io_println(len(regex_captures("inbox_claims_written=([1-9][0-9]*)", queue.stdout)) == 1)
+  __io_println(len(regex_captures("inbox_active_entries=([1-9][0-9]*)", queue.stdout)) == 1)
 }

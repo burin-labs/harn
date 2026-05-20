@@ -9,13 +9,13 @@ pipeline default() {
   //   write_cost = 3.75 / 1e6 * 10000 = 0.0375
   //   break_even = ceil(0.0375 / 0.027) = 2
   let row = cache_break_even({provider: "anthropic", model: "claude-sonnet-4-20250514", prompt_tokens: 10000})
-  println("recommended=" + to_string(row.recommended))
-  println("reason=" + row.reason)
-  println("break_even=" + to_string(row.break_even_calls))
-  println("savings=" + to_string(row.savings_per_hit))
+  __io_println("recommended=" + to_string(row.recommended))
+  __io_println("reason=" + row.reason)
+  __io_println("break_even=" + to_string(row.break_even_calls))
+  __io_println("savings=" + to_string(row.savings_per_hit))
   // Unknown pricing path.
   let unknown = cache_break_even({provider: "nonexistent_provider", model: "ghost-model", prompt_tokens: 1000})
-  println("unknown_recommended=" + to_string(unknown.recommended))
-  println("unknown_reason=" + unknown.reason)
-  println("unknown_break_even_nil=" + to_string(unknown.break_even_calls == nil))
+  __io_println("unknown_recommended=" + to_string(unknown.recommended))
+  __io_println("unknown_reason=" + unknown.reason)
+  __io_println("unknown_break_even_nil=" + to_string(unknown.break_even_calls == nil))
 }

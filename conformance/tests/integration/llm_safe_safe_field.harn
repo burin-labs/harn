@@ -5,9 +5,9 @@ import { safe_field } from "std/llm/safe"
 
 pipeline default() {
   let env = {a: nil, B: "hi"}
-  println(safe_field(env, ["a", "b"], "miss"))
-  println(safe_field({}, ["x"], "miss"))
-  println(safe_field({Verdict: ""}, ["verdict"], "skipped"))
-  println(safe_field({Verdict: "DONE"}, ["verdict", "Verdict"], "skipped"))
-  println(safe_field({nested: {x: 1}}, ["nested"], "miss") == {x: 1})
+  __io_println(safe_field(env, ["a", "b"], "miss"))
+  __io_println(safe_field({}, ["x"], "miss"))
+  __io_println(safe_field({Verdict: ""}, ["verdict"], "skipped"))
+  __io_println(safe_field({Verdict: "DONE"}, ["verdict", "Verdict"], "skipped"))
+  __io_println(safe_field({nested: {x: 1}}, ["nested"], "miss") == {x: 1})
 }

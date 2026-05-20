@@ -22,9 +22,9 @@ pipeline main() {
   )
   let suspended = wait_agent(handle)
   let trigger_handle = suspended?.suspension?.auto_resume_trigger
-  println(suspended?.status)
-  println(trigger_handle?.id != nil)
-  println(trigger_handle?.version != nil)
+  __io_println(suspended?.status)
+  __io_println(trigger_handle?.id != nil)
+  __io_println(trigger_handle?.version != nil)
   let fired: DispatchHandle = trigger_fire(
     trigger_handle,
     {
@@ -34,8 +34,8 @@ pipeline main() {
       headers: {x_delivery: "auto-resume-conformance"},
     },
   )
-  println(fired.status)
+  __io_println(fired.status)
   let resumed = wait_agent(handle)
-  println(resumed?.status)
-  println(contains(resumed?.task ?? "", "approved"))
+  __io_println(resumed?.status)
+  __io_println(contains(resumed?.task ?? "", "approved"))
 }

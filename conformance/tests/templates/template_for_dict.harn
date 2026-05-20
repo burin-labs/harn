@@ -1,5 +1,5 @@
 pipeline default() {
-  println(render("fixtures/template/for_else.prompt", {xs: []}))
-  println("---")
-  println(render("fixtures/template/for_dict.prompt", {m: {alpha: 1, beta: 2, gamma: 3}}))
+  __io_println(render("fixtures/template/for_else.prompt", {xs: []}))
+  __io_println("---")
+  __io_println(render("fixtures/template/for_dict.prompt", {m: {alpha: 1, beta: 2, gamma: 3}}))
 }

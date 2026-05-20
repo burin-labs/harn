@@ -8,18 +8,18 @@ pipeline test(task) {
   // Assignable: a literal flows into its base-typed slot.
   let v: Verdict = "pass"
   let s: Score = 2
-  println(v)
-  println(s)
+  __io_println(v)
+  __io_println(s)
   // schema_of emits canonical enum JSON Schema.
   let vs = schema_of(Verdict)
   let ss = schema_of(Score)
-  println(vs.type)
-  println(vs.enum)
-  println(ss.type)
-  println(ss.enum)
+  __io_println(vs.type)
+  __io_println(vs.enum)
+  __io_println(ss.type)
+  __io_println(ss.enum)
   // schema_is accepts conforming values and rejects non-members.
-  println(schema_is("fail", Verdict))
-  println(schema_is("nope", Verdict))
-  println(schema_is(1, Score))
-  println(schema_is(5, Score))
+  __io_println(schema_is("fail", Verdict))
+  __io_println(schema_is("nope", Verdict))
+  __io_println(schema_is(1, Score))
+  __io_println(schema_is(5, Score))
 }

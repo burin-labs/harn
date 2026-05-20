@@ -7,5 +7,5 @@ pipeline test(task) {
   fn pipe(xs: iter<int>) -> int {
     return sink(xs)
   }
-  println("ok")
+  __io_println("ok")
 }

@@ -40,6 +40,6 @@ pipeline run(task) {
     },
     handoff: handoff,
   }
-  println(json_stringify(result))
+  __io_println(json_stringify(result))
   return result
 }

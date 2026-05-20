@@ -9,9 +9,9 @@ import { pack_agent } from "std/llm/defaults"
 
 pipeline default() {
   let opts = pack_agent("claude-sonnet-4-5", {prompt: "Build a TODO list", system: "You are precise."})
-  println("model = " + to_string(opts?.model))
-  println("provider = " + to_string(opts?.provider))
-  println("temperature = " + to_string(opts?.temperature))
-  println("thinking budget = " + to_string(opts?.thinking?.budget_tokens))
-  println("max_tokens = " + to_string(opts?.max_tokens))
+  __io_println("model = " + to_string(opts?.model))
+  __io_println("provider = " + to_string(opts?.provider))
+  __io_println("temperature = " + to_string(opts?.temperature))
+  __io_println("thinking budget = " + to_string(opts?.thinking?.budget_tokens))
+  __io_println("max_tokens = " + to_string(opts?.max_tokens))
 }

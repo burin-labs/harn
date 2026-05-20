@@ -6,7 +6,7 @@ pipeline default() {
   try {
     mcp_call(client, "fail")
   } catch (e) {
-    println(e)
+    __io_println(e)
   }
   mcp_disconnect(client)
 }

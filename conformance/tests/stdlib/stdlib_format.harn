@@ -1,13 +1,13 @@
 pipeline default() {
   let name = "world"
   let age = 42
-  println(format("Hello, {}!", name))
-  println(format("{} is {} years old", name, age))
-  println(format("no placeholders"))
-  println(format("{} + {} = {}", 1, 2, 3))
+  __io_println(format("Hello, {}!", name))
+  __io_println(format("{} is {} years old", name, age))
+  __io_println(format("no placeholders"))
+  __io_println(format("{} + {} = {}", 1, 2, 3))
   // Named placeholders with dict
-  println(format("Hello {name} from {city}", {name: "Alice", city: "NYC"}))
-  println(format("{greeting}, {who}!", {greeting: "Hi", who: "Bob"}))
-  println(format("no named placeholders here", {x: 1}))
-  println(format("{a} + {b} = {c}", {a: 1, b: 2, c: 3}))
+  __io_println(format("Hello {name} from {city}", {name: "Alice", city: "NYC"}))
+  __io_println(format("{greeting}, {who}!", {greeting: "Hi", who: "Bob"}))
+  __io_println(format("no named placeholders here", {x: 1}))
+  __io_println(format("{a} + {b} = {c}", {a: 1, b: 2, c: 3}))
 }

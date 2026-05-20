@@ -23,8 +23,8 @@ pipeline test(task) {
     "project_deep_scan_ignore",
     {namespace: namespace, tiers: ["ambient"], incremental: true, depth: nil},
   )
-  println(tree.app.ambient.languages[0] == "rust")
-  println(tree["ignored"] == nil)
-  println(tree["target/tooling"] == nil)
-  println(tree["node_modules/pkg"] == nil)
+  __io_println(tree.app.ambient.languages[0] == "rust")
+  __io_println(tree["ignored"] == nil)
+  __io_println(tree["target/tooling"] == nil)
+  __io_println(tree["node_modules/pkg"] == nil)
 }

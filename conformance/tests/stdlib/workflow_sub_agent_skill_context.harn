@@ -86,9 +86,9 @@ pipeline test(task) {
       }
     }
   }
-  println(result?.status == "completed")
-  println(len(calls) == 3)
-  println(contains(calls[1].system, "## Active skills"))
-  println(seen_read)
-  println(!seen_write)
+  __io_println(result?.status == "completed")
+  __io_println(len(calls) == 3)
+  __io_println(contains(calls[1].system, "## Active skills"))
+  __io_println(seen_read)
+  __io_println(!seen_write)
 }

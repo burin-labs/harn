@@ -9,7 +9,7 @@ pipeline test(task) {
     }
   }
   let point = Point {x: 3, y: 4}
-  println(point.x)
-  println(point.y)
-  println(point.total())
+  __io_println(point.x)
+  __io_println(point.y)
+  __io_println(point.total())
 }

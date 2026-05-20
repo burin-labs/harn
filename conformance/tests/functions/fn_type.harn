@@ -3,6 +3,6 @@ pipeline default() {
     return f(x)
   }
   let double: fn(int) -> int = { x -> x * 2 }
-  println(apply(double, 5))
-  println(apply({ x -> x + 10 }, 3))
+  __io_println(apply(double, 5))
+  __io_println(apply({ x -> x + 10 }, 3))
 }

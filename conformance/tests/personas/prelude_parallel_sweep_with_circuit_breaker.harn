@@ -19,13 +19,13 @@ pipeline test(task) {
       max_failures: 1,
     },
   )
-  println(result.status)
-  println(result.circuit_open)
-  println(result.succeeded)
-  println(result.failed)
-  println(result.skipped)
-  println(len(result.results))
-  println(result.results[0].value)
-  println(result.results[1].ok)
-  println(result.receipt.status)
+  __io_println(result.status)
+  __io_println(result.circuit_open)
+  __io_println(result.succeeded)
+  __io_println(result.failed)
+  __io_println(result.skipped)
+  __io_println(len(result.results))
+  __io_println(result.results[0].value)
+  __io_println(result.results[1].ok)
+  __io_println(result.receipt.status)
 }

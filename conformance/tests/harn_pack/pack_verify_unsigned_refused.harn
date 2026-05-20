@@ -5,7 +5,7 @@ pipeline default() {
   let harn_bin = env_or("HARN_CONFORMANCE_HARN_BIN", resolve_harn_bin(repo_root))
   let root = path_join(temp_dir(), "harn_pack_unsigned_" + uuid_v7())
   mkdir(root)
-  write_file(path_join(root, "hello.harn"), "println(\"hi\")\n")
+  write_file(path_join(root, "hello.harn"), "__io_println(\"hi\")\n")
   let pack = exec_at(
     root,
     harn_bin,
@@ -15,13 +15,13 @@ pipeline default() {
     "--out",
     path_join(root, "hello.harnpack"),
   )
-  println(pack.success)
+  __io_println(pack.success)
   let strict = exec_at(root, harn_bin, "pack", "verify", path_join(root, "hello.harnpack"), "--json")
   // Strict verify on an unsigned bundle MUST exit non-zero.
-  println(strict.success)
+  __io_println(strict.success)
   let strict_data = json_parse(strict.stdout)
-  println(strict_data.ok)
-  println(strict_data.error.code)
+  __io_println(strict_data.ok)
+  __io_println(strict_data.error.code)
   let lenient = exec_at(
     root,
     harn_bin,
@@ -31,9 +31,9 @@ pipeline default() {
     "--allow-unsigned",
     "--json",
   )
-  println(lenient.success)
+  __io_println(lenient.success)
   let lenient_data = json_parse(lenient.stdout)
-  println(lenient_data.ok)
-  println(lenient_data.data.signature_present)
-  println(lenient_data.data.signature_verified)
+  __io_println(lenient_data.ok)
+  __io_println(lenient_data.data.signature_present)
+  __io_println(lenient_data.data.signature_verified)
 }

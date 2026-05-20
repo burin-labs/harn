@@ -4,20 +4,20 @@ import { propose_instructions } from "std/llm/refine"
 
 pipeline default() {
   let judged = parallel_judge("Prompt", [{id: "one"}], { _ctx -> 0.5 })
-  println(judged.best.score == 0.5)
+  __io_println(judged.best.score == 0.5)
   let explicit = propose_instructions("Base", {instruction_proposals: "Tighten the answer."})
-  println(explicit[0] == "Base")
-  println(explicit[1] == "Tighten the answer.")
+  __io_println(explicit[0] == "Base")
+  __io_println(explicit[1] == "Tighten the answer.")
   llm_mock_clear()
   llm_mock({text: "{\"instructions\":[\"Plan first.\",\"Plan first.\"]}"})
   let proposed = propose_instructions(
     "Base",
     {provider: "mock", proposal_count: 2, system: "Proposal sys", schema_retries: 0, repair: false},
   )
-  println(proposed[0] == "Base")
-  println(proposed[1] == "Plan first.")
-  println(len(proposed) == 2)
-  println(llm_mock_calls()[0].system == "Proposal sys")
+  __io_println(proposed[0] == "Base")
+  __io_println(proposed[1] == "Plan first.")
+  __io_println(len(proposed) == 2)
+  __io_println(llm_mock_calls()[0].system == "Proposal sys")
   let result = optimize_prompt(
     {
       base_prompt: "Answer the question.",
@@ -45,11 +45,11 @@ pipeline default() {
       demos: [[], [{input: "1 + 1", output: "2"}]],
     },
   )
-  println(result.best_score == 1.0)
-  println(contains(result.best_prompt, "Calculate carefully"))
-  println(len(result.trace) == 4)
-  println(result.trace[0].candidate.instruction == "Answer the question.")
-  println(result.trace[-1].acquisition.kind == "expected_improvement")
-  println(result.trace[-1].case_scores[0].case_id == "add")
-  println(result.ranked[0].score == 1.0)
+  __io_println(result.best_score == 1.0)
+  __io_println(contains(result.best_prompt, "Calculate carefully"))
+  __io_println(len(result.trace) == 4)
+  __io_println(result.trace[0].candidate.instruction == "Answer the question.")
+  __io_println(result.trace[-1].acquisition.kind == "expected_improvement")
+  __io_println(result.trace[-1].case_scores[0].case_id == "add")
+  __io_println(result.ranked[0].score == 1.0)
 }

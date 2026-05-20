@@ -23,5 +23,5 @@ pipeline test(task) {
   assert_eq(rs256_header.typ, "JWT")
   assert_eq(rs256_payload.exp, 1700000600)
   assert(len(rs256_parts[2]) > 0, "RS256 signature present")
-  println("jwt_sign_ok")
+  __io_println("jwt_sign_ok")
 }

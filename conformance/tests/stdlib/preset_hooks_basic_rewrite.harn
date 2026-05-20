@@ -15,23 +15,23 @@ pipeline default() {
   let wrapper = preset_run_command({stacks: ["rust"], inner: inner})
   let result = wrapper({command: "cargo build --release"})
   /* The envelope reports rewrite + rule provenance. */
-  println(result.action)
-  println(result.rule_id)
-  println(result.catalogue_id)
-  println(result.severity)
-  println(result.original_command)
-  println(result.command)
+  __io_println(result.action)
+  __io_println(result.rule_id)
+  __io_println(result.catalogue_id)
+  __io_println(result.severity)
+  __io_println(result.original_command)
+  __io_println(result.command)
   /* inner saw the rewritten command, not the original. */
-  println(result.result.ran)
+  __io_println(result.result.ran)
   /* Rewrite mode emits exactly two audit entries: tool_rewrite +
    * tool_hooks.reminder_injected. The reminder body names the rewrite
    * so an agent can paraphrase it back to the user. */
   let log = pipeline_lifecycle_audit_log_take()
-  println(len(log))
-  println(log[0].kind)
-  println(log[0].payload.rule_id)
-  println(log[1].kind)
-  println(log[1].payload.tags[0])
-  println(contains(log[1].payload.body, "rewritten"))
-  println(contains(log[1].payload.body, "target-shared"))
+  __io_println(len(log))
+  __io_println(log[0].kind)
+  __io_println(log[0].payload.rule_id)
+  __io_println(log[1].kind)
+  __io_println(log[1].payload.tags[0])
+  __io_println(contains(log[1].payload.body, "rewritten"))
+  __io_println(contains(log[1].payload.body, "target-shared"))
 }

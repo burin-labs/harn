@@ -35,26 +35,26 @@ pipeline test(task) {
   )
   // 1. The structured deny fired and the file was never written, even
   //    though the resolved tier is `act_auto`.
-  println(outcome.caught != nil && !file_exists(target))
-  println(contains(outcome.caught, "HARN-AUT-NEEDS-HUMAN"))
-  println(contains(outcome.caught, "tool_rejected"))
+  __io_println(outcome.caught != nil && !file_exists(target))
+  __io_println(contains(outcome.caught, "HARN-AUT-NEEDS-HUMAN"))
+  __io_println(contains(outcome.caught, "tool_rejected"))
   // 2. A trust-graph record was appended with outcome `denied` and the
   //    autonomy class flowing through metadata.
   let records: list<TrustRecord> = trust_query({agent: agent, action: "fs.write"})
-  println(len(records) == 1)
-  println(records[0].outcome == "denied")
-  println(records[0].metadata.autonomy_class == "needs-human")
-  println(records[0].metadata.requires_human)
-  println(records[0].metadata.deny_code == "HARN-AUT-NEEDS-HUMAN")
-  println(records[0].metadata["autonomy.enforcement"] == "needs_human_denied")
+  __io_println(len(records) == 1)
+  __io_println(records[0].outcome == "denied")
+  __io_println(records[0].metadata.autonomy_class == "needs-human")
+  __io_println(records[0].metadata.requires_human)
+  __io_println(records[0].metadata.deny_code == "HARN-AUT-NEEDS-HUMAN")
+  __io_println(records[0].metadata["autonomy.enforcement"] == "needs_human_denied")
   // 3. An approval-request was queued with the `needs-human` tag in the
   //    payload so reviewers can render it distinctly from a normal
   //    tier-driven approval ask.
   let pending = hitl_pending({}).filter({ row -> row.agent == agent })
-  println(len(pending) == 1)
-  println(pending[0].metadata.detail.autonomy_class == "needs-human")
-  println(pending[0].metadata.detail.requires_human)
-  println(pending[0].metadata.detail.deny_code == "HARN-AUT-NEEDS-HUMAN")
+  __io_println(len(pending) == 1)
+  __io_println(pending[0].metadata.detail.autonomy_class == "needs-human")
+  __io_println(pending[0].metadata.detail.requires_human)
+  __io_println(pending[0].metadata.detail.deny_code == "HARN-AUT-NEEDS-HUMAN")
   if file_exists(target) {
     delete_file(target)
   }

@@ -34,9 +34,9 @@ pipeline default() {
   )
   let judges = judge_events(captured.events)
   require len(judges) == 2, "done_judge cadence should fire on every second completion candidate"
-  println(captured.result.status)
-  println(captured.result.visible_text)
-  println(captured.result.llm.iterations)
-  println(len(llm_mock_calls()))
-  println(len(judges))
+  __io_println(captured.result.status)
+  __io_println(captured.result.visible_text)
+  __io_println(captured.result.llm.iterations)
+  __io_println(len(llm_mock_calls()))
+  __io_println(len(judges))
 }

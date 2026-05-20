@@ -1,7 +1,7 @@
 pipeline test(task) {
-  println(2 + 3 * 4)
-  println("ha" * 2)
-  println(([1] + [2, 3])[2])
-  println(({a: 1} + {b: 2}).b)
-  println(false || !false)
+  __io_println(2 + 3 * 4)
+  __io_println("ha" * 2)
+  __io_println(([1] + [2, 3])[2])
+  __io_println(({a: 1} + {b: 2}).b)
+  __io_println(false || !false)
 }

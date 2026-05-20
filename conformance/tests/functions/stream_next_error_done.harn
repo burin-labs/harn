@@ -5,12 +5,12 @@ pipeline test(task) {
   }
   let stream = broken()
   let first = stream.next()
-  println(first.value)
+  __io_println(first.value)
   try {
     stream.next()
   } catch (err) {
-    println("caught ${err}")
+    __io_println("caught ${err}")
   }
   let final = stream.next()
-  println(final.done)
+  __io_println(final.done)
 }

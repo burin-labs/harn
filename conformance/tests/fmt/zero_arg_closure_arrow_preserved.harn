@@ -10,7 +10,7 @@ pipeline default() {
   }
   let with_call = { -> heavy() }
   let one = { x -> x + 1 }
-  println(zero())
-  println(with_call())
-  println(one(2))
+  __io_println(zero())
+  __io_println(with_call())
+  __io_println(one(2))
 }

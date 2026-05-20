@@ -33,19 +33,19 @@ pub fn count_xfail_markers(root: string) -> int {
 pipeline main(task) {
   let threshold_file = "scripts/xfail_threshold.txt"
   if !file_exists(threshold_file) {
-    eprintln("missing ${threshold_file}")
+    __io_eprintln("missing ${threshold_file}")
     return 1
   }
   let raw = read_file(threshold_file).trim()
   let threshold = to_int(raw)
   if threshold == nil || threshold < 0 {
-    eprintln("${threshold_file} must contain a non-negative integer")
+    __io_eprintln("${threshold_file} must contain a non-negative integer")
     return 1
   }
   let count = count_xfail_markers("conformance")
   if count > threshold {
-    eprintln("::error::xfail count went up: ${count} > ${threshold}")
+    __io_eprintln("::error::xfail count went up: ${count} > ${threshold}")
     return 1
   }
-  println("xfail regression ratchet OK (${count} <= ${threshold})")
+  __io_println("xfail regression ratchet OK (${count} <= ${threshold})")
 }

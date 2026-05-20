@@ -56,10 +56,10 @@ pipeline test(task) {
   let evaluated = trigger_inspect_lifecycle("predicate.evaluated")
     .filter({ entry -> entry?.headers?.trigger_id == handle.id })
   let last = evaluated[len(evaluated) - 1]
-  println(len(llm_mock_calls()) == 3)
-  println(contains(json_stringify(first.result ?? {}), "\"skipped\":true"))
-  println(contains(json_stringify(second.result ?? {}), "\"skipped\":true"))
-  println(contains(json_stringify(third.result ?? {}), "\"skipped\":true"))
-  println(contains(json_stringify(fourth.result ?? {}), "\"reason\":\"circuit_open\""))
-  println(len(evaluated) == 4 && last?.payload?.reason == "circuit_open")
+  __io_println(len(llm_mock_calls()) == 3)
+  __io_println(contains(json_stringify(first.result ?? {}), "\"skipped\":true"))
+  __io_println(contains(json_stringify(second.result ?? {}), "\"skipped\":true"))
+  __io_println(contains(json_stringify(third.result ?? {}), "\"skipped\":true"))
+  __io_println(contains(json_stringify(fourth.result ?? {}), "\"reason\":\"circuit_open\""))
+  __io_println(len(evaluated) == 4 && last?.payload?.reason == "circuit_open")
 }

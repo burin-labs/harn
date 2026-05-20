@@ -661,9 +661,9 @@
       "summary": "`main` entrypoint must take a single `harness: Harness` parameter",
       "repairs": [
         {
-          "id": "bindings/thread-harness",
+          "id": "bindings/thread-harness-needs-param",
           "safety": "surface-changing",
-          "summary": "Rewrite the entrypoint as `fn main(harness: Harness)` so the runtime can thread its capability handle"
+          "summary": "Add a `harness: Harness` parameter where the stdio capability handle is required and update local callers"
         }
       ],
       "related": [],
@@ -2143,9 +2143,9 @@
       "summary": "ambient stdio builtin replaced by `harness.stdio.*`",
       "repairs": [
         {
-          "id": "bindings/thread-harness-stdio",
+          "id": "bindings/thread-harness",
           "safety": "scope-local",
-          "summary": "Replace the ambient stdio builtin with the corresponding `harness.stdio.*` method"
+          "summary": "Thread the existing `harness` binding through local helper calls and replace the ambient stdio builtin with `harness.stdio.*`"
         }
       ],
       "related": [

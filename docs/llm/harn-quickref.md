@@ -43,13 +43,13 @@ logs and progress always go to stderr.
   (pipeline mode — `compile_top_level_declarations` runs first, then
   the pipeline body) or be a bare script with top-level statements.
 - Run: `harn run script.harn`.
-- Inline: `harn run -e 'println("hi")'`. The snippet is wrapped in
+- Inline: `harn run -e 'log("hi")'`. The snippet is wrapped in
   `pipeline main(task) { ... }`; leading `import "..."` /
   `import { x } from "..."` / `pub import { x } from "..."` lines are
   hoisted out of the wrapper. The temp file lives in the current
   directory so relative imports (`import "./lib"`) and `harn.toml`
   discovery resolve against your project, e.g.
-  `harn run -e $'import "./lib"\nprintln(answer())'`. Imports must come
+  `harn run -e $'import "./lib"\nlog(answer())'`. Imports must come
   first — interleaved imports are not lifted.
 - Shebang: a `#!/usr/bin/env harn` line at byte offset 0 of a `.harn`
   file is skipped by the lexer, so executables on PATH can `chmod +x`
@@ -229,10 +229,13 @@ in `crates/harn-vm/src/orchestration/playground/manifest.rs`.
 
 ## stdin / stdout / stderr / TTY
 
-- `print(s)` / `println(s)` → stdout. `eprint(s)` / `eprintln(s)` →
-  stderr.
-- `read_stdin()` slurps the rest of stdin to a `string`. `read_line()`
-  reads one line (without trailing newline). Both return `nil` at EOF.
+- Stdio capability calls route through `Harness`: use
+  `harness.stdio.print(s)` / `harness.stdio.println(s)` for stdout,
+  `harness.stdio.eprint(s)` / `harness.stdio.eprintln(s)` for stderr,
+  and `harness.stdio.read_line()` / `harness.stdio.prompt(msg?)` for
+  interactive input.
+- `read_stdin()` slurps the rest of stdin to a `string` and returns `nil`
+  at EOF.
 - `is_stdin_tty()`, `is_stdout_tty()`, `is_stderr_tty()` — `bool`,
   uses `std::io::IsTerminal`. Use these to decide between rich
   interactive UI and pipe-friendly output.
@@ -308,11 +311,11 @@ End-exclusive slicing works on strings and lists:
 
 ```harn
 let s = "hello world"
-println(s[0:5])        // "hello"
-println(s[6:11])       // "world"
+log(s[0:5])        // "hello"
+log(s[6:11])       // "world"
 
 let xs = [1, 2, 3, 4, 5]
-println(xs[1:4])       // [2, 3, 4]
+log(xs[1:4])       // [2, 3, 4]
 ```
 
 `substring(s, start, length)` also exists — note the third argument
@@ -379,7 +382,7 @@ gen fn numbers() -> Stream<int> {
   emit 2
 }
 
-for n in numbers() { println(n) }
+for n in numbers() { log(n) }
 ```
 
 `stream.*` works with any iterable source: lists, ranges, channels,
@@ -718,8 +721,8 @@ let results = parallel each paths { p -> process(p) }
 
 // parallel settle: like `each` but collects per-item Ok/Err.
 let outcome = parallel settle paths { p -> grade(p) }
-println(outcome.succeeded)  // count
-println(outcome.failed)
+log(outcome.succeeded)  // count
+log(outcome.failed)
 for r in outcome.results {
   // r is Result.Ok(...) or Result.Err(...)
 }
@@ -783,7 +786,7 @@ in a for-loop:
 
 ```harn
 for (k, v) in {a: 1, b: 2}.iter() {
-  println("${k}: ${v}")
+  log("${k}: ${v}")
 }
 ```
 
@@ -881,12 +884,12 @@ let parsed = uuid_parse(uuid_v7())
 
 ```harn
 let response = llm_call(prompt, system, options)
-println(response.prose)          // unwrapped prose (text minus tags)
-println(response.text)           // raw provider text (may include tags)
-println(response.canonical_text) // canonical tagged reconstruction
-println(response.input_tokens)
-println(response.output_tokens)
-println(response.logprobs)       // present when requested and returned
+log(response.prose)          // unwrapped prose (text minus tags)
+log(response.text)           // raw provider text (may include tags)
+log(response.canonical_text) // canonical tagged reconstruction
+log(response.input_tokens)
+log(response.output_tokens)
+log(response.logprobs)       // present when requested and returned
 ```
 
 ### `llm_call` options
@@ -1281,7 +1284,7 @@ let verdict = llm_call_structured(prompt, schema, {
   model: "local:gemma-4-e4b-it",
   system: "You are a strict grader.",
 })
-println(verdict.verdict)
+log(verdict.verdict)
 ```
 
 Non-throwing variant `llm_call_structured_safe(prompt, schema,
@@ -1294,7 +1297,7 @@ if !r.ok {
   log("structured call failed:", r.error.category, r.error.message)
   return nil
 }
-println(r.data.verdict)
+log(r.data.verdict)
 ```
 
 Diagnostic envelope `llm_call_structured_result(prompt, schema,
@@ -1316,7 +1319,7 @@ let r = llm_call_structured_result(prompt, schema, {
   },
 })
 if r.ok {
-  println(r.data.verdict)
+  log(r.data.verdict)
 } else {
   // error_category ∈ "transport" | "missing_json" | "schema_validation"
   // | "repair_failed" — plus retryable transport categories
@@ -1395,8 +1398,8 @@ let r = llm_call(prompt, sys, {
   schema_retries: 2,
   output_format: {kind: "json_schema", schema: schema, strict: true},
 })
-println(r.data.verdict)
-println(r.input_tokens)
+log(r.data.verdict)
+log(r.input_tokens)
 ```
 
 Schema-as-type (a `type` alias drives both the schema and the
@@ -1414,7 +1417,7 @@ let out: GraderOut = llm_call_structured(prompt, GraderOut, {
   provider: "auto",
   system: sys,
 })
-println(out.verdict)     // narrowed to GraderOut
+log(out.verdict)     // narrowed to GraderOut
 ```
 
 Reusable generic wrapper (narrows via the `Schema<T>` generic
@@ -1426,7 +1429,7 @@ fn grade<T>(prompt: string, schema: Schema<T>) -> T {
 }
 
 let out: GraderOut = grade("Grade this", schema_of(GraderOut))
-println(out.verdict)
+log(out.verdict)
 ```
 
 Batch grading at bounded concurrency:
@@ -1512,7 +1515,7 @@ match.
 
 ```harn
 let cleared = transcript.clear_reminders(t, {tag: "token_pressure"})
-println(cleared.removed_count)
+log(cleared.removed_count)
 ```
 
 `agent_loop(...)` enables canonical reminder providers by default; bare
@@ -1593,8 +1596,8 @@ let result = agent_turn("Review this patch and fix obvious issues.", {
   provider: "openai",
   model: "gpt-5-mini",
 })
-println(result.visible_text)
-println(result.judge_decisions[0].verdict)
+log(result.visible_text)
+log(result.judge_decisions[0].verdict)
 ```
 
 ### `agent_loop`
@@ -1787,8 +1790,8 @@ let result = agent_loop("Wait for the maintainer's review.", nil, {
 })
 
 if result.status == "suspended" {
-  println(result.reason)               // model-supplied
-  println(result.handle.snapshot_path) // resumable snapshot on disk
+  log(result.reason)               // model-supplied
+  log(result.handle.snapshot_path) // resumable snapshot on disk
 }
 ```
 
@@ -1882,8 +1885,8 @@ let receipt = emit_channel("session:worker.ready", {worker: "lint"}, {
   id: "worker-ready-lint",
   ttl: 10m,
 })
-println(receipt.event_id)
-println(receipt.emitted_at.signature.starts_with("sha256:"))
+log(receipt.event_id)
+log(receipt.emitted_at.signature.starts_with("sha256:"))
 ```
 
 Each stored event includes `id`, fully resolved `name`, `payload`,
@@ -2117,9 +2120,9 @@ mechanics required:
 
 The closure runs in a child VM (separate `output` buffer) and its
 return is parsed by `interpret_post_turn_callback_verdict`. Any
-captured `log()` / `print()` output flows back to the parent VM
-unchanged. The callback is awaited synchronously per turn, so it can
-be a heavy LLM call without races. Keep broad review strategies in
+captured `log()` output flows back to the parent VM unchanged. The
+callback is awaited synchronously per turn, so it can be a heavy LLM call
+without races. Keep broad review strategies in
 `post_turn_callback` when the policy needs custom timing, branching, or
 multiple competing judges; use `done_judge` for the built-in
 sentinel-only completion gate.
@@ -2463,7 +2466,7 @@ import { triage_start_my_day } from "std/triage"
 let connector_events = []
 let feed = triage_start_my_day(connector_events, {emit: true})
 for event in feed.events {
-  println(event.summary)
+  log(event.summary)
 }
 ```
 
@@ -3680,7 +3683,7 @@ let token_set = device_flow(providers().github, {
   scopes: ["read:user", "repo"],
   storage: file("/var/lib/harn/ci.bin", env("HARN_OAUTH_KEY")),
   on_user_code: { user_code, verification_uri ->
-    eprintln("Open " + verification_uri + " and enter " + user_code)
+    log("Open " + verification_uri + " and enter " + user_code)
   },
 })
 ```

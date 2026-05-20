@@ -2,11 +2,11 @@ pipeline default() {
   fn identity<T>(x: T) -> T {
     return x
   }
-  println(identity(42))
-  println(identity("hello"))
+  __io_println(identity(42))
+  __io_println(identity("hello"))
   fn first<T>(items: list<T>) -> T {
     return items[0]
   }
-  println(first([10, 20, 30]))
-  println(first(["a", "b"]))
+  __io_println(first([10, 20, 30]))
+  __io_println(first(["a", "b"]))
 }

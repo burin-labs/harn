@@ -44,5 +44,5 @@ pipeline test() {
     },
   )
   step_assertions_end()
-  println("testing_step_assertions ok")
+  __io_println("testing_step_assertions ok")
 }

@@ -14,9 +14,9 @@ fn probe_with_rewrite(reg, cmd) {
     } else {
       to_string(rewrite(cmd, {}))
     }
-    println(m[0].rule_id + " => " + after)
+    __io_println(m[0].rule_id + " => " + after)
   } else {
-    println("miss")
+    __io_println("miss")
   }
 }
 

@@ -590,7 +590,7 @@ mod tests {
             r#"
 pipeline test(task) {
   let rows = hitl_pending({})
-  println(len(rows))
+  __io_println(len(rows))
 }
 "#,
         )

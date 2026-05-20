@@ -181,7 +181,7 @@ let doubled = parallel each xs { x -> x * 2 }
 
 // parallel settle: concurrent map that collects per-item Ok/Err.
 let outcome = parallel settle paths { p -> grade(p) }
-println(outcome.succeeded)
+log(outcome.succeeded)
 
 // Cap in-flight workers so you don't overwhelm the backend.
 let results = parallel settle paths with { max_concurrent: 4 } { p ->
@@ -204,7 +204,7 @@ gen fn numbers() -> Stream<int> {
 }
 
 for n in numbers() {
-  println(n)
+  log(n)
 }
 ```
 
@@ -223,7 +223,7 @@ Inside the script:
 
 ```harn
 fn grade_file(path) {
-  println(path)
+  log(path)
 }
 
 for path in argv {
@@ -257,8 +257,8 @@ let r = llm_call(prompt, system, {
   schema_retries: 2,       // retry with corrective nudge on schema mismatch
   response_format: "json",
 })
-println(r.prose)           // unwrapped prose (preferred for "the answer")
-println(r.data.verdict)    // parsed structured output
+log(r.prose)           // unwrapped prose (preferred for "the answer")
+log(r.data.verdict)    // parsed structured output
 ```
 
 Key options:

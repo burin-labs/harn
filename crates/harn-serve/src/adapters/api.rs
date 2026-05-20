@@ -2250,7 +2250,8 @@ mod tests {
     async fn openapi_json_is_served_from_canonical_spec() {
         let dir = tempfile::tempdir().expect("tempdir");
         let script = dir.path().join("agent.harn");
-        std::fs::write(&script, "pipeline main() { println(prompt) }\n").expect("write script");
+        std::fs::write(&script, "pipeline main() { __io_println(prompt) }\n")
+            .expect("write script");
         let server = ApiServer::new(ApiServerConfig::for_pipeline(
             script.to_string_lossy().to_string(),
         ));
@@ -2276,7 +2277,8 @@ mod tests {
     async fn local_api_creates_session_and_accepts_task() {
         let dir = tempfile::tempdir().expect("tempdir");
         let script = dir.path().join("agent.harn");
-        std::fs::write(&script, "pipeline main() { println(prompt) }\n").expect("write script");
+        std::fs::write(&script, "pipeline main() { __io_println(prompt) }\n")
+            .expect("write script");
         let server = ApiServer::new(ApiServerConfig::for_pipeline(
             script.to_string_lossy().to_string(),
         ));
@@ -2328,7 +2330,8 @@ mod tests {
     async fn local_api_truncates_session_messages() {
         let dir = tempfile::tempdir().expect("tempdir");
         let script = dir.path().join("agent.harn");
-        std::fs::write(&script, "pipeline main() { println(prompt) }\n").expect("write script");
+        std::fs::write(&script, "pipeline main() { __io_println(prompt) }\n")
+            .expect("write script");
         let server = ApiServer::new(ApiServerConfig::for_pipeline(
             script.to_string_lossy().to_string(),
         ));
@@ -2413,7 +2416,8 @@ mod tests {
     async fn authenticated_api_rejects_missing_key() {
         let dir = tempfile::tempdir().expect("tempdir");
         let script = dir.path().join("agent.harn");
-        std::fs::write(&script, "pipeline main() { println(prompt) }\n").expect("write script");
+        std::fs::write(&script, "pipeline main() { __io_println(prompt) }\n")
+            .expect("write script");
         let config = ApiServerConfig::for_pipeline(script.to_string_lossy().to_string())
             .with_auth_policy(AuthPolicy {
                 methods: vec![crate::auth::AuthMethodConfig::ApiKey(

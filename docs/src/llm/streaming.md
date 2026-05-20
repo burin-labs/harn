@@ -8,7 +8,7 @@ arrive. Iterate over it with a `for` loop:
 ```harn
 let stream = llm_stream("Tell me a story", "You are a storyteller")
 for chunk in stream {
-  print(chunk)
+  log(chunk)
 }
 ```
 
@@ -23,7 +23,7 @@ raw strings:
 ```harn
 let chunks = llm_stream_call("Tell me a story", nil, {provider: "openai"})
 for chunk in chunks {
-  print(chunk.visible_delta)
+  log(chunk.visible_delta)
   if chunk.partial.contains("REFUSAL") {
     break
   }
@@ -102,10 +102,10 @@ Each workflow session also carries a normalized `usage` summary copied from the
 underlying run record when available:
 
 ```harn
-println(session?.usage?.input_tokens)
-println(session?.usage?.output_tokens)
-println(session?.usage?.total_duration_ms)
-println(session?.usage?.call_count)
+log(session?.usage?.input_tokens)
+log(session?.usage?.output_tokens)
+log(session?.usage?.total_duration_ms)
+log(session?.usage?.call_count)
 ```
 
 `std/agents` also exposes worker helpers for delegated/background orchestration:

@@ -27,7 +27,7 @@ Catch errors with an optional error binding:
 try {
   let data = json_parse(raw_input)
 } catch (e) {
-  println("Parse failed: ${e}")
+  log("Parse failed: ${e}")
 }
 ```
 
@@ -39,7 +39,7 @@ fn risky_operation() { throw "boom" }
 try {
   risky_operation()
 } catch {
-  println("Something failed, moving on")
+  log("Something failed, moving on")
 }
 ```
 
@@ -79,9 +79,9 @@ try {
   throw AppError.NotFound("user:123")
 } catch (e: AppError) {
   match e.variant {
-    "NotFound" -> { println("Missing: ${e.fields[0]}") }
-    "Unauthorized" -> { println("Access denied") }
-    "Internal" -> { println("Internal: ${e.fields[0]}") }
+    "NotFound" -> { log("Missing: ${e.fields[0]}") }
+    "Unauthorized" -> { log("Access denied") }
+    "Internal" -> { log("Internal: ${e.fields[0]}") }
   }
 }
 ```
@@ -161,7 +161,7 @@ crashing or needing a full `try`/`catch`:
 ```harn
 let parsed = try { json_parse(input) }
 if is_err(parsed) {
-  println("Bad input, using defaults")
+  log("Bad input, using defaults")
   parsed = Ok({})
 }
 let data = unwrap(parsed)
@@ -222,7 +222,7 @@ a clear error is produced:
 
 ```harn,ignore
 fn process(user: {name: string, age: int}) {
-  println("${user.name} is ${user.age}")
+  log("${user.name} is ${user.age}")
 }
 
 process({name: "Alice"})
@@ -253,8 +253,8 @@ let err = Err("something failed")
 let typed_ok: Result<int, string> = ok
 let typed_err: Result<int, string> = err
 
-println(ok)   // Result.Ok(42)
-println(err)  // Result.Err(something failed)
+log(ok)   // Result.Ok(42)
+log(err)  // Result.Err(something failed)
 ```
 
 The shorthand constructors `Ok(value)` and `Err(value)` are equivalent to
@@ -272,10 +272,10 @@ The shorthand constructors `Ok(value)` and `Err(value)` are equivalent to
 
 ```harn
 let r = Ok(42)
-println(is_ok(r))           // true
-println(is_err(r))          // false
-println(unwrap(r))          // 42
-println(unwrap_or(Err("x"), "default"))  // default
+log(is_ok(r))           // true
+log(is_err(r))          // false
+log(unwrap(r))          // 42
+log(unwrap_or(Err("x"), "default"))  // default
 ```
 
 ### Pattern matching on result
@@ -288,8 +288,8 @@ fn fetch_data(url) {
 }
 
 match fetch_data("/api/users") {
-  Result.Ok(data) -> { println("Got ${len(data)} users") }
-  Result.Err(err) -> { println("Failed: ${err}") }
+  Result.Ok(data) -> { log("Got ${len(data)} users") }
+  Result.Err(err) -> { log("Failed: ${err}") }
 }
 ```
 
@@ -394,7 +394,7 @@ retry 3 {
     let parsed = json_parse(result.text)
     return parsed
   } catch (e) {
-    println("Attempt failed: ${e}")
+    log("Attempt failed: ${e}")
     throw e  // re-throw to trigger retry
   }
 }

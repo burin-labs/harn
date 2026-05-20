@@ -33,13 +33,13 @@ pipeline test(task) {
     handle,
     {provider: "github", kind: "issue.opened", headers: {x_delivery: "evt-" + unique}},
   )
-  println(dispatch.status == "dispatched")
-  println(dispatch.result?.status == "broadcast")
-  println(dispatch.result?.scope_kind == "concrete")
-  println(dispatch.result?.target_count)
-  println(dispatch.result?.suspended_count)
-  println(dispatch.result?.skipped_count)
-  println(dispatch.result?.reason == "phantom_panic")
+  __io_println(dispatch.status == "dispatched")
+  __io_println(dispatch.result?.status == "broadcast")
+  __io_println(dispatch.result?.scope_kind == "concrete")
+  __io_println(dispatch.result?.target_count)
+  __io_println(dispatch.result?.suspended_count)
+  __io_println(dispatch.result?.skipped_count)
+  __io_println(dispatch.result?.reason == "phantom_panic")
   let audits = lifecycle_audit_log_take()
   var broadcast_audits = 0
   var per_worker_audits = 0
@@ -56,8 +56,8 @@ pipeline test(task) {
       }
     }
   }
-  println(broadcast_audits)
-  println(per_worker_audits)
-  println(summary_outcome)
-  println(summary_reason)
+  __io_println(broadcast_audits)
+  __io_println(per_worker_audits)
+  __io_println(summary_outcome)
+  __io_println(summary_reason)
 }

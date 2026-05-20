@@ -24,22 +24,22 @@ pipeline default() {
   )
   // Replay with identical payload — succeeds, returns cached input.
   let hit = lifecycle_replay_resume_input(receipt.payload, original_input)
-  println("hit_ok=" + to_string(hit.ok))
-  println("hit_input_approved=" + to_string(hit.input?.approved))
-  println("hit_input_reviewer=" + hit.input?.reviewer)
+  __io_println("hit_ok=" + to_string(hit.ok))
+  __io_println("hit_input_approved=" + to_string(hit.input?.approved))
+  __io_println("hit_input_reviewer=" + hit.input?.reviewer)
   // Replay with reordered keys — canonical hash matches.
   let reordered = {reviewer: "alice", approved: true, comment: "ship it"}
   let reorder_hit = lifecycle_replay_resume_input(receipt.payload, reordered)
-  println("reorder_ok=" + to_string(reorder_hit.ok))
+  __io_println("reorder_ok=" + to_string(reorder_hit.ok))
   // Replay with a drifted payload — mismatch, HARN-SUS-011.
   let drifted = {approved: false, comment: "ship it", reviewer: "alice"}
   let miss = lifecycle_replay_resume_input(receipt.payload, drifted)
-  println("miss_ok=" + to_string(miss.ok))
-  println("miss_code=" + miss.code)
+  __io_println("miss_ok=" + to_string(miss.ok))
+  __io_println("miss_code=" + miss.code)
   // Hash is stable across orderings.
   let h1 = lifecycle_resume_input_hash(original_input)
   let h2 = lifecycle_resume_input_hash(reordered)
-  println("hash_canonical=" + to_string(h1 == h2))
+  __io_println("hash_canonical=" + to_string(h1 == h2))
   let _ = unmock_time()
   return "ok"
 }

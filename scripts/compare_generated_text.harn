@@ -10,7 +10,7 @@ pub fn normalize(text: string) -> string {
 
 pipeline main(task) {
   if argv.count != 2 {
-    eprintln("usage: compare_generated_text.harn <committed> <generated>")
+    __io_eprintln("usage: compare_generated_text.harn <committed> <generated>")
     return 2
   }
   let committed = read_file(argv[0])

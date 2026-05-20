@@ -41,8 +41,8 @@ pipeline test(task) {
   )
   let evaluated = trigger_inspect_lifecycle("predicate.evaluated")
     .filter({ entry -> entry?.headers?.trigger_id == handle.id })
-  println(fire.status == "dispatched")
-  println(contains(json_stringify(fire.result ?? {}), "\"handled\":true"))
-  println(len(evaluated) == 1 && evaluated[0]?.payload?.result)
-  println(len(llm_mock_calls()) == 1)
+  __io_println(fire.status == "dispatched")
+  __io_println(contains(json_stringify(fire.result ?? {}), "\"handled\":true"))
+  __io_println(len(evaluated) == 1 && evaluated[0]?.payload?.result)
+  __io_println(len(llm_mock_calls()) == 1)
 }

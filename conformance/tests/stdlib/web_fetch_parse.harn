@@ -58,5 +58,5 @@ pipeline test(task) {
   assert_eq(parsed.tables[0].rows[0], ["Pro", "20"])
   assert_eq(parsed.json_ld[0].headline, "Example")
   assert(contains(parsed.text, "Hello world"))
-  println("web_fetch_parse_ok")
+  __io_println("web_fetch_parse_ok")
 }

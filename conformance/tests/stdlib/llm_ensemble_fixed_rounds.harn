@@ -19,10 +19,10 @@ pipeline default() {
       provider: "mock",
     },
   )
-  println(result.completed_rounds)
-  println(result.stopped_early)
-  println(result.stop_reason == nil)
-  println(llm_call_count())
-  println(len(result.stability))
-  println(result.stability[0].stable)
+  __io_println(result.completed_rounds)
+  __io_println(result.stopped_early)
+  __io_println(result.stop_reason == nil)
+  __io_println(llm_call_count())
+  __io_println(len(result.stability))
+  __io_println(result.stability[0].stable)
 }

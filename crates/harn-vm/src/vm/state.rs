@@ -855,7 +855,7 @@ mod tests {
 
     #[test]
     fn vm_baseline_instantiates_clean_mutable_execution_state() {
-        let baseline = baseline_with_stdlib("pipeline main() { println(stable_global) }");
+        let baseline = baseline_with_stdlib("pipeline main() { __io_println(stable_global) }");
 
         let mut dirty = baseline.instantiate();
         dirty.stack.push(VmValue::Int(42));
@@ -894,7 +894,7 @@ mod tests {
                 let source = r#"
 pipeline main() {
   let cell = shared_cell({scope: "task_group", key: "turn", initial: 0})
-  println(shared_get(cell))
+  __io_println(shared_get(cell))
   shared_set(cell, shared_get(cell) + 1)
 }"#;
                 let chunk = crate::compile_source(source).expect("compile");

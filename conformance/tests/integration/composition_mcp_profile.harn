@@ -2,10 +2,10 @@ import { composition_crystallization_input, composition_mcp_tools } from "std/co
 
 pipeline main() {
   let tools = composition_mcp_tools()
-  println(tool_count(tools))
+  __io_println(tool_count(tools))
   let search = tool_find(tools, "harn.code.search_examples")
   let examples = search.handler({query: "read", limit: 1})
-  println(examples[0].language)
+  __io_println(examples[0].language)
   let source_tools = [
     {
       name: "read_file",
@@ -20,11 +20,11 @@ pipeline main() {
     .handler(
     {snippet: "return read_file({path: \"README.md\"}).text", manifest: manifest, run_id: "profile-run"},
   )
-  println(report.ok)
-  println(report.child_calls[0].tool_name)
+  __io_println(report.ok)
+  __io_println(report.child_calls[0].tool_name)
   let trace = composition_crystallization_input(report, {id: "profile-trace"})
-  println(trace.source)
-  println(trace.actions.count())
-  println(trace.actions[0].name)
-  println(trace.actions[1].name)
+  __io_println(trace.source)
+  __io_println(trace.actions.count())
+  __io_println(trace.actions[0].name)
+  __io_println(trace.actions[1].name)
 }

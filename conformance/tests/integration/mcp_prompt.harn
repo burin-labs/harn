@@ -20,5 +20,5 @@ pipeline test(task) {
       ] },
     },
   )
-  println("mcp_prompt registered")
+  __io_println("mcp_prompt registered")
 }

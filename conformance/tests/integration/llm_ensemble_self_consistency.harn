@@ -20,9 +20,9 @@ pipeline default() {
       extract: { text -> text },
     },
   )
-  println(result.ok)
-  println(result.answer)
-  println(result.answer_count)
-  println(result.total)
-  println(result.entropy > 0.0)
+  __io_println(result.ok)
+  __io_println(result.answer)
+  __io_println(result.answer_count)
+  __io_println(result.total)
+  __io_println(result.entropy > 0.0)
 }

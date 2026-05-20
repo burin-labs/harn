@@ -45,8 +45,8 @@ When imported, these functions become available in the importing file's scope.
 import "lib/math"
 
 pipeline default(task) {
-  println(double(21))        // 42
-  println(clamp(150, 0, 100)) // 100
+  log(double(21))        // 42
+  log(clamp(150, 0, 100)) // 100
 }
 ```
 
@@ -57,7 +57,7 @@ Imported files can also contain pipelines, which are registered globally by name
 ```harn
 // lib/analysis.harn
 pipeline analyze(task) {
-  println("Analyzing: ${task}")
+  log("Analyzing: ${task}")
 }
 ```
 
@@ -429,19 +429,19 @@ Extended math utilities:
 ```harn
 import "std/math"
 
-println(clamp(150, 0, 100))         // 100
-println(lerp(0, 10, 0.5))           // 5
-println(map_range(50, 0, 100, 0, 1)) // 0.5
-println(sum([1, 2, 3, 4]))          // 10
-println(avg([10, 20, 30]))          // 20
-println(percentile([1, 2, 3, 4], 75)) // 3.25
-println(top_k(["a", "bbbb", "cc"], 2, { x -> len(x) })) // ["bbbb", "cc"]
-println(softmax([1, 2, 3]))         // probabilities summing to 1
-println(cosine_similarity([1, 0], [1, 1])) // ~0.707
-println(moving_avg([1, 2, 3, 4, 5], 3)) // [2.0, 3.0, 4.0]
+log(clamp(150, 0, 100))         // 100
+log(lerp(0, 10, 0.5))           // 5
+log(map_range(50, 0, 100, 0, 1)) // 0.5
+log(sum([1, 2, 3, 4]))          // 10
+log(avg([10, 20, 30]))          // 20
+log(percentile([1, 2, 3, 4], 75)) // 3.25
+log(top_k(["a", "bbbb", "cc"], 2, { x -> len(x) })) // ["bbbb", "cc"]
+log(softmax([1, 2, 3]))         // probabilities summing to 1
+log(cosine_similarity([1, 0], [1, 1])) // ~0.707
+log(moving_avg([1, 2, 3, 4, 5], 3)) // [2.0, 3.0, 4.0]
 
 let grouped = kmeans([[0, 0], [0, 1], [10, 10], [10, 11]], 2)
-println(grouped.centroids)          // [[0.0, 0.5], [10.0, 10.5]]
+log(grouped.centroids)          // [[0.0, 0.5], [10.0, 10.5]]
 ```
 
 ### std/path
@@ -462,10 +462,10 @@ Path manipulation utilities:
 ```harn
 import "std/path"
 
-println(ext("main.harn"))          // "harn"
-println(stem("/src/main.harn"))    // "main"
-println(is_absolute("/usr/bin"))   // true
-println(workspace_normalize("/packages/app/SKILL.md", cwd())) // "packages/app/SKILL.md"
+log(ext("main.harn"))          // "harn"
+log(stem("/src/main.harn"))    // "main"
+log(is_absolute("/usr/bin"))   // true
+log(workspace_normalize("/packages/app/SKILL.md", cwd())) // "packages/app/SKILL.md"
 
 let files = list_files("src")
 let dirs = list_dirs(".")
@@ -484,9 +484,9 @@ builtin:
 import "std/vision"
 
 let structured = ocr("fixtures/ui.png")
-println(structured.text)
-println(structured.lines[0]?.text)
-println(structured.tokens[0]?.bbox.left)
+log(structured.text)
+log(structured.lines[0]?.text)
+log(structured.tokens[0]?.bbox.left)
 ```
 
 ### std/json
@@ -547,7 +547,7 @@ escape output; otherwise let the auto policy decide.
 import { ansi_success, ansi_strip } from "std/ansi"
 
 let line = ansi_success("passed", {mode: "always"})
-println(ansi_strip(line)) // passed
+log(ansi_strip(line)) // passed
 ```
 
 ### std/table
@@ -569,7 +569,7 @@ normalized, ANSI-aware for visible width, and optionally capped with
 ```harn
 import { render_table } from "std/table"
 
-println(render_table(
+log(render_table(
   [{name: "harn", status: "ok"}, {name: "burin", status: "queued"}],
   {columns: ["name", "status"]},
 ))
@@ -596,7 +596,7 @@ through `std/git` or `std/command` and use `colorize_diff` or
 ```harn
 import { unified_diff } from "std/diff"
 
-println(unified_diff("one\ntwo", "one\nthree", {path: "example.txt"}))
+log(unified_diff("one\ntwo", "one\nthree", {path: "example.txt"}))
 ```
 
 ### std/cache
@@ -805,8 +805,8 @@ import { read_json, relative_path, write_json } from "std/fs"
 
 let path = path_join(temp_dir(), "report/data.json")
 write_json(path, {status: "ok"}, {pretty: true})
-println(read_json(path).status)
-println(relative_path(temp_dir(), path))
+log(read_json(path).status)
+log(relative_path(temp_dir(), path))
 ```
 
 ### std/os
@@ -908,7 +908,7 @@ path supplied by tests:
 ```harn
 import { gha_annotation, gha_write_output } from "std/gha"
 
-println(gha_annotation("warning", "line1\nline2", {
+log(gha_annotation("warning", "line1\nline2", {
   file: "src/main.rs",
   line: 7,
   title: "Heads up",
@@ -943,7 +943,7 @@ let result = page({
   format: "markdown",
 })
 if !result.ok {
-  eprintln(result.error ?? "pager failed")
+  log(result.error ?? "pager failed")
 }
 ```
 
@@ -982,7 +982,7 @@ let runs = [
 ]
 let pick = select_from(runs, {prompt: "Pick a run", default_index: 0})
 if pick.ok {
-  println("operator chose " + pick.value.id)
+  log("operator chose " + pick.value.id)
 }
 ```
 
@@ -1483,14 +1483,14 @@ Pipelines can extend other pipelines:
 
 ```harn
 pipeline base(task) {
-  println("Step 1: setup")
-  println("Step 2: execute")
-  println("Step 3: cleanup")
+  log("Step 1: setup")
+  log("Step 2: execute")
+  log("Step 3: cleanup")
 }
 
 pipeline custom(task) extends base {
   override setup() {
-    println("Custom setup")
+    log("Custom setup")
   }
 }
 ```

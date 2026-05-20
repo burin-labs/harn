@@ -32,11 +32,11 @@ pipeline default() {
       },
     ],
   )
-  println("calls=" + to_string(summary.total_calls))
-  println("unknown=" + to_string(summary.unknown_calls))
-  println("total=" + format_usd(summary.total_cost_usd))
-  println("known=" + format_usd(summary.known_cost_usd))
-  println("rows=" + to_string(len(summary.per_model)))
-  println("top=" + summary.per_model[0].model)
-  println("top_calls=" + to_string(summary.per_model[0].calls))
+  __io_println("calls=" + to_string(summary.total_calls))
+  __io_println("unknown=" + to_string(summary.unknown_calls))
+  __io_println("total=" + format_usd(summary.total_cost_usd))
+  __io_println("known=" + format_usd(summary.known_cost_usd))
+  __io_println("rows=" + to_string(len(summary.per_model)))
+  __io_println("top=" + summary.per_model[0].model)
+  __io_println("top_calls=" + to_string(summary.per_model[0].calls))
 }

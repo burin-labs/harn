@@ -7,7 +7,7 @@ fn persona_body_must_call_step_functions() {
 fn merge_captain(ctx) {
   plan(ctx)
   helper(ctx)
-  println("done")
+  __io_println("done")
 }
 
 @step(name: "plan")

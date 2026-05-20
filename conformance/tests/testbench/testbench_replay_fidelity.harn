@@ -30,8 +30,8 @@ pipeline test(task) {
   let resp = llm_call("replay test", nil, {provider: "mock", model: "mock"})
   advance_time(1000)
   let after = now_ms()
-  println(resp.text == "fidelity-response")
-  println(after - before == 1000)
+  __io_println(resp.text == "fidelity-response")
+  __io_println(after - before == 1000)
   unmock_time()
   llm_mock_clear()
 }

@@ -63,8 +63,8 @@ pipeline main() {
       saw_predicate_gate = true
     }
   }
-  println(trigger_trace == "trace_conformance")
-  println(predicate_trace == "trace_conformance")
-  println(saw_trigger_dispatch)
-  println(saw_predicate_gate)
+  __io_println(trigger_trace == "trace_conformance")
+  __io_println(predicate_trace == "trace_conformance")
+  __io_println(saw_trigger_dispatch)
+  __io_println(saw_predicate_gate)
 }

@@ -2,24 +2,24 @@
 pipeline default(task) {
   // trim_start / trim_end — verify by measuring length
   let s = "  hello world  "
-  println(len(s.trim_start()))
-  println(len(s.trim_end()))
-  println(len(s.trim()))
+  __io_println(len(s.trim_start()))
+  __io_println(len(s.trim_end()))
+  __io_println(len(s.trim()))
   // lines
   let multi = "line1\nline2\nline3"
   let lines = multi.lines()
-  println(len(lines))
-  println(lines.first())
-  println(lines.last())
+  __io_println(len(lines))
+  __io_println(lines.first())
+  __io_println(lines.last())
   // char_at
   let word = "hello"
-  println(word.char_at(0))
-  println(word.char_at(4))
-  println(word.char_at(99))
+  __io_println(word.char_at(0))
+  __io_println(word.char_at(4))
+  __io_println(word.char_at(99))
   // last_index_of
   let path = "src/lib/utils/lib.rs"
-  println(path.index_of("lib"))
-  println(path.last_index_of("lib"))
+  __io_println(path.index_of("lib"))
+  __io_println(path.last_index_of("lib"))
   // len method (on string)
-  println("cafe".len())
+  __io_println("cafe".len())
 }

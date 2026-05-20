@@ -72,7 +72,7 @@ pipeline main(task) {
     return 0
   }
   if !file_exists(EMBEDDED_SPEC_PATH) || read_file(EMBEDDED_SPEC_PATH) != spec_text {
-    eprintln(
+    __io_eprintln(
       "crates/harn-serve/openapi.yaml is stale. Run `harn run scripts/check_openapi_snapshot.harn -- --update` after reviewing the OpenAPI surface.",
     )
     return 1
@@ -85,7 +85,7 @@ pipeline main(task) {
   if actual == expected {
     return 0
   }
-  eprintln(
+  __io_eprintln(
     "spec/openapi.snapshot is stale. Run `harn run scripts/check_openapi_snapshot.harn -- --update` after reviewing the OpenAPI surface.",
   )
   return 1

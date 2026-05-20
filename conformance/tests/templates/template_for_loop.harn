@@ -1,5 +1,5 @@
 pipeline default() {
-  println(render("fixtures/template/for_loop.prompt", {xs: ["apple", "banana", "cherry"]}))
-  println("---")
-  println(render("fixtures/template/for_loop.prompt", {xs: []}))
+  __io_println(render("fixtures/template/for_loop.prompt", {xs: ["apple", "banana", "cherry"]}))
+  __io_println("---")
+  __io_println(render("fixtures/template/for_loop.prompt", {xs: []}))
 }

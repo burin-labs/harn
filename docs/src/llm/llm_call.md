@@ -8,7 +8,7 @@ message shapes.
 
 ```harn
 let result = llm_call("What is 2 + 2?")
-println(result.text)
+log(result.text)
 ```
 
 With a system message:
@@ -18,7 +18,7 @@ let result = llm_call(
   "Explain quicksort",
   "You are a computer science teacher. Be concise."
 )
-println(result.text)
+log(result.text)
 ```
 
 With options:
@@ -33,7 +33,7 @@ let result = llm_call(
     max_tokens: 1024
   }
 )
-println(result.text)
+log(result.text)
 ```
 
 With image content:
@@ -52,7 +52,7 @@ let result = llm_call("", nil, {
     ],
   }],
 })
-println(result.text)
+log(result.text)
 ```
 
 Image blocks use the provider-neutral shape
@@ -204,8 +204,8 @@ let person = llm_call_structured(
   schema,
   {provider: "anthropic", system: "You are precise."},
 )
-println(person.name)
-println(person.age)
+log(person.name)
+log(person.age)
 ```
 
 ### Parameters
@@ -367,7 +367,7 @@ let result = llm_completion("let total = ", ";", nil, {
   provider: "ollama",
   model_tier: "small"
 })
-println(result.text)
+log(result.text)
 ```
 
 ## Cost tracking
@@ -377,18 +377,18 @@ Harn provides builtins for estimating and controlling LLM costs:
 ```harn
 // Estimate cost for a specific call
 let cost = llm_cost("claude-sonnet-4-20250514", 1000, 500)
-println("Estimated cost: $${cost}")
+log("Estimated cost: $${cost}")
 
 // Check cumulative session costs
 let session = llm_session_cost()
-println("Total: $${session.total_cost}")
-println("Calls: ${session.call_count}")
-println("Input tokens: ${session.input_tokens}")
-println("Output tokens: ${session.output_tokens}")
+log("Total: $${session.total_cost}")
+log("Calls: ${session.call_count}")
+log("Input tokens: ${session.input_tokens}")
+log("Output tokens: ${session.output_tokens}")
 
 // Set a budget (LLM calls throw if exceeded)
 llm_budget(1.00)
-println("Remaining: $${llm_budget_remaining()}")
+log("Remaining: $${llm_budget_remaining()}")
 ```
 
 For per-call controls, pass a `budget` envelope on `llm_call`:

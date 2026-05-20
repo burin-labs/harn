@@ -7,12 +7,12 @@
 import { format_usd } from "std/llm/economics"
 
 pipeline default() {
-  println(format_usd(0.000045))
-  println(format_usd(1.2345))
-  println(format_usd(1234.5))
-  println(format_usd(-1234.5))
-  println(format_usd(1234.5, {sign: true}))
-  println(format_usd(0.123456789, {precision: 2}))
-  println(format_usd(1.0, {precision: 0}))
-  println(format_usd(0.00027 * 300000))
+  __io_println(format_usd(0.000045))
+  __io_println(format_usd(1.2345))
+  __io_println(format_usd(1234.5))
+  __io_println(format_usd(-1234.5))
+  __io_println(format_usd(1234.5, {sign: true}))
+  __io_println(format_usd(0.123456789, {precision: 2}))
+  __io_println(format_usd(1.0, {precision: 0}))
+  __io_println(format_usd(0.00027 * 300000))
 }

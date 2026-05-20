@@ -17,11 +17,11 @@ pipeline test(task) {
     )
   }
   let expensive_err = unwrap_err(expensive)
-  println(expensive_err.kind)
-  println(expensive_err.reason)
-  println(expensive_err.category)
-  println(expensive_err.projected_cost_usd > 0.0001)
-  println(len(llm_mock_calls()) == 0)
+  __io_println(expensive_err.kind)
+  __io_println(expensive_err.reason)
+  __io_println(expensive_err.category)
+  __io_println(expensive_err.projected_cost_usd > 0.0001)
+  __io_println(len(llm_mock_calls()) == 0)
   let input_limited = try {
     llm_call(
       "this prompt is longer than one estimated token",
@@ -36,8 +36,8 @@ pipeline test(task) {
     )
   }
   let input_err = unwrap_err(input_limited)
-  println(input_err.limit)
-  println(input_err.projected_input_tokens > 1)
+  __io_println(input_err.limit)
+  __io_println(input_err.projected_input_tokens > 1)
   llm_mock_clear()
   llm_mock(
     {
@@ -58,6 +58,6 @@ pipeline test(task) {
       budget: {total_budget_usd: 0.0001},
     },
   )
-  println(loop_result.status)
-  println(len(llm_mock_calls()) == 0)
+  __io_println(loop_result.status)
+  __io_println(len(llm_mock_calls()) == 0)
 }
