@@ -95,6 +95,19 @@ on any mismatch and emits structured error codes (`verify.signature_failed`,
 By default, unsigned bundles fail verification. Pass `--allow-unsigned` to
 accept a bundle without an Ed25519 signature (useful in local development).
 
+For compliance gates, pass `--require-trusted-signer` to require that the
+bundle signer resolve from the trusted signer registry. Add
+`--trust-policy policy.json` to layer a JSON allowlist on top:
+
+```json
+{
+  "signer_registry_url": "./signers",
+  "trusted_signers": ["<sha256-fingerprint>"]
+}
+```
+
+When that gate fails, the verifier exits with `verify.untrusted_signer`.
+
 `harn pack verify --json` emits a `JsonEnvelope` with the recomputed
 `bundle_hash`, signature presence/verification flags, signing key fingerprint,
 and per-bundle counts (`module_count`, `content_entry_count`). The schema is

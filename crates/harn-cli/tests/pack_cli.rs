@@ -10,6 +10,8 @@
 use std::fs;
 use std::path::{Path, PathBuf};
 
+use ed25519_dalek::pkcs8::{spki::der::pem::LineEnding, DecodePrivateKey, EncodePublicKey};
+use ed25519_dalek::SigningKey;
 use harn_cli::cli::{PackArgs, PackVerifyArgs};
 use harn_cli::commands::pack;
 use harn_cli::commands::pack::BuildArgs;
@@ -22,6 +24,14 @@ use tempfile::TempDir;
 use tokio::runtime::Builder;
 
 const TEST_ED25519_PRIVATE_KEY: &str = "-----BEGIN PRIVATE KEY-----\nMC4CAQAwBQYDK2VwBCIEIDmsNDO8iZqiMmA/b7I7lwGXNKe68o+gDno6R5riUcDC\n-----END PRIVATE KEY-----\n";
+
+fn test_public_key_pem() -> String {
+    let signing_key = SigningKey::from_pkcs8_pem(TEST_ED25519_PRIVATE_KEY).unwrap();
+    signing_key
+        .verifying_key()
+        .to_public_key_pem(LineEnding::LF)
+        .unwrap()
+}
 
 fn build_args_from_pack(args: &PackArgs) -> BuildArgs {
     BuildArgs {
@@ -445,6 +455,8 @@ fn pack_verify_signed_bundle_passes_and_reports_signature_key() {
     let report = pack::verify(&PackVerifyArgs {
         bundle: out.clone(),
         allow_unsigned: false,
+        trust_policy: None,
+        require_trusted_signer: false,
         json: false,
     })
     .expect("verify ok on signed bundle");
@@ -471,6 +483,8 @@ fn pack_verify_unsigned_bundle_refused_without_flag_but_ok_with_flag() {
     let strict = pack::verify(&PackVerifyArgs {
         bundle: out.clone(),
         allow_unsigned: false,
+        trust_policy: None,
+        require_trusted_signer: false,
         json: false,
     })
     .expect_err("unsigned bundle must refuse without --allow-unsigned");
@@ -479,6 +493,8 @@ fn pack_verify_unsigned_bundle_refused_without_flag_but_ok_with_flag() {
     let lenient = pack::verify(&PackVerifyArgs {
         bundle: out.clone(),
         allow_unsigned: true,
+        trust_policy: None,
+        require_trusted_signer: false,
         json: false,
     })
     .expect("verify ok on unsigned bundle with --allow-unsigned");
@@ -526,6 +542,8 @@ fn pack_verify_tampered_signed_bundle_fails() {
     let err = pack::verify(&PackVerifyArgs {
         bundle: out.clone(),
         allow_unsigned: true,
+        trust_policy: None,
+        require_trusted_signer: false,
         json: false,
     })
     .expect_err("tampered bundle must fail verification");
@@ -547,6 +565,8 @@ fn pack_verify_json_envelope_round_trips_schema() {
     let envelope = pack::verify_to_envelope(&PackVerifyArgs {
         bundle: out.clone(),
         allow_unsigned: true,
+        trust_policy: None,
+        require_trusted_signer: false,
         json: true,
     });
     let value = serde_json::to_value(&envelope).unwrap();
@@ -561,6 +581,63 @@ fn pack_verify_json_envelope_round_trips_schema() {
     assert_eq!(value["data"]["signature_present"], false);
     assert_eq!(value["data"]["signature_verified"], false);
     assert!(value["data"]["module_count"].as_u64().unwrap() >= 1);
+}
+
+#[test]
+fn pack_verify_require_trusted_signer_rejects_signer_outside_policy_allowlist() {
+    let runtime = Builder::new_current_thread().enable_all().build().unwrap();
+    runtime.block_on(async {
+        let _cwd_guard = cwd_lock::lock_cwd_async().await;
+        harn_vm::reset_thread_local_state();
+
+        let workdir = TempDir::new().unwrap();
+        let signers_dir = workdir.path().join("signers");
+        fs::create_dir_all(&signers_dir).unwrap();
+        let entry = workdir.path().join("hello.harn");
+        fs::write(&entry, "println(\"signed\")\n").unwrap();
+        let key = workdir.path().join("release-key.pem");
+        fs::write(&key, TEST_ED25519_PRIVATE_KEY).unwrap();
+        let out = workdir.path().join("hello.harnpack");
+
+        let outcome = pack::build(&BuildArgs {
+            entrypoint: entry.clone(),
+            out: Some(out.clone()),
+            upgrade: None,
+            sign: true,
+            key: Some(key),
+            unsigned: false,
+            exclude_secrets: false,
+            json: false,
+        })
+        .expect("pack succeeds");
+        let signer_fingerprint = outcome.json.signature.key_id.clone().unwrap();
+        fs::write(
+            signers_dir.join(format!("{signer_fingerprint}.pub")),
+            test_public_key_pem(),
+        )
+        .unwrap();
+        let policy = workdir.path().join("trust-policy.json");
+        fs::write(
+            &policy,
+            format!(
+                r#"{{"signer_registry_url":"{}","trusted_signers":["not-the-real-signer"]}}"#,
+                signers_dir.display()
+            ),
+        )
+        .unwrap();
+
+        let err = pack::verify(&PackVerifyArgs {
+            bundle: out,
+            allow_unsigned: false,
+            trust_policy: Some(policy),
+            require_trusted_signer: true,
+            json: false,
+        })
+        .expect_err("unexpected signer must fail the trust policy");
+
+        assert_eq!(err.code, "verify.untrusted_signer");
+        assert!(err.message.contains("trusted_signers allowlist"));
+    });
 }
 
 #[test]

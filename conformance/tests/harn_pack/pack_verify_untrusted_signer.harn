@@ -1,0 +1,61 @@
+import "../_common"
+
+pipeline default() {
+  let repo_root = exec("git", "rev-parse", "--show-toplevel").stdout.trim()
+  let harn_bin = env_or("HARN_CONFORMANCE_HARN_BIN", resolve_harn_bin(repo_root))
+  let root = path_join(temp_dir(), "harn_pack_untrusted_signer_" + uuid_v7())
+  mkdir(root)
+  write_file(path_join(root, "hello.harn"), "println(\"signed\")\n")
+  write_file(
+    path_join(root, "release-key.pem"),
+    "-----BEGIN PRIVATE KEY-----\nMC4CAQAwBQYDK2VwBCIEIDmsNDO8iZqiMmA/b7I7lwGXNKe68o+gDno6R5riUcDC\n-----END PRIVATE KEY-----\n",
+  )
+  let pack = exec_at(
+    root,
+    harn_bin,
+    "pack",
+    "hello.harn",
+    "--sign",
+    "--key",
+    path_join(root, "release-key.pem"),
+    "--out",
+    path_join(root, "hello.harnpack"),
+  )
+  println(pack.success)
+  let permissive = exec_at(root, harn_bin, "pack", "verify", path_join(root, "hello.harnpack"), "--json")
+  let permissive_data = json_parse(permissive.stdout)
+  let signer = permissive_data.data.key_id
+  let signers = path_join(root, "signers")
+  mkdir(signers)
+  println(
+    exec_at(
+      root,
+      "openssl",
+      "pkey",
+      "-in",
+      path_join(root, "release-key.pem"),
+      "-pubout",
+      "-out",
+      path_join(signers, signer + ".pub"),
+    ).success,
+  )
+  write_file(
+    path_join(root, "trust-policy.json"),
+    json_stringify({signer_registry_url: signers, trusted_signers: ["not-the-real-signer"]}),
+  )
+  let verify = exec_at(
+    root,
+    harn_bin,
+    "pack",
+    "verify",
+    path_join(root, "hello.harnpack"),
+    "--require-trusted-signer",
+    "--trust-policy",
+    path_join(root, "trust-policy.json"),
+    "--json",
+  )
+  println(verify.success)
+  let verify_data = json_parse(verify.stdout)
+  println(verify_data.ok)
+  println(verify_data.error.code)
+}
