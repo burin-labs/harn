@@ -6,7 +6,6 @@ pipeline default() {
   let root = path_join(temp_dir(), "harn_pack_json_" + uuid_v7())
   mkdir(root)
   write_file(path_join(root, "hello.harn"), "println(\"json\")\n")
-
   let pack = exec_at(
     root,
     harn_bin,
@@ -25,7 +24,6 @@ pipeline default() {
   println(pack_data.schemaVersion >= 2)
   println(starts_with(pack_data.data.bundle_hash, "blake3:"))
   println(pack_data.data.signature.algorithm)
-
   let verify = exec_at(
     root,
     harn_bin,

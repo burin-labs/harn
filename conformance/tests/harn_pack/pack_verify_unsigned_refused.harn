@@ -6,7 +6,6 @@ pipeline default() {
   let root = path_join(temp_dir(), "harn_pack_unsigned_" + uuid_v7())
   mkdir(root)
   write_file(path_join(root, "hello.harn"), "println(\"hi\")\n")
-
   let pack = exec_at(
     root,
     harn_bin,
@@ -17,21 +16,12 @@ pipeline default() {
     path_join(root, "hello.harnpack"),
   )
   println(pack.success)
-
-  let strict = exec_at(
-    root,
-    harn_bin,
-    "pack",
-    "verify",
-    path_join(root, "hello.harnpack"),
-    "--json",
-  )
+  let strict = exec_at(root, harn_bin, "pack", "verify", path_join(root, "hello.harnpack"), "--json")
   // Strict verify on an unsigned bundle MUST exit non-zero.
   println(strict.success)
   let strict_data = json_parse(strict.stdout)
   println(strict_data.ok)
   println(strict_data.error.code)
-
   let lenient = exec_at(
     root,
     harn_bin,
