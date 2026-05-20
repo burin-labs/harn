@@ -74,10 +74,13 @@ public enum HarnProtocolConstants {
 
 public enum HarnACPAgentMethod: String, Codable, Sendable, CaseIterable {
     case initialize = "initialize"
+    case sessionInject = "session/inject"
     case sessionNew = "session/new"
     case sessionLoad = "session/load"
+    case sessionReplaceInject = "session/replace_inject"
     case sessionResume = "session/resume"
     case sessionPrompt = "session/prompt"
+    case sessionRevokeInject = "session/revoke_inject"
     case sessionTruncate = "session/truncate"
     case sessionRemind = "session/remind"
     case sessionClose = "session/close"
@@ -86,10 +89,13 @@ public enum HarnACPAgentMethod: String, Codable, Sendable, CaseIterable {
 
     public static let allCases: [Self] = [
         "initialize",
+        "session/inject",
         "session/new",
         "session/load",
+        "session/replace_inject",
         "session/resume",
         "session/prompt",
+        "session/revoke_inject",
         "session/truncate",
         "session/remind",
         "session/close",
@@ -126,6 +132,7 @@ public enum HarnACPAgentNotification: String, Codable, Sendable, CaseIterable {
 }
 
 public enum HarnACPSessionUpdate: String, Codable, Sendable, CaseIterable {
+    case userMessage = "user_message"
     case userMessageChunk = "user_message_chunk"
     case agentMessageChunk = "agent_message_chunk"
     case agentThoughtChunk = "agent_thought_chunk"
@@ -153,6 +160,7 @@ public enum HarnACPSessionUpdate: String, Codable, Sendable, CaseIterable {
     case workerUpdate = "worker_update"
 
     public static let allCases: [Self] = [
+        "user_message",
         "user_message_chunk",
         "agent_message_chunk",
         "agent_thought_chunk",
@@ -909,7 +917,8 @@ public struct HarnACPToolCall: Codable, Sendable, Equatable {
 
 public struct HarnACPSessionUpdateEnvelope: Codable, Sendable, Equatable {
     public var sessionUpdate: HarnACPSessionUpdate
-    public var content: HarnACPContentBlock?
+    public var content: HarnACPValue?
+    public var messageId: String?
     public var entries: [HarnACPValue]?
     public var keptTurnCount: Int?
     public var removedTurnCount: Int?
@@ -926,6 +935,7 @@ public struct HarnACPSessionUpdateEnvelope: Codable, Sendable, Equatable {
     enum CodingKeys: String, CodingKey {
         case sessionUpdate
         case content
+        case messageId
         case entries
         case keptTurnCount
         case removedTurnCount
@@ -967,6 +977,7 @@ public struct HarnPromptCapabilities: Codable, Sendable, Equatable {
 public struct HarnACPAgentCapabilities: Codable, Sendable, Equatable {
     public var meta: HarnACPExtensionMeta?
     public var loadSession: Bool?
+    public var session: HarnACPObject?
     public var promptCapabilities: HarnPromptCapabilities?
     public var mcpCapabilities: HarnACPObject?
     public var sessionCapabilities: HarnACPObject?
@@ -974,6 +985,7 @@ public struct HarnACPAgentCapabilities: Codable, Sendable, Equatable {
     enum CodingKeys: String, CodingKey {
         case meta = "_meta"
         case loadSession
+        case session
         case promptCapabilities
         case mcpCapabilities
         case sessionCapabilities

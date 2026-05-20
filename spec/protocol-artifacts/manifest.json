@@ -33,10 +33,13 @@
   "acp": {
     "agentMethods": [
       "initialize",
+      "session/inject",
       "session/new",
       "session/load",
+      "session/replace_inject",
       "session/resume",
       "session/prompt",
+      "session/revoke_inject",
       "session/truncate",
       "session/remind",
       "session/close",
@@ -110,6 +113,7 @@
     ],
     "schemaCompatibility": "agentclientprotocol/agent-client-protocol schema v0.12.2",
     "sessionUpdateVariants": [
+      "user_message",
       "user_message_chunk",
       "agent_message_chunk",
       "agent_thought_chunk",

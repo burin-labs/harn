@@ -28,7 +28,10 @@ use auth::acp_auth_request_for_method;
 use bridge::{AcpBridge, AcpOutput};
 #[cfg(test)]
 use schema::configured_llm_route_for_capabilities;
-use schema::{acp_agent_capabilities, normalize_acp_prompt, retarget_prompt_text};
+use schema::{
+    acp_agent_capabilities, normalize_acp_prompt, normalize_acp_prompt_block,
+    prompt_text_from_content, retarget_prompt_text,
+};
 pub use schema::{
     ACP_SCHEMA_COMPATIBILITY, ACP_SESSION_UPDATE_VARIANTS, HARN_AGENT_EVENT_KINDS,
     HARN_AGENT_EVENT_METHOD, HARN_CONTENT_EXTENSION_FIELDS, HARN_SESSION_UPDATE_EXTENSIONS,
@@ -73,6 +76,52 @@ fn session_id_param(params: &serde_json::Value) -> Option<String> {
         .or_else(|| params.get("session_id"))
         .and_then(|value| value.as_str())
         .map(str::to_string)
+}
+
+fn bridge_mode_for_session_inject(params: &serde_json::Value) -> Result<&'static str, String> {
+    match params.get("mode").and_then(|value| value.as_str()) {
+        Some("queue") => Ok("wait_for_completion"),
+        Some("steer") => Ok("finish_step"),
+        Some(other) => Err(format!(
+            "session/inject: unsupported mode `{other}`; expected `queue` or `steer`"
+        )),
+        None => Err("session/inject requires mode".to_string()),
+    }
+}
+
+fn normalize_session_inject_content(
+    method: &str,
+    params: &serde_json::Value,
+) -> Result<(String, serde_json::Value), String> {
+    let Some(content) = params.get("content") else {
+        return Err(format!("{method} requires content"));
+    };
+    if let Some(text) = content.as_str() {
+        if text.is_empty() {
+            return Err(format!("{method}: content must not be empty"));
+        }
+        return Ok((
+            text.to_string(),
+            serde_json::Value::String(text.to_string()),
+        ));
+    }
+    let Some(blocks) = content.as_array() else {
+        return Err(format!(
+            "{method}: content must be a string or an array of content blocks"
+        ));
+    };
+    if blocks.is_empty() {
+        return Err(format!("{method}: content must not be empty"));
+    }
+    let normalized = blocks
+        .iter()
+        .map(|block| {
+            normalize_acp_prompt_block(block)
+                .map_err(|message| message.replace("session/prompt", method))
+        })
+        .collect::<Result<Vec<_>, _>>()?;
+    let text = prompt_text_from_content(&normalized);
+    Ok((text, serde_json::Value::Array(normalized)))
 }
 
 fn nonnegative_usize_param(
@@ -626,6 +675,7 @@ impl AcpServer {
                 cwd,
                 cancellation,
                 host_bridge: None,
+                inject_state: harn_vm::bridge::HostBridgeInjectionState::default(),
                 info,
                 advertised_commands: Vec::new(),
                 current_mode_id: modes::DEFAULT_MODE_ID.to_string(),
@@ -848,6 +898,7 @@ impl AcpServer {
                 cwd: src_cwd,
                 cancellation,
                 host_bridge: None,
+                inject_state: harn_vm::bridge::HostBridgeInjectionState::default(),
                 info: info.clone(),
                 advertised_commands: Vec::new(),
                 current_mode_id: parent_mode_id.clone(),
@@ -956,21 +1007,23 @@ impl AcpServer {
         };
         let prompt_text = prompt.text.clone();
 
-        let (cwd, cancellation, current_mode_id) = match self.sessions.get_mut(&session_id) {
-            Some(s) => {
-                s.cancellation.begin_prompt();
-                s.host_bridge = None;
-                (
-                    s.cwd.clone(),
-                    s.cancellation.clone(),
-                    s.current_mode_id.clone(),
-                )
-            }
-            None => {
-                self.send_error(id, -32602, &format!("Unknown session: {session_id}"));
-                return;
-            }
-        };
+        let (cwd, cancellation, current_mode_id, inject_state) =
+            match self.sessions.get_mut(&session_id) {
+                Some(s) => {
+                    s.cancellation.begin_prompt();
+                    s.host_bridge = None;
+                    (
+                        s.cwd.clone(),
+                        s.cancellation.clone(),
+                        s.current_mode_id.clone(),
+                        s.inject_state.clone(),
+                    )
+                }
+                None => {
+                    self.send_error(id, -32602, &format!("Unknown session: {session_id}"));
+                    return;
+                }
+            };
         harn_vm::agent_sessions::open_or_create(Some(session_id.clone()));
         let _session_guard = harn_vm::agent_sessions::enter_current_session(session_id.clone());
         #[cfg(feature = "hostlib")]
@@ -1074,7 +1127,7 @@ impl AcpServer {
         });
         let bridge_output = output.clone();
         let host_bridge = Rc::new(
-            harn_vm::bridge::HostBridge::from_parts_with_writer_and_cancel_notify(
+            harn_vm::bridge::HostBridge::from_parts_with_writer_cancel_notify_and_injection_state(
                 bridge.pending.clone(),
                 cancellation.cancelled.clone(),
                 cancellation.notify.clone(),
@@ -1083,9 +1136,13 @@ impl AcpServer {
                     Ok(())
                 }),
                 bridge.next_id_counter.fetch_add(10_000, Ordering::SeqCst),
+                Some(inject_state),
             ),
         );
         host_bridge.set_session_id(&bridge.session_id);
+        if let Some(session) = self.sessions.get_mut(&session_id) {
+            session.host_bridge = Some(host_bridge.clone());
+        }
 
         let compile_started = Instant::now();
         let (chunk, cache_hit) = match self.compile_pipeline_cached(
@@ -1101,6 +1158,7 @@ impl AcpServer {
                     .strip_prefix("Compilation error: ")
                     .map(|rest| format!("Compilation error: {rest}"))
                     .unwrap_or(message);
+                self.clear_active_prompt_transport(&session_id);
                 self.send_prompt_error(&session_id, id, &formatted);
                 return;
             }
@@ -1136,14 +1194,11 @@ impl AcpServer {
             Ok(value) => value,
             Err(message) => {
                 self.finish_profile_turn(&session_id, profile_turn);
+                self.clear_active_prompt_transport(&session_id);
                 self.send_prompt_error(&session_id, id, &message);
                 return;
             }
         };
-        if let Some(session) = self.sessions.get_mut(&session_id) {
-            session.host_bridge = Some(host_bridge.clone());
-        }
-
         let id_owned = id.clone();
         let send_output = self.output.clone();
         let host_bridge_for_response = host_bridge.clone();
@@ -1169,13 +1224,7 @@ impl AcpServer {
         .await;
         self.finish_profile_turn(&session_id, profile_turn);
         drop(_mode_guard);
-        if let Some(session) = self.sessions.get_mut(&session_id) {
-            session.host_bridge = None;
-        }
-
-        // Unregister so a session reusing this id can't receive stale
-        // events routed to a dropped stdout lock.
-        clear_session_sinks(&session_id);
+        self.clear_active_prompt_transport(&session_id);
 
         match result {
             Ok(output) => {
@@ -1252,30 +1301,198 @@ impl AcpServer {
         self.send_response(id, serde_json::json!({}));
     }
 
-    async fn handle_session_input(&self, params: &serde_json::Value) {
-        let session_id = params
-            .get("sessionId")
-            .and_then(|v| v.as_str())
-            .or_else(|| self.sessions.keys().next().map(|s| s.as_str()));
-        let Some(session_id) = session_id else {
+    async fn handle_session_inject(&self, id: &serde_json::Value, params: &serde_json::Value) {
+        let Some(inject_state) = self.session_inject_state(id, params, "session/inject", true)
+        else {
             return;
         };
-        let Some(content) = params.get("content").and_then(|v| v.as_str()) else {
-            return;
+        let mode = match bridge_mode_for_session_inject(params) {
+            Ok(mode) => mode,
+            Err(message) => {
+                self.send_error(id, -32602, &message);
+                return;
+            }
         };
-        let mode = params
-            .get("mode")
-            .and_then(|v| v.as_str())
-            .unwrap_or("wait_for_completion");
-        if let Some(bridge) = self
-            .sessions
-            .get(session_id)
-            .and_then(|session| session.host_bridge.clone())
-        {
-            bridge
-                .push_queued_user_message(content.to_string(), mode)
-                .await;
+        let (content, transcript_content) =
+            match normalize_session_inject_content("session/inject", params) {
+                Ok(content) => content,
+                Err(message) => {
+                    self.send_error(id, -32602, &message);
+                    return;
+                }
+            };
+        let message_id = inject_state
+            .push_pending_user_message(content, transcript_content, mode)
+            .await;
+        self.send_response(id, serde_json::json!({ "messageId": message_id }));
+    }
+
+    fn clear_active_prompt_transport(&mut self, session_id: &str) {
+        if let Some(session) = self.sessions.get_mut(session_id) {
+            session.host_bridge = None;
         }
+        clear_session_sinks(session_id);
+    }
+
+    async fn handle_session_revoke_inject(
+        &self,
+        id: &serde_json::Value,
+        params: &serde_json::Value,
+    ) {
+        let Some(inject_state) =
+            self.session_inject_state(id, params, "session/revoke_inject", false)
+        else {
+            return;
+        };
+        let Some(message_id) =
+            self.pending_inject_message_id_param(id, params, "session/revoke_inject")
+        else {
+            return;
+        };
+        match inject_state.revoke_pending_user_message(message_id).await {
+            harn_vm::bridge::PendingUserMessageMutationResult::Mutated
+            | harn_vm::bridge::PendingUserMessageMutationResult::AlreadyRevoked => {
+                self.send_response(id, serde_json::json!({}));
+            }
+            harn_vm::bridge::PendingUserMessageMutationResult::AlreadyDelivered => {
+                self.send_pending_inject_error(
+                    id,
+                    message_id,
+                    "already_delivered",
+                    "pending inject already delivered",
+                );
+            }
+            harn_vm::bridge::PendingUserMessageMutationResult::UnknownMessageId => {
+                self.send_pending_inject_error(
+                    id,
+                    message_id,
+                    "unknown_message_id",
+                    "unknown pending inject messageId",
+                );
+            }
+        }
+    }
+
+    async fn handle_session_replace_inject(
+        &self,
+        id: &serde_json::Value,
+        params: &serde_json::Value,
+    ) {
+        let Some(inject_state) =
+            self.session_inject_state(id, params, "session/replace_inject", false)
+        else {
+            return;
+        };
+        let Some(message_id) =
+            self.pending_inject_message_id_param(id, params, "session/replace_inject")
+        else {
+            return;
+        };
+        let (content, transcript_content) =
+            match normalize_session_inject_content("session/replace_inject", params) {
+                Ok(content) => content,
+                Err(message) => {
+                    self.send_error(id, -32602, &message);
+                    return;
+                }
+            };
+        match inject_state
+            .replace_pending_user_message(message_id, content, transcript_content)
+            .await
+        {
+            harn_vm::bridge::PendingUserMessageMutationResult::Mutated => {
+                self.send_response(id, serde_json::json!({ "messageId": message_id }));
+            }
+            harn_vm::bridge::PendingUserMessageMutationResult::AlreadyRevoked => {
+                self.send_pending_inject_error(
+                    id,
+                    message_id,
+                    "already_revoked",
+                    "pending inject already revoked",
+                );
+            }
+            harn_vm::bridge::PendingUserMessageMutationResult::AlreadyDelivered => {
+                self.send_pending_inject_error(
+                    id,
+                    message_id,
+                    "already_delivered",
+                    "pending inject already delivered",
+                );
+            }
+            harn_vm::bridge::PendingUserMessageMutationResult::UnknownMessageId => {
+                self.send_pending_inject_error(
+                    id,
+                    message_id,
+                    "unknown_message_id",
+                    "unknown pending inject messageId",
+                );
+            }
+        }
+    }
+
+    fn session_inject_state(
+        &self,
+        id: &serde_json::Value,
+        params: &serde_json::Value,
+        method: &str,
+        require_active_prompt: bool,
+    ) -> Option<harn_vm::bridge::HostBridgeInjectionState> {
+        let Some(session_id) = params.get("sessionId").and_then(|v| v.as_str()) else {
+            self.send_error(id, -32602, &format!("{method} requires sessionId"));
+            return None;
+        };
+        let Some(session) = self.sessions.get(session_id) else {
+            self.send_error(id, -32004, &format!("Session not found: {session_id}"));
+            return None;
+        };
+        if require_active_prompt && session.host_bridge.is_none() {
+            self.send_error(
+                id,
+                -32004,
+                &format!("Session has no active prompt: {session_id}"),
+            );
+            return None;
+        }
+        Some(session.inject_state.clone())
+    }
+
+    fn pending_inject_message_id_param<'a>(
+        &self,
+        id: &serde_json::Value,
+        params: &'a serde_json::Value,
+        method: &str,
+    ) -> Option<&'a str> {
+        let Some(message_id) = params.get("messageId").and_then(|v| v.as_str()) else {
+            self.send_error(id, -32602, &format!("{method} requires messageId"));
+            return None;
+        };
+        if message_id.trim().is_empty() {
+            self.send_error(
+                id,
+                -32602,
+                &format!("{method} requires non-empty messageId"),
+            );
+            return None;
+        }
+        Some(message_id)
+    }
+
+    fn send_pending_inject_error(
+        &self,
+        id: &serde_json::Value,
+        message_id: &str,
+        reason: &str,
+        message: &str,
+    ) {
+        self.send_error_with_data(
+            id,
+            -32602,
+            message,
+            serde_json::json!({
+                "reason": reason,
+                "messageId": message_id,
+            }),
+        );
     }
 
     async fn handle_session_remind(&self, id: &serde_json::Value, params: &serde_json::Value) {
@@ -2172,11 +2389,23 @@ impl AcpServer {
                 );
                 self.handle_session_close(&id, &params, "session/stop");
             }
-            "session/input" | "user_message" | "agent/user_message" => {
+            "session/inject" => {
                 if self.reject_unauthenticated(&id) {
                     return;
                 }
-                self.handle_session_input(&params).await;
+                self.handle_session_inject(&id, &params).await;
+            }
+            "session/revoke_inject" => {
+                if self.reject_unauthenticated(&id) {
+                    return;
+                }
+                self.handle_session_revoke_inject(&id, &params).await;
+            }
+            "session/replace_inject" => {
+                if self.reject_unauthenticated(&id) {
+                    return;
+                }
+                self.handle_session_replace_inject(&id, &params).await;
             }
             "session/remind" => {
                 if self.reject_unauthenticated(&id) {

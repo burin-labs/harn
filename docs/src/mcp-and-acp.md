@@ -548,6 +548,9 @@ The ACP server supports these JSON-RPC methods:
 | `session/fork` | Fork an existing session into an independent branch |
 | `session/list` | List active sessions known to the ACP adapter |
 | `session/prompt` | Send a prompt to the agent for execution |
+| `session/inject` | Accept a pending user message for a running turn and return its `messageId` |
+| `session/revoke_inject` | Revoke a pending injected user message before delivery |
+| `session/replace_inject` | Replace pending injected content without changing its queue position |
 | `session/cancel` | Cancel the currently running prompt |
 | `session/truncate` | Truncate the session transcript to a requested prefix |
 | `session/close` | Close a session and cancel any active prompt |
@@ -568,9 +571,11 @@ the session's configured working directory, so they operate on the same durable
 use.
 
 During `initialize`, Harn keeps the public `agentCapabilities` object aligned
-with upstream ACP: `loadSession`, `promptCapabilities`, `mcpCapabilities`, and
-the canonical `sessionCapabilities.close` and `sessionCapabilities.list` flags
-are advertised in their upstream locations. Harn-only methods such as
+with upstream ACP: `loadSession`, `promptCapabilities`, `mcpCapabilities`,
+`session.inject`, and the canonical `sessionCapabilities.close` and
+`sessionCapabilities.list` flags are advertised in their upstream locations.
+Harn advertises `session.inject.modes = ["queue", "steer"]` and
+`session.inject.pending.replace = true`. Harn-only methods such as
 `session/fork` remain documented extensions instead of being inserted into
 upstream `sessionCapabilities`.
 
@@ -768,25 +773,43 @@ parent. Setting a different pin on the child stays local.
 
 ACP hosts can inject user follow-up messages while an agent is running.
 Harn owns the delivery semantics inside the runtime so product apps do
-not need to reimplement queue/orchestration logic. User-message methods
-remain user-role only; ambient or system-style context uses `session/remind`.
+not need to reimplement queue/orchestration logic. Clients call
+`session/inject`, which responds as soon as Harn accepts the pending message
+and returns an agent-owned `messageId`. Delivery is later echoed as a
+`session/update` notification with `sessionUpdate: "user_message"` and the
+same `messageId`. User-message methods remain user-role only; ambient or
+system-style context uses `session/remind`.
 
-Supported notification methods:
+Relevant methods and notifications:
 
-- `user_message`
-- `session/input`
-- `agent/user_message`
+- `session/inject`
+- `session/revoke_inject`
+- `session/replace_inject`
 - `session/remind`
 - `session/update` with `worker_update` content for delegated worker lifecycle events
 
-User-message payload shape:
+Pending inject payload shape:
 
 ```json
 {
-  "content": "Please stop editing that file and explain first.",
-  "mode": "interrupt_immediate"
+  "sessionId": "sess_abc",
+  "mode": "steer",
+  "content": [
+    {
+      "type": "text",
+      "text": "Please stop editing that file and explain first."
+    }
+  ]
 }
 ```
+
+`mode: "steer"` delivers at the next safe operation boundary. `mode: "queue"`
+delivers at end-of-interaction. While the message is pending, callers can
+revoke it with `session/revoke_inject` or replace only its content with
+`session/replace_inject`; replacement preserves the original `messageId`, mode,
+and queue position. Revoke is idempotent for known revoked ids. Revoke or
+replace after delivery returns an `already_delivered` error, and unknown ids
+return `unknown_message_id`.
 
 Reminder payload shape:
 
@@ -808,19 +831,21 @@ Reminder payload shape:
 
 Supported `mode` values:
 
-- `interrupt_immediate`
-- `finish_step`
-- `wait_for_completion`
+- `queue`
+- `steer`
 
 Runtime behavior:
 
-- `interrupt_immediate`: inject on the next agent loop boundary immediately.
-- `finish_step`: deliver after the current operation finishes.
-- `wait_for_completion`: deliver at the end of the current interaction.
+- `steer`: deliver after the current operation finishes.
+- `queue`: deliver at the end of the current interaction.
+- Pending injects are session-scoped and survive `session/cancel` and
+  suspend/resume bridge replacement; clients that want to clear them should
+  revoke them before cancelling.
+- Pending, revoked, and pre-replacement content never enter transcript replay.
+  Replay shows only delivered `user_message` updates.
 - `session/remind`: queues a typed system reminder instead of a user-role
   message. Malformed reminder payloads are rejected with `HARN-RMD-002`.
-  `session/input`, `user_message`, and `agent/user_message` never create
-  reminders.
+  `session/inject` never creates reminders.
 - Worker lifecycle updates are emitted as structured `session/update` payloads with
   worker id/name, status, lineage metadata, artifact counts, transcript presence,
   snapshot path, execution metadata, child run ids/paths, lifecycle summaries,
@@ -835,8 +860,6 @@ Runtime behavior:
   repeated turns reuse stable stdlib/project/source setup, then instantiate a
   clean execution VM for prompt globals, output, bridge handles, tasks,
   cancellation, sync primitives, shared state, and tracing.
-- `finish_step`: inject after the current tool/operation completes
-- `wait_for_completion`: defer until the current agent interaction yields
 
 ### Typed pipeline returns (Harn → ACP boundary)
 

@@ -5,10 +5,13 @@ export const HARN_PROTOCOL_ARTIFACT_VERSION = "0.8.27"
 
 export const ACP_AGENT_METHODS = [
   "initialize",
+  "session/inject",
   "session/new",
   "session/load",
+  "session/replace_inject",
   "session/resume",
   "session/prompt",
+  "session/revoke_inject",
   "session/truncate",
   "session/remind",
   "session/close",
@@ -18,10 +21,13 @@ export type ACPAgentMethod = (typeof ACP_AGENT_METHODS)[number]
 
 export const ACP_AGENT_METHOD = {
   initialize: "initialize",
+  sessionInject: "session/inject",
   sessionNew: "session/new",
   sessionLoad: "session/load",
+  sessionReplaceInject: "session/replace_inject",
   sessionResume: "session/resume",
   sessionPrompt: "session/prompt",
+  sessionRevokeInject: "session/revoke_inject",
   sessionTruncate: "session/truncate",
   sessionRemind: "session/remind",
   sessionClose: "session/close",
@@ -46,6 +52,7 @@ export const ACP_AGENT_NOTIFICATIONS = [
 export type ACPAgentNotification = (typeof ACP_AGENT_NOTIFICATIONS)[number]
 
 export const ACP_SESSION_UPDATES = [
+  "user_message",
   "user_message_chunk",
   "agent_message_chunk",
   "agent_thought_chunk",
@@ -361,6 +368,12 @@ export interface ACPMessageChunkUpdate {
   content: ACPContentBlock
 }
 
+export interface ACPUserMessageUpdate {
+  sessionUpdate: "user_message"
+  messageId: string
+  content: ACPContentBlock[]
+}
+
 export interface ACPPlanUpdate {
   sessionUpdate: "plan"
   entries: ACPValue[]
@@ -381,6 +394,7 @@ export interface ACPHarnExtensionUpdate {
 }
 
 export type ACPSessionUpdateEnvelope =
+  | ACPUserMessageUpdate
   | ACPMessageChunkUpdate
   | ACPToolCall
   | ACPToolCallUpdate
@@ -437,6 +451,7 @@ export interface ACPAgentCapabilities {
     extensionContract?: string
   }>
   loadSession?: boolean
+  session?: ACPObject
   promptCapabilities?: ACPPromptCapabilities
   mcpCapabilities?: ACPObject
   sessionCapabilities?: ACPObject

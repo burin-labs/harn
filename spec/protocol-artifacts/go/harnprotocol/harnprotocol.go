@@ -30,10 +30,13 @@ type ACPAgentMethod = string
 // ACPAgentMethods enumerates every wire value Harn currently emits for ACPAgentMethod.
 var ACPAgentMethods = []ACPAgentMethod{
 	"initialize",
+	"session/inject",
 	"session/new",
 	"session/load",
+	"session/replace_inject",
 	"session/resume",
 	"session/prompt",
+	"session/revoke_inject",
 	"session/truncate",
 	"session/remind",
 	"session/close",
@@ -67,6 +70,7 @@ type ACPSessionUpdate = string
 
 // ACPSessionUpdates enumerates every wire value Harn currently emits for ACPSessionUpdate.
 var ACPSessionUpdates = []ACPSessionUpdate{
+	"user_message",
 	"user_message_chunk",
 	"agent_message_chunk",
 	"agent_thought_chunk",
@@ -508,7 +512,8 @@ type ACPToolCallUpdate struct {
 // and are stripped via `omitempty` on serialization.
 type ACPSessionUpdateEnvelope struct {
 	SessionUpdate    string             `json:"sessionUpdate"`
-	Content          *ACPContentBlock   `json:"content,omitempty"`
+	Content          json.RawMessage    `json:"content,omitempty"`
+	MessageID        *string            `json:"messageId,omitempty"`
 	Entries          []json.RawMessage  `json:"entries,omitempty"`
 	KeptTurnCount    *int               `json:"keptTurnCount,omitempty"`
 	RemovedTurnCount *int               `json:"removedTurnCount,omitempty"`

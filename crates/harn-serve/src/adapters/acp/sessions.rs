@@ -53,8 +53,11 @@ pub(super) struct Session {
     pub(super) cwd: PathBuf,
     /// If a cancel was requested for the current prompt execution.
     pub(super) cancellation: SessionCancellation,
-    /// Active host bridge for queued input / daemon resume while a prompt runs.
+    /// Host bridge for the active prompt, if one is running.
     pub(super) host_bridge: Option<Rc<harn_vm::bridge::HostBridge>>,
+    /// Pending user-message inject state that survives prompt cancellation
+    /// and active bridge replacement until delivery or explicit revoke.
+    pub(super) inject_state: harn_vm::bridge::HostBridgeInjectionState,
     pub(super) info: SessionInfo,
     /// Snapshot of slash-commands most recently advertised over
     /// `available_commands_update` for this session, used to skip re-emits

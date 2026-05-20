@@ -96,10 +96,13 @@ MCP_PROTOCOL_VERSION: str = "2025-11-25"
 
 ACP_AGENT_METHODS: tuple = (
     "initialize",
+    "session/inject",
     "session/new",
     "session/load",
+    "session/replace_inject",
     "session/resume",
     "session/prompt",
+    "session/revoke_inject",
     "session/truncate",
     "session/remind",
     "session/close",
@@ -118,6 +121,7 @@ ACP_AGENT_NOTIFICATIONS: tuple = (
     "terminal/output",
 )
 ACP_SESSION_UPDATES: tuple = (
+    "user_message",
     "user_message_chunk",
     "agent_message_chunk",
     "agent_thought_chunk",
@@ -318,10 +322,13 @@ MCP_LOGGING_LEVELS: tuple = (
 
 class ACPAgentMethod(str, Enum):
     INITIALIZE = "initialize"
+    SESSION_INJECT = "session/inject"
     SESSION_NEW = "session/new"
     SESSION_LOAD = "session/load"
+    SESSION_REPLACE_INJECT = "session/replace_inject"
     SESSION_RESUME = "session/resume"
     SESSION_PROMPT = "session/prompt"
+    SESSION_REVOKE_INJECT = "session/revoke_inject"
     SESSION_TRUNCATE = "session/truncate"
     SESSION_REMIND = "session/remind"
     SESSION_CLOSE = "session/close"
@@ -343,6 +350,7 @@ class ACPAgentNotification(str, Enum):
 
 
 class ACPSessionUpdate(str, Enum):
+    USER_MESSAGE = "user_message"
     USER_MESSAGE_CHUNK = "user_message_chunk"
     AGENT_MESSAGE_CHUNK = "agent_message_chunk"
     AGENT_THOUGHT_CHUNK = "agent_thought_chunk"
@@ -634,7 +642,8 @@ class ACPToolCallUpdate(_HarnDataclass):
 @dataclass
 class ACPSessionUpdateEnvelope(_HarnDataclass):
     sessionUpdate: str
-    content: Optional[ACPContentBlock] = None
+    content: Optional[JsonValue] = None
+    messageId: Optional[str] = None
     entries: Optional[List[JsonValue]] = None
     keptTurnCount: Optional[int] = None
     removedTurnCount: Optional[int] = None

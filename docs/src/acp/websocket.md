@@ -94,10 +94,12 @@ surface as stdio ACP:
 - `session/load`
 - `session/list`
 - `session/prompt`
+- `session/inject`
+- `session/revoke_inject`
+- `session/replace_inject`
 - `session/cancel`
 - `session/truncate`
 - `session/close`
-- `session/input`
 - `session/remind`
 - `session/fork`
 - `session/set_mode`

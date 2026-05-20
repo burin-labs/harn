@@ -4,7 +4,7 @@
 //! file I/O, tool execution) to a host process over stdin/stdout JSON-RPC.
 //! The host application handles these requests using its own providers.
 
-use std::collections::{BTreeMap, HashMap, VecDeque};
+use std::collections::{BTreeMap, HashMap, HashSet, VecDeque};
 use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::rc::Rc;
@@ -65,7 +65,7 @@ pub struct HostBridge {
     /// Name of the currently executing Harn script (without .harn suffix).
     script_name: std::sync::Mutex<String>,
     /// Transcript injections queued by the host while a run is active.
-    queued_transcript_injections: Arc<Mutex<VecDeque<QueuedTranscriptInjection>>>,
+    queued_transcript_injections: HostBridgeInjectionState,
     /// Host-triggered resume signal for daemon agents.
     resume_requested: Arc<AtomicBool>,
     /// Host-triggered skill-registry invalidation signal. Set when the
@@ -242,7 +242,9 @@ impl QueuedUserMessageMode {
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct QueuedUserMessage {
+    pub message_id: String,
     pub content: String,
+    pub transcript_content: serde_json::Value,
     pub mode: QueuedUserMessageMode,
 }
 
@@ -258,6 +260,26 @@ pub enum QueuedTranscriptInjection {
     Reminder(QueuedReminder),
 }
 
+#[derive(Debug, Default)]
+struct QueuedTranscriptInjections {
+    queue: VecDeque<QueuedTranscriptInjection>,
+    revoked_user_message_ids: HashSet<String>,
+    delivered_user_message_ids: HashSet<String>,
+}
+
+#[derive(Clone, Debug, Default)]
+pub struct HostBridgeInjectionState {
+    inner: Arc<Mutex<QueuedTranscriptInjections>>,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum PendingUserMessageMutationResult {
+    Mutated,
+    AlreadyRevoked,
+    AlreadyDelivered,
+    UnknownMessageId,
+}
+
 impl QueuedTranscriptInjection {
     fn mode(&self) -> QueuedUserMessageMode {
         match self {
@@ -267,22 +289,98 @@ impl QueuedTranscriptInjection {
     }
 }
 
-fn queue_user_message_from_params(params: &serde_json::Value) -> Option<QueuedUserMessage> {
-    let content = params
-        .get("content")
-        .and_then(|v| v.as_str())
-        .unwrap_or("")
-        .to_string();
-    if content.is_empty() {
-        return None;
+fn new_inject_message_id() -> String {
+    format!("msg_inj_{}", uuid::Uuid::now_v7().simple())
+}
+
+impl HostBridgeInjectionState {
+    pub fn new() -> Self {
+        Self::default()
     }
-    let mode = QueuedUserMessageMode::from_str(
-        params
-            .get("mode")
-            .and_then(|v| v.as_str())
-            .unwrap_or("wait_for_completion"),
-    );
-    Some(QueuedUserMessage { content, mode })
+
+    pub async fn push_pending_user_message(
+        &self,
+        content: String,
+        transcript_content: serde_json::Value,
+        mode: &str,
+    ) -> String {
+        let message_id = new_inject_message_id();
+        self.inner
+            .lock()
+            .await
+            .queue
+            .push_back(QueuedTranscriptInjection::User(QueuedUserMessage {
+                message_id: message_id.clone(),
+                content,
+                transcript_content,
+                mode: QueuedUserMessageMode::from_str(mode),
+            }));
+        message_id
+    }
+
+    pub async fn revoke_pending_user_message(
+        &self,
+        message_id: &str,
+    ) -> PendingUserMessageMutationResult {
+        let mut state = self.inner.lock().await;
+        let mut retained = VecDeque::new();
+        let mut revoked = false;
+        while let Some(injection) = state.queue.pop_front() {
+            match &injection {
+                QueuedTranscriptInjection::User(message) if message.message_id == message_id => {
+                    revoked = true;
+                }
+                _ => retained.push_back(injection),
+            }
+        }
+        state.queue = retained;
+        if revoked {
+            state
+                .revoked_user_message_ids
+                .insert(message_id.to_string());
+            return PendingUserMessageMutationResult::Mutated;
+        }
+        if state.revoked_user_message_ids.contains(message_id) {
+            PendingUserMessageMutationResult::AlreadyRevoked
+        } else if state.delivered_user_message_ids.contains(message_id) {
+            PendingUserMessageMutationResult::AlreadyDelivered
+        } else {
+            PendingUserMessageMutationResult::UnknownMessageId
+        }
+    }
+
+    pub async fn replace_pending_user_message(
+        &self,
+        message_id: &str,
+        content: String,
+        transcript_content: serde_json::Value,
+    ) -> PendingUserMessageMutationResult {
+        let mut state = self.inner.lock().await;
+        for injection in &mut state.queue {
+            if let QueuedTranscriptInjection::User(message) = injection {
+                if message.message_id == message_id {
+                    message.content = content;
+                    message.transcript_content = transcript_content;
+                    return PendingUserMessageMutationResult::Mutated;
+                }
+            }
+        }
+        if state.revoked_user_message_ids.contains(message_id) {
+            PendingUserMessageMutationResult::AlreadyRevoked
+        } else if state.delivered_user_message_ids.contains(message_id) {
+            PendingUserMessageMutationResult::AlreadyDelivered
+        } else {
+            PendingUserMessageMutationResult::UnknownMessageId
+        }
+    }
+
+    async fn push_session_reminder(&self, reminder: QueuedReminder) {
+        self.inner
+            .lock()
+            .await
+            .queue
+            .push_back(QueuedTranscriptInjection::Reminder(reminder));
+    }
 }
 
 fn reminder_unknown_option_error(message: impl AsRef<str>) -> String {
@@ -538,8 +636,7 @@ impl HostBridge {
             Arc::new(Mutex::new(HashMap::new()));
         let cancelled = Arc::new(AtomicBool::new(false));
         let cancel_notify = Arc::new(Notify::new());
-        let queued_transcript_injections: Arc<Mutex<VecDeque<QueuedTranscriptInjection>>> =
-            Arc::new(Mutex::new(VecDeque::new()));
+        let queued_transcript_injections = HostBridgeInjectionState::default();
         let resume_requested = Arc::new(AtomicBool::new(false));
         let skills_reload_requested = Arc::new(AtomicBool::new(false));
         let daemon_idle = Arc::new(AtomicBool::new(false));
@@ -577,24 +674,10 @@ impl HostBridge {
                             resume_clone.store(true, Ordering::SeqCst);
                         } else if method == "skills/update" {
                             skills_reload_clone.store(true, Ordering::SeqCst);
-                        } else if method == "user_message"
-                            || method == "session/input"
-                            || method == "agent/user_message"
-                        {
-                            let params = &msg["params"];
-                            if let Some(message) = queue_user_message_from_params(params) {
-                                queued_clone
-                                    .lock()
-                                    .await
-                                    .push_back(QueuedTranscriptInjection::User(message));
-                            }
                         } else if method == "session/remind" {
                             let params = &msg["params"];
                             if let Ok(reminder) = queued_session_remind_from_params(params) {
-                                queued_clone
-                                    .lock()
-                                    .await
-                                    .push_back(QueuedTranscriptInjection::Reminder(reminder));
+                                queued_clone.push_session_reminder(reminder).await;
                             }
                         }
                     }
@@ -669,6 +752,24 @@ impl HostBridge {
         writer: HostBridgeWriter,
         start_id: u64,
     ) -> Self {
+        Self::from_parts_with_writer_cancel_notify_and_injection_state(
+            pending,
+            cancelled,
+            cancel_notify,
+            writer,
+            start_id,
+            None,
+        )
+    }
+
+    pub fn from_parts_with_writer_cancel_notify_and_injection_state(
+        pending: Arc<Mutex<HashMap<u64, oneshot::Sender<serde_json::Value>>>>,
+        cancelled: Arc<AtomicBool>,
+        cancel_notify: Arc<Notify>,
+        writer: HostBridgeWriter,
+        start_id: u64,
+        injection_state: Option<HostBridgeInjectionState>,
+    ) -> Self {
         Self {
             next_id: AtomicU64::new(start_id),
             pending,
@@ -677,7 +778,7 @@ impl HostBridge {
             writer,
             session_id: std::sync::Mutex::new(String::new()),
             script_name: std::sync::Mutex::new(String::new()),
-            queued_transcript_injections: Arc::new(Mutex::new(VecDeque::new())),
+            queued_transcript_injections: injection_state.unwrap_or_default(),
             resume_requested: Arc::new(AtomicBool::new(false)),
             skills_reload_requested: Arc::new(AtomicBool::new(false)),
             daemon_idle: Arc::new(AtomicBool::new(false)),
@@ -700,7 +801,7 @@ impl HostBridge {
             writer: stdout_writer(Arc::new(std::sync::Mutex::new(()))),
             session_id: std::sync::Mutex::new(String::new()),
             script_name: std::sync::Mutex::new(String::new()),
-            queued_transcript_injections: Arc::new(Mutex::new(VecDeque::new())),
+            queued_transcript_injections: HostBridgeInjectionState::default(),
             resume_requested: Arc::new(AtomicBool::new(false)),
             skills_reload_requested: Arc::new(AtomicBool::new(false)),
             daemon_idle: Arc::new(AtomicBool::new(false)),
@@ -937,14 +1038,44 @@ impl HostBridge {
             .await
     }
 
-    pub async fn push_queued_user_message(&self, content: String, mode: &str) {
+    pub fn injection_state(&self) -> HostBridgeInjectionState {
+        self.queued_transcript_injections.clone()
+    }
+
+    pub async fn push_pending_user_message(
+        &self,
+        content: String,
+        transcript_content: serde_json::Value,
+        mode: &str,
+    ) -> String {
         self.queued_transcript_injections
-            .lock()
+            .push_pending_user_message(content, transcript_content, mode)
             .await
-            .push_back(QueuedTranscriptInjection::User(QueuedUserMessage {
-                content,
-                mode: QueuedUserMessageMode::from_str(mode),
-            }));
+    }
+
+    pub async fn push_queued_user_message(&self, content: String, mode: &str) -> String {
+        self.push_pending_user_message(content.clone(), serde_json::Value::String(content), mode)
+            .await
+    }
+
+    pub async fn revoke_pending_user_message(
+        &self,
+        message_id: &str,
+    ) -> PendingUserMessageMutationResult {
+        self.queued_transcript_injections
+            .revoke_pending_user_message(message_id)
+            .await
+    }
+
+    pub async fn replace_pending_user_message(
+        &self,
+        message_id: &str,
+        content: String,
+        transcript_content: serde_json::Value,
+    ) -> PendingUserMessageMutationResult {
+        self.queued_transcript_injections
+            .replace_pending_user_message(message_id, content, transcript_content)
+            .await
     }
 
     pub async fn push_queued_session_remind_from_params(
@@ -954,9 +1085,8 @@ impl HostBridge {
         let reminder = queued_session_remind_from_params(params)?;
         let reminder_id = reminder.reminder.id.clone();
         self.queued_transcript_injections
-            .lock()
-            .await
-            .push_back(QueuedTranscriptInjection::Reminder(reminder));
+            .push_session_reminder(reminder)
+            .await;
         Ok(reminder_id)
     }
 
@@ -966,21 +1096,26 @@ impl HostBridge {
         include_finish_step: bool,
         include_wait_for_completion: bool,
     ) -> Vec<QueuedUserMessage> {
-        let mut queue = self.queued_transcript_injections.lock().await;
+        let mut state = self.queued_transcript_injections.inner.lock().await;
         let mut selected = Vec::new();
         let mut retained = VecDeque::new();
-        while let Some(injection) = queue.pop_front() {
+        while let Some(injection) = state.queue.pop_front() {
             let should_take = match injection.mode() {
                 QueuedUserMessageMode::InterruptImmediate => include_interrupt_immediate,
                 QueuedUserMessageMode::FinishStep => include_finish_step,
                 QueuedUserMessageMode::WaitForCompletion => include_wait_for_completion,
             };
             match (should_take, injection) {
-                (true, QueuedTranscriptInjection::User(message)) => selected.push(message),
+                (true, QueuedTranscriptInjection::User(message)) => {
+                    state
+                        .delivered_user_message_ids
+                        .insert(message.message_id.clone());
+                    selected.push(message);
+                }
                 (_, injection) => retained.push_back(injection),
             }
         }
-        *queue = retained;
+        state.queue = retained;
         selected
     }
 
@@ -990,22 +1125,27 @@ impl HostBridge {
         include_finish_step: bool,
         include_wait_for_completion: bool,
     ) -> Vec<QueuedTranscriptInjection> {
-        let mut queue = self.queued_transcript_injections.lock().await;
+        let mut state = self.queued_transcript_injections.inner.lock().await;
         let mut selected = Vec::new();
         let mut retained = VecDeque::new();
-        while let Some(injection) = queue.pop_front() {
+        while let Some(injection) = state.queue.pop_front() {
             let should_take = match injection.mode() {
                 QueuedUserMessageMode::InterruptImmediate => include_interrupt_immediate,
                 QueuedUserMessageMode::FinishStep => include_finish_step,
                 QueuedUserMessageMode::WaitForCompletion => include_wait_for_completion,
             };
             if should_take {
+                if let QueuedTranscriptInjection::User(message) = &injection {
+                    state
+                        .delivered_user_message_ids
+                        .insert(message.message_id.clone());
+                }
                 selected.push(injection);
             } else {
                 retained.push_back(injection);
             }
         }
-        *queue = retained;
+        state.queue = retained;
         selected
     }
 
@@ -1334,6 +1474,17 @@ mod tests {
         )
     }
 
+    fn test_bridge_sharing_injection_state(owner: &HostBridge) -> HostBridge {
+        HostBridge::from_parts_with_writer_cancel_notify_and_injection_state(
+            Arc::new(Mutex::new(HashMap::new())),
+            Arc::new(AtomicBool::new(false)),
+            Arc::new(Notify::new()),
+            Arc::new(|_| Ok(())),
+            100,
+            Some(owner.injection_state()),
+        )
+    }
+
     #[test]
     fn test_json_rpc_request_format() {
         let request = crate::jsonrpc::request(
@@ -1459,6 +1610,173 @@ mod tests {
     }
 
     #[test]
+    fn pending_user_messages_support_revoke_replace_and_delivery_states() {
+        let runtime = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .unwrap();
+        runtime.block_on(async {
+            let bridge = test_bridge();
+            let first_id = bridge
+                .push_pending_user_message(
+                    "first".to_string(),
+                    serde_json::json!("first"),
+                    "wait_for_completion",
+                )
+                .await;
+            let second_id = bridge
+                .push_pending_user_message(
+                    "second".to_string(),
+                    serde_json::json!("second"),
+                    "wait_for_completion",
+                )
+                .await;
+
+            assert_eq!(
+                bridge
+                    .replace_pending_user_message(
+                        &second_id,
+                        "second edited".to_string(),
+                        serde_json::json!("second edited"),
+                    )
+                    .await,
+                PendingUserMessageMutationResult::Mutated
+            );
+            assert_eq!(
+                bridge.revoke_pending_user_message(&first_id).await,
+                PendingUserMessageMutationResult::Mutated
+            );
+            assert_eq!(
+                bridge.revoke_pending_user_message(&first_id).await,
+                PendingUserMessageMutationResult::AlreadyRevoked
+            );
+
+            let delivered = bridge
+                .take_queued_user_messages_for(DeliveryCheckpoint::EndOfInteraction)
+                .await;
+            assert_eq!(delivered.len(), 1);
+            assert_eq!(delivered[0].message_id, second_id);
+            assert_eq!(delivered[0].content, "second edited");
+
+            assert_eq!(
+                bridge.revoke_pending_user_message(&second_id).await,
+                PendingUserMessageMutationResult::AlreadyDelivered
+            );
+            assert_eq!(
+                bridge
+                    .replace_pending_user_message(
+                        &second_id,
+                        "too late".to_string(),
+                        serde_json::json!("too late"),
+                    )
+                    .await,
+                PendingUserMessageMutationResult::AlreadyDelivered
+            );
+            assert_eq!(
+                bridge.revoke_pending_user_message("missing").await,
+                PendingUserMessageMutationResult::UnknownMessageId
+            );
+        });
+    }
+
+    #[test]
+    fn pending_user_message_replace_preserves_fifo_position_and_mode() {
+        let runtime = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .unwrap();
+        runtime.block_on(async {
+            let bridge = test_bridge();
+            let first_id = bridge
+                .push_pending_user_message(
+                    "first".to_string(),
+                    serde_json::json!("first"),
+                    "finish_step",
+                )
+                .await;
+            let second_id = bridge
+                .push_pending_user_message(
+                    "second".to_string(),
+                    serde_json::json!("second"),
+                    "finish_step",
+                )
+                .await;
+            assert_eq!(
+                bridge
+                    .replace_pending_user_message(
+                        &first_id,
+                        "first edited".to_string(),
+                        serde_json::json!("first edited"),
+                    )
+                    .await,
+                PendingUserMessageMutationResult::Mutated
+            );
+
+            let delivered = bridge
+                .take_queued_user_messages_for(DeliveryCheckpoint::AfterCurrentOperation)
+                .await;
+            assert_eq!(
+                delivered
+                    .iter()
+                    .map(|message| (&message.message_id, message.content.as_str(), message.mode))
+                    .collect::<Vec<_>>(),
+                vec![
+                    (&first_id, "first edited", QueuedUserMessageMode::FinishStep,),
+                    (&second_id, "second", QueuedUserMessageMode::FinishStep),
+                ]
+            );
+        });
+    }
+
+    #[test]
+    fn pending_user_message_state_survives_bridge_replacement() {
+        let runtime = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .unwrap();
+        runtime.block_on(async {
+            let bridge = test_bridge();
+            let revoked_id = bridge
+                .push_pending_user_message(
+                    "revoke me".to_string(),
+                    serde_json::json!("revoke me"),
+                    "wait_for_completion",
+                )
+                .await;
+            let delivered_id = bridge
+                .push_pending_user_message(
+                    "deliver me".to_string(),
+                    serde_json::json!("deliver me"),
+                    "wait_for_completion",
+                )
+                .await;
+            assert_eq!(
+                bridge.revoke_pending_user_message(&revoked_id).await,
+                PendingUserMessageMutationResult::Mutated
+            );
+            bridge.cancelled.store(true, Ordering::SeqCst);
+
+            let replacement_bridge = test_bridge_sharing_injection_state(&bridge);
+            assert_eq!(
+                replacement_bridge
+                    .revoke_pending_user_message(&revoked_id)
+                    .await,
+                PendingUserMessageMutationResult::AlreadyRevoked
+            );
+            let delivered = replacement_bridge
+                .take_queued_user_messages_for(DeliveryCheckpoint::EndOfInteraction)
+                .await;
+            assert_eq!(delivered.len(), 1);
+            assert_eq!(delivered[0].message_id, delivered_id);
+            assert_eq!(delivered[0].content, "deliver me");
+            assert_eq!(
+                bridge.revoke_pending_user_message(&delivered_id).await,
+                PendingUserMessageMutationResult::AlreadyDelivered
+            );
+        });
+    }
+
+    #[test]
     fn queued_transcript_injections_preserve_user_reminder_separation() {
         let runtime = tokio::runtime::Builder::new_current_thread()
             .enable_all()
@@ -1562,29 +1880,6 @@ mod tests {
                 };
                 assert_eq!(reminder.reminder.body, format!("Reminder for {mode}"));
             }
-        });
-    }
-
-    #[test]
-    fn bridge_session_input_path_never_produces_reminder() {
-        let runtime = tokio::runtime::Builder::new_current_thread()
-            .enable_all()
-            .build()
-            .unwrap();
-        runtime.block_on(async {
-            let bridge = test_bridge();
-            bridge
-                .push_queued_user_message("still user input".to_string(), "finish_step")
-                .await;
-
-            let delivered = bridge
-                .take_queued_transcript_injections_for(DeliveryCheckpoint::AfterCurrentOperation)
-                .await;
-            assert_eq!(delivered.len(), 1);
-            let QueuedTranscriptInjection::User(message) = &delivered[0] else {
-                panic!("session/input queue path must produce a user message");
-            };
-            assert_eq!(message.content, "still user input");
         });
     }
 
