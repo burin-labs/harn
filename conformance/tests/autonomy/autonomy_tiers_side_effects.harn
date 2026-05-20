@@ -4,8 +4,8 @@ import "std/triggers"
 fn tier_handler(event: TriggerEvent) -> dict {
   let context = handler_context()
   let file_path = path_join(".harn", "autonomy_tier_" + event.headers?.x_delivery + ".txt")
-  write_file(file_path, "tier:" + context?.autonomy_tier)
-  return {tier: context?.autonomy_tier, file_path: file_path, file_exists: file_exists(file_path)}
+  harness.fs.write_text(file_path, "tier:" + context?.autonomy_tier)
+  return {tier: context?.autonomy_tier, file_path: file_path, file_exists: harness.fs.exists(file_path)}
 }
 
 fn register_tier_agent(agent_id: string, tier: string) -> TriggerHandle {

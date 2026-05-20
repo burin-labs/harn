@@ -1,18 +1,18 @@
 import "std/project"
 
-mkdir("meta_scratch")
+harness.fs.mkdir("meta_scratch")
 
-mkdir("meta_scratch/src")
+harness.fs.mkdir("meta_scratch/src")
 
-mkdir("meta_scratch/src/deep")
+harness.fs.mkdir("meta_scratch/src/deep")
 
-write_file("meta_scratch/root.txt", "root")
+harness.fs.write_text("meta_scratch/root.txt", "root")
 
-write_file("meta_scratch/.hidden.txt", "secret")
+harness.fs.write_text("meta_scratch/.hidden.txt", "secret")
 
-write_file("meta_scratch/src/deep/nested.txt", "nested")
+harness.fs.write_text("meta_scratch/src/deep/nested.txt", "nested")
 
-write_file("meta_scratch/src/deep/code.rs", "fn " + "main() {}")
+harness.fs.write_text("meta_scratch/src/deep/code.rs", "fn " + "main() {}")
 
 metadata_set("", "classification", {language: "rust", structureHash: "stale"})
 

@@ -9,8 +9,8 @@ fn replay_marker_path(event: TriggerEvent) -> string {
 
 fn flaky_handler(event: TriggerEvent) -> dict {
   let marker_path = replay_marker_path(event)
-  if !file_exists(marker_path) {
-    write_file(marker_path, "seen")
+  if !harness.fs.exists(marker_path) {
+    harness.fs.write_text(marker_path, "seen")
     throw "replay-fail:" + event.kind
   }
   return {kind: event.kind, provider: event.provider, replayed: event.id}
