@@ -42,14 +42,14 @@ pipeline default() {
       iteration_budget: {mode: "adaptive", initial: 2, max: 8, extend_by: 2},
     },
   )
-  println(result.status)
-  println(result.adaptive_budget.mode)
-  println(result.adaptive_budget.initial)
-  println(result.adaptive_budget.max)
-  println(result.adaptive_budget.extensions_used >= 1)
-  println(result.adaptive_budget.decisions[0].action)
+  __io_println(result.status)
+  __io_println(result.adaptive_budget.mode)
+  __io_println(result.adaptive_budget.initial)
+  __io_println(result.adaptive_budget.max)
+  __io_println(result.adaptive_budget.extensions_used >= 1)
+  __io_println(result.adaptive_budget.decisions[0].action)
   // Mock time stayed pinned: no opaque wall-clock observation lurks
   // in the budget path.
-  println(now_ms() == start_ms)
+  __io_println(now_ms() == start_ms)
   unmock_time()
 }

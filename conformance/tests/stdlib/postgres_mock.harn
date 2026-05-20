@@ -16,9 +16,9 @@ pipeline default() {
     ],
   )
   let rows = pg_query(db, "select id, payload from receipts where tenant_id = $1", ["tenant-a"])
-  println(rows[0].id)
-  println(rows[0].payload.ok)
-  println(
+  __io_println(rows[0].id)
+  __io_println(rows[0].payload.ok)
+  __io_println(
     pg_query_one(db, "select id, payload from receipts where tenant_id = $1", ["tenant-a"]).observed_at,
   )
   let result = pg_execute(
@@ -26,8 +26,8 @@ pipeline default() {
     "insert into audit_records(tenant_id, action) values ($1, $2)",
     ["tenant-a", "receipt.read"],
   )
-  println(result.rows_affected)
+  __io_println(result.rows_affected)
   let calls = pg_mock_calls(db)
-  println(len(calls))
-  println(calls[0].params[0])
+  __io_println(len(calls))
+  __io_println(calls[0].params[0])
 }

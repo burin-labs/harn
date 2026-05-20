@@ -40,9 +40,9 @@ pipeline test(task) {
   let _ = emit_channel("batch.count.input", {seq: 3})
   let _ = emit_channel("batch.count.input", {seq: 4})
   let before = channel_events("batch.count.fired")
-  println("before-threshold:" + to_string(len(before)))
+  __io_println("before-threshold:" + to_string(len(before)))
   let _ = emit_channel("batch.count.input", {seq: 5})
   let after = channel_events("batch.count.fired")
-  println("after-threshold:" + to_string(len(after)))
-  println("batch_size:" + to_string(after[0].payload.batch_size))
+  __io_println("after-threshold:" + to_string(len(after)))
+  __io_println("batch_size:" + to_string(after[0].payload.batch_size))
 }

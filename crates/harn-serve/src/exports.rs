@@ -199,7 +199,7 @@ pub fn greet(name: string, excited: bool = false) -> string {
             &path,
             r#"
 pipeline default(task) {
-  println(task)
+  __io_println(task)
 }
 "#,
         )

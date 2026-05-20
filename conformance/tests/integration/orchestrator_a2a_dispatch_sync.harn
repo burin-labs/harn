@@ -7,7 +7,7 @@ pipeline test(task) {
   mkdir(root)
   write_file(
     path_join(root, "receiver.harn"),
-    "pipeline default(task) {\n  let envelope = json_parse(task)\n  println(json_stringify({trace_id: envelope.event.trace_id, target_agent: envelope.target_agent}))\n}\n",
+    "pipeline default(task) {\n  let envelope = json_parse(task)\n  __io_println(json_stringify({trace_id: envelope.event.trace_id, target_agent: envelope.target_agent}))\n}\n",
   )
   let repo_root = exec("git", "rev-parse", "--show-toplevel").stdout.trim()
   let harn_bin = env_or("HARN_CONFORMANCE_HARN_BIN", resolve_harn_bin(repo_root))
@@ -45,7 +45,7 @@ pipeline test(task) {
       package_name: "conformance",
     },
   )
-  println(handle.id == trigger_id && handle.handler_kind == "a2a")
+  __io_println(handle.id == trigger_id && handle.handler_kind == "a2a")
   let fire: DispatchHandle = trigger_fire(
     handle,
     {
@@ -56,9 +56,9 @@ pipeline test(task) {
       headers: {x_delivery: "evt-" + unique},
     },
   )
-  println(fire.status == "dispatched" && fire.error == nil)
-  println(fire.result?.trace_id == trace_id)
-  println(fire.result?.target_agent == "triage")
+  __io_println(fire.status == "dispatched" && fire.error == nil)
+  __io_println(fire.result?.trace_id == trace_id)
+  __io_println(fire.result?.target_agent == "triage")
   let _ = shell("kill -TERM " + pid)
   wait_for_exit(pid)
   delete_file(root)

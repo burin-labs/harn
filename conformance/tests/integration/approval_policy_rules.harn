@@ -74,9 +74,9 @@ fn one_call(name, args, approval_policy) {
 pipeline main() {
   let secret = one_call("read_secret", {path: "config/.env"}, {rules: [{allow: "*"}]})
   let secret_events = json_stringify(transcript_events_by_kind(secret?.transcript, "PermissionDeny"))
-  println(secret?.tools?.rejected[0] == "read_secret")
-  println(secret_events.contains("sensitive_path"))
-  println(secret_events.contains("harn.permission_policy_decision.v1"))
+  __io_println(secret?.tools?.rejected[0] == "read_secret")
+  __io_println(secret_events.contains("sensitive_path"))
+  __io_println(secret_events.contains("harn.permission_policy_decision.v1"))
   let ask = one_call(
     "fetch_url",
     {url: "https://api.example.com/v1/issues", method: "post"},
@@ -90,17 +90,17 @@ pipeline main() {
     },
   )
   let ask_events = json_stringify(transcript_events_by_kind(ask?.transcript, "PermissionDeny"))
-  println(ask?.tools?.rejected[0] == "fetch_url")
-  println(ask_events.contains("managed network approval"))
-  println(ask_events.contains("\"action\":\"ask\""))
+  __io_println(ask?.tools?.rejected[0] == "fetch_url")
+  __io_println(ask_events.contains("managed network approval"))
+  __io_println(ask_events.contains("\"action\":\"ask\""))
   let allowed = one_call(
     "run_command",
     {argv: ["npm", "test"]},
     {allow_sensitive_paths: true, rules: [{allow: {tool: "run_command", command_identity: "npm"}}]},
   )
   let grant_events = json_stringify(transcript_events_by_kind(allowed?.transcript, "PermissionGrant"))
-  println(len(allowed?.tools?.rejected) == 0)
-  println(grant_events.contains("command_rule"))
+  __io_println(len(allowed?.tools?.rejected) == 0)
+  __io_println(grant_events.contains("command_rule"))
   let mcp = one_call(
     "github__create_issue",
     {title: "blocked"},
@@ -109,8 +109,8 @@ pipeline main() {
     },
   )
   let mcp_events = json_stringify(transcript_events_by_kind(mcp?.transcript, "PermissionDeny"))
-  println(mcp?.tools?.rejected[0] == "github__create_issue")
-  println(mcp_events.contains("mcp_rule"))
+  __io_println(mcp?.tools?.rejected[0] == "github__create_issue")
+  __io_println(mcp_events.contains("mcp_rule"))
   llm_mock(
     {
       tool_calls: [
@@ -132,6 +132,6 @@ pipeline main() {
     },
   )
   let repeat_events = json_stringify(transcript_events_by_kind(repeated?.transcript, "PermissionDeny"))
-  println(repeated?.tools?.rejected[0] == "run_command")
-  println(repeat_events.contains("repeated_call"))
+  __io_println(repeated?.tools?.rejected[0] == "run_command")
+  __io_println(repeat_events.contains("repeated_call"))
 }

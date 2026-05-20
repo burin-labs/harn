@@ -138,6 +138,6 @@ pipeline test() {
     }
   }
   step_assertions_end()
-  println("persona_steel_thread merge")
-  println(len(variants.merged) > 0)
+  __io_println("persona_steel_thread merge")
+  __io_println(len(variants.merged) > 0)
 }

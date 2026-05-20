@@ -10,11 +10,11 @@ pipeline test(task) {
   }
   let wrapped = with_audit_receipt(fn() { return {done: true} }, opts)
   let ok = wrapped()
-  println(ok.status)
-  println(ok.result.done)
-  println(ok.receipt.schema)
-  println(ok.receipt.step)
-  println(len(ok.receipt.tool_calls))
+  __io_println(ok.status)
+  __io_println(ok.result.done)
+  __io_println(ok.receipt.schema)
+  __io_println(ok.receipt.step)
+  __io_println(len(ok.receipt.tool_calls))
   let failed_wrapper = with_audit_receipt(
     fn() {
       throw "boom"
@@ -22,7 +22,7 @@ pipeline test(task) {
     opts,
   )
   let failed = failed_wrapper()
-  println(failed.status)
-  println(failed.error.message)
-  println(failed.receipt.status)
+  __io_println(failed.status)
+  __io_println(failed.error.message)
+  __io_println(failed.receipt.status)
 }

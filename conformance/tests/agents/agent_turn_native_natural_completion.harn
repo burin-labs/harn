@@ -24,11 +24,11 @@ pipeline main() {
     {provider: "mock", tools: tools(), tool_format: "native", max_iterations: 3},
   )
   let calls = llm_mock_calls()
-  println(result.status)
-  println(result.visible_text)
-  println(result.llm.iterations)
-  println(len(calls))
-  println(!contains(calls[0].system, "##DONE##"))
-  println(!contains(calls[1].system, "##DONE##"))
-  println(result.judge_decisions[0].verdict)
+  __io_println(result.status)
+  __io_println(result.visible_text)
+  __io_println(result.llm.iterations)
+  __io_println(len(calls))
+  __io_println(!contains(calls[0].system, "##DONE##"))
+  __io_println(!contains(calls[1].system, "##DONE##"))
+  __io_println(result.judge_decisions[0].verdict)
 }

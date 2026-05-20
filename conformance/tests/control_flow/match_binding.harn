@@ -5,5 +5,5 @@ pipeline default() {
     1 -> { result = "one" }
     other -> { result = "value is " + to_string(other) }
   }
-  println(result)
+  __io_println(result)
 }

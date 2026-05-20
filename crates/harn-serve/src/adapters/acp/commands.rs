@@ -128,12 +128,12 @@ mod tests {
     fn discover_commands_finds_attributed_pipelines() {
         let source = r#"
             @command(name: "review", description: "Run a code review", hint: "focus area")
-            pipeline review_branch(task) { println("review") }
+            pipeline review_branch(task) { __io_println("review") }
 
-            pipeline default(task) { println("default") }
+            pipeline default(task) { __io_println("default") }
 
             @command(description: "Plan the work")
-            pipeline plan(task) { println("plan") }
+            pipeline plan(task) { __io_println("plan") }
         "#;
         let commands = discover_commands(source);
         assert_eq!(commands.len(), 2);
@@ -168,7 +168,7 @@ mod tests {
 
     #[test]
     fn discover_commands_returns_empty_when_no_attribute_present() {
-        let source = "pipeline main(task) { println(\"hi\") }";
+        let source = "pipeline main(task) { __io_println(\"hi\") }";
         assert!(discover_commands(source).is_empty());
     }
 

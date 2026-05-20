@@ -162,7 +162,7 @@ async def main():
     urls = ["https://a.com", "https://b.com", "https://c.com"]
     results = await asyncio.gather(*[summarize(u) for u in urls])
     for r in results:
-        print(r)
+        log(r)
 
 asyncio.run(main())
 ```
@@ -181,7 +181,7 @@ pipeline default(task) {
   }
 
   for r in results {
-    println(r)
+    log(r)
   }
 }
 ```

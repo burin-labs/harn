@@ -848,7 +848,7 @@ pipeline main() {
 
     #[test]
     fn reports_no_calls() {
-        let out = render("pipeline main() { println(\"hi\") }");
+        let out = render("pipeline main() { __io_println(\"hi\") }");
         assert_eq!(out, "No llm_call or agent_loop callsites found.\n");
     }
 }

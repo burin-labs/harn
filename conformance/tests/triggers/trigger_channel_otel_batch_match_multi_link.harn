@@ -49,13 +49,13 @@ pipeline default() {
   let second = stream.next().value
   let third = stream.next().value
   let fourth = stream.next().value
-  println(first.kind)
-  println(second.kind)
-  println(third.kind)
-  println(fourth.kind)
-  println(fourth.payload.handler_kind)
-  println(fourth.payload.batch.count)
-  println(len(fourth.payload.batch.constituent_event_ids))
+  __io_println(first.kind)
+  __io_println(second.kind)
+  __io_println(third.kind)
+  __io_println(fourth.kind)
+  __io_println(fourth.payload.handler_kind)
+  __io_println(fourth.payload.batch.count)
+  __io_println(len(fourth.payload.batch.constituent_event_ids))
   // Span check: match span must multi-link to every emit span.
   let spans = trace_spans()
   let emit_spans = spans
@@ -66,9 +66,9 @@ pipeline default() {
     .filter(
     { s -> s.kind == "channel_match" && s.name == "channel.match tenant:default:ch.otel.batch.input" },
   )
-  println(len(emit_spans) >= 3)
-  println(len(match_spans) >= 1)
+  __io_println(len(emit_spans) >= 3)
+  __io_println(len(match_spans) >= 1)
   let match_span = match_spans[0]
-  println(len(match_span.links) >= 3)
+  __io_println(len(match_span.links) >= 3)
   enable_tracing(false)
 }

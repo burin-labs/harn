@@ -102,6 +102,6 @@ pipeline test() {
     },
   )
   step_assertions_end()
-  println("persona_steel_thread deploy")
-  println(result.promoted.result.promoted)
+  __io_println("persona_steel_thread deploy")
+  __io_println(result.promoted.result.promoted)
 }

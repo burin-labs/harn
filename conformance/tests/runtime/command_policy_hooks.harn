@@ -85,5 +85,5 @@ pipeline default() {
   )
   assert(len(scan?.risk_labels ?? []) > 0, "risk scan helper returns structured labels")
   delete_file(root)
-  println("command_policy_hooks_ok")
+  __io_println("command_policy_hooks_ok")
 }

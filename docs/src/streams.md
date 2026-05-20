@@ -14,7 +14,7 @@ gen fn numbers(start: int, end: int) -> Stream<int> {
 }
 
 for n in numbers(1, 4) {
-  println(n)
+  log(n)
 }
 ```
 
@@ -29,7 +29,7 @@ let results = parallel each [30, 5, 10] with { max_concurrent: 2 } { ms ->
 } as stream
 
 for result in results {
-  println(result) // 5, then 10, then 30
+  log(result) // 5, then 10, then 30
 }
 ```
 
@@ -56,8 +56,8 @@ gen fn chunks() -> Stream<string> {
 
 let s: Stream<string> = chunks()
 let first = s.next()
-println(first.value)  // one
-println(first.done)   // false
+log(first.value)  // one
+log(first.done)   // false
 ```
 
 Errors thrown inside a stream propagate to the consumer at the point
@@ -71,10 +71,10 @@ gen fn broken() -> Stream<int> {
 
 try {
   for n in broken() {
-    println(n)
+    log(n)
   }
 } catch err {
-  println("caught ${err}")
+  log("caught ${err}")
 }
 ```
 

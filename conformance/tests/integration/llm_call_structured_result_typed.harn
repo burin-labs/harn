@@ -12,9 +12,9 @@ pipeline default() {
   // explicit nil guard. The result envelope's `data` field
   // surfaces the schema-derived type.
   if r.data != nil {
-    println(r.data.verdict)
-    println(r.data.note)
+    __io_println(r.data.verdict)
+    __io_println(r.data.note)
   } else {
-    println("unexpected failure")
+    __io_println("unexpected failure")
   }
 }

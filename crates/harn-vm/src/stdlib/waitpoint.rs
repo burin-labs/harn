@@ -1184,7 +1184,7 @@ pipeline test(task) {
   let wp = create("outside-dispatch")
   complete(wp, 9)
   let resolved = wait(wp)
-  println(resolved.value)
+  __io_println(resolved.value)
 }
 "#,
         )

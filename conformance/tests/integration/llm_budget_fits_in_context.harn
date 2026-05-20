@@ -4,9 +4,9 @@ import { context_window_for, fits_in_context } from "std/llm/budget"
 
 pipeline default() {
   // Small text in a 200_000-window model fits trivially.
-  println(fits_in_context("hello", "claude-sonnet-4-20250514"))
+  __io_println(fits_in_context("hello", "claude-sonnet-4-20250514"))
   // Unknown model falls back to 8192 window.
-  println(context_window_for("totally-fake-unknown-model"))
+  __io_println(context_window_for("totally-fake-unknown-model"))
   // A 7000-char string at default 0.10 headroom uses ~1750 tokens, headroom
   // is 820, total 2570 → fits in 8192.
   var medium = ""
@@ -15,7 +15,7 @@ pipeline default() {
     medium = medium + "the quick brown fox "
     i = i + 1
   }
-  println(fits_in_context(medium, "totally-fake-unknown-model"))
+  __io_println(fits_in_context(medium, "totally-fake-unknown-model"))
   // Build a giant string that overflows even the small fallback.
   // 2000 iterations × 44 chars = 88000 chars → ~22000 tokens → exceeds
   // the 8192-window fallback after the 0.10 headroom (~819 tokens).
@@ -25,5 +25,5 @@ pipeline default() {
     huge = huge + "the quick brown fox jumps over the lazy dog "
     j = j + 1
   }
-  println(fits_in_context(huge, "totally-fake-unknown-model"))
+  __io_println(fits_in_context(huge, "totally-fake-unknown-model"))
 }

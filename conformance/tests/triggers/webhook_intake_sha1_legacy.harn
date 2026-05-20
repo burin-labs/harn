@@ -18,7 +18,7 @@ pipeline test(task) {
     "legacy-sha1",
     {headers: {"x-hub-signature": signature, "x-legacy-delivery": "legacy-1"}, body: body},
   )
-  println(outcome.status == "accepted")
+  __io_println(outcome.status == "accepted")
   // SHA-256 signature against a SHA-1 intake is rejected (mismatch).
   let wrong = webhook_intake_feed(
     "legacy-sha1",
@@ -27,5 +27,5 @@ pipeline test(task) {
       body: body,
     },
   )
-  println(wrong.status == "rejected")
+  __io_println(wrong.status == "rejected")
 }

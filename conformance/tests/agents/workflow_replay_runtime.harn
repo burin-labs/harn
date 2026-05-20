@@ -27,9 +27,9 @@ pipeline main() {
       persist_path: "/tmp/harn-workflow-replay-replayed.json",
     },
   )
-  println(first?.status)
-  println(replayed?.status)
-  println(replayed?.run?.metadata?.replay_mode)
-  println(replayed?.run?.metadata?.replayed_from == first?.run?.id)
-  println(len(replayed?.run?.stages) == len(first?.run?.stages))
+  __io_println(first?.status)
+  __io_println(replayed?.status)
+  __io_println(replayed?.run?.metadata?.replay_mode)
+  __io_println(replayed?.run?.metadata?.replayed_from == first?.run?.id)
+  __io_println(len(replayed?.run?.stages) == len(first?.run?.stages))
 }

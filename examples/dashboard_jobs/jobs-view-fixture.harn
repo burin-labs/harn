@@ -14,7 +14,7 @@ pipeline default() {
   events = events.push(dashboard_job_event("run.started", fixture("cloud_managed_run")))
   let view = dashboard_jobs_view(events, {title: "Jobs", generated_at: "fixture"})
   for job in view.jobs {
-    println(job.job_id + " " + job.status)
+    __io_println(job.job_id + " " + job.status)
   }
-  println("jobs=" + to_string(len(view.jobs)))
+  __io_println("jobs=" + to_string(len(view.jobs)))
 }

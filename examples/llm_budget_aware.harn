@@ -26,6 +26,6 @@ pipeline default() {
   }
   let short_max = recommend_max_output_tokens({prompt: short_prompt, model: model, task_kind: "chat"})
   let long_max = recommend_max_output_tokens({prompt: long_prompt, model: model, task_kind: "summarize"})
-  println("short prompt -> recommended max_output_tokens = " + to_string(short_max))
-  println("long prompt  -> recommended max_output_tokens = " + to_string(long_max))
+  __io_println("short prompt -> recommended max_output_tokens = " + to_string(short_max))
+  __io_println("long prompt  -> recommended max_output_tokens = " + to_string(long_max))
 }

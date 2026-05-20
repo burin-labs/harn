@@ -8,11 +8,11 @@ pipeline test(task) {
     ],
   )
   let truncated = transcript_compact(base, {strategy: "truncate", keep_last: 1, target_tokens: 1})
-  println(transcript_summary(truncated).contains("auto-compacted"))
-  println(transcript_events_by_kind(truncated, "compaction")[0].metadata?.strategy == "truncate")
+  __io_println(transcript_summary(truncated).contains("auto-compacted"))
+  __io_println(transcript_events_by_kind(truncated, "compaction")[0].metadata?.strategy == "truncate")
   let truncate_assets = transcript_assets(truncated)
-  println(len(truncate_assets) == 1)
-  println(len(transcript_messages(truncate_assets[0].data)) == 4)
+  __io_println(len(truncate_assets) == 1)
+  __io_println(len(transcript_messages(truncate_assets[0].data)) == 4)
   var verbose_lines = ""
   for i in range(0, 40) {
     verbose_lines = verbose_lines + "verbose line " + to_string(i) + "\n"
@@ -26,8 +26,10 @@ pipeline test(task) {
     ],
   )
   let masked = transcript_compact(masked_base, {strategy: "observation_mask", keep_last: 1, target_tokens: 1})
-  println(transcript_summary(masked).contains("masked"))
-  println(transcript_events_by_kind(masked, "compaction")[0].metadata?.strategy == "observation_mask")
+  __io_println(transcript_summary(masked).contains("masked"))
+  __io_println(
+    transcript_events_by_kind(masked, "compaction")[0].metadata?.strategy == "observation_mask",
+  )
   llm_mock_clear()
   llm_mock({text: "LLM compact summary"})
   let llm_compacted = transcript_compact(
@@ -39,11 +41,11 @@ pipeline test(task) {
       summarize_prompt: "compact_transcript_summary.harn.prompt",
     },
   )
-  println(transcript_summary(llm_compacted).contains("LLM compact summary"))
+  __io_println(transcript_summary(llm_compacted).contains("LLM compact summary"))
   let llm_calls = llm_mock_calls()
   let prompt = llm_calls[0].messages[0].content
-  println(prompt.contains("Compact prompt from asset."))
-  println(prompt.contains("Archived count: 2"))
+  __io_println(prompt.contains("Compact prompt from asset."))
+  __io_println(prompt.contains("Archived count: 2"))
   let stream_session = agent_session_open("compact-stream-session")
   agent_session_inject(stream_session, {role: "user", content: "one"})
   agent_session_inject(stream_session, {role: "assistant", content: "two"})
@@ -58,7 +60,7 @@ pipeline test(task) {
   )
   let session_snapshot = agent_session_snapshot(stream_session) ?? {}
   let _ = transcript_compact(session_snapshot, {strategy: "truncate", keep_last: 1, target_tokens: 1})
-  println(
+  __io_println(
     json_stringify(transcript_messages(agent_session_snapshot(stream_session) ?? {}))
       .contains("LIVE_COMPACTION_EVENT"),
   )
@@ -75,8 +77,8 @@ pipeline test(task) {
       ],
     },
   )
-  println(run.observability?.schema_version == 4)
-  println(len(run.observability?.compaction_events) == 3)
+  __io_println(run.observability?.schema_version == 4)
+  __io_println(len(run.observability?.compaction_events) == 3)
   var saw_truncate = false
   var saw_mask = false
   var saw_llm = false
@@ -91,7 +93,7 @@ pipeline test(task) {
       saw_llm = true
     }
   }
-  println(saw_truncate)
-  println(saw_mask)
-  println(saw_llm)
+  __io_println(saw_truncate)
+  __io_println(saw_mask)
+  __io_println(saw_llm)
 }

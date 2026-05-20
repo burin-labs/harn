@@ -101,7 +101,7 @@ pub fn gha_annotation(kind: string, message: string, options: GhaAnnotationOptio
  * @example: gha_notice(message, options)
  */
 pub fn gha_notice(message: string, options: GhaAnnotationOptions = {}) {
-  println(gha_annotation("notice", message, options))
+  __io_write_stdout(gha_annotation("notice", message, options) + "\n")
 }
 
 /**
@@ -114,7 +114,7 @@ pub fn gha_notice(message: string, options: GhaAnnotationOptions = {}) {
  * @example: gha_warning(message, options)
  */
 pub fn gha_warning(message: string, options: GhaAnnotationOptions = {}) {
-  println(gha_annotation("warning", message, options))
+  __io_write_stdout(gha_annotation("warning", message, options) + "\n")
 }
 
 /**
@@ -127,7 +127,7 @@ pub fn gha_warning(message: string, options: GhaAnnotationOptions = {}) {
  * @example: gha_error(message, options)
  */
 pub fn gha_error(message: string, options: GhaAnnotationOptions = {}) {
-  println(gha_annotation("error", message, options))
+  __io_write_stdout(gha_annotation("error", message, options) + "\n")
 }
 
 /**

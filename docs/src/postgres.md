@@ -21,7 +21,7 @@ pipeline default() {
     ["tenant-123"],
   )
 
-  println(json_stringify(rows))
+  log(json_stringify(rows))
   pg_close(db)
 }
 ```

@@ -50,7 +50,7 @@ harn test conformance --timing --filter my_test
 ### Writing a conformance test
 
 Create a `.harn` file with a `pipeline default(task)` entry point and use
-`log()` or `println()` to produce output:
+`log()` to produce output:
 
 ```harn,ignore
 // conformance/tests/<group>/my_feature.harn  (e.g. stdlib/, types/)

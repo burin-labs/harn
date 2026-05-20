@@ -15,30 +15,30 @@ pipeline default() {
   /* rust-only wrapper: rm -rf / and force-push to main both denied. */
   let rust_wrapper = preset_run_command({stacks: ["rust"], mode: tool_hooks_mode_deny_with_explanation, inner: inner})
   let r1 = rust_wrapper({command: "rm -rf /"})
-  println(r1.action)
-  println(r1.rule_id)
+  __io_println(r1.action)
+  __io_println(r1.rule_id)
   let r2 = rust_wrapper({command: "git push --force origin main"})
-  println(r2.action)
-  println(r2.rule_id)
+  __io_println(r2.action)
+  __io_println(r2.rule_id)
   /* python-only wrapper: same universal rules still fire. */
   let py_wrapper = preset_run_command({stacks: ["python"], mode: tool_hooks_mode_deny_with_explanation, inner: inner})
   let r3 = py_wrapper({command: "rm -rf /"})
-  println(r3.action)
-  println(r3.rule_id)
+  __io_println(r3.action)
+  __io_println(r3.rule_id)
   /* Unrecognized stack: __cat_for_stack returns nil so only the
    * universal catalogue ships. Universal denies still apply. */
   let unknown_wrapper = preset_run_command(
     {stacks: ["fictional"], mode: tool_hooks_mode_deny_with_explanation, inner: inner},
   )
   let r4 = unknown_wrapper({command: "rm -rf /"})
-  println(r4.action)
-  println(r4.rule_id)
+  __io_println(r4.action)
+  __io_println(r4.rule_id)
   /* Empty stack list: still picks up universal. */
   let empty_wrapper = preset_run_command({stacks: [], mode: tool_hooks_mode_deny_with_explanation, inner: inner})
   let r5 = empty_wrapper({command: "rm -rf /"})
-  println(r5.action)
-  println(r5.rule_id)
+  __io_println(r5.action)
+  __io_println(r5.rule_id)
   /* Sanity: a benign command on every wrapper still passes through. */
   let benign = rust_wrapper({command: "ls -la"})
-  println(benign?.result?.ran ?? benign?.ran ?? "MISSING")
+  __io_println(benign?.result?.ran ?? benign?.ran ?? "MISSING")
 }

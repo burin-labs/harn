@@ -9,7 +9,7 @@ let response = llm_call(
   "Explain quicksort in two sentences.",
   "You are a computer science tutor."
 )
-println(response)
+log(response)
 ```
 
 Harn files can contain top-level code like the above (implicit pipeline),
@@ -25,7 +25,7 @@ pipeline default(task) {
   }
 
   for review in reviews {
-    println(review)
+    log(review)
   }
 }
 ```

@@ -3,7 +3,7 @@ pipeline default() {
   let f = { x -> x + 1
     + 2
     + 3 }
-  println(f(10))
+  __io_println(f(10))
   // Multiline in match arm
   let val = "hello"
   match val {
@@ -11,21 +11,21 @@ pipeline default() {
       let r = "a"
         + "b"
         + "c"
-      println(r)
+      __io_println(r)
     }
-    _ -> { println("no") }
+    _ -> { __io_println("no") }
   }
   // Nested pipes with placeholder
   let result = [1, 2, 3]
     |> _.map({ x -> x * 2 })
     |> _.filter({ x -> x > 2 })
-  println(result)
+  __io_println(result)
   // Pipe placeholder in method args
   let doubled = [1, 2, 3] |> _.map({ x -> x * 2 })
-  println(doubled)
+  __io_println(doubled)
   // Multiline * and /
   let calc = 10
     * 2
     + 5
-  println(calc)
+  __io_println(calc)
 }

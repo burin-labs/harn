@@ -17,11 +17,11 @@ type Action = "create" | "edit"
 type ActionContainer<T> = {action: T, process_action: fn(T) -> nil}
 
 fn process_create(a: "create") {
-  println("create " + a)
+  __io_println("create " + a)
 }
 
 fn process_edit(a: "edit") {
-  println("edit " + a)
+  __io_println("edit " + a)
 }
 
 pipeline test(task) {

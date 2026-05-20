@@ -39,9 +39,9 @@ pipeline test(task) {
     },
   )
   let second_status = project_deep_scan_status(namespace, root)
-  println(first["."].enriched.purpose == "root")
-  println(second["."].enriched.purpose == "root changed")
-  println(second_status.cache_hits == 0)
-  println(len(llm_mock_calls()) == 2)
+  __io_println(first["."].enriched.purpose == "root")
+  __io_println(second["."].enriched.purpose == "root changed")
+  __io_println(second_status.cache_hits == 0)
+  __io_println(len(llm_mock_calls()) == 2)
   delete_file(root)
 }

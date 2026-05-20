@@ -161,6 +161,16 @@ condensed series summaries instead of full per-patch history.
   /mcp` as it already applied to POST/GET, preventing cross-origin session
   teardown when a browser-visible session id is present.
 
+### Changed
+
+- **Stdio now requires the `Harness` capability handle (#1767).** Removes
+  the ambient `print`, `println`, `eprint`, `eprintln`, `read_line`, and
+  `prompt_user` stdlib builtins in favor of `harness.stdio.*`. `harn fix`
+  now plans `bindings/thread-harness` when an existing harness binding can be
+  threaded through local helper calls, and downgrades to the
+  `bindings/thread-harness-needs-param` surface-changing repair when a new
+  `harness: Harness` parameter is required.
+
 ## v0.8.27
 
 ### Added

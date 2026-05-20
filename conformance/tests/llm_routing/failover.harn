@@ -24,14 +24,14 @@ pipeline test(task) {
     },
   )
   let result = llm_call("hi", nil, {routing: policy})
-  println(result.text)
-  println(result.routing.policy)
+  __io_println(result.text)
+  __io_println(result.routing.policy)
   let attempts = result.routing.attempts
-  println(len(attempts))
-  println(attempts[0].label)
-  println(attempts[0].status)
-  println(attempts[0].error.category)
-  println(attempts[1].label)
-  println(attempts[1].status)
-  println(result.routing.selected)
+  __io_println(len(attempts))
+  __io_println(attempts[0].label)
+  __io_println(attempts[0].status)
+  __io_println(attempts[0].error.category)
+  __io_println(attempts[1].label)
+  __io_println(attempts[1].status)
+  __io_println(result.routing.selected)
 }

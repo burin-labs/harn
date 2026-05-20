@@ -11,15 +11,15 @@ pipeline default() {
     ["printf", "ok"]
   }
   let result = host_call("process.exec", {mode: "argv", argv: argv, sandbox_profile: "worktree"})
-  println(result?.success)
-  println(result?.stdout)
+  __io_println(result?.success)
+  __io_println(result?.stdout)
   let unrestricted = host_call("process.exec", {mode: "argv", argv: argv, sandbox_profile: "unrestricted"})
-  println(unrestricted?.success)
+  __io_println(unrestricted?.success)
   let bad = try {
     host_call("process.exec", {mode: "argv", argv: argv, sandbox_profile: "wide_open"})
     nil
   } catch (e) {
     e
   }
-  println(bad != nil)
+  __io_println(bad != nil)
 }

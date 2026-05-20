@@ -3,8 +3,8 @@ pipeline default() {
   // After formatting, + already supports multiline natively
   let msg = "hello"
     + " world"
-  println(msg)
+  __io_println(msg)
   // Verify basic arithmetic still works
   let x = 10 - 3
-  println(x)
+  __io_println(x)
 }

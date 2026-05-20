@@ -2,42 +2,42 @@ pipeline default() {
   // Dict pattern: match on field value, bind others
   let response = {status: "ok", data: "hello world"}
   match response {
-    {status: "ok", data: d} -> { println("Got: " + d) }
-    {status: "error", message: m} -> { println("Error: " + m) }
-    _ -> { println("unknown") }
+    {status: "ok", data: d} -> { __io_println("Got: " + d) }
+    {status: "error", message: m} -> { __io_println("Error: " + m) }
+    _ -> { __io_println("unknown") }
   }
   // Dict pattern: second arm matches
   let err = {status: "error", message: "not found"}
   match err {
-    {status: "ok", data: d} -> { println("Got: " + d) }
-    {status: "error", message: m} -> { println("Error: " + m) }
-    _ -> { println("unknown") }
+    {status: "ok", data: d} -> { __io_println("Got: " + d) }
+    {status: "error", message: m} -> { __io_println("Error: " + m) }
+    _ -> { __io_println("unknown") }
   }
   // Dict pattern: no match falls to wildcard
   match 42 {
-    {status: "ok"} -> { println("dict") }
-    _ -> { println("not a dict") }
+    {status: "ok"} -> { __io_println("dict") }
+    _ -> { __io_println("not a dict") }
   }
   // List pattern: bind elements
   match [1, 2, 3] {
-    [1, x, y] -> { println(to_string(x) + "," + to_string(y)) }
-    _ -> { println("no match") }
+    [1, x, y] -> { __io_println(to_string(x) + "," + to_string(y)) }
+    _ -> { __io_println("no match") }
   }
   // List pattern: first arm fails, second matches
   match [5, 6] {
-    [1, w] -> { println("one") }
-    [5, w] -> { println("five:" + to_string(w)) }
-    _ -> { println("no match") }
+    [1, w] -> { __io_println("one") }
+    [5, w] -> { __io_println("five:" + to_string(w)) }
+    _ -> { __io_println("no match") }
   }
   // List pattern: non-list falls to wildcard
   match "hello" {
-    [x] -> { println("list") }
-    _ -> { println("not a list") }
+    [x] -> { __io_println("list") }
+    _ -> { __io_println("not a list") }
   }
   // List pattern: wrong length falls through
   match [1] {
-    [a, b, c] -> { println("three") }
-    [a] -> { println("one:" + to_string(a)) }
-    _ -> { println("no match") }
+    [a, b, c] -> { __io_println("three") }
+    [a] -> { __io_println("one:" + to_string(a)) }
+    _ -> { __io_println("no match") }
   }
 }

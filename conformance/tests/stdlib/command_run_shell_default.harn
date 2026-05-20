@@ -4,5 +4,5 @@ pipeline default() {
   let result = command_run({mode: "shell", command: "echo command-run-default"})
   require result.success, "shell command should succeed"
   require trim(result.stdout) == "command-run-default", "shell command should use default shell"
-  println("ok")
+  __io_println("ok")
 }

@@ -58,7 +58,7 @@ fn preflight_reports_template_syntax_error() {
     let source = r#"
 pipeline main() {
   let text = render("broken.prompt")
-  println(text)
+  __io_println(text)
 }
 "#;
     let program = parse_program(source);
@@ -82,7 +82,7 @@ fn preflight_reports_missing_literal_render_target() {
     let source = r#"
 pipeline main() {
   let text = render("missing.txt")
-  println(text)
+  __io_println(text)
 }
 "#;
     let program = parse_program(source);
@@ -173,7 +173,7 @@ pipeline main() {
   let prompt = render_prompt(path, {})
   let key = "1"
   let interp = render_prompt("missing_${key}.prompt", {})
-  println(prompt + interp)
+  __io_println(prompt + interp)
 }
 "#;
     let program = parse_program(source);
@@ -271,7 +271,7 @@ fn preflight_reports_missing_render_prompt_target_for_raw_string() {
     let source = r#"
 pipeline main() {
   let prompt = render_prompt(r"missing.prompt", {})
-  println(prompt)
+  __io_println(prompt)
 }
 "#;
     let program = parse_program(source);
@@ -299,7 +299,7 @@ fn preflight_render_prompt_diagnostic_spans_literal_argument() {
     let source = r#"
 pipeline main() {
   let prompt = render_prompt("missing.prompt", {})
-  println(prompt)
+  __io_println(prompt)
 }
 "#;
     let program = parse_program(source);
@@ -329,7 +329,7 @@ fn preflight_reports_missing_project_root_asset_path() {
     let source = r#"
 pipeline main() {
   let prompt = render_prompt("@/prompts/missing.harn.prompt", {})
-  println(prompt)
+  __io_println(prompt)
 }
 "#;
     let program = parse_program(source);
@@ -364,7 +364,7 @@ fn preflight_reports_unknown_asset_alias() {
     let source = r#"
 pipeline main() {
   let prompt = render_prompt("@unknown/foo.harn.prompt", {})
-  println(prompt)
+  __io_println(prompt)
 }
 "#;
     let program = parse_program(source);
@@ -398,7 +398,7 @@ fn preflight_reports_missing_aliased_asset_path() {
     let source = r#"
 pipeline main() {
   let prompt = render_prompt("@partials/missing.harn.prompt", {})
-  println(prompt)
+  __io_println(prompt)
 }
 "#;
     let program = parse_program(source);
@@ -474,7 +474,7 @@ fn preflight_omits_did_you_mean_when_no_near_miss() {
     let source = r#"
 pipeline main() {
   let prompt = render_prompt("nowhere.harn.prompt", {})
-  println(prompt)
+  __io_println(prompt)
 }
 "#;
     let program = parse_program(source);
@@ -1094,7 +1094,7 @@ fn preflight_accepts_render_target_from_bundle_root() {
     let source = r#"
 pipeline main() {
   let text = render("shared.prompt")
-  println(text)
+  __io_println(text)
 }
 "#;
     let program = parse_program(source);
@@ -1181,7 +1181,7 @@ pipeline main() {
     node: {kind: "stage"},
     execution: {worktree: {repo: "./repo"}}
   })
-  println(review + snippet + contract)
+  __io_println(review + snippet + contract)
 }
 "#,
     )
@@ -1462,7 +1462,7 @@ fn lint_file_inner_reports_type_aware_lint_rules() {
 type User = {name: string}
 pipeline main(task) {
   let user: User = {name: "Ada"}
-  println(user?.name)
+  __io_println(user?.name)
 }
 "#,
     )

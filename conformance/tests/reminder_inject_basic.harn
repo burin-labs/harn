@@ -1,9 +1,9 @@
 pipeline main() {
   let injected = transcript.inject_reminder(transcript(), {body: "hello reminder"})
   let events = transcript_events_by_kind(injected.transcript, "system_reminder")
-  println(len(events))
-  println(events[0].reminder.body)
-  println(events[0].reminder.source)
-  println(injected.deduped_count)
-  println(injected.reminder_id != "")
+  __io_println(len(events))
+  __io_println(events[0].reminder.body)
+  __io_println(events[0].reminder.source)
+  __io_println(injected.deduped_count)
+  __io_println(injected.reminder_id != "")
 }

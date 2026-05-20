@@ -16,11 +16,11 @@ pipeline default() {
       periods: 30,
     },
   )
-  println("pricing_known=" + to_string(row.pricing_known))
-  println("total_calls=" + to_string(row.total_calls))
-  println("per_call=" + format_usd(row.cost_per_call))
-  println("per_period=" + format_usd(row.cost_per_period))
-  println("total=" + format_usd(row.total_cost))
+  __io_println("pricing_known=" + to_string(row.pricing_known))
+  __io_println("total_calls=" + to_string(row.total_calls))
+  __io_println("per_call=" + format_usd(row.cost_per_call))
+  __io_println("per_period=" + format_usd(row.cost_per_period))
+  __io_println("total=" + format_usd(row.total_cost))
   // Unknown pricing keeps shape but reports nils.
   let unknown = volume_cost(
     {
@@ -31,7 +31,7 @@ pipeline default() {
       calls_per_period: 100,
     },
   )
-  println("unknown_known=" + to_string(unknown.pricing_known))
-  println("unknown_total_nil=" + to_string(unknown.total_cost == nil))
-  println("unknown_total_calls=" + to_string(unknown.total_calls))
+  __io_println("unknown_known=" + to_string(unknown.pricing_known))
+  __io_println("unknown_total_nil=" + to_string(unknown.total_cost == nil))
+  __io_println("unknown_total_calls=" + to_string(unknown.total_calls))
 }

@@ -42,16 +42,16 @@ pipeline test(task) {
     handle,
     {provider: "github", kind: "issue.opened", headers: {x_delivery: "evt-" + unique}},
   )
-  println(dispatch.status == "dispatched")
-  println(dispatch.result?.status == "injected")
-  println(dispatch.result?.target_kind == "concrete")
-  println(dispatch.result?.target_session_id == target_session)
+  __io_println(dispatch.status == "dispatched")
+  __io_println(dispatch.result?.status == "injected")
+  __io_println(dispatch.result?.target_kind == "concrete")
+  __io_println(dispatch.result?.target_session_id == target_session)
   let reminders = transcript_events_by_kind(agent_session_snapshot(target_session), "system_reminder")
-  println(len(reminders))
-  println(reminders[0].reminder.body)
-  println(reminders[0].reminder.tags[0])
-  println(reminders[0].reminder.ttl_turns)
-  println(reminders[0].reminder.dedupe_key)
+  __io_println(len(reminders))
+  __io_println(reminders[0].reminder.body)
+  __io_println(reminders[0].reminder.tags[0])
+  __io_println(reminders[0].reminder.ttl_turns)
+  __io_println(reminders[0].reminder.dedupe_key)
   let audits = lifecycle_audit_log_take()
   var inject_audit_count = 0
   var injected_outcome = ""
@@ -61,6 +61,6 @@ pipeline test(task) {
       injected_outcome = audit.payload.outcome
     }
   }
-  println(inject_audit_count)
-  println(injected_outcome)
+  __io_println(inject_audit_count)
+  __io_println(injected_outcome)
 }

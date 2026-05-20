@@ -26,8 +26,8 @@ pipeline default() {
     ],
   })
 
-  println(result.best_prompt)
-  println(result.best_score)
+  log(result.best_prompt)
+  log(result.best_score)
 }
 ```
 

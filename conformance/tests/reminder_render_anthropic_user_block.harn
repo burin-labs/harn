@@ -26,11 +26,11 @@ pipeline main() {
     },
   )
   let call = llm_mock_calls()[0]
-  println(call.messages[0].role)
-  println(contains(call.messages[0].content[0].text, "<system-reminder>"))
-  println(contains(call.messages[0].content[0].text, "anthropic user block reminder"))
+  __io_println(call.messages[0].role)
+  __io_println(contains(call.messages[0].content[0].text, "<system-reminder>"))
+  __io_println(contains(call.messages[0].content[0].text, "anthropic user block reminder"))
   // user_block role hint does NOT request ephemeral caching by itself.
-  println(call.messages[0].content[0].cache_control == nil)
-  println(call.messages[0].content[1].text)
+  __io_println(call.messages[0].content[0].cache_control == nil)
+  __io_println(call.messages[0].content[1].text)
   clear_reminder_providers()
 }

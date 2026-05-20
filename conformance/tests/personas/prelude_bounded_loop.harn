@@ -18,14 +18,14 @@ pipeline test(task) {
     },
     opts,
   )
-  println(completed.status)
-  println(completed.state)
-  println(completed.iterations)
-  println(completed.stopped_reason)
-  println(completed.receipt.schema)
+  __io_println(completed.status)
+  __io_println(completed.state)
+  __io_println(completed.iterations)
+  __io_println(completed.stopped_reason)
+  __io_println(completed.receipt.schema)
   let stalled = bounded_loop(7, fn(state) { return {state: state, progress: false} }, opts)
-  println(stalled.status)
-  println(stalled.state)
-  println(stalled.iterations)
-  println(stalled.stopped_reason)
+  __io_println(stalled.status)
+  __io_println(stalled.state)
+  __io_println(stalled.iterations)
+  __io_println(stalled.stopped_reason)
 }

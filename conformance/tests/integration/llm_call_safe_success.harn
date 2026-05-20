@@ -3,7 +3,7 @@
 pipeline default(task) {
   llm_mock({text: "ok"})
   let r = llm_call_safe("hello", nil, {provider: "mock"})
-  println(r.ok)
-  println(r.response.text)
-  println(r.error == nil)
+  __io_println(r.ok)
+  __io_println(r.response.text)
+  __io_println(r.error == nil)
 }

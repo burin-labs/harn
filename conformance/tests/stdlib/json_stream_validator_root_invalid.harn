@@ -3,8 +3,8 @@ import { stream_validator } from "std/json"
 pipeline default(task) {
   let validator = stream_validator({type: "list", items: {type: "int"}})
   let status = validator.feed("{")
-  println(status.variant)
-  println(status.fields[0].path)
-  println(contains(status.fields[0].reason, "expected type 'list'"))
-  println(validator.value() == nil)
+  __io_println(status.variant)
+  __io_println(status.fields[0].path)
+  __io_println(contains(status.fields[0].reason, "expected type 'list'"))
+  __io_println(validator.value() == nil)
 }

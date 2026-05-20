@@ -3,5 +3,5 @@ pipeline test(task) {
     emit 1
   }
   let wrong: Generator<int> = values()
-  println(wrong)
+  __io_println(wrong)
 }

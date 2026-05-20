@@ -28,8 +28,8 @@ pipeline default() {
   )
   assert(result.success, "mcp helper failed")
   let payload = json_parse(result.stdout.trim())
-  println(payload.status == "dispatched")
-  println(payload.binding_id == "cron-ok")
-  println(file_exists(log_path))
-  println(read_file(log_path).contains("fired:cron.tick"))
+  __io_println(payload.status == "dispatched")
+  __io_println(payload.binding_id == "cron-ok")
+  __io_println(file_exists(log_path))
+  __io_println(read_file(log_path).contains("fired:cron.tick"))
 }

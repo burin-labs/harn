@@ -100,6 +100,6 @@ pipeline run(task) {
     },
     handoff: "review_captain",
   }
-  println(json_stringify(result))
+  __io_println(json_stringify(result))
   return result
 }

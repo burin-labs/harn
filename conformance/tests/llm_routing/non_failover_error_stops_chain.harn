@@ -22,6 +22,6 @@ pipeline test(task) {
   } catch (e) {
     {error_caught: true, category: e.category}
   }
-  println(envelope.error_caught)
-  println(envelope.category)
+  __io_println(envelope.error_caught)
+  __io_println(envelope.category)
 }

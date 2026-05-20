@@ -15,5 +15,5 @@ pipeline main() {
       node: {kind: "subagent", mode: "llm", model_policy: {provider: "mock"}},
     },
   )
-  println("opaque ok")
+  __io_println("opaque ok")
 }

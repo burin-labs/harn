@@ -10,13 +10,13 @@ pipeline default() {
     .configure(
     {experimental: {file_upload: {spec_revision: "modelcontextprotocol/modelcontextprotocol#2356"}}},
   )
-  println(config.experimental.file_upload.enabled)
+  __io_println(config.experimental.file_upload.enabled)
   let client = mcp_connect("python3", [server_path])
   let tools = mcp_list_tools(client)
-  println(json_stringify(tools[0].inputSchema).contains("\"x-mcp-file\""))
+  __io_println(json_stringify(tools[0].inputSchema).contains("\"x-mcp-file\""))
   let uri = harn.mcp.upload_file(client, sample_path, {accept: ["text/*"], max_size: 64})
-  println(uri.starts_with("data:text/plain;base64,"))
+  __io_println(uri.starts_with("data:text/plain;base64,"))
   let result = mcp_call(client, "inspect_upload", {upload: uri})
-  println(result)
+  __io_println(result)
   mcp_disconnect(client)
 }

@@ -15,17 +15,17 @@ pipeline main() {
     },
   ]
   let manifest = composition_binding_manifest(tools)
-  println(manifest.schema_version)
-  println(manifest.bindings[0].binding)
-  println(manifest.bindings[0].policy.disposition)
+  __io_println(manifest.schema_version)
+  __io_println(manifest.bindings[0].binding)
+  __io_println(manifest.bindings[0].policy.disposition)
   let report = composition_execute(
     "let file = read_file({path: \"README.md\"})\nreturn file.text",
     manifest,
     {run_id: "conformance-composition"},
   )
-  println(report.ok)
-  println(report.child_calls[0].tool_name)
-  println(report.run.result)
+  __io_println(report.ok)
+  __io_println(report.child_calls[0].tool_name)
+  __io_println(report.run.result)
   let denied_manifest = composition_binding_manifest(
     [
       {
@@ -40,6 +40,6 @@ pipeline main() {
     denied_manifest,
     {run_id: "conformance-denied"},
   )
-  println(denied.ok)
-  println(denied.run.failure_category)
+  __io_println(denied.ok)
+  __io_println(denied.run.failure_category)
 }

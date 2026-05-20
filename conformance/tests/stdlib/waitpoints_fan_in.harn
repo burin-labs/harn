@@ -40,6 +40,6 @@ pipeline test(task) {
   await(w3)
   await(w4)
   await(w5)
-  println(signal.status == "completed")
-  println(atomic_get(completed) == 5)
+  __io_println(signal.status == "completed")
+  __io_println(atomic_get(completed) == 5)
 }

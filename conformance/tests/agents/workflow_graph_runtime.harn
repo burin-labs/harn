@@ -40,10 +40,10 @@ pipeline main() {
     artifacts,
     {max_steps: 8, persist_path: "/tmp/harn-workflow-graph-runtime.json"},
   )
-  println(result?.status)
-  println(len(result?.run?.stages) == 5)
-  println(len(result?.run?.transitions) >= 4)
-  println(len(result?.run?.checkpoints) >= 2)
-  println(result?.run?.stages[0]?.branch == "true")
-  println(result?.run?.replay_fixture?._type)
+  __io_println(result?.status)
+  __io_println(len(result?.run?.stages) == 5)
+  __io_println(len(result?.run?.transitions) >= 4)
+  __io_println(len(result?.run?.checkpoints) >= 2)
+  __io_println(result?.run?.stages[0]?.branch == "true")
+  __io_println(result?.run?.replay_fixture?._type)
 }

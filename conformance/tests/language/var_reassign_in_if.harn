@@ -4,20 +4,20 @@ pipeline default() {
   if true {
     x = "fixed"
   }
-  println(x)
+  __io_println(x)
   // Reassign with condition on var
   var y = "initial"
   if y != "final" {
     y = "final"
   }
-  println(y)
+  __io_println(y)
   // Reassign with optional chaining init
   let d = nil
   var z = d?.type
   if z != "tests" {
     z = "tests"
   }
-  println(z)
+  __io_println(z)
   // Nested if reassignment
   var w = 0
   if true {
@@ -25,5 +25,5 @@ pipeline default() {
       w = 42
     }
   }
-  println(w)
+  __io_println(w)
 }

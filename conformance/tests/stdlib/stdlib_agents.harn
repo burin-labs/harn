@@ -13,11 +13,11 @@ pipeline default() {
     },
   )
   let result = task_run("Write a note", flow, {provider: "mock"})
-  println(result?.status)
-  println(result?.repair != nil)
-  println(result?.transcript?._type)
+  __io_println(result?.status)
+  __io_println(result?.repair != nil)
+  __io_println(result?.transcript?._type)
   let continued = workflow_continue(result, "Continue", flow, {provider: "mock"})
-  println(continued?.transcript?._type)
+  __io_println(continued?.transcript?._type)
   let compacted = workflow_compact(continued, {provider: "mock", keep_last: 1})
-  println(transcript_summary(compacted) != nil)
+  __io_println(transcript_summary(compacted) != nil)
 }

@@ -25,11 +25,11 @@ pipeline default() {
   let inner = with_fallback([caller_a, caller_b])
   let observe = { call ->
     let env = inner(call)
-    println("fallback_index=" + to_string(env?.fallback_index ?? -1))
-    println("fallback_total=" + to_string(env?.fallback_total ?? -1))
+    __io_println("fallback_index=" + to_string(env?.fallback_index ?? -1))
+    __io_println("fallback_total=" + to_string(env?.fallback_total ?? -1))
     return env
   }
   let result = agent_loop("hi", nil, {provider: "mock", llm_caller: observe, max_iterations: 1})
-  println(result.status)
-  println(result.visible_text)
+  __io_println(result.status)
+  __io_println(result.visible_text)
 }

@@ -18,19 +18,19 @@ pipeline default() {
    * out by the rust-only opt-in, so the wrapper falls through to
    * `inner` with the original command. */
   let py_against_rust = rust_only({command: "find . -name '*.py'"})
-  println(py_against_rust.ok)
-  println(py_against_rust.ran)
+  __io_println(py_against_rust.ok)
+  __io_println(py_against_rust.ran)
   /* Symmetric: a rust `cargo build` against a python-only wrapper. */
   let py_only = preset_run_command({stacks: ["python"], inner: inner})
   let rust_against_py = py_only({command: "cargo build"})
-  println(rust_against_py.ok)
-  println(rust_against_py.ran)
+  __io_println(rust_against_py.ok)
+  __io_println(rust_against_py.ran)
   /* Opt-in to both stacks and each command hits its own rule. */
   let both = preset_run_command({stacks: ["rust", "python"], inner: inner})
   let py_hit = both({command: "find . -name '*.py'"})
-  println(py_hit.action)
-  println(py_hit.rule_id)
+  __io_println(py_hit.action)
+  __io_println(py_hit.rule_id)
   let rust_hit = both({command: "cargo build"})
-  println(rust_hit.action)
-  println(rust_hit.rule_id)
+  __io_println(rust_hit.action)
+  __io_println(rust_hit.rule_id)
 }

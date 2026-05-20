@@ -12,8 +12,8 @@ pipeline default() {
   llm_mock({text: "{\"improvement\": \"try again\"}"})
   llm_mock({text: "{\"verdict\": \"YES\", \"improvement\": \"\"}"})
   let result = llm_call_structured("Grade this", schema, {provider: "mock"})
-  println(result.verdict)
-  println(len(llm_mock_calls()))
+  __io_println(result.verdict)
+  __io_println(len(llm_mock_calls()))
   // Exhaust the retry budget by setting `retries: 0` — the helper
   // throws because `output_validation: "error"` is the forced default.
   llm_mock_clear()
@@ -21,8 +21,8 @@ pipeline default() {
   let err = try {
     llm_call_structured("Grade again", schema, {provider: "mock", retries: 0})
   }
-  println(is_err(err))
+  __io_println(is_err(err))
   // After #534 the thrown value is a {category, message, ...} dict
   // — dispatch on category instead of string-matching the message.
-  println(unwrap_err(err)?.category == "schema_validation")
+  __io_println(unwrap_err(err)?.category == "schema_validation")
 }

@@ -26,11 +26,11 @@ pipeline default() {
     sleep(5ms)
     state = supervisor_state(sup)
   }
-  println(atomic_get(starts))
-  println(state.status)
-  println(state.children[0].status)
-  println(state.children[0].restart_count)
-  println(state.metrics.failed)
-  println(state.metrics.restarted)
-  println(state.metrics.suppressed)
+  __io_println(atomic_get(starts))
+  __io_println(state.status)
+  __io_println(state.children[0].status)
+  __io_println(state.children[0].restart_count)
+  __io_println(state.metrics.failed)
+  __io_println(state.metrics.restarted)
+  __io_println(state.metrics.suppressed)
 }

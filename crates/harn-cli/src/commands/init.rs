@@ -166,29 +166,31 @@ pipeline test_add(task) {
             ("harn.toml", manifest),
             (
                 "main.harn",
-                r#"pipeline default(task) {
+                r#"fn main(harness: Harness) {
+  let task = env_or("HARN_TASK", "Review the repository")
   var tools = tool_registry()
-  tools = tool_define(tools, "read_repo_file", "Read a file from the current repository", {
-    parameters: {
-      type: "object",
-      properties: {
-        path: {type: "string"}
+  tools = tool_define(
+    tools,
+    "read_repo_file",
+    "Read a file from the current repository",
+    {
+      parameters: {
+        type: "object",
+        properties: {
+          path: {type: "string"},
+        },
+        required: ["path"],
       },
-      required: ["path"]
+      returns: {type: "string"},
+      handler: fn(args) {
+        return read_file(args.path)
+      },
     },
-    returns: {type: "string"},
-    handler: fn(args) {
-      return read_file(args.path)
-    }
-  })
+  )
 
-  let result = agent_loop(task, "You are a helpful agent. Read the repository before proposing changes.", {
-    loop_until_done: true,
-    max_nudges: 3,
-    tools: tools
-  })
+  let result = agent_loop(task, "You are a helpful agent. Read the repository before proposing changes.", {loop_until_done: true, max_nudges: 3, tools: tools})
 
-  println(result.text)
+  harness.stdio.println(result.text)
 }
 "#
                 .to_string(),
@@ -231,30 +233,30 @@ chat = {{ id = "llama3.2", provider = "ollama" }}
   return history + "\nUser: " + message
 }
 
-fn stream_reply(prompt, system, options) {
+fn stream_reply(harness: Harness, prompt, system, options) {
   var answer = ""
   let chunks = llm_stream_call(prompt, system, options)
   for chunk in chunks {
-    print(chunk.visible_delta)
+    harness.stdio.print(chunk.visible_delta)
     answer = chunk.partial
   }
-  println("")
+  harness.stdio.println("")
   return answer
 }
 
-pipeline default(task) {
+fn main(harness: Harness) {
   let system = env_or("HARN_CHAT_SYSTEM", "You are a concise, helpful assistant.")
   let model = env_or("HARN_CHAT_MODEL", "chat")
   let options = {model: model, max_tokens: 2048, temperature: 0.7}
   var history = ""
-  println("Harn chat. Type /clear to reset history or /exit to quit.")
+  harness.stdio.println("Harn chat. Type /clear to reset history or /exit to quit.")
   while true {
-    print("you> ")
-    let raw = read_line()
-    if raw == nil {
+    harness.stdio.print("you> ")
+    let raw = harness.stdio.read_line()
+    if !raw.ok {
       break
     }
-    let message = trim(raw)
+    let message = trim(raw.value)
     if message == "" {
       continue
     }
@@ -263,12 +265,12 @@ pipeline default(task) {
     }
     if message == "/clear" {
       history = ""
-      println("history cleared")
+      harness.stdio.println("history cleared")
       continue
     }
     let prompt = build_chat_prompt(history, message)
-    print("assistant> ")
-    let answer = stream_reply(prompt, system, options)
+    harness.stdio.print("assistant> ")
+    let answer = stream_reply(harness, prompt, system, options)
     history = prompt + "\nAssistant: " + answer + "\n"
   }
 }
@@ -357,7 +359,7 @@ Inside the chat loop, type `/clear` to reset local history and `/exit` to quit.
   eval_metric("passed", passed)
   eval_metric("output_length", len(output))
 
-  println(json_stringify({
+  log(json_stringify({
     input: input,
     output: output,
     passed: passed
@@ -421,7 +423,7 @@ pub fn request_permission(tool_name, request_args) -> bool {
     "Task: " + context.task + "\nWorkspace: " + context.cwd,
     "You are a concise coding assistant. Reply in 3 bullets max.",
   )
-  println(result.text)
+  log(result.text)
 }
 "#
                 .to_string(),
@@ -483,7 +485,7 @@ pub fn greet(name: string) -> string {
                 r#"import "lib/main"
 
 pipeline default(task) {
-  println(greet("world"))
+  log(greet("world"))
 }
 "#
                 .to_string(),
@@ -650,7 +652,7 @@ pub fn normalize_inbound(raw) {
                 r#"import "connectors/echo"
 
 pipeline default(task) {
-  println(provider_id())
+  log(provider_id())
 }
 "#
                 .to_string(),
@@ -831,7 +833,7 @@ mod tests {
         };
 
         assert!(content("main.harn").contains("llm_stream_call(prompt, system, options)"));
-        assert!(content("main.harn").contains("read_line()"));
+        assert!(content("main.harn").contains("harness.stdio.read_line()"));
         assert!(content("harn.toml").contains(r#"chat = { id = "llama3.2", provider = "ollama" }"#));
         toml::from_str::<toml::Value>(content("harn.toml")).expect("chat manifest is valid TOML");
     }

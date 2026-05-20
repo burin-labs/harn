@@ -4,10 +4,10 @@ pipeline default(task) {
   let validator = stream_validator(
     {type: "dict", required: ["name", "age"], properties: {name: {type: "string"}, age: {type: "int"}}},
   )
-  println(validator.feed("{\"name\"").variant)
-  println(validator.value() == nil)
-  println(validator.feed(":\"Ada\",\"age\":").variant)
-  println(validator.feed("42}").variant)
-  println(validator.value().name)
-  println(validator.value().age)
+  __io_println(validator.feed("{\"name\"").variant)
+  __io_println(validator.value() == nil)
+  __io_println(validator.feed(":\"Ada\",\"age\":").variant)
+  __io_println(validator.feed("42}").variant)
+  __io_println(validator.value().name)
+  __io_println(validator.value().age)
 }

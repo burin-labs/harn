@@ -14,14 +14,14 @@ pipeline default() {
     },
   )
   let failed = workflow_execute("verify once", failing, [], {max_steps: 1})
-  println(failed.run.stages[0].status)
-  println(failed.run.stages[0].outcome)
-  println(failed.run.stages[0].branch)
-  println(len(failed.run.stages[0].attempts))
-  println(len(failed.run.stages[0].artifacts))
-  println(contains(failed.run.stages[0].visible_text, "nope"))
+  __io_println(failed.run.stages[0].status)
+  __io_println(failed.run.stages[0].outcome)
+  __io_println(failed.run.stages[0].branch)
+  __io_println(len(failed.run.stages[0].attempts))
+  __io_println(len(failed.run.stages[0].artifacts))
+  __io_println(contains(failed.run.stages[0].visible_text, "nope"))
   let verify_ok = failed.run.stages[0].verification?.ok ?? false
-  println(!verify_ok)
+  __io_println(!verify_ok)
   let passing = workflow_graph(
     {
       entry: "verify",
@@ -37,6 +37,6 @@ pipeline default() {
     },
   )
   let passed = workflow_execute("verify once", passing, [], {max_steps: 1})
-  println(passed.run.stages[0].status)
-  println(len(passed.run.stages[0].attempts))
+  __io_println(passed.run.stages[0].status)
+  __io_println(len(passed.run.stages[0].attempts))
 }

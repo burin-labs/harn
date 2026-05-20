@@ -47,8 +47,8 @@ pipeline main() {
     },
   )
   let events = transcript_events(result?.transcript)
-  println(len(transcript_events_by_kind(result?.transcript, "PermissionGrant")) == 1)
-  println(len(transcript_events_by_kind(result?.transcript, "PermissionDeny")) == 1)
-  println(result?.tools?.rejected[0] == "write_note")
-  println(json_stringify(events).contains("/workspace/a.txt"))
+  __io_println(len(transcript_events_by_kind(result?.transcript, "PermissionGrant")) == 1)
+  __io_println(len(transcript_events_by_kind(result?.transcript, "PermissionDeny")) == 1)
+  __io_println(result?.tools?.rejected[0] == "write_note")
+  __io_println(json_stringify(events).contains("/workspace/a.txt"))
 }

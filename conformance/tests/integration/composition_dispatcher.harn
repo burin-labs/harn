@@ -24,11 +24,11 @@ pipeline main() {
     manifest,
     {run_id: "conformance-dispatcher", dispatcher: dispatch},
   )
-  println(report.ok)
-  println(report.child_calls.count)
-  println(report.child_calls[0].tool_name)
-  println(report.child_calls[1].tool_name)
-  println(report.run.result.readme_content)
-  println(report.run.result.hits_query)
-  println(report.run.result.hits_count)
+  __io_println(report.ok)
+  __io_println(report.child_calls.count)
+  __io_println(report.child_calls[0].tool_name)
+  __io_println(report.child_calls[1].tool_name)
+  __io_println(report.run.result.readme_content)
+  __io_println(report.run.result.hits_query)
+  __io_println(report.run.result.hits_count)
 }

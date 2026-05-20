@@ -57,11 +57,11 @@ pipeline default() {
   )
   let meta = ui_tool_meta(resource, {visibility: "app_only", initial_view: {window: "7d", focus: "signups"}})
   let mcp_meta = ui_tool_meta_to_mcp(meta)
-  println("ui_resource.uri=" + resource.uri)
-  println("ui_resource.validation.ok=" + to_string(resource.validation.ok))
-  println("ui_resource.size_bytes=" + to_string(resource.size_bytes))
-  println("mcp_meta.resourceUri=" + mcp_meta.ui.resourceUri)
-  println("mcp_meta.visibility=" + mcp_meta.ui.visibility)
+  __io_println("ui_resource.uri=" + resource.uri)
+  __io_println("ui_resource.validation.ok=" + to_string(resource.validation.ok))
+  __io_println("ui_resource.size_bytes=" + to_string(resource.size_bytes))
+  __io_println("mcp_meta.resourceUri=" + mcp_meta.ui.resourceUri)
+  __io_println("mcp_meta.visibility=" + mcp_meta.ui.visibility)
   let result = ui_tool_result(
     resource,
     {structured_fallback: ui_structured_fallback(metrics, {text: "signups=42 churn=3 mrr=18400"})},
@@ -73,6 +73,6 @@ pipeline default() {
     {label: "plain-text host", caps: {apps: false}},
   ] {
     let rendered = ui_select_for_host(result, host.caps)
-    println(host.label + " -> selected=" + rendered.selected)
+    __io_println(host.label + " -> selected=" + rendered.selected)
   }
 }

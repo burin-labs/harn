@@ -23,14 +23,14 @@ pipeline default() {
   } else {
     "noop"
   }
-  println(backend == expected)
+  __io_println(backend == expected)
   // Without an active orchestration policy the script runs at the
   // unrestricted profile — that is the documented `harn run` default.
-  println(sandbox_active_profile())
+  __io_println(sandbox_active_profile())
   // Each shipped backend reports availability as `true` on its host.
   // (Linux Landlock/seccomp are runtime-detected by the per-mechanism
   // setup, so the backend reports `true` even on kernels missing one
   // or both — the per-mechanism unavailability surfaces as a
   // structured warning rather than a backend-availability flip.)
-  println(sandbox_backend_available())
+  __io_println(sandbox_backend_available())
 }

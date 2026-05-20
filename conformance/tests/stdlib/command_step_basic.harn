@@ -47,5 +47,5 @@ pipeline default() {
   assert(failed.stderr_path != nil)
   assert_eq(len(failed.attempts), 1)
   assert_eq(failed.attempts[0].exit_code, 7)
-  println("ok")
+  __io_println("ok")
 }

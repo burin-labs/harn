@@ -23,13 +23,13 @@ pipeline default() {
   let events = captured.events.filter({ event -> event.type == "progress_reported" })
   require len(events) == 1, "entries-only progress emits one event"
   let event = events[0]
-  println("message_is_nil=" + to_string(event.message == nil))
-  println("entry_count=" + to_string(len(event.entries)))
-  println(
+  __io_println("message_is_nil=" + to_string(event.message == nil))
+  __io_println("entry_count=" + to_string(len(event.entries)))
+  __io_println(
     "first=" + event.entries[0].content + ":" + event.entries[0].status + ":"
       + event.entries[0].priority,
   )
-  println(
+  __io_println(
     "second="
       + event.entries[1].content
       + ":"

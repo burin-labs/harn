@@ -279,7 +279,7 @@ return the *same* task handle:
 ```harn,ignore
 let first = pool.submit({ -> review(pr) }, {idempotency_key: "review-pr-1984"})
 let second = pool.submit({ -> review(pr) }, {idempotency_key: "review-pr-1984"})
-println(first.id == second.id)   // true
+log(first.id == second.id)   // true
 ```
 
 This is load-bearing for pipeline-scope pools: a worker that crashed

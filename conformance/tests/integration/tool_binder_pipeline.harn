@@ -71,16 +71,16 @@ pipeline default() {
     },
   )
   let r1 = mw_skip(envelope("file_read", {path: "/etc/hosts"}, schema), next)
-  println(r1.ok)
-  println(r1.audit.binder.status)
-  println(r1.audit.binder.reason)
-  println(r1.audit.binder.attempts)
-  println(r1.arguments.path)
+  __io_println(r1.ok)
+  __io_println(r1.audit.binder.status)
+  __io_println(r1.audit.binder.reason)
+  __io_println(r1.audit.binder.attempts)
+  __io_println(r1.arguments.path)
   // (2) No intent provided AND args don't validate → still skipped because
   // there's nothing to bind from. Audit reason = "no_intent".
   let r2 = mw_skip(envelope("file_read", {}, schema), next)
-  println(r2.audit.binder.status)
-  println(r2.audit.binder.reason)
+  __io_println(r2.audit.binder.status)
+  __io_println(r2.audit.binder.reason)
   // (3) Successful binder dispatch — invalid args + intent → binder rewrites.
   // Also capture the binder opts so we can assert the configured `timeout_ms`
   // is forwarded to the inner caller (this is how the wall-clock budget is
@@ -102,17 +102,17 @@ pipeline default() {
   let _ = mock_time(0)
   let r3 = mw_ok(envelope("file_read", {_nl_intent: "read /var/log/syslog and append hello"}, schema), next)
   let _ = unmock_time()
-  println(r3.ok)
-  println(r3.audit.binder.status)
-  println(r3.audit.binder.attempts)
-  println(r3.arguments.path)
-  println(r3.arguments.contents)
+  __io_println(r3.ok)
+  __io_println(r3.audit.binder.status)
+  __io_println(r3.audit.binder.attempts)
+  __io_println(r3.arguments.path)
+  __io_println(r3.arguments.contents)
   // Intent must be stripped before dispatch.
-  println(contains(r3.arguments.keys(), "_nl_intent"))
+  __io_println(contains(r3.arguments.keys(), "_nl_intent"))
   // The configured `timeout_ms` must reach the binder substrate so a real
   // `llm_call` (which now recognizes `timeout_ms`) can apply an HTTP-level
   // backstop in addition to the middleware's post-call wall-clock check.
-  println(atomic_get(captured_timeout_ms))
+  __io_println(atomic_get(captured_timeout_ms))
   // (4) Defaults: the production defaults should be usable with reasoning
   // binder models without callers having to remember the empirical token
   // and latency budget.
@@ -138,9 +138,9 @@ pipeline default() {
     next,
   )
   let _ = unmock_time()
-  println(r_defaults.audit.binder.status)
-  println(atomic_get(captured_default_timeout_ms))
-  println(atomic_get(captured_default_max_tokens))
+  __io_println(r_defaults.audit.binder.status)
+  __io_println(atomic_get(captured_default_timeout_ms))
+  __io_println(atomic_get(captured_default_max_tokens))
   // (5) Timeout: binder takes longer than timeout_ms; envelope passes through.
   let slow_binder = { _prompt, _system, _opts ->
     let _ = advance_time(250)
@@ -158,11 +158,11 @@ pipeline default() {
   let _ = mock_time(0)
   let r4 = mw_timeout(envelope("file_read", {_nl_intent: "do something slow"}, schema), next)
   let _ = unmock_time()
-  println(r4.ok)
-  println(r4.audit.binder.status)
-  println(r4.audit.binder.latency_ms >= 100)
+  __io_println(r4.ok)
+  __io_println(r4.audit.binder.status)
+  __io_println(r4.audit.binder.latency_ms >= 100)
   // Stripped args reach next() — intent is gone, original args (empty here) pass through.
-  println(contains(r4.arguments.keys(), "_nl_intent"))
+  __io_println(contains(r4.arguments.keys(), "_nl_intent"))
   // (6) on_failure: "reject" — bad binder JSON short-circuits with schema_violation.
   let bad_binder = { _prompt, _system, _opts -> return {text: "not json at all", model: "mock", provider: "mock", input_tokens: 0, output_tokens: 0} }
   let was_dispatched = atomic(0)
@@ -180,16 +180,16 @@ pipeline default() {
     },
   )
   let r5 = mw_reject(envelope("file_read", {_nl_intent: "anything"}, schema), watch_next)
-  println(r5.ok)
-  println(r5.error_category)
-  println(r5.audit.binder.status)
-  println(atomic_get(was_dispatched) == 0)
+  __io_println(r5.ok)
+  __io_println(r5.error_category)
+  __io_println(r5.audit.binder.status)
+  __io_println(atomic_get(was_dispatched) == 0)
   // (7) compose_tool_callers stacks cleanly with the binder.
   let composed = compose_tool_callers([mw_ok])
   let _ = mock_time(0)
   let r6 = composed(envelope("file_read", {_nl_intent: "read /var/log/syslog and append hello"}, schema), next)
   let _ = unmock_time()
-  println(r6.ok)
-  println(r6.audit.binder.status)
-  println(r6.arguments.path)
+  __io_println(r6.ok)
+  __io_println(r6.audit.binder.status)
+  __io_println(r6.arguments.path)
 }

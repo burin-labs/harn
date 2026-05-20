@@ -59,14 +59,14 @@ pipeline default() {
   let stalls = events_of(captured.events, "agent_loop_stall_warning")
   let judges = events_of(captured.events, "judge_decision")
   let messages = json_stringify(agent_session_messages(session))
-  println(captured.result.status)
-  println(len(stalls))
-  println(len(judges))
-  println(judges[0].trigger)
-  println(judges[0].verdict)
-  println(tool_message_count(session))
-  println(contains(messages, "Stall diagnostic"))
-  println(len(llm_mock_calls()))
+  __io_println(captured.result.status)
+  __io_println(len(stalls))
+  __io_println(len(judges))
+  __io_println(judges[0].trigger)
+  __io_println(judges[0].verdict)
+  __io_println(tool_message_count(session))
+  __io_println(contains(messages, "Stall diagnostic"))
+  __io_println(len(llm_mock_calls()))
   var other_tools = tool_registry()
   other_tools = tool_define(
     other_tools,
@@ -100,8 +100,8 @@ pipeline default() {
       },
     ) },
   )
-  println(other.result.status)
-  println(len(events_of(other.events, "agent_loop_stall_warning")))
-  println(len(events_of(other.events, "judge_decision")))
-  println(tool_message_count(other_session))
+  __io_println(other.result.status)
+  __io_println(len(events_of(other.events, "agent_loop_stall_warning")))
+  __io_println(len(events_of(other.events, "judge_decision")))
+  __io_println(tool_message_count(other_session))
 }

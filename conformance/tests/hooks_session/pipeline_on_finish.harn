@@ -12,7 +12,7 @@ pipeline default() {
   register_session_hook(
     "pre_finish",
     { event ->
-      println(
+      __io_println(
         "pre_finish: has_on_finish=" + to_string(event.has_on_finish) + " return_value="
           + to_string(event.return_value),
       )
@@ -22,23 +22,23 @@ pipeline default() {
   register_session_hook(
     "post_finish",
     { event ->
-      println("post_finish: return_value=" + to_string(event.return_value))
+      __io_println("post_finish: return_value=" + to_string(event.return_value))
       return nil
     },
   )
   register_session_hook(
     "on_unsettled_detected",
     { event ->
-      println("on_unsettled_detected fired (unexpected for P-01)")
+      __io_println("on_unsettled_detected fired (unexpected for P-01)")
       return nil
     },
   )
   pipeline_on_finish(
     { _harness, return_value ->
-      println("on_finish: return_value=" + to_string(return_value))
+      __io_println("on_finish: return_value=" + to_string(return_value))
       return return_value + 100
     },
   )
-  println("body done")
+  __io_println("body done")
   return 7
 }

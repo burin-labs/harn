@@ -570,11 +570,6 @@ pub(crate) const SIGNATURES: &[BuiltinSignature] = &[
         TY_STRING,
     ),
     BuiltinSignature::simple(
-        "prompt_user",
-        &[Param::optional("message", TY_STRING)],
-        TY_STRING_OR_NIL,
-    ),
-    BuiltinSignature::simple(
         "provider_capabilities",
         &[
             Param::new("provider", TY_STRING),

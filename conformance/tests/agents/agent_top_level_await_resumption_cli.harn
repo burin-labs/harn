@@ -19,17 +19,17 @@ pipeline main() {
     "pipeline main() {\n"
       + "  llm_mock({tool_calls: [{id: \"park_1\", name: \"agent_await_resumption\", arguments: {reason: \"waiting on operator\"}}]})\n"
       + "  let result = agent_loop(\"Park until the operator resumes.\", nil, {provider: \"mock\", tool_format: \"native\", max_iterations: 2, session_id: \"top-level-\" + uuid_v7()})\n"
-      + "  println(\"status=\" + result.status)\n"
-      + "  println(\"reason=\" + result.reason)\n"
-      + "  println(\"handle_status=\" + result.handle.status)\n"
-      + "  println(\"snapshot=\" + result.handle.snapshot_path)\n"
+      + "  __io_println(\"status=\" + result.status)\n"
+      + "  __io_println(\"reason=\" + result.reason)\n"
+      + "  __io_println(\"handle_status=\" + result.handle.status)\n"
+      + "  __io_println(\"snapshot=\" + result.handle.snapshot_path)\n"
       + "}\n",
   )
   let first = exec_at(root, harn_bin, "run", script)
-  println(first.success)
-  println(contains(first.stdout, "status=suspended"))
-  println(contains(first.stdout, "reason=waiting on operator"))
-  println(contains(first.stdout, "handle_status=suspended"))
+  __io_println(first.success)
+  __io_println(contains(first.stdout, "status=suspended"))
+  __io_println(contains(first.stdout, "reason=waiting on operator"))
+  __io_println(contains(first.stdout, "handle_status=suspended"))
   let snapshot = first_snapshot_line(first.stdout)
   require snapshot != nil, "top-level suspend did not print a snapshot path"
   let snapshot_path = if path_is_absolute(snapshot) {
@@ -37,13 +37,13 @@ pipeline main() {
   } else {
     path_join(root, snapshot)
   }
-  println(file_exists(snapshot_path))
+  __io_println(file_exists(snapshot_path))
   let second = exec_at(root, harn_bin, "run", "--resume", snapshot, "--json")
-  println(second.success)
+  __io_println(second.success)
   let lines = second.stdout.trim().split("\n")
   let final = json_parse(lines[len(lines) - 1])
-  println(final.data.event_type)
-  println(final.data.value.status)
-  println(contains(final.data.value.result.summary, "Mock response"))
-  println(final.data.value.has_transcript)
+  __io_println(final.data.event_type)
+  __io_println(final.data.value.status)
+  __io_println(contains(final.data.value.result.summary, "Mock response"))
+  __io_println(final.data.value.has_transcript)
 }

@@ -22,8 +22,8 @@ pipeline default() {
   for item in items {
     picked = picked + [first_value(item)]
   }
-  println(len(picked))
+  __io_println(len(picked))
   for value in picked {
-    println(value)
+    __io_println(value)
   }
 }

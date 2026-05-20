@@ -26,9 +26,9 @@ pipeline default() {
   cache_put("k", {answer: 42}, {store: store})
   let hit = cache_get("k", {store: store})
   // -> {hit: true, value: {answer: 42}, backend: "mem", namespace: "evals"}
-  println(to_string(hit.hit))
+  log(to_string(hit.hit))
   cache_clear({store: store})
-  println(json_stringify(cache_stats({store: store})))
+  log(json_stringify(cache_stats({store: store})))
 }
 ```
 
@@ -53,7 +53,7 @@ fn deep_scan_repo() -> dict {
 pipeline default() {
   let store = mem_cache({namespace: "scan-results", ttl: "1h"})
   let scan = with_cache("repo:abc123", fn() { return deep_scan_repo() }, {store: store})
-  println(json_stringify(scan))
+  log(json_stringify(scan))
 }
 ```
 

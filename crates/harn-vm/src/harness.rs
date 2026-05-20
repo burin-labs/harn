@@ -948,15 +948,15 @@ mod tests {
 fn main(harness: Harness) {
   harness.stdio.print("partial ")
   harness.stdio.println("line")
-  println(harness.clock.now_ms())
+  __io_println(harness.clock.now_ms())
   harness.clock.sleep_ms(250)
-  println(harness.clock.now_ms())
-  println(harness.clock.monotonic_ms())
-  println(harness.env.get("KEY"))
-  println(harness.fs.read_text("/x"))
-  println(harness.fs.exists("/missing"))
-  println(harness.random.gen_u64())
-  println(harness.net.get("https://example.test"))
+  __io_println(harness.clock.now_ms())
+  __io_println(harness.clock.monotonic_ms())
+  __io_println(harness.env.get("KEY"))
+  __io_println(harness.fs.read_text("/x"))
+  __io_println(harness.fs.exists("/missing"))
+  __io_println(harness.random.gen_u64())
+  __io_println(harness.net.get("https://example.test"))
 }
 "#,
             harness.clone(),
@@ -1002,9 +1002,9 @@ fn main(harness: Harness) {
         let output = run_harness_source(
             r#"
 fn main(harness: Harness) {
-  println(harness.random.gen_u64())
-  println(harness.random.gen_u64())
-  println(harness.random.gen_u64())
+  __io_println(harness.random.gen_u64())
+  __io_println(harness.random.gen_u64())
+  __io_println(harness.random.gen_u64())
 }
 "#,
             harness,

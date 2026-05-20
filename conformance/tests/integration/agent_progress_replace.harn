@@ -16,8 +16,8 @@ pipeline default() {
   )
   let events = captured.events.filter({ event -> event.type == "progress_reported" })
   require len(events) == 2, "replace semantics should emit both updates"
-  println("replace_count=" + to_string(len(events)))
-  println("first_replace=" + to_string(events[0].replace))
-  println("second_replace=" + to_string(events[1].replace))
-  println("messages=" + events[0].message + "," + events[1].message)
+  __io_println("replace_count=" + to_string(len(events)))
+  __io_println("first_replace=" + to_string(events[0].replace))
+  __io_println("second_replace=" + to_string(events[1].replace))
+  __io_println("messages=" + events[0].message + "," + events[1].message)
 }

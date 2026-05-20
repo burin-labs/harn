@@ -48,8 +48,8 @@ pipeline default() {
       compact_keep_last: 0,
     },
   )
-  println(result.status)
-  println(atomic_get(pre_seen))
-  println(atomic_get(post_seen))
+  __io_println(result.status)
+  __io_println(atomic_get(pre_seen))
+  __io_println(atomic_get(post_seen))
   clear_session_hooks()
 }

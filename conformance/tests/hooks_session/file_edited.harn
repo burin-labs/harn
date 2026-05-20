@@ -25,8 +25,8 @@ pipeline default() {
   llm_mock_clear()
   llm_mock({text: "ok"})
   let result = agent_loop("touch some files", nil, {provider: "mock"})
-  println(result.status)
-  println(atomic_get(edits_seen))
+  __io_println(result.status)
+  __io_println(atomic_get(edits_seen))
   delete_file(tmp)
   clear_session_hooks()
 }

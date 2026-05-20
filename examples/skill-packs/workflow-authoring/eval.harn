@@ -19,7 +19,7 @@
 pipeline default() {
   let opts = parse_argv(argv)
   if opts.case == "" {
-    eprint(
+    __io_eprint(
       "usage: harn run eval.harn -- --case <path> [--provider <id>] [--model <name>] [--tmp <dir>]\n",
     )
     return 2
@@ -36,7 +36,7 @@ pipeline default() {
     let response = llm_call(case.user_prompt, case.system_prompt, opts_dict)
     bundle_text = extract_block(response.text, "bundle")
     if bundle_text == "" {
-      eprint("eval: model response missing <bundle>...</bundle>\n")
+      __io_eprint("eval: model response missing <bundle>...</bundle>\n")
       return 3
     }
   }
@@ -67,8 +67,8 @@ pipeline default() {
     validate_stdout: validate.stdout,
     validate_stderr: validate.stderr,
   }
-  print(json_stringify(report))
-  print("\n")
+  __io_print(json_stringify(report))
+  __io_print("\n")
   if validate_ok && preview_ok && run_ok && assertions.ok {
     return 0
   }

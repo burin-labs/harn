@@ -25,5 +25,5 @@ pipeline main() {
       approval_policy: {auto_approve: ["read*"], auto_deny: ["shell*"]},
     },
   )
-  println(len(result?.tools?.rejected) == 0)
+  __io_println(len(result?.tools?.rejected) == 0)
 }

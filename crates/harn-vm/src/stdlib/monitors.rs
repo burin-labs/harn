@@ -680,8 +680,8 @@ pipeline test(task) {
     source: {label: "poll-demo", poll: { _ -> return {ready: true} }},
     condition: { state -> state.ready },
   })
-  println(result.status)
-  println(result.poll_count == 1)
+  __io_println(result.status)
+  __io_println(result.poll_count == 1)
 }
 "#;
                 let (output, log) = execute_monitor_script(dir.path(), source)
@@ -722,8 +722,8 @@ pipeline test(task) {
     source: {poll: { _ -> return {ready: true, value: 42} }},
     condition: { state -> state.ready },
   })
-  println(result.status)
-  println(result.state.value)
+  __io_println(result.status)
+  __io_println(result.state.value)
 }
 "#;
                 let (live_output, _) = execute_monitor_script(dir.path(), live)
@@ -741,8 +741,8 @@ pipeline test(task) {
     source: {poll: { _ -> return {ready: false, value: 0} }},
     condition: { state -> state.ready },
   })
-  println(result.status)
-  println(result.state.value)
+  __io_println(result.status)
+  __io_println(result.state.value)
 }
 "#;
                 let (replay_output, _) = execute_monitor_script(dir.path(), replay)
@@ -802,9 +802,9 @@ pipeline test(task) {
     },
     condition: { state -> state.ready },
   })
-  println(result.status)
-  println(result.poll_count)
-  println(result.push_wake_count)
+  __io_println(result.status)
+  __io_println(result.poll_count)
+  __io_println(result.push_wake_count)
 }
 "#;
                 let chunk = compile_source(source).expect("compile source");

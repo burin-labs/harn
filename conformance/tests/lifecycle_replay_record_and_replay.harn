@@ -42,20 +42,24 @@ pipeline default() {
     },
   )
   let snapshot = lifecycle_receipts_snapshot()
-  println("snapshot_len=" + to_string(len(snapshot)))
-  println("seq_1=" + to_string(snapshot[0].seq))
-  println("seq_2=" + to_string(snapshot[1].seq))
-  println("seq_3=" + to_string(snapshot[2].seq))
-  println("kind_1=" + snapshot[0].kind)
-  println("kind_2=" + snapshot[1].kind)
-  println("kind_3=" + snapshot[2].kind)
-  println("suspension_signed=" + to_string(snapshot[0].payload.suspended_at.at_ms == 1700000000000))
-  println("resumption_signed=" + to_string(snapshot[1].payload.resumed_at.at_ms == 1700000000000))
-  println("drain_signed=" + to_string(snapshot[2].payload.decided_at.at_ms == 1700000000000))
-  println("resumption_input_present=" + to_string(snapshot[1].payload.input?.approved))
-  println("suspension_entry_seq=" + to_string(suspension.seq))
-  println("resumption_entry_seq=" + to_string(resumption.seq))
-  println("drain_entry_seq=" + to_string(drain.seq))
+  __io_println("snapshot_len=" + to_string(len(snapshot)))
+  __io_println("seq_1=" + to_string(snapshot[0].seq))
+  __io_println("seq_2=" + to_string(snapshot[1].seq))
+  __io_println("seq_3=" + to_string(snapshot[2].seq))
+  __io_println("kind_1=" + snapshot[0].kind)
+  __io_println("kind_2=" + snapshot[1].kind)
+  __io_println("kind_3=" + snapshot[2].kind)
+  __io_println(
+    "suspension_signed=" + to_string(snapshot[0].payload.suspended_at.at_ms == 1700000000000),
+  )
+  __io_println(
+    "resumption_signed=" + to_string(snapshot[1].payload.resumed_at.at_ms == 1700000000000),
+  )
+  __io_println("drain_signed=" + to_string(snapshot[2].payload.decided_at.at_ms == 1700000000000))
+  __io_println("resumption_input_present=" + to_string(snapshot[1].payload.input?.approved))
+  __io_println("suspension_entry_seq=" + to_string(suspension.seq))
+  __io_println("resumption_entry_seq=" + to_string(resumption.seq))
+  __io_println("drain_entry_seq=" + to_string(drain.seq))
   let _ = unmock_time()
   return "ok"
 }

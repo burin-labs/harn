@@ -31,8 +31,8 @@ pipeline test(task) {
   )
   let _ = emit_channel("wild.input", {n: 1})
   let fired = channel_events("ch.wild.fired")
-  println(len(fired))
-  println(fired[0].payload.scope)
+  __io_println(len(fired))
+  __io_println(fired[0].payload.scope)
   // Default tenant id is `default` when no tenant is set on the runtime.
-  println(fired[0].payload.scope_id)
+  __io_println(fired[0].payload.scope_id)
 }

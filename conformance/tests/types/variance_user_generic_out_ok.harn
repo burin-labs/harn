@@ -3,5 +3,5 @@
 // declared variance.
 pipeline test(task) {
   type Reader<out T> = fn() -> T
-  println("ok")
+  __io_println("ok")
 }

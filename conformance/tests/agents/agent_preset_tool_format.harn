@@ -4,22 +4,22 @@ pipeline default() {
   // No model supplied — `tool_format` should be absent so the VM can derive
   // it at the llm_call boundary.
   let bare = agent_preset("audit")
-  println(bare?.tool_format == nil)
+  __io_println(bare?.tool_format == nil)
   // Native-capable model — preset derives `tool_format: "native"` from the
   // capability matrix via `llm_resolve_model`.
   let native_audit = agent_preset("audit", {model: "claude-sonnet-4-5"})
-  println(native_audit.tool_format)
+  __io_println(native_audit.tool_format)
   // Text-only local route — preset derives `tool_format: "text"` so the VM
   // capability gate accepts the request instead of rejecting with
   // "option `tools` is not supported by ...".
   let text_audit = agent_preset("audit", {provider: "ollama", model: "qwen3.6:35b-a3b-coding-nvfp4"})
-  println(text_audit.tool_format)
+  __io_println(text_audit.tool_format)
   // Caller explicit `tool_format` wins over the derived default — even if the
   // capability matrix disagrees.
   let forced_text = agent_preset("audit", {model: "claude-sonnet-4-5", tool_format: "text"})
-  println(forced_text.tool_format)
+  __io_println(forced_text.tool_format)
   // Summary preset does not opt into tool semantics, so the derivation is
   // skipped and `tool_format` stays absent regardless of model.
   let summary = agent_preset("summary", {model: "claude-sonnet-4-5"})
-  println(summary?.tool_format == nil)
+  __io_println(summary?.tool_format == nil)
 }

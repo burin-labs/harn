@@ -2,8 +2,8 @@ import { agent_chat_loop, agent_chat_route_input } from "std/agent/chat"
 
 pipeline default() {
   let routed = agent_chat_route_input("/help", {}, {"/runs": { _req -> {kind: "handled", message: "runs"} }})
-  println(routed.kind)
-  println(contains(routed.message, "/runs"))
+  __io_println(routed.kind)
+  __io_println(contains(routed.message, "/runs"))
   llm_mock_clear()
   llm_mock(
     {
@@ -43,14 +43,14 @@ pipeline default() {
       },
     },
   )
-  println(result.turns)
-  println(result.stop_reason)
-  println(result.last_result?.visible_text)
-  println(result.state.handled_once)
-  println(result.state.last_wait_for_user_question)
-  println(atomic_get(input_count))
-  println(atomic_get(model_count))
-  println(atomic_get(wait_count))
-  println(len(result.transcript.messages))
-  println(agent_session_exists("agent-chat-loop-conformance"))
+  __io_println(result.turns)
+  __io_println(result.stop_reason)
+  __io_println(result.last_result?.visible_text)
+  __io_println(result.state.handled_once)
+  __io_println(result.state.last_wait_for_user_question)
+  __io_println(atomic_get(input_count))
+  __io_println(atomic_get(model_count))
+  __io_println(atomic_get(wait_count))
+  __io_println(len(result.transcript.messages))
+  __io_println(agent_session_exists("agent-chat-loop-conformance"))
 }

@@ -28,8 +28,8 @@ pipeline main() {
       },
     },
   )
-  println(typed?.ok)
-  println(len(typed?.data?.callers ?? []) == 2)
+  __io_println(typed?.ok)
+  __io_println(len(typed?.data?.callers ?? []) == 2)
   llm_mock({tool_calls: [{id: "deny_1", name: "write_note", arguments: {path: "notes.txt"}}]})
   let denied = sub_agent_run(
     "Try to write a note.",
@@ -41,7 +41,7 @@ pipeline main() {
       max_iterations: 1,
     },
   )
-  println(!denied?.ok)
-  println(denied?.error?.category == "permission_denied")
-  println(denied?.error?.tool == "write_note")
+  __io_println(!denied?.ok)
+  __io_println(denied?.error?.category == "permission_denied")
+  __io_println(denied?.error?.tool == "write_note")
 }

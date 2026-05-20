@@ -1,6 +1,6 @@
 import { add, greet } from "selective_import_lib"
 
 pipeline default() {
-  println(greet("World"))
-  println(add(3, 4))
+  __io_println(greet("World"))
+  __io_println(add(3, 4))
 }

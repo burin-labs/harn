@@ -115,7 +115,7 @@ pipeline default() {
     )
     stopped = any(kind == "stopped" for kind, _ in lifecycle)
 
-    print(
+    sys.stdout.write(
         json.dumps(
             {
                 "pending_started": pending_started,
@@ -127,12 +127,12 @@ pipeline default() {
     PY
     """
   let result = shell(script)
-  println(result.success)
+  __io_println(result.success)
   if !result.success {
     return
   }
   let summary = json_parse(result.stdout.trim())
-  println(summary.pending_started)
-  println(summary.waitpoint_started)
-  println(summary.stopped)
+  __io_println(summary.pending_started)
+  __io_println(summary.waitpoint_started)
+  __io_println(summary.stopped)
 }

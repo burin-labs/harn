@@ -26,5 +26,5 @@ pipeline default() {
   if !contains(result.stdout, "smoke") {
     throw "process smoke failed: stdout did not contain expected marker (got ${result.stdout})"
   }
-  println("process ok on " + platform())
+  __io_println("process ok on " + platform())
 }

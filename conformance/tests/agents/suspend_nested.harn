@@ -37,21 +37,23 @@ pipeline main() {
     {provider: "mock", background: true, tool_format: "native", max_iterations: 3},
   )
   let suspended_b = wait_agent(handle_b)
-  println("a_suspended=" + suspended_a.status)
-  println("b_suspended=" + suspended_b.status)
-  println("distinct_ids=" + to_string(suspended_a.id != suspended_b.id))
-  println("distinct_snapshots=" + to_string(suspended_a.snapshot_path != suspended_b.snapshot_path))
+  __io_println("a_suspended=" + suspended_a.status)
+  __io_println("b_suspended=" + suspended_b.status)
+  __io_println("distinct_ids=" + to_string(suspended_a.id != suspended_b.id))
+  __io_println(
+    "distinct_snapshots=" + to_string(suspended_a.snapshot_path != suspended_b.snapshot_path),
+  )
   // Resume A first. B must remain suspended.
   llm_mock({text: "worker A completed"})
   let _resumed_a = resume_agent(handle_a)
   let done_a = wait_agent(handle_a)
   let still_b = wait_agent(handle_b)
-  println("a_after_resume=" + done_a.status)
-  println("b_still_suspended=" + still_b.status)
+  __io_println("a_after_resume=" + done_a.status)
+  __io_println("b_still_suspended=" + still_b.status)
   // Resume B independently.
   llm_mock({text: "worker B completed"})
   let _resumed_b = resume_agent(handle_b)
   let done_b = wait_agent(handle_b)
-  println("b_after_resume=" + done_b.status)
-  println("a_unchanged=" + done_a.status)
+  __io_println("b_after_resume=" + done_b.status)
+  __io_println("a_unchanged=" + done_a.status)
 }

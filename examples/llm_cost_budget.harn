@@ -26,14 +26,14 @@ pipeline default() {
   while i < 5 {
     let env = caller(call)
     if !(env?.ok ?? false) {
-      println("call " + to_string(i + 1) + " -> " + to_string(env.status))
+      __io_println("call " + to_string(i + 1) + " -> " + to_string(env.status))
       if exceeded_at < 0 {
         exceeded_at = i + 1
       }
     } else {
-      println("call " + to_string(i + 1) + " -> ok")
+      __io_println("call " + to_string(i + 1) + " -> ok")
     }
     i = i + 1
   }
-  println("exceeded after " + to_string(exceeded_at - 1) + " successful calls")
+  __io_println("exceeded after " + to_string(exceeded_at - 1) + " successful calls")
 }

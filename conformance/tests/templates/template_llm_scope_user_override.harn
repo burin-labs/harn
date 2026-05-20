@@ -8,5 +8,5 @@ pipeline default() {
   // to use the `llm` key for unrelated data. A one-shot lint warning
   // is emitted in the host log (not captured in this transcript).
   let tmpl = "user={{ llm.tag }} provider={{ llm.provider }}"
-  println(render_string(tmpl, {llm: {tag: "user-payload", provider: "user-provider"}}))
+  __io_println(render_string(tmpl, {llm: {tag: "user-payload", provider: "user-provider"}}))
 }

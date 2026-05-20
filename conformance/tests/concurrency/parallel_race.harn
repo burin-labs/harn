@@ -9,15 +9,15 @@ pipeline default() {
     return Ok("slow")
   }
   let winner = parallel_race([50, 5], racer)
-  println(winner)
+  __io_println(winner)
   sleep(80)
-  println(atomic_get(finished))
+  __io_println(atomic_get(finished))
   fn failer(n: int) {
     return Err(n)
   }
   try {
     parallel_race([1, 2], failer)
   } catch (e) {
-    println("all failed")
+    __io_println("all failed")
   }
 }

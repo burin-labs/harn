@@ -40,8 +40,8 @@ pipeline test(task) {
     ],
     {hosted_history_days: 30},
   )
-  println(gated.status)
-  println(len(gated.candidates))
+  __io_println(gated.status)
+  __io_println(len(gated.candidates))
   let history = [
     repair_run("r1", "burin-labs/harn"),
     repair_run("r2", "burin-labs/harn"),
@@ -52,13 +52,13 @@ pipeline test(task) {
     history,
     {hosted_history_days: 91, min_examples: 3, package_name: "merge-captain-workflows"},
   )
-  println(bundle.schema)
-  println(bundle.kind)
-  println(len(bundle.source_traces))
-  println(bundle.shadow.pass)
-  println(bundle.savings.model_calls_avoided)
-  println(bundle.workflow.package_name)
-  println(bundle.patch.contains("@step"))
-  println(bundle.patch.contains("dispatch"))
-  println(len(bundle.report.rejected))
+  __io_println(bundle.schema)
+  __io_println(bundle.kind)
+  __io_println(len(bundle.source_traces))
+  __io_println(bundle.shadow.pass)
+  __io_println(bundle.savings.model_calls_avoided)
+  __io_println(bundle.workflow.package_name)
+  __io_println(bundle.patch.contains("@step"))
+  __io_println(bundle.patch.contains("dispatch"))
+  __io_println(len(bundle.report.rejected))
 }

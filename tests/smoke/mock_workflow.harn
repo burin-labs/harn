@@ -12,5 +12,5 @@ pipeline default() {
   if result.text != "smoke" {
     throw "mock workflow smoke failed: expected text=smoke, got ${result.text}"
   }
-  println("mock workflow ok")
+  __io_println("mock workflow ok")
 }

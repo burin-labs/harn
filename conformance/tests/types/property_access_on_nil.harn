@@ -3,5 +3,5 @@
 // type is nil here and points at `?.` / nil-guard fixes.
 pipeline default(_) {
   let x: nil = nil
-  println(x.foo)
+  __io_println(x.foo)
 }

@@ -61,7 +61,7 @@ fn pipeline_main_returning_ok_exits_zero() {
 #[ignore = "binary surface — moves to slow E2E/smoke job (issue #1069)"]
 #[test]
 fn pipeline_main_implicit_return_exits_zero() {
-    let out = run_script("pipeline main() {\n  println(\"hi\")\n}\n");
+    let out = run_script("pipeline main() {\n  __io_println(\"hi\")\n}\n");
     assert_eq!(out.status.code(), Some(0));
     assert!(String::from_utf8_lossy(&out.stdout).contains("hi"));
 }

@@ -1,7 +1,7 @@
 pipeline test(task) {
-  println("ab" * 3)
-  println(4 * "xy")
-  println(len("z" * 100))
-  println("hi" * 0)
-  println("hi" * -1)
+  __io_println("ab" * 3)
+  __io_println(4 * "xy")
+  __io_println(len("z" * 100))
+  __io_println("hi" * 0)
+  __io_println("hi" * -1)
 }

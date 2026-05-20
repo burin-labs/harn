@@ -39,5 +39,5 @@ pipeline test(task) {
   assert_eq(len(host_calls()), 3)
   assert_eq(len(host_calls_for("project", "metadata_get")), 1)
   assert_host_call_count(1, "workspace", "read_text")
-  println("ok")
+  __io_println("ok")
 }

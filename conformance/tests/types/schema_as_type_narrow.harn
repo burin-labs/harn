@@ -4,22 +4,22 @@ pipeline test(task) {
   let data: unknown = {verdict: "pass", summary: "looks good"}
   if schema_is(data, GraderOut) {
     // data is narrowed to GraderOut here.
-    println(data.verdict)
-    println(data.summary)
+    __io_println(data.verdict)
+    __io_println(data.summary)
   } else {
-    println("unreachable")
+    __io_println("unreachable")
   }
   // schema_of(T) produces the same dict schema, and narrowing works
   // through it too.
   if schema_is(data, schema_of(GraderOut)) {
-    println(data.verdict.upper())
+    __io_println(data.verdict.upper())
   }
   // Negative narrowing: a value that fails validation does not reach
   // the then-branch.
   let bogus: unknown = {verdict: "maybe", summary: "x"}
   if schema_is(bogus, GraderOut) {
-    println("unreachable")
+    __io_println("unreachable")
   } else {
-    println("rejected")
+    __io_println("rejected")
   }
 }

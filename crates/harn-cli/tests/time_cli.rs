@@ -171,7 +171,7 @@ fn time_run_eval_mode_emits_envelope() {
     let cache_dir = tempfile::tempdir().expect("cache dir");
 
     let output = Command::new(binary_path())
-        .args(["time", "run", "--json", "-e", "println(\"inline\")"])
+        .args(["time", "run", "--json", "-e", "__io_println(\"inline\")"])
         .current_dir(workdir.path())
         .env("HARN_CACHE_DIR", cache_dir.path())
         .env("HARN_BYTECODE_CACHE", "1")

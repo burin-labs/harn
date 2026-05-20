@@ -4,9 +4,9 @@ pipeline main() {
   let second = transcript
     .inject_reminder(first.transcript, {body: "new", dedupe_key: "slot", ttl_turns: 3})
   let events = transcript_events_by_kind(second.transcript, "system_reminder")
-  println(second.deduped_count)
-  println(len(events))
-  println(events[0].text)
-  println(events[0].reminder.body)
-  println(events[0].reminder.ttl_turns)
+  __io_println(second.deduped_count)
+  __io_println(len(events))
+  __io_println(events[0].text)
+  __io_println(events[0].reminder.body)
+  __io_println(events[0].reminder.ttl_turns)
 }

@@ -5,7 +5,7 @@ pipeline default() {
     "b" -> { "bravo" }
     _ -> { "other" }
   }
-  println(label)
+  __io_println(label)
   let n = 7
   let size = match n {
     0 -> { "zero" }
@@ -15,11 +15,11 @@ pipeline default() {
     }
     _ -> { "small" }
   }
-  println(size)
+  __io_println(size)
   let pair = [10, 20]
   let second = match pair {
     [_, value] -> { value }
     _ -> { 0 }
   }
-  println(second)
+  __io_println(second)
 }

@@ -15,11 +15,11 @@ pipeline test(task) {
     .filter(
     { event -> event.type == "tool_call_audit" && event.tool_name == "agent_await_resumption" },
   )
-  println(captured.result.status)
-  println(len(audit) == 1)
-  println(audit[0]?.audit?.status)
-  println(audit[0]?.audit?.reason)
-  println(audit[0]?.audit?.initiator)
-  println(audit[0]?.audit?.conditions?.timeout?.duration_minutes)
-  println(audit[0]?.audit?.conditions?.timeout?.on_timeout)
+  __io_println(captured.result.status)
+  __io_println(len(audit) == 1)
+  __io_println(audit[0]?.audit?.status)
+  __io_println(audit[0]?.audit?.reason)
+  __io_println(audit[0]?.audit?.initiator)
+  __io_println(audit[0]?.audit?.conditions?.timeout?.duration_minutes)
+  __io_println(audit[0]?.audit?.conditions?.timeout?.on_timeout)
 }

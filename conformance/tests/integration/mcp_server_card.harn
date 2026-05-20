@@ -7,14 +7,14 @@ pipeline default() {
   let card_path = path_join(root, "conformance/helpers/mcp_test_card.json")
   // Direct path access — bypass the registered-server lookup.
   let card = mcp_server_card(card_path)
-  println(card.name)
-  println(card.version)
-  println(card.protocolVersion)
-  println(card.capabilities.tools)
-  println(card.tools.count)
-  println(card.tools[0].name)
-  println(card.publisher.name)
+  __io_println(card.name)
+  __io_println(card.version)
+  __io_println(card.protocolVersion)
+  __io_println(card.capabilities.tools)
+  __io_println(card.tools.count)
+  __io_println(card.tools[0].name)
+  __io_println(card.publisher.name)
   // Second call should hit the cache and return identical data.
   let cached = mcp_server_card(card_path)
-  println(cached.name)
+  __io_println(cached.name)
 }

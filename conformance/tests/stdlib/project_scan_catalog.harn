@@ -7,8 +7,8 @@ pipeline test(task) {
   let ev = project_scan("project_scan_catalog", {tiers: ["ambient"]})
   let catalog = project_catalog()
   let go_entry = catalog.filter({ entry -> entry.id == "go" })[0]
-  println(ev.languages[0] == "go")
-  println(ev.confidence.go >= 0.95)
-  println(go_entry.anchors[0] == "go.mod")
-  println(go_entry.default_test_cmd == "go test ./...")
+  __io_println(ev.languages[0] == "go")
+  __io_println(ev.confidence.go >= 0.95)
+  __io_println(go_entry.anchors[0] == "go.mod")
+  __io_println(go_entry.default_test_cmd == "go test ./...")
 }

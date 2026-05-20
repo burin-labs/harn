@@ -46,9 +46,9 @@ let receipt = emit_channel("pr.merged", {
   number: 1984,
   sha: "3e949640",
 })
-println(receipt.event_id)
-println(receipt.name_resolved)  // "tenant:default:pr.merged"
-println(receipt.emitted_at.signature.starts_with("sha256:"))
+log(receipt.event_id)
+log(receipt.name_resolved)  // "tenant:default:pr.merged"
+log(receipt.emitted_at.signature.starts_with("sha256:"))
 ```
 
 The receipt shape is:
@@ -120,7 +120,7 @@ for tests, diagnostics, and local orchestration inspection:
 ```harn,ignore
 let events = channel_events("pr.merged", {limit: 10})
 for event in events {
-  println(event.payload.repo)
+  log(event.payload.repo)
 }
 ```
 
@@ -142,7 +142,7 @@ trigger_register({
   kind: "channel.emit",
   provider: "channel",
   handler: { event ->
-    println("PR merged: " + to_string(event.provider_payload.payload.number))
+    log("PR merged: " + to_string(event.provider_payload.payload.number))
   },
   match: {events: ["channel:pr.merged"]},
 })
@@ -199,7 +199,7 @@ trigger_register({
   batch: {count: 3, window: "1h", key: "repo", expire_action: "fire_partial"},
   handler: { event ->
     let merged = event.batch
-    println("Cutting release with " + to_string(len(merged)) + " merged PRs")
+    log("Cutting release with " + to_string(len(merged)) + " merged PRs")
   },
 })
 ```

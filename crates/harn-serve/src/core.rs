@@ -637,7 +637,7 @@ pub fn greet(name: string) -> string {
             &script,
             r#"
 pipeline default(task) {
-  println(json_stringify({task: task}))
+  __io_println(json_stringify({task: task}))
 }
 "#,
         )

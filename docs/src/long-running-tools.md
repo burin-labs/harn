@@ -87,7 +87,7 @@ This starts background work but has no cleanup path if the pipeline exits early:
 ```harn
 pipeline main() {
   let handle = walk_dir(".", {long_running: true})
-  println(handle.handle_id)
+  log(handle.handle_id)
 }
 ```
 

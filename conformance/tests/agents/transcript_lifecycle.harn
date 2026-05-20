@@ -5,8 +5,8 @@ pipeline main() {
   let resumed = transcript_resume(archived)
   let abandoned = transcript_abandon(resumed)
   let reset = transcript_reset({metadata: {source: "test"}})
-  println(contains(transcript_render_full(archived), "transcript archived"))
-  println(contains(transcript_render_full(resumed), "transcript resumed"))
-  println(contains(transcript_render_full(abandoned), "transcript abandoned"))
-  println(transcript_messages(reset) == [])
+  __io_println(contains(transcript_render_full(archived), "transcript archived"))
+  __io_println(contains(transcript_render_full(resumed), "transcript resumed"))
+  __io_println(contains(transcript_render_full(abandoned), "transcript abandoned"))
+  __io_println(transcript_messages(reset) == [])
 }

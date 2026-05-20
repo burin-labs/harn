@@ -5,11 +5,11 @@ pipeline main() {
     {body: "ttl reminder", ttl_turns: 5, preserve_on_compact: true, propagate: "none"},
   )
   let events = transcript_events_by_kind(injected.transcript, "system_reminder")
-  println(len(events))
-  println(events[0].reminder.body)
-  println(events[0].reminder.ttl_turns)
-  println(events[0].reminder.preserve_on_compact)
-  println(events[0].reminder.propagate)
-  println(events[0].reminder.source)
-  println(injected.deduped_count)
+  __io_println(len(events))
+  __io_println(events[0].reminder.body)
+  __io_println(events[0].reminder.ttl_turns)
+  __io_println(events[0].reminder.preserve_on_compact)
+  __io_println(events[0].reminder.propagate)
+  __io_println(events[0].reminder.source)
+  __io_println(injected.deduped_count)
 }

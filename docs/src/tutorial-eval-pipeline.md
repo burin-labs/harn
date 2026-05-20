@@ -23,7 +23,7 @@ pipeline main(task) {
     {id: "case-3", input: "Color of grass?", expected: "green"},
   ]
 
-  println("Loaded ${cases.count} eval cases")
+  log("Loaded ${cases.count} eval cases")
 }
 ```
 
@@ -53,7 +53,7 @@ pipeline main(task) {
     }
   }
 
-  println(json_stringify(results))
+  log(json_stringify(results))
 }
 ```
 
@@ -104,7 +104,7 @@ pipeline main(task) {
   }
 
   write_file("eval-summary.json", json_stringify(summary))
-  println(json_stringify(summary))
+  log(json_stringify(summary))
 }
 ```
 

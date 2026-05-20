@@ -10,5 +10,5 @@ pipeline test(task) {
   assert(type_of(summary) == "string", "trace_summary should return a string")
   // enable_tracing(false) disables collection
   enable_tracing(false)
-  println("trace spans ok")
+  __io_println("trace spans ok")
 }

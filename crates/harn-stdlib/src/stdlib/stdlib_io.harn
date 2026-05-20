@@ -48,7 +48,10 @@ pub fn read_line(opts: ReadLineOptions = {}) -> ReadLineResult {
  * @example: read_password(prompt, timeout_ms)
  */
 pub fn read_password(prompt: string = "", timeout_ms: int? = nil) -> ReadLineResult {
-  return read_line({prompt: prompt, timeout_ms: timeout_ms, echo: false})
+  if timeout_ms == nil {
+    return __io_read_line({prompt: prompt, echo: false})
+  }
+  return __io_read_line({prompt: prompt, timeout_ms: timeout_ms, echo: false})
 }
 
 /**
@@ -61,5 +64,5 @@ pub fn read_password(prompt: string = "", timeout_ms: int? = nil) -> ReadLineRes
  * @example: write_stderr(text)
  */
 pub fn write_stderr(text: string) {
-  eprint(text)
+  __io_write_stderr(text)
 }

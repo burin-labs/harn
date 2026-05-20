@@ -49,7 +49,7 @@ pipeline default() {
       permissions: {deny: ["guarded_tool"], on_escalation: { _req -> return false }},
     },
   )
-  println(result.status)
-  println(atomic_get(replies))
+  __io_println(result.status)
+  __io_println(atomic_get(replies))
   clear_session_hooks()
 }

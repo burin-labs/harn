@@ -742,7 +742,7 @@ impl Code {
             | Code::UnknownMethod
             | Code::UnknownBuiltin
             | Code::UnknownDeclaration => Some(&REPAIR_BINDINGS_RENAME_TO_CLOSEST),
-            Code::InvalidMainSignature => Some(&REPAIR_BINDINGS_THREAD_HARNESS),
+            Code::InvalidMainSignature => Some(&REPAIR_BINDINGS_THREAD_HARNESS_NEEDS_PARAM),
             Code::DeprecatedFunction => Some(&REPAIR_STDLIB_MIGRATE_RENAMED),
             Code::ModuleImportUnresolved | Code::ImportResolutionFailed => {
                 Some(&REPAIR_IMPORTS_FIX_PATH)
@@ -821,11 +821,11 @@ impl Code {
             Code::LintDeadCodeAfterReturn => Some(&REPAIR_DEAD_CODE_REMOVE),
             Code::LintRenamedStdlibSymbol => Some(&REPAIR_STDLIB_MIGRATE_RENAMED),
             Code::LintAmbientClockBuiltin => Some(&REPAIR_BINDINGS_THREAD_HARNESS_CLOCK),
-            Code::LintAmbientStdioBuiltin => Some(&REPAIR_BINDINGS_THREAD_HARNESS_STDIO),
             Code::LintAmbientFsBuiltin => Some(&REPAIR_BINDINGS_THREAD_HARNESS_FS),
             Code::LintAmbientEnvBuiltin => Some(&REPAIR_BINDINGS_THREAD_HARNESS_ENV),
             Code::LintAmbientRandomBuiltin => Some(&REPAIR_BINDINGS_THREAD_HARNESS_RANDOM),
             Code::LintAmbientNetBuiltin => Some(&REPAIR_BINDINGS_THREAD_HARNESS_NET),
+            Code::LintAmbientStdioBuiltin => Some(&REPAIR_BINDINGS_THREAD_HARNESS),
             Code::LintDeprecatedLlmOptions => Some(&REPAIR_LLM_MIGRATE_DEPRECATED_OPTION),
             Code::LintTemplateProviderIdentityBranch => Some(&REPAIR_LLM_USE_CAPABILITY_FLAG),
             Code::LintPromptInjectionRisk => Some(&REPAIR_PROMPTS_ESCAPE_INJECTION),
@@ -918,19 +918,19 @@ const REPAIR_BINDINGS_RENAME_SHADOW: RepairTemplate = RepairTemplate {
 
 const REPAIR_BINDINGS_THREAD_HARNESS: RepairTemplate = RepairTemplate {
     id: "bindings/thread-harness",
-    summary: "Rewrite the entrypoint as `fn main(harness: Harness)` so the runtime can thread its capability handle",
+    summary: "Thread the existing `harness` binding through local helper calls and replace the ambient stdio builtin with `harness.stdio.*`",
+    safety: RepairSafety::ScopeLocal,
+};
+
+const REPAIR_BINDINGS_THREAD_HARNESS_NEEDS_PARAM: RepairTemplate = RepairTemplate {
+    id: "bindings/thread-harness-needs-param",
+    summary: "Add a `harness: Harness` parameter where the stdio capability handle is required and update local callers",
     safety: RepairSafety::SurfaceChanging,
 };
 
 const REPAIR_BINDINGS_THREAD_HARNESS_CLOCK: RepairTemplate = RepairTemplate {
     id: "bindings/thread-harness-clock",
     summary: "Replace the ambient clock builtin with the corresponding `harness.clock.*` method",
-    safety: RepairSafety::ScopeLocal,
-};
-
-const REPAIR_BINDINGS_THREAD_HARNESS_STDIO: RepairTemplate = RepairTemplate {
-    id: "bindings/thread-harness-stdio",
-    summary: "Replace the ambient stdio builtin with the corresponding `harness.stdio.*` method",
     safety: RepairSafety::ScopeLocal,
 };
 
@@ -1146,8 +1146,8 @@ pub const REPAIR_REGISTRY: &[&RepairTemplate] = &[
     &REPAIR_BINDINGS_RENAME_UNUSED,
     &REPAIR_BINDINGS_RENAME_SHADOW,
     &REPAIR_BINDINGS_THREAD_HARNESS,
+    &REPAIR_BINDINGS_THREAD_HARNESS_NEEDS_PARAM,
     &REPAIR_BINDINGS_THREAD_HARNESS_CLOCK,
-    &REPAIR_BINDINGS_THREAD_HARNESS_STDIO,
     &REPAIR_BINDINGS_THREAD_HARNESS_FS,
     &REPAIR_BINDINGS_THREAD_HARNESS_ENV,
     &REPAIR_BINDINGS_THREAD_HARNESS_RANDOM,
@@ -1405,6 +1405,16 @@ mod tests {
                 Code::LintAmbientClockBuiltin,
                 RepairSafety::ScopeLocal,
                 "bindings/thread-harness-clock",
+            ),
+            (
+                Code::LintAmbientStdioBuiltin,
+                RepairSafety::ScopeLocal,
+                "bindings/thread-harness",
+            ),
+            (
+                Code::InvalidMainSignature,
+                RepairSafety::SurfaceChanging,
+                "bindings/thread-harness-needs-param",
             ),
         ];
         for (code, safety, repair_id) in expected {

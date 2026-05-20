@@ -3,8 +3,8 @@ import { retry_predicate_with_backoff } from "std/async"
 pipeline default() {
   let ok = retry_predicate_with_backoff(1, 0, fn() { return "ready" })
   let exhausted = retry_predicate_with_backoff(2, 0, fn() { return false })
-  println(is_ok(ok))
-  println(unwrap(ok))
-  println(is_ok(exhausted))
-  println(unwrap_err(exhausted))
+  __io_println(is_ok(ok))
+  __io_println(unwrap(ok))
+  __io_println(is_ok(exhausted))
+  __io_println(unwrap_err(exhausted))
 }

@@ -6,7 +6,7 @@ pipeline default() {
       throw "not yet"
     }
   }
-  println(attempts)
+  __io_println(attempts)
   // retry with all attempts exhausted
   var failed = false
   try {
@@ -16,5 +16,5 @@ pipeline default() {
   } catch (e) {
     failed = true
   }
-  println(failed)
+  __io_println(failed)
 }

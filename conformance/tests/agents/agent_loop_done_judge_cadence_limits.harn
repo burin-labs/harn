@@ -25,10 +25,10 @@ pipeline default() {
       },
     ) },
   )
-  println(stalled.result.status)
-  println(stalled.result.llm.iterations)
-  println(len(judge_events(stalled.events)))
-  println(len(llm_mock_calls()))
+  __io_println(stalled.result.status)
+  __io_println(stalled.result.llm.iterations)
+  __io_println(len(judge_events(stalled.events)))
+  __io_println(len(llm_mock_calls()))
   llm_mock_clear()
   llm_mock({text: "<user_response>capped one</user_response>\n<done>##DONE##</done>"})
   llm_mock(
@@ -55,10 +55,10 @@ pipeline default() {
       },
     ) },
   )
-  println(capped.result.status)
-  println(capped.result.llm.iterations)
-  println(len(judge_events(capped.events)))
-  println(len(llm_mock_calls()))
+  __io_println(capped.result.status)
+  __io_println(capped.result.llm.iterations)
+  __io_println(len(judge_events(capped.events)))
+  __io_println(len(llm_mock_calls()))
   llm_mock_clear()
   llm_mock({text: "<user_response>closure one</user_response>\n<done>##DONE##</done>"})
   llm_mock({text: "<user_response>closure two</user_response>\n<done>##DONE##</done>"})
@@ -79,8 +79,8 @@ pipeline default() {
       },
     ) },
   )
-  println(closure.result.status)
-  println(closure.result.llm.iterations)
-  println(len(judge_events(closure.events)))
-  println(len(llm_mock_calls()))
+  __io_println(closure.result.status)
+  __io_println(closure.result.llm.iterations)
+  __io_println(len(judge_events(closure.events)))
+  __io_println(len(llm_mock_calls()))
 }

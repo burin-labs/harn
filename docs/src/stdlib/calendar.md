@@ -21,9 +21,9 @@ pipeline default() {
     "America/New_York",
   )
 
-  println(date_to_zone(next_monday, "America/New_York"))
-  println(json_stringify(iso_week(next_monday, "America/New_York")))
-  println(quarter(next_monday, "America/New_York"))
+  log(date_to_zone(next_monday, "America/New_York"))
+  log(json_stringify(iso_week(next_monday, "America/New_York")))
+  log(quarter(next_monday, "America/New_York"))
 }
 ```
 
@@ -65,8 +65,8 @@ pipeline default() {
     "later",
   )
 
-  println(date_to_zone(first, "UTC"))
-  println(date_to_zone(second, "UTC"))
+  log(date_to_zone(first, "UTC"))
+  log(date_to_zone(second, "UTC"))
 }
 ```
 
@@ -91,10 +91,10 @@ pipeline default() {
   let timezone = "America/New_York"
   let window = {timezone: timezone, start: "09:00", end: "17:00"}
 
-  println(date_format(next_business_day("2026-07-03", calendar, timezone), "%Y-%m-%d", timezone))
-  println(date_format(add_business_days("2026-07-01", 3, calendar, timezone), "%Y-%m-%d", timezone))
-  println(business_days_between("2026-07-01", "2026-07-08", calendar, timezone))
-  println(is_business_time(date_parse("2026-07-06T14:00:00-04:00"), calendar, window))
+  log(date_format(next_business_day("2026-07-03", calendar, timezone), "%Y-%m-%d", timezone))
+  log(date_format(add_business_days("2026-07-01", 3, calendar, timezone), "%Y-%m-%d", timezone))
+  log(business_days_between("2026-07-01", "2026-07-08", calendar, timezone))
+  log(is_business_time(date_parse("2026-07-06T14:00:00-04:00"), calendar, window))
 }
 ```
 
@@ -110,7 +110,7 @@ pipeline default() {
     holidays: [{date: "2026-12-24", name: "Company winter closure"}],
   }
 
-  println(is_business_day("2026-12-24", company_calendar))
+  log(is_business_day("2026-12-24", company_calendar))
 }
 ```
 
@@ -126,9 +126,9 @@ import { country_info, country_timezones, default_timezone_for_country } from "s
 
 pipeline default() {
   let us = country_info("US")
-  println(us.name)
-  println(default_timezone_for_country("US") == nil)
-  println(country_timezones("GB")[0])
-  println(default_timezone_for_country("GB"))
+  log(us.name)
+  log(default_timezone_for_country("US") == nil)
+  log(country_timezones("GB")[0])
+  log(default_timezone_for_country("GB"))
 }
 ```

@@ -25,10 +25,10 @@ pipeline main() {
     {provider: "mock", model: "mock", messages: agent_session_messages(session), session_id: session},
   )
   let call = llm_mock_calls()[0]
-  println(contains(call.system, "System reminder:"))
-  println(contains(call.system, "local fallback reminder"))
+  __io_println(contains(call.system, "System reminder:"))
+  __io_println(contains(call.system, "local fallback reminder"))
   // Local fallback uses plain prose, not XML tags.
-  println(!contains(call.system, "<system-reminder>"))
-  println(call.messages[0].role)
+  __io_println(!contains(call.system, "<system-reminder>"))
+  __io_println(call.messages[0].role)
   clear_reminder_providers()
 }

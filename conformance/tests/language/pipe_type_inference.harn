@@ -2,7 +2,7 @@ pipeline default() {
   let n: int = 4 |> { x -> x + 3 }
   let label: string = n |> { x -> x > 5 ? "ok" : "bad" }
   let placeholder: int = 5 |> _ * 2
-  println(n)
-  println(label)
-  println(placeholder)
+  __io_println(n)
+  __io_println(label)
+  __io_println(placeholder)
 }

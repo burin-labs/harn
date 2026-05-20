@@ -165,5 +165,5 @@ pipeline test_with_mocks(task) {
   assert_eq(combined.l, "llm_v")
   assert_eq(host_call_count(), 0)
   assert_eq(llm_call_count(), 0)
-  println("ok")
+  __io_println("ok")
 }

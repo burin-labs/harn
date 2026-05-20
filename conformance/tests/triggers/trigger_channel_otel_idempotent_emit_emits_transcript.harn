@@ -42,12 +42,12 @@ pipeline default() {
   let first = stream.next().value
   let second = stream.next().value
   let third = stream.next().value
-  println(first.kind)
-  println(first.payload.inserted)
-  println(first.payload.duplicate)
-  println(second.kind)
-  println(third.kind)
-  println(third.payload.inserted)
-  println(third.payload.duplicate)
+  __io_println(first.kind)
+  __io_println(first.payload.inserted)
+  __io_println(first.payload.duplicate)
+  __io_println(second.kind)
+  __io_println(third.kind)
+  __io_println(third.payload.inserted)
+  __io_println(third.payload.duplicate)
   enable_tracing(false)
 }

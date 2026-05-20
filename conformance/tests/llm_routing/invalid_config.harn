@@ -9,26 +9,26 @@ pipeline test(task) {
   } catch (e) {
     "empty_chain"
   }
-  println(r1)
+  __io_println(r1)
   let r2 = try {
     routing_policy({chain: [{provider: "mock"}]})
     "no_error"
   } catch (e) {
     "missing_model"
   }
-  println(r2)
+  __io_println(r2)
   let r3 = try {
     routing_policy({chain: [{provider: "mock", model: "mock"}], failover: {on_status: [99]}})
     "no_error"
   } catch (e) {
     "bad_status"
   }
-  println(r3)
+  __io_println(r3)
   let r4 = try {
     routing_policy({chain: [{provider: "mock", model: "mock"}], budget: {on_exceed: "explode"}})
     "no_error"
   } catch (e) {
     "bad_on_exceed"
   }
-  println(r4)
+  __io_println(r4)
 }

@@ -20,14 +20,14 @@ pipeline default() {
     },
   )
   let budget = opts?.agent_loop_options?.iteration_budget
-  println(type_of(budget))
-  println(budget?.mode)
-  println(budget?.initial)
-  println(budget?.max)
-  println(budget?.extend_by)
+  __io_println(type_of(budget))
+  __io_println(budget?.mode)
+  __io_println(budget?.initial)
+  __io_println(budget?.max)
+  __io_println(budget?.extend_by)
   // The static cap remains so older agent_loop paths that haven't moved
   // to iteration_budget still see a bound.
-  println(opts?.agent_loop_options?.max_iterations)
+  __io_println(opts?.agent_loop_options?.max_iterations)
   // String-form sugar should also propagate verbatim — `agent_preset`
   // applies its kind-specific defaults and produces a dict, but callers
   // that pass a literal "adaptive" / "fixed" still survive the
@@ -40,6 +40,6 @@ pipeline default() {
       host: {default_tool_format: "native"},
     },
   )
-  println(type_of(sugar?.agent_loop_options?.iteration_budget))
-  println(sugar?.agent_loop_options?.iteration_budget)
+  __io_println(type_of(sugar?.agent_loop_options?.iteration_budget))
+  __io_println(sugar?.agent_loop_options?.iteration_budget)
 }

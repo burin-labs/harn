@@ -16,7 +16,7 @@ fn label(rec: Tagged) -> string {
 
 pipeline test(task) {
   // Intersection branch: this dict has both id and kind.
-  println(label({id: "a", kind: "node"}))
+  __io_println(label({id: "a", kind: "node"}))
   // Plain shape branch: just the label field.
-  println(label({label: "fallback"}))
+  __io_println(label({label: "fallback"}))
 }

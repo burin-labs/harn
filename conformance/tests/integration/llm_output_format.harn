@@ -10,7 +10,7 @@ pipeline default() {
       output_validation: "error",
     },
   )
-  println(typed.data.answer)
+  __io_println(typed.data.answer)
   llm_mock_clear()
   llm_mock({text: "{\"answer\":\"legacy\"}"})
   let legacy = llm_call(
@@ -18,9 +18,9 @@ pipeline default() {
     nil,
     {provider: "mock", response_format: "json", json_schema: schema, output_validation: "error"},
   )
-  println(legacy.data.answer)
+  __io_println(legacy.data.answer)
   llm_mock_clear()
   llm_mock({text: "{\"answer\":\"loose\"}"})
   let loose = llm_call("Return JSON", nil, {provider: "mock", output_format: {kind: "json_object"}})
-  println(loose.data.answer)
+  __io_println(loose.data.answer)
 }

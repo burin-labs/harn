@@ -86,35 +86,37 @@ pipeline default() {
       pinned_ids: ["parser-conventions"],
     },
   )
-  println(len(budgeted.artifacts))
-  println(budgeted.artifacts[0].id)
-  println(len(context_artifact_dedupe([primary, duplicate])))
-  println(digest.metadata.burin_legacy_context_digest)
-  println(digest.metadata.legacy_source)
-  println(join(merged.source_hashes, ","))
-  println(merged.token_estimate > primary.token_estimate)
-  println(
+  __io_println(len(budgeted.artifacts))
+  __io_println(budgeted.artifacts[0].id)
+  __io_println(len(context_artifact_dedupe([primary, duplicate])))
+  __io_println(digest.metadata.burin_legacy_context_digest)
+  __io_println(digest.metadata.legacy_source)
+  __io_println(join(merged.source_hashes, ","))
+  __io_println(merged.token_estimate > primary.token_estimate)
+  __io_println(
     contains(
       context_render_artifacts([secret], {variant: "xml", skip_budget: true}),
       "[sensitive context withheld: secret]",
     ),
   )
-  println(
+  __io_println(
     contains(
       context_render_artifacts([redaction_override], {variant: "plain", skip_budget: true}),
       "[sensitive context withheld: secret]",
     ),
   )
-  println(
+  __io_println(
     contains(
       context_render_artifacts([xml_escape], {variant: "xml", skip_budget: true}),
       "Use &lt;span&gt; tags.",
     ),
   )
-  println(ctx_with_artifact.artifacts[0].id)
-  println(len(context_artifact_dedupe([same_body_a, same_body_b])))
-  println(len(context_artifact_dedupe([overlap_hash_a, overlap_hash_b])))
-  println(contains(context_render_artifacts([primary], {variant: "plain"}), "Context Artifacts:"))
+  __io_println(ctx_with_artifact.artifacts[0].id)
+  __io_println(len(context_artifact_dedupe([same_body_a, same_body_b])))
+  __io_println(len(context_artifact_dedupe([overlap_hash_a, overlap_hash_b])))
+  __io_println(
+    contains(context_render_artifacts([primary], {variant: "plain"}), "Context Artifacts:"),
+  )
   let packed = assemble_context(
     {
       artifacts: budgeted.artifacts,
@@ -124,15 +126,15 @@ pipeline default() {
       query: "parser spans",
     },
   )
-  println(packed.chunks[0].artifact_id)
-  println(context_render_artifacts([primary], {variant: "markdown"}))
-  println(context_render_artifacts([primary], {capabilities: {prefers_xml_scaffolding: true}}))
-  println(context_render_artifacts([primary, digest], {variant: "compact", max_tokens: 100}))
+  __io_println(packed.chunks[0].artifact_id)
+  __io_println(context_render_artifacts([primary], {variant: "markdown"}))
+  __io_println(context_render_artifacts([primary], {capabilities: {prefers_xml_scaffolding: true}}))
+  __io_println(context_render_artifacts([primary, digest], {variant: "compact", max_tokens: 100}))
   let prompt = prompt_compose(
     "Fix parser spans.",
     context([], {artifacts: [primary]}),
     {capabilities: {prefers_markdown_scaffolding: true}, task_label: "Parser Task"},
   )
-  println(contains(prompt.prompt, "## Parser Task"))
-  println(contains(prompt.rendered_context, "## Context Artifacts"))
+  __io_println(contains(prompt.prompt, "## Parser Task"))
+  __io_println(contains(prompt.rendered_context, "## Context Artifacts"))
 }

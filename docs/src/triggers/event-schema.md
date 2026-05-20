@@ -11,12 +11,12 @@ import "std/triggers"
 fn on_event(event: TriggerEvent) {
   let payload = event.provider_payload
   if payload.provider == "github" && payload.event == "issues" {
-    println(payload.issue.title ?? "unknown")
+    log(payload.issue.title ?? "unknown")
   }
 
   let signature = event.signature_status
   if signature.state == "failed" {
-    println(signature.reason)
+    log(signature.reason)
   }
 }
 ```

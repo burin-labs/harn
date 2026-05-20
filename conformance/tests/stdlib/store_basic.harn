@@ -4,23 +4,23 @@ pipeline default() {
   // Set and get
   store_set("name", "alice")
   store_set("age", 30)
-  println(store_get("name"))
-  println(store_get("age"))
+  __io_println(store_get("name"))
+  __io_println(store_get("age"))
   // Get missing key
-  println(store_get("missing"))
+  __io_println(store_get("missing"))
   // List keys
   let keys = store_list()
-  println(len(keys))
+  __io_println(len(keys))
   // Delete
   store_delete("age")
-  println(store_get("age"))
-  println(len(store_list()))
+  __io_println(store_get("age"))
+  __io_println(len(store_list()))
   // Complex values
   store_set("config", {theme: "dark", size: 14})
   let cfg = store_get("config")
-  println(cfg.theme)
-  println(cfg.size)
+  __io_println(cfg.theme)
+  __io_println(cfg.size)
   // Clear
   store_clear()
-  println(len(store_list()))
+  __io_println(len(store_list()))
 }

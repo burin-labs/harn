@@ -2,24 +2,24 @@
 pipeline default(task) {
   // Create a circuit breaker with threshold=3
   let cb = circuit_breaker("test_cb", 3, 60000)
-  println(type_of(cb))
-  println(cb)
+  __io_println(type_of(cb))
+  __io_println(cb)
   // Initially closed
-  println(circuit_check("test_cb"))
+  __io_println(circuit_check("test_cb"))
   // Record failures below threshold
-  println(circuit_record_failure("test_cb"))
-  println(circuit_check("test_cb"))
-  println(circuit_record_failure("test_cb"))
-  println(circuit_check("test_cb"))
+  __io_println(circuit_record_failure("test_cb"))
+  __io_println(circuit_check("test_cb"))
+  __io_println(circuit_record_failure("test_cb"))
+  __io_println(circuit_check("test_cb"))
   // Third failure opens the circuit
-  println(circuit_record_failure("test_cb"))
-  println(circuit_check("test_cb"))
+  __io_println(circuit_record_failure("test_cb"))
+  __io_println(circuit_check("test_cb"))
   // Reset clears the circuit
   circuit_reset("test_cb")
-  println(circuit_check("test_cb"))
+  __io_println(circuit_check("test_cb"))
   // Record success also resets
   circuit_record_failure("test_cb")
   circuit_record_failure("test_cb")
   circuit_record_success("test_cb")
-  println(circuit_check("test_cb"))
+  __io_println(circuit_check("test_cb"))
 }

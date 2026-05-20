@@ -604,8 +604,8 @@ pipeline test(task) {
   }
   let result = waitpoint_wait("demo", {wait_id: "wait-demo"})
   await(completer)
-  println(result.status)
-  println(result.waitpoints[0].completed_by)
+  __io_println(result.status)
+  __io_println(result.waitpoints[0].completed_by)
 }
 "#;
 

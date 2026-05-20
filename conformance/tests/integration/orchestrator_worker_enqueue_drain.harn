@@ -47,7 +47,7 @@ pipeline default(task) {
     "--json",
   )
   let before = json_parse(queue_before.stdout)
-  println(
+  __io_println(
     fire.success
       && contains(fire.stdout, "\"queue\":\"triage\"")
       && queue_before.success
@@ -69,7 +69,7 @@ pipeline default(task) {
     "--json",
   )
   let data = json_parse(drain.stdout)
-  println(drain.success && data.drained == 1 && data.acked == 1 && data.deferred == 0)
-  println(data.summary.ready == 0 && data.summary.in_flight == 0 && data.summary.responses == 1)
-  println(data.responses[0].outcome?.status == "succeeded" && data.responses[0].error == nil)
+  __io_println(drain.success && data.drained == 1 && data.acked == 1 && data.deferred == 0)
+  __io_println(data.summary.ready == 0 && data.summary.in_flight == 0 && data.summary.responses == 1)
+  __io_println(data.responses[0].outcome?.status == "succeeded" && data.responses[0].error == nil)
 }

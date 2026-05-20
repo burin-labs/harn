@@ -2,19 +2,19 @@ pipeline default() {
   let outer = "outer"
   if true {
     let branch = "if-branch"
-    println(branch)
+    __io_println(branch)
   } else {
     let branch = "else-branch"
-    println(branch)
+    __io_println(branch)
   }
   for item in [1, 2] {
     let loop_label = "loop-" + item
-    println(loop_label)
+    __io_println(loop_label)
   }
   try {
     throw "boom"
   } catch (err) {
-    println(err)
+    __io_println(err)
   }
-  println(outer)
+  __io_println(outer)
 }

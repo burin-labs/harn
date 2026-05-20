@@ -113,7 +113,7 @@ harn completions fish > ~/.config/fish/completions/harn.fish
 Create a file called `hello.harn`:
 
 ```harn
-println("Hello, world!")
+log("Hello, world!")
 ```
 
 Run it:
@@ -134,7 +134,7 @@ executes the `default` pipeline (or the first one declared):
 ```harn
 pipeline default(task) {
   let name = "Harn"
-  println("Hello from ${name}!")
+  log("Hello from ${name}!")
 }
 ```
 
@@ -169,7 +169,7 @@ let response = llm_call(
   "Explain quicksort in two sentences.",
   "You are a computer science tutor."
 )
-println(response)
+log(response)
 ```
 
 No imports, no SDK initialization, no response parsing. Harn ships with

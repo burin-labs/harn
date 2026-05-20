@@ -12,20 +12,22 @@ import {
 pipeline default() {
   let calendar = "US-FEDERAL"
   let timezone = "America/New_York"
-  println(is_holiday("2026-07-03", calendar, timezone))
-  println(is_business_day("2026-07-03", calendar, timezone))
-  println(date_format(next_business_day("2026-07-03", calendar, timezone), "%Y-%m-%d", timezone))
-  println(date_format(add_business_days("2026-07-01", 3, calendar, timezone), "%Y-%m-%d", timezone))
-  println(business_days_between("2026-07-01", "2026-07-08", calendar, timezone))
-  println(holidays(2026, calendar)[5].date)
-  println(len(holidays(2020, calendar)))
+  __io_println(is_holiday("2026-07-03", calendar, timezone))
+  __io_println(is_business_day("2026-07-03", calendar, timezone))
+  __io_println(date_format(next_business_day("2026-07-03", calendar, timezone), "%Y-%m-%d", timezone))
+  __io_println(
+    date_format(add_business_days("2026-07-01", 3, calendar, timezone), "%Y-%m-%d", timezone),
+  )
+  __io_println(business_days_between("2026-07-01", "2026-07-08", calendar, timezone))
+  __io_println(holidays(2026, calendar)[5].date)
+  __io_println(len(holidays(2020, calendar)))
   let options = {timezone: timezone, start: "09:00", end: "17:00"}
-  println(is_business_time(date_parse("2026-07-06T14:00:00-04:00"), calendar, options))
-  println(business_window(date_parse("2026-07-06T22:00:00Z"), calendar, options).reason)
+  __io_println(is_business_time(date_parse("2026-07-06T14:00:00-04:00"), calendar, options))
+  __io_println(business_window(date_parse("2026-07-06T22:00:00Z"), calendar, options).reason)
   let custom = {timezone: "UTC", holidays: ["2026-01-02"]}
-  println(is_business_day("2026-01-02", custom))
+  __io_println(is_business_day("2026-01-02", custom))
   let unsupported = try {
     is_business_day("2026-01-02", "ZZ")
   }
-  println(is_err(unsupported))
+  __io_println(is_err(unsupported))
 }

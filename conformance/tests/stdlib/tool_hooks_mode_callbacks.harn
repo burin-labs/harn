@@ -33,22 +33,22 @@ pipeline default() {
     rewrite: { command, _ctx -> command + " --target-dir target-shared" },
   }
   let rewrite_result = tool_hooks_mode_rewrite_with_audit(rewrite_rule, {command: "cargo build --release"}, echo)
-  println(rewrite_result.action)
-  println(rewrite_result.command)
-  println(rewrite_result.original_command)
-  println(rewrite_result.result.ran)
+  __io_println(rewrite_result.action)
+  __io_println(rewrite_result.command)
+  __io_println(rewrite_result.original_command)
+  __io_println(rewrite_result.result.ran)
   let rewrite_audits = lifecycle_audit_log_take()
   /* Expect two audit entries: tool_rewrite + tool_hooks.reminder_injected. */
-  println(len(rewrite_audits))
-  println(rewrite_audits[0].kind)
-  println(rewrite_audits[0].payload.rule_id)
-  println(rewrite_audits[0].payload.original_command)
-  println(rewrite_audits[0].payload.command)
-  println(rewrite_audits[1].kind)
-  println(rewrite_audits[1].payload.tags[0])
-  println(rewrite_audits[1].payload.ttl_turns)
-  println(contains(rewrite_audits[1].payload.body, "rewritten"))
-  println(contains(rewrite_audits[1].payload.body, "target-shared"))
+  __io_println(len(rewrite_audits))
+  __io_println(rewrite_audits[0].kind)
+  __io_println(rewrite_audits[0].payload.rule_id)
+  __io_println(rewrite_audits[0].payload.original_command)
+  __io_println(rewrite_audits[0].payload.command)
+  __io_println(rewrite_audits[1].kind)
+  __io_println(rewrite_audits[1].payload.tags[0])
+  __io_println(rewrite_audits[1].payload.ttl_turns)
+  __io_println(contains(rewrite_audits[1].payload.body, "rewritten"))
+  __io_println(contains(rewrite_audits[1].payload.body, "target-shared"))
   let deny_rule = {
     rule_id: "custom.git_push_force",
     catalogue_id: "preset_run_command/custom",
@@ -58,17 +58,17 @@ pipeline default() {
     rewrite: nil,
   }
   let deny_result = tool_hooks_mode_deny_with_explanation(deny_rule, {command: "git push origin main --force"}, echo)
-  println(deny_result.action)
-  println(deny_result.rule_id)
+  __io_println(deny_result.action)
+  __io_println(deny_result.rule_id)
   /* Deny must not call `inner` — the echo executor's `ran` field
    * should be absent from the result envelope. */
-  println(deny_result?.result == nil)
+  __io_println(deny_result?.result == nil)
   let deny_audits = lifecycle_audit_log_take()
-  println(len(deny_audits))
-  println(deny_audits[0].kind)
-  println(deny_audits[0].payload.rule_id)
-  println(deny_audits[0].payload.command)
-  println(deny_audits[0].payload.severity)
+  __io_println(len(deny_audits))
+  __io_println(deny_audits[0].kind)
+  __io_println(deny_audits[0].payload.rule_id)
+  __io_println(deny_audits[0].payload.command)
+  __io_println(deny_audits[0].payload.severity)
   let warn_rule = {
     rule_id: "python.find_versus_rg",
     catalogue_id: "harn-canon/python",
@@ -78,28 +78,28 @@ pipeline default() {
     rewrite: nil,
   }
   let warn_result = tool_hooks_mode_passthrough_only_audit(warn_rule, {command: "find . -name foo"}, echo)
-  println(warn_result.action)
-  println(warn_result.command)
-  println(warn_result.result.ran)
+  __io_println(warn_result.action)
+  __io_println(warn_result.command)
+  __io_println(warn_result.result.ran)
   let warn_audits = lifecycle_audit_log_take()
-  println(len(warn_audits))
-  println(warn_audits[0].kind)
-  println(warn_audits[0].payload.rule_id)
-  println(warn_audits[0].payload.severity)
+  __io_println(len(warn_audits))
+  __io_println(warn_audits[0].kind)
+  __io_println(warn_audits[0].payload.rule_id)
+  __io_println(warn_audits[0].payload.severity)
   /* Passthrough must not inject a reminder — only the warning audit
    * entry should be present. */
-  println(warn_audits[0].kind == "tool_rule_warning")
+  __io_println(warn_audits[0].kind == "tool_rule_warning")
   /* Rewrite mode without an `inner` returns the envelope alone but
    * still records the audit + reminder side effects. The
    * `rule.rewrite` callback is invoked so the envelope reflects the
    * rewritten command. */
   let preview = tool_hooks_mode_rewrite_with_audit(rewrite_rule, "cargo test", nil)
-  println(preview.action)
-  println(preview.command)
-  println(preview.original_command)
-  println(preview?.result == nil)
+  __io_println(preview.action)
+  __io_println(preview.command)
+  __io_println(preview.original_command)
+  __io_println(preview?.result == nil)
   let preview_audits = lifecycle_audit_log_take()
-  println(len(preview_audits))
-  println(preview_audits[0].kind)
-  println(preview_audits[1].kind)
+  __io_println(len(preview_audits))
+  __io_println(preview_audits[0].kind)
+  __io_println(preview_audits[1].kind)
 }

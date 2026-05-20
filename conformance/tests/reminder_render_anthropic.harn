@@ -26,10 +26,10 @@ pipeline main() {
     },
   )
   let call = llm_mock_calls()[0]
-  println(call.messages[0].role)
-  println(contains(call.messages[0].content[0].text, "<system-reminder>"))
-  println(contains(call.messages[0].content[0].text, "anthropic reminder"))
-  println(call.messages[0].content[0].cache_control.type)
-  println(call.messages[0].content[1].text)
+  __io_println(call.messages[0].role)
+  __io_println(contains(call.messages[0].content[0].text, "<system-reminder>"))
+  __io_println(contains(call.messages[0].content[0].text, "anthropic reminder"))
+  __io_println(call.messages[0].content[0].cache_control.type)
+  __io_println(call.messages[0].content[1].text)
   clear_reminder_providers()
 }

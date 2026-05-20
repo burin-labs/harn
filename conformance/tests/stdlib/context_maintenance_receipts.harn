@@ -17,18 +17,18 @@ pipeline default() {
       replay: {mode: "include"},
     },
   )
-  println(queued.schema)
-  println(queued.status)
-  println(queued.lifecycle_event)
-  println(queued.affected_paths[0])
-  println(queued.retry_hint.retryable)
+  __io_println(queued.schema)
+  __io_println(queued.status)
+  __io_println(queued.lifecycle_event)
+  __io_println(queued.affected_paths[0])
+  __io_println(queued.retry_hint.retryable)
   let running = context_maintenance_transition(
     queued,
     "running",
     {started_at: "2026-05-16T18:00:01Z", duration_ms: 1},
   )
-  println(running.status)
-  println(running.run_id == queued.run_id)
+  __io_println(running.status)
+  __io_println(running.run_id == queued.run_id)
   let succeeded = context_maintenance_transition(
     running,
     "succeeded",
@@ -38,9 +38,9 @@ pipeline default() {
       artifact_ids: ["scan-result", "scan-result"],
     },
   )
-  println(succeeded.status)
-  println(succeeded.duration_ms)
-  println(len(succeeded.artifact_ids))
+  __io_println(succeeded.status)
+  __io_println(succeeded.duration_ms)
+  __io_println(len(succeeded.artifact_ids))
   let failed = context_maintenance_transition(
     running,
     "failed",
@@ -50,19 +50,19 @@ pipeline default() {
       retry_hint: {retryable: true, reason: "transient"},
     },
   )
-  println(failed.status)
-  println(failed.retry_hint.reason)
+  __io_println(failed.status)
+  __io_println(failed.retry_hint.reason)
   let skipped = context_maintenance_replay_decision(succeeded, {mode: "skip", reason: "fixture covers it"})
-  println(skipped.should_run)
-  println(skipped.receipt.status)
-  println(skipped.receipt.error)
+  __io_println(skipped.should_run)
+  __io_println(skipped.receipt.status)
+  __io_println(skipped.receipt.error)
   let included = context_maintenance_replay_decision(succeeded, {mode: "include"})
-  println(included.should_run)
+  __io_println(included.should_run)
   let invalid = try {
     context_maintenance_receipt("context.refresh", "paused", {})
   }
-  println(is_err(invalid))
+  __io_println(is_err(invalid))
   let key_a = context_maintenance_dedupe_key("context.refresh", "FileEdited", ["b", "a", "a"], "session-1")
   let key_b = context_maintenance_dedupe_key("context.refresh", "FileEdited", ["a", "b"], "session-1")
-  println(key_a == key_b)
+  __io_println(key_a == key_b)
 }

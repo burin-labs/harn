@@ -8,7 +8,7 @@ pipeline default() {
   llm_mock({text: "Still working."})
   llm_mock({text: "Finished. ##DONE##"})
   let observe_caller = { call ->
-    println("turn=" + to_string(call.turn.iteration) + " attempt=" + to_string(call.turn.attempt))
+    __io_println("turn=" + to_string(call.turn.iteration) + " attempt=" + to_string(call.turn.attempt))
     let result = try {
       llm_call(call.prompt, call.system, call.opts)
     }
@@ -22,6 +22,6 @@ pipeline default() {
     nil,
     {provider: "mock", loop_until_done: true, max_iterations: 2, llm_caller: observe_caller},
   )
-  println(result.status)
-  println(result.visible_text)
+  __io_println(result.status)
+  __io_println(result.visible_text)
 }

@@ -3,20 +3,20 @@ pipeline default() {
   fn show_user(u: {name: string, age: int}) -> string {
     return u["name"] + " is " + to_string(u["age"])
   }
-  println(show_user({name: "Alice", age: 30}))
+  __io_println(show_user({name: "Alice", age: 30}))
   // 2. Width subtyping: extra fields are allowed at runtime
-  println(show_user({name: "Bob", age: 25, role: "admin"}))
+  __io_println(show_user({name: "Bob", age: 25, role: "admin"}))
   // 3. Optional fields: missing optional is fine
   fn show_config(c: {host: string, port?: int}) -> string {
     return c["host"]
   }
-  println(show_config({host: "localhost"}))
-  println(show_config({host: "example.com", port: 8080}))
+  __io_println(show_config({host: "localhost"}))
+  __io_println(show_config({host: "example.com", port: 8080}))
   // 4. Nested shapes pass runtime check
   fn show_nested(d: {user: {name: string}, count: int}) -> string {
     return d["user"]["name"] + ":" + to_string(d["count"])
   }
-  println(show_nested({user: {name: "X"}, count: 5}))
+  __io_println(show_nested({user: {name: "X"}, count: 5}))
   // 5. Dynamic value bypasses static checker — missing required field
   fn make_bad_user() -> dict {
     return {name: "NoAge"}
@@ -24,7 +24,7 @@ pipeline default() {
   try {
     show_user(make_bad_user())
   } catch (e) {
-    println(e)
+    __io_println(e)
   }
   // 6. Dynamic value — wrong field type
   fn make_wrong_type() -> dict {
@@ -33,7 +33,7 @@ pipeline default() {
   try {
     show_user(make_wrong_type())
   } catch (e2) {
-    println(e2)
+    __io_println(e2)
   }
   // 7. Dynamic value — non-dict passed to shape param
   fn _make_string() -> dict {
@@ -52,7 +52,7 @@ pipeline default() {
   try {
     show_nested(make_bad_nested())
   } catch (e3) {
-    println(e3)
+    __io_println(e3)
   }
   // 9. Nested shape wrong type via dynamic dict
   fn make_flat_nested() -> dict {
@@ -61,6 +61,6 @@ pipeline default() {
   try {
     show_nested(make_flat_nested())
   } catch (e4) {
-    println(e4)
+    __io_println(e4)
   }
 }

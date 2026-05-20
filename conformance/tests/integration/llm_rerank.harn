@@ -23,28 +23,28 @@ pipeline default(task) {
     ],
     run_pairwise_rerank,
   )
-  println(judged.result.ranked[0] == "best")
-  println(judged.result.ranked[1] == "ok")
-  println(judged.result.ranked[2] == "weak")
-  println(judged.calls == 3)
-  println(judged.result.scores[1].wins == 2 && judged.result.scores[1].losses == 0)
-  println(judged.result.scores[0].losses == 2 && judged.result.scores[2].wins == 1)
-  println(
+  __io_println(judged.result.ranked[0] == "best")
+  __io_println(judged.result.ranked[1] == "ok")
+  __io_println(judged.result.ranked[2] == "weak")
+  __io_println(judged.calls == 3)
+  __io_println(judged.result.scores[1].wins == 2 && judged.result.scores[1].losses == 0)
+  __io_println(judged.result.scores[0].losses == 2 && judged.result.scores[2].wins == 1)
+  __io_println(
     judged.result.scores[1].avg_confidence > 0.84 && judged.result.scores[1].avg_confidence < 0.86,
   )
   let direct = self_certainty(
     "ignored",
     {logprobs: [{token: "a", logprob: -0.6931471805599453}, {token: "b", logprob: -0.6931471805599453}]},
   )
-  println(direct > 0.49 && direct < 0.51)
+  __io_println(direct > 0.49 && direct < 0.51)
   let from_mock = with_llm_mocks(
     [{text: "calibrated", logprobs: [{token: "calibrated", logprob: 0.0}]}],
     run_mock_self_certainty,
   )
-  println(from_mock == 1.0)
+  __io_println(from_mock == 1.0)
   let mocked_result = with_llm_mocks(
     [{text: "visible", logprobs: [{token: "visible", logprob: 0.0}]}],
     run_mock_logprobs_call,
   )
-  println(mocked_result.logprobs[0].token == "visible")
+  __io_println(mocked_result.logprobs[0].token == "visible")
 }

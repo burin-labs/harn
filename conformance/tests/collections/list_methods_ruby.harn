@@ -2,36 +2,36 @@
 pipeline default(task) {
   let nums = [1, 2, 3, 4, 5, 6, 7, 8]
   // none
-  println(nums.none({ x -> x > 100 }))
-  println(nums.none({ x -> x > 5 }))
+  __io_println(nums.none({ x -> x > 100 }))
+  __io_println(nums.none({ x -> x > 5 }))
   // every (alias for all)
-  println(nums.every({ x -> x > 0 }))
-  println(nums.every({ x -> x > 5 }))
+  __io_println(nums.every({ x -> x > 0 }))
+  __io_println(nums.every({ x -> x > 5 }))
   // find_index
-  println(nums.find_index({ x -> x > 3 }))
-  println(nums.find_index({ x -> x > 100 }))
+  __io_println(nums.find_index({ x -> x > 3 }))
+  __io_println(nums.find_index({ x -> x > 100 }))
   // first / last
-  println(nums.first())
-  println(nums.last())
-  println(nums.first(3))
-  println(nums.last(2))
+  __io_println(nums.first())
+  __io_println(nums.last())
+  __io_println(nums.first(3))
+  __io_println(nums.last(2))
   // partition
   let parts = nums.partition({ x -> x % 2 == 0 })
-  println(parts.first())
-  println(parts.last())
+  __io_println(parts.first())
+  __io_println(parts.last())
   // chunk
-  println([1, 2, 3, 4, 5].chunk(2))
+  __io_println([1, 2, 3, 4, 5].chunk(2))
   // compact
-  println([1, nil, 2, nil, 3].compact())
+  __io_println([1, nil, 2, nil, 3].compact())
   // tally
-  println(["a", "b", "a", "c", "b", "a"].tally())
+  __io_println(["a", "b", "a", "c", "b", "a"].tally())
   // min_by / max_by
   let words = ["hello", "hi", "hey"]
-  println(words.min_by({ w -> len(w) }))
-  println(words.max_by({ w -> len(w) }))
+  __io_println(words.min_by({ w -> len(w) }))
+  __io_println(words.max_by({ w -> len(w) }))
   // group_by
   let grouped = [1, 2, 3, 4, 5, 6].group_by({ x -> x % 2 == 0 })
-  println(grouped)
+  __io_println(grouped)
   // each_cons (sliding window)
-  println([1, 2, 3, 4].each_cons(2))
+  __io_println([1, 2, 3, 4].each_cons(2))
 }

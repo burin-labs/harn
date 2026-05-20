@@ -24,7 +24,7 @@ pipeline test(task) {
     },
   )
   // Mock's `##DONE##` exits the loop cleanly -> status "done".
-  println(first.status)
+  __io_println(first.status)
   // Second call exceeds the daily quota and is routed to approval
   // before the LLM is touched. The result envelope carries the same
   // `approval_required` shape the trigger dispatcher emits.
@@ -39,15 +39,15 @@ pipeline test(task) {
       autonomy_budget: {per_day: 1, key: key, reviewer: "oncall"},
     },
   )
-  println(second.status)
-  println(second.reason)
-  println(second.approval_required)
-  println(second.from_tier)
-  println(second.requested_tier)
-  println(second.reviewers[0])
-  println(type_of(second.request_id) == "string" && len(second.request_id) > 0)
+  __io_println(second.status)
+  __io_println(second.reason)
+  __io_println(second.approval_required)
+  __io_println(second.from_tier)
+  __io_println(second.requested_tier)
+  __io_println(second.reviewers[0])
+  __io_println(type_of(second.request_id) == "string" && len(second.request_id) > 0)
   // The approval request landed on hitl.approvals.
   let pending = hitl_pending({}).filter({ row -> row.agent == key })
-  println(len(pending) >= 1)
-  println(pending[0].request_kind)
+  __io_println(len(pending) >= 1)
+  __io_println(pending[0].request_kind)
 }

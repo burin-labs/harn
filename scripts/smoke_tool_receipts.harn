@@ -56,9 +56,9 @@ pipeline default() {
     },
   )
   let records = read_jsonl(receipt_path, {strict: true})
-  println("status=" + result.status)
-  println("receipt_path=" + receipt_path)
-  println("records=" + to_string(len(records)))
-  println("reason=" + records[0].reason)
-  println("receipt_uri=" + to_string(records[0]?.audit?.receipt_uri ?? ""))
+  __io_println("status=" + result.status)
+  __io_println("receipt_path=" + receipt_path)
+  __io_println("records=" + to_string(len(records)))
+  __io_println("reason=" + records[0].reason)
+  __io_println("receipt_uri=" + to_string(records[0]?.audit?.receipt_uri ?? ""))
 }

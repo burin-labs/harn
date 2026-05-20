@@ -5,11 +5,13 @@ pipeline default() {
       return "{{ greeting | upper }}"
     }
     """
-  println(
+  __io_println(
     render_string(
       template,
       {fn_name: "greet", params: [{name: "name", optional: true}], greeting: "hello", show_note: true},
     ),
   )
-  println(render_string(template, {fn_name: "greet", params: [], greeting: "hi", show_note: false}))
+  __io_println(
+    render_string(template, {fn_name: "greet", params: [], greeting: "hi", show_note: false}),
+  )
 }

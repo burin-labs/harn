@@ -7,6 +7,6 @@ pipeline default() {
   fn divide(a, b) {
     return a / b
   }
-  println(multiply(6, 7))
-  println(divide(42, 6))
+  __io_println(multiply(6, 7))
+  __io_println(divide(42, 6))
 }

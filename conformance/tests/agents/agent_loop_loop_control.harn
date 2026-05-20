@@ -44,10 +44,10 @@ pipeline default() {
       require_successful_tools: ["release_run"],
     },
   )
-  println(required_path.status)
-  println(required_path.adaptive_budget.extensions_used)
-  println(required_path.adaptive_budget.final_limit >= 4)
-  println(required_path?.missing_required_tools == nil)
+  __io_println(required_path.status)
+  __io_println(required_path.adaptive_budget.extensions_used)
+  __io_println(required_path.adaptive_budget.final_limit >= 4)
+  __io_println(required_path?.missing_required_tools == nil)
   // Case B: caller-provided loop_control extends only when remaining=0,
   // emits a custom reason, and inspects tool progress.
   llm_mock_clear()
@@ -75,9 +75,9 @@ pipeline default() {
       },
     },
   )
-  println(custom_policy.status)
-  println(custom_policy.adaptive_budget.extensions_used)
-  println(custom_policy.adaptive_budget.decisions[0].reason)
+  __io_println(custom_policy.status)
+  __io_println(custom_policy.adaptive_budget.extensions_used)
+  __io_println(custom_policy.adaptive_budget.decisions[0].reason)
   // Case C: nil loop_control return after we already converged — natural
   // completion still wins, no adaptive_budget noise.
   llm_mock_clear()
@@ -95,9 +95,9 @@ pipeline default() {
       loop_control: { _state -> nil },
     },
   )
-  println(no_op_policy.status)
-  println(no_op_policy.adaptive_budget.extensions_used)
-  println(len(no_op_policy.adaptive_budget.decisions))
+  __io_println(no_op_policy.status)
+  __io_println(no_op_policy.adaptive_budget.extensions_used)
+  __io_println(len(no_op_policy.adaptive_budget.decisions))
   // Case D: until-style extension with explicit target.
   llm_mock_clear()
   llm_mock({tool_calls: [{id: "u1", name: "lookup", arguments: {query: "1"}}]})
@@ -122,6 +122,6 @@ pipeline default() {
       },
     },
   )
-  println(until_policy.status)
-  println(until_policy.adaptive_budget.decisions[0].new_limit)
+  __io_println(until_policy.status)
+  __io_println(until_policy.adaptive_budget.decisions[0].new_limit)
 }

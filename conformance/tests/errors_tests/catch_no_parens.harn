@@ -4,18 +4,18 @@ pipeline default(task) {
   try {
     throw "test error"
   } catch (e) {
-    println("caught: " + e)
+    __io_println("caught: " + e)
   }
   // catch (e) { ... } should also still work
   try {
     throw "another error"
   } catch (e2) {
-    println("also caught: " + e2)
+    __io_println("also caught: " + e2)
   }
   // catch without variable should work too
   try {
     throw "ignored"
   } catch {
-    println("caught without var")
+    __io_println("caught without var")
   }
 }

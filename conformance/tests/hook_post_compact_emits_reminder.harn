@@ -20,9 +20,9 @@ pipeline main() {
   } else {
     events[1]
   }
-  println(len(events) >= 1)
-  println(hook_event.reminder.body)
-  println(hook_event.reminder.tags[0])
-  println(hook_event.reminder.source)
+  __io_println(len(events) >= 1)
+  __io_println(hook_event.reminder.body)
+  __io_println(hook_event.reminder.tags[0])
+  __io_println(hook_event.reminder.source)
   clear_session_hooks()
 }

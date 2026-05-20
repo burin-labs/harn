@@ -8,9 +8,9 @@ import { tool_hooks_seed_registry } from "std/tool_hooks_catalogues"
 fn probe(reg, cmd) {
   let m = tool_hooks_match(reg, cmd, {stacks: ["sql"]})
   if len(m) > 0 {
-    println(m[0].rule_id + " " + m[0].severity)
+    __io_println(m[0].rule_id + " " + m[0].severity)
   } else {
-    println("miss")
+    __io_println("miss")
   }
 }
 

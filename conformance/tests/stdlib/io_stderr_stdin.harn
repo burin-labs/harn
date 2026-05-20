@@ -1,24 +1,32 @@
 /** Verifies eprint/eprintln/read_stdin/read_line and the stdin/tty mocks. */
+fn legacy_line() {
+  let line = __io_read_line({})
+  if line.ok {
+    return line.value
+  }
+  return nil
+}
+
 pipeline test(task) {
   // mock stdin with three lines and read them back individually
   mock_stdin("alpha\nbeta\ngamma\n")
-  log(read_line())
-  log(read_line())
-  log(read_line())
+  log(legacy_line())
+  log(legacy_line())
+  log(legacy_line())
   // queue is now drained — next read_line returns nil
-  log(read_line())
+  log(legacy_line())
   unmock_stdin()
   // bulk read
   mock_stdin("hello\nworld\n")
   log(read_stdin())
   // after bulk read, the stream is consumed
-  log(read_line())
+  log(legacy_line())
   unmock_stdin()
   // capture stderr produced by eprint / eprintln
   capture_stderr_start()
-  eprint("warn: ")
-  eprintln("disk full")
-  eprintln("retry in 5s")
+  __io_eprint("warn: ")
+  __io_eprintln("disk full")
+  __io_eprintln("retry in 5s")
   let captured = capture_stderr_take()
   log(captured)
   // tty mocks are honored by is_*_tty

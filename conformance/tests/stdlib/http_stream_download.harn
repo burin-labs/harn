@@ -18,11 +18,11 @@ pipeline default() {
     {status: 200, body: "downloaded", headers: {etag: "abc"}},
   )
   let download = http_download("https://api.example.com/download", dst)
-  println(info.status)
-  println(info.headers["x-test"])
-  println(text)
-  println(type_of(end))
-  println(closed)
-  println(download.bytes_written)
-  println(read_file(dst))
+  __io_println(info.status)
+  __io_println(info.headers["x-test"])
+  __io_println(text)
+  __io_println(type_of(end))
+  __io_println(closed)
+  __io_println(download.bytes_written)
+  __io_println(read_file(dst))
 }

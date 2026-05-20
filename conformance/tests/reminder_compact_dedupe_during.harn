@@ -19,8 +19,8 @@ pipeline main() {
   let reminders = transcript_events_by_kind(compacted, "system_reminder")
   // Two reminders sharing the same dedupe_key collapse to one during
   // compaction, preserving the newest body and TTL.
-  println(len(reminders))
-  println(reminders[0].reminder.body)
-  println(reminders[0].reminder.dedupe_key)
-  println(reminders[0].reminder.ttl_turns)
+  __io_println(len(reminders))
+  __io_println(reminders[0].reminder.body)
+  __io_println(reminders[0].reminder.dedupe_key)
+  __io_println(reminders[0].reminder.ttl_turns)
 }

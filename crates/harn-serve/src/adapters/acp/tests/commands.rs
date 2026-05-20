@@ -17,9 +17,9 @@ async fn acp_advertises_and_dispatches_slash_commands() {
                 "@command(name: \"review\", description: \"Review the diff\", \
                      hint: \"focus area\")\n\
                      pipeline review_branch(task) {\n  \
-                       println(\"REVIEW:\" + prompt)\n}\n\n\
+                       __io_println(\"REVIEW:\" + prompt)\n}\n\n\
                      pipeline default(task) {\n  \
-                       println(\"DEFAULT:\" + prompt)\n}\n",
+                       __io_println(\"DEFAULT:\" + prompt)\n}\n",
             )
             .expect("write pipeline");
 
@@ -129,8 +129,8 @@ async fn acp_unknown_slash_invocation_falls_through_to_default_pipeline() {
             std::fs::write(
                 &pipeline_path,
                 "@command(name: \"known\", description: \"known\")\n\
-                     pipeline known(task) { println(\"KNOWN\") }\n\n\
-                     pipeline default(task) { println(\"DEFAULT:\" + prompt) }\n",
+                     pipeline known(task) { __io_println(\"KNOWN\") }\n\n\
+                     pipeline default(task) { __io_println(\"DEFAULT:\" + prompt) }\n",
             )
             .expect("write pipeline");
 
@@ -277,7 +277,7 @@ async fn acp_reemits_available_commands_on_pipeline_hot_reload() {
             std::fs::write(
                 &pipeline_path,
                 "@command(name: \"alpha\", description: \"first\")\n\
-                     pipeline alpha(task) { println(\"alpha\") }\n",
+                     pipeline alpha(task) { __io_println(\"alpha\") }\n",
             )
             .expect("write initial pipeline");
 
@@ -312,9 +312,9 @@ async fn acp_reemits_available_commands_on_pipeline_hot_reload() {
             std::fs::write(
                 &pipeline_path,
                 "@command(name: \"alpha\", description: \"first\")\n\
-                     pipeline alpha(task) { println(\"alpha\") }\n\n\
+                     pipeline alpha(task) { __io_println(\"alpha\") }\n\n\
                      @command(name: \"beta\", description: \"second\")\n\
-                     pipeline beta(task) { println(\"beta\") }\n",
+                     pipeline beta(task) { __io_println(\"beta\") }\n",
             )
             .expect("rewrite pipeline");
 

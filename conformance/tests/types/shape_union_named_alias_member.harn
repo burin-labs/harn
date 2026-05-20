@@ -15,9 +15,9 @@ pipeline default() {
     }
   }
   // Narrowed to the Ping shape — `ttl` is reachable.
-  println(summarise({kind: "ping", ttl: 30}))
-  println(summarise({kind: "pong", latency_ms: 42}))
-  println(summarise({kind: "close", reason: "bye"}))
+  __io_println(summarise({kind: "ping", ttl: 30}))
+  __io_println(summarise({kind: "pong", latency_ms: 42}))
+  __io_println(summarise({kind: "close", reason: "bye"}))
   fn via_if(m: Msg) -> string {
     if m.kind == "ping" {
       return "p:" + to_string(m.ttl)
@@ -27,6 +27,6 @@ pipeline default() {
     }
     return "c"
   }
-  println(via_if({kind: "ping", ttl: 9}))
-  println(via_if({kind: "pong", latency_ms: 7}))
+  __io_println(via_if({kind: "ping", ttl: 9}))
+  __io_println(via_if({kind: "pong", latency_ms: 7}))
 }

@@ -7,11 +7,11 @@ pipeline test(task) {
     }
   }
   let stream = numbers(1, 4)
-  println(type_of(stream))
+  __io_println(type_of(stream))
   let first = stream.next()
-  println(first.value)
-  println(first.done)
+  __io_println(first.value)
+  __io_println(first.done)
   for n in numbers(10, 13) {
-    println(n)
+    __io_println(n)
   }
 }

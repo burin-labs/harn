@@ -2,21 +2,21 @@
 pipeline default(task) {
   // username should return a non-empty string
   let user = username()
-  println(len(user) > 0)
+  __io_println(len(user) > 0)
   // platform should be one of the known values
   let plat = platform()
-  println(plat == "darwin" || plat == "linux" || plat == "windows")
+  __io_println(plat == "darwin" || plat == "linux" || plat == "windows")
   // arch should be non-empty
-  println(len(arch()) > 0)
+  __io_println(len(arch()) > 0)
   // home_dir should be non-empty
-  println(len(home_dir()) > 0)
+  __io_println(len(home_dir()) > 0)
   // pid should be a positive integer
-  println(pid() > 0)
+  __io_println(pid() > 0)
   // cwd should be non-empty
-  println(len(cwd()) > 0)
+  __io_println(len(cwd()) > 0)
   // date_iso should return ISO 8601 format
   let iso = date_iso()
-  println(len(iso) > 20)
-  println(contains(iso, "T"))
-  println(ends_with(iso, "Z"))
+  __io_println(len(iso) > 20)
+  __io_println(contains(iso, "T"))
+  __io_println(ends_with(iso, "Z"))
 }

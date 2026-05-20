@@ -8,15 +8,15 @@ pipeline default() {
   } else {
     2
   }
-  println(x)
+  __io_println(x)
   let label = if 3 > 2 {
     "bigger"
   } else {
     "smaller"
   }
-  println(label)
+  __io_println(label)
   // Nested in function call args.
-  println(
+  __io_println(
     if false {
       "a"
     } else {
@@ -31,5 +31,5 @@ pipeline default() {
   } else {
     "C"
   }
-  println(grade)
+  __io_println(grade)
 }

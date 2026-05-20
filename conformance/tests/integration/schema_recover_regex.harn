@@ -12,13 +12,13 @@ pipeline default() {
   }
   let raw = "name: \"Grace Hopper\", age: 85, active: yes"
   let r = schema_recover(raw, schema, {llm_repair: false})
-  println(r.ok)
-  println(r.stage)
+  __io_println(r.ok)
+  __io_println(r.stage)
   let data = r.data
   if data != nil {
-    println(data.name)
-    println(data.age)
-    println(data.active)
+    __io_println(data.name)
+    __io_println(data.age)
+    __io_println(data.active)
   }
-  println(r.repaired)
+  __io_println(r.repaired)
 }

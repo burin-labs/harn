@@ -3,11 +3,11 @@ pipeline test(task) {
     return {ok: user.name != "" && prefs["missing"] == nil, names: tags}
   }
   let tool_def = tool_find(create_user, "create_user")
-  println(tool_def.parameters.user.type)
-  println(tool_def.parameters.user.properties.name.type)
-  println(tool_def.parameters.user.required[0])
-  println(tool_def.parameters.tags.items.type)
-  println(tool_def.parameters.prefs.additionalProperties.type)
-  println(tool_def.outputSchema.properties.ok.type)
-  println(tool_def.outputSchema.properties.names.items.type)
+  __io_println(tool_def.parameters.user.type)
+  __io_println(tool_def.parameters.user.properties.name.type)
+  __io_println(tool_def.parameters.user.required[0])
+  __io_println(tool_def.parameters.tags.items.type)
+  __io_println(tool_def.parameters.prefs.additionalProperties.type)
+  __io_println(tool_def.outputSchema.properties.ok.type)
+  __io_println(tool_def.outputSchema.properties.names.items.type)
 }

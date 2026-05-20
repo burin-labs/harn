@@ -71,7 +71,7 @@ fn eval_pure_expression_still_works() {
     let temp = TempDir::new().unwrap();
     let out = harn_e2e_command()
         .current_dir(temp.path())
-        .args(["run", "-e", "println(1 + 2)"])
+        .args(["run", "-e", "__io_println(1 + 2)"])
         .output()
         .unwrap();
     assert_eq!(

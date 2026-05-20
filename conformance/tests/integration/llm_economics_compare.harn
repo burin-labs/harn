@@ -16,7 +16,7 @@ pipeline default() {
   // A model under a non-existent provider has no catalog row and no
   // provider-level economics, so pricing is genuinely unknown.
   for entry in ranked {
-    println(
+    __io_println(
       entry.model
         + " known="
         + to_string(entry.pricing_known)
@@ -32,7 +32,7 @@ pipeline default() {
     ],
     {input_tokens: 1000, output_tokens: 200, calls: 10},
   )
-  println("scaled calls=" + to_string(scaled[0].calls))
+  __io_println("scaled calls=" + to_string(scaled[0].calls))
   // gpt-4o-mini should be cheaper than claude-sonnet-4.
-  println("scaled cheapest=" + scaled[0].model)
+  __io_println("scaled cheapest=" + scaled[0].model)
 }

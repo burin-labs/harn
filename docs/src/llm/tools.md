@@ -115,7 +115,7 @@ let result = agent_loop(
   }
 )
 
-println(result.text)
+log(result.text)
 ```
 
 ## Why this works

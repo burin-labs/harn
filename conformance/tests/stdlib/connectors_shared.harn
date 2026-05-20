@@ -8,8 +8,8 @@ import {
 
 pipeline test(task) {
   let signature = "sha256=" + hmac_sha256("secret", "payload")
-  println(verify_hmac_signature("payload", signature, "secret", "sha256"))
-  println(verify_hmac_signature("payload", signature, "wrong", "sha256"))
+  __io_println(verify_hmac_signature("payload", signature, "secret", "sha256"))
+  __io_println(verify_hmac_signature("payload", signature, "wrong", "sha256"))
   let root = project_root() ?? cwd()
   let private_key = read_file(path_join(root, "conformance/helpers/github_app_test_key.pem"))
   let token = jwt_sign("RS256", {iss: "issuer", aud: "audience", exp: 4102444800}, private_key)
@@ -30,16 +30,16 @@ pipeline test(task) {
       },
     },
   )
-  println(jwt_result.ok)
-  println(jwt_result.claims.iss)
+  __io_println(jwt_result.ok)
+  __io_println(jwt_result.claims.iss)
   let config = {capacity: 1, refill_tokens: 1, refill_interval_ms: 1000}
   let first = rate_limit_token_bucket(nil, config, 1000)
   let second = rate_limit_token_bucket(first.state, config, 1000)
   let third = rate_limit_token_bucket(second.state, config, 2000)
-  println(first.allowed)
-  println(second.allowed)
-  println(second.retry_after_ms)
-  println(third.allowed)
+  __io_println(first.allowed)
+  __io_println(second.allowed)
+  __io_println(second.retry_after_ms)
+  __io_println(third.allowed)
   let pages = [{results: [{id: "a"}], next_cursor: "page-2"}, {results: [{id: "b"}], next_cursor: nil}]
   let paged = paginate_cursor(
     "https://api.example/items",
@@ -51,18 +51,18 @@ pipeline test(task) {
     },
     "/next_cursor",
   )
-  println(len(paged.items))
-  println(paged.items[1].id)
-  println(paged.complete)
+  __io_println(len(paged.items))
+  __io_println(paged.items[1].id)
+  __io_println(paged.complete)
   http_mock(
     "POST",
     "https://auth.example/token",
     {status: 200, body: "{\"access_token\":\"new-token\",\"expires_in\":3600}", headers: {}},
   )
   let refreshed = oauth2_token_refresh("client-id", "client-secret", "refresh-token", "https://auth.example/token")
-  println(refreshed.ok)
-  println(refreshed.access_token)
+  __io_println(refreshed.ok)
+  __io_println(refreshed.access_token)
   let calls = http_mock_calls({include_sensitive: true})
-  println(contains(calls[0].body, "grant_type=refresh_token"))
-  println(calls[0].headers["content-type"])
+  __io_println(contains(calls[0].body, "grant_type=refresh_token"))
+  __io_println(calls[0].headers["content-type"])
 }

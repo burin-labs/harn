@@ -25,11 +25,11 @@ pipeline test(task) {
     "project_scan_ignored",
     {tiers: ["ambient"], depth: 4, respect_gitignore: false, include_vendor: true},
   )
-  println(default_tree.app.languages[0] == "rust")
-  println(!contains(keys(default_tree), "ignored"))
-  println(!contains(keys(default_tree), "node_modules/pkg"))
-  println(!contains(keys(default_tree), "target/tooling"))
-  println(expanded_tree.ignored.languages[0] == "go")
-  println(expanded_tree["node_modules/pkg"].languages[0] == "javascript")
-  println(expanded_tree["target/tooling"].languages[0] == "rust")
+  __io_println(default_tree.app.languages[0] == "rust")
+  __io_println(!contains(keys(default_tree), "ignored"))
+  __io_println(!contains(keys(default_tree), "node_modules/pkg"))
+  __io_println(!contains(keys(default_tree), "target/tooling"))
+  __io_println(expanded_tree.ignored.languages[0] == "go")
+  __io_println(expanded_tree["node_modules/pkg"].languages[0] == "javascript")
+  __io_println(expanded_tree["target/tooling"].languages[0] == "rust")
 }

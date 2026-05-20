@@ -11,6 +11,6 @@ pipeline default() {
   let judge_fn = { item -> return {score: item * 10} }
   let results = parallel_judge(items, judge_fn, {max_concurrent: 2})
   for r in results {
-    println("item=" + to_string(r.item) + " score=" + to_string(r.verdict.score))
+    __io_println("item=" + to_string(r.item) + " score=" + to_string(r.verdict.score))
   }
 }

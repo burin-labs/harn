@@ -31,7 +31,7 @@ pipeline main() {
       },
     },
   )
-  println(worker?.status == "completed")
-  println(worker?.result?.result?.tools?.rejected[0] == "write_note")
-  println(len(transcript_events_by_kind(worker?.result?.transcript, "PermissionDeny")) == 1)
+  __io_println(worker?.status == "completed")
+  __io_println(worker?.result?.result?.tools?.rejected[0] == "write_note")
+  __io_println(len(transcript_events_by_kind(worker?.result?.transcript, "PermissionDeny")) == 1)
 }

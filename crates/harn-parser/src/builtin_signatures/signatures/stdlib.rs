@@ -164,6 +164,20 @@ pub(crate) const SIGNATURES: &[BuiltinSignature] = &[
         IO_RESULT_ENVELOPE,
     ),
     BuiltinSignature::simple(
+        "__io_write_stderr",
+        &[Param::new("message", TY_ANY)],
+        TY_NIL,
+    ),
+    BuiltinSignature::simple(
+        "__io_write_stdout",
+        &[Param::new("message", TY_ANY)],
+        TY_NIL,
+    ),
+    BuiltinSignature::variadic("__io_print", &[Param::new("args", TY_ANY)], TY_NIL),
+    BuiltinSignature::variadic("__io_println", &[Param::new("args", TY_ANY)], TY_NIL),
+    BuiltinSignature::simple("__io_eprint", &[Param::new("message", TY_ANY)], TY_NIL),
+    BuiltinSignature::simple("__io_eprintln", &[Param::new("message", TY_ANY)], TY_NIL),
+    BuiltinSignature::simple(
         "__json_stream_validate_chunk",
         &[
             Param::new("handle", TY_STRING),
@@ -1060,8 +1074,6 @@ pub(crate) const SIGNATURES: &[BuiltinSignature] = &[
         &[Param::new("name", TY_STRING), Param::new("default", TY_ANY)],
         TY_ANY,
     ),
-    BuiltinSignature::simple("eprint", &[Param::new("message", TY_ANY)], TY_NIL),
-    BuiltinSignature::simple("eprintln", &[Param::new("message", TY_ANY)], TY_NIL),
     BuiltinSignature::simple("error_category", &[Param::new("error", TY_ANY)], TY_STRING),
     BuiltinSignature::simple(
         "escalate_to",
@@ -1589,8 +1601,6 @@ pub(crate) const SIGNATURES: &[BuiltinSignature] = &[
     BuiltinSignature::variadic("plan_entries", &[Param::new("args", TY_ANY)], TY_LIST),
     BuiltinSignature::variadic("platform", &[Param::new("args", TY_ANY)], TY_STRING),
     BuiltinSignature::variadic("pow", &[Param::new("args", TY_ANY)], TY_ANY),
-    BuiltinSignature::variadic("print", &[Param::new("args", TY_ANY)], TY_NIL),
-    BuiltinSignature::variadic("println", &[Param::new("args", TY_ANY)], TY_NIL),
     BuiltinSignature::variadic("progress", &[Param::new("args", TY_ANY)], TY_NIL),
     BuiltinSignature::variadic(
         "prompt_mark_rendered",
@@ -1877,7 +1887,6 @@ pub(crate) const SIGNATURES: &[BuiltinSignature] = &[
         &[Param::new("args", TY_ANY)],
         TY_STRING_OR_NIL,
     ),
-    BuiltinSignature::variadic("read_line", &[Param::new("args", TY_ANY)], TY_STRING_OR_NIL),
     BuiltinSignature::variadic("mock_stdin", &[Param::new("args", TY_ANY)], TY_NIL),
     BuiltinSignature::variadic("unmock_stdin", &[Param::new("args", TY_ANY)], TY_NIL),
     BuiltinSignature::variadic("mock_tty", &[Param::new("args", TY_ANY)], TY_NIL),

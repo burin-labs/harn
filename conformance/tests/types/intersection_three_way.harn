@@ -15,5 +15,5 @@ fn describe(rec: Identified & {kind: string}) -> string {
 
 pipeline test(task) {
   let rec = {id: "i-1", name: "alpha", kind: "node"}
-  println(describe(rec))
+  __io_println(describe(rec))
 }

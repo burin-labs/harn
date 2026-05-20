@@ -11,22 +11,22 @@ pipeline main() {
     },
   )
   let report = workflow_validate(flow)
-  println(report?.valid)
+  __io_println(report?.valid)
   let base = artifact({kind: "summary", text: "short note", relevance: 0.9})
   let derived = artifact_derive(base, "analysis_note", {text: "derived note"})
   let ctx = artifact_context([base, derived], {max_artifacts: 2})
-  println(len(ctx) > 0)
+  __io_println(len(ctx) > 0)
   let result = workflow_execute("Write a note", flow, [base], {max_steps: 4})
-  println(result?.status)
-  println(result?.run?._type)
+  __io_println(result?.status)
+  __io_println(result?.run?._type)
   // Transcript lives in stages, not at the top level
   let stage_transcript = result?.run?.stages[0]?.transcript
-  println(len(transcript_messages(stage_transcript)) >= 2)
-  println(contains(transcript_render_visible(stage_transcript), "Mock response"))
+  __io_println(len(transcript_messages(stage_transcript)) >= 2)
+  __io_println(contains(transcript_render_visible(stage_transcript), "Mock response"))
   let saved = run_record_save(result?.run, "/tmp/harn-workflow-runtime.json")
   let loaded = run_record_load(saved?.path)
-  println(loaded?._type)
+  __io_println(loaded?._type)
   let loaded_transcript = loaded?.stages[0]?.transcript
-  println(len(transcript_messages(loaded_transcript)) >= 2)
-  println(contains(transcript_render_visible(loaded_transcript), "Mock response"))
+  __io_println(len(transcript_messages(loaded_transcript)) >= 2)
+  __io_println(contains(transcript_render_visible(loaded_transcript), "Mock response"))
 }

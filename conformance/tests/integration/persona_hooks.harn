@@ -74,8 +74,8 @@ pipeline default() {
     },
   )
   let result = merge_captain("PR-7")
-  println(result)
-  println(atomic_get(hook_order))
+  __io_println(result)
+  __io_println(atomic_get(hook_order))
   clear_persona_hooks()
   clear_tool_hooks()
 }

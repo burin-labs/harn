@@ -123,6 +123,8 @@ impl<'a> Linter<'a> {
                     self.declare_parameter(&p.name, snode.span);
                 }
                 self.return_type_stack.push(return_type.clone());
+                self.harness_param_stack
+                    .push(Self::callable_harness_param(params));
                 if harn_vm::connector_export_effect_class(name).is_some() {
                     self.connector_effect_export_stack.push(name.clone());
                 }
@@ -133,6 +135,7 @@ impl<'a> Linter<'a> {
                 if harn_vm::connector_export_effect_class(name).is_some() {
                     self.connector_effect_export_stack.pop();
                 }
+                self.harness_param_stack.pop();
                 self.return_type_stack.pop();
                 self.loop_depth = saved_loop_depth;
                 self.pop_scope();
@@ -166,10 +169,13 @@ impl<'a> Linter<'a> {
                     self.declare_parameter(&p.name, snode.span);
                 }
                 self.return_type_stack.push(return_type.clone());
+                self.harness_param_stack
+                    .push(Self::callable_harness_param(params));
                 let _ = self.analyze_secret_scan_block(body, false);
                 self.enter_long_running_body(body);
                 self.lint_block(body);
                 self.exit_long_running_body();
+                self.harness_param_stack.pop();
                 self.return_type_stack.pop();
                 self.loop_depth = saved_loop_depth;
                 self.pop_scope();

@@ -134,10 +134,22 @@ mod tests {
     #[test]
     fn generated_file_contains_known_builtins() {
         let out = generate_file();
-        for name in &["println", "read_file", "llm_call", "http_get"] {
+        for name in &["log", "read_file", "llm_call", "http_get"] {
             assert!(
                 out.contains(name),
                 "expected builtin `{name}` in generated file"
+            );
+        }
+        let builtin_line = out
+            .lines()
+            .find_map(|line| line.trim().strip_prefix("built_in: \""))
+            .and_then(|line| line.strip_suffix('"'))
+            .expect("generated built_in line");
+        let builtins: std::collections::BTreeSet<&str> = builtin_line.split_whitespace().collect();
+        for name in &["println", "prompt_user"] {
+            assert!(
+                !builtins.contains(name),
+                "ambient stdio builtin `{name}` should not be highlighted"
             );
         }
     }

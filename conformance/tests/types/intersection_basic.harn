@@ -13,5 +13,5 @@ fn use_ctx(ctx: BaseCtx & AuthCtx) -> string {
 
 pipeline test(task) {
   let ctx = {request_id: "req-42", user_id: "u-7"}
-  println(use_ctx(ctx))
+  __io_println(use_ctx(ctx))
 }

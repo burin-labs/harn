@@ -29,10 +29,10 @@ pipeline default() {
       turn: {iteration: 0, session_id: "", attempt: 1},
     },
   )
-  println(env.ok)
-  println(env.value.text)
-  println(env.repair_attempted)
-  println(atomic_get(nudged))
+  __io_println(env.ok)
+  __io_println(env.value.text)
+  __io_println(env.repair_attempted)
+  __io_println(atomic_get(nudged))
   // Non-schema failures pass through unchanged (no repair attempt).
   let other_calls = atomic(0)
   let other_synth = { _call ->
@@ -41,8 +41,8 @@ pipeline default() {
   }
   let other_caller = with_repair(other_synth, {})
   let other_env = other_caller({prompt: "p", system: "", opts: {}, turn: {iteration: 0, session_id: "", attempt: 1}})
-  println(other_env.ok)
-  println(other_env.status)
-  println(other_env?.repair_attempted ?? false)
-  println(atomic_get(other_calls))
+  __io_println(other_env.ok)
+  __io_println(other_env.status)
+  __io_println(other_env?.repair_attempted ?? false)
+  __io_println(atomic_get(other_calls))
 }

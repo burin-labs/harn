@@ -14,7 +14,7 @@ let feed = triage_start_my_day(
 )
 
 for event in feed.events {
-  println(event.summary)
+  log(event.summary)
 }
 ```
 

@@ -41,8 +41,8 @@ pipeline test(task) {
   let calls = llm_mock_calls()
   let retry_messages = calls[1].messages
   let retry_last = retry_messages[len(retry_messages) - 1]
-  println(result.test_runner == "cargo nextest")
-  println(!result._provenance.cached)
-  println(len(calls) == 2)
-  println(contains(retry_last.content, "schema"))
+  __io_println(result.test_runner == "cargo nextest")
+  __io_println(!result._provenance.cached)
+  __io_println(len(calls) == 2)
+  __io_println(contains(retry_last.content, "schema"))
 }

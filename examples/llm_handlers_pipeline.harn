@@ -12,10 +12,10 @@ pipeline default() {
   let base = { _call ->
     let n = atomic_add(counter, 1)
     if n < 1 {
-      println("[base]   attempt " + to_string(n + 1) + " -> transient blip")
+      __io_println("[base]   attempt " + to_string(n + 1) + " -> transient blip")
       return {ok: false, status: "transient", error: "blip"}
     }
-    println("[base]   attempt " + to_string(n + 1) + " -> success")
+    __io_println("[base]   attempt " + to_string(n + 1) + " -> success")
     return {
       ok: true,
       value: {
@@ -29,7 +29,7 @@ pipeline default() {
     }
   }
   // compose([logging, retry, cache])(base) == logging(retry(cache(base))).
-  let log_sink = { record -> println(
+  let log_sink = { record -> __io_println(
     "[logging] status=" + to_string(record?.status) + " latency_ms=" + to_string(record?.latency_ms),
   ) }
   let stack = compose(
@@ -48,6 +48,6 @@ pipeline default() {
       turn: {iteration: 0, session_id: "", attempt: 1},
     },
   )
-  println("final: ok=" + to_string(env.ok) + " text=" + to_string(env.value.text))
-  println("retries_attempted=" + to_string(env?.retries_attempted ?? 0))
+  __io_println("final: ok=" + to_string(env.ok) + " text=" + to_string(env.value.text))
+  __io_println("retries_attempted=" + to_string(env?.retries_attempted ?? 0))
 }

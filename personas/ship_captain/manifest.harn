@@ -38,6 +38,6 @@ fn ship_captain_manifest() {
 
 pipeline run(task) {
   let manifest = ship_captain_manifest()
-  println(json_stringify(manifest))
+  __io_println(json_stringify(manifest))
   return manifest
 }

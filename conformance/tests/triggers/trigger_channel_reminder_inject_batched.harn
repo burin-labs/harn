@@ -43,19 +43,19 @@ pipeline test(task) {
   let _ = emit_channel("ch.reminder.batched.input", {seq: 1})
   let _ = emit_channel("ch.reminder.batched.input", {seq: 2})
   let before = transcript_events_by_kind(agent_session_snapshot(target_session), "system_reminder")
-  println("before-threshold:" + to_string(len(before)))
+  __io_println("before-threshold:" + to_string(len(before)))
   // Threshold-fire path: the third emit closes the batch and dispatches once.
   let _ = emit_channel("ch.reminder.batched.input", {seq: 3})
   let after = transcript_events_by_kind(agent_session_snapshot(target_session), "system_reminder")
-  println("after-threshold:" + to_string(len(after)))
-  println(after[0].reminder.body)
-  println(after[0].reminder.tags[0])
+  __io_println("after-threshold:" + to_string(len(after)))
+  __io_println(after[0].reminder.body)
+  __io_println(after[0].reminder.tags[0])
   // Subsequent emits in a fresh batch generate a new inject — proves
   // the batch counter resets cleanly after a fire.
   let _ = emit_channel("ch.reminder.batched.input", {seq: 4})
   let _ = emit_channel("ch.reminder.batched.input", {seq: 5})
   let _ = emit_channel("ch.reminder.batched.input", {seq: 6})
   let after_second = transcript_events_by_kind(agent_session_snapshot(target_session), "system_reminder")
-  println("after-second-batch:" + to_string(len(after_second)))
+  __io_println("after-second-batch:" + to_string(len(after_second)))
   unmock_time()
 }

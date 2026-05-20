@@ -52,9 +52,9 @@ pipeline test(task) {
     },
   )
   let calls = llm_mock_calls()
-  println(first.framework == "axum")
-  println(!first._provenance.cached)
-  println(second._provenance.cached)
-  println(len(calls) == 1)
-  println(contains(calls[0].messages[0].content, "FILE src/lib.rs"))
+  __io_println(first.framework == "axum")
+  __io_println(!first._provenance.cached)
+  __io_println(second._provenance.cached)
+  __io_println(len(calls) == 1)
+  __io_println(contains(calls[0].messages[0].content, "FILE src/lib.rs"))
 }

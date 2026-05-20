@@ -46,7 +46,7 @@ let result = llm_call("Translate to French: Hello, world", nil, {
   model: "gpt-4o",
   max_tokens: 1024,
 })
-println(result.text)
+log(result.text)
 ```
 
 For schema-validated JSON, use `llm_call_structured(...)` or its safe/result
@@ -88,8 +88,8 @@ let result = agent_loop(
   "You are a senior engineer.",
   {loop_until_done: true, profile: "tool_using"}
 )
-println(result.status)
-println(result.llm.iterations)
+log(result.status)
+log(result.llm.iterations)
 ```
 
 The result is namespaced as `llm`, `tools`, `trace`, `task_ledger`, and

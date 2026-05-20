@@ -125,7 +125,7 @@ let result = llm_call(
   "Explain quicksort in two sentences.",
   "You are a concise CS tutor."
 )
-println(result.visible_text)
+log(result.visible_text)
 ```
 
 Loop-until-done agent with tools:
@@ -161,8 +161,8 @@ let result = agent_loop(
   }
 )
 
-println(result.status)
-println(result.visible_text)
+log(result.status)
+log(result.visible_text)
 ```
 
 The `tool` keyword declares tools with typed parameters and optional
@@ -502,9 +502,9 @@ let run = workflow_execute(
   {max_steps: 8}
 )
 
-println(run.status)
-println(run.path)
-println(run.run.stages)
+log(run.status)
+log(run.path)
+log(run.run.stages)
 ```
 
 `verify` nodes can either run an explicit command as shown above or use an

@@ -4,5 +4,5 @@
 pipeline test(task) {
   let wide = fn(x: float) { return 0 }
   let cb: fn(int) -> int = wide
-  println("ok")
+  __io_println("ok")
 }

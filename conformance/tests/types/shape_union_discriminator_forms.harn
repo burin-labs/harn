@@ -56,16 +56,16 @@ fn run_instr(i: Instr) -> int {
 
 pipeline default(task) {
   // Pure-literal-union round trip
-  println(classify_verdict("pass"))
-  println(classify_verdict("fail"))
-  println(classify_verdict("unclear"))
+  __io_println(classify_verdict("pass"))
+  __io_println(classify_verdict("fail"))
+  __io_println(classify_verdict("unclear"))
   // kind-tagged
-  println(describe_msg({kind: "ping", ttl: 30}))
-  println(describe_msg({kind: "pong", latency_ms: 12}))
+  __io_println(describe_msg({kind: "ping", ttl: 30}))
+  __io_println(describe_msg({kind: "pong", latency_ms: 12}))
   // type-tagged
-  println(describe_event({type: "click", x: 7, y: 9}))
-  println(describe_event({type: "scroll", dy: -2}))
+  __io_println(describe_event({type: "click", x: 7, y: 9}))
+  __io_println(describe_event({type: "scroll", dy: -2}))
   // op-tagged
-  println(to_string(run_instr({op: "add", lhs: 2, rhs: 3})))
-  println(to_string(run_instr({op: "neg", arg: 11})))
+  __io_println(to_string(run_instr({op: "add", lhs: 2, rhs: 3})))
+  __io_println(to_string(run_instr({op: "neg", arg: 11})))
 }

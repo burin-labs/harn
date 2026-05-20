@@ -63,10 +63,10 @@ pipeline default(task) {
     "--json",
   )
   let first_data = json_parse(first.stdout)
-  println(
+  __io_println(
     first.success && first_data.drained == 1 && first_data.acked == 0 && first_data.deferred == 1,
   )
-  println(
+  __io_println(
     first_data.summary.in_flight == 1
       && first_data.summary.responses == 1
       && first_data.responses[0].outcome?.status == "dlq"
@@ -88,19 +88,19 @@ pipeline default(task) {
     "--json",
   )
   let second_data = json_parse(second.stdout)
-  println(
+  __io_println(
     second.success && second_data.drained == 1 && second_data.acked == 1
       && second_data.deferred == 0,
   )
   let first_has_response = len(first_data.responses ?? []) > 0
   let second_has_response = len(second_data.responses ?? []) > 0
-  println(
+  __io_println(
     first_has_response
       && second_has_response
       && second_data.responses[0].job_event_id == first_data.responses[0].job_event_id
       && second_data.responses[0].outcome?.status == "succeeded",
   )
-  println(
+  __io_println(
     second_data.summary.ready == 0 && second_data.summary.in_flight == 0
       && second_data.summary.responses == 2,
   )

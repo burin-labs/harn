@@ -522,7 +522,7 @@ async fn acp_websocket_parallel_clients_get_distinct_sessions_and_can_load_activ
         "session/prompt",
         json!({
             "sessionId": session_id,
-            "prompt": [{"type": "text", "text": "println(\"websocket prompt\")"}],
+            "prompt": [{"type": "text", "text": "__io_println(\"websocket prompt\")"}],
         }),
     )
     .await;
@@ -599,7 +599,7 @@ async fn acp_websocket_reconnect_replays_pending_host_request_and_completes_prom
         "session/prompt",
         json!({
             "sessionId": session_id,
-            "prompt": [{"type": "text", "text": "println(\"reconnect\")"}],
+            "prompt": [{"type": "text", "text": "__io_println(\"reconnect\")"}],
         }),
     )
     .await;

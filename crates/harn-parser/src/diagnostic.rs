@@ -97,6 +97,12 @@ pub fn find_closest_match<'a>(
 pub fn renamed_stdlib_symbol(name: &str) -> Option<&'static str> {
     match name {
         "retry_with_backoff" => Some("retry_predicate_with_backoff"),
+        "print" => Some("harness.stdio.print"),
+        "println" => Some("harness.stdio.println"),
+        "eprint" => Some("harness.stdio.eprint"),
+        "eprintln" => Some("harness.stdio.eprintln"),
+        "read_line" => Some("harness.stdio.read_line"),
+        "prompt_user" => Some("harness.stdio.prompt"),
         _ => None,
     }
 }
@@ -119,8 +125,8 @@ pub fn harness_clock_replacement(name: &str) -> Option<&'static str> {
 }
 
 /// Map an ambient stdio-capability builtin to its `harness.stdio.*`
-/// replacement so the `bindings/thread-harness-stdio` repair can replace
-/// the call when a harness binding is already in scope.
+/// replacement so `harn fix` can replace the call in place once the
+/// relevant harness binding is available.
 pub fn harness_stdio_replacement(name: &str) -> Option<&'static str> {
     match name {
         "print" => Some("harness.stdio.print"),

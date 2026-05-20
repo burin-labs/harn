@@ -51,18 +51,18 @@ pipeline default() {
   )
   let matches = tool_hooks_match(reg, "git push origin main --force", {stacks: ["git"]})
   /* All three rules matched. */
-  println(len(matches))
+  __io_println(len(matches))
   /* Highest priority wins the first slot regardless of insertion order. */
-  println(matches[0].rule_id)
-  println(matches[0].catalogue_id)
-  println(matches[0].severity)
-  println(matches[1].rule_id)
-  println(matches[2].rule_id)
+  __io_println(matches[0].rule_id)
+  __io_println(matches[0].catalogue_id)
+  __io_println(matches[0].severity)
+  __io_println(matches[1].rule_id)
+  __io_println(matches[2].rule_id)
   /* Removing the deny catalogue collapses to the rewrite rules and the
    * mid (priority 5) rule wins over the low (priority 1) one. */
   let pruned = tool_hooks_unregister(reg, "team/deny")
   let pruned_matches = tool_hooks_match(pruned, "git push origin main --force", {stacks: ["git"]})
-  println(len(pruned_matches))
-  println(pruned_matches[0].rule_id)
-  println(pruned_matches[1].rule_id)
+  __io_println(len(pruned_matches))
+  __io_println(pruned_matches[0].rule_id)
+  __io_println(pruned_matches[1].rule_id)
 }

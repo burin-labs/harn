@@ -108,6 +108,10 @@ pub(crate) struct Linter<'a> {
     /// `return <iter-chain>` inside a function declared to return a
     /// concrete collection.
     pub(super) return_type_stack: Vec<Option<TypeExpr>>,
+    /// Stack of typed harness parameter names for the current callable.
+    /// A local binding named `harness` is not enough to safely rewrite
+    /// capability calls to `harness.*`.
+    pub(super) harness_param_stack: Vec<Option<String>>,
     /// Tracks how many enclosing `@complexity(allow)` attributes are
     /// active. When > 0, the cyclomatic-complexity rule is suppressed
     /// for the contained function.
@@ -164,6 +168,7 @@ impl<'a> Linter<'a> {
             type_declarations: Vec::new(),
             type_references: HashSet::new(),
             return_type_stack: Vec::new(),
+            harness_param_stack: Vec::new(),
             complexity_suppression_depth: 0,
             complexity_threshold: DEFAULT_COMPLEXITY_THRESHOLD,
             value_block_depth: 0,
@@ -211,6 +216,9 @@ impl<'a> Linter<'a> {
     }
 
     pub(super) fn check_renamed_stdlib_symbol(&mut self, name: &str, span: Span) {
+        if harness_stdio_replacement(name).is_some() {
+            return;
+        }
         let Some(replacement) = renamed_stdlib_symbol(name) else {
             return;
         };
@@ -230,7 +238,7 @@ impl<'a> Linter<'a> {
     /// them to `harness.clock.*`. When `harness` (or `_harness`) is in
     /// scope the lint emits a `bindings/thread-harness-clock` FixEdit;
     /// otherwise the suggestion points users at the
-    /// `bindings/thread-harness` repair that adds the parameter.
+    /// `bindings/thread-harness-needs-param` repair that adds the parameter.
     pub(super) fn check_ambient_clock_builtin(&mut self, name: &str, span: Span) {
         self.check_ambient_capability_builtin(AmbientCapabilityLint {
             name,
@@ -254,7 +262,7 @@ impl<'a> Linter<'a> {
             code: Code::LintAmbientStdioBuiltin,
             rule: "ambient-stdio-builtin",
             sub_handle: "stdio",
-            require_harness_in_scope: true,
+            require_harness_in_scope: false,
         });
     }
 
@@ -317,31 +325,30 @@ impl<'a> Linter<'a> {
 
     /// Shared implementation for every ambient-capability lint. The
     /// per-sub-handle wrappers above just supply the replacement table,
-    /// diagnostic code, rule slug, and surface name. The `stdio` variant
-    /// is unique in suppressing the lint entirely when `harness` is not
-    /// yet in scope (because the bare `print`/`println` shape is
-    /// ambiguous with user-defined free fns); every other capability
-    /// surfaces the lint and points users at `bindings/thread-harness`.
+    /// diagnostic code, rule slug, and surface name.
     fn check_ambient_capability_builtin(&mut self, lint: AmbientCapabilityLint<'_>) {
         let Some(replacement) = lint.replacement else {
             return;
         };
-        let harness_in_scope = self
-            .scopes
-            .iter()
-            .any(|scope| scope.contains("harness") || scope.contains("_harness"));
-        if lint.require_harness_in_scope && !harness_in_scope {
+        if self.has_local_or_imported_name(lint.name) {
             return;
         }
-        let fix = harness_in_scope
-            .then(|| replace_identifier_text_fix(self.source, lint.span, lint.name, replacement))
-            .flatten();
-        let suggestion = if harness_in_scope {
+        let harness_binding = self.harness_binding_name();
+        if lint.require_harness_in_scope && harness_binding.is_none() {
+            return;
+        }
+        let replacement = harness_binding
+            .map(|binding| replacement.replacen("harness", binding, 1))
+            .unwrap_or_else(|| replacement.to_string());
+        let fix = harness_binding.and_then(|_| {
+            replace_identifier_text_fix(self.source, lint.span, lint.name, &replacement)
+        });
+        let suggestion = if harness_binding.is_some() {
             format!("replace `{}` with `{}`", lint.name, replacement)
         } else {
             format!(
                 "thread `harness: Harness` through the enclosing fn (see repair \
-                 `bindings/thread-harness`), then call `{replacement}`"
+                 `bindings/thread-harness-needs-param`), then call `{replacement}`"
             )
         };
         self.diagnostics.push(LintDiagnostic {
@@ -358,6 +365,33 @@ impl<'a> Linter<'a> {
         });
     }
 
+    fn harness_binding_name(&self) -> Option<&str> {
+        self.harness_param_stack
+            .last()
+            .and_then(|name| name.as_deref())
+    }
+
+    fn has_local_or_imported_name(&self, name: &str) -> bool {
+        self.scopes.iter().any(|scope| scope.contains(name))
+            || self
+                .imports
+                .iter()
+                .any(|import| import.names.iter().any(|imported| imported == name))
+            || self
+                .fn_declarations
+                .iter()
+                .any(|declaration| declaration.name == name)
+    }
+
+    pub(super) fn callable_harness_param(params: &[TypedParam]) -> Option<String> {
+        params.iter().find_map(|param| {
+            let TypeExpr::Named(name) = param.type_expr.as_ref()? else {
+                return None;
+            };
+            (name == "Harness" && matches!(param.name.as_str(), "harness" | "_harness"))
+                .then(|| param.name.clone())
+        })
+    }
     /// Warn when a public stdlib `pub fn` is missing one or more of the
     /// declared metadata fields (`@effects`, `@allocation`, `@errors`,
     /// `@api_stability`, `@example`). Only runs when callers opted in via

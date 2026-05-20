@@ -32,7 +32,7 @@ End with a short verdict.
     max_tokens: 1200,
   })
 
-  println(review.text)
+  log(review.text)
 }
 ```
 
@@ -63,7 +63,7 @@ Do not invent missing context. If the context is insufficient, say so.
     {temperature: 0.2, max_tokens: 1400}
   )
 
-  println(review.text)
+  log(review.text)
 }
 ```
 
@@ -89,7 +89,7 @@ pipeline default(task) {
   eval_metric("review_has_issue", has_issue)
   eval_metric("review_chars", review.text.count)
 
-  println(review.text)
+  log(review.text)
 }
 ```
 

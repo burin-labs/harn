@@ -45,6 +45,6 @@ pipeline main() {
     },
   )
   let child_reminders = transcript_events_by_kind(agent_session_snapshot(child), "system_reminder")
-  println(len(child_reminders))
+  __io_println(len(child_reminders))
   llm_mock_clear()
 }

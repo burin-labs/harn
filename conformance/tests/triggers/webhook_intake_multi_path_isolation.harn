@@ -19,8 +19,8 @@ pipeline test(task) {
       topic: "tests.intake.path_b",
     },
   )
-  println(intake_a.id == "intake-a")
-  println(intake_b.id == "intake-b")
+  __io_println(intake_a.id == "intake-a")
+  __io_println(intake_b.id == "intake-b")
   let body = "shared-body"
   // Same delivery id on two intakes must NOT collide.
   let sig_a = "sha256=" + hmac_sha256("secret-a", body)
@@ -33,8 +33,8 @@ pipeline test(task) {
     "intake-b",
     {headers: {"x-b-signature": sig_b, "x-b-delivery": "shared-delivery"}, body: body, path: "/hooks/b"},
   )
-  println(outcome_a.status == "accepted")
-  println(outcome_b.status == "accepted")
+  __io_println(outcome_a.status == "accepted")
+  __io_println(outcome_b.status == "accepted")
   // Path mismatch is rejected even with a valid signature.
   let mismatched = webhook_intake_feed(
     "intake-a",
@@ -44,11 +44,11 @@ pipeline test(task) {
       path: "/hooks/wrong",
     },
   )
-  println(mismatched.status == "rejected")
+  __io_println(mismatched.status == "rejected")
   // Wrong-secret signature is rejected (cross-intake leakage).
   let cross = webhook_intake_feed(
     "intake-a",
     {headers: {"x-a-signature": sig_b, "x-a-delivery": "delivery-cross"}, body: body, path: "/hooks/a"},
   )
-  println(cross.status == "rejected")
+  __io_println(cross.status == "rejected")
 }

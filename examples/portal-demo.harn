@@ -84,8 +84,8 @@ pipeline main() {
     [artifact({kind: "summary", text: "seed note", relevance: 0.6})],
     {max_steps: 4, persist_path: path_join(dir, "portal-failed.json")},
   )
-  println(success?.status)
-  println(replayed?.status)
-  println(failed?.status)
-  println(success?.run?.replay_fixture?._type)
+  __io_println(success?.status)
+  __io_println(replayed?.status)
+  __io_println(failed?.status)
+  __io_println(success?.run?.replay_fixture?._type)
 }

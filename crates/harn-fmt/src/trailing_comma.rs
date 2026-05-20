@@ -389,7 +389,7 @@ mod tests {
 
     #[test]
     fn does_not_treat_eval_pack_block_as_dict() {
-        let src = "eval_pack pack \"p\" {\n  cases: [{id: \"one\"}]\n  for case in cases {\n    println(case.id)\n  }\n  summarize {\n    println(pack.id)\n  }\n}\n";
+        let src = "eval_pack pack \"p\" {\n  cases: [{id: \"one\"}]\n  for case in cases {\n    __io_println(case.id)\n  }\n  summarize {\n    __io_println(pack.id)\n  }\n}\n";
         assert_eq!(fix(src), src);
     }
 
@@ -407,10 +407,10 @@ mod tests {
 
     #[test]
     fn fires_on_multiline_function_call() {
-        let src = "fn f() {\n  print(\n    \"hello\",\n    \"world\"\n  )\n}\n";
+        let src = "fn f() {\n  __io_print(\n    \"hello\",\n    \"world\"\n  )\n}\n";
         assert_eq!(
             fix(src),
-            "fn f() {\n  print(\n    \"hello\",\n    \"world\",\n  )\n}\n"
+            "fn f() {\n  __io_print(\n    \"hello\",\n    \"world\",\n  )\n}\n"
         );
     }
 

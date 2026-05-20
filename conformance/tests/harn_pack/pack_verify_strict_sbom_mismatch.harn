@@ -5,7 +5,7 @@ pipeline default() {
   let harn_bin = env_or("HARN_CONFORMANCE_HARN_BIN", resolve_harn_bin(repo_root))
   let root = path_join(temp_dir(), "harn_pack_strict_sbom_" + uuid_v7())
   mkdir(root)
-  write_file(path_join(root, "hello.harn"), "println(\"hi\")\n")
+  write_file(path_join(root, "hello.harn"), "__io_println(\"hi\")\n")
   let pack = exec_at(
     root,
     harn_bin,
@@ -15,9 +15,9 @@ pipeline default() {
     "--out",
     path_join(root, "hello.harnpack"),
   )
-  println(pack.success)
+  __io_println(pack.success)
   let unpack = exec_at(root, "sh", "-lc", "mkdir unpack && zstd -d -c hello.harnpack | tar -xf - -C unpack")
-  println(unpack.success)
+  __io_println(unpack.success)
   let tamper = exec_at(
     root,
     "python3",
@@ -26,14 +26,14 @@ pipeline default() {
     path_join(root, "unpack/harnpack.json"),
     path_join(root, "unpack/sbom.spdx.json"),
   )
-  println(tamper.success)
+  __io_println(tamper.success)
   let repack = exec_at(
     root,
     "sh",
     "-lc",
     "cd unpack && tar -cf - harnpack.json sbom.spdx.json sources bytecode | zstd -f -o ../tampered.harnpack",
   )
-  println(repack.success)
+  __io_println(repack.success)
   let lenient = exec_at(
     root,
     harn_bin,
@@ -43,9 +43,9 @@ pipeline default() {
     "--allow-unsigned",
     "--json",
   )
-  println(lenient.success)
+  __io_println(lenient.success)
   let lenient_data = json_parse(lenient.stdout)
-  println(lenient_data.ok)
+  __io_println(lenient_data.ok)
   let strict = exec_at(
     root,
     harn_bin,
@@ -56,8 +56,8 @@ pipeline default() {
     "--strict",
     "--json",
   )
-  println(strict.success)
+  __io_println(strict.success)
   let strict_data = json_parse(strict.stdout)
-  println(strict_data.ok)
-  println(strict_data.error.code)
+  __io_println(strict_data.ok)
+  __io_println(strict_data.error.code)
 }

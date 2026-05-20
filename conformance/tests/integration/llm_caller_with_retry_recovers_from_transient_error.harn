@@ -27,6 +27,6 @@ pipeline default() {
   }
   let caller = with_retry(synthetic, {max_attempts: 5, base_ms: 1})
   let result = agent_loop("hi", nil, {provider: "mock", llm_caller: caller, max_iterations: 1})
-  println(result.status)
-  println(result.visible_text)
+  __io_println(result.status)
+  __io_println(result.visible_text)
 }

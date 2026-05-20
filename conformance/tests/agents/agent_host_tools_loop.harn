@@ -33,13 +33,13 @@ pipeline main() {
       done_judge: nil,
     },
   )
-  println(result.status)
+  __io_println(result.status)
   let calls = llm_mock_calls()
-  println(len(calls) >= 2)
-  println(!contains(calls[0].system, "##DONE##"))
-  println(!contains(calls[1].system, "##DONE##"))
-  println(contains(calls[0].system, "no more tool calls"))
+  __io_println(len(calls) >= 2)
+  __io_println(!contains(calls[0].system, "##DONE##"))
+  __io_println(!contains(calls[1].system, "##DONE##"))
+  __io_println(contains(calls[0].system, "no more tool calls"))
   let second_turn = json_stringify(calls[1].messages)
-  println(contains(second_turn, "byte_count"))
-  println(contains(second_turn, "tool"))
+  __io_println(contains(second_turn, "byte_count"))
+  __io_println(contains(second_turn, "tool"))
 }

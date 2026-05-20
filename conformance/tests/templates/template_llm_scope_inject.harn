@@ -4,7 +4,7 @@ pipeline default() {
     __pop_llm_render_context()
   }
   let tmpl = "provider={{ llm.provider }} family={{ llm.family }} native_tools={{ llm.capabilities.native_tools }}"
-  println(render_string(tmpl, {}))
+  __io_println(render_string(tmpl, {}))
   let tmpl2 = "{{ if llm.capabilities.native_tools }}native{{ else }}text{{ end }}"
-  println(render_string(tmpl2, {}))
+  __io_println(render_string(tmpl2, {}))
 }

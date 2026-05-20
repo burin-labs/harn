@@ -6,6 +6,6 @@ pipeline default() {
     chunks = chunks + [chunk]
   }
   // Mock stream should produce at least one chunk
-  println(chunks.count > 0)
-  println(type_of(chunks[0]))
+  __io_println(chunks.count > 0)
+  __io_println(type_of(chunks[0]))
 }

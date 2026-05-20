@@ -38,9 +38,9 @@ pipeline default(_task) {
   let review_prompt = render_review_prompt(diff)
   let initial_envelope = llm_call(review_prompt, "You are review_captain, a thorough code reviewer.")
   let initial_response = initial_envelope.text
-  println("=== review_captain · stage 1 (initial scan) ===")
-  println(initial_response)
-  println("")
+  __io_println("=== review_captain · stage 1 (initial scan) ===")
+  __io_println(initial_response)
+  __io_println("")
   let author_answer = "Yes, the retry middleware is intended to wrap idempotent requests only; non-idempotent calls bypass it via the `safe: false` opt-out."
   let clarification_prompt = render_clarification_prompt(author_answer)
   let final_envelope = llm_call(clarification_prompt, "You are review_captain, a thorough code reviewer.")
@@ -57,7 +57,7 @@ pipeline default(_task) {
     final_verdict: final_response,
     receipt_kind: "review_receipt",
   }
-  println("=== review_captain · stage 2 (final verdict) ===")
-  println(json_stringify(receipt))
+  __io_println("=== review_captain · stage 2 (final verdict) ===")
+  __io_println(json_stringify(receipt))
   return receipt
 }

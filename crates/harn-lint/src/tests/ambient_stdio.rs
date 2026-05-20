@@ -57,12 +57,28 @@ fn ambient_stdio_lints_all_supported_names_inside_main() {
 }
 
 #[test]
-fn ambient_stdio_lint_waits_until_harness_is_in_scope() {
+fn ambient_stdio_lint_without_harness_binding_has_no_direct_fix() {
     let source = "fn helper() {\n  println(\"hi\")\n}\n";
     let diags = lint_source(source);
     assert_eq!(
         count_rule(&diags, "ambient-stdio-builtin"),
-        0,
-        "stdio migration lint should not flood pre-harness files: {diags:?}"
+        1,
+        "expected one stdio migration lint even before harness is threaded: {diags:?}"
+    );
+    let diag = diags
+        .iter()
+        .find(|diag| diag.rule == "ambient-stdio-builtin")
+        .expect("ambient stdio lint should be present");
+    assert!(
+        diag.fix.is_none(),
+        "lint-only fix should defer to harn fix planning when harness is not in scope: {diag:?}"
+    );
+    let suggestion = diag
+        .suggestion
+        .as_deref()
+        .expect("ambient stdio lint should explain the repair path");
+    assert!(
+        suggestion.contains("bindings/thread-harness-needs-param"),
+        "expected suggestion to point at the surface-changing repair: {suggestion}"
     );
 }

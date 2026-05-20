@@ -5,8 +5,8 @@ pipeline main() {
     .inject_reminder(a.transcript, {body: "keep", dedupe_key: "slot-y"})
   let cleared = transcript.clear_reminders(b.transcript, {dedupe_key: "slot-x"})
   let events = transcript_events_by_kind(cleared.transcript, "system_reminder")
-  println(cleared.removed_count)
-  println(len(events))
-  println(events[0].reminder.body)
-  println(events[0].reminder.dedupe_key)
+  __io_println(cleared.removed_count)
+  __io_println(len(events))
+  __io_println(events[0].reminder.body)
+  __io_println(events[0].reminder.dedupe_key)
 }

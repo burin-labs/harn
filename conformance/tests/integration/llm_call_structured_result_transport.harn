@@ -8,11 +8,11 @@ pipeline default() {
   let schema = {type: "object", required: ["k"], properties: {k: {type: "string"}}}
   llm_mock({error: {category: "rate_limit", message: "429 slow down"}})
   let r = llm_call_structured_result("Q", schema, {provider: "mock", llm_retries: 0, repair: {enabled: true}})
-  println(r.ok)
-  println(r.data == nil)
-  println(r.error_category)
-  println(contains(r.error, "429"))
-  println(r.repaired)
-  println(r.attempts)
-  println(r.raw_text)
+  __io_println(r.ok)
+  __io_println(r.data == nil)
+  __io_println(r.error_category)
+  __io_println(contains(r.error, "429"))
+  __io_println(r.repaired)
+  __io_println(r.attempts)
+  __io_println(r.raw_text)
 }

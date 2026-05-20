@@ -23,16 +23,16 @@ pipeline default() {
       host: {env_tool_format: "text", default_tool_format: "text"},
     },
   )
-  println(explicit.tool_format)
-  println(explicit.run_agent_loop)
-  println(explicit.llm_options.provider)
-  println(explicit.llm_options.tool_format)
-  println(explicit.agent_loop_options.max_iterations)
-  println(explicit.agent_loop_options.session_id)
-  println(explicit.agent_loop_options.native_tool_fallback)
-  println(explicit.agent_loop_options.done_sentinel)
-  println(explicit.agent_loop_options.exit_when_verified)
-  println(explicit.agent_loop_options.stop_after_successful_tools[0])
+  __io_println(explicit.tool_format)
+  __io_println(explicit.run_agent_loop)
+  __io_println(explicit.llm_options.provider)
+  __io_println(explicit.llm_options.tool_format)
+  __io_println(explicit.agent_loop_options.max_iterations)
+  __io_println(explicit.agent_loop_options.session_id)
+  __io_println(explicit.agent_loop_options.native_tool_fallback)
+  __io_println(explicit.agent_loop_options.done_sentinel)
+  __io_println(explicit.agent_loop_options.exit_when_verified)
+  __io_println(explicit.agent_loop_options.stop_after_successful_tools[0])
   let env = workflow_stage_agent_options(
     {
       has_tools: true,
@@ -40,11 +40,11 @@ pipeline default() {
       host: {env_tool_format: "native", default_tool_format: "text"},
     },
   )
-  println(env.tool_format)
+  __io_println(env.tool_format)
   let defaulted = workflow_stage_agent_options(
     {has_tools: false, model_policy: {}, host: {env_tool_format: "", default_tool_format: "native"}},
   )
-  println(defaulted.tool_format)
-  println(defaulted.run_agent_loop)
-  println(defaulted.agent_loop_options.max_iterations)
+  __io_println(defaulted.tool_format)
+  __io_println(defaulted.run_agent_loop)
+  __io_println(defaulted.agent_loop_options.max_iterations)
 }

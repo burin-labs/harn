@@ -48,6 +48,6 @@ pipeline default() {
       tool_caller: counting_caller,
     },
   )
-  println(result.status)
-  println(atomic_get(observed))
+  __io_println(result.status)
+  __io_println(atomic_get(observed))
 }

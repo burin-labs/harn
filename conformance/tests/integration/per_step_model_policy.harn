@@ -100,10 +100,10 @@ pipeline default() {
   // `llm_call`, the prompt-glob mocks return per-model fixtures, and
   // the over-budget step is skipped (continue → nil).
   let result = triage_captain("PR-42")
-  println(result)
+  __io_println(result)
   // 3 calls succeeded; the 4th was rejected pre-flight by the step's
   // own max_tokens=5 budget.
-  println(len(llm_mock_calls()))
+  __io_println(len(llm_mock_calls()))
   // `escalate` re-tags the budget-exhausted error with category
   // "handoff_escalation" and `escalated: true`, which the persona body
   // can route on. The step's frame is unwound, so the throw exits the
@@ -112,7 +112,7 @@ pipeline default() {
     budget_exhausted_escalate_step("PR-42")
   }
   let err = unwrap_err(escalation_caught)
-  println(err.category)
-  println(err.escalated)
-  println(err.step)
+  __io_println(err.category)
+  __io_println(err.escalated)
+  __io_println(err.step)
 }

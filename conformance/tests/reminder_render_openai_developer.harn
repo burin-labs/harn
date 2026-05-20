@@ -21,9 +21,9 @@ pipeline main() {
     {provider: "mock", model: "o3", messages: agent_session_messages(session), session_id: session},
   )
   let call = llm_mock_calls()[0]
-  println(call.messages[0].role)
-  println(contains(call.messages[0].content, "openai reminder"))
-  println(call.messages[1].role)
-  println(call.system == nil || !contains(call.system, "openai reminder"))
+  __io_println(call.messages[0].role)
+  __io_println(contains(call.messages[0].content, "openai reminder"))
+  __io_println(call.messages[1].role)
+  __io_println(call.system == nil || !contains(call.system, "openai reminder"))
   clear_reminder_providers()
 }

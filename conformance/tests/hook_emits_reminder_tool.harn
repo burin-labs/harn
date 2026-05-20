@@ -36,11 +36,11 @@ pipeline main() {
     },
   )
   let events = transcript_events_by_kind(result.transcript, "system_reminder")
-  println(result.status)
-  println(len(events))
-  println(events[0].reminder.body)
-  println(events[0].reminder.role_hint)
-  println(events[1].reminder.body)
-  println(events[1].reminder.source)
+  __io_println(result.status)
+  __io_println(len(events))
+  __io_println(events[0].reminder.body)
+  __io_println(events[0].reminder.role_hint)
+  __io_println(events[1].reminder.body)
+  __io_println(events[1].reminder.source)
   clear_tool_hooks()
 }

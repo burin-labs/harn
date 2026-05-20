@@ -126,8 +126,8 @@ let injected = transcript.inject_reminder(transcript(), {
 })
 
 let next_transcript = injected.transcript
-println(injected.reminder_id)
-println(injected.deduped_count)
+log(injected.reminder_id)
+log(injected.deduped_count)
 ```
 
 The returned transcript has one additional `system_reminder` event and
@@ -151,7 +151,7 @@ pending reminders:
 let cleared = transcript.clear_reminders(next_transcript, {
   tag: "token_pressure",
 })
-println(cleared.removed_count)
+log(cleared.removed_count)
 ```
 
 Selectors support `id`, `tag`, and `dedupe_key`. At least one selector
@@ -529,7 +529,7 @@ transcript_compact(snapshot, {
   strategy: "custom",
   custom_compactor: { messages, reminders ->
     for reminder in reminders {
-      println(reminder.body)
+      log(reminder.body)
     }
     return transcript({messages: messages})
   },

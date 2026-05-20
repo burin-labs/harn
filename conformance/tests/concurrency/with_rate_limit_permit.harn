@@ -7,8 +7,8 @@ pipeline default(task) {
   llm_mock({text: "two"})
   let a = with_rate_limit("mock", fn() { llm_call("hello", nil, {provider: "mock"}) })
   let b = with_rate_limit("mock", fn() { llm_call("hello", nil, {provider: "mock"}) })
-  println(a.text)
-  println(b.text)
+  __io_println(a.text)
+  __io_println(b.text)
   // Clear the rate limit so other tests aren't affected by it.
   llm_rate_limit("mock", {rpm: 0})
 }

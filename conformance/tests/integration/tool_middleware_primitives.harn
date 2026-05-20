@@ -44,9 +44,9 @@ pipeline default() {
   // (1) default_tool_caller passes through unchanged.
   let dc = default_tool_caller()
   let r1 = dc(envelope("read", {path: "/etc/hosts"}), next)
-  println(r1.ok)
-  println(r1.tool_name)
-  println(r1.arguments.path)
+  __io_println(r1.ok)
+  __io_println(r1.tool_name)
+  __io_println(r1.arguments.path)
   // (2) compose ordering: outer wrapper runs first; both args mutations
   // reach `next`; outer's post-wrap field lands on the result.
   let outer = { call, inner ->
@@ -56,9 +56,9 @@ pipeline default() {
   let middle = { call, inner -> return inner(call + {tool_args: call.tool_args + {seen_by_middle: "yes"}}) }
   let composed = compose_tool_callers([outer, middle])
   let r2 = composed(envelope("write", {path: "/tmp/x"}), next)
-  println(r2.wrapped_by)
-  println(r2.arguments.seen_by)
-  println(r2.arguments.seen_by_middle)
+  __io_println(r2.wrapped_by)
+  __io_println(r2.arguments.seen_by)
+  __io_println(r2.arguments.seen_by_middle)
   // (3) tools_use_middleware applies the schema transform per entry.
   var tools = tool_registry()
   tools = tool_define(
@@ -72,9 +72,9 @@ pipeline default() {
     { entry -> tool_inject_param(entry, "reason", {type: "string", description: "why"}) },
   )
   let read_entry = added.tools[0]
-  println(contains(read_entry.parameters.keys(), "reason"))
-  println(contains(read_entry.parameters.keys(), "path"))
-  println(read_entry.parameters.reason.description)
+  __io_println(contains(read_entry.parameters.keys(), "reason"))
+  __io_println(contains(read_entry.parameters.keys(), "path"))
+  __io_println(read_entry.parameters.reason.description)
   // (4) JSON-schema-shaped parameters keep `required` updated.
   var tools2 = tool_registry()
   tools2 = tool_define(
@@ -92,6 +92,6 @@ pipeline default() {
     { entry -> tool_inject_param(entry, "reason", {type: "string"}, {required: true}) },
   )
   let edit_entry = added2.tools[0]
-  println(contains(edit_entry.parameters.properties.keys(), "reason"))
-  println(contains(edit_entry.parameters.required, "reason"))
+  __io_println(contains(edit_entry.parameters.properties.keys(), "reason"))
+  __io_println(contains(edit_entry.parameters.required, "reason"))
 }

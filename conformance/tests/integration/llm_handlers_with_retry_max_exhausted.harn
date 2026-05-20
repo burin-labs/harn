@@ -10,8 +10,8 @@ pipeline default() {
   }
   let caller = with_retry(synthetic, {max_attempts: 3, base_ms: 1})
   let env = caller({prompt: "p", system: "", opts: {}, turn: {iteration: 0, session_id: "", attempt: 1}})
-  println(env.ok)
-  println(env.status)
-  println(env.retries_attempted)
-  println(atomic_get(counter))
+  __io_println(env.ok)
+  __io_println(env.status)
+  __io_println(env.retries_attempted)
+  __io_println(atomic_get(counter))
 }

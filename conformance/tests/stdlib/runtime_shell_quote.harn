@@ -1,12 +1,12 @@
 import { process_result_success, shell_quote } from "std/runtime"
 
 pipeline default() {
-  println(shell_quote("simple"))
-  println(shell_quote("two words"))
-  println(shell_quote("can't"))
-  println(shell_quote(""))
-  println(shell_quote(nil))
-  println(process_result_success({status: "completed", exit_code: 0}))
-  println(process_result_success({status: "failed", exit_code: 0}))
-  println(process_result_success({success: false, status: "completed", exit_code: 0}))
+  __io_println(shell_quote("simple"))
+  __io_println(shell_quote("two words"))
+  __io_println(shell_quote("can't"))
+  __io_println(shell_quote(""))
+  __io_println(shell_quote(nil))
+  __io_println(process_result_success({status: "completed", exit_code: 0}))
+  __io_println(process_result_success({status: "failed", exit_code: 0}))
+  __io_println(process_result_success({success: false, status: "completed", exit_code: 0}))
 }

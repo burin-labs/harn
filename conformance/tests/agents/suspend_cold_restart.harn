@@ -40,13 +40,13 @@ pipeline main() {
     "pipeline main() {\n"
       + "  llm_mock({tool_calls: [{id: \"park_cold\", name: \"agent_await_resumption\", arguments: {reason: \"cold restart park\"}}]})\n"
       + "  let result = agent_loop(\"Park until a cold restart resumes you.\", nil, {provider: \"mock\", tool_format: \"native\", max_iterations: 2, session_id: \"cold-restart-\" + uuid_v7()})\n"
-      + "  println(\"status=\" + result.status)\n"
-      + "  println(\"snapshot=\" + result.handle.snapshot_path)\n"
+      + "  __io_println(\"status=\" + result.status)\n"
+      + "  __io_println(\"snapshot=\" + result.handle.snapshot_path)\n"
       + "}\n",
   )
   let first = exec_at(root, harn_bin, "run", script)
-  println("first_ok=" + to_string(first.success))
-  println("first_suspended=" + to_string(contains(first.stdout, "status=suspended")))
+  __io_println("first_ok=" + to_string(first.success))
+  __io_println("first_suspended=" + to_string(contains(first.stdout, "status=suspended")))
   let snapshot = first_snapshot_line(first.stdout)
   require snapshot != nil, "cold restart suspend did not print a snapshot path"
   let snapshot_path = if path_is_absolute(snapshot) {
@@ -54,14 +54,14 @@ pipeline main() {
   } else {
     path_join(root, snapshot)
   }
-  println("snapshot_exists=" + to_string(file_exists(snapshot_path)))
+  __io_println("snapshot_exists=" + to_string(file_exists(snapshot_path)))
   let snapshot_text = read_file(snapshot_path)
-  println("snapshot_nonempty=" + to_string(len(snapshot_text) > 0))
+  __io_println("snapshot_nonempty=" + to_string(len(snapshot_text) > 0))
   let second = exec_at(root, harn_bin, "run", "--resume", snapshot, "--json")
-  println("second_ok=" + to_string(second.success))
+  __io_println("second_ok=" + to_string(second.success))
   let lines = second.stdout.trim().split("\n")
   let final = json_parse(lines[len(lines) - 1])
-  println("event_type=" + to_string(final.data.event_type))
-  println("resumed_status=" + to_string(final.data.value.status))
-  println("has_transcript=" + to_string(final.data.value.has_transcript))
+  __io_println("event_type=" + to_string(final.data.event_type))
+  __io_println("resumed_status=" + to_string(final.data.value.status))
+  __io_println("has_transcript=" + to_string(final.data.value.has_transcript))
 }

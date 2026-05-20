@@ -5,7 +5,7 @@ pipeline default() {
   let harn_bin = env_or("HARN_CONFORMANCE_HARN_BIN", resolve_harn_bin(repo_root))
   let root = path_join(temp_dir(), "harn_pack_basic_" + uuid_v7())
   mkdir(root)
-  write_file(path_join(root, "hello.harn"), "println(\"hi\")\n")
+  write_file(path_join(root, "hello.harn"), "__io_println(\"hi\")\n")
   let pack = exec_at(
     root,
     harn_bin,
@@ -16,13 +16,13 @@ pipeline default() {
     path_join(root, "hello.harnpack"),
     "--json",
   )
-  println(pack.success)
+  __io_println(pack.success)
   let pack_data = json_parse(pack.stdout)
-  println(pack_data.schemaVersion >= 1)
-  println(pack_data.ok)
-  println(starts_with(pack_data.data.bundle_hash, "blake3:"))
-  println(pack_data.data.signature.present)
-  println(file_exists(path_join(root, "hello.harnpack")))
+  __io_println(pack_data.schemaVersion >= 1)
+  __io_println(pack_data.ok)
+  __io_println(starts_with(pack_data.data.bundle_hash, "blake3:"))
+  __io_println(pack_data.data.signature.present)
+  __io_println(file_exists(path_join(root, "hello.harnpack")))
   let verify = exec_at(
     root,
     harn_bin,
@@ -32,11 +32,11 @@ pipeline default() {
     "--allow-unsigned",
     "--json",
   )
-  println(verify.success)
+  __io_println(verify.success)
   let verify_data = json_parse(verify.stdout)
-  println(verify_data.ok)
-  println(verify_data.data.bundle_hash == pack_data.data.bundle_hash)
-  println(verify_data.data.signature_present)
-  println(verify_data.data.signature_verified)
-  println(verify_data.data.module_count)
+  __io_println(verify_data.ok)
+  __io_println(verify_data.data.bundle_hash == pack_data.data.bundle_hash)
+  __io_println(verify_data.data.signature_present)
+  __io_println(verify_data.data.signature_verified)
+  __io_println(verify_data.data.module_count)
 }

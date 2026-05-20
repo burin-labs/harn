@@ -491,7 +491,7 @@ pub fn build_prompt(task) {
 pipeline default(task) {
   llm_mock({text: "done"})
   let result = llm_call(build_prompt(env_or("HARN_TASK", "")), "You are concise.")
-  println(result.text)
+  __io_println(result.text)
 }
 "#,
         );
@@ -569,7 +569,7 @@ pub fn build_prompt(task) {
             r#"
 pipeline default(task) {
   let result = llm_call(build_prompt(env_or("HARN_TASK", "")), "You are concise.")
-  println(result.text)
+  __io_println(result.text)
 }
 "#,
         );

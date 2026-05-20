@@ -4,10 +4,10 @@ import { render_markdown_table, render_table } from "std/table"
 
 pipeline test(task) {
   let styled = ansi_style("hi", {fg: "red", bold: true}, {mode: "always"})
-  println(json_stringify(styled))
-  println(ansi_strip(styled))
-  println(ansi_visible_len(styled))
-  println(contains(ansi_bg("x", "bright_red", {mode: "always"}), "[101m"))
+  __io_println(json_stringify(styled))
+  __io_println(ansi_strip(styled))
+  __io_println(ansi_visible_len(styled))
+  __io_println(contains(ansi_bg("x", "bright_red", {mode: "always"}), "[101m"))
   let table = render_table(
     [{name: "api", status: "ok", count: 12}, {name: "web", status: "fail", count: 3}],
     {
@@ -18,13 +18,13 @@ pipeline test(task) {
       ],
     },
   )
-  println(table)
-  println(render_markdown_table([{name: "api"}], {columns: [{key: "name", header: "Name"}]}))
+  __io_println(table)
+  __io_println(render_markdown_table([{name: "api"}], {columns: [{key: "name", header: "Name"}]}))
   let before = "a\nb\nc"
   let after = "a\nB\nc\nd"
   let summary = diff_summary(before, after)
-  println(summary.changed)
-  println(summary.insertions)
-  println(summary.deletions)
-  println(unified_diff(before, after, {path: "demo.txt"}))
+  __io_println(summary.changed)
+  __io_println(summary.insertions)
+  __io_println(summary.deletions)
+  __io_println(unified_diff(before, after, {path: "demo.txt"}))
 }

@@ -35,5 +35,5 @@ pipeline test(task) {
   assert_eq(with_sensitive[1].headers.cookie, "sid=session-secret")
   assert_eq(with_sensitive[1].headers["content-type"], "application/json")
   assert_eq(with_sensitive[1].body, "{\"name\":\"Ada\"}")
-  println("http_mock_calls_headers_ok")
+  __io_println("http_mock_calls_headers_ok")
 }

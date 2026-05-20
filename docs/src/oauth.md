@@ -215,7 +215,7 @@ let token_set = device_flow(
     scopes: ["read:user"],
     storage: memory(),
     on_user_code: { user_code, verification_uri ->
-      eprintln("Open " + verification_uri + " and enter " + user_code)
+      log("Open " + verification_uri + " and enter " + user_code)
     },
   },
 )
@@ -693,7 +693,7 @@ let token_set = device_flow(
     storage: store,
     on_user_code: { user_code, verification_uri ->
       // Surface to the CI log + a chat webhook so an operator can complete the dance.
-      let _ = eprintln("Visit " + verification_uri + " and enter " + user_code)
+      let _ = log("Visit " + verification_uri + " and enter " + user_code)
       let _ = http_post(env("SLACK_WEBHOOK_URL"), json_stringify({
         text: "CI auth pending: open " + verification_uri + " and enter `" + user_code + "`",
       }), {headers: {"Content-Type": "application/json"}})

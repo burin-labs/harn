@@ -6,7 +6,7 @@ pipeline default() {
     nil,
     {provider: "mock", loop_until_done: true, max_iterations: 3, done_sentinel: "##DONE##"},
   )
-  println(result.status)
-  println(result.text)
-  println(result.llm.iterations)
+  __io_println(result.status)
+  __io_println(result.text)
+  __io_println(result.llm.iterations)
 }

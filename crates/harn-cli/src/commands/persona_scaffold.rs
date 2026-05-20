@@ -112,13 +112,13 @@ pipeline test_{{persona_ident}}_smoke(task) {
   assert_eq(result.ok, true)
   assert_eq(result.receipt.schema, "harn.receipt.v1")
 {{smoke_assertions}}
-  println(result.ok)
-  println(result.receipt.schema)
+  log(result.ok)
+  log(result.receipt.schema)
 }
 "#;
 
-const SMOKE_EXPECTED_TEMPLATE: &str = r#"true
-harn.receipt.v1
+const SMOKE_EXPECTED_TEMPLATE: &str = r#"[harn] true
+[harn] harn.receipt.v1
 "#;
 
 const FIXTURE_TEMPLATE: &str = r#"{

@@ -58,12 +58,12 @@ pipeline test(task) {
       headers: {x_delivery: "evt-widget-" + unique},
     },
   )
-  println(to_acme.result?.target_session_id == acme_session)
-  println(to_widget.result?.target_session_id == widget_session)
+  __io_println(to_acme.result?.target_session_id == acme_session)
+  __io_println(to_widget.result?.target_session_id == widget_session)
   let acme_reminders = transcript_events_by_kind(agent_session_snapshot(acme_session), "system_reminder")
   let widget_reminders = transcript_events_by_kind(agent_session_snapshot(widget_session), "system_reminder")
-  println(len(acme_reminders))
-  println(len(widget_reminders))
-  println(acme_reminders[0].reminder.body)
-  println(widget_reminders[0].reminder.body)
+  __io_println(len(acme_reminders))
+  __io_println(len(widget_reminders))
+  __io_println(acme_reminders[0].reminder.body)
+  __io_println(widget_reminders[0].reminder.body)
 }

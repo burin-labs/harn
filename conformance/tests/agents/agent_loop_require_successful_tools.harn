@@ -30,9 +30,9 @@ pipeline main() {
       require_successful_tools: ["missing_tool"],
     },
   )
-  println(failed.status)
-  println(failed.stop_reason)
-  println(failed.missing_required_tools[0])
+  __io_println(failed.status)
+  __io_println(failed.stop_reason)
+  __io_println(failed.missing_required_tools[0])
   llm_mock_clear()
   llm_mock({tool_calls: [{id: "lookup_2", name: "lookup", arguments: {query: "x"}}]})
   llm_mock({text: "Finished."})
@@ -48,8 +48,8 @@ pipeline main() {
       require_successful_tools: [["lookup", "alternate_reader"]],
     },
   )
-  println(satisfied.status)
-  println(len(satisfied.missing_required_tools ?? []))
+  __io_println(satisfied.status)
+  __io_println(len(satisfied.missing_required_tools ?? []))
   llm_mock_clear()
   llm_mock({text: "Finished before using the required tool."})
   llm_mock({tool_calls: [{id: "lookup_3", name: "lookup", arguments: {query: "x"}}]})
@@ -67,7 +67,7 @@ pipeline main() {
       require_successful_tools: ["lookup"],
     },
   )
-  println(gated.status)
-  println(gated.llm.iterations)
-  println(len(gated.missing_required_tools ?? []))
+  __io_println(gated.status)
+  __io_println(gated.llm.iterations)
+  __io_println(len(gated.missing_required_tools ?? []))
 }

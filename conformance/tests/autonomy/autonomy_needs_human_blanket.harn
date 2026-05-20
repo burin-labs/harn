@@ -31,10 +31,12 @@ pipeline test(task) {
     {agent_id: blanket_agent, autonomy_tier: "act_auto", requires_human: true},
     fn() { return attempt_write(blanket_target) },
   )
-  println(blanket_outcome.caught != nil && !file_exists(blanket_target))
-  println(contains(blanket_outcome.caught, "HARN-AUT-NEEDS-HUMAN"))
+  __io_println(blanket_outcome.caught != nil && !file_exists(blanket_target))
+  __io_println(contains(blanket_outcome.caught, "HARN-AUT-NEEDS-HUMAN"))
   let blanket_records: list<TrustRecord> = trust_query({agent: blanket_agent, action: "fs.write"})
-  println(len(blanket_records) == 1 && blanket_records[0].metadata.autonomy_class == "needs-human")
+  __io_println(
+    len(blanket_records) == 1 && blanket_records[0].metadata.autonomy_class == "needs-human",
+  )
   // Shape 2: per-agent tag flips just one agent into needs-human while
   // other agents under the same policy continue to auto-apply.
   let scoped_agent = "needs-human-agent-" + unique
@@ -43,9 +45,9 @@ pipeline test(task) {
     {agent_id: scoped_agent, autonomy_tier: "act_auto", requires_human_agents: [scoped_agent]},
     fn() { return attempt_write(scoped_target) },
   )
-  println(scoped_outcome.caught != nil && !file_exists(scoped_target))
+  __io_println(scoped_outcome.caught != nil && !file_exists(scoped_target))
   let scoped_records: list<TrustRecord> = trust_query({agent: scoped_agent, action: "fs.write"})
-  println(len(scoped_records) == 1 && scoped_records[0].metadata.requires_human)
+  __io_println(len(scoped_records) == 1 && scoped_records[0].metadata.requires_human)
   for path in [blanket_target, scoped_target] {
     if file_exists(path) {
       delete_file(path)

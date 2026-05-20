@@ -541,9 +541,9 @@ fn build_run_script(
                 model: entry.model,\n\
                 max_tokens: {max_tokens}\n\
             }})\n\
-            println(json_stringify({{selector: entry.selector, response: resp}}))\n\
+            __io_println(json_stringify({{selector: entry.selector, response: resp}}))\n\
         }} catch (err) {{\n\
-            println(json_stringify({{selector: entry.selector, error: to_string(err)}}))\n\
+            __io_println(json_stringify({{selector: entry.selector, error: to_string(err)}}))\n\
         }}\n\
         if pushed {{\n\
             __pop_llm_render_context()\n\
@@ -668,7 +668,7 @@ async fn execute_judge(
         model: {model_lit},\n\
         max_tokens: {max_tokens}\n\
     }})\n\
-    println(verdict)\n\
+    __io_println(verdict)\n\
 }}\n",
     );
 

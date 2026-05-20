@@ -24,7 +24,7 @@ pipeline test(task) {
   // The VM-produced record carries one signature per reviewer; the
   // forged dict has none. This is the structural property that allows
   // hosts to verify provenance.
-  println(len(real_record.signatures))
-  println(len(forged_record.signatures))
-  println(starts_with(real_record.signatures[0].signature, "sha256:"))
+  __io_println(len(real_record.signatures))
+  __io_println(len(forged_record.signatures))
+  __io_println(starts_with(real_record.signatures[0].signature, "sha256:"))
 }

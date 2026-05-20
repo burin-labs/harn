@@ -6,24 +6,24 @@ import { append_jsonl, fold_jsonl, parse_jsonl, read_jsonl, write_jsonl } from "
 pipeline default() {
   let body = "{\"a\":1}\n\n{\"b\":2}\n  \n{\"c\":3}\n"
   let parsed = parse_jsonl(body)
-  println(len(parsed))
-  println(parsed[0].a)
-  println(parsed[1].b)
-  println(parsed[2].c)
+  __io_println(len(parsed))
+  __io_println(parsed[0].a)
+  __io_println(parsed[1].b)
+  __io_println(parsed[2].c)
   let limited = parse_jsonl(body, {max_records: 2})
-  println(len(limited))
+  __io_println(len(limited))
   let lenient = parse_jsonl("{\"ok\":1}\nNOT JSON\n{\"ok\":2}\n")
-  println(len(lenient))
+  __io_println(len(lenient))
   let path = path_join(temp_dir(), "harn-jsonl-roundtrip-" + uuid() + ".jsonl")
   let written = write_jsonl(path, [{x: 1}, {x: 2}, {x: 3}])
-  println(written)
+  __io_println(written)
   let reread = read_jsonl(path)
-  println(len(reread))
-  println(reread[2].x)
+  __io_println(len(reread))
+  __io_println(reread[2].x)
   append_jsonl(path, {x: 4})
   let after_append = read_jsonl(path)
-  println(len(after_append))
-  println(after_append[3].x)
+  __io_println(len(after_append))
+  __io_println(after_append[3].x)
   let total = fold_jsonl(
     body,
     0,
@@ -32,5 +32,5 @@ pipeline default() {
       return acc + value
     },
   )
-  println(total)
+  __io_println(total)
 }

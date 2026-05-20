@@ -37,8 +37,8 @@ pipeline main() {
     {},
   )
   let recap = transcript_events_by_kind(agent_session_snapshot(recap_session), "system_reminder")[0].reminder
-  println(token.propagate)
-  println(idle.propagate)
-  println(tool_reminder.propagate)
-  println(recap.propagate)
+  __io_println(token.propagate)
+  __io_println(idle.propagate)
+  __io_println(tool_reminder.propagate)
+  __io_println(recap.propagate)
 }

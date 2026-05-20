@@ -6,5 +6,5 @@ type User = {name: string, email: string, age: int}
 
 pipeline default(_) {
   let u: User = {name: "Ada", email: "ada@x", age: 36}
-  println(u.emial)
+  __io_println(u.emial)
 }

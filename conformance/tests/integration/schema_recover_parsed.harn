@@ -9,16 +9,16 @@ pipeline default() {
     properties: {name: {type: "string"}, age: {type: "integer"}},
   }
   let r = schema_recover("{\"name\": \"Ada\", \"age\": 36}", schema)
-  println(r.ok)
+  __io_println(r.ok)
   // `r.data` is `T | nil`; bind it to a local and narrow with a
   // nil guard before reading fields.
   let data = r.data
   if data != nil {
-    println(data.name)
-    println(data.age)
+    __io_println(data.name)
+    __io_println(data.age)
   }
-  println(r.stage)
-  println(r.attempts)
-  println(r.repaired)
-  println(r.error_category == nil)
+  __io_println(r.stage)
+  __io_println(r.attempts)
+  __io_println(r.repaired)
+  __io_println(r.error_category == nil)
 }

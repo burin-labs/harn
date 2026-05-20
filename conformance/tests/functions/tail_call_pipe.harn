@@ -6,5 +6,5 @@ pipeline default() {
     return n - 1 |> process
   }
   // Would overflow without TCO
-  println(process(10000))
+  __io_println(process(10000))
 }

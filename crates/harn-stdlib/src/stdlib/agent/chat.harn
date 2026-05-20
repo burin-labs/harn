@@ -1,6 +1,7 @@
 // @harn-entrypoint-category agent.stdlib
 import { agent_loop } from "std/agent/loop"
 import { filter_nil, pick_keys } from "std/collections"
+import { read_line } from "std/io"
 
 fn __chat_agent_option_keys() {
   return [
@@ -218,10 +219,10 @@ pub fn agent_chat_route_input(line, state = nil, handlers = nil) {
 
 fn __chat_default_user_input(opts, state) {
   let line = read_line()
-  if line == nil {
+  if !line.ok {
     return {kind: "exit", reason: "eof", state: state}
   }
-  return agent_chat_route_input(line, state, opts?.slash_commands)
+  return agent_chat_route_input(line.value, state, opts?.slash_commands)
 }
 
 fn __chat_normalize_user_decision(decision, state) {

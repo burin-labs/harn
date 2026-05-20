@@ -23,5 +23,5 @@ pipeline default() {
   let child = agent_session_open("tool-format-contract-child")
   agent_session_claim_tool_format(child, "native")
   require agent_session_tool_format(child) == "native", "new transcripts can choose their contract"
-  println("agent_session_tool_format_contract passed")
+  __io_println("agent_session_tool_format_contract passed")
 }

@@ -2,8 +2,8 @@ import { extract_paths, int_to_string, truncate_head_tail } from "std/text"
 
 pipeline default() {
   let paths = extract_paths("See /foo/bar.txt for details")
-  println(paths[0])
-  println(int_to_string(17))
+  __io_println(paths[0])
+  __io_println(int_to_string(17))
   let short = truncate_head_tail("a\nb\nc\nd\ne\nf", 1)
-  println(contains(short, "4 lines omitted"))
+  __io_println(contains(short, "4 lines omitted"))
 }

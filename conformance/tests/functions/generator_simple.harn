@@ -4,9 +4,9 @@ pipeline test(task) {
   }
   let g = gen()
   let r1 = g.next()
-  println(r1.value)
-  println(r1.done)
+  __io_println(r1.value)
+  __io_println(r1.done)
   let r2 = g.next()
-  println(r2.value)
-  println(r2.done)
+  __io_println(r2.value)
+  __io_println(r2.done)
 }

@@ -24,10 +24,10 @@ pipeline default() {
     },
   )
   let events = transcript_events_by_kind(result?.transcript, "compaction")
-  println(result?.llm?.iterations == 100)
-  println(result?.status == "budget_exhausted")
-  println(result?.trace?.compactions > 0)
-  println(len(events) > 0)
-  println(events[0]?.metadata?.strategy == "hybrid")
-  println(events[0]?.metadata?.engine_strategy == "llm")
+  __io_println(result?.llm?.iterations == 100)
+  __io_println(result?.status == "budget_exhausted")
+  __io_println(result?.trace?.compactions > 0)
+  __io_println(len(events) > 0)
+  __io_println(events[0]?.metadata?.strategy == "hybrid")
+  __io_println(events[0]?.metadata?.engine_strategy == "llm")
 }

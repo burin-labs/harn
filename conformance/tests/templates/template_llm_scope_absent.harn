@@ -1,6 +1,6 @@
 pipeline default() {
   let tmpl = "{{ if llm }}has-context{{ else }}bare-render{{ end }}"
-  println(render_string(tmpl, {}))
+  __io_println(render_string(tmpl, {}))
   let tmpl2 = "fallback={{ llm.provider }}/{{ llm.capabilities.native_tools }}"
-  println(render_string(tmpl2, {}))
+  __io_println(render_string(tmpl2, {}))
 }

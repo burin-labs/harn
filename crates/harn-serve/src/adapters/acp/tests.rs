@@ -657,7 +657,7 @@ fn acp_prompt_capabilities_follow_configured_model_aliases() {
 fn compile_pipeline_cached_serves_cached_chunk_until_mtime_advances() {
     let dir = tempfile::tempdir().expect("tempdir");
     let pipeline_path = dir.path().join("p.harn");
-    let initial = "pipeline main() { println(\"first\") }\n";
+    let initial = "pipeline main() { __io_println(\"first\") }\n";
     std::fs::write(&pipeline_path, initial).expect("write initial");
 
     let mut server = AcpServer::new(AcpServerConfig::new(Some(
@@ -676,8 +676,8 @@ fn compile_pipeline_cached_serves_cached_chunk_until_mtime_advances() {
 
     // Switching `target_pipeline` invalidates the slot — a named compile
     // produces a different chunk than the default-entry compile.
-    let named_source = "@command(name: \"alpha\") pipeline alpha() { println(\"alpha\") }\n\
-                       pipeline main() { println(\"main\") }\n";
+    let named_source = "@command(name: \"alpha\") pipeline alpha() { __io_println(\"alpha\") }\n\
+                       pipeline main() { __io_println(\"main\") }\n";
     std::fs::write(&pipeline_path, named_source).expect("write named");
     // Force mtime advance with a deterministic far-future literal so the
     // test doesn't read the wall clock (banned by `make lint-test-patterns`).
@@ -705,7 +705,7 @@ fn compile_pipeline_cached_serves_cached_chunk_until_mtime_advances() {
 #[test]
 fn compile_pipeline_cached_does_not_cache_inline_prompts() {
     let mut server = AcpServer::new(AcpServerConfig::new(None));
-    let source = "pipeline main() { println(\"inline\") }\n";
+    let source = "pipeline main() { __io_println(\"inline\") }\n";
     let (_chunk, hit1) = server
         .compile_pipeline_cached(source, None, None)
         .expect("first inline compile");
@@ -723,7 +723,7 @@ fn compile_pipeline_cached_does_not_cache_inline_prompts() {
 async fn vm_baseline_cached_serves_file_backed_context_until_key_changes() {
     let dir = tempfile::tempdir().expect("tempdir");
     let pipeline_path = dir.path().join("baseline.harn");
-    let source = "pipeline main() { println(\"baseline\") }\n";
+    let source = "pipeline main() { __io_println(\"baseline\") }\n";
     std::fs::write(&pipeline_path, source).expect("write pipeline");
 
     let mut server = AcpServer::new(AcpServerConfig::new(Some(

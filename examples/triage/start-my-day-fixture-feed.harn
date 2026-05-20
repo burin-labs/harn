@@ -11,8 +11,8 @@ pipeline default() {
     {title: "Start My Day", generated_at: "fixture", emit: true, topic: "triage.inbox.start_my_day"},
   )
   for event in feed.events {
-    println(event.provider + " " + event.summary)
+    __io_println(event.provider + " " + event.summary)
   }
-  println("events=" + to_string(len(feed.events)))
-  println("receipts=" + to_string(len(feed.receipts)))
+  __io_println("events=" + to_string(len(feed.events)))
+  __io_println("receipts=" + to_string(len(feed.receipts)))
 }

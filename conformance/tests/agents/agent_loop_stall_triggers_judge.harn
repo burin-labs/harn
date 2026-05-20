@@ -55,11 +55,11 @@ pipeline default() {
   let judges = events_of(captured.events, "judge_decision")
   require len(stalls) == 1, "stall warning should fire once"
   require len(judges) == 1, "stalled done_judge should fire once"
-  println(captured.result.status)
-  println(captured.result.stop_reason)
-  println(judges[0].trigger)
-  println(judges[0].verdict)
-  println(judges[0].iteration == stalls[0].warning.iteration)
-  println(tool_message_count(session))
-  println(len(llm_mock_calls()))
+  __io_println(captured.result.status)
+  __io_println(captured.result.stop_reason)
+  __io_println(judges[0].trigger)
+  __io_println(judges[0].verdict)
+  __io_println(judges[0].iteration == stalls[0].warning.iteration)
+  __io_println(tool_message_count(session))
+  __io_println(len(llm_mock_calls()))
 }

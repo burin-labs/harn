@@ -37,8 +37,8 @@ pipeline main() {
     {provider: "mock", background: true, tool_format: "native", max_iterations: 3},
   )
   let suspended = wait_agent(handle)
-  println("status=" + suspended.status)
-  println("has_auto_trigger=" + to_string(suspended?.suspension?.auto_resume_trigger != nil))
+  __io_println("status=" + suspended.status)
+  __io_println("has_auto_trigger=" + to_string(suspended?.suspension?.auto_resume_trigger != nil))
   // Advance the mock clock past the 5-minute timeout. The spawned
   // auto-resume timeout task wakes from `clock::sleep`, fires the
   // synthetic auto_resume.timeout event, and the agent loop resumes.
@@ -49,7 +49,7 @@ pipeline main() {
   yield_now()
   yield_now()
   let resumed = wait_agent(handle)
-  println("post_timeout_status=" + resumed.status)
-  println("has_transcript=" + to_string(resumed.has_transcript))
+  __io_println("post_timeout_status=" + resumed.status)
+  __io_println("has_transcript=" + to_string(resumed.has_transcript))
   let _ = unmock_time()
 }

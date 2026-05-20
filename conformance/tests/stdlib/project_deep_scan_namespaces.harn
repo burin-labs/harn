@@ -49,12 +49,12 @@ pipeline test(task) {
       enrichment: {prompt: "Return valid JSON only.", provider: "mock", schema: {purpose: "string"}},
     },
   )
-  println(alpha["."].enriched.purpose == "alpha root")
-  println(beta["."].enriched.purpose == "beta root")
-  println(alpha_cached["."].enriched.purpose == "alpha root")
-  println(beta_cached["."].enriched.purpose == "beta root")
-  println(project_deep_scan_status(alpha_namespace, root).cache_hits == 1)
-  println(project_deep_scan_status(beta_namespace, root).cache_hits == 1)
-  println(len(llm_mock_calls()) == 2)
+  __io_println(alpha["."].enriched.purpose == "alpha root")
+  __io_println(beta["."].enriched.purpose == "beta root")
+  __io_println(alpha_cached["."].enriched.purpose == "alpha root")
+  __io_println(beta_cached["."].enriched.purpose == "beta root")
+  __io_println(project_deep_scan_status(alpha_namespace, root).cache_hits == 1)
+  __io_println(project_deep_scan_status(beta_namespace, root).cache_hits == 1)
+  __io_println(len(llm_mock_calls()) == 2)
   delete_file(root)
 }

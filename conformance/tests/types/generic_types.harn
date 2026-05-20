@@ -1,16 +1,16 @@
 pipeline default() {
   // list<int> type annotation
   let numbers: list<int> = [1, 2, 3]
-  println(numbers.count)
+  __io_println(numbers.count)
   // dict<string, int> type annotation
   let ages: dict<string, int> = {alice: 30, bob: 25}
-  println(ages["alice"])
+  __io_println(ages["alice"])
   // Nested: list of dicts
   let people: list<dict> = [{name: "Alice"}, {name: "Bob"}]
-  println(people[0]["name"])
+  __io_println(people[0]["name"])
   // Type annotation on function params
   fn sum(items: list<int>) -> int {
     return items.sum()
   }
-  println(sum([10, 20, 30]))
+  __io_println(sum([10, 20, 30]))
 }

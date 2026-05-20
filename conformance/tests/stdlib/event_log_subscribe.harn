@@ -3,13 +3,13 @@ pipeline default() {
   let second_id = event_log.emit("tests.events", "two", {n: 2})
   let replay = event_log.subscribe({topic: "tests.events", from_cursor: first_id})
   let replayed = replay.next()
-  println(replayed.value.kind)
-  println(replayed.value.payload.n)
+  __io_println(replayed.value.kind)
+  __io_println(replayed.value.payload.n)
   let live = event_log.subscribe({topic: "tests.events", from_cursor: second_id})
   event_log.emit("tests.events", "three", {n: 3})
   let live_event = live.next()
-  println(live_event.value.kind)
-  println(live_event.value.cursor)
+  __io_println(live_event.value.kind)
+  __io_println(live_event.value.cursor)
   let filtered = event_log
     .subscribe(
     {topic: "tests.events", from_cursor: live_event.value.cursor, kind_prefix: "transcript.reminder."},
@@ -17,6 +17,6 @@ pipeline default() {
   event_log.emit("tests.events", "other", {n: 4})
   event_log.emit("tests.events", "transcript.reminder.injected", {n: 5})
   let filtered_event = filtered.next()
-  println(filtered_event.value.kind)
-  println(filtered_event.value.payload.n)
+  __io_println(filtered_event.value.kind)
+  __io_println(filtered_event.value.payload.n)
 }

@@ -17,9 +17,9 @@ pipeline default() {
       references: ["https://github.com/rust-lang/cargo/issues/4282"],
     },
   )
-  println(rule._type)
-  println(rule.id)
-  println(rule.priority)
+  __io_println(rule._type)
+  __io_println(rule.id)
+  __io_println(rule.priority)
   let predicate_rule = tool_rule(
     {
       id: "shell.dangerous_rm",
@@ -29,53 +29,53 @@ pipeline default() {
       explanation: "Refusing recursive root deletion",
     },
   )
-  println(predicate_rule._type)
+  __io_println(predicate_rule._type)
   let rust_cat = catalogue(
     {id: "harn-canon/rust", stack: "rust", version: "0.1.0", source: "harn-canon", rules: [rule]},
   )
-  println(rust_cat._type)
+  __io_println(rust_cat._type)
   let shell_cat = catalogue({id: "harn-canon/shell", stack: "shell", version: "0.1.0", rules: [predicate_rule]})
   /* Round-trip catalogue through JSON to satisfy the serde criterion. */
   let json = json_stringify(rust_cat)
   let decoded = json_parse(json)
-  println(decoded._type)
-  println(decoded.id)
-  println(len(decoded.rules))
+  __io_println(decoded._type)
+  __io_println(decoded.id)
+  __io_println(len(decoded.rules))
   /* register / list / unregister */
   let registry = tool_hooks_registry()
   let r1 = tool_hooks_register(registry, rust_cat)
   let r2 = tool_hooks_register(r1, shell_cat)
   let listed = tool_hooks_list(r2)
-  println(len(listed))
-  println(listed[0].id)
-  println(listed[0].rule_count)
+  __io_println(len(listed))
+  __io_println(listed[0].id)
+  __io_println(listed[0].rule_count)
   /* Re-registering the same id replaces in place. */
   let r3 = tool_hooks_register(r2, rust_cat)
-  println(len(tool_hooks_list(r3)))
+  __io_println(len(tool_hooks_list(r3)))
   /* Unregistering by id prunes the catalogue. */
   let pruned = tool_hooks_unregister(r3, "harn-canon/shell")
-  println(len(tool_hooks_list(pruned)))
+  __io_println(len(tool_hooks_list(pruned)))
   /* Regex match (rust stack scoped). */
   let matches = tool_hooks_match(r3, "cargo build --release", {stacks: ["rust"]})
-  println(len(matches))
-  println(matches[0].rule_id)
-  println(matches[0].catalogue_id)
-  println(matches[0].severity)
+  __io_println(len(matches))
+  __io_println(matches[0].rule_id)
+  __io_println(matches[0].catalogue_id)
+  __io_println(matches[0].severity)
   /* applies_to filter rejects non-matching stacks. */
   let py_matches = tool_hooks_match(r3, "cargo build --release", {stacks: ["python"]})
-  println(len(py_matches))
+  __io_println(len(py_matches))
   /* Empty stack context — `applies_to: []` rule (shell) still matches. */
   let shell_matches = tool_hooks_match(r3, "rm -rf / now", nil)
-  println(len(shell_matches))
-  println(shell_matches[0].rule_id)
+  __io_println(len(shell_matches))
+  __io_println(shell_matches[0].rule_id)
   /* Non-matching command produces no hits. */
-  println(len(tool_hooks_match(r3, "echo hello", {stacks: ["rust"]})))
+  __io_println(len(tool_hooks_match(r3, "echo hello", {stacks: ["rust"]})))
   /* Priority sorting: higher rule priority sorts first across catalogues. */
   let low = tool_rule({id: "low", pattern: "git push", priority: 1})
   let high = tool_rule({id: "high", pattern: "git push", priority: 9})
   let pri_cat = catalogue({id: "pri", stack: "general", rules: [low, high]})
   let pri_reg = tool_hooks_register(tool_hooks_registry(), pri_cat)
   let pri_matches = tool_hooks_match(pri_reg, "git push --force", nil)
-  println(pri_matches[0].rule_id)
-  println(pri_matches[1].rule_id)
+  __io_println(pri_matches[0].rule_id)
+  __io_println(pri_matches[1].rule_id)
 }

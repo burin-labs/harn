@@ -53,10 +53,10 @@ pipeline default() {
   let progress_events = captured.events.filter({ event -> event.type == "progress_reported" })
   require len(progress_events) == 1, "tool-mode progress emits one event"
   let event = progress_events[0]
-  println("tool_exposed=" + to_string(contains(tool_names(calls[0].tools), "report_progress")))
-  println("progress_events=" + to_string(len(progress_events)))
-  println("event_message=" + event.message)
-  println("entry_status=" + event.entries[0].status)
-  println("replace=" + to_string(event.replace))
-  println("result_status=" + captured.result.status)
+  __io_println("tool_exposed=" + to_string(contains(tool_names(calls[0].tools), "report_progress")))
+  __io_println("progress_events=" + to_string(len(progress_events)))
+  __io_println("event_message=" + event.message)
+  __io_println("entry_status=" + event.entries[0].status)
+  __io_println("replace=" + to_string(event.replace))
+  __io_println("result_status=" + captured.result.status)
 }

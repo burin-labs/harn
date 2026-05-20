@@ -2,15 +2,15 @@
 pipeline default(task) {
   // Valid date should work
   let ts = date_parse("2024-06-15")
-  println(ts > 0)
+  __io_println(ts > 0)
   // Invalid month
   let r1 = try {
     date_parse("2024-13-01")
   }
-  println(is_err(r1))
+  __io_println(is_err(r1))
   // Invalid day
   let r2 = try {
     date_parse("2024-01-32")
   }
-  println(is_err(r2))
+  __io_println(is_err(r2))
 }

@@ -913,7 +913,7 @@ let tenant = pg_transaction(
   },
   {settings: {"app.current_tenant_id": "tenant-a"}},
 )
-println(tenant)
+__io_println(tenant)
 
 let rolled = try {
   pg_transaction(db, { tx ->
@@ -923,8 +923,8 @@ let rolled = try {
 } catch (e) {
   "rolled back"
 }
-println(rolled)
-println(pg_query_one(db, "select count(*)::int8 as count from harn_pg_tx_test", []).count)
+__io_println(rolled)
+__io_println(pg_query_one(db, "select count(*)::int8 as count from harn_pg_tx_test", []).count)
 pg_close(db)
 "#;
         let rt = tokio::runtime::Builder::new_current_thread()

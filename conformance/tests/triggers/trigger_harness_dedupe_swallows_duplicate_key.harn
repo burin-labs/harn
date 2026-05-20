@@ -1,7 +1,7 @@
 pipeline test(task) {
   let result = trigger_test_harness("dedupe_swallows_duplicate_key")
-  println(result.ok)
-  println(len(result.emitted) == 1)
-  println(result.emitted[0].note == "first_delivery")
-  println(contains(result.details.duplicate_error, "duplicate"))
+  __io_println(result.ok)
+  __io_println(len(result.emitted) == 1)
+  __io_println(result.emitted[0].note == "first_delivery")
+  __io_println(contains(result.details.duplicate_error, "duplicate"))
 }

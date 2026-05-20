@@ -37,19 +37,19 @@ pipeline default() {
   // (1) dry-run everything.
   let dry = with_dry_run()
   let r1 = dry(envelope("write"), next)
-  println(r1.ok)
-  println(r1.status)
-  println(r1.result.dry_run)
+  __io_println(r1.ok)
+  __io_println(r1.status)
+  __io_println(r1.result.dry_run)
   // (2) `except` allows specific tools to actually run.
   let dry_except_read = with_dry_run({except: ["read"]})
   let r2 = dry_except_read(envelope("read"), next)
   let r3 = dry_except_read(envelope("write"), next)
-  println(r2.result)
-  println(r3.status)
+  __io_println(r2.result)
+  __io_println(r3.status)
   // (3) `only` runs dry-run only for listed tools.
   let dry_only_write = with_dry_run({only: ["write"]})
   let r4 = dry_only_write(envelope("read"), next)
   let r5 = dry_only_write(envelope("write"), next)
-  println(r4.result)
-  println(r5.status)
+  __io_println(r4.result)
+  __io_println(r5.status)
 }

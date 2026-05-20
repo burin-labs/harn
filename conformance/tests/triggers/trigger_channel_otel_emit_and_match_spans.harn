@@ -39,23 +39,23 @@ pipeline default() {
   // `ch.otel.fired`. The match handler runs synchronously inline so
   // both events land before the test reads them.
   let first = stream.next().value
-  println(first.kind)
-  println(first.payload.name_resolved)
-  println(first.payload.scope)
-  println(first.payload.inserted)
+  __io_println(first.kind)
+  __io_println(first.payload.name_resolved)
+  __io_println(first.payload.scope)
+  __io_println(first.payload.inserted)
   let second = stream.next().value
-  println(second.kind)
-  println(second.payload.name_resolved)
-  println(second.payload.handler_kind)
+  __io_println(second.kind)
+  __io_println(second.payload.name_resolved)
+  __io_println(second.payload.handler_kind)
   // Spans: at least one ChannelEmit and one ChannelMatch must be
   // present, and the match span must carry a link back to the emit.
   let spans = trace_spans()
   let emits = spans.filter({ s -> s.kind == "channel_emit" })
   let matches = spans.filter({ s -> s.kind == "channel_match" })
-  println(len(emits) >= 1)
-  println(len(matches) >= 1)
+  __io_println(len(emits) >= 1)
+  __io_println(len(matches) >= 1)
   let match_span = matches[0]
-  println(match_span.links != nil)
-  println(len(match_span.links) >= 1)
+  __io_println(match_span.links != nil)
+  __io_println(len(match_span.links) >= 1)
   enable_tracing(false)
 }

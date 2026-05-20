@@ -18,15 +18,15 @@ fn drop_oldest_case(bp) {
   let old = pool.submit(constant("old"))
   let newest = pool.submit(constant("newest"))
   let saturated = pool.snapshot()
-  println(saturated.backpressure.on_full)
-  println(saturated.rejected)
-  println(saturated.queued)
+  __io_println(saturated.backpressure.on_full)
+  __io_println(saturated.rejected)
+  __io_println(saturated.queued)
   send(gate, "go")
   let results = pool_wait([warmup, old, newest])
-  println(results[1].status)
-  println(results[1].rejection_policy)
-  println(results[2].status)
-  println(results[2].result)
+  __io_println(results[1].status)
+  __io_println(results[1].rejection_policy)
+  __io_println(results[2].status)
+  __io_println(results[2].result)
 }
 
 fn drop_newest_case(bp) {
@@ -36,15 +36,15 @@ fn drop_newest_case(bp) {
   let old = pool.submit(constant("old"))
   let newest = pool.submit(constant("newest"))
   let saturated = pool.snapshot()
-  println(saturated.backpressure.on_full)
-  println(saturated.rejected)
-  println(saturated.queued)
+  __io_println(saturated.backpressure.on_full)
+  __io_println(saturated.rejected)
+  __io_println(saturated.queued)
   send(gate, "go")
   let results = pool_wait([warmup, old, newest])
-  println(results[1].status)
-  println(results[1].result)
-  println(results[2].status)
-  println(results[2].rejection_policy)
+  __io_println(results[1].status)
+  __io_println(results[1].result)
+  __io_println(results[2].status)
+  __io_println(results[2].rejection_policy)
 }
 
 fn ring_buffer_case(bp) {
@@ -54,15 +54,15 @@ fn ring_buffer_case(bp) {
   let old = pool.submit(constant("old"))
   let newest = pool.submit(constant("newest"))
   let saturated = pool.snapshot()
-  println(saturated.backpressure.kind)
-  println(saturated.backpressure.max_depth)
-  println(saturated.rejected)
+  __io_println(saturated.backpressure.kind)
+  __io_println(saturated.backpressure.max_depth)
+  __io_println(saturated.rejected)
   send(gate, "go")
   let results = pool_wait([warmup, old, newest])
-  println(results[1].status)
-  println(results[1].rejection_policy)
-  println(results[2].status)
-  println(results[2].result)
+  __io_println(results[1].status)
+  __io_println(results[1].rejection_policy)
+  __io_println(results[2].status)
+  __io_println(results[2].result)
 }
 
 fn fail_submitter_case(bp) {
@@ -75,12 +75,12 @@ fn fail_submitter_case(bp) {
   let failed = try {
     pool.submit(constant("overflow"))
   }
-  println(is_err(failed))
-  println(contains(to_string(unwrap_err(failed)), "HARN-POL-001"))
+  __io_println(is_err(failed))
+  __io_println(contains(to_string(unwrap_err(failed)), "HARN-POL-001"))
   send(gate, "go")
   let results = pool_wait([warmup, queued])
-  println(results[0].status)
-  println(results[1].result)
+  __io_println(results[0].status)
+  __io_println(results[1].result)
 }
 
 fn fail_fast_case(bp) {
@@ -90,12 +90,12 @@ fn fail_fast_case(bp) {
   let failed = try {
     pool.submit(constant("overflow"))
   }
-  println(is_err(failed))
-  println(contains(to_string(unwrap_err(failed)), "HARN-POL-002"))
+  __io_println(is_err(failed))
+  __io_println(contains(to_string(unwrap_err(failed)), "HARN-POL-002"))
   send(gate, "go")
   let result = pool_wait(warmup)
-  println(result.status)
-  println(result.result)
+  __io_println(result.status)
+  __io_println(result.result)
 }
 
 fn block_submitter_case(bp) {
@@ -112,14 +112,14 @@ fn block_submitter_case(bp) {
     return late
   }
   receive(started)
-  println(try_receive(returned) == nil)
+  __io_println(try_receive(returned) == nil)
   send(gate, "go")
   let late = await(submitter)
-  println(receive(returned))
+  __io_println(receive(returned))
   let results = pool_wait([warmup, queued, late])
-  println(results[0].status)
-  println(results[1].result)
-  println(results[2].result)
+  __io_println(results[0].status)
+  __io_println(results[1].result)
+  __io_println(results[2].result)
 }
 
 fn audit_case() {
@@ -130,17 +130,17 @@ fn audit_case() {
   let first = stream.next().value
   let second = stream.next().value
   let third = stream.next().value
-  println(first.kind)
-  println(first.payload.policy)
-  println(first.headers.schema)
-  println(second.payload.policy)
-  println(third.payload.policy)
+  __io_println(first.kind)
+  __io_println(first.payload.policy)
+  __io_println(first.headers.schema)
+  __io_println(second.payload.policy)
+  __io_println(third.payload.policy)
 }
 
 pipeline default() {
   let bp = Backpressure()
-  println(bp.fail_fast.kind)
-  println(bp.queue(2, "block_submitter").max_depth)
+  __io_println(bp.fail_fast.kind)
+  __io_println(bp.queue(2, "block_submitter").max_depth)
   drop_oldest_case(bp)
   drop_newest_case(bp)
   ring_buffer_case(bp)

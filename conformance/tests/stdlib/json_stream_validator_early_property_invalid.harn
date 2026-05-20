@@ -5,9 +5,9 @@ pipeline default(task) {
     {type: "dict", required: ["name", "age"], properties: {name: {type: "string"}, age: {type: "int"}}},
   )
   let status = validator.feed("{\"name\":\"Ada\",\"age\":\"")
-  println(status.variant)
-  println(status.fields[0].path)
-  println(contains(status.fields[0].reason, "expected type 'int'"))
-  println(validator.value() == nil)
-  println(validator.feed("42}").variant)
+  __io_println(status.variant)
+  __io_println(status.fields[0].path)
+  __io_println(contains(status.fields[0].reason, "expected type 'int'"))
+  __io_println(validator.value() == nil)
+  __io_println(validator.feed("42}").variant)
 }

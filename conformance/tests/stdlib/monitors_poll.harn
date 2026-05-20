@@ -10,6 +10,6 @@ pipeline test(task) {
       condition: { state -> state.ready },
     },
   )
-  println(result.status == "matched")
-  println(result.poll_count == 1)
+  __io_println(result.status == "matched")
+  __io_println(result.poll_count == 1)
 }

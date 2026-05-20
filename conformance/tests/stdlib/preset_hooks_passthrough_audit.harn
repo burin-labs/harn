@@ -14,17 +14,17 @@ pipeline default() {
   let inner = { args -> {ok: true, ran: args.command} }
   let wrapper = preset_run_command({stacks: ["python"], mode: tool_hooks_mode_passthrough_only_audit, inner: inner})
   let result = wrapper({command: "find . -name '*.py'"})
-  println(result.action)
-  println(result.rule_id)
-  println(result.original_command)
+  __io_println(result.action)
+  __io_println(result.rule_id)
+  __io_println(result.original_command)
   /* original_command and command are identical — no rewrite applied. */
-  println(result.command)
-  println(result.result.ran)
+  __io_println(result.command)
+  __io_println(result.result.ran)
   /* Exactly one audit entry, kind tool_rule_warning. No
    * tool_hooks.reminder_injected — passthrough is observability-only. */
   let log = pipeline_lifecycle_audit_log_take()
-  println(len(log))
-  println(log[0].kind)
-  println(log[0].payload.rule_id)
-  println(log[0].payload.severity)
+  __io_println(len(log))
+  __io_println(log[0].kind)
+  __io_println(log[0].payload.rule_id)
+  __io_println(log[0].payload.severity)
 }

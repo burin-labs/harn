@@ -627,12 +627,12 @@ mod tests {
 pipeline main(task) {
   let items = [1, 2]
   if ready {
-    println("go")
+    __io_println("go")
   } else {
-    println("wait")
+    __io_println("wait")
   }
   parallel each items { item ->
-    println(item)
+    __io_println(item)
   }
 }
 "#;
@@ -650,15 +650,15 @@ pipeline main(task) {
 pipeline main(task) {
   let value = 1
   match value {
-    1 -> { println("one") }
-    _ -> { println("other") }
+    1 -> { __io_println("one") }
+    _ -> { __io_println("other") }
   }
   try {
     risky()
   } catch err {
-    println(err)
+    __io_println(err)
   } finally {
-    println("done")
+    __io_println("done")
   }
 }
 "#;

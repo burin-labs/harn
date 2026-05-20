@@ -48,5 +48,5 @@ pipeline test(task) {
   assert_eq(cancelled_close.type, "close")
   assert(sse_server_close(response))
   assert_eq(sse_server_flush(response), false)
-  println("sse_server_primitives_ok")
+  __io_println("sse_server_primitives_ok")
 }

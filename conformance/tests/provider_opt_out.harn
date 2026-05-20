@@ -21,8 +21,8 @@ pipeline main() {
     {reminders: {providers: ["-idle_nudge"], config: {idle_nudge: {idle_seconds: 60}}}},
   )
   let opted_out_reminders = transcript_events_by_kind(agent_session_snapshot(opted_out_session), "system_reminder")
-  println(enabled.fired_count)
-  println(len(enabled_reminders))
-  println(opted_out.fired_count)
-  println(len(opted_out_reminders))
+  __io_println(enabled.fired_count)
+  __io_println(len(enabled_reminders))
+  __io_println(opted_out.fired_count)
+  __io_println(len(opted_out_reminders))
 }

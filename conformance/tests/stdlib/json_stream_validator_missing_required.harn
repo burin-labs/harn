@@ -5,7 +5,7 @@ pipeline default(task) {
     {type: "dict", required: ["name", "age"], properties: {name: {type: "string"}, age: {type: "int"}}},
   )
   let status = validator.feed("{\"name\":\"Ada\"}")
-  println(status.variant)
-  println(status.fields[0].path)
-  println(validator.value() == nil)
+  __io_println(status.variant)
+  __io_println(status.fields[0].path)
+  __io_println(validator.value() == nil)
 }

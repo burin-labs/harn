@@ -3,10 +3,10 @@ pipeline default() {
   // replace every match and both support `$1`, `$2`, `${name}`
   // backrefs from the `regex` crate.
   let swapped = regex_replace("(\\w+)\\s(\\w+)", "$2 $1", "hello world")
-  println(swapped)
+  __io_println(swapped)
   let swapped_alias = regex_replace_all("(\\w+)\\s(\\w+)", "$2 $1", "hello world")
-  println(swapped_alias)
+  __io_println(swapped_alias)
   // Named backrefs work as well.
   let shouty = regex_replace_all("(?P<word>\\w+)", "<$word>", "one two three")
-  println(shouty)
+  __io_println(shouty)
 }

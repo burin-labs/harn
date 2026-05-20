@@ -64,5 +64,5 @@ pipeline test(task) {
   assert(websocket_close(backpressure_client))
   assert(websocket_close(backpressure_conn))
   assert(websocket_server_close(server))
-  println("websocket_server_builtins_ok")
+  __io_println("websocket_server_builtins_ok")
 }

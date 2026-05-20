@@ -8,9 +8,9 @@ pipeline default() {
   let r1 = try {
     agent_loop("hi", nil, {provider: "mock", llm_caller: bad_string_caller})
   }
-  println(unwrap_err(r1))
+  __io_println(unwrap_err(r1))
   let r2 = try {
     agent_loop("hi", nil, {provider: "mock", llm_caller: bad_value_caller})
   }
-  println(unwrap_err(r2))
+  __io_println(unwrap_err(r2))
 }

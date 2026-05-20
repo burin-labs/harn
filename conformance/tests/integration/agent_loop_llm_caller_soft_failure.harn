@@ -6,5 +6,5 @@
 pipeline default() {
   let budget_caller = { _call -> return {ok: false, status: "budget_exhausted"} }
   let result = agent_loop("hi", nil, {provider: "mock", llm_caller: budget_caller})
-  println(result.status)
+  __io_println(result.status)
 }

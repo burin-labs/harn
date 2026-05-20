@@ -45,10 +45,10 @@ pipeline default() {
       client_ip: "203.0.113.7",
     },
   )
-  println(response.status)
-  println(http_header(response, "X-After"))
-  println(json_parse(response.body).accepted)
-  println(http_header(response, "x-order"))
+  __io_println(response.status)
+  __io_println(http_header(response, "X-After"))
+  __io_println(json_parse(response.body).accepted)
+  __io_println(http_header(response, "x-order"))
   http_server_route(
     server,
     "POST",
@@ -57,8 +57,8 @@ pipeline default() {
     {max_body_bytes: 4},
   )
   let rejected = http_server_request(server, {method: "POST", path: "/limited", body: "12345"})
-  println(rejected.status)
-  println(http_header(rejected, "x-harn-body-limit"))
+  __io_println(rejected.status)
+  __io_println(http_header(rejected, "x-harn-body-limit"))
   http_server_route(
     server,
     "POST",
@@ -67,14 +67,14 @@ pipeline default() {
     {retain_raw_body: false},
   )
   let discarded = http_server_test(server, {method: "POST", path: "/discard", body: "kept-text"})
-  println(discarded.body)
+  __io_println(discarded.body)
   http_server_set_ready(server, false)
-  println(http_server_test(server, {method: "POST", path: "/discard"}).status)
+  __io_println(http_server_test(server, {method: "POST", path: "/discard"}).status)
   http_server_set_ready(server, true)
   http_server_readiness(server, { _server -> false })
-  println(http_server_ready(server))
-  println(http_server_test(server, {method: "POST", path: "/discard"}).status)
+  __io_println(http_server_ready(server))
+  __io_println(http_server_test(server, {method: "POST", path: "/discard"}).status)
   http_server_on_shutdown(server, { _server -> nil })
-  println(http_server_shutdown(server))
-  println(http_server_test(server, {method: "POST", path: "/discard"}).status)
+  __io_println(http_server_shutdown(server))
+  __io_println(http_server_test(server, {method: "POST", path: "/discard"}).status)
 }

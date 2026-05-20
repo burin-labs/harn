@@ -34,7 +34,7 @@ pipeline test(task) {
   // Session-scoped emit fires the trigger.
   let _ = emit_channel("session:sess.input", {n: 2})
   let fired = channel_events("ch.session.fired")
-  println(len(fired))
-  println(fired[0].payload.scope)
-  println(fired[0].payload.name)
+  __io_println(len(fired))
+  __io_println(fired[0].payload.scope)
+  __io_println(fired[0].payload.name)
 }

@@ -33,11 +33,11 @@ pipeline test(task) {
     handle,
     {provider: "github", kind: "issue.opened", headers: {x_delivery: "evt-" + unique}},
   )
-  println(dispatch.status == "dispatched")
-  println(dispatch.result?.target_session_id == target)
+  __io_println(dispatch.status == "dispatched")
+  __io_println(dispatch.result?.target_session_id == target)
   let target_reminders = transcript_events_by_kind(agent_session_snapshot(target), "system_reminder")
   let bystander_reminders = transcript_events_by_kind(agent_session_snapshot(bystander), "system_reminder")
-  println(len(target_reminders))
-  println(len(bystander_reminders))
-  println(target_reminders[0].reminder.body)
+  __io_println(len(target_reminders))
+  __io_println(len(bystander_reminders))
+  __io_println(target_reminders[0].reminder.body)
 }

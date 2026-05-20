@@ -116,6 +116,16 @@ fn try_outside_function_attaches_surface_changing_repair() {
 }
 
 #[test]
+fn invalid_main_signature_attaches_surface_changing_param_repair() {
+    let diag = first_with_code("fn main() {}", Code::InvalidMainSignature);
+    let repair = diag
+        .repair
+        .expect("InvalidMainSignature should carry a repair");
+    assert_eq!(repair.id.as_str(), "bindings/thread-harness-needs-param");
+    assert_eq!(repair.safety, RepairSafety::SurfaceChanging);
+}
+
+#[test]
 fn diagnostics_without_registered_template_have_no_repair() {
     // `LlmSchemaInvalid` has no registered repair template — agents
     // should treat these as "diagnose only".

@@ -18,6 +18,6 @@ pipeline default() {
     }
   }
   // Narrowed to the `event: "click"` variant.
-  println(classify({event: "click", weight: 3}))
-  println(classify({event: "scroll", weight: 7}))
+  __io_println(classify({event: "click", weight: 3}))
+  __io_println(classify({event: "scroll", weight: 7}))
 }

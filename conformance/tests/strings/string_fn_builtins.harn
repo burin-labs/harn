@@ -1,7 +1,7 @@
 pipeline default() {
-  println(trim("  hello  "))
-  println(lowercase("HELLO"))
-  println(uppercase("hello"))
+  __io_println(trim("  hello  "))
+  __io_println(lowercase("HELLO"))
+  __io_println(uppercase("hello"))
   let parts = split("a,b,c", ",")
-  println(parts)
+  __io_println(parts)
 }

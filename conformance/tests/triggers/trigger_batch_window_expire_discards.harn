@@ -37,6 +37,6 @@ pipeline test(task) {
   let _ = advance_time(60000)
   flush_trigger_aggregations()
   let fired = channel_events("batch.discard.fired")
-  println("after-window:" + to_string(len(fired)))
+  __io_println("after-window:" + to_string(len(fired)))
   unmock_time()
 }

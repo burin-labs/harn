@@ -19,8 +19,8 @@ let result = pairwise_rerank(candidates, {
   model_tier: "small",
 })
 
-println(result.ranked[0])
-println(result.scores)
+log(result.ranked[0])
+log(result.scores)
 ```
 
 ## pairwise_rerank

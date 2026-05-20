@@ -10,12 +10,12 @@ pipeline default() {
   // Repair call: still invalid.
   llm_mock({text: "{\"note\": \"still nope\"}"})
   let r = llm_call_structured_result("Grade", schema, {provider: "mock", retries: 0, repair: {enabled: true}})
-  println(r.ok)
-  println(r.data == nil)
-  println(r.error_category)
-  println(r.repaired)
+  __io_println(r.ok)
+  __io_println(r.data == nil)
+  __io_println(r.error_category)
+  __io_println(r.repaired)
   // raw_text comes from the main call (the input the repair pass tried
   // to fix), not the repair output.
-  println(contains(r.raw_text, "nope"))
-  println(len(llm_mock_calls()))
+  __io_println(contains(r.raw_text, "nope"))
+  __io_println(len(llm_mock_calls()))
 }

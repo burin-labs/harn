@@ -84,7 +84,7 @@ fn pack_args(entrypoint: PathBuf, out: PathBuf) -> PackArgs {
 fn pack_writes_valid_harnpack_archive() {
     let workdir = TempDir::new().unwrap();
     let entry = workdir.path().join("hello.harn");
-    fs::write(&entry, "println(\"hi\")\n").unwrap();
+    fs::write(&entry, "__io_println(\"hi\")\n").unwrap();
     let out = workdir.path().join("hello.harnpack");
 
     run_pack(&pack_args(entry.clone(), out.clone()));
@@ -148,7 +148,7 @@ fn pack_writes_valid_harnpack_archive() {
 fn pack_is_deterministic_across_runs() {
     let workdir = TempDir::new().unwrap();
     let entry = workdir.path().join("hello.harn");
-    fs::write(&entry, "println(\"hi\")\n").unwrap();
+    fs::write(&entry, "__io_println(\"hi\")\n").unwrap();
     let out_a = workdir.path().join("a.harnpack");
     let out_b = workdir.path().join("b.harnpack");
 
@@ -200,7 +200,7 @@ fn pack_resolves_transitive_imports() {
 fn pack_json_envelope_carries_pack_schema() {
     let workdir = TempDir::new().unwrap();
     let entry = workdir.path().join("hello.harn");
-    fs::write(&entry, "println(\"hi\")\n").unwrap();
+    fs::write(&entry, "__io_println(\"hi\")\n").unwrap();
     let out = workdir.path().join("hello.harnpack");
 
     let envelope = Builder::new_current_thread()
@@ -291,7 +291,7 @@ fn pack_upgrade_replaces_schema_version_keeping_workflow() {
     .unwrap();
 
     let entry = workdir.path().join("entry.harn");
-    fs::write(&entry, "println(\"upgrade\")\n").unwrap();
+    fs::write(&entry, "__io_println(\"upgrade\")\n").unwrap();
     let out = workdir.path().join("legacy.harnpack");
 
     run_pack(&PackArgs {
@@ -322,7 +322,7 @@ fn pack_upgrade_replaces_schema_version_keeping_workflow() {
 fn pack_signs_manifest_and_emits_release_trust_record() {
     let workdir = TempDir::new().unwrap();
     let entry = workdir.path().join("hello.harn");
-    fs::write(&entry, "println(\"signed\")\n").unwrap();
+    fs::write(&entry, "__io_println(\"signed\")\n").unwrap();
     let key = workdir.path().join("release-key.pem");
     fs::write(&key, TEST_ED25519_PRIVATE_KEY).unwrap();
     let out = workdir.path().join("hello.harnpack");
@@ -374,7 +374,7 @@ fn pack_signs_manifest_and_emits_release_trust_record() {
 fn pack_unsigned_emits_suggest_release_trust_record() {
     let workdir = TempDir::new().unwrap();
     let entry = workdir.path().join("hello.harn");
-    fs::write(&entry, "println(\"unsigned\")\n").unwrap();
+    fs::write(&entry, "__io_println(\"unsigned\")\n").unwrap();
     let out = workdir.path().join("hello.harnpack");
 
     let outcome = build_pack(&pack_args(entry.clone(), out.clone()));
@@ -398,7 +398,7 @@ fn pack_unsigned_emits_suggest_release_trust_record() {
 fn workflow_bundle_signature_verifier_rejects_content_mismatch() {
     let workdir = TempDir::new().unwrap();
     let entry = workdir.path().join("hello.harn");
-    fs::write(&entry, "println(\"signed\")\n").unwrap();
+    fs::write(&entry, "__io_println(\"signed\")\n").unwrap();
     let key = workdir.path().join("release-key.pem");
     fs::write(&key, TEST_ED25519_PRIVATE_KEY).unwrap();
     let out = workdir.path().join("hello.harnpack");
@@ -422,7 +422,7 @@ fn workflow_bundle_signature_verifier_rejects_content_mismatch() {
         .iter_mut()
         .find(|entry| entry.path == Path::new("sources/hello.harn"))
         .expect("source entry present");
-    source.bytes = b"println(\"tampered\")\n".to_vec();
+    source.bytes = b"__io_println(\"tampered\")\n".to_vec();
     let error = verify_workflow_bundle_signature(&archive.manifest, &archive.contents)
         .expect_err("tampered content must fail verification");
     assert!(error.message.contains("signature hash mismatch"));

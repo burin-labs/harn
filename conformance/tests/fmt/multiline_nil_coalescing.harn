@@ -9,5 +9,5 @@ pipeline default() {
   let resolved = first_candidate_value_from_a_very_long_source
     ?? second_candidate_value_from_another_long_source
     ?? third_candidate_value_from_yet_another_long_source
-  println(resolved)
+  __io_println(resolved)
 }

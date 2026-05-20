@@ -41,8 +41,8 @@ pipeline test(task) {
   )
   let dispatches = trigger_inspect_lifecycle("DispatchStarted")
     .filter({ entry -> entry?.headers?.trigger_id == handle.id })
-  println(fire.status == "dispatched")
-  println(contains(json_stringify(fire.result ?? {}), "\"skipped\":true"))
-  println(contains(json_stringify(fire.result ?? {}), "\"reason\":null"))
-  println(len(dispatches) == 0)
+  __io_println(fire.status == "dispatched")
+  __io_println(contains(json_stringify(fire.result ?? {}), "\"skipped\":true"))
+  __io_println(contains(json_stringify(fire.result ?? {}), "\"reason\":null"))
+  __io_println(len(dispatches) == 0)
 }

@@ -49,7 +49,7 @@ fn profile_text_and_json_roundtrip() {
         &script,
         r#"
 pipeline main() {
-  println("hello")
+  __io_println("hello")
 }
 "#,
     )
@@ -138,7 +138,7 @@ pipeline main() {
     model: "claude-haiku-4-5",
   })
   let out = classify_step("input")
-  println(out)
+  __io_println(out)
 }
 "#,
     )
@@ -209,7 +209,7 @@ fn profile_disabled_means_no_stderr_section() {
         &script,
         r#"
 pipeline main() {
-  println("hi")
+  __io_println("hi")
 }
 "#,
     )

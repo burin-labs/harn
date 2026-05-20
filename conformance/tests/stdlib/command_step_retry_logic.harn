@@ -91,5 +91,5 @@ pipeline default() {
   }
   assert(contains(shell_err, "mode: \"shell\""))
   unmock_time()
-  println("ok")
+  __io_println("ok")
 }

@@ -2,5 +2,5 @@ pipeline test(task) {
   gen fn wrong() -> Stream<int> {
     yield 1
   }
-  println(wrong())
+  __io_println(wrong())
 }

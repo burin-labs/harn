@@ -17,8 +17,8 @@ pipeline main() {
   let tools = scoped_tools()
   let call = {name: "write_note", arguments: {path: "notes.txt"}}
   let denied = with_approval_policy({auto_deny: ["write*"]}, fn() { return agent_dispatch_tool_call(call, tools) })
-  println(denied.ok)
-  println(denied.error_category)
+  __io_println(denied.ok)
+  __io_println(denied.error_category)
   try {
     with_approval_policy(
       {auto_deny: ["write*"]},
@@ -27,9 +27,9 @@ pipeline main() {
       },
     )
   } catch (e) {
-    println("caught")
+    __io_println("caught")
   }
   let allowed = agent_dispatch_tool_call(call, tools)
-  println(allowed.ok)
-  println(allowed.rendered_result)
+  __io_println(allowed.ok)
+  __io_println(allowed.rendered_result)
 }

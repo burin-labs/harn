@@ -29,33 +29,33 @@ pipeline default() {
     },
   )
   let r1 = wrapper({command: "echo hello"})
-  println(r1.ok)
-  println(r1.ran)
+  __io_println(r1.ok)
+  __io_println(r1.ran)
   /* Scenario 2: explicit allow verdict — auditing the fact that the
    * classifier ran and said allow, but no command rewrite. */
   llm_mock({text: "{\"kind\": \"allow\", \"confidence\": 0.99, \"explanation\": \"safe\"}"})
   let r2 = wrapper({command: "ls -la"})
-  println(r2.ok)
-  println(r2.ran)
+  __io_println(r2.ok)
+  __io_println(r2.ran)
   /* Scenario 3: cache hit. Repeat scenario 1's command with different
    * whitespace. The classifier cache should normalize it and return the
    * prior low-confidence verdict without invoking the model again. */
   let calls_before = len(llm_mock_calls())
   let r3 = wrapper({command: "echo   hello"})
-  println(r3.ok)
-  println(r3.ran)
+  __io_println(r3.ok)
+  __io_println(r3.ran)
   let calls_after = len(llm_mock_calls())
   /* The mock recorder counts every invocation, so the delta must be
    * zero on a cache hit. */
-  println(calls_after - calls_before)
+  __io_println(calls_after - calls_before)
   /* Each invocation (cache hit or miss) still audits a classifier
    * verdict — that's the "audited even on passthrough" contract. */
   let log = pipeline_lifecycle_audit_log_take()
-  println(len(log))
-  println(log[0].payload.action)
-  println(log[0].payload.cache_hit)
-  println(log[1].payload.action)
-  println(log[1].payload.cache_hit)
-  println(log[2].payload.action)
-  println(log[2].payload.cache_hit)
+  __io_println(len(log))
+  __io_println(log[0].payload.action)
+  __io_println(log[0].payload.cache_hit)
+  __io_println(log[1].payload.action)
+  __io_println(log[1].payload.cache_hit)
+  __io_println(log[2].payload.action)
+  __io_println(log[2].payload.cache_hit)
 }

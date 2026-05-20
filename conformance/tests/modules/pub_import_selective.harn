@@ -1,6 +1,6 @@
 import "pub_import_selective_facade"
 
 pipeline default() {
-  println(alpha())
-  println(beta())
+  __io_println(alpha())
+  __io_println(beta())
 }

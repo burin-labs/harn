@@ -36,7 +36,7 @@ fn annotated_roundtrip() -> bool {
 }
 
 pipeline default(task) {
-  println(render_hit(first_hit()))
-  println(widen_direct())
-  println(annotated_roundtrip())
+  __io_println(render_hit(first_hit()))
+  __io_println(widen_direct())
+  __io_println(annotated_roundtrip())
 }

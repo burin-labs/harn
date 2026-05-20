@@ -75,7 +75,7 @@ pipeline default() {
             data = json.loads(snapshot.read_text())
             bind = data.get("bind")
             if bind:
-                print(bind)
+                sys.stdout.write(bind)
                 raise SystemExit(0)
         time.sleep(0.05)
     # On timeout, dump the orchestrator's captured stderr so CI tells us *why*
@@ -243,7 +243,7 @@ pipeline default() {
     assert task_ids == ["task-1", "task-2"], task_ids
     assert snapshot["triggers"][0]["version"] == 2, snapshot
 
-    print(json.dumps({
+    sys.stdout.write(json.dumps({
         "count": len(events),
         "versions": versions,
         "task_ids": task_ids,

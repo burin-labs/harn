@@ -19,8 +19,8 @@ pipeline test(task) {
     {wait_id: "fan-out-wait"},
   )
   await(completer)
-  println(result.status == "completed")
-  println(len(result.waitpoints) == 5)
-  println(result.waitpoints[0].status == "completed")
-  println(result.waitpoints[4].status == "completed")
+  __io_println(result.status == "completed")
+  __io_println(len(result.waitpoints) == 5)
+  __io_println(result.waitpoints[0].status == "completed")
+  __io_println(result.waitpoints[4].status == "completed")
 }

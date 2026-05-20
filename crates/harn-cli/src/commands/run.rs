@@ -1827,17 +1827,17 @@ mod tests {
 
     #[test]
     fn split_eval_header_no_imports_returns_full_body() {
-        let (header, body) = split_eval_header("println(1 + 2)");
+        let (header, body) = split_eval_header("log(1 + 2)");
         assert_eq!(header, "");
-        assert_eq!(body, "println(1 + 2)");
+        assert_eq!(body, "log(1 + 2)");
     }
 
     #[test]
     fn split_eval_header_lifts_leading_imports() {
-        let code = "import \"./lib\"\nimport { x } from \"std/math\"\nprintln(x)";
+        let code = "import \"./lib\"\nimport { x } from \"std/math\"\nlog(x)";
         let (header, body) = split_eval_header(code);
         assert_eq!(header, "import \"./lib\"\nimport { x } from \"std/math\"");
-        assert_eq!(body, "println(x)");
+        assert_eq!(body, "log(x)");
     }
 
     #[test]
@@ -1921,7 +1921,7 @@ pipeline main() {
             r#"
 pipeline main() {
   let _ = hostlib_enable("tools:deterministic")
-  println("enabled")
+  __io_println("enabled")
 }
 "#,
         )
@@ -1957,16 +1957,16 @@ pipeline main() {
     capture: {max_inline_bytes: 8},
     timeout_ms: 5000,
   })
-  println(starts_with(result.command_id, "cmd_"))
-  println(len(result.stdout))
-  println(result.byte_count)
+  __io_println(starts_with(result.command_id, "cmd_"))
+  __io_println(len(result.stdout))
+  __io_println(result.byte_count)
   let window = hostlib_tools_read_command_output({
     command_id: result.command_id,
     offset: 1990,
     length: 20,
   })
-  println(len(window.content))
-  println(window.eof)
+  __io_println(len(window.content))
+  __io_println(window.eof)
 }
 "#,
         )

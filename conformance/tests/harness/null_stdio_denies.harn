@@ -2,6 +2,6 @@ fn main(harness: Harness) {
   try {
     harness.stdio.println("blocked")
   } catch (e) {
-    println("caught")
+    __io_println("caught")
   }
 }

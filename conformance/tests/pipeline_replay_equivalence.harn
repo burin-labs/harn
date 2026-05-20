@@ -52,8 +52,7 @@ pipeline default() {
       harness.stdio.println("first_payload_kind=" + first.payload.kind)
       harness.stdio.println("first_action=" + first.payload.payload.action)
       harness.stdio.println("second_payload_kind=" + second.payload.kind)
-      harness.stdio
-        .println("second_envelope=" + second.payload.payload.envelope_id)
+      harness.stdio.println("second_envelope=" + second.payload.payload.envelope_id)
       harness.stdio.println("third_payload_kind=" + third.payload.kind)
       harness.stdio.println("third_reason=" + third.payload.payload.reason)
       harness.stdio

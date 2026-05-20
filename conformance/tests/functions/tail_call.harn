@@ -13,8 +13,8 @@ pipeline default() {
   }
   // This would overflow the 512-frame stack without TCO
   let result = count_down(10000, 0)
-  println(result)
+  __io_println(result)
   // Tail-recursive sum
   let total = sum_tail(100, 0)
-  println(total)
+  __io_println(total)
 }

@@ -28,9 +28,9 @@ fn scenario_veto_then_confirm() {
       verify_completion: cb,
     },
   )
-  println("scenario1.status=${result.status}")
-  println("scenario1.iters=${result.llm.iterations}")
-  println("scenario1.calls=${len(llm_mock_calls())}")
+  __io_println("scenario1.status=${result.status}")
+  __io_println("scenario1.iters=${result.llm.iterations}")
+  __io_println("scenario1.calls=${len(llm_mock_calls())}")
 }
 
 fn scenario_max_verify_exhausted() {
@@ -53,8 +53,8 @@ fn scenario_max_verify_exhausted() {
       max_verify_attempts: 2,
     },
   )
-  println("scenario2.status=${result.status}")
-  println("scenario2.calls=${len(llm_mock_calls())}")
+  __io_println("scenario2.status=${result.status}")
+  __io_println("scenario2.calls=${len(llm_mock_calls())}")
 }
 
 fn scenario_confirm_immediately() {
@@ -72,8 +72,8 @@ fn scenario_confirm_immediately() {
       verify_completion: always_confirm,
     },
   )
-  println("scenario3.status=${result.status}")
-  println("scenario3.iters=${result.llm.iterations}")
+  __io_println("scenario3.status=${result.status}")
+  __io_println("scenario3.iters=${result.llm.iterations}")
 }
 
 pipeline default() {

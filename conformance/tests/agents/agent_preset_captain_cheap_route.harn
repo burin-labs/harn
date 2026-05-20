@@ -63,11 +63,11 @@ pipeline default() {
       max_iterations: 2,
     },
   )
-  println(cheap_run.status)
-  println(cheap_run.text)
-  println(atomic_get(cheap_calls))
-  println(atomic_get(frontier_calls))
-  println(atomic_get(log_records))
+  __io_println(cheap_run.status)
+  __io_println(cheap_run.text)
+  __io_println(atomic_get(cheap_calls))
+  __io_println(atomic_get(frontier_calls))
+  __io_println(atomic_get(log_records))
   // Escalated route: predicate matches via `escalate: true` in opts.
   let frontier_run = release_captain_agent(
     "Frontier path.",
@@ -82,9 +82,9 @@ pipeline default() {
       max_iterations: 2,
     },
   )
-  println(frontier_run.status)
-  println(frontier_run.text)
-  println(atomic_get(cheap_calls))
-  println(atomic_get(frontier_calls))
-  println(atomic_get(log_records))
+  __io_println(frontier_run.status)
+  __io_println(frontier_run.text)
+  __io_println(atomic_get(cheap_calls))
+  __io_println(atomic_get(frontier_calls))
+  __io_println(atomic_get(log_records))
 }

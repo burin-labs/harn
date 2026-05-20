@@ -12,11 +12,11 @@ pipeline test(task) {
     ],
   )
   let record: {approved: bool, reviewers: list<string>, approved_at: string, reason: string?, signatures: list<{reviewer: string, signed_at: string, signature: string}>} = request_approval("deploy production", {quorum: 2, reviewers: ["alice", "bob", "carol"]})
-  println(record.approved)
-  println(len(record.reviewers))
-  println(record.reviewers[0])
-  println(record.reviewers[1])
-  println(len(record.signatures))
-  println(record.signatures[0].reviewer)
-  println(starts_with(record.signatures[0].signature, "sha256:"))
+  __io_println(record.approved)
+  __io_println(len(record.reviewers))
+  __io_println(record.reviewers[0])
+  __io_println(record.reviewers[1])
+  __io_println(len(record.signatures))
+  __io_println(record.signatures[0].reviewer)
+  __io_println(starts_with(record.signatures[0].signature, "sha256:"))
 }

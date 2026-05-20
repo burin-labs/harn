@@ -10,20 +10,20 @@ pipeline default() {
       _ -> { "large" }
     }
   }
-  println(classify(0))
-  println(classify(2))
-  println(classify(4))
-  println(classify(100))
+  __io_println(classify(0))
+  __io_println(classify(2))
+  __io_println(classify(4))
+  __io_println(classify(100))
   fn verdict(v: "pass" | "fail" | "unclear" | "skip") -> string {
     return match v {
       "pass" -> { "ok" }
       "fail" | "unclear" | "skip" -> { "not ok" }
     }
   }
-  println(verdict("pass"))
-  println(verdict("fail"))
-  println(verdict("unclear"))
-  println(verdict("skip"))
+  __io_println(verdict("pass"))
+  __io_println(verdict("fail"))
+  __io_println(verdict("unclear"))
+  __io_println(verdict("skip"))
   // Or-pattern with a guard applies the guard once per match.
   fn describe(n: int) -> string {
     return match n {
@@ -32,7 +32,7 @@ pipeline default() {
       _ -> { "other" }
     }
   }
-  println(describe(1))
-  println(describe(3))
-  println(describe(10))
+  __io_println(describe(1))
+  __io_println(describe(3))
+  __io_println(describe(10))
 }

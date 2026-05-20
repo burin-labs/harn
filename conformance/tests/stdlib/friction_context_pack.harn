@@ -13,7 +13,7 @@ pipeline main() {
     },
     {enabled: false},
   )
-  println(!disabled.recorded && len(friction_events()) == 0)
+  __io_println(!disabled.recorded && len(friction_events()) == 0)
   let first = friction_record(
     {
       kind: "repeated_query",
@@ -81,12 +81,12 @@ pipeline main() {
       ],
     },
   )
-  println(first.recorded && first.sink == "memory")
-  println(len(events) == 2 && contains(events[0].redacted_summary, "[redacted]"))
-  println(events[0].metadata.api_key == "[redacted]")
-  println(len(suggestions) == 1 && suggestions[0].recommended_artifact == "context_pack")
-  println(suggestions[0].candidate_manifest.capabilities[0] == "splunk.search")
-  println(suggestions[0].estimated_savings.estimated_time_saved_ms == 240000)
-  println(pack.id == "checkout_incident_context" && pack.refresh_policy.mode == "on_demand")
-  println(eval.pass && eval.suggestion_count == 1)
+  __io_println(first.recorded && first.sink == "memory")
+  __io_println(len(events) == 2 && contains(events[0].redacted_summary, "[redacted]"))
+  __io_println(events[0].metadata.api_key == "[redacted]")
+  __io_println(len(suggestions) == 1 && suggestions[0].recommended_artifact == "context_pack")
+  __io_println(suggestions[0].candidate_manifest.capabilities[0] == "splunk.search")
+  __io_println(suggestions[0].estimated_savings.estimated_time_saved_ms == 240000)
+  __io_println(pack.id == "checkout_incident_context" && pack.refresh_policy.mode == "on_demand")
+  __io_println(eval.pass && eval.suggestion_count == 1)
 }

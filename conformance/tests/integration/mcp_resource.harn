@@ -20,5 +20,5 @@ pipeline test(task) {
     },
   )
   assert(r2 == nil, "mcp_resource_template should return nil")
-  println("mcp_resource and mcp_resource_template registered")
+  __io_println("mcp_resource and mcp_resource_template registered")
 }

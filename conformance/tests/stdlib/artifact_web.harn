@@ -8,42 +8,42 @@ import {
 pipeline default() {
   let good = "<!doctype html><html><head><style>.card { color: red; }</style></head><body><main><h1>Hello</h1><button id=\"b\">Count</button><script>const count = 1; document.getElementById('b').textContent = count;</script></main></body></html>"
   let extracted = web_artifact_extract(good)
-  println(len(extracted.styles))
-  println(len(extracted.scripts))
-  println(extracted.body.contains("Hello"))
+  __io_println(len(extracted.styles))
+  __io_println(len(extracted.scripts))
+  __io_println(extracted.body.contains("Hello"))
   let css_patch = web_artifact_apply_patch(
     good,
     ".card { color: red; }",
     ".card { color: blue; }",
     {provenance: {agent: "fixture"}},
   )
-  println(css_patch.ok)
-  println(css_patch.changed_regions[0].kind)
-  println(css_patch.validation.ok)
-  println(css_patch.text_fallback.contains("Hello"))
+  __io_println(css_patch.ok)
+  __io_println(css_patch.changed_regions[0].kind)
+  __io_println(css_patch.validation.ok)
+  __io_println(css_patch.text_fallback.contains("Hello"))
   let js_patch = web_artifact_apply_patch(good, "const count = 1;", "const count = 2;")
-  println(js_patch.ok)
-  println(js_patch.changed_regions[0].kind)
+  __io_println(js_patch.ok)
+  __io_println(js_patch.changed_regions[0].kind)
   let malicious = web_artifact_validate(
     "<html><body><script>fetch('https://evil.example/x'); window.parent.postMessage('x','*'); location.href='https://evil.example'; const api_key = 'sk-abcdefghijklmnopqrstuvwxyz';</script></body></html>",
   )
-  println(malicious.ok)
-  println(malicious.error_codes.contains("network_call"))
-  println(malicious.error_codes.contains("host_bridge_call"))
-  println(malicious.error_codes.contains("dangerous_navigation"))
-  println(malicious.error_codes.contains("inline_secret"))
+  __io_println(malicious.ok)
+  __io_println(malicious.error_codes.contains("network_call"))
+  __io_println(malicious.error_codes.contains("host_bridge_call"))
+  __io_println(malicious.error_codes.contains("dangerous_navigation"))
+  __io_println(malicious.error_codes.contains("inline_secret"))
   let harmless_text = web_artifact_validate(
     "<html><head><style>.x { color: red; }</style></head><body><pre>fetch('https://example.invalid'); window.parent; location.href</pre><script>const ok = 1;</script></body></html>",
   )
-  println(harmless_text.ok)
+  __io_println(harmless_text.ok)
   let external = web_artifact_validate(
     "<html><head><script src=\"//cdn.example/app.js\"></script><style>@import \"https://cdn.example/x.css\"; .x { background: url(//cdn.example/x.png); }</style></head><body></body></html>",
   )
-  println(external.ok)
-  println(external.error_codes.contains("network_call"))
+  __io_println(external.ok)
+  __io_println(external.error_codes.contains("network_call"))
   let broken = web_artifact_validate("<html><body><script>alert(1)</body></html>")
-  println(broken.ok)
-  println(broken.error_codes.contains("unclosed_script_tag"))
+  __io_println(broken.ok)
+  __io_println(broken.error_codes.contains("unclosed_script_tag"))
   let bridge_default = web_artifact_validate(
     "<html><body><script>window.parent.postMessage({}, '*');</script></body></html>",
   )
@@ -51,9 +51,9 @@ pipeline default() {
     "<html><body><script>window.parent.postMessage({}, '*');</script></body></html>",
     {allow_host_bridge: true},
   )
-  println(bridge_default.error_codes.contains("host_bridge_call"))
-  println(bridge_opt_in.error_codes.contains("host_bridge_call"))
+  __io_println(bridge_default.error_codes.contains("host_bridge_call"))
+  __io_println(bridge_opt_in.error_codes.contains("host_bridge_call"))
   let fallback = web_artifact_text_fallback(good)
-  println(fallback.contains("Hello"))
-  println(!fallback.contains("const count"))
+  __io_println(fallback.contains("Hello"))
+  __io_println(!fallback.contains("const count"))
 }

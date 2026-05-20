@@ -13,16 +13,16 @@ pipeline main() {
     manifest,
     {run_id: "conformance-child-cap", max_operations: 1},
   )
-  println(capped.ok)
-  println(capped.run.failure_category)
-  println(capped.child_calls.count)
+  __io_println(capped.ok)
+  __io_println(capped.run.failure_category)
+  __io_println(capped.child_calls.count)
   let too_large = composition_execute(
     "return \"0123456789\"",
     manifest,
     {run_id: "conformance-output-cap", max_output_bytes: 4},
   )
-  println(too_large.ok)
-  println(too_large.run.failure_category)
+  __io_println(too_large.ok)
+  __io_println(too_large.run.failure_category)
   let gated_manifest = composition_binding_manifest(
     [
       {
@@ -33,13 +33,13 @@ pipeline main() {
     ],
     {include_denied: true, gated_tools: ["write_file"], side_effect_ceiling: "workspace_write"},
   )
-  println(gated_manifest.bindings[0].policy.disposition)
+  __io_println(gated_manifest.bindings[0].policy.disposition)
   let gated = composition_execute(
     "return write_file({path: \"x\", content: \"bad\"})",
     gated_manifest,
     {run_id: "conformance-gated"},
   )
-  println(gated.ok)
-  println(gated.run.failure_category)
-  println(gated.child_results[0].error_category)
+  __io_println(gated.ok)
+  __io_println(gated.run.failure_category)
+  __io_println(gated.child_results[0].error_category)
 }

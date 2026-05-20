@@ -39,9 +39,9 @@ pipeline main() {
     [{run: good, fixture: fixture, path: "good.json"}, {run: bad, fixture: fixture, path: "bad.json"}],
   )
   let diff = run_record_diff(good, bad)
-  println(!suite?.pass)
-  println(suite?.failed == 1)
-  println(len(suite?.cases) == 2)
-  println(diff?.status_changed)
-  println(len(diff?.stage_diffs) == 1)
+  __io_println(!suite?.pass)
+  __io_println(suite?.failed == 1)
+  __io_println(len(suite?.cases) == 2)
+  __io_println(diff?.status_changed)
+  __io_println(len(diff?.stage_diffs) == 1)
 }

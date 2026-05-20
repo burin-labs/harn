@@ -29,7 +29,7 @@ pub fn render_mirror() -> string {
 
 pipeline main(task) {
   if !file_exists(SRC) {
-    eprintln("error: missing ${SRC}")
+    __io_eprintln("error: missing ${SRC}")
     return 1
   }
   let mode = if argv.count == 0 {
@@ -51,10 +51,10 @@ pipeline main(task) {
     if normalize(expected) == normalize(actual) {
       return 0
     }
-    eprintln("error: ${DST} is stale relative to ${SRC}")
-    eprintln("hint: run 'make sync-language-spec' and commit the result")
+    __io_eprintln("error: ${DST} is stale relative to ${SRC}")
+    __io_eprintln("hint: run 'make sync-language-spec' and commit the result")
     return 1
   }
-  eprintln("usage: sync_language_spec.harn [--check]")
+  __io_eprintln("usage: sync_language_spec.harn [--check]")
   return 2
 }

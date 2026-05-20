@@ -9,7 +9,7 @@ pipeline test(task) {
   }
   for stream in outer() {
     for n in stream {
-      println(n)
+      __io_println(n)
     }
   }
 }
