@@ -1,0 +1,42 @@
+import "../_common"
+
+pipeline default() {
+  let repo_root = exec("git", "rev-parse", "--show-toplevel").stdout.trim()
+  let harn_bin = env_or("HARN_CONFORMANCE_HARN_BIN", resolve_harn_bin(repo_root))
+  let root = path_join(temp_dir(), "harn_pack_det_" + uuid_v7())
+  mkdir(root)
+  write_file(path_join(root, "hello.harn"), "println(\"determinism\")\n")
+
+  let pack_a = exec_at(
+    root,
+    harn_bin,
+    "pack",
+    "hello.harn",
+    "--unsigned",
+    "--out",
+    path_join(root, "a.harnpack"),
+    "--json",
+  )
+  let pack_b = exec_at(
+    root,
+    harn_bin,
+    "pack",
+    "hello.harn",
+    "--unsigned",
+    "--out",
+    path_join(root, "b.harnpack"),
+    "--json",
+  )
+  println(pack_a.success)
+  println(pack_b.success)
+
+  let data_a = json_parse(pack_a.stdout)
+  let data_b = json_parse(pack_b.stdout)
+  println(data_a.data.bundle_hash == data_b.data.bundle_hash)
+
+  let bytes_a = exec("shasum", "-a", "256", path_join(root, "a.harnpack")).stdout
+  let bytes_b = exec("shasum", "-a", "256", path_join(root, "b.harnpack")).stdout
+  let hash_a = split(bytes_a, " ")[0]
+  let hash_b = split(bytes_b, " ")[0]
+  println(hash_a == hash_b)
+}

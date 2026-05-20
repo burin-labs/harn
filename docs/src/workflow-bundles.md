@@ -75,6 +75,35 @@ signature but still appends the release record at autonomy tier `suggest`.
 path, archive size, signature presence, SBOM counts, bytecode/debug-symbol
 metadata, and the full manifest.
 
+`harn pack --exclude-secrets` refuses to bundle entrypoints (or, once asset
+bundling lands, transitive paths) that match a conservative secret-bearing
+glob: `.env`, `.env.*`, `*.pem`, `*.key`, `credentials*`, and any path under a
+`secrets/` directory. Pass `--include-secrets` to be explicit about the
+default behavior in release pipelines.
+
+### Verifying a `.harnpack`
+
+`harn pack verify <bundle.harnpack>` reads a bundle back, recomputes the
+canonical bundle hash, verifies the embedded Ed25519 signature (if any), and
+cross-checks every `transitive_modules[*].source_hash_blake3` and
+`harnbc_hash_blake3` against the in-archive payload. The command exits non-zero
+on any mismatch and emits structured error codes (`verify.signature_failed`,
+`verify.source_mismatch`, `verify.bytecode_mismatch`,
+`verify.recorded_hash_mismatch`, `verify.archive_failed`,
+`verify.unsigned`).
+
+By default, unsigned bundles fail verification. Pass `--allow-unsigned` to
+accept a bundle without an Ed25519 signature (useful in local development).
+
+`harn pack verify --json` emits a `JsonEnvelope` with the recomputed
+`bundle_hash`, signature presence/verification flags, signing key fingerprint,
+and per-bundle counts (`module_count`, `content_entry_count`). The schema is
+`harn --json-schemas --command "pack verify"`.
+
+`harn run <bundle.harnpack>` also runs the same verification before extracting
+into the content-addressed pack cache and executing the entrypoint — `harn pack
+verify` is the standalone equivalent for CI and supply-chain audits.
+
 ## Preview
 
 `harn workflow preview --json` emits the contract Burin GUI/TUI surfaces need
