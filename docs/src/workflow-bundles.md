@@ -92,6 +92,11 @@ on any mismatch and emits structured error codes (`verify.signature_failed`,
 `verify.recorded_hash_mismatch`, `verify.archive_failed`,
 `verify.unsigned`).
 
+Pass `--strict` to additionally cross-check SBOM package hashes against the
+archive payloads they describe when the bundle format carries a corresponding
+entry. Today that primarily hardens `module:*` SBOM rows and surfaces drift as
+`verify.sbom_mismatch`.
+
 By default, unsigned bundles fail verification. Pass `--allow-unsigned` to
 accept a bundle without an Ed25519 signature (useful in local development).
 

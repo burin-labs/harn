@@ -1,0 +1,63 @@
+import "../_common"
+
+pipeline default() {
+  let repo_root = exec("git", "rev-parse", "--show-toplevel").stdout.trim()
+  let harn_bin = env_or("HARN_CONFORMANCE_HARN_BIN", resolve_harn_bin(repo_root))
+  let root = path_join(temp_dir(), "harn_pack_strict_sbom_" + uuid_v7())
+  mkdir(root)
+  write_file(path_join(root, "hello.harn"), "println(\"hi\")\n")
+  let pack = exec_at(
+    root,
+    harn_bin,
+    "pack",
+    "hello.harn",
+    "--unsigned",
+    "--out",
+    path_join(root, "hello.harnpack"),
+  )
+  println(pack.success)
+  let unpack = exec_at(root, "sh", "-lc", "mkdir unpack && zstd -d -c hello.harnpack | tar -xf - -C unpack")
+  println(unpack.success)
+  let tamper = exec_at(
+    root,
+    "python3",
+    "-c",
+    "import json, pathlib, sys\nZERO = 'blake3:0000000000000000000000000000000000000000000000000000000000000000'\nmanifest = pathlib.Path(sys.argv[1])\nsbom = pathlib.Path(sys.argv[2])\nmanifest_data = json.loads(manifest.read_text())\nfor package in manifest_data['sbom']['packages']:\n    if package.get('name') == 'module:hello.harn':\n        package['package_hash_blake3'] = ZERO\n        break\nmanifest.write_text(json.dumps(manifest_data, separators=(',', ':')))\nsbom_data = json.loads(sbom.read_text())\nfor package in sbom_data['packages']:\n    if package.get('name') == 'module:hello.harn':\n        package['package_hash_blake3'] = ZERO\n        break\nsbom.write_text(json.dumps(sbom_data, separators=(',', ':')))\n",
+    path_join(root, "unpack/harnpack.json"),
+    path_join(root, "unpack/sbom.spdx.json"),
+  )
+  println(tamper.success)
+  let repack = exec_at(
+    root,
+    "sh",
+    "-lc",
+    "cd unpack && tar -cf - harnpack.json sbom.spdx.json sources bytecode | zstd -f -o ../tampered.harnpack",
+  )
+  println(repack.success)
+  let lenient = exec_at(
+    root,
+    harn_bin,
+    "pack",
+    "verify",
+    path_join(root, "tampered.harnpack"),
+    "--allow-unsigned",
+    "--json",
+  )
+  println(lenient.success)
+  let lenient_data = json_parse(lenient.stdout)
+  println(lenient_data.ok)
+  let strict = exec_at(
+    root,
+    harn_bin,
+    "pack",
+    "verify",
+    path_join(root, "tampered.harnpack"),
+    "--allow-unsigned",
+    "--strict",
+    "--json",
+  )
+  println(strict.success)
+  let strict_data = json_parse(strict.stdout)
+  println(strict_data.ok)
+  println(strict_data.error.code)
+}

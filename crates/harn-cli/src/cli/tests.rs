@@ -1799,6 +1799,7 @@ fn test_parses_pack_verify_subcommand() {
         "--trust-policy",
         "policy.json",
         "--require-trusted-signer",
+        "--strict",
         "--json",
     ]);
     let Command::Pack(args) = cli.command.unwrap() else {
@@ -1811,6 +1812,7 @@ fn test_parses_pack_verify_subcommand() {
     assert!(verify.allow_unsigned);
     assert_eq!(verify.trust_policy, Some(PathBuf::from("policy.json")));
     assert!(verify.require_trusted_signer);
+    assert!(verify.strict);
     assert!(verify.json);
 }
 

@@ -108,6 +108,12 @@ pub struct PackVerifyArgs {
     #[arg(long, default_value_t = false)]
     pub require_trusted_signer: bool,
 
+    /// Cross-check SBOM package hashes against the archive payloads
+    /// they describe when the bundle format carries a corresponding
+    /// entry.
+    #[arg(long, default_value_t = false)]
+    pub strict: bool,
+
     /// Emit a `JsonEnvelope` summary instead of a human-readable
     /// one-liner. Schema: `harn --json-schemas --command "pack verify"`.
     #[arg(long, default_value_t = false)]
