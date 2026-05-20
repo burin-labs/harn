@@ -10,6 +10,13 @@ condensed series summaries instead of full per-patch history.
 
 ### Added
 
+- **Connector-safe HTTP policy helpers (#2082).** `std/connectors/shared` now
+  exposes `connector_http_request`, `connector_http_json`,
+  `connector_http_header`, and `connector_http_rate_limit` so Harn package
+  authors can wrap `harness.net.request` with stable error envelopes,
+  idempotency-aware unsafe write retries, capped `Retry-After` handling, JSON
+  parse categorization, and standard rate-limit header extraction without
+  hand-rolling provider loops.
 - **`harness.net.*` access policy (#1913).** Adds the `std/net_policy`
   stdlib module so scripts can attach a per-harness allow/deny policy
   to `harness.net.*` requests: `NetPolicy.create({allow, deny,
