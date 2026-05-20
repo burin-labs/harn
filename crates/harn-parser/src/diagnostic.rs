@@ -133,6 +133,71 @@ pub fn harness_stdio_replacement(name: &str) -> Option<&'static str> {
     }
 }
 
+/// Map an ambient fs-capability builtin to its `harness.fs.*` replacement.
+/// Backs the `bindings/thread-harness-fs` repair the E4.4 → E4.6
+/// migration uses to rewrite `.harn` scripts off the legacy surface.
+pub fn harness_fs_replacement(name: &str) -> Option<&'static str> {
+    match name {
+        "read_file" => Some("harness.fs.read_text"),
+        "read_file_result" => Some("harness.fs.read_text_result"),
+        "read_file_bytes" => Some("harness.fs.read_bytes"),
+        "write_file" => Some("harness.fs.write_text"),
+        "write_file_bytes" => Some("harness.fs.write_bytes"),
+        "file_exists" => Some("harness.fs.exists"),
+        "delete_file" => Some("harness.fs.delete"),
+        "append_file" => Some("harness.fs.append"),
+        "list_dir" => Some("harness.fs.list_dir"),
+        "mkdir" => Some("harness.fs.mkdir"),
+        "copy_file" => Some("harness.fs.copy"),
+        "temp_dir" => Some("harness.fs.temp_dir"),
+        "stat" => Some("harness.fs.stat"),
+        "move_file" => Some("harness.fs.rename"),
+        "read_lines" => Some("harness.fs.read_lines"),
+        "walk_dir" => Some("harness.fs.walk"),
+        "glob" => Some("harness.fs.glob"),
+        _ => None,
+    }
+}
+
+/// Map an ambient env-capability builtin to its `harness.env.*` replacement.
+/// Backs the `bindings/thread-harness-env` repair.
+pub fn harness_env_replacement(name: &str) -> Option<&'static str> {
+    match name {
+        "env" => Some("harness.env.get"),
+        "env_or" => Some("harness.env.get_or"),
+        _ => None,
+    }
+}
+
+/// Map an ambient random-capability builtin to its `harness.random.*`
+/// replacement. Backs the `bindings/thread-harness-random` repair.
+pub fn harness_random_replacement(name: &str) -> Option<&'static str> {
+    match name {
+        "random" => Some("harness.random.gen_f64"),
+        "random_int" => Some("harness.random.gen_range"),
+        "random_choice" => Some("harness.random.choice"),
+        "random_shuffle" => Some("harness.random.shuffle"),
+        _ => None,
+    }
+}
+
+/// Map an ambient net-capability builtin to its `harness.net.*`
+/// replacement. Backs the `bindings/thread-harness-net` repair. Only
+/// the basic verb surface is migrated mechanically; streaming, session,
+/// and server-mode builtins keep their ambient names today.
+pub fn harness_net_replacement(name: &str) -> Option<&'static str> {
+    match name {
+        "http_get" => Some("harness.net.get"),
+        "http_post" => Some("harness.net.post"),
+        "http_put" => Some("harness.net.put"),
+        "http_patch" => Some("harness.net.patch"),
+        "http_delete" => Some("harness.net.delete"),
+        "http_request" => Some("harness.net.request"),
+        "http_download" => Some("harness.net.download"),
+        _ => None,
+    }
+}
+
 /// Render a Rust-style diagnostic message.
 ///
 /// Example output:

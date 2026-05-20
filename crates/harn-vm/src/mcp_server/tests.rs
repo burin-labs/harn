@@ -66,6 +66,38 @@ fn test_params_to_json_schema_with_params() {
 }
 
 #[test]
+fn test_params_to_json_schema_preserves_file_input_descriptor() {
+    let mut file_descriptor = BTreeMap::new();
+    file_descriptor.insert(
+        "accept".to_string(),
+        VmValue::List(Rc::new(vec![VmValue::String(Rc::from("text/*"))])),
+    );
+    file_descriptor.insert("maxSize".to_string(), VmValue::Int(64));
+
+    let mut param_def = BTreeMap::new();
+    param_def.insert("type".to_string(), VmValue::String(Rc::from("string")));
+    param_def.insert("format".to_string(), VmValue::String(Rc::from("uri")));
+    param_def.insert(
+        "x-mcp-file".to_string(),
+        VmValue::Dict(Rc::new(file_descriptor)),
+    );
+    param_def.insert("required".to_string(), VmValue::Bool(true));
+
+    let mut params = BTreeMap::new();
+    params.insert("upload".to_string(), VmValue::Dict(Rc::new(param_def)));
+
+    let schema = params_to_json_schema(Some(&VmValue::Dict(Rc::new(params))));
+    assert_eq!(schema["properties"]["upload"]["type"], "string");
+    assert_eq!(schema["properties"]["upload"]["format"], "uri");
+    assert_eq!(
+        schema["properties"]["upload"]["x-mcp-file"]["accept"],
+        serde_json::json!(["text/*"])
+    );
+    assert_eq!(schema["properties"]["upload"]["x-mcp-file"]["maxSize"], 64);
+    assert_eq!(schema["required"], serde_json::json!(["upload"]));
+}
+
+#[test]
 fn test_params_to_json_schema_simple_form() {
     let mut params = BTreeMap::new();
     params.insert("query".to_string(), VmValue::String(Rc::from("string")));

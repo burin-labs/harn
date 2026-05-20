@@ -244,6 +244,13 @@ pub fn catalog() -> Vec<SchemaEntry> {
             schema_json: Some(crate::commands::pack::json_schema()),
         },
         SchemaEntry {
+            command: "pack verify",
+            schema_version: crate::commands::pack::PACK_VERIFY_SCHEMA_VERSION,
+            description:
+                "Result of verifying a .harnpack: bundle hash, signature, per-module hashes.",
+            schema_json: Some(crate::commands::pack::verify_json_schema()),
+        },
+        SchemaEntry {
             command: "dev",
             schema_version: 1,
             description: "`harn dev --watch` incremental NDJSON event stream (ready / fingerprint_changed / rerun / diagnostics / tests).",

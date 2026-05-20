@@ -1335,6 +1335,7 @@ pub async fn connect_mcp_server_from_json(
 pub fn register_mcp_builtins(vm: &mut Vm) {
     vm.register_builtin("mcp_roots", mcp_roots_builtin);
     vm.register_builtin("harn.mcp.roots", mcp_roots_builtin);
+    crate::mcp_file_upload::register_mcp_file_upload_builtins(vm);
     register_harn_mcp_namespace(vm);
 
     vm.register_async_builtin("mcp_connect", |args| async move {
@@ -1768,6 +1769,18 @@ fn register_harn_mcp_namespace(vm: &mut Vm) {
         (
             "roots".to_string(),
             VmValue::BuiltinRef(Rc::from("harn.mcp.roots")),
+        ),
+        (
+            "configure".to_string(),
+            VmValue::BuiltinRef(Rc::from("harn.mcp.configure")),
+        ),
+        (
+            "file_input".to_string(),
+            VmValue::BuiltinRef(Rc::from("harn.mcp.file_input")),
+        ),
+        (
+            "upload_file".to_string(),
+            VmValue::BuiltinRef(Rc::from("harn.mcp.upload_file")),
         ),
     ])));
     vm.set_global(

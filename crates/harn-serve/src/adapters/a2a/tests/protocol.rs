@@ -773,6 +773,217 @@ fn auth_request_with_bearer(token: &str) -> AuthRequest {
     }
 }
 
+fn assert_unauthorized_processed(processed: ProcessedRpc) -> JsonValue {
+    assert_eq!(processed.status, Some(StatusCode::UNAUTHORIZED));
+    let challenge = processed
+        .auth_challenge
+        .as_ref()
+        .expect("auth challenge")
+        .to_str()
+        .expect("ascii challenge");
+    assert!(
+        challenge.starts_with("Bearer realm="),
+        "challenge missing scheme: {challenge}"
+    );
+    let RpcOutcome::Json(response) = processed.outcome else {
+        panic!("expected json response");
+    };
+    assert_eq!(response["error"]["code"], -32000);
+    response
+}
+
+#[tokio::test]
+async fn protected_message_send_requires_auth_before_task_state_is_created() {
+    let (_dir, server) = server_with_api_key_policy(
+        r#"
+pub fn triage(task: string) -> string {
+  return task
+}
+"#,
+        "secret",
+    );
+    let request = harn_vm::jsonrpc::request(
+        "auth-gate-1",
+        "message/send",
+        json!({
+            "message": {
+                "metadata": {"target_agent": "triage"},
+                "parts": [{"type": "text", "text": "private task"}]
+            },
+            "configuration": {"blocking": true}
+        }),
+    );
+
+    let response = assert_unauthorized_processed(
+        server
+            .clone()
+            .process_rpc(request, AuthRequest::default())
+            .await,
+    );
+
+    assert!(
+        response["error"]["message"]
+            .as_str()
+            .is_some_and(|message| message.contains("Unauthorized")),
+        "got: {response}"
+    );
+    assert!(
+        server.tasks.lock().expect("tasks poisoned").is_empty(),
+        "unauthorized send must not leave task history behind"
+    );
+}
+
+#[tokio::test]
+async fn protected_task_management_requires_auth() {
+    let (_dir, server) = server_with_api_key_policy(
+        r#"
+pub fn triage(task: string) -> string {
+  return task
+}
+"#,
+        "secret",
+    );
+    let send = harn_vm::jsonrpc::request(
+        "auth-gate-2",
+        "message/send",
+        json!({
+            "message": {
+                "metadata": {"target_agent": "triage"},
+                "parts": [{"type": "text", "text": "private task"}]
+            },
+            "configuration": {"blocking": true}
+        }),
+    );
+    let processed = server
+        .clone()
+        .process_rpc(send, auth_request_with_bearer("secret"))
+        .await;
+    let RpcOutcome::Json(response) = processed.outcome else {
+        panic!("expected json response");
+    };
+    let task_id = response["result"]["id"]
+        .as_str()
+        .expect("task id")
+        .to_string();
+
+    for request in [
+        harn_vm::jsonrpc::request("auth-gate-3", "tasks/get", json!({"id": task_id})),
+        harn_vm::jsonrpc::request("auth-gate-4", "tasks/list", json!({})),
+        harn_vm::jsonrpc::request("auth-gate-5", "tasks/cancel", json!({"id": task_id})),
+        harn_vm::jsonrpc::request(
+            "auth-gate-6",
+            "tasks/pushNotificationConfig/set",
+            json!({
+                "taskId": task_id,
+                "pushNotificationConfig": {"url": "https://callback.example/push"}
+            }),
+        ),
+    ] {
+        assert_unauthorized_processed(
+            server
+                .clone()
+                .process_rpc(request, AuthRequest::default())
+                .await,
+        );
+    }
+
+    assert_eq!(server.task_json(&task_id)["status"]["state"], "completed");
+    assert!(
+        server
+            .push_configs(Some(&task_id))
+            .expect("push configs")
+            .as_array()
+            .expect("push config array")
+            .is_empty(),
+        "unauthorized push config mutation must not persist"
+    );
+}
+
+#[tokio::test]
+async fn protected_rest_task_management_requires_auth() {
+    let (_dir, server) = server_with_api_key_policy(
+        r#"
+pub fn triage(task: string) -> string {
+  return task
+}
+"#,
+        "secret",
+    );
+    let send = harn_vm::jsonrpc::request(
+        "auth-gate-rest-1",
+        "message/send",
+        json!({
+            "message": {
+                "metadata": {"target_agent": "triage"},
+                "parts": [{"type": "text", "text": "private task"}]
+            },
+            "configuration": {"blocking": true}
+        }),
+    );
+    let processed = server
+        .clone()
+        .process_rpc(send, auth_request_with_bearer("secret"))
+        .await;
+    let RpcOutcome::Json(response) = processed.outcome else {
+        panic!("expected json response");
+    };
+    let task_id = response["result"]["id"]
+        .as_str()
+        .expect("task id")
+        .to_string();
+    let router = A2aServer::http_router(HttpState {
+        server: server.clone(),
+        public_url: "https://agent.example".to_string(),
+    });
+
+    let requests = vec![
+        Request::builder()
+            .method(Method::GET)
+            .uri(format!("/v1/tasks/{task_id}"))
+            .body(Body::empty())
+            .expect("get task request"),
+        Request::builder()
+            .method(Method::POST)
+            .uri(format!("/v1/tasks/{task_id}:cancel"))
+            .body(Body::empty())
+            .expect("cancel task request"),
+        Request::builder()
+            .method(Method::GET)
+            .uri(format!("/v1/tasks/{task_id}/pushNotificationConfigs"))
+            .body(Body::empty())
+            .expect("list push configs request"),
+        Request::builder()
+            .method(Method::POST)
+            .uri(format!("/v1/tasks/{task_id}/pushNotificationConfigs"))
+            .header(axum::http::header::CONTENT_TYPE, "application/json")
+            .body(Body::from(r#"{"url":"https://callback.example/push"}"#))
+            .expect("set push config request"),
+    ];
+
+    for request in requests {
+        let response = router.clone().oneshot(request).await.expect("response");
+        assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
+        assert!(
+            response
+                .headers()
+                .get(axum::http::header::WWW_AUTHENTICATE)
+                .is_some(),
+            "401 must carry a WWW-Authenticate challenge"
+        );
+    }
+
+    assert_eq!(server.task_json(&task_id)["status"]["state"], "completed");
+    assert!(
+        server
+            .push_configs(Some(&task_id))
+            .expect("push configs")
+            .as_array()
+            .expect("push config array")
+            .is_empty(),
+        "unauthorized REST push config mutation must not persist"
+    );
+}
+
 #[tokio::test]
 async fn extended_card_unauthenticated_when_no_auth_configured_returns_not_configured() {
     // Per A2A 0.3.0: if the agent does not have an extended card

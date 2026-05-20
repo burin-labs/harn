@@ -144,6 +144,7 @@ Run it with:
 ```bash
 harn serve a2a server.harn
 harn serve a2a --port 3000 server.harn
+harn serve a2a --bind 0.0.0.0:3000 --api-key "$HARN_SERVE_API_KEY" server.harn
 harn serve a2a --tls edge --public-url https://agent.example.com server.harn
 harn serve a2a --tls self-signed-dev --port 3443 server.harn
 harn serve a2a --cert certs/prod.pem --key certs/prod-key.pem server.harn
@@ -151,6 +152,9 @@ harn serve a2a --cert certs/prod.pem --key certs/prod-key.pem server.harn
 
 Behavior today:
 
+- `harn serve a2a` binds to `127.0.0.1:8080` by default; pass `--bind
+  0.0.0.0:PORT` only when the server is protected by API-key/HMAC auth and
+  TLS or a trusted edge proxy
 - HTTP JSON-RPC endpoint at `/`
 - A2A AgentCard at `/.well-known/agent-card.json`, with compatibility aliases
   at `/.well-known/a2a-agent`, `/.well-known/agent.json`, and `/agent/card`
@@ -176,6 +180,8 @@ Behavior today:
 - HTTP auth hooks built on the shared `AuthPolicy` surface:
   API keys
   HMAC canonical-request signatures
+  When auth is configured, all task creation, task inspection, cancellation,
+  streaming/resubscribe, and push notification config operations require it.
 - optional HS256 agent-card signatures with
   `--card-signing-secret` or `HARN_SERVE_A2A_CARD_SECRET`
 

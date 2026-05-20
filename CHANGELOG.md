@@ -68,6 +68,98 @@ condensed series summaries instead of full per-patch history.
   closure-bag `stream_validator` API and the new functions share the
   same underlying `JsonStreamValidator` storage, so there is no
   duplicate parser or validator implementation.
+- **Experimental MCP file inputs (#1916).** Adds a default-off
+  `harn.mcp.configure({experimental: {file_upload: ...}})` opt-in for the
+  current draft MCP file-input proposal, SEP-2356. Client code can call
+  `harn.mcp.upload_file(client, path, options?)` to encode a local file as an
+  RFC 2397 `data:` URI for an `x-mcp-file` schema field, while Harn MCP
+  servers can declare those fields with `harn.mcp.file_input(...)`. Both the
+  VM MCP server and `harn-serve` MCP adapter validate incoming `data:` URI
+  scheme, media-type, and decoded-size constraints before dispatching the tool
+  handler. The implementation redacts inline file payloads from replay keys
+  and is explicitly tagged as speculative until upstream MCP ratifies the final
+  file-input shape.
+- **`harn pack` signed content-addressed run bundles (#1779).** Promotes
+  `harn pack` to a parent command with a `verify` subcommand and adds
+  `--exclude-secrets` to the build path. `harn pack verify <bundle.harnpack>`
+  reads a `.harnpack`, recomputes the canonical bundle hash, runs the
+  embedded Ed25519 signature check (refusing unsigned bundles without
+  `--allow-unsigned`), and cross-checks every per-module
+  `source_hash_blake3` / `harnbc_hash_blake3` against the in-archive payload.
+  Exits non-zero on any mismatch with stable structured error codes
+  (`verify.signature_failed`, `verify.source_mismatch`,
+  `verify.bytecode_mismatch`, `verify.recorded_hash_mismatch`,
+  `verify.archive_failed`, `verify.unsigned`). `--exclude-secrets` refuses
+  to bundle entrypoints whose path matches a conservative secret-bearing
+  glob (`.env`, `.env.*`, `*.pem`, `*.key`, `credentials*`, anything under
+  `secrets/`); pass `--include-secrets` to be explicit about the historical
+  default. Both surfaces emit `JsonEnvelope` payloads under `--json` and
+  register with `harn --json-schemas` (`pack verify` schema v1). The
+  verifier also accepts `--trust-policy <policy.json>` plus
+  `--require-trusted-signer` so compliance pipelines can reject bundles
+  signed by unknown or allowlist-mismatched keys with the structured
+  `verify.untrusted_signer` error code. The local/registry trust model is
+  reused from the existing skill-provenance signer workflow. The
+  conformance suite covers happy path, byte-deterministic re-pack, signed
+  bundle roundtrip, signed-bundle tamper detection, secrets gate, and the
+  JSON envelope contract under `conformance/tests/harn_pack/`.
+- **fs / env / random / net `harness.*` sub-handles (E4.4, #1769).**
+  The `harness.fs.*`, `harness.env.*`, `harness.random.*`, and
+  `harness.net.*` method surfaces are now wired end-to-end in real
+  mode. Each sub-handle delegates to the existing ambient builtin
+  (and through it, to the existing sandbox path enforcement, egress
+  allowlist, transcript tagging, and tape replay machinery), so a
+  script that rewrites `read_file("notes.txt")` as
+  `harness.fs.read_text("notes.txt")` keeps every guard rail. The
+  parser gains four new lint codes (`HARN-LNT-054`..`HARN-LNT-057`)
+  paired with four new repair templates
+  (`bindings/thread-harness-{fs,env,random,net}`); `harn fix` rewrites
+  every call site once `harness` is in scope and points users at the
+  surface-changing `bindings/thread-harness` repair otherwise. A new
+  `HARN-CAP-201` diagnostic (`sandbox capability denied by active
+  sandbox profile`) is attached to runtime errors raised by harness
+  sub-handle calls when the active `CapabilityPolicy` rejects the
+  path or URL — both the `CategorizedError` (`sandbox violation: ...`)
+  shape and the `Thrown(Dict { type: "EgressBlocked", ... })` shape
+  pick up the code so scripts can pattern-match on it. `harn-ir`
+  attributes `harness.<sub_handle>.<method>` calls back to the
+  canonical ambient builtin so `harn graph --json` and the
+  routes/invariants pipelines see them as having the same effect
+  surface as the legacy ambient call. Conformance fixtures cover the
+  null-deny path for `random` (the previously-missing piece in
+  `conformance/tests/harness/null_*_denies`), a real-mode
+  filesystem roundtrip, deterministic random ranges, and missing-env
+  defaults. Actual removal of the ambient `read_file`, `env`,
+  `random`, and `http_*` builtins is intentionally deferred to E4.6,
+  which migrates the conformance corpus in lockstep.
+
+### Security
+
+- **Template render sandbox hardening.** File-backed `render(...)`,
+  `render_prompt(...)`, `render_with_provenance(...)`, `{{ include ... }}`,
+  and `host_call("template.render", ...)` now enforce the active
+  `workspace_roots` read boundary before reading template files. This closes
+  a policy bypass where template rendering could read arbitrary readable files
+  even when `read_file(...)` was correctly blocked.
+
+- **Vision OCR sandbox and audit hardening.** Path-backed `vision_ocr(...)`
+  inputs now enforce the same active `workspace_roots` read boundary before
+  loading image bytes, the Tesseract backend runs through the runtime process
+  sandbox, and `audit.vision_ocr` records image metadata and hashes without
+  retaining the raw image payload.
+
+- **A2A access-control hardening.** `harn serve a2a` now enforces configured
+  API-key/HMAC auth before any non-discovery A2A RPC or REST operation creates,
+  reads, cancels, subscribes to, or mutates task state. Unauthenticated callers
+  receive HTTP 401 plus `WWW-Authenticate` instead of leaving rejected task
+  history behind or reaching task-management and push-callback operations.
+  The A2A listener also defaults to loopback; use `--bind 0.0.0.0:PORT`
+  explicitly for public deployments behind auth and TLS or a trusted edge.
+
+- **MCP HTTP session teardown hardening.** Script-driven MCP Streamable HTTP
+  now applies the same Origin and `mcp-protocol-version` checks to `DELETE
+  /mcp` as it already applied to POST/GET, preventing cross-origin session
+  teardown when a browser-visible session id is present.
 
 ## v0.8.27
 

@@ -1113,6 +1113,37 @@ fn main(harness: Harness) {
         assert!(error.contains("HarnessFs.read_text expects string argument 1, got int"));
     }
 
+    #[test]
+    fn real_harness_fs_write_outside_workspace_roots_surfaces_cap_201() {
+        use crate::orchestration::{
+            clear_execution_policy_stacks, push_execution_policy, CapabilityPolicy, SandboxProfile,
+        };
+        clear_execution_policy_stacks();
+        let temp = tempfile::tempdir().unwrap();
+        let policy = CapabilityPolicy {
+            sandbox_profile: SandboxProfile::Worktree,
+            workspace_roots: vec![temp.path().to_string_lossy().into_owned()],
+            ..CapabilityPolicy::default()
+        };
+        push_execution_policy(policy);
+        let outside = std::env::temp_dir().join("harn_e4_4_cap_201_outside.txt");
+        let source = format!(
+            r#"fn main(harness: Harness) {{ harness.fs.write_text("{}", "x") }}"#,
+            outside.to_string_lossy().replace('\\', "/"),
+        );
+        let error = run_harness_source(&source, Harness::real())
+            .expect_err("write outside workspace_roots must reject");
+        clear_execution_policy_stacks();
+        assert!(
+            error.contains("HARN-CAP-201"),
+            "expected HARN-CAP-201 prefix, got: {error}"
+        );
+        assert!(
+            error.contains("sandbox violation"),
+            "deny should keep the underlying sandbox-rejection message, got: {error}"
+        );
+    }
+
     fn run_harness_source(source: &str, harness: Harness) -> Result<String, String> {
         let rt = tokio::runtime::Builder::new_current_thread()
             .enable_all()

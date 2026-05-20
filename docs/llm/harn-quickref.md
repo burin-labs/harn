@@ -1013,6 +1013,32 @@ executable backend. The historical `[builtin_call] unhandled: <name>`
 runtime failure is replaced by a clear error pointing at the offending
 tool.
 
+### Experimental MCP file inputs
+
+Harn implements draft MCP SEP-2356 file inputs behind an explicit opt-in. The
+wire shape is `x-mcp-file` on a `{"type": "string", "format": "uri"}` schema
+property, with selected file bytes sent inline as an RFC 2397 `data:` URI.
+
+```harn
+harn.mcp.configure({
+  experimental: {file_upload: {spec_revision: "modelcontextprotocol/modelcontextprotocol#2356"}},
+})
+
+let image = harn.mcp.upload_file(mcp.image_server, "photo.png", {
+  accept: ["image/png", "image/jpeg"],
+  max_size: 5242880,
+})
+mcp_call(mcp.image_server, "describe_image", {image: image})
+
+registry = tool_define(registry, "inspect_upload", "Inspect text", {
+  parameters: {upload: harn.mcp.file_input({accept: ["text/*"], max_size: 64})},
+  handler: { args -> "received" },
+})
+```
+
+Keep this in the experimental namespace until upstream ratifies file inputs;
+large files should still use URL-mode elicitation or an app-provided upload UI.
+
 ### Tool loading & search
 
 Mark tools that the model rarely needs with `defer_loading: true` and
@@ -3797,6 +3823,8 @@ partials = "Sources/BurinCore/Resources/pipelines/partials"
 Both `render_prompt(...)` and `{{ include "@/..." }}` honor the same
 syntax. `harn check` validates the resolved files exist; bundle manifests
 and LSP go-to-definition follow `@`-paths to the target file.
+When an execution policy is active, file-backed templates and includes obey
+the same `workspace_roots` read boundary as `read_file(...)`.
 
 - `{{ name }}` — interpolation; nested with `{{ a.b[0] }}`.
 - `{{ if expr }}..{{ elif expr }}..{{ else }}..{{ end }}` — expression
