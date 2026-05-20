@@ -143,7 +143,7 @@ impl TypeChecker {
         is_stream: bool,
         expected_span: Span,
     ) {
-        let mut fn_scope = self.scope.child();
+        let mut fn_scope = TypeScope::child_of(&self.scope);
         // Register generic type parameters so they are treated as compatible
         // with any concrete type during type checking.
         for tp in type_params {

@@ -291,14 +291,21 @@ impl TypeChecker {
             }
         }
 
-        let call_scope = if sig.type_params.is_empty() {
-            scope.clone()
+        // `call_scope` only needs to differ from `scope` when the callee
+        // declares its own generic type params (which must be visible while
+        // we check this call's arguments). The common case — calling a
+        // non-generic builtin — borrows `scope` directly, sparing a clone
+        // per call. Otherwise we allocate a child that adds those names.
+        let call_scope_owned;
+        let call_scope: &TypeScope = if sig.type_params.is_empty() {
+            scope
         } else {
             let mut s = scope.child();
             for tp_name in sig.type_params {
                 s.generic_type_params.insert((*tp_name).to_string());
             }
-            s
+            call_scope_owned = s;
+            &call_scope_owned
         };
 
         let type_param_names = sig.type_param_names();
@@ -343,13 +350,13 @@ impl TypeChecker {
                         param.name,
                         &expected,
                         arg,
-                        &call_scope,
+                        call_scope,
                     );
                 }
-                let compatible = self.types_compatible(&expected, actual, &call_scope)
+                let compatible = self.types_compatible(&expected, actual, call_scope)
                     || (param.optional
                         && without_nil(actual).is_none_or(|non_nil| {
-                            self.types_compatible(&expected, &non_nil, &call_scope)
+                            self.types_compatible(&expected, &non_nil, call_scope)
                         }));
                 if !compatible {
                     self.type_mismatch_at(
@@ -359,7 +366,7 @@ impl TypeChecker {
                         actual,
                         arg.span,
                         (None, Some(arg.span)),
-                        &call_scope,
+                        call_scope,
                     );
                 }
             }
@@ -1208,16 +1215,20 @@ impl TypeChecker {
                     );
                 }
             }
-            // Build a scope that includes the function's generic type params
-            // so they are treated as compatible with any concrete type.
-            let call_scope = if sig.type_param_names.is_empty() {
-                scope.clone()
+            // Most callees have no generic type params and can reuse the
+            // caller's scope by reference. The branch with a child scope
+            // is only allocated when generic names need to be visible
+            // during arg checking.
+            let call_scope_owned;
+            let call_scope: &TypeScope = if sig.type_param_names.is_empty() {
+                scope
             } else {
                 let mut s = scope.child();
                 for tp_name in &sig.type_param_names {
                     s.generic_type_params.insert(tp_name.clone());
                 }
-                s
+                call_scope_owned = s;
+                &call_scope_owned
             };
             let mut type_bindings: BTreeMap<String, TypeExpr> = BTreeMap::new();
             let type_param_set: std::collections::BTreeSet<String> =
@@ -1256,9 +1267,9 @@ impl TypeChecker {
                             param_name,
                             &expected,
                             arg,
-                            &call_scope,
+                            call_scope,
                         );
-                        if !self.types_compatible(&expected, actual, &call_scope) {
+                        if !self.types_compatible(&expected, actual, call_scope) {
                             self.type_mismatch_at(
                                 Code::ArgumentTypeMismatch,
                                 format!("argument {} `{}`", i + 1, param_name),
@@ -1271,7 +1282,7 @@ impl TypeChecker {
                                     }),
                                     Some(arg.span),
                                 ),
-                                &call_scope,
+                                call_scope,
                             );
                         }
                     }
