@@ -125,8 +125,9 @@ println(result.text)
 - `vision::ocr` now returns `StructuredText` instead of an opaque blob, so the
   model gets token, line, and block structure back in the tool result.
 - The current OCR backend shells out to `tesseract`, but the runtime keeps the
-  backend pluggable and records the canonical OCR input plus structured output
-  on `audit.vision_ocr` when an event log is active.
+  backend pluggable, runs it through the process sandbox under an active handler
+  policy, and records OCR metadata plus structured output on `audit.vision_ocr`
+  when an event log is active.
 
 ## Guidance
 

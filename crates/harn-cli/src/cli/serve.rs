@@ -50,6 +50,10 @@ pub(crate) struct ServeAcpArgs {
 
 #[derive(Debug, Args)]
 pub(crate) struct A2aServeArgs {
+    /// Socket address to bind the A2A server to. Defaults to loopback; use
+    /// `--bind 0.0.0.0:PORT` only behind explicit auth/TLS or a trusted edge.
+    #[arg(long, env = "HARN_SERVE_A2A_BIND", value_name = "ADDR")]
+    pub bind: Option<SocketAddr>,
     /// Port to bind the A2A server to.
     #[arg(long, default_value_t = 8080)]
     pub port: u16,

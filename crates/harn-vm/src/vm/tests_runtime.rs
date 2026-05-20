@@ -1735,6 +1735,42 @@ fn test_policy_workspace_roots_catch_filesystem_escapes() {
 }
 
 #[test]
+fn test_policy_workspace_roots_catch_template_render_escapes() {
+    let allowed = tempfile::tempdir().unwrap();
+    let outside = tempfile::tempdir().unwrap();
+    let outside_template = outside.path().join("secret.harn.prompt");
+    std::fs::write(&outside_template, "TOP_SECRET_RENDER_BYPASS").unwrap();
+
+    let policy = crate::orchestration::CapabilityPolicy {
+        capabilities: std::collections::BTreeMap::from([
+            ("workspace".to_string(), vec!["read_text".to_string()]),
+            ("template".to_string(), vec!["render".to_string()]),
+        ]),
+        workspace_roots: vec![allowed.path().display().to_string()],
+        side_effect_level: Some("read_only".to_string()),
+        ..Default::default()
+    };
+
+    let escaped_path = outside_template.display();
+    let escapes = [
+        format!(r#"pipeline t(task) {{ render("{escaped_path}") }}"#),
+        format!(r#"pipeline t(task) {{ render_prompt("{escaped_path}") }}"#),
+        format!(r#"pipeline t(task) {{ render_with_provenance("{escaped_path}") }}"#),
+        format!(
+            r#"pipeline t(task) {{ host_call("template.render", {{path: "{escaped_path}"}}) }}"#
+        ),
+    ];
+
+    for source in escapes {
+        let err = run_harn_with_policy(&source, policy.clone()).unwrap_err();
+        assert!(
+            err.to_string().contains("sandbox violation"),
+            "expected sandbox violation for source {source}, got {err}"
+        );
+    }
+}
+
+#[test]
 fn test_policy_workspace_roots_reject_process_cwd_escape() {
     let allowed = tempfile::tempdir().unwrap();
     let outside = tempfile::tempdir().unwrap();

@@ -594,6 +594,37 @@ fn test_parses_serve_acp() {
 }
 
 #[test]
+fn test_parses_serve_a2a_bind_and_auth() {
+    let cli = Cli::parse_from([
+        "harn",
+        "serve",
+        "a2a",
+        "--bind",
+        "0.0.0.0:3000",
+        "--api-key",
+        "alpha,beta",
+        "--hmac-secret",
+        "shared",
+        "agent.harn",
+    ]);
+
+    let Command::Serve(args) = cli.command.unwrap() else {
+        panic!("expected serve command");
+    };
+    let crate::cli::ServeCommand::A2a(serve) = args.command else {
+        panic!("expected serve a2a");
+    };
+    assert_eq!(
+        serve.bind.map(|addr| addr.to_string()).as_deref(),
+        Some("0.0.0.0:3000")
+    );
+    assert_eq!(serve.port, 8080);
+    assert_eq!(serve.api_key, vec!["alpha".to_string(), "beta".to_string()]);
+    assert_eq!(serve.hmac_secret.as_deref(), Some("shared"));
+    assert_eq!(serve.file, "agent.harn");
+}
+
+#[test]
 fn test_parses_serve_api() {
     let cli = Cli::parse_from([
         "harn",
