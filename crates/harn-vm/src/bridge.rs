@@ -5,8 +5,10 @@
 //! The host application handles these requests using its own providers.
 
 use std::collections::{BTreeMap, HashMap, HashSet, VecDeque};
+use std::future::Future;
 use std::io::Write;
 use std::path::{Path, PathBuf};
+use std::pin::Pin;
 use std::rc::Rc;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::Arc;
@@ -96,36 +98,43 @@ struct InProcessHost {
 }
 
 impl InProcessHost {
-    async fn dispatch(
-        &self,
-        method: &str,
+    /// Box-pin'd to break the static recursion between the VM's hot dispatch
+    /// loop and the bridge: a bridge-backed builtin spawns a child VM that
+    /// calls back into the dispatch loop via `call_closure_pub`. Indirecting
+    /// at this slow-path boundary keeps the recursion satisfied without
+    /// allocating per call in the hot per-callback path.
+    fn dispatch<'a>(
+        &'a self,
+        method: &'a str,
         params: serde_json::Value,
-    ) -> Result<serde_json::Value, VmError> {
-        match method {
-            "builtin_call" => {
-                let name = params
-                    .get("name")
-                    .and_then(|value| value.as_str())
-                    .unwrap_or_default();
-                let args = params
-                    .get("args")
-                    .and_then(|value| value.as_array())
-                    .cloned()
-                    .unwrap_or_default()
-                    .into_iter()
-                    .map(|value| json_result_to_vm_value(&value))
-                    .collect::<Vec<_>>();
-                self.invoke_export(name, &args).await
+    ) -> Pin<Box<dyn Future<Output = Result<serde_json::Value, VmError>> + 'a>> {
+        Box::pin(async move {
+            match method {
+                "builtin_call" => {
+                    let name = params
+                        .get("name")
+                        .and_then(|value| value.as_str())
+                        .unwrap_or_default();
+                    let args = params
+                        .get("args")
+                        .and_then(|value| value.as_array())
+                        .cloned()
+                        .unwrap_or_default()
+                        .into_iter()
+                        .map(|value| json_result_to_vm_value(&value))
+                        .collect::<Vec<_>>();
+                    self.invoke_export(name, &args).await
+                }
+                "host/tools/list" => self
+                    .invoke_optional_export("host_tools_list", &[])
+                    .await
+                    .map(|value| value.unwrap_or_else(|| serde_json::json!({ "tools": [] }))),
+                "session/request_permission" => self.request_permission(params).await,
+                other => Err(VmError::Runtime(format!(
+                    "playground host backend does not implement bridge method '{other}'"
+                ))),
             }
-            "host/tools/list" => self
-                .invoke_optional_export("host_tools_list", &[])
-                .await
-                .map(|value| value.unwrap_or_else(|| serde_json::json!({ "tools": [] }))),
-            "session/request_permission" => self.request_permission(params).await,
-            other => Err(VmError::Runtime(format!(
-                "playground host backend does not implement bridge method '{other}'"
-            ))),
-        }
+        })
     }
 
     async fn invoke_export(

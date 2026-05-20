@@ -1,5 +1,4 @@
 use std::future::Future;
-use std::pin::Pin;
 use std::rc::Rc;
 
 use crate::value::{ErrorCategory, VmClosure, VmError, VmValue};
@@ -129,91 +128,78 @@ impl Vm {
         }
     }
 
-    /// Call a closure (used by method calls like .map/.filter etc.)
-    /// Uses recursive execution for simplicity in method dispatch.
-    pub(crate) fn call_closure<'a>(
-        &'a mut self,
-        closure: &'a VmClosure,
-        args: &'a [VmValue],
-    ) -> Pin<Box<dyn Future<Output = Result<VmValue, VmError>> + 'a>> {
-        Box::pin(async move {
-            crate::typecheck::validate_user_call(&closure.func, args, None)?;
-            let saved_env = self.env.clone();
-            let mut call_env = self.closure_call_env_for_current_frame(closure);
-            let saved_frames = std::mem::take(&mut self.frames);
-            let saved_handlers = std::mem::take(&mut self.exception_handlers);
-            let saved_iterators = std::mem::take(&mut self.iterators);
-            let saved_deadlines = std::mem::take(&mut self.deadlines);
-            let active_context = (!crate::step_runtime::is_tracked_function(&closure.func.name))
-                .then(crate::step_runtime::take_active_context);
+    /// Invoke a closure inline against the existing VM frame stack.
+    ///
+    /// Dispatch path for every callback-taking method on lists/dicts/sets
+    /// (`.map`, `.filter`, `.reduce`, `.each`, `.sort_by`, …) via
+    /// [`call_callable_value`]. The closure's frame is pushed onto
+    /// `self.frames` using the same machinery as `Op::Call`, and the
+    /// shared dispatch loop ([`Vm::drive_until_frame_depth`]) drains the
+    /// sub-execution back to the caller's depth.
+    ///
+    /// This avoids the per-invocation `Pin<Box<dyn Future>>` heap
+    /// allocation a recursive `async fn` would require — the recursion
+    /// cycle (closure → `.map` → callback → closure) is broken instead at
+    /// [`Vm::call_method`], which keeps a single boxed future per
+    /// method-call site rather than per callback element.
+    ///
+    /// Exception handlers are saved and cleared before the sub-execution
+    /// so an unhandled throw inside the body propagates as a Rust
+    /// `Result::Err` to the caller's dispatch loop, matching the previous
+    /// `mem::take`-based isolation. Iterators, deadlines, and frames are
+    /// naturally scoped via `CallFrame::saved_iterator_depth` and the
+    /// per-frame deadline tags, so the previous 4× `mem::take` dance
+    /// collapses to a single one.
+    pub(crate) async fn call_closure(
+        &mut self,
+        closure: &VmClosure,
+        args: &[VmValue],
+    ) -> Result<VmValue, VmError> {
+        let saved_handlers = std::mem::take(&mut self.exception_handlers);
+        let active_context = (!crate::step_runtime::is_tracked_function(&closure.func.name))
+            .then(crate::step_runtime::take_active_context);
 
-            call_env.push_scope();
+        let target_frame_depth = self.frames.len();
+        let result = match self.push_closure_frame(closure, args) {
+            Ok(()) => self.drive_until_frame_depth(target_frame_depth).await,
+            Err(e) => Err(e),
+        };
 
-            self.env = call_env;
-            let argc = args.len();
-            let mut local_slots = Self::fresh_local_slots(&closure.func.chunk);
-            Self::bind_param_slots(&mut local_slots, &closure.func, args, false);
-            let saved_source_dir = if let Some(ref dir) = closure.source_dir {
-                let prev = crate::stdlib::process::VM_SOURCE_DIR.with(|sd| sd.borrow().clone());
-                crate::stdlib::set_thread_source_dir(dir);
-                prev
-            } else {
-                None
-            };
-            let result = self
-                .run_chunk_ref(
-                    Rc::clone(&closure.func.chunk),
-                    argc,
-                    saved_source_dir,
-                    closure.module_functions.clone(),
-                    closure.module_state.clone(),
-                    Some(local_slots),
-                )
-                .await;
+        self.exception_handlers = saved_handlers;
+        if let Some(ctx) = active_context {
+            crate::step_runtime::restore_active_context(ctx);
+        }
 
-            self.env = saved_env;
-            self.frames = saved_frames;
-            self.exception_handlers = saved_handlers;
-            self.iterators = saved_iterators;
-            self.deadlines = saved_deadlines;
-            if let Some(active_context) = active_context {
-                crate::step_runtime::restore_active_context(active_context);
-            }
-
-            result
-        })
+        result
     }
 
     /// Invoke a value as a callable. Supports `VmValue::Closure` and
     /// `VmValue::BuiltinRef`, so builtin names passed by reference (e.g.
     /// `dict.rekey(snake_to_camel)`) dispatch through the same code path as
     /// user-defined closures.
-    #[allow(clippy::manual_async_fn)]
-    pub(crate) fn call_callable_value<'a>(
-        &'a mut self,
-        callable: &'a VmValue,
-        args: &'a [VmValue],
-    ) -> Pin<Box<dyn Future<Output = Result<VmValue, VmError>> + 'a>> {
-        Box::pin(async move {
-            match callable {
-                VmValue::Closure(closure) => self.call_closure(closure, args).await,
-                VmValue::BuiltinRef(name) => {
-                    if !crate::autonomy::needs_async_side_effect_enforcement(name) {
-                        if let Some(result) = self.call_sync_builtin_by_ref(name, args) {
-                            return result;
-                        }
+    pub(crate) async fn call_callable_value(
+        &mut self,
+        callable: &VmValue,
+        args: &[VmValue],
+    ) -> Result<VmValue, VmError> {
+        match callable {
+            VmValue::Closure(closure) => self.call_closure(closure, args).await,
+            VmValue::BuiltinRef(name) => {
+                if !crate::autonomy::needs_async_side_effect_enforcement(name) {
+                    if let Some(result) = self.call_sync_builtin_by_ref(name, args) {
+                        return result;
                     }
-                    self.call_named_builtin(name, args.to_vec()).await
                 }
-                VmValue::BuiltinRefId { id, name } => {
-                    self.call_builtin_id_or_name(*id, name, args.to_vec()).await
-                }
-                other => Err(VmError::TypeError(format!(
-                    "expected callable, got {}",
-                    other.type_name()
-                ))),
+                self.call_named_builtin(name, args.to_vec()).await
             }
-        })
+            VmValue::BuiltinRefId { id, name } => {
+                self.call_builtin_id_or_name(*id, name, args.to_vec()).await
+            }
+            other => Err(VmError::TypeError(format!(
+                "expected callable, got {}",
+                other.type_name()
+            ))),
+        }
     }
 
     fn call_sync_builtin_by_ref(
