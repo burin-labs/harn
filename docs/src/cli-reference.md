@@ -1969,10 +1969,11 @@ harn remove my-lib
 Build a `.harnpack` run bundle from a Harn entrypoint
 ([#1781][issue-1781]). The bundle is a deterministic tar.zst archive
 containing a v2 `WorkflowBundle` manifest (`harnpack.json`), every
-transitively-imported `.harn` source under `sources/`, every module's
-precompiled `.harnbc`/`.harnmod` artifact under `bytecode/`, a
-provider-catalog hash + stdlib version pin, an archived SPDX-lite 2.3
-SBOM (`sbom.spdx.json`), and an optional Ed25519 signature slot.
+transitively-imported `.harn` source and non-Harn import asset under
+`sources/`, every module's precompiled `.harnbc`/`.harnmod` artifact
+under `bytecode/`, a provider-catalog hash + stdlib version pin, an
+archived SPDX-lite 2.3 SBOM (`sbom.spdx.json`), and an optional
+Ed25519 signature slot.
 
 ```bash
 harn pack examples/hello.harn
@@ -2002,6 +2003,11 @@ canonical bundle hash, embeds the signature in the manifest, and appends an
 OpenTrustGraph `release` record. `--unsigned` skips the manifest signature but
 still appends the release record at autonomy tier `suggest`; this is also the
 default when neither signing flag is provided.
+
+`--exclude-secrets` refuses secret-looking entrypoints and skips imported
+non-Harn assets whose paths match `.env`, `.env.*`, `*.pem`, `*.key`,
+`credentials*`, or a `secrets/` directory. Skipped assets are reported as
+`JsonEnvelope.warnings` entries and in `manifest.metadata.skipped_assets`.
 
 [issue-1781]: https://github.com/burin-labs/harn/issues/1781
 
