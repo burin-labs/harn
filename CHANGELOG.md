@@ -17,6 +17,13 @@ condensed series summaries instead of full per-patch history.
   idempotency-aware unsafe write retries, capped `Retry-After` handling, JSON
   parse categorization, and standard rate-limit header extraction without
   hand-rolling provider loops.
+- **Run artifact directory helpers (#2089).** Adds `std/run_artifacts`
+  for harness-local output directories under `runtime_paths().run_root`
+  or an explicit `{root}`. The module opens/reopens `.harn-runs/<kind>/<run_id>`
+  directories, provides traversal-checked artifact paths, JSON/text
+  read-write helpers that reuse `std/fs` fallback and newline conventions,
+  transcript sidecar path helpers, standard artifact path dictionaries, and
+  newest-first recent-run listing for recovery/review flows.
 - **`harness.net.*` access policy (#1913).** Adds the `std/net_policy`
   stdlib module so scripts can attach a per-harness allow/deny policy
   to `harness.net.*` requests: `NetPolicy.create({allow, deny,

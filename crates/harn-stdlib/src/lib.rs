@@ -74,6 +74,10 @@ pub const STDLIB_SOURCES: &[StdlibSource] = &[
         source: include_str!("stdlib/stdlib_fs.harn"),
     },
     StdlibSource {
+        module: "run_artifacts",
+        source: include_str!("stdlib/stdlib_run_artifacts.harn"),
+    },
+    StdlibSource {
         module: "os",
         source: include_str!("stdlib/stdlib_os.harn"),
     },

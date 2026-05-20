@@ -1,0 +1,316 @@
+// std/run_artifacts - directory-backed run artifact helpers for harnesses.
+import { is_dir, read_json, write_json, write_lines } from "std/fs"
+
+type RunArtifactsOpenOptions = {root?: string, namespace?: string, run_id?: string}
+
+type RunArtifactsListOptions = {root?: string, namespace?: string, limit?: int}
+
+type RunArtifactWriteOptions = {pretty?: bool, trailing_newline?: bool, ensure_parent?: bool}
+
+fn __run_artifacts_required_text(value, label) -> string {
+  let text = trim(to_string(value ?? ""))
+  if text == "" {
+    throw "std/run_artifacts: " + label + " is required"
+  }
+  return text
+}
+
+fn __run_artifacts_clean_relative(value, label) -> string {
+  let raw = __run_artifacts_required_text(value, label)
+  let posix = path_to_posix(raw)
+  if path_is_absolute(posix) {
+    throw "std/run_artifacts: " + label + " must be relative"
+  }
+  for segment in path_segments(posix) {
+    if segment == ".." {
+      throw "std/run_artifacts: " + label + " must not contain '..'"
+    }
+  }
+  let normalized = path_normalize(posix)
+  if normalized == "." || normalized == "" {
+    throw "std/run_artifacts: " + label + " is required"
+  }
+  if normalized == ".." || starts_with(normalized, "../") {
+    throw "std/run_artifacts: " + label + " must stay inside the run directory"
+  }
+  return normalized
+}
+
+fn __run_artifacts_clean_segment(value, label) -> string {
+  let clean = __run_artifacts_clean_relative(value, label)
+  if contains(clean, "/") {
+    throw "std/run_artifacts: " + label + " must be one path segment"
+  }
+  return clean
+}
+
+fn __run_artifacts_root(options) -> string {
+  let opts = options ?? {}
+  let root = to_string(opts?.root ?? runtime_paths().run_root)
+  if root == "" {
+    throw "std/run_artifacts: root is required"
+  }
+  return path_normalize(root)
+}
+
+fn __run_artifacts_namespace(options) {
+  let raw = trim(to_string((options ?? {})?.namespace ?? ""))
+  if raw == "" {
+    return nil
+  }
+  return __run_artifacts_clean_relative(raw, "namespace")
+}
+
+fn __run_artifacts_kind_dir(root, kind, namespace) -> string {
+  if namespace == nil {
+    return path_join(root, kind)
+  }
+  return path_join(root, namespace, kind)
+}
+
+fn __run_artifacts_default_run_id() -> string {
+  return to_string(to_int(harness.clock.timestamp())) + "-" + uuid_v7()
+}
+
+fn __run_artifacts_run_dir(run) -> string {
+  let dir = to_string(run?.dir ?? "")
+  if dir == "" {
+    throw "std/run_artifacts: run.dir is required"
+  }
+  return dir
+}
+
+fn __run_artifacts_path(run, name) -> string {
+  let rel = __run_artifacts_clean_relative(name, "artifact path")
+  let root = path_normalize(__run_artifacts_run_dir(run))
+  let joined = path_normalize(path_join(root, rel))
+  let relative = path_relative_to(joined, root)
+  if relative == nil || relative == ".." || starts_with(relative, "../") {
+    throw "std/run_artifacts: artifact path must stay inside the run directory"
+  }
+  return joined
+}
+
+fn __run_artifacts_standard_paths(run) -> dict {
+  return {
+    facts: __run_artifacts_path(run, "facts.json"),
+    audit: __run_artifacts_path(run, "audit.json"),
+    review: __run_artifacts_path(run, "review.md"),
+    agent_result: __run_artifacts_path(run, "agent-result.json"),
+    agent_trace: __run_artifacts_path(run, "agent-trace.json"),
+    agent_llm_transcript: __run_artifacts_path(run, "agent-llm/llm_transcript.jsonl"),
+  }
+}
+
+fn __run_artifacts_make_run(kind, namespace, root, run_id, dir, modified = nil) -> dict {
+  let base = {kind: kind, namespace: namespace, run_id: run_id, root: root, dir: dir, modified: modified}
+  return base + {paths: __run_artifacts_standard_paths(base)}
+}
+
+/**
+ * Create or resolve a run artifact directory below the configured run root.
+ *
+ * @effects: [fs.write]
+ * @allocation: heap
+ * @errors: [validation, fs]
+ * @api_stability: stable
+ * @example: run_artifacts_open("release", {root: root, run_id: "run-1"})
+ */
+pub fn run_artifacts_open(kind: string, options: RunArtifactsOpenOptions = {}) -> dict {
+  let opts = options ?? {}
+  let clean_kind = __run_artifacts_clean_segment(kind, "kind")
+  let namespace = __run_artifacts_namespace(opts)
+  let root = __run_artifacts_root(opts)
+  let run_id = if opts.run_id == nil {
+    __run_artifacts_default_run_id()
+  } else {
+    __run_artifacts_clean_segment(opts.run_id, "run_id")
+  }
+  let dir = path_join(__run_artifacts_kind_dir(root, clean_kind, namespace), run_id)
+  harness.fs.mkdir(dir)
+  return __run_artifacts_make_run(clean_kind, namespace, root, run_id, dir)
+}
+
+/**
+ * Return an artifact path inside `run.dir`, rejecting absolute paths and traversal.
+ *
+ * @effects: []
+ * @allocation: heap
+ * @errors: [validation]
+ * @api_stability: stable
+ * @example: run_artifact_path(run, "facts.json")
+ */
+pub fn run_artifact_path(run: dict, name: string) -> string {
+  return __run_artifacts_path(run, name)
+}
+
+/**
+ * Write a JSON artifact using the standard `std/fs.write_json` conventions.
+ *
+ * @effects: [fs.write]
+ * @allocation: heap
+ * @errors: [validation, fs]
+ * @api_stability: stable
+ * @example: run_artifact_write_json(run, "facts.json", facts, {pretty: true})
+ */
+pub fn run_artifact_write_json(
+  run: dict,
+  name: string,
+  value,
+  options: RunArtifactWriteOptions = {},
+) {
+  write_json(run_artifact_path(run, name), value, options ?? {})
+}
+
+/**
+ * Read a JSON artifact, returning `fallback` when the file is missing or malformed.
+ *
+ * @effects: [fs.read]
+ * @allocation: heap
+ * @errors: [validation]
+ * @api_stability: stable
+ * @example: run_artifact_read_json(run, "facts.json", {})
+ */
+pub fn run_artifact_read_json(run: dict, name: string, fallback = nil) {
+  return read_json(run_artifact_path(run, name), fallback)
+}
+
+/**
+ * Write a text artifact with standard parent-directory and newline handling.
+ *
+ * @effects: [fs.write]
+ * @allocation: heap
+ * @errors: [validation, fs]
+ * @api_stability: stable
+ * @example: run_artifact_write_text(run, "review.md", body)
+ */
+pub fn run_artifact_write_text(
+  run: dict,
+  name: string,
+  text: string,
+  options: RunArtifactWriteOptions = {},
+) {
+  write_lines(run_artifact_path(run, name), [text ?? ""], options ?? {})
+}
+
+/**
+ * Read a text artifact, returning `fallback` when it cannot be read.
+ *
+ * @effects: [fs.read]
+ * @allocation: heap
+ * @errors: [validation]
+ * @api_stability: stable
+ * @example: run_artifact_read_text(run, "review.md", "")
+ */
+pub fn run_artifact_read_text(run: dict, name: string, fallback = nil) {
+  let result = try {
+    harness.fs.read_text(run_artifact_path(run, name))
+  }
+  if is_ok(result) {
+    return unwrap(result)
+  }
+  return fallback
+}
+
+/**
+ * Return the transcript sidecar directory for a run without creating it.
+ *
+ * @effects: []
+ * @allocation: heap
+ * @errors: [validation]
+ * @api_stability: stable
+ * @example: run_artifact_transcript_dir(run, "agent-llm")
+ */
+pub fn run_artifact_transcript_dir(run: dict, name: string = "agent-llm") -> string {
+  let dir_name = if trim(to_string(name ?? "")) == "" {
+    "agent-llm"
+  } else {
+    name
+  }
+  return run_artifact_path(run, dir_name)
+}
+
+/**
+ * Return the standard JSONL transcript sidecar path for a named transcript directory.
+ *
+ * @effects: []
+ * @allocation: heap
+ * @errors: [validation]
+ * @api_stability: stable
+ * @example: run_artifact_transcript_path(run, "agent-llm")
+ */
+pub fn run_artifact_transcript_path(run: dict, name: string = "agent-llm") -> string {
+  let dir_name = if trim(to_string(name ?? "")) == "" {
+    "agent-llm"
+  } else {
+    name
+  }
+  return run_artifact_path(run, path_join(dir_name, "llm_transcript.jsonl"))
+}
+
+/**
+ * List recent run artifact directories newest-first for a kind.
+ *
+ * @effects: [fs.read]
+ * @allocation: heap
+ * @errors: [validation]
+ * @api_stability: stable
+ * @example: run_artifacts_list("release", {limit: 5})
+ */
+pub fn run_artifacts_list(kind: string, options: RunArtifactsListOptions = {}) -> list<dict> {
+  let opts = options ?? {}
+  let clean_kind = __run_artifacts_clean_segment(kind, "kind")
+  let namespace = __run_artifacts_namespace(opts)
+  let root = __run_artifacts_root(opts)
+  let limit = to_int(opts.limit ?? 20) ?? 20
+  if limit <= 0 {
+    return []
+  }
+  let kind_dir = __run_artifacts_kind_dir(root, clean_kind, namespace)
+  if !is_dir(kind_dir) {
+    return []
+  }
+  let names_result = try {
+    harness.fs.list_dir(kind_dir)
+  }
+  if !is_ok(names_result) {
+    return []
+  }
+  var rows = []
+  for name in unwrap(names_result) {
+    let dir = path_join(kind_dir, name)
+    let info = try {
+      harness.fs.stat(dir)
+    }
+    if is_ok(info) && unwrap(info)?.is_dir ?? false {
+      let stat = unwrap(info)
+      rows = rows.push(__run_artifacts_make_run(clean_kind, namespace, root, name, dir, stat?.modified))
+    }
+  }
+  return rows
+    .sort_by(
+    { row ->
+      let modified = row.modified ?? 0
+      return pair(0 - modified, row.run_id ?? "")
+    },
+  )
+    .take(limit)
+    .to_list()
+}
+
+/**
+ * Reconstruct the run artifact shape from an existing directory path without writing.
+ *
+ * @effects: []
+ * @allocation: heap
+ * @errors: [validation]
+ * @api_stability: stable
+ * @example: run_artifacts_from_dir("release", previous_dir)
+ */
+pub fn run_artifacts_from_dir(kind: string, dir: string) -> dict {
+  let clean_kind = __run_artifacts_clean_segment(kind, "kind")
+  let clean_dir = path_normalize(__run_artifacts_required_text(dir, "dir"))
+  let run_id = __run_artifacts_clean_segment(path_basename(clean_dir), "run_id")
+  let root = path_parent(path_parent(clean_dir))
+  return __run_artifacts_make_run(clean_kind, nil, root, run_id, clean_dir)
+}

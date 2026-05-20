@@ -1,0 +1,55 @@
+import {
+  run_artifact_path,
+  run_artifact_read_json,
+  run_artifact_read_text,
+  run_artifact_transcript_dir,
+  run_artifact_transcript_path,
+  run_artifact_write_json,
+  run_artifact_write_text,
+  run_artifacts_from_dir,
+  run_artifacts_list,
+  run_artifacts_open,
+} from "std/run_artifacts"
+
+pipeline test(task) {
+  let root = path_join(harness.fs.temp_dir(), "harn-run-artifacts-" + uuid_v7())
+  let run = run_artifacts_open("eval", {root: root, run_id: "run-a"})
+  __io_println(run.kind)
+  __io_println(run.run_id)
+  __io_println(run.root == path_normalize(root))
+  __io_println(harness.fs.exists(run.dir))
+  __io_println(path_relative_to(run.paths.facts, run.dir))
+  run_artifact_write_json(run, "facts.json", {status: "ok", count: 2}, {pretty: true})
+  let facts = run_artifact_read_json(run, "facts.json")
+  __io_println(facts.status)
+  __io_println(facts.count)
+  __io_println(run_artifact_read_json(run, "missing.json", {status: "missing"}).status)
+  harness.fs.write_text(run_artifact_path(run, "bad.json"), "{bad")
+  __io_println(run_artifact_read_json(run, "bad.json", {status: "malformed"}).status)
+  run_artifact_write_text(run, "review.md", "hello")
+  __io_println(run_artifact_read_text(run, "review.md", "") == "hello\n")
+  __io_println(path_relative_to(run_artifact_transcript_dir(run), run.dir))
+  __io_println(path_relative_to(run_artifact_transcript_path(run, "chat-llm"), run.dir))
+  let reopened = run_artifacts_from_dir("eval", run.dir)
+  __io_println(reopened.run_id)
+  __io_println(path_relative_to(reopened.paths.agent_result, reopened.dir))
+  let escaped = try {
+    run_artifact_path(run, "../secret.json")
+  }
+  __io_println(!is_ok(escaped))
+  let missing_root = path_join(root, "missing-root")
+  __io_println(len(run_artifacts_list("eval", {root: missing_root})) == 0)
+  let empty_root = path_join(root, "empty-root")
+  harness.fs.mkdir(path_join(empty_root, "eval"))
+  __io_println(len(run_artifacts_list("eval", {root: empty_root})) == 0)
+  let run_b = run_artifacts_open("eval", {root: root, run_id: "run-b"})
+  run_artifact_write_json(run_b, "facts.json", {status: "ok"})
+  let listed = run_artifacts_list("eval", {root: root, limit: 10})
+  __io_println(len(listed))
+  __io_println(listed[0].modified >= listed[1].modified)
+  __io_println(len(run_artifacts_list("eval", {root: root, limit: 1})))
+  __io_println(len(run_artifacts_list("eval", {root: root, limit: 0})))
+  let namespaced = run_artifacts_open("eval", {root: root, namespace: "fleet", run_id: "run-c"})
+  __io_println(path_relative_to(namespaced.dir, root))
+  harness.fs.delete(root)
+}

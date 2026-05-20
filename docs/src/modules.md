@@ -815,6 +815,56 @@ log(read_json(path).status)
 log(relative_path(temp_dir(), path))
 ```
 
+### std/run_artifacts
+
+Directory-backed run artifact helpers for harness-local outputs. The default
+root is `runtime_paths().run_root`, so `HARN_RUN_DIR` and the active runtime
+root keep working; pass `{root}` when a host owns a different artifact store.
+
+These helpers do not define a second run-record schema. Keep using
+`workflow_result_persist`, `run_record_save`, `run_record_load`, and portal run
+records for canonical workflow history and portal inspection. Use artifact
+directories for local harness files such as facts, audits, reviews, agent
+results, and transcript sidecars. When a run needs to leave the machine, export
+a portable session bundle instead of treating the raw artifact directory as the
+support boundary.
+
+| Function | Description |
+|---|---|
+| `run_artifacts_open(kind, options?)` | Create or resolve `.harn-runs/<kind>/<run_id>` under `{root?, namespace?, run_id?}` |
+| `run_artifacts_from_dir(kind, dir)` | Reconstruct the basic run artifact shape for recovery/chat/review flows without writing |
+| `run_artifacts_list(kind, options?)` | List recent run directories newest-first with `{root?, namespace?, limit?}` |
+| `run_artifact_path(run, name)` | Resolve a relative artifact path inside `run.dir`, rejecting absolute paths and `..` traversal |
+| `run_artifact_write_json(run, name, value, options?)` | Write JSON through `std/fs.write_json` conventions |
+| `run_artifact_read_json(run, name, fallback?)` | Read JSON through `std/fs.read_json` fallback semantics |
+| `run_artifact_write_text(run, name, text, options?)` | Write text with parent-directory and trailing-newline behavior |
+| `run_artifact_read_text(run, name, fallback?)` | Read text with a fallback for missing or unreadable files |
+| `run_artifact_transcript_dir(run, name?)` | Return a transcript sidecar directory such as `agent-llm` or `chat-llm` |
+| `run_artifact_transcript_path(run, name?)` | Return `<transcript-dir>/llm_transcript.jsonl` inside the run directory |
+
+`run_artifacts_open` and `run_artifacts_from_dir` return a dict shaped like
+`{kind, namespace, run_id, root, dir, modified?, paths}`. `paths` contains the
+standard local artifact names: `facts`, `audit`, `review`, `agent_result`,
+`agent_trace`, and `agent_llm_transcript`.
+
+```harn
+import {
+  run_artifact_transcript_path,
+  run_artifact_write_json,
+  run_artifacts_from_dir,
+  run_artifacts_open,
+} from "std/run_artifacts"
+
+let run = run_artifacts_open("eval", {run_id: "smoke-001"})
+run_artifact_write_json(run, "facts.json", {status: "ok"}, {pretty: true})
+run_artifact_write_json(run, "agent-result.json", {summary: "complete"})
+
+let transcript = run_artifact_transcript_path(run)
+let reopened = run_artifacts_from_dir("eval", run.dir)
+log(reopened.paths.facts)
+log(transcript)
+```
+
 ### std/os
 
 Environment and host diagnostic helpers:
