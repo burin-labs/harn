@@ -12,7 +12,7 @@ pipeline test(task) {
     "pipeline default(task) {\n  let envelope = json_parse(task)\n  __io_println(json_stringify({trace_id: envelope.event.trace_id, target_agent: envelope.target_agent}))\n}\n",
   )
   let repo_root = exec("git", "rev-parse", "--show-toplevel").stdout.trim()
-  let harn_bin = harness.env.get_or("HARN_CONFORMANCE_HARN_BIN", resolve_harn_bin(repo_root))
+  let harn_bin = harness.env.get_or("HARN_CONFORMANCE_HARN_BIN", resolve_harn_bin(harness, repo_root))
   assert(harness.fs.exists(harn_bin), "missing built harn binary at " + harn_bin)
   let start = shell_at(
     root,
@@ -22,7 +22,7 @@ pipeline test(task) {
   let pid = start.stdout.trim()
   assert(start.success, "failed to start A2A receiver")
   assert(pid != "", "missing A2A receiver pid")
-  let receiver_url = wait_for_a2a_server_url(path_join(root, "receiver.log"))
+  let receiver_url = wait_for_a2a_server_url(harness, path_join(root, "receiver.log"))
   assert(receiver_url != nil, "A2A receiver did not start")
   let port_matches = regex_captures(r":(\d+)$", receiver_url)
   assert(len(port_matches) == 1, "A2A receiver URL did not include a port: " + receiver_url)

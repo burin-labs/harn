@@ -14,7 +14,7 @@ pipeline test(task) {
     "import \"std/triggers\"\n\npub fn on_task(event: TriggerEvent) {\n  log(event.kind)\n}\n",
   )
   let repo_root = exec("git", "rev-parse", "--show-toplevel").stdout.trim()
-  let harn_bin = resolve_harn_bin(repo_root)
+  let harn_bin = resolve_harn_bin(harness, repo_root)
   assert(harness.fs.exists(harn_bin), "missing built harn binary at " + harn_bin)
   let start = shell_at(
     root,
@@ -25,7 +25,7 @@ pipeline test(task) {
   let pid = start.stdout.trim()
   assert(start.success, "failed to start orchestrator")
   assert(pid != "", "missing orchestrator pid")
-  let url = wait_for_listener_url(path_join(root, "orchestrator.log"))
+  let url = wait_for_listener_url(harness, path_join(root, "orchestrator.log"))
   assert(url != nil, "listener URL did not appear in log")
   let body = "{\"kind\":\"a2a.task.received\",\"task\":{\"id\":\"task-123\"}}"
   let json_headers = {"Content-Type": "application/json"}

@@ -6,7 +6,7 @@ pipeline default() {
   let base = path_join(harness.fs.temp_dir(), "harn-orchestrator-hot-reload-" + unique)
   let workspace = path_join(base, "workspace")
   let state_dir = path_join(base, "state")
-  let binary = harness.env.get_or("HARN_CONFORMANCE_HARN_BIN", resolve_harn_bin(repo_root))
+  let binary = harness.env.get_or("HARN_CONFORMANCE_HARN_BIN", resolve_harn_bin(harness, repo_root))
   assert(harness.fs.exists(binary), "missing built harn binary at " + binary)
   let script = """
     set -eu

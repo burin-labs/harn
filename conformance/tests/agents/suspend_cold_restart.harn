@@ -31,7 +31,7 @@ fn first_snapshot_line(text) {
 
 pipeline main() {
   let repo_root = exec("git", "rev-parse", "--show-toplevel").stdout.trim()
-  let harn_bin = harness.env.get_or("HARN_CONFORMANCE_HARN_BIN", resolve_harn_bin(repo_root))
+  let harn_bin = harness.env.get_or("HARN_CONFORMANCE_HARN_BIN", resolve_harn_bin(harness, repo_root))
   let root = path_join(harness.fs.temp_dir(), "harn-suspend-cold-restart-" + uuid_v7())
   harness.fs.mkdir(root)
   let script = path_join(root, "cold_restart_suspend.harn")

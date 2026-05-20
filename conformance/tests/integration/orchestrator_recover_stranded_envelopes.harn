@@ -32,7 +32,7 @@ pipeline test(task) {
     "import \"std/triggers\"\n\npub fn on_task(event: TriggerEvent) -> string {\n  return event.kind\n}\n",
   )
   let repo_root = exec("git", "rev-parse", "--show-toplevel").stdout.trim()
-  let harn_bin = resolve_harn_bin(repo_root)
+  let harn_bin = resolve_harn_bin(harness, repo_root)
   assert(harness.fs.exists(harn_bin), "missing built harn binary at " + harn_bin)
   let crash_start = shell_at(
     root,
@@ -42,7 +42,7 @@ pipeline test(task) {
   )
   let crash_pid = crash_start.stdout.trim()
   assert(crash_start.success && crash_pid != "", "failed to start crashing orchestrator")
-  let crash_url = wait_for_listener_url(path_join(root, "orchestrator-crash.log"))
+  let crash_url = wait_for_listener_url(harness, path_join(root, "orchestrator-crash.log"))
   assert(crash_url != nil, "crashing listener URL did not appear in log")
   assert(wait_for_readyz(harness, crash_url, crash_pid), "crashing listener did not become ready")
   let response = harness.net
@@ -73,7 +73,7 @@ pipeline test(task) {
   )
   let restart_pid = restart.stdout.trim()
   assert(restart.success && restart_pid != "", "failed to restart orchestrator")
-  let restart_url = wait_for_listener_url(path_join(root, "orchestrator-restart.log"))
+  let restart_url = wait_for_listener_url(harness, path_join(root, "orchestrator-restart.log"))
   assert(restart_url != nil, "restart listener URL did not appear in log")
   assert(wait_for_readyz(harness, restart_url, restart_pid), "restart listener did not become ready")
   let state_dir = path_join(root, "state")

@@ -8,7 +8,7 @@ fn first_group(pattern, text) {
 }
 
 /** Resolve the built Harn CLI for conformance fixtures that spawn subprocesses. */
-pub fn resolve_harn_bin(repo_root) {
+pub fn resolve_harn_bin(harness: Harness, repo_root) {
   let env_target_dir = harness.env.get("CARGO_TARGET_DIR")
   if env_target_dir {
     return path_join(env_target_dir, "debug/harn")
@@ -31,7 +31,7 @@ pub fn process_alive(pid) {
 }
 
 /** Poll a subprocess log for a regex match and return the first capture group. */
-pub fn wait_for_log_match(log_path, pattern) {
+pub fn wait_for_log_match(harness: Harness, log_path, pattern) {
   var attempts = 0
   while attempts < 300 {
     if harness.fs.exists(log_path) {
@@ -48,7 +48,7 @@ pub fn wait_for_log_match(log_path, pattern) {
 }
 
 /** Poll a subprocess log until it contains the expected text. */
-pub fn wait_for_log_contains(log_path, needle) {
+pub fn wait_for_log_contains(harness: Harness, log_path, needle) {
   var attempts = 0
   while attempts < 300 {
     if harness.fs.exists(log_path) {
@@ -64,13 +64,13 @@ pub fn wait_for_log_contains(log_path, needle) {
 }
 
 /** Wait for the orchestrator HTTP listener readiness line and return its URL. */
-pub fn wait_for_listener_url(log_path) {
-  return wait_for_log_match(log_path, "\\[harn\\] HTTP listener ready on (\\S+)")
+pub fn wait_for_listener_url(harness: Harness, log_path) {
+  return wait_for_log_match(harness, log_path, "\\[harn\\] HTTP listener ready on (\\S+)")
 }
 
 /** Wait for the A2A server readiness line and return its advertised URL. */
-pub fn wait_for_a2a_server_url(log_path) {
-  return wait_for_log_match(log_path, "Harn A2A server listening on (\\S+)")
+pub fn wait_for_a2a_server_url(harness: Harness, log_path) {
+  return wait_for_log_match(harness, log_path, "Harn A2A server listening on (\\S+)")
 }
 
 /**

@@ -38,7 +38,7 @@ pipeline default(task) {
     "import \"std/triggers\"\n\npub fn on_task(event: TriggerEvent) -> dict {\n  return {ok: true, event_id: event.id}\n}\n",
   )
   let repo_root = exec("git", "rev-parse", "--show-toplevel").stdout.trim()
-  let harn_bin = harness.env.get_or("HARN_CONFORMANCE_HARN_BIN", resolve_harn_bin(repo_root))
+  let harn_bin = harness.env.get_or("HARN_CONFORMANCE_HARN_BIN", resolve_harn_bin(harness, repo_root))
   assert(harness.fs.exists(harn_bin), "missing built harn binary at " + harn_bin)
   let fire = exec(
     harn_bin,

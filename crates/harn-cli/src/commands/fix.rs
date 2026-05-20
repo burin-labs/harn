@@ -487,7 +487,7 @@ fn collect_file_candidates(
         &options,
     );
     for diag in &lint_diagnostics {
-        let Some((repair, edits)) = lint_candidate_repair(diag, &source, &program) else {
+        let Some((repair, edits)) = lint_candidate_repair(diag, file, &source, &program) else {
             continue;
         };
         if !repair_allowed(&repair, safety_ceiling) {
@@ -510,11 +510,17 @@ fn collect_file_candidates(
 
 fn lint_candidate_repair(
     diag: &harn_lint::LintDiagnostic,
+    file: &Path,
     source: &str,
     program: &[SNode],
 ) -> Option<(Repair, Vec<FixEdit>)> {
     if ambient_capability_handle(diag.code).is_some() {
-        return synthesize_ambient_capability_repair(diag, source, program);
+        return synthesize_ambient_capability_repair(
+            diag,
+            source,
+            program,
+            commands::check::path_is_stdlib_source(file),
+        );
     }
     let repair = diag.repair()?;
     Some((repair, diag.fix.clone().unwrap_or_default()))
@@ -524,6 +530,7 @@ fn synthesize_ambient_capability_repair(
     diag: &harn_lint::LintDiagnostic,
     source: &str,
     program: &[SNode],
+    allow_stdlib_public_global: bool,
 ) -> Option<(Repair, Vec<FixEdit>)> {
     ambient_capability_handle(diag.code)?;
     let infos = collect_callable_infos(program, source);
@@ -541,7 +548,7 @@ fn synthesize_ambient_capability_repair(
             && call.span.start == diag.span.start
             && call.span.end == diag.span.end
     })?;
-    let owner_uses_global_harness = should_use_global_harness(owner);
+    let owner_uses_global_harness = should_use_global_harness(owner, allow_stdlib_public_global);
     let replacement_binding = if owner_uses_global_harness {
         Some("harness".to_string())
     } else {
@@ -562,7 +569,12 @@ fn synthesize_ambient_capability_repair(
         return Some((Repair::from_template(diag.code.repair_template()?), edits));
     }
 
-    let needed = propagate_harness_requirements(&infos, &reverse_callers, owner_idx);
+    let needed = propagate_harness_requirements(
+        &infos,
+        &reverse_callers,
+        owner_idx,
+        allow_stdlib_public_global,
+    );
     let primary_call_start = owner
         .ambient_capability_calls
         .iter()
@@ -589,7 +601,7 @@ fn synthesize_ambient_capability_repair(
             let caller = &infos[caller_idx];
             let arg_name = match caller.harness_binding.as_deref() {
                 Some(binding) => binding,
-                None if should_use_global_harness(caller) => "harness",
+                None if should_use_global_harness(caller, allow_stdlib_public_global) => "harness",
                 None if needed.contains(&caller_idx) => harness_param_name_for_insert(caller)?,
                 None => continue,
             };
@@ -607,14 +619,14 @@ fn synthesize_ambient_capability_repair(
     ))
 }
 
-fn should_use_global_harness(info: &CallableInfo) -> bool {
-    // Public Harn APIs need to keep their source-level signature stable while
-    // their internals migrate off ambient builtins. The VM installs `harness`
-    // as a global before execution, so using that binding is compatible with
-    // existing callers. Pipeline bodies are modeled separately with an
-    // explicit harness binding because their runtime entry parameters are not
-    // invocation parameters.
-    info.is_pub && !info.param_names.contains("harness")
+fn should_use_global_harness(info: &CallableInfo, allow_stdlib_public_global: bool) -> bool {
+    // Canonical stdlib APIs need source-level signature stability: adding a
+    // required Harness parameter would break every user import at once. The
+    // VM installs the runtime harness global before execution, so stdlib
+    // internals can migrate off ambient builtins without changing public API.
+    // Non-stdlib public helpers must thread Harness explicitly; that keeps
+    // the fixer from using a broad "public means global harness" catch-all.
+    allow_stdlib_public_global && info.is_pub && !info.param_names.contains("harness")
 }
 
 fn ambient_capability_handle(code: Code) -> Option<&'static str> {
@@ -830,6 +842,7 @@ fn propagate_harness_requirements(
     infos: &[CallableInfo],
     reverse_callers: &[Vec<(usize, usize)>],
     owner_idx: usize,
+    allow_stdlib_public_global: bool,
 ) -> BTreeSet<usize> {
     let mut needed = BTreeSet::from([owner_idx]);
     let mut changed = true;
@@ -839,7 +852,7 @@ fn propagate_harness_requirements(
         for callee_idx in snapshot {
             for &(caller_idx, _) in &reverse_callers[callee_idx] {
                 if infos[caller_idx].harness_binding.is_none()
-                    && !should_use_global_harness(&infos[caller_idx])
+                    && !should_use_global_harness(&infos[caller_idx], allow_stdlib_public_global)
                     && infos[caller_idx].can_add_harness_param
                     && needed.insert(caller_idx)
                 {
@@ -1540,12 +1553,14 @@ mod tests {
     }
 
     #[test]
-    fn apply_scope_local_preserves_public_signature_with_global_harness() {
+    fn apply_scope_local_preserves_stdlib_public_signature_with_global_harness() {
         let temp = tempfile::TempDir::new().unwrap();
-        let script = temp.path().join("public_helper.harn");
+        let stdlib_dir = temp.path().join("crates/harn-stdlib/src/stdlib");
+        fs::create_dir_all(&stdlib_dir).unwrap();
+        let script = stdlib_dir.join("public_helper.harn");
         fs::write(
             &script,
-            "/** Public API. */\npub fn helper(path: string) {\n  return read_file(path)\n}\n\npipeline default() {\n  helper(\"notes.txt\")\n}\n",
+            "/**\n * Public API.\n *\n * @effects: []\n * @allocation: heap\n * @errors: []\n * @api_stability: stable\n * @example: helper(path)\n */\npub fn helper(path: string) {\n  return read_file(path)\n}\n\npipeline default() {\n  helper(\"notes.txt\")\n}\n",
         )
         .unwrap();
 
@@ -1574,7 +1589,7 @@ mod tests {
     }
 
     #[test]
-    fn apply_scope_local_threads_private_helper_from_public_api() {
+    fn apply_surface_changing_threads_non_stdlib_public_api() {
         let temp = tempfile::TempDir::new().unwrap();
         let script = temp.path().join("public_calls_private.harn");
         fs::write(
@@ -1583,23 +1598,23 @@ mod tests {
         )
         .unwrap();
 
-        let result = apply_repairs(&script, RepairSafety::ScopeLocal, false).unwrap();
+        let result = apply_repairs(&script, RepairSafety::SurfaceChanging, false).unwrap();
         assert!(
             result.applied.iter().any(|repair| {
                 repair.diagnostic_code == Code::LintAmbientFsBuiltin.to_string()
-                    && repair.repair_id == "bindings/thread-harness-fs"
+                    && repair.repair_id == "bindings/thread-harness-needs-param"
             }),
             "{result:#?}"
         );
 
         let updated = fs::read_to_string(&script).unwrap();
         assert!(
-            updated.contains("pub fn load(path: string)"),
-            "public signature should remain stable: {updated}"
+            updated.contains("pub fn load(harness: Harness, path: string)"),
+            "non-stdlib public API should gain an explicit harness parameter: {updated}"
         );
         assert!(
             updated.contains("return load_inner(harness, path)"),
-            "public caller should thread the VM harness global: {updated}"
+            "public caller should thread its explicit harness parameter: {updated}"
         );
         assert!(
             updated.contains("fn load_inner(harness: Harness, path: string)"),
@@ -1608,6 +1623,10 @@ mod tests {
         assert!(
             updated.contains("return harness.fs.read_text(path)"),
             "private helper should migrate ambient fs call: {updated}"
+        );
+        assert!(
+            updated.contains("load(harness, \"notes.txt\")"),
+            "pipeline caller should pass the runtime harness into the public API: {updated}"
         );
     }
 

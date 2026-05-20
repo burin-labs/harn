@@ -25,7 +25,7 @@ pipeline test(task) {
       + "\"\n\npub fn on_tick(event: TriggerEvent) {\n  log(event.kind)\n}\n\npub fn flaky_issue(event: TriggerEvent) -> dict {\n  if !file_exists(replay_marker) {\n    throw \"replay-me:\" + event.kind\n  }\n  return {kind: event.kind, event_id: event.id}\n}\n\npub fn always_fail(event: TriggerEvent) -> any {\n  throw \"discard-me:\" + event.kind\n}\n",
   )
   let repo_root = exec("git", "rev-parse", "--show-toplevel").stdout.trim()
-  let harn_bin = resolve_harn_bin(repo_root)
+  let harn_bin = resolve_harn_bin(harness, repo_root)
   assert(harness.fs.exists(harn_bin), "missing built harn binary at " + harn_bin)
   let start = shell_at(
     root,
@@ -36,10 +36,11 @@ pipeline test(task) {
   let pid = start.stdout.trim()
   assert(start.success, "failed to start orchestrator")
   assert(pid != "", "missing orchestrator pid")
-  let url = wait_for_listener_url(path_join(root, "orchestrator.log"))
+  let url = wait_for_listener_url(harness, path_join(root, "orchestrator.log"))
   assert(url != nil, "listener URL did not appear in log")
   assert(
     wait_for_log_contains(
+      harness,
       path_join(root, "orchestrator.log"),
       "activated connectors: a2a-push(2), cron(1)",
     ),
