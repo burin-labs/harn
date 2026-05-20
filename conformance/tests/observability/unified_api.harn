@@ -1,0 +1,35 @@
+import { obs } from "std/observability"
+
+pipeline default() {
+  let o = obs()
+  o.reset()
+  o.configure({backend: o.Backend.test()})
+  let result = o
+    .span(
+    "plan_review",
+    {pr_number: 1915},
+    { ->
+      o.log("starting review", "info", {phase: "start"})
+      o.metric("review_duration_ms", 42, {unit: "ms"})
+      return "done"
+    },
+  )
+  let emitted = o.events_take()
+  println(result)
+  println(len(emitted))
+  println(emitted[0].payload.kind)
+  println(emitted[0].payload.fields.pr_number)
+  println(emitted[1].payload.kind)
+  println(emitted[1].payload.fields.pr_number)
+  println(emitted[2].payload.kind)
+  println(emitted[2].payload.fields.span_name)
+  println(emitted[2].payload.trace_id == emitted[0].payload.trace_id)
+  o.configure({backend: o.Backend.test()})
+  let span = o.start_span("imperative", {request_id: "r1"})
+  o.log_in_span(span, "manual", "warn", {local: true})
+  o.end_span(span)
+  let manual = o.events_take()[0].payload
+  println(manual.level)
+  println(manual.fields.request_id)
+  println(manual.fields.local)
+}

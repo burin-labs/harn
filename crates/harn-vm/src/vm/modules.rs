@@ -305,7 +305,10 @@ impl Vm {
         Box::pin(async move {
             let _import_span = ScopeSpan::new(crate::tracing::SpanKind::Import, path.to_string());
 
-            if let Some(module) = path.strip_prefix("std/") {
+            let stdlib_module = path
+                .strip_prefix("std/")
+                .or_else(|| (path == "observability").then_some("observability"));
+            if let Some(module) = stdlib_module {
                 if let Some(source) = crate::stdlib_modules::get_stdlib_source(module) {
                     let synthetic = PathBuf::from(format!("<stdlib>/{module}.harn"));
                     if self.imported_paths.contains(&synthetic) {
@@ -383,7 +386,10 @@ impl Vm {
     /// look up the already-loaded source module after `execute_import`
     /// has populated [`Vm::module_cache`].
     fn cache_key_for_import(&self, path: &str) -> PathBuf {
-        if let Some(module) = path.strip_prefix("std/") {
+        if let Some(module) = path
+            .strip_prefix("std/")
+            .or_else(|| (path == "observability").then_some("observability"))
+        {
             return PathBuf::from(format!("<stdlib>/{module}.harn"));
         }
         let base = self
@@ -485,7 +491,10 @@ impl Vm {
     ) -> Result<BTreeMap<String, Rc<VmClosure>>, VmError> {
         self.execute_import(import_path, None).await?;
 
-        if let Some(module) = import_path.strip_prefix("std/") {
+        if let Some(module) = import_path
+            .strip_prefix("std/")
+            .or_else(|| (import_path == "observability").then_some("observability"))
+        {
             let synthetic = PathBuf::from(format!("<stdlib>/{module}.harn"));
             let loaded = self.module_cache.get(&synthetic).cloned().ok_or_else(|| {
                 VmError::Runtime(format!(

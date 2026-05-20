@@ -29,6 +29,16 @@ condensed series summaries instead of full per-patch history.
   can exercise the matcher without touching the network. Tracked
   through the E4.9 row of epic #1765 and lays the runtime groundwork
   for the harn-cloud `workspaces.network_policy` schema.
+- **Unified user observability API (#1915).** Adds
+  `std/observability` with `obs()` / direct `span`, `log`, `metric`,
+  and `event` helpers over the existing VM span machinery. Runtime
+  configuration uses named backend handles and factories for
+  `Backend.auto`, OTel, Splunk HEC, Honeycomb, pretty stderr, and
+  `compose([...])`, with routing rules by `kind`, `level`, or default
+  backend. Span attributes merge into emitted log and metric fields,
+  `import { obs } from "observability"` is accepted as the short stdlib
+  alias, and conformance covers the unified API, backend fan-out, and
+  routing payload shapes.
 
 ## v0.8.27
 

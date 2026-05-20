@@ -2660,6 +2660,14 @@ Three concentric surfaces:
   - `when(predicate, callback)` — only invoke when
     `predicate(harness, return_value)` is truthy; otherwise pass the
     inbound value through unchanged.
+- `std/observability` exports `obs()`, a unified facade for user-space
+  spans, logs, metrics, and structured events. Configure once with
+  `import { obs } from "observability"` then
+  `obs().configure({backend: obs().Backend.auto})`, use
+  `obs().span("name", attrs, { -> ... })` for scoped auto-close, or
+  `start_span` / `log_in_span` / `end_span` for imperative flows.
+  Backends include OTel, Splunk HEC, Honeycomb, pretty stderr,
+  `compose([...])`, and env-driven `auto`.
 - `std/lifecycle/on_budget` exports three named callback strategies for
   the `OnBudgetThreshold` event. Each takes `(harness, budget_state)`
   and composes with the combinators above:

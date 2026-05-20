@@ -1,0 +1,21 @@
+import { obs } from "std/observability"
+
+pipeline default() {
+  let o = obs()
+  o.reset()
+  o
+    .configure(
+    {
+      backend: o.Backend
+        .compose(
+        [o.Backend.otel("http://collector.example"), o.Backend.honeycomb("key", "dataset")],
+      ),
+    },
+  )
+  o.log("fanout", "info", {component: "compose"})
+  let emitted = o.events_take()
+  println(len(emitted))
+  println(emitted[0].backend)
+  println(emitted[1].backend)
+  println(emitted[1].payload.component)
+}

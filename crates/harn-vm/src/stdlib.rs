@@ -45,6 +45,7 @@ mod multipart;
 mod net_policy;
 mod oauth_dynreg;
 mod oauth_storage;
+mod observability;
 mod options;
 mod path;
 pub(crate) mod pool;
@@ -148,6 +149,7 @@ pub fn register_io_stdlib(vm: &mut Vm) {
     testbench::register_testbench_builtins(vm);
     project::register_project_builtins(vm);
     tracing::register_tracing_builtins(vm);
+    observability::register_observability_builtins(vm);
     tui::register_tui_builtins(vm);
 }
 
@@ -262,6 +264,7 @@ pub fn reset_stdlib_state() {
     json::reset_json_state();
     json_stream::reset_json_stream_state();
     host::reset_host_state();
+    observability::reset_observability_state();
     crate::egress::reset_egress_policy_for_host();
     hitl::reset_hitl_state();
     crate::http::reset_http_state();

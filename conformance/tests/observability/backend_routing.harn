@@ -1,0 +1,31 @@
+import { obs } from "std/observability"
+
+pipeline default() {
+  let o = obs()
+  o.reset()
+  o
+    .configure(
+    {
+      backends: {
+        otel: o.Backend.otel("http://collector.example"),
+        splunk: o.Backend.splunk_hec("http://splunk.example", "token"),
+        honeycomb: o.Backend.honeycomb("key", "dataset"),
+        pretty: o.Backend.pretty_stderr,
+      },
+      backend: o.Backend.compose([o.Backend.otel("http://collector.example"), o.Backend.pretty_stderr]),
+      routes: [{level: "error", backend: "splunk"}, {kind: "metric", backend: "honeycomb"}, {default: "otel"}],
+    },
+  )
+  o.log("normal", "info", {component: "router"})
+  o.log("bad", "error", {component: "router"})
+  o.metric("requests", 7, {route: "/v1"})
+  let emitted = o.events_take()
+  println(len(emitted))
+  println(emitted[0].backend)
+  println(emitted[0].payload.resourceLogs[0].scopeLogs[0].logRecords[0].body)
+  println(emitted[1].backend)
+  println(emitted[1].payload.event.level)
+  println(emitted[2].backend)
+  println(emitted[2].payload.name)
+  println(emitted[2].payload.route)
+}

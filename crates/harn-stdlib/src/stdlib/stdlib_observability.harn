@@ -1,0 +1,260 @@
+/**
+ * std/observability - unified user-facing spans, logs, and metrics.
+ *
+ * The module exposes direct functions (`span`, `log`, `metric`,
+ * `configure`) plus `obs()`, a namespace record for call sites that
+ * prefer `obs().span(...)` style. Backend factories are named values
+ * returned by `backends()` / `obs().Backend`, so runtime configuration
+ * chooses routing once instead of making every emission pick a wire
+ * format.
+ */
+type ObsBackend = dict
+
+type ObsSpan = dict
+
+fn __backend(kind: string, fields: dict = {}) -> ObsBackend {
+  let id = fields?.id ?? kind
+  return fields + {kind: kind, id: id}
+}
+
+fn __span_fields(span: ObsSpan, fields: dict) -> dict {
+  let attrs = span?.attrs ?? {}
+  return attrs + fields
+}
+
+/**
+ * backends returns backend factories and ready handles for
+ * observability configuration. `auto` selects OTel, Splunk HEC,
+ * Honeycomb, or pretty stderr from process environment in that order.
+ *
+ * @effects: []
+ * @allocation: heap
+ * @errors: []
+ * @api_stability: experimental
+ * @example: configure({backend: backends().auto})
+ */
+pub fn backends() -> dict {
+  return {
+    auto: __backend("auto"),
+    pretty_stderr: __backend("pretty_stderr"),
+    otel: { endpoint = nil, id = "otel" -> __backend("otel", {endpoint: endpoint, id: id}) },
+    splunk_hec: { endpoint = nil, token = nil, id = "splunk" -> __backend("splunk_hec", {endpoint: endpoint, token: token, id: id}) },
+    honeycomb: { api_key = nil, dataset = nil, id = "honeycomb" -> __backend("honeycomb", {api_key: api_key, dataset: dataset, id: id}) },
+    compose: { items, id = "compose" -> __backend("compose", {backends: items, id: id}) },
+    test: { id = "test" -> __backend("test", {id: id}) },
+  }
+}
+
+/**
+ * configure installs process-local observability routing for subsequent
+ * `span`, `log`, and `metric` calls. Supported keys are `backend`,
+ * `backends`, `routes`, and `audit_to_pretty_stderr`.
+ *
+ * @effects: [host]
+ * @allocation: heap
+ * @errors: [invalid_argument]
+ * @api_stability: experimental
+ * @example: configure({backend: backends().auto})
+ */
+pub fn configure(config: dict = {}) {
+  __obs_configure(config)
+}
+
+/**
+ * auto_backend returns the concrete backend selected by `Backend.auto`
+ * for the current process environment.
+ *
+ * @effects: [env]
+ * @allocation: heap
+ * @errors: []
+ * @api_stability: experimental
+ * @example: auto_backend()
+ */
+pub fn auto_backend() -> ObsBackend {
+  return __obs_auto_backend()
+}
+
+/**
+ * start_span opens a user observability span and returns an opaque span
+ * handle. Pair it with `end_span`, or use `span(name, attrs, callback)`
+ * for callback-scoped auto-close.
+ *
+ * @effects: [host]
+ * @allocation: heap
+ * @errors: [invalid_argument]
+ * @api_stability: experimental
+ * @example: let s = start_span("review", {pr: 1915})
+ */
+pub fn start_span(name: string, attrs: dict = {}) -> ObsSpan {
+  return __obs_start_span(name, attrs)
+}
+
+/**
+ * end_span closes a span handle returned by `start_span`.
+ *
+ * @effects: [host]
+ * @allocation: heap
+ * @errors: []
+ * @api_stability: experimental
+ * @example: end_span(s)
+ */
+pub fn end_span(span: ObsSpan) {
+  __obs_end_span(span)
+}
+
+/**
+ * span either opens an imperative span (`callback == nil`) or runs a
+ * callback inside a span and closes it on return or throw.
+ *
+ * @effects: [host]
+ * @allocation: heap
+ * @errors: [invalid_argument]
+ * @api_stability: experimental
+ * @example: span("review", {pr: 1915}, { -> work() })
+ */
+pub fn span(name: string, attrs: dict = {}, callback = nil) {
+  let handle = start_span(name, attrs)
+  if callback == nil {
+    return handle
+  }
+  try {
+    let result = callback()
+    end_span(handle)
+    return result
+  } catch (e) {
+    end_span(handle)
+    throw e
+  }
+}
+
+/**
+ * log emits a structured log event through the configured backend.
+ *
+ * @effects: [host]
+ * @allocation: heap
+ * @errors: []
+ * @api_stability: experimental
+ * @example: log("starting", "info", {phase: "review"})
+ */
+pub fn log(message: string, level: string = "info", fields: dict = {}) {
+  return __obs_emit({kind: "log", message: message, level: level, fields: fields})
+}
+
+/**
+ * metric emits a numeric measurement through the configured backend.
+ *
+ * @effects: [host]
+ * @allocation: heap
+ * @errors: []
+ * @api_stability: experimental
+ * @example: metric("review_duration_ms", 42, {pr: 1915})
+ */
+pub fn metric(name: string, value, fields: dict = {}) {
+  return __obs_emit({kind: "metric", name: name, value: value, fields: fields})
+}
+
+/**
+ * event emits an arbitrary structured observation. It is the shared
+ * primitive underneath logs, metrics, and span lifecycle events.
+ *
+ * @effects: [host]
+ * @allocation: heap
+ * @errors: []
+ * @api_stability: experimental
+ * @example: event({kind: "audit", name: "policy.decision"})
+ */
+pub fn event(record: dict) {
+  return __obs_emit(record)
+}
+
+/**
+ * log_in_span emits a log correlated with an imperative span handle
+ * without requiring that span to be current on the stack.
+ *
+ * @effects: [host]
+ * @allocation: heap
+ * @errors: []
+ * @api_stability: experimental
+ * @example: log_in_span(span, "child event")
+ */
+pub fn log_in_span(span: ObsSpan, message: string, level: string = "info", fields: dict = {}) {
+  return __obs_emit(
+    {
+      kind: "log",
+      message: message,
+      level: level,
+      fields: __span_fields(span, fields),
+      trace_id: span?.trace_id,
+      span_id: span?.span_id,
+    },
+  )
+}
+
+/**
+ * events returns the process-local emitted payload buffer. It is meant
+ * for tests and embedded hosts that want to pull observations directly.
+ *
+ * @effects: []
+ * @allocation: heap
+ * @errors: []
+ * @api_stability: experimental
+ * @example: events()
+ */
+pub fn events() -> list {
+  return __obs_events()
+}
+
+/**
+ * events_take drains the process-local emitted payload buffer.
+ *
+ * @effects: []
+ * @allocation: heap
+ * @errors: []
+ * @api_stability: experimental
+ * @example: events_take()
+ */
+pub fn events_take() -> list {
+  return __obs_events_take()
+}
+
+/**
+ * reset clears observability configuration, open spans, and captured
+ * emissions for the current VM thread.
+ *
+ * @effects: [host]
+ * @allocation: heap
+ * @errors: []
+ * @api_stability: experimental
+ * @example: reset()
+ */
+pub fn reset() {
+  __obs_reset()
+}
+
+/**
+ * obs returns the ergonomic namespace record for user code that wants
+ * `obs().span(...)`, `obs().Backend.auto`, and matching direct helpers.
+ *
+ * @effects: []
+ * @allocation: heap
+ * @errors: []
+ * @api_stability: experimental
+ * @example: let o = obs(); o.log("ready")
+ */
+pub fn obs() -> dict {
+  return {
+    Backend: backends(),
+    configure: { config = {} -> configure(config) },
+    auto_backend: { -> auto_backend() },
+    start_span: { name, attrs = {} -> start_span(name, attrs) },
+    end_span: { handle -> end_span(handle) },
+    span: { name, attrs = {}, callback = nil -> span(name, attrs, callback) },
+    log: { message, level = "info", fields = {} -> log(message, level, fields) },
+    log_in_span: { handle, message, level = "info", fields = {} -> log_in_span(handle, message, level, fields) },
+    metric: { name, value, fields = {} -> metric(name, value, fields) },
+    event: { record -> event(record) },
+    events: { -> events() },
+    events_take: { -> events_take() },
+    reset: { -> reset() },
+  }
+}
