@@ -1264,12 +1264,13 @@ async fn truncate_session(
             messages.truncate(keep_first);
         }
         let canceled_task_id = inner.active_task_by_session.remove(&session_id);
+        let now = now_rfc3339();
         let canceled_task = canceled_task_id.and_then(|task_id| {
             let task = inner.tasks.get_mut(&task_id)?;
             if task.get("status").and_then(Value::as_str) != Some("CANCELED") {
                 task["status"] = json!("CANCELED");
-                task["updated_at"] = json!(now_rfc3339());
-                task["canceled_at"] = json!(now_rfc3339());
+                task["updated_at"] = json!(&now);
+                task["canceled_at"] = json!(&now);
             }
             Some((task_id, task.clone()))
         });
@@ -1279,7 +1280,7 @@ async fn truncate_session(
         if session.get("state").and_then(Value::as_str) != Some("CLOSED") {
             session["state"] = json!("IDLE");
         }
-        session["updated_at"] = json!(now_rfc3339());
+        session["updated_at"] = json!(now);
         (session.clone(), canceled_task)
     };
     if let Some((task_id, task)) = canceled_task {
@@ -1546,10 +1547,11 @@ async fn submit_task_inner(
             let mut inner = task_state.inner.lock().expect("api state poisoned");
             if let Some(task) = inner.tasks.get_mut(&task_id) {
                 if task.get("status").and_then(Value::as_str) != Some("CANCELED") {
+                    let now = now_rfc3339();
                     task["status"] = json!(status);
-                    task["updated_at"] = json!(now_rfc3339());
+                    task["updated_at"] = json!(&now);
                     if status == "COMPLETED" {
-                        task["completed_at"] = json!(now_rfc3339());
+                        task["completed_at"] = json!(now);
                         task["outcome_id"] = json!(format!("outcome_{task_id}"));
                     } else {
                         task["failure"] = json!({
@@ -1633,9 +1635,10 @@ async fn cancel_task(
                 .and_then(Value::as_str)
                 .unwrap_or_default()
                 .to_string();
+            let now = now_rfc3339();
             task["status"] = json!("CANCELED");
-            task["updated_at"] = json!(now_rfc3339());
-            task["canceled_at"] = json!(now_rfc3339());
+            task["updated_at"] = json!(&now);
+            task["canceled_at"] = json!(now);
             (session_id, task.clone())
         };
         inner.active_task_by_session.remove(&session_id);

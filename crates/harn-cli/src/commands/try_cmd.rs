@@ -1,9 +1,11 @@
 //! `harn try "<prompt>"` — minimal agent_loop convenience wrapper.
 //!
 //! Internally synthesizes a one-line Harn script and routes through the
-//! existing run pipeline. Once `with_retry` from `std/llm/handlers` lands
-//! (Task #5), the script can swap raw `llm_retries` for the composable
-//! caller; today we use the option directly.
+//! existing run pipeline. Uses the `llm_retries` agent_loop option
+//! directly because the synthesized script is meant to stay readable as
+//! a single line; users who want composable middleware should write a
+//! script with `with_retry(default_llm_caller(), {...})` from
+//! `std/llm/handlers` instead.
 
 use std::collections::HashSet;
 use std::fs;
@@ -24,11 +26,9 @@ pub(crate) async fn run(args: TryArgs) {
 
     let escaped = escape_for_harn_string(&args.prompt);
     let max_iters = args.max_iterations;
-    // TODO: switch to with_retry from std/llm/handlers once Task #5 lands.
-    // We deliberately omit a `tools` option here because the registered-tool
-    // contract requires schemas, not bare identifiers, and `harn try` is meant
-    // to be a zero-config smoke test. Users can drop into `harn run` for
-    // tool-augmented loops.
+    // No `tools` option: the registered-tool contract requires schemas,
+    // not bare identifiers, and `harn try` is meant to be a zero-config
+    // smoke test. Users can drop into `harn run` for tool-augmented loops.
     let script = format!(
         "let result = agent_loop(\"{escaped}\", nil, {{\n    max_iterations: {max_iters},\n    llm_retries: 2\n}})\nprintln(result.text)\n"
     );

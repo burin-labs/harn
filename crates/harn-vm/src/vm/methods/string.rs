@@ -36,10 +36,11 @@ impl crate::vm::Vm {
             "lowercase" => Ok(VmValue::String(Rc::from(s.to_lowercase()))),
             "uppercase" => Ok(VmValue::String(Rc::from(s.to_uppercase()))),
             "substring" => {
-                let start = args.first().and_then(|a| a.as_int()).unwrap_or(0);
                 let len = s.chars().count() as i64;
-                let start = start.max(0).min(len) as usize;
-                let end = args.get(1).and_then(|a| a.as_int()).unwrap_or(len).min(len) as usize;
+                let start = args.first().and_then(|a| a.as_int()).unwrap_or(0);
+                let end = args.get(1).and_then(|a| a.as_int()).unwrap_or(len);
+                let start = start.clamp(0, len) as usize;
+                let end = end.clamp(0, len) as usize;
                 let end = end.max(start);
                 let substr: String = s.chars().skip(start).take(end - start).collect();
                 Ok(VmValue::String(Rc::from(substr)))
@@ -105,8 +106,8 @@ impl crate::vm::Vm {
                     .map(|byte_pos| s[..byte_pos].chars().count() as i64);
                 Ok(VmValue::Int(idx.unwrap_or(-1)))
             }
-            "lower" | "to_lower" => Ok(VmValue::String(Rc::from(s.to_lowercase().as_str()))),
-            "upper" | "to_upper" => Ok(VmValue::String(Rc::from(s.to_uppercase().as_str()))),
+            "lower" | "to_lower" => Ok(VmValue::String(Rc::from(s.to_lowercase()))),
+            "upper" | "to_upper" => Ok(VmValue::String(Rc::from(s.to_uppercase()))),
             "len" => Ok(VmValue::Int(s.chars().count() as i64)),
             _ => Err(VmError::Runtime(format!("string has no method `{method}`"))),
         }

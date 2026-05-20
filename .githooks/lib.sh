@@ -170,6 +170,17 @@ hook_write_changed_cargo_packages() {
         crate=${crate%%/*}
         manifest="crates/$crate/Cargo.toml"
         if [ -f "$manifest" ]; then
+          # Skip crates listed in the workspace `exclude = [...]` line.
+          # `cargo check -p <name>` cannot target them, so gating the
+          # push on those crates produces a "did not match any packages"
+          # error. Match against the workspace's exclude line directly
+          # rather than parsing all the way to a `]` (the harn workspace
+          # writes it inline on a single line).
+          if [ -f "Cargo.toml" ] && \
+             grep -E '^exclude *= *\[' Cargo.toml \
+               | grep -Fq "\"crates/$crate\""; then
+            continue
+          fi
           package=$(awk -F '"' '/^name = / { print $2; exit }' "$manifest")
           [ -n "$package" ] && printf '%s\n' "$package" >> "$output"
         fi

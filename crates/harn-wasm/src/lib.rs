@@ -62,7 +62,7 @@ pub fn execute_pure_component(source: &str) -> Result<String, JsError> {
 pub fn tokenize(source: &str) -> Result<String, JsError> {
     let mut lexer = Lexer::new(source);
     let tokens = lexer.tokenize().map_err(|e| JsError::new(&e.to_string()))?;
-    let token_strs: Vec<String> = tokens.iter().map(|t| format!("{}", t.kind)).collect();
+    let token_strs: Vec<String> = tokens.iter().map(|t| t.kind.to_string()).collect();
     Ok(serde_json::to_string(&token_strs).unwrap_or_default())
 }
 

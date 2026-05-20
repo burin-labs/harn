@@ -488,7 +488,7 @@ pub fn skill_entry_to_vm(skill: &Skill) -> crate::value::VmValue {
     if let Some(dir) = &skill.skill_dir {
         entry.insert(
             "skill_dir".to_string(),
-            VmValue::String(Rc::from(dir.display().to_string().as_str())),
+            VmValue::String(Rc::from(dir.display().to_string())),
         );
     }
     entry.insert(
