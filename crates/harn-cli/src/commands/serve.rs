@@ -50,9 +50,12 @@ pub(crate) async fn run_a2a_server(args: &A2aServeArgs) -> Result<(), String> {
     let mut server_config = A2aServerConfig::new(core);
     server_config.card_signing_secret = args.card_signing_secret.clone();
     let server = Arc::new(A2aServer::new(server_config));
+    let bind = args
+        .bind
+        .unwrap_or_else(|| SocketAddr::from(([127, 0, 0, 1], args.port)));
     server
         .run_http(A2aHttpServeOptions {
-            bind: SocketAddr::from(([0, 0, 0, 0], args.port)),
+            bind,
             public_url: args.public_url.clone(),
             tls: build_tls_config(args.tls, args.cert.as_ref(), args.key.as_ref())?,
         })
@@ -406,6 +409,9 @@ async fn script_http_get_stream(
     if let Err(response) = validate_script_origin(&headers) {
         return *response;
     }
+    if let Err(response) = validate_script_protocol_header(&headers) {
+        return *response;
+    }
     let Some(session_id) = headers
         .get("mcp-session-id")
         .and_then(|value| value.to_str().ok())
@@ -430,6 +436,12 @@ async fn script_http_delete_session(
     State(state): State<ScriptMcpHttpState>,
     headers: HeaderMap,
 ) -> Response {
+    if let Err(response) = validate_script_origin(&headers) {
+        return *response;
+    }
+    if let Err(response) = validate_script_protocol_header(&headers) {
+        return *response;
+    }
     let Some(session_id) = headers
         .get("mcp-session-id")
         .and_then(|value| value.to_str().ok())
@@ -742,4 +754,76 @@ fn build_auth_policy(api_keys: &[String], hmac_secret: Option<&String>) -> AuthP
         }));
     }
     AuthPolicy { methods }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn test_script_mcp_state() -> ScriptMcpHttpState {
+        let (tx, _rx) = tokio_mpsc::unbounded_channel();
+        let sessions = Arc::new(Mutex::new(HashMap::new()));
+        sessions
+            .lock()
+            .expect("sessions")
+            .insert("session-1".to_string(), SharedScriptSession::new());
+        ScriptMcpHttpState {
+            runtime: ScriptMcpRuntime { tx },
+            options: McpHttpServeOptions {
+                bind: "127.0.0.1:0".parse().expect("bind"),
+                path: "/mcp".to_string(),
+                sse_path: "/sse".to_string(),
+                messages_path: "/messages".to_string(),
+                tls: HttpTlsConfig::plain(),
+            },
+            auth_policy: AuthPolicy::allow_all(),
+            sessions,
+        }
+    }
+
+    #[tokio::test]
+    async fn script_mcp_delete_rejects_remote_origin_without_deleting_session() {
+        let state = test_script_mcp_state();
+        let sessions = state.sessions.clone();
+        let response = script_http_delete_session(
+            State(state),
+            HeaderMap::from_iter([
+                (
+                    HeaderName::from_static("mcp-session-id"),
+                    HeaderValue::from_static("session-1"),
+                ),
+                (
+                    HeaderName::from_static("origin"),
+                    HeaderValue::from_static("https://attacker.example"),
+                ),
+            ]),
+        )
+        .await;
+
+        assert_eq!(response.status(), StatusCode::FORBIDDEN);
+        assert!(sessions.lock().expect("sessions").contains_key("session-1"));
+    }
+
+    #[tokio::test]
+    async fn script_mcp_delete_rejects_unsupported_protocol_version() {
+        let state = test_script_mcp_state();
+        let sessions = state.sessions.clone();
+        let response = script_http_delete_session(
+            State(state),
+            HeaderMap::from_iter([
+                (
+                    HeaderName::from_static("mcp-session-id"),
+                    HeaderValue::from_static("session-1"),
+                ),
+                (
+                    HeaderName::from_static("mcp-protocol-version"),
+                    HeaderValue::from_static("1999-01-01"),
+                ),
+            ]),
+        )
+        .await;
+
+        assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+        assert!(sessions.lock().expect("sessions").contains_key("session-1"));
+    }
 }

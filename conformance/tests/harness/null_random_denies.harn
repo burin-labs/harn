@@ -1,0 +1,15 @@
+/**
+ * Swallow the deny inside `catch` so the conformance runner observes a
+ * clean exit and the `expect_deny_events` sidecar assertion is the only
+ * signal. The sibling `null_*_denies.harn` fixtures use ambient
+ * `println("caught")` for the same trick; we omit it here because
+ * `harn fix`'s ambient-stdio repair would rewrite that call into a
+ * second `harness.stdio.println` whose own null-mode deny event would
+ * poison the assertion.
+ */
+fn main(harness: Harness) {
+  try {
+    harness.random.gen_u64()
+  } catch (e) {
+  }
+}

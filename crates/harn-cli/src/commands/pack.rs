@@ -6,17 +6,23 @@
 //! stdlib pin, generates a minimal SBOM, assembles a v2 `WorkflowBundle`
 //! manifest, and emits a deterministic tar.zst archive. Signing lands
 //! in E6.3; SBOM body and CLI `--json` polish in E6.4.
+//!
+//! `harn pack verify <bundle.harnpack>` (#1779) reads a bundle back,
+//! recomputes its canonical hash, verifies the embedded Ed25519
+//! signature (if any), and cross-checks every per-module BLAKE3.
 
 use std::collections::BTreeMap;
 use std::path::{Component, Path, PathBuf};
 use std::process;
 
 use ed25519_dalek::Signer;
+use ed25519_dalek::VerifyingKey;
 use harn_parser::DiagnosticSeverity;
 use harn_vm::bytecode_cache;
 use harn_vm::module_artifact;
 use harn_vm::orchestration::{
-    build_harnpack, load_workflow_bundle_any_version, workflow_bundle_hash, CatchupPolicySpec,
+    build_harnpack, load_workflow_bundle_any_version, read_harnpack,
+    verify_workflow_bundle_signature, workflow_bundle_hash, CatchupPolicySpec,
     ConnectorRequirement, Ed25519Signature, EnvironmentRequirements, HarnpackEntry, ModuleEntry,
     RetryPolicySpec, SBOMDoc, SBOMPackage, SBOMRelationship, ToolEntry, WorkflowBundle,
     WorkflowBundlePolicy, WorkflowBundleReplayMetadata, WorkflowBundleTrigger,
@@ -26,7 +32,7 @@ use harn_vm::Compiler;
 use harn_vm::{AutonomyTier, TrustRecord};
 use serde::Serialize;
 
-use crate::cli::PackArgs;
+use crate::cli::{PackArgs, PackCommand, PackVerifyArgs};
 use crate::command_error;
 use crate::json_envelope::{to_string_pretty, JsonEnvelope, JsonOutput};
 use crate::parse_source_file;
@@ -81,9 +87,27 @@ impl JsonOutput for PackJsonOutput {
 }
 
 pub fn run(args: PackArgs) {
-    match build(&args) {
+    if let Some(command) = args.command {
+        match command {
+            PackCommand::Verify(verify_args) => return run_verify(verify_args),
+        }
+    }
+    let Some(entrypoint) = args.entrypoint.clone() else {
+        command_error("harn pack requires an entrypoint or a subcommand (see `harn pack --help`)");
+    };
+    let build_args = BuildArgs {
+        entrypoint,
+        out: args.out,
+        upgrade: args.upgrade,
+        sign: args.sign,
+        key: args.key,
+        unsigned: args.unsigned,
+        exclude_secrets: args.exclude_secrets,
+        json: args.json,
+    };
+    match build(&build_args) {
         Ok(outcome) => {
-            if args.json {
+            if build_args.json {
                 let envelope = PackJsonOutput(outcome.json).into_envelope();
                 println!("{}", to_string_pretty(&envelope));
             } else {
@@ -96,7 +120,7 @@ pub fn run(args: PackArgs) {
             }
         }
         Err(err) => {
-            if args.json {
+            if build_args.json {
                 let envelope: JsonEnvelope<PackJsonData> =
                     JsonEnvelope::err(PACK_SCHEMA_VERSION, err.code, err.message);
                 println!("{}", to_string_pretty(&envelope));
@@ -110,10 +134,42 @@ pub fn run(args: PackArgs) {
 /// Programmatic entrypoint used by tests and other CLI command code
 /// that needs the JSON envelope without going through stdout.
 pub fn run_to_envelope(args: &PackArgs) -> JsonEnvelope<PackJsonData> {
-    match build(args) {
+    let Some(entrypoint) = args.entrypoint.clone() else {
+        return JsonEnvelope::err(
+            PACK_SCHEMA_VERSION,
+            "pack.missing_entrypoint",
+            "harn pack requires an entrypoint or a subcommand".to_string(),
+        );
+    };
+    let build_args = BuildArgs {
+        entrypoint,
+        out: args.out.clone(),
+        upgrade: args.upgrade.clone(),
+        sign: args.sign,
+        key: args.key.clone(),
+        unsigned: args.unsigned,
+        exclude_secrets: args.exclude_secrets,
+        json: args.json,
+    };
+    match build(&build_args) {
         Ok(outcome) => PackJsonOutput(outcome.json).into_envelope(),
         Err(err) => JsonEnvelope::err(PACK_SCHEMA_VERSION, err.code, err.message),
     }
+}
+
+/// Plain-data input to [`build`]: a flattened copy of [`PackArgs`]
+/// without the subcommand surface. Tests can construct this directly
+/// instead of going through the CLI parser.
+#[derive(Debug, Clone)]
+pub struct BuildArgs {
+    pub entrypoint: PathBuf,
+    pub out: Option<PathBuf>,
+    pub upgrade: Option<PathBuf>,
+    pub sign: bool,
+    pub key: Option<PathBuf>,
+    pub unsigned: bool,
+    pub exclude_secrets: bool,
+    pub json: bool,
 }
 
 pub fn json_schema() -> serde_json::Value {
@@ -177,6 +233,7 @@ pub fn json_schema() -> serde_json::Value {
 
 /// Outcome of [`build`]. Used by tests; the dispatcher consumes it
 /// directly via [`run`].
+#[derive(Debug)]
 pub struct PackOutcome {
     pub bundle_hash: String,
     pub output_path: PathBuf,
@@ -207,7 +264,7 @@ impl PackError {
     }
 }
 
-pub fn build(args: &PackArgs) -> Result<PackOutcome, PackError> {
+pub fn build(args: &BuildArgs) -> Result<PackOutcome, PackError> {
     if args.sign && args.unsigned {
         return Err(PackError::new(
             "pack.sign_conflict",
@@ -237,14 +294,14 @@ pub fn build(args: &PackArgs) -> Result<PackOutcome, PackError> {
             ));
         }
     }
-    let entrypoint = args
-        .entrypoint
+    let entrypoint_input = args.entrypoint.clone();
+    let entrypoint = entrypoint_input
         .canonicalize()
-        .unwrap_or_else(|_| args.entrypoint.clone());
+        .unwrap_or_else(|_| entrypoint_input.clone());
     if !entrypoint.exists() {
         return Err(PackError::new(
             "entrypoint.not_found",
-            format!("entrypoint does not exist: {}", args.entrypoint.display()),
+            format!("entrypoint does not exist: {}", entrypoint_input.display()),
         ));
     }
     if !entrypoint.is_file() || entrypoint.extension().and_then(|ext| ext.to_str()) != Some("harn")
@@ -253,7 +310,17 @@ pub fn build(args: &PackArgs) -> Result<PackOutcome, PackError> {
             "entrypoint.invalid",
             format!(
                 "entrypoint must be a .harn file: {}",
-                args.entrypoint.display()
+                entrypoint_input.display()
+            ),
+        ));
+    }
+    if args.exclude_secrets && path_looks_like_secret(&entrypoint) {
+        return Err(PackError::new(
+            "pack.secret_blocked",
+            format!(
+                "entrypoint {} matches a secret-bearing path pattern; \
+                 re-run with --include-secrets to override",
+                entrypoint_input.display()
             ),
         ));
     }
@@ -870,4 +937,390 @@ fn resolve_output_path(out: &Option<PathBuf>, entrypoint: &Path) -> PathBuf {
         .unwrap_or_else(|| "bundle".to_string());
     let parent = entrypoint.parent().unwrap_or_else(|| Path::new("."));
     parent.join(format!("{stem}.harnpack"))
+}
+
+/// Heuristic gate for `--exclude-secrets`. Matches `.env`, `.env.*`,
+/// `*.pem`, `*.key`, `credentials*`, and any path under a `secrets/`
+/// directory. Kept conservative so false positives don't strand
+/// legitimate bundles; mirrors common git secret-scanning policies.
+pub(crate) fn path_looks_like_secret(path: &Path) -> bool {
+    let lower_name = path
+        .file_name()
+        .map(|s| s.to_string_lossy().to_ascii_lowercase())
+        .unwrap_or_default();
+    if lower_name == ".env" || lower_name.starts_with(".env.") {
+        return true;
+    }
+    if lower_name.starts_with("credentials") {
+        return true;
+    }
+    if let Some(ext) = path.extension().and_then(|s| s.to_str()) {
+        let ext = ext.to_ascii_lowercase();
+        if ext == "pem" || ext == "key" {
+            return true;
+        }
+    }
+    for component in path.components() {
+        if let Component::Normal(part) = component {
+            if part.to_string_lossy().eq_ignore_ascii_case("secrets") {
+                return true;
+            }
+        }
+    }
+    false
+}
+
+// --- `harn pack verify` -----------------------------------------------------
+
+/// Stable schema version for the `harn pack verify --json` envelope.
+/// Bump when [`PackVerifyJsonData`] changes shape in a way agents need
+/// to detect.
+pub const PACK_VERIFY_SCHEMA_VERSION: u32 = 1;
+
+/// JSON payload emitted under `JsonEnvelope.data` for `harn pack verify`.
+#[derive(Debug, Clone, Serialize)]
+pub struct PackVerifyJsonData {
+    pub bundle: PathBuf,
+    pub bundle_hash: String,
+    pub recorded_bundle_hash: Option<String>,
+    pub signature_present: bool,
+    pub signature_verified: bool,
+    pub key_id: Option<String>,
+    pub schema_version: u32,
+    pub entrypoint: PathBuf,
+    pub module_count: usize,
+    pub content_entry_count: usize,
+}
+
+struct PackVerifyJsonOutput(PackVerifyJsonData);
+
+impl JsonOutput for PackVerifyJsonOutput {
+    const SCHEMA_VERSION: u32 = PACK_VERIFY_SCHEMA_VERSION;
+    type Data = PackVerifyJsonData;
+    fn into_envelope(self) -> JsonEnvelope<Self::Data> {
+        JsonEnvelope::ok(Self::SCHEMA_VERSION, self.0)
+    }
+}
+
+/// JSON schema for `harn pack verify --json`. Mirrors the runtime
+/// envelope so agents can validate output before consuming it.
+pub fn verify_json_schema() -> serde_json::Value {
+    serde_json::json!({
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "title": "harn pack verify --json",
+        "type": "object",
+        "required": ["schemaVersion", "ok", "data", "warnings"],
+        "properties": {
+            "schemaVersion": { "const": PACK_VERIFY_SCHEMA_VERSION },
+            "ok": { "type": "boolean" },
+            "warnings": { "type": "array" },
+            "data": {
+                "type": "object",
+                "required": [
+                    "bundle",
+                    "bundle_hash",
+                    "signature_present",
+                    "signature_verified",
+                    "recorded_bundle_hash",
+                    "key_id",
+                    "schema_version",
+                    "entrypoint",
+                    "module_count",
+                    "content_entry_count"
+                ],
+                "properties": {
+                    "bundle": { "type": "string", "minLength": 1 },
+                    "bundle_hash": { "type": "string", "pattern": "^blake3:" },
+                    "recorded_bundle_hash": { "type": ["string", "null"] },
+                    "signature_present": { "type": "boolean" },
+                    "signature_verified": { "type": "boolean" },
+                    "key_id": { "type": ["string", "null"] },
+                    "schema_version": { "type": "integer", "minimum": 1 },
+                    "entrypoint": { "type": "string", "minLength": 1 },
+                    "module_count": { "type": "integer", "minimum": 1 },
+                    "content_entry_count": { "type": "integer", "minimum": 1 }
+                }
+            }
+        }
+    })
+}
+
+/// Dispatcher for [`PackCommand::Verify`]: prints a human-readable
+/// line or a `JsonEnvelope` and exits non-zero on verification failure.
+pub fn run_verify(args: PackVerifyArgs) {
+    match verify(&args) {
+        Ok(outcome) => {
+            if args.json {
+                let envelope = PackVerifyJsonOutput(outcome).into_envelope();
+                println!("{}", to_string_pretty(&envelope));
+            } else {
+                println!(
+                    "ok {} (bundle_hash {}, signature_verified={})",
+                    outcome.bundle.display(),
+                    outcome.bundle_hash,
+                    outcome.signature_verified
+                );
+            }
+        }
+        Err(err) => {
+            if args.json {
+                let envelope: JsonEnvelope<PackVerifyJsonData> =
+                    JsonEnvelope::err(PACK_VERIFY_SCHEMA_VERSION, err.code, err.message);
+                println!("{}", to_string_pretty(&envelope));
+                process::exit(1);
+            }
+            command_error(&err.message);
+        }
+    }
+}
+
+/// Programmatic verify entry point used by tests so they can read the
+/// envelope structurally instead of parsing stdout.
+pub fn verify_to_envelope(args: &PackVerifyArgs) -> JsonEnvelope<PackVerifyJsonData> {
+    match verify(args) {
+        Ok(outcome) => PackVerifyJsonOutput(outcome).into_envelope(),
+        Err(err) => JsonEnvelope::err(PACK_VERIFY_SCHEMA_VERSION, err.code, err.message),
+    }
+}
+
+/// Verify the bundle at `args.bundle`:
+///
+/// 1. Read the archive (`tar.zst`) and decode the manifest.
+/// 2. Recompute the canonical bundle hash from manifest + contents.
+/// 3. If the manifest carries an Ed25519 signature, run the existing
+///    [`verify_workflow_bundle_signature`] check; refuse unsigned
+///    bundles unless `--allow-unsigned` was passed.
+/// 4. Walk each `ModuleEntry` and verify its `source_hash_blake3` /
+///    `harnbc_hash_blake3` match the in-archive payload.
+///
+/// Any mismatch yields a [`PackError`] with a stable structured code
+/// suitable for JSON consumers.
+pub fn verify(args: &PackVerifyArgs) -> Result<PackVerifyJsonData, PackError> {
+    let bytes = std::fs::read(&args.bundle).map_err(|err| {
+        PackError::new(
+            "verify.read_failed",
+            format!("failed to read {}: {err}", args.bundle.display()),
+        )
+    })?;
+    let archive = read_harnpack(&bytes).map_err(|err| {
+        PackError::new(
+            "verify.archive_failed",
+            format!("failed to parse {}: {err}", args.bundle.display()),
+        )
+    })?;
+    let manifest = &archive.manifest;
+    let contents = &archive.contents;
+
+    let expected_hash = workflow_bundle_hash(manifest, contents).map_err(|err| {
+        PackError::new(
+            "verify.hash_failed",
+            format!("failed to recompute bundle hash: {err}"),
+        )
+    })?;
+
+    let trust_policy = args
+        .trust_policy
+        .as_deref()
+        .map(skill_provenance::load_trust_policy)
+        .transpose()
+        .map_err(|err| PackError::new("verify.trust_policy_failed", err))?;
+    let signature_present = manifest.signature.is_some();
+    let mut signature_verified = false;
+    let mut key_id = None;
+    if let Some(signature) = manifest.signature.as_ref() {
+        key_id = signature.key_id.clone();
+        verify_workflow_bundle_signature(manifest, contents)
+            .map_err(|err| PackError::new("verify.signature_failed", err.message.clone()))?;
+        if args.require_trusted_signer {
+            let signer_fingerprint = bundle_signer_fingerprint(signature).map_err(|err| {
+                PackError::new(
+                    "verify.signature_failed",
+                    format!("invalid bundle signer: {err}"),
+                )
+            })?;
+            match skill_provenance::check_trusted_signer(&signer_fingerprint, trust_policy.as_ref())
+                .map_err(|err| PackError::new("verify.trust_policy_failed", err))?
+            {
+                skill_provenance::TrustedSignerStatus::Trusted => {}
+                skill_provenance::TrustedSignerStatus::MissingSigner => {
+                    return Err(PackError::new(
+                        "verify.untrusted_signer",
+                        format!(
+                            "bundle {} was signed by {}, but that signer is not present in the trusted signer registry",
+                            args.bundle.display(),
+                            signer_fingerprint
+                        ),
+                    ));
+                }
+                skill_provenance::TrustedSignerStatus::UntrustedSigner => {
+                    return Err(PackError::new(
+                        "verify.untrusted_signer",
+                        format!(
+                            "bundle {} was signed by {}, which is not in the trust policy's trusted_signers allowlist",
+                            args.bundle.display(),
+                            signer_fingerprint
+                        ),
+                    ));
+                }
+            }
+        }
+        signature_verified = true;
+        key_id.get_or_insert(
+            signer_fingerprint_from_public_key(&signature.public_key).map_err(|err| {
+                PackError::new(
+                    "verify.signature_failed",
+                    format!("invalid bundle signer: {err}"),
+                )
+            })?,
+        );
+    } else if args.require_trusted_signer {
+        return Err(PackError::new(
+            "verify.untrusted_signer",
+            format!(
+                "bundle {} is unsigned and cannot satisfy --require-trusted-signer",
+                args.bundle.display()
+            ),
+        ));
+    } else if !args.allow_unsigned {
+        return Err(PackError::new(
+            "verify.unsigned",
+            format!(
+                "refusing to verify unsigned bundle {} (re-run with --allow-unsigned)",
+                args.bundle.display()
+            ),
+        ));
+    }
+
+    let mut source_map: BTreeMap<PathBuf, &HarnpackEntry> = BTreeMap::new();
+    let mut bytecode_map: BTreeMap<PathBuf, &HarnpackEntry> = BTreeMap::new();
+    for entry in contents {
+        if let Ok(rel) = entry.path.strip_prefix("sources") {
+            source_map.insert(rel.to_path_buf(), entry);
+        } else if let Ok(rel) = entry.path.strip_prefix("bytecode") {
+            bytecode_map.insert(rel.to_path_buf(), entry);
+        }
+    }
+
+    for module in &manifest.transitive_modules {
+        let source_entry = source_map.get(&module.path).ok_or_else(|| {
+            PackError::new(
+                "verify.module_missing",
+                format!(
+                    "manifest lists module {} but archive has no sources/{} entry",
+                    module.path.display(),
+                    module.path.display()
+                ),
+            )
+        })?;
+        let actual_source = blake3_hash(&source_entry.bytes);
+        if actual_source != module.source_hash_blake3 {
+            return Err(PackError::new(
+                "verify.source_mismatch",
+                format!(
+                    "source hash mismatch for {}: manifest {}, archive {}",
+                    module.path.display(),
+                    module.source_hash_blake3,
+                    actual_source
+                ),
+            ));
+        }
+        let chunk_rel = adjacent_with_extension(&module.path, bytecode_cache::CACHE_EXTENSION)
+            .ok_or_else(|| {
+                PackError::new(
+                    "verify.module_invalid_path",
+                    format!("module {} has no stem", module.path.display()),
+                )
+            })?;
+        let chunk_entry = bytecode_map.get(&chunk_rel).ok_or_else(|| {
+            PackError::new(
+                "verify.module_missing",
+                format!(
+                    "manifest lists bytecode for {} but archive has no bytecode/{} entry",
+                    module.path.display(),
+                    chunk_rel.display()
+                ),
+            )
+        })?;
+        let actual_harnbc = blake3_hash(&chunk_entry.bytes);
+        if actual_harnbc != module.harnbc_hash_blake3 {
+            return Err(PackError::new(
+                "verify.bytecode_mismatch",
+                format!(
+                    "bytecode hash mismatch for {}: manifest {}, archive {}",
+                    module.path.display(),
+                    module.harnbc_hash_blake3,
+                    actual_harnbc
+                ),
+            ));
+        }
+    }
+
+    // Cross-check the recorded signature hash against the recomputed
+    // canonical hash. `verify_workflow_bundle_signature` already does
+    // this for signed bundles; for unsigned bundles we report the
+    // recomputed hash so callers can compare against external
+    // attestations.
+    let recorded_bundle_hash = manifest
+        .signature
+        .as_ref()
+        .map(|sig| sig.manifest_hash_blake3.clone());
+    if let Some(recorded) = &recorded_bundle_hash {
+        if recorded != &expected_hash {
+            return Err(PackError::new(
+                "verify.recorded_hash_mismatch",
+                format!(
+                    "recorded signature manifest hash {recorded} does not match recomputed {expected_hash}"
+                ),
+            ));
+        }
+    }
+
+    Ok(PackVerifyJsonData {
+        bundle: args.bundle.clone(),
+        bundle_hash: expected_hash,
+        recorded_bundle_hash,
+        signature_present,
+        signature_verified,
+        key_id,
+        schema_version: manifest.schema_version,
+        entrypoint: manifest.entrypoint.clone(),
+        module_count: manifest.transitive_modules.len(),
+        content_entry_count: contents.len(),
+    })
+}
+
+fn bundle_signer_fingerprint(signature: &Ed25519Signature) -> Result<String, String> {
+    match signature.key_id.as_deref() {
+        Some(key_id) if !key_id.trim().is_empty() => Ok(key_id.to_string()),
+        _ => signer_fingerprint_from_public_key(&signature.public_key),
+    }
+}
+
+fn signer_fingerprint_from_public_key(public_key_hex: &str) -> Result<String, String> {
+    let public_key_bytes = decode_hex_32(public_key_hex)?;
+    let verifying_key = VerifyingKey::from_bytes(&public_key_bytes).map_err(|error| {
+        format!("workflow bundle signature public_key is invalid Ed25519: {error}")
+    })?;
+    Ok(skill_provenance::fingerprint_for_key(&verifying_key))
+}
+
+fn decode_hex_32(raw: &str) -> Result<[u8; 32], String> {
+    let trimmed = raw.trim();
+    if trimmed.len() != 64 {
+        return Err(format!(
+            "workflow bundle signature public_key must be 64 hex characters, found {}",
+            trimmed.len()
+        ));
+    }
+    let mut bytes = [0_u8; 32];
+    for (idx, slot) in bytes.iter_mut().enumerate() {
+        let start = idx * 2;
+        let end = start + 2;
+        *slot = u8::from_str_radix(&trimmed[start..end], 16).map_err(|error| {
+            format!(
+                "workflow bundle signature public_key contains invalid hex at byte {idx}: {error}"
+            )
+        })?;
+    }
+    Ok(bytes)
 }

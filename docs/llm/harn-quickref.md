@@ -3823,6 +3823,8 @@ partials = "Sources/BurinCore/Resources/pipelines/partials"
 Both `render_prompt(...)` and `{{ include "@/..." }}` honor the same
 syntax. `harn check` validates the resolved files exist; bundle manifests
 and LSP go-to-definition follow `@`-paths to the target file.
+When an execution policy is active, file-backed templates and includes obey
+the same `workspace_roots` read boundary as `read_file(...)`.
 
 - `{{ name }}` — interpolation; nested with `{{ a.b[0] }}`.
 - `{{ if expr }}..{{ elif expr }}..{{ else }}..{{ end }}` — expression

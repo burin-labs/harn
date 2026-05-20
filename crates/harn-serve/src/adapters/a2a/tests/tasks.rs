@@ -897,13 +897,7 @@ fn hitl_requested_event_does_not_override_terminal_task() {
 }
 
 #[tokio::test]
-async fn rejected_state_surfaces_when_auth_policy_denies_dispatch() {
-    // Synchronous policy denial: `AuthPolicy.authorize` returns
-    // `Rejected` before any script work runs, so the task lands in
-    // the terminal `rejected` state per A2A 0.3.0. The client sees
-    // the `rejected` status alongside the policy's reason in the
-    // task history; subsequent `tasks/cancel` is rejected because
-    // the task is already terminal.
+async fn auth_policy_denial_returns_unauthorized_without_storing_task() {
     let (_dir, server) = server_with_api_key_policy(
         r#"
 pub fn triage(task: string) -> string {
@@ -924,38 +918,23 @@ pub fn triage(task: string) -> string {
         }),
     );
 
-    // No bearer token — the API-key policy will deny the dispatch.
-    let processed = server.process_rpc(request, AuthRequest::default()).await;
+    let processed = server
+        .clone()
+        .process_rpc(request, AuthRequest::default())
+        .await;
     let RpcOutcome::Json(response) = processed.outcome else {
-        panic!(
-            "expected json response, got: {processed:?}",
-            processed = match processed.outcome {
-                RpcOutcome::Json(_) => "json",
-                RpcOutcome::Sse(_) => "sse",
-            }
-        );
+        panic!("expected json response");
     };
 
-    assert_eq!(
-        response["result"]["status"]["state"], "rejected",
-        "got: {response}"
-    );
-    // The denial reason lands in the task history as the agent
-    // turn so callers can render it without cracking error fields.
-    let history = response["result"]["history"]
-        .as_array()
-        .expect("history array");
-    let agent_message = history
-        .iter()
-        .find(|message| message["role"] == "agent")
-        .expect("agent reply");
-    let text = agent_message["parts"][0]["text"]
-        .as_str()
-        .expect("text part")
-        .to_lowercase();
+    assert_eq!(processed.status, Some(StatusCode::UNAUTHORIZED));
+    assert_eq!(response["error"]["code"], -32000, "got: {response}");
     assert!(
-        text.contains("auth") || text.contains("missing") || text.contains("invalid"),
-        "expected denial reason in history, got: {agent_message}"
+        server.tasks.lock().expect("tasks poisoned").is_empty(),
+        "auth failures should not persist caller-provided task content"
+    );
+    assert!(
+        processed.auth_challenge.is_some(),
+        "auth failures should advertise a challenge"
     );
 }
 

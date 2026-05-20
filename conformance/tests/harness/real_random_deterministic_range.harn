@@ -1,0 +1,11 @@
+fn main(harness: Harness) {
+  harness.stdio.println(harness.random.gen_range(0, 0))
+  harness.stdio.println(harness.random.gen_range(42, 42))
+  let value = harness.random.gen_range(0, 100)
+  harness.stdio.println(value >= 0 && value <= 100)
+  let elements = [1, 2, 3]
+  let picked = harness.random.choice(elements)
+  harness.stdio.println(picked >= 1 && picked <= 3)
+  let shuffled = harness.random.shuffle([1])
+  harness.stdio.println(shuffled[0])
+}

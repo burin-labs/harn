@@ -38,7 +38,7 @@ Repairs are tagged with a six-level safety class so `harn fix --apply --safety <
 | [`TYP`](#typ--type-checker) | Type checker | 25 |
 | [`PAR`](#par--parser--lexer) | Parser / lexer | 5 |
 | [`NAM`](#nam--naming-and-resolution) | Naming and resolution | 13 |
-| [`CAP`](#cap--capabilities) | Capabilities | 8 |
+| [`CAP`](#cap--capabilities) | Capabilities | 9 |
 | [`LLM`](#llm--llm-calls) | LLM calls | 5 |
 | [`ORC`](#orc--orchestration-constructs) | Orchestration constructs | 10 |
 | [`STD`](#std--stdlib-usage) | Stdlib usage | 4 |
@@ -46,7 +46,7 @@ Repairs are tagged with a six-level safety class so `harn fix --apply --safety <
 | [`MOD`](#mod--modules-and-exports) | Modules and exports | 6 |
 | [`RMD`](#rmd--reminder-lifecycle) | Reminder lifecycle | 8 |
 | [`SUS`](#sus--suspend--resume-lifecycle) | Suspend / resume lifecycle | 13 |
-| [`LNT`](#lnt--lint-rules) | Lint rules | 53 |
+| [`LNT`](#lnt--lint-rules) | Lint rules | 57 |
 | [`FMT`](#fmt--formatter) | Formatter | 3 |
 | [`IMP`](#imp--import-resolution) | Import resolution | 3 |
 | [`OWN`](#own--ownership-and-mutability) | Ownership and mutability | 4 |
@@ -125,6 +125,7 @@ Repairs are tagged with a six-level safety class so `harn fix --apply --safety <
 | [`HARN-CAP-005`](#harn-cap-005) | host capability operation is not declared | — | — |
 | [`HARN-CAP-006`](#harn-cap-006) | host capability call must use a static operation name | — | — |
 | [`HARN-CAP-007`](#harn-cap-007) | tool host capability binding is invalid | `manual/review-capability-binding` | `needs-human` |
+| [`HARN-CAP-201`](#harn-cap-201) | harness capability denied by active sandbox profile | — | — |
 | [`HARN-CAP-301`](#harn-cap-301) | child agent effect set exceeds the parent's declared effects | `policy/narrow-child-effects` | `surface-changing` |
 
 ## LLM — LLM calls
@@ -272,6 +273,10 @@ Repairs are tagged with a six-level safety class so `harn fix --apply --safety <
 | [`HARN-LNT-051`](#harn-lnt-051) | unnecessary safe navigation lint | `expressions/simplify` | `behavior-preserving` |
 | [`HARN-LNT-052`](#harn-lnt-052) | ambient clock builtin replaced by `harness.clock.*` | `bindings/thread-harness-clock` | `scope-local` |
 | [`HARN-LNT-053`](#harn-lnt-053) | ambient stdio builtin replaced by `harness.stdio.*` | `bindings/thread-harness-stdio` | `scope-local` |
+| [`HARN-LNT-054`](#harn-lnt-054) | ambient fs builtin replaced by `harness.fs.*` | `bindings/thread-harness-fs` | `scope-local` |
+| [`HARN-LNT-055`](#harn-lnt-055) | ambient env builtin replaced by `harness.env.*` | `bindings/thread-harness-env` | `scope-local` |
+| [`HARN-LNT-056`](#harn-lnt-056) | ambient random builtin replaced by `harness.random.*` | `bindings/thread-harness-random` | `scope-local` |
+| [`HARN-LNT-057`](#harn-lnt-057) | ambient net builtin replaced by `harness.net.*` | `bindings/thread-harness-net` | `scope-local` |
 
 ## FMT — Formatter
 
@@ -1923,6 +1928,59 @@ Specifically: tool host capability binding is invalid.
 This code is stable. Its identifier, category, and meaning will not change
 without a deprecation cycle. Cross-language tooling and IDE integrations can
 dispatch on it directly.
+
+### `HARN-CAP-201`
+
+**Category:** `CAP` (Capabilities) &nbsp;·&nbsp; **API stability:** `stable`
+
+harness capability denied by active sandbox profile
+
+- **See also:** [`HARN-CAP-001`](#harn-cap-001)
+
+**Category:** Host capability (CAP)  
+**Variant:** `Code::SandboxCapabilityDenied` (sandbox capability denied)
+
+#### What it means
+
+A `harness.fs.*`, `harness.env.*`, `harness.random.*`, or
+`harness.net.*` method was rejected by the active sandbox profile.
+Examples:
+
+- `harness.fs.write_text("/etc/passwd", ...)` from a script whose
+  `workspace_roots` only include `./build/` — the path is outside the
+  permitted set.
+- `harness.net.get("https://example.com")` from a script whose egress
+  allowlist does not include `example.com`.
+- Any `harness.*` capability under `SandboxProfile::OsHardened` when the
+  required platform mechanism is unavailable.
+
+The runtime raises the rejection as a typed `tool_rejected` error so
+the harness method surface stays narrow — every script-visible
+capability tightens the same way at the same boundary, instead of each
+ambient builtin growing its own bespoke deny diagnostic.
+
+When the requested operation can be evaluated against the profile
+ahead of time (literal path or URL argument, well-known method on a
+sub-handle), `harn check` and `harn lint` surface the same diagnostic
+at static-check time so callers don't have to actually execute the
+script to discover the denial.
+
+#### How to fix
+
+- Widen the active sandbox profile via `CapabilityPolicy::workspace_roots`
+  or the egress allowlist if the request is legitimate. The relevant
+  policy lives in `~/.config/harn/policy.toml` or the per-script
+  `CapabilityPolicy` overlay.
+- Use `harn graph --json` to inspect which capabilities your script
+  actually needs, then narrow the call site to those.
+- For tests, switch from `Harness::real()` to `Harness::mock()` /
+  `Harness::null()` so the call is recorded without touching the host.
+
+#### Stability
+
+This code is stable. Its identifier, category, and meaning will not
+change without a deprecation cycle. Cross-language tooling and IDE
+integrations can dispatch on it directly.
 
 ### `HARN-CAP-301`
 
@@ -5039,6 +5097,177 @@ the in-tree corpus migration is in flight, but new code should use
 This code is stable. Its identifier, category, and meaning will not change
 without a deprecation cycle. Cross-language tooling and IDE integrations can
 dispatch on it directly.
+
+### `HARN-LNT-054`
+
+**Category:** `LNT` (Lint rules) &nbsp;·&nbsp; **API stability:** `stable`
+
+ambient fs builtin replaced by `harness.fs.*`
+
+- **Repair:** `bindings/thread-harness-fs` &nbsp;·&nbsp; **Safety:** `scope-local`
+- Replace the ambient fs builtin with the corresponding `harness.fs.*` method
+- **See also:** [`HARN-NAM-101`](#harn-nam-101), [`HARN-LNT-001`](#harn-lnt-001)
+
+**Category:** Lint (LNT)  
+**Variant:** `Code::LintAmbientFsBuiltin` (ambient fs builtin)
+
+#### What it means
+
+The lint fires on any call to `read_file`, `write_file`, `file_exists`,
+`delete_file`, `append_file`, `list_dir`, `mkdir`, `copy_file`,
+`temp_dir`, `stat`, `move_file`, `read_lines`, `walk_dir`, or `glob`.
+These were ambient fs-capability builtins in the pre-`Harness` runtime.
+Filesystem access now routes through the `harness.fs.*` sub-handle so
+capability requirements appear in the type system instead of being
+hidden in the stdlib surface.
+
+This is a lint, not a hard error. The legacy builtins still compile
+while the migration is in flight, but every new call site should use the
+`harness.fs.*` method that matches it (`read_file` →
+`harness.fs.read_text`, `write_file` → `harness.fs.write_text`, etc.).
+
+#### How to fix
+
+- Run `harn fix --apply --safety scope-local` over the file. The
+  `bindings/thread-harness-fs` repair rewrites every call site where a
+  `harness` (or `_harness`) binding is in scope.
+- If `harness` isn't reachable from the call site, first thread it
+  through the enclosing fn via the `bindings/thread-harness` repair
+  (which adds the `harness: Harness` parameter at the entrypoint), then
+  re-run `harn fix --apply` to swap the call.
+
+#### Stability
+
+This code is stable. Its identifier, category, and meaning will not
+change without a deprecation cycle. Cross-language tooling and IDE
+integrations can dispatch on it directly.
+
+### `HARN-LNT-055`
+
+**Category:** `LNT` (Lint rules) &nbsp;·&nbsp; **API stability:** `stable`
+
+ambient env builtin replaced by `harness.env.*`
+
+- **Repair:** `bindings/thread-harness-env` &nbsp;·&nbsp; **Safety:** `scope-local`
+- Replace the ambient env builtin with the corresponding `harness.env.*` method
+- **See also:** [`HARN-NAM-101`](#harn-nam-101), [`HARN-LNT-001`](#harn-lnt-001)
+
+**Category:** Lint (LNT)  
+**Variant:** `Code::LintAmbientEnvBuiltin` (ambient env builtin)
+
+#### What it means
+
+The lint fires on calls to the ambient `env` and `env_or` builtins.
+Environment access now routes through the `harness.env.*` sub-handle so
+capability requirements appear in the type system instead of being
+hidden in the stdlib surface.
+
+This is a lint, not a hard error. The legacy builtins still compile
+while the migration is in flight, but every new call site should use
+`harness.env.get(name)` / `harness.env.get_or(name, default)`.
+
+#### How to fix
+
+- Run `harn fix --apply --safety scope-local` over the file. The
+  `bindings/thread-harness-env` repair rewrites every call site where a
+  `harness` (or `_harness`) binding is in scope.
+- If `harness` isn't reachable from the call site, first thread it
+  through the enclosing fn via the `bindings/thread-harness` repair
+  (which adds the `harness: Harness` parameter at the entrypoint), then
+  re-run `harn fix --apply` to swap the call.
+
+#### Stability
+
+This code is stable. Its identifier, category, and meaning will not
+change without a deprecation cycle. Cross-language tooling and IDE
+integrations can dispatch on it directly.
+
+### `HARN-LNT-056`
+
+**Category:** `LNT` (Lint rules) &nbsp;·&nbsp; **API stability:** `stable`
+
+ambient random builtin replaced by `harness.random.*`
+
+- **Repair:** `bindings/thread-harness-random` &nbsp;·&nbsp; **Safety:** `scope-local`
+- Replace the ambient random builtin with the corresponding `harness.random.*` method
+- **See also:** [`HARN-NAM-101`](#harn-nam-101), [`HARN-LNT-001`](#harn-lnt-001)
+
+**Category:** Lint (LNT)  
+**Variant:** `Code::LintAmbientRandomBuiltin` (ambient random builtin)
+
+#### What it means
+
+The lint fires on calls to the ambient `random`, `random_int`,
+`random_choice`, and `random_shuffle` builtins. Randomness now routes
+through the `harness.random.*` sub-handle so capability requirements
+appear in the type system instead of being hidden in the stdlib surface.
+
+This is a lint, not a hard error. The legacy builtins still compile
+while the migration is in flight, but every new call site should use
+the matching `harness.random.*` method (`random` →
+`harness.random.gen_f64`, `random_int` → `harness.random.gen_range`,
+etc.). Seeded streams via an explicit `Rng` handle remain available
+through the `Rng.*` surface for tests that need deterministic output.
+
+#### How to fix
+
+- Run `harn fix --apply --safety scope-local` over the file. The
+  `bindings/thread-harness-random` repair rewrites every call site
+  where a `harness` (or `_harness`) binding is in scope.
+- If `harness` isn't reachable from the call site, first thread it
+  through the enclosing fn via the `bindings/thread-harness` repair
+  (which adds the `harness: Harness` parameter at the entrypoint), then
+  re-run `harn fix --apply` to swap the call.
+
+#### Stability
+
+This code is stable. Its identifier, category, and meaning will not
+change without a deprecation cycle. Cross-language tooling and IDE
+integrations can dispatch on it directly.
+
+### `HARN-LNT-057`
+
+**Category:** `LNT` (Lint rules) &nbsp;·&nbsp; **API stability:** `stable`
+
+ambient net builtin replaced by `harness.net.*`
+
+- **Repair:** `bindings/thread-harness-net` &nbsp;·&nbsp; **Safety:** `scope-local`
+- Replace the ambient net builtin with the corresponding `harness.net.*` method
+- **See also:** [`HARN-NAM-101`](#harn-nam-101), [`HARN-LNT-001`](#harn-lnt-001)
+
+**Category:** Lint (LNT)  
+**Variant:** `Code::LintAmbientNetBuiltin` (ambient net builtin)
+
+#### What it means
+
+The lint fires on calls to the ambient `http_get`, `http_post`,
+`http_put`, `http_patch`, `http_delete`, `http_request`, and
+`http_download` builtins. Outbound HTTP now routes through the
+`harness.net.*` sub-handle so capability requirements appear in the
+type system instead of being hidden in the stdlib surface.
+
+This is a lint, not a hard error. The legacy builtins still compile
+while the migration is in flight, but every new call site should use
+the matching `harness.net.*` method (`http_get` → `harness.net.get`,
+`http_post` → `harness.net.post`, etc.). Streaming, server-mode, and
+session builtins keep their ambient names today and will migrate in a
+follow-up ticket.
+
+#### How to fix
+
+- Run `harn fix --apply --safety scope-local` over the file. The
+  `bindings/thread-harness-net` repair rewrites every call site where a
+  `harness` (or `_harness`) binding is in scope.
+- If `harness` isn't reachable from the call site, first thread it
+  through the enclosing fn via the `bindings/thread-harness` repair
+  (which adds the `harness: Harness` parameter at the entrypoint), then
+  re-run `harn fix --apply` to swap the call.
+
+#### Stability
+
+This code is stable. Its identifier, category, and meaning will not
+change without a deprecation cycle. Cross-language tooling and IDE
+integrations can dispatch on it directly.
 
 ### `HARN-FMT-001`
 

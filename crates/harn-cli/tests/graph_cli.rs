@@ -193,6 +193,49 @@ pub fn read_file(path: string) -> string {
 }
 
 #[test]
+fn graph_json_attributes_harness_sub_handle_calls_to_capabilities() {
+    let temp = TempDir::new().unwrap();
+    fs::write(
+        temp.path().join("main.harn"),
+        r#"
+fn main(harness: Harness) {
+  let body = harness.fs.read_text("README.md")
+  harness.net.get("https://example.test/data")
+  harness.stdio.println(body)
+}
+"#,
+    )
+    .unwrap();
+
+    let root = temp.path().to_str().unwrap();
+    let output = run_harn(&["graph", root, "--json"]);
+    assert!(
+        output.status.success(),
+        "stdout:\n{}\nstderr:\n{}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let parsed = stdout_json(&output);
+    let modules = parsed["data"]["modules"].as_array().unwrap();
+    let main = modules
+        .iter()
+        .find(|module| module["path"] == "main.harn")
+        .expect("main.harn module");
+    let caps = main["requires_capabilities"]
+        .as_array()
+        .expect("requires_capabilities array");
+    let cap_strings: Vec<&str> = caps.iter().filter_map(|v| v.as_str()).collect();
+    assert!(
+        cap_strings.contains(&"workspace.read_text"),
+        "expected harness.fs.read_text to produce workspace.read_text capability, got: {cap_strings:?}"
+    );
+    assert!(
+        cap_strings.contains(&"network.http"),
+        "expected harness.net.get to produce network.http capability, got: {cap_strings:?}"
+    );
+}
+
+#[test]
 fn graph_appears_in_json_schemas_catalog() {
     let output = run_harn(&["--json-schemas", "--command", "graph"]);
     assert!(output.status.success(), "exit={:?}", output.status.code());

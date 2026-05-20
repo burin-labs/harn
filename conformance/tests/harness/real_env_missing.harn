@@ -1,0 +1,4 @@
+fn main(harness: Harness) {
+  harness.stdio.println(harness.env.get("HARN_CONFORMANCE_E4_4_MISSING") == nil)
+  harness.stdio.println(harness.env.get_or("HARN_CONFORMANCE_E4_4_MISSING", "fallback"))
+}

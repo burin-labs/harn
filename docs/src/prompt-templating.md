@@ -13,6 +13,9 @@ Use `render_string(...)` when the template should live inline in source. Use
 `render(...)` / `render_prompt(...)` when the template should be loaded from a
 separate file relative to the calling module. The template syntax and error
 shape are identical across both entrypoints.
+Under an active execution policy, file-backed templates and included templates
+must stay within the policy's `workspace_roots`; embedded `std/...` prompt
+assets do not touch the filesystem.
 
 Stdlib-owned model-facing prompt prose lives in embedded `std/...harn.prompt`
 assets. These render without touching the filesystem and report stable

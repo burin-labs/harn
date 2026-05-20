@@ -19,7 +19,7 @@
     {
       "id": "CAP",
       "title": "Capabilities",
-      "count": 8
+      "count": 9
     },
     {
       "id": "LLM",
@@ -59,7 +59,7 @@
     {
       "id": "LNT",
       "title": "Lint rules",
-      "count": 53
+      "count": 57
     },
     {
       "id": "FMT",
@@ -747,6 +747,17 @@
         }
       ],
       "related": [],
+      "explanationPresent": true,
+      "apiStability": "stable"
+    },
+    {
+      "code": "HARN-CAP-201",
+      "category": "CAP",
+      "summary": "harness capability denied by active sandbox profile",
+      "repairs": [],
+      "related": [
+        "HARN-CAP-001"
+      ],
       "explanationPresent": true,
       "apiStability": "stable"
     },
@@ -2135,6 +2146,78 @@
           "id": "bindings/thread-harness-stdio",
           "safety": "scope-local",
           "summary": "Replace the ambient stdio builtin with the corresponding `harness.stdio.*` method"
+        }
+      ],
+      "related": [
+        "HARN-NAM-101",
+        "HARN-LNT-001"
+      ],
+      "explanationPresent": true,
+      "apiStability": "stable"
+    },
+    {
+      "code": "HARN-LNT-054",
+      "category": "LNT",
+      "summary": "ambient fs builtin replaced by `harness.fs.*`",
+      "repairs": [
+        {
+          "id": "bindings/thread-harness-fs",
+          "safety": "scope-local",
+          "summary": "Replace the ambient fs builtin with the corresponding `harness.fs.*` method"
+        }
+      ],
+      "related": [
+        "HARN-NAM-101",
+        "HARN-LNT-001"
+      ],
+      "explanationPresent": true,
+      "apiStability": "stable"
+    },
+    {
+      "code": "HARN-LNT-055",
+      "category": "LNT",
+      "summary": "ambient env builtin replaced by `harness.env.*`",
+      "repairs": [
+        {
+          "id": "bindings/thread-harness-env",
+          "safety": "scope-local",
+          "summary": "Replace the ambient env builtin with the corresponding `harness.env.*` method"
+        }
+      ],
+      "related": [
+        "HARN-NAM-101",
+        "HARN-LNT-001"
+      ],
+      "explanationPresent": true,
+      "apiStability": "stable"
+    },
+    {
+      "code": "HARN-LNT-056",
+      "category": "LNT",
+      "summary": "ambient random builtin replaced by `harness.random.*`",
+      "repairs": [
+        {
+          "id": "bindings/thread-harness-random",
+          "safety": "scope-local",
+          "summary": "Replace the ambient random builtin with the corresponding `harness.random.*` method"
+        }
+      ],
+      "related": [
+        "HARN-NAM-101",
+        "HARN-LNT-001"
+      ],
+      "explanationPresent": true,
+      "apiStability": "stable"
+    },
+    {
+      "code": "HARN-LNT-057",
+      "category": "LNT",
+      "summary": "ambient net builtin replaced by `harness.net.*`",
+      "repairs": [
+        {
+          "id": "bindings/thread-harness-net",
+          "safety": "scope-local",
+          "summary": "Replace the ambient net builtin with the corresponding `harness.net.*` method"
         }
       ],
       "related": [

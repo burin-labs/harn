@@ -298,6 +298,10 @@ impl<'a> Linter<'a> {
                 self.check_renamed_stdlib_symbol(name, snode.span);
                 self.check_ambient_clock_builtin(name, snode.span);
                 self.check_ambient_stdio_builtin(name, snode.span);
+                self.check_ambient_fs_builtin(name, snode.span);
+                self.check_ambient_env_builtin(name, snode.span);
+                self.check_ambient_random_builtin(name, snode.span);
+                self.check_ambient_net_builtin(name, snode.span);
                 self.references.insert(name.clone());
                 self.function_references.insert(name.clone());
                 self.function_calls.push((name.clone(), snode.span));
