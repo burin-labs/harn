@@ -1,12 +1,13 @@
 //! `harn fix`: propose or apply repair-bearing diagnostics.
 
-use std::collections::{BTreeMap, BTreeSet, HashSet};
+use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet, VecDeque};
 use std::path::Path;
 
 use harn_lexer::{FixEdit, Span};
 use harn_lint::LintSeverity;
 use harn_parser::{
-    DiagnosticCode as Code, DiagnosticSeverity, Repair, RepairSafety, SNode, TypeChecker,
+    diagnostic::harness_stdio_replacement, peel_attributes, visit, DiagnosticCode as Code,
+    DiagnosticSeverity, Node, Repair, RepairSafety, SNode, TypeChecker, TypeExpr, TypedParam,
 };
 use serde::Serialize;
 
@@ -110,6 +111,28 @@ struct RepairCandidate {
     span: Option<Span>,
     repair: Repair,
     edits: Vec<FixEdit>,
+}
+
+#[derive(Debug, Clone)]
+struct CallableInfo {
+    name: String,
+    span: Span,
+    params: Vec<TypedParam>,
+    is_pub: bool,
+}
+
+#[derive(Debug, Clone)]
+struct CallSite {
+    caller: String,
+    callee: String,
+    span: Span,
+    arg_count: usize,
+}
+
+#[derive(Debug, Default)]
+struct FileCallableGraph {
+    callables: HashMap<String, CallableInfo>,
+    callsites_by_callee: HashMap<String, Vec<CallSite>>,
 }
 
 pub(crate) fn run(args: &FixArgs) -> Result<(), String> {
@@ -290,7 +313,9 @@ pub(crate) fn apply_repairs(
 
     if !dry_run {
         for (path, edits) in &edits_by_file {
-            apply_file_edits(Path::new(path), edits)?;
+            let mut deduped = edits.clone();
+            dedupe_fix_edit_wires(&mut deduped);
+            apply_file_edits(Path::new(path), &deduped)?;
         }
     }
 
@@ -346,6 +371,307 @@ fn apply_file_edits(path: &Path, edits: &[FixEditWire]) -> Result<(), String> {
     }
     std::fs::write(path, result)
         .map_err(|error| format!("failed to write {}: {error}", path.display()))
+}
+
+fn dedupe_fix_edit_wires(edits: &mut Vec<FixEditWire>) {
+    edits.sort_by(|left, right| {
+        left.span
+            .start
+            .cmp(&right.span.start)
+            .then(left.span.end.cmp(&right.span.end))
+            .then(left.replacement.cmp(&right.replacement))
+    });
+    edits.dedup_by(|left, right| {
+        left.span.start == right.span.start
+            && left.span.end == right.span.end
+            && left.replacement == right.replacement
+    });
+}
+
+fn build_file_callable_graph(program: &[SNode]) -> FileCallableGraph {
+    let mut graph = FileCallableGraph::default();
+    for node in program {
+        let (_, inner) = peel_attributes(node);
+        let (name, params, body, is_pub) = match &inner.node {
+            Node::FnDecl {
+                name,
+                params,
+                body,
+                is_pub,
+                ..
+            } => (name.clone(), params.clone(), body, *is_pub),
+            Node::ToolDecl {
+                name,
+                params,
+                body,
+                is_pub,
+                ..
+            } => (name.clone(), params.clone(), body, *is_pub),
+            _ => continue,
+        };
+        graph.callables.insert(
+            name.clone(),
+            CallableInfo {
+                name: name.clone(),
+                span: inner.span,
+                params,
+                is_pub,
+            },
+        );
+        let mut local_calls = Vec::new();
+        for stmt in body {
+            visit::walk_node(stmt, &mut |child| {
+                if let Node::FunctionCall { name, args, .. } = &child.node {
+                    local_calls.push(CallSite {
+                        caller: name.clone(), // overwritten below if callee is local
+                        callee: name.clone(),
+                        span: child.span,
+                        arg_count: args.len(),
+                    });
+                }
+            });
+        }
+        for mut call in local_calls {
+            if graph.callables.contains_key(&call.callee)
+                || callable_declared_in_program(program, &call.callee)
+            {
+                call.caller = name.clone();
+                graph
+                    .callsites_by_callee
+                    .entry(call.callee.clone())
+                    .or_default()
+                    .push(call);
+            }
+        }
+    }
+    graph
+}
+
+fn callable_declared_in_program(program: &[SNode], target: &str) -> bool {
+    program.iter().any(|node| {
+        let (_, inner) = peel_attributes(node);
+        matches!(
+            &inner.node,
+            Node::FnDecl { name, .. } | Node::ToolDecl { name, .. } if name == target
+        )
+    })
+}
+
+fn synthesize_stdio_threaded_repair(
+    source: &str,
+    _program: &[SNode],
+    graph: &FileCallableGraph,
+    diag_span: Span,
+) -> Option<(Repair, Vec<FixEdit>)> {
+    let owner = owning_callable(graph, diag_span)?;
+    let callable = graph.callables.get(&owner)?;
+    let ambient_name_span = function_call_name_span(source, diag_span)?;
+    let ambient_name = source.get(ambient_name_span.start..ambient_name_span.end)?;
+    let replacement = harness_stdio_replacement(ambient_name)?;
+    let local_harness_name =
+        callable_harness_name(&callable.params).unwrap_or_else(|| "harness".to_string());
+
+    let mut edits = vec![replace_identifier_fix(ambient_name_span, replacement)];
+    let mut needs_param = BTreeSet::new();
+    let mut seen = HashSet::new();
+    let mut queue = VecDeque::from([owner.clone()]);
+    let mut safety = if callable.is_pub || callable.name == "main" {
+        RepairSafety::SurfaceChanging
+    } else {
+        RepairSafety::ScopeLocal
+    };
+
+    while let Some(current) = queue.pop_front() {
+        if !seen.insert(current.clone()) {
+            continue;
+        }
+        let current_callable = match graph.callables.get(&current) {
+            Some(callable) => callable,
+            None => continue,
+        };
+        if !callable_has_harness_param(&current_callable.params) {
+            needs_param.insert(current.clone());
+        }
+        let mut has_local_caller = false;
+        for callsite in graph
+            .callsites_by_callee
+            .get(&current)
+            .into_iter()
+            .flatten()
+            .cloned()
+        {
+            has_local_caller = true;
+            let caller = match graph.callables.get(&callsite.caller) {
+                Some(caller) => caller,
+                None => continue,
+            };
+            let caller_harness_name =
+                callable_harness_name(&caller.params).unwrap_or_else(|| "harness".to_string());
+            edits.push(add_call_argument_edit(
+                source,
+                callsite.span,
+                callsite.arg_count,
+                &caller_harness_name,
+            )?);
+            if (caller.is_pub || caller.name == "main")
+                && !callable_has_harness_param(&caller.params)
+            {
+                safety = RepairSafety::SurfaceChanging;
+            }
+            if !callable_has_harness_param(&caller.params) {
+                queue.push_back(caller.name.clone());
+            }
+        }
+        if !has_local_caller && !callable_has_harness_param(&current_callable.params) {
+            safety = RepairSafety::SurfaceChanging;
+        }
+    }
+
+    for callable_name in needs_param {
+        let callable = graph.callables.get(&callable_name)?;
+        let param_name = if callable.name == owner {
+            local_harness_name.clone()
+        } else {
+            "harness".to_string()
+        };
+        edits.push(add_harness_param_edit(source, callable.span, &param_name)?);
+    }
+    dedupe_fix_edits(&mut edits);
+
+    let repair_id = if safety == RepairSafety::SurfaceChanging {
+        "bindings/thread-harness-needs-param"
+    } else {
+        "bindings/thread-harness-stdio"
+    };
+    let template = harn_parser::REPAIR_REGISTRY
+        .iter()
+        .copied()
+        .find(|template| template.id == repair_id)?;
+    let mut repair = Repair::from_template(template);
+    repair.safety = safety;
+    Some((repair, edits))
+}
+
+fn owning_callable(graph: &FileCallableGraph, span: Span) -> Option<String> {
+    graph
+        .callables
+        .values()
+        .filter(|callable| callable.span.start <= span.start && callable.span.end >= span.end)
+        .min_by_key(|callable| callable.span.end - callable.span.start)
+        .map(|callable| callable.name.clone())
+}
+
+fn callable_has_harness_param(params: &[TypedParam]) -> bool {
+    callable_harness_name(params).is_some()
+}
+
+fn callable_harness_name(params: &[TypedParam]) -> Option<String> {
+    params
+        .iter()
+        .find(|param| is_harness_param(param))
+        .map(|param| param.name.clone())
+}
+
+fn is_harness_param(param: &TypedParam) -> bool {
+    matches!(param.type_expr.as_ref(), Some(TypeExpr::Named(name)) if name == "Harness")
+        && matches!(param.name.as_str(), "harness" | "_harness")
+}
+
+fn add_harness_param_edit(source: &str, callable_span: Span, param_name: &str) -> Option<FixEdit> {
+    let open = source
+        .get(callable_span.start..callable_span.end)?
+        .find('(')?
+        + callable_span.start;
+    let close = find_matching_paren(source, open)?;
+    let has_params = !source.get((open + 1)..close)?.trim().is_empty();
+    let insert = if has_params {
+        format!("{param_name}: Harness, ")
+    } else {
+        format!("{param_name}: Harness")
+    };
+    Some(FixEdit {
+        span: zero_length_span(source, open + 1),
+        replacement: insert,
+    })
+}
+
+fn add_call_argument_edit(
+    source: &str,
+    call_span: Span,
+    arg_count: usize,
+    arg_name: &str,
+) -> Option<FixEdit> {
+    let open = source.get(call_span.start..call_span.end)?.find('(')? + call_span.start;
+    let insert = if arg_count == 0 {
+        arg_name.to_string()
+    } else {
+        format!("{arg_name}, ")
+    };
+    Some(FixEdit {
+        span: zero_length_span(source, open + 1),
+        replacement: insert,
+    })
+}
+
+fn replace_identifier_fix(span: Span, replacement: &str) -> FixEdit {
+    FixEdit {
+        span,
+        replacement: replacement.to_string(),
+    }
+}
+
+fn function_call_name_span(source: &str, call_span: Span) -> Option<Span> {
+    let call_source = source.get(call_span.start..call_span.end)?;
+    let open = call_source.find('(')?;
+    Some(Span::with_offsets(
+        call_span.start,
+        call_span.start + open,
+        call_span.line,
+        call_span.column,
+    ))
+}
+
+fn dedupe_fix_edits(edits: &mut Vec<FixEdit>) {
+    edits.sort_by(|left, right| {
+        left.span
+            .start
+            .cmp(&right.span.start)
+            .then(left.span.end.cmp(&right.span.end))
+            .then(left.replacement.cmp(&right.replacement))
+    });
+    edits.dedup_by(|left, right| {
+        left.span.start == right.span.start
+            && left.span.end == right.span.end
+            && left.replacement == right.replacement
+    });
+}
+
+fn find_matching_paren(source: &str, open: usize) -> Option<usize> {
+    let mut depth = 0usize;
+    for (offset, ch) in source.get(open..)?.char_indices() {
+        match ch {
+            '(' => depth += 1,
+            ')' => {
+                depth = depth.checked_sub(1)?;
+                if depth == 0 {
+                    return Some(open + offset);
+                }
+            }
+            _ => {}
+        }
+    }
+    None
+}
+
+fn zero_length_span(source: &str, offset: usize) -> Span {
+    let prefix = source.get(..offset).unwrap_or("");
+    let line = prefix.bytes().filter(|byte| *byte == b'\n').count() + 1;
+    let column = prefix
+        .rsplit('\n')
+        .next()
+        .map(|line_text| line_text.chars().count() + 1)
+        .unwrap_or(1);
+    Span::with_offsets(offset, offset, line, column)
 }
 
 fn count_remaining_diagnostics(target: &Path) -> Result<usize, String> {
@@ -414,6 +740,7 @@ fn collect_file_candidates(
 ) {
     let path_str = file.to_string_lossy().into_owned();
     let (source, program) = parse_source_file(&path_str);
+    let callable_graph = build_file_callable_graph(&program);
     let mut config = package::load_check_config(Some(file));
     commands::check::apply_harn_lint_config(file, &mut config);
 
@@ -458,9 +785,18 @@ fn collect_file_candidates(
         &options,
     );
     for diag in &lint_diagnostics {
-        let Some(repair) = diag.repair() else {
+        let Some(mut repair) = diag.repair() else {
             continue;
         };
+        let mut edits = diag.fix.clone().unwrap_or_default();
+        if diag.code == Code::LintAmbientStdioBuiltin && edits.is_empty() {
+            if let Some((synthesized_repair, synthesized_edits)) =
+                synthesize_stdio_threaded_repair(&source, &program, &callable_graph, diag.span)
+            {
+                repair = synthesized_repair;
+                edits = synthesized_edits;
+            }
+        }
         if !repair_allowed(&repair, safety_ceiling) {
             continue;
         }
@@ -472,7 +808,7 @@ fn collect_file_candidates(
             message: diag.message.clone(),
             span: Some(diag.span),
             repair,
-            edits: diag.fix.clone().unwrap_or_default(),
+            edits,
         });
     }
 
@@ -567,12 +903,26 @@ fn candidates_overlap(left: &RepairCandidate, right: &RepairCandidate) -> bool {
         right
             .edits
             .iter()
-            .any(|right_edit| spans_overlap(left_edit.span, right_edit.span))
+            .any(|right_edit| edits_conflict(left_edit, right_edit))
     })
 }
 
 fn spans_overlap(left: Span, right: Span) -> bool {
     left.start < right.end && left.end > right.start
+}
+
+fn edits_conflict(left: &FixEdit, right: &FixEdit) -> bool {
+    if left.span.start == right.span.start
+        && left.span.end == right.span.end
+        && left.replacement == right.replacement
+    {
+        return false;
+    }
+    spans_overlap(left.span, right.span)
+        || (left.span.start == left.span.end
+            && right.span.start == right.span.end
+            && left.span.start == right.span.start
+            && left.replacement != right.replacement)
 }
 
 fn print_human_plan(plan: &RepairPlan) {
@@ -806,6 +1156,132 @@ mod tests {
         assert!(
             error.contains("needs-human") && error.contains("--plan --json"),
             "unexpected error: {error}"
+        );
+    }
+
+    #[test]
+    fn plan_reports_surface_changing_stdio_migration_when_harness_is_missing() {
+        let temp = tempfile::TempDir::new().unwrap();
+        let script = temp.path().join("stdio_demo.harn");
+        fs::write(&script, "fn helper() {\n  println(\"hi\")\n}\n").unwrap();
+
+        let plan = build_plan(&script, Some(RepairSafety::SurfaceChanging)).unwrap();
+        let repair = plan
+            .repairs
+            .iter()
+            .find(|repair| repair.diagnostic_code == Code::LintAmbientStdioBuiltin.to_string())
+            .expect("stdio repair present");
+
+        assert_eq!(repair.repair.id, "bindings/thread-harness-needs-param");
+        assert_eq!(repair.repair.safety, "surface-changing");
+        assert!(!repair.edits.is_empty(), "{repair:#?}");
+    }
+
+    #[test]
+    fn apply_threads_harness_through_same_file_callers_for_stdio() {
+        let temp = tempfile::TempDir::new().unwrap();
+        let script = temp.path().join("stdio_demo.harn");
+        fs::write(
+            &script,
+            concat!(
+                "fn helper() {\n",
+                "  println(\"hi\")\n",
+                "}\n",
+                "\n",
+                "fn wrapper() {\n",
+                "  helper()\n",
+                "}\n",
+                "\n",
+                "fn main(harness: Harness) {\n",
+                "  wrapper()\n",
+                "}\n",
+            ),
+        )
+        .unwrap();
+
+        let result = apply_repairs(&script, RepairSafety::ScopeLocal, false).unwrap();
+
+        assert_eq!(result.applied.len(), 1, "{result:#?}");
+        assert_eq!(result.skipped.len(), 1, "{result:#?}");
+        assert_eq!(result.skipped[0].reason, "no_edits", "{result:#?}");
+        let updated = fs::read_to_string(&script).unwrap();
+        assert!(updated.contains("fn helper(harness: Harness)"), "{updated}");
+        assert!(
+            updated.contains("fn wrapper(harness: Harness)"),
+            "{updated}"
+        );
+        assert!(
+            updated.contains("harness.stdio.println(\"hi\")"),
+            "{updated}"
+        );
+        assert!(updated.contains("helper(harness)"), "{updated}");
+        assert!(updated.contains("wrapper(harness)"), "{updated}");
+    }
+
+    #[test]
+    fn plan_uses_scope_local_stdio_repair_when_harness_is_reachable() {
+        let temp = tempfile::TempDir::new().unwrap();
+        let script = temp.path().join("stdio_demo.harn");
+        fs::write(
+            &script,
+            concat!(
+                "fn helper() {\n",
+                "  println(\"hi\")\n",
+                "}\n",
+                "\n",
+                "fn wrapper() {\n",
+                "  helper()\n",
+                "}\n",
+                "\n",
+                "fn main(harness: Harness) {\n",
+                "  wrapper()\n",
+                "}\n",
+            ),
+        )
+        .unwrap();
+
+        let plan = build_plan(&script, Some(RepairSafety::ScopeLocal)).unwrap();
+        let repair = plan
+            .repairs
+            .iter()
+            .find(|repair| repair.diagnostic_code == Code::LintAmbientStdioBuiltin.to_string())
+            .expect("stdio repair present");
+
+        assert_eq!(repair.repair.id, "bindings/thread-harness-stdio");
+        assert_eq!(repair.repair.safety, "scope-local");
+        assert!(repair.applies_cleanly, "{plan:#?}");
+    }
+
+    #[test]
+    fn plan_dedupes_shared_harness_threading_edits() {
+        let temp = tempfile::TempDir::new().unwrap();
+        let script = temp.path().join("stdio_demo.harn");
+        fs::write(
+            &script,
+            concat!(
+                "fn helper() {\n",
+                "  println(\"one\")\n",
+                "  println(\"two\")\n",
+                "}\n",
+                "\n",
+                "fn main(harness: Harness) {\n",
+                "  helper()\n",
+                "}\n",
+            ),
+        )
+        .unwrap();
+
+        let plan = build_plan(&script, Some(RepairSafety::ScopeLocal)).unwrap();
+        let repairs = plan
+            .repairs
+            .iter()
+            .filter(|repair| repair.diagnostic_code == Code::LintAmbientStdioBuiltin.to_string())
+            .collect::<Vec<_>>();
+
+        assert_eq!(repairs.len(), 2, "{plan:#?}");
+        assert!(
+            repairs.iter().all(|repair| repair.applies_cleanly),
+            "{plan:#?}"
         );
     }
 }

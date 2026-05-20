@@ -254,7 +254,7 @@ impl<'a> Linter<'a> {
             code: Code::LintAmbientStdioBuiltin,
             rule: "ambient-stdio-builtin",
             sub_handle: "stdio",
-            require_harness_in_scope: true,
+            require_harness_in_scope: false,
         });
     }
 

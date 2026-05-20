@@ -934,6 +934,12 @@ const REPAIR_BINDINGS_THREAD_HARNESS_STDIO: RepairTemplate = RepairTemplate {
     safety: RepairSafety::ScopeLocal,
 };
 
+const REPAIR_BINDINGS_THREAD_HARNESS_NEEDS_PARAM: RepairTemplate = RepairTemplate {
+    id: "bindings/thread-harness-needs-param",
+    summary: "Thread a `Harness` parameter through the enclosing callable chain before replacing the ambient capability call",
+    safety: RepairSafety::SurfaceChanging,
+};
+
 const REPAIR_BINDINGS_THREAD_HARNESS_FS: RepairTemplate = RepairTemplate {
     id: "bindings/thread-harness-fs",
     summary: "Replace the ambient fs builtin with the corresponding `harness.fs.*` method",
@@ -1148,6 +1154,7 @@ pub const REPAIR_REGISTRY: &[&RepairTemplate] = &[
     &REPAIR_BINDINGS_THREAD_HARNESS,
     &REPAIR_BINDINGS_THREAD_HARNESS_CLOCK,
     &REPAIR_BINDINGS_THREAD_HARNESS_STDIO,
+    &REPAIR_BINDINGS_THREAD_HARNESS_NEEDS_PARAM,
     &REPAIR_BINDINGS_THREAD_HARNESS_FS,
     &REPAIR_BINDINGS_THREAD_HARNESS_ENV,
     &REPAIR_BINDINGS_THREAD_HARNESS_RANDOM,

@@ -28,6 +28,14 @@ impl LintDiagnostic {
     /// function of its `code`; storing a per-site copy would invite
     /// drift. Callers that need the dispatch handle ask for it here.
     pub fn repair(&self) -> Option<Repair> {
+        if self.code == Code::LintAmbientStdioBuiltin && self.fix.is_none() {
+            return Some(Repair::from_template(
+                harn_parser::REPAIR_REGISTRY
+                    .iter()
+                    .copied()
+                    .find(|template| template.id == "bindings/thread-harness-needs-param")?,
+            ));
+        }
         self.code.repair_template().map(Repair::from_template)
     }
 }

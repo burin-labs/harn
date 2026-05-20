@@ -62,7 +62,18 @@ fn ambient_stdio_lint_waits_until_harness_is_in_scope() {
     let diags = lint_source(source);
     assert_eq!(
         count_rule(&diags, "ambient-stdio-builtin"),
-        0,
-        "stdio migration lint should not flood pre-harness files: {diags:?}"
+        1,
+        "stdio migration lint should surface the threaded-harness path: {diags:?}"
     );
+    let diag = diags
+        .iter()
+        .find(|diag| diag.rule == "ambient-stdio-builtin")
+        .expect("stdio migration lint present");
+    assert!(
+        diag.fix.is_none(),
+        "no direct fix should be emitted: {diag:?}"
+    );
+    let repair = diag.repair().expect("repair metadata present");
+    assert_eq!(repair.id.as_str(), "bindings/thread-harness-needs-param");
+    assert_eq!(repair.safety.as_str(), "surface-changing");
 }
