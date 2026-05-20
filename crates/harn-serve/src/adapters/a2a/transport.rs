@@ -87,8 +87,10 @@ impl A2aServer {
             .unwrap_or_default();
         let params = request.get("params").cloned().unwrap_or_else(|| json!({}));
 
-        let mut status: Option<StatusCode> = None;
-        let mut auth_challenge: Option<HeaderValue> = None;
+        let principal = match self.authorize_protocol_request(rpc_id.clone(), &auth).await {
+            Ok(principal) => principal,
+            Err(processed) => return processed,
+        };
         let (outcome, deprecation) = match method {
             "message/send" | "a2a.SendMessage" | "tasks/send" | "tasks/send_and_wait" => {
                 let deprecation = match method {
@@ -296,27 +298,17 @@ impl A2aServer {
                         None,
                     )
                 } else {
-                    match policy.authorize(&auth).await {
-                        AuthorizationDecision::Authorized(principal) => (
-                            RpcOutcome::Json(task_rpc_response(
-                                &rpc_id,
-                                self.extended_agent_card(public_url, &principal.subject),
-                            )),
-                            None,
-                        ),
-                        AuthorizationDecision::Rejected(message) => {
-                            status = Some(StatusCode::UNAUTHORIZED);
-                            auth_challenge = Some(www_authenticate_header(policy));
-                            (
-                                RpcOutcome::Json(error_response(
-                                    rpc_id,
-                                    -32000,
-                                    &format!("Unauthorized: {message}"),
-                                )),
-                                None,
-                            )
-                        }
-                    }
+                    let subject = principal
+                        .as_ref()
+                        .map(|principal| principal.subject.as_str())
+                        .unwrap_or("authenticated");
+                    (
+                        RpcOutcome::Json(task_rpc_response(
+                            &rpc_id,
+                            self.extended_agent_card(public_url, subject),
+                        )),
+                        None,
+                    )
                 }
             }
             _ => (
@@ -331,8 +323,32 @@ impl A2aServer {
         ProcessedRpc {
             outcome,
             deprecation,
-            status,
-            auth_challenge,
+            status: None,
+            auth_challenge: None,
+        }
+    }
+
+    async fn authorize_protocol_request(
+        &self,
+        rpc_id: JsonValue,
+        auth: &AuthRequest,
+    ) -> Result<Option<crate::AuthenticatedPrincipal>, ProcessedRpc> {
+        let policy = self.core.auth_policy();
+        if policy.methods.is_empty() {
+            return Ok(None);
+        }
+        match policy.authorize(auth).await {
+            AuthorizationDecision::Authorized(principal) => Ok(Some(principal)),
+            AuthorizationDecision::Rejected(message) => Err(ProcessedRpc {
+                outcome: RpcOutcome::Json(error_response(
+                    rpc_id,
+                    -32000,
+                    &format!("Unauthorized: {message}"),
+                )),
+                deprecation: None,
+                status: Some(StatusCode::UNAUTHORIZED),
+                auth_challenge: Some(www_authenticate_header(policy)),
+            }),
         }
     }
 }

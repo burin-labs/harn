@@ -364,6 +364,14 @@ const BUILTIN_CAPABILITIES: &[(&str, &str, &str, &str)] = &[
     ("read_file", "workspace", "read_text", "read_only"),
     ("read_file_result", "workspace", "read_text", "read_only"),
     ("read_file_bytes", "workspace", "read_text", "read_only"),
+    ("render", "workspace", "read_text", "read_only"),
+    ("render_prompt", "workspace", "read_text", "read_only"),
+    (
+        "render_with_provenance",
+        "workspace",
+        "read_text",
+        "read_only",
+    ),
     ("list_dir", "workspace", "list", "read_only"),
     ("file_exists", "workspace", "exists", "read_only"),
     ("stat", "workspace", "exists", "read_only"),
@@ -397,6 +405,7 @@ const BUILTIN_CAPABILITIES: &[(&str, &str, &str, &str)] = &[
     ("llm_completion", "llm", "call", "network"),
     ("llm_stream", "llm", "call", "network"),
     ("agent_loop", "llm", "call", "network"),
+    ("vision_ocr", "vision", "ocr", "process_exec"),
     ("mcp_call", "process", "exec", "process_exec"),
     ("mcp_connect", "process", "exec", "process_exec"),
 ];
@@ -497,6 +506,24 @@ mod tests {
             },
         );
         assert!(!report.allowed());
+    }
+
+    #[test]
+    fn harn_script_with_vision_ocr_is_rejected_under_read_only_parent() {
+        let source = r#"
+            vision_ocr("receipt.png")
+        "#;
+        let report = enforce_nested_invocation_ceiling(
+            &read_only_parent(),
+            &NestedInvocationTarget::HarnScript {
+                path: "vision.harn",
+                source,
+            },
+        );
+        assert!(!report.allowed());
+        let kinds: Vec<&str> = report.violations.iter().map(|v| v.kind.as_str()).collect();
+        assert!(kinds.contains(&"capability"));
+        assert!(kinds.contains(&"side_effect_level"));
     }
 
     #[test]

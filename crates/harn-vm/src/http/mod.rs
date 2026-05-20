@@ -16,6 +16,19 @@ use mock::{
     reset_http_mocks,
 };
 pub use mock::{http_mock_calls_snapshot, push_http_mock, HttpMockCallSnapshot, HttpMockResponse};
+
+/// Route a Harn HTTP request through the standard verb pipeline.
+///
+/// This is the entry point used by the `harness.net.*` sub-handle so
+/// every script-visible network call observes the same egress allowlist,
+/// retry policy, and mock plumbing as the legacy ambient builtins.
+pub(crate) async fn execute_http_request(
+    method: &str,
+    url: &str,
+    options: &BTreeMap<String, VmValue>,
+) -> Result<VmValue, VmError> {
+    client::vm_execute_http_request(method, url, options).await
+}
 #[cfg(test)]
 use mock::{mock_call_headers_value, redact_mock_call_url};
 

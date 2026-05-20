@@ -329,6 +329,11 @@ diagnostic_codes! {
     LintUnnecessarySafeNavigation, "HARN-LNT-051", Lnt, "unnecessary safe navigation lint";
     LintAmbientClockBuiltin, "HARN-LNT-052", Lnt, "ambient clock builtin replaced by `harness.clock.*`";
     LintAmbientStdioBuiltin, "HARN-LNT-053", Lnt, "ambient stdio builtin replaced by `harness.stdio.*`";
+    LintAmbientFsBuiltin, "HARN-LNT-054", Lnt, "ambient fs builtin replaced by `harness.fs.*`";
+    LintAmbientEnvBuiltin, "HARN-LNT-055", Lnt, "ambient env builtin replaced by `harness.env.*`";
+    LintAmbientRandomBuiltin, "HARN-LNT-056", Lnt, "ambient random builtin replaced by `harness.random.*`";
+    LintAmbientNetBuiltin, "HARN-LNT-057", Lnt, "ambient net builtin replaced by `harness.net.*`";
+    SandboxCapabilityDenied, "HARN-CAP-201", Cap, "harness capability denied by active sandbox profile";
     FormatterParseFailed, "HARN-FMT-001", Fmt, "formatter could not parse the source";
     FormatterWouldReformat, "HARN-FMT-002", Fmt, "source is not in canonical format";
     FormatterTrailingComma, "HARN-FMT-003", Fmt, "formatter normalized trailing comma layout";
@@ -502,12 +507,15 @@ impl Code {
             Code::LintTemplateVariantExplosion => &[Code::PromptVariantExplosion],
             Code::LintTemplateProviderIdentityBranch => &[Code::PromptProviderIdentityBranch],
             Code::LintRenamedStdlibSymbol => &[Code::DeprecatedStdlibSymbol],
-            Code::LintAmbientClockBuiltin => {
+            Code::LintAmbientClockBuiltin
+            | Code::LintAmbientStdioBuiltin
+            | Code::LintAmbientFsBuiltin
+            | Code::LintAmbientEnvBuiltin
+            | Code::LintAmbientRandomBuiltin
+            | Code::LintAmbientNetBuiltin => {
                 &[Code::InvalidMainSignature, Code::LintRenamedStdlibSymbol]
             }
-            Code::LintAmbientStdioBuiltin => {
-                &[Code::InvalidMainSignature, Code::LintRenamedStdlibSymbol]
-            }
+            Code::SandboxCapabilityDenied => &[Code::CapabilityPayloadInvalid],
             Code::LintMutableNeverReassigned => &[Code::MutableNeverReassigned],
             Code::LintUnusedImport => &[Code::ModuleImportUnused],
             Code::LintDuplicateMatchArm => &[Code::DuplicateMatchArm],
@@ -814,6 +822,10 @@ impl Code {
             Code::LintRenamedStdlibSymbol => Some(&REPAIR_STDLIB_MIGRATE_RENAMED),
             Code::LintAmbientClockBuiltin => Some(&REPAIR_BINDINGS_THREAD_HARNESS_CLOCK),
             Code::LintAmbientStdioBuiltin => Some(&REPAIR_BINDINGS_THREAD_HARNESS_STDIO),
+            Code::LintAmbientFsBuiltin => Some(&REPAIR_BINDINGS_THREAD_HARNESS_FS),
+            Code::LintAmbientEnvBuiltin => Some(&REPAIR_BINDINGS_THREAD_HARNESS_ENV),
+            Code::LintAmbientRandomBuiltin => Some(&REPAIR_BINDINGS_THREAD_HARNESS_RANDOM),
+            Code::LintAmbientNetBuiltin => Some(&REPAIR_BINDINGS_THREAD_HARNESS_NET),
             Code::LintDeprecatedLlmOptions => Some(&REPAIR_LLM_MIGRATE_DEPRECATED_OPTION),
             Code::LintTemplateProviderIdentityBranch => Some(&REPAIR_LLM_USE_CAPABILITY_FLAG),
             Code::LintPromptInjectionRisk => Some(&REPAIR_PROMPTS_ESCAPE_INJECTION),
@@ -919,6 +931,30 @@ const REPAIR_BINDINGS_THREAD_HARNESS_CLOCK: RepairTemplate = RepairTemplate {
 const REPAIR_BINDINGS_THREAD_HARNESS_STDIO: RepairTemplate = RepairTemplate {
     id: "bindings/thread-harness-stdio",
     summary: "Replace the ambient stdio builtin with the corresponding `harness.stdio.*` method",
+    safety: RepairSafety::ScopeLocal,
+};
+
+const REPAIR_BINDINGS_THREAD_HARNESS_FS: RepairTemplate = RepairTemplate {
+    id: "bindings/thread-harness-fs",
+    summary: "Replace the ambient fs builtin with the corresponding `harness.fs.*` method",
+    safety: RepairSafety::ScopeLocal,
+};
+
+const REPAIR_BINDINGS_THREAD_HARNESS_ENV: RepairTemplate = RepairTemplate {
+    id: "bindings/thread-harness-env",
+    summary: "Replace the ambient env builtin with the corresponding `harness.env.*` method",
+    safety: RepairSafety::ScopeLocal,
+};
+
+const REPAIR_BINDINGS_THREAD_HARNESS_RANDOM: RepairTemplate = RepairTemplate {
+    id: "bindings/thread-harness-random",
+    summary: "Replace the ambient random builtin with the corresponding `harness.random.*` method",
+    safety: RepairSafety::ScopeLocal,
+};
+
+const REPAIR_BINDINGS_THREAD_HARNESS_NET: RepairTemplate = RepairTemplate {
+    id: "bindings/thread-harness-net",
+    summary: "Replace the ambient net builtin with the corresponding `harness.net.*` method",
     safety: RepairSafety::ScopeLocal,
 };
 
@@ -1112,6 +1148,10 @@ pub const REPAIR_REGISTRY: &[&RepairTemplate] = &[
     &REPAIR_BINDINGS_THREAD_HARNESS,
     &REPAIR_BINDINGS_THREAD_HARNESS_CLOCK,
     &REPAIR_BINDINGS_THREAD_HARNESS_STDIO,
+    &REPAIR_BINDINGS_THREAD_HARNESS_FS,
+    &REPAIR_BINDINGS_THREAD_HARNESS_ENV,
+    &REPAIR_BINDINGS_THREAD_HARNESS_RANDOM,
+    &REPAIR_BINDINGS_THREAD_HARNESS_NET,
     &REPAIR_DECLARATIONS_REMOVE_UNUSED,
     &REPAIR_IMPORTS_FIX_PATH,
     &REPAIR_IMPORTS_REMOVE_UNUSED,

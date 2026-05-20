@@ -1,0 +1,13 @@
+fn main(harness: Harness) {
+  let path = harness.fs.path_join(harness.fs.temp_dir(), "harn_e4_4_fs.txt")
+  if harness.fs.exists(path) {
+    harness.fs.delete(path)
+  }
+  harness.fs.write_text(path, "hello harness")
+  harness.stdio.println(harness.fs.exists(path))
+  harness.stdio.println(harness.fs.read_text(path))
+  harness.fs.append(path, "!")
+  harness.stdio.println(harness.fs.read_text(path))
+  harness.fs.delete(path)
+  harness.stdio.println(harness.fs.exists(path))
+}

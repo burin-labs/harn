@@ -194,10 +194,18 @@ fn builtin_effect(name: &str) -> Option<EffectRecord> {
         "read_stdin" => Some(EffectRecord::new(EffectKind::Stdio, EffectScope::Read)),
 
         // fs reads
-        "read_file" | "read_file_bytes" | "read_file_result" | "read_lines" | "list_dir"
-        | "walk_dir" | "glob" | "file_exists" | "stat" => {
-            Some(EffectRecord::new(EffectKind::Fs, EffectScope::Read))
-        }
+        "read_file"
+        | "read_file_bytes"
+        | "read_file_result"
+        | "render"
+        | "render_prompt"
+        | "render_with_provenance"
+        | "read_lines"
+        | "list_dir"
+        | "walk_dir"
+        | "glob"
+        | "file_exists"
+        | "stat" => Some(EffectRecord::new(EffectKind::Fs, EffectScope::Read)),
 
         // fs writes
         "write_file" | "write_file_bytes" | "append_file" | "mkdir" | "copy_file" | "move_file" => {

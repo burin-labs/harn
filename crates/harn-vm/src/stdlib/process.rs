@@ -69,7 +69,7 @@ fn env_override(name: &str) -> Option<String> {
         .then(|| "1".to_string())
 }
 
-fn read_env_value(name: &str) -> Option<String> {
+pub(crate) fn read_env_value(name: &str) -> Option<String> {
     env_override(name)
         .or_else(|| current_execution_context().and_then(|context| context.env.get(name).cloned()))
         .or_else(|| std::env::var(name).ok())
