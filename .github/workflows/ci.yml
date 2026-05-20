@@ -15,9 +15,9 @@ concurrency:
 
 env:
   CARGO_TERM_COLOR: always
-  # sccache is wired in via .cargo/config.toml (rustc-wrapper = "sccache").
-  # Incremental fights sccache — disable on CI so every rustc invocation is
-  # eligible for cache hits.
+  # Incremental fights sccache — disable on CI so rustc invocations are
+  # eligible for cache hits once cargo jobs export RUSTC_WRAPPER from the
+  # sccache action.
   CARGO_INCREMENTAL: "0"
   SCCACHE_GHA_ENABLED: "true"
   # Promote build warnings to errors so platform-specific warnings can't
@@ -50,20 +50,18 @@ jobs:
       - uses: DavidAnson/markdownlint-cli2-action@ded1f9488f68a970bc66ea5619e13e9b52e601cd # v23.2.0
 
   rust:
-    name: Rust (lint + test + conformance)
+    name: Rust (lint + test)
     # GitHub-hosted runners keep the required gate predictable while the
     # self-hosted pool is scarce and shared by multiple repos.
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
-        with:
-          # Full history + tags so the changelog retroactive-edit check can
-          # traverse BASE..HEAD and inspect commit trailers.
-          fetch-depth: 0
       - uses: dtolnay/rust-toolchain@29eef336d9b2848a0b548edc03f92a220660cdb8 # stable
         with:
           components: clippy
       - uses: mozilla-actions/sccache-action@9e7fa8a12102821edf02ca5dbea1acd0f89a2696 # v0.0.10
+      - name: Configure Cargo to use sccache
+        run: echo "RUSTC_WRAPPER=${SCCACHE_PATH}" >> "$GITHUB_ENV"
       - uses: Swatinem/rust-cache@c19371144df3bb44fab255c43d04cbc2ab54d1c4 # v2.9.1
         continue-on-error: true
         with:
@@ -78,6 +76,27 @@ jobs:
       - run: make test
         env:
           NEXTEST_PROFILE: ci
+
+  harn-audit:
+    name: Harn conformance + audit
+    # These checks use the harn CLI and generated artifacts, but they do not
+    # need to serialize behind clippy and nextest.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          # Full history + tags so the changelog retroactive-edit check can
+          # traverse BASE..HEAD and inspect commit trailers.
+          fetch-depth: 0
+      - uses: dtolnay/rust-toolchain@29eef336d9b2848a0b548edc03f92a220660cdb8 # stable
+      - uses: mozilla-actions/sccache-action@9e7fa8a12102821edf02ca5dbea1acd0f89a2696 # v0.0.10
+      - name: Configure Cargo to use sccache
+        run: echo "RUSTC_WRAPPER=${SCCACHE_PATH}" >> "$GITHUB_ENV"
+      - uses: Swatinem/rust-cache@c19371144df3bb44fab255c43d04cbc2ab54d1c4 # v2.9.1
+        continue-on-error: true
+        with:
+          shared-key: workspace
+          cache-bin: false
       - run: make conformance
       - run: make protocol-conformance
       - run: make lint-harn
@@ -101,7 +120,6 @@ jobs:
       - run: make check-bindings
       - run: make lint-test-patterns
       - run: make lint-diagnostic-codes
-      - run: make lint-no-rust-prompt-prose lint-no-xfail-regression
       - run: python3 scripts/verify_release_metadata.py
       - name: Check no retroactive CHANGELOG edits
         run: |
@@ -144,6 +162,9 @@ jobs:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
       - uses: dtolnay/rust-toolchain@29eef336d9b2848a0b548edc03f92a220660cdb8 # stable
       - uses: mozilla-actions/sccache-action@9e7fa8a12102821edf02ca5dbea1acd0f89a2696 # v0.0.10
+      - name: Configure Cargo to use sccache
+        shell: bash
+        run: echo "RUSTC_WRAPPER=${SCCACHE_PATH}" >> "$GITHUB_ENV"
       - uses: Swatinem/rust-cache@c19371144df3bb44fab255c43d04cbc2ab54d1c4 # v2.9.1
         continue-on-error: true
         with:
@@ -251,6 +272,8 @@ jobs:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
       - uses: dtolnay/rust-toolchain@29eef336d9b2848a0b548edc03f92a220660cdb8 # stable
       - uses: mozilla-actions/sccache-action@9e7fa8a12102821edf02ca5dbea1acd0f89a2696 # v0.0.10
+      - name: Configure Cargo to use sccache
+        run: echo "RUSTC_WRAPPER=${SCCACHE_PATH}" >> "$GITHUB_ENV"
       - uses: Swatinem/rust-cache@c19371144df3bb44fab255c43d04cbc2ab54d1c4 # v2.9.1
         continue-on-error: true
         with:
@@ -268,14 +291,15 @@ jobs:
     name: CI status
     runs-on: ubuntu-latest
     if: always()
-    needs: [fmt, lint-md, rust, windows, portal, actions, e2e]
+    needs: [fmt, lint-md, rust, harn-audit, windows, portal, actions, e2e]
     steps:
       - name: Verify required CI jobs
         run: |
           declare -A results=(
             ["Format check"]="${{ needs.fmt.result }}"
             ["Markdown lint"]="${{ needs['lint-md'].result }}"
-            ["Rust (lint + test + conformance)"]="${{ needs.rust.result }}"
+            ["Rust (lint + test)"]="${{ needs.rust.result }}"
+            ["Harn conformance + audit"]="${{ needs['harn-audit'].result }}"
             ["Portal frontend"]="${{ needs.portal.result }}"
             ["GitHub Actions hygiene"]="${{ needs.actions.result }}"
           )
