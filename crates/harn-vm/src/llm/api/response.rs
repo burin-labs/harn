@@ -194,87 +194,97 @@ pub(crate) fn parse_llm_response(
     is_anthropic_style: bool,
 ) -> Result<LlmResult, VmError> {
     if is_anthropic_style {
+        if let Some(err) = json["error"]["message"].as_str() {
+            return Err(VmError::Thrown(VmValue::String(Rc::from(format!(
+                "{provider} API error: {err}"
+            )))));
+        }
+
         let mut text = String::new();
         let mut thinking_text = String::new();
         let mut tool_calls = Vec::new();
         let mut blocks = Vec::new();
 
-        if let Some(content) = json["content"].as_array() {
-            for block in content {
-                match block["type"].as_str() {
-                    Some("text") => {
-                        if let Some(t) = block["text"].as_str() {
-                            text.push_str(t);
-                            blocks.push(serde_json::json!({"type": "output_text", "text": t, "visibility": "public"}));
-                        }
+        let content = json
+            .get("content")
+            .and_then(|value| value.as_array())
+            .ok_or_else(|| {
+                VmError::Thrown(VmValue::String(Rc::from(format!(
+                    "{provider} API response missing content array"
+                ))))
+            })?;
+        for block in content {
+            match block["type"].as_str() {
+                Some("text") => {
+                    if let Some(t) = block["text"].as_str() {
+                        text.push_str(t);
+                        blocks.push(serde_json::json!({"type": "output_text", "text": t, "visibility": "public"}));
                     }
-                    Some("thinking") => {
-                        if let Some(t) = block["thinking"].as_str() {
-                            thinking_text.push_str(t);
-                            blocks.push(serde_json::json!({"type": "reasoning", "text": t, "visibility": "private"}));
-                        }
-                    }
-                    Some("tool_use") => {
-                        let name = block["name"].as_str().unwrap_or("").to_string();
-                        let id = block["id"].as_str().unwrap_or("").to_string();
-                        let input = block["input"].clone();
-                        tool_calls.push(serde_json::json!({
-                            "id": id,
-                            "name": name,
-                            "arguments": input,
-                        }));
-                        blocks.push(serde_json::json!({
-                            "type": "tool_call",
-                            "id": block["id"].clone(),
-                            "name": block["name"].clone(),
-                            "arguments": block["input"].clone(),
-                            "visibility": "internal",
-                        }));
-                    }
-                    Some("server_tool_use") => {
-                        // Anthropic's server-side tool-search tool emits
-                        // a `server_tool_use` content block when it
-                        // queries. The model never sees this as a
-                        // dispatchable tool — Anthropic executes it for
-                        // us — so we record it for transcript/replay
-                        // fidelity but do NOT add it to `tool_calls`.
-                        blocks.push(serde_json::json!({
-                            "type": "tool_search_query",
-                            "id": block["id"].clone(),
-                            "name": block["name"].clone(),
-                            "query": block["input"].clone(),
-                            "visibility": "internal",
-                        }));
-                    }
-                    Some("tool_search_tool_result") => {
-                        // Server-side search results. Anthropic
-                        // auto-expands the referenced tools inline on
-                        // subsequent turns; we just record the event so
-                        // replay/eval can see which tools were promoted
-                        // and when.
-                        let references: Vec<serde_json::Value> = block["content"]
-                            ["tool_references"]
-                            .as_array()
-                            .cloned()
-                            .unwrap_or_default();
-                        blocks.push(serde_json::json!({
-                            "type": "tool_search_result",
-                            "tool_use_id": block["tool_use_id"].clone(),
-                            "tool_references": references,
-                            "visibility": "internal",
-                        }));
-                    }
-                    _ => {}
                 }
+                Some("thinking") => {
+                    if let Some(t) = block["thinking"].as_str() {
+                        thinking_text.push_str(t);
+                        blocks.push(serde_json::json!({"type": "reasoning", "text": t, "visibility": "private"}));
+                    }
+                }
+                Some("tool_use") => {
+                    let name = block["name"].as_str().unwrap_or("").to_string();
+                    let id = block["id"].as_str().unwrap_or("").to_string();
+                    let input = block["input"].clone();
+                    tool_calls.push(serde_json::json!({
+                        "id": id,
+                        "name": name,
+                        "arguments": input,
+                    }));
+                    blocks.push(serde_json::json!({
+                        "type": "tool_call",
+                        "id": block["id"].clone(),
+                        "name": block["name"].clone(),
+                        "arguments": block["input"].clone(),
+                        "visibility": "internal",
+                    }));
+                }
+                Some("server_tool_use") => {
+                    // Anthropic's server-side tool-search tool emits
+                    // a `server_tool_use` content block when it
+                    // queries. The model never sees this as a
+                    // dispatchable tool — Anthropic executes it for
+                    // us — so we record it for transcript/replay
+                    // fidelity but do NOT add it to `tool_calls`.
+                    blocks.push(serde_json::json!({
+                        "type": "tool_search_query",
+                        "id": block["id"].clone(),
+                        "name": block["name"].clone(),
+                        "query": block["input"].clone(),
+                        "visibility": "internal",
+                    }));
+                }
+                Some("tool_search_tool_result") => {
+                    // Server-side search results. Anthropic
+                    // auto-expands the referenced tools inline on
+                    // subsequent turns; we just record the event so
+                    // replay/eval can see which tools were promoted
+                    // and when.
+                    let references: Vec<serde_json::Value> = block["content"]["tool_references"]
+                        .as_array()
+                        .cloned()
+                        .unwrap_or_default();
+                    blocks.push(serde_json::json!({
+                        "type": "tool_search_result",
+                        "tool_use_id": block["tool_use_id"].clone(),
+                        "tool_references": references,
+                        "visibility": "internal",
+                    }));
+                }
+                _ => {}
             }
         }
 
-        if text.is_empty() && tool_calls.is_empty() {
-            if let Some(err) = json["error"]["message"].as_str() {
-                return Err(VmError::Thrown(VmValue::String(Rc::from(format!(
-                    "{provider} API error: {err}"
-                )))));
-            }
+        if text.is_empty() && thinking_text.is_empty() && tool_calls.is_empty() && blocks.is_empty()
+        {
+            return Err(VmError::Thrown(VmValue::String(Rc::from(format!(
+                "anthropic-style model {model} delivered no content, reasoning, or tool calls"
+            )))));
         }
 
         let input_tokens = json["usage"]["input_tokens"].as_i64().unwrap_or(0);
@@ -312,7 +322,21 @@ pub(crate) fn parse_llm_response(
             )))));
         }
 
-        let message = &json["choices"][0]["message"];
+        let choices = json
+            .get("choices")
+            .and_then(|value| value.as_array())
+            .filter(|choices| !choices.is_empty())
+            .ok_or_else(|| {
+                VmError::Thrown(VmValue::String(Rc::from(format!(
+                    "{provider} API response missing non-empty choices array"
+                ))))
+            })?;
+        let choice = &choices[0];
+        let message = choice.get("message").ok_or_else(|| {
+            VmError::Thrown(VmValue::String(Rc::from(format!(
+                "{provider} API response missing choices[0].message"
+            ))))
+        })?;
         let (text, extracted_thinking) = normalize_openai_message_text(message);
         let reasoning_summary = extract_openai_reasoning_summary(json, message);
         let mut blocks = if text.is_empty() {
@@ -418,9 +442,7 @@ pub(crate) fn parse_llm_response(
         let output_tokens = json["usage"]["completion_tokens"].as_i64().unwrap_or(0);
         let cache_read_tokens = extract_cache_read_tokens(&json["usage"]);
         let cache_write_tokens = extract_cache_write_tokens(&json["usage"]);
-        let stop_reason = json["choices"][0]["finish_reason"]
-            .as_str()
-            .map(|s| s.to_string());
+        let stop_reason = choice["finish_reason"].as_str().map(|s| s.to_string());
         let request_id = json["id"].as_str().filter(|value| !value.is_empty());
         let telemetry = ProviderTelemetry::from_openai_usage(&json["usage"], request_id);
 
@@ -440,12 +462,11 @@ pub(crate) fn parse_llm_response(
         if text.is_empty()
             && extracted_thinking.is_empty()
             && reasoning_summary.is_empty()
-            && output_tokens > 0
             && tool_calls.is_empty()
             && !has_tool_search_block
         {
             return Err(VmError::Thrown(VmValue::String(Rc::from(format!(
-                "openai-compatible model {model} reported completion_tokens={output_tokens} but delivered no content, reasoning, or tool calls"
+                "openai-compatible model {model} delivered no content, reasoning, or tool calls"
             )))));
         }
 
@@ -470,7 +491,7 @@ pub(crate) fn parse_llm_response(
             },
             stop_reason,
             blocks,
-            logprobs: extract_openai_choice_logprobs(&json["choices"][0]),
+            logprobs: extract_openai_choice_logprobs(choice),
             telemetry,
         })
     }
@@ -638,6 +659,50 @@ mod tests {
             item.get("token").and_then(|value| value.as_str()) == Some("risky")
                 && item.get("logprob").and_then(|value| value.as_f64()) == Some(-2.4)
         }));
+    }
+
+    #[test]
+    fn anthropic_parser_rejects_missing_content_array() {
+        let response = serde_json::json!({
+            "id": "msg_bad",
+            "usage": {"input_tokens": 1, "output_tokens": 0}
+        });
+
+        let error = parse_llm_response(&response, "anthropic", "claude-opus-4-7", true)
+            .expect_err("missing content must be rejected");
+
+        assert!(error.to_string().contains("missing content array"));
+    }
+
+    #[test]
+    fn openai_parser_rejects_missing_choices_array() {
+        let response = serde_json::json!({
+            "id": "chatcmpl-bad",
+            "usage": {"prompt_tokens": 1, "completion_tokens": 0}
+        });
+
+        let error = parse_llm_response(&response, "openai", "gpt-5.4-preview", false)
+            .expect_err("missing choices must be rejected");
+
+        assert!(error
+            .to_string()
+            .contains("missing non-empty choices array"));
+    }
+
+    #[test]
+    fn openai_parser_rejects_empty_message_without_content() {
+        let response = serde_json::json!({
+            "choices": [{
+                "message": {"content": ""},
+                "finish_reason": "stop"
+            }],
+            "usage": {"prompt_tokens": 1, "completion_tokens": 0}
+        });
+
+        let error = parse_llm_response(&response, "openai", "gpt-5.4-preview", false)
+            .expect_err("empty provider message must be rejected");
+
+        assert!(error.to_string().contains("delivered no content"));
     }
 
     #[test]

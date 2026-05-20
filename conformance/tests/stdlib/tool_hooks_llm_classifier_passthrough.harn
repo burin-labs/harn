@@ -37,11 +37,11 @@ pipeline default() {
   let r2 = wrapper({command: "ls -la"})
   println(r2.ok)
   println(r2.ran)
-  /* Scenario 3: cache hit. Repeat scenario 1's command — the classifier
-   * cache should return the prior low-confidence verdict without
-   * invoking the model again. Compare llm_mock_calls() before vs after. */
+  /* Scenario 3: cache hit. Repeat scenario 1's command with different
+   * whitespace. The classifier cache should normalize it and return the
+   * prior low-confidence verdict without invoking the model again. */
   let calls_before = len(llm_mock_calls())
-  let r3 = wrapper({command: "echo hello"})
+  let r3 = wrapper({command: "echo   hello"})
   println(r3.ok)
   println(r3.ran)
   let calls_after = len(llm_mock_calls())

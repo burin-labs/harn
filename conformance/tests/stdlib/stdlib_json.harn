@@ -20,4 +20,8 @@ pipeline default(task) {
   // omit: remove specific keys
   let omitted = omit({a: 1, b: 2, c: 3}, ["b"])
   println(json_stringify(omitted))
+  let non_finite = json_stringify([sqrt(-1.0)])
+  println(non_finite)
+  let parsed_non_finite: list = json_parse(non_finite)
+  println(parsed_non_finite[0])
 }

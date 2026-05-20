@@ -806,10 +806,12 @@ let same     = regex_replace_all("(\\w+)\\s(\\w+)", "$2 $1", "hello world")
 let captures = regex_captures("(?P<day>[A-Z][a-z]+)", "Mon Tue")
 let words    = regex_split("a, b, c", ",\\s*")
 let ci       = regex_match("hello", "HeLLo", "i")
+let fixed_ci = regex_replace("hello", "hi", "HeLLo", "i")
 ```
 
 `regex_replace` and `regex_replace_all` both replace every match and
-both support `$1`, `$2`, `${name}` backrefs.
+both support `$1`, `$2`, `${name}` backrefs plus the same optional
+`i`/`m`/`s`/`x` flags as `regex_match`.
 
 ## Encoding, bytes, and compression
 

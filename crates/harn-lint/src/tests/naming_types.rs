@@ -74,3 +74,42 @@ pipeline default(task) {
         "referenced types should not trigger unused-type: {diags:?}"
     );
 }
+
+#[test]
+fn test_unused_type_warns_for_unreferenced_alias() {
+    let diags = lint_source(
+        r#"
+type Payload = {value: int}
+
+pipeline default(task) {
+  log("ready")
+}
+"#,
+    );
+    assert!(
+        has_rule(&diags, "unused-type"),
+        "expected unused-type warning for alias, got: {diags:?}"
+    );
+}
+
+#[test]
+fn test_unused_type_ignores_referenced_alias() {
+    let diags = lint_source(
+        r#"
+type Payload = {value: int}
+
+fn build() -> Payload {
+  return {value: 1}
+}
+
+pipeline default(task) {
+  let item = build()
+  log(item.value)
+}
+"#,
+    );
+    assert!(
+        !has_rule(&diags, "unused-type"),
+        "referenced aliases should not trigger unused-type: {diags:?}"
+    );
+}

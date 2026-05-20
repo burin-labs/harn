@@ -501,7 +501,8 @@ pub(crate) fn escape_json_string_vm(s: &str) -> String {
 fn vm_value_to_data_value(value: &VmValue) -> serde_json::Value {
     match value {
         VmValue::Int(i) => serde_json::json!(i),
-        VmValue::Float(f) => serde_json::json!(f),
+        VmValue::Float(f) if f.is_finite() => serde_json::json!(f),
+        VmValue::Float(_) => serde_json::Value::Null,
         VmValue::String(s) => serde_json::json!(s.as_ref()),
         VmValue::Bool(b) => serde_json::json!(b),
         VmValue::Nil => serde_json::Value::Null,
@@ -549,7 +550,8 @@ fn write_vm_value_to_json(val: &VmValue, out: &mut String) {
             out.push('}');
         }
         VmValue::Int(n) => out.push_str(&n.to_string()),
-        VmValue::Float(n) => out.push_str(&n.to_string()),
+        VmValue::Float(n) if n.is_finite() => out.push_str(&n.to_string()),
+        VmValue::Float(_) => out.push_str("null"),
         VmValue::Bool(b) => out.push_str(if *b { "true" } else { "false" }),
         VmValue::Nil => out.push_str("null"),
         VmValue::List(items) | VmValue::Set(items) => {
@@ -721,5 +723,25 @@ mod tests {
         assert_eq!(parse_pointer_index("-1"), None);
         assert_eq!(parse_pointer_index("01"), None);
         assert_eq!(parse_pointer_index("1.0"), None);
+    }
+
+    #[test]
+    fn stringify_non_finite_floats_as_json_null() {
+        let value = VmValue::List(Rc::new(vec![
+            VmValue::Float(f64::NAN),
+            VmValue::Float(f64::INFINITY),
+            VmValue::Float(f64::NEG_INFINITY),
+            VmValue::Float(1.5),
+        ]));
+
+        let compact = vm_value_to_json(&value);
+        assert_eq!(compact, "[null,null,null,1.5]");
+        serde_json::from_str::<serde_json::Value>(&compact).expect("compact JSON parses");
+
+        let pretty = serde_json::to_string_pretty(&vm_value_to_data_value(&value)).unwrap();
+        assert_eq!(
+            serde_json::from_str::<serde_json::Value>(&pretty).unwrap(),
+            serde_json::json!([null, null, null, 1.5])
+        );
     }
 }

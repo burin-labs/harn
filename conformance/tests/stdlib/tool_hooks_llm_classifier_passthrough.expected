@@ -3,7 +3,7 @@ echo hello
 true
 ls -la
 true
-echo hello
+echo   hello
 0
 3
 passthrough

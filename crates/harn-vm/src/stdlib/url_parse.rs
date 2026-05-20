@@ -86,43 +86,55 @@ pub(crate) fn register_url_builtins(vm: &mut Vm) {
         let host = dict_str(parts, "host").unwrap_or("");
         let path = dict_str(parts, "path").unwrap_or("/");
 
-        // Build the authority piece manually so we can inject userinfo and
-        // port without re-parsing.
-        let userinfo = match (
-            dict_str(parts, "username").filter(|s| !s.is_empty()),
-            dict_str(parts, "password"),
-        ) {
-            (Some(u), Some(p)) => format!("{u}:{p}@"),
-            (Some(u), None) => format!("{u}@"),
-            _ => String::new(),
-        };
-        let port = parts
-            .get("port")
-            .and_then(|v| v.as_int())
-            .map(|p| format!(":{p}"))
-            .unwrap_or_default();
-
-        let authority = if host.is_empty() {
-            String::new()
+        let mut parsed = if host.is_empty() {
+            Url::parse(&format!("{scheme}:{path}")).map_err(|e| {
+                VmError::Thrown(VmValue::String(Rc::from(format!("url_build: {e}"))))
+            })?
         } else {
-            format!("//{userinfo}{host}{port}")
+            let mut url = Url::parse(&format!("{scheme}://placeholder.invalid/")).map_err(|e| {
+                VmError::Thrown(VmValue::String(Rc::from(format!("url_build: {e}"))))
+            })?;
+            url.set_host(Some(host)).map_err(|_| {
+                VmError::Thrown(VmValue::String(Rc::from(format!(
+                    "url_build: invalid host '{host}'"
+                ))))
+            })?;
+            if let Some(username) = dict_str(parts, "username").filter(|value| !value.is_empty()) {
+                url.set_username(username).map_err(|_| {
+                    VmError::Thrown(VmValue::String(Rc::from(
+                        "url_build: username is not allowed for this URL",
+                    )))
+                })?;
+            }
+            if let Some(password) = dict_str(parts, "password") {
+                url.set_password(Some(password)).map_err(|_| {
+                    VmError::Thrown(VmValue::String(Rc::from(
+                        "url_build: password is not allowed for this URL",
+                    )))
+                })?;
+            }
+            if let Some(port) = parts.get("port").and_then(|v| v.as_int()) {
+                if !(0..=u16::MAX as i64).contains(&port) {
+                    return Err(VmError::Thrown(VmValue::String(Rc::from(format!(
+                        "url_build: invalid port {port}"
+                    )))));
+                }
+                url.set_port(Some(port as u16)).map_err(|_| {
+                    VmError::Thrown(VmValue::String(Rc::from(
+                        "url_build: port is not allowed for this URL",
+                    )))
+                })?;
+            }
+            url.set_path(path);
+            url
         };
-        let mut composed = format!("{scheme}:{authority}{path}");
-        if let Some(q) = dict_str(parts, "query") {
-            if !q.is_empty() {
-                composed.push('?');
-                composed.push_str(q);
-            }
+
+        if let Some(q) = dict_str(parts, "query").filter(|value| !value.is_empty()) {
+            parsed.set_query(Some(q));
         }
-        if let Some(f) = dict_str(parts, "fragment") {
-            if !f.is_empty() {
-                composed.push('#');
-                composed.push_str(f);
-            }
+        if let Some(f) = dict_str(parts, "fragment").filter(|value| !value.is_empty()) {
+            parsed.set_fragment(Some(f));
         }
-        // Round-trip through `Url` to canonicalize and surface errors.
-        let parsed = Url::parse(&composed)
-            .map_err(|e| VmError::Thrown(VmValue::String(Rc::from(format!("url_build: {e}")))))?;
         Ok(VmValue::String(Rc::from(parsed.as_str())))
     });
 

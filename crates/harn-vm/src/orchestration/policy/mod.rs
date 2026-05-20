@@ -200,20 +200,22 @@ pub fn enforce_current_policy_for_builtin(name: &str, args: &[VmValue]) -> Resul
         return Ok(());
     };
     match name {
-        "read_file" | "read_file_result" | "read_file_bytes"
+        "read_file" | "read_file_result" | "read_file_bytes" | "read_lines"
             if !policy_allows_capability(&policy, "workspace", "read_text") =>
         {
             return reject_policy(format!(
                 "builtin '{name}' exceeds workspace.read_text ceiling"
             ));
         }
-        "list_dir" if !policy_allows_capability(&policy, "workspace", "list") => {
+        "list_dir" | "walk_dir" | "glob"
+            if !policy_allows_capability(&policy, "workspace", "list") =>
+        {
             return reject_policy(format!("builtin '{name}' exceeds workspace.list ceiling"));
         }
         "file_exists" | "stat" if !policy_allows_capability(&policy, "workspace", "exists") => {
             return reject_policy(format!("builtin '{name}' exceeds workspace.exists ceiling"));
         }
-        "write_file" | "write_file_bytes" | "append_file" | "mkdir" | "copy_file"
+        "write_file" | "write_file_bytes" | "append_file" | "mkdir" | "copy_file" | "move_file"
             if !policy_allows_capability(&policy, "workspace", "write_text")
                 || !policy_allows_side_effect(&policy, "workspace_write") =>
         {
@@ -454,15 +456,7 @@ pub fn redact_transcript_visibility(
     let public_messages = match dict.get("messages") {
         Some(VmValue::List(list)) => list
             .iter()
-            .filter(|message| {
-                message
-                    .as_dict()
-                    .and_then(|d| d.get("role"))
-                    .map(|v| v.display())
-                    .map(|role| role != "tool_result")
-                    .unwrap_or(true)
-            })
-            .cloned()
+            .filter_map(redact_public_message)
             .collect::<Vec<_>>(),
         _ => Vec::new(),
     };
@@ -488,6 +482,76 @@ pub fn redact_transcript_visibility(
     );
     redacted.insert("events".to_string(), VmValue::List(Rc::new(public_events)));
     Some(VmValue::Dict(Rc::new(redacted)))
+}
+
+fn redact_public_message(message: &VmValue) -> Option<VmValue> {
+    let Some(dict) = message.as_dict() else {
+        return Some(message.clone());
+    };
+    if dict.get("role").map(|value| value.display()).as_deref() == Some("tool_result") {
+        return None;
+    }
+    if dict
+        .get("visibility")
+        .map(|value| value.display())
+        .is_some_and(|visibility| visibility != "public")
+    {
+        return None;
+    }
+
+    let mut redacted = dict.clone();
+    let mut saw_structured_blocks = false;
+    let mut public_text = Vec::new();
+    for key in ["content", "blocks"] {
+        if let Some(VmValue::List(blocks)) = dict.get(key) {
+            saw_structured_blocks = true;
+            let public_blocks = blocks
+                .iter()
+                .filter_map(redact_public_block)
+                .collect::<Vec<_>>();
+            if key == "blocks" || public_text.is_empty() {
+                public_text = text_fragments_from_blocks(&public_blocks);
+            }
+            redacted.insert(key.to_string(), VmValue::List(Rc::new(public_blocks)));
+        }
+    }
+    if saw_structured_blocks {
+        if public_text.is_empty() {
+            redacted.remove("text");
+        } else {
+            redacted.insert(
+                "text".to_string(),
+                VmValue::String(Rc::from(public_text.join("\n"))),
+            );
+        }
+    }
+    Some(VmValue::Dict(Rc::new(redacted)))
+}
+
+fn redact_public_block(block: &VmValue) -> Option<VmValue> {
+    let Some(dict) = block.as_dict() else {
+        return Some(block.clone());
+    };
+    if dict
+        .get("visibility")
+        .map(|value| value.display())
+        .is_some_and(|visibility| visibility != "public")
+    {
+        return None;
+    }
+    Some(block.clone())
+}
+
+fn text_fragments_from_blocks(blocks: &[VmValue]) -> Vec<String> {
+    blocks
+        .iter()
+        .filter_map(|block| block.as_dict())
+        .filter_map(|dict| dict.get("text"))
+        .filter_map(|text| match text {
+            VmValue::String(value) if !value.is_empty() => Some(value.to_string()),
+            _ => None,
+        })
+        .collect()
 }
 
 pub fn builtin_ceiling() -> CapabilityPolicy {
@@ -871,6 +935,46 @@ mod approval_policy_tests {
         pop_execution_policy();
         crate::stdlib::process::set_thread_execution_context(None);
     }
+
+    #[test]
+    fn builtin_policy_covers_fs_read_and_list_helpers() {
+        clear_execution_policy_stacks();
+        push_execution_policy(CapabilityPolicy {
+            capabilities: BTreeMap::from([("workspace".to_string(), vec!["exists".to_string()])]),
+            side_effect_level: Some("read_only".to_string()),
+            ..CapabilityPolicy::default()
+        });
+
+        for name in ["read_lines", "walk_dir", "glob"] {
+            assert!(
+                enforce_current_policy_for_builtin(name, &[]).is_err(),
+                "{name} should be rejected when the matching workspace capability is absent"
+            );
+        }
+
+        pop_execution_policy();
+    }
+
+    #[test]
+    fn move_file_requires_workspace_write_side_effect() {
+        clear_execution_policy_stacks();
+        push_execution_policy(CapabilityPolicy {
+            capabilities: BTreeMap::from([(
+                "workspace".to_string(),
+                vec!["write_text".to_string()],
+            )]),
+            side_effect_level: Some("read_only".to_string()),
+            ..CapabilityPolicy::default()
+        });
+
+        let error = enforce_current_policy_for_builtin("move_file", &[]).unwrap_err();
+        assert!(
+            error.to_string().contains("workspace write ceiling"),
+            "unexpected error: {error}"
+        );
+
+        pop_execution_policy();
+    }
 }
 
 #[cfg(test)]
@@ -955,6 +1059,35 @@ mod visibility_redaction_tests {
         let t = mock_transcript();
         let result = redact_transcript_visibility(&t, Some("public")).unwrap();
         assert_eq!(message_count(&result), 2);
+    }
+
+    #[test]
+    fn visibility_public_drops_private_content_blocks() {
+        let t = crate::schema::json_to_vm_value(&serde_json::json!({
+            "messages": [
+                {
+                    "role": "assistant",
+                    "visibility": "public",
+                    "text": "visible answer\nsecret chain",
+                    "content": [
+                        {"type": "output_text", "text": "visible answer", "visibility": "public"},
+                        {"type": "reasoning", "text": "secret chain", "visibility": "private"}
+                    ],
+                    "blocks": [
+                        {"type": "output_text", "text": "visible block", "visibility": "public"},
+                        {"type": "tool_call", "text": "internal args", "visibility": "internal"}
+                    ]
+                }
+            ],
+            "events": []
+        }));
+
+        let result = redact_transcript_visibility(&t, Some("public")).unwrap();
+        let rendered = result.display();
+        assert!(rendered.contains("visible answer"));
+        assert!(rendered.contains("visible block"));
+        assert!(!rendered.contains("secret chain"));
+        assert!(!rendered.contains("internal args"));
     }
 
     #[test]

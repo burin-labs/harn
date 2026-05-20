@@ -5,12 +5,24 @@ use tower_lsp::jsonrpc::Result;
 use tower_lsp::lsp_types::*;
 
 use crate::constants::{builtin_doc, builtin_signature, keyword_doc};
-use crate::helpers::{lsp_position_to_offset, word_at_position};
+use crate::helpers::{lsp_position_to_offset, offset_to_position, word_at_position};
 use crate::symbols::{
     format_flow_attributes_block, format_shape_expanded, format_union_shapes_expanded,
     HarnSymbolKind, SymbolInfo,
 };
 use crate::HarnLsp;
+
+fn line_prefix_at_position(source: &str, position: Position) -> Option<&str> {
+    let offset = lsp_position_to_offset(source, position);
+    if offset == source.len() && offset_to_position(source, offset).line < position.line {
+        return None;
+    }
+    let line_start = source[..offset]
+        .rfind('\n')
+        .map(|idx| idx + '\n'.len_utf8())
+        .unwrap_or(0);
+    Some(&source[line_start..offset])
+}
 
 impl HarnLsp {
     pub(super) async fn handle_hover(&self, params: HoverParams) -> Result<Option<Hover>> {
@@ -187,16 +199,8 @@ impl HarnLsp {
             }
         };
 
-        let lines: Vec<&str> = source.lines().collect();
-        let line = match lines.get(position.line as usize) {
-            Some(l) => *l,
-            None => return Ok(None),
-        };
-        let col = position.character as usize;
-        let prefix = if col <= line.len() {
-            &line[..col]
-        } else {
-            line
+        let Some(prefix) = line_prefix_at_position(&source, position) else {
+            return Ok(None);
         };
 
         let mut depth = 0i32;
@@ -319,5 +323,22 @@ impl HarnLsp {
             .collect();
 
         Ok(if hints.is_empty() { None } else { Some(hints) })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn signature_prefix_uses_utf16_position_without_slicing_mid_char() {
+        let source = "éé(log(";
+        let prefix = line_prefix_at_position(source, Position::new(0, 7)).unwrap();
+        assert_eq!(prefix, source);
+    }
+
+    #[test]
+    fn signature_prefix_rejects_out_of_range_line() {
+        assert!(line_prefix_at_position("log(", Position::new(4, 0)).is_none());
     }
 }

@@ -598,7 +598,7 @@ For interactive terminal presentation, import `std/tui`. It provides
 |---|---|---|---|
 | `regex_match(pattern, text, flags?)` | pattern: string, text: string, flags: string | list or nil | Find all non-overlapping matches. Optional flags: `i`, `m`, `s`, `x` |
 | `regex_split(text, pattern, flags?)` | text: string, pattern: string, flags: string | list | Split text by regex matches |
-| `regex_replace(pattern, replacement, text)` | pattern: string, replacement: string, text: string | string | Replace all matches. Throws on invalid regex |
+| `regex_replace(pattern, replacement, text, flags?)` | pattern: string, replacement: string, text: string, flags: string | string | Replace all matches. Optional flags: `i`, `m`, `s`, `x`. Throws on invalid regex |
 | `regex_captures(pattern, text)` | pattern: string, text: string | list | Find all matches with capture group details |
 
 ### regex_captures

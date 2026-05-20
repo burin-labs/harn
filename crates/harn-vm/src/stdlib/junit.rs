@@ -220,13 +220,58 @@ fn combined_message(message: Option<String>, body_text: String) -> String {
 }
 
 fn attr(header: &str, key: &str) -> Option<String> {
-    // Require a leading space so we don't match `name="..."` inside
-    // `classname="..."` and friends.
-    let needle = format!(" {key}=\"");
-    let start = header.find(&needle)?;
-    let after = &header[start + needle.len()..];
-    let end = after.find('"')?;
-    Some(unescape_xml(&after[..end]))
+    let bytes = header.as_bytes();
+    let mut idx = 0;
+    while idx < bytes.len() {
+        while idx < bytes.len() && bytes[idx].is_ascii_whitespace() {
+            idx += 1;
+        }
+        if idx >= bytes.len() {
+            break;
+        }
+        if bytes[idx] == b'<' || bytes[idx] == b'/' {
+            idx += 1;
+            continue;
+        }
+        let name_start = idx;
+        while idx < bytes.len()
+            && (bytes[idx].is_ascii_alphanumeric()
+                || matches!(bytes[idx], b'_' | b'-' | b':' | b'.'))
+        {
+            idx += 1;
+        }
+        let name = &header[name_start..idx];
+        while idx < bytes.len() && bytes[idx].is_ascii_whitespace() {
+            idx += 1;
+        }
+        if idx >= bytes.len() || bytes[idx] != b'=' {
+            if idx == name_start || idx >= bytes.len() || matches!(bytes[idx], b'>' | b'/') {
+                idx += 1;
+            }
+            continue;
+        }
+        idx += 1;
+        while idx < bytes.len() && bytes[idx].is_ascii_whitespace() {
+            idx += 1;
+        }
+        if idx >= bytes.len() || !matches!(bytes[idx], b'"' | b'\'') {
+            continue;
+        }
+        let quote = bytes[idx];
+        idx += 1;
+        let value_start = idx;
+        while idx < bytes.len() && bytes[idx] != quote {
+            idx += 1;
+        }
+        if idx >= bytes.len() {
+            break;
+        }
+        if name == key {
+            return Some(unescape_xml(&header[value_start..idx]));
+        }
+        idx += 1;
+    }
+    None
 }
 
 fn unescape_xml(text: &str) -> String {
@@ -320,5 +365,22 @@ mod tests {
         let records = parse_junit_xml(xml.as_bytes());
         assert_eq!(records.len(), 1);
         assert_eq!(records[0].name, "pkg.Suite::actual");
+    }
+
+    #[test]
+    fn parses_single_quoted_and_spaced_attributes() {
+        let xml = r#"<testsuite>
+  <testcase classname = 'pkg.Suite' name = 'actual' time = '0.003'>
+    <failure message = 'a &amp; b'>left &lt; right</failure>
+  </testcase>
+</testsuite>"#;
+        let records = parse_junit_xml(xml.as_bytes());
+        assert_eq!(records.len(), 1);
+        assert_eq!(records[0].name, "pkg.Suite::actual");
+        assert_eq!(records[0].duration_ms, 3);
+        assert_eq!(records[0].status, Status::Failed);
+        let message = records[0].message.as_deref().unwrap();
+        assert!(message.contains("a & b"));
+        assert!(message.contains("left < right"));
     }
 }

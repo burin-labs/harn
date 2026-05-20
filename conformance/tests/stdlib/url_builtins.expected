@@ -6,6 +6,8 @@
 [harn] frag
 [harn] user
 [harn] https://example.com/api?x=1&y=2
+[harn] https://example.com/api
+[harn] https://a%40b:p%3Aq@example.com/
 [harn] 3
 [harn] key
 [harn] alpha
