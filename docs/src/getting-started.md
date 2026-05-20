@@ -113,7 +113,9 @@ harn completions fish > ~/.config/fish/completions/harn.fish
 Create a file called `hello.harn`:
 
 ```harn
-log("Hello, world!")
+fn main(harness: Harness) {
+  harness.stdio.println("Hello, world!")
+}
 ```
 
 Run it:
@@ -122,14 +124,20 @@ Run it:
 harn run hello.harn
 ```
 
-That's it. Harn files can contain top-level code without any boilerplate.
-The above is an **implicit pipeline** -- the runtime wraps your top-level
-statements automatically.
+That's it. For capability-aware scripts, `fn main(harness: Harness)` is the
+canonical entrypoint: the runtime passes in the script's `Harness` handle and
+you route side effects through `harness.*`.
+
+Harn still supports top-level code without boilerplate. For tiny one-off
+snippets, the runtime can wrap top-level statements as an **implicit pipeline**,
+but the explicit `main(harness: Harness)` form is the recommended starting
+point once a script needs stdio, clock, filesystem, env, random, or network
+access.
 
 ## Adding a pipeline
 
-For larger programs, organize code into named pipelines. The runtime
-executes the `default` pipeline (or the first one declared):
+For larger workflow-style programs, organize code into named pipelines. The
+runtime executes the `default` pipeline (or the first one declared):
 
 ```harn
 pipeline default(task) {

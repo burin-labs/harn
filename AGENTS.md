@@ -9,6 +9,10 @@ concurrency primitives (`parallel each` / `parallel settle` with `max_concurrent
 `llm_call` options table (including `schema_retries` + `provider: "auto"`), and the gotchas
 that repeatedly trip up first-time scripters.
 
+For new scripts, default to the explicit entrypoint form
+`fn main(harness: Harness) { ... }` and route capability access through
+`harness.*` (for example `harness.stdio.println("hi")`).
+
 - In-repo: `docs/llm/harn-quickref.md`
 - Trigger/orchestrator add-on: `docs/llm/harn-triggers-quickref.md`
 - Canonical URL: <https://harnlang.com/docs/llm/harn-quickref.html>

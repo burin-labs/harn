@@ -16,6 +16,8 @@ Pair it with [[harn-testing]] for fixtures and [[harn-diagnostics]] for user-fac
 - Read `docs/llm/harn-quickref.md` before editing `.harn` files.
 - Use `docs/llm/harn-triggers-quickref.md` when trigger manifests are involved.
 - Treat `spec/HARN_SPEC.md` as the canonical language reference.
+- Default new script entrypoints to `fn main(harness: Harness) { ... }` and
+  route side effects through `harness.*`.
 - Edit `spec/HARN_SPEC.md`, not `docs/src/language-spec.md`, for spec changes.
 - Regenerate generated spec docs with `make sync-language-spec`.
 - Check user-visible behavior with conformance fixtures under `conformance/tests/`.
