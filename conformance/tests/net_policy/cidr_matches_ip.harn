@@ -1,0 +1,25 @@
+/**
+ * `NetPolicy.cidr("10.0.0.0/8")` matches URLs whose host is an IP
+ * literal inside the range, and denies IPs outside it. Per the issue
+ * spec, full DNS-resolved IP matching is layered on as part of the
+ * E4.4 real-mode wiring (#1769); this fixture covers the literal-IP
+ * leg the mock harness can exercise deterministically.
+ *
+ * Tracking: harn#1913 (E4.9).
+ */
+import { cidr, create } from "std/net_policy"
+
+fn main(harness: Harness) {
+  let policy = create({allow: [cidr("10.0.0.0/8")], default: "deny"})
+  let restricted = harness.with_net_policy(policy)
+  let inside = restricted.net.get("http://10.5.5.5/probe")
+  harness.stdio.println("inside=" + inside)
+  var outside_err = nil
+  try {
+    restricted.net.get("http://192.168.1.1/blocked")
+  } catch (e) {
+    outside_err = e
+  }
+  harness.stdio.println("outside_blocked=" + to_string(outside_err != nil))
+  harness.stdio.println("outside_outcome=" + outside_err.outcome)
+}

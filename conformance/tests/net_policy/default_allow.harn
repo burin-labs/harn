@@ -1,0 +1,22 @@
+/**
+ * `default: "allow"` lets unmatched URLs through, while explicit
+ * deny rules still fire. Inverts the safety default so authors can
+ * opt out of the deny-by-default contract for trusted contexts.
+ *
+ * Tracking: harn#1913 (E4.9).
+ */
+import { create, domain_wildcard } from "std/net_policy"
+
+fn main(harness: Harness) {
+  let policy = create({deny: [domain_wildcard("*.competitor.com")], default: "allow"})
+  let restricted = harness.with_net_policy(policy)
+  let through = restricted.net.get("https://example.test/anywhere")
+  harness.stdio.println("through=" + through)
+  var deny_err = nil
+  try {
+    restricted.net.get("https://api.competitor.com/x")
+  } catch (e) {
+    deny_err = e
+  }
+  harness.stdio.println("competitor_blocked=" + to_string(deny_err != nil))
+}

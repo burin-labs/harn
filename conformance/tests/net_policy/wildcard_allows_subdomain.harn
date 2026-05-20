@@ -1,0 +1,23 @@
+/**
+ * `NetPolicy.domain_wildcard("*.github.com")` matches subdomains
+ * (`api.github.com`) but NOT the bare apex (`github.com`). Mirrors
+ * the deny-by-default contract from the issue spec.
+ *
+ * Tracking: harn#1913 (E4.9).
+ */
+import { create, domain_wildcard } from "std/net_policy"
+
+fn main(harness: Harness) {
+  let policy = create({allow: [domain_wildcard("*.github.com")], default: "deny"})
+  let restricted = harness.with_net_policy(policy)
+  let body = restricted.net.get("https://api.github.com/v1/users")
+  harness.stdio.println("api=" + body)
+  var apex_err = nil
+  try {
+    restricted.net.get("https://github.com/")
+  } catch (e) {
+    apex_err = e
+  }
+  harness.stdio.println("apex_blocked=" + to_string(apex_err != nil))
+  harness.stdio.println("apex_host=" + apex_err.host)
+}

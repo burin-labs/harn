@@ -42,6 +42,7 @@ mod math;
 mod memory;
 mod monitors;
 mod multipart;
+mod net_policy;
 mod oauth_dynreg;
 mod oauth_storage;
 mod options;
@@ -125,6 +126,7 @@ pub fn register_core_stdlib(vm: &mut Vm) {
     testing::register_testing_builtins(vm);
     flow::register_flow_builtins(vm);
     lifecycle_receipts::register_lifecycle_receipt_builtins(vm);
+    net_policy::register_net_policy_builtins(vm);
 }
 
 /// Register I/O builtins (requires OS access).

@@ -1,0 +1,23 @@
+/**
+ * `on_violation: "quarantine"` denies the request AND flips the
+ * harness's sticky `is_quarantined()` flag, so downstream tooling can
+ * gate further work on the signal even after the throw is caught.
+ *
+ * Tracking: harn#1913 (E4.9).
+ */
+import { create } from "std/net_policy"
+
+fn main(harness: Harness) {
+  let policy = create({allow: [], default: "deny", on_violation: "quarantine"})
+  let restricted = harness.with_net_policy(policy)
+  harness.stdio.println("before=" + to_string(restricted.is_quarantined()))
+  var err = nil
+  try {
+    restricted.net.get("https://probe.test/x")
+  } catch (e) {
+    err = e
+  }
+  harness.stdio.println("threw=" + to_string(err != nil))
+  harness.stdio.println("outcome=" + err.outcome)
+  harness.stdio.println("after=" + to_string(restricted.is_quarantined()))
+}

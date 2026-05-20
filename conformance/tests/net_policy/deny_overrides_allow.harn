@@ -1,0 +1,24 @@
+/**
+ * Deny rules always win over allow rules. `*.github.com` allows
+ * subdomains broadly, but an explicit deny for one carves it out.
+ *
+ * Tracking: harn#1913 (E4.9).
+ */
+import { create, domain, domain_wildcard } from "std/net_policy"
+
+fn main(harness: Harness) {
+  let policy = create(
+    {allow: [domain_wildcard("*.github.com")], deny: [domain("evil.github.com")], default: "deny"},
+  )
+  let restricted = harness.with_net_policy(policy)
+  let ok = restricted.net.get("https://api.github.com/probe")
+  harness.stdio.println("api=" + ok)
+  var deny_err = nil
+  try {
+    restricted.net.get("https://evil.github.com/x")
+  } catch (e) {
+    deny_err = e
+  }
+  harness.stdio.println("evil_blocked=" + to_string(deny_err != nil))
+  harness.stdio.println("matched_rule=" + deny_err.matched_rule)
+}

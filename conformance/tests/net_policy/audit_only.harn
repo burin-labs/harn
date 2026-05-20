@@ -1,0 +1,17 @@
+/**
+ * `on_violation: "audit_only"` lets the underlying call proceed but
+ * leaves a record on the audit log. Use this when you want to
+ * observe policy drift without breaking the script.
+ *
+ * Tracking: harn#1913 (E4.9).
+ */
+import { create } from "std/net_policy"
+
+fn main(harness: Harness) {
+  let policy = create({allow: [], default: "deny", on_violation: "audit_only"})
+  let observed = harness.with_net_policy(policy)
+  // The URL would otherwise be denied, but audit_only lets it through.
+  let body = observed.net.get("https://shadow.test/x")
+  harness.stdio.println("body=" + body)
+  harness.stdio.println("quarantined=" + to_string(observed.is_quarantined()))
+}
