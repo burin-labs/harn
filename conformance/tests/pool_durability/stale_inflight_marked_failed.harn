@@ -5,7 +5,7 @@
 import { fail_fast, pool_create, pool_simulate_restart, pool_wait } from "std/lifecycle/pool"
 
 pipeline default() {
-  let dir = path_join(temp_dir(), "harn-pool-durability-stale-" + uuid())
+  let dir = path_join(harness.fs.temp_dir(), "harn-pool-durability-stale-" + uuid())
   let pool = pool_create(
     {
       name: "stale-demo",
@@ -24,11 +24,11 @@ pipeline default() {
   // simulate_restart helper then drops the live registry, and a fresh
   // pool_create re-hydrates: terminal "task-A" stays completed, the
   // forged in-flight "task-B" is re-classified as failed (process gone).
-  let forged_path = path_join(dir, list_dir(dir)[0])
-  let _now = now_ms()
+  let forged_path = path_join(dir, harness.fs.list_dir(dir)[0])
+  let _now = harness.clock.now_ms()
   let stale = "{\"kind\":\"task\",\"task\":{\"id\":\"stale_task\",\"pool_id\":\"" + pool.id
     + "\",\"pool_name\":\"stale-demo\",\"priority\":0,\"status\":\"running\",\"submitted_at\":\"forged\",\"started_at\":\"forged\",\"idempotency_key\":\"task-B\",\"heartbeat_at_ms\":0,\"seq\":99}}\n"
-  write_file(forged_path, read_file(forged_path) + stale)
+  harness.fs.write_text(forged_path, harness.fs.read_text(forged_path) + stale)
   pool_simulate_restart()
   let resumed = pool_create(
     {

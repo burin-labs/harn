@@ -21,7 +21,7 @@ let CHANGELOG_PATH = "CHANGELOG.md"
  * if no `version = "..."` line is at the top of the file.
  */
 pub fn read_cargo_version() -> string {
-  let captures = regex_captures(r"(?m)^version = \x22([^\x22]+)\x22", read_file(CARGO_PATH))
+  let captures = regex_captures(r"(?m)^version = \x22([^\x22]+)\x22", harness.fs.read_text(CARGO_PATH))
   if captures.count == 0 {
     throw "could not find workspace version in ${CARGO_PATH}"
   }
@@ -30,7 +30,7 @@ pub fn read_cargo_version() -> string {
 
 /** Pull the topmost `## vX.Y.Z` heading from CHANGELOG.md. */
 pub fn read_changelog_top_version() -> string {
-  let captures = regex_captures(r"(?m)^## v(\d+\.\d+\.\d+)\s*$", read_file(CHANGELOG_PATH))
+  let captures = regex_captures(r"(?m)^## v(\d+\.\d+\.\d+)\s*$", harness.fs.read_text(CHANGELOG_PATH))
   if captures.count == 0 {
     throw "no `## vX.Y.Z` heading found in ${CHANGELOG_PATH}"
   }

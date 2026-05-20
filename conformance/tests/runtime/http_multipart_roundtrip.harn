@@ -1,6 +1,7 @@
 pipeline default() {
   http_mock("POST", "https://api.example.com/upload", {status: 201, body: "uploaded", headers: {}})
-  let response = http_post(
+  let response = harness.net
+    .post(
     "https://api.example.com/upload",
     {
       multipart: [

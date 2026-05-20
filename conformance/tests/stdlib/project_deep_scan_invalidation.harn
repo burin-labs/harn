@@ -2,9 +2,9 @@ import "std/project"
 
 pipeline test(task) {
   let namespace = "coding-enrichment-${uuid()}"
-  let root = path_join(temp_dir(), "project-deep-scan-invalidation-" + uuid())
-  mkdir(root)
-  write_file(path_join(root, "README.md"), "# repo\n")
+  let root = path_join(harness.fs.temp_dir(), "project-deep-scan-invalidation-" + uuid())
+  harness.fs.mkdir(root)
+  harness.fs.write_text(path_join(root, "README.md"), "# repo\n")
   llm_mock({text: "{\"purpose\":\"root\"}"})
   let first = project_deep_scan(
     root,
@@ -21,7 +21,7 @@ pipeline test(task) {
       },
     },
   )
-  write_file(path_join(root, "README.md"), "# repo changed\n")
+  harness.fs.write_text(path_join(root, "README.md"), "# repo changed\n")
   llm_mock({text: "{\"purpose\":\"root changed\"}"})
   let second = project_deep_scan(
     root,
@@ -43,5 +43,5 @@ pipeline test(task) {
   __io_println(second["."].enriched.purpose == "root changed")
   __io_println(second_status.cache_hits == 0)
   __io_println(len(llm_mock_calls()) == 2)
-  delete_file(root)
+  harness.fs.delete(root)
 }

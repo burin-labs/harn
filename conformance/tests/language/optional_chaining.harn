@@ -5,15 +5,15 @@ pipeline default() {
   __io_println(x?.name)
   // Optional chaining on non-nil works normally
   let d = {name: "Alice", age: 30}
-  __io_println(d?.name)
-  __io_println(d?.age)
+  __io_println(d.name)
+  __io_println(d.age)
   // Chained optional access
   let nested = {inner: {value: 42}}
-  __io_println(nested?.inner?.value)
+  __io_println(nested.inner.value)
   // Optional on list
   let items = [1, 2, 3]
-  __io_println(items?.count)
-  __io_println(items?.first)
+  __io_println(items.count)
+  __io_println(items.first)
   // Nil propagation through chain
   let empty = nil
   __io_println(empty?.inner?.value)
@@ -21,6 +21,6 @@ pipeline default() {
   let n = 42
   __io_println(n?.foo)
   let s = "hello"
-  __io_println(s?.count)
+  __io_println(s.count)
   __io_println(s?.foo)
 }

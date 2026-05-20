@@ -29,13 +29,13 @@ pub fn resolve_workspace_path(path) {
 
 /** Read one file from the sample workspace. */
 pub fn read_workspace(path) {
-  return read_file(resolve_workspace_path(path))
+  return harness.fs.read_text(resolve_workspace_path(path))
 }
 
 /** Write one file inside the sample workspace. */
 pub fn write_workspace(path, content) {
   let resolved = resolve_workspace_path(path)
-  write_file(resolved, content)
+  harness.fs.write_text(resolved, content)
   return resolved
 }
 

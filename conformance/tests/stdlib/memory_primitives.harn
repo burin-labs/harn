@@ -1,7 +1,7 @@
 import "std/memory"
 
 pipeline default() {
-  let root = path_join(temp_dir(), "harn-memory-primitives-" + uuid())
+  let root = path_join(harness.fs.temp_dir(), "harn-memory-primitives-" + uuid())
   let options = {root: root, now: "2026-04-29T00:00:00Z"}
   let namespace = "agent/customer"
   let first = memory_store(
@@ -30,5 +30,5 @@ pipeline default() {
   let forgotten = memory_forget(namespace, {tag: "profile"}, {root: root, now: "2026-04-29T00:00:02Z"})
   __io_println(forgotten.forgotten)
   __io_println(len(memory_recall(namespace, "rust", 5, {root: root})))
-  delete_file(root)
+  harness.fs.delete(root)
 }

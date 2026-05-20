@@ -1,4 +1,4 @@
-// Test match arm type narrowing
+/** Test match arm type narrowing */
 pipeline test(task) {
   fn classify(x: string | int | nil) -> string {
     match x {

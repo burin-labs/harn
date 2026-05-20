@@ -359,7 +359,8 @@ pub fn graphql_request(endpoint, query, variables = nil, options = nil) {
   let auth = options?.auth ?? options?.authorization
   let headers = graphql_auth_headers(auth, options?.headers)
   let body = graphql_request_body(query, variables, options)
-  let response = http_request(
+  let response = harness.net
+    .request(
     "POST",
     endpoint,
     filter_nil(

@@ -1,10 +1,12 @@
-// Code Review Agent Example
-//
-// Run with:
-//   cargo run --bin harn -- run examples/code-reviewer.harn
-//
-// This is a compact review agent that reviews a pasted patch or a task
-// description with optional context files.
+/**
+ * Code Review Agent Example
+ *
+ * Run with:
+ *   cargo run --bin harn -- run examples/code-reviewer.harn
+ *
+ * This is a compact review agent that reviews a pasted patch or a task
+ * description with optional context files.
+ */
 pipeline default(task) {
   log("Starting code review agent")
   let system = """

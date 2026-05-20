@@ -1,7 +1,7 @@
 pipeline test(task) {
   // Test error handling: connection refused should throw, caught by try/catch
   try {
-    let _r = http_get("http://127.0.0.1:1", {timeout: 100})
+    let _r = harness.net.get("http://127.0.0.1:1", {timeout: 100})
     __io_println("unexpected success")
   } catch (e) {
     // Should get a connection error
@@ -9,7 +9,7 @@ pipeline test(task) {
   }
   // Test http_request exists and validates args
   try {
-    let _r = http_request("GET", "", {timeout: 100})
+    let _r = harness.net.request("GET", "", {timeout: 100})
     __io_println("unexpected success")
   } catch (e2) {
     __io_println("caught_empty_url")

@@ -277,7 +277,8 @@ pub fn langfuse_sink(opts = nil) {
     let endpoint = __tt_langfuse_endpoint(base_url)
     let auth = "Basic " + base64_encode(public_key + ":" + secret_key)
     let response_outcome = try {
-      http_request(
+      harness.net
+        .request(
         "POST",
         endpoint,
         {

@@ -21,13 +21,13 @@ pipeline default(args) {
   let prompt = "Reply with only the word ok."
   var samples = []
   for i in range(iterations) {
-    let start = monotonic_ms()
+    let start = harness.clock.monotonic_ms()
     let r = llm_call(
       prompt,
       nil,
       {provider: "cerebras", model: model, max_tokens: 8, temperature: 0.0, stream: false},
     )
-    let elapsed = monotonic_ms() - start
+    let elapsed = harness.clock.monotonic_ms() - start
     samples = samples + [elapsed]
     log("[${i + 1}/${iterations}] ${elapsed}ms — ${r.text}")
   }

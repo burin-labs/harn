@@ -1,4 +1,4 @@
-// Test sign, is_nan, is_infinite, atan2
+/** Test sign, is_nan, is_infinite, atan2 */
 pipeline default(task) {
   // sign
   __io_println(sign(42))

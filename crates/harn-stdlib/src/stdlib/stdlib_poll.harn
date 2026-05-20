@@ -15,7 +15,7 @@
 //     elapsed_ms}` so callers don't have to track the bookkeeping.
 //
 // All three honor `mock_time` / `advance_time` because they delegate
-// timing to `now_ms`, `monotonic_ms`, and `sleep_ms` (the unified clock).
+// timing to the unified harness clock.
 //
 // Import with: import { poll_until, wait_for_status, retry_with_result } from "std/poll"
 /** Polling configuration shared by `poll_until` and `wait_for_status`. */
@@ -55,9 +55,9 @@ fn __poll_options(options) {
 pub fn poll_until(check, options: PollOptions = {}) -> any {
   let resolved = __poll_options(options)
   if resolved.initial_delay_ms > 0 {
-    sleep_ms(resolved.initial_delay_ms)
+    harness.clock.sleep_ms(resolved.initial_delay_ms)
   }
-  let started = monotonic_ms()
+  let started = harness.clock.monotonic_ms()
   var attempts = 0
   while true {
     let value = check()
@@ -68,10 +68,10 @@ pub fn poll_until(check, options: PollOptions = {}) -> any {
     if resolved.max_attempts > 0 && attempts >= resolved.max_attempts {
       return nil
     }
-    if monotonic_ms() - started >= resolved.timeout_ms {
+    if harness.clock.monotonic_ms() - started >= resolved.timeout_ms {
       return nil
     }
-    sleep_ms(resolved.interval_ms)
+    harness.clock.sleep_ms(resolved.interval_ms)
   }
   return nil
 }
@@ -96,9 +96,9 @@ pub fn wait_for_status(probe, terminal: list<string>, options: PollOptions = {},
   let resolved = __poll_options(options)
   let terminal_set = set(terminal ?? [])
   if resolved.initial_delay_ms > 0 {
-    sleep_ms(resolved.initial_delay_ms)
+    harness.clock.sleep_ms(resolved.initial_delay_ms)
   }
-  let started = monotonic_ms()
+  let started = harness.clock.monotonic_ms()
   var attempts = 0
   while true {
     let row = probe()
@@ -114,10 +114,10 @@ pub fn wait_for_status(probe, terminal: list<string>, options: PollOptions = {},
     if resolved.max_attempts > 0 && attempts >= resolved.max_attempts {
       return nil
     }
-    if monotonic_ms() - started >= resolved.timeout_ms {
+    if harness.clock.monotonic_ms() - started >= resolved.timeout_ms {
       return nil
     }
-    sleep_ms(resolved.interval_ms)
+    harness.clock.sleep_ms(resolved.interval_ms)
   }
   return nil
 }
@@ -182,7 +182,7 @@ fn __backoff_delay(base_ms: int, attempt: int, multiplier: float, cap_ms: int) -
  */
 pub fn retry_with_result(action, options: RetryOptions = {}) -> RetryReport {
   let resolved = __retry_options(options)
-  let started = monotonic_ms()
+  let started = harness.clock.monotonic_ms()
   var attempt = 0
   var last_error = nil
   while attempt < resolved.max_attempts {
@@ -193,14 +193,14 @@ pub fn retry_with_result(action, options: RetryOptions = {}) -> RetryReport {
         value: unwrap(outcome),
         error: nil,
         attempts: attempt + 1,
-        elapsed_ms: monotonic_ms() - started,
+        elapsed_ms: harness.clock.monotonic_ms() - started,
       }
     }
     last_error = unwrap_err(outcome)
     attempt = attempt + 1
     if attempt < resolved.max_attempts {
       let delay = __backoff_delay(resolved.base_ms, attempt - 1, resolved.multiplier, resolved.cap_ms)
-      sleep_ms(delay)
+      harness.clock.sleep_ms(delay)
     }
   }
   return {
@@ -208,6 +208,6 @@ pub fn retry_with_result(action, options: RetryOptions = {}) -> RetryReport {
     value: nil,
     error: last_error,
     attempts: resolved.max_attempts,
-    elapsed_ms: monotonic_ms() - started,
+    elapsed_ms: harness.clock.monotonic_ms() - started,
   }
 }

@@ -1,4 +1,4 @@
-// Test system attribute builtins
+/** Test system attribute builtins */
 pipeline default(task) {
   // username should return a non-empty string
   let user = username()

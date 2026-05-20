@@ -10,9 +10,9 @@
  *
  * Tracking: harn#1792.
  */
-fn attempt_write(target: string) -> dict {
+fn attempt_write(harness: Harness, target: string) -> dict {
   try {
-    write_file(target, "should never land")
+    harness.fs.write_text(target, "should never land")
     return {caught: nil, wrote: true}
   } catch (e) {
     return {caught: to_string(e), wrote: false}
@@ -20,8 +20,9 @@ fn attempt_write(target: string) -> dict {
 }
 
 pipeline test(task) {
-  mkdir(".harn")
-  let unique = to_string(to_int(timestamp())) + "-" + to_string(random_int(100000, 999999))
+  harness.fs.mkdir(".harn")
+  let unique = to_string(to_int(harness.clock.timestamp())) + "-"
+    + to_string(harness.random.gen_range(100000, 999999))
   let agent = "needs-human-" + unique
   let target = path_join(".harn", "needs_human_" + unique + ".txt")
   let outcome = with_autonomy_policy(
@@ -31,11 +32,11 @@ pipeline test(task) {
       reviewers: ["ops-lead"],
       requires_human_actions: ["fs.write"],
     },
-    fn() { return attempt_write(target) },
+    fn() { return attempt_write(harness, target) },
   )
   // 1. The structured deny fired and the file was never written, even
   //    though the resolved tier is `act_auto`.
-  __io_println(outcome.caught != nil && !file_exists(target))
+  __io_println(outcome.caught != nil && !harness.fs.exists(target))
   __io_println(contains(outcome.caught, "HARN-AUT-NEEDS-HUMAN"))
   __io_println(contains(outcome.caught, "tool_rejected"))
   // 2. A trust-graph record was appended with outcome `denied` and the
@@ -55,7 +56,7 @@ pipeline test(task) {
   __io_println(pending[0].metadata.detail.autonomy_class == "needs-human")
   __io_println(pending[0].metadata.detail.requires_human)
   __io_println(pending[0].metadata.detail.deny_code == "HARN-AUT-NEEDS-HUMAN")
-  if file_exists(target) {
-    delete_file(target)
+  if harness.fs.exists(target) {
+    harness.fs.delete(target)
   }
 }

@@ -1,4 +1,4 @@
-// Test error category builtins
+/** Test error category builtins */
 pipeline default(task) {
   // throw_error and error_category
   try {

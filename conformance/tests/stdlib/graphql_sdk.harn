@@ -12,7 +12,7 @@ import {
 
 pipeline test(task) {
   let root = project_root() ?? cwd()
-  let schema_text = read_file(path_join(root, "conformance/fixtures/graphql/linear_fixture.graphql"))
+  let schema_text = harness.fs.read_text(path_join(root, "conformance/fixtures/graphql/linear_fixture.graphql"))
   let parsed = graphql_parse_schema(schema_text)
   let issue = parsed.types.find({ entry -> return entry.name == "Issue" })
   let identifier = issue.fields.find({ field -> return field.name == "identifier" })

@@ -1,4 +1,4 @@
-// Test set predicate builtins (function-call syntax)
+/** Test set predicate builtins (function-call syntax) */
 pipeline default(task) {
   let a = set(1, 2, 3, 4)
   let b = set(3, 4, 5, 6)

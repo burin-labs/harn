@@ -49,6 +49,13 @@ struct AmbientCapabilityLint<'a> {
     require_harness_in_scope: bool,
 }
 
+fn is_explicit_seeded_random_call(name: &str, arg_count: usize) -> bool {
+    matches!(
+        (name, arg_count),
+        ("random", 1) | ("random_int", 3) | ("random_choice", 2) | ("random_shuffle", 2)
+    )
+}
+
 /// The linter walks the AST and collects diagnostics.
 pub(crate) struct Linter<'a> {
     pub(super) diagnostics: Vec<LintDiagnostic>,
@@ -296,8 +303,18 @@ impl<'a> Linter<'a> {
 
     /// Flag ambient random builtins (`random`, `random_int`,
     /// `random_choice`, `random_shuffle`) so the E4.4 → E4.6 migration
-    /// can rewrite them to `harness.random.*`.
-    pub(super) fn check_ambient_random_builtin(&mut self, name: &str, span: Span) {
+    /// can rewrite them to `harness.random.*`. Calls that receive an
+    /// explicit seeded Rng handle are deterministic data operations, not
+    /// ambient host-random access.
+    pub(super) fn check_ambient_random_builtin(
+        &mut self,
+        name: &str,
+        arg_count: usize,
+        span: Span,
+    ) {
+        if is_explicit_seeded_random_call(name, arg_count) {
+            return;
+        }
         self.check_ambient_capability_builtin(AmbientCapabilityLint {
             name,
             span,

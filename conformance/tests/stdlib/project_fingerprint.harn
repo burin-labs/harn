@@ -19,120 +19,132 @@ fn fingerprint_signature(fp: ProjectFingerprint) -> string {
 }
 
 pipeline test(task) {
-  let root = path_join(temp_dir(), "project-fingerprint-" + uuid())
-  mkdir(root)
+  let root = path_join(harness.fs.temp_dir(), "project-fingerprint-" + uuid())
+  harness.fs.mkdir(root)
   defer {
-    delete_file(root)
+    harness.fs.delete(root)
   }
   let rust_workspace = path_join(root, "rust-workspace")
-  mkdir(rust_workspace)
-  mkdir(path_join(rust_workspace, ".git"))
-  mkdir(path_join(rust_workspace, ".config"))
-  mkdir(path_join(rust_workspace, "crates/api/src"))
-  mkdir(path_join(rust_workspace, "crates/cli/src"))
-  write_file(
+  harness.fs.mkdir(rust_workspace)
+  harness.fs.mkdir(path_join(rust_workspace, ".git"))
+  harness.fs.mkdir(path_join(rust_workspace, ".config"))
+  harness.fs.mkdir(path_join(rust_workspace, "crates/api/src"))
+  harness.fs.mkdir(path_join(rust_workspace, "crates/cli/src"))
+  harness.fs
+    .write_text(
     path_join(rust_workspace, "Cargo.toml"),
     "[workspace]\nmembers = [\"crates/api\", \"crates/cli\"]\n",
   )
-  write_file(path_join(rust_workspace, "Cargo.lock"), "# lock\n")
-  write_file(path_join(rust_workspace, ".config/nextest.toml"), "[profile.default]\n")
-  write_file(
+  harness.fs.write_text(path_join(rust_workspace, "Cargo.lock"), "# lock\n")
+  harness.fs.write_text(path_join(rust_workspace, ".config/nextest.toml"), "[profile.default]\n")
+  harness.fs
+    .write_text(
     path_join(rust_workspace, "crates/api/Cargo.toml"),
     "[package]\nname = \"api\"\nversion = \"0.1.0\"\n[dependencies]\naxum = \"0.8\"\n",
   )
-  write_file(
+  harness.fs
+    .write_text(
     path_join(rust_workspace, "crates/cli/Cargo.toml"),
     "[package]\nname = \"cli\"\nversion = \"0.1.0\"\n",
   )
   __io_println("rust-workspace " + fingerprint_signature(project_fingerprint(rust_workspace)))
   let swift_library = path_join(root, "swift-library")
-  mkdir(swift_library)
-  mkdir(path_join(swift_library, "Sources/Lib"))
-  mkdir(path_join(swift_library, "Tests/LibTests"))
-  write_file(
+  harness.fs.mkdir(swift_library)
+  harness.fs.mkdir(path_join(swift_library, "Sources/Lib"))
+  harness.fs.mkdir(path_join(swift_library, "Tests/LibTests"))
+  harness.fs
+    .write_text(
     path_join(swift_library, "Package.swift"),
     "import PackageDescription\nlet package = Package(name: \"Lib\", products: [.library(name: \"Lib\", targets: [\"Lib\"])], targets: [.target(name: \"Lib\"), .testTarget(name: \"LibTests\", dependencies: [\"Lib\"])])\n",
   )
-  write_file(path_join(swift_library, "Sources/Lib/Lib.swift"), "public struct Lib {}\n")
-  write_file(path_join(swift_library, "Tests/LibTests/LibTests.swift"), "import XCTest\n")
+  harness.fs.write_text(path_join(swift_library, "Sources/Lib/Lib.swift"), "public struct Lib {}\n")
+  harness.fs.write_text(path_join(swift_library, "Tests/LibTests/LibTests.swift"), "import XCTest\n")
   __io_println("swift-library " + fingerprint_signature(project_fingerprint(swift_library)))
   let swift_executable = path_join(root, "swift-executable")
-  mkdir(swift_executable)
-  mkdir(path_join(swift_executable, "Sources/App"))
-  mkdir(path_join(swift_executable, "Tests/AppTests"))
-  write_file(
+  harness.fs.mkdir(swift_executable)
+  harness.fs.mkdir(path_join(swift_executable, "Sources/App"))
+  harness.fs.mkdir(path_join(swift_executable, "Tests/AppTests"))
+  harness.fs
+    .write_text(
     path_join(swift_executable, "Package.swift"),
     "import PackageDescription\nlet package = Package(name: \"App\", targets: [.executableTarget(name: \"App\"), .testTarget(name: \"AppTests\", dependencies: [\"App\"])])\n",
   )
-  write_file(path_join(swift_executable, "Sources/App/main.swift"), "__io_print(\"hi\")\n")
-  write_file(path_join(swift_executable, "Tests/AppTests/AppTests.swift"), "import XCTest\n")
+  harness.fs.write_text(path_join(swift_executable, "Sources/App/main.swift"), "__io_print(\"hi\")\n")
+  harness.fs
+    .write_text(path_join(swift_executable, "Tests/AppTests/AppTests.swift"), "import XCTest\n")
   __io_println("swift-executable " + fingerprint_signature(project_fingerprint(swift_executable)))
   let npm_monorepo = path_join(root, "npm-monorepo")
-  mkdir(npm_monorepo)
-  mkdir(path_join(npm_monorepo, "packages/web/src"))
-  mkdir(path_join(npm_monorepo, "packages/web/tests"))
-  write_file(
+  harness.fs.mkdir(npm_monorepo)
+  harness.fs.mkdir(path_join(npm_monorepo, "packages/web/src"))
+  harness.fs.mkdir(path_join(npm_monorepo, "packages/web/tests"))
+  harness.fs
+    .write_text(
     path_join(npm_monorepo, "package.json"),
     "{\n  \"name\": \"npm-monorepo\",\n  \"private\": true,\n  \"workspaces\": [\"packages/*\"],\n  \"packageManager\": \"npm@10.8.0\",\n  \"devDependencies\": {\n    \"vite\": \"5.0.0\",\n    \"vitest\": \"2.0.0\"\n  },\n  \"scripts\": {\n    \"build\": \"vite build\",\n    \"test\": \"vitest run\"\n  }\n}\n",
   )
-  write_file(path_join(npm_monorepo, "package-lock.json"), "{}\n")
-  write_file(path_join(npm_monorepo, "packages/web/src/app.ts"), "export const app = 1\n")
+  harness.fs.write_text(path_join(npm_monorepo, "package-lock.json"), "{}\n")
+  harness.fs.write_text(path_join(npm_monorepo, "packages/web/src/app.ts"), "export const app = 1\n")
   __io_println("npm-monorepo " + fingerprint_signature(project_fingerprint(npm_monorepo)))
   let pnpm_monorepo = path_join(root, "pnpm-monorepo")
-  mkdir(pnpm_monorepo)
-  mkdir(path_join(pnpm_monorepo, "apps/web"))
-  write_file(
+  harness.fs.mkdir(pnpm_monorepo)
+  harness.fs.mkdir(path_join(pnpm_monorepo, "apps/web"))
+  harness.fs
+    .write_text(
     path_join(pnpm_monorepo, "package.json"),
     "{\n  \"name\": \"pnpm-monorepo\",\n  \"private\": true,\n  \"workspaces\": [\"apps/*\"],\n  \"packageManager\": \"pnpm@9.0.0\",\n  \"dependencies\": {\n    \"next\": \"15.0.0\",\n    \"react\": \"19.0.0\"\n  },\n  \"scripts\": {\n    \"build\": \"next build\"\n  }\n}\n",
   )
-  write_file(path_join(pnpm_monorepo, "pnpm-lock.yaml"), "lockfileVersion: '9.0'\n")
-  write_file(path_join(pnpm_monorepo, "apps/web/next.config.ts"), "export default {}\n")
+  harness.fs.write_text(path_join(pnpm_monorepo, "pnpm-lock.yaml"), "lockfileVersion: '9.0'\n")
+  harness.fs.write_text(path_join(pnpm_monorepo, "apps/web/next.config.ts"), "export default {}\n")
   __io_println("pnpm-monorepo " + fingerprint_signature(project_fingerprint(pnpm_monorepo)))
   let python_poetry = path_join(root, "python-poetry")
-  mkdir(python_poetry)
-  mkdir(path_join(python_poetry, "tests"))
-  write_file(
+  harness.fs.mkdir(python_poetry)
+  harness.fs.mkdir(path_join(python_poetry, "tests"))
+  harness.fs
+    .write_text(
     path_join(python_poetry, "pyproject.toml"),
     "[tool.poetry]\nname = \"svc\"\nversion = \"0.1.0\"\n[tool.poetry.dependencies]\npython = \"^3.12\"\nfastapi = \"^0.110\"\n[tool.poetry.group.dev.dependencies]\npytest = \"^8.0\"\n",
   )
-  write_file(path_join(python_poetry, "poetry.lock"), "# lock\n")
+  harness.fs.write_text(path_join(python_poetry, "poetry.lock"), "# lock\n")
   __io_println("python-poetry " + fingerprint_signature(project_fingerprint(python_poetry)))
   let python_uv = path_join(root, "python-uv")
-  mkdir(python_uv)
-  mkdir(path_join(python_uv, "tests"))
-  write_file(
+  harness.fs.mkdir(python_uv)
+  harness.fs.mkdir(path_join(python_uv, "tests"))
+  harness.fs
+    .write_text(
     path_join(python_uv, "pyproject.toml"),
     "[project]\nname = \"svc\"\ndependencies = [\"fastapi>=0.110\", \"pytest>=8.0\"]\n[tool.uv]\n",
   )
-  write_file(path_join(python_uv, "uv.lock"), "# lock\n")
+  harness.fs.write_text(path_join(python_uv, "uv.lock"), "# lock\n")
   __io_println("python-uv " + fingerprint_signature(project_fingerprint(python_uv)))
   let go_module = path_join(root, "go-module")
-  mkdir(go_module)
-  mkdir(path_join(go_module, "pkg"))
-  write_file(path_join(go_module, "go.mod"), "module github.com/acme/service\n\ngo 1.23\n")
-  write_file(path_join(go_module, "go.sum"), "example v0.0.0 h1:abc\n")
-  write_file(path_join(go_module, "pkg/service.go"), "package pkg\n")
+  harness.fs.mkdir(go_module)
+  harness.fs.mkdir(path_join(go_module, "pkg"))
+  harness.fs.write_text(path_join(go_module, "go.mod"), "module github.com/acme/service\n\ngo 1.23\n")
+  harness.fs.write_text(path_join(go_module, "go.sum"), "example v0.0.0 h1:abc\n")
+  harness.fs.write_text(path_join(go_module, "pkg/service.go"), "package pkg\n")
   __io_println("go-module " + fingerprint_signature(project_fingerprint(go_module)))
   let mixed_repo = path_join(root, "mixed-repo")
-  mkdir(mixed_repo)
-  mkdir(path_join(mixed_repo, ".git"))
-  mkdir(path_join(mixed_repo, ".github/workflows"))
-  mkdir(path_join(mixed_repo, "backend"))
-  mkdir(path_join(mixed_repo, "portal/tests"))
-  write_file(
+  harness.fs.mkdir(mixed_repo)
+  harness.fs.mkdir(path_join(mixed_repo, ".git"))
+  harness.fs.mkdir(path_join(mixed_repo, ".github/workflows"))
+  harness.fs.mkdir(path_join(mixed_repo, "backend"))
+  harness.fs.mkdir(path_join(mixed_repo, "portal/tests"))
+  harness.fs
+    .write_text(
     path_join(mixed_repo, "backend/Cargo.toml"),
     "[package]\nname = \"backend\"\nversion = \"0.1.0\"\n[dependencies]\naxum = \"0.8\"\n",
   )
-  write_file(path_join(mixed_repo, "backend/Cargo.lock"), "# lock\n")
-  write_file(
+  harness.fs.write_text(path_join(mixed_repo, "backend/Cargo.lock"), "# lock\n")
+  harness.fs
+    .write_text(
     path_join(mixed_repo, "portal/package.json"),
     "{\n  \"name\": \"portal\",\n  \"packageManager\": \"pnpm@9.0.0\",\n  \"dependencies\": {\n    \"next\": \"15.0.0\",\n    \"react\": \"19.0.0\"\n  }\n}\n",
   )
-  write_file(path_join(mixed_repo, "portal/next.config.ts"), "export default {}\n")
-  write_file(path_join(mixed_repo, "portal/pnpm-lock.yaml"), "lockfileVersion: '9.0'\n")
-  write_file(path_join(mixed_repo, ".github/workflows/ci.yml"), "name: ci\non: push\n")
+  harness.fs.write_text(path_join(mixed_repo, "portal/next.config.ts"), "export default {}\n")
+  harness.fs.write_text(path_join(mixed_repo, "portal/pnpm-lock.yaml"), "lockfileVersion: '9.0'\n")
+  harness.fs.write_text(path_join(mixed_repo, ".github/workflows/ci.yml"), "name: ci\non: push\n")
   __io_println("mixed-repo " + fingerprint_signature(project_fingerprint(mixed_repo)))
   let empty_dir = path_join(root, "empty-dir")
-  mkdir(empty_dir)
+  harness.fs.mkdir(empty_dir)
   __io_println("empty-dir " + fingerprint_signature(project_fingerprint(empty_dir)))
 }

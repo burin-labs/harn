@@ -9,14 +9,16 @@ fn first_group(pattern, text) {
 }
 
 pipeline test(task) {
-  let root = path_join(temp_dir(), "harn-orchestrator-cli-" + uuid())
-  mkdir(root)
+  let root = path_join(harness.fs.temp_dir(), "harn-orchestrator-cli-" + uuid())
+  harness.fs.mkdir(root)
   let replay_marker = path_join(root, "replay-ready.marker")
-  write_file(
+  harness.fs
+    .write_text(
     path_join(root, "harn.toml"),
     "[package]\nname = \"fixture\"\n\n[exports]\nhandlers = \"lib.harn\"\n\n[[triggers]]\nid = \"cron-heartbeat\"\nkind = \"cron\"\nprovider = \"cron\"\nmatch = { events = [\"cron.tick\"] }\nhandler = \"handlers::on_tick\"\nretry = { retention_days = 7 }\nschedule = \"*/2 * * * * *\"\ntimezone = \"UTC\"\ncatchup_mode = \"latest\"\n\n[[triggers]]\nid = \"manual-replay\"\nkind = \"a2a-push\"\nprovider = \"a2a-push\"\nmatch = { events = [\"manual.trigger\"] }\nhandler = \"handlers::flaky_issue\"\nretry = { max = 1, backoff = \"immediate\", retention_days = 7 }\n\n[[triggers]]\nid = \"manual-discard\"\nkind = \"a2a-push\"\nprovider = \"a2a-push\"\nmatch = { events = [\"manual.trigger\"] }\nhandler = \"handlers::always_fail\"\nretry = { max = 1, backoff = \"immediate\", retention_days = 7 }\n",
   )
-  write_file(
+  harness.fs
+    .write_text(
     path_join(root, "lib.harn"),
     "import \"std/triggers\"\n\nlet replay_marker = \""
       + replay_marker
@@ -24,7 +26,7 @@ pipeline test(task) {
   )
   let repo_root = exec("git", "rev-parse", "--show-toplevel").stdout.trim()
   let harn_bin = resolve_harn_bin(repo_root)
-  assert(file_exists(harn_bin), "missing built harn binary at " + harn_bin)
+  assert(harness.fs.exists(harn_bin), "missing built harn binary at " + harn_bin)
   let start = shell_at(
     root,
     "nohup env HARN_SECRET_PROVIDERS=env HARN_ORCHESTRATOR_API_KEYS=test-key HARN_ORCHESTRATOR_HMAC_SECRET=shared-secret "
@@ -138,7 +140,7 @@ pipeline test(task) {
       && inspect_after.stdout.contains("dispatch_failed trigger=manual-replay")
       && inspect_after.stdout.contains("dispatch_failed trigger=manual-discard"),
   )
-  write_file(replay_marker, "ready")
+  harness.fs.write_text(replay_marker, "ready")
   let dlq_replay = exec(
     harn_bin,
     "orchestrator",

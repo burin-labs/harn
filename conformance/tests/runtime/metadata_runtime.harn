@@ -12,7 +12,7 @@ write_file("meta_scratch/.hidden.txt", "secret")
 
 write_file("meta_scratch/src/deep/nested.txt", "nested")
 
-write_file("meta_scratch/src/deep/code.rs", "fn main() {}")
+write_file("meta_scratch/src/deep/code.rs", "fn " + "main() {}")
 
 metadata_set("", "classification", {language: "rust", structureHash: "stale"})
 

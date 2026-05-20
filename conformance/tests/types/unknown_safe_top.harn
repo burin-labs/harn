@@ -1,5 +1,7 @@
-// `unknown` is a safe top — anything flows in, but values must be
-// narrowed before flowing back out to a concrete type.
+/**
+ * `unknown` is a safe top — anything flows in, but values must be
+ * narrowed before flowing back out to a concrete type.
+ */
 pipeline test(task) {
   // Every concrete type is assignable to `unknown`.
   let u1: unknown = 42

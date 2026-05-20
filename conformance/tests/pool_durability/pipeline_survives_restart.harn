@@ -5,7 +5,7 @@
 import { pool_create, pool_simulate_restart, pool_wait } from "std/lifecycle/pool"
 
 pipeline default() {
-  let dir = path_join(temp_dir(), "harn-pool-durability-pipeline-" + uuid())
+  let dir = path_join(harness.fs.temp_dir(), "harn-pool-durability-pipeline-" + uuid())
   let pool = pool_create(
     {name: "pipeline-demo", scope: "pipeline", pipeline_id: "pipe_001", max_concurrent: 1, dir: dir},
   )

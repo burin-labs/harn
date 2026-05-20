@@ -1,6 +1,8 @@
-// Exhaustive narrowing on `unknown`: when all nine concrete `type_of`
-// variants are covered before an `unreachable()` fallback, the type
-// checker emits no warning and the program runs end-to-end.
+/**
+ * Exhaustive narrowing on `unknown`: when all nine concrete `type_of`
+ * variants are covered before an `unreachable()` fallback, the type
+ * checker emits no warning and the program runs end-to-end.
+ */
 pipeline test(task) {
   fn describe(v: unknown) -> string {
     if type_of(v) == "string" {

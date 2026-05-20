@@ -22,8 +22,8 @@ fn smoke_tools() {
 pipeline default() {
   let session = "smoke-tool-receipts-" + uuid()
   let receipt_path = path_join(".harn", "receipts", session + ".jsonl")
-  if file_exists(receipt_path) {
-    delete_file(receipt_path)
+  if harness.fs.exists(receipt_path) {
+    harness.fs.delete(receipt_path)
   }
   llm_mock_clear()
   llm_mock(

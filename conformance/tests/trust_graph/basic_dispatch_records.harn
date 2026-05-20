@@ -12,7 +12,8 @@ fn handle_issue(event: TriggerEvent) -> dict {
 }
 
 pipeline test(task) {
-  let unique = to_string(to_int(timestamp())) + "-" + to_string(random_int(100000, 999999))
+  let unique = to_string(to_int(harness.clock.timestamp())) + "-"
+    + to_string(harness.random.gen_range(100000, 999999))
   let agent_id = "github-triage-bot-" + unique
   let handle: TriggerHandle = trigger_register(
     {

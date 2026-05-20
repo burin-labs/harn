@@ -1,7 +1,7 @@
 import "std/memory"
 
 pipeline default() {
-  let root = path_join(temp_dir(), "harn-memory-vector-" + uuid())
+  let root = path_join(harness.fs.temp_dir(), "harn-memory-vector-" + uuid())
   host_mock_clear()
   // Fixed-vector mock so any text → same embedding. Cosine similarity is
   // then 1.0 across all records and order falls through to the
@@ -38,7 +38,7 @@ pipeline default() {
   __io_println(lexical[0].key)
   // The embedding cache should now contain both stored records plus the
   // last query. Verify entries exist for the configured model.
-  let cache_entries = list_dir(path_join(root, "agent", "vector", "vectors", "test"))
+  let cache_entries = harness.fs.list_dir(path_join(root, "agent", "vector", "vectors", "test"))
   __io_println(len(cache_entries) >= 3)
-  delete_file(root)
+  harness.fs.delete(root)
 }

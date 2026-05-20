@@ -14,7 +14,7 @@ pipeline test(task) {
   mock_time(1000000)
   let target_session = agent_session_open("trigger-channel-reminder-batched")
   agent_session_reset(target_session)
-  let unique = to_string(random_int(100000, 999999))
+  let unique = to_string(harness.random.gen_range(100000, 999999))
   let _handle: TriggerHandle = trigger_register(
     {
       id: "trigger-channel-reminder-batched-" + unique,

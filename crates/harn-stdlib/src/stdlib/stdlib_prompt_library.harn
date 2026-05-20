@@ -42,7 +42,7 @@ fn __token_prefix(text, max_tokens) {
   return join(words[:max_tokens], " ")
 }
 
-fn __fragment_from_config(config, base_dir = nil) {
+fn __fragment_from_config(harness: Harness, config, base_dir = nil) {
   var body = config?.body ?? config?.prompt ?? config?.text
   var path = config?.path
   if body == nil && path != nil {
@@ -51,7 +51,7 @@ fn __fragment_from_config(config, base_dir = nil) {
     } else {
       path
     }
-    body = read_file(full_path)
+    body = harness.fs.read_text(full_path)
     path = full_path
   }
   require body != nil, "prompt_fragment: fragment requires body, prompt, text, or path"
@@ -64,7 +64,7 @@ fn __fragment_from_config(config, base_dir = nil) {
   return prompt_fragment(id, body, config + {path: path})
 }
 
-fn __front_matter_fragment(path, text) {
+fn __front_matter_fragment(harness: Harness, path, text) {
   if !starts_with(text, "---\n") {
     return prompt_fragment(__fragment_id_from_path(path), text, {path: path, source_path: path})
   }
@@ -76,11 +76,11 @@ fn __front_matter_fragment(path, text) {
   let meta_text = substring(rest, 0, marker)
   let body = substring(rest, marker + len("\n---\n"))
   let meta = toml_parse(meta_text)
-  return __fragment_from_config(meta + {body: body, path: path, source_path: path}, dirname(path))
+  return __fragment_from_config(harness, meta + {body: body, path: path, source_path: path}, dirname(path))
 }
 
-fn __load_one(path) {
-  let text = read_file(path)
+fn __load_one(harness: Harness, path) {
+  let text = harness.fs.read_text(path)
   let parsed = try {
     toml_parse(text)
   }
@@ -90,12 +90,12 @@ fn __load_one(path) {
       let base_dir = dirname(path)
       var library = __empty_library()
       for fragment_config in data.prompt_fragments {
-        library = prompt_library_define(library, __fragment_from_config(fragment_config, base_dir))
+        library = prompt_library_define(library, __fragment_from_config(harness, fragment_config, base_dir))
       }
       return library
     }
   }
-  return prompt_library([__front_matter_fragment(path, text)])
+  return prompt_library([__front_matter_fragment(harness, path, text)])
 }
 
 fn __render_fragment(fragment, bindings = nil) {
@@ -462,7 +462,7 @@ pub fn prompt_library_load(path_or_paths) {
     }
     return library
   }
-  return __load_one(path_or_paths)
+  return __load_one(harness, path_or_paths)
 }
 
 /**

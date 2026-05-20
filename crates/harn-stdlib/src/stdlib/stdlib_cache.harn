@@ -240,9 +240,9 @@ pub fn with_cache_envelope(key: string, compute, options = nil) -> dict {
     }
     return {value: cached.value, hit: true, key: key, metrics: metrics}
   }
-  let started_ms = monotonic_ms()
+  let started_ms = harness.clock.monotonic_ms()
   let value = compute()
-  let compute_ms = monotonic_ms() - started_ms
+  let compute_ms = harness.clock.monotonic_ms() - started_ms
   cache_put(key, value, store_opts)
   if session_id != "" {
     __with_cache_emit(

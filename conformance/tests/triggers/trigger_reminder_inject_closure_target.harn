@@ -12,7 +12,8 @@ pipeline test(task) {
   let widget_session = agent_session_open("trigger-reminder-inject-closure-widget")
   agent_session_reset(acme_session)
   agent_session_reset(widget_session)
-  let unique = to_string(to_int(timestamp())) + "-" + to_string(random_int(100000, 999999))
+  let unique = to_string(to_int(harness.clock.timestamp())) + "-"
+    + to_string(harness.random.gen_range(100000, 999999))
   let handle: TriggerHandle = trigger_register(
     {
       id: "trigger-reminder-inject-closure-" + unique,

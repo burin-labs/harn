@@ -1,8 +1,8 @@
 pipeline main() {
   let root = ".harn-runs"
   let dir = path_join(root, "portal-demo")
-  mkdir(root)
-  mkdir(dir)
+  harness.fs.mkdir(root)
+  harness.fs.mkdir(dir)
   let graph_flow = workflow_graph(
     {
       name: "portal_demo",

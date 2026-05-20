@@ -9,14 +9,15 @@ pipeline test(task) {
   // Register a mock for POST with glob pattern
   http_mock("POST", "https://api.example.com/*", {status: 201, body: "{\"created\": true}"})
   // Make a GET request - should hit mock
-  let resp = http_get("https://api.example.com/users")
+  let resp = harness.net.get("https://api.example.com/users")
   assert_eq(resp.status, 200)
   log("get status: " + to_string(resp.status))
   let data = json_parse(resp.body)
   assert_eq(len(data.users), 2)
   log("users: " + to_string(len(data.users)))
   // Make a POST request - should hit glob mock
-  let post_resp = http_post(
+  let post_resp = harness.net
+    .post(
     "https://api.example.com/items",
     "{\"name\": \"test\"}",
     {headers: {Authorization: "Bearer test-token", "Content-Type": "application/json"}},

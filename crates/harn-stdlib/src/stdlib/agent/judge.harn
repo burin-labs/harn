@@ -62,7 +62,7 @@ fn __judge_invoke_closure(verify_completion, payload) {
   return {vetoed: false}
 }
 
-fn __judge_invoke_structured(judge_cfg, opts, payload) {
+fn __judge_invoke_structured(harness: Harness, judge_cfg, opts, payload) {
   let system = judge_cfg?.system ?? ""
   let user = completion_judge_user_prompt(payload)
   let schema = {
@@ -88,9 +88,9 @@ fn __judge_invoke_structured(judge_cfg, opts, payload) {
       llm_opts[key] = judge_cfg[key]
     }
   }
-  let started = monotonic_ms()
+  let started = harness.clock.monotonic_ms()
   let checkpoint = agent_typed_output_checkpoint("agent.completion_judge", user, schema, llm_opts)
-  let duration_ms = monotonic_ms() - started
+  let duration_ms = harness.clock.monotonic_ms() - started
   if !checkpoint.ok {
     if judge_cfg?.fail_open_on_error ?? judge_cfg?.fail_open ?? false {
       return {
@@ -170,7 +170,7 @@ pub fn agent_verify_or_continue(session, opts, stop_reason, text, iteration = 0)
     verdict = __judge_invoke_closure(opts.verify_completion, payload)
   }
   if !verdict.vetoed && opts?.verify_completion_judge != nil {
-    verdict = __judge_invoke_structured(opts.verify_completion_judge, opts, payload)
+    verdict = __judge_invoke_structured(harness, opts.verify_completion_judge, opts, payload)
     __emit_judge_decision(session.session_id, iteration, verdict)
   }
   let done_judge_due = opts?._done_judge_due ?? true
@@ -178,7 +178,7 @@ pub fn agent_verify_or_continue(session, opts, stop_reason, text, iteration = 0)
     && (stop_reason == "sentinel" || stop_reason == "natural" || stop_reason == "stalled")
     && done_judge_due
   if !verdict.vetoed && done_judge_applies {
-    verdict = __judge_invoke_structured(opts.done_judge, opts, payload)
+    verdict = __judge_invoke_structured(harness, opts.done_judge, opts, payload)
     verdict = verdict + {done_judge_invoked: true, trigger: opts?._done_judge_trigger ?? nil}
     __emit_judge_decision(session.session_id, iteration, verdict)
   }

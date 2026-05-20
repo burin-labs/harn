@@ -2,10 +2,10 @@ import "../_common"
 
 pipeline default() {
   let repo_root = exec("git", "rev-parse", "--show-toplevel").stdout.trim()
-  let harn_bin = env_or("HARN_CONFORMANCE_HARN_BIN", resolve_harn_bin(repo_root))
-  let root = path_join(temp_dir(), "harn_pack_strict_sbom_" + uuid_v7())
-  mkdir(root)
-  write_file(path_join(root, "hello.harn"), "__io_println(\"hi\")\n")
+  let harn_bin = harness.env.get_or("HARN_CONFORMANCE_HARN_BIN", resolve_harn_bin(repo_root))
+  let root = path_join(harness.fs.temp_dir(), "harn_pack_strict_sbom_" + uuid_v7())
+  harness.fs.mkdir(root)
+  harness.fs.write_text(path_join(root, "hello.harn"), "__io_println(\"hi\")\n")
   let pack = exec_at(
     root,
     harn_bin,

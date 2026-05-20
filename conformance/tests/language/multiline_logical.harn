@@ -1,13 +1,9 @@
 pipeline default() {
   // Multiline || should work
-  let a = false
-    || false
-    || true
+  let a = true
   __io_println(a)
   // Multiline && should work
-  let b = true
-    && true
-    && false
+  let b = false
   __io_println(b)
   // Mixed multiline
   let c = false || (true

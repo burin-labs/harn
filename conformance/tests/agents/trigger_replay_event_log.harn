@@ -17,8 +17,9 @@ fn flaky_handler(event: TriggerEvent) -> dict {
 }
 
 pipeline test(task) {
-  mkdir(".harn")
-  let unique = to_string(to_int(timestamp())) + "-" + to_string(random_int(100000, 999999))
+  harness.fs.mkdir(".harn")
+  let unique = to_string(to_int(harness.clock.timestamp())) + "-"
+    + to_string(harness.random.gen_range(100000, 999999))
   let delivery = "evt-replay-" + unique
   let trigger_id = "replay-trigger-" + unique
   let handle: TriggerHandle = trigger_register(
@@ -58,7 +59,7 @@ pipeline test(task) {
   __io_println(live?.metrics?.dlq == 1)
   __io_println(live?.metrics?.dispatched == 1)
   let marker_path = path_join(".harn", "harn-trigger-replay-event-log-" + delivery + ".marker")
-  if file_exists(marker_path) {
-    delete_file(marker_path)
+  if harness.fs.exists(marker_path) {
+    harness.fs.delete(marker_path)
   }
 }

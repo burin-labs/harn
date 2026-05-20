@@ -2,23 +2,26 @@ import "std/project"
 
 pipeline test(task) {
   let namespace = "ambient-${uuid()}"
-  mkdir("project_deep_scan_ignore/app/src")
-  mkdir("project_deep_scan_ignore/ignored/src")
-  mkdir("project_deep_scan_ignore/target/tooling")
-  mkdir("project_deep_scan_ignore/node_modules/pkg")
-  write_file("project_deep_scan_ignore/.gitignore", "ignored/\n")
-  write_file(
+  harness.fs.mkdir("project_deep_scan_ignore/app/src")
+  harness.fs.mkdir("project_deep_scan_ignore/ignored/src")
+  harness.fs.mkdir("project_deep_scan_ignore/target/tooling")
+  harness.fs.mkdir("project_deep_scan_ignore/node_modules/pkg")
+  harness.fs.write_text("project_deep_scan_ignore/.gitignore", "ignored/\n")
+  harness.fs
+    .write_text(
     "project_deep_scan_ignore/app/Cargo.toml",
     "[package]\nname = \"app\"\nversion = \"0.1.0\"\n",
   )
-  write_file("project_deep_scan_ignore/app/Cargo.lock", "# lock\n")
-  write_file("project_deep_scan_ignore/app/src/main.rs", "fn main() {}\n")
-  write_file("project_deep_scan_ignore/ignored/go.mod", "module ignored\n")
-  write_file(
+  harness.fs.write_text("project_deep_scan_ignore/app/Cargo.lock", "# lock\n")
+  harness.fs.write_text("project_deep_scan_ignore/app/src/main.rs", "fn " + "main() {}\n")
+  harness.fs.write_text("project_deep_scan_ignore/ignored/go.mod", "module ignored\n")
+  harness.fs
+    .write_text(
     "project_deep_scan_ignore/target/tooling/Cargo.toml",
     "[package]\nname = \"tooling\"\nversion = \"0.1.0\"\n",
   )
-  write_file("project_deep_scan_ignore/node_modules/pkg/package.json", "{\"name\":\"pkg\"}\n")
+  harness.fs
+    .write_text("project_deep_scan_ignore/node_modules/pkg/package.json", "{\"name\":\"pkg\"}\n")
   let tree = project_deep_scan(
     "project_deep_scan_ignore",
     {namespace: namespace, tiers: ["ambient"], incremental: true, depth: nil},

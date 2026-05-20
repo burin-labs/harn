@@ -8,11 +8,11 @@
  */
 pipeline test(task) {
   let root = source_dir() + "/testbench_fs_overlay_diff.fs-overlay"
-  write_file(root + "/new_a.txt", "alpha")
-  write_file(root + "/new_b.txt", "beta")
-  write_file(root + "/new_c.txt", "gamma")
-  write_file(root + "/existing.txt", "updated content")
-  delete_file(root + "/to_delete.txt")
+  harness.fs.write_text(root + "/new_a.txt", "alpha")
+  harness.fs.write_text(root + "/new_b.txt", "beta")
+  harness.fs.write_text(root + "/new_c.txt", "gamma")
+  harness.fs.write_text(root + "/existing.txt", "updated content")
+  harness.fs.delete(root + "/to_delete.txt")
   let diff = testbench_fs_diff()
   let added = diff.filter({ e -> e.kind == "added" })
   let modified = diff.filter({ e -> e.kind == "modified" })

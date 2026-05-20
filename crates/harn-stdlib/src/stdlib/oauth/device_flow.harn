@@ -162,8 +162,8 @@ fn __safe_json_parse(text) {
   }
 }
 
-fn __now_seconds() {
-  return to_int(timestamp())
+fn __now_seconds(harness: Harness) {
+  return to_int(harness.clock.timestamp())
 }
 
 fn __default_on_user_code(user_code, verification_uri) {
@@ -234,7 +234,7 @@ fn __audit_obtained(provider_id, storage_key, token_set) {
   let _ = event_log.emit(__AUDIT_TOPIC, __AUDIT_KIND_OBTAINED, payload, {provider: to_string(provider_id)})
 }
 
-fn __request_device_code(cfg) {
+fn __request_device_code(harness: Harness, cfg) {
   var form = [{key: "client_id", value: cfg.client_id}]
   let scopes_str = __join_scopes(cfg.scopes, cfg.scope_separator)
   if scopes_str != nil {
@@ -244,7 +244,7 @@ fn __request_device_code(cfg) {
     form = form + [{key: "audience", value: cfg.audience}]
   }
   let headers = {"Content-Type": "application/x-www-form-urlencoded", Accept: "application/json"}
-  let response = http_post(cfg.device_code_url, __form_body(form), {headers: headers})
+  let response = harness.net.post(cfg.device_code_url, __form_body(form), {headers: headers})
   if !(response?.ok ?? false) {
     let parsed = __safe_json_parse(response?.body ?? "")
     let detail = parsed?.error_description ?? parsed?.error ?? "device authorization endpoint returned status "
@@ -276,7 +276,7 @@ fn __request_device_code(cfg) {
   }
 }
 
-fn __poll_once(cfg, device_code) {
+fn __poll_once(harness: Harness, cfg, device_code) {
   var form = [
     {key: "grant_type", value: "urn:ietf:params:oauth:grant-type:device_code"},
     {key: "device_code", value: device_code},
@@ -286,7 +286,7 @@ fn __poll_once(cfg, device_code) {
     form = form + [{key: "client_secret", value: cfg.client_secret}]
   }
   let headers = {"Content-Type": "application/x-www-form-urlencoded", Accept: "application/json"}
-  let response = http_post(cfg.token_url, __form_body(form), {headers: headers})
+  let response = harness.net.post(cfg.token_url, __form_body(form), {headers: headers})
   let status = to_int(response?.status ?? 0)
   let parsed = __safe_json_parse(response?.body ?? "") ?? {}
   if response?.ok ?? false && parsed?.access_token != nil {
@@ -310,11 +310,17 @@ fn __poll_once(cfg, device_code) {
   throw "std/oauth/device_flow: " + prefix + to_string(detail)
 }
 
-fn __poll_until_done(cfg, device_code, initial_interval_seconds, expires_in_seconds) {
+fn __poll_until_done(
+  harness: Harness,
+  cfg,
+  device_code,
+  initial_interval_seconds,
+  expires_in_seconds,
+) {
   var interval_seconds = initial_interval_seconds
   var elapsed_seconds = 0
   while true {
-    let outcome = __poll_once(cfg, device_code)
+    let outcome = __poll_once(harness, cfg, device_code)
     if outcome.kind == "ok" {
       return outcome.parsed
     }
@@ -377,10 +383,16 @@ pub fn device_flow(provider, opts) {
     scope_separator: scope_separator,
     audience: opts?.audience,
   }
-  let device = __request_device_code(cfg)
+  let device = __request_device_code(harness, cfg)
   let _ = __invoke_user_code_handler(opts?.on_user_code, device.user_code, device.verification_uri)
-  let parsed = __poll_until_done(cfg, device.device_code, device.interval_seconds, device.expires_in_seconds)
-  let issued_at = __now_seconds()
+  let parsed = __poll_until_done(
+    harness,
+    cfg,
+    device.device_code,
+    device.interval_seconds,
+    device.expires_in_seconds,
+  )
+  let issued_at = __now_seconds(harness)
   let token_set = __build_token_set(parsed, scopes, issued_at)
   storage.set(storage_key, token_set)
   __audit_obtained(cfg.provider_id, storage_key, token_set)

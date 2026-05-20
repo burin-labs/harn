@@ -50,7 +50,7 @@ pub fn verify_jwt(token, jwks_url, options = nil) {
     if jwks_url == nil || trim(jwks_url) == "" {
       return {ok: false, claims: nil, error: "jwks_url is required unless options.inline_jwks is provided"}
     }
-    let response = http_get(jwks_url, {headers: {Accept: "application/json"}})
+    let response = harness.net.get(jwks_url, {headers: {Accept: "application/json"}})
     if !(response.ok ?? false) {
       return {ok: false, claims: nil, error: response.body, status: response.status}
     }
@@ -96,7 +96,7 @@ pub fn oauth2_token_refresh(client_id, client_secret, refresh_token, token_url, 
     {Accept: "application/json", "Content-Type": "application/x-www-form-urlencoded"},
     opts.headers ?? {},
   )
-  let response = http_post(token_url, __form_body(params), {headers: headers})
+  let response = harness.net.post(token_url, __form_body(params), {headers: headers})
   let parsed = safe_parse(response.body)
   if !(response.ok ?? false) {
     return {ok: false, status: response.status, error: parsed ?? response.body}
@@ -127,7 +127,7 @@ pub fn rate_limit_token_bucket(state = nil, config = nil, now_ms = nil) {
   if refill_interval_ms < 1 {
     refill_interval_ms = 1
   }
-  let now = now_ms ?? to_int(timestamp() * 1000)
+  let now = now_ms ?? to_int(harness.clock.timestamp() * 1000)
   let last_refill_ms = state?.last_refill_ms ?? now
   let elapsed_ms = now - last_refill_ms
   var tokens = state?.tokens ?? capacity

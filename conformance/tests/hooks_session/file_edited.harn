@@ -18,15 +18,15 @@ pipeline default() {
       return nil
     },
   )
-  let tmp = path_join(temp_dir(), "hooks_session_file_edited.txt")
-  write_file(tmp, "hello")
-  append_file(tmp, " world")
+  let tmp = path_join(harness.fs.temp_dir(), "hooks_session_file_edited.txt")
+  harness.fs.write_text(tmp, "hello")
+  harness.fs.append(tmp, " world")
   notify_file_edited(tmp, {operation: "append", bytes: 11})
   llm_mock_clear()
   llm_mock({text: "ok"})
   let result = agent_loop("touch some files", nil, {provider: "mock"})
   __io_println(result.status)
   __io_println(atomic_get(edits_seen))
-  delete_file(tmp)
+  harness.fs.delete(tmp)
   clear_session_hooks()
 }

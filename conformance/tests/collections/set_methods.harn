@@ -1,4 +1,4 @@
-// Test set method syntax and new operations
+/** Test set method syntax and new operations */
 pipeline default(task) {
   let a = set([1, 2, 3, 4])
   let b = set([3, 4, 5, 6])

@@ -16,7 +16,8 @@ fn classify(event: TriggerEvent) -> bool {
 pipeline test(task) {
   llm_mock_clear()
   llm_mock({text: "no", input_tokens: 10, output_tokens: 5, model: "gpt-4o-mini"})
-  let unique = to_string(to_int(timestamp())) + "-" + to_string(random_int(100000, 999999))
+  let unique = to_string(to_int(harness.clock.timestamp())) + "-"
+    + to_string(harness.random.gen_range(100000, 999999))
   let handle: TriggerHandle = trigger_register(
     {
       id: "llm-predicate-false-" + unique,

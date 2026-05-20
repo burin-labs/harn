@@ -1,4 +1,4 @@
-// Test that date_parse validates month/day ranges
+/** Test that date_parse validates month/day ranges */
 pipeline default(task) {
   // Valid date should work
   let ts = date_parse("2024-06-15")

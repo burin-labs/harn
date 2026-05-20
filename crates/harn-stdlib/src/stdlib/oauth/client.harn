@@ -206,8 +206,8 @@ fn __validate_auth_method(method) {
   throw "std/oauth/client: unsupported token_auth_method `" + method + "`"
 }
 
-fn __now_seconds() {
-  return to_int(timestamp())
+fn __now_seconds(harness: Harness) {
+  return to_int(harness.clock.timestamp())
 }
 
 fn __token_expires_at(token, now_s) {
@@ -276,7 +276,14 @@ fn __redact_endpoint(url) {
   return split(text, "?")[0]
 }
 
-fn __post_token_request(token_url, client_id, client_secret, auth_method, form_pairs) {
+fn __post_token_request(
+  harness: Harness,
+  token_url,
+  client_id,
+  client_secret,
+  auth_method,
+  form_pairs,
+) {
   let method = __validate_auth_method(auth_method)
   var headers = {"Content-Type": "application/x-www-form-urlencoded", Accept: "application/json"}
   var pairs = form_pairs + [{key: "client_id", value: client_id}]
@@ -293,7 +300,7 @@ fn __post_token_request(token_url, client_id, client_secret, auth_method, form_p
     pairs = pairs + [{key: "client_secret", value: client_secret}]
   }
   let body = __form_body(pairs)
-  let response = http_post(token_url, body, {headers: headers})
+  let response = harness.net.post(token_url, body, {headers: headers})
   if !(response?.ok ?? false) {
     let parsed = __safe_json_parse(response?.body ?? "")
     let detail = parsed?.error_description ?? parsed?.error ?? "token endpoint returned status "
@@ -383,7 +390,7 @@ fn __audit_revoked(provider_id, storage_key, prev, revoke_url_used) {
   let _ = event_log.emit(__AUDIT_TOPIC, __AUDIT_KIND_REVOKED, payload, {provider: to_string(provider_id)})
 }
 
-fn __try_revoke_remote(cfg, token_value) {
+fn __try_revoke_remote(harness: Harness, cfg, token_value) {
   // Best-effort RFC 7009 revoke. We never let a remote failure block
   // the local storage delete: revocation is a hygiene step on top of
   // discarding the credential locally, and the storage delete is the
@@ -398,23 +405,23 @@ fn __try_revoke_remote(cfg, token_value) {
   let headers = {"Content-Type": "application/x-www-form-urlencoded", Accept: "application/json"}
   let body = __form_body([{key: "token", value: token_value}, {key: "client_id", value: cfg.client_id}])
   try {
-    let _ = http_post(url_text, body, {headers: headers})
+    let _ = harness.net.post(url_text, body, {headers: headers})
   } catch (_err) {
     let _ = nil
   }
   return url_text
 }
 
-fn __revoke_locked(cfg) {
+fn __revoke_locked(harness: Harness, cfg) {
   let prev = cfg.storage.get(cfg.storage_key)
   let access = prev?.access_token
-  let remote_url = access == nil || to_string(access) == "" ? nil : __try_revoke_remote(cfg, to_string(access))
+  let remote_url = access == nil || to_string(access) == "" ? nil : __try_revoke_remote(harness, cfg, to_string(access))
   cfg.storage.delete(cfg.storage_key)
   __audit_revoked(cfg.provider_id, cfg.storage_key, prev, remote_url)
   return nil
 }
 
-fn __refresh_locked(cfg, prev_token, reason) {
+fn __refresh_locked(harness: Harness, cfg, prev_token, reason) {
   let refresh = prev_token?.refresh_token
   if refresh == nil || to_string(refresh) == "" {
     throw __DIAGNOSTIC_REFRESH_EXPIRED
@@ -425,10 +432,17 @@ fn __refresh_locked(cfg, prev_token, reason) {
   if scopes_str != nil {
     form = form + [{key: "scope", value: scopes_str}]
   }
-  let issued_at = __now_seconds()
+  let issued_at = __now_seconds(harness)
   var parsed = nil
   try {
-    parsed = __post_token_request(cfg.token_url, cfg.client_id, cfg.client_secret, cfg.token_auth_method, form)
+    parsed = __post_token_request(
+      harness,
+      cfg.token_url,
+      cfg.client_id,
+      cfg.client_secret,
+      cfg.token_auth_method,
+      form,
+    )
   } catch (err) {
     // Refresh-grant failures are special: the stored refresh token is
     // gone (expired, revoked, or rotated by another caller). Surface
@@ -442,26 +456,26 @@ fn __refresh_locked(cfg, prev_token, reason) {
   return next_token
 }
 
-fn __maybe_refresh(cfg, reason) {
+fn __maybe_refresh(harness: Harness, cfg, reason) {
   let stored = cfg.storage.get(cfg.storage_key)
   if stored == nil {
     throw __DIAGNOSTIC_REFRESH_EXPIRED
       + ": std/oauth/client: no token in storage; run authorization first"
   }
-  let now_s = __now_seconds()
+  let now_s = __now_seconds(harness)
   if !__token_is_stale(stored, now_s) && reason != "forced" && reason != "post_401" {
     return stored
   }
-  return __refresh_locked(cfg, stored, reason)
+  return __refresh_locked(harness, cfg, stored, reason)
 }
 
-fn __get_valid_token(cfg) {
+fn __get_valid_token(harness: Harness, cfg) {
   let stored = cfg.storage.get(cfg.storage_key)
-  let now_s = __now_seconds()
+  let now_s = __now_seconds(harness)
   if stored != nil && !__token_is_stale(stored, now_s) {
     return stored
   }
-  return __maybe_refresh(cfg, "ttl_threshold")
+  return __maybe_refresh(harness, cfg, "ttl_threshold")
 }
 
 fn __start_authorization(cfg) {
@@ -499,7 +513,7 @@ fn __start_authorization(cfg) {
   }
 }
 
-fn __exchange_code(cfg, pkce, code, state) {
+fn __exchange_code(harness: Harness, cfg, pkce, code, state) {
   if pkce == nil || type_of(pkce) != "dict" {
     throw "std/oauth/client: exchange_code requires the pkce dict from start_authorization"
   }
@@ -526,8 +540,15 @@ fn __exchange_code(cfg, pkce, code, state) {
   if scopes_str != nil {
     form = form + [{key: "scope", value: scopes_str}]
   }
-  let issued_at = __now_seconds()
-  let parsed = __post_token_request(cfg.token_url, cfg.client_id, cfg.client_secret, cfg.token_auth_method, form)
+  let issued_at = __now_seconds(harness)
+  let parsed = __post_token_request(
+    harness,
+    cfg.token_url,
+    cfg.client_id,
+    cfg.client_secret,
+    cfg.token_auth_method,
+    form,
+  )
   let token_set = __build_token_set(parsed, cfg.scopes, issued_at, nil)
   cfg.storage.set(cfg.storage_key, token_set)
   __audit_exchange(cfg.provider_id, cfg.storage_key, token_set)
@@ -539,21 +560,21 @@ fn __with_bearer(headers, access_token) {
   return merge(base, {Authorization: "Bearer " + to_string(access_token)})
 }
 
-fn __token_request(cfg, method, url, opts) {
+fn __token_request(harness: Harness, cfg, method, url, opts) {
   let opts_dict = opts ?? {}
-  let access = __get_valid_token(cfg)
+  let access = __get_valid_token(harness, cfg)
   let headers = __with_bearer(opts_dict?.headers ?? {}, access.access_token)
   let body = opts_dict?.body
   let http_opts = merge(opts_dict, {headers: headers})
-  let response = http_request(method, url, http_opts)
+  let response = harness.net.request(method, url, http_opts)
   if to_int(response?.status ?? 0) != 401 {
     return response
   }
   // 401 on a token-bearing call -> refresh + retry once.
-  let refreshed = __maybe_refresh(cfg, "post_401")
+  let refreshed = __maybe_refresh(harness, cfg, "post_401")
   let retried_headers = __with_bearer(opts_dict?.headers ?? {}, refreshed.access_token)
   let retried_opts = merge(opts_dict, {headers: retried_headers})
-  return http_request(method, url, retried_opts)
+  return harness.net.request(method, url, retried_opts)
 }
 
 /**
@@ -621,12 +642,12 @@ pub fn client(provider, opts) -> OAuthClient {
     token_endpoint: __redact_endpoint(cfg.token_url),
     auth_endpoint: __redact_endpoint(cfg.auth_url),
     start_authorization: { -> __start_authorization(cfg) },
-    exchange_code: { pkce, code, state -> __exchange_code(cfg, pkce, code, state) },
-    refresh: { -> __maybe_refresh(cfg, "forced") },
-    token: { -> __get_valid_token(cfg).access_token },
+    exchange_code: { pkce, code, state -> __exchange_code(harness, cfg, pkce, code, state) },
+    refresh: { -> __maybe_refresh(harness, cfg, "forced") },
+    token: { -> __get_valid_token(harness, cfg).access_token },
     current_token: { -> cfg.storage.get(cfg.storage_key) },
-    request: { method, url, http_opts = nil -> __token_request(cfg, method, url, http_opts) },
-    revoke: { -> __revoke_locked(cfg) },
+    request: { method, url, http_opts = nil -> __token_request(harness, cfg, method, url, http_opts) },
+    revoke: { -> __revoke_locked(harness, cfg) },
   }
 }
 

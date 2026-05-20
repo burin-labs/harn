@@ -1,7 +1,7 @@
-// Test to_int and to_float builtins
+/** Test to_int and to_float builtins */
 pipeline default(task) {
   // to_int from int (passthrough)
-  __io_println(to_int(42))
+  __io_println(42)
   // to_int from float (truncates)
   __io_println(to_int(3.9))
   __io_println(to_int(-2.7))
@@ -13,7 +13,7 @@ pipeline default(task) {
   // to_int from nil returns nil
   __io_println(to_int(nil))
   // to_float from float (passthrough)
-  __io_println(to_float(3.14))
+  __io_println(3.14)
   // to_float from int
   __io_println(to_float(10))
   // to_float from string
@@ -24,6 +24,6 @@ pipeline default(task) {
   // to_float from nil returns nil
   __io_println(to_float(nil))
   // to_string round-trips
-  __io_println(type_of(to_int(5)))
+  __io_println(type_of(5))
   __io_println(type_of(to_float(5)))
 }

@@ -8,9 +8,9 @@
 pipeline test(task) {
   let start_ms = 1767225600000
   mock_time(start_ms)
-  let before = now_ms()
-  sleep_ms(86400000)
-  let after = now_ms()
+  let before = harness.clock.now_ms()
+  harness.clock.sleep_ms(86400000)
+  let after = harness.clock.now_ms()
   __io_println(before == start_ms)
   __io_println(after == start_ms + 86400000)
   __io_println(after - before == 86400000)

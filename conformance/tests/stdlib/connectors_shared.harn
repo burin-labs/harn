@@ -11,7 +11,7 @@ pipeline test(task) {
   __io_println(verify_hmac_signature("payload", signature, "secret", "sha256"))
   __io_println(verify_hmac_signature("payload", signature, "wrong", "sha256"))
   let root = project_root() ?? cwd()
-  let private_key = read_file(path_join(root, "conformance/helpers/github_app_test_key.pem"))
+  let private_key = harness.fs.read_text(path_join(root, "conformance/helpers/github_app_test_key.pem"))
   let token = jwt_sign("RS256", {iss: "issuer", aud: "audience", exp: 4102444800}, private_key)
   let jwt_result = verify_jwt(
     token,

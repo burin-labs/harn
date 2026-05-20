@@ -1,10 +1,12 @@
-// Regression test: finally must execute exactly once per control-flow
-// path through a try/catch/finally. Prior compiler runs double-fired
-// finally on the body-throw + catch-success path because throw-lowering
-// pre-ran the pending finally AND the post-catch compilation ran it
-// again manually; the rethrow-with-finally helper triple-fired it when
-// the catch body also threw. All three variants are verified here with
-// an explicit counter so any regression is immediately visible.
+/**
+ * Regression test: finally must execute exactly once per control-flow
+ * path through a try/catch/finally. Prior compiler runs double-fired
+ * finally on the body-throw + catch-success path because throw-lowering
+ * pre-ran the pending finally AND the post-catch compilation ran it
+ * again manually; the rethrow-with-finally helper triple-fired it when
+ * the catch body also threw. All three variants are verified here with
+ * an explicit counter so any regression is immediately visible.
+ */
 pipeline test(task) {
   // --- try/catch/finally on caught-throw path: one run ---
   var counter_a = 0

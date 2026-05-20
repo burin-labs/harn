@@ -1,6 +1,8 @@
-// `unknown` narrows via the same flow-sensitive refinement that works on
-// union types: `type_of(x) == "T"` in an if-condition narrows the truthy
-// branch to `T`.
+/**
+ * `unknown` narrows via the same flow-sensitive refinement that works on
+ * union types: `type_of(x) == "T"` in an if-condition narrows the truthy
+ * branch to `T`.
+ */
 pipeline test(task) {
   fn describe(v: unknown) -> string {
     if type_of(v) == "string" {

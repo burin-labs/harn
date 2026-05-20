@@ -1,6 +1,6 @@
 pipeline main() {
-  let dir = path_join(temp_dir(), "harn_eval_manifest_artifacts")
-  mkdir(dir)
+  let dir = path_join(harness.fs.temp_dir(), "harn_eval_manifest_artifacts")
+  harness.fs.mkdir(dir)
   let baseline = run_record(
     {
       _type: "run_record",
@@ -49,7 +49,7 @@ pipeline main() {
   let diff = artifact_diff("src/main.rs", "old\nsame", "new\nsame")
   let review = artifact_diff_review(diff, "Needs approval")
   let decision = artifact_review_decision(review, "accepted")
-  let workspace = artifact_workspace_file("src/main.rs", "fn main() {}")
+  let workspace = artifact_workspace_file("src/main.rs", "fn " + "main() {}")
   let command = artifact_command_result("cargo test", {status: 0, success: true})
   __io_println(suite?.failed == 1)
   __io_println(!suite?.cases[0]?.comparison?.identical)

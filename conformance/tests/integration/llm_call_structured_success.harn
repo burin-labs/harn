@@ -1,7 +1,9 @@
-// `llm_call_structured(prompt, schema, options?)` returns the
-// validated data directly — no `.data` unwrap. The helper forces
-// `response_format: "json"`, `output_validation: "error"`, and
-// `schema_retries: 3` unless the caller overrides them.
+/**
+ * `llm_call_structured(prompt, schema, options?)` returns the
+ * validated data directly — no `.data` unwrap. The helper forces
+ * `response_format: "json"`, `output_validation: "error"`, and
+ * `schema_retries: 3` unless the caller overrides them.
+ */
 pipeline default() {
   let schema = {
     type: "object",

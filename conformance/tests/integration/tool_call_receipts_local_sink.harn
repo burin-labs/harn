@@ -71,8 +71,8 @@ pipeline default() {
   )
   let local_session = "receipt-local-" + uuid()
   let local_path = path_join(".harn", "receipts", local_session + ".jsonl")
-  if file_exists(local_path) {
-    delete_file(local_path)
+  if harness.fs.exists(local_path) {
+    harness.fs.delete(local_path)
   }
   let local_captured = agent_capture_events(
     local_session,

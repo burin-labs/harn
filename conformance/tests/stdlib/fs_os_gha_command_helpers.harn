@@ -10,7 +10,7 @@ import { env_bool } from "std/os"
 import { prefix_lines, single_line_or, truncate_middle, truncate_text } from "std/text"
 
 pipeline test(task) {
-  let root = path_join(temp_dir(), "harn-utility-helpers-" + uuid_v7())
+  let root = path_join(harness.fs.temp_dir(), "harn-utility-helpers-" + uuid_v7())
   let json_path = path_join(root, "nested/data.json")
   write_json(json_path, {name: "harn", count: 2}, {pretty: true})
   let parsed = read_json(json_path)
@@ -19,11 +19,11 @@ pipeline test(task) {
   __io_println(relative_path(root, json_path))
   let lines_path = path_join(root, "lines.txt")
   append_line(lines_path, "x")
-  __io_println(read_file(lines_path))
+  __io_println(harness.fs.read_text(lines_path))
   let output_path = path_join(root, "github-output.txt")
   __io_println(gha_env_block("answer", "42", "EOF"))
   __io_println(gha_write_output("name", "harn", output_path))
-  let output_file = read_file(output_path)
+  let output_file = harness.fs.read_text(output_path)
   __io_println(contains(output_file, "name<<harn_"))
   __io_println(contains(output_file, "\nharn\n"))
   __io_println(
@@ -38,5 +38,5 @@ pipeline test(task) {
   __io_println(prefix_lines("a\nb", "> "))
   __io_println(truncate_middle("abcdef", 5))
   __io_println(contains(truncate_text("abcdef", 3), "truncated"))
-  delete_file(root)
+  harness.fs.delete(root)
 }

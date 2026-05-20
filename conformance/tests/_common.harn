@@ -9,12 +9,12 @@ fn first_group(pattern, text) {
 
 /** Resolve the built Harn CLI for conformance fixtures that spawn subprocesses. */
 pub fn resolve_harn_bin(repo_root) {
-  let env_target_dir = env("CARGO_TARGET_DIR")
+  let env_target_dir = harness.env.get("CARGO_TARGET_DIR")
   if env_target_dir {
     return path_join(env_target_dir, "debug/harn")
   }
   let cargo_config = path_join(repo_root, ".cargo/config.toml")
-  if file_exists(cargo_config) {
+  if harness.fs.exists(cargo_config) {
     let config = exec("cat", cargo_config).stdout
     let configured = first_group("(?m)^target-dir\\s*=\\s*\\\"([^\\\"]+)\\\"", config)
     if configured {
@@ -34,7 +34,7 @@ pub fn process_alive(pid) {
 pub fn wait_for_log_match(log_path, pattern) {
   var attempts = 0
   while attempts < 300 {
-    if file_exists(log_path) {
+    if harness.fs.exists(log_path) {
       let log = exec("cat", log_path).stdout
       let matches = regex_captures(pattern, log)
       if len(matches) > 0 {
@@ -51,7 +51,7 @@ pub fn wait_for_log_match(log_path, pattern) {
 pub fn wait_for_log_contains(log_path, needle) {
   var attempts = 0
   while attempts < 300 {
-    if file_exists(log_path) {
+    if harness.fs.exists(log_path) {
       let log = exec("cat", log_path).stdout
       if contains(log, needle) {
         return true

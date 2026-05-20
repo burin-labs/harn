@@ -8,6 +8,6 @@ pipeline test(task) {
     random_choice(rng_b, ["alpha", "beta", "gamma"]),
   )
   assert_eq(random_shuffle(rng_a, [1, 2, 3, 4, 5]), random_shuffle(rng_b, [1, 2, 3, 4, 5]))
-  assert_eq(random_choice(["only"]), "only")
+  assert_eq(harness.random.choice(["only"]), "only")
   log("seeded rng ok")
 }

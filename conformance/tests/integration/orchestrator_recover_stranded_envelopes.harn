@@ -1,13 +1,13 @@
 import "../_common"
 
-fn wait_for_readyz(url, pid) {
+fn wait_for_readyz(harness: Harness, url, pid) {
   var attempts = 0
   while attempts < 200 {
     if !process_alive(pid) {
       return false
     }
     try {
-      let response = http_request("GET", url + "/readyz", {timeout_ms: 250})
+      let response = harness.net.request("GET", url + "/readyz", {timeout_ms: 250})
       if response.status == 200 {
         return true
       }
@@ -19,19 +19,21 @@ fn wait_for_readyz(url, pid) {
 }
 
 pipeline test(task) {
-  let root = path_join(temp_dir(), "harn-orchestrator-recover-" + uuid())
-  mkdir(root)
-  write_file(
+  let root = path_join(harness.fs.temp_dir(), "harn-orchestrator-recover-" + uuid())
+  harness.fs.mkdir(root)
+  harness.fs
+    .write_text(
     path_join(root, "harn.toml"),
     "[package]\nname = \"fixture\"\n\n[exports]\nhandlers = \"lib.harn\"\n\n[[triggers]]\nid = \"incoming-review-task\"\nkind = \"a2a-push\"\nprovider = \"a2a-push\"\npath = \"/a2a/review\"\nmatch = { events = [\"a2a.task.received\"] }\nhandler = \"handlers::on_task\"\n",
   )
-  write_file(
+  harness.fs
+    .write_text(
     path_join(root, "lib.harn"),
     "import \"std/triggers\"\n\npub fn on_task(event: TriggerEvent) -> string {\n  return event.kind\n}\n",
   )
   let repo_root = exec("git", "rev-parse", "--show-toplevel").stdout.trim()
   let harn_bin = resolve_harn_bin(repo_root)
-  assert(file_exists(harn_bin), "missing built harn binary at " + harn_bin)
+  assert(harness.fs.exists(harn_bin), "missing built harn binary at " + harn_bin)
   let crash_start = shell_at(
     root,
     "nohup env HARN_SECRET_PROVIDERS=env HARN_EVENT_LOG_BACKEND=file HARN_ORCHESTRATOR_API_KEYS=test-key HARN_ORCHESTRATOR_HMAC_SECRET=shared-secret HARN_TEST_DISPATCHER_FAIL_BEFORE_OUTBOX=1 "
@@ -42,8 +44,9 @@ pipeline test(task) {
   assert(crash_start.success && crash_pid != "", "failed to start crashing orchestrator")
   let crash_url = wait_for_listener_url(path_join(root, "orchestrator-crash.log"))
   assert(crash_url != nil, "crashing listener URL did not appear in log")
-  assert(wait_for_readyz(crash_url, crash_pid), "crashing listener did not become ready")
-  let response = http_request(
+  assert(wait_for_readyz(harness, crash_url, crash_pid), "crashing listener did not become ready")
+  let response = harness.net
+    .request(
     "POST",
     crash_url + "/a2a/review",
     {
@@ -72,7 +75,7 @@ pipeline test(task) {
   assert(restart.success && restart_pid != "", "failed to restart orchestrator")
   let restart_url = wait_for_listener_url(path_join(root, "orchestrator-restart.log"))
   assert(restart_url != nil, "restart listener URL did not appear in log")
-  assert(wait_for_readyz(restart_url, restart_pid), "restart listener did not become ready")
+  assert(wait_for_readyz(harness, restart_url, restart_pid), "restart listener did not become ready")
   let state_dir = path_join(root, "state")
   let config_path = path_join(root, "harn.toml")
   let queue = shell_at(
@@ -108,5 +111,5 @@ pipeline test(task) {
   )
   let _ = shell("kill -TERM " + restart_pid)
   wait_for_exit(restart_pid)
-  delete_file(root)
+  harness.fs.delete(root)
 }

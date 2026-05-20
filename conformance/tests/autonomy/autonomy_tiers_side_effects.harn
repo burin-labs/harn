@@ -35,8 +35,9 @@ fn fire_tier(handle: TriggerHandle, unique: string) -> DispatchHandle {
 
 pipeline test(task) {
   clear_host_mocks()
-  mkdir(".harn")
-  let unique = to_string(to_int(timestamp())) + "-" + to_string(random_int(100000, 999999))
+  harness.fs.mkdir(".harn")
+  let unique = to_string(to_int(harness.clock.timestamp())) + "-"
+    + to_string(harness.random.gen_range(100000, 999999))
   let shadow_agent = "autonomy-shadow-" + unique
   let shadow = fire_tier(register_tier_agent(shadow_agent, "shadow"), "shadow-" + unique)
   let shadow_records: list<TrustRecord> = trust_query({agent: shadow_agent, action: "fs.write", tier: "shadow"})
@@ -69,11 +70,12 @@ pipeline test(task) {
   let scoped_path = path_join(".harn", "autonomy_tier_scoped_" + unique + ".txt")
   with_autonomy_policy(
     {agent_id: scoped_agent, autonomy_tier: "act_auto", action_tiers: {"fs.write": "shadow"}},
-    fn() { write_file(scoped_path, "scoped") },
+    fn() { harness.fs.write_text(scoped_path, "scoped") },
   )
   let scoped_records: list<TrustRecord> = trust_query({agent: scoped_agent, action: "fs.write", tier: "shadow"})
   __io_println(
-    !file_exists(scoped_path) && len(scoped_records) == 1 && scoped_records[0].outcome == "denied",
+    !harness.fs.exists(scoped_path) && len(scoped_records) == 1
+      && scoped_records[0].outcome == "denied",
   )
   for path in [
     shadow.result?.file_path,
@@ -82,8 +84,8 @@ pipeline test(task) {
     auto.result?.file_path,
     scoped_path,
   ] {
-    if path != nil && file_exists(path) {
-      delete_file(path)
+    if path != nil && harness.fs.exists(path) {
+      harness.fs.delete(path)
     }
   }
 }

@@ -537,11 +537,11 @@ pub fn parallel_judge(items, judge_fn, opts = nil) {
     i = i + 1
   }
   let raw = parallel each indexed with { max_concurrent: __clamp_int(cfg?.max_concurrent ?? 4, 1, 64) } { entry ->
-    let started = now_ms()
+    let started = harness.clock.now_ms()
     let r = try {
       judge_fn(entry.item)
     }
-    let duration = now_ms() - started
+    let duration = harness.clock.now_ms() - started
     if is_err(r) {
       let err = unwrap_err(r)
       let record = {index: entry.index, item: entry.item, ok: false, error: err, duration_ms: duration}

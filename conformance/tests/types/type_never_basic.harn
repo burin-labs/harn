@@ -1,4 +1,4 @@
-// Test the never type and unreachable() builtin
+/** Test the never type and unreachable() builtin */
 pipeline test(task) {
   // unreachable() throws at runtime
   fn test_unreachable_throws() -> string {
@@ -20,12 +20,11 @@ pipeline test(task) {
   }
   // if/else where one branch throws — the other branch's value is used
   fn branch_type(x: bool) -> int {
-    let result = if x {
+    return if x {
       42
     } else {
       throw "nope"
     }
-    return result
   }
   // Exhaustive narrowing with unreachable()
   fn exhaustive_check(x: string | int) -> string {

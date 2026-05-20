@@ -443,10 +443,10 @@ fn __classifier_audit_payload(classifier_cfg, command, verdict, cache_hit, actio
   }
 }
 
-fn __classifier_run(classifier_cfg, args, inner) {
+fn __classifier_run(harness: Harness, classifier_cfg, args, inner) {
   let original_command = __preset_command_text(args)
   let cache_key = __classifier_cache_key(classifier_cfg.scope, original_command)
-  let now = now_ms()
+  let now = harness.clock.now_ms()
   let cached = if classifier_cfg.cache_ttl_ms > 0 {
     __tool_hooks_classifier_cache_get(cache_key, now)
   } else {
@@ -616,7 +616,7 @@ pub fn preset_run_command(config = nil) {
       return mode(matches[0], args, inner)
     }
     if classifier_cfg != nil {
-      return __classifier_run(classifier_cfg, args, inner)
+      return __classifier_run(harness, classifier_cfg, args, inner)
     }
     return __preset_no_match(args, inner)
   }

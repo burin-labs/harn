@@ -26,7 +26,7 @@ pipeline test(task) {
       default_scopes: ["read"],
     },
   )
-  let now = to_int(timestamp())
+  let now = to_int(harness.clock.timestamp())
   let stored = {
     access_token: "ACCESS-STALE",
     refresh_token: "REFRESH-DEAD",

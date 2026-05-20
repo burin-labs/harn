@@ -8,10 +8,11 @@ fn gated_handler(event: TriggerEvent) -> dict {
 }
 
 pipeline test(task) {
-  let unique = to_string(to_int(timestamp())) + "-" + to_string(random_int(100000, 999999))
+  let unique = to_string(to_int(harness.clock.timestamp())) + "-"
+    + to_string(harness.random.gen_range(100000, 999999))
   let agent_id = "shadow-bot-" + unique
   let file_path = path_join(".harn", "trust_graph_shadow_" + agent_id + ".txt")
-  mkdir(".harn")
+  harness.fs.mkdir(".harn")
   let handle: TriggerHandle = trigger_register(
     {
       id: agent_id,
@@ -35,7 +36,7 @@ pipeline test(task) {
     {provider: "github", kind: "issue.opened", headers: {x_delivery: "evt-shadow-" + unique}},
   )
   let denied: list<TrustRecord> = trust_query({agent: agent_id, action: "fs.write", outcome: "denied"})
-  let file_after_first = file_exists(file_path)
+  let file_after_first = harness.fs.exists(file_path)
   let promoted: TrustRecord = trust_record(agent_id, "trust.promote", "tester", "success", "act_auto")
   let promote_records: list<TrustRecord> = trust_query({agent: agent_id, action: "trust.promote"})
   let second: DispatchHandle = trigger_fire(
@@ -50,7 +51,7 @@ pipeline test(task) {
   __io_println(len(promote_records) == 1)
   __io_println(second.status == "dispatched" && second.error == nil)
   __io_println(second.result?.autonomy_tier == "act_auto")
-  __io_println(file_exists(file_path))
-  delete_file(file_path)
+  __io_println(harness.fs.exists(file_path))
+  harness.fs.delete(file_path)
   __io_println(len(successes) == 1 && successes[0].autonomy_tier == "act_auto")
 }

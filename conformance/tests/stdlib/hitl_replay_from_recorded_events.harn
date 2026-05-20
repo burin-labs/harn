@@ -25,7 +25,8 @@ pipeline test(task) {
       {approved: true, reviewer: "bob", responded_at: "2026-04-20T12:00:01Z"},
     ],
   )
-  let unique = to_string(to_int(timestamp())) + "-" + to_string(random_int(100000, 999999))
+  let unique = to_string(to_int(harness.clock.timestamp())) + "-"
+    + to_string(harness.random.gen_range(100000, 999999))
   let handle: TriggerHandle = trigger_register(
     {
       id: "hitl-replay-" + unique,

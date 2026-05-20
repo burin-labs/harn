@@ -25,7 +25,7 @@ fn lookup_tools() {
 
 pipeline default() {
   mock_time(1700000000000)
-  let start_ms = now_ms()
+  let start_ms = harness.clock.now_ms()
   llm_mock_clear()
   llm_mock({tool_calls: [{id: "t1", name: "lookup", arguments: {q: "1"}}]})
   llm_mock({tool_calls: [{id: "t2", name: "lookup", arguments: {q: "2"}}]})
@@ -50,6 +50,6 @@ pipeline default() {
   __io_println(result.adaptive_budget.decisions[0].action)
   // Mock time stayed pinned: no opaque wall-clock observation lurks
   // in the budget path.
-  __io_println(now_ms() == start_ms)
+  __io_println(harness.clock.now_ms() == start_ms)
   unmock_time()
 }

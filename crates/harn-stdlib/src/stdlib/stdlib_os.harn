@@ -16,7 +16,7 @@ pub fn os_info() -> dict {
     arch: arch(),
     cwd: cwd(),
     home_dir: home_dir(),
-    temp_dir: temp_dir(),
+    temp_dir: harness.fs.temp_dir(),
     username: username(),
     hostname: hostname(),
     pid: pid(),
@@ -37,7 +37,7 @@ pub fn os_info() -> dict {
  * @example: env_bool(name, fallback)
  */
 pub fn env_bool(name: string, fallback: bool = false) -> bool {
-  let value = env(name)
+  let value = harness.env.get(name)
   if value == nil {
     return fallback
   }
@@ -63,7 +63,7 @@ pub fn env_bool(name: string, fallback: bool = false) -> bool {
  * @example: env_int(name, fallback)
  */
 pub fn env_int(name: string, fallback = nil) {
-  let value = env(name)
+  let value = harness.env.get(name)
   if value == nil {
     return fallback
   }
@@ -80,7 +80,7 @@ pub fn env_int(name: string, fallback = nil) {
  * @example: env_list(name, separator)
  */
 pub fn env_list(name: string, separator = nil) -> list<string> {
-  let value = env(name)
+  let value = harness.env.get(name)
   if value == nil || value == "" {
     return []
   }
@@ -112,7 +112,7 @@ pub fn env_list(name: string, separator = nil) -> list<string> {
  * @example: require_env(name)
  */
 pub fn require_env(name: string) -> string {
-  let value = env(name)
+  let value = harness.env.get(name)
   if value == nil || value == "" {
     throw "required environment variable is not set: " + name
   }

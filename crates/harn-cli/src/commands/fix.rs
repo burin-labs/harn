@@ -122,8 +122,9 @@ struct CallableInfo {
     has_params: bool,
     param_names: BTreeSet<String>,
     harness_binding: Option<String>,
+    can_add_harness_param: bool,
     calls: Vec<CallSite>,
-    ambient_stdio_calls: Vec<AmbientStdioCall>,
+    ambient_capability_calls: Vec<AmbientCapabilityCall>,
 }
 
 #[derive(Debug, Clone)]
@@ -133,8 +134,9 @@ struct CallSite {
 }
 
 #[derive(Debug, Clone)]
-struct AmbientStdioCall {
+struct AmbientCapabilityCall {
     name: String,
+    code: Code,
     span: Span,
 }
 
@@ -511,55 +513,66 @@ fn lint_candidate_repair(
     source: &str,
     program: &[SNode],
 ) -> Option<(Repair, Vec<FixEdit>)> {
-    if diag.code == Code::LintAmbientStdioBuiltin {
-        return synthesize_stdio_repair(diag, source, program);
+    if ambient_capability_handle(diag.code).is_some() {
+        return synthesize_ambient_capability_repair(diag, source, program);
     }
     let repair = diag.repair()?;
     Some((repair, diag.fix.clone().unwrap_or_default()))
 }
 
-fn synthesize_stdio_repair(
+fn synthesize_ambient_capability_repair(
     diag: &harn_lint::LintDiagnostic,
     source: &str,
     program: &[SNode],
 ) -> Option<(Repair, Vec<FixEdit>)> {
+    ambient_capability_handle(diag.code)?;
     let infos = collect_callable_infos(program, source);
     let owner_idx = infos.iter().position(|info| {
-        info.ambient_stdio_calls
-            .iter()
-            .any(|call| call.span.start == diag.span.start && call.span.end == diag.span.end)
+        info.ambient_capability_calls.iter().any(|call| {
+            call.code == diag.code
+                && call.span.start == diag.span.start
+                && call.span.end == diag.span.end
+        })
     })?;
+    let reverse_callers = build_reverse_callers(&infos);
     let owner = &infos[owner_idx];
-    let ambient = owner
-        .ambient_stdio_calls
-        .iter()
-        .find(|call| call.span.start == diag.span.start && call.span.end == diag.span.end)?;
-    let replacement_binding = owner
-        .harness_binding
-        .clone()
-        .or_else(|| harness_param_name_for_insert(owner).map(str::to_string));
-    let replacement = ambient_replacement(&ambient.name, replacement_binding.as_deref())?;
+    let ambient = owner.ambient_capability_calls.iter().find(|call| {
+        call.code == diag.code
+            && call.span.start == diag.span.start
+            && call.span.end == diag.span.end
+    })?;
+    let owner_uses_global_harness = should_use_global_harness(owner);
+    let replacement_binding = if owner_uses_global_harness {
+        Some("harness".to_string())
+    } else {
+        None
+    }
+    .or_else(|| {
+        owner
+            .harness_binding
+            .clone()
+            .or_else(|| harness_param_name_for_insert(owner).map(str::to_string))
+    });
+    let replacement =
+        ambient_replacement(diag.code, &ambient.name, replacement_binding.as_deref())?;
     let mut edits =
         replace_identifier_within_span_fix(source, diag.span, &ambient.name, &replacement)?;
 
-    if owner.harness_binding.is_some() {
-        return Some((
-            Repair::from_template(Code::LintAmbientStdioBuiltin.repair_template()?),
-            edits,
-        ));
+    if owner.harness_binding.is_some() || owner_uses_global_harness {
+        return Some((Repair::from_template(diag.code.repair_template()?), edits));
     }
 
-    let reverse_callers = build_reverse_callers(&infos);
     let needed = propagate_harness_requirements(&infos, &reverse_callers, owner_idx);
     let primary_call_start = owner
-        .ambient_stdio_calls
+        .ambient_capability_calls
         .iter()
+        .filter(|call| call.code == diag.code)
         .map(|call| call.span.start)
         .min()
         .unwrap_or(diag.span.start);
     if diag.span.start != primary_call_start {
         return Some((
-            repair_for_stdio_plan(&infos, &reverse_callers, &needed)?,
+            repair_for_ambient_capability_plan(diag.code, &infos, &reverse_callers, &needed)?,
             edits,
         ));
     }
@@ -576,6 +589,7 @@ fn synthesize_stdio_repair(
             let caller = &infos[caller_idx];
             let arg_name = match caller.harness_binding.as_deref() {
                 Some(binding) => binding,
+                None if should_use_global_harness(caller) => "harness",
                 None if needed.contains(&caller_idx) => harness_param_name_for_insert(caller)?,
                 None => continue,
             };
@@ -588,13 +602,74 @@ fn synthesize_stdio_repair(
     }
 
     Some((
-        repair_for_stdio_plan(&infos, &reverse_callers, &needed)?,
+        repair_for_ambient_capability_plan(diag.code, &infos, &reverse_callers, &needed)?,
         dedupe_edits(edits),
     ))
 }
 
-fn ambient_replacement(name: &str, binding: Option<&str>) -> Option<String> {
-    let replacement = harn_parser::diagnostic::harness_stdio_replacement(name)?;
+fn should_use_global_harness(info: &CallableInfo) -> bool {
+    // Public Harn APIs need to keep their source-level signature stable while
+    // their internals migrate off ambient builtins. The VM installs `harness`
+    // as a global before execution, so using that binding is compatible with
+    // existing callers. Pipeline bodies are modeled separately with an
+    // explicit harness binding because their runtime entry parameters are not
+    // invocation parameters.
+    info.is_pub && !info.param_names.contains("harness")
+}
+
+fn ambient_capability_handle(code: Code) -> Option<&'static str> {
+    match code {
+        Code::LintAmbientClockBuiltin => Some("clock"),
+        Code::LintAmbientStdioBuiltin => Some("stdio"),
+        Code::LintAmbientFsBuiltin => Some("fs"),
+        Code::LintAmbientEnvBuiltin => Some("env"),
+        Code::LintAmbientRandomBuiltin => Some("random"),
+        Code::LintAmbientNetBuiltin => Some("net"),
+        _ => None,
+    }
+}
+
+fn ambient_code_for_call(name: &str, arg_count: usize) -> Option<Code> {
+    if harn_parser::diagnostic::harness_clock_replacement(name).is_some() {
+        return Some(Code::LintAmbientClockBuiltin);
+    }
+    if harn_parser::diagnostic::harness_stdio_replacement(name).is_some() {
+        return Some(Code::LintAmbientStdioBuiltin);
+    }
+    if harn_parser::diagnostic::harness_fs_replacement(name).is_some() {
+        return Some(Code::LintAmbientFsBuiltin);
+    }
+    if harn_parser::diagnostic::harness_env_replacement(name).is_some() {
+        return Some(Code::LintAmbientEnvBuiltin);
+    }
+    if harn_parser::diagnostic::harness_random_replacement(name).is_some()
+        && !is_explicit_seeded_random_call(name, arg_count)
+    {
+        return Some(Code::LintAmbientRandomBuiltin);
+    }
+    if harn_parser::diagnostic::harness_net_replacement(name).is_some() {
+        return Some(Code::LintAmbientNetBuiltin);
+    }
+    None
+}
+
+fn is_explicit_seeded_random_call(name: &str, arg_count: usize) -> bool {
+    matches!(
+        (name, arg_count),
+        ("random", 1) | ("random_int", 3) | ("random_choice", 2) | ("random_shuffle", 2)
+    )
+}
+
+fn ambient_replacement(code: Code, name: &str, binding: Option<&str>) -> Option<String> {
+    let replacement = match code {
+        Code::LintAmbientClockBuiltin => harn_parser::diagnostic::harness_clock_replacement(name),
+        Code::LintAmbientStdioBuiltin => harn_parser::diagnostic::harness_stdio_replacement(name),
+        Code::LintAmbientFsBuiltin => harn_parser::diagnostic::harness_fs_replacement(name),
+        Code::LintAmbientEnvBuiltin => harn_parser::diagnostic::harness_env_replacement(name),
+        Code::LintAmbientRandomBuiltin => harn_parser::diagnostic::harness_random_replacement(name),
+        Code::LintAmbientNetBuiltin => harn_parser::diagnostic::harness_net_replacement(name),
+        _ => None,
+    }?;
     Some(replacement.replacen("harness", binding.unwrap_or("harness"), 1))
 }
 
@@ -619,16 +694,17 @@ fn collect_callable_infos(program: &[SNode], source: &str) -> Vec<CallableInfo> 
                 ..
             } => {
                 let mut calls = Vec::new();
-                let mut ambient_stdio_calls = Vec::new();
+                let mut ambient_capability_calls = Vec::new();
                 visit_callable_body(inner, &mut |child| {
-                    if let Node::FunctionCall { name, .. } = &child.node {
+                    if let Node::FunctionCall { name, args, .. } = &child.node {
                         calls.push(CallSite {
                             callee: name.clone(),
                             span: child.span,
                         });
-                        if harn_parser::diagnostic::harness_stdio_replacement(name).is_some() {
-                            ambient_stdio_calls.push(AmbientStdioCall {
+                        if let Some(code) = ambient_code_for_call(name, args.len()) {
+                            ambient_capability_calls.push(AmbientCapabilityCall {
                                 name: name.clone(),
+                                code,
                                 span: child.span,
                             });
                         }
@@ -646,8 +722,49 @@ fn collect_callable_infos(program: &[SNode], source: &str) -> Vec<CallableInfo> 
                     has_params: has_params || !params.is_empty(),
                     param_names: params.iter().map(|param| param.name.clone()).collect(),
                     harness_binding: harness_param_name(params).map(str::to_string),
+                    can_add_harness_param: true,
                     calls,
-                    ambient_stdio_calls,
+                    ambient_capability_calls,
+                });
+            }
+            Node::Pipeline {
+                name,
+                params,
+                is_pub,
+                ..
+            } => {
+                let mut calls = Vec::new();
+                let mut ambient_capability_calls = Vec::new();
+                visit_callable_body(inner, &mut |child| {
+                    if let Node::FunctionCall { name, args, .. } = &child.node {
+                        calls.push(CallSite {
+                            callee: name.clone(),
+                            span: child.span,
+                        });
+                        if let Some(code) = ambient_code_for_call(name, args.len()) {
+                            ambient_capability_calls.push(AmbientCapabilityCall {
+                                name: name.clone(),
+                                code,
+                                span: child.span,
+                            });
+                        }
+                    }
+                });
+                let Some((insert_offset, has_params)) = callable_param_insert(source, inner.span)
+                else {
+                    continue;
+                };
+                infos.push(CallableInfo {
+                    name: name.clone(),
+                    span: inner.span,
+                    is_pub: *is_pub,
+                    insert_offset,
+                    has_params: has_params || !params.is_empty(),
+                    param_names: params.iter().cloned().collect(),
+                    harness_binding: Some("harness".to_string()),
+                    can_add_harness_param: false,
+                    calls,
+                    ambient_capability_calls,
                 });
             }
             _ => {}
@@ -658,7 +775,9 @@ fn collect_callable_infos(program: &[SNode], source: &str) -> Vec<CallableInfo> 
 
 fn visit_callable_body(node: &SNode, visitor: &mut impl FnMut(&SNode)) {
     let body = match &node.node {
-        Node::FnDecl { body, .. } | Node::ToolDecl { body, .. } => body,
+        Node::FnDecl { body, .. } | Node::ToolDecl { body, .. } | Node::Pipeline { body, .. } => {
+            body
+        }
         _ => return,
     };
     for stmt in body {
@@ -719,7 +838,11 @@ fn propagate_harness_requirements(
         let snapshot = needed.iter().copied().collect::<Vec<_>>();
         for callee_idx in snapshot {
             for &(caller_idx, _) in &reverse_callers[callee_idx] {
-                if infos[caller_idx].harness_binding.is_none() && needed.insert(caller_idx) {
+                if infos[caller_idx].harness_binding.is_none()
+                    && !should_use_global_harness(&infos[caller_idx])
+                    && infos[caller_idx].can_add_harness_param
+                    && needed.insert(caller_idx)
+                {
                     changed = true;
                 }
             }
@@ -728,7 +851,8 @@ fn propagate_harness_requirements(
     needed
 }
 
-fn repair_for_stdio_plan(
+fn repair_for_ambient_capability_plan(
+    code: Code,
     infos: &[CallableInfo],
     reverse_callers: &[Vec<(usize, usize)>],
     needed: &BTreeSet<usize>,
@@ -742,9 +866,7 @@ fn repair_for_stdio_plan(
             Code::InvalidMainSignature.repair_template()?,
         ))
     } else {
-        Some(Repair::from_template(
-            Code::LintAmbientStdioBuiltin.repair_template()?,
-        ))
+        Some(Repair::from_template(code.repair_template()?))
     }
 }
 
@@ -1268,6 +1390,224 @@ mod tests {
         assert!(
             updated.contains("harness.stdio.println(\"hi\")"),
             "expected ambient stdio call to migrate: {updated}"
+        );
+    }
+
+    #[test]
+    fn apply_scope_local_threads_harness_for_non_stdio_capabilities() {
+        let cases = [
+            (
+                "clock_apply.harn",
+                Code::LintAmbientClockBuiltin,
+                "let value = now_ms()",
+                "harness.clock.now_ms()",
+            ),
+            (
+                "fs_apply.harn",
+                Code::LintAmbientFsBuiltin,
+                "let value = read_file(\"notes.txt\")",
+                "harness.fs.read_text(\"notes.txt\")",
+            ),
+            (
+                "env_apply.harn",
+                Code::LintAmbientEnvBuiltin,
+                "let value = env_or(\"MODE\", \"dev\")",
+                "harness.env.get_or(\"MODE\", \"dev\")",
+            ),
+            (
+                "random_apply.harn",
+                Code::LintAmbientRandomBuiltin,
+                "let value = random_int(0, 10)",
+                "harness.random.gen_range(0, 10)",
+            ),
+            (
+                "net_apply.harn",
+                Code::LintAmbientNetBuiltin,
+                "let value = http_get(\"https://example.test\")",
+                "harness.net.get(\"https://example.test\")",
+            ),
+        ];
+
+        for (filename, code, ambient_line, migrated_call) in cases {
+            let temp = tempfile::TempDir::new().unwrap();
+            let script = temp.path().join(filename);
+            fs::write(
+                &script,
+                format!(
+                    "fn helper() {{\n  {ambient_line}\n  value\n}}\n\nfn main(harness: Harness) {{\n  helper()\n}}\n"
+                ),
+            )
+            .unwrap();
+
+            let result = apply_repairs(&script, RepairSafety::ScopeLocal, false).unwrap();
+            assert!(
+                result.applied.iter().any(|repair| {
+                    repair.diagnostic_code == code.to_string()
+                        && repair.repair_id.starts_with("bindings/thread-harness")
+                }),
+                "{filename}: {result:#?}"
+            );
+
+            let updated = fs::read_to_string(&script).unwrap();
+            assert!(
+                updated.contains("fn helper(harness: Harness)"),
+                "{filename}: expected helper to gain a harness parameter: {updated}"
+            );
+            assert!(
+                updated.contains("helper(harness)"),
+                "{filename}: expected main to thread harness into helper: {updated}"
+            );
+            assert!(
+                updated.contains(migrated_call),
+                "{filename}: expected ambient call to migrate to {migrated_call}: {updated}"
+            );
+        }
+    }
+
+    #[test]
+    fn apply_scope_local_rewrites_ambient_calls_inside_pipeline() {
+        let temp = tempfile::TempDir::new().unwrap();
+        let script = temp.path().join("pipeline_direct.harn");
+        fs::write(
+            &script,
+            "pipeline default() {\n  println(\"hi\")\n  let home = env_or(\"HOME\", \"\")\n}\n",
+        )
+        .unwrap();
+
+        let result = apply_repairs(&script, RepairSafety::ScopeLocal, false).unwrap();
+        assert!(
+            result.applied.iter().any(|repair| {
+                repair.diagnostic_code == Code::LintAmbientStdioBuiltin.to_string()
+                    && repair.repair_id == "bindings/thread-harness"
+            }),
+            "{result:#?}"
+        );
+        assert!(
+            result.applied.iter().any(|repair| {
+                repair.diagnostic_code == Code::LintAmbientEnvBuiltin.to_string()
+                    && repair.repair_id == "bindings/thread-harness-env"
+            }),
+            "{result:#?}"
+        );
+
+        let updated = fs::read_to_string(&script).unwrap();
+        assert!(
+            updated.contains("pipeline default()"),
+            "pipeline signature should remain stable: {updated}"
+        );
+        assert!(
+            updated.contains("harness.stdio.println(\"hi\")"),
+            "expected stdio call to use the pipeline harness global: {updated}"
+        );
+        assert!(
+            updated.contains("harness.env.get_or(\"HOME\", \"\")"),
+            "expected env call to use the pipeline harness global: {updated}"
+        );
+    }
+
+    #[test]
+    fn apply_scope_local_threads_harness_from_pipeline_to_helper() {
+        let temp = tempfile::TempDir::new().unwrap();
+        let script = temp.path().join("pipeline_helper.harn");
+        fs::write(
+            &script,
+            "fn helper() {\n  println(\"hi\")\n}\n\npipeline default() {\n  helper()\n}\n",
+        )
+        .unwrap();
+
+        let result = apply_repairs(&script, RepairSafety::ScopeLocal, false).unwrap();
+        assert!(
+            result.applied.iter().any(|repair| {
+                repair.diagnostic_code == Code::LintAmbientStdioBuiltin.to_string()
+                    && repair.repair_id == "bindings/thread-harness"
+            }),
+            "{result:#?}"
+        );
+
+        let updated = fs::read_to_string(&script).unwrap();
+        assert!(
+            updated.contains("fn helper(harness: Harness)"),
+            "expected helper to gain a harness parameter: {updated}"
+        );
+        assert!(
+            updated.contains("helper(harness)"),
+            "expected pipeline to pass its harness global into helper: {updated}"
+        );
+        assert!(
+            updated.contains("harness.stdio.println(\"hi\")"),
+            "expected ambient stdio call to migrate: {updated}"
+        );
+    }
+
+    #[test]
+    fn apply_scope_local_preserves_public_signature_with_global_harness() {
+        let temp = tempfile::TempDir::new().unwrap();
+        let script = temp.path().join("public_helper.harn");
+        fs::write(
+            &script,
+            "/** Public API. */\npub fn helper(path: string) {\n  return read_file(path)\n}\n\npipeline default() {\n  helper(\"notes.txt\")\n}\n",
+        )
+        .unwrap();
+
+        let result = apply_repairs(&script, RepairSafety::ScopeLocal, false).unwrap();
+        assert!(
+            result.applied.iter().any(|repair| {
+                repair.diagnostic_code == Code::LintAmbientFsBuiltin.to_string()
+                    && repair.repair_id == "bindings/thread-harness-fs"
+            }),
+            "{result:#?}"
+        );
+
+        let updated = fs::read_to_string(&script).unwrap();
+        assert!(
+            updated.contains("pub fn helper(path: string)"),
+            "public signature should remain stable: {updated}"
+        );
+        assert!(
+            updated.contains("return harness.fs.read_text(path)"),
+            "public function internals should use the VM harness global: {updated}"
+        );
+        assert!(
+            updated.contains("helper(\"notes.txt\")"),
+            "callers should not receive an inserted harness argument: {updated}"
+        );
+    }
+
+    #[test]
+    fn apply_scope_local_threads_private_helper_from_public_api() {
+        let temp = tempfile::TempDir::new().unwrap();
+        let script = temp.path().join("public_calls_private.harn");
+        fs::write(
+            &script,
+            "/** Public API. */\npub fn load(path: string) {\n  return load_inner(path)\n}\n\nfn load_inner(path: string) {\n  return read_file(path)\n}\n\npipeline default() {\n  load(\"notes.txt\")\n}\n",
+        )
+        .unwrap();
+
+        let result = apply_repairs(&script, RepairSafety::ScopeLocal, false).unwrap();
+        assert!(
+            result.applied.iter().any(|repair| {
+                repair.diagnostic_code == Code::LintAmbientFsBuiltin.to_string()
+                    && repair.repair_id == "bindings/thread-harness-fs"
+            }),
+            "{result:#?}"
+        );
+
+        let updated = fs::read_to_string(&script).unwrap();
+        assert!(
+            updated.contains("pub fn load(path: string)"),
+            "public signature should remain stable: {updated}"
+        );
+        assert!(
+            updated.contains("return load_inner(harness, path)"),
+            "public caller should thread the VM harness global: {updated}"
+        );
+        assert!(
+            updated.contains("fn load_inner(harness: Harness, path: string)"),
+            "private helper should receive an explicit harness: {updated}"
+        );
+        assert!(
+            updated.contains("return harness.fs.read_text(path)"),
+            "private helper should migrate ambient fs call: {updated}"
         );
     }
 

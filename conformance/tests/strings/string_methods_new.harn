@@ -1,4 +1,4 @@
-// Test new string methods
+/** Test new string methods */
 pipeline default(task) {
   // trim_start / trim_end — verify by measuring length
   let s = "  hello world  "

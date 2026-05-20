@@ -4,9 +4,9 @@ pipeline test(task) {
   let suffix = uuid()
   let alpha_namespace = "alpha-${suffix}"
   let beta_namespace = "beta-${suffix}"
-  let root = path_join(temp_dir(), "project-deep-scan-ns-" + suffix)
-  mkdir(root)
-  write_file(path_join(root, "README.md"), "# repo\n")
+  let root = path_join(harness.fs.temp_dir(), "project-deep-scan-ns-" + suffix)
+  harness.fs.mkdir(root)
+  harness.fs.write_text(path_join(root, "README.md"), "# repo\n")
   llm_mock({text: "{\"purpose\":\"alpha root\"}"})
   let alpha = project_deep_scan(
     root,
@@ -56,5 +56,5 @@ pipeline test(task) {
   __io_println(project_deep_scan_status(alpha_namespace, root).cache_hits == 1)
   __io_println(project_deep_scan_status(beta_namespace, root).cache_hits == 1)
   __io_println(len(llm_mock_calls()) == 2)
-  delete_file(root)
+  harness.fs.delete(root)
 }

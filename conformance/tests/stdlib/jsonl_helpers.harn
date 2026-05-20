@@ -14,7 +14,7 @@ pipeline default() {
   __io_println(len(limited))
   let lenient = parse_jsonl("{\"ok\":1}\nNOT JSON\n{\"ok\":2}\n")
   __io_println(len(lenient))
-  let path = path_join(temp_dir(), "harn-jsonl-roundtrip-" + uuid() + ".jsonl")
+  let path = path_join(harness.fs.temp_dir(), "harn-jsonl-roundtrip-" + uuid() + ".jsonl")
   let written = write_jsonl(path, [{x: 1}, {x: 2}, {x: 3}])
   __io_println(written)
   let reread = read_jsonl(path)

@@ -4,7 +4,7 @@ pipeline test(task) {
     "https://api.example.com/items",
     {responses: [{status: 503}, {status: 200, body: "created"}]},
   )
-  let no_retry = http_post("https://api.example.com/items", "{}", {retry: {max: 1, backoff_ms: 0}})
+  let no_retry = harness.net.post("https://api.example.com/items", "{}", {retry: {max: 1, backoff_ms: 0}})
   let no_retry_calls = http_mock_calls()
   assert_eq(no_retry.status, 503)
   assert_eq(len(no_retry_calls), 1)
@@ -16,7 +16,8 @@ pipeline test(task) {
     "https://api.example.com/items",
     {responses: [{status: 503}, {status: 200, body: "created"}]},
   )
-  let with_retry = http_post(
+  let with_retry = harness.net
+    .post(
     "https://api.example.com/items",
     "{}",
     {retry: {max: 1, backoff_ms: 0}, retry_methods: ["POST"]},

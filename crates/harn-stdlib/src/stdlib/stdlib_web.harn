@@ -162,8 +162,8 @@ pub fn web_fetch(url: string, options = nil) -> dict {
   }
   let headers = __web_conditional_headers(__web_base_headers(opts), previous, opts?.conditional ?? true)
   http_opts = http_opts + {headers: headers}
-  let response = http_request(method, url, http_opts)
-  let fetched_at = opts?.fetched_at ?? timestamp()
+  let response = harness.net.request(method, url, http_opts)
+  let fetched_at = opts?.fetched_at ?? harness.clock.timestamp()
   if response.status == 304 && previous != nil {
     let not_modified = __web_not_modified(source_url, response, previous, fetched_at)
     if store_opts != nil {

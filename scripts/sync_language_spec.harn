@@ -24,11 +24,11 @@ pub fn render_from(spec_text: string) -> string {
  * disk. Equivalent to `render_from(read_file(SRC))`.
  */
 pub fn render_mirror() -> string {
-  return render_from(read_file(SRC))
+  return render_from(harness.fs.read_text(SRC))
 }
 
 pipeline main(task) {
-  if !file_exists(SRC) {
+  if !harness.fs.exists(SRC) {
     __io_eprintln("error: missing ${SRC}")
     return 1
   }
@@ -38,13 +38,13 @@ pipeline main(task) {
     argv[0]
   }
   if mode == "write" {
-    write_file(DST, render_mirror())
+    harness.fs.write_text(DST, render_mirror())
     return 0
   }
   if mode == "--check" {
     let expected = render_mirror()
-    let actual = if file_exists(DST) {
-      read_file(DST)
+    let actual = if harness.fs.exists(DST) {
+      harness.fs.read_text(DST)
     } else {
       ""
     }

@@ -11,9 +11,9 @@
  *
  * Tracking: harn#1792.
  */
-fn attempt_write(target: string) -> dict {
+fn attempt_write(harness: Harness, target: string) -> dict {
   try {
-    write_file(target, "should never land")
+    harness.fs.write_text(target, "should never land")
     return {caught: nil, wrote: true}
   } catch (e) {
     return {caught: to_string(e), wrote: false}
@@ -21,17 +21,18 @@ fn attempt_write(target: string) -> dict {
 }
 
 pipeline test(task) {
-  mkdir(".harn")
-  let unique = to_string(to_int(timestamp())) + "-" + to_string(random_int(100000, 999999))
+  harness.fs.mkdir(".harn")
+  let unique = to_string(to_int(harness.clock.timestamp())) + "-"
+    + to_string(harness.random.gen_range(100000, 999999))
   // Shape 1: blanket `requires_human` flag flips the whole policy into
   // needs-human, even when the resolved tier is `act_auto`.
   let blanket_agent = "needs-human-blanket-" + unique
   let blanket_target = path_join(".harn", "needs_human_blanket_" + unique + ".txt")
   let blanket_outcome = with_autonomy_policy(
     {agent_id: blanket_agent, autonomy_tier: "act_auto", requires_human: true},
-    fn() { return attempt_write(blanket_target) },
+    fn() { return attempt_write(harness, blanket_target) },
   )
-  __io_println(blanket_outcome.caught != nil && !file_exists(blanket_target))
+  __io_println(blanket_outcome.caught != nil && !harness.fs.exists(blanket_target))
   __io_println(contains(blanket_outcome.caught, "HARN-AUT-NEEDS-HUMAN"))
   let blanket_records: list<TrustRecord> = trust_query({agent: blanket_agent, action: "fs.write"})
   __io_println(
@@ -43,14 +44,14 @@ pipeline test(task) {
   let scoped_target = path_join(".harn", "needs_human_agent_" + unique + ".txt")
   let scoped_outcome = with_autonomy_policy(
     {agent_id: scoped_agent, autonomy_tier: "act_auto", requires_human_agents: [scoped_agent]},
-    fn() { return attempt_write(scoped_target) },
+    fn() { return attempt_write(harness, scoped_target) },
   )
-  __io_println(scoped_outcome.caught != nil && !file_exists(scoped_target))
+  __io_println(scoped_outcome.caught != nil && !harness.fs.exists(scoped_target))
   let scoped_records: list<TrustRecord> = trust_query({agent: scoped_agent, action: "fs.write"})
   __io_println(len(scoped_records) == 1 && scoped_records[0].metadata.requires_human)
   for path in [blanket_target, scoped_target] {
-    if file_exists(path) {
-      delete_file(path)
+    if harness.fs.exists(path) {
+      harness.fs.delete(path)
     }
   }
 }

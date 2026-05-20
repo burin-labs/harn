@@ -1,6 +1,8 @@
-// `llm_call_structured_safe(prompt, schema, options?)` returns the
-// `{ok, data, error}` envelope on both success and failure. Mirrors
-// `llm_call_safe` but with `.data` pre-unwrapped.
+/**
+ * `llm_call_structured_safe(prompt, schema, options?)` returns the
+ * `{ok, data, error}` envelope on both success and failure. Mirrors
+ * `llm_call_safe` but with `.data` pre-unwrapped.
+ */
 pipeline default() {
   let schema = {type: "object", required: ["verdict"], properties: {verdict: {type: "string"}}}
   // Success path: parsed data surfaces in `.data`, error is nil.

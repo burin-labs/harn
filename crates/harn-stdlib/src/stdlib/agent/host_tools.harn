@@ -453,10 +453,10 @@ fn __agent_host_tail_command_request(args, options) {
   return locator + {offset: offset, length: length}
 }
 
-fn __agent_host_tail_file_request(args, options) {
+fn __agent_host_tail_file_request(harness: Harness, args, options) {
   let path = __agent_host_resolve_path(args.path, options)
   let length = args?.length ?? __agent_host_options(options)?.tail_bytes ?? 12000
-  let info = stat(path)
+  let info = harness.fs.stat(path)
   let offset = if info.size > length {
     info.size - length
   } else {
@@ -533,7 +533,11 @@ pub fn agent_read_tools(registry = nil, options = nil) {
           parameters: {path: {type: "string"}, length: {type: "integer", required: false}},
           returns: {type: "object"},
           annotations: __agent_host_annotations(opts, key, {kind: "read", side_effect_level: "read_only"}),
-          handler: { args -> __agent_host_render(hostlib_tools_read_file(__agent_host_tail_file_request(args, opts)), opts, key) },
+          handler: { args -> __agent_host_render(
+            hostlib_tools_read_file(__agent_host_tail_file_request(harness, args, opts)),
+            opts,
+            key,
+          ) },
         },
       ),
     )

@@ -240,7 +240,7 @@ pub fn verify_then_act(verifier, actor, options = nil) {
 pub fn bounded_loop(state_init, step_fn, options = nil) {
   let opts = options ?? {}
   let started_at = opts?.started_at ?? date_iso()
-  let started_ms = timestamp() * 1000
+  let started_ms = harness.clock.timestamp() * 1000
   let max_iterations = opts?.max_iterations ?? 10
   let max_duration_ms = opts?.max_duration_ms ?? opts?.max_duration
   let progress_required = opts?.progress_required ?? false
@@ -271,7 +271,7 @@ pub fn bounded_loop(state_init, step_fn, options = nil) {
   var iterations = 0
   var stopped_reason = "max_iterations"
   while iterations < max_iterations {
-    if max_duration_ms != nil && timestamp() * 1000 - started_ms >= max_duration_ms {
+    if max_duration_ms != nil && harness.clock.timestamp() * 1000 - started_ms >= max_duration_ms {
       stopped_reason = "max_duration"
       break
     }

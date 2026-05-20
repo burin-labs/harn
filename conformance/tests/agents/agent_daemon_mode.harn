@@ -1,7 +1,8 @@
 pipeline test(task) {
-  let unique = to_string(to_int(timestamp())) + "-" + to_string(random_int(100000, 999999))
-  let dir = path_join(temp_dir(), "harn-agent-daemon-" + unique)
-  mkdir(dir)
+  let unique = to_string(to_int(harness.clock.timestamp())) + "-"
+    + to_string(harness.random.gen_range(100000, 999999))
+  let dir = path_join(harness.fs.temp_dir(), "harn-agent-daemon-" + unique)
+  harness.fs.mkdir(dir)
   let snapshot = path_join(dir, "daemon.json")
   let result = agent_loop(
     "Poll for background work",
@@ -20,7 +21,7 @@ pipeline test(task) {
       compact_callback: { archived -> {summary: "daemon compact " + to_string(len(archived))} },
     },
   )
-  let saved = json_parse(read_file(snapshot))
+  let saved = json_parse(harness.fs.read_text(snapshot))
   __io_println(result.status)
   __io_println(result.daemon_state)
   __io_println(result.daemon_snapshot_path == snapshot)
@@ -28,5 +29,5 @@ pipeline test(task) {
   __io_println(saved.daemon_state)
   __io_println(saved.total_iterations)
   __io_println(saved.transcript_summary.contains("daemon compact"))
-  delete_file(dir)
+  harness.fs.delete(dir)
 }

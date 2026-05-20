@@ -3,17 +3,17 @@ import "std/schema"
 
 /** Resolve the LLM provider for Burin Mini runs. */
 pub fn provider_name() {
-  return env_or("BURIN_MINI_PROVIDER", env_or("HARN_LLM_PROVIDER", "mock"))
+  return harness.env.get_or("BURIN_MINI_PROVIDER", harness.env.get_or("HARN_LLM_PROVIDER", "mock"))
 }
 
 /** Resolve the generator model for Burin Mini runs. */
 pub fn generator_model() {
-  return env_or("BURIN_MINI_GENERATOR_MODEL", env_or("HARN_LLM_MODEL", "mock"))
+  return harness.env.get_or("BURIN_MINI_GENERATOR_MODEL", harness.env.get_or("HARN_LLM_MODEL", "mock"))
 }
 
 /** Resolve the evaluator model for Burin Mini runs. */
 pub fn evaluator_model() {
-  return env_or("BURIN_MINI_EVALUATOR_MODEL", generator_model())
+  return harness.env.get_or("BURIN_MINI_EVALUATOR_MODEL", generator_model())
 }
 
 fn bool_env(value) {
@@ -27,33 +27,33 @@ fn bool_env(value) {
   return nil
 }
 
-fn reasoning_policy_for_model(_provider, _model) {
-  let legacy = bool_env(env_or("BURIN_MINI_THINKING", ""))
+fn reasoning_policy_for_model(harness: Harness, _provider, _model) {
+  let legacy = bool_env(harness.env.get_or("BURIN_MINI_THINKING", ""))
   if legacy != nil && !legacy {
     return "off"
   }
   if legacy {
     return "manual_on"
   }
-  return env_or("BURIN_MINI_REASONING_POLICY", "auto")
+  return harness.env.get_or("BURIN_MINI_REASONING_POLICY", "auto")
 }
 
-fn reasoning_scale_for_model(_provider, _model) {
-  return env_or("BURIN_MINI_REASONING_SCALE", "medium")
+fn reasoning_scale_for_model(harness: Harness, _provider, _model) {
+  return harness.env.get_or("BURIN_MINI_REASONING_SCALE", "medium")
 }
 
 /** Apply the Burin Mini reasoning policy defaults to agent options. */
 pub fn apply_reasoning_policy(opts, task) {
   let provider = opts?.provider ?? provider_name()
   let model = opts?.model ?? generator_model()
-  let policy = reasoning_policy_for_model(provider, model)
+  let policy = reasoning_policy_for_model(harness, provider, model)
   if policy == "manual_on" {
     return opts + {thinking: true}
   }
   return opts
     + {
     reasoning_policy: policy,
-    reasoning_scale: reasoning_scale_for_model(provider, model),
+    reasoning_scale: reasoning_scale_for_model(harness, provider, model),
     reasoning_task: task,
   }
 }

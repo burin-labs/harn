@@ -91,7 +91,7 @@ fn semantic_eval_with_llm(report, run, reference, heuristic, task_root) {
       temperature: 0,
     },
   )
-  let data = response?.data ?? {}
+  let data = response.data ?? {}
   let gated_verdict = if len(heuristic?.gating_failures ?? []) > 0 {
     "fail"
   } else {
@@ -159,7 +159,7 @@ pipeline default() {
     semantic_eval_with_llm(report, run, reference, heuristic, task_root)
   }
   let destination = output_path(report_path)
-  write_file(destination, json_stringify(result))
+  harness.fs.write_text(destination, json_stringify(result))
   __io_println("task_id=${report?.task_id ?? ""}")
   __io_println("semantic_eval_mode=${semantic_eval_mode()}")
   __io_println("semantic_eval_provider=${semantic_eval_provider()}")

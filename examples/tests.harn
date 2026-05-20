@@ -1,4 +1,4 @@
-// Example test file — run with: harn test examples/tests.harn
+/** Example test file — run with: harn test examples/tests.harn */
 pipeline test_addition(task) {
   fn add(a, b) {
     return a + b
@@ -60,7 +60,7 @@ pipeline test_closures(task) {
   assert_eq(add_fn(3, 4), 7)
 }
 
-// This pipeline is NOT a test (no test_ prefix) — should be ignored
+/** This pipeline is NOT a test (no test_ prefix) — should be ignored */
 pipeline helper(task) {
   log("I should not run during tests")
 }

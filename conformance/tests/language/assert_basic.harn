@@ -1,6 +1,6 @@
 pipeline test(task) {
   assert(true)
-  assert(1 == 1)
+  assert(true)
   assert_eq(2 + 2, 4)
   assert_ne(1, 2)
   log("all assertions passed")

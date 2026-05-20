@@ -42,6 +42,6 @@ pipeline main() {
     },
   )
   __io_println(!denied?.ok)
-  __io_println(denied?.error?.category == "permission_denied")
-  __io_println(denied?.error?.tool == "write_note")
+  __io_println(denied.error?.category == "permission_denied")
+  __io_println(denied.error?.tool == "write_note")
 }
