@@ -287,6 +287,40 @@ impl Vm {
             local_scope_depth: 0,
         });
 
+        self.drive_dispatch_loop(0, false).await
+    }
+
+    /// Sub-execution entrypoint used by [`Vm::call_closure`]: runs the
+    /// dispatch loop until the topmost frame pops back to `target_depth`,
+    /// restoring env/iterators/stack on that final pop so the caller's
+    /// state is intact. Distinct from the entrypoint-mode call in
+    /// [`Vm::run_chunk_ref`] (which preserves the script's top-level scope
+    /// for the module-init capture in `modules.rs`).
+    pub(crate) async fn drive_until_frame_depth(
+        &mut self,
+        target_depth: usize,
+    ) -> Result<VmValue, VmError> {
+        self.drive_dispatch_loop(target_depth, true).await
+    }
+
+    /// Dispatch loop body, parameterized on a target frame depth at which
+    /// the loop should return and whether to restore the caller's
+    /// env/iterators/stack on the final pop.
+    ///
+    /// `restore_on_final_pop = false` is the entrypoint mode used by
+    /// `run_chunk_ref` (leaves the script's top-level state in place so the
+    /// caller can capture it — see `modules.rs`).
+    ///
+    /// `restore_on_final_pop = true` is the sub-execution mode used by
+    /// `call_closure`: the closure's frame is pushed onto the caller's
+    /// frame stack and the loop drains it back to `target_depth`, so the
+    /// per-invocation `Box::pin` heap allocation a recursive async
+    /// `call_closure` would require is avoided.
+    async fn drive_dispatch_loop(
+        &mut self,
+        target_depth: usize,
+        restore_on_final_pop: bool,
+    ) -> Result<VmValue, VmError> {
         loop {
             // Slow path only: the interrupt-handler future, deadline check,
             // and host-signal poll inside `pending_scope_interrupt` are all
@@ -299,7 +333,10 @@ impl Vm {
                     match self.handle_error(err) {
                         Ok(None) => continue,
                         Ok(Some(val)) => return Ok(val),
-                        Err(e) => return Err(e),
+                        Err(e) => {
+                            self.unwind_frames_to_depth(target_depth);
+                            return Err(e);
+                        }
                     }
                 }
             }
@@ -317,17 +354,30 @@ impl Vm {
                 if let Some(ref dir) = popped_frame.saved_source_dir {
                     crate::stdlib::set_thread_source_dir(dir);
                 }
-                crate::step_runtime::prune_below_frame(self.frames.len());
-
-                if self.frames.is_empty() {
-                    return Ok(val);
-                } else {
-                    self.iterators.truncate(popped_frame.saved_iterator_depth);
-                    self.env = popped_frame.saved_env;
-                    self.stack.truncate(popped_frame.stack_base);
-                    self.stack.push(val);
-                    continue;
+                let current_depth = self.frames.len();
+                crate::step_runtime::prune_below_frame(current_depth);
+                // Drop any deadlines owned by the popped frame so the
+                // caller doesn't inherit them (an early `return` from
+                // inside `deadline(d) { ... }` would otherwise leave the
+                // deadline live across the function boundary).
+                while self.deadlines.last().is_some_and(|d| d.1 > current_depth) {
+                    self.deadlines.pop();
                 }
+
+                let reached_target = current_depth <= target_depth;
+                if reached_target && !restore_on_final_pop {
+                    // Entrypoint mode: leave env / iterators / stack in place
+                    // so the caller can observe the script's top-level scope.
+                    return Ok(val);
+                }
+                self.iterators.truncate(popped_frame.saved_iterator_depth);
+                self.env = popped_frame.saved_env;
+                self.stack.truncate(popped_frame.stack_base);
+                if reached_target {
+                    return Ok(val);
+                }
+                self.stack.push(val);
+                continue;
             }
 
             let op_byte = frame.chunk.code[frame.ip];
@@ -369,13 +419,20 @@ impl Vm {
                         self.exception_handlers
                             .retain(|h| h.frame_depth <= current_depth);
                         crate::step_runtime::prune_below_frame(current_depth);
+                        while self.deadlines.last().is_some_and(|d| d.1 > current_depth) {
+                            self.deadlines.pop();
+                        }
 
-                        if self.frames.is_empty() {
+                        let reached_target = current_depth <= target_depth;
+                        if reached_target && !restore_on_final_pop {
                             return Ok(val);
                         }
                         self.iterators.truncate(popped_frame.saved_iterator_depth);
                         self.env = popped_frame.saved_env;
                         self.stack.truncate(popped_frame.stack_base);
+                        if reached_target {
+                            return Ok(val);
+                        }
                         self.stack.push(val);
                     } else {
                         return Ok(val);
@@ -395,6 +452,9 @@ impl Vm {
                     let e = match self.apply_step_error_boundary(e) {
                         StepBoundaryOutcome::Returned(val) => {
                             self.error_stack_trace.clear();
+                            if self.frames.len() <= target_depth {
+                                return Ok(val);
+                            }
                             self.stack.push(val);
                             continue;
                         }
@@ -406,10 +466,39 @@ impl Vm {
                             continue;
                         }
                         Ok(Some(val)) => return Ok(val),
-                        Err(e) => return Err(self.enrich_error_with_line(e)),
+                        Err(e) => {
+                            self.unwind_frames_to_depth(target_depth);
+                            return Err(self.enrich_error_with_line(e));
+                        }
                     }
                 }
             }
+        }
+    }
+
+    /// Pop frames until `self.frames.len() <= target_depth`, restoring env,
+    /// iterators, stack, source-dir thread-locals, and releasing per-frame
+    /// sync guards for each popped frame. Used by [`drive_until_frame_depth`]
+    /// on the error path so a closure sub-execution leaves caller-visible
+    /// state at the same depth it found when an unhandled error propagates
+    /// out.
+    fn unwind_frames_to_depth(&mut self, target_depth: usize) {
+        while self.frames.len() > target_depth {
+            let frame_depth = self.frames.len();
+            if let Some(frame) = self.frames.pop() {
+                self.release_sync_guards_for_frame(frame_depth);
+                if let Some(ref dir) = frame.saved_source_dir {
+                    crate::stdlib::set_thread_source_dir(dir);
+                }
+                self.iterators.truncate(frame.saved_iterator_depth);
+                self.env = frame.saved_env;
+                self.stack.truncate(frame.stack_base);
+            }
+        }
+        let current_depth = self.frames.len();
+        crate::step_runtime::prune_below_frame(current_depth);
+        while self.deadlines.last().is_some_and(|d| d.1 > current_depth) {
+            self.deadlines.pop();
         }
     }
 

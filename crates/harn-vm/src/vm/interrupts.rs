@@ -1,4 +1,6 @@
 use std::collections::BTreeMap;
+use std::future::Future;
+use std::pin::Pin;
 use std::rc::Rc;
 use std::time::{Duration, Instant};
 
@@ -80,61 +82,70 @@ impl Vm {
             .any(|entry| entry.signals.iter().any(|candidate| candidate == signal))
     }
 
-    pub(crate) async fn dispatch_interrupt_handlers(
-        &mut self,
-        signal: &str,
-    ) -> Result<bool, VmError> {
-        let signal = normalize_signal(signal)?;
-        self.interrupted = true;
+    /// Box-pin'd to break the static recursion cycle between
+    /// `drive_until_frame_depth` (the hot dispatch loop), `call_callable_value`
+    /// (the hot per-callback path), and the slow interrupt-handler path: a
+    /// handler runs another Harn closure, which re-enters the dispatch loop,
+    /// which may again raise an interrupt. Indirecting at this slow-path
+    /// boundary keeps the recursion satisfied while the hot path stays free of
+    /// per-invocation heap allocation.
+    pub(crate) fn dispatch_interrupt_handlers<'a>(
+        &'a mut self,
+        signal: &'a str,
+    ) -> Pin<Box<dyn Future<Output = Result<bool, VmError>> + 'a>> {
+        Box::pin(async move {
+            let signal = normalize_signal(signal)?;
+            self.interrupted = true;
 
-        if self.dispatching_interrupt {
-            return Err(Self::cancelled_error());
-        }
-
-        let matching: Vec<(i64, bool, Option<u64>, VmValue)> = self
-            .interrupt_handlers
-            .iter()
-            .rev()
-            .filter(|entry| entry.signals.iter().any(|candidate| candidate == &signal))
-            .map(|entry| {
-                (
-                    entry.handle,
-                    entry.once,
-                    entry.graceful_timeout_ms,
-                    entry.handler.clone(),
-                )
-            })
-            .collect();
-        if matching.is_empty() {
-            return Ok(false);
-        }
-
-        self.clear_cancel_request();
-        self.dispatching_interrupt = true;
-        let mut once_handles = Vec::new();
-        let mut result = Ok(());
-        for (handle, once, graceful_timeout_ms, handler) in matching {
-            if once {
-                once_handles.push(handle);
+            if self.dispatching_interrupt {
+                return Err(Self::cancelled_error());
             }
-            let saved_interrupt_deadline = self.interrupt_handler_deadline;
-            self.interrupt_handler_deadline = graceful_timeout_ms
-                .and_then(|ms| Instant::now().checked_add(Duration::from_millis(ms)));
-            let handler_result = self.call_callable_value(&handler, &[]).await;
-            self.interrupt_handler_deadline = saved_interrupt_deadline;
-            if let Err(error) = handler_result {
-                result = Err(error);
-                break;
+
+            let matching: Vec<(i64, bool, Option<u64>, VmValue)> = self
+                .interrupt_handlers
+                .iter()
+                .rev()
+                .filter(|entry| entry.signals.iter().any(|candidate| candidate == &signal))
+                .map(|entry| {
+                    (
+                        entry.handle,
+                        entry.once,
+                        entry.graceful_timeout_ms,
+                        entry.handler.clone(),
+                    )
+                })
+                .collect();
+            if matching.is_empty() {
+                return Ok(false);
             }
-        }
-        self.dispatching_interrupt = false;
 
-        if !once_handles.is_empty() {
-            self.interrupt_handlers
-                .retain(|entry| !once_handles.contains(&entry.handle));
-        }
+            self.clear_cancel_request();
+            self.dispatching_interrupt = true;
+            let mut once_handles = Vec::new();
+            let mut result = Ok(());
+            for (handle, once, graceful_timeout_ms, handler) in matching {
+                if once {
+                    once_handles.push(handle);
+                }
+                let saved_interrupt_deadline = self.interrupt_handler_deadline;
+                self.interrupt_handler_deadline = graceful_timeout_ms
+                    .and_then(|ms| Instant::now().checked_add(Duration::from_millis(ms)));
+                let handler_result = self.call_callable_value(&handler, &[]).await;
+                self.interrupt_handler_deadline = saved_interrupt_deadline;
+                if let Err(error) = handler_result {
+                    result = Err(error);
+                    break;
+                }
+            }
+            self.dispatching_interrupt = false;
 
-        result.map(|()| true)
+            if !once_handles.is_empty() {
+                self.interrupt_handlers
+                    .retain(|entry| !once_handles.contains(&entry.handle));
+            }
+
+            result.map(|()| true)
+        })
     }
 
     pub(crate) async fn pending_scope_interrupt(&mut self) -> Option<VmError> {

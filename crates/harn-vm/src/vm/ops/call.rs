@@ -1,3 +1,5 @@
+use std::future::Future;
+use std::pin::Pin;
 use std::rc::Rc;
 
 use crate::chunk::{InlineCacheEntry, MethodCacheTarget};
@@ -321,15 +323,24 @@ impl super::super::Vm {
         Ok(())
     }
 
-    async fn call_lifecycle_hook(
-        &mut self,
-        handler: &Rc<VmClosure>,
+    /// Box-pin'd to break the static recursion between `drive_until_frame_depth`
+    /// (the hot dispatch loop) and `call_closure` (the hot per-callback path):
+    /// a step's lifecycle hook is itself a closure, which re-enters the
+    /// dispatch loop, which may again pop a step frame and fire post-hooks.
+    /// Indirecting at this slow-path hook boundary keeps the recursion
+    /// satisfied while the per-element dispatch path stays free of
+    /// per-invocation heap allocation.
+    fn call_lifecycle_hook<'a>(
+        &'a mut self,
+        handler: &'a Rc<VmClosure>,
         payload: VmValue,
-    ) -> Result<VmValue, VmError> {
-        let snapshot = crate::step_runtime::take_active_context();
-        let result = self.call_closure(handler, &[payload]).await;
-        crate::step_runtime::restore_active_context(snapshot);
-        result
+    ) -> Pin<Box<dyn Future<Output = Result<VmValue, VmError>> + 'a>> {
+        Box::pin(async move {
+            let snapshot = crate::step_runtime::take_active_context();
+            let result = self.call_closure(handler, &[payload]).await;
+            crate::step_runtime::restore_active_context(snapshot);
+            result
+        })
     }
 
     fn try_cached_method(
