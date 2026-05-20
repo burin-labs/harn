@@ -580,7 +580,55 @@ impl super::super::Vm {
         Ok(())
     }
 
-    pub(super) async fn execute_call(&mut self) -> Result<(), VmError> {
+    /// Sync fast path for `Op::Call`. Peeks the callee on the stack
+    /// **before** touching `ip`; if it's a non-generator user closure with
+    /// no `@step` definition attached, it pushes the closure frame inline
+    /// and returns `Some(Ok(()))`. Otherwise returns `None` without
+    /// advancing the frame, so the caller falls through to
+    /// [`execute_call_async`] which reads the operand exactly once.
+    ///
+    /// Note: in the current compiler, user-level `f(x)` calls compile to
+    /// `Op::CallBuiltin` (name-resolved at runtime), not `Op::Call`. The
+    /// `Op::Call` opcode is emitted only for compiler-internal lowerings
+    /// (`__assert_list` for spread args, `to_string` for string
+    /// interpolation, etc.) where the callee is a `VmValue::String`. Those
+    /// take the `None` fall-through and stay on the async path. The split
+    /// is therefore a no-op on the user-closure case in current bench
+    /// fixtures; it parallels the IterNext split (#2074) so that any
+    /// future `Op::Call`-with-closure-callee emissions benefit
+    /// automatically, and keeps the dispatch tables symmetric with the
+    /// rest of the call family. The measurable wins from this idea live
+    /// behind `Op::CallBuiltin` (where `f(x)` actually dispatches) and
+    /// are filed as a separate follow-up PR per the task's
+    /// "one-shippable-change-per-PR" guidance.
+    pub(super) fn execute_call_sync(&mut self) -> Option<Result<(), VmError>> {
+        let frame = self.frames.last().unwrap();
+        let argc = frame.chunk.code[frame.ip] as usize;
+        let callee_idx = self.stack.len().checked_sub(argc + 1)?;
+        let closure = match self.stack.get(callee_idx)? {
+            VmValue::Closure(c) => c,
+            _ => return None,
+        };
+        if closure.func.is_generator {
+            return None;
+        }
+        if crate::step_runtime::step_definition_for_function(&closure.func.name).is_some() {
+            return None;
+        }
+
+        let closure = Rc::clone(closure);
+        let frame = self.frames.last_mut().unwrap();
+        frame.ip += 1;
+        let args: Vec<VmValue> = self.stack.split_off(self.stack.len() - argc);
+        let _ = self.stack.pop();
+        Some(self.push_closure_frame(&closure, &args))
+    }
+
+    /// Async slow path for `Op::Call`. Identical in behavior to the
+    /// pre-split `execute_call`. The caller (`execute_op_async`) reaches
+    /// this only after [`execute_call_sync`] returned `None` without
+    /// touching `ip`, so this path reads the argc operand exactly once.
+    pub(super) async fn execute_call_async(&mut self) -> Result<(), VmError> {
         let frame = self.frames.last_mut().unwrap();
         let argc = frame.chunk.code[frame.ip] as usize;
         frame.ip += 1;
