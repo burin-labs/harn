@@ -36,3 +36,83 @@ pub fn stream_validator(schema) -> JsonStreamValidator {
     status: fn() { return __json_stream_validator_status(handle) },
   }
 }
+
+/**
+ * `std/json/stream_validate` — standalone partial-JSON validation API.
+ *
+ * Verdict shape (plain dict, stable for agents to dispatch on):
+ *   {verdict: "pending"}
+ *   {verdict: "valid"}
+ *   {verdict: "invalid", reason: <string>, path: <jsonpointer-ish>}
+ *
+ * `stream_validate_create(schema)` returns an opaque validator handle.
+ * `stream_validate_chunk(handle, chunk)` returns the verdict after
+ * consuming `chunk` (string or bytes). Once a validator reaches
+ * `"invalid"` further chunks are ignored and the same verdict is
+ * surfaced. `stream_validate_finalize(handle)` flushes the stream — a
+ * still-pending validator with a partial document transitions to
+ * `"invalid"` with `reason: "incomplete JSON document at end of stream"`.
+ * The trio is also exposed as the `stream_validate` namespace record so
+ * callers can write `stream_validate.create(schema)`.
+ */
+/**
+ * Create a `stream_validate` handle for a JSON schema.
+ *
+ * @effects: []
+ * @allocation: heap
+ * @errors: []
+ * @api_stability: stable
+ * @example: stream_validate_create(schema)
+ */
+pub fn stream_validate_create(schema) -> string {
+  return __json_stream_validate_create(schema)
+}
+
+/**
+ * Feed the next chunk into a `stream_validate` handle. Returns the new
+ * verdict dict.
+ *
+ * @effects: []
+ * @allocation: heap
+ * @errors: []
+ * @api_stability: stable
+ * @example: stream_validate_chunk(handle, chunk)
+ */
+pub fn stream_validate_chunk(handle: string, chunk) -> dict {
+  return __json_stream_validate_chunk(handle, chunk)
+}
+
+/**
+ * Flush a `stream_validate` handle. If the stream is still pending with
+ * a partial document the verdict transitions to invalid; an already
+ * valid or invalid verdict is returned unchanged.
+ *
+ * @effects: []
+ * @allocation: heap
+ * @errors: []
+ * @api_stability: stable
+ * @example: stream_validate_finalize(handle)
+ */
+pub fn stream_validate_finalize(handle: string) -> dict {
+  return __json_stream_validate_finalize(handle)
+}
+
+/**
+ * Namespace accessor for the `stream_validate.*` API. Returns a record
+ * holding the create/chunk/finalize closures so scripts can write
+ * `let sv = stream_validate(); let v = sv.create(schema)` or destructure
+ * via `let {create, chunk, finalize} = stream_validate()`.
+ *
+ * @effects: []
+ * @allocation: heap
+ * @errors: []
+ * @api_stability: stable
+ * @example: stream_validate()
+ */
+pub fn stream_validate() -> dict {
+  return {
+    create: fn(schema) { return __json_stream_validate_create(schema) },
+    chunk: fn(handle, chunk) { return __json_stream_validate_chunk(handle, chunk) },
+    finalize: fn(handle) { return __json_stream_validate_finalize(handle) },
+  }
+}

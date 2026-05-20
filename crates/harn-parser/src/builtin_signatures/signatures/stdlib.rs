@@ -164,6 +164,24 @@ pub(crate) const SIGNATURES: &[BuiltinSignature] = &[
         IO_RESULT_ENVELOPE,
     ),
     BuiltinSignature::simple(
+        "__json_stream_validate_chunk",
+        &[
+            Param::new("handle", TY_STRING),
+            Param::new("chunk", Ty::Union(&[TY_STRING, TY_BYTES])),
+        ],
+        TY_DICT,
+    ),
+    BuiltinSignature::simple(
+        "__json_stream_validate_create",
+        &[Param::new("schema", TY_DICT)],
+        TY_STRING,
+    ),
+    BuiltinSignature::simple(
+        "__json_stream_validate_finalize",
+        &[Param::new("handle", TY_STRING)],
+        TY_DICT,
+    ),
+    BuiltinSignature::simple(
         "__json_stream_validator",
         &[Param::new("schema", TY_DICT)],
         TY_STRING,

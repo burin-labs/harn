@@ -50,6 +50,24 @@ condensed series summaries instead of full per-patch history.
   at `docs/src/cli-json-contract.md`; a condensed cheatsheet ships in
   `docs/llm/harn-quickref.md`. Stdout stays single-document parseable;
   progress, warnings, and human-readable logs route to stderr.
+- **Streaming partial-JSON validation builtin (E5.1, #1773).** New
+  `std/json/stream_validate_create`, `stream_validate_chunk`, and
+  `stream_validate_finalize` builtins expose the incremental JSON
+  validator that already powers `llm_call`'s mid-stream
+  `schema_stream_abort` (E5.2) as a standalone user-callable. Each
+  call returns a plain-dict verdict
+  `{verdict: "pending"|"valid"|"invalid", reason?, path?}` so streaming
+  agents (SSE chunks, partial WebSocket frames, custom transports)
+  can dispatch on a stable string verdict without pattern-matching enum
+  variants. `stream_validate()` returns the same trio bundled as a
+  namespace record (`stream_validate.create`/`.chunk`/`.finalize`).
+  `finalize` transitions a still-pending validator with a partial
+  document to `"invalid"` with
+  `reason: "incomplete JSON document at end of stream"`; an already
+  `"valid"` or `"invalid"` verdict is returned unchanged. Both the
+  closure-bag `stream_validator` API and the new functions share the
+  same underlying `JsonStreamValidator` storage, so there is no
+  duplicate parser or validator implementation.
 - **Experimental MCP file inputs (#1916).** Adds a default-off
   `harn.mcp.configure({experimental: {file_upload: ...}})` opt-in for the
   current draft MCP file-input proposal, SEP-2356. Client code can call
