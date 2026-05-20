@@ -1264,11 +1264,7 @@ fn exit_code_from_return_value(value: &harn_vm::VmValue) -> i32 {
     use harn_vm::VmValue;
     match value {
         VmValue::Int(n) => (*n).clamp(0, 255) as i32,
-        VmValue::EnumVariant {
-            enum_name,
-            variant,
-            fields,
-        } if enum_name.as_ref() == "Result" && variant.as_ref() == "Err" => 1,
+        VmValue::EnumVariant(enum_variant) if enum_variant.is_variant("Result", "Err") => 1,
         _ => 0,
     }
 }
@@ -1388,18 +1384,17 @@ fn finalize_harnpack_dry_run(
 }
 
 fn render_return_value_error(value: &harn_vm::VmValue) -> String {
-    let harn_vm::VmValue::EnumVariant {
-        enum_name,
-        variant,
-        fields,
-    } = value
-    else {
+    let harn_vm::VmValue::EnumVariant(enum_variant) = value else {
         return String::new();
     };
-    if enum_name.as_ref() != "Result" || variant.as_ref() != "Err" {
+    if !enum_variant.is_variant("Result", "Err") {
         return String::new();
     }
-    let rendered = fields.first().map(|p| p.display()).unwrap_or_default();
+    let rendered = enum_variant
+        .fields
+        .first()
+        .map(|p| p.display())
+        .unwrap_or_default();
     if rendered.is_empty() {
         "error\n".to_string()
     } else if rendered.ends_with('\n') {
@@ -1476,7 +1471,7 @@ pub(crate) async fn connect_mcp_servers(
             Ok(handle) => {
                 eprintln!("[harn] mcp: connected to '{}'", server.name);
                 harn_vm::mcp_install_active(&server.name, handle.clone());
-                mcp_dict.insert(server.name.clone(), harn_vm::VmValue::McpClient(handle));
+                mcp_dict.insert(server.name.clone(), harn_vm::VmValue::mcp_client(handle));
             }
             Err(e) => {
                 eprintln!(

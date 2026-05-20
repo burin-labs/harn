@@ -110,7 +110,7 @@ pub(crate) fn register_math_builtins(vm: &mut Vm) {
         let seed = args.first().and_then(|arg| arg.as_int()).ok_or_else(|| {
             VmError::TypeError("rng_seed(seed): seed must be an integer".to_string())
         })?;
-        Ok(VmValue::Rng(VmRngHandle {
+        Ok(VmValue::rng(VmRngHandle {
             rng: Arc::new(Mutex::new(rand::rngs::StdRng::seed_from_u64(seed as u64))),
         }))
     });

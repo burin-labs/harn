@@ -66,11 +66,11 @@ pub enum VmIter {
     /// Unicode scalar iteration over a string.
     Chars { s: Rc<str>, byte_idx: usize },
     /// Drains a generator's yield channel.
-    Gen { gen: VmGenerator },
+    Gen { gen: Rc<VmGenerator> },
     /// Drains a stream's emit channel.
-    Stream { stream: VmStream },
+    Stream { stream: Rc<VmStream> },
     /// Reads from a channel handle.
-    Chan { handle: VmChannelHandle },
+    Chan { handle: Rc<VmChannelHandle> },
     /// Maps each item through a closure.
     Map {
         inner: Rc<RefCell<VmIter>>,

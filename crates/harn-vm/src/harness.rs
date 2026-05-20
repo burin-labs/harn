@@ -614,7 +614,7 @@ impl Harness {
 
     /// Lower this handle into the `VmValue::Harness` payload.
     pub fn into_vm_value(self) -> crate::value::VmValue {
-        crate::value::VmValue::Harness(VmHarness {
+        crate::value::VmValue::harness(VmHarness {
             inner: self.inner,
             kind: HarnessKind::Root,
         })

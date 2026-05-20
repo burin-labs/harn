@@ -462,26 +462,23 @@ pub(super) fn predicate_node_metadata(
 fn predicate_value_as_bool(value: VmValue) -> Result<bool, String> {
     match value {
         VmValue::Bool(result) => Ok(result),
-        VmValue::EnumVariant {
-            enum_name,
-            variant,
-            fields,
-        } if enum_name.as_ref() == "Result" && variant.as_ref() == "Ok" => match fields.first() {
-            Some(VmValue::Bool(result)) => Ok(*result),
-            Some(other) => Err(format!(
-                "predicate Result.Ok payload must be bool, got {}",
-                other.type_name()
-            )),
-            None => Err("predicate Result.Ok payload is missing".to_string()),
-        },
-        VmValue::EnumVariant {
-            enum_name,
-            variant,
-            fields,
-        } if enum_name.as_ref() == "Result" && variant.as_ref() == "Err" => Err(fields
-            .first()
-            .map(VmValue::display)
-            .unwrap_or_else(|| "predicate returned Result.Err".to_string())),
+        VmValue::EnumVariant(enum_variant) if enum_variant.is_variant("Result", "Ok") => {
+            match enum_variant.fields.first() {
+                Some(VmValue::Bool(result)) => Ok(*result),
+                Some(other) => Err(format!(
+                    "predicate Result.Ok payload must be bool, got {}",
+                    other.type_name()
+                )),
+                None => Err("predicate Result.Ok payload is missing".to_string()),
+            }
+        }
+        VmValue::EnumVariant(enum_variant) if enum_variant.is_variant("Result", "Err") => {
+            Err(enum_variant
+                .fields
+                .first()
+                .map(VmValue::display)
+                .unwrap_or_else(|| "predicate returned Result.Err".to_string()))
+        }
         other => Err(format!(
             "predicate must return bool or Result<bool, _>, got {}",
             other.type_name()

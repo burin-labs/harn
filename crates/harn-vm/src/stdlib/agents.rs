@@ -2265,7 +2265,7 @@ mod suspend_tests {
     }
 
     fn handle_value(worker_id: &str) -> VmValue {
-        VmValue::TaskHandle(worker_id.to_string())
+        VmValue::task_handle(worker_id.to_string())
     }
 
     fn message_value(role: &str, content: &str) -> VmValue {

@@ -66,7 +66,7 @@ fn validate_additional_properties_false() {
     );
     assert!(matches!(
         result,
-        VmValue::EnumVariant { variant, .. } if variant.as_ref() == "Err"
+        VmValue::EnumVariant(enum_variant) if enum_variant.is_variant("Result", "Err")
     ));
 }
 
@@ -187,14 +187,12 @@ fn invalid_pattern_surfaces_a_clear_error() {
         ("pattern", s("[unclosed")),
     ]);
     let result = schema_result_value(&s("anything"), &schema, false);
-    let VmValue::EnumVariant {
-        variant, fields, ..
-    } = result
-    else {
+    let VmValue::EnumVariant(enum_variant) = result else {
         panic!("expected Result variant");
     };
-    assert_eq!(variant.as_ref(), "Err");
-    let payload_dict = fields
+    assert!(enum_variant.is_variant("Result", "Err"));
+    let payload_dict = enum_variant
+        .fields
         .first()
         .and_then(|value| value.as_dict().cloned())
         .expect("Err payload is a dict");

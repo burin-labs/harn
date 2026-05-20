@@ -44,34 +44,30 @@ pub(crate) fn register_type_builtins(vm: &mut Vm) {
         let val = args.first().unwrap_or(&VmValue::Nil);
         Ok(VmValue::Bool(matches!(
             val,
-            VmValue::EnumVariant { enum_name, variant, .. }
-            if enum_name.as_ref() == "Result" && variant.as_ref() == "Ok"
+            VmValue::EnumVariant(enum_variant)
+            if enum_variant.is_variant("Result", "Ok")
         )))
     });
     vm.register_builtin("is_err", |args, _out| {
         let val = args.first().unwrap_or(&VmValue::Nil);
         Ok(VmValue::Bool(matches!(
             val,
-            VmValue::EnumVariant { enum_name, variant, .. }
-            if enum_name.as_ref() == "Result" && variant.as_ref() == "Err"
+            VmValue::EnumVariant(enum_variant)
+            if enum_variant.is_variant("Result", "Err")
         )))
     });
     vm.register_builtin("unwrap", |args, _out| {
         let val = args.first().unwrap_or(&VmValue::Nil);
         match val {
-            VmValue::EnumVariant {
-                enum_name,
-                variant,
-                fields,
-            } if enum_name.as_ref() == "Result" && variant.as_ref() == "Ok" => {
-                Ok(fields.first().cloned().unwrap_or(VmValue::Nil))
+            VmValue::EnumVariant(enum_variant) if enum_variant.is_variant("Result", "Ok") => {
+                Ok(enum_variant.fields.first().cloned().unwrap_or(VmValue::Nil))
             }
-            VmValue::EnumVariant {
-                enum_name,
-                variant,
-                fields,
-            } if enum_name.as_ref() == "Result" && variant.as_ref() == "Err" => {
-                let msg = fields.first().map(|f| f.display()).unwrap_or_default();
+            VmValue::EnumVariant(enum_variant) if enum_variant.is_variant("Result", "Err") => {
+                let msg = enum_variant
+                    .fields
+                    .first()
+                    .map(|f| f.display())
+                    .unwrap_or_default();
                 Err(VmError::Runtime(format!("unwrap called on Err: {msg}")))
             }
             _ => Ok(val.clone()),
@@ -81,28 +77,20 @@ pub(crate) fn register_type_builtins(vm: &mut Vm) {
         let val = args.first().unwrap_or(&VmValue::Nil);
         let default = args.get(1).cloned().unwrap_or(VmValue::Nil);
         match val {
-            VmValue::EnumVariant {
-                enum_name,
-                variant,
-                fields,
-            } if enum_name.as_ref() == "Result" && variant.as_ref() == "Ok" => {
-                Ok(fields.first().cloned().unwrap_or(VmValue::Nil))
+            VmValue::EnumVariant(enum_variant) if enum_variant.is_variant("Result", "Ok") => {
+                Ok(enum_variant.fields.first().cloned().unwrap_or(VmValue::Nil))
             }
-            VmValue::EnumVariant {
-                enum_name, variant, ..
-            } if enum_name.as_ref() == "Result" && variant.as_ref() == "Err" => Ok(default),
+            VmValue::EnumVariant(enum_variant) if enum_variant.is_variant("Result", "Err") => {
+                Ok(default)
+            }
             _ => Ok(val.clone()),
         }
     });
     vm.register_builtin("unwrap_err", |args, _out| {
         let val = args.first().unwrap_or(&VmValue::Nil);
         match val {
-            VmValue::EnumVariant {
-                enum_name,
-                variant,
-                fields,
-            } if enum_name.as_ref() == "Result" && variant.as_ref() == "Err" => {
-                Ok(fields.first().cloned().unwrap_or(VmValue::Nil))
+            VmValue::EnumVariant(enum_variant) if enum_variant.is_variant("Result", "Err") => {
+                Ok(enum_variant.fields.first().cloned().unwrap_or(VmValue::Nil))
             }
             _ => Err(VmError::Runtime("unwrap_err called on non-Err".into())),
         }

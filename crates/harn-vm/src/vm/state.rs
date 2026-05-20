@@ -110,10 +110,10 @@ pub(crate) enum IterState {
         closed: std::sync::Arc<std::sync::atomic::AtomicBool>,
     },
     Generator {
-        gen: crate::value::VmGenerator,
+        gen: std::rc::Rc<crate::value::VmGenerator>,
     },
     Stream {
-        stream: crate::value::VmStream,
+        stream: std::rc::Rc<crate::value::VmStream>,
     },
     /// Step through a lazy range without materializing a Vec.
     /// Inclusive ranges keep `end` as an actual value so `i64::MAX to i64::MAX`

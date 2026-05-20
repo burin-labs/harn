@@ -155,7 +155,7 @@ impl Vm {
 
         if let Err(error) = crate::typecheck::validate_user_call(&closure.func, args, None) {
             let _ = tx.try_send(Err(error));
-            return VmValue::Generator(VmGenerator {
+            return VmValue::generator(VmGenerator {
                 done: Rc::new(std::cell::Cell::new(false)),
                 receiver: Rc::new(tokio::sync::Mutex::new(rx)),
             });
@@ -207,14 +207,14 @@ impl Vm {
 
         let receiver = Rc::new(tokio::sync::Mutex::new(rx));
         if closure.func.is_stream {
-            return VmValue::Stream(VmStream {
+            return VmValue::stream(VmStream {
                 done: Rc::new(std::cell::Cell::new(false)),
                 receiver,
                 cancel: None,
             });
         }
 
-        VmValue::Generator(VmGenerator {
+        VmValue::generator(VmGenerator {
             done: Rc::new(std::cell::Cell::new(false)),
             receiver,
         })

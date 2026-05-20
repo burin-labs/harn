@@ -93,19 +93,18 @@ fn output_validation_mode(opts: &api::LlmCallOptions) -> &str {
 
 fn schema_validation_errors(result: &VmValue) -> Vec<String> {
     match result {
-        VmValue::EnumVariant {
-            enum_name,
-            variant,
-            fields,
-        } if enum_name.as_ref() == "Result" && variant.as_ref() == "Err" => fields
-            .first()
-            .and_then(|payload| payload.as_dict())
-            .and_then(|payload| payload.get("errors"))
-            .and_then(|errors| match errors {
-                VmValue::List(items) => Some(items.iter().map(|err| err.display()).collect()),
-                _ => None,
-            })
-            .unwrap_or_else(|| vec!["schema validation failed".to_string()]),
+        VmValue::EnumVariant(enum_variant) if enum_variant.is_variant("Result", "Err") => {
+            enum_variant
+                .fields
+                .first()
+                .and_then(|payload| payload.as_dict())
+                .and_then(|payload| payload.get("errors"))
+                .and_then(|errors| match errors {
+                    VmValue::List(items) => Some(items.iter().map(|err| err.display()).collect()),
+                    _ => None,
+                })
+                .unwrap_or_else(|| vec!["schema validation failed".to_string()])
+        }
         _ => Vec::new(),
     }
 }

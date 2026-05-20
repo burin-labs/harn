@@ -112,11 +112,11 @@ impl super::super::Vm {
             }
             (PropertyCacheTarget::PairFirst, VmValue::Pair(p)) => Some(p.0.clone()),
             (PropertyCacheTarget::PairSecond, VmValue::Pair(p)) => Some(p.1.clone()),
-            (PropertyCacheTarget::EnumVariant, VmValue::EnumVariant { variant, .. }) => {
-                Some(VmValue::String(Rc::clone(variant)))
+            (PropertyCacheTarget::EnumVariant, VmValue::EnumVariant(enum_variant)) => {
+                Some(VmValue::String(Rc::clone(&enum_variant.variant)))
             }
-            (PropertyCacheTarget::EnumFields, VmValue::EnumVariant { fields, .. }) => {
-                Some(VmValue::List(fields.clone()))
+            (PropertyCacheTarget::EnumFields, VmValue::EnumVariant(enum_variant)) => {
+                Some(VmValue::List(Rc::clone(&enum_variant.fields)))
             }
             _ => None,
         }
@@ -150,7 +150,7 @@ impl super::super::Vm {
                 "second" => Some(PropertyCacheTarget::PairSecond),
                 _ => None,
             },
-            VmValue::EnumVariant { .. } => match name {
+            VmValue::EnumVariant(_) => match name {
                 "variant" => Some(PropertyCacheTarget::EnumVariant),
                 "fields" => Some(PropertyCacheTarget::EnumFields),
                 _ => None,
@@ -175,11 +175,9 @@ impl super::super::Vm {
                 "empty" => VmValue::Bool(s.is_empty()),
                 _ => VmValue::Nil,
             },
-            VmValue::EnumVariant {
-                variant, fields, ..
-            } => match name {
-                "variant" => VmValue::String(Rc::clone(variant)),
-                "fields" => VmValue::List(fields.clone()),
+            VmValue::EnumVariant(enum_variant) => match name {
+                "variant" => VmValue::String(Rc::clone(&enum_variant.variant)),
+                "fields" => VmValue::List(Rc::clone(&enum_variant.fields)),
                 _ => VmValue::Nil,
             },
             VmValue::StructInstance { layout, fields } => layout
@@ -198,7 +196,7 @@ impl super::super::Vm {
                 }
             },
             VmValue::Harness(handle) => match handle.sub_handle(name) {
-                Some(sub) => VmValue::Harness(sub),
+                Some(sub) => VmValue::harness(sub),
                 None if optional => VmValue::Nil,
                 None => {
                     return Err(VmError::TypeError(format!(
@@ -614,11 +612,9 @@ impl super::super::Vm {
         let variant_name = Self::const_string(&frame.chunk.constants[variant_idx])?;
         let val = self.pop()?;
         let matches = match &val {
-            VmValue::EnumVariant {
-                enum_name: en,
-                variant: vn,
-                ..
-            } => en.as_ref() == enum_name && vn.as_ref() == variant_name,
+            VmValue::EnumVariant(enum_variant) => {
+                enum_variant.is_variant(&enum_name, &variant_name)
+            }
             _ => false,
         };
         self.stack.push(val);

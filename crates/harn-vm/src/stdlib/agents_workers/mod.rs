@@ -262,7 +262,7 @@ pub(super) fn worker_id_from_value(value: &VmValue) -> Result<String, VmError> {
                 "agent handle dict is missing an id field".to_string(),
             )),
         },
-        VmValue::TaskHandle(id) => Ok(id.clone()),
+        VmValue::TaskHandle(id) => Ok(id.to_string()),
         _ => Err(VmError::Runtime(
             "expected agent handle or worker id".to_string(),
         )),

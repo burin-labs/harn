@@ -212,30 +212,29 @@ fn try_parse_and_validate(
 /// the error list from `Result.Err({errors, ...})`.
 fn extract_validation_outcome(result: &VmValue) -> Result<VmValue, Vec<String>> {
     match result {
-        VmValue::EnumVariant {
-            enum_name,
-            variant,
-            fields,
-        } if enum_name.as_ref() == "Result" => match variant.as_ref() {
-            "Ok" => Ok(fields.first().cloned().unwrap_or(VmValue::Nil)),
-            "Err" => {
-                let errors = fields
-                    .first()
-                    .and_then(|payload| payload.as_dict())
-                    .and_then(|payload| payload.get("errors"))
-                    .and_then(|errors| match errors {
-                        VmValue::List(items) => {
-                            Some(items.iter().map(|err| err.display()).collect())
-                        }
-                        _ => None,
-                    })
-                    .unwrap_or_else(|| vec!["schema validation failed".to_string()]);
-                Err(errors)
+        VmValue::EnumVariant(enum_variant) if enum_variant.has_enum_name("Result") => {
+            match enum_variant.variant.as_ref() {
+                "Ok" => Ok(enum_variant.fields.first().cloned().unwrap_or(VmValue::Nil)),
+                "Err" => {
+                    let errors = enum_variant
+                        .fields
+                        .first()
+                        .and_then(|payload| payload.as_dict())
+                        .and_then(|payload| payload.get("errors"))
+                        .and_then(|errors| match errors {
+                            VmValue::List(items) => {
+                                Some(items.iter().map(|err| err.display()).collect())
+                            }
+                            _ => None,
+                        })
+                        .unwrap_or_else(|| vec!["schema validation failed".to_string()]);
+                    Err(errors)
+                }
+                other => Err(vec![format!(
+                    "unexpected Result variant from schema validation: {other}"
+                )]),
             }
-            other => Err(vec![format!(
-                "unexpected Result variant from schema validation: {other}"
-            )]),
-        },
+        }
         _ => Err(vec!["schema validation did not return a Result".to_string()]),
     }
 }

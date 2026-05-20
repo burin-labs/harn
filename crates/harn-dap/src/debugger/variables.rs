@@ -64,20 +64,21 @@ impl Debugger {
                     (self.alloc_var_ref(children), display)
                 }
             }
-            VmValue::EnumVariant {
-                enum_name,
-                variant,
-                fields,
-            } => {
-                if fields.is_empty() {
-                    (0, format!("{enum_name}.{variant}"))
+            VmValue::EnumVariant(enum_variant) => {
+                if enum_variant.fields.is_empty() {
+                    (
+                        0,
+                        format!("{}.{}", enum_variant.enum_name, enum_variant.variant),
+                    )
                 } else {
-                    let children: Vec<(String, VmValue)> = fields
+                    let children: Vec<(String, VmValue)> = enum_variant
+                        .fields
                         .iter()
                         .enumerate()
                         .map(|(i, v)| (format!("field_{i}"), v.clone()))
                         .collect();
-                    let display = format!("{enum_name}.{variant}(...)");
+                    let display =
+                        format!("{}.{}(...)", enum_variant.enum_name, enum_variant.variant);
                     (self.alloc_var_ref(children), display)
                 }
             }

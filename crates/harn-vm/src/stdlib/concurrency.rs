@@ -490,7 +490,7 @@ async fn sync_mutex_acquire_builtin(args: Vec<VmValue>) -> Result<VmValue, VmErr
         .sync_runtime
         .acquire("mutex", &key, 1, 1, timeout_ms, vm.cancel_token.clone())
         .await?
-        .map(VmValue::SyncPermit)
+        .map(VmValue::sync_permit)
         .unwrap_or(VmValue::Nil))
 }
 
@@ -514,7 +514,7 @@ async fn sync_semaphore_acquire_builtin(args: Vec<VmValue>) -> Result<VmValue, V
             vm.cancel_token.clone(),
         )
         .await?
-        .map(VmValue::SyncPermit)
+        .map(VmValue::sync_permit)
         .unwrap_or(VmValue::Nil))
 }
 
@@ -530,7 +530,7 @@ async fn sync_gate_acquire_builtin(args: Vec<VmValue>) -> Result<VmValue, VmErro
         .sync_runtime
         .acquire("gate", &key, limit, 1, timeout_ms, vm.cancel_token.clone())
         .await?
-        .map(VmValue::SyncPermit)
+        .map(VmValue::sync_permit)
         .unwrap_or(VmValue::Nil))
 }
 
@@ -566,7 +566,7 @@ async fn sync_rwlock_acquire_builtin(args: Vec<VmValue>) -> Result<VmValue, VmEr
             vm.cancel_token.clone(),
         )
         .await?
-        .map(VmValue::SyncPermit)
+        .map(VmValue::sync_permit)
         .unwrap_or(VmValue::Nil))
 }
 
@@ -903,7 +903,7 @@ fn channel_builtin(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmErr
     let (tx, rx) = tokio::sync::mpsc::channel(capacity);
     // The handle stays on the single-threaded VM LocalSet; VmValue itself is !Send.
     #[allow(clippy::arc_with_non_send_sync)]
-    Ok(VmValue::Channel(VmChannelHandle {
+    Ok(VmValue::channel(VmChannelHandle {
         name: Rc::from(name),
         sender: Arc::new(tx),
         receiver: Arc::new(tokio::sync::Mutex::new(rx)),
@@ -964,7 +964,7 @@ fn atomic_builtin(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmErro
         Some(VmValue::Bool(b)) => i64::from(*b),
         _ => 0,
     };
-    Ok(VmValue::Atomic(VmAtomicHandle {
+    Ok(VmValue::atomic(VmAtomicHandle {
         value: Arc::new(AtomicI64::new(initial)),
     }))
 }

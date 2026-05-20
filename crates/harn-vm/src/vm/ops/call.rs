@@ -431,7 +431,7 @@ impl super::super::Vm {
         if name == "await" {
             crate::typecheck::validate_builtin_call(name, args, None)?;
             let task_id = args.first().and_then(|a| match a {
-                VmValue::TaskHandle(id) => Some(id.clone()),
+                VmValue::TaskHandle(id) => Some(id.to_string()),
                 _ => None,
             });
             if let Some(id) = task_id {
@@ -458,7 +458,7 @@ impl super::super::Vm {
         if name == "cancel" {
             crate::typecheck::validate_builtin_call(name, args, None)?;
             if let Some(VmValue::TaskHandle(id)) = args.first() {
-                if let Some(handle) = self.spawned_tasks.remove(id) {
+                if let Some(handle) = self.spawned_tasks.remove(id.as_ref()) {
                     handle.handle.abort();
                 }
             }
@@ -469,7 +469,7 @@ impl super::super::Vm {
         if name == "cancel_graceful" {
             crate::typecheck::validate_builtin_call(name, args, None)?;
             let task_id = args.first().and_then(|a| match a {
-                VmValue::TaskHandle(id) => Some(id.clone()),
+                VmValue::TaskHandle(id) => Some(id.to_string()),
                 _ => None,
             });
             let timeout_ms = args
