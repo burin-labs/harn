@@ -34,6 +34,8 @@ wire contract against `agentclientprotocol/agent-client-protocol` schema
 `v0.12.2`. The adapter treats these `session/update` values as standard
 ACP variants:
 
+- `user_message`
+- `user_message_chunk`
 - `agent_message_chunk`
 - `agent_thought_chunk`
 - `tool_call`
@@ -503,9 +505,18 @@ Payload:
 {}
 ```
 
-A host may also wake the daemon by sending a queued `user_message`, `session/input`, or
-`agent/user_message` notification. Those methods are always user-role input. To inject
-ambient context without pretending it is a user message, send `session/remind`:
+On the ACP adapter surface, hosts can wake the daemon by sending a pending
+user-message inject. `session/inject` accepts `{sessionId, mode, content}`
+where `content` is a string or ACP content-block array, then responds
+immediately with an agent-owned `messageId`. Harn later delivers the same id
+as `session/update` with `sessionUpdate: "user_message"`. `mode: "steer"` maps
+to the next safe operation boundary, and `mode: "queue"` maps to
+end-of-interaction delivery. Pending injects can be revoked with
+`session/revoke_inject` or edited in place with `session/replace_inject` before
+delivery.
+
+To inject ambient context without pretending it is a user message, send
+`session/remind`:
 
 ```json
 {

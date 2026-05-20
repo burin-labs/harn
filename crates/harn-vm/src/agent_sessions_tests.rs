@@ -207,6 +207,49 @@ fn close_with_status_emits_terminal_event_and_clears_sinks() {
 }
 
 #[test]
+fn inject_identified_user_message_emits_replayable_user_event() {
+    reset_all_sinks();
+    reset_session_store();
+    let id = open_or_create(Some("identified-user-message-session".into()));
+    let captured = Arc::new(Mutex::new(Vec::new()));
+    register_sink(&id, Arc::new(CapturingSink(captured.clone())));
+
+    let mut message = BTreeMap::new();
+    message.insert("role".to_string(), VmValue::String(Rc::from("user")));
+    message.insert(
+        "content".to_string(),
+        VmValue::String(Rc::from("queued follow-up")),
+    );
+    message.insert(
+        "messageId".to_string(),
+        VmValue::String(Rc::from("msg_inj_test")),
+    );
+    inject_message(&id, VmValue::Dict(Rc::new(message))).unwrap();
+
+    let events = captured.lock().expect("capture sink poisoned");
+    assert_eq!(events.len(), 1);
+    match &events[0] {
+        AgentEvent::UserMessage {
+            session_id,
+            message_id,
+            content,
+        } => {
+            assert_eq!(session_id, &id);
+            assert_eq!(message_id, "msg_inj_test");
+            assert_eq!(
+                content,
+                &vec![serde_json::json!({
+                    "type": "text",
+                    "text": "queued follow-up",
+                })]
+            );
+        }
+        event => panic!("expected UserMessage event, got {event:?}"),
+    }
+    reset_all_sinks();
+}
+
+#[test]
 fn close_drops_pending_inbox_entries_for_reused_session_ids() {
     // Regression: before close() cleared the inbox, a pending
     // notification could survive past close() and get delivered to a

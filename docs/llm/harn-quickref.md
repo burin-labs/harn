@@ -1555,8 +1555,8 @@ config}` and returns a reminder effect, bare spec, effect list, or `nil`.
 
 Hooks can return `{reminder: {...}, then?: ...}`, a bare reminder spec,
 or a session-hook effect list. Hosts inject ambient context with the
-bridge `session/remind` notification; `session/input` and
-`agent/user_message` remain user-role input.
+bridge `session/remind` notification; `session/inject` remains user-role
+input.
 
 Rendering is capability-aware: routes that prefer developer-role
 instructions get separate developer messages; Anthropic routes can use

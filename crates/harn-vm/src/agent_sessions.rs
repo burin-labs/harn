@@ -650,6 +650,7 @@ pub fn inject_message(id: &str, message: VmValue) -> Result<(), String> {
             _ => crate::llm::helpers::transcript_events_from_messages(&messages),
         };
         let new_message = VmValue::Dict(Rc::new(msg_dict));
+        emit_identified_user_message_event(id, &new_message);
         emit_llm_message_event(id, messages.len(), &new_message);
         events.push(crate::llm::helpers::transcript_event_from_message(
             &new_message,
@@ -662,6 +663,45 @@ pub fn inject_message(id: &str, message: VmValue) -> Result<(), String> {
         state.last_accessed = Instant::now();
         Ok(())
     })
+}
+
+fn emit_identified_user_message_event(session_id: &str, message: &VmValue) {
+    let message_json = crate::llm::helpers::vm_value_to_json(message);
+    let role = message_json.get("role").and_then(|value| value.as_str());
+    if role != Some("user") {
+        return;
+    }
+    let Some(message_id) = message_json
+        .get("messageId")
+        .or_else(|| message_json.get("message_id"))
+        .and_then(|value| value.as_str())
+        .filter(|value| !value.trim().is_empty())
+    else {
+        return;
+    };
+    let content = message_json
+        .get("content")
+        .map(user_message_content_blocks)
+        .unwrap_or_default();
+    crate::agent_events::emit_event(&crate::agent_events::AgentEvent::UserMessage {
+        session_id: session_id.to_string(),
+        message_id: message_id.to_string(),
+        content,
+    });
+}
+
+fn user_message_content_blocks(content: &serde_json::Value) -> Vec<serde_json::Value> {
+    match content {
+        serde_json::Value::Array(items) => items.clone(),
+        serde_json::Value::String(text) => vec![serde_json::json!({
+            "type": "text",
+            "text": text,
+        })],
+        other => vec![serde_json::json!({
+            "type": "text",
+            "text": other.to_string(),
+        })],
+    }
 }
 
 fn emit_llm_message_event(session_id: &str, message_index: usize, message: &VmValue) {

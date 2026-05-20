@@ -141,6 +141,7 @@
     },
     "SessionUpdate": {
       "oneOf": [
+        { "$ref": "#/$defs/UserMessage" },
         { "$ref": "#/$defs/UserMessageChunk" },
         { "$ref": "#/$defs/AgentMessageChunk" },
         { "$ref": "#/$defs/AgentThoughtChunk" },
@@ -180,6 +181,19 @@
       "properties": {
         "sessionUpdate": { "const": "user_message_chunk" },
         "content": { "$ref": "#/$defs/ContentBlock" }
+      }
+    },
+    "UserMessage": {
+      "type": "object",
+      "required": ["sessionUpdate", "messageId", "content"],
+      "additionalProperties": true,
+      "properties": {
+        "sessionUpdate": { "const": "user_message" },
+        "messageId": { "type": "string", "minLength": 1 },
+        "content": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/ContentBlock" }
+        }
       }
     },
     "AgentMessageChunk": {

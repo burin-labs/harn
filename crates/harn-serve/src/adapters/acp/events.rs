@@ -260,6 +260,20 @@ impl AgentEventSink for AcpAgentEventSink {
                     },
                 }));
             }
+            AgentEvent::UserMessage {
+                session_id,
+                message_id,
+                content,
+            } => {
+                self.write_notification(serde_json::json!({
+                    "sessionId": session_id,
+                    "update": {
+                        "sessionUpdate": "user_message",
+                        "messageId": message_id,
+                        "content": content,
+                    },
+                }));
+            }
             AgentEvent::ToolCall {
                 session_id,
                 tool_call_id,

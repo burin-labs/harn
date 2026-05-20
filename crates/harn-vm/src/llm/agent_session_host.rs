@@ -1735,7 +1735,8 @@ async fn drain_bridge_injections_for_checkpoint(
                     session_id,
                     json_to_vm(&serde_json::json!({
                         "role": "user",
-                        "content": message.content,
+                        "content": message.transcript_content,
+                        "messageId": message.message_id,
                     })),
                 );
             }

@@ -3,6 +3,7 @@ pub const ACP_SCHEMA_COMPATIBILITY: &str =
     "agentclientprotocol/agent-client-protocol schema v0.12.2";
 
 pub const ACP_SESSION_UPDATE_VARIANTS: &[&str] = &[
+    "user_message",
     "user_message_chunk",
     "agent_message_chunk",
     "agent_thought_chunk",
@@ -171,6 +172,14 @@ pub(super) fn acp_agent_capabilities() -> serde_json::Value {
     serde_json::json!({
         "_meta": harn_acp_extension_meta(),
         "loadSession": true,
+        "session": {
+            "inject": {
+                "modes": ["queue", "steer"],
+                "pending": {
+                    "replace": true,
+                },
+            },
+        },
         "promptCapabilities": acp_prompt_capabilities(),
         "mcpCapabilities": {
             "http": true,

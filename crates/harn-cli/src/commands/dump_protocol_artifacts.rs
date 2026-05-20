@@ -27,10 +27,13 @@ use serde_json::json;
 
 const ACP_AGENT_METHODS: &[&str] = &[
     "initialize",
+    "session/inject",
     "session/new",
     "session/load",
+    "session/replace_inject",
     "session/resume",
     "session/prompt",
+    "session/revoke_inject",
     "session/truncate",
     "session/remind",
     "session/close",
@@ -600,6 +603,12 @@ export interface ACPMessageChunkUpdate {
   content: ACPContentBlock
 }
 
+export interface ACPUserMessageUpdate {
+  sessionUpdate: "user_message"
+  messageId: string
+  content: ACPContentBlock[]
+}
+
 export interface ACPPlanUpdate {
   sessionUpdate: "plan"
   entries: ACPValue[]
@@ -620,6 +629,7 @@ export interface ACPHarnExtensionUpdate {
 }
 
 export type ACPSessionUpdateEnvelope =
+  | ACPUserMessageUpdate
   | ACPMessageChunkUpdate
   | ACPToolCall
   | ACPToolCallUpdate
@@ -676,6 +686,7 @@ export interface ACPAgentCapabilities {
     extensionContract?: string
   }>
   loadSession?: boolean
+  session?: ACPObject
   promptCapabilities?: ACPPromptCapabilities
   mcpCapabilities?: ACPObject
   sessionCapabilities?: ACPObject
@@ -1369,7 +1380,8 @@ public struct HarnACPToolCall: Codable, Sendable, Equatable {
 
 public struct HarnACPSessionUpdateEnvelope: Codable, Sendable, Equatable {
     public var sessionUpdate: HarnACPSessionUpdate
-    public var content: HarnACPContentBlock?
+    public var content: HarnACPValue?
+    public var messageId: String?
     public var entries: [HarnACPValue]?
     public var keptTurnCount: Int?
     public var removedTurnCount: Int?
@@ -1386,6 +1398,7 @@ public struct HarnACPSessionUpdateEnvelope: Codable, Sendable, Equatable {
     enum CodingKeys: String, CodingKey {
         case sessionUpdate
         case content
+        case messageId
         case entries
         case keptTurnCount
         case removedTurnCount
@@ -1427,6 +1440,7 @@ public struct HarnPromptCapabilities: Codable, Sendable, Equatable {
 public struct HarnACPAgentCapabilities: Codable, Sendable, Equatable {
     public var meta: HarnACPExtensionMeta?
     public var loadSession: Bool?
+    public var session: HarnACPObject?
     public var promptCapabilities: HarnPromptCapabilities?
     public var mcpCapabilities: HarnACPObject?
     public var sessionCapabilities: HarnACPObject?
@@ -1434,6 +1448,7 @@ public struct HarnACPAgentCapabilities: Codable, Sendable, Equatable {
     enum CodingKeys: String, CodingKey {
         case meta = "_meta"
         case loadSession
+        case session
         case promptCapabilities
         case mcpCapabilities
         case sessionCapabilities
@@ -1835,7 +1850,8 @@ class ACPToolCallUpdate(_HarnDataclass):
 @dataclass
 class ACPSessionUpdateEnvelope(_HarnDataclass):
     sessionUpdate: str
-    content: Optional[ACPContentBlock] = None
+    content: Optional[JsonValue] = None
+    messageId: Optional[str] = None
     entries: Optional[List[JsonValue]] = None
     keptTurnCount: Optional[int] = None
     removedTurnCount: Optional[int] = None
@@ -2411,7 +2427,8 @@ type ACPToolCallUpdate struct {
 // and are stripped via `omitempty` on serialization.
 type ACPSessionUpdateEnvelope struct {
 	SessionUpdate    string             `json:"sessionUpdate"`
-	Content          *ACPContentBlock   `json:"content,omitempty"`
+	Content          json.RawMessage    `json:"content,omitempty"`
+	MessageID        *string            `json:"messageId,omitempty"`
 	Entries          []json.RawMessage  `json:"entries,omitempty"`
 	KeptTurnCount    *int               `json:"keptTurnCount,omitempty"`
 	RemovedTurnCount *int               `json:"removedTurnCount,omitempty"`

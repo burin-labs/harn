@@ -330,9 +330,9 @@ defaults, safe, prompts, catalog).
   diff, validate, and commit-style validation.
 - Capability ceiling enforcement for workflows and sub-orchestration:
   internal plans may narrow capabilities but cannot exceed the host ceiling.
-- ACP/bridge queued-user-message handling modes for agent execution:
-  interrupt immediately, inject after the current operation, or defer until
-  the agent yields back to the human.
+- ACP pending user-message injects for agent execution: accept with a stable
+  `messageId`, optionally replace or revoke while pending, steer after the
+  current operation, or queue until the agent yields back to the human.
 - Remote MCP over stdio and HTTP, including OAuth metadata discovery, stored
   bearer tokens for standalone CLI use, and automatic token reuse for HTTP MCP
   servers declared in `harn.toml`.
@@ -560,12 +560,11 @@ harn replay .harn-runs/<run>.json
 harn eval .harn-runs/<run>.json
 ```
 
-Queued human messages can be delivered to an in-flight agent through host
-notifications:
+Queued human messages can be delivered to an in-flight agent with
+`session/inject`:
 
-- `interrupt_immediate`: stop the current deliberation boundary and inject now
-- `finish_step`: inject after the current tool/operation boundary
-- `wait_for_completion`: defer until the agent yields control
+- `steer`: inject after the current tool/operation boundary
+- `queue`: defer until the agent yields control
 
 ## Documentation
 

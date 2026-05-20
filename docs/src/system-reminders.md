@@ -234,8 +234,8 @@ unless disabled with reminder options.
 ### From a host bridge
 
 Bridge and ACP-style hosts inject ambient context with the `session/remind`
-JSON-RPC notification. This is distinct from `session/input` and
-`agent/user_message`, which are always user-role input.
+JSON-RPC notification. This is distinct from `session/inject`, which is always
+user-role input.
 
 ```json
 {
@@ -485,7 +485,7 @@ let cleared = transcript.clear_reminders(current_transcript, {
 
 ### Host-injected idle workspace nudge
 
-Bridge hosts should use `session/remind`, not `session/input`, when the
+Bridge hosts should use `session/remind`, not `session/inject`, when the
 content is ambient context rather than user text.
 
 ```json

@@ -305,6 +305,11 @@ pub enum AgentEvent {
         session_id: String,
         content: String,
     },
+    UserMessage {
+        session_id: String,
+        message_id: String,
+        content: Vec<serde_json::Value>,
+    },
     ToolCall {
         session_id: String,
         tool_call_id: String,
@@ -717,6 +722,7 @@ impl AgentEvent {
         match self {
             Self::AgentMessageChunk { session_id, .. }
             | Self::AgentThoughtChunk { session_id, .. }
+            | Self::UserMessage { session_id, .. }
             | Self::ToolCall { session_id, .. }
             | Self::ToolCallUpdate { session_id, .. }
             | Self::Plan { session_id, .. }
