@@ -13,9 +13,48 @@ use std::io::Read;
 use std::path::Path;
 use std::time::Duration;
 
+use serde::Serialize;
 use sha2::{Digest, Sha256};
 
 use crate::cli::UpgradeArgs;
+use crate::json_envelope::{self, JsonEnvelope};
+
+/// Schema version for `harn upgrade --json`.
+pub(crate) const UPGRADE_SCHEMA_VERSION: u32 = 1;
+
+#[derive(Debug, Clone, Serialize)]
+pub(crate) struct UpgradeReport {
+    /// Currently installed `harn` version (without leading `v`).
+    pub current: String,
+    /// Resolved target release tag (with leading `v`).
+    pub target: String,
+    /// `true` when the resolved target differs from the installed version.
+    pub needs_upgrade: bool,
+    /// Whether this invocation only resolved the target (`--check`) or
+    /// actually performed an install.
+    pub mode: UpgradeMode,
+    /// `true` when an install actually took place. Always `false` for
+    /// `--check`; `false` for re-runs against the same version unless
+    /// `--force` was set.
+    pub installed: bool,
+    /// Resolved target archive URL, populated for both modes so agents
+    /// can plan side-band downloads if desired.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub archive_url: Option<String>,
+    /// Resolved SHA256SUMS URL paired with `archive_url`.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub checksums_url: Option<String>,
+    /// Target triple resolved at compile time, for log/telemetry use.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub target_triple: Option<String>,
+}
+
+#[derive(Debug, Clone, Copy, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub(crate) enum UpgradeMode {
+    Check,
+    Install,
+}
 
 const REPO: &str = "burin-labs/harn";
 const RELEASES_BASE: &str = "https://github.com/burin-labs/harn/releases";
@@ -28,6 +67,15 @@ const REQUEST_TIMEOUT: Duration = Duration::from_secs(60);
 /// runs inside a tokio multi-thread runtime, where dropping a nested
 /// blocking client on the async thread itself panics.
 pub(crate) async fn run(args: UpgradeArgs) -> Result<(), String> {
+    if args.json {
+        let exit = tokio::task::spawn_blocking(move || run_blocking_json(args))
+            .await
+            .map_err(|error| format!("upgrade task failed: {error}"))?;
+        if exit != 0 {
+            std::process::exit(exit);
+        }
+        return Ok(());
+    }
     tokio::task::spawn_blocking(move || run_blocking(args))
         .await
         .map_err(|error| format!("upgrade task failed: {error}"))?
@@ -96,6 +144,150 @@ fn run_blocking(args: UpgradeArgs) -> Result<(), String> {
 
     println!("Upgraded harn to {target}. Re-run your last command to use the new binary.",);
     Ok(())
+}
+
+/// JSON variant. Mirrors `run_blocking` but emits a [`JsonEnvelope`]
+/// to stdout and routes every log line to stderr to keep stdout
+/// single-document parseable.
+fn run_blocking_json(args: UpgradeArgs) -> i32 {
+    let triple = match target_triple() {
+        Ok(t) => t,
+        Err(error) => return emit_upgrade_error("unsupported_target", error),
+    };
+    let current = env!("CARGO_PKG_VERSION");
+
+    let target = match args.version.as_deref() {
+        Some(v) => match normalize_version(v) {
+            Ok(t) => t,
+            Err(error) => return emit_upgrade_error("invalid_version", error),
+        },
+        None => match fetch_latest_tag() {
+            Ok(t) => t,
+            Err(error) => return emit_upgrade_error("resolve_failed", error),
+        },
+    };
+
+    let archive_name = format!("harn-{triple}.tar.gz");
+    let archive_url = format!("{RELEASES_BASE}/download/{target}/{archive_name}");
+    let checksums_url = format!("{RELEASES_BASE}/download/{target}/SHA256SUMS");
+    let needs_upgrade = target.trim_start_matches('v') != current;
+    let mode = if args.check {
+        UpgradeMode::Check
+    } else {
+        UpgradeMode::Install
+    };
+    let mut report = UpgradeReport {
+        current: current.to_string(),
+        target: target.clone(),
+        needs_upgrade,
+        mode,
+        installed: false,
+        archive_url: Some(archive_url.clone()),
+        checksums_url: Some(checksums_url.clone()),
+        target_triple: Some(triple.to_string()),
+    };
+
+    if args.check {
+        emit_upgrade_ok(report);
+        return 0;
+    }
+    if !args.force && !needs_upgrade {
+        emit_upgrade_ok(report);
+        return 0;
+    }
+
+    // Logs go to stderr so stdout stays a single parseable envelope.
+    eprintln!("Installed: v{current}");
+    eprintln!("Target:    {target}");
+
+    let current_exe = match env::current_exe()
+        .map_err(|error| format!("failed to resolve current exe: {error}"))
+    {
+        Ok(p) => p,
+        Err(error) => return emit_upgrade_error_with(&report, "resolve_exe_failed", error),
+    };
+    let current_exe = current_exe
+        .canonicalize()
+        .unwrap_or_else(|_| current_exe.clone());
+    let install_dir = match current_exe
+        .parent()
+        .ok_or_else(|| format!("{} has no parent directory", current_exe.display()))
+    {
+        Ok(p) => p.to_path_buf(),
+        Err(error) => return emit_upgrade_error_with(&report, "resolve_exe_failed", error),
+    };
+
+    let staging = match tempfile::tempdir()
+        .map_err(|error| format!("failed to create staging directory: {error}"))
+    {
+        Ok(s) => s,
+        Err(error) => return emit_upgrade_error_with(&report, "staging_failed", error),
+    };
+    let archive_path = staging.path().join(&archive_name);
+
+    eprintln!("Downloading {archive_name}");
+    if let Err(error) = download(&archive_url, &archive_path) {
+        return emit_upgrade_error_with(&report, "download_failed", error);
+    }
+
+    if args.no_verify {
+        eprintln!("warning: SHA256 verification skipped (--no-verify)");
+    } else if let Err(error) = verify_checksum(&checksums_url, &archive_name, &archive_path) {
+        return emit_upgrade_error_with(&report, "checksum_failed", error);
+    }
+
+    eprintln!("Extracting");
+    if let Err(error) = extract_tarball(&archive_path, staging.path()) {
+        return emit_upgrade_error_with(&report, "extract_failed", error);
+    }
+
+    let staged_binary = staging.path().join(harn_binary_name());
+    if !staged_binary.exists() {
+        return emit_upgrade_error_with(
+            &report,
+            "archive_missing_binary",
+            format!(
+                "archive did not contain {} — refusing to upgrade",
+                harn_binary_name()
+            ),
+        );
+    }
+
+    if let Err(error) = install_binaries(staging.path(), &install_dir) {
+        return emit_upgrade_error_with(&report, "install_failed", error);
+    }
+
+    report.installed = true;
+    emit_upgrade_ok(report);
+    0
+}
+
+fn emit_upgrade_ok(report: UpgradeReport) {
+    let envelope = JsonEnvelope::ok(UPGRADE_SCHEMA_VERSION, report);
+    println!("{}", json_envelope::to_string_pretty(&envelope));
+}
+
+fn emit_upgrade_error(code: &str, message: String) -> i32 {
+    let envelope: JsonEnvelope<UpgradeReport> =
+        JsonEnvelope::err(UPGRADE_SCHEMA_VERSION, code, message);
+    println!("{}", json_envelope::to_string_pretty(&envelope));
+    1
+}
+
+fn emit_upgrade_error_with(report: &UpgradeReport, code: &str, message: String) -> i32 {
+    let envelope = JsonEnvelope {
+        schema_version: UPGRADE_SCHEMA_VERSION,
+        ok: false,
+        data: Some(report.clone()),
+        error: Some(json_envelope::JsonError {
+            code: code.to_string(),
+            message,
+            details: serde_json::Value::Null,
+        }),
+        warnings: Vec::new(),
+    };
+    println!("{}", json_envelope::to_string_pretty(&envelope));
+    1
 }
 
 /// Compile-time host target triple for selecting the matching release

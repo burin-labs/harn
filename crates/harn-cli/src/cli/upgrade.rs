@@ -19,4 +19,12 @@ pub(crate) struct UpgradeArgs {
     /// resolved target.
     #[arg(long)]
     pub force: bool,
+
+    /// Emit a structured `JsonEnvelope` instead of human-readable output. Pairs
+    /// naturally with `--check` for an agent-readable upgrade-readiness probe;
+    /// when combined with a full install, the envelope is printed after the
+    /// install action completes so callers can read the final status.
+    /// See `docs/src/cli-json-contract.md` for the envelope shape.
+    #[arg(long)]
+    pub json: bool,
 }

@@ -112,7 +112,13 @@ async fn async_main() {
         return;
     };
     match subcommand {
-        Command::Version => print_version(),
+        Command::Version(args) => {
+            if args.json {
+                print_version_json();
+            } else {
+                print_version();
+            }
+        }
         Command::Upgrade(args) => {
             if let Err(error) = commands::upgrade::run(args).await {
                 eprintln!("error: {error}");
@@ -451,10 +457,66 @@ async fn async_main() {
             let files = commands::check::collect_harn_targets(&targets);
             let prompt_files = commands::check::collect_prompt_targets(&targets);
             if files.is_empty() && prompt_files.is_empty() {
+                if args.json {
+                    print_lint_error(
+                        "no_lint_targets",
+                        "no .harn or .harn.prompt files found under the given target(s)",
+                    );
+                }
                 command_error("no .harn or .harn.prompt files found under the given target(s)");
             }
             let module_graph = commands::check::build_module_graph(&files);
             let cross_file_imports = commands::check::collect_cross_file_imports(&module_graph);
+            if args.json {
+                // `--json` always reports without modifying source — `--fix`
+                // is intentionally orthogonal to structured output so agents
+                // can plan repairs from the report and apply them in a
+                // follow-up `harn lint --fix` (or `harn fix apply`).
+                let mut should_fail = false;
+                let mut json_files: Vec<commands::check::LintFileReport> = Vec::new();
+                for file in &files {
+                    let mut config = package::load_check_config(Some(file));
+                    commands::check::apply_harn_lint_config(file, &mut config);
+                    let require_header = args.require_file_header
+                        || commands::check::harn_lint_require_file_header(file);
+                    let complexity_threshold =
+                        commands::check::harn_lint_complexity_threshold(file);
+                    let persona_step_allowlist =
+                        commands::check::harn_lint_persona_step_allowlist(file);
+                    let report = commands::check::lint_file_report(
+                        file,
+                        &config,
+                        &cross_file_imports,
+                        &module_graph,
+                        require_header,
+                        complexity_threshold,
+                        &persona_step_allowlist,
+                    );
+                    should_fail |= report.outcome().should_fail(config.strict);
+                    json_files.push(report);
+                }
+                let report = commands::check::LintReport::from_files(json_files);
+                let envelope = if should_fail {
+                    json_envelope::JsonEnvelope {
+                        schema_version: commands::check::LINT_SCHEMA_VERSION,
+                        ok: false,
+                        data: Some(report),
+                        error: Some(json_envelope::JsonError {
+                            code: "lint_failed".to_string(),
+                            message: "one or more files failed `harn lint`".to_string(),
+                            details: serde_json::Value::Null,
+                        }),
+                        warnings: Vec::new(),
+                    }
+                } else {
+                    json_envelope::JsonEnvelope::ok(commands::check::LINT_SCHEMA_VERSION, report)
+                };
+                println!("{}", json_envelope::to_string_pretty(&envelope));
+                if should_fail {
+                    process::exit(1);
+                }
+                return;
+            }
             if args.fix {
                 for file in &files {
                     let mut config = package::load_check_config(Some(file));
@@ -962,7 +1024,16 @@ async fn async_main() {
             }
         },
         Command::Session(args) => commands::session::run(args),
-        Command::Replay(args) => replay_run_record(&args.path),
+        Command::Replay(args) => {
+            if args.json {
+                let exit = commands::replay::run_json(&args.path);
+                if exit != 0 {
+                    process::exit(exit);
+                }
+            } else {
+                replay_run_record(&args.path);
+            }
+        }
         Command::Eval(args) => match args.command {
             Some(EvalCommand::Prompt(prompt_args)) => {
                 let code = commands::eval_prompt::run(prompt_args).await;
@@ -1348,6 +1419,27 @@ fn print_version() {
     );
 }
 
+/// Schema version for `harn version --json`. Bump when the data shape
+/// changes; new optional fields can be added freely.
+pub(crate) const VERSION_SCHEMA_VERSION: u32 = 1;
+
+#[derive(serde::Serialize)]
+struct VersionInfo {
+    name: &'static str,
+    version: &'static str,
+    description: &'static str,
+}
+
+fn print_version_json() {
+    let payload = VersionInfo {
+        name: env!("CARGO_PKG_NAME"),
+        version: env!("CARGO_PKG_VERSION"),
+        description: env!("CARGO_PKG_DESCRIPTION"),
+    };
+    let envelope = json_envelope::JsonEnvelope::ok(VERSION_SCHEMA_VERSION, payload);
+    println!("{}", json_envelope::to_string_pretty(&envelope));
+}
+
 async fn print_model_info(args: &ModelInfoArgs) -> bool {
     let resolved = harn_vm::llm_config::resolve_model_info(&args.model);
     let api_key_result = harn_vm::llm::resolve_api_key(&resolved.provider);
@@ -1572,6 +1664,13 @@ fn command_error(message: &str) -> ! {
 fn print_check_error(code: &str, message: &str) -> ! {
     let envelope: json_envelope::JsonEnvelope<commands::check::CheckReport> =
         json_envelope::JsonEnvelope::err(commands::check::CHECK_SCHEMA_VERSION, code, message);
+    println!("{}", json_envelope::to_string_pretty(&envelope));
+    process::exit(1);
+}
+
+fn print_lint_error(code: &str, message: &str) -> ! {
+    let envelope: json_envelope::JsonEnvelope<commands::check::LintReport> =
+        json_envelope::JsonEnvelope::err(commands::check::LINT_SCHEMA_VERSION, code, message);
     println!("{}", json_envelope::to_string_pretty(&envelope));
     process::exit(1);
 }

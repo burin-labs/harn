@@ -39,6 +39,17 @@ condensed series summaries instead of full per-patch history.
   `import { obs } from "observability"` is accepted as the short stdlib
   alias, and conformance covers the unified API, backend fan-out, and
   routing payload shapes.
+- **`--json` everywhere + `schemaVersion` envelope (#1753).** Extends the
+  versioned `JsonEnvelope` contract to the highest-leverage commands that
+  previously had no machine-readable mode: `harn lint --json`,
+  `harn replay --json`, `harn version --json`, and `harn upgrade --json`
+  (pairs naturally with `--check` for a self-update probe). Every new
+  envelope is registered in the `harn --json-schemas` catalog with a
+  stable `schemaVersion` so agents can dispatch per-command. The full
+  contract — envelope shape, error layout, and per-command notes — lives
+  at `docs/src/cli-json-contract.md`; a condensed cheatsheet ships in
+  `docs/llm/harn-quickref.md`. Stdout stays single-document parseable;
+  progress, warnings, and human-readable logs route to stderr.
 
 ## v0.8.27
 

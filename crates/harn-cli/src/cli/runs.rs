@@ -25,4 +25,8 @@ pub(crate) struct RunsInspectArgs {
 pub(crate) struct ReplayArgs {
     /// Path to the run record JSON file.
     pub path: String,
+    /// Emit a structured `JsonEnvelope` replay summary instead of human-readable output.
+    /// See `docs/src/cli-json-contract.md` for the envelope shape.
+    #[arg(long)]
+    pub json: bool,
 }

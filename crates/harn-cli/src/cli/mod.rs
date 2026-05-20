@@ -64,6 +64,7 @@ mod try_cmd;
 mod upgrade;
 mod util;
 mod verify;
+mod version;
 mod viz;
 mod watch;
 mod workflow;
@@ -204,6 +205,7 @@ pub(crate) use trust::{
     TrustVerifyChainArgs,
 };
 pub(crate) use verify::VerifyArgs;
+pub(crate) use version::VersionArgs;
 pub(crate) use viz::VizArgs;
 pub(crate) use watch::WatchArgs;
 pub(crate) use workflow::{
@@ -470,7 +472,7 @@ SCRIPTING
     /// Scaffold and inspect Harn-native custom tools.
     Tool(ToolArgs),
     /// Print the decorated version banner.
-    Version,
+    Version(VersionArgs),
     /// Download and atomically replace the running `harn` binary with
     /// the latest published GitHub release (or a specific tag via
     /// `--version`). Verifies the archive against the release's

@@ -263,6 +263,33 @@ pub fn catalog() -> Vec<SchemaEntry> {
             schema_json: None,
         },
         SchemaEntry {
+            command: "lint",
+            schema_version: crate::commands::check::LINT_SCHEMA_VERSION,
+            description:
+                "Per-file lint diagnostics with severity, fixable/fixed counts, and summary.",
+            schema_json: None,
+        },
+        SchemaEntry {
+            command: "replay",
+            schema_version: crate::commands::replay::REPLAY_SCHEMA_VERSION,
+            description:
+                "Replay summary: per-stage status/outcome/branch plus the embedded replay-fixture verdict.",
+            schema_json: None,
+        },
+        SchemaEntry {
+            command: "version",
+            schema_version: crate::VERSION_SCHEMA_VERSION,
+            description: "CLI build metadata: name, version, description.",
+            schema_json: None,
+        },
+        SchemaEntry {
+            command: "upgrade",
+            schema_version: crate::commands::upgrade::UPGRADE_SCHEMA_VERSION,
+            description:
+                "Self-update probe (`--check`) or install summary: current, target, archive URL, install outcome.",
+            schema_json: None,
+        },
+        SchemaEntry {
             command: "explain --catalog",
             schema_version: crate::commands::diagnostics_catalog::SCHEMA_VERSION,
             description:
