@@ -122,6 +122,12 @@ impl super::Vm {
             // frame inline. Builtins and the listed escape hatches fall
             // through to `execute_call_builtin_async` with `ip` untouched.
             Op::CallBuiltin => return self.execute_call_builtin_sync(),
+            // TailCall is split: the sync fast path handles the
+            // steady-state user-closure tail call inline (TCO frame
+            // reuse). Tracked-function frames/callees, generators, and
+            // string/builtin-ref callees return `None` and fall through
+            // to `execute_tail_call_async`.
+            Op::TailCall => return self.execute_tail_call_sync(),
             Op::Throw => self.execute_throw(),
             Op::TryCatchSetup => {
                 self.execute_try_catch_setup();
@@ -187,7 +193,6 @@ impl super::Vm {
             // keeps the sync/async classification visible alongside the
             // sync dispatch table.
             Op::CallBuiltinSpread
-            | Op::TailCall
             | Op::MethodCall
             | Op::MethodCallOpt
             | Op::Pipe
@@ -213,7 +218,7 @@ impl super::Vm {
             Op::Call => self.execute_call_async().await,
             Op::CallBuiltin => self.execute_call_builtin_async().await,
             Op::CallBuiltinSpread => self.execute_call_builtin_spread().await,
-            Op::TailCall => self.execute_tail_call().await,
+            Op::TailCall => self.execute_tail_call_async().await,
             Op::MethodCall => self.execute_method_call(false).await,
             Op::MethodCallOpt => self.execute_method_call(true).await,
             Op::IterNext => self.execute_iter_next_async().await,
