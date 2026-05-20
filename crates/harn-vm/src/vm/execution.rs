@@ -1,7 +1,7 @@
 use std::rc::Rc;
 use std::time::{Duration, Instant};
 
-use crate::chunk::{Chunk, ChunkRef};
+use crate::chunk::{Chunk, ChunkRef, Op};
 use crate::value::{ModuleFunctionRegistry, VmError, VmValue};
 
 use super::{CallFrame, LocalSlot, Vm};
@@ -15,6 +15,21 @@ enum DeadlineKind {
 }
 
 impl Vm {
+    /// Returns true when no scope-level async machinery is armed. The hot
+    /// interpreter loop uses this to skip both the `pending_scope_interrupt`
+    /// future and the `execute_op_with_scope_interrupts` `tokio::select!`
+    /// wrapper on every dispatch — both are necessary for cancellable /
+    /// deadlined VMs but pure overhead in the common case (benchmarks,
+    /// background script execution, etc.).
+    #[inline]
+    pub(crate) fn scope_interrupts_clean(&self) -> bool {
+        self.cancel_token.is_none()
+            && self.interrupt_signal_token.is_none()
+            && self.pending_interrupt_signal.is_none()
+            && self.interrupt_handler_deadline.is_none()
+            && self.deadlines.is_empty()
+    }
+
     /// Execute a compiled chunk.
     pub async fn execute(&mut self, chunk: &Chunk) -> Result<VmValue, VmError> {
         let span_id = crate::tracing::span_start(crate::tracing::SpanKind::Pipeline, "main".into());
@@ -273,11 +288,19 @@ impl Vm {
         });
 
         loop {
-            if let Some(err) = self.pending_scope_interrupt().await {
-                match self.handle_error(err) {
-                    Ok(None) => continue,
-                    Ok(Some(val)) => return Ok(val),
-                    Err(e) => return Err(e),
+            // Slow path only: the interrupt-handler future, deadline check,
+            // and host-signal poll inside `pending_scope_interrupt` are all
+            // no-ops when no cancel/interrupt/deadline machinery is armed
+            // (the common case for unsupervised execution), so guard them
+            // with a sync check that avoids the per-iteration future
+            // state-machine allocation.
+            if !self.scope_interrupts_clean() {
+                if let Some(err) = self.pending_scope_interrupt().await {
+                    match self.handle_error(err) {
+                        Ok(None) => continue,
+                        Ok(Some(val)) => return Ok(val),
+                        Err(e) => return Err(e),
+                    }
                 }
             }
 
@@ -307,12 +330,34 @@ impl Vm {
                 }
             }
 
-            let op = frame.chunk.code[frame.ip];
+            let op_byte = frame.chunk.code[frame.ip];
             frame.ip += 1;
 
-            match self.execute_op_with_scope_interrupts(op).await {
-                Ok(Some(val)) => return Ok(val),
-                Ok(None) => continue,
+            // Sync/async split dispatch: skip the `execute_op` async fn
+            // (a per-iteration `Future` state machine over ~80 match arms)
+            // and the `tokio::select!` deadline/cancel wrapper whenever
+            // the VM has no interrupt machinery armed. Only call/iter/
+            // pipe/parallel/import/yield opcodes still need an `.await`.
+            let op_result: Result<(), VmError> = if self.scope_interrupts_clean() {
+                let op = match Op::from_byte(op_byte) {
+                    Some(op) => op,
+                    None => return Err(VmError::InvalidInstruction(op_byte)),
+                };
+                if let Some(result) = self.execute_op_sync(op) {
+                    result
+                } else {
+                    self.execute_op_async(op).await
+                }
+            } else {
+                match self.execute_op_with_scope_interrupts(op_byte).await {
+                    Ok(Some(val)) => return Ok(val),
+                    Ok(None) => Ok(()),
+                    Err(e) => Err(e),
+                }
+            };
+
+            match op_result {
+                Ok(()) => continue,
                 Err(VmError::Return(val)) => {
                     let val = self.run_step_post_hooks_for_current_frame(val).await?;
                     if let Some(popped_frame) = self.frames.pop() {
