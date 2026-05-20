@@ -29,6 +29,25 @@ condensed series summaries instead of full per-patch history.
   can exercise the matcher without touching the network. Tracked
   through the E4.9 row of epic #1765 and lays the runtime groundwork
   for the harn-cloud `workspaces.network_policy` schema.
+- **`harn pack` signed content-addressed run bundles (#1779).** Promotes
+  `harn pack` to a parent command with a `verify` subcommand and adds
+  `--exclude-secrets` to the build path. `harn pack verify <bundle.harnpack>`
+  reads a `.harnpack`, recomputes the canonical bundle hash, runs the
+  embedded Ed25519 signature check (refusing unsigned bundles without
+  `--allow-unsigned`), and cross-checks every per-module
+  `source_hash_blake3` / `harnbc_hash_blake3` against the in-archive payload.
+  Exits non-zero on any mismatch with stable structured error codes
+  (`verify.signature_failed`, `verify.source_mismatch`,
+  `verify.bytecode_mismatch`, `verify.recorded_hash_mismatch`,
+  `verify.archive_failed`, `verify.unsigned`). `--exclude-secrets` refuses
+  to bundle entrypoints whose path matches a conservative secret-bearing
+  glob (`.env`, `.env.*`, `*.pem`, `*.key`, `credentials*`, anything under
+  `secrets/`); pass `--include-secrets` to be explicit about the historical
+  default. Both surfaces emit `JsonEnvelope` payloads under `--json` and
+  register with `harn --json-schemas` (`pack verify` schema v1). The
+  conformance suite covers happy path, byte-deterministic re-pack, signed
+  bundle roundtrip, signed-bundle tamper detection, secrets gate, and the
+  JSON envelope contract under `conformance/tests/harn_pack/`.
 
 ## v0.8.27
 

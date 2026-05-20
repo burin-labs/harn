@@ -55,7 +55,8 @@ impl HarnpackFixture {
 
     fn pack_args(&self, sign: bool) -> PackArgs {
         PackArgs {
-            entrypoint: self.workdir.path().join("hello.harn"),
+            command: None,
+            entrypoint: Some(self.workdir.path().join("hello.harn")),
             out: Some(self.pack_path.clone()),
             upgrade: None,
             sign,
@@ -65,6 +66,8 @@ impl HarnpackFixture {
                 None
             },
             unsigned: !sign,
+            exclude_secrets: false,
+            include_secrets: false,
             json: false,
         }
     }
@@ -111,7 +114,20 @@ fn build_pack(args: &PackArgs) -> pack::PackOutcome {
         .block_on(async {
             let _cwd_guard = cwd_lock::lock_cwd_async().await;
             harn_vm::reset_thread_local_state();
-            pack::build(args).expect("pack succeeds")
+            let build_args = pack::BuildArgs {
+                entrypoint: args
+                    .entrypoint
+                    .clone()
+                    .expect("PackArgs.entrypoint set in tests"),
+                out: args.out.clone(),
+                upgrade: args.upgrade.clone(),
+                sign: args.sign,
+                key: args.key.clone(),
+                unsigned: args.unsigned,
+                exclude_secrets: args.exclude_secrets,
+                json: args.json,
+            };
+            pack::build(&build_args).expect("pack succeeds")
         })
 }
 

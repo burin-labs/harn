@@ -1,16 +1,18 @@
-//! Integration coverage for `harn pack` (#1781).
+//! Integration coverage for `harn pack` (#1781) and `harn pack verify` (#1779).
 //!
-//! Exercises the exit criteria spelled out on the issue:
+//! Exercises the exit criteria spelled out on the epic:
 //!  - producing a valid `.harnpack` archive from a single entrypoint,
 //!  - bit-for-bit determinism across repeated invocations,
-//!  - the `--json` `JsonEnvelope` shape and schema version, and
-//!  - the `--upgrade` path for older bundle schemas.
+//!  - the `--json` `JsonEnvelope` shape and schema version,
+//!  - the `--upgrade` path for older bundle schemas,
+//!  - `harn pack verify` happy/sad paths (signed, unsigned, tampered).
 
 use std::fs;
 use std::path::{Path, PathBuf};
 
-use harn_cli::cli::PackArgs;
+use harn_cli::cli::{PackArgs, PackVerifyArgs};
 use harn_cli::commands::pack;
+use harn_cli::commands::pack::BuildArgs;
 use harn_cli::tests::common::cwd_lock;
 use harn_vm::orchestration::{
     load_workflow_bundle, read_harnpack, verify_workflow_bundle_signature, SBOMDoc,
@@ -20,6 +22,22 @@ use tempfile::TempDir;
 use tokio::runtime::Builder;
 
 const TEST_ED25519_PRIVATE_KEY: &str = "-----BEGIN PRIVATE KEY-----\nMC4CAQAwBQYDK2VwBCIEIDmsNDO8iZqiMmA/b7I7lwGXNKe68o+gDno6R5riUcDC\n-----END PRIVATE KEY-----\n";
+
+fn build_args_from_pack(args: &PackArgs) -> BuildArgs {
+    BuildArgs {
+        entrypoint: args
+            .entrypoint
+            .clone()
+            .expect("PackArgs.entrypoint set in tests"),
+        out: args.out.clone(),
+        upgrade: args.upgrade.clone(),
+        sign: args.sign,
+        key: args.key.clone(),
+        unsigned: args.unsigned,
+        exclude_secrets: args.exclude_secrets,
+        json: args.json,
+    }
+}
 
 fn run_pack(args: &PackArgs) {
     let _ = build_pack(args);
@@ -33,18 +51,21 @@ fn build_pack(args: &PackArgs) -> pack::PackOutcome {
         .block_on(async {
             let _cwd_guard = cwd_lock::lock_cwd_async().await;
             harn_vm::reset_thread_local_state();
-            pack::build(args).expect("pack succeeds")
+            pack::build(&build_args_from_pack(args)).expect("pack succeeds")
         })
 }
 
 fn pack_args(entrypoint: PathBuf, out: PathBuf) -> PackArgs {
     PackArgs {
-        entrypoint,
+        command: None,
+        entrypoint: Some(entrypoint),
         out: Some(out),
         upgrade: None,
         sign: false,
         key: None,
         unsigned: true,
+        exclude_secrets: false,
+        include_secrets: false,
         json: false,
     }
 }
@@ -180,12 +201,15 @@ fn pack_json_envelope_carries_pack_schema() {
             let _cwd_guard = cwd_lock::lock_cwd_async().await;
             harn_vm::reset_thread_local_state();
             pack::run_to_envelope(&PackArgs {
-                entrypoint: entry.clone(),
+                command: None,
+                entrypoint: Some(entry.clone()),
                 out: Some(out.clone()),
                 upgrade: None,
                 sign: false,
                 key: None,
                 unsigned: true,
+                exclude_secrets: false,
+                include_secrets: false,
                 json: true,
             })
         });
@@ -261,12 +285,15 @@ fn pack_upgrade_replaces_schema_version_keeping_workflow() {
     let out = workdir.path().join("legacy.harnpack");
 
     run_pack(&PackArgs {
-        entrypoint: entry.clone(),
+        command: None,
+        entrypoint: Some(entry.clone()),
         out: Some(out.clone()),
         upgrade: Some(v1.clone()),
         sign: false,
         key: None,
         unsigned: true,
+        exclude_secrets: false,
+        include_secrets: false,
         json: false,
     });
 
@@ -291,12 +318,15 @@ fn pack_signs_manifest_and_emits_release_trust_record() {
     let out = workdir.path().join("hello.harnpack");
 
     let outcome = build_pack(&PackArgs {
-        entrypoint: entry.clone(),
+        command: None,
+        entrypoint: Some(entry.clone()),
         out: Some(out.clone()),
         upgrade: None,
         sign: true,
         key: Some(key),
         unsigned: false,
+        exclude_secrets: false,
+        include_secrets: false,
         json: false,
     });
 
@@ -364,12 +394,15 @@ fn workflow_bundle_signature_verifier_rejects_content_mismatch() {
     let out = workdir.path().join("hello.harnpack");
 
     run_pack(&PackArgs {
-        entrypoint: entry.clone(),
+        command: None,
+        entrypoint: Some(entry.clone()),
         out: Some(out.clone()),
         upgrade: None,
         sign: true,
         key: Some(key),
         unsigned: false,
+        exclude_secrets: false,
+        include_secrets: false,
         json: false,
     });
 
@@ -383,6 +416,178 @@ fn workflow_bundle_signature_verifier_rejects_content_mismatch() {
     let error = verify_workflow_bundle_signature(&archive.manifest, &archive.contents)
         .expect_err("tampered content must fail verification");
     assert!(error.message.contains("signature hash mismatch"));
+}
+
+// --- `harn pack verify` integration coverage --------------------------------
+
+#[test]
+fn pack_verify_signed_bundle_passes_and_reports_signature_key() {
+    let workdir = TempDir::new().unwrap();
+    let entry = workdir.path().join("hello.harn");
+    fs::write(&entry, "println(\"signed\")\n").unwrap();
+    let key = workdir.path().join("release-key.pem");
+    fs::write(&key, TEST_ED25519_PRIVATE_KEY).unwrap();
+    let out = workdir.path().join("hello.harnpack");
+
+    let outcome = build_pack(&PackArgs {
+        command: None,
+        entrypoint: Some(entry.clone()),
+        out: Some(out.clone()),
+        upgrade: None,
+        sign: true,
+        key: Some(key),
+        unsigned: false,
+        exclude_secrets: false,
+        include_secrets: false,
+        json: false,
+    });
+
+    let report = pack::verify(&PackVerifyArgs {
+        bundle: out.clone(),
+        allow_unsigned: false,
+        json: false,
+    })
+    .expect("verify ok on signed bundle");
+    assert_eq!(report.bundle_hash, outcome.bundle_hash);
+    assert!(report.signature_present);
+    assert!(report.signature_verified);
+    assert!(report.key_id.is_some());
+    assert_eq!(
+        report.recorded_bundle_hash.as_deref(),
+        Some(outcome.bundle_hash.as_str())
+    );
+    assert_eq!(report.module_count, 1);
+    assert!(report.content_entry_count >= 3, "{:?}", report);
+}
+
+#[test]
+fn pack_verify_unsigned_bundle_refused_without_flag_but_ok_with_flag() {
+    let workdir = TempDir::new().unwrap();
+    let entry = workdir.path().join("hello.harn");
+    fs::write(&entry, "println(\"hi\")\n").unwrap();
+    let out = workdir.path().join("hello.harnpack");
+    build_pack(&pack_args(entry.clone(), out.clone()));
+
+    let strict = pack::verify(&PackVerifyArgs {
+        bundle: out.clone(),
+        allow_unsigned: false,
+        json: false,
+    })
+    .expect_err("unsigned bundle must refuse without --allow-unsigned");
+    assert_eq!(strict.code, "verify.unsigned");
+
+    let lenient = pack::verify(&PackVerifyArgs {
+        bundle: out.clone(),
+        allow_unsigned: true,
+        json: false,
+    })
+    .expect("verify ok on unsigned bundle with --allow-unsigned");
+    assert!(!lenient.signature_present);
+    assert!(!lenient.signature_verified);
+}
+
+#[test]
+fn pack_verify_tampered_signed_bundle_fails() {
+    let workdir = TempDir::new().unwrap();
+    let entry = workdir.path().join("hello.harn");
+    fs::write(&entry, "println(\"signed\")\n").unwrap();
+    let key = workdir.path().join("release-key.pem");
+    fs::write(&key, TEST_ED25519_PRIVATE_KEY).unwrap();
+    let out = workdir.path().join("hello.harnpack");
+
+    build_pack(&PackArgs {
+        command: None,
+        entrypoint: Some(entry.clone()),
+        out: Some(out.clone()),
+        upgrade: None,
+        sign: true,
+        key: Some(key),
+        unsigned: false,
+        exclude_secrets: false,
+        include_secrets: false,
+        json: false,
+    });
+
+    // Tamper the source bytes inside the archive but keep the original
+    // manifest (with its recorded source_hash_blake3) intact. Repack
+    // with `build_harnpack` so the on-disk archive is structurally
+    // valid but its content no longer matches the manifest's hashes.
+    let mut archive = read_harnpack(&fs::read(&out).unwrap()).unwrap();
+    let source = archive
+        .contents
+        .iter_mut()
+        .find(|entry| entry.path == Path::new("sources/hello.harn"))
+        .expect("source entry present");
+    source.bytes = b"println(\"tampered\")\n".to_vec();
+    let tampered =
+        harn_vm::orchestration::build_harnpack(&archive.manifest, &archive.contents).unwrap();
+    fs::write(&out, &tampered).unwrap();
+
+    let err = pack::verify(&PackVerifyArgs {
+        bundle: out.clone(),
+        allow_unsigned: true,
+        json: false,
+    })
+    .expect_err("tampered bundle must fail verification");
+    assert!(
+        err.code.starts_with("verify."),
+        "expected verify.* error, got {}",
+        err.code
+    );
+}
+
+#[test]
+fn pack_verify_json_envelope_round_trips_schema() {
+    let workdir = TempDir::new().unwrap();
+    let entry = workdir.path().join("hello.harn");
+    fs::write(&entry, "println(\"hi\")\n").unwrap();
+    let out = workdir.path().join("hello.harnpack");
+    build_pack(&pack_args(entry.clone(), out.clone()));
+
+    let envelope = pack::verify_to_envelope(&PackVerifyArgs {
+        bundle: out.clone(),
+        allow_unsigned: true,
+        json: true,
+    });
+    let value = serde_json::to_value(&envelope).unwrap();
+    jsonschema::draft202012::meta::validate(&pack::verify_json_schema()).unwrap();
+    let validator = jsonschema::draft202012::new(&pack::verify_json_schema()).unwrap();
+    validator.validate(&value).unwrap();
+    assert_eq!(value["schemaVersion"], pack::PACK_VERIFY_SCHEMA_VERSION);
+    assert_eq!(value["ok"], true);
+    assert!(value["data"]["bundle_hash"]
+        .as_str()
+        .is_some_and(|s| s.starts_with("blake3:")));
+    assert_eq!(value["data"]["signature_present"], false);
+    assert_eq!(value["data"]["signature_verified"], false);
+    assert!(value["data"]["module_count"].as_u64().unwrap() >= 1);
+}
+
+#[test]
+fn pack_exclude_secrets_blocks_entrypoint_with_dotenv_name() {
+    let workdir = TempDir::new().unwrap();
+    let entry = workdir.path().join(".env.harn");
+    fs::write(&entry, "println(\"secret\")\n").unwrap();
+    let out = workdir.path().join(".env.harnpack");
+
+    let runtime = Builder::new_current_thread().enable_all().build().unwrap();
+    let err = runtime.block_on(async {
+        let _cwd_guard = cwd_lock::lock_cwd_async().await;
+        harn_vm::reset_thread_local_state();
+        pack::build(&BuildArgs {
+            entrypoint: entry.clone(),
+            out: Some(out.clone()),
+            upgrade: None,
+            sign: false,
+            key: None,
+            unsigned: true,
+            exclude_secrets: true,
+            json: false,
+        })
+        .expect_err("--exclude-secrets must refuse secret-looking entrypoints")
+    });
+    assert_eq!(err.code, "pack.secret_blocked");
+    assert!(!out.exists(), "blocked bundle must not be written");
 }
 
 fn release_records(
