@@ -103,6 +103,11 @@ impl super::Vm {
                 Ok(())
             }
             Op::IterInit => self.execute_iter_init(),
+            // IterNext is a split opcode: the sync fast path handles
+            // Vec/Dict/Range/empty iterators inline; if it returns `None`
+            // we hand off to `execute_op_async` for Channel/Generator/
+            // Stream/VmIter without having touched `ip`.
+            Op::IterNext => return self.execute_iter_next_sync(),
             Op::Throw => self.execute_throw(),
             Op::TryCatchSetup => {
                 self.execute_try_catch_setup();
@@ -173,7 +178,6 @@ impl super::Vm {
             | Op::TailCall
             | Op::MethodCall
             | Op::MethodCallOpt
-            | Op::IterNext
             | Op::Pipe
             | Op::Parallel
             | Op::ParallelMap
@@ -200,7 +204,7 @@ impl super::Vm {
             Op::TailCall => self.execute_tail_call().await,
             Op::MethodCall => self.execute_method_call(false).await,
             Op::MethodCallOpt => self.execute_method_call(true).await,
-            Op::IterNext => self.execute_iter_next().await,
+            Op::IterNext => self.execute_iter_next_async().await,
             Op::Pipe => self.execute_pipe().await,
             Op::Parallel => self.execute_parallel().await,
             Op::ParallelMap => self.execute_parallel_map().await,
