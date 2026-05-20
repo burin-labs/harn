@@ -2334,6 +2334,33 @@ query_stringify([{key: "name", value: "ali ce"}])
 - `http_mock(method, url_pattern, response)` can script multiple responses
   with `{responses: [...]}` and `http_mock_calls()` records each attempt.
 
+### Connector HTTP policy
+
+Package authors should prefer `std/connectors/shared` for provider API calls:
+
+```harn
+import { connector_http_json } from "std/connectors/shared"
+
+let response = connector_http_json("POST", url, {
+  headers: {Authorization: "Bearer " + token, Accept: "application/json"},
+  body: json_stringify(payload),
+  idempotency_key: "create:" + payload.id,
+  retry: {max_attempts: 3, base_ms: 250, cap_ms: 30000},
+  provider: "example",
+  operation: "create_item",
+})
+```
+
+`connector_http_request` returns a non-throwing envelope. Success:
+`{ok: true, status, headers, body, retry_after_ms?}`. Failure:
+`{ok: false, status?, retryable, retry_after_ms?, error}` where
+`error.category` is stable for branching. `connector_http_json` adds `json` on
+valid JSON and returns `error.category == "invalid_json"` on parse failure.
+`POST`/`PATCH` retries require an existing or supplied `Idempotency-Key`, unless
+`retry_unsafe: true` is explicit. `connector_http_header` and
+`connector_http_rate_limit` cover case-insensitive header lookup plus
+`Retry-After`, `RateLimit-*`, and `X-RateLimit-*` extraction.
+
 ### Human-in-the-loop primitives
 
 `ask_user`, `request_approval`, `dual_control`, and `escalate_to` are

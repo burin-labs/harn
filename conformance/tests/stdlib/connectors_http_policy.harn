@@ -1,0 +1,178 @@
+import {
+  connector_http_header,
+  connector_http_json,
+  connector_http_rate_limit,
+  connector_http_request,
+} from "std/connectors/shared"
+
+pipeline test(task) {
+  http_mock_clear()
+  http_mock(
+    "GET",
+    "https://api.example.com/connector/get-retry",
+    {responses: [{status: 503, body: "busy"}, {status: 200, body: "ok"}]},
+  )
+  let get_retry = connector_http_request(
+    "GET",
+    "https://api.example.com/connector/get-retry",
+    {retry: {max_attempts: 2, base_ms: 0, cap_ms: 1}},
+  )
+  let get_calls = http_mock_calls({include_sensitive: true})
+  assert_eq(get_retry.ok, true)
+  assert_eq(get_retry.status, 200)
+  assert_eq(len(get_calls), 2)
+  __io_println("get_retry:" + to_string(get_retry.status) + ":" + to_string(len(get_calls)))
+  http_mock_clear()
+  http_mock(
+    "POST",
+    "https://api.example.com/connector/post-no-idempotency",
+    {responses: [{status: 503, body: "busy"}, {status: 201, body: "created"}]},
+  )
+  let post_no_idem = connector_http_request(
+    "POST",
+    "https://api.example.com/connector/post-no-idempotency",
+    {body: "{}", retry: {max_attempts: 2, base_ms: 0, cap_ms: 1}},
+  )
+  let post_no_idem_calls = http_mock_calls({include_sensitive: true})
+  assert_eq(post_no_idem.ok, false)
+  assert_eq(post_no_idem.error.category, "overloaded")
+  assert_eq(len(post_no_idem_calls), 1)
+  __io_println(
+    "post_no_idem:" + post_no_idem.error.category + ":" + to_string(len(post_no_idem_calls)),
+  )
+  http_mock_clear()
+  http_mock(
+    "POST",
+    "https://api.example.com/connector/post-idempotency",
+    {responses: [{status: 503, body: "busy"}, {status: 201, body: "created"}]},
+  )
+  let post_idem = connector_http_request(
+    "POST",
+    "https://api.example.com/connector/post-idempotency",
+    {body: "{}", idempotency_key: "idem-1", retry: {max_attempts: 2, base_ms: 0, cap_ms: 1}},
+  )
+  let post_idem_calls = http_mock_calls({include_sensitive: true})
+  assert_eq(post_idem.ok, true)
+  assert_eq(post_idem.status, 201)
+  assert_eq(len(post_idem_calls), 2)
+  assert_eq(post_idem_calls[0].headers["idempotency-key"], "idem-1")
+  __io_println(
+    "post_idem:"
+      + to_string(post_idem.status)
+      + ":"
+      + to_string(len(post_idem_calls))
+      + ":"
+      + post_idem_calls[0].headers["idempotency-key"],
+  )
+  http_mock_clear()
+  http_mock(
+    "POST",
+    "https://api.example.com/connector/post-preserve-idempotency",
+    {status: 200, body: "ok"},
+  )
+  let preserved = connector_http_request(
+    "POST",
+    "https://api.example.com/connector/post-preserve-idempotency",
+    {
+      body: "{}",
+      headers: {"idempotency-key": "caller-key"},
+      idempotency_key: "ignored",
+      retry: {max_attempts: 1},
+    },
+  )
+  let preserved_calls = http_mock_calls({include_sensitive: true})
+  assert_eq(preserved.ok, true)
+  assert_eq(preserved_calls[0].headers["idempotency-key"], "caller-key")
+  __io_println("preserve_idem:" + preserved_calls[0].headers["idempotency-key"])
+  http_mock_clear()
+  http_mock(
+    "GET",
+    "https://api.example.com/connector/retry-after-cap",
+    {
+      responses: [{status: 429, body: "limited", headers: {"Retry-After": "5"}}, {status: 200, body: "ok"}],
+    },
+  )
+  let capped = connector_http_request(
+    "GET",
+    "https://api.example.com/connector/retry-after-cap",
+    {retry: {max_attempts: 2, base_ms: 0, cap_ms: 1}},
+  )
+  let capped_calls = http_mock_calls({include_sensitive: true})
+  assert_eq(capped.ok, false)
+  assert_eq(capped.error.category, "rate_limit")
+  assert_eq(capped.error.retry_after_ms, 5000)
+  assert_eq(len(capped_calls), 1)
+  __io_println(
+    "retry_after_cap:" + to_string(capped.error.retry_after_ms) + ":" + to_string(len(capped_calls)),
+  )
+  http_mock_clear()
+  http_mock("GET", "https://api.example.com/connector/json-invalid", {status: 200, body: "not json"})
+  let invalid_json = connector_http_json(
+    "GET",
+    "https://api.example.com/connector/json-invalid",
+    {provider: "example", operation: "parse"},
+  )
+  assert_eq(invalid_json.ok, false)
+  assert_eq(invalid_json.error.category, "invalid_json")
+  assert_eq(invalid_json.error.status, 200)
+  assert_eq(invalid_json.error.provider, "example")
+  __io_println("invalid_json:" + invalid_json.error.category + ":" + invalid_json.error.provider)
+  http_mock_clear()
+  http_mock("GET", "https://api.example.com/connector/json-empty", {status: 204, body: ""})
+  let empty_json = connector_http_json("GET", "https://api.example.com/connector/json-empty")
+  assert_eq(empty_json.ok, true)
+  assert_eq(empty_json.body, "")
+  assert_eq(empty_json.json, nil)
+  __io_println("empty_json:" + to_string(empty_json.status) + ":" + to_string(empty_json.body == ""))
+  let headers = {
+    "Retry-After": "2",
+    "RateLimit-Limit": "100",
+    "X-RateLimit-Remaining": "0",
+    "X-RateLimit-Reset": "4102444800",
+  }
+  let rate = connector_http_rate_limit({headers: headers})
+  mock_time(0)
+  let http_date_rate = connector_http_rate_limit({headers: {"Retry-After": "Thu, 01 Jan 1970 00:00:03 GMT"}})
+  unmock_time()
+  assert_eq(connector_http_header(headers, "retry-after"), "2")
+  assert_eq(rate.retry_after_ms, 2000)
+  assert_eq(rate.limit, "100")
+  assert_eq(rate.remaining, "0")
+  assert_eq(http_date_rate.retry_after_ms, 3000)
+  __io_println(
+    "rate_limit:"
+      + to_string(rate.retry_after_ms)
+      + ":"
+      + rate.limit
+      + ":"
+      + rate.remaining
+      + ":"
+      + to_string(http_date_rate.retry_after_ms),
+  )
+  http_mock_clear()
+  http_mock(
+    "GET",
+    "https://api.example.com/connector/redacted-error",
+    {status: 500, body: "provider secret payload"},
+  )
+  let redacted = connector_http_request(
+    "GET",
+    "https://api.example.com/connector/redacted-error",
+    {provider: "example", operation: "list", redact_error_body: true},
+  )
+  assert_eq(redacted.ok, false)
+  assert_eq(redacted.error.provider, "example")
+  assert_eq(redacted.error.operation, "list")
+  assert_eq(redacted.error.status, 500)
+  assert_eq(redacted.error.body, nil)
+  __io_println(
+    "redacted:"
+      + redacted.error.provider
+      + ":"
+      + redacted.error.operation
+      + ":"
+      + to_string(redacted.error.status)
+      + ":"
+      + to_string(redacted.error.body == nil),
+  )
+}

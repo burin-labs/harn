@@ -571,6 +571,9 @@ package-level equivalent helpers:
 
 ```harn
 import {
+  connector_http_json,
+  connector_http_rate_limit,
+  connector_http_request,
   oauth2_token_refresh,
   paginate_cursor,
   rate_limit_token_bucket,
@@ -582,8 +585,58 @@ import {
 Use the Rust `verify_hmac_signed(...)` path for runtime HTTP ingress when you
 need timestamp-window checks, audit events, or a provider-specific signed
 message format. Use `std/connectors/shared` inside Harn package exports for
-local HMAC checks, JWT/JWKS verification, OAuth2 token refresh, package-local
-token buckets, and cursor pagination.
+local HMAC checks, JWT/JWKS verification, outbound HTTP policy, OAuth2 token
+refresh, package-local token buckets, and cursor pagination.
+
+## Outbound HTTP policy
+
+Connector packages should layer provider-specific request logic over
+`connector_http_request(...)` or `connector_http_json(...)` instead of
+open-coding retry loops around `harness.net.request(...)`. The raw
+`harness.net.*` APIs remain the escape hatch when a package needs exact client
+behavior; the shared policy wrapper is the default for provider API calls that
+need stable error categories, idempotency-aware retries, and rate-limit
+metadata.
+
+```harn
+import { connector_http_json } from "std/connectors/shared"
+
+fn api_json(method, url, token, body = nil, idempotency_key = nil) {
+  return connector_http_json(
+    method,
+    url,
+    {
+      provider: "example",
+      operation: "api_json",
+      headers: {Authorization: "Bearer " + token, Accept: "application/json"},
+      body: if body == nil { nil } else { json_stringify(body) },
+      idempotency_key: idempotency_key,
+      retry: {max_attempts: 3, base_ms: 250, cap_ms: 30000},
+    },
+  )
+}
+```
+
+`connector_http_request(...)` returns a non-throwing envelope. Successful
+responses contain `{ok: true, status, headers, body, retry_after_ms?}`.
+Failures contain `{ok: false, status?, retryable, retry_after_ms?, error}` where
+`error.category` is stable enough for generated SDKs and package code to branch
+on (`"rate_limit"`, `"overloaded"`, `"server_error"`, `"auth"`,
+`"permission"`, `"not_found"`, `"timeout"`, `"invalid_json"`, and transport
+categories such as `"transient_network"` or `"egress_blocked"`).
+
+The retry policy uses total-attempt semantics:
+`retry: {max_attempts, base_ms, cap_ms}`. Safe/idempotent methods (`GET`,
+`HEAD`, `PUT`, `DELETE`, `OPTIONS`) may retry retryable statuses. `POST` and
+`PATCH` retry only when an `Idempotency-Key` header is already present, when
+`options.idempotency_key` can add one, or when the caller explicitly sets
+`retry_unsafe: true`. When a provider returns a `Retry-After` value above
+`cap_ms`, the wrapper returns a retryable error with `retry_after_ms` instead of
+sleeping for a long reset window.
+
+Use `connector_http_header(...)` for case-insensitive response header lookup and
+`connector_http_rate_limit(...)` to expose `Retry-After`, `RateLimit-*`, and
+`X-RateLimit-*` metadata without repeating provider-local header scans.
 
 ## Rate limiting
 
