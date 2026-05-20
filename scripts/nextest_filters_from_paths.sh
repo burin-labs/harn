@@ -21,8 +21,12 @@
 #     or shared helpers (e.g. support/, test_util/) — check for the
 #     sibling .rs entry to tell them apart.
 #
-#   crates/<pkg>/...                      → package(<pkg>)
+#   crates/<pkg>/...                      → package(<workspace package name>)
 #     Unit tests in src/ or any other crate-local change.
+#
+#   crates/<pkg>/... for workspace-excluded crates is ignored. Those
+#     packages are not discoverable by `cargo nextest run --workspace`,
+#     so including them would make nextest reject the whole filterset.
 #
 # Designed to be called from the flake-detection CI workflow.
 
@@ -35,7 +39,61 @@ fi
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 
 declare -A seen
+declare -A workspace_packages
 filters=()
+
+load_workspace_packages() {
+    if ! command -v python3 >/dev/null 2>&1; then
+        return 0
+    fi
+
+    while IFS=$'\t' read -r member package; do
+        [[ -z "$member" || -z "$package" ]] && continue
+        workspace_packages["$member"]="$package"
+    done < <(python3 - "$repo_root" <<'PY'
+import fnmatch
+import pathlib
+import sys
+
+try:
+    import tomllib
+except ModuleNotFoundError:
+    sys.exit(0)
+
+root = pathlib.Path(sys.argv[1])
+with (root / "Cargo.toml").open("rb") as handle:
+    workspace = tomllib.load(handle).get("workspace", {})
+
+members = workspace.get("members", [])
+excludes = workspace.get("exclude", [])
+
+def is_excluded(relative_path: str) -> bool:
+    return any(fnmatch.fnmatch(relative_path, pattern) for pattern in excludes)
+
+for pattern in members:
+    matches = sorted(root.glob(pattern))
+    if not matches and "*" not in pattern:
+        matches = [root / pattern]
+    for member_path in matches:
+        manifest = member_path / "Cargo.toml"
+        if not manifest.is_file():
+            continue
+        relative = member_path.relative_to(root).as_posix()
+        if is_excluded(relative):
+            continue
+        with manifest.open("rb") as handle:
+            package = tomllib.load(handle).get("package", {})
+        name = package.get("name")
+        if name:
+            print(f"{relative}\t{name}")
+PY
+    )
+}
+
+workspace_package_for_crate_dir() {
+    local crate_dir="$1"
+    printf '%s' "${workspace_packages[$crate_dir]-}"
+}
 
 add_filter() {
     local f="$1"
@@ -45,6 +103,8 @@ add_filter() {
     fi
 }
 
+load_workspace_packages
+
 for path in "$@"; do
     # Strip leading ./ and skip blank entries.
     path="${path#./}"
@@ -52,15 +112,19 @@ for path in "$@"; do
 
     # crates/<pkg>/tests/<name>.rs — top-level integration test binary.
     if [[ "$path" =~ ^crates/([^/]+)/tests/([^/]+)\.rs$ ]]; then
+        pkg="$(workspace_package_for_crate_dir "crates/${BASH_REMATCH[1]}")"
+        [[ -z "$pkg" ]] && continue
         add_filter "binary(${BASH_REMATCH[2]})"
         continue
     fi
 
     # crates/<pkg>/tests/<dir>/... — module file or shared support directory.
     if [[ "$path" =~ ^crates/([^/]+)/tests/([^/]+)/ ]]; then
-        pkg="${BASH_REMATCH[1]}"
+        crate_dir="${BASH_REMATCH[1]}"
         dir="${BASH_REMATCH[2]}"
-        if [[ -f "${repo_root}/crates/${pkg}/tests/${dir}.rs" ]]; then
+        pkg="$(workspace_package_for_crate_dir "crates/${crate_dir}")"
+        [[ -z "$pkg" ]] && continue
+        if [[ -f "${repo_root}/crates/${crate_dir}/tests/${dir}.rs" ]]; then
             add_filter "binary(${dir})"
         else
             add_filter "package(${pkg})"
@@ -70,7 +134,9 @@ for path in "$@"; do
 
     # crates/<pkg>/... — unit tests in src/ or any other package file.
     if [[ "$path" =~ ^crates/([^/]+)/ ]]; then
-        add_filter "package(${BASH_REMATCH[1]})"
+        pkg="$(workspace_package_for_crate_dir "crates/${BASH_REMATCH[1]}")"
+        [[ -z "$pkg" ]] && continue
+        add_filter "package(${pkg})"
         continue
     fi
 done

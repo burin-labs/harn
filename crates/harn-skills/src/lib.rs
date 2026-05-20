@@ -259,12 +259,7 @@ fn parse_disk_skill(path: &Path) -> Result<DiskSkill, SkillDiscoveryError> {
 }
 
 fn split_disk_frontmatter(source: &str) -> Option<(&str, &str)> {
-    let after_open = source.strip_prefix("---\n")?;
-    let close_offset = after_open.find("\n---\n")?;
-    Some((
-        &after_open[..close_offset],
-        &after_open[close_offset + "\n---\n".len()..],
-    ))
+    split_frontmatter_parts(source)
 }
 
 fn parse_disk_frontmatter(
@@ -310,16 +305,40 @@ fn require_disk_field(
 }
 
 fn split_frontmatter(source: &'static str) -> (&'static str, &'static str) {
-    let Some(after_open) = source.strip_prefix("---\n") else {
+    let Some((after_open, line_ending)) = split_opening_frontmatter(source) else {
         panic!("embedded skill source is missing opening frontmatter delimiter");
     };
-    let Some(close_offset) = after_open.find("\n---\n") else {
+    let Some((frontmatter, body)) = split_closing_frontmatter(after_open, line_ending) else {
         panic!("embedded skill source is missing closing frontmatter delimiter");
     };
-    (
+    (frontmatter, body)
+}
+
+fn split_frontmatter_parts(source: &str) -> Option<(&str, &str)> {
+    let (after_open, line_ending) = split_opening_frontmatter(source)?;
+    split_closing_frontmatter(after_open, line_ending)
+}
+
+fn split_opening_frontmatter(source: &str) -> Option<(&str, &str)> {
+    if let Some(after_open) = source.strip_prefix("---\n") {
+        Some((after_open, "\n"))
+    } else if let Some(after_open) = source.strip_prefix("---\r\n") {
+        Some((after_open, "\r\n"))
+    } else {
+        None
+    }
+}
+
+fn split_closing_frontmatter<'a>(
+    after_open: &'a str,
+    line_ending: &str,
+) -> Option<(&'a str, &'a str)> {
+    let close = format!("{line_ending}---{line_ending}");
+    let close_offset = after_open.find(&close)?;
+    Some((
         &after_open[..close_offset],
-        &after_open[close_offset + "\n---\n".len()..],
-    )
+        &after_open[close_offset + close.len()..],
+    ))
 }
 
 fn parse_frontmatter(frontmatter: &'static str) -> SkillFrontmatter {
@@ -416,7 +435,7 @@ mod tests {
     fn source_round_trips_to_frontmatter_and_body() {
         for skill in list_embedded_skills() {
             assert!(
-                skill.source.starts_with("---\n"),
+                split_frontmatter_parts(skill.source).is_some(),
                 "{} source missing opening fence",
                 skill.name
             );
@@ -431,6 +450,19 @@ mod tests {
                 skill.name
             );
         }
+    }
+
+    #[test]
+    fn frontmatter_split_accepts_crlf_sources() {
+        let source = "---\r\nname: crlf\r\n---\r\n# Body\r\n";
+        let (frontmatter, body) = split_frontmatter_parts(source).expect("CRLF frontmatter");
+        assert_eq!(frontmatter, "name: crlf");
+        assert_eq!(body, "# Body\r\n");
+    }
+
+    #[test]
+    fn frontmatter_split_rejects_missing_closing_fence() {
+        assert!(split_frontmatter_parts("---\nname: missing\n# Body\n").is_none());
     }
 
     #[test]
