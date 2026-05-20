@@ -63,5 +63,5 @@ jobs:
       - name: Smoke test harn run
         shell: bash
         run: |
-          echo 'pipeline main() { println("ok") }' > smoke.harn
+          echo 'fn main(harness: Harness) { harness.stdio.println("ok") }' > smoke.harn
           ./target/debug/harn.exe run smoke.harn
