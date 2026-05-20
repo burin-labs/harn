@@ -1,7 +1,7 @@
 import "std/agent_state"
 
 pipeline default() {
-  let root = path_join(temp_dir(), "harn-agent-state-two-writer-" + uuid())
+  let root = path_join(harness.fs.temp_dir(), "harn-agent-state-two-writer-" + uuid())
   let first = agent_state_init(root, {session_id: "conflict-session", writer_id: "stage-a"})
   agent_state_write(first, "ledger.md", "from-a")
   let second = agent_state_resume(root, "conflict-session", {writer_id: "stage-b", conflict_policy: "ignore"})
@@ -17,5 +17,5 @@ pipeline default() {
   __io_println(contains(message, "previously written by"))
   __io_println(contains(message, "stage-b") && contains(message, "stage-c"))
   __io_println(agent_state_read(strict, "ledger.md"))
-  delete_file(root)
+  harness.fs.delete(root)
 }

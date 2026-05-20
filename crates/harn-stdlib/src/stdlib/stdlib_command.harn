@@ -530,7 +530,7 @@ pub fn command_step(name: string, spec, options = nil) -> dict {
     __command_before_retry(policy, step, attempt_number)
     let delay = __command_retry_delay_ms(policy, attempt_number)
     if delay > 0 {
-      sleep_ms(delay)
+      harness.clock.sleep_ms(delay)
     }
     attempt_number += 1
   }

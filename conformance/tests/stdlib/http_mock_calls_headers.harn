@@ -5,7 +5,8 @@ pipeline test(task) {
     "https://api.example.com/items?api_key=secret&limit=2",
     {status: 200, body: "ok", headers: {}},
   )
-  let get_resp = http_get(
+  let get_resp = harness.net
+    .get(
     "https://api.example.com/items",
     {
       headers: {Authorization: "Bearer secret-token", "X-Api-Key": "header-secret", Accept: "application/json"},
@@ -25,7 +26,8 @@ pipeline test(task) {
   assert_eq(raw[0].headers.authorization, "Bearer secret-token")
   assert_eq(raw[0].headers["x-api-key"], "header-secret")
   http_mock("POST", "https://api.example.com/items", {status: 201, body: "created", headers: {}})
-  let post_resp = http_post(
+  let post_resp = harness.net
+    .post(
     "https://api.example.com/items",
     "{\"name\":\"Ada\"}",
     {headers: {Cookie: "sid=session-secret", "Content-Type": "application/json"}},

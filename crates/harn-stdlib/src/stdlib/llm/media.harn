@@ -2,11 +2,11 @@ fn __llm_media_is_url(source) {
   return starts_with(source, "http://") || starts_with(source, "https://") || starts_with(source, "data:")
 }
 
-fn __llm_media_source_field(source, media_type) {
+fn __llm_media_source_field(harness: Harness, source, media_type) {
   if __llm_media_is_url(source) {
     return {url: source}
   }
-  return {base64: bytes_to_base64(read_file_bytes(source)), media_type: media_type}
+  return {base64: bytes_to_base64(harness.fs.read_bytes(source)), media_type: media_type}
 }
 
 /**
@@ -81,7 +81,7 @@ pub fn image_content(source, options = nil) {
   }
   let opts = options ?? {}
   let media_type = opts?.media_type ?? opts?.mime_type ?? media_type_for_path(source, "image/png")
-  var block = {type: "image"} + __llm_media_source_field(source, media_type)
+  var block = {type: "image"} + __llm_media_source_field(harness, source, media_type)
   if block?.media_type == nil {
     block = block + {media_type: media_type}
   }
@@ -109,7 +109,7 @@ pub fn document_content(source, options = nil) {
   if opts?.file_id != nil {
     return {type: "pdf", file_id: opts.file_id, media_type: media_type}
   }
-  var block = {type: "pdf"} + __llm_media_source_field(source, media_type)
+  var block = {type: "pdf"} + __llm_media_source_field(harness, source, media_type)
   if block?.media_type == nil {
     block = block + {media_type: media_type}
   }
@@ -134,7 +134,7 @@ pub fn audio_content(source, options = nil) {
   if opts?.file_id != nil {
     return {type: "audio", file_id: opts.file_id, media_type: media_type}
   }
-  var block = {type: "audio"} + __llm_media_source_field(source, media_type)
+  var block = {type: "audio"} + __llm_media_source_field(harness, source, media_type)
   if block?.media_type == nil {
     block = block + {media_type: media_type}
   }

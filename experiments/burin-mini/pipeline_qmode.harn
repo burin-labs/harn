@@ -21,16 +21,20 @@ import {
 // Provider guard: hard-block remote inference.
 // -------------------------------------------------------------------------------------------------
 
-fn provider_name() {
-  return env_or("BURIN_MINI_PROVIDER", env_or("HARN_LLM_PROVIDER", "ollama"))
+fn provider_name(harness: Harness) {
+  return harness.env.get_or("BURIN_MINI_PROVIDER", harness.env.get_or("HARN_LLM_PROVIDER", "ollama"))
 }
 
-fn generator_model() {
-  return env_or("BURIN_MINI_GENERATOR_MODEL", env_or("HARN_LLM_MODEL", "qwen3.6:35b-a3b-coding-nvfp4"))
+fn generator_model(harness: Harness) {
+  return harness.env
+    .get_or(
+    "BURIN_MINI_GENERATOR_MODEL",
+    harness.env.get_or("HARN_LLM_MODEL", "qwen3.6:35b-a3b-coding-nvfp4"),
+  )
 }
 
-fn assert_local_only() {
-  let p = lowercase(provider_name())
+fn assert_local_only(harness: Harness) {
+  let p = lowercase(provider_name(harness))
   let allowed = ["ollama", "local", "mock"]
   for name in allowed {
     if p == name || starts_with(p, name + ":") {
@@ -48,9 +52,9 @@ fn task_dir(task_id) {
   return path_join(source_dir(), ".qmode", task_id)
 }
 
-fn ensure_task_dir(task_id) {
+fn ensure_task_dir(harness: Harness, task_id) {
   let dir = task_dir(task_id)
-  mkdir(dir)
+  harness.fs.mkdir(dir)
   return dir
 }
 
@@ -74,11 +78,11 @@ fn task_meta_path(task_id) {
 // JSONL helpers (newline-delimited JSON).
 // -------------------------------------------------------------------------------------------------
 
-fn read_jsonl(path) {
-  if !file_exists(path) {
+fn read_jsonl(harness: Harness, path) {
+  if !harness.fs.exists(path) {
     return []
   }
-  let raw = read_file(path)
+  let raw = harness.fs.read_text(path)
   if (raw ?? "").trim() == "" {
     return []
   }
@@ -103,32 +107,32 @@ fn read_jsonl(path) {
 
 // -------------------------------------------------------------------------------------------------
 
-fn read_profile_file(path, scope) {
-  if !file_exists(path) {
+fn read_profile_file(harness: Harness, path, scope) {
+  if !harness.fs.exists(path) {
     return ""
   }
-  let body = read_file(path)
+  let body = harness.fs.read_text(path)
   if body.trim() == "" {
     return ""
   }
   return "<profile scope=\"${scope}\" path=\"${path}\">\n${body.trim()}\n</profile>"
 }
 
-fn load_profile_layers() {
+fn load_profile_layers(harness: Harness) {
   let home = home_dir()
   let user_global = path_join(home, ".harn", "USER_PROFILE.md")
   let project = path_join(workspace_root(), ".harn", "USER_PROFILE.md")
   let cwd_local = path_join(source_dir(), ".harn", "USER_PROFILE.md")
   var blocks = []
-  let user_block = read_profile_file(user_global, "user")
+  let user_block = read_profile_file(harness, user_global, "user")
   if user_block != "" {
     blocks = blocks + [user_block]
   }
-  let project_block = read_profile_file(project, "project")
+  let project_block = read_profile_file(harness, project, "project")
   if project_block != "" {
     blocks = blocks + [project_block]
   }
-  let cwd_block = read_profile_file(cwd_local, "cwd")
+  let cwd_block = read_profile_file(harness, cwd_local, "cwd")
   if cwd_block != "" {
     blocks = blocks + [cwd_block]
   }
@@ -148,7 +152,7 @@ fn profile_path_for_scope(scope) {
   return path_join(source_dir(), ".harn", "USER_PROFILE.md")
 }
 
-fn append_profile_writes(profile_writes) {
+fn append_profile_writes(harness: Harness, profile_writes) {
   if type_of(profile_writes) != "list" || len(profile_writes) == 0 {
     return
   }
@@ -163,9 +167,9 @@ fn append_profile_writes(profile_writes) {
       continue
     }
     let target = profile_path_for_scope(scope)
-    mkdir(path_parent(target))
-    let prior = if file_exists(target) {
-      read_file(target)
+    harness.fs.mkdir(path_parent(target))
+    let prior = if harness.fs.exists(target) {
+      harness.fs.read_text(target)
     } else {
       ""
     }
@@ -182,7 +186,7 @@ fn append_profile_writes(profile_writes) {
     } else {
       "${header}- ${bullet}\n"
     }
-    append_file(target, body)
+    harness.fs.append(target, body)
   }
 }
 
@@ -198,8 +202,8 @@ fn append_profile_writes(profile_writes) {
 
 // -------------------------------------------------------------------------------------------------
 
-fn _first_nonempty_line(path) {
-  let body = read_file(path)
+fn _first_nonempty_line(harness: Harness, path) {
+  let body = harness.fs.read_text(path)
   if body == nil {
     return ""
   }
@@ -216,7 +220,7 @@ fn _first_nonempty_line(path) {
   return ""
 }
 
-fn repo_map_text() {
+fn repo_map_text(harness: Harness) {
   let files = list_workspace_files()
   let root = workspace_root()
   if len(files) == 0 {
@@ -231,13 +235,13 @@ fn repo_map_text() {
   var lines = ["root: ${root}", "files (${len(files)}; ${len(visible)} shown):"]
   for rel in visible {
     let abs = path_join(root, rel)
-    let body = read_file(abs)
+    let body = harness.fs.read_text(abs)
     let line_count = if body == nil {
       0
     } else {
       len(split(body, "\n"))
     }
-    let summary = _first_nonempty_line(abs)
+    let summary = _first_nonempty_line(harness, abs)
     lines = lines + ["  ${rel} (${line_count}L)  ${summary}"]
   }
   if len(files) > cap {
@@ -250,7 +254,7 @@ fn repo_map_text() {
 // Tools available to the model.
 // -------------------------------------------------------------------------------------------------
 
-fn build_tools(dir) {
+fn build_tools(harness: Harness, dir) {
   let pending_p = path_join(dir, "pending.json")
   let plan_p = path_join(dir, "plan.json")
   var registry = tool_registry()
@@ -309,15 +313,15 @@ fn build_tools(dir) {
           return "Error: scope must be one of 'user', 'project', 'cwd'. Got '${scope}'."
         }
         let target = profile_path_for_scope(scope)
-        let prior = if file_exists(target) {
-          read_file(target)
+        let prior = if harness.fs.exists(target) {
+          harness.fs.read_text(target)
         } else {
           ""
         }
         if contains(prior, "- ${bullet}") {
           return "Already saved (no-op)."
         }
-        append_profile_writes([{scope: scope, bullet: bullet}])
+        append_profile_writes(harness, [{scope: scope, bullet: bullet}])
         "Saved to ${scope} profile."
       },
     },
@@ -339,8 +343,8 @@ fn build_tools(dir) {
         if q == "" {
           return "Error: question text was empty. Try again with a concrete question."
         }
-        if !file_exists(pending_p) {
-          write_file(pending_p, json_stringify({question: q, asked_at: date_iso()}))
+        if !harness.fs.exists(pending_p) {
+          harness.fs.write_text(pending_p, json_stringify({question: q, asked_at: date_iso()}))
         }
         "Question recorded. The harness will pause and resume after the user answers."
       },
@@ -362,14 +366,14 @@ fn build_tools(dir) {
       },
       returns: {type: "string"},
       handler: { args ->
-        if !file_exists(plan_p) {
+        if !harness.fs.exists(plan_p) {
           let raw = args?.plan ?? args ?? {}
           let plan = if type_of(raw) == "string" {
             json_parse(raw) ?? {}
           } else {
             raw
           }
-          write_file(plan_p, json_stringify(plan))
+          harness.fs.write_text(plan_p, json_stringify(plan))
         }
         "Plan recorded. The harness will end the step now."
       },
@@ -432,14 +436,14 @@ Reminder: no free-form prose answers. Every step ends with one tool call to ask_
  * First-turn user prompt: full orientation. Workspace overview + the task
  * + the "what to do this step" rubric.
  */
-fn build_first_turn_prompt(task) {
+fn build_first_turn_prompt(harness: Harness, task) {
   let lines = [
     "The user's request:",
     "",
     task,
     "",
     "<workspace>",
-    repo_map_text(),
+    repo_map_text(harness),
     "</workspace>",
     "",
     "The workspace block above is your orientation — a `find` call is rarely needed before reading. Read 1-3 specific files if it'll change the plan, then ask the single most plan-changing question (or, if the request is concrete and every parameter is pinned by the code, commit to exit_plan_mode).",
@@ -484,13 +488,13 @@ fn session_snapshot_path(dir) {
   return path_join(dir, "session.json")
 }
 
-fn restore_session(session_id, snap_path, fresh_system_prompt) {
+fn restore_session(harness: Harness, session_id, snap_path, fresh_system_prompt) {
   agent_session_open(session_id)
   // Always start with the fresh system prompt — profile may have changed
   // (e.g. save_user_pref ran in a prior turn), and we want the latest
   // <profile> block visible.
   agent_session_inject(session_id, {role: "system", content: fresh_system_prompt})
-  if !file_exists(snap_path) {
+  if !harness.fs.exists(snap_path) {
     return false
   }
   // json_parse throws on invalid JSON, so guard it. A corrupted session
@@ -498,7 +502,7 @@ fn restore_session(session_id, snap_path, fresh_system_prompt) {
   // behaviour so the user can still make progress (the qa_history textual
   // replay then becomes the model's only memory of prior turns).
   let prior = try {
-    json_parse(read_file(snap_path))
+    json_parse(harness.fs.read_text(snap_path))
   } catch (e) {
     nil
   }
@@ -545,14 +549,14 @@ fn replay_qa_history_into_session(session_id, qa_history) {
   }
 }
 
-fn save_session(session_id, snap_path) {
+fn save_session(harness: Harness, session_id, snap_path) {
   let snap = agent_session_snapshot(session_id)
   let messages = if type_of(snap) == "dict" {
     snap.messages ?? []
   } else {
     []
   }
-  write_file(snap_path, json_stringify(messages))
+  harness.fs.write_text(snap_path, json_stringify(messages))
 }
 
 // -------------------------------------------------------------------------------------------------
@@ -560,36 +564,37 @@ fn save_session(session_id, snap_path) {
 // -------------------------------------------------------------------------------------------------
 
 pipeline default() {
-  assert_local_only()
-  let task_id = env_or("QMODE_TASK_ID", "default")
+  assert_local_only(harness)
+  let task_id = harness.env.get_or("QMODE_TASK_ID", "default")
   let task_text = runtime_task()
-  let dir = ensure_task_dir(task_id)
+  let dir = ensure_task_dir(harness, task_id)
   // Reset step marker for this invocation; handlers overwrite it.
   let step_marker = path_join(dir, "step.txt")
-  if file_exists(step_marker) {
-    delete_file(step_marker)
+  if harness.fs.exists(step_marker) {
+    harness.fs.delete(step_marker)
   }
-  if file_exists(plan_path(task_id)) {
-    write_file(step_marker, "plan_already_exists")
+  if harness.fs.exists(plan_path(task_id)) {
+    harness.fs.write_text(step_marker, "plan_already_exists")
     return
   }
-  if file_exists(pending_path(task_id)) {
+  if harness.fs.exists(pending_path(task_id)) {
     throw "[qmode] pending.json exists at ${pending_path(task_id)}. The driver should have cleared it after recording the answer."
   }
   // Persist task metadata on first run.
-  if !file_exists(task_meta_path(task_id)) {
+  if !harness.fs.exists(task_meta_path(task_id)) {
     if task_text.trim() == "" {
       throw "[qmode] no task text supplied. Pass --task '...' on first invocation."
     }
-    write_file(
+    harness.fs
+      .write_text(
       task_meta_path(task_id),
       json_stringify({task: task_text, workspace_root: workspace_root(), started_at: date_iso()}),
     )
   }
-  let task_meta = json_parse(read_file(task_meta_path(task_id))) ?? {}
+  let task_meta = json_parse(harness.fs.read_text(task_meta_path(task_id))) ?? {}
   let effective_task = task_meta?.task ?? task_text
-  let qa_history = read_jsonl(qa_path(task_id))
-  let profile_block = load_profile_layers()
+  let qa_history = read_jsonl(harness, qa_path(task_id))
+  let profile_block = load_profile_layers(harness)
   let sys_prompt = system_prompt(profile_block)
   // Restore prior session messages from disk (if any). On turn 1 this is a
   // no-op and the session is empty after the system message; on turn 2+ the
@@ -603,7 +608,7 @@ pipeline default() {
   // user/assistant messages AND a fresh first-turn user prompt, confusing
   // the model with duplicate intent. Treat it as a fresh first turn.
   let resumed = if len(qa_history) > 0 {
-    restore_session(session_id, snap_path, sys_prompt)
+    restore_session(harness, session_id, snap_path, sys_prompt)
   } else {
     agent_session_open(session_id)
     agent_session_inject(session_id, {role: "system", content: sys_prompt})
@@ -634,9 +639,10 @@ pipeline default() {
     replay_qa_history_into_session(session_id, qa_history)
     "(Continue from the prior conversation. End this step with one TERMINAL call: ask_question or exit_plan_mode.)"
   } else {
-    build_first_turn_prompt(effective_task)
+    build_first_turn_prompt(harness, effective_task)
   }
-  write_file(
+  harness.fs
+    .write_text(
     path_join(dir, "last-prompt.txt"),
     "===SYSTEM===\n${sys_prompt}\n===USER===\n${user_prompt}\n===RESUME-MODE===\n${resume_mode}\n",
   )
@@ -650,9 +656,9 @@ pipeline default() {
     user_prompt,
     sys_prompt,
     {
-      provider: provider_name(),
-      model: generator_model(),
-      tools: build_tools(dir),
+      provider: provider_name(harness),
+      model: generator_model(harness),
+      tools: build_tools(harness, dir),
       tool_format: "native",
       temperature: 0.2,
       max_tokens: 2048,
@@ -664,10 +670,10 @@ pipeline default() {
     },
   )
   // Persist the updated session for the next turn.
-  save_session(session_id, snap_path)
-  let outcome = if file_exists(path_join(dir, "plan.json")) {
+  save_session(harness, session_id, snap_path)
+  let outcome = if harness.fs.exists(path_join(dir, "plan.json")) {
     "exit_plan_mode"
-  } else if file_exists(path_join(dir, "pending.json")) {
+  } else if harness.fs.exists(path_join(dir, "pending.json")) {
     "ask_question"
   } else {
     "no_terminal"
@@ -679,10 +685,11 @@ pipeline default() {
     tool_calls: result?.tools?.calls ?? [],
     visible_text: result?.visible_text ?? "",
   }
-  write_file(path_join(dir, "step.txt"), outcome)
-  write_file(path_join(dir, "diag.json"), json_stringify(diag))
+  harness.fs.write_text(path_join(dir, "step.txt"), outcome)
+  harness.fs.write_text(path_join(dir, "diag.json"), json_stringify(diag))
   // Dump the full transcript for offline inspection.
-  write_file(
+  harness.fs
+    .write_text(
     path_join(dir, "step-transcript.json"),
     json_stringify({transcript: result?.transcript, task_ledger: result?.task_ledger}),
   )

@@ -1,7 +1,7 @@
 import "std/memory"
 
 pipeline default() {
-  let root = path_join(temp_dir(), "harn-memory-hybrid-" + uuid())
+  let root = path_join(harness.fs.temp_dir(), "harn-memory-hybrid-" + uuid())
   host_mock_clear()
   // Give distinct unit vectors per record by matching on the
   // record-key line that searchable_text emits first. The mocks are
@@ -71,5 +71,5 @@ pipeline default() {
   memory_open("agent/hybrid", {backend: "bm25", root: root})
   let default_now_lexical = memory_recall("agent/hybrid", "typescript", 5, {root: root})
   __io_println(default_now_lexical[0].key)
-  delete_file(root)
+  harness.fs.delete(root)
 }

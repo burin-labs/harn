@@ -1,12 +1,12 @@
 pipeline test(task) {
   try {
-    let _r = http_get("http://127.0.0.1:1", {timeout_ms: 100})
+    let _r = harness.net.get("http://127.0.0.1:1", {timeout_ms: 100})
     __io_println("unexpected_timeout_ms_success")
   } catch (e) {
     __io_println("caught_timeout_ms")
   }
   try {
-    let _r = http_get("http://127.0.0.1:1", {timeout: 100})
+    let _r = harness.net.get("http://127.0.0.1:1", {timeout: 100})
     __io_println("unexpected_timeout_alias_success")
   } catch (e2) {
     __io_println("caught_timeout_alias")

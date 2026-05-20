@@ -1,8 +1,10 @@
-// Post-distribution narrowing: `Container<A | B>` distributes over the
-// closed union at alias-application time, producing
-// `Container<A> | Container<B>` — a tagged shape union that supports
-// discriminator narrowing on match arms. This pins the end-to-end
-// behaviour that the distribution + narrowing paths compose.
+/**
+ * Post-distribution narrowing: `Container<A | B>` distributes over the
+ * closed union at alias-application time, producing
+ * `Container<A> | Container<B>` — a tagged shape union that supports
+ * discriminator narrowing on match arms. This pins the end-to-end
+ * behaviour that the distribution + narrowing paths compose.
+ */
 type Tag = "click" | "scroll"
 
 type Event<T> = {event: T, weight: int}

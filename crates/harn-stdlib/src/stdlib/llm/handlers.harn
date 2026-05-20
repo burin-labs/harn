@@ -253,7 +253,7 @@ fn __retry_after_ms(envelope) {
   return 0
 }
 
-fn __backoff_delay(attempt, base_ms, max_ms, backoff, jitter) {
+fn __backoff_delay(harness: Harness, attempt, base_ms, max_ms, backoff, jitter) {
   if attempt < 1 {
     return 0
   }
@@ -274,11 +274,11 @@ fn __backoff_delay(attempt, base_ms, max_ms, backoff, jitter) {
     delay = max_ms
   }
   if backoff == "jittered" || jitter == "full" {
-    let r = random()
+    let r = harness.random.gen_f64()
     delay = to_int(r * to_float(delay))
   } else if jitter == "equal" {
     let half = delay / 2
-    let r = random()
+    let r = harness.random.gen_f64()
     delay = half + to_int(r * to_float(half))
   }
   if delay < 0 {
@@ -359,14 +359,14 @@ pub fn with_retry(next, opts = nil) {
       } else {
         0
       }
-      let backoff_delay = __backoff_delay(attempt, base_ms, max_ms, backoff, jitter)
+      let backoff_delay = __backoff_delay(harness, attempt, base_ms, max_ms, backoff, jitter)
       let delay = if header_delay > backoff_delay {
         header_delay
       } else {
         backoff_delay
       }
       if delay > 0 {
-        sleep_ms(delay)
+        harness.clock.sleep_ms(delay)
       }
       attempt = attempt + 1
     }
@@ -608,7 +608,7 @@ pub fn with_logging(next, opts = nil) {
   let include_prompt = cfg?.include_prompt ?? false
   let sink = cfg?.sink
   return { call ->
-    let start_ms = now_ms()
+    let start_ms = harness.clock.now_ms()
     let envelope = __safe_invoke(next, call)
     let call_opts = __opts_dict(call?.opts)
     let status = if envelope?.ok ?? false {
@@ -619,7 +619,7 @@ pub fn with_logging(next, opts = nil) {
     var record = {
       event: "llm_call_log",
       level: level,
-      latency_ms: now_ms() - start_ms,
+      latency_ms: harness.clock.now_ms() - start_ms,
       model: to_string(call_opts?.model ?? ""),
       provider: to_string(call_opts?.provider ?? ""),
       status: status,
@@ -778,6 +778,7 @@ pub fn with_cache(first, second = nil, third = nil) {
       let merged_opts = opts + cfg
       let session_id = to_string(call?.turn?.session_id ?? merged_opts?.session_id ?? "")
       return __with_cache_run(
+        harness,
         call?.prompt,
         call?.system,
         merged_opts,
@@ -792,6 +793,7 @@ pub fn with_cache(first, second = nil, third = nil) {
   let opts = third ?? {}
   let session_id = to_string(opts?.session_id ?? "")
   return __with_cache_run(
+    harness,
     prompt,
     system,
     opts,
@@ -801,7 +803,7 @@ pub fn with_cache(first, second = nil, third = nil) {
   )
 }
 
-fn __with_cache_run(prompt, system, opts, session_id, compute, should_store) {
+fn __with_cache_run(harness: Harness, prompt, system, opts, session_id, compute, should_store) {
   if __llm_handler_should_skip_cache(prompt, system, opts) {
     return compute()
   }
@@ -812,9 +814,9 @@ fn __with_cache_run(prompt, system, opts, session_id, compute, should_store) {
     __with_cache_emit_hit(session_id, key, cached, opts)
     return cached.value
   }
-  let started_ms = monotonic_ms()
+  let started_ms = harness.clock.monotonic_ms()
   let result = compute()
-  let compute_ms = monotonic_ms() - started_ms
+  let compute_ms = harness.clock.monotonic_ms() - started_ms
   if should_store(result) {
     cache_put(key, result, cache_options)
     __with_cache_emit_miss(session_id, key, cached, compute_ms)
@@ -1219,9 +1221,9 @@ pub fn with_timeout(next, opts = nil) {
       original_opts
     }
     let deadline_call = call + {opts: injected}
-    let start = now_ms()
+    let start = harness.clock.now_ms()
     let envelope = __safe_invoke(next, deadline_call)
-    let elapsed = now_ms() - start
+    let elapsed = harness.clock.now_ms() - start
     if timeout_ms <= 0 {
       return envelope
     }

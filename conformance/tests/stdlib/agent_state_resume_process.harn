@@ -1,21 +1,23 @@
 import "../_common"
 
 pipeline default() {
-  let root = path_join(temp_dir(), "harn-agent-state-process-" + uuid())
+  let root = path_join(harness.fs.temp_dir(), "harn-agent-state-process-" + uuid())
   let script_dir = path_join(root, "scripts")
-  mkdir(script_dir)
+  harness.fs.mkdir(script_dir)
   let writer = script_dir + "/writer.harn"
   let reader = script_dir + "/reader.harn"
-  write_file(
+  harness.fs
+    .write_text(
     writer,
     "import \"std/agent_state\"\n\npipeline default() {\n  let root = argv[0]\n  let handle = agent_state_init(root, {session_id: \"resume-session\", writer_id: \"writer-a\"})\n  agent_state_write(handle, \"plan.md\", \"persisted plan\")\n  agent_state_handoff(handle, {status: \"ready\", source: \"writer\"})\n  __io_println(agent_state_read(handle, \"plan.md\"))\n}\n",
   )
-  write_file(
+  harness.fs
+    .write_text(
     reader,
     "import \"std/agent_state\"\n\npipeline default() {\n  let root = argv[0]\n  let handle = agent_state_resume(root, \"resume-session\", nil)\n  __io_println(agent_state_read(handle, \"plan.md\"))\n  let handoff = json_parse(agent_state_read(handle, agent_state_handoff_key()))\n  __io_println(handoff.summary.status)\n  __io_println(handoff.session_id)\n}\n",
   )
   let repo_root = exec("git", "rev-parse", "--show-toplevel").stdout.trim()
-  let harn_bin = resolve_harn_bin(repo_root)
+  let harn_bin = resolve_harn_bin(harness, repo_root)
   let first = exec(harn_bin, "run", writer, "--", root)
   __io_println(first.success)
   __io_println(first.stdout.contains("persisted plan"))
@@ -24,5 +26,5 @@ pipeline default() {
   __io_println(second.stdout.contains("persisted plan"))
   __io_println(second.stdout.contains("ready"))
   __io_println(second.stdout.contains("resume-session"))
-  delete_file(root)
+  harness.fs.delete(root)
 }

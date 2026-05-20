@@ -1,4 +1,4 @@
-// Test path/directory introspection builtins
+/** Test path/directory introspection builtins */
 pipeline default(task) {
   // source_dir should return a non-empty path
   let sd = source_dir()

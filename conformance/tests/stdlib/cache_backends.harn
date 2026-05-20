@@ -21,14 +21,14 @@ pipeline default() {
     {
       label: "fs",
       store: fs_cache(
-        path_join(temp_dir(), "harn-cache-fs-" + stamp),
+        path_join(harness.fs.temp_dir(), "harn-cache-fs-" + stamp),
         {namespace: "cache-fs-" + stamp, max_entries: 2},
       ),
     },
     {
       label: "sqlite",
       store: sqlite_cache(
-        path_join(temp_dir(), "harn-cache-sqlite-" + stamp + ".sqlite"),
+        path_join(harness.fs.temp_dir(), "harn-cache-sqlite-" + stamp + ".sqlite"),
         {namespace: "cache-sqlite-" + stamp, max_entries: 2},
       ),
     },

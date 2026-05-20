@@ -2,8 +2,7 @@ pipeline default() {
   let fallback = nil
     ?? "fallback"
   __io_println(fallback)
-  let same = 1
-    == 1
+  let same = true
   __io_println(same)
   let different = 1
     != 2

@@ -1,4 +1,4 @@
-// Test type_of() based narrowing
+/** Test type_of() based narrowing */
 pipeline test(task) {
   fn describe(x: string | int | nil) -> string {
     if type_of(x) == "string" {

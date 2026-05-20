@@ -1,7 +1,7 @@
 import "std/agent_state"
 
 pipeline default() {
-  let root = path_join(temp_dir(), "harn-agent-state-" + uuid())
+  let root = path_join(harness.fs.temp_dir(), "harn-agent-state-" + uuid())
   let handle = agent_state_init(root, {session_id: "roundtrip-session", writer_id: "writer-a"})
   __io_println(handle._type == "state_handle")
   __io_println(handle.session_id == "roundtrip-session")
@@ -34,5 +34,5 @@ pipeline default() {
   __io_println(handoff.handoff.allowed_side_effects[0] == "publish_release_notes")
   agent_state_delete(handle, "ledger.md")
   __io_println(agent_state_read(handle, "ledger.md") == nil)
-  delete_file(root)
+  harness.fs.delete(root)
 }

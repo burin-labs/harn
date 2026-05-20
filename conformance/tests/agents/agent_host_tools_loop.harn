@@ -1,8 +1,8 @@
 import { agent_command_tools } from "std/agent/host_tools"
 
 pipeline main() {
-  let root = path_join(temp_dir(), "harn-host-tools-loop-" + uuid())
-  mkdir(root, true)
+  let root = path_join(harness.fs.temp_dir(), "harn-host-tools-loop-" + uuid())
+  harness.fs.mkdir(root, true)
   let tools = agent_command_tools(
     nil,
     {root: root, cwd: root, max_inline_bytes: 4, allow_argv_prefixes: [["sh", "-c"]]},

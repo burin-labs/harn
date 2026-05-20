@@ -18,7 +18,7 @@ fn success_result(text) {
 pipeline default() {
   mock_time(1700000000000)
   let retry_runner = { _spec, _options ->
-    if now_ms() == 1700000000000 {
+    if harness.clock.now_ms() == 1700000000000 {
       return failed_result(2, "try-1")
     }
     return success_result("try-2")
@@ -34,7 +34,7 @@ pipeline default() {
   assert_eq(retried.attempts[0].attempt, 1)
   assert_eq(retried.attempts[0].exit_code, 2)
   assert_eq(retried.attempts[1].attempt, 2)
-  assert_eq(now_ms(), 1700000000025)
+  assert_eq(harness.clock.now_ms(), 1700000000025)
   let exhausted_runner = { _spec, _options -> return failed_result(9, "still failing") }
   let exhausted = command_step(
     "exhausted",

@@ -15,12 +15,12 @@ pub fn count_substring(haystack: string, needle: string) -> int {
  * directories so binary fixtures never get string-decoded.
  */
 pub fn count_xfail_markers(root: string) -> int {
-  let entries = walk_dir(root)
+  let entries = harness.fs.walk(root)
   var total = 0
   for entry in entries {
     if entry.is_file {
       let text = try {
-        read_file(entry.path)
+        harness.fs.read_text(entry.path)
       } catch (_) {
         ""
       }
@@ -32,11 +32,11 @@ pub fn count_xfail_markers(root: string) -> int {
 
 pipeline main(task) {
   let threshold_file = "scripts/xfail_threshold.txt"
-  if !file_exists(threshold_file) {
+  if !harness.fs.exists(threshold_file) {
     __io_eprintln("missing ${threshold_file}")
     return 1
   }
-  let raw = read_file(threshold_file).trim()
+  let raw = harness.fs.read_text(threshold_file).trim()
   let threshold = to_int(raw)
   if threshold == nil || threshold < 0 {
     __io_eprintln("${threshold_file} must contain a non-negative integer")

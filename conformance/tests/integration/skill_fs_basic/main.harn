@@ -1,9 +1,11 @@
-// Filesystem skill discovery (issue #73).
-//
-// The CLI walks up from this file, finds `harn.toml`, then loads every
-// `<name>/SKILL.md` under `.harn/skills/`. Each discovered skill is
-// visible on the pre-populated `skills` global (same shape as the
-// `skill_registry()` builtin).
+/**
+ * Filesystem skill discovery (issue #73).
+ *
+ * The CLI walks up from this file, finds `harn.toml`, then loads every
+ * `<name>/SKILL.md` under `.harn/skills/`. Each discovered skill is
+ * visible on the pre-populated `skills` global (same shape as the
+ * `skill_registry()` builtin).
+ */
 pipeline test(task) {
   // Two fixtures land in the registry: `deploy` (with a rich
   // frontmatter) and `review` (minimal).
@@ -37,7 +39,7 @@ pipeline test(task) {
   assert(deploy.body == nil, "startup registry keeps only the compact card")
   let review = skill_find(skills, "review")
   assert(review != nil, "review skill discovered")
-  assert(review.user_invocable == true, "user_invocable=true preserved")
+  assert(review.user_invocable, "user_invocable=true preserved")
   // `disable-model-invocation: false` is the default and isn't round-tripped
   // as an explicit field — keep the assertion focused on what we know to be
   // present to avoid schema fragility.

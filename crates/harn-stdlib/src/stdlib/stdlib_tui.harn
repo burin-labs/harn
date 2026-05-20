@@ -314,15 +314,15 @@ fn __tui_join_stdin(labels: list<string>) -> string {
   return join(lines, "\n") + "\n"
 }
 
-fn __tui_preview_setup(items, preview_fn) -> dict {
+fn __tui_preview_setup(harness: Harness, items, preview_fn) -> dict {
   if preview_fn == nil || !__tui_is_callable(preview_fn) {
     return {dir: nil, args: []}
   }
-  let dir = temp_dir() + "/harn-tui-" + uuid_v7()
-  mkdir(dir)
+  let dir = harness.fs.temp_dir() + "/harn-tui-" + uuid_v7()
+  harness.fs.mkdir(dir)
   var idx = 0
   for item in items {
-    write_file(dir + "/" + to_string(idx) + ".txt", __tui_render_preview(item, preview_fn))
+    harness.fs.write_text(dir + "/" + to_string(idx) + ".txt", __tui_render_preview(item, preview_fn))
     idx = idx + 1
   }
   // fzf evaluates `--preview` through the host shell — `cmd.exe` on
@@ -335,12 +335,12 @@ fn __tui_preview_setup(items, preview_fn) -> dict {
   return {dir: dir, args: ["--preview", reader + " " + dir + "/{1}.txt"]}
 }
 
-fn __tui_preview_cleanup(dir) {
+fn __tui_preview_cleanup(harness: Harness, dir) {
   if dir == nil {
     return
   }
   let _ = try {
-    delete_file(dir)
+    harness.fs.delete(dir)
   }
 }
 
@@ -397,10 +397,10 @@ fn __tui_fzf_pick(items, labels, opts) -> dict {
   if multi {
     argv = argv + ["-m"]
   }
-  let preview = __tui_preview_setup(items, opts?.preview)
+  let preview = __tui_preview_setup(harness, items, opts?.preview)
   argv = argv + preview.args
   let result = command_run({argv: argv}, {stdin: stdin, capture: {max_inline_bytes: 1048576}})
-  __tui_preview_cleanup(preview.dir)
+  __tui_preview_cleanup(harness, preview.dir)
   if result.exit_code == 130 {
     return __tui_cancelled(opts)
   }

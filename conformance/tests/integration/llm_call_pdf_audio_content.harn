@@ -3,10 +3,10 @@ import { upload } from "std/files"
 pipeline test(task) {
   llm_mock_clear()
   let pdf_path = "sample.pdf"
-  write_file_bytes(pdf_path, bytes_from_string("%PDF-1.4\n1 0 obj\n<<>>\nendobj\n"))
+  harness.fs.write_bytes(pdf_path, bytes_from_string("%PDF-1.4\n1 0 obj\n<<>>\nendobj\n"))
   let file_id = upload(pdf_path, "mock")
   let file_id_again = upload(pdf_path, "mock")
-  delete_file(pdf_path)
+  harness.fs.delete(pdf_path)
   assert_eq(file_id, file_id_again)
   assert(contains(file_id, "mock_file_"), "mock upload should return a stable file_id")
   llm_mock({text: "summary"})

@@ -63,22 +63,22 @@ pub fn collect_surface(spec_text: string) -> string {
 }
 
 pipeline main(task) {
-  let spec_text = read_file(SPEC_PATH)
+  let spec_text = harness.fs.read_text(SPEC_PATH)
   let actual = collect_surface(spec_text)
   let update = argv.contains("--update")
   if update {
-    write_file(SNAPSHOT_PATH, actual)
-    write_file(EMBEDDED_SPEC_PATH, spec_text)
+    harness.fs.write_text(SNAPSHOT_PATH, actual)
+    harness.fs.write_text(EMBEDDED_SPEC_PATH, spec_text)
     return 0
   }
-  if !file_exists(EMBEDDED_SPEC_PATH) || read_file(EMBEDDED_SPEC_PATH) != spec_text {
+  if !harness.fs.exists(EMBEDDED_SPEC_PATH) || harness.fs.read_text(EMBEDDED_SPEC_PATH) != spec_text {
     __io_eprintln(
       "crates/harn-serve/openapi.yaml is stale. Run `harn run scripts/check_openapi_snapshot.harn -- --update` after reviewing the OpenAPI surface.",
     )
     return 1
   }
-  let expected = if file_exists(SNAPSHOT_PATH) {
-    read_file(SNAPSHOT_PATH)
+  let expected = if harness.fs.exists(SNAPSHOT_PATH) {
+    harness.fs.read_text(SNAPSHOT_PATH)
   } else {
     ""
   }

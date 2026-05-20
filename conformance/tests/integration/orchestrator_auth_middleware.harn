@@ -1,19 +1,21 @@
 import "../_common"
 
 pipeline test(task) {
-  let root = path_join(temp_dir(), "harn-orchestrator-auth-" + uuid())
-  mkdir(root)
-  write_file(
+  let root = path_join(harness.fs.temp_dir(), "harn-orchestrator-auth-" + uuid())
+  harness.fs.mkdir(root)
+  harness.fs
+    .write_text(
     path_join(root, "harn.toml"),
     "[package]\nname = \"fixture\"\n\n[exports]\nhandlers = \"lib.harn\"\n\n[[triggers]]\nid = \"incoming-review-task\"\nkind = \"a2a-push\"\nprovider = \"a2a-push\"\npath = \"/a2a/review\"\nmatch = { events = [\"a2a.task.received\"] }\nhandler = \"handlers::on_task\"\n",
   )
-  write_file(
+  harness.fs
+    .write_text(
     path_join(root, "lib.harn"),
     "import \"std/triggers\"\n\npub fn on_task(event: TriggerEvent) {\n  log(event.kind)\n}\n",
   )
   let repo_root = exec("git", "rev-parse", "--show-toplevel").stdout.trim()
-  let harn_bin = resolve_harn_bin(repo_root)
-  assert(file_exists(harn_bin), "missing built harn binary at " + harn_bin)
+  let harn_bin = resolve_harn_bin(harness, repo_root)
+  assert(harness.fs.exists(harn_bin), "missing built harn binary at " + harn_bin)
   let start = shell_at(
     root,
     "nohup env HARN_SECRET_PROVIDERS=env HARN_ORCHESTRATOR_API_KEYS=test-key-1,test-key-2 HARN_ORCHESTRATOR_HMAC_SECRET=shared-secret "
@@ -23,14 +25,15 @@ pipeline test(task) {
   let pid = start.stdout.trim()
   assert(start.success, "failed to start orchestrator")
   assert(pid != "", "missing orchestrator pid")
-  let url = wait_for_listener_url(path_join(root, "orchestrator.log"))
+  let url = wait_for_listener_url(harness, path_join(root, "orchestrator.log"))
   assert(url != nil, "listener URL did not appear in log")
   let body = "{\"kind\":\"a2a.task.received\",\"task\":{\"id\":\"task-123\"}}"
   let json_headers = {"Content-Type": "application/json"}
-  let unauth = http_request("POST", url + "/a2a/review", {body: body, headers: json_headers})
+  let unauth = harness.net.request("POST", url + "/a2a/review", {body: body, headers: json_headers})
   __io_println(unauth.status == 401)
-  let ts = to_string(to_int(timestamp()))
-  let wrong_hmac = http_request(
+  let ts = to_string(to_int(harness.clock.timestamp()))
+  let wrong_hmac = harness.net
+    .request(
     "POST",
     url + "/a2a/review",
     {
@@ -42,7 +45,8 @@ pipeline test(task) {
     },
   )
   __io_println(wrong_hmac.status == 401)
-  let bearer = http_request(
+  let bearer = harness.net
+    .request(
     "POST",
     url + "/a2a/review",
     {body: body, headers: {"Content-Type": "application/json", Authorization: "Bearer test-key-2"}},
@@ -50,5 +54,5 @@ pipeline test(task) {
   __io_println(bearer.status == 200)
   let _ = shell("kill -TERM " + pid)
   wait_for_exit(pid)
-  delete_file(root)
+  harness.fs.delete(root)
 }

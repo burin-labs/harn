@@ -1,4 +1,4 @@
-// Test structured error categories
+/** Test structured error categories */
 pipeline default(task) {
   // throw_error creates categorized errors
   let r1 = try {

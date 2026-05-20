@@ -1,10 +1,12 @@
-// Data Pipeline Example
-//
-// Run with:
-//   cargo run --bin harn -- run examples/data-pipeline.harn
-//
-// Demonstrates a small data transformation pipeline with parallel fan-out
-// and a machine-readable summary report.
+/**
+ * Data Pipeline Example
+ *
+ * Run with:
+ *   cargo run --bin harn -- run examples/data-pipeline.harn
+ *
+ * Demonstrates a small data transformation pipeline with parallel fan-out
+ * and a machine-readable summary report.
+ */
 pipeline default(task) {
   log("Starting data pipeline")
   let raw = """
@@ -26,7 +28,7 @@ pipeline default(task) {
   }
   let report = {
     run_id: uuid(),
-    generated_at: timestamp(),
+    generated_at: harness.clock.timestamp(),
     input_rows: rows.count,
     passed_rows: passed,
     failed_rows: rows.count - passed,

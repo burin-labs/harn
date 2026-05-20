@@ -10,15 +10,18 @@ fn run_git(cwd, argv) {
 }
 
 pipeline default() {
-  let root = path_join(temp_dir(), "harn_git_stdlib_" + to_string(random_int(100000, 999999)))
-  mkdir(root)
+  let root = path_join(
+    harness.fs.temp_dir(),
+    "harn_git_stdlib_" + to_string(harness.random.gen_range(100000, 999999)),
+  )
+  harness.fs.mkdir(root)
   run_git(root, ["git", "init", "-b", "main"])
   run_git(root, ["git", "config", "user.email", "harn@example.test"])
   run_git(root, ["git", "config", "user.name", "Harn Test"])
-  write_file(path_join(root, "README.md"), "initial\n")
+  harness.fs.write_text(path_join(root, "README.md"), "initial\n")
   run_git(root, ["git", "add", "README.md"])
   run_git(root, ["git", "commit", "-m", "initial"])
-  write_file(path_join(root, "README.md"), "changed\n")
+  harness.fs.write_text(path_join(root, "README.md"), "changed\n")
   let status: GitReceipt = git.status(root)
   let status_fn: GitReceipt = git_status(root)
   let records: list<TrustRecord> = trust_query({action: "git.status"})
@@ -38,7 +41,10 @@ pipeline default() {
   __io_println(switch_result.success)
   __io_println(git_current_branch(root).branch == "feature/std-git")
   __io_println(git_switch("main", root).success)
-  let remote = path_join(temp_dir(), "harn_git_remote_" + to_string(random_int(100000, 999999)) + ".git")
+  let remote = path_join(
+    harness.fs.temp_dir(),
+    "harn_git_remote_" + to_string(harness.random.gen_range(100000, 999999)) + ".git",
+  )
   run_git(root, ["git", "init", "--bare", remote])
   run_git(root, ["git", "remote", "add", "origin", remote])
   run_git(root, ["git", "push", "-u", "origin", "main"])

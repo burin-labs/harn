@@ -1,38 +1,39 @@
 import { process_shell } from "std/runtime"
 
-fn wait_for_file(path, attempts) {
+fn wait_for_file(harness: Harness, path, attempts) {
   var remaining = attempts
-  while !file_exists(path) && remaining > 0 {
+  while !harness.fs.exists(path) && remaining > 0 {
     sleep(50ms)
     remaining = remaining - 1
   }
-  require file_exists(path), "timed out waiting for " + path
+  require harness.fs.exists(path), "timed out waiting for " + path
 }
 
 pipeline default() {
   let root = project_root() ?? cwd()
   let helper = path_join(root, "conformance/helpers/http_proxy_server.py")
-  let state_dir = path_join(temp_dir(), "harn-http-proxy-" + uuid())
+  let state_dir = path_join(harness.fs.temp_dir(), "harn-http-proxy-" + uuid())
   let port_path = path_join(state_dir, "port")
   let state_path = path_join(state_dir, "state.json")
   let pid_path = path_join(state_dir, "server.pid")
   let log_path = path_join(state_dir, "server.log")
-  mkdir(state_dir)
+  harness.fs.mkdir(state_dir)
   let start = process_shell(
     "python3 \"" + helper + "\" \"" + state_dir + "\" >\"" + log_path + "\" 2>&1 & echo $! > \""
       + pid_path
       + "\"",
   )
   require start?.success, "proxy server started"
-  wait_for_file(port_path, 100)
-  let proxy = "http://127.0.0.1:" + read_file(port_path).trim()
-  let response = http_get(
+  wait_for_file(harness, port_path, 100)
+  let proxy = "http://127.0.0.1:" + harness.fs.read_text(port_path).trim()
+  let response = harness.net
+    .get(
     "http://example.invalid/proxy-check",
     {proxy: proxy, proxy_auth: {user: "user", pass: "pass"}, timeout_ms: 1000},
   )
-  wait_for_file(state_path, 100)
+  wait_for_file(harness, state_path, 100)
   process_shell("kill $(cat \"" + pid_path + "\") >/dev/null 2>&1 || true")
-  let state = json_parse(read_file(state_path))
+  let state = json_parse(harness.fs.read_text(state_path))
   __io_println(response.body)
   __io_println(state.method)
   __io_println(state.target)

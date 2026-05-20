@@ -1,10 +1,12 @@
-// Counterfactual session fork
-//
-// Demonstrates agent_session_fork for exploring a conversation branch
-// without mutating the original. Both branches share the seeded prefix
-// and then evolve independently.
-//
-// Run with: cargo run --bin harn -- run examples/session-fork.harn
+/**
+ * Counterfactual session fork
+ *
+ * Demonstrates agent_session_fork for exploring a conversation branch
+ * without mutating the original. Both branches share the seeded prefix
+ * and then evolve independently.
+ *
+ * Run with: cargo run --bin harn -- run examples/session-fork.harn
+ */
 pipeline main(task) {
   let base = agent_session_open()
   agent_session_inject(base, {role: "user", content: "Plan a weekend in Kyoto."})

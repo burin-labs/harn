@@ -154,11 +154,11 @@ pub fn gha_env_block(name: string, value, delimiter: string? = nil) -> string {
  * @example: gha_write_output(name, value, path)
  */
 pub fn gha_write_output(name: string, value, path: string? = nil) -> bool {
-  let target = __gha_file_path(path, env("GITHUB_OUTPUT"))
+  let target = __gha_file_path(path, harness.env.get("GITHUB_OUTPUT"))
   if target == nil {
     return false
   }
-  append_file(target, gha_env_block(name, value))
+  harness.fs.append(target, gha_env_block(name, value))
   return true
 }
 
@@ -172,11 +172,11 @@ pub fn gha_write_output(name: string, value, path: string? = nil) -> bool {
  * @example: gha_write_env(name, value, path)
  */
 pub fn gha_write_env(name: string, value, path: string? = nil) -> bool {
-  let target = __gha_file_path(path, env("GITHUB_ENV"))
+  let target = __gha_file_path(path, harness.env.get("GITHUB_ENV"))
   if target == nil {
     return false
   }
-  append_file(target, gha_env_block(name, value))
+  harness.fs.append(target, gha_env_block(name, value))
   return true
 }
 
@@ -190,13 +190,13 @@ pub fn gha_write_env(name: string, value, path: string? = nil) -> bool {
  * @example: gha_append_summary(markdown, path)
  */
 pub fn gha_append_summary(markdown: string, path: string? = nil) -> bool {
-  let target = __gha_file_path(path, env("GITHUB_STEP_SUMMARY"))
+  let target = __gha_file_path(path, harness.env.get("GITHUB_STEP_SUMMARY"))
   if target == nil {
     return false
   }
-  append_file(target, markdown ?? "")
+  harness.fs.append(target, markdown ?? "")
   if !ends_with(markdown ?? "", "\n") {
-    append_file(target, "\n")
+    harness.fs.append(target, "\n")
   }
   return true
 }

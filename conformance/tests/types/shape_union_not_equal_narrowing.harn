@@ -1,7 +1,9 @@
-// `if obj.<tag> != "value"` narrows `obj` to the residual (all
-// variants except the matched one) in the truthy branch, and to the
-// single matched variant in the else branch. This is the symmetric
-// counterpart of `==` discriminator narrowing.
+/**
+ * `if obj.<tag> != "value"` narrows `obj` to the residual (all
+ * variants except the matched one) in the truthy branch, and to the
+ * single matched variant in the else branch. This is the symmetric
+ * counterpart of `==` discriminator narrowing.
+ */
 type Msg = {kind: "ping", ttl: int} | {kind: "pong", latency_ms: int} | {kind: "close", reason: string}
 
 pipeline default() {

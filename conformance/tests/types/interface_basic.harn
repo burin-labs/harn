@@ -1,5 +1,5 @@
 pipeline default() {
-  // Define an interface
+  /** Define an interface */
   interface Printable {
     fn to_display() -> string
   }

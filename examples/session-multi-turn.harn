@@ -1,13 +1,15 @@
-// Session-backed multi-turn conversation
-//
-// Demonstrates agent_session_open + repeated agent_loop calls sharing a
-// single session id. The second call automatically sees the first call's
-// transcript as a prefix.
-//
-// Uses provider: "mock" so the example runs offline. Swap to your real
-// provider to see a substantive conversation.
-//
-// Run with: cargo run --bin harn -- run examples/session-multi-turn.harn
+/**
+ * Session-backed multi-turn conversation
+ *
+ * Demonstrates agent_session_open + repeated agent_loop calls sharing a
+ * single session id. The second call automatically sees the first call's
+ * transcript as a prefix.
+ *
+ * Uses provider: "mock" so the example runs offline. Swap to your real
+ * provider to see a substantive conversation.
+ *
+ * Run with: cargo run --bin harn -- run examples/session-multi-turn.harn
+ */
 pipeline main(task) {
   let sid = agent_session_open()
   log("opened session ${sid}")

@@ -1,7 +1,9 @@
-// Tagged shape unions whose members include a `Named` alias that
-// resolves to a shape still support discriminator narrowing. Both the
-// `match obj.kind` and `if obj.kind == "…"` paths resolve the alias
-// chain before the shape-union check.
+/**
+ * Tagged shape unions whose members include a `Named` alias that
+ * resolves to a shape still support discriminator narrowing. Both the
+ * `match obj.kind` and `if obj.kind == "…"` paths resolve the alias
+ * chain before the shape-union check.
+ */
 type Ping = {kind: "ping", ttl: int}
 
 type Msg = Ping | {kind: "pong", latency_ms: int} | {kind: "close", reason: string}

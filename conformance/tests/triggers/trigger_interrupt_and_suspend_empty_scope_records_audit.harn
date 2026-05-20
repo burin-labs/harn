@@ -11,7 +11,8 @@ import "std/triggers"
  */
 pipeline test(task) {
   let _ = lifecycle_audit_log_take()
-  let unique = to_string(to_int(timestamp())) + "-" + to_string(random_int(100000, 999999))
+  let unique = to_string(to_int(harness.clock.timestamp())) + "-"
+    + to_string(harness.random.gen_range(100000, 999999))
   let handle: TriggerHandle = trigger_register(
     {
       id: "trigger-interrupt-empty-" + unique,

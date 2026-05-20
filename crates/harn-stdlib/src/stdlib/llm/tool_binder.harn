@@ -378,11 +378,11 @@ pub fn with_natural_language_executor(opts) {
       schema: schema,
       timeout_ms: ctx.timeout_ms,
     }
-    let started = now_ms()
+    let started = harness.clock.now_ms()
     let outcome = try {
       __binder_invoke(ctx.binder_fn, prompt, ctx.system_prompt, invoke_cfg)
     }
-    let elapsed = now_ms() - started
+    let elapsed = harness.clock.now_ms() - started
     let fail_ctx = ctx + {elapsed_ms: elapsed, stripped_args: stripped_args}
     if elapsed > ctx.timeout_ms {
       return __binder_handle_failure(

@@ -20,7 +20,7 @@ type ModelIdParts = {provider: string, model: string, raw: string}
  * @example: env_str(key)
  */
 pub fn env_str(key: string) -> any {
-  let raw = env(key)
+  let raw = harness.env.get(key)
   if raw == nil {
     return nil
   }
@@ -40,7 +40,7 @@ pub fn env_str(key: string) -> any {
  * @example: env_int(key, default)
  */
 pub fn env_int(key: string, default: int) -> int {
-  let raw = env(key)
+  let raw = harness.env.get(key)
   if raw == nil {
     return default
   }
@@ -57,7 +57,7 @@ pub fn env_int(key: string, default: int) -> int {
  * @example: env_float(key, default)
  */
 pub fn env_float(key: string, default: float) -> float {
-  let raw = env(key)
+  let raw = harness.env.get(key)
   if raw == nil {
     return default
   }
@@ -76,7 +76,7 @@ pub fn env_float(key: string, default: float) -> float {
  * @example: env_bool(key, default)
  */
 pub fn env_bool(key: string, default: bool) -> bool {
-  let raw = env(key)
+  let raw = harness.env.get(key)
   if raw == nil {
     return default
   }
@@ -105,7 +105,7 @@ pub fn env_bool(key: string, default: bool) -> bool {
  * @example: env_list(key, separator, ")
  */
 pub fn env_list(key: string, separator: string = ",") -> list<string> {
-  let raw = env(key)
+  let raw = harness.env.get(key)
   if raw == nil {
     return []
   }

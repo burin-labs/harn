@@ -1,13 +1,13 @@
 import { agent_host_tools } from "std/agent/host_tools"
 
 pipeline main() {
-  let root = path_join(temp_dir(), "harn-host-tools-" + uuid())
-  let outside = path_join(temp_dir(), "harn-host-tools-outside-" + uuid())
-  mkdir(root, true)
-  mkdir(outside, true)
-  mkdir(path_join(root, "logs"), true)
-  write_file(path_join(root, "README.md"), "alpha\nbeta\ngamma\n")
-  write_file(path_join(root, "logs/llm_transcript.jsonl"), "beta from transcript\n")
+  let root = path_join(harness.fs.temp_dir(), "harn-host-tools-" + uuid())
+  let outside = path_join(harness.fs.temp_dir(), "harn-host-tools-outside-" + uuid())
+  harness.fs.mkdir(root, true)
+  harness.fs.mkdir(outside, true)
+  harness.fs.mkdir(path_join(root, "logs"), true)
+  harness.fs.write_text(path_join(root, "README.md"), "alpha\nbeta\ngamma\n")
+  harness.fs.write_text(path_join(root, "logs/llm_transcript.jsonl"), "beta from transcript\n")
   let tools = agent_host_tools(
     nil,
     {

@@ -1,13 +1,17 @@
 import { triage_start_my_day } from "std/triage"
 
-fn fixture(name) {
+fn fixture(harness: Harness, name) {
   let root = project_root() ?? cwd()
-  return json_parse(read_file(path_join(root, "examples/triage/fixtures/" + name + ".json")))
+  return json_parse(harness.fs.read_text(path_join(root, "examples/triage/fixtures/" + name + ".json")))
 }
 
 pipeline default() {
   let feed = triage_start_my_day(
-    [fixture("github_issue"), fixture("slack_message"), fixture("notion_page")],
+    [
+      fixture(harness, "github_issue"),
+      fixture(harness, "slack_message"),
+      fixture(harness, "notion_page"),
+    ],
     {title: "Start My Day", generated_at: "fixture", emit: true, topic: "triage.inbox.start_my_day"},
   )
   for event in feed.events {

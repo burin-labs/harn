@@ -1,26 +1,27 @@
 import "../_common"
 
 pipeline default() {
-  let root = path_join(temp_dir(), "harn-signal-" + uuid())
-  mkdir(root)
+  let root = path_join(harness.fs.temp_dir(), "harn-signal-" + uuid())
+  harness.fs.mkdir(root)
   let script_path = path_join(root, "sigterm.harn")
   let log_path = path_join(root, "sigterm.log")
-  write_file(
+  harness.fs
+    .write_text(
     script_path,
     "import \"std/signal\"\n\npipeline default() {\n  on_interrupt({ -> __io_println(\"term\") }, {signals: [\"SIGTERM\"], once: false})\n  __io_println(\"ready\")\n  try {\n    sleep(duration_seconds(30))\n  } catch (e) {\n    __io_println(\"caught\")\n  }\n  __io_println(interrupted())\n}\n",
   )
   let repo_root = exec("git", "rev-parse", "--show-toplevel").stdout.trim()
-  let harn_bin = env_or("HARN_CONFORMANCE_HARN_BIN", resolve_harn_bin(repo_root))
+  let harn_bin = harness.env.get_or("HARN_CONFORMANCE_HARN_BIN", resolve_harn_bin(harness, repo_root))
   let start = shell("\"" + harn_bin + "\" run \"" + script_path + "\" >\"" + log_path + "\" 2>&1 & echo $!")
   let pid = start.stdout.trim()
   require start.success, "failed to start harn run child"
   require pid != "", "missing child pid"
-  require wait_for_log_contains(log_path, "ready"), "child did not become ready"
+  require wait_for_log_contains(harness, log_path, "ready"), "child did not become ready"
   let _ = shell("kill -TERM " + pid)
   let exited = wait_for_exit(pid)
   let _ = shell("kill -TERM " + pid + " >/dev/null 2>&1 || true")
   require exited, "child did not exit after SIGTERM"
-  let log = read_file(log_path)
+  let log = harness.fs.read_text(log_path)
   __io_println(contains(log, "\nterm\n"))
   __io_println(contains(log, "\ncaught\n"))
   __io_println(contains(log, "\ntrue\n"))

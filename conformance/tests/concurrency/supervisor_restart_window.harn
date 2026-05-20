@@ -21,8 +21,8 @@ pipeline default() {
     },
   )
   var state = supervisor_state(sup)
-  let deadline_ms = timestamp() * 1000 + 250
-  while state.status != "completed" && timestamp() * 1000 < deadline_ms {
+  let deadline_ms = harness.clock.timestamp() * 1000 + 250
+  while state.status != "completed" && harness.clock.timestamp() * 1000 < deadline_ms {
     sleep(5ms)
     state = supervisor_state(sup)
   }

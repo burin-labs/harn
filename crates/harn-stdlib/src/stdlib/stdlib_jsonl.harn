@@ -81,11 +81,11 @@ pub fn parse_jsonl(text: string, options: ReadJsonlOptions = {}) -> list {
  * @example: read_jsonl(path, options)
  */
 pub fn read_jsonl(path: string, options: ReadJsonlOptions = {}) -> list {
-  if !file_exists(path) {
+  if !harness.fs.exists(path) {
     return []
   }
   let raw = try {
-    read_file(path)
+    harness.fs.read_text(path)
   }
   if !is_ok(raw) {
     if (options ?? {}).strict {
@@ -116,7 +116,7 @@ fn __serialize(items: list) -> string {
  */
 pub fn write_jsonl(path: string, items: list) -> int {
   let body = __serialize(items)
-  write_file(path, body)
+  harness.fs.write_text(path, body)
   return len(items ?? [])
 }
 
@@ -132,7 +132,7 @@ pub fn write_jsonl(path: string, items: list) -> int {
  */
 pub fn append_jsonl(path: string, item) -> int {
   let line = json_stringify(item) + "\n"
-  append_file(path, line)
+  harness.fs.append(path, line)
   return len(line)
 }
 

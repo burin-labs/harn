@@ -215,7 +215,7 @@ fn run_planner(task, workspace_root, profile, facts, round_no, force_ready) {
     || trim(recovered?.plan_summary ?? "") != "" {
     return {ok: true, error: nil, data: recovered}
   }
-  return {ok: false, error: result?.error ?? {message: result?.summary ?? "planner failed"}, data: {}}
+  return {ok: false, error: result.error ?? {message: result?.summary ?? "planner failed"}, data: {}}
 }
 
 fn run_research(workspace_root, profile, question) {
@@ -231,7 +231,7 @@ fn run_research(workspace_root, profile, question) {
   if result?.ok {
     return {ok: true, error: nil, data: normalize_research_fact(question, result?.data ?? {})}
   }
-  return {ok: false, error: result?.error ?? {message: result?.summary ?? "research failed"}, data: {}}
+  return {ok: false, error: result.error ?? {message: result?.summary ?? "research failed"}, data: {}}
 }
 
 fn collect_research_batch(workspace_root, profile, questions) {
@@ -379,7 +379,7 @@ fn run_read_only_evaluator(task, workspace_root, profile, plan, facts, final_res
     return data
       + {verdict: lowercase(trim(data?.verdict ?? "unknown"))}
   }
-  return {verdict: "fail", reason: result?.error?.message ?? result?.summary ?? "evaluation failed"}
+  return {verdict: "fail", reason: result.error?.message ?? result?.summary ?? "evaluation failed"}
 }
 
 fn failed_stage_ids(execution) {
@@ -455,9 +455,19 @@ fn execution_visible_text(execution) {
   return latest
 }
 
-fn write_report(workspace_root, profile, task, plan, facts, execution, verdict, final_response) {
+fn write_report(
+  harness: Harness,
+  workspace_root,
+  profile,
+  task,
+  plan,
+  facts,
+  execution,
+  verdict,
+  final_response,
+) {
   let generated_dir = path_join(source_dir(), "evals", "generated")
-  mkdir(generated_dir)
+  harness.fs.mkdir(generated_dir)
   let report_path = path_join(generated_dir, "${profile?.id}-latest.json")
   let report = {
     task_id: profile?.id,
@@ -481,12 +491,12 @@ fn write_report(workspace_root, profile, task, plan, facts, execution, verdict, 
     verdict: verdict,
     final_response: final_response,
   }
-  write_file(report_path, json_stringify(report))
+  harness.fs.write_text(report_path, json_stringify(report))
   return report_path
 }
 
 pipeline default() {
-  let request = env_or("HARN_TASK", "")
+  let request = harness.env.get_or("HARN_TASK", "")
   let root = workspace_root()
   let profile = profile_for_task(request)
   var facts = []
@@ -542,7 +552,7 @@ pipeline default() {
     verdict = "fail"
     final_response = "Planner never reached a concrete action list.\n\nLatest plan summary: ${planning?.plan_summary ?? "none"}"
   }
-  let report_path = write_report(root, profile, request, planning, facts, execution, verdict, final_response)
+  let report_path = write_report(harness, root, profile, request, planning, facts, execution, verdict, final_response)
   __io_println("task_id=${profile?.id}")
   __io_println("plan_ready=${planning?.ready}")
   __io_println("research_items=${len(facts)}")

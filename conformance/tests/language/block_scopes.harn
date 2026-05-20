@@ -8,7 +8,7 @@ pipeline default() {
     __io_println(branch)
   }
   for item in [1, 2] {
-    let loop_label = "loop-" + item
+    let loop_label = "loop-${item}"
     __io_println(loop_label)
   }
   try {

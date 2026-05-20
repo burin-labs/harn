@@ -28,7 +28,7 @@ fn missing_core_fields(record) {
   return missing
 }
 
-fn mock_flow_for_provider(name) {
+fn mock_flow_for_provider(harness: Harness, name) {
   let base = "https://mock-oauth.example/" + name
   let record = provider(
     name,
@@ -68,7 +68,8 @@ fn mock_flow_for_provider(name) {
     },
   )
   http_mock("POST", revoke_url, {status: 200, body: "{\"revoked\":true}", headers: {}})
-  let token_resp = http_post(
+  let token_resp = harness.net
+    .post(
     record.token_url,
     "grant_type=authorization_code&code=code-" + name
       + "&redirect_uri=https%3A%2F%2Fapp.example%2Fcallback",
@@ -77,11 +78,12 @@ fn mock_flow_for_provider(name) {
   require token_resp.status == 200, name + " token response"
   let token = json_parse(token_resp.body)
   require token.access_token == "access-" + name, name + " access token"
-  let profile_resp = http_get(userinfo_url, {headers: {Authorization: "Bearer " + token.access_token}})
+  let profile_resp = harness.net.get(userinfo_url, {headers: {Authorization: "Bearer " + token.access_token}})
   require profile_resp.status == 200, name + " userinfo response"
   let profile = json_parse(profile_resp.body)
   require profile.provider == name, name + " profile provider"
-  let revoke_resp = http_post(
+  let revoke_resp = harness.net
+    .post(
     revoke_url,
     "token=" + token.access_token,
     {headers: {"Content-Type": "application/x-www-form-urlencoded"}},
@@ -106,7 +108,7 @@ pipeline test(task) {
   for name in names {
     assert_eq(missing_core_fields(catalog[name]), [], name + " carries core fields")
     assert_eq(catalog[name].id, name, name + " id")
-    mock_flow_for_provider(name)
+    mock_flow_for_provider(harness, name)
   }
   let gh = github()
   assert_eq(gh.auth_url, "https://github.com/login/oauth/authorize", "github auth url")

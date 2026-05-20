@@ -44,12 +44,12 @@ fn workspace_normalize(path, workspace_root = nil) {
 
 /** List files in a directory recursively (one level). */
 fn list_files(dir) {
-  let entries = list_dir(dir)
+  let entries = harness.fs.list_dir(dir)
   return entries
     .filter(
     { name ->
       let full = path_join(dir, name)
-      let info = stat(full)
+      let info = harness.fs.stat(full)
       return info.is_file
     },
   )
@@ -57,12 +57,12 @@ fn list_files(dir) {
 
 /** List subdirectories. */
 fn list_dirs(dir) {
-  let entries = list_dir(dir)
+  let entries = harness.fs.list_dir(dir)
   return entries
     .filter(
     { name ->
       let full = path_join(dir, name)
-      let info = stat(full)
+      let info = harness.fs.stat(full)
       return info.is_dir
     },
   )

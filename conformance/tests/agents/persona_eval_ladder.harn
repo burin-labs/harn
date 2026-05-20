@@ -1,6 +1,6 @@
 pipeline main() {
   let root = project_root() ?? cwd()
-  let artifacts = path_join(temp_dir(), "harn-persona-eval-ladder-" + uuid())
+  let artifacts = path_join(harness.fs.temp_dir(), "harn-persona-eval-ladder-" + uuid())
   let manifest = persona_eval_ladder_manifest(
     {
       id: "merge-captain-ladder-conformance",
@@ -28,5 +28,5 @@ pipeline main() {
   __io_println(report.tiers[0].outcome)
   __io_println(report.tiers[1].outcome)
   __io_println(len(report.tiers[1].state_machine_coverage.observed_steps) > 0)
-  __io_println(file_exists(report.tiers[1].receipt_path))
+  __io_println(harness.fs.exists(report.tiers[1].receipt_path))
 }

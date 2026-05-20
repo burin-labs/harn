@@ -1,17 +1,19 @@
-// Ports the motivating TypeScript playground:
-//   type Action = 'create' | 'edit'
-//   type ActionContainer<T extends Action> = { action: T, processAction: (t: T) => void }
-//   const xs: Array<ActionContainer<Action>> = [
-//     {action: 'create', processAction: processCreate},
-//     {action: 'edit',   processAction: processEdit},
-//   ]
-//
-// TS rejects this because `processCreate: (t: "create") => void` doesn't
-// fit `(t: "create" | "edit") => void` under contravariance. Harn fixes
-// it by distributing `ActionContainer<Action>` over the closed literal
-// union, so each instantiation self-consistently fixes `T`:
-//   ActionContainer<"create"> | ActionContainer<"edit">
-// which is exactly the shape each literal-tagged element inhabits.
+/**
+ * Ports the motivating TypeScript playground:
+ *   type Action = 'create' | 'edit'
+ *   type ActionContainer<T extends Action> = { action: T, processAction: (t: T) => void }
+ *   const xs: Array<ActionContainer<Action>> = [
+ *     {action: 'create', processAction: processCreate},
+ *     {action: 'edit',   processAction: processEdit},
+ *   ]
+ *
+ * TS rejects this because `processCreate: (t: "create") => void` doesn't
+ * fit `(t: "create" | "edit") => void` under contravariance. Harn fixes
+ * it by distributing `ActionContainer<Action>` over the closed literal
+ * union, so each instantiation self-consistently fixes `T`:
+ *   ActionContainer<"create"> | ActionContainer<"edit">
+ * which is exactly the shape each literal-tagged element inhabits.
+ */
 type Action = "create" | "edit"
 
 type ActionContainer<T> = {action: T, process_action: fn(T) -> nil}

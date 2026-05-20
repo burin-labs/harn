@@ -15,7 +15,7 @@ pipeline test(task) {
   }
   __io_println(is_err(denied))
   let calls = host_mock_calls()
-  __io_println(calls?.count ?? 0)
+  __io_println(calls.count ?? 0)
   __io_println(calls[0]?.capability)
   __io_println(calls[0]?.operation)
   __io_println(calls[0]?.params?.namespace)

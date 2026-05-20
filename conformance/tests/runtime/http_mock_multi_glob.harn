@@ -1,8 +1,8 @@
-// Test http_mock with multi-* glob patterns
+/** Test http_mock with multi-* glob patterns */
 pipeline default(task) {
   // Setup mock with multi-glob
   http_mock("GET", "https://api.example.com/*/items/*", {status: 200, body: "matched"})
-  let r = http_get("https://api.example.com/users/items/123")
+  let r = harness.net.get("https://api.example.com/users/items/123")
   __io_println(r.body)
   __io_println(r.status)
   http_mock_clear()

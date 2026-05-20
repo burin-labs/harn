@@ -1,6 +1,8 @@
-// Verify `mcp_registry_status()` and `mcp_ensure_active`/`mcp_release`
-// behave sanely when no MCP servers are registered (conformance tests
-// don't load harn.toml MCP configs).
+/**
+ * Verify `mcp_registry_status()` and `mcp_ensure_active`/`mcp_release`
+ * behave sanely when no MCP servers are registered (conformance tests
+ * don't load harn.toml MCP configs).
+ */
 pipeline default() {
   // Empty registry reports no servers.
   let status = mcp_registry_status()

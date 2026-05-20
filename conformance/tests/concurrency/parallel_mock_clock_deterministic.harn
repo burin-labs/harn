@@ -17,7 +17,7 @@ pipeline test(task) {
   }
   log(len(results))
   // Mock time advanced by the largest sleep observed, not the sum.
-  let elapsed_ms = now_ms() - 1700000000000
+  let elapsed_ms = harness.clock.now_ms() - 1700000000000
   log(elapsed_ms >= 40 && elapsed_ms <= 100)
   unmock_time()
 }

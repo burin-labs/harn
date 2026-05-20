@@ -1,4 +1,4 @@
-// Test shape validation with union type fields
+/** Test shape validation with union type fields */
 pipeline default(task) {
   fn process(data: {name: string, value: string | int}) {
     __io_println(data.name)

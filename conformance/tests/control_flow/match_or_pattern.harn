@@ -1,7 +1,9 @@
-// Or-patterns in match arms: `p1 | p2 | ... -> body` shares one arm
-// body across multiple alternative values. Covers literal unions,
-// mixed int/string arms on an int/string-tagged value, and guarded
-// or-pattern arms.
+/**
+ * Or-patterns in match arms: `p1 | p2 | ... -> body` shares one arm
+ * body across multiple alternative values. Covers literal unions,
+ * mixed int/string arms on an int/string-tagged value, and guarded
+ * or-pattern arms.
+ */
 pipeline default() {
   fn classify(n: int) -> string {
     return match n {

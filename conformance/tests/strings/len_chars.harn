@@ -1,4 +1,4 @@
-// Test that len() counts characters, not bytes, for Unicode strings
+/** Test that len() counts characters, not bytes, for Unicode strings */
 pipeline default(task) {
   let ascii = "hello"
   __io_println(len(ascii))

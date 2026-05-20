@@ -2,16 +2,18 @@ import "std/triggers"
 import "../_common"
 
 pipeline test(task) {
-  let unique = to_string(to_int(timestamp())) + "-" + to_string(random_int(100000, 999999))
-  let root = path_join(temp_dir(), "harn-a2a-dispatch-" + unique)
-  mkdir(root)
-  write_file(
+  let unique = to_string(to_int(harness.clock.timestamp())) + "-"
+    + to_string(harness.random.gen_range(100000, 999999))
+  let root = path_join(harness.fs.temp_dir(), "harn-a2a-dispatch-" + unique)
+  harness.fs.mkdir(root)
+  harness.fs
+    .write_text(
     path_join(root, "receiver.harn"),
     "pipeline default(task) {\n  let envelope = json_parse(task)\n  __io_println(json_stringify({trace_id: envelope.event.trace_id, target_agent: envelope.target_agent}))\n}\n",
   )
   let repo_root = exec("git", "rev-parse", "--show-toplevel").stdout.trim()
-  let harn_bin = env_or("HARN_CONFORMANCE_HARN_BIN", resolve_harn_bin(repo_root))
-  assert(file_exists(harn_bin), "missing built harn binary at " + harn_bin)
+  let harn_bin = harness.env.get_or("HARN_CONFORMANCE_HARN_BIN", resolve_harn_bin(harness, repo_root))
+  assert(harness.fs.exists(harn_bin), "missing built harn binary at " + harn_bin)
   let start = shell_at(
     root,
     "nohup " + harn_bin + " serve --port 0"
@@ -20,7 +22,7 @@ pipeline test(task) {
   let pid = start.stdout.trim()
   assert(start.success, "failed to start A2A receiver")
   assert(pid != "", "missing A2A receiver pid")
-  let receiver_url = wait_for_a2a_server_url(path_join(root, "receiver.log"))
+  let receiver_url = wait_for_a2a_server_url(harness, path_join(root, "receiver.log"))
   assert(receiver_url != nil, "A2A receiver did not start")
   let port_matches = regex_captures(r":(\d+)$", receiver_url)
   assert(len(port_matches) == 1, "A2A receiver URL did not include a port: " + receiver_url)
@@ -61,5 +63,5 @@ pipeline test(task) {
   __io_println(fire.result?.target_agent == "triage")
   let _ = shell("kill -TERM " + pid)
   wait_for_exit(pid)
-  delete_file(root)
+  harness.fs.delete(root)
 }

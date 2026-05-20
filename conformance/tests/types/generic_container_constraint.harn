@@ -1,5 +1,5 @@
 pipeline test(task) {
-  // Generic constraint with container type: where T: Interface works inside list<T>
+  /** Generic constraint with container type: where T: Interface works inside list<T> */
   interface Printable {
     fn label(self) -> string
   }

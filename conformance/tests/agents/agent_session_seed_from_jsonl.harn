@@ -1,6 +1,7 @@
 pipeline main() {
-  let path = path_join(temp_dir(), "harn-seed-" + uuid() + ".jsonl")
-  write_file(
+  let path = path_join(harness.fs.temp_dir(), "harn-seed-" + uuid() + ".jsonl")
+  harness.fs
+    .write_text(
     path,
     join(
       [
@@ -52,8 +53,9 @@ pipeline main() {
   __io_println(snap.messages[0].role)
   __io_println(snap.messages[1].content)
   __io_println(snap.messages[1].tool_calls == nil)
-  let legacy_path = path_join(temp_dir(), "harn-legacy-seed-" + uuid() + ".jsonl")
-  write_file(
+  let legacy_path = path_join(harness.fs.temp_dir(), "harn-legacy-seed-" + uuid() + ".jsonl")
+  harness.fs
+    .write_text(
     legacy_path,
     join(
       [
@@ -81,7 +83,7 @@ pipeline main() {
   __io_println(legacy_snap.messages[1].content)
   llm_mock_clear()
   llm_mock({text: "recorded assistant"})
-  let transcript_dir = path_join(temp_dir(), "harn-seed-sidecar-" + uuid())
+  let transcript_dir = path_join(harness.fs.temp_dir(), "harn-seed-sidecar-" + uuid())
   let source_session = agent_session_open()
   agent_loop(
     "record this",
@@ -94,7 +96,7 @@ pipeline main() {
     },
   )
   let sidecar = path_join(transcript_dir, "llm_transcript.jsonl")
-  __io_println(contains(read_file(sidecar), "\"type\":\"message\""))
+  __io_println(contains(harness.fs.read_text(sidecar), "\"type\":\"message\""))
   let imported = agent_session_seed_from_jsonl(sidecar, {provider: "mock"})
   __io_println(imported.ok)
   __io_println(imported.source_format)

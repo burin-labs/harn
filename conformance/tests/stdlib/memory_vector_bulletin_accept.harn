@@ -6,7 +6,7 @@ import {
 } from "std/personas/bulletins"
 
 pipeline default() {
-  let root = path_join(temp_dir(), "harn-bulletin-embed-" + uuid())
+  let root = path_join(harness.fs.temp_dir(), "harn-bulletin-embed-" + uuid())
   host_mock_clear()
   host_mock("memory", "embed", {result: {vector: [0.4, 0.6, 0.7], dim: 3, model: "fake"}})
   let proposed = bulletin_propose(
@@ -46,5 +46,5 @@ pipeline default() {
   __io_println(hits[0].key == proposed.id)
   __io_println(hits[0].provenance.bulletin_id == proposed.id)
   __io_println(hits[0].tags[0])
-  delete_file(root)
+  harness.fs.delete(root)
 }

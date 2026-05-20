@@ -523,9 +523,9 @@ pub fn local_receipt_sink(session_id) {
     let raw_session = __tool_mw_optional_text(receipt?.session_id) ?? fallback
     let filename = __tool_mw_local_receipt_filename(raw_session)
     let dir = path_join(".harn", "receipts")
-    mkdir(dir)
+    harness.fs.mkdir(dir)
     let path = path_join(dir, filename + ".jsonl")
-    append_file(path, json_stringify(receipt) + "\n")
+    harness.fs.append(path, json_stringify(receipt) + "\n")
     return path
   }
 }
@@ -706,9 +706,9 @@ fn __tool_mw_audit_log_return(result, cfg, receipt) {
 pub fn with_audit_log(sink_or_options) {
   let cfg = __tool_mw_audit_log_config(sink_or_options)
   return { call, next ->
-    let started = now_ms()
+    let started = harness.clock.now_ms()
     let result = next(call)
-    let duration = now_ms() - started
+    let duration = harness.clock.now_ms() - started
     let base_receipt = __tool_mw_tool_call_receipt(call, result, duration, cfg.redact_keys)
     let receipt_uri = if cfg.mode == "local" || cfg.mode == "both" {
       __tool_mw_local_receipt_uri(base_receipt.session_id)
@@ -1167,10 +1167,10 @@ pub fn with_telemetry(sink_or_opts) {
   let sink = resolve_telemetry_sink(sink_or_opts)
   let extras = __telemetry_extras(sink_or_opts)
   return { call, next ->
-    let started_ms = now_ms()
+    let started_ms = harness.clock.now_ms()
     let started_iso = __tool_mw_now_iso()
     let result = next(call)
-    let ended_ms = now_ms()
+    let ended_ms = harness.clock.now_ms()
     let ended_iso = __tool_mw_now_iso()
     let span = tool_call_span(
       call,
@@ -1427,9 +1427,9 @@ pub fn with_timeout(opts) {
     } else {
       default_ms
     }
-    let started = now_ms()
+    let started = harness.clock.now_ms()
     let result = next(call)
-    let elapsed = now_ms() - started
+    let elapsed = harness.clock.now_ms() - started
     if elapsed < limit {
       return __tool_mw_attach_audit(
         result,

@@ -11,14 +11,14 @@ pipeline test(task) {
     "https://api.example.com/download",
     {status: 200, body: "payload", headers: {"content-type": "text/plain"}},
   )
-  let get_resp: dict = http_get("https://api.example.com/users")
-  let post_resp: dict = http_post("https://api.example.com/users", "{}")
+  let get_resp: dict = harness.net.get("https://api.example.com/users")
+  let post_resp: dict = harness.net.post("https://api.example.com/users", "{}")
   let stream: string = http_stream_open("https://api.example.com/stream")
   let info: dict = http_stream_info(stream)
   let chunk = http_stream_read(stream, 3)
   let closed: bool = http_stream_close(stream)
-  let dst = temp_dir() + "/http-signature-download.txt"
-  let download_resp: dict = http_download("https://api.example.com/download", dst)
+  let dst = harness.fs.temp_dir() + "/http-signature-download.txt"
+  let download_resp: dict = harness.net.download("https://api.example.com/download", dst)
   log(get_resp.status)
   log(get_resp.body)
   log(post_resp.status)

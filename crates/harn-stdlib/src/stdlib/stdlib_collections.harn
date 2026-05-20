@@ -58,7 +58,7 @@ pub fn store_stale(key, max_age_seconds) {
   if ts == nil {
     return true
   }
-  return timestamp() - ts > max_age_seconds
+  return harness.clock.timestamp() - ts > max_age_seconds
 }
 
 // Refresh a store key's timestamp to now.
@@ -72,5 +72,5 @@ pub fn store_stale(key, max_age_seconds) {
  * @example: store_refresh(key)
  */
 pub fn store_refresh(key) {
-  store_set(key + "_ts", timestamp())
+  store_set(key + "_ts", harness.clock.timestamp())
 }

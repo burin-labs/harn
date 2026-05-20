@@ -2,7 +2,7 @@ pipeline test(task) {
   let root = project_root() ?? cwd()
   let helper_dir = path_join(root, "conformance/helpers")
   let claims = {iss: "12345", iat: 1700000000, exp: 1700000600}
-  let es256_key = read_file(path_join(helper_dir, "jwt_es256_test_key.pem"))
+  let es256_key = harness.fs.read_text(path_join(helper_dir, "jwt_es256_test_key.pem"))
   let es256_token = jwt_sign("ES256", claims, es256_key)
   let es256_parts = split(es256_token, ".")
   assert_eq(len(es256_parts), 3)
@@ -13,7 +13,7 @@ pipeline test(task) {
   assert_eq(es256_payload.iss, "12345")
   assert_eq(es256_payload.iat, 1700000000)
   assert(len(es256_parts[2]) > 0, "ES256 signature present")
-  let rs256_key = read_file(path_join(helper_dir, "github_app_test_key.pem"))
+  let rs256_key = harness.fs.read_text(path_join(helper_dir, "github_app_test_key.pem"))
   let rs256_token = jwt_sign("RS256", claims, rs256_key)
   let rs256_parts = split(rs256_token, ".")
   assert_eq(len(rs256_parts), 3)

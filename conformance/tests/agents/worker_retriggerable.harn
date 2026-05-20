@@ -21,14 +21,14 @@ fn wait_for_status(handle, status) {
   return worker
 }
 
-fn worker_snapshot(handle) {
+fn worker_snapshot(harness: Harness, handle) {
   let worker = current_worker(handle)
-  return json_parse(read_file(worker?.snapshot_path))
+  return json_parse(harness.fs.read_text(worker?.snapshot_path))
 }
 
-fn worker_snapshot_text(handle) {
+fn worker_snapshot_text(harness: Harness, handle) {
   let worker = current_worker(handle)
-  return read_file(worker?.snapshot_path)
+  return harness.fs.read_text(worker?.snapshot_path)
 }
 
 pipeline main() {
@@ -52,8 +52,8 @@ pipeline main() {
   let first = wait_for_status(loop, "awaiting")
   __io_println(first?.status == "awaiting")
   __io_println(contains(worker_result(first)?.summary ?? "", "first answer"))
-  let first_snapshot = worker_snapshot(loop)
-  let first_snapshot_text = worker_snapshot_text(loop)
+  let first_snapshot = worker_snapshot(harness, loop)
+  let first_snapshot_text = worker_snapshot_text(harness, loop)
   let first_messages = first_snapshot?.transcript?.messages ?? []
   __io_println(len(first_messages) >= 2)
   __io_println(contains(first_snapshot_text, "Answer the first question."))
@@ -73,9 +73,9 @@ pipeline main() {
   __io_println(worker_provenance(second)?.worker_id == loop?.id)
   let closed = close_agent(loop)
   __io_println(closed?.status == "cancelled")
-  let final_snapshot_path = path_join(temp_dir(), "worker-final-" + closed?.id + ".json")
-  copy_file(closed?.snapshot_path, final_snapshot_path)
-  let final_snapshot_text = read_file(final_snapshot_path)
+  let final_snapshot_path = path_join(harness.fs.temp_dir(), "worker-final-" + closed?.id + ".json")
+  harness.fs.copy(closed?.snapshot_path, final_snapshot_path)
+  let final_snapshot_text = harness.fs.read_text(final_snapshot_path)
   __io_println(len(final_snapshot_text) > len(first_snapshot_text))
   __io_println(contains(final_snapshot_text, "Answer the first question."))
   __io_println(contains(final_snapshot_text, "Need one more detail"))

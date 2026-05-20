@@ -4,7 +4,7 @@ import { evaluator_model, provider_name, render_csv, render_facts } from "common
 
 /** Resolve the provider for semantic Burin Mini grading runs. */
 pub fn semantic_eval_provider() {
-  let configured = env_or("BURIN_MINI_SEMANTIC_EVAL_PROVIDER", "")
+  let configured = harness.env.get_or("BURIN_MINI_SEMANTIC_EVAL_PROVIDER", "")
   if configured != "" {
     return configured
   }
@@ -13,7 +13,7 @@ pub fn semantic_eval_provider() {
 
 /** Resolve the model for semantic Burin Mini grading runs. */
 pub fn semantic_eval_model() {
-  let configured = env_or("BURIN_MINI_SEMANTIC_EVAL_MODEL", "")
+  let configured = harness.env.get_or("BURIN_MINI_SEMANTIC_EVAL_MODEL", "")
   if configured != "" {
     return configured
   }
@@ -22,7 +22,7 @@ pub fn semantic_eval_model() {
 
 /** Select heuristic or LLM semantic grading mode. */
 pub fn semantic_eval_mode() {
-  let configured = env_or("BURIN_MINI_SEMANTIC_EVAL_MODE", "")
+  let configured = harness.env.get_or("BURIN_MINI_SEMANTIC_EVAL_MODE", "")
   if configured != "" {
     return configured
   }
@@ -34,7 +34,7 @@ pub fn semantic_eval_mode() {
 
 /** Load and parse a JSON file or throw with context. */
 pub fn load_json_file(path) {
-  let parsed = safe_parse(read_file(path))
+  let parsed = safe_parse(harness.fs.read_text(path))
   guard parsed != nil else {
     throw "Failed to parse JSON file: ${path}"
   }
@@ -242,8 +242,8 @@ pub fn render_actual_trace(report, run) {
   return join(sections, "\n\n")
 }
 
-fn render_file_bundle(dir_path, heading) {
-  let files = collect_tree_files(dir_path)
+fn render_file_bundle(harness: Harness, dir_path, heading) {
+  let files = collect_tree_files(harness, dir_path)
   if len(files) == 0 {
     return "${heading}:\n(none)"
   }
@@ -256,7 +256,7 @@ fn render_file_bundle(dir_path, heading) {
       path
     }
     let content = try {
-      read_file(path)
+      harness.fs.read_text(path)
     } catch (e) {
       ""
     }
@@ -272,8 +272,8 @@ pub fn render_inference_transcripts(task_root) {
   }
   return join(
     [
-      render_file_bundle(path_join(task_root, "llm"), "Top-level and provider transcripts"),
-      render_file_bundle(path_join(task_root, "events"), "Event logs and forked session traces"),
+      render_file_bundle(harness, path_join(task_root, "llm"), "Top-level and provider transcripts"),
+      render_file_bundle(harness, path_join(task_root, "events"), "Event logs and forked session traces"),
     ],
     "\n\n",
   )
@@ -409,9 +409,9 @@ pub fn heuristic_semantic_eval(report, run, reference) {
   }
 }
 
-fn collect_tree_files(dir_path) {
+fn collect_tree_files(harness: Harness, dir_path) {
   let info = try {
-    stat(dir_path)
+    harness.fs.stat(dir_path)
   } catch (e) {
     nil
   }
@@ -419,10 +419,10 @@ fn collect_tree_files(dir_path) {
     return []
   }
   var files = []
-  for name in list_dir(dir_path) {
+  for name in harness.fs.list_dir(dir_path) {
     let child = path_join(dir_path, name)
     let child_info = try {
-      stat(child)
+      harness.fs.stat(child)
     } catch (e) {
       nil
     }
@@ -430,7 +430,7 @@ fn collect_tree_files(dir_path) {
       continue
     }
     if child_info.is_dir {
-      files = files + collect_tree_files(child)
+      files = files + collect_tree_files(harness, child)
       continue
     }
     if child_info.is_file {

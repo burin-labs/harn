@@ -11,18 +11,18 @@ pipeline default() {
   let end = http_stream_read(stream, 64)
   let text = bytes_to_string(bytes_concat(first ?? bytes_from_string(""), second ?? bytes_from_string("")))
   let closed = http_stream_close(stream)
-  let dst = path_join(temp_dir(), "harn-http-download-" + uuid() + ".txt")
+  let dst = path_join(harness.fs.temp_dir(), "harn-http-download-" + uuid() + ".txt")
   http_mock(
     "GET",
     "https://api.example.com/download",
     {status: 200, body: "downloaded", headers: {etag: "abc"}},
   )
-  let download = http_download("https://api.example.com/download", dst)
+  let download = harness.net.download("https://api.example.com/download", dst)
   __io_println(info.status)
   __io_println(info.headers["x-test"])
   __io_println(text)
   __io_println(type_of(end))
   __io_println(closed)
   __io_println(download.bytes_written)
-  __io_println(read_file(dst))
+  __io_println(harness.fs.read_text(dst))
 }

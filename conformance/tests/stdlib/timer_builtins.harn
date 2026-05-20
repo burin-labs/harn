@@ -6,8 +6,8 @@ pipeline test(task) {
   assert(ms >= 0)
   log("timer ok")
   // elapsed returns monotonic ms since first call
-  let e1 = elapsed()
-  let e2 = elapsed()
+  let e1 = harness.clock.elapsed()
+  let e2 = harness.clock.elapsed()
   assert(e1 >= 0)
   assert(e2 >= e1)
   log("elapsed ok")

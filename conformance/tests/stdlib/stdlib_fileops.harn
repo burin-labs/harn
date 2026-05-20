@@ -1,33 +1,33 @@
 pipeline default() {
-  let tmp = temp_dir()
+  let tmp = harness.fs.temp_dir()
   let test_dir = path_join(tmp, "harn_test_fileops")
-  mkdir(test_dir)
+  harness.fs.mkdir(test_dir)
   // path_join
   let p = path_join(test_dir, "hello.txt")
   __io_println(p != "")
   // write and read
-  write_file(p, "hello world")
-  __io_println(file_exists(p))
-  let content = read_file(p)
+  harness.fs.write_text(p, "hello world")
+  __io_println(harness.fs.exists(p))
+  let content = harness.fs.read_text(p)
   __io_println(content)
   // append
-  append_file(p, " appended")
-  __io_println(read_file(p))
+  harness.fs.append(p, " appended")
+  __io_println(harness.fs.read_text(p))
   // stat
-  let info = stat(p)
+  let info = harness.fs.stat(p)
   __io_println(info.is_file)
   __io_println(info.is_dir)
   // copy
   let p2 = path_join(test_dir, "copy.txt")
-  copy_file(p, p2)
-  __io_println(file_exists(p2))
-  __io_println(read_file(p2))
+  harness.fs.copy(p, p2)
+  __io_println(harness.fs.exists(p2))
+  __io_println(harness.fs.read_text(p2))
   // list_dir
-  let files = list_dir(test_dir)
+  let files = harness.fs.list_dir(test_dir)
   __io_println(files.count)
   // delete
-  delete_file(p)
-  __io_println(file_exists(p))
+  harness.fs.delete(p)
+  __io_println(harness.fs.exists(p))
   // cleanup
-  delete_file(test_dir)
+  harness.fs.delete(test_dir)
 }

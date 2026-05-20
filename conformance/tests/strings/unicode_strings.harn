@@ -1,4 +1,4 @@
-// Unicode string operations: slicing, contains, split, replace, interpolation
+/** Unicode string operations: slicing, contains, split, replace, interpolation */
 pipeline default(task) {
   let emoji = "Hello 🌍🔥 World"
   // len counts characters, not bytes

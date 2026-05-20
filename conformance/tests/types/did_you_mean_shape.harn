@@ -1,4 +1,4 @@
-// Test "did you mean" suggestions on shape validation errors
+/** Test "did you mean" suggestions on shape validation errors */
 pipeline default(task) {
   fn process(data: {name: string, email: string}) {
     __io_println(data.name)

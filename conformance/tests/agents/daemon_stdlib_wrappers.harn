@@ -10,9 +10,10 @@ fn wait_for_iterations(handle, min_iterations) {
 }
 
 pipeline test(task) {
-  let unique = to_string(to_int(timestamp())) + "-" + to_string(random_int(100000, 999999))
-  let root = path_join(temp_dir(), "harn-daemon-stdlib-" + unique)
-  mkdir(root)
+  let unique = to_string(to_int(harness.clock.timestamp())) + "-"
+    + to_string(harness.random.gen_range(100000, 999999))
+  let root = path_join(harness.fs.temp_dir(), "harn-daemon-stdlib-" + unique)
+  harness.fs.mkdir(root)
   llm_mock({text: "daemon ready"})
   llm_mock({text: "handled Foo.swift"})
   llm_mock({text: "handled Bar.swift"})
@@ -28,20 +29,20 @@ pipeline test(task) {
     },
   )
   let first = daemon_snapshot(daemon)
-  __io_println(daemon?.status == "running")
-  __io_println(first?.daemon_state == "idle")
-  __io_println(first?.queued_event_count == 0)
+  __io_println(daemon.status == "running")
+  __io_println(first.daemon_state == "idle")
+  __io_println(first.queued_event_count == 0)
   daemon_trigger(daemon, {kind: "file_changed", path: "Foo.swift"})
   let second = wait_for_iterations(daemon, first?.total_iterations ?? 0 + 1)
   __io_println(second?.total_iterations > first?.total_iterations)
   __io_println(contains(json_stringify(second?.recorded_messages ?? []), "Foo.swift"))
   __io_println(second?.queued_event_count == 0)
   let stopped = daemon_stop(daemon)
-  __io_println(stopped?.status == "stopped")
+  __io_println(stopped.status == "stopped")
   let resumed = daemon_resume(root)
   let resumed_snap = daemon_snapshot(resumed)
   __io_println(resumed_snap?.total_iterations ?? 0 >= second?.total_iterations ?? 0)
-  __io_println(resumed_snap?.queued_event_count == 0)
+  __io_println(resumed_snap.queued_event_count == 0)
   daemon_trigger(resumed, {kind: "file_changed", path: "Bar.swift"})
   let final_snap = wait_for_iterations(resumed, resumed_snap?.total_iterations ?? 0 + 1)
   __io_println(final_snap?.total_iterations > resumed_snap?.total_iterations)
@@ -50,5 +51,5 @@ pipeline test(task) {
   __io_println(contains(recorded, "Bar.swift"))
   __io_println(final_snap?.queued_event_count == 0)
   daemon_stop(resumed)
-  delete_file(root)
+  harness.fs.delete(root)
 }

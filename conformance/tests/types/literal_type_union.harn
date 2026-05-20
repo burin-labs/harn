@@ -1,5 +1,7 @@
-// Literal types can appear as union members in `type` aliases and
-// on bare annotations. They round-trip through schema_of as enum schemas.
+/**
+ * Literal types can appear as union members in `type` aliases and
+ * on bare annotations. They round-trip through schema_of as enum schemas.
+ */
 type Verdict = "pass" | "fail" | "unclear"
 
 type Score = 0 | 1 | 2

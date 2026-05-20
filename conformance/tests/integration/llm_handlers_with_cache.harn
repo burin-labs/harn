@@ -5,7 +5,7 @@ pipeline default() {
   let store = {
     backend: "sqlite",
     namespace: "with-cache-" + uuid(),
-    path: path_join(temp_dir(), "harn-with-cache-sqlite-" + uuid() + ".sqlite"),
+    path: path_join(harness.fs.temp_dir(), "harn-with-cache-sqlite-" + uuid() + ".sqlite"),
   }
   cache_clear({store: store})
   llm_mock_clear()
@@ -25,7 +25,7 @@ pipeline default() {
   let fs_store = {
     backend: "fs",
     namespace: "with-cache-fs-" + uuid(),
-    path: path_join(temp_dir(), "harn-with-cache-fs-" + uuid()),
+    path: path_join(harness.fs.temp_dir(), "harn-with-cache-fs-" + uuid()),
   }
   llm_mock_clear()
   llm_mock({text: "fs cached", model: "mock-model", provider: "mock"})

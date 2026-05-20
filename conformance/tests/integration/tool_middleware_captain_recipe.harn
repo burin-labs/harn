@@ -23,11 +23,13 @@ let telemetry_records = atomic(0)
 
 let handoff_records = atomic(0)
 
-// Tool schemas omit `reason` deliberately. with_required_reason adds it
-// to the registry via `schema_transform` and strips it back out before
-// the runtime validates dispatch args, so leaving it out of the natural
-// tool definition is the canonical pattern (echoes the existing
-// `agent_loop_tool_caller_observes` test).
+/**
+ * Tool schemas omit `reason` deliberately. with_required_reason adds it
+ * to the registry via `schema_transform` and strips it back out before
+ * the runtime validates dispatch args, so leaving it out of the natural
+ * tool definition is the canonical pattern (echoes the existing
+ * `agent_loop_tool_caller_observes` test).
+ */
 fn tools() {
   var r = tool_registry()
   r = tool_define(

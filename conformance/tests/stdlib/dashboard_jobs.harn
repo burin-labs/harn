@@ -1,17 +1,19 @@
 import { dashboard_job_event, dashboard_jobs_view } from "std/dashboard/jobs"
 
-fn fixture(name) {
+fn fixture(harness: Harness, name) {
   let root = project_root() ?? cwd()
-  return json_parse(read_file(path_join(root, "examples/dashboard_jobs/fixtures/" + name + ".json")))
+  return json_parse(
+    harness.fs.read_text(path_join(root, "examples/dashboard_jobs/fixtures/" + name + ".json")),
+  )
 }
 
 pipeline default() {
-  let local = fixture("local_job_stream")
+  let local = fixture(harness, "local_job_stream")
   var events = []
   for item in local.events {
     events = events.push(dashboard_job_event(item.kind, item))
   }
-  let cloud_event = dashboard_job_event("run.started", fixture("cloud_managed_run"))
+  let cloud_event = dashboard_job_event("run.started", fixture(harness, "cloud_managed_run"))
   let approval_requested = events.find({ event -> event.kind == "approval.requested" })
   let dlq_created = events.find({ event -> event.kind == "dlq.created" })
   let receipt_available = events.find({ event -> event.kind == "receipt.available" })

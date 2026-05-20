@@ -439,7 +439,7 @@ fn weighted_choice(items, weights = nil) {
   require len(items) == len(ws), "items and weights must have the same length"
   let total_weight = sum(ws)
   require total_weight > 0, "weights must sum to a positive value"
-  let target = random() * total_weight
+  let target = harness.random.gen_f64() * total_weight
   var cumulative = 0.0
   var idx = 0
   while idx < len(items) {

@@ -22,7 +22,7 @@ pipeline test(task) {
       default_scopes: ["read"],
     },
   )
-  let now = to_int(timestamp())
+  let now = to_int(harness.clock.timestamp())
   let ttl_seconds = 3600
   store
     .set(

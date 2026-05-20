@@ -38,7 +38,7 @@ let FIXED_OBSERVED_AT = "2026-05-11T00:00:00Z"
 
 let FIXED_FETCHED_AT = "fixture-time"
 
-fn __install_fixture_mocks() {
+fn __install_fixture_mocks(harness: Harness) {
   http_mock_clear()
   http_mock(
     "GET",
@@ -50,7 +50,7 @@ fn __install_fixture_mocks() {
         etag: "\"fixture\"",
         "last-modified": "Mon, 11 May 2026 00:00:00 GMT",
       },
-      body: read_file(path_join(FIXTURE_DIR, "anthropic_pricing.html")),
+      body: harness.fs.read_text(path_join(FIXTURE_DIR, "anthropic_pricing.html")),
     },
   )
   http_mock(
@@ -63,7 +63,7 @@ fn __install_fixture_mocks() {
         etag: "\"fixture\"",
         "last-modified": "Mon, 11 May 2026 00:00:00 GMT",
       },
-      body: read_file(path_join(FIXTURE_DIR, "openai_pricing.html")),
+      body: harness.fs.read_text(path_join(FIXTURE_DIR, "openai_pricing.html")),
     },
   )
   http_mock(
@@ -76,7 +76,7 @@ fn __install_fixture_mocks() {
         etag: "\"fixture\"",
         "last-modified": "Mon, 11 May 2026 00:00:00 GMT",
       },
-      body: read_file(path_join(FIXTURE_DIR, "openrouter_models.json")),
+      body: harness.fs.read_text(path_join(FIXTURE_DIR, "openrouter_models.json")),
     },
   )
 }
@@ -214,14 +214,14 @@ fn __adapter_specs() {
   return [__anthropic_spec(), __openai_spec(), __openrouter_spec(), __fireworks_spec()]
 }
 
-fn __load_secrets(live, specs) {
+fn __load_secrets(harness: Harness, live, specs) {
   if !live {
     return {}
   }
   var secrets = {}
   for spec in specs {
     for name in spec?.key_envs ?? [] {
-      let value = env(name)
+      let value = harness.env.get(name)
       if value != nil {
         secrets = secrets + {[name]: value}
       }
@@ -247,9 +247,9 @@ pub fn run_adapters(env: dict, specs: list<dict>) -> dict {
   return {runs: runs, observations: raw}
 }
 
-fn __ensure_run_dir() {
-  if !file_exists(RUN_OUTPUT_DIR) {
-    mkdir(RUN_OUTPUT_DIR)
+fn __ensure_run_dir(harness: Harness) {
+  if !harness.fs.exists(RUN_OUTPUT_DIR) {
+    harness.fs.mkdir(RUN_OUTPUT_DIR)
   }
 }
 
@@ -271,27 +271,27 @@ fn __compose_report(env, specs, catalog, run_mode) {
   }
 }
 
-fn __write_outputs(outcome) {
-  __ensure_run_dir()
-  write_file(path_join(RUN_OUTPUT_DIR, "drift-report.md"), outcome.report)
-  write_file(path_join(RUN_OUTPUT_DIR, "candidate.toml"), outcome.candidate)
+fn __write_outputs(harness: Harness, outcome) {
+  __ensure_run_dir(harness)
+  harness.fs.write_text(path_join(RUN_OUTPUT_DIR, "drift-report.md"), outcome.report)
+  harness.fs.write_text(path_join(RUN_OUTPUT_DIR, "candidate.toml"), outcome.candidate)
 }
 
-fn __check_against_golden(outcome, update) -> int {
+fn __check_against_golden(harness: Harness, outcome, update) -> int {
   if update {
-    write_file(EXPECTED_REPORT_PATH, outcome.report)
-    write_file(EXPECTED_CANDIDATE_PATH, outcome.candidate)
+    harness.fs.write_text(EXPECTED_REPORT_PATH, outcome.report)
+    harness.fs.write_text(EXPECTED_CANDIDATE_PATH, outcome.candidate)
     __io_println("Updated " + EXPECTED_REPORT_PATH)
     __io_println("Updated " + EXPECTED_CANDIDATE_PATH)
     return 0
   }
-  let expected_report = if file_exists(EXPECTED_REPORT_PATH) {
-    read_file(EXPECTED_REPORT_PATH)
+  let expected_report = if harness.fs.exists(EXPECTED_REPORT_PATH) {
+    harness.fs.read_text(EXPECTED_REPORT_PATH)
   } else {
     ""
   }
-  let expected_candidate = if file_exists(EXPECTED_CANDIDATE_PATH) {
-    read_file(EXPECTED_CANDIDATE_PATH)
+  let expected_candidate = if harness.fs.exists(EXPECTED_CANDIDATE_PATH) {
+    harness.fs.read_text(EXPECTED_CANDIDATE_PATH)
   } else {
     ""
   }
@@ -319,11 +319,11 @@ pipeline main(task) {
     FIXED_OBSERVED_AT
   }
   if !live {
-    __install_fixture_mocks()
+    __install_fixture_mocks(harness)
   }
   let env_data = {
     observed_at: observed_at,
-    secrets: __load_secrets(live, specs),
+    secrets: __load_secrets(harness, live, specs),
     http_options: if live {
       nil
     } else {
@@ -338,13 +338,13 @@ pipeline main(task) {
   let catalog = if live {
     llm_provider_catalog()
   } else {
-    json_parse(read_file(BASELINE_CATALOG_PATH))
+    json_parse(harness.fs.read_text(BASELINE_CATALOG_PATH))
   }
   let outcome = __compose_report(env_data, specs, catalog, run_mode)
   if check {
-    return __check_against_golden(outcome, update)
+    return __check_against_golden(harness, outcome, update)
   }
-  __write_outputs(outcome)
+  __write_outputs(harness, outcome)
   __io_println("wrote " + path_join(RUN_OUTPUT_DIR, "drift-report.md"))
   __io_println("wrote " + path_join(RUN_OUTPUT_DIR, "candidate.toml"))
   return 0

@@ -1,6 +1,6 @@
 pipeline main() {
-  let dir = path_join(temp_dir(), "harn_eval_pack_declaration")
-  mkdir(dir)
+  let dir = path_join(harness.fs.temp_dir(), "harn_eval_pack_declaration")
+  harness.fs.mkdir(dir)
   let run = run_record(
     {
       _type: "run_record",

@@ -1,9 +1,11 @@
-// Basic `skill NAME { ... }` top-level declaration.
-//
-// A skill decl lowers to `skill_define(skill_registry(), NAME, {
-// field: value, ... })` and binds the resulting registry dict to NAME.
-// Body entries are `<field_name> <expression>` pairs; lifecycle hooks
-// are fn literal expressions like any other value.
+/**
+ * Basic `skill NAME { ... }` top-level declaration.
+ *
+ * A skill decl lowers to `skill_define(skill_registry(), NAME, {
+ * field: value, ... })` and binds the resulting registry dict to NAME.
+ * Body entries are `<field_name> <expression>` pairs; lifecycle hooks
+ * are fn literal expressions like any other value.
+ */
 pipeline test(task) {
   // Test 1: basic skill declaration with string/list fields
   skill deploy {

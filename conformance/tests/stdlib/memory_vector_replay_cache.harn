@@ -1,7 +1,7 @@
 import "std/memory"
 
 pipeline default() {
-  let root = path_join(temp_dir(), "harn-memory-replay-" + uuid())
+  let root = path_join(harness.fs.temp_dir(), "harn-memory-replay-" + uuid())
   host_mock_clear()
   host_mock("memory", "embed", {result: {vector: [0.6, 0.8], dim: 2, model: "fake"}})
   memory_open("agent/replay", {backend: "vector", embed_dim: 2, embed_model_hint: "fake", root: root})
@@ -33,5 +33,5 @@ pipeline default() {
   // Same (namespace, query, mode, model_hint, top_k) tape → same order.
   __io_println(first_recall[0].id == second_recall[0].id)
   __io_println(first_recall[1].id == second_recall[1].id)
-  delete_file(root)
+  harness.fs.delete(root)
 }

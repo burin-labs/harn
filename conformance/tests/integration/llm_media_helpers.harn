@@ -2,14 +2,15 @@ import { image_content, image_message, media_type_for_path } from "std/llm/media
 
 pipeline test(task) {
   let png_path = "media_helper_fixture.png"
-  write_file_bytes(
+  harness.fs
+    .write_bytes(
     png_path,
     bytes_from_hex(
       "89504e470d0a1a0a0000000d49484452000000010000000108060000001f15c4890000000a49444154789c63000100000500010d0a2db40000000049454e44ae426082",
     ),
   )
   let block = image_content(png_path, {detail: "low"})
-  delete_file(png_path)
+  harness.fs.delete(png_path)
   assert(block.type == "image", "image block type")
   assert(block.media_type == "image/png", "media type inferred")
   assert(block.detail == "low", "detail propagated")

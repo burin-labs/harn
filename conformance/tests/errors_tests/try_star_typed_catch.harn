@@ -1,6 +1,8 @@
-// `try*` rethrows the original thrown value with its original type, so
-// a typed-catch filter on the outer `try { ... } catch (e: T) { ... }`
-// applies to the rethrown value normally.
+/**
+ * `try*` rethrows the original thrown value with its original type, so
+ * a typed-catch filter on the outer `try { ... } catch (e: T) { ... }`
+ * applies to the rethrown value normally.
+ */
 pipeline test(task) {
   enum AppError {
     NotFound(msg)

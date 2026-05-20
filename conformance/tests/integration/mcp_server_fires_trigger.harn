@@ -1,21 +1,23 @@
 import "../_common"
 
 pipeline default() {
-  let root = path_join(temp_dir(), "harn-mcp-fire-" + uuid())
-  mkdir(root)
+  let root = path_join(harness.fs.temp_dir(), "harn-mcp-fire-" + uuid())
+  harness.fs.mkdir(root)
   let log_path = path_join(root, "trigger.log")
-  write_file(
+  harness.fs
+    .write_text(
     path_join(root, "harn.toml"),
     "[package]\nname = \"fixture\"\n\n[exports]\nhandlers = \"lib.harn\"\n\n[[triggers]]\nid = \"cron-ok\"\nkind = \"cron\"\nprovider = \"cron\"\nschedule = \"* * * * *\"\nmatch = { events = [\"cron.tick\"] }\nhandler = \"handlers::on_ok\"\n",
   )
-  write_file(
+  harness.fs
+    .write_text(
     path_join(root, "lib.harn"),
     "import \"std/triggers\"\n\nlet log_path = \""
       + log_path
       + "\"\n\npub fn on_ok(event: TriggerEvent) -> dict {\n  write_file(log_path, \"fired:\" + event.kind + \"\\n\")\n  return {kind: event.kind, event_id: event.id}\n}\n",
   )
   let repo_root = exec("git", "rev-parse", "--show-toplevel").stdout.trim()
-  let harn_bin = resolve_harn_bin(repo_root)
+  let harn_bin = resolve_harn_bin(harness, repo_root)
   let helper = path_join(repo_root, "conformance/helpers/mcp_stdio_tool.py")
   let result = exec(
     "python3",
@@ -30,6 +32,6 @@ pipeline default() {
   let payload = json_parse(result.stdout.trim())
   __io_println(payload.status == "dispatched")
   __io_println(payload.binding_id == "cron-ok")
-  __io_println(file_exists(log_path))
-  __io_println(read_file(log_path).contains("fired:cron.tick"))
+  __io_println(harness.fs.exists(log_path))
+  __io_println(harness.fs.read_text(log_path).contains("fired:cron.tick"))
 }

@@ -10,7 +10,7 @@ pipeline default() {
       id: "artifact-1",
       kind: "workspace_file",
       title: "src/main.rs",
-      text: "fn main() {}",
+      text: "fn " + "main() {}",
       source: "stage<a>",
       freshness: "fresh&ready",
       priority: 7,
@@ -20,7 +20,7 @@ pipeline default() {
   __io_println(contains(xml_context, "<title>src/main.rs</title>"))
   __io_println(contains(xml_context, "<source>stage&lt;a&gt;</source>"))
   __io_println(contains(xml_context, "<freshness>fresh&amp;ready</freshness>"))
-  __io_println(contains(xml_context, "fn main() {}"))
+  __io_println(contains(xml_context, "fn " + "main() {}"))
   let json_context = workflow_render_artifacts_context(
     [{id: "artifact-2", kind: "summary", data: {b: 2, a: 1}}],
     {render: "json"},

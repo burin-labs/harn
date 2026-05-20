@@ -31,11 +31,12 @@ fn first_snapshot_line(text) {
 
 pipeline main() {
   let repo_root = exec("git", "rev-parse", "--show-toplevel").stdout.trim()
-  let harn_bin = env_or("HARN_CONFORMANCE_HARN_BIN", resolve_harn_bin(repo_root))
-  let root = path_join(temp_dir(), "harn-suspend-cold-restart-" + uuid_v7())
-  mkdir(root)
+  let harn_bin = harness.env.get_or("HARN_CONFORMANCE_HARN_BIN", resolve_harn_bin(harness, repo_root))
+  let root = path_join(harness.fs.temp_dir(), "harn-suspend-cold-restart-" + uuid_v7())
+  harness.fs.mkdir(root)
   let script = path_join(root, "cold_restart_suspend.harn")
-  write_file(
+  harness.fs
+    .write_text(
     script,
     "pipeline main() {\n"
       + "  llm_mock({tool_calls: [{id: \"park_cold\", name: \"agent_await_resumption\", arguments: {reason: \"cold restart park\"}}]})\n"
@@ -54,8 +55,8 @@ pipeline main() {
   } else {
     path_join(root, snapshot)
   }
-  __io_println("snapshot_exists=" + to_string(file_exists(snapshot_path)))
-  let snapshot_text = read_file(snapshot_path)
+  __io_println("snapshot_exists=" + to_string(harness.fs.exists(snapshot_path)))
+  let snapshot_text = harness.fs.read_text(snapshot_path)
   __io_println("snapshot_nonempty=" + to_string(len(snapshot_text) > 0))
   let second = exec_at(root, harn_bin, "run", "--resume", snapshot, "--json")
   __io_println("second_ok=" + to_string(second.success))

@@ -52,19 +52,19 @@ fn exercise_memory() {
   require_nil("memory.isolation", b.get("shared-key"))
 }
 
-fn exercise_file() {
-  let path = path_join(temp_dir(), "harn-oauth-storage-" + uuid() + ".bin")
+fn exercise_file(harness: Harness) {
+  let path = path_join(harness.fs.temp_dir(), "harn-oauth-storage-" + uuid() + ".bin")
   let key = "high-entropy-test-key-must-be-long-enough"
   let s = file(path, key)
   exercise_backend("file", s, "file")
   // After exercise_backend deletes both keys the file should be gone.
-  if file_exists(path) {
+  if harness.fs.exists(path) {
     throw "file: expected file to be removed once empty"
   }
   // Persistence + at-rest encryption: re-open with the same key.
   let s2 = file(path, key)
   s2.set("github", {access_token: "persistent"}, 600)
-  let raw = read_file(path)
+  let raw = harness.fs.read_text(path)
   if contains(raw, "persistent") {
     throw "file: plaintext token leaked into ciphertext on disk"
   }
@@ -146,7 +146,7 @@ fn exercise_cloud(scope, factory, expect_kind) {
   host_mock_clear()
 }
 
-fn exercise_namespace() {
+fn exercise_namespace(harness: Harness) {
   let ns = storage()
   if ns.memory.kind != "memory" {
     throw "storage(): expected memory handle on namespace"
@@ -157,7 +157,7 @@ fn exercise_namespace() {
   if ns.harn_cloud_org.kind != "harn_cloud_org" {
     throw "storage(): expected harn_cloud_org handle on namespace"
   }
-  let path = path_join(temp_dir(), "harn-oauth-storage-ns-" + uuid() + ".bin")
+  let path = path_join(harness.fs.temp_dir(), "harn-oauth-storage-ns-" + uuid() + ".bin")
   let s = ns.file(path, "ns-key")
   s.set("ns", {access_token: "ns-tok"}, 60)
   require_token("namespace.file", s.get("ns"), "ns-tok")
@@ -177,10 +177,10 @@ fn exercise_namespace() {
 
 pipeline test(task) {
   exercise_memory()
-  exercise_file()
+  exercise_file(harness)
   exercise_custom()
   exercise_cloud("session", harn_cloud_session, "harn_cloud_session")
   exercise_cloud("org", harn_cloud_org, "harn_cloud_org")
-  exercise_namespace()
+  exercise_namespace(harness)
   log("oauth storage ok")
 }

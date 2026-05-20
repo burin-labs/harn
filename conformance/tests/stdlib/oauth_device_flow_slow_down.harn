@@ -43,9 +43,9 @@ pipeline test(task) {
       ],
     },
   )
-  let start_ts = to_int(timestamp())
+  let start_ts = to_int(harness.clock.timestamp())
   let token_set = device_flow(provider, {client_id: "cli-id", storage: store, on_user_code: { _u, _v -> nil }})
-  let end_ts = to_int(timestamp())
+  let end_ts = to_int(harness.clock.timestamp())
   assert_eq(token_set.access_token, "OK-SLOW", "device_flow returns token after slow_down")
   // Initial interval=3s; slow_down bumps it to 3+5=8s; one sleep of 8s
   // happens before the successful retry. mock_time advances on sleep, so

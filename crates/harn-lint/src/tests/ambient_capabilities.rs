@@ -91,6 +91,24 @@ fn ambient_random_call_rewrites_to_harness_random() {
 }
 
 #[test]
+fn explicit_seeded_random_calls_are_not_ambient_host_random() {
+    let source = r#"fn main(harness: Harness) {
+  let rng = rng_seed(42)
+  random(rng)
+  random_int(rng, 0, 10)
+  random_choice(rng, ["a", "b"])
+  random_shuffle(rng, [1, 2])
+}
+"#;
+    let diags = lint_source(source);
+    assert_eq!(
+        count_rule(&diags, "ambient-random-builtin"),
+        0,
+        "seeded Rng calls should stay on the deterministic Rng surface: {diags:?}"
+    );
+}
+
+#[test]
 fn ambient_net_call_rewrites_to_harness_net() {
     let source =
         "fn main(harness: Harness) {\n  let r = http_get(\"https://example.test\")\n  println(r)\n}\n";

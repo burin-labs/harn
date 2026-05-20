@@ -1,4 +1,4 @@
-// Test circuit breaker builtins
+/** Test circuit breaker builtins */
 pipeline default(task) {
   // Create a circuit breaker with threshold=3
   let cb = circuit_breaker("test_cb", 3, 60000)

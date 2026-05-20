@@ -30,7 +30,7 @@ fn __fs_with_newline(text, trailing_newline) {
 pub fn ensure_parent_dir(path: string) {
   let parent = __fs_parent(path)
   if parent != "" && parent != "." {
-    mkdir(parent)
+    harness.fs.mkdir(parent)
   }
 }
 
@@ -44,10 +44,10 @@ pub fn ensure_parent_dir(path: string) {
  * @example: read_json(path, fallback)
  */
 pub fn read_json(path: string, fallback = nil) {
-  if !file_exists(path) {
+  if !harness.fs.exists(path) {
     return fallback
   }
-  let parsed = safe_parse(read_file(path))
+  let parsed = safe_parse(harness.fs.read_text(path))
   if parsed == nil {
     return fallback
   }
@@ -64,11 +64,11 @@ pub fn read_json(path: string, fallback = nil) {
  * @example: read_json_result(path)
  */
 pub fn read_json_result(path: string) -> dict {
-  if !file_exists(path) {
+  if !harness.fs.exists(path) {
     return {ok: false, error: "file not found: " + path}
   }
   let parsed = try {
-    json_parse(read_file(path))
+    json_parse(harness.fs.read_text(path))
   }
   if is_ok(parsed) {
     return {ok: true, value: unwrap(parsed)}
@@ -95,7 +95,7 @@ pub fn write_json(path: string, value, options: WriteDataOptions = {}) {
   } else {
     json_stringify(value)
   }
-  write_file(path, __fs_with_newline(body, opts?.trailing_newline ?? true))
+  harness.fs.write_text(path, __fs_with_newline(body, opts?.trailing_newline ?? true))
 }
 
 /**
@@ -108,11 +108,11 @@ pub fn write_json(path: string, value, options: WriteDataOptions = {}) {
  * @example: read_yaml(path, fallback)
  */
 pub fn read_yaml(path: string, fallback = nil) {
-  if !file_exists(path) {
+  if !harness.fs.exists(path) {
     return fallback
   }
   let parsed = try {
-    yaml_parse(read_file(path))
+    yaml_parse(harness.fs.read_text(path))
   }
   if is_ok(parsed) {
     return unwrap(parsed)
@@ -134,7 +134,8 @@ pub fn write_yaml(path: string, value, options: WriteDataOptions = {}) {
   if opts.ensure_parent ?? true {
     ensure_parent_dir(path)
   }
-  write_file(path, __fs_with_newline(yaml_stringify(value), opts?.trailing_newline ?? true))
+  harness.fs
+    .write_text(path, __fs_with_newline(yaml_stringify(value), opts?.trailing_newline ?? true))
 }
 
 /**
@@ -147,11 +148,11 @@ pub fn write_yaml(path: string, value, options: WriteDataOptions = {}) {
  * @example: read_toml(path, fallback)
  */
 pub fn read_toml(path: string, fallback = nil) {
-  if !file_exists(path) {
+  if !harness.fs.exists(path) {
     return fallback
   }
   let parsed = try {
-    toml_parse(read_file(path))
+    toml_parse(harness.fs.read_text(path))
   }
   if is_ok(parsed) {
     return unwrap(parsed)
@@ -173,7 +174,8 @@ pub fn write_toml(path: string, value, options: WriteDataOptions = {}) {
   if opts.ensure_parent ?? true {
     ensure_parent_dir(path)
   }
-  write_file(path, __fs_with_newline(toml_stringify(value), opts?.trailing_newline ?? true))
+  harness.fs
+    .write_text(path, __fs_with_newline(toml_stringify(value), opts?.trailing_newline ?? true))
 }
 
 /**
@@ -190,7 +192,8 @@ pub fn write_lines(path: string, lines: list<string>, options: WriteDataOptions 
   if opts.ensure_parent ?? true {
     ensure_parent_dir(path)
   }
-  write_file(path, __fs_with_newline(join(lines ?? [], "\n"), opts?.trailing_newline ?? true))
+  harness.fs
+    .write_text(path, __fs_with_newline(join(lines ?? [], "\n"), opts?.trailing_newline ?? true))
 }
 
 /**
@@ -204,7 +207,7 @@ pub fn write_lines(path: string, lines: list<string>, options: WriteDataOptions 
  */
 pub fn append_line(path: string, line: string) {
   let text = line ?? ""
-  append_file(path, text + "\n")
+  harness.fs.append(path, text + "\n")
 }
 
 /**
@@ -217,9 +220,9 @@ pub fn append_line(path: string, line: string) {
  * @example: touch(path)
  */
 pub fn touch(path: string) {
-  if !file_exists(path) {
+  if !harness.fs.exists(path) {
     ensure_parent_dir(path)
-    write_file(path, "")
+    harness.fs.write_text(path, "")
   }
 }
 
@@ -274,7 +277,7 @@ pub fn relative_path(root: string, path: string) -> string {
  */
 pub fn is_file(path: string) -> bool {
   let info = try {
-    stat(path)
+    harness.fs.stat(path)
   }
   if !is_ok(info) {
     return false
@@ -293,7 +296,7 @@ pub fn is_file(path: string) -> bool {
  */
 pub fn is_dir(path: string) -> bool {
   let info = try {
-    stat(path)
+    harness.fs.stat(path)
   }
   if !is_ok(info) {
     return false
@@ -312,7 +315,7 @@ pub fn is_dir(path: string) -> bool {
  */
 pub fn file_size(path: string) {
   let info = try {
-    stat(path)
+    harness.fs.stat(path)
   }
   if is_ok(info) {
     return unwrap(info)?.size

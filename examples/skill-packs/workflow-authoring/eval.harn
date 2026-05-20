@@ -17,17 +17,17 @@
  * case; non-zero otherwise.
  */
 pipeline default() {
-  let opts = parse_argv(argv)
+  let opts = parse_argv(harness, argv)
   if opts.case == "" {
-    __io_eprint(
+    __io_write_stderr(
       "usage: harn run eval.harn -- --case <path> [--provider <id>] [--model <name>] [--tmp <dir>]\n",
     )
     return 2
   }
-  let case = json_parse(read_file(opts.case))
+  let case = json_parse(harness.fs.read_text(opts.case))
   let case_dir = dirname(opts.case)
   let golden_path = case_dir + "/" + case.golden_bundle_path
-  let golden_text = read_file(golden_path)
+  let golden_text = harness.fs.read_text(golden_path)
   var bundle_text = ""
   if opts.provider == "fake" {
     bundle_text = golden_text
@@ -36,13 +36,13 @@ pipeline default() {
     let response = llm_call(case.user_prompt, case.system_prompt, opts_dict)
     bundle_text = extract_block(response.text, "bundle")
     if bundle_text == "" {
-      __io_eprint("eval: model response missing <bundle>...</bundle>\n")
+      __io_write_stderr("eval: model response missing <bundle>...</bundle>\n")
       return 3
     }
   }
   exec("mkdir", "-p", opts.tmp)
   let bundle_path = opts.tmp + "/" + case.id + ".bundle.json"
-  write_file(bundle_path, bundle_text)
+  harness.fs.write_text(bundle_path, bundle_text)
   let harn_bin = opts.harn_bin
   let validate = exec(harn_bin, "workflow", "validate", "--bundle", bundle_path, "--json")
   let preview = exec(harn_bin, "workflow", "preview", "--bundle", bundle_path, "--json")
@@ -67,21 +67,21 @@ pipeline default() {
     validate_stdout: validate.stdout,
     validate_stderr: validate.stderr,
   }
-  __io_print(json_stringify(report))
-  __io_print("\n")
+  __io_write_stdout(json_stringify(report))
+  __io_write_stdout("\n")
   if validate_ok && preview_ok && run_ok && assertions.ok {
     return 0
   }
   return 1
 }
 
-fn parse_argv(args: list<string>) -> dict {
+fn parse_argv(harness: Harness, args: list<string>) -> dict {
   var opts = {
     case: "",
     provider: "fake",
     model: "fake-model",
     tmp: ".harn-runs/workflow-authoring-eval",
-    harn_bin: env_or("HARN_BIN", "harn"),
+    harn_bin: harness.env.get_or("HARN_BIN", "harn"),
   }
   var i = 0
   while i < len(args) {

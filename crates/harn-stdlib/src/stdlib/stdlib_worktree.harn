@@ -29,8 +29,8 @@ pub fn worktree_create(repo, name, base_ref, path) {
   } else {
     path
   }
-  mkdir(repo + "/.harn")
-  mkdir(repo + "/.harn/worktrees")
+  harness.fs.mkdir(repo + "/.harn")
+  harness.fs.mkdir(repo + "/.harn/worktrees")
   let result = exec_at(repo, "git", "worktree", "add", "-B", name, target, base_ref)
   return {repo: repo, name: name, path: target, base_ref: base_ref, result: result, success: result?.success}
 }

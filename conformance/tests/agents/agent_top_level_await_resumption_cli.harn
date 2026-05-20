@@ -10,11 +10,12 @@ fn first_snapshot_line(text) {
 
 pipeline main() {
   let repo_root = exec("git", "rev-parse", "--show-toplevel").stdout.trim()
-  let harn_bin = env_or("HARN_CONFORMANCE_HARN_BIN", resolve_harn_bin(repo_root))
-  let root = path_join(temp_dir(), "harn-top-level-resume-" + uuid_v7())
-  mkdir(root)
+  let harn_bin = harness.env.get_or("HARN_CONFORMANCE_HARN_BIN", resolve_harn_bin(harness, repo_root))
+  let root = path_join(harness.fs.temp_dir(), "harn-top-level-resume-" + uuid_v7())
+  harness.fs.mkdir(root)
   let script = path_join(root, "top_level_suspend.harn")
-  write_file(
+  harness.fs
+    .write_text(
     script,
     "pipeline main() {\n"
       + "  llm_mock({tool_calls: [{id: \"park_1\", name: \"agent_await_resumption\", arguments: {reason: \"waiting on operator\"}}]})\n"
@@ -37,7 +38,7 @@ pipeline main() {
   } else {
     path_join(root, snapshot)
   }
-  __io_println(file_exists(snapshot_path))
+  __io_println(harness.fs.exists(snapshot_path))
   let second = exec_at(root, harn_bin, "run", "--resume", snapshot, "--json")
   __io_println(second.success)
   let lines = second.stdout.trim().split("\n")

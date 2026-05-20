@@ -1,6 +1,8 @@
-// `schema_of(T)` must produce a schema dict that round-trips cleanly
-// through the OpenAPI/JSON-Schema converter — the same representation
-// ACP's `ToolAnnotations.args` consumes.
+/**
+ * `schema_of(T)` must produce a schema dict that round-trips cleanly
+ * through the OpenAPI/JSON-Schema converter — the same representation
+ * ACP's `ToolAnnotations.args` consumes.
+ */
 type Task = {title: string, priority: "low" | "med" | "high", points: 1 | 2 | 3 | 5 | 8}
 
 pipeline test(task) {

@@ -1,11 +1,13 @@
-// Discriminator narrowing on tagged shape unions: `match v.<tag>` and
-// `if v.<tag> == "..."` both refine `v` to the matching variant in
-// each arm/branch, regardless of the discriminant field name.
-//
-// Companion to shape_union_discriminator_forms (which pins the surface
-// invariants); this file exercises the *narrowed* variant types so the
-// `let pinned: <variant_shape> = v` assignments only succeed when
-// narrowing actually fires.
+/**
+ * Discriminator narrowing on tagged shape unions: `match v.<tag>` and
+ * `if v.<tag> == "..."` both refine `v` to the matching variant in
+ * each arm/branch, regardless of the discriminant field name.
+ *
+ * Companion to shape_union_discriminator_forms (which pins the surface
+ * invariants); this file exercises the *narrowed* variant types so the
+ * `let pinned: <variant_shape> = v` assignments only succeed when
+ * narrowing actually fires.
+ */
 type Msg = {kind: "ping", ttl: int} | {kind: "pong", latency_ms: int}
 
 fn handle_msg(m: Msg) -> string {
@@ -25,10 +27,9 @@ fn handle_msg_if(m: Msg) -> string {
   if m.kind == "ping" {
     let pinned: {kind: "ping", ttl: int} = m
     return "if-ping " + to_string(pinned.ttl)
-  } else {
-    let pinned: {kind: "pong", latency_ms: int} = m
-    return "if-pong " + to_string(pinned.latency_ms)
   }
+  let pinned: {kind: "pong", latency_ms: int} = m
+  return "if-pong " + to_string(pinned.latency_ms)
 }
 
 type Event = {type: "click", x: int, y: int} | {type: "scroll", dy: int}

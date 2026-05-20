@@ -1,21 +1,22 @@
 import "std/worktree"
 
 pipeline main() {
-  let unique = to_string(to_int(timestamp())) + "-" + to_string(random_int(100000, 999999))
-  let base = path_join(temp_dir(), "harn-worktree-runtime-" + unique)
-  mkdir(base)
+  let unique = to_string(to_int(harness.clock.timestamp())) + "-"
+    + to_string(harness.random.gen_range(100000, 999999))
+  let base = path_join(harness.fs.temp_dir(), "harn-worktree-runtime-" + unique)
+  harness.fs.mkdir(base)
   let repo = path_join(base, "repo")
-  mkdir(repo)
+  harness.fs.mkdir(repo)
   __io_println(exec_at(repo, "git", "init")?.success)
-  write_file(path_join(repo, "README.md"), "hello\n")
+  harness.fs.write_text(path_join(repo, "README.md"), "hello\n")
   __io_println(exec_at(repo, "git", "add", "README.md")?.success)
   __io_println(
     shell_at(repo, "git -c user.name='Harn' -c user.email='harn@example.com' commit -m init")?.success,
   )
   let worktree = worktree_create(repo, "feature_runtime", "HEAD", nil)
   __io_println(worktree?.success)
-  __io_println(file_exists(path_join(worktree?.path, "README.md")))
-  write_file(path_join(worktree?.path, "README.md"), "hello\nworld\n")
+  __io_println(harness.fs.exists(path_join(worktree?.path, "README.md")))
+  harness.fs.write_text(path_join(worktree?.path, "README.md"), "hello\nworld\n")
   let diff = worktree_diff(worktree?.path, nil)
   __io_println(diff?.success)
   __io_println(contains(diff?.stdout, "README"))
