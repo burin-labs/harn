@@ -49,6 +49,66 @@ println(content)
 dicts for multi-block results, or nil when empty. If the tool reports an
 error, `mcp_call` throws.
 
+### Experimental file inputs
+
+MCP file inputs are still draft protocol work. Harn implements the current
+leading draft, [SEP-2356][mcp-file-sep], behind an explicit runtime opt-in:
+tool schemas mark file fields with `x-mcp-file`, and clients pass the selected
+file inline as an RFC 2397 `data:` URI. This is not the older multipart
+upload-endpoint proposal; upstream closed that path in favor of the smaller
+schema annotation.
+
+```harn
+harn.mcp.configure({
+  experimental: {
+    file_upload: {
+      spec_revision: "modelcontextprotocol/modelcontextprotocol#2356",
+    },
+  },
+})
+
+let client = mcp_connect("python3", ["./image-server.py"])
+let image = harn.mcp.upload_file(client, "photo.png", {
+  accept: ["image/png", "image/jpeg"],
+  max_size: 5242880,
+})
+let result = mcp_call(client, "describe_image", {image: image})
+println(result)
+```
+
+`harn.mcp.upload_file(...)` reads a local file, enforces the normal Harn
+filesystem policy, validates optional `accept` / `max_size` hints, and returns
+`data:<media-type>;base64,...`. Harn redacts `data:` URI payloads from replay
+keys and server-side diagnostics; scripts should still avoid printing them.
+
+When Harn serves an MCP tool, use `harn.mcp.file_input(...)` in a
+`tool_define` parameter schema. The MCP server validates incoming `data:` URIs
+against the declared media-type and size constraints before invoking the
+handler.
+
+```harn
+var tools = tool_registry()
+
+tools = tool_define(tools, "inspect_upload", "Inspect a small text file", {
+  parameters: {
+    upload: harn.mcp.file_input({
+      accept: ["text/*"],
+      max_size: 64,
+      description: "Small text file to inspect",
+    }),
+  },
+  handler: { args -> "received " + args.upload },
+})
+
+mcp_tools(tools)
+```
+
+Because SEP-2356 is still draft, the wire shape can change. The opt-in records
+the implemented proposal revision so experimental users have a clear cutover
+point when MCP ratifies file input support.
+
+[mcp-file-sep]: https://github.com/modelcontextprotocol/modelcontextprotocol/pull/2356
+
 ### Resources and prompts
 
 ```harn

@@ -2000,6 +2000,9 @@ MCP servers.
 | Function | Parameters | Returns | Description |
 |---|---|---|---|
 | `mcp_roots()` / `harn.mcp.roots()` | none | list | Return the MCP roots Harn exposes to connected servers (`uri`, `name`, `path`) |
+| `mcp_configure(config)` / `harn.mcp.configure(config)` | config: dict | dict | Opt into experimental MCP behavior for the current VM, including draft SEP-2356 file inputs |
+| `mcp_file_input(options?)` / `harn.mcp.file_input(options?)` | options: dict | dict | Return a JSON Schema property using the draft `x-mcp-file` annotation |
+| `mcp_upload_file(server, file_path, options?)` / `harn.mcp.upload_file(server, file_path, options?)` | server: mcp\_client, file\_path: string, options: dict | string | Encode a local file as an RFC 2397 `data:` URI for an experimental MCP file input |
 | `mcp_connect(command, args?)` | command: string, args: list | mcp\_client | Spawn an MCP server and perform the initialize handshake |
 | `mcp_list_tools(client)` | client: mcp\_client | list | List available tools from the server |
 | `mcp_call(client, name, arguments?)` | client: mcp\_client, name: string, arguments: dict | string or list | Call a tool and return the result |
@@ -2026,6 +2029,12 @@ mcp_disconnect(client)
 
 Notes:
 
+- MCP file inputs are experimental and default off. Harn implements the current
+  draft [SEP-2356](https://github.com/modelcontextprotocol/modelcontextprotocol/pull/2356)
+  shape: `x-mcp-file` on `uri` string schema properties and inline RFC 2397
+  `data:` URI values. Enable it explicitly with
+  `harn.mcp.configure({experimental: {file_upload: {spec_revision:
+  "modelcontextprotocol/modelcontextprotocol#2356"}}})`.
 - `mcp_call` returns a string when the tool produces a single text block,
   a list of content dicts for multi-block results, or nil when empty.
 - HTTP MCP clients keep the server's Streamable HTTP GET event stream open
