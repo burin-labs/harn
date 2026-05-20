@@ -357,15 +357,11 @@ fn vm_output_to_value(output: std::process::Output) -> VmValue {
     let mut result = BTreeMap::new();
     result.insert(
         "stdout".to_string(),
-        VmValue::String(Rc::from(
-            String::from_utf8_lossy(&output.stdout).to_string().as_str(),
-        )),
+        VmValue::String(Rc::from(String::from_utf8_lossy(&output.stdout).as_ref())),
     );
     result.insert(
         "stderr".to_string(),
-        VmValue::String(Rc::from(
-            String::from_utf8_lossy(&output.stderr).to_string().as_str(),
-        )),
+        VmValue::String(Rc::from(String::from_utf8_lossy(&output.stderr).as_ref())),
     );
     result.insert(
         "status".to_string(),

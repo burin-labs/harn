@@ -254,7 +254,9 @@ impl VmIter {
                 let rest = &s[*byte_idx..];
                 if let Some(c) = rest.chars().next() {
                     *byte_idx += c.len_utf8();
-                    Ok(Some(VmValue::String(Rc::from(c.to_string().as_str()))))
+                    let mut buf = [0u8; 4];
+                    let encoded = c.encode_utf8(&mut buf);
+                    Ok(Some(VmValue::String(Rc::from(&*encoded))))
                 } else {
                     *self = VmIter::Exhausted;
                     Ok(None)

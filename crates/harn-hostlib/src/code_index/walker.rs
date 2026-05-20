@@ -153,10 +153,7 @@ pub(crate) fn is_sensitive(path: &Path) -> bool {
     if BASE_CONTAINS.iter().any(|s| base.contains(s)) {
         return true;
     }
-    let parts: Vec<&str> = lower.split('/').collect();
-    parts
-        .iter()
-        .any(|part| SENSITIVE_DIRS.contains(&part.to_string().as_str()))
+    lower.split('/').any(|part| SENSITIVE_DIRS.contains(&part))
 }
 
 const EXACT_SENSITIVE: &[&str] = &[

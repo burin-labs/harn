@@ -281,9 +281,9 @@ pub async fn run_tests(
         }
     }
 
-    let passed = all_results.iter().filter(|r| r.passed).count();
-    let failed = all_results.iter().filter(|r| !r.passed).count();
     let total = all_results.len();
+    let passed = all_results.iter().filter(|r| r.passed).count();
+    let failed = total - passed;
 
     TestSummary {
         results: all_results,

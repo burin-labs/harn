@@ -342,8 +342,8 @@ fn render_diagnostic_inner(input: RenderDiagnostic<'_>) -> String {
         width = gutter_width + 1,
     ));
 
-    let source_line_opt = source.lines().nth(line_num.wrapping_sub(1));
-    if let Some(source_line) = source_line_opt.filter(|_| line_num > 0) {
+    let source_line_opt = line_num.checked_sub(1).and_then(|n| source.lines().nth(n));
+    if let Some(source_line) = source_line_opt {
         out.push_str(&format!(
             "{:>width$} {gutter} {source_line}\n",
             line_num,
@@ -522,11 +522,7 @@ fn render_related_span(
         width = gutter_width + 1,
     ));
 
-    if let Some(source_line) = source
-        .lines()
-        .nth(line_num.wrapping_sub(1))
-        .filter(|_| line_num > 0)
-    {
+    if let Some(source_line) = line_num.checked_sub(1).and_then(|n| source.lines().nth(n)) {
         out.push_str(&format!(
             "{:>width$} {gutter} {source_line}\n",
             line_num,

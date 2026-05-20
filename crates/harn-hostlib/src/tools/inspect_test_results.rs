@@ -18,10 +18,9 @@ use std::collections::BTreeMap;
 use std::path::PathBuf;
 use std::rc::Rc;
 use std::sync::atomic::{AtomicU64, Ordering};
-use std::sync::Mutex;
+use std::sync::{LazyLock, Mutex};
 
 use harn_vm::VmValue;
-use once_cell::sync::Lazy;
 
 use crate::error::HostlibError;
 use crate::tools::payload::{optional_bool, require_dict_arg, require_string};
@@ -109,7 +108,7 @@ struct HandleStore {
     entries: BTreeMap<String, RawArtifacts>,
 }
 
-static STORE: Lazy<Mutex<HandleStore>> = Lazy::new(|| Mutex::new(HandleStore::default()));
+static STORE: LazyLock<Mutex<HandleStore>> = LazyLock::new(|| Mutex::new(HandleStore::default()));
 static HANDLE_COUNTER: AtomicU64 = AtomicU64::new(1);
 
 /// Cache `artifacts` and return the opaque `result_handle` for them.

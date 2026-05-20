@@ -233,20 +233,13 @@ fn score_regex(pattern: &str, candidates: &[Candidate], max_results: usize) -> V
 }
 
 fn score_hybrid(query: &str, candidates: &[Candidate], max_results: usize) -> Vec<RankedTool> {
-    let field = score_field_weighted(
-        query,
-        candidates,
-        max_results.saturating_mul(4).max(max_results),
-    );
-    let lists = vec![
-        score_bm25(
-            query,
-            candidates,
-            max_results.saturating_mul(4).max(max_results),
-        ),
-        field.clone(),
-        field,
-    ];
+    // Pull 4x the requested fan-out from each ranker so the fusion has
+    // room to reorder beyond the top-N from any single list.
+    let pool = max_results.saturating_mul(4);
+    let field = score_field_weighted(query, candidates, pool);
+    // Field-weighted ranking is included twice to bias the fused order
+    // toward exact-name/path matches over BM25's bag-of-tokens score.
+    let lists = vec![score_bm25(query, candidates, pool), field.clone(), field];
     reciprocal_rank_fuse(lists, candidates, max_results)
 }
 
