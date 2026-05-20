@@ -1451,6 +1451,10 @@
         },
         {
           "type": "SYMBOL",
+          "name": "const_binding"
+        },
+        {
+          "type": "SYMBOL",
           "name": "var_binding"
         },
         {
@@ -1675,6 +1679,69 @@
           "content": {
             "type": "SYMBOL",
             "name": "_binding_pattern"
+          }
+        },
+        {
+          "type": "CHOICE",
+          "members": [
+            {
+              "type": "SEQ",
+              "members": [
+                {
+                  "type": "STRING",
+                  "value": ":"
+                },
+                {
+                  "type": "FIELD",
+                  "name": "type",
+                  "content": {
+                    "type": "SYMBOL",
+                    "name": "type_annotation"
+                  }
+                }
+              ]
+            },
+            {
+              "type": "BLANK"
+            }
+          ]
+        },
+        {
+          "type": "STRING",
+          "value": "="
+        },
+        {
+          "type": "FIELD",
+          "name": "value",
+          "content": {
+            "type": "CHOICE",
+            "members": [
+              {
+                "type": "SYMBOL",
+                "name": "struct_construct"
+              },
+              {
+                "type": "SYMBOL",
+                "name": "_expression"
+              }
+            ]
+          }
+        }
+      ]
+    },
+    "const_binding": {
+      "type": "SEQ",
+      "members": [
+        {
+          "type": "STRING",
+          "value": "const"
+        },
+        {
+          "type": "FIELD",
+          "name": "name",
+          "content": {
+            "type": "SYMBOL",
+            "name": "identifier"
           }
         },
         {
@@ -7362,7 +7429,7 @@
     },
     "duration_literal": {
       "type": "PATTERN",
-      "value": "\\d+(ms|s|m|h)"
+      "value": "\\d+(ms|s|m|h|d|w)"
     },
     "true": {
       "type": "STRING",
@@ -8250,6 +8317,10 @@
         {
           "type": "STRING",
           "value": "let"
+        },
+        {
+          "type": "STRING",
+          "value": "const"
         },
         {
           "type": "STRING",

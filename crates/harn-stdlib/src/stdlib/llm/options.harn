@@ -39,6 +39,7 @@ fn __llm_call_option_keys() {
     "output_validation",
     "schema_retries",
     "schema_retry_nudge",
+    "schema_stream_abort",
     "retries",
     "schema_recover",
     "repair",

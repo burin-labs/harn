@@ -750,7 +750,7 @@ fn matches_failover(rules: &FailoverRules, error: &VmError) -> (bool, RoutingErr
         }
     }
 
-    if matches!(category, ErrorCategory::Timeout) {
+    if matches!(category, ErrorCategory::Timeout) && rules.on_timeout_ms.is_some() {
         return (true, snapshot);
     }
 
@@ -1635,6 +1635,20 @@ mod tests {
         };
         let (eligible, _) = matches_failover(&rules, &err);
         assert!(eligible);
+    }
+
+    #[test]
+    fn explicit_failover_kind_does_not_implicitly_match_timeout() {
+        let rules = FailoverRules {
+            on_error_kinds: vec!["rate_limit".to_string()],
+            ..Default::default()
+        };
+        let err = VmError::CategorizedError {
+            message: "timed out".to_string(),
+            category: ErrorCategory::Timeout,
+        };
+        let (eligible, _) = matches_failover(&rules, &err);
+        assert!(!eligible);
     }
 
     #[test]

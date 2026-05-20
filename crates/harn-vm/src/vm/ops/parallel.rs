@@ -3,7 +3,7 @@ use std::rc::Rc;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
-use crate::value::{VmError, VmStream, VmTaskHandle, VmValue};
+use crate::value::{VmError, VmStream, VmStreamCancel, VmTaskHandle, VmValue};
 
 /// Decode the `cap_val` stack operand pushed by `parallel ... with
 /// { max_concurrent: N }`. A value of `0` (emitted when no option was
@@ -76,6 +76,7 @@ async fn stream_capped_unordered<F, T>(
     futures: Vec<F>,
     cap: Option<usize>,
     sender: tokio::sync::mpsc::Sender<Result<T, VmError>>,
+    mut cancel_rx: tokio::sync::watch::Receiver<bool>,
     error_label: &'static str,
 ) where
     F: std::future::Future<Output = Result<T, VmError>> + 'static,
@@ -96,14 +97,39 @@ async fn stream_capped_unordered<F, T>(
         join_set.spawn_local(fut);
     }
 
-    while let Some(joined) = join_set.join_next().await {
+    loop {
+        if *cancel_rx.borrow() {
+            join_set.abort_all();
+            return;
+        }
+        if join_set.is_empty() {
+            return;
+        }
+        let joined = tokio::select! {
+            _ = cancel_rx.changed() => {
+                join_set.abort_all();
+                return;
+            }
+            joined = join_set.join_next() => joined,
+        };
+        let Some(joined) = joined else {
+            return;
+        };
         let value = match joined {
             Ok(Ok(value)) => Ok(value),
             Ok(Err(error)) => Err(error),
             Err(error) => Err(VmError::Runtime(format!("{error_label}: {error}"))),
         };
         let should_stop = value.is_err();
-        if sender.send(value).await.is_err() || should_stop {
+        let send_result = tokio::select! {
+            _ = cancel_rx.changed() => {
+                join_set.abort_all();
+                return;
+            }
+            result = sender.send(value) => result,
+        };
+        if send_result.is_err() || should_stop {
+            join_set.abort_all();
             return;
         }
         if let Some(fut) = pending.pop_front() {
@@ -232,16 +258,18 @@ impl super::super::Vm {
                 }
 
                 let (tx, rx) = tokio::sync::mpsc::channel::<Result<VmValue, VmError>>(1);
+                let cancel = VmStreamCancel::new();
                 tokio::task::spawn_local(stream_capped_unordered(
                     futures,
                     cap,
                     tx,
+                    cancel.subscribe(),
                     "Parallel map stream error",
                 ));
                 self.stack.push(VmValue::Stream(VmStream {
                     done: Rc::new(std::cell::Cell::new(false)),
                     receiver: Rc::new(tokio::sync::Mutex::new(rx)),
-                    cancel: None,
+                    cancel: Some(cancel),
                 }));
             }
             _ => self.stack.push(VmValue::Nil),

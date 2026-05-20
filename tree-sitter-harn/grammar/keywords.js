@@ -3,6 +3,7 @@ module.exports = [
   "extends",
   "override",
   "let",
+  "const",
   "var",
   "if",
   "else",

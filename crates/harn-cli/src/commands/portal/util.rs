@@ -19,6 +19,7 @@ pub(super) fn date_ms(value: &str) -> Option<u64> {
 }
 
 pub(super) fn compact_metadata(metadata: &BTreeMap<String, serde_json::Value>) -> String {
+    let metadata = redacted_metadata(metadata);
     if metadata.is_empty() {
         return "No extra metadata".to_string();
     }
@@ -57,7 +58,9 @@ pub(super) fn metadata_pretty_json(
     metadata: &BTreeMap<String, serde_json::Value>,
     key: &str,
 ) -> Option<String> {
-    metadata.get(key).map(pretty_json)
+    metadata
+        .get(key)
+        .map(|value| pretty_json(&redacted_json_value(value)))
 }
 
 pub(super) fn metadata_string(
@@ -67,7 +70,34 @@ pub(super) fn metadata_string(
     metadata
         .get(key)
         .and_then(|value| value.as_str())
-        .map(str::to_string)
+        .map(redacted_string)
+}
+
+pub(super) fn redacted_json_value(value: &serde_json::Value) -> serde_json::Value {
+    harn_vm::redact::current_policy().redact_json(value)
+}
+
+pub(super) fn redacted_metadata(
+    metadata: &BTreeMap<String, serde_json::Value>,
+) -> BTreeMap<String, serde_json::Value> {
+    let mut object = serde_json::Map::new();
+    for (key, value) in metadata {
+        object.insert(key.clone(), value.clone());
+    }
+    match redacted_json_value(&serde_json::Value::Object(object)) {
+        serde_json::Value::Object(map) => map.into_iter().collect(),
+        _ => BTreeMap::new(),
+    }
+}
+
+pub(super) fn redacted_headers(headers: &BTreeMap<String, String>) -> BTreeMap<String, String> {
+    harn_vm::redact::current_policy().redact_headers(headers)
+}
+
+pub(super) fn redacted_string(value: &str) -> String {
+    harn_vm::redact::current_policy()
+        .redact_string(value)
+        .into_owned()
 }
 
 pub(super) fn string_array_value(

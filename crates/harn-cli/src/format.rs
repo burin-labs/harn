@@ -22,10 +22,10 @@ pub(crate) fn format_unix_ms_rfc3339(ms: i64) -> String {
     format_timestamp_rfc3339(value)
 }
 
-/// Render a `std::time::Duration` as a coarse "5s / 2m / 3h / 1d" suffix.
+/// Render a `std::time::Duration` as a coarse "5s / 2m / 3h / 1d / 1w" suffix.
 ///
-/// Rounds toward zero on the chosen unit, mirroring the original behavior
-/// of the orchestrator command output.
+/// Rounds toward zero on the chosen unit so status output does not overstate
+/// elapsed time.
 pub(crate) fn format_duration_coarse(value: StdDuration) -> String {
     if value.as_secs() == 0 {
         return format!("{}ms", value.as_millis());
@@ -39,6 +39,12 @@ pub(crate) fn format_duration_coarse(value: StdDuration) -> String {
     }
     if seconds < 60 * 60 * 24 {
         return format!("{}h", seconds / (60 * 60));
+    }
+    if seconds < 60 * 60 * 24 * 7 {
+        return format!("{}d", seconds / (60 * 60 * 24));
+    }
+    if seconds.is_multiple_of(60 * 60 * 24 * 7) {
+        return format!("{}w", seconds / (60 * 60 * 24 * 7));
     }
     format!("{}d", seconds / (60 * 60 * 24))
 }
@@ -82,6 +88,10 @@ mod tests {
         assert_eq!(
             format_duration_coarse(StdDuration::from_secs(86_400 * 3)),
             "3d"
+        );
+        assert_eq!(
+            format_duration_coarse(StdDuration::from_secs(86_400 * 14)),
+            "2w"
         );
     }
 

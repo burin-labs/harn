@@ -60,6 +60,10 @@
     "numbers": {
       "patterns": [
         {
+          "name": "constant.numeric.duration.harn",
+          "match": "\\b\\d+(ms|s|m|h|d|w)\\b"
+        },
+        {
           "name": "constant.numeric.float.harn",
           "match": "\\b\\d+\\.\\d+\\b"
         },
@@ -125,7 +129,7 @@
       "patterns": [
         {
           "name": "keyword.operator.harn",
-          "match": "(\\*\\*|\\|>|->|=>|\\.\\.=?|\\+\\+|&&|\\|\\||\\?\\?|[+\\-*/%=<>!&|^]=?)"
+          "match": "(\\*\\*|\\|>|->|=>|\\.\\.=?|&&|\\|\\||\\?\\?|==|!=|<=|>=|[+\\-*/%<>]=?|=|!|[&|])"
         }
       ]
     },

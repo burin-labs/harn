@@ -385,7 +385,11 @@ impl VmValue {
             VmValue::Duration(ms) => {
                 let sign = if *ms < 0 { "-" } else { "" };
                 let abs_ms = ms.unsigned_abs();
-                if abs_ms >= 3_600_000 && abs_ms % 3_600_000 == 0 {
+                if abs_ms >= 604_800_000 && abs_ms % 604_800_000 == 0 {
+                    let _ = write!(out, "{}{}w", sign, abs_ms / 604_800_000);
+                } else if abs_ms >= 86_400_000 && abs_ms % 86_400_000 == 0 {
+                    let _ = write!(out, "{}{}d", sign, abs_ms / 86_400_000);
+                } else if abs_ms >= 3_600_000 && abs_ms % 3_600_000 == 0 {
                     let _ = write!(out, "{}{}h", sign, abs_ms / 3_600_000);
                 } else if abs_ms >= 60_000 && abs_ms % 60_000 == 0 {
                     let _ = write!(out, "{}{}m", sign, abs_ms / 60_000);

@@ -2,10 +2,38 @@ use std::rc::Rc;
 
 use crate::chunk::{InlineCacheEntry, MethodCacheTarget};
 use crate::orchestration::HookEvent;
-use crate::value::{VmClosure, VmError, VmValue};
+use crate::value::{VmClosure, VmError, VmJoinHandle, VmTaskHandle, VmValue};
 use crate::BuiltinId;
 
 use super::super::CallFrame;
+
+struct AwaitingTask {
+    task: Option<VmTaskHandle>,
+}
+
+impl AwaitingTask {
+    fn new(task: VmTaskHandle) -> Self {
+        Self { task: Some(task) }
+    }
+
+    fn handle_mut(&mut self) -> &mut VmJoinHandle {
+        &mut self.task.as_mut().expect("awaiting task present").handle
+    }
+
+    fn disarm(mut self) {
+        self.task = None;
+    }
+}
+
+impl Drop for AwaitingTask {
+    fn drop(&mut self) {
+        if let Some(task) = self.task.take() {
+            task.cancel_token
+                .store(true, std::sync::atomic::Ordering::SeqCst);
+            task.handle.abort();
+        }
+    }
+}
 
 enum StepPreHookAction {
     Allow(Vec<VmValue>),
@@ -408,10 +436,13 @@ impl super::super::Vm {
             });
             if let Some(id) = task_id {
                 if let Some(handle) = self.spawned_tasks.remove(&id) {
-                    let (result, task_output) = handle
-                        .handle
+                    let mut awaiting = AwaitingTask::new(handle);
+                    let joined = awaiting
+                        .handle_mut()
                         .await
                         .map_err(|e| VmError::Runtime(format!("Task join error: {e}")))??;
+                    awaiting.disarm();
+                    let (result, task_output) = joined;
                     self.output.push_str(&task_output);
                     self.stack.push(result);
                 } else {

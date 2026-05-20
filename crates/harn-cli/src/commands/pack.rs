@@ -4,8 +4,7 @@
 //! Walks the entrypoint's transitive imports, precompiles every module
 //! into a `.harnbc` artifact, snapshots the provider catalog and
 //! stdlib pin, generates a minimal SBOM, assembles a v2 `WorkflowBundle`
-//! manifest, and emits a deterministic tar.zst archive. Signing lands
-//! in E6.3; SBOM body and CLI `--json` polish in E6.4.
+//! manifest, and emits a deterministic tar.zst archive.
 //!
 //! `harn pack verify <bundle.harnpack>` (#1779) reads a bundle back,
 //! recomputes its canonical hash, verifies the embedded Ed25519
@@ -341,10 +340,7 @@ pub fn build(args: &BuildArgs) -> Result<PackOutcome, PackError> {
             ),
         ));
     }
-    let project_root = entrypoint
-        .parent()
-        .map(Path::to_path_buf)
-        .unwrap_or_else(|| PathBuf::from("."));
+    let project_root = pack_archive_root(&entrypoint);
     let entrypoint_rel = relativize(&project_root, &entrypoint).ok_or_else(|| {
         PackError::new(
             "entrypoint.outside_root",
@@ -464,14 +460,16 @@ pub fn build(args: &BuildArgs) -> Result<PackOutcome, PackError> {
             None => None,
         };
 
-        let rel = relativize(&project_root, module_path).unwrap_or_else(|| {
-            PathBuf::from(
-                module_path
-                    .file_name()
-                    .map(|name| name.to_string_lossy().into_owned())
-                    .unwrap_or_else(|| module_str.clone()),
+        let rel = relativize(&project_root, module_path).ok_or_else(|| {
+            PackError::new(
+                "module.outside_root",
+                format!(
+                    "module {} resolves outside pack archive root {}; add a harn.toml at the intended project root or keep imports inside it",
+                    module_path.display(),
+                    project_root.display()
+                ),
             )
-        });
+        })?;
         let source_archive_path = PathBuf::from("sources").join(&rel);
         let chunk_archive_path = adjacent_with_extension(&rel, bytecode_cache::CACHE_EXTENSION)
             .ok_or_else(|| {
@@ -526,7 +524,7 @@ pub fn build(args: &BuildArgs) -> Result<PackOutcome, PackError> {
         });
     }
 
-    for asset in discover_import_assets(&graph, &module_paths, &project_root) {
+    for asset in discover_import_assets(&graph, &module_paths, &project_root)? {
         if args.exclude_secrets && path_looks_like_secret(&asset.path) {
             warnings.push(JsonWarning {
                 code: "pack.asset_skipped_secret".to_string(),
@@ -613,10 +611,8 @@ pub fn build(args: &BuildArgs) -> Result<PackOutcome, PackError> {
         });
     }
 
-    // The static module walk does not yet discover tool definitions, but
-    // the SBOM path below is wired so future tool manifest entries are
-    // reflected in both the manifest and JSON summary without another
-    // archive format change.
+    // Tool entries use the same manifest/SBOM path as modules and
+    // providers, keeping the archive representation centralized.
     let tool_manifest: Vec<ToolEntry> = Vec::new();
     for tool in &tool_manifest {
         sbom_packages.push(SBOMPackage {
@@ -863,7 +859,7 @@ fn discover_import_assets(
     graph: &harn_modules::ModuleGraph,
     module_paths: &[PathBuf],
     project_root: &Path,
-) -> Vec<ImportedAsset> {
+) -> Result<Vec<ImportedAsset>, PackError> {
     let mut assets = BTreeMap::<PathBuf, ImportedAsset>::new();
     for module_path in module_paths {
         if module_path.to_string_lossy().starts_with("<std>/") {
@@ -879,19 +875,23 @@ fn discover_import_assets(
             let canonical = resolved_path
                 .canonicalize()
                 .unwrap_or_else(|_| resolved_path.clone());
-            let rel = relativize(project_root, &canonical).unwrap_or_else(|| {
-                canonical
-                    .file_name()
-                    .map(PathBuf::from)
-                    .unwrap_or_else(|| canonical.clone())
-            });
+            let rel = relativize(project_root, &canonical).ok_or_else(|| {
+                PackError::new(
+                    "asset.outside_root",
+                    format!(
+                        "imported asset {} resolves outside pack archive root {}; add a harn.toml at the intended project root or keep imports inside it",
+                        canonical.display(),
+                        project_root.display()
+                    ),
+                )
+            })?;
             assets.entry(canonical.clone()).or_insert(ImportedAsset {
                 path: canonical,
                 rel,
             });
         }
     }
-    assets.into_values().collect()
+    Ok(assets.into_values().collect())
 }
 
 fn is_harn_module_path(path: &Path) -> bool {
@@ -1022,6 +1022,11 @@ fn type_check_or_fail(
     Ok(())
 }
 
+fn pack_archive_root(entrypoint: &Path) -> PathBuf {
+    let parent = entrypoint.parent().unwrap_or_else(|| Path::new("."));
+    harn_modules::asset_paths::find_project_root(parent).unwrap_or_else(|| parent.to_path_buf())
+}
+
 fn relativize(root: &Path, target: &Path) -> Option<PathBuf> {
     let root_canon = root.canonicalize().unwrap_or_else(|_| root.to_path_buf());
     let target_canon = target
@@ -1030,9 +1035,7 @@ fn relativize(root: &Path, target: &Path) -> Option<PathBuf> {
     if let Ok(rel) = target_canon.strip_prefix(&root_canon) {
         return Some(rel.to_path_buf());
     }
-    // Fallback: keep the filename so deeply-nested entrypoints still
-    // pack as relative paths.
-    target.file_name().map(PathBuf::from)
+    None
 }
 
 fn adjacent_with_extension(rel: &Path, extension: &str) -> Option<PathBuf> {
@@ -1100,6 +1103,85 @@ pub(crate) fn path_looks_like_secret(path: &Path) -> bool {
         }
     }
     false
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::fs;
+
+    fn build_args(entrypoint: PathBuf, out: PathBuf) -> BuildArgs {
+        BuildArgs {
+            entrypoint,
+            out: Some(out),
+            upgrade: None,
+            sign: false,
+            key: None,
+            unsigned: true,
+            exclude_secrets: false,
+            json: true,
+        }
+    }
+
+    #[test]
+    fn pack_uses_nearest_harn_toml_root_for_nested_entrypoint_assets() {
+        let temp = tempfile::tempdir().unwrap();
+        fs::write(
+            temp.path().join("harn.toml"),
+            "[package]\nname = \"pack-root\"\n",
+        )
+        .unwrap();
+        fs::create_dir_all(temp.path().join("scripts")).unwrap();
+        fs::create_dir_all(temp.path().join("assets")).unwrap();
+        fs::write(temp.path().join("assets/prompt.txt"), "prompt asset\n").unwrap();
+        fs::write(
+            temp.path().join("scripts/entry.harn"),
+            "import \"../assets/prompt.txt\"\n__io_println(\"packed\")\n",
+        )
+        .unwrap();
+
+        let outcome = build(&build_args(
+            temp.path().join("scripts/entry.harn"),
+            temp.path().join("bundle.harnpack"),
+        ))
+        .unwrap();
+
+        assert_eq!(
+            outcome.json.manifest.entrypoint,
+            PathBuf::from("scripts/entry.harn")
+        );
+        assert!(outcome
+            .json
+            .manifest
+            .sbom
+            .packages
+            .iter()
+            .any(|package| package.name == "asset:assets/prompt.txt"));
+    }
+
+    #[test]
+    fn pack_rejects_imported_asset_outside_archive_root() {
+        let temp = tempfile::tempdir().unwrap();
+        let root = temp.path().join("root");
+        let outside = temp.path().join("outside");
+        fs::create_dir_all(&root).unwrap();
+        fs::create_dir_all(&outside).unwrap();
+        fs::write(outside.join("prompt.txt"), "outside asset\n").unwrap();
+        fs::write(
+            root.join("entry.harn"),
+            "import \"../outside/prompt.txt\"\n__io_println(\"packed\")\n",
+        )
+        .unwrap();
+
+        let err = build(&build_args(
+            root.join("entry.harn"),
+            root.join("bundle.harnpack"),
+        ))
+        .unwrap_err();
+
+        assert_eq!(err.code, "asset.outside_root");
+        assert!(!root.join("bundle.harnpack").exists());
+    }
 }
 
 // --- `harn pack verify` -----------------------------------------------------

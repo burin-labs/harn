@@ -116,8 +116,12 @@ as both LLM content and deterministic `vision_ocr(...)` context.
 | `presence_penalty` | float | nil | Presence penalty (OpenAI only) |
 | `logprobs` | bool | `false` | Request token log probabilities when the selected provider route supports them |
 | `top_logprobs` | int | nil | Request top alternative token log probabilities where supported |
-| `response_format` | string | `"text"` | `"text"` or `"json"` |
-| `schema` | dict | nil | JSON Schema, OpenAPI Schema Object, or canonical Harn schema dict for structured output |
+| `response_format` | string | `"text"` | `"text"` or `"json"`; with `output_schema`/`json_schema`, `"json"` selects schema-validated JSON rather than loose JSON-object mode |
+| `output_format` | string/dict | `{kind: "text"}` | Provider-neutral output shape: `"text"`, `"json_object"`, or `{kind: "json_schema", schema, strict?}` |
+| `schema` / `json_schema` / `output_schema` | dict | nil | JSON Schema, OpenAPI Schema Object, canonical Harn schema dict, or `Schema<T>` type alias for structured output |
+| `output_validation` | string | `"off"` | `"error"` throws after exhausted schema retries; `"warn"` logs and returns the final envelope; `"off"` returns the final envelope without a warning |
+| `schema_retries` | int | `1` | Re-prompt on schema validation failure with a corrective user message. Applies to direct and `routing_policy` calls. |
+| `schema_stream_abort` | bool | inferred | Defaults to `true` when `output_schema` is set. Aborts impossible streaming JSON early and consumes one `schema_retries` slot. |
 | `llm_retries` | int | `0` | (deprecated; prefer `with_retry` from `std/llm/handlers`) Retries on transient HTTP / provider errors. Raw `llm_call` is fail-fast by default; set to N to allow N retries after the first attempt. Off-by-one: `llm_retries: 3` ≈ `with_retry(..., {max_attempts: 4})` |
 | `llm_backoff_ms` | int | `250` | (deprecated; prefer `with_retry`) Base exponential backoff in ms between LLM retries |
 | `thinking` | bool/dict | nil | Enable typed provider reasoning. `true` and `{budget_tokens: N}` remain shorthand for `{mode: "enabled"}`; use `{mode: "enabled", budget_tokens: N}`, `{mode: "adaptive"}`, or `{mode: "effort", level: "none" \| "minimal" \| "low" \| "medium" \| "high" \| "xhigh"}`. On Anthropic Opus models that declare interleaved-thinking support, `{mode: "enabled"}` also sends `anthropic-beta: interleaved-thinking-2025-05-14`. When `thinking: false` is set on a model whose chat template uses an in-prompt directive (Qwen3's `/no_think`), Harn auto-prepends the directive to the system message — `thinking: false` works uniformly across providers without scripts needing to know per-template prompt syntax. |

@@ -12,6 +12,7 @@ use time::OffsetDateTime;
 use super::dto::PortalLaunchJob;
 use super::launch::create_trigger_replay_job;
 use super::state::PortalState;
+use super::util::{redacted_headers, redacted_json_value, redacted_string};
 
 const MAX_BULK_ITEMS: usize = 50;
 const DEFAULT_BULK_RATE_LIMIT_PER_SECOND: f64 = 2.0;
@@ -121,19 +122,13 @@ pub(super) async fn list_dlq_entries(
     state: &Arc<PortalState>,
     query: &DlqQuery,
 ) -> Result<PortalDlqListResponse, String> {
-    let event_log = state
-        .event_log
-        .as_ref()
-        .ok_or_else(|| "portal is not attached to an event log".to_string())?;
-    let mut entries = load_normalized_dlq(event_log).await?;
-    attach_predicate_trace(event_log, &mut entries).await?;
-    let entries = filter_entries(entries, query)?;
+    let entries = load_filtered_dlq_entries(state, query).await?;
     let groups = group_by_error_class(&entries);
     let alert_configs = load_alert_configs(&state.workspace_root);
     let alerts = active_alerts(&entries, &alert_configs);
     Ok(PortalDlqListResponse {
         total: entries.len(),
-        entries,
+        entries: entries.into_iter().map(redacted_dlq_entry).collect(),
         groups,
         alerts,
         alert_configs,
@@ -144,17 +139,9 @@ pub(super) async fn dlq_detail(
     state: &Arc<PortalState>,
     entry_id: &str,
 ) -> Result<PortalDlqEntry, String> {
-    let query = DlqQuery {
-        state: Some("all".to_string()),
-        ..DlqQuery::default()
-    };
-    let mut response = list_dlq_entries(state, &query).await?;
-    let entry = response
-        .entries
-        .drain(..)
-        .find(|entry| entry.id == entry_id)
-        .ok_or_else(|| format!("unknown DLQ entry '{entry_id}'"))?;
-    Ok(entry)
+    dlq_detail_raw(state, entry_id)
+        .await
+        .map(redacted_dlq_entry)
 }
 
 pub(super) async fn replay_entry(
@@ -162,7 +149,7 @@ pub(super) async fn replay_entry(
     entry_id: &str,
     drift_accept: bool,
 ) -> Result<PortalLaunchJob, String> {
-    let entry = dlq_detail(state, entry_id).await?;
+    let entry = dlq_detail_raw(state, entry_id).await?;
     create_trigger_replay_job_with_mode(state, &entry, drift_accept).await
 }
 
@@ -170,7 +157,7 @@ pub(super) async fn purge_entry(
     state: &Arc<PortalState>,
     entry_id: &str,
 ) -> Result<PortalDlqEntry, String> {
-    let mut entry = dlq_detail(state, entry_id).await?;
+    let mut entry = dlq_detail_raw(state, entry_id).await?;
     entry.state = "discarded".to_string();
     entry.attempt_history.push(PortalDlqAttempt {
         attempt: entry.attempt_history.len() as u32 + 1,
@@ -181,7 +168,7 @@ pub(super) async fn purge_entry(
     append_portal_entry(state, &entry, "dlq_entry")
         .await
         .map_err(|error| format!("failed to purge DLQ entry: {error}"))?;
-    Ok(entry)
+    Ok(redacted_dlq_entry(entry))
 }
 
 pub(super) async fn export_entry(
@@ -212,7 +199,7 @@ pub(super) async fn bulk_replay(
             skipped_count: entries.len(),
             rate_limit_per_second,
             jobs: Vec::new(),
-            entries,
+            entries: entries.into_iter().map(redacted_dlq_entry).collect(),
         });
     }
 
@@ -231,7 +218,7 @@ pub(super) async fn bulk_replay(
         skipped_count: 0,
         rate_limit_per_second,
         jobs,
-        entries,
+        entries: entries.into_iter().map(redacted_dlq_entry).collect(),
     })
 }
 
@@ -268,8 +255,26 @@ pub(super) async fn bulk_purge(
         skipped_count: if dry_run { entries.len() } else { 0 },
         rate_limit_per_second,
         jobs: Vec::new(),
-        entries: if dry_run { entries } else { purged },
+        entries: if dry_run { entries } else { purged }
+            .into_iter()
+            .map(redacted_dlq_entry)
+            .collect(),
     })
+}
+
+async fn dlq_detail_raw(
+    state: &Arc<PortalState>,
+    entry_id: &str,
+) -> Result<PortalDlqEntry, String> {
+    let query = DlqQuery {
+        state: Some("all".to_string()),
+        ..DlqQuery::default()
+    };
+    load_filtered_dlq_entries(state, &query)
+        .await?
+        .into_iter()
+        .find(|entry| entry.id == entry_id)
+        .ok_or_else(|| format!("unknown DLQ entry '{entry_id}'"))
 }
 
 async fn select_bulk_entries(
@@ -292,15 +297,28 @@ async fn select_bulk_entries(
             .unwrap_or_default();
         query.until = Some(until);
     }
-    let response = list_dlq_entries(state, &query).await?;
-    if response.entries.len() > MAX_BULK_ITEMS {
+    let entries = load_filtered_dlq_entries(state, &query).await?;
+    if entries.len() > MAX_BULK_ITEMS {
         return Err(format!(
             "bulk operation matched {} entries; narrow the filter below the {} entry safety limit",
-            response.entries.len(),
+            entries.len(),
             MAX_BULK_ITEMS
         ));
     }
-    Ok(response.entries)
+    Ok(entries)
+}
+
+async fn load_filtered_dlq_entries(
+    state: &Arc<PortalState>,
+    query: &DlqQuery,
+) -> Result<Vec<PortalDlqEntry>, String> {
+    let event_log = state
+        .event_log
+        .as_ref()
+        .ok_or_else(|| "portal is not attached to an event log".to_string())?;
+    let mut entries = load_normalized_dlq(event_log).await?;
+    attach_predicate_trace(event_log, &mut entries).await?;
+    filter_entries(entries, query)
 }
 
 async fn create_trigger_replay_job_with_mode(
@@ -316,6 +334,24 @@ async fn create_trigger_replay_job_with_mode(
         job.target_label = format!("trigger replay {} (drift accepted)", entry.event_id);
     }
     Ok(job)
+}
+
+fn redacted_dlq_entry(mut entry: PortalDlqEntry) -> PortalDlqEntry {
+    entry.headers = redacted_headers(&entry.headers);
+    entry.payload = redacted_json_value(&entry.payload);
+    entry.event = redacted_json_value(&entry.event);
+    entry.last_error = redacted_string(&entry.last_error);
+    for attempt in &mut entry.attempt_history {
+        if let Some(error) = &attempt.error {
+            attempt.error = Some(redacted_string(error));
+        }
+    }
+    entry.predicate_trace = entry
+        .predicate_trace
+        .into_iter()
+        .map(|trace| redacted_json_value(&trace))
+        .collect();
+    entry
 }
 
 async fn load_normalized_dlq(event_log: &Arc<AnyEventLog>) -> Result<Vec<PortalDlqEntry>, String> {

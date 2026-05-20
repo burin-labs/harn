@@ -21,7 +21,7 @@ use super::transcript::{build_story, discover_template_renders, discover_transcr
 use super::util::{
     compact_json, compact_metadata, date_ms, format_duration, humanize_kind, is_completed_status,
     is_failed_status, metadata_pretty_json, metadata_string, owning_stage, preview_text,
-    span_kind_totals, string_array_value, system_time_ms,
+    redacted_json_value, redacted_metadata, span_kind_totals, string_array_value, system_time_ms,
 };
 
 pub(super) fn scan_runs(run_dir: &Path) -> Result<Vec<PortalRunSummary>, String> {
@@ -654,7 +654,7 @@ fn build_spans(run: &harn_vm::orchestration::RunRecord) -> Vec<PortalSpan> {
                 label: span_label(&span),
                 lane,
                 depth,
-                metadata: span.metadata,
+                metadata: redacted_metadata(&span.metadata),
             }
         })
         .collect()
@@ -701,11 +701,11 @@ fn build_tool_call_audit_index(
 ) -> HashMap<String, PortalActivityAudit> {
     let mut index: HashMap<String, PortalActivityAudit> = HashMap::new();
     if let Some(transcript) = &run.transcript {
-        collect_tool_call_audit_events(transcript, &mut index);
+        collect_tool_call_audit_events(&redacted_json_value(transcript), &mut index);
     }
     for stage in &run.stages {
         if let Some(transcript) = &stage.transcript {
-            collect_tool_call_audit_events(transcript, &mut index);
+            collect_tool_call_audit_events(&redacted_json_value(transcript), &mut index);
         }
     }
     index

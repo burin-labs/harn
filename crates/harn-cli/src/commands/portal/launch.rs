@@ -14,7 +14,7 @@ use super::errors::{bad_request_error, internal_error};
 use super::query::ErrorResponse;
 use super::run_analysis::scan_runs;
 use super::state::PortalState;
-use super::util::portal_timestamp_id;
+use super::util::{portal_timestamp_id, redacted_string};
 
 const MAX_LAUNCH_JOB_LOG_BYTES: usize = 256 * 1024;
 const MAX_COMPLETED_LAUNCH_JOBS: usize = 200;
@@ -193,7 +193,8 @@ pub(super) fn launch_output_logs(stdout: &[u8], stderr: &[u8]) -> String {
     } else {
         String::new()
     };
-    format!("{prefix}{}", String::from_utf8_lossy(truncated))
+    let logs = String::from_utf8_lossy(truncated);
+    format!("{prefix}{}", redacted_string(&logs))
 }
 
 fn tail_bytes(bytes: &[u8], max: usize) -> &[u8] {
