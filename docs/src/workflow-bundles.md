@@ -75,11 +75,12 @@ signature but still appends the release record at autonomy tier `suggest`.
 path, archive size, signature presence, SBOM counts, bytecode/debug-symbol
 metadata, and the full manifest.
 
-`harn pack --exclude-secrets` refuses to bundle entrypoints (or, once asset
-bundling lands, transitive paths) that match a conservative secret-bearing
-glob: `.env`, `.env.*`, `*.pem`, `*.key`, `credentials*`, and any path under a
-`secrets/` directory. Pass `--include-secrets` to be explicit about the
-default behavior in release pipelines.
+`harn pack --exclude-secrets` refuses to bundle entrypoints and skips imported
+non-Harn assets that match a conservative secret-bearing glob: `.env`,
+`.env.*`, `*.pem`, `*.key`, `credentials*`, and any path under a `secrets/`
+directory. Skipped assets are reported as structured JSON warnings and in
+`manifest.metadata.skipped_assets`. Pass `--include-secrets` to be explicit
+about the default behavior in release pipelines.
 
 ### Verifying a `.harnpack`
 

@@ -197,6 +197,56 @@ fn pack_resolves_transitive_imports() {
 }
 
 #[test]
+fn pack_bundles_non_harn_assets_from_imports() {
+    let workdir = TempDir::new().unwrap();
+    let prompts = workdir.path().join("prompts");
+    fs::create_dir_all(&prompts).unwrap();
+    fs::write(prompts.join("template.txt"), "Hello, {{name}}\n").unwrap();
+    fs::write(
+        workdir.path().join("lib.harn"),
+        "pub fn greet() -> string { return \"howdy\" }\n",
+    )
+    .unwrap();
+    let entry = workdir.path().join("entry.harn");
+    fs::write(
+        &entry,
+        "import { greet } from \"./lib\"\nimport \"./prompts/template.txt\"\nprintln(greet())\n",
+    )
+    .unwrap();
+    let out = workdir.path().join("entry.harnpack");
+
+    run_pack(&pack_args(entry.clone(), out.clone()));
+
+    let archive = read_harnpack(&fs::read(&out).unwrap()).unwrap();
+    assert!(archive
+        .contents
+        .iter()
+        .any(|entry| entry.path == Path::new("sources/prompts/template.txt")));
+    assert!(archive.manifest.sbom.packages.iter().any(|package| {
+        package.name == "asset:prompts/template.txt"
+            && package
+                .package_hash_blake3
+                .as_deref()
+                .is_some_and(|hash| hash.starts_with("blake3:"))
+    }));
+    assert!(archive
+        .manifest
+        .sbom
+        .relationships
+        .iter()
+        .any(|relationship| {
+            relationship.from == "entrypoint:entry.harn"
+                && relationship.to == "asset:prompts/template.txt"
+                && relationship.relationship_type == "depends_on"
+        }));
+    assert!(archive
+        .manifest
+        .transitive_modules
+        .iter()
+        .all(|module| module.path != Path::new("prompts/template.txt")));
+}
+
+#[test]
 fn pack_json_envelope_carries_pack_schema() {
     let workdir = TempDir::new().unwrap();
     let entry = workdir.path().join("hello.harn");
@@ -698,6 +748,54 @@ fn pack_verify_strict_rejects_tampered_sbom_module_hash() {
 }
 
 #[test]
+fn pack_verify_strict_rejects_tampered_sbom_asset_hash() {
+    let workdir = TempDir::new().unwrap();
+    let prompts = workdir.path().join("prompts");
+    fs::create_dir_all(&prompts).unwrap();
+    fs::write(prompts.join("template.txt"), "asset body\n").unwrap();
+    let entry = workdir.path().join("hello.harn");
+    fs::write(
+        &entry,
+        "import \"./prompts/template.txt\"\nprintln(\"hi\")\n",
+    )
+    .unwrap();
+    let out = workdir.path().join("hello.harnpack");
+    build_pack(&pack_args(entry.clone(), out.clone()));
+
+    let mut archive = read_harnpack(&fs::read(&out).unwrap()).unwrap();
+    let asset_package = archive
+        .manifest
+        .sbom
+        .packages
+        .iter_mut()
+        .find(|package| package.name == "asset:prompts/template.txt")
+        .expect("asset package present");
+    asset_package.package_hash_blake3 =
+        Some("blake3:0000000000000000000000000000000000000000000000000000000000000000".to_string());
+    let sbom_entry = archive
+        .contents
+        .iter_mut()
+        .find(|entry| entry.path == Path::new(pack::PACK_SBOM_ARCHIVE_PATH))
+        .expect("sbom entry present");
+    sbom_entry.bytes = serde_json::to_vec(&archive.manifest.sbom).unwrap();
+    let tampered =
+        harn_vm::orchestration::build_harnpack(&archive.manifest, &archive.contents).unwrap();
+    fs::write(&out, &tampered).unwrap();
+
+    let err = pack::verify(&PackVerifyArgs {
+        bundle: out,
+        allow_unsigned: true,
+        trust_policy: None,
+        require_trusted_signer: false,
+        strict: true,
+        json: false,
+    })
+    .expect_err("strict verify must reject SBOM asset hash drift");
+    assert_eq!(err.code, "verify.sbom_mismatch");
+    assert!(err.message.contains("asset:prompts/template.txt"));
+}
+
+#[test]
 fn pack_exclude_secrets_blocks_entrypoint_with_dotenv_name() {
     let workdir = TempDir::new().unwrap();
     let entry = workdir.path().join(".env.harn");
@@ -722,6 +820,62 @@ fn pack_exclude_secrets_blocks_entrypoint_with_dotenv_name() {
     });
     assert_eq!(err.code, "pack.secret_blocked");
     assert!(!out.exists(), "blocked bundle must not be written");
+}
+
+#[test]
+fn pack_exclude_secrets_skips_imported_assets_with_warning() {
+    let workdir = TempDir::new().unwrap();
+    let secrets = workdir.path().join("secrets");
+    fs::create_dir_all(&secrets).unwrap();
+    fs::write(secrets.join("prompt.txt"), "token={{secret}}\n").unwrap();
+    let entry = workdir.path().join("entry.harn");
+    fs::write(&entry, "import \"./secrets/prompt.txt\"\nprintln(\"ok\")\n").unwrap();
+    let out = workdir.path().join("entry.harnpack");
+
+    let envelope = Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .unwrap()
+        .block_on(async {
+            let _cwd_guard = cwd_lock::lock_cwd_async().await;
+            harn_vm::reset_thread_local_state();
+            pack::run_to_envelope(&PackArgs {
+                command: None,
+                entrypoint: Some(entry.clone()),
+                out: Some(out.clone()),
+                upgrade: None,
+                sign: false,
+                key: None,
+                unsigned: true,
+                exclude_secrets: true,
+                include_secrets: false,
+                json: true,
+            })
+        });
+
+    let value = serde_json::to_value(&envelope).unwrap();
+    assert_eq!(value["ok"], true);
+    assert_eq!(value["warnings"][0]["code"], "pack.asset_skipped_secret");
+    assert_eq!(
+        value["data"]["manifest"]["metadata"]["skipped_assets"][0]["path"],
+        "secrets/prompt.txt"
+    );
+    assert_eq!(
+        value["data"]["manifest"]["metadata"]["skipped_assets"][0]["reason"],
+        "secret_path"
+    );
+
+    let archive = read_harnpack(&fs::read(&out).unwrap()).unwrap();
+    assert!(!archive
+        .contents
+        .iter()
+        .any(|entry| entry.path == Path::new("sources/secrets/prompt.txt")));
+    assert!(!archive
+        .manifest
+        .sbom
+        .packages
+        .iter()
+        .any(|package| package.name == "asset:secrets/prompt.txt"));
 }
 
 fn release_records(

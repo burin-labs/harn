@@ -30,11 +30,11 @@ use harn_vm::orchestration::{
 };
 use harn_vm::Compiler;
 use harn_vm::{AutonomyTier, TrustRecord};
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 
 use crate::cli::{PackArgs, PackCommand, PackVerifyArgs};
 use crate::command_error;
-use crate::json_envelope::{to_string_pretty, JsonEnvelope, JsonOutput};
+use crate::json_envelope::{to_string_pretty, JsonEnvelope, JsonOutput, JsonWarning};
 use crate::parse_source_file;
 use crate::skill_provenance;
 
@@ -76,13 +76,18 @@ pub struct PackDebugSymbolMetadata {
     pub total_bytes: u64,
 }
 
-struct PackJsonOutput(PackJsonData);
+struct PackJsonOutput {
+    data: PackJsonData,
+    warnings: Vec<JsonWarning>,
+}
 
 impl JsonOutput for PackJsonOutput {
     const SCHEMA_VERSION: u32 = PACK_SCHEMA_VERSION;
     type Data = PackJsonData;
     fn into_envelope(self) -> JsonEnvelope<Self::Data> {
-        JsonEnvelope::ok(Self::SCHEMA_VERSION, self.0)
+        let mut envelope = JsonEnvelope::ok(Self::SCHEMA_VERSION, self.data);
+        envelope.warnings = self.warnings;
+        envelope
     }
 }
 
@@ -108,9 +113,16 @@ pub fn run(args: PackArgs) {
     match build(&build_args) {
         Ok(outcome) => {
             if build_args.json {
-                let envelope = PackJsonOutput(outcome.json).into_envelope();
+                let envelope = PackJsonOutput {
+                    data: outcome.json,
+                    warnings: outcome.warnings,
+                }
+                .into_envelope();
                 println!("{}", to_string_pretty(&envelope));
             } else {
+                for warning in &outcome.warnings {
+                    eprintln!("warning[{}]: {}", warning.code, warning.message);
+                }
                 println!(
                     "wrote {} ({} bytes, bundle_hash {})",
                     outcome.output_path.display(),
@@ -152,7 +164,11 @@ pub fn run_to_envelope(args: &PackArgs) -> JsonEnvelope<PackJsonData> {
         json: args.json,
     };
     match build(&build_args) {
-        Ok(outcome) => PackJsonOutput(outcome.json).into_envelope(),
+        Ok(outcome) => PackJsonOutput {
+            data: outcome.json,
+            warnings: outcome.warnings,
+        }
+        .into_envelope(),
         Err(err) => JsonEnvelope::err(PACK_SCHEMA_VERSION, err.code, err.message),
     }
 }
@@ -239,6 +255,7 @@ pub struct PackOutcome {
     pub output_path: PathBuf,
     pub size_bytes: u64,
     pub json: PackJsonData,
+    pub warnings: Vec<JsonWarning>,
 }
 
 #[derive(Debug)]
@@ -350,14 +367,22 @@ pub fn build(args: &BuildArgs) -> Result<PackOutcome, PackError> {
     };
 
     let graph = harn_modules::build(std::slice::from_ref(&entrypoint));
-    let mut module_paths = graph.module_paths();
+    let mut graph_paths = graph.module_paths();
     // The entrypoint is always present in the graph; ensure deterministic order.
+    graph_paths.sort();
+    let mut module_paths: Vec<PathBuf> = graph_paths
+        .iter()
+        .filter(|path| is_harn_module_path(path))
+        .cloned()
+        .collect();
     module_paths.sort();
 
     let mut transitive_modules = Vec::new();
     let mut contents = Vec::new();
     let mut sbom_packages = Vec::new();
     let mut sbom_relationships = Vec::new();
+    let mut warnings = Vec::new();
+    let mut skipped_assets = Vec::new();
     let mut debug_symbol_metadata = PackDebugSymbolMetadata {
         harnbc_count: 0,
         total_bytes: 0,
@@ -501,6 +526,49 @@ pub fn build(args: &BuildArgs) -> Result<PackOutcome, PackError> {
         });
     }
 
+    for asset in discover_import_assets(&graph, &module_paths, &project_root) {
+        if args.exclude_secrets && path_looks_like_secret(&asset.path) {
+            warnings.push(JsonWarning {
+                code: "pack.asset_skipped_secret".to_string(),
+                message: format!(
+                    "skipped imported asset {} because it matches a secret-bearing path pattern",
+                    asset.rel.display()
+                ),
+            });
+            skipped_assets.push(SkippedAsset {
+                path: asset.rel.clone(),
+                reason: "secret_path".to_string(),
+            });
+            continue;
+        }
+
+        let bytes = std::fs::read(&asset.path).map_err(|err| {
+            PackError::new(
+                "asset.read_failed",
+                format!(
+                    "failed to read imported asset {}: {err}",
+                    asset.path.display()
+                ),
+            )
+        })?;
+        let asset_hash = blake3_hash(&bytes);
+        contents.push(HarnpackEntry::new(
+            PathBuf::from("sources").join(&asset.rel),
+            bytes,
+        ));
+        sbom_packages.push(SBOMPackage {
+            name: format!("asset:{}", asset.rel.display()),
+            version: Some(harn_version.clone()),
+            package_hash_blake3: Some(asset_hash),
+            license: None,
+        });
+        sbom_relationships.push(SBOMRelationship {
+            from: format!("entrypoint:{}", entrypoint_rel.display()),
+            to: format!("asset:{}", asset.rel.display()),
+            relationship_type: "depends_on".to_string(),
+        });
+    }
+
     if transitive_modules.is_empty() {
         return Err(PackError::new(
             "pack.no_modules",
@@ -578,6 +646,17 @@ pub fn build(args: &BuildArgs) -> Result<PackOutcome, PackError> {
         },
         prior.as_ref(),
     );
+    if !skipped_assets.is_empty() {
+        bundle.metadata.insert(
+            "skipped_assets".to_string(),
+            serde_json::to_value(&skipped_assets).map_err(|err| {
+                PackError::new(
+                    "pack.metadata_failed",
+                    format!("failed to render skipped asset metadata: {err}"),
+                )
+            })?,
+        );
+    }
     sort_sbom_doc(&mut bundle.sbom);
     let sbom_bytes = serde_json::to_vec_pretty(&bundle.sbom).map_err(|err| {
         PackError::new(
@@ -638,6 +717,7 @@ pub fn build(args: &BuildArgs) -> Result<PackOutcome, PackError> {
             debug_symbol_metadata,
             manifest: bundle,
         },
+        warnings,
     })
 }
 
@@ -765,6 +845,58 @@ fn sbom_summary(bundle: &WorkflowBundle) -> PackSbomSummary {
         providers,
         tools: bundle.tool_manifest.len(),
     }
+}
+
+#[derive(Debug)]
+struct ImportedAsset {
+    path: PathBuf,
+    rel: PathBuf,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+struct SkippedAsset {
+    path: PathBuf,
+    reason: String,
+}
+
+fn discover_import_assets(
+    graph: &harn_modules::ModuleGraph,
+    module_paths: &[PathBuf],
+    project_root: &Path,
+) -> Vec<ImportedAsset> {
+    let mut assets = BTreeMap::<PathBuf, ImportedAsset>::new();
+    for module_path in module_paths {
+        if module_path.to_string_lossy().starts_with("<std>/") {
+            continue;
+        }
+        for import in graph.imports_for_module(module_path) {
+            let Some(resolved_path) = import.resolved_path else {
+                continue;
+            };
+            if is_harn_module_path(&resolved_path) {
+                continue;
+            }
+            let canonical = resolved_path
+                .canonicalize()
+                .unwrap_or_else(|_| resolved_path.clone());
+            let rel = relativize(project_root, &canonical).unwrap_or_else(|| {
+                canonical
+                    .file_name()
+                    .map(PathBuf::from)
+                    .unwrap_or_else(|| canonical.clone())
+            });
+            assets.entry(canonical.clone()).or_insert(ImportedAsset {
+                path: canonical,
+                rel,
+            });
+        }
+    }
+    assets.into_values().collect()
+}
+
+fn is_harn_module_path(path: &Path) -> bool {
+    path.to_string_lossy().starts_with("<std>/")
+        || path.extension().and_then(|ext| ext.to_str()) == Some("harn")
 }
 
 fn sort_sbom_doc(sbom: &mut SBOMDoc) {
@@ -1353,6 +1485,34 @@ fn verify_sbom_package_hashes(
                         package.name,
                         expected_hash,
                         source_archive_path.display(),
+                        archive_hash
+                    ),
+                ));
+            }
+            continue;
+        }
+
+        if let Some(rel) = package.name.strip_prefix("asset:") {
+            let asset_archive_path = PathBuf::from("sources").join(rel);
+            let archive_hash = archive_hashes.get(&asset_archive_path).ok_or_else(|| {
+                PackError::new(
+                    "verify.sbom_mismatch",
+                    format!(
+                        "SBOM package {} refers to {}, but archive is missing {}",
+                        package.name,
+                        rel,
+                        asset_archive_path.display()
+                    ),
+                )
+            })?;
+            if archive_hash != expected_hash {
+                return Err(PackError::new(
+                    "verify.sbom_mismatch",
+                    format!(
+                        "SBOM package {} recorded hash {} but archive {} hashes to {}",
+                        package.name,
+                        expected_hash,
+                        asset_archive_path.display(),
                         archive_hash
                     ),
                 ));

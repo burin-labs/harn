@@ -8,7 +8,8 @@ pub struct PackArgs {
     #[command(subcommand)]
     pub command: Option<PackCommand>,
 
-    /// Entrypoint `.harn` file to pack. Transitive imports under the
+    /// Entrypoint `.harn` file to pack. Transitive Harn modules and
+    /// non-Harn assets referenced by import directives under the
     /// entrypoint's directory are bundled alongside it.
     ///
     /// When `harn pack` is invoked without a subcommand, this positional
@@ -55,11 +56,9 @@ pub struct PackArgs {
     /// module set without any secret filtering. Pass `--exclude-secrets`
     /// from CI or release pipelines that share bundles externally.
     ///
-    /// Today the static module walk is rooted at the entrypoint
-    /// directory and only pulls in `.harn` files; the gate primarily
-    /// blocks an entrypoint that itself looks like a secret-bearing
-    /// path and is wired so the CLI / JSON surface stays stable when
-    /// asset bundling lands.
+    /// The same gate skips imported non-Harn assets that match the
+    /// secret heuristic and reports each skipped asset as a structured
+    /// JSON warning plus `manifest.metadata.skipped_assets`.
     #[arg(long, default_value_t = false, conflicts_with = "include_secrets")]
     pub exclude_secrets: bool,
 
