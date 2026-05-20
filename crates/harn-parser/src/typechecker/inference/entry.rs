@@ -6,6 +6,8 @@
 //! declaration order don't trip the strict cross-module undefined-name
 //! check.
 
+use std::rc::Rc;
+
 use crate::ast::*;
 use crate::diagnostic_codes::Code;
 
@@ -20,17 +22,21 @@ impl TypeChecker {
         mut self,
         program: &[SNode],
     ) -> (Vec<TypeDiagnostic>, Vec<InlayHintInfo>) {
-        Self::register_declarations_into(&mut self.scope, &self.imported_type_decls);
-        Self::register_imported_callable_signatures_into(
-            &mut self.scope,
-            &self.imported_callable_decls,
-        );
+        // Pre-pass mutations: nobody else holds an `Rc` to `self.scope`
+        // yet, so `Rc::make_mut` resolves to a direct `&mut TypeScope`
+        // without copying. Once body children start to share the root
+        // (via `child_of(&self.scope)`), the refcount climbs above 1 and
+        // any further `make_mut` would copy — but at that point we don't
+        // mutate `self.scope` directly, only its children.
+        let scope_mut = Rc::make_mut(&mut self.scope);
+        Self::register_declarations_into(scope_mut, &self.imported_type_decls);
+        Self::register_imported_callable_signatures_into(scope_mut, &self.imported_callable_decls);
         // First pass: collect declarations (type/enum/struct/interface) into scope
         // before type-checking bodies so forward references resolve.
-        Self::register_declarations_into(&mut self.scope, program);
+        Self::register_declarations_into(scope_mut, program);
         for snode in program {
             if let Node::Pipeline { body, .. } = &snode.node {
-                Self::register_declarations_into(&mut self.scope, body);
+                Self::register_declarations_into(scope_mut, body);
             }
         }
         // Pre-register every top-level `fn`/`pipeline`/`tool` name so a
@@ -39,7 +45,7 @@ impl TypeChecker {
         // it as undefined. Signatures populated here are overwritten
         // when the body is actually walked; this pass only needs the
         // name to exist so `check_call`'s resolvability check passes.
-        Self::register_callable_placeholders(&mut self.scope, program);
+        Self::register_callable_placeholders(scope_mut, program);
 
         // Pre-pass: index `@deprecated` attributes on top-level fn decls so
         // `check_call` (and the standalone deprecation visitor below) can
@@ -86,7 +92,7 @@ impl TypeChecker {
                     body,
                     ..
                 } => {
-                    let mut child = self.scope.child();
+                    let mut child = TypeScope::child_of(&self.scope);
                     for p in params {
                         child.define_var(p, None);
                         child.clear_nil_widenable(p);
@@ -130,7 +136,7 @@ impl TypeChecker {
                             .collect(),
                         has_rest: params.last().is_some_and(|p| p.rest),
                     };
-                    self.scope.define_fn(name, sig);
+                    Rc::make_mut(&mut self.scope).define_fn(name, sig);
                     if name == "main" {
                         self.check_main_signature(params, snode.span);
                     }
@@ -145,18 +151,29 @@ impl TypeChecker {
                     );
                 }
                 _ => {
-                    let mut scope = self.scope.clone();
+                    // Top-level statements that aren't fn/pipeline decls
+                    // (e.g. bare `let` bindings). Type-check in a child
+                    // scope, then promote newly defined names back onto
+                    // the root so subsequent top-level nodes see them.
+                    //
+                    // Destructure to move the maps out and drop the
+                    // child's `Rc` reference to the parent before calling
+                    // `Rc::make_mut`; otherwise the live child clone would
+                    // force `make_mut` to copy the root scope.
+                    let mut scope = TypeScope::child_of(&self.scope);
                     self.check_node(snode, &mut scope);
-                    // Promote top-level definitions out of the temporary scope.
-                    for (name, ty) in scope.vars {
-                        self.scope.vars.entry(name).or_insert(ty);
+                    let TypeScope {
+                        vars,
+                        mutable_vars,
+                        nil_widenable_vars,
+                        ..
+                    } = scope;
+                    let root = Rc::make_mut(&mut self.scope);
+                    for (name, ty) in vars {
+                        root.vars.entry(name).or_insert(ty);
                     }
-                    for name in scope.mutable_vars {
-                        self.scope.mutable_vars.insert(name);
-                    }
-                    for (name, enabled) in scope.nil_widenable_vars {
-                        self.scope.nil_widenable_vars.insert(name, enabled);
-                    }
+                    root.mutable_vars.extend(mutable_vars);
+                    root.nil_widenable_vars.extend(nil_widenable_vars);
                 }
             }
         }

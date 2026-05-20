@@ -178,6 +178,20 @@ condensed series summaries instead of full per-patch history.
   `bindings/thread-harness-needs-param` surface-changing repair when a new
   `harness: Harness` parameter is required.
 
+- **Linear typecheck scaling on large files (#2093).** Restructures
+  `TypeScope.parent` from `Box<TypeScope>` (deep-cloned on every scope
+  entry) to `Rc<TypeScope>` so child scope creation is an `Rc::clone`
+  rather than a recursive copy of the parent chain. Each function /
+  pipeline body now enters its scope via a refcount bump against the
+  shared root, and non-generic call sites skip the per-call
+  `call_scope.clone()` by borrowing the caller's scope directly.
+  Cold-start typecheck phase on a synthetic file with one-line fns and
+  500 call sites in the main pipeline drops from previously
+  super-linear to flat O(n): 500 fns 69 ms → 3 ms (23×), 2000 fns
+  438 ms → 6 ms (73×), 5000 fns 2.18 s → 14 ms (156×), 10000 fns
+  8.27 s → 29 ms (285×). LSP re-typecheck on save and `harn check` in
+  pre-commit on large projects pick up the same speedup.
+
 ## v0.8.27
 
 ### Added

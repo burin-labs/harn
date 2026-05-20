@@ -7,6 +7,7 @@
 //! gradual-typing alias (`InferredType`) and the variance polarity tracker.
 
 use std::collections::{BTreeMap, BTreeSet};
+use std::rc::Rc;
 
 use crate::ast::*;
 use crate::builtin_signatures;
@@ -122,7 +123,11 @@ pub(super) struct TypeScope {
     /// type is a best-effort guess, and historical scripts treat them like
     /// loose dicts.
     pub(super) annotated_vars: BTreeSet<String>,
-    pub(super) parent: Option<Box<TypeScope>>,
+    /// Lexical parent. Held by `Rc` so creating a child scope is an
+    /// `Rc::clone` (constant time) rather than a deep clone of the entire
+    /// parent chain. Lookups walk this chain by shared reference; no
+    /// mutation ever travels through it.
+    pub(super) parent: Option<Rc<TypeScope>>,
 }
 
 /// Method signature extracted from an impl block (for interface checking).
@@ -211,7 +216,24 @@ impl TypeScope {
         scope
     }
 
+    /// Create a child scope. Wraps `self` in a fresh `Rc` for use as the
+    /// child's parent; prefer [`TypeScope::child_of`] whenever a parent
+    /// `Rc` is already available, since that turns scope entry into an
+    /// `Rc::clone` (constant time) regardless of parent chain depth.
     pub(super) fn child(&self) -> Self {
+        Self::child_with_parent(Rc::new(self.clone()))
+    }
+
+    /// Create a child scope that shares an existing `Rc<TypeScope>` as
+    /// its parent. This is the hot path for entering function / pipeline
+    /// bodies, where many siblings share the same root scope: the root
+    /// is wrapped in an `Rc` once and every child entry is then an
+    /// `Rc::clone` rather than a deep clone of the root's tables.
+    pub(super) fn child_of(parent: &Rc<TypeScope>) -> Self {
+        Self::child_with_parent(Rc::clone(parent))
+    }
+
+    fn child_with_parent(parent: Rc<TypeScope>) -> Self {
         Self {
             vars: BTreeMap::new(),
             functions: BTreeMap::new(),
@@ -229,7 +251,7 @@ impl TypeScope {
             untyped_sources: BTreeMap::new(),
             unknown_ruled_out: BTreeMap::new(),
             annotated_vars: BTreeSet::new(),
-            parent: Some(Box::new(self.clone())),
+            parent: Some(parent),
         }
     }
 

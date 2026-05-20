@@ -1,4 +1,5 @@
 use std::collections::HashSet;
+use std::rc::Rc;
 
 use crate::ast::*;
 use crate::builtin_signatures;
@@ -95,7 +96,12 @@ pub enum DiagnosticSeverity {
 /// The static type checker.
 pub struct TypeChecker {
     diagnostics: Vec<TypeDiagnostic>,
-    scope: TypeScope,
+    /// Root scope shared by every child scope created during the walk.
+    /// `Rc` lets fn/pipeline body entries take a refcount bump instead of
+    /// deep-cloning the entire scope chain. Mutations during the pre-pass
+    /// (and the top-level non-callable arm) go through `Rc::make_mut`,
+    /// which is O(1) while the refcount is 1.
+    scope: Rc<TypeScope>,
     source: Option<String>,
     hints: Vec<InlayHintInfo>,
     /// When true, flag unvalidated boundary-API values used in field access.
@@ -152,7 +158,7 @@ impl TypeChecker {
     pub fn new() -> Self {
         Self {
             diagnostics: Vec::new(),
-            scope: TypeScope::new(),
+            scope: Rc::new(TypeScope::new()),
             source: None,
             hints: Vec::new(),
             strict_types: false,
@@ -172,7 +178,7 @@ impl TypeChecker {
     pub fn with_strict_types(strict: bool) -> Self {
         Self {
             diagnostics: Vec::new(),
-            scope: TypeScope::new(),
+            scope: Rc::new(TypeScope::new()),
             source: None,
             hints: Vec::new(),
             strict_types: strict,
