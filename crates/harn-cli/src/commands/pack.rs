@@ -1193,7 +1193,9 @@ pub fn verify(args: &PackVerifyArgs) -> Result<PackVerifyJsonData, PackError> {
 
     let mut source_map: BTreeMap<PathBuf, &HarnpackEntry> = BTreeMap::new();
     let mut bytecode_map: BTreeMap<PathBuf, &HarnpackEntry> = BTreeMap::new();
+    let mut archive_hashes: BTreeMap<PathBuf, String> = BTreeMap::new();
     for entry in contents {
+        archive_hashes.insert(entry.path.clone(), blake3_hash(&entry.bytes));
         if let Ok(rel) = entry.path.strip_prefix("sources") {
             source_map.insert(rel.to_path_buf(), entry);
         } else if let Ok(rel) = entry.path.strip_prefix("bytecode") {
@@ -1255,6 +1257,10 @@ pub fn verify(args: &PackVerifyArgs) -> Result<PackVerifyJsonData, PackError> {
         }
     }
 
+    if args.strict {
+        verify_sbom_package_hashes(manifest, &archive_hashes)?;
+    }
+
     // Cross-check the recorded signature hash against the recomputed
     // canonical hash. `verify_workflow_bundle_signature` already does
     // this for signed bundles; for unsigned bundles we report the
@@ -1287,6 +1293,92 @@ pub fn verify(args: &PackVerifyArgs) -> Result<PackVerifyJsonData, PackError> {
         module_count: manifest.transitive_modules.len(),
         content_entry_count: contents.len(),
     })
+}
+
+fn verify_sbom_package_hashes(
+    manifest: &WorkflowBundle,
+    archive_hashes: &BTreeMap<PathBuf, String>,
+) -> Result<(), PackError> {
+    let module_hashes: BTreeMap<&Path, &str> = manifest
+        .transitive_modules
+        .iter()
+        .map(|module| (module.path.as_path(), module.source_hash_blake3.as_str()))
+        .collect();
+
+    for package in &manifest.sbom.packages {
+        let Some(expected_hash) = package.package_hash_blake3.as_deref() else {
+            continue;
+        };
+
+        if let Some(rel) = package.name.strip_prefix("module:") {
+            let module_path = Path::new(rel);
+            let manifest_hash = module_hashes.get(module_path).ok_or_else(|| {
+                PackError::new(
+                    "verify.sbom_mismatch",
+                    format!(
+                        "SBOM package {} does not match any manifest transitive module",
+                        package.name
+                    ),
+                )
+            })?;
+            if *manifest_hash != expected_hash {
+                return Err(PackError::new(
+                    "verify.sbom_mismatch",
+                    format!(
+                        "SBOM package {} recorded hash {} but manifest module {} uses {}",
+                        package.name,
+                        expected_hash,
+                        module_path.display(),
+                        manifest_hash
+                    ),
+                ));
+            }
+            let source_archive_path = PathBuf::from("sources").join(module_path);
+            let archive_hash = archive_hashes.get(&source_archive_path).ok_or_else(|| {
+                PackError::new(
+                    "verify.sbom_mismatch",
+                    format!(
+                        "SBOM package {} refers to {}, but archive is missing {}",
+                        package.name,
+                        module_path.display(),
+                        source_archive_path.display()
+                    ),
+                )
+            })?;
+            if archive_hash != expected_hash {
+                return Err(PackError::new(
+                    "verify.sbom_mismatch",
+                    format!(
+                        "SBOM package {} recorded hash {} but archive {} hashes to {}",
+                        package.name,
+                        expected_hash,
+                        source_archive_path.display(),
+                        archive_hash
+                    ),
+                ));
+            }
+            continue;
+        }
+
+        let candidate_path = Path::new(&package.name);
+        let Some(archive_hash) = archive_hashes.get(candidate_path) else {
+            continue;
+        };
+        if archive_hash != expected_hash {
+            return Err(PackError::new(
+                "verify.sbom_mismatch",
+                format!(
+                    "SBOM package {} recorded hash {} but archive {} hashes to {}",
+                    package.name,
+                    expected_hash,
+                    candidate_path.display(),
+                    archive_hash
+                ),
+            ));
+        }
+    }
+
+    Ok(())
 }
 
 fn bundle_signer_fingerprint(signature: &Ed25519Signature) -> Result<String, String> {

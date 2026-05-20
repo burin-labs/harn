@@ -457,6 +457,7 @@ fn pack_verify_signed_bundle_passes_and_reports_signature_key() {
         allow_unsigned: false,
         trust_policy: None,
         require_trusted_signer: false,
+        strict: false,
         json: false,
     })
     .expect("verify ok on signed bundle");
@@ -485,6 +486,7 @@ fn pack_verify_unsigned_bundle_refused_without_flag_but_ok_with_flag() {
         allow_unsigned: false,
         trust_policy: None,
         require_trusted_signer: false,
+        strict: false,
         json: false,
     })
     .expect_err("unsigned bundle must refuse without --allow-unsigned");
@@ -495,6 +497,7 @@ fn pack_verify_unsigned_bundle_refused_without_flag_but_ok_with_flag() {
         allow_unsigned: true,
         trust_policy: None,
         require_trusted_signer: false,
+        strict: false,
         json: false,
     })
     .expect("verify ok on unsigned bundle with --allow-unsigned");
@@ -544,6 +547,7 @@ fn pack_verify_tampered_signed_bundle_fails() {
         allow_unsigned: true,
         trust_policy: None,
         require_trusted_signer: false,
+        strict: false,
         json: false,
     })
     .expect_err("tampered bundle must fail verification");
@@ -567,6 +571,7 @@ fn pack_verify_json_envelope_round_trips_schema() {
         allow_unsigned: true,
         trust_policy: None,
         require_trusted_signer: false,
+        strict: false,
         json: true,
     });
     let value = serde_json::to_value(&envelope).unwrap();
@@ -631,6 +636,7 @@ fn pack_verify_require_trusted_signer_rejects_signer_outside_policy_allowlist() 
             allow_unsigned: false,
             trust_policy: Some(policy),
             require_trusted_signer: true,
+            strict: false,
             json: false,
         })
         .expect_err("unexpected signer must fail the trust policy");
@@ -638,6 +644,57 @@ fn pack_verify_require_trusted_signer_rejects_signer_outside_policy_allowlist() 
         assert_eq!(err.code, "verify.untrusted_signer");
         assert!(err.message.contains("trusted_signers allowlist"));
     });
+}
+
+#[test]
+fn pack_verify_strict_rejects_tampered_sbom_module_hash() {
+    let workdir = TempDir::new().unwrap();
+    let entry = workdir.path().join("hello.harn");
+    fs::write(&entry, "println(\"hi\")\n").unwrap();
+    let out = workdir.path().join("hello.harnpack");
+    build_pack(&pack_args(entry.clone(), out.clone()));
+
+    let mut archive = read_harnpack(&fs::read(&out).unwrap()).unwrap();
+    let module_package = archive
+        .manifest
+        .sbom
+        .packages
+        .iter_mut()
+        .find(|package| package.name == "module:hello.harn")
+        .expect("module package present");
+    module_package.package_hash_blake3 =
+        Some("blake3:0000000000000000000000000000000000000000000000000000000000000000".to_string());
+    let sbom_entry = archive
+        .contents
+        .iter_mut()
+        .find(|entry| entry.path == Path::new(pack::PACK_SBOM_ARCHIVE_PATH))
+        .expect("sbom entry present");
+    sbom_entry.bytes = serde_json::to_vec(&archive.manifest.sbom).unwrap();
+    let tampered =
+        harn_vm::orchestration::build_harnpack(&archive.manifest, &archive.contents).unwrap();
+    fs::write(&out, &tampered).unwrap();
+
+    pack::verify(&PackVerifyArgs {
+        bundle: out.clone(),
+        allow_unsigned: true,
+        trust_policy: None,
+        require_trusted_signer: false,
+        strict: false,
+        json: false,
+    })
+    .expect("non-strict verify ignores SBOM-only drift");
+
+    let err = pack::verify(&PackVerifyArgs {
+        bundle: out,
+        allow_unsigned: true,
+        trust_policy: None,
+        require_trusted_signer: false,
+        strict: true,
+        json: false,
+    })
+    .expect_err("strict verify must reject SBOM package hash drift");
+    assert_eq!(err.code, "verify.sbom_mismatch");
+    assert!(err.message.contains("module:hello.harn"));
 }
 
 #[test]
