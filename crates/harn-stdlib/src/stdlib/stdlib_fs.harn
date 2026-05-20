@@ -236,7 +236,7 @@ pub fn touch(path: string) {
  * @example: find_files(root, pattern, options)
  */
 pub fn find_files(root: string, pattern: string, options = {}) -> list<string> {
-  let matches = glob(pattern, {base: root, long_running: options?.long_running ?? false})
+  let matches = harness.fs.glob(pattern, {base: root, long_running: options?.long_running ?? false})
   if options?.relative ?? false {
     return matches.map({ path -> relative_path(root, path) }).to_list()
   }
