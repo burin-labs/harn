@@ -1,0 +1,4 @@
+{
+  "mode": "mock",
+  "expect_stdio": "type=NetPolicyViolation\ncategory=net_policy_violation\nhost=example.test\noutcome=error\n"
+}

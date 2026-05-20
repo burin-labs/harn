@@ -6,6 +6,30 @@ Pre-0.6 highlights live in [CHANGELOG-pre-0.6.md](CHANGELOG-pre-0.6.md).
 Harn had no external users before 0.6.0, so that archive intentionally keeps
 condensed series summaries instead of full per-patch history.
 
+## Unreleased
+
+### Added
+
+- **`harness.net.*` access policy (#1913).** Adds the `std/net_policy`
+  stdlib module so scripts can attach a per-harness allow/deny policy
+  to `harness.net.*` requests: `NetPolicy.create({allow, deny,
+  default, on_violation})` plus the rule constructors
+  `NetPolicy.domain(host)`, `NetPolicy.domain_wildcard(pattern)`,
+  `NetPolicy.cidr(range)`, and `NetPolicy.host(host_name, [ports])`.
+  `harness.with_net_policy(policy)` returns a new harness whose
+  `net.*` calls are gated against the rules. `on_violation` accepts
+  `"error"` (throws a typed `NetPolicyViolation`), `"audit_only"`
+  (allows the request but records an audit), `"quarantine"` (denies
+  and flips the new sticky `harness.is_quarantined()` flag), or a
+  user closure `fn(req) -> string` that picks one of the three per
+  request. Every evaluation — including the `HARN_NET_POLICY_BYPASS=1`
+  short-circuit — emits a `harness.net.policy.audit` event so the
+  trust graph keeps an evidence trail. Mock-mode dispatch enforces the
+  policy ahead of the canned-response lookup, so conformance fixtures
+  can exercise the matcher without touching the network. Tracked
+  through the E4.9 row of epic #1765 and lays the runtime groundwork
+  for the harn-cloud `workspaces.network_policy` schema.
+
 ## v0.8.27
 
 ### Added

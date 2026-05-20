@@ -6,11 +6,23 @@
 use std::time::Duration;
 
 use crate::harness::{vm_string, HarnessKind, HarnessMode, VmHarness};
+use crate::harness_net::{
+    self, record_audit, violation_request_value, violation_vm_error, NetPolicyAudit,
+    NetPolicyDecision, OnViolation,
+};
 use crate::stdlib::io::{
     prompt_user_value, read_line_legacy_value, read_line_structured_value, write_stderr,
     write_stdout,
 };
 use crate::value::{ErrorCategory, VmError, VmValue};
+
+/// Outcome of `Vm::evaluate_net_policy_for_method`. `Allow` means the
+/// dispatcher should proceed with the underlying call; `Deny` carries
+/// the typed error to surface to the caller.
+enum NetPolicyOutcome {
+    Allow,
+    Deny(VmError),
+}
 
 impl crate::vm::Vm {
     pub(super) async fn call_harness_method(
@@ -19,12 +31,40 @@ impl crate::vm::Vm {
         method: &str,
         args: &[VmValue],
     ) -> Result<VmValue, VmError> {
+        // Capability-handle methods that adjust the harness itself
+        // (`with_net_policy`, `is_quarantined`) run independent of the
+        // backing mode so scripts can reshape the handle even under
+        // null/mock harnesses. Per issue #1913.
+        if handle.kind() == HarnessKind::Root {
+            match method {
+                "with_net_policy" | "is_quarantined" => {
+                    return self
+                        .call_harness_root_capability_method(handle, method, args)
+                        .await;
+                }
+                _ => {}
+            }
+        }
         if let HarnessMode::Null(state) = handle.inner().mode() {
             state.record_deny(handle.kind(), method, args);
             return Err(VmError::CategorizedError {
                 message: format!("NullHarness denied {}::{method}", handle.kind().type_name()),
                 category: ErrorCategory::ToolRejected,
             });
+        }
+        // Enforce per-harness `NetPolicy` (issue #1913) ahead of mock
+        // dispatch so audit_only / quarantine outcomes apply uniformly
+        // to real and mock paths.
+        if handle.kind() == HarnessKind::Net {
+            if let Some(decision) = self
+                .evaluate_net_policy_for_method(handle, method, args)
+                .await?
+            {
+                match decision {
+                    NetPolicyOutcome::Allow => {}
+                    NetPolicyOutcome::Deny(err) => return Err(err),
+                }
+            }
         }
         if matches!(handle.inner().mode(), HarnessMode::Mock(_)) {
             return self.call_mock_harness_method(handle, method, args).await;
@@ -40,6 +80,152 @@ impl crate::vm::Vm {
                 handle.type_name(),
             )))
             }
+        }
+    }
+
+    /// Root-handle capability methods that bypass the null/mock-mode
+    /// gating because they reshape the `Harness` value itself rather
+    /// than touch the OS. Currently `with_net_policy` (issue #1913)
+    /// and `is_quarantined`. Adding new entries here requires the
+    /// caller-side allowlist in `call_harness_method` to be updated
+    /// at the same time.
+    async fn call_harness_root_capability_method(
+        &mut self,
+        handle: &VmHarness,
+        method: &str,
+        args: &[VmValue],
+    ) -> Result<VmValue, VmError> {
+        match method {
+            "with_net_policy" => {
+                let policy_value = args.first().ok_or_else(|| {
+                    VmError::TypeError(
+                        "Harness.with_net_policy expects a NetPolicy.create({...}) result"
+                            .to_string(),
+                    )
+                })?;
+                let dict = policy_value.as_dict().ok_or_else(|| {
+                    VmError::TypeError(format!(
+                        "Harness.with_net_policy: expected a NetPolicy dict, got {}",
+                        policy_value.type_name()
+                    ))
+                })?;
+                let policy = crate::harness_net::parse::policy_from_dict(dict)?;
+                let source = crate::harness::Harness::from_inner(handle.inner().clone());
+                Ok(source.with_net_policy(policy).into_vm_value())
+            }
+            "is_quarantined" => Ok(VmValue::Bool(handle.inner().is_quarantined())),
+            _ => Err(method_unsupported(handle, method)),
+        }
+    }
+
+    /// Apply the per-harness `NetPolicy` (issue #1913) to a
+    /// `harness.net.*` method call. Returns `Ok(None)` when no policy
+    /// is bound; `Ok(Some(Allow))` for an allowed (possibly audited)
+    /// request; `Ok(Some(Deny))` carrying the typed VmError when the
+    /// request must be blocked.
+    async fn evaluate_net_policy_for_method(
+        &mut self,
+        handle: &VmHarness,
+        method: &str,
+        args: &[VmValue],
+    ) -> Result<Option<NetPolicyOutcome>, VmError> {
+        let Some(policy) = handle.inner().net_policy().cloned() else {
+            return Ok(None);
+        };
+        // Bypass is honoured *after* the policy is bound so that
+        // configuring a policy and forgetting to clear the env var
+        // still leaves an audit trail.
+        if harness_net::bypass_enabled() {
+            let bypass_audit = NetPolicyAudit {
+                method: method.to_string(),
+                url: args
+                    .first()
+                    .map(|v| v.display())
+                    .unwrap_or_else(|| "<missing>".to_string()),
+                host: String::new(),
+                port: None,
+                reason: "HARN_NET_POLICY_BYPASS set; policy not enforced".to_string(),
+                outcome: "bypass",
+                bypass: true,
+                matched_rule: None,
+            };
+            record_audit(&bypass_audit).await;
+            return Ok(Some(NetPolicyOutcome::Allow));
+        }
+        let Some(url) = args.first().and_then(|v| match v {
+            VmValue::String(s) => Some(s.as_ref().to_string()),
+            _ => None,
+        }) else {
+            // No URL argument — let the underlying method surface its
+            // own type error.
+            return Ok(None);
+        };
+        let decision = policy.evaluate(method, &url)?;
+        match decision {
+            NetPolicyDecision::Allow { audited, audit } => {
+                if audited {
+                    if let Some(audit) = &audit {
+                        record_audit(audit).await;
+                    }
+                }
+                Ok(Some(NetPolicyOutcome::Allow))
+            }
+            NetPolicyDecision::Deny { audit, quarantine } => {
+                if quarantine {
+                    handle.inner().mark_quarantined();
+                }
+                // Custom callback resolution: invoke the user closure
+                // and respect its returned outcome string.
+                if let OnViolation::Callback(closure) = policy.on_violation.clone() {
+                    let request = violation_request_value(&audit);
+                    match self.call_closure_pub(&closure, &[request]).await {
+                        Ok(value) => match value {
+                            VmValue::String(s) => {
+                                let outcome = OnViolation::parse_str(s.as_ref())?;
+                                return self.apply_callback_outcome(handle, audit, outcome).await;
+                            }
+                            other => {
+                                return Err(VmError::TypeError(format!(
+                                    "NetPolicy.on_violation callback must return one of `error`, `audit_only`, `quarantine`, got {}",
+                                    other.type_name()
+                                )));
+                            }
+                        },
+                        Err(err) => return Err(err),
+                    }
+                }
+                record_audit(&audit).await;
+                Ok(Some(NetPolicyOutcome::Deny(violation_vm_error(&audit))))
+            }
+        }
+    }
+
+    async fn apply_callback_outcome(
+        &mut self,
+        handle: &VmHarness,
+        mut audit: NetPolicyAudit,
+        outcome: OnViolation,
+    ) -> Result<Option<NetPolicyOutcome>, VmError> {
+        match outcome {
+            OnViolation::Error => {
+                audit.outcome = "error";
+                record_audit(&audit).await;
+                Ok(Some(NetPolicyOutcome::Deny(violation_vm_error(&audit))))
+            }
+            OnViolation::AuditOnly => {
+                audit.outcome = "audit_only";
+                record_audit(&audit).await;
+                Ok(Some(NetPolicyOutcome::Allow))
+            }
+            OnViolation::Quarantine => {
+                audit.outcome = "quarantine";
+                handle.inner().mark_quarantined();
+                record_audit(&audit).await;
+                Ok(Some(NetPolicyOutcome::Deny(violation_vm_error(&audit))))
+            }
+            OnViolation::Callback(_) => Err(VmError::TypeError(
+                "NetPolicy.on_violation callback may not return another callback".to_string(),
+            )),
         }
     }
 

@@ -1,0 +1,23 @@
+/**
+ * `NetPolicy.create({default: "deny"})` with no allow rules makes
+ * every `harness.net.*` call throw `NetPolicyViolation` and the
+ * dispatcher skips the underlying request (mock state stays untouched).
+ *
+ * Tracking: harn#1913 (E4.9).
+ */
+import { create, domain } from "std/net_policy"
+
+fn main(harness: Harness) {
+  let policy = create({allow: [domain("github.com")], default: "deny"})
+  let restricted = harness.with_net_policy(policy)
+  var err = nil
+  try {
+    restricted.net.get("https://example.test/blocked")
+  } catch (e) {
+    err = e
+  }
+  harness.stdio.println("type=" + err.type)
+  harness.stdio.println("category=" + err.category)
+  harness.stdio.println("host=" + err.host)
+  harness.stdio.println("outcome=" + err.outcome)
+}

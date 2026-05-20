@@ -125,6 +125,18 @@ impl HarnessKind {
 pub struct HarnessInner {
     clock: Arc<dyn Clock>,
     mode: HarnessMode,
+    /// Per-harness `harness.net.*` access policy. `None` means the
+    /// handle inherits the legacy unrestricted behaviour (subject to
+    /// the process-wide `crate::egress` allowlist, if configured).
+    /// See `Harness::with_net_policy` and `crate::harness_net`.
+    net_policy: Option<crate::harness_net::NetPolicy>,
+    /// `true` once a request denied under `OnViolation::Quarantine`
+    /// has fired. Sticky for the lifetime of the underlying
+    /// `Arc<HarnessInner>` so downstream consumers can pin on the
+    /// signal even after the originating call has returned. The flag
+    /// is per-`Arc` (i.e. per-`Harness` build) so unrelated harnesses
+    /// stay independent.
+    quarantined: Mutex<bool>,
 }
 
 impl HarnessInner {
@@ -135,13 +147,27 @@ impl HarnessInner {
     pub(crate) fn mode(&self) -> &HarnessMode {
         &self.mode
     }
+
+    pub fn net_policy(&self) -> Option<&crate::harness_net::NetPolicy> {
+        self.net_policy.as_ref()
+    }
+
+    pub(crate) fn mark_quarantined(&self) {
+        if let Ok(mut guard) = self.quarantined.lock() {
+            *guard = true;
+        }
+    }
+
+    pub fn is_quarantined(&self) -> bool {
+        self.quarantined.lock().map(|guard| *guard).unwrap_or(false)
+    }
 }
 
 #[derive(Debug)]
 pub(crate) enum HarnessMode {
     Real,
     Null(NullHarnessState),
-    Mock(Box<MockHarnessState>),
+    Mock(Arc<MockHarnessState>),
 }
 
 #[derive(Debug, Default)]
@@ -359,7 +385,7 @@ impl MockHarnessBuilder {
         let clock = self.clock;
         Harness::with_mode(
             clock.clone() as Arc<dyn Clock>,
-            HarnessMode::Mock(Box::new(MockHarnessState {
+            HarnessMode::Mock(Arc::new(MockHarnessState {
                 calls: Mutex::new(Vec::new()),
                 clock,
                 env: self.env,
@@ -422,10 +448,67 @@ impl Harness {
         Self::with_mode(clock, HarnessMode::Real)
     }
 
+    /// Construct a `Harness` from a pre-built `Arc<HarnessInner>`.
+    /// Used by VM method dispatch when it needs to re-wrap a sub-handle's
+    /// inner state into a root `Harness` (e.g. to invoke
+    /// [`Self::with_net_policy`] from inside the method dispatcher).
+    pub fn from_inner(inner: Arc<HarnessInner>) -> Self {
+        Self { inner }
+    }
+
     fn with_mode(clock: Arc<dyn Clock>, mode: HarnessMode) -> Self {
-        Self {
-            inner: Arc::new(HarnessInner { clock, mode }),
-        }
+        // `HarnessInner` becomes !Send/!Sync once a `NetPolicy` with a
+        // `Rc<VmClosure>` callback is attached (issue #1913). The
+        // closure is only invoked on the VM thread that originated
+        // the harness method call, so the practical safety of the Arc
+        // is unchanged; the clippy lint is suppressed at the
+        // construction sites that legitimately store the inner state
+        // in shared ownership.
+        #[allow(clippy::arc_with_non_send_sync)]
+        let inner = Arc::new(HarnessInner {
+            clock,
+            mode,
+            net_policy: None,
+            quarantined: Mutex::new(false),
+        });
+        Self { inner }
+    }
+
+    /// Attach a per-harness `harness.net.*` access policy.
+    ///
+    /// Returns a new `Harness` value whose sub-handles share a fresh
+    /// `Arc<HarnessInner>`. Existing handles built off the prior inner
+    /// keep operating without the policy — so calling
+    /// `harness.with_net_policy(...)` does NOT retroactively gate
+    /// references to `harness` held elsewhere. Per issue #1913.
+    ///
+    /// The clock and mode are propagated verbatim. Mock canned
+    /// responses (`net_gets`, `random_u64`, etc.) live behind the
+    /// shared `HarnessMode::Mock` payload, so the new handle observes
+    /// the same recorded calls and the same canned responses as the
+    /// source handle.
+    pub fn with_net_policy(&self, policy: crate::harness_net::NetPolicy) -> Self {
+        let clock = Arc::clone(&self.inner.clock);
+        let mode = match &self.inner.mode {
+            HarnessMode::Real => HarnessMode::Real,
+            HarnessMode::Null(_) => HarnessMode::Null(NullHarnessState::default()),
+            HarnessMode::Mock(state) => HarnessMode::Mock(Arc::clone(state)),
+        };
+        // See `with_mode` for the rationale on this suppression.
+        #[allow(clippy::arc_with_non_send_sync)]
+        let inner = Arc::new(HarnessInner {
+            clock,
+            mode,
+            net_policy: Some(policy),
+            quarantined: Mutex::new(self.is_quarantined()),
+        });
+        Self { inner }
+    }
+
+    /// `true` if the harness has been marked quarantined by an
+    /// `OnViolation::Quarantine` deny event.
+    pub fn is_quarantined(&self) -> bool {
+        self.inner.is_quarantined()
     }
 
     pub fn deny_events(&self) -> Vec<DenyEvent> {

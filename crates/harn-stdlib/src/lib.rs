@@ -146,6 +146,10 @@ pub const STDLIB_SOURCES: &[StdlibSource] = &[
         source: include_str!("stdlib/stdlib_signal.harn"),
     },
     StdlibSource {
+        module: "net_policy",
+        source: include_str!("stdlib/stdlib_net_policy.harn"),
+    },
+    StdlibSource {
         module: "review",
         source: include_str!("stdlib/stdlib_review.harn"),
     },

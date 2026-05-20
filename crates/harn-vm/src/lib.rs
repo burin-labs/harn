@@ -28,6 +28,7 @@ pub mod event_log;
 pub mod events;
 pub mod flow;
 pub mod harness;
+pub mod harness_net;
 pub mod harness_system;
 mod http;
 pub mod jsonrpc;
@@ -137,6 +138,11 @@ pub use corrections::{
 pub use harness::{
     DenyEvent, Harness, HarnessCall, HarnessClock, HarnessEnv, HarnessFs, HarnessKind, HarnessNet,
     HarnessRandom, HarnessStdio, HarnessSystem, MockAwareClock, MockHarnessBuilder, VmHarness,
+};
+pub use harness_net::{
+    bypass_enabled as net_policy_bypass_enabled, NetMatcher, NetPolicy, NetPolicyAudit,
+    NetPolicyDecision, NetPolicyDefault, NetPolicyRule, OnViolation, HARN_NET_POLICY_BYPASS_ENV,
+    NET_POLICY_AUDIT_TOPIC,
 };
 pub use http::{register_http_builtins, reset_http_state};
 pub use llm::register_llm_builtins;

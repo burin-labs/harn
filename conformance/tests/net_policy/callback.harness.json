@@ -1,0 +1,5 @@
+{
+  "mode": "mock",
+  "net_gets": {"https://example.test/safe/hello": "safe-body"},
+  "expect_stdio": "safe=safe-body\ndanger_outcome=quarantine\nquarantined=true\n"
+}

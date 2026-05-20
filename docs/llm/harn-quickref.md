@@ -3448,6 +3448,50 @@ value ledger and crystallization receipts read these back.
 
 Full reference: [`docs/src/stdlib/cache.md`](https://harnlang.com/docs/stdlib/cache.html).
 
+## Per-harness net policy (`std/net_policy`)
+
+Attach an allowlist/denylist to one harness so its `harness.net.*`
+calls (added by E4.4 / #1769) get gated against your rules. Returns a
+new `Harness` value bound to the policy — the source handle stays
+unrestricted, so policies are scoped by where you rebind, not by
+mutating shared state. Tracked through harn#1913 / epic #1765.
+
+```harn,ignore
+import { create, domain, domain_wildcard, cidr, host } from "std/net_policy"
+
+let policy = create({
+  allow: [
+    domain("github.com"),
+    domain_wildcard("*.github.com"),
+    cidr("10.0.0.0/8"),
+    host("api.anthropic.com", [443]),
+  ],
+  deny: [domain_wildcard("*.competitor.com")],
+  default: "deny",                                    // or "allow"
+  on_violation: "error",                              // or "audit_only", "quarantine",
+                                                      // or a fn(req) returning one of those
+})
+let restricted = harness.with_net_policy(policy)
+restricted.net.get("https://github.com/foo")          // allowed
+restricted.net.get("https://example.test/blocked")    // throws NetPolicyViolation
+restricted.is_quarantined()                           // sticky after a quarantine deny
+```
+
+- Rule precedence: `deny` rules fire first, then `allow`, then the
+  `default`. A typed `NetPolicyViolation` (`{type, category, host,
+  port, reason, outcome, matched_rule}`) is thrown for `error` /
+  `quarantine` outcomes; `audit_only` still records the audit and
+  lets the request through.
+- `on_violation` callbacks receive a `{method, url, host, port,
+  reason, matched_rule}` envelope and must return one of `"error"`,
+  `"audit_only"`, `"quarantine"` (returning a closure is rejected).
+- Every evaluation — including the `HARN_NET_POLICY_BYPASS=1`
+  short-circuit — emits a `harness.net.policy.audit` event so the
+  trust graph keeps an evidence trail.
+- The matcher is mock-aware: in mock mode the policy runs ahead of
+  the canned-response lookup, so conformance fixtures exercise the
+  same matcher path as production without touching the network.
+
 ## Authentication (OAuth)
 
 Harn ships a full OAuth stack: provider catalogue, five interchangeable

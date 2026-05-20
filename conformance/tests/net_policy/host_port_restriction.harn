@@ -1,0 +1,23 @@
+/**
+ * `NetPolicy.host("api.anthropic.com", [443])` allows the host only
+ * on the listed ports. A matching scheme port allows, a mismatched
+ * port denies even though the host matches.
+ *
+ * Tracking: harn#1913 (E4.9).
+ */
+import { create, host } from "std/net_policy"
+
+fn main(harness: Harness) {
+  let policy = create({allow: [host("api.anthropic.com", [443])], default: "deny"})
+  let restricted = harness.with_net_policy(policy)
+  let ok = restricted.net.get("https://api.anthropic.com/v1/messages")
+  harness.stdio.println("ok=" + ok)
+  var port_err = nil
+  try {
+    restricted.net.get("http://api.anthropic.com/v1/messages")
+  } catch (e) {
+    port_err = e
+  }
+  harness.stdio.println("plaintext_blocked=" + to_string(port_err != nil))
+  harness.stdio.println("plaintext_port=" + to_string(port_err.port))
+}

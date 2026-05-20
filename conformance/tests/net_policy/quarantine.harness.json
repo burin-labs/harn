@@ -1,0 +1,4 @@
+{
+  "mode": "mock",
+  "expect_stdio": "before=false\nthrew=true\noutcome=quarantine\nafter=true\n"
+}

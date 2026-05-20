@@ -1,0 +1,164 @@
+/**
+ * std/net_policy — per-harness `harness.net.*` access policy.
+ *
+ * Issue: harn#1913 (E4.9), epic #1765 (Harness explicit-capability).
+ *
+ * `harness.net.*` is the ambient-free entry point for network I/O in
+ * Harn scripts. By default it is gated only by the process-wide
+ * `egress_policy(...)` allowlist (when configured). A `NetPolicy`
+ * value layered on top of an individual harness lets the script
+ * declare an allowlist / denylist / default action and pick what
+ * happens on a violation (throw, audit-only allow, quarantine the
+ * agent, or run a custom callback). The dispatcher in
+ * `crates/harn-vm/src/vm/methods/harness.rs` runs the policy ahead of
+ * the underlying `net.get` / `net.http_get` call so audit_only and
+ * quarantine outcomes apply uniformly to real and mock paths.
+ *
+ *   import { NetPolicy } from "std/net_policy"
+ *
+ *   pipeline default() {
+ *     pipeline_on_finish({ harness, return_value ->
+ *       let policy = NetPolicy.create({
+ *         allow: [
+ *           NetPolicy.domain("github.com"),
+ *           NetPolicy.domain_wildcard("*.github.com"),
+ *           NetPolicy.cidr("10.0.0.0/8"),
+ *           NetPolicy.host("api.anthropic.com", [443]),
+ *         ],
+ *         deny: [NetPolicy.domain_wildcard("*.competitor.com")],
+ *         default: "deny",
+ *         on_violation: "error",
+ *       })
+ *       let restricted = harness.with_net_policy(policy)
+ *       restricted.net.get("https://github.com/foo")    // allowed
+ *       restricted.net.get("https://example.com/bar")   // throws NetPolicyViolation
+ *       return return_value
+ *     })
+ *     return 0
+ *   }
+ *
+ * `on_violation` accepts a string (`"error"`, `"audit_only"`,
+ * `"quarantine"`) or a closure shaped `fn(req) -> string` that picks
+ * one of the three outcomes per-request. Quarantine deny events flip
+ * the harness's `is_quarantined()` flag so downstream tooling can
+ * route on the signal.
+ *
+ * `HARN_NET_POLICY_BYPASS=1` short-circuits enforcement on every
+ * harness in the process. The bypass is recorded on the audit log
+ * with `bypass: true` so the trust graph still sees the leak.
+ */
+/**
+ * Allow exactly one host (case-insensitive, IDNA-normalised). Does
+ * not match subdomains; use `domain_wildcard` for that.
+ *
+ * @effects: []
+ * @allocation: heap
+ * @errors: []
+ * @api_stability: experimental
+ * @example: NetPolicy.domain("github.com")
+ */
+pub fn domain(host) {
+  return __net_policy_domain(host)
+}
+
+/**
+ * Allow any subdomain of `suffix`. Pattern must start with `*.`. The
+ * bare apex is NOT matched (`*.github.com` does not match `github.com`
+ * — list the apex separately if you need it).
+ *
+ * @effects: []
+ * @allocation: heap
+ * @errors: []
+ * @api_stability: experimental
+ * @example: NetPolicy.domain_wildcard("*.github.com")
+ */
+pub fn domain_wildcard(pattern) {
+  return __net_policy_domain_wildcard(pattern)
+}
+
+/**
+ * Allow any host whose resolved IP falls inside the supplied CIDR
+ * range. URLs whose host is a literal IP are matched directly. For
+ * hostnames the dispatcher relies on the URL parser's host string;
+ * full DNS-resolved IP matching is layered on by the future
+ * `harness.net.*` real-mode wiring (E4.4 / harn#1769).
+ *
+ * @effects: []
+ * @allocation: heap
+ * @errors: []
+ * @api_stability: experimental
+ * @example: NetPolicy.cidr("10.0.0.0/8")
+ */
+pub fn cidr(range) {
+  return __net_policy_cidr(range)
+}
+
+/**
+ * Allow one host on a specific list of ports. Pass `nil` (or omit)
+ * for any port. `ports` must be a list of u16 integers.
+ *
+ * @effects: []
+ * @allocation: heap
+ * @errors: []
+ * @api_stability: experimental
+ * @example: NetPolicy.host("api.anthropic.com", [443])
+ */
+pub fn host(host_name, ports) {
+  return __net_policy_host(host_name, ports)
+}
+
+/**
+ * Compile a policy from `{allow, deny, default, on_violation}`.
+ * Defaults are `default: "deny"` and `on_violation: "error"`. `allow`
+ * / `deny` accept tagged-rule values from this module or bare strings
+ * (interpreted as domain, wildcard, or CIDR by shape).
+ *
+ * @effects: []
+ * @allocation: heap
+ * @errors: []
+ * @api_stability: experimental
+ * @example: NetPolicy.create({allow: [NetPolicy.domain("github.com")], default: "deny"})
+ */
+pub fn create(config) {
+  return __net_policy_create(config)
+}
+
+/**
+ * `OnViolation()` returns the named-action namespace as a dict so
+ * authors can use dotted access (e.g. `OnViolation.audit_only`). The
+ * strings are the same shape `NetPolicy.create({..., on_violation:
+ * "..."})` accepts, so the constants are interchangeable with the raw
+ * strings.
+ *
+ * @effects: []
+ * @allocation: heap
+ * @errors: []
+ * @api_stability: experimental
+ * @example: NetPolicy.create({on_violation: OnViolation.audit_only})
+ */
+pub fn OnViolation() {
+  return {error: "error", audit_only: "audit_only", quarantine: "quarantine"}
+}
+
+/**
+ * `NetPolicy()` returns the namespace dict so callers can use dotted
+ * access (e.g. `NetPolicy.create({...})`) after a single import. This
+ * mirrors the `OnBudget()` / `QueueStrategy()` factories elsewhere in
+ * the stdlib.
+ *
+ * @effects: []
+ * @allocation: heap
+ * @errors: []
+ * @api_stability: experimental
+ * @example: let NetPolicy = NetPolicy()
+ */
+pub fn NetPolicy() {
+  return {
+    domain: domain,
+    domain_wildcard: domain_wildcard,
+    cidr: cidr,
+    host: host,
+    create: create,
+    OnViolation: OnViolation(),
+  }
+}

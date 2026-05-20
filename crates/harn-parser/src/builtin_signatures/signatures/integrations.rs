@@ -34,6 +34,36 @@ pub(crate) const SIGNATURES: &[BuiltinSignature] = &[
         TY_DICT,
     ),
     BuiltinSignature::simple("egress_policy", &[Param::new("config", TY_DICT)], TY_DICT),
+    // NetPolicy constructors (harn#1913). Each returns a tagged dict
+    // recognised by the dispatcher in `harn-vm/src/harness_net.rs`.
+    BuiltinSignature::simple(
+        "__net_policy_create",
+        &[Param::new("config", TY_DICT)],
+        TY_DICT,
+    ),
+    BuiltinSignature::simple(
+        "__net_policy_domain",
+        &[Param::new("host", TY_STRING)],
+        TY_DICT,
+    ),
+    BuiltinSignature::simple(
+        "__net_policy_domain_wildcard",
+        &[Param::new("pattern", TY_STRING)],
+        TY_DICT,
+    ),
+    BuiltinSignature::simple(
+        "__net_policy_cidr",
+        &[Param::new("range", TY_STRING)],
+        TY_DICT,
+    ),
+    BuiltinSignature::simple(
+        "__net_policy_host",
+        &[
+            Param::new("host", TY_STRING),
+            Param::optional("ports", TY_LIST),
+        ],
+        TY_DICT,
+    ),
     BuiltinSignature::variadic("exec", &[Param::new("command", TY_STRING)], TY_DICT),
     BuiltinSignature::variadic(
         "exec_at",

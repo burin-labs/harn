@@ -1,0 +1,35 @@
+/**
+ * `on_violation: fn(req) -> string` runs the closure with the
+ * blocked-request envelope and routes the outcome based on the
+ * returned string (one of `error`, `audit_only`, `quarantine`).
+ *
+ * Here the callback inspects the URL: if it contains `/safe/` we
+ * downgrade to `audit_only` and the call succeeds; otherwise we
+ * escalate to `quarantine`. Demonstrates that callback decisions are
+ * per-request rather than per-policy.
+ *
+ * Tracking: harn#1913 (E4.9).
+ */
+import { create } from "std/net_policy"
+
+fn pick(req) {
+  if req.url.contains("/safe/") {
+    return "audit_only"
+  }
+  return "quarantine"
+}
+
+fn main(harness: Harness) {
+  let policy = create({allow: [], default: "deny", on_violation: pick})
+  let restricted = harness.with_net_policy(policy)
+  let safe = restricted.net.get("https://example.test/safe/hello")
+  harness.stdio.println("safe=" + safe)
+  var hostile_err = nil
+  try {
+    restricted.net.get("https://example.test/danger")
+  } catch (e) {
+    hostile_err = e
+  }
+  harness.stdio.println("danger_outcome=" + hostile_err.outcome)
+  harness.stdio.println("quarantined=" + to_string(restricted.is_quarantined()))
+}
