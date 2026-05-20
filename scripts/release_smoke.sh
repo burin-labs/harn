@@ -175,7 +175,7 @@ smoke_provider_matrix() {
 smoke_watch_boot() {
   local watch_log="$TMP_ROOT/watch.log"
   local watch_target="$TMP_ROOT/watch_target.harn"
-  printf 'pipeline default() {\n  println("watch boot")\n}\n' >"$watch_target"
+  printf 'fn main(harness: Harness) {\n  harness.stdio.println("watch boot")\n}\n' >"$watch_target"
   "$HARN" watch "$watch_target" >"$watch_log" 2>&1 &
   local watch_pid=$!
   # 30 iterations × 0.5 s = 15 s timeout. Generous on a cold runner
