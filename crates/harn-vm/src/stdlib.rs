@@ -84,7 +84,7 @@ mod web;
 pub mod workflow_messages;
 
 use crate::http::register_http_builtins;
-use crate::llm::register_llm_builtins;
+use crate::llm::{register_deferred_llm_builtins, register_llm_builtins};
 use crate::mcp::register_mcp_builtins;
 use crate::mcp_server::register_mcp_server_builtins;
 use crate::vm::Vm;
@@ -153,8 +153,7 @@ pub fn register_io_stdlib(vm: &mut Vm) {
     tui::register_tui_builtins(vm);
 }
 
-/// Register agent builtins (requires network access and async runtime).
-pub fn register_agent_stdlib(vm: &mut Vm) {
+fn register_agent_stdlib_before_llm(vm: &mut Vm) {
     concurrency::register_concurrency_builtins(vm);
     connectors::register_connector_builtins(vm);
     review::register_review_builtins(vm);
@@ -183,10 +182,25 @@ pub fn register_agent_stdlib(vm: &mut Vm) {
     assemble::register_assemble_context_builtin(vm);
     crate::egress::register_egress_builtins(vm);
     register_http_builtins(vm);
-    register_llm_builtins(vm);
+}
+
+fn register_agent_stdlib_after_llm(vm: &mut Vm) {
     register_mcp_builtins(vm);
     register_mcp_server_builtins(vm);
     crate::step_runtime::register_step_builtins(vm);
+}
+
+/// Register agent builtins (requires network access and async runtime).
+pub fn register_agent_stdlib(vm: &mut Vm) {
+    register_agent_stdlib_before_llm(vm);
+    register_llm_builtins(vm);
+    register_agent_stdlib_after_llm(vm);
+}
+
+fn register_agent_stdlib_with_deferred_llm(vm: &mut Vm) {
+    register_agent_stdlib_before_llm(vm);
+    register_deferred_llm_builtins(vm);
+    register_agent_stdlib_after_llm(vm);
 }
 
 /// Register all standard builtins on a VM (core + io + agent).
@@ -194,6 +208,13 @@ pub fn register_vm_stdlib(vm: &mut Vm) {
     register_core_stdlib(vm);
     register_io_stdlib(vm);
     register_agent_stdlib(vm);
+}
+
+/// Register the stdlib shape used by latency-sensitive CLI execution.
+pub fn register_vm_stdlib_with_deferred_llm(vm: &mut Vm) {
+    register_core_stdlib(vm);
+    register_io_stdlib(vm);
+    register_agent_stdlib_with_deferred_llm(vm);
 }
 
 pub(crate) fn rebind_execution_state_builtins(vm: &mut Vm) {

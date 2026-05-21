@@ -15,7 +15,9 @@ use crate::orchestration::{
     pop_approval_policy, pop_execution_policy, push_approval_policy, push_command_policy,
     push_execution_policy, CapabilityPolicy, ToolApprovalPolicy,
 };
-use crate::stdlib::registration::{register_builtin_group, BuiltinGroup, SyncBuiltin};
+use crate::stdlib::registration::{
+    register_builtin_group, register_deferred_builtin_group, BuiltinGroup, SyncBuiltin,
+};
 use crate::value::{VmError, VmValue};
 use crate::vm::{Vm, VmBuiltinArity, VmBuiltinMetadata};
 
@@ -2104,6 +2106,21 @@ const HOST_SESSION_PRIMITIVES_SYNC: &[SyncBuiltin] = &[
 const HOST_SESSION_PRIMITIVES_GROUP: BuiltinGroup<'static> = BuiltinGroup::new()
     .category("agent.host")
     .sync(HOST_SESSION_PRIMITIVES_SYNC);
+
+pub fn register_deferred_agent_session_host_primitives(vm: &mut Vm, registrar: fn(&mut Vm)) {
+    register_deferred_builtin_group(vm, HOST_SESSION_PRIMITIVES_GROUP, registrar);
+    for name in [
+        HOST_SESSION_INIT,
+        HOST_SESSION_FINALIZE,
+        HOST_AGENT_EMIT_EVENT,
+        HOST_SKILL_SCORE,
+        HOST_AUTONOMY_BUDGET_CHECK,
+        HOST_SESSION_DRAIN_BRIDGE_INJECTIONS,
+        HOST_DAEMON_WAIT,
+    ] {
+        vm.register_deferred_builtin(name, registrar);
+    }
+}
 
 pub fn register_agent_session_host_primitives(vm: &mut Vm) {
     register_builtin_group(vm, HOST_SESSION_PRIMITIVES_GROUP);

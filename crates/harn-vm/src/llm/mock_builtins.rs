@@ -1,7 +1,9 @@
 use std::rc::Rc;
 
 use crate::stdlib::json_to_vm_value;
-use crate::stdlib::registration::{register_builtin_group, BuiltinGroup, SyncBuiltin};
+use crate::stdlib::registration::{
+    register_builtin_group, register_deferred_builtin_group, BuiltinGroup, SyncBuiltin,
+};
 use crate::value::{VmError, VmValue};
 use crate::vm::{Vm, VmBuiltinArity};
 
@@ -37,6 +39,10 @@ const LLM_MOCK_PRIMITIVES: BuiltinGroup<'static> = BuiltinGroup::new()
 /// Register llm_mock / llm_mock_calls / llm_mock_clear builtins.
 pub(super) fn register_llm_mock_builtins(vm: &mut Vm) {
     register_builtin_group(vm, LLM_MOCK_PRIMITIVES);
+}
+
+pub(super) fn register_deferred_llm_mock_builtins(vm: &mut Vm, registrar: fn(&mut Vm)) {
+    register_deferred_builtin_group(vm, LLM_MOCK_PRIMITIVES, registrar);
 }
 
 fn llm_mock_builtin(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {

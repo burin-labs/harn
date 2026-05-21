@@ -355,6 +355,7 @@ impl EventLogConfig {
 
 thread_local! {
     static ACTIVE_EVENT_LOG: RefCell<Option<Arc<AnyEventLog>>> = const { RefCell::new(None) };
+    static PENDING_DEFAULT_EVENT_LOG: RefCell<Option<EventLogConfig>> = const { RefCell::new(None) };
 }
 
 pub fn install_default_for_base_dir(base_dir: &Path) -> Result<Arc<AnyEventLog>, LogError> {
@@ -363,13 +364,30 @@ pub fn install_default_for_base_dir(base_dir: &Path) -> Result<Arc<AnyEventLog>,
     ACTIVE_EVENT_LOG.with(|slot| {
         *slot.borrow_mut() = Some(log.clone());
     });
+    PENDING_DEFAULT_EVENT_LOG.with(|slot| {
+        *slot.borrow_mut() = None;
+    });
     Ok(log)
+}
+
+pub fn install_lazy_default_for_base_dir(base_dir: &Path) -> Result<(), LogError> {
+    let config = EventLogConfig::for_base_dir(base_dir)?;
+    let has_active = ACTIVE_EVENT_LOG.with(|slot| slot.borrow().is_some());
+    if !has_active {
+        PENDING_DEFAULT_EVENT_LOG.with(|slot| {
+            *slot.borrow_mut() = Some(config);
+        });
+    }
+    Ok(())
 }
 
 pub fn install_memory_for_current_thread(queue_depth: usize) -> Arc<AnyEventLog> {
     let log = Arc::new(AnyEventLog::Memory(MemoryEventLog::new(queue_depth.max(1))));
     ACTIVE_EVENT_LOG.with(|slot| {
         *slot.borrow_mut() = Some(log.clone());
+    });
+    PENDING_DEFAULT_EVENT_LOG.with(|slot| {
+        *slot.borrow_mut() = None;
     });
     log
 }
@@ -378,15 +396,32 @@ pub fn install_active_event_log(log: Arc<AnyEventLog>) -> Arc<AnyEventLog> {
     ACTIVE_EVENT_LOG.with(|slot| {
         *slot.borrow_mut() = Some(log.clone());
     });
+    PENDING_DEFAULT_EVENT_LOG.with(|slot| {
+        *slot.borrow_mut() = None;
+    });
     log
 }
 
 pub fn active_event_log() -> Option<Arc<AnyEventLog>> {
-    ACTIVE_EVENT_LOG.with(|slot| slot.borrow().clone())
+    if let Some(log) = ACTIVE_EVENT_LOG.with(|slot| slot.borrow().clone()) {
+        return Some(log);
+    }
+
+    let config = PENDING_DEFAULT_EVENT_LOG.with(|slot| slot.borrow_mut().take())?;
+    match open_event_log(&config) {
+        Ok(log) => Some(install_active_event_log(log)),
+        Err(error) => {
+            crate::events::log_warn("event_log.init", &error.to_string());
+            None
+        }
+    }
 }
 
 pub fn reset_active_event_log() {
     ACTIVE_EVENT_LOG.with(|slot| {
+        *slot.borrow_mut() = None;
+    });
+    PENDING_DEFAULT_EVENT_LOG.with(|slot| {
         *slot.borrow_mut() = None;
     });
 }
@@ -1980,6 +2015,21 @@ mod tests {
     use super::*;
     use futures::StreamExt;
     use rand::{rngs::StdRng, RngExt, SeedableRng};
+
+    #[test]
+    fn lazy_default_event_log_opens_on_first_access() {
+        reset_active_event_log();
+        let dir = tempfile::tempdir().unwrap();
+
+        install_lazy_default_for_base_dir(dir.path()).unwrap();
+        assert!(ACTIVE_EVENT_LOG.with(|slot| slot.borrow().is_none()));
+        assert!(PENDING_DEFAULT_EVENT_LOG.with(|slot| slot.borrow().is_some()));
+
+        let _log = active_event_log().expect("lazy event log should open on demand");
+        assert!(ACTIVE_EVENT_LOG.with(|slot| slot.borrow().is_some()));
+        assert!(PENDING_DEFAULT_EVENT_LOG.with(|slot| slot.borrow().is_none()));
+        reset_active_event_log();
+    }
 
     async fn exercise_basic_backend(log: Arc<AnyEventLog>) {
         let topic = Topic::new("trigger.inbox").unwrap();

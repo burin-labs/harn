@@ -129,7 +129,7 @@ pub(crate) async fn run_bench(path: &str, iterations: usize, profile: RunProfile
         }
 
         let mut vm = harn_vm::Vm::new();
-        harn_vm::register_vm_stdlib(&mut vm);
+        harn_vm::register_vm_stdlib_with_deferred_llm(&mut vm);
         crate::install_default_hostlib(&mut vm);
         harn_vm::register_store_builtins(&mut vm, store_base);
         harn_vm::register_metadata_builtins(&mut vm, store_base);

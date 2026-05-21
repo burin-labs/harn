@@ -11,7 +11,9 @@ use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
 use crate::stdlib::clock::now_wall_ms;
-use crate::stdlib::registration::{register_builtin_group, BuiltinGroup, SyncBuiltin};
+use crate::stdlib::registration::{
+    register_builtin_group, register_deferred_builtin_group, BuiltinGroup, SyncBuiltin,
+};
 use crate::value::{VmError, VmValue};
 use crate::vm::{Vm, VmBuiltinArity};
 
@@ -92,6 +94,16 @@ pub(crate) fn register_cache_builtins(vm: &mut Vm) {
         BuiltinGroup::new()
             .category("cache")
             .sync(CACHE_SYNC_PRIMITIVES),
+    );
+}
+
+pub(crate) fn register_deferred_cache_builtins(vm: &mut Vm, registrar: fn(&mut Vm)) {
+    register_deferred_builtin_group(
+        vm,
+        BuiltinGroup::new()
+            .category("cache")
+            .sync(CACHE_SYNC_PRIMITIVES),
+        registrar,
     );
 }
 

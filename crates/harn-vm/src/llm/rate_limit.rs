@@ -10,7 +10,7 @@
 //! 2. Environment variables — `HARN_RATE_LIMIT_<PROVIDER>=<rpm>`
 //! 3. Runtime — `llm_rate_limit("provider", {rpm: N})` builtin
 
-use std::cell::RefCell;
+use std::cell::{Cell, RefCell};
 use std::collections::{HashMap, VecDeque};
 use std::time::{Duration, Instant};
 
@@ -57,6 +57,7 @@ impl SlidingWindow {
 
 thread_local! {
     static LIMITERS: RefCell<HashMap<String, SlidingWindow>> = RefCell::new(HashMap::new());
+    static INITIALIZED_FROM_CONFIG: Cell<bool> = const { Cell::new(false) };
 }
 
 /// Load rate limits from provider config and environment variables.
@@ -65,6 +66,7 @@ pub(crate) fn init_from_config() {
     let config = crate::llm_config::load_config();
     LIMITERS.with(|limiters| {
         let mut map = limiters.borrow_mut();
+        map.clear();
         for (name, pdef) in &config.providers {
             if let Some(rpm) = pdef.rpm {
                 if rpm > 0 {
@@ -89,10 +91,19 @@ pub(crate) fn init_from_config() {
             }
         }
     }
+    INITIALIZED_FROM_CONFIG.with(|initialized| initialized.set(true));
+}
+
+fn ensure_initialized_from_config() {
+    if INITIALIZED_FROM_CONFIG.with(Cell::get) {
+        return;
+    }
+    init_from_config();
 }
 
 /// Set or update the rate limit for a provider at runtime.
 pub(crate) fn set_rate_limit(provider: &str, rpm: u32) {
+    ensure_initialized_from_config();
     LIMITERS.with(|limiters| {
         limiters
             .borrow_mut()
@@ -102,6 +113,7 @@ pub(crate) fn set_rate_limit(provider: &str, rpm: u32) {
 
 /// Remove the rate limit for a provider.
 pub(crate) fn clear_rate_limit(provider: &str) {
+    ensure_initialized_from_config();
     LIMITERS.with(|limiters| {
         limiters.borrow_mut().remove(provider);
     });
@@ -109,6 +121,7 @@ pub(crate) fn clear_rate_limit(provider: &str) {
 
 /// Query the current RPM limit for a provider. Returns `None` if unlimited.
 pub(crate) fn get_rate_limit(provider: &str) -> Option<u32> {
+    ensure_initialized_from_config();
     LIMITERS.with(|limiters| limiters.borrow().get(provider).map(|sw| sw.max_requests))
 }
 
@@ -116,6 +129,7 @@ pub(crate) fn get_rate_limit(provider: &str) -> Option<u32> {
 /// Returns immediately if no limit is configured or the window has capacity.
 /// When throttled, yields to the tokio scheduler so other tasks can run.
 pub(crate) async fn acquire_permit(provider: &str) {
+    ensure_initialized_from_config();
     loop {
         let wait = LIMITERS.with(|limiters| {
             let mut map = limiters.borrow_mut();
@@ -148,6 +162,7 @@ pub(crate) async fn acquire_permit(provider: &str) {
 /// Reset all rate limiter state. Used between test runs.
 pub(crate) fn reset_rate_limit_state() {
     LIMITERS.with(|limiters| limiters.borrow_mut().clear());
+    INITIALIZED_FROM_CONFIG.with(|initialized| initialized.set(false));
 }
 
 #[cfg(test)]

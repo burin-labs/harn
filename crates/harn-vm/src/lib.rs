@@ -238,6 +238,7 @@ pub use stdlib::workflow_messages::{
 };
 pub use stdlib::{
     register_agent_stdlib, register_core_stdlib, register_io_stdlib, register_vm_stdlib,
+    register_vm_stdlib_with_deferred_llm,
 };
 pub use store::register_store_builtins;
 pub use tenant::{
