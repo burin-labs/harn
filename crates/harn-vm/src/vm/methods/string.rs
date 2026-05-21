@@ -4,7 +4,6 @@ use crate::value::{VmError, VmValue};
 
 impl crate::vm::Vm {
     pub(super) fn call_string_method(
-        &mut self,
         s: &Rc<str>,
         method: &str,
         args: &[VmValue],

@@ -3,13 +3,12 @@ use std::rc::Rc;
 use crate::value::{values_equal, VmError, VmValue};
 
 impl crate::vm::Vm {
-    pub(super) async fn call_set_method(
-        &mut self,
+    pub(super) fn call_set_method_sync(
         items: &Rc<Vec<VmValue>>,
         method: &str,
         args: &[VmValue],
-    ) -> Result<VmValue, VmError> {
-        match method {
+    ) -> Option<Result<VmValue, VmError>> {
+        let result = match method {
             "count" | "len" => Ok(VmValue::Int(items.len() as i64)),
             "empty" => Ok(VmValue::Bool(items.is_empty())),
             "contains" => {
@@ -122,59 +121,89 @@ impl crate::vm::Vm {
             }
             "to_list" => Ok(VmValue::List(Rc::new(items.to_vec()))),
             "to_set" => Ok(VmValue::Set(Rc::clone(items))),
-            "map" => {
-                if let Some(callable) = args.first().filter(|v| Self::is_callable_value(v)) {
-                    let mut result = Vec::new();
-                    for item in items.iter() {
-                        let mapped = self.call_callable_value(callable, &[item.clone()]).await?;
-                        if !result.iter().any(|x| values_equal(x, &mapped)) {
-                            result.push(mapped);
-                        }
-                    }
-                    Ok(VmValue::Set(Rc::new(result)))
-                } else {
-                    Ok(VmValue::Nil)
+            "map" | "filter" => {
+                if args.first().is_some_and(Self::is_callable_value) {
+                    return None;
                 }
-            }
-            "filter" => {
-                if let Some(callable) = args.first().filter(|v| Self::is_callable_value(v)) {
-                    let mut result = Vec::new();
-                    for item in items.iter() {
-                        let keep = self.call_callable_value(callable, &[item.clone()]).await?;
-                        if keep.is_truthy() {
-                            result.push(item.clone());
-                        }
-                    }
-                    Ok(VmValue::Set(Rc::new(result)))
-                } else {
-                    Ok(VmValue::Nil)
-                }
+                Ok(VmValue::Nil)
             }
             "any" => {
-                if let Some(callable) = args.first().filter(|v| Self::is_callable_value(v)) {
-                    for item in items.iter() {
-                        let result = self.call_callable_value(callable, &[item.clone()]).await?;
-                        if result.is_truthy() {
-                            return Ok(VmValue::Bool(true));
-                        }
-                    }
-                    Ok(VmValue::Bool(false))
-                } else {
-                    Ok(VmValue::Bool(false))
+                if args.first().is_some_and(Self::is_callable_value) {
+                    return None;
                 }
+                Ok(VmValue::Bool(false))
             }
             "all" | "every" => {
-                if let Some(callable) = args.first().filter(|v| Self::is_callable_value(v)) {
-                    for item in items.iter() {
-                        let result = self.call_callable_value(callable, &[item.clone()]).await?;
-                        if !result.is_truthy() {
-                            return Ok(VmValue::Bool(false));
-                        }
-                    }
-                    Ok(VmValue::Bool(true))
-                } else {
-                    Ok(VmValue::Bool(true))
+                if args.first().is_some_and(Self::is_callable_value) {
+                    return None;
                 }
+                Ok(VmValue::Bool(true))
+            }
+            _ => Err(VmError::Runtime(format!("set has no method `{method}`"))),
+        };
+        Some(result)
+    }
+
+    pub(super) async fn call_set_method(
+        &mut self,
+        items: &Rc<Vec<VmValue>>,
+        method: &str,
+        args: &[VmValue],
+    ) -> Result<VmValue, VmError> {
+        if let Some(result) = Self::call_set_method_sync(items, method, args) {
+            return result;
+        }
+
+        match method {
+            "map" => {
+                let Some(callable) = args.first().filter(|v| Self::is_callable_value(v)) else {
+                    return Ok(VmValue::Nil);
+                };
+                let mut result = Vec::new();
+                for item in items.iter() {
+                    let mapped = self.call_callable_value(callable, &[item.clone()]).await?;
+                    if !result.iter().any(|x| values_equal(x, &mapped)) {
+                        result.push(mapped);
+                    }
+                }
+                Ok(VmValue::Set(Rc::new(result)))
+            }
+            "filter" => {
+                let Some(callable) = args.first().filter(|v| Self::is_callable_value(v)) else {
+                    return Ok(VmValue::Nil);
+                };
+                let mut result = Vec::new();
+                for item in items.iter() {
+                    let keep = self.call_callable_value(callable, &[item.clone()]).await?;
+                    if keep.is_truthy() {
+                        result.push(item.clone());
+                    }
+                }
+                Ok(VmValue::Set(Rc::new(result)))
+            }
+            "any" => {
+                let Some(callable) = args.first().filter(|v| Self::is_callable_value(v)) else {
+                    return Ok(VmValue::Bool(false));
+                };
+                for item in items.iter() {
+                    let result = self.call_callable_value(callable, &[item.clone()]).await?;
+                    if result.is_truthy() {
+                        return Ok(VmValue::Bool(true));
+                    }
+                }
+                Ok(VmValue::Bool(false))
+            }
+            "all" | "every" => {
+                let Some(callable) = args.first().filter(|v| Self::is_callable_value(v)) else {
+                    return Ok(VmValue::Bool(true));
+                };
+                for item in items.iter() {
+                    let result = self.call_callable_value(callable, &[item.clone()]).await?;
+                    if !result.is_truthy() {
+                        return Ok(VmValue::Bool(false));
+                    }
+                }
+                Ok(VmValue::Bool(true))
             }
             _ => Err(VmError::Runtime(format!("set has no method `{method}`"))),
         }

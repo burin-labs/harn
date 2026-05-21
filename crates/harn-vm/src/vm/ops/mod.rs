@@ -128,6 +128,12 @@ impl super::Vm {
             // string/builtin-ref callees return `None` and fall through
             // to `execute_tail_call_async`.
             Op::TailCall => return self.execute_tail_call_sync(),
+            // MethodCall is split: optional-nil receivers, inline-cache
+            // hits, and receiver methods that are known to be synchronous
+            // complete here. Callback-taking collection methods and host
+            // capability methods fall through with `ip` untouched.
+            Op::MethodCall => return self.execute_method_call_sync(false),
+            Op::MethodCallOpt => return self.execute_method_call_sync(true),
             Op::Throw => self.execute_throw(),
             Op::TryCatchSetup => {
                 self.execute_try_catch_setup();
@@ -193,8 +199,6 @@ impl super::Vm {
             // keeps the sync/async classification visible alongside the
             // sync dispatch table.
             Op::CallBuiltinSpread
-            | Op::MethodCall
-            | Op::MethodCallOpt
             | Op::Pipe
             | Op::Parallel
             | Op::ParallelMap
