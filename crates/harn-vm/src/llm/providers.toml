@@ -839,19 +839,19 @@ pricing = { input_per_mtok = 1.25, output_per_mtok = 5.00, cache_read_per_mtok =
 
 # Mistral hosted via OpenRouter.
 
-[models."mistral-large-latest"]
-name = "Mistral Large"
+[models."mistralai/mistral-large-2512"]
+name = "Mistral Large 3 2512"
 provider = "openrouter"
-context_window = 128000
+context_window = 262144
 capabilities = ["tools", "streaming"]
-pricing = { input_per_mtok = 2.00, output_per_mtok = 6.00 }
+pricing = { input_per_mtok = 0.50, output_per_mtok = 1.50, cache_read_per_mtok = 0.05 }
 
-[models."mistral-small-latest"]
-name = "Mistral Small"
+[models."mistralai/mistral-small-2603"]
+name = "Mistral Small 4"
 provider = "openrouter"
-context_window = 128000
+context_window = 262144
 capabilities = ["tools", "streaming"]
-pricing = { input_per_mtok = 0.20, output_per_mtok = 0.60 }
+pricing = { input_per_mtok = 0.15, output_per_mtok = 0.60, cache_read_per_mtok = 0.015 }
 
 # Open-weight executor candidates (<$2/Mtok with function calling). Use
 # these via OpenRouter or Fireworks for fast secondary-model dispatch.
