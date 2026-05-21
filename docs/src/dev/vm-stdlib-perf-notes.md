@@ -1,8 +1,11 @@
-# VM and stdlib hot-path profile (issue #1426)
+# VM and stdlib hot-path profile
 
-This page captures the allocation profile, the two optimizations that
-landed, and the remaining hotspots that frame which Rust orchestration
-work is realistic to port to Harn next. Reproduce locally with:
+This page captures the allocation profile behind issue #1426 and the
+follow-on runtime/typechecker performance wave tracked by issue #2095.
+The first sections are historical context for the May 2026 optimization
+series; the post-#2095 section records which bottlenecks have since
+landed so new work starts from the current shape instead of refiling
+already-fixed hotspots. Reproduce locally with:
 
 ```bash
 ./scripts/bench_vm.sh --no-build --iterations 20
@@ -82,10 +85,27 @@ canonical connector option-builder shape):
 Conformance was unchanged (`stdlib_collections`, `stdlib_json`, and the
 broader 933-test suite all pass).
 
-## Remaining hotspots
+## Post-#2095 performance wave
+
+The #1426 profile left a second wave of runtime and typechecker work.
+Issue #2095 split that wave into small PRs so each hot path could land
+with isolated measurements and conformance parity.
+
+| Area | Issues / PRs | Change | Measured signal |
+|---|---|---|---|
+| Typechecker scope entry | #2093 / #2102 | Replaced deep-cloned `TypeScope.parent` chains with `Rc<TypeScope>` parents and shared root-scope children. | Synthetic one-line function corpus typecheck dropped from 69 ms to 3 ms at 500 fns and from 8.27 s to 29 ms at 10,000 fns. |
+| Closure callbacks | #2086 / #2099 | Pushed callback closures onto the existing VM frame stack and drove them with `drive_until_frame_depth`, removing the per-callback boxed future and the frame/iterator/deadline `mem::take` isolation. | `list_map_filter` moved from the checked-in #1426 baseline mean of 298.64 ms to 76.08 ms in the PR bench table. |
+| Named user calls | #2085 / #2101 | Split `Op::CallBuiltin` into a sync user-closure fast path and async fallback. | `function_call_loop` best-of-three minimum improved by 11.2%. |
+| Tail calls | #2088 / #2103 | Split `Op::TailCall` into a sync TCO fast path and async fallback for tracked/generator/non-closure cases. | `recursive_countdown` best-of-three minimum improved by 5.6%. |
+| Call argument packing | #2091 / #2107 | Bound regular closure, tail-call, pipe, and sync-builtin arguments directly from VM stack slices; materialized `Vec`s only for paths that need ownership. | Conformance stayed green, with targeted hot fixture smoke runs covering `function_call_loop`, `method_call_dispatch`, and `list_map_filter`. |
+| `VmValue` layout | #2092 / #2100 | Boxed rare/large variants behind shared payloads and added a layout-budget test. | `VmValue` size budget tightened from 48 bytes to 32 bytes. |
+| Method dispatch | #2087 / #2108 | Added sync method dispatch for optional nil, inline-cache hits, and pure receiver methods, leaving callable-backed methods on the async path. | `method_call_dispatch` release mean measured at 32.74 ms; `list_map_filter` stayed near 83 ms after the dispatch split. |
+| `harn run` setup | #2094 / #2109 | Deferred LLM builtin registration and lazy-loaded setup-only runtime config. | Warm run-setup samples for `function_call_loop` settled at roughly 1 ms after first-touch initialization. |
+
+## Historical pre-#2095 hotspots
 
 `bench_vm_fixtures` numbers (allocations × wall-time per fixture run, on
-the optimized binary) tell us where to focus next:
+the post-#1426 binary) were the input to #2095:
 
 | fixture | alloc/run | bytes/run | median wall | shape |
 |---|---:|---:|---:|---|
@@ -97,17 +117,17 @@ the optimized binary) tell us where to focus next:
 | `struct_field_read` | 0.90M | 3.3 MB | 94 ms | struct field access in a hot loop |
 | `dict_merge_loop` | 0.85M | 96 MB | 45 ms | `result = result + {[k]: v}` accumulator |
 
-Two patterns dominate the remaining cost:
+Two patterns dominated that snapshot:
 
 1. **Closure callbacks per element.** `list_map_filter` allocates ~2,725
    bytes and ~5,450 ops per iteration's worth of map+filter calls — the
    per-callback `VmEnv` clone-on-call probe (`bench_vmenv_clone`) shows
    each call constructs a fresh capture environment even for closures
-   with zero captures. Native `list.filter`/`list.map` already exists,
-   but the Harn-level callback dispatch is the bottleneck. Worth
-   exploring: a `flat`-shape intrinsic for arithmetic predicates (e.g.
-   `value % 2 == 0`), or a peephole that lifts trivial closures to
-   inline VM ops.
+   with zero captures. #2086 removed the per-callback boxed future and
+   `mem::take` isolation, and the later method/call-argument work
+   reduced the remaining callback dispatch overhead. Re-measure before
+   filing more callback-specific work; the old `list_map_filter` numbers
+   are no longer representative.
 
 2. **`Rc::try_unwrap` defeated by the slot/stack double-hold.** The
    `dict + dict` operator already does `Rc::try_unwrap` for the unique
