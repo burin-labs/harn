@@ -715,20 +715,28 @@ while i < 3 {
   total = total + dict.count()
   total = total + range.first()
   total = total + values.count()
+  if list.contains(i + 1) { total = total + 1 }
+  if text.contains("b") { total = total + 1 }
+  if dict.has("a") { total = total + 1 }
+  if values.contains(2) { total = total + 1 }
   i = i + 1
 }
 log(total)
 }"#,
     );
 
-    assert_eq!(out.trim_end(), "[harn] 33");
+    assert_eq!(out.trim_end(), "[harn] 45");
     let entries = chunk.inline_cache_entries();
     for target in [
         MethodCacheTarget::ListCount,
+        MethodCacheTarget::ListContains,
         MethodCacheTarget::StringCount,
+        MethodCacheTarget::StringContains,
         MethodCacheTarget::DictCount,
+        MethodCacheTarget::DictHas,
         MethodCacheTarget::RangeFirst,
         MethodCacheTarget::SetCount,
+        MethodCacheTarget::SetContains,
     ] {
         assert!(
             entries.iter().any(|entry| matches!(

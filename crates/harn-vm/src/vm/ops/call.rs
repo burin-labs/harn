@@ -4,7 +4,7 @@ use std::rc::Rc;
 
 use crate::chunk::{InlineCacheEntry, MethodCacheTarget};
 use crate::orchestration::HookEvent;
-use crate::value::{VmClosure, VmError, VmJoinHandle, VmTaskHandle, VmValue};
+use crate::value::{values_equal, VmClosure, VmError, VmJoinHandle, VmTaskHandle, VmValue};
 use crate::BuiltinId;
 
 use super::super::CallFrame;
@@ -348,6 +348,7 @@ impl super::super::Vm {
         name_idx: u16,
         argc: usize,
         obj: &VmValue,
+        args: &[VmValue],
     ) -> Option<VmValue> {
         let InlineCacheEntry::Method {
             name_idx: cached_name_idx,
@@ -368,15 +369,25 @@ impl super::super::Vm {
             (MethodCacheTarget::ListEmpty, VmValue::List(items)) => {
                 Some(VmValue::Bool(items.is_empty()))
             }
+            (MethodCacheTarget::ListContains, VmValue::List(items)) => {
+                let needle = args.first().unwrap_or(&VmValue::Nil);
+                Some(VmValue::Bool(items.iter().any(|v| values_equal(v, needle))))
+            }
             (MethodCacheTarget::StringCount, VmValue::String(s)) => {
                 Some(VmValue::Int(s.chars().count() as i64))
             }
             (MethodCacheTarget::StringEmpty, VmValue::String(s)) => {
                 Some(VmValue::Bool(s.is_empty()))
             }
+            (MethodCacheTarget::StringContains, VmValue::String(s)) => Some(VmValue::Bool(
+                s.contains(&*args.first().map(|arg| arg.display()).unwrap_or_default()),
+            )),
             (MethodCacheTarget::DictCount, VmValue::Dict(map)) => {
                 Some(VmValue::Int(map.len() as i64))
             }
+            (MethodCacheTarget::DictHas, VmValue::Dict(map)) => Some(VmValue::Bool(
+                map.contains_key(&args.first().map(|arg| arg.display()).unwrap_or_default()),
+            )),
             (MethodCacheTarget::RangeCount | MethodCacheTarget::RangeLen, VmValue::Range(r)) => {
                 Some(VmValue::Int(r.len()))
             }
@@ -393,45 +404,80 @@ impl super::super::Vm {
             (MethodCacheTarget::SetEmpty, VmValue::Set(items)) => {
                 Some(VmValue::Bool(items.is_empty()))
             }
+            (MethodCacheTarget::SetContains, VmValue::Set(items)) => {
+                let needle = args.first().unwrap_or(&VmValue::Nil);
+                Some(VmValue::Bool(items.iter().any(|v| values_equal(v, needle))))
+            }
             _ => None,
         }
     }
 
     fn method_cache_target(obj: &VmValue, method: &str, argc: usize) -> Option<MethodCacheTarget> {
-        if argc != 0 {
-            return None;
-        }
         match obj {
-            VmValue::List(_) => match method {
-                "count" => Some(MethodCacheTarget::ListCount),
-                "empty" => Some(MethodCacheTarget::ListEmpty),
+            VmValue::List(_) => match (method, argc) {
+                ("count", 0) => Some(MethodCacheTarget::ListCount),
+                ("empty", 0) => Some(MethodCacheTarget::ListEmpty),
+                ("contains", 1) => Some(MethodCacheTarget::ListContains),
                 _ => None,
             },
-            VmValue::String(_) => match method {
-                "count" | "len" => Some(MethodCacheTarget::StringCount),
-                "empty" => Some(MethodCacheTarget::StringEmpty),
+            VmValue::String(_) => match (method, argc) {
+                ("count" | "len", 0) => Some(MethodCacheTarget::StringCount),
+                ("empty", 0) => Some(MethodCacheTarget::StringEmpty),
+                ("contains", 1) => Some(MethodCacheTarget::StringContains),
                 _ => None,
             },
-            VmValue::Dict(_) => match method {
-                "count" => Some(MethodCacheTarget::DictCount),
+            VmValue::Dict(_) => match (method, argc) {
+                ("count", 0) => Some(MethodCacheTarget::DictCount),
+                ("has", 1) => Some(MethodCacheTarget::DictHas),
                 _ => None,
             },
-            VmValue::Range(_) => match method {
-                "count" => Some(MethodCacheTarget::RangeCount),
-                "len" => Some(MethodCacheTarget::RangeLen),
-                "empty" => Some(MethodCacheTarget::RangeEmpty),
-                "first" => Some(MethodCacheTarget::RangeFirst),
-                "last" => Some(MethodCacheTarget::RangeLast),
+            VmValue::Range(_) => match (method, argc) {
+                ("count", 0) => Some(MethodCacheTarget::RangeCount),
+                ("len", 0) => Some(MethodCacheTarget::RangeLen),
+                ("empty", 0) => Some(MethodCacheTarget::RangeEmpty),
+                ("first", 0) => Some(MethodCacheTarget::RangeFirst),
+                ("last", 0) => Some(MethodCacheTarget::RangeLast),
                 _ => None,
             },
-            VmValue::Set(_) => match method {
-                "count" => Some(MethodCacheTarget::SetCount),
-                "len" => Some(MethodCacheTarget::SetLen),
-                "empty" => Some(MethodCacheTarget::SetEmpty),
+            VmValue::Set(_) => match (method, argc) {
+                ("count", 0) => Some(MethodCacheTarget::SetCount),
+                ("len", 0) => Some(MethodCacheTarget::SetLen),
+                ("empty", 0) => Some(MethodCacheTarget::SetEmpty),
+                ("contains", 1) => Some(MethodCacheTarget::SetContains),
                 _ => None,
             },
             _ => None,
         }
+    }
+
+    fn stack_arg_start(&self, argc: usize) -> Result<usize, VmError> {
+        self.stack
+            .len()
+            .checked_sub(argc)
+            .ok_or_else(|| VmError::Runtime("call argument stack underflow".to_string()))
+    }
+
+    fn take_stack_args_from(&mut self, args_start: usize) -> Result<Vec<VmValue>, VmError> {
+        if args_start > self.stack.len() {
+            return Err(VmError::Runtime(
+                "call argument stack underflow".to_string(),
+            ));
+        }
+        Ok(self.stack.drain(args_start..).collect())
+    }
+
+    fn is_special_name(name: &str) -> bool {
+        matches!(
+            name,
+            "await"
+                | "cancel"
+                | "cancel_graceful"
+                | "is_cancelled"
+                | "__signal_on_interrupt"
+                | "__signal_off_interrupt"
+                | "__signal_interrupted"
+                | "__signal_raise"
+        )
     }
 
     async fn try_call_special_name(
@@ -622,27 +668,62 @@ impl super::super::Vm {
         Ok(())
     }
 
-    /// Sync fast path for `Op::Call`. Peeks the callee on the stack
-    /// **before** touching `ip`; if it's a non-generator user closure with
-    /// no `@step` definition attached, it pushes the closure frame inline
-    /// and returns `Some(Ok(()))`. Otherwise returns `None` without
-    /// advancing the frame, so the caller falls through to
-    /// [`execute_call_async`] which reads the operand exactly once.
-    ///
-    /// Note: in the current compiler, user-level `f(x)` calls compile to
-    /// `Op::CallBuiltin` (name-resolved at runtime), not `Op::Call`. The
-    /// `Op::Call` opcode is emitted only for compiler-internal lowerings
-    /// (`__assert_list` for spread args, `to_string` for string
-    /// interpolation, etc.) where the callee is a `VmValue::String`. Those
-    /// take the `None` fall-through and stay on the async path. The split
-    /// is therefore a no-op on the user-closure case in current bench
-    /// fixtures; it parallels the IterNext split (#2074) so that any
-    /// future `Op::Call`-with-closure-callee emissions benefit
-    /// automatically, and keeps the dispatch tables symmetric with the
-    /// rest of the call family. The measurable wins from this idea live
-    /// behind `Op::CallBuiltin` (where `f(x)` actually dispatches) and
-    /// are filed as a separate follow-up PR per the task's
-    /// "one-shippable-change-per-PR" guidance.
+    async fn call_named_value_from_stack_args(
+        &mut self,
+        name: &str,
+        args_start: usize,
+        stack_truncate_to: usize,
+        direct_id: Option<BuiltinId>,
+    ) -> Result<(), VmError> {
+        if stack_truncate_to > args_start || args_start > self.stack.len() {
+            return Err(VmError::Runtime(
+                "invalid call argument stack range".to_string(),
+            ));
+        }
+
+        if Self::is_special_name(name) {
+            let args = self.take_stack_args_from(args_start)?;
+            self.stack.truncate(stack_truncate_to);
+            return self.call_named_value(name, args, direct_id).await;
+        }
+
+        if let Some(closure) = self.resolve_named_closure(name) {
+            if closure.func.is_generator
+                || crate::step_runtime::step_definition_for_function(&closure.func.name).is_some()
+            {
+                let args = self.take_stack_args_from(args_start)?;
+                self.stack.truncate(stack_truncate_to);
+                self.call_user_closure(closure, args).await?;
+            } else {
+                self.push_closure_frame_from_stack_args(&closure, args_start, stack_truncate_to)?;
+            }
+            return Ok(());
+        }
+
+        if let Some(result) =
+            self.try_call_sync_builtin_id_or_name_from_stack_args(direct_id, name, args_start)
+        {
+            self.stack.truncate(stack_truncate_to);
+            self.stack.push(result?);
+            return Ok(());
+        }
+
+        let args = self.take_stack_args_from(args_start)?;
+        self.stack.truncate(stack_truncate_to);
+        let result = if let Some(id) = direct_id {
+            self.call_builtin_id_or_name(id, name, args).await?
+        } else {
+            self.call_named_builtin(name, args).await?
+        };
+        self.stack.push(result);
+        Ok(())
+    }
+
+    /// Sync fast path for `Op::Call`. Peeks the callee before touching
+    /// `ip`; regular user closures can enter a new frame directly from the
+    /// existing stack argument slice. Anything that needs async handling
+    /// leaves `ip` untouched so [`execute_call_async`] can read the operand
+    /// exactly once.
     pub(super) fn execute_call_sync(&mut self) -> Option<Result<(), VmError>> {
         let frame = self.frames.last().unwrap();
         let argc = frame.chunk.code[frame.ip] as usize;
@@ -661,41 +742,56 @@ impl super::super::Vm {
         let closure = Rc::clone(closure);
         let frame = self.frames.last_mut().unwrap();
         frame.ip += 1;
-        let args: Vec<VmValue> = self.stack.split_off(self.stack.len() - argc);
-        let _ = self.stack.pop();
-        Some(self.push_closure_frame(&closure, &args))
+        let args_start = self.stack.len() - argc;
+        Some(self.push_closure_frame_from_stack_args(&closure, args_start, callee_idx))
     }
 
-    /// Async slow path for `Op::Call`. Identical in behavior to the
-    /// pre-split `execute_call`. The caller (`execute_op_async`) reaches
-    /// this only after [`execute_call_sync`] returned `None` without
-    /// touching `ip`, so this path reads the argc operand exactly once.
+    /// Async path for `Op::Call`. Arguments stay on the VM stack until the
+    /// selected callee shape requires owned arguments.
     pub(super) async fn execute_call_async(&mut self) -> Result<(), VmError> {
         let frame = self.frames.last_mut().unwrap();
         let argc = frame.chunk.code[frame.ip] as usize;
         frame.ip += 1;
 
-        let args: Vec<VmValue> = self.stack.split_off(self.stack.len().saturating_sub(argc));
-        let callee = self.pop()?;
+        let args_start = self.stack_arg_start(argc)?;
+        let callee_idx = args_start
+            .checked_sub(1)
+            .ok_or_else(|| VmError::Runtime("call callee stack underflow".to_string()))?;
+        let callee = self
+            .stack
+            .get(callee_idx)
+            .cloned()
+            .ok_or_else(|| VmError::Runtime("call callee stack underflow".to_string()))?;
 
         match callee {
             VmValue::String(name) => {
-                self.call_named_value(&name, args, None).await?;
+                self.call_named_value_from_stack_args(&name, args_start, callee_idx, None)
+                    .await?;
             }
             VmValue::Closure(closure) => {
-                self.call_user_closure(closure, args).await?;
+                if closure.func.is_generator
+                    || crate::step_runtime::step_definition_for_function(&closure.func.name)
+                        .is_some()
+                {
+                    let args = self.take_stack_args_from(args_start)?;
+                    self.stack.truncate(callee_idx);
+                    self.call_user_closure(closure, args).await?;
+                } else {
+                    self.push_closure_frame_from_stack_args(&closure, args_start, callee_idx)?;
+                }
             }
             VmValue::BuiltinRef(name) => {
-                self.call_named_value(&name, args, None).await?;
+                self.call_named_value_from_stack_args(&name, args_start, callee_idx, None)
+                    .await?;
             }
             VmValue::BuiltinRefId { id, name } => {
-                self.call_named_value(&name, args, Some(id)).await?;
+                self.call_named_value_from_stack_args(&name, args_start, callee_idx, Some(id))
+                    .await?;
             }
             _ => {
-                return Err(VmError::TypeError(format!(
-                    "Cannot call {}",
-                    callee.display()
-                )))
+                let message = format!("Cannot call {}", callee.display());
+                self.stack.truncate(callee_idx);
+                return Err(VmError::TypeError(message));
             }
         }
         Ok(())
@@ -766,17 +862,7 @@ impl super::super::Vm {
         // (`await`, `cancel`, ...) that must run on the async path even if
         // the user happens to define a function with the same name —
         // matching the async dispatcher's first-check semantics.
-        if matches!(
-            name,
-            "await"
-                | "cancel"
-                | "cancel_graceful"
-                | "is_cancelled"
-                | "__signal_on_interrupt"
-                | "__signal_off_interrupt"
-                | "__signal_interrupted"
-                | "__signal_raise"
-        ) {
+        if Self::is_special_name(name) {
             return None;
         }
 
@@ -790,15 +876,12 @@ impl super::super::Vm {
 
         let frame = self.frames.last_mut().unwrap();
         frame.ip += 11;
-        let args: Vec<VmValue> = self.stack.split_off(self.stack.len().saturating_sub(argc));
-        Some(self.push_closure_frame(&closure, &args))
+        let args_start = self.stack.len().checked_sub(argc)?;
+        Some(self.push_closure_frame_from_stack_args(&closure, args_start, args_start))
     }
 
-    /// Async slow path for `Op::CallBuiltin`. Identical in behavior to
-    /// the pre-split `execute_call_builtin`. The caller
-    /// (`execute_op_async`) reaches this only after
-    /// [`execute_call_builtin_sync`] returned `None` without touching
-    /// `ip`, so this path reads the operand exactly once.
+    /// Async path for `Op::CallBuiltin`. Arguments stay on the VM stack
+    /// until the selected callee shape requires owned arguments.
     pub(super) async fn execute_call_builtin_async(&mut self) -> Result<(), VmError> {
         let frame = self.frames.last_mut().unwrap();
         let id = BuiltinId::from_raw(frame.chunk.read_u64(frame.ip));
@@ -808,8 +891,9 @@ impl super::super::Vm {
         let argc = frame.chunk.code[frame.ip] as usize;
         frame.ip += 1;
         let name = Self::const_string(&frame.chunk.constants[name_idx])?;
-        let args: Vec<VmValue> = self.stack.split_off(self.stack.len().saturating_sub(argc));
-        self.call_named_value(&name, args, Some(id)).await
+        let args_start = self.stack_arg_start(argc)?;
+        self.call_named_value_from_stack_args(&name, args_start, args_start, Some(id))
+            .await
     }
 
     pub(super) async fn execute_call_builtin_spread(&mut self) -> Result<(), VmError> {
@@ -831,23 +915,33 @@ impl super::super::Vm {
         self.call_named_value(&name, args, Some(id)).await
     }
 
-    /// Sync TCO body shared between [`execute_tail_call_sync`] and
-    /// [`execute_tail_call_async`]: validate arity/types, reuse the current
-    /// frame's stack base and saved env, then push the callee's frame in
-    /// place. Callers must have already advanced `ip`, popped the callee,
-    /// and confirmed neither the current frame nor the callee is tracked
-    /// (so PreStep/PostStep boundaries aren't elided by TCO).
-    fn perform_tail_call_tco(
+    /// Tail-call optimization body: validate arguments directly on the VM
+    /// stack, reuse the caller frame's stack base and saved env, then push
+    /// the callee frame in place. Tracked persona/step frames use the
+    /// non-TCO path so lifecycle hooks still observe explicit boundaries.
+    fn perform_tail_call_tco_from_stack_args(
         &mut self,
         closure: Rc<VmClosure>,
-        args: Vec<VmValue>,
+        args_start: usize,
+        stack_truncate_to: usize,
     ) -> Result<(), VmError> {
-        crate::typecheck::validate_user_call(&closure.func, &args, None)?;
+        if stack_truncate_to > args_start || args_start > self.stack.len() {
+            return Err(VmError::Runtime(
+                "invalid call argument stack range".to_string(),
+            ));
+        }
+        let args_len = self.stack.len() - args_start;
+        let args = &self.stack[args_start..];
+        if let Err(error) = crate::typecheck::validate_user_call(&closure.func, args, None) {
+            self.stack.truncate(stack_truncate_to);
+            return Err(error);
+        }
         if closure.func.is_generator {
-            // Generators cannot be tail-call optimized.
-            let gen = self.create_generator(&closure, &args);
+            let gen = self.create_generator(&closure, args);
+            self.stack.truncate(stack_truncate_to);
             return Err(VmError::Return(gen));
         }
+
         let mut call_env = self.closure_call_env_for_current_frame(&closure);
         // TCO: reuse the current frame's stack_base / saved_env.
         let popped = self.frames.pop().unwrap();
@@ -857,8 +951,6 @@ impl super::super::Vm {
         if let Some(ref dir) = popped.saved_source_dir {
             crate::stdlib::set_thread_source_dir(dir);
         }
-
-        self.stack.truncate(stack_base);
 
         let saved_source_dir = if let Some(ref dir) = closure.source_dir {
             let prev = crate::stdlib::process::VM_SOURCE_DIR.with(|sd| sd.borrow().clone());
@@ -877,7 +969,12 @@ impl super::super::Vm {
         };
         self.env = call_env;
         let mut local_slots = Self::fresh_local_slots(&closure.func.chunk);
-        Self::bind_param_slots(&mut local_slots, &closure.func, &args, false);
+        Self::bind_param_slots(
+            &mut local_slots,
+            &closure.func,
+            &self.stack[args_start..],
+            false,
+        );
         let initial_local_slots = if debugger {
             Some(local_slots.clone())
         } else {
@@ -890,7 +987,7 @@ impl super::super::Vm {
         // eventually returns, instead of leaking into the caller's caller.
         let saved_iterator_depth = popped.saved_iterator_depth;
         self.iterators.truncate(saved_iterator_depth);
-        let argc = args.len();
+        self.stack.truncate(stack_base);
         self.frames.push(CallFrame {
             chunk: Rc::clone(&closure.func.chunk),
             ip: 0,
@@ -900,7 +997,7 @@ impl super::super::Vm {
             initial_local_slots,
             saved_iterator_depth,
             fn_name: closure.func.name.clone(),
-            argc,
+            argc: args_len,
             saved_source_dir,
             module_functions: closure.module_functions.clone(),
             module_state: closure.module_state.clone(),
@@ -957,23 +1054,26 @@ impl super::super::Vm {
 
         let frame = self.frames.last_mut().unwrap();
         frame.ip += 1;
-        let args: Vec<VmValue> = self.stack.split_off(self.stack.len() - argc);
-        let _ = self.stack.pop();
-        Some(self.perform_tail_call_tco(closure, args))
+        let args_start = self.stack.len() - argc;
+        Some(self.perform_tail_call_tco_from_stack_args(closure, args_start, callee_idx))
     }
 
-    /// Async slow path for `Op::TailCall`. Identical in behavior to the
-    /// pre-split `execute_tail_call`. The caller (`execute_op_async`)
-    /// reaches this only after [`execute_tail_call_sync`] returned `None`
-    /// without touching `ip`, so this path reads the argc operand exactly
-    /// once.
+    /// Async path for `Op::TailCall`. Arguments stay on the VM stack until
+    /// the selected callee shape requires owned arguments.
     pub(super) async fn execute_tail_call_async(&mut self) -> Result<(), VmError> {
         let frame = self.frames.last_mut().unwrap();
         let argc = frame.chunk.code[frame.ip] as usize;
         frame.ip += 1;
 
-        let args: Vec<VmValue> = self.stack.split_off(self.stack.len().saturating_sub(argc));
-        let callee = self.pop()?;
+        let args_start = self.stack_arg_start(argc)?;
+        let callee_idx = args_start
+            .checked_sub(1)
+            .ok_or_else(|| VmError::Runtime("call callee stack underflow".to_string()))?;
+        let callee = self
+            .stack
+            .get(callee_idx)
+            .cloned()
+            .ok_or_else(|| VmError::Runtime("call callee stack underflow".to_string()))?;
 
         let resolved_closure = match &callee {
             VmValue::Closure(cl) => Some(Rc::clone(cl)),
@@ -993,21 +1093,23 @@ impl super::super::Vm {
                 // Persona/step lifecycle state is frame-owned. Keep those
                 // frames explicit so PreStep/PostStep hooks see the same
                 // boundaries as a non-tail call.
+                let args = self.take_stack_args_from(args_start)?;
+                self.stack.truncate(callee_idx);
                 self.call_user_closure(closure, args).await?;
                 return Ok(());
             }
 
-            self.perform_tail_call_tco(closure, args)?;
+            self.perform_tail_call_tco_from_stack_args(closure, args_start, callee_idx)?;
         } else {
             match callee {
                 VmValue::String(name) => {
-                    self.call_named_value(&name, args, None).await?;
+                    self.call_named_value_from_stack_args(&name, args_start, callee_idx, None)
+                        .await?;
                 }
                 _ => {
-                    return Err(VmError::TypeError(format!(
-                        "Cannot call {}",
-                        callee.display()
-                    )))
+                    let message = format!("Cannot call {}", callee.display());
+                    self.stack.truncate(callee_idx);
+                    return Err(VmError::TypeError(message));
                 }
             }
         }
@@ -1057,18 +1159,35 @@ impl super::super::Vm {
                 .unwrap_or(InlineCacheEntry::Empty);
             (name_idx, argc, cache_slot, cache_entry)
         };
-        let args: Vec<VmValue> = self.stack.split_off(self.stack.len().saturating_sub(argc));
-        let obj = self.pop()?;
+        let args_start = self.stack_arg_start(argc)?;
+        let obj_idx = args_start
+            .checked_sub(1)
+            .ok_or_else(|| VmError::Runtime("method receiver stack underflow".to_string()))?;
+        let obj = self
+            .stack
+            .get(obj_idx)
+            .cloned()
+            .ok_or_else(|| VmError::Runtime("method receiver stack underflow".to_string()))?;
         if optional && matches!(obj, VmValue::Nil) {
+            self.stack.truncate(obj_idx);
             self.stack.push(VmValue::Nil);
-        } else if let Some(result) = Self::try_cached_method(&cache_entry, name_idx, argc, &obj) {
+        } else if let Some(result) = Self::try_cached_method(
+            &cache_entry,
+            name_idx,
+            argc,
+            &obj,
+            &self.stack[args_start..],
+        ) {
+            self.stack.truncate(obj_idx);
             self.stack.push(result);
         } else {
             let method = {
                 let frame = self.frames.last().unwrap();
                 Self::const_string(&frame.chunk.constants[name_idx as usize])?
             };
-            let cache_target = Self::method_cache_target(&obj, &method, args.len());
+            let cache_target = Self::method_cache_target(&obj, &method, argc);
+            let args = self.take_stack_args_from(args_start)?;
+            self.stack.truncate(obj_idx);
             let result = self.call_method(obj, &method, &args).await?;
             if let (Some(slot), Some(target)) = (cache_slot, cache_target) {
                 let frame = self.frames.last().unwrap();
@@ -1076,7 +1195,7 @@ impl super::super::Vm {
                     slot,
                     InlineCacheEntry::Method {
                         name_idx,
-                        argc,
+                        argc: args.len(),
                         target,
                     },
                 );
@@ -1108,7 +1227,9 @@ impl super::super::Vm {
                 ))
             }
         };
-        if let Some(result) = Self::try_cached_method(&cache_entry, name_idx, args.len(), &obj) {
+        if let Some(result) =
+            Self::try_cached_method(&cache_entry, name_idx, args.len(), &obj, &args)
+        {
             self.stack.push(result);
         } else {
             let method = {
@@ -1135,21 +1256,33 @@ impl super::super::Vm {
 
     pub(super) async fn execute_pipe(&mut self) -> Result<(), VmError> {
         let callable = self.pop()?;
-        let value = self.pop()?;
+        let args_start = self.stack_arg_start(1)?;
         match callable {
             VmValue::Closure(closure) => {
-                self.call_user_closure(closure, vec![value]).await?;
+                if closure.func.is_generator
+                    || crate::step_runtime::step_definition_for_function(&closure.func.name)
+                        .is_some()
+                {
+                    let args = self.take_stack_args_from(args_start)?;
+                    self.call_user_closure(closure, args).await?;
+                } else {
+                    self.push_closure_frame_from_stack_args(&closure, args_start, args_start)?;
+                }
             }
             VmValue::String(name) => {
-                self.call_named_value(&name, vec![value], None).await?;
+                self.call_named_value_from_stack_args(&name, args_start, args_start, None)
+                    .await?;
             }
             VmValue::BuiltinRef(name) => {
-                self.call_named_value(&name, vec![value], None).await?;
+                self.call_named_value_from_stack_args(&name, args_start, args_start, None)
+                    .await?;
             }
             VmValue::BuiltinRefId { id, name } => {
-                self.call_named_value(&name, vec![value], Some(id)).await?;
+                self.call_named_value_from_stack_args(&name, args_start, args_start, Some(id))
+                    .await?;
             }
             _ => {
+                self.stack.truncate(args_start);
                 return Err(VmError::TypeError(format!(
                     "cannot pipe into {}",
                     callable.type_name()

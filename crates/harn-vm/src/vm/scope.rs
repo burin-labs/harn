@@ -2,7 +2,7 @@ use std::rc::Rc;
 
 use crate::value::{VmClosure, VmEnv, VmError, VmValue};
 
-use super::{CallFrame, Vm};
+use super::{CallFrame, LocalSlot, Vm};
 
 impl Vm {
     pub(crate) const MAX_FRAMES: usize = 512;
@@ -32,8 +32,7 @@ impl Vm {
     /// Imported module closures have `module_state` set, at which
     /// point the full lexical environment is already available via
     /// `closure.env` + `module_state`, and we skip the closure merge
-    /// entirely as a fast path. This is the hot path for context-
-    /// builder workloads (~65% of VM CPU before this optimization).
+    /// entirely as a fast path for context-builder workloads.
     pub(crate) fn closure_call_env(caller_env: &VmEnv, closure: &VmClosure) -> VmEnv {
         if closure.module_state.is_some() {
             return closure.env.clone();
@@ -65,16 +64,30 @@ impl Vm {
             .and_then(|registry| registry.borrow().get(name).cloned())
     }
 
-    /// Push a new call frame for a closure invocation.
-    pub(crate) fn push_closure_frame(
-        &mut self,
+    fn prepare_closure_local_slots(
+        &self,
         closure: &VmClosure,
         args: &[VmValue],
-    ) -> Result<(), VmError> {
-        if self.frames.len() >= Self::MAX_FRAMES {
-            return Err(VmError::StackOverflow);
-        }
+    ) -> Result<(Vec<LocalSlot>, Option<Vec<LocalSlot>>), VmError> {
         crate::typecheck::validate_user_call(&closure.func, args, None)?;
+        let mut local_slots = Self::fresh_local_slots(&closure.func.chunk);
+        Self::bind_param_slots(&mut local_slots, &closure.func, args, false);
+        let initial_local_slots = if self.debugger_attached() {
+            Some(local_slots.clone())
+        } else {
+            None
+        };
+        Ok((local_slots, initial_local_slots))
+    }
+
+    fn enter_closure_frame(
+        &mut self,
+        closure: &VmClosure,
+        argc: usize,
+        local_slots: Vec<LocalSlot>,
+        initial_local_slots: Option<Vec<LocalSlot>>,
+        step_args: &[VmValue],
+    ) {
         let saved_env = self.env.clone();
 
         // If this closure originated from an imported module, switch
@@ -91,20 +104,12 @@ impl Vm {
         let mut call_env = self.closure_call_env_for_current_frame(closure);
         call_env.push_scope();
 
-        let debugger = self.debugger_attached();
-        let initial_env = if debugger {
+        let initial_env = if self.debugger_attached() {
             Some(call_env.clone())
         } else {
             None
         };
         self.env = call_env;
-        let mut local_slots = Self::fresh_local_slots(&closure.func.chunk);
-        Self::bind_param_slots(&mut local_slots, &closure.func, args, false);
-        let initial_local_slots = if debugger {
-            Some(local_slots.clone())
-        } else {
-            None
-        };
 
         // Function-name breakpoint latch: record the name so the step
         // loop can raise a single "function breakpoint" stop on the
@@ -125,7 +130,7 @@ impl Vm {
             initial_local_slots,
             saved_iterator_depth: self.iterators.len(),
             fn_name: closure.func.name.clone(),
-            argc: args.len(),
+            argc,
             saved_source_dir,
             module_functions: closure.module_functions.clone(),
             module_state: closure.module_state.clone(),
@@ -140,8 +145,65 @@ impl Vm {
         // off the function name registered by compiler-emitted
         // `__register_step` calls.
         crate::step_runtime::maybe_push_active_persona(&closure.func.name, self.frames.len());
-        crate::step_runtime::maybe_push_active_step(&closure.func.name, self.frames.len(), args);
+        crate::step_runtime::maybe_push_active_step(
+            &closure.func.name,
+            self.frames.len(),
+            step_args,
+        );
+    }
 
+    /// Push a new call frame for a closure invocation.
+    pub(crate) fn push_closure_frame(
+        &mut self,
+        closure: &VmClosure,
+        args: &[VmValue],
+    ) -> Result<(), VmError> {
+        if self.frames.len() >= Self::MAX_FRAMES {
+            return Err(VmError::StackOverflow);
+        }
+        let (local_slots, initial_local_slots) = self.prepare_closure_local_slots(closure, args)?;
+        self.enter_closure_frame(closure, args.len(), local_slots, initial_local_slots, args);
+        Ok(())
+    }
+
+    pub(crate) fn push_closure_frame_from_stack_args(
+        &mut self,
+        closure: &VmClosure,
+        args_start: usize,
+        stack_truncate_to: usize,
+    ) -> Result<(), VmError> {
+        if stack_truncate_to > args_start || args_start > self.stack.len() {
+            return Err(VmError::Runtime(
+                "invalid call argument stack range".to_string(),
+            ));
+        }
+        if self.frames.len() >= Self::MAX_FRAMES {
+            self.stack.truncate(stack_truncate_to);
+            return Err(VmError::StackOverflow);
+        }
+        let args_len = self.stack.len() - args_start;
+        let (local_slots, initial_local_slots) =
+            match self.prepare_closure_local_slots(closure, &self.stack[args_start..]) {
+                Ok(prepared) => prepared,
+                Err(error) => {
+                    self.stack.truncate(stack_truncate_to);
+                    return Err(error);
+                }
+            };
+        let step_args =
+            if crate::step_runtime::step_definition_for_function(&closure.func.name).is_some() {
+                self.stack[args_start..].to_vec()
+            } else {
+                Vec::new()
+            };
+        self.stack.truncate(stack_truncate_to);
+        self.enter_closure_frame(
+            closure,
+            args_len,
+            local_slots,
+            initial_local_slots,
+            &step_args,
+        );
         Ok(())
     }
 

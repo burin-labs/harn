@@ -421,9 +421,12 @@ pub(crate) enum PropertyCacheTarget {
 pub(crate) enum MethodCacheTarget {
     ListCount,
     ListEmpty,
+    ListContains,
     StringCount,
     StringEmpty,
+    StringContains,
     DictCount,
+    DictHas,
     RangeCount,
     RangeLen,
     RangeEmpty,
@@ -432,6 +435,7 @@ pub(crate) enum MethodCacheTarget {
     SetCount,
     SetLen,
     SetEmpty,
+    SetContains,
 }
 
 /// Debug metadata for a slot-indexed local in a compiled chunk.
