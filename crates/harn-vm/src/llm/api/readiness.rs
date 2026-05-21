@@ -124,28 +124,34 @@ fn models_healthcheck_url(def: &ProviderDef) -> Option<String> {
 }
 
 pub fn parse_model_ids(json: &serde_json::Value) -> Vec<String> {
+    if let Some(entries) = json.as_array() {
+        return collect_model_ids(entries);
+    }
+
     if let Some(data) = json.get("data").and_then(|value| value.as_array()) {
-        return data
-            .iter()
-            .filter_map(|entry| entry.get("id").and_then(|value| value.as_str()))
-            .map(str::to_string)
-            .collect();
+        return collect_model_ids(data);
     }
 
     if let Some(models) = json.get("models").and_then(|value| value.as_array()) {
-        return models
-            .iter()
-            .filter_map(|entry| {
+        return collect_model_ids(models);
+    }
+
+    Vec::new()
+}
+
+fn collect_model_ids(entries: &[serde_json::Value]) -> Vec<String> {
+    entries
+        .iter()
+        .filter_map(|entry| {
+            entry.as_str().or_else(|| {
                 entry
                     .get("id")
                     .or_else(|| entry.get("name"))
                     .and_then(|value| value.as_str())
             })
-            .map(str::to_string)
-            .collect();
-    }
-
-    Vec::new()
+        })
+        .map(str::to_string)
+        .collect()
 }
 
 pub fn model_is_served(available: &[String], model: &str) -> bool {
@@ -338,6 +344,20 @@ mod tests {
         assert_eq!(
             parse_model_ids(&models),
             vec!["llama".to_string(), "qwen".to_string()]
+        );
+
+        let top_level = serde_json::json!([
+            {"id": "deepseek-ai/DeepSeek-V4-Pro"},
+            {"name": "qwen"},
+            "string-model"
+        ]);
+        assert_eq!(
+            parse_model_ids(&top_level),
+            vec![
+                "deepseek-ai/DeepSeek-V4-Pro".to_string(),
+                "qwen".to_string(),
+                "string-model".to_string()
+            ]
         );
     }
 

@@ -59,6 +59,12 @@ pub struct SessionState {
     /// session swap is exposed over ACP via `session/set_config_option`
     /// (configId="model").
     pub pinned_model: Option<String>,
+    /// Session-pinned high-level reasoning policy. When set, `llm_call`
+    /// invocations that do not pass explicit `thinking` or
+    /// `reasoning_effort` options resolve this provider-aware policy into
+    /// the route's native thinking shape. Exposed over ACP as
+    /// `session/set_config_option(configId="thought_level")`.
+    pub pinned_reasoning_policy: Option<String>,
 }
 
 impl SessionState {
@@ -78,6 +84,7 @@ impl SessionState {
             tool_format: None,
             system_prompt: None,
             pinned_model: None,
+            pinned_reasoning_policy: None,
         }
     }
 }
@@ -468,21 +475,28 @@ pub fn reset_transcript(id: &str) -> bool {
 /// operation itself can't make `src` look stale and kick it out of
 /// the LRU just to make room for the new fork.
 pub fn fork(src_id: &str, dst_id: Option<String>) -> Option<String> {
-    let (src_transcript, src_tool_format, src_system_prompt, src_pinned_model, dst) = SESSIONS
-        .with(|s| {
-            let mut map = s.borrow_mut();
-            let src = map.get_mut(src_id)?;
-            src.last_accessed = Instant::now();
-            let dst = dst_id.unwrap_or_else(|| uuid::Uuid::now_v7().to_string());
-            let forked_transcript = clone_transcript_with_id(&src.transcript, &dst);
-            Some((
-                forked_transcript,
-                src.tool_format.clone(),
-                src.system_prompt.clone(),
-                src.pinned_model.clone(),
-                dst,
-            ))
-        })?;
+    let (
+        src_transcript,
+        src_tool_format,
+        src_system_prompt,
+        src_pinned_model,
+        src_pinned_reasoning_policy,
+        dst,
+    ) = SESSIONS.with(|s| {
+        let mut map = s.borrow_mut();
+        let src = map.get_mut(src_id)?;
+        src.last_accessed = Instant::now();
+        let dst = dst_id.unwrap_or_else(|| uuid::Uuid::now_v7().to_string());
+        let forked_transcript = clone_transcript_with_id(&src.transcript, &dst);
+        Some((
+            forked_transcript,
+            src.tool_format.clone(),
+            src.system_prompt.clone(),
+            src.pinned_model.clone(),
+            src.pinned_reasoning_policy.clone(),
+            dst,
+        ))
+    })?;
     // Ensure cap is respected when inserting the fork.
     open_or_create(Some(dst.clone()));
     SESSIONS.with(|s| {
@@ -492,6 +506,7 @@ pub fn fork(src_id: &str, dst_id: Option<String>) -> Option<String> {
             state.tool_format = src_tool_format;
             state.system_prompt = src_system_prompt;
             state.pinned_model = src_pinned_model;
+            state.pinned_reasoning_policy = src_pinned_reasoning_policy;
             state.last_accessed = Instant::now();
         }
         update_lineage(&mut map, src_id, &dst, None);
@@ -1323,6 +1338,33 @@ pub fn pinned_model(id: &str) -> Option<String> {
     })
 }
 
+/// Pin (or clear) the session-level provider-aware reasoning policy.
+pub fn set_pinned_reasoning_policy(id: &str, policy: Option<String>) -> Result<bool, String> {
+    let normalized = match policy {
+        Some(value) => crate::llm::reasoning_policy::normalize_policy_selector(&value)?,
+        None => None,
+    };
+    SESSIONS.with(|s| {
+        let mut map = s.borrow_mut();
+        let Some(state) = map.get_mut(id) else {
+            return Err(format!("agent session '{id}' does not exist"));
+        };
+        let changed = state.pinned_reasoning_policy != normalized;
+        state.pinned_reasoning_policy = normalized;
+        state.last_accessed = Instant::now();
+        Ok(changed)
+    })
+}
+
+/// Read the session's pinned reasoning policy, if any.
+pub fn pinned_reasoning_policy(id: &str) -> Option<String> {
+    SESSIONS.with(|s| {
+        s.borrow()
+            .get(id)
+            .and_then(|state| state.pinned_reasoning_policy.clone())
+    })
+}
+
 fn empty_transcript(id: &str) -> VmValue {
     use crate::llm::helpers::new_transcript_with;
     new_transcript_with(Some(id.to_string()), Vec::new(), None, None)
@@ -1473,6 +1515,14 @@ fn session_snapshot(state: &SessionState) -> VmValue {
             .pinned_model
             .as_ref()
             .map(|model| VmValue::String(Rc::from(model.clone())))
+            .unwrap_or(VmValue::Nil),
+    );
+    next.insert(
+        "pinned_reasoning_policy".to_string(),
+        state
+            .pinned_reasoning_policy
+            .as_ref()
+            .map(|policy| VmValue::String(Rc::from(policy.clone())))
             .unwrap_or(VmValue::Nil),
     );
     VmValue::Dict(Rc::new(next))

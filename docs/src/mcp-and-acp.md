@@ -556,7 +556,7 @@ The ACP server supports these JSON-RPC methods:
 | `session/close` | Close a session and cancel any active prompt |
 | `session/stop` | Deprecated alias for `session/close` |
 | `session/set_mode` | Switch the active session mode |
-| `session/set_config_option` | Switch a preferred ACP session config option (`mode` or `model`) |
+| `session/set_config_option` | Switch a preferred ACP session config option (`mode`, `model`, or `thought_level`) |
 | `workflow/signal` | Enqueue a workflow signal message in the current session workspace |
 | `workflow/query` | Read a named workflow query value from the current session workspace |
 | `workflow/update` | Send a workflow update request and wait for a response |
@@ -653,6 +653,23 @@ it; Harn keeps `modes` available for clients still on `session/set_mode`.
       "options": [
         { "value": "@inherit",         "name": "Inherit ambient default", "description": "..." },
         { "value": "claude-sonnet-4-6", "name": "claude-sonnet-4-6 (anthropic/claude-sonnet-4-6)", "description": "tier: frontier" }
+      ]
+    },
+    {
+      "id": "thought_level",
+      "name": "Thought Level",
+      "category": "model",
+      "type": "select",
+      "currentValue": "@inherit",
+      "options": [
+        { "value": "@inherit", "name": "Inherit script default", "description": "..." },
+        { "value": "auto",     "name": "Auto",   "description": "..." },
+        { "value": "off",      "name": "Off",    "description": "..." },
+        { "value": "minimal",  "name": "Minimal", "description": "..." },
+        { "value": "low",      "name": "Low",    "description": "..." },
+        { "value": "medium",   "name": "Medium", "description": "..." },
+        { "value": "high",     "name": "High",   "description": "..." },
+        { "value": "xhigh",    "name": "Extra High", "description": "..." }
       ]
     }
   ],
@@ -768,6 +785,48 @@ actually changes (re-pinning to the same selector is a silent ack).
 (matching how `tool_format` and the session-level system prompt
 inherit), so a branch starts with the same effective model as the
 parent. Setting a different pin on the child stays local.
+
+### Session thought level
+
+`session/set_config_option(configId="thought_level")` pins Harn's
+provider-aware reasoning policy on the session. The value is intentionally
+higher-level than any single provider API: Harn lowers it to the selected
+route's native thinking representation before the provider call.
+
+```json
+{
+  "jsonrpc": "2.0",
+  "id": 43,
+  "method": "session/set_config_option",
+  "params": {
+    "sessionId": "sess_abc",
+    "configId": "thought_level",
+    "value": "high"
+  }
+}
+```
+
+Accepted values are `auto`, `off`, `minimal`, `low`, `medium`, `high`,
+and `xhigh`; `none`, `disabled`, `no_think`, and `nothink` are accepted
+aliases for `off`. Setting `"@inherit"` clears the pin.
+
+Lowering examples:
+
+- OpenAI reasoning routes receive `reasoning_effort` / typed
+  `thinking: {mode: "effort", level: ...}` where supported.
+- Gemini routes receive typed Harn thinking that the provider adapter lowers
+  to `thinkingBudget`, dynamic thinking, or the supported compatibility shape.
+- Anthropic routes use adaptive thinking where a model requires it and
+  budgeted extended thinking where that is still supported.
+- Qwen-style local/open-compatible routes use `thinking: {mode: "disabled"}`
+  for `off`, which triggers Harn's capability-driven `/no_think` injection
+  or `chat_template_kwargs.enable_thinking=false` where the transport
+  supports it.
+
+Per-call options still win: `llm_call(..., {thinking: ...})` and
+`llm_call(..., {reasoning_effort: ...})` bypass the session thought pin.
+`session/fork` carries the parent's thought pin to the child, and later
+changes remain branch-local.
 
 ### Queued user messages and reminders during agent execution
 

@@ -586,6 +586,11 @@ pub(crate) const SIGNATURES: &[BuiltinSignature] = &[
         ],
         TY_DICT,
     ),
+    BuiltinSignature::simple(
+        "llm_apply_reasoning_policy",
+        &[Param::new("opts", TY_DICT)],
+        TY_DICT,
+    ),
     BuiltinSignature::simple("llm_available_providers", &[], TY_LIST),
     BuiltinSignature::simple(
         "llm_infer_provider",

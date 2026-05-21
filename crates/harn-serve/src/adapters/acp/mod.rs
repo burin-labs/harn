@@ -707,6 +707,7 @@ impl AcpServer {
                 "configOptions": modes::config_options_state(
                     modes::DEFAULT_MODE_ID,
                     self.pinned_model(&session_id).as_deref(),
+                    self.pinned_reasoning_policy(&session_id).as_deref(),
                 ),
             }),
         );
@@ -918,6 +919,7 @@ impl AcpServer {
                 "configOptions": modes::config_options_state(
                     &parent_mode_id,
                     self.pinned_model(&new_session_id).as_deref(),
+                    self.pinned_reasoning_policy(&new_session_id).as_deref(),
                 ),
             }),
         );
@@ -1738,6 +1740,7 @@ impl AcpServer {
             "configOptions": modes::config_options_state(
                 &session.current_mode_id,
                 self.pinned_model(session_id).as_deref(),
+                self.pinned_reasoning_policy(session_id).as_deref(),
             ),
         }))
     }
@@ -1862,6 +1865,25 @@ impl AcpServer {
         harn_vm::agent_sessions::pinned_model(session_id)
     }
 
+    /// Pin (or clear) the provider-aware reasoning policy for `session_id`.
+    fn set_session_reasoning_policy(
+        &mut self,
+        session_id: &str,
+        policy: Option<String>,
+    ) -> Result<bool, String> {
+        if !self.sessions.contains_key(session_id) {
+            return Err(format!("Unknown session: {session_id}"));
+        }
+        if !harn_vm::agent_sessions::exists(session_id) {
+            harn_vm::agent_sessions::open_or_create(Some(session_id.to_string()));
+        }
+        harn_vm::agent_sessions::set_pinned_reasoning_policy(session_id, policy)
+    }
+
+    fn pinned_reasoning_policy(&self, session_id: &str) -> Option<String> {
+        harn_vm::agent_sessions::pinned_reasoning_policy(session_id)
+    }
+
     fn emit_current_mode_update(&self, session_id: &str, mode_id: &str) {
         self.send_notification(
             "session/update",
@@ -1885,6 +1907,7 @@ impl AcpServer {
                     "configOptions": modes::config_options_state(
                         mode_id,
                         self.pinned_model(session_id).as_deref(),
+                        self.pinned_reasoning_policy(session_id).as_deref(),
                     ),
                 },
             }),
@@ -2208,10 +2231,13 @@ impl AcpServer {
         match config_id {
             "mode" => self.apply_set_mode_config_option(id, &session_id, value),
             "model" => self.apply_set_model_config_option(id, &session_id, value),
+            "thought_level" | "reasoning_policy" => {
+                self.apply_set_reasoning_policy_config_option(id, &session_id, value)
+            }
             other => self.send_error(
                 id,
                 -32602,
-                &format!("Unknown config option '{other}'. Available: mode, model"),
+                &format!("Unknown config option '{other}'. Available: mode, model, thought_level"),
             ),
         }
     }
@@ -2230,6 +2256,7 @@ impl AcpServer {
                         "configOptions": modes::config_options_state(
                             mode_id,
                             self.pinned_model(session_id).as_deref(),
+                            self.pinned_reasoning_policy(session_id).as_deref(),
                         ),
                     }),
                 );
@@ -2267,6 +2294,45 @@ impl AcpServer {
                     serde_json::json!({
                         "configOptions": modes::config_options_state(
                             &current_mode_id,
+                            normalized.as_deref(),
+                            self.pinned_reasoning_policy(session_id).as_deref(),
+                        ),
+                    }),
+                );
+                if changed {
+                    self.emit_config_option_update(session_id, &current_mode_id);
+                }
+            }
+            Err(message) => self.send_error(id, -32602, &message),
+        }
+    }
+
+    fn apply_set_reasoning_policy_config_option(
+        &mut self,
+        id: &serde_json::Value,
+        session_id: &str,
+        raw_value: &str,
+    ) {
+        let normalized = match modes::validate_reasoning_policy_selector(raw_value) {
+            Ok(value) => value,
+            Err(message) => {
+                self.send_error(id, -32602, &message);
+                return;
+            }
+        };
+        match self.set_session_reasoning_policy(session_id, normalized.clone()) {
+            Ok(changed) => {
+                let current_mode_id = self
+                    .sessions
+                    .get(session_id)
+                    .map(|session| session.current_mode_id.clone())
+                    .unwrap_or_else(|| modes::DEFAULT_MODE_ID.to_string());
+                self.send_response(
+                    id,
+                    serde_json::json!({
+                        "configOptions": modes::config_options_state(
+                            &current_mode_id,
+                            self.pinned_model(session_id).as_deref(),
                             normalized.as_deref(),
                         ),
                     }),

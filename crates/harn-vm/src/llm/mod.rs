@@ -36,6 +36,7 @@ mod model_test;
 pub(crate) mod permissions;
 pub mod plan;
 pub mod readiness;
+pub mod reasoning_policy;
 pub(crate) mod reminder_providers;
 mod rerank;
 pub(crate) mod routing;

@@ -238,27 +238,31 @@ pub async fn probe_provider_readiness(
 pub fn parse_model_ids(body: &str) -> Result<Vec<String>, serde_json::Error> {
     let payload: serde_json::Value = serde_json::from_str(body)?;
     let mut models = Vec::new();
+    if let Some(entries) = payload.as_array() {
+        collect_model_ids(entries, &mut models);
+    }
     if let Some(entries) = payload.get("data").and_then(|value| value.as_array()) {
-        for entry in entries {
-            if let Some(id) = entry.get("id").and_then(|value| value.as_str()) {
-                models.push(id.to_string());
-            }
-        }
+        collect_model_ids(entries, &mut models);
     }
     if let Some(entries) = payload.get("models").and_then(|value| value.as_array()) {
-        for entry in entries {
-            if let Some(id) = entry
-                .get("id")
-                .or_else(|| entry.get("name"))
-                .and_then(|value| value.as_str())
-            {
-                models.push(id.to_string());
-            }
-        }
+        collect_model_ids(entries, &mut models);
     }
     models.sort();
     models.dedup();
     Ok(models)
+}
+
+fn collect_model_ids(entries: &[serde_json::Value], models: &mut Vec<String>) {
+    for entry in entries {
+        if let Some(id) = entry.as_str().or_else(|| {
+            entry
+                .get("id")
+                .or_else(|| entry.get("name"))
+                .and_then(|value| value.as_str())
+        }) {
+            models.push(id.to_string());
+        }
+    }
 }
 
 pub fn model_is_served(model: &str, served_models: &[String]) -> bool {
@@ -309,7 +313,8 @@ fn models_url(def: &ProviderDef, base_url: &str) -> Result<String, String> {
                 None
             }
         })
-        .unwrap_or("/v1/models");
+        .map(ToOwned::to_owned)
+        .unwrap_or_else(|| model_path_from_chat_endpoint(&def.chat_endpoint));
     let url = if path.starts_with('/') {
         format!("{}{}", base_url.trim_end_matches('/'), path)
     } else {
@@ -318,6 +323,18 @@ fn models_url(def: &ProviderDef, base_url: &str) -> Result<String, String> {
     reqwest::Url::parse(&url)
         .map(|_| url.clone())
         .map_err(|error| format!("Invalid provider models URL '{url}': {error}"))
+}
+
+fn model_path_from_chat_endpoint(chat_endpoint: &str) -> String {
+    if let Some(prefix) = chat_endpoint.strip_suffix("/chat/completions") {
+        if prefix.is_empty() {
+            "/models".to_string()
+        } else {
+            format!("{prefix}/models")
+        }
+    } else {
+        "/v1/models".to_string()
+    }
 }
 
 #[cfg(test)]
@@ -332,6 +349,59 @@ mod tests {
             parse_model_ids(r#"{"object":"list","data":[{"id":"qwen"},{"id":"mlx-model"}]}"#)
                 .expect("parse models");
         assert_eq!(models, vec!["mlx-model".to_string(), "qwen".to_string()]);
+    }
+
+    #[test]
+    fn parse_model_ids_reads_together_top_level_array() {
+        let models = parse_model_ids(r#"[{"id":"deepseek-ai/DeepSeek-V4-Pro"},{"name":"qwen"}]"#)
+            .expect("parse models");
+        assert_eq!(
+            models,
+            vec![
+                "deepseek-ai/DeepSeek-V4-Pro".to_string(),
+                "qwen".to_string()
+            ]
+        );
+    }
+
+    #[test]
+    fn models_url_does_not_duplicate_version_prefix_in_base_url() {
+        let def = ProviderDef {
+            base_url: "https://openrouter.ai/api/v1".to_string(),
+            chat_endpoint: "/chat/completions".to_string(),
+            healthcheck: Some(crate::llm_config::HealthcheckDef {
+                method: "GET".to_string(),
+                path: Some("/auth/key".to_string()),
+                url: None,
+                body: None,
+            }),
+            ..Default::default()
+        };
+
+        assert_eq!(
+            models_url(&def, &def.base_url).expect("models url"),
+            "https://openrouter.ai/api/v1/models"
+        );
+    }
+
+    #[test]
+    fn models_url_keeps_openai_compatible_fallback_for_native_chat_endpoint() {
+        let def = ProviderDef {
+            base_url: "http://localhost:11434".to_string(),
+            chat_endpoint: "/api/chat".to_string(),
+            healthcheck: Some(crate::llm_config::HealthcheckDef {
+                method: "GET".to_string(),
+                path: Some("/api/tags".to_string()),
+                url: None,
+                body: None,
+            }),
+            ..Default::default()
+        };
+
+        assert_eq!(
+            models_url(&def, &def.base_url).expect("models url"),
+            "http://localhost:11434/v1/models"
+        );
     }
 
     #[test]

@@ -1657,6 +1657,7 @@ See [LLM calls and agent loops](llm-and-agents.md) for full documentation.
 | `llm_infer_provider(model_id)` | model_id: string | string | Infer provider from model ID (e.g. `"claude-*"` → `"anthropic"`) |
 | `llm_model_tier(model_id)` | model_id: string | string | Get capability tier: `"small"`, `"mid"`, or `"frontier"` |
 | `llm_healthcheck(provider?, options?)` | provider: string or `{provider, api_key?, model?}`, options: `{api_key?, model?}` or model string | dict | Validate a configured provider healthcheck. Returns `{provider, valid, message, metadata}`; `api_key` lets hosts validate a candidate key without first exporting it. For OpenAI-compatible `/models` healthchecks, passing a `model` (positional, `{model: "..."}`, or `{provider, model: "..."}`) verifies the selected model/alias is served and surfaces distinct `metadata.category` values such as `unreachable`, `bad_status`, `model_missing`, and `invalid_url` |
+| `llm_apply_reasoning_policy(opts)` | opts: dict | dict | Apply Harn's provider-aware `reasoning_policy` / `thinking_policy` lowering to an `llm_call` option dict, preserving caller-supplied `thinking` or `reasoning_effort` |
 | `llm_rate_limit(provider, options?)` | provider: string, options: dict | int/nil/bool | Set (`{rpm: N}`), query, or clear (`{rpm: 0}`) per-provider rate limit |
 | `llm_providers()` | — | list | List all configured provider names |
 | `llm_available_providers()` | — | list | List providers usable in the current environment (auth configured or no auth required) |
