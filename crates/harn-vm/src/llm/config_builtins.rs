@@ -4,7 +4,8 @@ use std::rc::Rc;
 use crate::llm_config;
 use crate::stdlib::json_to_vm_value;
 use crate::stdlib::registration::{
-    async_builtin, register_builtin_groups, AsyncBuiltin, BuiltinGroup, SyncBuiltin,
+    async_builtin, register_builtin_groups, register_deferred_builtin_groups, AsyncBuiltin,
+    BuiltinGroup, SyncBuiltin,
 };
 use crate::value::{VmError, VmValue};
 use crate::vm::{Vm, VmBuiltinArity};
@@ -14,6 +15,10 @@ use super::helpers::vm_value_to_json;
 /// Register config-based LLM builtins (llm_infer_provider, llm_resolve_model, etc.).
 pub(crate) fn register_config_builtins(vm: &mut Vm) {
     register_builtin_groups(vm, LLM_CONFIG_GROUPS);
+}
+
+pub(crate) fn register_deferred_config_builtins(vm: &mut Vm, registrar: fn(&mut Vm)) {
+    register_deferred_builtin_groups(vm, LLM_CONFIG_GROUPS, registrar);
 }
 
 const LLM_CONFIG_SYNC_BUILTINS: &[SyncBuiltin] = &[

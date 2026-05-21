@@ -53,6 +53,10 @@ macro_rules! builtin_kind {
                 self
             }
 
+            pub(crate) const fn name(&self) -> &'static str {
+                self.name
+            }
+
             fn metadata(&self, default_category: Option<&'static str>) -> VmBuiltinMetadata {
                 let mut metadata = VmBuiltinMetadata::$meta_ctor(self.name);
                 if let Some(signature) = self.signature {
@@ -137,5 +141,28 @@ pub(crate) fn register_builtin_group(vm: &mut Vm, group: BuiltinGroup<'_>) {
 pub(crate) fn register_builtin_groups(vm: &mut Vm, groups: &[BuiltinGroup<'_>]) {
     for group in groups {
         register_builtin_group(vm, *group);
+    }
+}
+
+pub(crate) fn register_deferred_builtin_group(
+    vm: &mut Vm,
+    group: BuiltinGroup<'_>,
+    registrar: fn(&mut Vm),
+) {
+    for builtin in group.sync {
+        vm.register_deferred_builtin(builtin.name(), registrar);
+    }
+    for builtin in group.async_ {
+        vm.register_deferred_builtin(builtin.name(), registrar);
+    }
+}
+
+pub(crate) fn register_deferred_builtin_groups(
+    vm: &mut Vm,
+    groups: &[BuiltinGroup<'_>],
+    registrar: fn(&mut Vm),
+) {
+    for group in groups {
+        register_deferred_builtin_group(vm, *group, registrar);
     }
 }

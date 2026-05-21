@@ -74,6 +74,16 @@ impl super::super::Vm {
             // Collided IDs cannot use the direct index, but remain valid callbacks.
             self.stack
                 .push(VmValue::BuiltinRef(Rc::from(name.as_str())));
+        } else if self.ensure_deferred_builtin(&name) {
+            if let Some(id) = self.registered_builtin_id(&name) {
+                self.stack.push(VmValue::BuiltinRefId {
+                    id,
+                    name: Rc::from(name.as_str()),
+                });
+            } else {
+                self.stack
+                    .push(VmValue::BuiltinRef(Rc::from(name.as_str())));
+            }
         } else {
             let mut all_vars = self.visible_variables();
             for (k, v) in self.globals.iter() {
@@ -83,6 +93,7 @@ impl super::super::Vm {
             let mut candidates: Vec<String> = all_vars.keys().cloned().collect();
             candidates.extend(self.builtins.keys().cloned());
             candidates.extend(self.async_builtins.keys().cloned());
+            candidates.extend(self.deferred_builtin_registrars.keys().cloned());
             if let Some(suggestion) =
                 crate::value::closest_match(&name, candidates.iter().map(|s| s.as_str()))
             {

@@ -1,7 +1,8 @@
 use std::rc::Rc;
 
 use crate::stdlib::registration::{
-    async_builtin, register_builtin_group, AsyncBuiltin, BuiltinGroup,
+    async_builtin, register_builtin_group, register_deferred_builtin_group, AsyncBuiltin,
+    BuiltinGroup,
 };
 use crate::value::{VmError, VmValue};
 use crate::vm::{Vm, VmBuiltinArity};
@@ -11,6 +12,10 @@ const SELF_CERTAINTY_PROMPT_SUFFIX: &str = "\n</text>";
 
 pub(crate) fn register_rerank_builtins(vm: &mut Vm) {
     register_builtin_group(vm, RERANK_PRIMITIVES);
+}
+
+pub(crate) fn register_deferred_rerank_builtins(vm: &mut Vm, registrar: fn(&mut Vm)) {
+    register_deferred_builtin_group(vm, RERANK_PRIMITIVES, registrar);
 }
 
 const RERANK_ASYNC_PRIMITIVES: &[AsyncBuiltin] =

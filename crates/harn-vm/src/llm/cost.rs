@@ -518,6 +518,24 @@ pub(crate) fn record_llm_usage_for_provider(
     accumulate_cost_for_provider(provider, model, input_tokens, output_tokens)
 }
 
+const COST_BUILTIN_NAMES: &[&str] = &[
+    "llm_cost",
+    "llm_pricing",
+    "llm_format_usd",
+    "llm_compare_costs",
+    "llm_session_cost",
+    "llm_budget",
+    "llm_budget_remaining",
+    "tiktoken_count_tokens",
+    "tiktoken_tokenizer_info",
+];
+
+pub(crate) fn register_deferred_cost_builtins(vm: &mut Vm, registrar: fn(&mut Vm)) {
+    for name in COST_BUILTIN_NAMES {
+        vm.register_deferred_builtin(name, registrar);
+    }
+}
+
 pub(crate) fn register_cost_builtins(vm: &mut Vm) {
     vm.register_builtin("llm_cost", |args, _out| {
         let model = args.first().map(|a| a.display()).unwrap_or_default();

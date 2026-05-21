@@ -8,6 +8,12 @@ use std::rc::Rc;
 use crate::value::VmValue;
 use crate::vm::Vm;
 
+pub(crate) fn register_deferred_transcript_builtins(vm: &mut Vm, registrar: fn(&mut Vm)) {
+    for name in ["transcript_stats", "transcript_events_by_kind"] {
+        vm.register_deferred_builtin(name, registrar);
+    }
+}
+
 pub(crate) fn register_transcript_builtins(vm: &mut Vm) {
     vm.register_builtin("transcript_stats", |args, _out| {
         let transcript = args.first().cloned().unwrap_or(VmValue::Nil);

@@ -3,8 +3,12 @@
 
 use std::rc::Rc;
 
-use crate::stdlib::harn_entry::register_harn_entrypoint_category;
-use crate::stdlib::registration::{register_builtin_group, BuiltinGroup, SyncBuiltin};
+use crate::stdlib::harn_entry::{
+    register_deferred_harn_entrypoint_category, register_harn_entrypoint_category,
+};
+use crate::stdlib::registration::{
+    register_builtin_group, register_deferred_builtin_group, BuiltinGroup, SyncBuiltin,
+};
 use crate::value::{VmError, VmValue};
 use crate::vm::{Vm, VmBuiltinArity, VmBuiltinMetadata};
 
@@ -294,6 +298,10 @@ pub(crate) fn register_agent_loop(vm: &mut Vm) {
     register_harn_entrypoint_category(vm, AGENT_STDLIB_ENTRYPOINT_CATEGORY);
 }
 
+pub(crate) fn register_deferred_agent_loop(vm: &mut Vm, registrar: fn(&mut Vm)) {
+    register_deferred_harn_entrypoint_category(vm, AGENT_STDLIB_ENTRYPOINT_CATEGORY, registrar);
+}
+
 pub fn register_agent_loop_with_bridge(vm: &mut Vm, bridge: Rc<crate::bridge::HostBridge>) {
     super::agent_runtime::install_current_host_bridge(bridge);
     register_harn_entrypoint_category(vm, AGENT_STDLIB_ENTRYPOINT_CATEGORY);
@@ -301,6 +309,10 @@ pub fn register_agent_loop_with_bridge(vm: &mut Vm, bridge: Rc<crate::bridge::Ho
 
 pub(crate) fn register_agent_control_primitives(vm: &mut Vm) {
     register_builtin_group(vm, AGENT_CONTROL_GROUP);
+}
+
+pub(crate) fn register_deferred_agent_control_primitives(vm: &mut Vm, registrar: fn(&mut Vm)) {
+    register_deferred_builtin_group(vm, AGENT_CONTROL_GROUP, registrar);
 }
 
 fn agent_subscribe_builtin(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
