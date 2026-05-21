@@ -18,6 +18,16 @@ condensed series summaries instead of full per-patch history.
   resolution. Namespace shards on disk now include an optional `files` section
   alongside `entries`, and shards without it continue to load unchanged.
 
+### Fixed
+
+- **CI: release binary builds now actually save the Swatinem rust-cache.**
+  `build-release-binaries.yml` gated `save-if` on `refs/heads/main`, but the
+  workflow only runs on tag pushes (`refs/tags/v*`), so the per-target
+  `release-<triple>` cache was never populated. Subsequent releases were
+  always cold on every matrix leg. Saving by default lets back-to-back tag
+  pushes restore the previous `target/` instead of rebuilding all deps from
+  scratch.
+
 ## v0.8.30
 
 ### Fixed
