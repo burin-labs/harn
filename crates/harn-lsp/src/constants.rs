@@ -541,6 +541,18 @@ pub(crate) const BUILTINS: &[(&str, &str)] = &[
         "metadata_refresh_hashes() -> nil",
     ),
     (
+        "path_metadata_get",
+        "path_metadata_get(path, namespace?, opts?) -> dict",
+    ),
+    (
+        "path_metadata_set",
+        "path_metadata_set(path, namespace, data, opts?) -> nil",
+    ),
+    (
+        "path_metadata_entries",
+        "path_metadata_entries(namespace?, opts?) -> list",
+    ),
+    (
         "compute_content_hash",
         "compute_content_hash(dir) -> string",
     ),
@@ -881,6 +893,9 @@ pub(crate) fn builtin_doc(name: &str) -> Option<String> {
         "metadata_resolve" => "**metadata_resolve(dir, namespace?)** → dict | nil — Read resolved metadata while preserving namespace structure",
         "metadata_entries" => "**metadata_entries(namespace?)** → list — List local and resolved metadata for each stored directory",
         "metadata_set" => "**metadata_set(dir, namespace, data)** → nil — Write metadata for a directory/namespace",
+        "path_metadata_get" => "**path_metadata_get(path, namespace?, opts?)** → dict | nil — Read metadata at an exact path. Files don't inherit; pass `{kind: \"dir\"}` for hierarchical directory resolution.",
+        "path_metadata_set" => "**path_metadata_set(path, namespace, data, opts?)** → nil — Write metadata at an exact path. Defaults to `{kind: \"file\"}`; pass `{kind: \"dir\"}` to mirror `metadata_set`.",
+        "path_metadata_entries" => "**path_metadata_entries(namespace?, opts?)** → list — List stored file entries (or `{kind: \"dir\"}`/`{kind: \"all\"}`) keyed by normalized relative path.",
         "metadata_save" => "**metadata_save()** → nil — Flush metadata to .harn/metadata/ files",
         "metadata_stale" => "**metadata_stale(project)** → dict — Check for stale metadata: {any_stale, tier1, tier2}",
         "metadata_status" => "**metadata_status(namespace?)** → dict — Summarize metadata directories, namespaces, missing hashes, and stale state",

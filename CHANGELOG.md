@@ -6,6 +6,18 @@ Pre-0.6 highlights live in [CHANGELOG-pre-0.6.md](CHANGELOG-pre-0.6.md).
 Harn had no external users before 0.6.0, so that archive intentionally keeps
 condensed series summaries instead of full per-patch history.
 
+## Unreleased
+
+### Added
+
+- **Path-scoped metadata builtins (#2112).** Adds `path_metadata_get(path,
+  namespace?, opts?)`, `path_metadata_set(path, namespace, data, opts?)`, and
+  `path_metadata_entries(namespace?, opts?)` for addressing metadata at exact
+  file paths. File entries do not inherit from parent directories; pass
+  `{kind: "dir"}` to fall back to the existing hierarchical directory
+  resolution. Namespace shards on disk now include an optional `files` section
+  alongside `entries`, and shards without it continue to load unchanged.
+
 ## v0.8.30
 
 ### Fixed
