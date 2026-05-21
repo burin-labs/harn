@@ -49,10 +49,16 @@ jobs:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
       - uses: DavidAnson/markdownlint-cli2-action@ded1f9488f68a970bc66ea5619e13e9b52e601cd # v23.2.0
 
-  rust:
-    name: Rust (lint + test)
-    # GitHub-hosted runners keep the required gate predictable while the
-    # self-hosted pool is scarce and shared by multiple repos.
+  # `make lint` and `make test` each take roughly half of the historical
+  # combined runtime (~5 min each on a warm cache), but they don't share
+  # cargo artifacts in a way the other could reuse: clippy is check-mode and
+  # nextest is full-codegen test binaries with different metadata hashes.
+  # Splitting them into parallel jobs cuts the Linux Rust critical path in
+  # half (and the merge-queue pass with it) for free. Each job gets its own
+  # rust-cache shared-key so two jobs with the same Cargo.lock don't race
+  # to overwrite each other's saves with partial target/ contents.
+  rust-lint:
+    name: Rust lint
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
@@ -65,14 +71,36 @@ jobs:
       - uses: Swatinem/rust-cache@c19371144df3bb44fab255c43d04cbc2ab54d1c4 # v2.9.1
         continue-on-error: true
         with:
-          shared-key: workspace
+          shared-key: workspace-lint
+          cache-bin: false
+      # `make lint` also runs `lint-no-xfail-regression`, which compiles
+      # `harn-cli` via `cargo run` just to walk conformance/ and count
+      # `@xfail:` markers. That ~1-2 min cost is paid by the harn-audit job
+      # for free (it already has harn-cli warm from `make conformance`), so
+      # the CI invocation here drops the prereq and runs just the cheap
+      # python prelude plus clippy.
+      - run: make lint-no-rust-prompt-prose
+      - run: cargo clippy --workspace --all-targets -- -D warnings
+
+  rust-test:
+    name: Rust test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+      - uses: dtolnay/rust-toolchain@29eef336d9b2848a0b548edc03f92a220660cdb8 # stable
+      - uses: mozilla-actions/sccache-action@9e7fa8a12102821edf02ca5dbea1acd0f89a2696 # v0.0.10
+      - name: Configure Cargo to use sccache
+        run: echo "RUSTC_WRAPPER=${SCCACHE_PATH}" >> "$GITHUB_ENV"
+      - uses: Swatinem/rust-cache@c19371144df3bb44fab255c43d04cbc2ab54d1c4 # v2.9.1
+        continue-on-error: true
+        with:
+          shared-key: workspace-test
           cache-bin: false
       - name: Install cargo-nextest
         uses: taiki-e/install-action@c070f87102a1c75b3183910f391c1cb887fe13c8 # v2.77.6
         continue-on-error: true
         with:
           tool: nextest@0.9.133
-      - run: make lint
       - run: make test
         env:
           NEXTEST_PROFILE: ci
@@ -95,10 +123,15 @@ jobs:
       - uses: Swatinem/rust-cache@c19371144df3bb44fab255c43d04cbc2ab54d1c4 # v2.9.1
         continue-on-error: true
         with:
-          shared-key: workspace
+          shared-key: workspace-audit
           cache-bin: false
       - run: make conformance
       - run: make protocol-conformance
+      # Promoted out of `make lint` (in the rust-lint job) so the Linux
+      # critical path doesn't pay ~1-2 min to compile harn-cli from scratch
+      # just to count `@xfail:` markers. `make conformance` above already
+      # warmed target/debug/harn, so this is effectively free here.
+      - run: make lint-no-xfail-regression
       - run: make lint-harn
       - run: make fmt-harn
       # Audit gates promoted from release_gate.sh audit so a stale
@@ -291,14 +324,15 @@ jobs:
     name: CI status
     runs-on: ubuntu-latest
     if: always()
-    needs: [fmt, lint-md, rust, harn-audit, windows, portal, actions, e2e]
+    needs: [fmt, lint-md, rust-lint, rust-test, harn-audit, windows, portal, actions, e2e]
     steps:
       - name: Verify required CI jobs
         run: |
           declare -A results=(
             ["Format check"]="${{ needs.fmt.result }}"
             ["Markdown lint"]="${{ needs['lint-md'].result }}"
-            ["Rust (lint + test)"]="${{ needs.rust.result }}"
+            ["Rust lint"]="${{ needs['rust-lint'].result }}"
+            ["Rust test"]="${{ needs['rust-test'].result }}"
             ["Harn conformance + audit"]="${{ needs['harn-audit'].result }}"
             ["Portal frontend"]="${{ needs.portal.result }}"
             ["GitHub Actions hygiene"]="${{ needs.actions.result }}"
