@@ -1,13 +1,98 @@
 use std::future::Future;
 use std::rc::Rc;
 
-use crate::value::{ErrorCategory, VmClosure, VmError, VmValue};
+use crate::value::{ErrorCategory, VmBuiltinFn, VmClosure, VmError, VmValue};
 use crate::BuiltinId;
 
 use super::async_builtin::CURRENT_ASYNC_BUILTIN_CHILD_VM;
 use super::{ScopeSpan, Vm, VmBuiltinDispatch, VmBuiltinEntry, VmBuiltinKind, VmBuiltinMetadata};
 
 impl Vm {
+    fn builtin_span_kind(name: &str) -> Option<crate::tracing::SpanKind> {
+        match name {
+            "llm_call" | "llm_stream" | "llm_stream_call" | "agent_loop" | "agent_turn" => {
+                Some(crate::tracing::SpanKind::LlmCall)
+            }
+            "mcp_call" => Some(crate::tracing::SpanKind::ToolCall),
+            _ => None,
+        }
+    }
+
+    fn is_runtime_context_builtin(name: &str) -> bool {
+        matches!(
+            name,
+            "runtime_context"
+                | "task_current"
+                | "runtime_context_values"
+                | "runtime_context_get"
+                | "runtime_context_set"
+                | "runtime_context_clear"
+        )
+    }
+
+    fn resolve_sync_builtin_id_or_name(
+        &self,
+        direct_id: Option<BuiltinId>,
+        name: &str,
+    ) -> Option<Result<VmBuiltinFn, VmError>> {
+        if crate::autonomy::needs_async_side_effect_enforcement(name)
+            || Self::is_runtime_context_builtin(name)
+        {
+            return None;
+        }
+
+        let dispatch = if let Some(id) = direct_id {
+            self.builtins_by_id
+                .get(&id)
+                .filter(|entry| entry.name.as_ref() == name)
+                .map(|entry| entry.dispatch.clone())
+        } else {
+            None
+        }
+        .or_else(|| {
+            self.builtins
+                .get(name)
+                .cloned()
+                .map(VmBuiltinDispatch::Sync)
+        });
+
+        let Some(dispatch) = dispatch else {
+            if self.async_builtins.contains_key(name) || self.bridge.is_some() {
+                return None;
+            }
+            let all_builtins = self
+                .builtins
+                .keys()
+                .chain(self.async_builtins.keys())
+                .map(|s| s.as_str());
+            return Some(
+                if let Some(suggestion) = crate::value::closest_match(name, all_builtins) {
+                    Err(VmError::Runtime(format!(
+                        "Undefined builtin: {name} (did you mean `{suggestion}`?)"
+                    )))
+                } else {
+                    Err(VmError::UndefinedBuiltin(name.to_string()))
+                },
+            );
+        };
+
+        match dispatch {
+            VmBuiltinDispatch::Sync(builtin) => Some(Ok(builtin)),
+            VmBuiltinDispatch::Async(_) => None,
+        }
+    }
+
+    fn validate_sync_builtin_args(&self, name: &str, args: &[VmValue]) -> Result<(), VmError> {
+        if self.denied_builtins.contains(name) {
+            return Err(VmError::CategorizedError {
+                message: format!("Tool '{}' is not permitted.", name),
+                category: ErrorCategory::ToolRejected,
+            });
+        }
+        crate::orchestration::enforce_current_policy_for_builtin(name, args)?;
+        crate::typecheck::validate_builtin_call(name, args, None)
+    }
+
     fn index_builtin_id(&mut self, name: &str, dispatch: VmBuiltinDispatch) {
         let id = BuiltinId::from_name(name);
         if self.builtin_id_collisions.contains(&id) {
@@ -145,11 +230,9 @@ impl Vm {
     ///
     /// Exception handlers are saved and cleared before the sub-execution
     /// so an unhandled throw inside the body propagates as a Rust
-    /// `Result::Err` to the caller's dispatch loop, matching the previous
-    /// `mem::take`-based isolation. Iterators, deadlines, and frames are
-    /// naturally scoped via `CallFrame::saved_iterator_depth` and the
-    /// per-frame deadline tags, so the previous 4× `mem::take` dance
-    /// collapses to a single one.
+    /// `Result::Err` to the caller's dispatch loop. Iterators, deadlines,
+    /// and frames are scoped by `CallFrame::saved_iterator_depth` and the
+    /// per-frame deadline tags.
     pub(crate) async fn call_closure(
         &mut self,
         closure: &VmClosure,
@@ -207,31 +290,7 @@ impl Vm {
         name: &str,
         args: &[VmValue],
     ) -> Option<Result<VmValue, VmError>> {
-        let builtin = self.builtins.get(name).cloned()?;
-
-        let span_kind = match name {
-            "llm_call" | "llm_stream" | "llm_stream_call" | "agent_loop" | "agent_turn" => {
-                Some(crate::tracing::SpanKind::LlmCall)
-            }
-            "mcp_call" => Some(crate::tracing::SpanKind::ToolCall),
-            _ => None,
-        };
-        let _span = span_kind.map(|kind| ScopeSpan::new(kind, name.to_string()));
-
-        if self.denied_builtins.contains(name) {
-            return Some(Err(VmError::CategorizedError {
-                message: format!("Tool '{}' is not permitted.", name),
-                category: ErrorCategory::ToolRejected,
-            }));
-        }
-        if let Err(err) = crate::orchestration::enforce_current_policy_for_builtin(name, args) {
-            return Some(Err(err));
-        }
-        if let Err(err) = crate::typecheck::validate_builtin_call(name, args, None) {
-            return Some(Err(err));
-        }
-
-        Some(builtin(args, &mut self.output))
+        self.try_call_sync_builtin_id_or_name(None, name, args)
     }
 
     /// Returns true if `v` is callable via `call_callable_value`.
@@ -272,6 +331,63 @@ impl Vm {
         self.call_builtin_impl(name, args, Some(id)).await
     }
 
+    pub(crate) fn try_call_sync_builtin_id_or_name(
+        &mut self,
+        direct_id: Option<BuiltinId>,
+        name: &str,
+        args: &[VmValue],
+    ) -> Option<Result<VmValue, VmError>> {
+        if self.denied_builtins.contains(name) {
+            return Some(Err(VmError::CategorizedError {
+                message: format!("Tool '{}' is not permitted.", name),
+                category: ErrorCategory::ToolRejected,
+            }));
+        }
+        let builtin = match self.resolve_sync_builtin_id_or_name(direct_id, name)? {
+            Ok(builtin) => builtin,
+            Err(error) => return Some(Err(error)),
+        };
+        let _span =
+            Self::builtin_span_kind(name).map(|kind| ScopeSpan::new(kind, name.to_string()));
+        if let Err(error) = self.validate_sync_builtin_args(name, args) {
+            return Some(Err(error));
+        }
+
+        Some(builtin(args, &mut self.output))
+    }
+
+    pub(crate) fn try_call_sync_builtin_id_or_name_from_stack_args(
+        &mut self,
+        direct_id: Option<BuiltinId>,
+        name: &str,
+        args_start: usize,
+    ) -> Option<Result<VmValue, VmError>> {
+        if self.denied_builtins.contains(name) {
+            return Some(Err(VmError::CategorizedError {
+                message: format!("Tool '{}' is not permitted.", name),
+                category: ErrorCategory::ToolRejected,
+            }));
+        }
+        let builtin = match self.resolve_sync_builtin_id_or_name(direct_id, name)? {
+            Ok(builtin) => builtin,
+            Err(error) => return Some(Err(error)),
+        };
+        if args_start > self.stack.len() {
+            return Some(Err(VmError::Runtime(
+                "call argument stack underflow".to_string(),
+            )));
+        }
+
+        let _span =
+            Self::builtin_span_kind(name).map(|kind| ScopeSpan::new(kind, name.to_string()));
+        let args = &self.stack[args_start..];
+        if let Err(error) = self.validate_sync_builtin_args(name, args) {
+            return Some(Err(error));
+        }
+
+        Some(builtin(args, &mut self.output))
+    }
+
     async fn call_builtin_impl(
         &mut self,
         name: &str,
@@ -279,14 +395,8 @@ impl Vm {
         direct_id: Option<BuiltinId>,
     ) -> Result<VmValue, VmError> {
         // Auto-trace LLM calls and tool calls.
-        let span_kind = match name {
-            "llm_call" | "llm_stream" | "llm_stream_call" | "agent_loop" => {
-                Some(crate::tracing::SpanKind::LlmCall)
-            }
-            "mcp_call" => Some(crate::tracing::SpanKind::ToolCall),
-            _ => None,
-        };
-        let _span = span_kind.map(|kind| ScopeSpan::new(kind, name.to_string()));
+        let _span =
+            Self::builtin_span_kind(name).map(|kind| ScopeSpan::new(kind, name.to_string()));
 
         // Sandbox check: deny builtins blocked by --deny/--allow flags.
         if self.denied_builtins.contains(name) {
