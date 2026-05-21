@@ -1,6 +1,7 @@
 use std::collections::BTreeMap;
 use std::rc::Rc;
 
+use chrono::{DateTime, NaiveDateTime, TimeZone, Utc};
 use jsonwebtoken::{Algorithm, EncodingKey, Header};
 use url::Url;
 use zeroize::Zeroizing;
@@ -587,6 +588,149 @@ fn verify_signed_url_builtin(args: &[VmValue]) -> Result<VmValue, VmError> {
     ))
 }
 
+fn aws_sigv4_error(message: impl Into<String>) -> VmError {
+    VmError::Runtime(format!("aws_sigv4_headers: {}", message.into()))
+}
+
+fn required_spec_string(spec: &BTreeMap<String, VmValue>, key: &str) -> Result<String, VmError> {
+    match spec.get(key) {
+        Some(VmValue::String(value)) if !value.trim().is_empty() => Ok(value.to_string()),
+        Some(value) if !matches!(value, VmValue::Nil) => Err(aws_sigv4_error(format!(
+            "{key} must be a non-empty string, got {}",
+            value.type_name()
+        ))),
+        _ => Err(aws_sigv4_error(format!("{key} is required"))),
+    }
+}
+
+fn optional_spec_string(
+    spec: &BTreeMap<String, VmValue>,
+    key: &str,
+) -> Result<Option<String>, VmError> {
+    match spec.get(key) {
+        Some(VmValue::String(value)) if !value.trim().is_empty() => Ok(Some(value.to_string())),
+        Some(VmValue::String(_)) | Some(VmValue::Nil) | None => Ok(None),
+        Some(value) => Err(aws_sigv4_error(format!(
+            "{key} must be a string when provided, got {}",
+            value.type_name()
+        ))),
+    }
+}
+
+fn aws_sigv4_headers_arg(
+    spec: &BTreeMap<String, VmValue>,
+) -> Result<BTreeMap<String, String>, VmError> {
+    match spec.get("headers") {
+        None | Some(VmValue::Nil) => Ok(BTreeMap::new()),
+        Some(VmValue::Dict(headers)) => Ok(headers
+            .iter()
+            .map(|(key, value)| (key.clone(), value.display()))
+            .collect()),
+        Some(value) => Err(aws_sigv4_error(format!(
+            "headers must be a dict when provided, got {}",
+            value.type_name()
+        ))),
+    }
+}
+
+fn aws_sigv4_body_bytes(spec: &BTreeMap<String, VmValue>) -> Vec<u8> {
+    match spec.get("body") {
+        Some(VmValue::Bytes(bytes)) => bytes.as_ref().clone(),
+        Some(VmValue::Nil) | None => Vec::new(),
+        Some(value) => value.display().into_bytes(),
+    }
+}
+
+fn aws_sigv4_timestamp(value: Option<&VmValue>) -> Result<DateTime<Utc>, VmError> {
+    let value = value.ok_or_else(|| aws_sigv4_error("timestamp is required"))?;
+    match value {
+        VmValue::String(text) => aws_sigv4_timestamp_string(text),
+        VmValue::Int(seconds) => Utc
+            .timestamp_opt(*seconds, 0)
+            .single()
+            .ok_or_else(|| aws_sigv4_error("timestamp is out of range")),
+        VmValue::Float(seconds) => aws_sigv4_timestamp_float(*seconds),
+        VmValue::Dict(dict) => aws_sigv4_timestamp(
+            dict.get("timestamp").or_else(|| dict.get("iso8601")),
+        ),
+        other => Err(aws_sigv4_error(format!(
+            "timestamp must be an RFC 3339 string, SigV4 basic timestamp, Unix timestamp, or date dict, got {}",
+            other.type_name()
+        ))),
+    }
+}
+
+fn aws_sigv4_timestamp_string(text: &str) -> Result<DateTime<Utc>, VmError> {
+    if let Ok(dt) = DateTime::parse_from_rfc3339(text) {
+        return Ok(dt.with_timezone(&Utc));
+    }
+    NaiveDateTime::parse_from_str(text, "%Y%m%dT%H%M%SZ")
+        .map(|dt| Utc.from_utc_datetime(&dt))
+        .map_err(|_| aws_sigv4_error("timestamp must be RFC 3339 or YYYYMMDDTHHMMSSZ"))
+}
+
+fn aws_sigv4_timestamp_float(seconds: f64) -> Result<DateTime<Utc>, VmError> {
+    if !seconds.is_finite() {
+        return Err(aws_sigv4_error("timestamp must be finite"));
+    }
+    let mut secs = seconds.trunc() as i64;
+    let mut nanos = ((seconds - secs as f64) * 1_000_000_000.0).round() as i64;
+    if nanos < 0 {
+        secs -= 1;
+        nanos += 1_000_000_000;
+    } else if nanos >= 1_000_000_000 {
+        secs += 1;
+        nanos -= 1_000_000_000;
+    }
+    Utc.timestamp_opt(secs, nanos as u32)
+        .single()
+        .ok_or_else(|| aws_sigv4_error("timestamp is out of range"))
+}
+
+fn aws_sigv4_headers_builtin(args: &[VmValue]) -> Result<VmValue, VmError> {
+    if args.len() != 1 {
+        return Err(aws_sigv4_error("requires one spec dict argument"));
+    }
+    let spec = args[0].as_dict().ok_or_else(|| {
+        aws_sigv4_error(format!("spec must be a dict, got {}", args[0].type_name()))
+    })?;
+    let credentials = crate::aws_sigv4::AwsSigV4Credentials {
+        access_key_id: required_spec_string(spec, "access_key_id")?,
+        secret_access_key: required_spec_string(spec, "secret_access_key")?,
+        session_token: optional_spec_string(spec, "session_token")?,
+    };
+    let method = required_spec_string(spec, "method")?;
+    let url = required_spec_string(spec, "url")?;
+    let service = required_spec_string(spec, "service")?;
+    let region = required_spec_string(spec, "region")?;
+    let headers = aws_sigv4_headers_arg(spec)?;
+    let body = aws_sigv4_body_bytes(spec);
+    let timestamp = aws_sigv4_timestamp(spec.get("timestamp"))?;
+
+    let signed = crate::aws_sigv4::sign(crate::aws_sigv4::AwsSigV4Input {
+        credentials: &credentials,
+        method: &method,
+        url: &url,
+        service: &service,
+        region: &region,
+        headers: &headers,
+        body: &body,
+        timestamp,
+    })
+    .map_err(aws_sigv4_error)?;
+
+    Ok(crate::schema::json_to_vm_value(&serde_json::json!({
+        "headers": signed.headers,
+        "authorization": signed.authorization,
+        "amz_date": signed.amz_date,
+        "content_sha256": signed.content_sha256,
+        "signed_headers": signed.signed_headers,
+        "credential_scope": signed.credential_scope,
+        "canonical_request": signed.canonical_request,
+        "string_to_sign": signed.string_to_sign,
+    })))
+}
+
 pub(crate) fn register_crypto_builtins(vm: &mut Vm) {
     fn display_arg(args: &[VmValue]) -> String {
         args.first().map(|a| a.display()).unwrap_or_default()
@@ -787,6 +931,9 @@ pub(crate) fn register_crypto_builtins(vm: &mut Vm) {
     vm.register_builtin("signed_url", |args, _out| signed_url_builtin(args));
     vm.register_builtin("verify_signed_url", |args, _out| {
         verify_signed_url_builtin(args)
+    });
+    vm.register_builtin("aws_sigv4_headers", |args, _out| {
+        aws_sigv4_headers_builtin(args)
     });
 
     // Constant-time string equality. The variable-time `==` operator can leak

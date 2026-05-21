@@ -638,6 +638,49 @@ Use `connector_http_header(...)` for case-insensitive response header lookup and
 `connector_http_rate_limit(...)` to expose `Retry-After`, `RateLimit-*`, and
 `X-RateLimit-*` metadata without repeating provider-local header scans.
 
+AWS-backed connector packages that need exactly one signed REST/JSON call can
+use the global `aws_sigv4_headers(...)` primitive and still route the request
+through `harness.net.request(...)`. Keep this as a narrow auth helper, not the
+start of an AWS SDK: credentials come from the caller or secret provider, and
+service clients, paginators, waiters, Smithy generation, and live AWS tests stay
+out of scope for connector packages.
+
+```harn
+let body = "{\"TableName\":\"Items\"}"
+let url = "https://dynamodb.us-east-1.amazonaws.com/"
+http_mock("POST", url, {status: 200, body: "{\"ok\":true}", headers: {}})
+
+let signed = aws_sigv4_headers({
+  method: "POST",
+  url: url,
+  service: "dynamodb",
+  region: "us-east-1",
+  body: body,
+  access_key_id: access_key_id,
+  secret_access_key: secret_access_key,
+  session_token: session_token,
+  headers: {
+    "Content-Type": "application/x-amz-json-1.0",
+    "X-Amz-Target": "DynamoDB_20120810.DescribeTable",
+  },
+  timestamp: "20260429T120000Z",
+})
+
+let response = harness.net.request("POST", url, {
+  body: body,
+  headers: signed.headers,
+})
+```
+
+`timestamp` is required so signing is deterministic in tests. The helper returns
+`headers`, `authorization`, `amz_date`, `content_sha256`, `signed_headers`,
+`credential_scope`, `canonical_request`, and `string_to_sign`; it never returns
+derived signing keys. Validation errors identify the invalid field without
+echoing access keys, secret access keys, session tokens, canonical requests, or
+signed headers. The normal redaction policy scrubs `Authorization` and
+`X-Amz-Security-Token` from recorded HTTP mock calls and transcripts unless a
+test explicitly opts into sensitive values.
+
 ## Rate limiting
 
 Connector clients should acquire outbound permits through the shared

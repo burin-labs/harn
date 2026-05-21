@@ -404,6 +404,7 @@ fn is_default_sensitive_field(lower: &str) -> bool {
             | "api_key"
             | "apikey"
             | "api-key"
+            | "x-amz-security-token"
             | "x-api-key"
             | "x-auth-token"
             | "x-csrf-token"
@@ -566,6 +567,7 @@ mod tests {
         let mut value = json!({
             "headers": {
                 "authorization": "Bearer abc",
+                "X-Amz-Security-Token": "session",
                 "x-trace-id": "trace_1",
             },
             "list": [
@@ -577,6 +579,10 @@ mod tests {
         });
         policy.redact_json_in_place(&mut value);
         assert_eq!(value["headers"]["authorization"], REDACTED_PLACEHOLDER);
+        assert_eq!(
+            value["headers"]["X-Amz-Security-Token"],
+            REDACTED_PLACEHOLDER
+        );
         assert_eq!(value["headers"]["x-trace-id"], "trace_1");
         assert_eq!(value["list"][0]["auth_token"], REDACTED_PLACEHOLDER);
         assert_eq!(value["list"][0]["name"], "alice");

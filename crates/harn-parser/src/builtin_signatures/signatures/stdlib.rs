@@ -541,6 +541,7 @@ pub(crate) const SIGNATURES: &[BuiltinSignature] = &[
         TY_INT,
     ),
     BuiltinSignature::simple("await", &[Param::new("handle", Ty::Named("task"))], TY_ANY),
+    BuiltinSignature::simple("aws_sigv4_headers", &[Param::new("spec", TY_DICT)], TY_DICT),
     BuiltinSignature::simple("base32_decode", &[Param::new("text", TY_STRING)], TY_STRING),
     BuiltinSignature::simple(
         "base32_encode",

@@ -7,8 +7,8 @@
 use std::collections::BTreeMap;
 
 use chrono::Utc;
-use sha2::{Digest, Sha256};
 
+use crate::aws_sigv4::{sign as sign_sigv4_request, AwsSigV4Input};
 use crate::llm::api::{DeltaSender, LlmRequestPayload, LlmResult};
 use crate::llm::provider::{LlmProvider, LlmProviderChat};
 use crate::llm::providers::common::{
@@ -19,20 +19,7 @@ use crate::value::VmError;
 
 pub(crate) struct BedrockProvider;
 
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) struct AwsCredentials {
-    pub access_key_id: String,
-    pub secret_access_key: String,
-    pub session_token: Option<String>,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) struct SigV4Headers {
-    pub authorization: String,
-    pub amz_date: String,
-    pub content_sha256: String,
-    pub security_token: Option<String>,
-}
+pub(crate) use crate::aws_sigv4::AwsSigV4Credentials as AwsCredentials;
 
 impl BedrockProvider {
     pub(crate) fn build_request_body(request: &LlmRequestPayload) -> serde_json::Value {
@@ -118,16 +105,19 @@ impl BedrockProvider {
         );
         let base_url = bedrock_base_url(&region);
         let url = format!("{}{}", base_url.trim_end_matches('/'), path);
-        let host = host_for_url(&url)?;
-        let signed = sign_request(
-            &credentials,
-            &region,
-            "POST",
-            &host,
-            &path,
-            &body_bytes,
-            None,
-        )?;
+        let sign_headers =
+            BTreeMap::from([("Content-Type".to_string(), "application/json".to_string())]);
+        let signed = sign_sigv4_request(AwsSigV4Input {
+            credentials: &credentials,
+            method: "POST",
+            url: &url,
+            service: "bedrock",
+            region: &region,
+            headers: &sign_headers,
+            body: &body_bytes,
+            timestamp: Utc::now(),
+        })
+        .map_err(|error| vm_err(format!("bedrock request signing failed: {error}")))?;
         let mut req = crate::llm::shared_blocking_client()
             .post(url)
             .header("Content-Type", "application/json")
@@ -262,18 +252,6 @@ fn bedrock_base_url(region: &str) -> String {
         .ok()
         .filter(|value| !value.trim().is_empty())
         .unwrap_or_else(|| format!("https://bedrock-runtime.{region}.amazonaws.com"))
-}
-
-fn host_for_url(url: &str) -> Result<String, VmError> {
-    let parsed =
-        url::Url::parse(url).map_err(|error| vm_err(format!("invalid Bedrock URL: {error}")))?;
-    let host = parsed
-        .host_str()
-        .ok_or_else(|| vm_err("Bedrock URL does not contain a host"))?;
-    Ok(match parsed.port() {
-        Some(port) => format!("{host}:{port}"),
-        None => host.to_string(),
-    })
 }
 
 fn resolve_region() -> Result<String, VmError> {
@@ -458,69 +436,10 @@ fn credentials_from_metadata_json(json: &serde_json::Value) -> Option<AwsCredent
     })
 }
 
-fn sign_request(
-    credentials: &AwsCredentials,
-    region: &str,
-    method: &str,
-    host: &str,
-    path: &str,
-    body: &[u8],
-    now_override: Option<chrono::DateTime<Utc>>,
-) -> Result<SigV4Headers, VmError> {
-    let now = now_override.unwrap_or_else(Utc::now);
-    let amz_date = now.format("%Y%m%dT%H%M%SZ").to_string();
-    let date = now.format("%Y%m%d").to_string();
-    let content_sha256 = sha256_hex(body);
-    let mut headers = BTreeMap::from([
-        ("content-type".to_string(), "application/json".to_string()),
-        ("host".to_string(), host.to_string()),
-        ("x-amz-content-sha256".to_string(), content_sha256.clone()),
-        ("x-amz-date".to_string(), amz_date.clone()),
-    ]);
-    if let Some(token) = credentials.session_token.as_ref() {
-        headers.insert("x-amz-security-token".to_string(), token.clone());
-    }
-    let signed_headers = headers.keys().cloned().collect::<Vec<_>>().join(";");
-    let canonical_headers = headers
-        .iter()
-        .map(|(key, value)| format!("{key}:{}\n", value.trim()))
-        .collect::<String>();
-    let canonical_request =
-        format!("{method}\n{path}\n\n{canonical_headers}\n{signed_headers}\n{content_sha256}");
-    let credential_scope = format!("{date}/{region}/bedrock/aws4_request");
-    let string_to_sign = format!(
-        "AWS4-HMAC-SHA256\n{amz_date}\n{credential_scope}\n{}",
-        sha256_hex(canonical_request.as_bytes())
-    );
-    let date_key = crate::connectors::hmac::hmac_sha256(
-        format!("AWS4{}", credentials.secret_access_key).as_bytes(),
-        date.as_bytes(),
-    );
-    let region_key = crate::connectors::hmac::hmac_sha256(&date_key, region.as_bytes());
-    let service_key = crate::connectors::hmac::hmac_sha256(&region_key, b"bedrock");
-    let signing_key = crate::connectors::hmac::hmac_sha256(&service_key, b"aws4_request");
-    let signature = hex::encode(crate::connectors::hmac::hmac_sha256(
-        &signing_key,
-        string_to_sign.as_bytes(),
-    ));
-    Ok(SigV4Headers {
-        authorization: format!(
-            "AWS4-HMAC-SHA256 Credential={}/{credential_scope}, SignedHeaders={signed_headers}, Signature={signature}",
-            credentials.access_key_id
-        ),
-        amz_date,
-        content_sha256,
-        security_token: credentials.session_token.clone(),
-    })
-}
-
-fn sha256_hex(data: &[u8]) -> String {
-    hex::encode(Sha256::digest(data))
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::aws_sigv4::AwsSigV4Input;
     use crate::llm::api::{LlmRequestPayload, ThinkingConfig};
     use chrono::TimeZone;
     use serde_json::json;
@@ -545,15 +464,18 @@ mod tests {
             secret_access_key: "wJalrXUtnFEMI/K7MDENG+bPxRfiCYEXAMPLEKEY".to_string(),
             session_token: Some("session".to_string()),
         };
-        let signed = sign_request(
-            &credentials,
-            "us-east-1",
-            "POST",
-            "bedrock-runtime.us-east-1.amazonaws.com",
-            "/model/anthropic.claude-3-5-sonnet-20240620-v1%3A0/converse",
-            br#"{"messages":[]}"#,
-            Some(Utc.with_ymd_and_hms(2026, 4, 29, 12, 0, 0).unwrap()),
-        )
+        let headers =
+            BTreeMap::from([("Content-Type".to_string(), "application/json".to_string())]);
+        let signed = sign_sigv4_request(AwsSigV4Input {
+            credentials: &credentials,
+            method: "POST",
+            url: "https://bedrock-runtime.us-east-1.amazonaws.com/model/anthropic.claude-3-5-sonnet-20240620-v1%3A0/converse",
+            service: "bedrock",
+            region: "us-east-1",
+            headers: &headers,
+            body: br#"{"messages":[]}"#,
+            timestamp: Utc.with_ymd_and_hms(2026, 4, 29, 12, 0, 0).unwrap(),
+        })
         .expect("signature");
         assert_eq!(signed.amz_date, "20260429T120000Z");
         assert_eq!(signed.security_token.as_deref(), Some("session"));

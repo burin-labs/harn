@@ -11,6 +11,7 @@ pub mod agent_events;
 pub mod agent_sessions;
 pub mod atomic_io;
 pub mod autonomy;
+pub(crate) mod aws_sigv4;
 pub mod bridge;
 mod builtin_id;
 pub mod bytecode_cache;

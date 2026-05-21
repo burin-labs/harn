@@ -1,0 +1,102 @@
+pipeline test(task) {
+  let body = "{\"hello\":\"world\"}"
+  let signed = aws_sigv4_headers(
+    {
+      method: "POST",
+      url: "https://service.us-east-1.amazonaws.com/",
+      service: "service",
+      region: "us-east-1",
+      body: body,
+      access_key_id: "AKIDEXAMPLE",
+      secret_access_key: "wJalrXUtnFEMI/K7MDENG+bPxRfiCYEXAMPLEKEY",
+      headers: {"Content-Type": "application/x-amz-json-1.1"},
+      timestamp: "20150830T123600Z",
+    },
+  )
+  assert_eq(signed.amz_date, "20150830T123600Z")
+  assert_eq(signed.content_sha256, "93a23971a914e5eacbf0a8d25154cda309c3c1c72fbb9914d47c60f3cb681588")
+  assert_eq(signed.signed_headers, "content-type;host;x-amz-content-sha256;x-amz-date")
+  assert(
+    contains(signed.authorization, "Credential=AKIDEXAMPLE/20150830/us-east-1/service/aws4_request"),
+  )
+  assert(
+    contains(
+      signed.authorization,
+      "Signature=bbd206a978e4215b047ffcb9df0601d8173a68a1d314fbb5ce382e7556b147be",
+    ),
+  )
+  http_mock_clear()
+  http_mock(
+    "POST",
+    "https://service.us-east-1.amazonaws.com/",
+    {status: 200, body: "ok", headers: {}},
+  )
+  let response = harness.net
+    .request(
+    "POST",
+    "https://service.us-east-1.amazonaws.com/",
+    {body: body, headers: signed.headers},
+  )
+  assert_eq(response.status, 200)
+  let redacted = http_mock_calls()
+  assert_eq(redacted[0].headers.authorization, "[redacted]")
+  let raw = http_mock_calls({include_sensitive: true})
+  assert_eq(raw[0].headers.authorization, signed.authorization)
+  let session_signed = aws_sigv4_headers(
+    {
+      method: "GET",
+      url: "https://service.us-east-1.amazonaws.com/",
+      service: "service",
+      region: "us-east-1",
+      access_key_id: "AKIDEXAMPLE",
+      secret_access_key: "wJalrXUtnFEMI/K7MDENG+bPxRfiCYEXAMPLEKEY",
+      session_token: "session-token",
+      timestamp: "2015-08-30T12:36:00Z",
+    },
+  )
+  assert_eq(session_signed.headers["X-Amz-Security-Token"], "session-token")
+  assert(contains(session_signed.signed_headers, "x-amz-security-token"))
+  let edge = aws_sigv4_headers(
+    {
+      method: "GET",
+      url: "https://example.amazonaws.com/a%2Fb/space%20here/tilde%7e?Param=value%2Fwith%20space&plus=a+b&empty&Param=second",
+      service: "execute-api",
+      region: "us-east-1",
+      access_key_id: "AKIDEXAMPLE",
+      secret_access_key: "wJalrXUtnFEMI/K7MDENG+bPxRfiCYEXAMPLEKEY",
+      headers: {"X-Amz-Target": "Example.Action"},
+      timestamp: 1440938160,
+    },
+  )
+  assert(contains(edge.canonical_request, "\n/a%2Fb/space%20here/tilde~\n"))
+  assert(
+    contains(edge.canonical_request, "\nParam=second&Param=value%2Fwith%20space&empty=&plus=a%2Bb\n"),
+  )
+  assert(contains(edge.canonical_request, "x-amz-target:Example.Action\n"))
+  let failed = try {
+    aws_sigv4_headers(
+      {
+        method: "POST",
+        url: "not a url",
+        service: "service",
+        region: "us-east-1",
+        access_key_id: "AKIAIOSFODNN7EXAMPLE",
+        secret_access_key: "secret-that-must-not-leak",
+        session_token: "session-that-must-not-leak",
+        timestamp: "20150830T123600Z",
+      },
+    )
+  }
+  assert(is_err(failed))
+  match failed {
+    Result.Err(message) -> {
+      assert(!contains(message, "AKIAIOSFODNN7EXAMPLE"))
+      assert(!contains(message, "secret-that-must-not-leak"))
+      assert(!contains(message, "session-that-must-not-leak"))
+    }
+    Result.Ok(_) -> {
+      throw "expected aws_sigv4_headers to reject invalid URL"
+    }
+  }
+  __io_println("aws_sigv4_headers_ok")
+}
