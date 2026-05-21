@@ -96,6 +96,60 @@ pub(crate) enum PackageCommand {
     Audit(PackageAuditArgs),
     /// Inspect or verify the published Harn protocol-artifact contract.
     Artifacts(PackageArtifactsArgs),
+    /// Scaffold a package from an external source.
+    Scaffold(Box<PackageScaffoldArgs>),
+}
+
+#[derive(Debug, Args)]
+pub(crate) struct PackageScaffoldArgs {
+    #[command(subcommand)]
+    pub command: PackageScaffoldCommand,
+}
+
+#[derive(Debug, Subcommand)]
+pub(crate) enum PackageScaffoldCommand {
+    /// Generate a focused Harn SDK package from an OpenAPI 3.1 spec.
+    Openapi(PackageScaffoldOpenapiArgs),
+}
+
+#[derive(Debug, Args)]
+pub(crate) struct PackageScaffoldOpenapiArgs {
+    /// Harn package name, for example `acme-sdk-harn`.
+    #[arg(long)]
+    pub name: String,
+    /// Generated Harn module/export name. Defaults to a snake_case form of --name.
+    #[arg(long = "module-name")]
+    pub module_name: Option<String>,
+    /// Generated client constructor type label. Defaults to `<ModuleName>Client`.
+    #[arg(long = "client-name")]
+    pub client_name: Option<String>,
+    /// Local OpenAPI JSON/YAML file or HTTPS URL.
+    #[arg(long, value_name = "PATH_OR_URL")]
+    pub spec: String,
+    /// Destination package directory. Defaults to `<name>/`.
+    #[arg(long, value_name = "DIR")]
+    pub out: Option<PathBuf>,
+    /// One-line package description.
+    #[arg(long)]
+    pub description: Option<String>,
+    /// Default base URL baked into `new_client()`. Defaults to the first OpenAPI server URL.
+    #[arg(long = "default-base-url")]
+    pub default_base_url: Option<String>,
+    /// Local `harn-openapi` checkout to use for deterministic generation.
+    #[arg(long = "harn-openapi-path", value_name = "DIR")]
+    pub harn_openapi_path: Option<PathBuf>,
+    /// Git URL or local git repo path written for the generated `harn-openapi` dependency.
+    #[arg(long = "harn-openapi-git", value_name = "URL|PATH")]
+    pub harn_openapi_git: Option<String>,
+    /// Git rev/tag written for the generated `harn-openapi` dependency.
+    #[arg(long = "harn-openapi-rev", conflicts_with = "harn_openapi_branch")]
+    pub harn_openapi_rev: Option<String>,
+    /// Git branch written for the generated `harn-openapi` dependency. Defaults to `main`.
+    #[arg(long = "harn-openapi-branch", conflicts_with = "harn_openapi_rev")]
+    pub harn_openapi_branch: Option<String>,
+    /// Overwrite generated files in an existing package directory.
+    #[arg(long)]
+    pub force: bool,
 }
 
 #[derive(Debug, Args)]

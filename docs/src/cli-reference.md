@@ -2039,6 +2039,36 @@ package tool/skill metadata. Publish-readiness checks remain under
 `harn package check`, so applications can use doctor without adding package
 metadata that only published libraries need.
 
+## harn package scaffold openapi
+
+Create a focused Harn SDK package from a local or remote OpenAPI 3.1 spec.
+
+```bash
+harn package scaffold openapi \
+  --name acme-sdk-harn \
+  --module-name acme_sdk \
+  --client-name AcmeClient \
+  --spec ./openapi.json \
+  --out ./acme-sdk-harn
+```
+
+The scaffold writes `harn.toml`, generated `src/lib.harn`, the source spec
+under `openapi/`, `scripts/regen.harn`, `tests/smoke.harn`, docs, README,
+license, and package CI. Run `harn install` inside the package before checking
+or testing so the declared `harn-openapi` regeneration dependency is
+materialized.
+
+Useful flags:
+
+| Flag | Description |
+|---|---|
+| `--default-base-url <url>` | Override the first `servers[].url` from the spec |
+| `--harn-openapi-path <dir>` | Use a local `harn-openapi` checkout for generation |
+| `--harn-openapi-git <url-or-path>` | Dependency source written to `harn.toml` |
+| `--harn-openapi-rev <rev>` | Pin the dependency to a rev or tag |
+| `--harn-openapi-branch <branch>` | Track a branch instead of a rev, default `main` |
+| `--force` | Overwrite generated files in an existing output directory |
+
 ## harn package search
 
 Search the configured package registry index.

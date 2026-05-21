@@ -7,9 +7,10 @@ use super::{
     FlowCommand, LocalCommand, McpCommand, ModelsCommand, OrchestratorCommand,
     OrchestratorDeployProvider, OrchestratorLogFormat, OrchestratorQueueCommand,
     OrchestratorTenantCommand, PackageArtifactsCommand, PackageCacheCommand, PackageCommand,
-    PersonaCommand, ProjectTemplate, ProviderToolProbeModeArg, ProvidersCommand, RunsCommand,
-    SessionCommand, SkillCommand, SkillKeyCommand, SkillTrustCommand, SkillsCommand, ToolCommand,
-    TraceCommand, TriggerCommand, TrustCommand, TrustOutcomeArg, TrustTierArg,
+    PackageScaffoldCommand, PersonaCommand, ProjectTemplate, ProviderToolProbeModeArg,
+    ProvidersCommand, RunsCommand, SessionCommand, SkillCommand, SkillKeyCommand,
+    SkillTrustCommand, SkillsCommand, ToolCommand, TraceCommand, TriggerCommand, TrustCommand,
+    TrustOutcomeArg, TrustTierArg,
 };
 use clap::{CommandFactory, Parser};
 
@@ -2075,6 +2076,61 @@ fn test_parses_package_cache_subcommands() {
         panic!("expected package cache verify");
     };
     assert!(verify.materialized);
+}
+
+#[test]
+fn test_parses_package_scaffold_openapi() {
+    let cli = Cli::parse_from([
+        "harn",
+        "package",
+        "scaffold",
+        "openapi",
+        "--name",
+        "acme-sdk-harn",
+        "--module-name",
+        "acme_sdk",
+        "--client-name",
+        "AcmeClient",
+        "--spec",
+        "./openapi.json",
+        "--out",
+        "./acme-sdk-harn",
+        "--default-base-url",
+        "https://api.example.test",
+        "--harn-openapi-path",
+        "../harn-openapi",
+        "--harn-openapi-git",
+        "https://github.com/burin-labs/harn-openapi",
+        "--harn-openapi-rev",
+        "abc123",
+        "--force",
+    ]);
+    let Command::Package(args) = cli.command.unwrap() else {
+        panic!("expected package command");
+    };
+    let PackageCommand::Scaffold(scaffold) = args.command else {
+        panic!("expected package scaffold");
+    };
+    let PackageScaffoldCommand::Openapi(openapi) = scaffold.command;
+    assert_eq!(openapi.name, "acme-sdk-harn");
+    assert_eq!(openapi.module_name.as_deref(), Some("acme_sdk"));
+    assert_eq!(openapi.client_name.as_deref(), Some("AcmeClient"));
+    assert_eq!(openapi.spec, "./openapi.json");
+    assert_eq!(openapi.out, Some(PathBuf::from("./acme-sdk-harn")));
+    assert_eq!(
+        openapi.default_base_url.as_deref(),
+        Some("https://api.example.test")
+    );
+    assert_eq!(
+        openapi.harn_openapi_path,
+        Some(PathBuf::from("../harn-openapi"))
+    );
+    assert_eq!(
+        openapi.harn_openapi_git.as_deref(),
+        Some("https://github.com/burin-labs/harn-openapi")
+    );
+    assert_eq!(openapi.harn_openapi_rev.as_deref(), Some("abc123"));
+    assert!(openapi.force);
 }
 
 #[test]

@@ -1,7 +1,10 @@
 use std::fs;
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 
 use crate::cli::ToolNewArgs;
+use crate::commands::scaffold_common::{
+    harn_identifier_with_prefix, harn_string_literal, write_file,
+};
 use crate::package::{
     current_harn_range_example, generate_package_docs_impl, toml_string_literal,
     validate_package_alias, PackageError,
@@ -264,59 +267,8 @@ jobs:
     ])
 }
 
-fn write_file(root: &Path, relative_path: &str, content: &str) -> Result<(), PackageError> {
-    let path = root.join(relative_path);
-    if let Some(parent) = path.parent() {
-        fs::create_dir_all(parent)
-            .map_err(|error| format!("failed to create {}: {error}", parent.display()))?;
-    }
-    harn_vm::atomic_io::atomic_write(&path, content.as_bytes())
-        .map_err(|error| format!("failed to write {}: {error}", path.display()))?;
-    Ok(())
-}
-
 fn harn_identifier(name: &str) -> Result<String, PackageError> {
-    let mut out = String::new();
-    for ch in name.chars() {
-        if ch == '_' || ch.is_ascii_alphanumeric() {
-            out.push(ch);
-        } else {
-            out.push('_');
-        }
-    }
-    while out.contains("__") {
-        out = out.replace("__", "_");
-    }
-    let out = out.trim_matches('_').to_string();
-    if out.is_empty() {
-        return Err(format!("tool name {name:?} does not contain an identifier").into());
-    }
-    if out
-        .chars()
-        .next()
-        .is_some_and(|ch| ch.is_ascii_alphabetic() || ch == '_')
-    {
-        Ok(out)
-    } else {
-        Ok(format!("tool_{out}"))
-    }
-}
-
-fn harn_string_literal(value: &str) -> String {
-    let mut out = String::with_capacity(value.len() + 2);
-    out.push('"');
-    for ch in value.chars() {
-        match ch {
-            '\\' => out.push_str("\\\\"),
-            '"' => out.push_str("\\\""),
-            '\n' => out.push_str("\\n"),
-            '\r' => out.push_str("\\r"),
-            '\t' => out.push_str("\\t"),
-            other => out.push(other),
-        }
-    }
-    out.push('"');
-    out
+    harn_identifier_with_prefix(name, "tool")
 }
 
 #[cfg(test)]
