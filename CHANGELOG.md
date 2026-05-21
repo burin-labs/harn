@@ -21,6 +21,13 @@ condensed series summaries instead of full per-patch history.
   returning ordered attempt summaries plus `fallback_index` /
   `fallback_total` without adding a provider framework or second retry
   system.
+- **Minimal AWS SigV4 signing helper (#2083).** Adds the pure
+  `aws_sigv4_headers(spec)` builtin so connector packages can sign one AWS
+  REST/JSON request with explicit credentials and pass the returned headers to
+  `harness.net.request(...)`. Bedrock now reuses the same signer, temporary
+  credentials emit and sign `X-Amz-Security-Token`, and tests cover fixed
+  vectors, query/path canonicalization, Bedrock shape parity, mocked HTTP
+  usage, and credential-safe errors.
 - **Connector-safe HTTP policy helpers (#2082).** `std/connectors/shared` now
   exposes `connector_http_request`, `connector_http_json`,
   `connector_http_header`, and `connector_http_rate_limit` so Harn package

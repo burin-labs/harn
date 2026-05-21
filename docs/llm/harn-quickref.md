@@ -2397,6 +2397,32 @@ valid JSON and returns `error.category == "invalid_json"` on parse failure.
 `connector_http_rate_limit` cover case-insensitive header lookup plus
 `Retry-After`, `RateLimit-*`, and `X-RateLimit-*` extraction.
 
+For narrow AWS connector calls, use `aws_sigv4_headers(spec)` to sign one
+request with explicit credentials, then pass `signed.headers` into
+`harness.net.request(...)`. This is not an AWS SDK: there is no credential
+chain, paginator, service client, or live AWS test requirement. `timestamp` is
+required for deterministic signing, and temporary credentials use
+`session_token` / `X-Amz-Security-Token`.
+
+```harn
+let body = "{\"TableName\":\"Items\"}"
+let url = "https://dynamodb.us-east-1.amazonaws.com/"
+http_mock("POST", url, {status: 200, body: "{\"ok\":true}", headers: {}})
+let signed = aws_sigv4_headers({
+  method: "POST",
+  url: url,
+  service: "dynamodb",
+  region: "us-east-1",
+  body: body,
+  access_key_id: access_key_id,
+  secret_access_key: secret_access_key,
+  session_token: session_token,
+  headers: {"Content-Type": "application/x-amz-json-1.0"},
+  timestamp: "20260429T120000Z",
+})
+let response = harness.net.request("POST", url, {body: body, headers: signed.headers})
+```
+
 ### Human-in-the-loop primitives
 
 `ask_user`, `request_approval`, `dual_control`, and `escalate_to` are

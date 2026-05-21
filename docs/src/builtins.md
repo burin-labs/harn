@@ -681,6 +681,7 @@ log(md5("hello"))     // 5d41402abc4b2a76b9719d911017c592
 |---|---|---|---|
 | `hmac_sha256(key, message)` | key: string, message: string | string | HMAC-SHA256 as a lowercase hex-encoded string. Most webhook providers (GitHub, Stripe) send signatures in this form |
 | `hmac_sha256_base64(key, message)` | key: string, message: string | string | HMAC-SHA256 as standard base64 (used by Slack-style signatures) |
+| `aws_sigv4_headers(spec)` | spec: dict | dict | Deterministically sign one AWS HTTP request with explicit credentials. Returns signed headers plus canonical request metadata; does not perform network I/O |
 | `constant_time_eq(a, b)` | a: string, b: string | bool | Timing-safe string equality. Always use this to compare HMAC signatures — plain `==` can leak the signature byte-by-byte through timing differences |
 | `signed_url(base, claims, secret, expires_at, options?)` | base: string, claims: dict, secret: string, expires_at: int, options: dict | string | Create a short-lived HMAC-SHA256 signed absolute URL or absolute path. The signature is URL-safe base64 without padding |
 | `verify_signed_url(url, secret_or_keys, now, options?)` | url: string, secret_or_keys: string or dict, now: int, options: dict | dict | Verify a signed URL/path with constant-time signature comparison and optional clock skew. Returns `{valid, reason, signature_valid, expired, expires_at, kid, claims}` |
@@ -694,6 +695,46 @@ if !constant_time_eq(signature, request_signature) {
   throw "invalid signature"
 }
 ```
+
+Example (one AWS REST/JSON request against `http_mock`):
+
+```harn
+let body = "{\"TableName\":\"Items\"}"
+let url = "https://dynamodb.us-east-1.amazonaws.com/"
+http_mock("POST", url, {status: 200, body: "{\"ok\":true}", headers: {}})
+
+let signed = aws_sigv4_headers({
+  method: "POST",
+  url: url,
+  service: "dynamodb",
+  region: "us-east-1",
+  body: body,
+  access_key_id: access_key_id,
+  secret_access_key: secret_access_key,
+  session_token: session_token,
+  headers: {
+    "Content-Type": "application/x-amz-json-1.0",
+    "X-Amz-Target": "DynamoDB_20120810.DescribeTable",
+  },
+  timestamp: date_format(date_now().timestamp, "%Y%m%dT%H%M%SZ"),
+})
+
+let response = harness.net.request("POST", url, {
+  body: body,
+  headers: signed.headers,
+})
+```
+
+`aws_sigv4_headers(...)` is intentionally not an AWS SDK. It exists so focused
+connector packages can sign a single AWS call when a product workflow needs
+one. Credentials must come from the caller or secret provider. `timestamp` is
+required to keep signing deterministic; pass a fixed value in tests or format
+the current time at the call site. Temporary credentials are supported via
+`session_token`, which emits and signs `X-Amz-Security-Token`. Errors name only
+invalid fields or signing rules and do not include access keys, secret access
+keys, session tokens, derived signing keys, canonical request bodies, or signed
+headers. Normal transcript and `http_mock_calls()` redaction treat
+`Authorization` and `X-Amz-Security-Token` as sensitive headers.
 
 Example (short-lived receipt or artifact link):
 
