@@ -3055,11 +3055,11 @@ export const harnProviderCatalog: HarnProviderCatalog = {
       ]
     },
     {
-      "id": "mistral-large-latest",
-      "name": "Mistral Large",
+      "id": "mistralai/mistral-large-2512",
+      "name": "Mistral Large 3 2512",
       "provider": "openrouter",
       "aliases": [],
-      "context_window": 128000,
+      "context_window": 262144,
       "modalities": {
         "input": [
           "text"
@@ -3092,9 +3092,9 @@ export const harnProviderCatalog: HarnProviderCatalog = {
       },
       "prompt_cache": false,
       "pricing": {
-        "input_per_mtok": 2.0,
-        "output_per_mtok": 6.0,
-        "cache_read_per_mtok": null,
+        "input_per_mtok": 0.5,
+        "output_per_mtok": 1.5,
+        "cache_read_per_mtok": 0.05,
         "cache_write_per_mtok": null
       },
       "deprecation": {
@@ -3107,11 +3107,11 @@ export const harnProviderCatalog: HarnProviderCatalog = {
       ]
     },
     {
-      "id": "mistral-small-latest",
-      "name": "Mistral Small",
+      "id": "mistralai/mistral-small-2603",
+      "name": "Mistral Small 4",
       "provider": "openrouter",
       "aliases": [],
-      "context_window": 128000,
+      "context_window": 262144,
       "modalities": {
         "input": [
           "text"
@@ -3144,9 +3144,9 @@ export const harnProviderCatalog: HarnProviderCatalog = {
       },
       "prompt_cache": false,
       "pricing": {
-        "input_per_mtok": 0.2,
+        "input_per_mtok": 0.15,
         "output_per_mtok": 0.6,
-        "cache_read_per_mtok": null,
+        "cache_read_per_mtok": 0.015,
         "cache_write_per_mtok": null
       },
       "deprecation": {
