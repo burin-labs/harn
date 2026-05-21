@@ -39,6 +39,22 @@ condensed series summaries instead of full per-patch history.
   warm from `make conformance`, so the ratchet runs in seconds instead of
   paying for a fresh `cargo run` compile on the lint critical path. The
   required `CI status` gate now waits on both `Rust lint` and `Rust test`.
+- **Pre-commit hook: scope clippy to changed packages.** Restores the
+  intent of 63b3ebdc — `make lint` was re-invoking
+  `cargo clippy --workspace --all-targets` on every Rust touch via the
+  pre-commit hook, even for a one-file edit inside a single crate. The
+  hook now runs `cargo clippy -p <pkg> -- -D warnings` for the staged
+  crate(s) only, with a workspace-scope fallback when `Cargo.toml`,
+  `Cargo.lock`, or the root `Makefile` change. Workspace `--all-targets`
+  clippy still runs in the `Rust lint` CI job and on ad-hoc `make lint`.
+- **Pre-commit hook: deduplicate the `lint-no-rust-prompt-prose` ratchet
+  step** when both the Rust pattern and the ratchet pattern match the
+  staged change set.
+- **Pre-push hook: batch per-package `cargo check` into one invocation.**
+  When multiple crates changed, the hook now runs
+  `cargo check -p A -p B ... --tests` once instead of looping
+  N invocations, so cargo only resolves the dep graph and re-evaluates
+  fingerprints once.
 
 ## v0.8.30
 

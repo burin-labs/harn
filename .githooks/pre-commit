@@ -7,9 +7,16 @@ hook_dir=$(dirname "$0")
 changed=$(mktemp)
 harn_format_files=$(mktemp)
 harn_lint_files=$(mktemp)
-trap 'rm -f "$changed" "$harn_format_files" "$harn_lint_files"' EXIT
+changed_packages=$(mktemp)
+trap 'rm -f "$changed" "$harn_format_files" "$harn_lint_files" "$changed_packages"' EXIT
 hook_write_staged_files "$changed"
 hook_disable_cargo_incremental_if_release_bump staged
+
+# Track whether the python prompt-prose ratchet has already run in this
+# hook, so the Rust and ratchet blocks don't pay for it twice when both
+# patterns match (the common case for a Rust crate edit that also
+# touches scripts/ or Makefile).
+prompt_prose_done=0
 
 if hook_paths_match "$changed" "$HOOK_RUST_PATTERN"; then
   echo "=== Pre-commit: formatting Rust ==="
@@ -56,8 +63,33 @@ fi
 hook_write_staged_files "$changed"
 
 if hook_paths_match "$changed" "$HOOK_RUST_PATTERN"; then
-  echo "=== Pre-commit: running clippy ==="
-  make lint
+  # Match the intent of 63b3ebdc: pre-commit lints the *library* surface
+  # of changed packages only — fast feedback for the dev loop. Workspace
+  # `--all-targets` clippy is still enforced by the `Rust lint` CI job
+  # and by `make lint` for ad-hoc local runs; pre-push catches
+  # test-target compile errors via `cargo check --tests`.
+  echo "=== Pre-commit: lint-no-rust-prompt-prose ==="
+  make lint-no-rust-prompt-prose
+  prompt_prose_done=1
+
+  hook_write_changed_cargo_packages "$changed" "$changed_packages"
+  if hook_paths_match "$changed" '(^Cargo\.toml$|^Cargo\.lock$|^Makefile$)'; then
+    echo "=== Pre-commit: running clippy on full workspace (workspace-scope change) ==="
+    cargo clippy --workspace -- -D warnings
+  elif [ -s "$changed_packages" ]; then
+    package_flags=""
+    while IFS= read -r package; do
+      package_flags="$package_flags -p $package"
+    done < "$changed_packages"
+    # shellcheck disable=SC2086  # intentional word splitting on -p flags
+    echo "=== Pre-commit: running clippy on changed packages ($(tr '\n' ' ' < "$changed_packages")) ==="
+    cargo clippy $package_flags -- -D warnings
+  else
+    # `.rs` outside any `crates/` package (eg. top-level build script) —
+    # fall back to a workspace check rather than skip silently.
+    echo "=== Pre-commit: running clippy on full workspace (no crate package matched) ==="
+    cargo clippy --workspace -- -D warnings
+  fi
   echo "    Rust lint OK."
 else
   echo "=== Pre-commit: skipping clippy (no Rust/Cargo changes) ==="
@@ -65,7 +97,10 @@ fi
 
 if hook_paths_match "$changed" "$HOOK_RATCHET_PATTERN"; then
   echo "=== Pre-commit: checking CI ratchets ==="
-  make lint-no-rust-prompt-prose lint-no-xfail-regression
+  if [ "$prompt_prose_done" -eq 0 ]; then
+    make lint-no-rust-prompt-prose
+  fi
+  make lint-no-xfail-regression
   echo "    CI ratchets OK."
 else
   echo "=== Pre-commit: skipping CI ratchets (no protected paths changed) ==="
