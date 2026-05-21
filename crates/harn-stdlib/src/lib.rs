@@ -1059,6 +1059,9 @@ mod tests {
         for name in [
             "command_run",
             "command_output_tail",
+            "command_json",
+            "command_json_step",
+            "command_try",
             "command_step",
             "command_steps_append",
             "command_last_failed_step",

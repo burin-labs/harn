@@ -1,0 +1,114 @@
+import {
+  command_json,
+  command_json_step,
+  command_result_fail,
+  command_result_ok,
+  command_try,
+} from "std/command"
+
+fn json_runner(text) {
+  return { _spec, _options -> return command_result_ok(text) }
+}
+
+fn fail_runner(code, stderr) {
+  return { _spec, _options -> return command_result_fail(code, stderr) }
+}
+
+fn no_newline_echo(text) {
+  if platform() == "windows" {
+    return ["cmd", "/C", "echo|set /p=" + text]
+  }
+  return ["printf", text]
+}
+
+pipeline default() {
+  let direct = command_json(no_newline_echo("{\"direct\":true}"), {capture: {max_inline_bytes: 100}})
+  assert_eq(direct.direct, true)
+  let parsed = command_json(["fake-json"], {runner: json_runner("{\"name\":\"harn\",\"count\":2}")})
+  assert_eq(parsed.name, "harn")
+  assert_eq(parsed.count, 2)
+  let empty = command_json(["empty"], {runner: json_runner(""), allow_empty: true})
+  assert_eq(empty, nil)
+  let empty_record = command_json(["empty"], {runner: json_runner(""), result: "record"})
+  assert_eq(empty_record.ok, false)
+  assert_eq(empty_record.error.category, "empty_output")
+  assert_eq(empty_record.step.status, "empty_output")
+  let failed_record = command_json(["fail"], {runner: fail_runner(7, "denied"), result: "record"})
+  assert_eq(failed_record.ok, false)
+  assert_eq(failed_record.error.category, "command_failed")
+  assert_eq(failed_record.step.exit_code, 7)
+  assert(contains(failed_record.error.message, "denied"))
+  let malformed = command_json(["bad-json"], {runner: json_runner("{ nope"), result: "record"})
+  assert_eq(malformed.ok, false)
+  assert_eq(malformed.error.category, "invalid_json")
+  assert_eq(malformed.step.status, "invalid_json")
+  assert(contains(malformed.error.message, "invalid JSON"))
+  let thrown = try {
+    command_json(["bad-json"], {runner: json_runner("{ nope")})
+  }
+  assert_eq(is_err(thrown), true)
+  assert(contains(to_string(unwrap_err(thrown)), "invalid JSON"))
+  let step = command_json_step(
+    "structured probe",
+    ["fake-step"],
+    {
+      runner: json_runner("{\"ok\":true,\"items\":[1,2,3]}"),
+      classify: { command_step ->
+        if command_step.exit_code == 0 {
+          return {kind: "clean"}
+        }
+        return nil
+      },
+    },
+  )
+  assert_eq(step.name, "structured probe")
+  assert_eq(step.ok, true)
+  assert_eq(step.json.ok, true)
+  assert_eq(len(step.json.items), 3)
+  assert_eq(step.classification.kind, "clean")
+  let fallback = command_try(
+    [
+      {source: "connector", run: fn() { return nil }},
+      {source: "cli", run: fn() { return {items: [1, 2]} }},
+    ],
+    {normalize: { value, source -> return {source: source, count: len(value.items)} }},
+  )
+  assert_eq(fallback.ok, true)
+  assert_eq(fallback.source, "cli")
+  assert_eq(fallback.fallback_index, 1)
+  assert_eq(fallback.fallback_total, 2)
+  assert_eq(len(fallback.attempts), 2)
+  assert_eq(fallback.attempts[0].status, "nil_result")
+  assert_eq(fallback.value.source, "cli")
+  assert_eq(fallback.value.count, 2)
+  let spec_fallback = command_try(
+    [
+      {
+        source: "cli-spec",
+        spec: ["fake-cli"],
+        options: {runner: json_runner("{\"ok\":false,\"payload\":42}")},
+      },
+    ],
+  )
+  assert_eq(spec_fallback.ok, true)
+  assert_eq(spec_fallback.value.ok, false)
+  assert_eq(spec_fallback.value.payload, 42)
+  let exhausted = command_try(
+    [
+      {source: "a", run: fn() { return {ok: false, status: "missing", error: {category: "missing"}} }},
+      {
+        source: "b",
+        run: fn() {
+          throw "boom"
+        },
+      },
+    ],
+  )
+  assert_eq(exhausted.ok, false)
+  assert_eq(exhausted.fallback_total, 2)
+  assert_eq(len(exhausted.attempts), 2)
+  assert_eq(exhausted.attempts[0].error.category, "missing")
+  assert_eq(exhausted.attempts[1].status, "exception")
+  assert(contains(exhausted.error.message, "boom"))
+  __io_println("ok")
+}

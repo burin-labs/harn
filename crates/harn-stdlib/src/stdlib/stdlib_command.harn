@@ -10,6 +10,10 @@ fn __command_is_callable(value) -> bool {
   return kind == "function" || kind == "closure" || kind == "fn"
 }
 
+fn __command_has_key(value, key) -> bool {
+  return type_of(value) == "dict" && contains(value.keys(), key)
+}
+
 fn __command_require_argv(argv) {
   if type_of(argv) != "list" || len(argv) == 0 {
     throw "command_run: argv must be a non-empty list"
@@ -734,6 +738,372 @@ pub fn command_failure_text(result, options = nil) -> string {
     lines = lines + ["output:", truncate_text(command_output_text(result), max_stdout)]
   }
   return join(lines, "\n")
+}
+
+fn __command_label(spec, fallback = "command") -> string {
+  let argv = __command_spec_field(spec, "argv")
+  if argv != nil {
+    return argv_label(argv)
+  }
+  let command = __command_spec_field(spec, "command")
+  if command != nil {
+    return to_string(command)
+  }
+  return fallback
+}
+
+fn __command_json_stream(options) -> string {
+  let opts = __command_options(options)
+  let stream = opts?.stream ?? opts?.source ?? opts?.output ?? "stdout"
+  if stream == "stdout" || stream == "stderr" || stream == "combined"
+    || stream == "tail"
+    || stream == "failure_tail" {
+    return stream
+  }
+  throw "command_json: unsupported output stream " + to_string(stream)
+}
+
+fn __command_json_error(category, label, message, step, extra = nil) {
+  let base = extra ?? {}
+  return base
+    + {
+    category: category,
+    label: label,
+    message: message,
+    status: step?.status,
+    exit_code: step?.exit_code,
+    stderr: step?.stderr,
+    tail: step?.failure_tail ?? step?.tail,
+  }
+}
+
+fn __command_json_failure_error(label, step) {
+  var message = label
+    + " failed (status="
+    + to_string(step?.status ?? "failed")
+    + " exit="
+    + to_string(step?.exit_code ?? "unknown")
+    + ")"
+  let detail = trim(step?.stderr ?? step?.failure_tail ?? step?.tail ?? "")
+  if detail != "" {
+    message = message + ": " + detail
+  }
+  return __command_json_error("command_failed", label, message, step)
+}
+
+fn __command_json_empty_error(label, stream, step) {
+  return __command_json_error(
+    "empty_output",
+    label,
+    label + " produced empty " + stream + " output",
+    step,
+    {source: stream},
+  )
+}
+
+fn __command_json_parse_error(label, stream, text, parsed, step, options) {
+  let opts = __command_options(options)
+  let reason = to_string(unwrap_err(parsed))
+  return __command_json_error(
+    "invalid_json",
+    label,
+    label + " produced invalid JSON on " + stream + ": " + reason,
+    step,
+    {source: stream, reason: reason, text_tail: truncate_text(text, opts?.parse_error_chars ?? 1000)},
+  )
+}
+
+fn __command_json_annotate_step(step, spec, options) {
+  let opts = __command_options(options)
+  let label = to_string(opts?.label ?? step?.name ?? __command_label(spec))
+  if !(step?.success ?? step?.ok ?? false) {
+    let error = __command_json_failure_error(label, step)
+    return step + {json: nil, error: error}
+  }
+  let stream = __command_json_stream(opts)
+  let text = trim(command_output_text(step, stream))
+  if text == "" {
+    if opts?.allow_empty ?? false {
+      return step + {json: nil}
+    }
+    let error = __command_json_empty_error(label, stream, step)
+    return step + {success: false, ok: false, status: "empty_output", json: nil, error: error}
+  }
+  let parsed = try {
+    json_parse(text)
+  }
+  if is_ok(parsed) {
+    return step + {json: unwrap(parsed)}
+  }
+  let error = __command_json_parse_error(label, stream, text, parsed, step, opts)
+  return step
+    + {success: false, ok: false, status: "invalid_json", json: nil, parse_error: error, error: error}
+}
+
+fn __command_json_record(step) {
+  if step?.ok ?? false {
+    return {ok: true, value: step?.json, json: step?.json, step: step}
+  }
+  return {
+    ok: false,
+    error: step?.error ?? step?.parse_error ?? __command_json_failure_error(step?.name ?? "command", step),
+    step: step,
+  }
+}
+
+fn __command_json_throw(step) {
+  let error = step?.error ?? step?.parse_error
+  throw error?.message ?? to_string(error ?? "command_json failed")
+}
+
+fn __command_json_uses_step(options) -> bool {
+  let opts = __command_options(options)
+  return opts?.step_name != nil
+    || opts?.name != nil
+    || opts?.retry != nil
+    || opts?.classify != nil
+    || opts?.recovery_hint != nil
+    || opts?.runner != nil
+}
+
+/**
+ * command_json_step runs one named command step and parses the selected output as JSON.
+ *
+ * @effects: []
+ * @allocation: heap
+ * @errors: []
+ * @api_stability: stable
+ * @example: command_json_step("gh repo", ["gh", "api", "repos/owner/repo"])
+ */
+pub fn command_json_step(name: string, spec, options = nil) -> dict {
+  let step = command_step(name, spec, options)
+  return __command_json_annotate_step(step, spec, options)
+}
+
+/**
+ * command_json runs a command and returns parsed JSON from stdout by default.
+ *
+ * @effects: [process]
+ * @allocation: heap
+ * @errors: [command_failed, empty_output, invalid_json]
+ * @api_stability: stable
+ * @example: command_json(["gh", "api", "repos/owner/repo"])
+ */
+pub fn command_json(spec, options = nil) {
+  let opts = __command_options(options)
+  let result_mode = opts?.result ?? "throw"
+  if result_mode != "throw" && result_mode != "record" {
+    throw "command_json: result must be \"throw\" or \"record\""
+  }
+  var step = nil
+  if __command_json_uses_step(opts) {
+    let name = to_string(opts?.step_name ?? opts?.name ?? __command_label(spec))
+    step = command_json_step(name, spec, opts)
+  } else {
+    let result = command_run(spec, __command_run_options(opts))
+    step = __command_json_annotate_step(
+      __command_step_from_result(__command_label(spec), spec, result, opts, []),
+      spec,
+      opts,
+    )
+  }
+  if result_mode == "record" {
+    return __command_json_record(step)
+  }
+  if step?.ok ?? false {
+    return step?.json
+  }
+  __command_json_throw(step)
+}
+
+fn __command_try_source(attempt, index) -> string {
+  if type_of(attempt) == "dict" {
+    if attempt?.source != nil {
+      return to_string(attempt.source)
+    }
+    if attempt?.name != nil {
+      return to_string(attempt.name)
+    }
+    if attempt?.spec != nil {
+      return __command_label(attempt.spec, "attempt-" + to_string(index))
+    }
+    return __command_label(attempt, "attempt-" + to_string(index))
+  }
+  if type_of(attempt) == "list" {
+    return argv_label(attempt)
+  }
+  return "attempt-" + to_string(index)
+}
+
+fn __command_try_command_options(attempt, options) {
+  let opts = __command_options(options)
+  let base = opts?.command_options ?? {}
+  if type_of(attempt) == "dict" {
+    let extra = attempt?.options ?? {}
+    return base + extra
+  }
+  return base
+}
+
+fn __command_try_raw(attempt, options) {
+  if __command_is_callable(attempt) {
+    return attempt()
+  }
+  if type_of(attempt) == "list" {
+    return {ok: true, value: command_json(attempt, __command_try_command_options(attempt, options))}
+  }
+  if type_of(attempt) != "dict" {
+    throw "command_try: attempt must be callable, command spec, or attempt dict"
+  }
+  if attempt?.run != nil {
+    if !__command_is_callable(attempt.run) {
+      throw "command_try: attempt.run must be callable"
+    }
+    return attempt.run()
+  }
+  if attempt?.spec != nil {
+    return {ok: true, value: command_json(attempt.spec, __command_try_command_options(attempt, options))}
+  }
+  if attempt?.argv != nil || attempt?.command != nil {
+    return {ok: true, value: command_json(attempt, __command_try_command_options(attempt, options))}
+  }
+  throw "command_try: attempt dict must contain run, spec, argv, or command"
+}
+
+fn __command_try_value(raw, source) {
+  if raw == nil {
+    return {
+      ok: false,
+      status: "nil_result",
+      error: {category: "nil_result", source: source, message: source + " returned nil"},
+    }
+  }
+  if type_of(raw) == "dict" && raw?.ok != nil {
+    if raw.ok {
+      if __command_has_key(raw, "value") {
+        return {ok: true, value: raw.value}
+      }
+      if __command_has_key(raw, "json") {
+        return {ok: true, value: raw.json}
+      }
+      return {ok: true, value: raw}
+    }
+    return {ok: false, status: raw?.status ?? "failed", error: raw?.error ?? raw}
+  }
+  return {ok: true, value: raw}
+}
+
+fn __command_try_normalize(value, source, attempt, options) {
+  let opts = __command_options(options)
+  let normalizer = if type_of(attempt) == "dict" && attempt?.normalize != nil {
+    attempt.normalize
+  } else {
+    opts?.normalize
+  }
+  if normalizer == nil {
+    return value
+  }
+  if !__command_is_callable(normalizer) {
+    throw "command_try: normalize must be callable"
+  }
+  return normalizer(value, source)
+}
+
+fn __command_try_attempt(attempt, index, total, options) {
+  let source = __command_try_source(attempt, index)
+  let raw_result = try {
+    __command_try_raw(attempt, options)
+  }
+  if is_err(raw_result) {
+    let reason = to_string(unwrap_err(raw_result))
+    return {
+      ok: false,
+      source: source,
+      fallback_index: index,
+      fallback_total: total,
+      status: "exception",
+      error: {category: "exception", source: source, message: reason},
+    }
+  }
+  let envelope = __command_try_value(unwrap(raw_result), source)
+  if !(envelope?.ok ?? false) {
+    return {
+      ok: false,
+      source: source,
+      fallback_index: index,
+      fallback_total: total,
+      status: envelope?.status ?? "failed",
+      error: envelope?.error,
+    }
+  }
+  let normalized = try {
+    __command_try_normalize(envelope?.value, source, attempt, options)
+  }
+  if is_err(normalized) {
+    let reason = to_string(unwrap_err(normalized))
+    return {
+      ok: false,
+      source: source,
+      fallback_index: index,
+      fallback_total: total,
+      status: "normalize_failed",
+      error: {category: "normalize_failed", source: source, message: reason},
+    }
+  }
+  return {ok: true, source: source, fallback_index: index, fallback_total: total, value: unwrap(normalized)}
+}
+
+fn __command_try_attempt_record(attempt) {
+  return {
+    ok: attempt?.ok ?? false,
+    source: attempt?.source,
+    fallback_index: attempt?.fallback_index,
+    fallback_total: attempt?.fallback_total,
+    status: attempt?.status,
+    error: attempt?.error,
+  }
+}
+
+/**
+ * command_try runs ordered equivalent probes until one returns an ok value.
+ *
+ * @effects: []
+ * @allocation: heap
+ * @errors: []
+ * @api_stability: stable
+ * @example: command_try([{source: "cli", spec: ["tool", "--json"]}])
+ */
+pub fn command_try(attempts, options = nil) -> dict {
+  if type_of(attempts) != "list" {
+    throw "command_try: attempts must be a list"
+  }
+  let total = len(attempts)
+  var records = []
+  var last = nil
+  var index = 0
+  while index < total {
+    let attempt = __command_try_attempt(attempts[index], index, total, options)
+    records = records + [__command_try_attempt_record(attempt)]
+    last = attempt
+    if attempt.ok {
+      return {
+        ok: true,
+        source: attempt.source,
+        value: attempt.value,
+        attempts: records,
+        fallback_index: index,
+        fallback_total: total,
+      }
+    }
+    index += 1
+  }
+  return {
+    ok: false,
+    attempts: records,
+    fallback_total: total,
+    status: last?.status ?? "no_attempts",
+    error: last?.error ?? {category: "no_attempts", message: "command_try: no attempts supplied"},
+  }
 }
 
 /**
