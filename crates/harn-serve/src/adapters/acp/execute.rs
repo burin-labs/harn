@@ -117,6 +117,7 @@ pub(super) async fn execute_chunk(
         vm
     };
 
+    vm.set_harness(harn_vm::Harness::real());
     vm.set_global("prompt", harn_vm::VmValue::String(Rc::from(prompt.text)));
     vm.set_global(
         "prompt_content",
