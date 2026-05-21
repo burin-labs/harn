@@ -22,7 +22,7 @@ mod transport;
 
 use std::rc::Rc;
 
-use crate::value::{VmError, VmValue};
+use crate::value::{ErrorCategory, VmError, VmValue};
 
 use super::mock::{
     fixture_hash, get_replay_mode, load_fixture, mock_llm_response, record_cli_llm_result,
@@ -68,6 +68,56 @@ pub(crate) use thinking::{split_openai_thinking_blocks, ThinkingStreamSplitter};
 pub(crate) use transport::vm_call_llm_api_with_body;
 
 use transport::vm_call_llm_api;
+
+#[derive(Debug, Clone)]
+struct OffthreadLlmError {
+    message: String,
+    category: Option<ErrorCategory>,
+}
+
+impl OffthreadLlmError {
+    fn from_vm_error(err: VmError) -> Self {
+        match err {
+            VmError::CategorizedError { message, category } => Self {
+                message,
+                category: Some(category),
+            },
+            VmError::Thrown(VmValue::String(message)) => {
+                Self::from_display_message(message.to_string())
+            }
+            other => Self::from_display_message(other.to_string()),
+        }
+    }
+
+    fn from_display_message(message: String) -> Self {
+        if let Some((category, stripped)) = parse_displayed_categorized_error(&message) {
+            return Self {
+                message: stripped.to_string(),
+                category: Some(category),
+            };
+        }
+        Self {
+            message,
+            category: None,
+        }
+    }
+
+    fn into_vm_error(self) -> VmError {
+        match self.category {
+            Some(category) => VmError::CategorizedError {
+                message: self.message,
+                category,
+            },
+            None => VmError::Thrown(VmValue::String(Rc::from(self.message))),
+        }
+    }
+}
+
+fn parse_displayed_categorized_error(message: &str) -> Option<(ErrorCategory, &str)> {
+    let body = message.strip_prefix("Error [")?;
+    let (category, rest) = body.split_once("]: ")?;
+    Some((ErrorCategory::parse(category), rest))
+}
 
 /// Execute an LLM call. Always goes through the streaming path with a
 /// discarding receiver so all callers share one code path for status/error
@@ -134,7 +184,7 @@ pub(crate) async fn vm_call_llm_full_streaming_offthread(
             "llm_call background task failed: {join_err}"
         ))))
     })?
-    .map_err(|message| VmError::Thrown(VmValue::String(Rc::from(message))))?;
+    .map_err(OffthreadLlmError::into_vm_error)?;
     super::cost::record_llm_usage_for_provider(
         &result.provider,
         &result.model,
@@ -217,16 +267,12 @@ async fn vm_call_llm_full_inner_request(
     super::ensure_real_llm_allowed(&request.provider)?;
     request.emit_reminder_lifecycle();
 
-    let result = vm_call_llm_api(request, delta_tx).await;
-
-    // Surface the error as a String so it can cross the off-thread await.
-    let primary_message = result.as_ref().err().map(ToString::to_string);
-    let result = match (result, primary_message) {
-        (Ok(r), _) => r,
-        (Err(_), Some(message)) => try_fallback_provider(request, message)
-            .await
-            .map_err(|msg| VmError::Thrown(VmValue::String(Rc::from(msg))))?,
-        (Err(_), None) => unreachable!("error branch must capture a message"),
+    let result = match vm_call_llm_api(request, delta_tx).await {
+        Ok(result) => result,
+        Err(primary_error) => match try_fallback_provider(request).await {
+            Some(result) => result,
+            None => return Err(primary_error),
+        },
     };
 
     if replay_mode == LlmReplayMode::Record {
@@ -241,7 +287,7 @@ async fn vm_call_llm_full_inner_request(
 async fn vm_call_llm_full_inner_offthread(
     request: &LlmRequestPayload,
     delta_tx: Option<DeltaSender>,
-) -> Result<LlmResult, String> {
+) -> Result<LlmResult, OffthreadLlmError> {
     if let Some(result) = super::trigger_predicate::lookup_cached_result(request) {
         record_cli_llm_result(&result);
         return Ok(result);
@@ -257,7 +303,7 @@ async fn vm_call_llm_full_inner_offthread(
             &request.model,
             request.cache,
         )
-        .map_err(|e| e.to_string())?;
+        .map_err(OffthreadLlmError::from_vm_error)?;
         super::trigger_predicate::note_result(request, &result);
         record_cli_llm_result(&result);
         return Ok(result);
@@ -267,7 +313,7 @@ async fn vm_call_llm_full_inner_offthread(
         let result = crate::llm::fake::FakeLlmProvider
             .chat_impl(request, delta_tx)
             .await
-            .map_err(|e| e.to_string())?;
+            .map_err(OffthreadLlmError::from_vm_error)?;
         super::trigger_predicate::note_result(request, &result);
         record_cli_llm_result(&result);
         return Ok(result);
@@ -282,18 +328,29 @@ async fn vm_call_llm_full_inner_offthread(
                 super::trigger_predicate::note_result(request, result);
             })
             .ok_or_else(|| {
-                format!("No fixture found for LLM call (hash: {hash}). Run with --record first.")
+                OffthreadLlmError::from_display_message(format!(
+                    "No fixture found for LLM call (hash: {hash}). Run with --record first."
+                ))
             });
     }
 
-    super::ensure_real_llm_allowed(&request.provider).map_err(|err| err.to_string())?;
+    super::ensure_real_llm_allowed(&request.provider).map_err(OffthreadLlmError::from_vm_error)?;
 
-    let result = vm_call_llm_api(request, delta_tx)
-        .await
-        .map_err(|err| err.to_string());
-    let result = match result {
-        Ok(result) => result,
-        Err(message) => try_fallback_provider(request, message).await?,
+    let primary_error = match vm_call_llm_api(request, delta_tx).await {
+        Ok(result) => {
+            if replay_mode == LlmReplayMode::Record {
+                save_fixture(&hash, &result);
+            }
+            super::trigger_predicate::note_result(request, &result);
+            record_cli_llm_result(&result);
+            return Ok(result);
+        }
+        Err(primary_error) => OffthreadLlmError::from_vm_error(primary_error),
+    };
+
+    let result = match try_fallback_provider(request).await {
+        Some(result) => result,
+        None => return Err(primary_error),
     };
 
     if replay_mode == LlmReplayMode::Record {
@@ -305,13 +362,8 @@ async fn vm_call_llm_full_inner_offthread(
     Ok(result)
 }
 
-/// Attempt the request on the configured fallback provider.  Returns the
-/// original `primary_message` as the error if no fallback is available or
-/// the fallback also fails.
-async fn try_fallback_provider(
-    request: &LlmRequestPayload,
-    primary_message: String,
-) -> Result<LlmResult, String> {
+/// Attempt the request on the configured fallback provider.
+async fn try_fallback_provider(request: &LlmRequestPayload) -> Option<LlmResult> {
     for route in &request.route_fallbacks {
         if route.provider == request.provider && route.model == request.model {
             continue;
@@ -328,7 +380,7 @@ async fn try_fallback_provider(
             continue;
         }
         if let Ok(result) = vm_call_llm_api(&fb_request, None).await {
-            return Ok(result);
+            return Some(result);
         }
     }
 
@@ -348,7 +400,7 @@ async fn try_fallback_provider(
         }
     }
     if fallback_providers.is_empty() {
-        return Err(primary_message);
+        return None;
     }
 
     for fallback_provider in fallback_providers {
@@ -363,11 +415,11 @@ async fn try_fallback_provider(
             continue;
         }
         if let Ok(result) = vm_call_llm_api(&fb_request, None).await {
-            return Ok(result);
+            return Some(result);
         }
     }
 
-    Err(primary_message)
+    None
 }
 
 #[cfg(test)]
@@ -542,6 +594,26 @@ mod tests {
         let message = err.to_string();
         assert!(message.contains("HARN_LLM_CALLS_DISABLED"), "{message}");
         assert!(message.contains("provider `local`"), "{message}");
+    }
+
+    #[test]
+    fn offthread_error_preserves_schema_stream_abort_category() {
+        let abort = super::SchemaStreamAbort {
+            provider: "openrouter".to_string(),
+            model: "mistralai/devstral-small".to_string(),
+            reason: "expected JSON value, got '`'".to_string(),
+            path: "$".to_string(),
+            chunks_consumed: 1,
+        };
+
+        let err = super::OffthreadLlmError::from_vm_error(abort.into_vm_error()).into_vm_error();
+        let parsed = super::parse_schema_stream_abort(&err)
+            .expect("schema stream abort must survive off-thread conversion");
+
+        assert_eq!(parsed.provider, "openrouter");
+        assert_eq!(parsed.model, "mistralai/devstral-small");
+        assert_eq!(parsed.path, "$");
+        assert_eq!(parsed.chunks_consumed, 1);
     }
 
     #[test]

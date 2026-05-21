@@ -300,6 +300,11 @@ async fn vm_call_llm_api_with_body_inner(
             }
         }
     }
+    if provider == "openrouter"
+        && (body.get("response_format").is_some() || body.get("top_k").is_some())
+    {
+        crate::llm::providers::openai_compat::ensure_openrouter_require_parameters(&mut body);
+    }
 
     if let Some(messages) = body.get("messages").and_then(|value| value.as_array()) {
         debug_log_message_shapes(

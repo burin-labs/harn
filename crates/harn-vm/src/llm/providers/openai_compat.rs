@@ -150,6 +150,9 @@ impl OpenAiCompatibleProvider {
         if let Some(top_p) = opts.top_p {
             body["top_p"] = serde_json::json!(top_p);
         }
+        if let Some(top_k) = opts.top_k.filter(|_| caps.top_k_supported) {
+            body["top_k"] = serde_json::json!(top_k);
+        }
         if opts.logprobs {
             body["logprobs"] = serde_json::json!(true);
             if let Some(top_logprobs) = opts.top_logprobs.filter(|value| *value > 0) {
@@ -205,6 +208,11 @@ impl OpenAiCompatibleProvider {
                 });
             }
         }
+        if opts.provider == "openrouter"
+            && (body.get("response_format").is_some() || body.get("top_k").is_some())
+        {
+            ensure_openrouter_require_parameters(&mut body);
+        }
         if let Some(ref tools) = opts.native_tools {
             if !tools.is_empty() {
                 body["tools"] = serde_json::json!(tools);
@@ -251,6 +259,20 @@ impl OpenAiCompatibleProvider {
             false, // is_ollama
         )
         .await
+    }
+}
+
+pub(crate) fn ensure_openrouter_require_parameters(body: &mut serde_json::Value) {
+    match body.get_mut("provider") {
+        Some(serde_json::Value::Object(provider)) => {
+            provider
+                .entry("require_parameters".to_string())
+                .or_insert_with(|| serde_json::json!(true));
+        }
+        Some(_) => {}
+        None => {
+            body["provider"] = serde_json::json!({"require_parameters": true});
+        }
     }
 }
 
@@ -667,6 +689,53 @@ thinking_modes = ["enabled"]
             body["response_format"]["json_schema"]["strict"],
             serde_json::json!(false)
         );
+    }
+
+    #[test]
+    fn openrouter_structured_output_requires_supported_parameters() {
+        let mut payload = base_request_payload();
+        payload.output_format = crate::llm::api::OutputFormat::JsonSchema {
+            schema: serde_json::json!({
+                "type": "object",
+                "properties": {"answer": {"type": "string"}},
+                "required": ["answer"],
+            }),
+            strict: true,
+        };
+
+        let body = OpenAiCompatibleProvider::build_request_body(&payload, false);
+
+        assert_eq!(body["provider"]["require_parameters"], true);
+    }
+
+    #[test]
+    fn openrouter_require_parameters_preserves_provider_preferences() {
+        let mut body = serde_json::json!({
+            "model": "google/gemma-4-26b-a4b-it",
+            "messages": [],
+            "response_format": {"type": "json_schema"},
+            "provider": {"order": ["Fireworks"], "sort": "throughput"},
+        });
+
+        ensure_openrouter_require_parameters(&mut body);
+
+        assert_eq!(body["provider"]["order"][0], "Fireworks");
+        assert_eq!(body["provider"]["sort"], "throughput");
+        assert_eq!(body["provider"]["require_parameters"], true);
+    }
+
+    #[test]
+    fn openrouter_emits_top_k_only_when_capability_allows() {
+        let mut payload = base_request_payload();
+        payload.model = "google/gemma-4-26b-a4b-it".to_string();
+        payload.top_k = Some(64);
+        let body = OpenAiCompatibleProvider::build_request_body(&payload, false);
+        assert_eq!(body["top_k"].as_i64(), Some(64));
+        assert_eq!(body["provider"]["require_parameters"], true);
+
+        payload.model = "mistralai/devstral-small".to_string();
+        let body = OpenAiCompatibleProvider::build_request_body(&payload, false);
+        assert!(body.get("top_k").is_none());
     }
 
     fn base_request_payload() -> LlmRequestPayload {
