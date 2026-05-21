@@ -10,6 +10,17 @@ condensed series summaries instead of full per-patch history.
 
 ### Added
 
+- **Command JSON helpers and ordered fallback probes (#2090).**
+  `std/command` now exposes `command_json(...)` and
+  `command_json_step(...)` for argv-first JSON-emitting CLIs. They reuse
+  the existing command runner, artifact-backed tails, retry policies,
+  classification, and recovery hints while turning non-zero exits, empty
+  output, and malformed JSON into debuggable thrown errors or
+  `{ok:false,error,step}` records. The new `command_try(...)` helper
+  covers the narrow connector-then-CLI style of equivalent probe fallback,
+  returning ordered attempt summaries plus `fallback_index` /
+  `fallback_total` without adding a provider framework or second retry
+  system.
 - **Connector-safe HTTP policy helpers (#2082).** `std/connectors/shared` now
   exposes `connector_http_request`, `connector_http_json`,
   `connector_http_header`, and `connector_http_rate_limit` so Harn package

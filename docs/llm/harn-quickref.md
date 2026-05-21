@@ -274,6 +274,42 @@ For interactive pickers, the same module exports
 auto-detects fzf then gum then falls back to a numbered `read_line`
 menu, and honors `mock_stdin` under `prefer_external: "none"`.
 
+## Command helpers (`std/command`)
+
+Use `std/command` for script-side harness commands. It runs through the same
+host command substrate as model-facing tools, but returns deterministic Harn
+records for retries, artifacts, tails, classification, and recovery hints.
+
+```harn,ignore
+import { command_json, command_json_step, command_try } from "std/command"
+
+let repo = command_json(["gh", "api", "repos/burin-labs/harn"], {
+  capture: {max_inline_bytes: 65536},
+})
+
+let step = command_json_step("repo metadata", ["gh", "api", "repos/burin-labs/harn"], {
+  retry: {max_attempts: 2, delay_ms: 0},
+})
+
+let fallback = command_try(
+  [
+    {source: "connector", run: fn() { return repos_get("burin-labs", "harn") }},
+    {source: "cli", run: fn() { return command_json(["gh", "api", "repos/burin-labs/harn"]) }},
+  ],
+  {normalize: { value, source -> return {source: source, name: value.name} }},
+)
+```
+
+- `command_json(spec, opts?)` parses stdout as JSON, returns `nil` for empty
+  output only with `allow_empty: true`, and supports `result: "record"` for
+  `{ok:false,error,step}` instead of throwing.
+- `command_json_step(name, spec, opts?)` preserves `command_step` retry,
+  classify, recovery, artifact, and attempt fields, then adds `json` or
+  `parse_error`.
+- `command_try(attempts, opts?)` is only for ordered equivalent probes. It adds
+  `fallback_index`, `fallback_total`, and per-attempt summaries; it is not a
+  retry system or provider framework.
+
 ## Time, sleep, monotonic clock
 
 - `now_ms()` — wall-clock millis since UNIX_EPOCH (`int`).

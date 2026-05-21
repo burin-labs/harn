@@ -224,6 +224,17 @@ should be exposed as model-facing tools inside an agent loop. Both layers share
 `hostlib_tools_run_command` and `hostlib_tools_read_command_output`, so command
 artifacts, IDs, output paths, and range readers behave the same.
 
+For JSON-emitting CLIs, keep parsing in the script-side command layer instead
+of open-coding process execution plus `json_parse`:
+
+```harn,ignore
+import { command_json } from "std/command"
+
+let repo = command_json(["gh", "api", "repos/burin-labs/harn"], {
+  capture: {max_inline_bytes: 65536},
+})
+```
+
 The helpers are deliberately configurable so harness authors can keep their
 script surface product-specific without duplicating implementation details:
 

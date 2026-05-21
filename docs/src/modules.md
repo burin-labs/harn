@@ -842,6 +842,9 @@ compact recovery context:
 | Function | Description |
 |---|---|
 | `command_run(spec, options?)` | Run an argv-first command through `hostlib_tools_run_command` and return normalized success, status, output, artifact, and timing fields |
+| `command_json(spec, options?)` | Run a JSON-emitting command and parse stdout by default; use `allow_empty: true` for probe-style nil output or `result: "record"` for structured failures |
+| `command_json_step(name, spec, options?)` | Run a normal command step, preserving retry/classify/recovery hooks, and add `json` on success or `parse_error`/`error` on malformed output |
+| `command_try(attempts, options?)` | Try ordered equivalent probes until one returns an ok value, recording `attempts`, `fallback_index`, and `fallback_total` |
 | `command_output_range(locator, options?)` | Range-read a command output artifact by command result, `command_id`, `handle_id`, or artifact path |
 | `command_output_tail(locator, options?)` | Read the last bytes of a command output artifact without calculating offsets |
 | `command_step(name, spec, options?)` | Run one named command and return a normalized step record with artifacts, tail text, optional classification, optional recovery hint, and attempts |
@@ -891,6 +894,40 @@ let step = command_step("verify package", ["cargo", "test", "-p", "harn-vm"], {
     return nil
   },
 })
+```
+
+Use `command_json` when the command's stdout is expected to be one JSON
+document. Non-zero exits, empty output, and malformed JSON throw by default; set
+`result: "record"` to receive `{ok:false,error,step}` instead. The JSON layer
+delegates retries and recovery metadata to `command_json_step`:
+
+```harn,ignore
+import { command_json, command_json_step } from "std/command"
+
+let repo = command_json(["gh", "api", "repos/burin-labs/harn"], {
+  timeout_ms: 10000,
+  capture: {max_inline_bytes: 65536},
+})
+
+let probe = command_json_step("read repo metadata", ["gh", "api", "repos/burin-labs/harn"], {
+  retry: {max_attempts: 2, delay_ms: 0},
+})
+```
+
+Use `command_try` only for ordered equivalent probes, such as a structured
+connector followed by a CLI JSON fallback. It does not retry, route workflows, or
+know about providers:
+
+```harn,ignore
+import { command_json, command_try } from "std/command"
+
+let repo = command_try(
+  [
+    {source: "connector", run: fn() { return repos_get("burin-labs", "harn") }},
+    {source: "cli", run: fn() { return command_json(["gh", "api", "repos/burin-labs/harn"]) }},
+  ],
+  {normalize: { value, source -> return {source: source, name: value.name} }},
+)
 ```
 
 ### std/gha
