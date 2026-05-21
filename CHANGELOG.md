@@ -6,6 +6,16 @@ Pre-0.6 highlights live in [CHANGELOG-pre-0.6.md](CHANGELOG-pre-0.6.md).
 Harn had no external users before 0.6.0, so that archive intentionally keeps
 condensed series summaries instead of full per-patch history.
 
+## v0.8.30
+
+### Fixed
+
+- **ACP pipeline VMs now install the `harness` capability handle (#2118).**
+  File-backed ACP sessions now match `harn run`/`harn test` by installing a fresh
+  `harness` global before each prompt execution, so stdlib helpers such as
+  `std/config::env_int` and migrated pipeline code that calls
+  `harness.stdio.*` work under embedded Burin lightweight pipelines.
+
 ## v0.8.29
 
 ### Fixed

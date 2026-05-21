@@ -640,6 +640,49 @@ async fn acp_session_close_cancels_pending_host_bridge_call() {
 }
 
 #[tokio::test(flavor = "current_thread")]
+async fn acp_file_backed_pipeline_installs_harness_global() {
+    let local = tokio::task::LocalSet::new();
+    local
+        .run_until(async {
+            let dir = tempfile::tempdir().expect("tempdir");
+            let pipeline_path = dir.path().join("harness.harn");
+            std::fs::write(
+                &pipeline_path,
+                r#"
+import { env_int } from "std/config"
+
+pipeline default(task) {
+  __io_println(env_int("HARN_ACP_HARNESS_REGRESSION_UNSET", 7))
+  harness.stdio.println("via-harness")
+}"#,
+            )
+            .expect("write pipeline");
+
+            let (request_tx, mut response_rx, server, session_id) =
+                start_acp_code_session_with_config(
+                    AcpServerConfig::for_pipeline(pipeline_path.to_string_lossy().to_string()),
+                    serde_json::json!(dir.path()),
+                )
+                .await;
+
+            let output = run_prompt_with_project_capability(
+                &request_tx,
+                &mut response_rx,
+                &session_id,
+                3,
+                "hello",
+                false,
+            )
+            .await;
+            assert_eq!(output, "7\nvia-harness\n");
+
+            drop(request_tx);
+            server.await.expect("ACP channel server task");
+        })
+        .await;
+}
+
+#[tokio::test(flavor = "current_thread")]
 async fn acp_file_backed_vm_baseline_keeps_prompt_turns_isolated() {
     let local = tokio::task::LocalSet::new();
     local
