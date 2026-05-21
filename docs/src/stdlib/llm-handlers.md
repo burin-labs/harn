@@ -404,6 +404,7 @@ Layering (low → high):
 | Function | Signature | Description |
 |---|---|---|
 | `pack_for(opts)` | `(dict) -> dict` | Required: `opts.model`. Optional: `provider`, `task ∈ {"chat","agent","refine","judge","summarize","code","json"}` (default `"chat"`), `thinking ∈ {"off","low","medium","high","auto"}` (default `"auto"`), `effort ∈ {"fast","balanced","quality","auto"}` (default `"balanced"`), plus any other `llm_call` keys. |
+| `llm_apply_reasoning_policy(opts)` | `(dict) -> dict` | Applies Harn's provider-aware `reasoning_policy` / `thinking_policy` abstraction to an option dict. Used by `agent_loop`; direct callers can use it before `llm_call` when they want the same calibration. Explicit `thinking` and `reasoning_effort` win. |
 | `pack_chat(model, opts?)` | `(string, dict?) -> dict` | Convenience wrapper for `task: "chat"`. |
 | `pack_agent(model, opts?)` | `(string, dict?) -> dict` | `task: "agent"`. |
 | `pack_refine(model, opts?)` | `(string, dict?) -> dict` | `task: "refine"`. |

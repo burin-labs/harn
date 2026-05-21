@@ -1278,6 +1278,17 @@ pub(crate) fn extract_llm_options(
         });
     let output_validation = opt_str(&options, "output_validation");
 
+    let reasoning_policy_application = crate::llm::reasoning_policy::resolve_for_llm_call(
+        options.as_ref(),
+        &provider,
+        &model,
+        &caps,
+    )?;
+    let thinking_from_reasoning_policy = reasoning_policy_application.is_some();
+    let policy_thinking = reasoning_policy_application
+        .as_ref()
+        .map(|application| application.thinking.clone());
+
     let reasoning_effort = parse_reasoning_effort_option(options.as_ref())?;
     let thinking_from_reasoning_effort = reasoning_effort.is_some()
         && !options
@@ -1295,6 +1306,8 @@ pub(crate) fn extract_llm_options(
             ));
         }
         crate::llm::api::ThinkingConfig::Effort { level }
+    } else if let Some(thinking) = policy_thinking {
+        thinking
     } else {
         parse_thinking_option(options.as_ref())?
     };
@@ -1322,6 +1335,8 @@ pub(crate) fn extract_llm_options(
             &caps.thinking_modes,
             if thinking_from_reasoning_effort {
                 "reasoning_effort"
+            } else if thinking_from_reasoning_policy {
+                "reasoning_policy"
             } else {
                 "thinking"
             },
@@ -2886,6 +2901,110 @@ mod routing_tests {
                 level: crate::llm::api::ReasoningEffort::Minimal
             }
         );
+    }
+
+    #[test]
+    fn reasoning_policy_maps_to_provider_aware_thinking_when_explicit() {
+        let options = BTreeMap::from([
+            (
+                "provider".to_string(),
+                VmValue::String(Rc::from("mock".to_string())),
+            ),
+            (
+                "model".to_string(),
+                VmValue::String(Rc::from("gpt-5.5".to_string())),
+            ),
+            (
+                "reasoning_policy".to_string(),
+                VmValue::String(Rc::from("off".to_string())),
+            ),
+        ]);
+
+        let opts = extract_llm_options(&[
+            VmValue::String(Rc::from("hello".to_string())),
+            VmValue::Nil,
+            VmValue::Dict(Rc::new(options)),
+        ])
+        .expect("reasoning_policy");
+
+        assert_eq!(
+            opts.thinking,
+            crate::llm::api::ThinkingConfig::Effort {
+                level: crate::llm::api::ReasoningEffort::None
+            }
+        );
+    }
+
+    #[test]
+    fn session_pinned_reasoning_policy_is_llm_call_default() {
+        crate::agent_sessions::reset_session_store();
+        let session_id = crate::agent_sessions::open_or_create(Some(
+            "reasoning-policy-options-session".to_string(),
+        ));
+        crate::agent_sessions::set_pinned_reasoning_policy(&session_id, Some("high".to_string()))
+            .expect("set policy");
+        let _session_guard = crate::agent_sessions::enter_current_session(session_id.clone());
+        let options = BTreeMap::from([
+            (
+                "provider".to_string(),
+                VmValue::String(Rc::from("mock".to_string())),
+            ),
+            (
+                "model".to_string(),
+                VmValue::String(Rc::from("o3".to_string())),
+            ),
+        ]);
+
+        let opts = extract_llm_options(&[
+            VmValue::String(Rc::from("hello".to_string())),
+            VmValue::Nil,
+            VmValue::Dict(Rc::new(options)),
+        ])
+        .expect("session reasoning_policy");
+
+        drop(_session_guard);
+        crate::agent_sessions::reset_session_store();
+
+        assert_eq!(
+            opts.thinking,
+            crate::llm::api::ThinkingConfig::Effort {
+                level: crate::llm::api::ReasoningEffort::High
+            }
+        );
+    }
+
+    #[test]
+    fn explicit_thinking_wins_over_session_pinned_reasoning_policy() {
+        crate::agent_sessions::reset_session_store();
+        let session_id = crate::agent_sessions::open_or_create(Some(
+            "reasoning-policy-explicit-session".to_string(),
+        ));
+        crate::agent_sessions::set_pinned_reasoning_policy(&session_id, Some("high".to_string()))
+            .expect("set policy");
+        let _session_guard = crate::agent_sessions::enter_current_session(session_id.clone());
+        let options = BTreeMap::from([
+            (
+                "provider".to_string(),
+                VmValue::String(Rc::from("mock".to_string())),
+            ),
+            (
+                "model".to_string(),
+                VmValue::String(Rc::from("o3".to_string())),
+            ),
+            ("thinking".to_string(), VmValue::Bool(false)),
+        ]);
+
+        let opts = extract_llm_options(&[
+            VmValue::String(Rc::from("hello".to_string())),
+            VmValue::Nil,
+            VmValue::Dict(Rc::new(options)),
+        ])
+        .expect("explicit thinking");
+
+        drop(_session_guard);
+        crate::agent_sessions::reset_session_store();
+
+        assert!(opts.thinking.is_disabled());
     }
 
     #[test]

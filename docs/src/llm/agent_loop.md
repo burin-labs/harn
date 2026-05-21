@@ -285,6 +285,11 @@ For Claude Opus 4.6/4.7 agent loops, `thinking: true` remains the
 single explicit switch that enables extended thinking and the Anthropic
 interleaved-thinking beta header.
 
+ACP clients can pin the same abstraction for a session with
+`session/set_config_option(configId="thought_level")`. Agent loops running in
+that session inherit the pin unless their options explicitly set
+`reasoning_policy`, `thinking_policy`, `thinking`, or `reasoning_effort`.
+
 Profiles preload the common loop-budget and retry keys below. Pass any
 key explicitly to override the profile's value for that call.
 

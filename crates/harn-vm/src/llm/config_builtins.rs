@@ -72,6 +72,13 @@ const LLM_CONFIG_SYNC_BUILTINS: &[SyncBuiltin] = &[
         .signature("llm_resolved_options(opts)")
         .arity(VmBuiltinArity::Exact(1))
         .doc("Return the fully-merged llm_call options for `opts`. Requires opts.model."),
+    SyncBuiltin::new(
+        "llm_apply_reasoning_policy",
+        llm_apply_reasoning_policy_builtin,
+    )
+    .signature("llm_apply_reasoning_policy(opts)")
+    .arity(VmBuiltinArity::Exact(1))
+    .doc("Apply Harn's provider-aware reasoning_policy/thinking_policy defaults to an llm_call option dict."),
     SyncBuiltin::new("llm_model_defaults", llm_model_defaults_builtin)
         .signature("llm_model_defaults(model_id)")
         .arity(VmBuiltinArity::Exact(1))
@@ -259,6 +266,17 @@ fn llm_resolved_options_builtin(args: &[VmValue], _out: &mut String) -> Result<V
         VmValue::String(Rc::from(final_provider)),
     );
     out.insert("model".to_string(), VmValue::String(Rc::from(resolved_id)));
+    Ok(VmValue::Dict(Rc::new(out)))
+}
+
+fn llm_apply_reasoning_policy_builtin(
+    args: &[VmValue],
+    _out: &mut String,
+) -> Result<VmValue, VmError> {
+    let opts = args.first().and_then(|a| a.as_dict()).ok_or_else(|| {
+        VmError::Runtime("llm_apply_reasoning_policy: opts must be a dict".to_string())
+    })?;
+    let out = super::reasoning_policy::apply_policy_to_vm_options(opts)?;
     Ok(VmValue::Dict(Rc::new(out)))
 }
 

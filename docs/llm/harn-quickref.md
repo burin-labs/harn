@@ -943,6 +943,9 @@ log(response.logprobs)       // present when requested and returned
 | `logprobs` | bool | false | Request token log probabilities when the selected provider route supports them. |
 | `top_logprobs` | int | nil | Request top alternative token log probabilities where supported. |
 | `tools` | list | nil | Registered tool schemas. |
+| `reasoning_policy` / `thinking_policy` | string \| bool | nil | Provider-aware reasoning policy for direct calls. Values: `auto`, `off`, `minimal`, `low`, `medium`, `high`, `xhigh`; `none`, `disabled`, `no_think`, and `nothink` alias to `off`. Explicit `thinking` or `reasoning_effort` wins. |
+| `reasoning_scale` / `problem_scale` | string | `"medium"` | Scale hint for `reasoning_policy: "auto"`: `small`, `medium`, or `large`. |
+| `reasoning_task` | string | inferred | Task hint for `reasoning_policy: "auto"`: `chat`, `agent`, `code`, `verify`, or `summarize`. |
 | `thinking` | bool \| dict | nil | Typed provider reasoning. `true` / `{mode: "enabled"}` automatically sends Anthropic's `interleaved-thinking-2025-05-14` beta header on supported Claude Opus models. `thinking: false` on Qwen3 routes auto-prepends `/no_think` to the system message (capability-driven; no per-template knowledge needed in scripts). |
 | `interleaved_thinking` | bool | false | Force the Anthropic interleaved-thinking beta header for the call/loop. |
 | `anthropic_beta_features` | string \| list | nil | Extra Anthropic beta feature names for the comma-separated `anthropic-beta` header. |

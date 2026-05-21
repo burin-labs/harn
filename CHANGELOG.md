@@ -10,6 +10,12 @@ condensed series summaries instead of full per-patch history.
 
 ### Added
 
+- **ACP thought-level session config.** Adds a provider-aware `thought_level`
+  ACP session option and matching `reasoning_policy` / `thinking_policy`
+  `llm_call` abstraction so harness authors can choose `auto`, `off`,
+  `minimal`, `low`, `medium`, `high`, or `xhigh` without leaking
+  provider-specific `reasoning_effort`, thinking-budget, adaptive-thinking, or
+  local Qwen `/no_think` details into scripts.
 - **Path-scoped metadata builtins (#2112).** Adds `path_metadata_get(path,
   namespace?, opts?)`, `path_metadata_set(path, namespace, data, opts?)`, and
   `path_metadata_entries(namespace?, opts?)` for addressing metadata at exact

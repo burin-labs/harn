@@ -229,6 +229,19 @@ async fn acp_session_new_advertises_session_mode_state_and_config_options() {
     // should advertise the "inherit ambient default" sentinel as the
     // current value so clients render an "unpinned" state.
     assert_eq!(model_option["currentValue"], "@inherit");
+
+    let thought_option = config_options
+        .iter()
+        .find(|entry| entry["id"] == "thought_level")
+        .expect("thought level config option");
+    assert_eq!(thought_option["category"], "model");
+    assert_eq!(thought_option["type"], "select");
+    assert_eq!(thought_option["currentValue"], "@inherit");
+    assert!(thought_option["options"]
+        .as_array()
+        .expect("thought options")
+        .iter()
+        .any(|entry| entry["value"] == "auto"));
 }
 
 /// `session/load` echoes the active mode state back to a
@@ -1057,6 +1070,103 @@ async fn acp_set_config_option_pins_model_and_emits_update() {
         harn_vm::agent_sessions::pinned_model(&session_id).is_none(),
         "clearing the pin should remove the vm-side selector"
     );
+}
+
+/// `thought_level` is a provider-aware Harn abstraction over inconsistent
+/// provider knobs (`reasoning_effort`, thinking budgets, adaptive thinking,
+/// and Qwen no-think directives). ACP stores only the high-level policy.
+#[tokio::test(flavor = "current_thread")]
+async fn acp_set_config_option_pins_thought_level_and_emits_update() {
+    let (tx, mut rx) = mpsc::unbounded_channel();
+    let mut server = AcpServer::new_with_output(AcpServerConfig::new(None), AcpOutput::Channel(tx));
+
+    server
+        .handle_incoming_message(serde_json::json!({
+            "jsonrpc": "2.0",
+            "id": 1,
+            "method": "session/new",
+            "params": {"cwd": "."},
+        }))
+        .await;
+    let created = recv_json(&mut rx).await;
+    let session_id = created["result"]["sessionId"]
+        .as_str()
+        .expect("session id")
+        .to_string();
+
+    server
+        .handle_incoming_message(serde_json::json!({
+            "jsonrpc": "2.0",
+            "id": 2,
+            "method": "session/set_config_option",
+            "params": {
+                "sessionId": session_id,
+                "configId": "thought_level",
+                "value": "NO_THINK",
+            },
+        }))
+        .await;
+    let ack = recv_json(&mut rx).await;
+    assert_eq!(ack["id"], 2);
+    let pinned_value = ack["result"]["configOptions"]
+        .as_array()
+        .expect("configOptions array")
+        .iter()
+        .find(|entry| entry["id"] == "thought_level")
+        .expect("thought config option")
+        .get("currentValue")
+        .and_then(|v| v.as_str())
+        .expect("currentValue string");
+    assert_eq!(pinned_value, "off");
+
+    let notification = recv_json(&mut rx).await;
+    assert_eq!(notification["method"], "session/update");
+    assert_eq!(
+        notification["params"]["update"]["sessionUpdate"],
+        "config_option_update"
+    );
+    let pin_in_notification = notification["params"]["update"]["configOptions"]
+        .as_array()
+        .expect("configOptions in notification")
+        .iter()
+        .find(|entry| entry["id"] == "thought_level")
+        .expect("thought entry in notification")
+        .get("currentValue")
+        .and_then(|v| v.as_str())
+        .expect("currentValue string");
+    assert_eq!(pin_in_notification, "off");
+
+    assert_eq!(
+        harn_vm::agent_sessions::pinned_reasoning_policy(&session_id).as_deref(),
+        Some("off"),
+    );
+
+    server
+        .handle_incoming_message(serde_json::json!({
+            "jsonrpc": "2.0",
+            "id": 3,
+            "method": "session/set_config_option",
+            "params": {
+                "sessionId": session_id,
+                "configId": "thought_level",
+                "value": "@inherit",
+            },
+        }))
+        .await;
+    let clear_ack = recv_json(&mut rx).await;
+    assert_eq!(clear_ack["id"], 3);
+    let cleared_value = clear_ack["result"]["configOptions"]
+        .as_array()
+        .expect("configOptions array")
+        .iter()
+        .find(|entry| entry["id"] == "thought_level")
+        .expect("thought config option")
+        .get("currentValue")
+        .and_then(|v| v.as_str())
+        .expect("currentValue string");
+    assert_eq!(cleared_value, "@inherit");
+    let _clear_notification = recv_json(&mut rx).await;
+    assert!(harn_vm::agent_sessions::pinned_reasoning_policy(&session_id).is_none());
 }
 
 /// `session/set_config_option(configId="model")` rejects selectors that

@@ -170,6 +170,55 @@ fn fork_inherits_parent_pinned_model_so_branch_starts_on_same_route() {
 }
 
 #[test]
+fn pinned_reasoning_policy_round_trips_through_session_state_and_snapshot() {
+    reset_session_store();
+    let id = open_or_create(Some("pinned-reasoning-session".into()));
+
+    assert!(pinned_reasoning_policy(&id).is_none());
+    let initial_snapshot = snapshot(&id).expect("session snapshot");
+    assert!(matches!(
+        initial_snapshot
+            .as_dict()
+            .and_then(|d| d.get("pinned_reasoning_policy")),
+        Some(VmValue::Nil)
+    ));
+
+    assert!(set_pinned_reasoning_policy(&id, Some("HIGH".into())).unwrap());
+    assert_eq!(pinned_reasoning_policy(&id).as_deref(), Some("high"));
+    let pinned_snapshot = snapshot(&id).expect("session snapshot");
+    let pinned_value = pinned_snapshot
+        .as_dict()
+        .and_then(|d| d.get("pinned_reasoning_policy"))
+        .map(|v| v.display())
+        .unwrap_or_default();
+    assert_eq!(pinned_value, "high");
+
+    assert!(!set_pinned_reasoning_policy(&id, Some("high".into())).unwrap());
+    assert!(set_pinned_reasoning_policy(&id, Some("@inherit".into())).unwrap());
+    assert!(pinned_reasoning_policy(&id).is_none());
+
+    let error = set_pinned_reasoning_policy(&id, Some("slow".into())).unwrap_err();
+    assert!(
+        error.contains("expected auto, off, minimal, low, medium, high, or xhigh"),
+        "invalid policy should explain accepted values: {error}",
+    );
+}
+
+#[test]
+fn fork_inherits_parent_pinned_reasoning_policy_but_child_changes_stay_local() {
+    reset_session_store();
+    let parent_id = open_or_create(Some("fork-reasoning-parent".into()));
+    set_pinned_reasoning_policy(&parent_id, Some("high".into())).unwrap();
+    let child_id = fork(&parent_id, Some("fork-reasoning-child".into())).expect("fork");
+
+    assert_eq!(pinned_reasoning_policy(&child_id).as_deref(), Some("high"));
+
+    set_pinned_reasoning_policy(&child_id, Some("off".into())).unwrap();
+    assert_eq!(pinned_reasoning_policy(&parent_id).as_deref(), Some("high"));
+    assert_eq!(pinned_reasoning_policy(&child_id).as_deref(), Some("off"));
+}
+
+#[test]
 fn close_with_status_emits_terminal_event_and_clears_sinks() {
     reset_all_sinks();
     let id = open_or_create(Some("close-reason-session".into()));

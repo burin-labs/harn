@@ -70,8 +70,8 @@ pub(super) fn session_mode_state(current_mode_id: &str) -> serde_json::Value {
 }
 
 /// Render the preferred ACP `configOptions` representation for the
-/// per-session knobs Harn exposes today: session mode plus pinned LLM
-/// model. Both entries follow the `select` shape (the only `type` the
+/// per-session knobs Harn exposes today: session mode, pinned LLM
+/// model, and a provider-aware thought level. Entries follow the `select` shape (the only `type` the
 /// current spec defines, per
 /// <https://agentclientprotocol.com/protocol/session-config-options>).
 ///
@@ -82,6 +82,7 @@ pub(super) fn session_mode_state(current_mode_id: &str) -> serde_json::Value {
 pub(super) fn config_options_state(
     current_mode_id: &str,
     pinned_model: Option<&str>,
+    pinned_reasoning_policy: Option<&str>,
 ) -> serde_json::Value {
     serde_json::json!([
         {
@@ -94,6 +95,7 @@ pub(super) fn config_options_state(
             "options": mode_entries("value"),
         },
         model_config_option(pinned_model),
+        reasoning_policy_config_option(pinned_reasoning_policy),
     ])
 }
 
@@ -181,6 +183,81 @@ fn model_select_options(pinned_model: Option<&str>) -> Vec<serde_json::Value> {
         }
     }
     entries
+}
+
+fn reasoning_policy_config_option(pinned_policy: Option<&str>) -> serde_json::Value {
+    serde_json::json!({
+        "id": "thought_level",
+        "name": "Thought Level",
+        "description": "Provider-aware reasoning policy for subsequent prompts. Harn lowers this \
+                        to the route's native thinking shape (`reasoning_effort`, thinking budgets, \
+                        adaptive thinking, or Qwen `/no_think`). Per-call `thinking` and \
+                        `reasoning_effort` options still win; pick `@inherit` to clear the pin.",
+        "category": "model",
+        "type": "select",
+        "currentValue": pinned_policy.unwrap_or(harn_vm::llm::reasoning_policy::INHERIT_POLICY_VALUE),
+        "options": reasoning_policy_select_options(),
+    })
+}
+
+fn reasoning_policy_select_options() -> Vec<serde_json::Value> {
+    let mut entries = vec![serde_json::json!({
+        "value": harn_vm::llm::reasoning_policy::INHERIT_POLICY_VALUE,
+        "name": "Inherit script default",
+        "description": "Clear the session-level thought policy pin.",
+    })];
+    entries.extend(
+        [
+            (
+                "auto",
+                "Auto",
+                "Let Harn choose from task, scale, provider, and model capabilities.",
+            ),
+            (
+                "off",
+                "Off",
+                "Disable model thinking when possible, including Qwen no-think directives.",
+            ),
+            (
+                "minimal",
+                "Minimal",
+                "Use the lowest provider-supported reasoning floor.",
+            ),
+            (
+                "low",
+                "Low",
+                "Light extra reasoning for verification or small tasks.",
+            ),
+            (
+                "medium",
+                "Medium",
+                "Balanced reasoning for general agent work.",
+            ),
+            (
+                "high",
+                "High",
+                "More reasoning for difficult planning or code changes.",
+            ),
+            (
+                "xhigh",
+                "Extra High",
+                "Maximum reasoning for routes that expose it.",
+            ),
+        ]
+        .into_iter()
+        .map(|(value, name, description)| {
+            serde_json::json!({
+                "value": value,
+                "name": name,
+                "description": description,
+            })
+        }),
+    );
+    entries
+}
+
+pub(super) fn validate_reasoning_policy_selector(raw: &str) -> Result<Option<String>, String> {
+    harn_vm::llm::reasoning_policy::normalize_policy_selector(raw)
 }
 
 /// Validate a model selector for `session/set_config_option(configId="model")`.
@@ -305,9 +382,9 @@ mod tests {
 
     #[test]
     fn config_options_state_contains_mode_selector() {
-        let state = config_options_state("code", None);
+        let state = config_options_state("code", None, None);
         let options = state.as_array().expect("config options array");
-        assert_eq!(options.len(), 2);
+        assert_eq!(options.len(), 3);
         assert_eq!(options[0]["id"], "mode");
         assert_eq!(options[0]["currentValue"], "code");
         assert!(options[0]["options"]
@@ -319,7 +396,7 @@ mod tests {
 
     #[test]
     fn config_options_state_includes_model_selector_with_pin_clear_sentinel() {
-        let state = config_options_state("code", None);
+        let state = config_options_state("code", None, None);
         let options = state.as_array().expect("config options array");
         let model_option = options
             .iter()
@@ -342,7 +419,7 @@ mod tests {
 
     #[test]
     fn config_options_state_surfaces_free_form_pinned_model() {
-        let state = config_options_state("code", Some("custom-model-not-in-catalog"));
+        let state = config_options_state("code", Some("custom-model-not-in-catalog"), None);
         let model_option = state
             .as_array()
             .expect("config options array")
@@ -367,6 +444,52 @@ mod tests {
         assert!(validate_model_selector("").unwrap().is_none());
         assert!(validate_model_selector("   ").unwrap().is_none());
         assert!(validate_model_selector("@inherit").unwrap().is_none());
+    }
+
+    #[test]
+    fn config_options_state_includes_thought_level_selector() {
+        let state = config_options_state("code", None, Some("high"));
+        let thought_option = state
+            .as_array()
+            .expect("config options array")
+            .iter()
+            .find(|entry| entry["id"] == "thought_level")
+            .cloned()
+            .expect("thought level config option");
+        assert_eq!(thought_option["category"], "model");
+        assert_eq!(thought_option["type"], "select");
+        assert_eq!(thought_option["currentValue"], "high");
+        let values: Vec<&str> = thought_option["options"]
+            .as_array()
+            .expect("thought options")
+            .iter()
+            .map(|entry| entry["value"].as_str().expect("value string"))
+            .collect();
+        assert!(values.contains(&"@inherit"));
+        assert!(values.contains(&"auto"));
+        assert!(values.contains(&"off"));
+        assert!(values.contains(&"xhigh"));
+    }
+
+    #[test]
+    fn validate_reasoning_policy_selector_normalizes_aliases() {
+        assert!(validate_reasoning_policy_selector("").unwrap().is_none());
+        assert!(validate_reasoning_policy_selector("@inherit")
+            .unwrap()
+            .is_none());
+        assert_eq!(
+            validate_reasoning_policy_selector("NO_THINK")
+                .unwrap()
+                .as_deref(),
+            Some("off"),
+        );
+        assert_eq!(
+            validate_reasoning_policy_selector(" high ")
+                .unwrap()
+                .as_deref(),
+            Some("high"),
+        );
+        assert!(validate_reasoning_policy_selector("slow").is_err());
     }
 
     #[test]
