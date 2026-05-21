@@ -28,6 +28,18 @@ condensed series summaries instead of full per-patch history.
   pushes restore the previous `target/` instead of rebuilding all deps from
   scratch.
 
+### Changed
+
+- **CI: split the Linux Rust gate into parallel `Rust lint` and `Rust test`
+  jobs.** `make lint` and `make test` previously serialized in one ~11-min
+  job; splitting them into parallel jobs with their own rust-cache shared
+  keys (`workspace-lint` / `workspace-test`) lets them complete in roughly
+  half the wall time. Promoted `lint-no-xfail-regression` from `make lint`
+  to the `Harn conformance + audit` job, which already has `target/debug/harn`
+  warm from `make conformance`, so the ratchet runs in seconds instead of
+  paying for a fresh `cargo run` compile on the lint critical path. The
+  required `CI status` gate now waits on both `Rust lint` and `Rust test`.
+
 ## v0.8.30
 
 ### Fixed
