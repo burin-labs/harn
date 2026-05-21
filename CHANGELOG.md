@@ -6,16 +6,24 @@ Pre-0.6 highlights live in [CHANGELOG-pre-0.6.md](CHANGELOG-pre-0.6.md).
 Harn had no external users before 0.6.0, so that archive intentionally keeps
 condensed series summaries instead of full per-patch history.
 
-## Unreleased
+## v0.8.29
 
 ### Fixed
 
-- **OpenRouter structured-output routing.** Refreshes OpenRouter capability
-  rules for current DeepSeek V4, Devstral, Llama 4, and Gemma 4 families;
-  preserves `schema_stream_aborted` error categories across off-thread LLM
-  calls; emits `top_k` only when the selected route supports it; and requests
-  OpenRouter `provider.require_parameters` whenever schemas or `top_k` must be
-  honored by the routed backend.
+- **OpenRouter structured-output routing (#2113).** Refreshes OpenRouter
+  capability rules for current DeepSeek V4, Devstral, Llama 4, and Gemma 4
+  families; preserves `schema_stream_aborted` error categories across
+  off-thread LLM calls; emits `top_k` only when the selected route supports
+  it; and requests OpenRouter `provider.require_parameters` whenever schemas
+  or `top_k` must be honored by the routed backend.
+- **CI: Windows release-binary builds no longer race the GHA sccache backend
+  (#2114).** Skips `mozilla-actions/sccache-action` and the
+  `RUSTC_WRAPPER=sccache` export on the `x86_64-pc-windows-msvc` matrix leg of
+  `build-release-binaries.yml`. The GHA cache backend dropped the TLS
+  connection partway through the single rustc invocation that compiles
+  `harn-vm` on Windows (`os error 10054`), failing the v0.8.28 release run
+  twice in a row on the same step. Other targets keep sccache, and the
+  Swatinem `target/` cache still warms repeat Windows builds.
 
 ## v0.8.28
 
