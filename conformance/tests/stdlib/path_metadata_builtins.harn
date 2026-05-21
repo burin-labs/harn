@@ -1,0 +1,40 @@
+pipeline test(task) {
+  // Empty store: file lookup returns nil and does not error.
+  assert_eq(path_metadata_get("src/foo.rs", "facts"), nil)
+  // Default kind is "file"; missing entry is nil regardless of namespace arg.
+  assert_eq(path_metadata_get("src/foo.rs"), nil)
+  // Dir-level metadata seeded via the existing API.
+  metadata_set(".", "facts", {root_owner: "vm"})
+  metadata_set("src", "facts", {owner: "vm"})
+  // File entry on a child file: stored and retrieved exactly.
+  path_metadata_set("src/foo.rs", "facts", {summary: "entry point"})
+  let file_facts = path_metadata_get("src/foo.rs", "facts")
+  assert_eq(file_facts.summary, "entry point")
+  // File lookups never inherit from parent dirs.
+  assert_eq(file_facts?.owner, nil)
+  assert_eq(file_facts?.root_owner, nil)
+  // Normalization: "./src/foo.rs" addresses the same entry.
+  let normalized = path_metadata_get("./src/foo.rs", "facts")
+  assert_eq(normalized.summary, "entry point")
+  // Missing namespace on a known file returns nil.
+  assert_eq(path_metadata_get("src/foo.rs", "missing_ns"), nil)
+  // kind: "dir" delegates to hierarchical dir resolution.
+  let dir_facts = path_metadata_get("src", "facts", {kind: "dir"})
+  assert_eq(dir_facts.owner, "vm")
+  assert_eq(dir_facts.root_owner, "vm")
+  // kind: "dir" on path_metadata_set mirrors metadata_set.
+  path_metadata_set("src/nested", "facts", {tag: "deep"}, {kind: "dir"})
+  let nested = metadata_get("src/nested", "facts")
+  assert_eq(nested.tag, "deep")
+  // Entries listing: defaults to files-only.
+  path_metadata_set("src/bar.rs", "facts", {summary: "helpers"})
+  let file_entries = path_metadata_entries("facts")
+  assert_eq(len(file_entries), 2)
+  assert_eq(file_entries[0].kind, "file")
+  assert_eq(file_entries[0].path, "src/bar.rs")
+  assert_eq(file_entries[1].path, "src/foo.rs")
+  // kind: "all" includes both files and dirs.
+  let all_entries = path_metadata_entries("facts", {kind: "all"})
+  assert(len(all_entries) >= 4)
+  log("path metadata ok")
+}

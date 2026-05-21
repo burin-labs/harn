@@ -1958,6 +1958,11 @@ from parents). The default filesystem backend persists namespace shards
 under `.harn/metadata/<namespace>/entries.json` and still reads the legacy
 monolithic `root.json` shard.
 
+Directory entries inherit; file entries do not. The shard schema is shared:
+each namespace shard has a directory map under `entries` and an optional
+file map under `files`, both keyed by normalized relative path. Shards
+without a `files` section load unchanged.
+
 | Function | Parameters | Returns | Description |
 |---|---|---|---|
 | `metadata_get(dir, namespace?)` | dir: string, namespace: string | dict \| nil | Read metadata with inheritance |
@@ -1970,6 +1975,9 @@ monolithic `root.json` shard.
 | `metadata_refresh_hashes()` | — | nil | Recompute content hashes |
 | `compute_content_hash(dir)` | dir: string | string | Hash of directory contents |
 | `invalidate_facts(dir)` | dir: string | nil | Mark cached facts as stale |
+| `path_metadata_get(path, namespace?, opts?)` | path: string, namespace: string, opts: `{kind?: "file"\|"dir"}` | dict \| nil | Read metadata at an exact path. File entries (default) do not inherit; `{kind: "dir"}` falls back to hierarchical resolution. |
+| `path_metadata_set(path, namespace, data, opts?)` | path: string, namespace: string, data: dict, opts: `{kind?: "file"\|"dir"}` | nil | Write metadata at an exact path. Defaults to `{kind: "file"}`. |
+| `path_metadata_entries(namespace?, opts?)` | namespace: string, opts: `{kind?: "file"\|"dir"\|"all"}` | list | List stored entries keyed by normalized relative path. Defaults to files only. |
 | `scan_directory(path?, pattern_or_options?, options?)` | path: string, pattern: string or options: dict | list | Enumerate files and directories with optional `pattern`, `max_depth`, `include_hidden`, `include_dirs`, `include_files` |
 
 ## Project introspection

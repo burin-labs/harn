@@ -239,6 +239,7 @@ pub fn side_effect_action_for_builtin(name: &str) -> Option<SideEffectAction> {
                 "metadata_save",
                 "metadata_refresh_hashes",
                 "invalidate_facts",
+                "path_metadata_set",
             ],
             "metadata.write",
             "metadata.write",

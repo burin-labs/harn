@@ -78,6 +78,36 @@ pub(crate) const SIGNATURES: &[BuiltinSignature] = &[
         &[Param::optional("project", TY_STRING)],
         TY_DICT,
     ),
+    // path_metadata_get(path, namespace?, opts?) -> dict | nil
+    BuiltinSignature::simple(
+        "path_metadata_get",
+        &[
+            Param::new("path", TY_STRING),
+            Param::optional("namespace", TY_STRING_OR_NIL),
+            Param::optional("opts", TY_DICT_OR_NIL),
+        ],
+        TY_DICT_OR_NIL,
+    ),
+    // path_metadata_set(path, namespace, data, opts?) -> nil
+    BuiltinSignature::simple(
+        "path_metadata_set",
+        &[
+            Param::new("path", TY_STRING),
+            Param::new("namespace", TY_STRING),
+            Param::new("data", TY_DICT),
+            Param::optional("opts", TY_DICT_OR_NIL),
+        ],
+        TY_NIL,
+    ),
+    // path_metadata_entries(namespace?, opts?) -> list of {kind, path, local, resolved?}
+    BuiltinSignature::simple(
+        "path_metadata_entries",
+        &[
+            Param::optional("namespace", TY_STRING_OR_NIL),
+            Param::optional("opts", TY_DICT_OR_NIL),
+        ],
+        TY_LIST,
+    ),
     // metadata_status(namespace?) -> dict
     BuiltinSignature::simple(
         "metadata_status",

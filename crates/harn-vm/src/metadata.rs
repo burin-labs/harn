@@ -20,19 +20,32 @@ type FieldKey = String;
 const LEGACY_SHARD_NAME: &str = "root.json";
 const NAMESPACE_ENTRIES_FILE: &str = "entries.json";
 
-/// Per-directory metadata: namespaces -> keys -> JSON values.
+/// Per-path metadata: namespaces -> keys -> JSON values. Used for both
+/// directory entries (inherited via [`MetadataState::resolve`]) and file
+/// entries (exact-path only via [`MetadataState::file_namespace`]).
 #[derive(Clone, Default)]
-struct DirectoryMetadata {
+struct PathMetadata {
     namespaces: BTreeMap<Namespace, BTreeMap<FieldKey, serde_json::Value>>,
+}
+
+type DirectoryMetadata = PathMetadata;
+
+/// Loaded form of a namespace shard: directory entries plus file entries
+/// keyed by normalized relative path. File entries do not inherit.
+#[derive(Default)]
+struct LoadedEntries {
+    dirs: BTreeMap<String, PathMetadata>,
+    files: BTreeMap<String, PathMetadata>,
 }
 
 trait MetadataBackend {
     fn backend_name(&self) -> &'static str;
-    fn load(&self, root: &Path) -> Result<BTreeMap<String, DirectoryMetadata>, String>;
+    fn load(&self, root: &Path) -> Result<LoadedEntries, String>;
     fn save(
         &self,
         root: &Path,
-        entries: &BTreeMap<String, DirectoryMetadata>,
+        dirs: &BTreeMap<String, PathMetadata>,
+        files: &BTreeMap<String, PathMetadata>,
     ) -> Result<(), String>;
 }
 
@@ -45,9 +58,11 @@ impl FilesystemMetadataBackend {
     }
 }
 
-/// The full metadata store (all directories).
+/// The full metadata store: directory entries (hierarchical) plus file
+/// entries (exact-path).
 struct MetadataState {
-    entries: BTreeMap<String, DirectoryMetadata>,
+    entries: BTreeMap<String, PathMetadata>,
+    files: BTreeMap<String, PathMetadata>,
     base_dir: PathBuf,
     backend: Box<dyn MetadataBackend>,
     loaded: bool,
@@ -58,6 +73,7 @@ impl MetadataState {
     fn new(base_dir: &Path) -> Self {
         Self {
             entries: BTreeMap::new(),
+            files: BTreeMap::new(),
             base_dir: base_dir.to_path_buf(),
             backend: Box::new(FilesystemMetadataBackend::new()),
             loaded: false,
@@ -74,8 +90,9 @@ impl MetadataState {
             return;
         }
         self.loaded = true;
-        if let Ok(entries) = self.backend.load(&self.metadata_dir()) {
-            self.entries = entries;
+        if let Ok(loaded) = self.backend.load(&self.metadata_dir()) {
+            self.entries = loaded.dirs;
+            self.files = loaded.files;
         }
     }
 
@@ -139,13 +156,47 @@ impl MetadataState {
         self.dirty = true;
     }
 
+    /// Look up file metadata at an exact normalized path. File entries do
+    /// not inherit from parent directories.
+    fn file_namespace(
+        &mut self,
+        path: &str,
+        namespace: &str,
+    ) -> Option<BTreeMap<FieldKey, serde_json::Value>> {
+        self.ensure_loaded();
+        self.files
+            .get(path)
+            .and_then(|meta| meta.namespaces.get(namespace).cloned())
+    }
+
+    fn file_entry(&mut self, path: &str) -> Option<PathMetadata> {
+        self.ensure_loaded();
+        self.files.get(path).cloned()
+    }
+
+    /// Write file metadata at an exact normalized path.
+    fn set_file_namespace(
+        &mut self,
+        path: &str,
+        namespace: &str,
+        data: BTreeMap<FieldKey, serde_json::Value>,
+    ) {
+        self.ensure_loaded();
+        let meta = self.files.entry(path.to_string()).or_default();
+        let ns = meta.namespaces.entry(namespace.to_string()).or_default();
+        for (k, v) in data {
+            ns.insert(k, v);
+        }
+        self.dirty = true;
+    }
+
     /// Save all metadata back to sharded JSON files.
     fn save(&mut self) -> Result<(), String> {
         if !self.dirty {
             return Ok(());
         }
         let meta_dir = self.metadata_dir();
-        self.backend.save(&meta_dir, &self.entries)?;
+        self.backend.save(&meta_dir, &self.entries, &self.files)?;
         self.dirty = false;
         Ok(())
     }
@@ -156,16 +207,16 @@ impl MetadataBackend for FilesystemMetadataBackend {
         "filesystem"
     }
 
-    fn load(&self, root: &Path) -> Result<BTreeMap<String, DirectoryMetadata>, String> {
-        let mut entries = BTreeMap::new();
+    fn load(&self, root: &Path) -> Result<LoadedEntries, String> {
+        let mut loaded = LoadedEntries::default();
         let legacy_path = root.join(LEGACY_SHARD_NAME);
         if let Ok(contents) = std::fs::read_to_string(&legacy_path) {
-            entries = parse_legacy_entries(&contents);
+            loaded.dirs = parse_legacy_entries(&contents);
         }
 
         let namespace_dirs = match std::fs::read_dir(root) {
             Ok(read_dir) => read_dir,
-            Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(entries),
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(loaded),
             Err(error) => return Err(format!("metadata load: {error}")),
         };
 
@@ -180,42 +231,73 @@ impl MetadataBackend for FilesystemMetadataBackend {
             let Ok(contents) = std::fs::read_to_string(&shard_path) else {
                 continue;
             };
-            merge_namespace_entries(&mut entries, &contents);
+            merge_namespace_shard(&mut loaded, &contents);
         }
 
-        Ok(entries)
+        Ok(loaded)
     }
 
     fn save(
         &self,
         root: &Path,
-        entries: &BTreeMap<String, DirectoryMetadata>,
+        dirs: &BTreeMap<String, PathMetadata>,
+        files: &BTreeMap<String, PathMetadata>,
     ) -> Result<(), String> {
         std::fs::create_dir_all(root).map_err(|error| format!("metadata mkdir: {error}"))?;
 
-        let mut namespaces: BTreeMap<String, serde_json::Map<String, serde_json::Value>> =
+        let mut dir_namespaces: BTreeMap<String, serde_json::Map<String, serde_json::Value>> =
             BTreeMap::new();
-        for (dir, meta) in entries {
+        for (dir, meta) in dirs {
             for (namespace, fields) in &meta.namespaces {
-                namespaces
+                dir_namespaces
                     .entry(namespace.clone())
                     .or_default()
                     .insert(dir.clone(), serialize_namespace_fields(fields));
             }
         }
+        let mut file_namespaces: BTreeMap<String, serde_json::Map<String, serde_json::Value>> =
+            BTreeMap::new();
+        for (path, meta) in files {
+            for (namespace, fields) in &meta.namespaces {
+                file_namespaces
+                    .entry(namespace.clone())
+                    .or_default()
+                    .insert(path.clone(), serialize_namespace_fields(fields));
+            }
+        }
 
-        for (namespace, shard_entries) in namespaces {
+        let mut all_namespaces: std::collections::BTreeSet<String> =
+            dir_namespaces.keys().cloned().collect();
+        all_namespaces.extend(file_namespaces.keys().cloned());
+
+        for namespace in all_namespaces {
+            let dir_entries = dir_namespaces.remove(&namespace).unwrap_or_default();
+            let file_entries = file_namespaces.remove(&namespace).unwrap_or_default();
             let namespace_dir = root.join(namespace_path_component(&namespace));
             std::fs::create_dir_all(&namespace_dir)
                 .map_err(|error| format!("metadata mkdir: {error}"))?;
-            let shard = serde_json::json!({
-                "version": 1,
-                "namespace": namespace,
-                "backend": self.backend_name(),
-                "generatedAt": chrono_now_iso(),
-                "entries": serde_json::Value::Object(shard_entries),
-            });
-            let json = serde_json::to_string_pretty(&shard)
+            let mut shard = serde_json::Map::new();
+            shard.insert("version".to_string(), serde_json::json!(1));
+            shard.insert(
+                "namespace".to_string(),
+                serde_json::Value::String(namespace.clone()),
+            );
+            shard.insert(
+                "backend".to_string(),
+                serde_json::Value::String(self.backend_name().to_string()),
+            );
+            shard.insert(
+                "generatedAt".to_string(),
+                serde_json::Value::String(chrono_now_iso()),
+            );
+            shard.insert(
+                "entries".to_string(),
+                serde_json::Value::Object(dir_entries),
+            );
+            if !file_entries.is_empty() {
+                shard.insert("files".to_string(), serde_json::Value::Object(file_entries));
+            }
+            let json = serde_json::to_string_pretty(&serde_json::Value::Object(shard))
                 .map_err(|error| format!("metadata json: {error}"))?;
             std::fs::write(namespace_dir.join(NAMESPACE_ENTRIES_FILE), json)
                 .map_err(|error| format!("metadata write: {error}"))?;
@@ -313,8 +395,8 @@ fn serialize_namespace_fields(fields: &BTreeMap<FieldKey, serde_json::Value>) ->
     serde_json::Value::Object(fields_obj)
 }
 
-fn parse_directory_metadata(val: &serde_json::Value) -> DirectoryMetadata {
-    let mut meta = DirectoryMetadata::default();
+fn parse_path_metadata(val: &serde_json::Value) -> PathMetadata {
+    let mut meta = PathMetadata::default();
     let obj = match val.as_object() {
         Some(o) => o,
         None => return meta,
@@ -333,7 +415,7 @@ fn parse_directory_metadata(val: &serde_json::Value) -> DirectoryMetadata {
     meta
 }
 
-fn parse_legacy_entries(contents: &str) -> BTreeMap<String, DirectoryMetadata> {
+fn parse_legacy_entries(contents: &str) -> BTreeMap<String, PathMetadata> {
     let mut entries = BTreeMap::new();
     let parsed: serde_json::Value = match serde_json::from_str(contents) {
         Ok(v) => v,
@@ -343,12 +425,12 @@ fn parse_legacy_entries(contents: &str) -> BTreeMap<String, DirectoryMetadata> {
         return entries;
     };
     for (dir, meta_val) in shard_entries {
-        entries.insert(dir.clone(), parse_directory_metadata(meta_val));
+        entries.insert(dir.clone(), parse_path_metadata(meta_val));
     }
     entries
 }
 
-fn merge_namespace_entries(entries: &mut BTreeMap<String, DirectoryMetadata>, contents: &str) {
+fn merge_namespace_shard(loaded: &mut LoadedEntries, contents: &str) {
     let parsed: serde_json::Value = match serde_json::from_str(contents) {
         Ok(v) => v,
         Err(_) => return,
@@ -356,14 +438,20 @@ fn merge_namespace_entries(entries: &mut BTreeMap<String, DirectoryMetadata>, co
     let Some(namespace) = parsed.get("namespace").and_then(|value| value.as_str()) else {
         return;
     };
-    let Some(shard_entries) = parsed.get("entries").and_then(|value| value.as_object()) else {
-        return;
-    };
-    for (dir, fields_val) in shard_entries {
-        let directory = entries.entry(dir.clone()).or_default();
-        directory
-            .namespaces
-            .insert(namespace.to_string(), parse_namespace_fields(fields_val));
+    if let Some(shard_entries) = parsed.get("entries").and_then(|value| value.as_object()) {
+        for (dir, fields_val) in shard_entries {
+            let directory = loaded.dirs.entry(dir.clone()).or_default();
+            directory
+                .namespaces
+                .insert(namespace.to_string(), parse_namespace_fields(fields_val));
+        }
+    }
+    if let Some(shard_files) = parsed.get("files").and_then(|value| value.as_object()) {
+        for (path, fields_val) in shard_files {
+            let file = loaded.files.entry(path.clone()).or_default();
+            file.namespaces
+                .insert(namespace.to_string(), parse_namespace_fields(fields_val));
+        }
     }
 }
 
@@ -447,6 +535,66 @@ fn normalize_directory_key(dir: &str) -> String {
         ".".to_string()
     } else {
         dir.to_string()
+    }
+}
+
+/// Normalize a relative path for use as a file metadata key.
+///
+/// - Converts backslashes to forward slashes.
+/// - Strips a leading `./` and a trailing `/` (file keys never end in `/`).
+/// - Returns `None` if the result is empty or refers to a directory (`.` or `..`).
+fn normalize_file_key(path: &str) -> Option<String> {
+    let trimmed = path.trim().replace('\\', "/");
+    let stripped = trimmed.strip_prefix("./").unwrap_or(&trimmed);
+    let stripped = stripped.trim_end_matches('/');
+    if stripped.is_empty() || stripped == "." || stripped == ".." {
+        return None;
+    }
+    Some(stripped.to_string())
+}
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum PathKind {
+    File,
+    Dir,
+}
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum PathKindFilter {
+    File,
+    Dir,
+    All,
+}
+
+/// Read `opts.kind` from an optional dict argument. Returns `None` on a
+/// malformed dict or unknown kind; the empty/nil case yields `default`.
+fn parse_path_kind_filter(
+    value: Option<&VmValue>,
+    default: PathKindFilter,
+    allow_all: bool,
+) -> Option<PathKindFilter> {
+    let dict = match value {
+        Some(VmValue::Dict(dict)) => dict,
+        Some(VmValue::Nil) | None => return Some(default),
+        _ => return None,
+    };
+    match dict.get("kind") {
+        Some(VmValue::String(s)) => match s.as_ref() {
+            "file" => Some(PathKindFilter::File),
+            "dir" | "directory" => Some(PathKindFilter::Dir),
+            "all" if allow_all => Some(PathKindFilter::All),
+            _ => None,
+        },
+        None | Some(VmValue::Nil) => Some(default),
+        _ => None,
+    }
+}
+
+fn parse_path_kind(value: Option<&VmValue>) -> Option<PathKind> {
+    match parse_path_kind_filter(value, PathKindFilter::File, false)? {
+        PathKindFilter::File => Some(PathKind::File),
+        PathKindFilter::Dir => Some(PathKind::Dir),
+        PathKindFilter::All => None,
     }
 }
 
@@ -846,6 +994,178 @@ pub fn register_metadata_builtins(vm: &mut Vm, base_dir: &Path) {
     // invalidate_facts is a no-op: facts live in the metadata namespace.
     vm.register_builtin("invalidate_facts", |_args, _out| Ok(VmValue::Nil));
 
+    // path_metadata_get(path, namespace?, opts?) -> dict | nil
+    //
+    // Reads metadata for an exact path. Files are addressed directly without
+    // inheritance from parent directories. Pass `{kind: "dir"}` to fall back
+    // to hierarchical directory resolution.
+    let s = Rc::clone(&state);
+    vm.register_builtin("path_metadata_get", move |args, _out| {
+        let path = args.first().map(|a| a.display()).unwrap_or_default();
+        let namespace = args.get(1).and_then(|a| {
+            if matches!(a, VmValue::Nil) {
+                None
+            } else {
+                Some(a.display())
+            }
+        });
+        let Some(kind) = parse_path_kind(args.get(2)) else {
+            return Err(VmError::Runtime(
+                "path_metadata_get: opts.kind must be \"file\" or \"dir\"".to_string(),
+            ));
+        };
+        let mut st = s.borrow_mut();
+        match kind {
+            PathKind::File => {
+                let Some(key) = normalize_file_key(&path) else {
+                    return Ok(VmValue::Nil);
+                };
+                match namespace {
+                    Some(ns) => match st.file_namespace(&key, &ns) {
+                        Some(fields) => Ok(namespace_fields_to_vm(&fields)),
+                        None => Ok(VmValue::Nil),
+                    },
+                    None => match st.file_entry(&key) {
+                        Some(meta) if !meta.namespaces.is_empty() => {
+                            Ok(directory_metadata_to_vm(&meta))
+                        }
+                        _ => Ok(VmValue::Nil),
+                    },
+                }
+            }
+            PathKind::Dir => {
+                if let Some(ns) = namespace {
+                    match st.get_namespace(&path, &ns) {
+                        Some(fields) => Ok(namespace_fields_to_vm(&fields)),
+                        None => Ok(VmValue::Nil),
+                    }
+                } else {
+                    let resolved = st.resolve(&path);
+                    if resolved.namespaces.is_empty() {
+                        Ok(VmValue::Nil)
+                    } else {
+                        Ok(directory_metadata_to_vm(&resolved))
+                    }
+                }
+            }
+        }
+    });
+
+    // path_metadata_set(path, namespace, data, opts?) -> nil
+    let s = Rc::clone(&state);
+    vm.register_builtin("path_metadata_set", move |args, _out| {
+        let path = args.first().map(|a| a.display()).unwrap_or_default();
+        let namespace = args.get(1).map(|a| a.display()).unwrap_or_default();
+        let data_val = args.get(2).unwrap_or(&VmValue::Nil);
+        let Some(kind) = parse_path_kind(args.get(3)) else {
+            return Err(VmError::Runtime(
+                "path_metadata_set: opts.kind must be \"file\" or \"dir\"".to_string(),
+            ));
+        };
+        if namespace.is_empty() {
+            return Err(VmError::Runtime(
+                "path_metadata_set: namespace must not be empty".to_string(),
+            ));
+        }
+        let mut data = BTreeMap::new();
+        if let VmValue::Dict(dict) = data_val {
+            for (k, v) in dict.iter() {
+                data.insert(k.clone(), vm_to_json(v));
+            }
+        }
+        if data.is_empty() {
+            return Ok(VmValue::Nil);
+        }
+        match kind {
+            PathKind::File => {
+                let Some(key) = normalize_file_key(&path) else {
+                    return Err(VmError::Runtime(format!(
+                        "path_metadata_set: {path:?} is not a valid file path"
+                    )));
+                };
+                s.borrow_mut().set_file_namespace(&key, &namespace, data);
+            }
+            PathKind::Dir => {
+                s.borrow_mut().set_namespace(&path, &namespace, data);
+            }
+        }
+        Ok(VmValue::Nil)
+    });
+
+    // path_metadata_entries(namespace?, opts?) -> list of {kind, path, local}
+    //
+    // Lists stored file (and optionally directory) entries. Useful for
+    // iterating over precomputed enrichment artifacts.
+    let s = Rc::clone(&state);
+    vm.register_builtin("path_metadata_entries", move |args, _out| {
+        let namespace = args.first().and_then(|a| {
+            if matches!(a, VmValue::Nil) {
+                None
+            } else {
+                Some(a.display())
+            }
+        });
+        let Some(filter) = parse_path_kind_filter(args.get(1), PathKindFilter::File, true) else {
+            return Err(VmError::Runtime(
+                "path_metadata_entries: opts.kind must be \"file\", \"dir\", or \"all\""
+                    .to_string(),
+            ));
+        };
+        let include_files = matches!(filter, PathKindFilter::File | PathKindFilter::All);
+        let include_dirs = matches!(filter, PathKindFilter::Dir | PathKindFilter::All);
+        let mut st = s.borrow_mut();
+        st.ensure_loaded();
+        let mut items = Vec::new();
+        if include_files {
+            for (path, meta) in &st.files {
+                let local = match &namespace {
+                    Some(ns) => match meta.namespaces.get(ns) {
+                        Some(fields) => namespace_fields_to_vm(fields),
+                        None => continue,
+                    },
+                    None => directory_metadata_to_vm(meta),
+                };
+                let mut item = BTreeMap::new();
+                item.insert("kind".to_string(), VmValue::String(Rc::from("file")));
+                item.insert("path".to_string(), VmValue::String(Rc::from(path.as_str())));
+                item.insert("local".to_string(), local);
+                items.push(VmValue::Dict(Rc::new(item)));
+            }
+        }
+        if include_dirs {
+            let directories: Vec<String> = st.entries.keys().cloned().collect();
+            for dir in directories {
+                let local = st.local_directory(&dir);
+                let resolved = st.resolve(&dir);
+                let local_value = match &namespace {
+                    Some(ns) => match local.namespaces.get(ns) {
+                        Some(fields) => namespace_fields_to_vm(fields),
+                        None => continue,
+                    },
+                    None => directory_metadata_to_vm(&local),
+                };
+                let resolved_value = match &namespace {
+                    Some(ns) => resolved
+                        .namespaces
+                        .get(ns)
+                        .map(namespace_fields_to_vm)
+                        .unwrap_or(VmValue::Nil),
+                    None => directory_metadata_to_vm(&resolved),
+                };
+                let mut item = BTreeMap::new();
+                item.insert("kind".to_string(), VmValue::String(Rc::from("dir")));
+                item.insert(
+                    "path".to_string(),
+                    VmValue::String(Rc::from(normalize_directory_key(&dir))),
+                );
+                item.insert("local".to_string(), local_value);
+                item.insert("resolved".to_string(), resolved_value);
+                items.push(VmValue::Dict(Rc::new(item)));
+            }
+        }
+        Ok(VmValue::List(Rc::new(items)))
+    });
+
     register_scan_builtins(vm);
 }
 
@@ -1171,6 +1491,142 @@ mod tests {
                 .and_then(|fields| fields.get("kind")),
             Some(&serde_json::json!("module"))
         );
+    }
+
+    #[test]
+    fn path_metadata_file_round_trip_does_not_inherit() {
+        let base = temp_path("path_file_roundtrip");
+        let mut state = MetadataState::new(&base);
+
+        // Dir-level fact set on a parent — should not leak into file lookup.
+        state.set_namespace(
+            "src",
+            "facts",
+            BTreeMap::from([("owner".into(), serde_json::json!("vm"))]),
+        );
+        state.set_file_namespace(
+            "src/foo.rs",
+            "facts",
+            BTreeMap::from([("summary".into(), serde_json::json!("entry point"))]),
+        );
+
+        let file_fields = state.file_namespace("src/foo.rs", "facts").expect("file");
+        assert_eq!(
+            file_fields.get("summary"),
+            Some(&serde_json::json!("entry point"))
+        );
+        // File lookup must NOT inherit "owner" from the parent dir entry.
+        assert!(!file_fields.contains_key("owner"));
+
+        // Missing file path returns None.
+        assert!(state.file_namespace("src/missing.rs", "facts").is_none());
+        // Missing namespace on a known file returns None.
+        assert!(state
+            .file_namespace("src/foo.rs", "other_namespace")
+            .is_none());
+    }
+
+    #[test]
+    fn path_metadata_persists_files_alongside_dirs() {
+        let base = temp_path("path_persist");
+        let mut state = MetadataState::new(&base);
+        state.set_namespace(
+            ".",
+            "classification",
+            BTreeMap::from([("language".into(), serde_json::json!("rust"))]),
+        );
+        state.set_file_namespace(
+            "src/foo.rs",
+            "facts",
+            BTreeMap::from([("summary".into(), serde_json::json!("entry point"))]),
+        );
+        state.set_file_namespace(
+            "src/bar.rs",
+            "facts",
+            BTreeMap::from([("summary".into(), serde_json::json!("helpers"))]),
+        );
+        state.save().expect("save");
+
+        let facts_shard = std::fs::read_to_string(
+            crate::runtime_paths::metadata_dir(&base)
+                .join("facts")
+                .join(NAMESPACE_ENTRIES_FILE),
+        )
+        .expect("facts shard");
+        let parsed = serde_json::from_str::<serde_json::Value>(&facts_shard).expect("json");
+        let files = parsed.get("files").and_then(|v| v.as_object()).unwrap();
+        assert!(files.contains_key("src/foo.rs"));
+        assert!(files.contains_key("src/bar.rs"));
+
+        // Dir-only namespace must not write a `files` field.
+        let class_shard = std::fs::read_to_string(
+            crate::runtime_paths::metadata_dir(&base)
+                .join("classification")
+                .join(NAMESPACE_ENTRIES_FILE),
+        )
+        .expect("classification shard");
+        let parsed = serde_json::from_str::<serde_json::Value>(&class_shard).expect("json");
+        assert!(parsed.get("files").is_none());
+
+        // Reload from disk and verify file entries round-trip.
+        let mut reloaded = MetadataState::new(&base);
+        let fields = reloaded
+            .file_namespace("src/foo.rs", "facts")
+            .expect("reloaded");
+        assert_eq!(
+            fields.get("summary"),
+            Some(&serde_json::json!("entry point"))
+        );
+    }
+
+    #[test]
+    fn path_metadata_load_tolerates_stale_snapshot_without_files_section() {
+        let base = temp_path("path_stale");
+        let metadata_root = crate::runtime_paths::metadata_dir(&base);
+        std::fs::create_dir_all(metadata_root.join("facts")).unwrap();
+        // Pre-v2 shard with only `entries`, no `files` — must still load.
+        std::fs::write(
+            metadata_root.join("facts").join(NAMESPACE_ENTRIES_FILE),
+            serde_json::json!({
+                "version": 1,
+                "namespace": "facts",
+                "entries": {
+                    "src": {"kind": "module"}
+                }
+            })
+            .to_string(),
+        )
+        .unwrap();
+
+        let mut state = MetadataState::new(&base);
+        state.ensure_loaded();
+        assert_eq!(
+            state
+                .entries
+                .get("src")
+                .and_then(|meta| meta.namespaces.get("facts"))
+                .and_then(|f| f.get("kind")),
+            Some(&serde_json::json!("module"))
+        );
+        assert!(state.files.is_empty());
+        assert!(state.file_namespace("src/foo.rs", "facts").is_none());
+    }
+
+    #[test]
+    fn normalize_file_key_handles_common_inputs() {
+        assert_eq!(normalize_file_key("src/foo.rs"), Some("src/foo.rs".into()));
+        assert_eq!(
+            normalize_file_key("./src/foo.rs"),
+            Some("src/foo.rs".into())
+        );
+        assert_eq!(
+            normalize_file_key("src\\nested\\foo.rs"),
+            Some("src/nested/foo.rs".into())
+        );
+        assert_eq!(normalize_file_key("src/foo.rs/"), Some("src/foo.rs".into()));
+        assert_eq!(normalize_file_key(""), None);
+        assert_eq!(normalize_file_key("."), None);
+        assert_eq!(normalize_file_key(".."), None);
     }
 
     #[test]
