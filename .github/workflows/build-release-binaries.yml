@@ -162,12 +162,17 @@ jobs:
         shell: bash
         run: echo "RUSTC_WRAPPER=${SCCACHE_PATH}" >> "$GITHUB_ENV"
 
+      # This workflow fires on tag pushes (refs/tags/v*) and workflow_dispatch
+      # against a tag, so a `save-if: github.ref == 'refs/heads/main'` guard
+      # always evaluates false and the release cache was never populated. Let
+      # Swatinem save by default so the second release in a series can warm
+      # restore the per-target `target/` from the previous tag instead of
+      # rebuilding all deps from scratch.
       - uses: Swatinem/rust-cache@c19371144df3bb44fab255c43d04cbc2ab54d1c4 # v2.9.1
         with:
           shared-key: release-${{ matrix.target }}
           cache-on-failure: true
           cache-bin: false
-          save-if: ${{ github.ref == 'refs/heads/main' }}
 
       - name: Add cross-compile target to pinned toolchain
         run: |
