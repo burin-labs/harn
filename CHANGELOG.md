@@ -35,6 +35,14 @@ condensed series summaries instead of full per-patch history.
   read-write helpers that reuse `std/fs` fallback and newline conventions,
   transcript sidecar path helpers, standard artifact path dictionaries, and
   newest-first recent-run listing for recovery/review flows.
+- **OpenAPI SDK package scaffold (#2084).** Adds
+  `harn package scaffold openapi` to turn a local or HTTPS OpenAPI 3.1 spec
+  into a focused Harn SDK package with generated `src/lib.harn`,
+  `harn.toml`, a copied spec fixture, `scripts/regen.harn`, docs, README,
+  smoke tests, and package CI. The scaffold delegates SDK source generation
+  to `harn-openapi`, declares that dependency for regeneration, and documents
+  when package authors should use generated helpers instead of hand-written
+  `harness.net` calls.
 - **`harness.net.*` access policy (#1913).** Adds the `std/net_policy`
   stdlib module so scripts can attach a per-harness allow/deny policy
   to `harness.net.*` requests: `NetPolicy.create({allow, deny,

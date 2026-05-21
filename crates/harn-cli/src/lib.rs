@@ -24,9 +24,10 @@ use std::{env, fs, process, thread};
 
 use cli::{
     Cli, Command, CompletionShell, EvalCommand, MergeCaptainCommand, MergeCaptainMockCommand,
-    ModelInfoArgs, PackageArtifactsCommand, PackageCacheCommand, PackageCommand, PersonaCommand,
-    PersonaSupervisionCommand, ProvidersCommand, RunsCommand, ServeCommand, SkillCommand,
-    SkillKeyCommand, SkillTrustCommand, SkillsCommand, TimeCommand, ToolCommand,
+    ModelInfoArgs, PackageArtifactsCommand, PackageCacheCommand, PackageCommand,
+    PackageScaffoldCommand, PersonaCommand, PersonaSupervisionCommand, ProvidersCommand,
+    RunsCommand, ServeCommand, SkillCommand, SkillKeyCommand, SkillTrustCommand, SkillsCommand,
+    TimeCommand, ToolCommand,
 };
 use harn_lexer::Lexer;
 use harn_parser::{DiagnosticSeverity, Parser, TypeChecker};
@@ -1149,6 +1150,14 @@ async fn async_main() {
                 }
                 PackageArtifactsCommand::Check(check) => {
                     package::artifacts_check(&check.manifest, check.json)
+                }
+            },
+            PackageCommand::Scaffold(args) => match args.command {
+                PackageScaffoldCommand::Openapi(openapi) => {
+                    if let Err(error) = commands::package_scaffold::run_openapi(&openapi).await {
+                        eprintln!("error: {error}");
+                        process::exit(1);
+                    }
                 }
             },
         },

@@ -253,7 +253,9 @@ defaults, safe, prompts, catalog).
   `[[package.tools]]` and `[[package.skills]]`, and ship provider/alias
   adapters declaratively via `[llm]` in `harn.toml`, without editing core
   runtime registration code. `harn tool new <name>` scaffolds a Harn-native
-  tool package with manifest metadata, tests, docs, and CI.
+  tool package with manifest metadata, tests, docs, and CI, while
+  `harn package scaffold openapi` turns an OpenAPI spec into a focused
+  generated SDK package with a regeneration script and package checks.
   Local sibling packages can be added with `harn add ../harn-openapi`;
   Harn derives the alias from the dependency's `harn.toml` and live-links
   directory path dependencies into `.harn/packages/` for fast multi-repo

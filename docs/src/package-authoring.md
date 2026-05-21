@@ -57,6 +57,37 @@ import the stable export, and merge it into their own tool registry:
 import { tools } from "acme-echo/tools"
 ```
 
+## Create an OpenAPI SDK package
+
+```bash
+harn package scaffold openapi \
+  --name acme-sdk-harn \
+  --module-name acme_sdk \
+  --client-name AcmeClient \
+  --spec ./openapi.json \
+  --out ./acme-sdk-harn
+cd acme-sdk-harn
+harn install
+harn check src/lib.harn
+harn test tests/
+harn package check
+harn package docs --check
+harn package pack --dry-run
+```
+
+The OpenAPI scaffold uses `harn-openapi` to generate `src/lib.harn`, stores the
+input spec under `openapi/`, writes a `scripts/regen.harn` regeneration path,
+adds a package export for the generated module, and creates a smoke test that
+uses a mocked operation when the spec has a no-argument operation. The package
+is intentionally focused: it wraps the API described by the OpenAPI document,
+not an entire provider product line.
+
+Hand-written `harness.net` calls are fine for private one-off endpoints,
+temporary admin probes, or gaps that are not in the OpenAPI document. Repeated
+provider API coverage, connector helpers, and user-facing package exports
+should use a generated SDK or a small Harn wrapper over one so auth,
+pagination, rate-limit metadata, and package tests stay centralized.
+
 ## Create a skill package
 
 ```bash
