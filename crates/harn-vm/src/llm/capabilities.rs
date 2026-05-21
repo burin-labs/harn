@@ -1122,6 +1122,25 @@ anthropic_beta_features = ["fine-grained-tool-streaming-2025-05-14"]
     }
 
     #[test]
+    fn openrouter_structured_routes_cover_current_open_models() {
+        reset();
+        for model in [
+            "deepseek/deepseek-v4-flash",
+            "mistralai/devstral-small",
+            "meta-llama/llama-4-scout",
+        ] {
+            let caps = lookup("openrouter", model);
+            assert!(caps.native_tools, "{model} should expose native tools");
+            assert_eq!(caps.structured_output.as_deref(), Some("native"));
+            assert_eq!(caps.structured_output_mode, "native_json");
+        }
+        assert!(lookup("openrouter", "deepseek/deepseek-v4-flash").top_k_supported);
+        assert!(lookup("openrouter", "meta-llama/llama-4-scout").top_k_supported);
+        assert!(!lookup("openrouter", "mistralai/devstral-small").top_k_supported);
+        assert!(lookup("openrouter", "google/gemma-4-26b-a4b-it").top_k_supported);
+    }
+
+    #[test]
     fn bedrock_claude_uses_anthropic_wire_capabilities() {
         reset();
         let caps = lookup("bedrock", "anthropic.claude-3-5-sonnet-20240620-v1:0");

@@ -6,6 +6,17 @@ Pre-0.6 highlights live in [CHANGELOG-pre-0.6.md](CHANGELOG-pre-0.6.md).
 Harn had no external users before 0.6.0, so that archive intentionally keeps
 condensed series summaries instead of full per-patch history.
 
+## Unreleased
+
+### Fixed
+
+- **OpenRouter structured-output routing.** Refreshes OpenRouter capability
+  rules for current DeepSeek V4, Devstral, Llama 4, and Gemma 4 families;
+  preserves `schema_stream_aborted` error categories across off-thread LLM
+  calls; emits `top_k` only when the selected route supports it; and requests
+  OpenRouter `provider.require_parameters` whenever schemas or `top_k` must be
+  honored by the routed backend.
+
 ## v0.8.28
 
 ### Added
