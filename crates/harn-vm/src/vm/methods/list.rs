@@ -4,125 +4,42 @@ use std::rc::Rc;
 use crate::value::{compare_values, values_equal, VmError, VmValue};
 
 impl crate::vm::Vm {
-    pub(super) async fn call_list_method(
-        &mut self,
+    pub(super) fn call_list_method_sync(
         items: &Rc<Vec<VmValue>>,
         method: &str,
         args: &[VmValue],
-    ) -> Result<VmValue, VmError> {
-        match method {
+    ) -> Option<Result<VmValue, VmError>> {
+        let result = match method {
             "count" => Ok(VmValue::Int(items.len() as i64)),
             "empty" => Ok(VmValue::Bool(items.is_empty())),
-            "map" => {
-                if let Some(callable) = args.first().filter(|v| Self::is_callable_value(v)) {
-                    let mut results = Vec::with_capacity(items.len());
-                    for item in items.iter() {
-                        results.push(self.call_callable_value(callable, &[item.clone()]).await?);
-                    }
-                    Ok(VmValue::List(Rc::new(results)))
-                } else {
-                    Ok(VmValue::Nil)
-                }
-            }
-            "filter" => {
-                if let Some(callable) = args.first().filter(|v| Self::is_callable_value(v)) {
-                    let mut results = Vec::with_capacity(items.len());
-                    for item in items.iter() {
-                        let result = self.call_callable_value(callable, &[item.clone()]).await?;
-                        if result.is_truthy() {
-                            results.push(item.clone());
-                        }
-                    }
-                    Ok(VmValue::List(Rc::new(results)))
-                } else {
-                    Ok(VmValue::Nil)
-                }
-            }
-            "reduce" => {
-                if args.len() >= 2 && Self::is_callable_value(&args[1]) {
-                    let callable = &args[1].clone();
-                    let mut acc = args[0].clone();
-                    for item in items.iter() {
-                        acc = self
-                            .call_callable_value(callable, &[acc, item.clone()])
-                            .await?;
-                    }
-                    return Ok(acc);
+            "map" | "filter" | "find" | "flat_map" | "sort_by" | "partition" | "group_by" => {
+                if args.first().is_some_and(Self::is_callable_value) {
+                    return None;
                 }
                 Ok(VmValue::Nil)
             }
-            "find" => {
-                if let Some(callable) = args.first().filter(|v| Self::is_callable_value(v)) {
-                    for item in items.iter() {
-                        let result = self.call_callable_value(callable, &[item.clone()]).await?;
-                        if result.is_truthy() {
-                            return Ok(item.clone());
-                        }
-                    }
+            "reduce" => {
+                if args.len() >= 2 && Self::is_callable_value(&args[1]) {
+                    return None;
                 }
                 Ok(VmValue::Nil)
             }
             "any" => {
-                if let Some(callable) = args.first().filter(|v| Self::is_callable_value(v)) {
-                    for item in items.iter() {
-                        let result = self.call_callable_value(callable, &[item.clone()]).await?;
-                        if result.is_truthy() {
-                            return Ok(VmValue::Bool(true));
-                        }
-                    }
-                    Ok(VmValue::Bool(false))
-                } else {
-                    Ok(VmValue::Bool(false))
+                if args.first().is_some_and(Self::is_callable_value) {
+                    return None;
                 }
+                Ok(VmValue::Bool(false))
             }
             "all" | "every" | "all?" => {
-                if let Some(callable) = args.first().filter(|v| Self::is_callable_value(v)) {
-                    for item in items.iter() {
-                        let result = self.call_callable_value(callable, &[item.clone()]).await?;
-                        if !result.is_truthy() {
-                            return Ok(VmValue::Bool(false));
-                        }
-                    }
-                    Ok(VmValue::Bool(true))
-                } else {
-                    Ok(VmValue::Bool(true))
+                if args.first().is_some_and(Self::is_callable_value) {
+                    return None;
                 }
-            }
-            "flat_map" => {
-                if let Some(callable) = args.first().filter(|v| Self::is_callable_value(v)) {
-                    let mut results = Vec::with_capacity(items.len());
-                    for item in items.iter() {
-                        let result = self.call_callable_value(callable, &[item.clone()]).await?;
-                        if let VmValue::List(inner) = result {
-                            results.extend(inner.iter().cloned());
-                        } else {
-                            results.push(result);
-                        }
-                    }
-                    Ok(VmValue::List(Rc::new(results)))
-                } else {
-                    Ok(VmValue::Nil)
-                }
+                Ok(VmValue::Bool(true))
             }
             "sort" => {
                 let mut sorted: Vec<VmValue> = items.iter().cloned().collect();
                 sorted.sort_by(|a, b| compare_values(a, b).cmp(&0));
                 Ok(VmValue::List(Rc::new(sorted)))
-            }
-            "sort_by" => {
-                if let Some(callable) = args.first().filter(|v| Self::is_callable_value(v)) {
-                    let mut keyed: Vec<(VmValue, VmValue)> = Vec::new();
-                    for item in items.iter() {
-                        let key = self.call_callable_value(callable, &[item.clone()]).await?;
-                        keyed.push((item.clone(), key));
-                    }
-                    keyed.sort_by(|(_, ka), (_, kb)| compare_values(ka, kb).cmp(&0));
-                    Ok(VmValue::List(Rc::new(
-                        keyed.into_iter().map(|(v, _)| v).collect(),
-                    )))
-                } else {
-                    Ok(VmValue::Nil)
-                }
             }
             "reverse" => {
                 let mut rev: Vec<VmValue> = items.iter().cloned().collect();
@@ -182,14 +99,14 @@ impl crate::vm::Vm {
                 let start = if start_raw < 0 {
                     (len + start_raw).max(0) as usize
                 } else {
-                    (start_raw.min(len)) as usize
+                    start_raw.min(len) as usize
                 };
                 let end = if args.len() > 1 {
                     let end_raw = args[1].as_int().unwrap_or(len);
                     if end_raw < 0 {
                         (len + end_raw).max(0) as usize
                     } else {
-                        (end_raw.min(len)) as usize
+                        end_raw.min(len) as usize
                     }
                 } else {
                     len as usize
@@ -245,7 +162,7 @@ impl crate::vm::Vm {
             }
             "min" => {
                 if items.is_empty() {
-                    return Ok(VmValue::Nil);
+                    return Some(Ok(VmValue::Nil));
                 }
                 let mut min_val = items[0].clone();
                 for item in &items[1..] {
@@ -257,7 +174,7 @@ impl crate::vm::Vm {
             }
             "max" => {
                 if items.is_empty() {
-                    return Ok(VmValue::Nil);
+                    return Some(Ok(VmValue::Nil));
                 }
                 let mut max_val = items[0].clone();
                 for item in &items[1..] {
@@ -291,26 +208,14 @@ impl crate::vm::Vm {
                 Ok(VmValue::List(Rc::new(new_list)))
             }
             "none" | "none?" => {
-                if let Some(callable) = args.first().filter(|v| Self::is_callable_value(v)) {
-                    for item in items.iter() {
-                        let result = self.call_callable_value(callable, &[item.clone()]).await?;
-                        if result.is_truthy() {
-                            return Ok(VmValue::Bool(false));
-                        }
-                    }
-                    Ok(VmValue::Bool(true))
-                } else {
-                    Ok(VmValue::Bool(items.is_empty()))
+                if args.first().is_some_and(Self::is_callable_value) {
+                    return None;
                 }
+                Ok(VmValue::Bool(items.is_empty()))
             }
             "find_index" => {
-                if let Some(callable) = args.first().filter(|v| Self::is_callable_value(v)) {
-                    for (i, item) in items.iter().enumerate() {
-                        let result = self.call_callable_value(callable, &[item.clone()]).await?;
-                        if result.is_truthy() {
-                            return Ok(VmValue::Int(i as i64));
-                        }
-                    }
+                if args.first().is_some_and(Self::is_callable_value) {
+                    return None;
                 }
                 Ok(VmValue::Int(-1))
             }
@@ -336,43 +241,6 @@ impl crate::vm::Vm {
                     None => Ok(items.last().cloned().unwrap_or(VmValue::Nil)),
                 }
             }
-            "partition" => {
-                if let Some(callable) = args.first().filter(|v| Self::is_callable_value(v)) {
-                    let mut truthy = Vec::new();
-                    let mut falsy = Vec::new();
-                    for item in items.iter() {
-                        let result = self.call_callable_value(callable, &[item.clone()]).await?;
-                        if result.is_truthy() {
-                            truthy.push(item.clone());
-                        } else {
-                            falsy.push(item.clone());
-                        }
-                    }
-                    Ok(VmValue::List(Rc::new(vec![
-                        VmValue::List(Rc::new(truthy)),
-                        VmValue::List(Rc::new(falsy)),
-                    ])))
-                } else {
-                    Ok(VmValue::Nil)
-                }
-            }
-            "group_by" => {
-                if let Some(callable) = args.first().filter(|v| Self::is_callable_value(v)) {
-                    let mut groups: BTreeMap<String, Vec<VmValue>> = BTreeMap::new();
-                    for item in items.iter() {
-                        let key = self.call_callable_value(callable, &[item.clone()]).await?;
-                        let key_str = key.display();
-                        groups.entry(key_str).or_default().push(item.clone());
-                    }
-                    let result: BTreeMap<String, VmValue> = groups
-                        .into_iter()
-                        .map(|(k, v)| (k, VmValue::List(Rc::new(v))))
-                        .collect();
-                    Ok(VmValue::Dict(Rc::new(result)))
-                } else {
-                    Ok(VmValue::Nil)
-                }
-            }
             "chunk" | "each_slice" => {
                 let size = args.first().and_then(|a| a.as_int()).unwrap_or(1).max(1) as usize;
                 let chunks: Vec<VmValue> = items
@@ -381,40 +249,11 @@ impl crate::vm::Vm {
                     .collect();
                 Ok(VmValue::List(Rc::new(chunks)))
             }
-            "min_by" => {
+            "min_by" | "max_by" => {
                 if items.is_empty() {
-                    return Ok(VmValue::Nil);
-                }
-                if let Some(callable) = args.first().filter(|v| Self::is_callable_value(v)) {
-                    let mut best = items[0].clone();
-                    let mut best_key = self.call_callable_value(callable, &[best.clone()]).await?;
-                    for item in &items[1..] {
-                        let key = self.call_callable_value(callable, &[item.clone()]).await?;
-                        if compare_values(&key, &best_key) < 0 {
-                            best = item.clone();
-                            best_key = key;
-                        }
-                    }
-                    Ok(best)
-                } else {
                     Ok(VmValue::Nil)
-                }
-            }
-            "max_by" => {
-                if items.is_empty() {
-                    return Ok(VmValue::Nil);
-                }
-                if let Some(callable) = args.first().filter(|v| Self::is_callable_value(v)) {
-                    let mut best = items[0].clone();
-                    let mut best_key = self.call_callable_value(callable, &[best.clone()]).await?;
-                    for item in &items[1..] {
-                        let key = self.call_callable_value(callable, &[item.clone()]).await?;
-                        if compare_values(&key, &best_key) > 0 {
-                            best = item.clone();
-                            best_key = key;
-                        }
-                    }
-                    Ok(best)
+                } else if args.first().is_some_and(Self::is_callable_value) {
+                    return None;
                 } else {
                     Ok(VmValue::Nil)
                 }
@@ -431,7 +270,7 @@ impl crate::vm::Vm {
                 let size = args.first().and_then(|a| a.as_int()).unwrap_or(2).max(1) as usize;
                 let step = args.get(1).and_then(|a| a.as_int()).unwrap_or(1).max(1) as usize;
                 if size > items.len() {
-                    return Ok(VmValue::List(Rc::new(Vec::new())));
+                    return Some(Ok(VmValue::List(Rc::new(Vec::new()))));
                 }
                 let mut windows = Vec::new();
                 let mut start = 0;
@@ -450,10 +289,6 @@ impl crate::vm::Vm {
                 }
                 Ok(VmValue::Dict(Rc::new(counts)))
             }
-            // Iter-style sinks behave as identities/conversions when
-            // the receiver is already eager. Lets `xs.filter(...).to_list()`
-            // work uniformly whether `filter` returned an `iter` or a
-            // `list`.
             "to_list" => Ok(VmValue::List(Rc::clone(items))),
             "to_set" => {
                 let mut out: Vec<VmValue> = Vec::with_capacity(items.len());
@@ -463,6 +298,218 @@ impl crate::vm::Vm {
                     }
                 }
                 Ok(VmValue::Set(Rc::new(out)))
+            }
+            _ => Err(VmError::Runtime(format!("list has no method `{method}`"))),
+        };
+        Some(result)
+    }
+
+    pub(super) async fn call_list_method(
+        &mut self,
+        items: &Rc<Vec<VmValue>>,
+        method: &str,
+        args: &[VmValue],
+    ) -> Result<VmValue, VmError> {
+        if let Some(result) = Self::call_list_method_sync(items, method, args) {
+            return result;
+        }
+
+        match method {
+            "map" => {
+                let Some(callable) = args.first().filter(|v| Self::is_callable_value(v)) else {
+                    return Ok(VmValue::Nil);
+                };
+                let mut results = Vec::with_capacity(items.len());
+                for item in items.iter() {
+                    results.push(self.call_callable_value(callable, &[item.clone()]).await?);
+                }
+                Ok(VmValue::List(Rc::new(results)))
+            }
+            "filter" => {
+                let Some(callable) = args.first().filter(|v| Self::is_callable_value(v)) else {
+                    return Ok(VmValue::Nil);
+                };
+                let mut results = Vec::with_capacity(items.len());
+                for item in items.iter() {
+                    let result = self.call_callable_value(callable, &[item.clone()]).await?;
+                    if result.is_truthy() {
+                        results.push(item.clone());
+                    }
+                }
+                Ok(VmValue::List(Rc::new(results)))
+            }
+            "reduce" => {
+                let Some(callable) = args.get(1).filter(|v| Self::is_callable_value(v)).cloned()
+                else {
+                    return Ok(VmValue::Nil);
+                };
+                let mut acc = args.first().cloned().unwrap_or(VmValue::Nil);
+                for item in items.iter() {
+                    acc = self
+                        .call_callable_value(&callable, &[acc, item.clone()])
+                        .await?;
+                }
+                Ok(acc)
+            }
+            "find" => {
+                let Some(callable) = args.first().filter(|v| Self::is_callable_value(v)) else {
+                    return Ok(VmValue::Nil);
+                };
+                for item in items.iter() {
+                    let result = self.call_callable_value(callable, &[item.clone()]).await?;
+                    if result.is_truthy() {
+                        return Ok(item.clone());
+                    }
+                }
+                Ok(VmValue::Nil)
+            }
+            "any" => {
+                let Some(callable) = args.first().filter(|v| Self::is_callable_value(v)) else {
+                    return Ok(VmValue::Bool(false));
+                };
+                for item in items.iter() {
+                    let result = self.call_callable_value(callable, &[item.clone()]).await?;
+                    if result.is_truthy() {
+                        return Ok(VmValue::Bool(true));
+                    }
+                }
+                Ok(VmValue::Bool(false))
+            }
+            "all" | "every" | "all?" => {
+                let Some(callable) = args.first().filter(|v| Self::is_callable_value(v)) else {
+                    return Ok(VmValue::Bool(true));
+                };
+                for item in items.iter() {
+                    let result = self.call_callable_value(callable, &[item.clone()]).await?;
+                    if !result.is_truthy() {
+                        return Ok(VmValue::Bool(false));
+                    }
+                }
+                Ok(VmValue::Bool(true))
+            }
+            "flat_map" => {
+                let Some(callable) = args.first().filter(|v| Self::is_callable_value(v)) else {
+                    return Ok(VmValue::Nil);
+                };
+                let mut results = Vec::with_capacity(items.len());
+                for item in items.iter() {
+                    let result = self.call_callable_value(callable, &[item.clone()]).await?;
+                    if let VmValue::List(inner) = result {
+                        results.extend(inner.iter().cloned());
+                    } else {
+                        results.push(result);
+                    }
+                }
+                Ok(VmValue::List(Rc::new(results)))
+            }
+            "sort_by" => {
+                let Some(callable) = args.first().filter(|v| Self::is_callable_value(v)) else {
+                    return Ok(VmValue::Nil);
+                };
+                let mut keyed: Vec<(VmValue, VmValue)> = Vec::new();
+                for item in items.iter() {
+                    let key = self.call_callable_value(callable, &[item.clone()]).await?;
+                    keyed.push((item.clone(), key));
+                }
+                keyed.sort_by(|(_, ka), (_, kb)| compare_values(ka, kb).cmp(&0));
+                Ok(VmValue::List(Rc::new(
+                    keyed.into_iter().map(|(v, _)| v).collect(),
+                )))
+            }
+            "none" | "none?" => {
+                let Some(callable) = args.first().filter(|v| Self::is_callable_value(v)) else {
+                    return Ok(VmValue::Bool(items.is_empty()));
+                };
+                for item in items.iter() {
+                    let result = self.call_callable_value(callable, &[item.clone()]).await?;
+                    if result.is_truthy() {
+                        return Ok(VmValue::Bool(false));
+                    }
+                }
+                Ok(VmValue::Bool(true))
+            }
+            "find_index" => {
+                let Some(callable) = args.first().filter(|v| Self::is_callable_value(v)) else {
+                    return Ok(VmValue::Int(-1));
+                };
+                for (i, item) in items.iter().enumerate() {
+                    let result = self.call_callable_value(callable, &[item.clone()]).await?;
+                    if result.is_truthy() {
+                        return Ok(VmValue::Int(i as i64));
+                    }
+                }
+                Ok(VmValue::Int(-1))
+            }
+            "partition" => {
+                let Some(callable) = args.first().filter(|v| Self::is_callable_value(v)) else {
+                    return Ok(VmValue::Nil);
+                };
+                let mut truthy = Vec::new();
+                let mut falsy = Vec::new();
+                for item in items.iter() {
+                    let result = self.call_callable_value(callable, &[item.clone()]).await?;
+                    if result.is_truthy() {
+                        truthy.push(item.clone());
+                    } else {
+                        falsy.push(item.clone());
+                    }
+                }
+                Ok(VmValue::List(Rc::new(vec![
+                    VmValue::List(Rc::new(truthy)),
+                    VmValue::List(Rc::new(falsy)),
+                ])))
+            }
+            "group_by" => {
+                let Some(callable) = args.first().filter(|v| Self::is_callable_value(v)) else {
+                    return Ok(VmValue::Nil);
+                };
+                let mut groups: BTreeMap<String, Vec<VmValue>> = BTreeMap::new();
+                for item in items.iter() {
+                    let key = self.call_callable_value(callable, &[item.clone()]).await?;
+                    let key_str = key.display();
+                    groups.entry(key_str).or_default().push(item.clone());
+                }
+                let result: BTreeMap<String, VmValue> = groups
+                    .into_iter()
+                    .map(|(k, v)| (k, VmValue::List(Rc::new(v))))
+                    .collect();
+                Ok(VmValue::Dict(Rc::new(result)))
+            }
+            "min_by" => {
+                if items.is_empty() {
+                    return Ok(VmValue::Nil);
+                }
+                let Some(callable) = args.first().filter(|v| Self::is_callable_value(v)) else {
+                    return Ok(VmValue::Nil);
+                };
+                let mut best = items[0].clone();
+                let mut best_key = self.call_callable_value(callable, &[best.clone()]).await?;
+                for item in &items[1..] {
+                    let key = self.call_callable_value(callable, &[item.clone()]).await?;
+                    if compare_values(&key, &best_key) < 0 {
+                        best = item.clone();
+                        best_key = key;
+                    }
+                }
+                Ok(best)
+            }
+            "max_by" => {
+                if items.is_empty() {
+                    return Ok(VmValue::Nil);
+                }
+                let Some(callable) = args.first().filter(|v| Self::is_callable_value(v)) else {
+                    return Ok(VmValue::Nil);
+                };
+                let mut best = items[0].clone();
+                let mut best_key = self.call_callable_value(callable, &[best.clone()]).await?;
+                for item in &items[1..] {
+                    let key = self.call_callable_value(callable, &[item.clone()]).await?;
+                    if compare_values(&key, &best_key) > 0 {
+                        best = item.clone();
+                        best_key = key;
+                    }
+                }
+                Ok(best)
             }
             _ => Err(VmError::Runtime(format!("list has no method `{method}`"))),
         }

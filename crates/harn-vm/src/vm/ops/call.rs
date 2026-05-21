@@ -1186,22 +1186,124 @@ impl super::super::Vm {
                 Self::const_string(&frame.chunk.constants[name_idx as usize])?
             };
             let cache_target = Self::method_cache_target(&obj, &method, argc);
-            let args = self.take_stack_args_from(args_start)?;
-            self.stack.truncate(obj_idx);
-            let result = self.call_method(obj, &method, &args).await?;
+            let result = if let Some(result) =
+                Self::call_method_sync(&obj, &method, &self.stack[args_start..])
+            {
+                self.stack.truncate(obj_idx);
+                result?
+            } else {
+                let args = self.take_stack_args_from(args_start)?;
+                self.stack.truncate(obj_idx);
+                self.call_method_async(obj, &method, &args).await?
+            };
             if let (Some(slot), Some(target)) = (cache_slot, cache_target) {
                 let frame = self.frames.last().unwrap();
                 frame.chunk.set_inline_cache_entry(
                     slot,
                     InlineCacheEntry::Method {
                         name_idx,
-                        argc: args.len(),
+                        argc,
                         target,
                     },
                 );
             }
             self.stack.push(result);
         }
+        Ok(())
+    }
+
+    /// Completes method calls that do not need to suspend. Returning `None`
+    /// leaves the frame and operand stack untouched for the async fallback.
+    pub(super) fn execute_method_call_sync(
+        &mut self,
+        optional: bool,
+    ) -> Option<Result<(), VmError>> {
+        let (name_idx, argc, cache_slot, cache_entry) = {
+            let frame = self.frames.last().unwrap();
+            let op_offset = frame.ip.saturating_sub(1);
+            let name_idx = frame.chunk.read_u16(frame.ip);
+            let argc = frame.chunk.code[frame.ip + 2] as usize;
+            let cache_slot = frame.chunk.inline_cache_slot(op_offset);
+            let cache_entry = cache_slot
+                .map(|slot| frame.chunk.inline_cache_entry(slot))
+                .unwrap_or(InlineCacheEntry::Empty);
+            (name_idx, argc, cache_slot, cache_entry)
+        };
+
+        let args_start = match self.stack.len().checked_sub(argc) {
+            Some(args_start) => args_start,
+            None => return Some(Err(VmError::StackUnderflow)),
+        };
+        let obj_idx = match args_start.checked_sub(1) {
+            Some(obj_idx) => obj_idx,
+            None => return Some(Err(VmError::StackUnderflow)),
+        };
+        let obj = &self.stack[obj_idx];
+
+        if optional && matches!(obj, VmValue::Nil) {
+            return Some(self.finish_method_call_sync(
+                argc,
+                Ok(VmValue::Nil),
+                name_idx,
+                None,
+                None,
+            ));
+        }
+
+        if let Some(result) =
+            Self::try_cached_method(&cache_entry, name_idx, argc, obj, &self.stack[args_start..])
+        {
+            return Some(self.finish_method_call_sync(argc, Ok(result), name_idx, None, None));
+        }
+
+        let (result, cache_target) = {
+            let frame = self.frames.last().unwrap();
+            let method = match Self::const_str(&frame.chunk.constants[name_idx as usize]) {
+                Ok(method) => method,
+                Err(err) => {
+                    return Some(self.finish_method_call_sync(argc, Err(err), name_idx, None, None))
+                }
+            };
+            let args = &self.stack[args_start..];
+            let result = Self::call_method_sync(obj, method, args)?;
+            let cache_target = Self::method_cache_target(obj, method, argc);
+            (result, cache_target)
+        };
+
+        Some(self.finish_method_call_sync(argc, result, name_idx, cache_slot, cache_target))
+    }
+
+    fn finish_method_call_sync(
+        &mut self,
+        argc: usize,
+        result: Result<VmValue, VmError>,
+        name_idx: u16,
+        cache_slot: Option<usize>,
+        cache_target: Option<MethodCacheTarget>,
+    ) -> Result<(), VmError> {
+        let frame = self.frames.last_mut().unwrap();
+        frame.ip += 3;
+
+        let obj_idx = self
+            .stack
+            .len()
+            .checked_sub(argc + 1)
+            .ok_or(VmError::StackUnderflow)?;
+        self.stack.truncate(obj_idx);
+
+        let result = result?;
+        if let (Some(slot), Some(target)) = (cache_slot, cache_target) {
+            let frame = self.frames.last().unwrap();
+            frame.chunk.set_inline_cache_entry(
+                slot,
+                InlineCacheEntry::Method {
+                    name_idx,
+                    argc,
+                    target,
+                },
+            );
+        }
+        self.stack.push(result);
         Ok(())
     }
 
@@ -1237,7 +1339,11 @@ impl super::super::Vm {
                 Self::const_string(&frame.chunk.constants[name_idx as usize])?
             };
             let cache_target = Self::method_cache_target(&obj, &method, args.len());
-            let result = self.call_method(obj, &method, &args).await?;
+            let result = if let Some(result) = Self::call_method_sync(&obj, &method, &args) {
+                result?
+            } else {
+                self.call_method_async(obj, &method, &args).await?
+            };
             if let (Some(slot), Some(target)) = (cache_slot, cache_target) {
                 let frame = self.frames.last().unwrap();
                 frame.chunk.set_inline_cache_entry(
