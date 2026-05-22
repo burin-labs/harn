@@ -544,35 +544,46 @@ public enum HarnACPValue: Codable, Sendable, Equatable {
     private static func jsonScalar(_ jsonObject: Any) -> HarnACPValue? {
         switch jsonObject {
         case _ as NSNull: return .null
-        case let value as Bool: return .bool(value)
-        case let value as Int: return .int(value)
-        case let value as Int64: return jsonInt64(value)
-        case let value as UInt64: return jsonUInt64(value)
-        case let value as Double: return .double(value)
         case let value as NSNumber: return jsonNumber(value)
         case let value as String: return .string(value)
         default: return nil
         }
     }
 
-    private static func jsonInt64(_ value: Int64) -> HarnACPValue? {
+    private static func jsonSignedInteger(_ value: Int64) -> HarnACPValue? {
         guard value <= Int64(Int.max), value >= Int64(Int.min) else { return nil }
         return .int(Int(value))
     }
 
-    private static func jsonUInt64(_ value: UInt64) -> HarnACPValue? {
+    private static func jsonUnsignedInteger(_ value: UInt64) -> HarnACPValue {
         value <= UInt64(Int.max) ? .int(Int(value)) : .double(Double(value))
     }
 
-    private static func jsonNumber(_ value: NSNumber) -> HarnACPValue {
-        let objCType = String(cString: value.objCType)
-        if objCType == "c" {
+    private static func jsonNumber(_ value: NSNumber) -> HarnACPValue? {
+        #if canImport(Darwin)
+        if CFGetTypeID(value) == CFBooleanGetTypeID() {
             return .bool(value.boolValue)
         }
+        if CFNumberIsFloatType(value) {
+            return .double(value.doubleValue)
+        }
+        #endif
+        let objCType = String(cString: value.objCType)
+        #if !canImport(Darwin)
+        if objCType == "c" || objCType == "B" {
+            return .bool(value.boolValue)
+        }
+        #endif
         if objCType == "f" || objCType == "d" {
             return .double(value.doubleValue)
         }
-        return .int(value.intValue)
+        if ["q", "l", "i", "s"].contains(objCType) {
+            return jsonSignedInteger(value.int64Value)
+        }
+        if ["Q", "L", "I", "S"].contains(objCType) {
+            return jsonUnsignedInteger(value.uint64Value)
+        }
+        return jsonSignedInteger(value.int64Value)
     }
 
     private static func jsonArray(_ values: [Any]) -> HarnACPValue? {
