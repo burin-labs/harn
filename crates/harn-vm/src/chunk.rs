@@ -380,13 +380,15 @@ pub enum Constant {
     Duration(i64),
 }
 
-/// Monomorphic inline-cache state for bytecode instructions that repeatedly
-/// resolve the same property or builtin method. Cache guards are intentionally
-/// conservative: each entry is tied to the instruction's name constant index
-/// and a single receiver shape. Harn collection values are immutable or
-/// copy-on-write at the VM level, so receiver-kind caches do not need
-/// invalidation. Struct field caches guard on the field name at the cached
-/// slot before reading the indexed field.
+/// Runtime-only inline-cache state for bytecode instructions that repeatedly
+/// see the same dynamic shape. Lookup caches stay monomorphic on a name and
+/// receiver shape. Adaptive caches warm on a stable operand or call target,
+/// then fall back through the generic opcode and replace or reset state when
+/// the observed shape changes.
+///
+/// This vector is intentionally excluded from [`CachedChunk`]: bytecode cache
+/// artifacts keep the slot layout but start with empty runtime feedback in each
+/// process.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) enum InlineCacheEntry {
     Empty,
@@ -399,7 +401,121 @@ pub(crate) enum InlineCacheEntry {
         argc: usize,
         target: MethodCacheTarget,
     },
+    AdaptiveBinary {
+        op: AdaptiveBinaryOp,
+        state: AdaptiveBinaryState,
+    },
+    DirectCall {
+        state: DirectCallState,
+    },
 }
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum AdaptiveBinaryOp {
+    Add,
+    Sub,
+    Mul,
+    Div,
+    Mod,
+    Equal,
+    NotEqual,
+    Less,
+    Greater,
+    LessEqual,
+    GreaterEqual,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) enum AdaptiveBinaryState {
+    Warmup {
+        shape: BinaryShape,
+        hits: u8,
+    },
+    Specialized {
+        shape: BinaryShape,
+        hits: u64,
+        misses: u64,
+    },
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum BinaryShape {
+    Int,
+    Float,
+    Bool,
+    String,
+}
+
+#[derive(Debug, Clone)]
+pub(crate) enum DirectCallState {
+    Warmup {
+        argc: usize,
+        target: DirectCallTarget,
+        hits: u8,
+    },
+    Specialized {
+        argc: usize,
+        target: DirectCallTarget,
+        hits: u64,
+        misses: u64,
+    },
+}
+
+#[derive(Debug, Clone)]
+pub(crate) enum DirectCallTarget {
+    Closure(Rc<crate::value::VmClosure>),
+}
+
+impl PartialEq for DirectCallTarget {
+    fn eq(&self, other: &Self) -> bool {
+        match (self, other) {
+            (Self::Closure(left), Self::Closure(right)) => Rc::ptr_eq(left, right),
+        }
+    }
+}
+
+impl Eq for DirectCallTarget {}
+
+impl PartialEq for DirectCallState {
+    fn eq(&self, other: &Self) -> bool {
+        match (self, other) {
+            (
+                Self::Warmup {
+                    argc: left_argc,
+                    target: left_target,
+                    hits: left_hits,
+                },
+                Self::Warmup {
+                    argc: right_argc,
+                    target: right_target,
+                    hits: right_hits,
+                },
+            ) => left_argc == right_argc && left_target == right_target && left_hits == right_hits,
+            (
+                Self::Specialized {
+                    argc: left_argc,
+                    target: left_target,
+                    hits: left_hits,
+                    misses: left_misses,
+                },
+                Self::Specialized {
+                    argc: right_argc,
+                    target: right_target,
+                    hits: right_hits,
+                    misses: right_misses,
+                },
+            ) => {
+                left_argc == right_argc
+                    && left_target == right_target
+                    && left_hits == right_hits
+                    && left_misses == right_misses
+            }
+            _ => false,
+        }
+    }
+}
+
+impl Eq for DirectCallState {}
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) enum PropertyCacheTarget {
@@ -690,9 +806,13 @@ impl Chunk {
     /// Emit a single-byte instruction.
     pub fn emit(&mut self, op: Op, line: u32) {
         let col = self.current_col;
+        let op_offset = self.code.len();
         self.code.push(op as u8);
         self.lines.push(line);
         self.columns.push(col);
+        if is_adaptive_binary_op(op) {
+            self.register_inline_cache(op_offset);
+        }
     }
 
     /// Emit an instruction with a u16 argument.
@@ -719,12 +839,16 @@ impl Chunk {
     /// Emit an instruction with a u8 argument.
     pub fn emit_u8(&mut self, op: Op, arg: u8, line: u32) {
         let col = self.current_col;
+        let op_offset = self.code.len();
         self.code.push(op as u8);
         self.code.push(arg);
         self.lines.push(line);
         self.lines.push(line);
         self.columns.push(col);
         self.columns.push(col);
+        if matches!(op, Op::Call) {
+            self.register_inline_cache(op_offset);
+        }
     }
 
     /// Emit a direct builtin call.
@@ -736,6 +860,7 @@ impl Chunk {
         line: u32,
     ) {
         let col = self.current_col;
+        let op_offset = self.code.len();
         self.code.push(Op::CallBuiltin as u8);
         self.code.extend_from_slice(&id.raw().to_be_bytes());
         self.code.push((name_idx >> 8) as u8);
@@ -745,6 +870,7 @@ impl Chunk {
             self.lines.push(line);
             self.columns.push(col);
         }
+        self.register_inline_cache(op_offset);
     }
 
     /// Emit a direct builtin spread call.
@@ -1301,6 +1427,23 @@ impl Chunk {
         }
         out
     }
+}
+
+fn is_adaptive_binary_op(op: Op) -> bool {
+    matches!(
+        op,
+        Op::Add
+            | Op::Sub
+            | Op::Mul
+            | Op::Div
+            | Op::Mod
+            | Op::Equal
+            | Op::NotEqual
+            | Op::Less
+            | Op::Greater
+            | Op::LessEqual
+            | Op::GreaterEqual
+    )
 }
 
 impl Default for Chunk {
