@@ -76,7 +76,7 @@ versions.
 | `harn routes --json`           | Trigger route + budget + capability inventory            |
 | `harn dev --watch --json`      | Streaming NDJSON incremental rebuild events              |
 | `harn time run --json`         | Per-phase wall-clock + per-LLM/tool-call latency         |
-| `harn fix plan --json` / `apply --json` | Repair plan or applied edits at a safety ceiling |
+| `harn fix plan --json` / `apply --json` | Repair plan or applied edits, plus skipped invalid files |
 | `harn pack --json`             | `.harnpack` bundle build summary (inline schema)         |
 | `harn doctor --json`           | Capability matrix: host, targets, providers, effects     |
 | `harn explain <CODE> --json`   | Per-diagnostic-code explanation                          |

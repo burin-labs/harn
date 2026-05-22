@@ -6,17 +6,49 @@ use std::path::Path;
 use harn_lexer::{FixEdit, Span};
 use harn_lint::LintSeverity;
 use harn_parser::{
-    visit, DiagnosticCode as Code, DiagnosticSeverity, Node, Repair, RepairSafety, SNode,
-    TypeChecker, TypeExpr, TypedParam,
+    visit, DiagnosticCode as Code, DiagnosticSeverity, Node, PipelineError, Repair, RepairSafety,
+    SNode, TypeChecker, TypeExpr, TypedParam,
 };
 use serde::Serialize;
 
 use crate::cli::FixArgs;
+use crate::commands;
 use crate::package::{self, CheckConfig, PreflightSeverity};
-use crate::{commands, parse_source_file};
 
-pub(crate) const FIX_PLAN_SCHEMA_VERSION: u32 = 1;
-pub(crate) const FIX_APPLY_SCHEMA_VERSION: u32 = 1;
+pub(crate) const FIX_PLAN_SCHEMA_VERSION: u32 = 2;
+pub(crate) const FIX_APPLY_SCHEMA_VERSION: u32 = 2;
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) enum FixRunError {
+    Command(String),
+    PartialFailure(String),
+}
+
+impl FixRunError {
+    pub(crate) fn message(&self) -> &str {
+        match self {
+            Self::Command(message) | Self::PartialFailure(message) => message,
+        }
+    }
+
+    pub(crate) fn is_partial_failure(&self) -> bool {
+        matches!(self, Self::PartialFailure(_))
+    }
+}
+
+impl From<String> for FixRunError {
+    fn from(message: String) -> Self {
+        Self::Command(message)
+    }
+}
+
+impl std::fmt::Display for FixRunError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(self.message())
+    }
+}
+
+impl std::error::Error for FixRunError {}
 
 #[derive(Debug, Clone, Serialize)]
 pub(crate) struct RepairPlan {
@@ -25,6 +57,8 @@ pub(crate) struct RepairPlan {
     pub path: String,
     pub diagnostics: Vec<DiagnosticWire>,
     pub repairs: Vec<RepairWire>,
+    #[serde(rename = "skippedFiles")]
+    pub skipped_files: Vec<SkippedFileWire>,
     #[serde(rename = "safetyLevels")]
     pub safety_levels: Vec<String>,
 }
@@ -35,6 +69,8 @@ pub(crate) struct ApplyResult {
     pub schema_version: u32,
     pub applied: Vec<AppliedRepairWire>,
     pub skipped: Vec<SkippedRepairWire>,
+    #[serde(rename = "skippedFiles")]
+    pub skipped_files: Vec<SkippedFileWire>,
     #[serde(rename = "post_apply_diagnostics_count")]
     pub post_apply_diagnostics_count: usize,
     #[serde(rename = "dryRun")]
@@ -55,6 +91,26 @@ pub(crate) struct SkippedRepairWire {
     pub repair_id: String,
     pub path: String,
     pub reason: &'static str,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub(crate) struct SkippedFileWire {
+    pub path: String,
+    pub reason: &'static str,
+    pub diagnostics: Vec<SkippedFileDiagnosticWire>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub(crate) struct SkippedFileDiagnosticWire {
+    pub source: &'static str,
+    pub severity: &'static str,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub code: Option<String>,
+    pub message: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub span: Option<SpanWire>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub help: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -140,7 +196,7 @@ struct AmbientCapabilityCall {
     span: Span,
 }
 
-pub(crate) fn run(args: &FixArgs) -> Result<(), String> {
+pub(crate) fn run(args: &FixArgs) -> Result<(), FixRunError> {
     if args.apply {
         let safety = args.safety.ok_or_else(|| {
             "`harn fix --apply` requires `--safety <format-only|behavior-preserving|scope-local|surface-changing|capability-changing>`"
@@ -149,7 +205,8 @@ pub(crate) fn run(args: &FixArgs) -> Result<(), String> {
         if safety == RepairSafety::NeedsHuman {
             return Err(
                 "`harn fix --apply --safety needs-human` is not allowed; use `harn fix --plan --json` to inspect propose-only repairs"
-                    .to_string(),
+                    .to_string()
+                    .into(),
             );
         }
         let result = apply_repairs(&args.path, safety, args.dry_run)?;
@@ -162,10 +219,17 @@ pub(crate) fn run(args: &FixArgs) -> Result<(), String> {
         } else {
             print_apply_result(&result);
         }
+        if !result.skipped_files.is_empty() {
+            return Err(FixRunError::PartialFailure(skipped_files_error(
+                result.skipped_files.len(),
+            )));
+        }
         return Ok(());
     }
     if !args.plan {
-        return Err("`harn fix` requires `--plan` or `--apply`".to_string());
+        return Err("`harn fix` requires `--plan` or `--apply`"
+            .to_string()
+            .into());
     }
 
     let plan = build_plan(&args.path, args.safety)?;
@@ -177,6 +241,11 @@ pub(crate) fn run(args: &FixArgs) -> Result<(), String> {
         );
     } else {
         print_human_plan(&plan);
+    }
+    if !plan.skipped_files.is_empty() {
+        return Err(FixRunError::PartialFailure(skipped_files_error(
+            plan.skipped_files.len(),
+        )));
     }
     Ok(())
 }
@@ -199,14 +268,17 @@ pub(crate) fn build_plan(
     let module_graph = commands::check::build_module_graph(&files);
     let cross_file_imports = commands::check::collect_cross_file_imports(&module_graph);
     let mut candidates = Vec::new();
+    let mut skipped_files = Vec::new();
     for file in &files {
-        collect_file_candidates(
+        if let Err(skipped) = collect_file_candidates(
             file,
             safety_ceiling,
             &cross_file_imports,
             &module_graph,
             &mut candidates,
-        );
+        ) {
+            skipped_files.push(skipped);
+        }
     }
 
     let conflicts = detect_conflicts(&candidates);
@@ -259,6 +331,7 @@ pub(crate) fn build_plan(
         path: target_string,
         diagnostics,
         repairs,
+        skipped_files,
         safety_levels,
     })
 }
@@ -323,12 +396,13 @@ pub(crate) fn apply_repairs(
         }
     }
 
-    let post_apply_diagnostics_count = count_remaining_diagnostics(target)?;
+    let remaining = count_remaining_diagnostics(target)?;
     Ok(ApplyResult {
         schema_version: FIX_APPLY_SCHEMA_VERSION,
         applied,
         skipped,
-        post_apply_diagnostics_count,
+        skipped_files: remaining.skipped_files,
+        post_apply_diagnostics_count: remaining.count,
         dry_run,
     })
 }
@@ -377,7 +451,13 @@ fn apply_file_edits(path: &Path, edits: &[FixEditWire]) -> Result<(), String> {
         .map_err(|error| format!("failed to write {}: {error}", path.display()))
 }
 
-fn count_remaining_diagnostics(target: &Path) -> Result<usize, String> {
+#[derive(Debug, Clone)]
+struct RemainingDiagnostics {
+    count: usize,
+    skipped_files: Vec<SkippedFileWire>,
+}
+
+fn count_remaining_diagnostics(target: &Path) -> Result<RemainingDiagnostics, String> {
     if let Err(error) = package::validate_runtime_manifest_extensions(target) {
         return Err(format!("manifest extension validation failed: {error}"));
     }
@@ -388,10 +468,16 @@ fn count_remaining_diagnostics(target: &Path) -> Result<usize, String> {
     let module_graph = commands::check::build_module_graph(&files);
     let cross_file_imports = commands::check::collect_cross_file_imports(&module_graph);
     let mut count = 0;
+    let mut skipped_files = Vec::new();
 
     for file in &files {
-        let path_str = file.to_string_lossy().into_owned();
-        let (source, program) = parse_source_file(&path_str);
+        let (source, program) = match parse_fix_source_file(file) {
+            Ok(parsed) => parsed,
+            Err(skipped) => {
+                skipped_files.push(skipped);
+                continue;
+            }
+        };
         let mut config = package::load_check_config(Some(file));
         commands::check::apply_harn_lint_config(file, &mut config);
 
@@ -431,7 +517,10 @@ fn count_remaining_diagnostics(target: &Path) -> Result<usize, String> {
         }
     }
 
-    Ok(count)
+    Ok(RemainingDiagnostics {
+        count,
+        skipped_files,
+    })
 }
 
 fn collect_file_candidates(
@@ -440,9 +529,9 @@ fn collect_file_candidates(
     cross_file_imports: &HashSet<String>,
     module_graph: &harn_modules::ModuleGraph,
     out: &mut Vec<RepairCandidate>,
-) {
+) -> Result<(), SkippedFileWire> {
     let path_str = file.to_string_lossy().into_owned();
-    let (source, program) = parse_source_file(&path_str);
+    let (source, program) = parse_fix_source_file(file)?;
     let mut config = package::load_check_config(Some(file));
     commands::check::apply_harn_lint_config(file, &mut config);
 
@@ -506,6 +595,70 @@ fn collect_file_candidates(
     }
 
     collect_preflight_candidates(file, &source, &program, &config, safety_ceiling, out);
+    Ok(())
+}
+
+fn parse_fix_source_file(file: &Path) -> Result<(String, Vec<SNode>), SkippedFileWire> {
+    let path = file.to_string_lossy().into_owned();
+    let source = std::fs::read_to_string(file).map_err(|error| SkippedFileWire {
+        path: path.clone(),
+        reason: "read_error",
+        diagnostics: vec![SkippedFileDiagnosticWire {
+            source: "io",
+            severity: "error",
+            code: None,
+            message: format!("failed to read {path}: {error}"),
+            span: None,
+            help: None,
+        }],
+    })?;
+    let program = harn_parser::parse_source(&source)
+        .map_err(|error| skipped_file_from_pipeline_error(path, error))?;
+    Ok((source, program))
+}
+
+fn skipped_file_from_pipeline_error(path: String, error: PipelineError) -> SkippedFileWire {
+    let span = error.span().copied().map(SpanWire::from);
+    let (reason, diagnostic) = match error {
+        PipelineError::Lex(error) => (
+            "lex_error",
+            SkippedFileDiagnosticWire {
+                source: "lexer",
+                severity: "error",
+                code: Some(harn_parser::diagnostic::lexer_error_code(&error).to_string()),
+                message: error.to_string(),
+                span,
+                help: None,
+            },
+        ),
+        PipelineError::Parse(error) => (
+            "parse_error",
+            SkippedFileDiagnosticWire {
+                source: "parser",
+                severity: "error",
+                code: Some(harn_parser::diagnostic::parser_error_code(&error).to_string()),
+                message: harn_parser::diagnostic::parser_error_message(&error),
+                span,
+                help: harn_parser::diagnostic::parser_error_help(&error).map(str::to_string),
+            },
+        ),
+        PipelineError::TypeCheck(error) => (
+            "type_error",
+            SkippedFileDiagnosticWire {
+                source: "typecheck",
+                severity: severity_label(error.severity),
+                code: Some(error.code.to_string()),
+                message: error.message,
+                span: error.span.map(SpanWire::from),
+                help: error.help,
+            },
+        ),
+    };
+    SkippedFileWire {
+        path,
+        reason,
+        diagnostics: vec![diagnostic],
+    }
 }
 
 fn lint_candidate_repair(
@@ -1084,27 +1237,47 @@ fn edits_conflict(left: &FixEdit, right: &FixEdit) -> bool {
 }
 
 fn print_human_plan(plan: &RepairPlan) {
-    if plan.repairs.is_empty() {
+    if plan.repairs.is_empty() && plan.skipped_files.is_empty() {
         println!("{}: no repairable diagnostics found", plan.path);
         return;
     }
-    println!(
-        "{}: {} repairable diagnostic(s)",
-        plan.path,
-        plan.repairs.len()
-    );
-    println!("idx  code          safety               edits  clean  repair");
-    for repair in &plan.repairs {
-        let clean = if repair.applies_cleanly { "yes" } else { "no" };
+    if !plan.repairs.is_empty() {
         println!(
-            "{:<4} {:<13} {:<20} {:<5} {:<5} {}",
-            repair.diagnostic_index,
-            repair.diagnostic_code,
-            repair.repair.safety,
-            repair.edits.len(),
-            clean,
-            repair.repair.id
+            "{}: {} repairable diagnostic(s)",
+            plan.path,
+            plan.repairs.len()
         );
+        println!("idx  code          safety               edits  clean  repair");
+        for repair in &plan.repairs {
+            let clean = if repair.applies_cleanly { "yes" } else { "no" };
+            println!(
+                "{:<4} {:<13} {:<20} {:<5} {:<5} {}",
+                repair.diagnostic_index,
+                repair.diagnostic_code,
+                repair.repair.safety,
+                repair.edits.len(),
+                clean,
+                repair.repair.id
+            );
+        }
+    }
+    print_skipped_files(&plan.skipped_files);
+}
+
+fn print_skipped_files(skipped_files: &[SkippedFileWire]) {
+    if skipped_files.is_empty() {
+        return;
+    }
+    println!("skipped {} file(s):", skipped_files.len());
+    for skipped in skipped_files {
+        println!("skipped {}: {}", skipped.path, skipped.reason);
+        for diagnostic in &skipped.diagnostics {
+            let code = diagnostic.code.as_deref().unwrap_or("no-code");
+            println!("  {}[{}]: {}", diagnostic.source, code, diagnostic.message);
+            if let Some(help) = &diagnostic.help {
+                println!("    help: {help}");
+            }
+        }
     }
 }
 
@@ -1126,6 +1299,11 @@ fn print_apply_result(result: &ApplyResult) {
             skipped.diagnostic_code, skipped.repair_id, skipped.path, skipped.reason
         );
     }
+    print_skipped_files(&result.skipped_files);
+}
+
+fn skipped_files_error(count: usize) -> String {
+    format!("harn fix skipped {count} file(s) due to read, lex, or parse errors")
 }
 
 fn severity_label(severity: DiagnosticSeverity) -> &'static str {
@@ -1244,6 +1422,40 @@ mod tests {
     }
 
     #[test]
+    fn plan_skips_invalid_files_and_keeps_repairing_valid_files() {
+        let temp = tempfile::TempDir::new().unwrap();
+        let valid = temp.path().join("valid.harn");
+        let invalid = temp.path().join("invalid.harn");
+        fs::write(
+            &valid,
+            "pipeline main() { let count = 1; let greeting = \"hello \" + count; greeting }\n",
+        )
+        .unwrap();
+        fs::write(&invalid, "fn bad() {\n").unwrap();
+
+        let plan = build_plan(temp.path(), Some(RepairSafety::BehaviorPreserving)).unwrap();
+
+        assert!(
+            plan.repairs.iter().any(|repair| {
+                repair.repair.id == "style/string-interpolation"
+                    && repair_path(&plan, repair).unwrap() == valid.to_string_lossy().as_ref()
+            }),
+            "expected valid file repair despite invalid sibling: {plan:#?}"
+        );
+        assert_eq!(plan.skipped_files.len(), 1, "{plan:#?}");
+        let skipped = &plan.skipped_files[0];
+        assert_eq!(skipped.path, invalid.to_string_lossy().as_ref());
+        assert_eq!(skipped.reason, "parse_error");
+        assert_eq!(skipped.diagnostics[0].source, "parser");
+        assert!(skipped.diagnostics[0].code.is_some());
+        assert!(skipped.diagnostics[0].span.is_some());
+
+        let encoded = serde_json::to_value(&plan).unwrap();
+        assert_eq!(encoded["skippedFiles"][0]["reason"], "parse_error");
+        assert!(encoded["skippedFiles"][0]["diagnostics"][0]["span"]["line"].is_u64());
+    }
+
+    #[test]
     fn apply_writes_clean_repairs_and_reports_post_check_count() {
         let temp = tempfile::TempDir::new().unwrap();
         let script = temp.path().join("repair_demo.harn");
@@ -1264,6 +1476,32 @@ mod tests {
     }
 
     #[test]
+    fn apply_directory_skips_invalid_files_after_applying_valid_files() {
+        let temp = tempfile::TempDir::new().unwrap();
+        let valid = temp.path().join("valid.harn");
+        let invalid = temp.path().join("invalid.harn");
+        fs::write(
+            &valid,
+            "pipeline main() { let count = 1; let greeting = \"hello \" + count; greeting }\n",
+        )
+        .unwrap();
+        fs::write(&invalid, "fn bad() {\n").unwrap();
+
+        let result = apply_repairs(temp.path(), RepairSafety::BehaviorPreserving, false).unwrap();
+
+        assert_eq!(result.applied.len(), 1, "{result:#?}");
+        assert_eq!(result.skipped_files.len(), 1, "{result:#?}");
+        assert_eq!(
+            result.skipped_files[0].path,
+            invalid.to_string_lossy().as_ref()
+        );
+        assert_eq!(result.skipped_files[0].reason, "parse_error");
+        assert_eq!(result.post_apply_diagnostics_count, 0, "{result:#?}");
+        let updated = fs::read_to_string(&valid).unwrap();
+        assert!(updated.contains("\"hello ${count}\""), "{updated}");
+    }
+
+    #[test]
     fn apply_dry_run_reports_without_writing() {
         let temp = tempfile::TempDir::new().unwrap();
         let script = temp.path().join("repair_demo.harn");
@@ -1276,6 +1514,29 @@ mod tests {
         assert!(result.dry_run);
         assert_eq!(result.applied.len(), 1, "{result:#?}");
         assert_eq!(fs::read_to_string(&script).unwrap(), source);
+    }
+
+    #[test]
+    fn run_returns_error_after_reporting_skipped_files() {
+        let temp = tempfile::TempDir::new().unwrap();
+        fs::write(temp.path().join("invalid.harn"), "fn bad() {\n").unwrap();
+        let args = FixArgs {
+            plan: true,
+            apply: false,
+            dry_run: false,
+            safety: None,
+            json: false,
+            path: temp.path().to_path_buf(),
+        };
+
+        let error = run(&args).unwrap_err();
+
+        assert!(error.is_partial_failure(), "unexpected error: {error}");
+        assert!(
+            error.message().contains("skipped 1 file")
+                && error.message().contains("read, lex, or parse errors"),
+            "unexpected error: {error}"
+        );
     }
 
     #[test]
@@ -1312,7 +1573,9 @@ mod tests {
 
         let error = run(&args).unwrap_err();
         assert!(
-            error.contains("needs-human") && error.contains("--plan --json"),
+            error.message().contains("needs-human")
+                && error.message().contains("--plan --json")
+                && !error.is_partial_failure(),
             "unexpected error: {error}"
         );
     }
