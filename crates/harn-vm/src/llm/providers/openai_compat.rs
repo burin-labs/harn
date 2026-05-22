@@ -215,7 +215,11 @@ impl OpenAiCompatibleProvider {
         }
         if let Some(ref tools) = opts.native_tools {
             if !tools.is_empty() {
-                body["tools"] = serde_json::json!(tools);
+                body["tools"] = serde_json::Value::Array(provider_request_tools(
+                    &opts.provider,
+                    &opts.model,
+                    tools,
+                ));
             }
         }
         if let Some(ref tc) = opts.tool_choice {
@@ -274,6 +278,52 @@ pub(crate) fn ensure_openrouter_require_parameters(body: &mut serde_json::Value)
             body["provider"] = serde_json::json!({"require_parameters": true});
         }
     }
+}
+
+fn provider_request_tools(
+    provider: &str,
+    model: &str,
+    tools: &[serde_json::Value],
+) -> Vec<serde_json::Value> {
+    let caps = crate::llm::capabilities::lookup(provider, model);
+    let has_openai_tool_search = tools
+        .iter()
+        .any(|tool| tool.get("type").and_then(serde_json::Value::as_str) == Some("tool_search"));
+    let supports_openai_tool_search_extensions = has_openai_tool_search
+        && caps.defer_loading
+        && caps.tool_search.iter().any(|variant| variant == "hosted");
+
+    tools
+        .iter()
+        .map(|tool| sanitize_openai_tool_for_request(tool, supports_openai_tool_search_extensions))
+        .collect()
+}
+
+fn sanitize_openai_tool_for_request(
+    tool: &serde_json::Value,
+    supports_openai_tool_search_extensions: bool,
+) -> serde_json::Value {
+    let mut tool = tool.clone();
+    let Some(object) = tool.as_object_mut() else {
+        return tool;
+    };
+
+    object.remove("x-harn-output-schema");
+    if !supports_openai_tool_search_extensions {
+        object.remove("defer_loading");
+        object.remove("namespace");
+        object.remove("namespaces");
+    }
+
+    if let Some(function) = object
+        .get_mut("function")
+        .and_then(serde_json::Value::as_object_mut)
+    {
+        function.remove("x-harn-output-schema");
+        function.remove("namespace");
+    }
+
+    tool
 }
 
 fn openrouter_reasoning_config(thinking: &ThinkingConfig) -> Option<serde_json::Value> {
@@ -419,6 +469,106 @@ mod tests {
         let provider = OpenAiCompatibleProvider::new("openai".to_string());
         assert!(provider.supports_defer_loading("gpt-5.4"));
         assert!(!provider.supports_defer_loading("gpt-4o"));
+    }
+
+    #[test]
+    fn cerebras_request_strips_harn_tool_extensions() {
+        let mut payload = base_request_payload();
+        payload.provider = "cerebras".to_string();
+        payload.model = "gpt-oss-120b".to_string();
+        payload.native_tools = Some(vec![json!({
+            "type": "function",
+            "namespace": "ops",
+            "defer_loading": true,
+            "function": {
+                "name": "deploy",
+                "description": "Deploy the app",
+                "namespace": "ops",
+                "x-harn-output-schema": {"type": "object"},
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "env": {"type": "string"}
+                    },
+                    "required": ["env"]
+                }
+            }
+        })]);
+
+        let body = OpenAiCompatibleProvider::build_request_body(&payload, false);
+        let tool = &body["tools"][0];
+        assert_eq!(tool["type"], "function");
+        assert!(tool.get("namespace").is_none());
+        assert!(tool.get("defer_loading").is_none());
+        assert!(tool["function"].get("namespace").is_none());
+        assert!(tool["function"].get("x-harn-output-schema").is_none());
+        assert_eq!(
+            tool["function"]["parameters"]["properties"]["env"]["type"],
+            "string"
+        );
+        let source_tool = &payload.native_tools.as_ref().expect("source tools")[0];
+        assert_eq!(source_tool["namespace"], "ops");
+        assert_eq!(
+            source_tool["function"]["x-harn-output-schema"]["type"],
+            "object"
+        );
+    }
+
+    #[test]
+    fn openai_tool_search_request_keeps_wire_extensions() {
+        let mut payload = base_request_payload();
+        payload.provider = "openai".to_string();
+        payload.model = "gpt-5.4".to_string();
+        payload.native_tools = Some(vec![
+            json!({
+                "type": "tool_search",
+                "mode": "hosted",
+                "namespaces": ["ops"],
+            }),
+            json!({
+                "type": "function",
+                "namespace": "ops",
+                "defer_loading": true,
+                "function": {
+                    "name": "deploy",
+                    "description": "Deploy the app",
+                    "x-harn-output-schema": {"type": "object"},
+                    "parameters": {"type": "object"}
+                }
+            }),
+        ]);
+
+        let body = OpenAiCompatibleProvider::build_request_body(&payload, false);
+        assert_eq!(body["tools"][0]["namespaces"], json!(["ops"]));
+        assert_eq!(body["tools"][1]["namespace"], "ops");
+        assert_eq!(body["tools"][1]["defer_loading"], true);
+        assert!(
+            body["tools"][1]["function"]
+                .get("x-harn-output-schema")
+                .is_none(),
+            "Harn output schemas stay in transcripts, not provider payloads"
+        );
+    }
+
+    #[test]
+    fn openai_regular_request_strips_tool_search_extensions_without_meta_tool() {
+        let mut payload = base_request_payload();
+        payload.provider = "openai".to_string();
+        payload.model = "gpt-5.4".to_string();
+        payload.native_tools = Some(vec![json!({
+            "type": "function",
+            "namespace": "ops",
+            "defer_loading": true,
+            "function": {
+                "name": "deploy",
+                "description": "Deploy the app",
+                "parameters": {"type": "object"}
+            }
+        })]);
+
+        let body = OpenAiCompatibleProvider::build_request_body(&payload, false);
+        assert!(body["tools"][0].get("namespace").is_none());
+        assert!(body["tools"][0].get("defer_loading").is_none());
     }
 
     #[test]

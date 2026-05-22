@@ -51,9 +51,10 @@ fn vm_tools_to_native_uses_model_capability_shape_for_bedrock_claude() {
 #[test]
 fn vm_tools_to_native_emits_namespace_for_openai_compat() {
     // `namespace` on a tool entry (harn#71) flows through to the
-    // OpenAI-shape wrapper alongside `defer_loading`. Anthropic
-    // receives it too — the field is harmless there (ignored by the
-    // API) and keeps replay fidelity.
+    // OpenAI-shape wrapper alongside `defer_loading`. Provider request
+    // builders may strip it from outbound HTTP bodies, but keeping it
+    // in the native tool value preserves transcript and tool-search
+    // grouping fidelity.
     let mut deferred_params = BTreeMap::new();
     deferred_params.insert("env".to_string(), vm_str("string"));
     let deferred = vm_dict(&[
@@ -82,9 +83,8 @@ fn vm_tools_to_native_emits_namespace_for_openai_compat() {
 fn vm_tools_to_native_emits_defer_loading_for_openai_compat() {
     // OpenAI-shape tools place the flag at the wrapper level (not inside
     // `function`) so harn#71's Responses-API path can read it uniformly
-    // without re-walking. Non-Anthropic providers that don't understand
-    // the flag will never actually see it — the capability gate in
-    // options.rs blocks them before the request leaves the VM.
+    // without re-walking. The OpenAI-compatible request builder strips
+    // it from providers that do not expose native tool-search extensions.
     let registry = defer_loading_registry();
     let tools = vm_tools_to_native(&registry, "openai", "gpt-5.4").expect("openai native tools");
     let deploy = tools

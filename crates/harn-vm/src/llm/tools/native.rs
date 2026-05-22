@@ -91,19 +91,17 @@ pub(crate) fn vm_tools_to_native(
                         // Record the flag on the Harn-side wrapper so
                         // native and client-executed tool-search paths
                         // can read it without re-walking the VmValue
-                        // tree. Non-OpenAI OpenAI-compat providers that don't
-                        // understand `defer_loading` today will return an
-                        // error when the user explicitly requests
-                        // tool_search — the capability gate in options.rs
-                        // catches that before the payload ever reaches
-                        // the provider.
+                        // tree. OpenAI-compatible request builders strip
+                        // it from providers that do not advertise native
+                        // tool-search extensions.
                         tool_json["defer_loading"] = serde_json::Value::Bool(true);
                     }
                     if let Some(ns) = namespace {
                         // OpenAI's `tool_search` meta-tool groups
                         // deferred tools by namespace. Placed on the
-                        // wrapper (alongside `type: "function"`) so the
-                        // Responses API sees it next to `defer_loading`.
+                        // wrapper (alongside `type: "function"`) so
+                        // request builders can collect the metadata
+                        // before sanitizing provider payloads.
                         tool_json["namespace"] = serde_json::Value::String(ns);
                     }
                     native_tools.push(tool_json);
