@@ -270,8 +270,9 @@ harn test conformance tests/language/arithmetic.harn # run one conformance file
 harn test conformance tests/stdlib/     # run a conformance subtree
 harn test tests/                       # run user tests in directory
 harn test tests/ --filter "auth*"      # filter by pattern
-harn test tests/ --parallel            # run tests concurrently
+harn test tests/ --parallel            # run tests concurrently with bounded workers
 harn test tests/ --parallel --timing   # show progress and slowest tests/files
+harn test tests/ --parallel -j 4       # pin worker count (also via HARN_TEST_JOBS)
 harn test tests/ --watch               # re-run on file changes
 harn test conformance --verbose        # show per-test timing
 harn test conformance --timing         # show timing summary without verbose failures
@@ -289,7 +290,8 @@ harn test agents-conformance --target http://localhost:8080 --api-key "$KEY"
 | `--json` | Emit conformance results as JSON to stdout, or the agents-conformance leaderboard report |
 | `--json-out <path>` | Write user-test results (or the agents-conformance report) to a JSON file; schemaVersion 1 |
 | `--workspace-id <id>` / `--session-id <id>` | Reuse existing Harness resources for agents conformance setup |
-| `--parallel` | Run tests concurrently |
+| `--parallel` | Run tests concurrently with a bounded worker pool. Slow tests are front-loaded using historical timings from `.harn/test-timings.json` |
+| `--jobs <N>` / `-j <N>` | Maximum concurrent workers (also `HARN_TEST_JOBS`). Defaults to available parallelism, capped at 8 |
 | `--watch` | Re-run tests on file changes (mutually exclusive with `--junit` / `--json-out`) |
 | `--verbose` / `-v` | Show per-test timing and detailed failures |
 | `--timing` | Show per-test timing plus summary statistics |

@@ -511,6 +511,8 @@ pub fn compute(x: int) -> int { return x + 1 }
 |---|---|
 | `@deprecated(since: "X", use: "Y")` | Type-check warning at every call site (both args optional). |
 | `@test` | Marks a `pipeline` as a test. `harn test` discovers it alongside the legacy `test_*` naming convention. |
+| `@serial(group: "name")` | Test-scheduler hint: tests sharing the group are run serially under `--parallel`. Bare `@serial` shares a default group. |
+| `@heavy(threads: N)` | Test-scheduler hint: the test reserves `N` worker permits under `--parallel` so it never oversubscribes the pool. |
 | `@complexity(allow)` | Suppresses the `cyclomatic-complexity` lint warning on this fn. |
 | `@invariant("fs.writes", "src/**")` | Checked only by `harn check --invariants`. Current built-ins: `fs.writes`, `budget.remaining`, `approval.reachability`. `harn explain --invariant <name> <handler> <file>` prints the violating CFG path. |
 | `@acp_tool(name: "X", kind: "edit", side_effect_level: "mutation", ...)` | Compiles to `tool_define(...)` with the fn as the handler and the named args (minus `name`) lifted into `annotations`. `name` defaults to the fn name. |

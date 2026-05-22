@@ -31,6 +31,20 @@ impl UserTestReportConfig<'_> {
     }
 }
 
+/// Per-invocation knobs for `harn test <dir>` and `harn test --watch`.
+/// Bundled so call sites share one parameter shape and the runner
+/// signatures stay readable as new flags accrete.
+#[derive(Clone, Copy)]
+pub(crate) struct UserTestRunArgs<'a> {
+    pub filter: Option<&'a str>,
+    pub timeout_ms: u64,
+    pub parallel: bool,
+    pub jobs: Option<usize>,
+    pub verbose: bool,
+    pub timing: bool,
+    pub cli_skill_dirs: &'a [PathBuf],
+}
+
 pub(crate) const CONFORMANCE_TEST_SCHEMA_VERSION: u32 = 1;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
@@ -1520,15 +1534,18 @@ fn user_test_progress(verbose: bool) -> test_runner::TestRunProgress {
             total_tests,
             total_files,
             parallel,
+            workers,
         } => {
             if total_tests > 0 {
-                let mode = if parallel { "parallel" } else { "sequential" };
+                let mode = if parallel { "dynamic" } else { "sequential" };
                 println!(
-                    "Running {} test{} from {} file{} ({mode})...\n",
+                    "Running {} test{} from {} file{} with {} worker{} ({mode} scheduling)\n",
                     total_tests,
                     if total_tests == 1 { "" } else { "s" },
                     total_files,
                     if total_files == 1 { "" } else { "s" },
+                    workers,
+                    if workers == 1 { "" } else { "s" },
                 );
             }
         }
@@ -1537,25 +1554,17 @@ fn user_test_progress(verbose: bool) -> test_runner::TestRunProgress {
             total_files,
         } => {
             println!(
-                "\x1b[33mwarning\x1b[0m: large suite discovered ({total_tests} tests across {total_files} files); running sequentially. Use `--parallel` for file-level concurrency.\n"
+                "\x1b[33mwarning\x1b[0m: large suite discovered ({total_tests} tests across {total_files} files); running sequentially. Use `--parallel` to enable the bounded worker pool.\n"
             );
-        }
-        test_runner::TestRunEvent::FileStarted {
-            file,
-            file_index,
-            total_files,
-            test_count,
-        } => {
-            println!("  RUN   file {file_index}/{total_files} {file} ({test_count} tests)");
         }
         test_runner::TestRunEvent::TestStarted {
             name,
             file,
             test_index,
-            total_tests_in_file,
+            total_tests,
         } => {
             if verbose {
-                println!("    RUN   {name} [{file}] ({test_index}/{total_tests_in_file})");
+                println!("    RUN   {name} [{file}] ({test_index}/{total_tests})");
             }
         }
         test_runner::TestRunEvent::TestFinished(result) => {
@@ -1770,29 +1779,20 @@ fn print_user_test_timing(summary: &test_runner::TestSummary) {
     }
 }
 
-async fn run_user_tests_once(
-    path: &Path,
-    filter: Option<&str>,
-    timeout_ms: u64,
-    parallel: bool,
-    verbose: bool,
-    timing: bool,
-    cli_skill_dirs: &[PathBuf],
-) -> test_runner::TestSummary {
-    let progress = user_test_progress(verbose);
-    let summary = test_runner::run_tests_with_progress(
-        path,
-        filter,
-        timeout_ms,
-        parallel,
-        cli_skill_dirs,
-        Some(progress),
-    )
-    .await;
+async fn run_user_tests_once(path: &Path, args: UserTestRunArgs<'_>) -> test_runner::TestSummary {
+    let options = test_runner::RunOptions {
+        filter: args.filter.map(str::to_owned),
+        timeout_ms: args.timeout_ms,
+        parallel: args.parallel,
+        jobs: args.jobs,
+        cli_skill_dirs: args.cli_skill_dirs.to_vec(),
+        progress: Some(user_test_progress(args.verbose)),
+    };
+    let summary = test_runner::run_tests_with_options(path, &options).await;
     print_test_results(
         &summary,
         UserTestOutputOptions {
-            timing,
+            timing: args.timing,
             progress: true,
         },
     );
@@ -1801,12 +1801,7 @@ async fn run_user_tests_once(
 
 pub(crate) async fn run_user_tests(
     path_str: &str,
-    filter: Option<&str>,
-    timeout_ms: u64,
-    parallel: bool,
-    verbose: bool,
-    timing: bool,
-    cli_skill_dirs: &[PathBuf],
+    args: UserTestRunArgs<'_>,
     report_config: UserTestReportConfig<'_>,
 ) {
     let path = PathBuf::from(path_str);
@@ -1822,16 +1817,7 @@ pub(crate) async fn run_user_tests(
             preflight_report_path(p);
         }
     }
-    let summary = run_user_tests_once(
-        &path,
-        filter,
-        timeout_ms,
-        parallel,
-        verbose,
-        timing,
-        cli_skill_dirs,
-    )
-    .await;
+    let summary = run_user_tests_once(&path, args).await;
 
     if !report_config.is_empty() {
         let suite_root = path.canonicalize().unwrap_or(path.clone());
@@ -2209,15 +2195,7 @@ pub(crate) async fn run_conformance_determinism_tests(
     );
 }
 
-pub(crate) async fn run_watch_tests(
-    path_str: &str,
-    filter: Option<&str>,
-    timeout_ms: u64,
-    parallel: bool,
-    verbose: bool,
-    timing: bool,
-    cli_skill_dirs: &[PathBuf],
-) {
+pub(crate) async fn run_watch_tests(path_str: &str, args: UserTestRunArgs<'_>) {
     use notify::{Config, RecommendedWatcher, RecursiveMode, Watcher};
     use std::sync::mpsc;
     use std::time::Duration;
@@ -2230,16 +2208,7 @@ pub(crate) async fn run_watch_tests(
 
     println!("Watching {path_str} for changes... (Ctrl+C to stop)\n");
 
-    run_user_tests_once(
-        &path,
-        filter,
-        timeout_ms,
-        parallel,
-        verbose,
-        timing,
-        cli_skill_dirs,
-    )
-    .await;
+    run_user_tests_once(&path, args).await;
 
     let (tx, rx) = mpsc::channel();
     let mut watcher = RecommendedWatcher::new(tx, Config::default()).unwrap_or_else(|e| {
@@ -2268,16 +2237,7 @@ pub(crate) async fn run_watch_tests(
                 while rx.recv_timeout(Duration::from_millis(100)).is_ok() {}
 
                 println!("\n\x1b[2m--- file changed, re-running tests ---\x1b[0m\n");
-                run_user_tests_once(
-                    &path,
-                    filter,
-                    timeout_ms,
-                    parallel,
-                    verbose,
-                    timing,
-                    cli_skill_dirs,
-                )
-                .await;
+                run_user_tests_once(&path, args).await;
             }
             Ok(Err(e)) => {
                 eprintln!("Watch error: {e}");

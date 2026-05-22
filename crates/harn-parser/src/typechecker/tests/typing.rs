@@ -306,6 +306,90 @@ fn deploy_activate() -> string { return "ready" }
 }
 
 #[test]
+fn test_test_scheduler_attributes_are_recognized_and_validated() {
+    let warns = warnings(
+        r#"
+@test
+@serial(group: "shared-fixture")
+pipeline test_login_first(task) {}
+
+@test
+@heavy(threads: 2)
+pipeline test_full_rebuild(task) {}
+
+@test
+@serial
+pipeline test_bare_serial(task) {}
+"#,
+    );
+    assert!(
+        warns
+            .iter()
+            .all(|warning| !warning.contains("unknown attribute")
+                && !warning.contains("only applies")
+                && !warning.contains("@serial")
+                && !warning.contains("@heavy")),
+        "test scheduler attributes should validate cleanly: {warns:?}"
+    );
+}
+
+#[test]
+fn test_heavy_attribute_requires_positive_int_threads() {
+    let warns = warnings(
+        r#"
+@test
+@heavy
+pipeline test_missing_threads(task) {}
+
+@test
+@heavy(threads: 0)
+pipeline test_zero_threads(task) {}
+
+@test
+@heavy(threads: "lots")
+pipeline test_string_threads(task) {}
+"#,
+    );
+    assert!(
+        warns.iter().any(|w| w.contains("must specify `threads:")),
+        "expected missing-threads warning, got {warns:?}"
+    );
+    assert!(
+        warns
+            .iter()
+            .filter(|w| w.contains("must be a positive integer"))
+            .count()
+            == 2,
+        "expected two positive-int warnings (for 0 and \"lots\"), got {warns:?}"
+    );
+}
+
+#[test]
+fn test_serial_heavy_attributes_warn_on_non_pipeline_targets() {
+    let warns = warnings(
+        r#"
+@serial(group: "fixture")
+fn helper(x) -> int { return x }
+
+@heavy(threads: 2)
+fn other_helper() -> int { return 0 }
+"#,
+    );
+    assert!(
+        warns
+            .iter()
+            .any(|w| w.contains("`@serial` only applies to pipeline declarations")),
+        "expected @serial target warning, got {warns:?}"
+    );
+    assert!(
+        warns
+            .iter()
+            .any(|w| w.contains("`@heavy` only applies to pipeline declarations")),
+        "expected @heavy target warning, got {warns:?}"
+    );
+}
+
+#[test]
 fn test_durable_persona_annotations_are_recognized_and_validated() {
     let warns = warnings(
         r#"

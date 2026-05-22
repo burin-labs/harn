@@ -21,6 +21,17 @@ condensed series summaries instead of full per-patch history.
   unwritable report directory now fails the run with a clear diagnostic
   instead of succeeding silently. `--watch` rejects both flags up-front
   since the watch loop never terminates.
+- **`harn test --parallel` now uses an adaptive scheduler with a bounded worker
+  pool (#2144).** Tests are scheduled at per-pipeline granularity rather than
+  per file, so a single slow file no longer holds the run hostage. Worker count
+  is set with `--jobs/-j` (or `HARN_TEST_JOBS`) and defaults to available
+  parallelism capped at 8 to bound system load. The runner front-loads the
+  slowest tests using a persisted `.harn/test-timings.json` cache so future
+  runs balance themselves. Two new attributes tune the scheduler when isolation
+  is required: `@serial(group: "name")` serializes tests sharing a fixture, and
+  `@heavy(threads: N)` reserves `N` worker permits so expensive tests do not
+  oversubscribe the pool. The selected worker count and scheduling mode are
+  printed at the top of every run.
 
 ### Fixed
 

@@ -35,6 +35,11 @@ pub(crate) struct TestArgs {
     /// Run user tests concurrently where supported.
     #[arg(long)]
     pub parallel: bool,
+    /// Maximum number of concurrent test workers. Defaults to available
+    /// parallelism, capped to keep system load bounded. Also honored via
+    /// the `HARN_TEST_JOBS` env var. Ignored unless `--parallel` is set.
+    #[arg(long = "jobs", short = 'j', value_name = "N", env = "HARN_TEST_JOBS")]
+    pub jobs: Option<usize>,
     /// Re-run user tests when watched files change.
     #[arg(long)]
     pub watch: bool,

@@ -1889,7 +1889,7 @@ impl TypeChecker {
             match attr.name.as_str() {
                 "deprecated" | "test" | "complexity" | "acp_tool" | "acp_skill" | "invariant"
                 | "deterministic" | "semantic" | "archivist" | "retroactive" | "persona"
-                | "step" | "trigger" | "handoff" | "budget" | "command" => {}
+                | "step" | "trigger" | "handoff" | "budget" | "command" | "serial" | "heavy" => {}
                 other => {
                     self.warning_at(
                         Code::UnknownAttribute,
@@ -1941,6 +1941,18 @@ impl TypeChecker {
                 self.warning_at(
                     Code::InvalidAttributeTarget,
                     "`@command` only applies to pipeline declarations".to_string(),
+                    attr.span,
+                );
+            }
+            if matches!(attr.name.as_str(), "serial" | "heavy")
+                && !matches!(inner.node, Node::Pipeline { .. })
+            {
+                self.warning_at(
+                    Code::InvalidAttributeTarget,
+                    format!(
+                        "`@{}` only applies to pipeline declarations (use on `@test` or `test_*` pipelines)",
+                        attr.name
+                    ),
                     attr.span,
                 );
             }
@@ -2053,6 +2065,8 @@ impl TypeChecker {
             "budget" => self.validate_budget_args(attr),
             "deprecated" => self.validate_deprecated_args(attr),
             "command" => self.validate_command_args(attr),
+            "serial" => self.validate_serial_args(attr),
+            "heavy" => self.validate_heavy_args(attr),
             "test" if !attr.args.is_empty() => {
                 self.warning_at(
                     Code::InvalidAttributeArgument,
@@ -2400,6 +2414,61 @@ impl TypeChecker {
                 continue;
             };
             self.expect_budget_value("@budget", name, &arg.value, arg.span);
+        }
+    }
+
+    fn validate_serial_args(&mut self, attr: &Attribute) {
+        // `@serial` may be bare or take a single `group: "name"` arg.
+        const KNOWN_KEYS: &[&str] = &["group"];
+        for arg in &attr.args {
+            let Some(name) = self.require_named_arg("@serial", arg) else {
+                continue;
+            };
+            if !KNOWN_KEYS.contains(&name) {
+                self.warning_at(
+                    Code::InvalidAttributeArgument,
+                    format!("unknown `@serial` argument `{name}`; expected one of {KNOWN_KEYS:?}"),
+                    arg.span,
+                );
+                continue;
+            }
+            self.expect_symbol_like("@serial", name, &arg.value, arg.span);
+        }
+    }
+
+    fn validate_heavy_args(&mut self, attr: &Attribute) {
+        // `@heavy` requires a positive integer `threads` arg.
+        const KNOWN_KEYS: &[&str] = &["threads"];
+        let mut has_threads = false;
+        for arg in &attr.args {
+            let Some(name) = self.require_named_arg("@heavy", arg) else {
+                continue;
+            };
+            if !KNOWN_KEYS.contains(&name) {
+                self.warning_at(
+                    Code::InvalidAttributeArgument,
+                    format!("unknown `@heavy` argument `{name}`; expected one of {KNOWN_KEYS:?}"),
+                    arg.span,
+                );
+                continue;
+            }
+            if name == "threads" {
+                has_threads = true;
+                if !matches!(arg.value.node, Node::IntLiteral(n) if n >= 1) {
+                    self.warning_at(
+                        Code::InvalidAttributeArgument,
+                        "`@heavy(threads: ...)` must be a positive integer".to_string(),
+                        arg.span,
+                    );
+                }
+            }
+        }
+        if !has_threads {
+            self.warning_at(
+                Code::InvalidAttributeArgument,
+                "`@heavy(...)` must specify `threads: <positive int>`".to_string(),
+                attr.span,
+            );
         }
     }
 
