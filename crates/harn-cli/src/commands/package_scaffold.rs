@@ -20,7 +20,7 @@ use crate::package::{
 };
 
 const DEFAULT_HARN_OPENAPI_GIT: &str = "https://github.com/burin-labs/harn-openapi";
-const DEFAULT_HARN_OPENAPI_BRANCH: &str = "main";
+const DEFAULT_HARN_OPENAPI_REV: &str = "v0.1.1-rc.1";
 const DEFAULT_SMOKE_BASE_URL: &str = "https://api.example.test";
 const MAX_SPEC_BYTES: u64 = 16 * 1024 * 1024;
 
@@ -336,14 +336,15 @@ fn clone_harn_openapi(
     let tmp = tempfile::tempdir()
         .map_err(|error| format!("failed to create harn-openapi temp checkout: {error}"))?;
     let checkout = tmp.path().join("harn-openapi");
+    let checkout_rev = args.harn_openapi_rev.as_deref().or_else(|| {
+        args.harn_openapi_branch
+            .is_none()
+            .then_some(DEFAULT_HARN_OPENAPI_REV)
+    });
     let mut command = process::Command::new("git");
     command.arg("clone");
-    if args.harn_openapi_rev.is_none() {
-        command.arg("--depth").arg("1").arg("--branch").arg(
-            args.harn_openapi_branch
-                .as_deref()
-                .unwrap_or(DEFAULT_HARN_OPENAPI_BRANCH),
-        );
+    if let Some(branch) = args.harn_openapi_branch.as_deref() {
+        command.arg("--depth").arg("1").arg("--branch").arg(branch);
     }
     command
         .arg(git)
@@ -361,7 +362,7 @@ fn clone_harn_openapi(
         )
         .into());
     }
-    if let Some(rev) = args.harn_openapi_rev.as_deref() {
+    if let Some(rev) = checkout_rev {
         let output = process::Command::new("git")
             .arg("checkout")
             .arg(rev)
@@ -555,16 +556,16 @@ fn harn_openapi_dependency(args: &PackageScaffoldOpenapiArgs) -> Result<String, 
             .as_deref()
             .unwrap_or(DEFAULT_HARN_OPENAPI_GIT),
     )?;
-    let pin = if let Some(rev) = args.harn_openapi_rev.as_deref() {
+    let pin = if let Some(rev) = args.harn_openapi_rev.as_deref().or_else(|| {
+        args.harn_openapi_branch
+            .is_none()
+            .then_some(DEFAULT_HARN_OPENAPI_REV)
+    }) {
         format!("rev = {}", toml_string_literal(rev)?)
     } else {
         format!(
             "branch = {}",
-            toml_string_literal(
-                args.harn_openapi_branch
-                    .as_deref()
-                    .unwrap_or(DEFAULT_HARN_OPENAPI_BRANCH)
-            )?
+            toml_string_literal(args.harn_openapi_branch.as_deref().unwrap())?
         )
     };
     Ok(format!("{{ git = {git}, {pin} }}"))
@@ -689,8 +690,8 @@ harn run scripts/regen.harn
 harn package docs
 ```
 
-`harn-openapi` is declared in `harn.toml` so regeneration works in CI. Pin it
-to a reviewed rev before publishing a long-lived SDK package:
+`harn-openapi` is declared in `harn.toml` so regeneration works in CI. Override
+the reviewed default only when intentionally testing a newer generator:
 
 ```bash
 harn add github.com/burin-labs/harn-openapi@<rev>
@@ -937,6 +938,29 @@ mod tests {
         assert_eq!(sanitize_openapi_function_name("type"), "type_");
     }
 
+    #[test]
+    fn harn_openapi_dependency_defaults_to_reviewed_rev() {
+        let args = openapi_args_for_test();
+        let dependency = harn_openapi_dependency(&args).unwrap();
+
+        assert_eq!(
+            dependency,
+            r#"{ git = "https://github.com/burin-labs/harn-openapi", rev = "v0.1.1-rc.1" }"#
+        );
+    }
+
+    #[test]
+    fn harn_openapi_dependency_respects_branch_override() {
+        let mut args = openapi_args_for_test();
+        args.harn_openapi_branch = Some("main".to_string());
+        let dependency = harn_openapi_dependency(&args).unwrap();
+
+        assert_eq!(
+            dependency,
+            r#"{ git = "https://github.com/burin-labs/harn-openapi", branch = "main" }"#
+        );
+    }
+
     #[tokio::test]
     async fn load_spec_accepts_file_url() {
         let tmp = tempfile::tempdir().unwrap();
@@ -1140,5 +1164,22 @@ pub fn codegen_module(doc, options) -> string {
         run_git(&repo, &["add", "."]);
         run_git(&repo, &["commit", "-m", "initial"]);
         repo
+    }
+
+    fn openapi_args_for_test() -> PackageScaffoldOpenapiArgs {
+        PackageScaffoldOpenapiArgs {
+            name: "tiny-sdk-harn".to_string(),
+            module_name: None,
+            client_name: None,
+            spec: "openapi.json".to_string(),
+            out: None,
+            description: None,
+            default_base_url: None,
+            harn_openapi_path: None,
+            harn_openapi_git: None,
+            harn_openapi_rev: None,
+            harn_openapi_branch: None,
+            force: false,
+        }
     }
 }

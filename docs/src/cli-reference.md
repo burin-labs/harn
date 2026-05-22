@@ -2082,7 +2082,7 @@ Useful flags:
 | `--harn-openapi-path <dir>` | Use a local `harn-openapi` checkout for generation |
 | `--harn-openapi-git <url-or-path>` | Dependency source written to `harn.toml` |
 | `--harn-openapi-rev <rev>` | Pin the dependency to a rev or tag |
-| `--harn-openapi-branch <branch>` | Track a branch instead of a rev, default `main` |
+| `--harn-openapi-branch <branch>` | Track a branch instead of the default pinned rev |
 | `--force` | Overwrite generated files in an existing output directory |
 
 ## harn package search
