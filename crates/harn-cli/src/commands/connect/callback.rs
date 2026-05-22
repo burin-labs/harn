@@ -6,9 +6,14 @@ use url::Url;
 
 use super::OAUTH_CALLBACK_TIMEOUT;
 
+const CALLBACK_ACCEPT_POLL_INTERVAL: Duration = Duration::from_millis(50);
+
 pub(super) fn bind_loopback_listener(redirect_uri: &str) -> Result<(TcpListener, String), String> {
     let mut parsed =
         Url::parse(redirect_uri).map_err(|error| format!("Invalid redirect URI: {error}"))?;
+    if parsed.scheme() != "http" {
+        return Err("Redirect URI must use the http scheme for the loopback listener".to_string());
+    }
     let host = parsed
         .host_str()
         .ok_or_else(|| "Redirect URI must include a host".to_string())?;
@@ -16,7 +21,7 @@ pub(super) fn bind_loopback_listener(redirect_uri: &str) -> Result<(TcpListener,
         return Err("Redirect URI must bind to 127.0.0.1 or localhost".to_string());
     }
     let port = parsed
-        .port_or_known_default()
+        .port()
         .ok_or_else(|| "Redirect URI must include a port".to_string())?;
     let listener = TcpListener::bind((host, port))
         .map_err(|error| format!("Failed to bind redirect URI {redirect_uri}: {error}"))?;
@@ -105,7 +110,7 @@ pub(super) fn wait_for_callback_query(
                 if Instant::now() >= deadline {
                     return Err("OAuth callback timed out after 5 minutes".to_string());
                 }
-                std::thread::sleep(Duration::from_millis(50));
+                std::thread::sleep(CALLBACK_ACCEPT_POLL_INTERVAL);
             }
             Err(error) => return Err(format!("Failed to accept OAuth callback: {error}")),
         }
@@ -122,10 +127,22 @@ pub(super) fn parse_callback_request(
     let request_line = lines
         .next()
         .ok_or_else(|| "OAuth callback request was empty".to_string())?;
-    let path_and_query = request_line
-        .split_whitespace()
-        .nth(1)
+    let mut request_parts = request_line.split_whitespace();
+    let method = request_parts
+        .next()
         .ok_or_else(|| "OAuth callback request line was invalid".to_string())?;
+    if method != "GET" {
+        return Err("OAuth callback request must use GET".to_string());
+    }
+    let path_and_query = request_parts
+        .next()
+        .ok_or_else(|| "OAuth callback request line was invalid".to_string())?;
+    let version = request_parts
+        .next()
+        .ok_or_else(|| "OAuth callback request line was invalid".to_string())?;
+    if !version.starts_with("HTTP/") || request_parts.next().is_some() {
+        return Err("OAuth callback request line was invalid".to_string());
+    }
     let origin = lines.find_map(|line| {
         let (name, value) = line.split_once(':')?;
         name.eq_ignore_ascii_case("origin")
@@ -167,7 +184,7 @@ pub(super) fn loopback_origin(url: &Url) -> Result<String, String> {
         .host_str()
         .ok_or_else(|| "Redirect URI must include a host".to_string())?;
     let port = url
-        .port_or_known_default()
+        .port()
         .ok_or_else(|| "Redirect URI must include a port".to_string())?;
     Ok(format!("{}://{}:{}", url.scheme(), host, port))
 }

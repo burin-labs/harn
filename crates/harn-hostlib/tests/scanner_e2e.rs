@@ -14,7 +14,6 @@
 
 use std::fs;
 use std::path::Path;
-use std::time::SystemTime;
 
 use harn_hostlib::scanner::{
     scan_incremental, scan_project, scan_project_with_git, FileRecord, GitCapabilities,
@@ -123,12 +122,10 @@ edition = "2024"
     );
 }
 
-fn touch_after(path: &Path, base: SystemTime) {
-    // Force a modification time strictly after `base` so the incremental
-    // scanner's mtime check picks the file up regardless of filesystem
-    // resolution.
-    let new_mtime = base + std::time::Duration::from_secs(60);
-    let _ = filetime::set_file_mtime(path, filetime::FileTime::from_system_time(new_mtime));
+fn touch_after_snapshot(path: &Path, snapshot_max_mtime_ms: i64) {
+    let base_secs = snapshot_max_mtime_ms.max(0).div_euclid(1_000);
+    let new_mtime = filetime::FileTime::from_unix_time(base_secs.saturating_add(60), 0);
+    filetime::set_file_mtime(path, new_mtime).unwrap();
 }
 
 #[derive(Default)]
@@ -296,7 +293,12 @@ fn scan_incremental_picks_up_added_and_removed_files() {
 
     let initial = scan_project(tmp.path(), ScanProjectOptions::default());
     let token = initial.snapshot_token.clone();
-    let baseline = SystemTime::now();
+    let snapshot_max_mtime_ms = initial
+        .files
+        .iter()
+        .map(|file| file.last_modified_unix_ms)
+        .max()
+        .unwrap_or(0);
 
     // Add a new source file and remove an existing one.
     write(
@@ -305,7 +307,10 @@ fn scan_incremental_picks_up_added_and_removed_files() {
         "pub struct OrdersService;\n",
     );
     fs::remove_file(tmp.path().join("src/lib/helpers.ts")).unwrap();
-    touch_after(&tmp.path().join("src/routes/orders.rs"), baseline);
+    touch_after_snapshot(
+        &tmp.path().join("src/routes/orders.rs"),
+        snapshot_max_mtime_ms,
+    );
 
     let scan = scan_incremental(&token, None, ScanProjectOptions::default());
     assert!(scan.delta.added.iter().any(|p| p == "src/routes/orders.rs"));

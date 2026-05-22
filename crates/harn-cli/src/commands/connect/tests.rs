@@ -264,6 +264,20 @@ fn loopback_listener_rewrites_zero_port() {
 }
 
 #[test]
+fn loopback_listener_rejects_non_http_redirect_uri() {
+    let error = bind_loopback_listener("https://127.0.0.1:0/oauth/callback").unwrap_err();
+
+    assert!(error.contains("http scheme"));
+}
+
+#[test]
+fn loopback_listener_requires_explicit_port() {
+    let error = bind_loopback_listener("http://127.0.0.1/oauth/callback").unwrap_err();
+
+    assert!(error.contains("include a port"));
+}
+
+#[test]
 fn callback_request_rejects_wrong_origin() {
     let request =
         "GET /oauth/callback?code=abc&state=xyz HTTP/1.1\r\nOrigin: http://evil.example\r\n\r\n";
@@ -275,6 +289,36 @@ fn callback_request_rejects_wrong_origin() {
     )
     .unwrap_err();
     assert!(error.contains("Origin"));
+}
+
+#[test]
+fn callback_request_requires_get_method() {
+    let request =
+        "POST /oauth/callback?code=abc&state=xyz HTTP/1.1\r\nOrigin: http://127.0.0.1:49152\r\n\r\n";
+    let error = parse_callback_request(
+        request,
+        "/oauth/callback",
+        Some("xyz"),
+        "http://127.0.0.1:49152",
+    )
+    .unwrap_err();
+
+    assert!(error.contains("must use GET"));
+}
+
+#[test]
+fn callback_request_rejects_malformed_request_line() {
+    let request =
+        "GET /oauth/callback?code=abc&state=xyz HTTP/1.1 extra\r\nOrigin: http://127.0.0.1:49152\r\n\r\n";
+    let error = parse_callback_request(
+        request,
+        "/oauth/callback",
+        Some("xyz"),
+        "http://127.0.0.1:49152",
+    )
+    .unwrap_err();
+
+    assert!(error.contains("request line"));
 }
 
 #[test]

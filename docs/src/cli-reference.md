@@ -1139,13 +1139,14 @@ harn connect --refresh notion
 harn connect --revoke slack
 ```
 
-OAuth provider commands use a loopback callback bound to `127.0.0.1`. The
-default redirect URI uses port `0`, so Harn selects a random free localhost
-port and sends that exact URI in the authorization request. PKCE S256 is always
-enabled. Generic OAuth discovers protected-resource and authorization-server
-metadata when explicit endpoints are not supplied, attempts dynamic client
-registration when available, and sends the `resource` parameter to both the
-authorization and token endpoints.
+OAuth provider commands use a plaintext HTTP loopback callback bound to
+`127.0.0.1` or `localhost`. The default redirect URI uses port `0`, so Harn
+selects a random free localhost port and sends that exact URI in the
+authorization request; custom redirect URIs must also include an explicit port.
+PKCE S256 is always enabled. Generic OAuth discovers protected-resource and
+authorization-server metadata when explicit endpoints are not supplied, attempts
+dynamic client registration when available, and sends the `resource` parameter
+to both the authorization and token endpoints.
 
 `harn connect <provider>` is available for providers registered in the nearest
 `harn.toml` `[[providers]]` table with `oauth = { ... }` metadata. CLI flags
