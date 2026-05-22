@@ -3347,8 +3347,8 @@ condensed series summaries instead of full per-patch history.
   `oncall_captain` ships a default `with_rate_limit({max_calls: 50})`
   cap; `release_captain` accepts an opt-in `with_dry_run` shadow-run
   layer). Each captain composes the
-  [`std/llm/handlers`](src/stdlib/llm-handlers.md) handler stack and
-  the [`std/llm/tool_middleware`](src/stdlib/tool-middleware.md)
+  [`std/llm/handlers`](docs/src/stdlib/llm-handlers.md) handler stack and
+  the [`std/llm/tool_middleware`](docs/src/stdlib/tool-middleware.md)
   middleware stack from caller-supplied `audit_sink` /
   `telemetry_sink` / `consent` / `rate_limit` / `handoff_sink` /
   `cheap_caller` / `frontier_caller` / `escalate_predicate` /

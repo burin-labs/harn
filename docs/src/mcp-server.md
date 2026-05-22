@@ -329,7 +329,7 @@ and streamable HTTP sessions. It does not expose roots. The
 orchestrator-mode catalog does not currently issue
 `sampling/createMessage` against connected clients (Harn's outbound MCP
 clients accept inbound sampling — see the
-[client docs](mcp-and-acp.html#mcp-client-support-matrix)).
+[client docs](mcp-and-acp.md#mcp-client-support-matrix)).
 
 | Method or feature | Status |
 |---|---|
@@ -345,7 +345,7 @@ clients accept inbound sampling — see the
 | `completion/complete` | Supported for prompt arguments with front-matter suggestions and orchestrator resource template arguments |
 | `elicitation/create` | Supported on script-driven `harn run --serve mcp` surfaces via the `mcp_elicit(...)` builtin (see [Elicitation](#elicitation)). The orchestrator-mode tool catalog does not currently issue elicitations. |
 | `roots/list` | Explicitly unsupported |
-| `sampling/createMessage` | Server-initiated sampling against the connected client is not emitted by the orchestrator catalog. Harn-as-MCP-client *does* accept inbound `sampling/createMessage` (routed to `llm_call` via the host bridge) — see the [client matrix](mcp-and-acp.html#mcp-client-support-matrix). |
+| `sampling/createMessage` | Server-initiated sampling against the connected client is not emitted by the orchestrator catalog. Harn-as-MCP-client *does* accept inbound `sampling/createMessage` (routed to `llm_call` via the host bridge) — see the [client matrix](mcp-and-acp.md#mcp-client-support-matrix). |
 | `tasks/get`, `tasks/result`, `tasks/list`, `tasks/cancel` | Supported for task-augmented orchestrator tool calls |
 | `tools/call` with `params.task` | Supported for tools that advertise optional task execution; rejected with `-32602` for tools that advertise `execution.taskSupport="forbidden"` |
 

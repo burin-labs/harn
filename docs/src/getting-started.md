@@ -20,7 +20,7 @@ so Gatekeeper validates them on first launch with no extra prompts.
 To pin a specific release, pass `HARN_VERSION`:
 
 ```bash
-curl -fsSL https://harnlang.com/install.sh | HARN_VERSION=v0.8.19 sh
+curl -fsSL https://harnlang.com/install.sh | HARN_VERSION=v0.8.32 sh
 ```
 
 To upgrade later, run `harn upgrade` — it reuses the same release

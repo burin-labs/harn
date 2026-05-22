@@ -31,10 +31,10 @@ and ships with policies for `harn`, `harn-cloud`, and `burin-code`.
   commands actually executed, the checks observed, and the final
   outcome. A sweep-level summary aggregates by state, action, and
   repo.
-- A typed GitHub adapter that dispatches through
-  [`std/connectors/github`](../stdlib/connectors-github.md) in live
-  mode and through a deterministic JSON snapshot in fixture mode.
-  Tests, evals, and replay all run on fixtures — no `gh` shelling.
+- A typed GitHub adapter that dispatches through `std/connectors/github`
+  (listed in [`docs/src/modules.md`](../modules.md)) in live mode and through a
+  deterministic JSON snapshot in fixture mode. Tests, evals, and replay all run
+  on fixtures — no `gh` shelling.
 
 ## Running the sweep
 
@@ -65,9 +65,9 @@ harn test personas/merge_captain/tests/scheduler_test.harn
 
 ## Live mode input
 
-`manifest.harn` reads its configuration via
-[`runtime_pipeline_input()`](../stdlib/runtime.md), so the same entry
-pipeline serves both the smoke fixture and a production sweep.
+`manifest.harn` reads its configuration via `runtime_pipeline_input()`
+(listed in [`docs/src/modules.md`](../modules.md)), so the same entry pipeline
+serves both the smoke fixture and a production sweep.
 
 ```json
 {

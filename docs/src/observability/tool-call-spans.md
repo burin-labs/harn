@@ -128,7 +128,7 @@ and writes them to stderr by default. Passing `{sink: my_emitter}` redirects
 each formatted record to a custom callable.
 
 The full OTLP HTTP export path is wired separately via the
-[`HARN_OTEL_ENDPOINT`](./orchestrator/observability.md) env var on the
+[`HARN_OTEL_ENDPOINT`](../orchestrator/observability.md) env var on the
 orchestrator subscriber. Tool-call spans will flow through that same
 pipeline in a follow-up.
 

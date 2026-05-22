@@ -43,7 +43,7 @@ mutation/UX/policy.
 | SSE client | `sse_connect`, `sse_receive`, `sse_close`, `sse_mock` |
 | WebSocket client | `websocket_connect`, `websocket_send`, `websocket_receive`, `websocket_close`, `websocket_mock` |
 
-Source: [`crates/harn-vm/src/http.rs`](../crates/harn-vm/src/http.rs).
+Source: [`crates/harn-vm/src/http/`](../crates/harn-vm/src/http/).
 
 Outbound multipart bodies, streaming requests, and custom TLS for the
 client are tracked separately in
