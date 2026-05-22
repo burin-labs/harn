@@ -76,6 +76,7 @@ fn synthetic_closure(name: &str, env: VmEnv) -> VmClosure {
         is_generator: false,
         is_stream: false,
         has_rest_param: false,
+        has_runtime_type_checks: false,
     };
     VmClosure {
         func: Rc::new(func),

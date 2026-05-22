@@ -25,6 +25,7 @@ fn empty_closure(name: &str) -> VmClosure {
             is_generator: false,
             is_stream: false,
             has_rest_param: false,
+            has_runtime_type_checks: false,
         }),
         env: VmEnv::new(),
         source_dir: None,
