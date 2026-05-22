@@ -457,13 +457,16 @@ pub fn resolve_model(alias: &str) -> (String, Option<String>) {
 /// slash separator (`cerebras/gpt-oss-120b`) because its own /v1/models
 /// endpoint returns bare names that overlap OpenAI's families.
 pub fn normalize_model_id(raw: &str) -> String {
-    for prefix in ["ollama:", "local:", "huggingface:", "hf:", "cerebras/"] {
+    for prefix in PROVIDER_SELECTOR_PREFIXES {
         if let Some(stripped) = raw.strip_prefix(prefix) {
             return stripped.to_string();
         }
     }
     raw.to_string()
 }
+
+const PROVIDER_SELECTOR_PREFIXES: &[&str] =
+    &["ollama:", "local:", "huggingface:", "hf:", "cerebras/"];
 
 /// Resolve an alias or selector into the complete catalog identity hosts need:
 /// provider inference, prefix-normalized model id, default tool format, and tier.
@@ -485,8 +488,8 @@ pub fn resolve_model_info(selector: &str) -> ResolvedModel {
         };
     }
 
-    let provider = infer_provider_with_config(&config, selector).provider;
     let id = normalize_model_id(selector);
+    let provider = infer_provider_with_config(&config, selector).provider;
     let tool_format = default_tool_format_with_config(&config, &id, &provider);
     let tier = model_tier_with_config(&config, &id);
     ResolvedModel {
@@ -524,7 +527,12 @@ fn infer_provider_with_config(
     // less specific than `[models."<id>"].provider = "<name>"`. Catalogs
     // include user overlays, so users can still re-home a model by
     // setting a catalog entry in their own providers.toml.
-    if let Some(model) = config.models.get(model_id) {
+    let normalized_id = normalize_model_id(model_id);
+    if let Some(model) = config
+        .models
+        .get(model_id)
+        .or_else(|| config.models.get(&normalized_id))
+    {
         return crate::llm::provider::ProviderInference::builtin(model.provider.clone());
     }
     for rule in &config.inference_rules {
