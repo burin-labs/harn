@@ -475,6 +475,14 @@ fn infer_provider_with_config(
     if model_id.starts_with("huggingface:") || model_id.starts_with("hf:") {
         return crate::llm::provider::ProviderInference::builtin("huggingface");
     }
+    // Exact catalog rows are the most authoritative declaration of where
+    // a model is hosted: any pattern-based inference rule is necessarily
+    // less specific than `[models."<id>"].provider = "<name>"`. Catalogs
+    // include user overlays, so users can still re-home a model by
+    // setting a catalog entry in their own providers.toml.
+    if let Some(model) = config.models.get(model_id) {
+        return crate::llm::provider::ProviderInference::builtin(model.provider.clone());
+    }
     for rule in &config.inference_rules {
         if let Some(exact) = &rule.exact {
             if model_id == exact {
@@ -1063,6 +1071,66 @@ mod tests {
                 None => std::env::remove_var("HARN_DEFAULT_PROVIDER"),
             }
         }
+    }
+
+    #[test]
+    fn test_direct_catalog_model_id_resolves_to_catalog_provider() {
+        // Bare model IDs that the embedded catalog hosts on Cerebras must
+        // not be misrouted by the generic `gpt-*` / single-slash inference
+        // fallbacks. Regression for harn#2142 (model-info routed
+        // `gpt-oss-120b` to openai, breaking Burin TUI credential checks).
+        let _guard = crate::llm::env_lock().lock().expect("env lock");
+        let prev_default_provider = std::env::var("HARN_DEFAULT_PROVIDER").ok();
+        unsafe {
+            std::env::remove_var("HARN_DEFAULT_PROVIDER");
+        }
+
+        for model in ["gpt-oss-120b", "llama-3.3-70b", "qwen-3-coder-480b"] {
+            assert_eq!(
+                infer_provider(model),
+                "cerebras",
+                "{model} should route to its catalog provider"
+            );
+            let resolved = resolve_model_info(model);
+            assert_eq!(resolved.id, model);
+            assert_eq!(resolved.provider, "cerebras");
+        }
+
+        unsafe {
+            match prev_default_provider {
+                Some(value) => std::env::set_var("HARN_DEFAULT_PROVIDER", value),
+                None => std::env::remove_var("HARN_DEFAULT_PROVIDER"),
+            }
+        }
+    }
+
+    #[test]
+    fn test_user_catalog_overlay_re_homes_model_provider() {
+        // Users can re-home a built-in model by overlaying a catalog row;
+        // the exact-match catalog lookup must honor overlays as well as the
+        // embedded TOML.
+        reset_overrides();
+        let mut overlay = ProvidersConfig::default();
+        overlay.models.insert(
+            "gpt-4o".to_string(),
+            ModelDef {
+                name: "GPT-4o via OpenRouter".to_string(),
+                provider: "openrouter".to_string(),
+                context_window: 128_000,
+                runtime_context_window: None,
+                stream_timeout: None,
+                capabilities: Vec::new(),
+                pricing: None,
+                deprecated: false,
+                deprecation_note: None,
+                quality_tags: Vec::new(),
+            },
+        );
+        set_user_overrides(Some(overlay));
+
+        assert_eq!(infer_provider("gpt-4o"), "openrouter");
+
+        reset_overrides();
     }
 
     #[test]
