@@ -836,6 +836,7 @@ async fn async_main() {
                             jobs: args.jobs,
                             verbose: args.verbose,
                             timing: args.timing,
+                            diagnose: args.diagnose,
                             cli_skill_dirs: &cli_skill_dirs,
                         };
                         if args.watch {
@@ -870,6 +871,7 @@ async fn async_main() {
                         jobs: args.jobs,
                         verbose: args.verbose,
                         timing: args.timing,
+                        diagnose: args.diagnose,
                         cli_skill_dirs: &cli_skill_dirs,
                     };
                     if args.watch {

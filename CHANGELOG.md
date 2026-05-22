@@ -32,6 +32,18 @@ condensed series summaries instead of full per-patch history.
   `@heavy(threads: N)` reserves `N` worker permits so expensive tests do not
   oversubscribe the pool. The selected worker count and scheduling mode are
   printed at the top of every run.
+- **`harn test` per-test phase diagnostics (#2145).** Every `TestResult`
+  now carries a `PhaseTimings { setup, compile, execute, teardown }`
+  breakdown, and the summary exposes an `AggregateTimings` roll-up.
+  `--timing` appends a one-line `Phase totals: …` to the existing
+  slowest tests/files report. A new `--diagnose` flag (also honored via
+  `HARN_TEST_DIAGNOSE=1`) prints one machine-readable
+  `[harn test diag] …` line per test to stderr so downstream consumers
+  (eg. burin-code's preflight) can attribute cold-start vs. assertion
+  cost without external instrumentation. The phase breakdown lands on
+  top of the #2164 bounded scheduler; together they replace the older
+  "filtered single-test runs take ~2-4s of unattributed time" footgun
+  on package-heavy suites.
 
 ### Fixed
 
