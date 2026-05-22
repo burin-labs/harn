@@ -435,11 +435,7 @@ SCRIPTING
     Lock,
     /// Manage Harn package caches and integrity verification.
     Package(PackageArgs),
-    /// Prepare a package manifest and bundle for publication. Validates
-    /// `harn.toml` and produces a publishable archive locally; remote
-    /// registry submission is not yet implemented (the resulting
-    /// archive can be installed via `harn add <repo-or-path>` in the
-    /// meantime).
+    /// Publish a package by tagging the source repo and opening a package-index PR.
     Publish(PublishArgs),
     /// List and inspect durable agent persona manifests.
     Persona(PersonaArgs),

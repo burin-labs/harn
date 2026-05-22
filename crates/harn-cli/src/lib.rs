@@ -1233,6 +1233,11 @@ async fn async_main() {
         Command::Publish(args) => package::publish_package(
             args.package.as_deref(),
             args.dry_run,
+            &args.remote,
+            &args.index_repo,
+            &args.index_path,
+            args.registry_name.as_deref(),
+            args.skip_index_pr,
             args.registry.as_deref(),
             args.json,
         ),

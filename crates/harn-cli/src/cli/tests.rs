@@ -8,9 +8,9 @@ use super::{
     OrchestratorCommand, OrchestratorDeployProvider, OrchestratorLogFormat,
     OrchestratorQueueCommand, OrchestratorTenantCommand, PackageArtifactsCommand,
     PackageCacheCommand, PackageCommand, PackageScaffoldCommand, PersonaCommand, ProjectTemplate,
-    ProviderToolProbeModeArg, ProvidersCommand, RunsCommand, SessionCommand, SkillCommand,
-    SkillKeyCommand, SkillTrustCommand, SkillsCommand, ToolCommand, TraceCommand, TriggerCommand,
-    TrustCommand, TrustOutcomeArg, TrustTierArg,
+    ProviderToolProbeModeArg, ProvidersCommand, PublishArgs, RunsCommand, SessionCommand,
+    SkillCommand, SkillKeyCommand, SkillTrustCommand, SkillsCommand, ToolCommand, TraceCommand,
+    TriggerCommand, TrustCommand, TrustOutcomeArg, TrustTierArg,
 };
 use clap::{CommandFactory, Parser};
 
@@ -2080,6 +2080,52 @@ fn test_parses_package_cache_subcommands() {
         panic!("expected package cache verify");
     };
     assert!(verify.materialized);
+}
+
+#[test]
+fn test_parses_publish_git_tag_flow_options() {
+    let cli = Cli::parse_from([
+        "harn",
+        "publish",
+        "pkg",
+        "--dry-run",
+        "--remote",
+        "upstream",
+        "--index-repo",
+        "burin-labs/harn-cloud",
+        "--index-path",
+        "package-index/harn-package-index.toml",
+        "--registry-name",
+        "@burin/acme-lib",
+        "--skip-index-pr",
+        "--json",
+    ]);
+    let Command::Publish(PublishArgs {
+        package,
+        dry_run,
+        remote,
+        index_repo,
+        index_path,
+        registry_name,
+        skip_index_pr,
+        json,
+        ..
+    }) = cli.command.unwrap()
+    else {
+        panic!("expected publish command");
+    };
+
+    assert_eq!(package, Some(PathBuf::from("pkg")));
+    assert!(dry_run);
+    assert_eq!(remote, "upstream");
+    assert_eq!(index_repo, "burin-labs/harn-cloud");
+    assert_eq!(
+        index_path,
+        PathBuf::from("package-index/harn-package-index.toml")
+    );
+    assert_eq!(registry_name.as_deref(), Some("@burin/acme-lib"));
+    assert!(skip_index_pr);
+    assert!(json);
 }
 
 #[test]

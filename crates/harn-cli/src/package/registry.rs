@@ -48,6 +48,10 @@ pub(crate) struct RegistryPackageVersion {
     #[serde(default)]
     rev: Option<String>,
     #[serde(default)]
+    tag: Option<String>,
+    #[serde(default)]
+    sha: Option<String>,
+    #[serde(default)]
     branch: Option<String>,
     #[serde(default)]
     package: Option<String>,
@@ -542,12 +546,6 @@ pub(crate) fn read_registry_source(source: &str) -> Result<String, PackageError>
     response.text().map_err(|error| {
         PackageError::Registry(format!("failed to read package registry response: {error}"))
     })
-}
-
-pub(crate) fn resolve_configured_registry_source(
-    explicit: Option<&str>,
-) -> Result<String, PackageError> {
-    PackageWorkspace::from_current_dir()?.resolve_registry_source(explicit)
 }
 
 pub(crate) fn is_valid_registry_segment(segment: &str) -> bool {
