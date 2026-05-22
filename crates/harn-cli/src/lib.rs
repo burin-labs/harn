@@ -11,6 +11,7 @@ pub mod package;
 mod provider_bootstrap;
 pub mod skill_loader;
 pub mod skill_provenance;
+pub mod test_report;
 pub mod test_runner;
 #[doc(hidden)]
 pub mod tests;
@@ -662,6 +663,11 @@ async fn async_main() {
             }
         }
         Command::Test(args) => {
+            if args.watch && (args.junit.is_some() || args.json_out.is_some()) {
+                command_error(
+                    "`harn test --watch` cannot combine with --junit or --json-out; the watch loop never terminates so the report would never be written",
+                );
+            }
             if args.target.as_deref() == Some("agents-conformance") {
                 if args.selection.is_some() {
                     command_error(
@@ -835,6 +841,10 @@ async fn async_main() {
                             args.verbose,
                             args.timing,
                             &cli_skill_dirs,
+                            commands::test::UserTestReportConfig {
+                                junit_path: args.junit.as_deref(),
+                                json_out_path: args.json_out.as_deref(),
+                            },
                         )
                         .await;
                     }
@@ -869,6 +879,10 @@ async fn async_main() {
                             args.verbose,
                             args.timing,
                             &cli_skill_dirs,
+                            commands::test::UserTestReportConfig {
+                                junit_path: args.junit.as_deref(),
+                                json_out_path: args.json_out.as_deref(),
+                            },
                         )
                         .await;
                     }

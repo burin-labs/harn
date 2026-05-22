@@ -12,8 +12,24 @@ use crate::commands::run::{
 };
 use crate::env_guard::ScopedEnvVar;
 use crate::json_envelope::{self, JsonEnvelope, JsonError};
+use crate::test_report::{self, TestCaseReport, TestOutcome, TestReport};
 use crate::test_runner;
 use crate::{execute_with_skill_dirs, execute_with_skill_dirs_and_harness};
+
+/// Report-writing options threaded into `run_user_tests`. Each `Some`
+/// path triggers a write at end-of-run; a missing parent directory or
+/// I/O error fails the run loudly instead of silently succeeding.
+#[derive(Debug, Clone, Copy, Default)]
+pub struct UserTestReportConfig<'a> {
+    pub junit_path: Option<&'a str>,
+    pub json_out_path: Option<&'a str>,
+}
+
+impl UserTestReportConfig<'_> {
+    pub fn is_empty(&self) -> bool {
+        self.junit_path.is_none() && self.json_out_path.is_none()
+    }
+}
 
 pub(crate) const CONFORMANCE_TEST_SCHEMA_VERSION: u32 = 1;
 
@@ -155,47 +171,34 @@ fn error_line_matches(actual_error: &str, pattern: &str) -> bool {
     }
 }
 
-fn xml_escape(s: &str) -> String {
-    s.replace('&', "&amp;")
-        .replace('<', "&lt;")
-        .replace('>', "&gt;")
-        .replace('"', "&quot;")
-        .replace('\'', "&apos;")
-}
-
-fn write_junit_xml(path: &str, results: &[(String, bool, String, u64)], announce: bool) {
-    let total = results.len();
-    let failures = results.iter().filter(|r| !r.1).count();
-    let total_time: f64 = results.iter().map(|r| r.3 as f64 / 1000.0).sum();
-
-    let mut xml = String::new();
-    xml.push_str("<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n");
-    xml.push_str(&format!(
-        "<testsuite name=\"harn\" tests=\"{total}\" failures=\"{failures}\" time=\"{total_time:.3}\">\n"
-    ));
-    for (name, passed, error_msg, duration_ms) in results {
-        let time = *duration_ms as f64 / 1000.0;
-        let escaped_name = xml_escape(name);
-        xml.push_str(&format!(
-            "  <testcase name=\"{escaped_name}\" time=\"{time:.3}\""
-        ));
-        if *passed {
-            xml.push_str(" />\n");
-        } else {
-            xml.push_str(">\n");
-            let escaped = xml_escape(error_msg);
-            xml.push_str(&format!(
-                "    <failure message=\"test failed\">{escaped}</failure>\n"
-            ));
-            xml.push_str("  </testcase>\n");
+/// Write a JUnit XML report or exit non-zero with a clear diagnostic.
+/// Centralised so every `harn test` mode fails loudly on bad paths
+/// (issue #2146).
+fn write_junit_xml_or_exit(path: &str, report: &TestReport, announce: bool) {
+    match test_report::write_junit(path, report) {
+        Ok(written) => {
+            if announce {
+                println!("JUnit XML written to {}", written.display());
+            }
+        }
+        Err(error) => {
+            eprintln!("{error}");
+            process::exit(1);
         }
     }
-    xml.push_str("</testsuite>\n");
+}
 
-    if let Err(e) = fs::write(path, &xml) {
-        eprintln!("Failed to write JUnit XML to {path}: {e}");
-    } else if announce {
-        println!("JUnit XML written to {path}");
+fn write_user_test_json_or_exit(path: &str, report: &TestReport, announce: bool) {
+    match test_report::write_json(path, report) {
+        Ok(written) => {
+            if announce {
+                println!("JSON report written to {}", written.display());
+            }
+        }
+        Err(error) => {
+            eprintln!("{error}");
+            process::exit(1);
+        }
     }
 }
 
@@ -1270,7 +1273,7 @@ pub(crate) async fn run_conformance_tests(
     let mut errors: Vec<String> = Vec::new();
     let mut json_results: Vec<ConformanceJsonResult> = Vec::new();
     let mut json_summary = ConformanceJsonSummary::default();
-    let mut junit_results: Vec<(String, bool, String, u64)> = Vec::new();
+    let mut report = TestReport::new("conformance", Some(&suite_root));
 
     let harn_files = match resolve_conformance_selection(&suite_root, selection) {
         Ok(files) => files,
@@ -1363,16 +1366,18 @@ pub(crate) async fn run_conformance_tests(
                 outcome,
                 ConformanceJsonOutcome::Pass | ConformanceJsonOutcome::XfailExpected
             );
-            junit_results.push((
-                rel_path.clone(),
-                junit_passed,
-                if junit_passed {
-                    String::new()
+            report.push(TestCaseReport {
+                name: rel_path.clone(),
+                file: rel_path.clone(),
+                classname: rel_path.clone(),
+                outcome: if junit_passed {
+                    TestOutcome::Passed
                 } else {
-                    message.clone().unwrap_or_default()
+                    TestOutcome::Failed
                 },
-                evaluation.duration_ms,
-            ));
+                duration_ms: evaluation.duration_ms,
+                message: if junit_passed { None } else { message.clone() },
+            });
             json_results.push(ConformanceJsonResult {
                 name: rel_path.clone(),
                 outcome,
@@ -1392,12 +1397,14 @@ pub(crate) async fn run_conformance_tests(
             } else {
                 println!("  \x1b[32mPASS\x1b[0m  {rel_path}");
             }
-            junit_results.push((
-                rel_path.clone(),
-                true,
-                String::new(),
-                evaluation.duration_ms,
-            ));
+            report.push(TestCaseReport {
+                name: rel_path.clone(),
+                file: rel_path.clone(),
+                classname: rel_path.clone(),
+                outcome: TestOutcome::Passed,
+                duration_ms: evaluation.duration_ms,
+                message: None,
+            });
             passed += 1;
         } else {
             if show_timing {
@@ -1412,16 +1419,24 @@ pub(crate) async fn run_conformance_tests(
                 .message
                 .unwrap_or_else(|| format!("{rel_path}: failed without diagnostic message"));
             errors.push(msg.clone());
-            junit_results.push((rel_path.clone(), false, msg, evaluation.duration_ms));
+            report.push(TestCaseReport {
+                name: rel_path.clone(),
+                file: rel_path.clone(),
+                classname: rel_path.clone(),
+                outcome: TestOutcome::Failed,
+                duration_ms: evaluation.duration_ms,
+                message: Some(msg),
+            });
             failed += 1;
         }
     }
 
     let total_duration_ms = suite_start.elapsed().as_millis() as u64;
+    report.set_duration_ms(total_duration_ms);
 
     if options.json {
         if let Some(path) = junit_path {
-            write_junit_xml(path, &junit_results, false);
+            write_junit_xml_or_exit(path, &report, false);
         }
         let snapshot_key = conformance_snapshot_key(&suite_root, &selected_harn_files);
         let ok = json_summary.is_success();
@@ -1476,32 +1491,11 @@ pub(crate) async fn run_conformance_tests(
         println!();
         println!("Total time: {total_duration_ms} ms");
 
-        let mut durations: Vec<u64> = junit_results.iter().map(|r| r.3).collect();
-        durations.sort();
-
-        if !durations.is_empty() {
-            let n = durations.len();
-            let p50 = durations[n * 50 / 100];
-            let p95 = durations[n * 95 / 100];
-            let p99 = durations[(n * 99 / 100).min(n - 1)];
-            let avg = durations.iter().sum::<u64>() / n as u64;
-            println!("Per-test: avg={avg} ms  p50={p50} ms  p95={p95} ms  p99={p99} ms");
-        }
-
-        let mut by_time: Vec<&(String, bool, String, u64)> = junit_results.iter().collect();
-        by_time.sort_by_key(|entry| std::cmp::Reverse(entry.3));
-        let top_n = by_time.len().min(10);
-        if top_n > 0 {
-            println!();
-            println!("Slowest {top_n} tests:");
-            for entry in &by_time[..top_n] {
-                println!("  {:>6} ms  {}", entry.3, entry.0);
-            }
-        }
+        print_per_test_timing(&report);
     }
 
     if let Some(path) = junit_path {
-        write_junit_xml(path, &junit_results, true);
+        write_junit_xml_or_exit(path, &report, true);
     }
 
     if !errors.is_empty() {
@@ -1582,6 +1576,75 @@ fn user_test_progress(verbose: bool) -> test_runner::TestRunProgress {
             }
         }
     })
+}
+
+/// Print avg/p50/p95/p99 and the slowest-10 from a finalized
+/// [`TestReport`]. Used by the conformance path; the user-test path
+/// has its own variant that also groups by file (see
+/// [`print_user_test_timing`]).
+fn print_per_test_timing(report: &TestReport) {
+    let mut durations: Vec<u64> = report.cases.iter().map(|c| c.duration_ms).collect();
+    if durations.is_empty() {
+        return;
+    }
+    durations.sort();
+    let n = durations.len();
+    let p50 = durations[n * 50 / 100];
+    let p95 = durations[n * 95 / 100];
+    let p99 = durations[(n * 99 / 100).min(n - 1)];
+    let avg = durations.iter().sum::<u64>() / n as u64;
+    println!("Per-test: avg={avg} ms  p50={p50} ms  p95={p95} ms  p99={p99} ms");
+
+    let mut by_time: Vec<&TestCaseReport> = report.cases.iter().collect();
+    by_time.sort_by_key(|case| std::cmp::Reverse(case.duration_ms));
+    let top_n = by_time.len().min(10);
+    if top_n > 0 {
+        println!();
+        println!("Slowest {top_n} tests:");
+        for case in &by_time[..top_n] {
+            println!("  {:>6} ms  {}", case.duration_ms, case.name);
+        }
+    }
+}
+
+/// Convert a [`TestSummary`] (raw runner output) into the
+/// machine-readable [`TestReport`] shape consumed by `--junit` and
+/// `--json-out`. File paths are made relative to `suite_root` so CI
+/// uploads and snapshot diffs are portable across machines.
+fn user_test_report_from_summary(
+    suite_root: &Path,
+    summary: &test_runner::TestSummary,
+) -> TestReport {
+    let mut report = TestReport::new("user", Some(suite_root));
+    for result in &summary.results {
+        let outcome = if result.passed {
+            TestOutcome::Passed
+        } else if result
+            .error
+            .as_deref()
+            .is_some_and(|msg| msg.starts_with("timed out after"))
+        {
+            TestOutcome::TimedOut
+        } else {
+            TestOutcome::Failed
+        };
+        let file_path = PathBuf::from(&result.file);
+        let relative = file_path
+            .strip_prefix(suite_root)
+            .ok()
+            .map(logical_path)
+            .unwrap_or_else(|| result.file.clone());
+        report.push(TestCaseReport {
+            name: result.name.clone(),
+            file: relative.clone(),
+            classname: relative,
+            outcome,
+            duration_ms: result.duration_ms,
+            message: result.error.clone(),
+        });
+    }
+    report.set_duration_ms(summary.duration_ms);
+    report
 }
 
 fn print_test_results(summary: &test_runner::TestSummary, options: UserTestOutputOptions) {
@@ -1744,11 +1807,20 @@ pub(crate) async fn run_user_tests(
     verbose: bool,
     timing: bool,
     cli_skill_dirs: &[PathBuf],
+    report_config: UserTestReportConfig<'_>,
 ) {
     let path = PathBuf::from(path_str);
     if !path.exists() {
         eprintln!("Path not found: {path_str}");
         process::exit(1);
+    }
+    if !report_config.is_empty() {
+        if let Some(p) = report_config.junit_path {
+            preflight_report_path(p);
+        }
+        if let Some(p) = report_config.json_out_path {
+            preflight_report_path(p);
+        }
     }
     let summary = run_user_tests_once(
         &path,
@@ -1760,8 +1832,39 @@ pub(crate) async fn run_user_tests(
         cli_skill_dirs,
     )
     .await;
+
+    if !report_config.is_empty() {
+        let suite_root = path.canonicalize().unwrap_or(path.clone());
+        let report = user_test_report_from_summary(&suite_root, &summary);
+        if let Some(p) = report_config.junit_path {
+            write_junit_xml_or_exit(p, &report, true);
+        }
+        if let Some(p) = report_config.json_out_path {
+            write_user_test_json_or_exit(p, &report, true);
+        }
+    }
+
     if summary.failed > 0 {
         process::exit(1);
+    }
+}
+
+/// Validate report destinations before running the suite so a typo
+/// in the output path is caught up-front rather than after a long
+/// test run. Mirrors the post-run write check inside the writers but
+/// short-circuits "I just spent 10 minutes running tests and got no
+/// report" cases.
+fn preflight_report_path(path: &str) {
+    let buf = PathBuf::from(path);
+    if let Some(parent) = buf.parent().filter(|p| !p.as_os_str().is_empty()) {
+        if !parent.exists() {
+            eprintln!("report directory does not exist: {}", parent.display());
+            process::exit(1);
+        }
+        if !parent.is_dir() {
+            eprintln!("report directory is not a directory: {}", parent.display());
+            process::exit(1);
+        }
     }
 }
 

@@ -286,13 +286,14 @@ harn test agents-conformance --target http://localhost:8080 --api-key "$KEY"
 | `--target <url>` | Harness base URL for `harn test agents-conformance` |
 | `--api-key <key>` | Bearer API key for `harn test agents-conformance` |
 | `--category <name>` | Agents conformance category to run; repeatable or comma-separated |
-| `--json` / `--json-out <path>` | Emit or write the agents conformance leaderboard-shaped JSON report |
+| `--json` | Emit conformance results as JSON to stdout, or the agents-conformance leaderboard report |
+| `--json-out <path>` | Write user-test results (or the agents-conformance report) to a JSON file; schemaVersion 1 |
 | `--workspace-id <id>` / `--session-id <id>` | Reuse existing Harness resources for agents conformance setup |
 | `--parallel` | Run tests concurrently |
-| `--watch` | Re-run tests on file changes |
+| `--watch` | Re-run tests on file changes (mutually exclusive with `--junit` / `--json-out`) |
 | `--verbose` / `-v` | Show per-test timing and detailed failures |
 | `--timing` | Show per-test timing plus summary statistics |
-| `--junit <path>` | Write JUnit XML report |
+| `--junit <path>` | Write JUnit XML report for user tests or conformance; missing or unwritable destinations fail loudly |
 | `--timeout <ms>` | Per-test timeout in milliseconds (default: 30000) |
 | `--record` | Record LLM responses to `.harn-fixtures/` |
 | `--replay` | Replay recorded LLM responses |

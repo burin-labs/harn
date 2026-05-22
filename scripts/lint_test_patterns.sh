@@ -148,6 +148,7 @@ is_e2e_subprocess_path() {
     crates/harn-cli/tests/run_exit_codes.rs | \
     crates/harn-cli/tests/skills_cli.rs | \
     crates/harn-cli/tests/trigger_replay_cli.rs | \
+    crates/harn-cli/tests/user_test_reports_cli.rs | \
     crates/harn-cli/tests/orchestrator_http.rs | \
     crates/harn-cli/tests/orchestrator_http/* | \
     crates/harn-cli/tests/support/mcp.rs | \

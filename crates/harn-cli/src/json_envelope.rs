@@ -207,6 +207,13 @@ pub fn catalog() -> Vec<SchemaEntry> {
             schema_json: None,
         },
         SchemaEntry {
+            command: "test --json-out",
+            schema_version: crate::test_report::USER_TEST_REPORT_SCHEMA_VERSION,
+            description:
+                "User-test report (`--json-out`): per-case name/file/classname/outcome/duration plus suite-level summary.",
+            schema_json: None,
+        },
+        SchemaEntry {
             command: "time run",
             schema_version: crate::commands::time::TIME_RUN_SCHEMA_VERSION,
             description:
