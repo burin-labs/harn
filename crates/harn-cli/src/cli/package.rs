@@ -144,7 +144,7 @@ pub(crate) struct PackageScaffoldOpenapiArgs {
     /// Git rev/tag written for the generated `harn-openapi` dependency.
     #[arg(long = "harn-openapi-rev", conflicts_with = "harn_openapi_branch")]
     pub harn_openapi_rev: Option<String>,
-    /// Git branch written for the generated `harn-openapi` dependency. Defaults to `main`.
+    /// Git branch written for the generated `harn-openapi` dependency instead of the default pinned rev.
     #[arg(long = "harn-openapi-branch", conflicts_with = "harn_openapi_rev")]
     pub harn_openapi_branch: Option<String>,
     /// Overwrite generated files in an existing package directory.
