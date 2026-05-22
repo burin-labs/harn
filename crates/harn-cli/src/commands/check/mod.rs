@@ -1,3 +1,4 @@
+mod analysis;
 mod bundle;
 mod check_cmd;
 mod config;
@@ -17,6 +18,9 @@ mod template_lint;
 #[cfg(test)]
 mod tests;
 
+pub(crate) use analysis::{
+    analyze_file, span_from_lexer_error, span_from_parser_error, FileAnalysisError,
+};
 pub(crate) use bundle::build_bundle_manifest;
 pub(crate) use check_cmd::{
     check_file_inner, check_file_report, CheckReport, CHECK_SCHEMA_VERSION,

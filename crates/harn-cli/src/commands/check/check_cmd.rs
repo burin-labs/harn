@@ -1,12 +1,16 @@
 use std::path::Path;
 
 use harn_lint::LintSeverity;
-use harn_parser::{DiagnosticSeverity, PipelineError, TypeChecker};
+use harn_parser::analysis::{AnalysisDatabase, AnalysisError};
+use harn_parser::DiagnosticSeverity;
 use serde::Serialize;
 
 use crate::package::{CheckConfig, PreflightSeverity};
-use crate::parse_source_file;
 
+use super::analysis::{
+    analyze_file, render_file_analysis_error_or_exit, span_from_lexer_error,
+    span_from_parser_error, FileAnalysisError,
+};
 use super::outcome::{print_lint_diagnostics, CommandOutcome};
 use super::preflight::{collect_preflight_diagnostics, is_preflight_allowed};
 
@@ -85,6 +89,7 @@ impl CheckReport {
 }
 
 pub(crate) fn check_file_inner(
+    analysis: &mut AnalysisDatabase,
     path: &Path,
     config: &CheckConfig,
     externally_imported_names: &std::collections::HashSet<String>,
@@ -92,6 +97,7 @@ pub(crate) fn check_file_inner(
     check_invariants: bool,
 ) -> CommandOutcome {
     check_file_report_inner(
+        analysis,
         path,
         config,
         externally_imported_names,
@@ -103,6 +109,7 @@ pub(crate) fn check_file_inner(
 }
 
 pub(crate) fn check_file_report(
+    analysis: &mut AnalysisDatabase,
     path: &Path,
     config: &CheckConfig,
     externally_imported_names: &std::collections::HashSet<String>,
@@ -110,6 +117,7 @@ pub(crate) fn check_file_report(
     check_invariants: bool,
 ) -> CheckFileReport {
     check_file_report_inner(
+        analysis,
         path,
         config,
         externally_imported_names,
@@ -120,6 +128,7 @@ pub(crate) fn check_file_report(
 }
 
 fn check_file_report_inner(
+    analysis: &mut AnalysisDatabase,
     path: &Path,
     config: &CheckConfig,
     externally_imported_names: &std::collections::HashSet<String>,
@@ -128,32 +137,24 @@ fn check_file_report_inner(
     emit_text: bool,
 ) -> CheckFileReport {
     let path_str = path.to_string_lossy().into_owned();
-    let (source, program) = if emit_text {
-        parse_source_file(&path_str)
-    } else {
-        match parse_source_for_report(&path_str) {
-            Ok(parsed) => parsed,
-            Err(report) => return report,
+    let output = match analyze_file(analysis, path, config, module_graph) {
+        Ok(output) => output,
+        Err(error) => {
+            if emit_text {
+                render_file_analysis_error_or_exit(&path_str, error);
+            }
+            return file_analysis_error_report(&path_str, error);
         }
     };
+    let source = output.source;
+    let program = output.program;
 
     let mut has_error = false;
     let mut has_warning = false;
     let mut diagnostic_count = 0;
     let mut diagnostics = Vec::new();
 
-    let mut checker = TypeChecker::with_strict_types(config.strict_types);
-    if let Some(imported) = module_graph.imported_names_for_file(path) {
-        checker = checker.with_imported_names(imported);
-    }
-    if let Some(imported) = module_graph.imported_type_declarations_for_file(path) {
-        checker = checker.with_imported_type_decls(imported);
-    }
-    if let Some(imported) = module_graph.imported_callable_declarations_for_file(path) {
-        checker = checker.with_imported_callable_decls(imported);
-    }
-    let type_diagnostics = checker.check_with_source(&program, &source);
-    for diag in &type_diagnostics {
+    for diag in &output.diagnostics {
         if harn_lint::type_diagnostic_lint_disabled(diag, &config.disable_rules) {
             continue;
         }
@@ -317,64 +318,70 @@ fn lint_severity_label(severity: LintSeverity) -> &'static str {
     }
 }
 
-fn check_span(span: harn_lexer::Span) -> CheckSpan {
+pub(crate) fn check_span(span: harn_lexer::Span) -> CheckSpan {
     CheckSpan {
         start: span.start,
         end: span.end,
     }
 }
 
-fn parse_source_for_report(
-    path: &str,
-) -> Result<(String, Vec<harn_parser::SNode>), CheckFileReport> {
-    let source = std::fs::read_to_string(path).map_err(|error| CheckFileReport {
-        path: path.to_string(),
-        status: CheckFileStatus::Error,
-        diagnostics: vec![CheckDiagnostic {
-            source: "io",
-            severity: "error",
-            code: None,
-            message: format!("Error reading {path}: {error}"),
-            span: None,
-            help: None,
-        }],
-    })?;
-    let program = harn_parser::parse_source(&source)
-        .map_err(|error| parse_diagnostic_report(path, &source, error))?;
-    Ok((source, program))
+fn file_analysis_error_report(path: &str, error: FileAnalysisError) -> CheckFileReport {
+    match error {
+        FileAnalysisError::Read(error) => CheckFileReport {
+            path: path.to_string(),
+            status: CheckFileStatus::Error,
+            diagnostics: vec![CheckDiagnostic {
+                source: "io",
+                severity: "error",
+                code: None,
+                message: format!("Error reading {path}: {error}"),
+                span: None,
+                help: None,
+            }],
+        },
+        FileAnalysisError::Analysis(error) => analysis_diagnostic_report(path, error),
+    }
 }
 
-fn parse_diagnostic_report(path: &str, _source: &str, error: PipelineError) -> CheckFileReport {
-    let span = error.span().copied();
-    let diagnostic = match error {
-        PipelineError::Lex(error) => CheckDiagnostic {
-            source: "lexer",
-            severity: "error",
-            code: Some(harn_parser::diagnostic::lexer_error_code(&error).to_string()),
-            message: error.to_string(),
-            span: span.map(check_span),
-            help: None,
-        },
-        PipelineError::Parse(error) => CheckDiagnostic {
-            source: "parser",
-            severity: "error",
-            code: Some(harn_parser::diagnostic::parser_error_code(&error).to_string()),
-            message: harn_parser::diagnostic::parser_error_message(&error),
-            span: span.map(check_span),
-            help: harn_parser::diagnostic::parser_error_help(&error).map(str::to_string),
-        },
-        PipelineError::TypeCheck(error) => CheckDiagnostic {
-            source: "type",
-            severity: type_severity_label(error.severity),
-            code: Some(error.code.to_string()),
-            message: error.message.clone(),
-            span: error.span.map(check_span),
-            help: error.help.clone(),
-        },
-    };
+fn analysis_diagnostic_report(path: &str, error: AnalysisError) -> CheckFileReport {
+    let diagnostic = check_diagnostic_from_analysis_error(error);
     CheckFileReport {
         path: path.to_string(),
         status: CheckFileStatus::Error,
         diagnostics: vec![diagnostic],
+    }
+}
+
+pub(crate) fn check_diagnostic_from_analysis_error(error: AnalysisError) -> CheckDiagnostic {
+    match error {
+        AnalysisError::MissingSource(id) => CheckDiagnostic {
+            source: "analysis",
+            severity: "error",
+            code: None,
+            message: format!("missing analysis source {}", id.as_str()),
+            span: None,
+            help: None,
+        },
+        AnalysisError::Lex { error, .. } => CheckDiagnostic {
+            source: "lexer",
+            severity: "error",
+            code: Some(harn_parser::diagnostic::lexer_error_code(&error).to_string()),
+            message: error.to_string(),
+            span: Some(check_span(span_from_lexer_error(&error))),
+            help: None,
+        },
+        AnalysisError::Parse { errors, .. } => {
+            let error = errors
+                .first()
+                .expect("analysis parse errors should include at least one error");
+            CheckDiagnostic {
+                source: "parser",
+                severity: "error",
+                code: Some(harn_parser::diagnostic::parser_error_code(error).to_string()),
+                message: harn_parser::diagnostic::parser_error_message(error),
+                span: Some(check_span(span_from_parser_error(error))),
+                help: harn_parser::diagnostic::parser_error_help(error).map(str::to_string),
+            }
+        }
     }
 }

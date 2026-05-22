@@ -5,9 +5,10 @@ use std::path::Path;
 
 use harn_lexer::{FixEdit, Span};
 use harn_lint::LintSeverity;
+use harn_parser::analysis::{AnalysisDatabase, AnalysisError};
 use harn_parser::{
-    visit, BindingPattern, DiagnosticCode as Code, DiagnosticSeverity, Node, PipelineError, Repair,
-    RepairSafety, SNode, TypeChecker, TypeExpr, TypedParam,
+    visit, BindingPattern, DiagnosticCode as Code, DiagnosticSeverity, Node, Repair, RepairSafety,
+    SNode, TypeExpr, TypedParam,
 };
 use serde::Serialize;
 
@@ -382,10 +383,12 @@ fn build_plan_with_options(
 
     let module_graph = commands::check::build_module_graph(&files);
     let cross_file_imports = commands::check::collect_cross_file_imports(&module_graph);
+    let mut analysis = AnalysisDatabase::new();
     let mut candidates = Vec::new();
     let mut skipped_files = Vec::new();
     for file in &files {
         if let Err(skipped) = collect_file_candidates(
+            &mut analysis,
             file,
             safety_ceiling,
             &cross_file_imports,
@@ -595,21 +598,29 @@ fn count_remaining_diagnostics(target: &Path) -> Result<RemainingDiagnostics, St
     let files = commands::check::collect_harn_targets(&target_refs);
     let module_graph = commands::check::build_module_graph(&files);
     let cross_file_imports = commands::check::collect_cross_file_imports(&module_graph);
+    let mut analysis = AnalysisDatabase::new();
     let mut count = 0;
     let mut skipped_files = Vec::new();
 
     for file in &files {
-        let (source, program) = match parse_fix_source_file(file) {
-            Ok(parsed) => parsed,
-            Err(skipped) => {
-                skipped_files.push(skipped);
-                continue;
-            }
-        };
         let mut config = package::load_check_config(Some(file));
         commands::check::apply_harn_lint_config(file, &mut config);
+        let output =
+            match commands::check::analyze_file(&mut analysis, file, &config, &module_graph) {
+                Ok(output) => output,
+                Err(skipped) => {
+                    skipped_files.push(skipped_file_from_analysis_error(
+                        file.to_string_lossy().into_owned(),
+                        skipped,
+                    ));
+                    continue;
+                }
+            };
+        let source = output.source;
+        let program = output.program;
 
-        count += type_check(file, &config, &module_graph, &program, &source)
+        count += output
+            .diagnostics
             .iter()
             .filter(|diag| !harn_lint::type_diagnostic_lint_disabled(diag, &config.disable_rules))
             .count();
@@ -652,6 +663,7 @@ fn count_remaining_diagnostics(target: &Path) -> Result<RemainingDiagnostics, St
 }
 
 fn collect_file_candidates(
+    analysis: &mut AnalysisDatabase,
     file: &Path,
     safety_ceiling: Option<RepairSafety>,
     cross_file_imports: &HashSet<String>,
@@ -660,12 +672,14 @@ fn collect_file_candidates(
     out: &mut Vec<RepairCandidate>,
 ) -> Result<(), SkippedFileWire> {
     let path_str = file.to_string_lossy().into_owned();
-    let (source, program) = parse_fix_source_file(file)?;
     let mut config = package::load_check_config(Some(file));
     commands::check::apply_harn_lint_config(file, &mut config);
+    let output = commands::check::analyze_file(analysis, file, &config, module_graph)
+        .map_err(|error| skipped_file_from_analysis_error(path_str.clone(), error))?;
+    let source = output.source;
+    let program = output.program;
 
-    let type_diagnostics = type_check(file, &config, module_graph, &program, &source);
-    for diag in &type_diagnostics {
+    for diag in &output.diagnostics {
         if harn_lint::type_diagnostic_lint_disabled(diag, &config.disable_rules) {
             continue;
         }
@@ -731,61 +745,64 @@ fn collect_file_candidates(
     Ok(())
 }
 
-fn parse_fix_source_file(file: &Path) -> Result<(String, Vec<SNode>), SkippedFileWire> {
-    let path = file.to_string_lossy().into_owned();
-    let source = std::fs::read_to_string(file).map_err(|error| SkippedFileWire {
-        path: path.clone(),
-        reason: "read_error",
-        diagnostics: vec![SkippedFileDiagnosticWire {
-            source: "io",
-            severity: "error",
-            code: None,
-            message: format!("failed to read {path}: {error}"),
-            span: None,
-            help: None,
-        }],
-    })?;
-    let program = harn_parser::parse_source(&source)
-        .map_err(|error| skipped_file_from_pipeline_error(path, error))?;
-    Ok((source, program))
-}
-
-fn skipped_file_from_pipeline_error(path: String, error: PipelineError) -> SkippedFileWire {
-    let span = error.span().copied().map(SpanWire::from);
+fn skipped_file_from_analysis_error(
+    path: String,
+    error: commands::check::FileAnalysisError,
+) -> SkippedFileWire {
     let (reason, diagnostic) = match error {
-        PipelineError::Lex(error) => (
+        commands::check::FileAnalysisError::Read(error) => (
+            "read_error",
+            SkippedFileDiagnosticWire {
+                source: "io",
+                severity: "error",
+                code: None,
+                message: format!("failed to read {path}: {error}"),
+                span: None,
+                help: None,
+            },
+        ),
+        commands::check::FileAnalysisError::Analysis(AnalysisError::MissingSource(id)) => (
+            "analysis_error",
+            SkippedFileDiagnosticWire {
+                source: "analysis",
+                severity: "error",
+                code: None,
+                message: format!("missing analysis source {}", id.as_str()),
+                span: None,
+                help: None,
+            },
+        ),
+        commands::check::FileAnalysisError::Analysis(AnalysisError::Lex { error, .. }) => (
             "lex_error",
             SkippedFileDiagnosticWire {
                 source: "lexer",
                 severity: "error",
                 code: Some(harn_parser::diagnostic::lexer_error_code(&error).to_string()),
                 message: error.to_string(),
-                span,
+                span: Some(SpanWire::from(commands::check::span_from_lexer_error(
+                    &error,
+                ))),
                 help: None,
             },
         ),
-        PipelineError::Parse(error) => (
-            "parse_error",
-            SkippedFileDiagnosticWire {
-                source: "parser",
-                severity: "error",
-                code: Some(harn_parser::diagnostic::parser_error_code(&error).to_string()),
-                message: harn_parser::diagnostic::parser_error_message(&error),
-                span,
-                help: harn_parser::diagnostic::parser_error_help(&error).map(str::to_string),
-            },
-        ),
-        PipelineError::TypeCheck(error) => (
-            "type_error",
-            SkippedFileDiagnosticWire {
-                source: "typecheck",
-                severity: severity_label(error.severity),
-                code: Some(error.code.to_string()),
-                message: error.message,
-                span: error.span.map(SpanWire::from),
-                help: error.help,
-            },
-        ),
+        commands::check::FileAnalysisError::Analysis(AnalysisError::Parse { errors, .. }) => {
+            let error = errors
+                .first()
+                .expect("analysis parse errors should include at least one error");
+            (
+                "parse_error",
+                SkippedFileDiagnosticWire {
+                    source: "parser",
+                    severity: "error",
+                    code: Some(harn_parser::diagnostic::parser_error_code(error).to_string()),
+                    message: harn_parser::diagnostic::parser_error_message(error),
+                    span: Some(SpanWire::from(commands::check::span_from_parser_error(
+                        error,
+                    ))),
+                    help: harn_parser::diagnostic::parser_error_help(error).map(str::to_string),
+                },
+            )
+        }
     };
     SkippedFileWire {
         path,
@@ -1444,26 +1461,6 @@ fn collect_preflight_candidates(
             edits: Vec::new(),
         });
     }
-}
-
-fn type_check(
-    path: &Path,
-    config: &CheckConfig,
-    module_graph: &harn_modules::ModuleGraph,
-    program: &[SNode],
-    source: &str,
-) -> Vec<harn_parser::TypeDiagnostic> {
-    let mut checker = TypeChecker::with_strict_types(config.strict_types);
-    if let Some(imported) = module_graph.imported_names_for_file(path) {
-        checker = checker.with_imported_names(imported);
-    }
-    if let Some(imported) = module_graph.imported_type_declarations_for_file(path) {
-        checker = checker.with_imported_type_decls(imported);
-    }
-    if let Some(imported) = module_graph.imported_callable_declarations_for_file(path) {
-        checker = checker.with_imported_callable_decls(imported);
-    }
-    checker.check_with_source(program, source)
 }
 
 fn repair_allowed(repair: &Repair, safety_ceiling: Option<RepairSafety>) -> bool {
