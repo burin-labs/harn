@@ -605,7 +605,7 @@ pipeline default() {{
       }},
     ),
   )
-  println("wrote " + out_path)
+  __io_println("wrote " + out_path)
 }}
 "#,
         spec_path = harn_string_literal(spec_relative_path),

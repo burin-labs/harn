@@ -19,7 +19,7 @@ fn eval_supports_stdlib_import() {
     let temp = TempDir::new().unwrap();
     let out = harn_e2e_command()
         .current_dir(temp.path())
-        .args(["run", "-e", "import \"std/triggers\"\nprintln(\"ok\")"])
+        .args(["run", "-e", "import \"std/triggers\"\n__io_println(\"ok\")"])
         .output()
         .unwrap();
     assert_eq!(
@@ -48,7 +48,7 @@ fn eval_supports_relative_import_against_cwd() {
 
     let out = harn_e2e_command()
         .current_dir(temp.path())
-        .args(["run", "-e", "import \"./lib\"\nprintln(answer())"])
+        .args(["run", "-e", "import \"./lib\"\n__io_println(answer())"])
         .output()
         .unwrap();
     assert_eq!(

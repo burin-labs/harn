@@ -8,7 +8,7 @@ use super::*;
 #[test]
 fn ambient_fs_call_inside_main_rewrites_to_harness_fs() {
     let source =
-        "fn main(harness: Harness) {\n  let body = read_file(\"path.txt\")\n  println(body)\n}\n";
+        "fn main(harness: Harness) {\n  let body = read_file(\"path.txt\")\n  harness.stdio.println(body)\n}\n";
     let diags = lint_source(source);
     assert_eq!(
         count_rule(&diags, "ambient-fs-builtin"),
@@ -51,7 +51,8 @@ fn ambient_fs_lints_full_surface_inside_main() {
 
 #[test]
 fn ambient_env_call_rewrites_to_harness_env() {
-    let source = "fn main(harness: Harness) {\n  let v = env(\"HOME\")\n  println(v)\n}\n";
+    let source =
+        "fn main(harness: Harness) {\n  let v = env(\"HOME\")\n  harness.stdio.println(v)\n}\n";
     let diags = lint_source(source);
     assert_eq!(
         count_rule(&diags, "ambient-env-builtin"),
@@ -76,7 +77,8 @@ fn ambient_env_or_rewrites_to_harness_env_get_or() {
 
 #[test]
 fn ambient_random_call_rewrites_to_harness_random() {
-    let source = "fn main(harness: Harness) {\n  let n = random_int(0, 10)\n  println(n)\n}\n";
+    let source =
+        "fn main(harness: Harness) {\n  let n = random_int(0, 10)\n  harness.stdio.println(n)\n}\n";
     let diags = lint_source(source);
     assert_eq!(
         count_rule(&diags, "ambient-random-builtin"),
@@ -111,7 +113,7 @@ fn explicit_seeded_random_calls_are_not_ambient_host_random() {
 #[test]
 fn ambient_net_call_rewrites_to_harness_net() {
     let source =
-        "fn main(harness: Harness) {\n  let r = http_get(\"https://example.test\")\n  println(r)\n}\n";
+        "fn main(harness: Harness) {\n  let r = http_get(\"https://example.test\")\n  harness.stdio.println(r)\n}\n";
     let diags = lint_source(source);
     assert_eq!(
         count_rule(&diags, "ambient-net-builtin"),

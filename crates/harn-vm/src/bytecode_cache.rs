@@ -860,9 +860,17 @@ mod tests {
         )
         .unwrap();
         let ab = tmp.path().join("entry_ab.harn");
-        std::fs::write(&ab, "import \"./a\"\nimport \"./b\"\nprintln(\"hi\")\n").unwrap();
+        std::fs::write(
+            &ab,
+            "import \"./a\"\nimport \"./b\"\n__io_println(\"hi\")\n",
+        )
+        .unwrap();
         let ba = tmp.path().join("entry_ba.harn");
-        std::fs::write(&ba, "import \"./b\"\nimport \"./a\"\nprintln(\"hi\")\n").unwrap();
+        std::fs::write(
+            &ba,
+            "import \"./b\"\nimport \"./a\"\n__io_println(\"hi\")\n",
+        )
+        .unwrap();
         let hash_ab = hash_transitive_user_imports(&ab, &std::fs::read_to_string(&ab).unwrap());
         let hash_ba = hash_transitive_user_imports(&ba, &std::fs::read_to_string(&ba).unwrap());
         assert_eq!(
@@ -886,7 +894,7 @@ mod tests {
         )
         .unwrap();
         let entry = tmp.path().join("entry.harn");
-        std::fs::write(&entry, "import \"./mid\"\nprintln(\"hi\")\n").unwrap();
+        std::fs::write(&entry, "import \"./mid\"\n__io_println(\"hi\")\n").unwrap();
 
         let before =
             hash_transitive_user_imports(&entry, &std::fs::read_to_string(&entry).unwrap());

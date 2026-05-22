@@ -30,7 +30,7 @@ pub(crate) async fn run(args: TryArgs) {
     // not bare identifiers, and `harn try` is meant to be a zero-config
     // smoke test. Users can drop into `harn run` for tool-augmented loops.
     let script = format!(
-        "let result = agent_loop(\"{escaped}\", nil, {{\n    max_iterations: {max_iters},\n    llm_retries: 2\n}})\nprintln(result.text)\n"
+        "let result = agent_loop(\"{escaped}\", nil, {{\n    max_iterations: {max_iters},\n    llm_retries: 2\n}})\n__io_println(result.text)\n"
     );
 
     let tmp = match tempfile::Builder::new()

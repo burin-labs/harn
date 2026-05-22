@@ -274,7 +274,7 @@ fn tampered_harnpack_fails_verification() {
 #[test]
 fn dry_run_verify_returns_without_executing() {
     let fixture =
-        HarnpackFixture::new("write_file(\"side-effect.txt\", \"oops\")\nprintln(\"ran\")\n");
+        HarnpackFixture::new("write_file(\"side-effect.txt\", \"oops\")\n__io_println(\"ran\")\n");
     let outcome_pack = build_pack(&fixture.pack_args(true));
     let sanitized_hash = outcome_pack.bundle_hash.replace(':', "_");
 

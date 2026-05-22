@@ -9,7 +9,7 @@ HOOK_PORTAL_PATTERN='(^crates/harn-cli/portal/|^package(-lock)?\.json$)'
 HOOK_HIGHLIGHT_PATTERN='(^crates/harn-lexer/|^crates/harn-stdlib/src/stdlib/|^crates/harn-vm/src/(stdlib|lib\.rs)|^crates/harn-modules/|^docs/theme/harn-keywords\.js$)'
 HOOK_LANGSPEC_PATTERN='(^spec/HARN_SPEC\.md$|^docs/src/language-spec\.md$)'
 HOOK_DIAGCATALOG_PATTERN='(^crates/harn-parser/src/diagnostic_codes(\.rs|/)|^docs/src/diagnostics\.md$|^docs/diagnostics-catalog\.json$)'
-HOOK_RATCHET_PATTERN='(^crates/harn-vm/src/(llm/|orchestration/(workflow|artifacts|compaction)\.rs$)|^conformance/|^scripts/(allowed_long_strings\.txt|check_no_rust_prompt_prose\.sh|check_rust_prompt_prose\.py|check_xfail_count\.harn|xfail_threshold\.txt)$|^Makefile$)'
+HOOK_RATCHET_PATTERN='(^crates/harn-vm/src/(llm/|orchestration/(workflow|artifacts|compaction)\.rs$)|^conformance/|^scripts/(allowed_long_strings\.txt|check_no_rust_prompt_prose\.sh|check_rust_prompt_prose\.py|check_no_stale_harn_builtins\.py|check_xfail_count\.harn|xfail_threshold\.txt)$|^Makefile$)'
 HOOK_HARN_FORMAT_SKIP=' semicolon_statements.harn semicolon_if_else_invalid.harn semicolon_try_catch_invalid.harn semicolon_empty_statement_invalid.harn '
 
 hook_paths_match() {
