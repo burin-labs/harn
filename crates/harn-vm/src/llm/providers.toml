@@ -863,6 +863,21 @@ provider = "openrouter"
 context_window = 262144
 capabilities = ["tools", "streaming"]
 pricing = { input_per_mtok = 0.22, output_per_mtok = 1.80 }
+availability = "serverless"
+
+# Together lists Qwen3-Coder-Next-FP8 in GET /v1/models alongside its
+# serverless catalog, but normal chat-completion calls fail with
+# `model_not_available` and instruct the caller to create a dedicated
+# endpoint. Carry the catalog row so price/route metadata is preserved,
+# but mark `availability = "dedicated"` so hosts don't surface it as a
+# one-click serverless option.
+[models."Qwen/Qwen3-Coder-Next-FP8"]
+name = "Qwen3 Coder Next FP8 (Together, dedicated)"
+provider = "together"
+context_window = 262144
+capabilities = ["tools", "streaming"]
+pricing = { input_per_mtok = 0.18, output_per_mtok = 0.18 }
+availability = "dedicated"
 
 [models."deepseek/deepseek-v3.2"]
 name = "DeepSeek V3.2"

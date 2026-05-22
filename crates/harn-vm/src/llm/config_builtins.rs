@@ -936,6 +936,10 @@ fn model_def_to_vm_value(id: &str, model: &llm_config::ModelDef) -> VmValue {
         "quality_tags".to_string(),
         string_list_to_vm_value(model.quality_tags.clone()),
     );
+    dict.insert(
+        "availability".to_string(),
+        VmValue::String(Rc::from(model.availability.as_str())),
+    );
     VmValue::Dict(Rc::new(dict))
 }
 
