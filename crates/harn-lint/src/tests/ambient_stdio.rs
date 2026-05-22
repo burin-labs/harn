@@ -78,7 +78,8 @@ fn ambient_stdio_lint_without_harness_binding_has_no_direct_fix() {
         .as_deref()
         .expect("ambient stdio lint should explain the repair path");
     assert!(
-        suggestion.contains("bindings/thread-harness-needs-param"),
-        "expected suggestion to point at the surface-changing repair: {suggestion}"
+        suggestion.contains("--harness-threading thread-params")
+            && suggestion.contains("VM-level `harness`"),
+        "expected suggestion to describe both Harness migration modes: {suggestion}"
     );
 }

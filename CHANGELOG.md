@@ -16,6 +16,17 @@ condensed series summaries instead of full per-patch history.
   `skippedFiles[]` with diagnostics, and return a nonzero exit only after all
   parseable `.harn` files have been planned or repaired.
 
+### Changed
+
+- **`harn fix` Harness migration defaults preserve helper signatures (#2133).**
+  Ambient stdio/fs/env/clock/random/net repairs now default to
+  `--harness-threading local-global`, rewriting calls through the VM-level
+  `harness` binding without adding `harness: Harness` to helper APIs. Use
+  `--harness-threading thread-params` to opt into explicit parameter threading.
+  `harn fix --plan --json` repair plans are now schema version 2 and include
+  Harness threading plus impact metadata that distinguishes local rewrites from
+  public signature changes and flags cross-module caller updates.
+
 ## v0.8.32
 
 ### Added

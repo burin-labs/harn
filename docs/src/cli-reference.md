@@ -592,20 +592,31 @@ harn fix --plan --json main.harn
 harn fix --plan --json --safety behavior-preserving src/
 harn fix --apply --safety behavior-preserving main.harn
 harn fix --apply --dry-run --json --safety scope-local src/
+harn fix --apply --safety surface-changing --harness-threading thread-params src/
 ```
 
-`--json` returns a `RepairPlan` with `schemaVersion: 2`, `diagnostics[]`,
-`repairs[]`, `skippedFiles[]`, and `safetyLevels[]`. Each repair includes the
-diagnostic code, repair `{id, summary, safety}`, candidate edits,
-`applies_cleanly`, and `conflicts_with` indexes for overlapping edit ranges.
-Directory runs continue after read, lex, or parse failures; those files appear
-in `skippedFiles[]` with `reason` and diagnostic details, and the command exits
-nonzero after processing the remaining parseable files. Apply mode requires
+`--harness-threading` controls how ambient-capability migrations satisfy call
+sites that do not already have a local `Harness` parameter. The default,
+`local-global`, rewrites ambient builtins to the VM-level `harness` binding and
+preserves helper signatures. `thread-params` adds `harness: Harness` parameters
+and updates same-file callers; use it when you explicitly want public signature
+threading.
+
+`--json` returns a `RepairPlan` with `schemaVersion: 2`, `harnessThreading`,
+`diagnostics[]`, `repairs[]`, `skippedFiles[]`, and `safetyLevels[]`. Each
+repair includes the diagnostic code, repair `{id, summary, safety}`, impact
+metadata, candidate edits, `applies_cleanly`, and `conflicts_with` indexes for
+overlapping edit ranges. Ambient Harness repairs classify local rewrites
+separately from public signature changes and flag repairs that require
+cross-module caller updates. Directory runs continue after read, lex, or parse
+failures; those files appear in `skippedFiles[]` with `reason` and diagnostic
+details, and the command exits nonzero after processing the remaining parseable
+files. Apply mode requires
 `--safety <format-only|behavior-preserving|scope-local|surface-changing|capability-changing>`;
-`needs-human` repairs are propose-only and are never auto-applied.
-`--apply --json` returns `schemaVersion`, `applied[]`, `skipped[]`,
-`skippedFiles[]`, and `post_apply_diagnostics_count`. `--dry-run` reports the
-same apply set without writing files.
+`needs-human` repairs are propose-only and are never auto-applied. `--apply
+--json` returns `schemaVersion`, `applied[]`, `skipped[]`, `skippedFiles[]`,
+and `post_apply_diagnostics_count`. `--dry-run` reports the same apply set
+without writing files.
 
 ## harn check
 

@@ -100,7 +100,7 @@ pub use eval::{
     EvalToolCallsCommand, EvalToolCallsRegressionArgs,
 };
 pub(crate) use explain::{CatalogFormat, ExplainArgs};
-pub(crate) use fix::FixArgs;
+pub(crate) use fix::{FixArgs, HarnessThreadingMode};
 pub(crate) use flow::{
     FlowArchivistCommand, FlowArchivistScanArgs, FlowArgs, FlowCommand, FlowReplayAuditArgs,
     FlowShipCommand, FlowShipWatchArgs,

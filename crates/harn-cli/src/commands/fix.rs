@@ -6,12 +6,12 @@ use std::path::Path;
 use harn_lexer::{FixEdit, Span};
 use harn_lint::LintSeverity;
 use harn_parser::{
-    visit, DiagnosticCode as Code, DiagnosticSeverity, Node, PipelineError, Repair, RepairSafety,
-    SNode, TypeChecker, TypeExpr, TypedParam,
+    visit, BindingPattern, DiagnosticCode as Code, DiagnosticSeverity, Node, PipelineError, Repair,
+    RepairSafety, SNode, TypeChecker, TypeExpr, TypedParam,
 };
 use serde::Serialize;
 
-use crate::cli::FixArgs;
+use crate::cli::{FixArgs, HarnessThreadingMode};
 use crate::commands;
 use crate::package::{self, CheckConfig, PreflightSeverity};
 
@@ -55,6 +55,8 @@ pub(crate) struct RepairPlan {
     #[serde(rename = "schemaVersion")]
     pub schema_version: u32,
     pub path: String,
+    #[serde(rename = "harnessThreading")]
+    pub harness_threading: String,
     pub diagnostics: Vec<DiagnosticWire>,
     pub repairs: Vec<RepairWire>,
     #[serde(rename = "skippedFiles")]
@@ -130,9 +132,30 @@ pub(crate) struct RepairWire {
     pub diagnostic_index: usize,
     pub diagnostic_code: String,
     pub repair: RepairMetadataWire,
+    pub impact: RepairImpactWire,
     pub edits: Vec<FixEditWire>,
     pub applies_cleanly: bool,
     pub conflicts_with: Vec<usize>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub(crate) struct RepairImpactWire {
+    pub classification: String,
+    pub strategy: Option<String>,
+    #[serde(rename = "signatureChanges")]
+    pub signature_changes: Vec<SignatureChangeWire>,
+    #[serde(rename = "requiresCrossModuleCallerUpdates")]
+    pub requires_cross_module_caller_updates: bool,
+    pub notes: Vec<String>,
+}
+
+#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+pub(crate) struct SignatureChangeWire {
+    pub callable: String,
+    #[serde(rename = "isExported")]
+    pub is_exported: bool,
+    #[serde(rename = "isEntrypoint")]
+    pub is_entrypoint: bool,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -166,6 +189,7 @@ struct RepairCandidate {
     message: String,
     span: Option<Span>,
     repair: Repair,
+    impact: RepairImpactWire,
     edits: Vec<FixEdit>,
 }
 
@@ -173,10 +197,10 @@ struct RepairCandidate {
 struct CallableInfo {
     name: String,
     span: Span,
-    is_pub: bool,
+    is_exported: bool,
     insert_offset: usize,
     has_params: bool,
-    param_names: BTreeSet<String>,
+    bound_names: BTreeSet<String>,
     harness_binding: Option<String>,
     can_add_harness_param: bool,
     calls: Vec<CallSite>,
@@ -196,6 +220,75 @@ struct AmbientCapabilityCall {
     span: Span,
 }
 
+#[derive(Debug, Clone, Copy, Default)]
+struct FixOptions {
+    harness_threading: HarnessThreadingMode,
+}
+
+struct AmbientRepairContext {
+    harness_threading: HarnessThreadingMode,
+    allow_stdlib_public_global: bool,
+    cross_module_importer_count: usize,
+}
+
+impl RepairImpactWire {
+    fn generic() -> Self {
+        Self {
+            classification: "generic-repair".to_string(),
+            strategy: None,
+            signature_changes: Vec::new(),
+            requires_cross_module_caller_updates: false,
+            notes: Vec::new(),
+        }
+    }
+
+    fn local_ambient(strategy: &'static str) -> Self {
+        Self {
+            classification: "local-ambient-rewrite".to_string(),
+            strategy: Some(strategy.to_string()),
+            signature_changes: Vec::new(),
+            requires_cross_module_caller_updates: false,
+            notes: Vec::new(),
+        }
+    }
+
+    fn signature_threading(
+        signature_changes: Vec<SignatureChangeWire>,
+        cross_module_importer_count: usize,
+    ) -> Self {
+        let has_exported_change = signature_changes.iter().any(|change| change.is_exported);
+        let has_public_change = signature_changes
+            .iter()
+            .any(|change| change.is_exported || change.is_entrypoint);
+        let requires_cross_module_caller_updates =
+            has_exported_change && cross_module_importer_count > 0;
+        let mut notes = Vec::new();
+        if requires_cross_module_caller_updates {
+            notes.push(format!(
+                "changes exported signatures in a file imported by {cross_module_importer_count} module(s); cross-module callers must be updated"
+            ));
+        } else if has_public_change {
+            notes.push(
+                "changes an exported or entrypoint signature; external callers may need updates"
+                    .to_string(),
+            );
+        }
+
+        Self {
+            classification: if has_public_change {
+                "public-signature-change"
+            } else {
+                "local-signature-threading"
+            }
+            .to_string(),
+            strategy: Some("thread-params".to_string()),
+            signature_changes,
+            requires_cross_module_caller_updates,
+            notes,
+        }
+    }
+}
+
 pub(crate) fn run(args: &FixArgs) -> Result<(), FixRunError> {
     if args.apply {
         let safety = args.safety.ok_or_else(|| {
@@ -209,7 +302,14 @@ pub(crate) fn run(args: &FixArgs) -> Result<(), FixRunError> {
                     .into(),
             );
         }
-        let result = apply_repairs(&args.path, safety, args.dry_run)?;
+        let result = apply_repairs_with_options(
+            &args.path,
+            safety,
+            args.dry_run,
+            FixOptions {
+                harness_threading: args.harness_threading,
+            },
+        )?;
         if args.json {
             println!(
                 "{}",
@@ -232,7 +332,13 @@ pub(crate) fn run(args: &FixArgs) -> Result<(), FixRunError> {
             .into());
     }
 
-    let plan = build_plan(&args.path, args.safety)?;
+    let plan = build_plan_with_options(
+        &args.path,
+        args.safety,
+        FixOptions {
+            harness_threading: args.harness_threading,
+        },
+    )?;
     if args.json {
         println!(
             "{}",
@@ -250,9 +356,18 @@ pub(crate) fn run(args: &FixArgs) -> Result<(), FixRunError> {
     Ok(())
 }
 
+#[cfg(test)]
 pub(crate) fn build_plan(
     target: &Path,
     safety_ceiling: Option<RepairSafety>,
+) -> Result<RepairPlan, String> {
+    build_plan_with_options(target, safety_ceiling, FixOptions::default())
+}
+
+fn build_plan_with_options(
+    target: &Path,
+    safety_ceiling: Option<RepairSafety>,
+    options: FixOptions,
 ) -> Result<RepairPlan, String> {
     if let Err(error) = package::validate_runtime_manifest_extensions(target) {
         return Err(format!("manifest extension validation failed: {error}"));
@@ -275,6 +390,7 @@ pub(crate) fn build_plan(
             safety_ceiling,
             &cross_file_imports,
             &module_graph,
+            options,
             &mut candidates,
         ) {
             skipped_files.push(skipped);
@@ -305,6 +421,7 @@ pub(crate) fn build_plan(
                 diagnostic_index: index,
                 diagnostic_code: candidate.code.to_string(),
                 repair: RepairMetadataWire::from(&candidate.repair),
+                impact: candidate.impact.clone(),
                 edits: candidate
                     .edits
                     .iter()
@@ -329,6 +446,7 @@ pub(crate) fn build_plan(
     Ok(RepairPlan {
         schema_version: FIX_PLAN_SCHEMA_VERSION,
         path: target_string,
+        harness_threading: options.harness_threading.as_str().to_string(),
         diagnostics,
         repairs,
         skipped_files,
@@ -336,12 +454,22 @@ pub(crate) fn build_plan(
     })
 }
 
+#[cfg(test)]
 pub(crate) fn apply_repairs(
     target: &Path,
     safety_ceiling: RepairSafety,
     dry_run: bool,
 ) -> Result<ApplyResult, String> {
-    let plan = build_plan(target, None)?;
+    apply_repairs_with_options(target, safety_ceiling, dry_run, FixOptions::default())
+}
+
+fn apply_repairs_with_options(
+    target: &Path,
+    safety_ceiling: RepairSafety,
+    dry_run: bool,
+    options: FixOptions,
+) -> Result<ApplyResult, String> {
+    let plan = build_plan_with_options(target, None, options)?;
     let mut edits_by_file: BTreeMap<String, Vec<FixEditWire>> = BTreeMap::new();
     let mut applied = Vec::new();
     let mut skipped = Vec::new();
@@ -528,6 +656,7 @@ fn collect_file_candidates(
     safety_ceiling: Option<RepairSafety>,
     cross_file_imports: &HashSet<String>,
     module_graph: &harn_modules::ModuleGraph,
+    options: FixOptions,
     out: &mut Vec<RepairCandidate>,
 ) -> Result<(), SkippedFileWire> {
     let path_str = file.to_string_lossy().into_owned();
@@ -554,12 +683,13 @@ fn collect_file_candidates(
             message: diag.message.clone(),
             span: diag.span,
             repair,
+            impact: RepairImpactWire::generic(),
             edits: diag.fix.clone().unwrap_or_default(),
         });
     }
 
     let persona_step_allowlist = commands::check::harn_lint_persona_step_allowlist(file);
-    let options = harn_lint::LintOptions {
+    let lint_options = harn_lint::LintOptions {
         file_path: Some(file),
         require_file_header: commands::check::harn_lint_require_file_header(file),
         complexity_threshold: commands::check::harn_lint_complexity_threshold(file),
@@ -573,10 +703,12 @@ fn collect_file_candidates(
         cross_file_imports,
         module_graph,
         file,
-        &options,
+        &lint_options,
     );
     for diag in &lint_diagnostics {
-        let Some((repair, edits)) = lint_candidate_repair(diag, file, &source, &program) else {
+        let Some((repair, edits, impact)) =
+            lint_candidate_repair(diag, file, &source, &program, module_graph, options)
+        else {
             continue;
         };
         if !repair_allowed(&repair, safety_ceiling) {
@@ -590,6 +722,7 @@ fn collect_file_candidates(
             message: diag.message.clone(),
             span: Some(diag.span),
             repair,
+            impact,
             edits,
         });
     }
@@ -666,27 +799,44 @@ fn lint_candidate_repair(
     file: &Path,
     source: &str,
     program: &[SNode],
-) -> Option<(Repair, Vec<FixEdit>)> {
+    module_graph: &harn_modules::ModuleGraph,
+    options: FixOptions,
+) -> Option<(Repair, Vec<FixEdit>, RepairImpactWire)> {
     if ambient_capability_handle(diag.code).is_some() {
+        let exported_names = module_graph
+            .exports_for_module(file)
+            .into_iter()
+            .collect::<BTreeSet<_>>();
+        let context = AmbientRepairContext {
+            harness_threading: options.harness_threading,
+            allow_stdlib_public_global: commands::check::path_is_stdlib_source(file),
+            cross_module_importer_count: module_graph.importers_of(file).len(),
+        };
         return synthesize_ambient_capability_repair(
             diag,
             source,
             program,
-            commands::check::path_is_stdlib_source(file),
+            &exported_names,
+            &context,
         );
     }
     let repair = diag.repair()?;
-    Some((repair, diag.fix.clone().unwrap_or_default()))
+    Some((
+        repair,
+        diag.fix.clone().unwrap_or_default(),
+        RepairImpactWire::generic(),
+    ))
 }
 
 fn synthesize_ambient_capability_repair(
     diag: &harn_lint::LintDiagnostic,
     source: &str,
     program: &[SNode],
-    allow_stdlib_public_global: bool,
-) -> Option<(Repair, Vec<FixEdit>)> {
+    exported_names: &BTreeSet<String>,
+    context: &AmbientRepairContext,
+) -> Option<(Repair, Vec<FixEdit>, RepairImpactWire)> {
     ambient_capability_handle(diag.code)?;
-    let infos = collect_callable_infos(program, source);
+    let infos = collect_callable_infos(program, source, exported_names);
     let owner_idx = infos.iter().position(|info| {
         info.ambient_capability_calls.iter().any(|call| {
             call.code == diag.code
@@ -701,7 +851,7 @@ fn synthesize_ambient_capability_repair(
             && call.span.start == diag.span.start
             && call.span.end == diag.span.end
     })?;
-    let owner_uses_global_harness = should_use_global_harness(owner, allow_stdlib_public_global);
+    let owner_uses_global_harness = should_use_global_harness(owner, context);
     let replacement_binding = if owner_uses_global_harness {
         Some("harness".to_string())
     } else {
@@ -718,16 +868,22 @@ fn synthesize_ambient_capability_repair(
     let mut edits =
         replace_identifier_within_span_fix(source, diag.span, &ambient.name, &replacement)?;
 
-    if owner.harness_binding.is_some() || owner_uses_global_harness {
-        return Some((Repair::from_template(diag.code.repair_template()?), edits));
+    if owner.harness_binding.is_some() {
+        return Some((
+            Repair::from_template(diag.code.repair_template()?),
+            edits,
+            RepairImpactWire::local_ambient("existing-harness-binding"),
+        ));
+    }
+    if owner_uses_global_harness {
+        return Some((
+            use_enclosing_harness_global_repair(diag.code)?,
+            edits,
+            RepairImpactWire::local_ambient("use-enclosing-harness-global"),
+        ));
     }
 
-    let needed = propagate_harness_requirements(
-        &infos,
-        &reverse_callers,
-        owner_idx,
-        allow_stdlib_public_global,
-    );
+    let needed = propagate_harness_requirements(&infos, &reverse_callers, owner_idx, context);
     let primary_call_start = owner
         .ambient_capability_calls
         .iter()
@@ -739,6 +895,11 @@ fn synthesize_ambient_capability_repair(
         return Some((
             repair_for_ambient_capability_plan(diag.code, &infos, &reverse_callers, &needed)?,
             edits,
+            repair_impact_for_signature_threading(
+                &infos,
+                &needed,
+                context.cross_module_importer_count,
+            ),
         ));
     }
 
@@ -754,7 +915,7 @@ fn synthesize_ambient_capability_repair(
             let caller = &infos[caller_idx];
             let arg_name = match caller.harness_binding.as_deref() {
                 Some(binding) => binding,
-                None if should_use_global_harness(caller, allow_stdlib_public_global) => "harness",
+                None if should_use_global_harness(caller, context) => "harness",
                 None if needed.contains(&caller_idx) => harness_param_name_for_insert(caller)?,
                 None => continue,
             };
@@ -769,17 +930,52 @@ fn synthesize_ambient_capability_repair(
     Some((
         repair_for_ambient_capability_plan(diag.code, &infos, &reverse_callers, &needed)?,
         dedupe_edits(edits),
+        repair_impact_for_signature_threading(&infos, &needed, context.cross_module_importer_count),
     ))
 }
 
-fn should_use_global_harness(info: &CallableInfo, allow_stdlib_public_global: bool) -> bool {
-    // Canonical stdlib APIs need source-level signature stability: adding a
-    // required Harness parameter would break every user import at once. The
-    // VM installs the runtime harness global before execution, so stdlib
-    // internals can migrate off ambient builtins without changing public API.
-    // Non-stdlib public helpers must thread Harness explicitly; that keeps
-    // the fixer from using a broad "public means global harness" catch-all.
-    allow_stdlib_public_global && info.is_pub && !info.param_names.contains("harness")
+fn should_use_global_harness(info: &CallableInfo, context: &AmbientRepairContext) -> bool {
+    if info.bound_names.contains("harness") {
+        return false;
+    }
+    match context.harness_threading {
+        HarnessThreadingMode::LocalGlobal => true,
+        HarnessThreadingMode::ThreadParams => {
+            context.allow_stdlib_public_global && info.is_exported
+        }
+    }
+}
+
+fn use_enclosing_harness_global_repair(code: Code) -> Option<Repair> {
+    let capability = ambient_capability_handle(code)?;
+    Some(Repair {
+        id: harn_parser::RepairId::from_owned(
+            "bindings/use-enclosing-harness-global".to_string(),
+        ),
+        summary: format!(
+            "Use the VM-level `harness` binding for ambient {capability} calls without changing helper signatures"
+        ),
+        safety: RepairSafety::ScopeLocal,
+    })
+}
+
+fn repair_impact_for_signature_threading(
+    infos: &[CallableInfo],
+    needed: &BTreeSet<usize>,
+    cross_module_importer_count: usize,
+) -> RepairImpactWire {
+    let signature_changes = needed
+        .iter()
+        .map(|&idx| {
+            let info = &infos[idx];
+            SignatureChangeWire {
+                callable: info.name.clone(),
+                is_exported: info.is_exported,
+                is_entrypoint: info.name == "main",
+            }
+        })
+        .collect::<Vec<_>>();
+    RepairImpactWire::signature_threading(signature_changes, cross_module_importer_count)
 }
 
 fn ambient_capability_handle(code: Code) -> Option<&'static str> {
@@ -838,7 +1034,11 @@ fn ambient_replacement(code: Code, name: &str, binding: Option<&str>) -> Option<
     Some(replacement.replacen("harness", binding.unwrap_or("harness"), 1))
 }
 
-fn collect_callable_infos(program: &[SNode], source: &str) -> Vec<CallableInfo> {
+fn collect_callable_infos(
+    program: &[SNode],
+    source: &str,
+    exported_names: &BTreeSet<String>,
+) -> Vec<CallableInfo> {
     let mut infos = Vec::new();
     for node in program {
         let inner = match &node.node {
@@ -849,12 +1049,14 @@ fn collect_callable_infos(program: &[SNode], source: &str) -> Vec<CallableInfo> 
             Node::FnDecl {
                 name,
                 params,
+                body,
                 is_pub,
                 ..
             }
             | Node::ToolDecl {
                 name,
                 params,
+                body,
                 is_pub,
                 ..
             } => {
@@ -879,13 +1081,14 @@ fn collect_callable_infos(program: &[SNode], source: &str) -> Vec<CallableInfo> 
                 else {
                     continue;
                 };
+                let bound_names = callable_bound_names(params, body);
                 infos.push(CallableInfo {
                     name: name.clone(),
                     span: inner.span,
-                    is_pub: *is_pub,
+                    is_exported: *is_pub || exported_names.contains(name),
                     insert_offset,
                     has_params: has_params || !params.is_empty(),
-                    param_names: params.iter().map(|param| param.name.clone()).collect(),
+                    bound_names,
                     harness_binding: harness_param_name(params).map(str::to_string),
                     can_add_harness_param: true,
                     calls,
@@ -895,6 +1098,7 @@ fn collect_callable_infos(program: &[SNode], source: &str) -> Vec<CallableInfo> 
             Node::Pipeline {
                 name,
                 params,
+                body,
                 is_pub,
                 ..
             } => {
@@ -919,13 +1123,16 @@ fn collect_callable_infos(program: &[SNode], source: &str) -> Vec<CallableInfo> 
                 else {
                     continue;
                 };
+                let param_names = params.iter().cloned().collect::<BTreeSet<_>>();
+                let mut bound_names = param_names.clone();
+                collect_binding_names(body, &mut bound_names);
                 infos.push(CallableInfo {
                     name: name.clone(),
                     span: inner.span,
-                    is_pub: *is_pub,
+                    is_exported: *is_pub || exported_names.contains(name),
                     insert_offset,
                     has_params: has_params || !params.is_empty(),
-                    param_names: params.iter().cloned().collect(),
+                    bound_names,
                     harness_binding: Some("harness".to_string()),
                     can_add_harness_param: false,
                     calls,
@@ -936,6 +1143,69 @@ fn collect_callable_infos(program: &[SNode], source: &str) -> Vec<CallableInfo> 
         }
     }
     infos
+}
+
+fn callable_bound_names(params: &[TypedParam], body: &[SNode]) -> BTreeSet<String> {
+    let mut names = params
+        .iter()
+        .map(|param| param.name.clone())
+        .collect::<BTreeSet<_>>();
+    collect_binding_names(body, &mut names);
+    names
+}
+
+fn collect_binding_names(nodes: &[SNode], names: &mut BTreeSet<String>) {
+    for node in nodes {
+        visit::walk_node(node, &mut |child| match &child.node {
+            Node::LetBinding { pattern, .. } | Node::VarBinding { pattern, .. } => {
+                collect_pattern_names(pattern, names);
+            }
+            Node::ConstBinding { name, .. } => {
+                names.insert(name.clone());
+            }
+            Node::ForIn { pattern, .. } => {
+                collect_pattern_names(pattern, names);
+            }
+            Node::Parallel {
+                variable: Some(name),
+                ..
+            } => {
+                names.insert(name.clone());
+            }
+            Node::TryCatch {
+                error_var: Some(name),
+                ..
+            } => {
+                names.insert(name.clone());
+            }
+            Node::Closure { params, .. } => {
+                names.extend(params.iter().map(|param| param.name.clone()));
+            }
+            _ => {}
+        });
+    }
+}
+
+fn collect_pattern_names(pattern: &BindingPattern, names: &mut BTreeSet<String>) {
+    match pattern {
+        BindingPattern::Identifier(name) => {
+            names.insert(name.clone());
+        }
+        BindingPattern::Dict(fields) => {
+            names.extend(
+                fields
+                    .iter()
+                    .map(|field| field.alias.as_ref().unwrap_or(&field.key).clone()),
+            );
+        }
+        BindingPattern::List(elements) => {
+            names.extend(elements.iter().map(|element| element.name.clone()));
+        }
+        BindingPattern::Pair(left, right) => {
+            names.insert(left.clone());
+            names.insert(right.clone());
+        }
+    }
 }
 
 fn visit_callable_body(node: &SNode, visitor: &mut impl FnMut(&SNode)) {
@@ -995,7 +1265,7 @@ fn propagate_harness_requirements(
     infos: &[CallableInfo],
     reverse_callers: &[Vec<(usize, usize)>],
     owner_idx: usize,
-    allow_stdlib_public_global: bool,
+    context: &AmbientRepairContext,
 ) -> BTreeSet<usize> {
     let mut needed = BTreeSet::from([owner_idx]);
     let mut changed = true;
@@ -1005,7 +1275,7 @@ fn propagate_harness_requirements(
         for callee_idx in snapshot {
             for &(caller_idx, _) in &reverse_callers[callee_idx] {
                 if infos[caller_idx].harness_binding.is_none()
-                    && !should_use_global_harness(&infos[caller_idx], allow_stdlib_public_global)
+                    && !should_use_global_harness(&infos[caller_idx], context)
                     && infos[caller_idx].can_add_harness_param
                     && needed.insert(caller_idx)
                 {
@@ -1025,7 +1295,7 @@ fn repair_for_ambient_capability_plan(
 ) -> Option<Repair> {
     let surface_changing = needed.iter().any(|&idx| {
         let info = &infos[idx];
-        info.is_pub || info.name == "main" || reverse_callers[idx].is_empty()
+        info.is_exported || info.name == "main" || reverse_callers[idx].is_empty()
     });
     if surface_changing {
         Some(Repair::from_template(
@@ -1054,10 +1324,10 @@ fn add_harness_param_edit(info: &CallableInfo) -> Option<FixEdit> {
 }
 
 fn harness_param_name_for_insert(info: &CallableInfo) -> Option<&'static str> {
-    if !info.param_names.contains("harness") {
+    if !info.bound_names.contains("harness") {
         return Some("harness");
     }
-    if !info.param_names.contains("_harness") {
+    if !info.bound_names.contains("_harness") {
         return Some("_harness");
     }
     None
@@ -1170,6 +1440,7 @@ fn collect_preflight_candidates(
             message: diag.message,
             span: Some(diag.span),
             repair,
+            impact: RepairImpactWire::generic(),
             edits: Vec::new(),
         });
     }
@@ -1247,18 +1518,24 @@ fn print_human_plan(plan: &RepairPlan) {
             plan.path,
             plan.repairs.len()
         );
-        println!("idx  code          safety               edits  clean  repair");
+        println!(
+            "idx  code          safety               edits  clean  impact                    repair"
+        );
         for repair in &plan.repairs {
             let clean = if repair.applies_cleanly { "yes" } else { "no" };
             println!(
-                "{:<4} {:<13} {:<20} {:<5} {:<5} {}",
+                "{:<4} {:<13} {:<20} {:<5} {:<5} {:<25} {}",
                 repair.diagnostic_index,
                 repair.diagnostic_code,
                 repair.repair.safety,
                 repair.edits.len(),
                 clean,
+                repair.impact.classification,
                 repair.repair.id
             );
+            for note in &repair.impact.notes {
+                println!("      note: {note}");
+            }
         }
     }
     print_skipped_files(&plan.skipped_files);
@@ -1367,6 +1644,7 @@ mod tests {
             message: "test".to_string(),
             span: Some(Span::with_offsets(start, end, 1, start + 1)),
             repair: Repair::from_template(Code::FormatterWouldReformat.repair_template().unwrap()),
+            impact: RepairImpactWire::generic(),
             edits: vec![FixEdit {
                 span: Span::with_offsets(start, end, 1, start + 1),
                 replacement: "x".to_string(),
@@ -1525,6 +1803,7 @@ mod tests {
             apply: false,
             dry_run: false,
             safety: None,
+            harness_threading: HarnessThreadingMode::default(),
             json: false,
             path: temp.path().to_path_buf(),
         };
@@ -1567,6 +1846,7 @@ mod tests {
             apply: true,
             dry_run: false,
             safety: Some(RepairSafety::NeedsHuman),
+            harness_threading: HarnessThreadingMode::default(),
             json: false,
             path: PathBuf::from("repair_demo.harn"),
         };
@@ -1581,7 +1861,7 @@ mod tests {
     }
 
     #[test]
-    fn plan_threads_existing_harness_for_stdio_repairs() {
+    fn plan_uses_global_harness_for_stdio_repairs_by_default() {
         let temp = tempfile::TempDir::new().unwrap();
         let script = temp.path().join("stdio_threading.harn");
         fs::write(
@@ -1597,8 +1877,10 @@ mod tests {
             .find(|repair| repair.diagnostic_code == Code::LintAmbientStdioBuiltin.to_string())
             .expect("ambient stdio repair should be present");
 
-        assert_eq!(repair.repair.id, "bindings/thread-harness");
+        assert_eq!(repair.repair.id, "bindings/use-enclosing-harness-global");
         assert_eq!(repair.repair.safety, "scope-local");
+        assert_eq!(repair.impact.classification, "local-ambient-rewrite");
+        assert!(repair.impact.signature_changes.is_empty());
         let replacements = repair
             .edits
             .iter()
@@ -1609,12 +1891,10 @@ mod tests {
             "expected direct call rewrite in edits: {replacements:?}"
         );
         assert!(
-            replacements.contains(&"harness: Harness"),
-            "expected helper parameter insertion in edits: {replacements:?}"
-        );
-        assert!(
-            replacements.contains(&"harness"),
-            "expected caller argument threading in edits: {replacements:?}"
+            !replacements
+                .iter()
+                .any(|replacement| replacement.contains("Harness")),
+            "default repair should not change helper signatures: {replacements:?}"
         );
     }
 
@@ -1624,7 +1904,14 @@ mod tests {
         let script = temp.path().join("stdio_needs_param.harn");
         fs::write(&script, "fn helper() {\n  println(\"hi\")\n}\n").unwrap();
 
-        let plan = build_plan(&script, None).unwrap();
+        let plan = build_plan_with_options(
+            &script,
+            None,
+            FixOptions {
+                harness_threading: HarnessThreadingMode::ThreadParams,
+            },
+        )
+        .unwrap();
         let repair = plan
             .repairs
             .iter()
@@ -1633,10 +1920,75 @@ mod tests {
 
         assert_eq!(repair.repair.id, "bindings/thread-harness-needs-param");
         assert_eq!(repair.repair.safety, "surface-changing");
+        assert_eq!(repair.impact.classification, "public-signature-change");
     }
 
     #[test]
-    fn apply_scope_local_threads_harness_for_stdio_migration() {
+    fn plan_json_reports_cross_module_public_signature_impact() {
+        let temp = tempfile::TempDir::new().unwrap();
+        let lib = temp.path().join("lib.harn");
+        let entry = temp.path().join("main.harn");
+        fs::write(
+            &lib,
+            "pub fn host_write_file(path: string, body: string) {\n  write_file(path, body)\n}\n",
+        )
+        .unwrap();
+        fs::write(
+            &entry,
+            "import \"./lib\"\n\nfn main(harness: Harness) {\n  host_write_file(\"out.txt\", \"hi\")\n}\n",
+        )
+        .unwrap();
+
+        let plan = build_plan_with_options(
+            temp.path(),
+            None,
+            FixOptions {
+                harness_threading: HarnessThreadingMode::ThreadParams,
+            },
+        )
+        .unwrap();
+        let repair_index = plan
+            .repairs
+            .iter()
+            .position(|repair| {
+                repair.diagnostic_code == Code::LintAmbientFsBuiltin.to_string()
+                    && repair
+                        .edits
+                        .iter()
+                        .any(|edit| edit.replacement == "harness: Harness, ")
+            })
+            .expect("public fs repair should be present");
+        let repair = &plan.repairs[repair_index];
+
+        assert_eq!(plan.harness_threading, "thread-params");
+        assert_eq!(repair.impact.classification, "public-signature-change");
+        assert!(repair.impact.requires_cross_module_caller_updates);
+        assert_eq!(
+            repair.impact.signature_changes,
+            vec![SignatureChangeWire {
+                callable: "host_write_file".to_string(),
+                is_exported: true,
+                is_entrypoint: false,
+            }]
+        );
+        assert!(
+            repair
+                .impact
+                .notes
+                .iter()
+                .any(|note| note.contains("cross-module callers must be updated")),
+            "{repair:#?}"
+        );
+
+        let encoded = serde_json::to_value(&plan).unwrap();
+        assert_eq!(
+            encoded["repairs"][repair_index]["impact"]["classification"],
+            "public-signature-change"
+        );
+    }
+
+    #[test]
+    fn apply_thread_params_threads_harness_for_stdio_migration() {
         let temp = tempfile::TempDir::new().unwrap();
         let script = temp.path().join("stdio_apply.harn");
         fs::write(
@@ -1645,11 +1997,19 @@ mod tests {
         )
         .unwrap();
 
-        let result = apply_repairs(&script, RepairSafety::ScopeLocal, false).unwrap();
+        let result = apply_repairs_with_options(
+            &script,
+            RepairSafety::SurfaceChanging,
+            false,
+            FixOptions {
+                harness_threading: HarnessThreadingMode::ThreadParams,
+            },
+        )
+        .unwrap();
         assert!(
             result.applied.iter().any(|repair| {
                 repair.diagnostic_code == Code::LintAmbientStdioBuiltin.to_string()
-                    && repair.repair_id == "bindings/thread-harness"
+                    && repair.repair_id == "bindings/thread-harness-needs-param"
             }),
             "{result:#?}"
         );
@@ -1670,7 +2030,7 @@ mod tests {
     }
 
     #[test]
-    fn apply_scope_local_threads_harness_for_non_stdio_capabilities() {
+    fn apply_thread_params_threads_harness_for_non_stdio_capabilities() {
         let cases = [
             (
                 "clock_apply.harn",
@@ -1715,7 +2075,15 @@ mod tests {
             )
             .unwrap();
 
-            let result = apply_repairs(&script, RepairSafety::ScopeLocal, false).unwrap();
+            let result = apply_repairs_with_options(
+                &script,
+                RepairSafety::SurfaceChanging,
+                false,
+                FixOptions {
+                    harness_threading: HarnessThreadingMode::ThreadParams,
+                },
+            )
+            .unwrap();
             assert!(
                 result.applied.iter().any(|repair| {
                     repair.diagnostic_code == code.to_string()
@@ -1782,7 +2150,7 @@ mod tests {
     }
 
     #[test]
-    fn apply_scope_local_threads_harness_from_pipeline_to_helper() {
+    fn apply_thread_params_threads_harness_from_pipeline_to_helper() {
         let temp = tempfile::TempDir::new().unwrap();
         let script = temp.path().join("pipeline_helper.harn");
         fs::write(
@@ -1791,11 +2159,19 @@ mod tests {
         )
         .unwrap();
 
-        let result = apply_repairs(&script, RepairSafety::ScopeLocal, false).unwrap();
+        let result = apply_repairs_with_options(
+            &script,
+            RepairSafety::SurfaceChanging,
+            false,
+            FixOptions {
+                harness_threading: HarnessThreadingMode::ThreadParams,
+            },
+        )
+        .unwrap();
         assert!(
             result.applied.iter().any(|repair| {
                 repair.diagnostic_code == Code::LintAmbientStdioBuiltin.to_string()
-                    && repair.repair_id == "bindings/thread-harness"
+                    && repair.repair_id == "bindings/thread-harness-needs-param"
             }),
             "{result:#?}"
         );
@@ -1831,7 +2207,7 @@ mod tests {
         assert!(
             result.applied.iter().any(|repair| {
                 repair.diagnostic_code == Code::LintAmbientFsBuiltin.to_string()
-                    && repair.repair_id == "bindings/thread-harness-fs"
+                    && repair.repair_id == "bindings/use-enclosing-harness-global"
             }),
             "{result:#?}"
         );
@@ -1852,6 +2228,44 @@ mod tests {
     }
 
     #[test]
+    fn apply_default_preserves_non_stdlib_public_signature_with_global_harness() {
+        let temp = tempfile::TempDir::new().unwrap();
+        let script = temp.path().join("public_calls_private.harn");
+        fs::write(
+            &script,
+            "/** Public API. */\npub fn load(path: string) {\n  return load_inner(path)\n}\n\nfn load_inner(path: string) {\n  return read_file(path)\n}\n\npipeline default() {\n  load(\"notes.txt\")\n}\n",
+        )
+        .unwrap();
+
+        let result = apply_repairs(&script, RepairSafety::ScopeLocal, false).unwrap();
+        assert!(
+            result.applied.iter().any(|repair| {
+                repair.diagnostic_code == Code::LintAmbientFsBuiltin.to_string()
+                    && repair.repair_id == "bindings/use-enclosing-harness-global"
+            }),
+            "{result:#?}"
+        );
+
+        let updated = fs::read_to_string(&script).unwrap();
+        assert!(
+            updated.contains("pub fn load(path: string)"),
+            "public signature should remain stable: {updated}"
+        );
+        assert!(
+            updated.contains("fn load_inner(path: string)"),
+            "private helper signature should remain stable in local-global mode: {updated}"
+        );
+        assert!(
+            updated.contains("return harness.fs.read_text(path)"),
+            "private helper should use the VM harness global: {updated}"
+        );
+        assert!(
+            updated.contains("load(\"notes.txt\")"),
+            "callers should not receive an inserted harness argument: {updated}"
+        );
+    }
+
+    #[test]
     fn apply_surface_changing_threads_non_stdlib_public_api() {
         let temp = tempfile::TempDir::new().unwrap();
         let script = temp.path().join("public_calls_private.harn");
@@ -1861,7 +2275,15 @@ mod tests {
         )
         .unwrap();
 
-        let result = apply_repairs(&script, RepairSafety::SurfaceChanging, false).unwrap();
+        let result = apply_repairs_with_options(
+            &script,
+            RepairSafety::SurfaceChanging,
+            false,
+            FixOptions {
+                harness_threading: HarnessThreadingMode::ThreadParams,
+            },
+        )
+        .unwrap();
         assert!(
             result.applied.iter().any(|repair| {
                 repair.diagnostic_code == Code::LintAmbientFsBuiltin.to_string()
@@ -1903,11 +2325,19 @@ mod tests {
         )
         .unwrap();
 
-        let result = apply_repairs(&script, RepairSafety::ScopeLocal, false).unwrap();
+        let result = apply_repairs_with_options(
+            &script,
+            RepairSafety::SurfaceChanging,
+            false,
+            FixOptions {
+                harness_threading: HarnessThreadingMode::ThreadParams,
+            },
+        )
+        .unwrap();
         assert!(
             result.applied.iter().any(|repair| {
                 repair.diagnostic_code == Code::LintAmbientStdioBuiltin.to_string()
-                    && repair.repair_id == "bindings/thread-harness"
+                    && repair.repair_id == "bindings/thread-harness-needs-param"
             }),
             "{result:#?}"
         );
