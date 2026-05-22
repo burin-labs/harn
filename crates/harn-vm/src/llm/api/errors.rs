@@ -363,6 +363,12 @@ fn is_model_unavailable(lower: &str) -> bool {
         || lower.contains("model unavailable")
         || lower.contains("model is unavailable")
         || lower.contains("model not found")
+        || lower.contains("model_not_available")
+        // Together's wording when a route is listed in `/v1/models` but only
+        // available through a dedicated endpoint; treat like a missing model
+        // so caller fallback logic routes around it instead of surfacing a
+        // generic invalid_request to the agent.
+        || lower.contains("non-serverless model")
 }
 
 #[cfg(test)]
@@ -492,5 +498,30 @@ mod tests {
         let info = classify_llm_error(ErrorCategory::TransientNetwork, "connection reset");
         assert_eq!(info.kind, LlmErrorKind::Transient);
         assert_eq!(info.reason, LlmErrorReason::NetworkError);
+    }
+
+    #[test]
+    fn classifies_together_dedicated_only_route_as_model_unavailable() {
+        // Together returns HTTP 400 + invalid_request_error for routes
+        // listed in `/v1/models` that actually require a dedicated
+        // endpoint. The body wording is stable and distinct from a normal
+        // missing-model error, but callers' fallback logic only kicks in
+        // on `model_unavailable`, so we lift it out of `invalid_request`.
+        let body = concat!(
+            r#"{"error":{"message":"#,
+            r#""Unable to access non-serverless model Qwen/Qwen3-Coder-Next-FP8. "#,
+            r#"Please visit https://api.together.ai/models/Qwen/Qwen3-Coder-Next-FP8 "#,
+            r#"to create and start a new dedicated endpoint for the model.","#,
+            r#""type":"invalid_request_error","code":"model_not_available"}}"#,
+        );
+        let info =
+            classify_provider_http_error("together", reqwest::StatusCode::BAD_REQUEST, None, body);
+        assert_eq!(info.kind, LlmErrorKind::Terminal);
+        assert_eq!(info.reason, LlmErrorReason::ModelUnavailable);
+        assert!(
+            info.message.contains("[model_unavailable]"),
+            "msg was: {}",
+            info.message
+        );
     }
 }

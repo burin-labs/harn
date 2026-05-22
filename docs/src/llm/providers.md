@@ -475,6 +475,33 @@ llm_call("...", nil, {model: "claude-sonnet-4-5-20241022"})
 The `HARN_LLM_MODEL` environment variable sets the default model when none
 is specified in the script.
 
+### Serverless vs. dedicated routes
+
+Each catalog row carries an `availability` field that distinguishes the
+provider's serverless surface from routes that require a dedicated
+endpoint:
+
+| value | meaning |
+|---|---|
+| `serverless` | Reachable through the provider's normal API-key path. The default for cataloged rows. |
+| `dedicated` | Listed by the provider but only callable once the caller has provisioned a dedicated endpoint (e.g. some Together `/v1/models` entries). Hosts must not auto-route to it. |
+| `unknown` | Surfaced dynamically (e.g. from `/v1/models`) without a static claim from Harn or the user. |
+
+Override the field in `harn.toml` overlays when shipping a provider
+adapter for routes that need explicit provisioning:
+
+```toml
+[models."Qwen/Qwen3-Coder-Next-FP8"]
+name = "Qwen3 Coder Next FP8 (dedicated)"
+provider = "together"
+context_window = 262144
+availability = "dedicated"
+```
+
+A runtime call that hits a non-serverless Together route also classifies
+as `model_unavailable` (not the generic `invalid_request`) so fallback
+logic can route around the dedicated-only model.
+
 ## Rate limiting
 
 Harn supports per-provider rate limiting (requests per minute):

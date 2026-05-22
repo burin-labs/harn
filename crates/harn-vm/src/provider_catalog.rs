@@ -11,7 +11,9 @@ use serde::Serialize;
 use serde_json::{json, Value};
 
 use crate::llm;
-use crate::llm_config::{self, AliasDef, AliasToolCallingDef, ModelDef, ModelPricing, ProviderDef};
+use crate::llm_config::{
+    self, AliasDef, AliasToolCallingDef, ModelAvailability, ModelDef, ModelPricing, ProviderDef,
+};
 
 pub const PROVIDER_CATALOG_SCHEMA_VERSION: u32 = 2;
 pub const PROVIDER_CATALOG_SCHEMA_ID: &str =
@@ -105,8 +107,27 @@ pub struct CatalogModel {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub pricing: Option<ModelPricing>,
     pub deprecation: ModelDeprecation,
+    pub availability: ModelAvailabilityStatus,
     pub quality_tags: Vec<String>,
     pub capability_tags: Vec<String>,
+}
+
+#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum ModelAvailabilityStatus {
+    Serverless,
+    Dedicated,
+    Unknown,
+}
+
+impl From<ModelAvailability> for ModelAvailabilityStatus {
+    fn from(value: ModelAvailability) -> Self {
+        match value {
+            ModelAvailability::Serverless => Self::Serverless,
+            ModelAvailability::Dedicated => Self::Dedicated,
+            ModelAvailability::Unknown => Self::Unknown,
+        }
+    }
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -355,10 +376,24 @@ pub fn validate_artifact(artifact: &ProviderCatalogArtifact) -> ProviderCatalogV
         }
     }
 
+    let dedicated_pairs: BTreeSet<(&str, &str)> = artifact
+        .models
+        .iter()
+        .filter(|model| model.availability == ModelAvailabilityStatus::Dedicated)
+        .map(|model| (model.provider.as_str(), model.id.as_str()))
+        .collect();
     for alias in &artifact.aliases {
         if !model_pairs.contains(&(alias.provider.as_str(), alias.model_id.as_str())) {
             result.errors.push(format!(
                 "alias {} targets {}/{} without a catalog row",
+                alias.name, alias.provider, alias.model_id
+            ));
+        }
+        if is_tier_alias(&alias.name)
+            && dedicated_pairs.contains(&(alias.provider.as_str(), alias.model_id.as_str()))
+        {
+            result.warnings.push(format!(
+                "tier alias {} targets dedicated-only model {}/{}; serverless callers will fail until the dedicated endpoint is provisioned",
                 alias.name, alias.provider, alias.model_id
             ));
         }
@@ -486,6 +521,7 @@ pub fn schema_value() -> Value {
                     "reasoning",
                     "prompt_cache",
                     "deprecation",
+                    "availability",
                     "quality_tags",
                     "capability_tags"
                 ],
@@ -505,6 +541,7 @@ pub fn schema_value() -> Value {
                     "prompt_cache": {"type": "boolean"},
                     "pricing": {"$ref": "#/$defs/pricing"},
                     "deprecation": {"$ref": "#/$defs/deprecation"},
+                    "availability": {"enum": ["serverless", "dedicated", "unknown"]},
                     "quality_tags": {"type": "array", "items": {"type": "string"}},
                     "capability_tags": {"type": "array", "items": {"type": "string"}}
                 },
@@ -692,6 +729,7 @@ fn catalog_model(
             },
             note: model.deprecation_note.clone(),
         },
+        availability: ModelAvailabilityStatus::from(model.availability),
         quality_tags,
         capability_tags: model.capabilities.clone(),
         id,
@@ -928,6 +966,21 @@ fn is_local_provider(provider: &str) -> bool {
     )
 }
 
+fn is_tier_alias(name: &str) -> bool {
+    matches!(
+        name,
+        "frontier"
+            | "mid"
+            | "small"
+            | "tier/frontier"
+            | "tier/mid"
+            | "tier/small"
+            | "sonnet"
+            | "opus"
+            | "haiku"
+    )
+}
+
 fn title_case(id: &str) -> String {
     id.split('_')
         .map(|part| {
@@ -1039,6 +1092,7 @@ export interface HarnCatalogModel {
   prompt_cache: boolean
   pricing?: HarnModelPricing
   deprecation: { status: "active" | "deprecated"; note?: string }
+  availability: "serverless" | "dedicated" | "unknown"
   quality_tags: string[]
   capability_tags: string[]
 }
@@ -1252,6 +1306,7 @@ public struct HarnCatalogModel: Codable, Sendable, Equatable {
     public let promptCache: Bool
     public let pricing: HarnModelPricing?
     public let deprecation: HarnModelDeprecation
+    public let availability: String
     public let qualityTags: [String]
     public let capabilityTags: [String]
 
@@ -1271,6 +1326,7 @@ public struct HarnCatalogModel: Codable, Sendable, Equatable {
         case promptCache = "prompt_cache"
         case pricing
         case deprecation
+        case availability
         case qualityTags = "quality_tags"
         case capabilityTags = "capability_tags"
     }
@@ -1487,6 +1543,90 @@ quality_tags = ["experiment"]
             .expect("private model is exported");
         assert_eq!(model.aliases, vec!["private-fast"]);
         assert_eq!(model.quality_tags, vec!["experiment"]);
+    }
+
+    #[test]
+    fn cataloged_models_default_to_serverless_availability() {
+        llm_config::clear_user_overrides();
+        let catalog = artifact();
+        let qwen_dedicated = catalog
+            .models
+            .iter()
+            .find(|model| model.id == "Qwen/Qwen3-Coder-Next-FP8")
+            .expect("Together dedicated route is exported");
+        assert_eq!(
+            qwen_dedicated.availability,
+            ModelAvailabilityStatus::Dedicated
+        );
+
+        let bundled_serverless = catalog
+            .models
+            .iter()
+            .find(|model| model.id == "qwen/qwen3-coder")
+            .expect("OpenRouter Qwen3 Coder is exported");
+        assert_eq!(
+            bundled_serverless.availability,
+            ModelAvailabilityStatus::Serverless
+        );
+    }
+
+    #[test]
+    fn tier_alias_targeting_dedicated_model_emits_warning() {
+        let _guard = install_overlay(
+            r#"
+[providers.together_test]
+display_name = "Together (test)"
+base_url = "https://api.together.xyz/v1"
+auth_style = "bearer"
+auth_env = "TOGETHER_AI_API_KEY"
+chat_endpoint = "/chat/completions"
+
+[aliases.frontier]
+id = "Qwen/Test-Dedicated-Only"
+provider = "together_test"
+
+[models."Qwen/Test-Dedicated-Only"]
+name = "Qwen Dedicated Only"
+provider = "together_test"
+context_window = 8192
+availability = "dedicated"
+"#,
+        );
+        let report = validate_current();
+        assert!(
+            report.warnings.iter().any(|message| {
+                message.contains("tier alias frontier") && message.contains("dedicated-only model")
+            }),
+            "expected dedicated-alias warning, got {:?}",
+            report.warnings
+        );
+    }
+
+    #[test]
+    fn overlay_parses_availability_strings() {
+        let _guard = install_overlay(
+            r#"
+[providers.experiment_co]
+display_name = "Experiment Co"
+base_url = "https://example.test/v1"
+auth_style = "bearer"
+auth_env = "EXPERIMENT_API_KEY"
+chat_endpoint = "/chat/completions"
+
+[models."exp/discovered"]
+name = "Discovered Route"
+provider = "experiment_co"
+context_window = 4096
+availability = "unknown"
+"#,
+        );
+        let catalog = artifact();
+        let model = catalog
+            .models
+            .iter()
+            .find(|model| model.id == "exp/discovered")
+            .expect("overlay model is exported");
+        assert_eq!(model.availability, ModelAvailabilityStatus::Unknown);
     }
 
     #[test]

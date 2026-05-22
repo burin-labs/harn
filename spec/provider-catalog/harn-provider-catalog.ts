@@ -93,6 +93,7 @@ export interface HarnCatalogModel {
   prompt_cache: boolean
   pricing?: HarnModelPricing
   deprecation: { status: "active" | "deprecated"; note?: string }
+  availability: "serverless" | "dedicated" | "unknown"
   quality_tags: string[]
   capability_tags: string[]
 }
@@ -678,6 +679,7 @@ export const harnProviderCatalog: HarnProviderCatalog = {
       "deprecation": {
         "status": "active"
       },
+      "availability": "serverless",
       "quality_tags": [],
       "capability_tags": [
         "streaming",
@@ -742,6 +744,7 @@ export const harnProviderCatalog: HarnProviderCatalog = {
       "deprecation": {
         "status": "active"
       },
+      "availability": "serverless",
       "quality_tags": [],
       "capability_tags": [
         "streaming",
@@ -806,6 +809,7 @@ export const harnProviderCatalog: HarnProviderCatalog = {
       "deprecation": {
         "status": "active"
       },
+      "availability": "serverless",
       "quality_tags": [],
       "capability_tags": [
         "streaming",
@@ -870,6 +874,7 @@ export const harnProviderCatalog: HarnProviderCatalog = {
       "deprecation": {
         "status": "active"
       },
+      "availability": "serverless",
       "quality_tags": [],
       "capability_tags": [
         "streaming",
@@ -940,6 +945,7 @@ export const harnProviderCatalog: HarnProviderCatalog = {
       "deprecation": {
         "status": "active"
       },
+      "availability": "serverless",
       "quality_tags": [],
       "capability_tags": [
         "streaming",
@@ -1010,6 +1016,7 @@ export const harnProviderCatalog: HarnProviderCatalog = {
         "status": "deprecated",
         "note": "Superseded by claude-opus-4-7. No formal sunset yet; switch when convenient."
       },
+      "availability": "serverless",
       "quality_tags": [],
       "capability_tags": [
         "streaming",
@@ -1080,6 +1087,7 @@ export const harnProviderCatalog: HarnProviderCatalog = {
         "status": "deprecated",
         "note": "Sunset 2026-06-15 per Anthropic deprecations page. Replaced by claude-opus-4-7."
       },
+      "availability": "serverless",
       "quality_tags": [],
       "capability_tags": [
         "streaming",
@@ -1149,6 +1157,7 @@ export const harnProviderCatalog: HarnProviderCatalog = {
       "deprecation": {
         "status": "active"
       },
+      "availability": "serverless",
       "quality_tags": [],
       "capability_tags": [
         "streaming",
@@ -1221,6 +1230,7 @@ export const harnProviderCatalog: HarnProviderCatalog = {
       "deprecation": {
         "status": "active"
       },
+      "availability": "serverless",
       "quality_tags": [],
       "capability_tags": [
         "streaming",
@@ -1292,6 +1302,7 @@ export const harnProviderCatalog: HarnProviderCatalog = {
         "status": "deprecated",
         "note": "Sunset 2026-06-15 per Anthropic deprecations page. Replaced by claude-sonnet-4-6."
       },
+      "availability": "serverless",
       "quality_tags": [],
       "capability_tags": [
         "streaming",
@@ -1362,6 +1373,7 @@ export const harnProviderCatalog: HarnProviderCatalog = {
         "status": "deprecated",
         "note": "Sunset 2026-05-15 per Anthropic deprecations page. Replaced by claude-sonnet-4-6."
       },
+      "availability": "serverless",
       "quality_tags": [],
       "capability_tags": [
         "streaming",
@@ -1435,6 +1447,7 @@ export const harnProviderCatalog: HarnProviderCatalog = {
       "deprecation": {
         "status": "active"
       },
+      "availability": "serverless",
       "quality_tags": [
         "frontier"
       ],
@@ -1506,6 +1519,7 @@ export const harnProviderCatalog: HarnProviderCatalog = {
       "deprecation": {
         "status": "active"
       },
+      "availability": "serverless",
       "quality_tags": [],
       "capability_tags": [
         "streaming",
@@ -1567,6 +1581,7 @@ export const harnProviderCatalog: HarnProviderCatalog = {
       "deprecation": {
         "status": "active"
       },
+      "availability": "serverless",
       "quality_tags": [],
       "capability_tags": [
         "streaming",
@@ -1620,6 +1635,7 @@ export const harnProviderCatalog: HarnProviderCatalog = {
       "deprecation": {
         "status": "active"
       },
+      "availability": "serverless",
       "quality_tags": [],
       "capability_tags": [
         "streaming",
@@ -1672,6 +1688,7 @@ export const harnProviderCatalog: HarnProviderCatalog = {
       "deprecation": {
         "status": "active"
       },
+      "availability": "serverless",
       "quality_tags": [],
       "capability_tags": [
         "streaming",
@@ -1731,6 +1748,7 @@ export const harnProviderCatalog: HarnProviderCatalog = {
       "deprecation": {
         "status": "active"
       },
+      "availability": "serverless",
       "quality_tags": [],
       "capability_tags": [
         "streaming",
@@ -1796,6 +1814,7 @@ export const harnProviderCatalog: HarnProviderCatalog = {
       "deprecation": {
         "status": "active"
       },
+      "availability": "serverless",
       "quality_tags": [],
       "capability_tags": [
         "streaming",
@@ -1854,6 +1873,7 @@ export const harnProviderCatalog: HarnProviderCatalog = {
       "deprecation": {
         "status": "active"
       },
+      "availability": "serverless",
       "quality_tags": [
         "local"
       ],
@@ -1912,6 +1932,7 @@ export const harnProviderCatalog: HarnProviderCatalog = {
       "deprecation": {
         "status": "active"
       },
+      "availability": "serverless",
       "quality_tags": [
         "local"
       ],
@@ -1966,6 +1987,7 @@ export const harnProviderCatalog: HarnProviderCatalog = {
       "deprecation": {
         "status": "active"
       },
+      "availability": "serverless",
       "quality_tags": [
         "local"
       ],
@@ -2022,6 +2044,7 @@ export const harnProviderCatalog: HarnProviderCatalog = {
       "deprecation": {
         "status": "active"
       },
+      "availability": "serverless",
       "quality_tags": [
         "local"
       ],
@@ -2076,6 +2099,7 @@ export const harnProviderCatalog: HarnProviderCatalog = {
       "deprecation": {
         "status": "active"
       },
+      "availability": "serverless",
       "quality_tags": [
         "local"
       ],
@@ -2130,6 +2154,7 @@ export const harnProviderCatalog: HarnProviderCatalog = {
       "deprecation": {
         "status": "active"
       },
+      "availability": "serverless",
       "quality_tags": [
         "local"
       ],
@@ -2184,6 +2209,7 @@ export const harnProviderCatalog: HarnProviderCatalog = {
       "deprecation": {
         "status": "active"
       },
+      "availability": "serverless",
       "quality_tags": [
         "local"
       ],
@@ -2242,6 +2268,7 @@ export const harnProviderCatalog: HarnProviderCatalog = {
       "deprecation": {
         "status": "active"
       },
+      "availability": "serverless",
       "quality_tags": [
         "local"
       ],
@@ -2299,6 +2326,7 @@ export const harnProviderCatalog: HarnProviderCatalog = {
       "deprecation": {
         "status": "active"
       },
+      "availability": "serverless",
       "quality_tags": [
         "local"
       ],
@@ -2354,6 +2382,7 @@ export const harnProviderCatalog: HarnProviderCatalog = {
       "deprecation": {
         "status": "active"
       },
+      "availability": "serverless",
       "quality_tags": [
         "local"
       ],
@@ -2404,6 +2433,7 @@ export const harnProviderCatalog: HarnProviderCatalog = {
       "deprecation": {
         "status": "active"
       },
+      "availability": "serverless",
       "quality_tags": [
         "local"
       ],
@@ -2461,6 +2491,7 @@ export const harnProviderCatalog: HarnProviderCatalog = {
       "deprecation": {
         "status": "active"
       },
+      "availability": "serverless",
       "quality_tags": [
         "local"
       ],
@@ -2518,6 +2549,7 @@ export const harnProviderCatalog: HarnProviderCatalog = {
         "status": "deprecated",
         "note": "Superseded by gpt-5 family. Listed for cost-attribution backfill only."
       },
+      "availability": "serverless",
       "quality_tags": [],
       "capability_tags": [
         "streaming",
@@ -2574,6 +2606,7 @@ export const harnProviderCatalog: HarnProviderCatalog = {
         "status": "deprecated",
         "note": "API sunset 2026-02-17 per OpenAI deprecations page. Switch to gpt-5-mini for cheap routing or gpt-5 for frontier."
       },
+      "availability": "serverless",
       "quality_tags": [],
       "capability_tags": [
         "streaming",
@@ -2634,6 +2667,7 @@ export const harnProviderCatalog: HarnProviderCatalog = {
       "deprecation": {
         "status": "active"
       },
+      "availability": "serverless",
       "quality_tags": [
         "balanced"
       ],
@@ -2693,6 +2727,7 @@ export const harnProviderCatalog: HarnProviderCatalog = {
       "deprecation": {
         "status": "active"
       },
+      "availability": "serverless",
       "quality_tags": [],
       "capability_tags": [
         "streaming",
@@ -2750,6 +2785,7 @@ export const harnProviderCatalog: HarnProviderCatalog = {
       "deprecation": {
         "status": "active"
       },
+      "availability": "serverless",
       "quality_tags": [],
       "capability_tags": [
         "streaming",
@@ -2807,6 +2843,7 @@ export const harnProviderCatalog: HarnProviderCatalog = {
       "deprecation": {
         "status": "active"
       },
+      "availability": "serverless",
       "quality_tags": [],
       "capability_tags": [
         "streaming",
@@ -2864,6 +2901,7 @@ export const harnProviderCatalog: HarnProviderCatalog = {
       "deprecation": {
         "status": "active"
       },
+      "availability": "serverless",
       "quality_tags": [],
       "capability_tags": [
         "streaming",
@@ -2919,6 +2957,7 @@ export const harnProviderCatalog: HarnProviderCatalog = {
       "deprecation": {
         "status": "active"
       },
+      "availability": "serverless",
       "quality_tags": [
         "small"
       ],
@@ -2979,6 +3018,7 @@ export const harnProviderCatalog: HarnProviderCatalog = {
       "deprecation": {
         "status": "active"
       },
+      "availability": "serverless",
       "quality_tags": [],
       "capability_tags": [
         "streaming",
@@ -3041,6 +3081,7 @@ export const harnProviderCatalog: HarnProviderCatalog = {
       "deprecation": {
         "status": "active"
       },
+      "availability": "serverless",
       "quality_tags": [],
       "capability_tags": [
         "streaming",
@@ -3100,6 +3141,7 @@ export const harnProviderCatalog: HarnProviderCatalog = {
       "deprecation": {
         "status": "active"
       },
+      "availability": "serverless",
       "quality_tags": [],
       "capability_tags": [
         "streaming",
@@ -3152,6 +3194,7 @@ export const harnProviderCatalog: HarnProviderCatalog = {
       "deprecation": {
         "status": "active"
       },
+      "availability": "serverless",
       "quality_tags": [],
       "capability_tags": [
         "streaming",
@@ -3204,6 +3247,7 @@ export const harnProviderCatalog: HarnProviderCatalog = {
       "deprecation": {
         "status": "active"
       },
+      "availability": "serverless",
       "quality_tags": [],
       "capability_tags": [
         "streaming",
@@ -3256,6 +3300,7 @@ export const harnProviderCatalog: HarnProviderCatalog = {
       "deprecation": {
         "status": "active"
       },
+      "availability": "serverless",
       "quality_tags": [],
       "capability_tags": [
         "streaming",
@@ -3309,6 +3354,61 @@ export const harnProviderCatalog: HarnProviderCatalog = {
       "deprecation": {
         "status": "active"
       },
+      "availability": "serverless",
+      "quality_tags": [],
+      "capability_tags": [
+        "streaming",
+        "tools",
+        "structured_output"
+      ]
+    },
+    {
+      "id": "Qwen/Qwen3-Coder-Next-FP8",
+      "name": "Qwen3 Coder Next FP8 (Together, dedicated)",
+      "provider": "together",
+      "aliases": [],
+      "context_window": 262144,
+      "modalities": {
+        "input": [
+          "text"
+        ],
+        "output": [
+          "text"
+        ]
+      },
+      "tool_support": {
+        "native": true,
+        "text": true,
+        "tool_search": []
+      },
+      "structured_output": "native",
+      "format_preferences": {
+        "prefers_xml_scaffolding": false,
+        "prefers_markdown_scaffolding": true,
+        "structured_output_mode": "delimited",
+        "supports_assistant_prefill": false,
+        "prefers_role_developer": false,
+        "prefers_xml_tools": false,
+        "thinking_block_style": "none"
+      },
+      "reasoning": {
+        "modes": [],
+        "effort_supported": false,
+        "none_supported": false,
+        "interleaved_supported": false,
+        "preserve_thinking": false
+      },
+      "prompt_cache": false,
+      "pricing": {
+        "input_per_mtok": 0.18,
+        "output_per_mtok": 0.18,
+        "cache_read_per_mtok": null,
+        "cache_write_per_mtok": null
+      },
+      "deprecation": {
+        "status": "active"
+      },
+      "availability": "dedicated",
       "quality_tags": [],
       "capability_tags": [
         "streaming",
@@ -3560,8 +3660,8 @@ export const harnProviderCatalog: HarnProviderCatalog = {
       "id": "cheap",
       "label": "Cheap",
       "description": "Lowest known hosted input+output token price.",
-      "model_id": "gemini-2.5-flash",
-      "provider": "gemini",
+      "model_id": "Qwen/Qwen3-Coder-Next-FP8",
+      "provider": "together",
       "source": "catalog"
     },
     {

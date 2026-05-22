@@ -44,7 +44,8 @@ downstream hosts do not need to parse Harn internals:
 
 - `provider-catalog.json` — normalized providers, models, aliases,
   variants, QC defaults, capabilities, pricing, deprecation metadata,
-  endpoint/auth metadata, and provider caveats;
+  serverless-vs-dedicated availability, endpoint/auth metadata, and
+  provider caveats;
 - `provider-catalog.schema.json` — JSON Schema for the catalog
   contract;
 - `harn-provider-catalog.ts` — TypeScript types plus compatibility

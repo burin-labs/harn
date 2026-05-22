@@ -252,6 +252,50 @@ pub struct ModelDef {
     pub deprecation_note: Option<String>,
     #[serde(default)]
     pub quality_tags: Vec<String>,
+    /// Whether the model can be reached over a normal API-key serverless call,
+    /// or only via a dedicated/provisioned endpoint that the caller must spin
+    /// up out-of-band. Providers like Together list dedicated-only routes
+    /// alongside serverless ones in `/v1/models`, so this metadata lets clients
+    /// avoid presenting them as one-click options.
+    #[serde(default)]
+    pub availability: ModelAvailability,
+}
+
+#[derive(Debug, Clone, Copy, Deserialize, Serialize, PartialEq, Eq, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum ModelAvailability {
+    /// Reachable through the provider's normal API-key path with no extra
+    /// setup. The default for cataloged hosted/local models: by cataloging a
+    /// row we are claiming the route works out of the box.
+    #[default]
+    Serverless,
+    /// Requires the caller to provision a dedicated endpoint before requests
+    /// will succeed. The catalog row exists for selection/pricing UI, but
+    /// hosts must not auto-route to it.
+    Dedicated,
+    /// Availability is not known ahead of time. Used for routes that were
+    /// surfaced dynamically (e.g. through `/v1/models`) without a static
+    /// claim from Harn or the user.
+    Unknown,
+}
+
+impl ModelAvailability {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Serverless => "serverless",
+            Self::Dedicated => "dedicated",
+            Self::Unknown => "unknown",
+        }
+    }
+
+    pub fn parse(value: &str) -> Option<Self> {
+        match value {
+            "serverless" => Some(Self::Serverless),
+            "dedicated" => Some(Self::Dedicated),
+            "unknown" => Some(Self::Unknown),
+            _ => None,
+        }
+    }
 }
 
 #[derive(Debug, Clone, Serialize, PartialEq, Eq)]
@@ -1124,6 +1168,7 @@ mod tests {
                 deprecated: false,
                 deprecation_note: None,
                 quality_tags: Vec::new(),
+                availability: ModelAvailability::default(),
             },
         );
         set_user_overrides(Some(overlay));
@@ -1460,6 +1505,7 @@ mod tests {
                 deprecated: false,
                 deprecation_note: None,
                 quality_tags: Vec::new(),
+                availability: ModelAvailability::default(),
             },
         );
         overlay
@@ -1623,6 +1669,76 @@ mod tests {
             }
             if let Some(rate) = pricing.cache_write_per_mtok {
                 assert!(rate >= 0.0, "{id}: negative cache_write rate {rate}");
+            }
+        }
+    }
+
+    #[test]
+    fn model_availability_parses_known_strings() {
+        assert_eq!(
+            ModelAvailability::parse("serverless"),
+            Some(ModelAvailability::Serverless)
+        );
+        assert_eq!(
+            ModelAvailability::parse("dedicated"),
+            Some(ModelAvailability::Dedicated)
+        );
+        assert_eq!(
+            ModelAvailability::parse("unknown"),
+            Some(ModelAvailability::Unknown)
+        );
+        assert_eq!(ModelAvailability::parse("provisioned"), None);
+        for value in [
+            ModelAvailability::Serverless,
+            ModelAvailability::Dedicated,
+            ModelAvailability::Unknown,
+        ] {
+            assert_eq!(ModelAvailability::parse(value.as_str()), Some(value));
+        }
+    }
+
+    #[test]
+    fn embedded_catalog_marks_together_dedicated_route_as_dedicated() {
+        let config = default_config();
+        let model = config
+            .models
+            .get("Qwen/Qwen3-Coder-Next-FP8")
+            .expect("Together Qwen3 Coder Next FP8 is cataloged");
+        assert_eq!(model.provider, "together");
+        assert_eq!(model.availability, ModelAvailability::Dedicated);
+    }
+
+    #[test]
+    fn embedded_catalog_dedicated_models_are_not_targeted_by_tier_aliases() {
+        // A dedicated-only model behind a tier alias would silently fail
+        // every serverless caller; the catalog must keep those routes
+        // separated.
+        let config = default_config();
+        let dedicated: std::collections::BTreeSet<(&str, &str)> = config
+            .models
+            .iter()
+            .filter(|(_, model)| model.availability == ModelAvailability::Dedicated)
+            .map(|(id, model)| (model.provider.as_str(), id.as_str()))
+            .collect();
+        for (name, alias) in &config.aliases {
+            if matches!(
+                name.as_str(),
+                "frontier"
+                    | "mid"
+                    | "small"
+                    | "tier/frontier"
+                    | "tier/mid"
+                    | "tier/small"
+                    | "sonnet"
+                    | "opus"
+                    | "haiku"
+            ) {
+                assert!(
+                    !dedicated.contains(&(alias.provider.as_str(), alias.id.as_str())),
+                    "tier alias `{name}` targets dedicated-only route `{}/{}`",
+                    alias.provider,
+                    alias.id,
+                );
             }
         }
     }

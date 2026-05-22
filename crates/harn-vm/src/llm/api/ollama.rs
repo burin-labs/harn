@@ -843,6 +843,7 @@ mod tests {
                 deprecated: false,
                 deprecation_note: None,
                 quality_tags: Vec::new(),
+                availability: crate::llm_config::ModelAvailability::default(),
             },
         );
         crate::llm_config::set_user_overrides(Some(overlay));
@@ -935,6 +936,7 @@ mod tests {
                 deprecated: false,
                 deprecation_note: None,
                 quality_tags: Vec::new(),
+                availability: crate::llm_config::ModelAvailability::default(),
             },
         );
         crate::llm_config::set_user_overrides(Some(overlay));
@@ -1178,6 +1180,7 @@ mod tests {
                 deprecated: false,
                 deprecation_note: None,
                 quality_tags: Vec::new(),
+                availability: crate::llm_config::ModelAvailability::default(),
             },
         );
         crate::llm_config::set_user_overrides(Some(overlay));
