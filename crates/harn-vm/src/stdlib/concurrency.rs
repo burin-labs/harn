@@ -765,12 +765,11 @@ async fn mailbox_open_builtin(args: Vec<VmValue>) -> Result<VmValue, VmError> {
     let vm = current_async_vm("mailbox_open")?;
     let shared_runtime = vm.shared_state_runtime.clone();
     let (scoped, options) = scoped_from_open_args(&vm, &args, "mailbox_open", "name")?;
-    let capacity = options
+    let capacity_arg = options
         .as_ref()
-        .and_then(|opts| opts.get("capacity").and_then(VmValue::as_int))
-        .or_else(|| args.get(1).and_then(VmValue::as_int))
-        .unwrap_or(256)
-        .max(1) as usize;
+        .and_then(|opts| opts.get("capacity"))
+        .or_else(|| args.get(1));
+    let capacity = optional_positive_usize_arg(capacity_arg, 256, "mailbox_open", "capacity")?;
     Ok(shared_runtime.open_mailbox(scoped, capacity))
 }
 
@@ -898,8 +897,7 @@ fn channel_builtin(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmErr
         .first()
         .map(|a| a.display())
         .unwrap_or_else(|| "default".to_string());
-    let capacity = args.get(1).and_then(|a| a.as_int()).unwrap_or(256) as usize;
-    let capacity = capacity.max(1);
+    let capacity = optional_positive_usize_arg(args.get(1), 256, "channel", "capacity")?;
     let (tx, rx) = tokio::sync::mpsc::channel(capacity);
     // The handle stays on the single-threaded VM LocalSet; VmValue itself is !Send.
     #[allow(clippy::arc_with_non_send_sync)]
@@ -1242,8 +1240,9 @@ fn circuit_breaker_builtin(args: &[VmValue], _out: &mut String) -> Result<VmValu
         .first()
         .map(|a| a.display())
         .unwrap_or_else(|| "default".to_string());
-    let threshold = args.get(1).and_then(|a| a.as_int()).unwrap_or(5) as usize;
-    let reset_ms = args.get(2).and_then(|a| a.as_int()).unwrap_or(30000) as u64;
+    let threshold = optional_positive_usize_arg(args.get(1), 5, "circuit_breaker", "threshold")?;
+    let reset_ms =
+        optional_non_negative_u64_arg(args.get(2), 30000, "circuit_breaker", "reset_ms")?;
     CIRCUITS.with(|circuits| {
         circuits.borrow_mut().insert(
             name.clone(),
@@ -1256,6 +1255,40 @@ fn circuit_breaker_builtin(args: &[VmValue], _out: &mut String) -> Result<VmValu
         );
     });
     Ok(VmValue::String(Rc::from(name)))
+}
+
+fn optional_positive_usize_arg(
+    value: Option<&VmValue>,
+    default: usize,
+    builtin: &str,
+    key: &str,
+) -> Result<usize, VmError> {
+    match value {
+        None | Some(VmValue::Nil) => Ok(default),
+        Some(VmValue::Int(n)) if *n >= 1 => Ok(*n as usize),
+        Some(VmValue::Int(_)) => Err(VmError::Runtime(format!("{builtin}: {key} must be >= 1"))),
+        Some(other) => Err(VmError::Runtime(format!(
+            "{builtin}: {key} must be an int, got {}",
+            other.type_name()
+        ))),
+    }
+}
+
+fn optional_non_negative_u64_arg(
+    value: Option<&VmValue>,
+    default: u64,
+    builtin: &str,
+    key: &str,
+) -> Result<u64, VmError> {
+    match value {
+        None | Some(VmValue::Nil) => Ok(default),
+        Some(VmValue::Int(n)) if *n >= 0 => Ok(*n as u64),
+        Some(VmValue::Int(_)) => Err(VmError::Runtime(format!("{builtin}: {key} must be >= 0"))),
+        Some(other) => Err(VmError::Runtime(format!(
+            "{builtin}: {key} must be an int, got {}",
+            other.type_name()
+        ))),
+    }
 }
 
 fn circuit_check_builtin(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmError> {
@@ -1375,6 +1408,14 @@ mod tests {
 
     fn s(v: &str) -> VmValue {
         VmValue::String(Rc::from(v))
+    }
+
+    #[test]
+    fn channel_rejects_invalid_capacity() {
+        let mut vm = vm();
+        let err = call(&mut vm, "channel", vec![s("bad_channel"), VmValue::Int(0)])
+            .expect_err("zero capacity must fail");
+        assert!(err.to_string().contains("capacity"));
     }
 
     #[test]
@@ -1525,6 +1566,26 @@ mod tests {
         let mut vm = vm();
         let state = call(&mut vm, "circuit_check", vec![s("nonexistent")]).unwrap();
         assert_eq!(state.display(), "closed");
+    }
+
+    #[test]
+    fn circuit_breaker_rejects_invalid_numeric_config() {
+        let mut vm = vm();
+        let threshold_err = call(
+            &mut vm,
+            "circuit_breaker",
+            vec![s("bad_threshold"), VmValue::Int(0)],
+        )
+        .expect_err("zero threshold must fail");
+        assert!(threshold_err.to_string().contains("threshold"));
+
+        let reset_err = call(
+            &mut vm,
+            "circuit_breaker",
+            vec![s("bad_reset"), VmValue::Int(1), VmValue::Int(-1)],
+        )
+        .expect_err("negative reset must fail");
+        assert!(reset_err.to_string().contains("reset_ms"));
     }
 
     #[test]

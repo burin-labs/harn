@@ -23,8 +23,8 @@ use super::trigram;
 use super::versions::EditOp;
 use crate::error::HostlibError;
 use crate::tools::args::{
-    build_dict, dict_arg, optional_bool, optional_int, optional_int_list, optional_string,
-    optional_string_list, require_int, require_string, str_value,
+    build_dict, dict_arg, optional_bool, optional_int_list, optional_string, optional_string_list,
+    require_string, str_value,
 };
 
 /// Shared, mutable cell carrying the (at most one) live workspace index.
@@ -87,14 +87,7 @@ pub(super) fn run_query(index: &SharedIndex, args: &[VmValue]) -> Result<VmValue
         });
     }
     let case_sensitive = optional_bool(BUILTIN_QUERY, dict, "case_sensitive", false)?;
-    let max_results = optional_int(BUILTIN_QUERY, dict, "max_results", 100)?;
-    if max_results < 1 {
-        return Err(HostlibError::InvalidParameter {
-            builtin: BUILTIN_QUERY,
-            param: "max_results",
-            message: "must be >= 1".to_string(),
-        });
-    }
+    let max_results = optional_positive_usize(BUILTIN_QUERY, dict, "max_results")?.unwrap_or(100);
     let scope = optional_string_list(BUILTIN_QUERY, dict, "scope")?;
 
     let guard = index.lock().expect("code_index mutex poisoned");
@@ -129,10 +122,9 @@ pub(super) fn run_query(index: &SharedIndex, args: &[VmValue]) -> Result<VmValue
             .cmp(&a.match_count)
             .then_with(|| a.path.cmp(&b.path))
     });
-    let max = max_results as usize;
-    let truncated = hits.len() > max;
+    let truncated = hits.len() > max_results;
     if truncated {
-        hits.truncate(max);
+        hits.truncate(max_results);
     }
     Ok(build_dict([
         (
@@ -301,7 +293,7 @@ pub(super) fn run_id_to_path(
     args: &[VmValue],
 ) -> Result<VmValue, HostlibError> {
     let raw = dict_arg(BUILTIN_ID_TO_PATH, args)?;
-    let id = require_int(BUILTIN_ID_TO_PATH, raw.as_ref(), "file_id")? as FileId;
+    let id = require_positive_file_id(BUILTIN_ID_TO_PATH, raw.as_ref(), "file_id")?;
     let guard = index.lock().expect("code_index mutex poisoned");
     let path = guard
         .as_ref()
@@ -338,8 +330,12 @@ pub(super) fn run_file_meta(
     let Some(state) = guard.as_ref() else {
         return Ok(VmValue::Nil);
     };
-    let id_opt: Option<FileId> = if let Some(VmValue::Int(n)) = dict.get("file_id") {
-        Some(*n as FileId)
+    let id_opt: Option<FileId> = if dict.contains_key("file_id") {
+        Some(require_positive_file_id(
+            BUILTIN_FILE_META,
+            dict,
+            "file_id",
+        )?)
     } else if let Some(VmValue::String(p)) = dict.get("path") {
         state.lookup_path(p)
     } else {
@@ -403,28 +399,8 @@ pub(super) fn run_read_range(
     let raw = dict_arg(BUILTIN_READ_RANGE, args)?;
     let dict = raw.as_ref();
     let path = require_string(BUILTIN_READ_RANGE, dict, "path")?;
-    let start = match dict.get("start") {
-        None | Some(VmValue::Nil) => None,
-        Some(VmValue::Int(n)) => Some(*n),
-        Some(other) => {
-            return Err(HostlibError::InvalidParameter {
-                builtin: BUILTIN_READ_RANGE,
-                param: "start",
-                message: format!("expected integer, got {}", other.type_name()),
-            });
-        }
-    };
-    let end = match dict.get("end") {
-        None | Some(VmValue::Nil) => None,
-        Some(VmValue::Int(n)) => Some(*n),
-        Some(other) => {
-            return Err(HostlibError::InvalidParameter {
-                builtin: BUILTIN_READ_RANGE,
-                param: "end",
-                message: format!("expected integer, got {}", other.type_name()),
-            });
-        }
-    };
+    let start = optional_positive_i64(BUILTIN_READ_RANGE, dict, "start")?;
+    let end = optional_positive_i64(BUILTIN_READ_RANGE, dict, "end")?;
     let guard = index.lock().expect("code_index mutex poisoned");
     let abs = match guard.as_ref() {
         Some(state) => {
@@ -513,18 +489,18 @@ pub(super) fn run_trigram_query(
     let raw = dict_arg(BUILTIN_TRIGRAM_QUERY, args)?;
     let dict = raw.as_ref();
     let trigrams_raw = optional_int_list(BUILTIN_TRIGRAM_QUERY, dict, "trigrams")?;
-    let max_files = match dict.get("max_files") {
-        None | Some(VmValue::Nil) => None,
-        Some(VmValue::Int(n)) => Some(*n as usize),
-        Some(other) => {
+    let max_files = optional_positive_usize(BUILTIN_TRIGRAM_QUERY, dict, "max_files")?;
+    let mut trigrams = Vec::with_capacity(trigrams_raw.len());
+    for n in trigrams_raw {
+        if n < 0 {
             return Err(HostlibError::InvalidParameter {
                 builtin: BUILTIN_TRIGRAM_QUERY,
-                param: "max_files",
-                message: format!("expected integer, got {}", other.type_name()),
-            })
+                param: "trigrams",
+                message: "entries must be >= 0".to_string(),
+            });
         }
-    };
-    let trigrams: Vec<u32> = trigrams_raw.into_iter().map(|n| n as u32).collect();
+        trigrams.push(n as u32);
+    }
     let guard = index.lock().expect("code_index mutex poisoned");
     let mut ids: Vec<FileId> = match guard.as_ref() {
         Some(state) => state.trigrams.query(&trigrams).into_iter().collect(),
@@ -576,7 +552,7 @@ pub(super) fn run_word_get(index: &SharedIndex, args: &[VmValue]) -> Result<VmVa
 pub(super) fn run_deps_get(index: &SharedIndex, args: &[VmValue]) -> Result<VmValue, HostlibError> {
     let raw = dict_arg(BUILTIN_DEPS_GET, args)?;
     let dict = raw.as_ref();
-    let id = require_int(BUILTIN_DEPS_GET, dict, "file_id")? as FileId;
+    let id = require_positive_file_id(BUILTIN_DEPS_GET, dict, "file_id")?;
     let direction = optional_string(BUILTIN_DEPS_GET, dict, "direction")?
         .unwrap_or_else(|| "importers".to_string());
     let guard = index.lock().expect("code_index mutex poisoned");
@@ -608,7 +584,7 @@ pub(super) fn run_outline_get(
     args: &[VmValue],
 ) -> Result<VmValue, HostlibError> {
     let raw = dict_arg(BUILTIN_OUTLINE_GET, args)?;
-    let id = require_int(BUILTIN_OUTLINE_GET, raw.as_ref(), "file_id")? as FileId;
+    let id = require_positive_file_id(BUILTIN_OUTLINE_GET, raw.as_ref(), "file_id")?;
     let guard = index.lock().expect("code_index mutex poisoned");
     let symbols: Vec<VmValue> = match guard.as_ref().and_then(|s| s.files.get(&id)) {
         Some(file) => file
@@ -646,18 +622,8 @@ pub(super) fn run_changes_since(
 ) -> Result<VmValue, HostlibError> {
     let raw = dict_arg(BUILTIN_CHANGES_SINCE, args)?;
     let dict = raw.as_ref();
-    let seq = optional_int(BUILTIN_CHANGES_SINCE, dict, "seq", 0)?.max(0) as u64;
-    let limit = match dict.get("limit") {
-        None | Some(VmValue::Nil) => None,
-        Some(VmValue::Int(n)) => Some(*n as usize),
-        Some(other) => {
-            return Err(HostlibError::InvalidParameter {
-                builtin: BUILTIN_CHANGES_SINCE,
-                param: "limit",
-                message: format!("expected integer, got {}", other.type_name()),
-            })
-        }
-    };
+    let seq = optional_non_negative_u64(BUILTIN_CHANGES_SINCE, dict, "seq", 0)?;
+    let limit = optional_positive_usize(BUILTIN_CHANGES_SINCE, dict, "limit")?;
     let guard = index.lock().expect("code_index mutex poisoned");
     let records = match guard.as_ref() {
         Some(state) => state.versions.changes_since(seq, limit),
@@ -687,13 +653,13 @@ pub(super) fn run_version_record(
 ) -> Result<VmValue, HostlibError> {
     let raw = dict_arg(BUILTIN_VERSION_RECORD, args)?;
     let dict = raw.as_ref();
-    let agent_id = require_int(BUILTIN_VERSION_RECORD, dict, "agent_id")? as AgentId;
+    let agent_id = require_non_negative_u64(BUILTIN_VERSION_RECORD, dict, "agent_id")?;
     let path = require_string(BUILTIN_VERSION_RECORD, dict, "path")?;
     let op_str =
         optional_string(BUILTIN_VERSION_RECORD, dict, "op")?.unwrap_or_else(|| "write".to_string());
     let op = EditOp::parse(&op_str).unwrap_or(EditOp::Write);
     let hash = parse_hash(BUILTIN_VERSION_RECORD, dict, "hash")?;
-    let size = optional_int(BUILTIN_VERSION_RECORD, dict, "size", 0)?.max(0) as u64;
+    let size = optional_non_negative_u64(BUILTIN_VERSION_RECORD, dict, "size", 0)?;
     let now = now_unix_ms();
     let mut guard = index.lock().expect("code_index mutex poisoned");
     let state = ensure_state(BUILTIN_VERSION_RECORD, &mut guard)?;
@@ -715,17 +681,7 @@ pub(super) fn run_agent_register(
     let dict = raw.as_ref();
     let name = optional_string(BUILTIN_AGENT_REGISTER, dict, "name")?
         .unwrap_or_else(|| "agent".to_string());
-    let requested_id = match dict.get("agent_id") {
-        None | Some(VmValue::Nil) => None,
-        Some(VmValue::Int(n)) => Some(*n as AgentId),
-        Some(other) => {
-            return Err(HostlibError::InvalidParameter {
-                builtin: BUILTIN_AGENT_REGISTER,
-                param: "agent_id",
-                message: format!("expected integer, got {}", other.type_name()),
-            })
-        }
-    };
+    let requested_id = optional_positive_u64(BUILTIN_AGENT_REGISTER, dict, "agent_id")?;
     let now = now_unix_ms();
     let mut guard = index.lock().expect("code_index mutex poisoned");
     let state = ensure_state(BUILTIN_AGENT_REGISTER, &mut guard)?;
@@ -741,7 +697,7 @@ pub(super) fn run_agent_heartbeat(
     args: &[VmValue],
 ) -> Result<VmValue, HostlibError> {
     let raw = dict_arg(BUILTIN_AGENT_HEARTBEAT, args)?;
-    let id = require_int(BUILTIN_AGENT_HEARTBEAT, raw.as_ref(), "agent_id")? as AgentId;
+    let id = require_positive_u64(BUILTIN_AGENT_HEARTBEAT, raw.as_ref(), "agent_id")?;
     let now = now_unix_ms();
     let mut guard = index.lock().expect("code_index mutex poisoned");
     let state = ensure_state(BUILTIN_AGENT_HEARTBEAT, &mut guard)?;
@@ -754,7 +710,7 @@ pub(super) fn run_agent_unregister(
     args: &[VmValue],
 ) -> Result<VmValue, HostlibError> {
     let raw = dict_arg(BUILTIN_AGENT_UNREGISTER, args)?;
-    let id = require_int(BUILTIN_AGENT_UNREGISTER, raw.as_ref(), "agent_id")? as AgentId;
+    let id = require_positive_u64(BUILTIN_AGENT_UNREGISTER, raw.as_ref(), "agent_id")?;
     let mut guard = index.lock().expect("code_index mutex poisoned");
     let state = ensure_state(BUILTIN_AGENT_UNREGISTER, &mut guard)?;
     state.agents.unregister(id);
@@ -764,19 +720,9 @@ pub(super) fn run_agent_unregister(
 pub(super) fn run_lock_try(index: &SharedIndex, args: &[VmValue]) -> Result<VmValue, HostlibError> {
     let raw = dict_arg(BUILTIN_LOCK_TRY, args)?;
     let dict = raw.as_ref();
-    let agent_id = require_int(BUILTIN_LOCK_TRY, dict, "agent_id")? as AgentId;
+    let agent_id = require_positive_u64(BUILTIN_LOCK_TRY, dict, "agent_id")?;
     let path = require_string(BUILTIN_LOCK_TRY, dict, "path")?;
-    let ttl = match dict.get("ttl_ms") {
-        None | Some(VmValue::Nil) => None,
-        Some(VmValue::Int(n)) => Some(*n),
-        Some(other) => {
-            return Err(HostlibError::InvalidParameter {
-                builtin: BUILTIN_LOCK_TRY,
-                param: "ttl_ms",
-                message: format!("expected integer, got {}", other.type_name()),
-            })
-        }
-    };
+    let ttl = optional_positive_i64(BUILTIN_LOCK_TRY, dict, "ttl_ms")?;
     let now = now_unix_ms();
     let mut guard = index.lock().expect("code_index mutex poisoned");
     let state = ensure_state(BUILTIN_LOCK_TRY, &mut guard)?;
@@ -805,7 +751,7 @@ pub(super) fn run_lock_release(
 ) -> Result<VmValue, HostlibError> {
     let raw = dict_arg(BUILTIN_LOCK_RELEASE, args)?;
     let dict = raw.as_ref();
-    let agent_id = require_int(BUILTIN_LOCK_RELEASE, dict, "agent_id")? as AgentId;
+    let agent_id = require_positive_u64(BUILTIN_LOCK_RELEASE, dict, "agent_id")?;
     let path = require_string(BUILTIN_LOCK_RELEASE, dict, "path")?;
     let mut guard = index.lock().expect("code_index mutex poisoned");
     let state = ensure_state(BUILTIN_LOCK_RELEASE, &mut guard)?;
@@ -903,7 +849,12 @@ fn parse_hash(
 ) -> Result<u64, HostlibError> {
     match dict.get(key) {
         None | Some(VmValue::Nil) => Ok(0),
-        Some(VmValue::Int(n)) => Ok(*n as u64),
+        Some(VmValue::Int(n)) if *n >= 0 => Ok(*n as u64),
+        Some(VmValue::Int(n)) => Err(HostlibError::InvalidParameter {
+            builtin,
+            param: key,
+            message: format!("must be >= 0, got {n}"),
+        }),
         Some(VmValue::String(s)) => s
             .parse::<u64>()
             .map_err(|_| HostlibError::InvalidParameter {
@@ -919,6 +870,124 @@ fn parse_hash(
                 other.type_name()
             ),
         }),
+    }
+}
+
+fn require_positive_u64(
+    builtin: &'static str,
+    dict: &BTreeMap<String, VmValue>,
+    key: &'static str,
+) -> Result<u64, HostlibError> {
+    let raw = require_non_negative_u64(builtin, dict, key)?;
+    if raw == 0 {
+        return Err(HostlibError::InvalidParameter {
+            builtin,
+            param: key,
+            message: "must be >= 1".to_string(),
+        });
+    }
+    Ok(raw)
+}
+
+fn require_positive_file_id(
+    builtin: &'static str,
+    dict: &BTreeMap<String, VmValue>,
+    key: &'static str,
+) -> Result<FileId, HostlibError> {
+    let raw = require_positive_u64(builtin, dict, key)?;
+    FileId::try_from(raw).map_err(|_| HostlibError::InvalidParameter {
+        builtin,
+        param: key,
+        message: "does not fit in file id".to_string(),
+    })
+}
+
+fn require_non_negative_u64(
+    builtin: &'static str,
+    dict: &BTreeMap<String, VmValue>,
+    key: &'static str,
+) -> Result<u64, HostlibError> {
+    match dict.get(key) {
+        Some(VmValue::Int(n)) if *n >= 0 => Ok(*n as u64),
+        Some(VmValue::Float(f)) if f.fract() == 0.0 && *f >= 0.0 => Ok(*f as u64),
+        Some(VmValue::Int(n)) => Err(HostlibError::InvalidParameter {
+            builtin,
+            param: key,
+            message: format!("must be >= 0, got {n}"),
+        }),
+        Some(other) => Err(HostlibError::InvalidParameter {
+            builtin,
+            param: key,
+            message: format!("expected integer, got {}", other.type_name()),
+        }),
+        None => Err(HostlibError::MissingParameter {
+            builtin,
+            param: key,
+        }),
+    }
+}
+
+fn optional_positive_u64(
+    builtin: &'static str,
+    dict: &BTreeMap<String, VmValue>,
+    key: &'static str,
+) -> Result<Option<u64>, HostlibError> {
+    match dict.get(key) {
+        None | Some(VmValue::Nil) => Ok(None),
+        Some(_) => require_positive_u64(builtin, dict, key).map(Some),
+    }
+}
+
+fn optional_non_negative_u64(
+    builtin: &'static str,
+    dict: &BTreeMap<String, VmValue>,
+    key: &'static str,
+    default: u64,
+) -> Result<u64, HostlibError> {
+    match dict.get(key) {
+        None | Some(VmValue::Nil) => Ok(default),
+        Some(_) => require_non_negative_u64(builtin, dict, key),
+    }
+}
+
+fn optional_positive_i64(
+    builtin: &'static str,
+    dict: &BTreeMap<String, VmValue>,
+    key: &'static str,
+) -> Result<Option<i64>, HostlibError> {
+    match dict.get(key) {
+        None | Some(VmValue::Nil) => Ok(None),
+        Some(VmValue::Int(n)) if *n >= 1 => Ok(Some(*n)),
+        Some(VmValue::Float(f)) if f.fract() == 0.0 && *f >= 1.0 => Ok(Some(*f as i64)),
+        Some(VmValue::Int(n)) => Err(HostlibError::InvalidParameter {
+            builtin,
+            param: key,
+            message: format!("must be >= 1, got {n}"),
+        }),
+        Some(other) => Err(HostlibError::InvalidParameter {
+            builtin,
+            param: key,
+            message: format!("expected integer, got {}", other.type_name()),
+        }),
+    }
+}
+
+fn optional_positive_usize(
+    builtin: &'static str,
+    dict: &BTreeMap<String, VmValue>,
+    key: &'static str,
+) -> Result<Option<usize>, HostlibError> {
+    match optional_positive_u64(builtin, dict, key)? {
+        Some(value) => {
+            usize::try_from(value)
+                .map(Some)
+                .map_err(|_| HostlibError::InvalidParameter {
+                    builtin,
+                    param: key,
+                    message: "does not fit in usize".to_string(),
+                })
+        }
+        None => Ok(None),
     }
 }
 

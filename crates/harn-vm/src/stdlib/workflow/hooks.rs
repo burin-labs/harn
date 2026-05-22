@@ -21,10 +21,19 @@ pub(super) fn register_tool_hook_builtin(
         .map(|v| v.display())
         .unwrap_or_else(|| "*".to_string());
     let deny_reason = config.get("deny").map(|v| v.display());
-    let max_output = config.get("max_output").and_then(|v| match v {
-        VmValue::Int(n) => Some(*n as usize),
-        _ => None,
-    });
+    let max_output = config
+        .get("max_output")
+        .map(|v| match v {
+            VmValue::Int(n) if *n >= 0 => Ok(*n as usize),
+            VmValue::Int(_) => Err(VmError::Runtime(
+                "register_tool_hook: max_output must be >= 0".to_string(),
+            )),
+            other => Err(VmError::Runtime(format!(
+                "register_tool_hook: max_output must be an int, got {}",
+                other.type_name()
+            ))),
+        })
+        .transpose()?;
     let pre_handler = match config.get("pre") {
         Some(VmValue::Closure(closure)) => Some(closure.clone()),
         Some(VmValue::Nil) | None => None,
@@ -493,4 +502,32 @@ pub(super) async fn drain_file_edits_builtin(args: Vec<VmValue>) -> Result<VmVal
         paths.push(VmValue::String(Rc::from(edit.path)));
     }
     Ok(VmValue::List(Rc::new(paths)))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn dict(entries: &[(&str, VmValue)]) -> VmValue {
+        VmValue::Dict(Rc::new(
+            entries
+                .iter()
+                .map(|(key, value)| ((*key).to_string(), value.clone()))
+                .collect(),
+        ))
+    }
+
+    #[test]
+    fn register_tool_hook_rejects_negative_max_output() {
+        let mut out = String::new();
+        let err = register_tool_hook_builtin(
+            &[dict(&[
+                ("pattern", VmValue::String(Rc::from("*"))),
+                ("max_output", VmValue::Int(-1)),
+            ])],
+            &mut out,
+        )
+        .expect_err("negative max_output must fail");
+        assert!(err.to_string().contains("max_output"));
+    }
 }
