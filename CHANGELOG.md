@@ -35,6 +35,16 @@ condensed series summaries instead of full per-patch history.
   `cargo check -p A -p B ... --tests` once instead of looping
   N invocations, so cargo only resolves the dep graph and re-evaluates
   fingerprints once.
+- **CI: speed up the Windows Rust gate (compile+test ~8:29 → ~6:21 warm).**
+  Drop the `mozilla-actions/sccache-action` wrapper on the `windows-latest`
+  job. PR #2114 already documented a 0% hit rate on the harn-vm Windows
+  compile plus intermittent `os error 10054` failures from the GHA backend
+  dropping long rustc uploads; `build-release-binaries.yml` and
+  `release-smoke.yml` already skip sccache on Windows. Swatinem rust-cache
+  continues to warm `target/` across runs. Benchmarked on bench PRs
+  #2127/#2128/#2129: Windows compile+test step drops from ~8:29 warm to
+  ~6:21 warm. A paired `CARGO_PROFILE_DEV_DEBUG=line-tables-only` override
+  was tested and actually regressed compile time, so it is not applied.
 
 ## v0.8.31
 
