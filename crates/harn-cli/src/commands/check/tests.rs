@@ -9,11 +9,12 @@ use harn_parser::{Parser, SNode};
 use crate::package::CheckConfig;
 
 use super::bundle::build_bundle_manifest;
-use super::check_cmd::check_file_inner;
+use super::check_cmd::{check_file_inner, check_file_report};
 use super::config::collect_harn_targets;
 use super::config::{build_module_graph, collect_cross_file_imports};
 use super::host_capabilities::parse_host_capability_value;
 use super::lint::lint_file_inner;
+use super::lint_report::lint_file_report;
 use super::preflight::{collect_preflight_diagnostics, is_preflight_allowed};
 
 fn parse_program(source: &str) -> Vec<SNode> {
@@ -788,7 +789,9 @@ fn handler() {
     let files = vec![file.clone()];
     let module_graph = build_module_graph(&files);
     let cross_file_imports = collect_cross_file_imports(&module_graph);
+    let mut analysis = harn_parser::analysis::AnalysisDatabase::new();
     let outcome = check_file_inner(
+        &mut analysis,
         &file,
         &CheckConfig::default(),
         &cross_file_imports,
@@ -835,7 +838,9 @@ pipeline main() {
     let files = vec![file.clone()];
     let module_graph = build_module_graph(&files);
     let cross_file_imports = collect_cross_file_imports(&module_graph);
+    let mut analysis = harn_parser::analysis::AnalysisDatabase::new();
     let outcome = check_file_inner(
+        &mut analysis,
         &file,
         &CheckConfig::default(),
         &cross_file_imports,
@@ -869,7 +874,9 @@ fn handler() {
     let files = vec![file.clone()];
     let module_graph = build_module_graph(&files);
     let cross_file_imports = collect_cross_file_imports(&module_graph);
+    let mut analysis = harn_parser::analysis::AnalysisDatabase::new();
     let outcome = check_file_inner(
+        &mut analysis,
         &file,
         &CheckConfig::default(),
         &cross_file_imports,
@@ -903,7 +910,9 @@ fn _handler(client) {
     let files = vec![file.clone()];
     let module_graph = build_module_graph(&files);
     let cross_file_imports = collect_cross_file_imports(&module_graph);
+    let mut analysis = harn_parser::analysis::AnalysisDatabase::new();
     let outcome = check_file_inner(
+        &mut analysis,
         &file,
         &CheckConfig::default(),
         &cross_file_imports,
@@ -955,7 +964,9 @@ fn _handler() {
     let files = vec![file.clone()];
     let module_graph = build_module_graph(&files);
     let cross_file_imports = collect_cross_file_imports(&module_graph);
+    let mut analysis = harn_parser::analysis::AnalysisDatabase::new();
     let outcome = check_file_inner(
+        &mut analysis,
         &file,
         &CheckConfig::default(),
         &cross_file_imports,
@@ -1470,7 +1481,9 @@ pipeline main(task) {
     let files = vec![file.clone()];
     let module_graph = build_module_graph(&files);
     let cross_file_imports = collect_cross_file_imports(&module_graph);
+    let mut analysis = harn_parser::analysis::AnalysisDatabase::new();
     let outcome = lint_file_inner(
+        &mut analysis,
         &file,
         &CheckConfig::default(),
         &cross_file_imports,
@@ -1483,6 +1496,64 @@ pipeline main(task) {
         outcome.has_warning,
         "type-aware lint should surface through `harn lint`"
     );
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn check_and_lint_json_share_typecheck_cache() {
+    let dir = unique_temp_dir("harn-check-shared-analysis");
+    std::fs::create_dir_all(&dir).unwrap();
+    let file = dir.join("main.harn");
+    std::fs::write(
+        &file,
+        r#"
+pipeline main() {
+  let x = 1
+  log(x)
+}
+"#,
+    )
+    .unwrap();
+
+    let files = vec![file.clone()];
+    let module_graph = build_module_graph(&files);
+    let cross_file_imports = collect_cross_file_imports(&module_graph);
+    let mut analysis = harn_parser::analysis::AnalysisDatabase::new();
+    let config = CheckConfig::default();
+
+    let check_report = check_file_report(
+        &mut analysis,
+        &file,
+        &config,
+        &cross_file_imports,
+        &module_graph,
+        false,
+    );
+    assert!(matches!(
+        check_report.status,
+        super::check_cmd::CheckFileStatus::Ok
+    ));
+    let after_check = analysis.stats();
+
+    let lint_report = lint_file_report(
+        &mut analysis,
+        &file,
+        &config,
+        &cross_file_imports,
+        &module_graph,
+        false,
+        None,
+        &[],
+    );
+    assert!(matches!(
+        lint_report.status,
+        super::check_cmd::CheckFileStatus::Ok
+    ));
+    let after_lint = analysis.stats();
+
+    assert_eq!(after_check.typecheck_runs, 1);
+    assert_eq!(after_lint.typecheck_runs, 1);
+    assert_eq!(after_lint.parse_runs, after_check.parse_runs);
     let _ = std::fs::remove_dir_all(&dir);
 }
 

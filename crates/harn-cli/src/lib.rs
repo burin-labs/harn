@@ -394,6 +394,7 @@ async fn async_main() {
             }
             let module_graph = commands::check::build_module_graph(&files);
             let cross_file_imports = commands::check::collect_cross_file_imports(&module_graph);
+            let mut analysis = harn_parser::analysis::AnalysisDatabase::new();
             let mut should_fail = false;
             let mut json_files = Vec::new();
             for file in &files {
@@ -412,6 +413,7 @@ async fn async_main() {
                 }
                 if args.json {
                     let report = commands::check::check_file_report(
+                        &mut analysis,
                         file,
                         &config,
                         &cross_file_imports,
@@ -422,6 +424,7 @@ async fn async_main() {
                     json_files.push(report);
                 } else {
                     let outcome = commands::check::check_file_inner(
+                        &mut analysis,
                         file,
                         &config,
                         &cross_file_imports,
@@ -509,6 +512,7 @@ async fn async_main() {
             }
             let module_graph = commands::check::build_module_graph(&files);
             let cross_file_imports = commands::check::collect_cross_file_imports(&module_graph);
+            let mut analysis = harn_parser::analysis::AnalysisDatabase::new();
             if args.json {
                 // `--json` always reports without modifying source — `--fix`
                 // is intentionally orthogonal to structured output so agents
@@ -526,6 +530,7 @@ async fn async_main() {
                     let persona_step_allowlist =
                         commands::check::harn_lint_persona_step_allowlist(file);
                     let report = commands::check::lint_file_report(
+                        &mut analysis,
                         file,
                         &config,
                         &cross_file_imports,
@@ -570,6 +575,7 @@ async fn async_main() {
                     let persona_step_allowlist =
                         commands::check::harn_lint_persona_step_allowlist(file);
                     commands::check::lint_fix_file(
+                        &mut analysis,
                         file,
                         &config,
                         &cross_file_imports,
@@ -601,6 +607,7 @@ async fn async_main() {
                     let persona_step_allowlist =
                         commands::check::harn_lint_persona_step_allowlist(file);
                     let outcome = commands::check::lint_file_inner(
+                        &mut analysis,
                         file,
                         &config,
                         &cross_file_imports,

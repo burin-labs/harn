@@ -1,5 +1,7 @@
-use harn_lexer::Lexer;
-use harn_parser::{Parser, SNode, TypeChecker};
+use harn_parser::analysis::{
+    AnalysisDatabase, AnalysisError, SourceId, SourceVersion, TypeCheckConfig,
+};
+use harn_parser::SNode;
 use tower_lsp::lsp_types::*;
 
 use crate::helpers::{
@@ -9,6 +11,9 @@ use crate::symbols::{build_symbol_table, SymbolInfo};
 
 pub(crate) struct DocumentState {
     pub(crate) source: String,
+    analysis: AnalysisDatabase,
+    source_id: SourceId,
+    version: SourceVersion,
     pub(crate) cached_ast: Option<Vec<SNode>>,
     pub(crate) symbols: Vec<SymbolInfo>,
     pub(crate) diagnostics: Vec<Diagnostic>,
@@ -21,8 +26,14 @@ pub(crate) struct DocumentState {
 
 impl DocumentState {
     pub(crate) fn new(source: String) -> Self {
+        let mut analysis = AnalysisDatabase::new();
+        let source_id = SourceId::new("document");
+        analysis.set_source(source_id.clone(), source.clone(), SourceVersion(1));
         let mut state = Self {
             source,
+            analysis,
+            source_id,
+            version: SourceVersion(1),
             cached_ast: None,
             symbols: Vec::new(),
             diagnostics: Vec::new(),
@@ -38,6 +49,9 @@ impl DocumentState {
 
     pub(crate) fn update_source(&mut self, source: String) {
         self.source = source;
+        self.version = SourceVersion(self.version.0 + 1);
+        self.analysis
+            .set_source(self.source_id.clone(), self.source.clone(), self.version);
         self.dirty = true;
     }
 
@@ -54,32 +68,30 @@ impl DocumentState {
         self.symbols.clear();
         self.cached_ast = None;
 
-        let mut lexer = Lexer::new(&self.source);
-        let tokens = match lexer.tokenize() {
-            Ok(t) => t,
-            Err(e) => {
-                self.diagnostics.push(lexer_error_to_diagnostic(&e));
-                self.dirty = false;
-                return;
-            }
-        };
-
-        // Parse with recovery so every error surfaces, not just the first.
-        let mut parser = Parser::new(tokens);
-        let program = match parser.parse() {
-            Ok(p) => p,
-            Err(_) => {
-                for e in parser.all_errors() {
-                    self.diagnostics.push(parser_error_to_diagnostic(e));
+        let analysis = match self
+            .analysis
+            .typecheck(&self.source_id, TypeCheckConfig::new())
+        {
+            Ok(analysis) => analysis,
+            Err(error) => {
+                match error {
+                    AnalysisError::Lex { error, .. } => {
+                        self.diagnostics.push(lexer_error_to_diagnostic(&error));
+                    }
+                    AnalysisError::Parse { errors, .. } => {
+                        for error in &errors {
+                            self.diagnostics.push(parser_error_to_diagnostic(error));
+                        }
+                    }
+                    AnalysisError::MissingSource(_) => {}
                 }
                 self.dirty = false;
                 return;
             }
         };
-
-        // Source is required here so the checker can emit autofix text and inlay hints.
-        let (type_diags, inlay_hints) = TypeChecker::new().check_with_hints(&program, &self.source);
-        self.inlay_hints = inlay_hints;
+        let program = analysis.program;
+        let type_diags = analysis.diagnostics;
+        self.inlay_hints = analysis.inlay_hints;
         for diag in &type_diags {
             let severity = match diag.severity {
                 harn_parser::DiagnosticSeverity::Error => DiagnosticSeverity::ERROR,
@@ -177,6 +189,20 @@ mod tests {
             !state.diagnostics.is_empty(),
             "invalid source should produce diagnostics after reparse"
         );
+    }
+
+    #[test]
+    fn unchanged_document_reuses_analysis_cache() {
+        let mut state = DocumentState::new("pipeline default(task) { log(1) }\n".to_string());
+        let initial = state.analysis.stats();
+
+        state.update_source("pipeline default(task) { log(1) }\n".to_string());
+        state.reparse_if_dirty();
+
+        let after = state.analysis.stats();
+        assert_eq!(after.lex_runs, initial.lex_runs);
+        assert_eq!(after.parse_runs, initial.parse_runs);
+        assert_eq!(after.typecheck_runs, initial.typecheck_runs);
     }
 
     #[test]

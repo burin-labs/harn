@@ -3,14 +3,15 @@ use std::path::Path;
 use std::process;
 
 use harn_lint::LintSeverity;
-use harn_parser::{TypeChecker, TypeDiagnostic};
+use harn_parser::analysis::AnalysisDatabase;
 
 use crate::package::CheckConfig;
-use crate::parse_source_file;
 
+use super::analysis::{analyze_file, render_file_analysis_error_or_exit};
 use super::outcome::{print_lint_diagnostics, CommandOutcome};
 
 pub(crate) fn lint_file_inner(
+    analysis: &mut AnalysisDatabase,
     path: &Path,
     config: &CheckConfig,
     externally_imported_names: &HashSet<String>,
@@ -20,7 +21,10 @@ pub(crate) fn lint_file_inner(
     persona_step_allowlist: &[String],
 ) -> CommandOutcome {
     let path_str = path.to_string_lossy().into_owned();
-    let (source, program) = parse_source_file(&path_str);
+    let output = analyze_file(analysis, path, config, module_graph)
+        .unwrap_or_else(|error| render_file_analysis_error_or_exit(&path_str, error));
+    let source = output.source;
+    let program = output.program;
 
     let options = harn_lint::LintOptions {
         file_path: Some(path),
@@ -38,9 +42,8 @@ pub(crate) fn lint_file_inner(
         path,
         &options,
     );
-    let type_diags = type_check_for_lint(path, config, module_graph, &program, &source);
     diagnostics.extend(harn_lint::lint_diagnostics_from_type_diagnostics(
-        &type_diags,
+        &output.diagnostics,
         &config.disable_rules,
     ));
 
@@ -63,6 +66,7 @@ pub(crate) fn lint_file_inner(
 /// Apply autofix edits from lint and type-check diagnostics and write back to disk.
 /// Returns the number of fixes applied.
 pub(crate) fn lint_fix_file(
+    analysis: &mut AnalysisDatabase,
     path: &Path,
     config: &CheckConfig,
     externally_imported_names: &HashSet<String>,
@@ -72,7 +76,10 @@ pub(crate) fn lint_fix_file(
     persona_step_allowlist: &[String],
 ) -> usize {
     let path_str = path.to_string_lossy().into_owned();
-    let (source, program) = parse_source_file(&path_str);
+    let output = analyze_file(analysis, path, config, module_graph)
+        .unwrap_or_else(|error| render_file_analysis_error_or_exit(&path_str, error));
+    let source = output.source;
+    let program = output.program;
 
     let options = harn_lint::LintOptions {
         file_path: Some(path),
@@ -91,13 +98,12 @@ pub(crate) fn lint_fix_file(
         &options,
     );
 
-    let type_diags = type_check_for_lint(path, config, module_graph, &program, &source);
-
     let mut edits: Vec<&harn_lexer::FixEdit> = lint_diags
         .iter()
         .filter_map(|d| d.fix.as_ref())
         .chain(
-            type_diags
+            output
+                .diagnostics
                 .iter()
                 .filter(|d| !harn_lint::type_diagnostic_lint_disabled(d, &config.disable_rules))
                 .filter_map(|d| d.fix.as_ref()),
@@ -138,7 +144,10 @@ pub(crate) fn lint_fix_file(
 
     println!("{path_str}: applied {applied} fix(es)");
 
-    let (source2, program2) = parse_source_file(&path_str);
+    let output2 = analyze_file(analysis, path, config, module_graph)
+        .unwrap_or_else(|error| render_file_analysis_error_or_exit(&path_str, error));
+    let source2 = output2.source;
+    let program2 = output2.program;
     let mut remaining = harn_lint::lint_with_module_graph(
         &program2,
         &config.disable_rules,
@@ -148,9 +157,8 @@ pub(crate) fn lint_fix_file(
         path,
         &options,
     );
-    let type_remaining = type_check_for_lint(path, config, module_graph, &program2, &source2);
     remaining.extend(harn_lint::lint_diagnostics_from_type_diagnostics(
-        &type_remaining,
+        &output2.diagnostics,
         &config.disable_rules,
     ));
     if !remaining.is_empty() {
@@ -185,26 +193,6 @@ pub(crate) fn path_is_stdlib_source(path: &Path) -> bool {
         }
     }
     false
-}
-
-fn type_check_for_lint(
-    path: &Path,
-    config: &CheckConfig,
-    module_graph: &harn_modules::ModuleGraph,
-    program: &[harn_parser::SNode],
-    source: &str,
-) -> Vec<TypeDiagnostic> {
-    let mut checker = TypeChecker::with_strict_types(config.strict_types);
-    if let Some(imported) = module_graph.imported_names_for_file(path) {
-        checker = checker.with_imported_names(imported);
-    }
-    if let Some(imported) = module_graph.imported_type_declarations_for_file(path) {
-        checker = checker.with_imported_type_decls(imported);
-    }
-    if let Some(imported) = module_graph.imported_callable_declarations_for_file(path) {
-        checker = checker.with_imported_callable_decls(imported);
-    }
-    checker.check_with_source(program, source)
 }
 
 #[cfg(test)]
