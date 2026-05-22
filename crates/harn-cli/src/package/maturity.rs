@@ -321,7 +321,7 @@ pub(crate) fn audit_packages_in(
         });
     }
 
-    if let Err(error) = validate_lock_matches_manifest(&ctx, &lock) {
+    if let Err(error) = validate_lock_matches_manifest(workspace, &ctx, &lock) {
         findings.push(AuditFinding {
             alias: None,
             severity: AuditSeverity::Error,

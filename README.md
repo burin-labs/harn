@@ -263,6 +263,8 @@ defaults, safe, prompts, catalog).
   `harn package search`, `harn package info`, and
   `harn add @burin/<name>@<version>`, which resolve through the package
   index and then use the same git-backed install path as direct GitHub refs.
+  Manifests can also pin direct git tags with `tag = "v1.2.3"` or resolve
+  registry semver ranges with `version = "^1.2"`.
   `harn package list` and `harn package doctor` expose locked exports,
   permissions, host requirements, and materialized-package integrity for host
   UI and CI policy checks.

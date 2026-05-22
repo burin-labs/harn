@@ -5703,10 +5703,11 @@ leases, and `disable` records later events as dead-lettered.
 
 ```toml
 [dependencies]
-harn-openapi = { git = "https://github.com/burin-labs/harn-openapi", rev = "v1.2.3" }
-notion-sdk-harn = { git = "https://github.com/burin-labs/notion-sdk-harn", rev = "v1.2.3" }
-notion-connector-harn = { git = "https://github.com/burin-labs/notion-connector-harn", rev = "v1.2.3" }
-notion = { git = "https://github.com/burin-labs/notion-sdk-harn", rev = "v1.2.3", package = "notion-sdk-harn" }
+sdk = { version = "^1.2", registry_name = "@burin/notion-sdk", package = "notion-sdk-harn" }
+harn-openapi = { git = "https://github.com/burin-labs/harn-openapi", tag = "v1.2.3" }
+notion-sdk-harn = { git = "https://github.com/burin-labs/notion-sdk-harn", tag = "v1.2.3" }
+notion-connector-harn = { git = "https://github.com/burin-labs/notion-connector-harn", tag = "v1.2.3" }
+notion = { git = "https://github.com/burin-labs/notion-sdk-harn", tag = "v1.2.3", package = "notion-sdk-harn" }
 openapi = { git = "https://github.com/burin-labs/harn-openapi", branch = "main" }
 local-fixture = { path = "../fixture-lib" }
 ```
@@ -5718,10 +5719,17 @@ resolve without filesystem-relative hacks.
 - The table key is the local import alias.
 - `git` accepts HTTPS, SSH, `file://`, local-repo paths, and GitHub-style
   shorthand URLs.
-- Git dependencies must specify either `rev` or `branch`.
-- `rev` pins a tag, symbolic ref, or full commit SHA in the manifest.
+- Git dependencies must specify exactly one of `tag`, `rev`, or `branch`.
+- `tag` pins a git tag in the manifest and lockfile.
+- `rev` pins a symbolic ref or full commit SHA in the manifest.
 - `branch` records a moving ref in the manifest, but `harn.lock` still
   pins one resolved commit for reproducible installs.
+- `version` resolves through the configured registry index, selects the
+  highest unyanked semver version matching the range, and then clones the
+  git `tag`, `rev`, or `branch` recorded for that registry version.
+- `registry_name` records the registry-side package name when it differs
+  from the local import alias. Omit it for unscoped registry names that
+  match the alias.
 - `package` documents the upstream package name when the local alias
   differs from the repository name.
 - `path` installs a local directory or `.harn` file without using the
@@ -5911,6 +5919,19 @@ writes the equivalent `[dependencies]` git table, updates `harn.lock`,
 and materializes the same `.harn/packages/<package>/` tree that a direct
 GitHub install would use.
 
+Manifests may also keep a registry dependency semantic:
+
+```toml
+[dependencies]
+notion-sdk-harn = { version = "^1.2" }
+notion = { version = ">=1.2,<2.0", registry_name = "@burin/notion-sdk", package = "notion-sdk-harn" }
+```
+
+`harn install` records the selected exact registry version, resolved git tag
+when present, commit SHA, and content hash in `harn.lock`. Frozen/offline
+installs reuse that lock entry and local git cache without querying the
+registry index again.
+
 ```toml
 [registry]
 url = "https://packages.harnlang.com/index.toml"
@@ -5936,7 +5957,7 @@ provenance = "https://github.com/burin-labs/notion-sdk-harn/releases/tag/v1.2.3"
 [[package.version]]
 version = "1.2.3"
 git = "https://github.com/burin-labs/notion-sdk-harn"
-rev = "v1.2.3"
+tag = "v1.2.3"
 package = "notion-sdk-harn"
 checksum = "sha256:..."
 provenance = "https://github.com/burin-labs/notion-sdk-harn/releases/tag/v1.2.3"
@@ -5946,17 +5967,19 @@ Package-level metadata includes the registry name, version list,
 description, repository, license, Harn compatibility range, exported
 modules, connector contract compatibility, docs URL, and optional
 checksum/provenance fields. Version entries must specify `git` plus
-either `rev` or `branch`; `rev` is preferred for reproducible installs.
+exactly one of `tag`, `rev`, or `branch`; `tag` or `rev` is preferred for
+reproducible installs.
 
 Use registry names when developers should discover first-party or
 community packages by capability and stable name. Use direct GitHub refs
 for local dogfood, private repositories, unreleased commits, or temporary
 pins that are not ready for the shared index.
 
-`harn.lock` is a typed TOML file with `version = 3` and one `[[package]]`
+`harn.lock` is a typed TOML file with `version = 4` and one `[[package]]`
 entry per dependency. Each git entry records:
 
 - `source`
+- `tag`, when the dependency resolved through a git tag
 - `rev_request`
 - `commit`
 - `content_hash`
