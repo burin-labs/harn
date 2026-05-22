@@ -530,6 +530,21 @@ pub(crate) fn read_registry_source(source: &str) -> Result<String, PackageError>
         "http" | "https" => {}
         other => return Err(format!("unsupported package registry URL scheme: {other}").into()),
     }
+    // `reqwest::blocking` builds its own current-thread tokio runtime and
+    // panics if dropped from inside an already-running tokio runtime — which
+    // is exactly what `harn add` / `harn install` do today. Hop onto a fresh
+    // OS thread so the blocking client's lifetime is fully outside any
+    // ambient runtime.
+    let source_owned = source.to_string();
+    std::thread::scope(|scope| {
+        scope
+            .spawn(move || fetch_registry_blocking(url, &source_owned))
+            .join()
+            .map_err(|_| PackageError::Registry("registry fetch thread panicked".to_string()))?
+    })
+}
+
+fn fetch_registry_blocking(url: Url, source: &str) -> Result<String, PackageError> {
     let response = reqwest::blocking::Client::builder()
         .timeout(Duration::from_secs(20))
         .build()
@@ -804,16 +819,45 @@ fn normalize_partial_version(raw: &str) -> String {
     trimmed.to_string()
 }
 
+/// Look up a registry package by either its scoped registry name
+/// (`@burin/notion-sdk`) or any `[[package.version]].package` alias
+/// (`notion-sdk-harn`). Bare-name lookup falls back to the alias so
+/// `harn add notion-sdk-harn@0.1.0` works the same as the scoped form.
+fn lookup_registry_package<'a>(
+    index: &'a PackageRegistryIndex,
+    name: &str,
+) -> Result<&'a RegistryPackage, PackageError> {
+    if let Some(package) = index.packages.iter().find(|package| package.name == name) {
+        return Ok(package);
+    }
+    let matches: Vec<&RegistryPackage> = index
+        .packages
+        .iter()
+        .filter(|package| {
+            package
+                .versions
+                .iter()
+                .any(|entry| entry.package.as_deref() == Some(name))
+        })
+        .collect();
+    match matches.as_slice() {
+        [package] => Ok(package),
+        [] => Err(format!("package registry does not contain {name}").into()),
+        many => Err(format!(
+            "package alias {name} is ambiguous in the registry — found {} packages; use the scoped name (e.g. {})",
+            many.len(),
+            many[0].name,
+        )
+        .into()),
+    }
+}
+
 pub(crate) fn find_registry_package_version(
     index: &PackageRegistryIndex,
     name: &str,
     version: Option<&str>,
 ) -> Result<RegistryPackageInfo, PackageError> {
-    let package = index
-        .packages
-        .iter()
-        .find(|package| package.name == name)
-        .ok_or_else(|| format!("package registry does not contain {name}"))?;
+    let package = lookup_registry_package(index, name)?;
     let selected_version = match version {
         Some(version) => Some(
             package
@@ -836,11 +880,7 @@ pub(crate) fn find_registry_package_version_matching(
     name: &str,
     requirement: &str,
 ) -> Result<RegistryPackageInfo, PackageError> {
-    let package = index
-        .packages
-        .iter()
-        .find(|package| package.name == name)
-        .ok_or_else(|| format!("package registry does not contain {name}"))?;
+    let package = lookup_registry_package(index, name)?;
     let req = parse_registry_version_req(requirement)?;
     let selected_version = package
         .versions
@@ -918,7 +958,15 @@ pub(crate) fn registry_dependency_from_spec_in(
         .into());
     };
     let registry_source = workspace.resolve_registry_source(registry)?;
-    let info = package_registry_info_in(workspace, &format!("{name}@{version}"), registry)?;
+    let (_, index) = load_package_registry_in(workspace, registry)?;
+    // Accept both exact versions (`@1.2.3`) and semver constraints
+    // (`@^0.1`, `@~1.4`, `@>=1,<2`). The latter resolve to the highest
+    // matching unyanked entry.
+    let info = if is_exact_semver(version) {
+        find_registry_package_version(&index, name, Some(version))?
+    } else {
+        find_registry_package_version_matching(&index, name, version)?
+    };
     let selected = info
         .selected_version
         .ok_or_else(|| format!("package registry does not contain {name}@{version}"))?;
@@ -934,6 +982,7 @@ pub(crate) fn registry_dependency_from_spec_in(
     let alias = alias.unwrap_or(package_name.as_str()).to_string();
     let tag = selected.tag;
     let rev = if tag.is_some() { None } else { selected.rev };
+    let resolved_version = selected.version.clone();
     Ok((
         alias.clone(),
         Dependency::Table(Box::new(DepTable {
@@ -943,11 +992,18 @@ pub(crate) fn registry_dependency_from_spec_in(
             branch: selected.branch,
             package: (alias != package_name).then_some(package_name),
             registry: Some(registry_source),
-            registry_name: Some(name.to_string()),
-            registry_version: Some(version.to_string()),
+            // Store the canonical scoped registry name (e.g. `@burin/notion-sdk`)
+            // even when the user typed the bare alias (`notion-sdk-harn`) so
+            // re-resolves stay anchored to the same registry row.
+            registry_name: Some(info.package.name.clone()),
+            registry_version: Some(resolved_version),
             ..DepTable::default()
         })),
     ))
+}
+
+fn is_exact_semver(spec: &str) -> bool {
+    parse_registry_semver(spec).is_ok()
 }
 
 pub(crate) fn registry_dependency_from_manifest_constraint_in(
@@ -1178,12 +1234,32 @@ pub(crate) fn resolve_git_commit(
         .into());
     }
     let stdout = String::from_utf8_lossy(&output.stdout);
-    let commit = stdout
+    pick_ls_remote_commit(&stdout)
+        .map(str::to_string)
+        .ok_or_else(|| format!("could not resolve {requested} from {url}").into())
+}
+
+/// Pick the commit SHA from `git ls-remote` output.
+///
+/// Annotated tags surface as two refs: `refs/tags/X` (the tag object) and
+/// `refs/tags/X^{}` (the commit the tag points at). Prefer the peeled form so
+/// the lockfile records the commit SHA, not the tag-object SHA — checking out
+/// the tag object still recovers the commit, but the SHA recorded in the lock
+/// is less surprising and round-trips through normal git commands.
+fn pick_ls_remote_commit(stdout: &str) -> Option<&str> {
+    let parsed: Vec<(&str, &str)> = stdout
         .lines()
-        .filter_map(|line| line.split_whitespace().next())
-        .find(|value| is_full_git_sha(value))
-        .ok_or_else(|| format!("could not resolve {requested} from {url}"))?;
-    Ok(commit.to_string())
+        .filter_map(|line| {
+            let mut parts = line.split_whitespace();
+            let sha = parts.next()?;
+            let refname = parts.next().unwrap_or("");
+            is_full_git_sha(sha).then_some((sha, refname))
+        })
+        .collect();
+    parsed
+        .iter()
+        .find_map(|(sha, refname)| refname.ends_with("^{}").then_some(*sha))
+        .or_else(|| parsed.first().map(|(sha, _)| *sha))
 }
 
 pub(crate) fn clone_git_commit_to(
@@ -1799,6 +1875,35 @@ mod tests {
     use crate::package::test_support::*;
 
     #[test]
+    fn pick_ls_remote_commit_prefers_peeled_tag_over_tag_object() {
+        // Real-world example from notion-sdk-harn v0.1.0: the tag is
+        // annotated, so ls-remote returns both the tag-object SHA and the
+        // commit it points at.
+        let output = "\
+963b6e8acfdf030a9b922bc5a73e010758ff47da\trefs/tags/v0.1.0\n\
+bad580c5fbe8ede612b2748ad98606642ce2fc02\trefs/tags/v0.1.0^{}\n";
+        assert_eq!(
+            pick_ls_remote_commit(output),
+            Some("bad580c5fbe8ede612b2748ad98606642ce2fc02"),
+        );
+    }
+
+    #[test]
+    fn pick_ls_remote_commit_falls_back_to_first_match_for_lightweight_tags() {
+        let output = "\
+abc123abc123abc123abc123abc123abc1234567\trefs/tags/v0.0.1\n";
+        assert_eq!(
+            pick_ls_remote_commit(output),
+            Some("abc123abc123abc123abc123abc123abc1234567"),
+        );
+    }
+
+    #[test]
+    fn pick_ls_remote_commit_returns_none_on_empty_output() {
+        assert_eq!(pick_ls_remote_commit(""), None);
+    }
+
+    #[test]
     fn compute_content_hash_ignores_git_and_hash_marker() {
         let tmp = tempfile::tempdir().unwrap();
         let root = tmp.path();
@@ -2037,6 +2142,55 @@ mod tests {
             .join("acme-lib")
             .join("lib.harn")
             .is_file());
+    }
+
+    #[test]
+    fn add_registry_dependency_accepts_bare_alias_and_semver_range() {
+        // Covers the literal acceptance from the free-tier package-manager
+        // epic (harn#2157): `harn add notion-sdk-harn@^0.1` should resolve
+        // even though the registry-side name is `@burin/notion-sdk`.
+        let (_repo_tmp, repo, _branch) = create_git_package_repo();
+        let project_tmp = tempfile::tempdir().unwrap();
+        let root = project_tmp.path();
+        let registry_path = root.join("index.toml");
+        let workspace =
+            TestWorkspace::new(root).with_registry_source(registry_path.display().to_string());
+        let git = normalize_git_url(repo.to_string_lossy().as_ref()).unwrap();
+        write_package_registry_index(&registry_path, "@burin/acme-lib", &git, "acme-lib");
+        fs::create_dir_all(root.join(".git")).unwrap();
+        fs::write(
+            root.join(MANIFEST),
+            r#"
+    [package]
+    name = "workspace"
+    version = "0.1.0"
+    "#,
+        )
+        .unwrap();
+
+        // Bare alias + semver range. Highest matching unyanked version wins.
+        add_package_to(
+            workspace.env(),
+            "acme-lib@^1",
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+        )
+        .unwrap();
+
+        let manifest = fs::read_to_string(root.join(MANIFEST)).unwrap();
+        assert!(
+            manifest.contains("registry_name = \"@burin/acme-lib\""),
+            "bare-alias add must record the canonical scoped registry name: {manifest}"
+        );
+        assert!(
+            manifest.contains("registry_version = \"1.0.0\""),
+            "semver range must resolve to the highest matching exact version: {manifest}"
+        );
     }
 
     #[test]
