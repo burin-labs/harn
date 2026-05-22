@@ -101,7 +101,6 @@ pipeline main(task) {
 }
 
 #[test]
-#[ignore = "tool_format claim/contract enforcement not yet wired through Harn-driven loop — tracked in #1236"]
 fn agent_loop_rejects_tool_format_switch_on_same_session() {
     let lines = out(r#"
 pipeline main(task) {

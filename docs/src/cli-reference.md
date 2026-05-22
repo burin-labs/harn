@@ -271,6 +271,7 @@ harn test conformance tests/stdlib/     # run a conformance subtree
 harn test tests/                       # run user tests in directory
 harn test tests/ --filter "auth*"      # filter by pattern
 harn test tests/ --parallel            # run tests concurrently
+harn test tests/ --parallel --timing   # show progress and slowest tests/files
 harn test tests/ --watch               # re-run on file changes
 harn test conformance --verbose        # show per-test timing
 harn test conformance --timing         # show timing summary without verbose failures

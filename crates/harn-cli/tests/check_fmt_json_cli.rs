@@ -1,6 +1,7 @@
 //! End-to-end coverage for `harn check --json` and `harn fmt --json`.
 
-use std::process::Command;
+use std::io::{BufRead, BufReader};
+use std::process::{Command, Stdio};
 
 use harn_cli::tests::common::json_envelope::assert_envelope;
 
@@ -96,6 +97,45 @@ fn check_json_reports_success_and_diagnostics() {
             .iter()
             .any(|diag| diag["code"].as_str().unwrap_or("").starts_with("HARN-TYP-")),
         "expected a type diagnostic: {parsed}"
+    );
+}
+
+#[test]
+fn check_json_exits_successfully_when_stdout_consumer_closes_early() {
+    let temp = tempfile::TempDir::new().expect("tempdir");
+    for index in 0..300 {
+        let script = temp.path().join(format!("case_{index:03}.harn"));
+        std::fs::write(
+            &script,
+            format!("pipeline main(task) {{\n  return {index}\n}}\n"),
+        )
+        .expect("write script");
+    }
+
+    let mut child = Command::new(binary_path())
+        .args(["check", "--json", temp.path().to_str().unwrap()])
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .expect("spawn harn check --json");
+
+    let stdout = child.stdout.take().expect("stdout pipe");
+    let mut reader = BufReader::new(stdout);
+    let mut first_line = String::new();
+    reader.read_line(&mut first_line).expect("read first line");
+    drop(reader);
+
+    let output = child.wait_with_output().expect("wait for harn check");
+    assert!(
+        output.status.success(),
+        "consumer-close should be a clean exit\nstatus: {}\nstderr:\n{}",
+        output.status,
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        !stderr.contains("failed printing to stdout"),
+        "broken pipe panic leaked to stderr:\n{stderr}"
     );
 }
 
