@@ -8,6 +8,20 @@ condensed series summaries instead of full per-patch history.
 
 ## Unreleased
 
+### Added
+
+- **`harn test --junit`/`--json-out` now produce reports for user Harn
+  tests (#2146).** The CLI accepted both flags before but silently
+  dropped them outside the conformance path, leaving CI and perf-audit
+  consumers parsing colourised terminal output. The writer is now shared
+  across user tests and conformance: a `<testsuites>`-wrapped JUnit XML
+  with `classname`/`file` attributes for each case, and a versioned JSON
+  report (schemaVersion 1) with per-case `name`/`file`/`classname`/
+  `outcome`/`duration_ms` plus suite-level `summary`. A missing or
+  unwritable report directory now fails the run with a clear diagnostic
+  instead of succeeding silently. `--watch` rejects both flags up-front
+  since the watch loop never terminates.
+
 ### Fixed
 
 - **`harn fix` now finishes recursive migrations with invalid fixtures
