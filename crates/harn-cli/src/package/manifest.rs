@@ -738,7 +738,7 @@ pub struct PackageSkillExport {
 #[derive(Debug, Clone, Deserialize)]
 #[serde(untagged)]
 pub enum Dependency {
-    Table(DepTable),
+    Table(Box<DepTable>),
     Path(String),
 }
 
@@ -748,6 +748,7 @@ pub struct DepTable {
     pub tag: Option<String>,
     pub rev: Option<String>,
     pub branch: Option<String>,
+    pub version: Option<String>,
     pub path: Option<String>,
     pub package: Option<String>,
     /// Registry index URL/path the dependency was originally added from.
@@ -775,7 +776,14 @@ impl Dependency {
 
     pub(crate) fn rev(&self) -> Option<&str> {
         match self {
-            Dependency::Table(t) => t.rev.as_deref().or(t.tag.as_deref()),
+            Dependency::Table(t) => t.rev.as_deref(),
+            Dependency::Path(_) => None,
+        }
+    }
+
+    pub(crate) fn tag(&self) -> Option<&str> {
+        match self {
+            Dependency::Table(t) => t.tag.as_deref(),
             Dependency::Path(_) => None,
         }
     }
@@ -785,6 +793,17 @@ impl Dependency {
             Dependency::Table(t) => t.branch.as_deref(),
             Dependency::Path(_) => None,
         }
+    }
+
+    pub(crate) fn version(&self) -> Option<&str> {
+        match self {
+            Dependency::Table(t) => t.version.as_deref(),
+            Dependency::Path(_) => None,
+        }
+    }
+
+    pub(crate) fn requires_git(&self) -> bool {
+        self.git_url().is_some() || self.version().is_some()
     }
 
     pub(crate) fn local_path(&self) -> Option<&str> {

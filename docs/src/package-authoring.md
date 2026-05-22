@@ -166,7 +166,7 @@ name = "review"
 path = "skills/review"
 
 [dependencies]
-json-helpers = { git = "https://github.com/acme/json-helpers", rev = "v0.1.0" }
+json-helpers = { git = "https://github.com/acme/json-helpers", tag = "v0.1.0" }
 ```
 
 `harn package check` validates required metadata, dependency declarations,
@@ -177,7 +177,10 @@ Harn module, provide valid JSON-schema-shaped `input_schema` and
 runtime tool annotation schema. Skill declarations must stay inside the package
 root and point at a directory with valid `SKILL.md` front matter. Publish
 readiness rejects path-only dependencies and unsupported Harn version ranges
-because they cannot be reproduced from a registry index.
+because they cannot be reproduced from a registry index. Publishable
+dependencies should use direct git `tag`/`rev` pins or registry `version`
+ranges; `branch` dependencies are accepted with a warning because they are
+moving refs.
 
 ## API docs
 
@@ -230,15 +233,18 @@ write captures:
   top level so downstream automation can detect when the lock was produced
   by an older Harn line.
 - Per-entry `source`, `commit`, and `content_hash` for git/registry deps,
-  plus `package_version`, `harn_compat`, package `provenance`, and a separate
-  `manifest_digest` taken from the resolved package's `harn.toml`.
+  plus the resolved `tag` when a tag was used, `package_version`,
+  `harn_compat`, package `provenance`, and a separate `manifest_digest` taken
+  from the resolved package's `harn.toml`.
 - Exported modules, custom tools, skills, package permissions, and host
   requirements declared by the resolved package. Hosts and CI can inspect this
   metadata without reading arbitrary package source.
-- A `[package.registry]` table for entries originally added via
-  `harn add @scope/name@version`, preserving the registry source, package
-  name, and requested version so `harn package outdated` can compare
-  against the registry's latest release without re-reading the manifest.
+- A `[package.registry]` table for entries originally resolved through the
+  registry, preserving the registry source, package name, and exact resolved
+  version so `harn package outdated` can compare against the registry's latest
+  release without re-reading the manifest. Registry dependencies may remain in
+  `harn.toml` as semver ranges, for example
+  `notion-sdk-harn = { version = ">=1.2,<2.0" }`.
 
 Path dependencies remain live-linked; their lockfile entry records the
 resolved `path+file://` URI plus the same `package_version` and

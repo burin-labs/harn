@@ -1920,16 +1920,18 @@ Add a dependency to `harn.toml`.
 harn add github.com/burin-labs/harn-openapi@v1.2.3
 harn add @burin/notion-sdk@1.2.3
 harn add @burin/notion-sdk@1.2.3 --registry ./harn-package-index.toml
+harn add https://github.com/user/my-lib --alias my-lib --tag v1.2.3
 harn add https://github.com/user/my-lib --alias my-lib --rev v1.2.3
 harn add https://github.com/user/my-lib --alias my-lib --branch main
-harn add my-lib --git https://github.com/user/my-lib --rev v1.2.3   # legacy form
+harn add my-lib --git https://github.com/user/my-lib --tag v1.2.3   # legacy form
 ```
 
-Git dependencies must specify a stable `rev` or an explicit `branch`.
-`harn.lock` records the resolved commit and content hash used for
-reproducible installs. Registry-name dependencies resolve through the
-package index and then write the same git dependency shape as direct
-GitHub installs.
+Git dependencies must specify a stable `tag`/`rev` or an explicit `branch`.
+`harn.lock` records the resolved tag when present, commit, and content hash
+used for reproducible installs. Registry-name dependencies resolve through the
+package index and then write the same git dependency shape as direct GitHub
+installs; hand-authored manifests may also use registry semver ranges such as
+`my-lib = { version = "^1.2" }`.
 
 ## harn install
 

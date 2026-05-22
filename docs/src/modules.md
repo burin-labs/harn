@@ -1470,8 +1470,8 @@ can import sibling packages through the workspace-level `.harn/packages`
 root instead of relying on brittle relative paths.
 
 `harn add`, `harn install`, and `harn lock` populate
-`.harn/packages/` from `harn.lock`. Git dependencies must specify `rev`
-or `branch`; Harn resolves them to commits, records content hashes, caches
+`.harn/packages/` from `harn.lock`. Git dependencies must specify `tag`,
+`rev`, or `branch`; Harn resolves them to commits, records content hashes, caches
 them under the user cache directory, and copies them back into the
 workspace as needed. Package dependencies are flattened into the same
 workspace package root, so a connector package can import an SDK package
@@ -1494,6 +1494,24 @@ refs remain the right choice for private repos, unreleased commits,
 temporary pins, and local dogfood before a package is added to the
 shared index.
 
+Registry-backed manifest entries can stay semantic instead of lowering to a
+git table by using `version`:
+
+```toml
+[registry]
+url = "./harn-package-index.toml"
+
+[dependencies]
+notion-sdk-harn = { version = "^1.2" }
+notion = { version = ">=1.2,<2.0", registry_name = "@burin/notion-sdk", package = "notion-sdk-harn" }
+```
+
+`harn install` selects the highest unyanked semver version that matches the
+range, clones the git tag/rev/branch recorded by the registry index, and pins
+the resolved commit plus content hash in `harn.lock`. Frozen/offline installs
+reuse that lock entry and the local package cache without querying the
+registry again.
+
 Canonical bootstrap for first-party packages:
 
 ```bash
@@ -1511,9 +1529,9 @@ Equivalent manifest entries:
 
 ```toml
 [dependencies]
-harn-openapi = { git = "https://github.com/burin-labs/harn-openapi", rev = "v1.2.3" }
-notion-sdk-harn = { git = "https://github.com/burin-labs/notion-sdk-harn", rev = "v1.2.3" }
-notion-connector-harn = { git = "https://github.com/burin-labs/notion-connector-harn", rev = "v1.2.3" }
+harn-openapi = { git = "https://github.com/burin-labs/harn-openapi", tag = "v1.2.3" }
+notion-sdk-harn = { git = "https://github.com/burin-labs/notion-sdk-harn", tag = "v1.2.3" }
+notion-connector-harn = { git = "https://github.com/burin-labs/notion-connector-harn", tag = "v1.2.3" }
 ```
 
 Installed package code is importable, but package manifests do not

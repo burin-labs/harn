@@ -1,5 +1,6 @@
 use super::errors::PackageError;
 use super::*;
+use semver::{Version, VersionReq};
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub(crate) struct PackageCacheMetadata {
@@ -46,9 +47,9 @@ pub(crate) struct RegistryPackageVersion {
     version: String,
     git: String,
     #[serde(default)]
-    rev: Option<String>,
-    #[serde(default)]
     tag: Option<String>,
+    #[serde(default)]
+    rev: Option<String>,
     #[serde(default)]
     sha: Option<String>,
     #[serde(default)]
@@ -70,10 +71,7 @@ pub(crate) struct RegistryPackageInfo {
 }
 
 pub(crate) fn manifest_has_git_dependencies(manifest: &Manifest) -> bool {
-    manifest
-        .dependencies
-        .values()
-        .any(|dependency| dependency.git_url().is_some())
+    manifest.dependencies.values().any(Dependency::requires_git)
 }
 
 pub(crate) fn ensure_git_available() -> Result<(), PackageError> {
@@ -661,13 +659,19 @@ pub(crate) fn validate_package_registry_index(
                 )
                 .into());
             }
-            if version.rev.is_none() && version.branch.is_none() {
+            if selected_git_ref_count(version) != 1 {
                 return Err(format!(
-                    "package registry {source} entry '{}@{}' must specify rev or branch",
+                    "package registry {source} entry '{}@{}' must specify tag, rev, or branch; rev may accompany tag as a resolved commit pin",
                     package.name, version.version
                 )
                 .into());
             }
+            parse_registry_semver(&version.version).map_err(|error| {
+                format!(
+                    "package registry {source} has invalid semver for '{}@{}': {error}",
+                    package.name, version.version
+                )
+            })?;
             normalize_git_url(&version.git).map_err(|error| {
                 format!(
                     "package registry {source} has invalid git source for '{}@{}': {error}",
@@ -680,6 +684,12 @@ pub(crate) fn validate_package_registry_index(
         .packages
         .sort_by(|left, right| left.name.cmp(&right.name));
     Ok(())
+}
+
+fn selected_git_ref_count(version: &RegistryPackageVersion) -> usize {
+    usize::from(version.tag.is_some())
+        + usize::from(version.tag.is_none() && version.rev.is_some())
+        + usize::from(version.branch.is_some())
 }
 
 pub(crate) fn load_package_registry_in(
@@ -715,8 +725,14 @@ pub(crate) fn latest_registry_version(
     package
         .versions
         .iter()
-        .rev()
-        .find(|version| !version.yanked)
+        .filter(|version| !version.yanked)
+        .filter_map(|version| {
+            parse_registry_semver(&version.version)
+                .ok()
+                .map(|semver| (semver, version))
+        })
+        .max_by(|(left, _), (right, _)| left.cmp(right))
+        .map(|(_, version)| version)
 }
 
 impl PackageRegistryIndex {
@@ -736,6 +752,56 @@ impl PackageRegistryIndex {
             .flat_map(|package| package.versions.iter())
             .any(|entry| entry.version == version && entry.yanked)
     }
+}
+
+pub(crate) fn parse_registry_semver(raw: &str) -> Result<Version, PackageError> {
+    Version::parse(raw.trim().trim_start_matches('v'))
+        .map_err(|error| PackageError::Registry(error.to_string()))
+}
+
+pub(crate) fn parse_registry_version_req(raw: &str) -> Result<VersionReq, PackageError> {
+    VersionReq::parse(&normalize_registry_version_req(raw)).map_err(|error| {
+        PackageError::Registry(format!("invalid version requirement {raw:?}: {error}"))
+    })
+}
+
+fn normalize_registry_version_req(raw: &str) -> String {
+    raw.split(',')
+        .map(|part| normalize_version_req_part(part.trim()))
+        .collect::<Vec<_>>()
+        .join(",")
+}
+
+fn normalize_version_req_part(part: &str) -> String {
+    for op in ["<=", ">=", "!=", "=", "<", ">", "^", "~"] {
+        if let Some(rest) = part.strip_prefix(op) {
+            return format!("{op}{}", normalize_partial_version(rest.trim()));
+        }
+    }
+    normalize_partial_version(part)
+}
+
+fn normalize_partial_version(raw: &str) -> String {
+    let trimmed = raw.trim().trim_start_matches('v');
+    if trimmed == "*" || trimmed.eq_ignore_ascii_case("x") {
+        return trimmed.to_string();
+    }
+    let (core, suffix) = trimmed
+        .find(['-', '+'])
+        .map(|index| (&trimmed[..index], &trimmed[index..]))
+        .unwrap_or((trimmed, ""));
+    let mut parts = core.split('.').collect::<Vec<_>>();
+    if (1..=2).contains(&parts.len())
+        && parts
+            .iter()
+            .all(|part| !part.is_empty() && part.bytes().all(|byte| byte.is_ascii_digit()))
+    {
+        while parts.len() < 3 {
+            parts.push("0");
+        }
+        return format!("{}{}", parts.join("."), suffix);
+    }
+    trimmed.to_string()
 }
 
 pub(crate) fn find_registry_package_version(
@@ -762,6 +828,38 @@ pub(crate) fn find_registry_package_version(
     Ok(RegistryPackageInfo {
         package: package.clone(),
         selected_version,
+    })
+}
+
+pub(crate) fn find_registry_package_version_matching(
+    index: &PackageRegistryIndex,
+    name: &str,
+    requirement: &str,
+) -> Result<RegistryPackageInfo, PackageError> {
+    let package = index
+        .packages
+        .iter()
+        .find(|package| package.name == name)
+        .ok_or_else(|| format!("package registry does not contain {name}"))?;
+    let req = parse_registry_version_req(requirement)?;
+    let selected_version = package
+        .versions
+        .iter()
+        .filter(|entry| !entry.yanked)
+        .filter_map(|entry| {
+            parse_registry_semver(&entry.version)
+                .ok()
+                .filter(|version| req.matches(version))
+                .map(|version| (version, entry.clone()))
+        })
+        .max_by(|(left, _), (right, _)| left.cmp(right))
+        .map(|(_, entry)| entry)
+        .ok_or_else(|| {
+            format!("package registry does not contain {name} matching {requirement}")
+        })?;
+    Ok(RegistryPackageInfo {
+        package: package.clone(),
+        selected_version: Some(selected_version),
     })
 }
 
@@ -834,19 +932,54 @@ pub(crate) fn registry_dependency_from_spec_in(
         .map(Ok)
         .unwrap_or_else(|| derive_repo_name_from_source(&git))?;
     let alias = alias.unwrap_or(package_name.as_str()).to_string();
+    let tag = selected.tag;
+    let rev = if tag.is_some() { None } else { selected.rev };
     Ok((
         alias.clone(),
-        Dependency::Table(DepTable {
+        Dependency::Table(Box::new(DepTable {
             git: Some(git),
-            rev: selected.rev,
+            tag,
+            rev,
             branch: selected.branch,
             package: (alias != package_name).then_some(package_name),
             registry: Some(registry_source),
             registry_name: Some(name.to_string()),
             registry_version: Some(version.to_string()),
             ..DepTable::default()
-        }),
+        })),
     ))
+}
+
+pub(crate) fn registry_dependency_from_manifest_constraint_in(
+    workspace: &PackageWorkspace,
+    alias: &str,
+    table: &DepTable,
+) -> Result<Dependency, PackageError> {
+    let requirement = table
+        .version
+        .as_deref()
+        .ok_or_else(|| format!("dependency {alias} is missing `version`"))?;
+    let registry_source = workspace.resolve_registry_source(table.registry.as_deref())?;
+    let registry_name = table.registry_name.as_deref().unwrap_or(alias);
+    let (_, index) = load_package_registry_in(workspace, Some(&registry_source))?;
+    let info = find_registry_package_version_matching(&index, registry_name, requirement)?;
+    let selected = info.selected_version.ok_or_else(|| {
+        format!("package registry does not contain {registry_name} matching {requirement}")
+    })?;
+    let git = normalize_git_url(&selected.git)?;
+    let tag = selected.tag;
+    let rev = if tag.is_some() { None } else { selected.rev };
+    Ok(Dependency::Table(Box::new(DepTable {
+        git: Some(git),
+        tag,
+        rev,
+        branch: selected.branch,
+        package: selected.package.or_else(|| table.package.clone()),
+        registry: Some(registry_source),
+        registry_name: Some(registry_name.to_string()),
+        registry_version: Some(selected.version),
+        ..DepTable::default()
+    })))
 }
 
 pub(crate) fn is_probable_shorthand_git_url(raw: &str) -> bool {
@@ -1008,15 +1141,18 @@ where
 pub(crate) fn resolve_git_commit(
     url: &str,
     rev: Option<&str>,
+    tag: Option<&str>,
     branch: Option<&str>,
 ) -> Result<String, PackageError> {
-    let requested = branch.or(rev).unwrap_or("HEAD");
-    if branch.is_none() && is_full_git_sha(requested) {
+    let requested = branch.or(rev).or(tag).unwrap_or("HEAD");
+    if branch.is_none() && tag.is_none() && is_full_git_sha(requested) {
         return Ok(requested.to_string());
     }
 
     let refs = if let Some(branch) = branch {
         vec![format!("refs/heads/{branch}")]
+    } else if let Some(tag) = tag {
+        vec![format!("refs/tags/{tag}^{{}}"), format!("refs/tags/{tag}")]
     } else if requested == "HEAD" {
         vec!["HEAD".to_string()]
     } else {
@@ -1426,7 +1562,7 @@ pub(crate) fn verify_package_cache_in(
     let ctx = workspace.load_manifest_context()?;
     let lock = LockFile::load(&ctx.lock_path())?
         .ok_or_else(|| format!("{} is missing", ctx.lock_path().display()))?;
-    validate_lock_matches_manifest(&ctx, &lock)?;
+    validate_lock_matches_manifest(workspace, &ctx, &lock)?;
     let mut verified = 0usize;
     for entry in &lock.packages {
         if verify_lock_entry_cache_in(workspace, entry)? {
@@ -1470,7 +1606,7 @@ pub(crate) fn clean_package_cache_in(
             LOCK_FILE
         )
     })?;
-    validate_lock_matches_manifest(&ctx, &lock)?;
+    validate_lock_matches_manifest(workspace, &ctx, &lock)?;
     let keep = locked_git_cache_paths_in(workspace, &lock)?;
     let mut removed = 0usize;
     for entry in entries {
@@ -1876,8 +2012,8 @@ mod tests {
             "registry install must record the resolved git URL: {manifest}"
         );
         assert!(
-            manifest.contains("rev = \"v1.0.0\""),
-            "registry install must pin the resolved rev: {manifest}"
+            manifest.contains("tag = \"v1.0.0\""),
+            "registry install must pin the resolved tag: {manifest}"
         );
         assert!(
             manifest.contains("registry_name = \"@burin/acme-lib\""),

@@ -482,7 +482,7 @@ fn doctor_packages_in(workspace: &PackageWorkspace) -> Result<PackageDoctorRepor
     }
 
     if let Some(lock) = lock.as_ref() {
-        if let Err(error) = validate_lock_matches_manifest(&ctx, lock) {
+        if let Err(error) = validate_lock_matches_manifest(workspace, &ctx, lock) {
             diagnostics.push(package_doctor_diagnostic(
                 "error",
                 "stale-lockfile",
@@ -1629,31 +1629,56 @@ pub(crate) fn validate_dependencies_for_publish(
             Dependency::Path(path) => push_error(
                 errors,
                 &field,
-                format!("path-only dependency '{path}' is not publishable; pin a git rev or registry version"),
+                format!("path-only dependency '{path}' is not publishable; pin a git tag, git rev, or registry version"),
             ),
             Dependency::Table(table) => {
+                if table.version.is_some()
+                    && (table.git.is_some()
+                        || table.path.is_some()
+                        || table.rev.is_some()
+                        || table.tag.is_some()
+                        || table.branch.is_some())
+                {
+                    push_error(
+                        errors,
+                        &field,
+                        "version dependencies resolve through the registry; do not combine version with git, path, tag, rev, or branch",
+                    );
+                }
                 if table.path.is_some() {
                     push_error(
                         errors,
                         &field,
-                        "path dependencies are not publishable; pin a git rev or registry version",
+                        "path dependencies are not publishable; pin a git tag, git rev, or registry version",
                     );
                 }
-                if table.git.is_none() && table.path.is_none() {
-                    push_error(errors, &field, "dependency must specify git, registry-expanded git, or path");
+                if table.git.is_none() && table.path.is_none() && table.version.is_none() {
+                    push_error(
+                        errors,
+                        &field,
+                        "dependency must specify git, registry version, or path",
+                    );
                 }
-                if table.rev.is_some() && table.branch.is_some() {
-                    push_error(errors, &field, "dependency cannot specify both rev and branch");
+                let git_ref_count = usize::from(table.rev.is_some())
+                    + usize::from(table.tag.is_some())
+                    + usize::from(table.branch.is_some());
+                if table.git.is_some() && git_ref_count > 1 {
+                    push_error(errors, &field, "dependency cannot specify more than one of tag, rev, or branch");
                 }
-                if table.git.is_some() && table.rev.is_none() && table.branch.is_none() {
-                    push_error(errors, &field, "git dependency must specify rev or branch");
+                if table.git.is_some() && git_ref_count == 0 {
+                    push_error(errors, &field, "git dependency must specify tag, rev, or branch");
                 }
                 if table.branch.is_some() {
                     push_warning(
                         warnings,
                         &field,
-                        "branch dependencies are allowed but rev pins are more reproducible for publishing",
+                        "branch dependencies are non-reproducible for publishing; prefer tag, rev, or registry version",
                     );
+                }
+                if let Some(version) = table.version.as_deref() {
+                    if let Err(error) = parse_registry_version_req(version) {
+                        push_error(errors, &field, error.to_string());
+                    }
                 }
                 if let Some(git) = table.git.as_deref() {
                     if normalize_git_url(git).is_err() {
@@ -2622,6 +2647,45 @@ mod tests {
 
         assert!(messages.contains("unsupported Harn version range"));
         assert!(messages.contains("path dependencies are not publishable"));
+    }
+
+    #[test]
+    fn package_check_warns_on_branch_dependency() {
+        let tmp = tempfile::tempdir().unwrap();
+        write_publishable_package(tmp.path());
+        fs::write(
+            tmp.path().join(MANIFEST),
+            format!(
+                r#"[package]
+name = "acme-lib"
+version = "0.1.0"
+description = "Acme helpers"
+license = "MIT"
+repository = "https://github.com/acme/acme-lib"
+harn = "{}"
+docs_url = "docs/api.md"
+
+[exports]
+lib = "lib/main.harn"
+
+[dependencies]
+remote = {{ git = "https://github.com/acme/remote-lib", branch = "main" }}
+"#,
+                current_harn_range_example()
+            ),
+        )
+        .unwrap();
+
+        let report = check_package_impl(Some(tmp.path())).unwrap();
+        let warnings = report
+            .warnings
+            .iter()
+            .map(|diagnostic| diagnostic.message.as_str())
+            .collect::<Vec<_>>()
+            .join("\n");
+
+        assert!(report.errors.is_empty(), "{:?}", report.errors);
+        assert!(warnings.contains("branch dependencies are non-reproducible"));
     }
 
     #[test]

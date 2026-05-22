@@ -42,6 +42,8 @@ pub(crate) struct LockEntry {
     pub(crate) name: String,
     pub(crate) source: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) tag: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub(crate) rev_request: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub(crate) commit: Option<String>,
@@ -140,7 +142,7 @@ impl LockFile {
                 lock.sort_entries();
                 Ok(Some(lock))
             }
-            Some(1 | 2) => {
+            Some(1..=3) => {
                 // Older lockfile versions load through the current struct
                 // because added fields are optional. Saving stamps the current
                 // version and enriches provenance on the next install.
@@ -174,6 +176,7 @@ impl LockFile {
                                 .map(|path| format!("path+{path}"))
                                 .or_else(|| entry.git.map(|git| format!("git+{git}")))
                                 .unwrap_or_default(),
+                            tag: entry.tag.clone(),
                             rev_request: entry.rev_request.or(entry.tag),
                             commit: entry.commit,
                             content_hash: None,
@@ -259,6 +262,7 @@ pub(crate) struct LegacyLockEntry {
 }
 
 pub(crate) fn compatible_locked_entry(
+    workspace: &PackageWorkspace,
     alias: &str,
     dependency: &Dependency,
     lock: &LockEntry,
@@ -271,14 +275,34 @@ pub(crate) fn compatible_locked_entry(
         let source = path_source_uri(&resolve_path_dependency_source(manifest_dir, path)?)?;
         return Ok(lock.source == source);
     }
+    if let Some(requirement) = dependency.version() {
+        let Dependency::Table(table) = dependency else {
+            return Ok(false);
+        };
+        let Some(registry) = lock.registry.as_ref() else {
+            return Ok(false);
+        };
+        let registry_name = table.registry_name.as_deref().unwrap_or(alias);
+        if registry.name != registry_name {
+            return Ok(false);
+        }
+        let expected_source = workspace.resolve_registry_source(table.registry.as_deref())?;
+        if registry.source != expected_source {
+            return Ok(false);
+        }
+        let version = parse_registry_semver(&registry.version)?;
+        let req = parse_registry_version_req(requirement)?;
+        return Ok(req.matches(&version)
+            && lock.source.starts_with("git+")
+            && lock.commit.is_some()
+            && lock.content_hash.is_some());
+    }
     if let Some(url) = dependency.git_url() {
         let source = format!("git+{}", normalize_git_url(url)?);
-        let requested = dependency
-            .branch()
-            .map(str::to_string)
-            .or_else(|| dependency.rev().map(str::to_string));
+        let requested = dependency_git_request(dependency).map(str::to_string);
         return Ok(lock.source == source
             && lock.rev_request == requested
+            && lock.tag == dependency.tag().map(str::to_string)
             && lock.commit.is_some()
             && lock.content_hash.is_some());
     }
@@ -298,15 +322,20 @@ pub(crate) fn git_rev_request(
     alias: &str,
     dependency: &Dependency,
 ) -> Result<String, PackageError> {
-    dependency
-        .branch()
-        .or_else(|| dependency.rev())
+    dependency_git_request(dependency)
         .map(str::to_string)
         .ok_or_else(|| {
             PackageError::Lockfile(format!(
-                "git dependency {alias} must specify `rev` or `branch`; use `harn add <url>@<tag-or-sha>` or add `rev = \"...\"` to {MANIFEST}"
+                "git dependency {alias} must specify `tag`, `rev`, or `branch`; use `harn add <url>@<tag-or-sha>` or add `tag = \"...\"` to {MANIFEST}"
             ))
         })
+}
+
+pub(crate) fn dependency_git_request(dependency: &Dependency) -> Option<&str> {
+    dependency
+        .branch()
+        .or_else(|| dependency.rev())
+        .or_else(|| dependency.tag())
 }
 
 pub(crate) fn dependency_manifest_dir(source: &Path) -> Option<PathBuf> {
@@ -497,6 +526,31 @@ pub(crate) fn enqueue_manifest_dependencies(
     }
 }
 
+fn resolve_registry_version_dependency(
+    workspace: &PackageWorkspace,
+    alias: &str,
+    dependency: Dependency,
+) -> Result<Dependency, PackageError> {
+    let Dependency::Table(table) = &dependency else {
+        return Ok(dependency);
+    };
+    if table.version.is_none() {
+        return Ok(dependency);
+    }
+    if table.git.is_some()
+        || table.path.is_some()
+        || table.rev.is_some()
+        || table.tag.is_some()
+        || table.branch.is_some()
+    {
+        return Err(format!(
+            "dependency {alias} uses `version`; do not combine registry version constraints with git, path, tag, rev, or branch"
+        )
+        .into());
+    }
+    registry_dependency_from_manifest_constraint_in(workspace, alias, table)
+}
+
 pub(crate) fn build_lockfile(
     workspace: &PackageWorkspace,
     ctx: &ManifestContext,
@@ -537,17 +591,25 @@ pub(crate) fn build_lockfile(
         if dependency.local_path().is_some() && next.parent_is_git {
             let parent = next.parent.as_deref().unwrap_or("a git package");
             return Err(format!(
-                "package {parent} declares local path dependency {alias}, but path dependencies are not supported inside git-installed packages; publish {alias} as a git dependency with `rev` or `branch`"
+                "package {parent} declares local path dependency {alias}, but path dependencies are not supported inside git-installed packages; publish {alias} as a git dependency with `tag`, `rev`, or `version`"
             ).into());
         }
-        if dependency.git_url().is_some() {
+        if dependency.requires_git() {
             ensure_git_available()?;
-            git_rev_request(&alias, &dependency)?;
+            if dependency.git_url().is_some() {
+                git_rev_request(&alias, &dependency)?;
+            }
         }
         let refresh = refresh_all || refresh_alias == Some(alias.as_str());
         if let Some(existing_lock) = existing.and_then(|lock| lock.find(&alias)) {
             if !refresh
-                && compatible_locked_entry(&alias, &dependency, existing_lock, &next.manifest_dir)?
+                && compatible_locked_entry(
+                    workspace,
+                    &alias,
+                    &dependency,
+                    existing_lock,
+                    &next.manifest_dir,
+                )?
             {
                 let mut entry = existing_lock.clone();
                 if entry.source.starts_with("git+") && entry.content_hash.is_none() {
@@ -643,6 +705,8 @@ pub(crate) fn build_lockfile(
             return Err(format!("{} would need to change", ctx.lock_path().display()).into());
         }
 
+        let dependency = resolve_registry_version_dependency(workspace, &alias, dependency)?;
+
         if let Some(path) = dependency.local_path() {
             let source = resolve_path_dependency_source(&next.manifest_dir, path)?;
             let package_alias = alias.clone();
@@ -655,6 +719,7 @@ pub(crate) fn build_lockfile(
             let mut entry = LockEntry {
                 name: alias.clone(),
                 source: path_source_uri(&source)?,
+                tag: None,
                 rev_request: None,
                 commit: None,
                 content_hash: None,
@@ -689,8 +754,12 @@ pub(crate) fn build_lockfile(
             let rev_request = git_rev_request(&alias, &dependency)?;
             let normalized_url = normalize_git_url(url)?;
             let source = format!("git+{normalized_url}");
-            let commit =
-                resolve_git_commit(&normalized_url, dependency.rev(), dependency.branch())?;
+            let commit = resolve_git_commit(
+                &normalized_url,
+                dependency.rev(),
+                dependency.tag(),
+                dependency.branch(),
+            )?;
             let content_hash = ensure_git_cache_populated_in(
                 workspace,
                 &normalized_url,
@@ -705,6 +774,7 @@ pub(crate) fn build_lockfile(
             let mut entry = LockEntry {
                 name: alias.clone(),
                 source: source.clone(),
+                tag: dependency.tag().map(str::to_string),
                 rev_request: Some(rev_request),
                 commit: Some(commit.clone()),
                 content_hash: Some(content_hash),
@@ -787,6 +857,7 @@ pub(crate) fn materialize_dependencies_from_lock(
 }
 
 pub(crate) fn validate_lock_matches_manifest(
+    workspace: &PackageWorkspace,
     ctx: &ManifestContext,
     lock: &LockFile,
 ) -> Result<(), PackageError> {
@@ -798,7 +869,7 @@ pub(crate) fn validate_lock_matches_manifest(
                 ctx.lock_path().display()
             )
         })?;
-        if !compatible_locked_entry(alias, dependency, entry, &ctx.dir)? {
+        if !compatible_locked_entry(workspace, alias, dependency, entry, &ctx.dir)? {
             return Err(format!(
                 "{} is out of date for {alias}; run `harn install`",
                 ctx.lock_path().display()
@@ -823,8 +894,8 @@ pub fn ensure_dependencies_materialized(anchor: &Path) -> Result<(), PackageErro
             ctx.lock_path().display()
         )
     })?;
-    validate_lock_matches_manifest(&ctx, &lock)?;
     let workspace = PackageWorkspace::from_current_dir()?;
+    validate_lock_matches_manifest(&workspace, &ctx, &lock)?;
     materialize_dependencies_from_lock(&workspace, &ctx, &lock, None, false)?;
     Ok(())
 }
@@ -863,8 +934,13 @@ pub(crate) fn render_dependency_line(
             }
             if let Some(branch) = table.branch.as_deref() {
                 fields.push(format!("branch = {}", toml_string_literal(branch)?));
-            } else if let Some(rev) = table.rev.as_deref().or(table.tag.as_deref()) {
+            } else if let Some(tag) = table.tag.as_deref() {
+                fields.push(format!("tag = {}", toml_string_literal(tag)?));
+            } else if let Some(rev) = table.rev.as_deref() {
                 fields.push(format!("rev = {}", toml_string_literal(rev)?));
+            }
+            if let Some(version) = table.version.as_deref() {
+                fields.push(format!("version = {}", toml_string_literal(version)?));
             }
             if let Some(package) = table.package.as_deref() {
                 fields.push(format!("package = {}", toml_string_literal(package)?));
@@ -1243,10 +1319,10 @@ pub(crate) fn normalize_add_request_in(
             validate_package_alias(&alias)?;
             return Ok((
                 alias,
-                Dependency::Table(DepTable {
+                Dependency::Table(Box::new(DepTable {
                     path: Some(name_or_spec.to_string()),
                     ..DepTable::default()
-                }),
+                })),
             ));
         }
         if parse_registry_package_spec(name_or_spec).is_some() {
@@ -1261,30 +1337,34 @@ pub(crate) fn normalize_add_request_in(
             validate_package_alias(&alias)?;
             return Ok((
                 alias,
-                Dependency::Table(DepTable {
+                Dependency::Table(Box::new(DepTable {
                     path: Some(path.to_string()),
                     ..DepTable::default()
-                }),
+                })),
             ));
         }
         let alias = alias.unwrap_or(name_or_spec).to_string();
         validate_package_alias(&alias)?;
+        if rev.is_some() && tag.is_some() {
+            return Err("use only one of --rev or --tag".to_string().into());
+        }
         if rev.is_none() && tag.is_none() && branch.is_none() {
             return Err(format!(
-                "git dependency {alias} must specify `rev` or `branch`; use `harn add <url>@<tag-or-sha>` or pass `--rev`/`--branch`"
+                "git dependency {alias} must specify `tag`, `rev`, or `branch`; use `harn add <url>@<tag-or-sha>` or pass `--tag`/`--rev`/`--branch`"
             ).into());
         }
         let git = normalize_git_url(git_url.ok_or_else(|| "missing --git URL".to_string())?)?;
         let package_name = derive_repo_name_from_source(&git)?;
         return Ok((
             alias.clone(),
-            Dependency::Table(DepTable {
+            Dependency::Table(Box::new(DepTable {
                 git: Some(git),
-                rev: rev.or(tag).map(str::to_string),
+                tag: tag.map(str::to_string),
+                rev: rev.map(str::to_string),
                 branch: branch.map(str::to_string),
                 package: (alias != package_name).then_some(package_name),
                 ..DepTable::default()
-            }),
+            })),
         ));
     }
 
@@ -1294,7 +1374,7 @@ pub(crate) fn normalize_add_request_in(
     let (raw_source, inline_ref) = parse_positional_git_spec(name_or_spec);
     if inline_ref.is_some() && (rev.is_some() || tag.is_some() || branch.is_some()) {
         return Err(
-            "specify the git ref either inline as @ref or via --rev/--branch"
+            "specify the git ref either inline as @ref or via --tag/--rev/--branch"
                 .to_string()
                 .into(),
         );
@@ -1305,18 +1385,19 @@ pub(crate) fn normalize_add_request_in(
     validate_package_alias(&alias)?;
     if inline_ref.is_none() && rev.is_none() && tag.is_none() && branch.is_none() {
         return Err(format!(
-            "git dependency {alias} must specify `rev` or `branch`; use `harn add {raw_source}@<tag-or-sha>` or pass `--rev`/`--branch`"
+            "git dependency {alias} must specify `tag`, `rev`, or `branch`; use `harn add {raw_source}@<tag-or-sha>` or pass `--tag`/`--rev`/`--branch`"
         ).into());
     }
     Ok((
         alias.clone(),
-        Dependency::Table(DepTable {
+        Dependency::Table(Box::new(DepTable {
             git: Some(git),
-            rev: inline_ref.or(rev).or(tag).map(str::to_string),
+            tag: tag.map(str::to_string),
+            rev: inline_ref.or(rev).map(str::to_string),
             branch: branch.map(str::to_string),
             package: (alias != package_name).then_some(package_name),
             ..DepTable::default()
-        }),
+        })),
     ))
 }
 
@@ -1425,6 +1506,7 @@ mod tests {
             packages: vec![LockEntry {
                 name: "acme-lib".to_string(),
                 source: "git+https://github.com/acme/acme-lib".to_string(),
+                tag: Some("v1.0.0".to_string()),
                 rev_request: Some("v1.0.0".to_string()),
                 commit: Some("0123456789abcdef0123456789abcdef01234567".to_string()),
                 content_hash: Some("sha256:deadbeef".to_string()),
@@ -1511,6 +1593,147 @@ mod tests {
         let updated_lock = LockFile::load(&root.join(LOCK_FILE)).unwrap().unwrap();
         assert!(updated_lock.find(alias).is_none());
         assert!(!root.join(PKG_DIR).join(alias).exists());
+    }
+
+    #[test]
+    fn install_resolves_git_tag_dependency_and_records_tag() {
+        let (_repo_tmp, repo, _branch) = create_git_package_repo();
+        let project_tmp = tempfile::tempdir().unwrap();
+        let root = project_tmp.path();
+        let workspace = TestWorkspace::new(root);
+        fs::create_dir_all(root.join(".git")).unwrap();
+        let git = normalize_git_url(repo.to_string_lossy().as_ref()).unwrap();
+        fs::write(
+            root.join(MANIFEST),
+            format!(
+                r#"
+    [package]
+    name = "workspace"
+    version = "0.1.0"
+
+    [dependencies]
+    acme-lib = {{ git = "{git}", tag = "v1.0.0" }}
+    "#
+            ),
+        )
+        .unwrap();
+
+        let installed = install_packages_in(workspace.env(), false, None, false).unwrap();
+
+        assert_eq!(installed, 1);
+        let lock = LockFile::load(&root.join(LOCK_FILE)).unwrap().unwrap();
+        let entry = lock.find("acme-lib").unwrap();
+        assert_eq!(entry.tag.as_deref(), Some("v1.0.0"));
+        assert_eq!(entry.rev_request.as_deref(), Some("v1.0.0"));
+        assert!(entry.commit.as_deref().is_some_and(is_full_git_sha));
+        assert!(entry.content_hash.as_deref().is_some());
+        assert!(root
+            .join(PKG_DIR)
+            .join("acme-lib")
+            .join("lib.harn")
+            .is_file());
+    }
+
+    #[test]
+    fn install_resolves_registry_version_range_to_highest_matching_tag() {
+        let (_repo_tmp, repo, _branch) = create_git_package_repo();
+        fs::write(
+            repo.join("lib.harn"),
+            "pub fn value() -> string { return \"v0.1.1\" }\n",
+        )
+        .unwrap();
+        run_git(&repo, &["add", "."]);
+        run_git(&repo, &["commit", "-m", "v0.1.1"]);
+        run_git(&repo, &["tag", "v0.1.1"]);
+        fs::write(
+            repo.join("lib.harn"),
+            "pub fn value() -> string { return \"v0.2.0\" }\n",
+        )
+        .unwrap();
+        run_git(&repo, &["add", "."]);
+        run_git(&repo, &["commit", "-m", "v0.2.0"]);
+        run_git(&repo, &["tag", "v0.2.0"]);
+
+        let project_tmp = tempfile::tempdir().unwrap();
+        let root = project_tmp.path();
+        let registry_path = root.join("index.toml");
+        let workspace =
+            TestWorkspace::new(root).with_registry_source(registry_path.display().to_string());
+        fs::create_dir_all(root.join(".git")).unwrap();
+        let git = normalize_git_url(repo.to_string_lossy().as_ref()).unwrap();
+        fs::write(
+            &registry_path,
+            format!(
+                r#"
+version = 1
+
+[[package]]
+name = "acme-lib"
+repository = "{git}"
+
+[[package.version]]
+version = "0.1.0"
+git = "{git}"
+tag = "v1.0.0"
+
+[[package.version]]
+version = "0.1.1"
+git = "{git}"
+tag = "v0.1.1"
+
+[[package.version]]
+version = "0.2.0"
+git = "{git}"
+tag = "v0.2.0"
+"#
+            ),
+        )
+        .unwrap();
+        fs::write(
+            root.join(MANIFEST),
+            r#"
+    [package]
+    name = "workspace"
+    version = "0.1.0"
+
+    [dependencies]
+    acme-lib = { version = ">=0.1,<0.2" }
+    "#,
+        )
+        .unwrap();
+
+        let installed = install_packages_in(workspace.env(), false, None, false).unwrap();
+
+        assert_eq!(installed, 1);
+        let lock_path = root.join(LOCK_FILE);
+        let lock = LockFile::load(&lock_path).unwrap().unwrap();
+        let entry = lock.find("acme-lib").unwrap();
+        assert_eq!(entry.tag.as_deref(), Some("v0.1.1"));
+        assert_eq!(entry.rev_request.as_deref(), Some("v0.1.1"));
+        assert_eq!(
+            entry
+                .registry
+                .as_ref()
+                .map(|registry| registry.version.as_str()),
+            Some("0.1.1")
+        );
+        let source =
+            fs::read_to_string(root.join(PKG_DIR).join("acme-lib").join("lib.harn")).unwrap();
+        assert!(source.contains("v0.1.1"), "{source}");
+
+        let original_lock = fs::read_to_string(&lock_path).unwrap();
+        fs::remove_dir_all(root.join(PKG_DIR)).unwrap();
+        fs::remove_dir_all(&repo).unwrap();
+        fs::remove_file(&registry_path).unwrap();
+
+        let reinstalled = install_packages_in(workspace.env(), true, None, true).unwrap();
+        assert_eq!(reinstalled, 1);
+        assert_eq!(fs::read_to_string(&lock_path).unwrap(), original_lock);
+        assert!(root
+            .join(PKG_DIR)
+            .join("acme-lib")
+            .join("lib.harn")
+            .is_file());
     }
 
     #[test]
@@ -1775,7 +1998,9 @@ mod tests {
             None,
         )
         .unwrap_err();
-        assert!(error.to_string().contains("must specify `rev` or `branch`"));
+        assert!(error
+            .to_string()
+            .contains("must specify `tag`, `rev`, or `branch`"));
     }
 
     #[test]
@@ -1952,10 +2177,10 @@ mod tests {
         let path = "dep\" \nmalicious = true";
         let line = render_dependency_line(
             "safe",
-            &Dependency::Table(DepTable {
+            &Dependency::Table(Box::new(DepTable {
                 path: Some(path.to_string()),
                 ..DepTable::default()
-            }),
+            })),
         )
         .expect("dependency line");
         let parsed: Manifest = toml::from_str(&format!("[dependencies]\n{line}\n")).unwrap();

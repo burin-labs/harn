@@ -154,7 +154,7 @@ provenance = "https://provenance.example.test/acme"
 [[package.version]]
 version = "1.0.0"
 git = "{git}"
-rev = "v1.0.0"
+tag = "v1.0.0"
 package = "{package_name}"
 checksum = "sha256:package"
 provenance = "https://provenance.example.test/acme/1.0.0"

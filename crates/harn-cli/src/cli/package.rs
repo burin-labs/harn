@@ -31,7 +31,7 @@ pub(crate) struct AddArgs {
     /// Git URL for a remote dependency.
     #[arg(long, conflicts_with = "path")]
     pub git: Option<String>,
-    /// Deprecated alias for `--rev` on the legacy `--git` form.
+    /// Git tag to pin for a remote dependency.
     #[arg(long, conflicts_with_all = ["rev", "branch"])]
     pub tag: Option<String>,
     /// Git rev to pin for a remote dependency.
