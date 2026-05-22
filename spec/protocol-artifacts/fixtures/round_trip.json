@@ -16,7 +16,7 @@
       "state": "working"
     }
   },
-  "artifactVersion": "0.8.32",
+  "artifactVersion": "0.8.33",
   "envelopes": {
     "agentEventNotification": {
       "jsonrpc": "2.0",
