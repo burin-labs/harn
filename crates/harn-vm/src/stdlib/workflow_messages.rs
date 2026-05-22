@@ -147,23 +147,35 @@ struct WorkflowTarget {
 
 fn sanitize_workflow_id(raw: &str) -> String {
     let trimmed = raw.trim();
-    let base = Path::new(trimmed)
-        .file_name()
-        .and_then(|value| value.to_str())
-        .unwrap_or(trimmed);
-    if base.is_empty() || base == "." || base == ".." {
+    let mut sanitized = String::with_capacity(trimmed.len());
+    for ch in trimmed.chars() {
+        if ch.is_ascii_alphanumeric() || matches!(ch, '-' | '_' | '.') {
+            sanitized.push(ch);
+        } else {
+            sanitized.push('_');
+        }
+    }
+    if sanitized.is_empty() || sanitized == "." || sanitized == ".." {
         "workflow".to_string()
     } else {
-        base.to_string()
+        sanitized
     }
 }
 
 fn workflow_base_dir_from_persisted_path(path: &Path) -> PathBuf {
-    let parent = path.parent().unwrap_or_else(|| Path::new("."));
-    if parent.file_name().and_then(|value| value.to_str()) == Some(".harn-runs") {
-        parent.parent().unwrap_or(parent).to_path_buf()
+    for ancestor in path.ancestors() {
+        if ancestor.file_name().and_then(|value| value.to_str()) == Some(".harn-runs") {
+            return non_empty_path_or_dot(ancestor.parent().unwrap_or_else(|| Path::new(".")));
+        }
+    }
+    non_empty_path_or_dot(path.parent().unwrap_or_else(|| Path::new(".")))
+}
+
+fn non_empty_path_or_dot(path: &Path) -> PathBuf {
+    if path.as_os_str().is_empty() {
+        PathBuf::from(".")
     } else {
-        parent.to_path_buf()
+        path.to_path_buf()
     }
 }
 
@@ -455,11 +467,19 @@ async fn wait_for_update_response(
     timeout: StdDuration,
 ) -> Result<serde_json::Value, String> {
     let deadline = tokio::time::Instant::now() + timeout;
-    while tokio::time::Instant::now() <= deadline {
-        if let Ok(Some(value)) = update_response_value(target, request_id) {
-            return Ok(value);
+    loop {
+        match update_response_value(target, request_id) {
+            Ok(Some(value)) => return Ok(value),
+            Ok(None) => {}
+            Err(error) => return Err(error),
         }
-        tokio::time::sleep(StdDuration::from_millis(UPDATE_POLL_INTERVAL_MS)).await;
+
+        let now = tokio::time::Instant::now();
+        if now >= deadline {
+            break;
+        }
+        let next_poll = now + StdDuration::from_millis(UPDATE_POLL_INTERVAL_MS);
+        tokio::time::sleep_until(next_poll.min(deadline)).await;
     }
     Err(format!(
         "workflow update '{name}' timed out for '{}'",
@@ -784,6 +804,59 @@ mod tests {
         assert_eq!(result, serde_json::json!({"ok": true}));
     }
 
+    #[tokio::test(start_paused = true)]
+    async fn update_wait_respects_short_timeout() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let target = target_for_base(dir.path(), "wf-timeout");
+        let request_id =
+            enqueue_update_request(&target, "adjust_budget", serde_json::json!({"max_usd": 10}))
+                .expect("enqueue update");
+
+        let waiter = wait_for_update_response(
+            &target,
+            "adjust_budget",
+            &request_id,
+            StdDuration::from_millis(10),
+        );
+        tokio::pin!(waiter);
+        assert!(matches!(futures::poll!(&mut waiter), Poll::Pending));
+
+        tokio::time::advance(StdDuration::from_millis(9)).await;
+        assert!(matches!(futures::poll!(&mut waiter), Poll::Pending));
+
+        tokio::time::advance(StdDuration::from_millis(1)).await;
+        let err = waiter.await.expect_err("update should time out");
+        assert!(err.contains("timed out"));
+    }
+
+    #[tokio::test]
+    async fn update_wait_propagates_state_errors() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let target = target_for_base(dir.path(), "wf-corrupt");
+        std::fs::create_dir_all(workflow_target_root(&target)).expect("state dir");
+        std::fs::write(workflow_state_path(&target), "{not json").expect("state write");
+
+        let err = wait_for_update_response(
+            &target,
+            "adjust_budget",
+            "request-1",
+            StdDuration::from_millis(10),
+        )
+        .await
+        .expect_err("corrupt state should fail immediately");
+        assert!(err.contains("workflow state parse error"));
+    }
+
+    #[test]
+    fn workflow_ids_preserve_namespace_without_path_segments() {
+        assert_eq!(
+            sanitize_workflow_id("workflow://local/start-my-day"),
+            "workflow___local_start-my-day"
+        );
+        assert_eq!(sanitize_workflow_id("../start-my-day"), ".._start-my-day");
+        assert_eq!(sanitize_workflow_id(".."), "workflow");
+    }
+
     #[test]
     fn persisted_path_drives_target_base_dir() {
         let base = parse_target_json(
@@ -796,5 +869,28 @@ mod tests {
         .expect("target");
         assert_eq!(base.workflow_id, "wf");
         assert_eq!(base.base_dir, PathBuf::from("/tmp/demo"));
+    }
+
+    #[test]
+    fn nested_persisted_path_drives_target_base_dir() {
+        let base = parse_target_json(
+            &serde_json::json!({
+                "workflow_id": "wf",
+                "persisted_path": "/tmp/demo/.harn-runs/session/run.json"
+            }),
+            None,
+        )
+        .expect("target");
+        assert_eq!(base.base_dir, PathBuf::from("/tmp/demo"));
+
+        let relative = parse_target_json(
+            &serde_json::json!({
+                "workflow_id": "wf",
+                "persisted_path": ".harn-runs/session/run.json"
+            }),
+            None,
+        )
+        .expect("target");
+        assert_eq!(relative.base_dir, PathBuf::from("."));
     }
 }
