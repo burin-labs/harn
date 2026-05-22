@@ -112,7 +112,7 @@ harn test personas/merge_captain/tests/prompt_pack_test.harn
 ```
 
 In live mode the adapter dispatches through the
-[`std/connectors/github`](../../crates/harn-modules/src/stdlib/stdlib_connectors_github.harn)
+[`std/connectors/github`](../../crates/harn-stdlib/src/stdlib/stdlib_connectors_github.harn)
 connector. You still need a registered `github` connector client — the
 adapter never shells out to `gh`. Local verification commands are the
 one exception; they run via `process.exec` per the per-repo

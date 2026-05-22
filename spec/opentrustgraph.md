@@ -84,8 +84,8 @@ Fields:
     from the parent record referenced via `parent_record_id`).
   - `parent_record_id`: pointer at the parent record's `record_id`
     (`null`/absent for root records). The release-record flow keeps the
-    separate `parent_trust_record_id` key for the
-    [`harn release`](release.md) lineage; `parent_record_id` is the
+    separate `parent_trust_record_id` key for the Harn release
+    lineage; `parent_record_id` is the
     generic spawn-lineage pointer.
 
 Outcome enum:
@@ -128,8 +128,8 @@ supervision UIs, and third-party verification:
     "generated_at": "2026-04-19T18:45:00Z",
     "producer": {
       "name": "harn",
-      "version": "0.7.x"
-    },
+      "version": "0.8.x"
+    }
   },
   "records": []
 }
@@ -203,7 +203,7 @@ authoritative.
     "generated_at": "2026-04-19T18:45:00Z",
     "producer": {
       "name": "harn",
-      "version": "0.7.x"
+      "version": "0.8.x"
     }
   },
   "records": [

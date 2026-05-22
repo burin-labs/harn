@@ -2,12 +2,13 @@
 
 # Harn language specification
 
-Version: tracks the workspace `0.7.x` series; derived from the
+Version: tracks the workspace `0.8.x` series; derived from the
 implementation and updated alongside it. The language is still
 pre-1.0 — surface-level breaking changes are possible between minor
-releases. See [`CHANGELOG.md`](../CHANGELOG.md) for what changed and
-when, and the `Stability` column in subsections below for per-feature
-guarantees.
+releases. See the
+[changelog](https://github.com/burin-labs/harn/blob/main/CHANGELOG.md) for
+what changed and when, and the `Stability` column in subsections below for
+per-feature guarantees.
 
 Harn is a pipeline-oriented programming language for orchestrating AI agents.
 It is implemented as a Rust workspace with a lexer, parser, type checker,
@@ -6371,7 +6372,7 @@ per-platform mechanisms are:
 confinement (used by `harn run` when no orchestration policy is
 active). `SandboxProfile::Wasi` is testbench-only — subprocesses are
 intercepted by the process tape and resolved against recorded WASI
-modules. See [docs/src/sandboxing.md](../docs/src/sandboxing.md) for
+modules. See the [sandboxing guide](https://harnlang.com/sandboxing.html) for
 the full per-platform capability → kernel-knob mapping table.
 
 ## Test framework

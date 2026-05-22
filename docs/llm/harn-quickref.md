@@ -3168,7 +3168,7 @@ Nine opinionated modules wrap common LLM patterns:
   Harn-side names are `model_info` / `resolved_options` to avoid
   shadowing the same-named builtins.
 
-Full reference: [`docs/src/stdlib/llm-handlers.md`](https://harnlang.com/docs/stdlib/llm-handlers.html).
+Full reference: [`docs/src/stdlib/llm-handlers.md`](https://harnlang.com/stdlib/llm-handlers.html).
 
 ## Resilient LLM patterns
 
@@ -3303,7 +3303,7 @@ let persona_caller = compose([
 ])(router)
 ```
 
-Full reference: [`docs/src/stdlib/llm-handlers.md`](https://harnlang.com/docs/stdlib/llm-handlers.html).
+Full reference: [`docs/src/stdlib/llm-handlers.md`](https://harnlang.com/stdlib/llm-handlers.html).
 
 ## First-class routing policy
 
@@ -3439,7 +3439,7 @@ aligned with A2A `metadata` / ACP `kind` / OpenAI `summary_text` / OTel
 `tool_call_audit` AgentEvent so live ACP/A2A consumers can render
 chips alongside the standard `tool_call_update` stream.
 
-Full reference: [`docs/src/stdlib/tool-middleware.md`](https://harnlang.com/docs/stdlib/tool-middleware.html).
+Full reference: [`docs/src/stdlib/tool-middleware.md`](https://harnlang.com/stdlib/tool-middleware.html).
 
 ### Catalogue-driven `run_command` hooks
 
@@ -3529,9 +3529,9 @@ agent_loop(message, tools: {tools: [{name: "run_command", handler: run_command}]
   prompt to the model, so redact secrets the same way `run_command`
   already requires; transport errors degrade gracefully to passthrough.
 
-Full reference: [`docs/src/tool-hooks.md`](https://harnlang.com/docs/tool-hooks.html).
-Recipes per stack: [`docs/src/cookbooks/tool-hooks.md`](https://harnlang.com/docs/cookbooks/tool-hooks.html).
-Contributing rules: [`docs/src/contributing/preset-hooks.md`](https://harnlang.com/docs/contributing/preset-hooks.html).
+Full reference: [`docs/src/tool-hooks.md`](https://harnlang.com/tool-hooks.html).
+Recipes per stack: [`docs/src/cookbooks/tool-hooks.md`](https://harnlang.com/cookbooks/tool-hooks.html).
+Contributing rules: [`docs/src/contributing/preset-hooks.md`](https://harnlang.com/contributing/preset-hooks.html).
 
 ## Cancellation
 
@@ -3602,7 +3602,7 @@ and direct-call forms emit `cache_hit` + receipts (`model_calls_avoided`,
 `tokens_saved`, `latency_saved_ms`) on the agent event tape. The persona
 value ledger and crystallization receipts read these back.
 
-Full reference: [`docs/src/stdlib/cache.md`](https://harnlang.com/docs/stdlib/cache.html).
+Full reference: [`docs/src/stdlib/cache.md`](https://harnlang.com/stdlib/cache.html).
 
 ## Per-harness net policy (`std/net_policy`)
 
@@ -3668,7 +3668,7 @@ import { device_flow } from "std/oauth/device_flow"         // RFC 8628 (CI / he
 import { register_pattern } from "std/oauth/redaction"      // HARN-OAU-001 catalog
 ```
 
-Full reference + per-provider cookbook: [`docs/src/oauth.md`](https://harnlang.com/docs/oauth.html).
+Full reference + per-provider cookbook: [`docs/src/oauth.md`](https://harnlang.com/oauth.html).
 
 ## OAuth client (`std/oauth/client`)
 
@@ -3759,7 +3759,7 @@ mem.delete("github")
   by-value, so back the closures with a real store (HTTP, MCP,
   `harn-cloud`) rather than a captured local.
 
-Full reference: [`docs/src/stdlib/oauth-storage.md`](https://harnlang.com/docs/stdlib/oauth-storage.html).
+Full reference: [`docs/src/stdlib/oauth-storage.md`](https://harnlang.com/stdlib/oauth-storage.html).
 
 ## OAuth device flow (`std/oauth/device_flow`)
 
