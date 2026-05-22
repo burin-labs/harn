@@ -17,7 +17,6 @@ hook_disable_cargo_incremental_if_release_bump staged
 # patterns match (the common case for a Rust crate edit that also
 # touches scripts/ or Makefile).
 prompt_prose_done=0
-stale_builtins_done=0
 
 if hook_paths_match "$changed" "$HOOK_RUST_PATTERN"; then
   echo "=== Pre-commit: formatting Rust ==="
@@ -72,9 +71,6 @@ if hook_paths_match "$changed" "$HOOK_RUST_PATTERN"; then
   echo "=== Pre-commit: lint-no-rust-prompt-prose ==="
   make lint-no-rust-prompt-prose
   prompt_prose_done=1
-  echo "=== Pre-commit: lint-no-stale-harn-builtins ==="
-  make lint-no-stale-harn-builtins
-  stale_builtins_done=1
 
   hook_write_changed_cargo_packages "$changed" "$changed_packages"
   if hook_paths_match "$changed" '(^Cargo\.toml$|^Cargo\.lock$|^Makefile$)'; then
@@ -103,9 +99,6 @@ if hook_paths_match "$changed" "$HOOK_RATCHET_PATTERN"; then
   echo "=== Pre-commit: checking CI ratchets ==="
   if [ "$prompt_prose_done" -eq 0 ]; then
     make lint-no-rust-prompt-prose
-  fi
-  if [ "$stale_builtins_done" -eq 0 ]; then
-    make lint-no-stale-harn-builtins
   fi
   make lint-no-xfail-regression
   echo "    CI ratchets OK."

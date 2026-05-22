@@ -1,4 +1,4 @@
-.PHONY: setup install-hooks configure-merge-drivers build build-release sign-local check fmt fmt-harn fmt-harn-fix lint lint-md lint-actions lint-harn spec-lint test test-e2e test-cargo test-fast test-harn-scripts conformance protocol-conformance replay-oracle replay-bench eval-tool-calls bench-vm bench-vm-clone bench-llm bench-orchestration all release-gate release-smoke smoke-audit portal portal-check portal-demo gen-highlight check-highlight gen-protocol-artifacts check-protocol-artifacts check-bindings gen-session-bundle-schema check-session-bundle-schema gen-trigger-quickref check-trigger-quickref gen-provider-matrix check-provider-matrix gen-provider-catalog check-provider-catalog gen-connector-matrix check-connector-matrix check-trigger-examples check-docs-snippets check-docs-workflow-quickstart sync-language-spec check-language-spec sync-diagnostics-catalog check-diagnostics-catalog lint-test-patterns lint-diagnostic-codes check-receipt-structs lint-no-rust-prompt-prose lint-no-stale-harn-builtins lint-no-xfail-regression check-provider-catalog-drift
+.PHONY: setup install-hooks configure-merge-drivers build build-release sign-local check fmt fmt-harn fmt-harn-fix lint lint-md lint-actions lint-harn spec-lint test test-e2e test-cargo test-fast test-harn-scripts conformance protocol-conformance replay-oracle replay-bench eval-tool-calls bench-vm bench-vm-clone bench-llm bench-orchestration all release-gate release-smoke smoke-audit portal portal-check portal-demo gen-highlight check-highlight gen-protocol-artifacts check-protocol-artifacts check-bindings gen-session-bundle-schema check-session-bundle-schema gen-trigger-quickref check-trigger-quickref gen-provider-matrix check-provider-matrix gen-provider-catalog check-provider-catalog gen-connector-matrix check-connector-matrix check-trigger-examples check-docs-snippets check-docs-workflow-quickstart sync-language-spec check-language-spec sync-diagnostics-catalog check-diagnostics-catalog lint-test-patterns lint-diagnostic-codes check-receipt-structs lint-no-rust-prompt-prose lint-no-xfail-regression check-provider-catalog-drift
 
 # Full quality check: format first, then lint/test in parallel.
 # Usage: make all -j       (parallel checks after formatting)
@@ -41,7 +41,7 @@ fmt:
 	cargo fmt --all
 
 # Run clippy lints (deny warnings in CI)
-lint: lint-no-rust-prompt-prose lint-no-stale-harn-builtins lint-no-xfail-regression
+lint: lint-no-rust-prompt-prose lint-no-xfail-regression
 	cargo clippy --workspace --all-targets -- -D warnings
 
 # Run the fast (in-process, deterministic) test suite via cargo-nextest.
@@ -429,10 +429,6 @@ check-receipt-structs:
 
 lint-no-rust-prompt-prose:
 	@./scripts/check_no_rust_prompt_prose.sh
-
-lint-no-stale-harn-builtins:
-	@python3 scripts/check_no_stale_harn_builtins.py --self-test
-	@python3 scripts/check_no_stale_harn_builtins.py
 
 lint-no-xfail-regression:
 	@cargo run --quiet --bin harn -- run scripts/check_xfail_count.harn

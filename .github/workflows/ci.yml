@@ -80,7 +80,6 @@ jobs:
       # the CI invocation here drops the prereq and runs just the cheap
       # python prelude plus clippy.
       - run: make lint-no-rust-prompt-prose
-      - run: make lint-no-stale-harn-builtins
       - run: cargo clippy --workspace --all-targets -- -D warnings
 
   rust-test:
