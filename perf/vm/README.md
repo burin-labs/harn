@@ -67,3 +67,49 @@ to avoid build contention:
 ```bash
 CARGO_TARGET_DIR=/tmp/harn-bench-target ./scripts/bench_vm.sh --iterations 20
 ```
+
+## Focused VM microbenchmarks
+
+Use the Criterion microbench layer when working on interpreter internals and
+you need a small, repeatable signal for a specific hot path. It complements the
+fixture suite above; it does not replace the end-to-end `harn bench` smoke
+coverage.
+
+```bash
+make bench-vm-micro
+./scripts/bench_vm_micro.sh property_inline_cache_hits
+./scripts/bench_vm_micro.sh -- method_inline_cache_hits
+```
+
+`scripts/bench_vm_micro.sh` runs `cargo bench -p harn-vm-perf --bench
+bench_vm_hot_paths` with a fresh temporary `CARGO_TARGET_DIR` by default so
+parallel worktrees do not fight over the shared Cargo target lock. Pass
+`--target-dir /tmp/harn-vm-microbench-target` or set `CARGO_TARGET_DIR` when
+you intentionally want to reuse compiled dependencies across runs.
+The script also defaults `CARGO_PROFILE_BENCH_LTO=false` and
+`CARGO_PROFILE_BENCH_CODEGEN_UNITS=16` so targeted runs do not spend minutes in
+link-time optimization before measuring a single hot path. Override those env
+vars for final trend-capture runs when you want the full Cargo bench profile.
+
+The microbench suite covers focused VM hot paths:
+
+- non-module closure call environment setup (`bench_vmenv_clone`)
+- closure call setup through the VM dispatch loop
+- direct builtin/native call setup
+- runtime parameter validation for typed user calls
+- property inline-cache hits for dicts, structs, lists, and strings
+- method inline-cache hits for list/string/dict/set helpers
+- list callback dispatch through `.filter` and `.map`
+- std/collections dict helper builtins
+- bytecode-cache freeze/serialize and adjacent-artifact load paths
+
+Each Criterion benchmark emits one JSON object per allocation probe on stderr:
+
+```json
+{"suite":"vm_hot_paths","benchmark":"property_inline_cache_hits","iterations":25,"allocations_per_iteration":123.0,"allocated_bytes_per_iteration":4567.0}
+```
+
+Criterion timing estimates remain machine-readable under
+`$CARGO_TARGET_DIR/criterion/<group>/<benchmark>/new/estimates.json`, so PR
+comments or local comparison scripts can consume allocation JSONL and timing
+JSON independently instead of failing on noisy wall-clock deltas.

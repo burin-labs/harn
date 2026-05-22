@@ -1,10 +1,9 @@
-use std::alloc::{GlobalAlloc, Layout, System};
 use std::hint::black_box;
 use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::time::{Duration, Instant};
 
 use criterion::{criterion_group, criterion_main, BenchmarkId, Criterion};
+use harn_vm_perf::{allocation_stats_per_iteration_batched, emit_allocation_jsonl};
 use tokio::runtime::{Builder, Runtime};
 
 const FIXTURES: &[&str] = &[
@@ -24,46 +23,6 @@ const FIXTURES: &[&str] = &[
     "string_interpolation_loop.harn",
     "struct_field_read.harn",
 ];
-
-static TRACK_ALLOCATIONS: AtomicBool = AtomicBool::new(false);
-static ALLOCATION_COUNT: AtomicU64 = AtomicU64::new(0);
-static ALLOCATED_BYTES: AtomicU64 = AtomicU64::new(0);
-
-struct CountingAllocator;
-
-#[global_allocator]
-static GLOBAL_ALLOCATOR: CountingAllocator = CountingAllocator;
-
-unsafe impl GlobalAlloc for CountingAllocator {
-    unsafe fn alloc(&self, layout: Layout) -> *mut u8 {
-        let ptr = unsafe { System.alloc(layout) };
-        record_allocation(ptr, layout.size());
-        ptr
-    }
-
-    unsafe fn alloc_zeroed(&self, layout: Layout) -> *mut u8 {
-        let ptr = unsafe { System.alloc_zeroed(layout) };
-        record_allocation(ptr, layout.size());
-        ptr
-    }
-
-    unsafe fn dealloc(&self, ptr: *mut u8, layout: Layout) {
-        unsafe { System.dealloc(ptr, layout) };
-    }
-
-    unsafe fn realloc(&self, ptr: *mut u8, layout: Layout, new_size: usize) -> *mut u8 {
-        let ptr = unsafe { System.realloc(ptr, layout, new_size) };
-        record_allocation(ptr, new_size);
-        ptr
-    }
-}
-
-fn record_allocation(ptr: *mut u8, bytes: usize) {
-    if !ptr.is_null() && TRACK_ALLOCATIONS.load(Ordering::Relaxed) {
-        ALLOCATION_COUNT.fetch_add(1, Ordering::Relaxed);
-        ALLOCATED_BYTES.fetch_add(bytes as u64, Ordering::Relaxed);
-    }
-}
 
 struct Fixture {
     name: String,
@@ -114,19 +73,13 @@ fn execute_fixture(runtime: &Runtime, fixture: &Fixture, mut vm: harn_vm::Vm) {
     });
 }
 
-fn allocation_stats_per_run(runtime: &Runtime, fixture: &Fixture, samples: u64) -> (f64, f64) {
-    ALLOCATION_COUNT.store(0, Ordering::Relaxed);
-    ALLOCATED_BYTES.store(0, Ordering::Relaxed);
-    for _ in 0..samples {
-        let vm = setup_vm(fixture);
-        TRACK_ALLOCATIONS.store(true, Ordering::Relaxed);
-        execute_fixture(runtime, fixture, vm);
-        TRACK_ALLOCATIONS.store(false, Ordering::Relaxed);
-    }
-    (
-        ALLOCATION_COUNT.load(Ordering::Relaxed) as f64 / samples as f64,
-        ALLOCATED_BYTES.load(Ordering::Relaxed) as f64 / samples as f64,
-    )
+fn allocation_stats_per_run(runtime: &Runtime, fixture: &Fixture, samples: u64) {
+    let stats = allocation_stats_per_iteration_batched(
+        samples,
+        || setup_vm(fixture),
+        |vm| execute_fixture(runtime, fixture, vm),
+    );
+    emit_allocation_jsonl("vm_fixtures", &fixture.name, samples, stats);
 }
 
 fn timed_runs(runtime: &Runtime, fixture: &Fixture, iterations: u64) -> Duration {
@@ -149,11 +102,7 @@ fn bench_vm_fixtures(c: &mut Criterion) {
 
     let mut group = c.benchmark_group("vm_fixtures");
     for fixture in &fixtures {
-        let (allocations, allocated_bytes) = allocation_stats_per_run(&runtime, fixture, 10);
-        eprintln!(
-            "vm_fixtures/{}: {:.2} allocations/run, {:.1} allocated bytes/run",
-            fixture.name, allocations, allocated_bytes
-        );
+        allocation_stats_per_run(&runtime, fixture, 10);
 
         group.bench_with_input(
             BenchmarkId::from_parameter(&fixture.name),
