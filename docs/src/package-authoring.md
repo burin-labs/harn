@@ -106,6 +106,7 @@ cd echo-connector
 harn connector test .
 harn package docs
 harn publish --dry-run
+harn publish
 ```
 
 Connector packages use `harn connector test .` as the CI gate. It runs package
@@ -212,9 +213,13 @@ harn package pack --dry-run
 harn package pack
 ```
 
-`harn publish --dry-run` runs the same publish-readiness checks and reports the
-registry target that would receive the submission. Real registry submission is
-reserved for the registry/index workflow.
+`harn publish --dry-run` runs the publish-readiness checks and prints the git
+tag command plus the package-index diff that would be proposed. `harn publish`
+requires a clean git worktree, a non-empty `CHANGELOG.md` entry for the package
+version, and an unused `vX.Y.Z` tag. It then tags and pushes the configured
+remote, and opens a PR against the configured package index. Use
+`--skip-index-pr` to push only the tag when the index entry should be composed
+manually.
 
 ## Lockfile provenance
 

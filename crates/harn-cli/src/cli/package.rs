@@ -230,10 +230,25 @@ pub(crate) struct PackageInfoArgs {
 pub(crate) struct PublishArgs {
     /// Package directory, harn.toml, or file under the package. Defaults to cwd.
     pub package: Option<PathBuf>,
-    /// Required until registry submission support lands.
+    /// Validate and print the tag command plus package-index diff without pushing.
     #[arg(long)]
     pub dry_run: bool,
-    /// Package registry index URL or path to report as the submission target.
+    /// Git remote to tag and push. Defaults to origin.
+    #[arg(long, default_value = "origin")]
+    pub remote: String,
+    /// GitHub repository that owns the package index.
+    #[arg(long, default_value = "burin-labs/harn-cloud")]
+    pub index_repo: String,
+    /// Package-index TOML path inside --index-repo.
+    #[arg(long, default_value = "package-index/harn-package-index.toml")]
+    pub index_path: PathBuf,
+    /// Registry package name to update. Defaults to [package].name.
+    #[arg(long)]
+    pub registry_name: Option<String>,
+    /// Push the git tag but leave the package-index PR to the maintainer.
+    #[arg(long)]
+    pub skip_index_pr: bool,
+    /// Compatibility label for the registry/index target shown in reports.
     #[arg(long, value_name = "URL|PATH")]
     pub registry: Option<String>,
     /// Emit JSON instead of a human-readable report.
