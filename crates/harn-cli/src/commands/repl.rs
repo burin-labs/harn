@@ -379,7 +379,7 @@ pub(crate) async fn run_repl() {
                 let emitted_line = if is_bare_expression {
                     result_counter += 1;
                     format!(
-                        "let _{n} = {expr}\nprintln(to_string(_{n}))",
+                        "let _{n} = {expr}\n__io_println(to_string(_{n}))",
                         n = result_counter,
                         expr = line
                     )

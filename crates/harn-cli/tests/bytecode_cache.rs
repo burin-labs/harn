@@ -131,7 +131,7 @@ fn imported_module_is_cached_to_disk() {
     let script = workdir.path().join("entry.harn");
     fs::write(
         &script,
-        "import { answer } from \"./lib\"\nprintln(answer())\n",
+        "import { answer } from \"./lib\"\n__io_println(answer())\n",
     )
     .unwrap();
 
@@ -164,7 +164,7 @@ fn imported_file_edit_invalidates_cache() {
     let script = workdir.path().join("entry.harn");
     fs::write(
         &script,
-        "import { greet } from \"./lib\"\nprintln(greet())\n",
+        "import { greet } from \"./lib\"\n__io_println(greet())\n",
     )
     .unwrap();
 
@@ -252,7 +252,7 @@ fn precompiled_imported_module_uses_adjacent_artifact() {
     let script = workdir.path().join("entry.harn");
     fs::write(
         &script,
-        "import { answer } from \"./lib\"\nprintln(answer())\n",
+        "import { answer } from \"./lib\"\n__io_println(answer())\n",
     )
     .unwrap();
 

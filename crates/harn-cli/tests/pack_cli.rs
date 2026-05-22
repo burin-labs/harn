@@ -171,7 +171,7 @@ fn pack_resolves_transitive_imports() {
     let entry = workdir.path().join("entry.harn");
     fs::write(
         &entry,
-        "import { greet } from \"./lib\"\nprintln(greet())\n",
+        "import { greet } from \"./lib\"\n__io_println(greet())\n",
     )
     .unwrap();
 
@@ -210,7 +210,7 @@ fn pack_bundles_non_harn_assets_from_imports() {
     let entry = workdir.path().join("entry.harn");
     fs::write(
         &entry,
-        "import { greet } from \"./lib\"\nimport \"./prompts/template.txt\"\nprintln(greet())\n",
+        "import { greet } from \"./lib\"\nimport \"./prompts/template.txt\"\n__io_println(greet())\n",
     )
     .unwrap();
     let out = workdir.path().join("entry.harnpack");
@@ -484,7 +484,7 @@ fn workflow_bundle_signature_verifier_rejects_content_mismatch() {
 fn pack_verify_signed_bundle_passes_and_reports_signature_key() {
     let workdir = TempDir::new().unwrap();
     let entry = workdir.path().join("hello.harn");
-    fs::write(&entry, "println(\"signed\")\n").unwrap();
+    fs::write(&entry, "__io_println(\"signed\")\n").unwrap();
     let key = workdir.path().join("release-key.pem");
     fs::write(&key, TEST_ED25519_PRIVATE_KEY).unwrap();
     let out = workdir.path().join("hello.harnpack");
@@ -527,7 +527,7 @@ fn pack_verify_signed_bundle_passes_and_reports_signature_key() {
 fn pack_verify_unsigned_bundle_refused_without_flag_but_ok_with_flag() {
     let workdir = TempDir::new().unwrap();
     let entry = workdir.path().join("hello.harn");
-    fs::write(&entry, "println(\"hi\")\n").unwrap();
+    fs::write(&entry, "__io_println(\"hi\")\n").unwrap();
     let out = workdir.path().join("hello.harnpack");
     build_pack(&pack_args(entry.clone(), out.clone()));
 
@@ -559,7 +559,7 @@ fn pack_verify_unsigned_bundle_refused_without_flag_but_ok_with_flag() {
 fn pack_verify_tampered_signed_bundle_fails() {
     let workdir = TempDir::new().unwrap();
     let entry = workdir.path().join("hello.harn");
-    fs::write(&entry, "println(\"signed\")\n").unwrap();
+    fs::write(&entry, "__io_println(\"signed\")\n").unwrap();
     let key = workdir.path().join("release-key.pem");
     fs::write(&key, TEST_ED25519_PRIVATE_KEY).unwrap();
     let out = workdir.path().join("hello.harnpack");
@@ -587,7 +587,7 @@ fn pack_verify_tampered_signed_bundle_fails() {
         .iter_mut()
         .find(|entry| entry.path == Path::new("sources/hello.harn"))
         .expect("source entry present");
-    source.bytes = b"println(\"tampered\")\n".to_vec();
+    source.bytes = b"__io_println(\"tampered\")\n".to_vec();
     let tampered =
         harn_vm::orchestration::build_harnpack(&archive.manifest, &archive.contents).unwrap();
     fs::write(&out, &tampered).unwrap();
@@ -612,7 +612,7 @@ fn pack_verify_tampered_signed_bundle_fails() {
 fn pack_verify_json_envelope_round_trips_schema() {
     let workdir = TempDir::new().unwrap();
     let entry = workdir.path().join("hello.harn");
-    fs::write(&entry, "println(\"hi\")\n").unwrap();
+    fs::write(&entry, "__io_println(\"hi\")\n").unwrap();
     let out = workdir.path().join("hello.harnpack");
     build_pack(&pack_args(entry.clone(), out.clone()));
 
@@ -649,7 +649,7 @@ fn pack_verify_require_trusted_signer_rejects_signer_outside_policy_allowlist() 
         let signers_dir = workdir.path().join("signers");
         fs::create_dir_all(&signers_dir).unwrap();
         let entry = workdir.path().join("hello.harn");
-        fs::write(&entry, "println(\"signed\")\n").unwrap();
+        fs::write(&entry, "__io_println(\"signed\")\n").unwrap();
         let key = workdir.path().join("release-key.pem");
         fs::write(&key, TEST_ED25519_PRIVATE_KEY).unwrap();
         let out = workdir.path().join("hello.harnpack");
@@ -700,7 +700,7 @@ fn pack_verify_require_trusted_signer_rejects_signer_outside_policy_allowlist() 
 fn pack_verify_strict_rejects_tampered_sbom_module_hash() {
     let workdir = TempDir::new().unwrap();
     let entry = workdir.path().join("hello.harn");
-    fs::write(&entry, "println(\"hi\")\n").unwrap();
+    fs::write(&entry, "__io_println(\"hi\")\n").unwrap();
     let out = workdir.path().join("hello.harnpack");
     build_pack(&pack_args(entry.clone(), out.clone()));
 
@@ -756,7 +756,7 @@ fn pack_verify_strict_rejects_tampered_sbom_asset_hash() {
     let entry = workdir.path().join("hello.harn");
     fs::write(
         &entry,
-        "import \"./prompts/template.txt\"\nprintln(\"hi\")\n",
+        "import \"./prompts/template.txt\"\n__io_println(\"hi\")\n",
     )
     .unwrap();
     let out = workdir.path().join("hello.harnpack");
@@ -799,7 +799,7 @@ fn pack_verify_strict_rejects_tampered_sbom_asset_hash() {
 fn pack_exclude_secrets_blocks_entrypoint_with_dotenv_name() {
     let workdir = TempDir::new().unwrap();
     let entry = workdir.path().join(".env.harn");
-    fs::write(&entry, "println(\"secret\")\n").unwrap();
+    fs::write(&entry, "__io_println(\"secret\")\n").unwrap();
     let out = workdir.path().join(".env.harnpack");
 
     let runtime = Builder::new_current_thread().enable_all().build().unwrap();
@@ -829,7 +829,11 @@ fn pack_exclude_secrets_skips_imported_assets_with_warning() {
     fs::create_dir_all(&secrets).unwrap();
     fs::write(secrets.join("prompt.txt"), "token={{secret}}\n").unwrap();
     let entry = workdir.path().join("entry.harn");
-    fs::write(&entry, "import \"./secrets/prompt.txt\"\nprintln(\"ok\")\n").unwrap();
+    fs::write(
+        &entry,
+        "import \"./secrets/prompt.txt\"\n__io_println(\"ok\")\n",
+    )
+    .unwrap();
     let out = workdir.path().join("entry.harnpack");
 
     let envelope = Builder::new_current_thread()
