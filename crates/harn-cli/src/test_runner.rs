@@ -339,30 +339,21 @@ fn discover_test_files(dir: &Path) -> Vec<PathBuf> {
 mod tests {
     use super::{discover_test_files, run_tests};
     use std::fs;
-    use std::path::{Path, PathBuf};
-    use std::time::{SystemTime, UNIX_EPOCH};
+    use std::path::Path;
 
     struct TempTestDir {
-        path: PathBuf,
+        inner: tempfile::TempDir,
     }
 
     impl TempTestDir {
         fn new() -> Self {
-            let unique = format!(
-                "harn-test-runner-{}-{}",
-                std::process::id(),
-                SystemTime::now()
-                    .duration_since(UNIX_EPOCH)
-                    .unwrap()
-                    .as_nanos()
-            );
-            let path = std::env::temp_dir().join(unique);
-            fs::create_dir_all(&path).unwrap();
-            Self { path }
+            Self {
+                inner: tempfile::tempdir().unwrap(),
+            }
         }
 
         fn write(&self, relative: &str, contents: &str) {
-            let path = self.path.join(relative);
+            let path = self.path().join(relative);
             if let Some(parent) = path.parent() {
                 fs::create_dir_all(parent).unwrap();
             }
@@ -370,13 +361,7 @@ mod tests {
         }
 
         fn path(&self) -> &Path {
-            &self.path
-        }
-    }
-
-    impl Drop for TempTestDir {
-        fn drop(&mut self) {
-            let _ = fs::remove_dir_all(&self.path);
+            self.inner.path()
         }
     }
 

@@ -110,11 +110,13 @@ harn connect github \
 
 ## Callback server
 
-OAuth and GitHub App setup callbacks bind only to `127.0.0.1` or `localhost`.
-The default redirect URI uses port `0`, so Harn chooses a random free local port
-and sends that concrete URI in the authorization request. Callback listeners are
-single-use and time out after five minutes. If a callback request includes an
-`Origin` header, Harn requires it to match the redirect origin.
+OAuth and GitHub App setup callbacks use plaintext HTTP and bind only to
+`127.0.0.1` or `localhost`. The default redirect URI uses port `0`, so Harn
+chooses a random free local port and sends that concrete URI in the
+authorization request; custom redirect URIs must also include an explicit port.
+Callback listeners are single-use and time out after five minutes. If a callback
+request includes an `Origin` header, Harn requires it to match the redirect
+origin.
 
 ## OAuth guarantees
 
