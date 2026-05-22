@@ -600,6 +600,109 @@ fn changes_since_respects_limit() {
     assert_eq!(extract_list(&limited).len(), 2);
 }
 
+#[test]
+fn code_index_rejects_schema_invalid_numeric_bounds() {
+    let dir = workspace();
+    let (registry, _) = build();
+    rebuild_in(dir.path(), &registry);
+
+    let cases = [
+        (
+            "hostlib_code_index_id_to_path",
+            dict(&[("file_id", VmValue::Int(0))]),
+            "file_id",
+        ),
+        (
+            "hostlib_code_index_query",
+            dict(&[
+                ("needle", VmValue::String(Rc::from("main"))),
+                ("max_results", VmValue::Int(0)),
+            ]),
+            "max_results",
+        ),
+        (
+            "hostlib_code_index_read_range",
+            dict(&[
+                ("path", VmValue::String(Rc::from("src/main.ts"))),
+                ("start", VmValue::Int(0)),
+            ]),
+            "start",
+        ),
+        (
+            "hostlib_code_index_file_meta",
+            dict(&[("file_id", VmValue::Int(0))]),
+            "file_id",
+        ),
+        (
+            "hostlib_code_index_trigram_query",
+            dict(&[("trigrams", VmValue::List(Rc::new(vec![VmValue::Int(-1)])))]),
+            "trigrams",
+        ),
+        (
+            "hostlib_code_index_trigram_query",
+            dict(&[
+                ("trigrams", VmValue::List(Rc::new(Vec::new()))),
+                ("max_files", VmValue::Int(0)),
+            ]),
+            "max_files",
+        ),
+        (
+            "hostlib_code_index_changes_since",
+            dict(&[("seq", VmValue::Int(-1))]),
+            "seq",
+        ),
+        (
+            "hostlib_code_index_changes_since",
+            dict(&[("limit", VmValue::Int(0))]),
+            "limit",
+        ),
+        (
+            "hostlib_code_index_version_record",
+            dict(&[
+                ("agent_id", VmValue::Int(-1)),
+                ("path", VmValue::String(Rc::from("src/main.ts"))),
+            ]),
+            "agent_id",
+        ),
+        (
+            "hostlib_code_index_version_record",
+            dict(&[
+                ("agent_id", VmValue::Int(1)),
+                ("path", VmValue::String(Rc::from("src/main.ts"))),
+                ("hash", VmValue::Int(-1)),
+            ]),
+            "hash",
+        ),
+        (
+            "hostlib_code_index_agent_register",
+            dict(&[("agent_id", VmValue::Int(0))]),
+            "agent_id",
+        ),
+        (
+            "hostlib_code_index_lock_try",
+            dict(&[
+                ("agent_id", VmValue::Int(1)),
+                ("path", VmValue::String(Rc::from("src/main.ts"))),
+                ("ttl_ms", VmValue::Int(0)),
+            ]),
+            "ttl_ms",
+        ),
+    ];
+
+    for (name, payload, expected_param) in cases {
+        let err = match try_call(&registry, name, payload) {
+            Ok(value) => panic!("{name} accepted invalid {expected_param}: {value:?}"),
+            Err(error) => error,
+        };
+        match err {
+            harn_hostlib::HostlibError::InvalidParameter { param, .. } => {
+                assert_eq!(param, expected_param, "{name}");
+            }
+            other => panic!("{name} returned wrong error for {expected_param}: {other:?}"),
+        }
+    }
+}
+
 // === Agent registry + locks ===
 
 #[test]

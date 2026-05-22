@@ -679,23 +679,20 @@ fn build_compact_config(
         }
     }
     let mut cfg = crate::orchestration::AutoCompactConfig::default();
-    if let Some(v) = opts.get("keep_last").and_then(|v| v.as_int()) {
-        if v < 0 {
-            return Err(err("agent_session_compact: `keep_last` must be >= 0"));
-        }
-        cfg.keep_last = v as usize;
+    if let Some(v) = compact_usize_opt(opts, "keep_last")? {
+        cfg.keep_last = v;
     }
-    if let Some(v) = opts.get("token_threshold").and_then(|v| v.as_int()) {
-        cfg.token_threshold = v as usize;
+    if let Some(v) = compact_usize_opt(opts, "token_threshold")? {
+        cfg.token_threshold = v;
     }
-    if let Some(v) = opts.get("tool_output_max_chars").and_then(|v| v.as_int()) {
-        cfg.tool_output_max_chars = v as usize;
+    if let Some(v) = compact_usize_opt(opts, "tool_output_max_chars")? {
+        cfg.tool_output_max_chars = v;
     }
     if let Some(VmValue::String(s)) = opts.get("compact_strategy") {
         cfg.compact_strategy = crate::orchestration::parse_compact_strategy(s)?;
     }
-    if let Some(v) = opts.get("hard_limit_tokens").and_then(|v| v.as_int()) {
-        cfg.hard_limit_tokens = Some(v as usize);
+    if let Some(v) = compact_usize_opt(opts, "hard_limit_tokens")? {
+        cfg.hard_limit_tokens = Some(v);
     }
     if let Some(VmValue::String(s)) = opts.get("hard_limit_strategy") {
         cfg.hard_limit_strategy = crate::orchestration::parse_compact_strategy(s)?;
@@ -727,8 +724,29 @@ fn build_compact_config(
     Ok(cfg)
 }
 
+fn compact_usize_opt(
+    opts: &BTreeMap<String, VmValue>,
+    key: &'static str,
+) -> Result<Option<usize>, VmError> {
+    let Some(value) = opts.get(key) else {
+        return Ok(None);
+    };
+    let Some(raw) = value.as_int() else {
+        return Err(err(format!(
+            "agent_session_compact: `{key}` must be an int"
+        )));
+    };
+    if raw < 0 {
+        return Err(err(format!("agent_session_compact: `{key}` must be >= 0")));
+    }
+    Ok(Some(raw as usize))
+}
+
 #[cfg(test)]
 mod tests {
+    use std::collections::BTreeMap;
+
+    use super::build_compact_config;
     use crate::value::VmValue;
 
     fn call_current_id_builtin() -> VmValue {
@@ -763,5 +781,20 @@ mod tests {
         let current = call_current_id_builtin();
         crate::agent_sessions::pop_current_session();
         assert!(matches!(current, VmValue::String(value) if value.as_ref() == "unit-test-session"));
+    }
+
+    #[test]
+    fn compact_config_rejects_negative_numeric_options() {
+        for key in [
+            "keep_last",
+            "token_threshold",
+            "tool_output_max_chars",
+            "hard_limit_tokens",
+        ] {
+            let mut opts = BTreeMap::new();
+            opts.insert(key.to_string(), VmValue::Int(-1));
+            let err = build_compact_config(&opts).expect_err("negative option must fail");
+            assert!(err.to_string().contains(key), "{err}");
+        }
     }
 }

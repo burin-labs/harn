@@ -46,14 +46,23 @@ pub(super) fn microcompact_builtin(
     let text = args.first().map(|a| a.display()).unwrap_or_default();
     let max_chars = args
         .get(1)
-        .and_then(|v| match v {
-            VmValue::Int(n) => Some(*n as usize),
-            _ => None,
-        })
+        .map(|v| non_negative_usize(v, "microcompact", "max_chars"))
+        .transpose()?
         .unwrap_or(20_000);
     Ok(VmValue::String(Rc::from(
         crate::orchestration::microcompact_tool_output(&text, max_chars),
     )))
+}
+
+fn non_negative_usize(value: &VmValue, builtin: &str, key: &str) -> Result<usize, VmError> {
+    match value {
+        VmValue::Int(n) if *n >= 0 => Ok(*n as usize),
+        VmValue::Int(_) => Err(VmError::Runtime(format!("{builtin}: `{key}` must be >= 0"))),
+        other => Err(VmError::Runtime(format!(
+            "{builtin}: `{key}` must be an int, got {}",
+            other.type_name()
+        ))),
+    }
 }
 
 pub(super) async fn transcript_auto_compact_builtin(
@@ -75,38 +84,42 @@ pub(super) async fn transcript_auto_compact_builtin(
     if let Some(v) = options
         .as_ref()
         .and_then(|o| o.get("keep_first"))
-        .and_then(|v| v.as_int())
+        .map(|v| non_negative_usize(v, "transcript_auto_compact", "keep_first"))
+        .transpose()?
     {
-        config.keep_first = v.max(0) as usize;
+        config.keep_first = v;
     }
     let threshold = options.as_ref().and_then(|o| {
         o.get("token_threshold")
-            .or_else(|| o.get("compact_threshold"))
-            .and_then(|v| v.as_int())
+            .map(|v| ("token_threshold", v))
+            .or_else(|| o.get("compact_threshold").map(|v| ("compact_threshold", v)))
     });
-    if let Some(v) = threshold {
-        config.token_threshold = v.max(0) as usize;
+    if let Some((key, v)) = threshold {
+        config.token_threshold = non_negative_usize(v, "transcript_auto_compact", key)?;
     }
     if let Some(v) = options
         .as_ref()
         .and_then(|o| o.get("tool_output_max_chars"))
-        .and_then(|v| v.as_int())
+        .map(|v| non_negative_usize(v, "transcript_auto_compact", "tool_output_max_chars"))
+        .transpose()?
     {
-        config.tool_output_max_chars = v.max(0) as usize;
+        config.tool_output_max_chars = v;
     }
     if let Some(v) = options
         .as_ref()
         .and_then(|o| o.get("keep_last"))
-        .and_then(|v| v.as_int())
+        .map(|v| non_negative_usize(v, "transcript_auto_compact", "keep_last"))
+        .transpose()?
     {
-        config.keep_last = v.max(0) as usize;
+        config.keep_last = v;
     }
     if let Some(v) = options
         .as_ref()
         .and_then(|o| o.get("hard_limit_tokens"))
-        .and_then(|v| v.as_int())
+        .map(|v| non_negative_usize(v, "transcript_auto_compact", "hard_limit_tokens"))
+        .transpose()?
     {
-        config.hard_limit_tokens = Some(v.max(0) as usize);
+        config.hard_limit_tokens = Some(v);
     }
     if let Some(strategy) = options
         .as_ref()
@@ -156,4 +169,20 @@ pub(super) async fn transcript_auto_compact_builtin(
             .map(crate::stdlib::json_to_vm_value)
             .collect(),
     )))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn microcompact_rejects_negative_limit() {
+        let mut out = String::new();
+        let err = microcompact_builtin(
+            &[VmValue::String(Rc::from("hello")), VmValue::Int(-1)],
+            &mut out,
+        )
+        .expect_err("negative limits must fail");
+        assert!(err.to_string().contains("max_chars"));
+    }
 }

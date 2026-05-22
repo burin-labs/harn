@@ -112,27 +112,6 @@ pub fn optional_int(
     }
 }
 
-/// Required integer field. Errors if the key is missing or not an int.
-pub fn require_int(
-    builtin: &'static str,
-    dict: &BTreeMap<String, VmValue>,
-    key: &'static str,
-) -> Result<i64, HostlibError> {
-    match dict.get(key) {
-        Some(VmValue::Int(n)) => Ok(*n),
-        Some(VmValue::Float(f)) if f.fract() == 0.0 => Ok(*f as i64),
-        Some(other) => Err(HostlibError::InvalidParameter {
-            builtin,
-            param: key,
-            message: format!("expected integer, got {}", other.type_name()),
-        }),
-        None => Err(HostlibError::MissingParameter {
-            builtin,
-            param: key,
-        }),
-    }
-}
-
 /// Optional list of strings. Missing/`Nil` returns `Vec::new()`.
 pub fn optional_string_list(
     builtin: &'static str,
