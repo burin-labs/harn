@@ -1,6 +1,7 @@
 use std::rc::Rc;
 
-use crate::value::{compare_values, values_equal, VmError, VmValue};
+use crate::chunk::AdaptiveBinaryOp;
+use crate::value::{values_equal, VmError, VmValue};
 
 impl super::super::Vm {
     fn push_compare_result(
@@ -14,27 +15,27 @@ impl super::super::Vm {
     }
 
     pub(super) fn execute_equal(&mut self) -> Result<(), VmError> {
-        self.push_compare_result(|a, b| Ok(values_equal(&a, &b)))
+        self.execute_adaptive_binary(AdaptiveBinaryOp::Equal)
     }
 
     pub(super) fn execute_not_equal(&mut self) -> Result<(), VmError> {
-        self.push_compare_result(|a, b| Ok(!values_equal(&a, &b)))
+        self.execute_adaptive_binary(AdaptiveBinaryOp::NotEqual)
     }
 
     pub(super) fn execute_less(&mut self) -> Result<(), VmError> {
-        self.push_compare_result(|a, b| Ok(compare_values(&a, &b) < 0))
+        self.execute_adaptive_binary(AdaptiveBinaryOp::Less)
     }
 
     pub(super) fn execute_greater(&mut self) -> Result<(), VmError> {
-        self.push_compare_result(|a, b| Ok(compare_values(&a, &b) > 0))
+        self.execute_adaptive_binary(AdaptiveBinaryOp::Greater)
     }
 
     pub(super) fn execute_less_equal(&mut self) -> Result<(), VmError> {
-        self.push_compare_result(|a, b| Ok(compare_values(&a, &b) <= 0))
+        self.execute_adaptive_binary(AdaptiveBinaryOp::LessEqual)
     }
 
     pub(super) fn execute_greater_equal(&mut self) -> Result<(), VmError> {
-        self.push_compare_result(|a, b| Ok(compare_values(&a, &b) >= 0))
+        self.execute_adaptive_binary(AdaptiveBinaryOp::GreaterEqual)
     }
 
     pub(super) fn execute_contains(&mut self) -> Result<(), VmError> {

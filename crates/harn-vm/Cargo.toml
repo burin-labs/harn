@@ -127,3 +127,7 @@ harness = false
 [[bench]]
 name = "flow_predicate_union"
 harness = false
+
+[[bench]]
+name = "vm_adaptive_inline_cache"
+harness = false

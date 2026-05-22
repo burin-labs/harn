@@ -6,7 +6,10 @@ use std::time::Duration;
 
 use crate::compiler::{Compiler, CompilerOptions};
 use crate::stdlib::register_vm_stdlib;
-use crate::{Chunk, InlineCacheEntry, MethodCacheTarget, PropertyCacheTarget, VmError, VmValue};
+use crate::{
+    AdaptiveBinaryOp, AdaptiveBinaryState, BinaryShape, Chunk, DirectCallState, InlineCacheEntry,
+    MethodCacheTarget, PropertyCacheTarget, VmError, VmValue,
+};
 use harn_lexer::Lexer;
 use harn_parser::Parser;
 
@@ -749,6 +752,142 @@ log(total)
             "missing {target:?} in {entries:?}"
         );
     }
+}
+
+#[test]
+fn test_adaptive_inline_cache_specializes_generic_integer_add_site() {
+    let (chunk, out, _) = run_harn_with_chunk(
+        r#"pipeline t(task) {
+fn erase(x) {
+  return x
+}
+var i = erase(0)
+var total = erase(0)
+while i < erase(8) {
+  total = total + i
+  i = i + erase(1)
+}
+log(total)
+}"#,
+    );
+
+    assert_eq!(out.trim_end(), "[harn] 28");
+    let entries = chunk.inline_cache_entries();
+    assert!(
+        entries.iter().any(|entry| matches!(
+            entry,
+            InlineCacheEntry::AdaptiveBinary {
+                op: AdaptiveBinaryOp::Add,
+                state: AdaptiveBinaryState::Specialized {
+                    shape: BinaryShape::Int,
+                    hits,
+                    ..
+                },
+            } if *hits >= 3
+        )),
+        "{entries:?}"
+    );
+}
+
+#[test]
+fn test_adaptive_inline_cache_deoptimizes_mixed_binary_shapes() {
+    let (chunk, out, _) = run_harn_with_chunk(
+        r#"pipeline t(task) {
+fn erase(x) {
+  return x
+}
+let values = [erase(1), erase(2), erase(3), erase(4.0), erase(5.0)]
+var acc = erase(0)
+for value in values {
+  acc = acc + value
+}
+log(acc)
+}"#,
+    );
+
+    assert_eq!(out.trim_end(), "[harn] 15.0");
+    let entries = chunk.inline_cache_entries();
+    assert!(
+        entries.iter().any(|entry| matches!(
+            entry,
+            InlineCacheEntry::AdaptiveBinary {
+                op: AdaptiveBinaryOp::Add,
+                state: AdaptiveBinaryState::Specialized {
+                    shape: BinaryShape::Float,
+                    misses: 1,
+                    ..
+                },
+            }
+        )),
+        "{entries:?}"
+    );
+}
+
+#[test]
+fn test_adaptive_inline_cache_specializes_named_closure_call_site() {
+    let (chunk, out, _) = run_harn_with_chunk(
+        r#"pipeline t(task) {
+fn inc(x) {
+  return x + 1
+}
+var i = 0
+var total = 0
+while i < 8 {
+  total = total + inc(i)
+  i = i + 1
+}
+log(total)
+}"#,
+    );
+
+    assert_eq!(out.trim_end(), "[harn] 36");
+    let entries = chunk.inline_cache_entries();
+    assert!(
+        entries.iter().any(|entry| matches!(
+            entry,
+            InlineCacheEntry::DirectCall {
+                state: DirectCallState::Specialized { hits, .. },
+            } if *hits >= 3
+        )),
+        "{entries:?}"
+    );
+}
+
+#[test]
+fn test_adaptive_inline_cache_deoptimizes_rebound_closure_call_site() {
+    let (chunk, out, _) = run_harn_with_chunk(
+        r#"pipeline t(task) {
+fn inc(x) {
+  return x + 1
+}
+fn dec(x) {
+  return x - 1
+}
+var op = inc
+var i = 0
+var total = 0
+while i < 5 {
+  if i == 3 {
+    op = dec
+  }
+  total = total + op(10)
+  i = i + 1
+}
+log(total)
+}"#,
+    );
+
+    assert_eq!(out.trim_end(), "[harn] 51");
+    let entries = chunk.inline_cache_entries();
+    assert!(
+        entries.iter().any(|entry| matches!(
+            entry,
+            InlineCacheEntry::DirectCall {
+                state: DirectCallState::Specialized { misses: 1, .. },
+            }
+        )),
+        "{entries:?}"
+    );
 }
 
 #[test]

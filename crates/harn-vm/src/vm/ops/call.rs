@@ -2,12 +2,14 @@ use std::future::Future;
 use std::pin::Pin;
 use std::rc::Rc;
 
-use crate::chunk::{InlineCacheEntry, MethodCacheTarget};
+use crate::chunk::{DirectCallState, DirectCallTarget, InlineCacheEntry, MethodCacheTarget};
 use crate::orchestration::HookEvent;
 use crate::value::{values_equal, VmClosure, VmError, VmJoinHandle, VmTaskHandle, VmValue};
 use crate::BuiltinId;
 
 use super::super::CallFrame;
+
+const DIRECT_CALL_QUICKEN_THRESHOLD: u8 = 3;
 
 struct AwaitingTask {
     task: Option<VmTaskHandle>,
@@ -725,25 +727,133 @@ impl super::super::Vm {
     /// leaves `ip` untouched so [`execute_call_async`] can read the operand
     /// exactly once.
     pub(super) fn execute_call_sync(&mut self) -> Option<Result<(), VmError>> {
-        let frame = self.frames.last().unwrap();
-        let argc = frame.chunk.code[frame.ip] as usize;
-        let callee_idx = self.stack.len().checked_sub(argc + 1)?;
-        let closure = match self.stack.get(callee_idx)? {
-            VmValue::Closure(c) => c,
-            _ => return None,
+        let (argc, cache_slot, cache_entry) = {
+            let frame = self.frames.last().unwrap();
+            let op_offset = frame.ip.saturating_sub(1);
+            let argc = frame.chunk.code[frame.ip] as usize;
+            let cache_slot = frame.chunk.inline_cache_slot(op_offset);
+            let cache_entry = cache_slot
+                .map(|slot| frame.chunk.inline_cache_entry(slot))
+                .unwrap_or(InlineCacheEntry::Empty);
+            (argc, cache_slot, cache_entry)
         };
-        if closure.func.is_generator {
-            return None;
-        }
-        if crate::step_runtime::step_definition_for_function(&closure.func.name).is_some() {
+        let callee_idx = self.stack.len().checked_sub(argc + 1)?;
+        let closure = match self.try_cached_direct_call(&cache_entry, argc, callee_idx) {
+            Some(closure) => closure,
+            None => match self.stack.get(callee_idx)? {
+                VmValue::Closure(c) => Rc::clone(c),
+                _ => return None,
+            },
+        };
+        if !Self::direct_call_cacheable(&closure) {
             return None;
         }
 
-        let closure = Rc::clone(closure);
+        if let Some(slot) = cache_slot {
+            let next_entry = Self::next_direct_call_entry(
+                cache_entry,
+                argc,
+                DirectCallTarget::Closure(Rc::clone(&closure)),
+            );
+            let frame = self.frames.last().unwrap();
+            frame.chunk.set_inline_cache_entry(slot, next_entry);
+        }
+
         let frame = self.frames.last_mut().unwrap();
         frame.ip += 1;
         let args_start = self.stack.len() - argc;
         Some(self.push_closure_frame_from_stack_args(&closure, args_start, callee_idx))
+    }
+
+    fn direct_call_cacheable(closure: &VmClosure) -> bool {
+        !closure.func.is_generator
+            && crate::step_runtime::step_definition_for_function(&closure.func.name).is_none()
+    }
+
+    fn try_cached_direct_call(
+        &self,
+        cache: &InlineCacheEntry,
+        argc: usize,
+        callee_idx: usize,
+    ) -> Option<Rc<VmClosure>> {
+        let InlineCacheEntry::DirectCall {
+            state:
+                DirectCallState::Specialized {
+                    argc: cached_argc,
+                    target: DirectCallTarget::Closure(cached_closure),
+                    ..
+                },
+        } = cache
+        else {
+            return None;
+        };
+        if *cached_argc != argc {
+            return None;
+        }
+        let VmValue::Closure(callee) = self.stack.get(callee_idx)? else {
+            return None;
+        };
+        if !Rc::ptr_eq(cached_closure, callee) {
+            return None;
+        }
+        Some(Rc::clone(cached_closure))
+    }
+
+    fn next_direct_call_entry(
+        previous: InlineCacheEntry,
+        argc: usize,
+        target: DirectCallTarget,
+    ) -> InlineCacheEntry {
+        let state = match previous {
+            InlineCacheEntry::DirectCall {
+                state:
+                    DirectCallState::Warmup {
+                        argc: cached_argc,
+                        target: cached_target,
+                        hits,
+                    },
+            } if cached_argc == argc && cached_target == target => {
+                let hits = hits.saturating_add(1);
+                if hits >= DIRECT_CALL_QUICKEN_THRESHOLD {
+                    DirectCallState::Specialized {
+                        argc,
+                        target,
+                        hits: hits as u64,
+                        misses: 0,
+                    }
+                } else {
+                    DirectCallState::Warmup { argc, target, hits }
+                }
+            }
+            InlineCacheEntry::DirectCall {
+                state:
+                    DirectCallState::Specialized {
+                        argc: cached_argc,
+                        target: cached_target,
+                        hits,
+                        misses,
+                    },
+            } if cached_argc == argc && cached_target == target => DirectCallState::Specialized {
+                argc,
+                target,
+                hits: hits.saturating_add(1),
+                misses,
+            },
+            InlineCacheEntry::DirectCall {
+                state: DirectCallState::Specialized { misses: 0, .. },
+            } => DirectCallState::Specialized {
+                argc,
+                target,
+                hits: 1,
+                misses: 1,
+            },
+            _ => DirectCallState::Warmup {
+                argc,
+                target,
+                hits: 1,
+            },
+        };
+        InlineCacheEntry::DirectCall { state }
     }
 
     /// Async path for `Op::Call`. Arguments stay on the VM stack until the
@@ -853,9 +963,18 @@ impl super::super::Vm {
     /// resolves synchronously in the hot case but still pays the
     /// future-state-machine tax.
     pub(super) fn execute_call_builtin_sync(&mut self) -> Option<Result<(), VmError>> {
+        let (name_idx, argc, cache_slot, cache_entry) = {
+            let frame = self.frames.last().unwrap();
+            let op_offset = frame.ip.saturating_sub(1);
+            let name_idx = frame.chunk.read_u16(frame.ip + 8) as usize;
+            let argc = frame.chunk.code[frame.ip + 10] as usize;
+            let cache_slot = frame.chunk.inline_cache_slot(op_offset);
+            let cache_entry = cache_slot
+                .map(|slot| frame.chunk.inline_cache_entry(slot))
+                .unwrap_or(InlineCacheEntry::Empty);
+            (name_idx, argc, cache_slot, cache_entry)
+        };
         let frame = self.frames.last().unwrap();
-        let name_idx = frame.chunk.read_u16(frame.ip + 8) as usize;
-        let argc = frame.chunk.code[frame.ip + 10] as usize;
         let name = Self::const_str(&frame.chunk.constants[name_idx]).ok()?;
 
         // Names handled by `try_call_special_name` are runtime constructs
@@ -866,18 +985,55 @@ impl super::super::Vm {
             return None;
         }
 
-        let closure = self.resolve_named_closure(name)?;
-        if closure.func.is_generator {
+        let closure = match self.try_cached_named_direct_call(&cache_entry, name, argc) {
+            Some(closure) => closure,
+            None => self.resolve_named_closure(name)?,
+        };
+        if !Self::direct_call_cacheable(&closure) {
             return None;
         }
-        if crate::step_runtime::step_definition_for_function(&closure.func.name).is_some() {
-            return None;
+
+        if let Some(slot) = cache_slot {
+            let next_entry = Self::next_direct_call_entry(
+                cache_entry,
+                argc,
+                DirectCallTarget::Closure(Rc::clone(&closure)),
+            );
+            let frame = self.frames.last().unwrap();
+            frame.chunk.set_inline_cache_entry(slot, next_entry);
         }
 
         let frame = self.frames.last_mut().unwrap();
         frame.ip += 11;
         let args_start = self.stack.len().checked_sub(argc)?;
         Some(self.push_closure_frame_from_stack_args(&closure, args_start, args_start))
+    }
+
+    fn try_cached_named_direct_call(
+        &self,
+        cache: &InlineCacheEntry,
+        name: &str,
+        argc: usize,
+    ) -> Option<Rc<VmClosure>> {
+        let InlineCacheEntry::DirectCall {
+            state:
+                DirectCallState::Specialized {
+                    argc: cached_argc,
+                    target: DirectCallTarget::Closure(cached_closure),
+                    ..
+                },
+        } = cache
+        else {
+            return None;
+        };
+        if *cached_argc != argc {
+            return None;
+        }
+        let resolved = self.resolve_named_closure(name)?;
+        if !Rc::ptr_eq(cached_closure, &resolved) {
+            return None;
+        }
+        Some(Rc::clone(cached_closure))
     }
 
     /// Async path for `Op::CallBuiltin`. Arguments stay on the VM stack
