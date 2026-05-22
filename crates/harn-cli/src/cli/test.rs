@@ -49,6 +49,11 @@ pub(crate) struct TestArgs {
     /// Show per-test timing and summary statistics.
     #[arg(long, action = ArgAction::SetTrue)]
     pub timing: bool,
+    /// Emit per-test phase timings (setup / compile / execute /
+    /// teardown) to stderr alongside the standard output. Also honored
+    /// via `HARN_TEST_DIAGNOSE=1`.
+    #[arg(long, action = ArgAction::SetTrue)]
+    pub diagnose: bool,
     /// Record LLM fixtures to .harn-fixtures/.
     #[arg(long)]
     pub record: bool,

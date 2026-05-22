@@ -17,6 +17,10 @@ pub struct TestResult {
     pub passed: bool,
     pub error: Option<String>,
     pub duration_ms: u64,
+    /// Per-phase timings. Populated by `execute_case`; default-zero on
+    /// discovery/worker-error rows. Used by `--diagnose` and the
+    /// `--timing` aggregate.
+    pub phases: PhaseTimings,
 }
 
 #[derive(Clone, Debug)]
@@ -26,6 +30,74 @@ pub struct TestSummary {
     pub failed: usize,
     pub total: usize,
     pub duration_ms: u64,
+    /// Aggregated phase costs across the entire run.
+    pub aggregate: AggregateTimings,
+}
+
+/// Wall-clock cost of each phase of a single test execution.
+///
+/// Sums to the test's `duration_ms` modulo measurement overhead. Surfaced
+/// so consumers can attribute cold-start vs assertion cost without
+/// having to instrument the runner externally.
+#[derive(Debug, Default, Clone, Copy)]
+pub struct PhaseTimings {
+    /// VM construction + stdlib/hostlib registration + skill install +
+    /// runtime extension install + manifest hooks/triggers install.
+    pub setup_ms: u64,
+    /// `Compiler::compile_named` time for this test's chunk.
+    pub compile_ms: u64,
+    /// `vm.execute(chunk)` wall time, i.e. the actual user-test body.
+    pub execute_ms: u64,
+    /// `reset_thread_local_state` between tests.
+    pub teardown_ms: u64,
+}
+
+/// Aggregated cost across the run. Mirrors [`PhaseTimings`] plus the
+/// suite-level collection cost (discover + parse).
+#[derive(Debug, Default, Clone, Copy)]
+pub struct AggregateTimings {
+    pub collection_ms: u64,
+    pub setup_ms: u64,
+    pub compile_ms: u64,
+    pub execute_ms: u64,
+    pub teardown_ms: u64,
+}
+
+impl AggregateTimings {
+    fn from_results(collection_ms: u64, results: &[TestResult]) -> Self {
+        results.iter().map(|r| r.phases).fold(
+            Self {
+                collection_ms,
+                ..Self::default()
+            },
+            |acc, p| Self {
+                collection_ms: acc.collection_ms,
+                setup_ms: acc.setup_ms.saturating_add(p.setup_ms),
+                compile_ms: acc.compile_ms.saturating_add(p.compile_ms),
+                execute_ms: acc.execute_ms.saturating_add(p.execute_ms),
+                teardown_ms: acc.teardown_ms.saturating_add(p.teardown_ms),
+            },
+        )
+    }
+}
+
+impl TestResult {
+    /// Emit a one-line phase breakdown to stderr. Driven by `--diagnose`
+    /// / `HARN_TEST_DIAGNOSE=1`. The format is intentionally
+    /// machine-readable so downstream eval pipelines can grep it.
+    fn emit_diagnose(&self) {
+        let outcome = if self.passed { "ok" } else { "FAIL" };
+        eprintln!(
+            "[harn test diag] {} {} setup={}ms compile={}ms execute={}ms teardown={}ms total={}ms",
+            outcome,
+            self.name,
+            self.phases.setup_ms,
+            self.phases.compile_ms,
+            self.phases.execute_ms,
+            self.phases.teardown_ms,
+            self.duration_ms,
+        );
+    }
 }
 
 #[derive(Clone, Debug)]
@@ -78,6 +150,10 @@ pub struct RunOptions {
     /// Optional progress callback. When set, the runner emits events as
     /// the suite progresses; consumers (CLI, dev mode) render output.
     pub progress: Option<TestRunProgress>,
+    /// Emit per-test phase timings (setup / compile / execute /
+    /// teardown) to stderr. Also honored via `HARN_TEST_DIAGNOSE=1` so
+    /// users can flip the flag without restarting their shell.
+    pub diagnose: bool,
 }
 
 impl RunOptions {
@@ -140,6 +216,7 @@ pub async fn run_tests(
         jobs: None,
         cli_skill_dirs: cli_skill_dirs.to_vec(),
         progress: None,
+        diagnose: diagnose_enabled_via_env(),
     };
     run_tests_with_options(path, &options).await
 }
@@ -160,8 +237,19 @@ pub async fn run_tests_with_progress(
         jobs: None,
         cli_skill_dirs: cli_skill_dirs.to_vec(),
         progress,
+        diagnose: diagnose_enabled_via_env(),
     };
     run_tests_with_options(path, &options).await
+}
+
+fn diagnose_enabled_via_env() -> bool {
+    let Ok(raw) = std::env::var("HARN_TEST_DIAGNOSE") else {
+        return false;
+    };
+    matches!(
+        raw.to_ascii_lowercase().as_str(),
+        "1" | "true" | "yes" | "on"
+    )
 }
 
 /// Run tests with full control over scheduling, worker count, and
@@ -175,6 +263,7 @@ pub async fn run_tests_with_options(path: &Path, options: &RunOptions) -> TestSu
 
     let start = Instant::now();
 
+    let collection_start = Instant::now();
     let canonical_target = canonicalize_existing_path(path);
     let files = if canonical_target.is_dir() {
         discover_test_files(&canonical_target)
@@ -190,6 +279,7 @@ pub async fn run_tests_with_options(path: &Path, options: &RunOptions) -> TestSu
         .unwrap_or_default();
 
     let discovery = discover_test_cases(&files, options.filter.as_deref(), workers);
+    let collection_ms = collection_start.elapsed().as_millis() as u64;
 
     emit_progress(
         &options.progress,
@@ -222,6 +312,7 @@ pub async fn run_tests_with_options(path: &Path, options: &RunOptions) -> TestSu
     let total = all_results.len();
     let passed = all_results.iter().filter(|r| r.passed).count();
     let failed = total - passed;
+    let aggregate = AggregateTimings::from_results(collection_ms, &all_results);
 
     if let Some(path) = timings_path.as_deref() {
         update_timings_cache(path, timings, &all_results);
@@ -233,6 +324,7 @@ pub async fn run_tests_with_options(path: &Path, options: &RunOptions) -> TestSu
         failed,
         total,
         duration_ms: start.elapsed().as_millis() as u64,
+        aggregate,
     }
 }
 
@@ -309,6 +401,7 @@ fn discover_test_cases(files: &[PathBuf], filter: Option<&str>, workers: usize) 
                     passed: false,
                     error: Some(format!("Failed to read {}: {e}", file.display())),
                     duration_ms: 0,
+                    phases: PhaseTimings::default(),
                 });
                 continue;
             }
@@ -323,6 +416,7 @@ fn discover_test_cases(files: &[PathBuf], filter: Option<&str>, workers: usize) 
                     passed: false,
                     error: Some(e),
                     duration_ms: 0,
+                    phases: PhaseTimings::default(),
                 });
                 continue;
             }
@@ -524,6 +618,9 @@ async fn execute_cases(
             );
             let result =
                 execute_case(&case, &cwd, options.timeout_ms, &options.cli_skill_dirs).await;
+            if options.diagnose {
+                result.emit_diagnose();
+            }
             emit_progress(
                 &options.progress,
                 TestRunEvent::TestFinished(result.clone()),
@@ -546,6 +643,7 @@ async fn execute_cases(
         let timeout_ms = options.timeout_ms;
         let cli_skill_dirs = options.cli_skill_dirs.clone();
         let progress = options.progress.clone();
+        let diagnose = options.diagnose;
         let handle = thread::Builder::new()
             .name(format!("harn-test-worker-{worker_idx}"))
             .spawn(move || {
@@ -561,6 +659,7 @@ async fn execute_cases(
                             passed: false,
                             error: Some(format!("failed to start test runtime: {error}")),
                             duration_ms: 0,
+                            phases: PhaseTimings::default(),
                         });
                         return;
                     }
@@ -584,6 +683,9 @@ async fn execute_cases(
                     );
                     let result =
                         runtime.block_on(execute_case(&case, &cwd, timeout_ms, &cli_skill_dirs));
+                    if diagnose {
+                        result.emit_diagnose();
+                    }
                     emit_progress(&progress, TestRunEvent::TestFinished(result.clone()));
                     results.lock().unwrap().push(result);
                 }
@@ -690,24 +792,30 @@ async fn execute_case(
 ) -> TestResult {
     harn_vm::reset_thread_local_state();
 
-    let start = Instant::now();
+    let mut phases = PhaseTimings::default();
+    let total_start = Instant::now();
 
+    let compile_start = Instant::now();
     let chunk = match harn_vm::Compiler::new().compile_named(&case.program, &case.name) {
         Ok(c) => c,
         Err(e) => {
+            phases.compile_ms = compile_start.elapsed().as_millis() as u64;
             return TestResult {
                 name: case.name.clone(),
                 file: case.file.display().to_string(),
                 passed: false,
                 error: Some(format!("Compile error: {e}")),
-                duration_ms: 0,
+                duration_ms: total_start.elapsed().as_millis() as u64,
+                phases,
             };
         }
     };
+    phases.compile_ms = compile_start.elapsed().as_millis() as u64;
 
     let local = tokio::task::LocalSet::new();
     let timeout = std::time::Duration::from_millis(timeout_ms);
     let file_display = case.file.display().to_string();
+    let setup_start = Instant::now();
     let result = tokio::time::timeout(
         timeout,
         local.run_until(async {
@@ -764,40 +872,54 @@ async fn execute_case(
                 .await
                 .map_err(|error| format!("failed to install manifest hooks: {error}"))?;
             vm.set_harness(harn_vm::Harness::real());
-            let result = match vm.execute(&chunk).await {
+            let setup_ms = setup_start.elapsed().as_millis() as u64;
+            let exec_start = Instant::now();
+            let outcome = match vm.execute(&chunk).await {
                 Ok(val) => Ok(val),
                 Err(e) => Err(vm.format_runtime_error(&e)),
             };
+            let execute_ms = exec_start.elapsed().as_millis() as u64;
             harn_vm::egress::reset_egress_policy_for_host();
-            result
+            Ok::<_, String>((outcome, setup_ms, execute_ms))
         }),
     )
     .await;
 
-    let duration = start.elapsed().as_millis() as u64;
+    let teardown_start = Instant::now();
+    // Clear thread-locals so the next case scheduled onto this worker
+    // sees a clean slate. Wall clock for this work lands in the
+    // teardown bucket so the phase breakdown sums to wall time.
+    harn_vm::reset_thread_local_state();
+    phases.teardown_ms = teardown_start.elapsed().as_millis() as u64;
 
-    match result {
-        Ok(Ok(_)) => TestResult {
-            name: case.name.clone(),
-            file: file_display,
-            passed: true,
-            error: None,
-            duration_ms: duration,
-        },
-        Ok(Err(e)) => TestResult {
-            name: case.name.clone(),
-            file: file_display,
-            passed: false,
-            error: Some(e),
-            duration_ms: duration,
-        },
-        Err(_) => TestResult {
-            name: case.name.clone(),
-            file: file_display,
-            passed: false,
-            error: Some(format!("timed out after {timeout_ms}ms")),
-            duration_ms: timeout_ms,
-        },
+    let elapsed_ms = total_start.elapsed().as_millis() as u64;
+    let (passed, error, duration_ms) = match result {
+        Ok(Ok((outcome, setup_ms, execute_ms))) => {
+            phases.setup_ms = setup_ms;
+            phases.execute_ms = execute_ms;
+            match outcome {
+                Ok(_) => (true, None, elapsed_ms),
+                Err(message) => (false, Some(message), elapsed_ms),
+            }
+        }
+        Ok(Err(setup_error)) => (false, Some(setup_error), elapsed_ms),
+        // Report `timeout_ms` rather than `elapsed_ms` for timeouts so a
+        // suite-wide aggregate still reflects the configured budget that
+        // was hit, not the slightly-earlier moment we tore down at.
+        Err(_) => (
+            false,
+            Some(format!("timed out after {timeout_ms}ms")),
+            timeout_ms,
+        ),
+    };
+
+    TestResult {
+        name: case.name.clone(),
+        file: file_display,
+        passed,
+        error,
+        duration_ms,
+        phases,
     }
 }
 
@@ -1098,12 +1220,9 @@ pipeline test_light(task) {}
         );
 
         let opts = RunOptions {
-            filter: None,
-            timeout_ms: 5_000,
             parallel: true,
             jobs: Some(2),
-            cli_skill_dirs: vec![],
-            progress: None,
+            ..RunOptions::new(5_000)
         };
         let summary = run_tests_with_options(&temp.path().join("suite"), &opts).await;
         assert_eq!(summary.failed, 0, "{:?}", summary.results);
@@ -1128,12 +1247,9 @@ pipeline test_serial_two(task) {}
         );
 
         let opts = RunOptions {
-            filter: None,
-            timeout_ms: 5_000,
             parallel: true,
             jobs: Some(4),
-            cli_skill_dirs: vec![],
-            progress: None,
+            ..RunOptions::new(5_000)
         };
         let summary = run_tests_with_options(&temp.path().join("suite"), &opts).await;
         assert_eq!(summary.failed, 0, "{:?}", summary.results);
@@ -1156,12 +1272,9 @@ pipeline test_second(task) {}
         );
 
         let opts = RunOptions {
-            filter: None,
-            timeout_ms: 5_000,
             parallel: true,
             jobs: Some(2),
-            cli_skill_dirs: vec![],
-            progress: None,
+            ..RunOptions::new(5_000)
         };
         let summary = run_tests_with_options(&temp.path().join("suite"), &opts).await;
         assert_eq!(summary.passed, 2);
@@ -1176,6 +1289,79 @@ pipeline test_second(task) {}
         assert!(
             stored.keys().any(|key| key.contains("test_second")),
             "expected timings for test_second in {stored:?}"
+        );
+    }
+
+    /// Regression fixture: a worker thread that runs multiple cases must
+    /// reset thread-local state between them. Test A pins the clock
+    /// mock to a future timestamp; test B asserts the clock is fresh.
+    /// Fails if the per-case `reset_thread_local_state()` in
+    /// `execute_case` ever regresses. Pins workers to 1 so both tests
+    /// land on the same scheduler thread.
+    #[tokio::test]
+    async fn worker_resets_thread_local_state_between_cases() {
+        let _env_guard = crate::tests::common::env_lock::lock_env().lock().await;
+        let temp = TempTestDir::new();
+        temp.write(
+            "suite/test_isolation.harn",
+            r#"
+// The leak probe pins the clock to a future-but-i64-safe value
+// (year ~2128) so a leaked mock is observable. Larger values overflow
+// the nanosecond conversion inside the mock clock.
+pipeline test_a_pins_clock(task) {
+  mock_time(5000000000000)
+  assert_eq(now_ms(), 5000000000000)
+}
+
+pipeline test_b_clock_is_fresh(task) {
+  let ms = now_ms()
+  assert(ms < 5000000000000, "clock mock leaked from previous test")
+}
+"#,
+        );
+
+        let opts = RunOptions::new(5_000);
+        let summary = run_tests_with_options(&temp.path().join("suite"), &opts).await;
+        assert_eq!(
+            summary.failed,
+            0,
+            "state leaked between tests: {:?}",
+            summary
+                .results
+                .iter()
+                .filter(|r| !r.passed)
+                .map(|r| (r.name.clone(), r.error.clone()))
+                .collect::<Vec<_>>()
+        );
+        assert_eq!(summary.passed, 2);
+    }
+
+    #[tokio::test]
+    async fn summary_aggregate_timings_sum_phases_across_results() {
+        let _env_guard = crate::tests::common::env_lock::lock_env().lock().await;
+        let temp = TempTestDir::new();
+        temp.write(
+            "suite/test_phases.harn",
+            r#"
+pipeline test_one(task) { assert_eq(1, 1) }
+pipeline test_two(task) { assert_eq(2, 2) }
+"#,
+        );
+
+        let summary = run_tests(&temp.path().join("suite"), None, 5_000, false, &[]).await;
+        assert_eq!(summary.passed, 2);
+        let per_test_sum: u64 = summary
+            .results
+            .iter()
+            .map(|r| r.phases.setup_ms.saturating_add(r.phases.compile_ms))
+            .sum();
+        let agg_sum = summary
+            .aggregate
+            .setup_ms
+            .saturating_add(summary.aggregate.compile_ms);
+        assert_eq!(
+            per_test_sum, agg_sum,
+            "aggregate setup+compile must equal sum of per-test setup+compile"
         );
     }
 
@@ -1205,12 +1391,10 @@ pipeline test_b(task) {}
             });
         });
         let opts = RunOptions {
-            filter: None,
-            timeout_ms: 5_000,
             parallel: true,
             jobs: Some(2),
-            cli_skill_dirs: vec![],
             progress: Some(progress),
+            ..RunOptions::new(5_000)
         };
         let _ = run_tests_with_options(&temp.path().join("suite"), &opts).await;
         let events = events.lock().unwrap();

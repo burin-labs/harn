@@ -48,17 +48,19 @@ pipeline test_beta(task) {
         String::from_utf8_lossy(&output.stderr)
     );
     let stdout = String::from_utf8_lossy(&output.stdout);
-    assert!(stdout.contains("Running 2 tests from 2 files (sequential)"));
-    assert!(stdout.contains("RUN   file 1/2"));
+    assert!(
+        stdout.contains("Running 2 tests from 2 files with 1 worker (sequential scheduling)"),
+        "stdout did not include the suite banner:\n{stdout}"
+    );
     assert!(stdout.contains("RUN   test_alpha"));
     assert!(stdout.contains("PASS"));
     assert!(stdout.contains("Slowest 2 tests:"));
     assert!(stdout.contains("Slowest 2 files:"));
 
-    let first_file = stdout.find("RUN   file 1/2").expect("file progress");
+    let first_run = stdout.find("RUN   test_alpha").expect("alpha start");
     let first_pass = stdout.find("PASS").expect("pass output");
     assert!(
-        first_file < first_pass,
-        "file progress should be emitted before completed test results:\n{stdout}"
+        first_run < first_pass,
+        "test-start progress should be emitted before PASS:\n{stdout}"
     );
 }

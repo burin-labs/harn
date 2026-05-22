@@ -42,6 +42,7 @@ pub(crate) struct UserTestRunArgs<'a> {
     pub jobs: Option<usize>,
     pub verbose: bool,
     pub timing: bool,
+    pub diagnose: bool,
     pub cli_skill_dirs: &'a [PathBuf],
 }
 
@@ -1777,6 +1778,16 @@ fn print_user_test_timing(summary: &test_runner::TestSummary) {
             println!("  {duration_ms:>6} ms  {file}");
         }
     }
+
+    // Phase-level aggregate. Useful for downstream callers (eg.
+    // burin-code's preflight) that want to attribute cold-start vs.
+    // assertion cost without running with `--diagnose` per test.
+    let agg = summary.aggregate;
+    println!();
+    println!(
+        "Phase totals: collection={} ms  setup={} ms  compile={} ms  execute={} ms  teardown={} ms",
+        agg.collection_ms, agg.setup_ms, agg.compile_ms, agg.execute_ms, agg.teardown_ms,
+    );
 }
 
 async fn run_user_tests_once(path: &Path, args: UserTestRunArgs<'_>) -> test_runner::TestSummary {
@@ -1787,6 +1798,7 @@ async fn run_user_tests_once(path: &Path, args: UserTestRunArgs<'_>) -> test_run
         jobs: args.jobs,
         cli_skill_dirs: args.cli_skill_dirs.to_vec(),
         progress: Some(user_test_progress(args.verbose)),
+        diagnose: args.diagnose,
     };
     let summary = test_runner::run_tests_with_options(path, &options).await;
     print_test_results(
