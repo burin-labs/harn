@@ -191,13 +191,21 @@ jobs:
     runs-on: windows-latest
     needs: changes
     if: needs.changes.outputs.windows == 'true' || github.event_name == 'push'
+    # Drop sccache on the Windows job. PR #2114 documented 0% cache-hit
+    # rate on the harn-vm Windows compile plus periodic `os error 10054`
+    # failures where the GHA backend dropped the rmeta upload mid-rustc.
+    # build-release-binaries.yml and release-smoke.yml already skip
+    # sccache on Windows. Swatinem/rust-cache stays in place.
+    #
+    # Bench on PRs #2127 (E2 line-tables-only), #2128 (E1 this change),
+    # #2129 (E3 both) — compile+test step, warm-cache rerun:
+    #     baseline 8:29 → this PR 6:21 (~25% saved).
+    # Pairing this with `CARGO_PROFILE_DEV_DEBUG=line-tables-only` (E3)
+    # was tested and actually regressed Windows compile time vs E1 alone,
+    # so the dev-debug override is not applied here.
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
       - uses: dtolnay/rust-toolchain@29eef336d9b2848a0b548edc03f92a220660cdb8 # stable
-      - uses: mozilla-actions/sccache-action@9e7fa8a12102821edf02ca5dbea1acd0f89a2696 # v0.0.10
-      - name: Configure Cargo to use sccache
-        shell: bash
-        run: echo "RUSTC_WRAPPER=${SCCACHE_PATH}" >> "$GITHUB_ENV"
       - uses: Swatinem/rust-cache@c19371144df3bb44fab255c43d04cbc2ab54d1c4 # v2.9.1
         continue-on-error: true
         with:
