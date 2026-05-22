@@ -821,32 +821,29 @@ async fn async_main() {
                         command_error(
                             "only `harn test conformance` accepts a second positional target",
                         );
-                    } else if args.watch {
-                        commands::test::run_watch_tests(
-                            t,
-                            args.filter.as_deref(),
-                            args.timeout,
-                            args.parallel,
-                            args.verbose,
-                            args.timing,
-                            &cli_skill_dirs,
-                        )
-                        .await;
                     } else {
-                        commands::test::run_user_tests(
-                            t,
-                            args.filter.as_deref(),
-                            args.timeout,
-                            args.parallel,
-                            args.verbose,
-                            args.timing,
-                            &cli_skill_dirs,
-                            commands::test::UserTestReportConfig {
-                                junit_path: args.junit.as_deref(),
-                                json_out_path: args.json_out.as_deref(),
-                            },
-                        )
-                        .await;
+                        let run_args = commands::test::UserTestRunArgs {
+                            filter: args.filter.as_deref(),
+                            timeout_ms: args.timeout,
+                            parallel: args.parallel,
+                            jobs: args.jobs,
+                            verbose: args.verbose,
+                            timing: args.timing,
+                            cli_skill_dirs: &cli_skill_dirs,
+                        };
+                        if args.watch {
+                            commands::test::run_watch_tests(t, run_args).await;
+                        } else {
+                            commands::test::run_user_tests(
+                                t,
+                                run_args,
+                                commands::test::UserTestReportConfig {
+                                    junit_path: args.junit.as_deref(),
+                                    json_out_path: args.json_out.as_deref(),
+                                },
+                            )
+                            .await;
+                        }
                     }
                 } else {
                     let test_dir = if PathBuf::from("tests").is_dir() {
@@ -859,26 +856,21 @@ async fn async_main() {
                             "only `harn test conformance` accepts a second positional target",
                         );
                     }
+                    let run_args = commands::test::UserTestRunArgs {
+                        filter: args.filter.as_deref(),
+                        timeout_ms: args.timeout,
+                        parallel: args.parallel,
+                        jobs: args.jobs,
+                        verbose: args.verbose,
+                        timing: args.timing,
+                        cli_skill_dirs: &cli_skill_dirs,
+                    };
                     if args.watch {
-                        commands::test::run_watch_tests(
-                            &test_dir,
-                            args.filter.as_deref(),
-                            args.timeout,
-                            args.parallel,
-                            args.verbose,
-                            args.timing,
-                            &cli_skill_dirs,
-                        )
-                        .await;
+                        commands::test::run_watch_tests(&test_dir, run_args).await;
                     } else {
                         commands::test::run_user_tests(
                             &test_dir,
-                            args.filter.as_deref(),
-                            args.timeout,
-                            args.parallel,
-                            args.verbose,
-                            args.timing,
-                            &cli_skill_dirs,
+                            run_args,
                             commands::test::UserTestReportConfig {
                                 junit_path: args.junit.as_deref(),
                                 json_out_path: args.json_out.as_deref(),
