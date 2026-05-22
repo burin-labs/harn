@@ -1,9 +1,9 @@
 // @harn-entrypoint-category llm.stdlib
 //
-// std/llm/refine — meta-prompt-based prompt refinement.
+// std/llm/refine - meta-prompt-based prompt refinement.
 //
 // Inspired by:
-//   - DSPy MIPROv2 (Khattab et al.) — instruction tuning via meta-prompting.
+//   - DSPy MIPROv2 (Khattab et al.), instruction tuning via meta-prompting.
 //   - OpenAI Prompt Optimizer guide
 //     (https://platform.openai.com/docs/guides/prompt-engineering).
 //   - OpenAI Cookbook meta-prompting recipe
@@ -138,7 +138,7 @@ fn __build_meta_prompt(user_prompt, style, target_size, keep, strip) {
   let keep_block = __bullet_list("- Keep verbatim:", keep)
   let strip_block = __bullet_list("- Remove:", strip)
   var lines = [
-    "You are a prompt-engineering reviewer. Rewrite the user prompt below"
+    "You rewrite prompts for production LLM calls. Rewrite the user prompt below"
       + " into a "
       + style_clause
       + " prompt of "
@@ -146,6 +146,9 @@ fn __build_meta_prompt(user_prompt, style, target_size, keep, strip) {
       + ". Preserve original intent.",
     "",
     "Strict rules:",
+    "- Prefer short, direct instructions with clear success criteria.",
+    "- Replace vague adjectives with objective constraints where the original gives enough information.",
+    "- Do not ask for chain-of-thought. Ask for a brief rationale or verification summary only when useful.",
     "- Do not invent goals or constraints not present in the original.",
     "- Preserve every \"MUST\" / \"MUST NOT\" verbatim.",
   ]

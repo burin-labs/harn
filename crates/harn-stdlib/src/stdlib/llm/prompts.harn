@@ -1,7 +1,7 @@
 /**
  * @harn-entrypoint-category llm.stdlib
  *
- * std/llm/prompts — system-prompt builders for non-agent_loop callers.
+ * std/llm/prompts - system-prompt builders for non-agent_loop callers.
  * Deterministic-by-design so callers benefit from prompt caching.
  */
 fn __tone_voice(tone) {
@@ -9,9 +9,9 @@ fn __tone_voice(tone) {
     return "Voice: terse and direct. Skip pleasantries; keep responses brief."
   }
   if tone == "conversational" {
-    return "Voice: warm and conversational. Sound like a helpful colleague."
+    return "Voice: conversational and plainspoken. Sound like a helpful colleague."
   }
-  return "Voice: professional and precise. Use clear, neutral language."
+  return "Voice: precise and neutral. Use clear, plain language."
 }
 
 fn __bulleted(items) {
@@ -197,11 +197,10 @@ fn __tools_listing(tools) {
  * Render a tool-use prelude for non-agent_loop callers. format ∈
  * {"native", "text"}. Returns a deterministic string.
  *
- * Note: this is an inline rendering rather than re-using the existing
+ * Note: this is an inline rendering rather than reusing the existing
  * agent/prompts/tool_contract_*.harn.prompt assets because those expect
  * a richer binding context (done_sentinel, native_contract, etc.) than
- * plain non-loop callers can supply. Could be refactored in the future
- * to share a common prompt asset.
+ * plain non-loop callers can supply.
  *
  * @effects: []
  * @allocation: heap
@@ -219,6 +218,8 @@ pub fn tool_use_prelude(tools, format) {
         "Tools are available via the provider's native tool-calling channel.",
         "- Invoke tools through the native tool-calling API only.",
         "- Do not emit tool-call syntax in assistant prose, code fences, or JSON envelopes.",
+        "- Inspect before changing when the next read or check is cheap.",
+        "- Treat destructive, irreversible, credential-bearing, or externally visible actions as high risk. Confirm authorization or use the active approval path before taking them unless already authorized.",
         "- Keep assistant prose short and operational.",
         "Tools available:",
         listing,
@@ -233,6 +234,8 @@ pub fn tool_use_prelude(tools, format) {
       "- Emit one ```call <tool_name>``` block per invocation.",
       "- Use only tools listed below.",
       "- Wait for tool results before continuing.",
+      "- Inspect before changing when the next read or check is cheap.",
+      "- Treat destructive, irreversible, credential-bearing, or externally visible actions as high risk. Confirm authorization or use the active approval path before taking them unless already authorized.",
       "Tools available:",
       listing,
     ],

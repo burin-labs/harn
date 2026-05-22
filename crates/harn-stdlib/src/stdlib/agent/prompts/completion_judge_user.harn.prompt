@@ -10,4 +10,10 @@ Transcript context:
 Latest assistant text:
 {{ last_text }}
 
-Decide whether this agent loop may yield to the user now. Consider the original user request, recent assistant prose, tool calls, and tool result outputs together. If the latest assistant message included a tool call, do not require an extra prose-only turn when the assistant text plus tool result already form a clear final answer. Respond as JSON with `verdict`, `reasoning`, and `next_step`. Set `verdict` to `"done"` only when the current visible answer satisfies the request; otherwise set it to `"continue"` and make `next_step` a concrete instruction for the next turn. If there is no next step, use an empty string for `next_step`.
+Decide whether this agent loop may yield to the user now. Consider the original request, recent assistant prose, tool calls, and tool result outputs together. If the latest assistant message included a tool call, do not require an extra prose-only turn when the assistant text plus tool result already form a clear final answer.
+
+Return JSON with `verdict`, `reasoning`, and `next_step`.
+- Set `verdict` to `"done"` only when the current visible answer satisfies the request and does not leave required verification or high-risk authorization unresolved.
+- Otherwise set `verdict` to `"continue"` and make `next_step` a concrete instruction for the next turn.
+- Use `reasoning` for one short rationale, not chain-of-thought.
+- If there is no next step, use an empty string for `next_step`.

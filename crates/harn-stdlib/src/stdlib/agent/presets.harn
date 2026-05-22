@@ -153,7 +153,7 @@ fn __default_budget_for_kind(kind) {
   }
   if kind == "merge_captain" {
     // Merge sweeps span repair turns, validation, and approval cycles
-    // — long-running by design.
+    // Long-running by design.
     return {mode: "adaptive", initial: 8, max: 60, extend_by: 4}
   }
   if kind == "review_captain" {
@@ -195,8 +195,8 @@ fn __turn_policy_for_kind(kind, opts) {
   if kind == "verify" {
     return {allow_done_sentinel: false, max_prose_chars: 12000}
   }
-  // Captains can emit longer per-turn rationales — sweep summaries,
-  // approval rationale, release notes — bump the cap accordingly.
+  // Captains can emit longer per-turn rationales: sweep summaries,
+  // approval rationale, and release notes.
   if __is_captain(kind) {
     return {allow_done_sentinel: false, max_prose_chars: 60000}
   }
@@ -236,13 +236,8 @@ fn __tool_using_defaults(kind) {
 }
 
 /**
- * Resolves the right `tool_format` for the configured model so it lands in
- * the preset dict before downstream stdlib helpers (postturn / turn / options
- * inspectors) read it. Previously this was hardcoded to `"native"`, which the
- * VM's capability gate rejects for tool-capable text-format routes (e.g.
- * `ollama/qwen3.6:35b-a3b-coding-nvfp4`) with "option `tools` is not supported
- * by ..." before `native_tool_fallback` could engage. Now it defers to
- * `llm_resolve_model`, which consults the capability matrix.
+ * Resolve `tool_format` from the model capability matrix before downstream
+ * stdlib helpers decide whether to use native tools or text-tool prompts.
  */
 fn __preset_default_tool_format(opts) {
   if opts?.tool_format != nil {
@@ -490,7 +485,7 @@ fn __apply_captain_llm_caller(opts, kind) {
  *   - captain:  "merge_captain", "review_captain", "oncall_captain",
  *               "release_captain"
  *
- * The returned dict is a plain `agent_loop` options dict — callers can
+ * The returned dict is a plain `agent_loop` options dict. Callers can
  * spread it into `agent_loop(...)` directly, or merge further overrides
  * on top. Captain presets additionally compose:
  *   - a `tool_caller` middleware stack from any of `audit_sink`,

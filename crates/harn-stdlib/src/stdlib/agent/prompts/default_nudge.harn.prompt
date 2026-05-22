@@ -1,1 +1,1 @@
-{{ if continue_prefix }}Continue: {{ end }}{{ if has_tools }}use a tool call to make progress.{{ else }}make concrete progress in your reply.{{ end }}
+{{ if continue_prefix }}Continue: {{ end }}{{ if has_tools }}use a tool call to inspect, act, or verify the next concrete step.{{ else }}make concrete progress in your reply.{{ end }}
