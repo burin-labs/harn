@@ -273,6 +273,10 @@ pub fn validate_user_call(
         })));
     }
 
+    if !func.has_runtime_type_checks {
+        return Ok(());
+    }
+
     for (i, value) in args.iter().enumerate() {
         let Some(slot) = user_param_for_arg(func, i) else {
             continue;
@@ -406,6 +410,7 @@ fn arity_expect_for(func: &CompiledFunction) -> ArityExpect {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::chunk::Chunk;
     use std::rc::Rc;
 
     fn vm_int(n: i64) -> VmValue {
@@ -422,6 +427,30 @@ mod tests {
 
     fn ty_string() -> TypeExpr {
         TypeExpr::Named("string".into())
+    }
+
+    fn param_slot(name: &str, type_expr: Option<TypeExpr>) -> ParamSlot {
+        ParamSlot {
+            name: name.to_string(),
+            type_expr,
+            has_default: false,
+        }
+    }
+
+    fn compiled_function(params: Vec<ParamSlot>) -> CompiledFunction {
+        let has_runtime_type_checks = CompiledFunction::has_runtime_type_checks_for_params(&params);
+        CompiledFunction {
+            name: "f".to_string(),
+            type_params: Vec::new(),
+            nominal_type_names: Vec::new(),
+            params,
+            default_start: None,
+            chunk: Rc::new(Chunk::new()),
+            is_generator: false,
+            is_stream: false,
+            has_rest_param: false,
+            has_runtime_type_checks,
+        }
     }
 
     #[test]
@@ -524,5 +553,25 @@ mod tests {
             }
             other => panic!("expected ArgTypeMismatch, got {other:?}"),
         }
+    }
+
+    #[test]
+    fn validate_user_call_skips_param_walk_for_untyped_function() {
+        let func = compiled_function(vec![param_slot("value", None)]);
+
+        validate_user_call(&func, &[vm_string("anything")], None).unwrap();
+
+        let err = validate_user_call(&func, &[], None).unwrap_err();
+        assert!(matches!(err, VmError::ArityMismatch(_)));
+    }
+
+    #[test]
+    fn validate_user_call_checks_typed_function() {
+        let func = compiled_function(vec![param_slot("value", Some(ty_int()))]);
+
+        validate_user_call(&func, &[vm_int(1)], None).unwrap();
+
+        let err = validate_user_call(&func, &[vm_string("bad")], None).unwrap_err();
+        assert!(matches!(err, VmError::Runtime(_) | VmError::TypeError(_)));
     }
 }

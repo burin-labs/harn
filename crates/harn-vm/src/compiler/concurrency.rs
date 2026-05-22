@@ -64,16 +64,20 @@ impl Compiler {
         }
         fn_compiler.compile_block(body)?;
         fn_compiler.chunk.emit(Op::Return, self.line);
+        let param_slots = crate::chunk::ParamSlot::vec_from_typed(&typed_params);
+        let has_runtime_type_checks =
+            CompiledFunction::has_runtime_type_checks_for_params(&param_slots);
         let func = CompiledFunction {
             name: fn_name.to_string(),
             type_params: Vec::new(),
             nominal_type_names: fn_compiler.nominal_type_names(),
-            params: crate::chunk::ParamSlot::vec_from_typed(&typed_params),
+            params: param_slots,
             default_start: None,
             chunk: Rc::new(fn_compiler.chunk),
             is_generator: false,
             is_stream: false,
             has_rest_param: false,
+            has_runtime_type_checks,
         };
         let fn_idx = self.chunk.functions.len();
         self.chunk.functions.push(Rc::new(func));
@@ -106,6 +110,7 @@ impl Compiler {
             is_generator: false,
             is_stream: false,
             has_rest_param: false,
+            has_runtime_type_checks: false,
         };
         let fn_idx = self.chunk.functions.len();
         self.chunk.functions.push(Rc::new(func));

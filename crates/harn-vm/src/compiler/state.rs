@@ -1182,16 +1182,20 @@ impl Compiler {
         fn_compiler.chunk.emit(Op::Nil, 0);
         fn_compiler.chunk.emit(Op::Return, 0);
         fn_compiler.chunk.source_file = source_file;
+        let param_slots = crate::chunk::ParamSlot::vec_from_typed(params);
+        let has_runtime_type_checks =
+            CompiledFunction::has_runtime_type_checks_for_params(&param_slots);
         Ok(CompiledFunction {
             name: String::new(),
             type_params: type_params.iter().map(|param| param.name.clone()).collect(),
             nominal_type_names: fn_compiler.nominal_type_names(),
-            params: crate::chunk::ParamSlot::vec_from_typed(params),
+            params: param_slots,
             default_start: TypedParam::default_start(params),
             chunk: Rc::new(fn_compiler.chunk),
             is_generator: is_gen,
             is_stream: false,
             has_rest_param: false,
+            has_runtime_type_checks,
         })
     }
 

@@ -14,7 +14,7 @@
 //! `crates/harn-vm/src/llm/`, `crates/harn-vm/src/vm/`, and the compiler
 //! stay focused.
 
-use std::cell::RefCell;
+use std::cell::{Cell, RefCell};
 use std::collections::BTreeMap;
 use std::rc::Rc;
 
@@ -161,6 +161,8 @@ thread_local! {
         const { RefCell::new(BTreeMap::new()) };
     static PERSONA_REGISTRY: RefCell<BTreeMap<String, Rc<PersonaDefinition>>> =
         const { RefCell::new(BTreeMap::new()) };
+    static STEP_REGISTRY_LEN: Cell<usize> = const { Cell::new(0) };
+    static PERSONA_REGISTRY_LEN: Cell<usize> = const { Cell::new(0) };
     static PERSONA_STACK: RefCell<Vec<ActivePersona>> = const { RefCell::new(Vec::new()) };
     static STEP_STACK: RefCell<Vec<ActiveStep>> = const { RefCell::new(Vec::new()) };
     static COMPLETED_STEPS: RefCell<Vec<CompletedStep>> = const { RefCell::new(Vec::new()) };
@@ -173,29 +175,54 @@ thread_local! {
 pub fn reset_thread_local_state() {
     STEP_REGISTRY.with(|r| r.borrow_mut().clear());
     PERSONA_REGISTRY.with(|r| r.borrow_mut().clear());
+    STEP_REGISTRY_LEN.with(|len| len.set(0));
+    PERSONA_REGISTRY_LEN.with(|len| len.set(0));
     PERSONA_STACK.with(|s| s.borrow_mut().clear());
     STEP_STACK.with(|s| s.borrow_mut().clear());
     COMPLETED_STEPS.with(|c| c.borrow_mut().clear());
     PERSONA_HOOKS.with(|h| h.borrow_mut().clear());
 }
 
+#[inline]
+fn step_registry_empty() -> bool {
+    STEP_REGISTRY_LEN.with(|len| len.get() == 0)
+}
+
+#[inline]
+fn persona_registry_empty() -> bool {
+    PERSONA_REGISTRY_LEN.with(|len| len.get() == 0)
+}
+
+#[inline]
+fn tracked_registries_empty() -> bool {
+    step_registry_empty() && persona_registry_empty()
+}
+
 /// Bind a `@step` function name to its declared metadata. Idempotent: a
 /// second call replaces the prior definition (matches re-evaluation
 /// semantics of `harn run` and the conformance harness).
 pub fn register_step(function: &str, definition: StepDefinition) {
-    STEP_REGISTRY.with(|registry| {
+    let inserted = STEP_REGISTRY.with(|registry| {
         registry
             .borrow_mut()
-            .insert(function.to_string(), Rc::new(definition));
+            .insert(function.to_string(), Rc::new(definition))
+            .is_none()
     });
+    if inserted {
+        STEP_REGISTRY_LEN.with(|len| len.set(len.get() + 1));
+    }
 }
 
 pub fn register_persona(function: &str, definition: PersonaDefinition) {
-    PERSONA_REGISTRY.with(|registry| {
+    let inserted = PERSONA_REGISTRY.with(|registry| {
         registry
             .borrow_mut()
-            .insert(function.to_string(), Rc::new(definition));
+            .insert(function.to_string(), Rc::new(definition))
+            .is_none()
     });
+    if inserted {
+        PERSONA_REGISTRY_LEN.with(|len| len.set(len.get() + 1));
+    }
 }
 
 pub fn register_persona_from_dict(args: Vec<VmValue>) -> Result<VmValue, VmError> {
@@ -442,11 +469,19 @@ pub fn restore_active_context(snapshot: ActiveContextSnapshot) {
 }
 
 pub fn is_tracked_function(function_name: &str) -> bool {
-    STEP_REGISTRY.with(|registry| registry.borrow().contains_key(function_name))
-        || PERSONA_REGISTRY.with(|registry| registry.borrow().contains_key(function_name))
+    if tracked_registries_empty() {
+        return false;
+    }
+    (!step_registry_empty()
+        && STEP_REGISTRY.with(|registry| registry.borrow().contains_key(function_name)))
+        || (!persona_registry_empty()
+            && PERSONA_REGISTRY.with(|registry| registry.borrow().contains_key(function_name)))
 }
 
 pub fn step_definition_for_function(function_name: &str) -> Option<Rc<StepDefinition>> {
+    if step_registry_empty() {
+        return None;
+    }
     STEP_REGISTRY.with(|registry| registry.borrow().get(function_name).cloned())
 }
 
@@ -537,6 +572,9 @@ pub fn matching_hooks(
 }
 
 pub fn maybe_push_active_persona(function_name: &str, frame_depth: usize) -> bool {
+    if persona_registry_empty() {
+        return false;
+    }
     let definition =
         PERSONA_REGISTRY.with(|registry| registry.borrow().get(function_name).cloned());
     let Some(definition) = definition else {
@@ -556,6 +594,9 @@ pub fn maybe_push_active_persona(function_name: &str, frame_depth: usize) -> boo
 /// can record that fact. Called from `Vm::push_closure_frame` after the
 /// new frame has been added.
 pub fn maybe_push_active_step(function_name: &str, frame_depth: usize, args: &[VmValue]) -> bool {
+    if step_registry_empty() {
+        return false;
+    }
     let definition = STEP_REGISTRY.with(|registry| registry.borrow().get(function_name).cloned());
     let Some(definition) = definition else {
         return false;
@@ -1005,6 +1046,39 @@ mod tests {
         fresh_state();
         assert!(!maybe_push_active_step("not_a_step", 1, &[]));
         assert!(active_step_frame_depth().is_none());
+    }
+
+    #[test]
+    fn tracked_registry_empty_fast_path_tracks_registrations_and_reset() {
+        fresh_state();
+        assert!(tracked_registries_empty());
+        assert!(!is_tracked_function("plan_step"));
+
+        register_step(
+            "plan_step",
+            StepDefinition {
+                name: "plan".to_string(),
+                function: "plan_step".to_string(),
+                ..StepDefinition::default()
+            },
+        );
+        assert!(!tracked_registries_empty());
+        assert!(is_tracked_function("plan_step"));
+        assert!(step_definition_for_function("plan_step").is_some());
+
+        register_step(
+            "plan_step",
+            StepDefinition {
+                name: "plan_v2".to_string(),
+                function: "plan_step".to_string(),
+                ..StepDefinition::default()
+            },
+        );
+        assert!(is_tracked_function("plan_step"));
+
+        fresh_state();
+        assert!(tracked_registries_empty());
+        assert!(!is_tracked_function("plan_step"));
     }
 
     #[test]

@@ -529,6 +529,7 @@ pub struct CachedCompiledFunction {
     pub(crate) is_generator: bool,
     pub(crate) is_stream: bool,
     pub(crate) has_rest_param: bool,
+    pub(crate) has_runtime_type_checks: bool,
 }
 
 /// One parameter slot of a compiled user-defined function. Carries the
@@ -590,9 +591,18 @@ pub struct CompiledFunction {
     pub is_stream: bool,
     /// True if the last parameter is a rest parameter (`...name`).
     pub has_rest_param: bool,
+    /// True when at least one parameter has a runtime-visible type
+    /// assertion. Untyped closures dominate collection callback hot paths,
+    /// so this lets the VM skip the per-argument metadata walk after the
+    /// arity check.
+    pub has_runtime_type_checks: bool,
 }
 
 impl CompiledFunction {
+    pub(crate) fn has_runtime_type_checks_for_params(params: &[ParamSlot]) -> bool {
+        params.iter().any(|param| param.type_expr.is_some())
+    }
+
     /// Returns just the parameter names — convenience for code paths that
     /// don't care about types or defaults.
     pub fn param_names(&self) -> impl Iterator<Item = &str> {
@@ -623,6 +633,7 @@ impl CompiledFunction {
             is_generator: self.is_generator,
             is_stream: self.is_stream,
             has_rest_param: self.has_rest_param,
+            has_runtime_type_checks: self.has_runtime_type_checks,
         }
     }
 
@@ -637,6 +648,7 @@ impl CompiledFunction {
             is_generator: cached.is_generator,
             is_stream: cached.is_stream,
             has_rest_param: cached.has_rest_param,
+            has_runtime_type_checks: cached.has_runtime_type_checks,
         }
     }
 }

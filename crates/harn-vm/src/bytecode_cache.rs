@@ -51,7 +51,7 @@ pub const MAGIC: &[u8; 8] = b"HARNBC\0\0";
 
 /// On-disk format version. Bump when [`CachedChunk`] or the header
 /// layout changes in a backwards-incompatible way.
-pub const SCHEMA_VERSION: u32 = 2;
+pub const SCHEMA_VERSION: u32 = 3;
 
 /// Compile-time Harn release. Cache files written by a different release
 /// are rejected on load.
