@@ -268,6 +268,21 @@ while IFS= read -r file; do
   done < <(grep -n "spawn_orchestrator(" "$file" 2>/dev/null || true)
 done < "$TEST_FILES_TMP"
 
+echo "--- #[ignore] outside slow harn-cli integration tests ---"
+while IFS= read -r file; do
+  case "${file#"$ROOT_DIR/"}" in
+    crates/harn-cli/tests/*)
+      continue
+      ;;
+  esac
+  while IFS= read -r hit; do
+    [[ -z "$hit" ]] && continue
+    echo "  $hit"
+    echo "    hint: Default-suite Rust tests must run by default. Move slow subprocess coverage to the harn-cli E2E profile instead of using #[ignore]."
+    violations=$((violations + 1))
+  done < <(grep -n "#\\[ignore" "$file" 2>/dev/null || true)
+done < "$TEST_FILES_TMP"
+
 echo "--- copied conformance subprocess wait helpers ---"
 check_harn_helper_pattern() {
   local pattern="$1"
