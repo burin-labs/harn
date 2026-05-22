@@ -242,10 +242,10 @@ impl<'a> Linter<'a> {
 
     /// Flag ambient clock builtins (`now_ms`, `monotonic_ms`, `sleep_ms`,
     /// `timestamp`, `elapsed`) so the E4.3 → E4.6 migration can rewrite
-    /// them to `harness.clock.*`. When `harness` (or `_harness`) is in
-    /// scope the lint emits a `bindings/thread-harness-clock` FixEdit;
-    /// otherwise the suggestion points users at the
-    /// `bindings/thread-harness-needs-param` repair that adds the parameter.
+    /// them to `harness.clock.*`. Direct lint fixes only run when a
+    /// `harness` (or `_harness`) binding is in scope; otherwise `harn fix`
+    /// chooses between global-harness rewrites and explicit parameter
+    /// threading.
     pub(super) fn check_ambient_clock_builtin(&mut self, name: &str, span: Span) {
         self.check_ambient_capability_builtin(AmbientCapabilityLint {
             name,
@@ -364,8 +364,9 @@ impl<'a> Linter<'a> {
             format!("replace `{}` with `{}`", lint.name, replacement)
         } else {
             format!(
-                "thread `harness: Harness` through the enclosing fn (see repair \
-                 `bindings/thread-harness-needs-param`), then call `{replacement}`"
+                "run `harn fix --apply --safety scope-local` to call `{replacement}` through the \
+                 VM-level `harness` binding, or opt into \
+                 `--harness-threading thread-params` for explicit parameter threading"
             )
         };
         self.diagnostics.push(LintDiagnostic {

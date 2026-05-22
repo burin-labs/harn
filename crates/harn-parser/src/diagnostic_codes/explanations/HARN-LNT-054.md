@@ -20,13 +20,13 @@ while the migration is in flight, but every new call site should use the
 
 ## How to fix
 
-- Run `harn fix --apply --safety scope-local` over the file. The
-  `bindings/thread-harness-fs` repair rewrites every call site where a
-  `harness` (or `_harness`) binding is in scope.
-- If `harness` isn't reachable from the call site, first thread it
-  through the enclosing fn via the `bindings/thread-harness` repair
-  (which adds the `harness: Harness` parameter at the entrypoint), then
-  re-run `harn fix --apply` to swap the call.
+- Run `harn fix --apply --safety scope-local` over the file. By default the
+  fixer rewrites ambient filesystem calls to the VM-level `harness` binding
+  with `bindings/use-enclosing-harness-global`, preserving helper signatures.
+- If you explicitly want source-level parameter threading, run
+  `harn fix --apply --safety surface-changing --harness-threading thread-params`.
+  `harn fix --plan --json` reports which signatures would change and whether
+  cross-module callers must be updated.
 
 ## Stability
 

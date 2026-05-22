@@ -1,6 +1,6 @@
 //! HARN-LNT-052 — ambient clock builtins now route through
-//! `harness.clock.*`. The lint owns the `bindings/thread-harness-clock`
-//! repair that the E4.3 → E4.6 migration leans on.
+//! `harness.clock.*`. Direct lint fixes run only when a Harness binding
+//! is already in scope; `harn fix` owns broader migration planning.
 
 use super::*;
 
@@ -61,8 +61,9 @@ fn ambient_clock_lint_without_harness_in_scope_emits_no_fix() {
         entries[0]
             .suggestion
             .as_ref()
-            .is_some_and(|s| s.contains("bindings/thread-harness")),
-        "suggestion should point at the surface-changing repair, got: {:?}",
+            .is_some_and(|s| s.contains("--harness-threading thread-params")
+                && s.contains("VM-level `harness`")),
+        "suggestion should describe both Harness migration modes, got: {:?}",
         entries[0].suggestion
     );
 }

@@ -19,14 +19,14 @@ code should use `harness.stdio.print`, `harness.stdio.println`,
 
 ## How to fix
 
-- Run `harn fix --apply --safety scope-local` over the file. The
-  `bindings/thread-harness` repair rewrites every call site where a
-  `harness` binding is already in scope, and can thread that existing binding
-  down same-file synchronous helper chains.
-- If `harness` is not reachable from the call site, `harn fix --plan` will
-  surface the `bindings/thread-harness-needs-param` repair instead. That path
-  adds a `harness: Harness` parameter and updates local callers, so it is
-  marked `surface-changing`.
+- Run `harn fix --apply --safety scope-local` over the file. By default the
+  fixer rewrites ambient stdio calls to an existing local Harness binding or to
+  the VM-level `harness` binding with `bindings/use-enclosing-harness-global`,
+  preserving helper signatures.
+- If you explicitly want source-level parameter threading, run
+  `harn fix --apply --safety surface-changing --harness-threading thread-params`.
+  `harn fix --plan --json` reports which signatures would change and whether
+  cross-module callers must be updated.
 
 ## Stability
 

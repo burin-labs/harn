@@ -1,7 +1,7 @@
 //! HARN-LNT-054..057 — ambient fs/env/random/net builtins now route
-//! through `harness.{fs,env,random,net}.*`. Each lint owns its
-//! `bindings/thread-harness-<sub_handle>` repair which the E4.4 → E4.6
-//! migration leans on.
+//! through `harness.{fs,env,random,net}.*`. Direct lint fixes run only
+//! when a Harness binding is already in scope; `harn fix` owns broader
+//! migration planning.
 
 use super::*;
 
@@ -143,7 +143,8 @@ fn ambient_capability_lint_without_harness_param_keeps_no_fix() {
         .as_deref()
         .expect("lint must carry a suggestion");
     assert!(
-        suggestion.contains("bindings/thread-harness"),
-        "suggestion should point at the surface-changing repair, got: {suggestion}"
+        suggestion.contains("--harness-threading thread-params")
+            && suggestion.contains("VM-level `harness`"),
+        "suggestion should describe both Harness migration modes, got: {suggestion}"
     );
 }
