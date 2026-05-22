@@ -1,1 +1,1 @@
-You emitted a completion signal but verification has not passed (last run exit code: {{ code }}). The loop will continue. Run the verification command and fix any failures before finishing.
+You emitted a completion signal but verification has not passed (last run exit code: {{ code }}). The loop will continue. Run or inspect the verification path, fix any failures, and finish only after verification passes.

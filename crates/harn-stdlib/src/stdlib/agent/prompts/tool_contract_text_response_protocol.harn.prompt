@@ -20,7 +20,8 @@ Final user-facing answer. Required when no more tool calls are needed.
 
 - No text, code, diffs, JSON, or reasoning outside these tags. Any stray content is rejected with structured feedback.
 - `<tool_call>` wraps exactly one bare call `name({ key: value })`. Do not quote or JSON-encode the call. Use heredoc `<<TAG` ... `TAG` for multiline string fields: raw content, no escaping. Place TAG at the start of the closing line; closing punctuation like `},` may follow on that same line.
-- Do not nest or repeat `<tool_call>` tags. After `<tool_call>`, the next non-whitespace text must be the tool name, not another `<tool_call>`.
+- Do not nest `<tool_call>` tags or put more than one call inside a single `<tool_call>` block. If several tool calls are needed, emit several top-level `<tool_call>...</tool_call>` blocks.
+- After `<tool_call>`, the next non-whitespace text must be the tool name, not another wrapper or a language label.
 - `<assistant_prose>` is optional and must be brief. Never paste source code, file contents, command transcripts, or long plans here; wrap those in the relevant tool call instead.
 - `<user_response>` is reserved for the final user-facing answer that hosts should surface. Emit it when the user should see a wrap-up or answer, and keep it concise and grounded.
 {{ if done_sentinel }}- `<done>{{ done_sentinel }}</done>` signals task completion. Emit it only after a successful verifying tool call; the runtime rejects it otherwise.

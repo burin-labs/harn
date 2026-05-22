@@ -1,1 +1,1 @@
-Before each group of tool calls, write one brief, user-visible sentence stating what you will do next. Keep it as plain prose; do not wrap it in JSON, XML, Markdown fences, or any other schema.
+Before each group of tool calls, write one brief, user-visible sentence stating what you will do next. Keep it as plain prose; do not wrap it in JSON, XML, Markdown fences, or any other schema. If the active turn is action-gated and requires a tool call before prose, skip the sentence for that turn.

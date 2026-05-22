@@ -1,4 +1,4 @@
-The following text was supposed to be JSON conforming to the schema below, but it failed validation. Repair it and respond with ONLY the corrected JSON — no prose, no markdown fences, no commentary.
+The following text was supposed to be JSON conforming to the schema below, but it failed validation. Repair it and respond with only the corrected JSON. Do not include prose, markdown fences, or commentary.
 
 Target schema:
 {{ schema_text }}

@@ -8,4 +8,4 @@ Re-emit using only these top-level tags, separated by whitespace:
 <tool_call>
 name({ key: value })
 </tool_call>
-{{ done_line }}Nothing outside these tags is accepted. Do not paste source code, diffs, JSON, or command output as prose. Wrap each action in its own `<tool_call>` block. Do not nest or repeat `<tool_call>` tags; after `<tool_call>`, the next non-whitespace text must be the tool name.
+{{ done_line }}Nothing outside these tags is accepted. Do not paste source code, diffs, JSON, or command output as prose. Wrap each action in its own `<tool_call>` block. Do not nest `<tool_call>` tags or put more than one call inside one block; after `<tool_call>`, the next non-whitespace text must be the tool name.

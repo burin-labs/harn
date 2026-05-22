@@ -620,6 +620,6 @@ mod tests {
         assert!(opts.messages[0]["content"]
             .as_str()
             .unwrap()
-            .contains("Return ONLY JSON that conforms to this JSON Schema"));
+            .contains("Return only JSON that conforms to this JSON Schema"));
     }
 }

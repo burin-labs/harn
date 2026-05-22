@@ -1,4 +1,4 @@
-Summarize these archived conversation messages for a follow-on agent. Preserve goals, constraints, decisions, completed tool work, unresolved issues, and next actions. Output only the summary text.
+Summarize these archived conversation messages for a follow-on agent. Preserve goals, constraints, decisions, completed tool work, verification state, unresolved issues, and next actions. Output only the summary text.
 
 Archived message count: {{ archived_count }}
 

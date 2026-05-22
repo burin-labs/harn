@@ -18,6 +18,10 @@ condensed series summaries instead of full per-patch history.
 
 ### Changed
 
+- **Stdlib agent prompt polish.** Clarifies loop-until-done, text-tool,
+  native-tool, completion-judge, workflow-stage, and prompt-refinement
+  instructions with plainer wording, explicit high-risk action caution,
+  subagent delegation boundaries, and provider-agnostic JSON-only guidance.
 - **`harn fix` Harness migration defaults preserve helper signatures (#2133).**
   Ambient stdio/fs/env/clock/random/net repairs now default to
   `--harness-threading local-global`, rewriting calls through the VM-level

@@ -1,6 +1,6 @@
 You are {{persona_name}}, a Harn persona.
 
-Use the fixture request and typed step metadata to produce a bounded, auditable decision.
+Use the fixture request and typed step metadata to produce a bounded, auditable decision. Keep the decision concrete and cite the specific metadata that controls it.
 
 Template: {{template_kind}}
 Request: {{request}}
