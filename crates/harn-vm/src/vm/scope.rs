@@ -2,7 +2,7 @@ use std::rc::Rc;
 
 use crate::value::{VmClosure, VmEnv, VmError, VmValue};
 
-use super::{CallFrame, LocalSlot, Vm};
+use super::{CallArgs, CallFrame, LocalSlot, Vm};
 
 impl Vm {
     pub(crate) const MAX_FRAMES: usize = 512;
@@ -69,9 +69,17 @@ impl Vm {
         closure: &VmClosure,
         args: &[VmValue],
     ) -> Result<(Vec<LocalSlot>, Option<Vec<LocalSlot>>), VmError> {
-        crate::typecheck::validate_user_call(&closure.func, args, None)?;
+        self.prepare_closure_local_slots_args(closure, &CallArgs::Slice(args))
+    }
+
+    fn prepare_closure_local_slots_args(
+        &self,
+        closure: &VmClosure,
+        args: &CallArgs<'_>,
+    ) -> Result<(Vec<LocalSlot>, Option<Vec<LocalSlot>>), VmError> {
+        crate::typecheck::validate_user_call_args(&closure.func, args, None)?;
         let mut local_slots = Self::fresh_local_slots(&closure.func.chunk);
-        Self::bind_param_slots(&mut local_slots, &closure.func, args, false);
+        Self::bind_param_slots_args(&mut local_slots, &closure.func, args, false);
         let initial_local_slots = if self.debugger_attached() {
             Some(local_slots.clone())
         } else {
@@ -158,11 +166,32 @@ impl Vm {
         closure: &VmClosure,
         args: &[VmValue],
     ) -> Result<(), VmError> {
+        self.push_closure_frame_args(closure, &CallArgs::Slice(args))
+    }
+
+    pub(crate) fn push_closure_frame_args(
+        &mut self,
+        closure: &VmClosure,
+        args: &CallArgs<'_>,
+    ) -> Result<(), VmError> {
         if self.frames.len() >= Self::MAX_FRAMES {
             return Err(VmError::StackOverflow);
         }
-        let (local_slots, initial_local_slots) = self.prepare_closure_local_slots(closure, args)?;
-        self.enter_closure_frame(closure, args.len(), local_slots, initial_local_slots, args);
+        let (local_slots, initial_local_slots) =
+            self.prepare_closure_local_slots_args(closure, args)?;
+        let step_args =
+            if crate::step_runtime::step_definition_for_function(&closure.func.name).is_some() {
+                args.to_vec_from(0)
+            } else {
+                Vec::new()
+            };
+        self.enter_closure_frame(
+            closure,
+            args.len(),
+            local_slots,
+            initial_local_slots,
+            &step_args,
+        );
         Ok(())
     }
 

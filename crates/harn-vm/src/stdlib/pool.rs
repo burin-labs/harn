@@ -2493,7 +2493,7 @@ fn spawn_task(pool: Rc<RefCell<PoolEntry>>, pending: PendingTask) {
 
     tokio::task::spawn_local(async move {
         let outcome = child_vm
-            .call_closure(&closure, &[])
+            .call_closure_args(&closure, crate::vm::CallArgs::Empty)
             .await
             .map_err(|error| error.to_string());
         finalize_task(&pool, &state, outcome);

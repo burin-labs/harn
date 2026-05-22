@@ -130,7 +130,7 @@ impl Vm {
                 let saved_interrupt_deadline = self.interrupt_handler_deadline;
                 self.interrupt_handler_deadline = graceful_timeout_ms
                     .and_then(|ms| Instant::now().checked_add(Duration::from_millis(ms)));
-                let handler_result = self.call_callable_value(&handler, &[]).await;
+                let handler_result = self.call_callable_zero(&handler).await;
                 self.interrupt_handler_deadline = saved_interrupt_deadline;
                 if let Err(error) = handler_result {
                     result = Err(error);

@@ -377,22 +377,27 @@ impl Vm {
         args: &[VmValue],
         synced: bool,
     ) {
+        Self::bind_param_slots_args(slots, func, &super::CallArgs::Slice(args), synced);
+    }
+
+    pub(crate) fn bind_param_slots_args(
+        slots: &mut [LocalSlot],
+        func: &crate::chunk::CompiledFunction,
+        args: &super::CallArgs<'_>,
+        synced: bool,
+    ) {
         let param_count = func.params.len();
         for (i, _param) in func.params.iter().enumerate() {
             if i >= slots.len() {
                 break;
             }
             if func.has_rest_param && i == param_count - 1 {
-                let rest_args = if i < args.len() {
-                    args[i..].to_vec()
-                } else {
-                    Vec::new()
-                };
+                let rest_args = args.to_vec_from(i);
                 slots[i].value = VmValue::List(Rc::new(rest_args));
                 slots[i].initialized = true;
                 slots[i].synced = synced;
-            } else if i < args.len() {
-                slots[i].value = args[i].clone();
+            } else if let Some(arg) = args.get(i) {
+                slots[i].value = arg.clone();
                 slots[i].initialized = true;
                 slots[i].synced = synced;
             }

@@ -5,7 +5,9 @@ use crate::value::{ErrorCategory, VmBuiltinFn, VmClosure, VmError, VmValue};
 use crate::BuiltinId;
 
 use super::async_builtin::CURRENT_ASYNC_BUILTIN_CHILD_VM;
-use super::{ScopeSpan, Vm, VmBuiltinDispatch, VmBuiltinEntry, VmBuiltinKind, VmBuiltinMetadata};
+use super::{
+    CallArgs, ScopeSpan, Vm, VmBuiltinDispatch, VmBuiltinEntry, VmBuiltinKind, VmBuiltinMetadata,
+};
 
 impl Vm {
     fn builtin_span_kind(name: &str) -> Option<crate::tracing::SpanKind> {
@@ -260,12 +262,22 @@ impl Vm {
         closure: &VmClosure,
         args: &[VmValue],
     ) -> Result<VmValue, VmError> {
+        self.call_closure_args(closure, CallArgs::Slice(args)).await
+    }
+
+    pub(crate) async fn call_closure_args(
+        &mut self,
+        closure: &VmClosure,
+        args: CallArgs<'_>,
+    ) -> Result<VmValue, VmError> {
         let saved_handlers = std::mem::take(&mut self.exception_handlers);
         let active_context = (!crate::step_runtime::is_tracked_function(&closure.func.name))
             .then(crate::step_runtime::take_active_context);
 
         let target_frame_depth = self.frames.len();
-        let result = match self.push_closure_frame(closure, args) {
+        let frame_result = self.push_closure_frame_args(closure, &args);
+        drop(args);
+        let result = match frame_result {
             Ok(()) => self.drive_until_frame_depth(target_frame_depth).await,
             Err(e) => Err(e),
         };
@@ -287,18 +299,67 @@ impl Vm {
         callable: &VmValue,
         args: &[VmValue],
     ) -> Result<VmValue, VmError> {
+        self.call_callable_args(callable, CallArgs::Slice(args))
+            .await
+    }
+
+    pub(crate) async fn call_callable_owned(
+        &mut self,
+        callable: &VmValue,
+        args: Vec<VmValue>,
+    ) -> Result<VmValue, VmError> {
+        self.call_callable_args(callable, CallArgs::Owned(args))
+            .await
+    }
+
+    pub(crate) async fn call_callable_zero(
+        &mut self,
+        callable: &VmValue,
+    ) -> Result<VmValue, VmError> {
+        self.call_callable_args(callable, CallArgs::Empty).await
+    }
+
+    pub(crate) async fn call_callable_one(
+        &mut self,
+        callable: &VmValue,
+        arg: &VmValue,
+    ) -> Result<VmValue, VmError> {
+        self.call_callable_args(callable, CallArgs::One(arg)).await
+    }
+
+    pub(crate) async fn call_callable_two(
+        &mut self,
+        callable: &VmValue,
+        first: &VmValue,
+        second: &VmValue,
+    ) -> Result<VmValue, VmError> {
+        self.call_callable_args(callable, CallArgs::Two(first, second))
+            .await
+    }
+
+    pub(crate) async fn call_callable_args(
+        &mut self,
+        callable: &VmValue,
+        args: CallArgs<'_>,
+    ) -> Result<VmValue, VmError> {
         match callable {
-            VmValue::Closure(closure) => self.call_closure(closure, args).await,
+            VmValue::Closure(closure) => self.call_closure_args(closure, args).await,
             VmValue::BuiltinRef(name) => {
                 if !crate::autonomy::needs_async_side_effect_enforcement(name) {
-                    if let Some(result) = self.call_sync_builtin_by_ref(name, args) {
+                    if let Some(result) = self.call_sync_builtin_by_ref_args(name, &args) {
                         return result;
                     }
                 }
-                self.call_named_builtin(name, args.to_vec()).await
+                self.call_named_builtin(name, args.into_vec()).await
             }
             VmValue::BuiltinRefId { id, name } => {
-                self.call_builtin_id_or_name(*id, name, args.to_vec()).await
+                if let Some(result) =
+                    self.try_call_sync_builtin_id_or_name_args(Some(*id), name, &args)
+                {
+                    return result;
+                }
+                self.call_builtin_id_or_name(*id, name, args.into_vec())
+                    .await
             }
             other => Err(VmError::TypeError(format!(
                 "expected callable, got {}",
@@ -307,12 +368,12 @@ impl Vm {
         }
     }
 
-    fn call_sync_builtin_by_ref(
+    fn call_sync_builtin_by_ref_args(
         &mut self,
         name: &str,
-        args: &[VmValue],
+        args: &CallArgs<'_>,
     ) -> Option<Result<VmValue, VmError>> {
-        self.try_call_sync_builtin_id_or_name(None, name, args)
+        self.try_call_sync_builtin_id_or_name_args(None, name, args)
     }
 
     /// Returns true if `v` is callable via `call_callable_value`.
@@ -353,11 +414,11 @@ impl Vm {
         self.call_builtin_impl(name, args, Some(id)).await
     }
 
-    pub(crate) fn try_call_sync_builtin_id_or_name(
+    pub(crate) fn try_call_sync_builtin_id_or_name_args(
         &mut self,
         direct_id: Option<BuiltinId>,
         name: &str,
-        args: &[VmValue],
+        args: &CallArgs<'_>,
     ) -> Option<Result<VmValue, VmError>> {
         if self.denied_builtins.contains(name) {
             return Some(Err(VmError::CategorizedError {
@@ -372,11 +433,11 @@ impl Vm {
         };
         let _span =
             Self::builtin_span_kind(name).map(|kind| ScopeSpan::new(kind, name.to_string()));
-        if let Err(error) = self.validate_sync_builtin_args(name, args) {
+        if let Err(error) = args.with_slice(|slice| self.validate_sync_builtin_args(name, slice)) {
             return Some(Err(error));
         }
 
-        Some(builtin(args, &mut self.output))
+        Some(args.with_slice(|slice| builtin(slice, &mut self.output)))
     }
 
     pub(crate) fn try_call_sync_builtin_id_or_name_from_stack_args(

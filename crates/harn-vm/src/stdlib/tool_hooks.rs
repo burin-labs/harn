@@ -462,12 +462,8 @@ async fn invoke_rule_pattern(
         callable if Vm::is_callable_value(callable) => {
             let mut vm = crate::vm::clone_async_builtin_child_vm()
                 .ok_or_else(|| err("tool_hooks_match: builtin requires VM execution context"))?;
-            let result = vm
-                .call_callable_value(
-                    callable,
-                    &[VmValue::String(Rc::from(command)), context.clone()],
-                )
-                .await?;
+            let command = VmValue::String(Rc::from(command));
+            let result = vm.call_callable_two(callable, &command, context).await?;
             Ok(result.is_truthy())
         }
         other => Err(err(format!(

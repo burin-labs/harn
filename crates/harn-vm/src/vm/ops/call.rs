@@ -7,7 +7,7 @@ use crate::orchestration::HookEvent;
 use crate::value::{values_equal, VmClosure, VmError, VmJoinHandle, VmTaskHandle, VmValue};
 use crate::BuiltinId;
 
-use super::super::CallFrame;
+use super::super::{CallArgs, CallFrame};
 
 const DIRECT_CALL_QUICKEN_THRESHOLD: u8 = 3;
 
@@ -339,7 +339,9 @@ impl super::super::Vm {
     ) -> Pin<Box<dyn Future<Output = Result<VmValue, VmError>> + 'a>> {
         Box::pin(async move {
             let snapshot = crate::step_runtime::take_active_context();
-            let result = self.call_closure(handler, &[payload]).await;
+            let result = self
+                .call_closure_args(handler, CallArgs::One(&payload))
+                .await;
             crate::step_runtime::restore_active_context(snapshot);
             result
         })
