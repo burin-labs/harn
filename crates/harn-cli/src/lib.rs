@@ -19,8 +19,8 @@ pub use harn_skills::{get_embedded_skill, list_embedded_skills, EmbeddedSkill, S
 
 use clap::{error::ErrorKind, CommandFactory, Parser as ClapParser};
 use std::path::{Path, PathBuf};
-use std::sync::Arc;
-use std::{env, fs, process, thread};
+use std::sync::{Arc, Once};
+use std::{env, fs, panic, process, thread};
 
 use cli::{
     Cli, Command, CompletionShell, EvalCommand, MergeCaptainCommand, MergeCaptainMockCommand,
@@ -34,6 +34,8 @@ use harn_parser::{DiagnosticSeverity, Parser, TypeChecker};
 
 pub const CLI_RUNTIME_STACK_SIZE: usize = 16 * 1024 * 1024;
 
+static BROKEN_PIPE_PANIC_HOOK: Once = Once::new();
+
 #[cfg(feature = "hostlib")]
 pub(crate) fn install_default_hostlib(vm: &mut harn_vm::Vm) {
     let _ = harn_hostlib::install_default(vm);
@@ -45,6 +47,8 @@ pub(crate) fn install_default_hostlib(_vm: &mut harn_vm::Vm) {}
 /// Entry point used by `src/main.rs`. Hosts the CLI runtime thread and
 /// drives the async dispatcher in `async_main`.
 pub fn run() {
+    install_broken_pipe_panic_hook();
+
     let handle = thread::Builder::new()
         .name("harn-cli".to_string())
         .stack_size(CLI_RUNTIME_STACK_SIZE)
@@ -64,8 +68,40 @@ pub fn run() {
         });
 
     if let Err(payload) = handle.join() {
+        if is_broken_pipe_panic_payload(payload.as_ref()) {
+            process::exit(0);
+        }
         std::panic::resume_unwind(payload);
     }
+}
+
+fn install_broken_pipe_panic_hook() {
+    BROKEN_PIPE_PANIC_HOOK.call_once(|| {
+        let previous = panic::take_hook();
+        panic::set_hook(Box::new(move |info| {
+            if is_broken_pipe_panic_payload(info.payload()) {
+                return;
+            }
+            previous(info);
+        }));
+    });
+}
+
+fn is_broken_pipe_panic_payload(payload: &(dyn std::any::Any + Send)) -> bool {
+    let message = if let Some(message) = payload.downcast_ref::<String>() {
+        message.as_str()
+    } else if let Some(message) = payload.downcast_ref::<&str>() {
+        message
+    } else {
+        return false;
+    };
+
+    let print_failure = message.contains("failed printing to stdout")
+        || message.contains("failed printing to stderr");
+    let broken_pipe = message.contains("Broken pipe")
+        || message.contains("os error 32")
+        || message.contains("EPIPE");
+    print_failure && broken_pipe
 }
 
 async fn async_main() {
@@ -785,6 +821,8 @@ async fn async_main() {
                             args.filter.as_deref(),
                             args.timeout,
                             args.parallel,
+                            args.verbose,
+                            args.timing,
                             &cli_skill_dirs,
                         )
                         .await;
@@ -794,6 +832,8 @@ async fn async_main() {
                             args.filter.as_deref(),
                             args.timeout,
                             args.parallel,
+                            args.verbose,
+                            args.timing,
                             &cli_skill_dirs,
                         )
                         .await;
@@ -815,6 +855,8 @@ async fn async_main() {
                             args.filter.as_deref(),
                             args.timeout,
                             args.parallel,
+                            args.verbose,
+                            args.timing,
                             &cli_skill_dirs,
                         )
                         .await;
@@ -824,6 +866,8 @@ async fn async_main() {
                             args.filter.as_deref(),
                             args.timeout,
                             args.parallel,
+                            args.verbose,
+                            args.timing,
                             &cli_skill_dirs,
                         )
                         .await;
@@ -2901,7 +2945,10 @@ fn connector_secret_namespace(base_dir: &Path) -> String {
 
 #[cfg(test)]
 mod main_tests {
-    use super::{normalize_serve_args, should_install_default_connector_clients};
+    use super::{
+        is_broken_pipe_panic_payload, normalize_serve_args,
+        should_install_default_connector_clients,
+    };
     use std::path::Path;
 
     #[test]
@@ -2964,5 +3011,17 @@ mod main_tests {
             "__io_println(1)",
             Some(Path::new("examples/demo.harn"))
         ));
+    }
+
+    #[test]
+    fn broken_pipe_print_panic_is_classified_as_clean_consumer_close() {
+        let payload = String::from("failed printing to stdout: Broken pipe (os error 32)");
+        assert!(is_broken_pipe_panic_payload(&payload));
+    }
+
+    #[test]
+    fn unrelated_panic_is_not_classified_as_broken_pipe() {
+        let payload = String::from("assertion failed: expected true");
+        assert!(!is_broken_pipe_panic_payload(&payload));
     }
 }

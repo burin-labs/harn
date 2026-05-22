@@ -1514,7 +1514,77 @@ pub(crate) async fn run_conformance_tests(
     }
 }
 
-fn print_test_results(summary: &test_runner::TestSummary) {
+#[derive(Debug, Clone, Copy)]
+struct UserTestOutputOptions {
+    timing: bool,
+    progress: bool,
+}
+
+fn user_test_progress(verbose: bool) -> test_runner::TestRunProgress {
+    std::sync::Arc::new(move |event| match event {
+        test_runner::TestRunEvent::SuiteDiscovered {
+            total_tests,
+            total_files,
+            parallel,
+        } => {
+            if total_tests > 0 {
+                let mode = if parallel { "parallel" } else { "sequential" };
+                println!(
+                    "Running {} test{} from {} file{} ({mode})...\n",
+                    total_tests,
+                    if total_tests == 1 { "" } else { "s" },
+                    total_files,
+                    if total_files == 1 { "" } else { "s" },
+                );
+            }
+        }
+        test_runner::TestRunEvent::LargeSequentialSuite {
+            total_tests,
+            total_files,
+        } => {
+            println!(
+                "\x1b[33mwarning\x1b[0m: large suite discovered ({total_tests} tests across {total_files} files); running sequentially. Use `--parallel` for file-level concurrency.\n"
+            );
+        }
+        test_runner::TestRunEvent::FileStarted {
+            file,
+            file_index,
+            total_files,
+            test_count,
+        } => {
+            println!("  RUN   file {file_index}/{total_files} {file} ({test_count} tests)");
+        }
+        test_runner::TestRunEvent::TestStarted {
+            name,
+            file,
+            test_index,
+            total_tests_in_file,
+        } => {
+            if verbose {
+                println!("    RUN   {name} [{file}] ({test_index}/{total_tests_in_file})");
+            }
+        }
+        test_runner::TestRunEvent::TestFinished(result) => {
+            if result.passed {
+                println!(
+                    "  \x1b[32mPASS\x1b[0m  {} [{}] ({} ms)",
+                    result.name, result.file, result.duration_ms
+                );
+            } else {
+                println!("  \x1b[31mFAIL\x1b[0m  {} [{}]", result.name, result.file);
+                if verbose {
+                    if let Some(err) = &result.error {
+                        for line in err.lines() {
+                            println!("        {line}");
+                        }
+                    }
+                }
+            }
+        }
+    })
+}
+
+fn print_test_results(summary: &test_runner::TestSummary, options: UserTestOutputOptions) {
     let file_count = summary
         .results
         .iter()
@@ -1522,7 +1592,7 @@ fn print_test_results(summary: &test_runner::TestSummary) {
         .collect::<std::collections::HashSet<_>>()
         .len();
 
-    if summary.total > 0 {
+    if !options.progress && summary.total > 0 {
         println!(
             "Running {} test{} from {} file{}...\n",
             summary.total,
@@ -1532,17 +1602,19 @@ fn print_test_results(summary: &test_runner::TestSummary) {
         );
     }
 
-    for result in &summary.results {
-        if result.passed {
-            println!(
-                "  \x1b[32mPASS\x1b[0m  {} [{}] ({} ms)",
-                result.name, result.file, result.duration_ms
-            );
-        } else {
-            println!("  \x1b[31mFAIL\x1b[0m  {} [{}]", result.name, result.file);
-            if let Some(err) = &result.error {
-                for line in err.lines() {
-                    println!("        {line}");
+    if !options.progress {
+        for result in &summary.results {
+            if result.passed {
+                println!(
+                    "  \x1b[32mPASS\x1b[0m  {} [{}] ({} ms)",
+                    result.name, result.file, result.duration_ms
+                );
+            } else {
+                println!("  \x1b[31mFAIL\x1b[0m  {} [{}]", result.name, result.file);
+                if let Some(err) = &result.error {
+                    for line in err.lines() {
+                        println!("        {line}");
+                    }
                 }
             }
         }
@@ -1562,6 +1634,106 @@ fn print_test_results(summary: &test_runner::TestSummary) {
             summary.passed, summary.total, summary.duration_ms
         );
     }
+
+    if options.timing {
+        print_user_test_timing(summary);
+    }
+
+    if options.progress && summary.failed > 0 {
+        println!();
+        println!("Failures:");
+        for result in summary.results.iter().filter(|result| !result.passed) {
+            if let Some(err) = &result.error {
+                println!("  {} [{}]", result.name, result.file);
+                for line in err.lines() {
+                    println!("        {line}");
+                }
+            }
+        }
+    }
+}
+
+fn print_user_test_timing(summary: &test_runner::TestSummary) {
+    if summary.total == 0 {
+        return;
+    }
+
+    println!();
+    println!("Total time: {} ms", summary.duration_ms);
+
+    let mut durations = summary
+        .results
+        .iter()
+        .map(|result| result.duration_ms)
+        .collect::<Vec<_>>();
+    durations.sort();
+
+    if !durations.is_empty() {
+        let n = durations.len();
+        let p50 = durations[n * 50 / 100];
+        let p95 = durations[n * 95 / 100];
+        let p99 = durations[(n * 99 / 100).min(n - 1)];
+        let avg = durations.iter().sum::<u64>() / n as u64;
+        println!("Per-test: avg={avg} ms  p50={p50} ms  p95={p95} ms  p99={p99} ms");
+    }
+
+    let mut by_test = summary.results.iter().collect::<Vec<_>>();
+    by_test.sort_by_key(|result| std::cmp::Reverse(result.duration_ms));
+    let top_test_count = by_test.len().min(10);
+    if top_test_count > 0 {
+        println!();
+        println!("Slowest {top_test_count} tests:");
+        for result in &by_test[..top_test_count] {
+            println!(
+                "  {:>6} ms  {} [{}]",
+                result.duration_ms, result.name, result.file
+            );
+        }
+    }
+
+    let mut file_totals = BTreeMap::<&str, u64>::new();
+    for result in &summary.results {
+        *file_totals.entry(result.file.as_str()).or_default() += result.duration_ms;
+    }
+    let mut by_file = file_totals.into_iter().collect::<Vec<_>>();
+    by_file.sort_by_key(|(_, duration_ms)| std::cmp::Reverse(*duration_ms));
+    let top_file_count = by_file.len().min(10);
+    if top_file_count > 0 {
+        println!();
+        println!("Slowest {top_file_count} files:");
+        for (file, duration_ms) in &by_file[..top_file_count] {
+            println!("  {duration_ms:>6} ms  {file}");
+        }
+    }
+}
+
+async fn run_user_tests_once(
+    path: &Path,
+    filter: Option<&str>,
+    timeout_ms: u64,
+    parallel: bool,
+    verbose: bool,
+    timing: bool,
+    cli_skill_dirs: &[PathBuf],
+) -> test_runner::TestSummary {
+    let progress = user_test_progress(verbose);
+    let summary = test_runner::run_tests_with_progress(
+        path,
+        filter,
+        timeout_ms,
+        parallel,
+        cli_skill_dirs,
+        Some(progress),
+    )
+    .await;
+    print_test_results(
+        &summary,
+        UserTestOutputOptions {
+            timing,
+            progress: true,
+        },
+    );
+    summary
 }
 
 pub(crate) async fn run_user_tests(
@@ -1569,6 +1741,8 @@ pub(crate) async fn run_user_tests(
     filter: Option<&str>,
     timeout_ms: u64,
     parallel: bool,
+    verbose: bool,
+    timing: bool,
     cli_skill_dirs: &[PathBuf],
 ) {
     let path = PathBuf::from(path_str);
@@ -1576,8 +1750,16 @@ pub(crate) async fn run_user_tests(
         eprintln!("Path not found: {path_str}");
         process::exit(1);
     }
-    let summary = test_runner::run_tests(&path, filter, timeout_ms, parallel, cli_skill_dirs).await;
-    print_test_results(&summary);
+    let summary = run_user_tests_once(
+        &path,
+        filter,
+        timeout_ms,
+        parallel,
+        verbose,
+        timing,
+        cli_skill_dirs,
+    )
+    .await;
     if summary.failed > 0 {
         process::exit(1);
     }
@@ -1929,6 +2111,8 @@ pub(crate) async fn run_watch_tests(
     filter: Option<&str>,
     timeout_ms: u64,
     parallel: bool,
+    verbose: bool,
+    timing: bool,
     cli_skill_dirs: &[PathBuf],
 ) {
     use notify::{Config, RecommendedWatcher, RecursiveMode, Watcher};
@@ -1943,8 +2127,16 @@ pub(crate) async fn run_watch_tests(
 
     println!("Watching {path_str} for changes... (Ctrl+C to stop)\n");
 
-    let summary = test_runner::run_tests(&path, filter, timeout_ms, parallel, cli_skill_dirs).await;
-    print_test_results(&summary);
+    run_user_tests_once(
+        &path,
+        filter,
+        timeout_ms,
+        parallel,
+        verbose,
+        timing,
+        cli_skill_dirs,
+    )
+    .await;
 
     let (tx, rx) = mpsc::channel();
     let mut watcher = RecommendedWatcher::new(tx, Config::default()).unwrap_or_else(|e| {
@@ -1973,10 +2165,16 @@ pub(crate) async fn run_watch_tests(
                 while rx.recv_timeout(Duration::from_millis(100)).is_ok() {}
 
                 println!("\n\x1b[2m--- file changed, re-running tests ---\x1b[0m\n");
-                let summary =
-                    test_runner::run_tests(&path, filter, timeout_ms, parallel, cli_skill_dirs)
-                        .await;
-                print_test_results(&summary);
+                run_user_tests_once(
+                    &path,
+                    filter,
+                    timeout_ms,
+                    parallel,
+                    verbose,
+                    timing,
+                    cli_skill_dirs,
+                )
+                .await;
             }
             Ok(Err(e)) => {
                 eprintln!("Watch error: {e}");

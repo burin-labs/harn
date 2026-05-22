@@ -1,11 +1,13 @@
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 use std::time::Instant;
 
 use harn_lexer::Lexer;
-use harn_parser::{Node, Parser};
+use harn_parser::{Node, Parser, SNode};
 
 use crate::env_guard::ScopedEnvVar;
 
+#[derive(Clone, Debug)]
 pub struct TestResult {
     pub name: String,
     pub file: String,
@@ -14,6 +16,7 @@ pub struct TestResult {
     pub duration_ms: u64,
 }
 
+#[derive(Clone, Debug)]
 pub struct TestSummary {
     pub results: Vec<TestResult>,
     pub passed: usize,
@@ -21,6 +24,37 @@ pub struct TestSummary {
     pub total: usize,
     pub duration_ms: u64,
 }
+
+#[derive(Clone, Debug)]
+pub enum TestRunEvent {
+    SuiteDiscovered {
+        total_tests: usize,
+        total_files: usize,
+        parallel: bool,
+    },
+    LargeSequentialSuite {
+        total_tests: usize,
+        total_files: usize,
+    },
+    FileStarted {
+        file: String,
+        file_index: usize,
+        total_files: usize,
+        test_count: usize,
+    },
+    TestStarted {
+        name: String,
+        file: String,
+        test_index: usize,
+        total_tests_in_file: usize,
+    },
+    TestFinished(TestResult),
+}
+
+pub type TestRunProgress = Arc<dyn Fn(TestRunEvent) + Send + Sync>;
+
+const LARGE_SEQUENTIAL_TEST_THRESHOLD: usize = 50;
+const LARGE_SEQUENTIAL_FILE_THRESHOLD: usize = 10;
 
 fn canonicalize_existing_path(path: &Path) -> PathBuf {
     path.canonicalize().unwrap_or_else(|_| path.to_path_buf())
@@ -30,14 +64,19 @@ fn test_execution_cwd() -> PathBuf {
     std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."))
 }
 
-/// Run all test_* pipelines in a single source file using the VM.
-pub async fn run_test_file(
-    path: &Path,
-    filter: Option<&str>,
-    timeout_ms: u64,
-    execution_cwd: Option<&Path>,
-    cli_skill_dirs: &[PathBuf],
-) -> Result<Vec<TestResult>, String> {
+struct ParsedTestFile {
+    source: String,
+    program: Vec<SNode>,
+    test_names: Vec<String>,
+}
+
+#[derive(Clone)]
+struct TestFilePlan {
+    file: PathBuf,
+    test_count: usize,
+}
+
+fn parse_test_file(path: &Path, filter: Option<&str>) -> Result<ParsedTestFile, String> {
     let source = std::fs::read_to_string(path)
         .map_err(|e| format!("Failed to read {}: {e}", path.display()))?;
 
@@ -45,8 +84,17 @@ pub async fn run_test_file(
     let tokens = lexer.tokenize().map_err(|e| format!("{e}"))?;
     let mut parser = Parser::new(tokens);
     let program = parser.parse().map_err(|e| format!("{e}"))?;
+    let test_names = discover_test_names(&program, filter);
 
-    let test_names: Vec<String> = program
+    Ok(ParsedTestFile {
+        source,
+        program,
+        test_names,
+    })
+}
+
+fn discover_test_names(program: &[SNode], filter: Option<&str>) -> Vec<String> {
+    program
         .iter()
         .filter_map(|snode| {
             // Recognize either:
@@ -72,11 +120,54 @@ pub async fn run_test_file(
             }
             Some(name)
         })
-        .collect();
+        .collect()
+}
+
+fn emit_progress(progress: &Option<TestRunProgress>, event: TestRunEvent) {
+    if let Some(callback) = progress {
+        callback(event);
+    }
+}
+
+fn push_result(
+    results: &mut Vec<TestResult>,
+    result: TestResult,
+    progress: &Option<TestRunProgress>,
+) {
+    emit_progress(progress, TestRunEvent::TestFinished(result.clone()));
+    results.push(result);
+}
+
+fn should_warn_large_sequential_suite(total_tests: usize, total_files: usize) -> bool {
+    total_tests >= LARGE_SEQUENTIAL_TEST_THRESHOLD || total_files >= LARGE_SEQUENTIAL_FILE_THRESHOLD
+}
+
+async fn run_test_file_with_progress(
+    path: &Path,
+    filter: Option<&str>,
+    timeout_ms: u64,
+    execution_cwd: Option<&Path>,
+    cli_skill_dirs: &[PathBuf],
+    progress: Option<TestRunProgress>,
+) -> Result<Vec<TestResult>, String> {
+    let ParsedTestFile {
+        source,
+        program,
+        test_names,
+    } = parse_test_file(path, filter)?;
 
     let mut results = Vec::new();
 
-    for test_name in &test_names {
+    for (test_index, test_name) in test_names.iter().enumerate() {
+        emit_progress(
+            &progress,
+            TestRunEvent::TestStarted {
+                name: test_name.clone(),
+                file: path.display().to_string(),
+                test_index: test_index + 1,
+                total_tests_in_file: test_names.len(),
+            },
+        );
         harn_vm::reset_thread_local_state();
 
         let start = Instant::now();
@@ -84,13 +175,17 @@ pub async fn run_test_file(
         let chunk = match harn_vm::Compiler::new().compile_named(&program, test_name) {
             Ok(c) => c,
             Err(e) => {
-                results.push(TestResult {
-                    name: test_name.clone(),
-                    file: path.display().to_string(),
-                    passed: false,
-                    error: Some(format!("Compile error: {e}")),
-                    duration_ms: 0,
-                });
+                push_result(
+                    &mut results,
+                    TestResult {
+                        name: test_name.clone(),
+                        file: path.display().to_string(),
+                        passed: false,
+                        error: Some(format!("Compile error: {e}")),
+                        duration_ms: 0,
+                    },
+                    &progress,
+                );
                 continue;
             }
         };
@@ -170,36 +265,67 @@ pub async fn run_test_file(
 
         match result {
             Ok(Ok(_)) => {
-                results.push(TestResult {
-                    name: test_name.clone(),
-                    file: path.display().to_string(),
-                    passed: true,
-                    error: None,
-                    duration_ms: duration,
-                });
+                push_result(
+                    &mut results,
+                    TestResult {
+                        name: test_name.clone(),
+                        file: path.display().to_string(),
+                        passed: true,
+                        error: None,
+                        duration_ms: duration,
+                    },
+                    &progress,
+                );
             }
             Ok(Err(e)) => {
-                results.push(TestResult {
-                    name: test_name.clone(),
-                    file: path.display().to_string(),
-                    passed: false,
-                    error: Some(e),
-                    duration_ms: duration,
-                });
+                push_result(
+                    &mut results,
+                    TestResult {
+                        name: test_name.clone(),
+                        file: path.display().to_string(),
+                        passed: false,
+                        error: Some(e),
+                        duration_ms: duration,
+                    },
+                    &progress,
+                );
             }
             Err(_) => {
-                results.push(TestResult {
-                    name: test_name.clone(),
-                    file: path.display().to_string(),
-                    passed: false,
-                    error: Some(format!("timed out after {timeout_ms}ms")),
-                    duration_ms: timeout_ms,
-                });
+                push_result(
+                    &mut results,
+                    TestResult {
+                        name: test_name.clone(),
+                        file: path.display().to_string(),
+                        passed: false,
+                        error: Some(format!("timed out after {timeout_ms}ms")),
+                        duration_ms: timeout_ms,
+                    },
+                    &progress,
+                );
             }
         }
     }
 
     Ok(results)
+}
+
+/// Run all test_* pipelines in a single source file using the VM.
+pub async fn run_test_file(
+    path: &Path,
+    filter: Option<&str>,
+    timeout_ms: u64,
+    execution_cwd: Option<&Path>,
+    cli_skill_dirs: &[PathBuf],
+) -> Result<Vec<TestResult>, String> {
+    run_test_file_with_progress(
+        path,
+        filter,
+        timeout_ms,
+        execution_cwd,
+        cli_skill_dirs,
+        None,
+    )
+    .await
 }
 
 /// Discover and run tests in a file or directory.
@@ -209,6 +335,17 @@ pub async fn run_tests(
     timeout_ms: u64,
     parallel: bool,
     cli_skill_dirs: &[PathBuf],
+) -> TestSummary {
+    run_tests_with_progress(path, filter, timeout_ms, parallel, cli_skill_dirs, None).await
+}
+
+pub async fn run_tests_with_progress(
+    path: &Path,
+    filter: Option<&str>,
+    timeout_ms: u64,
+    parallel: bool,
+    cli_skill_dirs: &[PathBuf],
+    progress: Option<TestRunProgress>,
 ) -> TestSummary {
     // Default LLM provider to "mock" in test mode unless caller overrides.
     let _default_llm_provider = ScopedEnvVar::set_if_unset("HARN_LLM_PROVIDER", "mock");
@@ -223,60 +360,139 @@ pub async fn run_tests(
     } else {
         vec![canonical_target]
     };
+    let file_plans = files
+        .into_iter()
+        .map(|file| {
+            let test_count = parse_test_file(&file, filter)
+                .map(|parsed| parsed.test_names.len())
+                .unwrap_or(0);
+            TestFilePlan { file, test_count }
+        })
+        .collect::<Vec<_>>();
+    let total_tests = file_plans.iter().map(|plan| plan.test_count).sum();
+    let total_files = file_plans.iter().filter(|plan| plan.test_count > 0).count();
+    emit_progress(
+        &progress,
+        TestRunEvent::SuiteDiscovered {
+            total_tests,
+            total_files,
+            parallel,
+        },
+    );
+    if !parallel && should_warn_large_sequential_suite(total_tests, total_files) {
+        emit_progress(
+            &progress,
+            TestRunEvent::LargeSequentialSuite {
+                total_tests,
+                total_files,
+            },
+        );
+    }
 
     if parallel {
         let mut handles = Vec::new();
-        for file in files {
+        let mut progress_file_index = 0;
+        for plan in file_plans {
             let filter = filter.map(|s| s.to_string());
             let cli_skill_dirs = cli_skill_dirs.to_vec();
+            let progress = progress.clone();
+            if plan.test_count > 0 {
+                progress_file_index += 1;
+                emit_progress(
+                    &progress,
+                    TestRunEvent::FileStarted {
+                        file: plan.file.display().to_string(),
+                        file_index: progress_file_index,
+                        total_files,
+                        test_count: plan.test_count,
+                    },
+                );
+            }
             handles.push(tokio::task::spawn_blocking(move || {
-                let execution_cwd = file
+                let execution_cwd = plan
+                    .file
                     .parent()
                     .filter(|parent| !parent.as_os_str().is_empty())
                     .map(Path::to_path_buf);
                 run_test_file_on_isolated_thread(
-                    &file,
+                    &plan.file,
                     filter.as_deref(),
                     timeout_ms,
                     execution_cwd.as_deref(),
                     &cli_skill_dirs,
+                    None,
                 )
             }));
         }
         for handle in handles {
             match handle.await {
-                Ok(Ok(r)) => all_results.extend(r),
-                Ok(Err(e)) => all_results.push(TestResult {
-                    name: "<file error>".to_string(),
-                    file: String::new(),
-                    passed: false,
-                    error: Some(e),
-                    duration_ms: 0,
-                }),
-                Err(e) => all_results.push(TestResult {
-                    name: "<join error>".to_string(),
-                    file: String::new(),
-                    passed: false,
-                    error: Some(format!("{e}")),
-                    duration_ms: 0,
-                }),
-            }
-        }
-    } else {
-        for file in &files {
-            let execution_cwd = file
-                .parent()
-                .filter(|parent| !parent.as_os_str().is_empty());
-            match run_test_file(file, filter, timeout_ms, execution_cwd, cli_skill_dirs).await {
-                Ok(results) => all_results.extend(results),
-                Err(e) => {
-                    all_results.push(TestResult {
+                Ok(Ok(r)) => {
+                    for result in &r {
+                        emit_progress(&progress, TestRunEvent::TestFinished(result.clone()));
+                    }
+                    all_results.extend(r);
+                }
+                Ok(Err(e)) => {
+                    let result = TestResult {
                         name: "<file error>".to_string(),
-                        file: file.display().to_string(),
+                        file: String::new(),
                         passed: false,
                         error: Some(e),
                         duration_ms: 0,
-                    });
+                    };
+                    push_result(&mut all_results, result, &progress);
+                }
+                Err(e) => {
+                    let result = TestResult {
+                        name: "<join error>".to_string(),
+                        file: String::new(),
+                        passed: false,
+                        error: Some(format!("{e}")),
+                        duration_ms: 0,
+                    };
+                    push_result(&mut all_results, result, &progress);
+                }
+            }
+        }
+    } else {
+        let mut progress_file_index = 0;
+        for plan in &file_plans {
+            if plan.test_count > 0 {
+                progress_file_index += 1;
+                emit_progress(
+                    &progress,
+                    TestRunEvent::FileStarted {
+                        file: plan.file.display().to_string(),
+                        file_index: progress_file_index,
+                        total_files,
+                        test_count: plan.test_count,
+                    },
+                );
+            }
+            let execution_cwd = plan
+                .file
+                .parent()
+                .filter(|parent| !parent.as_os_str().is_empty());
+            match run_test_file_with_progress(
+                &plan.file,
+                filter,
+                timeout_ms,
+                execution_cwd,
+                cli_skill_dirs,
+                progress.clone(),
+            )
+            .await
+            {
+                Ok(results) => all_results.extend(results),
+                Err(e) => {
+                    let result = TestResult {
+                        name: "<file error>".to_string(),
+                        file: plan.file.display().to_string(),
+                        passed: false,
+                        error: Some(e),
+                        duration_ms: 0,
+                    };
+                    push_result(&mut all_results, result, &progress);
                 }
             }
         }
@@ -301,17 +517,19 @@ fn run_test_file_on_isolated_thread(
     timeout_ms: u64,
     execution_cwd: Option<&Path>,
     cli_skill_dirs: &[PathBuf],
+    progress: Option<TestRunProgress>,
 ) -> Result<Vec<TestResult>, String> {
     let runtime = tokio::runtime::Builder::new_current_thread()
         .enable_all()
         .build()
         .map_err(|error| format!("failed to start test runtime: {error}"))?;
-    runtime.block_on(run_test_file(
+    runtime.block_on(run_test_file_with_progress(
         file,
         filter,
         timeout_ms,
         execution_cwd,
         cli_skill_dirs,
+        progress,
     ))
 }
 
@@ -337,9 +555,13 @@ fn discover_test_files(dir: &Path) -> Vec<PathBuf> {
 
 #[cfg(test)]
 mod tests {
-    use super::{discover_test_files, run_tests};
+    use super::{
+        discover_test_files, run_tests, run_tests_with_progress,
+        should_warn_large_sequential_suite, TestRunEvent, TestRunProgress,
+    };
     use std::fs;
     use std::path::Path;
+    use std::sync::{Arc, Mutex};
 
     struct TempTestDir {
         inner: tempfile::TempDir,
@@ -389,6 +611,72 @@ mod tests {
         assert!(files
             .iter()
             .any(|path| path.ends_with("suite/annotated.harn")));
+    }
+
+    #[test]
+    fn large_sequential_suite_warning_threshold_is_conservative() {
+        assert!(!should_warn_large_sequential_suite(49, 9));
+        assert!(should_warn_large_sequential_suite(50, 1));
+        assert!(should_warn_large_sequential_suite(1, 10));
+    }
+
+    #[tokio::test]
+    async fn run_tests_emits_progress_events() {
+        let _env_guard = crate::tests::common::env_lock::lock_env().lock().await;
+        let temp = TempTestDir::new();
+        temp.write(
+            "suite/test_progress.harn",
+            r#"
+pipeline test_alpha(task) {
+  assert_eq(1, 1)
+}
+
+pipeline test_beta(task) {
+  assert_eq(2, 2)
+}
+"#,
+        );
+        let events = Arc::new(Mutex::new(Vec::new()));
+        let captured = Arc::clone(&events);
+        let progress: TestRunProgress = Arc::new(move |event| {
+            captured.lock().unwrap().push(event);
+        });
+
+        let summary = run_tests_with_progress(
+            &temp.path().join("suite"),
+            None,
+            1_000,
+            false,
+            &[],
+            Some(progress),
+        )
+        .await;
+        let events = events.lock().unwrap();
+
+        assert_eq!(summary.failed, 0);
+        assert_eq!(summary.passed, 2);
+        assert!(matches!(
+            events.first(),
+            Some(TestRunEvent::SuiteDiscovered {
+                total_tests: 2,
+                total_files: 1,
+                parallel: false
+            })
+        ));
+        let file_started = events
+            .iter()
+            .position(|event| matches!(event, TestRunEvent::FileStarted { .. }))
+            .expect("file start event");
+        let test_started = events
+            .iter()
+            .position(|event| matches!(event, TestRunEvent::TestStarted { .. }))
+            .expect("test start event");
+        let test_finished = events
+            .iter()
+            .position(|event| matches!(event, TestRunEvent::TestFinished(_)))
+            .expect("test finished event");
+        assert!(file_started < test_started);
+        assert!(test_started < test_finished);
     }
 
     #[tokio::test]
