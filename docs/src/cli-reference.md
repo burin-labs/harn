@@ -594,15 +594,18 @@ harn fix --apply --safety behavior-preserving main.harn
 harn fix --apply --dry-run --json --safety scope-local src/
 ```
 
-`--json` returns a `RepairPlan` with `schemaVersion: 1`, `diagnostics[]`,
-`repairs[]`, and `safetyLevels[]`. Each repair includes the diagnostic code,
-repair `{id, summary, safety}`, candidate edits, `applies_cleanly`, and
-`conflicts_with` indexes for overlapping edit ranges. Apply mode requires
+`--json` returns a `RepairPlan` with `schemaVersion: 2`, `diagnostics[]`,
+`repairs[]`, `skippedFiles[]`, and `safetyLevels[]`. Each repair includes the
+diagnostic code, repair `{id, summary, safety}`, candidate edits,
+`applies_cleanly`, and `conflicts_with` indexes for overlapping edit ranges.
+Directory runs continue after read, lex, or parse failures; those files appear
+in `skippedFiles[]` with `reason` and diagnostic details, and the command exits
+nonzero after processing the remaining parseable files. Apply mode requires
 `--safety <format-only|behavior-preserving|scope-local|surface-changing|capability-changing>`;
 `needs-human` repairs are propose-only and are never auto-applied.
-`--apply --json` returns `schemaVersion`, `applied[]`, `skipped[]`, and
-`post_apply_diagnostics_count`. `--dry-run` reports the same apply set without
-writing files.
+`--apply --json` returns `schemaVersion`, `applied[]`, `skipped[]`,
+`skippedFiles[]`, and `post_apply_diagnostics_count`. `--dry-run` reports the
+same apply set without writing files.
 
 ## harn check
 

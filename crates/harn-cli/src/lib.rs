@@ -444,7 +444,11 @@ async fn async_main() {
         }
         Command::Fix(args) => {
             if let Err(error) = commands::fix::run(&args) {
-                command_error(&error);
+                if error.is_partial_failure() {
+                    eprintln!("error: {}", error.message());
+                    process::exit(1);
+                }
+                command_error(error.message());
             }
         }
         Command::Contracts(args) => {

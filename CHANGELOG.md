@@ -6,6 +6,16 @@ Pre-0.6 highlights live in [CHANGELOG-pre-0.6.md](CHANGELOG-pre-0.6.md).
 Harn had no external users before 0.6.0, so that archive intentionally keeps
 condensed series summaries instead of full per-patch history.
 
+## Unreleased
+
+### Fixed
+
+- **`harn fix` now finishes recursive migrations with invalid fixtures
+  present (#2134).** Directory-mode `fix --plan --json` and `fix --apply
+  --json` continue past read, lex, and parse failures, report those files in
+  `skippedFiles[]` with diagnostics, and return a nonzero exit only after all
+  parseable `.harn` files have been planned or repaired.
+
 ## v0.8.32
 
 ### Added
