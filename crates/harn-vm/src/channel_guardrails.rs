@@ -432,7 +432,7 @@ async fn evaluate_custom(
     let payload_vm = crate::stdlib::json_to_vm_value(payload);
     let context_vm = crate::stdlib::json_to_vm_value(context);
     let result = vm
-        .call_callable_value(scan_fn, &[payload_vm, context_vm])
+        .call_callable_two(scan_fn, &payload_vm, &context_vm)
         .await?;
     parse_custom_verdict(&result)
 }

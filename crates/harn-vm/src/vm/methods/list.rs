@@ -321,7 +321,7 @@ impl crate::vm::Vm {
                 };
                 let mut results = Vec::with_capacity(items.len());
                 for item in items.iter() {
-                    results.push(self.call_callable_value(callable, &[item.clone()]).await?);
+                    results.push(self.call_callable_one(callable, item).await?);
                 }
                 Ok(VmValue::List(Rc::new(results)))
             }
@@ -331,7 +331,7 @@ impl crate::vm::Vm {
                 };
                 let mut results = Vec::with_capacity(items.len());
                 for item in items.iter() {
-                    let result = self.call_callable_value(callable, &[item.clone()]).await?;
+                    let result = self.call_callable_one(callable, item).await?;
                     if result.is_truthy() {
                         results.push(item.clone());
                     }
@@ -345,9 +345,7 @@ impl crate::vm::Vm {
                 };
                 let mut acc = args.first().cloned().unwrap_or(VmValue::Nil);
                 for item in items.iter() {
-                    acc = self
-                        .call_callable_value(&callable, &[acc, item.clone()])
-                        .await?;
+                    acc = self.call_callable_two(&callable, &acc, item).await?;
                 }
                 Ok(acc)
             }
@@ -356,7 +354,7 @@ impl crate::vm::Vm {
                     return Ok(VmValue::Nil);
                 };
                 for item in items.iter() {
-                    let result = self.call_callable_value(callable, &[item.clone()]).await?;
+                    let result = self.call_callable_one(callable, item).await?;
                     if result.is_truthy() {
                         return Ok(item.clone());
                     }
@@ -368,7 +366,7 @@ impl crate::vm::Vm {
                     return Ok(VmValue::Bool(false));
                 };
                 for item in items.iter() {
-                    let result = self.call_callable_value(callable, &[item.clone()]).await?;
+                    let result = self.call_callable_one(callable, item).await?;
                     if result.is_truthy() {
                         return Ok(VmValue::Bool(true));
                     }
@@ -380,7 +378,7 @@ impl crate::vm::Vm {
                     return Ok(VmValue::Bool(true));
                 };
                 for item in items.iter() {
-                    let result = self.call_callable_value(callable, &[item.clone()]).await?;
+                    let result = self.call_callable_one(callable, item).await?;
                     if !result.is_truthy() {
                         return Ok(VmValue::Bool(false));
                     }
@@ -393,7 +391,7 @@ impl crate::vm::Vm {
                 };
                 let mut results = Vec::with_capacity(items.len());
                 for item in items.iter() {
-                    let result = self.call_callable_value(callable, &[item.clone()]).await?;
+                    let result = self.call_callable_one(callable, item).await?;
                     if let VmValue::List(inner) = result {
                         results.extend(inner.iter().cloned());
                     } else {
@@ -408,7 +406,7 @@ impl crate::vm::Vm {
                 };
                 let mut keyed: Vec<(VmValue, VmValue)> = Vec::new();
                 for item in items.iter() {
-                    let key = self.call_callable_value(callable, &[item.clone()]).await?;
+                    let key = self.call_callable_one(callable, item).await?;
                     keyed.push((item.clone(), key));
                 }
                 keyed.sort_by(|(_, ka), (_, kb)| compare_values(ka, kb).cmp(&0));
@@ -421,7 +419,7 @@ impl crate::vm::Vm {
                     return Ok(VmValue::Bool(items.is_empty()));
                 };
                 for item in items.iter() {
-                    let result = self.call_callable_value(callable, &[item.clone()]).await?;
+                    let result = self.call_callable_one(callable, item).await?;
                     if result.is_truthy() {
                         return Ok(VmValue::Bool(false));
                     }
@@ -433,7 +431,7 @@ impl crate::vm::Vm {
                     return Ok(VmValue::Int(-1));
                 };
                 for (i, item) in items.iter().enumerate() {
-                    let result = self.call_callable_value(callable, &[item.clone()]).await?;
+                    let result = self.call_callable_one(callable, item).await?;
                     if result.is_truthy() {
                         return Ok(VmValue::Int(i as i64));
                     }
@@ -447,7 +445,7 @@ impl crate::vm::Vm {
                 let mut truthy = Vec::new();
                 let mut falsy = Vec::new();
                 for item in items.iter() {
-                    let result = self.call_callable_value(callable, &[item.clone()]).await?;
+                    let result = self.call_callable_one(callable, item).await?;
                     if result.is_truthy() {
                         truthy.push(item.clone());
                     } else {
@@ -465,7 +463,7 @@ impl crate::vm::Vm {
                 };
                 let mut groups: BTreeMap<String, Vec<VmValue>> = BTreeMap::new();
                 for item in items.iter() {
-                    let key = self.call_callable_value(callable, &[item.clone()]).await?;
+                    let key = self.call_callable_one(callable, item).await?;
                     let key_str = key.display();
                     groups.entry(key_str).or_default().push(item.clone());
                 }
@@ -483,9 +481,9 @@ impl crate::vm::Vm {
                     return Ok(VmValue::Nil);
                 };
                 let mut best = items[0].clone();
-                let mut best_key = self.call_callable_value(callable, &[best.clone()]).await?;
+                let mut best_key = self.call_callable_one(callable, &best).await?;
                 for item in &items[1..] {
-                    let key = self.call_callable_value(callable, &[item.clone()]).await?;
+                    let key = self.call_callable_one(callable, item).await?;
                     if compare_values(&key, &best_key) < 0 {
                         best = item.clone();
                         best_key = key;
@@ -501,9 +499,9 @@ impl crate::vm::Vm {
                     return Ok(VmValue::Nil);
                 };
                 let mut best = items[0].clone();
-                let mut best_key = self.call_callable_value(callable, &[best.clone()]).await?;
+                let mut best_key = self.call_callable_one(callable, &best).await?;
                 for item in &items[1..] {
-                    let key = self.call_callable_value(callable, &[item.clone()]).await?;
+                    let key = self.call_callable_one(callable, item).await?;
                     if compare_values(&key, &best_key) > 0 {
                         best = item.clone();
                         best_key = key;

@@ -304,7 +304,7 @@ impl crate::vm::Vm {
                     match item {
                         None => return Ok(acc),
                         Some(v) => {
-                            acc = self.call_callable_value(&f, &[acc, v]).await?;
+                            acc = self.call_callable_two(&f, &acc, &v).await?;
                         }
                     }
                 }
@@ -334,7 +334,7 @@ impl crate::vm::Vm {
                     match item {
                         None => return Ok(VmValue::Bool(false)),
                         Some(v) => {
-                            let r = self.call_callable_value(&p, &[v]).await?;
+                            let r = self.call_callable_one(&p, &v).await?;
                             if r.is_truthy() {
                                 return Ok(VmValue::Bool(true));
                             }
@@ -353,7 +353,7 @@ impl crate::vm::Vm {
                     match item {
                         None => return Ok(VmValue::Bool(true)),
                         Some(v) => {
-                            let r = self.call_callable_value(&p, &[v]).await?;
+                            let r = self.call_callable_one(&p, &v).await?;
                             if !r.is_truthy() {
                                 return Ok(VmValue::Bool(false));
                             }
@@ -374,7 +374,7 @@ impl crate::vm::Vm {
                     match item {
                         None => return Ok(VmValue::Nil),
                         Some(v) => {
-                            let r = self.call_callable_value(&p, &[v.clone()]).await?;
+                            let r = self.call_callable_one(&p, &v).await?;
                             if r.is_truthy() {
                                 return Ok(v);
                             }
@@ -395,7 +395,7 @@ impl crate::vm::Vm {
                     match item {
                         None => return Ok(VmValue::Nil),
                         Some(v) => {
-                            self.call_callable_value(&f, &[v]).await?;
+                            self.call_callable_one(&f, &v).await?;
                         }
                     }
                 }

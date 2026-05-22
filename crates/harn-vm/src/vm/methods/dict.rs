@@ -94,7 +94,7 @@ impl crate::vm::Vm {
                 };
                 let mut result = BTreeMap::new();
                 for (k, v) in map.iter() {
-                    let mapped = self.call_callable_value(callable, &[v.clone()]).await?;
+                    let mapped = self.call_callable_one(callable, v).await?;
                     result.insert(k.clone(), mapped);
                 }
                 Ok(VmValue::Dict(Rc::new(result)))
@@ -105,9 +105,8 @@ impl crate::vm::Vm {
                 };
                 let mut result = BTreeMap::new();
                 for (k, v) in map.iter() {
-                    let new_key = self
-                        .call_callable_value(callable, &[VmValue::String(Rc::from(k.as_str()))])
-                        .await?;
+                    let key = VmValue::String(Rc::from(k.as_str()));
+                    let new_key = self.call_callable_one(callable, &key).await?;
                     let new_key_str = new_key.display();
                     result.insert(new_key_str, v.clone());
                 }
@@ -119,7 +118,7 @@ impl crate::vm::Vm {
                 };
                 let mut result = BTreeMap::new();
                 for (k, v) in map.iter() {
-                    let keep = self.call_callable_value(callable, &[v.clone()]).await?;
+                    let keep = self.call_callable_one(callable, v).await?;
                     if keep.is_truthy() {
                         result.insert(k.clone(), v.clone());
                     }

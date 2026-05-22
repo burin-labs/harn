@@ -161,7 +161,7 @@ impl crate::vm::Vm {
                 };
                 let mut result = Vec::new();
                 for item in items.iter() {
-                    let mapped = self.call_callable_value(callable, &[item.clone()]).await?;
+                    let mapped = self.call_callable_one(callable, item).await?;
                     if !result.iter().any(|x| values_equal(x, &mapped)) {
                         result.push(mapped);
                     }
@@ -174,7 +174,7 @@ impl crate::vm::Vm {
                 };
                 let mut result = Vec::new();
                 for item in items.iter() {
-                    let keep = self.call_callable_value(callable, &[item.clone()]).await?;
+                    let keep = self.call_callable_one(callable, item).await?;
                     if keep.is_truthy() {
                         result.push(item.clone());
                     }
@@ -186,7 +186,7 @@ impl crate::vm::Vm {
                     return Ok(VmValue::Bool(false));
                 };
                 for item in items.iter() {
-                    let result = self.call_callable_value(callable, &[item.clone()]).await?;
+                    let result = self.call_callable_one(callable, item).await?;
                     if result.is_truthy() {
                         return Ok(VmValue::Bool(true));
                     }
@@ -198,7 +198,7 @@ impl crate::vm::Vm {
                     return Ok(VmValue::Bool(true));
                 };
                 for item in items.iter() {
-                    let result = self.call_callable_value(callable, &[item.clone()]).await?;
+                    let result = self.call_callable_one(callable, item).await?;
                     if !result.is_truthy() {
                         return Ok(VmValue::Bool(false));
                     }

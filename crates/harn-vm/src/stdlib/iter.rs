@@ -327,7 +327,7 @@ pub(crate) fn register_iter_builtins(vm: &mut Vm) {
         })?;
         loop {
             match next_handle(&inner, &mut vm).await? {
-                Some(v) => acc = vm.call_callable_value(&f, &[acc, v]).await?,
+                Some(v) => acc = vm.call_callable_two(&f, &acc, &v).await?,
                 None => return Ok(acc),
             }
         }
@@ -436,7 +436,7 @@ fn spawn_parallel_race_task(
     item: VmValue,
 ) {
     join_set.spawn_local(async move {
-        match vm.call_callable_value(&callable, &[item]).await {
+        match vm.call_callable_one(&callable, &item).await {
             Ok(VmValue::EnumVariant(enum_variant)) if enum_variant.is_variant("Result", "Ok") => {
                 Ok(enum_variant.fields.first().cloned().unwrap_or(VmValue::Nil))
             }

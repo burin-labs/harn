@@ -5,6 +5,8 @@ use std::time::{Duration, Instant};
 
 use crate::value::{VmError, VmStream, VmStreamCancel, VmTaskHandle, VmValue};
 
+use super::super::CallArgs;
+
 /// Decode the `cap_val` stack operand pushed by `parallel ... with
 /// { max_concurrent: N }`. A value of `0` (emitted when no option was
 /// given) and any negative integer both mean "unlimited"; returning
@@ -166,8 +168,9 @@ impl super::super::Vm {
                 );
                 let closure = closure.clone();
                 futures.push(async move {
+                    let arg = VmValue::Int(i as i64);
                     let result = child
-                        .call_closure(&closure, &[VmValue::Int(i as i64)])
+                        .call_closure_args(&closure, CallArgs::One(&arg))
                         .await?;
                     Ok::<(VmValue, String), VmError>((result, std::mem::take(&mut child.output)))
                 });
@@ -210,7 +213,9 @@ impl super::super::Vm {
                     let closure = closure.clone();
                     let item = item.clone();
                     futures.push(async move {
-                        let result = child.call_closure(&closure, &[item]).await?;
+                        let result = child
+                            .call_closure_args(&closure, CallArgs::One(&item))
+                            .await?;
                         Ok::<(VmValue, String), VmError>((
                             result,
                             std::mem::take(&mut child.output),
@@ -254,7 +259,11 @@ impl super::super::Vm {
                     );
                     let closure = closure.clone();
                     let item = item.clone();
-                    futures.push(async move { child.call_closure(&closure, &[item]).await });
+                    futures.push(async move {
+                        child
+                            .call_closure_args(&closure, CallArgs::One(&item))
+                            .await
+                    });
                 }
 
                 let (tx, rx) = tokio::sync::mpsc::channel::<Result<VmValue, VmError>>(1);
@@ -301,7 +310,9 @@ impl super::super::Vm {
                     let closure = closure.clone();
                     let item = item.clone();
                     futures.push(async move {
-                        let result = child.call_closure(&closure, &[item]).await;
+                        let result = child
+                            .call_closure_args(&closure, CallArgs::One(&item))
+                            .await;
                         let output = std::mem::take(&mut child.output);
                         (result, output)
                     });
@@ -357,7 +368,7 @@ impl super::super::Vm {
             let cancel_token = Arc::new(std::sync::atomic::AtomicBool::new(false));
             child.cancel_token = Some(cancel_token.clone());
             let handle = tokio::task::spawn_local(async move {
-                let result = child.call_closure(&closure, &[]).await?;
+                let result = child.call_closure_args(&closure, CallArgs::Empty).await?;
                 Ok((result, std::mem::take(&mut child.output)))
             });
             self.spawned_tasks.insert(

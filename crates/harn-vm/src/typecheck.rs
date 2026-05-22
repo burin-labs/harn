@@ -30,6 +30,7 @@ use harn_parser::TypeExpr;
 
 use crate::chunk::{CompiledFunction, ParamSlot};
 use crate::value::{ArgTypeMismatchError, ArityExpect, ArityMismatchError, VmError, VmValue};
+use crate::vm::CallArgs;
 
 /// Validate that `value` satisfies `expected`. Returns `Ok(())` when the
 /// value is acceptable, otherwise an [`VmError::ArgTypeMismatch`] tagged
@@ -250,6 +251,14 @@ fn matches_type_with_generics(
 pub fn validate_user_call(
     func: &CompiledFunction,
     args: &[VmValue],
+    span: Option<Span>,
+) -> Result<(), VmError> {
+    validate_user_call_args(func, &CallArgs::Slice(args), span)
+}
+
+pub(crate) fn validate_user_call_args(
+    func: &CompiledFunction,
+    args: &CallArgs<'_>,
     span: Option<Span>,
 ) -> Result<(), VmError> {
     let total = func.params.len();

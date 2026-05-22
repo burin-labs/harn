@@ -101,7 +101,7 @@ pub(crate) fn register_collection_builtins(vm: &mut Vm) {
         let mut vm = current_async_vm("group_by")?;
         let mut groups: BTreeMap<String, Vec<VmValue>> = BTreeMap::new();
         for item in items.iter() {
-            let key = vm.call_callable_value(callable, &[item.clone()]).await?;
+            let key = vm.call_callable_one(callable, item).await?;
             groups.entry(key.display()).or_default().push(item.clone());
         }
         Ok(VmValue::Dict(Rc::new(
@@ -127,7 +127,7 @@ pub(crate) fn register_collection_builtins(vm: &mut Vm) {
         let mut matched = Vec::new();
         let mut no_match = Vec::new();
         for item in items.iter() {
-            let result = vm.call_callable_value(callable, &[item.clone()]).await?;
+            let result = vm.call_callable_one(callable, item).await?;
             if result.is_truthy() {
                 matched.push(item.clone());
             } else {
@@ -155,7 +155,7 @@ pub(crate) fn register_collection_builtins(vm: &mut Vm) {
         let mut seen = HashSet::new();
         let mut out = Vec::new();
         for item in items.iter() {
-            let key = vm.call_callable_value(callable, &[item.clone()]).await?;
+            let key = vm.call_callable_one(callable, item).await?;
             if seen.insert(value_structural_hash_key(&key)) {
                 out.push(item.clone());
             }
@@ -177,7 +177,7 @@ pub(crate) fn register_collection_builtins(vm: &mut Vm) {
         let mut vm = current_async_vm("flat_map")?;
         let mut out = Vec::new();
         for item in items.iter() {
-            match vm.call_callable_value(callable, &[item.clone()]).await? {
+            match vm.call_callable_one(callable, item).await? {
                 VmValue::List(inner) => out.extend(inner.iter().cloned()),
                 other => out.push(other),
             }

@@ -1,5 +1,6 @@
 mod async_builtin;
 mod builtin;
+mod call_args;
 mod debug;
 mod dispatch;
 mod execution;
@@ -27,6 +28,7 @@ pub use debug::{DebugAction, DebugState};
 pub use modules::resolve_module_import_path;
 pub use state::{Vm, VmBaseline};
 
+pub(crate) use call_args::CallArgs;
 pub(crate) use state::{
     CallFrame, ExceptionHandler, InterruptHandler, IterState, LocalSlot, ScopeSpan,
     VmBuiltinDispatch, VmBuiltinEntry,

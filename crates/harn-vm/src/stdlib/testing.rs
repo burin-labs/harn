@@ -36,7 +36,7 @@ pub(crate) fn register_testing_builtins(vm: &mut Vm) {
         let mut vm = crate::vm::clone_async_builtin_child_vm().ok_or_else(|| {
             VmError::Runtime("__testing_call_body: builtin requires VM execution context".to_string())
         })?;
-        let result = vm.call_callable_value(&body, &call_args).await;
+        let result = vm.call_callable_owned(&body, call_args).await;
         crate::vm::forward_child_output_to_parent(&vm.take_output());
         result
     });

@@ -317,7 +317,7 @@ impl VmIter {
                         Ok(None)
                     }
                     Some(v) => {
-                        let out = vm.call_callable_value(&f, &[v]).await?;
+                        let out = vm.call_callable_one(&f, &v).await?;
                         Ok(Some(out))
                     }
                 }
@@ -331,7 +331,7 @@ impl VmIter {
                         Ok(None)
                     }
                     Some(v) => {
-                        vm.call_callable_value(&f, &[v.clone()]).await?;
+                        vm.call_callable_one(&f, &v).await?;
                         Ok(Some(v))
                     }
                 }
@@ -346,7 +346,7 @@ impl VmIter {
                             return Ok(None);
                         }
                         Some(v) => {
-                            let keep = vm.call_callable_value(&p, &[v.clone()]).await?;
+                            let keep = vm.call_callable_one(&p, &v).await?;
                             if keep.is_truthy() {
                                 return Ok(Some(v));
                             }
@@ -363,7 +363,7 @@ impl VmIter {
                         Ok(None)
                     }
                     Some(v) => {
-                        let next_acc = vm.call_callable_value(&f, &[acc.clone(), v]).await?;
+                        let next_acc = vm.call_callable_two(&f, acc, &v).await?;
                         *acc = next_acc.clone();
                         Ok(Some(next_acc))
                     }
@@ -386,7 +386,7 @@ impl VmIter {
                             return Ok(None);
                         }
                         Some(v) => {
-                            let result = vm.call_callable_value(&f, &[v]).await?;
+                            let result = vm.call_callable_one(&f, &v).await?;
                             let lifted = iter_from_value(result)?;
                             if let VmValue::Iter(h) = lifted {
                                 *cur = Some(h);
@@ -453,7 +453,7 @@ impl VmIter {
                         Ok(None)
                     }
                     Some(v) => {
-                        let keep = vm.call_callable_value(&p, &[v.clone()]).await?;
+                        let keep = vm.call_callable_one(&p, &v).await?;
                         if keep.is_truthy() {
                             Ok(Some(v))
                         } else {
@@ -472,7 +472,7 @@ impl VmIter {
                         Ok(None)
                     }
                     Some(v) => {
-                        let stop = vm.call_callable_value(&p, &[v.clone()]).await?;
+                        let stop = vm.call_callable_one(&p, &v).await?;
                         if stop.is_truthy() {
                             *self = VmIter::Exhausted;
                             Ok(None)
@@ -502,7 +502,7 @@ impl VmIter {
                             return Ok(None);
                         }
                         Some(v) => {
-                            let drop_it = vm.call_callable_value(&p, &[v.clone()]).await?;
+                            let drop_it = vm.call_callable_one(&p, &v).await?;
                             if !drop_it.is_truthy() {
                                 *primed = true;
                                 return Ok(Some(v));
@@ -923,7 +923,7 @@ impl VmIter {
             VmIter::Map { inner, f } => {
                 let f = f.clone();
                 match try_next_ready(inner, vm).await? {
-                    Some(v) => Ok(Some(vm.call_callable_value(&f, &[v]).await?)),
+                    Some(v) => Ok(Some(vm.call_callable_one(&f, &v).await?)),
                     None => {
                         if is_exhausted_handle(inner) {
                             *self = VmIter::Exhausted;
@@ -936,7 +936,7 @@ impl VmIter {
                 let f = f.clone();
                 match try_next_ready(inner, vm).await? {
                     Some(v) => {
-                        vm.call_callable_value(&f, &[v.clone()]).await?;
+                        vm.call_callable_one(&f, &v).await?;
                         Ok(Some(v))
                     }
                     None => {
@@ -952,7 +952,7 @@ impl VmIter {
                 loop {
                     match try_next_ready(inner, vm).await? {
                         Some(v) => {
-                            let keep = vm.call_callable_value(&p, &[v.clone()]).await?;
+                            let keep = vm.call_callable_one(&p, &v).await?;
                             if keep.is_truthy() {
                                 return Ok(Some(v));
                             }
@@ -970,7 +970,7 @@ impl VmIter {
                 let f = f.clone();
                 match try_next_ready(inner, vm).await? {
                     Some(v) => {
-                        let next_acc = vm.call_callable_value(&f, &[acc.clone(), v]).await?;
+                        let next_acc = vm.call_callable_two(&f, acc, &v).await?;
                         *acc = next_acc.clone();
                         Ok(Some(next_acc))
                     }
@@ -998,7 +998,7 @@ impl VmIter {
                     }
                     match try_next_ready(inner, vm).await? {
                         Some(v) => {
-                            let result = vm.call_callable_value(&f, &[v]).await?;
+                            let result = vm.call_callable_one(&f, &v).await?;
                             *cur = Some(iter_handle_from_value(result)?);
                         }
                         None => {
@@ -1035,7 +1035,7 @@ impl VmIter {
                 let p = p.clone();
                 match try_next_ready(inner, vm).await? {
                     Some(v) => {
-                        let stop = vm.call_callable_value(&p, &[v.clone()]).await?;
+                        let stop = vm.call_callable_one(&p, &v).await?;
                         if stop.is_truthy() {
                             *self = VmIter::Exhausted;
                             Ok(None)
