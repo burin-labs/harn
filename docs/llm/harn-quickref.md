@@ -2310,9 +2310,10 @@ csv_stringify([{name: "alice", age: 30}], {headers: true})
 // → "age,name\n30,alice\n"
 ```
 
-Options: `headers: bool` (default false), `delimiter: ","`. Without
-headers, `csv_parse` returns list-of-lists; with headers, list of
-dicts (keys are sorted on stringify for determinism).
+Options: `headers: bool` (default false), `delimiter: ","` as one
+ASCII character. Without headers, `csv_parse` returns list-of-lists;
+with headers, list of dicts (keys are sorted on stringify for
+determinism).
 
 ### URL parsing
 

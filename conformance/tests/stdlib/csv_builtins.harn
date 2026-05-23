@@ -16,4 +16,14 @@ pipeline test(task) {
   // round-trip list rows
   let listy = csv_stringify([["a", "b"], ["c", "d"]])
   log(listy)
+  let multi_delimiter = try {
+    csv_parse("a||b\n", {delimiter: "||"})
+  }
+  assert(is_err(multi_delimiter))
+  assert(contains(to_string(unwrap_err(multi_delimiter)), "exactly one ASCII"))
+  let unicode_delimiter = try {
+    csv_stringify([["a", "b"]], {delimiter: "é"})
+  }
+  assert(is_err(unicode_delimiter))
+  assert(contains(to_string(unwrap_err(unicode_delimiter)), "exactly one ASCII"))
 }

@@ -20,12 +20,27 @@ fn opt_bool(opts: Option<&BTreeMap<String, VmValue>>, key: &str, default: bool) 
     .unwrap_or(default)
 }
 
-fn opt_char(opts: Option<&BTreeMap<String, VmValue>>, key: &str, default: u8) -> u8 {
-    opts.and_then(|d| match d.get(key) {
-        Some(VmValue::String(s)) if !s.is_empty() => Some(s.as_bytes()[0]),
-        _ => None,
-    })
-    .unwrap_or(default)
+fn opt_delimiter(
+    opts: Option<&BTreeMap<String, VmValue>>,
+    key: &str,
+    default: u8,
+    builtin: &str,
+) -> Result<u8, VmError> {
+    let Some(value) = opts.and_then(|d| d.get(key)) else {
+        return Ok(default);
+    };
+    let VmValue::String(raw) = value else {
+        return Err(VmError::Thrown(VmValue::String(Rc::from(format!(
+            "{builtin}: {key} must be a string"
+        )))));
+    };
+    let bytes = raw.as_bytes();
+    if bytes.len() != 1 || !bytes[0].is_ascii() {
+        return Err(VmError::Thrown(VmValue::String(Rc::from(format!(
+            "{builtin}: {key} must be exactly one ASCII character"
+        )))));
+    }
+    Ok(bytes[0])
 }
 
 pub(crate) fn register_csv_builtins(vm: &mut Vm) {
@@ -36,7 +51,7 @@ pub(crate) fn register_csv_builtins(vm: &mut Vm) {
             _ => None,
         });
         let has_headers = opt_bool(opts, "headers", false);
-        let delimiter = opt_char(opts, "delimiter", b',');
+        let delimiter = opt_delimiter(opts, "delimiter", b',', "csv_parse")?;
 
         let mut reader = csv::ReaderBuilder::new()
             .has_headers(has_headers)
@@ -89,7 +104,7 @@ pub(crate) fn register_csv_builtins(vm: &mut Vm) {
             _ => None,
         });
         let want_headers = opt_bool(opts, "headers", false);
-        let delimiter = opt_char(opts, "delimiter", b',');
+        let delimiter = opt_delimiter(opts, "delimiter", b',', "csv_stringify")?;
 
         let mut wtr = csv::WriterBuilder::new()
             .delimiter(delimiter)
@@ -145,8 +160,69 @@ pub(crate) fn register_csv_builtins(vm: &mut Vm) {
         let bytes = wtr.into_inner().map_err(|e| {
             VmError::Thrown(VmValue::String(Rc::from(format!("csv_stringify: {e}"))))
         })?;
-        Ok(VmValue::String(Rc::from(
-            String::from_utf8(bytes).unwrap_or_default(),
-        )))
+        String::from_utf8(bytes)
+            .map(|text| VmValue::String(Rc::from(text)))
+            .map_err(|error| {
+                VmError::Thrown(VmValue::String(Rc::from(format!("csv_stringify: {error}"))))
+            })
     });
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn vm() -> Vm {
+        let mut vm = Vm::new();
+        register_csv_builtins(&mut vm);
+        vm
+    }
+
+    fn call(vm: &mut Vm, name: &str, args: Vec<VmValue>) -> Result<VmValue, VmError> {
+        let f = vm.builtins.get(name).unwrap().clone();
+        let mut out = String::new();
+        f(&args, &mut out)
+    }
+
+    fn string(value: &str) -> VmValue {
+        VmValue::String(Rc::from(value))
+    }
+
+    fn list(items: Vec<VmValue>) -> VmValue {
+        VmValue::List(Rc::new(items))
+    }
+
+    fn dict(items: impl IntoIterator<Item = (&'static str, VmValue)>) -> VmValue {
+        VmValue::Dict(Rc::new(
+            items
+                .into_iter()
+                .map(|(key, value)| (key.to_string(), value))
+                .collect(),
+        ))
+    }
+
+    #[test]
+    fn csv_stringify_rejects_non_ascii_delimiter() {
+        let mut vm = vm();
+        let rows = list(vec![list(vec![string("a"), string("b")])]);
+        let options = dict([("delimiter", string("é"))]);
+        let error = call(&mut vm, "csv_stringify", vec![rows, options])
+            .expect_err("delimiter must be a single ASCII byte");
+        assert!(
+            error.to_string().contains("delimiter"),
+            "unexpected error: {error}"
+        );
+    }
+
+    #[test]
+    fn csv_parse_rejects_multi_character_delimiter() {
+        let mut vm = vm();
+        let options = dict([("delimiter", string("||"))]);
+        let error = call(&mut vm, "csv_parse", vec![string("a||b\n"), options])
+            .expect_err("delimiter must be one character");
+        assert!(
+            error.to_string().contains("exactly one ASCII"),
+            "unexpected error: {error}"
+        );
+    }
 }

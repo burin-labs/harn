@@ -229,36 +229,45 @@ pub(super) async fn bulk_purge(
     let entries = select_bulk_entries(state, request).await?;
     let dry_run = request.dry_run.unwrap_or(false);
     let rate_limit_per_second = sanitize_rate_limit(request.rate_limit_per_second);
+    let matched_count = entries.len();
+    if dry_run {
+        return Ok(PortalDlqBulkResponse {
+            operation: "purge".to_string(),
+            dry_run,
+            matched_count,
+            accepted_count: 0,
+            skipped_count: matched_count,
+            rate_limit_per_second,
+            jobs: Vec::new(),
+            entries: entries.into_iter().map(redacted_dlq_entry).collect(),
+        });
+    }
+
     let mut purged = Vec::new();
-    if !dry_run {
-        let total = entries.len();
-        for (index, mut entry) in entries.clone().into_iter().enumerate() {
-            entry.state = "discarded".to_string();
-            entry.attempt_history.push(PortalDlqAttempt {
-                attempt: entry.attempt_history.len() as u32 + 1,
-                at: now_rfc3339(),
-                status: "discarded".to_string(),
-                error: None,
-            });
-            append_portal_entry(state, &entry, "dlq_entry").await?;
-            purged.push(entry);
-            if index + 1 < total {
-                tokio::time::sleep(Duration::from_secs_f64(1.0 / rate_limit_per_second)).await;
-            }
+    let total = matched_count;
+    for (index, mut entry) in entries.into_iter().enumerate() {
+        entry.state = "discarded".to_string();
+        entry.attempt_history.push(PortalDlqAttempt {
+            attempt: entry.attempt_history.len() as u32 + 1,
+            at: now_rfc3339(),
+            status: "discarded".to_string(),
+            error: None,
+        });
+        append_portal_entry(state, &entry, "dlq_entry").await?;
+        purged.push(entry);
+        if index + 1 < total {
+            tokio::time::sleep(Duration::from_secs_f64(1.0 / rate_limit_per_second)).await;
         }
     }
     Ok(PortalDlqBulkResponse {
         operation: "purge".to_string(),
         dry_run,
-        matched_count: entries.len(),
-        accepted_count: if dry_run { 0 } else { purged.len() },
-        skipped_count: if dry_run { entries.len() } else { 0 },
+        matched_count,
+        accepted_count: purged.len(),
+        skipped_count: 0,
         rate_limit_per_second,
         jobs: Vec::new(),
-        entries: if dry_run { entries } else { purged }
-            .into_iter()
-            .map(redacted_dlq_entry)
-            .collect(),
+        entries: purged.into_iter().map(redacted_dlq_entry).collect(),
     })
 }
 
@@ -802,7 +811,7 @@ fn parse_time_ms(raw: &str) -> Result<i64, String> {
 fn parse_time_ms_ok(raw: &str) -> Option<i64> {
     OffsetDateTime::parse(raw, &Rfc3339)
         .ok()
-        .map(|time| time.unix_timestamp().saturating_mul(1000))
+        .and_then(|time| i64::try_from(time.unix_timestamp_nanos() / 1_000_000).ok())
 }
 
 fn now_rfc3339() -> String {
@@ -886,5 +895,13 @@ mod tests {
         )
         .unwrap();
         assert_eq!(filtered.len(), 1);
+    }
+
+    #[test]
+    fn parse_time_ms_preserves_rfc3339_milliseconds() {
+        assert_eq!(
+            parse_time_ms("2026-04-24T10:00:00.123Z").unwrap(),
+            1_777_024_800_123
+        );
     }
 }
