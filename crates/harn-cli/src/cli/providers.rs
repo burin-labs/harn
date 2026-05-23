@@ -18,6 +18,8 @@ pub(crate) enum ProvidersCommand {
     Export(ProvidersExportArgs),
     /// Generate or check the provider capability matrix docs.
     Matrix(ProvidersMatrixArgs),
+    /// Recommend local provider/model presets from coding-agent readiness data.
+    Recommend(ProvidersRecommendArgs),
 }
 
 #[derive(Debug, Args)]
@@ -79,4 +81,20 @@ pub(crate) struct ProvidersMatrixArgs {
     /// Only include matrix rows that support the named feature.
     #[arg(long)]
     pub filter: Option<String>,
+}
+
+#[derive(Debug, Args)]
+pub(crate) struct ProvidersRecommendArgs {
+    /// Local readiness JSON or coding-agent summary JSON to read.
+    #[arg(long)]
+    pub input: Option<PathBuf>,
+    /// Coding-agent summary JSON to convert into a readiness report.
+    #[arg(long, conflicts_with = "input")]
+    pub summary: Option<PathBuf>,
+    /// Limit recommendations and outcomes to one provider id.
+    #[arg(long)]
+    pub provider: Option<String>,
+    /// Emit the structured local readiness report as JSON.
+    #[arg(long)]
+    pub json: bool,
 }

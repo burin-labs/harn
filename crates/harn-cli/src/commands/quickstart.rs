@@ -6,6 +6,7 @@ use std::process::Command;
 use std::time::Duration;
 
 use crate::cli::QuickstartArgs;
+use crate::commands::local_readiness;
 
 const QUICKSTART_ALIAS: &str = "quickstart";
 const PREFERRED_PROVIDERS: &[&str] = &[
@@ -18,13 +19,6 @@ const PREFERRED_PROVIDERS: &[&str] = &[
     "huggingface",
     "local",
     "mlx",
-];
-const PREFERRED_OLLAMA_MODELS: &[(&str, &str)] = &[
-    ("devstral-small-2", "devstral-small-2:24b"),
-    ("qwen3.6-coding", "qwen3.6:35b-a3b-coding-nvfp4"),
-    ("ollama-gemma4", "gemma4:26b"),
-    ("qwen3.6-35b-coding", "qwen3.6:35b-a3b-coding-nvfp4"),
-    ("qwen3.6-coding-nvfp4", "qwen3.6:35b-a3b-coding-nvfp4"),
 ];
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -186,7 +180,7 @@ fn default_model_for_choice(provider: &str, model: Option<&str>, ollama: &Ollama
         return model.trim().to_string();
     }
     if provider == "ollama" {
-        if let Some(model) = preferred_ollama_selector(&ollama.available_models) {
+        if let Some(model) = recommended_ollama_selector(&ollama.available_models) {
             return model;
         }
         if let Some(model) = ollama.available_models.first() {
@@ -196,37 +190,18 @@ fn default_model_for_choice(provider: &str, model: Option<&str>, ollama: &Ollama
     harn_vm::llm_config::default_model_for_provider(provider)
 }
 
-fn preferred_ollama_selector(available_models: &[String]) -> Option<String> {
-    for (alias, id) in PREFERRED_OLLAMA_MODELS {
-        if available_models.iter().any(|model| model == id) {
-            return Some((*alias).to_string());
-        }
-    }
-    None
+fn recommended_ollama_selector(available_models: &[String]) -> Option<String> {
+    ordered_ollama_models(available_models)
+        .first()
+        .map(|model| ollama_selector_for_model(model))
 }
 
 fn ollama_selector_for_model(model: &str) -> String {
-    PREFERRED_OLLAMA_MODELS
-        .iter()
-        .find_map(|(alias, id)| (*id == model).then(|| (*alias).to_string()))
-        .unwrap_or_else(|| model.to_string())
+    local_readiness::selector_for_provider_model("ollama", model, None)
 }
 
 fn ordered_ollama_models(available_models: &[String]) -> Vec<String> {
-    let mut ordered = Vec::new();
-    for (_, id) in PREFERRED_OLLAMA_MODELS {
-        if available_models.iter().any(|model| model == id)
-            && !ordered.iter().any(|model| model == id)
-        {
-            ordered.push((*id).to_string());
-        }
-    }
-    for model in available_models {
-        if !ordered.iter().any(|existing| existing == model) {
-            ordered.push(model.clone());
-        }
-    }
-    ordered
+    local_readiness::recommended_models_for_provider("ollama", available_models)
 }
 
 fn choose_non_interactive(
@@ -1005,21 +980,14 @@ mod tests {
     }
 
     #[test]
-    fn preferred_ollama_selector_uses_current_local_coding_alias() {
-        let available = vec![
-            "llama3.2".to_string(),
-            "devstral-small-2:24b".to_string(),
-            "qwen3.6:35b-a3b-coding-nvfp4".to_string(),
-        ];
+    fn ollama_selector_for_model_uses_alias_catalog() {
         assert_eq!(
-            preferred_ollama_selector(&available).as_deref(),
-            Some("devstral-small-2")
+            ollama_selector_for_model("devstral-small-2:24b"),
+            "devstral-small-2"
         );
         assert_eq!(
-            ordered_ollama_models(&available)
-                .first()
-                .map(String::as_str),
-            Some("devstral-small-2:24b")
+            ollama_selector_for_model("qwen3.6:35b-a3b-coding-nvfp4"),
+            "qwen3.6-coding"
         );
     }
 }

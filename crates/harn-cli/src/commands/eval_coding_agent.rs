@@ -17,6 +17,7 @@ use crate::commands::eval_model_selector::{
 use crate::commands::local::runtime::{
     local_provider_ids, ollama_unload_model, snapshot_provider, LocalProviderSnapshot,
 };
+use crate::commands::local_readiness;
 use crate::commands::run::{execute_run, CliLlmMockMode, RunProfileOptions};
 
 const FIRST_CODING_AGENT_HARN: &str = include_str!("../../assets/evals/first_coding_agent.harn");
@@ -200,9 +201,10 @@ pub async fn run(args: EvalCodingAgentArgs) -> i32 {
         return 1;
     }
     eprintln!(
-        "wrote {}, {}, {}, and {}",
+        "wrote {}, {}, {}, {}, and {}",
         output_dir.join("summary.json").display(),
         output_dir.join("per_run.jsonl").display(),
+        output_dir.join("local_readiness.json").display(),
         output_dir.join("summary.md").display(),
         output_dir.join("followups.md").display()
     );
@@ -852,6 +854,12 @@ fn suggest_followups(
 fn write_outputs(output_dir: &Path, summary: &EvalSummary) -> Result<(), String> {
     write_json_pretty(&output_dir.join("summary.json"), summary)?;
     write_jsonl(&output_dir.join("per_run.jsonl"), &summary.runs)?;
+    let summary_value = serde_json::to_value(summary).map_err(|error| error.to_string())?;
+    let readiness = local_readiness::report_from_summary_json(
+        &summary_value,
+        output_dir.display().to_string(),
+    )?;
+    write_json_pretty(&output_dir.join("local_readiness.json"), &readiness)?;
     fs::write(output_dir.join("summary.md"), render_markdown(summary))
         .map_err(|error| error.to_string())?;
     fs::write(output_dir.join("followups.md"), render_followups(summary))

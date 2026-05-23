@@ -23,6 +23,9 @@ condensed series summaries instead of full per-patch history.
   exercises provider/model selectors across native and text tool modes, records
   normalized JSON/JSONL/Markdown artifacts, snapshots local model cleanup, and
   generates follow-up issue candidates for provider/preset abstraction leaks.
+  Local runs now also emit `local_readiness.json`, and
+  `harn providers recommend` exposes the same readiness evidence and local
+  preset ordering that `harn quickstart` consumes.
 
 - **Provider matrix lifecycle command.** Added `harn providers matrix` so the
   capability matrix docs can be regenerated and checked through the same

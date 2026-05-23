@@ -16,6 +16,9 @@ Artifacts are written to `.harn-runs/coding-agent-bench/latest/` by default:
 
 - `summary.json`: aggregate pass/fail, token, cost, and native/text comparison data.
 - `per_run.jsonl`: one normalized row per provider/tool-format run.
+- `local_readiness.json`: local-provider recommendation evidence derived from
+  local runs, with provider transport failures, unsupported capability
+  failures, and behavioral task failures separated.
 - `<run_id>/summary.json`: the Harn harness result for one run.
 - `<run_id>/transcript_events.jsonl`: canonical transcript events from `transcript_events(...)`.
 - `summary.md`: a readable table for sharing results.
@@ -54,6 +57,18 @@ Pass `--keep-local-after-run` to leave newly-loaded local models running.
 Non-Ollama local servers are not killed unless Harn already owns a managed PID
 through the `harn local` lifecycle commands.
 
+Turn the latest local benchmark output into a machine-readable recommendation
+surface with:
+
+```sh
+harn providers recommend --json
+```
+
+`harn providers recommend --input <path>` accepts either `local_readiness.json`
+or a raw coding-agent `summary.json`. Without an input path, it reads the latest
+benchmark report and falls back to bundled seed evidence. `harn quickstart` uses
+the same recommendation order when choosing among installed local Ollama models.
+
 ## Reading Results
 
 Use the native/text comparison table to spot provider abstraction leaks:
@@ -63,6 +78,9 @@ Use the native/text comparison table to spot provider abstraction leaks:
 - rejected tool calls followed by eventual success suggest Harn may need better
   transcript compaction, repair, or history-rewrite ergonomics for recoverable
   tool-call noise.
+- provider transport failures such as HTTP 5xx, EOF, or connection resets are
+  reported separately from model behavioral failures, so a runtime path does not
+  get blamed on the model.
 - unknown pricing on live models means the provider catalog cannot yet support
   credible cost recommendations.
 

@@ -929,6 +929,11 @@ async fn async_main() {
                     command_error(&error);
                 }
             }
+            ProvidersCommand::Recommend(recommend) => {
+                if let Err(error) = commands::providers::run_recommend(&recommend) {
+                    command_error(&error);
+                }
+            }
         },
         Command::Try(args) => commands::try_cmd::run(args).await,
         Command::Quickstart(args) => {

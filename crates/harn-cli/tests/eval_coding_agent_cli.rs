@@ -68,6 +68,16 @@ fn mock_matrix_writes_artifacts_for_native_and_text_tools() {
 
     let per_run = fs::read_to_string(output.join("per_run.jsonl")).expect("per-run JSONL exists");
     assert_eq!(per_run.lines().count(), 2);
+    let readiness_raw =
+        fs::read_to_string(output.join("local_readiness.json")).expect("readiness exists");
+    let readiness: serde_json::Value =
+        serde_json::from_str(&readiness_raw).expect("readiness parses as JSON");
+    assert_eq!(readiness["schema_version"], 1);
+    assert_eq!(
+        readiness["outcomes"].as_array().map(Vec::len),
+        Some(0),
+        "mock-only runs should not produce local model readiness outcomes",
+    );
     assert!(output.join("mock_mock__native/summary.json").exists());
     assert!(output
         .join("mock_mock__native/transcript_events.jsonl")

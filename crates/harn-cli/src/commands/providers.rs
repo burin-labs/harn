@@ -5,7 +5,8 @@ use serde_json::json;
 use tokio::process::Command;
 
 use crate::cli::{
-    ProvidersExportArgs, ProvidersMatrixArgs, ProvidersRefreshArgs, ProvidersValidateArgs,
+    ProvidersExportArgs, ProvidersMatrixArgs, ProvidersRecommendArgs, ProvidersRefreshArgs,
+    ProvidersValidateArgs,
 };
 
 pub(crate) async fn run_refresh(args: &ProvidersRefreshArgs) -> Result<(), String> {
@@ -165,6 +166,53 @@ pub(crate) fn run_matrix(args: &ProvidersMatrixArgs) -> Result<(), String> {
     fs::write(&args.output, generated)
         .map_err(|error| format!("failed to write {}: {error}", args.output.display()))?;
     println!("wrote {}", args.output.display());
+    Ok(())
+}
+
+pub(crate) fn run_recommend(args: &ProvidersRecommendArgs) -> Result<(), String> {
+    let report = if let Some(summary) = args.summary.as_deref() {
+        crate::commands::local_readiness::report_from_summary_path(summary)?
+    } else if let Some(input) = args.input.as_deref() {
+        crate::commands::local_readiness::load_report_or_summary(input)?
+    } else {
+        crate::commands::local_readiness::load_default_report()?
+    };
+    let report = crate::commands::local_readiness::filter_report_by_provider(
+        report,
+        args.provider.as_deref(),
+    );
+    if args.json {
+        println!(
+            "{}",
+            serde_json::to_string_pretty(&report)
+                .map_err(|error| format!("failed to render recommendation JSON: {error}"))?
+        );
+        return Ok(());
+    }
+    println!("local provider recommendations");
+    println!("source: {}", report.source);
+    if report.recommendations.is_empty() {
+        println!("(no local model outcomes found)");
+        return Ok(());
+    }
+    for recommendation in &report.recommendations {
+        let tool = recommendation
+            .recommended_tool_format
+            .as_deref()
+            .unwrap_or("unproven");
+        println!(
+            "{}. {} {} ({}, selector {}, tools {})",
+            recommendation.rank,
+            recommendation.provider,
+            recommendation.model,
+            recommendation.status,
+            recommendation.selector,
+            tool
+        );
+        for caveat in &recommendation.caveats {
+            println!("   caveat: {caveat}");
+        }
+    }
     Ok(())
 }
 
