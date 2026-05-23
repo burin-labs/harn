@@ -9,6 +9,12 @@ and `duration_hours` stay available globally. `std/calendar` adds ISO week
 fields, quarter and boundary helpers, local-time construction with explicit DST
 overlap behavior, supported country metadata, and business-day arithmetic.
 
+Public calendar helpers use reusable shapes instead of anonymous records:
+`CalendarParts`, `CalendarIsoWeek`, `CalendarLocalDateTime`,
+`CalendarDateRangeOptions`, `CalendarCountry`, `CalendarHoliday`,
+`CalendarBusinessCalendar`, `CalendarBusinessWindowOptions`, and
+`CalendarBusinessWindow`.
+
 ## Civil calendar helpers
 
 ```harn

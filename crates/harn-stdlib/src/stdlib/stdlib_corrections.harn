@@ -9,11 +9,34 @@ type CorrectionId = string
 
 type CorrectionScope = "this_run" | "this_persona" | "all"
 
+type CorrectionDecision = {
+  actor_id?: string,
+  actor?: string,
+  agent?: string,
+  action?: string,
+  event_kind?: string,
+  outcome?: string,
+  reason?: string,
+  metadata?: dict,
+  raw?: dict,
+}
+
+type CorrectionEvidenceRef = {
+  kind: string,
+  event_id?: string,
+  trace_id?: string,
+  uri?: string,
+  path?: string,
+  line?: int,
+  summary?: string,
+  raw?: dict,
+}
+
 type CorrectionRecord = {
   schema: string,
   correction_id: string,
-  from_decision: any,
-  to_decision: any,
+  from_decision: CorrectionDecision,
+  to_decision: CorrectionDecision,
   reason: string,
   applied_by: string,
   scope: CorrectionScope,
@@ -22,19 +45,35 @@ type CorrectionRecord = {
   action: string?,
   trace_id: string?,
   step: string?,
-  evidence_refs: list<dict>,
+  evidence_refs: list<CorrectionEvidenceRef>,
   metadata: dict,
 }
 
+type CorrectionInput = {
+  from_decision: CorrectionDecision,
+  to_decision: CorrectionDecision,
+  reason: string,
+  applied_by: string,
+  scope?: CorrectionScope,
+  actor_id?: string,
+  actor?: string,
+  agent?: string,
+  action?: string,
+  trace_id?: string,
+  step?: string,
+  evidence_refs?: list<CorrectionEvidenceRef>,
+  metadata?: dict,
+}
+
 type CorrectionQueryFilters = {
-  actor: string?,
-  actor_id: string?,
-  agent: string?,
-  action: string?,
-  scope: CorrectionScope?,
-  since: string?,
-  until: string?,
-  limit: int?,
+  actor?: string,
+  actor_id?: string,
+  agent?: string,
+  action?: string,
+  scope?: CorrectionScope,
+  since?: string,
+  until?: string,
+  limit?: int,
 }
 
 /**
@@ -46,7 +85,7 @@ type CorrectionQueryFilters = {
  * @api_stability: stable
  * @example: record(correction)
  */
-pub fn record(correction) -> CorrectionId {
+pub fn record(correction: CorrectionInput) -> CorrectionId {
   return corrections.record(correction)
 }
 
@@ -59,6 +98,6 @@ pub fn record(correction) -> CorrectionId {
  * @api_stability: stable
  * @example: query(filters)
  */
-pub fn query(filters = {}) -> list<CorrectionRecord> {
+pub fn query(filters: CorrectionQueryFilters = {}) -> list<CorrectionRecord> {
   return corrections.query(filters)
 }

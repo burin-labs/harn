@@ -7,6 +7,25 @@ type RunArtifactsListOptions = {root?: string, namespace?: string, limit?: int}
 
 type RunArtifactWriteOptions = {pretty?: bool, trailing_newline?: bool, ensure_parent?: bool}
 
+type RunArtifactPaths = {
+  facts: string,
+  audit: string,
+  review: string,
+  agent_result: string,
+  agent_trace: string,
+  agent_llm_transcript: string,
+}
+
+type RunArtifactsRun = {
+  kind: string,
+  namespace?: string,
+  run_id: string,
+  root: string,
+  dir: string,
+  modified?: int | float,
+  paths: RunArtifactPaths,
+}
+
 fn __run_artifacts_required_text(value, label) -> string {
   let text = trim(to_string(value ?? ""))
   if text == "" {
@@ -72,15 +91,15 @@ fn __run_artifacts_default_run_id() -> string {
   return to_string(to_int(harness.clock.timestamp())) + "-" + uuid_v7()
 }
 
-fn __run_artifacts_run_dir(run) -> string {
-  let dir = to_string(run?.dir ?? "")
+fn __run_artifacts_run_dir(run: {dir: string}) -> string {
+  let dir = to_string(run.dir ?? "")
   if dir == "" {
     throw "std/run_artifacts: run.dir is required"
   }
   return dir
 }
 
-fn __run_artifacts_path(run, name) -> string {
+fn __run_artifacts_path(run: {dir: string}, name) -> string {
   let rel = __run_artifacts_clean_relative(name, "artifact path")
   let root = path_normalize(__run_artifacts_run_dir(run))
   let joined = path_normalize(path_join(root, rel))
@@ -91,7 +110,7 @@ fn __run_artifacts_path(run, name) -> string {
   return joined
 }
 
-fn __run_artifacts_standard_paths(run) -> dict {
+fn __run_artifacts_standard_paths(run: {dir: string}) -> RunArtifactPaths {
   return {
     facts: __run_artifacts_path(run, "facts.json"),
     audit: __run_artifacts_path(run, "audit.json"),
@@ -102,7 +121,7 @@ fn __run_artifacts_standard_paths(run) -> dict {
   }
 }
 
-fn __run_artifacts_make_run(kind, namespace, root, run_id, dir, modified = nil) -> dict {
+fn __run_artifacts_make_run(kind, namespace, root, run_id, dir, modified = nil) -> RunArtifactsRun {
   let base = {kind: kind, namespace: namespace, run_id: run_id, root: root, dir: dir, modified: modified}
   return base + {paths: __run_artifacts_standard_paths(base)}
 }
@@ -116,7 +135,7 @@ fn __run_artifacts_make_run(kind, namespace, root, run_id, dir, modified = nil) 
  * @api_stability: stable
  * @example: run_artifacts_open("release", {root: root, run_id: "run-1"})
  */
-pub fn run_artifacts_open(kind: string, options: RunArtifactsOpenOptions = {}) -> dict {
+pub fn run_artifacts_open(kind: string, options: RunArtifactsOpenOptions = {}) -> RunArtifactsRun {
   let opts = options ?? {}
   let clean_kind = __run_artifacts_clean_segment(kind, "kind")
   let namespace = __run_artifacts_namespace(opts)
@@ -140,7 +159,7 @@ pub fn run_artifacts_open(kind: string, options: RunArtifactsOpenOptions = {}) -
  * @api_stability: stable
  * @example: run_artifact_path(run, "facts.json")
  */
-pub fn run_artifact_path(run: dict, name: string) -> string {
+pub fn run_artifact_path(run: RunArtifactsRun, name: string) -> string {
   return __run_artifacts_path(run, name)
 }
 
@@ -154,7 +173,7 @@ pub fn run_artifact_path(run: dict, name: string) -> string {
  * @example: run_artifact_write_json(run, "facts.json", facts, {pretty: true})
  */
 pub fn run_artifact_write_json(
-  run: dict,
+  run: RunArtifactsRun,
   name: string,
   value,
   options: RunArtifactWriteOptions = {},
@@ -171,7 +190,7 @@ pub fn run_artifact_write_json(
  * @api_stability: stable
  * @example: run_artifact_read_json(run, "facts.json", {})
  */
-pub fn run_artifact_read_json(run: dict, name: string, fallback = nil) {
+pub fn run_artifact_read_json(run: RunArtifactsRun, name: string, fallback = nil) {
   return read_json(run_artifact_path(run, name), fallback)
 }
 
@@ -185,7 +204,7 @@ pub fn run_artifact_read_json(run: dict, name: string, fallback = nil) {
  * @example: run_artifact_write_text(run, "review.md", body)
  */
 pub fn run_artifact_write_text(
-  run: dict,
+  run: RunArtifactsRun,
   name: string,
   text: string,
   options: RunArtifactWriteOptions = {},
@@ -202,7 +221,7 @@ pub fn run_artifact_write_text(
  * @api_stability: stable
  * @example: run_artifact_read_text(run, "review.md", "")
  */
-pub fn run_artifact_read_text(run: dict, name: string, fallback = nil) {
+pub fn run_artifact_read_text(run: RunArtifactsRun, name: string, fallback = nil) {
   let result = try {
     harness.fs.read_text(run_artifact_path(run, name))
   }
@@ -221,7 +240,7 @@ pub fn run_artifact_read_text(run: dict, name: string, fallback = nil) {
  * @api_stability: stable
  * @example: run_artifact_transcript_dir(run, "agent-llm")
  */
-pub fn run_artifact_transcript_dir(run: dict, name: string = "agent-llm") -> string {
+pub fn run_artifact_transcript_dir(run: RunArtifactsRun, name: string = "agent-llm") -> string {
   let dir_name = if trim(to_string(name ?? "")) == "" {
     "agent-llm"
   } else {
@@ -239,7 +258,7 @@ pub fn run_artifact_transcript_dir(run: dict, name: string = "agent-llm") -> str
  * @api_stability: stable
  * @example: run_artifact_transcript_path(run, "agent-llm")
  */
-pub fn run_artifact_transcript_path(run: dict, name: string = "agent-llm") -> string {
+pub fn run_artifact_transcript_path(run: RunArtifactsRun, name: string = "agent-llm") -> string {
   let dir_name = if trim(to_string(name ?? "")) == "" {
     "agent-llm"
   } else {
@@ -257,7 +276,7 @@ pub fn run_artifact_transcript_path(run: dict, name: string = "agent-llm") -> st
  * @api_stability: stable
  * @example: run_artifacts_list("release", {limit: 5})
  */
-pub fn run_artifacts_list(kind: string, options: RunArtifactsListOptions = {}) -> list<dict> {
+pub fn run_artifacts_list(kind: string, options: RunArtifactsListOptions = {}) -> list<RunArtifactsRun> {
   let opts = options ?? {}
   let clean_kind = __run_artifacts_clean_segment(kind, "kind")
   let namespace = __run_artifacts_namespace(opts)
@@ -307,7 +326,7 @@ pub fn run_artifacts_list(kind: string, options: RunArtifactsListOptions = {}) -
  * @api_stability: stable
  * @example: run_artifacts_from_dir("release", previous_dir)
  */
-pub fn run_artifacts_from_dir(kind: string, dir: string) -> dict {
+pub fn run_artifacts_from_dir(kind: string, dir: string) -> RunArtifactsRun {
   let clean_kind = __run_artifacts_clean_segment(kind, "kind")
   let clean_dir = path_normalize(__run_artifacts_required_text(dir, "dir"))
   let run_id = __run_artifacts_clean_segment(path_basename(clean_dir), "run_id")

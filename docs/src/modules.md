@@ -288,15 +288,15 @@ MCP Apps-compatible UI resource envelopes with text and structured fallbacks:
 
 | Function | Description |
 |---|---|
-| `ui_resource(uri, name, html, options?)` | Build a `harn.ui_resource.v1` envelope, validate HTML through `std/artifact/web`, and capture a content hash, size, requested permissions, and a CSP/sandbox policy |
-| `ui_tool_meta(resource, options?)` | Build a `_meta.ui` tool-declaration block (`harn.ui_tool_meta.v1`) with visibility, initial view, and permission/capability lists |
+| `ui_resource(uri, name, html, options?: UiResourceOptions)` | Build a `UiResource` (`harn.ui_resource.v1`) envelope, validate HTML through `std/artifact/web`, and capture a content hash, size, requested permissions, and a CSP/sandbox policy |
+| `ui_tool_meta(resource, options?: UiToolMetaOptions)` | Build a `_meta.ui` tool-declaration block (`UiToolMeta`, `harn.ui_tool_meta.v1`) with visibility, initial view, and permission/capability lists |
 | `ui_tool_meta_to_mcp(meta)` | Serialize a tool-meta into the MCP Apps `_meta.ui` dict (`resourceUri`, `visibility`, etc.) for direct inclusion in `tools/list` payloads |
-| `ui_text_fallback(content)` / `ui_structured_fallback(data, options?)` | Build text and structured fallback envelopes for hosts without UI support |
-| `ui_tool_result(resource, options?)` | Wrap a resource with mandatory text and optional structured fallbacks, defaulting the text to a `web_artifact_text_fallback` projection |
-| `ui_select_for_host(result, capabilities?)` | Choose between `ui_resource`, `structured_fallback`, and `text_fallback` for a host based on advertised MCP Apps capability |
-| `ui_host_supports_apps(capabilities?)` / `ui_host_capabilities(input?)` | Detect whether an MCP, MCP Apps, or OpenAI Apps SDK host advertises support for the `mcp-app` profile |
-| `ui_tool_call_envelope(name, params?, options?)` | Build the host→guest JSON-RPC `tools/call` envelope a sandboxed iframe receives over `postMessage` |
-| `ui_context_update_envelope(key, value, options?)` | Build the guest→host JSON-RPC `context/update` envelope used to update model-visible context |
+| `ui_text_fallback(content)` / `ui_structured_fallback(data, options?: UiStructuredFallbackOptions)` | Build `UiTextFallback` and `UiStructuredFallback` envelopes for hosts without UI support |
+| `ui_tool_result(resource, options?: UiToolResultOptions)` | Wrap a resource with mandatory text and optional `UiStructuredFallback`, defaulting the text to a `web_artifact_text_fallback` projection |
+| `ui_select_for_host(result, capabilities?: UiHostCapabilityInput)` | Choose between `ui_resource`, `structured_fallback`, and `text_fallback` for a host based on advertised MCP Apps capability |
+| `ui_host_supports_apps(capabilities?: UiHostCapabilityInput)` / `ui_host_capabilities(input?: UiHostCapabilityInput)` | Detect whether an MCP, MCP Apps, or OpenAI Apps SDK host advertises support for the `mcp-app` profile |
+| `ui_tool_call_envelope(name, params?, options?: UiToolCallOptions)` | Build the host→guest JSON-RPC `tools/call` envelope a sandboxed iframe receives over `postMessage` |
+| `ui_context_update_envelope(key, value, options?: UiContextUpdateOptions)` | Build the guest→host JSON-RPC `context/update` envelope used to update model-visible context |
 | `ui_resource_csp_header(csp)` / `ui_resource_sandbox_attr(csp)` | Project the resource CSP into header value and `<iframe sandbox>` attribute strings |
 | `ui_tool_result_validate(result)` | Reject tool results that are missing required fields or ship a UI resource whose HTML failed validation |
 
@@ -304,7 +304,9 @@ Tool results always carry a non-empty text fallback so plain-text hosts
 still see useful output. UI resources fail closed: `ui_tool_result` omits
 `ui_resource` whenever validation finds errors (network calls, dangerous
 navigation, embedded secrets, etc.) unless the caller opts in with
-`allow_invalid_resource: true` for preview-only use. See
+`allow_invalid_resource: true` for preview-only use. Pass structured fallback
+data through `ui_structured_fallback(...)`; `UiToolResultOptions` expects the
+typed fallback envelope instead of an anonymous raw payload. See
 [examples/ui_resource](https://github.com/burin-labs/harn/tree/main/examples/ui_resource)
 for a dashboard widget and a multi-step review form.
 
@@ -842,10 +844,11 @@ support boundary.
 | `run_artifact_transcript_dir(run, name?)` | Return a transcript sidecar directory such as `agent-llm` or `chat-llm` |
 | `run_artifact_transcript_path(run, name?)` | Return `<transcript-dir>/llm_transcript.jsonl` inside the run directory |
 
-`run_artifacts_open` and `run_artifacts_from_dir` return a dict shaped like
-`{kind, namespace, run_id, root, dir, modified?, paths}`. `paths` contains the
-standard local artifact names: `facts`, `audit`, `review`, `agent_result`,
-`agent_trace`, and `agent_llm_transcript`.
+`run_artifacts_open` and `run_artifacts_from_dir` return `RunArtifactsRun`.
+`run_artifacts_list` returns `list<RunArtifactsRun>`. The nested
+`RunArtifactPaths` shape contains the standard local artifact names: `facts`,
+`audit`, `review`, `agent_result`, `agent_trace`, and
+`agent_llm_transcript`.
 
 ```harn
 import {

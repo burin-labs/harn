@@ -1,30 +1,28 @@
-import { tool_define_many, tool_registry_from } from "std/tools"
+import "std/tools"
 
 pipeline test(task) {
-  let registry = tool_define_many(
-    tool_registry(),
-    [
-      {
-        name: "search_code",
-        description: "Search code",
-        parameters: {query: {type: "string"}},
-        handler: { args -> "search:" + args.query },
+  let specs: list<ToolDefinitionSpec> = [
+    {
+      name: "search_code",
+      description: "Search code",
+      parameters: {query: {type: "string"}},
+      handler: { args -> "search:" + args.query },
+    },
+    {
+      name: "read_file",
+      description: "Read file",
+      config: {
+        parameters: {path: {type: "string"}},
+        returns: {type: "string"},
+        handler: { args -> "read:" + args.path },
       },
-      {
-        name: "read_file",
-        description: "Read file",
-        config: {
-          parameters: {path: {type: "string"}},
-          returns: {type: "string"},
-          handler: { args -> "read:" + args.path },
-        },
-      },
-    ],
-  )
+    },
+  ]
+  let registry: ToolRegistry = tool_define_many(tool_registry(), specs)
   assert(tool_count(registry) == 2, "tool_define_many registers both tools")
   assert(tool_find(registry, "search_code").parameters.query.type == "string", "inline config works")
   assert(tool_find(registry, "read_file").outputSchema.type == "string", "nested config works")
-  let fresh = tool_registry_from([{name: "one", desc: "One tool", parameters: {}, handler: { _ -> "ok" }}])
+  let fresh: ToolRegistry = tool_registry_from([{name: "one", desc: "One tool", parameters: {}, handler: { _ -> "ok" }}])
   assert(tool_count(fresh) == 1, "tool_registry_from creates a registry")
   log("tool_define_many tests passed")
 }

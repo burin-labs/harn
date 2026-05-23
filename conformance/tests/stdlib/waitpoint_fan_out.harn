@@ -1,7 +1,7 @@
-import { complete, create, wait } from "std/waitpoint"
+import "std/waitpoint"
 
 pipeline test(task) {
-  let points = [
+  let points: list<Waitpoint> = [
     create("fan-out-1"),
     create("fan-out-2"),
     create("fan-out-3"),

@@ -955,13 +955,65 @@ type StreamJoinPlan = {kind: "stream.join", source: any, join: dict}
 
 type StreamWindowPlan = {kind: "stream.window", events: list<any>, window: StreamWindowSpec}
 
+type StreamLlmClassifyConfig = {cache?: string, model?: string, provider?: string}
+
+type StreamLlmClassifyOptions = StreamLlmClassifyConfig?
+
 type StreamLlmClassifyPlan = {
   kind: "stream.llm_classify",
   input: any,
   labels: list<string>,
   cache: string?,
-  options: dict,
+  options: StreamLlmClassifyConfig,
 }
+
+type SpawnToPoolOptions = {
+  pool: string,
+  priority_from?: string,
+  key_from?: string,
+  task_factory: fn(TriggerEvent) -> any,
+}
+
+type SpawnToPoolHandler = {
+  kind: string,
+  pool: string,
+  priority_from: string?,
+  key_from: string?,
+  task_factory: fn(TriggerEvent) -> any,
+}
+
+type ReminderTarget = string | fn(TriggerEvent) -> string?
+
+type ReminderPropagateMode = "none" | "session" | "all" | string
+
+type ReminderInjectOptions = {
+  target?: ReminderTarget,
+  body: string,
+  tags?: list<string>,
+  ttl_turns?: int,
+  dedupe_key?: string,
+  propagate?: ReminderPropagateMode,
+  role_hint?: string,
+  preserve_on_compact?: bool,
+}
+
+type ReminderInjectHandler = {
+  kind: string,
+  target: ReminderTarget?,
+  body: string,
+  tags: list<string>?,
+  ttl_turns: int?,
+  dedupe_key: string?,
+  propagate: ReminderPropagateMode?,
+  role_hint: string?,
+  preserve_on_compact: bool?,
+}
+
+type InterruptTargets = string | list<string> | fn(TriggerEvent) -> list<string>
+
+type InterruptAndSuspendOptions = {target_agents?: InterruptTargets, reason?: string}
+
+type InterruptAndSuspendHandler = {kind: string, target_agents: InterruptTargets?, reason: string?}
 
 /**
  * SpawnToPool builds a handler-variant dict that routes matched events into
@@ -980,12 +1032,12 @@ type StreamLlmClassifyPlan = {
  * @api_stability: experimental
  * @example: trigger_register({handler: SpawnToPool({pool: "pr-review", task_factory: { event -> { -> review(event) } }})})
  */
-pub fn SpawnToPool(options: dict) -> dict {
+pub fn SpawnToPool(options: SpawnToPoolOptions) -> SpawnToPoolHandler {
   return {
     kind: "spawn_to_pool",
     pool: options.pool,
-    priority_from: options?.priority_from,
-    key_from: options?.key_from,
+    priority_from: options.priority_from,
+    key_from: options.key_from,
     task_factory: options.task_factory,
   }
 }
@@ -1018,17 +1070,17 @@ pub fn SpawnToPool(options: dict) -> dict {
  * @api_stability: experimental
  * @example: trigger_register({handler: ReminderInject({target: "current", body: "{{ event.kind }} arrived"})})
  */
-pub fn ReminderInject(options: dict) -> dict {
+pub fn ReminderInject(options: ReminderInjectOptions) -> ReminderInjectHandler {
   return {
     kind: "reminder_inject",
-    target: options?.target,
+    target: options.target,
     body: options.body,
-    tags: options?.tags,
-    ttl_turns: options?.ttl_turns,
-    dedupe_key: options?.dedupe_key,
-    propagate: options?.propagate,
-    role_hint: options?.role_hint,
-    preserve_on_compact: options?.preserve_on_compact,
+    tags: options.tags,
+    ttl_turns: options.ttl_turns,
+    dedupe_key: options.dedupe_key,
+    propagate: options.propagate,
+    role_hint: options.role_hint,
+    preserve_on_compact: options.preserve_on_compact,
   }
 }
 
@@ -1065,8 +1117,8 @@ pub fn ReminderInject(options: dict) -> dict {
  * @api_stability: experimental
  * @example: trigger_register({handler: InterruptAndSuspend({target_agents: "all", reason: "build_storm"})})
  */
-pub fn InterruptAndSuspend(options: dict) -> dict {
-  return {kind: "interrupt_and_suspend", target_agents: options?.target_agents, reason: options?.reason}
+pub fn InterruptAndSuspend(options: InterruptAndSuspendOptions) -> InterruptAndSuspendHandler {
+  return {kind: "interrupt_and_suspend", target_agents: options.target_agents, reason: options.reason}
 }
 
 /**
@@ -1104,8 +1156,22 @@ pub fn stream_fork(source, branches = []) -> StreamForkPlan {
  * @api_stability: stable
  * @example: stream_join(source, join)
  */
-pub fn stream_join(source, join = nil) -> StreamJoinPlan {
+pub fn stream_join(source, join: dict? = nil) -> StreamJoinPlan {
   return {kind: "stream.join", source: source, join: join ?? {}}
+}
+
+fn __stream_llm_classify_options(options: StreamLlmClassifyOptions = nil) -> StreamLlmClassifyConfig {
+  var config = {}
+  if options?.cache != nil {
+    config = config + {cache: options?.cache}
+  }
+  if options?.model != nil {
+    config = config + {model: options?.model}
+  }
+  if options?.provider != nil {
+    config = config + {provider: options?.provider}
+  }
+  return config
 }
 
 /**
@@ -1130,7 +1196,7 @@ pub fn window_by(events, window: StreamWindowSpec) -> StreamWindowPlan {
  * @api_stability: stable
  * @example: llm_classify(input, labels, options)
  */
-pub fn llm_classify(input, labels, options = nil) -> StreamLlmClassifyPlan {
-  let config = options ?? {}
-  return {kind: "stream.llm_classify", input: input, labels: labels, cache: config?.cache, options: config}
+pub fn llm_classify(input, labels: list<string>, options: StreamLlmClassifyOptions = nil) -> StreamLlmClassifyPlan {
+  let config = __stream_llm_classify_options(options)
+  return {kind: "stream.llm_classify", input: input, labels: labels, cache: config.cache, options: config}
 }
