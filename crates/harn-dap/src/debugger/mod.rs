@@ -205,7 +205,30 @@ impl Debugger {
     }
 
     fn handle_stack_trace(&mut self, msg: &DapMessage) -> Vec<DapResponse> {
-        let frames: Vec<StackFrame> = if self.vm.is_some() {
+        let requested_thread_id = msg
+            .arguments
+            .as_ref()
+            .and_then(|a| a.get("threadId"))
+            .and_then(|v| v.as_u64())
+            .unwrap_or(self.current_thread_id);
+        let frames: Vec<StackFrame> = if let Some(thread) = self
+            .subagent_tracker
+            .thread_for_id(requested_thread_id)
+            .filter(|thread| thread.suspension.is_some())
+        {
+            let reason = thread
+                .suspend_reason
+                .as_deref()
+                .filter(|reason| !reason.trim().is_empty())
+                .unwrap_or("suspended");
+            vec![StackFrame {
+                id: Self::subagent_suspension_frame_id(requested_thread_id),
+                name: format!("<suspended: {reason}>"),
+                line: self.current_line.max(1),
+                column: 1,
+                source: self.source_path.clone().map(|p| self.source_for_path(&p)),
+            }]
+        } else if self.vm.is_some() {
             let vm_frames = self
                 .vm
                 .as_ref()

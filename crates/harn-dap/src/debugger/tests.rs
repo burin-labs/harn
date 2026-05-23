@@ -1314,6 +1314,7 @@ mod subagent_bridge {
                     status: "running".to_string(),
                     parent_worker_id: None,
                     suspend_reason: None,
+                    suspension: None,
                 });
             guard
                 .pending
@@ -1324,6 +1325,17 @@ mod subagent_bridge {
                     status: "suspended".to_string(),
                     parent_worker_id: None,
                     suspend_reason: Some("awaiting human approval".to_string()),
+                    suspension: Some(json!({
+                        "handle": "w-1",
+                        "reason": "awaiting human approval",
+                        "conditions": {
+                            "trigger": {"provider": "github", "kind": "comment"},
+                            "timeout": {"minutes": 30},
+                        },
+                        "resume_by_mechanism": "trigger",
+                        "suspended_at": "01978f25-0000-7000-8000-000000000000",
+                        "initiator": "operator",
+                    })),
                 });
         }
 
@@ -1351,7 +1363,8 @@ mod subagent_bridge {
         let thread = dbg
             .subagent_tracker
             .upsert_thread("w-1", "researcher", None, "running");
-        dbg.subagent_tracker.mark_suspended("w-1", Some("timer"));
+        dbg.subagent_tracker
+            .mark_suspended("w-1", Some("timer"), Some(json!({"reason": "timer"})));
         {
             let mut guard = dbg.subagent_tracker.inner_for_test();
             guard
@@ -1363,6 +1376,7 @@ mod subagent_bridge {
                     status: "running".to_string(),
                     parent_worker_id: None,
                     suspend_reason: None,
+                    suspension: None,
                 });
         }
 
@@ -1395,6 +1409,7 @@ mod subagent_bridge {
                     status: "running".to_string(),
                     parent_worker_id: None,
                     suspend_reason: None,
+                    suspension: None,
                 });
         }
         let events = dbg.drain_subagent_events();
@@ -1419,8 +1434,11 @@ mod subagent_bridge {
         let child =
             dbg.subagent_tracker
                 .upsert_thread("w-2", "child-agent", Some("w-1"), "suspended");
-        dbg.subagent_tracker
-            .mark_suspended("w-2", Some("escalated to operator"));
+        dbg.subagent_tracker.mark_suspended(
+            "w-2",
+            Some("escalated to operator"),
+            Some(json!({"reason": "escalated to operator"})),
+        );
 
         let responses = dbg.handle_message(make_request(1, "threads", None));
         let body = responses[0].body.as_ref().unwrap();
@@ -1447,6 +1465,80 @@ mod subagent_bridge {
     }
 
     #[test]
+    fn suspended_subagent_thread_surfaces_stack_scope_and_variables() {
+        let mut dbg = Debugger::new();
+        let thread =
+            dbg.subagent_tracker
+                .upsert_thread("w-2", "child-agent", Some("w-1"), "suspended");
+        dbg.subagent_tracker.mark_suspended(
+            "w-2",
+            Some("waiting on review"),
+            Some(json!({
+                "handle": "w-2",
+                "reason": "waiting on review",
+                "conditions": {
+                    "trigger": {"provider": "github", "kind": "comment"},
+                    "timeout": {"minutes": 30},
+                },
+                "resume_by_mechanism": "trigger",
+                "suspended_at": "01978f25-0000-7000-8000-000000000000",
+                "initiator": "operator",
+            })),
+        );
+
+        let stack = dbg.handle_message(make_request(
+            1,
+            "stackTrace",
+            Some(json!({"threadId": thread.thread_id})),
+        ));
+        let frames = stack[0].body.as_ref().unwrap()["stackFrames"]
+            .as_array()
+            .unwrap();
+        assert_eq!(frames.len(), 1);
+        assert_eq!(frames[0]["name"], "<suspended: waiting on review>");
+        let frame_id = frames[0]["id"].as_i64().unwrap();
+
+        let scopes = dbg.handle_message(make_request(
+            2,
+            "scopes",
+            Some(json!({"frameId": frame_id})),
+        ));
+        let scope = &scopes[0].body.as_ref().unwrap()["scopes"][0];
+        assert_eq!(scope["name"], "Suspension");
+        let variables_reference = scope["variablesReference"].as_i64().unwrap();
+
+        let variables = dbg.handle_message(make_request(
+            3,
+            "variables",
+            Some(json!({"variablesReference": variables_reference})),
+        ));
+        let vars = variables[0].body.as_ref().unwrap()["variables"]
+            .as_array()
+            .unwrap();
+        let names: Vec<&str> = vars
+            .iter()
+            .map(|var| var["name"].as_str().unwrap())
+            .collect();
+        for required in [
+            "handle",
+            "conditions",
+            "resume_by_mechanism",
+            "suspended_at",
+            "initiator",
+        ] {
+            assert!(names.contains(&required), "missing {required}: {vars:?}");
+        }
+        let conditions = vars
+            .iter()
+            .find(|var| var["name"] == "conditions")
+            .expect("conditions variable");
+        assert!(
+            conditions["variablesReference"].as_i64().unwrap() > 0,
+            "conditions should be expandable: {conditions:?}"
+        );
+    }
+
+    #[test]
     fn drain_failed_emits_stopped_exception_then_thread_exited() {
         let mut dbg = Debugger::new();
         dbg.subagent_tracker
@@ -1462,6 +1554,7 @@ mod subagent_bridge {
                     status: "failed".to_string(),
                     parent_worker_id: None,
                     suspend_reason: Some("OOM in tool".to_string()),
+                    suspension: None,
                 });
         }
         let events = dbg.drain_subagent_events();
@@ -1489,6 +1582,7 @@ mod subagent_bridge {
                         status: "progressed".to_string(),
                         parent_worker_id: None,
                         suspend_reason: None,
+                        suspension: None,
                     });
             }
         }
