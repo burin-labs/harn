@@ -102,17 +102,22 @@ impl Drop for NestedExecutionGuard {
     }
 }
 
-/// Enter a child execution: intersect the parent + requested policies,
-/// validate and decrement the recursion budget, then push the
-/// effective policy onto the thread-local execution policy stack for
-/// the lifetime of the returned guard.
+/// Enter a child execution: validate the parent's recursion budget,
+/// decrement once for this descent, and push a *budget-carrier* policy
+/// onto the thread-local execution policy stack. The guard pops it on
+/// drop. The carrier intentionally carries only `recursion_limit` —
+/// tool, capability, and side-effect ceilings continue to flow through
+/// the per-tool-dispatch policy guard so an agent's own `llm_call`
+/// turns are not gated by its policy (which typically scopes tools,
+/// not the agent's infrastructure). Per-tool-dispatch intersections
+/// preserve the decremented budget because `CapabilityPolicy::intersect`
+/// takes the `min` of `recursion_limit` across both sides.
 pub fn enter_nested_execution_policy(
     requested: Option<CapabilityPolicy>,
     kind: NestedExecutionKind,
     label: &str,
 ) -> Result<NestedExecutionGuard, VmError> {
-    let parent = current_execution_policy();
-    let parent_limit = parent.as_ref().and_then(|p| p.recursion_limit);
+    let parent_limit = current_execution_policy().and_then(|p| p.recursion_limit);
 
     if matches!(parent_limit, Some(0)) {
         emit_descent_event(kind, label, parent_limit, None, true);
@@ -120,15 +125,6 @@ pub fn enter_nested_execution_policy(
     }
 
     let requested_limit = requested.as_ref().and_then(|p| p.recursion_limit);
-    let mut effective = match (parent.as_ref(), requested.as_ref()) {
-        (Some(parent), Some(requested)) => {
-            Some(parent.intersect(requested).map_err(VmError::Runtime)?)
-        }
-        (Some(parent), None) => Some(parent.clone()),
-        (None, Some(requested)) => Some(requested.clone()),
-        (None, None) => None,
-    };
-
     let decremented_parent = parent_limit.map(|n| n - 1);
     let child_limit = match (decremented_parent, requested_limit) {
         (Some(a), Some(b)) => Some(a.min(b)),
@@ -137,22 +133,13 @@ pub fn enter_nested_execution_policy(
         (None, None) => None,
     };
 
-    match effective.as_mut() {
-        Some(policy) => policy.recursion_limit = child_limit,
-        None => {
-            if child_limit.is_some() {
-                effective = Some(CapabilityPolicy {
-                    recursion_limit: child_limit,
-                    ..Default::default()
-                });
-            }
-        }
-    }
-
     emit_descent_event(kind, label, parent_limit, child_limit, false);
 
-    let pushed = if let Some(policy) = effective {
-        push_execution_policy(policy);
+    let pushed = if let Some(limit) = child_limit {
+        push_execution_policy(CapabilityPolicy {
+            recursion_limit: Some(limit),
+            ..Default::default()
+        });
         true
     } else {
         false
@@ -368,6 +355,38 @@ mod tests {
         assert_eq!(guard.child_limit, None);
         drop(guard);
         assert!(current_execution_policy().is_none());
+    }
+
+    #[test]
+    fn pushed_carrier_does_not_propagate_requested_tools_or_capabilities() {
+        // Regression: the carrier intentionally exposes only the budget
+        // to subsequent stack lookups. Tool, capability, and side-effect
+        // ceilings flow through the per-tool-dispatch guard instead, so
+        // the agent's own `llm_call` turn is not gated by a policy that
+        // scopes the agent's tools to a read-only allowlist.
+        clear_execution_policy_stacks();
+        let requested = CapabilityPolicy {
+            tools: vec!["read_only".to_string()],
+            capabilities: std::collections::BTreeMap::from([(
+                "workspace".to_string(),
+                vec!["read_text".to_string()],
+            )]),
+            side_effect_level: Some("read_only".to_string()),
+            recursion_limit: Some(4),
+            ..Default::default()
+        };
+        let guard = enter_nested_execution_policy(
+            Some(requested),
+            NestedExecutionKind::AgentLoop,
+            "session-x",
+        )
+        .unwrap();
+        let pushed = current_execution_policy().unwrap();
+        assert_eq!(pushed.recursion_limit, Some(4));
+        assert!(pushed.tools.is_empty());
+        assert!(pushed.capabilities.is_empty());
+        assert!(pushed.side_effect_level.is_none());
+        drop(guard);
     }
 
     #[test]
