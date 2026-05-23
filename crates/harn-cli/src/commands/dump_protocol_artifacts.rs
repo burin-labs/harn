@@ -80,7 +80,12 @@ const A2A_TASK_STATES: &[&str] = &[
 ];
 const A2A_TASK_EVENT_TYPES: &[&str] = &["status", "message", "worker_update"];
 
+const MCP_DRAFT_PROTOCOL_VERSION: &str = "DRAFT-2026-v1";
+const MCP_FINAL_2026_PROTOCOL_VERSION: &str = "2026-07-28";
+const MCP_JSON_SCHEMA_2020_12_DIALECT: &str = "https://json-schema.org/draft/2020-12/schema";
+const MCP_PROTOCOL_VERSIONS: &[&str] = &[MCP_DRAFT_PROTOCOL_VERSION, MCP_PROTOCOL_VERSION];
 const MCP_METHODS: &[&str] = &[
+    "server/discover",
     "initialize",
     "tools/list",
     "tools/call",
@@ -96,6 +101,28 @@ const MCP_METHODS: &[&str] = &[
     "notifications/initialized",
     "notifications/message",
 ];
+const MCP_REQUIRED_METADATA_KEYS: &[&str] = &[
+    "io.modelcontextprotocol/protocolVersion",
+    "io.modelcontextprotocol/clientInfo",
+    "io.modelcontextprotocol/clientCapabilities",
+];
+const MCP_METADATA_KEYS: &[&str] = &[
+    "io.modelcontextprotocol/protocolVersion",
+    "io.modelcontextprotocol/clientInfo",
+    "io.modelcontextprotocol/clientCapabilities",
+    "io.modelcontextprotocol/logLevel",
+    "progressToken",
+    "traceparent",
+    "tracestate",
+    "baggage",
+];
+const MCP_STANDARD_HTTP_HEADERS: &[&str] = &["MCP-Protocol-Version", "Mcp-Method", "Mcp-Name"];
+const MCP_CACHE_RESULT_FIELDS: &[&str] = &["ttlMs", "cacheScope"];
+const MCP_CACHE_SCOPES: &[&str] = &["private", "public"];
+const MCP_RESULT_TYPES: &[&str] = &["complete", "input_required"];
+const MCP_INPUT_REQUIRED_RESULT_TYPE: &str = "input_required";
+const MCP_UNSUPPORTED_PROTOCOL_VERSION_ERROR_CODE: i32 = -32004;
+const MCP_UNSUPPORTED_PROTOCOL_VERSION_ERROR_MESSAGE: &str = "Unsupported protocol version";
 const MCP_LOGGING_LEVELS: &[&str] = &[
     "debug",
     "info",
@@ -122,6 +149,11 @@ const SCHEMA_COPIES: &[SchemaCopy] = &[
         protocol: "mcp",
         source: "conformance/protocols/schemas/mcp-2025-11-25.schema.json",
         artifact: "schemas/mcp-2025-11-25.schema.json",
+    },
+    SchemaCopy {
+        protocol: "mcp",
+        source: "conformance/protocols/schemas/mcp-draft-2026-v1.schema.json",
+        artifact: "schemas/mcp-draft-2026-v1.schema.json",
     },
 ];
 
@@ -316,7 +348,23 @@ fn generate_manifest() -> Result<String, String> {
         },
         "mcp": {
             "protocolVersion": MCP_PROTOCOL_VERSION,
+            "stableProtocolVersion": MCP_PROTOCOL_VERSION,
+            "draftProtocolVersion": MCP_DRAFT_PROTOCOL_VERSION,
+            "final2026ProtocolVersion": MCP_FINAL_2026_PROTOCOL_VERSION,
+            "protocolVersions": MCP_PROTOCOL_VERSIONS,
+            "jsonSchemaDialect": MCP_JSON_SCHEMA_2020_12_DIALECT,
             "methods": MCP_METHODS,
+            "requiredRequestMetadataKeys": MCP_REQUIRED_METADATA_KEYS,
+            "metadataKeys": MCP_METADATA_KEYS,
+            "standardHttpHeaders": MCP_STANDARD_HTTP_HEADERS,
+            "cacheResultFields": MCP_CACHE_RESULT_FIELDS,
+            "cacheScopes": MCP_CACHE_SCOPES,
+            "resultTypes": MCP_RESULT_TYPES,
+            "inputRequiredResultType": MCP_INPUT_REQUIRED_RESULT_TYPE,
+            "unsupportedProtocolVersionError": {
+                "code": MCP_UNSUPPORTED_PROTOCOL_VERSION_ERROR_CODE,
+                "message": MCP_UNSUPPORTED_PROTOCOL_VERSION_ERROR_MESSAGE,
+            },
             "loggingLevels": MCP_LOGGING_LEVELS,
         },
         "receipts": {
@@ -367,6 +415,9 @@ fn generate_readme() -> String {
            profile (`{acp}`).\n\
          - `schemas/a2a-0.3.0.schema.json`: Harn's A2A schema profile (`{a2a}`).\n\
          - `schemas/mcp-2025-11-25.schema.json`: Harn's MCP schema profile (`{mcp}`).\n\
+         - `schemas/mcp-draft-2026-v1.schema.json`: Harn's opt-in MCP RC schema\n\
+           profile (`{mcp_draft}`), pinned beside the stable profile until the\n\
+           final `2026-07-28` specification lands.\n\
          - `schemas/tool-call-receipt.schema.json`: Harn's typed, privacy-preserving\n\
            `ToolCallReceipt` schema for audited tool calls.\n\
          - `harn-protocol.ts`: TypeScript definitions for ACP session updates,\n\
@@ -384,6 +435,7 @@ fn generate_readme() -> String {
         acp = ACP_SCHEMA_COMPATIBILITY,
         a2a = A2A_PROTOCOL_VERSION,
         mcp = MCP_PROTOCOL_VERSION,
+        mcp_draft = MCP_DRAFT_PROTOCOL_VERSION,
     )
 }
 
@@ -392,6 +444,30 @@ fn generate_typescript() -> String {
     out.push_str("export const HARN_PROTOCOL_ARTIFACT_VERSION = ");
     out.push_str(&json_string_literal(env!("CARGO_PKG_VERSION")));
     out.push_str("\n\n");
+    for (name, value) in [
+        ("MCP_PROTOCOL_VERSION", MCP_PROTOCOL_VERSION),
+        ("MCP_STABLE_PROTOCOL_VERSION", MCP_PROTOCOL_VERSION),
+        ("MCP_DRAFT_PROTOCOL_VERSION", MCP_DRAFT_PROTOCOL_VERSION),
+        (
+            "MCP_FINAL_2026_PROTOCOL_VERSION",
+            MCP_FINAL_2026_PROTOCOL_VERSION,
+        ),
+        (
+            "MCP_JSON_SCHEMA_2020_12_DIALECT",
+            MCP_JSON_SCHEMA_2020_12_DIALECT,
+        ),
+    ] {
+        out.push_str("export const ");
+        out.push_str(name);
+        out.push_str(" = ");
+        out.push_str(&json_string_literal(value));
+        out.push('\n');
+    }
+    out.push_str(&format!(
+        "export const MCP_UNSUPPORTED_PROTOCOL_VERSION_ERROR = {{ code: {}, message: {} }} as const\n\n",
+        MCP_UNSUPPORTED_PROTOCOL_VERSION_ERROR_CODE,
+        json_string_literal(MCP_UNSUPPORTED_PROTOCOL_VERSION_ERROR_MESSAGE)
+    ));
     out.push_str(&ts_array(
         "ACP_AGENT_METHODS",
         ACP_AGENT_METHODS,
@@ -481,7 +557,42 @@ fn generate_typescript() -> String {
         A2A_TASK_EVENT_TYPES,
         "A2ATaskEventType",
     ));
+    out.push_str(&ts_array(
+        "MCP_PROTOCOL_VERSIONS",
+        MCP_PROTOCOL_VERSIONS,
+        "MCPProtocolVersion",
+    ));
     out.push_str(&ts_array("MCP_METHODS", MCP_METHODS, "MCPMethod"));
+    out.push_str(&ts_array(
+        "MCP_REQUIRED_METADATA_KEYS",
+        MCP_REQUIRED_METADATA_KEYS,
+        "MCPRequiredMetadataKey",
+    ));
+    out.push_str(&ts_array(
+        "MCP_METADATA_KEYS",
+        MCP_METADATA_KEYS,
+        "MCPMetadataKey",
+    ));
+    out.push_str(&ts_array(
+        "MCP_STANDARD_HTTP_HEADERS",
+        MCP_STANDARD_HTTP_HEADERS,
+        "MCPStandardHTTPHeader",
+    ));
+    out.push_str(&ts_array(
+        "MCP_CACHE_RESULT_FIELDS",
+        MCP_CACHE_RESULT_FIELDS,
+        "MCPCacheResultField",
+    ));
+    out.push_str(&ts_array(
+        "MCP_CACHE_SCOPES",
+        MCP_CACHE_SCOPES,
+        "MCPCacheScope",
+    ));
+    out.push_str(&ts_array(
+        "MCP_RESULT_TYPES",
+        MCP_RESULT_TYPES,
+        "MCPResultType",
+    ));
     out.push_str(&ts_array(
         "MCP_LOGGING_LEVELS",
         MCP_LOGGING_LEVELS,
@@ -744,12 +855,75 @@ export type A2ATaskEvent =
   | { type: "message" | "worker_update"; taskId: string; message?: A2AMessage }
   | { statusUpdate: { taskId: string; contextId?: string | null; status: A2ATaskStatus } }
 
+export type MCPJsonSchema202012 = ACPObject
+
+export interface MCPImplementation {
+  name: string
+  version: string
+  title?: string
+  description?: string
+  websiteUrl?: string
+}
+
+export interface MCPRequestMeta {
+  "io.modelcontextprotocol/protocolVersion": MCPProtocolVersion | string
+  "io.modelcontextprotocol/clientInfo": MCPImplementation
+  "io.modelcontextprotocol/clientCapabilities": ACPObject
+  "io.modelcontextprotocol/logLevel"?: MCPLoggingLevel
+  progressToken?: string | number
+  traceparent?: string
+  tracestate?: string
+  baggage?: string
+  [key: string]: ACPValue | MCPImplementation | undefined
+}
+
+export interface MCPHTTPHeaders {
+  "MCP-Protocol-Version": MCPProtocolVersion | string
+  "Mcp-Method": MCPMethod | string
+  "Mcp-Name"?: string
+  [header: string]: string | undefined
+}
+
+export interface MCPCacheHints {
+  ttlMs: number
+  cacheScope: MCPCacheScope
+}
+
+export interface MCPDiscoverResult {
+  resultType: "complete"
+  supportedVersions: (MCPProtocolVersion | string)[]
+  capabilities: ACPObject
+  serverInfo: MCPImplementation
+  instructions?: string
+  _meta?: ACPObject
+}
+
+export interface MCPInputRequiredResult {
+  resultType: "input_required"
+  inputRequests?: Record<string, ACPObject>
+  requestState?: string
+  _meta?: ACPObject
+}
+
+export interface MCPUnsupportedProtocolVersionError {
+  jsonrpc: "2.0"
+  id?: JsonRpcId
+  error: {
+    code: typeof MCP_UNSUPPORTED_PROTOCOL_VERSION_ERROR.code
+    message: typeof MCP_UNSUPPORTED_PROTOCOL_VERSION_ERROR.message
+    data: {
+      requested: string
+      supported: (MCPProtocolVersion | string)[]
+    }
+  }
+}
+
 export interface MCPTool {
   name: string
   title?: string
   description?: string
-  inputSchema: ACPObject
-  outputSchema?: ACPObject
+  inputSchema: MCPJsonSchema202012
+  outputSchema?: MCPJsonSchema202012
   annotations?: ACPObject
 }
 
@@ -807,6 +981,49 @@ fn generate_swift() -> String {
     out.push_str(&format!(
         "    public static let harnAgentEventMethod = {}\n",
         json_string_literal(HARN_AGENT_EVENT_METHOD)
+    ));
+    for (name, value) in [
+        ("mcpProtocolVersion", MCP_PROTOCOL_VERSION),
+        ("mcpStableProtocolVersion", MCP_PROTOCOL_VERSION),
+        ("mcpDraftProtocolVersion", MCP_DRAFT_PROTOCOL_VERSION),
+        (
+            "mcpFinal2026ProtocolVersion",
+            MCP_FINAL_2026_PROTOCOL_VERSION,
+        ),
+        (
+            "mcpJsonSchema202012Dialect",
+            MCP_JSON_SCHEMA_2020_12_DIALECT,
+        ),
+    ] {
+        out.push_str(&format!(
+            "    public static let {name} = {}\n",
+            json_string_literal(value)
+        ));
+    }
+    out.push_str(&format!(
+        "    public static let mcpUnsupportedProtocolVersionErrorCode = {}\n",
+        MCP_UNSUPPORTED_PROTOCOL_VERSION_ERROR_CODE
+    ));
+    out.push_str(&format!(
+        "    public static let mcpUnsupportedProtocolVersionErrorMessage = {}\n",
+        json_string_literal(MCP_UNSUPPORTED_PROTOCOL_VERSION_ERROR_MESSAGE)
+    ));
+    out.push_str(&swift_string_array(
+        "mcpProtocolVersions",
+        MCP_PROTOCOL_VERSIONS,
+    ));
+    out.push_str(&swift_string_array(
+        "mcpRequiredMetadataKeys",
+        MCP_REQUIRED_METADATA_KEYS,
+    ));
+    out.push_str(&swift_string_array("mcpMetadataKeys", MCP_METADATA_KEYS));
+    out.push_str(&swift_string_array(
+        "mcpStandardHTTPHeaders",
+        MCP_STANDARD_HTTP_HEADERS,
+    ));
+    out.push_str(&swift_string_array(
+        "mcpCacheResultFields",
+        MCP_CACHE_RESULT_FIELDS,
     ));
     out.push_str(&swift_string_array(
         "acpSessionUpdateExtensions",
@@ -886,6 +1103,14 @@ fn generate_swift() -> String {
         &strs_to_strings(A2A_TASK_EVENT_TYPES),
     ));
     out.push_str(&swift_enum("HarnMCPMethod", &strs_to_strings(MCP_METHODS)));
+    out.push_str(&swift_enum(
+        "HarnMCPCacheScope",
+        &strs_to_strings(MCP_CACHE_SCOPES),
+    ));
+    out.push_str(&swift_enum(
+        "HarnMCPResultType",
+        &strs_to_strings(MCP_RESULT_TYPES),
+    ));
     out.push_str(&swift_enum(
         "HarnMCPLoggingLevel",
         &strs_to_strings(MCP_LOGGING_LEVELS),
@@ -1513,12 +1738,104 @@ public struct HarnA2ATask: Codable, Sendable, Equatable {
     public var metadata: HarnACPObject?
 }
 
+public typealias HarnMCPJsonSchema202012 = HarnACPObject
+
+public struct HarnMCPImplementation: Codable, Sendable, Equatable {
+    public var name: String
+    public var version: String
+    public var title: String?
+    public var description: String?
+    public var websiteUrl: String?
+}
+
+public struct HarnMCPRequestMeta: Codable, Sendable, Equatable {
+    public var protocolVersion: String
+    public var clientInfo: HarnMCPImplementation
+    public var clientCapabilities: HarnACPObject
+    public var logLevel: HarnMCPLoggingLevel?
+    public var progressToken: HarnACPValue?
+    public var traceparent: String?
+    public var tracestate: String?
+    public var baggage: String?
+
+    enum CodingKeys: String, CodingKey {
+        case protocolVersion = "io.modelcontextprotocol/protocolVersion"
+        case clientInfo = "io.modelcontextprotocol/clientInfo"
+        case clientCapabilities = "io.modelcontextprotocol/clientCapabilities"
+        case logLevel = "io.modelcontextprotocol/logLevel"
+        case progressToken
+        case traceparent
+        case tracestate
+        case baggage
+    }
+}
+
+public struct HarnMCPHTTPHeaders: Codable, Sendable, Equatable {
+    public var protocolVersion: String
+    public var method: String
+    public var name: String?
+
+    enum CodingKeys: String, CodingKey {
+        case protocolVersion = "MCP-Protocol-Version"
+        case method = "Mcp-Method"
+        case name = "Mcp-Name"
+    }
+}
+
+public struct HarnMCPCacheHints: Codable, Sendable, Equatable {
+    public var ttlMs: Int
+    public var cacheScope: HarnMCPCacheScope
+}
+
+public struct HarnMCPDiscoverResult: Codable, Sendable, Equatable {
+    public var resultType: HarnMCPResultType
+    public var supportedVersions: [String]
+    public var capabilities: HarnACPObject
+    public var serverInfo: HarnMCPImplementation
+    public var instructions: String?
+    public var meta: HarnACPObject?
+
+    enum CodingKeys: String, CodingKey {
+        case resultType
+        case supportedVersions
+        case capabilities
+        case serverInfo
+        case instructions
+        case meta = "_meta"
+    }
+}
+
+public struct HarnMCPInputRequiredResult: Codable, Sendable, Equatable {
+    public var resultType: HarnMCPResultType
+    public var inputRequests: HarnACPObject?
+    public var requestState: String?
+    public var meta: HarnACPObject?
+
+    enum CodingKeys: String, CodingKey {
+        case resultType
+        case inputRequests
+        case requestState
+        case meta = "_meta"
+    }
+}
+
+public struct HarnMCPUnsupportedProtocolVersionErrorData: Codable, Sendable, Equatable {
+    public var requested: String
+    public var supported: [String]
+}
+
+public struct HarnMCPUnsupportedProtocolVersionError: Codable, Sendable, Equatable {
+    public var jsonrpc: String
+    public var id: HarnJsonRpcId?
+    public var error: HarnACPError
+}
+
 public struct HarnMCPTool: Codable, Sendable, Equatable {
     public var name: String
     public var title: String?
     public var description: String?
-    public var inputSchema: HarnACPObject
-    public var outputSchema: HarnACPObject?
+    public var inputSchema: HarnMCPJsonSchema202012
+    public var outputSchema: HarnMCPJsonSchema202012?
     public var annotations: HarnACPObject?
 }
 
@@ -1580,9 +1897,31 @@ fn generate_python() -> String {
         ("ACP_SCHEMA_COMPATIBILITY", ACP_SCHEMA_COMPATIBILITY),
         ("A2A_PROTOCOL_VERSION", A2A_PROTOCOL_VERSION),
         ("MCP_PROTOCOL_VERSION", MCP_PROTOCOL_VERSION),
+        ("MCP_STABLE_PROTOCOL_VERSION", MCP_PROTOCOL_VERSION),
+        ("MCP_DRAFT_PROTOCOL_VERSION", MCP_DRAFT_PROTOCOL_VERSION),
+        (
+            "MCP_FINAL_2026_PROTOCOL_VERSION",
+            MCP_FINAL_2026_PROTOCOL_VERSION,
+        ),
+        (
+            "MCP_JSON_SCHEMA_2020_12_DIALECT",
+            MCP_JSON_SCHEMA_2020_12_DIALECT,
+        ),
+        (
+            "MCP_INPUT_REQUIRED_RESULT_TYPE",
+            MCP_INPUT_REQUIRED_RESULT_TYPE,
+        ),
+        (
+            "MCP_UNSUPPORTED_PROTOCOL_VERSION_ERROR_MESSAGE",
+            MCP_UNSUPPORTED_PROTOCOL_VERSION_ERROR_MESSAGE,
+        ),
     ] {
         out.push_str(&format!("{name}: str = {}\n", json_string_literal(value)));
     }
+    out.push_str(&format!(
+        "MCP_UNSUPPORTED_PROTOCOL_VERSION_ERROR_CODE: int = {}\n",
+        MCP_UNSUPPORTED_PROTOCOL_VERSION_ERROR_CODE
+    ));
     out.push('\n');
 
     out.push_str(&py_const_tuple("ACP_AGENT_METHODS", ACP_AGENT_METHODS));
@@ -1647,7 +1986,26 @@ fn generate_python() -> String {
         "A2A_TASK_EVENT_TYPES",
         A2A_TASK_EVENT_TYPES,
     ));
+    out.push_str(&py_const_tuple(
+        "MCP_PROTOCOL_VERSIONS",
+        MCP_PROTOCOL_VERSIONS,
+    ));
     out.push_str(&py_const_tuple("MCP_METHODS", MCP_METHODS));
+    out.push_str(&py_const_tuple(
+        "MCP_REQUIRED_METADATA_KEYS",
+        MCP_REQUIRED_METADATA_KEYS,
+    ));
+    out.push_str(&py_const_tuple("MCP_METADATA_KEYS", MCP_METADATA_KEYS));
+    out.push_str(&py_const_tuple(
+        "MCP_STANDARD_HTTP_HEADERS",
+        MCP_STANDARD_HTTP_HEADERS,
+    ));
+    out.push_str(&py_const_tuple(
+        "MCP_CACHE_RESULT_FIELDS",
+        MCP_CACHE_RESULT_FIELDS,
+    ));
+    out.push_str(&py_const_tuple("MCP_CACHE_SCOPES", MCP_CACHE_SCOPES));
+    out.push_str(&py_const_tuple("MCP_RESULT_TYPES", MCP_RESULT_TYPES));
     out.push_str(&py_const_tuple("MCP_LOGGING_LEVELS", MCP_LOGGING_LEVELS));
 
     out.push_str(&py_str_enum("ACPAgentMethod", ACP_AGENT_METHODS));
@@ -1684,6 +2042,8 @@ fn generate_python() -> String {
     ));
     out.push_str(&py_str_enum("A2ATaskState", A2A_TASK_STATES));
     out.push_str(&py_str_enum("A2ATaskEventType", A2A_TASK_EVENT_TYPES));
+    out.push_str(&py_str_enum("MCPCacheScope", MCP_CACHE_SCOPES));
+    out.push_str(&py_str_enum("MCPResultType", MCP_RESULT_TYPES));
     out.push_str(&py_str_enum("MCPLoggingLevel", MCP_LOGGING_LEVELS));
 
     out.push_str(PYTHON_TYPE_DEFINITIONS);
@@ -1939,13 +2299,64 @@ class A2ATask(_HarnDataclass):
     metadata: Optional[JsonObject] = None
 
 
+MCPJsonSchema202012 = JsonObject
+MCPRequestMeta = JsonObject
+MCPHTTPHeaders = Dict[str, str]
+
+
+@dataclass
+class MCPImplementation(_HarnDataclass):
+    name: str
+    version: str
+    title: Optional[str] = None
+    description: Optional[str] = None
+    websiteUrl: Optional[str] = None
+
+
+@dataclass
+class MCPCacheHints(_HarnDataclass):
+    ttlMs: int
+    cacheScope: str
+
+
+@dataclass
+class MCPDiscoverResult(_HarnDataclass):
+    resultType: str
+    supportedVersions: List[str]
+    capabilities: JsonObject
+    serverInfo: MCPImplementation
+    instructions: Optional[str] = None
+    _meta: Optional[JsonObject] = None
+
+
+@dataclass
+class MCPInputRequiredResult(_HarnDataclass):
+    resultType: str
+    inputRequests: Optional[JsonObject] = None
+    requestState: Optional[str] = None
+    _meta: Optional[JsonObject] = None
+
+
+@dataclass
+class MCPUnsupportedProtocolVersionErrorData(_HarnDataclass):
+    requested: str
+    supported: List[str]
+
+
+@dataclass
+class MCPUnsupportedProtocolVersionError(_HarnDataclass):
+    error: ACPError
+    id: JsonRpcId = None
+    jsonrpc: str = "2.0"
+
+
 @dataclass
 class MCPTool(_HarnDataclass):
     name: str
-    inputSchema: JsonObject
+    inputSchema: MCPJsonSchema202012
     title: Optional[str] = None
     description: Optional[str] = None
-    outputSchema: Optional[JsonObject] = None
+    outputSchema: Optional[MCPJsonSchema202012] = None
     annotations: Optional[JsonObject] = None
 
 
@@ -1982,6 +2393,13 @@ fn python_public_names() -> Vec<String> {
         "ACP_SCHEMA_COMPATIBILITY",
         "A2A_PROTOCOL_VERSION",
         "MCP_PROTOCOL_VERSION",
+        "MCP_STABLE_PROTOCOL_VERSION",
+        "MCP_DRAFT_PROTOCOL_VERSION",
+        "MCP_FINAL_2026_PROTOCOL_VERSION",
+        "MCP_JSON_SCHEMA_2020_12_DIALECT",
+        "MCP_INPUT_REQUIRED_RESULT_TYPE",
+        "MCP_UNSUPPORTED_PROTOCOL_VERSION_ERROR_CODE",
+        "MCP_UNSUPPORTED_PROTOCOL_VERSION_ERROR_MESSAGE",
         "ACP_AGENT_METHODS",
         "ACP_CLIENT_METHODS",
         "ACP_AGENT_NOTIFICATIONS",
@@ -2001,7 +2419,14 @@ fn python_public_names() -> Vec<String> {
         "A2A_METHODS",
         "A2A_TASK_STATES",
         "A2A_TASK_EVENT_TYPES",
+        "MCP_PROTOCOL_VERSIONS",
         "MCP_METHODS",
+        "MCP_REQUIRED_METADATA_KEYS",
+        "MCP_METADATA_KEYS",
+        "MCP_STANDARD_HTTP_HEADERS",
+        "MCP_CACHE_RESULT_FIELDS",
+        "MCP_CACHE_SCOPES",
+        "MCP_RESULT_TYPES",
         "MCP_LOGGING_LEVELS",
         "ACPAgentMethod",
         "ACPClientMethod",
@@ -2016,6 +2441,8 @@ fn python_public_names() -> Vec<String> {
         "ToolCallReceiptExecutor",
         "A2ATaskState",
         "A2ATaskEventType",
+        "MCPCacheScope",
+        "MCPResultType",
         "MCPLoggingLevel",
         "ACPError",
         "ACPRequest",
@@ -2037,6 +2464,15 @@ fn python_public_names() -> Vec<String> {
         "A2AMessage",
         "A2ATaskStatus",
         "A2ATask",
+        "MCPJsonSchema202012",
+        "MCPRequestMeta",
+        "MCPHTTPHeaders",
+        "MCPImplementation",
+        "MCPCacheHints",
+        "MCPDiscoverResult",
+        "MCPInputRequiredResult",
+        "MCPUnsupportedProtocolVersionErrorData",
+        "MCPUnsupportedProtocolVersionError",
         "MCPTool",
         "MCPResource",
         "MCPResourceTemplate",
@@ -2161,6 +2597,36 @@ fn generate_go() -> String {
             "MCPProtocolVersion",
             MCP_PROTOCOL_VERSION,
         ),
+        (
+            "// MCPStableProtocolVersion is the stable MCP protocol version Harn implements at runtime.\n",
+            "MCPStableProtocolVersion",
+            MCP_PROTOCOL_VERSION,
+        ),
+        (
+            "// MCPDraftProtocolVersion is the opt-in MCP release-candidate profile identity.\n",
+            "MCPDraftProtocolVersion",
+            MCP_DRAFT_PROTOCOL_VERSION,
+        ),
+        (
+            "// MCPFinal2026ProtocolVersion is the scheduled final identity for the RC profile.\n",
+            "MCPFinal2026ProtocolVersion",
+            MCP_FINAL_2026_PROTOCOL_VERSION,
+        ),
+        (
+            "// MCPJSONSchema202012Dialect is the JSON Schema dialect used by the MCP RC artifact profile.\n",
+            "MCPJSONSchema202012Dialect",
+            MCP_JSON_SCHEMA_2020_12_DIALECT,
+        ),
+        (
+            "// MCPInputRequiredResultType is the resultType discriminator for multi round-trip requests.\n",
+            "MCPInputRequiredResultType",
+            MCP_INPUT_REQUIRED_RESULT_TYPE,
+        ),
+        (
+            "// MCPUnsupportedProtocolVersionErrorMessage is the standard message for unsupported versions.\n",
+            "MCPUnsupportedProtocolVersionErrorMessage",
+            MCP_UNSUPPORTED_PROTOCOL_VERSION_ERROR_MESSAGE,
+        ),
     ] {
         out.push_str(doc);
         out.push_str(&format!(
@@ -2168,6 +2634,10 @@ fn generate_go() -> String {
             json_string_literal(value)
         ));
     }
+    out.push_str(&format!(
+        "// MCPUnsupportedProtocolVersionErrorCode is the JSON-RPC server error for unsupported versions.\nconst MCPUnsupportedProtocolVersionErrorCode = {}\n\n",
+        MCP_UNSUPPORTED_PROTOCOL_VERSION_ERROR_CODE
+    ));
 
     out.push_str(&go_typed_array(
         "ACPAgentMethod",
@@ -2250,7 +2720,22 @@ fn generate_go() -> String {
         "A2ATaskEventTypes",
         A2A_TASK_EVENT_TYPES,
     ));
+    out.push_str(&go_typed_array(
+        "MCPProtocolVersionValue",
+        "MCPProtocolVersions",
+        MCP_PROTOCOL_VERSIONS,
+    ));
     out.push_str(&go_typed_array("MCPMethod", "MCPMethods", MCP_METHODS));
+    out.push_str(&go_typed_array(
+        "MCPCacheScope",
+        "MCPCacheScopes",
+        MCP_CACHE_SCOPES,
+    ));
+    out.push_str(&go_typed_array(
+        "MCPResultType",
+        "MCPResultTypes",
+        MCP_RESULT_TYPES,
+    ));
     out.push_str(&go_typed_array(
         "MCPLoggingLevel",
         "MCPLoggingLevels",
@@ -2265,6 +2750,19 @@ fn generate_go() -> String {
         HARN_CONTENT_EXTENSION_FIELDS,
     ));
     out.push_str(&go_string_array("A2AMethods", A2A_METHODS));
+    out.push_str(&go_string_array(
+        "MCPRequiredMetadataKeys",
+        MCP_REQUIRED_METADATA_KEYS,
+    ));
+    out.push_str(&go_string_array("MCPMetadataKeys", MCP_METADATA_KEYS));
+    out.push_str(&go_string_array(
+        "MCPStandardHTTPHeaders",
+        MCP_STANDARD_HTTP_HEADERS,
+    ));
+    out.push_str(&go_string_array(
+        "MCPCacheResultFields",
+        MCP_CACHE_RESULT_FIELDS,
+    ));
 
     out.push_str(GO_TYPE_DEFINITIONS);
     out
@@ -2516,14 +3014,84 @@ type A2ATask struct {
 	Metadata  JSONObject        `json:"metadata,omitempty"`
 }
 
+// MCPJSONSchema202012 is the JSON Schema dialect surface used by the MCP RC
+// tool input/output schema profile.
+type MCPJSONSchema202012 = JSONObject
+
+// MCPImplementation describes an MCP client or server implementation.
+type MCPImplementation struct {
+	Name        string  `json:"name"`
+	Version     string  `json:"version"`
+	Title       *string `json:"title,omitempty"`
+	Description *string `json:"description,omitempty"`
+	WebsiteURL  *string `json:"websiteUrl,omitempty"`
+}
+
+// MCPRequestMeta is the per-request metadata required by the MCP RC profile.
+type MCPRequestMeta struct {
+	ProtocolVersion    string            `json:"io.modelcontextprotocol/protocolVersion"`
+	ClientInfo         MCPImplementation `json:"io.modelcontextprotocol/clientInfo"`
+	ClientCapabilities JSONObject        `json:"io.modelcontextprotocol/clientCapabilities"`
+	LogLevel           *MCPLoggingLevel  `json:"io.modelcontextprotocol/logLevel,omitempty"`
+	ProgressToken      json.RawMessage   `json:"progressToken,omitempty"`
+	Traceparent        *string           `json:"traceparent,omitempty"`
+	Tracestate         *string           `json:"tracestate,omitempty"`
+	Baggage            *string           `json:"baggage,omitempty"`
+}
+
+// MCPHTTPHeaders names the HTTP headers used by the MCP RC Streamable HTTP profile.
+type MCPHTTPHeaders struct {
+	ProtocolVersion string  `json:"MCP-Protocol-Version"`
+	Method          string  `json:"Mcp-Method"`
+	Name            *string `json:"Mcp-Name,omitempty"`
+}
+
+// MCPCacheHints captures the RC ttlMs/cacheScope cache fields.
+type MCPCacheHints struct {
+	TTLMS      uint64        `json:"ttlMs"`
+	CacheScope MCPCacheScope `json:"cacheScope"`
+}
+
+// MCPDiscoverResult is the result returned by server/discover.
+type MCPDiscoverResult struct {
+	ResultType        MCPResultType     `json:"resultType"`
+	SupportedVersions []string          `json:"supportedVersions"`
+	Capabilities      JSONObject        `json:"capabilities"`
+	ServerInfo        MCPImplementation `json:"serverInfo"`
+	Instructions      *string           `json:"instructions,omitempty"`
+	Meta              JSONObject        `json:"_meta,omitempty"`
+}
+
+// MCPInputRequiredResult carries server-to-client requests for multi round-trip calls.
+type MCPInputRequiredResult struct {
+	ResultType    MCPResultType `json:"resultType"`
+	InputRequests JSONObject    `json:"inputRequests,omitempty"`
+	RequestState  *string       `json:"requestState,omitempty"`
+	Meta          JSONObject    `json:"_meta,omitempty"`
+}
+
+// MCPUnsupportedProtocolVersionErrorData is the typed data payload for -32004.
+type MCPUnsupportedProtocolVersionErrorData struct {
+	Requested string   `json:"requested"`
+	Supported []string `json:"supported"`
+}
+
+// MCPUnsupportedProtocolVersionError is the JSON-RPC error response shape for
+// an unsupported MCP protocol version.
+type MCPUnsupportedProtocolVersionError struct {
+	JSONRPC string    `json:"jsonrpc"`
+	ID      JSONRPCID `json:"id,omitempty"`
+	Error   ACPError  `json:"error"`
+}
+
 // MCPTool is the MCP `tools/list` entry.
 type MCPTool struct {
-	Name         string     `json:"name"`
-	Title        *string    `json:"title,omitempty"`
-	Description  *string    `json:"description,omitempty"`
-	InputSchema  JSONObject `json:"inputSchema"`
-	OutputSchema JSONObject `json:"outputSchema,omitempty"`
-	Annotations  JSONObject `json:"annotations,omitempty"`
+	Name         string              `json:"name"`
+	Title        *string             `json:"title,omitempty"`
+	Description  *string             `json:"description,omitempty"`
+	InputSchema  MCPJSONSchema202012 `json:"inputSchema"`
+	OutputSchema MCPJSONSchema202012 `json:"outputSchema,omitempty"`
+	Annotations  JSONObject          `json:"annotations,omitempty"`
 }
 
 // MCPResource is the MCP `resources/list` entry.
@@ -2716,7 +3284,49 @@ fn generate_round_trip_fixture() -> Result<String, String> {
         "name": "echo",
         "title": "Echo",
         "description": "Echoes input",
-        "inputSchema": {"type": "object", "properties": {"x": {"type": "string"}}}
+        "inputSchema": {
+            "$schema": MCP_JSON_SCHEMA_2020_12_DIALECT,
+            "type": "object",
+            "properties": {"x": {"type": "string"}}
+        }
+    });
+    let mcp_discover_result = json!({
+        "resultType": "complete",
+        "supportedVersions": MCP_PROTOCOL_VERSIONS,
+        "capabilities": {"tools": {}},
+        "serverInfo": {"name": "harn", "version": env!("CARGO_PKG_VERSION")},
+        "instructions": "Use the stable MCP version unless the RC is explicitly enabled.",
+    });
+    let mcp_input_required_result = json!({
+        "resultType": MCP_INPUT_REQUIRED_RESULT_TYPE,
+        "requestState": "opaque-state",
+        "inputRequests": {
+            "confirm": {
+                "method": "elicitation/create",
+                "params": {
+                    "message": "Confirm the action",
+                    "mode": "form",
+                    "requestedSchema": {
+                        "$schema": MCP_JSON_SCHEMA_2020_12_DIALECT,
+                        "type": "object",
+                        "properties": {"confirmed": {"type": "boolean"}},
+                        "required": ["confirmed"],
+                    }
+                }
+            }
+        }
+    });
+    let mcp_unsupported_version_error = json!({
+        "jsonrpc": "2.0",
+        "id": 19,
+        "error": {
+            "code": MCP_UNSUPPORTED_PROTOCOL_VERSION_ERROR_CODE,
+            "message": MCP_UNSUPPORTED_PROTOCOL_VERSION_ERROR_MESSAGE,
+            "data": {
+                "requested": "DRAFT-2026-v0",
+                "supported": MCP_PROTOCOL_VERSIONS,
+            }
+        }
     });
 
     let fixture = json!({
@@ -2731,6 +3341,9 @@ fn generate_round_trip_fixture() -> Result<String, String> {
         },
         "a2aTask": a2a_task,
         "mcpTool": mcp_tool,
+        "mcpDiscoverResult": mcp_discover_result,
+        "mcpInputRequiredResult": mcp_input_required_result,
+        "mcpUnsupportedProtocolVersionError": mcp_unsupported_version_error,
         "toolCallReceipt": tool_call_receipt,
     });
 
@@ -3001,6 +3614,16 @@ mod tests {
     fn generated_types_include_harn_wire_vocabularies() {
         let ts = generate_typescript();
         assert!(ts.contains("export type JsonRpcId = number | string | null"));
+        assert!(ts.contains("export const MCP_DRAFT_PROTOCOL_VERSION = \"DRAFT-2026-v1\""));
+        assert!(ts.contains("export interface MCPRequestMeta"));
+        assert!(ts.contains("export interface MCPDiscoverResult"));
+        assert!(ts.contains("export interface MCPInputRequiredResult"));
+        assert!(ts.contains("MCP_UNSUPPORTED_PROTOCOL_VERSION_ERROR"));
+        assert!(ts.contains("server/discover"));
+        assert!(ts.contains("io.modelcontextprotocol/protocolVersion"));
+        assert!(ts.contains("MCP-Protocol-Version"));
+        assert!(ts.contains("ttlMs"));
+        assert!(ts.contains("cacheScope"));
         assert!(ts.contains("sessionClose: \"session/close\""));
         assert!(ts.contains("@deprecated Use session/close; session/stop will be removed"));
         for value in HARN_SESSION_UPDATE_EXTENSIONS
@@ -3012,6 +3635,15 @@ mod tests {
         }
         let swift = generate_swift();
         assert!(swift.contains("public enum HarnACPAgentMethod"));
+        assert!(swift.contains("mcpDraftProtocolVersion = \"DRAFT-2026-v1\""));
+        assert!(swift.contains("public struct HarnMCPRequestMeta"));
+        assert!(swift.contains("public struct HarnMCPDiscoverResult"));
+        assert!(swift.contains("public struct HarnMCPInputRequiredResult"));
+        assert!(swift.contains("HarnMCPUnsupportedProtocolVersionError"));
+        assert!(
+            swift.contains("case protocolVersion = \"io.modelcontextprotocol/protocolVersion\"")
+        );
+        assert!(swift.contains("case protocolVersion = \"MCP-Protocol-Version\""));
         assert!(swift.contains("case sessionClose = \"session/close\""));
         assert!(swift.contains("@available(*, deprecated"));
         assert!(swift.contains("public static let allCases: [Self]"));
@@ -3047,6 +3679,11 @@ mod tests {
     #[test]
     fn generated_python_includes_harn_wire_vocabularies() {
         let py = generate_python();
+        assert!(py.contains("MCP_DRAFT_PROTOCOL_VERSION: str = \"DRAFT-2026-v1\""));
+        assert!(py.contains("MCP_REQUIRED_METADATA_KEYS: tuple"));
+        assert!(py.contains("class MCPDiscoverResult(_HarnDataclass):"));
+        assert!(py.contains("class MCPInputRequiredResult(_HarnDataclass):"));
+        assert!(py.contains("class MCPCacheScope(str, Enum):"));
         assert!(py.contains("class ACPSessionUpdate(str, Enum):"));
         assert!(py.contains("class HarnToolCallErrorCategory(str, Enum):"));
         assert!(py.contains("class HarnWorkerStatus(str, Enum):"));
@@ -3070,6 +3707,11 @@ mod tests {
     fn generated_go_includes_harn_wire_vocabularies() {
         let go = generate_go();
         assert!(go.contains("package harnprotocol"));
+        assert!(go.contains("const MCPDraftProtocolVersion = \"DRAFT-2026-v1\""));
+        assert!(go.contains("type MCPRequestMeta struct"));
+        assert!(go.contains("type MCPDiscoverResult struct"));
+        assert!(go.contains("type MCPInputRequiredResult struct"));
+        assert!(go.contains("MCPUnsupportedProtocolVersionErrorCode"));
         assert!(go.contains("type JSONRPCID struct"));
         assert!(go.contains("type ACPSessionUpdateNotification struct"));
         assert!(go.contains("func IsRequest(envelope map[string]json.RawMessage)"));
@@ -3111,6 +3753,18 @@ mod tests {
             json!("composition_child_call")
         );
         assert_eq!(fixture["a2aTask"]["status"]["state"], json!("working"));
+        assert_eq!(
+            fixture["mcpDiscoverResult"]["supportedVersions"][0],
+            json!(MCP_DRAFT_PROTOCOL_VERSION)
+        );
+        assert_eq!(
+            fixture["mcpInputRequiredResult"]["resultType"],
+            json!(MCP_INPUT_REQUIRED_RESULT_TYPE)
+        );
+        assert_eq!(
+            fixture["mcpUnsupportedProtocolVersionError"]["error"]["code"],
+            json!(MCP_UNSUPPORTED_PROTOCOL_VERSION_ERROR_CODE)
+        );
         assert_eq!(fixture["toolCallReceipt"]["schema_version"], json!(1));
     }
 
@@ -3124,6 +3778,18 @@ mod tests {
         assert_eq!(
             manifest["bindings"]["typescript"]["stability"],
             json!("stable")
+        );
+        assert_eq!(
+            manifest["mcp"]["draftProtocolVersion"],
+            json!("DRAFT-2026-v1")
+        );
+        assert_eq!(
+            manifest["mcp"]["unsupportedProtocolVersionError"]["code"],
+            json!(MCP_UNSUPPORTED_PROTOCOL_VERSION_ERROR_CODE)
+        );
+        assert_eq!(
+            manifest["mcp"]["jsonSchemaDialect"],
+            json!(MCP_JSON_SCHEMA_2020_12_DIALECT)
         );
         assert_eq!(manifest["bindings"]["python"]["stability"], json!("stable"));
         assert_eq!(manifest["bindings"]["go"]["stability"], json!("stable"));

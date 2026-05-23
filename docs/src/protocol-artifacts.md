@@ -21,7 +21,9 @@ The generated contract includes:
   block enumerating the published TypeScript, Swift, Python, and Go modules
   with their stability tier and (for Go) the canonical module path.
 - `schemas/*.schema.json`: stable copies of the ACP, A2A, and MCP adapter
-  profiles validated by `harn test protocols`.
+  profiles validated by `harn test protocols`. MCP publishes both the stable
+  `2025-11-25` profile and the opt-in `DRAFT-2026-v1` RC profile so
+  downstreams can prepare without changing runtime negotiation behavior.
 - `harn-protocol.ts`: TypeScript bindings for JSON-RPC messages, ACP
   `session/update`, Harn tool lifecycle metadata, A2A task events, and MCP
   tool/resource/prompt metadata.
@@ -42,6 +44,14 @@ The generated contract includes:
   envelopes plus an A2A task and an MCP tool entry. `make check-bindings`
   decodes and re-encodes these through the Python and Go bindings on every
   CI run, catching wire-vocabulary drift before downstream consumers see it.
+
+MCP RC helpers include `DRAFT-2026-v1`, the final scheduled
+`2026-07-28` identity, required request `_meta` keys, standard Streamable HTTP
+headers (`MCP-Protocol-Version`, `Mcp-Method`, `Mcp-Name`), `server/discover`,
+`ttlMs`/`cacheScope` cache hints, `input_required` results, the `-32004`
+unsupported-version error, and the JSON Schema 2020-12 dialect URL. The RC
+profile is data-only until the final spec lands; servers and clients should
+opt in explicitly instead of assuming Harn's stable MCP runtime negotiates it.
 
 ## Stability
 
@@ -86,6 +96,15 @@ import `spec/protocol-artifacts/python/harn_protocol.py` (e.g. by vendoring
 the file or pinning the artifact directory) and the
 `harnprotocol` Go module under `spec/protocol-artifacts/go/harnprotocol`
 respectively.
+
+Cross-repo release jobs can run:
+
+```sh
+BURIN_CODE_ROOT=/path/to/burin-code make check-burin-protocol-artifacts
+```
+
+to fail when Burin Code's vendored Swift or TypeScript protocol bindings drift
+from the Harn source artifacts.
 
 For ACP, clients should still follow the wire namespacing rules in
 [Bridge protocol](./bridge-protocol.md): canonical ACP fields remain at the

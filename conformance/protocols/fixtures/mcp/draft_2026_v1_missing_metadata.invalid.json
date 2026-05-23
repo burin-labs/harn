@@ -1,0 +1,44 @@
+{
+  "name": "mcp.draft_2026_v1.missing_metadata",
+  "protocol": "mcp",
+  "schema": "schemas/mcp-draft-2026-v1.schema.json",
+  "expect": "invalid",
+  "documents": [
+    {
+      "jsonrpc": "2.0",
+      "id": 1,
+      "method": "tools/list",
+      "params": {
+        "cursor": "page-2"
+      }
+    },
+    {
+      "jsonrpc": "2.0",
+      "id": 2,
+      "result": {
+        "resultType": "input_required"
+      }
+    },
+    {
+      "jsonrpc": "2.0",
+      "id": 3,
+      "error": {
+        "code": -32004,
+        "message": "version unsupported",
+        "data": {
+          "requested": "DRAFT-2026-v0",
+          "supported": ["DRAFT-2026-v1"]
+        }
+      }
+    }
+  ],
+  "matrix": {
+    "version": "DRAFT-2026-v1",
+    "family": "rc-core",
+    "case": "missing-required-metadata-and-result-discriminants",
+    "source": {
+      "kind": "hand_authored",
+      "description": "Negative coverage for required per-request metadata, input-required continuation state, and the unsupported-version error message pinned by the RC profile."
+    }
+  }
+}

@@ -21,6 +21,13 @@ __all__ = [
     "ACP_SCHEMA_COMPATIBILITY",
     "A2A_PROTOCOL_VERSION",
     "MCP_PROTOCOL_VERSION",
+    "MCP_STABLE_PROTOCOL_VERSION",
+    "MCP_DRAFT_PROTOCOL_VERSION",
+    "MCP_FINAL_2026_PROTOCOL_VERSION",
+    "MCP_JSON_SCHEMA_2020_12_DIALECT",
+    "MCP_INPUT_REQUIRED_RESULT_TYPE",
+    "MCP_UNSUPPORTED_PROTOCOL_VERSION_ERROR_CODE",
+    "MCP_UNSUPPORTED_PROTOCOL_VERSION_ERROR_MESSAGE",
     "ACP_AGENT_METHODS",
     "ACP_CLIENT_METHODS",
     "ACP_AGENT_NOTIFICATIONS",
@@ -40,7 +47,14 @@ __all__ = [
     "A2A_METHODS",
     "A2A_TASK_STATES",
     "A2A_TASK_EVENT_TYPES",
+    "MCP_PROTOCOL_VERSIONS",
     "MCP_METHODS",
+    "MCP_REQUIRED_METADATA_KEYS",
+    "MCP_METADATA_KEYS",
+    "MCP_STANDARD_HTTP_HEADERS",
+    "MCP_CACHE_RESULT_FIELDS",
+    "MCP_CACHE_SCOPES",
+    "MCP_RESULT_TYPES",
     "MCP_LOGGING_LEVELS",
     "ACPAgentMethod",
     "ACPClientMethod",
@@ -55,6 +69,8 @@ __all__ = [
     "ToolCallReceiptExecutor",
     "A2ATaskState",
     "A2ATaskEventType",
+    "MCPCacheScope",
+    "MCPResultType",
     "MCPLoggingLevel",
     "ACPError",
     "ACPRequest",
@@ -76,6 +92,15 @@ __all__ = [
     "A2AMessage",
     "A2ATaskStatus",
     "A2ATask",
+    "MCPJsonSchema202012",
+    "MCPRequestMeta",
+    "MCPHTTPHeaders",
+    "MCPImplementation",
+    "MCPCacheHints",
+    "MCPDiscoverResult",
+    "MCPInputRequiredResult",
+    "MCPUnsupportedProtocolVersionErrorData",
+    "MCPUnsupportedProtocolVersionError",
     "MCPTool",
     "MCPResource",
     "MCPResourceTemplate",
@@ -93,6 +118,13 @@ HARN_AGENT_EVENT_METHOD: str = "_harn/agentEvent"
 ACP_SCHEMA_COMPATIBILITY: str = "agentclientprotocol/agent-client-protocol schema v0.12.2"
 A2A_PROTOCOL_VERSION: str = "0.3.0"
 MCP_PROTOCOL_VERSION: str = "2025-11-25"
+MCP_STABLE_PROTOCOL_VERSION: str = "2025-11-25"
+MCP_DRAFT_PROTOCOL_VERSION: str = "DRAFT-2026-v1"
+MCP_FINAL_2026_PROTOCOL_VERSION: str = "2026-07-28"
+MCP_JSON_SCHEMA_2020_12_DIALECT: str = "https://json-schema.org/draft/2020-12/schema"
+MCP_INPUT_REQUIRED_RESULT_TYPE: str = "input_required"
+MCP_UNSUPPORTED_PROTOCOL_VERSION_ERROR_MESSAGE: str = "Unsupported protocol version"
+MCP_UNSUPPORTED_PROTOCOL_VERSION_ERROR_CODE: int = -32004
 
 ACP_AGENT_METHODS: tuple = (
     "initialize",
@@ -294,7 +326,12 @@ A2A_TASK_EVENT_TYPES: tuple = (
     "message",
     "worker_update",
 )
+MCP_PROTOCOL_VERSIONS: tuple = (
+    "DRAFT-2026-v1",
+    "2025-11-25",
+)
 MCP_METHODS: tuple = (
+    "server/discover",
     "initialize",
     "tools/list",
     "tools/call",
@@ -309,6 +346,38 @@ MCP_METHODS: tuple = (
     "elicitation/create",
     "notifications/initialized",
     "notifications/message",
+)
+MCP_REQUIRED_METADATA_KEYS: tuple = (
+    "io.modelcontextprotocol/protocolVersion",
+    "io.modelcontextprotocol/clientInfo",
+    "io.modelcontextprotocol/clientCapabilities",
+)
+MCP_METADATA_KEYS: tuple = (
+    "io.modelcontextprotocol/protocolVersion",
+    "io.modelcontextprotocol/clientInfo",
+    "io.modelcontextprotocol/clientCapabilities",
+    "io.modelcontextprotocol/logLevel",
+    "progressToken",
+    "traceparent",
+    "tracestate",
+    "baggage",
+)
+MCP_STANDARD_HTTP_HEADERS: tuple = (
+    "MCP-Protocol-Version",
+    "Mcp-Method",
+    "Mcp-Name",
+)
+MCP_CACHE_RESULT_FIELDS: tuple = (
+    "ttlMs",
+    "cacheScope",
+)
+MCP_CACHE_SCOPES: tuple = (
+    "private",
+    "public",
+)
+MCP_RESULT_TYPES: tuple = (
+    "complete",
+    "input_required",
 )
 MCP_LOGGING_LEVELS: tuple = (
     "debug",
@@ -463,6 +532,16 @@ class A2ATaskEventType(str, Enum):
     STATUS = "status"
     MESSAGE = "message"
     WORKER_UPDATE = "worker_update"
+
+
+class MCPCacheScope(str, Enum):
+    PRIVATE = "private"
+    PUBLIC = "public"
+
+
+class MCPResultType(str, Enum):
+    COMPLETE = "complete"
+    INPUT_REQUIRED = "input_required"
 
 
 class MCPLoggingLevel(str, Enum):
@@ -723,13 +802,64 @@ class A2ATask(_HarnDataclass):
     metadata: Optional[JsonObject] = None
 
 
+MCPJsonSchema202012 = JsonObject
+MCPRequestMeta = JsonObject
+MCPHTTPHeaders = Dict[str, str]
+
+
+@dataclass
+class MCPImplementation(_HarnDataclass):
+    name: str
+    version: str
+    title: Optional[str] = None
+    description: Optional[str] = None
+    websiteUrl: Optional[str] = None
+
+
+@dataclass
+class MCPCacheHints(_HarnDataclass):
+    ttlMs: int
+    cacheScope: str
+
+
+@dataclass
+class MCPDiscoverResult(_HarnDataclass):
+    resultType: str
+    supportedVersions: List[str]
+    capabilities: JsonObject
+    serverInfo: MCPImplementation
+    instructions: Optional[str] = None
+    _meta: Optional[JsonObject] = None
+
+
+@dataclass
+class MCPInputRequiredResult(_HarnDataclass):
+    resultType: str
+    inputRequests: Optional[JsonObject] = None
+    requestState: Optional[str] = None
+    _meta: Optional[JsonObject] = None
+
+
+@dataclass
+class MCPUnsupportedProtocolVersionErrorData(_HarnDataclass):
+    requested: str
+    supported: List[str]
+
+
+@dataclass
+class MCPUnsupportedProtocolVersionError(_HarnDataclass):
+    error: ACPError
+    id: JsonRpcId = None
+    jsonrpc: str = "2.0"
+
+
 @dataclass
 class MCPTool(_HarnDataclass):
     name: str
-    inputSchema: JsonObject
+    inputSchema: MCPJsonSchema202012
     title: Optional[str] = None
     description: Optional[str] = None
-    outputSchema: Optional[JsonObject] = None
+    outputSchema: Optional[MCPJsonSchema202012] = None
     annotations: Optional[JsonObject] = None
 
 

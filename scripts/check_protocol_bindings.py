@@ -71,6 +71,17 @@ def main() -> int:
         ),
         ("A2ATask", fixture["a2aTask"], hp.A2ATask),
         ("MCPTool", fixture["mcpTool"], hp.MCPTool),
+        ("MCPDiscoverResult", fixture["mcpDiscoverResult"], hp.MCPDiscoverResult),
+        (
+            "MCPInputRequiredResult",
+            fixture["mcpInputRequiredResult"],
+            hp.MCPInputRequiredResult,
+        ),
+        (
+            "MCPUnsupportedProtocolVersionError",
+            fixture["mcpUnsupportedProtocolVersionError"],
+            hp.MCPUnsupportedProtocolVersionError,
+        ),
         ("ToolCallReceipt", fixture["toolCallReceipt"], hp.ToolCallReceipt),
     ]
     for label, payload, cls in cases:

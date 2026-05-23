@@ -1,0 +1,133 @@
+{
+  "name": "mcp.draft_2026_v1.core",
+  "protocol": "mcp",
+  "schema": "schemas/mcp-draft-2026-v1.schema.json",
+  "expect": "valid",
+  "documents": [
+    {
+      "jsonrpc": "2.0",
+      "id": 1,
+      "method": "server/discover",
+      "params": {
+        "_meta": {
+          "io.modelcontextprotocol/protocolVersion": "DRAFT-2026-v1",
+          "io.modelcontextprotocol/clientInfo": {
+            "name": "harn-fixture-client",
+            "version": "0.1.0"
+          },
+          "io.modelcontextprotocol/clientCapabilities": {}
+        }
+      }
+    },
+    {
+      "jsonrpc": "2.0",
+      "id": 1,
+      "result": {
+        "resultType": "complete",
+        "supportedVersions": ["DRAFT-2026-v1", "2025-11-25"],
+        "capabilities": {
+          "tools": {}
+        },
+        "serverInfo": {
+          "name": "harn-fixture-server",
+          "version": "0.1.0"
+        },
+        "instructions": "Prefer 2025-11-25 unless RC support is explicitly enabled."
+      }
+    },
+    {
+      "MCP-Protocol-Version": "DRAFT-2026-v1",
+      "Mcp-Method": "tools/call",
+      "Mcp-Name": "echo"
+    },
+    {
+      "jsonrpc": "2.0",
+      "id": 2,
+      "method": "tools/list",
+      "params": {
+        "_meta": {
+          "io.modelcontextprotocol/protocolVersion": "DRAFT-2026-v1",
+          "io.modelcontextprotocol/clientInfo": {
+            "name": "harn-fixture-client",
+            "version": "0.1.0"
+          },
+          "io.modelcontextprotocol/clientCapabilities": {}
+        }
+      }
+    },
+    {
+      "jsonrpc": "2.0",
+      "id": 2,
+      "result": {
+        "resultType": "complete",
+        "ttlMs": 30000,
+        "cacheScope": "private",
+        "tools": [
+          {
+            "name": "echo",
+            "title": "Echo",
+            "description": "Echoes a string.",
+            "inputSchema": {
+              "$schema": "https://json-schema.org/draft/2020-12/schema",
+              "type": "object",
+              "properties": {
+                "message": {
+                  "type": "string"
+                }
+              },
+              "required": ["message"]
+            }
+          }
+        ]
+      }
+    },
+    {
+      "jsonrpc": "2.0",
+      "id": 3,
+      "result": {
+        "resultType": "input_required",
+        "requestState": "opaque-server-state",
+        "inputRequests": {
+          "confirm": {
+            "method": "elicitation/create",
+            "params": {
+              "mode": "form",
+              "message": "Confirm the tool call.",
+              "requestedSchema": {
+                "$schema": "https://json-schema.org/draft/2020-12/schema",
+                "type": "object",
+                "properties": {
+                  "confirmed": {
+                    "type": "boolean"
+                  }
+                },
+                "required": ["confirmed"]
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "jsonrpc": "2.0",
+      "id": 4,
+      "error": {
+        "code": -32004,
+        "message": "Unsupported protocol version",
+        "data": {
+          "requested": "DRAFT-2026-v0",
+          "supported": ["DRAFT-2026-v1", "2025-11-25"]
+        }
+      }
+    }
+  ],
+  "matrix": {
+    "version": "DRAFT-2026-v1",
+    "family": "rc-core",
+    "case": "discover-metadata-cache-input-required-unsupported-version",
+    "source": {
+      "kind": "hand_authored",
+      "description": "Pins the MCP RC helper surface Harn publishes before runtime behavior opts in: request metadata, standard HTTP headers, server/discover, cache hints, input-required results, unsupported-version errors, and JSON Schema 2020-12 tool schemas."
+    }
+  }
+}

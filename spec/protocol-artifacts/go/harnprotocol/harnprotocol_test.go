@@ -236,6 +236,63 @@ func TestRoundTripFixture(t *testing.T) {
 		assertRoundTrip(t, "MCPTool", raw, out)
 	})
 
+	t.Run("MCPDiscoverResult", func(t *testing.T) {
+		raw, ok := fixture["mcpDiscoverResult"]
+		if !ok {
+			t.Fatal("fixture missing mcpDiscoverResult")
+		}
+		var result MCPDiscoverResult
+		if err := json.Unmarshal(raw, &result); err != nil {
+			t.Fatalf("decode mcp discover result: %v", err)
+		}
+		if len(result.SupportedVersions) == 0 || result.SupportedVersions[0] != MCPDraftProtocolVersion {
+			t.Fatalf("expected first supported version %q, got %#v", MCPDraftProtocolVersion, result.SupportedVersions)
+		}
+		out, err := json.Marshal(result)
+		if err != nil {
+			t.Fatalf("encode mcp discover result: %v", err)
+		}
+		assertRoundTrip(t, "MCPDiscoverResult", raw, out)
+	})
+
+	t.Run("MCPInputRequiredResult", func(t *testing.T) {
+		raw, ok := fixture["mcpInputRequiredResult"]
+		if !ok {
+			t.Fatal("fixture missing mcpInputRequiredResult")
+		}
+		var result MCPInputRequiredResult
+		if err := json.Unmarshal(raw, &result); err != nil {
+			t.Fatalf("decode mcp input-required result: %v", err)
+		}
+		if result.ResultType != MCPInputRequiredResultType {
+			t.Fatalf("expected resultType=%q, got %q", MCPInputRequiredResultType, result.ResultType)
+		}
+		out, err := json.Marshal(result)
+		if err != nil {
+			t.Fatalf("encode mcp input-required result: %v", err)
+		}
+		assertRoundTrip(t, "MCPInputRequiredResult", raw, out)
+	})
+
+	t.Run("MCPUnsupportedProtocolVersionError", func(t *testing.T) {
+		raw, ok := fixture["mcpUnsupportedProtocolVersionError"]
+		if !ok {
+			t.Fatal("fixture missing mcpUnsupportedProtocolVersionError")
+		}
+		var response MCPUnsupportedProtocolVersionError
+		if err := json.Unmarshal(raw, &response); err != nil {
+			t.Fatalf("decode mcp unsupported-version error: %v", err)
+		}
+		if response.Error.Code != MCPUnsupportedProtocolVersionErrorCode {
+			t.Fatalf("expected code=%d, got %d", MCPUnsupportedProtocolVersionErrorCode, response.Error.Code)
+		}
+		out, err := json.Marshal(response)
+		if err != nil {
+			t.Fatalf("encode mcp unsupported-version error: %v", err)
+		}
+		assertRoundTrip(t, "MCPUnsupportedProtocolVersionError", raw, out)
+	})
+
 	t.Run("ToolCallReceipt", func(t *testing.T) {
 		raw, ok := fixture["toolCallReceipt"]
 		if !ok {
@@ -353,7 +410,10 @@ func TestVocabulariesArePopulated(t *testing.T) {
 		{"ToolCallReceiptExecutors", ToolCallReceiptExecutors},
 		{"A2ATaskStates", A2ATaskStates},
 		{"A2ATaskEventTypes", A2ATaskEventTypes},
+		{"MCPProtocolVersions", MCPProtocolVersions},
 		{"MCPMethods", MCPMethods},
+		{"MCPCacheScopes", MCPCacheScopes},
+		{"MCPResultTypes", MCPResultTypes},
 	}
 	for _, check := range checks {
 		if len(check.values) == 0 {

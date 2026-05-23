@@ -28,6 +28,9 @@ extension fields, and generated binding vocabulary.
 profile (`agentclientprotocol/agent-client-protocol schema v0.12.2`).
 - `schemas/a2a-0.3.0.schema.json`: Harn's A2A schema profile (`0.3.0`).
 - `schemas/mcp-2025-11-25.schema.json`: Harn's MCP schema profile (`2025-11-25`).
+- `schemas/mcp-draft-2026-v1.schema.json`: Harn's opt-in MCP RC schema
+profile (`DRAFT-2026-v1`), pinned beside the stable profile until the
+final `2026-07-28` specification lands.
 - `schemas/tool-call-receipt.schema.json`: Harn's typed, privacy-preserving
 `ToolCallReceipt` schema for audited tool calls.
 - `harn-protocol.ts`: TypeScript definitions for ACP session updates,
