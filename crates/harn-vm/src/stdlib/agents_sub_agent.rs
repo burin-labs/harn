@@ -3,7 +3,9 @@ use std::rc::Rc;
 
 use super::agents_workers;
 use super::{SubAgentExecutionResult, SubAgentRunSpec};
-use crate::orchestration::CapabilityPolicy;
+use crate::orchestration::{
+    annotate_nested_execution_options, CapabilityPolicy, NestedExecutionKind,
+};
 use crate::stdlib::options::{ErrorKind, OptionsParser};
 use crate::value::{VmError, VmValue};
 
@@ -115,10 +117,11 @@ pub(super) fn parse_sub_agent_request(args: &[VmValue]) -> Result<ParsedSubAgent
     let system = non_empty_raw_string(parser.optional_string_raw("system")?);
     let session_id = non_empty_raw_string(parser.optional_string_raw("session_id")?)
         .unwrap_or_else(|| format!("sub_agent_session_{}", uuid::Uuid::now_v7()));
-    let options =
+    let mut options =
         prepare_sub_agent_options(&mut parser, &session_id, policies.requested_policy.as_ref())?;
     let name = non_empty_raw_string(parser.optional_string_raw("name")?)
         .unwrap_or_else(|| "sub-agent".to_string());
+    annotate_nested_execution_options(&mut options, NestedExecutionKind::SubAgentRun, &name);
     let parent_session_id = crate::llm::current_agent_session_id();
     let reminder_propagation = match parser.optional_list("reminder_propagation")? {
         Some(reminders) => reminders

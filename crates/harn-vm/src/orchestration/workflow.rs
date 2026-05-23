@@ -1059,6 +1059,15 @@ fn workflow_stage_agent_loop_options(
         "tool_format".to_string(),
         VmValue::String(Rc::from(stage_agent_options.tool_format.clone())),
     );
+    let stage_label = node
+        .id
+        .clone()
+        .unwrap_or_else(|| stage_session_id.to_string());
+    crate::orchestration::annotate_nested_execution_options(
+        &mut options,
+        crate::orchestration::NestedExecutionKind::WorkflowStage,
+        &stage_label,
+    );
     Ok(options)
 }
 

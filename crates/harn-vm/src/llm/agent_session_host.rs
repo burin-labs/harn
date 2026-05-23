@@ -12,8 +12,9 @@ use std::rc::Rc;
 
 use crate::agent_events::AgentEvent;
 use crate::orchestration::{
-    pop_approval_policy, pop_execution_policy, push_approval_policy, push_command_policy,
-    push_execution_policy, CapabilityPolicy, ToolApprovalPolicy,
+    enter_nested_execution_policy, pop_approval_policy, pop_execution_policy, push_approval_policy,
+    push_command_policy, push_execution_policy, CapabilityPolicy, NestedExecutionGuard,
+    NestedExecutionKind, ToolApprovalPolicy, NESTED_KIND_OPTION_KEY, NESTED_LABEL_OPTION_KEY,
 };
 use crate::stdlib::registration::{
     register_builtin_group, register_deferred_builtin_group, BuiltinGroup, SyncBuiltin,
@@ -89,6 +90,11 @@ struct AgentHostSession {
     /// the last call truncated due to its `max_tokens` parameter) and
     /// `refusal` (Anthropic refusal stop_reason).
     last_llm_stop_reason: Option<String>,
+    /// Pops the per-session capability policy off the execution stack
+    /// on drop. Declared last so it Drops last in `AgentHostSession`'s
+    /// natural field-order drop, after every other cleanup completes.
+    #[allow(dead_code, reason = "held for Drop side effect")]
+    nested_policy_guard: Option<NestedExecutionGuard>,
 }
 
 /// Tracks which scoped policy stacks were pushed for a guarded tool
@@ -261,6 +267,19 @@ async fn host_agent_session_init(args: Vec<VmValue>) -> Result<VmValue, VmError>
             .map_err(VmError::Runtime)?;
     }
 
+    let nested_policy_guard = match install_session_nested_budget(&opts_map, &resolved) {
+        Ok(guard) => Some(guard),
+        Err(error) => {
+            let denial = build_nested_budget_denial(&resolved, &message, &error);
+            return Ok(agent_init_control_done(
+                &resolved,
+                &message,
+                system.as_deref(),
+                denial,
+            ));
+        }
+    };
+
     let max_iterations = opt_int(&opts_map, "max_iterations").unwrap_or(50).max(1);
     let max_verify_attempts = opt_int(&opts_map, "max_verify_attempts")
         .unwrap_or(20)
@@ -318,6 +337,7 @@ async fn host_agent_session_init(args: Vec<VmValue>) -> Result<VmValue, VmError>
         daemon_idle_backoff_ms: 100,
         host_bridge,
         last_llm_stop_reason: None,
+        nested_policy_guard,
     };
 
     AGENT_HOST_SESSIONS.with(|sessions| {
@@ -1979,6 +1999,86 @@ fn parse_capability_policy(value: Option<&VmValue>) -> Result<Option<CapabilityP
         .map_err(|error| VmError::Runtime(format!("agent_loop.policy: invalid policy: {error}")))
 }
 
+/// Apply the nested-execution budget check at `agent_loop` entry and
+/// install the decremented per-session execution policy. The caller
+/// (sub_agent_run / spawn_agent / workflow stage / direct invocation)
+/// can pass `_nested_kind` and `_nested_label` to refine the audit and
+/// error wording; we default to `agent_loop` + the session id.
+fn install_session_nested_budget(
+    opts_map: &BTreeMap<String, VmValue>,
+    session_id: &str,
+) -> Result<NestedExecutionGuard, VmError> {
+    let requested = parse_capability_policy(opts_map.get("policy"))?;
+    let kind =
+        NestedExecutionKind::parse_or_default(opts_map.get(NESTED_KIND_OPTION_KEY).and_then(|v| {
+            match v {
+                VmValue::String(text) => Some(text.as_ref()),
+                _ => None,
+            }
+        }));
+    let label = opts_map
+        .get(NESTED_LABEL_OPTION_KEY)
+        .and_then(|v| match v {
+            VmValue::String(text) if !text.trim().is_empty() => Some(text.to_string()),
+            _ => None,
+        })
+        .unwrap_or_else(|| session_id.to_string());
+    enter_nested_execution_policy(requested, kind, &label)
+}
+
+/// Build a categorized `nested_execution_budget` denial payload that
+/// the Harn-side `agent_loop` returns verbatim when the budget gate
+/// rejects the launch. Mirrors `build_user_prompt_block_result` —
+/// session is opened so transcript readers see the rejection event,
+/// then we surface the canonical error envelope.
+fn build_nested_budget_denial(session_id: &str, prompt: &str, error: &VmError) -> VmValue {
+    let (message, category) = match error {
+        VmError::CategorizedError { message, category } => (message.clone(), category.as_str()),
+        other => (other.to_string(), "tool_rejected"),
+    };
+    let _ = crate::agent_sessions::append_event(
+        session_id,
+        super::helpers::transcript_event(
+            "nested_execution_budget_denied",
+            "system",
+            "internal",
+            &message,
+            Some(serde_json::json!({
+                "category": category,
+                "session_id": session_id,
+            })),
+        ),
+    );
+    let transcript_json = crate::agent_sessions::transcript(session_id)
+        .as_ref()
+        .map(vm_to_json)
+        .unwrap_or(serde_json::Value::Null);
+    let result = serde_json::json!({
+        "status": "blocked",
+        "final_status": "blocked",
+        "stop_reason": "nested_execution_budget_exhausted",
+        "error": {
+            "category": category,
+            "message": message,
+        },
+        "text": "",
+        "visible_text": "",
+        "private_reasoning": serde_json::Value::Null,
+        "thinking_summary": serde_json::Value::Null,
+        "llm": {"iterations": 0, "duration_ms": 0, "input_tokens": 0, "output_tokens": 0},
+        "tools": {"calls": [], "successful": [], "rejected": [], "mode": ""},
+        "transcript": transcript_json,
+        "trace": serde_json::Value::Null,
+        "tokens_used": 0,
+        "cost_usd": 0.0,
+        "session_id": session_id,
+        "task": prompt,
+        "daemon_state": serde_json::Value::Null,
+        "daemon_snapshot_path": serde_json::Value::Null,
+    });
+    crate::stdlib::json_to_vm_value(&result)
+}
+
 fn parse_approval_policy(value: Option<&VmValue>) -> Result<Option<ToolApprovalPolicy>, VmError> {
     let Some(value) = value else { return Ok(None) };
     if matches!(value, VmValue::Nil) {
@@ -2408,5 +2508,140 @@ mod tests {
             canonical_acp_stop_reason("budget_exhausted", 50, 50, Some("refusal")),
             "max_turn_requests"
         );
+    }
+}
+
+#[cfg(test)]
+mod nested_budget_tests {
+    use super::*;
+    use crate::orchestration::{
+        clear_execution_policy_stacks, current_execution_policy, CapabilityPolicy,
+    };
+    use std::rc::Rc;
+
+    fn policy_value(policy: &CapabilityPolicy) -> VmValue {
+        crate::stdlib::json_to_vm_value(&serde_json::to_value(policy).unwrap())
+    }
+
+    fn empty_session_id() -> String {
+        format!("test_session_{}", uuid::Uuid::now_v7())
+    }
+
+    #[test]
+    fn install_session_nested_budget_rejects_when_parent_is_zero() {
+        clear_execution_policy_stacks();
+        let parent = CapabilityPolicy {
+            recursion_limit: Some(0),
+            ..Default::default()
+        };
+        push_execution_policy(parent);
+
+        let opts_map = BTreeMap::new();
+        let session_id = empty_session_id();
+        let error = install_session_nested_budget(&opts_map, &session_id).unwrap_err();
+        match error {
+            VmError::CategorizedError { message, category } => {
+                assert_eq!(category.as_str(), "budget_exceeded");
+                assert!(message.contains("agent_loop"), "missing kind: {message}");
+                assert!(message.contains(&session_id), "missing label: {message}");
+            }
+            other => panic!("unexpected error variant: {other:?}"),
+        }
+        pop_execution_policy();
+    }
+
+    #[test]
+    fn install_session_nested_budget_decrements_when_parent_has_room() {
+        clear_execution_policy_stacks();
+        push_execution_policy(CapabilityPolicy {
+            recursion_limit: Some(3),
+            ..Default::default()
+        });
+
+        let opts_map = BTreeMap::new();
+        let guard = install_session_nested_budget(&opts_map, "child").unwrap();
+        assert_eq!(guard.parent_limit, Some(3));
+        assert_eq!(guard.child_limit, Some(2));
+        assert_eq!(current_execution_policy().unwrap().recursion_limit, Some(2));
+        drop(guard);
+        pop_execution_policy();
+    }
+
+    #[test]
+    fn install_session_nested_budget_reads_kind_and_label_from_options() {
+        clear_execution_policy_stacks();
+        push_execution_policy(CapabilityPolicy {
+            recursion_limit: Some(0),
+            ..Default::default()
+        });
+
+        let mut opts_map = BTreeMap::new();
+        opts_map.insert(
+            "_nested_kind".to_string(),
+            VmValue::String(Rc::from("sub_agent_run")),
+        );
+        opts_map.insert(
+            "_nested_label".to_string(),
+            VmValue::String(Rc::from("research-worker")),
+        );
+        let error = install_session_nested_budget(&opts_map, "ignored").unwrap_err();
+        match error {
+            VmError::CategorizedError { message, .. } => {
+                assert!(
+                    message.contains("sub_agent_run"),
+                    "kind not surfaced: {message}"
+                );
+                assert!(
+                    message.contains("research-worker"),
+                    "label not surfaced: {message}"
+                );
+            }
+            other => panic!("unexpected variant: {other:?}"),
+        }
+        pop_execution_policy();
+    }
+
+    #[test]
+    fn install_session_nested_budget_intersects_requested_policy() {
+        clear_execution_policy_stacks();
+        push_execution_policy(CapabilityPolicy {
+            recursion_limit: Some(10),
+            ..Default::default()
+        });
+
+        let mut opts_map = BTreeMap::new();
+        opts_map.insert(
+            "policy".to_string(),
+            policy_value(&CapabilityPolicy {
+                recursion_limit: Some(1),
+                ..Default::default()
+            }),
+        );
+        let guard = install_session_nested_budget(&opts_map, "child").unwrap();
+        // Parent had Some(10); decremented to Some(9). Intersected with
+        // the requested ceiling Some(1) yields the tighter Some(1).
+        assert_eq!(guard.child_limit, Some(1));
+        drop(guard);
+        pop_execution_policy();
+    }
+
+    #[test]
+    fn build_nested_budget_denial_carries_budget_exceeded_category() {
+        let error = VmError::CategorizedError {
+            message: "nested execution budget exhausted before sub_agent_run: research-worker"
+                .to_string(),
+            category: crate::value::ErrorCategory::BudgetExceeded,
+        };
+        let result = build_nested_budget_denial("session-x", "go", &error);
+        let json = vm_to_json(&result);
+        assert_eq!(json["final_status"], "blocked");
+        assert_eq!(json["stop_reason"], "nested_execution_budget_exhausted");
+        assert_eq!(json["error"]["category"], "budget_exceeded");
+        assert!(json["error"]["message"]
+            .as_str()
+            .unwrap()
+            .contains("research-worker"));
+        assert_eq!(json["session_id"], "session-x");
+        assert_eq!(json["task"], "go");
     }
 }
