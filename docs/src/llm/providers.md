@@ -12,6 +12,11 @@ space, and GPU availability, then write starter `providers.toml`, `harn.toml`,
 and `.env` files.
 
 Run `harn models recommend` to choose a starter model for the current hardware.
+Run `harn providers recommend --json` to inspect the coding-agent readiness
+evidence that orders local provider/model presets for quickstart. The report
+reads the latest `harn eval coding-agent --include-local` output when present
+and falls back to bundled seed evidence, while keeping runtime transport
+failures separate from model task failures.
 Run `harn models install qwen3.6-coding`, `harn models install devstral-small-2`,
 or `harn models install ollama-gemma4` to resolve Harn aliases and pull the
 matching Ollama model. For non-Ollama local runtimes, `harn models install

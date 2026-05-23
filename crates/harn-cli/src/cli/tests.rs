@@ -3125,6 +3125,30 @@ fn test_parses_check_provider_matrix_args() {
 }
 
 #[test]
+fn test_parses_providers_recommend_args() {
+    let cli = Cli::parse_from([
+        "harn",
+        "providers",
+        "recommend",
+        "--input",
+        "local_readiness.json",
+        "--provider",
+        "ollama",
+        "--json",
+    ]);
+
+    let Command::Providers(args) = cli.command.unwrap() else {
+        panic!("expected providers command");
+    };
+    let ProvidersCommand::Recommend(recommend) = args.command else {
+        panic!("expected providers recommend command");
+    };
+    assert_eq!(recommend.input, Some(PathBuf::from("local_readiness.json")));
+    assert_eq!(recommend.provider.as_deref(), Some("ollama"));
+    assert!(recommend.json);
+}
+
+#[test]
 fn test_parses_check_connector_matrix_args() {
     let cli = Cli::parse_from([
         "harn",

@@ -26,6 +26,7 @@ pub(crate) mod hardware;
 pub(crate) mod init;
 pub(crate) mod json_schemas;
 pub(crate) mod local;
+pub(crate) mod local_readiness;
 pub(crate) mod mcp;
 pub(crate) mod merge_captain;
 pub(crate) mod merge_captain_mock;
