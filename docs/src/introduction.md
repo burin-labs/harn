@@ -1,8 +1,9 @@
+<!-- markdownlint-disable MD013 MD033 MD041 -->
+<div class="harn-hero">
+
 # Harn
 
-Harn is a pipeline-oriented programming language for orchestrating AI agents.
-LLM calls, tool use, concurrency, and error recovery are built into the
-language instead of spread across SDK glue.
+<p class="tagline">A pipeline-oriented language for AI agent orchestration. LLM calls, tool use, concurrency, retries, and replay are language primitives — not SDK glue.</p>
 
 ```harn
 let response = llm_call(
@@ -12,16 +13,27 @@ let response = llm_call(
 log(response)
 ```
 
-Harn files can contain top-level code like the above (implicit pipeline),
-or organize logic into named pipelines for larger programs:
+<div class="harn-cta-row">
+<a class="harn-cta harn-cta-primary" href="./getting-started.html">Get started</a>
+<a class="harn-cta harn-cta-secondary" href="./concepts/index.html">Read the concepts</a>
+<a class="harn-cta harn-cta-secondary" href="https://github.com/burin-labs/harn">GitHub</a>
+</div>
+
+</div>
+
+## What Harn is
+
+Harn is a small language built around one observation: when you write an AI agent, most of your code is *coordination* — calling a model, dispatching a tool, retrying, fanning out work, persisting state, recovering from a crash, replaying a trace for debugging. In Python or TypeScript this becomes a stack of libraries, each with its own configuration surface. In Harn the same patterns are keywords and builtins.
 
 ```harn
-pipeline default(task) {
+pipeline review(task) {
   let files = ["src/main.rs", "src/lib.rs"]
 
   let reviews = parallel each files { file ->
     let content = read_file(file)
-    llm_call("Review this code:\n${content}", "You are a code reviewer.")
+    retry 3 {
+      llm_call("Review this code:\n${content}", "You are a code reviewer.")
+    }
   }
 
   for review in reviews {
@@ -30,35 +42,101 @@ pipeline default(task) {
 }
 ```
 
-## Get started
+No imports. No async annotations. No retry decorators. No HTTP client setup. The orchestration logic *is* the code.
 
-Start with [Getting started](./getting-started.md): install Harn, write a
-program, and run it in under five minutes.
+## Why it exists
 
-## What's in this guide
+<div class="harn-feature-grid">
 
-- [Getting started](./getting-started.md): install and run your first program
-- [Why Harn?](./why-harn.md): what Harn solves and how it compares
-- [Language basics](./language-basics.md): syntax, types, control flow, functions, structs, enums
-- [Error handling](./error-handling.md): try/catch, Result type, the `?` operator, retry
-- [Modules and imports](./modules.md): files, modules, and the standard library
-- [Concurrency](./concurrency.md): spawn/await, parallel, channels, mutexes, deadlines
-- [Language specification](./language-spec.md): grammar and runtime semantics
-- [LLM and agents](./llm-and-agents.md): model calls, agent loops, and tool use
-- [Transcript architecture](./transcript-architecture.md): storage and replay for agent conversations
-- [Workflow runtime](./workflow-runtime.md): workflow graphs, artifacts, run records, replay, evals
-- [Cookbook](./cookbook.md): practical recipes and patterns
-- [Host boundary](./host-boundary.md): integration with host applications
-- [Bridge protocol](./bridge-protocol.md): JSON-RPC contract for host bridges
-- [Protocol support matrix](./protocol-support.md): ACP, A2A, and MCP entry points
-- [MCP, ACP, and A2A integration](./mcp-and-acp.md): protocol examples and behavior
-- [Harn portal](./portal.md): local observability UI for runs and transcripts
-- [CLI reference](./cli-reference.md): commands and flags
-- [Builtin functions](./builtins.md): built-in function reference
-- [Editor integration](./editor-integration.md): LSP, tree-sitter, and formatter support
-- [Testing](./testing.md): user tests and the conformance suite
+<div class="harn-feature">
+
+### LLM calls as primitives
+
+`llm_call`, `agent_loop`, and `workflow_execute` are part of the language. Switch providers with a one-field change.
+
+</div>
+
+<div class="harn-feature">
+
+### Concurrency without ceremony
+
+`parallel each`, `spawn`/`await`, channels, and deadlines are keywords. No promise combinators, no callback chains.
+
+</div>
+
+<div class="harn-feature">
+
+### Replay built in
+
+Every agent loop produces a structured transcript that replays deterministically. Debug the run that happened, not your reconstruction of it.
+
+</div>
+
+<div class="harn-feature">
+
+### Protocols out of the box
+
+Native MCP, ACP, and A2A. Expose your pipeline as an agent backend, or call any MCP server with three lines.
+
+</div>
+
+<div class="harn-feature">
+
+### Suspend and resume
+
+Cooperatively pause a worker mid-loop, persist a snapshot, resume hours later with new input. Daemon agents are first-class.
+
+</div>
+
+<div class="harn-feature">
+
+### Gradually typed
+
+Annotations are optional. Add them where they help, leave them off where they don't. Structural shape types describe expected dict fields.
+
+</div>
+
+</div>
+
+## Three paths in
+
+<div class="harn-paths">
+
+<div class="harn-path-card">
+
+### Build something
+
+Start with [Getting started](./getting-started.md) for install + first program in five minutes. Then [a code-review agent tutorial](./tutorial-code-review-agent.md).
+
+</div>
+
+<div class="harn-path-card">
+
+### Understand the model
+
+Read the [Concepts](./concepts/index.md) section: how `llm_call`, `agent_loop`, `workflow`, and `pipeline` fit together, and when to reach for each.
+
+</div>
+
+<div class="harn-path-card">
+
+### Coming from elsewhere
+
+If you're arriving from LangGraph, OpenAI Agents SDK, Anthropic Agent SDK, Inngest, or Mastra, the [terminology cross-reference](./concepts/sota-comparison.md) is the fastest map.
+
+</div>
+
+</div>
+
+## Where to go next
+
+- [Tutorials](./getting-started.md) — install, write your first program, then walk through worked examples.
+- [How-to guides](./cookbook.md) — task-oriented recipes for the things you actually need to do.
+- [Reference](./builtins.md) — every builtin, option, and CLI flag.
+- [Explanation](./host-boundary.md) — architecture notes, protocol RFCs, ADRs.
 
 ## Links
 
-- [GitHub](https://github.com/burin-labs/harn)
+- [GitHub repository](https://github.com/burin-labs/harn)
 - [Language specification](./language-spec.md)
+- [Feature matrix vs Inngest, Temporal, LangGraph, Cursor Automations](./feature-matrix.md)
