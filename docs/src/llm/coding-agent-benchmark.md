@@ -1,10 +1,10 @@
 # Coding Agent Provider Benchmark
 
-`harn eval coding-agent` runs a small, repeatable coding-agent harness across
-provider/model selectors and tool-call formats. The harness seeds a tiny Python
-project with one failing unittest, runs the stdlib `repair_agent` preset with
-read/edit/command tools, exports transcript JSONL, and verifies the repository
-with `python3 -m unittest discover -s tests`.
+`harn eval coding-agent` runs a small, repeatable coding-agent fixture suite
+across provider/model selectors and tool-call formats. The suite covers tiny
+task shapes that stress harness quality without turning the command into a full
+coding benchmark: one-file repair, CLI flag work, test-output-driven repair,
+docs/example drift, read-only audit, and prompt-only diagnosis.
 
 The default run is cost-free and deterministic:
 
@@ -14,8 +14,8 @@ harn eval coding-agent --model mock:mock --tool-format native,text
 
 Artifacts are written to `.harn-runs/coding-agent-bench/latest/` by default:
 
-- `summary.json`: aggregate pass/fail, token, cost, and native/text comparison data.
-- `per_run.jsonl`: one normalized row per provider/tool-format run.
+- `summary.json`: aggregate pass/fail, token, cost, rollup, and native/text comparison data.
+- `per_run.jsonl`: one normalized row per fixture/provider/tool-format run.
 - `local_readiness.json`: local-provider recommendation evidence derived from
   local runs, with provider transport failures, unsupported capability
   failures, and behavioral task failures separated.
@@ -24,6 +24,23 @@ Artifacts are written to `.harn-runs/coding-agent-bench/latest/` by default:
 - `summary.md`: a readable table for sharing results.
 - `followups.md`: candidate GitHub issues inferred from failures, rejected tool calls, or catalog gaps.
 
+Run ids include the fixture id, model selector, and tool format, for example
+`python-add__mock_mock__native`.
+
+## Fixtures
+
+Use `--fixture <id>` for tight local debugging, or `--fixture all` for the full
+suite. `all` is the default.
+
+| id | shape |
+|---|---|
+| `python-add` | one-file Python bug fix with verifier output |
+| `cli-help-flag` | add a tiny CLI flag, update help/docs, and verify behavior |
+| `test-output-first` | run failing tests before editing, then re-run them |
+| `docs-symbol-rename` | update docs and an example after a symbol rename |
+| `read-only-audit` | one-tool read-only audit with no edits |
+| `no-tool-diagnosis` | prompt-only diagnosis with no tools |
+
 ## Provider Matrix
 
 Pass model selectors with repeated or comma-separated `--model` flags. Selectors
@@ -31,6 +48,7 @@ can be aliases, `provider:model`, or `provider=...,model=...`:
 
 ```sh
 harn eval coding-agent \
+  --fixture all \
   --model mock:mock,together:Qwen/Qwen3-Coder-30B-A3B-Instruct \
   --tool-format native,text \
   --env-file ~/path/to/provider.env \
@@ -71,8 +89,12 @@ the same recommendation order when choosing among installed local Ollama models.
 
 ## Reading Results
 
-Use the native/text comparison table to spot provider abstraction leaks:
+Use the rollups and native/text comparison table to spot provider abstraction
+leaks:
 
+- fixture rollups show which task shapes regress first.
+- provider and model rollups show whether failures cluster by backend.
+- tool-format rollups show whether native or text tool rendering is weaker.
 - native passes while text fails, or the reverse, usually means the preset or
   provider adapter is exposing too much tool-channel behavior to harness authors.
 - rejected tool calls followed by eventual success suggest Harn may need better

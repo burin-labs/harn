@@ -47,7 +47,7 @@ pub struct EvalArgs {
 
 #[derive(Debug, Subcommand)]
 pub enum EvalCommand {
-    /// Benchmark first-coding-agent presets across providers and tool formats.
+    /// Benchmark coding-agent fixtures across providers and tool formats.
     CodingAgent(EvalCodingAgentArgs),
     /// Render and optionally run a `.harn.prompt` across a fleet of models.
     Prompt(EvalPromptArgs),
@@ -57,6 +57,9 @@ pub enum EvalCommand {
 
 #[derive(Debug, Args)]
 pub struct EvalCodingAgentArgs {
+    /// Fixture ids to run (comma-separated, repeatable). Use `all` for the full suite.
+    #[arg(long = "fixture", value_delimiter = ',', default_value = "all")]
+    pub fixtures: Vec<String>,
     /// Model selectors to run (comma-separated, repeatable). Each entry may be
     /// an alias, `provider:model`, or `provider=...,model=...`.
     #[arg(long = "model", value_delimiter = ',', default_value = "mock:mock")]
