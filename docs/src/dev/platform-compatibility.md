@@ -21,7 +21,7 @@ that points at the specific (platform, capability) pair, not just
 | `harn check` (type-check) | Yes | Yes | Yes | Lexer/parser/type checker is platform-independent. Smoke step 3. |
 | `harn fmt --check` | Yes | Yes | Yes | LF-only fixtures keep the formatter byte-stable across platforms. Smoke step 4. |
 | `harn package check` | Yes | Yes | Yes | Manifest parsing, exports resolution, path normalization. Smoke step 5. |
-| Generated artifacts (`harn check --provider-matrix`) | Yes | Yes | Yes | Deterministic-text emitter; line endings, sort order, and rounding are normalized in the writer. Smoke step 6. |
+| Generated artifacts (`harn providers matrix`) | Yes | Yes | Yes | Deterministic-text emitter; line endings, sort order, and rounding are normalized in the writer. Smoke step 6. |
 | `harn run` | Yes | Yes | Yes | VM bootstrapping + stdlib startup. Smoke step 7. |
 | Process spawning (`std/command::command_run`) | Yes (sandbox-exec / Seatbelt) | Yes (Landlock + seccomp; falls back to warn under `HARN_HANDLER_SANDBOX=warn`) | Yes (AppContainer + Job Objects; warn fallback applies the same way) | Sandbox backend differences are encapsulated in `crates/harn-vm/src/stdlib/sandbox/` (one file per OS) behind a shared `SandboxBackend` trait. Scripts pick argv via `platform()`. Smoke step 8. |
 | No-credentials workflow (`provider: "mock"`) | Yes | Yes | Yes | Drives `llm_call` end-to-end through the in-memory mock provider with no API keys, network, or platform secret store. Smoke step 9. |
@@ -53,7 +53,7 @@ that points at the specific (platform, capability) pair, not just
 - `harn fmt` preserves whatever line endings the input file has;
   release smoke fixtures pin LF so the formatter never churns on a
   Windows checkout.
-- The provider matrix emitter (`harn check --provider-matrix`) writes
+- The provider matrix emitter (`harn providers matrix`) writes
   LF on every platform. CI verifies byte-identical output across the
   matrix as smoke step 6.
 

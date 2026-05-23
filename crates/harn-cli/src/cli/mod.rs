@@ -96,8 +96,8 @@ pub(crate) use dump::{
     DumpTriggerQuickrefArgs,
 };
 pub use eval::{
-    EvalArgs, EvalCommand, EvalPromptArgs, EvalPromptMode, EvalPromptOutput, EvalToolCallsArgs,
-    EvalToolCallsCommand, EvalToolCallsRegressionArgs,
+    EvalArgs, EvalCodingAgentArgs, EvalCommand, EvalPromptArgs, EvalPromptMode, EvalPromptOutput,
+    EvalToolCallsArgs, EvalToolCallsCommand, EvalToolCallsRegressionArgs,
 };
 pub(crate) use explain::{CatalogFormat, ExplainArgs};
 pub(crate) use fix::{FixArgs, HarnessThreadingMode};
@@ -157,8 +157,8 @@ pub(crate) use provider::{
     ProviderToolProbeArgs, ProviderToolProbeModeArg,
 };
 pub(crate) use providers::{
-    ProvidersArgs, ProvidersCommand, ProvidersExportArgs, ProvidersRefreshArgs,
-    ProvidersValidateArgs,
+    ProvidersArgs, ProvidersCommand, ProvidersExportArgs, ProvidersMatrixArgs,
+    ProvidersRefreshArgs, ProvidersValidateArgs,
 };
 pub(crate) use quickstart::QuickstartArgs;
 pub(crate) use routes::RoutesArgs;

@@ -130,6 +130,56 @@ fn tagged_parser_accepts_gemma_json_tool_call_body() {
 }
 
 #[test]
+fn tagged_parser_recovers_mistral_tool_markers() {
+    let tools = sample_tool_registry();
+    let text = "I'll inspect first.[TOOL_CALLS]edit[ARGS]{\"action\":\"create\",\"path\":\"a.rs\"}";
+    let result = parse_text_tool_calls_with_tools(text, Some(&tools));
+
+    assert_eq!(result.calls.len(), 1);
+    assert_eq!(result.calls[0]["name"], json!("edit"));
+    assert_eq!(result.calls[0]["arguments"]["path"], json!("a.rs"));
+    assert_eq!(result.prose, "I'll inspect first.");
+    assert!(
+        result.violations[0].contains("Mistral"),
+        "violation should teach canonical protocol: {:?}",
+        result.violations
+    );
+    assert!(result.canonical.contains("<tool_call>"));
+}
+
+#[test]
+fn tagged_parser_recovers_deepseek_dsml_markers() {
+    let tools = sample_tool_registry();
+    let text = "I'll inspect first.\n\
+<｜DSML｜function_calls>\n\
+<｜DSML｜invoke name=\"edit\">\n\
+<｜DSML｜parameter name=\"action\" string=\"true\">create</｜DSML｜parameter>\n\
+<｜DSML｜parameter name=\"path\" string=\"true\">a.rs</｜DSML｜parameter>\n\
+<｜DSML｜parameter name=\"content\" string=\"true\">fn main() {}</｜DSML｜parameter>\n\
+</｜DSML｜invoke>\n\
+</｜DSML｜function_calls><｜DSML｜function_calls>\n\
+<｜DSML｜invoke name=\"run\">\n\
+<｜DSML｜parameter name=\"command\" string=\"false\">[\"cargo\", \"test\"]</｜DSML｜parameter>\n\
+</｜DSML｜invoke>\n\
+</｜DSML｜function_calls><｜DSML｜function_calls>\n\
+<｜DSML｜invoke name=\"edit\">";
+    let result = parse_text_tool_calls_with_tools(text, Some(&tools));
+
+    assert_eq!(result.calls.len(), 2);
+    assert_eq!(result.calls[0]["name"], json!("edit"));
+    assert_eq!(result.calls[0]["arguments"]["path"], json!("a.rs"));
+    assert_eq!(result.calls[1]["name"], json!("run"));
+    assert_eq!(result.calls[1]["arguments"]["command"][0], json!("cargo"));
+    assert_eq!(result.prose, "I'll inspect first.");
+    assert!(
+        result.violations[0].contains("DeepSeek DSML"),
+        "violation should teach canonical protocol: {:?}",
+        result.violations
+    );
+    assert!(result.canonical.contains("<tool_call>"));
+}
+
+#[test]
 fn tagged_parser_accepts_compact_protocol_tag_aliases() {
     let tools = sample_tool_registry();
     let text = "<assistantprose>Checking status.</assistantprose>\n\

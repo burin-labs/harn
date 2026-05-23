@@ -777,12 +777,15 @@ fn host_agent_session_record_assistant_builtin(
 fn tool_result_message_for_provider(
     provider: &str,
     model: &str,
+    tool_format: &str,
     name: &str,
     tool_call_id: &str,
     observation: &str,
 ) -> VmValue {
     let mut msg = BTreeMap::new();
-    if crate::llm::provider::provider_uses_anthropic_messages(provider, model) {
+    if tool_format == "text" {
+        msg.insert("role".to_string(), VmValue::String(Rc::from("user")));
+    } else if crate::llm::provider::provider_uses_anthropic_messages(provider, model) {
         msg.insert("role".to_string(), VmValue::String(Rc::from("tool_result")));
         msg.insert(
             "tool_use_id".to_string(),
@@ -851,6 +854,7 @@ fn host_agent_session_record_tool_results_builtin(
             ))
         })
         .unwrap_or_default();
+    let tool_format = crate::agent_sessions::tool_format(&session_id).unwrap_or_default();
     // dispatch may be either a flat list of results (as returned by
     // agent_dispatch_tool_batch) or a dict with a `results` key (legacy
     // shape some callers still synthesize). Handle both.
@@ -911,7 +915,14 @@ fn host_agent_session_record_tool_results_builtin(
         }
         let _ = crate::agent_sessions::inject_message(
             &session_id,
-            tool_result_message_for_provider(&provider, &model, &name, &tool_call_id, &observation),
+            tool_result_message_for_provider(
+                &provider,
+                &model,
+                &tool_format,
+                &name,
+                &tool_call_id,
+                &observation,
+            ),
         );
     }
     let _ = with_session(&session_id, HOST_SESSION_RECORD_TOOL_RESULTS, |session| {
@@ -2420,6 +2431,7 @@ mod tests {
         let local = vm_to_json(&tool_result_message_for_provider(
             "local",
             "Qwen/Qwen3.6-35B-A3B",
+            "native",
             "release_run",
             "call_001",
             "ok",
@@ -2431,6 +2443,7 @@ mod tests {
         let anthropic = vm_to_json(&tool_result_message_for_provider(
             "anthropic",
             "claude-opus-4-7",
+            "native",
             "release_run",
             "call_002",
             "ok",
@@ -2441,6 +2454,7 @@ mod tests {
         let bedrock_claude = vm_to_json(&tool_result_message_for_provider(
             "bedrock",
             "anthropic.claude-3-5-sonnet-20240620-v1:0",
+            "native",
             "release_run",
             "call_003",
             "ok",
@@ -2451,6 +2465,7 @@ mod tests {
         let gemini = vm_to_json(&tool_result_message_for_provider(
             "gemini",
             "gemini-2.5-flash",
+            "native",
             "release_run",
             "call_004",
             "ok",
@@ -2458,6 +2473,18 @@ mod tests {
         assert_eq!(gemini["role"], "tool");
         assert_eq!(gemini["name"], "release_run");
         assert_eq!(gemini["tool_call_id"], "call_004");
+
+        let text_mode = vm_to_json(&tool_result_message_for_provider(
+            "ollama",
+            "devstral-small-2:24b",
+            "text",
+            "release_run",
+            "call_005",
+            "ok",
+        ));
+        assert_eq!(text_mode["role"], "user");
+        assert!(text_mode.get("tool_call_id").is_none());
+        assert!(text_mode.get("tool_use_id").is_none());
     }
 
     #[test]

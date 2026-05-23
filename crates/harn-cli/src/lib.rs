@@ -924,6 +924,11 @@ async fn async_main() {
                     command_error(&error);
                 }
             }
+            ProvidersCommand::Matrix(matrix) => {
+                if let Err(error) = commands::providers::run_matrix(&matrix) {
+                    command_error(&error);
+                }
+            }
         },
         Command::Try(args) => commands::try_cmd::run(args).await,
         Command::Quickstart(args) => {
@@ -1099,6 +1104,12 @@ async fn async_main() {
             }
         }
         Command::Eval(args) => match args.command {
+            Some(EvalCommand::CodingAgent(coding_agent_args)) => {
+                let code = commands::eval_coding_agent::run(coding_agent_args).await;
+                if code != 0 {
+                    process::exit(code);
+                }
+            }
             Some(EvalCommand::Prompt(prompt_args)) => {
                 let code = commands::eval_prompt::run(prompt_args).await;
                 if code != 0 {

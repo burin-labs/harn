@@ -1572,11 +1572,11 @@
         ]
       },
       "tool_support": {
-        "native": false,
+        "native": true,
         "text": true,
         "tool_search": []
       },
-      "structured_output": "none",
+      "structured_output": "native",
       "format_preferences": {
         "prefers_xml_scaffolding": true,
         "prefers_markdown_scaffolding": true,
@@ -1617,7 +1617,8 @@
         "pdf",
         "files",
         "thinking",
-        "extended_thinking"
+        "extended_thinking",
+        "structured_output"
       ]
     },
     {
@@ -1638,11 +1639,11 @@
         ]
       },
       "tool_support": {
-        "native": false,
+        "native": true,
         "text": true,
         "tool_search": []
       },
-      "structured_output": "none",
+      "structured_output": "native",
       "format_preferences": {
         "prefers_xml_scaffolding": true,
         "prefers_markdown_scaffolding": true,
@@ -1683,7 +1684,8 @@
         "pdf",
         "files",
         "thinking",
-        "extended_thinking"
+        "extended_thinking",
+        "structured_output"
       ]
     },
     {
@@ -2841,7 +2843,7 @@
         ]
       },
       "tool_support": {
-        "native": true,
+        "native": false,
         "text": true,
         "tool_search": []
       },

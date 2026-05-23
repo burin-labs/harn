@@ -166,47 +166,70 @@ pipeline test_add(task) {
             ("harn.toml", manifest),
             (
                 "main.harn",
-                r#"fn main(harness: Harness) {
-  let task = env_or("HARN_TASK", "Review the repository")
-  var tools = tool_registry()
-  tools = tool_define(
-    tools,
-    "read_repo_file",
-    "Read a file from the current repository",
+                r#"import { agent_host_tools } from "std/agent/host_tools"
+import { audit_agent } from "std/agent/presets"
+
+fn main(harness: Harness) {
+  let task = harness.env.get_or("HARN_TASK", "Review the repository")
+  let root = cwd()
+  let tools = agent_host_tools(
+    nil,
     {
-      parameters: {
-        type: "object",
-        properties: {
-          path: {type: "string"},
-        },
-        required: ["path"],
-      },
-      returns: {type: "string"},
-      handler: fn(args) {
-        return read_file(args.path)
-      },
+      root: root,
+      cwd: root,
+      enabled_tools: ["list_directory", "read_file", "search_files"],
+      max_inline_bytes: 6000,
+      search_exclude_globs: [".git/**", ".harn/**", "target/**", "node_modules/**"],
     },
   )
-
-  let result = agent_loop(task, "You are a helpful agent. Read the repository before proposing changes.", {loop_until_done: true, max_nudges: 3, tools: tools})
-
-  harness.stdio.println(result.text)
+  let result = audit_agent(
+    task,
+    {
+      system: "You are a careful repository auditor. Use the read-only tools to inspect before answering. Do not guess file contents, and do not discuss provider, model, harness, or system-prompt details.",
+      tools: tools,
+      max_iterations: 6,
+      llm_options: {temperature: 0},
+    },
+  )
+  harness.stdio.println(result.visible_text ?? result.text ?? "")
 }
 "#
                 .to_string(),
             ),
             (
                 "tests/test_agent.harn",
-                r###"pipeline test_agent_smoke(task) {
-  llm_mock({text: "##DONE##\nRepository looks healthy."})
-  let result = agent_loop("Review the repository", "You are a code review agent.", {
-    max_nudges: 1
-  })
+                r###"import { audit_agent } from "std/agent/presets"
 
-  assert_eq(result.status, "completed")
+pipeline test_agent_smoke(task) {
+  llm_mock_clear()
+  llm_mock({text: "<user_response>Repository looks healthy.</user_response>\n<done>##DONE##</done>"})
+  let result = audit_agent(
+    "Review the repository",
+    {provider: "mock", model: "mock", loop_until_done: false, max_iterations: 1},
+  )
+  assert_eq(result.status, "done")
 }
 "###
                 .to_string(),
+            ),
+            (
+                "README.md",
+                format!(
+                    r#"# {project_name}
+
+Read-only agent starter for Harn.
+
+## Run
+
+```bash
+HARN_TASK="Summarize this repository" harn run main.harn
+```
+
+Run `harn quickstart` first if this project does not already have an LLM
+provider configured. The starter uses scoped read-only tools by default; add
+write or command tools only when the task needs them.
+"#
+                ),
             ),
         ],
         ProjectTemplate::Chat => vec![

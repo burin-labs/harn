@@ -1085,7 +1085,6 @@ fn __agent_loop_run(message, session, initial_opts) {
       let parsed = agent_parse_tool_calls(raw_text, turn_opts?.tools)
       let visible_text = __visible_text(parsed, raw_text)
       let normalized = llm_result + {text: visible_text, visible_text: visible_text}
-      agent_session_record_assistant(session.session_id, normalized)
       let fallback_outcome = __detect_native_fallback(
         llm_result,
         parsed,
@@ -1100,6 +1099,12 @@ fn __agent_loop_run(message, session, initial_opts) {
       } else {
         __resolve_tool_calls(llm_result, parsed)
       }
+      let recorded_assistant = if fallback_outcome.triggered && fallback_outcome.accepted {
+        normalized + {tool_calls: tool_calls, native_tool_calls: tool_calls}
+      } else {
+        normalized
+      }
+      agent_session_record_assistant(session.session_id, recorded_assistant)
       let await_call = __agent_await_resumption_call(tool_calls)
       if await_call != nil {
         suspend_result = __agent_loop_await_resumption(session, iteration, await_call, opts)

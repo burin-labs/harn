@@ -20,8 +20,8 @@ const PREFERRED_PROVIDERS: &[&str] = &[
     "mlx",
 ];
 const PREFERRED_OLLAMA_MODELS: &[(&str, &str)] = &[
-    ("qwen3.6-coding", "qwen3.6:35b-a3b-coding-nvfp4"),
     ("devstral-small-2", "devstral-small-2:24b"),
+    ("qwen3.6-coding", "qwen3.6:35b-a3b-coding-nvfp4"),
     ("ollama-gemma4", "gemma4:26b"),
     ("qwen3.6-35b-coding", "qwen3.6:35b-a3b-coding-nvfp4"),
     ("qwen3.6-coding-nvfp4", "qwen3.6:35b-a3b-coding-nvfp4"),
@@ -1008,17 +1008,18 @@ mod tests {
     fn preferred_ollama_selector_uses_current_local_coding_alias() {
         let available = vec![
             "llama3.2".to_string(),
+            "devstral-small-2:24b".to_string(),
             "qwen3.6:35b-a3b-coding-nvfp4".to_string(),
         ];
         assert_eq!(
             preferred_ollama_selector(&available).as_deref(),
-            Some("qwen3.6-coding")
+            Some("devstral-small-2")
         );
         assert_eq!(
             ordered_ollama_models(&available)
                 .first()
                 .map(String::as_str),
-            Some("qwen3.6:35b-a3b-coding-nvfp4")
+            Some("devstral-small-2:24b")
         );
     }
 }

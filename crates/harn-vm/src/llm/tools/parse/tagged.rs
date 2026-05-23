@@ -3,8 +3,8 @@ use std::collections::BTreeSet;
 use super::super::{text_tool_call_block, TEXT_TOOL_CALL_TAG, TEXT_TOOL_CALL_TAG_COMPACT};
 use super::bare::parse_bare_calls_in_body;
 use super::syntax::{
-    ident_length, match_block, parse_ts_call_from, preview_str, render_canonical_call,
-    skip_heredoc_body, strip_thinking_tags,
+    collapse_blank_lines, ident_length, match_block, parse_ts_call_from, preview_str,
+    render_canonical_call, skip_heredoc_body, strip_thinking_tags,
 };
 use super::TextToolParseResult;
 use crate::llm::tools::collect_tool_schemas;
@@ -38,6 +38,12 @@ pub(crate) fn parse_text_tool_calls_with_tools(
 ) -> TextToolParseResult {
     let cleaned = strip_thinking_tags(text);
     let src = cleaned.as_ref();
+    if let Some(result) = parse_mistral_marker_calls(src, tools_val) {
+        return result;
+    }
+    if let Some(result) = parse_deepseek_dsml_calls(src, tools_val) {
+        return result;
+    }
 
     let mut calls: Vec<serde_json::Value> = Vec::new();
     let mut errors: Vec<String> = Vec::new();
@@ -233,6 +239,271 @@ pub(crate) fn parse_text_tool_calls_with_tools(
         done_marker,
         canonical: canonical_parts.join("\n\n"),
     }
+}
+
+fn parse_mistral_marker_calls(
+    src: &str,
+    tools_val: Option<&VmValue>,
+) -> Option<TextToolParseResult> {
+    const CALL_MARKER: &str = "[TOOL_CALLS]";
+    const ARGS_MARKER: &str = "[ARGS]";
+
+    if !src.contains(CALL_MARKER) {
+        return None;
+    }
+
+    let known: BTreeSet<String> = collect_tool_schemas(tools_val, None)
+        .into_iter()
+        .map(|schema| schema.name)
+        .collect();
+    let bytes = src.as_bytes();
+    let mut cursor = 0usize;
+    let mut calls = Vec::new();
+    let mut errors = Vec::new();
+    let mut ranges = Vec::<(usize, usize)>::new();
+
+    while let Some(relative) = src[cursor..].find(CALL_MARKER) {
+        let start = cursor + relative;
+        let mut name_start = start + CALL_MARKER.len();
+        while name_start < bytes.len() && bytes[name_start].is_ascii_whitespace() {
+            name_start += 1;
+        }
+        let Some(name_len) = ident_length(&bytes[name_start..]) else {
+            errors.push("Mistral [TOOL_CALLS] marker was missing a tool name.".to_string());
+            cursor = name_start.saturating_add(1);
+            continue;
+        };
+        let name = &src[name_start..name_start + name_len];
+        if !known.contains(name) {
+            errors.push(format!(
+                "Unknown tool '{name}' in Mistral [TOOL_CALLS] marker."
+            ));
+            cursor = name_start + name_len;
+            continue;
+        }
+        let mut args_marker_start = name_start + name_len;
+        while args_marker_start < bytes.len() && bytes[args_marker_start].is_ascii_whitespace() {
+            args_marker_start += 1;
+        }
+        if !src[args_marker_start..].starts_with(ARGS_MARKER) {
+            errors.push(format!(
+                "Mistral [TOOL_CALLS] marker for `{name}` was missing [ARGS]."
+            ));
+            cursor = args_marker_start;
+            continue;
+        }
+        let mut args_start = args_marker_start + ARGS_MARKER.len();
+        while args_start < bytes.len() && bytes[args_start].is_ascii_whitespace() {
+            args_start += 1;
+        }
+        let next_marker = src[args_start..]
+            .find(CALL_MARKER)
+            .map(|relative| args_start + relative)
+            .unwrap_or(src.len());
+        let raw_args = src[args_start..next_marker].trim();
+        let synthetic = format!("{name}({raw_args})");
+        match parse_ts_call_from(&synthetic, name.to_string()) {
+            Ok((arguments, _)) => {
+                calls.push(serde_json::json!({
+                    "id": format!("tc_{}", calls.len()),
+                    "name": name,
+                    "arguments": arguments,
+                }));
+                ranges.push((start, args_start + raw_args.len()));
+                cursor = next_marker;
+            }
+            Err(msg) => {
+                errors.push(msg);
+                cursor = next_marker;
+            }
+        }
+    }
+
+    if calls.is_empty() && errors.is_empty() {
+        return None;
+    }
+
+    let prose = prose_without_ranges(src, &ranges);
+    let mut violations = Vec::new();
+    if !calls.is_empty() {
+        violations.push(
+            "Tool call(s) were emitted with Mistral `[TOOL_CALLS]name[ARGS]{...}` markers. \
+             Executed this turn so work moves forward; use `<tool_call>name({ ... })</tool_call>` \
+             on subsequent turns."
+                .to_string(),
+        );
+    }
+
+    let canonical = canonical_for_recovered_calls(&calls, &prose);
+
+    Some(TextToolParseResult {
+        calls,
+        errors,
+        prose,
+        user_response: None,
+        violations,
+        done_marker: None,
+        canonical,
+    })
+}
+
+fn parse_deepseek_dsml_calls(
+    src: &str,
+    tools_val: Option<&VmValue>,
+) -> Option<TextToolParseResult> {
+    const DSML_MARKER: &str = "<｜DSML｜";
+    if !src.contains(DSML_MARKER) {
+        return None;
+    }
+
+    let known: BTreeSet<String> = collect_tool_schemas(tools_val, None)
+        .into_iter()
+        .map(|schema| schema.name)
+        .collect();
+    let invoke_re =
+        regex::Regex::new(r#"(?s)<｜DSML｜invoke\s+name="([^"]+)"\s*>(.*?)</｜DSML｜invoke>"#)
+            .expect("valid DSML invoke regex");
+    let block_re = regex::Regex::new(r#"(?s)<｜DSML｜function_calls>.*?</｜DSML｜function_calls>"#)
+        .expect("valid DSML function_calls regex");
+    let param_re = regex::Regex::new(
+        r#"(?s)<｜DSML｜parameter\s+name="([^"]+)"(?:\s+string="(true|false)")?\s*>(.*?)</｜DSML｜parameter>"#,
+    )
+    .expect("valid DSML parameter regex");
+
+    let mut calls = Vec::new();
+    let mut errors = Vec::new();
+    let mut ranges = Vec::<(usize, usize)>::new();
+    for block in block_re.find_iter(src) {
+        ranges.push((block.start(), block.end()));
+    }
+    for captures in invoke_re.captures_iter(src) {
+        let whole = captures.get(0).expect("whole DSML invoke match");
+        let covered = ranges.iter().any(|(range_start, range_end)| {
+            whole.start() >= *range_start && whole.end() <= *range_end
+        });
+        if !covered {
+            ranges.push((whole.start(), whole.end()));
+        }
+        let name = captures.get(1).map(|m| m.as_str()).unwrap_or("");
+        if !known.contains(name) {
+            errors.push(format!("Unknown tool '{name}' in DeepSeek DSML invoke."));
+            continue;
+        }
+        let body = captures.get(2).map(|m| m.as_str()).unwrap_or("");
+        let mut args = serde_json::Map::new();
+        for param in param_re.captures_iter(body) {
+            let key = param.get(1).map(|m| m.as_str()).unwrap_or("").to_string();
+            let as_string = param.get(2).map(|m| m.as_str()) != Some("false");
+            let raw = param.get(3).map(|m| m.as_str()).unwrap_or("");
+            let value = if as_string {
+                serde_json::Value::String(decode_dsml_text(raw))
+            } else {
+                parse_dsml_value(raw).unwrap_or_else(|error| {
+                    errors.push(format!(
+                        "DeepSeek DSML parameter `{key}` for `{name}` could not parse as JSON: {error}."
+                    ));
+                    serde_json::Value::String(decode_dsml_text(raw))
+                })
+            };
+            args.insert(key, value);
+        }
+        calls.push(serde_json::json!({
+            "id": format!("tc_dsml_{}", calls.len()),
+            "name": name,
+            "arguments": serde_json::Value::Object(args),
+        }));
+    }
+    let mut marker_cursor = 0usize;
+    while let Some(relative) = src[marker_cursor..].find(DSML_MARKER) {
+        let start = marker_cursor + relative;
+        let covered = ranges
+            .iter()
+            .any(|(range_start, range_end)| start >= *range_start && start < *range_end);
+        if !covered {
+            ranges.push((start, src.len()));
+            break;
+        }
+        marker_cursor = start + DSML_MARKER.len();
+    }
+    ranges.sort_by_key(|(start, _)| *start);
+
+    if calls.is_empty() && errors.is_empty() {
+        return None;
+    }
+
+    let prose = prose_without_ranges(src, &ranges);
+    let mut violations = Vec::new();
+    if !calls.is_empty() {
+        violations.push(
+            "Tool call(s) were emitted with DeepSeek DSML markers. Executed this turn so work moves \
+             forward; use `<tool_call>name({ ... })</tool_call>` on subsequent turns."
+                .to_string(),
+        );
+    }
+
+    let canonical = canonical_for_recovered_calls(&calls, &prose);
+
+    Some(TextToolParseResult {
+        calls,
+        errors,
+        prose,
+        user_response: None,
+        violations,
+        done_marker: None,
+        canonical,
+    })
+}
+
+fn parse_dsml_value(raw: &str) -> Result<serde_json::Value, serde_json::Error> {
+    serde_json::from_str(raw.trim())
+}
+
+fn decode_dsml_text(raw: &str) -> String {
+    raw.replace("&lt;", "<")
+        .replace("&gt;", ">")
+        .replace("&quot;", "\"")
+        .replace("&#39;", "'")
+        .replace("&amp;", "&")
+}
+
+fn canonical_for_recovered_calls(calls: &[serde_json::Value], prose: &str) -> String {
+    let mut canonical_parts = Vec::new();
+    if !prose.trim().is_empty() {
+        canonical_parts.push(format!(
+            "<assistant_prose>\n{}\n</assistant_prose>",
+            prose.trim()
+        ));
+    }
+    for call in calls {
+        let name = call
+            .get("name")
+            .and_then(|name| name.as_str())
+            .unwrap_or("");
+        let args = call
+            .get("arguments")
+            .cloned()
+            .unwrap_or(serde_json::json!({}));
+        canonical_parts.push(text_tool_call_block(&render_canonical_call(name, &args)));
+    }
+    canonical_parts.join("\n\n")
+}
+
+fn prose_without_ranges(src: &str, ranges: &[(usize, usize)]) -> String {
+    if ranges.is_empty() {
+        return collapse_blank_lines(src).trim().to_string();
+    }
+    let mut out = String::new();
+    let mut cursor = 0usize;
+    for (start, end) in ranges {
+        if *start > cursor {
+            out.push_str(&src[cursor..*start]);
+        }
+        cursor = (*end).max(cursor);
+    }
+    if cursor < src.len() {
+        out.push_str(&src[cursor..]);
+    }
+    collapse_blank_lines(&out).trim().to_string()
 }
 
 /// Try to parse `<name({...})>` (or `<name({...})` with the closing `>`

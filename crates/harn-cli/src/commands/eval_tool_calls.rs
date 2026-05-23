@@ -10,13 +10,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value as JsonValue;
 
 use crate::cli::{EvalToolCallsArgs, EvalToolCallsCommand, EvalToolCallsRegressionArgs};
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-struct ModelSelector {
-    selector: String,
-    provider: String,
-    model: String,
-}
+use crate::commands::eval_model_selector::{resolve_selector, ModelSelector};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 struct PhaseReport {
@@ -312,51 +306,6 @@ fn all_required_provider_keys_available(
         }
     }
     true
-}
-
-fn resolve_selector(raw: &str) -> ModelSelector {
-    let trimmed = raw.trim();
-    if let Some((provider, model)) = parse_provider_model_kv(trimmed) {
-        return ModelSelector {
-            selector: trimmed.to_string(),
-            provider,
-            model,
-        };
-    }
-    if let Some((provider, model)) = trimmed.split_once(':') {
-        if !provider.is_empty() && !model.is_empty() {
-            return ModelSelector {
-                selector: trimmed.to_string(),
-                provider: provider.to_string(),
-                model: model.to_string(),
-            };
-        }
-    }
-    let resolved = harn_vm::llm_config::resolve_model_info(trimmed);
-    ModelSelector {
-        selector: trimmed.to_string(),
-        provider: resolved.provider,
-        model: resolved.id,
-    }
-}
-
-fn parse_provider_model_kv(raw: &str) -> Option<(String, String)> {
-    let mut provider = None;
-    let mut model = None;
-    for part in raw.split(',') {
-        let (key, value) = part.split_once('=')?;
-        match key.trim() {
-            "provider" => provider = Some(value.trim().to_string()),
-            "model" => model = Some(value.trim().to_string()),
-            _ => {}
-        }
-    }
-    match (provider, model) {
-        (Some(provider), Some(model)) if !provider.is_empty() && !model.is_empty() => {
-            Some((provider, model))
-        }
-        _ => None,
-    }
 }
 
 fn phase_report(model: ModelSelector, output: RawPhaseOutput) -> PhaseReport {

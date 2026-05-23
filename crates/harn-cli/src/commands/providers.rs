@@ -4,7 +4,9 @@ use std::path::{Path, PathBuf};
 use serde_json::json;
 use tokio::process::Command;
 
-use crate::cli::{ProvidersExportArgs, ProvidersRefreshArgs, ProvidersValidateArgs};
+use crate::cli::{
+    ProvidersExportArgs, ProvidersMatrixArgs, ProvidersRefreshArgs, ProvidersValidateArgs,
+};
 
 pub(crate) async fn run_refresh(args: &ProvidersRefreshArgs) -> Result<(), String> {
     if !args.script.exists() {
@@ -122,6 +124,47 @@ pub(crate) fn run_export(args: &ProvidersExportArgs) -> Result<(), String> {
             .map_err(|error| format!("failed to write {}: {error}", path.display()))?;
         println!("wrote {}", path.display());
     }
+    Ok(())
+}
+
+pub(crate) fn run_matrix(args: &ProvidersMatrixArgs) -> Result<(), String> {
+    let rows = crate::commands::check::provider_matrix::filtered_rows(args.filter.as_deref());
+    let generated = crate::commands::check::provider_matrix::generate_markdown(&rows);
+    if args.check {
+        match fs::read_to_string(&args.output) {
+            Ok(existing) if existing == generated => {
+                if !args.stdout {
+                    println!("provider capability matrix is up to date");
+                    return Ok(());
+                }
+            }
+            Ok(_) | Err(_) => {
+                return Err(format!(
+                    "provider capability matrix is stale or missing: {}",
+                    args.output.display()
+                ));
+            }
+        }
+    }
+    if args.stdout {
+        print!("{generated}");
+        return Ok(());
+    }
+    if let Some(parent) = args
+        .output
+        .parent()
+        .filter(|parent| !parent.as_os_str().is_empty())
+    {
+        fs::create_dir_all(parent).map_err(|error| {
+            format!(
+                "failed to create provider matrix directory {}: {error}",
+                parent.display()
+            )
+        })?;
+    }
+    fs::write(&args.output, generated)
+        .map_err(|error| format!("failed to write {}: {error}", args.output.display()))?;
+    println!("wrote {}", args.output.display());
     Ok(())
 }
 

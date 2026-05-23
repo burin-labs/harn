@@ -18,6 +18,21 @@ condensed series summaries instead of full per-patch history.
   audit metadata record the instruction mode/source, and
   `std/agent/autocompact` adds helper policies for bug-fix resumption, failing
   test preservation, and retaining the current plan.
+- **Empirical coding-agent provider benchmark.** Added
+  `harn eval coding-agent`, a packaged minimal repair-agent harness that
+  exercises provider/model selectors across native and text tool modes, records
+  normalized JSON/JSONL/Markdown artifacts, snapshots local model cleanup, and
+  generates follow-up issue candidates for provider/preset abstraction leaks.
+
+- **Provider matrix lifecycle command.** Added `harn providers matrix` so the
+  capability matrix docs can be regenerated and checked through the same
+  provider command group that owns catalog refresh, validation, and export.
+
+- **Safer starter agent defaults.** The `harn new --template agent` starter now
+  uses scoped read-only `agent_host_tools`, the standard `audit_agent` preset,
+  and a README that calls out when to add mutating tools. `harn quickstart`
+  also prefers the empirically stronger local Devstral coding preset when it is
+  available.
 
 ### Fixed
 
@@ -32,6 +47,12 @@ condensed series summaries instead of full per-patch history.
   be positive integers, and `iteration_budget.initial` cannot exceed
   `iteration_budget.max`. Invalid workflow stage budgets now fail with a clear
   `agent_loop` diagnostic before any provider call.
+
+- **Provider tool-mode normalization is stricter.** Text-mode tool calls no
+  longer leak native provider schemas or orphan native tool-result messages,
+  recoverable Mistral and DeepSeek tool-call markers are normalized into Harn
+  text-tool calls, and OpenRouter DeepSeek V3.2 defaults to text tools after
+  empirical native-mode failures.
 
 ## v0.8.34
 
