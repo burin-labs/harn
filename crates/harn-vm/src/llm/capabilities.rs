@@ -321,6 +321,21 @@ pub struct ProviderRule {
     /// survive the provider route and return in the visible response body.
     #[serde(default)]
     pub text_tool_wire_format_supported: Option<bool>,
+    /// Preferred tool-calling mode for this provider/model route when
+    /// callers do not explicitly choose `tool_format`. This lets the
+    /// capability matrix route around known provider-native regressions
+    /// without making presets branch on model names.
+    #[serde(default)]
+    pub preferred_tool_format: Option<String>,
+    /// Empirical native/text interchangeability status for this route.
+    /// Known values are descriptive, not gates: `interchangeable`,
+    /// `native_unreliable`, `text_unreliable`, `native_only`,
+    /// `text_only`, and `unknown`.
+    #[serde(default)]
+    pub tool_mode_parity: Option<String>,
+    /// Short human-readable note explaining `tool_mode_parity`.
+    #[serde(default)]
+    pub tool_mode_parity_notes: Option<String>,
     /// In-prompt directive that disables this model's "thinking" mode when
     /// the API doesn't expose a first-class field (or exposes it
     /// inconsistently across templates / quantizations). For Qwen3 family
@@ -390,6 +405,9 @@ pub struct Capabilities {
     pub presence_penalty_supported: bool,
     pub recommended_endpoint: Option<String>,
     pub text_tool_wire_format_supported: bool,
+    pub preferred_tool_format: Option<String>,
+    pub tool_mode_parity: Option<String>,
+    pub tool_mode_parity_notes: Option<String>,
     pub thinking_disable_directive: Option<String>,
     /// Per-task auto-policy reasoning-level overrides for this route.
     /// See [`ProviderRule::auto_reasoning_overrides`].
@@ -438,6 +456,9 @@ impl Default for Capabilities {
             presence_penalty_supported: true,
             recommended_endpoint: None,
             text_tool_wire_format_supported: true,
+            preferred_tool_format: None,
+            tool_mode_parity: None,
+            tool_mode_parity_notes: None,
             thinking_disable_directive: None,
             auto_reasoning_overrides: BTreeMap::new(),
         }
@@ -468,6 +489,10 @@ pub struct ProviderCapabilityMatrixRow {
     pub prefers_role_developer: bool,
     pub prefers_xml_tools: bool,
     pub thinking_block_style: String,
+    pub native_tools: bool,
+    pub text_tools: bool,
+    pub preferred_tool_format: String,
+    pub tool_mode_parity: String,
     pub tools: bool,
     pub cache: bool,
     pub source: String,
@@ -597,7 +622,12 @@ fn rule_to_matrix_row(
             .unwrap_or_else(|| rule.requires_completion_tokens.unwrap_or(false)),
         prefers_xml_tools: rule.prefers_xml_tools.unwrap_or(false),
         thinking_block_style: rule_thinking_block_style(rule),
-        tools: rule.native_tools.unwrap_or(false),
+        native_tools: rule.native_tools.unwrap_or(false),
+        text_tools: rule.text_tool_wire_format_supported.unwrap_or(true),
+        preferred_tool_format: rule_preferred_tool_format(rule),
+        tool_mode_parity: rule_tool_mode_parity(rule),
+        tools: rule.native_tools.unwrap_or(false)
+            || rule.text_tool_wire_format_supported.unwrap_or(true),
         cache: rule.prompt_caching.unwrap_or(false),
         source: source.to_string(),
     }
@@ -771,6 +801,9 @@ fn defaults_to_caps(defaults: &ProviderDefaults) -> Capabilities {
         presence_penalty_supported: None,
         recommended_endpoint: None,
         text_tool_wire_format_supported: None,
+        preferred_tool_format: None,
+        tool_mode_parity: None,
+        tool_mode_parity_notes: None,
         thinking_disable_directive: None,
         auto_reasoning_overrides: None,
     };
@@ -854,9 +887,36 @@ fn rule_to_caps(rule: &ProviderRule, defaults: &ProviderDefaults) -> Capabilitie
             .unwrap_or(true),
         recommended_endpoint: rule.recommended_endpoint.clone(),
         text_tool_wire_format_supported: rule.text_tool_wire_format_supported.unwrap_or(true),
+        preferred_tool_format: Some(rule_preferred_tool_format(rule)),
+        tool_mode_parity: Some(rule_tool_mode_parity(rule)),
+        tool_mode_parity_notes: rule.tool_mode_parity_notes.clone(),
         thinking_disable_directive: rule.thinking_disable_directive.clone(),
         auto_reasoning_overrides: rule.auto_reasoning_overrides.clone().unwrap_or_default(),
     }
+}
+
+fn rule_preferred_tool_format(rule: &ProviderRule) -> String {
+    rule.preferred_tool_format.clone().unwrap_or_else(|| {
+        if rule.native_tools.unwrap_or(false) {
+            "native".to_string()
+        } else {
+            "text".to_string()
+        }
+    })
+}
+
+fn rule_tool_mode_parity(rule: &ProviderRule) -> String {
+    rule.tool_mode_parity.clone().unwrap_or_else(|| {
+        match (
+            rule.native_tools.unwrap_or(false),
+            rule.text_tool_wire_format_supported.unwrap_or(true),
+        ) {
+            (true, true) => "unknown".to_string(),
+            (true, false) => "native_only".to_string(),
+            (false, true) => "text_only".to_string(),
+            (false, false) => "unsupported".to_string(),
+        }
+    })
 }
 
 fn rule_structured_output(rule: &ProviderRule) -> Option<String> {
@@ -1165,9 +1225,21 @@ anthropic_beta_features = ["fine-grained-tool-streaming-2025-05-14"]
     fn openrouter_deepseek_v32_defaults_to_text_tools() {
         reset();
         let caps = lookup("openrouter", "deepseek/deepseek-v3.2");
-        assert!(!caps.native_tools);
+        assert!(caps.native_tools);
         assert!(caps.text_tool_wire_format_supported);
+        assert_eq!(caps.preferred_tool_format.as_deref(), Some("text"));
+        assert_eq!(caps.tool_mode_parity.as_deref(), Some("native_unreliable"));
         assert_eq!(caps.structured_output.as_deref(), Some("native"));
+    }
+
+    #[test]
+    fn openrouter_qwen_coder_defaults_to_text_tools() {
+        reset();
+        let caps = lookup("openrouter", "qwen/qwen3-coder-flash");
+        assert!(caps.native_tools);
+        assert!(caps.text_tool_wire_format_supported);
+        assert_eq!(caps.preferred_tool_format.as_deref(), Some("text"));
+        assert_eq!(caps.tool_mode_parity.as_deref(), Some("native_unreliable"));
     }
 
     #[test]

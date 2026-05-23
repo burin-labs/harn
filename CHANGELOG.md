@@ -26,6 +26,10 @@ condensed series summaries instead of full per-patch history.
   Local runs now also emit `local_readiness.json`, and
   `harn providers recommend` exposes the same readiness evidence and local
   preset ordering that `harn quickstart` consumes.
+- **Native/text tool-mode parity reporting (#2242).** `harn eval coding-agent`
+  summaries now compare native and text runs by fixture, verifier result, tool
+  sequence, rejected-call recovery, and linked transcript evidence so provider
+  divergences are visible in the benchmark report.
 
 - **Provider matrix lifecycle command.** Added `harn providers matrix` so the
   capability matrix docs can be regenerated and checked through the same
@@ -69,6 +73,11 @@ condensed series summaries instead of full per-patch history.
   expansions. Cyclic local references such as `$ref: "#"` now fail
   deterministically with a Harn-level schema error instead of relying on Rust
   stack depth.
+- **Provider capability data owns tool-mode defaults (#2242).** Capability rows,
+  `provider_capabilities(...)`, the generated provider matrix, and provider
+  catalog bindings now expose `preferred_tool_format`, `tool_mode_parity`, and
+  optional parity notes. Presets use that data to route known unreliable native
+  tool modes to text tools without provider-specific branches.
 - **Bridge inject mode `wait_for_completion` renamed to `audit_only`
   (#2212).** The previous name was a footgun: reminders queued with this
   mode drain at `loop_exit` and land in the transcript audit, but the

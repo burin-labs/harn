@@ -421,6 +421,15 @@
         "native": {
           "type": "boolean"
         },
+        "parity": {
+          "type": "string"
+        },
+        "parity_notes": {
+          "type": "string"
+        },
+        "preferred_format": {
+          "type": "string"
+        },
         "text": {
           "type": "boolean"
         },

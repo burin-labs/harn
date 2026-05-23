@@ -805,7 +805,13 @@ fn default_tool_format_with_config(
             }
         }
     }
-    let capability_matrix_native = crate::llm::capabilities::lookup(provider, model).native_tools;
+    let capabilities = crate::llm::capabilities::lookup(provider, model);
+    if let Some(format) = capabilities.preferred_tool_format.as_deref() {
+        if matches!(format, "native" | "text") {
+            return format.to_string();
+        }
+    }
+    let capability_matrix_native = capabilities.native_tools;
     let legacy_provider_native = config
         .providers
         .get(provider)
@@ -1491,6 +1497,10 @@ mod tests {
         assert_eq!(default_tool_format("gemma-4-26b-a4b-it", "local"), "text");
         assert_eq!(
             default_tool_format("deepseek/deepseek-v3.2", "openrouter"),
+            "text"
+        );
+        assert_eq!(
+            default_tool_format("qwen/qwen3-coder-flash", "openrouter"),
             "text"
         );
     }

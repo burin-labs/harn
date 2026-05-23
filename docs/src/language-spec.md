@@ -2847,7 +2847,11 @@ effective matrix at runtime with:
 ```harn
 let caps = provider_capabilities("anthropic", "claude-opus-4-7")
 // {
-//   provider, model, native_tools, defer_loading,
+//   provider, model, native_tools, text_tool_wire_format_supported,
+//   preferred_tool_format: "native" | "text",
+//   tool_mode_parity: "interchangeable" | "unknown" | "native_unreliable" | "text_unreliable" | "native_only" | "text_only" | "unsupported",
+//   tool_mode_parity_notes: string | nil,
+//   tools, defer_loading,
 //   tool_search: [string], max_tools: int | nil,
 //   prompt_caching, thinking, thinking_modes: [string],
 //   reasoning_effort_supported, reasoning_none_supported,

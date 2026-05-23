@@ -20,6 +20,10 @@ const FEATURES: &[&str] = &[
     "assistant_prefill",
     "role_developer",
     "xml_tools",
+    "native_tools",
+    "text_tools",
+    "native_tool_default",
+    "text_tool_default",
     "native_json",
     "delimited_output",
     "xml_tagged_output",
@@ -47,14 +51,14 @@ pub(crate) fn generate_markdown(rows: &[ProviderCapabilityMatrixRow]) -> String 
     );
     out.push_str("Regenerate with `make gen-provider-matrix` and verify with `make check-provider-matrix`.\n\n");
     out.push_str(
-        "| Provider | Model pattern | Version min | Thinking | Vision | Audio | PDF | Streaming | Files API | JSON schema | Prompt | Output mode | Prefill | Role | Tool prompt | Thinking blocks | Tools | Cache |\n",
+        "| Provider | Model pattern | Version min | Thinking | Vision | Audio | PDF | Streaming | Files API | JSON schema | Prompt | Output mode | Prefill | Role | Tool prompt | Thinking blocks | Default tools | Native tools | Text tools | Parity | Tools | Cache |\n",
     );
     out.push_str(
-        "|---|---|---|---|---:|---:|---:|---:|---:|---|---|---|---:|---|---|---|---:|---:|\n",
+        "|---|---|---|---|---:|---:|---:|---:|---:|---|---|---|---:|---|---|---|---|---:|---:|---|---:|---:|\n",
     );
     for row in rows {
         out.push_str(&format!(
-            "| `{}` | `{}` | {} | {} | {} | {} | {} | {} | {} | {} | {} | `{}` | {} | `{}` | `{}` | `{}` | {} | {} |\n",
+            "| `{}` | `{}` | {} | {} | {} | {} | {} | {} | {} | {} | {} | `{}` | {} | `{}` | `{}` | `{}` | `{}` | {} | {} | `{}` | {} | {} |\n",
             row.provider,
             row.model,
             markdown_cell(&version_min_cell(row)),
@@ -71,6 +75,10 @@ pub(crate) fn generate_markdown(rows: &[ProviderCapabilityMatrixRow]) -> String 
             instruction_role_cell(row),
             tool_prompt_cell(row),
             row.thinking_block_style,
+            row.preferred_tool_format,
+            yes_no(row.native_tools),
+            yes_no(row.text_tools),
+            row.tool_mode_parity,
             yes_no(row.tools),
             yes_no(row.cache),
         ));
@@ -114,6 +122,10 @@ fn row_supports_feature(row: &ProviderCapabilityMatrixRow, feature: &str) -> boo
         "assistant_prefill" => row.supports_assistant_prefill,
         "role_developer" => row.prefers_role_developer,
         "xml_tools" => row.prefers_xml_tools,
+        "native_tools" => row.native_tools,
+        "text_tools" => row.text_tools,
+        "native_tool_default" => row.preferred_tool_format == "native",
+        "text_tool_default" => row.preferred_tool_format == "text",
         "native_json" => row.structured_output_mode == "native_json",
         "delimited_output" => row.structured_output_mode == "delimited",
         "xml_tagged_output" => row.structured_output_mode == "xml_tagged",
@@ -124,7 +136,7 @@ fn row_supports_feature(row: &ProviderCapabilityMatrixRow, feature: &str) -> boo
 }
 
 fn print_text(rows: &[ProviderCapabilityMatrixRow]) {
-    let table_rows: Vec<[String; 17]> = rows
+    let table_rows: Vec<[String; 21]> = rows
         .iter()
         .map(|row| {
             [
@@ -143,6 +155,10 @@ fn print_text(rows: &[ProviderCapabilityMatrixRow]) {
                 instruction_role_cell(row),
                 tool_prompt_cell(row),
                 row.thinking_block_style.clone(),
+                row.preferred_tool_format.clone(),
+                yes_no(row.native_tools).to_string(),
+                yes_no(row.text_tools).to_string(),
+                row.tool_mode_parity.clone(),
                 yes_no(row.tools).to_string(),
                 yes_no(row.cache).to_string(),
             ]
@@ -164,6 +180,10 @@ fn print_text(rows: &[ProviderCapabilityMatrixRow]) {
         "role".to_string(),
         "tool_prompt".to_string(),
         "thinking_blocks".to_string(),
+        "default_tools".to_string(),
+        "native_tools".to_string(),
+        "text_tools".to_string(),
+        "parity".to_string(),
         "tools".to_string(),
         "cache".to_string(),
     ];
@@ -304,7 +324,7 @@ mod tests {
         assert!(markdown.contains("Source of truth"));
         assert!(markdown.contains("harn providers matrix"));
         assert!(markdown.contains(
-            "| Provider | Model pattern | Version min | Thinking | Vision | Audio | PDF | Streaming | Files API | JSON schema | Prompt | Output mode | Prefill | Role | Tool prompt | Thinking blocks | Tools | Cache |"
+            "| Provider | Model pattern | Version min | Thinking | Vision | Audio | PDF | Streaming | Files API | JSON schema | Prompt | Output mode | Prefill | Role | Tool prompt | Thinking blocks | Default tools | Native tools | Text tools | Parity | Tools | Cache |"
         ));
     }
 }

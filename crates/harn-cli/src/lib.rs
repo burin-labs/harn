@@ -1586,6 +1586,9 @@ async fn print_model_info(args: &ModelInfoArgs) -> bool {
             "honors_chat_template_kwargs": capabilities.honors_chat_template_kwargs,
             "recommended_endpoint": capabilities.recommended_endpoint,
             "text_tool_wire_format_supported": capabilities.text_tool_wire_format_supported,
+            "preferred_tool_format": capabilities.preferred_tool_format,
+            "tool_mode_parity": capabilities.tool_mode_parity,
+            "tool_mode_parity_notes": capabilities.tool_mode_parity_notes,
         },
         "qc_default_model": harn_vm::llm_config::qc_default_model(&resolved.provider),
     });

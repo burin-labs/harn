@@ -661,6 +661,10 @@ pub(crate) fn canonical_acp_stop_reason(
         // truncated by the provider's `max_tokens` parameter.
         return "max_turn_requests";
     }
+    canonical_provider_stop_reason(last_llm_stop_reason)
+}
+
+pub(crate) fn canonical_provider_stop_reason(last_llm_stop_reason: Option<&str>) -> &'static str {
     match last_llm_stop_reason {
         Some(reason) if reason.eq_ignore_ascii_case("max_tokens") => "max_tokens",
         Some(reason) if reason.eq_ignore_ascii_case("length") => "max_tokens",
@@ -998,6 +1002,8 @@ fn host_agent_session_record_usage_builtin(
                 "provider": provider,
                 "model": model,
                 "cost_usd": cost,
+                "provider_stop_reason": stop_reason,
+                "canonical_stop_reason": canonical_provider_stop_reason(stop_reason.as_deref()),
             })),
         ),
     );
@@ -2506,8 +2512,9 @@ mod tests {
     use serde_json::json;
 
     use super::{
-        assistant_message_from_llm_result, canonical_acp_stop_reason, initial_user_content,
-        last_assistant_text, tool_result_message_for_provider, vm_to_json,
+        assistant_message_from_llm_result, canonical_acp_stop_reason,
+        canonical_provider_stop_reason, initial_user_content, last_assistant_text,
+        tool_result_message_for_provider, vm_to_json,
     };
     use std::collections::BTreeMap;
 
@@ -2681,6 +2688,14 @@ mod tests {
             canonical_acp_stop_reason("done", 1, 50, Some("MAX_TOKENS")),
             "max_tokens"
         );
+    }
+
+    #[test]
+    fn provider_stop_reason_normalization_is_shared_with_transcripts() {
+        assert_eq!(canonical_provider_stop_reason(Some("length")), "max_tokens");
+        assert_eq!(canonical_provider_stop_reason(Some("refusal")), "refusal");
+        assert_eq!(canonical_provider_stop_reason(Some("tool_use")), "end_turn");
+        assert_eq!(canonical_provider_stop_reason(None), "end_turn");
     }
 
     #[test]

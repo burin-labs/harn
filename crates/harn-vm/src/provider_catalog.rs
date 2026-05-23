@@ -140,6 +140,12 @@ pub struct ModelModalities {
 pub struct ModelToolSupport {
     pub native: bool,
     pub text: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub preferred_format: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub parity: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub parity_notes: Option<String>,
     pub tool_search: Vec<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub max_tools: Option<u32>,
@@ -562,6 +568,9 @@ pub fn schema_value() -> Value {
                 "properties": {
                     "native": {"type": "boolean"},
                     "text": {"type": "boolean"},
+                    "preferred_format": {"type": "string"},
+                    "parity": {"type": "string"},
+                    "parity_notes": {"type": "string"},
                     "tool_search": {"type": "array", "items": {"type": "string"}},
                     "max_tools": {"type": "integer", "minimum": 1}
                 },
@@ -699,6 +708,9 @@ fn catalog_model(
         tool_support: ModelToolSupport {
             native: caps.native_tools,
             text: caps.text_tool_wire_format_supported,
+            preferred_format: caps.preferred_tool_format.clone(),
+            parity: caps.tool_mode_parity.clone(),
+            parity_notes: caps.tool_mode_parity_notes.clone(),
             tool_search: caps.tool_search.clone(),
             max_tools: caps.max_tools,
         },
@@ -1069,6 +1081,9 @@ export interface HarnCatalogModel {
   tool_support: {
     native: boolean
     text: boolean
+    preferred_format?: string
+    parity?: string
+    parity_notes?: string
     tool_search: string[]
     max_tools?: number
   }
@@ -1340,12 +1355,18 @@ public struct HarnModelModalities: Codable, Sendable, Equatable {
 public struct HarnModelToolSupport: Codable, Sendable, Equatable {
     public let native: Bool
     public let text: Bool
+    public let preferredFormat: String?
+    public let parity: String?
+    public let parityNotes: String?
     public let toolSearch: [String]
     public let maxTools: Int?
 
     enum CodingKeys: String, CodingKey {
         case native
         case text
+        case preferredFormat = "preferred_format"
+        case parity
+        case parityNotes = "parity_notes"
         case toolSearch = "tool_search"
         case maxTools = "max_tools"
     }

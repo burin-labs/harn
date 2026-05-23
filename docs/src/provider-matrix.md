@@ -9,98 +9,98 @@ This table is generated from Harn's live provider capability rules. `Model patte
 
 Regenerate with `make gen-provider-matrix` and verify with `make check-provider-matrix`.
 
-| Provider | Model pattern | Version min | Thinking | Vision | Audio | PDF | Streaming | Files API | JSON schema | Prompt | Output mode | Prefill | Role | Tool prompt | Thinking blocks | Tools | Cache |
-|---|---|---|---|---:|---:|---:|---:|---:|---|---|---|---:|---|---|---|---:|---:|
-| `anthropic` | `claude-haiku-*` | `>=4.7` | `adaptive` | yes | yes | yes | yes | yes | `tool_use` | `xml` | `xml_tagged` | no | `system` | `xml` | `thinking_blocks` | yes | yes |
-| `anthropic` | `claude-opus-*` | `>=4.7` | `adaptive` | yes | yes | yes | yes | yes | `tool_use` | `xml` | `xml_tagged` | no | `system` | `xml` | `thinking_blocks` | yes | yes |
-| `anthropic` | `claude-sonnet-*` | `>=4.7` | `adaptive` | yes | yes | yes | yes | yes | `tool_use` | `xml` | `xml_tagged` | no | `system` | `xml` | `thinking_blocks` | yes | yes |
-| `anthropic` | `claude-haiku-*` | `>=4.5` | `enabled` | yes | yes | yes | yes | yes | `tool_use` | `xml` | `xml_tagged` | yes | `system` | `xml` | `thinking_blocks` | yes | yes |
-| `anthropic` | `claude-opus-*` | `>=4.6` | `enabled` | yes | yes | yes | yes | yes | `tool_use` | `xml` | `xml_tagged` | no | `system` | `xml` | `thinking_blocks` | yes | yes |
-| `anthropic` | `claude-opus-*` | `>=4.0` | `enabled` | yes | yes | yes | yes | yes | `tool_use` | `xml` | `xml_tagged` | yes | `system` | `xml` | `thinking_blocks` | yes | yes |
-| `anthropic` | `claude-sonnet-*` | `>=4.6` | `enabled` | yes | yes | yes | yes | yes | `tool_use` | `xml` | `xml_tagged` | no | `system` | `xml` | `thinking_blocks` | yes | yes |
-| `anthropic` | `claude-sonnet-*` | `>=4.0` | `enabled` | yes | yes | yes | yes | yes | `tool_use` | `xml` | `xml_tagged` | yes | `system` | `xml` | `thinking_blocks` | yes | yes |
-| `anthropic` | `anthropic/claude-haiku-*` | `>=4.7` | `adaptive` | yes | yes | yes | yes | yes | `tool_use` | `xml` | `xml_tagged` | no | `system` | `xml` | `thinking_blocks` | yes | yes |
-| `anthropic` | `anthropic/claude-opus-*` | `>=4.7` | `adaptive` | yes | yes | yes | yes | yes | `tool_use` | `xml` | `xml_tagged` | no | `system` | `xml` | `thinking_blocks` | yes | yes |
-| `anthropic` | `anthropic/claude-sonnet-*` | `>=4.7` | `adaptive` | yes | yes | yes | yes | yes | `tool_use` | `xml` | `xml_tagged` | no | `system` | `xml` | `thinking_blocks` | yes | yes |
-| `anthropic` | `anthropic/claude-haiku-*` | `>=4.5` | `enabled` | yes | yes | yes | yes | yes | `tool_use` | `xml` | `xml_tagged` | yes | `system` | `xml` | `thinking_blocks` | yes | yes |
-| `anthropic` | `anthropic/claude-opus-*` | `>=4.6` | `enabled` | yes | yes | yes | yes | yes | `tool_use` | `xml` | `xml_tagged` | no | `system` | `xml` | `thinking_blocks` | yes | yes |
-| `anthropic` | `anthropic/claude-opus-*` | `>=4.0` | `enabled` | yes | yes | yes | yes | yes | `tool_use` | `xml` | `xml_tagged` | yes | `system` | `xml` | `thinking_blocks` | yes | yes |
-| `anthropic` | `anthropic/claude-sonnet-*` | `>=4.6` | `enabled` | yes | yes | yes | yes | yes | `tool_use` | `xml` | `xml_tagged` | no | `system` | `xml` | `thinking_blocks` | yes | yes |
-| `anthropic` | `anthropic/claude-sonnet-*` | `>=4.0` | `enabled` | yes | yes | yes | yes | yes | `tool_use` | `xml` | `xml_tagged` | yes | `system` | `xml` | `thinking_blocks` | yes | yes |
-| `anthropic` | `claude-*` | `any` | `enabled` | yes | yes | yes | yes | yes | `tool_use` | `xml` | `xml_tagged` | yes | `system` | `xml` | `thinking_blocks` | yes | yes |
-| `azure_openai` | `gpt-*` | `any` | no | no | no | no | yes | no | no | `markdown` | `native_json` | no | `system` | `json` | `none` | yes | no |
-| `azure_openai` | `o1*` | `any` | no | no | no | no | yes | no | no | `markdown` | `native_json` | no | `developer` | `json` | `reasoning_summary` | yes | no |
-| `azure_openai` | `o3*` | `any` | no | no | no | no | yes | no | no | `markdown` | `native_json` | no | `developer` | `json` | `reasoning_summary` | yes | no |
-| `azure_openai` | `o4*` | `any` | no | no | no | no | yes | no | no | `markdown` | `native_json` | no | `developer` | `json` | `reasoning_summary` | yes | no |
-| `bedrock` | `anthropic.claude-*` | `any` | no | no | no | no | yes | no | no | `xml` | `xml_tagged` | no | `system` | `xml` | `thinking_blocks` | yes | no |
-| `bedrock` | `*claude*` | `any` | no | no | no | no | yes | no | no | `xml` | `xml_tagged` | no | `system` | `xml` | `thinking_blocks` | yes | no |
-| `bedrock` | `*` | `any` | no | no | no | no | yes | no | no | `markdown` | `delimited` | no | `system` | `json` | `none` | yes | no |
-| `dashscope` | `qwen3.6*` | `any` | `enabled` | no | no | no | yes | no | `native` | `markdown` | `delimited` | no | `system` | `json` | `inline` | yes | no |
-| `dashscope` | `qwen*` | `any` | `enabled` | no | no | no | yes | no | `native` | `markdown` | `delimited` | no | `system` | `json` | `inline` | yes | no |
-| `fireworks` | `*qwen3.6*` | `any` | `enabled` | no | no | no | yes | no | `native` | `markdown` | `delimited` | no | `system` | `json` | `inline` | yes | no |
-| `fireworks` | `*qwen3p6*` | `any` | `enabled` | no | no | no | yes | no | `native` | `markdown` | `delimited` | no | `system` | `json` | `inline` | yes | no |
-| `fireworks` | `*qwen*` | `any` | `enabled` | no | no | no | yes | no | `native` | `markdown` | `delimited` | no | `system` | `json` | `inline` | yes | no |
-| `gemini` | `gemini-2.5*` | `any` | `enabled,adaptive,effort` | yes | yes | yes | yes | yes | `native` | `xml,markdown` | `native_json` | no | `system` | `json` | `reasoning_summary` | yes | no |
-| `gemini` | `models/gemini-2.5*` | `any` | `enabled,adaptive,effort` | yes | yes | yes | yes | yes | `native` | `xml,markdown` | `native_json` | no | `system` | `json` | `reasoning_summary` | yes | no |
-| `gemini` | `gemini-*` | `any` | no | yes | yes | yes | yes | yes | `native` | `xml,markdown` | `native_json` | no | `system` | `json` | `none` | yes | no |
-| `gemini` | `models/gemini-*` | `any` | no | yes | yes | yes | yes | yes | `native` | `xml,markdown` | `native_json` | no | `system` | `json` | `none` | yes | no |
-| `huggingface` | `qwen/qwen3.6*` | `any` | `enabled` | no | no | no | yes | no | `native` | `markdown` | `delimited` | no | `system` | `json` | `inline` | yes | no |
-| `huggingface` | `qwen/qwen3-coder*` | `any` | no | no | no | no | yes | no | `native` | `markdown` | `delimited` | no | `system` | `json` | `none` | yes | no |
-| `huggingface` | `qwen/*` | `any` | `enabled` | no | no | no | yes | no | `native` | `markdown` | `delimited` | no | `system` | `json` | `inline` | yes | no |
-| `huggingface` | `deepseek-ai/deepseek-v3*` | `any` | `enabled` | no | no | no | yes | no | `native` | `markdown` | `native_json` | no | `system` | `json` | `inline` | yes | yes |
-| `llamacpp` | `*qwen3.6*` | `any` | `enabled` | no | no | no | yes | no | `native` | `markdown` | `delimited` | no | `system` | `json` | `inline` | no | no |
-| `llamacpp` | `*qwen3*` | `any` | `enabled` | no | no | no | yes | no | `native` | `markdown` | `delimited` | no | `system` | `json` | `inline` | no | no |
-| `llamacpp` | `*devstral-small-2*` | `any` | no | no | no | no | yes | no | `native` | `markdown` | `delimited` | no | `system` | `json` | `none` | no | no |
-| `local` | `*qwen3.6*` | `any` | `enabled` | no | no | no | yes | no | `native` | `markdown` | `delimited` | no | `system` | `json` | `inline` | yes | no |
-| `local` | `*qwen3*` | `any` | `enabled` | no | no | no | yes | no | `native` | `markdown` | `delimited` | no | `system` | `json` | `inline` | yes | no |
-| `local` | `gemma-4*` | `any` | `enabled` | no | no | no | yes | no | no | `markdown` | `delimited` | no | `system` | `json` | `inline` | no | no |
-| `mlx` | `*qwen3.6*` | `any` | `enabled` | yes | no | no | yes | no | `native` | `markdown` | `delimited` | no | `system` | `json` | `inline` | yes | no |
-| `mlx` | `*qwen3*` | `any` | `enabled` | yes | no | no | yes | no | `native` | `markdown` | `delimited` | no | `system` | `json` | `inline` | yes | no |
-| `ollama` | `llava*` | `any` | no | yes | no | no | yes | no | no | `markdown` | `native_json` | no | `system` | `json` | `none` | no | no |
-| `ollama` | `bakllava*` | `any` | no | yes | no | no | yes | no | no | `markdown` | `native_json` | no | `system` | `json` | `reasoning_summary` | no | no |
-| `ollama` | `llama3.2-vision*` | `any` | no | yes | no | no | yes | no | no | `markdown` | `native_json` | no | `system` | `json` | `reasoning_summary` | no | no |
-| `ollama` | `gemma3*` | `any` | no | yes | no | no | yes | no | no | `markdown` | `native_json` | no | `system` | `json` | `reasoning_summary` | no | no |
-| `ollama` | `gemma4*` | `any` | no | yes | no | no | yes | no | no | `markdown` | `delimited` | no | `system` | `json` | `none` | no | no |
-| `ollama` | `qwen3.6*` | `any` | `enabled` | no | no | no | yes | no | `format_kw` | `markdown` | `delimited` | no | `system` | `json` | `inline` | no | no |
-| `ollama` | `qwen3*` | `any` | `enabled` | no | no | no | yes | no | `format_kw` | `markdown` | `delimited` | no | `system` | `json` | `inline` | yes | no |
-| `ollama` | `devstral-small-2*` | `any` | no | no | no | no | yes | no | `format_kw` | `markdown` | `delimited` | no | `system` | `json` | `none` | no | no |
-| `openai` | `gpt-4o*` | `any` | no | yes | yes | no | yes | no | `native` | `markdown` | `native_json` | no | `system` | `json` | `none` | yes | no |
-| `openai` | `gpt-4.1*` | `any` | no | yes | no | no | yes | no | `native` | `markdown` | `native_json` | no | `system` | `json` | `none` | yes | no |
-| `openai` | `gpt-*` | `>=5.4` | `effort` | yes | no | no | yes | no | `native` | `markdown` | `native_json` | no | `system` | `json` | `reasoning_summary` | yes | no |
-| `openai` | `gpt-*` | `>=5.1` | `effort` | yes | no | no | yes | no | `native` | `markdown` | `native_json` | no | `system` | `json` | `reasoning_summary` | yes | no |
-| `openai` | `gpt-*` | `>=5.0` | `effort` | yes | no | no | yes | no | `native` | `markdown` | `native_json` | no | `system` | `json` | `reasoning_summary` | yes | no |
-| `openai` | `gpt-*` | `any` | no | no | no | no | yes | no | `native` | `markdown` | `native_json` | no | `system` | `json` | `none` | yes | no |
-| `openai` | `o1*` | `any` | `effort` | no | no | no | yes | no | `native` | `markdown` | `native_json` | no | `developer` | `json` | `reasoning_summary` | yes | no |
-| `openai` | `o3*` | `any` | `effort` | no | no | no | yes | no | `native` | `markdown` | `native_json` | no | `developer` | `json` | `reasoning_summary` | yes | no |
-| `openai` | `o4*` | `any` | `effort` | yes | no | no | yes | no | `native` | `markdown` | `native_json` | no | `developer` | `json` | `reasoning_summary` | yes | no |
-| `openai` | `openai/gpt-4o*` | `any` | no | yes | yes | no | yes | no | `native` | `markdown` | `native_json` | no | `system` | `json` | `none` | yes | no |
-| `openai` | `openai/gpt-4.1*` | `any` | no | yes | no | no | yes | no | `native` | `markdown` | `native_json` | no | `system` | `json` | `none` | yes | no |
-| `openai` | `openai/gpt-*` | `>=5.4` | `effort` | yes | no | no | yes | no | `native` | `markdown` | `native_json` | no | `system` | `json` | `reasoning_summary` | yes | no |
-| `openai` | `openai/gpt-*` | `>=5.1` | `effort` | no | no | no | yes | no | `native` | `markdown` | `native_json` | no | `system` | `json` | `reasoning_summary` | yes | no |
-| `openai` | `openai/gpt-*` | `>=5.0` | `effort` | no | no | no | yes | no | `native` | `markdown` | `native_json` | no | `system` | `json` | `reasoning_summary` | yes | no |
-| `openai` | `openai/gpt-*` | `any` | no | no | no | no | yes | no | `native` | `markdown` | `native_json` | no | `system` | `json` | `none` | yes | no |
-| `openai` | `openai/o1*` | `any` | `effort` | no | no | no | yes | no | `native` | `markdown` | `native_json` | no | `developer` | `json` | `reasoning_summary` | yes | no |
-| `openai` | `openai/o3*` | `any` | `effort` | no | no | no | yes | no | `native` | `markdown` | `native_json` | no | `developer` | `json` | `reasoning_summary` | yes | no |
-| `openai` | `openai/o4*` | `any` | `effort` | yes | no | no | yes | no | `native` | `markdown` | `native_json` | no | `developer` | `json` | `reasoning_summary` | yes | no |
-| `openrouter` | `qwen/qwen3.6*` | `any` | `enabled` | no | no | no | yes | no | `native` | `markdown` | `delimited` | no | `system` | `json` | `inline` | yes | no |
-| `openrouter` | `qwen/qwen3-coder*` | `any` | no | no | no | no | yes | no | `native` | `markdown` | `delimited` | no | `system` | `json` | `none` | yes | no |
-| `openrouter` | `qwen/*` | `any` | `enabled` | no | no | no | yes | no | `native` | `markdown` | `delimited` | no | `system` | `json` | `inline` | yes | no |
-| `openrouter` | `deepseek/deepseek-v4*` | `any` | `enabled,effort` | no | no | no | yes | no | `native` | `markdown` | `native_json` | no | `system` | `json` | `reasoning_summary` | yes | yes |
-| `openrouter` | `deepseek/deepseek-v3.2*` | `any` | `enabled,effort` | no | no | no | yes | no | `native` | `markdown` | `native_json` | no | `system` | `json` | `reasoning_summary` | no | yes |
-| `openrouter` | `deepseek/deepseek-v3*` | `any` | `enabled,effort` | no | no | no | yes | no | `native` | `markdown` | `native_json` | no | `system` | `json` | `reasoning_summary` | yes | yes |
-| `openrouter` | `mistralai/devstral*` | `any` | no | no | no | no | yes | no | `native` | `markdown` | `native_json` | no | `system` | `json` | `none` | yes | no |
-| `openrouter` | `google/gemini-2.5*` | `any` | `enabled,effort` | yes | yes | yes | yes | no | `native` | `markdown` | `native_json` | no | `system` | `json` | `reasoning_summary` | yes | yes |
-| `openrouter` | `google/gemma-4*` | `any` | no | no | no | no | yes | no | `native` | `markdown` | `native_json` | no | `system` | `json` | `none` | yes | no |
-| `openrouter` | `meta-llama/llama-4*` | `any` | no | no | no | no | yes | no | `native` | `markdown` | `native_json` | no | `system` | `json` | `none` | yes | no |
-| `openrouter` | `meta-llama/llama-3*` | `any` | no | no | no | no | yes | no | `native` | `markdown` | `native_json` | no | `system` | `json` | `none` | yes | no |
-| `together` | `qwen/qwen3.6*` | `any` | `enabled` | no | no | no | yes | no | `native` | `markdown` | `delimited` | no | `system` | `json` | `inline` | yes | no |
-| `together` | `qwen/qwen3-coder*` | `any` | no | no | no | no | yes | no | `native` | `markdown` | `delimited` | no | `system` | `json` | `none` | yes | no |
-| `together` | `qwen/*` | `any` | `enabled` | no | no | no | yes | no | `native` | `markdown` | `delimited` | no | `system` | `json` | `inline` | yes | no |
-| `together` | `deepseek-ai/deepseek-v3*` | `any` | `enabled` | no | no | no | yes | no | `native` | `markdown` | `native_json` | no | `system` | `json` | `inline` | yes | yes |
-| `together` | `openai/gpt-oss-*` | `any` | `effort` | no | no | no | yes | no | `native` | `markdown` | `native_json` | no | `system` | `json` | `reasoning_summary` | no | no |
-| `together` | `deepseek-ai/deepseek-v4*` | `any` | `enabled,effort` | no | no | no | yes | no | `native` | `markdown` | `native_json` | no | `system` | `json` | `reasoning_summary` | yes | yes |
-| `together` | `moonshotai/kimi-k2*` | `any` | `enabled` | no | no | no | yes | no | `native` | `markdown` | `native_json` | no | `system` | `json` | `inline` | yes | no |
-| `together` | `zai-org/glm-5*` | `any` | `enabled` | no | no | no | yes | no | `native` | `markdown` | `native_json` | no | `system` | `json` | `inline` | yes | no |
-| `together` | `google/gemma-4*` | `any` | `enabled` | no | no | no | yes | no | `native` | `markdown` | `native_json` | no | `system` | `json` | `inline` | yes | no |
-| `together` | `moonshotai/*` | `any` | no | no | no | no | yes | no | `native` | `markdown` | `native_json` | no | `system` | `json` | `none` | yes | no |
-| `vertex` | `gemini-*` | `any` | no | no | no | no | yes | no | no | `markdown` | `native_json` | no | `system` | `json` | `none` | yes | no |
+| Provider | Model pattern | Version min | Thinking | Vision | Audio | PDF | Streaming | Files API | JSON schema | Prompt | Output mode | Prefill | Role | Tool prompt | Thinking blocks | Default tools | Native tools | Text tools | Parity | Tools | Cache |
+|---|---|---|---|---:|---:|---:|---:|---:|---|---|---|---:|---|---|---|---|---:|---:|---|---:|---:|
+| `anthropic` | `claude-haiku-*` | `>=4.7` | `adaptive` | yes | yes | yes | yes | yes | `tool_use` | `xml` | `xml_tagged` | no | `system` | `xml` | `thinking_blocks` | `native` | yes | yes | `unknown` | yes | yes |
+| `anthropic` | `claude-opus-*` | `>=4.7` | `adaptive` | yes | yes | yes | yes | yes | `tool_use` | `xml` | `xml_tagged` | no | `system` | `xml` | `thinking_blocks` | `native` | yes | yes | `unknown` | yes | yes |
+| `anthropic` | `claude-sonnet-*` | `>=4.7` | `adaptive` | yes | yes | yes | yes | yes | `tool_use` | `xml` | `xml_tagged` | no | `system` | `xml` | `thinking_blocks` | `native` | yes | yes | `unknown` | yes | yes |
+| `anthropic` | `claude-haiku-*` | `>=4.5` | `enabled` | yes | yes | yes | yes | yes | `tool_use` | `xml` | `xml_tagged` | yes | `system` | `xml` | `thinking_blocks` | `native` | yes | yes | `unknown` | yes | yes |
+| `anthropic` | `claude-opus-*` | `>=4.6` | `enabled` | yes | yes | yes | yes | yes | `tool_use` | `xml` | `xml_tagged` | no | `system` | `xml` | `thinking_blocks` | `native` | yes | yes | `unknown` | yes | yes |
+| `anthropic` | `claude-opus-*` | `>=4.0` | `enabled` | yes | yes | yes | yes | yes | `tool_use` | `xml` | `xml_tagged` | yes | `system` | `xml` | `thinking_blocks` | `native` | yes | yes | `unknown` | yes | yes |
+| `anthropic` | `claude-sonnet-*` | `>=4.6` | `enabled` | yes | yes | yes | yes | yes | `tool_use` | `xml` | `xml_tagged` | no | `system` | `xml` | `thinking_blocks` | `native` | yes | yes | `unknown` | yes | yes |
+| `anthropic` | `claude-sonnet-*` | `>=4.0` | `enabled` | yes | yes | yes | yes | yes | `tool_use` | `xml` | `xml_tagged` | yes | `system` | `xml` | `thinking_blocks` | `native` | yes | yes | `unknown` | yes | yes |
+| `anthropic` | `anthropic/claude-haiku-*` | `>=4.7` | `adaptive` | yes | yes | yes | yes | yes | `tool_use` | `xml` | `xml_tagged` | no | `system` | `xml` | `thinking_blocks` | `native` | yes | yes | `unknown` | yes | yes |
+| `anthropic` | `anthropic/claude-opus-*` | `>=4.7` | `adaptive` | yes | yes | yes | yes | yes | `tool_use` | `xml` | `xml_tagged` | no | `system` | `xml` | `thinking_blocks` | `native` | yes | yes | `unknown` | yes | yes |
+| `anthropic` | `anthropic/claude-sonnet-*` | `>=4.7` | `adaptive` | yes | yes | yes | yes | yes | `tool_use` | `xml` | `xml_tagged` | no | `system` | `xml` | `thinking_blocks` | `native` | yes | yes | `unknown` | yes | yes |
+| `anthropic` | `anthropic/claude-haiku-*` | `>=4.5` | `enabled` | yes | yes | yes | yes | yes | `tool_use` | `xml` | `xml_tagged` | yes | `system` | `xml` | `thinking_blocks` | `native` | yes | yes | `unknown` | yes | yes |
+| `anthropic` | `anthropic/claude-opus-*` | `>=4.6` | `enabled` | yes | yes | yes | yes | yes | `tool_use` | `xml` | `xml_tagged` | no | `system` | `xml` | `thinking_blocks` | `native` | yes | yes | `unknown` | yes | yes |
+| `anthropic` | `anthropic/claude-opus-*` | `>=4.0` | `enabled` | yes | yes | yes | yes | yes | `tool_use` | `xml` | `xml_tagged` | yes | `system` | `xml` | `thinking_blocks` | `native` | yes | yes | `unknown` | yes | yes |
+| `anthropic` | `anthropic/claude-sonnet-*` | `>=4.6` | `enabled` | yes | yes | yes | yes | yes | `tool_use` | `xml` | `xml_tagged` | no | `system` | `xml` | `thinking_blocks` | `native` | yes | yes | `unknown` | yes | yes |
+| `anthropic` | `anthropic/claude-sonnet-*` | `>=4.0` | `enabled` | yes | yes | yes | yes | yes | `tool_use` | `xml` | `xml_tagged` | yes | `system` | `xml` | `thinking_blocks` | `native` | yes | yes | `unknown` | yes | yes |
+| `anthropic` | `claude-*` | `any` | `enabled` | yes | yes | yes | yes | yes | `tool_use` | `xml` | `xml_tagged` | yes | `system` | `xml` | `thinking_blocks` | `native` | yes | yes | `unknown` | yes | yes |
+| `azure_openai` | `gpt-*` | `any` | no | no | no | no | yes | no | no | `markdown` | `native_json` | no | `system` | `json` | `none` | `native` | yes | yes | `unknown` | yes | no |
+| `azure_openai` | `o1*` | `any` | no | no | no | no | yes | no | no | `markdown` | `native_json` | no | `developer` | `json` | `reasoning_summary` | `native` | yes | yes | `unknown` | yes | no |
+| `azure_openai` | `o3*` | `any` | no | no | no | no | yes | no | no | `markdown` | `native_json` | no | `developer` | `json` | `reasoning_summary` | `native` | yes | yes | `unknown` | yes | no |
+| `azure_openai` | `o4*` | `any` | no | no | no | no | yes | no | no | `markdown` | `native_json` | no | `developer` | `json` | `reasoning_summary` | `native` | yes | yes | `unknown` | yes | no |
+| `bedrock` | `anthropic.claude-*` | `any` | no | no | no | no | yes | no | no | `xml` | `xml_tagged` | no | `system` | `xml` | `thinking_blocks` | `native` | yes | yes | `unknown` | yes | no |
+| `bedrock` | `*claude*` | `any` | no | no | no | no | yes | no | no | `xml` | `xml_tagged` | no | `system` | `xml` | `thinking_blocks` | `native` | yes | yes | `unknown` | yes | no |
+| `bedrock` | `*` | `any` | no | no | no | no | yes | no | no | `markdown` | `delimited` | no | `system` | `json` | `none` | `native` | yes | yes | `unknown` | yes | no |
+| `dashscope` | `qwen3.6*` | `any` | `enabled` | no | no | no | yes | no | `native` | `markdown` | `delimited` | no | `system` | `json` | `inline` | `native` | yes | yes | `unknown` | yes | no |
+| `dashscope` | `qwen*` | `any` | `enabled` | no | no | no | yes | no | `native` | `markdown` | `delimited` | no | `system` | `json` | `inline` | `native` | yes | yes | `unknown` | yes | no |
+| `fireworks` | `*qwen3.6*` | `any` | `enabled` | no | no | no | yes | no | `native` | `markdown` | `delimited` | no | `system` | `json` | `inline` | `native` | yes | yes | `unknown` | yes | no |
+| `fireworks` | `*qwen3p6*` | `any` | `enabled` | no | no | no | yes | no | `native` | `markdown` | `delimited` | no | `system` | `json` | `inline` | `native` | yes | yes | `unknown` | yes | no |
+| `fireworks` | `*qwen*` | `any` | `enabled` | no | no | no | yes | no | `native` | `markdown` | `delimited` | no | `system` | `json` | `inline` | `native` | yes | yes | `unknown` | yes | no |
+| `gemini` | `gemini-2.5*` | `any` | `enabled,adaptive,effort` | yes | yes | yes | yes | yes | `native` | `xml,markdown` | `native_json` | no | `system` | `json` | `reasoning_summary` | `native` | yes | yes | `unknown` | yes | no |
+| `gemini` | `models/gemini-2.5*` | `any` | `enabled,adaptive,effort` | yes | yes | yes | yes | yes | `native` | `xml,markdown` | `native_json` | no | `system` | `json` | `reasoning_summary` | `native` | yes | yes | `unknown` | yes | no |
+| `gemini` | `gemini-*` | `any` | no | yes | yes | yes | yes | yes | `native` | `xml,markdown` | `native_json` | no | `system` | `json` | `none` | `native` | yes | yes | `unknown` | yes | no |
+| `gemini` | `models/gemini-*` | `any` | no | yes | yes | yes | yes | yes | `native` | `xml,markdown` | `native_json` | no | `system` | `json` | `none` | `native` | yes | yes | `unknown` | yes | no |
+| `huggingface` | `qwen/qwen3.6*` | `any` | `enabled` | no | no | no | yes | no | `native` | `markdown` | `delimited` | no | `system` | `json` | `inline` | `native` | yes | yes | `unknown` | yes | no |
+| `huggingface` | `qwen/qwen3-coder*` | `any` | no | no | no | no | yes | no | `native` | `markdown` | `delimited` | no | `system` | `json` | `none` | `native` | yes | yes | `unknown` | yes | no |
+| `huggingface` | `qwen/*` | `any` | `enabled` | no | no | no | yes | no | `native` | `markdown` | `delimited` | no | `system` | `json` | `inline` | `native` | yes | yes | `unknown` | yes | no |
+| `huggingface` | `deepseek-ai/deepseek-v3*` | `any` | `enabled` | no | no | no | yes | no | `native` | `markdown` | `native_json` | no | `system` | `json` | `inline` | `native` | yes | yes | `unknown` | yes | yes |
+| `llamacpp` | `*qwen3.6*` | `any` | `enabled` | no | no | no | yes | no | `native` | `markdown` | `delimited` | no | `system` | `json` | `inline` | `text` | no | yes | `text_only` | yes | no |
+| `llamacpp` | `*qwen3*` | `any` | `enabled` | no | no | no | yes | no | `native` | `markdown` | `delimited` | no | `system` | `json` | `inline` | `text` | no | yes | `text_only` | yes | no |
+| `llamacpp` | `*devstral-small-2*` | `any` | no | no | no | no | yes | no | `native` | `markdown` | `delimited` | no | `system` | `json` | `none` | `text` | no | yes | `text_only` | yes | no |
+| `local` | `*qwen3.6*` | `any` | `enabled` | no | no | no | yes | no | `native` | `markdown` | `delimited` | no | `system` | `json` | `inline` | `native` | yes | yes | `unknown` | yes | no |
+| `local` | `*qwen3*` | `any` | `enabled` | no | no | no | yes | no | `native` | `markdown` | `delimited` | no | `system` | `json` | `inline` | `native` | yes | yes | `unknown` | yes | no |
+| `local` | `gemma-4*` | `any` | `enabled` | no | no | no | yes | no | no | `markdown` | `delimited` | no | `system` | `json` | `inline` | `text` | no | yes | `text_only` | yes | no |
+| `mlx` | `*qwen3.6*` | `any` | `enabled` | yes | no | no | yes | no | `native` | `markdown` | `delimited` | no | `system` | `json` | `inline` | `native` | yes | yes | `unknown` | yes | no |
+| `mlx` | `*qwen3*` | `any` | `enabled` | yes | no | no | yes | no | `native` | `markdown` | `delimited` | no | `system` | `json` | `inline` | `native` | yes | yes | `unknown` | yes | no |
+| `ollama` | `llava*` | `any` | no | yes | no | no | yes | no | no | `markdown` | `native_json` | no | `system` | `json` | `none` | `text` | no | yes | `text_only` | yes | no |
+| `ollama` | `bakllava*` | `any` | no | yes | no | no | yes | no | no | `markdown` | `native_json` | no | `system` | `json` | `reasoning_summary` | `text` | no | yes | `text_only` | yes | no |
+| `ollama` | `llama3.2-vision*` | `any` | no | yes | no | no | yes | no | no | `markdown` | `native_json` | no | `system` | `json` | `reasoning_summary` | `text` | no | yes | `text_only` | yes | no |
+| `ollama` | `gemma3*` | `any` | no | yes | no | no | yes | no | no | `markdown` | `native_json` | no | `system` | `json` | `reasoning_summary` | `text` | no | yes | `text_only` | yes | no |
+| `ollama` | `gemma4*` | `any` | no | yes | no | no | yes | no | no | `markdown` | `delimited` | no | `system` | `json` | `none` | `text` | no | yes | `text_only` | yes | no |
+| `ollama` | `qwen3.6*` | `any` | `enabled` | no | no | no | yes | no | `format_kw` | `markdown` | `delimited` | no | `system` | `json` | `inline` | `text` | no | yes | `text_only` | yes | no |
+| `ollama` | `qwen3*` | `any` | `enabled` | no | no | no | yes | no | `format_kw` | `markdown` | `delimited` | no | `system` | `json` | `inline` | `native` | yes | no | `native_only` | yes | no |
+| `ollama` | `devstral-small-2*` | `any` | no | no | no | no | yes | no | `format_kw` | `markdown` | `delimited` | no | `system` | `json` | `none` | `text` | no | yes | `text_only` | yes | no |
+| `openai` | `gpt-4o*` | `any` | no | yes | yes | no | yes | no | `native` | `markdown` | `native_json` | no | `system` | `json` | `none` | `native` | yes | yes | `unknown` | yes | no |
+| `openai` | `gpt-4.1*` | `any` | no | yes | no | no | yes | no | `native` | `markdown` | `native_json` | no | `system` | `json` | `none` | `native` | yes | yes | `unknown` | yes | no |
+| `openai` | `gpt-*` | `>=5.4` | `effort` | yes | no | no | yes | no | `native` | `markdown` | `native_json` | no | `system` | `json` | `reasoning_summary` | `native` | yes | yes | `unknown` | yes | no |
+| `openai` | `gpt-*` | `>=5.1` | `effort` | yes | no | no | yes | no | `native` | `markdown` | `native_json` | no | `system` | `json` | `reasoning_summary` | `native` | yes | yes | `unknown` | yes | no |
+| `openai` | `gpt-*` | `>=5.0` | `effort` | yes | no | no | yes | no | `native` | `markdown` | `native_json` | no | `system` | `json` | `reasoning_summary` | `native` | yes | yes | `unknown` | yes | no |
+| `openai` | `gpt-*` | `any` | no | no | no | no | yes | no | `native` | `markdown` | `native_json` | no | `system` | `json` | `none` | `native` | yes | yes | `unknown` | yes | no |
+| `openai` | `o1*` | `any` | `effort` | no | no | no | yes | no | `native` | `markdown` | `native_json` | no | `developer` | `json` | `reasoning_summary` | `native` | yes | yes | `unknown` | yes | no |
+| `openai` | `o3*` | `any` | `effort` | no | no | no | yes | no | `native` | `markdown` | `native_json` | no | `developer` | `json` | `reasoning_summary` | `native` | yes | yes | `unknown` | yes | no |
+| `openai` | `o4*` | `any` | `effort` | yes | no | no | yes | no | `native` | `markdown` | `native_json` | no | `developer` | `json` | `reasoning_summary` | `native` | yes | yes | `unknown` | yes | no |
+| `openai` | `openai/gpt-4o*` | `any` | no | yes | yes | no | yes | no | `native` | `markdown` | `native_json` | no | `system` | `json` | `none` | `native` | yes | yes | `unknown` | yes | no |
+| `openai` | `openai/gpt-4.1*` | `any` | no | yes | no | no | yes | no | `native` | `markdown` | `native_json` | no | `system` | `json` | `none` | `native` | yes | yes | `unknown` | yes | no |
+| `openai` | `openai/gpt-*` | `>=5.4` | `effort` | yes | no | no | yes | no | `native` | `markdown` | `native_json` | no | `system` | `json` | `reasoning_summary` | `native` | yes | yes | `unknown` | yes | no |
+| `openai` | `openai/gpt-*` | `>=5.1` | `effort` | no | no | no | yes | no | `native` | `markdown` | `native_json` | no | `system` | `json` | `reasoning_summary` | `native` | yes | yes | `unknown` | yes | no |
+| `openai` | `openai/gpt-*` | `>=5.0` | `effort` | no | no | no | yes | no | `native` | `markdown` | `native_json` | no | `system` | `json` | `reasoning_summary` | `native` | yes | yes | `unknown` | yes | no |
+| `openai` | `openai/gpt-*` | `any` | no | no | no | no | yes | no | `native` | `markdown` | `native_json` | no | `system` | `json` | `none` | `native` | yes | yes | `unknown` | yes | no |
+| `openai` | `openai/o1*` | `any` | `effort` | no | no | no | yes | no | `native` | `markdown` | `native_json` | no | `developer` | `json` | `reasoning_summary` | `native` | yes | yes | `unknown` | yes | no |
+| `openai` | `openai/o3*` | `any` | `effort` | no | no | no | yes | no | `native` | `markdown` | `native_json` | no | `developer` | `json` | `reasoning_summary` | `native` | yes | yes | `unknown` | yes | no |
+| `openai` | `openai/o4*` | `any` | `effort` | yes | no | no | yes | no | `native` | `markdown` | `native_json` | no | `developer` | `json` | `reasoning_summary` | `native` | yes | yes | `unknown` | yes | no |
+| `openrouter` | `qwen/qwen3.6*` | `any` | `enabled` | no | no | no | yes | no | `native` | `markdown` | `delimited` | no | `system` | `json` | `inline` | `native` | yes | yes | `unknown` | yes | no |
+| `openrouter` | `qwen/qwen3-coder*` | `any` | no | no | no | no | yes | no | `native` | `markdown` | `delimited` | no | `system` | `json` | `none` | `text` | yes | yes | `native_unreliable` | yes | no |
+| `openrouter` | `qwen/*` | `any` | `enabled` | no | no | no | yes | no | `native` | `markdown` | `delimited` | no | `system` | `json` | `inline` | `native` | yes | yes | `unknown` | yes | no |
+| `openrouter` | `deepseek/deepseek-v4*` | `any` | `enabled,effort` | no | no | no | yes | no | `native` | `markdown` | `native_json` | no | `system` | `json` | `reasoning_summary` | `native` | yes | yes | `unknown` | yes | yes |
+| `openrouter` | `deepseek/deepseek-v3.2*` | `any` | `enabled,effort` | no | no | no | yes | no | `native` | `markdown` | `native_json` | no | `system` | `json` | `reasoning_summary` | `text` | yes | yes | `native_unreliable` | yes | yes |
+| `openrouter` | `deepseek/deepseek-v3*` | `any` | `enabled,effort` | no | no | no | yes | no | `native` | `markdown` | `native_json` | no | `system` | `json` | `reasoning_summary` | `native` | yes | yes | `unknown` | yes | yes |
+| `openrouter` | `mistralai/devstral*` | `any` | no | no | no | no | yes | no | `native` | `markdown` | `native_json` | no | `system` | `json` | `none` | `native` | yes | yes | `unknown` | yes | no |
+| `openrouter` | `google/gemini-2.5*` | `any` | `enabled,effort` | yes | yes | yes | yes | no | `native` | `markdown` | `native_json` | no | `system` | `json` | `reasoning_summary` | `native` | yes | yes | `unknown` | yes | yes |
+| `openrouter` | `google/gemma-4*` | `any` | no | no | no | no | yes | no | `native` | `markdown` | `native_json` | no | `system` | `json` | `none` | `native` | yes | yes | `unknown` | yes | no |
+| `openrouter` | `meta-llama/llama-4*` | `any` | no | no | no | no | yes | no | `native` | `markdown` | `native_json` | no | `system` | `json` | `none` | `native` | yes | yes | `unknown` | yes | no |
+| `openrouter` | `meta-llama/llama-3*` | `any` | no | no | no | no | yes | no | `native` | `markdown` | `native_json` | no | `system` | `json` | `none` | `native` | yes | yes | `unknown` | yes | no |
+| `together` | `qwen/qwen3.6*` | `any` | `enabled` | no | no | no | yes | no | `native` | `markdown` | `delimited` | no | `system` | `json` | `inline` | `native` | yes | yes | `unknown` | yes | no |
+| `together` | `qwen/qwen3-coder*` | `any` | no | no | no | no | yes | no | `native` | `markdown` | `delimited` | no | `system` | `json` | `none` | `native` | yes | yes | `unknown` | yes | no |
+| `together` | `qwen/*` | `any` | `enabled` | no | no | no | yes | no | `native` | `markdown` | `delimited` | no | `system` | `json` | `inline` | `native` | yes | yes | `unknown` | yes | no |
+| `together` | `deepseek-ai/deepseek-v3*` | `any` | `enabled` | no | no | no | yes | no | `native` | `markdown` | `native_json` | no | `system` | `json` | `inline` | `native` | yes | yes | `unknown` | yes | yes |
+| `together` | `openai/gpt-oss-*` | `any` | `effort` | no | no | no | yes | no | `native` | `markdown` | `native_json` | no | `system` | `json` | `reasoning_summary` | `text` | no | yes | `text_only` | yes | no |
+| `together` | `deepseek-ai/deepseek-v4*` | `any` | `enabled,effort` | no | no | no | yes | no | `native` | `markdown` | `native_json` | no | `system` | `json` | `reasoning_summary` | `native` | yes | yes | `unknown` | yes | yes |
+| `together` | `moonshotai/kimi-k2*` | `any` | `enabled` | no | no | no | yes | no | `native` | `markdown` | `native_json` | no | `system` | `json` | `inline` | `native` | yes | yes | `unknown` | yes | no |
+| `together` | `zai-org/glm-5*` | `any` | `enabled` | no | no | no | yes | no | `native` | `markdown` | `native_json` | no | `system` | `json` | `inline` | `native` | yes | yes | `unknown` | yes | no |
+| `together` | `google/gemma-4*` | `any` | `enabled` | no | no | no | yes | no | `native` | `markdown` | `native_json` | no | `system` | `json` | `inline` | `native` | yes | yes | `unknown` | yes | no |
+| `together` | `moonshotai/*` | `any` | no | no | no | no | yes | no | `native` | `markdown` | `native_json` | no | `system` | `json` | `none` | `native` | yes | yes | `unknown` | yes | no |
+| `vertex` | `gemini-*` | `any` | no | no | no | no | yes | no | no | `markdown` | `native_json` | no | `system` | `json` | `none` | `native` | yes | yes | `unknown` | yes | no |

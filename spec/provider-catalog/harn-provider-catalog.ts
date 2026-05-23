@@ -70,6 +70,9 @@ export interface HarnCatalogModel {
   tool_support: {
     native: boolean
     text: boolean
+    preferred_format?: string
+    parity?: string
+    parity_notes?: string
     tool_search: string[]
     max_tools?: number
   }
@@ -648,6 +651,8 @@ export const harnProviderCatalog: HarnProviderCatalog = {
       "tool_support": {
         "native": true,
         "text": true,
+        "preferred_format": "native",
+        "parity": "unknown",
         "tool_search": []
       },
       "structured_output": "tool_use",
@@ -713,6 +718,8 @@ export const harnProviderCatalog: HarnProviderCatalog = {
       "tool_support": {
         "native": true,
         "text": true,
+        "preferred_format": "native",
+        "parity": "unknown",
         "tool_search": []
       },
       "structured_output": "tool_use",
@@ -778,6 +785,8 @@ export const harnProviderCatalog: HarnProviderCatalog = {
       "tool_support": {
         "native": true,
         "text": true,
+        "preferred_format": "native",
+        "parity": "unknown",
         "tool_search": []
       },
       "structured_output": "tool_use",
@@ -843,6 +852,8 @@ export const harnProviderCatalog: HarnProviderCatalog = {
       "tool_support": {
         "native": true,
         "text": true,
+        "preferred_format": "native",
+        "parity": "unknown",
         "tool_search": []
       },
       "structured_output": "tool_use",
@@ -910,6 +921,8 @@ export const harnProviderCatalog: HarnProviderCatalog = {
       "tool_support": {
         "native": true,
         "text": true,
+        "preferred_format": "native",
+        "parity": "unknown",
         "tool_search": [
           "bm25",
           "regex"
@@ -980,6 +993,8 @@ export const harnProviderCatalog: HarnProviderCatalog = {
       "tool_support": {
         "native": true,
         "text": true,
+        "preferred_format": "native",
+        "parity": "unknown",
         "tool_search": [
           "bm25",
           "regex"
@@ -1051,6 +1066,8 @@ export const harnProviderCatalog: HarnProviderCatalog = {
       "tool_support": {
         "native": true,
         "text": true,
+        "preferred_format": "native",
+        "parity": "unknown",
         "tool_search": [
           "bm25",
           "regex"
@@ -1122,6 +1139,8 @@ export const harnProviderCatalog: HarnProviderCatalog = {
       "tool_support": {
         "native": true,
         "text": true,
+        "preferred_format": "native",
+        "parity": "unknown",
         "tool_search": [
           "bm25",
           "regex"
@@ -1195,6 +1214,8 @@ export const harnProviderCatalog: HarnProviderCatalog = {
       "tool_support": {
         "native": true,
         "text": true,
+        "preferred_format": "native",
+        "parity": "unknown",
         "tool_search": [
           "bm25",
           "regex"
@@ -1266,6 +1287,8 @@ export const harnProviderCatalog: HarnProviderCatalog = {
       "tool_support": {
         "native": true,
         "text": true,
+        "preferred_format": "native",
+        "parity": "unknown",
         "tool_search": [
           "bm25",
           "regex"
@@ -1337,6 +1360,8 @@ export const harnProviderCatalog: HarnProviderCatalog = {
       "tool_support": {
         "native": true,
         "text": true,
+        "preferred_format": "native",
+        "parity": "unknown",
         "tool_search": [
           "bm25",
           "regex"
@@ -1412,6 +1437,8 @@ export const harnProviderCatalog: HarnProviderCatalog = {
       "tool_support": {
         "native": true,
         "text": true,
+        "preferred_format": "native",
+        "parity": "unknown",
         "tool_search": [
           "bm25",
           "regex"
@@ -1484,6 +1511,8 @@ export const harnProviderCatalog: HarnProviderCatalog = {
       "tool_support": {
         "native": true,
         "text": true,
+        "preferred_format": "native",
+        "parity": "unknown",
         "tool_search": [
           "bm25",
           "regex"
@@ -1552,6 +1581,8 @@ export const harnProviderCatalog: HarnProviderCatalog = {
       "tool_support": {
         "native": true,
         "text": true,
+        "preferred_format": "native",
+        "parity": "unknown",
         "tool_search": []
       },
       "structured_output": "native",
@@ -1606,6 +1637,8 @@ export const harnProviderCatalog: HarnProviderCatalog = {
       "tool_support": {
         "native": false,
         "text": true,
+        "preferred_format": "text",
+        "parity": "text_only",
         "tool_search": []
       },
       "structured_output": "none",
@@ -1659,6 +1692,8 @@ export const harnProviderCatalog: HarnProviderCatalog = {
       "tool_support": {
         "native": false,
         "text": true,
+        "preferred_format": "text",
+        "parity": "text_only",
         "tool_search": []
       },
       "structured_output": "none",
@@ -1715,6 +1750,8 @@ export const harnProviderCatalog: HarnProviderCatalog = {
       "tool_support": {
         "native": true,
         "text": true,
+        "preferred_format": "native",
+        "parity": "unknown",
         "tool_search": []
       },
       "structured_output": "native",
@@ -1782,6 +1819,8 @@ export const harnProviderCatalog: HarnProviderCatalog = {
       "tool_support": {
         "native": true,
         "text": true,
+        "preferred_format": "native",
+        "parity": "unknown",
         "tool_search": []
       },
       "structured_output": "native",
@@ -1850,6 +1889,8 @@ export const harnProviderCatalog: HarnProviderCatalog = {
       "tool_support": {
         "native": false,
         "text": true,
+        "preferred_format": "text",
+        "parity": "text_only",
         "tool_search": []
       },
       "structured_output": "native",
@@ -1909,6 +1950,8 @@ export const harnProviderCatalog: HarnProviderCatalog = {
       "tool_support": {
         "native": false,
         "text": true,
+        "preferred_format": "text",
+        "parity": "text_only",
         "tool_search": []
       },
       "structured_output": "native",
@@ -1964,6 +2007,8 @@ export const harnProviderCatalog: HarnProviderCatalog = {
       "tool_support": {
         "native": false,
         "text": true,
+        "preferred_format": "text",
+        "parity": "text_only",
         "tool_search": []
       },
       "structured_output": "native",
@@ -2021,6 +2066,8 @@ export const harnProviderCatalog: HarnProviderCatalog = {
       "tool_support": {
         "native": false,
         "text": true,
+        "preferred_format": "text",
+        "parity": "text_only",
         "tool_search": []
       },
       "structured_output": "none",
@@ -2076,6 +2123,8 @@ export const harnProviderCatalog: HarnProviderCatalog = {
       "tool_support": {
         "native": false,
         "text": true,
+        "preferred_format": "text",
+        "parity": "text_only",
         "tool_search": []
       },
       "structured_output": "none",
@@ -2131,6 +2180,8 @@ export const harnProviderCatalog: HarnProviderCatalog = {
       "tool_support": {
         "native": false,
         "text": true,
+        "preferred_format": "text",
+        "parity": "text_only",
         "tool_search": []
       },
       "structured_output": "none",
@@ -2186,6 +2237,8 @@ export const harnProviderCatalog: HarnProviderCatalog = {
       "tool_support": {
         "native": false,
         "text": true,
+        "preferred_format": "text",
+        "parity": "text_only",
         "tool_search": []
       },
       "structured_output": "none",
@@ -2245,6 +2298,8 @@ export const harnProviderCatalog: HarnProviderCatalog = {
       "tool_support": {
         "native": true,
         "text": true,
+        "preferred_format": "native",
+        "parity": "unknown",
         "tool_search": []
       },
       "structured_output": "native",
@@ -2305,6 +2360,8 @@ export const harnProviderCatalog: HarnProviderCatalog = {
       "tool_support": {
         "native": false,
         "text": true,
+        "preferred_format": "text",
+        "parity": "text_only",
         "tool_search": []
       },
       "structured_output": "format_kw",
@@ -2361,6 +2418,8 @@ export const harnProviderCatalog: HarnProviderCatalog = {
       "tool_support": {
         "native": false,
         "text": true,
+        "preferred_format": "text",
+        "parity": "text_only",
         "tool_search": []
       },
       "structured_output": "none",
@@ -2412,6 +2471,8 @@ export const harnProviderCatalog: HarnProviderCatalog = {
       "tool_support": {
         "native": false,
         "text": true,
+        "preferred_format": "text",
+        "parity": "text_only",
         "tool_search": []
       },
       "structured_output": "none",
@@ -2468,6 +2529,8 @@ export const harnProviderCatalog: HarnProviderCatalog = {
       "tool_support": {
         "native": false,
         "text": true,
+        "preferred_format": "text",
+        "parity": "text_only",
         "tool_search": []
       },
       "structured_output": "format_kw",
@@ -2521,6 +2584,8 @@ export const harnProviderCatalog: HarnProviderCatalog = {
       "tool_support": {
         "native": true,
         "text": true,
+        "preferred_format": "native",
+        "parity": "unknown",
         "tool_search": []
       },
       "structured_output": "native",
@@ -2578,6 +2643,8 @@ export const harnProviderCatalog: HarnProviderCatalog = {
       "tool_support": {
         "native": true,
         "text": true,
+        "preferred_format": "native",
+        "parity": "unknown",
         "tool_search": []
       },
       "structured_output": "native",
@@ -2640,6 +2707,8 @@ export const harnProviderCatalog: HarnProviderCatalog = {
       "tool_support": {
         "native": true,
         "text": true,
+        "preferred_format": "native",
+        "parity": "unknown",
         "tool_search": []
       },
       "structured_output": "native",
@@ -2698,6 +2767,8 @@ export const harnProviderCatalog: HarnProviderCatalog = {
       "tool_support": {
         "native": true,
         "text": true,
+        "preferred_format": "native",
+        "parity": "unknown",
         "tool_search": []
       },
       "structured_output": "native",
@@ -2756,6 +2827,8 @@ export const harnProviderCatalog: HarnProviderCatalog = {
       "tool_support": {
         "native": true,
         "text": true,
+        "preferred_format": "native",
+        "parity": "unknown",
         "tool_search": []
       },
       "structured_output": "native",
@@ -2814,6 +2887,8 @@ export const harnProviderCatalog: HarnProviderCatalog = {
       "tool_support": {
         "native": true,
         "text": true,
+        "preferred_format": "native",
+        "parity": "unknown",
         "tool_search": []
       },
       "structured_output": "native",
@@ -2872,6 +2947,8 @@ export const harnProviderCatalog: HarnProviderCatalog = {
       "tool_support": {
         "native": true,
         "text": true,
+        "preferred_format": "native",
+        "parity": "unknown",
         "tool_search": []
       },
       "structured_output": "native",
@@ -2933,6 +3010,8 @@ export const harnProviderCatalog: HarnProviderCatalog = {
       "tool_support": {
         "native": true,
         "text": true,
+        "preferred_format": "native",
+        "parity": "unknown",
         "tool_search": []
       },
       "structured_output": "native",
@@ -2984,8 +3063,11 @@ export const harnProviderCatalog: HarnProviderCatalog = {
         ]
       },
       "tool_support": {
-        "native": false,
+        "native": true,
         "text": true,
+        "preferred_format": "text",
+        "parity": "native_unreliable",
+        "parity_notes": "OpenRouter DeepSeek V3.2 advertises native tools, but coding-agent runs observed provider-native failures; default to Harn text tools and recover DSML markers.",
         "tool_search": []
       },
       "structured_output": "native",
@@ -3049,6 +3131,8 @@ export const harnProviderCatalog: HarnProviderCatalog = {
       "tool_support": {
         "native": true,
         "text": true,
+        "preferred_format": "native",
+        "parity": "unknown",
         "tool_search": []
       },
       "structured_output": "native",
@@ -3112,6 +3196,8 @@ export const harnProviderCatalog: HarnProviderCatalog = {
       "tool_support": {
         "native": false,
         "text": true,
+        "preferred_format": "text",
+        "parity": "text_only",
         "tool_search": []
       },
       "structured_output": "none",
@@ -3165,6 +3251,8 @@ export const harnProviderCatalog: HarnProviderCatalog = {
       "tool_support": {
         "native": false,
         "text": true,
+        "preferred_format": "text",
+        "parity": "text_only",
         "tool_search": []
       },
       "structured_output": "none",
@@ -3218,6 +3306,8 @@ export const harnProviderCatalog: HarnProviderCatalog = {
       "tool_support": {
         "native": false,
         "text": true,
+        "preferred_format": "text",
+        "parity": "text_only",
         "tool_search": []
       },
       "structured_output": "none",
@@ -3271,6 +3361,8 @@ export const harnProviderCatalog: HarnProviderCatalog = {
       "tool_support": {
         "native": true,
         "text": true,
+        "preferred_format": "native",
+        "parity": "unknown",
         "tool_search": []
       },
       "structured_output": "native",
@@ -3325,6 +3417,9 @@ export const harnProviderCatalog: HarnProviderCatalog = {
       "tool_support": {
         "native": true,
         "text": true,
+        "preferred_format": "text",
+        "parity": "native_unreliable",
+        "parity_notes": "OpenRouter Qwen3-Coder Flash native tools exhausted the coding-agent fixture while text tools completed; default to Harn text tools for preset parity.",
         "tool_search": []
       },
       "structured_output": "native",
@@ -3379,6 +3474,8 @@ export const harnProviderCatalog: HarnProviderCatalog = {
       "tool_support": {
         "native": true,
         "text": true,
+        "preferred_format": "native",
+        "parity": "unknown",
         "tool_search": []
       },
       "structured_output": "native",

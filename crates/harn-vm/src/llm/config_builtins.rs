@@ -713,6 +713,27 @@ pub(crate) fn capabilities_to_vm_value(
         "text_tool_wire_format_supported".to_string(),
         VmValue::Bool(caps.text_tool_wire_format_supported),
     );
+    dict.insert(
+        "preferred_tool_format".to_string(),
+        caps.preferred_tool_format
+            .as_deref()
+            .map(|format| VmValue::String(Rc::from(format)))
+            .unwrap_or(VmValue::Nil),
+    );
+    dict.insert(
+        "tool_mode_parity".to_string(),
+        caps.tool_mode_parity
+            .as_deref()
+            .map(|status| VmValue::String(Rc::from(status)))
+            .unwrap_or(VmValue::Nil),
+    );
+    dict.insert(
+        "tool_mode_parity_notes".to_string(),
+        caps.tool_mode_parity_notes
+            .as_deref()
+            .map(|notes| VmValue::String(Rc::from(notes)))
+            .unwrap_or(VmValue::Nil),
+    );
     // Mirrors the VM's tool-capability gate at llm_config::effective_model_capability_tags:
     // either native or text-format tool calling counts as tool-capable.
     dict.insert(
