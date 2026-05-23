@@ -329,6 +329,20 @@ pub struct ProviderRule {
     /// system message so script authors don't need to know it exists.
     #[serde(default)]
     pub thinking_disable_directive: Option<String>,
+    /// Per-task auto-policy reasoning-level overrides for this route.
+    /// Keys are task labels (`agent`, `verify`, `chat`, `summarize`,
+    /// `code`); values are reasoning levels (`off`, `minimal`, `low`,
+    /// `medium`, `high`, `xhigh`). Consulted by `reasoning_policy` only
+    /// when policy resolves to `auto` — explicit policies always win.
+    ///
+    /// Use this to declare known per-model regressions that should
+    /// flip the auto-policy default, instead of hard-coding the model/
+    /// provider pattern in resolver code. The canonical example is the
+    /// Qwen3 tool-call regression — `{ agent = "off" }` disables
+    /// reasoning whenever a script registers tools with that route,
+    /// matching Qwen's own published guidance.
+    #[serde(default)]
+    pub auto_reasoning_overrides: Option<BTreeMap<String, String>>,
 }
 
 /// Resolved capabilities for a `(provider, model)` pair. Unset rule
@@ -377,6 +391,9 @@ pub struct Capabilities {
     pub recommended_endpoint: Option<String>,
     pub text_tool_wire_format_supported: bool,
     pub thinking_disable_directive: Option<String>,
+    /// Per-task auto-policy reasoning-level overrides for this route.
+    /// See [`ProviderRule::auto_reasoning_overrides`].
+    pub auto_reasoning_overrides: BTreeMap<String, String>,
 }
 
 impl Default for Capabilities {
@@ -422,6 +439,7 @@ impl Default for Capabilities {
             recommended_endpoint: None,
             text_tool_wire_format_supported: true,
             thinking_disable_directive: None,
+            auto_reasoning_overrides: BTreeMap::new(),
         }
     }
 }
@@ -753,6 +771,7 @@ fn defaults_to_caps(defaults: &ProviderDefaults) -> Capabilities {
         recommended_endpoint: None,
         text_tool_wire_format_supported: None,
         thinking_disable_directive: None,
+        auto_reasoning_overrides: None,
     };
     rule_to_caps(&empty, defaults)
 }
@@ -835,6 +854,7 @@ fn rule_to_caps(rule: &ProviderRule, defaults: &ProviderDefaults) -> Capabilitie
         recommended_endpoint: rule.recommended_endpoint.clone(),
         text_tool_wire_format_supported: rule.text_tool_wire_format_supported.unwrap_or(true),
         thinking_disable_directive: rule.thinking_disable_directive.clone(),
+        auto_reasoning_overrides: rule.auto_reasoning_overrides.clone().unwrap_or_default(),
     }
 }
 

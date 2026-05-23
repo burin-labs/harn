@@ -328,7 +328,15 @@ fn sanitize_openai_tool_for_request(
 
 fn openrouter_reasoning_config(thinking: &ThinkingConfig) -> Option<serde_json::Value> {
     match thinking {
-        ThinkingConfig::Disabled => None,
+        // Explicitly disable on the wire. The previous `None` return left
+        // the request silent, which on Qwen3 thinking variants caused the
+        // model to fall through to its trained-default unbounded thinking
+        // budget. OpenRouter universally honors `reasoning.enabled: false`
+        // (verified empirically on qwen/qwen3.6-35b-a3b: 358ms with the
+        // disable directive vs 1300ms+ without), so emit it.
+        ThinkingConfig::Disabled => Some(serde_json::json!({
+            "enabled": false
+        })),
         ThinkingConfig::Enabled {
             budget_tokens: None,
         } => Some(serde_json::json!({
@@ -762,6 +770,25 @@ thinking_modes = ["enabled"]
 
         assert_eq!(body["reasoning"]["effort"], "medium");
         assert!(body.get("reasoning_effort").is_none());
+    }
+
+    #[test]
+    fn openrouter_disabled_thinking_emits_reasoning_enabled_false() {
+        // Regression: previously Disabled returned None which left the
+        // request silent on the wire, and Qwen3 thinking variants then
+        // fell back to their trained-default unbounded thinking budget
+        // (the 5+ minute single-turn finalize bug). Disabled must be
+        // an explicit `{enabled: false}` so reasoning is actually skipped
+        // by the upstream model. Empirically verified against
+        // qwen/qwen3.6-35b-a3b: 358ms response when the directive is
+        // sent vs 1300ms+ when it isn't.
+        let provider = OpenAiCompatibleProvider::new("openrouter".to_string());
+        let mut payload = base_request_payload();
+        payload.thinking = ThinkingConfig::Disabled;
+        let mut body = OpenAiCompatibleProvider::build_request_body(&payload, false);
+        provider.transform_request(&mut body);
+
+        assert_eq!(body["reasoning"]["enabled"], false);
     }
 
     #[test]

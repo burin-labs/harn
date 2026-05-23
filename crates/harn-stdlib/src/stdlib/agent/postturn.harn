@@ -1,4 +1,5 @@
 import {
+  agent_emit_event,
   agent_session_apply_reminder_post_turn,
   agent_session_inject_feedback,
 } from "std/agent/state"
@@ -123,7 +124,13 @@ fn __stop_after_successful_tools(opts, dispatch) {
   return false
 }
 
-fn __native_tool_text_completion(opts, has_tool_calls, text) {
+/**
+ * The classic gate for "prose without tool_calls = natural completion":
+ * loop_until_done with native tools, no explicit completion signal, and
+ * non-empty visible text without tool_calls. Shared between the
+ * completion check and the nudge-injection check so they cannot drift.
+ */
+fn __native_completion_context(opts, has_tool_calls, text) {
   if !(opts?.loop_until_done ?? false) || opts?.daemon {
     return false
   }
@@ -137,6 +144,72 @@ fn __native_tool_text_completion(opts, has_tool_calls, text) {
     return false
   }
   return trim(text) != ""
+}
+
+/**
+ * Narrows `__native_completion_context` to the regression-prone case:
+ * the model is "done" but has emitted ZERO tool_calls so far this
+ * session (successful OR rejected — a failed tool call still shows
+ * the model engaged the tool channel). This is the documented Qwen3
+ * thinking + native tools failure signature (QwenLM/Qwen3.6 #89):
+ * reasoning trace narrates tool intent ("let me run git..."), but
+ * the structured tool_calls channel emits nothing at all. Once the
+ * model has used the tool channel even once (even unsuccessfully),
+ * subsequent prose-only turns are legitimate final-answer signals
+ * and the classic behavior applies.
+ */
+fn __zero_tool_completion_context(opts, has_tool_calls, text) {
+  if !__native_completion_context(opts, has_tool_calls, text) {
+    return false
+  }
+  let successful = len(opts?._session_successful_tools ?? [])
+  let rejected = len(opts?._session_rejected_tools ?? [])
+  return successful + rejected == 0
+}
+
+/**
+ * In the classic native-completion context, prose-without-tool_calls
+ * means "I'm done." The one regression-prone subcase is the
+ * zero-tools-yet case, where we require ONE confirmation nudge before
+ * accepting prose as completion: `__consecutive_text_only` must be >= 2
+ * (i.e. the model emitted prose, got the nudge, then emitted prose
+ * again). After the nudge the model either recovers (calls a tool,
+ * resetting the counter) or confirms (raising it to 2, which we
+ * accept). The outer loop's `max_nudges` budget still caps the loop.
+ */
+fn __native_tool_text_completion(opts, has_tool_calls, text) {
+  if !__native_completion_context(opts, has_tool_calls, text) {
+    return false
+  }
+  if !__zero_tool_completion_context(opts, has_tool_calls, text) {
+    return true
+  }
+  return opts?._consecutive_text_only ?? 1 >= 2
+}
+
+/**
+ * Inject the one-shot completion-confirmation nudge when we're in the
+ * regression-prone subcase (zero tools called, prose-only) and haven't
+ * already nudged this session. Keyed on `_consecutive_text_only` so it
+ * is idempotent under repeated post-turn calls.
+ */
+fn __maybe_inject_completion_confirmation(session, opts, has_tool_calls, text, iteration) {
+  if !__zero_tool_completion_context(opts, has_tool_calls, text) {
+    return
+  }
+  if opts?._consecutive_text_only ?? 1 >= 2 {
+    return
+  }
+  agent_session_inject_feedback(
+    session.session_id,
+    "completion_confirmation",
+    "You ended your turn without calling a tool. If you intended to call a tool, call it now. If this was your final answer, restate it briefly on the next line — do not describe your process.",
+  )
+  agent_emit_event(
+    session.session_id,
+    "completion_confirmation_nudge",
+    {iteration: iteration, visible_text_prefix: visible_text_excerpt(text)},
+  )
 }
 
 fn __done_judge_config(opts) {
@@ -354,5 +427,14 @@ pub fn agent_compute_post_turn(session, llm_result, dispatch, opts, iteration) {
   if !has_tool_calls && !loop_until_done && !daemon {
     return __completion_result(opts, payload, "natural")
   }
+  __maybe_inject_completion_confirmation(session, opts, has_tool_calls, text, iteration)
   return {kind: "continue", done_judge_due: false}
+}
+
+fn visible_text_excerpt(text) {
+  let trimmed = trim(text ?? "")
+  if len(trimmed) <= 160 {
+    return trimmed
+  }
+  return trimmed[0:160] + "…"
 }

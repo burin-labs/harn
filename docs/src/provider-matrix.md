@@ -82,9 +82,9 @@ Regenerate with `make gen-provider-matrix` and verify with `make check-provider-
 | `openai` | `openai/o1*` | `any` | `effort` | no | no | no | yes | no | `native` | `markdown` | `native_json` | no | `developer` | `json` | `reasoning_summary` | yes | no |
 | `openai` | `openai/o3*` | `any` | `effort` | no | no | no | yes | no | `native` | `markdown` | `native_json` | no | `developer` | `json` | `reasoning_summary` | yes | no |
 | `openai` | `openai/o4*` | `any` | `effort` | yes | no | no | yes | no | `native` | `markdown` | `native_json` | no | `developer` | `json` | `reasoning_summary` | yes | no |
-| `openrouter` | `qwen/qwen3.6*` | `any` | `enabled,effort` | no | no | no | yes | no | `native` | `markdown` | `delimited` | no | `system` | `json` | `inline` | yes | no |
+| `openrouter` | `qwen/qwen3.6*` | `any` | `enabled` | no | no | no | yes | no | `native` | `markdown` | `delimited` | no | `system` | `json` | `inline` | yes | no |
 | `openrouter` | `qwen/qwen3-coder*` | `any` | no | no | no | no | yes | no | `native` | `markdown` | `delimited` | no | `system` | `json` | `none` | yes | no |
-| `openrouter` | `qwen/*` | `any` | `enabled,effort` | no | no | no | yes | no | `native` | `markdown` | `delimited` | no | `system` | `json` | `inline` | yes | no |
+| `openrouter` | `qwen/*` | `any` | `enabled` | no | no | no | yes | no | `native` | `markdown` | `delimited` | no | `system` | `json` | `inline` | yes | no |
 | `openrouter` | `deepseek/deepseek-v4*` | `any` | `enabled,effort` | no | no | no | yes | no | `native` | `markdown` | `native_json` | no | `system` | `json` | `reasoning_summary` | yes | yes |
 | `openrouter` | `deepseek/deepseek-v3*` | `any` | `enabled,effort` | no | no | no | yes | no | `native` | `markdown` | `native_json` | no | `system` | `json` | `reasoning_summary` | yes | yes |
 | `openrouter` | `mistralai/devstral*` | `any` | no | no | no | no | yes | no | `native` | `markdown` | `native_json` | no | `system` | `json` | `none` | yes | no |

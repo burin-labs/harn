@@ -587,6 +587,8 @@ async fn open_or_create_registers_event_log_sink_when_active_log_is_installed() 
     emit_event(&AgentEvent::TurnStart {
         session_id: session.clone(),
         iteration: 0,
+        provider: String::new(),
+        model: String::new(),
     });
 
     let emitted = stream

@@ -54,6 +54,8 @@ pub fn synthesize_sweep(
         AgentEvent::TurnStart {
             session_id: session_id.clone(),
             iteration: 1,
+            provider: String::new(),
+            model: String::new(),
         },
     ));
 

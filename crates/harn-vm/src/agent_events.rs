@@ -416,10 +416,27 @@ pub enum AgentEvent {
     TurnStart {
         session_id: String,
         iteration: usize,
+        /// Configured provider for the impending LLM call. Empty when the
+        /// caller defers provider selection to the routing layer.
+        /// Surfaces here so observers can show "about to call X/Y" before
+        /// the call returns — previously this only landed in the
+        /// transcript after the response, leaving live pulse-check
+        /// consumers without a model attribution for in-flight turns.
+        #[serde(default, skip_serializing_if = "String::is_empty")]
+        provider: String,
+        /// Configured model id. Same semantics as `provider`.
+        #[serde(default, skip_serializing_if = "String::is_empty")]
+        model: String,
     },
     TurnEnd {
         session_id: String,
         iteration: usize,
+        /// Free-form dict carrying the post-call snapshot. Stable keys
+        /// emitted by the agent loop: `tool_count`, `text`, plus the
+        /// LLM-result projection — `provider`, `model`, `response_ms`,
+        /// `input_tokens`, `output_tokens`, `thinking_chars`. Hosts that
+        /// surface latency/cost panes key off these without re-parsing
+        /// the transcript JSONL.
         turn_info: serde_json::Value,
     },
     /// Emitted when a first-class agent session is explicitly closed by
@@ -1335,6 +1352,8 @@ mod tests {
         let event = AgentEvent::TurnStart {
             session_id: "s1".into(),
             iteration: 1,
+            provider: String::new(),
+            model: String::new(),
         };
         multi.handle_event(&event);
         assert_eq!(a.load(Ordering::SeqCst), 1);
@@ -1351,6 +1370,8 @@ mod tests {
         emit_event(&AgentEvent::TurnStart {
             session_id: "session-a".into(),
             iteration: 0,
+            provider: String::new(),
+            model: String::new(),
         });
         assert_eq!(a.load(Ordering::SeqCst), 1);
         assert_eq!(b.load(Ordering::SeqCst), 0);
@@ -1379,6 +1400,8 @@ mod tests {
             emit_event(&AgentEvent::TurnStart {
                 session_id: inner,
                 iteration: 0,
+                provider: String::new(),
+                model: String::new(),
             });
         }
         assert_eq!(delivered.load(Ordering::SeqCst), 1);
@@ -1396,6 +1419,8 @@ mod tests {
             sink.handle_event(&AgentEvent::TurnStart {
                 session_id: "s".into(),
                 iteration: i,
+                provider: String::new(),
+                model: String::new(),
             });
         }
         assert_eq!(sink.event_count(), 5);
@@ -2103,6 +2128,8 @@ mod tests {
         emit_event(&AgentEvent::TurnStart {
             session_id: "session-w".into(),
             iteration: 0,
+            provider: String::new(),
+            model: String::new(),
         });
         emit_event(&AgentEvent::TurnEnd {
             session_id: "session-w-other".into(),
@@ -2114,6 +2141,8 @@ mod tests {
         emit_event(&AgentEvent::TurnStart {
             session_id: "session-w".into(),
             iteration: 1,
+            provider: String::new(),
+            model: String::new(),
         });
         assert_eq!(
             counter.load(Ordering::SeqCst),
@@ -2137,6 +2166,8 @@ mod tests {
         emit_event(&AgentEvent::TurnStart {
             session_id: "s".into(),
             iteration: 0,
+            provider: String::new(),
+            model: String::new(),
         });
         assert_eq!(counter.load(Ordering::SeqCst), 0);
         reset_wildcard_sinks();
