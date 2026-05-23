@@ -36,7 +36,7 @@ mod expr_parser;
 mod filters;
 mod lexer;
 pub mod lint;
-mod llm_context;
+pub(crate) mod llm_context;
 mod parser;
 mod render;
 mod sections;

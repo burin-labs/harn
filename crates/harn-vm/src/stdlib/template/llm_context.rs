@@ -146,7 +146,10 @@ impl Drop for LlmRenderContextGuard {
 /// this walks model-id heuristics so authors can branch on the
 /// underlying LLM family regardless of the routing provider. Falls
 /// back to the normalized provider name when nothing matches.
-fn derive_family(provider: &str, model: &str) -> String {
+///
+/// Shared with `crate::llm::introspection`, which surfaces the same
+/// family token through the `current_model()` tool.
+pub(crate) fn derive_family(provider: &str, model: &str) -> String {
     let model_lc = model.to_ascii_lowercase();
     // Order matters: longer/more-specific markers first so e.g.
     // "claude" wins over a generic "ai" substring.

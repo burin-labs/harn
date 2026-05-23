@@ -662,6 +662,15 @@ pub(crate) const SIGNATURES: &[BuiltinSignature] = &[
     ),
     BuiltinSignature::simple("llm_session_cost", &[], TY_DICT),
     BuiltinSignature::simple("routing_policy", &[Param::new("config", TY_DICT)], TY_DICT),
+    BuiltinSignature::simple("runtime_introspection", &[], TY_DICT),
+    BuiltinSignature::simple(
+        "runtime_introspection_tools",
+        &[
+            Param::optional("registry", TY_DICT_OR_NIL),
+            Param::optional("options", TY_DICT_OR_NIL),
+        ],
+        TY_DICT,
+    ),
     BuiltinSignature::simple(
         "llm_stream",
         &[

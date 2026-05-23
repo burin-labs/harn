@@ -87,6 +87,23 @@ condensed series summaries instead of full per-patch history.
   exporters surface them as INTERNAL spans rather than mislabeled
   GenAI/tool spans. `with_cache_envelope` and `retry_with_result` are
   re-platformed onto the new primitive.
+- **Runtime introspection tool bundle (#2188).** Optional, opt-in tools
+  the model can call to answer identity questions
+  (`current_model()`, `current_provider()`, `current_context_window()`,
+  `current_harn_version()`, `current_harness()`,
+  `available_runtime_capabilities()`, `current_compaction_policy()`)
+  with the facts the runtime actually resolved for the current turn —
+  not training-prior guesses or stale prompt prose. Each tool is
+  `executor: "harn"` and dispatches through the VM stdlib
+  short-circuit. Wire the bundle in with
+  `runtime_introspection_tools(reg)` from
+  `std/agent/introspection`; minimal harnesses that omit the call get
+  no introspection surface. `HARN_HARNESS=<name>` configures the host
+  identity reported by `current_harness()`; defaults to `"harn"`. A
+  parallel `runtime_introspection()` builtin returns the full snapshot
+  dict for tests and observability. See
+  [Runtime introspection tools](docs/src/stdlib/runtime-introspection.md)
+  for the full allowlist and integration recipes.
 
 ### Fixed
 

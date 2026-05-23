@@ -28,6 +28,7 @@ pub(crate) mod daemon;
 pub mod eval;
 pub(crate) mod fake;
 pub(crate) mod helpers;
+pub mod introspection;
 pub mod jsonl;
 pub mod local_profiles;
 pub(crate) mod mock;
@@ -265,6 +266,7 @@ pub use self::trace::{
 /// Reset all thread-local LLM state (cost, trace, mock, rate limits). Call between test runs.
 pub fn reset_llm_state() {
     call::clear_in_flight_llm_calls();
+    introspection::reset_snapshot();
     cost::reset_cost_state();
     trace::reset_trace_state();
     trace::reset_agent_trace_state();
@@ -419,6 +421,20 @@ const LLM_ROUTING_SYNC_PRIMITIVES: &[SyncBuiltin] =
      <dispatch>.{decision,attempt,race_started,race_won,race_lost,budget_exceeded,exhausted}.",
         )];
 
+const LLM_INTROSPECTION_SYNC_PRIMITIVES: &[SyncBuiltin] = &[SyncBuiltin::new(
+    "runtime_introspection",
+    introspection::runtime_introspection_builtin,
+)
+.signature("runtime_introspection()")
+.arity(VmBuiltinArity::Exact(0))
+.doc(
+    "Return resolved runtime facts {provider, model, model_alias, family, tool_format, tier, \
+     context_window, runtime_context_window, capabilities, harn_version, harness} for the \
+     most recent llm_call on this thread. Fields are nil before any llm_call has run. The \
+     model-callable surface (current_model() / current_provider() / ...) is opt-in via \
+     `runtime_introspection_tools(registry)`; this builtin is the underlying read.",
+)];
+
 const LLM_RUNTIME_PRIMITIVE_GROUPS: &[BuiltinGroup<'static>] = &[
     BuiltinGroup::new()
         .category("agent.trace")
@@ -447,6 +463,9 @@ const LLM_RUNTIME_PRIMITIVE_GROUPS: &[BuiltinGroup<'static>] = &[
     BuiltinGroup::new()
         .category("llm.host")
         .sync(LLM_ROUTING_SYNC_PRIMITIVES),
+    BuiltinGroup::new()
+        .category("llm.introspection")
+        .sync(LLM_INTROSPECTION_SYNC_PRIMITIVES),
 ];
 
 async fn llm_call_safe_builtin(args: Vec<VmValue>) -> Result<VmValue, VmError> {
