@@ -147,8 +147,11 @@ fn redact_provider_error_secrets(text: &str) -> String {
         Regex::new(r#"(?i)(bearer\s+)[^"',\s}]+"#).expect("valid bearer redaction regex")
     });
     let redacted = bearer_re.replace_all(text, "$1[redacted]");
-    secret_field_re
+    let redacted = secret_field_re
         .replace_all(&redacted, "$1[redacted]")
+        .into_owned();
+    crate::redact::current_policy()
+        .redact_string(&redacted)
         .into_owned()
 }
 
@@ -491,6 +494,23 @@ mod tests {
             "message was too long: {}",
             message.len()
         );
+    }
+
+    #[test]
+    fn provider_http_errors_use_shared_secret_pattern_redaction() {
+        let body = concat!(
+            r#"{"error":{"message":"jwt=eyJabcd.eyJefgh.signature_pad "#,
+            "-----BEGIN OPENSSH PRIVATE KEY-----\nsecret-material\n",
+            r#"-----END OPENSSH PRIVATE KEY-----"}}"#
+        );
+        let message =
+            classify_provider_http_error("openai", reqwest::StatusCode::BAD_REQUEST, None, body)
+                .message;
+
+        assert!(!message.contains("eyJabcd.eyJefgh.signature_pad"));
+        assert!(!message.contains("secret-material"));
+        assert!(message.contains("<redacted:jwt:"));
+        assert!(message.contains("<redacted:private_key_block:"));
     }
 
     #[test]

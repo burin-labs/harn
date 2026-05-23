@@ -60,6 +60,7 @@ pub mod run_events;
 pub mod runtime_context;
 pub mod runtime_paths;
 pub mod schema;
+pub(crate) mod secret_patterns;
 pub mod secrets;
 pub mod session_bundle;
 pub mod sessions;
