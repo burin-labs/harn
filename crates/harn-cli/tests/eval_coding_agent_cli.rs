@@ -33,6 +33,7 @@ fn mock_matrix_writes_artifacts_for_native_and_text_tools() {
     let tmp = tempfile::tempdir().expect("tempdir");
     let output = tmp.path().join("bench");
     let args = EvalCodingAgentArgs {
+        fixtures: vec!["all".to_string()],
         models: vec!["mock:mock".to_string()],
         tool_formats: vec!["native".to_string(), "text".to_string()],
         output: Some(output.clone()),
@@ -57,9 +58,25 @@ fn mock_matrix_writes_artifacts_for_native_and_text_tools() {
     let summary_raw = fs::read_to_string(output.join("summary.json")).expect("summary exists");
     let summary: serde_json::Value =
         serde_json::from_str(&summary_raw).expect("summary parses as JSON");
-    assert_eq!(summary["total_runs"], 2);
-    assert_eq!(summary["passed_runs"], 2);
+    assert_eq!(summary["schema_version"], 2);
+    assert_eq!(summary["fixture_ids"].as_array().map(Vec::len), Some(6));
+    assert_eq!(summary["total_runs"], 12);
+    assert_eq!(summary["passed_runs"], 12);
     assert_eq!(summary["skipped_runs"], 0);
+    assert_eq!(
+        summary
+            .pointer("/rollups/by_fixture")
+            .and_then(serde_json::Value::as_array)
+            .map(Vec::len),
+        Some(6),
+    );
+    assert_eq!(
+        summary
+            .pointer("/rollups/by_tool_format")
+            .and_then(serde_json::Value::as_array)
+            .map(Vec::len),
+        Some(2),
+    );
     assert_eq!(
         summary["env_keys_loaded"].as_array().map(Vec::len),
         Some(0),
@@ -67,7 +84,14 @@ fn mock_matrix_writes_artifacts_for_native_and_text_tools() {
     );
 
     let per_run = fs::read_to_string(output.join("per_run.jsonl")).expect("per-run JSONL exists");
-    assert_eq!(per_run.lines().count(), 2);
+    assert_eq!(per_run.lines().count(), 12);
+    for line in per_run.lines() {
+        let row: serde_json::Value = serde_json::from_str(line).expect("per-run row parses");
+        assert!(
+            row["fixture_id"].is_string(),
+            "fixture_id should be present"
+        );
+    }
     let readiness_raw =
         fs::read_to_string(output.join("local_readiness.json")).expect("readiness exists");
     let readiness: serde_json::Value =
@@ -78,13 +102,17 @@ fn mock_matrix_writes_artifacts_for_native_and_text_tools() {
         Some(0),
         "mock-only runs should not produce local model readiness outcomes",
     );
-    assert!(output.join("mock_mock__native/summary.json").exists());
     assert!(output
-        .join("mock_mock__native/transcript_events.jsonl")
+        .join("python-add__mock_mock__native/summary.json")
         .exists());
-    assert!(output.join("mock_mock__text/summary.json").exists());
     assert!(output
-        .join("mock_mock__text/transcript_events.jsonl")
+        .join("python-add__mock_mock__native/transcript_events.jsonl")
+        .exists());
+    assert!(output
+        .join("read-only-audit__mock_mock__text/summary.json")
+        .exists());
+    assert!(output
+        .join("no-tool-diagnosis__mock_mock__native/transcript_events.jsonl")
         .exists());
     assert!(output.join("summary.md").exists());
     assert!(output.join("followups.md").exists());

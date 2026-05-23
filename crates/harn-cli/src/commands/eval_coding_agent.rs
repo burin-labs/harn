@@ -1,5 +1,5 @@
 //! `harn eval coding-agent` — empirical preset/provider benchmark for a
-//! minimal coding-agent harness.
+//! small coding-agent fixture suite.
 
 use std::collections::{BTreeMap, BTreeSet, HashSet};
 use std::ffi::OsString;
@@ -20,7 +20,55 @@ use crate::commands::local::runtime::{
 use crate::commands::local_readiness;
 use crate::commands::run::{execute_run, CliLlmMockMode, RunProfileOptions};
 
-const FIRST_CODING_AGENT_HARN: &str = include_str!("../../assets/evals/first_coding_agent.harn");
+const CODING_AGENT_SUITE_HARN: &str = include_str!("../../assets/evals/coding_agent_suite.harn");
+
+#[derive(Debug, Clone, Copy)]
+struct FixtureDefinition {
+    id: &'static str,
+    name: &'static str,
+    tool_sequence: &'static str,
+    description: &'static str,
+}
+
+static FIXTURE_DEFINITIONS: &[FixtureDefinition] = &[
+    FixtureDefinition {
+        id: "python-add",
+        name: "Python add repair",
+        tool_sequence: "multi-tool",
+        description: "One-file Python bug fix verified by unittest output.",
+    },
+    FixtureDefinition {
+        id: "cli-help-flag",
+        name: "CLI help flag",
+        tool_sequence: "multi-tool",
+        description: "Add a tiny CLI flag, update help-facing docs, and verify behavior.",
+    },
+    FixtureDefinition {
+        id: "test-output-first",
+        name: "Test-output-first repair",
+        tool_sequence: "multi-tool",
+        description: "Run a failing test first, then edit the implementation and re-run it.",
+    },
+    FixtureDefinition {
+        id: "docs-symbol-rename",
+        name: "Docs symbol rename",
+        tool_sequence: "multi-tool",
+        description:
+            "Update docs and an example after a symbol rename without touching implementation.",
+    },
+    FixtureDefinition {
+        id: "read-only-audit",
+        name: "Read-only audit",
+        tool_sequence: "one-tool",
+        description: "Inspect a file and report that no edits are needed.",
+    },
+    FixtureDefinition {
+        id: "no-tool-diagnosis",
+        name: "No-tool diagnosis",
+        tool_sequence: "no-tool",
+        description: "Answer from prompt-only context without any tools.",
+    },
+];
 
 #[derive(Debug, Clone, Serialize)]
 struct LoadedEnvKey {
@@ -48,6 +96,9 @@ impl Drop for EnvOverlay {
 #[derive(Debug, Clone, Serialize)]
 struct RunReport {
     run_id: String,
+    fixture_id: String,
+    fixture_name: String,
+    tool_sequence: String,
     selector: ModelSelector,
     tool_format: String,
     status: String,
@@ -89,6 +140,7 @@ struct LocalCleanupReport {
 
 #[derive(Debug, Clone, Serialize)]
 struct FormatComparison {
+    fixture_id: String,
     selector: ModelSelector,
     native_status: Option<String>,
     text_status: Option<String>,
@@ -107,9 +159,37 @@ struct FollowupSuggestion {
 }
 
 #[derive(Debug, Clone, Serialize)]
+struct FixtureReport {
+    id: String,
+    name: String,
+    tool_sequence: String,
+    description: String,
+}
+
+#[derive(Debug, Clone, Serialize)]
+struct RollupReport {
+    key: String,
+    total_runs: usize,
+    passed_runs: usize,
+    failed_runs: usize,
+    skipped_runs: usize,
+    total_cost_usd: f64,
+}
+
+#[derive(Debug, Clone, Serialize)]
+struct EvalRollups {
+    by_fixture: Vec<RollupReport>,
+    by_provider: Vec<RollupReport>,
+    by_model: Vec<RollupReport>,
+    by_tool_format: Vec<RollupReport>,
+    by_tool_sequence: Vec<RollupReport>,
+}
+
+#[derive(Debug, Clone, Serialize)]
 struct EvalSummary {
     schema_version: u32,
-    case_id: String,
+    fixture_ids: Vec<String>,
+    fixtures: Vec<FixtureReport>,
     output_dir: String,
     models: Vec<ModelSelector>,
     tool_formats: Vec<String>,
@@ -119,6 +199,7 @@ struct EvalSummary {
     failed_runs: usize,
     skipped_runs: usize,
     total_cost_usd: f64,
+    rollups: EvalRollups,
     runs: Vec<RunReport>,
     comparisons: Vec<FormatComparison>,
     followups: Vec<FollowupSuggestion>,
@@ -132,6 +213,7 @@ struct LocalRunGuard {
 
 struct RunSummaryContext {
     run_id: String,
+    fixture: FixtureDefinition,
     selector: ModelSelector,
     tool_format: String,
     run_dir: PathBuf,
@@ -156,6 +238,13 @@ pub async fn run(args: EvalCodingAgentArgs) -> i32 {
         }
     };
 
+    let fixtures = match resolve_fixtures(&args.fixtures) {
+        Ok(fixtures) => fixtures,
+        Err(error) => {
+            eprintln!("error: {error}");
+            return 2;
+        }
+    };
     let models = match resolve_models(&args).await {
         Ok(models) => models,
         Err(error) => {
@@ -170,7 +259,7 @@ pub async fn run(args: EvalCodingAgentArgs) -> i32 {
             return 2;
         }
     };
-    let matrix = build_matrix(&models, &tool_formats, args.max_runs);
+    let matrix = build_matrix(&fixtures, &models, &tool_formats, args.max_runs);
     if matrix.is_empty() {
         eprintln!("error: no coding-agent benchmark runs selected");
         return 2;
@@ -178,8 +267,8 @@ pub async fn run(args: EvalCodingAgentArgs) -> i32 {
 
     let mut reports = Vec::new();
     let mut had_error = false;
-    for (selector, tool_format) in matrix {
-        let report = run_matrix_entry(&args, &output_dir, selector, tool_format).await;
+    for (fixture, selector, tool_format) in matrix {
+        let report = run_matrix_entry(&args, &output_dir, fixture, selector, tool_format).await;
         if !report.passed && !report.skipped {
             had_error = true;
         }
@@ -187,7 +276,8 @@ pub async fn run(args: EvalCodingAgentArgs) -> i32 {
             had_error = true;
         }
         eprintln!(
-            "{} {}: {}",
+            "{} {} {}: {}",
+            report.fixture_id,
             selector_label(&report.selector),
             report.tool_format,
             report.status
@@ -195,7 +285,14 @@ pub async fn run(args: EvalCodingAgentArgs) -> i32 {
         reports.push(report);
     }
 
-    let summary = build_summary(&output_dir, models, tool_formats, env_keys_loaded, reports);
+    let summary = build_summary(
+        &output_dir,
+        fixtures,
+        models,
+        tool_formats,
+        env_keys_loaded,
+        reports,
+    );
     if let Err(error) = write_outputs(&output_dir, &summary) {
         eprintln!("error: failed to write benchmark outputs: {error}");
         return 1;
@@ -230,14 +327,16 @@ pub async fn run(args: EvalCodingAgentArgs) -> i32 {
 async fn run_matrix_entry(
     args: &EvalCodingAgentArgs,
     output_dir: &Path,
+    fixture: FixtureDefinition,
     selector: ModelSelector,
     tool_format: String,
 ) -> RunReport {
-    let run_id = run_id_for(&selector, &tool_format);
+    let run_id = run_id_for(fixture, &selector, &tool_format);
     let run_dir = output_dir.join(&run_id);
     if let Err(error) = reset_dir(&run_dir) {
         return error_report(
             run_id,
+            fixture,
             selector,
             tool_format,
             run_dir,
@@ -250,13 +349,14 @@ async fn run_matrix_entry(
             "provider `{}` has no configured credentials",
             selector.provider
         );
-        return skipped_report(run_id, selector, tool_format, run_dir, reason);
+        return skipped_report(run_id, fixture, selector, tool_format, run_dir, reason);
     }
 
-    let script_path = run_dir.join("first_coding_agent.harn");
-    if let Err(error) = fs::write(&script_path, FIRST_CODING_AGENT_HARN) {
+    let script_path = run_dir.join("coding_agent_suite.harn");
+    if let Err(error) = fs::write(&script_path, CODING_AGENT_SUITE_HARN) {
         return error_report(
             run_id,
+            fixture,
             selector,
             tool_format,
             run_dir,
@@ -265,7 +365,7 @@ async fn run_matrix_entry(
     }
 
     let local_guard = LocalRunGuard::before(&selector, !args.keep_local_after_run).await;
-    let argv = script_argv(args, &selector, &tool_format, &run_dir);
+    let argv = script_argv(args, fixture, &selector, &tool_format, &run_dir);
     let clock = RealClock::new();
     let started_ms = clock.monotonic_ms();
     let outcome = execute_run(
@@ -295,6 +395,9 @@ async fn run_matrix_entry(
     let Some(summary) = summary_value else {
         return RunReport {
             run_id,
+            fixture_id: fixture.id.to_string(),
+            fixture_name: fixture.name.to_string(),
+            tool_sequence: fixture.tool_sequence.to_string(),
             selector,
             tool_format,
             status: "infra_error".to_string(),
@@ -325,6 +428,7 @@ async fn run_matrix_entry(
     report_from_summary(
         RunSummaryContext {
             run_id,
+            fixture,
             selector,
             tool_format,
             run_dir,
@@ -370,6 +474,9 @@ fn report_from_summary(ctx: RunSummaryContext, summary: JsonValue) -> RunReport 
     };
     RunReport {
         run_id: ctx.run_id,
+        fixture_id: ctx.fixture.id.to_string(),
+        fixture_name: ctx.fixture.name.to_string(),
+        tool_sequence: ctx.fixture.tool_sequence.to_string(),
         selector: ctx.selector,
         tool_format: ctx.tool_format,
         status,
@@ -498,11 +605,14 @@ impl LocalRunGuard {
 
 fn script_argv(
     args: &EvalCodingAgentArgs,
+    fixture: FixtureDefinition,
     selector: &ModelSelector,
     tool_format: &str,
     run_dir: &Path,
 ) -> Vec<String> {
     let mut argv = vec![
+        "--fixture".to_string(),
+        fixture.id.to_string(),
         "--output-dir".to_string(),
         run_dir.display().to_string(),
         "--provider".to_string(),
@@ -524,6 +634,7 @@ fn script_argv(
 
 fn error_report(
     run_id: String,
+    fixture: FixtureDefinition,
     selector: ModelSelector,
     tool_format: String,
     run_dir: PathBuf,
@@ -531,6 +642,9 @@ fn error_report(
 ) -> RunReport {
     RunReport {
         run_id,
+        fixture_id: fixture.id.to_string(),
+        fixture_name: fixture.name.to_string(),
+        tool_sequence: fixture.tool_sequence.to_string(),
         selector,
         tool_format,
         status: "infra_error".to_string(),
@@ -560,6 +674,7 @@ fn error_report(
 
 fn skipped_report(
     run_id: String,
+    fixture: FixtureDefinition,
     selector: ModelSelector,
     tool_format: String,
     run_dir: PathBuf,
@@ -567,6 +682,9 @@ fn skipped_report(
 ) -> RunReport {
     RunReport {
         run_id,
+        fixture_id: fixture.id.to_string(),
+        fixture_name: fixture.name.to_string(),
+        tool_sequence: fixture.tool_sequence.to_string(),
         selector,
         tool_format,
         status: "skipped".to_string(),
@@ -599,6 +717,44 @@ fn provider_available(selector: &ModelSelector) -> bool {
         return true;
     }
     harn_vm::llm_config::provider_key_available(&selector.provider)
+}
+
+fn resolve_fixtures(raw_fixtures: &[String]) -> Result<Vec<FixtureDefinition>, String> {
+    let mut seen = BTreeSet::new();
+    let mut out = Vec::new();
+    for raw in raw_fixtures {
+        let fixture = raw.trim().to_ascii_lowercase();
+        if fixture.is_empty() {
+            continue;
+        }
+        if fixture == "all" {
+            return Ok(FIXTURE_DEFINITIONS.to_vec());
+        }
+        let Some(definition) = fixture_definition(&fixture) else {
+            return Err(format!(
+                "unsupported --fixture `{fixture}`; expected one of: all, {}",
+                FIXTURE_DEFINITIONS
+                    .iter()
+                    .map(|definition| definition.id)
+                    .collect::<Vec<_>>()
+                    .join(", ")
+            ));
+        };
+        if seen.insert(definition.id) {
+            out.push(definition);
+        }
+    }
+    if out.is_empty() {
+        return Err("at least one coding-agent fixture must be selected".to_string());
+    }
+    Ok(out)
+}
+
+fn fixture_definition(id: &str) -> Option<FixtureDefinition> {
+    FIXTURE_DEFINITIONS
+        .iter()
+        .copied()
+        .find(|definition| definition.id == id)
 }
 
 async fn resolve_models(args: &EvalCodingAgentArgs) -> Result<Vec<ModelSelector>, String> {
@@ -686,16 +842,22 @@ fn normalize_tool_formats(raw_formats: &[String]) -> Result<Vec<String>, String>
 }
 
 fn build_matrix(
+    fixtures: &[FixtureDefinition],
     models: &[ModelSelector],
     tool_formats: &[String],
     max_runs: Option<usize>,
-) -> Vec<(ModelSelector, String)> {
+) -> Vec<(FixtureDefinition, ModelSelector, String)> {
+    if max_runs == Some(0) {
+        return Vec::new();
+    }
     let mut matrix = Vec::new();
-    for selector in models {
-        for tool_format in tool_formats {
-            matrix.push((selector.clone(), tool_format.clone()));
-            if max_runs.is_some_and(|limit| matrix.len() >= limit) {
-                return matrix;
+    for fixture in fixtures {
+        for selector in models {
+            for tool_format in tool_formats {
+                matrix.push((*fixture, selector.clone(), tool_format.clone()));
+                if max_runs.is_some_and(|limit| matrix.len() >= limit) {
+                    return matrix;
+                }
             }
         }
     }
@@ -704,6 +866,7 @@ fn build_matrix(
 
 fn build_summary(
     output_dir: &Path,
+    fixtures: Vec<FixtureDefinition>,
     models: Vec<ModelSelector>,
     tool_formats: Vec<String>,
     env_keys_loaded: Vec<LoadedEnvKey>,
@@ -716,11 +879,24 @@ fn build_summary(
         .filter(|run| !run.passed && !run.skipped)
         .count();
     let total_cost_usd = runs.iter().map(|run| run.cost_usd).sum();
+    let rollups = build_rollups(&runs);
     let comparisons = compare_formats(&runs);
     let followups = suggest_followups(&runs, &comparisons);
     EvalSummary {
-        schema_version: 1,
-        case_id: "python-add".to_string(),
+        schema_version: 2,
+        fixture_ids: fixtures
+            .iter()
+            .map(|fixture| fixture.id.to_string())
+            .collect(),
+        fixtures: fixtures
+            .iter()
+            .map(|fixture| FixtureReport {
+                id: fixture.id.to_string(),
+                name: fixture.name.to_string(),
+                tool_sequence: fixture.tool_sequence.to_string(),
+                description: fixture.description.to_string(),
+            })
+            .collect(),
         output_dir: output_dir.display().to_string(),
         models,
         tool_formats,
@@ -730,17 +906,60 @@ fn build_summary(
         failed_runs,
         skipped_runs,
         total_cost_usd,
+        rollups,
         runs,
         comparisons,
         followups,
     }
 }
 
+fn build_rollups(runs: &[RunReport]) -> EvalRollups {
+    EvalRollups {
+        by_fixture: rollup_by(runs, |run| run.fixture_id.clone()),
+        by_provider: rollup_by(runs, |run| run.selector.provider.clone()),
+        by_model: rollup_by(runs, |run| run.selector.model.clone()),
+        by_tool_format: rollup_by(runs, |run| run.tool_format.clone()),
+        by_tool_sequence: rollup_by(runs, |run| run.tool_sequence.clone()),
+    }
+}
+
+fn rollup_by<F>(runs: &[RunReport], key_for: F) -> Vec<RollupReport>
+where
+    F: Fn(&RunReport) -> String,
+{
+    let mut grouped: BTreeMap<String, RollupReport> = BTreeMap::new();
+    for run in runs {
+        let key = key_for(run);
+        let entry = grouped.entry(key.clone()).or_insert_with(|| RollupReport {
+            key,
+            total_runs: 0,
+            passed_runs: 0,
+            failed_runs: 0,
+            skipped_runs: 0,
+            total_cost_usd: 0.0,
+        });
+        entry.total_runs += 1;
+        if run.passed {
+            entry.passed_runs += 1;
+        } else if run.skipped {
+            entry.skipped_runs += 1;
+        } else {
+            entry.failed_runs += 1;
+        }
+        entry.total_cost_usd += run.cost_usd;
+    }
+    grouped.into_values().collect()
+}
+
 fn compare_formats(runs: &[RunReport]) -> Vec<FormatComparison> {
     let mut grouped: BTreeMap<String, Vec<&RunReport>> = BTreeMap::new();
     for run in runs {
         grouped
-            .entry(selector_label(&run.selector))
+            .entry(format!(
+                "{}__{}",
+                run.fixture_id,
+                selector_label(&run.selector)
+            ))
             .or_default()
             .push(run);
     }
@@ -758,6 +977,7 @@ fn compare_formats(runs: &[RunReport]) -> Vec<FormatComparison> {
             continue;
         }
         out.push(FormatComparison {
+            fixture_id: first.fixture_id.clone(),
             selector: first.selector.clone(),
             native_status: native.map(|run| run.status.clone()),
             text_status: text.map(|run| run.status.clone()),
@@ -787,8 +1007,8 @@ fn suggest_followups(
         .collect::<Vec<_>>();
     if !failed.is_empty() {
         out.push(FollowupSuggestion {
-            title: "Normalize first-coding-agent failures across provider presets".to_string(),
-            body: "One or more provider/tool-format runs failed the minimal coding-agent fixture. Inspect the run directories and decide whether the gap belongs in provider adapters, preset prompting, transcript handling, or host-tool ergonomics.".to_string(),
+            title: "Normalize coding-agent fixture failures across provider presets".to_string(),
+            body: "One or more fixture/provider/tool-format runs failed. Inspect the run directories and decide whether the gap belongs in provider adapters, preset prompting, transcript handling, or host-tool ergonomics.".to_string(),
             labels: vec!["eval".to_string(), "providers".to_string()],
             run_ids: failed,
         });
@@ -815,7 +1035,13 @@ fn suggest_followups(
                 && comparison.text_passed.is_some()
                 && comparison.native_passed != comparison.text_passed
         })
-        .map(|comparison| selector_label(&comparison.selector))
+        .map(|comparison| {
+            format!(
+                "{}:{}",
+                comparison.fixture_id,
+                selector_label(&comparison.selector)
+            )
+        })
         .collect::<Vec<_>>();
     if !mismatched.is_empty() {
         out.push(FollowupSuggestion {
@@ -884,24 +1110,37 @@ fn write_jsonl<T: Serialize>(path: &Path, items: &[T]) -> Result<(), String> {
 
 fn render_markdown(summary: &EvalSummary) -> String {
     let mut out = String::new();
-    out.push_str("# Coding Agent Provider Benchmark\n\n");
+    out.push_str("# Coding Agent Harness Quality Suite\n\n");
     out.push_str(&format!(
-        "- case: `{}`\n- passed: {}/{}\n- skipped: {}\n- total_cost_usd: {:.6}\n\n",
-        summary.case_id,
+        "- fixtures: `{}`\n- passed: {}/{}\n- skipped: {}\n- total_cost_usd: {:.6}\n\n",
+        summary.fixture_ids.join("`, `"),
         summary.passed_runs,
         summary.total_runs,
         summary.skipped_runs,
         summary.total_cost_usd
     ));
-    out.push_str("| run | provider | model | tools | status | iterations | tokens | cost | transcript | output |\n");
-    out.push_str("|---|---|---|---|---|---:|---:|---:|---:|---|\n");
+    render_rollup_table(&mut out, "By Fixture", &summary.rollups.by_fixture);
+    render_rollup_table(&mut out, "By Provider", &summary.rollups.by_provider);
+    render_rollup_table(&mut out, "By Model", &summary.rollups.by_model);
+    render_rollup_table(&mut out, "By Tool Format", &summary.rollups.by_tool_format);
+    render_rollup_table(
+        &mut out,
+        "By Tool Sequence",
+        &summary.rollups.by_tool_sequence,
+    );
+
+    out.push_str("\n## Runs\n\n");
+    out.push_str("| fixture | run | provider | model | tool format | tool sequence | status | iterations | tokens | cost | transcript | output |\n");
+    out.push_str("|---|---|---|---|---|---|---|---:|---:|---:|---:|---|\n");
     for run in &summary.runs {
         out.push_str(&format!(
-            "| `{}` | `{}` | `{}` | `{}` | {} | {} | {} | {:.6} | {} | `{}` |\n",
+            "| `{}` | `{}` | `{}` | `{}` | `{}` | `{}` | {} | {} | {} | {:.6} | {} | `{}` |\n",
+            run.fixture_id,
             run.run_id,
             run.selector.provider,
             run.selector.model.replace('|', "\\|"),
             run.tool_format,
+            run.tool_sequence,
             run.status,
             run.iterations,
             run.input_tokens + run.output_tokens,
@@ -912,11 +1151,12 @@ fn render_markdown(summary: &EvalSummary) -> String {
     }
     if !summary.comparisons.is_empty() {
         out.push_str("\n## Native/Text Comparison\n\n");
-        out.push_str("| selector | native | text | token delta | iteration delta |\n");
-        out.push_str("|---|---|---|---:|---:|\n");
+        out.push_str("| fixture | selector | native | text | token delta | iteration delta |\n");
+        out.push_str("|---|---|---|---|---:|---:|\n");
         for comparison in &summary.comparisons {
             out.push_str(&format!(
-                "| `{}` | {} | {} | {} | {} |\n",
+                "| `{}` | `{}` | {} | {} | {} | {} |\n",
+                comparison.fixture_id,
                 selector_label(&comparison.selector),
                 comparison
                     .native_status
@@ -938,6 +1178,24 @@ fn render_markdown(summary: &EvalSummary) -> String {
         }
     }
     out
+}
+
+fn render_rollup_table(out: &mut String, title: &str, rollups: &[RollupReport]) {
+    out.push_str(&format!("## {title}\n\n"));
+    out.push_str("| key | passed | failed | skipped | total | cost |\n");
+    out.push_str("|---|---:|---:|---:|---:|---:|\n");
+    for rollup in rollups {
+        out.push_str(&format!(
+            "| `{}` | {} | {} | {} | {} | {:.6} |\n",
+            rollup.key.replace('|', "\\|"),
+            rollup.passed_runs,
+            rollup.failed_runs,
+            rollup.skipped_runs,
+            rollup.total_runs,
+            rollup.total_cost_usd
+        ));
+    }
+    out.push('\n');
 }
 
 fn render_followups(summary: &EvalSummary) -> String {
@@ -994,8 +1252,13 @@ fn reset_dir(path: &Path) -> Result<(), String> {
     fs::create_dir_all(path).map_err(|error| error.to_string())
 }
 
-fn run_id_for(selector: &ModelSelector, tool_format: &str) -> String {
-    sanitize_id(&format!("{}__{}", selector_label(selector), tool_format))
+fn run_id_for(fixture: FixtureDefinition, selector: &ModelSelector, tool_format: &str) -> String {
+    sanitize_id(&format!(
+        "{}__{}__{}",
+        fixture.id,
+        selector_label(selector),
+        tool_format
+    ))
 }
 
 fn sanitize_id(raw: &str) -> String {
@@ -1132,8 +1395,14 @@ mod tests {
             model: "a|b".to_string(),
         };
         let summary = EvalSummary {
-            schema_version: 1,
-            case_id: "python-add".to_string(),
+            schema_version: 2,
+            fixture_ids: vec!["python-add".to_string()],
+            fixtures: vec![FixtureReport {
+                id: "python-add".to_string(),
+                name: "Python add repair".to_string(),
+                tool_sequence: "multi-tool".to_string(),
+                description: "One-file Python bug fix verified by unittest output.".to_string(),
+            }],
             output_dir: "out".to_string(),
             models: vec![selector.clone()],
             tool_formats: vec!["native".to_string()],
@@ -1143,8 +1412,25 @@ mod tests {
             failed_runs: 0,
             skipped_runs: 0,
             total_cost_usd: 0.0,
+            rollups: EvalRollups {
+                by_fixture: vec![RollupReport {
+                    key: "python-add".to_string(),
+                    total_runs: 1,
+                    passed_runs: 1,
+                    failed_runs: 0,
+                    skipped_runs: 0,
+                    total_cost_usd: 0.0,
+                }],
+                by_provider: Vec::new(),
+                by_model: Vec::new(),
+                by_tool_format: Vec::new(),
+                by_tool_sequence: Vec::new(),
+            },
             runs: vec![RunReport {
                 run_id: "r".to_string(),
+                fixture_id: "python-add".to_string(),
+                fixture_name: "Python add repair".to_string(),
+                tool_sequence: "multi-tool".to_string(),
                 selector,
                 tool_format: "native".to_string(),
                 status: "passed".to_string(),
@@ -1175,5 +1461,56 @@ mod tests {
         };
         let md = render_markdown(&summary);
         assert!(md.contains("a\\|b"));
+    }
+
+    #[test]
+    fn fixture_selection_supports_all_and_specific_ids() {
+        let all = resolve_fixtures(&["all".to_string()]).expect("all fixtures resolve");
+        assert_eq!(all.len(), FIXTURE_DEFINITIONS.len());
+
+        let selected = resolve_fixtures(&[
+            "python-add".to_string(),
+            "python-add".to_string(),
+            "read-only-audit".to_string(),
+        ])
+        .expect("specific fixtures resolve");
+        assert_eq!(
+            selected
+                .iter()
+                .map(|fixture| fixture.id)
+                .collect::<Vec<_>>(),
+            vec!["python-add", "read-only-audit"],
+        );
+
+        let error = resolve_fixtures(&["missing".to_string()]).expect_err("unknown fixture fails");
+        assert!(error.contains("unsupported --fixture `missing`"));
+    }
+
+    #[test]
+    fn matrix_max_runs_bounds_fixture_model_tool_product() {
+        let fixtures = resolve_fixtures(&["all".to_string()]).expect("fixtures");
+        let selector = ModelSelector {
+            selector: "mock:mock".to_string(),
+            provider: "mock".to_string(),
+            model: "mock".to_string(),
+        };
+        let selectors = vec![selector];
+        let tool_formats = vec!["native".to_string(), "text".to_string()];
+        let matrix = build_matrix(&fixtures, &selectors, &tool_formats, Some(3));
+        assert_eq!(matrix.len(), 3);
+        assert_eq!(
+            matrix
+                .iter()
+                .map(|(fixture, _selector, tool_format)| (fixture.id, tool_format.as_str()))
+                .collect::<Vec<_>>(),
+            vec![
+                ("python-add", "native"),
+                ("python-add", "text"),
+                ("cli-help-flag", "native"),
+            ],
+        );
+
+        let empty = build_matrix(&fixtures, &selectors, &tool_formats, Some(0));
+        assert!(empty.is_empty());
     }
 }
