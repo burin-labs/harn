@@ -44,6 +44,7 @@ const HOST_SESSION_ACTIVE_SKILLS: &str = "__host_agent_session_active_skills";
 const HOST_SESSION_RECORD_SKILL_EVENT: &str = "__host_agent_session_record_skill_event";
 const HOST_SESSION_COMPACT: &str = "__host_agent_session_compact_if_needed";
 const HOST_SESSION_REPLACE_MESSAGES: &str = "__host_agent_session_replace_messages";
+const HOST_SESSION_PROJECT_TURN: &str = "__host_agent_session_project_turn";
 const HOST_SESSION_CLAIM_TOOL_FORMAT: &str = "__host_agent_session_claim_tool_format";
 const HOST_SKILL_SCORE: &str = "__host_skill_score";
 const HOST_BUDGET_PRE_CALL: &str = "__host_agent_budget_pre_call_blocked";
@@ -1667,6 +1668,42 @@ fn host_agent_record_compaction_builtin(
     Ok(VmValue::Nil)
 }
 
+async fn host_agent_session_project_turn(args: Vec<VmValue>) -> Result<VmValue, VmError> {
+    let session_id = match args.first() {
+        Some(VmValue::String(s)) if !s.is_empty() => s.to_string(),
+        _ => {
+            return Err(VmError::Runtime(format!(
+                "{HOST_SESSION_PROJECT_TURN}: session_id must be a non-empty string"
+            )))
+        }
+    };
+    let options = args.get(1).cloned().unwrap_or(VmValue::Nil);
+    let policy = crate::stdlib::transcript_project::parse_projection_options(&options)?;
+    let Some(transcript) = crate::agent_sessions::transcript(&session_id) else {
+        return Err(VmError::Runtime(format!(
+            "{HOST_SESSION_PROJECT_TURN}: unknown agent session `{session_id}`"
+        )));
+    };
+    let transcript_dict = transcript.as_dict().cloned().unwrap_or_default();
+    let result =
+        crate::stdlib::transcript_project::project_transcript(&transcript_dict, &policy).await?;
+    let event = crate::stdlib::transcript_project::projection_event_value(&result, &policy);
+    let _ = crate::agent_sessions::append_event(&session_id, event.clone());
+    crate::llm::emit_live_agent_event(&AgentEvent::TranscriptProjected {
+        session_id: session_id.clone(),
+        policy: policy.kind.as_str().to_string(),
+        reason: result.reason.clone(),
+        prefix_hash: result.prefix_hash.clone(),
+        kept_count: result.kept_indices.len(),
+        dropped_count: result.dropped_indices.len(),
+        provider_safety_blocked: result.provider_safety_blocked,
+    })
+    .await;
+    Ok(crate::stdlib::transcript_project::result_to_vm(
+        &result, &policy,
+    ))
+}
+
 fn host_agent_session_claim_tool_format_builtin(
     args: &[VmValue],
     _out: &mut String,
@@ -2345,6 +2382,18 @@ const HOST_SESSION_PRIMITIVES_SYNC: &[SyncBuiltin] = &[
     .doc("Record a transcript compaction as a transcript event and trace counter."),
 ];
 
+fn host_session_project_metadata() -> VmBuiltinMetadata {
+    VmBuiltinMetadata::async_static(HOST_SESSION_PROJECT_TURN)
+        .signature_static("__host_agent_session_project_turn(session_id, options?)")
+        .arity(VmBuiltinArity::Range { min: 1, max: 2 })
+        .category_static("agent.host")
+        .doc_static(
+            "Project the session transcript through a policy, append a \
+             transcript.projection event, and return the projected messages \
+             with metadata.",
+        )
+}
+
 const HOST_SESSION_PRIMITIVES_GROUP: BuiltinGroup<'static> = BuiltinGroup::new()
     .category("agent.host")
     .sync(HOST_SESSION_PRIMITIVES_SYNC);
@@ -2360,6 +2409,7 @@ pub fn register_deferred_agent_session_host_primitives(vm: &mut Vm, registrar: f
         HOST_SESSION_DRAIN_BRIDGE_INJECTIONS,
         HOST_SESSION_PUSH_BRIDGE_INJECTION,
         HOST_DAEMON_WAIT,
+        HOST_SESSION_PROJECT_TURN,
     ] {
         vm.register_deferred_builtin(name, registrar);
     }
@@ -2444,6 +2494,10 @@ pub fn register_agent_session_host_primitives(vm: &mut Vm) {
         .doc_static("Wait for daemon wake input or a timeout.");
     vm.register_async_builtin_with_metadata(daemon_wait, |args| {
         Box::pin(async move { host_agent_daemon_wait(args).await })
+    });
+
+    vm.register_async_builtin_with_metadata(host_session_project_metadata(), |args| {
+        Box::pin(async move { host_agent_session_project_turn(args).await })
     });
 }
 

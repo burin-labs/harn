@@ -109,6 +109,7 @@
       "tool_search_query",
       "tool_search_result",
       "transcript_compacted",
+      "transcript_projected",
       "worker_update"
     ],
     "schemaCompatibility": "agentclientprotocol/agent-client-protocol schema v0.12.2",
@@ -138,6 +139,7 @@
       "tool_search_query",
       "tool_search_result",
       "transcript_compacted",
+      "transcript_projected",
       "worker_update"
     ],
     "toolCallErrorCategories": [

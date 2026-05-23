@@ -180,6 +180,15 @@ fn extension_fixture_events() -> Vec<AgentEvent> {
                 "instruction_source": "host"
             })),
         },
+        AgentEvent::TranscriptProjected {
+            session_id: "session-1".to_string(),
+            policy: "clean_tool_repair".to_string(),
+            reason: "tool_call_repair_squashed".to_string(),
+            prefix_hash: "sha256:abc".to_string(),
+            kept_count: 3,
+            dropped_count: 2,
+            provider_safety_blocked: false,
+        },
         AgentEvent::ReminderEmitted {
             session_id: "session-1".to_string(),
             reminder_id: "reminder-1".to_string(),
@@ -796,6 +805,15 @@ async fn forwarded_agent_events_serialize_as_session_updates() {
             instruction_source: None,
             compaction_policy: None,
         },
+        AgentEvent::TranscriptProjected {
+            session_id: "session-1".to_string(),
+            policy: "clean_tool_repair".to_string(),
+            reason: "tool_call_repair_squashed".to_string(),
+            prefix_hash: "sha256:abc".to_string(),
+            kept_count: 3,
+            dropped_count: 2,
+            provider_safety_blocked: false,
+        },
         AgentEvent::Handoff {
             session_id: "session-1".to_string(),
             artifact_id: "artifact-1".to_string(),
@@ -825,6 +843,7 @@ async fn forwarded_agent_events_serialize_as_session_updates() {
         "tool_search_query",
         "tool_search_result",
         "transcript_compacted",
+        "transcript_projected",
         "handoff",
         "fs_watch",
     ];
@@ -1306,6 +1325,17 @@ async fn vendor_extension_session_update_fields_live_under_meta_harn() {
                 "instructionMode",
                 "instructionSource",
                 "compactionPolicy",
+            ],
+        ),
+        (
+            "transcript_projected",
+            &[
+                "policy",
+                "reason",
+                "prefixHash",
+                "keptCount",
+                "droppedCount",
+                "providerSafetyBlocked",
             ],
         ),
         ("reminder_emitted", &["reminder"]),

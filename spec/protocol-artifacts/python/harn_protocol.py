@@ -146,6 +146,7 @@ ACP_SESSION_UPDATES: tuple = (
     "tool_search_query",
     "tool_search_result",
     "transcript_compacted",
+    "transcript_projected",
     "worker_update",
 )
 HARN_ACP_SESSION_UPDATE_EXTENSIONS: tuple = (
@@ -163,6 +164,7 @@ HARN_ACP_SESSION_UPDATE_EXTENSIONS: tuple = (
     "tool_search_query",
     "tool_search_result",
     "transcript_compacted",
+    "transcript_projected",
     "worker_update",
 )
 HARN_AGENT_EVENT_KINDS: tuple = (
@@ -375,6 +377,7 @@ class ACPSessionUpdate(str, Enum):
     TOOL_SEARCH_QUERY = "tool_search_query"
     TOOL_SEARCH_RESULT = "tool_search_result"
     TRANSCRIPT_COMPACTED = "transcript_compacted"
+    TRANSCRIPT_PROJECTED = "transcript_projected"
     WORKER_UPDATE = "worker_update"
 
 

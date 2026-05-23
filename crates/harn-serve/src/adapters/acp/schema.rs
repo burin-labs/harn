@@ -32,6 +32,7 @@ pub const HARN_SESSION_UPDATE_EXTENSIONS: &[&str] = &[
     "tool_search_query",
     "tool_search_result",
     "transcript_compacted",
+    "transcript_projected",
     "worker_update",
 ];
 

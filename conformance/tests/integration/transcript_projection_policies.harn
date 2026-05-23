@@ -1,0 +1,77 @@
+/**
+ * transcript_project policies derive a clean model-visible prefix from
+ * an immutable raw transcript without touching its audit lineage. This
+ * test covers raw, clean_tool_repair, squash_failed_calls,
+ * summary_prefix, custom, and the signed-reasoning guardrail.
+ */
+fn raw_transcript() {
+  return transcript_from_messages(
+    [
+      {role: "user", content: "run it"},
+      {role: "assistant", content: "", tool_calls: [{id: "call_1", name: "run", arguments: {}}]},
+      {role: "tool", tool_call_id: "call_1", name: "run", content: "Error: missing arg", is_error: true},
+      {role: "assistant", content: "", tool_calls: [{id: "call_2", name: "run", arguments: {arg: "x"}}]},
+      {role: "tool", tool_call_id: "call_2", name: "run", content: "ok"},
+    ],
+  )
+}
+
+fn signed_reasoning_transcript() {
+  return transcript_from_messages(
+    [
+      {role: "user", content: "go"},
+      {
+        role: "assistant",
+        content: [
+          {type: "thinking", thinking: "private chain", signature: "abc"},
+          {type: "tool_use", id: "c", name: "run", input: {}},
+        ],
+      },
+      {role: "tool", tool_call_id: "c", name: "run", content: "Error", is_error: true},
+      {role: "assistant", content: "", tool_calls: [{id: "c2", name: "run", arguments: {}}]},
+      {role: "tool", tool_call_id: "c2", name: "run", content: "ok"},
+    ],
+  )
+}
+
+pipeline default() {
+  let transcript = raw_transcript()
+  let raw_result = transcript_project(transcript, {policy: "raw"})
+  __io_println("raw_policy:" + raw_result.policy)
+  __io_println("raw_kept:" + to_string(raw_result.kept_count))
+  __io_println("raw_dropped:" + to_string(raw_result.dropped_count))
+  let hash_prefix = substring(raw_result.prefix_hash, 0, 7)
+  __io_println("raw_hash_prefix:" + hash_prefix)
+  let clean = transcript_project(transcript, {policy: "clean_tool_repair"})
+  __io_println("clean_policy:" + clean.policy)
+  __io_println("clean_kept:" + to_string(clean.kept_count))
+  __io_println("clean_dropped:" + to_string(clean.dropped_count))
+  __io_println("clean_blocked:" + to_string(clean.provider_safety_blocked))
+  __io_println("clean_event_kind:" + clean.event.kind)
+  let squashed = transcript_project(transcript, "squash_failed_calls")
+  __io_println("squash_dropped:" + to_string(squashed.dropped_count))
+  let summary = transcript_project(transcript, {policy: "summary_prefix", keep_last: 2})
+  __io_println("summary_kept:" + to_string(summary.kept_count))
+  __io_println("summary_first_role:" + summary.messages[0].role)
+  let user_only_projector = fn(messages) {
+    var kept = []
+    for message in messages {
+      if message.role == "user" {
+        kept = kept.push(message)
+      }
+    }
+    return {messages: kept, reason: "user_only"}
+  }
+  let custom = transcript_project(transcript, {policy: "custom", projector: user_only_projector})
+  __io_println("custom_messages:" + to_string(len(custom.messages)))
+  __io_println("custom_reason:" + custom.reason)
+  let blocked = transcript_project(signed_reasoning_transcript(), {policy: "clean_tool_repair"})
+  __io_println("blocked_safety:" + to_string(blocked.provider_safety_blocked))
+  __io_println("blocked_dropped:" + to_string(blocked.dropped_count))
+  let bypassed = transcript_project(
+    signed_reasoning_transcript(),
+    {policy: "clean_tool_repair", respect_provider_signatures: false},
+  )
+  __io_println("bypassed_safety:" + to_string(bypassed.provider_safety_blocked))
+  __io_println("bypassed_dropped:" + to_string(bypassed.dropped_count))
+}
