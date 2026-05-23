@@ -3048,11 +3048,10 @@ public let harnProviderCatalogJSON = #"""
       },
       "reasoning": {
         "modes": [
-          "enabled",
-          "effort"
+          "enabled"
         ],
         "effort_supported": false,
-        "none_supported": false,
+        "none_supported": true,
         "interleaved_supported": false,
         "preserve_thinking": false
       },
@@ -3068,7 +3067,6 @@ public let harnProviderCatalogJSON = #"""
         "streaming",
         "tools",
         "thinking",
-        "extended_thinking",
         "structured_output"
       ]
     },

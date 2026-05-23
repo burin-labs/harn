@@ -2945,11 +2945,10 @@ export const harnProviderCatalog: HarnProviderCatalog = {
       },
       "reasoning": {
         "modes": [
-          "enabled",
-          "effort"
+          "enabled"
         ],
         "effort_supported": false,
-        "none_supported": false,
+        "none_supported": true,
         "interleaved_supported": false,
         "preserve_thinking": false
       },
@@ -2965,7 +2964,6 @@ export const harnProviderCatalog: HarnProviderCatalog = {
         "streaming",
         "tools",
         "thinking",
-        "extended_thinking",
         "structured_output"
       ]
     },
