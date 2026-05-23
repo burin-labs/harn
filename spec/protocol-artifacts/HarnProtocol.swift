@@ -22,6 +22,7 @@ public enum HarnProtocolConstants {
         "tool_search_query",
         "tool_search_result",
         "transcript_compacted",
+        "transcript_projected",
         "worker_update",
     ]
     public static let harnAgentEventKinds: [String] = [
@@ -157,6 +158,7 @@ public enum HarnACPSessionUpdate: String, Codable, Sendable, CaseIterable {
     case toolSearchQuery = "tool_search_query"
     case toolSearchResult = "tool_search_result"
     case transcriptCompacted = "transcript_compacted"
+    case transcriptProjected = "transcript_projected"
     case workerUpdate = "worker_update"
 
     public static let allCases: [Self] = [
@@ -185,6 +187,7 @@ public enum HarnACPSessionUpdate: String, Codable, Sendable, CaseIterable {
         "tool_search_query",
         "tool_search_result",
         "transcript_compacted",
+        "transcript_projected",
         "worker_update",
     ].map { Self(rawValue: $0)! }
 }

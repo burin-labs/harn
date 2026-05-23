@@ -62,6 +62,7 @@
   - [Tools, Tool Vault, and MCP](./llm/tools.md)
   - [LLM ensemble helpers](./llm/ensemble.md)
   - [Streaming and transcripts](./llm/streaming.md)
+  - [Transcript projection](./llm/transcript-projection.md)
   - [LLM providers](./llm/providers.md)
   - [Provider capability matrix](./provider-matrix.md)
   - [Provider catalog refresh workflow](./llm/provider-catalog-refresh.md)

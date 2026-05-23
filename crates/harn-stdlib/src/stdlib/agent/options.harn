@@ -284,6 +284,47 @@ fn __validate_agent_loop_completion_options(opts) {
   }
 }
 
+fn __validate_transcript_projection(value) {
+  if value == nil {
+    return
+  }
+  if type_of(value) == "string" {
+    let policy = value
+    if policy != "raw" && policy != "clean_tool_repair" && policy != "squash_failed_calls"
+      && policy != "summary_prefix"
+      && policy != "custom" {
+      throw "agent_loop: `transcript_projection` policy must be one of raw, clean_tool_repair, squash_failed_calls, summary_prefix, custom; got "
+        + policy
+    }
+    return
+  }
+  if type_of(value) != "dict" {
+    throw "agent_loop: `transcript_projection` must be a string, dict, or nil; got " + type_of(value)
+  }
+  let policy = value?.policy ?? "raw"
+  if type_of(policy) != "string" {
+    throw "agent_loop: `transcript_projection.policy` must be a string"
+  }
+  if policy != "raw" && policy != "clean_tool_repair" && policy != "squash_failed_calls"
+    && policy != "summary_prefix"
+    && policy != "custom" {
+    throw "agent_loop: `transcript_projection.policy` must be one of raw, clean_tool_repair, squash_failed_calls, summary_prefix, custom; got "
+      + policy
+  }
+  if policy == "custom" {
+    let projector = value?.projector ?? value?.custom
+    if projector == nil || type_of(projector) != "closure" {
+      throw "agent_loop: `transcript_projection.policy = \"custom\"` requires a `projector` closure"
+    }
+  }
+  if policy == "summary_prefix" {
+    let keep_last = value?.keep_last
+    if keep_last != nil && (type_of(keep_last) != "int" || keep_last < 0) {
+      throw "agent_loop: `transcript_projection.keep_last` must be a non-negative integer"
+    }
+  }
+}
+
 fn __validate_agent_loop_callback_options(opts) {
   if __has_key(opts, "loop_control") {
     __validate_loop_control(opts.loop_control)
@@ -299,6 +340,9 @@ fn __validate_agent_loop_callback_options(opts) {
   }
   if __has_key(opts, "prefetch_next_turn") {
     __validate_prefetch_next_turn(opts.prefetch_next_turn)
+  }
+  if __has_key(opts, "transcript_projection") {
+    __validate_transcript_projection(opts.transcript_projection)
   }
 }
 

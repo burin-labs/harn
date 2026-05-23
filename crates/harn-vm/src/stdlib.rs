@@ -74,6 +74,7 @@ pub(crate) mod tool_hooks;
 pub(crate) mod tools;
 pub mod tracing;
 mod transcript_compact;
+pub(crate) mod transcript_project;
 mod triggers_stdlib;
 mod tui;
 mod types;
@@ -181,6 +182,7 @@ fn register_agent_stdlib_before_llm(vm: &mut Vm) {
     agent_sessions::register_agent_session_builtins(vm);
     workflow_messages::register_workflow_message_builtins(vm);
     transcript_compact::register_transcript_compaction_builtins(vm);
+    transcript_project::register_transcript_projection_builtins(vm);
     assemble::register_assemble_context_builtin(vm);
     crate::egress::register_egress_builtins(vm);
     register_http_builtins(vm);

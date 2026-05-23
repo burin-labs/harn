@@ -145,7 +145,9 @@ Transcripts carry context across calls, forks, repairs, resumptions, and workflo
 sessions. Use `transcript_render_visible`, `transcript_render_full`,
 `transcript_events`, `transcript_summarize`, and `transcript_compact` when host
 apps need stable rendering and replay boundaries. See
-[Streaming and transcripts](./llm/streaming.md#transcript-management).
+[Streaming and transcripts](./llm/streaming.md#transcript-management) and
+[Transcript projection](./llm/transcript-projection.md) for policies that derive
+a clean model-visible prefix without destroying audit lineage.
 
 ## Workflow runtime
 

@@ -593,6 +593,49 @@ impl AgentEventSink for AcpAgentEventSink {
                     "update": update,
                 }));
             }
+            AgentEvent::TranscriptProjected {
+                session_id,
+                policy,
+                reason,
+                prefix_hash,
+                kept_count,
+                dropped_count,
+                provider_safety_blocked,
+            } => {
+                let mut update = serde_json::json!({
+                    "sessionUpdate": "transcript_projected",
+                });
+                let mut harn_meta = serde_json::Map::new();
+                harn_meta.insert(
+                    "policy".to_string(),
+                    serde_json::Value::String(policy.clone()),
+                );
+                harn_meta.insert(
+                    "reason".to_string(),
+                    serde_json::Value::String(reason.clone()),
+                );
+                harn_meta.insert(
+                    "prefixHash".to_string(),
+                    serde_json::Value::String(prefix_hash.clone()),
+                );
+                harn_meta.insert(
+                    "keptCount".to_string(),
+                    serde_json::Value::from(*kept_count),
+                );
+                harn_meta.insert(
+                    "droppedCount".to_string(),
+                    serde_json::Value::from(*dropped_count),
+                );
+                harn_meta.insert(
+                    "providerSafetyBlocked".to_string(),
+                    serde_json::Value::Bool(*provider_safety_blocked),
+                );
+                merge_harn_meta(&mut update, harn_meta);
+                self.write_notification(serde_json::json!({
+                    "sessionId": session_id,
+                    "update": update,
+                }));
+            }
             AgentEvent::ReminderEmitted {
                 session_id,
                 reminder_id,

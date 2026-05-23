@@ -555,6 +555,21 @@ pub enum AgentEvent {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         compaction_policy: Option<serde_json::Value>,
     },
+    /// Emitted whenever `transcript_project` derives a model-visible
+    /// prefix from the immutable raw transcript. Hosts that render a
+    /// side-by-side raw/projected view subscribe to this — the typed
+    /// payload mirrors the metadata on the persisted
+    /// `transcript.projection` transcript event so clients don't have to
+    /// re-parse the transcript to sync UI state.
+    TranscriptProjected {
+        session_id: String,
+        policy: String,
+        reason: String,
+        prefix_hash: String,
+        kept_count: usize,
+        dropped_count: usize,
+        provider_safety_blocked: bool,
+    },
     /// Emitted when a pending `system_reminder` is rendered into the
     /// next provider request. ACP clients show these in a reminder lane
     /// instead of mixing them into assistant text chunks.
@@ -793,6 +808,7 @@ impl AgentEvent {
             | Self::ToolSearchQuery { session_id, .. }
             | Self::ToolSearchResult { session_id, .. }
             | Self::TranscriptCompacted { session_id, .. }
+            | Self::TranscriptProjected { session_id, .. }
             | Self::ReminderEmitted { session_id, .. }
             | Self::Handoff { session_id, .. }
             | Self::FsWatch { session_id, .. }

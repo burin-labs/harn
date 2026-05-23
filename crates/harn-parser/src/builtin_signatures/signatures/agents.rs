@@ -820,6 +820,14 @@ pub(crate) const SIGNATURES: &[BuiltinSignature] = &[
         TRANSCRIPT,
     ),
     BuiltinSignature::simple(
+        "transcript_project",
+        &[
+            Param::new("transcript", TY_MESSAGES_OR_TRANSCRIPT),
+            Param::optional("options", TY_ANY),
+        ],
+        TY_DICT,
+    ),
+    BuiltinSignature::simple(
         "transcript_events",
         &[Param::new("transcript", TY_MESSAGES_OR_TRANSCRIPT_OR_NIL)],
         TY_LIST,

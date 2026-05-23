@@ -95,6 +95,7 @@ var ACPSessionUpdates = []ACPSessionUpdate{
 	"tool_search_query",
 	"tool_search_result",
 	"transcript_compacted",
+	"transcript_projected",
 	"worker_update",
 }
 
@@ -117,6 +118,7 @@ var HarnACPSessionUpdateExtensions = []HarnACPSessionUpdateExtension{
 	"tool_search_query",
 	"tool_search_result",
 	"transcript_compacted",
+	"transcript_projected",
 	"worker_update",
 }
 

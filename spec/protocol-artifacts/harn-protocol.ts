@@ -77,6 +77,7 @@ export const ACP_SESSION_UPDATES = [
   "tool_search_query",
   "tool_search_result",
   "transcript_compacted",
+  "transcript_projected",
   "worker_update",
 ] as const
 export type ACPSessionUpdate = (typeof ACP_SESSION_UPDATES)[number]
@@ -96,6 +97,7 @@ export const HARN_ACP_SESSION_UPDATE_EXTENSIONS = [
   "tool_search_query",
   "tool_search_result",
   "transcript_compacted",
+  "transcript_projected",
   "worker_update",
 ] as const
 export type HarnACPSessionUpdateExtension = (typeof HARN_ACP_SESSION_UPDATE_EXTENSIONS)[number]

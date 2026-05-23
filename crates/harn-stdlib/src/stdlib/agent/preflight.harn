@@ -1,5 +1,5 @@
 import { loop_until_done_system_prompt, render_agent_prompt_id } from "std/agent/prompts"
-import { agent_session_messages } from "std/agent/state"
+import { agent_session_messages, agent_session_project_turn } from "std/agent/state"
 
 fn __agent_done_sentinel(opts) {
   let sentinel = opts?.done_sentinel
@@ -339,6 +339,33 @@ pub fn agent_build_turn_system(session, opts, iteration) {
   return join(parts, "\n\n")
 }
 
+fn __agent_projection_options(opts) {
+  let raw = opts?.transcript_projection
+  if raw == nil {
+    return nil
+  }
+  if type_of(raw) == "string" {
+    return {policy: raw}
+  }
+  if type_of(raw) == "dict" {
+    return raw
+  }
+  throw "agent_loop: `transcript_projection` must be a string, dict, or nil; got " + type_of(raw)
+}
+
+fn __agent_apply_projection(session_id, messages, opts) {
+  let projection_opts = __agent_projection_options(opts)
+  if projection_opts == nil {
+    return messages
+  }
+  let policy_label = projection_opts?.policy ?? "raw"
+  if policy_label == "raw" {
+    return messages
+  }
+  let projection = agent_session_project_turn(session_id, projection_opts)
+  return projection?.messages ?? messages
+}
+
 /**
  * agent_build_turn_messages.
  *
@@ -349,15 +376,16 @@ pub fn agent_build_turn_system(session, opts, iteration) {
  * @example: agent_build_turn_messages(session, opts, iteration)
  */
 pub fn agent_build_turn_messages(session, opts, iteration) {
-  let messages = agent_session_messages(session.session_id)
+  let raw_messages = agent_session_messages(session.session_id)
+  let projected_messages = __agent_apply_projection(session.session_id, raw_messages, opts)
   let decorator = opts?.message_decorator ?? opts?.decorate_message
   if !(opts?.timestamp_messages ?? opts?.message_timestamps ?? false) && decorator == nil {
-    return messages
+    return projected_messages
   }
   let timestamp = date_now_iso()
   var out = []
   var index = 0
-  for message in messages {
+  for message in projected_messages {
     out = out.push(__agent_decorate_turn_message(message, opts, session, iteration, index, timestamp))
     index = index + 1
   }

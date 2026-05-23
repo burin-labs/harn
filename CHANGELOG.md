@@ -107,6 +107,21 @@ condensed series summaries instead of full per-patch history.
   dict for tests and observability. See
   [Runtime introspection tools](docs/src/stdlib/runtime-introspection.md)
   for the full allowlist and integration recipes.
+- **Transcript projection policies (#2189).** New
+  [`transcript_project`](docs/src/llm/transcript-projection.md) builtin and
+  `agent_loop(transcript_projection: ...)` option derive a clean
+  model-visible prefix from an immutable raw transcript without rewriting
+  audit lineage. Ships five policies: `raw`, `clean_tool_repair`,
+  `squash_failed_calls`, `summary_prefix`, and `custom` (closure-driven).
+  Each call appends a `transcript.projection` event (with the policy,
+  reason, kept/dropped indices, and a SHA-256 prefix hash) so replay can
+  reconstruct both the raw audit and the projected view deterministically.
+  A signed-reasoning guardrail refuses to drop Anthropic `thinking` blocks
+  that carry a `signature` (opt out with
+  `respect_provider_signatures: false`). The runtime emits a typed
+  `TranscriptProjected` agent event surfaced over ACP as the
+  `transcript_projected` session update so Burin Code and other hosts can
+  render raw vs. projected side-by-side.
 
 ### Fixed
 

@@ -126,6 +126,26 @@
       "update": {
         "_meta": {
           "harn": {
+            "droppedCount": 2,
+            "keptCount": 3,
+            "policy": "clean_tool_repair",
+            "prefixHash": "sha256:abc",
+            "providerSafetyBlocked": false,
+            "reason": "tool_call_repair_squashed"
+          }
+        },
+        "sessionUpdate": "transcript_projected"
+      }
+    }
+  },
+  {
+    "jsonrpc": "2.0",
+    "method": "session/update",
+    "params": {
+      "sessionId": "session-1",
+      "update": {
+        "_meta": {
+          "harn": {
             "reminder": {
               "body": "Refresh the compacted context before answering.",
               "reminderId": "reminder-1",
