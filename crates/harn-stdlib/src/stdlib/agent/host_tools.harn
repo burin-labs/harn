@@ -148,7 +148,13 @@ fn __agent_host_read_file_request(args, options) {
 }
 
 fn __agent_host_list_directory_request(args, options) {
-  var req = {path: __agent_host_resolve_path(args.path ?? ".", options)}
+  let raw_path = trim(args?.path ?? ".")
+  let path = if raw_path == "" {
+    "."
+  } else {
+    raw_path
+  }
+  var req = {path: __agent_host_resolve_path(path, options)}
   if args?.include_hidden != nil {
     req = req + {include_hidden: args.include_hidden}
   }
@@ -168,7 +174,12 @@ fn __agent_host_file_outline_request(args, options) {
 
 fn __agent_host_search_request(args, options) {
   var req = {pattern: args.pattern}
-  let search_path = args?.path ?? "."
+  let raw_path = trim(args?.path ?? ".")
+  let search_path = if raw_path == "" {
+    "."
+  } else {
+    raw_path
+  }
   req = req + {path: __agent_host_resolve_path(search_path, options)}
   let default_max_matches = __agent_host_options(options)?.search_max_matches
     ?? __agent_host_options(options)?.max_search_matches

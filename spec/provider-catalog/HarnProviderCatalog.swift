@@ -1816,11 +1816,11 @@ public let harnProviderCatalogJSON = #"""
         ]
       },
       "tool_support": {
-        "native": false,
+        "native": true,
         "text": true,
         "tool_search": []
       },
-      "structured_output": "none",
+      "structured_output": "native",
       "format_preferences": {
         "prefers_xml_scaffolding": true,
         "prefers_markdown_scaffolding": true,
@@ -1861,7 +1861,8 @@ public let harnProviderCatalogJSON = #"""
         "pdf",
         "files",
         "thinking",
-        "extended_thinking"
+        "extended_thinking",
+        "structured_output"
       ]
     },
     {
@@ -1882,11 +1883,11 @@ public let harnProviderCatalogJSON = #"""
         ]
       },
       "tool_support": {
-        "native": false,
+        "native": true,
         "text": true,
         "tool_search": []
       },
-      "structured_output": "none",
+      "structured_output": "native",
       "format_preferences": {
         "prefers_xml_scaffolding": true,
         "prefers_markdown_scaffolding": true,
@@ -1927,7 +1928,8 @@ public let harnProviderCatalogJSON = #"""
         "pdf",
         "files",
         "thinking",
-        "extended_thinking"
+        "extended_thinking",
+        "structured_output"
       ]
     },
     {
@@ -3085,7 +3087,7 @@ public let harnProviderCatalogJSON = #"""
         ]
       },
       "tool_support": {
-        "native": true,
+        "native": false,
         "text": true,
         "tool_search": []
       },

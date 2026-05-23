@@ -444,10 +444,11 @@ impl Default for Capabilities {
     }
 }
 
-/// Display-oriented row for `harn check --provider-matrix` and the generated
-/// docs page. Rows are intentionally rule-shaped: `model` is the rule's
-/// `model_match` pattern, because the shipped capability source of truth is a
-/// first-match rule table rather than an exhaustive remote model inventory.
+/// Display-oriented row for `harn providers matrix`, the legacy
+/// `harn check --provider-matrix` surface, and the generated docs page. Rows
+/// are intentionally rule-shaped: `model` is the rule's `model_match` pattern,
+/// because the shipped capability source of truth is a first-match rule table
+/// rather than an exhaustive remote model inventory.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct ProviderCapabilityMatrixRow {
     pub provider: String,
@@ -1158,6 +1159,15 @@ anthropic_beta_features = ["fine-grained-tool-streaming-2025-05-14"]
         assert!(lookup("openrouter", "meta-llama/llama-4-scout").top_k_supported);
         assert!(!lookup("openrouter", "mistralai/devstral-small").top_k_supported);
         assert!(lookup("openrouter", "google/gemma-4-26b-a4b-it").top_k_supported);
+    }
+
+    #[test]
+    fn openrouter_deepseek_v32_defaults_to_text_tools() {
+        reset();
+        let caps = lookup("openrouter", "deepseek/deepseek-v3.2");
+        assert!(!caps.native_tools);
+        assert!(caps.text_tool_wire_format_supported);
+        assert_eq!(caps.structured_output.as_deref(), Some("native"));
     }
 
     #[test]

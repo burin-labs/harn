@@ -13,6 +13,8 @@ pub(crate) mod doctor;
 pub(crate) mod dump_highlight_keywords;
 pub(crate) mod dump_protocol_artifacts;
 pub(crate) mod dump_trigger_quickref;
+pub mod eval_coding_agent;
+pub(crate) mod eval_model_selector;
 pub mod eval_prompt;
 pub(crate) mod eval_prompt_context;
 pub(crate) mod eval_tool_calls;

@@ -66,13 +66,19 @@ harn providers validate --check-artifacts
 
 # Run the existing refresh workflow through the command group.
 harn providers refresh --check
+
+# Regenerate the checked-in capability matrix docs.
+harn providers matrix
+
+# CI gate: compare the capability matrix docs with capabilities.toml.
+harn providers matrix --check
 ```
 
 `make gen-provider-catalog` runs `harn providers export`, and
 `make check-provider-catalog` runs
 `harn providers validate --check-artifacts`. The full `make all` gate
-includes both `check-provider-catalog` and the refresh workflow drift
-gate.
+includes `check-provider-catalog`, `check-provider-matrix`, and the
+refresh workflow drift gate.
 
 For local or private models, pass a providers-style TOML overlay to
 `harn providers validate --overlay <path>` or

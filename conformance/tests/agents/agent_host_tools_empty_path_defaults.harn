@@ -1,0 +1,15 @@
+import { agent_read_tools } from "std/agent/host_tools"
+import { agent_dispatch_tool_call } from "std/agent/primitives"
+
+fn main(harness: Harness) {
+  let root = path_join(harness.fs.temp_dir(), "harn-host-tools-empty-path-" + uuid())
+  harness.fs.mkdir(root)
+  harness.fs.write_text(path_join(root, "needle.txt"), "alpha needle\n")
+  let tools = agent_read_tools(nil, {root: root, cwd: root})
+  let listed = agent_dispatch_tool_call({name: "list_directory", arguments: {path: ""}}, tools)
+  let searched = agent_dispatch_tool_call({name: "search_files", arguments: {path: "", pattern: "needle"}}, tools)
+  __io_println(listed.ok)
+  __io_println(searched.ok)
+  __io_println(contains(listed.rendered_result, "needle.txt"))
+  __io_println(contains(searched.rendered_result, "needle"))
+}

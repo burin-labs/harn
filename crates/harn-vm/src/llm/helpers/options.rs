@@ -484,7 +484,7 @@ fn output_format_error(message: impl Into<String>) -> VmError {
 
 fn unsupported_option_error(option: &str, provider: &str, model: &str) -> VmError {
     VmError::Thrown(VmValue::String(std::rc::Rc::from(format!(
-        "option `{option}` is not supported by `{model}` (provider `{provider}`). See `harn check --provider-matrix` for compatibility."
+        "option `{option}` is not supported by `{model}` (provider `{provider}`). See `harn providers matrix` for compatibility."
     ))))
 }
 
@@ -1462,8 +1462,12 @@ pub(crate) fn extract_llm_options(
     {
         return Err(unsupported_option_error("tools", &provider, &model));
     }
-    let mut native_tools = if let Some(tools) = &tools_val {
-        Some(vm_tools_to_native(tools, &provider, &model)?)
+    let mut native_tools = if tool_format == "native" {
+        if let Some(tools) = &tools_val {
+            Some(vm_tools_to_native(tools, &provider, &model)?)
+        } else {
+            None
+        }
     } else {
         None
     };
@@ -2750,7 +2754,7 @@ mod routing_tests {
 
         assert!(
             err.to_string().contains(&format!(
-                "option `{option}` is not supported by `unsupported-model` (provider `local`). See `harn check --provider-matrix` for compatibility."
+                "option `{option}` is not supported by `unsupported-model` (provider `local`). See `harn providers matrix` for compatibility."
             )),
             "unexpected error for {option}: {err}"
         );
@@ -2837,6 +2841,38 @@ mod routing_tests {
             VmValue::Dict(Rc::new(options)),
         ])
         .expect("tool_choice accepted on text-format routes");
+    }
+
+    #[test]
+    fn text_tool_format_does_not_emit_native_provider_tools() {
+        crate::llm::capabilities::clear_user_overrides();
+        crate::llm_config::clear_user_overrides();
+        super::super::reset_provider_key_cache();
+
+        let options = BTreeMap::from([
+            (
+                "provider".to_string(),
+                VmValue::String(Rc::from("ollama".to_string())),
+            ),
+            (
+                "model".to_string(),
+                VmValue::String(Rc::from("devstral-small-2:24b".to_string())),
+            ),
+            (
+                "tool_format".to_string(),
+                VmValue::String(Rc::from("text".to_string())),
+            ),
+            ("tools".to_string(), one_tool_list()),
+        ]);
+        let opts = extract_llm_options(&[
+            VmValue::String(Rc::from("hello".to_string())),
+            VmValue::Nil,
+            VmValue::Dict(Rc::new(options)),
+        ])
+        .expect("text-format tools accepted");
+
+        assert!(opts.tools.is_some());
+        assert!(opts.native_tools.is_none());
     }
 
     #[test]

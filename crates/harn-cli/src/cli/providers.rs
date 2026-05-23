@@ -16,6 +16,8 @@ pub(crate) enum ProvidersCommand {
     Validate(ProvidersValidateArgs),
     /// Generate JSON, schema, TypeScript, and Swift catalog artifacts.
     Export(ProvidersExportArgs),
+    /// Generate or check the provider capability matrix docs.
+    Matrix(ProvidersMatrixArgs),
 }
 
 #[derive(Debug, Args)]
@@ -61,4 +63,20 @@ pub(crate) struct ProvidersExportArgs {
     /// Merge an additional providers.toml-style overlay before exporting.
     #[arg(long)]
     pub overlay: Option<PathBuf>,
+}
+
+#[derive(Debug, Args)]
+pub(crate) struct ProvidersMatrixArgs {
+    /// Path for the generated markdown matrix.
+    #[arg(long, default_value = "docs/src/provider-matrix.md")]
+    pub output: PathBuf,
+    /// Check whether the matrix file is up to date without writing it.
+    #[arg(long)]
+    pub check: bool,
+    /// Print the generated markdown to stdout instead of writing it.
+    #[arg(long)]
+    pub stdout: bool,
+    /// Only include matrix rows that support the named feature.
+    #[arg(long)]
+    pub filter: Option<String>,
 }

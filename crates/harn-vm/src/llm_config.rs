@@ -1489,6 +1489,10 @@ mod tests {
             "native"
         );
         assert_eq!(default_tool_format("gemma-4-26b-a4b-it", "local"), "text");
+        assert_eq!(
+            default_tool_format("deepseek/deepseek-v3.2", "openrouter"),
+            "text"
+        );
     }
 
     #[test]

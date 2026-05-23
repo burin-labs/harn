@@ -88,11 +88,20 @@ Pair it with [[harn-orchestration]] for workflow behavior and [[harn-testing]] f
 - Does this need conformance or mock-provider fixtures?
 - Does this remain deterministic without network access?
 
+## Catalog and matrix commands
+
+- Refresh provider observations with fixtures: `harn providers refresh --check`.
+- Refresh provider observations live: `harn providers refresh --live`.
+- Regenerate catalog artifacts: `harn providers export`.
+- Validate catalog artifacts: `harn providers validate --check-artifacts`.
+- Regenerate capability matrix docs: `harn providers matrix`.
+- Validate capability matrix docs: `harn providers matrix --check`.
+
 ## Verify
 
 - Provider config: `cargo test -p harn-vm config`.
 - LLM behavior: targeted VM provider tests.
-- Provider matrix: the relevant `harn check --provider-matrix` path.
+- Provider matrix: `harn providers matrix --check`.
 - Connector manifests: package validation tests.
 - Connector package: `harn connector test . --provider <id>`.
 - Mock-provider fixtures: targeted conformance or CLI tests.

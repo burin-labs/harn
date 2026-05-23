@@ -47,10 +47,60 @@ pub struct EvalArgs {
 
 #[derive(Debug, Subcommand)]
 pub enum EvalCommand {
+    /// Benchmark first-coding-agent presets across providers and tool formats.
+    CodingAgent(EvalCodingAgentArgs),
     /// Render and optionally run a `.harn.prompt` across a fleet of models.
     Prompt(EvalPromptArgs),
     /// Run tool-call accuracy, latency, and cost evals over a dataset.
     ToolCalls(EvalToolCallsArgs),
+}
+
+#[derive(Debug, Args)]
+pub struct EvalCodingAgentArgs {
+    /// Model selectors to run (comma-separated, repeatable). Each entry may be
+    /// an alias, `provider:model`, or `provider=...,model=...`.
+    #[arg(long = "model", value_delimiter = ',', default_value = "mock:mock")]
+    pub models: Vec<String>,
+    /// Tool-call rendering modes to compare.
+    #[arg(
+        long = "tool-format",
+        value_delimiter = ',',
+        default_value = "native,text"
+    )]
+    pub tool_formats: Vec<String>,
+    /// Output directory for summary.json, per_run.jsonl, transcripts, and markdown reports.
+    #[arg(long)]
+    pub output: Option<PathBuf>,
+    /// Optional .env file(s) to load for provider credentials. Values are never written to artifacts.
+    #[arg(long = "env-file")]
+    pub env_files: Vec<PathBuf>,
+    /// Append reachable local Ollama/llama.cpp/MLX/vLLM models to the selected matrix.
+    #[arg(long = "include-local")]
+    pub include_local: bool,
+    /// Restrict local discovery to one provider id. Repeatable.
+    #[arg(long = "local-provider")]
+    pub local_providers: Vec<String>,
+    /// Maximum discovered local models to append.
+    #[arg(long = "max-local-models", default_value_t = 2)]
+    pub max_local_models: usize,
+    /// Leave newly-loaded Ollama models running after each local benchmark run.
+    #[arg(long = "keep-local-after-run")]
+    pub keep_local_after_run: bool,
+    /// Stop after N matrix entries, useful for cost-capped smoke runs.
+    #[arg(long = "max-runs")]
+    pub max_runs: Option<usize>,
+    /// Maximum repair-agent loop iterations per run.
+    #[arg(long = "max-iterations", default_value_t = 8)]
+    pub max_iterations: usize,
+    /// Python executable used by the fixture and verification command.
+    #[arg(long, default_value = "python3")]
+    pub python: String,
+    /// Treat missing credentials as an error instead of skipping the run.
+    #[arg(long = "fail-on-unauthorized")]
+    pub fail_on_unauthorized: bool,
+    /// Print the aggregate summary JSON to stdout.
+    #[arg(long)]
+    pub json: bool,
 }
 
 #[derive(Debug, Args)]

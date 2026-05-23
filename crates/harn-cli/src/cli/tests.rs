@@ -2891,6 +2891,35 @@ fn test_parses_providers_export_args() {
 }
 
 #[test]
+fn test_parses_providers_matrix_args() {
+    let cli = Cli::parse_from([
+        "harn",
+        "providers",
+        "matrix",
+        "--output",
+        "tmp/provider-matrix.md",
+        "--check",
+        "--stdout",
+        "--filter",
+        "native_tools",
+    ]);
+
+    let Command::Providers(args) = cli.command.unwrap() else {
+        panic!("expected providers command");
+    };
+    let ProvidersCommand::Matrix(args) = args.command else {
+        panic!("expected providers matrix command");
+    };
+    assert_eq!(
+        args.output,
+        std::path::PathBuf::from("tmp/provider-matrix.md")
+    );
+    assert!(args.check);
+    assert!(args.stdout);
+    assert_eq!(args.filter.as_deref(), Some("native_tools"));
+}
+
+#[test]
 fn test_parses_provider_catalog_args() {
     let cli = Cli::parse_from(["harn", "provider-catalog", "--available-only"]);
 
