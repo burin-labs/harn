@@ -658,7 +658,8 @@ async fn agent_session_compact_builtin(args: Vec<VmValue>) -> Result<VmValue, Vm
         let archived_messages = original_message_count
             .saturating_sub(messages.len())
             .saturating_add(1);
-        agent_sessions::replace_messages_with_summary(&id, &messages, Some(&summary));
+        agent_sessions::replace_messages_with_summary(&id, &messages, Some(&summary))
+            .map_err(err)?;
         record_agent_session_compaction(
             &id,
             &config,
@@ -666,9 +667,9 @@ async fn agent_session_compact_builtin(args: Vec<VmValue>) -> Result<VmValue, Vm
             estimated_tokens_before,
             estimated_tokens_after,
             summary.len(),
-        );
+        )?;
     } else {
-        agent_sessions::replace_messages(&id, &messages);
+        agent_sessions::replace_messages(&id, &messages).map_err(err)?;
     }
     Ok(VmValue::Int(kept as i64))
 }
@@ -767,7 +768,7 @@ fn record_agent_session_compaction(
     estimated_tokens_before: usize,
     estimated_tokens_after: usize,
     new_summary_len: usize,
-) {
+) -> Result<(), VmError> {
     let mut metadata = serde_json::json!({
         "mode": "host",
         "strategy": &config.policy_strategy,
@@ -791,7 +792,7 @@ fn record_agent_session_compaction(
         "",
         Some(metadata.clone()),
     );
-    let _ = agent_sessions::append_event(id, event);
+    agent_sessions::append_event(id, event).map_err(err)?;
     crate::llm::emit_live_agent_event_sync(&crate::agent_events::AgentEvent::TranscriptCompacted {
         session_id: id.to_string(),
         mode: "host".to_string(),
@@ -804,6 +805,7 @@ fn record_agent_session_compaction(
         instruction_source: config.policy.instruction_source().map(str::to_string),
         compaction_policy: config.policy.metadata_json(),
     });
+    Ok(())
 }
 
 fn compact_usize_opt(

@@ -31,6 +31,79 @@ use crate::value::VmValue;
 /// least-recently-accessed session is evicted on the next `open`.
 pub const DEFAULT_SESSION_CAP: usize = RuntimeLimits::DEFAULT.max_agent_sessions;
 
+/// Default cap on retained prompt-visible messages per session. The
+/// limit is intentionally high enough for normal long-running agents
+/// while still bounding accidental unbounded growth.
+pub const DEFAULT_TRANSCRIPT_MESSAGE_CAP: usize = 4096;
+
+/// Default cap on retained transcript audit events per session. Events
+/// include message-derived entries plus orchestration lifecycle records.
+pub const DEFAULT_TRANSCRIPT_EVENT_CAP: usize = 32768;
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum TranscriptBudgetRecovery {
+    Reject,
+    Trim { keep_last: usize },
+    Compact { keep_last: usize },
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct SessionTranscriptBudgetPolicy {
+    pub max_messages: usize,
+    pub max_events: usize,
+    pub max_approx_bytes: Option<usize>,
+    pub recovery: TranscriptBudgetRecovery,
+}
+
+impl SessionTranscriptBudgetPolicy {
+    pub fn reject(max_messages: usize, max_events: usize) -> Self {
+        Self {
+            max_messages: max_messages.max(1),
+            max_events: max_events.max(1),
+            max_approx_bytes: None,
+            recovery: TranscriptBudgetRecovery::Reject,
+        }
+    }
+
+    pub fn trim(max_messages: usize, max_events: usize, keep_last: usize) -> Self {
+        Self {
+            max_messages: max_messages.max(1),
+            max_events: max_events.max(1),
+            max_approx_bytes: None,
+            recovery: TranscriptBudgetRecovery::Trim { keep_last },
+        }
+    }
+
+    pub fn compact(max_messages: usize, max_events: usize, keep_last: usize) -> Self {
+        Self {
+            max_messages: max_messages.max(1),
+            max_events: max_events.max(1),
+            max_approx_bytes: None,
+            recovery: TranscriptBudgetRecovery::Compact { keep_last },
+        }
+    }
+
+    pub fn with_max_approx_bytes(mut self, max_approx_bytes: Option<usize>) -> Self {
+        self.max_approx_bytes = max_approx_bytes.map(|limit| limit.max(1));
+        self
+    }
+
+    fn normalized(&self) -> Self {
+        Self {
+            max_messages: self.max_messages.max(1),
+            max_events: self.max_events.max(1),
+            max_approx_bytes: self.max_approx_bytes.map(|limit| limit.max(1)),
+            recovery: self.recovery.clone(),
+        }
+    }
+}
+
+impl Default for SessionTranscriptBudgetPolicy {
+    fn default() -> Self {
+        Self::reject(DEFAULT_TRANSCRIPT_MESSAGE_CAP, DEFAULT_TRANSCRIPT_EVENT_CAP)
+    }
+}
+
 pub struct SessionState {
     pub id: String,
     pub transcript: VmValue,
@@ -66,6 +139,8 @@ pub struct SessionState {
     /// the route's native thinking shape. Exposed over ACP as
     /// `session/set_config_option(configId="thought_level")`.
     pub pinned_reasoning_policy: Option<String>,
+    pub transcript_budget_policy: SessionTranscriptBudgetPolicy,
+    pub last_transcript_budget_action: Option<serde_json::Value>,
 }
 
 impl SessionState {
@@ -86,6 +161,8 @@ impl SessionState {
             system_prompt: None,
             pinned_model: None,
             pinned_reasoning_policy: None,
+            transcript_budget_policy: default_transcript_budget_policy(),
+            last_transcript_budget_action: None,
         }
     }
 }
@@ -113,6 +190,8 @@ pub struct ReminderInjectionReport {
 thread_local! {
     static SESSIONS: RefCell<HashMap<String, SessionState>> = RefCell::new(HashMap::new());
     static SESSION_CAP: Cell<usize> = const { Cell::new(DEFAULT_SESSION_CAP) };
+    static DEFAULT_TRANSCRIPT_BUDGET_POLICY: RefCell<SessionTranscriptBudgetPolicy> =
+        RefCell::new(SessionTranscriptBudgetPolicy::default());
     static CURRENT_SESSION_STACK: RefCell<Vec<String>> = const { RefCell::new(Vec::new()) };
     static CURRENT_TOOL_CALL_STACK: RefCell<Vec<String>> = const { RefCell::new(Vec::new()) };
 }
@@ -160,11 +239,57 @@ pub fn session_cap() -> usize {
     SESSION_CAP.with(|c| c.get())
 }
 
+pub fn set_default_transcript_budget_policy(policy: SessionTranscriptBudgetPolicy) {
+    DEFAULT_TRANSCRIPT_BUDGET_POLICY.with(|cell| {
+        *cell.borrow_mut() = policy.normalized();
+    });
+}
+
+pub fn reset_default_transcript_budget_policy() {
+    set_default_transcript_budget_policy(SessionTranscriptBudgetPolicy::default());
+}
+
+pub fn default_transcript_budget_policy() -> SessionTranscriptBudgetPolicy {
+    DEFAULT_TRANSCRIPT_BUDGET_POLICY.with(|cell| cell.borrow().clone())
+}
+
+pub fn transcript_budget_policy(id: &str) -> Option<SessionTranscriptBudgetPolicy> {
+    SESSIONS.with(|s| {
+        s.borrow()
+            .get(id)
+            .map(|state| state.transcript_budget_policy.clone())
+    })
+}
+
+pub fn set_transcript_budget_policy(
+    id: &str,
+    policy: SessionTranscriptBudgetPolicy,
+) -> Result<(), String> {
+    SESSIONS.with(|s| {
+        let mut map = s.borrow_mut();
+        let Some(state) = map.get_mut(id) else {
+            return Err(format!("agent session '{id}' does not exist"));
+        };
+        let previous = state.transcript_budget_policy.clone();
+        let previous_action = state.last_transcript_budget_action.clone();
+        state.transcript_budget_policy = policy.normalized();
+        let candidate = state.transcript.clone();
+        if let Err(error) = apply_transcript_with_budget(state, candidate, "policy_update") {
+            state.transcript_budget_policy = previous;
+            state.last_transcript_budget_action = previous_action;
+            return Err(error);
+        }
+        state.last_accessed = Instant::now();
+        Ok(())
+    })
+}
+
 /// Clear the session store. Wired into `reset_llm_state` for test isolation.
 pub fn reset_session_store() {
     SESSIONS.with(|s| s.borrow_mut().clear());
     CURRENT_SESSION_STACK.with(|stack| stack.borrow_mut().clear());
     CURRENT_TOOL_CALL_STACK.with(|stack| stack.borrow_mut().clear());
+    reset_default_transcript_budget_policy();
 }
 
 pub(crate) fn push_current_session(id: String) {
@@ -464,6 +589,7 @@ pub fn reset_transcript(id: &str) -> bool {
         state.transcript = empty_transcript(id);
         state.tool_format = None;
         state.system_prompt = None;
+        state.last_transcript_budget_action = None;
         state.last_accessed = Instant::now();
         true
     })
@@ -482,6 +608,8 @@ pub fn fork(src_id: &str, dst_id: Option<String>) -> Option<String> {
         src_system_prompt,
         src_pinned_model,
         src_pinned_reasoning_policy,
+        src_transcript_budget_policy,
+        src_last_transcript_budget_action,
         dst,
     ) = SESSIONS.with(|s| {
         let mut map = s.borrow_mut();
@@ -495,6 +623,8 @@ pub fn fork(src_id: &str, dst_id: Option<String>) -> Option<String> {
             src.system_prompt.clone(),
             src.pinned_model.clone(),
             src.pinned_reasoning_policy.clone(),
+            src.transcript_budget_policy.clone(),
+            src.last_transcript_budget_action.clone(),
             dst,
         ))
     })?;
@@ -508,10 +638,24 @@ pub fn fork(src_id: &str, dst_id: Option<String>) -> Option<String> {
             state.system_prompt = src_system_prompt;
             state.pinned_model = src_pinned_model;
             state.pinned_reasoning_policy = src_pinned_reasoning_policy;
+            state.transcript_budget_policy = src_transcript_budget_policy;
+            state.last_transcript_budget_action = src_last_transcript_budget_action;
             state.last_accessed = Instant::now();
         }
         update_lineage(&mut map, src_id, &dst, None);
     });
+    let budget_ok = SESSIONS.with(|s| {
+        let mut map = s.borrow_mut();
+        let Some(state) = map.get_mut(&dst) else {
+            return false;
+        };
+        let candidate = state.transcript.clone();
+        apply_transcript_with_budget(state, candidate, "fork").is_ok()
+    });
+    if !budget_ok {
+        close(&dst);
+        return None;
+    }
     // open_or_create evicts BEFORE inserting, so the dst slot is
     // guaranteed once we get here. The existence check is cheap
     // insurance against a future refactor that breaks that invariant.
@@ -551,11 +695,12 @@ pub fn truncate(id: &str, keep_first: usize) -> Option<SessionTruncateResult> {
     SESSIONS.with(|s| {
         let mut map = s.borrow_mut();
         let state = map.get_mut(id)?;
-        Some(truncate_state(state, keep_first))
+        let result = truncate_state(state, keep_first)?;
+        Some(result)
     })
 }
 
-fn truncate_state(state: &mut SessionState, keep_first: usize) -> SessionTruncateResult {
+fn truncate_state(state: &mut SessionState, keep_first: usize) -> Option<SessionTruncateResult> {
     let dict = state
         .transcript
         .as_dict()
@@ -596,14 +741,14 @@ fn truncate_state(state: &mut SessionState, keep_first: usize) -> SessionTruncat
         );
         next.insert("messages".to_string(), VmValue::List(Rc::new(retained)));
         next.remove("summary");
-        state.transcript = VmValue::Dict(Rc::new(next));
+        apply_transcript_with_budget(state, VmValue::Dict(Rc::new(next)), "truncate").ok()?;
     }
     state.last_accessed = Instant::now();
-    SessionTruncateResult {
+    Some(SessionTruncateResult {
         kept_turn_count,
         removed_turn_count,
         new_tip_turn_id,
-    }
+    })
 }
 
 /// Retain only the last `keep_last` messages in the session transcript.
@@ -628,7 +773,7 @@ pub fn trim(id: &str, keep_last: usize) -> Option<usize> {
             )),
         );
         next.insert("messages".to_string(), VmValue::List(Rc::new(retained)));
-        state.transcript = VmValue::Dict(Rc::new(next));
+        apply_transcript_with_budget(state, VmValue::Dict(Rc::new(next)), "trim").ok()?;
         state.last_accessed = Instant::now();
         Some(kept)
     })
@@ -666,8 +811,7 @@ pub fn inject_message(id: &str, message: VmValue) -> Result<(), String> {
             _ => crate::llm::helpers::transcript_events_from_messages(&messages),
         };
         let new_message = VmValue::Dict(Rc::new(msg_dict));
-        emit_identified_user_message_event(id, &new_message);
-        emit_llm_message_event(id, messages.len(), &new_message);
+        let message_index = messages.len();
         events.push(crate::llm::helpers::transcript_event_from_message(
             &new_message,
         ));
@@ -675,7 +819,16 @@ pub fn inject_message(id: &str, message: VmValue) -> Result<(), String> {
         let mut next = dict;
         next.insert("events".to_string(), VmValue::List(Rc::new(events)));
         next.insert("messages".to_string(), VmValue::List(Rc::new(messages)));
-        state.transcript = VmValue::Dict(Rc::new(next));
+        let persisted_message = next
+            .get("messages")
+            .and_then(|value| match value {
+                VmValue::List(list) => list.get(message_index).cloned(),
+                _ => None,
+            })
+            .unwrap_or(VmValue::Nil);
+        apply_transcript_with_budget(state, VmValue::Dict(Rc::new(next)), "inject_message")?;
+        emit_identified_user_message_event(id, &persisted_message);
+        emit_llm_message_event(id, message_index, &persisted_message);
         state.last_accessed = Instant::now();
         Ok(())
     })
@@ -717,6 +870,396 @@ fn user_message_content_blocks(content: &serde_json::Value) -> Vec<serde_json::V
             "type": "text",
             "text": other.to_string(),
         })],
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct TranscriptBudgetUsage {
+    message_count: usize,
+    event_count: usize,
+    approx_bytes: Option<usize>,
+}
+
+fn transcript_messages_from_dict(dict: &BTreeMap<String, VmValue>) -> Vec<VmValue> {
+    match dict.get("messages") {
+        Some(VmValue::List(list)) => list.iter().cloned().collect(),
+        _ => Vec::new(),
+    }
+}
+
+fn transcript_events_from_dict(dict: &BTreeMap<String, VmValue>) -> Vec<VmValue> {
+    match dict.get("events") {
+        Some(VmValue::List(list)) => list.iter().cloned().collect(),
+        _ => {
+            let messages = transcript_messages_from_dict(dict);
+            crate::llm::helpers::transcript_events_from_messages(&messages)
+        }
+    }
+}
+
+fn transcript_usage(transcript: &VmValue, include_bytes: bool) -> TranscriptBudgetUsage {
+    let Some(dict) = transcript.as_dict() else {
+        return TranscriptBudgetUsage {
+            message_count: 0,
+            event_count: 0,
+            approx_bytes: include_bytes.then_some(0),
+        };
+    };
+    let approx_bytes = if include_bytes {
+        serde_json::to_vec(&crate::llm::helpers::vm_value_to_json(transcript))
+            .map(|bytes| bytes.len())
+            .ok()
+            .or(Some(usize::MAX))
+    } else {
+        None
+    };
+    TranscriptBudgetUsage {
+        message_count: transcript_messages_from_dict(dict).len(),
+        event_count: transcript_events_from_dict(dict).len(),
+        approx_bytes,
+    }
+}
+
+fn transcript_budget_exceeded_reason(
+    usage: &TranscriptBudgetUsage,
+    policy: &SessionTranscriptBudgetPolicy,
+) -> Option<&'static str> {
+    if usage.message_count > policy.max_messages {
+        return Some("message_count");
+    }
+    if usage.event_count > policy.max_events {
+        return Some("event_count");
+    }
+    if let (Some(bytes), Some(limit)) = (usage.approx_bytes, policy.max_approx_bytes) {
+        if bytes > limit {
+            return Some("approx_bytes");
+        }
+    }
+    None
+}
+
+fn transcript_budget_usage_json(usage: &TranscriptBudgetUsage) -> serde_json::Value {
+    serde_json::json!({
+        "messages": usage.message_count,
+        "events": usage.event_count,
+        "approx_bytes": usage.approx_bytes,
+    })
+}
+
+fn transcript_budget_policy_json(policy: &SessionTranscriptBudgetPolicy) -> serde_json::Value {
+    let recovery = match &policy.recovery {
+        TranscriptBudgetRecovery::Reject => serde_json::json!({"action": "reject"}),
+        TranscriptBudgetRecovery::Trim { keep_last } => {
+            serde_json::json!({"action": "trim", "keep_last": keep_last})
+        }
+        TranscriptBudgetRecovery::Compact { keep_last } => {
+            serde_json::json!({"action": "compact", "keep_last": keep_last})
+        }
+    };
+    serde_json::json!({
+        "max_messages": policy.max_messages,
+        "max_events": policy.max_events,
+        "max_approx_bytes": policy.max_approx_bytes,
+        "recovery": recovery,
+    })
+}
+
+fn transcript_budget_recovery_name(recovery: &TranscriptBudgetRecovery) -> &'static str {
+    match recovery {
+        TranscriptBudgetRecovery::Reject => "reject",
+        TranscriptBudgetRecovery::Trim { .. } => "trim",
+        TranscriptBudgetRecovery::Compact { .. } => "compact",
+    }
+}
+
+fn transcript_budget_error(
+    state: &SessionState,
+    policy: &SessionTranscriptBudgetPolicy,
+    usage: &TranscriptBudgetUsage,
+    reason: &str,
+) -> String {
+    let byte_suffix = match (usage.approx_bytes, policy.max_approx_bytes) {
+        (Some(bytes), Some(limit)) => format!(", approx_bytes {bytes}/{limit}"),
+        _ => String::new(),
+    };
+    format!(
+        "transcript budget exceeded for session '{}': {reason} (messages {}/{}, events {}/{}{}; recovery={})",
+        state.id,
+        usage.message_count,
+        policy.max_messages,
+        usage.event_count,
+        policy.max_events,
+        byte_suffix,
+        transcript_budget_recovery_name(&policy.recovery),
+    )
+}
+
+fn transcript_budget_audit_json(
+    action: &str,
+    source: &str,
+    reason: &str,
+    policy: &SessionTranscriptBudgetPolicy,
+    usage_before: &TranscriptBudgetUsage,
+    usage_attempted: &TranscriptBudgetUsage,
+    usage_after: &TranscriptBudgetUsage,
+) -> serde_json::Value {
+    serde_json::json!({
+        "action": action,
+        "source": source,
+        "reason": reason,
+        "policy": transcript_budget_policy_json(policy),
+        "usage_before": transcript_budget_usage_json(usage_before),
+        "usage_attempted": transcript_budget_usage_json(usage_attempted),
+        "usage_after": transcript_budget_usage_json(usage_after),
+        "removed_messages": usage_attempted.message_count.saturating_sub(usage_after.message_count),
+        "removed_events": usage_attempted.event_count.saturating_sub(usage_after.event_count),
+    })
+}
+
+fn transcript_budget_event(audit: &serde_json::Value) -> VmValue {
+    let action = audit
+        .get("action")
+        .and_then(serde_json::Value::as_str)
+        .unwrap_or("enforced");
+    crate::llm::helpers::transcript_event(
+        "transcript_budget",
+        "system",
+        "internal",
+        &format!("Transcript budget {action}."),
+        Some(audit.clone()),
+    )
+}
+
+fn append_event_to_transcript(transcript: VmValue, event: VmValue) -> VmValue {
+    let Some(dict) = transcript.as_dict() else {
+        return transcript;
+    };
+    let mut next = dict.clone();
+    let mut events = transcript_events_from_dict(&next);
+    events.push(event);
+    next.insert("events".to_string(), VmValue::List(Rc::new(events)));
+    VmValue::Dict(Rc::new(next))
+}
+
+fn summary_message_vm(summary: &str) -> VmValue {
+    crate::stdlib::json_to_vm_value(&summary_message_json(summary))
+}
+
+fn tail_message_capacity(
+    policy: &SessionTranscriptBudgetPolicy,
+    reserve_audit_event: bool,
+) -> usize {
+    let event_capacity = if reserve_audit_event {
+        policy.max_events.saturating_sub(1)
+    } else {
+        policy.max_events
+    };
+    policy.max_messages.min(event_capacity)
+}
+
+fn trim_transcript_for_budget(
+    transcript: &VmValue,
+    policy: &SessionTranscriptBudgetPolicy,
+    keep_last: usize,
+) -> VmValue {
+    let dict = transcript.as_dict().cloned().unwrap_or_else(BTreeMap::new);
+    let messages = transcript_messages_from_dict(&dict);
+    let keep = keep_last.min(tail_message_capacity(policy, true));
+    let start = messages.len().saturating_sub(keep);
+    let retained: Vec<VmValue> = messages.into_iter().skip(start).collect();
+    let mut next = dict;
+    next.insert(
+        "events".to_string(),
+        VmValue::List(Rc::new(
+            crate::llm::helpers::transcript_events_from_messages(&retained),
+        )),
+    );
+    next.insert("messages".to_string(), VmValue::List(Rc::new(retained)));
+    next.remove("summary");
+    VmValue::Dict(Rc::new(next))
+}
+
+fn compact_transcript_for_budget(
+    transcript: &VmValue,
+    policy: &SessionTranscriptBudgetPolicy,
+    keep_last: usize,
+    reason: &str,
+) -> VmValue {
+    let dict = transcript.as_dict().cloned().unwrap_or_else(BTreeMap::new);
+    let messages = transcript_messages_from_dict(&dict);
+    let message_capacity = tail_message_capacity(policy, true);
+    let mut retained = Vec::new();
+    let mut summary = None;
+
+    if messages.len() > message_capacity {
+        if message_capacity > 0 {
+            let tail_keep = keep_last.min(message_capacity.saturating_sub(1));
+            let archived = messages.len().saturating_sub(tail_keep);
+            let summary_text = format!(
+                "[auto-compacted {archived} older message(s) under transcript budget]\nSession transcript exceeded the {reason} budget; retained the most recent {tail_keep} message(s)."
+            );
+            retained.push(summary_message_vm(&summary_text));
+            retained.extend(messages.into_iter().skip(archived).take(tail_keep));
+            summary = Some(summary_text);
+        }
+    } else {
+        retained = messages;
+    }
+
+    let mut next = dict;
+    next.insert(
+        "events".to_string(),
+        VmValue::List(Rc::new(
+            crate::llm::helpers::transcript_events_from_messages(&retained),
+        )),
+    );
+    next.insert("messages".to_string(), VmValue::List(Rc::new(retained)));
+    if let Some(summary) = summary {
+        next.insert("summary".to_string(), VmValue::String(Rc::from(summary)));
+    } else {
+        next.remove("summary");
+    }
+    VmValue::Dict(Rc::new(next))
+}
+
+fn recovered_transcript_with_audit(
+    recovered: VmValue,
+    action: &str,
+    source: &str,
+    reason: &str,
+    policy: &SessionTranscriptBudgetPolicy,
+    usage_before: &TranscriptBudgetUsage,
+    usage_attempted: &TranscriptBudgetUsage,
+    include_bytes: bool,
+) -> (VmValue, serde_json::Value, TranscriptBudgetUsage) {
+    let usage_after_without_audit = transcript_usage(&recovered, include_bytes);
+    let initial_audit = transcript_budget_audit_json(
+        action,
+        source,
+        reason,
+        policy,
+        usage_before,
+        usage_attempted,
+        &usage_after_without_audit,
+    );
+    let with_initial_audit =
+        append_event_to_transcript(recovered.clone(), transcript_budget_event(&initial_audit));
+    let usage_after = transcript_usage(&with_initial_audit, include_bytes);
+    let audit = transcript_budget_audit_json(
+        action,
+        source,
+        reason,
+        policy,
+        usage_before,
+        usage_attempted,
+        &usage_after,
+    );
+    let with_audit = append_event_to_transcript(recovered, transcript_budget_event(&audit));
+    let usage_after = transcript_usage(&with_audit, include_bytes);
+    (with_audit, audit, usage_after)
+}
+
+fn apply_transcript_with_budget(
+    state: &mut SessionState,
+    candidate: VmValue,
+    source: &str,
+) -> Result<(), String> {
+    let policy = state.transcript_budget_policy.normalized();
+    let include_bytes = policy.max_approx_bytes.is_some();
+    let usage_before = transcript_usage(&state.transcript, include_bytes);
+    let usage_attempted = transcript_usage(&candidate, include_bytes);
+    let Some(reason) = transcript_budget_exceeded_reason(&usage_attempted, &policy) else {
+        state.transcript = candidate;
+        return Ok(());
+    };
+
+    match policy.recovery.clone() {
+        TranscriptBudgetRecovery::Reject => {
+            let audit = transcript_budget_audit_json(
+                "rejected",
+                source,
+                reason,
+                &policy,
+                &usage_before,
+                &usage_attempted,
+                &usage_before,
+            );
+            state.last_transcript_budget_action = Some(audit);
+            Err(transcript_budget_error(
+                state,
+                &policy,
+                &usage_attempted,
+                reason,
+            ))
+        }
+        TranscriptBudgetRecovery::Trim { keep_last } => {
+            let recovered = trim_transcript_for_budget(&candidate, &policy, keep_last);
+            let (with_audit, audit, usage_after) = recovered_transcript_with_audit(
+                recovered,
+                "trimmed",
+                source,
+                reason,
+                &policy,
+                &usage_before,
+                &usage_attempted,
+                include_bytes,
+            );
+            if transcript_budget_exceeded_reason(&usage_after, &policy).is_some() {
+                let rejected = transcript_budget_audit_json(
+                    "rejected",
+                    source,
+                    reason,
+                    &policy,
+                    &usage_before,
+                    &usage_attempted,
+                    &usage_after,
+                );
+                state.last_transcript_budget_action = Some(rejected);
+                return Err(transcript_budget_error(
+                    state,
+                    &policy,
+                    &usage_after,
+                    reason,
+                ));
+            }
+            state.last_transcript_budget_action = Some(audit);
+            state.transcript = with_audit;
+            Ok(())
+        }
+        TranscriptBudgetRecovery::Compact { keep_last } => {
+            let recovered = compact_transcript_for_budget(&candidate, &policy, keep_last, reason);
+            let (with_audit, audit, usage_after) = recovered_transcript_with_audit(
+                recovered,
+                "compacted",
+                source,
+                reason,
+                &policy,
+                &usage_before,
+                &usage_attempted,
+                include_bytes,
+            );
+            if transcript_budget_exceeded_reason(&usage_after, &policy).is_some() {
+                let rejected = transcript_budget_audit_json(
+                    "rejected",
+                    source,
+                    reason,
+                    &policy,
+                    &usage_before,
+                    &usage_attempted,
+                    &usage_after,
+                );
+                state.last_transcript_budget_action = Some(rejected);
+                return Err(transcript_budget_error(
+                    state,
+                    &policy,
+                    &usage_after,
+                    reason,
+                ));
+            }
+            state.last_transcript_budget_action = Some(audit);
+            state.transcript = with_audit;
+            Ok(())
+        }
     }
 }
 
@@ -790,7 +1333,7 @@ pub fn seed_from_messages(
             );
         }
         let vm_messages = crate::llm::helpers::json_messages_to_vm(messages);
-        state.transcript = crate::llm::helpers::new_transcript_with(
+        let candidate = crate::llm::helpers::new_transcript_with(
             Some(resolved.clone()),
             vm_messages,
             None,
@@ -798,6 +1341,7 @@ pub fn seed_from_messages(
                 metadata,
             ))),
         );
+        apply_transcript_with_budget(state, candidate, "seed_from_messages")?;
         state.last_accessed = Instant::now();
         Ok(resolved)
     })
@@ -883,13 +1427,19 @@ pub fn prompt_state_json(id: &str) -> SessionPromptState {
 
 /// Overwrite the transcript for this session. Used by `agent_loop` on
 /// exit to persist the synthesized transcript.
-pub fn store_transcript(id: &str, transcript: VmValue) {
+pub fn store_transcript(id: &str, transcript: VmValue) -> Result<(), String> {
     SESSIONS.with(|s| {
-        if let Some(state) = s.borrow_mut().get_mut(id) {
-            state.transcript = transcript_with_session_metadata(transcript, state);
-            state.last_accessed = Instant::now();
-        }
-    });
+        let mut map = s.borrow_mut();
+        let Some(state) = map.get_mut(id) else {
+            return Err(format!(
+                "agent_session_store_transcript: unknown session id '{id}'"
+            ));
+        };
+        let transcript = transcript_with_session_metadata(transcript, state);
+        apply_transcript_with_budget(state, transcript, "store_transcript")?;
+        state.last_accessed = Instant::now();
+        Ok(())
+    })
 }
 
 /// Remove malformed reminder events after their drop audit has been emitted.
@@ -931,7 +1481,11 @@ pub fn prune_invalid_reminder_events(id: &str) -> usize {
         if pruned > 0 {
             let mut next = dict;
             next.insert("events".to_string(), VmValue::List(Rc::new(kept)));
-            state.transcript = VmValue::Dict(Rc::new(next));
+            let _ = apply_transcript_with_budget(
+                state,
+                VmValue::Dict(Rc::new(next)),
+                "prune_invalid_reminder_events",
+            );
             state.last_accessed = Instant::now();
         }
         pruned
@@ -953,7 +1507,7 @@ pub fn apply_reminder_post_turn(id: &str, turn: i64) -> Result<serde_json::Value
         let report = crate::llm::helpers::apply_reminder_post_turn(&state.transcript, turn);
         if report.decremented_count > 0 || !report.expired.is_empty() {
             if let Some(next) = report.transcript.clone() {
-                state.transcript = next;
+                apply_transcript_with_budget(state, next, "apply_reminder_post_turn")?;
             }
             state.last_accessed = Instant::now();
         }
@@ -1040,7 +1594,7 @@ pub fn inject_reminder(
         events.push(crate::llm::helpers::transcript_reminder_event(&reminder));
         let mut next = dict;
         next.insert("events".to_string(), VmValue::List(Rc::new(events)));
-        state.transcript = VmValue::Dict(Rc::new(next));
+        apply_transcript_with_budget(state, VmValue::Dict(Rc::new(next)), "inject_reminder")?;
         state.last_accessed = Instant::now();
         Ok(())
     })?;
@@ -1113,7 +1667,7 @@ pub fn append_event(id: &str, event: VmValue) -> Result<(), String> {
         events.push(event);
         let mut next = dict;
         next.insert("events".to_string(), VmValue::List(Rc::new(events)));
-        state.transcript = VmValue::Dict(Rc::new(next));
+        apply_transcript_with_budget(state, VmValue::Dict(Rc::new(next)), "append_event")?;
         state.last_accessed = Instant::now();
         Ok(())
     })
@@ -1121,8 +1675,8 @@ pub fn append_event(id: &str, event: VmValue) -> Result<(), String> {
 
 /// Replace the transcript's message list wholesale. Used by the
 /// in-loop compaction path, which operates on JSON messages.
-pub fn replace_messages(id: &str, messages: &[serde_json::Value]) {
-    replace_messages_with_summary(id, messages, None);
+pub fn replace_messages(id: &str, messages: &[serde_json::Value]) -> Result<(), String> {
+    replace_messages_with_summary(id, messages, None)
 }
 
 /// Replace the transcript's message list and optionally update the
@@ -1133,11 +1687,13 @@ pub fn replace_messages_with_summary(
     id: &str,
     messages: &[serde_json::Value],
     summary: Option<&str>,
-) {
+) -> Result<(), String> {
     SESSIONS.with(|s| {
         let mut map = s.borrow_mut();
         let Some(state) = map.get_mut(id) else {
-            return;
+            return Err(format!(
+                "agent_session_replace_messages: unknown session id '{id}'"
+            ));
         };
         let dict = state
             .transcript
@@ -1161,10 +1717,13 @@ pub fn replace_messages_with_summary(
                 "summary".to_string(),
                 VmValue::String(Rc::from(summary.to_string())),
             );
+        } else {
+            next.remove("summary");
         }
-        state.transcript = VmValue::Dict(Rc::new(next));
+        apply_transcript_with_budget(state, VmValue::Dict(Rc::new(next)), "replace_messages")?;
         state.last_accessed = Instant::now();
-    });
+        Ok(())
+    })
 }
 
 pub fn append_subscriber(id: &str, callback: VmValue) {
@@ -1294,7 +1853,7 @@ pub fn record_system_prompt(id: &str, system_prompt: &str) -> Result<(), String>
             ));
             next.insert("events".to_string(), VmValue::List(Rc::new(events)));
         }
-        state.transcript = VmValue::Dict(Rc::new(next));
+        apply_transcript_with_budget(state, VmValue::Dict(Rc::new(next)), "record_system_prompt")?;
         state.last_accessed = Instant::now();
         Ok(())
     })
@@ -1442,6 +2001,20 @@ fn transcript_with_session_metadata(transcript: VmValue, state: &SessionState) -
             crate::stdlib::json_to_vm_value(&crate::llm::helpers::system_prompt_metadata(
                 system_prompt,
             )),
+        );
+    }
+    if let Some(last_action) = state.last_transcript_budget_action.as_ref() {
+        let usage = transcript_usage(
+            &VmValue::Dict(Rc::new(next.clone())),
+            state.transcript_budget_policy.max_approx_bytes.is_some(),
+        );
+        metadata.insert(
+            "transcript_budget".to_string(),
+            crate::stdlib::json_to_vm_value(&serde_json::json!({
+                "policy": transcript_budget_policy_json(&state.transcript_budget_policy.normalized()),
+                "usage": transcript_budget_usage_json(&usage),
+                "last_action": last_action,
+            })),
         );
     }
     if !metadata.is_empty() {

@@ -113,27 +113,33 @@ pub(in super::super) fn ensure_worker_config_session_ids(
     }
 }
 
-fn restore_worker_transcript(config: &WorkerConfig, transcript: Option<&VmValue>) {
+fn restore_worker_transcript(
+    config: &WorkerConfig,
+    transcript: Option<&VmValue>,
+) -> Result<(), VmError> {
     let Some(transcript) = transcript.cloned() else {
         if let WorkerConfig::SubAgent { spec } = config {
             crate::agent_sessions::open_or_create(Some(spec.session_id.clone()));
             crate::agent_sessions::reset_transcript(&spec.session_id);
         }
-        return;
+        return Ok(());
     };
     match config {
         WorkerConfig::Stage { node, .. } => {
             if let Some(session_id) = worker_stage_session_id(node) {
                 crate::agent_sessions::open_or_create(Some(session_id.clone()));
-                crate::agent_sessions::store_transcript(&session_id, transcript);
+                crate::agent_sessions::store_transcript(&session_id, transcript)
+                    .map_err(VmError::Runtime)?;
             }
         }
         WorkerConfig::SubAgent { spec } => {
             crate::agent_sessions::open_or_create(Some(spec.session_id.clone()));
-            crate::agent_sessions::store_transcript(&spec.session_id, transcript);
+            crate::agent_sessions::store_transcript(&spec.session_id, transcript)
+                .map_err(VmError::Runtime)?;
         }
         WorkerConfig::Workflow { .. } => {}
     }
+    Ok(())
 }
 
 async fn call_worker_harn_export(
@@ -153,7 +159,7 @@ async fn execute_worker_config(
     audit: MutationSessionRecord,
 ) -> Result<WorkerExecutionResult, VmError> {
     ensure_worker_worktree(&worker_id, &mut execution)?;
-    restore_worker_transcript(&config, prior_transcript.as_ref());
+    restore_worker_transcript(&config, prior_transcript.as_ref())?;
     let execution_record = execution_record(&execution);
     crate::stdlib::process::set_thread_execution_context(Some(execution_record.clone()));
     let parent_run_id = audit.run_id.clone();
