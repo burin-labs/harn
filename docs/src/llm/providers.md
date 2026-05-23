@@ -30,6 +30,7 @@ For model-specific feature support, see the generated
 | HuggingFace | `HF_TOKEN` or `HUGGINGFACE_API_KEY` | explicit `model` |
 | Bedrock | AWS env/profile/instance role | explicit Bedrock `model` |
 | Azure OpenAI | `AZURE_OPENAI_API_KEY` or `AZURE_OPENAI_AD_TOKEN` | deployment name in `model` |
+| Gemini API | `GEMINI_API_KEY` or `GOOGLE_API_KEY` | `gemini-2.5-flash` or explicit Gemini model ID |
 | Vertex AI | `VERTEX_AI_ACCESS_TOKEN` or `GOOGLE_APPLICATION_CREDENTIALS` | Gemini model ID |
 | Ollama | `OLLAMA_HOST` (optional) | `qwen3.6-coding` when installed, otherwise `llama3.2` |
 | Local server | `LOCAL_LLM_BASE_URL` | `LOCAL_LLM_MODEL` or explicit `model` |
@@ -150,6 +151,25 @@ Vertex AI requires a project and location. Set `VERTEX_AI_PROJECT` or
 JSON file through `GOOGLE_APPLICATION_CREDENTIALS`. Harn exchanges service
 account keys for a short-lived OAuth token with the cloud-platform scope.
 
+The native Gemini API uses Google's `generateContent` shape directly. Harn
+lowers native tools to `functionDeclarations`, records model-emitted
+`functionCall` parts, returns tool observations as `functionResponse` parts,
+and preserves Gemini thought signatures in conversation history without
+showing those opaque bytes as visible reasoning. `llm_call(..., {schema: ...})`
+uses Gemini's JSON response controls (`responseMimeType` plus JSON schema),
+and response usage maps `cachedContentTokenCount` to Harn's cache-read token
+field.
+
+Vertex AI also serves Gemini models through `generateContent`, but it is a
+Google Cloud route with OAuth/service-account authentication and project /
+location scoping. The built-in Vertex adapter shares the Google function
+declaration schema for native tool definitions while keeping its existing
+Google Cloud request envelope. OpenAI-compatible routes that serve Gemini
+model IDs, such as OpenRouter or a local proxy, remain OpenAI-wire routes:
+they use OpenAI-style `tool_calls` / `tools` and OpenAI-style structured-output
+parameters rather than Gemini `functionCall`, `functionResponse`, or
+`responseJsonSchema` parts.
+
 ### Capability matrix + `harn.toml` overrides
 
 The provider support table above is **not** hard-coded: it's the output
@@ -239,8 +259,8 @@ entry accepts these fields:
 | `model_match` | glob string | Required. Matched against the lowercased model ID. Leading/trailing `*` or a single middle `*` supported. |
 | `version_min` | `[major, minor]` | Narrows the match to a parseable version (Anthropic / OpenAI extractors). Rules where `version_min` is set but the model ID won't parse are skipped. |
 | `native_tools` | bool | Whether the provider accepts a native tool-call wire shape. |
-| `message_wire_format` | string | Shared request/response message format: `openai`, `anthropic`, or `ollama`. |
-| `native_tool_wire_format` | string | Native tool definition shape: `openai` or `anthropic`. |
+| `message_wire_format` | string | Shared request/response message format: `openai`, `anthropic`, `gemini`, or `ollama`. |
+| `native_tool_wire_format` | string | Native tool definition shape for shared helpers: `openai` or `anthropic`. Gemini and Vertex accept Harn's canonical tool definitions and their adapters emit Google `functionDeclarations`. |
 | `defer_loading` | bool | Whether `defer_loading: true` on tool definitions is honored server-side. |
 | `tool_search` | list of strings | Native `tool_search` variants, preferred first. Anthropic: `["bm25", "regex"]`. OpenAI: `["hosted", "client"]`. Empty = no native support (client fallback only). |
 | `max_tools` | int | Cap on tool count. `harn lint` will warn if a registry exceeds the smallest cap any active provider advertises. |

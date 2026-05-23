@@ -71,6 +71,8 @@ pipeline test(task) {
   assert(!qwen35.prefers_xml_tools, "qwen3.5 does not use XML tool wrappers")
   assert(qwen35.thinking_block_style == "inline", "qwen3.5 uses inline thinking blocks")
   let gemini = provider_capabilities("gemini", "gemini-2.5-flash")
+  assert(gemini.native_tools, "gemini native route supports function declarations")
+  assert(gemini.message_wire_format == "gemini", "gemini native route uses Gemini message parts")
   assert(gemini.vision_supported, "gemini native route accepts image content")
   assert(gemini.thinking_modes[0] == "enabled", "gemini 2.5 native route exposes typed thinking")
   assert(gemini.structured_output_mode == "native_json", "gemini prefers native JSON output")

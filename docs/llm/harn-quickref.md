@@ -989,6 +989,15 @@ Provider auto-resolution precedence:
 | `<model>:<tag>` | `ollama` | unchanged |
 | anything else | `HARN_DEFAULT_PROVIDER` / configured default | unchanged |
 
+Native Gemini routes use Google's `generateContent` wire format directly:
+tool schemas become `functionDeclarations`, model tool requests are
+`functionCall` parts, tool observations are `functionResponse` parts, and
+JSON schemas lower to Gemini's JSON response controls. Vertex AI also serves
+Gemini models through `generateContent`, but keeps Google Cloud project /
+location and OAuth/service-account authentication. OpenAI-compatible Gemini
+routes such as OpenRouter remain OpenAI-wire routes and use OpenAI-style
+`tools`, `tool_calls`, and structured-output parameters.
+
 ### Reranking and self-certainty
 
 ```harn
@@ -1242,8 +1251,8 @@ set under `[provider_defaults.<name>]`:
 | `model_match` | glob string | Required. Matched against lowercased model ID. |
 | `version_min` | `[major, minor]` | Optional lower bound; parsed via Claude / GPT version extractors. |
 | `native_tools` | bool | Native tool-call wire shape supported. |
-| `message_wire_format` | string | Shared request/response message format: `openai`, `anthropic`, or `ollama`. |
-| `native_tool_wire_format` | string | Native tool definition shape: `openai` or `anthropic`. |
+| `message_wire_format` | string | Shared request/response message format: `openai`, `anthropic`, `gemini`, or `ollama`. |
+| `native_tool_wire_format` | string | Native tool definition shape for shared helpers: `openai` or `anthropic`. Gemini/Vertex adapters emit Google `functionDeclarations` from canonical tool definitions. |
 | `defer_loading` | bool | Provider honors `defer_loading: true` on tool defs. |
 | `tool_search` | `[string]` | Native variants (`["bm25", "regex"]` or `["hosted", "client"]`). Empty = no native support. |
 | `max_tools` | int | Cap on tool count (used by `harn lint`). |

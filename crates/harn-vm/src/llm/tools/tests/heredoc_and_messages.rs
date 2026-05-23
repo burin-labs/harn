@@ -670,6 +670,73 @@ fn assistant_tool_message_stringifies_ollama_arguments() {
 }
 
 #[test]
+fn assistant_tool_message_uses_gemini_parts_for_gemini_models() {
+    let message = build_assistant_tool_message(
+        "checking",
+        &[json!({
+            "id": "call_001",
+            "name": "read",
+            "arguments": {"path": "main.rs"},
+            "thought_signature": "opaque-signature",
+        })],
+        "gemini",
+        "gemini-2.5-flash",
+    );
+
+    assert_eq!(message["role"], "assistant");
+    assert_eq!(message["content"][0], json!({"text": "checking"}));
+    assert_eq!(
+        message["content"][1]["functionCall"],
+        json!({"id": "call_001", "name": "read", "args": {"path": "main.rs"}})
+    );
+    assert_eq!(
+        message["content"][1]["thoughtSignature"],
+        "opaque-signature"
+    );
+}
+
+#[test]
+fn assistant_response_message_preserves_gemini_block_signatures() {
+    let message = build_assistant_response_message(
+        "checking",
+        &[
+            json!({
+                "type": "output_text",
+                "text": "checking",
+                "provider_metadata": {
+                    "gemini": {"thought_signature": "text-signature"}
+                }
+            }),
+            json!({
+                "type": "tool_call",
+                "id": "call_001",
+                "name": "read",
+                "arguments": {"path": "main.rs"},
+                "thought_signature": "tool-signature",
+            }),
+        ],
+        &[json!({
+            "id": "call_001",
+            "name": "read",
+            "arguments": {"path": "main.rs"},
+            "thought_signature": "tool-signature",
+        })],
+        None,
+        "gemini",
+        "gemini-2.5-flash",
+    );
+
+    assert_eq!(message["role"], "assistant");
+    assert_eq!(message["content"][0]["text"], "checking");
+    assert_eq!(message["content"][0]["thoughtSignature"], "text-signature");
+    assert_eq!(
+        message["content"][1]["functionCall"],
+        json!({"id": "call_001", "name": "read", "args": {"path": "main.rs"}})
+    );
+    assert_eq!(message["content"][1]["thoughtSignature"], "tool-signature");
+}
+
+#[test]
 fn assistant_tool_message_uses_model_capability_shape_for_bedrock_claude() {
     let message = build_assistant_tool_message(
         "using a tool",

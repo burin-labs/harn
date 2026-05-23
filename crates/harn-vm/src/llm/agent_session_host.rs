@@ -2303,6 +2303,17 @@ mod tests {
         ));
         assert_eq!(bedrock_claude["role"], "tool_result");
         assert_eq!(bedrock_claude["tool_use_id"], "call_003");
+
+        let gemini = vm_to_json(&tool_result_message_for_provider(
+            "gemini",
+            "gemini-2.5-flash",
+            "release_run",
+            "call_004",
+            "ok",
+        ));
+        assert_eq!(gemini["role"], "tool");
+        assert_eq!(gemini["name"], "release_run");
+        assert_eq!(gemini["tool_call_id"], "call_004");
     }
 
     #[test]

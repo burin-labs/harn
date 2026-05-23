@@ -76,6 +76,19 @@ fn llm_mock_builtin(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmEr
             ))
         }
     };
+    let blocks = match config.get("blocks") {
+        Some(VmValue::List(list)) => Some(
+            list.iter()
+                .map(helpers::vm_value_to_json)
+                .collect::<Vec<_>>(),
+        ),
+        Some(VmValue::Nil) | None => None,
+        _ => {
+            return Err(VmError::Runtime(
+                "llm_mock: blocks must be a list of response blocks".to_string(),
+            ))
+        }
+    };
 
     let match_pattern = config.get("match").and_then(|v| {
         if matches!(v, VmValue::Nil) {
@@ -122,6 +135,13 @@ fn llm_mock_builtin(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmEr
         .get("model")
         .map(|v| v.display())
         .unwrap_or_else(|| "mock".to_string());
+    let provider = config.get("provider").and_then(|v| {
+        if matches!(v, VmValue::Nil) {
+            None
+        } else {
+            Some(v.display())
+        }
+    });
 
     // Optional error injection: {error: {category, message,
     // retry_after_ms?}}. When present the mock short-circuits the
@@ -190,8 +210,8 @@ fn llm_mock_builtin(args: &[VmValue], _out: &mut String) -> Result<VmValue, VmEr
         thinking_summary,
         stop_reason,
         model,
-        provider: None,
-        blocks: None,
+        provider,
+        blocks,
         logprobs,
         error,
     });
