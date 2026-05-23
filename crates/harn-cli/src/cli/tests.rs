@@ -306,6 +306,35 @@ fn test_parses_eval_tool_calls_args() {
 }
 
 #[test]
+fn test_parses_eval_context_args() {
+    let cli = Cli::parse_from([
+        "harn",
+        "eval",
+        "context",
+        "examples/evals/context-engineering-smoke.json",
+        "--output",
+        ".harn-runs/context-eval/smoke",
+        "--json",
+    ]);
+
+    let Command::Eval(args) = cli.command.unwrap() else {
+        panic!("expected eval command");
+    };
+    let Some(EvalCommand::Context(context)) = args.command else {
+        panic!("expected context command");
+    };
+    assert_eq!(
+        context.manifest,
+        PathBuf::from("examples/evals/context-engineering-smoke.json")
+    );
+    assert_eq!(
+        context.output,
+        Some(PathBuf::from(".harn-runs/context-eval/smoke"))
+    );
+    assert!(context.json);
+}
+
+#[test]
 fn test_parses_run_yes_flag() {
     let cli = Cli::parse_from(["harn", "run", "--yes", "main.harn"]);
 

@@ -1,0 +1,178 @@
+/**
+ * std/context/eval - helpers for Harn context-engineering eval manifests.
+ *
+ * The CLI runner owns execution. These helpers keep Harn-authored fixtures,
+ * package evals, and host UI code aligned on the same portable data shape.
+ */
+import { filter_nil } from "std/collections"
+
+let CONTEXT_EVAL_MANIFEST_SCHEMA = "harn.context_eval.manifest.v1"
+
+let CONTEXT_EVAL_REPORT_SCHEMA = "harn.context_eval.report.v1"
+
+let CONTEXT_EVAL_VERSION = 1
+
+fn __context_eval_text(value) {
+  if value == nil {
+    return ""
+  }
+  return trim(to_string(value))
+}
+
+fn __context_eval_required_text(value, field) {
+  let text = __context_eval_text(value)
+  if text == "" {
+    throw "std/context/eval: " + field + " is required"
+  }
+  return text
+}
+
+fn __context_eval_list(value, field) {
+  if value == nil {
+    return []
+  }
+  if type_of(value) != "list" {
+    throw "std/context/eval: " + field + " must be a list"
+  }
+  return value
+}
+
+fn __context_eval_string_list(value, field) {
+  var out = []
+  for item in __context_eval_list(value, field) {
+    let text = __context_eval_text(item)
+    if text != "" && !out.contains(text) {
+      out = out.push(text)
+    }
+  }
+  return out.sort()
+}
+
+/**
+ * Build a context-eval mode declaration.
+ *
+ * @effects: []
+ * @allocation: heap
+ * @errors: []
+ * @api_stability: stable
+ * @example: context_eval_mode("pack", "hud_pack", {budget_tokens: 1600})
+ */
+pub fn context_eval_mode(id: string, kind = nil, options = nil) {
+  let opts = options ?? {}
+  let mode_id = __context_eval_required_text(id, "mode id")
+  let mode_kind = __context_eval_text(kind ?? opts?.kind ?? mode_id)
+  return filter_nil(
+    opts
+      + {
+      id: mode_id,
+      kind: if mode_kind == "" {
+        mode_id
+      } else {
+        mode_kind
+      },
+      name: opts?.name,
+      description: opts?.description,
+      artifact_ids: __context_eval_string_list(opts?.artifact_ids ?? opts?.artifacts, "artifact_ids"),
+      include_artifact_kinds: __context_eval_string_list(
+        opts?.include_artifact_kinds ?? opts?.include_kinds,
+        "include_artifact_kinds",
+      ),
+      exclude_artifact_kinds: __context_eval_string_list(
+        opts?.exclude_artifact_kinds ?? opts?.exclude_kinds,
+        "exclude_artifact_kinds",
+      ),
+      budget_tokens: opts?.budget_tokens ?? opts?.max_tokens,
+      assemble_strategy: opts?.assemble_strategy ?? opts?.strategy,
+      dedup: opts?.dedup,
+      projection_policy: opts?.projection_policy ?? opts?.projection,
+      transcript_keep_last: opts?.transcript_keep_last ?? opts?.keep_last,
+      tool_disclosure: opts?.tool_disclosure,
+      tool_allowlist: __context_eval_string_list(opts?.tool_allowlist ?? opts?.tools, "tool_allowlist"),
+      expected_cache_hit: opts?.expected_cache_hit,
+      cache_namespace: opts?.cache_namespace,
+      compaction_policy: opts?.compaction_policy,
+      preprocessing: opts?.preprocessing ?? "deterministic",
+      metadata: opts?.metadata ?? {},
+    },
+  )
+}
+
+/**
+ * Build a context-eval task declaration.
+ *
+ * @effects: []
+ * @allocation: heap
+ * @errors: []
+ * @api_stability: stable
+ * @example: context_eval_task("incident", "Find the failing service", {artifacts: []})
+ */
+pub fn context_eval_task(id: string, objective: string, options = nil) {
+  let opts = options ?? {}
+  let task_id = __context_eval_required_text(id, "task id")
+  let task_objective = __context_eval_required_text(objective, "objective")
+  let expected = opts?.expected ?? {}
+  return filter_nil(
+    opts
+      + {
+      id: task_id,
+      name: opts?.name,
+      objective: task_objective,
+      reference_answer: opts?.reference_answer,
+      artifacts: __context_eval_list(opts?.artifacts, "artifacts"),
+      transcript: __context_eval_list(opts?.transcript, "transcript"),
+      tools: __context_eval_list(opts?.tools, "tools"),
+      tool_events: __context_eval_list(opts?.tool_events, "tool_events"),
+      expected: expected
+        + {
+        required_terms: __context_eval_string_list(expected?.required_terms ?? opts?.required_terms, "required_terms"),
+        expected_artifact_ids: __context_eval_string_list(
+          expected?.expected_artifact_ids ?? opts?.expected_artifact_ids,
+          "expected_artifact_ids",
+        ),
+        expected_tools: __context_eval_string_list(expected?.expected_tools ?? opts?.expected_tools, "expected_tools"),
+        max_input_tokens: expected?.max_input_tokens ?? opts?.max_input_tokens,
+      },
+      observed: opts?.observed ?? {},
+      mode_observations: opts?.mode_observations ?? {},
+      metadata: opts?.metadata ?? {},
+    },
+  )
+}
+
+/**
+ * Build a portable context-eval manifest for `harn eval context`.
+ *
+ * @effects: []
+ * @allocation: heap
+ * @errors: []
+ * @api_stability: stable
+ * @example: context_eval_manifest(tasks, modes, {id: "repo-context-smoke"})
+ */
+pub fn context_eval_manifest(tasks = [], modes = [], options = nil) {
+  let opts = options ?? {}
+  return filter_nil(
+    {
+      _type: CONTEXT_EVAL_MANIFEST_SCHEMA,
+      version: CONTEXT_EVAL_VERSION,
+      id: __context_eval_text(opts?.id ?? "context-eval"),
+      name: opts?.name,
+      description: opts?.description,
+      modes: __context_eval_list(modes, "modes"),
+      tasks: __context_eval_list(tasks, "tasks"),
+      metadata: opts?.metadata ?? {},
+    },
+  )
+}
+
+/**
+ * Return the report schema id consumed by harn-cloud and local host UIs.
+ *
+ * @effects: []
+ * @allocation: stack
+ * @errors: []
+ * @api_stability: stable
+ * @example: context_eval_report_schema()
+ */
+pub fn context_eval_report_schema() {
+  return CONTEXT_EVAL_REPORT_SCHEMA
+}

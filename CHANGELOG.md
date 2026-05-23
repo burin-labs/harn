@@ -10,6 +10,12 @@ condensed series summaries instead of full per-patch history.
 
 ### Added
 
+- **Reusable context-engineering eval primitives (#2195).** Added
+  `harn eval context` plus portable `harn.context_eval.manifest.v1` and
+  `harn.context_eval.report.v1` shapes for deterministic pack, projection,
+  compaction, and tool-disclosure experiments. The smoke manifest exercises
+  three tasks across three context modes and writes stable JSON/JSONL/Markdown
+  artifacts that hosted eval tooling and downstream products can ingest.
 - **First-class compaction instructions (#2190).** Manual session compaction,
   transcript auto-compaction, host-triggered compaction, and `agent_loop`
   auto-compaction now accept a typed `CompactionPolicy` with optional

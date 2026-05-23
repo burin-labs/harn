@@ -1318,12 +1318,14 @@ harn eval evals/regression.json
 harn eval harn.eval.toml
 harn eval evals/clarifying-question.json
 harn eval --llm-mock fixtures.jsonl --structural-experiment doubled_prompt pipeline.harn
+harn eval context examples/evals/context-engineering-smoke.json \
+    --output target/context-eval --json
 harn eval prompt examples/coding-agent-system.harn.prompt \
     --fleet claude-opus-4-7,gpt-5,gemini-2.5-pro,qwen3.5,ollama:qwen3.5 \
     --bindings examples/coding-agent-system.bindings.json
 ```
 
-`harn eval` accepts five inputs:
+The legacy `harn eval <path>` entrypoint accepts five inputs:
 
 - a single run record JSON file
 - a directory of run record JSON files
@@ -1351,6 +1353,31 @@ the pipeline twice in isolated temp run directories: once as the baseline and
 once with `HARN_STRUCTURAL_EXPERIMENT=<spec>`. The CLI then evaluates both run
 sets against their embedded replay fixtures and prints a paired A/B summary.
 Use `--llm-mock <fixture.jsonl>` to keep the two runs deterministic.
+
+### harn eval context
+
+Run deterministic context-engineering evals over task fixtures and named
+context modes:
+
+```bash
+harn eval context examples/evals/context-engineering-smoke.json \
+    --output target/context-eval --json
+```
+
+The manifest uses `_type = "harn.context_eval.manifest.v1"` and can be JSON
+or TOML. It declares tasks, artifacts, transcript snippets, tool disclosures,
+expected terms/artifacts/tools, and modes such as HUD packs, projections,
+compaction, or limited tool disclosure. The local runner does not call an LLM;
+it scores whether each mode exposes enough deterministic context for the task
+and writes:
+
+- `summary.json`: a `harn.context_eval.report.v1` aggregate report
+- `per_run.jsonl`: one machine-readable record per task/mode run
+- `summary.md`: a compact human-readable table
+
+The report schema is checked into
+`spec/schemas/context-eval-report.v1.schema.json` so hosted evaluators,
+dashboards, and downstream products can ingest the same local artifacts.
 
 ### harn eval prompt
 

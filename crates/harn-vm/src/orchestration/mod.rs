@@ -95,6 +95,9 @@ mod workflow_test_fixtures;
 mod records;
 pub use records::*;
 
+mod context_eval;
+pub use context_eval::*;
+
 mod merge_captain_audit;
 pub use merge_captain_audit::*;
 

@@ -96,8 +96,8 @@ pub(crate) use dump::{
     DumpTriggerQuickrefArgs,
 };
 pub use eval::{
-    EvalArgs, EvalCodingAgentArgs, EvalCommand, EvalPromptArgs, EvalPromptMode, EvalPromptOutput,
-    EvalToolCallsArgs, EvalToolCallsCommand, EvalToolCallsRegressionArgs,
+    EvalArgs, EvalCodingAgentArgs, EvalCommand, EvalContextArgs, EvalPromptArgs, EvalPromptMode,
+    EvalPromptOutput, EvalToolCallsArgs, EvalToolCallsCommand, EvalToolCallsRegressionArgs,
 };
 pub(crate) use explain::{CatalogFormat, ExplainArgs};
 pub(crate) use fix::{FixArgs, HarnessThreadingMode};
