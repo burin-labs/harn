@@ -245,52 +245,15 @@ pub(crate) fn register_math_builtins(vm: &mut Vm) {
     vm.register_builtin("variance", |args, _out| {
         let values = non_empty_numeric_list_arg(args, "variance")?;
         let sample = args.get(1).is_some_and(VmValue::is_truthy);
-        if sample && values.len() < 2 {
-            return Err(VmError::Runtime(
-                "sample variance requires at least 2 values".to_string(),
-            ));
-        }
-        let mean = values.iter().sum::<f64>() / values.len() as f64;
-        let total = values
-            .iter()
-            .map(|value| {
-                let delta = value - mean;
-                delta * delta
-            })
-            .sum::<f64>();
-        let denom = if sample {
-            values.len() - 1
-        } else {
-            values.len()
-        };
-        Ok(VmValue::Float(total / denom as f64))
+        Ok(VmValue::Float(variance_for(&values, sample, "variance")?))
     });
 
     vm.register_builtin("stddev", |args, _out| {
-        let variance = {
-            let values = non_empty_numeric_list_arg(args, "stddev")?;
-            let sample = args.get(1).is_some_and(VmValue::is_truthy);
-            if sample && values.len() < 2 {
-                return Err(VmError::Runtime(
-                    "sample variance requires at least 2 values".to_string(),
-                ));
-            }
-            let mean = values.iter().sum::<f64>() / values.len() as f64;
-            let total = values
-                .iter()
-                .map(|value| {
-                    let delta = value - mean;
-                    delta * delta
-                })
-                .sum::<f64>();
-            let denom = if sample {
-                values.len() - 1
-            } else {
-                values.len()
-            };
-            total / denom as f64
-        };
-        Ok(VmValue::Float(variance.sqrt()))
+        let values = non_empty_numeric_list_arg(args, "stddev")?;
+        let sample = args.get(1).is_some_and(VmValue::is_truthy);
+        Ok(VmValue::Float(
+            variance_for(&values, sample, "stddev")?.sqrt(),
+        ))
     });
 
     register_unary_float(vm, "sin", f64::sin);
@@ -429,6 +392,28 @@ fn non_empty_numeric_list_arg(args: &[VmValue], label: &str) -> Result<Vec<f64>,
     Ok(values)
 }
 
+fn variance_for(values: &[f64], sample: bool, label: &str) -> Result<f64, VmError> {
+    if sample && values.len() < 2 {
+        return Err(VmError::Runtime(format!(
+            "sample {label} requires at least 2 values"
+        )));
+    }
+    let mean = values.iter().sum::<f64>() / values.len() as f64;
+    let total = values
+        .iter()
+        .map(|value| {
+            let delta = value - mean;
+            delta * delta
+        })
+        .sum::<f64>();
+    let denom = if sample {
+        values.len() - 1
+    } else {
+        values.len()
+    };
+    Ok(total / denom as f64)
+}
+
 fn finite_float_to_i64(n: f64) -> Result<i64, VmError> {
     if !n.is_finite() {
         return Err(VmError::Runtime(
@@ -491,5 +476,14 @@ mod tests {
         let error = call(&mut vm, "floor", vec![VmValue::Float(f64::INFINITY)])
             .expect_err("infinite float cannot become int");
         assert!(error.to_string().contains("non-finite"));
+    }
+
+    #[test]
+    fn stddev_sample_error_names_stddev() {
+        let mut vm = vm();
+        let values = VmValue::List(Rc::new(vec![VmValue::Int(1)]));
+        let error = call(&mut vm, "stddev", vec![values, VmValue::Bool(true)])
+            .expect_err("sample stddev needs at least two values");
+        assert!(error.to_string().contains("sample stddev"));
     }
 }

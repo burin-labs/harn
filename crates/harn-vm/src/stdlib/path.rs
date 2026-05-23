@@ -9,7 +9,7 @@
 use std::collections::BTreeMap;
 use std::rc::Rc;
 
-use crate::value::{VmError, VmValue};
+use crate::value::VmValue;
 use crate::vm::Vm;
 use crate::workspace_path::{classify_workspace_path, normalize_workspace_path, WorkspacePathInfo};
 
@@ -363,9 +363,6 @@ pub(crate) fn register_path_helper_builtins(vm: &mut Vm) {
                 .collect(),
         )))
     });
-
-    // Silence unused-import warnings if VmError becomes unused in a future refactor.
-    let _ = std::marker::PhantomData::<VmError>;
 }
 
 #[cfg(test)]
