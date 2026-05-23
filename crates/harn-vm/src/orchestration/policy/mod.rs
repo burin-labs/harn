@@ -2,6 +2,7 @@
 
 mod approval_rules;
 mod effects;
+mod nested_budget;
 mod types;
 
 use std::cell::RefCell;
@@ -24,6 +25,10 @@ pub use approval_rules::{
 pub use effects::{
     compute_handoff_effects, effect_kind_label, effect_record_summary, effect_subset_violations,
     effects_from_metadata, EffectKind, EffectRecord, EffectScope,
+};
+pub use nested_budget::{
+    annotate_nested_execution_options, enter_nested_execution_policy, NestedExecutionGuard,
+    NestedExecutionKind, NESTED_KIND_OPTION_KEY, NESTED_LABEL_OPTION_KEY,
 };
 pub use types::{
     enforce_tool_arg_constraints, AutoCompactPolicy, BranchSemantics, CapabilityPolicy,
