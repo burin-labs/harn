@@ -1650,6 +1650,7 @@ See [LLM calls and agent loops](llm-and-agents.md) for full documentation.
 | `trust.policy_for(actor_id)` | actor_id: string | dict | Return only the derived capability policy |
 | `trust.verify_chain()` | none | dict | Verify the underlying OpenTrustGraph hash chain |
 | `llm_info()` | — | dict | Current LLM config: `{provider, model, api_key_set}` |
+| `runtime_introspection()` | — | dict | Full resolved runtime snapshot: `{provider, model, model_alias, family, tool_format, tier, context_window, runtime_context_window, capabilities, harn_version, harness}`. Fields stay `nil` until the first `llm_call` on the thread; `harn_version` and `harness` are always populated. See [Runtime introspection tools](./stdlib/runtime-introspection.md) for the model-callable tool surface (`runtime_introspection_tools(reg)`). |
 | `llm_usage()` | — | dict | Cumulative usage: `{input_tokens, output_tokens, total_duration_ms, call_count, total_calls}` |
 | `llm_resolve_model(alias)` | alias: string | dict | Resolve model alias or provider-prefixed selector to `{id, provider, alias, tool_format, tier}` via providers.toml |
 | `llm_model_info(model)` | model: string | dict | Return resolved model/provider metadata plus catalog entry, capabilities, API-key availability, and QC default |

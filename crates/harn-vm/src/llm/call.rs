@@ -359,6 +359,10 @@ pub(super) async fn llm_call_impl(args: Vec<VmValue>) -> Result<VmValue, VmError
     let _llm_render_guard = crate::stdlib::template::LlmRenderContextGuard::enter(
         crate::stdlib::template::LlmRenderContext::resolve(&provider, &model),
     );
+    // `execute_llm_call` records the resolved provider/model into the
+    // runtime-introspection snapshot — that's the single DRY point for
+    // every llm_call path (plain, bridged, structured), so we don't
+    // also record here.
     match execute_llm_call(opts, options, None).await {
         Ok(v) => Ok(v),
         Err(err) => Err(VmError::Thrown(build_llm_error_dict(
@@ -436,6 +440,12 @@ pub(crate) async fn execute_llm_call(
     options: Option<std::collections::BTreeMap<String, VmValue>>,
     bridge: Option<&Rc<crate::bridge::HostBridge>>,
 ) -> Result<VmValue, VmError> {
+    // Publish the resolved provider/model facts for the introspection
+    // tool surface (current_model() / current_provider() / ...). All
+    // llm_call code paths funnel through this function — the bridged
+    // `llm_call_with_bridge`, structured variants, and the plain
+    // `llm_call_impl` — so recording here is the single DRY point.
+    super::introspection::record_resolved_llm_call(&opts.provider, &opts.model);
     let outcome = if let Some(policy) = opts.routing_policy.clone() {
         execute_routing_schema_retry_loop(policy, opts, options, bridge).await?
     } else {

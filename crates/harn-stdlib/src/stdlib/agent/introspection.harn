@@ -1,0 +1,169 @@
+// @harn-entrypoint-category agent.stdlib
+/**
+ * runtime_introspection_tools attaches the model-callable runtime
+ * introspection bundle to a tool registry.
+ *
+ * The model can call these tools to answer identity questions
+ * ("what model are you?", "how much context do you have?") with the
+ * facts the runtime actually resolved for the current turn, rather
+ * than guessing from its training prior or relying on prompt prose
+ * that may have gone stale.
+ *
+ * Tools added (each `executor: "harn"`, dispatched by the VM stdlib
+ * short-circuit so no Harn closure is allocated):
+ *
+ * - `current_model` — resolved model id, alias, family, tier
+ * - `current_provider` — resolved provider, tool format
+ * - `current_context_window` — catalog and runtime context window
+ * - `current_harn_version` — embedded `HARN_VERSION`
+ * - `current_harness` — `HARN_HARNESS` env override or `"harn"` default
+ * - `available_runtime_capabilities` — provider/model capability matrix
+ * - `current_compaction_policy` — active transcript-compaction policy
+ *
+ * Each call returns a dict with a `resolved` flag (false before the
+ * first `llm_call` on the thread) and any unresolved fields are nil
+ * rather than fabricated.
+ *
+ * Opt-in: this is intentionally NOT wired into `agent_loop` by
+ * default. Minimal harnesses skip the call. Hosts that want the model
+ * to answer truthfully (e.g. Burin Code, the harn CLI) attach the
+ * bundle explicitly:
+ *
+ * ```harn
+ * var reg = tool_registry()
+ * reg = runtime_introspection_tools(reg)
+ * reg = tool_define(reg, "my_tool", "...", { ... })
+ * agent_loop(prompt, system, {tools: reg})
+ * ```
+ *
+ * Options: pass `{only: ["current_model", "current_provider"]}` to
+ * narrow the surface, or `{exclude: [...]}` to drop specific tools.
+ * `only` and `exclude` are mutually exclusive — `only` wins when both
+ * are set (a callsite that defensively passes both stays valid).
+ *
+ * @effects: []
+ * @allocation: heap
+ * @errors: []
+ * @api_stability: experimental
+ * @example: runtime_introspection_tools(registry, options)
+ */
+pub fn runtime_introspection_tools(registry = nil, options = nil) {
+  let base = registry ?? tool_registry()
+  let selected = __introspection_selected_names(options)
+  var tools = base
+  for spec in __introspection_tool_specs() {
+    if !__introspection_in_set(selected, spec.name) {
+      continue
+    }
+    if __introspection_registry_has(tools, spec.name) {
+      continue
+    }
+    tools = tool_define(tools, spec.name, spec.description, spec.config)
+  }
+  return tools
+}
+
+fn __introspection_tool_specs() {
+  let nullary_params = {}
+  let annotations = {introspection: true, structural: true, initiator: "model"}
+  let returns_object = {type: "object"}
+  return [
+    {
+      name: "current_model",
+      description: "Return the resolved {model, model_alias, family, tier, resolved} for the most recent llm_call on this thread.",
+      config: {executor: "harn", parameters: nullary_params, returns: returns_object, annotations: annotations},
+    },
+    {
+      name: "current_provider",
+      description: "Return the resolved {provider, tool_format, resolved} used for the most recent llm_call on this thread.",
+      config: {executor: "harn", parameters: nullary_params, returns: returns_object, annotations: annotations},
+    },
+    {
+      name: "current_context_window",
+      description: "Return {context_window, runtime_context_window, resolved} for the resolved model. Both windows are token counts and may be null when the catalog doesn't carry the model.",
+      config: {executor: "harn", parameters: nullary_params, returns: returns_object, annotations: annotations},
+    },
+    {
+      name: "current_harn_version",
+      description: "Return {harn_version} — the embedded Harn release this runtime was built from.",
+      config: {executor: "harn", parameters: nullary_params, returns: returns_object, annotations: annotations},
+    },
+    {
+      name: "current_harness",
+      description: "Return {harness} — the host shell embedding the runtime (e.g. \"burin-code\", \"harn\", \"claude-code\"). Reads HARN_HARNESS, falls back to \"harn\".",
+      config: {executor: "harn", parameters: nullary_params, returns: returns_object, annotations: annotations},
+    },
+    {
+      name: "available_runtime_capabilities",
+      description: "Return {capabilities, resolved} — the provider/model capability matrix the runtime resolved (native tools, prompt caching, vision, thinking modes, structured output mode, etc).",
+      config: {executor: "harn", parameters: nullary_params, returns: returns_object, annotations: annotations},
+    },
+    {
+      name: "current_compaction_policy",
+      description: "Return {policy} — the transcript compaction policy that will apply if this agent_loop accumulates enough context to trigger it.",
+      config: {executor: "harn", parameters: nullary_params, returns: returns_object, annotations: annotations},
+    },
+  ]
+}
+
+fn __introspection_all_names() {
+  let names = []
+  var collected = names
+  for spec in __introspection_tool_specs() {
+    collected = collected + [spec.name]
+  }
+  return collected
+}
+
+fn __introspection_selected_names(options) {
+  if type_of(options) != "dict" {
+    return __introspection_all_names()
+  }
+  let only = options?.only
+  if type_of(only) == "list" && len(only) > 0 {
+    return only
+  }
+  let exclude = options?.exclude
+  if type_of(exclude) != "list" || len(exclude) == 0 {
+    return __introspection_all_names()
+  }
+  var keep = []
+  for name in __introspection_all_names() {
+    if !__introspection_in_set(exclude, name) {
+      keep = keep + [name]
+    }
+  }
+  return keep
+}
+
+fn __introspection_in_set(names, candidate) {
+  if type_of(names) != "list" {
+    return false
+  }
+  for value in names {
+    if to_string(value) == candidate {
+      return true
+    }
+  }
+  return false
+}
+
+fn __introspection_registry_has(registry, name) {
+  let entries = registry?.tools ?? []
+  if type_of(entries) != "list" {
+    return false
+  }
+  for entry in entries {
+    if type_of(entry) == "dict" {
+      let entry_name = entry?.name
+      if entry_name != nil && to_string(entry_name) == name {
+        return true
+      }
+      let func = entry?.function
+      if type_of(func) == "dict" && to_string(func?.name ?? "") == name {
+        return true
+      }
+    }
+  }
+  return false
+}

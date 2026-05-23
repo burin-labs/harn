@@ -64,6 +64,16 @@ pub(crate) const VM_STDLIB_SHORT_CIRCUIT_TOOLS: &[&str] = &[
     "list_directory",
     crate::llm::plan::EMIT_PLAN_TOOL,
     crate::llm::plan::UPDATE_PLAN_TOOL,
+    // Runtime introspection tools (harn#2188). Each maps to a
+    // `crate::llm::introspection::handle_introspection_tool` arm; the
+    // list there is canonical.
+    "current_model",
+    "current_provider",
+    "current_context_window",
+    "current_harn_version",
+    "current_harness",
+    "available_runtime_capabilities",
+    "current_compaction_policy",
 ];
 
 /// Returns `true` when `name` is a tool the VM stdlib services
@@ -77,6 +87,9 @@ pub(crate) fn is_vm_stdlib_short_circuit(name: &str) -> bool {
 /// Handle read-only tools locally in the VM without bridging to the host.
 /// This reduces latency and split-brain for passive operations.
 pub(crate) fn handle_tool_locally(name: &str, args: &serde_json::Value) -> Option<String> {
+    if let Some(payload) = crate::llm::introspection::handle_introspection_tool(name, args) {
+        return Some(payload);
+    }
     match name {
         crate::llm::plan::EMIT_PLAN_TOOL | crate::llm::plan::UPDATE_PLAN_TOOL => {
             let plan = crate::llm::plan::normalize_plan_tool_call(name, args);
