@@ -13,6 +13,13 @@ mod protocol_fixture_tests;
 mod replay;
 pub mod tls;
 
+/// Default 10 MiB body size cap applied to every HTTP router exposed by
+/// the `harn-serve` adapters (MCP, A2A, API). Matches the orchestrator
+/// listener's `DEFAULT_MAX_BODY_BYTES` so large/malicious POSTs cannot
+/// exhaust process memory while axum buffers the request before
+/// handing it to a handler.
+pub const DEFAULT_HTTP_BODY_LIMIT_BYTES: usize = 10 * 1024 * 1024;
+
 pub use adapter::{AdapterDescriptor, TransportAdapter};
 pub use adapters::a2a::{A2aHttpServeOptions, A2aServer, A2aServerConfig, A2A_PROTOCOL_VERSION};
 pub use adapters::acp::{

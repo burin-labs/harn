@@ -636,9 +636,18 @@ pub(super) async fn lock_env_with(envs: &[(&'static str, &str)]) -> EnvGuards {
 
 /// Build a default [`OrchestratorConfig`] rooted at `temp/harn.toml`
 /// with state in `temp/state`.
+///
+/// Test harnesses opt in to `public_metrics = true` so existing
+/// scrape-the-/metrics-endpoint assertions keep working unmodified.
+/// Production defaults gate `/metrics` behind the listener auth
+/// policy; the orchestrator_cli `metrics_endpoint_is_auth_gated_by_default_*`
+/// test covers the production path explicitly.
 pub(super) fn test_config(temp: &TempDir) -> OrchestratorConfig {
     write_first_party_connector_modules(temp.path());
-    OrchestratorConfig::for_test(temp.path().join("harn.toml"), temp.path().join("state"))
+    let mut config =
+        OrchestratorConfig::for_test(temp.path().join("harn.toml"), temp.path().join("state"));
+    config.public_metrics = true;
+    config
 }
 
 /// Start the harness with the default config under `temp`.

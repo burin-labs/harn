@@ -4,7 +4,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use axum::extract::{DefaultBodyLimit, Extension};
-use axum::http::StatusCode;
+use axum::http::{HeaderMap, Method, StatusCode};
 use axum::middleware;
 use axum::response::{IntoResponse, Response};
 use axum::routing::{get, post};
@@ -19,8 +19,9 @@ use super::acp_hub::{
 };
 use super::admin::{admin_reload_endpoint, AdminReloadHandle, AdminReloadState, ADMIN_RELOAD_PATH};
 use super::routes::{
-    ingest_trigger, test_file_from_env, IngestBackpressureConfig, ListenerAuth, ListenerAuthConfig,
-    RouteConfig, RouteRegistry, TestRequestGate, TriggerMetricSnapshot, PENDING_TOPIC,
+    ingest_trigger, normalize_headers, test_file_from_env, IngestBackpressureConfig, ListenerAuth,
+    ListenerAuthConfig, RouteConfig, RouteRegistry, TestRequestGate, TriggerMetricSnapshot,
+    PENDING_TOPIC,
 };
 use crate::commands::orchestrator::errors::OrchestratorError;
 use crate::commands::orchestrator::origin_guard::{enforce_allowed_origin, OriginAllowList};
@@ -44,6 +45,13 @@ pub(crate) struct ListenerConfig {
     pub(crate) routes: Vec<RouteConfig>,
     pub(crate) tenant_store: Option<Arc<harn_vm::TenantStore>>,
     pub(crate) session_store: Option<Arc<harn_vm::SessionStore>>,
+    /// When `true`, the Prometheus `/metrics` endpoint is exposed
+    /// without auth. Defaults to `false` so a public bind does not
+    /// leak the route catalog and throughput counters that map
+    /// the workflow topology. Set via the `--public-metrics` CLI flag
+    /// or `HARN_ORCHESTRATOR_PUBLIC_METRICS=1` env var when running
+    /// behind a trusted Prometheus scraper that can't authenticate.
+    pub(crate) public_metrics: bool,
 }
 
 impl ListenerConfig {
@@ -214,11 +222,22 @@ impl ListenerRuntime {
             .route(
                 "/readyz",
                 get(readyz_endpoint).layer(Extension(readiness.clone())),
-            )
-            .route(
+            );
+        app = if config.public_metrics {
+            app.route(
                 "/metrics",
                 get(metrics_endpoint).layer(Extension(config.metrics_registry.clone())),
-            );
+            )
+        } else {
+            app.route(
+                "/metrics",
+                get(metrics_endpoint_authenticated).layer(Extension(MetricsAuthState {
+                    metrics: config.metrics_registry.clone(),
+                    event_log: config.event_log.clone(),
+                    auth: auth.clone(),
+                })),
+            )
+        };
         app = app.route(
             ACP_PATH,
             get(acp_websocket_endpoint).layer(Extension(acp_state)),
@@ -317,6 +336,49 @@ async fn metrics_endpoint(
         )],
         metrics.render_prometheus(),
     )
+}
+
+#[derive(Clone)]
+struct MetricsAuthState {
+    metrics: Arc<harn_vm::MetricsRegistry>,
+    event_log: Arc<AnyEventLog>,
+    auth: Arc<ListenerAuth>,
+}
+
+/// Authenticated `/metrics` endpoint used when `--public-metrics` is
+/// not set. Runs every request through the same `ListenerAuth` used
+/// for ingestion so a public bind does not leak the route catalog,
+/// trigger names, and throughput counters that map the workflow
+/// topology to anyone who can reach the listener.
+async fn metrics_endpoint_authenticated(
+    Extension(state): Extension<MetricsAuthState>,
+    method: Method,
+    headers: HeaderMap,
+) -> Response {
+    let normalized = normalize_headers(&headers);
+    if state
+        .auth
+        .authorize(
+            state.event_log.as_ref(),
+            method.as_str(),
+            "/metrics",
+            &normalized,
+            &[],
+        )
+        .await
+        .is_err()
+    {
+        return (StatusCode::UNAUTHORIZED, "unauthorized").into_response();
+    }
+    (
+        StatusCode::OK,
+        [(
+            axum::http::header::CONTENT_TYPE,
+            "text/plain; version=0.0.4; charset=utf-8",
+        )],
+        state.metrics.render_prometheus(),
+    )
+        .into_response()
 }
 
 async fn readyz_endpoint(Extension(readiness): Extension<Arc<ListenerReadiness>>) -> Response {

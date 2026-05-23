@@ -5,7 +5,7 @@ use std::path::Path;
 use std::sync::{Arc, Mutex};
 
 use axum::body::Bytes;
-use axum::extract::{Query, State};
+use axum::extract::{DefaultBodyLimit, Query, State};
 use axum::http::{HeaderMap, HeaderName, HeaderValue, Method, StatusCode};
 use axum::response::sse::{Event, KeepAlive, Sse};
 use axum::response::{IntoResponse, Response};
@@ -29,6 +29,46 @@ use crate::cli::{
     A2aServeArgs, ApiServeArgs, McpServeTransport, ServeAcpArgs, ServeMcpArgs, ServeTlsMode,
 };
 
+/// Default 10 MiB request-body cap applied to every `harn serve` HTTP
+/// router. Mirrors `DEFAULT_MAX_BODY_BYTES` in the orchestrator
+/// listener so large/runaway POSTs cannot exhaust process memory while
+/// axum buffers a request.
+pub(crate) const SERVE_DEFAULT_MAX_BODY_BYTES: usize = 10 * 1024 * 1024;
+
+/// Refuse to start an unauthenticated HTTP serve adapter on a
+/// non-loopback bind. When the bind is loopback (`127.0.0.0/8`, `::1`)
+/// the call returns `Ok(())` after emitting a WARN log; when the bind
+/// exposes a non-loopback interface and there is no auth/TLS, the call
+/// returns `Err(...)` so the operator gets a clear failure instead of a
+/// silently public surface.
+fn guard_serve_bind_auth(
+    surface: &str,
+    bind: SocketAddr,
+    auth_policy: &AuthPolicy,
+    tls: &harn_serve::HttpTlsConfig,
+) -> Result<(), String> {
+    let auth_configured = !auth_policy.methods.is_empty();
+    let tls_configured = !matches!(tls, harn_serve::HttpTlsConfig::Plain);
+    let is_loopback = bind.ip().is_loopback();
+    if !is_loopback && !auth_configured && !tls_configured {
+        return Err(format!(
+            "refusing to start `harn serve {surface}` on non-loopback bind {bind} without auth \
+             (--api-key/--hmac-secret) or TLS (--tls). To listen on a public interface, \
+             configure auth or TLS; to keep the surface unauthenticated, bind to 127.0.0.1."
+        ));
+    }
+    if is_loopback && !auth_configured && !tls_configured {
+        tracing::warn!(
+            target: "harn::serve",
+            surface = surface,
+            bind = %bind,
+            "starting `harn serve {surface}` on loopback {bind} with no auth and no TLS; \
+             do not expose this socket beyond localhost"
+        );
+    }
+    Ok(())
+}
+
 pub(crate) async fn run_acp_server(args: &ServeAcpArgs) -> Result<(), String> {
     crate::acp::run_acp_server(
         Some(&args.file),
@@ -44,27 +84,35 @@ pub(crate) async fn run_acp_server(args: &ServeAcpArgs) -> Result<(), String> {
 }
 
 pub(crate) async fn run_a2a_server(args: &A2aServeArgs) -> Result<(), String> {
+    let auth_policy = build_auth_policy(&args.api_key, args.hmac_secret.as_ref());
+    let tls = build_tls_config(args.tls, args.cert.as_ref(), args.key.as_ref())?;
+    let bind = args
+        .bind
+        .unwrap_or_else(|| SocketAddr::from(([127, 0, 0, 1], args.port)));
+    guard_serve_bind_auth("a2a", bind, &auth_policy, &tls)?;
+
     let mut config = DispatchCoreConfig::for_script(&args.file);
-    config.auth_policy = build_auth_policy(&args.api_key, args.hmac_secret.as_ref());
+    config.auth_policy = auth_policy;
     let core = DispatchCore::new(config).map_err(|error| error.to_string())?;
     let mut server_config = A2aServerConfig::new(core);
     server_config.card_signing_secret = args.card_signing_secret.clone();
     let server = Arc::new(A2aServer::new(server_config));
-    let bind = args
-        .bind
-        .unwrap_or_else(|| SocketAddr::from(([127, 0, 0, 1], args.port)));
     server
         .run_http(A2aHttpServeOptions {
             bind,
             public_url: args.public_url.clone(),
-            tls: build_tls_config(args.tls, args.cert.as_ref(), args.key.as_ref())?,
+            tls,
         })
         .await
 }
 
 pub(crate) async fn run_api_server(args: &ApiServeArgs) -> Result<(), String> {
+    let auth_policy = build_auth_policy(&args.api_key, args.hmac_secret.as_ref());
+    let tls = build_tls_config(args.tls, args.cert.as_ref(), args.key.as_ref())?;
+    guard_serve_bind_auth("api", args.bind, &auth_policy, &tls)?;
+
     let config = ApiServerConfig::for_pipeline(args.file.clone())
-        .with_auth_policy(build_auth_policy(&args.api_key, args.hmac_secret.as_ref()))
+        .with_auth_policy(auth_policy)
         .with_profile(AcpProfileConfig {
             text: args.trace || args.profile.text,
             json_path: args.profile.json_path.clone(),
@@ -74,7 +122,7 @@ pub(crate) async fn run_api_server(args: &ApiServeArgs) -> Result<(), String> {
         .run_http(ApiHttpServeOptions {
             bind: args.bind,
             public_url: args.public_url.clone(),
-            tls: build_tls_config(args.tls, args.cert.as_ref(), args.key.as_ref())?,
+            tls,
         })
         .await
 }
@@ -103,23 +151,29 @@ pub(crate) async fn run_mcp_server(args: &ServeMcpArgs) -> Result<(), String> {
     if !has_pub_fn_exports {
         let mode = match args.transport {
             McpServeTransport::Stdio => crate::commands::run::RunFileMcpServeMode::Stdio,
-            McpServeTransport::Http => crate::commands::run::RunFileMcpServeMode::Http {
-                options: McpHttpServeOptions {
-                    bind: args.bind,
-                    path: args.path.clone(),
-                    sse_path: args.sse_path.clone(),
-                    messages_path: args.messages_path.clone(),
-                    tls: build_tls_config(args.tls, args.cert.as_ref(), args.key.as_ref())?,
-                },
-                auth_policy: build_auth_policy(&args.api_key, args.hmac_secret.as_ref()),
-            },
+            McpServeTransport::Http => {
+                let tls = build_tls_config(args.tls, args.cert.as_ref(), args.key.as_ref())?;
+                let auth_policy = build_auth_policy(&args.api_key, args.hmac_secret.as_ref());
+                guard_serve_bind_auth("mcp", args.bind, &auth_policy, &tls)?;
+                crate::commands::run::RunFileMcpServeMode::Http {
+                    options: McpHttpServeOptions {
+                        bind: args.bind,
+                        path: args.path.clone(),
+                        sse_path: args.sse_path.clone(),
+                        messages_path: args.messages_path.clone(),
+                        tls,
+                    },
+                    auth_policy,
+                }
+            }
         };
         crate::commands::run::run_file_mcp_serve(&args.file, args.card.as_deref(), mode).await;
         return Ok(());
     }
 
+    let auth_policy = build_auth_policy(&args.api_key, args.hmac_secret.as_ref());
     let mut config = DispatchCoreConfig::for_script(&args.file);
-    config.auth_policy = build_auth_policy(&args.api_key, args.hmac_secret.as_ref());
+    config.auth_policy = auth_policy.clone();
     let core = DispatchCore::new(config).map_err(|error| error.to_string())?;
     let mut server_config = McpServerConfig::new(core);
     if let Some(source) = args.card.as_deref() {
@@ -131,13 +185,15 @@ pub(crate) async fn run_mcp_server(args: &ServeMcpArgs) -> Result<(), String> {
     match args.transport {
         McpServeTransport::Stdio => server.run_stdio().await,
         McpServeTransport::Http => {
+            let tls = build_tls_config(args.tls, args.cert.as_ref(), args.key.as_ref())?;
+            guard_serve_bind_auth("mcp", args.bind, &auth_policy, &tls)?;
             server
                 .run_http(McpHttpServeOptions {
                     bind: args.bind,
                     path: args.path.clone(),
                     sse_path: args.sse_path.clone(),
                     messages_path: args.messages_path.clone(),
-                    tls: build_tls_config(args.tls, args.cert.as_ref(), args.key.as_ref())?,
+                    tls,
                 })
                 .await
         }
@@ -168,6 +224,7 @@ pub(crate) async fn run_script_mcp_http_server(
             get(script_legacy_sse_stream).post(script_legacy_sse_message),
         )
         .route(&options.messages_path, post(script_legacy_sse_message))
+        .layer(DefaultBodyLimit::max(SERVE_DEFAULT_MAX_BODY_BYTES))
         .with_state(state);
     let router = harn_serve::tls::apply_security_headers(router, &options.tls);
     let listener = harn_serve::tls::bind_listener(options.bind)?;
@@ -614,8 +671,20 @@ async fn authorize_script_rpc(
     }
 }
 
+/// Returns true when an MCP method MUST clear the configured auth policy
+/// before the runtime executes it. The list is deny-by-default: only
+/// `initialize` (required to establish the session) and `ping`
+/// (connectivity check) are exempt; every other method — including
+/// catalog and listing methods that previously bypassed auth and
+/// leaked the script's tool/resource/prompt surface — now goes through
+/// `AuthPolicy::authorize`.
+///
+/// New MCP methods (notifications/*, completion/complete,
+/// sampling/createMessage, elicitation/create, custom RPCs) are
+/// covered automatically because anything outside the small allowlist
+/// requires auth.
 fn script_method_requires_auth(method: &str) -> bool {
-    matches!(method, "tools/call" | "resources/read" | "prompts/get")
+    !matches!(method, "initialize" | "ping")
 }
 
 fn script_http_auth_request(
@@ -825,5 +894,84 @@ mod tests {
 
         assert_eq!(response.status(), StatusCode::BAD_REQUEST);
         assert!(sessions.lock().expect("sessions").contains_key("session-1"));
+    }
+
+    #[test]
+    fn script_method_requires_auth_denies_by_default() {
+        // initialize/ping must stay open so clients can complete the
+        // session handshake / connectivity check.
+        assert!(!script_method_requires_auth("initialize"));
+        assert!(!script_method_requires_auth("ping"));
+        // The previous allowlist gated only these three; they must
+        // continue to require auth under the inverted policy.
+        assert!(script_method_requires_auth("tools/call"));
+        assert!(script_method_requires_auth("resources/read"));
+        assert!(script_method_requires_auth("prompts/get"));
+        // The reason for the inversion: every other method (catalog
+        // listings, notifications, sampling, elicitation, custom RPCs)
+        // now requires auth instead of leaking the script's surface.
+        assert!(script_method_requires_auth("tools/list"));
+        assert!(script_method_requires_auth("resources/list"));
+        assert!(script_method_requires_auth("prompts/list"));
+        assert!(script_method_requires_auth("notifications/initialized"));
+        assert!(script_method_requires_auth("completion/complete"));
+        assert!(script_method_requires_auth("sampling/createMessage"));
+        assert!(script_method_requires_auth("elicitation/create"));
+        assert!(script_method_requires_auth("some/custom/method"));
+    }
+
+    #[test]
+    fn guard_serve_bind_auth_refuses_public_bind_without_auth_or_tls() {
+        let bind: SocketAddr = "0.0.0.0:8080".parse().unwrap();
+        let policy = AuthPolicy { methods: vec![] };
+        let tls = harn_serve::HttpTlsConfig::plain();
+        let result = guard_serve_bind_auth("mcp", bind, &policy, &tls);
+        let error = result.expect_err("public bind without auth should be refused");
+        assert!(
+            error.contains("refusing") && error.contains("non-loopback"),
+            "unexpected error: {error}"
+        );
+    }
+
+    #[test]
+    fn guard_serve_bind_auth_allows_public_bind_with_auth() {
+        let bind: SocketAddr = "0.0.0.0:8080".parse().unwrap();
+        let policy = AuthPolicy {
+            methods: vec![AuthMethodConfig::ApiKey(ApiKeyAuthConfig {
+                keys: ["test-key".to_string()].into_iter().collect(),
+            })],
+        };
+        let tls = harn_serve::HttpTlsConfig::plain();
+        let result = guard_serve_bind_auth("mcp", bind, &policy, &tls);
+        assert!(
+            result.is_ok(),
+            "public bind with auth should be allowed: {:?}",
+            result
+        );
+    }
+
+    #[test]
+    fn guard_serve_bind_auth_allows_loopback_without_auth() {
+        let bind: SocketAddr = "127.0.0.1:8080".parse().unwrap();
+        let policy = AuthPolicy { methods: vec![] };
+        let tls = harn_serve::HttpTlsConfig::plain();
+        // Loopback + no auth is allowed (the function emits a WARN log
+        // but does not refuse the start — the operator may be running
+        // a local dev server intentionally).
+        let result = guard_serve_bind_auth("mcp", bind, &policy, &tls);
+        assert!(result.is_ok(), "loopback with no auth should be allowed");
+    }
+
+    #[test]
+    fn guard_serve_bind_auth_allows_public_bind_with_tls() {
+        let bind: SocketAddr = "0.0.0.0:8080".parse().unwrap();
+        let policy = AuthPolicy { methods: vec![] };
+        let tls = harn_serve::HttpTlsConfig::self_signed_dev();
+        let result = guard_serve_bind_auth("api", bind, &policy, &tls);
+        assert!(
+            result.is_ok(),
+            "public bind with TLS should be allowed: {:?}",
+            result
+        );
     }
 }

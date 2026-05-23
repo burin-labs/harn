@@ -61,6 +61,9 @@ impl A2aServer {
             .route("/tasks/send_and_wait", post(rest_legacy_send_and_wait_task))
             .route("/tasks/cancel", post(rest_legacy_cancel_task))
             .route("/tasks/resubscribe", post(rest_legacy_resubscribe_task))
+            .layer(axum::extract::DefaultBodyLimit::max(
+                crate::DEFAULT_HTTP_BODY_LIMIT_BYTES,
+            ))
             .with_state(state)
     }
 

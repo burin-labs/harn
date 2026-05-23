@@ -11,7 +11,8 @@
 #                        script tries $XDG_BIN_DIR, $HOME/bin,
 #                        $HOME/.local/bin, then $HOME/.harn/bin.
 #   HARN_NO_VERIFY       set to 1 to skip SHA256 checksum verification
-#                        (not recommended).
+#                        (NOT recommended; emits a loud warning and
+#                        installs an unverified tarball).
 #   HARN_NO_MODIFY_PATH  set to 1 to suppress PATH update guidance.
 #
 # The script downloads a signed tarball from the GitHub release matching
@@ -185,24 +186,29 @@ download_to "$ASSET_URL" "$WORKDIR/$ASSET" \
   || die "failed to download $ASSET_URL"
 
 if [ "${HARN_NO_VERIFY:-0}" = "1" ]; then
-  warn "SHA256 verification skipped (HARN_NO_VERIFY=1)"
+  warn "!! SHA256 verification skipped via HARN_NO_VERIFY=1."
+  warn "!! The downloaded tarball will be installed WITHOUT integrity checks."
+  warn "!! Only use this when you have already verified the binary out of band."
 else
   info "Verifying checksum"
   if ! download_to "$CHECKSUMS_URL" "$WORKDIR/SHA256SUMS" 2>/dev/null; then
-    warn "SHA256SUMS not published for $VERSION; skipping verification"
-  else
-    expected="$(awk -v name="$ASSET" '$2 == name || $2 == "*"name { print $1 }' \
-      "$WORKDIR/SHA256SUMS" | head -1)"
-    [ -n "$expected" ] || die "no checksum for $ASSET in SHA256SUMS"
-    if command -v sha256sum >/dev/null 2>&1; then
-      actual="$(sha256sum "$WORKDIR/$ASSET" | awk '{print $1}')"
-    elif command -v shasum >/dev/null 2>&1; then
-      actual="$(shasum -a 256 "$WORKDIR/$ASSET" | awk '{print $1}')"
-    else
-      die "neither sha256sum nor shasum is available; set HARN_NO_VERIFY=1 to skip"
-    fi
-    [ "$expected" = "$actual" ] || die "checksum mismatch: expected $expected, got $actual"
+    # Hard fail when SHA256SUMS is missing. Releases that legitimately
+    # have no checksums file should set HARN_NO_VERIFY=1 explicitly so
+    # the operator at least sees the loud warning above.
+    die "SHA256SUMS not published for $VERSION; refusing to install an unverified tarball. \
+Set HARN_NO_VERIFY=1 to override (NOT recommended)."
   fi
+  expected="$(awk -v name="$ASSET" '$2 == name || $2 == "*"name { print $1 }' \
+    "$WORKDIR/SHA256SUMS" | head -1)"
+  [ -n "$expected" ] || die "no checksum for $ASSET in SHA256SUMS"
+  if command -v sha256sum >/dev/null 2>&1; then
+    actual="$(sha256sum "$WORKDIR/$ASSET" | awk '{print $1}')"
+  elif command -v shasum >/dev/null 2>&1; then
+    actual="$(shasum -a 256 "$WORKDIR/$ASSET" | awk '{print $1}')"
+  else
+    die "neither sha256sum nor shasum is available; set HARN_NO_VERIFY=1 to skip"
+  fi
+  [ "$expected" = "$actual" ] || die "checksum mismatch: expected $expected, got $actual"
 fi
 
 info "Extracting"

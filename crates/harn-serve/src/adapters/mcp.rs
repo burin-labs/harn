@@ -28,7 +28,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 
 use axum::body::Bytes;
-use axum::extract::{Query, State};
+use axum::extract::{DefaultBodyLimit, Query, State};
 use axum::http::header::ACCEPT;
 use axum::http::{HeaderMap, HeaderName, HeaderValue, Method, StatusCode};
 use axum::response::sse::{Event, KeepAlive, Sse};
@@ -336,6 +336,7 @@ impl McpServer {
                 get(legacy_sse_stream).post(legacy_sse_message),
             )
             .route(&options.messages_path, post(legacy_sse_message))
+            .layer(DefaultBodyLimit::max(crate::DEFAULT_HTTP_BODY_LIMIT_BYTES))
             .with_state(state.clone());
         let router = crate::tls::apply_security_headers(router, &options.tls);
         let listener = crate::tls::bind_listener(options.bind)?;

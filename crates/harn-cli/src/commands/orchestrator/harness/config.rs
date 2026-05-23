@@ -67,6 +67,12 @@ pub struct OrchestratorConfig {
     /// Time + sleep substrate. Defaults to [`RealClock`]; tests inject
     /// [`harn_vm::clock::PausedClock`] via [`OrchestratorConfig::with_clock`].
     pub clock: Arc<dyn Clock>,
+    /// When `true`, the Prometheus `/metrics` endpoint is exposed
+    /// without auth (mirrors the `--public-metrics` CLI flag and the
+    /// `HARN_ORCHESTRATOR_PUBLIC_METRICS` env var). Defaults to
+    /// `false` so a public bind does not leak route catalog and
+    /// throughput counters.
+    pub public_metrics: bool,
 }
 
 impl OrchestratorConfig {
@@ -88,6 +94,7 @@ impl OrchestratorConfig {
             pump: PumpConfig::default(),
             log_format: None,
             clock: RealClock::arc(),
+            public_metrics: false,
         }
     }
 

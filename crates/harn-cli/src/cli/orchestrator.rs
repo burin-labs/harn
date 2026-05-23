@@ -200,6 +200,18 @@ pub(crate) struct OrchestratorServeArgs {
         default_value_t = crate::commands::orchestrator::role::OrchestratorRole::SingleTenant
     )]
     pub role: crate::commands::orchestrator::role::OrchestratorRole,
+    /// Expose the Prometheus `/metrics` endpoint unauthenticated.
+    /// When false (default), `/metrics` is gated behind the same
+    /// `ListenerAuth` as ingestion so a public bind does not leak the
+    /// route catalog, trigger names, and throughput counters that map
+    /// the workflow topology to anyone who can reach the listener.
+    #[arg(
+        long = "public-metrics",
+        env = "HARN_ORCHESTRATOR_PUBLIC_METRICS",
+        default_value_t = false,
+        action = ArgAction::SetTrue
+    )]
+    pub public_metrics: bool,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum)]

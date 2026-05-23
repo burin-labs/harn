@@ -68,10 +68,19 @@ impl RouteConfig {
                 let provider = trigger.config.provider.clone();
                 let signature_mode = match provider.as_str() {
                     "github" => SignatureMode::GitHub,
+                    // Linear's signature scheme uses a different canonical
+                    // message shape than the shared verifier expects; keep
+                    // it Unsigned for now and revisit alongside the Linear
+                    // connector hardening pass.
                     "linear" => SignatureMode::Unsigned,
                     "webhook" => SignatureMode::Standard,
-                    "slack" => SignatureMode::Unsigned,
-                    "notion" => SignatureMode::Unsigned,
+                    // Slack and Notion both ship first-class HMAC and
+                    // their verifiers already exist in connectors/hmac.rs
+                    // (verify_slack / verify_notion). Wire them through
+                    // so default webhook routes are signed-by-default
+                    // when a `signing_secret` is configured.
+                    "slack" => SignatureMode::Slack,
+                    "notion" => SignatureMode::Notion,
                     other => match harn_vm::provider_metadata(other) {
                         Some(metadata)
                             if matches!(
@@ -330,6 +339,8 @@ impl RouteRegistry {
 pub(crate) enum SignatureMode {
     GitHub,
     Standard,
+    Slack,
+    Notion,
     Unsigned,
 }
 

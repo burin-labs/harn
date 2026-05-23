@@ -1725,7 +1725,8 @@ async fn a2a_push_fixture_connector() -> Result<(A2aPushConnector, Arc<InboxInde
                             "alg": "HS256",
                             "k": "c2VjcmV0"
                         }]
-                    }
+                    },
+                    "algorithm": "HS256"
                 }
             }),
         }])
