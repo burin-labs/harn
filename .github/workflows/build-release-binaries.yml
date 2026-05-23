@@ -151,6 +151,11 @@ jobs:
 
       - uses: mozilla-actions/sccache-action@9e7fa8a12102821edf02ca5dbea1acd0f89a2696 # v0.0.10
         if: matrix.target != 'x86_64-pc-windows-msvc'
+        # sccache is a build-cache optimization, not a build requirement. The
+        # upstream action sometimes fails on merge_group / restricted-token
+        # events with "Bad credentials" when api.github.com gates the release
+        # lookup; a cold build is a fine fallback, but the job shouldn't fail.
+        continue-on-error: true
 
       # Skip sccache on Windows: the GHA cache backend repeatedly drops the
       # connection during the long single-rustc-call harn-vm compile
@@ -158,7 +163,7 @@ jobs:
       # ghac for Windows runners. Local rustc + Swatinem/rust-cache still
       # cover incremental warmth for repeat builds.
       - name: Configure Cargo to use sccache
-        if: matrix.target != 'x86_64-pc-windows-msvc'
+        if: matrix.target != 'x86_64-pc-windows-msvc' && env.SCCACHE_PATH != ''
         shell: bash
         run: echo "RUSTC_WRAPPER=${SCCACHE_PATH}" >> "$GITHUB_ENV"
 
