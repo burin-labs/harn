@@ -1,0 +1,450 @@
+/* Harn documentation theme overrides.
+ *
+ * Layered on top of the mdbook base themes (light / rust / navy / coal / ayu).
+ * Adds Harn brand color, typography, and code-block polish; intentionally
+ * conservative so existing pages remain readable across all five themes.
+ */
+
+:root {
+  --harn-violet: #5b4dff;
+  --harn-violet-soft: #ece9ff;
+  --harn-violet-dark: #3a2eb8;
+  --harn-amber: #ff8a3d;
+  --harn-amber-soft: #fff1e6;
+  --harn-ink: #1a1530;
+  --harn-paper: #faf8f5;
+
+  --harn-font-sans: "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI",
+    "Helvetica Neue", Arial, sans-serif;
+  --harn-font-mono: "JetBrains Mono", "Fira Mono", "SF Mono", Menlo, Consolas,
+    "Liberation Mono", monospace;
+
+  --harn-radius: 6px;
+  --harn-radius-sm: 4px;
+
+  --harn-shadow-soft: 0 1px 2px rgba(26, 21, 48, 0.06),
+    0 4px 12px rgba(26, 21, 48, 0.04);
+}
+
+/* ---------- Typography ---------- */
+
+html {
+  font-family: var(--harn-font-sans);
+  font-feature-settings: "ss01", "cv01", "cv02";
+}
+
+body,
+.content {
+  font-family: var(--harn-font-sans);
+  line-height: 1.65;
+  letter-spacing: -0.005em;
+}
+
+.content h1,
+.content h2,
+.content h3,
+.content h4,
+.content h5,
+.content h6 {
+  font-family: var(--harn-font-sans);
+  font-weight: 600;
+  letter-spacing: -0.02em;
+  line-height: 1.25;
+}
+
+.content h1 {
+  font-size: 2.25rem;
+  margin-top: 0;
+  padding-bottom: 0.3em;
+  border-bottom: 1px solid var(--sidebar-bg, rgba(0, 0, 0, 0.08));
+}
+
+.content h2 {
+  font-size: 1.6rem;
+  margin-top: 2.5rem;
+}
+
+.content h3 {
+  font-size: 1.25rem;
+  margin-top: 2rem;
+}
+
+.content h4 {
+  font-size: 1.05rem;
+  margin-top: 1.6rem;
+}
+
+.content p,
+.content li {
+  font-size: 1rem;
+}
+
+.content a {
+  color: var(--harn-violet);
+  text-decoration-thickness: 1px;
+  text-underline-offset: 2px;
+}
+
+.content a:hover {
+  color: var(--harn-violet-dark);
+}
+
+/* ---------- Code blocks ---------- */
+
+code,
+pre,
+.hljs {
+  font-family: var(--harn-font-mono);
+  font-variant-ligatures: none;
+}
+
+code {
+  font-size: 0.92em;
+  padding: 0.12em 0.32em;
+  border-radius: var(--harn-radius-sm);
+}
+
+pre {
+  border-radius: var(--harn-radius);
+  padding: 1rem 1.1rem;
+  font-size: 0.88rem;
+  line-height: 1.55;
+  overflow-x: auto;
+}
+
+pre > code {
+  padding: 0;
+  font-size: inherit;
+}
+
+/* Highlight .harn code blocks with a subtle left border in brand color so
+ * Harn snippets stand out from shell/python/typescript blocks at a glance. */
+pre > code.language-harn {
+  display: block;
+  border-left: 3px solid var(--harn-violet);
+  padding-left: 0.85rem;
+  margin-left: -1.1rem;
+  padding-top: 0;
+  padding-bottom: 0;
+}
+
+/* ---------- Tables ---------- */
+
+.content table {
+  font-size: 0.95rem;
+  border-collapse: collapse;
+  margin: 1.2rem 0;
+  width: 100%;
+}
+
+.content table th,
+.content table td {
+  padding: 0.55rem 0.75rem;
+  text-align: left;
+  border-bottom: 1px solid rgba(91, 77, 255, 0.12);
+}
+
+.content table th {
+  font-weight: 600;
+  background: rgba(91, 77, 255, 0.04);
+  border-bottom: 2px solid var(--harn-violet);
+}
+
+.content table tr:last-child td {
+  border-bottom: none;
+}
+
+/* ---------- Blockquotes / callouts ---------- */
+
+.content blockquote {
+  border-left: 3px solid var(--harn-amber);
+  background: var(--harn-amber-soft);
+  margin: 1.2rem 0;
+  padding: 0.65rem 1rem;
+  border-radius: 0 var(--harn-radius) var(--harn-radius) 0;
+  color: inherit;
+}
+
+.content blockquote p:last-child {
+  margin-bottom: 0;
+}
+
+/* ---------- Sidebar ---------- */
+
+.sidebar .sidebar-scrollbox {
+  padding: 1rem 0.5rem 1rem 0.8rem;
+}
+
+.chapter li.chapter-item {
+  font-size: 0.9rem;
+  line-height: 1.45;
+  padding: 0.18em 0;
+}
+
+.chapter li.part-title {
+  font-size: 0.7rem;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--harn-violet);
+  margin-top: 1.8em;
+  margin-bottom: 0.4em;
+  padding-left: 0.4em;
+}
+
+.chapter li.chapter-item.expanded > a.active,
+.chapter li.chapter-item > a.active {
+  color: var(--harn-violet);
+  font-weight: 600;
+}
+
+/* ---------- Top nav ---------- */
+
+.menu-title {
+  font-weight: 600;
+  letter-spacing: -0.01em;
+}
+
+/* ---------- Search ---------- */
+
+#searchbar {
+  border-radius: var(--harn-radius);
+  border: 1px solid rgba(91, 77, 255, 0.2);
+  padding: 0.5rem 0.8rem;
+  font-family: var(--harn-font-sans);
+}
+
+#searchbar:focus {
+  border-color: var(--harn-violet);
+  outline: 2px solid rgba(91, 77, 255, 0.18);
+  outline-offset: 0;
+}
+
+/* ---------- Landing page hero ---------- */
+
+.harn-hero {
+  margin: 0 0 2.5rem 0;
+  padding: 2.4rem 2rem 2rem 2rem;
+  border-radius: 12px;
+  background: linear-gradient(
+    135deg,
+    var(--harn-violet) 0%,
+    var(--harn-violet-dark) 100%
+  );
+  color: white;
+  box-shadow: var(--harn-shadow-soft);
+}
+
+.harn-hero h1 {
+  color: white;
+  border-bottom: none;
+  margin: 0 0 0.4em 0;
+  font-size: 2.6rem;
+  letter-spacing: -0.03em;
+  font-weight: 700;
+}
+
+.harn-hero p.tagline {
+  color: rgba(255, 255, 255, 0.92);
+  font-size: 1.15rem;
+  margin: 0 0 1.4rem 0;
+  max-width: 56ch;
+  line-height: 1.5;
+}
+
+.harn-hero pre {
+  background: rgba(0, 0, 0, 0.25);
+  border: 1px solid rgba(255, 255, 255, 0.15);
+  color: #f3f1ff;
+  margin: 0;
+}
+
+.harn-hero pre code {
+  color: #f3f1ff;
+}
+
+.harn-hero a {
+  color: white;
+  text-decoration: underline;
+  text-decoration-color: rgba(255, 255, 255, 0.5);
+}
+
+.harn-hero a:hover {
+  text-decoration-color: white;
+}
+
+.harn-cta-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.6rem;
+  margin: 1.2rem 0 0 0;
+}
+
+.harn-cta {
+  display: inline-block;
+  padding: 0.55rem 1.05rem;
+  border-radius: var(--harn-radius);
+  font-weight: 600;
+  font-size: 0.95rem;
+  text-decoration: none !important;
+  transition: transform 80ms ease, background 80ms ease;
+}
+
+.harn-cta-primary {
+  background: var(--harn-amber);
+  color: #2a1500 !important;
+}
+
+.harn-cta-primary:hover {
+  background: #ffa05c;
+  transform: translateY(-1px);
+}
+
+.harn-cta-secondary {
+  background: rgba(255, 255, 255, 0.14);
+  color: white !important;
+  border: 1px solid rgba(255, 255, 255, 0.32);
+}
+
+.harn-cta-secondary:hover {
+  background: rgba(255, 255, 255, 0.22);
+}
+
+/* ---------- Landing page feature grid ---------- */
+
+.harn-feature-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+  gap: 1rem;
+  margin: 1.8rem 0 2.4rem 0;
+}
+
+.harn-feature {
+  padding: 1.1rem 1.2rem;
+  border-radius: var(--harn-radius);
+  border: 1px solid rgba(91, 77, 255, 0.18);
+  background: var(--harn-violet-soft);
+  transition: transform 100ms ease, box-shadow 100ms ease;
+}
+
+.harn-feature:hover {
+  transform: translateY(-2px);
+  box-shadow: var(--harn-shadow-soft);
+}
+
+.harn-feature h3 {
+  margin: 0 0 0.4rem 0;
+  font-size: 1rem;
+  color: var(--harn-violet-dark);
+}
+
+.harn-feature p {
+  margin: 0;
+  font-size: 0.9rem;
+  line-height: 1.5;
+}
+
+/* ---------- Concept landing path cards ---------- */
+
+.harn-paths {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 0.9rem;
+  margin: 1.6rem 0 2rem 0;
+}
+
+.harn-path-card {
+  padding: 1rem 1.1rem;
+  border-radius: var(--harn-radius);
+  border: 1px solid rgba(91, 77, 255, 0.15);
+  background: rgba(91, 77, 255, 0.025);
+  transition: background 100ms ease;
+}
+
+.harn-path-card:hover {
+  background: rgba(91, 77, 255, 0.06);
+}
+
+.harn-path-card h3 {
+  margin: 0 0 0.35rem 0;
+  font-size: 0.98rem;
+}
+
+.harn-path-card p {
+  margin: 0;
+  font-size: 0.88rem;
+  color: inherit;
+  opacity: 0.85;
+}
+
+/* ---------- Dark theme adjustments ---------- */
+
+.coal,
+.navy,
+.ayu {
+  --harn-violet-soft: rgba(91, 77, 255, 0.12);
+  --harn-amber-soft: rgba(255, 138, 61, 0.1);
+}
+
+.coal .content a,
+.navy .content a,
+.ayu .content a {
+  color: #a99cff;
+}
+
+.coal .content a:hover,
+.navy .content a:hover,
+.ayu .content a:hover {
+  color: #c9bfff;
+}
+
+.coal .harn-feature,
+.navy .harn-feature,
+.ayu .harn-feature {
+  background: rgba(91, 77, 255, 0.08);
+  border-color: rgba(91, 77, 255, 0.28);
+}
+
+.coal .harn-feature h3,
+.navy .harn-feature h3,
+.ayu .harn-feature h3 {
+  color: #b8aeff;
+}
+
+.coal .content table th,
+.navy .content table th,
+.ayu .content table th {
+  background: rgba(91, 77, 255, 0.08);
+}
+
+.coal .content blockquote,
+.navy .content blockquote,
+.ayu .content blockquote {
+  background: rgba(255, 138, 61, 0.08);
+}
+
+.coal pre > code.language-harn,
+.navy pre > code.language-harn,
+.ayu pre > code.language-harn {
+  border-left-color: #a99cff;
+}
+
+/* ---------- Responsive ---------- */
+
+@media (max-width: 720px) {
+  .harn-hero {
+    padding: 1.8rem 1.2rem;
+  }
+
+  .harn-hero h1 {
+    font-size: 2rem;
+  }
+
+  .content h1 {
+    font-size: 1.75rem;
+  }
+
+  .content h2 {
+    font-size: 1.35rem;
+  }
+}
