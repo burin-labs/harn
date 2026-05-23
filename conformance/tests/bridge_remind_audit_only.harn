@@ -1,7 +1,7 @@
 import { agent_session_drain_bridge_injections } from "std/agent/state"
 
 pipeline main() {
-  let result = agent_session_drain_bridge_injections("bridge-remind-conformance", "wait_for_completion")
+  let result = agent_session_drain_bridge_injections("bridge-remind-conformance", "audit_only")
   __io_println(result.delivered)
   __io_println(result.reason)
 }

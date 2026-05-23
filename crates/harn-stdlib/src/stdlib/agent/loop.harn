@@ -950,12 +950,117 @@ fn __agent_loop_suspend_checkpoint(session, iteration) {
   return payload
 }
 
-fn __agent_loop_drain_bridge_step(session_id) {
-  let immediate = agent_session_drain_bridge_injections(session_id, "interrupt_immediate")
-  let finish_step = agent_session_drain_bridge_injections(session_id, "finish_step")
-  let immediate_count = immediate?.delivered ?? 0
-  let finish_step_count = finish_step?.delivered ?? 0
-  return immediate_count + finish_step_count
+/**
+ * Mode filter table for `__agent_loop_checkpoint`. Each row encodes the
+ * invariant for one seam: which bridge modes are eligible to drain, and
+ * whether the host should pull the agent_inbox feedback queue.
+ *
+ *   turn_start, post_tool_dispatch, turn_end → drain `interrupt_immediate`
+ *     and `finish_step`; the model will see whatever lands on its next
+ *     prompt build, so both modes get the same opportunity here.
+ *   pre_tool_dispatch → drain `interrupt_immediate` only. This is the
+ *     "stop before the tool fires" seam — `finish_step` semantics
+ *     would defeat the point (it means "after the current tool batch").
+ *     If anything arrives, the caller skips the pending tool batch.
+ *   pre_compact, post_compact → bracket the compactor with an
+ *     agent_inbox drain so async producers (tool completions, MCP
+ *     notifications, command-policy feedback) land in the transcript
+ *     before the summarizer sees it and the next prompt is built.
+ *   daemon_idle_pre, daemon_idle_post → drain `interrupt_immediate`
+ *     only; the daemon path doesn't queue `finish_step`-mode injections.
+ *   loop_exit → drain `audit_only`. The other two modes were already
+ *     drained earlier in the loop body. `audit_only` reminders land in
+ *     the transcript at this seam but are NEVER rendered into a model
+ *     prompt — no further LLM call runs after `loop_exit` (harn#2212).
+ *     Hosts that need the model to see a reminder before the agent
+ *     terminates must use `finish_step` (drained at every iteration
+ *     boundary, including the last `turn_end` before the loop breaks).
+ */
+fn __agent_loop_checkpoint_modes(kind) {
+  if kind == "pre_tool_dispatch" || kind == "daemon_idle_pre" || kind == "daemon_idle_post" {
+    return {immediate: true, finish_step: false, audit_only: false, inbox: false}
+  }
+  if kind == "turn_start" || kind == "post_tool_dispatch" || kind == "turn_end" {
+    return {immediate: true, finish_step: true, audit_only: false, inbox: false}
+  }
+  if kind == "pre_compact" || kind == "post_compact" {
+    return {immediate: false, finish_step: false, audit_only: false, inbox: true}
+  }
+  if kind == "loop_exit" {
+    return {immediate: false, finish_step: false, audit_only: true, inbox: false}
+  }
+  return {immediate: false, finish_step: false, audit_only: false, inbox: false}
+}
+
+/**
+ * Single source of truth for "the loop is at a safe injection seam."
+ * Every drain site in the agent loop body and the daemon idle path
+ * routes through here so plugin authors and replayers see one canonical
+ * event (`LoopCheckpoint`) instead of having to enumerate inline calls.
+ *
+ * Returns a result dict carrying `delivered` (bridge injections drained
+ * at this seam), `inbox_delivered` (inbox feedback notes drained), and
+ * `dispatch_skipped` (`pre_tool_dispatch` short-circuit: an
+ * `interrupt_immediate` arrival here means the pending tool batch is
+ * cancelled and the loop iterates once more so the LLM sees the
+ * injection before the tool would have fired). Callers branch on
+ * `delivered` for the "continue if a steer arrived" behavior the
+ * stalled-done-judge and post-turn paths rely on.
+ */
+fn __agent_loop_checkpoint(session_id, kind, opts = nil) {
+  let modes = __agent_loop_checkpoint_modes(kind)
+  var delivered = 0
+  if modes.immediate {
+    let result = agent_session_drain_bridge_injections(session_id, "interrupt_immediate")
+    delivered = delivered + result?.delivered ?? 0
+  }
+  let immediate_count = delivered
+  if modes.finish_step {
+    let result = agent_session_drain_bridge_injections(session_id, "finish_step")
+    delivered = delivered + result?.delivered ?? 0
+  }
+  if modes.audit_only {
+    let result = agent_session_drain_bridge_injections(session_id, "audit_only")
+    delivered = delivered + result?.delivered ?? 0
+  }
+  var inbox_delivered = 0
+  if modes.inbox {
+    let pending = agent_session_drain_feedback(session_id)
+    for note in pending {
+      agent_session_inject_feedback(session_id, note.kind, note.content)
+      inbox_delivered = inbox_delivered + 1
+    }
+  }
+  let dispatch_skipped = kind == "pre_tool_dispatch" && immediate_count > 0
+  let iteration = to_int(opts?.iteration ?? 0)
+  agent_emit_event(
+    session_id,
+    "loop_checkpoint",
+    {
+      iteration: iteration,
+      kind: kind,
+      delivered: delivered,
+      inbox_delivered: inbox_delivered,
+      dispatch_skipped: dispatch_skipped,
+    },
+  )
+  __host_fire_session_hook(
+    "loop_checkpoint",
+    {
+      session_id: session_id,
+      iteration: iteration,
+      kind: kind,
+      delivered: delivered,
+      inbox_delivered: inbox_delivered,
+      dispatch_skipped: dispatch_skipped,
+    },
+  )
+  return {
+    delivered: delivered,
+    inbox_delivered: inbox_delivered,
+    dispatch_skipped: dispatch_skipped,
+    kind: kind,
+  }
 }
 
 fn __agent_loop_fire_resume_continuity(session, opts) {
@@ -1049,18 +1154,12 @@ fn __agent_loop_run(message, session, initial_opts) {
       } catch (e) {
         nil
       }
-      __agent_loop_drain_bridge_step(session.session_id)
+      __agent_loop_checkpoint(session.session_id, "turn_start", {iteration: turn_index + 1})
       var turn_opts = agent_skills_match(session, opts, turn_index)
       turn_opts = agent_tool_search_inject_if_needed(turn_opts)
-      let pending_pre = agent_session_drain_feedback(session.session_id)
-      for note in pending_pre {
-        agent_session_inject_feedback(session.session_id, note.kind, note.content)
-      }
+      __agent_loop_checkpoint(session.session_id, "pre_compact", {iteration: turn_index + 1})
       agent_autocompact_if_needed(session, turn_opts)
-      let pending_post = agent_session_drain_feedback(session.session_id)
-      for note in pending_post {
-        agent_session_inject_feedback(session.session_id, note.kind, note.content)
-      }
+      __agent_loop_checkpoint(session.session_id, "post_compact", {iteration: turn_index + 1})
       let turn_system = agent_build_turn_system(session, turn_opts, turn_index)
       let turn_messages = agent_build_turn_messages(session, turn_opts, turn_index)
       let llm_overrides = turn_opts?.llm_options ?? {}
@@ -1157,14 +1256,35 @@ fn __agent_loop_run(message, session, initial_opts) {
             "turn_end",
             {iteration: turn_index + 1, turn_info: __turn_info_payload(llm_result, tool_count, visible_text)},
           )
-          let bridge_step_delivered = __agent_loop_drain_bridge_step(session.session_id)
-          if bridge_step_delivered > 0 {
+          let stalled_done_checkpoint = __agent_loop_checkpoint(session.session_id, "turn_end", {iteration: turn_index + 1})
+          if stalled_done_checkpoint.delivered > 0 {
             continue
           }
           final_status = "done"
           stop_reason = "stalled_done_judge"
           break
         }
+      }
+      let pre_dispatch_checkpoint = __agent_loop_checkpoint(session.session_id, "pre_tool_dispatch", {iteration: turn_index + 1})
+      if pre_dispatch_checkpoint.dispatch_skipped {
+        let tool_count_skipped = len(tool_calls)
+        let totals_skipped = agent_session_record_usage(session.session_id, llm_result, turn_opts, turn_index + 1)
+        agent_emit_event(
+          session.session_id,
+          "turn_end",
+          {
+            iteration: turn_index + 1,
+            turn_info: __turn_info_payload(llm_result, tool_count_skipped, visible_text)
+              + {dispatch_skipped: true, skip_reason: "interrupt_immediate"},
+          },
+        )
+        if agent_budget_post_call_blocked(totals_skipped, turn_opts) {
+          final_status = "budget_exhausted"
+          break
+        }
+        consecutive_text_only = __next_text_only_count(0, consecutive_text_only)
+        last_tool_count = 0
+        continue
       }
       let dispatched = __dispatch_tool_calls(
         session.session_id,
@@ -1183,7 +1303,8 @@ fn __agent_loop_run(message, session, initial_opts) {
         "turn_end",
         {iteration: turn_index + 1, turn_info: __turn_info_payload(llm_result, tool_count, visible_text)},
       )
-      let bridge_step_delivered = __agent_loop_drain_bridge_step(session.session_id)
+      let post_dispatch_checkpoint = __agent_loop_checkpoint(session.session_id, "post_tool_dispatch", {iteration: turn_index + 1})
+      let bridge_step_delivered = post_dispatch_checkpoint.delivered
       if agent_budget_post_call_blocked(totals, turn_opts) {
         final_status = "budget_exhausted"
         break
@@ -1318,7 +1439,7 @@ fn __agent_loop_run(message, session, initial_opts) {
     } catch (e) {
       nil
     }
-    agent_session_drain_bridge_injections(session.session_id, "wait_for_completion")
+    __agent_loop_checkpoint(session.session_id, "loop_exit", {iteration: iteration})
     __drain_audit_flushes(audit_background_tasks)
     audit_background_tasks = []
     let result = agent_session_finalize(
@@ -1366,6 +1487,15 @@ fn __agent_loop_run(message, session, initial_opts) {
   return unwrap(run)
 }
 
+// Host pushed an `interrupt_immediate` injection between the
+// model emitting tool calls and the dispatcher starting. Honor
+// the host's "stop, do this instead" by skipping the pending
+// tool batch — the injection is already in the transcript, so
+// the next iteration's LLM call will see it and the model can
+// decide whether to re-issue, modify, or abandon the call. The
+// post-turn machinery (judge, required-tools, done sentinel) is
+// intentionally bypassed because nothing dispatched; budget is
+// still honored because the LLM call's tokens were spent.
 // Drain async events (long-running tool completions, MCP server
 // progress, command-policy feedback, file-edited nudges, trigger
 // events) BEFORE compaction so the summarizer sees the freshest

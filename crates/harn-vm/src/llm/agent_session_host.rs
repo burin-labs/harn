@@ -34,6 +34,7 @@ const HOST_SESSION_RECORD_TOOL_RESULTS: &str = "__host_agent_session_record_tool
 const HOST_SESSION_RECORD_USAGE: &str = "__host_agent_session_record_usage";
 const HOST_SESSION_DRAIN_FEEDBACK: &str = "__host_agent_session_drain_feedback";
 const HOST_SESSION_DRAIN_BRIDGE_INJECTIONS: &str = "__host_agent_session_drain_bridge_injections";
+const HOST_SESSION_PUSH_BRIDGE_INJECTION: &str = "__host_agent_session_push_bridge_injection";
 const HOST_SESSION_TOTALS: &str = "__host_agent_session_totals";
 const HOST_SESSION_INJECT_FEEDBACK: &str = "__host_agent_session_inject_feedback";
 const HOST_SESSION_POST_EVENT: &str = "__host_agent_session_post_event";
@@ -1323,6 +1324,7 @@ async fn host_agent_emit_event(args: Vec<VmValue>) -> Result<VmValue, VmError> {
             | "typed_checkpoint"
             | "agent_loop_stall_warning"
             | "tool_call_audit"
+            | "loop_checkpoint"
     ) {
         let role = if matches!(
             event_type.as_str(),
@@ -1483,6 +1485,17 @@ fn build_agent_event(
                 receipt,
             })
         }
+        "loop_checkpoint" => Ok(AgentEvent::LoopCheckpoint {
+            session_id: session_id.to_string(),
+            iteration: get_usize("iteration"),
+            kind: get_string("kind"),
+            delivered: get_usize("delivered"),
+            inbox_delivered: get_usize("inbox_delivered"),
+            dispatch_skipped: payload_obj
+                .and_then(|m| m.get("dispatch_skipped"))
+                .and_then(|v| v.as_bool())
+                .unwrap_or(false),
+        }),
         "cache_hit" => Ok(AgentEvent::CacheHit {
             session_id: session_id.to_string(),
             key: get_string("key"),
@@ -1794,7 +1807,7 @@ fn bridge_delivery_checkpoint(value: &str) -> Result<crate::bridge::DeliveryChec
         "finish_step" | "after_current_operation" => {
             Ok(crate::bridge::DeliveryCheckpoint::AfterCurrentOperation)
         }
-        "wait_for_completion" | "end_of_interaction" => {
+        "audit_only" | "end_of_interaction" => {
             Ok(crate::bridge::DeliveryCheckpoint::EndOfInteraction)
         }
         other => Err(VmError::Runtime(format!(
@@ -1847,6 +1860,76 @@ async fn drain_bridge_injections_for_checkpoint(
     }
 }
 
+/// Drain `interrupt_immediate` injections on behalf of the daemon idle
+/// path and emit a `LoopCheckpoint` so the rest of the seam catalog
+/// (Harn-side `__agent_loop_checkpoint`, ACP `loop_checkpoint`
+/// notifications, debugger views) sees daemon-side activity through the
+/// same surface. The actual drain reuses the bridge primitive — only
+/// the observability wrapper is daemon-specific because the daemon
+/// can't call back into Harn.
+async fn daemon_checkpoint_drain(
+    session_id: &str,
+    bridge: &crate::bridge::HostBridge,
+    kind: &'static str,
+) -> (usize, Option<&'static str>) {
+    let (delivered, reason) = drain_bridge_injections_for_checkpoint(
+        session_id,
+        bridge,
+        crate::bridge::DeliveryCheckpoint::InterruptImmediate,
+    )
+    .await;
+    let event = crate::agent_events::AgentEvent::LoopCheckpoint {
+        session_id: session_id.to_string(),
+        iteration: 0,
+        kind: kind.to_string(),
+        delivered,
+        inbox_delivered: 0,
+        dispatch_skipped: false,
+    };
+    super::agent_runtime::emit_agent_event(&event).await;
+    (delivered, reason)
+}
+
+/// Push a system-reminder onto the session's host bridge queue. The
+/// inverse of `__host_agent_session_drain_bridge_injections` — exposed
+/// so a Harn script driving the loop (custom CLI host, conformance
+/// test, etc.) can queue an injection that lands at the next eligible
+/// checkpoint without going through ACP.
+///
+/// Expects `options` shaped like the `session/remind` JSON-RPC params
+/// (`body`, `mode`, optional `tags`, `dedupe_key`, `ttl_turns`,
+/// `role_hint`, `propagate`, `preserve_on_compact`). Returns the
+/// reminder id so callers can correlate with later
+/// `ReminderEmitted` events.
+async fn host_agent_session_push_bridge_injection(args: Vec<VmValue>) -> Result<VmValue, VmError> {
+    let session_id = args.first().map(|v| v.display()).unwrap_or_default();
+    if session_id.trim().is_empty() {
+        return Err(VmError::Runtime(format!(
+            "{HOST_SESSION_PUSH_BRIDGE_INJECTION}: session_id must be a non-empty string"
+        )));
+    }
+    let options = args.get(1).cloned().unwrap_or(VmValue::Nil);
+    let params = vm_to_json(&options);
+    if !params.is_object() {
+        return Err(VmError::Runtime(format!(
+            "{HOST_SESSION_PUSH_BRIDGE_INJECTION}: options must be a dict"
+        )));
+    }
+    let Some(bridge) = host_bridge_for_session(&session_id, HOST_SESSION_PUSH_BRIDGE_INJECTION)
+    else {
+        return Err(VmError::Runtime(format!(
+            "{HOST_SESSION_PUSH_BRIDGE_INJECTION}: no host bridge attached to session `{session_id}`"
+        )));
+    };
+    let reminder_id = bridge
+        .push_queued_session_remind_from_params(&params)
+        .await
+        .map_err(|message| {
+            VmError::Runtime(format!("{HOST_SESSION_PUSH_BRIDGE_INJECTION}: {message}"))
+        })?;
+    Ok(VmValue::String(Rc::from(reminder_id)))
+}
+
 async fn host_agent_session_drain_bridge_injections(
     args: Vec<VmValue>,
 ) -> Result<VmValue, VmError> {
@@ -1895,12 +1978,7 @@ async fn host_agent_daemon_wait(args: Vec<VmValue>) -> Result<VmValue, VmError> 
             bridge.set_daemon_idle(false);
             return Ok(json_to_vm(&serde_json::json!({"reason": "resume"})));
         }
-        let (_, reason) = drain_bridge_injections_for_checkpoint(
-            &session_id,
-            bridge,
-            crate::bridge::DeliveryCheckpoint::InterruptImmediate,
-        )
-        .await;
+        let (_, reason) = daemon_checkpoint_drain(&session_id, bridge, "daemon_idle_pre").await;
         if let Some(reason) = reason {
             bridge.set_daemon_idle(false);
             return Ok(json_to_vm(&serde_json::json!({"reason": reason})));
@@ -1912,12 +1990,7 @@ async fn host_agent_daemon_wait(args: Vec<VmValue>) -> Result<VmValue, VmError> 
     }
 
     if let Some(bridge) = bridge.as_ref() {
-        let (_, reason) = drain_bridge_injections_for_checkpoint(
-            &session_id,
-            bridge,
-            crate::bridge::DeliveryCheckpoint::InterruptImmediate,
-        )
-        .await;
+        let (_, reason) = daemon_checkpoint_drain(&session_id, bridge, "daemon_idle_post").await;
         if let Some(reason) = reason {
             bridge.set_daemon_idle(false);
             return Ok(json_to_vm(&serde_json::json!({"reason": reason})));
@@ -2285,6 +2358,7 @@ pub fn register_deferred_agent_session_host_primitives(vm: &mut Vm, registrar: f
         HOST_SKILL_SCORE,
         HOST_AUTONOMY_BUDGET_CHECK,
         HOST_SESSION_DRAIN_BRIDGE_INJECTIONS,
+        HOST_SESSION_PUSH_BRIDGE_INJECTION,
         HOST_DAEMON_WAIT,
     ] {
         vm.register_deferred_builtin(name, registrar);
@@ -2349,6 +2423,18 @@ pub fn register_agent_session_host_primitives(vm: &mut Vm) {
             .doc_static("Drain queued bridge transcript injections for a delivery checkpoint.");
     vm.register_async_builtin_with_metadata(drain_bridge_injections, |args| {
         Box::pin(async move { host_agent_session_drain_bridge_injections(args).await })
+    });
+
+    let push_bridge_injection = VmBuiltinMetadata::async_static(HOST_SESSION_PUSH_BRIDGE_INJECTION)
+        .signature_static("__host_agent_session_push_bridge_injection(session_id, options)")
+        .arity(VmBuiltinArity::Exact(2))
+        .category_static("agent.host")
+        .doc_static(
+            "Push a system-reminder onto the session's host bridge queue; \
+                 returns the reminder id. Inverse of drain_bridge_injections.",
+        );
+    vm.register_async_builtin_with_metadata(push_bridge_injection, |args| {
+        Box::pin(async move { host_agent_session_push_bridge_injection(args).await })
     });
 
     let daemon_wait = VmBuiltinMetadata::async_static(HOST_DAEMON_WAIT)

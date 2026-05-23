@@ -117,6 +117,12 @@ pub enum HookEvent {
     PostDrain,
     #[serde(rename = "OnDrainDecision")]
     OnDrainDecision,
+    /// Fired by `__agent_loop_checkpoint(kind, ...)` at every safe
+    /// injection seam in the agent loop. Pattern-match on `payload.kind`
+    /// to subscribe to specific seams (e.g. `kind=="pre_tool_dispatch"`)
+    /// or use `*` to observe every checkpoint pass.
+    #[serde(rename = "LoopCheckpoint")]
+    LoopCheckpoint,
 }
 
 impl HookEvent {
@@ -162,6 +168,7 @@ impl HookEvent {
             Self::PreDrain => "PreDrain",
             Self::PostDrain => "PostDrain",
             Self::OnDrainDecision => "OnDrainDecision",
+            Self::LoopCheckpoint => "LoopCheckpoint",
         }
     }
 
@@ -191,6 +198,7 @@ impl HookEvent {
             "PreDrain" | "pre_drain" => Ok(Self::PreDrain),
             "PostDrain" | "post_drain" => Ok(Self::PostDrain),
             "OnDrainDecision" | "on_drain_decision" => Ok(Self::OnDrainDecision),
+            "LoopCheckpoint" | "loop_checkpoint" => Ok(Self::LoopCheckpoint),
             other => Err(format!("unknown session hook event `{other}`")),
         }
     }
@@ -578,6 +586,7 @@ pub fn clear_session_hooks() {
                     | HookEvent::PreDrain
                     | HookEvent::PostDrain
                     | HookEvent::OnDrainDecision
+                    | HookEvent::LoopCheckpoint
             )
         });
     });

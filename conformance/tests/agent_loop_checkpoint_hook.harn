@@ -1,0 +1,34 @@
+/**
+ * Verifies `register_checkpoint_hook(kinds, handler)` fires for every
+ * agent-loop seam declared in the kinds list and ignores seams outside
+ * the list (#2211). Uses an llm_caller stub so the run is deterministic
+ * and offline.
+ */
+pipeline main() {
+  clear_session_hooks()
+  llm_mock_clear()
+  let observed = shared_cell({scope: "task_group", key: "checkpoint-kinds", initial: ""})
+  register_checkpoint_hook(
+    ["turn_start", "pre_tool_dispatch", "loop_exit"],
+    { event ->
+      let snap = shared_snapshot(observed)
+      shared_set(observed, snap.value + event.kind + ",")
+      return nil
+    },
+  )
+  let one_shot_caller = { _call -> return {ok: true, value: {text: "ack ##DONE##", tool_calls: [], provider: "mock", model: "mock"}} }
+  let result = agent_loop(
+    "hi",
+    nil,
+    {
+      provider: "mock",
+      max_iterations: 2,
+      loop_until_done: true,
+      session_id: "checkpoint-hook-conformance",
+      llm_caller: one_shot_caller,
+    },
+  )
+  __io_println(result.status)
+  __io_println(shared_get(observed))
+  clear_session_hooks()
+}

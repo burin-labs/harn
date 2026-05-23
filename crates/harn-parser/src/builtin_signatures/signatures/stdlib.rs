@@ -1657,6 +1657,11 @@ pub(crate) const SIGNATURES: &[BuiltinSignature] = &[
         TY_NIL,
     ),
     BuiltinSignature::simple(
+        "register_checkpoint_hook",
+        &[Param::new("kinds", TY_ANY), Param::new("handler", TY_ANY)],
+        TY_NIL,
+    ),
+    BuiltinSignature::simple(
         "register_reminder_provider",
         &[Param::new("config", TY_DICT)],
         TY_NIL,

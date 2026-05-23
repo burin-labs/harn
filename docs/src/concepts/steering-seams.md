@@ -2,15 +2,10 @@
 
 A *steering seam* is a point during a running agent loop where the runtime
 checks for pending out-of-band influence: a queued user message, a system
-reminder, an inbox feedback note, or a revocation. Where the seams are, and what
-they honor, determines what kinds of "stop, do this instead" control a host can
-exert.
-
-This page describes the current state of the seams and where the gaps are. The
-improvements tracked at
-[issue #2211](https://github.com/burin-labs/harn/issues/2211) and
-[issue #2213](https://github.com/burin-labs/harn/issues/2213) will reshape
-this page substantially when they land.
+reminder, an inbox feedback note, or a revocation. Every drain in the agent
+loop now routes through a single named helper — `__agent_loop_checkpoint(kind)`
+— so the set of seams is a closed catalog rather than a grep across the loop
+body.
 
 ## What you can inject
 
@@ -18,110 +13,116 @@ Three orthogonal channels feed into the loop:
 
 | Channel | Producer | Drained from | Renders as |
 |---|---|---|---|
-| **Bridge injections** | `session/inject` and `session/inject_reminder` over ACP, or any host of the VM bridge | `__agent_loop_drain_bridge_step` (loop.harn:1558) | New user message or system reminder in the transcript |
-| **Inbox feedback** | In-pipeline `agent_session_inject_feedback`, `agent_session_post_event`, command policy, MCP server hooks, stall diagnostics | Drained pre- and post-compact, currently only there | User-role messages |
+| **Bridge injections** | `session/inject` and `session/remind` over ACP; `agent_session_push_bridge_injection` for Harn-driven hosts | `__agent_loop_checkpoint` at every bridge seam (see below) | New user message or system reminder in the transcript |
+| **Inbox feedback** | In-pipeline `agent_session_inject_feedback`, `agent_session_post_event`, command policy, MCP server hooks, stall diagnostics | `__agent_loop_checkpoint` at `pre_compact` / `post_compact` | User-role messages |
 | **Direct transcript inject** | `transcript.inject_reminder`, internal `agent_session_inject` | Appended directly when called | Whatever shape the caller built |
 
 Bridge injections carry a **mode** — `interrupt_immediate`, `finish_step`,
-`wait_for_completion` — that hints when delivery should happen.
+`audit_only` — that decides *which* seams drain it.
 
-## Where the seams are today
+> **Note on `audit_only`.** This mode was previously called
+> `wait_for_completion`. The rename (harn#2212) is truth-in-advertising:
+> reminders queued with this mode land in the transcript at `loop_exit`
+> but are **never rendered into a model prompt**. Hosts that need the
+> model to react to a reminder before the agent terminates must use
+> `finish_step`, which drains at every iteration boundary.
 
-The agent loop body checks for pending steering at these points:
+## The seam catalog
 
-1. **Iteration top, after `turn_start`.** Both bridge and inbox drains.
-2. **Stalled "done" path after `turn_end`.** Bridge drain only, to honor
-   "continue if a steer arrived during done-judge."
-3. **Post-iteration after `turn_end`.** Bridge drain only.
-4. **Pre-compact and post-compact.** Inbox drain only, bracketing the compactor.
-5. **Daemon idle wait, pre-sleep and post-sleep.** Bridge drain only,
-   `interrupt_immediate` mode.
-6. **Loop exit, before finalize.** Bridge drain only, `wait_for_completion`
-   mode.
+`__agent_loop_checkpoint(kind, ...)` fires at exactly these `kind` values, in
+this order, per iteration:
 
-The atomic unit is **the iteration boundary**, not the tool-call boundary. There
-is no drain between the model emitting a tool call and the tool executing.
+| Kind | Where | Bridge modes drained | Inbox? |
+|---|---|---|---|
+| `turn_start` | Top of each iteration, after `turn_start` event | `interrupt_immediate`, `finish_step` | no |
+| `pre_compact` | Just before `agent_autocompact_if_needed` | — | yes |
+| `post_compact` | Just after `agent_autocompact_if_needed` | — | yes |
+| `pre_tool_dispatch` | After `__invoke_llm` returns, before `__dispatch_tool_calls` | `interrupt_immediate` only | no |
+| `turn_end` | Stalled-done-judge "done" path, before the loop falls through to terminal | `interrupt_immediate`, `finish_step` | no |
+| `post_tool_dispatch` | After every successful turn dispatch | `interrupt_immediate`, `finish_step` | no |
+| `daemon_idle_pre` | Daemon idle wait, before sleep | `interrupt_immediate` only | no |
+| `daemon_idle_post` | Daemon idle wait, after sleep | `interrupt_immediate` only | no |
+| `loop_exit` | After the loop body exits, before finalize | `audit_only` only (transcript audit, never rendered) | no |
 
-## What this means for you
+Every checkpoint pass emits a `LoopCheckpoint` event carrying `iteration`,
+`kind`, `delivered` (bridge injections drained at this seam),
+`inbox_delivered` (feedback notes drained), and `dispatch_skipped`.
 
-### Safe to inject between iterations
+## `pre_tool_dispatch` is the new "stop" seam
 
-Anything you queue while the loop is between iterations will be visible to the
-model on the next iteration's prompt. This includes both `interrupt_immediate`
-and `finish_step` modes — today they're treated identically.
+The seam that didn't exist before #2211: between the LLM returning a tool call
+and the dispatcher actually firing it.
 
-### Not yet safe to inject mid-tool
+When a host pushes an `interrupt_immediate`-mode injection (via ACP
+`session/remind` or `agent_session_push_bridge_injection`), the
+`pre_tool_dispatch` checkpoint drains it and returns `dispatch_skipped: true`.
+The loop:
 
-If the model has emitted a tool call and the dispatcher has started running it,
-your steering injection will not interrupt the tool. The tool runs to
-completion, and the reminder is drained at the next iteration top.
+1. Skips `__dispatch_tool_calls` entirely — the tool batch does not run.
+2. Records usage for the iteration so cost/token accounting stays honest.
+3. Emits `turn_end` with `dispatch_skipped: true` and `skip_reason:
+   "interrupt_immediate"` in the turn info.
+4. Continues to the next iteration, where the injected reminder is already in
+   the transcript and visible to the model on its next prompt build.
 
-For destructive tools (anything that pushes to a remote, deletes files, sends a
-message), this is a real gap. The proposed `cancel_in_flight_tool_call` builtin
-([#2213](https://github.com/burin-labs/harn/issues/2213)) and the proposed
-pre-tool-dispatch checkpoint
-([#2211](https://github.com/burin-labs/harn/issues/2211)) both target this gap.
+In other words, `interrupt_immediate` finally means *"stop before the next
+tool fires"*, not *"land at the next iteration boundary anyway."*
 
-### `interrupt_immediate` is currently misnamed
+The same `interrupt_immediate` injection arriving at `turn_start` or
+`post_tool_dispatch` is still drained, but those seams sit between iterations
+where no tool is pending — there's nothing to skip, the injection just lands in
+the transcript and the next prompt sees it.
 
-The bridge mode `interrupt_immediate` does not preempt. It is drained at the
-same seams as `finish_step` — between iterations. The "immediate" promise will
-be honored when [#2211](https://github.com/burin-labs/harn/issues/2211) ships
-the pre-tool-dispatch checkpoint.
+## `register_checkpoint_hook`
 
-If you're writing a host today and you need "actually stop the agent right now,"
-your options are limited to:
+Plugin authors observe seams through one canonical builtin:
 
-- Call `session/cancel` to end the whole session.
-- Inject with `interrupt_immediate` and accept that it lands at the next
-  iteration boundary.
-- Wait for the cancel-in-flight-tool-call primitive.
+```harn,ignore
+register_checkpoint_hook(["pre_tool_dispatch", "turn_end"], { event ->
+  log("seam fired:", event.kind, "delivered:", event.delivered)
+})
+```
 
-### `wait_for_completion` reminders are not rendered
+`kinds` accepts a single seam name, a list of seam names, or `nil` / `"*"` for
+every seam. The handler receives the `LoopCheckpoint` payload directly.
 
-A reminder queued with `mode: "wait_for_completion"` is drained at loop exit and
-appended to the transcript, but no further LLM call runs to render it. The
-reminder is visible in audit but invisible to the model. Tracked at
-[#2212](https://github.com/burin-labs/harn/issues/2212).
+Under the hood this registers a `loop_checkpoint` session hook with a
+pattern derived from `kinds` — `register_session_hook("loop_checkpoint", ...)`
+works too, with explicit pattern syntax (`kind=="pre_tool_dispatch"`,
+`kind=~"^(turn_start|loop_exit)$"`).
 
-If you want a reminder the model will actually see on its last response, use
-`finish_step` and accept that delivery may land on either the final iteration or
-the one after.
+## Migration from the old drain sites
 
-## The roadmap
+Pre-#2211 code called `agent_session_drain_bridge_injections(session_id,
+checkpoint)` directly at several sites. Those calls still work — the
+checkpoint helper is implemented on top of them — but they bypass the
+`LoopCheckpoint` event and the hook fan-out. Prefer
+`__agent_loop_checkpoint` inside the loop body and `register_checkpoint_hook`
+outside it.
 
-The shape of an ideal steering API, as scoped in the open issues:
+The legacy `register_session_hook("turn_start", ...)` /
+`register_session_hook("post_compact", ...)` triple-registration pattern
+still works for backward compatibility, but `register_checkpoint_hook` covers
+every seam in one call and exposes the `dispatch_skipped` signal that
+turn-level hooks never see.
 
-- A single named `__agent_loop_checkpoint(kind)` helper as the source of truth
-  for what the loop drains where
-  ([#2211](https://github.com/burin-labs/harn/issues/2211)).
-- A pre-tool-dispatch checkpoint that honors `interrupt_immediate` by skipping
-  the pending tool batch when a stop-shaped reminder arrives
-  ([#2211](https://github.com/burin-labs/harn/issues/2211)).
-- `register_checkpoint_hook(kinds, closure)` so plugin authors get one canonical
-  extension point instead of juggling `turn_start` / `turn_end` / `post_compact`
-  registrations ([#2211](https://github.com/burin-labs/harn/issues/2211)).
-- `cancel_in_flight_tool_call(call_id, reason)` wired to per-tool cancellation
-  tokens for real preemption of running tool calls
-  ([#2213](https://github.com/burin-labs/harn/issues/2213)).
-- `agent_session_pending_injections(session_id)` and
-  `agent_session_revoke_reminder(...)` for hosts that want a "reminders panel"
-  UI ([#2211](https://github.com/burin-labs/harn/issues/2211)).
+## What's still out of scope
 
-When that work lands, this page will be rewritten as a reference of named
-checkpoints rather than a description of inline drain sites.
+These were called out as separate issues in #2211 and are not yet shipped:
 
-## What hosts can do today
+- **Mid-tool preemption.** Once a tool is dispatching, there is still no
+  cancellation token. A long-running tool that started before the checkpoint
+  fired will run to completion. Tracked at
+  [#2213](https://github.com/burin-labs/harn/issues/2213).
+- **Bridge-level dedupe-key collapsing.** Multiple `interrupt_immediate`
+  injections with the same `dedupe_key` are drained as separate transcript
+  events instead of collapsing.
 
-- Inspect already-delivered reminders via the transcript event log.
-- Revoke a pending *user message* injection via `revoke_pending_user_message`
-  (`bridge.rs:330`). Reminder revocation is not yet symmetric.
-- Replace a pending *user message* via `replace_pending_user_message`
-  (`bridge.rs:361`).
-- Inject with `dedupe_key` to collapse duplicate reminders at the transcript
-  level.
-- Watch the `SessionUpdate::ReminderEmitted` event to know when a reminder was
-  actually drained.
+> `audit_only` reminders that drain at `loop_exit` and never render to the
+> model are now expected behavior, not a bug — see
+> [harn#2212](https://github.com/burin-labs/harn/issues/2212). Use
+> `finish_step` if you want the model to see the reminder before the loop
+> terminates.
 
 ## Cross-references
 
@@ -129,6 +130,7 @@ checkpoints rather than a description of inline drain sites.
   reminders.
 - [ACP `session/inject_reminder`
   RFC](../protocol-contributions/acp-session-inject-reminder.md) — the
-  protocol-side proposal.
-- [Agent lifecycle](../agent-lifecycle.md) — suspend, resume, and self-park,
-  which are different from steering but interact with it.
+  protocol-side proposal that depends on the `interrupt_immediate` semantics
+  this page describes.
+- [Agent lifecycle](../agent-lifecycle.md) — suspend, resume, and self-park
+  interact with steering but are not themselves steering seams.
