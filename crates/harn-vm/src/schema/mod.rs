@@ -3,6 +3,7 @@ use std::collections::BTreeMap;
 
 mod api;
 mod canonicalize;
+mod limits;
 mod result;
 mod transform;
 mod type_check;

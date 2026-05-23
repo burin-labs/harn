@@ -62,6 +62,13 @@ condensed series summaries instead of full per-patch history.
 
 ### Changed
 
+- **Schema traversal hardening (#2202).** Runtime schema canonicalization,
+  JSON Schema/OpenAPI export, validation, runtime parameter assertions,
+  sub-agent return-schema validation, and JSON-stream schema setup now share
+  explicit traversal limits: 128 nested schema nodes and 256 local `$ref`
+  expansions. Cyclic local references such as `$ref: "#"` now fail
+  deterministically with a Harn-level schema error instead of relying on Rust
+  stack depth.
 - **Bridge inject mode `wait_for_completion` renamed to `audit_only`
   (#2212).** The previous name was a footgun: reminders queued with this
   mode drain at `loop_exit` and land in the transcript audit, but the

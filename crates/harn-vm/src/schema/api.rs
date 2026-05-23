@@ -102,19 +102,17 @@ pub(crate) fn schema_assert_param(
 pub(crate) fn schema_to_json_schema_value(schema: &VmValue) -> Result<VmValue, VmError> {
     let normalized = canonicalize_schema_value(schema)
         .map_err(|error| VmError::Thrown(VmValue::String(Rc::from(error))))?;
-    Ok(super::json_to_vm_value(&canonical_to_json_schema(
-        &normalized,
-        false,
-    )))
+    let json_schema = canonical_to_json_schema(&normalized, false)
+        .map_err(|error| VmError::Thrown(VmValue::String(Rc::from(error))))?;
+    Ok(super::json_to_vm_value(&json_schema))
 }
 
 pub(crate) fn schema_to_openapi_schema_value(schema: &VmValue) -> Result<VmValue, VmError> {
     let normalized = canonicalize_schema_value(schema)
         .map_err(|error| VmError::Thrown(VmValue::String(Rc::from(error))))?;
-    Ok(super::json_to_vm_value(&canonical_to_json_schema(
-        &normalized,
-        true,
-    )))
+    let json_schema = canonical_to_json_schema(&normalized, true)
+        .map_err(|error| VmError::Thrown(VmValue::String(Rc::from(error))))?;
+    Ok(super::json_to_vm_value(&json_schema))
 }
 
 pub(crate) fn schema_from_json_schema_value(schema: &VmValue) -> Result<VmValue, VmError> {

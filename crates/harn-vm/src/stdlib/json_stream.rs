@@ -857,10 +857,29 @@ mod tests {
     }
 
     fn call(name: &str, args: Vec<VmValue>) -> VmValue {
+        call_result(name, args).unwrap()
+    }
+
+    fn call_result(name: &str, args: Vec<VmValue>) -> Result<VmValue, VmError> {
         let mut vm = Vm::new();
         register_json_stream_builtins(&mut vm);
         let builtin = vm.builtins.get(name).unwrap().clone();
-        builtin(&args, &mut String::new()).unwrap()
+        builtin(&args, &mut String::new())
+    }
+
+    #[test]
+    fn stream_validator_rejects_cyclic_schema_at_create() {
+        reset_json_stream_state();
+        let schema = dict([("$ref", string("#"))]);
+        let error = call_result("__json_stream_validator", vec![schema])
+            .expect_err("cyclic schema must be rejected");
+
+        assert!(
+            error
+                .to_string()
+                .contains("cyclic schema reference: # -> #"),
+            "expected cyclic schema reference error, got {error:?}"
+        );
     }
 
     #[test]

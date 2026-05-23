@@ -5,7 +5,8 @@ use std::sync::{Arc, Mutex, OnceLock};
 
 use crate::value::{values_equal, StructLayout, VmValue};
 
-use super::canonicalize::resolve_canonical_ref;
+use super::canonicalize::resolve_canonical_ref_with_path;
+use super::limits::SchemaTraversal;
 use super::result::ValidationResult;
 use super::type_check::{
     actual_value_type, schema_expected_label, schema_is_object_like, schema_type_name,
@@ -64,7 +65,22 @@ pub(super) fn validate_schema_value(
 ) -> ValidationResult {
     let root = schema.as_dict().cloned().unwrap_or_default();
     let schema_dict = schema.as_dict().cloned().unwrap_or_default();
-    validate_against_schema(data, &schema_dict, &root, "", options)
+    let mut context = ValidationContext::new();
+    validate_against_schema(data, &schema_dict, &root, "", options, &mut context)
+}
+
+struct ValidationContext {
+    traversal: SchemaTraversal,
+    ref_stack: Vec<String>,
+}
+
+impl ValidationContext {
+    fn new() -> Self {
+        Self {
+            traversal: SchemaTraversal::new(),
+            ref_stack: Vec::new(),
+        }
+    }
 }
 
 fn validate_against_schema(
@@ -73,11 +89,48 @@ fn validate_against_schema(
     root_schema: &BTreeMap<String, VmValue>,
     path: &str,
     options: ValidationOptions,
+    context: &mut ValidationContext,
+) -> ValidationResult {
+    if let Err(error) = context.traversal.enter_schema() {
+        return validation_limit_error(value, path, error);
+    }
+    let result = validate_against_schema_inner(value, schema, root_schema, path, options, context);
+    context.traversal.exit_schema();
+    result
+}
+
+fn validate_against_schema_inner(
+    value: &VmValue,
+    schema: &BTreeMap<String, VmValue>,
+    root_schema: &BTreeMap<String, VmValue>,
+    path: &str,
+    options: ValidationOptions,
+    context: &mut ValidationContext,
 ) -> ValidationResult {
     if let Some(VmValue::String(pointer)) = schema.get("$ref") {
-        match resolve_canonical_ref(root_schema, pointer) {
-            Some(resolved) => {
-                return validate_against_schema(value, &resolved, root_schema, path, options);
+        if let Err(error) = context.traversal.expand_ref() {
+            return validation_limit_error(value, path, error);
+        }
+        match resolve_canonical_ref_with_path(root_schema, pointer) {
+            Some((resolved_pointer, resolved)) => {
+                if let Some(index) = context
+                    .ref_stack
+                    .iter()
+                    .position(|entry| entry == &resolved_pointer)
+                {
+                    let mut cycle = context.ref_stack[index..].to_vec();
+                    cycle.push(resolved_pointer);
+                    return validation_limit_error(
+                        value,
+                        path,
+                        format!("cyclic schema reference: {}", cycle.join(" -> ")),
+                    );
+                }
+                context.ref_stack.push(resolved_pointer);
+                let result =
+                    validate_against_schema(value, &resolved, root_schema, path, options, context);
+                context.ref_stack.pop();
+                return result;
             }
             None => {
                 return ValidationResult {
@@ -121,8 +174,14 @@ fn validate_against_schema(
             let Some(branch_dict) = branch.as_dict() else {
                 continue;
             };
-            let branch_result =
-                validate_against_schema(&normalized, branch_dict, root_schema, path, options);
+            let branch_result = validate_against_schema(
+                &normalized,
+                branch_dict,
+                root_schema,
+                path,
+                options,
+                context,
+            );
             normalized = branch_result.value;
             errors.extend(branch_result.errors);
         }
@@ -133,7 +192,7 @@ fn validate_against_schema(
         for branch in union_schemas.iter() {
             if let Some(dict) = branch.as_dict() {
                 let branch_result =
-                    validate_against_schema(value, dict, root_schema, path, options);
+                    validate_against_schema(value, dict, root_schema, path, options, context);
                 if branch_result.errors.is_empty() {
                     matched = Some(branch_result.value);
                     break;
@@ -168,14 +227,21 @@ fn validate_against_schema(
     match &normalized {
         VmValue::Dict(map) => {
             let (next_value, next_errors) =
-                validate_object_fields(map, None, schema, root_schema, path, options);
+                validate_object_fields(map, None, schema, root_schema, path, options, context);
             normalized = next_value;
             errors.extend(next_errors);
         }
         VmValue::StructInstance { layout, .. } => {
             let fields = normalized.struct_fields_map().unwrap_or_default();
-            let (next_value, next_errors) =
-                validate_object_fields(&fields, Some(layout), schema, root_schema, path, options);
+            let (next_value, next_errors) = validate_object_fields(
+                &fields,
+                Some(layout),
+                schema,
+                root_schema,
+                path,
+                options,
+                context,
+            );
             normalized = next_value;
             errors.extend(next_errors);
         }
@@ -209,6 +275,7 @@ fn validate_against_schema(
                         root_schema,
                         &index_path(path, i),
                         options,
+                        context,
                     );
                     if child.errors.is_empty() {
                         normalized_items.push(child.value);
@@ -300,6 +367,13 @@ fn validate_against_schema(
     }
 }
 
+fn validation_limit_error(value: &VmValue, path: &str, error: String) -> ValidationResult {
+    ValidationResult {
+        value: value.clone(),
+        errors: vec![format!("at {}: {}", location_label(path), error)],
+    }
+}
+
 fn validate_object_fields(
     fields: &BTreeMap<String, VmValue>,
     struct_layout: Option<&StructLayout>,
@@ -307,6 +381,7 @@ fn validate_object_fields(
     root_schema: &BTreeMap<String, VmValue>,
     path: &str,
     options: ValidationOptions,
+    context: &mut ValidationContext,
 ) -> (VmValue, Vec<String>) {
     let mut errors = Vec::new();
     let mut merged = fields.clone();
@@ -349,6 +424,7 @@ fn validate_object_fields(
                         root_schema,
                         &child_path,
                         options,
+                        context,
                     );
                     if child.errors.is_empty() {
                         merged.insert(key.clone(), child.value);
@@ -364,6 +440,7 @@ fn validate_object_fields(
                             root_schema,
                             &child_path,
                             options,
+                            context,
                         );
                         if child.errors.is_empty() {
                             merged.insert(key.clone(), child.value);
@@ -400,6 +477,7 @@ fn validate_object_fields(
                     root_schema,
                     &child_path(path, key),
                     options,
+                    context,
                 );
                 if child.errors.is_empty() {
                     merged.insert(key.clone(), child.value);
@@ -485,9 +563,78 @@ pub(super) fn first_param_validation_error(
     param_name: &str,
     options: ValidationOptions,
 ) -> Option<String> {
+    let mut context = ValidationContext::new();
+    first_param_validation_error_inner(
+        value,
+        schema,
+        root_schema,
+        param_name,
+        options,
+        &mut context,
+    )
+}
+
+fn first_param_validation_error_inner(
+    value: &VmValue,
+    schema: &BTreeMap<String, VmValue>,
+    root_schema: &BTreeMap<String, VmValue>,
+    param_name: &str,
+    options: ValidationOptions,
+    context: &mut ValidationContext,
+) -> Option<String> {
+    if let Err(error) = context.traversal.enter_schema() {
+        return Some(format!("parameter '{}': {}", param_name, error));
+    }
+    let result =
+        first_param_validation_error_body(value, schema, root_schema, param_name, options, context);
+    context.traversal.exit_schema();
+    result
+}
+
+fn first_param_validation_error_body(
+    value: &VmValue,
+    schema: &BTreeMap<String, VmValue>,
+    root_schema: &BTreeMap<String, VmValue>,
+    param_name: &str,
+    options: ValidationOptions,
+    context: &mut ValidationContext,
+) -> Option<String> {
     if let Some(VmValue::String(pointer)) = schema.get("$ref") {
-        let resolved = resolve_canonical_ref(root_schema, pointer)?;
-        return first_param_validation_error(value, &resolved, root_schema, param_name, options);
+        if let Err(error) = context.traversal.expand_ref() {
+            return Some(format!("parameter '{}': {}", param_name, error));
+        }
+        let Some((resolved_pointer, resolved)) =
+            resolve_canonical_ref_with_path(root_schema, pointer)
+        else {
+            return Some(format!(
+                "parameter '{}': unresolved schema reference '{}'",
+                param_name, pointer
+            ));
+        };
+        if let Some(index) = context
+            .ref_stack
+            .iter()
+            .position(|entry| entry == &resolved_pointer)
+        {
+            let mut cycle = context.ref_stack[index..].to_vec();
+            cycle.push(resolved_pointer);
+            return Some(format!(
+                "parameter '{}': cyclic schema reference: {}",
+                param_name,
+                cycle.join(" -> ")
+            ));
+        }
+        context.ref_stack.push(resolved_pointer);
+        let result = first_param_validation_error_inner(
+            value,
+            &resolved,
+            root_schema,
+            param_name,
+            options,
+            context,
+        );
+        context.ref_stack.pop();
+        return result;
     }
 
     if matches!(value, VmValue::Nil) && schema_bool(schema, "nullable") {
@@ -497,9 +644,14 @@ pub(super) fn first_param_validation_error(
     if let Some(VmValue::List(branches)) = schema.get("all_of") {
         for branch in branches.iter() {
             let branch_dict = branch.as_dict()?;
-            if let Some(error) =
-                first_param_validation_error(value, branch_dict, root_schema, param_name, options)
-            {
+            if let Some(error) = first_param_validation_error_inner(
+                value,
+                branch_dict,
+                root_schema,
+                param_name,
+                options,
+                context,
+            ) {
                 return Some(error);
             }
         }
@@ -509,7 +661,14 @@ pub(super) fn first_param_validation_error(
     if let Some(VmValue::List(branches)) = schema.get("union") {
         for branch in branches.iter() {
             let branch_dict = branch.as_dict()?;
-            first_param_validation_error(value, branch_dict, root_schema, param_name, options)?;
+            first_param_validation_error_inner(
+                value,
+                branch_dict,
+                root_schema,
+                param_name,
+                options,
+                context,
+            )?;
         }
         return Some(format!(
             "parameter '{}' expected {}, got {} ({})",
@@ -536,7 +695,7 @@ pub(super) fn first_param_validation_error(
                 ));
             }
         };
-        return first_object_param_error(fields, schema, root_schema, param_name, options);
+        return first_object_param_error(fields, schema, root_schema, param_name, options, context);
     }
 
     if let Some(expected_type) = schema_type_name(schema) {
@@ -551,7 +710,7 @@ pub(super) fn first_param_validation_error(
         }
     }
 
-    let result = validate_against_schema(value, schema, root_schema, "root", options);
+    let result = validate_against_schema(value, schema, root_schema, "root", options, context);
     if result.errors.is_empty() {
         None
     } else {
@@ -577,6 +736,7 @@ fn first_object_param_error(
     root_schema: &BTreeMap<String, VmValue>,
     param_name: &str,
     options: ValidationOptions,
+    context: &mut ValidationContext,
 ) -> Option<String> {
     let mut known_keys = std::collections::BTreeSet::new();
 
@@ -629,12 +789,13 @@ fn first_object_param_error(
                 match prop_value {
                     VmValue::Dict(_) | VmValue::StructInstance { .. } => {
                         let child_param = format!("{param_name}.{key}");
-                        if let Some(error) = first_param_validation_error(
+                        if let Some(error) = first_param_validation_error_inner(
                             prop_value,
                             prop_schema_dict,
                             root_schema,
                             &child_param,
                             options,
+                            context,
                         ) {
                             return Some(error);
                         }
@@ -664,12 +825,13 @@ fn first_object_param_error(
             }
 
             let child_param = format!("{param_name}.{key}");
-            if let Some(error) = first_param_validation_error(
+            if let Some(error) = first_param_validation_error_inner(
                 prop_value,
                 prop_schema_dict,
                 root_schema,
                 &child_param,
                 options,
+                context,
             ) {
                 return Some(error);
             }
@@ -696,12 +858,13 @@ fn first_object_param_error(
                     match value {
                         VmValue::Dict(_) | VmValue::StructInstance { .. } => {
                             let child_param = format!("{param_name}.{key}");
-                            if let Some(error) = first_param_validation_error(
+                            if let Some(error) = first_param_validation_error_inner(
                                 value,
                                 extra_schema,
                                 root_schema,
                                 &child_param,
                                 options,
+                                context,
                             ) {
                                 return Some(error);
                             }
@@ -731,12 +894,13 @@ fn first_object_param_error(
                 }
 
                 let child_param = format!("{param_name}.{key}");
-                if let Some(error) = first_param_validation_error(
+                if let Some(error) = first_param_validation_error_inner(
                     value,
                     extra_schema,
                     root_schema,
                     &child_param,
                     options,
+                    context,
                 ) {
                     return Some(error);
                 }
