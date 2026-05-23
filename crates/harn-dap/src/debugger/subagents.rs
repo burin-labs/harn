@@ -27,11 +27,10 @@
 //!
 //! ## Privacy
 //!
-//! Only public metadata — worker id, name, mode, status, parent worker
-//! id, optional human-readable suspend reason — flows through DAP. We
-//! deliberately do NOT forward `transcript`, `conditions`, or arbitrary
-//! `metadata` blobs; those can carry tool inputs that may be sensitive
-//! (issue #1867 privacy callout).
+//! DAP receives the worker identity, lineage, lifecycle status, and the
+//! structured suspension envelope needed for debugger inspection. It
+//! deliberately does not receive transcripts, resume input, or arbitrary
+//! worker metadata blobs.
 //!
 //! ## Filters
 //!
@@ -57,6 +56,7 @@ use std::collections::BTreeMap;
 use std::sync::{Arc, Mutex};
 
 use harn_vm::agent_events::{AgentEvent, AgentEventSink, WildcardSinkHandle, WorkerEvent};
+use serde_json::Value;
 
 /// Stable thread ids for subagent threads start at this base. Keeps
 /// them well above the synthetic `main` (1) and the ACP session range
@@ -73,6 +73,9 @@ pub(crate) struct SubagentThread {
     /// Most-recent suspend reason. Cleared on resume / completion so
     /// the next stop description doesn't echo a stale reason.
     pub(crate) suspend_reason: Option<String>,
+    /// Structured suspension envelope exposed through DAP scopes when
+    /// the suspended subagent thread is selected.
+    pub(crate) suspension: Option<Value>,
     /// True after `thread { reason: "exited" }` has been emitted; the
     /// record sticks around briefly so a `threads` response that races
     /// with the exit can still surface the row, but no further events
@@ -91,6 +94,7 @@ pub(crate) struct SubagentObservation {
     pub(crate) status: String,
     pub(crate) parent_worker_id: Option<String>,
     pub(crate) suspend_reason: Option<String>,
+    pub(crate) suspension: Option<Value>,
 }
 
 /// Shared state between the [`SubagentEventSink`] (which mutates from
@@ -166,6 +170,7 @@ impl SubagentTracker {
                 parent_worker_id: parent_worker_id.map(str::to_string),
                 last_status: status.to_string(),
                 suspend_reason: None,
+                suspension: None,
                 exited: false,
             };
             guard.threads.insert(worker_id.to_string(), record.clone());
@@ -173,12 +178,19 @@ impl SubagentTracker {
         }
     }
 
-    /// Mark a subagent's record as suspended, attaching the reason.
-    pub(crate) fn mark_suspended(&self, worker_id: &str, reason: Option<&str>) {
+    /// Mark a subagent's record as suspended, attaching the envelope
+    /// shown in the DAP variable inspector.
+    pub(crate) fn mark_suspended(
+        &self,
+        worker_id: &str,
+        reason: Option<&str>,
+        suspension: Option<Value>,
+    ) {
         let mut guard = self.inner.lock().expect("subagent tracker poisoned");
         if let Some(thread) = guard.threads.get_mut(worker_id) {
             thread.last_status = "suspended".to_string();
             thread.suspend_reason = reason.map(str::to_string);
+            thread.suspension = suspension;
         }
     }
 
@@ -190,6 +202,7 @@ impl SubagentTracker {
         if let Some(thread) = guard.threads.get_mut(worker_id) {
             thread.last_status = "running".to_string();
             thread.suspend_reason = None;
+            thread.suspension = None;
         }
     }
 
@@ -202,6 +215,7 @@ impl SubagentTracker {
         if let Some(thread) = guard.threads.get_mut(worker_id) {
             thread.exited = true;
             thread.suspend_reason = None;
+            thread.suspension = None;
         }
     }
 
@@ -232,6 +246,15 @@ impl SubagentTracker {
     pub(crate) fn thread_id_for_worker(&self, worker_id: &str) -> Option<u64> {
         let guard = self.inner.lock().expect("subagent tracker poisoned");
         guard.threads.get(worker_id).map(|t| t.thread_id)
+    }
+
+    pub(crate) fn thread_for_id(&self, thread_id: u64) -> Option<SubagentThread> {
+        let guard = self.inner.lock().expect("subagent tracker poisoned");
+        guard
+            .threads
+            .values()
+            .find(|thread| thread.thread_id == thread_id)
+            .cloned()
     }
 
     /// Test helper — peek at the queue length without draining.
@@ -283,10 +306,10 @@ impl AgentEventSink for SubagentEventSink {
             .and_then(|v| v.as_str())
             .filter(|s| !s.is_empty())
             .map(str::to_string);
-        // Suspend reason comes from the bridge metadata blob the
-        // `emit_worker_event` builder packed in. It's intentionally
-        // restricted to the short human-readable string so we don't
-        // leak transcript / payload data through DAP.
+        let suspension = metadata
+            .get("suspension")
+            .filter(|value| value.is_object())
+            .cloned();
         let suspend_reason = metadata
             .get("suspension")
             .and_then(|v| v.get("reason"))
@@ -299,6 +322,7 @@ impl AgentEventSink for SubagentEventSink {
             status: status.clone(),
             parent_worker_id,
             suspend_reason,
+            suspension,
         };
         let mut guard = self
             .tracker
@@ -346,7 +370,20 @@ mod tests {
             metadata.insert("parent_worker_id".to_string(), json!(p));
         }
         if let Some(r) = suspend_reason {
-            metadata.insert("suspension".to_string(), json!({ "reason": r }));
+            metadata.insert(
+                "suspension".to_string(),
+                json!({
+                    "handle": worker_id,
+                    "reason": r,
+                    "conditions": {
+                        "trigger": {"provider": "github", "kind": "comment"},
+                        "timeout": {"minutes": 30},
+                    },
+                    "resume_by_mechanism": "trigger",
+                    "suspended_at": "01978f25-0000-7000-8000-000000000000",
+                    "initiator": "operator",
+                }),
+            );
         }
         AgentEvent::WorkerUpdate {
             session_id: "session-test".to_string(),
@@ -394,6 +431,10 @@ mod tests {
         assert_eq!(drained[0].event, WorkerEvent::WorkerSpawned);
         assert_eq!(drained[1].event, WorkerEvent::WorkerSuspended);
         assert_eq!(drained[1].suspend_reason.as_deref(), Some("budget"));
+        assert_eq!(
+            drained[1].suspension.as_ref().unwrap()["resume_by_mechanism"],
+            "trigger"
+        );
     }
 
     #[test]
@@ -415,7 +456,7 @@ mod tests {
     fn mark_resumed_clears_suspend_reason() {
         let tracker = SubagentTracker::new();
         tracker.upsert_thread("w1", "alpha", None, "running");
-        tracker.mark_suspended("w1", Some("backoff"));
+        tracker.mark_suspended("w1", Some("backoff"), Some(json!({"reason": "backoff"})));
         let snapshot = tracker.snapshot_threads();
         assert_eq!(snapshot[0].1.suspend_reason.as_deref(), Some("backoff"));
         tracker.mark_resumed("w1");

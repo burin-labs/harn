@@ -151,8 +151,23 @@ impl Debugger {
                     // IDE with no-op stopped/continued churn.
                 }
                 WorkerEvent::WorkerWaitingForInput => {
-                    self.subagent_tracker
-                        .mark_suspended(&obs.worker_id, Some("awaiting input"));
+                    let mut suspension = obs.suspension.clone().unwrap_or_else(|| {
+                        json!({
+                            "handle": obs.worker_id,
+                            "reason": "awaiting input",
+                            "resume_by_mechanism": "manual",
+                        })
+                    });
+                    if let Some(object) = suspension.as_object_mut() {
+                        object
+                            .entry("reason".to_string())
+                            .or_insert_with(|| json!("awaiting input"));
+                    }
+                    self.subagent_tracker.mark_suspended(
+                        &obs.worker_id,
+                        Some("awaiting input"),
+                        Some(suspension),
+                    );
                     let seq = self.next_seq();
                     out.push(DapResponse::event(
                         seq,
@@ -167,8 +182,11 @@ impl Debugger {
                     ));
                 }
                 WorkerEvent::WorkerSuspended => {
-                    self.subagent_tracker
-                        .mark_suspended(&obs.worker_id, obs.suspend_reason.as_deref());
+                    self.subagent_tracker.mark_suspended(
+                        &obs.worker_id,
+                        obs.suspend_reason.as_deref(),
+                        obs.suspension.clone(),
+                    );
                     let description = obs
                         .suspend_reason
                         .clone()

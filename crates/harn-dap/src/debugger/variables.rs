@@ -4,6 +4,9 @@ use serde_json::json;
 use super::state::{Debugger, PathSegment};
 use crate::protocol::*;
 
+const SUBAGENT_SUSPENSION_FRAME_BASE: i64 = 700_000_000;
+const SUBAGENT_SUSPENSION_SCOPE_BASE: i64 = 800_000_000;
+
 fn vm_type_name(val: &VmValue) -> &'static str {
     val.type_name()
 }
@@ -21,6 +24,45 @@ fn is_simple_identifier(expr: &str) -> bool {
 }
 
 impl Debugger {
+    pub(crate) fn subagent_suspension_frame_id(thread_id: u64) -> i64 {
+        SUBAGENT_SUSPENSION_FRAME_BASE + thread_id as i64
+    }
+
+    fn thread_id_from_suspension_frame(frame_id: i64) -> Option<u64> {
+        if !(SUBAGENT_SUSPENSION_FRAME_BASE..SUBAGENT_SUSPENSION_SCOPE_BASE).contains(&frame_id) {
+            return None;
+        }
+        let offset = frame_id - SUBAGENT_SUSPENSION_FRAME_BASE;
+        (offset > 0).then_some(offset as u64)
+    }
+
+    fn suspension_scope_ref(thread_id: u64) -> i64 {
+        SUBAGENT_SUSPENSION_SCOPE_BASE + thread_id as i64
+    }
+
+    fn thread_id_from_suspension_scope(ref_id: i64) -> Option<u64> {
+        if ref_id < SUBAGENT_SUSPENSION_SCOPE_BASE {
+            return None;
+        }
+        let offset = ref_id - SUBAGENT_SUSPENSION_SCOPE_BASE;
+        (offset > 0).then_some(offset as u64)
+    }
+
+    fn suspension_variables_for_thread(&mut self, thread_id: u64) -> Option<Vec<Variable>> {
+        let suspension = self.subagent_tracker.thread_for_id(thread_id)?.suspension?;
+        let object = suspension.as_object()?;
+        let values: Vec<(String, VmValue)> = object
+            .iter()
+            .map(|(name, value)| (name.clone(), harn_vm::json_to_vm_value(value)))
+            .collect();
+        Some(
+            values
+                .iter()
+                .map(|(name, value)| self.make_variable(name.clone(), value))
+                .collect(),
+        )
+    }
+
     pub(crate) fn alloc_var_ref(&mut self, children: Vec<(String, VmValue)>) -> i64 {
         let id = self.next_var_ref;
         self.next_var_ref += 1;
@@ -93,6 +135,34 @@ impl Debugger {
     }
 
     pub(crate) fn handle_scopes(&mut self, msg: &DapMessage) -> Vec<DapResponse> {
+        let frame_id = msg
+            .arguments
+            .as_ref()
+            .and_then(|a| a.get("frameId"))
+            .and_then(|v| v.as_i64())
+            .unwrap_or(0);
+        if let Some(thread_id) = Self::thread_id_from_suspension_frame(frame_id) {
+            if self
+                .subagent_tracker
+                .thread_for_id(thread_id)
+                .and_then(|thread| thread.suspension)
+                .is_some()
+            {
+                let scopes = vec![Scope {
+                    name: "Suspension".to_string(),
+                    variables_reference: Self::suspension_scope_ref(thread_id),
+                    expensive: false,
+                }];
+                let seq = self.next_seq();
+                return vec![DapResponse::success(
+                    seq,
+                    msg.seq,
+                    "scopes",
+                    Some(json!({ "scopes": scopes })),
+                )];
+            }
+        }
+
         let scopes = vec![Scope {
             name: "Locals".to_string(),
             variables_reference: 1,
@@ -115,6 +185,19 @@ impl Debugger {
             .and_then(|a| a.get("variablesReference"))
             .and_then(|v| v.as_i64())
             .unwrap_or(1);
+
+        if let Some(thread_id) = Self::thread_id_from_suspension_scope(ref_id) {
+            let vars = self
+                .suspension_variables_for_thread(thread_id)
+                .unwrap_or_default();
+            let seq = self.next_seq();
+            return vec![DapResponse::success(
+                seq,
+                msg.seq,
+                "variables",
+                Some(json!({ "variables": vars })),
+            )];
+        }
 
         // Ref IDs >= 100 index `self.var_refs` (children of composite values).
         if ref_id >= 100 {

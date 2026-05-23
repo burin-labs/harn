@@ -207,7 +207,7 @@ fn parse_worker_config_rejects_unknown_carry_options() {
 
 #[test]
 fn worker_summary_exposes_request_and_provenance() {
-    let state = WorkerState {
+    let mut state = WorkerState {
         id: "worker_123".to_string(),
         name: "worker".to_string(),
         task: "latest task".to_string(),
@@ -283,6 +283,29 @@ fn worker_summary_exposes_request_and_provenance() {
         serde_json::json!("session_parent")
     );
     assert_eq!(summary["task"], serde_json::json!("latest task"));
+
+    state.status = "suspended".to_string();
+    state.suspension = Some(WorkerSuspension {
+        reason: "waiting on review".to_string(),
+        initiator: SuspendInitiator::Operator,
+        suspended_at: "01978f25-0000-7000-8000-000000000000".to_string(),
+        snapshot_ref: ".harn/workers/worker_123.json".to_string(),
+        conditions: Some(serde_json::json!({
+            "trigger": {"provider": "github", "kind": "comment"},
+            "timeout": {"minutes": 30},
+        })),
+        ..Default::default()
+    });
+
+    let event_snapshot = super::bridge::worker_event_snapshot(&state);
+    let suspension = &event_snapshot.metadata["suspension"];
+    assert_eq!(suspension["handle"], serde_json::json!("worker_123"));
+    assert_eq!(suspension["reason"], serde_json::json!("waiting on review"));
+    assert_eq!(
+        suspension["resume_by_mechanism"],
+        serde_json::json!("manual")
+    );
+    assert_eq!(suspension["conditions"]["timeout"]["minutes"], 30);
 }
 
 #[test]

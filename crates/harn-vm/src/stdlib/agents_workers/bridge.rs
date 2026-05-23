@@ -5,6 +5,25 @@ use crate::orchestration::MutationSessionRecord;
 
 use super::{worker_provenance, WorkerState};
 
+fn worker_suspension_metadata(state: &WorkerState) -> Option<serde_json::Value> {
+    let suspension = state.suspension.as_ref()?;
+    Some(serde_json::json!({
+        "handle": state.id.clone(),
+        "reason": suspension.reason.clone(),
+        "conditions": suspension.conditions.clone(),
+        "initiator": suspension.initiator,
+        "suspended_at": suspension.suspended_at.clone(),
+        "suspended_at_turn": suspension.suspended_at_turn,
+        "snapshot_ref": suspension.snapshot_ref.clone(),
+        "resume_by_mechanism": if suspension.auto_resume_trigger.is_some() {
+            "trigger"
+        } else {
+            "manual"
+        },
+        "auto_resume_trigger": suspension.auto_resume_trigger.clone(),
+    }))
+}
+
 fn worker_bridge_metadata(state: &WorkerState) -> serde_json::Value {
     serde_json::json!({
         "task": state.task,
@@ -23,6 +42,7 @@ fn worker_bridge_metadata(state: &WorkerState) -> serde_json::Value {
         "child_run_path": state.child_run_path,
         "execution": state.execution,
         "snapshot_path": state.snapshot_path,
+        "suspension": worker_suspension_metadata(state),
         "audit": state.audit,
         "error": state.latest_error,
     })
