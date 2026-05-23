@@ -6,6 +6,49 @@ Pre-0.6 highlights live in [CHANGELOG-pre-0.6.md](CHANGELOG-pre-0.6.md).
 Harn had no external users before 0.6.0, so that archive intentionally keeps
 condensed series summaries instead of full per-patch history.
 
+## Unreleased
+
+### Fixed
+
+- **Qwen3 thinking + native tools regression (QwenLM/Qwen3.6 #89, #2178).**
+  When `thinking` is enabled and a model is asked to call native tools,
+  the Qwen3 family narrates tool intent in the reasoning trace but emits
+  an empty `tool_calls` array. This produced 5+ minute single-turn
+  finalize stalls and burned release-audit attempts on OpenRouter
+  `qwen/qwen3.6-35b-a3b`. Two fixes: (1) every thinking-capable Qwen3
+  rule in `capabilities.toml` now declares
+  `auto_reasoning_overrides = { agent = "off", verify = "off", code =
+  "off" }`, so the reasoning policy disables thinking for tool-using
+  tasks at the data layer — replacing the prior hard-coded
+  `local_qwen_route()` Rust branch with a generalizable per-route map.
+  (2) `openrouter_reasoning_config(Disabled)` now emits
+  `{"enabled": false}` on the wire instead of dropping the field, so
+  OpenRouter actually honors the off intent (it silently ignores
+  `effort: "minimal"` for Qwen).
+
+### Changed
+
+- **Native-tool prose completion now requires confirmation (#2178).**
+  In a `loop_until_done` flow with native tools and no explicit
+  `done_sentinel` / `done_judge`, the agent loop previously accepted
+  prose-without-tool_calls on turn 1 as natural completion. That
+  optimistic heuristic conflated "I'm done" with "I tried to call a
+  tool but the channel dropped." The engine now narrows the auto-
+  complete path: if ZERO tool_calls have been emitted in the session
+  (successful or rejected), it injects one feedback message asking the
+  model to either call a tool or restate its final answer, then
+  accepts prose-only completion on the next turn. After any tool_call
+  the classic heuristic applies, so existing harness behavior is
+  preserved. Bounded by `max_nudges`.
+
+- **TurnStart/TurnEnd events carry model + latency (#2178).**
+  `TurnStart` now serializes `provider` and `model` alongside
+  `iteration`. `TurnEnd.turn_info` projects `provider`, `model`,
+  `response_ms`, `input_tokens`, `output_tokens`, `thinking_chars`
+  from the LLM result so live pulse-check consumers (ACP clients,
+  fleet hooks) can attribute latency and surface "still working"
+  indicators without re-parsing transcript JSONL.
+
 ## v0.8.33
 
 ### Added
