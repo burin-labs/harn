@@ -1,0 +1,358 @@
+import { agent_emit_event } from "std/agent/state"
+
+type AgentLoopCommandAction = "none" | "extend" | "stop"
+
+type AgentLoopCommand = {
+  action: AgentLoopCommandAction,
+  by: int,
+  until: int,
+  reason: string,
+  status: string,
+}
+
+type AgentLoopBudget = {
+  mode: string,
+  initial: int,
+  max: int,
+  extend_by: int,
+  expose_decisions: bool,
+}
+
+type AgentLoopBudgetDecision = {
+  iteration: int,
+  action: string,
+  old_limit: int,
+  new_limit: int,
+  reason: string,
+  status: string,
+}
+
+type AgentLoopCommandApplication = {
+  stop: bool,
+  final_status: string,
+  stop_reason: string?,
+  current_max: int,
+  extensions_used: int,
+  decisions: list<AgentLoopBudgetDecision>,
+}
+
+type AgentLoopState = {
+  iteration: int,
+  budget: dict,
+  turn: dict,
+  session: dict,
+  completion: dict,
+  progress: dict,
+}
+
+fn __agent_loop_state(args) -> AgentLoopState {
+  let current_limit = args.current_limit
+  let iteration = args.iteration
+  let remaining = if iteration >= current_limit {
+    0
+  } else {
+    current_limit - iteration
+  }
+  let missing = args.missing_required_tools
+  return {
+    iteration: iteration,
+    budget: {
+      current_limit: current_limit,
+      max: args.budget_max,
+      remaining: remaining,
+      extension_count: args.extensions_used,
+    },
+    turn: {
+      tool_call_count: args.turn_tool_count,
+      successful_tool_names: args.turn_successful,
+      rejected_tool_names: args.turn_rejected,
+      text_chars: args.turn_text_chars,
+      native_fallback_used: args.turn_native_fallback_used,
+    },
+    session: {
+      successful_tool_names: args.session_successful,
+      rejected_tool_names: args.session_rejected,
+      required_tools_satisfied: len(missing) == 0,
+      required_tools_missing: missing,
+    },
+    completion: {
+      proposed: args.completion_proposed,
+      vetoed: args.completion_vetoed,
+      verdict: args.completion_verdict,
+      feedback: args.completion_feedback,
+    },
+    progress: {changed: args.progress_changed, summary: args.progress_summary},
+  }
+}
+
+fn __agent_default_loop_control(state: AgentLoopState) {
+  if state.budget.remaining > 0 {
+    return nil
+  }
+  if state.completion.vetoed {
+    return {action: "extend", reason: "completion gate vetoed"}
+  }
+  if !state.session.required_tools_satisfied {
+    return {action: "extend", reason: "required tools missing"}
+  }
+  if state.progress.changed && state.turn.tool_call_count > 0 {
+    return {action: "extend", reason: "recent turn made progress"}
+  }
+  return nil
+}
+
+fn __agent_interpret_loop_command(command) -> AgentLoopCommand {
+  if command == nil {
+    return {action: "none", by: 0, until: 0, reason: "", status: ""}
+  }
+  if type_of(command) != "dict" {
+    throw "agent_loop: loop_control must return nil or a dict; got " + type_of(command)
+  }
+  let action = command?.action ?? "none"
+  if action != "none" && action != "extend" && action != "stop" {
+    throw "agent_loop: loop_control action must be \"none\", \"extend\", or \"stop\"; got "
+      + to_string(action)
+  }
+  let by = command?.by ?? 0
+  if type_of(by) != "int" {
+    throw "agent_loop: loop_control `by` must be an integer; got " + type_of(by)
+  }
+  let until = command?.until ?? 0
+  if type_of(until) != "int" {
+    throw "agent_loop: loop_control `until` must be an integer; got " + type_of(until)
+  }
+  return {action: action, by: by, until: until, reason: command?.reason ?? "", status: command?.status ?? ""}
+}
+
+/**
+ * agent_loop_control_invoke normalizes a custom or adaptive loop command.
+ *
+ * @effects: [agent]
+ * @allocation: heap
+ * @errors: [agent_loop]
+ * @api_stability: experimental
+ * @example: agent_loop_control_invoke(opts, budget, state)
+ */
+pub fn agent_loop_control_invoke(opts, budget: AgentLoopBudget, state: AgentLoopState) -> AgentLoopCommand {
+  let policy = opts?.loop_control
+  if policy != nil {
+    return __agent_interpret_loop_command(policy(state))
+  }
+  if budget.mode == "adaptive" {
+    return __agent_interpret_loop_command(__agent_default_loop_control(state))
+  }
+  return __agent_interpret_loop_command(nil)
+}
+
+fn __agent_apply_extension(command: AgentLoopCommand, budget: AgentLoopBudget, current_max: int) {
+  let cap = budget.max
+  let target = if command.until > 0 {
+    command.until
+  } else {
+    let by = if command.by > 0 {
+      command.by
+    } else {
+      budget.extend_by
+    }
+    current_max + by
+  }
+  let bounded = if target > cap {
+    cap
+  } else {
+    target
+  }
+  if bounded <= current_max {
+    return {extended: false, new_limit: current_max, delta: 0}
+  }
+  return {extended: true, new_limit: bounded, delta: bounded - current_max}
+}
+
+fn __agent_record_budget_decision(
+  decisions: list<AgentLoopBudgetDecision>,
+  iteration: int,
+  action: string,
+  old_limit: int,
+  new_limit: int,
+  reason: string,
+  status: string,
+) -> list<AgentLoopBudgetDecision> {
+  return decisions
+    .push(
+    {
+      iteration: iteration,
+      action: action,
+      old_limit: old_limit,
+      new_limit: new_limit,
+      reason: reason,
+      status: status,
+    },
+  )
+}
+
+fn __agent_progress_summary_text(completion_vetoed: bool, tool_count: int, visible_text: string) -> string {
+  if completion_vetoed {
+    return "completion gate vetoed"
+  }
+  if tool_count > 0 {
+    return "executed " + to_string(tool_count) + " tool call(s)"
+  }
+  if trim(visible_text) != "" {
+    return "produced visible text"
+  }
+  return "no progress signal"
+}
+
+/**
+ * agent_loop_snapshot_state builds the loop-control state callback payload.
+ *
+ * @effects: []
+ * @allocation: heap
+ * @errors: []
+ * @api_stability: experimental
+ * @example: agent_loop_snapshot_state(args)
+ */
+pub fn agent_loop_snapshot_state(args) -> AgentLoopState {
+  let verdict = args.verdict
+  let completion_vetoed = verdict != nil && verdict?.vetoed
+  let completion_verdict = if verdict == nil {
+    nil
+  } else {
+    verdict?.verdict
+  }
+  let completion_feedback = if verdict == nil {
+    nil
+  } else {
+    verdict?.feedback
+  }
+  let visible_text = args.visible_text
+  let tool_count = args.tool_count
+  let turn_successful = args.turn_successful
+  let progress_changed = tool_count > 0 || len(turn_successful) > 0
+    || trim(visible_text) != ""
+  let progress_summary = __agent_progress_summary_text(completion_vetoed, tool_count, visible_text)
+  return __agent_loop_state(
+    {
+      iteration: args.iteration,
+      current_limit: args.current_limit,
+      budget_max: args.budget_max,
+      extensions_used: args.extensions_used,
+      turn_tool_count: tool_count,
+      turn_successful: turn_successful,
+      turn_rejected: args.turn_rejected,
+      turn_text_chars: len(visible_text),
+      turn_native_fallback_used: args.turn_native_fallback_used,
+      session_successful: args.session_successful,
+      session_rejected: args.session_rejected,
+      missing_required_tools: args.missing_required_tools,
+      completion_proposed: args.completion_proposed,
+      completion_vetoed: completion_vetoed,
+      completion_verdict: completion_verdict,
+      completion_feedback: completion_feedback,
+      progress_changed: progress_changed,
+      progress_summary: progress_summary,
+    },
+  )
+}
+
+/**
+ * agent_loop_apply_command applies a normalized command to the loop budget.
+ *
+ * @effects: [agent]
+ * @allocation: heap
+ * @errors: []
+ * @api_stability: experimental
+ * @example: agent_loop_apply_command(state)
+ */
+pub fn agent_loop_apply_command(state) -> AgentLoopCommandApplication {
+  let command = state.command
+  let session_id = state.session_id
+  let iteration = state.iteration
+  let current_max = state.current_max
+  let budget = state.budget
+  if command.action == "stop" {
+    let stop_status = if command.status != "" {
+      command.status
+    } else {
+      "stopped"
+    }
+    let stop_reason = if command.reason != "" {
+      command.reason
+    } else {
+      "loop_control"
+    }
+    let decisions = __agent_record_budget_decision(
+      state.decisions,
+      iteration,
+      "stop",
+      current_max,
+      current_max,
+      command.reason,
+      stop_status,
+    )
+    agent_emit_event(
+      session_id,
+      "loop_control_decision",
+      {
+        iteration: iteration,
+        action: "stop",
+        old_limit: current_max,
+        new_limit: current_max,
+        reason: command.reason,
+        status: stop_status,
+      },
+    )
+    return {
+      stop: true,
+      final_status: stop_status,
+      stop_reason: stop_reason,
+      current_max: current_max,
+      extensions_used: state.extensions_used,
+      decisions: decisions,
+    }
+  }
+  if command.action == "extend" {
+    let applied = __agent_apply_extension(command, budget, current_max)
+    if applied.extended {
+      let old_limit = current_max
+      let new_limit = applied.new_limit
+      let extensions_used = state.extensions_used + 1
+      let decisions = __agent_record_budget_decision(
+        state.decisions,
+        iteration,
+        "extend",
+        old_limit,
+        new_limit,
+        command.reason,
+        "",
+      )
+      agent_emit_event(
+        session_id,
+        "loop_control_decision",
+        {
+          iteration: iteration,
+          action: "extend",
+          old_limit: old_limit,
+          new_limit: new_limit,
+          reason: command.reason,
+          status: "",
+        },
+      )
+      return {
+        stop: false,
+        final_status: "",
+        stop_reason: nil,
+        current_max: new_limit,
+        extensions_used: extensions_used,
+        decisions: decisions,
+      }
+    }
+  }
+  return {
+    stop: false,
+    final_status: "",
+    stop_reason: nil,
+    current_max: current_max,
+    extensions_used: state.extensions_used,
+    decisions: state.decisions,
+  }
+}

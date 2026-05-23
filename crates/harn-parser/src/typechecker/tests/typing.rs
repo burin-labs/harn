@@ -137,6 +137,19 @@ fn test_rest_param_binding_is_list_of_declared_type() {
 }
 
 #[test]
+fn test_transcript_append_builtins_preserve_input_container_type() {
+    let errs = errors(
+        r#"pipeline t(task) {
+  var built = transcript({workflow: "demo"})
+  built = add_user(built, [{type: "text", text: "hello", visibility: "public"}])
+  built = add_assistant(built, [{type: "output_text", text: "done", visibility: "public"}])
+  let messages = transcript_messages(built)
+}"#,
+    );
+    assert!(errs.is_empty(), "unexpected errors: {errs:?}");
+}
+
+#[test]
 fn test_unnecessary_safe_navigation_warns_on_non_nil_receiver() {
     let diagnostics = check_source_with_source(
         r#"

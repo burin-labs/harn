@@ -326,6 +326,18 @@ pub const STDLIB_SOURCES: &[StdlibSource] = &[
         source: include_str!("stdlib/agent/progress.harn"),
     },
     StdlibSource {
+        module: "agent/required_tools",
+        source: include_str!("stdlib/agent/required_tools.harn"),
+    },
+    StdlibSource {
+        module: "agent/stall",
+        source: include_str!("stdlib/agent/stall.harn"),
+    },
+    StdlibSource {
+        module: "agent/control",
+        source: include_str!("stdlib/agent/control.harn"),
+    },
+    StdlibSource {
         module: "agent/loop",
         source: include_str!("stdlib/agent/loop.harn"),
     },

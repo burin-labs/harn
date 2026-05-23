@@ -73,4 +73,22 @@ pipeline default() {
   __io_println(polling.repeated_tool_calls)
   __io_println(polling.suspected_loop)
   __io_println(len(polling.stall_warnings))
+  llm_mock_clear()
+  llm_mock({text: "Done. ##DONE##"})
+  let invalid_config = try {
+    agent_loop(
+      "Validate stall config",
+      nil,
+      {
+        provider: "mock",
+        tools: tools(),
+        tool_format: "native",
+        loop_until_done: true,
+        max_iterations: 1,
+        stall_diagnostics: {enabled: "yes"},
+      },
+    )
+  }
+  __io_println(is_err(invalid_config))
+  __io_println(contains(to_string(unwrap_err(invalid_config)), "stall_diagnostics.enabled"))
 }

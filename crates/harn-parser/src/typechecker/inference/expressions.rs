@@ -421,6 +421,13 @@ impl TypeChecker {
                     }
                     return None;
                 }
+                if Self::builtin_preserves_first_arg_type(name) {
+                    if let Some(first_type) =
+                        args.first().and_then(|arg| self.infer_type(arg, scope))
+                    {
+                        return Some(first_type);
+                    }
+                }
                 // Generic builtins (llm_call, schema_parse/check/expect):
                 // bind T by walking each arg node against the param
                 // TypeExpr, then apply bindings to the declared return
@@ -1082,6 +1089,13 @@ impl TypeChecker {
         } else {
             field_type
         })
+    }
+
+    fn builtin_preserves_first_arg_type(name: &str) -> bool {
+        matches!(
+            name,
+            "add_assistant" | "add_message" | "add_system" | "add_tool_result" | "add_user"
+        )
     }
 
     pub(in crate::typechecker) fn check_unnecessary_safe_property_access(

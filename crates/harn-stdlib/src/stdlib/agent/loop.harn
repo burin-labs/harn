@@ -1,6 +1,11 @@
 // @harn-entrypoint-category agent.stdlib
 import { agent_autocompact_if_needed } from "std/agent/autocompact"
 import { agent_budget_post_call_blocked, agent_budget_pre_call_blocked } from "std/agent/budget"
+import {
+  agent_loop_apply_command,
+  agent_loop_control_invoke,
+  agent_loop_snapshot_state,
+} from "std/agent/control"
 import { agent_daemon_snapshot, agent_daemon_step } from "std/agent/daemon"
 import { agent_verify_or_continue } from "std/agent/judge"
 import { agent_mcp_bootstrap_if_needed } from "std/agent/mcp"
@@ -10,7 +15,19 @@ import { agent_build_turn_messages, agent_build_turn_system } from "std/agent/pr
 import { agent_dispatch_tool_batch, agent_dispatch_tool_call } from "std/agent/primitives"
 import { agent_progress_apply_options } from "std/agent/progress"
 import { native_tool_contract_feedback_prompt } from "std/agent/prompts"
+import {
+  agent_required_tools_enforce,
+  agent_required_tools_inject_feedback,
+  agent_required_tools_missing_from_session,
+} from "std/agent/required_tools"
 import { agent_skills_match } from "std/agent/skills"
+import {
+  agent_stall_apply_result,
+  agent_stall_done_judge_due,
+  agent_stall_initial_state,
+  agent_stall_inject_feedback,
+  agent_stall_observe_tool_calls,
+} from "std/agent/stall"
 import {
   agent_emit_event,
   agent_record_native_tool_fallback,
@@ -474,59 +491,6 @@ fn __agent_loop_await_resumption_top_level(session, iteration, call, parsed, opt
   }
 }
 
-fn __stall_diagnostics_config(value) {
-  if value == nil {
-    return {enabled: false}
-  }
-  if type_of(value) == "bool" {
-    return {
-      enabled: value,
-      threshold: 3,
-      inject_feedback: true,
-      max_feedback: 1,
-      exempt_tools: [],
-      include_arguments: false,
-    }
-  }
-  if type_of(value) != "dict" {
-    throw "agent_loop: `stall_diagnostics` must be a dict, bool, or nil; got " + type_of(value)
-  }
-  let enabled = value?.enabled
-  let resolved_enabled = if enabled == nil {
-    true
-  } else {
-    enabled
-  }
-  let threshold = value?.threshold ?? 3
-  let safe_threshold = if type_of(threshold) == "int" && threshold >= 2 {
-    threshold
-  } else {
-    3
-  }
-  let max_feedback = value?.max_feedback ?? 1
-  let safe_max_feedback = if type_of(max_feedback) == "int" && max_feedback >= 0 {
-    max_feedback
-  } else {
-    1
-  }
-  return {
-    enabled: resolved_enabled,
-    threshold: safe_threshold,
-    inject_feedback: value?.inject_feedback ?? true,
-    max_feedback: safe_max_feedback,
-    exempt_tools: value?.exempt_tools ?? value?.allow_repeated_tools ?? [],
-    include_arguments: value?.include_arguments ?? false,
-  }
-}
-
-fn __stall_initial_state() {
-  return {last_signature: "", streak: 0, warnings: [], repeated_tool_calls: 0, feedback_count: 0}
-}
-
-fn __stall_reset_state(state) {
-  return state + {last_signature: "", streak: 0}
-}
-
 fn __tool_call_name(call) {
   return to_string(call?.name ?? call?.tool_name ?? "")
 }
@@ -537,157 +501,6 @@ fn __tool_call_args(call) {
     return raw
   }
   return {}
-}
-
-fn __tool_call_signature(call) {
-  let args_text = json_stringify(__tool_call_args(call))
-  return __tool_call_name(call) + "\n" + args_text
-}
-
-fn __stall_feedback_text(warning) {
-  return "Stall diagnostic: the last "
-    + to_string(warning.repeat_count)
-    + " tool calls repeated `"
-    + warning.tool_name
-    + "` with identical arguments. Use different evidence, finish, or explain why another identical call is necessary before repeating it."
-}
-
-fn __stall_warning_record(iteration, tool_name, args, signature, repeat_count, config) {
-  let args_text = json_stringify(args)
-  var record = {
-    iteration: iteration,
-    tool_name: tool_name,
-    repeat_count: repeat_count,
-    threshold: config.threshold,
-    arguments_digest: "sha256:" + sha256(args_text),
-    signature_digest: "sha256:" + sha256(signature),
-  }
-  if config.include_arguments {
-    record = record + {arguments: args}
-  }
-  return record
-}
-
-fn __stall_inject_feedback(session_id, warning, config, state) {
-  let wants_feedback = config.inject_feedback ?? true
-  let should_feedback = wants_feedback && state.feedback_count < config.max_feedback
-  if should_feedback {
-    agent_session_inject_feedback(session_id, "stall_diagnostics", __stall_feedback_text(warning))
-    return state + {feedback_count: state.feedback_count + 1}
-  }
-  return state
-}
-
-fn __stall_maybe_emit(session_id, warning, config, state, defer_feedback) {
-  agent_emit_event(session_id, "agent_loop_stall_warning", warning)
-  if defer_feedback {
-    return {state: state, warning: warning, feedback_deferred: true}
-  }
-  return {
-    state: __stall_inject_feedback(session_id, warning, config, state),
-    warning: warning,
-    feedback_deferred: false,
-  }
-}
-
-fn __stall_observe_tool_calls(session_id, tool_calls, iteration, raw_config, state, defer_feedback) {
-  let config = __stall_diagnostics_config(raw_config)
-  if !config.enabled {
-    return {state: state, enabled: false, warning: nil, feedback_deferred: false, config: config}
-  }
-  if len(tool_calls) == 0 {
-    return {
-      state: __stall_reset_state(state),
-      enabled: true,
-      warning: nil,
-      feedback_deferred: false,
-      config: config,
-    }
-  }
-  var next_state = state
-  var emitted_warning = nil
-  var feedback_deferred = false
-  for call in tool_calls {
-    let tool_name = __tool_call_name(call)
-    if tool_name == "" || contains(config.exempt_tools, tool_name) {
-      next_state = __stall_reset_state(next_state)
-      continue
-    }
-    let signature = __tool_call_signature(call)
-    let streak = if signature == next_state.last_signature {
-      next_state.streak + 1
-    } else {
-      1
-    }
-    let repeated = if streak > 1 {
-      next_state.repeated_tool_calls + 1
-    } else {
-      next_state.repeated_tool_calls
-    }
-    next_state = next_state
-      + {last_signature: signature, streak: streak, repeated_tool_calls: repeated}
-    if streak == config.threshold {
-      let warning = __stall_warning_record(iteration, tool_name, __tool_call_args(call), signature, streak, config)
-      let emitted = __stall_maybe_emit(session_id, warning, config, next_state, defer_feedback)
-      next_state = emitted.state
-      if emitted_warning == nil {
-        emitted_warning = warning
-      }
-      feedback_deferred = feedback_deferred || emitted?.feedback_deferred ?? false
-      next_state = next_state + {warnings: next_state.warnings.push(warning)}
-    }
-  }
-  return {
-    state: next_state,
-    enabled: true,
-    warning: emitted_warning,
-    feedback_deferred: feedback_deferred,
-    config: config,
-  }
-}
-
-fn __apply_stall_result(result, stall_enabled, stall_state) {
-  if !stall_enabled && len(stall_state.warnings) == 0 {
-    return result
-  }
-  return result
-    + {
-    repeated_tool_calls: stall_state.repeated_tool_calls,
-    stall_warnings: stall_state.warnings,
-    suspected_loop: len(stall_state.warnings) > 0,
-  }
-}
-
-fn __done_judge_stall_cadence(opts) {
-  let judge = opts?.done_judge
-  if type_of(judge) != "dict" {
-    return nil
-  }
-  let cadence = judge?.cadence
-  if type_of(cadence) != "dict" || cadence?.when != "stalled" {
-    return nil
-  }
-  return cadence
-}
-
-fn __done_judge_stall_due(opts, invocations, turn_number) {
-  let cadence = __done_judge_stall_cadence(opts)
-  if cadence == nil {
-    return false
-  }
-  let max_invocations = cadence?.max_invocations
-  if max_invocations != nil && invocations >= max_invocations {
-    return false
-  }
-  let min_iterations = cadence?.min_iterations_before_first
-  if min_iterations != nil && turn_number <= min_iterations {
-    return false
-  }
-  let every = cadence?.every
-  if every != nil && turn_number % every != 0 {
-    return false
-  }
-  return true
 }
 
 fn __native_fallback_feedback(policy, fallback_index) {
@@ -1063,110 +876,6 @@ fn __turn_info_payload(llm_result, tool_count, visible_text) {
   }
 }
 
-fn __requirement_satisfied(requirement, successful) {
-  if type_of(requirement) == "list" {
-    for candidate in requirement {
-      if contains(successful, candidate) {
-        return true
-      }
-    }
-    return false
-  }
-  return contains(successful, requirement)
-}
-
-fn __requirement_label(requirement) {
-  if type_of(requirement) == "list" {
-    return join(requirement, "|")
-  }
-  return to_string(requirement)
-}
-
-fn __missing_required_successful_tools(result, opts) {
-  let required = opts?.require_successful_tools
-  if required == nil || len(required) == 0 {
-    return []
-  }
-  let successful = result?.tools?.successful ?? []
-  var missing = []
-  for requirement in required {
-    if !__requirement_satisfied(requirement, successful) {
-      missing = missing.push(__requirement_label(requirement))
-    }
-  }
-  return missing
-}
-
-fn __required_tools_friction_event(result, opts, missing) {
-  let session_id = to_string(result?.session_id ?? "")
-  var recurrence = ["missing_required_tools=" + to_string(len(missing))]
-  if opts?.persona != nil {
-    recurrence = recurrence.push("persona=" + to_string(opts.persona))
-  }
-  return {
-    kind: "tool_gap",
-    source: "agent_loop.require_successful_tools",
-    actor: opts?.persona,
-    run_id: if session_id == "" {
-      nil
-    } else {
-      session_id
-    },
-    redacted_summary: "agent_loop completed without invoking required tool(s): "
-      + join(missing, ", "),
-    recurrence_hints: recurrence,
-    metadata: {
-      missing_required_tools: missing,
-      successful_tool_names: result?.tools?.successful ?? [],
-      iterations: result?.llm?.iterations ?? 0,
-      preset_kind: opts?._preset_kind,
-    },
-  }
-}
-
-fn __require_successful_tools_envelope(result, missing, iterations) {
-  return {
-    schema_version: 1,
-    kind: "missing_required_tools",
-    reason: "Required tool(s) did not succeed",
-    missing: missing,
-    successful_tool_names: result?.tools?.successful ?? [],
-    iterations: iterations,
-  }
-}
-
-fn __maybe_emit_required_tools_friction(result, opts, missing) {
-  let event = __required_tools_friction_event(result, opts, missing)
-  let _ = try {
-    friction_record(event)
-  }
-  let session_id = to_string(result?.session_id ?? "")
-  if session_id != "" {
-    let _ = try {
-      agent_emit_event(session_id, "require_successful_tools_violation", event)
-    }
-  }
-}
-
-fn __enforce_required_successful_tools(result, opts) {
-  let missing = __missing_required_successful_tools(result, opts)
-  if len(missing) == 0 {
-    return result
-  }
-  let iterations = result?.llm?.iterations ?? 0
-  let envelope = __require_successful_tools_envelope(result, missing, iterations)
-  __maybe_emit_required_tools_friction(result, opts, missing)
-  return result
-    + {
-    status: "failed",
-    final_status: "failed",
-    stop_reason: "missing_required_tools",
-    missing_required_tools: missing,
-    error: "Required tools did not succeed: " + join(missing, ", "),
-    error_envelope: envelope,
-  }
-}
-
 fn __agent_loop_finalize_failed(session, iteration) {
   try {
     agent_session_finalize(
@@ -1241,320 +950,6 @@ fn __agent_loop_suspend_checkpoint(session, iteration) {
   return payload
 }
 
-fn __requirement_missing(requirement, successful) {
-  if type_of(requirement) == "list" {
-    for candidate in requirement {
-      if contains(successful, candidate) {
-        return false
-      }
-    }
-    return true
-  }
-  return !contains(successful, requirement)
-}
-
-fn __required_tools_missing_list(opts, successful_tools_seen) {
-  let required = opts?.require_successful_tools
-  if required == nil || len(required) == 0 {
-    return []
-  }
-  var missing = []
-  for requirement in required {
-    if __requirement_missing(requirement, successful_tools_seen) {
-      let label = if type_of(requirement) == "list" {
-        join(requirement, "|")
-      } else {
-        to_string(requirement)
-      }
-      missing = missing.push(label)
-    }
-  }
-  return missing
-}
-
-fn __required_tools_feedback(missing) {
-  return "Required tool(s) have not succeeded yet: "
-    + join(missing, ", ")
-    + ". Continue working and call the missing required tool(s) before finalizing."
-}
-
-fn __build_loop_state(args) {
-  let current_limit = args.current_limit
-  let iteration = args.iteration
-  let remaining = if iteration >= current_limit {
-    0
-  } else {
-    current_limit - iteration
-  }
-  let missing = args.missing_required_tools
-  return {
-    iteration: iteration,
-    budget: {
-      current_limit: current_limit,
-      max: args.budget_max,
-      remaining: remaining,
-      extension_count: args.extensions_used,
-    },
-    turn: {
-      tool_call_count: args.turn_tool_count,
-      successful_tool_names: args.turn_successful,
-      rejected_tool_names: args.turn_rejected,
-      text_chars: args.turn_text_chars,
-      native_fallback_used: args.turn_native_fallback_used,
-    },
-    session: {
-      successful_tool_names: args.session_successful,
-      rejected_tool_names: args.session_rejected,
-      required_tools_satisfied: len(missing) == 0,
-      required_tools_missing: missing,
-    },
-    completion: {
-      proposed: args.completion_proposed,
-      vetoed: args.completion_vetoed,
-      verdict: args.completion_verdict,
-      feedback: args.completion_feedback,
-    },
-    progress: {changed: args.progress_changed, summary: args.progress_summary},
-  }
-}
-
-fn __default_loop_control(state) {
-  if state.budget.remaining > 0 {
-    return nil
-  }
-  if state.completion.vetoed {
-    return {action: "extend", reason: "completion gate vetoed"}
-  }
-  if !state.session.required_tools_satisfied {
-    return {action: "extend", reason: "required tools missing"}
-  }
-  if state.progress.changed && state.turn.tool_call_count > 0 {
-    return {action: "extend", reason: "recent turn made progress"}
-  }
-  return nil
-}
-
-fn __interpret_loop_command(command) {
-  if command == nil {
-    return {action: "none", by: 0, until: 0, reason: "", status: ""}
-  }
-  if type_of(command) != "dict" {
-    throw "agent_loop: loop_control must return nil or a dict; got " + type_of(command)
-  }
-  let action = command?.action ?? "none"
-  if action != "none" && action != "extend" && action != "stop" {
-    throw "agent_loop: loop_control action must be \"none\", \"extend\", or \"stop\"; got "
-      + to_string(action)
-  }
-  let by = command?.by ?? 0
-  if type_of(by) != "int" {
-    throw "agent_loop: loop_control `by` must be an integer; got " + type_of(by)
-  }
-  let until = command?.until ?? 0
-  if type_of(until) != "int" {
-    throw "agent_loop: loop_control `until` must be an integer; got " + type_of(until)
-  }
-  return {action: action, by: by, until: until, reason: command?.reason ?? "", status: command?.status ?? ""}
-}
-
-fn __loop_control_invoke(opts, budget, state) {
-  let policy = opts?.loop_control
-  if policy != nil {
-    return __interpret_loop_command(policy(state))
-  }
-  if budget?.mode == "adaptive" {
-    return __interpret_loop_command(__default_loop_control(state))
-  }
-  return __interpret_loop_command(nil)
-}
-
-fn __apply_extension(command, budget, current_max) {
-  let cap = budget?.max ?? current_max
-  let target = if command.until > 0 {
-    command.until
-  } else {
-    let by = if command.by > 0 {
-      command.by
-    } else {
-      budget?.extend_by ?? 0
-    }
-    current_max + by
-  }
-  let bounded = if target > cap {
-    cap
-  } else {
-    target
-  }
-  if bounded <= current_max {
-    return {extended: false, new_limit: current_max, delta: 0}
-  }
-  return {extended: true, new_limit: bounded, delta: bounded - current_max}
-}
-
-fn __record_budget_decision(decisions, iteration, action, old_limit, new_limit, reason, status) {
-  return decisions
-    .push(
-    {
-      iteration: iteration,
-      action: action,
-      old_limit: old_limit,
-      new_limit: new_limit,
-      reason: reason,
-      status: status,
-    },
-  )
-}
-
-fn __progress_summary_text(completion_vetoed, tool_count, visible_text) {
-  if completion_vetoed {
-    return "completion gate vetoed"
-  }
-  if tool_count > 0 {
-    return "executed " + to_string(tool_count) + " tool call(s)"
-  }
-  if trim(visible_text) != "" {
-    return "produced visible text"
-  }
-  return "no progress signal"
-}
-
-fn __snapshot_loop_state(args) {
-  let verdict = args.verdict
-  let completion_vetoed = verdict != nil && verdict?.vetoed
-  let completion_verdict = if verdict == nil {
-    nil
-  } else {
-    verdict?.verdict
-  }
-  let completion_feedback = if verdict == nil {
-    nil
-  } else {
-    verdict?.feedback
-  }
-  let visible_text = args.visible_text
-  let tool_count = args.tool_count
-  let turn_successful = args.turn_successful
-  let progress_changed = tool_count > 0 || len(turn_successful) > 0
-    || trim(visible_text) != ""
-  let progress_summary = __progress_summary_text(completion_vetoed, tool_count, visible_text)
-  return __build_loop_state(
-    {
-      iteration: args.iteration,
-      current_limit: args.current_limit,
-      budget_max: args.budget_max,
-      extensions_used: args.extensions_used,
-      turn_tool_count: tool_count,
-      turn_successful: turn_successful,
-      turn_rejected: args.turn_rejected,
-      turn_text_chars: len(visible_text),
-      turn_native_fallback_used: args.turn_native_fallback_used,
-      session_successful: args.session_successful,
-      session_rejected: args.session_rejected,
-      missing_required_tools: args.missing_required_tools,
-      completion_proposed: args.completion_proposed,
-      completion_vetoed: completion_vetoed,
-      completion_verdict: completion_verdict,
-      completion_feedback: completion_feedback,
-      progress_changed: progress_changed,
-      progress_summary: progress_summary,
-    },
-  )
-}
-
-fn __apply_loop_command(state) {
-  let command = state.command
-  let session_id = state.session_id
-  let iteration = state.iteration
-  let current_max = state.current_max
-  let budget = state.budget
-  if command.action == "stop" {
-    let stop_status = if command.status != "" {
-      command.status
-    } else {
-      "stopped"
-    }
-    let stop_reason = if command.reason != "" {
-      command.reason
-    } else {
-      "loop_control"
-    }
-    let decisions = __record_budget_decision(
-      state.decisions,
-      iteration,
-      "stop",
-      current_max,
-      current_max,
-      command.reason,
-      stop_status,
-    )
-    agent_emit_event(
-      session_id,
-      "loop_control_decision",
-      {
-        iteration: iteration,
-        action: "stop",
-        old_limit: current_max,
-        new_limit: current_max,
-        reason: command.reason,
-        status: stop_status,
-      },
-    )
-    return {
-      stop: true,
-      final_status: stop_status,
-      stop_reason: stop_reason,
-      current_max: current_max,
-      extensions_used: state.extensions_used,
-      decisions: decisions,
-    }
-  }
-  if command.action == "extend" {
-    let applied = __apply_extension(command, budget, current_max)
-    if applied.extended {
-      let old_limit = current_max
-      let new_limit = applied.new_limit
-      let extensions_used = state.extensions_used + 1
-      let decisions = __record_budget_decision(
-        state.decisions,
-        iteration,
-        "extend",
-        old_limit,
-        new_limit,
-        command.reason,
-        "",
-      )
-      agent_emit_event(
-        session_id,
-        "loop_control_decision",
-        {
-          iteration: iteration,
-          action: "extend",
-          old_limit: old_limit,
-          new_limit: new_limit,
-          reason: command.reason,
-          status: "",
-        },
-      )
-      return {
-        stop: false,
-        final_status: "",
-        stop_reason: nil,
-        current_max: new_limit,
-        extensions_used: extensions_used,
-        decisions: decisions,
-      }
-    }
-  }
-  return {
-    stop: false,
-    final_status: "",
-    stop_reason: nil,
-    current_max: current_max,
-    extensions_used: state.extensions_used,
-    decisions: state.decisions,
-  }
-}
-
 fn __agent_loop_drain_bridge_step(session_id) {
   let immediate = agent_session_drain_bridge_injections(session_id, "interrupt_immediate")
   let finish_step = agent_session_drain_bridge_injections(session_id, "finish_step")
@@ -1614,7 +1009,7 @@ fn __agent_loop_run(message, session, initial_opts) {
     var successful_tools_seen = []
     var rejected_tools_seen = []
     var suspend_result = nil
-    var stall_state = __stall_initial_state()
+    var stall_state = agent_stall_initial_state()
     var stall_enabled_seen = false
     let max_verify_attempts = opts?.max_verify_attempts ?? 20
     let budget = opts?.iteration_budget
@@ -1721,8 +1116,8 @@ fn __agent_loop_run(message, session, initial_opts) {
         stop_reason = "suspended"
         break
       }
-      let stall_judge_due = __done_judge_stall_due(turn_opts, done_judge_invocations, turn_index + 1)
-      let stall_observation = __stall_observe_tool_calls(
+      let stall_judge_due = agent_stall_done_judge_due(turn_opts, done_judge_invocations, turn_index + 1)
+      let stall_observation = agent_stall_observe_tool_calls(
         session.session_id,
         tool_calls,
         turn_index + 1,
@@ -1732,7 +1127,8 @@ fn __agent_loop_run(message, session, initial_opts) {
       )
       stall_state = stall_observation.state
       stall_enabled_seen = stall_enabled_seen || stall_observation.enabled
-      if stall_judge_due && stall_observation?.warning != nil {
+      let stall_warning = stall_observation.warning
+      if stall_judge_due && stall_warning != nil {
         let stall_verify_opts = turn_opts
           + {_done_judge_due: true, _done_judge_trigger: "stalled"}
         let stall_verdict = agent_verify_or_continue(session, stall_verify_opts, "stalled", visible_text, turn_index + 1)
@@ -1740,10 +1136,10 @@ fn __agent_loop_run(message, session, initial_opts) {
           done_judge_invocations = done_judge_invocations + 1
         }
         if stall_verdict.vetoed {
-          if stall_observation?.feedback_deferred ?? false {
-            stall_state = __stall_inject_feedback(
+          if stall_observation.feedback_deferred {
+            stall_state = agent_stall_inject_feedback(
               session.session_id,
-              stall_observation.warning,
+              stall_warning,
               stall_observation.config,
               stall_state,
             )
@@ -1798,8 +1194,8 @@ fn __agent_loop_run(message, session, initial_opts) {
         stop_reason = "max_nudges"
         break
       }
-      let missing_required_for_loop = __required_tools_missing_list(opts, successful_tools_seen)
-      let cadence_loop_state = __snapshot_loop_state(
+      let missing_required_for_loop = agent_required_tools_missing_from_session(opts, successful_tools_seen)
+      let cadence_loop_state = agent_loop_snapshot_state(
         {
           iteration: iteration,
           current_limit: current_max,
@@ -1857,13 +1253,9 @@ fn __agent_loop_run(message, session, initial_opts) {
             should_continue = true
           }
         }
-        let missing_now = __required_tools_missing_list(opts, successful_tools_seen)
+        let missing_now = agent_required_tools_missing_from_session(opts, successful_tools_seen)
         if !should_continue && len(missing_now) > 0 {
-          agent_session_inject_feedback(
-            session.session_id,
-            "required_tools",
-            __required_tools_feedback(missing_now),
-          )
+          agent_required_tools_inject_feedback(session.session_id, missing_now)
           should_continue = true
         }
         if !should_continue {
@@ -1871,7 +1263,7 @@ fn __agent_loop_run(message, session, initial_opts) {
           break
         }
       }
-      let loop_state = __snapshot_loop_state(
+      let loop_state = agent_loop_snapshot_state(
         {
           iteration: iteration,
           current_limit: current_max,
@@ -1889,8 +1281,8 @@ fn __agent_loop_run(message, session, initial_opts) {
           verdict: verdict_record,
         },
       )
-      let command = __loop_control_invoke(opts, budget, loop_state)
-      let applied = __apply_loop_command(
+      let command = agent_loop_control_invoke(opts, budget, loop_state)
+      let applied = agent_loop_apply_command(
         {
           command: command,
           session_id: session.session_id,
@@ -1934,11 +1326,11 @@ fn __agent_loop_run(message, session, initial_opts) {
       },
     )
     session_finalized = true
-    let result_with_stalls = __apply_stall_result(result, stall_enabled_seen, stall_state)
+    let result_with_stalls = agent_stall_apply_result(result, stall_enabled_seen, stall_state)
     let enforced = if suspend_result != nil {
       result_with_stalls
     } else {
-      __enforce_required_successful_tools(result_with_stalls, opts)
+      agent_required_tools_enforce(result_with_stalls, opts)
     }
     var final_result = enforced
     if budget.expose_decisions {
