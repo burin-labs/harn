@@ -1,0 +1,286 @@
+{
+  "_type": "harn.context_eval.manifest.v1",
+  "version": 1,
+  "id": "context-engineering-smoke",
+  "name": "Context Engineering Smoke",
+  "description": "Three deterministic tasks projected through reusable context modes.",
+  "modes": [
+    {
+      "id": "hud-pack",
+      "kind": "hud_pack",
+      "budget_tokens": 900,
+      "assemble_strategy": "relevance",
+      "dedup": "chunked",
+      "tool_disclosure": "full",
+      "cache_namespace": "harn.context_eval.smoke"
+    },
+    {
+      "id": "compacted",
+      "kind": "compacted",
+      "budget_tokens": 900,
+      "assemble_strategy": "relevance",
+      "dedup": "chunked",
+      "projection_policy": "compacted",
+      "transcript_keep_last": 1,
+      "tool_disclosure": "full",
+      "compaction_policy": {
+        "mode": "eval",
+        "scope": "summary",
+        "preserve": ["current blocker", "verification command"]
+      },
+      "cache_namespace": "harn.context_eval.smoke"
+    },
+    {
+      "id": "tool-search-limited",
+      "kind": "tool_search_limited",
+      "budget_tokens": 900,
+      "assemble_strategy": "relevance",
+      "dedup": "chunked",
+      "tool_disclosure": "tool_search_limited",
+      "tool_allowlist": ["read_file", "search_files", "search_logs"],
+      "cache_namespace": "harn.context_eval.smoke",
+      "expected_cache_hit": true
+    }
+  ],
+  "tasks": [
+    {
+      "id": "payments-incident",
+      "name": "Payments Incident",
+      "objective": "Identify the likely failing service and first verification step for checkout error 524.",
+      "reference_answer": "Check payments-api saturation and verify with search_logs before changing deploy state.",
+      "artifacts": [
+        {
+          "_type": "artifact",
+          "id": "payments-runbook",
+          "kind": "context_pack",
+          "title": "Payments error 524 runbook",
+          "text": "Checkout error 524 usually points at payments-api saturation behind the edge proxy. First verification step: run search_logs for payments-api timeout spikes before changing deploy state.",
+          "source": "examples/evals/payments-runbook.md",
+          "created_at": "2026-05-23T00:00:00Z",
+          "freshness": "fresh",
+          "priority": 90,
+          "metadata": {
+            "context_tier": "pack"
+          }
+        },
+        {
+          "_type": "artifact",
+          "id": "payments-noise",
+          "kind": "transcript_summary",
+          "title": "Old gateway note",
+          "text": "Legacy gateway retries were removed last quarter and should not drive current checkout triage.",
+          "source": "examples/evals/old-note.md",
+          "created_at": "2026-04-01T00:00:00Z",
+          "freshness": "stale",
+          "priority": 20
+        }
+      ],
+      "transcript": [
+        {
+          "role": "user",
+          "content": "Checkout is returning 524s in production."
+        },
+        {
+          "role": "assistant",
+          "content": "Current blocker is confirming whether payments-api is saturated."
+        }
+      ],
+      "tools": [
+        {
+          "name": "search_logs",
+          "description": "Search production logs",
+          "deterministic": true
+        },
+        {
+          "name": "read_file",
+          "description": "Read repo files",
+          "deterministic": true
+        },
+        {
+          "name": "apply_patch",
+          "description": "Apply file edits",
+          "deterministic": true
+        }
+      ],
+      "tool_events": [
+        {
+          "order": 1,
+          "name": "search_logs",
+          "phase": "read",
+          "success": true,
+          "quality": "useful"
+        },
+        {
+          "order": 2,
+          "name": "apply_patch",
+          "phase": "edit",
+          "success": true
+        }
+      ],
+      "expected": {
+        "required_terms": ["payments-api", "search_logs", "error 524"],
+        "expected_artifact_ids": ["payments-runbook"],
+        "expected_tools": ["search_logs"]
+      },
+      "observed": {
+        "latency_ms": 1800,
+        "output_tokens": 36,
+        "cost_usd": 0.0004
+      }
+    },
+    {
+      "id": "release-prep",
+      "name": "Release Prep",
+      "objective": "Find the command sequence for a patch release gate dry run.",
+      "reference_answer": "Run release_gate.sh full --bump patch --dry-run before opening the bump PR.",
+      "artifacts": [
+        {
+          "_type": "artifact",
+          "id": "release-checklist",
+          "kind": "context_pack",
+          "title": "Release checklist",
+          "text": "Patch release prep starts with ./scripts/release_gate.sh full --bump patch --dry-run. Only after that passes should the release_ship bump patch PR be opened.",
+          "source": "AGENTS.md",
+          "created_at": "2026-05-23T00:00:00Z",
+          "freshness": "fresh",
+          "priority": 95,
+          "metadata": {
+            "context_tier": "pack"
+          }
+        }
+      ],
+      "transcript": [
+        {
+          "role": "user",
+          "content": "Prepare a patch release but do not publish yet."
+        },
+        {
+          "role": "assistant",
+          "content": "Verification command is the dry-run release gate."
+        }
+      ],
+      "tools": [
+        {
+          "name": "read_file",
+          "description": "Read repo files",
+          "deterministic": true
+        },
+        {
+          "name": "apply_patch",
+          "description": "Apply file edits",
+          "deterministic": true
+        }
+      ],
+      "tool_events": [
+        {
+          "order": 1,
+          "name": "read_file",
+          "phase": "read",
+          "success": true,
+          "quality": "useful"
+        },
+        {
+          "order": 2,
+          "name": "apply_patch",
+          "phase": "edit",
+          "success": true
+        }
+      ],
+      "expected": {
+        "required_terms": ["release_gate.sh", "bump patch", "dry-run"],
+        "expected_artifact_ids": ["release-checklist"],
+        "expected_tools": ["read_file"]
+      },
+      "observed": {
+        "latency_ms": 1400,
+        "output_tokens": 30,
+        "cost_usd": 0.0003
+      }
+    },
+    {
+      "id": "flaky-test",
+      "name": "Flaky Test Audit",
+      "objective": "Name the deterministic pattern that should replace sleep-based orchestration tests.",
+      "reference_answer": "Use tokio::time::pause/advance or EventLog::subscribe instead of sleep polling.",
+      "artifacts": [
+        {
+          "_type": "artifact",
+          "id": "testing-guidance",
+          "kind": "context_pack",
+          "title": "Deterministic orchestration testing",
+          "text": "Do not add std::thread::sleep, tokio::time::sleep, Instant::now polling loops, SystemTime::now, or short recv_timeout calls to tests. Prefer tokio::time::pause()/advance(), EventLog::subscribe(), or OrchestratorHarness.",
+          "source": "AGENTS.md",
+          "created_at": "2026-05-23T00:00:00Z",
+          "freshness": "fresh",
+          "priority": 100,
+          "metadata": {
+            "context_tier": "pack"
+          }
+        }
+      ],
+      "transcript": [
+        {
+          "role": "user",
+          "content": "This orchestration test flakes in CI."
+        },
+        {
+          "role": "assistant",
+          "content": "Current blocker is replacing wall-clock polling with a deterministic event source."
+        }
+      ],
+      "tools": [
+        {
+          "name": "search_files",
+          "description": "Search repo files",
+          "deterministic": true
+        },
+        {
+          "name": "read_file",
+          "description": "Read repo files",
+          "deterministic": true
+        },
+        {
+          "name": "apply_patch",
+          "description": "Apply file edits",
+          "deterministic": true
+        }
+      ],
+      "tool_events": [
+        {
+          "order": 1,
+          "name": "search_files",
+          "phase": "read",
+          "success": true,
+          "quality": "useful"
+        },
+        {
+          "order": 2,
+          "name": "read_file",
+          "phase": "read",
+          "success": true,
+          "quality": "useful"
+        },
+        {
+          "order": 3,
+          "name": "apply_patch",
+          "phase": "edit",
+          "success": true
+        }
+      ],
+      "expected": {
+        "required_terms": ["tokio::time::pause", "EventLog::subscribe", "OrchestratorHarness"],
+        "expected_artifact_ids": ["testing-guidance"],
+        "expected_tools": ["search_files", "read_file"]
+      },
+      "observed": {
+        "latency_ms": 1600,
+        "output_tokens": 34,
+        "cost_usd": 0.0003
+      }
+    }
+  ],
+  "metadata": {
+    "issue": "2195",
+    "consumer_schema": "harn.context_eval.report.v1"
+  }
+}

@@ -49,10 +49,24 @@ pub struct EvalArgs {
 pub enum EvalCommand {
     /// Benchmark coding-agent fixtures across providers and tool formats.
     CodingAgent(EvalCodingAgentArgs),
+    /// Run deterministic context-engineering modes over task fixtures.
+    Context(EvalContextArgs),
     /// Render and optionally run a `.harn.prompt` across a fleet of models.
     Prompt(EvalPromptArgs),
     /// Run tool-call accuracy, latency, and cost evals over a dataset.
     ToolCalls(EvalToolCallsArgs),
+}
+
+#[derive(Debug, Args)]
+pub struct EvalContextArgs {
+    /// Context eval manifest JSON or TOML.
+    pub manifest: PathBuf,
+    /// Output directory for summary.json, per_run.jsonl, and summary.md.
+    #[arg(long)]
+    pub output: Option<PathBuf>,
+    /// Print the aggregate summary JSON to stdout.
+    #[arg(long)]
+    pub json: bool,
 }
 
 #[derive(Debug, Args)]

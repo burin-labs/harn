@@ -267,6 +267,20 @@ such as `model`, `provider`, and token counts when present.
 `harn eval` supports the default replay fixture flow plus an explicit
 clarifying-question kind for ambiguous tasks.
 
+`harn eval context <manifest>` supports deterministic context-engineering
+fixtures for pack, projection, compaction, and tool-disclosure experiments. A
+manifest declares task fixtures and one or more context modes; the runner scores
+each task/mode pair without model calls and writes stable local artifacts:
+`summary.json`, `per_run.jsonl`, and `summary.md`. Use the builders in
+`std/context/eval` when authoring manifests from Harn code, and use
+`spec/schemas/context-eval-report.v1.schema.json` when ingesting
+`harn.context_eval.report.v1` reports from hosted systems or downstream UIs.
+
+```bash
+harn eval context examples/evals/context-engineering-smoke.json \
+  --output target/context-eval --json
+```
+
 ## Eval packs
 
 Portable eval packs live in `harn.eval.toml` or another TOML file listed in

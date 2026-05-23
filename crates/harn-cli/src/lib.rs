@@ -1115,6 +1115,12 @@ async fn async_main() {
                     process::exit(code);
                 }
             }
+            Some(EvalCommand::Context(context_args)) => {
+                let code = commands::eval_context::run(context_args);
+                if code != 0 {
+                    process::exit(code);
+                }
+            }
             Some(EvalCommand::Prompt(prompt_args)) => {
                 let code = commands::eval_prompt::run(prompt_args).await;
                 if code != 0 {
