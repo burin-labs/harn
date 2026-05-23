@@ -126,6 +126,12 @@ JSON Schema / OpenAPI Schema Object spellings such as `object`, `array`,
 `minItems`, `maxItems`, and `additionalProperties`, normalizing them into the
 same internal form.
 
+Schema traversal is bounded before validation runs: canonicalization, JSON
+Schema/OpenAPI export, runtime validation, and JSON-stream schema setup reject
+schemas deeper than 128 nested schema nodes, more than 256 `$ref` expansions,
+or cyclic local `$ref` graphs. These failures surface as regular Harn schema
+errors such as `schema depth exceeded (128)` or `cyclic schema reference: # -> #`.
+
 Supported canonical keys:
 
 | Key | Type | Description |

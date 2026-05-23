@@ -4,8 +4,12 @@ use std::rc::Rc;
 use crate::value::VmValue;
 
 use super::canonicalize::canonicalize_schema_value;
+use super::limits::{DEFAULT_SCHEMA_MAX_DEPTH, DEFAULT_SCHEMA_MAX_REF_EXPANSIONS};
 use super::transform::{merge_schema_dicts, schema_partial_dict};
-use super::{schema_is_value, schema_result_value, schema_to_openapi_schema_value};
+use super::validate::{validate_schema_value, ValidationOptions};
+use super::{
+    schema_assert_param, schema_is_value, schema_result_value, schema_to_openapi_schema_value,
+};
 
 fn s(v: &str) -> VmValue {
     VmValue::String(Rc::from(v))
@@ -21,6 +25,51 @@ fn make_vm_dict(pairs: Vec<(&str, VmValue)>) -> VmValue {
 
 fn make_list(items: Vec<VmValue>) -> VmValue {
     VmValue::List(Rc::new(items))
+}
+
+fn assert_schema_error_contains(schema: &VmValue, expected: &str) {
+    match canonicalize_schema_value(schema) {
+        Ok(value) => panic!("expected schema error containing {expected:?}, got {value:?}"),
+        Err(error) => assert!(
+            error.contains(expected),
+            "expected schema error containing {expected:?}, got {error:?}"
+        ),
+    }
+}
+
+fn deep_properties_schema(depth: usize) -> VmValue {
+    let mut schema = make_vm_dict(vec![("type", s("string"))]);
+    for _ in 0..depth {
+        schema = make_vm_dict(vec![
+            ("type", s("dict")),
+            ("properties", make_vm_dict(vec![("node", schema)])),
+        ]);
+    }
+    schema
+}
+
+fn deep_items_schema(depth: usize) -> VmValue {
+    let mut schema = make_vm_dict(vec![("type", s("string"))]);
+    for _ in 0..depth {
+        schema = make_vm_dict(vec![("type", s("list")), ("items", schema)]);
+    }
+    schema
+}
+
+fn deep_node_value(depth: usize) -> VmValue {
+    let mut value = s("ok");
+    for _ in 0..depth {
+        value = make_vm_dict(vec![("node", value)]);
+    }
+    value
+}
+
+fn deep_list_value(depth: usize) -> VmValue {
+    let mut value = s("ok");
+    for _ in 0..depth {
+        value = make_list(vec![value]);
+    }
+    value
 }
 
 #[test]
@@ -46,6 +95,128 @@ fn normalize_json_schema_types() {
             .unwrap()
             .display(),
         "string"
+    );
+}
+
+#[test]
+fn direct_self_ref_schema_is_rejected() {
+    let schema = make_vm_dict(vec![("$ref", s("#"))]);
+    assert_schema_error_contains(&schema, "cyclic schema reference: # -> #");
+}
+
+#[test]
+fn two_node_ref_cycle_is_rejected() {
+    let schema = make_vm_dict(vec![(
+        "definitions",
+        make_vm_dict(vec![
+            ("A", make_vm_dict(vec![("$ref", s("#/definitions/B"))])),
+            ("B", make_vm_dict(vec![("$ref", s("#/definitions/A"))])),
+        ]),
+    )]);
+
+    assert_schema_error_contains(
+        &schema,
+        "cyclic schema reference: #/definitions/A -> #/definitions/B -> #/definitions/A",
+    );
+}
+
+#[test]
+fn deep_properties_schema_is_rejected_at_depth_limit() {
+    let schema = deep_properties_schema(DEFAULT_SCHEMA_MAX_DEPTH + 1);
+    assert_schema_error_contains(&schema, "schema depth exceeded (128)");
+}
+
+#[test]
+fn deep_items_schema_is_rejected_at_depth_limit() {
+    let schema = deep_items_schema(DEFAULT_SCHEMA_MAX_DEPTH + 1);
+    assert_schema_error_contains(&schema, "schema depth exceeded (128)");
+}
+
+#[test]
+fn many_refs_are_rejected_at_expansion_limit() {
+    let mut properties = BTreeMap::new();
+    for index in 0..=DEFAULT_SCHEMA_MAX_REF_EXPANSIONS {
+        properties.insert(
+            format!("p{index}"),
+            make_vm_dict(vec![("$ref", s("#/definitions/String"))]),
+        );
+    }
+
+    let schema = make_vm_dict(vec![
+        ("type", s("dict")),
+        ("properties", VmValue::Dict(Rc::new(properties))),
+        (
+            "definitions",
+            make_vm_dict(vec![("String", make_vm_dict(vec![("type", s("string"))]))]),
+        ),
+    ]);
+
+    assert_schema_error_contains(&schema, "schema $ref expansion limit exceeded (256)");
+}
+
+#[test]
+fn normal_nested_schema_within_limit_still_passes() {
+    let schema = deep_properties_schema(8);
+    let data = deep_node_value(8);
+    assert!(schema_is_value(&data, &schema).unwrap());
+}
+
+#[test]
+fn validation_depth_limit_returns_error_without_panicking() {
+    let schema = deep_items_schema(DEFAULT_SCHEMA_MAX_DEPTH + 1);
+    let data = deep_list_value(DEFAULT_SCHEMA_MAX_DEPTH + 1);
+    let result = validate_schema_value(
+        &data,
+        &schema,
+        ValidationOptions {
+            apply_defaults: false,
+            numeric_compat: false,
+        },
+    );
+
+    assert!(
+        result
+            .errors
+            .iter()
+            .any(|error| error.contains("schema depth exceeded (128)")),
+        "expected depth-limit error, got {:?}",
+        result.errors
+    );
+}
+
+#[test]
+fn validation_ref_cycle_returns_error_without_panicking() {
+    let schema = make_vm_dict(vec![("$ref", s("#"))]);
+    let result = validate_schema_value(
+        &s("ok"),
+        &schema,
+        ValidationOptions {
+            apply_defaults: false,
+            numeric_compat: false,
+        },
+    );
+
+    assert!(
+        result
+            .errors
+            .iter()
+            .any(|error| error.contains("cyclic schema reference: # -> #")),
+        "expected cyclic-ref error, got {:?}",
+        result.errors
+    );
+}
+
+#[test]
+fn runtime_param_schema_cycles_are_rejected() {
+    let schema = make_vm_dict(vec![("$ref", s("#"))]);
+    let error = schema_assert_param(&s("ok"), "payload", &schema)
+        .expect_err("cyclic parameter schema must be rejected");
+
+    assert!(
+        error
+            .to_string()
+            .contains("cyclic schema reference: # -> #"),
+        "expected cyclic-ref error, got {error:?}"
     );
 }
 
