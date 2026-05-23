@@ -98,7 +98,7 @@ struct RunReport {
     run_id: String,
     fixture_id: String,
     fixture_name: String,
-    tool_sequence: String,
+    fixture_tool_sequence: String,
     selector: ModelSelector,
     tool_format: String,
     status: String,
@@ -107,6 +107,7 @@ struct RunReport {
     #[serde(skip_serializing_if = "Option::is_none")]
     skipped_reason: Option<String>,
     output_dir: String,
+    transcript_events_path: String,
     workspace_root: Option<String>,
     elapsed_ms: u64,
     duration_ms: u64,
@@ -117,6 +118,7 @@ struct RunReport {
     pricing_known: bool,
     tool_calls: usize,
     rejected_tool_calls: usize,
+    tool_sequence: Vec<String>,
     successful_tools: Vec<String>,
     transcript_event_count: usize,
     verification_success: bool,
@@ -142,12 +144,22 @@ struct LocalCleanupReport {
 struct FormatComparison {
     fixture_id: String,
     selector: ModelSelector,
+    native_run_id: Option<String>,
+    text_run_id: Option<String>,
+    native_evidence_path: Option<String>,
+    text_evidence_path: Option<String>,
     native_status: Option<String>,
     text_status: Option<String>,
     native_passed: Option<bool>,
     text_passed: Option<bool>,
+    verifier_match: Option<bool>,
+    tool_sequence_match: Option<bool>,
+    rejected_tool_call_delta_text_minus_native: Option<i64>,
     token_delta_text_minus_native: Option<i64>,
     iteration_delta_text_minus_native: Option<i64>,
+    equivalent: Option<bool>,
+    divergence_reasons: Vec<String>,
+    evidence_paths: Vec<String>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -198,6 +210,7 @@ struct EvalSummary {
     passed_runs: usize,
     failed_runs: usize,
     skipped_runs: usize,
+    diverged_comparisons: usize,
     total_cost_usd: f64,
     rollups: EvalRollups,
     runs: Vec<RunReport>,
@@ -397,7 +410,7 @@ async fn run_matrix_entry(
             run_id,
             fixture_id: fixture.id.to_string(),
             fixture_name: fixture.name.to_string(),
-            tool_sequence: fixture.tool_sequence.to_string(),
+            fixture_tool_sequence: fixture.tool_sequence.to_string(),
             selector,
             tool_format,
             status: "infra_error".to_string(),
@@ -405,6 +418,10 @@ async fn run_matrix_entry(
             skipped: false,
             skipped_reason: None,
             output_dir: run_dir.display().to_string(),
+            transcript_events_path: run_dir
+                .join("transcript_events.jsonl")
+                .display()
+                .to_string(),
             workspace_root: None,
             elapsed_ms,
             duration_ms: 0,
@@ -415,6 +432,7 @@ async fn run_matrix_entry(
             pricing_known: false,
             tool_calls: 0,
             rejected_tool_calls: 0,
+            tool_sequence: Vec::new(),
             successful_tools: Vec::new(),
             transcript_event_count: 0,
             verification_success: false,
@@ -476,7 +494,7 @@ fn report_from_summary(ctx: RunSummaryContext, summary: JsonValue) -> RunReport 
         run_id: ctx.run_id,
         fixture_id: ctx.fixture.id.to_string(),
         fixture_name: ctx.fixture.name.to_string(),
-        tool_sequence: ctx.fixture.tool_sequence.to_string(),
+        fixture_tool_sequence: ctx.fixture.tool_sequence.to_string(),
         selector: ctx.selector,
         tool_format: ctx.tool_format,
         status,
@@ -484,6 +502,11 @@ fn report_from_summary(ctx: RunSummaryContext, summary: JsonValue) -> RunReport 
         skipped: false,
         skipped_reason: None,
         output_dir: ctx.run_dir.display().to_string(),
+        transcript_events_path: ctx
+            .run_dir
+            .join("transcript_events.jsonl")
+            .display()
+            .to_string(),
         workspace_root: summary
             .get("workspace_root")
             .and_then(JsonValue::as_str)
@@ -511,6 +534,9 @@ fn report_from_summary(ctx: RunSummaryContext, summary: JsonValue) -> RunReport 
             .and_then(JsonValue::as_array)
             .map(Vec::len)
             .unwrap_or(0),
+        tool_sequence: tool_call_sequence(summary.pointer("/tools/calls"))
+            .or_else(|| non_empty_string_array(summary.pointer("/tools/successful")))
+            .unwrap_or_default(),
         successful_tools: string_array(summary.pointer("/tools/successful")),
         transcript_event_count: summary
             .get("transcript_event_count")
@@ -644,7 +670,7 @@ fn error_report(
         run_id,
         fixture_id: fixture.id.to_string(),
         fixture_name: fixture.name.to_string(),
-        tool_sequence: fixture.tool_sequence.to_string(),
+        fixture_tool_sequence: fixture.tool_sequence.to_string(),
         selector,
         tool_format,
         status: "infra_error".to_string(),
@@ -652,6 +678,10 @@ fn error_report(
         skipped: false,
         skipped_reason: None,
         output_dir: run_dir.display().to_string(),
+        transcript_events_path: run_dir
+            .join("transcript_events.jsonl")
+            .display()
+            .to_string(),
         workspace_root: None,
         elapsed_ms: 0,
         duration_ms: 0,
@@ -662,6 +692,7 @@ fn error_report(
         pricing_known: false,
         tool_calls: 0,
         rejected_tool_calls: 0,
+        tool_sequence: Vec::new(),
         successful_tools: Vec::new(),
         transcript_event_count: 0,
         verification_success: false,
@@ -684,7 +715,7 @@ fn skipped_report(
         run_id,
         fixture_id: fixture.id.to_string(),
         fixture_name: fixture.name.to_string(),
-        tool_sequence: fixture.tool_sequence.to_string(),
+        fixture_tool_sequence: fixture.tool_sequence.to_string(),
         selector,
         tool_format,
         status: "skipped".to_string(),
@@ -692,6 +723,10 @@ fn skipped_report(
         skipped: true,
         skipped_reason: Some(reason),
         output_dir: run_dir.display().to_string(),
+        transcript_events_path: run_dir
+            .join("transcript_events.jsonl")
+            .display()
+            .to_string(),
         workspace_root: None,
         elapsed_ms: 0,
         duration_ms: 0,
@@ -702,6 +737,7 @@ fn skipped_report(
         pricing_known: false,
         tool_calls: 0,
         rejected_tool_calls: 0,
+        tool_sequence: Vec::new(),
         successful_tools: Vec::new(),
         transcript_event_count: 0,
         verification_success: false,
@@ -760,7 +796,7 @@ fn fixture_definition(id: &str) -> Option<FixtureDefinition> {
 async fn resolve_models(args: &EvalCodingAgentArgs) -> Result<Vec<ModelSelector>, String> {
     let mut seen = BTreeSet::new();
     let mut out = Vec::new();
-    for raw in &args.models {
+    for raw in normalize_model_selector_args(&args.models) {
         let trimmed = raw.trim();
         if trimmed.is_empty() {
             continue;
@@ -778,6 +814,25 @@ async fn resolve_models(args: &EvalCodingAgentArgs) -> Result<Vec<ModelSelector>
         }
     }
     Ok(out)
+}
+
+fn normalize_model_selector_args(raw_models: &[String]) -> Vec<String> {
+    let mut out = Vec::new();
+    let mut index = 0;
+    while index < raw_models.len() {
+        let current = raw_models[index].trim();
+        if current.starts_with("provider=") && index + 1 < raw_models.len() {
+            let next = raw_models[index + 1].trim();
+            if next.starts_with("model=") {
+                out.push(format!("{current},{next}"));
+                index += 2;
+                continue;
+            }
+        }
+        out.push(current.to_string());
+        index += 1;
+    }
+    out
 }
 
 async fn discover_local_models(args: &EvalCodingAgentArgs) -> Vec<ModelSelector> {
@@ -881,6 +936,10 @@ fn build_summary(
     let total_cost_usd = runs.iter().map(|run| run.cost_usd).sum();
     let rollups = build_rollups(&runs);
     let comparisons = compare_formats(&runs);
+    let diverged_comparisons = comparisons
+        .iter()
+        .filter(|comparison| !comparison.divergence_reasons.is_empty())
+        .count();
     let followups = suggest_followups(&runs, &comparisons);
     EvalSummary {
         schema_version: 2,
@@ -905,6 +964,7 @@ fn build_summary(
         passed_runs,
         failed_runs,
         skipped_runs,
+        diverged_comparisons,
         total_cost_usd,
         rollups,
         runs,
@@ -919,7 +979,7 @@ fn build_rollups(runs: &[RunReport]) -> EvalRollups {
         by_provider: rollup_by(runs, |run| run.selector.provider.clone()),
         by_model: rollup_by(runs, |run| run.selector.model.clone()),
         by_tool_format: rollup_by(runs, |run| run.tool_format.clone()),
-        by_tool_sequence: rollup_by(runs, |run| run.tool_sequence.clone()),
+        by_tool_sequence: rollup_by(runs, |run| run.fixture_tool_sequence.clone()),
     }
 }
 
@@ -956,7 +1016,7 @@ fn compare_formats(runs: &[RunReport]) -> Vec<FormatComparison> {
     for run in runs {
         grouped
             .entry(format!(
-                "{}__{}",
+                "{}\0{}",
                 run.fixture_id,
                 selector_label(&run.selector)
             ))
@@ -976,20 +1036,80 @@ fn compare_formats(runs: &[RunReport]) -> Vec<FormatComparison> {
         if native.is_none() && text.is_none() {
             continue;
         }
+        let pair = native.zip(text);
+        let mut divergence_reasons = Vec::new();
+        if let Some((native, text)) = pair {
+            if native.status != text.status {
+                divergence_reasons.push(format!(
+                    "status differs: native={} text={}",
+                    native.status, text.status
+                ));
+            }
+            if native.passed != text.passed {
+                divergence_reasons.push(format!(
+                    "pass result differs: native={} text={}",
+                    native.passed, text.passed
+                ));
+            }
+            if native.verification_success != text.verification_success {
+                divergence_reasons.push(format!(
+                    "verifier result differs: native={} text={}",
+                    native.verification_success, text.verification_success
+                ));
+            }
+            if native.tool_sequence != text.tool_sequence {
+                divergence_reasons.push(format!(
+                    "tool sequence differs: native=[{}] text=[{}]",
+                    native.tool_sequence.join(", "),
+                    text.tool_sequence.join(", ")
+                ));
+            }
+            if native.rejected_tool_calls != text.rejected_tool_calls {
+                divergence_reasons.push(format!(
+                    "rejected tool-call recovery differs: native={} text={}",
+                    native.rejected_tool_calls, text.rejected_tool_calls
+                ));
+            }
+        }
+        let evidence_paths = [native, text]
+            .into_iter()
+            .flatten()
+            .map(|run| run.transcript_events_path.clone())
+            .collect::<Vec<_>>();
         out.push(FormatComparison {
             fixture_id: first.fixture_id.clone(),
             selector: first.selector.clone(),
+            native_run_id: native.map(|run| run.run_id.clone()),
+            text_run_id: text.map(|run| run.run_id.clone()),
+            native_evidence_path: native.map(|run| run.transcript_events_path.clone()),
+            text_evidence_path: text.map(|run| run.transcript_events_path.clone()),
             native_status: native.map(|run| run.status.clone()),
             text_status: text.map(|run| run.status.clone()),
             native_passed: native.map(|run| run.passed),
             text_passed: text.map(|run| run.passed),
-            token_delta_text_minus_native: native.zip(text).map(|(native, text)| {
+            verifier_match: pair
+                .map(|(native, text)| native.verification_success == text.verification_success),
+            tool_sequence_match: pair
+                .map(|(native, text)| native.tool_sequence == text.tool_sequence),
+            rejected_tool_call_delta_text_minus_native: pair.map(|(native, text)| {
+                text.rejected_tool_calls as i64 - native.rejected_tool_calls as i64
+            }),
+            token_delta_text_minus_native: pair.map(|(native, text)| {
                 (text.input_tokens + text.output_tokens)
                     - (native.input_tokens + native.output_tokens)
             }),
-            iteration_delta_text_minus_native: native
-                .zip(text)
+            iteration_delta_text_minus_native: pair
                 .map(|(native, text)| text.iterations - native.iterations),
+            equivalent: pair.map(|(native, text)| {
+                native.status == text.status
+                    && native.passed == text.passed
+                    && native.skipped == text.skipped
+                    && native.verification_success == text.verification_success
+                    && native.tool_sequence == text.tool_sequence
+                    && native.rejected_tool_calls == text.rejected_tool_calls
+            }),
+            divergence_reasons,
+            evidence_paths,
         });
     }
     out
@@ -1030,20 +1150,28 @@ fn suggest_followups(
 
     let mismatched = comparisons
         .iter()
-        .filter(|comparison| {
-            comparison.native_passed.is_some()
-                && comparison.text_passed.is_some()
-                && comparison.native_passed != comparison.text_passed
-        })
+        .filter(|comparison| !comparison.divergence_reasons.is_empty())
         .map(|comparison| {
             format!(
-                "{}:{}",
+                "{}:{} ({})",
                 comparison.fixture_id,
-                selector_label(&comparison.selector)
+                selector_label(&comparison.selector),
+                comparison.divergence_reasons.join("; ")
             )
         })
         .collect::<Vec<_>>();
     if !mismatched.is_empty() {
+        let run_ids = comparisons
+            .iter()
+            .filter(|comparison| !comparison.divergence_reasons.is_empty())
+            .flat_map(|comparison| {
+                [
+                    comparison.native_run_id.clone(),
+                    comparison.text_run_id.clone(),
+                ]
+            })
+            .flatten()
+            .collect::<Vec<_>>();
         out.push(FollowupSuggestion {
             title: "Make native/text tool modes behaviorally interchangeable for preset harnesses"
                 .to_string(),
@@ -1052,7 +1180,7 @@ fn suggest_followups(
                 mismatched.join(", ")
             ),
             labels: vec!["agents".to_string(), "tools".to_string()],
-            run_ids: Vec::new(),
+            run_ids,
         });
     }
 
@@ -1130,32 +1258,41 @@ fn render_markdown(summary: &EvalSummary) -> String {
     );
 
     out.push_str("\n## Runs\n\n");
-    out.push_str("| fixture | run | provider | model | tool format | tool sequence | status | iterations | tokens | cost | transcript | output |\n");
-    out.push_str("|---|---|---|---|---|---|---|---:|---:|---:|---:|---|\n");
+    out.push_str("| fixture | run | provider | model | tool format | fixture sequence | tool calls | status | iterations | tokens | cost | transcript | output |\n");
+    out.push_str("|---|---|---|---|---|---|---|---|---:|---:|---:|---|---|\n");
     for run in &summary.runs {
+        let tool_sequence = if run.tool_sequence.is_empty() {
+            "-".to_string()
+        } else {
+            run.tool_sequence.join(", ").replace('|', "\\|")
+        };
         out.push_str(&format!(
-            "| `{}` | `{}` | `{}` | `{}` | `{}` | `{}` | {} | {} | {} | {:.6} | {} | `{}` |\n",
+            "| `{}` | `{}` | `{}` | `{}` | `{}` | `{}` | `{}` | {} | {} | {} | {:.6} | {} | `{}` |\n",
             run.fixture_id,
             run.run_id,
             run.selector.provider,
             run.selector.model.replace('|', "\\|"),
             run.tool_format,
-            run.tool_sequence,
+            run.fixture_tool_sequence,
+            tool_sequence,
             run.status,
             run.iterations,
             run.input_tokens + run.output_tokens,
             run.cost_usd,
-            run.transcript_event_count,
+            markdown_link(
+                &run.transcript_event_count.to_string(),
+                &run.transcript_events_path
+            ),
             run.output_dir
         ));
     }
     if !summary.comparisons.is_empty() {
         out.push_str("\n## Native/Text Comparison\n\n");
-        out.push_str("| fixture | selector | native | text | token delta | iteration delta |\n");
-        out.push_str("|---|---|---|---|---:|---:|\n");
+        out.push_str("| fixture | selector | native | text | equivalent | verifier | tools | rejected delta | token delta | iteration delta | evidence |\n");
+        out.push_str("|---|---|---|---|---|---|---|---:|---:|---:|---|\n");
         for comparison in &summary.comparisons {
             out.push_str(&format!(
-                "| `{}` | `{}` | {} | {} | {} | {} |\n",
+                "| `{}` | `{}` | {} | {} | {} | {} | {} | {} | {} | {} | {} |\n",
                 comparison.fixture_id,
                 selector_label(&comparison.selector),
                 comparison
@@ -1166,6 +1303,13 @@ fn render_markdown(summary: &EvalSummary) -> String {
                     .text_status
                     .clone()
                     .unwrap_or_else(|| "-".to_string()),
+                optional_bool_mark(comparison.equivalent),
+                optional_bool_mark(comparison.verifier_match),
+                optional_bool_mark(comparison.tool_sequence_match),
+                comparison
+                    .rejected_tool_call_delta_text_minus_native
+                    .map(|v| v.to_string())
+                    .unwrap_or_else(|| "-".to_string()),
                 comparison
                     .token_delta_text_minus_native
                     .map(|v| v.to_string())
@@ -1173,8 +1317,31 @@ fn render_markdown(summary: &EvalSummary) -> String {
                 comparison
                     .iteration_delta_text_minus_native
                     .map(|v| v.to_string())
-                    .unwrap_or_else(|| "-".to_string())
+                    .unwrap_or_else(|| "-".to_string()),
+                comparison_evidence_links(comparison)
             ));
+        }
+    }
+    let diverged = summary
+        .comparisons
+        .iter()
+        .filter(|comparison| !comparison.divergence_reasons.is_empty())
+        .collect::<Vec<_>>();
+    if !diverged.is_empty() {
+        out.push_str("\n## Native/Text Divergence Evidence\n\n");
+        for comparison in diverged {
+            out.push_str(&format!(
+                "- `{}` `{}`: {}\n",
+                comparison.fixture_id,
+                selector_label(&comparison.selector),
+                comparison.divergence_reasons.join("; ")
+            ));
+            if !comparison.evidence_paths.is_empty() {
+                out.push_str(&format!(
+                    "  Evidence: {}\n",
+                    comparison_evidence_links(comparison)
+                ));
+            }
         }
     }
     out
@@ -1243,6 +1410,60 @@ fn string_array(value: Option<&JsonValue>) -> Vec<String> {
                 .collect()
         })
         .unwrap_or_default()
+}
+
+fn non_empty_string_array(value: Option<&JsonValue>) -> Option<Vec<String>> {
+    let values = string_array(value);
+    (!values.is_empty()).then_some(values)
+}
+
+fn tool_call_sequence(value: Option<&JsonValue>) -> Option<Vec<String>> {
+    let calls = value.and_then(JsonValue::as_array)?;
+    let mut sequence = Vec::new();
+    for call in calls {
+        if let Some(name) = call
+            .get("name")
+            .or_else(|| call.get("tool_name"))
+            .and_then(JsonValue::as_str)
+        {
+            sequence.push(name.to_string());
+        }
+    }
+    (!sequence.is_empty()).then_some(sequence)
+}
+
+fn optional_bool_mark(value: Option<bool>) -> &'static str {
+    match value {
+        Some(true) => "yes",
+        Some(false) => "no",
+        None => "-",
+    }
+}
+
+fn comparison_evidence_links(comparison: &FormatComparison) -> String {
+    let mut links = Vec::new();
+    if let Some(native) = comparison.native_evidence_path.as_deref() {
+        links.push(markdown_link("native", native));
+    }
+    if let Some(text) = comparison.text_evidence_path.as_deref() {
+        links.push(markdown_link("text", text));
+    }
+    if links.is_empty() {
+        "-".to_string()
+    } else {
+        links.join("<br>")
+    }
+}
+
+fn markdown_link(label: &str, target: &str) -> String {
+    format!(
+        "[{}]({})",
+        label.replace('|', "\\|"),
+        target
+            .replace(' ', "%20")
+            .replace('(', "%28")
+            .replace(')', "%29")
+    )
 }
 
 fn reset_dir(path: &Path) -> Result<(), String> {
@@ -1388,6 +1609,25 @@ mod tests {
     }
 
     #[test]
+    fn model_selector_args_rejoin_provider_model_kv_after_clap_delimiter_split() {
+        let normalized = normalize_model_selector_args(&[
+            "mock:mock".to_string(),
+            "provider=openrouter".to_string(),
+            "model=qwen/qwen3-coder-flash".to_string(),
+            "provider=together".to_string(),
+            "model=Qwen/Qwen3-Coder-Next-FP8".to_string(),
+        ]);
+        assert_eq!(
+            normalized,
+            vec![
+                "mock:mock",
+                "provider=openrouter,model=qwen/qwen3-coder-flash",
+                "provider=together,model=Qwen/Qwen3-Coder-Next-FP8",
+            ]
+        );
+    }
+
+    #[test]
     fn markdown_escapes_model_table_pipes() {
         let selector = ModelSelector {
             selector: "provider:a|b".to_string(),
@@ -1411,6 +1651,7 @@ mod tests {
             passed_runs: 1,
             failed_runs: 0,
             skipped_runs: 0,
+            diverged_comparisons: 0,
             total_cost_usd: 0.0,
             rollups: EvalRollups {
                 by_fixture: vec![RollupReport {
@@ -1430,7 +1671,7 @@ mod tests {
                 run_id: "r".to_string(),
                 fixture_id: "python-add".to_string(),
                 fixture_name: "Python add repair".to_string(),
-                tool_sequence: "multi-tool".to_string(),
+                fixture_tool_sequence: "multi-tool".to_string(),
                 selector,
                 tool_format: "native".to_string(),
                 status: "passed".to_string(),
@@ -1438,6 +1679,7 @@ mod tests {
                 skipped: false,
                 skipped_reason: None,
                 output_dir: "out/r".to_string(),
+                transcript_events_path: "out/r/transcript_events.jsonl".to_string(),
                 workspace_root: None,
                 elapsed_ms: 1,
                 duration_ms: 1,
@@ -1448,6 +1690,7 @@ mod tests {
                 pricing_known: false,
                 tool_calls: 0,
                 rejected_tool_calls: 0,
+                tool_sequence: Vec::new(),
                 successful_tools: Vec::new(),
                 transcript_event_count: 0,
                 verification_success: true,

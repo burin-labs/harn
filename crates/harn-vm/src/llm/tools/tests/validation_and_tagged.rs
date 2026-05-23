@@ -148,6 +148,26 @@ fn tagged_parser_recovers_mistral_tool_markers() {
 }
 
 #[test]
+fn tagged_parser_recovers_mistral_json_tool_marker_payload() {
+    let tools = sample_tool_registry();
+    let text = "I'll inspect first.\n[TOOL_CALLS] [{\"name\":\"edit\",\"arguments\":{\"action\":\"create\",\"path\":\"a.rs\",\"content\":\"fn a() {}\"}},{\"name\":\"run\",\"arguments\":\"{\\\"command\\\":\\\"cargo test\\\"}\"}]";
+    let result = parse_text_tool_calls_with_tools(text, Some(&tools));
+
+    assert_eq!(result.calls.len(), 2);
+    assert_eq!(result.calls[0]["name"], json!("edit"));
+    assert_eq!(result.calls[0]["arguments"]["path"], json!("a.rs"));
+    assert_eq!(result.calls[1]["name"], json!("run"));
+    assert_eq!(result.calls[1]["arguments"]["command"], json!("cargo test"));
+    assert_eq!(result.prose, "I'll inspect first.");
+    assert!(
+        result.violations[0].contains("Mistral"),
+        "violation should teach canonical protocol: {:?}",
+        result.violations
+    );
+    assert_eq!(result.canonical.matches("<tool_call>").count(), 2);
+}
+
+#[test]
 fn tagged_parser_recovers_deepseek_dsml_markers() {
     let tools = sample_tool_registry();
     let text = "I'll inspect first.\n\

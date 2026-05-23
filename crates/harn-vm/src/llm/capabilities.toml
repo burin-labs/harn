@@ -77,6 +77,14 @@
 #                     openrouter or enabled.
 #   recommended_endpoint: preferred endpoint family for this route.
 #   text_tool_wire_format_supported: whether Harn text tool calls survive.
+#   preferred_tool_format:
+#                     default tool mode for this route: native or text.
+#   tool_mode_parity:
+#                     empirical native/text interchangeability status:
+#                     interchangeable, native_unreliable, text_unreliable,
+#                     native_only, text_only, unknown.
+#   tool_mode_parity_notes:
+#                     short explanation for known non-interchangeable modes.
 #   thinking_disable_directive:
 #                     in-prompt directive (e.g. "/no_think" for Qwen3 chat
 #                     templates) that disables the model's thinking mode.
@@ -1246,6 +1254,9 @@ thinking_block_style = "inline"
 [[provider.openrouter]]
 model_match = "qwen/qwen3-coder*"
 native_tools = true
+preferred_tool_format = "text"
+tool_mode_parity = "native_unreliable"
+tool_mode_parity_notes = "OpenRouter Qwen3-Coder Flash native tools exhausted the coding-agent fixture while text tools completed; default to Harn text tools for preset parity."
 structured_output = "native"
 server_parser = "none"
 honors_chat_template_kwargs = false
@@ -1448,7 +1459,10 @@ thinking_block_style = "reasoning_summary"
 
 [[provider.openrouter]]
 model_match = "deepseek/deepseek-v3.2*"
-native_tools = false
+native_tools = true
+preferred_tool_format = "text"
+tool_mode_parity = "native_unreliable"
+tool_mode_parity_notes = "OpenRouter DeepSeek V3.2 advertises native tools, but coding-agent runs observed provider-native failures; default to Harn text tools and recover DSML markers."
 thinking_modes = ["enabled", "effort"]
 prompt_caching = true
 structured_output = "native"

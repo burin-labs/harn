@@ -1198,6 +1198,8 @@ per-project via `[[capabilities.provider.<name>]]` in `harn.toml`:
 [[capabilities.provider.my-proxy]]
 model_match = "*"
 native_tools = true
+preferred_tool_format = "native"
+tool_mode_parity = "unknown"
 tool_search = ["hosted"]
 thinking_modes = ["effort"]
 ```
@@ -1209,6 +1211,7 @@ let caps = provider_capabilities("anthropic", "claude-opus-4-7")
 // {
 //   provider: "anthropic", model: "claude-opus-4-7",
 //   native_tools: true, text_tool_wire_format_supported: true,
+//   preferred_tool_format: "native", tool_mode_parity: "unknown",
 //   tools: true, defer_loading: true,
 //   tool_search: ["bm25", "regex"], max_tools: 10000,
 //   prompt_caching: true, thinking: true,
@@ -1228,7 +1231,8 @@ let caps = provider_capabilities("anthropic", "claude-opus-4-7")
 // `caps.tools` matches Harn's own tool gate: true when the route can call
 // tools via either the native API wire shape or Harn's text wire format.
 // Inspect `native_tools` or `text_tool_wire_format_supported` directly when
-// you need to distinguish.
+// you need to distinguish. Presets use `preferred_tool_format` when it is
+// present, so known native/text divergences stay data-driven.
 
 if "bm25" in caps.tool_search {
   // opt into progressive disclosure
@@ -1251,6 +1255,10 @@ set under `[provider_defaults.<name>]`:
 | `model_match` | glob string | Required. Matched against lowercased model ID. |
 | `version_min` | `[major, minor]` | Optional lower bound; parsed via Claude / GPT version extractors. |
 | `native_tools` | bool | Native tool-call wire shape supported. |
+| `text_tool_wire_format_supported` | bool | Harn text-tool contract supported. |
+| `preferred_tool_format` | string | Default preset tool mode: `native` or `text`. |
+| `tool_mode_parity` | string | Native/text interchangeability status: `interchangeable`, `unknown`, `native_unreliable`, `text_unreliable`, `native_only`, `text_only`, or `unsupported`. |
+| `tool_mode_parity_notes` | string | Optional explanation for known non-interchangeable routes. |
 | `message_wire_format` | string | Shared request/response message format: `openai`, `anthropic`, `gemini`, or `ollama`. |
 | `native_tool_wire_format` | string | Native tool definition shape for shared helpers: `openai` or `anthropic`. Gemini/Vertex adapters emit Google `functionDeclarations` from canonical tool definitions. |
 | `defer_loading` | bool | Provider honors `defer_loading: true` on tool defs. |

@@ -268,6 +268,20 @@ fn parse_mistral_marker_calls(
         while name_start < bytes.len() && bytes[name_start].is_ascii_whitespace() {
             name_start += 1;
         }
+        if matches!(bytes.get(name_start), Some(b'[' | b'{')) {
+            match parse_mistral_json_payload(&src[name_start..], &known, calls.len()) {
+                Ok((mut parsed_calls, consumed)) => {
+                    ranges.push((start, name_start + consumed));
+                    calls.append(&mut parsed_calls);
+                    cursor = name_start + consumed;
+                }
+                Err(message) => {
+                    errors.push(message);
+                    cursor = name_start.saturating_add(1);
+                }
+            }
+            continue;
+        }
         let Some(name_len) = ident_length(&bytes[name_start..]) else {
             errors.push("Mistral [TOOL_CALLS] marker was missing a tool name.".to_string());
             cursor = name_start.saturating_add(1);
@@ -345,6 +359,78 @@ fn parse_mistral_marker_calls(
         done_marker: None,
         canonical,
     })
+}
+
+fn parse_mistral_json_payload(
+    src: &str,
+    known: &BTreeSet<String>,
+    start_index: usize,
+) -> Result<(Vec<serde_json::Value>, usize), String> {
+    let mut values = serde_json::Deserializer::from_str(src).into_iter::<serde_json::Value>();
+    let value = values
+        .next()
+        .transpose()
+        .map_err(|error| format!("Mistral [TOOL_CALLS] JSON payload did not parse: {error}."))?;
+    let Some(value) = value else {
+        return Err("Mistral [TOOL_CALLS] JSON payload was empty.".to_string());
+    };
+    let consumed = values.byte_offset();
+    let items = match value {
+        serde_json::Value::Array(items) => items,
+        item @ serde_json::Value::Object(_) => vec![item],
+        other => {
+            return Err(format!(
+                "Mistral [TOOL_CALLS] JSON payload must be an object or array, got {}.",
+                other
+            ))
+        }
+    };
+    let mut calls = Vec::new();
+    for (offset, item) in items.into_iter().enumerate() {
+        let Some(object) = item.as_object() else {
+            return Err("Mistral [TOOL_CALLS] JSON entries must be objects.".to_string());
+        };
+        let name = object
+            .get("name")
+            .or_else(|| object.get("tool_name"))
+            .and_then(|value| value.as_str())
+            .unwrap_or("");
+        if name.is_empty() {
+            return Err("Mistral [TOOL_CALLS] JSON entry was missing `name`.".to_string());
+        }
+        if !known.contains(name) {
+            return Err(format!(
+                "Unknown tool '{name}' in Mistral [TOOL_CALLS] JSON payload."
+            ));
+        }
+        let raw_args = object
+            .get("arguments")
+            .or_else(|| object.get("args"))
+            .cloned()
+            .unwrap_or_else(|| serde_json::json!({}));
+        let parsed_args = match raw_args {
+            serde_json::Value::String(text) => serde_json::from_str::<serde_json::Value>(&text)
+                .map_err(|error| {
+                    format!("Mistral [TOOL_CALLS] arguments for `{name}` did not parse: {error}.")
+                })?,
+            value => value,
+        };
+        let arguments = match parsed_args {
+            value if value.is_object() => value,
+            serde_json::Value::Null => serde_json::json!({}),
+            other => {
+                return Err(format!(
+                    "Mistral [TOOL_CALLS] arguments for `{name}` must be an object or JSON string containing an object, got {other}."
+                ))
+            }
+        };
+        calls.push(serde_json::json!({
+            "id": format!("tc_mistral_{}", start_index + offset),
+            "name": name,
+            "arguments": arguments,
+        }));
+    }
+    Ok((calls, consumed))
 }
 
 fn parse_deepseek_dsml_calls(

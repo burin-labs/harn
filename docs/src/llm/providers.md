@@ -187,6 +187,7 @@ vendor-specific knowledge:
 let caps = provider_capabilities("anthropic", "claude-opus-4-7")
 // {
 //   native_tools: true, text_tool_wire_format_supported: true,
+//   preferred_tool_format: "native", tool_mode_parity: "unknown",
 //   tools: true, defer_loading: true,
 //   tool_search: ["bm25", "regex"], max_tools: 10000,
 //   prompt_caching: true, thinking: true, vision_supported: true,
@@ -203,6 +204,8 @@ let caps = provider_capabilities("anthropic", "claude-opus-4-7")
 // Gate on `tools` for "can this route call tools at all" — true for either
 // native or text-format tool wire. Inspect `native_tools` or
 // `text_tool_wire_format_supported` directly when you need to distinguish.
+// Presets use `preferred_tool_format` when it is present, which keeps known
+// native/text divergences in capability data instead of provider-name branches.
 if caps.tools && "bm25" in caps.tool_search {
   llm_call(prompt, sys, {
     tools: registry,
@@ -213,14 +216,15 @@ if caps.tools && "bm25" in caps.tool_search {
 
 The same matrix is the source of truth for Harn's default tool-calling
 mode. Alias-level `tool_format` still wins when set explicitly, but
-otherwise a matrix row with `native_tools = true` makes
-`agent_loop()` and `model-info` choose native provider tools for that
-provider/model route. Rows can also set `text_tool_wire_format_supported = true`
-for runtimes where Harn's text-tool contract is the reliable tool path even
-though native provider tool calls are unavailable or too flaky. Model-catalog
-display tags are derived from this matrix too; legacy `models.*.capabilities`
-entries are parsed for backwards compatibility but do not override runtime
-capability resolution.
+otherwise `preferred_tool_format` chooses `agent_loop()` and `model-info`
+tool mode for that provider/model route. Rows that do not set it infer
+`native` when `native_tools = true` and `text` otherwise. Rows can set
+`text_tool_wire_format_supported = true` for runtimes where Harn's text-tool
+contract is the reliable tool path, and can mark `tool_mode_parity` /
+`tool_mode_parity_notes` when native and text modes are known not to be
+interchangeable. Model-catalog display tags are derived from this matrix too;
+legacy `models.*.capabilities` entries are parsed for backwards compatibility
+but do not override runtime capability resolution.
 
 The matrix also records format preferences that prompt renderers can use
 without branching on provider names: XML vs. Markdown section scaffolding,
@@ -264,6 +268,10 @@ entry accepts these fields:
 | `model_match` | glob string | Required. Matched against the lowercased model ID. Leading/trailing `*` or a single middle `*` supported. |
 | `version_min` | `[major, minor]` | Narrows the match to a parseable version (Anthropic / OpenAI extractors). Rules where `version_min` is set but the model ID won't parse are skipped. |
 | `native_tools` | bool | Whether the provider accepts a native tool-call wire shape. |
+| `text_tool_wire_format_supported` | bool | Whether the provider/model route can use Harn's text-tool contract. Defaults to true for shipped rules unless disabled. |
+| `preferred_tool_format` | string | Optional preset default, `native` or `text`; inferred from `native_tools` when omitted. |
+| `tool_mode_parity` | string | Native/text interchangeability status: `interchangeable`, `unknown`, `native_unreliable`, `text_unreliable`, `native_only`, `text_only`, or `unsupported`. |
+| `tool_mode_parity_notes` | string | Optional explanation for known non-interchangeable routes. |
 | `message_wire_format` | string | Shared request/response message format: `openai`, `anthropic`, `gemini`, or `ollama`. |
 | `native_tool_wire_format` | string | Native tool definition shape for shared helpers: `openai` or `anthropic`. Gemini and Vertex accept Harn's canonical tool definitions and their adapters emit Google `functionDeclarations`. |
 | `defer_loading` | bool | Whether `defer_loading: true` on tool definitions is honored server-side. |

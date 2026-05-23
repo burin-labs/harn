@@ -90,6 +90,25 @@ pipeline test(task) {
   assert(routed.defer_loading, "openrouter inherits openai defer_loading")
   assert(routed.tool_search[0] == "hosted", "openrouter inherits hosted/client variants")
   assert(routed.reasoning_none_supported, "openrouter inherits gpt-5.4 reasoning none support")
+  let deepseek32 = provider_capabilities("openrouter", "deepseek/deepseek-v3.2")
+  assert(deepseek32.native_tools, "OpenRouter DeepSeek V3.2 exposes native tools")
+  assert(deepseek32.text_tool_wire_format_supported, "OpenRouter DeepSeek V3.2 supports text tools")
+  assert(
+    deepseek32.preferred_tool_format == "text",
+    "OpenRouter DeepSeek V3.2 defaults to text tools",
+  )
+  assert(
+    deepseek32.tool_mode_parity == "native_unreliable",
+    "OpenRouter DeepSeek V3.2 records native/text non-interchangeability",
+  )
+  let qwen_coder = provider_capabilities("openrouter", "qwen/qwen3-coder-flash")
+  assert(qwen_coder.native_tools, "OpenRouter Qwen Coder advertises native tools")
+  assert(qwen_coder.text_tool_wire_format_supported, "OpenRouter Qwen Coder supports text tools")
+  assert(qwen_coder.preferred_tool_format == "text", "OpenRouter Qwen Coder defaults to text tools")
+  assert(
+    qwen_coder.tool_mode_parity == "native_unreliable",
+    "OpenRouter Qwen Coder records native/text non-interchangeability",
+  )
   // Sibling families: together, groq, deepseek, fireworks, huggingface, local.
   for family in ["together", "groq", "deepseek", "fireworks", "huggingface", "local"] {
     let caps = provider_capabilities(family, "gpt-5.4")

@@ -157,12 +157,18 @@ public struct HarnModelModalities: Codable, Sendable, Equatable {
 public struct HarnModelToolSupport: Codable, Sendable, Equatable {
     public let native: Bool
     public let text: Bool
+    public let preferredFormat: String?
+    public let parity: String?
+    public let parityNotes: String?
     public let toolSearch: [String]
     public let maxTools: Int?
 
     enum CodingKeys: String, CodingKey {
         case native
         case text
+        case preferredFormat = "preferred_format"
+        case parity
+        case parityNotes = "parity_notes"
         case toolSearch = "tool_search"
         case maxTools = "max_tools"
     }
@@ -751,6 +757,8 @@ public let harnProviderCatalogJSON = #"""
       "tool_support": {
         "native": true,
         "text": true,
+        "preferred_format": "native",
+        "parity": "unknown",
         "tool_search": []
       },
       "structured_output": "tool_use",
@@ -816,6 +824,8 @@ public let harnProviderCatalogJSON = #"""
       "tool_support": {
         "native": true,
         "text": true,
+        "preferred_format": "native",
+        "parity": "unknown",
         "tool_search": []
       },
       "structured_output": "tool_use",
@@ -881,6 +891,8 @@ public let harnProviderCatalogJSON = #"""
       "tool_support": {
         "native": true,
         "text": true,
+        "preferred_format": "native",
+        "parity": "unknown",
         "tool_search": []
       },
       "structured_output": "tool_use",
@@ -946,6 +958,8 @@ public let harnProviderCatalogJSON = #"""
       "tool_support": {
         "native": true,
         "text": true,
+        "preferred_format": "native",
+        "parity": "unknown",
         "tool_search": []
       },
       "structured_output": "tool_use",
@@ -1013,6 +1027,8 @@ public let harnProviderCatalogJSON = #"""
       "tool_support": {
         "native": true,
         "text": true,
+        "preferred_format": "native",
+        "parity": "unknown",
         "tool_search": [
           "bm25",
           "regex"
@@ -1083,6 +1099,8 @@ public let harnProviderCatalogJSON = #"""
       "tool_support": {
         "native": true,
         "text": true,
+        "preferred_format": "native",
+        "parity": "unknown",
         "tool_search": [
           "bm25",
           "regex"
@@ -1154,6 +1172,8 @@ public let harnProviderCatalogJSON = #"""
       "tool_support": {
         "native": true,
         "text": true,
+        "preferred_format": "native",
+        "parity": "unknown",
         "tool_search": [
           "bm25",
           "regex"
@@ -1225,6 +1245,8 @@ public let harnProviderCatalogJSON = #"""
       "tool_support": {
         "native": true,
         "text": true,
+        "preferred_format": "native",
+        "parity": "unknown",
         "tool_search": [
           "bm25",
           "regex"
@@ -1298,6 +1320,8 @@ public let harnProviderCatalogJSON = #"""
       "tool_support": {
         "native": true,
         "text": true,
+        "preferred_format": "native",
+        "parity": "unknown",
         "tool_search": [
           "bm25",
           "regex"
@@ -1369,6 +1393,8 @@ public let harnProviderCatalogJSON = #"""
       "tool_support": {
         "native": true,
         "text": true,
+        "preferred_format": "native",
+        "parity": "unknown",
         "tool_search": [
           "bm25",
           "regex"
@@ -1440,6 +1466,8 @@ public let harnProviderCatalogJSON = #"""
       "tool_support": {
         "native": true,
         "text": true,
+        "preferred_format": "native",
+        "parity": "unknown",
         "tool_search": [
           "bm25",
           "regex"
@@ -1515,6 +1543,8 @@ public let harnProviderCatalogJSON = #"""
       "tool_support": {
         "native": true,
         "text": true,
+        "preferred_format": "native",
+        "parity": "unknown",
         "tool_search": [
           "bm25",
           "regex"
@@ -1587,6 +1617,8 @@ public let harnProviderCatalogJSON = #"""
       "tool_support": {
         "native": true,
         "text": true,
+        "preferred_format": "native",
+        "parity": "unknown",
         "tool_search": [
           "bm25",
           "regex"
@@ -1655,6 +1687,8 @@ public let harnProviderCatalogJSON = #"""
       "tool_support": {
         "native": true,
         "text": true,
+        "preferred_format": "native",
+        "parity": "unknown",
         "tool_search": []
       },
       "structured_output": "native",
@@ -1709,6 +1743,8 @@ public let harnProviderCatalogJSON = #"""
       "tool_support": {
         "native": false,
         "text": true,
+        "preferred_format": "text",
+        "parity": "text_only",
         "tool_search": []
       },
       "structured_output": "none",
@@ -1762,6 +1798,8 @@ public let harnProviderCatalogJSON = #"""
       "tool_support": {
         "native": false,
         "text": true,
+        "preferred_format": "text",
+        "parity": "text_only",
         "tool_search": []
       },
       "structured_output": "none",
@@ -1818,6 +1856,8 @@ public let harnProviderCatalogJSON = #"""
       "tool_support": {
         "native": true,
         "text": true,
+        "preferred_format": "native",
+        "parity": "unknown",
         "tool_search": []
       },
       "structured_output": "native",
@@ -1885,6 +1925,8 @@ public let harnProviderCatalogJSON = #"""
       "tool_support": {
         "native": true,
         "text": true,
+        "preferred_format": "native",
+        "parity": "unknown",
         "tool_search": []
       },
       "structured_output": "native",
@@ -1953,6 +1995,8 @@ public let harnProviderCatalogJSON = #"""
       "tool_support": {
         "native": false,
         "text": true,
+        "preferred_format": "text",
+        "parity": "text_only",
         "tool_search": []
       },
       "structured_output": "native",
@@ -2012,6 +2056,8 @@ public let harnProviderCatalogJSON = #"""
       "tool_support": {
         "native": false,
         "text": true,
+        "preferred_format": "text",
+        "parity": "text_only",
         "tool_search": []
       },
       "structured_output": "native",
@@ -2067,6 +2113,8 @@ public let harnProviderCatalogJSON = #"""
       "tool_support": {
         "native": false,
         "text": true,
+        "preferred_format": "text",
+        "parity": "text_only",
         "tool_search": []
       },
       "structured_output": "native",
@@ -2124,6 +2172,8 @@ public let harnProviderCatalogJSON = #"""
       "tool_support": {
         "native": false,
         "text": true,
+        "preferred_format": "text",
+        "parity": "text_only",
         "tool_search": []
       },
       "structured_output": "none",
@@ -2179,6 +2229,8 @@ public let harnProviderCatalogJSON = #"""
       "tool_support": {
         "native": false,
         "text": true,
+        "preferred_format": "text",
+        "parity": "text_only",
         "tool_search": []
       },
       "structured_output": "none",
@@ -2234,6 +2286,8 @@ public let harnProviderCatalogJSON = #"""
       "tool_support": {
         "native": false,
         "text": true,
+        "preferred_format": "text",
+        "parity": "text_only",
         "tool_search": []
       },
       "structured_output": "none",
@@ -2289,6 +2343,8 @@ public let harnProviderCatalogJSON = #"""
       "tool_support": {
         "native": false,
         "text": true,
+        "preferred_format": "text",
+        "parity": "text_only",
         "tool_search": []
       },
       "structured_output": "none",
@@ -2348,6 +2404,8 @@ public let harnProviderCatalogJSON = #"""
       "tool_support": {
         "native": true,
         "text": true,
+        "preferred_format": "native",
+        "parity": "unknown",
         "tool_search": []
       },
       "structured_output": "native",
@@ -2408,6 +2466,8 @@ public let harnProviderCatalogJSON = #"""
       "tool_support": {
         "native": false,
         "text": true,
+        "preferred_format": "text",
+        "parity": "text_only",
         "tool_search": []
       },
       "structured_output": "format_kw",
@@ -2464,6 +2524,8 @@ public let harnProviderCatalogJSON = #"""
       "tool_support": {
         "native": false,
         "text": true,
+        "preferred_format": "text",
+        "parity": "text_only",
         "tool_search": []
       },
       "structured_output": "none",
@@ -2515,6 +2577,8 @@ public let harnProviderCatalogJSON = #"""
       "tool_support": {
         "native": false,
         "text": true,
+        "preferred_format": "text",
+        "parity": "text_only",
         "tool_search": []
       },
       "structured_output": "none",
@@ -2571,6 +2635,8 @@ public let harnProviderCatalogJSON = #"""
       "tool_support": {
         "native": false,
         "text": true,
+        "preferred_format": "text",
+        "parity": "text_only",
         "tool_search": []
       },
       "structured_output": "format_kw",
@@ -2624,6 +2690,8 @@ public let harnProviderCatalogJSON = #"""
       "tool_support": {
         "native": true,
         "text": true,
+        "preferred_format": "native",
+        "parity": "unknown",
         "tool_search": []
       },
       "structured_output": "native",
@@ -2681,6 +2749,8 @@ public let harnProviderCatalogJSON = #"""
       "tool_support": {
         "native": true,
         "text": true,
+        "preferred_format": "native",
+        "parity": "unknown",
         "tool_search": []
       },
       "structured_output": "native",
@@ -2743,6 +2813,8 @@ public let harnProviderCatalogJSON = #"""
       "tool_support": {
         "native": true,
         "text": true,
+        "preferred_format": "native",
+        "parity": "unknown",
         "tool_search": []
       },
       "structured_output": "native",
@@ -2801,6 +2873,8 @@ public let harnProviderCatalogJSON = #"""
       "tool_support": {
         "native": true,
         "text": true,
+        "preferred_format": "native",
+        "parity": "unknown",
         "tool_search": []
       },
       "structured_output": "native",
@@ -2859,6 +2933,8 @@ public let harnProviderCatalogJSON = #"""
       "tool_support": {
         "native": true,
         "text": true,
+        "preferred_format": "native",
+        "parity": "unknown",
         "tool_search": []
       },
       "structured_output": "native",
@@ -2917,6 +2993,8 @@ public let harnProviderCatalogJSON = #"""
       "tool_support": {
         "native": true,
         "text": true,
+        "preferred_format": "native",
+        "parity": "unknown",
         "tool_search": []
       },
       "structured_output": "native",
@@ -2975,6 +3053,8 @@ public let harnProviderCatalogJSON = #"""
       "tool_support": {
         "native": true,
         "text": true,
+        "preferred_format": "native",
+        "parity": "unknown",
         "tool_search": []
       },
       "structured_output": "native",
@@ -3036,6 +3116,8 @@ public let harnProviderCatalogJSON = #"""
       "tool_support": {
         "native": true,
         "text": true,
+        "preferred_format": "native",
+        "parity": "unknown",
         "tool_search": []
       },
       "structured_output": "native",
@@ -3087,8 +3169,11 @@ public let harnProviderCatalogJSON = #"""
         ]
       },
       "tool_support": {
-        "native": false,
+        "native": true,
         "text": true,
+        "preferred_format": "text",
+        "parity": "native_unreliable",
+        "parity_notes": "OpenRouter DeepSeek V3.2 advertises native tools, but coding-agent runs observed provider-native failures; default to Harn text tools and recover DSML markers.",
         "tool_search": []
       },
       "structured_output": "native",
@@ -3152,6 +3237,8 @@ public let harnProviderCatalogJSON = #"""
       "tool_support": {
         "native": true,
         "text": true,
+        "preferred_format": "native",
+        "parity": "unknown",
         "tool_search": []
       },
       "structured_output": "native",
@@ -3215,6 +3302,8 @@ public let harnProviderCatalogJSON = #"""
       "tool_support": {
         "native": false,
         "text": true,
+        "preferred_format": "text",
+        "parity": "text_only",
         "tool_search": []
       },
       "structured_output": "none",
@@ -3268,6 +3357,8 @@ public let harnProviderCatalogJSON = #"""
       "tool_support": {
         "native": false,
         "text": true,
+        "preferred_format": "text",
+        "parity": "text_only",
         "tool_search": []
       },
       "structured_output": "none",
@@ -3321,6 +3412,8 @@ public let harnProviderCatalogJSON = #"""
       "tool_support": {
         "native": false,
         "text": true,
+        "preferred_format": "text",
+        "parity": "text_only",
         "tool_search": []
       },
       "structured_output": "none",
@@ -3374,6 +3467,8 @@ public let harnProviderCatalogJSON = #"""
       "tool_support": {
         "native": true,
         "text": true,
+        "preferred_format": "native",
+        "parity": "unknown",
         "tool_search": []
       },
       "structured_output": "native",
@@ -3428,6 +3523,9 @@ public let harnProviderCatalogJSON = #"""
       "tool_support": {
         "native": true,
         "text": true,
+        "preferred_format": "text",
+        "parity": "native_unreliable",
+        "parity_notes": "OpenRouter Qwen3-Coder Flash native tools exhausted the coding-agent fixture while text tools completed; default to Harn text tools for preset parity.",
         "tool_search": []
       },
       "structured_output": "native",
@@ -3482,6 +3580,8 @@ public let harnProviderCatalogJSON = #"""
       "tool_support": {
         "native": true,
         "text": true,
+        "preferred_format": "native",
+        "parity": "unknown",
         "tool_search": []
       },
       "structured_output": "native",

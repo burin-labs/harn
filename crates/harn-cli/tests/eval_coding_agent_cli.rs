@@ -63,6 +63,41 @@ fn mock_matrix_writes_artifacts_for_native_and_text_tools() {
     assert_eq!(summary["total_runs"], 12);
     assert_eq!(summary["passed_runs"], 12);
     assert_eq!(summary["skipped_runs"], 0);
+    assert_eq!(summary["diverged_comparisons"], 0);
+    let comparisons = summary["comparisons"]
+        .as_array()
+        .expect("comparisons should be an array");
+    assert_eq!(comparisons.len(), 6);
+    let mut comparison_fixtures = comparisons
+        .iter()
+        .map(|comparison| {
+            comparison["fixture_id"]
+                .as_str()
+                .expect("comparison fixture_id")
+                .to_string()
+        })
+        .collect::<Vec<_>>();
+    comparison_fixtures.sort();
+    assert_eq!(
+        comparison_fixtures,
+        vec![
+            "cli-help-flag",
+            "docs-symbol-rename",
+            "no-tool-diagnosis",
+            "python-add",
+            "read-only-audit",
+            "test-output-first",
+        ],
+    );
+    for comparison in comparisons {
+        assert_eq!(comparison["equivalent"], true);
+        assert_eq!(comparison["verifier_match"], true);
+        assert_eq!(comparison["tool_sequence_match"], true);
+        assert_eq!(comparison["rejected_tool_call_delta_text_minus_native"], 0,);
+        assert!(comparison["evidence_paths"]
+            .as_array()
+            .is_some_and(|paths| paths.len() == 2));
+    }
     assert_eq!(
         summary
             .pointer("/rollups/by_fixture")
@@ -90,6 +125,18 @@ fn mock_matrix_writes_artifacts_for_native_and_text_tools() {
         assert!(
             row["fixture_id"].is_string(),
             "fixture_id should be present"
+        );
+        assert!(
+            row["fixture_tool_sequence"].is_string(),
+            "fixture_tool_sequence should be present"
+        );
+        assert!(
+            row["transcript_events_path"].is_string(),
+            "transcript_events_path should be present"
+        );
+        assert!(
+            row["tool_sequence"].is_array(),
+            "tool_sequence should be present"
         );
     }
     let readiness_raw =
