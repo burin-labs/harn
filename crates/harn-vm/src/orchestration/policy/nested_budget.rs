@@ -103,21 +103,35 @@ impl Drop for NestedExecutionGuard {
 }
 
 /// Enter a child execution: validate the parent's recursion budget,
-/// decrement once for this descent, and push a *budget-carrier* policy
-/// onto the thread-local execution policy stack. The guard pops it on
-/// drop. The carrier intentionally carries only `recursion_limit` —
-/// tool, capability, and side-effect ceilings continue to flow through
-/// the per-tool-dispatch policy guard so an agent's own `llm_call`
-/// turns are not gated by its policy (which typically scopes tools,
-/// not the agent's infrastructure). Per-tool-dispatch intersections
-/// preserve the decremented budget because `CapabilityPolicy::intersect`
-/// takes the `min` of `recursion_limit` across both sides.
+/// decrement once for this descent, and push a policy carrier onto
+/// the thread-local execution policy stack. The guard pops it on drop.
+///
+/// The carrier inherits every field from the currently-active parent
+/// policy and only overrides `recursion_limit` with the decremented
+/// child budget. That preserves any tool / capability / side-effect /
+/// workspace ceiling the parent had established (e.g., a workflow
+/// stage's restrictive `CapabilityPolicy`) so the child agent's own
+/// `llm_call` and infrastructure builtins continue to see the parent's
+/// restrictions. When there is no parent on the stack, the carrier is
+/// built from `CapabilityPolicy::default()` (empty ceilings) plus the
+/// budget — which is the right thing for a top-level `agent_loop`
+/// whose options.policy scopes its tools but should not gate its own
+/// LLM turn.
+///
+/// The agent's own `options.policy` (with tool / capability / etc.
+/// ceilings) is intentionally *not* installed by this helper; that
+/// continues to flow through the per-tool-dispatch policy guard
+/// (`install_session_policy_guard`), which intersects with the current
+/// outer at every dispatch. Per-tool-dispatch intersections preserve
+/// the decremented budget because `CapabilityPolicy::intersect` takes
+/// the `min` of `recursion_limit` across both sides.
 pub fn enter_nested_execution_policy(
     requested: Option<CapabilityPolicy>,
     kind: NestedExecutionKind,
     label: &str,
 ) -> Result<NestedExecutionGuard, VmError> {
-    let parent_limit = current_execution_policy().and_then(|p| p.recursion_limit);
+    let parent = current_execution_policy();
+    let parent_limit = parent.as_ref().and_then(|p| p.recursion_limit);
 
     if matches!(parent_limit, Some(0)) {
         emit_descent_event(kind, label, parent_limit, None, true);
@@ -136,10 +150,9 @@ pub fn enter_nested_execution_policy(
     emit_descent_event(kind, label, parent_limit, child_limit, false);
 
     let pushed = if let Some(limit) = child_limit {
-        push_execution_policy(CapabilityPolicy {
-            recursion_limit: Some(limit),
-            ..Default::default()
-        });
+        let mut carrier = parent.unwrap_or_default();
+        carrier.recursion_limit = Some(limit);
+        push_execution_policy(carrier);
         true
     } else {
         false
@@ -358,12 +371,13 @@ mod tests {
     }
 
     #[test]
-    fn pushed_carrier_does_not_propagate_requested_tools_or_capabilities() {
-        // Regression: the carrier intentionally exposes only the budget
-        // to subsequent stack lookups. Tool, capability, and side-effect
-        // ceilings flow through the per-tool-dispatch guard instead, so
-        // the agent's own `llm_call` turn is not gated by a policy that
-        // scopes the agent's tools to a read-only allowlist.
+    fn top_level_carrier_does_not_propagate_requested_tools_or_capabilities() {
+        // Regression: at the top level (no parent on stack), the carrier
+        // intentionally exposes only the budget to subsequent stack
+        // lookups. Tool, capability, and side-effect ceilings flow
+        // through the per-tool-dispatch guard instead, so the agent's
+        // own `llm_call` turn is not gated by a policy that scopes the
+        // agent's tools to a read-only allowlist.
         clear_execution_policy_stacks();
         let requested = CapabilityPolicy {
             tools: vec!["read_only".to_string()],
@@ -387,6 +401,42 @@ mod tests {
         assert!(pushed.capabilities.is_empty());
         assert!(pushed.side_effect_level.is_none());
         drop(guard);
+    }
+
+    #[test]
+    fn carrier_inherits_parent_restrictions_when_nesting() {
+        // Regression: when an agent_loop is invoked under an outer policy
+        // (e.g., a workflow stage that restricts capabilities), the
+        // carrier must preserve those restrictions so the inner agent's
+        // own infrastructure calls observe the outer ceiling rather than
+        // a permissive carrier shadowing it.
+        clear_execution_policy_stacks();
+        let outer = CapabilityPolicy {
+            capabilities: std::collections::BTreeMap::from([(
+                "workspace".to_string(),
+                vec!["read_text".to_string()],
+            )]),
+            side_effect_level: Some("read_only".to_string()),
+            recursion_limit: Some(3),
+            ..Default::default()
+        };
+        push_execution_policy(outer);
+        let guard =
+            enter_nested_execution_policy(None, NestedExecutionKind::WorkflowStage, "stage-1")
+                .unwrap();
+        let pushed = current_execution_policy().unwrap();
+        // Budget decremented by one descent.
+        assert_eq!(pushed.recursion_limit, Some(2));
+        // Outer ceiling preserved so inner llm_call/tool calls remain
+        // gated by the workflow stage's policy, not shadowed by an empty
+        // carrier.
+        assert_eq!(
+            pushed.capabilities.get("workspace"),
+            Some(&vec!["read_text".to_string()])
+        );
+        assert_eq!(pushed.side_effect_level.as_deref(), Some("read_only"));
+        drop(guard);
+        pop_execution_policy();
     }
 
     #[test]
