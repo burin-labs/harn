@@ -29,6 +29,7 @@ use harn_parser::typechecker::format_type;
 use harn_parser::TypeExpr;
 
 use crate::chunk::{CompiledFunction, ParamSlot};
+use crate::runtime_guards::RuntimeParamGuard;
 use crate::value::{ArgTypeMismatchError, ArityExpect, ArityMismatchError, VmError, VmValue};
 use crate::vm::CallArgs;
 
@@ -293,25 +294,70 @@ pub(crate) fn validate_user_call_args(
         let Some(expected) = &slot.type_expr else {
             continue;
         };
-        if matches!(expected, TypeExpr::Named(name) if func.declares_type_param(name)) {
+        if let Some(guard) = &slot.runtime_guard {
+            validate_with_runtime_guard(value, guard, func, slot, span)?;
             continue;
         }
-        if let Some(schema) = crate::compiler::Compiler::type_expr_to_schema_value(expected) {
-            crate::schema::schema_assert_param(value, &slot.name, &schema)?;
-            continue;
-        }
-        assert_value_matches_type_with_generics(
-            value,
-            expected,
-            &func.name,
-            &slot.name,
-            span,
-            &func.type_params,
-            &func.nominal_type_names,
-        )?;
+        validate_uncached_type_expr(value, expected, func, slot, span)?;
     }
 
     Ok(())
+}
+
+fn validate_with_runtime_guard(
+    value: &VmValue,
+    guard: &RuntimeParamGuard,
+    func: &CompiledFunction,
+    slot: &ParamSlot,
+    span: Option<Span>,
+) -> Result<(), VmError> {
+    match guard {
+        RuntimeParamGuard::CanonicalSchema(schema) => {
+            crate::schema::schema_assert_canonical_param(value, &slot.name, schema)
+        }
+        RuntimeParamGuard::InvalidSchema(error) => Err(VmError::TypeError(format!(
+            "parameter '{}': {}",
+            slot.name, error
+        ))),
+        RuntimeParamGuard::TypeExpr(expected) => {
+            validate_type_expr_without_schema(value, expected, func, slot, span)
+        }
+    }
+}
+
+fn validate_uncached_type_expr(
+    value: &VmValue,
+    expected: &TypeExpr,
+    func: &CompiledFunction,
+    slot: &ParamSlot,
+    span: Option<Span>,
+) -> Result<(), VmError> {
+    if matches!(expected, TypeExpr::Named(name) if func.declares_type_param(name)) {
+        return Ok(());
+    }
+    if let Some(schema) = crate::compiler::Compiler::type_expr_to_schema_value(expected) {
+        crate::schema::schema_assert_param(value, &slot.name, &schema)?;
+        return Ok(());
+    }
+    validate_type_expr_without_schema(value, expected, func, slot, span)
+}
+
+fn validate_type_expr_without_schema(
+    value: &VmValue,
+    expected: &TypeExpr,
+    func: &CompiledFunction,
+    slot: &ParamSlot,
+    span: Option<Span>,
+) -> Result<(), VmError> {
+    assert_value_matches_type_with_generics(
+        value,
+        expected,
+        &func.name,
+        &slot.name,
+        span,
+        &func.type_params,
+        &func.nominal_type_names,
+    )
 }
 
 /// Validate a builtin call against the parser's signature registry.
@@ -441,6 +487,7 @@ mod tests {
     fn param_slot(name: &str, type_expr: Option<TypeExpr>) -> ParamSlot {
         ParamSlot {
             name: name.to_string(),
+            runtime_guard: type_expr.as_ref().map(RuntimeParamGuard::from_type_expr),
             type_expr,
             has_default: false,
         }
@@ -581,6 +628,29 @@ mod tests {
         validate_user_call(&func, &[vm_int(1)], None).unwrap();
 
         let err = validate_user_call(&func, &[vm_string("bad")], None).unwrap_err();
+        assert!(matches!(err, VmError::Runtime(_) | VmError::TypeError(_)));
+    }
+
+    #[test]
+    fn validate_user_call_uses_cached_runtime_guard_metadata() {
+        let string_schema = VmValue::Dict(Rc::new(std::collections::BTreeMap::from([(
+            "type".to_string(),
+            VmValue::String(Rc::from("string")),
+        )])));
+        let guard = RuntimeParamGuard::CanonicalSchema(
+            crate::schema::canonical_param_schema(&string_schema).unwrap(),
+        );
+        let func = compiled_function(vec![ParamSlot {
+            name: "value".to_string(),
+            type_expr: Some(ty_int()),
+            runtime_guard: Some(guard),
+            has_default: false,
+        }]);
+
+        validate_user_call(&func, &[vm_string("cached")], None).unwrap();
+        validate_user_call(&func, &[vm_string("guard")], None).unwrap();
+
+        let err = validate_user_call(&func, &[vm_int(1)], None).unwrap_err();
         assert!(matches!(err, VmError::Runtime(_) | VmError::TypeError(_)));
     }
 }

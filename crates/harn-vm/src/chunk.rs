@@ -6,6 +6,8 @@ use std::rc::Rc;
 use harn_parser::TypeExpr;
 use serde::{Deserialize, Serialize};
 
+use crate::runtime_guards::RuntimeParamGuard;
+
 /// Bytecode opcodes for the Harn VM.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[repr(u8)]
@@ -639,13 +641,34 @@ pub struct CachedCompiledFunction {
     pub(crate) name: String,
     pub(crate) type_params: Vec<String>,
     pub(crate) nominal_type_names: Vec<String>,
-    pub(crate) params: Vec<ParamSlot>,
+    pub(crate) params: Vec<CachedParamSlot>,
     pub(crate) default_start: Option<usize>,
     pub(crate) chunk: CachedChunk,
     pub(crate) is_generator: bool,
     pub(crate) is_stream: bool,
     pub(crate) has_rest_param: bool,
     pub(crate) has_runtime_type_checks: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub(crate) struct CachedParamSlot {
+    pub(crate) name: String,
+    pub(crate) type_expr: Option<TypeExpr>,
+    pub(crate) has_default: bool,
+}
+
+impl CachedParamSlot {
+    fn thaw(&self) -> ParamSlot {
+        ParamSlot {
+            name: self.name.clone(),
+            type_expr: self.type_expr.clone(),
+            runtime_guard: self
+                .type_expr
+                .as_ref()
+                .map(RuntimeParamGuard::from_type_expr),
+            has_default: self.has_default,
+        }
+    }
 }
 
 /// One parameter slot of a compiled user-defined function. Carries the
@@ -659,6 +682,10 @@ pub struct ParamSlot {
     /// Declared parameter type. `None` for untyped parameters (gradual
     /// typing); the runtime skips type assertion when absent.
     pub type_expr: Option<TypeExpr>,
+    /// Precomputed runtime validation metadata derived from `type_expr`.
+    /// Bytecode-cache artifacts omit this field and rebuild it at load time.
+    #[serde(skip)]
+    pub(crate) runtime_guard: Option<RuntimeParamGuard>,
     /// True when the parameter has a default-value clause. Diagnostic
     /// only — the canonical authority for arity ranges is
     /// [`CompiledFunction::default_start`].
@@ -672,7 +699,19 @@ impl ParamSlot {
         Self {
             name: param.name.clone(),
             type_expr: param.type_expr.clone(),
+            runtime_guard: param
+                .type_expr
+                .as_ref()
+                .map(RuntimeParamGuard::from_type_expr),
             has_default: param.default_value.is_some(),
+        }
+    }
+
+    fn freeze_for_cache(&self) -> CachedParamSlot {
+        CachedParamSlot {
+            name: self.name.clone(),
+            type_expr: self.type_expr.clone(),
+            has_default: self.has_default,
         }
     }
 
@@ -743,7 +782,11 @@ impl CompiledFunction {
             name: self.name.clone(),
             type_params: self.type_params.clone(),
             nominal_type_names: self.nominal_type_names.clone(),
-            params: self.params.clone(),
+            params: self
+                .params
+                .iter()
+                .map(ParamSlot::freeze_for_cache)
+                .collect(),
             default_start: self.default_start,
             chunk: self.chunk.freeze_for_cache(),
             is_generator: self.is_generator,
@@ -758,7 +801,7 @@ impl CompiledFunction {
             name: cached.name.clone(),
             type_params: cached.type_params.clone(),
             nominal_type_names: cached.nominal_type_names.clone(),
-            params: cached.params.clone(),
+            params: cached.params.iter().map(CachedParamSlot::thaw).collect(),
             default_start: cached.default_start,
             chunk: Rc::new(Chunk::from_cached(&cached.chunk)),
             is_generator: cached.is_generator,
