@@ -8,7 +8,8 @@
 use crate::llm::api::{DeltaSender, LlmRequestPayload, LlmResult};
 use crate::llm::provider::{LlmProvider, LlmProviderChat};
 use crate::llm::providers::common::{
-    apply_provider_overrides, maybe_emit_delta, request_text_content, vm_err,
+    apply_provider_overrides, google_function_declaration_tools, maybe_emit_delta,
+    request_text_content, vm_err,
 };
 use crate::url_encoding::percent_encode_component;
 use crate::value::VmError;
@@ -105,7 +106,7 @@ impl VertexProvider {
         if !generation.is_empty() {
             body["generationConfig"] = serde_json::Value::Object(generation);
         }
-        if let Some(tools) = vertex_tools(request.native_tools.as_deref()) {
+        if let Some(tools) = google_function_declaration_tools(request.native_tools.as_deref()) {
             body["tools"] = tools;
         }
         body
@@ -212,29 +213,6 @@ impl LlmProviderChat for VertexProvider {
     ) -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<LlmResult, VmError>> + 'a>> {
         Box::pin(self.chat_impl(request, delta_tx))
     }
-}
-
-fn vertex_tools(tools: Option<&[serde_json::Value]>) -> Option<serde_json::Value> {
-    let mut declarations = Vec::new();
-    for tool in tools.unwrap_or_default() {
-        let function = tool.get("function").unwrap_or(tool);
-        let Some(name) = function.get("name").and_then(|value| value.as_str()) else {
-            continue;
-        };
-        let mut declaration = serde_json::json!({ "name": name });
-        if let Some(description) = function.get("description") {
-            declaration["description"] = description.clone();
-        }
-        if let Some(parameters) = function
-            .get("parameters")
-            .or_else(|| function.get("input_schema"))
-        {
-            declaration["parameters"] = parameters.clone();
-        }
-        declarations.push(declaration);
-    }
-    (!declarations.is_empty())
-        .then(|| serde_json::json!([{ "functionDeclarations": declarations }]))
 }
 
 fn parse_vertex_response(json: &serde_json::Value, model: &str) -> Result<LlmResult, VmError> {

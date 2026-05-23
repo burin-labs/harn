@@ -38,6 +38,8 @@ pub mod source {
     pub const LLAMACPP_TIMINGS: &str = "llamacpp_timings";
     /// Anthropic Messages API — usage counts only; no timings.
     pub const ANTHROPIC_USAGE: &str = "anthropic_usage";
+    /// Google Gemini `usageMetadata` block from `generateContent`.
+    pub const GEMINI_USAGE: &str = "gemini_usage";
     /// Provider responded but we did not capture anything beyond what
     /// already lives on `LlmResult` (e.g. mock / fake providers, or a
     /// stream that finished without a usage frame).
@@ -238,6 +240,23 @@ impl ProviderTelemetry {
             .and_then(serde_json::Value::as_i64);
         telemetry.server_output_tokens = usage
             .get("output_tokens")
+            .and_then(serde_json::Value::as_i64);
+        if let Some(request_id) = request_id.filter(|value| !value.is_empty()) {
+            telemetry.request_id = Some(request_id.to_string());
+        }
+        telemetry
+    }
+
+    /// Extract Gemini `usageMetadata` counts. Cache-hit accounting stays on
+    /// `LlmResult`; telemetry keeps provider prompt/output counters plus the
+    /// request id for eval joins.
+    pub fn from_gemini_usage(usage: &serde_json::Value, request_id: Option<&str>) -> Self {
+        let mut telemetry = Self::new(source::GEMINI_USAGE);
+        telemetry.server_prompt_tokens = usage
+            .get("promptTokenCount")
+            .and_then(serde_json::Value::as_i64);
+        telemetry.server_output_tokens = usage
+            .get("candidatesTokenCount")
             .and_then(serde_json::Value::as_i64);
         if let Some(request_id) = request_id.filter(|value| !value.is_empty()) {
             telemetry.request_id = Some(request_id.to_string());

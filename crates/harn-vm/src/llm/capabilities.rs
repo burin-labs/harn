@@ -53,7 +53,7 @@ pub struct CapabilitiesFile {
 #[derive(Debug, Clone, Deserialize, Default)]
 pub struct ProviderDefaults {
     /// Message/request/response wire format used by shared helpers.
-    /// Known values are `openai`, `anthropic`, and `ollama`.
+    /// Known values are `openai`, `anthropic`, `gemini`, and `ollama`.
     #[serde(default)]
     pub message_wire_format: Option<String>,
     /// Native tool definition wire shape. Known values are `openai`
@@ -179,7 +179,7 @@ pub struct ProviderRule {
     #[serde(default)]
     pub native_tools: Option<bool>,
     /// Message/request/response wire format used by shared helpers.
-    /// Known values are `openai`, `anthropic`, and `ollama`.
+    /// Known values are `openai`, `anthropic`, `gemini`, and `ollama`.
     #[serde(default)]
     pub message_wire_format: Option<String>,
     /// Native tool definition wire shape. Known values are `openai`
@@ -1205,7 +1205,8 @@ anthropic_beta_features = ["fine-grained-tool-streaming-2025-05-14"]
     fn mock_with_gemini_model_routes_to_gemini() {
         reset();
         let caps = lookup("mock", "gemini-2.5-flash");
-        assert_eq!(caps.message_wire_format, "openai");
+        assert_eq!(caps.message_wire_format, "gemini");
+        assert_eq!(caps.native_tool_wire_format, "openai");
         assert!(caps.prefers_xml_scaffolding);
     }
 

@@ -1671,7 +1671,7 @@ See [LLM calls and agent loops](llm-and-agents.md) for full documentation.
 | `llm_budget_remaining()` | — | float or nil | Remaining budget (nil if no budget set) |
 | `tiktoken_count_tokens(text, model)` | text: string, model: string | int | Count text with the selected tiktoken encoder for known OpenAI models and labeled Claude/Gemini approximations |
 | `tiktoken_tokenizer_info(model)` | model: string | dict | Return `{model, model_family, source, exact, known_model_family, encoder}` for the encoder or heuristic fallback used by a model ID |
-| `llm_mock(response)` | response: dict | nil | Queue a mock LLM response. Dict supports `text`, `tool_calls`, `logprobs`, `match` (glob), `consume_match` (consume a matched pattern instead of reusing it), `input_tokens`, `output_tokens`, `thinking`, `stop_reason`, `model`, `error: {category, message}` (short-circuits the call and surfaces as `VmError::CategorizedError` — useful for testing `llm_call_safe` envelopes and `with_rate_limit` retry loops) |
+| `llm_mock(response)` | response: dict | nil | Queue a mock LLM response. Dict supports `text`, `tool_calls`, `blocks`, `logprobs`, `match` (glob), `consume_match` (consume a matched pattern instead of reusing it), `input_tokens`, `output_tokens`, `thinking`, `stop_reason`, `provider`, `model`, `error: {category, message}` (short-circuits the call and surfaces as `VmError::CategorizedError` — useful for testing `llm_call_safe` envelopes and `with_rate_limit` retry loops) |
 | `llm_mock_calls()` | — | list | Return list of `{messages, system, tools}` for all calls made to the mock provider |
 | `llm_mock_clear()` | — | nil | Clear all queued mock responses and recorded calls |
 

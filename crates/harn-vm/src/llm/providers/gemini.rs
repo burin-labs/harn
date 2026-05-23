@@ -3,9 +3,13 @@
 use std::rc::Rc;
 
 use crate::llm::api::{
-    DeltaSender, LlmRequestPayload, LlmResult, ProviderTelemetry, ReasoningEffort, ThinkingConfig,
+    DeltaSender, LlmRequestPayload, LlmResult, OutputFormat, ProviderTelemetry, ReasoningEffort,
+    ThinkingConfig,
 };
 use crate::llm::provider::{LlmProvider, LlmProviderChat};
+use crate::llm::providers::common::{
+    apply_provider_overrides, google_function_declaration_tools, maybe_emit_delta,
+};
 use crate::value::{VmError, VmValue};
 
 pub(crate) struct GeminiProvider;
@@ -73,16 +77,27 @@ fn gemini_thinking_budget(model: &str, thinking: &ThinkingConfig) -> Option<i64>
 impl GeminiProvider {
     pub(crate) fn build_request_body(opts: &LlmRequestPayload) -> serde_json::Value {
         let mut contents = Vec::new();
+        let mut system_parts = Vec::new();
         for message in &opts.messages {
-            let role = match message.get("role").and_then(|value| value.as_str()) {
-                Some("assistant" | "model") => "model",
+            let role = message
+                .get("role")
+                .and_then(|value| value.as_str())
+                .unwrap_or("user");
+            if role == "system" {
+                let parts = gemini_message_parts(message);
+                if !parts.is_empty() {
+                    system_parts.extend(parts);
+                }
+                continue;
+            }
+            let gemini_role = match role {
+                "assistant" | "model" => "model",
                 _ => "user",
             };
-            let content = message.get("content").unwrap_or(&serde_json::Value::Null);
-            let parts = crate::llm::content::gemini_parts(content);
+            let parts = gemini_message_parts(message);
             if !parts.is_empty() {
                 contents.push(serde_json::json!({
-                    "role": role,
+                    "role": gemini_role,
                     "parts": parts,
                 }));
             }
@@ -90,9 +105,10 @@ impl GeminiProvider {
 
         let mut body = serde_json::json!({ "contents": contents });
         if let Some(system) = opts.system.as_deref().filter(|value| !value.is_empty()) {
-            body["system_instruction"] = serde_json::json!({
-                "parts": [{"text": system}],
-            });
+            system_parts.insert(0, serde_json::json!({"text": system}));
+        }
+        if !system_parts.is_empty() {
+            body["systemInstruction"] = serde_json::json!({ "parts": system_parts });
         }
         let mut generation_config = serde_json::Map::new();
         if opts.max_tokens > 0 {
@@ -119,18 +135,32 @@ impl GeminiProvider {
                 serde_json::json!({ "thinkingBudget": budget }),
             );
         }
+        match &opts.output_format {
+            OutputFormat::Text => {}
+            OutputFormat::JsonObject => {
+                generation_config.insert(
+                    "responseMimeType".to_string(),
+                    serde_json::json!("application/json"),
+                );
+            }
+            OutputFormat::JsonSchema { schema, .. } => {
+                generation_config.insert(
+                    "responseMimeType".to_string(),
+                    serde_json::json!("application/json"),
+                );
+                generation_config.insert("responseJsonSchema".to_string(), schema.clone());
+            }
+        }
         if !generation_config.is_empty() {
             body["generationConfig"] = serde_json::Value::Object(generation_config);
         }
-        if let Some(overrides) = opts
-            .provider_overrides
-            .as_ref()
-            .and_then(|value| value.as_object())
-        {
-            for (key, value) in overrides {
-                body[key] = value.clone();
-            }
+        if let Some(tools) = google_function_declaration_tools(opts.native_tools.as_deref()) {
+            body["tools"] = tools;
         }
+        if let Some(tool_config) = gemini_tool_config(opts.tool_choice.as_ref()) {
+            body["toolConfig"] = tool_config;
+        }
+        apply_provider_overrides(&mut body, opts.provider_overrides.as_ref());
         body
     }
 
@@ -176,13 +206,145 @@ impl GeminiProvider {
             ))))
         })?;
         let result = parse_response(&json, request)?;
-        if let Some(tx) = delta_tx {
-            if !result.text.is_empty() {
-                let _ = tx.send(result.text.clone());
-            }
-        }
+        maybe_emit_delta(delta_tx, &result.text);
         Ok(result)
     }
+}
+
+fn gemini_message_parts(message: &serde_json::Value) -> Vec<serde_json::Value> {
+    if message
+        .get("role")
+        .and_then(|value| value.as_str())
+        .is_some_and(|role| role == "tool" || role == "tool_result")
+    {
+        if let Some(part) = gemini_function_response_part(message) {
+            return vec![part];
+        }
+    }
+
+    let mut parts = message
+        .get("content")
+        .map(crate::llm::content::gemini_parts)
+        .unwrap_or_default();
+    if let Some(calls) = message.get("tool_calls").and_then(|value| value.as_array()) {
+        for call in calls {
+            if let Some(part) = gemini_function_call_part(call) {
+                parts.push(part);
+            }
+        }
+    }
+    parts
+}
+
+fn gemini_function_call_part(call: &serde_json::Value) -> Option<serde_json::Value> {
+    let function = call.get("function").unwrap_or(call);
+    let name = function
+        .get("name")
+        .and_then(serde_json::Value::as_str)
+        .filter(|name| !name.is_empty())?;
+    let args = function
+        .get("arguments")
+        .and_then(|value| {
+            value
+                .as_str()
+                .and_then(|text| serde_json::from_str::<serde_json::Value>(text).ok())
+                .or_else(|| (!value.is_string()).then(|| value.clone()))
+        })
+        .or_else(|| call.get("arguments").cloned())
+        .unwrap_or_else(|| serde_json::json!({}));
+    let mut function_call = serde_json::json!({
+        "name": name,
+        "args": args,
+    });
+    if let Some(id) = call
+        .get("id")
+        .or_else(|| function.get("id"))
+        .and_then(serde_json::Value::as_str)
+        .filter(|id| !id.is_empty())
+    {
+        function_call["id"] = serde_json::json!(id);
+    }
+    let mut part = serde_json::json!({ "functionCall": function_call });
+    if let Some(signature) = call
+        .get("thought_signature")
+        .or_else(|| call.get("thoughtSignature"))
+        .and_then(serde_json::Value::as_str)
+        .filter(|signature| !signature.is_empty())
+    {
+        part["thoughtSignature"] = serde_json::json!(signature);
+    }
+    Some(part)
+}
+
+fn gemini_function_response_part(message: &serde_json::Value) -> Option<serde_json::Value> {
+    let name = message
+        .get("name")
+        .or_else(|| message.get("tool_name"))
+        .and_then(serde_json::Value::as_str)
+        .filter(|name| !name.is_empty())?;
+    let response = message
+        .get("content")
+        .map(gemini_function_response_payload)
+        .unwrap_or_else(|| serde_json::json!({}));
+    let mut function_response = serde_json::json!({
+        "name": name,
+        "response": response,
+    });
+    if let Some(id) = message
+        .get("tool_call_id")
+        .or_else(|| message.get("tool_use_id"))
+        .or_else(|| message.get("call_id"))
+        .and_then(serde_json::Value::as_str)
+        .filter(|id| !id.is_empty())
+    {
+        function_response["id"] = serde_json::json!(id);
+    }
+    Some(serde_json::json!({ "functionResponse": function_response }))
+}
+
+fn gemini_function_response_payload(content: &serde_json::Value) -> serde_json::Value {
+    match content {
+        serde_json::Value::Object(_) => content.clone(),
+        serde_json::Value::String(text) => match serde_json::from_str::<serde_json::Value>(text) {
+            Ok(serde_json::Value::Object(object)) => serde_json::Value::Object(object),
+            Ok(value) => serde_json::json!({ "result": value }),
+            Err(_) => serde_json::json!({ "result": text }),
+        },
+        serde_json::Value::Null => serde_json::json!({}),
+        other => serde_json::json!({ "result": other }),
+    }
+}
+
+fn gemini_tool_config(tool_choice: Option<&serde_json::Value>) -> Option<serde_json::Value> {
+    let choice = tool_choice?;
+    let mode = match choice {
+        serde_json::Value::String(value) => match value.as_str() {
+            "none" => "NONE",
+            "required" | "any" => "ANY",
+            _ => "AUTO",
+        },
+        serde_json::Value::Object(object) => {
+            match object.get("type").and_then(|value| value.as_str()) {
+                Some("none") => "NONE",
+                Some("function" | "tool" | "any" | "required") => "ANY",
+                _ => "AUTO",
+            }
+        }
+        _ => "AUTO",
+    };
+    let mut config = serde_json::json!({ "functionCallingConfig": { "mode": mode } });
+    if mode == "ANY" {
+        if let Some(name) = choice
+            .get("function")
+            .and_then(|value| value.get("name"))
+            .or_else(|| choice.get("name"))
+            .and_then(serde_json::Value::as_str)
+            .filter(|name| !name.is_empty())
+        {
+            config["functionCallingConfig"]["allowedFunctionNames"] = serde_json::json!([name]);
+        }
+    }
+    Some(config)
 }
 
 fn parse_response(
@@ -199,16 +361,77 @@ fn parse_response(
         )))));
     }
     let mut text = String::new();
+    let mut thinking = String::new();
     let mut blocks = Vec::new();
+    let mut tool_calls = Vec::new();
     if let Some(parts) = json["candidates"][0]["content"]["parts"].as_array() {
-        for part in parts {
+        for (idx, part) in parts.iter().enumerate() {
+            let thought_signature = part
+                .get("thoughtSignature")
+                .and_then(|value| value.as_str())
+                .filter(|value| !value.is_empty());
             if let Some(fragment) = part.get("text").and_then(|value| value.as_str()) {
-                text.push_str(fragment);
-                blocks.push(serde_json::json!({
-                    "type": "output_text",
-                    "text": fragment,
-                    "visibility": "public",
-                }));
+                if part.get("thought").and_then(|value| value.as_bool()) == Some(true) {
+                    thinking.push_str(fragment);
+                    blocks.push(serde_json::json!({
+                        "type": "reasoning",
+                        "text": fragment,
+                        "visibility": "private",
+                    }));
+                } else {
+                    text.push_str(fragment);
+                    let mut block = serde_json::json!({
+                        "type": "output_text",
+                        "text": fragment,
+                        "visibility": "public",
+                    });
+                    if let Some(signature) = thought_signature {
+                        block["provider_metadata"] = serde_json::json!({
+                            "gemini": {"thought_signature": signature}
+                        });
+                    }
+                    blocks.push(block);
+                }
+            }
+            if let Some(call) = part.get("functionCall") {
+                let Some(name) = call
+                    .get("name")
+                    .and_then(|value| value.as_str())
+                    .filter(|value| !value.is_empty())
+                else {
+                    continue;
+                };
+                let args = call
+                    .get("args")
+                    .cloned()
+                    .unwrap_or_else(|| serde_json::json!({}));
+                let id = call
+                    .get("id")
+                    .and_then(|value| value.as_str())
+                    .filter(|value| !value.is_empty())
+                    .map(str::to_string)
+                    .unwrap_or_else(|| format!("gemini_tool_{}", tool_calls.len()));
+                let mut tool_call = serde_json::json!({
+                    "id": id,
+                    "name": name,
+                    "arguments": args.clone(),
+                });
+                if let Some(signature) = thought_signature {
+                    tool_call["thought_signature"] = serde_json::json!(signature);
+                }
+                tool_calls.push(tool_call.clone());
+                let mut block = serde_json::json!({
+                    "type": "tool_call",
+                    "id": tool_call["id"].clone(),
+                    "name": name,
+                    "arguments": args,
+                    "visibility": "internal",
+                });
+                if let Some(signature) = thought_signature {
+                    block["thought_signature"] = serde_json::json!(signature);
+                }
+                block["part_index"] = serde_json::json!(idx);
+                blocks.push(block);
             }
         }
     }
@@ -218,30 +441,30 @@ fn parse_response(
     let output_tokens = json["usageMetadata"]["candidatesTokenCount"]
         .as_i64()
         .unwrap_or(0);
+    let cache_read_tokens = json["usageMetadata"]["cachedContentTokenCount"]
+        .as_i64()
+        .unwrap_or(0);
     let stop_reason = json["candidates"][0]["finishReason"]
         .as_str()
         .map(str::to_string);
-    // Gemini's REST response carries only token counts (no server-side
-    // timings) so we synthesize an OpenAI-shaped usage block and route it
-    // through the same normalizer the rest of the providers use.
-    let usage = serde_json::json!({
-        "prompt_tokens": input_tokens,
-        "completion_tokens": output_tokens,
-    });
     let request_id = json["responseId"]
         .as_str()
         .filter(|value| !value.is_empty());
-    let telemetry = ProviderTelemetry::from_openai_usage(&usage, request_id);
+    let telemetry = ProviderTelemetry::from_gemini_usage(&json["usageMetadata"], request_id);
     Ok(LlmResult {
         text,
-        tool_calls: Vec::new(),
+        tool_calls,
         input_tokens,
         output_tokens,
-        cache_read_tokens: 0,
+        cache_read_tokens,
         cache_write_tokens: 0,
         model: request.model.clone(),
         provider: request.provider.clone(),
-        thinking: None,
+        thinking: if thinking.is_empty() {
+            None
+        } else {
+            Some(thinking)
+        },
         thinking_summary: None,
         stop_reason,
         blocks,
@@ -253,7 +476,8 @@ fn parse_response(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::llm::api::ThinkingConfig;
+    use crate::llm::api::{OutputFormat, ThinkingConfig};
+    use serde_json::json;
 
     fn text_payload(model: &str, thinking: ThinkingConfig) -> LlmRequestPayload {
         LlmRequestPayload {
@@ -402,7 +626,7 @@ mod tests {
                 "file_uri": "https://example.com/image.png",
             })
         );
-        assert_eq!(body["system_instruction"]["parts"][0]["text"], "system");
+        assert_eq!(body["systemInstruction"]["parts"][0]["text"], "system");
     }
 
     #[test]
@@ -514,5 +738,166 @@ mod tests {
         assert!(legacy["generationConfig"]
             .as_object()
             .is_some_and(|config| !config.contains_key("thinkingConfig")));
+    }
+
+    #[test]
+    fn gemini_native_tools_and_structured_output_map_to_generate_content() {
+        let mut payload = text_payload("gemini-2.5-flash", ThinkingConfig::Disabled);
+        payload.native_tools = Some(vec![
+            json!({
+                "type": "function",
+                "function": {
+                    "name": "lookup",
+                    "description": "Lookup records",
+                    "parameters": {
+                        "type": "object",
+                        "properties": {"query": {"type": "string"}},
+                        "required": ["query"]
+                    }
+                }
+            }),
+            json!({
+                "type": "function",
+                "function": {
+                    "name": "summarize",
+                    "parameters": {"type": "object"}
+                }
+            }),
+        ]);
+        payload.tool_choice = Some(json!({
+            "type": "function",
+            "function": {"name": "lookup"}
+        }));
+        payload.output_format = OutputFormat::JsonSchema {
+            schema: json!({
+                "type": "object",
+                "properties": {"answer": {"type": "string"}},
+                "required": ["answer"]
+            }),
+            strict: true,
+        };
+
+        let body = GeminiProvider::build_request_body(&payload);
+
+        let declarations = body["tools"][0]["functionDeclarations"]
+            .as_array()
+            .expect("function declarations");
+        assert_eq!(declarations.len(), 2);
+        assert_eq!(declarations[0]["name"], "lookup");
+        assert_eq!(
+            declarations[0]["parameters"]["properties"]["query"]["type"],
+            "string"
+        );
+        assert_eq!(
+            body["toolConfig"]["functionCallingConfig"],
+            json!({"mode": "ANY", "allowedFunctionNames": ["lookup"]})
+        );
+        assert_eq!(
+            body["generationConfig"]["responseMimeType"],
+            "application/json"
+        );
+        assert_eq!(
+            body["generationConfig"]["responseJsonSchema"]["properties"]["answer"]["type"],
+            "string"
+        );
+    }
+
+    #[test]
+    fn gemini_history_maps_function_calls_and_tool_results() {
+        let mut payload = text_payload("gemini-2.5-flash", ThinkingConfig::Disabled);
+        payload.messages = vec![
+            json!({
+                "role": "assistant",
+                "content": [
+                    {
+                        "functionCall": {
+                            "id": "call_1",
+                            "name": "lookup",
+                            "args": {"query": "harn"}
+                        },
+                        "thoughtSignature": "opaque-signature"
+                    }
+                ]
+            }),
+            json!({
+                "role": "tool",
+                "name": "lookup",
+                "tool_call_id": "call_1",
+                "content": "{\"result\":\"ok\"}"
+            }),
+        ];
+
+        let body = GeminiProvider::build_request_body(&payload);
+
+        assert_eq!(body["contents"][0]["role"], "model");
+        assert_eq!(
+            body["contents"][0]["parts"][0]["functionCall"],
+            json!({"id": "call_1", "name": "lookup", "args": {"query": "harn"}})
+        );
+        assert_eq!(
+            body["contents"][0]["parts"][0]["thoughtSignature"],
+            "opaque-signature"
+        );
+        assert_eq!(body["contents"][1]["role"], "user");
+        assert_eq!(
+            body["contents"][1]["parts"][0]["functionResponse"],
+            json!({"id": "call_1", "name": "lookup", "response": {"result": "ok"}})
+        );
+    }
+
+    #[test]
+    fn gemini_response_extracts_text_function_calls_signatures_and_cache_usage() {
+        let request = text_payload("gemini-2.5-flash", ThinkingConfig::Disabled);
+        let response = json!({
+            "candidates": [{
+                "content": {"parts": [
+                    {"text": "checking"},
+                    {
+                        "functionCall": {
+                            "id": "call_1",
+                            "name": "lookup",
+                            "args": {"query": "harn"}
+                        },
+                        "thoughtSignature": "sig-1"
+                    },
+                    {
+                        "functionCall": {
+                            "name": "summarize",
+                            "args": {"topic": "tools"}
+                        }
+                    }
+                ]},
+                "finishReason": "STOP"
+            }],
+            "usageMetadata": {
+                "promptTokenCount": 10,
+                "candidatesTokenCount": 3,
+                "cachedContentTokenCount": 7
+            },
+            "responseId": "resp-1"
+        });
+
+        let result = parse_response(&response, &request).expect("gemini response parses");
+
+        assert_eq!(result.text, "checking");
+        assert_eq!(result.tool_calls.len(), 2);
+        assert_eq!(result.tool_calls[0]["id"], "call_1");
+        assert_eq!(result.tool_calls[0]["name"], "lookup");
+        assert_eq!(result.tool_calls[0]["arguments"]["query"], "harn");
+        assert_eq!(result.tool_calls[0]["thought_signature"], "sig-1");
+        assert_eq!(result.tool_calls[1]["id"], "gemini_tool_1");
+        assert_eq!(result.cache_read_tokens, 7);
+        assert_eq!(
+            result.telemetry.source,
+            crate::llm::api::telemetry_source::GEMINI_USAGE
+        );
+        assert_eq!(result.telemetry.request_id.as_deref(), Some("resp-1"));
+        assert!(result.blocks.iter().any(|block| {
+            block.get("type").and_then(|value| value.as_str()) == Some("tool_call")
+                && block
+                    .get("thought_signature")
+                    .and_then(|value| value.as_str())
+                    == Some("sig-1")
+        }));
     }
 }

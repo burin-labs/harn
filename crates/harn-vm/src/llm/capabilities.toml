@@ -23,7 +23,7 @@
 #   version_min     : [major, minor] lower bound, provider-aware parse.
 #   native_tools    : whether the model accepts native tool-call wire shape.
 #   message_wire_format:
-#                     shared helper wire format: openai, anthropic, or ollama.
+#                     shared helper wire format: openai, anthropic, gemini, or ollama.
 #   native_tool_wire_format:
 #                     native tool definition shape: openai or anthropic.
 #   defer_loading   : whether `defer_loading: true` is honored on tool defs.
@@ -117,6 +117,7 @@ frequency_penalty_supported = false
 presence_penalty_supported = false
 
 [provider_defaults.gemini]
+message_wire_format = "gemini"
 file_upload_wire_format = "gemini"
 files_api_supported = true
 
@@ -1502,6 +1503,8 @@ thinking_block_style = "reasoning_summary"
 
 [[provider.gemini]]
 model_match = "gemini-2.5*"
+native_tools = true
+structured_output = "native"
 thinking_modes = ["enabled", "adaptive", "effort"]
 vision_supported = true
 audio_supported = true
@@ -1517,6 +1520,8 @@ thinking_block_style = "reasoning_summary"
 
 [[provider.gemini]]
 model_match = "models/gemini-2.5*"
+native_tools = true
+structured_output = "native"
 thinking_modes = ["enabled", "adaptive", "effort"]
 vision_supported = true
 audio_supported = true
@@ -1532,6 +1537,8 @@ thinking_block_style = "reasoning_summary"
 
 [[provider.gemini]]
 model_match = "gemini-*"
+native_tools = true
+structured_output = "native"
 vision_supported = true
 audio_supported = true
 pdf_supported = true
@@ -1546,6 +1553,8 @@ thinking_block_style = "none"
 
 [[provider.gemini]]
 model_match = "models/gemini-*"
+native_tools = true
+structured_output = "native"
 vision_supported = true
 audio_supported = true
 pdf_supported = true

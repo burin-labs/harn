@@ -450,6 +450,40 @@ pub(crate) fn gemini_parts(content: &serde_json::Value) -> Vec<serde_json::Value
         serde_json::Value::Array(blocks) => blocks
             .iter()
             .filter_map(|block| {
+                if block.get("functionCall").is_some() || block.get("functionResponse").is_some()
+                {
+                    return Some(block.clone());
+                }
+                if block.get("type").and_then(|value| value.as_str()) == Some("tool_call") {
+                    let name = block
+                        .get("name")
+                        .and_then(|value| value.as_str())
+                        .filter(|value| !value.is_empty())?;
+                    let mut function_call = serde_json::json!({
+                        "name": name,
+                        "args": block
+                            .get("arguments")
+                            .cloned()
+                            .unwrap_or_else(|| serde_json::json!({})),
+                    });
+                    if let Some(id) = block
+                        .get("id")
+                        .and_then(|value| value.as_str())
+                        .filter(|value| !value.is_empty())
+                    {
+                        function_call["id"] = serde_json::json!(id);
+                    }
+                    let mut part = serde_json::json!({ "functionCall": function_call });
+                    if let Some(signature) = block
+                        .get("thoughtSignature")
+                        .or_else(|| block.get("thought_signature"))
+                        .and_then(|value| value.as_str())
+                        .filter(|value| !value.is_empty())
+                    {
+                        part["thoughtSignature"] = serde_json::json!(signature);
+                    }
+                    return Some(part);
+                }
                 if let Ok(Some(image)) = parse_image_block(block) {
                     if let Some(data) = image.base64 {
                         return Some(serde_json::json!({
@@ -487,9 +521,25 @@ pub(crate) fn gemini_parts(content: &serde_json::Value) -> Vec<serde_json::Value
                     }
                 }
                 if let Some(text) = normalized_text_block(block) {
-                    return Some(serde_json::json!({
+                    let mut part = serde_json::json!({
                         "text": text.get("text").and_then(|value| value.as_str()).unwrap_or_default(),
-                    }));
+                    });
+                    if let Some(signature) = block
+                        .get("thoughtSignature")
+                        .or_else(|| block.get("thought_signature"))
+                        .or_else(|| {
+                            block
+                                .get("provider_metadata")
+                                .and_then(|value| value.get("gemini"))
+                                .and_then(|value| value.get("thought_signature"))
+                        })
+                        .and_then(|value| value.as_str())
+                    {
+                        if !signature.is_empty() {
+                            part["thoughtSignature"] = serde_json::json!(signature);
+                        }
+                    }
+                    return Some(part);
                 }
                 block.get("text")
                     .and_then(|value| value.as_str())

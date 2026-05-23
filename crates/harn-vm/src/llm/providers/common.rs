@@ -67,6 +67,37 @@ pub(super) fn apply_provider_overrides(
     }
 }
 
+pub(super) fn google_function_declaration_tools(
+    tools: Option<&[serde_json::Value]>,
+) -> Option<serde_json::Value> {
+    let declarations: Vec<serde_json::Value> = tools
+        .unwrap_or_default()
+        .iter()
+        .filter_map(google_function_declaration)
+        .collect();
+    (!declarations.is_empty())
+        .then(|| serde_json::json!([{ "functionDeclarations": declarations }]))
+}
+
+fn google_function_declaration(tool: &serde_json::Value) -> Option<serde_json::Value> {
+    let function = tool.get("function").unwrap_or(tool);
+    let name = function
+        .get("name")
+        .and_then(serde_json::Value::as_str)
+        .filter(|name| !name.is_empty())?;
+    let mut declaration = serde_json::json!({ "name": name });
+    if let Some(description) = function.get("description") {
+        declaration["description"] = description.clone();
+    }
+    if let Some(parameters) = function
+        .get("parameters")
+        .or_else(|| function.get("input_schema"))
+    {
+        declaration["parameters"] = parameters.clone();
+    }
+    Some(declaration)
+}
+
 /// Parse a `(major, minor)` generation pair from the tail of a model ID after
 /// the family needle. Accepts both dotted forms (`4.7`, `5.4-preview`) and
 /// dashed forms (`4-7`, `5-4-preview`, `4-20251001`).

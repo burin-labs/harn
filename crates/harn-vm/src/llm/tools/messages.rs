@@ -9,6 +9,7 @@ pub(crate) fn build_assistant_tool_message(
     model: &str,
 ) -> serde_json::Value {
     let is_anthropic = super::super::provider::provider_uses_anthropic_messages(provider, model);
+    let is_gemini = super::super::provider::provider_uses_gemini_messages(provider, model);
     let is_ollama = super::super::provider::provider_uses_ollama_messages(provider, model);
     if is_anthropic {
         // Anthropic format: content blocks with text and tool_use
@@ -25,6 +26,34 @@ pub(crate) fn build_assistant_tool_message(
             }));
         }
         serde_json::json!({"role": "assistant", "content": content})
+    } else if is_gemini {
+        let mut parts = Vec::new();
+        if !text.is_empty() {
+            parts.push(serde_json::json!({"text": text}));
+        }
+        for tc in tool_calls {
+            let mut function_call = serde_json::json!({
+                "name": tc["name"],
+                "args": tc["arguments"],
+            });
+            if let Some(id) = tc.get("id").and_then(|value| value.as_str()) {
+                if !id.is_empty() {
+                    function_call["id"] = serde_json::json!(id);
+                }
+            }
+            let mut part = serde_json::json!({ "functionCall": function_call });
+            if let Some(signature) = tc
+                .get("thought_signature")
+                .or_else(|| tc.get("thoughtSignature"))
+                .and_then(|value| value.as_str())
+            {
+                if !signature.is_empty() {
+                    part["thoughtSignature"] = serde_json::json!(signature);
+                }
+            }
+            parts.push(part);
+        }
+        serde_json::json!({"role": "assistant", "content": parts})
     } else if is_ollama {
         // Ollama's chat API uses the OpenAI-style `function` envelope but
         // its request schema expects `function.arguments` to be a string.
@@ -86,7 +115,22 @@ pub(crate) fn build_assistant_response_message(
     model: &str,
 ) -> serde_json::Value {
     let mut message = if !tool_calls.is_empty() {
-        build_assistant_tool_message(text, tool_calls, provider, model)
+        if super::super::provider::provider_uses_gemini_messages(provider, model)
+            && !blocks.is_empty()
+        {
+            let content =
+                crate::llm::content::gemini_parts(&serde_json::Value::Array(blocks.to_vec()));
+            if content
+                .iter()
+                .any(|part| part.get("functionCall").is_some())
+            {
+                serde_json::json!({"role": "assistant", "content": content})
+            } else {
+                build_assistant_tool_message(text, tool_calls, provider, model)
+            }
+        } else {
+            build_assistant_tool_message(text, tool_calls, provider, model)
+        }
     } else if !blocks.is_empty() {
         serde_json::json!({
             "role": "assistant",
