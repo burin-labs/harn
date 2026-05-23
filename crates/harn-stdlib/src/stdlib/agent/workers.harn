@@ -8,7 +8,15 @@ type ResumeTimeoutSpec = {duration_minutes: int, on_timeout: ResumeTimeoutAction
 
 type ResumeConditions = {trigger: dict?, timeout: ResumeTimeoutSpec?, on_event: string?}
 
-type AgentAwaitResumptionRequest = {reason: string, conditions: ResumeConditions?}
+type ResumeByResult = {handled: bool, mechanism: string, reason?: string}
+
+type ResumeByCallback = fn(Harness, dict) -> ResumeByResult | dict | nil
+
+type AgentAwaitResumptionRequest = {
+  reason: string,
+  conditions: ResumeConditions?,
+  resume_by?: ResumeByCallback,
+}
 
 fn __agent_option_keys() {
   return [
@@ -72,11 +80,11 @@ pub fn agent(name, config = nil) {
  * @api_stability: experimental
  * @example: agent_name(agent)
  */
-pub fn agent_name(agent) {
-  if type_of(agent) != "dict" {
+pub fn agent_name(spec) {
+  if type_of(spec) != "dict" {
     throw "agent_name: argument must be an agent"
   }
-  return agent?.name
+  return spec?.name
 }
 
 /**
@@ -88,12 +96,12 @@ pub fn agent_name(agent) {
  * @api_stability: experimental
  * @example: agent_config(agent, prompt)
  */
-pub fn agent_config(agent, prompt) {
-  if type_of(agent) != "dict" || agent?._type != "agent" {
+pub fn agent_config(spec, prompt) {
+  if type_of(spec) != "dict" || spec?._type != "agent" {
     throw "agent_config: first argument must be an agent (created with agent())"
   }
-  let options = pick_keys(agent, __agent_option_keys(), {drop_nil: true})
-  return {prompt: prompt, system: agent?.system, options: options}
+  let options = pick_keys(spec, __agent_option_keys(), {drop_nil: true})
+  return {prompt: prompt, system: spec?.system, options: options}
 }
 
 fn __worker_dict(value) {
@@ -388,8 +396,8 @@ pub fn parse_resume_conditions(conditions = nil) -> ResumeConditions? {
  * daemon idle metadata.
  *
  * The optional `resume_by` argument names the callback that owns this
- * suspension's resume responsibility (S-14, harn#1864). Pass any
- * `(harness, suspension) -> {handled, mechanism}` closure — typically
+ * suspension's resume responsibility. Pass any `(harness, suspension) ->
+ * {handled, mechanism}` closure — typically
  * one of the four `ResumeBy.*` presets from `std/agent/resume_by`, or a
  * `first_available(...)` chain. When omitted, the runtime calls
  * `default_resume_by(...)` to pick a sensible default based on the

@@ -1,0 +1,353 @@
+import { agent_emit_event, agent_session_inject_feedback } from "std/agent/state"
+
+type AgentStallConfig = {
+  enabled: bool,
+  threshold: int,
+  inject_feedback: bool,
+  max_feedback: int,
+  exempt_tools: list,
+  include_arguments: bool,
+}
+
+type AgentStallWarning = {
+  iteration: int,
+  tool_name: string,
+  repeat_count: int,
+  threshold: int,
+  arguments_digest: string,
+  signature_digest: string,
+  arguments?: dict,
+}
+
+type AgentStallState = {
+  last_signature: string,
+  streak: int,
+  warnings: list<AgentStallWarning>,
+  repeated_tool_calls: int,
+  feedback_count: int,
+}
+
+type AgentStallObservation = {
+  state: AgentStallState,
+  enabled: bool,
+  warning: AgentStallWarning?,
+  feedback_deferred: bool,
+  config: AgentStallConfig,
+}
+
+fn __agent_stall_bool(value, fallback: bool, field: string) -> bool {
+  if value == nil {
+    return fallback
+  }
+  if type_of(value) == "bool" {
+    return value
+  }
+  throw "agent_loop: stall_diagnostics." + field + " must be a bool; got " + type_of(value)
+}
+
+fn __agent_stall_list(value, field: string) -> list {
+  if value == nil {
+    return []
+  }
+  if type_of(value) == "list" {
+    return value
+  }
+  throw "agent_loop: stall_diagnostics." + field + " must be a list; got " + type_of(value)
+}
+
+fn __agent_stall_config(value) -> AgentStallConfig {
+  if value == nil {
+    return {
+      enabled: false,
+      threshold: 3,
+      inject_feedback: true,
+      max_feedback: 1,
+      exempt_tools: [],
+      include_arguments: false,
+    }
+  }
+  if type_of(value) == "bool" {
+    return {
+      enabled: value,
+      threshold: 3,
+      inject_feedback: true,
+      max_feedback: 1,
+      exempt_tools: [],
+      include_arguments: false,
+    }
+  }
+  if type_of(value) != "dict" {
+    throw "agent_loop: `stall_diagnostics` must be a dict, bool, or nil; got " + type_of(value)
+  }
+  let threshold = value?.threshold ?? 3
+  let max_feedback = value?.max_feedback ?? 1
+  let exempt_tools = if value?.exempt_tools != nil {
+    __agent_stall_list(value.exempt_tools, "exempt_tools")
+  } else {
+    __agent_stall_list(value?.allow_repeated_tools, "allow_repeated_tools")
+  }
+  return {
+    enabled: __agent_stall_bool(value?.enabled, true, "enabled"),
+    threshold: if type_of(threshold) == "int" && threshold >= 2 {
+      threshold
+    } else {
+      3
+    },
+    inject_feedback: __agent_stall_bool(value?.inject_feedback, true, "inject_feedback"),
+    max_feedback: if type_of(max_feedback) == "int" && max_feedback >= 0 {
+      max_feedback
+    } else {
+      1
+    },
+    exempt_tools: exempt_tools,
+    include_arguments: __agent_stall_bool(value?.include_arguments, false, "include_arguments"),
+  }
+}
+
+/**
+ * agent_stall_initial_state creates repeated-tool-call diagnostic state.
+ *
+ * @effects: []
+ * @allocation: heap
+ * @errors: []
+ * @api_stability: experimental
+ * @example: agent_stall_initial_state()
+ */
+pub fn agent_stall_initial_state() -> AgentStallState {
+  return {last_signature: "", streak: 0, warnings: [], repeated_tool_calls: 0, feedback_count: 0}
+}
+
+fn __agent_stall_reset_state(state: AgentStallState) -> AgentStallState {
+  return state + {last_signature: "", streak: 0}
+}
+
+fn __agent_tool_call_name(call) -> string {
+  return to_string(call?.name ?? call?.tool_name ?? "")
+}
+
+fn __agent_tool_call_args(call) -> dict {
+  let raw = call?.arguments ?? call?.tool_args
+  if type_of(raw) == "dict" {
+    return raw
+  }
+  return {}
+}
+
+fn __agent_tool_call_signature(call) -> string {
+  let args_text = json_stringify(__agent_tool_call_args(call))
+  return __agent_tool_call_name(call) + "\n" + args_text
+}
+
+fn __agent_stall_feedback_text(warning: AgentStallWarning) -> string {
+  return "Stall diagnostic: the last "
+    + to_string(warning.repeat_count)
+    + " tool calls repeated `"
+    + warning.tool_name
+    + "` with identical arguments. Use different evidence, finish, or explain why another identical call is necessary before repeating it."
+}
+
+fn __agent_stall_warning_record(
+  iteration: int,
+  tool_name: string,
+  args: dict,
+  signature: string,
+  repeat_count: int,
+  config: AgentStallConfig,
+) -> AgentStallWarning {
+  let args_text = json_stringify(args)
+  var record = {
+    iteration: iteration,
+    tool_name: tool_name,
+    repeat_count: repeat_count,
+    threshold: config.threshold,
+    arguments_digest: "sha256:" + sha256(args_text),
+    signature_digest: "sha256:" + sha256(signature),
+  }
+  if config.include_arguments {
+    record = record + {arguments: args}
+  }
+  return record
+}
+
+/**
+ * agent_stall_inject_feedback injects bounded stall feedback.
+ *
+ * @effects: [agent]
+ * @allocation: heap
+ * @errors: []
+ * @api_stability: experimental
+ * @example: agent_stall_inject_feedback(session_id, warning, config, state)
+ */
+pub fn agent_stall_inject_feedback(
+  session_id: string,
+  warning: AgentStallWarning,
+  config: AgentStallConfig,
+  state: AgentStallState,
+) -> AgentStallState {
+  let wants_feedback = config.inject_feedback ?? true
+  let should_feedback = wants_feedback && state.feedback_count < config.max_feedback
+  if should_feedback {
+    agent_session_inject_feedback(session_id, "stall_diagnostics", __agent_stall_feedback_text(warning))
+    return state + {feedback_count: state.feedback_count + 1}
+  }
+  return state
+}
+
+fn __agent_stall_maybe_emit(
+  session_id: string,
+  warning: AgentStallWarning,
+  config: AgentStallConfig,
+  state: AgentStallState,
+  defer_feedback: bool,
+) {
+  agent_emit_event(session_id, "agent_loop_stall_warning", warning)
+  if defer_feedback {
+    return {state: state, warning: warning, feedback_deferred: true}
+  }
+  return {
+    state: agent_stall_inject_feedback(session_id, warning, config, state),
+    warning: warning,
+    feedback_deferred: false,
+  }
+}
+
+/**
+ * agent_stall_observe_tool_calls detects repeated identical tool calls.
+ *
+ * @effects: [agent]
+ * @allocation: heap
+ * @errors: [agent_loop]
+ * @api_stability: experimental
+ * @example: agent_stall_observe_tool_calls(session_id, calls, iteration, config, state, true)
+ */
+pub fn agent_stall_observe_tool_calls(
+  session_id: string,
+  tool_calls: list,
+  iteration: int,
+  raw_config,
+  state: AgentStallState,
+  defer_feedback: bool,
+) -> AgentStallObservation {
+  let config = __agent_stall_config(raw_config)
+  if !config.enabled {
+    return {state: state, enabled: false, warning: nil, feedback_deferred: false, config: config}
+  }
+  if len(tool_calls) == 0 {
+    return {
+      state: __agent_stall_reset_state(state),
+      enabled: true,
+      warning: nil,
+      feedback_deferred: false,
+      config: config,
+    }
+  }
+  var next_state = state
+  var emitted_warning = nil
+  var feedback_deferred = false
+  for call in tool_calls {
+    let tool_name = __agent_tool_call_name(call)
+    if tool_name == "" || contains(config.exempt_tools, tool_name) {
+      next_state = __agent_stall_reset_state(next_state)
+      continue
+    }
+    let signature = __agent_tool_call_signature(call)
+    let streak = if signature == next_state.last_signature {
+      next_state.streak + 1
+    } else {
+      1
+    }
+    let repeated = if streak > 1 {
+      next_state.repeated_tool_calls + 1
+    } else {
+      next_state.repeated_tool_calls
+    }
+    next_state = next_state
+      + {last_signature: signature, streak: streak, repeated_tool_calls: repeated}
+    if streak == config.threshold {
+      let warning = __agent_stall_warning_record(
+        iteration,
+        tool_name,
+        __agent_tool_call_args(call),
+        signature,
+        streak,
+        config,
+      )
+      let emitted = __agent_stall_maybe_emit(session_id, warning, config, next_state, defer_feedback)
+      next_state = emitted.state
+      if emitted_warning == nil {
+        emitted_warning = warning
+      }
+      feedback_deferred = feedback_deferred || emitted?.feedback_deferred ?? false
+      next_state = next_state + {warnings: next_state.warnings.push(warning)}
+    }
+  }
+  return {
+    state: next_state,
+    enabled: true,
+    warning: emitted_warning,
+    feedback_deferred: feedback_deferred,
+    config: config,
+  }
+}
+
+/**
+ * agent_stall_apply_result adds stall diagnostics to an agent-loop result.
+ *
+ * @effects: []
+ * @allocation: heap
+ * @errors: []
+ * @api_stability: experimental
+ * @example: agent_stall_apply_result(result, enabled, state)
+ */
+pub fn agent_stall_apply_result(result: dict, stall_enabled: bool, stall_state: AgentStallState) -> dict {
+  if !stall_enabled && len(stall_state.warnings) == 0 {
+    return result
+  }
+  return result
+    + {
+    repeated_tool_calls: stall_state.repeated_tool_calls,
+    stall_warnings: stall_state.warnings,
+    suspected_loop: len(stall_state.warnings) > 0,
+  }
+}
+
+fn __agent_done_judge_stall_cadence(opts) {
+  let judge = opts?.done_judge
+  if type_of(judge) != "dict" {
+    return nil
+  }
+  let cadence = judge?.cadence
+  if type_of(cadence) != "dict" || cadence?.when != "stalled" {
+    return nil
+  }
+  return cadence
+}
+
+/**
+ * agent_stall_done_judge_due decides whether the stall done judge is due.
+ *
+ * @effects: []
+ * @allocation: stack
+ * @errors: []
+ * @api_stability: experimental
+ * @example: agent_stall_done_judge_due(opts, 0, 3)
+ */
+pub fn agent_stall_done_judge_due(opts, invocations: int, turn_number: int) -> bool {
+  let cadence = __agent_done_judge_stall_cadence(opts)
+  if cadence == nil {
+    return false
+  }
+  let max_invocations = cadence?.max_invocations
+  if max_invocations != nil && invocations >= max_invocations {
+    return false
+  }
+  let min_iterations = cadence?.min_iterations_before_first
+  if min_iterations != nil && turn_number <= min_iterations {
+    return false
+  }
+  let every = cadence?.every
+  if every != nil && turn_number % every != 0 {
+    return false
+  }
+  return true
+}

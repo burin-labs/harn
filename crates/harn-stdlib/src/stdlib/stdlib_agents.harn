@@ -161,7 +161,8 @@ pub fn verify_command(config) {
   let output = host_call("process.exec", {mode: "shell", command: config?.command, shell_id: shell?.id})
   var ok = output?.success
   if config?.expect_status != nil {
-    ok = output?.exit_code ?? output?.legacy_status ?? output?.status == config?.expect_status
+    let actual_status = output?.exit_code ?? output?.legacy_status ?? output?.status
+    ok = actual_status == config.expect_status
   }
   if config?.expect_text != nil {
     ok = ok && contains(output?.combined ?? "", config?.expect_text)
@@ -1248,61 +1249,25 @@ pub fn workflow_result_text(result) {
   return json_stringify(raw)
 }
 
-/**
- * workflow_result_transcript.
- *
- * @effects: []
- * @allocation: heap
- * @errors: []
- * @api_stability: stable
- * @example: workflow_result_transcript(task, workflow_name, result, metadata)
- */
-pub fn workflow_result_transcript(task, workflow_name, result, metadata) {
-  let existing = result?.run?.transcript ?? result?.transcript ?? result?.result?.transcript
-  if existing {
-    return existing
-  }
-  var built = transcript(metadata ?? {} + {workflow: workflow_name})
+fn __workflow_existing_transcript(result) {
+  return result?.run?.transcript ?? result?.transcript ?? result?.result?.transcript
+}
+
+fn __workflow_build_transcript(task, workflow_name, text: string, metadata) {
+  let base_metadata = metadata ?? {}
+  let transcript_metadata = base_metadata + {workflow: workflow_name}
+  var built = transcript(transcript_metadata)
   if task {
     built = add_user(built, [{type: "text", text: task, visibility: "public"}])
   }
-  let text = workflow_result_text(result)
   if text {
     built = add_assistant(built, [{type: "output_text", text: text, visibility: "public"}])
   }
   return built
 }
 
-/**
- * workflow_result_run.
- *
- * @effects: []
- * @allocation: heap
- * @errors: []
- * @api_stability: stable
- * @example: workflow_result_run(task, workflow_name, result, artifacts, options)
- */
-pub fn workflow_result_run(task, workflow_name, result, artifacts, options) {
-  let base_run = if result?._type == "run_record" {
-    result
-  } else {
-    result?.run ?? {}
-  }
-  let text = workflow_result_text(result)
-  let metadata = base_run?.metadata ?? {} + options?.metadata ?? {}
-  let transcript = if result?.run?.transcript ?? result?.transcript ?? result?.result?.transcript {
-    result?.run?.transcript ?? result?.transcript ?? result?.result?.transcript
-  } else {
-    var built = transcript(metadata ?? {} + {workflow: workflow_name})
-    if task {
-      built = add_user(built, [{type: "text", text: task, visibility: "public"}])
-    }
-    if text {
-      built = add_assistant(built, [{type: "output_text", text: text, visibility: "public"}])
-    }
-    built
-  }
-  var run_artifacts = base_run?.artifacts ?? result?.artifacts ?? artifacts ?? []
+fn __workflow_result_artifacts(existing, text: string, workflow_name) {
+  var run_artifacts = existing ?? []
   var has_visible_result_artifact = false
   if text {
     for item in run_artifacts {
@@ -1327,6 +1292,60 @@ pub fn workflow_result_run(task, workflow_name, result, artifacts, options) {
       ]
     }
   }
+  return run_artifacts
+}
+
+fn __workflow_result_metadata(base_run, options) {
+  let base_metadata = base_run?.metadata ?? {}
+  let option_metadata = options?.metadata ?? {}
+  return base_metadata + option_metadata
+}
+
+/**
+ * workflow_result_transcript.
+ *
+ * @effects: []
+ * @allocation: heap
+ * @errors: []
+ * @api_stability: stable
+ * @example: workflow_result_transcript(task, workflow_name, result, metadata)
+ */
+pub fn workflow_result_transcript(task, workflow_name, result, metadata) {
+  let existing = __workflow_existing_transcript(result)
+  if existing {
+    return existing
+  }
+  let text = workflow_result_text(result)
+  return __workflow_build_transcript(task, workflow_name, text, metadata)
+}
+
+/**
+ * workflow_result_run.
+ *
+ * @effects: []
+ * @allocation: heap
+ * @errors: []
+ * @api_stability: stable
+ * @example: workflow_result_run(task, workflow_name, result, artifacts, options)
+ */
+pub fn workflow_result_run(task, workflow_name, result, artifacts, options) {
+  let base_run = if result?._type == "run_record" {
+    result
+  } else {
+    result?.run ?? {}
+  }
+  let text = workflow_result_text(result)
+  let metadata = __workflow_result_metadata(base_run, options)
+  let transcript = if __workflow_existing_transcript(result) {
+    __workflow_existing_transcript(result)
+  } else {
+    __workflow_build_transcript(task, workflow_name, text, metadata)
+  }
+  let run_artifacts = __workflow_result_artifacts(
+    base_run?.artifacts ?? result?.artifacts ?? artifacts,
+    text,
+    workflow_name,
+  )
   return run_record(
     base_run
       + {
@@ -1358,44 +1377,17 @@ pub fn workflow_result_persist(task, workflow_name, result, artifacts, options) 
     result?.run ?? {}
   }
   let text = workflow_result_text(result)
-  let metadata = base_run?.metadata ?? {} + options?.metadata ?? {}
-  let transcript = if result?.run?.transcript ?? result?.transcript ?? result?.result?.transcript {
-    result?.run?.transcript ?? result?.transcript ?? result?.result?.transcript
+  let metadata = __workflow_result_metadata(base_run, options)
+  let transcript = if __workflow_existing_transcript(result) {
+    __workflow_existing_transcript(result)
   } else {
-    var built = transcript(metadata ?? {} + {workflow: workflow_name})
-    if task {
-      built = add_user(built, [{type: "text", text: task, visibility: "public"}])
-    }
-    if text {
-      built = add_assistant(built, [{type: "output_text", text: text, visibility: "public"}])
-    }
-    built
+    __workflow_build_transcript(task, workflow_name, text, metadata)
   }
-  var run_artifacts = base_run?.artifacts ?? result?.artifacts ?? artifacts ?? []
-  var has_visible_result_artifact = false
-  if text {
-    for item in run_artifacts {
-      if item?.text == text {
-        has_visible_result_artifact = true
-      }
-    }
-    if !has_visible_result_artifact {
-      run_artifacts = run_artifacts
-        + [
-        artifact(
-          {
-            kind: "summary",
-            title: "Visible result",
-            text: text,
-            source: workflow_name,
-            freshness: "fresh",
-            relevance: 1.0,
-            metadata: {visibility: "public"},
-          },
-        ),
-      ]
-    }
-  }
+  let run_artifacts = __workflow_result_artifacts(
+    base_run?.artifacts ?? result?.artifacts ?? artifacts,
+    text,
+    workflow_name,
+  )
   let run = run_record(
     base_run
       + {

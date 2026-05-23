@@ -26,8 +26,8 @@ use self::agents_workers::{
     parse_worker_config, persist_worker_state_snapshot, reset_worker_registry, spawn_worker_task,
     with_worker_state, worker_event_snapshot, worker_id_from_value, worker_request_for_config,
     worker_snapshot_path, worker_summary, worker_trigger_payload_text, worker_wait_blocks,
-    SuspendInitiator, WorkerCarryPolicy, WorkerConfig, WorkerExecutionProfile, WorkerState,
-    WorkerSuspension, WORKER_REGISTRY,
+    SuspendInitiator, WorkerCarryPolicy, WorkerConfig, WorkerExecutionProfile, WorkerInit,
+    WorkerState, WorkerSuspension, WORKER_REGISTRY,
 };
 use self::sub_agent::{execute_sub_agent, parse_sub_agent_request};
 use crate::agent_events::WorkerEvent;
@@ -220,8 +220,8 @@ impl Drop for LifecycleSpanGuard {
     }
 }
 
-/// S-18 (harn#1867): apply the canonical attribute bag to a suspension
-/// lifecycle span. Kept in one helper so suspend_agent_builtin and
+/// Apply the canonical attribute bag to a suspension lifecycle span.
+/// Kept in one helper so suspend_agent_builtin and
 /// top_level_agent_suspend_builtin emit identically shaped spans for
 /// OTel exporters and downstream queries.
 ///
@@ -240,9 +240,8 @@ fn annotate_suspension_span(
     has_conditions: bool,
 ) {
     span.set_metadata("worker_id", serde_json::json!(worker_id));
-    // `handle` is the canonical OTel attribute name per the issue spec
-    // (#1867 acceptance criteria); we keep `worker_id` for back-compat
-    // with the P-05/P-06 attributes already shipped.
+    // `handle` is the canonical OTel attribute name for suspension spans;
+    // `worker_id` remains for consumers that join against worker events.
     span.set_metadata("handle", serde_json::json!(worker_id));
     span.set_metadata("reason", serde_json::json!(reason));
     span.set_metadata(
@@ -251,10 +250,8 @@ fn annotate_suspension_span(
     );
     span.set_metadata("has_conditions", serde_json::json!(has_conditions));
     if let Some(pipeline_span_link) = pipeline_span_link {
-        // `pipeline_id` is the issue's spec-level attribute; we use the
-        // active pipeline span's id since worker state does not carry a
-        // distinct pipeline identifier. `pipeline_span_id` is preserved
-        // for back-compat with the P-05 attribute.
+        // Worker state does not carry a distinct pipeline identifier, so the
+        // active pipeline span id is the stable cross-span join key.
         span.set_metadata(
             "pipeline_span_id",
             serde_json::json!(pipeline_span_link.span_id),
@@ -266,8 +263,8 @@ fn annotate_suspension_span(
     }
 }
 
-/// S-18 (harn#1867): apply the canonical attribute bag to a resume
-/// lifecycle span. Booleans describe the shape of the resume (transcript
+/// Apply the canonical attribute bag to a resume lifecycle span.
+/// Booleans describe the shape of the resume (transcript
 /// continuity, fresh resume input) without exposing transcript text or
 /// the resume payload itself.
 fn annotate_resume_span(
@@ -464,40 +461,52 @@ async fn sub_agent_run_builtin(args: Vec<VmValue>) -> Result<VmValue, VmError> {
         return Ok(crate::stdlib::json_to_vm_value(&result.payload));
     }
 
-    let worker_id = next_worker_id();
-    let created_at = uuid::Uuid::now_v7().to_string();
-    let mut audit = agents_workers::inherited_worker_audit("sub_agent");
-    audit.worker_id = Some(worker_id.clone());
     let execution = request.execution;
     let worker_policy = request.worker_policy;
     let mut carry_policy = request.carry_policy;
     carry_policy.policy = worker_policy;
     let spec = request.spec;
-    let worker_name = spec.name.clone();
-    let worker_task = spec.task.clone();
-    let mut config = WorkerConfig::SubAgent {
-        spec: Box::new(spec),
+    let init = WorkerInit {
+        name: spec.name.clone(),
+        task: spec.task.clone(),
+        config: WorkerConfig::SubAgent {
+            spec: Box::new(spec),
+        },
+        wait: false,
+        carry_policy,
+        execution,
+        audit: agents_workers::inherited_worker_audit("sub_agent"),
     };
-    ensure_worker_config_session_ids(&mut config, &worker_id);
-    let original_request = worker_request_for_config(&worker_task, &config);
-    let state = Rc::new(RefCell::new(WorkerState {
+    let state = fresh_worker_state(next_worker_id(), init);
+    finalize_and_run_worker(state, false, "sub_agent worker").await
+}
+
+fn fresh_worker_state(worker_id: String, mut init: WorkerInit) -> Rc<RefCell<WorkerState>> {
+    let created_at = uuid::Uuid::now_v7().to_string();
+    ensure_worker_config_session_ids(&mut init.config, &worker_id);
+    let mode = worker_mode_label(&init.config).to_string();
+    let mut audit = init.audit.normalize();
+    audit.worker_id = Some(worker_id.clone());
+    audit.execution_kind = Some(mode.clone());
+    let request = worker_request_for_config(&init.task, &init.config);
+    Rc::new(RefCell::new(WorkerState {
         id: worker_id.clone(),
-        name: worker_name,
-        task: worker_task.clone(),
+        name: init.name,
+        task: init.task.clone(),
         status: "running".to_string(),
         created_at: created_at.clone(),
         started_at: created_at,
         finished_at: None,
         awaiting_started_at: None,
         awaiting_since: None,
-        mode: "sub_agent".to_string(),
-        history: vec![worker_task],
-        config,
+        mode,
+        history: vec![init.task],
+        config: init.config,
         handle: None,
         cancel_token: Arc::new(AtomicBool::new(false)),
         suspend_signal: Arc::new(AtomicBool::new(false)),
         suspension: None,
-        request: original_request,
+        request,
         latest_payload: None,
         latest_error: None,
         transcript: None,
@@ -506,20 +515,15 @@ async fn sub_agent_run_builtin(args: Vec<VmValue>) -> Result<VmValue, VmError> {
         parent_stage_id: None,
         child_run_id: None,
         child_run_path: None,
-        carry_policy,
-        execution,
+        carry_policy: init.carry_policy,
+        execution: init.execution,
         snapshot_path: worker_snapshot_path(&worker_id),
         audit,
-    }));
-    finalize_and_run_worker(state, false, "sub_agent worker").await
+    }))
 }
 
-/// Persist + register + spawn a freshly-built worker, optionally block until
-/// it reaches a terminal state, and return the worker summary dict.
-///
-/// Shared by `spawn_agent_builtin` (background or `wait: true`) and
-/// `sub_agent_run_builtin` (background) so persistence / registry / task
-/// spawn / summary stay in one place.
+/// Persist, register, and spawn a freshly-built worker. Optionally block until
+/// it reaches a terminal state before returning the worker summary dict.
 async fn finalize_and_run_worker(
     state: Rc<RefCell<WorkerState>>,
     wait_for_terminal: bool,
@@ -554,47 +558,10 @@ async fn spawn_agent_builtin(args: Vec<VmValue>) -> Result<VmValue, VmError> {
     let config = args
         .first()
         .ok_or_else(|| VmError::Runtime("spawn_agent: missing config".to_string()))?;
-    let mut init = parse_worker_config(config)?;
-    let worker_id = next_worker_id();
-    let created_at = uuid::Uuid::now_v7().to_string();
-    ensure_worker_config_session_ids(&mut init.config, &worker_id);
-    let mode = worker_mode_label(&init.config).to_string();
-    let mut audit = init.audit.clone().normalize();
-    audit.worker_id = Some(worker_id.clone());
-    audit.execution_kind = Some(mode.clone());
-    let original_request = worker_request_for_config(&init.task, &init.config);
-    let state = Rc::new(RefCell::new(WorkerState {
-        id: worker_id.clone(),
-        name: init.name,
-        task: init.task.clone(),
-        status: "running".to_string(),
-        created_at: created_at.clone(),
-        started_at: created_at,
-        finished_at: None,
-        awaiting_started_at: None,
-        awaiting_since: None,
-        mode,
-        history: vec![init.task],
-        config: init.config,
-        handle: None,
-        cancel_token: Arc::new(AtomicBool::new(false)),
-        suspend_signal: Arc::new(AtomicBool::new(false)),
-        suspension: None,
-        request: original_request,
-        latest_payload: None,
-        latest_error: None,
-        transcript: None,
-        artifacts: Vec::new(),
-        parent_worker_id: None,
-        parent_stage_id: None,
-        child_run_id: None,
-        child_run_path: None,
-        carry_policy: init.carry_policy,
-        execution: init.execution,
-        snapshot_path: worker_snapshot_path(&worker_id),
-        audit,
-    }));
-    finalize_and_run_worker(state, init.wait, "spawn_agent worker").await
+    let init = parse_worker_config(config)?;
+    let wait = init.wait;
+    let state = fresh_worker_state(next_worker_id(), init);
+    finalize_and_run_worker(state, wait, "spawn_agent worker").await
 }
 
 async fn send_input_builtin(args: Vec<VmValue>) -> Result<VmValue, VmError> {
@@ -681,11 +648,11 @@ async fn worker_trigger_builtin(args: Vec<VmValue>) -> Result<VmValue, VmError> 
     with_worker_state(&worker_id, |state| worker_summary(&state.borrow()))
 }
 
-/// Cooperative suspend (harn#1837 / S-01).
+/// Cooperatively suspend a running worker.
 ///
 /// Sets the worker's `suspend_signal` flag — the `agent_loop` honors this
-/// at the next turn boundary (S-02) — records suspension metadata,
-/// persists a snapshot, and emits a `WorkerSuspended` lifecycle event.
+/// at the next turn boundary — records suspension metadata, persists a
+/// snapshot, and emits a `WorkerSuspended` lifecycle event.
 ///
 /// Idempotent: calling on an already-suspended worker returns the
 /// existing summary without re-emitting the event or re-persisting the
@@ -712,8 +679,8 @@ async fn suspend_agent_builtin(args: Vec<VmValue>) -> Result<VmValue, VmError> {
         .cloned();
     let conditions = conditions_value.as_ref().map(crate::llm::vm_value_to_json);
 
-    // PreSuspend lifecycle gate (harn#1859). Allow/Deny (cancel suspend,
-    // worker keeps running)/Modify (rewrite reason)/Reminder.
+    // PreSuspend lifecycle gate. Block cancels the suspend and leaves the
+    // worker running; Modify can rewrite the public reason.
     let pre_payload = serde_json::json!({
         "event": crate::orchestration::HookEvent::PreSuspend.as_str(),
         "worker": { "id": &worker_id },
@@ -731,7 +698,7 @@ async fn suspend_agent_builtin(args: Vec<VmValue>) -> Result<VmValue, VmError> {
         crate::orchestration::HookControl::Block {
             reason: block_reason,
         } => {
-            // PreSuspend Deny: cancel suspend, return current summary.
+            // Blocked suspend: leave the worker running and return its summary.
             return with_worker_state(&worker_id, |state| {
                 let mut summary = worker_summary(&state.borrow())?;
                 if let VmValue::Dict(map) = &mut summary {
@@ -780,13 +747,11 @@ async fn suspend_agent_builtin(args: Vec<VmValue>) -> Result<VmValue, VmError> {
             format!("suspend {}", worker.id),
             Vec::new(),
         );
-        // S-18 (harn#1867): attach the structured suspend metadata that
-        // OTel consumers need to render a paused agent without joining
-        // back to the worker registry. `reason` and `initiator` are already
-        // public via WorkerSuspended events and PreSuspend/PostSuspend
-        // hook payloads; we deliberately do NOT include transcript
-        // content, resume_input, or condition payloads (see issue #1867
-        // privacy callout).
+        // OTel consumers need enough metadata to render a paused agent
+        // without joining back to the worker registry. `reason` and
+        // `initiator` are already public via worker events and lifecycle hook
+        // payloads; transcript content, resume input, and condition payloads
+        // stay out of span attributes.
         annotate_suspension_span(
             &span,
             &worker.id,
@@ -843,8 +808,8 @@ async fn suspend_agent_builtin(args: Vec<VmValue>) -> Result<VmValue, VmError> {
             span.end();
         }
         emit_worker_event(&snapshot, crate::agent_events::WorkerEvent::WorkerSuspended).await?;
-        // PostSuspend lifecycle event (harn#1859). Advisory only; the
-        // snapshot has already been persisted by persist_worker_state_snapshot.
+        // PostSuspend hooks are advisory; the snapshot has already been
+        // persisted by persist_worker_state_snapshot.
         let post_payload = serde_json::json!({
             "event": crate::orchestration::HookEvent::PostSuspend.as_str(),
             "worker": { "id": &worker_id },
@@ -894,8 +859,8 @@ impl PanicSuspendOutcome {
     }
 }
 
-/// CH-10 (#1910) panic-broadcast helper. Cooperative-suspend a single
-/// worker as part of an `InterruptAndSuspend` trigger dispatch.
+/// Cooperatively suspend one worker as part of an `InterruptAndSuspend`
+/// trigger dispatch.
 ///
 /// Behavior parallels `suspend_agent_builtin` minus the
 /// `PreSuspend`/`PostSuspend` lifecycle hooks and the auto-resume trigger
@@ -903,8 +868,8 @@ impl PanicSuspendOutcome {
 /// approval/turn-boundary contract — wiring it through the hook gate would
 /// let one rogue PreSuspend Deny block the org-wide emergency. The
 /// suspension envelope carries the panic `reason` verbatim and uses
-/// `SuspendInitiator::Triggered` (the closest fit on the existing receipts
-/// schema; no schema bump required to ship this variant).
+/// `SuspendInitiator::Triggered`, which matches the trigger-owned suspend
+/// path already understood by receipts.
 ///
 /// Returns the structured outcome so the dispatcher can build the per-worker
 /// audit entries; returns `Err(...)` only on persistence/event-emission
@@ -973,12 +938,11 @@ pub(crate) async fn panic_suspend_worker(
     Ok(outcome)
 }
 
-/// CH-10 (#1910): enumerate every worker id currently registered in the
-/// local worker registry. Used by `InterruptAndSuspend` to materialize the
+/// Enumerate every worker id currently registered in the local worker
+/// registry. Used by `InterruptAndSuspend` to materialize the
 /// `AgentScope::All` target list. Ordering is the registry's stable
 /// `BTreeMap` iteration order so a panic broadcast is deterministic across
-/// replays — the dispatcher's audit log records the same worker order on
-/// re-run.
+/// replays.
 pub(crate) fn all_registered_worker_ids() -> Vec<String> {
     WORKER_REGISTRY.with(|registry| registry.borrow().keys().cloned().collect())
 }
@@ -1018,8 +982,8 @@ async fn top_level_agent_suspend_builtin(args: Vec<VmValue>) -> Result<VmValue, 
         format!("suspend {worker_id}"),
         Vec::new(),
     );
-    // S-18 (harn#1867): mirror the metadata captured in
-    // `suspend_agent_builtin` for top-level (script-level) suspensions.
+    // Mirror `suspend_agent_builtin` metadata for top-level script
+    // suspensions.
     // The initiator for the top-level path is always `SelfInitiated`
     // because only the active agent loop can drive the synchronous
     // checkpoint return path.
@@ -1594,8 +1558,8 @@ async fn warm_resume_worker(
     mut options: WorkerResumeOptions,
 ) -> Result<VmValue, VmError> {
     join_checkpointed_worker_handle(state.clone()).await?;
-    // PreResume lifecycle gate (harn#1859). Allow/Deny (stay suspended)/
-    // Modify (amend resume input)/Reminder.
+    // PreResume lifecycle gate. Block keeps the worker suspended; Modify can
+    // amend the resume input before the transcript policy runs.
     let pre_worker_id = state.borrow().id.clone();
     let pre_payload = serde_json::json!({
         "event": crate::orchestration::HookEvent::PreResume.as_str(),
@@ -1615,7 +1579,7 @@ async fn warm_resume_worker(
     {
         crate::orchestration::HookControl::Allow => {}
         crate::orchestration::HookControl::Block { reason } => {
-            // PreResume Deny: do not transition out of suspended.
+            // Blocked resume: do not transition out of suspended.
             let mut summary = worker_summary(&state.borrow())?;
             if let VmValue::Dict(map) = &mut summary {
                 let mut entries = (**map).clone();
@@ -1676,11 +1640,10 @@ async fn warm_resume_worker(
         format!("resume {worker_id}"),
         span_links,
     );
-    // S-18 (harn#1867): annotate the resume span with the per-resume
-    // shape (initiator, transcript continuity, presence of fresh input)
-    // and a count of the linked-not-parented prior spans. We do NOT
-    // include the resume_input value itself — it can contain transcript
-    // text or user data — only a boolean flag.
+    // Annotate the resume span with its shape (initiator, transcript
+    // continuity, fresh input) and prior-span link count. The resume input can
+    // contain transcript text or user data, so the span records only whether
+    // fresh input exists.
     annotate_resume_span(
         &resume_span,
         &worker_id,
@@ -1730,8 +1693,7 @@ async fn warm_resume_worker(
     if crate::vm::clone_async_builtin_child_vm().is_some() {
         respawn_worker_task(state.clone())?;
     }
-    // PostResume lifecycle event (harn#1859). Advisory only; the turn is
-    // about to start.
+    // PostResume hooks are advisory; the resumed turn is about to start.
     let post_payload = serde_json::json!({
         "event": crate::orchestration::HookEvent::PostResume.as_str(),
         "worker": { "id": &worker_id },
@@ -3165,8 +3127,8 @@ mod suspend_tests {
         crate::tracing::reset_tracing();
     }
 
-    /// S-18 (harn#1867): verify the suspension / resume spans carry the
-    /// documented attribute bag (`handle`, `reason`, `initiator`,
+    /// Verify the suspension and resume spans carry the documented attribute
+    /// bag (`handle`, `reason`, `initiator`,
     /// `pipeline_id` on suspend; `handle`, `initiator`,
     /// `continue_transcript`, `had_resume_input`,
     /// `linked_suspension_count` on resume). These attributes let OTel
@@ -3223,7 +3185,7 @@ mod suspend_tests {
                 .get("worker_id")
                 .and_then(|v| v.as_str()),
             Some(worker_id.as_str()),
-            "suspend span preserves back-compat worker_id"
+            "suspend span exposes worker_id"
         );
         assert_eq!(
             suspension.metadata.get("reason").and_then(|v| v.as_str()),
@@ -3251,7 +3213,7 @@ mod suspend_tests {
                 .get("pipeline_span_id")
                 .and_then(|v| v.as_str()),
             Some(pipeline_span_id.to_string()).as_deref(),
-            "back-compat pipeline_span_id is present"
+            "pipeline_span_id is present"
         );
         assert_eq!(
             suspension

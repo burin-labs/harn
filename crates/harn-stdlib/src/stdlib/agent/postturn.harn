@@ -151,7 +151,7 @@ fn __native_completion_context(opts, has_tool_calls, text) {
  * the model is "done" but has emitted ZERO tool_calls so far this
  * session (successful OR rejected — a failed tool call still shows
  * the model engaged the tool channel). This is the documented Qwen3
- * thinking + native tools failure signature (QwenLM/Qwen3.6 #89):
+ * thinking + native tools failure signature:
  * reasoning trace narrates tool intent ("let me run git..."), but
  * the structured tool_calls channel emits nothing at all. Once the
  * model has used the tool channel even once (even unsuccessfully),

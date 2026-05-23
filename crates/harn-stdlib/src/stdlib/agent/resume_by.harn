@@ -1,29 +1,29 @@
 /**
- * std/agent/resume_by — explicit resume-responsibility callbacks (S-14, harn#1864).
+ * std/agent/resume_by — explicit resume-responsibility callbacks.
  *
- * Replaces the legacy "infer resume responsibility from `conditions`"
- * dispatch with a callback-first surface (per epic #1853). Each preset
- * is a pure closure with signature `(harness, suspension) -> dict` so it
- * composes cleanly with every `std/lifecycle/combinators` helper.
+ * Each preset is a pure closure with signature `(harness, suspension) ->
+ * ResumeByDispatchResult` so it composes cleanly with every
+ * `std/lifecycle/combinators` helper.
  *
  * Import:
  *   import { ResumeBy, default_resume_by } from "std/agent/resume_by"
  *
  * Conventions:
- *   - Callbacks return a result dict shaped
- *     `{handled: bool, mechanism: string, reason?: string}`. The
- *     `mechanism` string is propagated to the suspension envelope as
- *     `resume_by_mechanism` so transcripts, replay, and audits all
- *     reference the same canonical name.
+ *   - Callbacks return `{handled: bool, mechanism: string, reason?: string}`.
+ *     The `mechanism` string is propagated to the suspension envelope as
+ *     `resume_by_mechanism` so transcripts, replay, and audits all reference
+ *     the same canonical name.
  *   - `handled: false` means the callback declined (e.g.
  *     `ResumeBy.cloud_harness` with no cloud session); composed chains
  *     such as `first_available(...)` continue to the next entry.
  *   - The runtime emits a `resume_by_dispatched` audit through
  *     `harness.emit_audit` on every handled invocation so behaviour is
  *     observable from `lifecycle_audit_log_take()`.
- *
- * Tracking: harn#1864 (S-14), harn#1836 (epic), harn#1853 (callback-first).
  */
+type ResumeByDispatchResult = {handled: bool, mechanism: string, reason?: string}
+
+type ResumeByCallback = fn(Harness, dict) -> ResumeByDispatchResult | dict | nil
+
 /**
  * first_handled walks `callbacks` in order with `(harness, suspension)`
  * and returns the first result whose `handled` field is `true`. This is
@@ -40,7 +40,7 @@
  * @api_stability: experimental
  * @example: first_handled([ResumeBy().cloud_harness, ResumeBy().local_runtime])
  */
-pub fn first_handled(callbacks) {
+pub fn first_handled(callbacks) -> ResumeByCallback {
   return { harness, suspension ->
     if type_of(callbacks) != "list" || len(callbacks) == 0 {
       return nil
@@ -111,9 +111,8 @@ fn __resume_by_cloud_session(harness) {
  * use it as the terminal entry in a `first_available(...)` chain.
  *
  * Emits a `resume_by_dispatched` audit with the suspension handle and
- * reason; downstream wiring to actually inject the parent-side reminder
- * lands when the harness exposes `emit_to_parent_transcript`
- * (tracked alongside harn#1853).
+ * reason. Parent-side reminder delivery is handled by the host surface that
+ * owns the parent transcript.
  *
  * @effects: [host]
  * @allocation: heap
@@ -121,14 +120,14 @@ fn __resume_by_cloud_session(harness) {
  * @api_stability: experimental
  * @example: resume_by_parent_llm(harness, suspension)
  */
-pub fn resume_by_parent_llm(harness, suspension) {
+pub fn resume_by_parent_llm(harness, suspension) -> ResumeByDispatchResult {
   __resume_by_emit(harness, suspension, "ResumeBy.parent_llm")
   return {handled: true, mechanism: "ResumeBy.parent_llm"}
 }
 
 /**
  * resume_by_local_runtime registers the suspension's resume conditions
- * with the in-process trigger dispatcher (#152). Declines with
+ * with the in-process trigger dispatcher. Declines with
  * `{handled: false, reason: "no_conditions"}` when no conditions are
  * present — the parent LLM must resume in that case.
  *
@@ -138,7 +137,7 @@ pub fn resume_by_parent_llm(harness, suspension) {
  * @api_stability: experimental
  * @example: resume_by_local_runtime(harness, suspension)
  */
-pub fn resume_by_local_runtime(harness, suspension) {
+pub fn resume_by_local_runtime(harness, suspension) -> ResumeByDispatchResult {
   if !__resume_by_has_conditions(suspension) {
     __resume_by_emit_declined(harness, suspension, "ResumeBy.local_runtime", "no_conditions")
     return {handled: false, mechanism: "ResumeBy.local_runtime", reason: "no_conditions"}
@@ -164,7 +163,7 @@ pub fn resume_by_local_runtime(harness, suspension) {
  * @api_stability: experimental
  * @example: resume_by_cloud_harness(harness, suspension)
  */
-pub fn resume_by_cloud_harness(harness, suspension) {
+pub fn resume_by_cloud_harness(harness, suspension) -> ResumeByDispatchResult {
   let session = __resume_by_cloud_session(harness)
   if session == nil {
     __resume_by_emit_declined(harness, suspension, "ResumeBy.cloud_harness", "no_cloud_session")
@@ -181,7 +180,7 @@ pub fn resume_by_cloud_harness(harness, suspension) {
 
 /**
  * resume_by_pipeline_drain defers the suspension to the enclosing
- * pipeline's drain step (#1853). Always returns
+ * pipeline's drain step. Always returns
  * `{handled: true, mechanism: "ResumeBy.pipeline_drain"}` so the
  * drain step owns the resume responsibility from there on.
  *
@@ -191,7 +190,7 @@ pub fn resume_by_cloud_harness(harness, suspension) {
  * @api_stability: experimental
  * @example: resume_by_pipeline_drain(harness, suspension)
  */
-pub fn resume_by_pipeline_drain(harness, suspension) {
+pub fn resume_by_pipeline_drain(harness, suspension) -> ResumeByDispatchResult {
   __resume_by_emit(harness, suspension, "ResumeBy.pipeline_drain")
   return {handled: true, mechanism: "ResumeBy.pipeline_drain"}
 }
@@ -242,7 +241,7 @@ pub fn ResumeBy() {
  * @api_stability: experimental
  * @example: default_resume_by({conditions: cond, harness: harness})
  */
-pub fn default_resume_by(opts = nil) {
+pub fn default_resume_by(opts = nil) -> ResumeByCallback {
   let conditions = opts?.conditions
   let harness = opts?.harness
   let has_conditions = if conditions == nil {
@@ -275,7 +274,7 @@ pub fn default_resume_by(opts = nil) {
  * @api_stability: experimental
  * @example: invoke_resume_by(callback, harness, suspension)
  */
-pub fn invoke_resume_by(callback, harness, suspension) {
+pub fn invoke_resume_by(callback, harness, suspension) -> ResumeByDispatchResult | dict {
   let cb = if callback == nil {
     resume_by_parent_llm
   } else {
@@ -289,12 +288,12 @@ pub fn invoke_resume_by(callback, harness, suspension) {
       harness
         .emit_audit(
         "resume_by_errored",
-        __resume_by_payload(suspension, "callback", {error: to_string(outcome)}),
+        __resume_by_payload(suspension, "callback", {error: to_string(unwrap_err(outcome))}),
       )
     }
     nil
   } else {
-    outcome
+    unwrap(outcome)
   }
   if resolved == nil || !resolved?.handled {
     if harness != nil {
