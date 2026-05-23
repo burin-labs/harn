@@ -800,12 +800,17 @@ impl AgentEventSink for AcpAgentEventSink {
             AgentEvent::TurnStart {
                 session_id,
                 iteration,
+                provider,
+                model,
             } => {
-                self.emit_agent_event_ext(
-                    "turn_start",
-                    session_id,
-                    serde_json::json!({"iteration": iteration}),
-                );
+                let mut payload = serde_json::json!({"iteration": iteration});
+                if !provider.is_empty() {
+                    payload["provider"] = serde_json::Value::String(provider.clone());
+                }
+                if !model.is_empty() {
+                    payload["model"] = serde_json::Value::String(model.clone());
+                }
+                self.emit_agent_event_ext("turn_start", session_id, payload);
             }
             AgentEvent::TurnEnd {
                 session_id,

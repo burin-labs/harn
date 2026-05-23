@@ -45,6 +45,7 @@ pipeline default() {
       tool_format: "native",
       max_iterations: 3,
       loop_until_done: true,
+      done_sentinel: "##DONE##",
       tool_caller: counting_caller,
     },
   )

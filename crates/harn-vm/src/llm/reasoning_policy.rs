@@ -100,11 +100,24 @@ fn resolve_policy(
     } else {
         policy.clone()
     };
-    if policy == "auto"
-        && local_qwen_route(provider, model)
-        && (level == "low" || level == "medium")
-    {
-        level = "off".to_string();
+    // Per-route auto-policy overrides live in the capability matrix
+    // (`auto_reasoning_overrides` in capabilities.toml) so per-model
+    // known regressions are declared alongside that model's other wire
+    // capabilities, not as hard-coded provider/model patterns here.
+    //
+    // The canonical case is Qwen3 with native tools: thinking mode plus
+    // tool calls is a binary on/off regression in the model weights — the
+    // model narrates its tool-call intent inside the reasoning trace and
+    // emits zero structured `tool_calls`. Qwen's own guidance is to
+    // disable reasoning when tool-calling. See
+    // https://github.com/QwenLM/Qwen3.6/issues/89 for the trained-behavior
+    // analysis. Routes that need the downgrade declare
+    // `auto_reasoning_overrides = { agent = "off" }`; callers that
+    // explicitly set a non-auto policy keep their override.
+    if policy == "auto" {
+        if let Some(override_level) = caps.auto_reasoning_overrides.get(&task) {
+            level = override_level.clone();
+        }
     }
     let Some(thinking) = thinking_for_reasoning_level(&level, caps) else {
         return Ok(None);
@@ -318,13 +331,6 @@ fn budget_for_reasoning_level(level: &str) -> u32 {
     }
 }
 
-fn local_qwen_route(provider: &str, model: &str) -> bool {
-    matches!(
-        provider.to_ascii_lowercase().as_str(),
-        "ollama" | "llamacpp" | "local" | "mlx"
-    ) && model.to_ascii_lowercase().contains("qwen3")
-}
-
 fn resolved_route_from_options(opts: &BTreeMap<String, VmValue>) -> Option<(String, String)> {
     let model = opts.get("model")?.display();
     if model.trim().is_empty() {
@@ -438,7 +444,12 @@ mod tests {
     }
 
     #[test]
-    fn auto_policy_turns_local_qwen_medium_agent_work_into_disabled_thinking() {
+    fn auto_policy_turns_local_qwen_agent_work_into_disabled_thinking() {
+        // The capability matrix declares `auto_reasoning_overrides =
+        // { agent = "off", verify = "off" }` on the ollama qwen3 rules
+        // to neutralize the Qwen3 tool-call/thinking regression at the
+        // data layer. Previously this lived as a hard-coded
+        // `local_qwen_route` branch in resolve_policy.
         let opts = BTreeMap::from([
             ("provider".to_string(), VmValue::String(Rc::from("ollama"))),
             (
@@ -471,6 +482,123 @@ mod tests {
             applied.get("level").map(VmValue::display).as_deref(),
             Some("off")
         );
+    }
+
+    #[test]
+    fn auto_policy_turns_cloud_qwen3_tool_use_into_disabled_thinking() {
+        // The Qwen3 tool-call regression is in the model weights, not
+        // the provider — cloud routes must downgrade too. Declared via
+        // `auto_reasoning_overrides = { agent = "off" }` on the
+        // openrouter qwen rules (matching qwen/qwen3.6-35b-a3b — the
+        // exact model whose 5+ minute single-turn finalize bug
+        // motivated this work).
+        let opts = BTreeMap::from([
+            (
+                "provider".to_string(),
+                VmValue::String(Rc::from("openrouter")),
+            ),
+            (
+                "model".to_string(),
+                VmValue::String(Rc::from("qwen/qwen3.6-35b-a3b")),
+            ),
+            (
+                "reasoning_policy".to_string(),
+                VmValue::String(Rc::from("auto")),
+            ),
+            (
+                "reasoning_task".to_string(),
+                VmValue::String(Rc::from("agent")),
+            ),
+        ]);
+        let out = apply(opts);
+        let thinking = out
+            .get("thinking")
+            .and_then(VmValue::as_dict)
+            .expect("thinking");
+        assert_eq!(
+            thinking.get("mode").map(VmValue::display).as_deref(),
+            Some("disabled")
+        );
+    }
+
+    #[test]
+    fn explicit_high_policy_overrides_capability_matrix_override() {
+        // `auto_reasoning_overrides` only fires when the resolved policy
+        // is `auto`. A caller who explicitly asks for `high` reasoning
+        // is acknowledged regardless of the per-route default — the
+        // override declares the auto default, not a ceiling.
+        let opts = BTreeMap::from([
+            (
+                "provider".to_string(),
+                VmValue::String(Rc::from("openrouter")),
+            ),
+            (
+                "model".to_string(),
+                VmValue::String(Rc::from("qwen/qwen3.6-35b-a3b")),
+            ),
+            (
+                "reasoning_policy".to_string(),
+                VmValue::String(Rc::from("high")),
+            ),
+            (
+                "reasoning_task".to_string(),
+                VmValue::String(Rc::from("agent")),
+            ),
+        ]);
+        let out = apply(opts);
+        let thinking = out
+            .get("thinking")
+            .and_then(VmValue::as_dict)
+            .expect("thinking");
+        // openrouter Qwen caps don't expose effort (effort is silently
+        // dropped by the provider for Qwen); the resolver therefore
+        // materializes "high" as Enabled{budget_tokens} with the high
+        // budget — wire format `{reasoning: {max_tokens: 12000}}`.
+        assert_eq!(
+            thinking.get("mode").map(VmValue::display).as_deref(),
+            Some("enabled")
+        );
+    }
+
+    #[test]
+    fn auto_reasoning_overrides_via_user_capability_toml_round_trips() {
+        // Project-level overrides should be able to declare the same
+        // shape (e.g. an org pinning a private model's auto behavior
+        // without patching the engine).
+        crate::llm::capabilities::set_user_overrides_toml(
+            r#"
+[[provider.acme]]
+model_match = "custom-thinker"
+thinking_modes = ["enabled"]
+auto_reasoning_overrides = { agent = "off" }
+"#,
+        )
+        .expect("override toml");
+        let opts = BTreeMap::from([
+            ("provider".to_string(), VmValue::String(Rc::from("acme"))),
+            (
+                "model".to_string(),
+                VmValue::String(Rc::from("custom-thinker")),
+            ),
+            (
+                "reasoning_policy".to_string(),
+                VmValue::String(Rc::from("auto")),
+            ),
+            (
+                "reasoning_task".to_string(),
+                VmValue::String(Rc::from("agent")),
+            ),
+        ]);
+        let out = apply(opts);
+        let thinking = out
+            .get("thinking")
+            .and_then(VmValue::as_dict)
+            .expect("thinking");
+        assert_eq!(
+            thinking.get("mode").map(VmValue::display).as_deref(),
+            Some("disabled")
+        );
+        crate::llm::capabilities::clear_user_overrides();
     }
 
     #[test]

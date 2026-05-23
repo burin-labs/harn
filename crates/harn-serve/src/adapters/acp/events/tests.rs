@@ -290,6 +290,8 @@ fn agent_event_ext_fixture_events() -> Vec<AgentEvent> {
         AgentEvent::TurnStart {
             session_id: "session-1".to_string(),
             iteration: 0,
+            provider: String::new(),
+            model: String::new(),
         },
         AgentEvent::TurnEnd {
             session_id: "session-1".to_string(),
@@ -1499,6 +1501,8 @@ fn internal_agent_events_never_emit_session_updates() {
     sink.handle_event(&AgentEvent::TurnStart {
         session_id: "session-1".to_string(),
         iteration: 1,
+        provider: String::new(),
+        model: String::new(),
     });
     sink.handle_event(&AgentEvent::BudgetExhausted {
         session_id: "session-1".to_string(),

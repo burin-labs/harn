@@ -1199,6 +1199,8 @@ mod tests {
             AgentEvent::TurnStart {
                 session_id: session.into(),
                 iteration: iter,
+                provider: String::new(),
+                model: String::new(),
             },
         )
     }

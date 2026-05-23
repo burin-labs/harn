@@ -457,6 +457,8 @@ mod tests {
         sink.handle_event(&AgentEvent::TurnStart {
             session_id: "s".to_string(),
             iteration: 1,
+            provider: String::new(),
+            model: String::new(),
         });
         assert_eq!(tracker.pending_len(), 0);
     }

@@ -1341,6 +1341,8 @@ fn build_agent_event(
         "turn_start" => Ok(AgentEvent::TurnStart {
             session_id: session_id.to_string(),
             iteration: get_usize("iteration"),
+            provider: get_string("provider"),
+            model: get_string("model"),
         }),
         "turn_end" => {
             let turn_info = payload_obj
@@ -1463,6 +1465,18 @@ fn build_agent_event(
             backend: get_string("backend"),
             namespace: get_string("namespace"),
             payload: payload.clone(),
+        }),
+        // `completion_confirmation_nudge` is the engine-side recovery
+        // signal for the QwenLM/Qwen3.6 #89 class of regressions where a
+        // thinking-enabled native-tool model narrates tool intent in its
+        // reasoning trace but emits no `tool_calls`. The engine asks the
+        // model to either call a tool or restate its final answer; the
+        // event surfaces that nudge to operators alongside the standard
+        // FeedbackInjected stream (engine-injected, not user-injected).
+        "completion_confirmation_nudge" => Ok(AgentEvent::FeedbackInjected {
+            session_id: session_id.to_string(),
+            kind: "completion_confirmation_nudge".to_string(),
+            content: get_string("visible_text_prefix"),
         }),
         other => Err(VmError::Runtime(format!(
             "{HOST_AGENT_EMIT_EVENT}: unsupported event type `{other}`"

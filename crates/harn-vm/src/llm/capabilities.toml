@@ -876,6 +876,7 @@ model_match = "qwen3.6*"
 native_tools = false
 structured_output = "format_kw"
 thinking_modes = ["enabled"]
+auto_reasoning_overrides = { agent = "off", verify = "off", code = "off" }
 preserve_thinking = true
 server_parser = "none"
 honors_chat_template_kwargs = false
@@ -895,6 +896,7 @@ model_match = "qwen3*"
 native_tools = true
 structured_output = "format_kw"
 thinking_modes = ["enabled"]
+auto_reasoning_overrides = { agent = "off", verify = "off", code = "off" }
 server_parser = "ollama_qwen3coder"
 honors_chat_template_kwargs = false
 recommended_endpoint = "/api/generate-raw"
@@ -918,6 +920,7 @@ model_match = "*qwen3.6*"
 native_tools = false
 structured_output = "native"
 thinking_modes = ["enabled"]
+auto_reasoning_overrides = { agent = "off", verify = "off", code = "off" }
 preserve_thinking = true
 server_parser = "none"
 honors_chat_template_kwargs = true
@@ -937,6 +940,7 @@ model_match = "*qwen3*"
 native_tools = false
 structured_output = "native"
 thinking_modes = ["enabled"]
+auto_reasoning_overrides = { agent = "off", verify = "off", code = "off" }
 server_parser = "none"
 honors_chat_template_kwargs = true
 recommended_endpoint = "/v1/chat/completions"
@@ -990,6 +994,7 @@ model_match = "*qwen3.6*"
 native_tools = true
 structured_output = "native"
 thinking_modes = ["enabled"]
+auto_reasoning_overrides = { agent = "off", verify = "off", code = "off" }
 preserve_thinking = true
 server_parser = "none"
 honors_chat_template_kwargs = true
@@ -1009,6 +1014,7 @@ model_match = "*qwen3*"
 native_tools = true
 structured_output = "native"
 thinking_modes = ["enabled"]
+auto_reasoning_overrides = { agent = "off", verify = "off", code = "off" }
 server_parser = "none"
 honors_chat_template_kwargs = true
 recommended_endpoint = "/v1/chat/completions"
@@ -1046,6 +1052,7 @@ native_tools = true
 vision = true
 structured_output = "native"
 thinking_modes = ["enabled"]
+auto_reasoning_overrides = { agent = "off", verify = "off", code = "off" }
 preserve_thinking = true
 server_parser = "none"
 honors_chat_template_kwargs = true
@@ -1066,6 +1073,7 @@ native_tools = true
 vision = true
 structured_output = "native"
 thinking_modes = ["enabled"]
+auto_reasoning_overrides = { agent = "off", verify = "off", code = "off" }
 server_parser = "none"
 honors_chat_template_kwargs = true
 recommended_endpoint = "/v1/chat/completions"
@@ -1093,6 +1101,7 @@ model_match = "qwen3.6*"
 native_tools = true
 structured_output = "native"
 thinking_modes = ["enabled"]
+auto_reasoning_overrides = { agent = "off", verify = "off", code = "off" }
 preserve_thinking = true
 server_parser = "none"
 honors_chat_template_kwargs = true
@@ -1130,6 +1139,7 @@ model_match = "*qwen3.6*"
 native_tools = true
 structured_output = "native"
 thinking_modes = ["enabled"]
+auto_reasoning_overrides = { agent = "off", verify = "off", code = "off" }
 preserve_thinking = true
 server_parser = "none"
 honors_chat_template_kwargs = true
@@ -1151,6 +1161,7 @@ model_match = "*qwen3p6*"
 native_tools = true
 structured_output = "native"
 thinking_modes = ["enabled"]
+auto_reasoning_overrides = { agent = "off", verify = "off", code = "off" }
 preserve_thinking = true
 server_parser = "none"
 honors_chat_template_kwargs = true
@@ -1187,11 +1198,36 @@ thinking_block_style = "inline"
 # chat_template_kwargs — transform_request strips that). Preservation
 # works transparently since thinking blocks round-trip as assistant
 # content; the reasoning enablement lives in `openrouter_reasoning_config`.
+#
+# `thinking_modes` is intentionally `["enabled"]` only — OpenRouter
+# silently drops `reasoning.effort` for Qwen models (effort is only
+# honored for OpenAI o-series and Grok per their docs). Declaring
+# "effort" support here caused medium-effort defaults to be sent on the
+# wire, get ignored, and have Qwen fall back to its *unbounded* internal
+# thinking budget — yielding 5+ minute single-turn finalize calls where
+# the visible response was a small fraction of the (hidden) 27K-char
+# reasoning trace. Routing through `reasoning.max_tokens` via
+# ThinkingConfig::Enabled{budget_tokens} (which Qwen DOES honor as
+# thinking_budget) gives bounded, predictable behavior instead.
+#
+# `reasoning_none_supported` enables the policy resolver to materialize
+# "off" as `Effort{None}` → wire `{reasoning: {enabled: false}}`, which
+# OpenRouter DOES honor for Qwen (empirically: 358ms vs 1300ms+ when
+# effort is silently dropped).
+#
+# `auto_reasoning_overrides.agent = "off"` declares the documented Qwen3
+# tool-call regression in the matrix itself: when a script registers
+# tools (task = "agent"), force reasoning off regardless of scale. See
+# https://github.com/QwenLM/Qwen3.6/issues/89 for the trained-behavior
+# analysis and Qwen's own recommendation to disable reasoning when
+# tool-calling.
 [[provider.openrouter]]
 model_match = "qwen/qwen3.6*"
 native_tools = true
 structured_output = "native"
-thinking_modes = ["enabled", "effort"]
+thinking_modes = ["enabled"]
+reasoning_none_supported = true
+auto_reasoning_overrides = { agent = "off", verify = "off", code = "off" }
 preserve_thinking = true
 server_parser = "none"
 honors_chat_template_kwargs = false
@@ -1226,7 +1262,9 @@ thinking_block_style = "none"
 model_match = "qwen/*"
 native_tools = true
 structured_output = "native"
-thinking_modes = ["enabled", "effort"]
+thinking_modes = ["enabled"]
+reasoning_none_supported = true
+auto_reasoning_overrides = { agent = "off", verify = "off", code = "off" }
 server_parser = "none"
 honors_chat_template_kwargs = false
 recommended_endpoint = "/v1/chat/completions"
@@ -1247,6 +1285,7 @@ model_match = "qwen/qwen3.6*"
 native_tools = true
 structured_output = "native"
 thinking_modes = ["enabled"]
+auto_reasoning_overrides = { agent = "off", verify = "off", code = "off" }
 preserve_thinking = true
 server_parser = "none"
 honors_chat_template_kwargs = true
@@ -1300,6 +1339,7 @@ model_match = "qwen/qwen3.6*"
 native_tools = true
 structured_output = "native"
 thinking_modes = ["enabled"]
+auto_reasoning_overrides = { agent = "off", verify = "off", code = "off" }
 preserve_thinking = true
 server_parser = "none"
 honors_chat_template_kwargs = true

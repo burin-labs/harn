@@ -1,0 +1,133 @@
+/**
+ * Engine-side recovery from the Qwen3 thinking + native tools regression
+ * (QwenLM/Qwen3.6 #89): when a model emits prose without any tool_calls
+ * AND has not used the tool channel at all yet in this session, the
+ * engine injects ONE completion-confirmation nudge. The model can either
+ * (a) recover by emitting a tool_call on the next turn or (b) confirm
+ * completion by emitting prose again (consecutive_text_only >= 2). After
+ * any tool_call has run in the session (successful OR rejected) the
+ * confirmation nudge no longer fires — prose-only is trusted as the
+ * natural completion signal, preserving existing harness behavior.
+ *
+ * Three scenarios:
+ *
+ *  1. Regression path: model emits prose on turn 1, nudge fires, model
+ *     calls a tool on turn 2, prose on turn 3 → loop completes "done".
+ *  2. Confirmation path: model emits prose on turn 1, nudge fires,
+ *     model emits prose again on turn 2 → loop accepts as completion.
+ *  3. Skip path: model calls a failing tool on turn 1, prose on turn 2 →
+ *     prose-only is trusted; no nudge fires (rejected tools count as
+ *     "model engaged the tool channel").
+ */
+fn evidence_tools() {
+  var tools = tool_registry()
+  tools = tool_define(
+    tools,
+    "lookup",
+    "Return canned evidence for a query.",
+    {
+      handler: { args -> "evidence for " + args?.query ?? "" },
+      parameters: {query: {type: "string", description: "Lookup query"}},
+      returns: {type: "string"},
+      annotations: {kind: "read"},
+    },
+  )
+  return tools
+}
+
+fn failing_tools() {
+  var tools = tool_registry()
+  tools = tool_define(
+    tools,
+    "always_fails",
+    "Tool that always raises.",
+    {
+      handler: { _args ->
+        throw "intentional failure"
+      },
+      parameters: {},
+      returns: {type: "string"},
+      annotations: {kind: "read"},
+    },
+  )
+  return tools
+}
+
+fn nudge_text_in(calls, idx) {
+  let msgs = calls[idx].messages
+  return contains(json_stringify(msgs), "completion_confirmation")
+    || contains(json_stringify(msgs), "If you intended to call a tool, call it now")
+}
+
+pipeline main() {
+  // Scenario 1: regression-then-recover.
+  llm_mock_clear()
+  llm_mock({text: "Let me look that up for you."})
+  llm_mock({tool_calls: [{id: "l1", name: "lookup", arguments: {query: "release"}}]})
+  llm_mock({text: "Found it: release notes are ready."})
+  let recover = agent_loop(
+    "Look up the release notes.",
+    nil,
+    {
+      provider: "mock",
+      tools: evidence_tools(),
+      tool_format: "native",
+      loop_until_done: true,
+      max_iterations: 5,
+      max_nudges: 3,
+    },
+  )
+  __io_println("recover.status=" + recover.status)
+  __io_println("recover.iterations=" + to_string(recover.llm.iterations))
+  __io_println("recover.successful=" + json_stringify(recover.tools.successful))
+  // The turn-2 request must include the engine-injected nudge text so
+  // the model sees the recovery cue.
+  let recover_calls = llm_mock_calls()
+  __io_println("recover.nudge_on_turn2=" + to_string(nudge_text_in(recover_calls, 1)))
+  // Scenario 2: confirmation path (prose again after the nudge).
+  llm_mock_clear()
+  llm_mock({text: "Direct answer: 42."})
+  llm_mock({text: "Confirmed: 42."})
+  let confirm = agent_loop(
+    "What is the answer?",
+    nil,
+    {
+      provider: "mock",
+      tools: evidence_tools(),
+      tool_format: "native",
+      loop_until_done: true,
+      max_iterations: 5,
+      max_nudges: 3,
+    },
+  )
+  __io_println("confirm.status=" + confirm.status)
+  __io_println("confirm.iterations=" + to_string(confirm.llm.iterations))
+  __io_println("confirm.text=" + confirm.text)
+  let confirm_calls = llm_mock_calls()
+  __io_println("confirm.nudge_on_turn2=" + to_string(nudge_text_in(confirm_calls, 1)))
+  // Scenario 3: rejected-tool then prose. No nudge because the tool
+  // channel was engaged (even though execution failed).
+  llm_mock_clear()
+  llm_mock({tool_calls: [{id: "bad1", name: "always_fails", arguments: {}}]})
+  llm_mock({text: "Tool blew up, here is what I can say from prior knowledge."})
+  let skip = agent_loop(
+    "Try the tool and report.",
+    nil,
+    {
+      provider: "mock",
+      tools: failing_tools(),
+      tool_format: "native",
+      loop_until_done: true,
+      max_iterations: 5,
+      max_nudges: 3,
+    },
+  )
+  __io_println("skip.status=" + skip.status)
+  __io_println("skip.iterations=" + to_string(skip.llm.iterations))
+  __io_println(
+    "skip.rejected_has_failure=" + to_string(contains(skip.tools.rejected, "always_fails")),
+  )
+  let skip_calls = llm_mock_calls()
+  // No nudge on turn 2 — the rejected tool counts as "channel engaged".
+  __io_println("skip.nudge_on_turn2=" + to_string(nudge_text_in(skip_calls, 1)))
+}

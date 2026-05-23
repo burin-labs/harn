@@ -1034,6 +1034,35 @@ fn __next_text_only_count(tool_count, consecutive_text_only) {
   return 0
 }
 
+/**
+ * Build the `turn_info` payload for the `turn_end` event from the LLM
+ * result plus the loop's per-turn aggregates. Carries `provider`,
+ * `model`, `response_ms`, token counts, and `thinking_chars` so live
+ * pulse-check consumers (fleet hooks, ACP clients) can attribute
+ * latency and surface "still working" indicators without re-parsing
+ * the transcript JSONL. Empty/missing fields are dropped so the event
+ * stays small for providers that don't report telemetry.
+ */
+fn __turn_info_payload(llm_result, tool_count, visible_text) {
+  let telemetry = llm_result?.provider_telemetry ?? {}
+  let thinking = llm_result?.thinking ?? ""
+  let thinking_chars = if type_of(thinking) == "string" {
+    len(thinking)
+  } else {
+    0
+  }
+  return {
+    tool_count: tool_count,
+    text: visible_text,
+    provider: llm_result?.provider ?? "",
+    model: llm_result?.model ?? "",
+    response_ms: telemetry?.client_wall_ms ?? 0,
+    input_tokens: llm_result?.input_tokens ?? 0,
+    output_tokens: llm_result?.output_tokens ?? 0,
+    thinking_chars: thinking_chars,
+  }
+}
+
 fn __requirement_satisfied(requirement, successful) {
   if type_of(requirement) == "list" {
     for candidate in requirement {
@@ -1615,7 +1644,11 @@ fn __agent_loop_run(message, session, initial_opts) {
         break
       }
       let turn_index = iteration
-      agent_emit_event(session.session_id, "turn_start", {iteration: turn_index + 1})
+      agent_emit_event(
+        session.session_id,
+        "turn_start",
+        {iteration: turn_index + 1, provider: opts?.provider ?? "", model: opts?.model ?? ""},
+      )
       try {
         __host_drain_file_edits(session.session_id)
       } catch (e) {
@@ -1679,7 +1712,10 @@ fn __agent_loop_run(message, session, initial_opts) {
         agent_emit_event(
           session.session_id,
           "turn_end",
-          {iteration: turn_index + 1, turn_info: {tool_count: len(tool_calls), text: visible_text}},
+          {
+            iteration: turn_index + 1,
+            turn_info: __turn_info_payload(llm_result, len(tool_calls), visible_text),
+          },
         )
         final_status = "suspended"
         stop_reason = "suspended"
@@ -1718,7 +1754,7 @@ fn __agent_loop_run(message, session, initial_opts) {
           agent_emit_event(
             session.session_id,
             "turn_end",
-            {iteration: turn_index + 1, turn_info: {tool_count: tool_count, text: visible_text}},
+            {iteration: turn_index + 1, turn_info: __turn_info_payload(llm_result, tool_count, visible_text)},
           )
           let bridge_step_delivered = __agent_loop_drain_bridge_step(session.session_id)
           if bridge_step_delivered > 0 {
@@ -1744,7 +1780,7 @@ fn __agent_loop_run(message, session, initial_opts) {
       agent_emit_event(
         session.session_id,
         "turn_end",
-        {iteration: turn_index + 1, turn_info: {tool_count: tool_count, text: visible_text}},
+        {iteration: turn_index + 1, turn_info: __turn_info_payload(llm_result, tool_count, visible_text)},
       )
       let bridge_step_delivered = __agent_loop_drain_bridge_step(session.session_id)
       if agent_budget_post_call_blocked(totals, turn_opts) {
@@ -1785,6 +1821,7 @@ fn __agent_loop_run(message, session, initial_opts) {
         + {
         _session_successful_tools: successful_tools_seen,
         _session_rejected_tools: rejected_tools_seen,
+        _consecutive_text_only: consecutive_text_only,
         _done_judge_invocations: done_judge_invocations,
         _done_judge_loop_state: cadence_loop_state,
       }
