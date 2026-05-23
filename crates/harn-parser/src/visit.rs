@@ -3,7 +3,7 @@
 //!
 //! Centralizing this here keeps a single source of truth for which
 //! children each `Node` variant has — adding a new variant requires
-//! one edit (in [`walk_children`]) and every consumer benefits.
+//! one edit (in `collect_children`) and every consumer benefits.
 //!
 //! # Usage
 //!
@@ -26,39 +26,62 @@ use crate::ast::{BindingPattern, DictEntry, MatchArm, Node, SNode, SelectCase};
 /// Walk every node in `program` in pre-order, invoking `visitor` on
 /// each.
 pub fn walk_program(program: &[SNode], visitor: &mut impl FnMut(&SNode)) {
-    for node in program {
-        walk_node(node, visitor);
-    }
+    let mut stack = Vec::with_capacity(program.len());
+    push_nodes_reversed(program, &mut stack);
+    walk_stack(&mut stack, visitor);
 }
 
 /// Visit `node`, then recurse into its children.
 pub fn walk_node(node: &SNode, visitor: &mut impl FnMut(&SNode)) {
-    visitor(node);
-    walk_children(node, visitor);
+    let mut stack = vec![node];
+    walk_stack(&mut stack, visitor);
 }
 
 /// Recurse into `node`'s children without re-visiting `node` itself.
 /// Useful when a caller wants to handle the parent specially and then
 /// continue the default traversal.
 pub fn walk_children(node: &SNode, visitor: &mut impl FnMut(&SNode)) {
+    let mut stack = Vec::new();
+    push_children_reversed(node, &mut stack);
+    walk_stack(&mut stack, visitor);
+}
+
+fn walk_stack(stack: &mut Vec<&SNode>, visitor: &mut impl FnMut(&SNode)) {
+    while let Some(node) = stack.pop() {
+        visitor(node);
+        push_children_reversed(node, stack);
+    }
+}
+
+fn push_children_reversed<'a>(node: &'a SNode, stack: &mut Vec<&'a SNode>) {
+    let mut children = Vec::new();
+    collect_children(node, &mut children);
+    stack.extend(children.into_iter().rev());
+}
+
+fn push_nodes_reversed<'a>(nodes: &'a [SNode], stack: &mut Vec<&'a SNode>) {
+    stack.extend(nodes.iter().rev());
+}
+
+fn collect_children<'a>(node: &'a SNode, children: &mut Vec<&'a SNode>) {
     match &node.node {
         Node::AttributedDecl { attributes, inner } => {
             for attr in attributes {
                 for arg in &attr.args {
-                    walk_node(&arg.value, visitor);
+                    children.push(&arg.value);
                 }
             }
-            walk_node(inner, visitor);
+            children.push(inner);
         }
         Node::Pipeline { body, .. } | Node::OverrideDecl { body, .. } => {
-            walk_nodes(body, visitor);
+            collect_nodes(body, children);
         }
         Node::LetBinding { pattern, value, .. } | Node::VarBinding { pattern, value, .. } => {
-            walk_binding_pattern(pattern, visitor);
-            walk_node(value, visitor);
+            collect_binding_pattern(pattern, children);
+            children.push(value);
         }
         Node::ConstBinding { value, .. } => {
-            walk_node(value, visitor);
+            children.push(value);
         }
         Node::EnumDecl { .. }
         | Node::StructDecl { .. }
@@ -68,16 +91,16 @@ pub fn walk_children(node: &SNode, visitor: &mut impl FnMut(&SNode)) {
         | Node::TypeDecl { .. }
         | Node::BreakStmt
         | Node::ContinueStmt => {}
-        Node::ImplBlock { methods, .. } => walk_nodes(methods, visitor),
+        Node::ImplBlock { methods, .. } => collect_nodes(methods, children),
         Node::IfElse {
             condition,
             then_body,
             else_body,
         } => {
-            walk_node(condition, visitor);
-            walk_nodes(then_body, visitor);
+            children.push(condition);
+            collect_nodes(then_body, children);
             if let Some(body) = else_body {
-                walk_nodes(body, visitor);
+                collect_nodes(body, children);
             }
         }
         Node::ForIn {
@@ -85,31 +108,31 @@ pub fn walk_children(node: &SNode, visitor: &mut impl FnMut(&SNode)) {
             iterable,
             body,
         } => {
-            walk_binding_pattern(pattern, visitor);
-            walk_node(iterable, visitor);
-            walk_nodes(body, visitor);
+            collect_binding_pattern(pattern, children);
+            children.push(iterable);
+            collect_nodes(body, children);
         }
         Node::MatchExpr { value, arms } => {
-            walk_node(value, visitor);
+            children.push(value);
             for arm in arms {
-                walk_match_arm(arm, visitor);
+                collect_match_arm(arm, children);
             }
         }
         Node::WhileLoop { condition, body } => {
-            walk_node(condition, visitor);
-            walk_nodes(body, visitor);
+            children.push(condition);
+            collect_nodes(body, children);
         }
         Node::Retry { count, body } => {
-            walk_node(count, visitor);
-            walk_nodes(body, visitor);
+            children.push(count);
+            collect_nodes(body, children);
         }
         Node::CostRoute { options, body } => {
-            walk_option_values(options, visitor);
-            walk_nodes(body, visitor);
+            collect_option_values(options, children);
+            collect_nodes(body, children);
         }
         Node::ReturnStmt { value } | Node::YieldExpr { value } => {
             if let Some(value) = value {
-                walk_node(value, visitor);
+                children.push(value);
             }
         }
         Node::TryCatch {
@@ -119,10 +142,10 @@ pub fn walk_children(node: &SNode, visitor: &mut impl FnMut(&SNode)) {
             finally_body,
             ..
         } => {
-            walk_nodes(body, visitor);
-            walk_nodes(catch_body, visitor);
+            collect_nodes(body, children);
+            collect_nodes(catch_body, children);
             if let Some(body) = finally_body {
-                walk_nodes(body, visitor);
+                collect_nodes(body, children);
             }
         }
         Node::TryExpr { body }
@@ -130,53 +153,53 @@ pub fn walk_children(node: &SNode, visitor: &mut impl FnMut(&SNode)) {
         | Node::DeferStmt { body }
         | Node::MutexBlock { body }
         | Node::Block(body)
-        | Node::Closure { body, .. } => walk_nodes(body, visitor),
+        | Node::Closure { body, .. } => collect_nodes(body, children),
         Node::FnDecl { body, .. } | Node::ToolDecl { body, .. } => {
-            walk_nodes(body, visitor);
+            collect_nodes(body, children);
         }
-        Node::SkillDecl { fields, .. } => walk_field_values(fields, visitor),
+        Node::SkillDecl { fields, .. } => collect_field_values(fields, children),
         Node::EvalPackDecl {
             fields,
             body,
             summarize,
             ..
         } => {
-            walk_field_values(fields, visitor);
-            walk_nodes(body, visitor);
+            collect_field_values(fields, children);
+            collect_nodes(body, children);
             if let Some(body) = summarize {
-                walk_nodes(body, visitor);
+                collect_nodes(body, children);
             }
         }
         Node::RangeExpr { start, end, .. } => {
-            walk_node(start, visitor);
-            walk_node(end, visitor);
+            children.push(start);
+            children.push(end);
         }
         Node::GuardStmt {
             condition,
             else_body,
         } => {
-            walk_node(condition, visitor);
-            walk_nodes(else_body, visitor);
+            children.push(condition);
+            collect_nodes(else_body, children);
         }
         Node::RequireStmt { condition, message } => {
-            walk_node(condition, visitor);
+            children.push(condition);
             if let Some(message) = message {
-                walk_node(message, visitor);
+                children.push(message);
             }
         }
         Node::DeadlineBlock { duration, body } => {
-            walk_node(duration, visitor);
-            walk_nodes(body, visitor);
+            children.push(duration);
+            collect_nodes(body, children);
         }
         Node::EmitExpr { value }
         | Node::ThrowStmt { value }
         | Node::Spread(value)
         | Node::TryOperator { operand: value }
         | Node::TryStar { operand: value }
-        | Node::UnaryOp { operand: value, .. } => walk_node(value, visitor),
+        | Node::UnaryOp { operand: value, .. } => children.push(value),
         Node::HitlExpr { args, .. } => {
             for arg in args {
-                walk_node(&arg.value, visitor);
+                children.push(&arg.value);
             }
         }
         Node::Parallel {
@@ -185,9 +208,9 @@ pub fn walk_children(node: &SNode, visitor: &mut impl FnMut(&SNode)) {
             options,
             ..
         } => {
-            walk_node(expr, visitor);
-            walk_option_values(options, visitor);
-            walk_nodes(body, visitor);
+            children.push(expr);
+            collect_option_values(options, children);
+            collect_nodes(body, children);
         }
         Node::SelectExpr {
             cases,
@@ -195,61 +218,61 @@ pub fn walk_children(node: &SNode, visitor: &mut impl FnMut(&SNode)) {
             default_body,
         } => {
             for case in cases {
-                walk_select_case(case, visitor);
+                collect_select_case(case, children);
             }
             if let Some((duration, body)) = timeout {
-                walk_node(duration, visitor);
-                walk_nodes(body, visitor);
+                children.push(duration);
+                collect_nodes(body, children);
             }
             if let Some(body) = default_body {
-                walk_nodes(body, visitor);
+                collect_nodes(body, children);
             }
         }
         Node::FunctionCall { args, .. } | Node::EnumConstruct { args, .. } => {
-            walk_nodes(args, visitor);
+            collect_nodes(args, children);
         }
         Node::MethodCall { object, args, .. } | Node::OptionalMethodCall { object, args, .. } => {
-            walk_node(object, visitor);
-            walk_nodes(args, visitor);
+            children.push(object);
+            collect_nodes(args, children);
         }
         Node::PropertyAccess { object, .. } | Node::OptionalPropertyAccess { object, .. } => {
-            walk_node(object, visitor);
+            children.push(object);
         }
         Node::SubscriptAccess { object, index }
         | Node::OptionalSubscriptAccess { object, index } => {
-            walk_node(object, visitor);
-            walk_node(index, visitor);
+            children.push(object);
+            children.push(index);
         }
         Node::SliceAccess { object, start, end } => {
-            walk_node(object, visitor);
+            children.push(object);
             if let Some(start) = start {
-                walk_node(start, visitor);
+                children.push(start);
             }
             if let Some(end) = end {
-                walk_node(end, visitor);
+                children.push(end);
             }
         }
         Node::BinaryOp { left, right, .. } => {
-            walk_node(left, visitor);
-            walk_node(right, visitor);
+            children.push(left);
+            children.push(right);
         }
         Node::Ternary {
             condition,
             true_expr,
             false_expr,
         } => {
-            walk_node(condition, visitor);
-            walk_node(true_expr, visitor);
-            walk_node(false_expr, visitor);
+            children.push(condition);
+            children.push(true_expr);
+            children.push(false_expr);
         }
         Node::Assignment { target, value, .. } => {
-            walk_node(target, visitor);
-            walk_node(value, visitor);
+            children.push(target);
+            children.push(value);
         }
         Node::StructConstruct { fields, .. } | Node::DictLiteral(fields) => {
-            walk_dict_entries(fields, visitor);
+            collect_dict_entries(fields, children);
         }
-        Node::ListLiteral(items) | Node::OrPattern(items) => walk_nodes(items, visitor),
+        Node::ListLiteral(items) | Node::OrPattern(items) => collect_nodes(items, children),
         Node::InterpolatedString(_)
         | Node::StringLiteral(_)
         | Node::RawStringLiteral(_)
@@ -262,60 +285,111 @@ pub fn walk_children(node: &SNode, visitor: &mut impl FnMut(&SNode)) {
     }
 }
 
-fn walk_nodes(nodes: &[SNode], visitor: &mut impl FnMut(&SNode)) {
-    for node in nodes {
-        walk_node(node, visitor);
-    }
+fn collect_nodes<'a>(nodes: &'a [SNode], children: &mut Vec<&'a SNode>) {
+    children.extend(nodes.iter());
 }
 
-fn walk_dict_entries(entries: &[DictEntry], visitor: &mut impl FnMut(&SNode)) {
+fn collect_dict_entries<'a>(entries: &'a [DictEntry], children: &mut Vec<&'a SNode>) {
     for entry in entries {
-        walk_node(&entry.key, visitor);
-        walk_node(&entry.value, visitor);
+        children.push(&entry.key);
+        children.push(&entry.value);
     }
 }
 
-fn walk_field_values(fields: &[(String, SNode)], visitor: &mut impl FnMut(&SNode)) {
+fn collect_field_values<'a>(fields: &'a [(String, SNode)], children: &mut Vec<&'a SNode>) {
     for (_, value) in fields {
-        walk_node(value, visitor);
+        children.push(value);
     }
 }
 
-fn walk_option_values(options: &[(String, SNode)], visitor: &mut impl FnMut(&SNode)) {
+fn collect_option_values<'a>(options: &'a [(String, SNode)], children: &mut Vec<&'a SNode>) {
     for (_, value) in options {
-        walk_node(value, visitor);
+        children.push(value);
     }
 }
 
-fn walk_match_arm(arm: &MatchArm, visitor: &mut impl FnMut(&SNode)) {
-    walk_node(&arm.pattern, visitor);
+fn collect_match_arm<'a>(arm: &'a MatchArm, children: &mut Vec<&'a SNode>) {
+    children.push(&arm.pattern);
     if let Some(guard) = &arm.guard {
-        walk_node(guard, visitor);
+        children.push(guard);
     }
-    walk_nodes(&arm.body, visitor);
+    collect_nodes(&arm.body, children);
 }
 
-fn walk_select_case(case: &SelectCase, visitor: &mut impl FnMut(&SNode)) {
-    walk_node(&case.channel, visitor);
-    walk_nodes(&case.body, visitor);
+fn collect_select_case<'a>(case: &'a SelectCase, children: &mut Vec<&'a SNode>) {
+    children.push(&case.channel);
+    collect_nodes(&case.body, children);
 }
 
-fn walk_binding_pattern(pattern: &BindingPattern, visitor: &mut impl FnMut(&SNode)) {
+fn collect_binding_pattern<'a>(pattern: &'a BindingPattern, children: &mut Vec<&'a SNode>) {
     match pattern {
         BindingPattern::Identifier(_) | BindingPattern::Pair(_, _) => {}
         BindingPattern::Dict(fields) => {
             for field in fields {
                 if let Some(default) = &field.default_value {
-                    walk_node(default, visitor);
+                    children.push(default);
                 }
             }
         }
         BindingPattern::List(items) => {
             for item in items {
                 if let Some(default) = &item.default_value {
-                    walk_node(default, visitor);
+                    children.push(default);
                 }
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::ast::{spanned, Node};
+    use harn_lexer::Span;
+
+    fn dummy(node: Node) -> SNode {
+        spanned(node, Span::dummy())
+    }
+
+    #[test]
+    fn walk_program_preserves_preorder() {
+        let program = vec![dummy(Node::LetBinding {
+            pattern: BindingPattern::Identifier("x".to_string()),
+            type_ann: None,
+            value: Box::new(dummy(Node::BinaryOp {
+                op: "+".to_string(),
+                left: Box::new(dummy(Node::IntLiteral(1))),
+                right: Box::new(dummy(Node::IntLiteral(2))),
+            })),
+        })];
+        let mut seen = Vec::new();
+
+        walk_program(&program, &mut |node| {
+            seen.push(match &node.node {
+                Node::LetBinding { .. } => "let",
+                Node::BinaryOp { .. } => "binary",
+                Node::IntLiteral(1) => "one",
+                Node::IntLiteral(2) => "two",
+                other => panic!("unexpected node {other:?}"),
+            });
+        });
+
+        assert_eq!(seen, vec!["let", "binary", "one", "two"]);
+    }
+
+    #[test]
+    fn walk_node_handles_deep_unary_chain_iteratively() {
+        let mut node = dummy(Node::IntLiteral(0));
+        for _ in 0..10_000 {
+            node = dummy(Node::UnaryOp {
+                op: "!".to_string(),
+                operand: Box::new(node),
+            });
+        }
+
+        let mut count = 0usize;
+        walk_node(&node, &mut |_| count += 1);
+
+        assert_eq!(count, 10_001);
     }
 }

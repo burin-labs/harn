@@ -36,7 +36,9 @@ impl Parser {
                 };
                 let default_value = if self.check(&TokenKind::Assign) {
                     self.advance();
-                    Some(Box::new(self.parse_expression()?))
+                    Some(Box::new(
+                        self.parse_nested_expression("binding pattern default")?,
+                    ))
                 } else {
                     None
                 };
@@ -71,7 +73,9 @@ impl Parser {
                 let name = self.consume_identifier("element name")?;
                 let default_value = if self.check(&TokenKind::Assign) {
                     self.advance();
-                    Some(Box::new(self.parse_expression()?))
+                    Some(Box::new(
+                        self.parse_nested_expression("binding pattern default")?,
+                    ))
                 } else {
                     None
                 };

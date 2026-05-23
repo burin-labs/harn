@@ -23,6 +23,83 @@ mod tests {
     }
 
     #[test]
+    fn parser_reports_expression_nesting_depth_limit() {
+        let depth = state::MAX_NESTING_DEPTH + 1;
+        let source = format!("let x = {}0{}", "(".repeat(depth), ")".repeat(depth));
+
+        let Err(err) = parse_source(&source) else {
+            panic!("expected parser depth limit");
+        };
+        let message = err.to_string();
+
+        assert!(message.contains("parser nesting depth within"));
+        assert!(message.contains(&format!("{} levels", state::MAX_NESTING_DEPTH)));
+    }
+
+    #[test]
+    fn parser_reports_unary_nesting_depth_limit() {
+        let depth = state::MAX_NESTING_DEPTH + 1;
+        let source = format!("let x = {}true", "!".repeat(depth));
+
+        let Err(err) = parse_source(&source) else {
+            panic!("expected parser depth limit");
+        };
+        let message = err.to_string();
+
+        assert!(message.contains("parser nesting depth within"));
+        assert!(message.contains(&format!("{} levels", state::MAX_NESTING_DEPTH)));
+    }
+
+    #[test]
+    fn parser_reports_block_nesting_depth_limit() {
+        let depth = state::MAX_NESTING_DEPTH + 1;
+        let mut source = String::new();
+        for _ in 0..depth {
+            source.push_str("if true {\n");
+        }
+        source.push_str("let x = 1\n");
+        for _ in 0..depth {
+            source.push_str("}\n");
+        }
+
+        let Err(err) = parse_source(&source) else {
+            panic!("expected parser depth limit");
+        };
+        let message = err.to_string();
+
+        assert!(message.contains("parser nesting depth within"));
+        assert!(message.contains(&format!("{} levels", state::MAX_NESTING_DEPTH)));
+    }
+
+    #[test]
+    fn parser_reports_list_literal_nesting_depth_limit() {
+        let depth = state::MAX_NESTING_DEPTH + 1;
+        let source = format!("let x = {}0{}", "[".repeat(depth), "]".repeat(depth));
+
+        let Err(err) = parse_source(&source) else {
+            panic!("expected parser depth limit");
+        };
+        let message = err.to_string();
+
+        assert!(message.contains("parser nesting depth within"));
+        assert!(message.contains(&format!("{} levels", state::MAX_NESTING_DEPTH)));
+    }
+
+    #[test]
+    fn parser_reports_type_nesting_depth_limit() {
+        let depth = state::MAX_NESTING_DEPTH + 1;
+        let source = format!("let x: {}int{} = []", "[".repeat(depth), "]".repeat(depth));
+
+        let Err(err) = parse_source(&source) else {
+            panic!("expected parser depth limit");
+        };
+        let message = err.to_string();
+
+        assert!(message.contains("parser nesting depth within"));
+        assert!(message.contains(&format!("{} levels", state::MAX_NESTING_DEPTH)));
+    }
+
+    #[test]
     fn parses_scoped_selective_import_as_slash_path() {
         let nodes =
             parse_source("pub import std::personas::prelude::{verify_then_act, bounded_loop}")

@@ -8,6 +8,9 @@
 
 use super::ast::{BinOp, Expr, Node, PathSeg};
 use super::parser::parse as parse_template;
+use crate::runtime_limits::RuntimeLimits;
+
+const TEMPLATE_LINT_AST_MAX_DEPTH: usize = RuntimeLimits::DEFAULT.max_template_ast_depth;
 
 /// Parse a template source string into a flat list of lintable
 /// constructs (conditionals + sections). Returns `Err` when the
@@ -16,7 +19,7 @@ use super::parser::parse as parse_template;
 pub fn parse(src: &str) -> Result<Vec<LintConstruct>, String> {
     let nodes = parse_template(src).map_err(|error| error.message())?;
     let mut out = Vec::new();
-    walk_nodes(&nodes, &mut out);
+    walk_nodes(&nodes, &mut out, 0)?;
     Ok(out)
 }
 
@@ -90,13 +93,18 @@ impl IdentityField {
     }
 }
 
-fn walk_nodes(nodes: &[Node], out: &mut Vec<LintConstruct>) {
+fn walk_nodes(nodes: &[Node], out: &mut Vec<LintConstruct>, depth: usize) -> Result<(), String> {
     for node in nodes {
-        walk_node(node, out);
+        walk_node(node, out, depth)?;
     }
+    Ok(())
 }
 
-fn walk_node(node: &Node, out: &mut Vec<LintConstruct>) {
+fn walk_node(node: &Node, out: &mut Vec<LintConstruct>, depth: usize) -> Result<(), String> {
+    if depth > TEMPLATE_LINT_AST_MAX_DEPTH {
+        return Err(lint_depth_error(node));
+    }
+
     match node {
         Node::Text(_) | Node::Expr { .. } | Node::LegacyBareInterp { .. } => {}
         Node::If {
@@ -112,17 +120,17 @@ fn walk_node(node: &Node, out: &mut Vec<LintConstruct>) {
                     col: branch.col,
                     condition: classify_condition(&branch.cond),
                 });
-                walk_nodes(&branch.body, out);
+                walk_nodes(&branch.body, out, depth + 1)?;
             }
             out.push(LintConstruct::IfChain { branches: summary });
             if let Some(else_body) = else_branch {
-                walk_nodes(else_body, out);
+                walk_nodes(else_body, out, depth + 1)?;
             }
         }
         Node::For { body, empty, .. } => {
-            walk_nodes(body, out);
+            walk_nodes(body, out, depth + 1)?;
             if let Some(empty) = empty {
-                walk_nodes(empty, out);
+                walk_nodes(empty, out, depth + 1)?;
             }
         }
         Node::Include { .. } => {
@@ -142,8 +150,28 @@ fn walk_node(node: &Node, out: &mut Vec<LintConstruct>) {
                 line: *line,
                 col: *col,
             });
-            walk_nodes(body, out);
+            walk_nodes(body, out, depth + 1)?;
         }
+    }
+    Ok(())
+}
+
+fn lint_depth_error(node: &Node) -> String {
+    let prefix = format!("template lint AST depth exceeded ({TEMPLATE_LINT_AST_MAX_DEPTH} levels)");
+    match node_location(node) {
+        Some((line, col)) => format!("{prefix} at {line}:{col}"),
+        None => prefix,
+    }
+}
+
+fn node_location(node: &Node) -> Option<(usize, usize)> {
+    match node {
+        Node::Expr { line, col, .. }
+        | Node::If { line, col, .. }
+        | Node::For { line, col, .. }
+        | Node::Include { line, col, .. }
+        | Node::Section { line, col, .. } => Some((*line, *col)),
+        Node::Text(_) | Node::LegacyBareInterp { .. } => None,
     }
 }
 
@@ -192,15 +220,24 @@ fn match_identity_compare(expr: &Expr) -> Option<IdentityField> {
 /// `llm.capabilities.<flag> == <literal>`, returning the flag name.
 fn match_capability_path(expr: &Expr) -> Option<ConditionShape> {
     fn find_capability_path(expr: &Expr) -> Option<String> {
-        match expr {
-            Expr::Path(path) => capability_flag_from_path(path),
-            Expr::Unary(_, inner) => find_capability_path(inner),
-            Expr::Binary(_, lhs, rhs) => {
-                find_capability_path(lhs).or_else(|| find_capability_path(rhs))
+        let mut stack = vec![expr];
+        while let Some(expr) = stack.pop() {
+            match expr {
+                Expr::Path(path) => {
+                    if let Some(flag) = capability_flag_from_path(path) {
+                        return Some(flag);
+                    }
+                }
+                Expr::Unary(_, inner) => stack.push(inner),
+                Expr::Binary(_, lhs, rhs) => {
+                    stack.push(rhs);
+                    stack.push(lhs);
+                }
+                Expr::Filter(inner, _, _) => stack.push(inner),
+                _ => {}
             }
-            Expr::Filter(inner, _, _) => find_capability_path(inner),
-            _ => None,
         }
+        None
     }
     let flag = find_capability_path(expr)?;
     Some(ConditionShape::CapabilityFlag { flag })
@@ -291,6 +328,57 @@ mod tests {
             if_chains[1][0].condition,
             ConditionShape::CapabilityFlag { ref flag, .. } if flag == "prefers_xml_scaffolding"
         ));
+    }
+
+    #[test]
+    fn capability_flag_detection_handles_wide_binary_expression() {
+        let mut terms = (0..300).map(|idx| format!("flag{idx}")).collect::<Vec<_>>();
+        terms.push("llm.capabilities.native_tools".to_string());
+        let src = format!("{{{{ if {} }}}}x{{{{ end }}}}", terms.join(" or "));
+
+        let constructs = parse_ok(&src);
+        let branches = first_if(&constructs);
+
+        assert!(matches!(
+            branches[0].condition,
+            ConditionShape::CapabilityFlag { ref flag, .. } if flag == "native_tools"
+        ));
+    }
+
+    #[test]
+    fn parse_reports_template_control_depth_limit() {
+        let depth = RuntimeLimits::DEFAULT.max_template_ast_depth + 1;
+        let mut src = String::new();
+        for _ in 0..depth {
+            src.push_str("{{ if true }}");
+        }
+        src.push('x');
+        for _ in 0..depth {
+            src.push_str("{{ end }}");
+        }
+
+        let err = parse(&src).expect_err("depth limit");
+
+        assert!(err.contains("template nesting depth exceeded"));
+        assert!(err.contains(&format!(
+            "({} levels)",
+            RuntimeLimits::DEFAULT.max_template_ast_depth
+        )));
+    }
+
+    #[test]
+    fn parse_reports_template_expression_depth_limit() {
+        let depth = RuntimeLimits::DEFAULT.max_template_ast_depth + 1;
+        let condition = format!("{}llm.capabilities.native_tools", "!".repeat(depth));
+        let src = format!("{{{{ if {condition} }}}}x{{{{ end }}}}");
+
+        let err = parse(&src).expect_err("depth limit");
+
+        assert!(err.contains("template expression depth exceeded"));
+        assert!(err.contains(&format!(
+            "({} levels)",
+            RuntimeLimits::DEFAULT.max_template_ast_depth
+        )));
     }
 
     #[test]

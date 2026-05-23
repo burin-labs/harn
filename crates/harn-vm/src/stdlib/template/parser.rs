@@ -3,12 +3,16 @@ use super::error::TemplateError;
 use super::expr_parser::parse_expr;
 use super::lexer::{tokenize, Token};
 use super::sections;
+use crate::runtime_limits::RuntimeLimits;
+
+const TEMPLATE_AST_MAX_DEPTH: usize = RuntimeLimits::DEFAULT.max_template_ast_depth;
 
 pub(super) fn parse(src: &str) -> Result<Vec<Node>, TemplateError> {
     let tokens = tokenize(src)?;
     let mut p = Parser {
         tokens: &tokens,
         pos: 0,
+        depth: 0,
     };
     let nodes = p.parse_block(&[])?;
     if p.pos < tokens.len() {
@@ -20,6 +24,7 @@ pub(super) fn parse(src: &str) -> Result<Vec<Node>, TemplateError> {
 struct Parser<'a> {
     tokens: &'a [Token],
     pos: usize,
+    depth: usize,
 }
 
 impl<'a> Parser<'a> {
@@ -28,6 +33,21 @@ impl<'a> Parser<'a> {
     }
 
     fn parse_block(&mut self, stops: &[&str]) -> Result<Vec<Node>, TemplateError> {
+        let (line, col) = self.peek_location();
+        if self.depth >= TEMPLATE_AST_MAX_DEPTH {
+            return Err(TemplateError::new(
+                line,
+                col,
+                format!("template nesting depth exceeded ({TEMPLATE_AST_MAX_DEPTH} levels)"),
+            ));
+        }
+        self.depth += 1;
+        let result = self.parse_block_inner(stops);
+        self.depth = self.depth.saturating_sub(1);
+        result
+    }
+
+    fn parse_block_inner(&mut self, stops: &[&str]) -> Result<Vec<Node>, TemplateError> {
         let mut out = Vec::new();
         while let Some(tok) = self.peek() {
             match tok {
@@ -104,6 +124,13 @@ impl<'a> Parser<'a> {
             }
         }
         Ok(out)
+    }
+
+    fn peek_location(&self) -> (usize, usize) {
+        match self.peek() {
+            Some(Token::Directive { line, col, .. }) => (*line, *col),
+            _ => (1, 1),
+        }
     }
 
     fn parse_if(

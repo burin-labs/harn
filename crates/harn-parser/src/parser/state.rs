@@ -3,11 +3,14 @@ use harn_lexer::{Span, Token, TokenKind};
 
 use super::error::ParserError;
 
+pub(crate) const MAX_NESTING_DEPTH: usize = 64;
+
 /// Recursive descent parser for Harn.
 pub struct Parser {
     pub(super) tokens: Vec<Token>,
     pub(super) pos: usize,
     pub(super) errors: Vec<ParserError>,
+    nesting_depth: usize,
 }
 
 impl Parser {
@@ -16,7 +19,33 @@ impl Parser {
             tokens,
             pos: 0,
             errors: Vec::new(),
+            nesting_depth: 0,
         }
+    }
+
+    pub(super) fn check_token_nesting_limit(&self) -> Result<(), ParserError> {
+        let mut depth = 0usize;
+        for token in &self.tokens {
+            match token.kind {
+                TokenKind::LBrace | TokenKind::LBracket | TokenKind::LParen => {
+                    depth += 1;
+                    if depth > MAX_NESTING_DEPTH {
+                        return Err(ParserError::Unexpected {
+                            got: "source nesting depth exceeded".to_string(),
+                            expected: format!(
+                                "parser nesting depth within {MAX_NESTING_DEPTH} levels"
+                            ),
+                            span: token.span,
+                        });
+                    }
+                }
+                TokenKind::RBrace | TokenKind::RBracket | TokenKind::RParen => {
+                    depth = depth.saturating_sub(1);
+                }
+                _ => {}
+            }
+        }
+        Ok(())
     }
 
     pub(super) fn current_span(&self) -> Span {
@@ -58,6 +87,8 @@ impl Parser {
 
     /// Parse a complete .harn file. Reports multiple errors via recovery.
     pub fn parse(&mut self) -> Result<Vec<SNode>, ParserError> {
+        self.check_token_nesting_limit()?;
+
         let mut nodes = Vec::new();
         self.skip_newlines();
 
@@ -424,5 +455,23 @@ impl Parser {
 
     pub(super) fn error(&self, expected: &str) -> ParserError {
         self.make_error(expected)
+    }
+
+    pub(super) fn with_nesting<T>(
+        &mut self,
+        context: &'static str,
+        f: impl FnOnce(&mut Self) -> Result<T, ParserError>,
+    ) -> Result<T, ParserError> {
+        if self.nesting_depth >= MAX_NESTING_DEPTH {
+            return Err(ParserError::Unexpected {
+                got: format!("{context} nesting depth exceeded"),
+                expected: format!("parser nesting depth within {MAX_NESTING_DEPTH} levels"),
+                span: self.current_span(),
+            });
+        }
+        self.nesting_depth += 1;
+        let result = f(self);
+        self.nesting_depth = self.nesting_depth.saturating_sub(1);
+        result
     }
 }

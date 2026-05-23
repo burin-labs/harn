@@ -6,6 +6,10 @@ use super::state::Parser;
 
 impl Parser {
     pub(super) fn parse_block(&mut self) -> Result<Vec<SNode>, ParserError> {
+        self.with_nesting("block", |parser| parser.parse_block_inner())
+    }
+
+    fn parse_block_inner(&mut self) -> Result<Vec<SNode>, ParserError> {
         let mut stmts = Vec::new();
         self.skip_newlines();
 
@@ -195,7 +199,9 @@ impl Parser {
         let else_body = if self.check(&TokenKind::Else) {
             self.advance();
             if self.check(&TokenKind::If) {
-                Some(vec![self.parse_if_else()?])
+                Some(vec![
+                    self.with_nesting("if/else", |parser| parser.parse_if_else())?
+                ])
             } else {
                 self.consume(&TokenKind::LBrace, "{")?;
                 let body = self.parse_block()?;

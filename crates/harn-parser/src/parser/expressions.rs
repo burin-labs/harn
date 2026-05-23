@@ -7,8 +7,16 @@ use super::state::Parser;
 impl Parser {
     /// Parse a single expression (for string interpolation).
     pub fn parse_single_expression(&mut self) -> Result<SNode, ParserError> {
+        self.check_token_nesting_limit()?;
         self.skip_newlines();
         self.parse_expression()
+    }
+
+    pub(super) fn parse_nested_expression(
+        &mut self,
+        context: &'static str,
+    ) -> Result<SNode, ParserError> {
+        self.with_nesting(context, |parser| parser.parse_expression())
     }
 
     pub(super) fn parse_expression(&mut self) -> Result<SNode, ParserError> {
@@ -71,11 +79,11 @@ impl Parser {
         let start = condition.span;
         self.advance(); // skip ?
         self.skip_newlines();
-        let true_val = self.parse_ternary()?;
+        let true_val = self.with_nesting("ternary expression", |parser| parser.parse_ternary())?;
         // `consume` already skips leading newlines for `:`.
         self.consume(&TokenKind::Colon, ":")?;
         self.skip_newlines();
-        let false_val = self.parse_ternary()?;
+        let false_val = self.with_nesting("ternary expression", |parser| parser.parse_ternary())?;
         Ok(spanned(
             Node::Ternary {
                 condition: Box::new(condition),
@@ -299,7 +307,7 @@ impl Parser {
         let start = left.span;
         self.advance();
         self.skip_newlines();
-        let right = self.parse_exponent()?;
+        let right = self.with_nesting("exponent expression", |parser| parser.parse_exponent())?;
         Ok(spanned(
             Node::BinaryOp {
                 op: "**".into(),
@@ -314,7 +322,7 @@ impl Parser {
         if self.check(&TokenKind::Not) {
             let start = self.current_span();
             self.advance();
-            let operand = self.parse_unary()?;
+            let operand = self.with_nesting("unary expression", |parser| parser.parse_unary())?;
             return Ok(spanned(
                 Node::UnaryOp {
                     op: "!".into(),
@@ -326,7 +334,7 @@ impl Parser {
         if self.check(&TokenKind::Minus) {
             let start = self.current_span();
             self.advance();
-            let operand = self.parse_unary()?;
+            let operand = self.with_nesting("unary expression", |parser| parser.parse_unary())?;
             return Ok(spanned(
                 Node::UnaryOp {
                     op: "-".into(),
@@ -400,7 +408,7 @@ impl Parser {
                     let end_expr = if self.check(&TokenKind::RBracket) {
                         None
                     } else {
-                        Some(Box::new(self.parse_expression()?))
+                        Some(Box::new(self.parse_nested_expression("slice bound")?))
                     };
                     self.consume(&TokenKind::RBracket, "]")?;
                     expr = spanned(
@@ -412,13 +420,13 @@ impl Parser {
                         Span::merge(start, self.prev_span()),
                     );
                 } else {
-                    let index = self.parse_expression()?;
+                    let index = self.parse_nested_expression("subscript index")?;
                     if self.check(&TokenKind::Colon) {
                         self.advance();
                         let end_expr = if self.check(&TokenKind::RBracket) {
                             None
                         } else {
-                            Some(Box::new(self.parse_expression()?))
+                            Some(Box::new(self.parse_nested_expression("slice bound")?))
                         };
                         self.consume(&TokenKind::RBracket, "]")?;
                         expr = spanned(
@@ -517,7 +525,7 @@ impl Parser {
                     let start = expr.span;
                     self.advance(); // consume ?
                     self.advance(); // consume [
-                    let index = self.parse_expression()?;
+                    let index = self.parse_nested_expression("optional subscript index")?;
                     self.consume(&TokenKind::RBracket, "]")?;
                     expr = spanned(
                         Node::OptionalSubscriptAccess {
@@ -756,8 +764,11 @@ impl Parser {
             }
             TokenKind::LParen => {
                 self.advance();
-                let expr = self.parse_expression()?;
-                self.consume(&TokenKind::RParen, ")")?;
+                let expr = self.with_nesting("parenthesized expression", |parser| {
+                    let expr = parser.parse_expression()?;
+                    parser.consume(&TokenKind::RParen, ")")?;
+                    Ok(expr)
+                })?;
                 Ok(expr)
             }
             TokenKind::LBracket => self.parse_list_literal(),
@@ -878,10 +889,10 @@ impl Parser {
                 self.advance();
                 self.consume(&TokenKind::Colon, ":")?;
                 self.skip_newlines();
-                let value = self.parse_expression()?;
+                let value = self.parse_nested_expression("HITL argument")?;
                 (Some(raw), value)
             } else {
-                (None, self.parse_expression()?)
+                (None, self.parse_nested_expression("HITL argument")?)
             };
             let arg_span = Span::merge(arg_start, self.prev_span());
             args.push(HitlArg {
@@ -920,17 +931,17 @@ impl Parser {
                     self.advance();
                     self.consume(&TokenKind::Dot, ".")?;
                     let spread_start = self.tokens[saved_pos].span;
-                    let expr = self.parse_expression()?;
+                    let expr = self.parse_nested_expression("list spread")?;
                     elements.push(spanned(
                         Node::Spread(Box::new(expr)),
                         Span::merge(spread_start, self.prev_span()),
                     ));
                 } else {
                     self.pos = saved_pos;
-                    elements.push(self.parse_expression()?);
+                    elements.push(self.parse_nested_expression("list element")?);
                 }
             } else {
-                elements.push(self.parse_expression()?);
+                elements.push(self.parse_nested_expression("list element")?);
             }
             self.skip_newlines();
             if self.check(&TokenKind::Comma) {
@@ -1064,7 +1075,7 @@ impl Parser {
                     if self.check(&TokenKind::Dot) {
                         self.advance();
                         let spread_start = self.tokens[saved_pos].span;
-                        let expr = self.parse_expression()?;
+                        let expr = self.parse_nested_expression("dict spread")?;
                         entries.push(DictEntry {
                             key: spanned(Node::NilLiteral, spread_start),
                             value: spanned(
@@ -1086,7 +1097,7 @@ impl Parser {
             }
             let key = if self.check(&TokenKind::LBracket) {
                 self.advance();
-                let k = self.parse_expression()?;
+                let k = self.parse_nested_expression("computed dict key")?;
                 self.consume(&TokenKind::RBracket, "]")?;
                 k
             } else if matches!(
@@ -1108,7 +1119,7 @@ impl Parser {
                 spanned(Node::StringLiteral(name), key_span)
             };
             self.consume(&TokenKind::Colon, ":")?;
-            let value = self.parse_expression()?;
+            let value = self.parse_nested_expression("dict value")?;
             entries.push(DictEntry { key, value });
             self.skip_newlines();
             if self.check(&TokenKind::Comma) {
@@ -1182,7 +1193,7 @@ impl Parser {
             let default_value = if self.check(&TokenKind::Assign) {
                 self.advance();
                 seen_default = true;
-                Some(Box::new(self.parse_expression()?))
+                Some(Box::new(self.parse_nested_expression("parameter default")?))
             } else {
                 if seen_default && !is_rest {
                     return Err(self.error(
@@ -1227,17 +1238,17 @@ impl Parser {
                     self.advance();
                     self.consume(&TokenKind::Dot, ".")?;
                     let spread_start = self.tokens[saved_pos].span;
-                    let expr = self.parse_expression()?;
+                    let expr = self.parse_nested_expression("spread argument")?;
                     args.push(spanned(
                         Node::Spread(Box::new(expr)),
                         Span::merge(spread_start, self.prev_span()),
                     ));
                 } else {
                     self.pos = saved_pos;
-                    args.push(self.parse_expression()?);
+                    args.push(self.parse_nested_expression("argument")?);
                 }
             } else {
-                args.push(self.parse_expression()?);
+                args.push(self.parse_nested_expression("argument")?);
             }
             self.skip_newlines();
             if self.check(&TokenKind::Comma) {
