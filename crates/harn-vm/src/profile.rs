@@ -361,9 +361,11 @@ mod tests {
             kind,
             name: name.into(),
             start_ms: 0,
+            start_unix_ms: 0,
             duration_ms: dur,
             metadata: BTreeMap::new(),
             links: Vec::new(),
+            events: Vec::new(),
         }
     }
 

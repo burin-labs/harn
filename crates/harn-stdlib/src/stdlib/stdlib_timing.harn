@@ -1,0 +1,116 @@
+/**
+ * std/timing — scoped duration spans for Harn scripts.
+ *
+ * Promotes the hand-rolled `let started = harness.clock.now_ms(); work();
+ * let dur = harness.clock.now_ms() - started` pattern into a first-class
+ * observability primitive. Callback form (`timed(name, attrs, callback)`)
+ * is the preferred shape because it cannot forget to close; imperative
+ * pairs (`start_timing` / `end_timing` / `timing_event`) are still
+ * available for flows that cross callbacks, branches, or async-ish
+ * lifecycle boundaries.
+ *
+ * Timing segments are recorded as `user_timing` VM spans regardless of
+ * whether `enable_tracing(true)` was called — scripts always get
+ * `duration_ms` back. Duration is measured against the monotonic clock,
+ * while `started_at_ms` / `ended_at_ms` capture wall-clock millis for
+ * external correlation. When tracing is enabled, the segments appear in
+ * `trace_spans()` and `harn run --profile-json` under
+ * `kind = "user_timing"` so OTel exporters route them as INTERNAL spans
+ * rather than as GenAI inference or tool spans.
+ *
+ * Pick a timing span when duration matters, a metric when you want a
+ * pre-aggregated numeric series, and a span attribute when the value
+ * belongs on the current span instead of a new one.
+ */
+type TimingSegment = dict
+
+type TimingHandle = dict
+
+/**
+ * timed runs `callback` inside a timing span named `name` and returns
+ * `{result, timing}`. The span closes automatically on return or throw,
+ * so this is the preferred shape for measuring a discrete piece of work.
+ *
+ * @effects: [host]
+ * @allocation: heap
+ * @errors: [invalid_argument]
+ * @api_stability: experimental
+ * @example: let r = timed("benchmark.agent_loop", {case_id: case_id}, { -> work() })
+ */
+pub fn timed(name: string, attrs: dict = {}, callback = nil) -> dict {
+  if callback == nil {
+    throw "timed: missing callback (use start_timing for imperative flows)"
+  }
+  let handle = __timing_start(name, attrs)
+  try {
+    let value = callback()
+    let timing = __timing_end(handle, {status: "ok"})
+    return {result: value, timing: timing}
+  } catch (e) {
+    let timing = __timing_end(handle, {status: "error", error: to_string(e)})
+    throw e
+  }
+}
+
+/**
+ * start_timing opens an imperative timing span and returns a handle.
+ * Pair every call with `end_timing` once the work finishes. Prefer
+ * `timed(name, attrs, callback)` when the work fits in a single callback.
+ *
+ * @effects: [host]
+ * @allocation: heap
+ * @errors: [invalid_argument]
+ * @api_stability: experimental
+ * @example: let h = start_timing("provider.preflight", {provider: provider})
+ */
+pub fn start_timing(name: string, attrs: dict = {}) -> TimingHandle {
+  return __timing_start(name, attrs)
+}
+
+/**
+ * timing_event records a sub-phase annotation on the open span without
+ * allocating a child span for every marker. Returns `true` when the
+ * event was attached, `false` if the handle's span was already closed.
+ *
+ * @effects: [host]
+ * @allocation: heap
+ * @errors: [invalid_argument]
+ * @api_stability: experimental
+ * @example: timing_event(timing, "credentials.checked", {available: true})
+ */
+pub fn timing_event(handle: TimingHandle, name: string, attrs: dict = {}) -> bool {
+  return __timing_event(handle, name, attrs)
+}
+
+/**
+ * end_timing finalizes a timing handle and returns its `TimingSegment`.
+ * Final attributes (`status`, `error`, additional metadata) merge into
+ * the span before close. Calling `end_timing` twice on the same handle
+ * is idempotent — the second call returns the cached segment instead of
+ * corrupting the active span stack.
+ *
+ * @effects: [host]
+ * @allocation: heap
+ * @errors: [invalid_argument]
+ * @api_stability: experimental
+ * @example: let timing = end_timing(handle, {status: "ok"})
+ */
+pub fn end_timing(handle: TimingHandle, final_attrs: dict = {}) -> TimingSegment {
+  return __timing_end(handle, final_attrs)
+}
+
+/**
+ * elapsed_ms reads the monotonic milliseconds elapsed since the handle
+ * was opened, without closing the span. Useful for soft deadlines that
+ * want to keep the span open for sub-phase annotations after the check.
+ *
+ * @effects: []
+ * @allocation: heap
+ * @errors: [invalid_argument]
+ * @api_stability: experimental
+ * @example: if elapsed_ms(handle) > 5000 { abort("deadline") }
+ */
+pub fn elapsed_ms(handle: TimingHandle) -> int {
+  let started = handle?.monotonic_started_ms ?? 0
+  return __timing_now_monotonic_ms() - started
+}

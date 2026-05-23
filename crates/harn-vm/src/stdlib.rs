@@ -68,6 +68,7 @@ pub(crate) mod supervisor;
 pub mod template;
 mod testbench;
 mod testing;
+mod timing;
 pub mod token_redaction;
 pub(crate) mod tool_hooks;
 pub(crate) mod tools;
@@ -150,6 +151,7 @@ pub fn register_io_stdlib(vm: &mut Vm) {
     project::register_project_builtins(vm);
     tracing::register_tracing_builtins(vm);
     observability::register_observability_builtins(vm);
+    timing::register_timing_builtins(vm);
     tui::register_tui_builtins(vm);
 }
 
@@ -286,6 +288,7 @@ pub fn reset_stdlib_state() {
     json_stream::reset_json_stream_state();
     host::reset_host_state();
     observability::reset_observability_state();
+    timing::reset_timing_state();
     crate::egress::reset_egress_policy_for_host();
     hitl::reset_hitl_state();
     crate::http::reset_http_state();

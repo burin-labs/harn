@@ -202,6 +202,67 @@ pipeline main() {
 }
 
 #[test]
+fn profile_json_includes_user_timing_bucket() {
+    let tempdir = TempDir::new().expect("temp dir");
+    let script = tempdir.path().join("timing_script.harn");
+    fs::write(
+        &script,
+        r#"
+import { timed } from "std/timing"
+
+pipeline main() {
+  timed("benchmark.work", {case_id: "fixture"}, { ->
+    return 7
+  })
+  __io_println("done")
+}
+"#,
+    )
+    .expect("write script");
+    let json_path = tempdir.path().join("timing_profile.json");
+
+    let outcome: RunOutcome = run_in_harn_runtime({
+        let script = script.clone();
+        let json_path = json_path.clone();
+        move || async move {
+            let _env_guard = env_lock::lock_env().lock().await;
+            let _cwd_guard = cwd_lock::lock_cwd_async().await;
+            harn_vm::reset_thread_local_state();
+            execute_run(
+                &script.to_string_lossy(),
+                false,
+                HashSet::new(),
+                Vec::new(),
+                Vec::new(),
+                CliLlmMockMode::Off,
+                None,
+                RunProfileOptions {
+                    text: false,
+                    json_path: Some(json_path.clone()),
+                },
+            )
+            .await
+        }
+    });
+
+    assert_eq!(outcome.exit_code, 0, "stderr:\n{}", outcome.stderr);
+    let profile: RunProfile =
+        serde_json::from_str(&fs::read_to_string(&json_path).expect("read profile.json"))
+            .expect("parse profile.json");
+
+    let user_timing_bucket = profile
+        .by_kind
+        .iter()
+        .find(|bucket| bucket.kind == "user_timing")
+        .unwrap_or_else(|| panic!("user_timing bucket missing: {:?}", profile.by_kind));
+    assert_eq!(
+        user_timing_bucket.count, 1,
+        "expected exactly one user_timing span, got bucket {:?}",
+        user_timing_bucket
+    );
+}
+
+#[test]
 fn profile_disabled_means_no_stderr_section() {
     let tempdir = TempDir::new().expect("temp dir");
     let script = tempdir.path().join("script.harn");

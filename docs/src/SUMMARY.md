@@ -78,6 +78,7 @@
 - [Pipeline lifecycle](./pipeline-lifecycle.md)
 - [Pipeline lifecycle presets](./stdlib/lifecycle.md)
 - [Observability stdlib](./stdlib/observability.md)
+- [Timing stdlib](./stdlib/timing.md)
 - [GraphQL stdlib](./stdlib/graphql.md)
 - [OAuth storage stdlib](./stdlib/oauth-storage.md)
 - [Prompt library stdlib](./stdlib/prompt-library.md)

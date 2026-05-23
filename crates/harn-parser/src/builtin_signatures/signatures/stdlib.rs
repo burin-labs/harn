@@ -310,6 +310,32 @@ pub(crate) const SIGNATURES: &[BuiltinSignature] = &[
         TY_NIL,
     ),
     BuiltinSignature::simple(
+        "__timing_end",
+        &[
+            Param::new("handle", TY_DICT),
+            Param::optional("final_attributes", TY_DICT_OR_NIL),
+        ],
+        TY_DICT,
+    ),
+    BuiltinSignature::simple(
+        "__timing_event",
+        &[
+            Param::new("handle", TY_DICT),
+            Param::new("name", TY_STRING),
+            Param::optional("attributes", TY_DICT_OR_NIL),
+        ],
+        TY_BOOL,
+    ),
+    BuiltinSignature::simple("__timing_now_monotonic_ms", &[], TY_INT),
+    BuiltinSignature::simple(
+        "__timing_start",
+        &[
+            Param::new("name", TY_STRING),
+            Param::optional("attributes", TY_DICT_OR_NIL),
+        ],
+        TY_DICT,
+    ),
+    BuiltinSignature::simple(
         "__ansi_enabled",
         &[Param::optional("stream", TY_STRING)],
         TY_BOOL,

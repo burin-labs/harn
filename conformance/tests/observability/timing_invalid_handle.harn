@@ -1,0 +1,13 @@
+import { end_timing, timing_event } from "std/timing"
+
+pipeline default() {
+  var raised = nil
+  try {
+    end_timing({span_id: 9999})
+  } catch (e) {
+    raised = e
+  }
+  __io_println(raised != nil)
+  // Unknown handles record no events without throwing.
+  __io_println(timing_event({span_id: 9999}, "ghost"))
+}

@@ -10,7 +10,7 @@
 use std::cell::RefCell;
 use std::collections::BTreeMap;
 use std::rc::Rc;
-use std::time::Instant;
+use std::time::{Instant, SystemTime, UNIX_EPOCH};
 
 use crate::value::VmValue;
 
@@ -50,6 +50,10 @@ pub enum SpanKind {
     /// Links back to the originating `ChannelEmit` span (multi-link for
     /// batched / aggregated triggers).
     ChannelMatch,
+    /// Script-opened user timing span via `std/timing`. Modeled as an
+    /// OTel INTERNAL span — distinct from `FnCall` so OTel exporters and
+    /// `harn run --profile-json` do not confuse them with LLM/tool work.
+    UserTiming,
 }
 
 impl SpanKind {
@@ -72,6 +76,7 @@ impl SpanKind {
             Self::PoolDequeue => "pool_dequeue",
             Self::ChannelEmit => "channel_emit",
             Self::ChannelMatch => "channel_match",
+            Self::UserTiming => "user_timing",
         }
     }
 }
@@ -101,6 +106,21 @@ impl SpanLink {
     }
 }
 
+/// One sub-phase annotation attached to a span. Modeled after OTel span
+/// events: a named checkpoint with optional structured attributes that
+/// piggy-backs on the enclosing span rather than allocating a new one.
+#[derive(Debug, Clone, Default, serde::Serialize, serde::Deserialize, PartialEq)]
+#[serde(default)]
+pub struct SpanEvent {
+    pub name: String,
+    /// Wall-clock time of the event in milliseconds since the UNIX epoch.
+    pub time_unix_ms: u64,
+    /// Monotonic offset from the parent span's start, in milliseconds.
+    pub offset_ms: u64,
+    #[serde(skip_serializing_if = "BTreeMap::is_empty")]
+    pub attributes: BTreeMap<String, serde_json::Value>,
+}
+
 /// A completed tracing span.
 #[derive(Debug, Clone)]
 pub struct Span {
@@ -109,10 +129,16 @@ pub struct Span {
     pub parent_id: Option<u64>,
     pub kind: SpanKind,
     pub name: String,
+    /// Monotonic offset from the collector's epoch, in milliseconds.
     pub start_ms: u64,
+    /// Wall-clock start in milliseconds since the UNIX epoch. Recorded
+    /// once at `start` for external correlation; duration is always
+    /// derived from the monotonic clock, not from wall-clock end - start.
+    pub start_unix_ms: u64,
     pub duration_ms: u64,
     pub metadata: BTreeMap<String, serde_json::Value>,
     pub links: Vec<SpanLink>,
+    pub events: Vec<SpanEvent>,
 }
 
 /// An in-flight span (not yet completed).
@@ -123,8 +149,14 @@ struct OpenSpan {
     kind: SpanKind,
     name: String,
     started_at: Instant,
+    /// Mock-monotonic snapshot at start, captured only when a
+    /// `clock_mock` override was active. Pairs with the closing snapshot
+    /// to compute deterministic durations under `mock_time(...)`.
+    started_at_mock_mono_ms: Option<u64>,
+    start_unix_ms: u64,
     metadata: BTreeMap<String, serde_json::Value>,
     links: Vec<SpanLink>,
+    events: Vec<SpanEvent>,
 }
 
 /// Thread-local span collector. Accumulates completed spans and tracks the
@@ -192,6 +224,8 @@ impl SpanCollector {
         let id = self.next_id;
         self.next_id += 1;
         let now = Instant::now();
+        let started_at_mock_mono_ms = mock_monotonic_ms();
+        let start_unix_ms = wall_clock_ms();
 
         let mut event_metadata = BTreeMap::new();
         if !links.is_empty() {
@@ -208,8 +242,11 @@ impl SpanCollector {
                 kind,
                 name,
                 started_at: now,
+                started_at_mock_mono_ms,
+                start_unix_ms,
                 metadata: BTreeMap::new(),
                 links,
+                events: Vec::new(),
             },
         );
         self.active_stack.push(id);
@@ -223,36 +260,73 @@ impl SpanCollector {
         }
     }
 
-    /// End a span. Moves it from open to completed.
-    pub fn end(&mut self, span_id: u64) {
-        if let Some(span) = self.open.remove(&span_id) {
-            let duration = span.started_at.elapsed();
-            let start_ms = span.started_at.duration_since(self.epoch).as_millis() as u64;
-            let duration_ms = duration.as_millis() as u64;
+    /// Append a sub-phase annotation to an open span. Returns `true` if
+    /// the event was attached; `false` if `span_id` does not match any
+    /// open span (already closed or never opened).
+    pub fn record_event(
+        &mut self,
+        span_id: u64,
+        name: String,
+        attributes: BTreeMap<String, serde_json::Value>,
+    ) -> bool {
+        let Some(span) = self.open.get_mut(&span_id) else {
+            return false;
+        };
+        let offset_ms = match (span.started_at_mock_mono_ms, mock_monotonic_ms()) {
+            (Some(start), Some(now)) => now.saturating_sub(start),
+            _ => span.started_at.elapsed().as_millis() as u64,
+        };
+        span.events.push(SpanEvent {
+            name,
+            time_unix_ms: wall_clock_ms(),
+            offset_ms,
+            attributes,
+        });
+        true
+    }
 
-            let mut end_meta = span.metadata.clone();
-            end_meta.insert(
-                "duration_ms".to_string(),
-                serde_json::Value::Number(serde_json::Number::from(duration_ms)),
-            );
-            crate::events::emit_span_end(span_id, end_meta);
+    /// Read the wall-clock start of an open span.
+    pub fn open_start_unix_ms(&self, span_id: u64) -> Option<u64> {
+        self.open.get(&span_id).map(|span| span.start_unix_ms)
+    }
 
-            self.completed.push(Span {
-                trace_id: span.trace_id,
-                span_id: span.span_id,
-                parent_id: span.parent_id,
-                kind: span.kind,
-                name: span.name,
-                start_ms,
-                duration_ms,
-                metadata: span.metadata,
-                links: span.links,
-            });
+    /// End a span. Moves it from open to completed and returns the
+    /// finalized span so callers (e.g. `std/timing`) can read its
+    /// `duration_ms` directly without re-scanning `take_spans()`.
+    pub fn end(&mut self, span_id: u64) -> Option<Span> {
+        let span = self.open.remove(&span_id)?;
+        let start_ms = span.started_at.duration_since(self.epoch).as_millis() as u64;
+        let duration_ms = match (span.started_at_mock_mono_ms, mock_monotonic_ms()) {
+            (Some(start), Some(end)) => end.saturating_sub(start),
+            _ => span.started_at.elapsed().as_millis() as u64,
+        };
 
-            if let Some(pos) = self.active_stack.iter().rposition(|&id| id == span_id) {
-                self.active_stack.remove(pos);
-            }
+        let mut end_meta = span.metadata.clone();
+        end_meta.insert(
+            "duration_ms".to_string(),
+            serde_json::Value::Number(serde_json::Number::from(duration_ms)),
+        );
+        crate::events::emit_span_end(span_id, end_meta);
+
+        let completed = Span {
+            trace_id: span.trace_id,
+            span_id: span.span_id,
+            parent_id: span.parent_id,
+            kind: span.kind,
+            name: span.name,
+            start_ms,
+            start_unix_ms: span.start_unix_ms,
+            duration_ms,
+            metadata: span.metadata,
+            links: span.links,
+            events: span.events,
+        };
+        self.completed.push(completed.clone());
+
+        if let Some(pos) = self.active_stack.iter().rposition(|&id| id == span_id) {
+            self.active_stack.remove(pos);
         }
+        Some(completed)
     }
 
     /// Get the current active span ID (if any).
@@ -297,6 +371,30 @@ impl SpanCollector {
 thread_local! {
     static COLLECTOR: RefCell<SpanCollector> = RefCell::new(SpanCollector::new());
     static TRACING_ENABLED: RefCell<bool> = const { RefCell::new(false) };
+}
+
+/// Best-effort wall-clock millis since the UNIX epoch. Honors an active
+/// `clock_mock` override so spans recorded inside `mock_time(...)` blocks
+/// align with the rest of the runtime's clock reads; returns 0 only if
+/// the host clock is behind the epoch (e.g. unusual sandbox shims).
+fn wall_clock_ms() -> u64 {
+    if let Some(mock) = crate::clock_mock::active_mock_clock() {
+        return mock.now_wall_ms() as u64;
+    }
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|d| d.as_millis() as u64)
+        .unwrap_or(0)
+}
+
+/// Mock-aware monotonic snapshot. Returns `Some(ms)` when a
+/// `clock_mock` override is active, `None` otherwise. Span lifecycle
+/// pairs the start/end snapshots so durations recorded under
+/// `mock_time(...)` reflect `advance_time(...)` instead of real
+/// wall-clock progress; spans without an active mock at start fall
+/// through to the standard `Instant::elapsed` path on close.
+fn mock_monotonic_ms() -> Option<u64> {
+    crate::clock_mock::active_mock_clock().map(|mock| mock.now_monotonic_ms() as u64)
 }
 
 /// Enable or disable VM tracing for the current thread.
@@ -344,12 +442,61 @@ pub fn span_set_metadata(span_id: u64, key: &str, value: serde_json::Value) {
     COLLECTOR.with(|c| c.borrow_mut().set_metadata(span_id, key, value));
 }
 
-/// End a span (no-op if span_id is 0).
-pub fn span_end(span_id: u64) {
+/// End a span (no-op if span_id is 0). Returns the finalized span when
+/// the id was a live open span.
+pub fn span_end(span_id: u64) -> Option<Span> {
+    if span_id == 0 {
+        return None;
+    }
+    COLLECTOR.with(|c| c.borrow_mut().end(span_id))
+}
+
+/// Start a user-timing span. Unlike [`span_start`], this always records
+/// regardless of [`is_tracing_enabled`] — `std/timing` callers depend on
+/// the returned `duration_ms` to function as a primitive replacement for
+/// hand-rolled `now_ms()` subtraction.
+pub fn span_start_user_timing(
+    name: String,
+    attrs: BTreeMap<String, serde_json::Value>,
+) -> (u64, String, Option<u64>, u64) {
+    COLLECTOR.with(|c| {
+        let mut c = c.borrow_mut();
+        let id = c.start(SpanKind::UserTiming, name);
+        for (key, value) in attrs {
+            c.set_metadata(id, &key, value);
+        }
+        let parent = c.open.get(&id).and_then(|span| span.parent_id);
+        let trace_id = c
+            .open
+            .get(&id)
+            .map(|span| span.trace_id.clone())
+            .unwrap_or_default();
+        let start_unix_ms = c.open_start_unix_ms(id).unwrap_or(0);
+        (id, trace_id, parent, start_unix_ms)
+    })
+}
+
+/// Record a sub-phase event on an open span. No-op when `span_id` is 0
+/// or already closed; returns whether the event was attached so callers
+/// can surface no-op feedback.
+pub fn span_record_event(
+    span_id: u64,
+    name: String,
+    attributes: BTreeMap<String, serde_json::Value>,
+) -> bool {
+    if span_id == 0 {
+        return false;
+    }
+    COLLECTOR.with(|c| c.borrow_mut().record_event(span_id, name, attributes))
+}
+
+/// Attach metadata to an open span. No-op when `span_id` is 0 or
+/// already closed.
+pub fn span_attach_metadata(span_id: u64, key: &str, value: serde_json::Value) {
     if span_id == 0 {
         return;
     }
-    COLLECTOR.with(|c| c.borrow_mut().end(span_id));
+    COLLECTOR.with(|c| c.borrow_mut().set_metadata(span_id, key, value));
 }
 
 /// Get the currently active span id, if tracing is enabled and a span is open.
@@ -408,6 +555,10 @@ pub fn span_to_vm_value(span: &Span) -> VmValue {
     d.insert("kind".into(), VmValue::String(Rc::from(span.kind.as_str())));
     d.insert("name".into(), VmValue::String(Rc::from(span.name.as_str())));
     d.insert("start_ms".into(), VmValue::Int(span.start_ms as i64));
+    d.insert(
+        "start_unix_ms".into(),
+        VmValue::Int(span.start_unix_ms as i64),
+    );
     d.insert("duration_ms".into(), VmValue::Int(span.duration_ms as i64));
 
     if !span.metadata.is_empty() {
@@ -422,6 +573,12 @@ pub fn span_to_vm_value(span: &Span) -> VmValue {
         d.insert(
             "links".into(),
             crate::stdlib::json_to_vm_value(&serde_json::json!(span.links)),
+        );
+    }
+    if !span.events.is_empty() {
+        d.insert(
+            "events".into(),
+            crate::stdlib::json_to_vm_value(&serde_json::json!(span.events)),
         );
     }
 
@@ -552,6 +709,53 @@ mod tests {
         set_tracing_enabled(false);
         let id = span_start(SpanKind::Pipeline, "test".into());
         assert_eq!(id, 0);
-        span_end(id);
+        assert!(span_end(id).is_none());
+    }
+
+    #[test]
+    fn test_user_timing_records_when_tracing_disabled() {
+        // UserTiming is the substrate behind `std/timing`. Script
+        // callers depend on a real `duration_ms` even when global VM
+        // tracing is off, so the collector must always record this
+        // kind.
+        set_tracing_enabled(false);
+        reset_tracing();
+        let mut attrs = BTreeMap::new();
+        attrs.insert("phase".into(), serde_json::json!("warmup"));
+        let (id, trace_id, parent, start_unix_ms) =
+            span_start_user_timing("script.work".into(), attrs);
+        assert!(id != 0);
+        assert!(!trace_id.is_empty());
+        assert_eq!(parent, None);
+        assert!(start_unix_ms > 0);
+
+        assert!(span_record_event(id, "checkpoint".into(), BTreeMap::new()));
+
+        let closed = span_end(id).expect("user timing always records");
+        assert_eq!(closed.kind, SpanKind::UserTiming);
+        assert_eq!(closed.events.len(), 1);
+        assert_eq!(closed.events[0].name, "checkpoint");
+        assert_eq!(closed.metadata["phase"], serde_json::json!("warmup"));
+
+        // The recorded user_timing span survives in the collector
+        // snapshot so `trace_spans()` / `harn run --profile-json`
+        // surface it alongside the other VM-emitted spans.
+        let snapshot = peek_spans();
+        assert!(snapshot
+            .iter()
+            .any(|span| span.kind == SpanKind::UserTiming && span.name == "script.work"));
+    }
+
+    #[test]
+    fn test_span_event_offset_is_monotonic() {
+        let mut c = SpanCollector::new();
+        let id = c.start(SpanKind::UserTiming, "outer".into());
+        assert!(c.record_event(id, "before".into(), BTreeMap::new()));
+        // Wait a beat so the offsets diverge on real Instant clocks.
+        std::thread::sleep(std::time::Duration::from_millis(2));
+        assert!(c.record_event(id, "after".into(), BTreeMap::new()));
+        let closed = c.end(id).expect("open span");
+        assert_eq!(closed.events.len(), 2);
+        assert!(closed.events[1].offset_ms >= closed.events[0].offset_ms);
     }
 }

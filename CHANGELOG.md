@@ -74,6 +74,19 @@ condensed series summaries instead of full per-patch history.
   to see a reminder before the agent terminates should use
   `finish_step`, which drains at every iteration boundary — including
   the final `turn_end` before the loop breaks.
+- **`std/timing` — first-class scoped timing spans (#2199).**
+  New stdlib module replaces hand-rolled `let started =
+  harness.clock.now_ms()` subtraction with a documented observability
+  primitive. `timed(name, attrs, callback)` is the docs-forward callback
+  shape; `start_timing` / `timing_event` / `end_timing` cover imperative
+  flows. Returned `TimingSegment` carries `duration_ms` (monotonic),
+  `started_at_ms` / `ended_at_ms` (wall-clock, mock-aware), status,
+  attributes, and sub-phase events. Timing spans flow through the VM
+  span collector under a new `SpanKind::UserTiming` so `trace_spans()`
+  and `harn run --profile-json` report them as their own bucket and OTel
+  exporters surface them as INTERNAL spans rather than mislabeled
+  GenAI/tool spans. `with_cache_envelope` and `retry_with_result` are
+  re-platformed onto the new primitive.
 
 ### Fixed
 

@@ -1,0 +1,17 @@
+import { timed } from "std/timing"
+
+pipeline default() {
+  var caught = nil
+  try {
+    timed(
+      "work.fragile",
+      {phase: "validate"},
+      { ->
+        throw "validation failed"
+      },
+    )
+  } catch (e) {
+    caught = e
+  }
+  __io_println(caught)
+}
