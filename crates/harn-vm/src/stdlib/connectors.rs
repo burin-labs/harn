@@ -234,6 +234,9 @@ fn jwt_verify_options(options: &JsonValue) -> Result<JwtVerificationOptions, VmE
     if let Some(audience) = string_field(options, &["audience", "aud"])? {
         verify_options = verify_options.with_audience(audience);
     }
+    if let Some(algorithm) = string_field(options, &["algorithm", "alg"])? {
+        verify_options = verify_options.with_algorithm(parse_jwt_algorithm(&algorithm)?);
+    }
     let mut required = Vec::new();
     if options
         .get("require_exp")
@@ -252,6 +255,27 @@ fn jwt_verify_options(options: &JsonValue) -> Result<JwtVerificationOptions, VmE
         verify_options = verify_options.require_spec_claims(required);
     }
     Ok(verify_options)
+}
+
+fn parse_jwt_algorithm(value: &str) -> Result<jsonwebtoken::Algorithm, VmError> {
+    use jsonwebtoken::Algorithm;
+    match value.trim() {
+        "HS256" => Ok(Algorithm::HS256),
+        "HS384" => Ok(Algorithm::HS384),
+        "HS512" => Ok(Algorithm::HS512),
+        "RS256" => Ok(Algorithm::RS256),
+        "RS384" => Ok(Algorithm::RS384),
+        "RS512" => Ok(Algorithm::RS512),
+        "ES256" => Ok(Algorithm::ES256),
+        "ES384" => Ok(Algorithm::ES384),
+        "PS256" => Ok(Algorithm::PS256),
+        "PS384" => Ok(Algorithm::PS384),
+        "PS512" => Ok(Algorithm::PS512),
+        "EdDSA" => Ok(Algorithm::EdDSA),
+        other => Err(VmError::Thrown(VmValue::String(Rc::from(format!(
+            "connector_shared_verify_jwt_inline: unsupported JWT algorithm `{other}`"
+        ))))),
+    }
 }
 
 fn string_field(options: &JsonValue, names: &[&str]) -> Result<Option<String>, VmError> {

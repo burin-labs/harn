@@ -671,6 +671,11 @@ pub fn on_task(event: TriggerEvent) -> string {
     .await;
     let harness = start_harness_with(&temp, |mut config| {
         config.pump.max_outstanding = 1;
+        // Scrape `/metrics` unauthenticated below to assert pump
+        // outstanding/backlog gauges; the production default is
+        // auth-gated (`--public-metrics` opt-in) so we flip the flag
+        // explicitly here.
+        config.public_metrics = true;
         config
     })
     .await;
@@ -1144,4 +1149,69 @@ pub fn on_task(event: TriggerEvent) -> dict {
     );
     assert_eq!(drain_json["summary"]["ready"], serde_json::json!(0));
     assert_eq!(drain_json["summary"]["responses"], serde_json::json!(1));
+}
+
+#[tokio::test]
+async fn metrics_endpoint_is_auth_gated_by_default_and_open_with_public_metrics() {
+    let temp = TempDir::new().expect("tempdir");
+    write_file(&temp.path().join("connectors"), "noop.harn", "");
+    write_file(
+        temp.path(),
+        "harn.toml",
+        r#"
+[orchestrator]
+[[trigger]]
+id = "noop"
+provider = "webhook"
+kind = "webhook"
+path = "/noop"
+"#,
+    );
+
+    let _envs = lock_env_with(&[
+        ("HARN_EVENT_LOG_BACKEND", "file"),
+        ("HARN_ORCHESTRATOR_API_KEYS", "test-key"),
+    ])
+    .await;
+
+    // Default: /metrics must reject unauthenticated requests.
+    let harness = start_harness(&temp).await;
+    let base_url = harness.listener_url().to_string();
+    let client = reqwest::Client::new();
+    let response = client
+        .get(format!("{base_url}/metrics"))
+        .send()
+        .await
+        .expect("metrics request");
+    assert_eq!(
+        response.status(),
+        reqwest::StatusCode::UNAUTHORIZED,
+        "/metrics should require auth by default"
+    );
+    // With the API key, the request must succeed.
+    let mut auth_headers = HeaderMap::new();
+    auth_headers.insert(AUTHORIZATION, HeaderValue::from_static("Bearer test-key"));
+    let authed = client
+        .get(format!("{base_url}/metrics"))
+        .headers(auth_headers)
+        .send()
+        .await
+        .expect("metrics request with auth");
+    assert_eq!(authed.status(), reqwest::StatusCode::OK);
+    shutdown(harness).await;
+
+    // Opt in to public metrics → unauthenticated request must succeed.
+    let harness = start_harness_with(&temp, |mut config| {
+        config.public_metrics = true;
+        config
+    })
+    .await;
+    let base_url = harness.listener_url().to_string();
+    let public_response = client
+        .get(format!("{base_url}/metrics"))
+        .send()
+        .await
+        .expect("public metrics request");
+    assert_eq!(public_response.status(), reqwest::StatusCode::OK);
+    shutdown(harness).await;
 }

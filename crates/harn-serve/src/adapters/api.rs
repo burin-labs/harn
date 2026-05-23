@@ -8,7 +8,7 @@ use std::sync::{Arc, Mutex};
 use std::thread;
 
 use axum::body::Bytes;
-use axum::extract::{OriginalUri, Path as AxumPath, Query, State};
+use axum::extract::{DefaultBodyLimit, OriginalUri, Path as AxumPath, Query, State};
 use axum::http::{HeaderMap, Method, StatusCode, Uri};
 use axum::response::sse::{Event, KeepAlive, Sse};
 use axum::response::{IntoResponse, Response};
@@ -628,6 +628,7 @@ fn api_router(state: ApiState) -> Router {
             "/v1/permission-requests/{request_id}/respond",
             post(respond_permission_request),
         )
+        .layer(DefaultBodyLimit::max(crate::DEFAULT_HTTP_BODY_LIMIT_BYTES))
         .with_state(state)
 }
 

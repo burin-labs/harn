@@ -352,6 +352,7 @@ async fn orchestrator_lifecycle(
         routes: route_configs,
         tenant_store: tenant_store.clone(),
         session_store: Some(Arc::new(harn_vm::SessionStore::new(event_log.clone()))),
+        public_metrics: config.public_metrics,
     })
     .await?;
     let local_bind = listener.local_addr();

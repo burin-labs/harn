@@ -257,18 +257,45 @@ fn upload_file(args: &[VmValue]) -> Result<VmValue, VmError> {
         &resolved_path,
         crate::stdlib::sandbox::FsAccess::Read,
     )?;
+    // Validate the file size BEFORE reading the contents. The previous
+    // ordering read the whole file into memory and only then compared
+    // against `max_size`, which made the size cap useless against a
+    // ~unbounded file (the OOM/oversized-read fired before the check).
+    let max_size =
+        options.and_then(|opts| int_field(opts, "max_size").or_else(|| int_field(opts, "maxSize")));
+    if let Some(max_size) = max_size {
+        if max_size < 0 {
+            return Err(VmError::Runtime(format!(
+                "mcp.upload_file: maxSize must be non-negative, got {max_size}",
+            )));
+        }
+        let metadata = std::fs::metadata(&resolved_path).map_err(|error| {
+            VmError::Runtime(format!(
+                "mcp.upload_file: failed to stat {}: {error}",
+                resolved_path.display()
+            ))
+        })?;
+        if metadata.len() > max_size as u64 {
+            return Err(VmError::Runtime(format!(
+                "mcp.upload_file: {} is {} bytes, exceeding maxSize {}",
+                resolved_path.display(),
+                metadata.len(),
+                max_size
+            )));
+        }
+    }
     let bytes = std::fs::read(&resolved_path).map_err(|error| {
         VmError::Runtime(format!(
             "mcp.upload_file: failed to read {}: {error}",
             resolved_path.display()
         ))
     })?;
-    if let Some(max_size) =
-        options.and_then(|opts| int_field(opts, "max_size").or_else(|| int_field(opts, "maxSize")))
-    {
-        if max_size < 0 || bytes.len() as u64 > max_size as u64 {
+    // Defense-in-depth: re-check after the read in case the file grew
+    // between the stat and the read.
+    if let Some(max_size) = max_size {
+        if bytes.len() as u64 > max_size as u64 {
             return Err(VmError::Runtime(format!(
-                "mcp.upload_file: {} is {} bytes, exceeding maxSize {}",
+                "mcp.upload_file: {} grew past maxSize ({} > {}) between stat and read",
                 resolved_path.display(),
                 bytes.len(),
                 max_size

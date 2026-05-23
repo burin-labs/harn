@@ -319,6 +319,7 @@ async fn start_acp_test_listener_with_env(
             routes: Vec::new(),
             tenant_store: None,
             session_store: None,
+            public_metrics: false,
         },
         runtime_env,
     )
@@ -765,6 +766,7 @@ async fn reload_swaps_routes_without_losing_inflight_request() {
             routes: vec![route("/a2a/v1", 1)],
             tenant_store: None,
             session_store: None,
+            public_metrics: false,
         },
         ListenerRuntimeEnv::for_test().with_request_gate(TestRequestGate {
             entered_file: Some(request_entered_path.clone()),
@@ -887,6 +889,7 @@ async fn webhook_first_delivery_is_appended() {
             routes: vec![webhook_route("/hooks/github")],
             tenant_store: None,
             session_store: None,
+            public_metrics: false,
         },
         ListenerRuntimeEnv::for_test(),
     )
@@ -956,6 +959,7 @@ async fn webhook_ingest_saturation_returns_retry_after() {
             routes: vec![webhook_route("/hooks/github")],
             tenant_store: None,
             session_store: None,
+            public_metrics: false,
         },
         ListenerRuntimeEnv::for_test().with_ingest_backpressure(IngestBackpressureConfig {
             global_capacity: 100,
@@ -1038,6 +1042,7 @@ async fn webhook_duplicate_delivery_is_dropped() {
             routes: vec![webhook_route("/hooks/github")],
             tenant_store: None,
             session_store: None,
+            public_metrics: false,
         },
         ListenerRuntimeEnv::for_test(),
     )
@@ -1114,6 +1119,7 @@ async fn webhook_dedupe_claim_uses_route_retention_days() {
             routes: vec![route],
             tenant_store: None,
             session_store: None,
+            public_metrics: false,
         },
         ListenerRuntimeEnv::for_test(),
     )

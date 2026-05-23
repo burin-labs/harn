@@ -43,6 +43,32 @@ impl SecretProvider for EnvSecretProvider {
         }
     }
 
+    /// Mutate the process environment so the secret is visible to
+    /// callers (and unfortunately to every child process spawned after
+    /// this point).
+    ///
+    /// # Safety / Soundness
+    ///
+    /// `std::env::set_var` is `unsafe` in Rust 2024 because the
+    /// underlying POSIX `setenv(3)` is not synchronized with concurrent
+    /// `getenv(3)` calls; another thread reading the environment at
+    /// the same moment can observe a half-updated or dangling pointer.
+    /// The harn host process drives a tokio runtime, so this hazard is
+    /// real even though no single call site currently triggers it. We
+    /// mark this `unsafe` block to flag the existing risk; the proper
+    /// fix is tracked as a follow-up — replace this with an in-process
+    /// `Mutex<HashMap<SecretId, SecretBytes>>` consulted by `get`, and
+    /// inject the secret narrowly via `Command::env(key, val)` at
+    /// spawn time so it does not leak into unrelated children.
+    ///
+    /// # Child-process leakage
+    ///
+    /// Beyond the soundness issue: once written here, the secret is
+    /// inherited by every subsequent `shell(...)`, `exec(...)`,
+    /// `tokio::process::Command::spawn`, and any tool we hand a child
+    /// process to. A `bash -c env` or a debugger attaching to a child
+    /// would see it. Treat this provider as a last-resort path; prefer
+    /// the keyring-backed provider when available.
     async fn put(&self, id: &SecretId, value: SecretBytes) -> Result<(), SecretError> {
         let env_name = self.env_var_name(id);
         let rendered = value.with_exposed(|bytes| {
@@ -53,7 +79,13 @@ impl SecretProvider for EnvSecretProvider {
                     message: format!("env secrets must be valid UTF-8: {error}"),
                 })
         })?;
-        std::env::set_var(&env_name, rendered);
+        // SAFETY: see the doc comment above. We accept the
+        // `setenv` data-race window as a known gap for the env-backed
+        // provider; the in-process Mutex<HashMap> replacement is
+        // tracked as a follow-up issue.
+        unsafe {
+            std::env::set_var(&env_name, rendered);
+        }
         Ok(())
     }
 

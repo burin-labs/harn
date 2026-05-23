@@ -19,6 +19,34 @@ pub const HARNPACK_MANIFEST_PATH: &str = "harnpack.json";
 
 const DEFAULT_HARNPACK_FILE_MODE: u32 = 0o644;
 
+/// Maximum decompressed size of a `.harnpack` archive. Matches the
+/// VM-level decompression cap in `stdlib/compression.rs`. Keeps a
+/// malicious bundle from exhausting memory during ingest (workflow
+/// bundles ride this exact path when harn-cloud accepts a plan
+/// transfer).
+const MAX_HARNPACK_DECOMPRESSED_BYTES: u64 = 100 * 1024 * 1024;
+
+/// Decompress zstd-compressed harnpack bytes, refusing to produce more
+/// than [`MAX_HARNPACK_DECOMPRESSED_BYTES`] of output. Returns
+/// [`WorkflowBundleErrorKind::InvalidArchive`] on overflow so callers
+/// can surface a clean rejection instead of OOMing the host.
+fn decompress_harnpack_zstd(bytes: &[u8]) -> Result<Vec<u8>, WorkflowBundleError> {
+    let mut decoder = zstd::stream::Decoder::new(Cursor::new(bytes))?;
+    let mut output = Vec::new();
+    let mut limited = (&mut decoder).take(MAX_HARNPACK_DECOMPRESSED_BYTES.saturating_add(1));
+    limited.read_to_end(&mut output)?;
+    if output.len() as u64 > MAX_HARNPACK_DECOMPRESSED_BYTES {
+        return Err(WorkflowBundleError::new(
+            WorkflowBundleErrorKind::InvalidArchive,
+            format!(
+                "harnpack zstd payload decompressed past max size ({} bytes); refusing to extract",
+                MAX_HARNPACK_DECOMPRESSED_BYTES
+            ),
+        ));
+    }
+    Ok(output)
+}
+
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
 #[serde(default)]
 pub struct WorkflowBundle {
@@ -504,7 +532,7 @@ pub fn load_workflow_bundle_any_version(
 ) -> Result<WorkflowBundle, WorkflowBundleError> {
     let bytes = fs::read(path)?;
     if path.extension().and_then(|extension| extension.to_str()) == Some("harnpack") {
-        let tar_bytes = zstd::stream::decode_all(Cursor::new(bytes))?;
+        let tar_bytes = decompress_harnpack_zstd(&bytes)?;
         let mut archive = tar::Archive::new(Cursor::new(tar_bytes));
         for entry in archive.entries()? {
             let mut entry = entry?;
@@ -685,7 +713,7 @@ pub fn build_harnpack(
 }
 
 pub fn read_harnpack(bytes: &[u8]) -> Result<HarnpackArchive, WorkflowBundleError> {
-    let tar_bytes = zstd::stream::decode_all(Cursor::new(bytes))?;
+    let tar_bytes = decompress_harnpack_zstd(bytes)?;
     let mut archive = tar::Archive::new(Cursor::new(tar_bytes));
     let mut manifest = None;
     let mut contents = Vec::new();

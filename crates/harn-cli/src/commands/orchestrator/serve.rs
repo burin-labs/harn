@@ -49,6 +49,7 @@ pub(crate) async fn run(args: OrchestratorServeArgs) -> Result<(), OrchestratorE
         },
         log_format: Some(log_format(args.log_format)),
         clock: harn_vm::clock::RealClock::arc(),
+        public_metrics: args.public_metrics,
     };
 
     let harness = OrchestratorHarness::start(config)

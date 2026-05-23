@@ -7,7 +7,7 @@ use std::sync::{OnceLock, RwLock};
 use std::time::{Duration as StdDuration, Instant};
 
 use jsonwebtoken::jwk::JwkSet;
-use jsonwebtoken::{decode, decode_header, DecodingKey, Validation};
+use jsonwebtoken::{decode, decode_header, Algorithm, DecodingKey, Validation};
 use serde::de::DeserializeOwned;
 use serde_json::Value as JsonValue;
 
@@ -81,6 +81,15 @@ pub struct JwtVerificationOptions {
     pub required_spec_claims: Vec<String>,
     pub jwks_cache_ttl: StdDuration,
     pub egress_label: &'static str,
+    /// Signing algorithm the caller expects this token to be signed
+    /// with. The verifier asserts `header.alg == expected_algorithm`
+    /// BEFORE constructing the `Validation` so an attacker-controlled
+    /// `alg` header cannot down/up-grade the verification algorithm
+    /// (the canonical "alg confusion" footgun). Defaults to RS256
+    /// (`Algorithm::RS256`) — change it explicitly via
+    /// [`JwtVerificationOptions::with_algorithm`] when a connector
+    /// uses HS256 / ES256 / etc.
+    pub expected_algorithm: Algorithm,
 }
 
 impl Default for JwtVerificationOptions {
@@ -91,6 +100,7 @@ impl Default for JwtVerificationOptions {
             required_spec_claims: Vec::new(),
             jwks_cache_ttl: DEFAULT_JWKS_CACHE_TTL,
             egress_label: "connector:jwks",
+            expected_algorithm: Algorithm::RS256,
         }
     }
 }
@@ -121,6 +131,15 @@ impl JwtVerificationOptions {
 
     pub fn with_jwks_cache_ttl(mut self, ttl: StdDuration) -> Self {
         self.jwks_cache_ttl = ttl;
+        self
+    }
+
+    /// Override the expected signing algorithm. Use this when the
+    /// connector you're verifying is known to sign with something
+    /// other than RS256 (e.g. HS256 for Slack-style shared secrets,
+    /// ES256 for some Apple flows).
+    pub fn with_algorithm(mut self, algorithm: Algorithm) -> Self {
+        self.expected_algorithm = algorithm;
         self
     }
 }
@@ -155,6 +174,18 @@ where
 {
     let header = decode_header(token)
         .map_err(|error| ConnectorError::invalid_signature(error.to_string()))?;
+    // Defense-in-depth against JWT "alg confusion": refuse to accept a
+    // token whose self-declared algorithm does not match what the
+    // caller said to expect. jsonwebtoken 10.x cross-checks JWK key
+    // type against `header.alg`, which closes the immediate bypass,
+    // but the canonical defense is to never trust `header.alg` for
+    // algorithm selection in the first place.
+    if header.alg != options.expected_algorithm {
+        return Err(ConnectorError::invalid_signature(format!(
+            "JWT header alg {:?} does not match expected {:?}",
+            header.alg, options.expected_algorithm
+        )));
+    }
     let jwks = resolve_jwks(http, source.clone(), options).await?;
     let jwks = match (source, header.kid.as_deref()) {
         (JwtKeySource::Url(jwks_url), Some(kid)) if jwks.find(kid).is_none() => {
@@ -165,7 +196,7 @@ where
     let jwk = jwk_for_header(&jwks, header.kid.as_deref())?;
     let key = DecodingKey::from_jwk(jwk)
         .map_err(|error| ConnectorError::invalid_signature(error.to_string()))?;
-    let mut validation = Validation::new(header.alg);
+    let mut validation = Validation::new(options.expected_algorithm);
     if !options.required_spec_claims.is_empty() {
         let claims = options
             .required_spec_claims
@@ -368,6 +399,7 @@ mod tests {
             &hs_token(),
             JwtKeySource::Inline(&hs_jwks()),
             &JwtVerificationOptions::default()
+                .with_algorithm(Algorithm::HS256)
                 .with_issuer("issuer")
                 .with_audience("audience")
                 .require_spec_claims(["exp", "iss", "aud"]),
@@ -375,6 +407,32 @@ mod tests {
         .await
         .unwrap();
         assert_eq!(claims.jti, "jwt-1");
+    }
+
+    #[tokio::test]
+    async fn jwt_claims_reject_alg_confusion() {
+        // Token is signed with HS256; verifier is told to expect
+        // RS256. Even though jsonwebtoken would catch this downstream
+        // because the JWK is symmetric, our up-front guard refuses
+        // before constructing `Validation`, which is the canonical
+        // defense against alg-confusion exploits.
+        let http = reqwest::Client::new();
+        let result = verify_jwt_claims::<Claims>(
+            &http,
+            &hs_token(),
+            JwtKeySource::Inline(&hs_jwks()),
+            &JwtVerificationOptions::default()
+                .with_algorithm(Algorithm::RS256)
+                .with_issuer("issuer")
+                .with_audience("audience"),
+        )
+        .await;
+        let error = result.expect_err("HS256 token should not verify under RS256");
+        let message = error.to_string();
+        assert!(
+            message.contains("alg") && message.contains("expected"),
+            "unexpected error: {message}"
+        );
     }
 
     #[tokio::test]

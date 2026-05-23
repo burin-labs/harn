@@ -36,9 +36,17 @@ uuid = { version = "1", features = ["v4", "v7"] }
 default = []
 hostlib = ["dep:harn-hostlib"]
 
+[dependencies.jsonwebtoken]
+# Used by the a2a-push OIDC verifier to opt callers into a non-default
+# JWT signing algorithm (e.g. HS256 for HMAC providers; default is
+# RS256). harn-vm already pins this transitive dep, but we name it
+# directly so the parse helper can refer to `jsonwebtoken::Algorithm`.
+version = "10"
+default-features = false
+features = ["use_pem", "aws_lc_rs"]
+
 [dev-dependencies]
 filetime = "0.2"
 hex = "0.4"
-jsonwebtoken = { version = "10", default-features = false, features = ["use_pem", "aws_lc_rs"] }
 tempfile = "3"
 tower = { version = "0.5", features = ["util"] }

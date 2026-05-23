@@ -59,11 +59,25 @@ WORKDIR /var/lib/harn
 # HARN_ORCHESTRATOR_API_KEYS, HARN_ORCHESTRATOR_HMAC_SECRET,
 # HARN_PROVIDER_*, HARN_SECRET_*,
 # OPENAI_API_KEY, ANTHROPIC_API_KEY, or similar provider-specific env vars.
+#
+# HARN_ORCHESTRATOR_LISTEN intentionally defaults to loopback so a bare
+# `docker run -p 8080:8080 burin-labs/harn` cannot accidentally expose
+# an unauthenticated orchestrator on the host's public interface.
+# Operators that DO want the orchestrator on a public interface must
+# opt in explicitly AND configure auth:
+#
+#   docker run -p 8080:8080 \
+#     -e HARN_ORCHESTRATOR_LISTEN=0.0.0.0:8080 \
+#     -e HARN_ORCHESTRATOR_API_KEYS=<key1,key2> \
+#     burin-labs/harn
+#
+# When HARN_ORCHESTRATOR_LISTEN is non-loopback and no API key/HMAC is
+# configured, the orchestrator refuses to start.
 ENV HARN_SECRET_PROVIDERS=env \
     HARN_ORCHESTRATOR_API_KEYS= \
     HARN_ORCHESTRATOR_HMAC_SECRET= \
     HARN_ORCHESTRATOR_MANIFEST=/etc/harn/triggers.toml \
-    HARN_ORCHESTRATOR_LISTEN=0.0.0.0:8080 \
+    HARN_ORCHESTRATOR_LISTEN=127.0.0.1:8080 \
     HARN_ORCHESTRATOR_STATE_DIR=/var/lib/harn/state \
     RUST_LOG=info
 

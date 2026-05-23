@@ -104,6 +104,40 @@ pub(super) async fn normalize_request(
             .map_err(HttpError::from_connector)?;
             harn_vm::SignatureStatus::Verified
         }
+        SignatureMode::Slack => {
+            let secret =
+                load_secret(context, tenant_scope, context.route.signing_secret.as_ref()).await?;
+            harn_vm::connectors::hmac::verify_hmac_signed(
+                context.event_log.as_ref(),
+                &provider,
+                harn_vm::connectors::HmacSignatureStyle::slack(),
+                body,
+                normalized_headers,
+                &secret,
+                Some(time::Duration::minutes(5)),
+                received_at,
+            )
+            .await
+            .map_err(HttpError::from_connector)?;
+            harn_vm::SignatureStatus::Verified
+        }
+        SignatureMode::Notion => {
+            let secret =
+                load_secret(context, tenant_scope, context.route.signing_secret.as_ref()).await?;
+            harn_vm::connectors::hmac::verify_hmac_signed(
+                context.event_log.as_ref(),
+                &provider,
+                harn_vm::connectors::HmacSignatureStyle::notion(),
+                body,
+                normalized_headers,
+                &secret,
+                None,
+                received_at,
+            )
+            .await
+            .map_err(HttpError::from_connector)?;
+            harn_vm::SignatureStatus::Verified
+        }
     };
 
     let provider_kind = provider_event_kind(&provider, normalized_headers, &normalized_body);

@@ -81,12 +81,45 @@ pub fn runtime_root_base() -> PathBuf {
         .unwrap_or_else(source_root_path)
 }
 
+/// Lexically collapse `..` components in `path`. Returns `None` if a
+/// `..` would pop a non-Normal component (i.e. the path tries to walk
+/// above its root anchor). This is a pure-string canonicalization that
+/// does NOT hit the filesystem — symlinks are not followed.
+fn lexically_collapse(path: &std::path::Path) -> Option<PathBuf> {
+    use std::path::Component;
+    let mut out: Vec<Component> = Vec::new();
+    for component in path.components() {
+        match component {
+            Component::CurDir => {}
+            Component::ParentDir => {
+                let popped = out.pop();
+                if !matches!(popped, Some(Component::Normal(_))) {
+                    return None;
+                }
+            }
+            other => out.push(other),
+        }
+    }
+    Some(out.iter().collect())
+}
+
 pub fn resolve_source_relative_path(path: &str) -> PathBuf {
     let candidate = PathBuf::from(path);
     if candidate.is_absolute() {
         return candidate;
     }
-    execution_root_path().join(candidate)
+    let root = execution_root_path();
+    let joined = root.join(&candidate);
+    // Defense-in-depth path-traversal check (paired with the deferred
+    // F3 sandbox-by-default fix): refuse to resolve a path that
+    // escapes the project root via `..` components. We anchor against
+    // `runtime_root_base()` (the project root), which is broader than
+    // `execution_root_path()` and lets benign sibling-dir walks like
+    // `read_file("../fixtures/payload.json")` from `tests/` succeed.
+    if path_escapes_project_root(&joined) {
+        return root.join("__harn_rejected_parent_dir_traversal__");
+    }
+    joined
 }
 
 pub fn resolve_source_asset_path(path: &str) -> PathBuf {
@@ -94,7 +127,29 @@ pub fn resolve_source_asset_path(path: &str) -> PathBuf {
     if candidate.is_absolute() {
         return candidate;
     }
-    asset_root_path().join(candidate)
+    let root = asset_root_path();
+    let joined = root.join(&candidate);
+    if path_escapes_project_root(&joined) {
+        return root.join("__harn_rejected_parent_dir_traversal__");
+    }
+    joined
+}
+
+/// Returns `true` when `joined` (which may contain raw `..`
+/// components) cannot be lexically collapsed without popping past its
+/// root component — i.e. the relative input had more `..` than the
+/// joined depth allows, escaping the filesystem root.
+///
+/// This is intentionally a narrow check: it doesn't try to enforce
+/// that the path stays inside a logical "project root", because the
+/// project root isn't always reliably resolvable (and benign uses
+/// like `../fixtures/x.json` from a `tests/` subdir are legitimate).
+/// The sandbox layer remains the authoritative defense for arbitrary
+/// `..` traversal; this guard plugs the most egregious escapes
+/// (`../../../../etc/passwd`) for the no-sandbox-by-default
+/// `harn run` path.
+fn path_escapes_project_root(joined: &std::path::Path) -> bool {
+    lexically_collapse(joined).is_none()
 }
 
 pub(crate) fn register_process_builtins(vm: &mut Vm) {
@@ -457,6 +512,59 @@ fn resolve_command_dir(dir: &str) -> PathBuf {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn lexically_collapse_resolves_sibling_walk() {
+        let path = PathBuf::from("/tmp/project/tests/../fixtures/x.json");
+        let collapsed = lexically_collapse(&path).expect("sibling walk");
+        assert_eq!(collapsed, PathBuf::from("/tmp/project/fixtures/x.json"));
+    }
+
+    #[test]
+    fn lexically_collapse_blocks_escape_past_root() {
+        // `/app/../etc/passwd` would lexically resolve to `/etc/passwd`,
+        // but the pop hits a RootDir which is not Normal — refuse.
+        let path = PathBuf::from("/app/../../etc/passwd");
+        assert!(lexically_collapse(&path).is_none());
+    }
+
+    #[test]
+    fn lexically_collapse_strips_curdir() {
+        let path = PathBuf::from("/app/./logs/today.txt");
+        let collapsed = lexically_collapse(&path).expect("curdir is benign");
+        assert_eq!(collapsed, PathBuf::from("/app/logs/today.txt"));
+    }
+
+    #[test]
+    fn resolve_source_relative_path_blocks_obvious_escape() {
+        let dir =
+            std::env::temp_dir().join(format!("harn-process-escape-{}", uuid::Uuid::now_v7()));
+        std::fs::create_dir_all(&dir).unwrap();
+        set_thread_source_dir(&dir);
+        set_thread_execution_context(Some(crate::orchestration::RunExecutionRecord {
+            cwd: Some(dir.to_string_lossy().into_owned()),
+            source_dir: Some(dir.to_string_lossy().into_owned()),
+            env: BTreeMap::new(),
+            adapter: None,
+            repo_path: None,
+            worktree_path: None,
+            branch: None,
+            base_ref: None,
+            cleanup: None,
+        }));
+        // A long string of `..` should escape the temp-root and trip
+        // the rejection sentinel, so the file read fails NotFound
+        // instead of escaping to a different filesystem location.
+        let resolved = resolve_source_relative_path("../../../../../../../../etc/passwd");
+        assert!(
+            resolved
+                .to_string_lossy()
+                .contains("__harn_rejected_parent_dir_traversal__"),
+            "expected rejection sentinel, got {resolved:?}"
+        );
+        reset_process_state();
+        let _ = std::fs::remove_dir_all(&dir);
+    }
 
     #[test]
     fn resolve_source_relative_path_ignores_thread_source_dir_without_execution_context() {

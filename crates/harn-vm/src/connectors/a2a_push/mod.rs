@@ -45,6 +45,13 @@ struct ActivatedA2aPushBinding {
     jwks_url: Option<String>,
     inline_jwks: Option<JwkSet>,
     auth_scheme: A2aPushAuthScheme,
+    /// Signing algorithm expected on inbound JWTs. Defaults to RS256
+    /// because Google A2A push notifications use OIDC-style asymmetric
+    /// signing. Tests + connectors that use HMAC tokens can opt in via
+    /// `a2a_push.algorithm = "HS256"`. The verifier rejects mismatched
+    /// `header.alg` before constructing the `Validation` (closes JWT
+    /// alg-confusion).
+    jwt_algorithm: jsonwebtoken::Algorithm,
 }
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -234,6 +241,7 @@ impl A2aPushConnector {
             token,
             source,
             &JwtVerificationOptions::default()
+                .with_algorithm(binding.jwt_algorithm)
                 .with_issuer(required(binding.expected_iss.as_deref(), "expected_iss")?)
                 .with_audience(required(binding.expected_aud.as_deref(), "expected_aud")?)
                 .require_spec_claims(["exp", "iss", "aud"])
@@ -375,6 +383,7 @@ impl ActivatedA2aPushBinding {
                 binding.binding_id
             )));
         }
+        let jwt_algorithm = parse_a2a_push_algorithm(push.algorithm.as_deref())?;
         Ok(Self {
             binding_id: binding.binding_id.clone(),
             expected_iss: push.expected_iss,
@@ -383,6 +392,7 @@ impl ActivatedA2aPushBinding {
             jwks_url: push.jwks_url,
             inline_jwks: push.inline_jwks,
             auth_scheme,
+            jwt_algorithm,
         })
     }
 }
@@ -403,6 +413,8 @@ struct A2aPushConfig {
     auth_scheme: Option<String>,
     expected_token: Option<String>,
     token: Option<String>,
+    /// Optional explicit JWT algorithm. Defaults to RS256 when unset.
+    algorithm: Option<String>,
 }
 
 impl A2aPushConfig {
@@ -414,6 +426,28 @@ impl A2aPushConfig {
             && self.inline_jwks.is_none()
             && self.expected_token.is_none()
             && self.token.is_none()
+            && self.algorithm.is_none()
+    }
+}
+
+fn parse_a2a_push_algorithm(raw: Option<&str>) -> Result<jsonwebtoken::Algorithm, ConnectorError> {
+    use jsonwebtoken::Algorithm;
+    match raw.map(str::trim).unwrap_or("RS256") {
+        "HS256" => Ok(Algorithm::HS256),
+        "HS384" => Ok(Algorithm::HS384),
+        "HS512" => Ok(Algorithm::HS512),
+        "RS256" => Ok(Algorithm::RS256),
+        "RS384" => Ok(Algorithm::RS384),
+        "RS512" => Ok(Algorithm::RS512),
+        "ES256" => Ok(Algorithm::ES256),
+        "ES384" => Ok(Algorithm::ES384),
+        "PS256" => Ok(Algorithm::PS256),
+        "PS384" => Ok(Algorithm::PS384),
+        "PS512" => Ok(Algorithm::PS512),
+        "EdDSA" => Ok(Algorithm::EdDSA),
+        other => Err(ConnectorError::Activation(format!(
+            "unsupported a2a-push JWT algorithm `{other}`"
+        ))),
     }
 }
 
@@ -685,6 +719,10 @@ mod tests {
                     "expected_aud": "https://orchestrator.test/a2a/review",
                     "expected_token": "opaque-token",
                     "inline_jwks": hs_jwks(),
+                    // Test fixture uses HS256 (symmetric) so the JWKS
+                    // can live inline; production a2a-push bindings
+                    // default to RS256 with a remote JWKS.
+                    "algorithm": "HS256",
                 }
             }),
         }

@@ -282,7 +282,12 @@ async fn push_delivery_validates_oidc_id_token_before_callback() {
             "jwks_url": format!("{}/jwks", server.base_url),
             "issuer": "https://issuer.example",
             "client_id": "push-client",
-            "client_secret": "secret"
+            "client_secret": "secret",
+            // Test fixture mints HS256 tokens so the JWKS can be served
+            // inline; production OIDC providers ship RS256 (the
+            // default), which is why the JWT verifier requires opting
+            // in here.
+            "algorithm": "HS256"
         }
     });
 
@@ -325,7 +330,8 @@ async fn push_delivery_rejects_oidc_bad_signature_without_callback() {
             "token_url": format!("{}/token", server.base_url),
             "jwks_url": format!("{}/jwks", server.base_url),
             "issuer": "https://issuer.example",
-            "client_id": "push-client"
+            "client_id": "push-client",
+            "algorithm": "HS256"
         }
     });
 
@@ -376,7 +382,8 @@ async fn push_delivery_rejects_expired_oidc_id_token_without_callback() {
             "token_url": format!("{}/token", server.base_url),
             "jwks_url": format!("{}/jwks", server.base_url),
             "issuer": "https://issuer.example",
-            "client_id": "push-client"
+            "client_id": "push-client",
+            "algorithm": "HS256"
         }
     });
 
@@ -447,7 +454,8 @@ async fn push_delivery_refetches_jwks_when_oidc_kid_rotates() {
             "token_url": format!("{}/token", server.base_url),
             "jwks_url": format!("{}/jwks", server.base_url),
             "issuer": "https://issuer.example",
-            "client_id": "push-client"
+            "client_id": "push-client",
+            "algorithm": "HS256"
         }
     });
 

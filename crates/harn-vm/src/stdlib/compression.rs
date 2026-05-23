@@ -13,6 +13,70 @@ const DEFAULT_GZIP_LEVEL: i64 = 6;
 const DEFAULT_ZSTD_LEVEL: i64 = 3;
 const DEFAULT_BROTLI_QUALITY: i64 = 11;
 const DEFAULT_TAR_MODE: i64 = 0o644;
+/// Default decompression bomb cap: refuse to expand any single archive
+/// or stream past 100 MiB unless the caller explicitly opts in with
+/// `max_decompressed_bytes`. Picked to comfortably cover normal
+/// payloads (LLM responses, workflow bundles, screenshot tarballs) but
+/// stay well under the smallest realistic memory budget.
+pub(crate) const MAX_DECOMPRESSED_BYTES: u64 = 100 * 1024 * 1024;
+
+/// Resolve a `max_decompressed_bytes` (alias `maxDecompressedBytes`)
+/// option from the args dict at `index`, falling back to
+/// [`MAX_DECOMPRESSED_BYTES`] when absent.
+fn decompress_cap(args: &[VmValue], index: usize, builtin: &str) -> Result<u64, VmError> {
+    let Some(value) = args.get(index) else {
+        return Ok(MAX_DECOMPRESSED_BYTES);
+    };
+    let options = match value {
+        VmValue::Nil => return Ok(MAX_DECOMPRESSED_BYTES),
+        VmValue::Dict(options) => options.as_ref(),
+        other => {
+            return Err(builtin_error(
+                builtin,
+                format!("options must be a dict, got {}", other.type_name()),
+            ));
+        }
+    };
+    let raw = options
+        .get("max_decompressed_bytes")
+        .or_else(|| options.get("maxDecompressedBytes"));
+    match raw {
+        None | Some(VmValue::Nil) => Ok(MAX_DECOMPRESSED_BYTES),
+        Some(VmValue::Int(value)) if *value > 0 => Ok(*value as u64),
+        Some(VmValue::Int(_)) => Err(builtin_error(
+            builtin,
+            "max_decompressed_bytes must be a positive integer",
+        )),
+        Some(other) => Err(builtin_error(
+            builtin,
+            format!(
+                "max_decompressed_bytes must be a positive integer, got {}",
+                other.type_name()
+            ),
+        )),
+    }
+}
+
+/// Decompress `source` into a `Vec<u8>`, refusing to grow past `cap`.
+/// Returns a clean error message instead of OOMing when the stream
+/// (gzip/zstd/brotli) expands past the configured limit.
+fn read_with_cap<R: Read>(source: &mut R, cap: u64, builtin: &str) -> Result<Vec<u8>, VmError> {
+    let mut limited = source.take(cap.saturating_add(1));
+    let mut output = Vec::new();
+    limited
+        .read_to_end(&mut output)
+        .map_err(|error| builtin_error(builtin, error))?;
+    if output.len() as u64 > cap {
+        return Err(builtin_error(
+            builtin,
+            format!(
+                "decompressed output exceeded max_decompressed_bytes ({cap}); refusing to \
+                 allocate further to avoid a decompression-bomb OOM"
+            ),
+        ));
+    }
+    Ok(output)
+}
 
 fn runtime_error(message: impl Into<String>) -> VmError {
     VmError::Runtime(message.into())
@@ -214,11 +278,9 @@ fn gzip_encode_builtin(args: &[VmValue]) -> Result<VmValue, VmError> {
 
 fn gzip_decode_builtin(args: &[VmValue]) -> Result<VmValue, VmError> {
     let input = expect_bytes(args, 0, "gzip_decode")?;
+    let cap = decompress_cap(args, 1, "gzip_decode")?;
     let mut decoder = GzDecoder::new(input);
-    let mut output = Vec::new();
-    decoder
-        .read_to_end(&mut output)
-        .map_err(|error| builtin_error("gzip_decode", error))?;
+    let output = read_with_cap(&mut decoder, cap, "gzip_decode")?;
     Ok(bytes_value(output))
 }
 
@@ -240,9 +302,11 @@ fn zstd_encode_builtin(args: &[VmValue]) -> Result<VmValue, VmError> {
 
 fn zstd_decode_builtin(args: &[VmValue]) -> Result<VmValue, VmError> {
     let input = expect_bytes(args, 0, "zstd_decode")?;
-    zstd::stream::decode_all(Cursor::new(input))
-        .map(bytes_value)
-        .map_err(|error| builtin_error("zstd_decode", error))
+    let cap = decompress_cap(args, 1, "zstd_decode")?;
+    let mut decoder = zstd::stream::Decoder::new(Cursor::new(input))
+        .map_err(|error| builtin_error("zstd_decode", error))?;
+    let output = read_with_cap(&mut decoder, cap, "zstd_decode")?;
+    Ok(bytes_value(output))
 }
 
 fn brotli_encode_builtin(args: &[VmValue]) -> Result<VmValue, VmError> {
@@ -265,11 +329,9 @@ fn brotli_encode_builtin(args: &[VmValue]) -> Result<VmValue, VmError> {
 
 fn brotli_decode_builtin(args: &[VmValue]) -> Result<VmValue, VmError> {
     let input = expect_bytes(args, 0, "brotli_decode")?;
+    let cap = decompress_cap(args, 1, "brotli_decode")?;
     let mut reader = brotli::Decompressor::new(Cursor::new(input), 4096);
-    let mut output = Vec::new();
-    reader
-        .read_to_end(&mut output)
-        .map_err(|error| builtin_error("brotli_decode", error))?;
+    let output = read_with_cap(&mut reader, cap, "brotli_decode")?;
     Ok(bytes_value(output))
 }
 
@@ -309,16 +371,35 @@ fn tar_create_builtin(args: &[VmValue]) -> Result<VmValue, VmError> {
 
 fn tar_extract_builtin(args: &[VmValue]) -> Result<VmValue, VmError> {
     let input = expect_bytes(args, 0, "tar_extract")?;
+    let cap = decompress_cap(args, 1, "tar_extract")?;
     let mut archive = tar::Archive::new(Cursor::new(input));
     let entries = archive
         .entries()
         .map_err(|error| builtin_error("tar_extract", error))?;
     let mut output = Vec::new();
+    let mut total_extracted: u64 = 0;
 
     for entry in entries {
         let mut entry = entry.map_err(|error| builtin_error("tar_extract", error))?;
         if entry.header().entry_type().is_dir() {
             continue;
+        }
+        // tar headers carry the entry's declared size; reject obvious
+        // attacker-shaped values (e.g. u64::MAX) BEFORE allocating, so
+        // a maliciously-crafted header cannot trigger a Vec reservation
+        // that triggers an allocator abort.
+        let declared_size = entry
+            .header()
+            .size()
+            .map_err(|error| builtin_error("tar_extract", error))?;
+        if declared_size > cap || declared_size.saturating_add(total_extracted) > cap {
+            return Err(builtin_error(
+                "tar_extract",
+                format!(
+                    "tar entry declares size {declared_size} which exceeds \
+                     max_decompressed_bytes ({cap}); refusing to extract"
+                ),
+            ));
         }
         let path = entry
             .path()
@@ -327,10 +408,13 @@ fn tar_extract_builtin(args: &[VmValue]) -> Result<VmValue, VmError> {
             .ok_or_else(|| builtin_error("tar_extract", "entry path is not valid UTF-8"))?
             .to_string();
         let mode = entry.header().mode().unwrap_or(DEFAULT_TAR_MODE as u32) as i64;
-        let mut content = Vec::new();
-        entry
-            .read_to_end(&mut content)
-            .map_err(|error| builtin_error("tar_extract", error))?;
+        // Even when the header says the entry is small, the actual
+        // body could be larger (gnu tar quirk, corrupt archive). Guard
+        // the read with the remaining cap so we never go past the
+        // overall limit.
+        let remaining = cap.saturating_sub(total_extracted);
+        let content = read_with_cap(&mut entry, remaining, "tar_extract")?;
+        total_extracted = total_extracted.saturating_add(content.len() as u64);
 
         let mut fields = BTreeMap::new();
         fields.insert("content".to_string(), bytes_value(content));
@@ -368,10 +452,12 @@ fn zip_create_builtin(args: &[VmValue]) -> Result<VmValue, VmError> {
 
 fn zip_extract_builtin(args: &[VmValue]) -> Result<VmValue, VmError> {
     let input = expect_bytes(args, 0, "zip_extract")?;
+    let cap = decompress_cap(args, 1, "zip_extract")?;
     let cursor = Cursor::new(input);
     let mut archive =
         zip::ZipArchive::new(cursor).map_err(|error| builtin_error("zip_extract", error))?;
     let mut output = Vec::new();
+    let mut total_extracted: u64 = 0;
 
     for index in 0..archive.len() {
         let mut file = archive
@@ -380,10 +466,23 @@ fn zip_extract_builtin(args: &[VmValue]) -> Result<VmValue, VmError> {
         if file.is_dir() {
             continue;
         }
+        // Reject entries that claim more uncompressed bytes than the
+        // configured cap up-front (and reject the cumulative-overflow
+        // case as well), so a zip bomb can't drain memory.
+        let declared_size = file.size();
+        if declared_size > cap || declared_size.saturating_add(total_extracted) > cap {
+            return Err(builtin_error(
+                "zip_extract",
+                format!(
+                    "zip entry declares uncompressed size {declared_size} which exceeds \
+                     max_decompressed_bytes ({cap}); refusing to extract"
+                ),
+            ));
+        }
         let path = file.name().to_string();
-        let mut content = Vec::new();
-        file.read_to_end(&mut content)
-            .map_err(|error| builtin_error("zip_extract", error))?;
+        let remaining = cap.saturating_sub(total_extracted);
+        let content = read_with_cap(&mut file, remaining, "zip_extract")?;
+        total_extracted = total_extracted.saturating_add(content.len() as u64);
 
         let mut fields = BTreeMap::new();
         fields.insert("content".to_string(), bytes_value(content));
@@ -433,6 +532,57 @@ mod tests {
         let encoded = call(&mut vm, "gzip_encode", vec![text("hello"), VmValue::Int(1)]).unwrap();
         let decoded = call(&mut vm, "gzip_decode", vec![encoded]).unwrap();
         assert_eq!(decoded.as_bytes().unwrap(), b"hello");
+    }
+
+    #[test]
+    fn gzip_decode_rejects_output_past_cap() {
+        let mut vm = vm();
+        // 64 KiB of zeros compresses to a few hundred bytes (~64x); cap
+        // it at 1 KiB and confirm the decoder refuses, rather than
+        // happily returning the full output.
+        let payload = vec![0u8; 64 * 1024];
+        let encoded = call(
+            &mut vm,
+            "gzip_encode",
+            vec![VmValue::Bytes(Rc::new(payload)), VmValue::Int(6)],
+        )
+        .unwrap();
+        let mut options = BTreeMap::new();
+        options.insert("max_decompressed_bytes".to_string(), VmValue::Int(1024));
+        let result = call(
+            &mut vm,
+            "gzip_decode",
+            vec![encoded, VmValue::Dict(Rc::new(options))],
+        );
+        let err = result.expect_err("gzip_decode should reject output past cap");
+        let message = match err {
+            VmError::Runtime(message) => message,
+            other => panic!("expected Runtime error, got {other:?}"),
+        };
+        assert!(
+            message.contains("max_decompressed_bytes"),
+            "unexpected error: {message}"
+        );
+    }
+
+    #[test]
+    fn zstd_decode_rejects_output_past_cap() {
+        let mut vm = vm();
+        let payload = vec![0u8; 64 * 1024];
+        let encoded = call(
+            &mut vm,
+            "zstd_encode",
+            vec![VmValue::Bytes(Rc::new(payload)), VmValue::Int(3)],
+        )
+        .unwrap();
+        let mut options = BTreeMap::new();
+        options.insert("max_decompressed_bytes".to_string(), VmValue::Int(1024));
+        let result = call(
+            &mut vm,
+            "zstd_decode",
+            vec![encoded, VmValue::Dict(Rc::new(options))],
+        );
+        assert!(result.is_err(), "zstd_decode should reject output past cap");
     }
 
     #[test]

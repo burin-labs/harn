@@ -261,19 +261,50 @@ pub(super) async fn fetch_oidc_id_token(
     let audience = string_field(auth, &["audience", "aud"])
         .or_else(|| string_field(auth, &["client_id", "clientId"]))
         .unwrap_or(webhook_url);
+    // Default to RS256 — the canonical OIDC ID-token signing algorithm
+    // — but let push configurations opt into HMAC variants for tests
+    // and providers that don't ship asymmetric keys. The verifier
+    // refuses to accept a token whose `header.alg` does not match what
+    // the caller asked for, which closes the JWT alg-confusion attack
+    // surface even though jsonwebtoken 10.x cross-checks key type.
+    let mut verify_options = JwtVerificationOptions::default()
+        .with_issuer(issuer)
+        .with_audience(audience)
+        .require_spec_claims(["exp", "iss", "aud"])
+        .with_egress_label("a2a_push_oidc_jwks");
+    if let Some(raw_algorithm) = string_field(auth, &["algorithm", "alg"]) {
+        verify_options = verify_options.with_algorithm(parse_oidc_jwt_algorithm(raw_algorithm)?);
+    }
     harn_vm::connectors::verify_jwt_json(
         client,
         id_token,
         JwtKeySource::Url(&metadata.jwks_uri),
-        &JwtVerificationOptions::default()
-            .with_issuer(issuer)
-            .with_audience(audience)
-            .require_spec_claims(["exp", "iss", "aud"])
-            .with_egress_label("a2a_push_oidc_jwks"),
+        &verify_options,
     )
     .await
     .map_err(|error| PushDeliveryError::Auth(format!("validate OIDC ID token: {error}")))?;
     Ok(id_token.to_string())
+}
+
+fn parse_oidc_jwt_algorithm(value: &str) -> Result<jsonwebtoken::Algorithm, PushDeliveryError> {
+    use jsonwebtoken::Algorithm;
+    match value.trim() {
+        "HS256" => Ok(Algorithm::HS256),
+        "HS384" => Ok(Algorithm::HS384),
+        "HS512" => Ok(Algorithm::HS512),
+        "RS256" => Ok(Algorithm::RS256),
+        "RS384" => Ok(Algorithm::RS384),
+        "RS512" => Ok(Algorithm::RS512),
+        "ES256" => Ok(Algorithm::ES256),
+        "ES384" => Ok(Algorithm::ES384),
+        "PS256" => Ok(Algorithm::PS256),
+        "PS384" => Ok(Algorithm::PS384),
+        "PS512" => Ok(Algorithm::PS512),
+        "EdDSA" => Ok(Algorithm::EdDSA),
+        other => Err(PushDeliveryError::Config(format!(
+            "unsupported OIDC JWT algorithm `{other}`"
+        ))),
+    }
 }
 
 pub(super) async fn fetch_oauth2_token_response(
