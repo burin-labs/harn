@@ -410,6 +410,8 @@ Imports starting with `std/` load embedded stdlib modules:
   agent_state_handoff)
 - `import "std/agent/progress"` — agent progress narration and task-list
   helpers (agent_progress, agent_progress_tool)
+- `import "std/agent/fact"` — typed fact envelopes over durable memory
+  (store_fact, recall_facts, invalidate_facts)
 - `import "std/memory"` — append-only durable memory helpers
   (memory_store, memory_recall, memory_summarize, memory_forget)
 - `import "std/trust"` — TrustGraph query and policy helpers
@@ -5303,6 +5305,29 @@ LLM prose can pass `summary.records` to `llm_call`.
 tombstone event. Predicates may be a string (substring match against searchable
 record text) or a dict using any combination of `id`, `key`, `tag` / `tags`,
 and `query`; all provided dict predicates must match.
+
+### std/agent/fact module
+
+```harn
+import { store_fact, recall_facts, invalidate_facts } from "std/agent/fact"
+```
+
+Provides typed `harn.fact.v1` assertions on top of `std/memory`. A fact contains
+`kind`, `claim`, `evidence`, `confidence`, `provenance`, optional
+`valid_until`, and `asserted_at`. Kinds normalize to `observation`, `claim`,
+`hypothesis`, `decision`, or `constraint`; evidence kinds normalize to
+`trace_ref`, `file_range`, `tool_output`, or `user_input`.
+
+| Function | Notes |
+|---|---|
+| `fact(input, options?)` / `fact_validate(input)` | Normalize and validate a `harn.fact.v1` envelope; validation failures include `HARN-FACT-NNN` codes |
+| `fact_namespace(scope?)` | Map `project`, `workspace`, or `user` to the default fact namespace, defaulting to `project/facts` |
+| `fact_id(kind, claim, evidence?, provenance?)` | Build a stable `fact_...` id from normalized assertion fields |
+| `fact_key(fact)` | Return the reserved `fact:<kind>:<id>` memory key |
+| `fact_tags(fact, tags?)` | Return `fact`, `fact:<kind>`, `schema:harn.fact.v1`, generic and kind-scoped evidence tags, and caller tags |
+| `store_fact(input, options?)` | Store the fact as `MemoryRecord.value`, using the fact id as the memory record id |
+| `recall_facts(query, kind?, min_confidence?, scope?)` | Recall normalized facts and filter by kind/confidence; `scope` may be a scope string or an options dict with normal memory options |
+| `invalidate_facts(predicate, scope?)` | Append memory tombstones; predicates accept exact `fact_...` ids or dicts with `id`, `key`, `kind`, `claim`, `query`, `tag`, `tags`, `evidence_ref`, or `evidence` |
 
 ### std/postgres module
 
