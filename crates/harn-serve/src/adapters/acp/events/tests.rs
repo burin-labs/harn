@@ -172,6 +172,13 @@ fn extension_fixture_events() -> Vec<AgentEvent> {
             estimated_tokens_before: 100,
             estimated_tokens_after: 40,
             snapshot_asset_id: Some("asset-1".to_string()),
+            instruction_mode: Some("extend".to_string()),
+            instruction_source: Some("host".to_string()),
+            compaction_policy: Some(serde_json::json!({
+                "instructions": "Preserve failing tests.",
+                "instruction_mode": "extend",
+                "instruction_source": "host"
+            })),
         },
         AgentEvent::ReminderEmitted {
             session_id: "session-1".to_string(),
@@ -785,6 +792,9 @@ async fn forwarded_agent_events_serialize_as_session_updates() {
             estimated_tokens_before: 100,
             estimated_tokens_after: 40,
             snapshot_asset_id: Some("asset-1".to_string()),
+            instruction_mode: None,
+            instruction_source: None,
+            compaction_policy: None,
         },
         AgentEvent::Handoff {
             session_id: "session-1".to_string(),
@@ -1293,6 +1303,9 @@ async fn vendor_extension_session_update_fields_live_under_meta_harn() {
                 "estimatedTokensBefore",
                 "estimatedTokensAfter",
                 "snapshotAssetId",
+                "instructionMode",
+                "instructionSource",
+                "compactionPolicy",
             ],
         ),
         ("reminder_emitted", &["reminder"]),

@@ -107,7 +107,7 @@ that route on it keep working unchanged. Concretely:
 | `log`                  | `level`, `message`, `fields`                                                                                                           |
 | `fs_watch`             | `subscriptionId`, `events`                                                                                                             |
 | `worker_update`        | `workerId`, `workerName`, `workerTask`, `workerMode`, `event`, `status`, `terminal`, `metadata`, `audit`                               |
-| `transcript_compacted` | `mode`, `strategy`, `archivedMessages`, `estimatedTokensBefore`, `estimatedTokensAfter`, `snapshotAssetId`                             |
+| `transcript_compacted` | `mode`, `strategy`, `archivedMessages`, `estimatedTokensBefore`, `estimatedTokensAfter`, `snapshotAssetId`, `instructionMode`, `instructionSource`, `compactionPolicy` |
 | `handoff`              | `handoffId`, `artifactId`, `handoff`                                                                                                   |
 | `skill_activated`      | `skillName`, `iteration`, `reason`                                                                                                     |
 | `skill_deactivated`    | `skillName`, `iteration`                                                                                                               |

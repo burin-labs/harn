@@ -244,10 +244,11 @@ Same as `llm_call`, plus additional options:
 | `wake_interval_ms` | int | nil | Fixed timer wake interval for daemon loops |
 | `watch_paths` | list/string | nil | Files to poll for mtime changes while idle |
 | `consolidate_on_idle` | bool | `false` | Run transcript auto-compaction before persisting an idle daemon snapshot |
-| `compaction` | string/dict/bool | `{strategy: "hybrid", keep_last_n: 10}` | Agent-loop context-window policy. Use `"none"` or `false` to disable; `"truncate"`, `"summarize_middle"`, `"summarize_all"`, or `"hybrid"` to choose policy |
+| `compaction` | string/dict/bool | `{strategy: "hybrid", keep_last_n: 10}` | Agent-loop context-window policy. Use `"none"` or `false` to disable; `"truncate"`, `"summarize_middle"`, `"summarize_all"`, or `"hybrid"` to choose policy. Dict policies may include `policy` / `compaction_policy` with compaction instructions |
 | `compact_threshold` | int | model-aware | Estimated input-token threshold for compaction. Harn lowers this from the provider/model context window when known |
 | `compact_keep_first` | int | `0` | Prompt-visible messages to keep verbatim before the compaction summary. The system prompt is always kept separately |
 | `compact_keep_last` | int | strategy default | Prompt-visible messages to keep verbatim after the compaction summary |
+| `auto_compact` | bool/dict | nil | Auto-compaction options. Dict values may include the same compaction policy fields as `compaction` |
 | `idle_watchdog_attempts` | int | nil (disabled) | Max consecutive idle-wait ticks that may return no wake reason before the daemon terminates with `status = "watchdog"`. Guards against a misconfigured daemon (e.g. bridge never signals, no timer, no watch paths) hanging the session silently |
 | `context_callback` | closure | nil | Per-turn hook that can rewrite prompt-visible `messages` and/or the effective `system` prompt before the next LLM call |
 | `context_filter` | closure | nil | Alias for `context_callback` |
@@ -349,8 +350,40 @@ Available strategies:
 
 Compaction emits `TranscriptCompacted` live events and transcript
 `compaction` events with `strategy`, `engine_strategy`,
-`estimated_tokens_before`, and `estimated_tokens_after`, so replay tools can
-verify which policy ran.
+`estimated_tokens_before`, `estimated_tokens_after`, `instruction_mode`,
+`instruction_source`, and `compaction_policy`, so replay tools can verify which
+policy and host/user instruction lane ran.
+
+Hosts can attach first-class compaction instructions without building custom
+prompt concatenation. The typed `CompactionPolicy` shape accepts
+`instructions`, `mode`, `scope`, `preserve`, `drop`,
+`extend_default_instructions`, and `author`. Omitting
+`extend_default_instructions` or setting it to `true` appends host/user guidance
+after Harn's default compaction rules; `false` replaces the default guidance.
+Host-only instructions stay in event and audit metadata and are not copied into
+the next model-visible summary unless `scope` is `"model_visible"`,
+`"summary"`, or `"transcript"`.
+
+```harn
+import {compact_for_bug_fix_resumption} from "std/agent/autocompact"
+
+let result = agent_loop(task, system, {
+  provider: "mock",
+  compact_threshold: 1,
+  compact_strategy: "custom",
+  auto_compact: {
+    policy: compact_for_bug_fix_resumption({author: "host"})
+  },
+  compact_callback: { archived, _reminders, policy ->
+    {summary: "resume with " + policy.mode + " over " + to_string(len(archived)) + " messages"}
+  },
+})
+```
+
+Stdlib helpers cover common host commands:
+`compaction_policy(...)`, `compact_for_bug_fix_resumption(...)`,
+`compact_preserving_test_failures(...)`, and
+`compact_retaining_current_plan(...)`.
 
 | Profile | `max_iterations` | `max_nudges` | `tool_retries` | `llm_retries` | `schema_retries` |
 |---|---:|---:|---:|---:|---:|

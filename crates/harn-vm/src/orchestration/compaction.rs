@@ -3,6 +3,8 @@
 use std::collections::BTreeMap;
 use std::rc::Rc;
 
+use serde::{Deserialize, Serialize};
+
 use crate::llm::{vm_call_llm_full, vm_value_to_json};
 use crate::value::{VmError, VmValue};
 
@@ -33,6 +35,382 @@ pub fn compact_strategy_name(strategy: &CompactStrategy) -> &'static str {
         CompactStrategy::Custom => "custom",
         CompactStrategy::ObservationMask => "observation_mask",
     }
+}
+
+const COMPACTION_POLICY_KEYS: &[&str] = &[
+    "instructions",
+    "mode",
+    "scope",
+    "preserve",
+    "drop",
+    "extend_default_instructions",
+    "author",
+];
+
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct CompactionPolicy {
+    pub instructions: Option<String>,
+    pub mode: Option<String>,
+    pub scope: Option<String>,
+    pub preserve: Vec<String>,
+    #[serde(rename = "drop")]
+    pub drop_items: Vec<String>,
+    pub extend_default_instructions: Option<bool>,
+    pub author: Option<String>,
+}
+
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct CompactionRequest {
+    pub mode: Option<String>,
+    pub policy: CompactionPolicy,
+}
+
+impl CompactionPolicy {
+    pub fn has_metadata(&self) -> bool {
+        self.instructions.is_some()
+            || self.mode.is_some()
+            || self.scope.is_some()
+            || !self.preserve.is_empty()
+            || !self.drop_items.is_empty()
+            || self.extend_default_instructions.is_some()
+            || self.author.is_some()
+    }
+
+    fn has_prompt_directives(&self) -> bool {
+        self.instructions
+            .as_deref()
+            .is_some_and(|value| !value.trim().is_empty())
+            || !self.preserve.is_empty()
+            || !self.drop_items.is_empty()
+    }
+
+    pub fn instruction_mode(&self) -> &'static str {
+        if !self.has_prompt_directives() {
+            "default"
+        } else if self.extend_default_instructions == Some(false) {
+            "replace"
+        } else {
+            "extend"
+        }
+    }
+
+    pub fn instruction_source(&self) -> Option<&str> {
+        self.author
+            .as_deref()
+            .filter(|author| !author.trim().is_empty())
+    }
+
+    pub fn metadata_json(&self) -> Option<serde_json::Value> {
+        if !self.has_metadata() {
+            return None;
+        }
+        let mut map = serde_json::Map::new();
+        if let Some(instructions) = self.instructions.as_ref() {
+            map.insert(
+                "instructions".to_string(),
+                serde_json::Value::String(instructions.clone()),
+            );
+        }
+        if let Some(mode) = self.mode.as_ref() {
+            map.insert("mode".to_string(), serde_json::Value::String(mode.clone()));
+        }
+        if let Some(scope) = self.scope.as_ref() {
+            map.insert(
+                "scope".to_string(),
+                serde_json::Value::String(scope.clone()),
+            );
+        }
+        if !self.preserve.is_empty() {
+            map.insert(
+                "preserve".to_string(),
+                serde_json::to_value(&self.preserve).unwrap_or_default(),
+            );
+        }
+        if !self.drop_items.is_empty() {
+            map.insert(
+                "drop".to_string(),
+                serde_json::to_value(&self.drop_items).unwrap_or_default(),
+            );
+        }
+        if let Some(extend_default_instructions) = self.extend_default_instructions {
+            map.insert(
+                "extend_default_instructions".to_string(),
+                serde_json::Value::Bool(extend_default_instructions),
+            );
+        }
+        if let Some(author) = self.author.as_ref() {
+            map.insert(
+                "author".to_string(),
+                serde_json::Value::String(author.clone()),
+            );
+        }
+        map.insert(
+            "instruction_mode".to_string(),
+            serde_json::Value::String(self.instruction_mode().to_string()),
+        );
+        if let Some(source) = self.instruction_source() {
+            map.insert(
+                "instruction_source".to_string(),
+                serde_json::Value::String(source.to_string()),
+            );
+        }
+        Some(serde_json::Value::Object(map))
+    }
+
+    fn prompt_directives(&self) -> Option<String> {
+        if !self.has_prompt_directives() {
+            return None;
+        }
+        let mut parts = Vec::new();
+        if let Some(instructions) = self
+            .instructions
+            .as_deref()
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+        {
+            parts.push(instructions.to_string());
+        }
+        if !self.preserve.is_empty() {
+            parts.push(format!("Preserve: {}.", self.preserve.join("; ")));
+        }
+        if !self.drop_items.is_empty() {
+            parts.push(format!("Drop: {}.", self.drop_items.join("; ")));
+        }
+        Some(parts.join("\n"))
+    }
+
+    fn is_model_visible_scope(&self) -> bool {
+        matches!(
+            self.scope.as_deref(),
+            Some("model_visible" | "summary" | "transcript")
+        )
+    }
+}
+
+pub fn compaction_policy_option_keys() -> &'static [&'static str] {
+    COMPACTION_POLICY_KEYS
+}
+
+pub fn compaction_policy_to_vm_value(policy: &CompactionPolicy) -> VmValue {
+    let mut map = BTreeMap::new();
+    if let Some(instructions) = policy.instructions.as_ref() {
+        map.insert(
+            "instructions".to_string(),
+            VmValue::String(Rc::from(instructions.clone())),
+        );
+    }
+    if let Some(mode) = policy.mode.as_ref() {
+        map.insert("mode".to_string(), VmValue::String(Rc::from(mode.clone())));
+    }
+    if let Some(scope) = policy.scope.as_ref() {
+        map.insert(
+            "scope".to_string(),
+            VmValue::String(Rc::from(scope.clone())),
+        );
+    }
+    map.insert(
+        "preserve".to_string(),
+        VmValue::List(Rc::new(
+            policy
+                .preserve
+                .iter()
+                .map(|item| VmValue::String(Rc::from(item.clone())))
+                .collect(),
+        )),
+    );
+    map.insert(
+        "drop".to_string(),
+        VmValue::List(Rc::new(
+            policy
+                .drop_items
+                .iter()
+                .map(|item| VmValue::String(Rc::from(item.clone())))
+                .collect(),
+        )),
+    );
+    if let Some(extend_default_instructions) = policy.extend_default_instructions {
+        map.insert(
+            "extend_default_instructions".to_string(),
+            VmValue::Bool(extend_default_instructions),
+        );
+    }
+    if let Some(author) = policy.author.as_ref() {
+        map.insert(
+            "author".to_string(),
+            VmValue::String(Rc::from(author.clone())),
+        );
+    }
+    VmValue::Dict(Rc::new(map))
+}
+
+pub fn parse_compaction_policy_options(
+    options: Option<&BTreeMap<String, VmValue>>,
+    builtin: &str,
+) -> Result<CompactionPolicy, VmError> {
+    let mut policy = options
+        .and_then(|map| {
+            map.get("policy")
+                .or_else(|| map.get("compaction_policy"))
+                .or_else(|| map.get("compaction_request"))
+        })
+        .map(|value| parse_compaction_policy_value(value, builtin))
+        .transpose()?
+        .unwrap_or_default();
+    if let Some(options) = options {
+        apply_compaction_policy_fields(&mut policy, options, builtin)?;
+    }
+    Ok(policy)
+}
+
+fn parse_compaction_policy_value(
+    value: &VmValue,
+    builtin: &str,
+) -> Result<CompactionPolicy, VmError> {
+    match value {
+        VmValue::Nil => Ok(CompactionPolicy::default()),
+        VmValue::Dict(map) => {
+            if let Some(nested) = map
+                .get("policy")
+                .or_else(|| map.get("compaction_policy"))
+                .or_else(|| map.get("compaction_request"))
+            {
+                let mut policy = parse_compaction_policy_value(nested, builtin)?;
+                apply_compaction_policy_fields(&mut policy, map, builtin)?;
+                Ok(policy)
+            } else {
+                let mut policy = CompactionPolicy::default();
+                apply_compaction_policy_fields(&mut policy, map, builtin)?;
+                Ok(policy)
+            }
+        }
+        other => Err(VmError::Runtime(format!(
+            "{builtin}: compaction policy must be a dict or nil, got {}",
+            other.type_name()
+        ))),
+    }
+}
+
+fn apply_compaction_policy_fields(
+    policy: &mut CompactionPolicy,
+    map: &BTreeMap<String, VmValue>,
+    builtin: &str,
+) -> Result<(), VmError> {
+    if let Some(value) = optional_policy_string(map, "instructions", builtin)? {
+        policy.instructions = Some(value);
+    }
+    if let Some(value) = optional_policy_string(map, "mode", builtin)? {
+        policy.mode = Some(value);
+    }
+    if let Some(value) = optional_policy_string(map, "scope", builtin)? {
+        policy.scope = Some(value);
+    }
+    if map.contains_key("preserve") {
+        policy.preserve = policy_string_list(map.get("preserve"), builtin, "preserve")?;
+    }
+    if map.contains_key("drop") {
+        policy.drop_items = policy_string_list(map.get("drop"), builtin, "drop")?;
+    }
+    if let Some(value) = optional_policy_bool(map, "extend_default_instructions", builtin)? {
+        policy.extend_default_instructions = Some(value);
+    }
+    if let Some(value) = optional_policy_string(map, "author", builtin)? {
+        policy.author = Some(value);
+    }
+    Ok(())
+}
+
+fn optional_policy_string(
+    map: &BTreeMap<String, VmValue>,
+    key: &str,
+    builtin: &str,
+) -> Result<Option<String>, VmError> {
+    match map.get(key) {
+        None | Some(VmValue::Nil) => Ok(None),
+        Some(VmValue::String(text)) => {
+            let trimmed = text.trim();
+            if trimmed.is_empty() {
+                Ok(None)
+            } else {
+                Ok(Some(trimmed.to_string()))
+            }
+        }
+        Some(other) => Err(VmError::Runtime(format!(
+            "{builtin}: compaction policy `{key}` must be a string, got {}",
+            other.type_name()
+        ))),
+    }
+}
+
+fn optional_policy_bool(
+    map: &BTreeMap<String, VmValue>,
+    key: &str,
+    builtin: &str,
+) -> Result<Option<bool>, VmError> {
+    match map.get(key) {
+        None | Some(VmValue::Nil) => Ok(None),
+        Some(VmValue::Bool(value)) => Ok(Some(*value)),
+        Some(other) => Err(VmError::Runtime(format!(
+            "{builtin}: compaction policy `{key}` must be a bool, got {}",
+            other.type_name()
+        ))),
+    }
+}
+
+fn policy_string_list(
+    value: Option<&VmValue>,
+    builtin: &str,
+    key: &str,
+) -> Result<Vec<String>, VmError> {
+    match value {
+        None | Some(VmValue::Nil) => Ok(Vec::new()),
+        Some(VmValue::String(text)) => {
+            let trimmed = text.trim();
+            if trimmed.is_empty() {
+                Ok(Vec::new())
+            } else {
+                Ok(vec![trimmed.to_string()])
+            }
+        }
+        Some(VmValue::List(items)) => items
+            .iter()
+            .map(|item| match item {
+                VmValue::String(text) => Ok(text.trim().to_string()),
+                other => Err(VmError::Runtime(format!(
+                    "{builtin}: compaction policy `{key}` entries must be strings, got {}",
+                    other.type_name()
+                ))),
+            })
+            .filter_map(|result| match result {
+                Ok(value) if value.is_empty() => None,
+                other => Some(other),
+            })
+            .collect(),
+        Some(other) => Err(VmError::Runtime(format!(
+            "{builtin}: compaction policy `{key}` must be a string or list, got {}",
+            other.type_name()
+        ))),
+    }
+}
+
+pub fn compaction_policy_metadata_fields(
+    policy: &CompactionPolicy,
+) -> Vec<(&'static str, serde_json::Value)> {
+    let mut fields = vec![(
+        "instruction_mode",
+        serde_json::Value::String(policy.instruction_mode().to_string()),
+    )];
+    if let Some(source) = policy.instruction_source() {
+        fields.push((
+            "instruction_source",
+            serde_json::Value::String(source.to_string()),
+        ));
+    }
+    if let Some(policy_json) = policy.metadata_json() {
+        fields.push(("compaction_policy", policy_json));
+    }
+    fields
 }
 
 /// Configuration for automatic transcript compaction in agent loops.
@@ -91,6 +469,10 @@ pub struct AutoCompactConfig {
     /// broader than the engine strategy, e.g. `hybrid` lowers to LLM
     /// summarization plus truncate fallback.
     pub policy_strategy: String,
+    /// Host/user-supplied instructions that guide compaction without
+    /// becoming part of the compacted transcript unless `scope` explicitly
+    /// asks for model-visible policy text.
+    pub policy: CompactionPolicy,
 }
 
 impl Default for AutoCompactConfig {
@@ -109,6 +491,7 @@ impl Default for AutoCompactConfig {
             compress_callback: None,
             summarize_prompt: None,
             policy_strategy: compact_strategy_name(&CompactStrategy::ObservationMask).to_string(),
+            policy: CompactionPolicy::default(),
         }
     }
 }
@@ -355,6 +738,7 @@ async fn llm_compaction_summary(
     archived_count: usize,
     llm_opts: &crate::llm::api::LlmCallOptions,
     summarize_prompt: Option<&str>,
+    policy: &CompactionPolicy,
 ) -> Result<String, VmError> {
     let mut compact_opts = llm_opts.clone();
     let formatted = format_compaction_messages(old_messages);
@@ -366,7 +750,8 @@ async fn llm_compaction_summary(
     compact_opts.response_format = None;
     compact_opts.json_schema = None;
     compact_opts.output_schema = None;
-    let prompt = render_llm_compaction_prompt(summarize_prompt, &formatted, archived_count)?;
+    let prompt =
+        render_llm_compaction_prompt(summarize_prompt, &formatted, archived_count, policy)?;
     compact_opts.messages = vec![serde_json::json!({
         "role": "user",
         "content": prompt,
@@ -390,7 +775,11 @@ fn render_llm_compaction_prompt(
     summarize_prompt: Option<&str>,
     formatted: &str,
     archived_count: usize,
+    policy: &CompactionPolicy,
 ) -> Result<String, VmError> {
+    if policy.has_prompt_directives() && policy.extend_default_instructions == Some(false) {
+        return render_replacement_compaction_prompt(policy, formatted, archived_count);
+    }
     let mut bindings = BTreeMap::new();
     bindings.insert(
         "formatted_messages".to_string(),
@@ -401,15 +790,54 @@ fn render_llm_compaction_prompt(
         VmValue::Int(archived_count as i64),
     );
     let Some(path) = summarize_prompt.filter(|path| !path.trim().is_empty()) else {
-        return crate::stdlib::template::render_stdlib_prompt_asset(
+        let prompt = crate::stdlib::template::render_stdlib_prompt_asset(
             "orchestration/prompts/compaction_summary.harn.prompt",
             Some(&bindings),
-        );
+        )?;
+        return Ok(extend_compaction_prompt(prompt, policy));
     };
 
     let asset = crate::stdlib::template::TemplateAsset::render_target(path)
         .map_err(|error| VmError::Runtime(format!("compaction summarize_prompt: {error}")))?;
-    crate::stdlib::template::render_asset_result(&asset, Some(&bindings)).map_err(VmError::from)
+    let prompt = crate::stdlib::template::render_asset_result(&asset, Some(&bindings))
+        .map_err(VmError::from)?;
+    Ok(extend_compaction_prompt(prompt, policy))
+}
+
+fn render_replacement_compaction_prompt(
+    policy: &CompactionPolicy,
+    formatted: &str,
+    archived_count: usize,
+) -> Result<String, VmError> {
+    let directives = policy.prompt_directives().unwrap_or_default();
+    let mut bindings = BTreeMap::new();
+    bindings.insert(
+        "directives".to_string(),
+        VmValue::String(Rc::from(directives)),
+    );
+    bindings.insert(
+        "formatted_messages".to_string(),
+        VmValue::String(Rc::from(formatted.to_string())),
+    );
+    bindings.insert(
+        "archived_count".to_string(),
+        VmValue::Int(archived_count as i64),
+    );
+    crate::stdlib::template::render_stdlib_prompt_asset(
+        "orchestration/prompts/compaction_policy_replacement.harn.prompt",
+        Some(&bindings),
+    )
+}
+
+fn extend_compaction_prompt(mut prompt: String, policy: &CompactionPolicy) -> String {
+    let Some(directives) = policy.prompt_directives() else {
+        return prompt;
+    };
+    prompt.push_str(
+        "\n\nAdditional compaction instructions: use these directives to shape the summary, but do not quote this section unless it explicitly requests a model-visible note.\n",
+    );
+    prompt.push_str(&directives);
+    prompt
 }
 
 async fn custom_compaction_summary(
@@ -417,6 +845,7 @@ async fn custom_compaction_summary(
     archived_count: usize,
     callback: &VmValue,
     reminders: &[VmValue],
+    policy: &CompactionPolicy,
 ) -> Result<String, VmError> {
     let Some(VmValue::Closure(closure)) = Some(callback.clone()) else {
         return Err(VmError::Runtime(
@@ -434,7 +863,14 @@ async fn custom_compaction_summary(
             .map(crate::stdlib::json_to_vm_value)
             .collect(),
     ));
-    let result = if closure.func.params.len() >= 2 || closure.func.has_rest_param {
+    let result = if policy.has_metadata()
+        && (closure.func.params.len() >= 3 || closure.func.has_rest_param)
+    {
+        let reminders_vm = VmValue::List(Rc::new(reminders.to_vec()));
+        let policy_vm = compaction_policy_to_vm_value(policy);
+        vm.call_closure_pub(&closure, &[messages_vm, reminders_vm, policy_vm])
+            .await
+    } else if closure.func.params.len() >= 2 || closure.func.has_rest_param {
         let reminders_vm = VmValue::List(Rc::new(reminders.to_vec()));
         vm.call_closure_pub(&closure, &[messages_vm, reminders_vm])
             .await
@@ -549,17 +985,31 @@ async fn invoke_mask_callback(
         .collect())
 }
 
-/// Apply a single compaction strategy to a list of archived messages.
-async fn apply_compaction_strategy(
-    strategy: &CompactStrategy,
-    old_messages: &[serde_json::Value],
+struct CompactionStrategyInputs<'a> {
+    strategy: &'a CompactStrategy,
+    old_messages: &'a [serde_json::Value],
     archived_count: usize,
-    llm_opts: Option<&crate::llm::api::LlmCallOptions>,
-    custom_compactor: Option<&VmValue>,
-    custom_compactor_reminders: &[VmValue],
-    mask_callback: Option<&VmValue>,
-    summarize_prompt: Option<&str>,
-) -> Result<String, VmError> {
+    llm_opts: Option<&'a crate::llm::api::LlmCallOptions>,
+    custom_compactor: Option<&'a VmValue>,
+    custom_compactor_reminders: &'a [VmValue],
+    mask_callback: Option<&'a VmValue>,
+    summarize_prompt: Option<&'a str>,
+    policy: &'a CompactionPolicy,
+}
+
+/// Apply a single compaction strategy to a list of archived messages.
+async fn apply_compaction_strategy(input: CompactionStrategyInputs<'_>) -> Result<String, VmError> {
+    let CompactionStrategyInputs {
+        strategy,
+        old_messages,
+        archived_count,
+        llm_opts,
+        custom_compactor,
+        custom_compactor_reminders,
+        mask_callback,
+        summarize_prompt,
+        policy,
+    } = input;
     match strategy {
         CompactStrategy::Truncate => Ok(truncate_compaction_summary(old_messages, archived_count)),
         CompactStrategy::Llm => {
@@ -572,6 +1022,7 @@ async fn apply_compaction_strategy(
                     )
                 })?,
                 summarize_prompt,
+                policy,
             )
             .await
         }
@@ -586,6 +1037,7 @@ async fn apply_compaction_strategy(
                     )
                 })?,
                 custom_compactor_reminders,
+                policy,
             )
             .await
         }
@@ -655,16 +1107,17 @@ pub(crate) async fn auto_compact_messages(
     let old_messages: Vec<_> = messages.drain(compact_start..split_at).collect();
     let archived_count = old_messages.len();
 
-    let mut summary = apply_compaction_strategy(
-        &config.compact_strategy,
-        &old_messages,
+    let mut summary = apply_compaction_strategy(CompactionStrategyInputs {
+        strategy: &config.compact_strategy,
+        old_messages: &old_messages,
         archived_count,
         llm_opts,
-        config.custom_compactor.as_ref(),
-        &config.custom_compactor_reminders,
-        config.mask_callback.as_ref(),
-        config.summarize_prompt.as_deref(),
-    )
+        custom_compactor: config.custom_compactor.as_ref(),
+        custom_compactor_reminders: &config.custom_compactor_reminders,
+        mask_callback: config.mask_callback.as_ref(),
+        summarize_prompt: config.summarize_prompt.as_deref(),
+        policy: &config.policy,
+    })
     .await?;
 
     if let Some(hard_limit) = config.hard_limit_tokens {
@@ -677,19 +1130,22 @@ pub(crate) async fn auto_compact_messages(
                 "role": "user",
                 "content": summary,
             })];
-            summary = apply_compaction_strategy(
-                &config.hard_limit_strategy,
-                &tier1_as_messages,
+            summary = apply_compaction_strategy(CompactionStrategyInputs {
+                strategy: &config.hard_limit_strategy,
+                old_messages: &tier1_as_messages,
                 archived_count,
                 llm_opts,
-                config.custom_compactor.as_ref(),
-                &config.custom_compactor_reminders,
-                None,
-                config.summarize_prompt.as_deref(),
-            )
+                custom_compactor: config.custom_compactor.as_ref(),
+                custom_compactor_reminders: &config.custom_compactor_reminders,
+                mask_callback: None,
+                summarize_prompt: config.summarize_prompt.as_deref(),
+                policy: &config.policy,
+            })
             .await?;
         }
     }
+
+    summary = apply_model_visible_policy(summary, &config.policy);
 
     messages.insert(
         compact_start,
@@ -699,6 +1155,18 @@ pub(crate) async fn auto_compact_messages(
         }),
     );
     Ok(Some(summary))
+}
+
+fn apply_model_visible_policy(mut summary: String, policy: &CompactionPolicy) -> String {
+    if !policy.is_model_visible_scope() {
+        return summary;
+    }
+    let Some(directives) = policy.prompt_directives() else {
+        return summary;
+    };
+    summary.push_str("\n\n[compaction instructions]\n");
+    summary.push_str(&directives);
+    summary
 }
 
 #[cfg(test)]
@@ -770,6 +1238,37 @@ mod tests {
             estimate_message_tokens(&messages) >= 100,
             "structured content must not count as zero"
         );
+    }
+
+    #[test]
+    fn compaction_policy_instructions_extend_by_default() {
+        let policy = CompactionPolicy {
+            instructions: Some("Keep the failing test names.".to_string()),
+            ..Default::default()
+        };
+        let prompt = render_llm_compaction_prompt(None, "[user] old context", 1, &policy)
+            .expect("prompt renders");
+
+        assert_eq!(policy.instruction_mode(), "extend");
+        assert!(prompt.contains("Preserve goals, constraints"));
+        assert!(prompt.contains("Additional compaction instructions"));
+        assert!(prompt.contains("Keep the failing test names."));
+    }
+
+    #[test]
+    fn compaction_policy_can_replace_default_instructions() {
+        let policy = CompactionPolicy {
+            instructions: Some("Only keep repro steps.".to_string()),
+            extend_default_instructions: Some(false),
+            ..Default::default()
+        };
+        let prompt = render_llm_compaction_prompt(None, "[user] old context", 1, &policy)
+            .expect("prompt renders");
+
+        assert_eq!(policy.instruction_mode(), "replace");
+        assert!(prompt.contains("according to these instructions"));
+        assert!(prompt.contains("Only keep repro steps."));
+        assert!(!prompt.contains("Preserve goals, constraints"));
     }
 
     #[test]

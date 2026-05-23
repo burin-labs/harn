@@ -738,6 +738,12 @@ pub const STDLIB_PROMPT_ASSETS: &[StdlibPromptAsset] = &[
         path: "orchestration/prompts/compaction_summary.harn.prompt",
         source: include_str!("stdlib/orchestration/prompts/compaction_summary.harn.prompt"),
     },
+    StdlibPromptAsset {
+        path: "orchestration/prompts/compaction_policy_replacement.harn.prompt",
+        source: include_str!(
+            "stdlib/orchestration/prompts/compaction_policy_replacement.harn.prompt"
+        ),
+    },
 ];
 
 pub fn get_stdlib_source(module: &str) -> Option<&'static str> {
@@ -1041,6 +1047,7 @@ mod tests {
             "std/agent/prompts/completion_judge_default.harn.prompt",
             "std/workflow/prompts/stage.harn.prompt",
             "std/orchestration/prompts/compaction_summary.harn.prompt",
+            "std/orchestration/prompts/compaction_policy_replacement.harn.prompt",
         ] {
             assert!(
                 get_stdlib_prompt_asset(path).is_some(),

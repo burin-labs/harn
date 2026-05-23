@@ -1563,6 +1563,38 @@ fn host_agent_record_compaction_builtin(
         .get("iteration")
         .and_then(serde_json::Value::as_u64)
         .unwrap_or(0) as usize;
+    let mode = payload_json
+        .get("mode")
+        .and_then(serde_json::Value::as_str)
+        .unwrap_or("auto")
+        .to_string();
+    let strategy = payload_json
+        .get("strategy")
+        .or_else(|| payload_json.get("engine_strategy"))
+        .and_then(serde_json::Value::as_str)
+        .unwrap_or_default()
+        .to_string();
+    let estimated_tokens_before = payload_json
+        .get("estimated_tokens_before")
+        .and_then(serde_json::Value::as_u64)
+        .unwrap_or(0) as usize;
+    let estimated_tokens_after = payload_json
+        .get("estimated_tokens_after")
+        .and_then(serde_json::Value::as_u64)
+        .unwrap_or(0) as usize;
+    let snapshot_asset_id = payload_json
+        .get("snapshot_asset_id")
+        .and_then(serde_json::Value::as_str)
+        .map(str::to_string);
+    let instruction_mode = payload_json
+        .get("instruction_mode")
+        .and_then(serde_json::Value::as_str)
+        .map(str::to_string);
+    let instruction_source = payload_json
+        .get("instruction_source")
+        .and_then(serde_json::Value::as_str)
+        .map(str::to_string);
+    let compaction_policy = payload_json.get("compaction_policy").cloned();
     super::trace::emit_agent_event(super::trace::AgentTraceEvent::ContextCompaction {
         archived_messages,
         new_summary_len,
@@ -1576,6 +1608,18 @@ fn host_agent_record_compaction_builtin(
         Some(payload_json),
     );
     let _ = crate::agent_sessions::append_event(&session_id, event);
+    crate::llm::emit_live_agent_event_sync(&crate::agent_events::AgentEvent::TranscriptCompacted {
+        session_id,
+        mode,
+        strategy,
+        archived_messages,
+        estimated_tokens_before,
+        estimated_tokens_after,
+        snapshot_asset_id,
+        instruction_mode,
+        instruction_source,
+        compaction_policy,
+    });
     Ok(VmValue::Nil)
 }
 

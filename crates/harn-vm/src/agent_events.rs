@@ -548,6 +548,12 @@ pub enum AgentEvent {
         estimated_tokens_before: usize,
         estimated_tokens_after: usize,
         snapshot_asset_id: Option<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        instruction_mode: Option<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        instruction_source: Option<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        compaction_policy: Option<serde_json::Value>,
     },
     /// Emitted when a pending `system_reminder` is rendered into the
     /// next provider request. ACP clients show these in a reminder lane

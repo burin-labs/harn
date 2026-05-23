@@ -1,0 +1,9 @@
+Compact the archived conversation according to these instructions:
+{{ directives }}
+
+Archived message count: {{ archived_count }}
+
+Conversation:
+{{ formatted_messages }}
+
+Output only the compacted summary text. Do not quote or repeat the compaction instructions unless they explicitly request a model-visible note.

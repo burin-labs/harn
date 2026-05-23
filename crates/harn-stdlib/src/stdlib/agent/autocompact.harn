@@ -29,6 +29,121 @@ fn __compaction_engine_strategy(label) {
   return "observation_mask"
 }
 
+fn __compaction_policy_list(value) {
+  if type_of(value) == "list" {
+    return value
+  }
+  if type_of(value) == "string" && value != "" {
+    return [value]
+  }
+  return []
+}
+
+fn __has_compaction_policy(policy) {
+  if type_of(policy) != "dict" {
+    return false
+  }
+  return policy?.instructions != nil
+    || policy?.mode != nil
+    || policy?.scope != nil
+    || len(__compaction_policy_list(policy?.preserve)) > 0
+    || len(__compaction_policy_list(policy?.drop)) > 0
+    || policy?.extend_default_instructions != nil
+    || policy?.author != nil
+}
+
+fn __compaction_policy_merge_fields(policy, fields) {
+  if type_of(fields) != "dict" {
+    return policy
+  }
+  var merged = policy
+  if fields?.instructions != nil {
+    merged = merged + {instructions: fields.instructions}
+  }
+  if fields?.mode != nil {
+    merged = merged + {mode: fields.mode}
+  }
+  if fields?.scope != nil {
+    merged = merged + {scope: fields.scope}
+  }
+  if fields?.preserve != nil {
+    merged = merged + {preserve: fields.preserve}
+  }
+  if fields?.drop != nil {
+    merged = merged + {drop: fields.drop}
+  }
+  if fields?.extend_default_instructions != nil {
+    merged = merged + {extend_default_instructions: fields.extend_default_instructions}
+  }
+  if fields?.author != nil {
+    merged = merged + {author: fields.author}
+  }
+  return merged
+}
+
+fn __compaction_policy_from_options(opts) {
+  if type_of(opts) != "dict" {
+    return nil
+  }
+  let nested = opts?.policy ?? opts?.compaction_policy ?? opts?.compaction_request
+  var policy = if type_of(nested?.policy) == "dict" {
+    nested.policy
+  } else if type_of(nested) == "dict" {
+    nested
+  } else {
+    {}
+  }
+  policy = __compaction_policy_merge_fields(policy, nested)
+  policy = __compaction_policy_merge_fields(policy, opts)
+  let preserve = __compaction_policy_list(opts?.preserve ?? policy?.preserve)
+  if len(preserve) > 0 {
+    policy = policy + {preserve: preserve}
+  }
+  let drop_items = __compaction_policy_list(opts?.drop ?? policy?.drop)
+  if len(drop_items) > 0 {
+    policy = policy + {drop: drop_items}
+  }
+  if !__has_compaction_policy(policy) {
+    return nil
+  }
+  return policy
+}
+
+fn __compaction_instruction_mode(policy) {
+  if type_of(policy) != "dict" {
+    return "default"
+  }
+  let has_directives = policy?.instructions != nil
+    || len(__compaction_policy_list(policy?.preserve)) > 0
+    || len(__compaction_policy_list(policy?.drop)) > 0
+  if !has_directives {
+    return "default"
+  }
+  if type_of(policy?.extend_default_instructions) == "bool" && !policy.extend_default_instructions {
+    return "replace"
+  }
+  return "extend"
+}
+
+fn __compaction_policy_event_fields(policy) {
+  if type_of(policy) != "dict" {
+    return {instruction_mode: "default"}
+  }
+  var fields = {
+    instruction_mode: __compaction_instruction_mode(policy),
+    compaction_policy: policy
+      + {instruction_mode: __compaction_instruction_mode(policy)},
+  }
+  if type_of(policy?.author) == "string" && policy.author != "" {
+    fields = fields
+      + {
+      instruction_source: policy.author,
+      compaction_policy: fields.compaction_policy + {instruction_source: policy.author},
+    }
+  }
+  return fields
+}
+
 fn __compaction_keep_last(opts) {
   let cfg = opts?.compaction
   if type_of(cfg) == "dict" {
@@ -71,6 +186,12 @@ fn __compact_options(opts, engine_strategy, keep_last) {
   }
   if !contains(compact_opts.keys(), "model") && opts?.model != nil {
     compact_opts = compact_opts + {model: opts.model}
+  }
+  let policy = __compaction_policy_from_options(compact_opts)
+    ?? __compaction_policy_from_options({policy: opts?.compaction_policy})
+    ?? __compaction_policy_from_options({policy: opts?.compaction?.policy})
+  if policy != nil && !contains(compact_opts.keys(), "policy") {
+    compact_opts = compact_opts + {policy: policy}
   }
   return compact_opts
 }
@@ -119,6 +240,140 @@ fn __compaction_enabled(opts) {
 }
 
 /**
+ * compaction_policy.
+ *
+ * @effects: []
+ * @allocation: heap
+ * @errors: []
+ * @api_stability: experimental
+ * @example: compaction_policy("Preserve failing tests.", {author: "host"})
+ */
+pub fn compaction_policy(instructions = nil, opts = nil) {
+  var base = if type_of(instructions) == "dict" && opts == nil {
+    instructions
+  } else if type_of(opts) == "dict" {
+    opts
+  } else {
+    {}
+  }
+  if type_of(instructions) == "string" && instructions != "" {
+    base = base + {instructions: instructions}
+  }
+  var policy = __compaction_policy_from_options(base)
+  if policy == nil {
+    return {}
+  }
+  if policy?.extend_default_instructions == nil {
+    policy = policy + {extend_default_instructions: true}
+  }
+  return policy
+}
+
+/**
+ * compact_for_bug_fix_resumption.
+ *
+ * @effects: []
+ * @allocation: heap
+ * @errors: []
+ * @api_stability: experimental
+ * @example: compact_for_bug_fix_resumption({author: "host"})
+ */
+pub fn compact_for_bug_fix_resumption(opts = nil) {
+  let base = if type_of(opts) == "dict" {
+    opts
+  } else {
+    {}
+  }
+  let extra = if type_of(base?.instructions) == "string" && base.instructions != "" {
+    "\n" + base.instructions
+  } else {
+    ""
+  }
+  return compaction_policy(
+    "Shape the summary so a follow-on agent can resume the bug fix quickly. Preserve the root cause, changed files, failing and passing checks, remaining hypotheses, and the next concrete command to run."
+      + extra,
+    base
+      + {
+      mode: base?.mode ?? "bug_fix_resumption",
+      preserve: base?.preserve
+        ?? ["root cause", "changed files", "test failures", "verification commands", "next action"],
+    },
+  )
+}
+
+/**
+ * compact_preserving_test_failures.
+ *
+ * @effects: []
+ * @allocation: heap
+ * @errors: []
+ * @api_stability: experimental
+ * @example: compact_preserving_test_failures()
+ */
+pub fn compact_preserving_test_failures(opts = nil) {
+  let base = if type_of(opts) == "dict" {
+    opts
+  } else {
+    {}
+  }
+  let extra = if type_of(base?.instructions) == "string" && base.instructions != "" {
+    "\n" + base.instructions
+  } else {
+    ""
+  }
+  return compaction_policy(
+    "Preserve exact failing test names, commands, error messages, stack traces, exit codes, and any suspected regression window. Drop repetitive build output that does not help reproduce the failure."
+      + extra,
+    base
+      + {
+      mode: base?.mode ?? "preserve_test_failures",
+      preserve: base?.preserve
+        ?? ["failing test names", "commands", "error messages", "stack traces", "exit codes"],
+      drop: base?.drop ?? ["repetitive build output"],
+    },
+  )
+}
+
+/**
+ * compact_retaining_current_plan.
+ *
+ * @effects: []
+ * @allocation: heap
+ * @errors: []
+ * @api_stability: experimental
+ * @example: compact_retaining_current_plan({author: "host"})
+ */
+pub fn compact_retaining_current_plan(opts = nil) {
+  let base = if type_of(opts) == "dict" {
+    opts
+  } else {
+    {}
+  }
+  let extra = if type_of(base?.instructions) == "string" && base.instructions != "" {
+    "\n" + base.instructions
+  } else {
+    ""
+  }
+  return compaction_policy(
+    "Retain the current plan, completed steps, in-progress step, blockers, assumptions, verification status, and remaining concrete actions."
+      + extra,
+    base
+      + {
+      mode: base?.mode ?? "retain_current_plan",
+      preserve: base?.preserve
+        ?? [
+        "current plan",
+        "completed steps",
+        "in-progress step",
+        "blockers",
+        "verification status",
+        "remaining actions",
+      ],
+    },
+  )
+}
+
+/**
  * agent_autocompact_if_needed.
  *
  * @effects: [host]
@@ -146,6 +401,8 @@ pub fn agent_autocompact_if_needed(session, opts) {
   let keep_last = __compaction_keep_last(opts)
   let compact_opts = __compact_options(opts, engine_strategy, keep_last)
   let messages = __host_agent_session_messages(session.session_id)
+  let policy = __compaction_policy_from_options(compact_opts)
+  let policy_fields = __compaction_policy_event_fields(policy)
   let pre_payload = {
     session: {id: session.session_id},
     strategy: if policy_label != "" {
@@ -156,17 +413,24 @@ pub fn agent_autocompact_if_needed(session, opts) {
     engine_strategy: engine_strategy,
     message_count: len(messages),
     keep_last: keep_last ?? 0,
+    estimated_tokens_before: estimate_tokens(messages),
   }
+    + policy_fields
   let pre_control = __host_fire_session_hook("pre_compact", pre_payload)
   if pre_control?.control == "block" {
     return nil
   }
   let compacted = transcript_auto_compact(messages, compact_opts)
   let summary = __auto_compact_summary(messages, compacted)
-  let archived = len(messages) - len(compacted)
+  let archived = if summary != "" {
+    len(messages) - len(compacted) + 1
+  } else {
+    0
+  }
   if archived > 0 {
     __host_agent_session_replace_messages(session.session_id, compacted, summary)
     let metadata = {
+      mode: "auto",
       strategy: if policy_label != "" {
         policy_label
       } else {
@@ -176,7 +440,10 @@ pub fn agent_autocompact_if_needed(session, opts) {
       archived_messages: archived,
       new_summary_len: len(summary),
       keep_last: keep_last ?? 0,
+      estimated_tokens_before: estimate_tokens(messages),
+      estimated_tokens_after: estimate_tokens(compacted),
     }
+      + policy_fields
     agent_record_compaction(session.session_id, metadata)
     let post_payload = pre_payload
       + {
@@ -184,7 +451,9 @@ pub fn agent_autocompact_if_needed(session, opts) {
       new_summary_len: len(summary),
       remaining_messages: len(compacted),
       summary: summary,
+      estimated_tokens_after: estimate_tokens(compacted),
     }
+      + policy_fields
     __host_fire_session_hook("post_compact", post_payload)
     agent_reminder_providers_fire(session.session_id, "post_compact", post_payload, opts)
   }

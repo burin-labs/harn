@@ -649,9 +649,27 @@ async fn agent_session_compact_builtin(args: Vec<VmValue>) -> Result<VmValue, Vm
     };
     let config = build_compact_config(&opts_dict)?;
     let mut messages = agent_sessions::messages_json(&id);
-    crate::orchestration::auto_compact_messages(&mut messages, &config, None).await?;
+    let original_message_count = messages.len();
+    let estimated_tokens_before = crate::orchestration::estimate_message_tokens(&messages);
+    let summary = crate::orchestration::auto_compact_messages(&mut messages, &config, None).await?;
     let kept = messages.len();
-    agent_sessions::replace_messages(&id, &messages);
+    if let Some(summary) = summary {
+        let estimated_tokens_after = crate::orchestration::estimate_message_tokens(&messages);
+        let archived_messages = original_message_count
+            .saturating_sub(messages.len())
+            .saturating_add(1);
+        agent_sessions::replace_messages_with_summary(&id, &messages, Some(&summary));
+        record_agent_session_compaction(
+            &id,
+            &config,
+            archived_messages,
+            estimated_tokens_before,
+            estimated_tokens_after,
+            summary.len(),
+        );
+    } else {
+        agent_sessions::replace_messages(&id, &messages);
+    }
     Ok(VmValue::Int(kept as i64))
 }
 
@@ -665,6 +683,16 @@ const COMPACT_OPT_KEYS: &[&str] = &[
     "custom_compactor",
     "mask_callback",
     "compress_callback",
+    "policy",
+    "compaction_policy",
+    "compaction_request",
+    "instructions",
+    "mode",
+    "scope",
+    "preserve",
+    "drop",
+    "extend_default_instructions",
+    "author",
 ];
 
 fn build_compact_config(
@@ -678,7 +706,13 @@ fn build_compact_config(
             )));
         }
     }
-    let mut cfg = crate::orchestration::AutoCompactConfig::default();
+    let mut cfg = crate::orchestration::AutoCompactConfig {
+        policy: crate::orchestration::parse_compaction_policy_options(
+            Some(opts),
+            "agent_session_compact",
+        )?,
+        ..Default::default()
+    };
     if let Some(v) = compact_usize_opt(opts, "keep_last")? {
         cfg.keep_last = v;
     }
@@ -690,6 +724,8 @@ fn build_compact_config(
     }
     if let Some(VmValue::String(s)) = opts.get("compact_strategy") {
         cfg.compact_strategy = crate::orchestration::parse_compact_strategy(s)?;
+        cfg.policy_strategy =
+            crate::orchestration::compact_strategy_name(&cfg.compact_strategy).to_string();
     }
     if let Some(v) = compact_usize_opt(opts, "hard_limit_tokens")? {
         cfg.hard_limit_tokens = Some(v);
@@ -722,6 +758,52 @@ fn build_compact_config(
         cfg.compress_callback = Some(v);
     }
     Ok(cfg)
+}
+
+fn record_agent_session_compaction(
+    id: &str,
+    config: &crate::orchestration::AutoCompactConfig,
+    archived_messages: usize,
+    estimated_tokens_before: usize,
+    estimated_tokens_after: usize,
+    new_summary_len: usize,
+) {
+    let mut metadata = serde_json::json!({
+        "mode": "host",
+        "strategy": &config.policy_strategy,
+        "engine_strategy": crate::orchestration::compact_strategy_name(&config.compact_strategy),
+        "archived_messages": archived_messages,
+        "estimated_tokens_before": estimated_tokens_before,
+        "estimated_tokens_after": estimated_tokens_after,
+        "new_summary_len": new_summary_len,
+        "keep_last": config.keep_last,
+    });
+    if let Some(map) = metadata.as_object_mut() {
+        for (key, value) in crate::orchestration::compaction_policy_metadata_fields(&config.policy)
+        {
+            map.insert(key.to_string(), value);
+        }
+    }
+    let event = crate::llm::helpers::transcript_event(
+        "compaction",
+        "system",
+        "internal",
+        "",
+        Some(metadata.clone()),
+    );
+    let _ = agent_sessions::append_event(id, event);
+    crate::llm::emit_live_agent_event_sync(&crate::agent_events::AgentEvent::TranscriptCompacted {
+        session_id: id.to_string(),
+        mode: "host".to_string(),
+        strategy: config.policy_strategy.clone(),
+        archived_messages,
+        estimated_tokens_before,
+        estimated_tokens_after,
+        snapshot_asset_id: None,
+        instruction_mode: Some(config.policy.instruction_mode().to_string()),
+        instruction_source: config.policy.instruction_source().map(str::to_string),
+        compaction_policy: config.policy.metadata_json(),
+    });
 }
 
 fn compact_usize_opt(

@@ -8,6 +8,17 @@ condensed series summaries instead of full per-patch history.
 
 ## Unreleased
 
+### Added
+
+- **First-class compaction instructions (#2190).** Manual session compaction,
+  transcript auto-compaction, host-triggered compaction, and `agent_loop`
+  auto-compaction now accept a typed `CompactionPolicy` with optional
+  `instructions`, `mode`, `scope`, `preserve`, `drop`,
+  `extend_default_instructions`, and `author` fields. Compaction events and
+  audit metadata record the instruction mode/source, and
+  `std/agent/autocompact` adds helper policies for bug-fix resumption, failing
+  test preservation, and retaining the current plan.
+
 ### Fixed
 
 - **Secret redaction and scanning now share one token catalog.**

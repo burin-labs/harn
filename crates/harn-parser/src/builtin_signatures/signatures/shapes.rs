@@ -341,8 +341,41 @@ pub(crate) const AGENT_SESSION_SEED_OPTS: Ty = Ty::Shape(&[
 ]);
 
 /// `agent_session_compact` `opts?` argument.
+pub(crate) const COMPACTION_POLICY: Ty = Ty::Shape(&[
+    ShapeFieldDescriptor::optional("instructions", TY_STRING),
+    ShapeFieldDescriptor::optional("mode", TY_STRING),
+    ShapeFieldDescriptor::optional("scope", TY_STRING),
+    ShapeFieldDescriptor::optional("preserve", TY_STRING_OR_LIST),
+    ShapeFieldDescriptor::optional("drop", TY_STRING_OR_LIST),
+    ShapeFieldDescriptor::optional("extend_default_instructions", TY_BOOL),
+    ShapeFieldDescriptor::optional("author", TY_STRING),
+]);
+
+pub(crate) const COMPACTION_REQUEST: Ty = Ty::Shape(&[
+    ShapeFieldDescriptor::optional("mode", TY_STRING),
+    ShapeFieldDescriptor::optional("policy", COMPACTION_POLICY),
+]);
+
 pub(crate) const AGENT_SESSION_COMPACT_OPTS: Ty = Ty::Shape(&[
     ShapeFieldDescriptor::optional("keep_last", TY_INT),
+    ShapeFieldDescriptor::optional("token_threshold", TY_INT),
+    ShapeFieldDescriptor::optional("tool_output_max_chars", TY_INT),
+    ShapeFieldDescriptor::optional("compact_strategy", TY_STRING),
+    ShapeFieldDescriptor::optional("hard_limit_tokens", TY_INT),
+    ShapeFieldDescriptor::optional("hard_limit_strategy", TY_STRING),
+    ShapeFieldDescriptor::optional("custom_compactor", TY_CLOSURE),
+    ShapeFieldDescriptor::optional("mask_callback", TY_CLOSURE),
+    ShapeFieldDescriptor::optional("compress_callback", TY_CLOSURE),
+    ShapeFieldDescriptor::optional("policy", COMPACTION_POLICY),
+    ShapeFieldDescriptor::optional("compaction_policy", COMPACTION_POLICY),
+    ShapeFieldDescriptor::optional("compaction_request", COMPACTION_REQUEST),
+    ShapeFieldDescriptor::optional("instructions", TY_STRING),
+    ShapeFieldDescriptor::optional("mode", TY_STRING),
+    ShapeFieldDescriptor::optional("scope", TY_STRING),
+    ShapeFieldDescriptor::optional("preserve", TY_STRING_OR_LIST),
+    ShapeFieldDescriptor::optional("drop", TY_STRING_OR_LIST),
+    ShapeFieldDescriptor::optional("extend_default_instructions", TY_BOOL),
+    ShapeFieldDescriptor::optional("author", TY_STRING),
     ShapeFieldDescriptor::optional("system", TY_STRING),
     ShapeFieldDescriptor::optional("model", TY_STRING),
     ShapeFieldDescriptor::optional("provider", TY_STRING),

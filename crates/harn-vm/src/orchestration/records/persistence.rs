@@ -364,6 +364,18 @@ pub(super) fn compaction_events_from_transcript(
                         snapshot_path: persisted_path
                             .map(|path| path.to_string_lossy().into_owned()),
                         available,
+                        instruction_mode: metadata
+                            .and_then(|value| value.get("instruction_mode"))
+                            .and_then(|value| value.as_str())
+                            .unwrap_or_default()
+                            .to_string(),
+                        instruction_source: metadata
+                            .and_then(|value| value.get("instruction_source"))
+                            .and_then(|value| value.as_str())
+                            .map(str::to_string),
+                        compaction_policy: metadata
+                            .and_then(|value| value.get("compaction_policy"))
+                            .cloned(),
                     }
                 })
                 .collect()

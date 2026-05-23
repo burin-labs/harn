@@ -80,7 +80,13 @@ pub(super) async fn transcript_auto_compact_builtin(
         }
     };
     let options = args.get(1).and_then(|v| v.as_dict()).cloned();
-    let mut config = crate::orchestration::AutoCompactConfig::default();
+    let mut config = crate::orchestration::AutoCompactConfig {
+        policy: crate::orchestration::parse_compaction_policy_options(
+            options.as_ref(),
+            "transcript_auto_compact",
+        )?,
+        ..Default::default()
+    };
     if let Some(v) = options
         .as_ref()
         .and_then(|o| o.get("keep_first"))

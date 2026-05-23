@@ -1,3 +1,8 @@
+import {
+  compact_preserving_test_failures,
+  compact_retaining_current_plan,
+} from "std/agent/autocompact"
+
 fn list_tools() {
   var tools = tool_registry()
   tools = tool_define(
@@ -59,6 +64,19 @@ pipeline test(task) {
     },
   )
   __io_println(custom_compacted[0].content.contains("custom compact 2"))
+  let policy_compacted = transcript_auto_compact(
+    base_messages,
+    {
+      keep_last: 1,
+      token_threshold: 1,
+      compact_strategy: "custom",
+      compact_callback: { archived, _reminders, policy -> {summary: "policy compact " + policy.mode + " " + policy.preserve[0]} },
+      policy: compact_preserving_test_failures({author: "host"}),
+    },
+  )
+  __io_println(
+    policy_compacted[0].content.contains("policy compact preserve_test_failures failing test names"),
+  )
   let loop_compacted = agent_loop(
     "Inspect the workspace",
     "You are helpful",
@@ -67,14 +85,36 @@ pipeline test(task) {
       tools: list_tools(),
       tool_format: "native",
       max_iterations: 2,
-      auto_compact: true,
+      auto_compact: compact_retaining_current_plan({author: "host"}),
       compact_threshold: 1,
       compact_keep_last: 1,
       compact_strategy: "custom",
-      compact_callback: { archived -> {summary: "loop compact " + to_string(len(archived))} },
+      compact_callback: { archived, _reminders, policy -> {summary: "loop compact " + policy.mode + " " + to_string(len(archived))} },
     },
   )
-  __io_println(transcript_summary(loop_compacted?.transcript).contains("loop compact"))
+  __io_println(
+    transcript_summary(loop_compacted?.transcript).contains("loop compact retain_current_plan"),
+  )
+  let request_compacted = agent_loop(
+    "Inspect the workspace",
+    "You are helpful",
+    {
+      provider: "mock",
+      tools: list_tools(),
+      tool_format: "native",
+      max_iterations: 2,
+      auto_compact: {
+        compaction_request: {mode: "resume_request", policy: {instructions: "Keep host state.", author: "host"}},
+      },
+      compact_threshold: 1,
+      compact_keep_last: 1,
+      compact_strategy: "custom",
+      compact_callback: { archived, _reminders, policy -> {summary: "request compact " + policy.mode + " " + policy.author + " " + to_string(len(archived))} },
+    },
+  )
+  __io_println(
+    transcript_summary(request_compacted?.transcript).contains("request compact resume_request host"),
+  )
   let stopped_after_tool_turn = agent_loop(
     "Inspect the workspace",
     "You are helpful",

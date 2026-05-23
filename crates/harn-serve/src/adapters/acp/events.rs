@@ -540,6 +540,9 @@ impl AgentEventSink for AcpAgentEventSink {
                 estimated_tokens_before,
                 estimated_tokens_after,
                 snapshot_asset_id,
+                instruction_mode,
+                instruction_source,
+                compaction_policy,
             } => {
                 let mut update = serde_json::json!({
                     "sessionUpdate": "transcript_compacted",
@@ -569,6 +572,21 @@ impl AgentEventSink for AcpAgentEventSink {
                         None => serde_json::Value::Null,
                     },
                 );
+                if let Some(instruction_mode) = instruction_mode {
+                    harn_meta.insert(
+                        "instructionMode".to_string(),
+                        serde_json::Value::String(instruction_mode.clone()),
+                    );
+                }
+                if let Some(instruction_source) = instruction_source {
+                    harn_meta.insert(
+                        "instructionSource".to_string(),
+                        serde_json::Value::String(instruction_source.clone()),
+                    );
+                }
+                if let Some(compaction_policy) = compaction_policy {
+                    harn_meta.insert("compactionPolicy".to_string(), compaction_policy.clone());
+                }
                 merge_harn_meta(&mut update, harn_meta);
                 self.write_notification(serde_json::json!({
                     "sessionId": session_id,
