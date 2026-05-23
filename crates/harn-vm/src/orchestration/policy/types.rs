@@ -171,6 +171,13 @@ pub struct CapabilityPolicy {
     pub capabilities: BTreeMap<String, Vec<String>>,
     pub workspace_roots: Vec<String>,
     pub side_effect_level: Option<String>,
+    /// Remaining Harn-side nested-execution depth. The
+    /// `enter_nested_execution_policy` helper validates this at every
+    /// `agent_loop`, `sub_agent_run`, `spawn_agent` worker, workflow
+    /// stage, and nested-workflow surface: `Some(0)` rejects the
+    /// launch with a categorized `BudgetExceeded` error; `Some(n>0)`
+    /// allows the descent and gives the child `Some(n - 1)`. `None`
+    /// disables the budget gate entirely.
     pub recursion_limit: Option<usize>,
     /// Argument-level constraints for specific tools.
     #[serde(default)]
