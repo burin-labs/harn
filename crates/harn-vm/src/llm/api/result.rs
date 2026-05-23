@@ -262,6 +262,12 @@ pub(crate) fn vm_build_llm_result(
             VmValue::String(Rc::from(stop_reason.as_str())),
         );
     }
+    if let Some(ref request_id) = result.telemetry.request_id {
+        dict.insert(
+            "provider_response_id".to_string(),
+            VmValue::String(Rc::from(request_id.as_str())),
+        );
+    }
 
     if let Some(transcript) = transcript {
         dict.insert("transcript".to_string(), transcript);

@@ -102,6 +102,8 @@ pub(crate) fn agent_loop_result_from_llm(
             "input_tokens": result.input_tokens,
             "output_tokens": result.output_tokens,
             "tool_calls": result.tool_calls.clone(),
+            "blocks": result.blocks.clone(),
+            "provider_response_id": result.telemetry.request_id.clone(),
             "thinking_summary": result.thinking_summary,
             "cost_usd": crate::llm::cost::calculate_cost_for_provider(
                 &result.provider,
@@ -198,6 +200,8 @@ pub(crate) fn build_llm_call_result(
             "input_tokens": result.input_tokens,
             "output_tokens": result.output_tokens,
             "tool_calls": result.tool_calls.clone(),
+            "blocks": result.blocks.clone(),
+            "provider_response_id": result.telemetry.request_id.clone(),
             "thinking_summary": result.thinking_summary,
             "structural_experiment": opts.applied_structural_experiment.as_ref(),
         })),

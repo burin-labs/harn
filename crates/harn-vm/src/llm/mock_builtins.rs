@@ -224,6 +224,10 @@ fn llm_mock_calls_builtin(_args: &[VmValue], _out: &mut String) -> Result<VmValu
         .iter()
         .map(|c| {
             let mut dict = std::collections::BTreeMap::new();
+            dict.insert(
+                "api_mode".to_string(),
+                VmValue::String(Rc::from(c.api_mode.as_str())),
+            );
             let messages: Vec<VmValue> = c.messages.iter().map(json_to_vm_value).collect();
             dict.insert("messages".to_string(), VmValue::List(Rc::new(messages)));
             dict.insert(
@@ -244,13 +248,71 @@ fn llm_mock_calls_builtin(_args: &[VmValue], _out: &mut String) -> Result<VmValu
                 },
             );
             dict.insert(
+                "provider_tools".to_string(),
+                match &c.provider_tools {
+                    Some(t) => {
+                        let tools: Vec<VmValue> = t.iter().map(json_to_vm_value).collect();
+                        VmValue::List(Rc::new(tools))
+                    }
+                    None => VmValue::Nil,
+                },
+            );
+            dict.insert(
                 "tool_choice".to_string(),
                 match &c.tool_choice {
                     Some(choice) => json_to_vm_value(choice),
                     None => VmValue::Nil,
                 },
             );
+            dict.insert(
+                "output_format".to_string(),
+                json_to_vm_value(&c.output_format),
+            );
             dict.insert("thinking".to_string(), json_to_vm_value(&c.thinking));
+            dict.insert(
+                "previous_response_id".to_string(),
+                c.previous_response_id
+                    .as_deref()
+                    .map(|value| VmValue::String(Rc::from(value)))
+                    .unwrap_or(VmValue::Nil),
+            );
+            dict.insert(
+                "store".to_string(),
+                c.store.map(VmValue::Bool).unwrap_or(VmValue::Nil),
+            );
+            dict.insert(
+                "background".to_string(),
+                c.background.map(VmValue::Bool).unwrap_or(VmValue::Nil),
+            );
+            dict.insert(
+                "truncation".to_string(),
+                c.truncation
+                    .as_deref()
+                    .map(|value| VmValue::String(Rc::from(value)))
+                    .unwrap_or(VmValue::Nil),
+            );
+            dict.insert(
+                "compact".to_string(),
+                c.compact.map(VmValue::Bool).unwrap_or(VmValue::Nil),
+            );
+            dict.insert(
+                "include".to_string(),
+                c.include
+                    .as_ref()
+                    .map(|items| {
+                        VmValue::List(Rc::new(
+                            items
+                                .iter()
+                                .map(|item| VmValue::String(Rc::from(item.as_str())))
+                                .collect(),
+                        ))
+                    })
+                    .unwrap_or(VmValue::Nil),
+            );
+            dict.insert(
+                "max_tool_calls".to_string(),
+                c.max_tool_calls.map(VmValue::Int).unwrap_or(VmValue::Nil),
+            );
             VmValue::Dict(Rc::new(dict))
         })
         .collect();

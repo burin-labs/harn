@@ -60,11 +60,21 @@ pub struct LlmMock {
 
 #[derive(Clone)]
 pub(crate) struct LlmMockCall {
+    pub api_mode: String,
     pub messages: Vec<serde_json::Value>,
     pub system: Option<String>,
     pub tools: Option<Vec<serde_json::Value>>,
+    pub provider_tools: Option<Vec<serde_json::Value>>,
     pub tool_choice: Option<serde_json::Value>,
+    pub output_format: serde_json::Value,
     pub thinking: serde_json::Value,
+    pub previous_response_id: Option<String>,
+    pub store: Option<bool>,
+    pub background: Option<bool>,
+    pub truncation: Option<String>,
+    pub compact: Option<bool>,
+    pub include: Option<Vec<String>>,
+    pub max_tool_calls: Option<i64>,
 }
 
 type LlmMockScope = (Vec<LlmMock>, Vec<LlmMockCall>, BTreeSet<String>);
@@ -159,24 +169,36 @@ pub(crate) fn cli_llm_mock_replay_active() -> bool {
     CLI_LLM_MOCK_MODE.with(|v| *v.borrow() == CliLlmMockMode::Replay)
 }
 
-fn record_llm_mock_call(
-    messages: &[serde_json::Value],
-    system: Option<&str>,
-    native_tools: Option<&[serde_json::Value]>,
-    tool_choice: Option<&serde_json::Value>,
-    thinking: &super::api::ThinkingConfig,
-) {
+fn record_llm_mock_call(request: &super::api::LlmRequestPayload) {
     LLM_MOCK_CALLS.with(|v| {
         v.borrow_mut().push(LlmMockCall {
-            messages: messages.to_vec(),
-            system: system.map(|s| s.to_string()),
-            tools: native_tools.map(|t| t.to_vec()),
-            tool_choice: tool_choice.cloned(),
-            thinking: serde_json::to_value(thinking).unwrap_or_else(|_| {
+            api_mode: request.api_mode.as_str().to_string(),
+            messages: request.messages.to_vec(),
+            system: request.system.clone(),
+            tools: request.native_tools.clone(),
+            provider_tools: if request.provider_tools.is_empty() {
+                None
+            } else {
+                Some(request.provider_tools.to_vec())
+            },
+            tool_choice: request.tool_choice.clone(),
+            output_format: serde_json::to_value(&request.output_format).unwrap_or_else(|_| {
+                serde_json::json!({
+                    "kind": "text"
+                })
+            }),
+            thinking: serde_json::to_value(&request.thinking).unwrap_or_else(|_| {
                 serde_json::json!({
                     "mode": "disabled"
                 })
             }),
+            previous_response_id: request.previous_response_id.clone(),
+            store: request.store,
+            background: request.background,
+            truncation: request.truncation.clone(),
+            compact: request.compact,
+            include: request.include.clone(),
+            max_tool_calls: request.max_tool_calls,
         });
     });
 }
@@ -466,15 +488,65 @@ fn record_unified_tape_llm_call(result: &LlmResult) {
     let request_digest = LLM_MOCK_CALLS
         .with(|calls| calls.borrow().last().cloned())
         .map(|call| {
-            let serialized = serde_json::to_vec(&serde_json::json!({
-                "messages": call.messages,
-                "system": call.system,
-                "tools": call.tools,
-                "tool_choice": call.tool_choice,
-                "thinking": call.thinking,
-                "model": result.model,
-            }))
-            .unwrap_or_default();
+            let mut request = serde_json::Map::new();
+            request.insert("messages".to_string(), serde_json::json!(call.messages));
+            request.insert("system".to_string(), serde_json::json!(call.system));
+            request.insert("tools".to_string(), serde_json::json!(call.tools));
+            request.insert(
+                "tool_choice".to_string(),
+                serde_json::json!(call.tool_choice),
+            );
+            request.insert("thinking".to_string(), serde_json::json!(call.thinking));
+            request.insert("model".to_string(), serde_json::json!(result.model));
+            if call.api_mode != "chat_completions" {
+                request.insert("api_mode".to_string(), serde_json::json!(call.api_mode));
+            }
+            if call.provider_tools.is_some() {
+                request.insert(
+                    "provider_tools".to_string(),
+                    serde_json::json!(call.provider_tools),
+                );
+            }
+            if call
+                .output_format
+                .get("kind")
+                .and_then(|value| value.as_str())
+                != Some("text")
+            {
+                request.insert(
+                    "output_format".to_string(),
+                    serde_json::json!(call.output_format),
+                );
+            }
+            if call.previous_response_id.is_some() {
+                request.insert(
+                    "previous_response_id".to_string(),
+                    serde_json::json!(call.previous_response_id),
+                );
+            }
+            if call.store.is_some() {
+                request.insert("store".to_string(), serde_json::json!(call.store));
+            }
+            if call.background.is_some() {
+                request.insert("background".to_string(), serde_json::json!(call.background));
+            }
+            if call.truncation.is_some() {
+                request.insert("truncation".to_string(), serde_json::json!(call.truncation));
+            }
+            if call.compact.is_some() {
+                request.insert("compact".to_string(), serde_json::json!(call.compact));
+            }
+            if call.include.is_some() {
+                request.insert("include".to_string(), serde_json::json!(call.include));
+            }
+            if call.max_tool_calls.is_some() {
+                request.insert(
+                    "max_tool_calls".to_string(),
+                    serde_json::json!(call.max_tool_calls),
+                );
+            }
+            let serialized =
+                serde_json::to_vec(&serde_json::Value::Object(request)).unwrap_or_default();
             crate::testbench::tape::content_hash(&serialized)
         })
         .unwrap_or_else(|| {
@@ -660,23 +732,19 @@ fn mock_auto_tool_candidate(tools: &[serde_json::Value]) -> Option<&serde_json::
 /// checked first (FIFO queue, then pattern matching). Falls through to the
 /// default deterministic behavior when no mocks match.
 pub(crate) fn mock_llm_response(
-    messages: &[serde_json::Value],
-    system: Option<&str>,
-    native_tools: Option<&[serde_json::Value]>,
-    tool_choice: Option<&serde_json::Value>,
-    thinking: &super::api::ThinkingConfig,
-    model: &str,
-    cache: bool,
+    request: &super::api::LlmRequestPayload,
 ) -> Result<LlmResult, VmError> {
-    record_llm_mock_call(messages, system, native_tools, tool_choice, thinking);
+    record_llm_mock_call(request);
 
+    let messages = &request.messages;
+    let system = request.system.as_deref();
     let match_text = mock_match_text(messages);
     let prompt_text = mock_last_prompt_text(messages);
-    let cache_key = mock_prompt_cache_key(model, messages, system);
+    let cache_key = mock_prompt_cache_key(&request.model, messages, system);
 
     if let Some(matched) = try_match_cli_mock(&match_text) {
         return matched.map(|mut result| {
-            if cache {
+            if request.cache {
                 apply_mock_prompt_cache(&mut result, &cache_key);
             }
             result
@@ -685,7 +753,7 @@ pub(crate) fn mock_llm_response(
 
     if let Some(matched) = try_match_builtin_mock(&match_text) {
         return matched.map(|mut result| {
-            if cache {
+            if request.cache {
                 apply_mock_prompt_cache(&mut result, &cache_key);
             }
             result
@@ -698,7 +766,7 @@ pub(crate) fn mock_llm_response(
 
     // Generate a mock tool call for the first tool, filling required
     // params with placeholders so the call passes schema validation.
-    if let Some(tools) = native_tools {
+    if let Some(tools) = request.native_tools.as_deref() {
         if let Some(first_tool) = mock_auto_tool_candidate(tools) {
             let tool_name = mock_tool_name(first_tool).unwrap_or("unknown");
             let mock_args = mock_required_args(first_tool);
@@ -714,7 +782,7 @@ pub(crate) fn mock_llm_response(
                 output_tokens: 20,
                 cache_read_tokens: 0,
                 cache_write_tokens: 0,
-                model: model.to_string(),
+                model: request.model.to_string(),
                 provider: "mock".to_string(),
                 thinking: None,
                 thinking_summary: None,
@@ -729,7 +797,7 @@ pub(crate) fn mock_llm_response(
                 logprobs: Vec::new(),
                 telemetry: ProviderTelemetry::default(),
             };
-            if cache {
+            if request.cache {
                 apply_mock_prompt_cache(&mut result, &cache_key);
             }
             return Ok(result);
@@ -764,7 +832,7 @@ pub(crate) fn mock_llm_response(
         output_tokens: 30,
         cache_read_tokens: 0,
         cache_write_tokens: 0,
-        model: model.to_string(),
+        model: request.model.to_string(),
         provider: "mock".to_string(),
         thinking: None,
         thinking_summary: None,
@@ -777,7 +845,7 @@ pub(crate) fn mock_llm_response(
         logprobs: Vec::new(),
         telemetry: ProviderTelemetry::default(),
     };
-    if cache {
+    if request.cache {
         apply_mock_prompt_cache(&mut result, &cache_key);
     }
     Ok(result)

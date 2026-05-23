@@ -1060,6 +1060,27 @@ fn test_llm_call_option_literal_flags_probable_typos() {
 }
 
 #[test]
+fn test_llm_call_option_literal_accepts_openai_responses_options() {
+    let warns = warnings(
+        r#"pipeline t(task) {
+  llm_call("prompt", nil, {
+    provider: "mock",
+    api_mode: "responses",
+    provider_tools: [{type: "web_search_preview"}],
+    previous_response_id: "resp_prev",
+    response_store: true,
+    background: false,
+    truncation: "auto",
+    compact: true,
+    include: ["reasoning.encrypted_content"],
+    max_tool_calls: 2
+  })
+}"#,
+    );
+    assert!(warns.is_empty(), "got warnings: {warns:?}");
+}
+
+#[test]
 fn test_structured_llm_options_accept_structured_aliases() {
     let errs = errors(
         r#"pipeline t(task) {

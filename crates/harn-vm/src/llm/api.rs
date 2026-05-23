@@ -47,7 +47,7 @@ pub use ollama::{
 };
 pub(crate) use openai_normalize::normalize_openai_style_messages;
 pub(crate) use options::{
-    push_unique_anthropic_beta_feature, DeltaSender, LlmCallOptions, LlmRequestPayload,
+    push_unique_anthropic_beta_feature, DeltaSender, LlmApiMode, LlmCallOptions, LlmRequestPayload,
     LlmRouteAlternative, LlmRouteFallback, LlmRoutePolicy, LlmRoutingDecision, OutputFormat,
     ReasoningEffort, ReminderLifecycleEmission, ThinkingConfig, ToolSearchConfig, ToolSearchMode,
     ToolSearchVariant,
@@ -57,6 +57,7 @@ pub use readiness::{
     ModelReadiness,
 };
 pub(crate) use response::parse_llm_response as parse_llm_response_for_provider;
+pub(crate) use response::parse_openai_responses_response;
 pub(crate) use result::{vm_build_llm_result, LlmResult};
 pub(crate) use schema_stream::{
     aborted_result_value as schema_stream_aborted_result_value, parse_schema_stream_abort,
@@ -219,15 +220,7 @@ async fn vm_call_llm_full_inner_request(
 
     if crate::llm::providers::MockProvider::should_intercept(&request.provider) {
         request.emit_reminder_lifecycle();
-        let result = mock_llm_response(
-            &request.messages,
-            request.system.as_deref(),
-            request.native_tools.as_deref(),
-            request.tool_choice.as_ref(),
-            &request.thinking,
-            &request.model,
-            request.cache,
-        )?;
+        let result = mock_llm_response(request)?;
         super::trigger_predicate::note_result(request, &result);
         record_cli_llm_result(&result);
         if let Some(tx) = delta_tx {
@@ -294,16 +287,7 @@ async fn vm_call_llm_full_inner_offthread(
     }
 
     if crate::llm::providers::MockProvider::should_intercept(&request.provider) {
-        let result = mock_llm_response(
-            &request.messages,
-            request.system.as_deref(),
-            request.native_tools.as_deref(),
-            request.tool_choice.as_ref(),
-            &request.thinking,
-            &request.model,
-            request.cache,
-        )
-        .map_err(OffthreadLlmError::from_vm_error)?;
+        let result = mock_llm_response(request).map_err(OffthreadLlmError::from_vm_error)?;
         super::trigger_predicate::note_result(request, &result);
         record_cli_llm_result(&result);
         return Ok(result);

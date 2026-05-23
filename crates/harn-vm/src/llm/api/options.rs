@@ -126,6 +126,25 @@ pub(crate) enum ToolSearchMode {
     Client,
 }
 
+/// Provider API surface for a call. OpenAI-compatible providers default to
+/// chat completions; the native OpenAI Responses path is explicit because it
+/// has different request, tool, and transcript semantics.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize)]
+#[serde(rename_all = "snake_case")]
+pub(crate) enum LlmApiMode {
+    ChatCompletions,
+    Responses,
+}
+
+impl LlmApiMode {
+    pub(crate) fn as_str(self) -> &'static str {
+        match self {
+            Self::ChatCompletions => "chat_completions",
+            Self::Responses => "responses",
+        }
+    }
+}
+
 /// User-facing tool_search configuration. Parsed from the `tool_search`
 /// option on `llm_call` / `agent_loop`. Absent means no deferred-loading
 /// machinery is engaged — tools ship eagerly as always.
@@ -276,6 +295,7 @@ pub(crate) struct LlmCallOptions {
     pub provider: String,
     pub model: String,
     pub api_key: String,
+    pub api_mode: LlmApiMode,
     pub route_policy: LlmRoutePolicy,
     pub fallback_chain: Vec<String>,
     pub route_fallbacks: Vec<LlmRouteFallback>,
@@ -353,6 +373,9 @@ pub(crate) struct LlmCallOptions {
     // --- Tools ---
     pub tools: Option<VmValue>,
     pub native_tools: Option<Vec<serde_json::Value>>,
+    /// Provider-native Responses tools that Harn does not execute locally,
+    /// such as OpenAI hosted web/file/code-interpreter tools or remote MCP.
+    pub provider_tools: Vec<serde_json::Value>,
     pub tool_choice: Option<serde_json::Value>,
     /// Progressive-disclosure configuration. When set, the options
     /// extractor resolves this against the active provider's capability
@@ -377,6 +400,21 @@ pub(crate) struct LlmCallOptions {
 
     // --- Provider-specific overrides ---
     pub provider_overrides: Option<serde_json::Value>,
+    /// OpenAI Responses conversation state. When present, the provider links
+    /// the request to its prior response instead of Harn replaying every turn.
+    pub previous_response_id: Option<String>,
+    /// OpenAI Responses persistence flag.
+    pub store: Option<bool>,
+    /// OpenAI Responses background execution flag.
+    pub background: Option<bool>,
+    /// OpenAI Responses truncation/compaction policy.
+    pub truncation: Option<String>,
+    /// OpenAI Responses standalone compaction endpoint flag.
+    pub compact: Option<bool>,
+    /// OpenAI Responses include list for provider-side metadata expansion.
+    pub include: Option<Vec<String>>,
+    /// OpenAI Responses limit for provider-executed tool calls.
+    pub max_tool_calls: Option<i64>,
 
     // --- Budgets ---
     /// Optional first-class budget envelope for pre-flight cost/token checks.
@@ -445,6 +483,7 @@ pub(crate) struct LlmRequestPayload {
     pub provider: String,
     pub model: String,
     pub api_key: String,
+    pub api_mode: LlmApiMode,
     pub fallback_chain: Vec<String>,
     pub route_fallbacks: Vec<LlmRouteFallback>,
     pub messages: Vec<serde_json::Value>,
@@ -476,11 +515,19 @@ pub(crate) struct LlmRequestPayload {
     pub anthropic_beta_features: Vec<String>,
     pub vision: bool,
     pub native_tools: Option<Vec<serde_json::Value>>,
+    pub provider_tools: Vec<serde_json::Value>,
     pub tool_choice: Option<serde_json::Value>,
     pub cache: bool,
     pub timeout: Option<u64>,
     pub stream: bool,
     pub provider_overrides: Option<serde_json::Value>,
+    pub previous_response_id: Option<String>,
+    pub store: Option<bool>,
+    pub background: Option<bool>,
+    pub truncation: Option<String>,
+    pub compact: Option<bool>,
+    pub include: Option<Vec<String>>,
+    pub max_tool_calls: Option<i64>,
     pub prefill: Option<String>,
     /// Forwarded session id for streaming-tool-call event emission (#693).
     /// Cloned out of `LlmCallOptions::session_id` so the transport layer
@@ -512,6 +559,7 @@ impl From<&LlmCallOptions> for LlmRequestPayload {
             provider: opts.provider.clone(),
             model: opts.model.clone(),
             api_key: opts.api_key.clone(),
+            api_mode: opts.api_mode,
             fallback_chain: opts.fallback_chain.clone(),
             route_fallbacks: opts.route_fallbacks.clone(),
             messages: opts.messages.clone(),
@@ -535,11 +583,19 @@ impl From<&LlmCallOptions> for LlmRequestPayload {
             anthropic_beta_features: opts.anthropic_beta_features_for_request(),
             vision: opts.vision,
             native_tools: opts.native_tools.clone(),
+            provider_tools: opts.provider_tools.clone(),
             tool_choice: opts.tool_choice.clone(),
             cache: opts.cache,
             timeout: opts.timeout,
             stream: opts.stream,
             provider_overrides: opts.provider_overrides.clone(),
+            previous_response_id: opts.previous_response_id.clone(),
+            store: opts.store,
+            background: opts.background,
+            truncation: opts.truncation.clone(),
+            compact: opts.compact,
+            include: opts.include.clone(),
+            max_tool_calls: opts.max_tool_calls,
             prefill: opts.prefill.clone(),
             session_id: opts.session_id.clone(),
             reminder_lifecycle: opts.reminder_lifecycle.clone(),
@@ -594,6 +650,7 @@ pub(crate) fn base_opts(provider: &str) -> LlmCallOptions {
         provider: provider.to_string(),
         model: "test-model".to_string(),
         api_key: String::new(),
+        api_mode: LlmApiMode::ChatCompletions,
         route_policy: LlmRoutePolicy::Manual,
         fallback_chain: Vec::new(),
         route_fallbacks: Vec::new(),
@@ -634,6 +691,7 @@ pub(crate) fn base_opts(provider: &str) -> LlmCallOptions {
         native_tools: Some(vec![
             serde_json::json!({"type": "function", "function": {"name": "tool"}}),
         ]),
+        provider_tools: Vec::new(),
         tool_choice: Some(serde_json::json!({
             "type": "function",
             "function": {"name": "tool"}
@@ -644,6 +702,13 @@ pub(crate) fn base_opts(provider: &str) -> LlmCallOptions {
         timeout: Some(5),
         idle_timeout: None,
         provider_overrides: Some(serde_json::json!({"custom_flag": true})),
+        previous_response_id: None,
+        store: None,
+        background: None,
+        truncation: None,
+        compact: None,
+        include: None,
+        max_tool_calls: None,
         budget: None,
         prefill: None,
         structural_experiment: None,

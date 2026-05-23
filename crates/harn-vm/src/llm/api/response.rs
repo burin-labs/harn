@@ -186,6 +186,315 @@ pub(super) fn extract_openai_choice_logprobs(choice: &serde_json::Value) -> Vec<
         .collect()
 }
 
+fn parse_tool_arguments(arguments: Option<&serde_json::Value>) -> serde_json::Value {
+    match arguments {
+        Some(serde_json::Value::String(text)) => serde_json::from_str(text).unwrap_or_else(|err| {
+            serde_json::json!({
+                "__parse_error": format!(
+                    "Could not parse tool arguments as JSON: {}. Raw input: {}",
+                    err,
+                    &text[..text.len().min(200)]
+                )
+            })
+        }),
+        Some(value) => value.clone(),
+        None => serde_json::json!({}),
+    }
+}
+
+fn openai_responses_tool_kind(item_type: &str) -> &'static str {
+    match item_type {
+        "web_search_call" => "web_search",
+        "file_search_call" => "file_search",
+        "code_interpreter_call" => "code_interpreter",
+        "computer_call" => "computer_use",
+        "image_generation_call" => "image_generation",
+        "tool_search_call" | "tool_search_output" => "tool_search",
+        _ if item_type.starts_with("mcp_") => "remote_mcp",
+        _ => "hosted_tool",
+    }
+}
+
+fn is_openai_responses_hosted_tool_item(item_type: &str) -> bool {
+    item_type.ends_with("_call")
+        || item_type == "tool_search_output"
+        || item_type == "mcp_list_tools"
+        || item_type == "mcp_approval_request"
+}
+
+fn push_openai_responses_text_block(
+    content: &serde_json::Value,
+    text: &mut String,
+    blocks: &mut Vec<serde_json::Value>,
+) {
+    let block_type = content.get("type").and_then(|value| value.as_str());
+    let Some(value) = content
+        .get("text")
+        .or_else(|| content.get("content"))
+        .and_then(|value| value.as_str())
+    else {
+        return;
+    };
+    match block_type {
+        Some("output_text") | Some("text") | None => {
+            text.push_str(value);
+            blocks.push(serde_json::json!({
+                "type": "output_text",
+                "text": value,
+                "visibility": "public",
+            }));
+        }
+        Some("refusal") | Some("output_refusal") => {
+            text.push_str(value);
+            blocks.push(serde_json::json!({
+                "type": "refusal",
+                "text": value,
+                "visibility": "public",
+            }));
+        }
+        _ => {}
+    }
+}
+
+fn push_openai_responses_hosted_tool_block(
+    item: &serde_json::Value,
+    item_type: &str,
+    blocks: &mut Vec<serde_json::Value>,
+) {
+    let id = item
+        .get("id")
+        .and_then(|value| value.as_str())
+        .unwrap_or("");
+    let call_id = item
+        .get("call_id")
+        .and_then(|value| value.as_str())
+        .unwrap_or(id);
+    let name = item
+        .get("name")
+        .or_else(|| item.get("server_label"))
+        .or_else(|| item.get("tool_name"))
+        .and_then(|value| value.as_str())
+        .unwrap_or(item_type);
+    let status = item
+        .get("status")
+        .and_then(|value| value.as_str())
+        .unwrap_or("");
+    blocks.push(serde_json::json!({
+        "type": "provider_tool_call",
+        "id": if call_id.is_empty() { id } else { call_id },
+        "provider_tool_id": id,
+        "call_id": call_id,
+        "name": name,
+        "provider_tool_type": item_type,
+        "tool_kind": openai_responses_tool_kind(item_type),
+        "executor": "provider_native",
+        "status": status,
+        "visibility": "internal",
+        "provider_metadata": item,
+    }));
+}
+
+/// Parse OpenAI's native Responses API output into Harn's normal result shape.
+pub(crate) fn parse_openai_responses_response(
+    json: &serde_json::Value,
+    provider: &str,
+    model: &str,
+) -> Result<LlmResult, VmError> {
+    if let Some(err) = json["error"]["message"].as_str() {
+        return Err(VmError::Thrown(VmValue::String(Rc::from(format!(
+            "{provider} API error: {err}"
+        )))));
+    }
+
+    let output = json
+        .get("output")
+        .and_then(|value| value.as_array())
+        .ok_or_else(|| {
+            VmError::Thrown(VmValue::String(Rc::from(format!(
+                "{provider} Responses API response missing output array"
+            ))))
+        })?;
+
+    let mut text = String::new();
+    let mut thinking_summary = String::new();
+    let mut tool_calls = Vec::new();
+    let mut blocks = Vec::new();
+
+    for item in output {
+        let item_type = item
+            .get("type")
+            .and_then(|value| value.as_str())
+            .unwrap_or("");
+        match item_type {
+            "message" => {
+                if let Some(content) = item.get("content").and_then(|value| value.as_array()) {
+                    for content in content {
+                        push_openai_responses_text_block(content, &mut text, &mut blocks);
+                    }
+                }
+            }
+            "reasoning" => {
+                if let Some(summary) = item.get("summary") {
+                    let rendered = render_reasoning_summary_value(summary);
+                    append_paragraph(&mut thinking_summary, &rendered);
+                    if !rendered.is_empty() {
+                        blocks.push(serde_json::json!({
+                            "type": "reasoning_summary",
+                            "text": rendered,
+                            "provider_id": item.get("id").cloned().unwrap_or(serde_json::Value::Null),
+                            "visibility": "private",
+                        }));
+                    }
+                }
+            }
+            "function_call" => {
+                let provider_id = item
+                    .get("id")
+                    .and_then(|value| value.as_str())
+                    .unwrap_or("");
+                let id = item
+                    .get("call_id")
+                    .and_then(|value| value.as_str())
+                    .unwrap_or(provider_id)
+                    .to_string();
+                let name = item
+                    .get("name")
+                    .or_else(|| item.get("function").and_then(|value| value.get("name")))
+                    .and_then(|value| value.as_str())
+                    .unwrap_or("")
+                    .to_string();
+                let arguments = parse_tool_arguments(item.get("arguments").or_else(|| {
+                    item.get("function")
+                        .and_then(|value| value.get("arguments"))
+                }));
+                tool_calls.push(serde_json::json!({
+                    "id": id,
+                    "provider_id": provider_id,
+                    "name": name,
+                    "arguments": arguments,
+                }));
+                blocks.push(serde_json::json!({
+                    "type": "tool_call",
+                    "id": id,
+                    "provider_id": provider_id,
+                    "name": name,
+                    "arguments": arguments,
+                    "visibility": "internal",
+                }));
+            }
+            "tool_search_call" => {
+                let id = item
+                    .get("call_id")
+                    .or_else(|| item.get("id"))
+                    .cloned()
+                    .unwrap_or(serde_json::Value::Null);
+                let query = item
+                    .get("query")
+                    .or_else(|| item.get("input"))
+                    .or_else(|| item.get("action").and_then(|action| action.get("query")))
+                    .cloned()
+                    .unwrap_or(serde_json::Value::Null);
+                blocks.push(serde_json::json!({
+                    "type": "tool_search_query",
+                    "id": id,
+                    "provider_tool_id": item.get("id").cloned().unwrap_or(serde_json::Value::Null),
+                    "name": "tool_search",
+                    "query": query,
+                    "executor": "provider_native",
+                    "visibility": "internal",
+                }));
+                push_openai_responses_hosted_tool_block(item, item_type, &mut blocks);
+            }
+            "tool_search_output" => {
+                let tool_use_id = item
+                    .get("call_id")
+                    .or_else(|| item.get("id"))
+                    .cloned()
+                    .unwrap_or(serde_json::Value::Null);
+                let references = item
+                    .get("tool_references")
+                    .or_else(|| item.get("results"))
+                    .and_then(|value| value.as_array())
+                    .cloned()
+                    .unwrap_or_default();
+                blocks.push(serde_json::json!({
+                    "type": "tool_search_result",
+                    "tool_use_id": tool_use_id,
+                    "tool_references": references,
+                    "executor": "provider_native",
+                    "visibility": "internal",
+                }));
+                push_openai_responses_hosted_tool_block(item, item_type, &mut blocks);
+            }
+            "compaction" => {
+                let id = item.get("id").cloned().unwrap_or(serde_json::Value::Null);
+                blocks.push(serde_json::json!({
+                    "type": "compaction",
+                    "id": id.clone(),
+                    "provider_id": id,
+                    "encrypted_content": item.get("encrypted_content").cloned().unwrap_or(serde_json::Value::Null),
+                    "visibility": "private",
+                    "provider_metadata": item,
+                }));
+            }
+            other if is_openai_responses_hosted_tool_item(other) => {
+                push_openai_responses_hosted_tool_block(item, other, &mut blocks);
+            }
+            _ => {}
+        }
+    }
+
+    let has_blocks = !blocks.is_empty();
+    if text.is_empty() && thinking_summary.is_empty() && tool_calls.is_empty() && !has_blocks {
+        return Err(VmError::Thrown(VmValue::String(Rc::from(format!(
+            "openai Responses model {model} delivered no content, reasoning, or tool calls"
+        )))));
+    }
+
+    let usage = &json["usage"];
+    let input_tokens = usage["input_tokens"]
+        .as_i64()
+        .or_else(|| usage["prompt_tokens"].as_i64())
+        .unwrap_or(0);
+    let output_tokens = usage["output_tokens"]
+        .as_i64()
+        .or_else(|| usage["completion_tokens"].as_i64())
+        .unwrap_or(0);
+    let cache_read_tokens = extract_cache_read_tokens(usage);
+    let cache_write_tokens = extract_cache_write_tokens(usage);
+    let stop_reason = json["status"]
+        .as_str()
+        .or_else(|| {
+            json.get("incomplete_details")
+                .and_then(|value| value.get("reason"))
+                .and_then(|value| value.as_str())
+        })
+        .map(str::to_string);
+    let request_id = json["id"].as_str().filter(|value| !value.is_empty());
+    let telemetry = ProviderTelemetry::from_openai_usage(usage, request_id);
+
+    Ok(LlmResult {
+        text,
+        tool_calls,
+        input_tokens,
+        output_tokens,
+        cache_read_tokens,
+        cache_write_tokens,
+        model: model.to_string(),
+        provider: provider.to_string(),
+        thinking: None,
+        thinking_summary: if thinking_summary.is_empty() {
+            None
+        } else {
+            Some(thinking_summary)
+        },
+        stop_reason,
+        blocks,
+        logprobs: Vec::new(),
+        telemetry,
+    })
+}
+
 /// Parse a complete (non-streaming) LLM JSON response into an `LlmResult`.
 pub(crate) fn parse_llm_response(
     json: &serde_json::Value,
@@ -193,6 +502,15 @@ pub(crate) fn parse_llm_response(
     model: &str,
     is_anthropic_style: bool,
 ) -> Result<LlmResult, VmError> {
+    if provider == "openai"
+        && json
+            .get("output")
+            .and_then(|value| value.as_array())
+            .is_some()
+    {
+        return parse_openai_responses_response(json, provider, model);
+    }
+
     if is_anthropic_style {
         if let Some(err) = json["error"]["message"].as_str() {
             return Err(VmError::Thrown(VmValue::String(Rc::from(format!(
@@ -572,7 +890,7 @@ pub(super) fn extract_cache_write_tokens(usage: &serde_json::Value) -> i64 {
 mod tests {
     use super::{
         extract_cache_read_tokens, extract_cache_write_tokens, extract_openai_choice_logprobs,
-        parse_llm_response,
+        parse_llm_response, parse_openai_responses_response,
     };
 
     #[test]
@@ -602,6 +920,93 @@ mod tests {
 
         assert_eq!(extract_cache_read_tokens(&usage), 120);
         assert_eq!(extract_cache_write_tokens(&usage), 40);
+    }
+
+    #[test]
+    fn parses_openai_responses_structured_output() {
+        let json = serde_json::json!({
+            "id": "resp_123",
+            "status": "completed",
+            "output": [{
+                "type": "message",
+                "id": "msg_123",
+                "content": [{
+                    "type": "output_text",
+                    "text": "{\"ok\":true}"
+                }]
+            }],
+            "usage": {
+                "input_tokens": 9,
+                "output_tokens": 5,
+                "input_tokens_details": {"cached_tokens": 3}
+            }
+        });
+
+        let result =
+            parse_openai_responses_response(&json, "openai", "gpt-5.4").expect("response parses");
+
+        assert_eq!(result.text, "{\"ok\":true}");
+        assert_eq!(result.input_tokens, 9);
+        assert_eq!(result.output_tokens, 5);
+        assert_eq!(result.cache_read_tokens, 3);
+        assert_eq!(result.telemetry.request_id.as_deref(), Some("resp_123"));
+        assert_eq!(result.blocks[0]["type"], "output_text");
+    }
+
+    #[test]
+    fn parses_openai_responses_hosted_tool_metadata() {
+        let json = serde_json::json!({
+            "id": "resp_456",
+            "status": "completed",
+            "output": [{
+                "type": "web_search_call",
+                "id": "ws_123",
+                "call_id": "call_ws_123",
+                "status": "completed",
+                "action": {"query": "Harn orchestration"}
+            }],
+            "usage": {"input_tokens": 4, "output_tokens": 1}
+        });
+
+        let result =
+            parse_openai_responses_response(&json, "openai", "gpt-5.4").expect("response parses");
+
+        assert!(result.tool_calls.is_empty());
+        let block = &result.blocks[0];
+        assert_eq!(block["type"], "provider_tool_call");
+        assert_eq!(block["provider_tool_id"], "ws_123");
+        assert_eq!(block["call_id"], "call_ws_123");
+        assert_eq!(block["provider_tool_type"], "web_search_call");
+        assert_eq!(block["tool_kind"], "web_search");
+        assert_eq!(block["executor"], "provider_native");
+        assert_eq!(
+            block["provider_metadata"]["action"]["query"],
+            "Harn orchestration"
+        );
+    }
+
+    #[test]
+    fn parses_openai_responses_compaction_metadata() {
+        let json = serde_json::json!({
+            "id": "resp_compact",
+            "status": "completed",
+            "output": [{
+                "type": "compaction",
+                "id": "cmp_123",
+                "encrypted_content": "opaque-state"
+            }],
+            "usage": {"input_tokens": 20, "output_tokens": 0}
+        });
+
+        let result =
+            parse_openai_responses_response(&json, "openai", "gpt-5.4").expect("response parses");
+
+        assert!(result.text.is_empty());
+        let block = &result.blocks[0];
+        assert_eq!(block["type"], "compaction");
+        assert_eq!(block["provider_id"], "cmp_123");
+        assert_eq!(block["encrypted_content"], "opaque-state");
+        assert_eq!(block["visibility"], "private");
     }
 
     #[test]

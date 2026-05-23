@@ -256,6 +256,10 @@ impl OpenAiCompatibleProvider {
         request: &LlmRequestPayload,
         delta_tx: Option<DeltaSender>,
     ) -> Result<LlmResult, VmError> {
+        if request.api_mode == crate::llm::api::LlmApiMode::Responses {
+            return crate::llm::providers::OpenAiResponsesProvider::call(request, delta_tx).await;
+        }
+
         let mut body = Self::build_request_body(request, false);
         self.transform_request(&mut body);
         crate::llm::api::vm_call_llm_api_with_body(
@@ -774,14 +778,8 @@ thinking_modes = ["enabled"]
 
     #[test]
     fn openrouter_disabled_thinking_emits_reasoning_enabled_false() {
-        // Regression: previously Disabled returned None which left the
-        // request silent on the wire, and Qwen3 thinking variants then
-        // fell back to their trained-default unbounded thinking budget
-        // (the 5+ minute single-turn finalize bug). Disabled must be
-        // an explicit `{enabled: false}` so reasoning is actually skipped
-        // by the upstream model. Empirically verified against
-        // qwen/qwen3.6-35b-a3b: 358ms response when the directive is
-        // sent vs 1300ms+ when it isn't.
+        // Qwen3 thinking variants honor explicit `{enabled: false}` but may
+        // otherwise use their trained-default thinking budget.
         let provider = OpenAiCompatibleProvider::new("openrouter".to_string());
         let mut payload = base_request_payload();
         payload.thinking = ThinkingConfig::Disabled;
@@ -920,6 +918,7 @@ thinking_modes = ["enabled"]
             provider: "openrouter".to_string(),
             model: "google/gemini-2.5-pro".to_string(),
             api_key: String::new(),
+            api_mode: crate::llm::api::LlmApiMode::ChatCompletions,
             fallback_chain: Vec::new(),
             route_fallbacks: Vec::new(),
             session_id: None,
@@ -944,11 +943,19 @@ thinking_modes = ["enabled"]
             anthropic_beta_features: Vec::new(),
             vision: false,
             native_tools: None,
+            provider_tools: Vec::new(),
             tool_choice: None,
             cache: false,
             timeout: None,
             stream: false,
             provider_overrides: None,
+            previous_response_id: None,
+            store: None,
+            background: None,
+            truncation: None,
+            compact: None,
+            include: None,
+            max_tool_calls: None,
             prefill: None,
             reminder_lifecycle: Vec::new(),
         }

@@ -952,6 +952,9 @@ log(response.logprobs)       // present when requested and returned
 | `interleaved_thinking` | bool | false | Force the Anthropic interleaved-thinking beta header for the call/loop. |
 | `anthropic_beta_features` | string \| list | nil | Extra Anthropic beta feature names for the comma-separated `anthropic-beta` header. |
 | `tool_search` | bool \| string \| dict | nil | Engage progressive tool disclosure. Shorthand `"bm25"` / `"regex"` / `"hybrid"` (variant, mode auto). Dict: `{variant: "bm25" \| "regex" \| "hybrid", mode: "auto" \| "native" \| "client", strategy: "bm25" \| "regex" \| "hybrid" \| closure \| {handler}, always_loaded: [string], budget_tokens: int, name: string, include_stub_listing: bool}`. See "Tool loading & search" below. |
+| `api_mode` | string | `"chat_completions"` | OpenAI only: set `"responses"` to use Harn's native OpenAI Responses path. Generic OpenAI-compatible providers stay on chat completions. |
+| `provider_tools` / `hosted_tools` | list | nil | OpenAI Responses only. Provider-hosted tools such as `{type: "web_search"}`, `{type: "file_search", ...}`, or `{type: "mcp", server_label, server_url, require_approval}`. |
+| `previous_response_id`, `response_store`, `background`, `truncation`, `compact`, `include`, `max_tool_calls` | mixed | nil | OpenAI Responses conversation-state, persistence, background, provider truncation/compaction, standalone `/responses/compact`, metadata expansion, and provider-executed tool limit controls. A bool `store` is accepted for direct raw Responses calls, but cache handlers reserve `store: {backend...}` for cache configuration. |
 | `output_format` | dict \| string | `{kind: "text"}` | Provider-agnostic output shape. Dicts: `{kind: "json_schema", schema: {...}, strict: true}`, `{kind: "json_object"}`, `{kind: "text"}`. Strings: `"json_schema"`, `"json_object"`/`"json"`, `"text"`. |
 | `response_format` | string | nil | Legacy alias. `"json"` maps to `output_format: {kind: "json_object"}` unless `json_schema`/`schema` is also supplied, in which case it maps to `kind: "json_schema"`. |
 | `json_schema` | dict | nil | Legacy alias for `output_format.schema` and `output_schema`. Prefer `output_format`. |
@@ -977,6 +980,35 @@ Provider auto-resolution precedence:
 4. Unknown model IDs fall back to `HARN_DEFAULT_PROVIDER`, then the
    configured default provider (`anthropic` in the built-in catalog),
    and emit a warning.
+
+### OpenAI Responses mode
+
+Use `api_mode: "responses"` with `provider: "openai"` when a call needs
+OpenAI-native hosted tools, remote MCP, previous-response chaining,
+background mode, or provider-side truncation/compaction:
+
+```harn
+let r = llm_call(prompt, sys, {
+  provider: "openai",
+  model: "gpt-5.4",
+  api_mode: "responses",
+  output_format: {kind: "json_schema", schema: schema, strict: true},
+  provider_tools: [
+    {type: "web_search"},
+    {type: "mcp", server_label: "docs", server_url: "https://mcp.example.com", require_approval: "always"},
+  ],
+  truncation: "auto",
+})
+```
+
+Use Harn `tools`/MCP when Harn must execute, approve, and audit each call.
+Use `provider_tools` only when OpenAI should execute the hosted tool. Those
+calls appear as `provider_tool_call` blocks with provider-native IDs and
+`executor: "provider_native"`; Harn records metadata but does not locally
+mediate each remote call.
+Set `compact: true` for a standalone compaction pass. Harn records returned
+opaque `compaction` items as private blocks rather than implicitly rewriting the
+Harn transcript.
 
 | Model selector | Provider | Model sent to provider |
 |---|---|---|
@@ -1263,6 +1295,10 @@ set under `[provider_defaults.<name>]`:
 | `native_tool_wire_format` | string | Native tool definition shape for shared helpers: `openai` or `anthropic`. Gemini/Vertex adapters emit Google `functionDeclarations` from canonical tool definitions. |
 | `defer_loading` | bool | Provider honors `defer_loading: true` on tool defs. |
 | `tool_search` | `[string]` | Native variants (`["bm25", "regex"]` or `["hosted", "client"]`). Empty = no native support. |
+| `responses_api` | bool | Harn native OpenAI Responses path is available for this route. |
+| `hosted_tools` | `[string]` | Provider-hosted tool kinds Harn can pass through. |
+| `remote_mcp`, `conversation_state`, `compaction`, `background_mode` | bool | OpenAI Responses remote MCP, previous-response state, provider compaction, and background-mode controls. |
+| `tool_approval_policy` | string | Approval policy story for provider-executed tools, for example `provider_or_harn`. |
 | `max_tools` | int | Cap on tool count (used by `harn lint`). |
 | `prompt_caching` | bool | `cache_control` blocks honored. |
 | `prefers_xml_scaffolding` | bool | Prompt sections prefer XML tags such as `<task>` / `<examples>`. |
@@ -2328,7 +2364,7 @@ Use the daemon stdlib wrappers when you want a first-class handle around
 ### Bridge-only builtins (IDE host integration)
 
 These builtins are only meaningful when a Harn script runs inside a host
-with a `HostCallBridge` attached (e.g. burin-code). Outside a bridge
+with a `HostCallBridge` attached. Outside a bridge
 session they raise an error — don't call them from `harn run` in a
 plain terminal.
 

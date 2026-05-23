@@ -396,6 +396,8 @@ pub(crate) const LLM_CALL_OPTIONS: Ty = Ty::Shape(&[
     ShapeFieldDescriptor::optional("model", TY_STRING),
     ShapeFieldDescriptor::optional("model_tier", TY_STRING),
     ShapeFieldDescriptor::optional("provider", TY_STRING),
+    ShapeFieldDescriptor::optional("api_mode", TY_STRING),
+    ShapeFieldDescriptor::optional("api", TY_STRING),
     ShapeFieldDescriptor::optional("route_policy", Ty::Union(&[TY_STRING, TY_DICT])),
     ShapeFieldDescriptor::optional("prefer", Ty::Union(&[TY_STRING, TY_LIST])),
     ShapeFieldDescriptor::optional("fallback_strategy", TY_STRING),
@@ -413,6 +415,7 @@ pub(crate) const LLM_CALL_OPTIONS: Ty = Ty::Shape(&[
     ShapeFieldDescriptor::optional("system_prompt_parts", TY_ANY),
     ShapeFieldDescriptor::optional("system_appendix", TY_ANY),
     ShapeFieldDescriptor::optional("system_suffix", TY_ANY),
+    ShapeFieldDescriptor::optional("previous_response_id", TY_STRING),
     // Generation.
     ShapeFieldDescriptor::optional("max_tokens", TY_INT),
     ShapeFieldDescriptor::optional("temperature", TY_FLOAT),
@@ -448,6 +451,8 @@ pub(crate) const LLM_CALL_OPTIONS: Ty = Ty::Shape(&[
     // Tools and progressive disclosure. Runtime accepts either a raw tool
     // list or a tool_registry dict.
     ShapeFieldDescriptor::optional("tools", Ty::Union(&[TY_LIST, TY_DICT])),
+    ShapeFieldDescriptor::optional("provider_tools", Ty::Union(&[TY_LIST, TY_DICT])),
+    ShapeFieldDescriptor::optional("hosted_tools", Ty::Union(&[TY_LIST, TY_DICT])),
     ShapeFieldDescriptor::optional("tool_choice", Ty::Union(&[TY_STRING, TY_DICT])),
     ShapeFieldDescriptor::optional("tool_search", Ty::Union(&[TY_BOOL, TY_STRING, TY_DICT])),
     ShapeFieldDescriptor::optional("tool_format", TY_STRING),
@@ -459,6 +464,14 @@ pub(crate) const LLM_CALL_OPTIONS: Ty = Ty::Shape(&[
     ShapeFieldDescriptor::optional("timeout", TY_INT),
     ShapeFieldDescriptor::optional("idle_timeout", TY_INT),
     ShapeFieldDescriptor::optional("stream", TY_BOOL),
+    ShapeFieldDescriptor::optional("store", Ty::Union(&[TY_BOOL, TY_DICT])),
+    ShapeFieldDescriptor::optional("response_store", TY_BOOL),
+    ShapeFieldDescriptor::optional("responses_store", TY_BOOL),
+    ShapeFieldDescriptor::optional("background", TY_BOOL),
+    ShapeFieldDescriptor::optional("truncation", TY_STRING),
+    ShapeFieldDescriptor::optional("compact", TY_BOOL),
+    ShapeFieldDescriptor::optional("include", TY_LIST),
+    ShapeFieldDescriptor::optional("max_tool_calls", TY_INT),
     // Provider-specific and advanced request shaping.
     ShapeFieldDescriptor::optional("anthropic", TY_DICT),
     ShapeFieldDescriptor::optional("openai", TY_DICT),

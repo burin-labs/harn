@@ -194,9 +194,11 @@ impl ProviderTelemetry {
         let mut telemetry = Self::new(source::OPENAI_USAGE);
         telemetry.server_prompt_tokens = usage
             .get("prompt_tokens")
+            .or_else(|| usage.get("input_tokens"))
             .and_then(serde_json::Value::as_i64);
         telemetry.server_output_tokens = usage
             .get("completion_tokens")
+            .or_else(|| usage.get("output_tokens"))
             .and_then(serde_json::Value::as_i64);
         if let Some(timings) = usage.get("timings").filter(|value| value.is_object()) {
             telemetry.source = source::LLAMACPP_TIMINGS.to_string();

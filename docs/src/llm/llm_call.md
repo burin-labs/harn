@@ -98,6 +98,7 @@ as both LLM content and deterministic `vision_ocr(...)` context.
 | `blocks` | list | Canonical structured content blocks across providers |
 | `logprobs` | list | Token log probability records when requested and returned by the provider |
 | `stop_reason` | string | `"end_turn"`, `"max_tokens"`, `"tool_use"`, `"stop_sequence"` |
+| `provider_response_id` | string | Provider-native response id when available, such as OpenAI Responses `resp_*` |
 | `transcript` | dict | Transcript carrying message history, events, summary, metadata, and id |
 
 ### Options dict
@@ -134,6 +135,15 @@ as both LLM content and deterministic `vision_ocr(...)` context.
 | `tools` | list | nil | Tool definitions |
 | `tool_choice` | string/dict | `"auto"` | `"auto"`, `"none"`, `"required"`, or `{name: "tool"}` |
 | `tool_search` | bool/string/dict | nil | Progressive tool disclosure. See [Tool Vault](./tools.md#tool-vault) |
+| `api_mode` | string | `"chat_completions"` | OpenAI only: set `"responses"` to use Harn's native OpenAI Responses path. Generic OpenAI-compatible providers stay on chat completions. |
+| `provider_tools` / `hosted_tools` | list | nil | OpenAI Responses only. Pass provider-hosted tools such as `{type: "web_search"}`, `{type: "file_search", ...}`, or `{type: "mcp", server_label, server_url, require_approval}`. Harn records provider-native IDs and normalized metadata but does not execute these tools locally. |
+| `previous_response_id` | string | nil | OpenAI Responses conversation-state link. Use only when provider-side state is desired instead of replaying the full Harn transcript. |
+| `response_store` / `responses_store` | bool | provider default | OpenAI Responses persistence flag. A bool `store` is also accepted for direct raw Responses calls, but cache handlers reserve `store: {backend...}` for cache storage configuration. |
+| `background` | bool | provider default | OpenAI Responses background-mode flag. |
+| `truncation` | string | provider default | OpenAI Responses provider-side truncation/compaction policy such as `"auto"`. |
+| `compact` | bool | `false` | OpenAI Responses standalone compaction. When `true`, Harn posts the request to `/responses/compact` and returns provider compaction items in `result.blocks`. |
+| `include` | list | nil | OpenAI Responses metadata expansions to request. |
+| `max_tool_calls` | int | nil | OpenAI Responses provider-executed tool-call limit. |
 | `budget` | dict | nil | Pre-flight LLM budget envelope. Supports `max_cost_usd`, `max_input_tokens`, `max_output_tokens`, and `total_budget_usd` |
 | `cache` | bool | `false` | Enable prompt caching (Anthropic) |
 | `stream` | bool | `true` | Use streaming SSE transport. Set `false` for synchronous request/response. Env: `HARN_LLM_STREAM` |
@@ -175,6 +185,36 @@ let result = llm_call("hello", nil, {
   ollama: {num_ctx: 32768}
 })
 ```
+
+### OpenAI Responses mode
+
+Set `api_mode: "responses"` with `provider: "openai"` when the call should
+use OpenAI's native Responses API instead of the generic
+`/chat/completions` adapter:
+
+```harn
+let result = llm_call("Search and summarize current docs.", nil, {
+  provider: "openai",
+  model: "gpt-5.4",
+  api_mode: "responses",
+  output_format: {kind: "json_schema", schema: summary_schema, strict: true},
+  provider_tools: [
+    {type: "web_search"},
+    {type: "mcp", server_label: "docs", server_url: "https://mcp.example.com", require_approval: "always"},
+  ],
+  truncation: "auto",
+  max_tool_calls: 4,
+})
+```
+
+Use normal Harn `tools` when Harn should execute, approve, and audit a tool or
+MCP server locally. Use `provider_tools` only when the provider should execute a
+hosted tool or remote MCP connector. Provider-executed calls appear in
+`result.blocks`, transcript `provider_payload.blocks`, and `provider_response_id`
+metadata with `executor: "provider_native"` and the provider-native IDs.
+Set `compact: true` for a standalone Responses compaction pass; Harn records the
+opaque `compaction` items as private blocks so later turns can explicitly choose
+whether to feed the compacted provider window back as input.
 
 Structural experiments can be enabled directly on a call:
 

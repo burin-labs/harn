@@ -466,6 +466,37 @@ run record:
 These are stable shapes; replay / eval can reconstruct which tools
 were available when without re-running the call.
 
+## Provider-hosted tools
+
+Use normal Harn `tools` when Harn should execute the operation locally,
+including local MCP servers, approval hooks, mutation-session audit, and
+deterministic tool receipts. Use OpenAI Responses `provider_tools` only when
+the provider should execute a hosted tool or remote MCP connector:
+
+```harn
+let result = llm_call("Find the current policy and summarize it.", nil, {
+  provider: "openai",
+  model: "gpt-5.4",
+  api_mode: "responses",
+  provider_tools: [
+    {type: "web_search"},
+    {type: "mcp", server_label: "docs", server_url: "https://mcp.example.com", require_approval: "always"},
+  ],
+})
+```
+
+Provider-hosted calls are not dispatchable Harn tool calls. Harn records them
+as `provider_tool_call` blocks with `executor: "provider_native"`,
+`provider_tool_id`, `call_id`, `provider_tool_type`, `tool_kind`, and the raw
+`provider_metadata`. Remote MCP approval and execution are mediated by OpenAI
+according to the provider tool config; choose Harn MCP tools instead when Harn
+must own each approval and tool receipt.
+
+Standalone OpenAI Responses compaction uses the same mode with `compact: true`.
+Harn posts the request to `/responses/compact` and records returned opaque
+`compaction` items as private blocks rather than rewriting the Harn transcript
+implicitly.
+
 ## MCP server tools
 
 Use `mcp_servers` when an agent should use an MCP server's tool catalog without
