@@ -90,6 +90,12 @@ condensed series summaries instead of full per-patch history.
   catalog bindings now expose `preferred_tool_format`, `tool_mode_parity`, and
   optional parity notes. Presets use that data to route known unreliable native
   tool modes to text tools without provider-specific branches.
+- **Stdlib typed shape audit (#2193).** High-value stdlib helpers now expose
+  reusable type aliases for their public record contracts instead of leaving
+  callers to pass free-form dicts. The pass covers run artifacts, calendar,
+  UI resource envelopes, waitpoints, replay corrections, tool registries, and
+  trigger helper plans while preserving raw provider payload envelopes where
+  hosts own the external schema.
 - **Bridge inject mode `wait_for_completion` renamed to `audit_only`
   (#2212).** The previous name was a footgun: reminders queued with this
   mode drain at `loop_exit` and land in the transcript audit, but the

@@ -129,12 +129,13 @@ integrations.
 
 Import `std/corrections` for replay-for-teaching records:
 
-- `record(correction)` appends a `CorrectionRecord` with `from_decision`,
-  `to_decision`, `reason`, `applied_by`, and `scope` (`this_run`,
-  `this_persona`, or `all`), plus optional `actor_id`, `action`, `trace_id`,
-  `step`, `evidence_refs`, and `metadata`.
-- `query(filters)` returns corrections by `actor`, `actor_id`, `agent`,
-  `action`, `scope`, `since`, `until`, and `limit`.
+- `record(correction: CorrectionInput)` appends a `CorrectionRecord` with
+  typed `CorrectionDecision` values for `from_decision` and `to_decision`,
+  `reason`, `applied_by`, and `scope` (`this_run`, `this_persona`, or `all`),
+  plus optional `actor_id`, `action`, `trace_id`, `step`,
+  `list<CorrectionEvidenceRef>`, and `metadata`.
+- `query(filters: CorrectionQueryFilters)` returns corrections by `actor`,
+  `actor_id`, `agent`, `action`, `scope`, `since`, `until`, and `limit`.
 
 `this_persona` and `all` corrections are policy inputs. When a human keeps
 correcting an actor's decision path, `policy_for(actor_id)` caps that actor's

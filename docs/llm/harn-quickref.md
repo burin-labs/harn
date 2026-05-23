@@ -2658,23 +2658,27 @@ let result = ui_tool_result(resource, {structured_fallback: ui_structured_fallba
 let rendered = ui_select_for_host(result, host_capabilities)
 ```
 
-- `ui_resource(uri, name, html, options?)` produces `harn.ui_resource.v1`
+- `ui_resource(uri, name, html, options?: UiResourceOptions)` produces
+  `UiResource` (`harn.ui_resource.v1`)
   with `mime_type: "text/html;profile=mcp-app"`, a content hash, CSP/sandbox
   policy, and an embedded `std/artifact/web` validation summary.
   `allow_host_bridge: true` is the default so `parent.postMessage` to the
   host counts as an expected MCP Apps bridge call rather than a finding.
-- `ui_tool_meta(resource, options?)` returns a `_meta.ui` block;
+- `ui_tool_meta(resource, options?: UiToolMetaOptions)` returns a `_meta.ui`
+  block;
   `ui_tool_meta_to_mcp(meta)` serializes it into the MCP `resourceUri` /
   `visibility` / `initialView` shape MCP Apps hosts read from `tools/list`.
-- `ui_tool_result(resource, options?)` wraps the resource with a mandatory
-  text fallback (default: `web_artifact_text_fallback` of the HTML) and an
-  optional structured fallback. Invalid resources are stripped automatically
-  unless the caller passes `allow_invalid_resource: true`.
+- `ui_tool_result(resource, options?: UiToolResultOptions)` wraps the resource
+  with a mandatory text fallback (default: `web_artifact_text_fallback` of the
+  HTML) and an optional `UiStructuredFallback`. Wrap raw fallback data with
+  `ui_structured_fallback(data, options?: UiStructuredFallbackOptions)`.
+  Invalid resources are stripped automatically unless the caller passes
+  `allow_invalid_resource: true`.
 - `ui_select_for_host(result, capabilities?)` picks `ui_resource`,
   `structured_fallback`, or `text_fallback` from the same envelope based on
   host capability advertisements. `ui_host_capabilities` accepts the MCP
   `client_capabilities.apps`, OpenAI Apps SDK `ui.apps`, or bare `{apps:
-  true}` shapes.
+  true}` shapes through `UiHostCapabilityInput`.
 - `ui_tool_call_envelope(name, params?, options?)` and
   `ui_context_update_envelope(key, value, options?)` build the JSON-RPC
   envelopes a sandboxed iframe sends through `window.parent.postMessage`.

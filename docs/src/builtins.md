@@ -1931,9 +1931,10 @@ registries programmatically. For MCP serving, see the `tool_define` /
 `mcp_tools` API above.
 
 For declarative batches, `import { tool_define_many, tool_registry_from } from
-"std/tools"`. `tool_define_many(registry, specs)` adds a list of `{name,
-description, parameters, handler, ...}` specs to a registry, and
-`tool_registry_from(specs)` creates a fresh registry from the same shape.
+"std/tools"`. `tool_define_many(registry, specs: list<ToolDefinitionSpec>)`
+adds typed `{name, description, parameters, handler, ...}` specs to a
+`ToolRegistry`, and `tool_registry_from(specs)` creates a fresh registry from
+the same shape.
 
 | Function | Parameters | Returns | Description |
 |---|---|---|---|
@@ -2190,8 +2191,8 @@ tool registry dict.
 |---|---|---|---|
 | `tool_registry()` | — | tool registry | Create an empty `{_type: "tool_registry", tools: []}` registry |
 | `tool_define(registry, name, desc, config)` | registry, name, desc: string, config: dict | dict | Add a tool (config: `{parameters, handler, returns?, annotations?, ...}`) |
-| `tool_define_many(registry, specs)` | registry: dict, specs: list | dict | Stdlib helper from `std/tools`; add many declarative tool specs to a registry |
-| `tool_registry_from(specs)` | specs: list | dict | Stdlib helper from `std/tools`; create a registry from declarative tool specs |
+| `tool_define_many(registry, specs)` | registry: `ToolRegistry`, specs: `list<ToolDefinitionSpec>` | `ToolRegistry` | Stdlib helper from `std/tools`; add many declarative tool specs to a registry |
+| `tool_registry_from(specs)` | specs: `list<ToolDefinitionSpec>` | `ToolRegistry` | Stdlib helper from `std/tools`; create a registry from declarative tool specs |
 | `tool_synthesize(config)` | config: dict | closure | Synthesize a deterministic callable tool from a natural-language description |
 | `tool_synthesis_cache()` | — | list | Inspect pinned synthesized tool specs for the current run |
 | `tool_synthesis_clear()` | — | nil | Clear the current run's synthesized tool cache |

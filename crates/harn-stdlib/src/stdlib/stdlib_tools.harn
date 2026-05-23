@@ -1,8 +1,40 @@
-fn __tool_spec_config(spec) {
+type ToolRegistry = {_type: "tool_registry", tools: list<dict>}
+
+type ToolDefinitionConfig = {
+  parameters?: dict,
+  returns?: dict,
+  output_schema?: dict,
+  handler?: any,
+  executor?: string,
+  host_capability?: string,
+  mcp_server?: string,
+  defer_loading?: bool,
+  namespace?: string,
+  annotations?: dict,
+}
+
+type ToolDefinitionSpec = {
+  name: string,
+  description?: string,
+  desc?: string,
+  config?: ToolDefinitionConfig,
+  parameters?: dict,
+  returns?: dict,
+  output_schema?: dict,
+  handler?: any,
+  executor?: string,
+  host_capability?: string,
+  mcp_server?: string,
+  defer_loading?: bool,
+  namespace?: string,
+  annotations?: dict,
+}
+
+fn __tool_spec_config(spec: ToolDefinitionSpec) -> ToolDefinitionConfig {
   if type_of(spec) != "dict" {
     throw "tool_define_many: each spec must be a dict"
   }
-  var config = spec?.config ?? {}
+  var config = spec.config ?? {}
   for key in spec.keys() {
     if !contains(["name", "description", "desc", "config"], key) {
       config = config + {[key]: spec[key]}
@@ -20,7 +52,7 @@ fn __tool_spec_config(spec) {
  * @api_stability: stable
  * @example: tool_define_many(registry, specs)
  */
-pub fn tool_define_many(registry, specs = nil) {
+pub fn tool_define_many(registry, specs: list<ToolDefinitionSpec>? = nil) -> ToolRegistry {
   var target = registry
   var items = specs
   if items == nil {
@@ -32,8 +64,8 @@ pub fn tool_define_many(registry, specs = nil) {
   }
   var tools = target ?? tool_registry()
   for spec in items {
-    let name = spec?.name
-    let description = spec?.description ?? spec?.desc
+    let name = spec.name
+    let description = spec.description ?? spec.desc
     if name == nil || name == "" {
       throw "tool_define_many: each spec needs a non-empty name"
     }
@@ -54,6 +86,6 @@ pub fn tool_define_many(registry, specs = nil) {
  * @api_stability: stable
  * @example: tool_registry_from(specs)
  */
-pub fn tool_registry_from(specs) {
+pub fn tool_registry_from(specs: list<ToolDefinitionSpec>) -> ToolRegistry {
   return tool_define_many(tool_registry(), specs)
 }

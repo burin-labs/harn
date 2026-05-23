@@ -33,8 +33,8 @@ let rendered = ui_select_for_host(result, host_capabilities)
 
 ## Resource envelope
 
-`ui_resource(uri, name, html, options?)` returns
-`harn.ui_resource.v1`:
+`ui_resource(uri, name, html, options?: UiResourceOptions)` returns
+`UiResource` (`harn.ui_resource.v1`):
 
 | Field | Purpose |
 |---|---|
@@ -57,8 +57,9 @@ rules used by safe artifact patching. The validator defaults to
 
 ## Tool-declaration metadata
 
-`ui_tool_meta(resource, options?)` returns a `harn.ui_tool_meta.v1`
-envelope and `ui_tool_meta_to_mcp(meta)` serializes it into the
+`ui_tool_meta(resource, options?: UiToolMetaOptions)` returns a
+`UiToolMeta` (`harn.ui_tool_meta.v1`) envelope and
+`ui_tool_meta_to_mcp(meta)` serializes it into the
 camelCase dict shape MCP Apps hosts read from `_meta.ui`:
 
 | MCP key | Harn field |
@@ -77,9 +78,11 @@ places.
 
 ## Fallbacks
 
-`ui_tool_result(resource, options?)` wraps a resource with a mandatory
-text fallback (defaulting to a `web_artifact_text_fallback` projection
-of the resource HTML) and an optional `ui_structured_fallback`.
+`ui_tool_result(resource, options?: UiToolResultOptions)` wraps a resource
+with a mandatory text fallback (defaulting to a `web_artifact_text_fallback`
+projection of the resource HTML) and an optional `UiStructuredFallback`.
+Wrap raw structured data with
+`ui_structured_fallback(data, options?: UiStructuredFallbackOptions)`.
 Hosts without UI support receive both fallbacks instead of the
 resource:
 
@@ -89,10 +92,10 @@ resource:
 | Otherwise, structured fallback present | `structured_fallback` |
 | Otherwise | `text_fallback` |
 
-`ui_host_capabilities` accepts the MCP `client_capabilities.apps`
-shape, the OpenAI Apps SDK `ui.apps` shape, or a bare `{apps: true}`
-record. `ui_host_supports_apps(caps)` returns whether the host can
-render the `mcp-app` profile.
+`ui_host_capabilities(input?: UiHostCapabilityInput)` accepts the MCP
+`client_capabilities.apps` shape, the OpenAI Apps SDK `ui.apps` shape,
+or a bare `{apps: true}` record. `ui_host_supports_apps(caps)` returns
+whether the host can render the `mcp-app` profile.
 
 ## Message envelopes
 

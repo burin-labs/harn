@@ -1,17 +1,22 @@
-import {
-  countries,
-  country_info,
-  country_timezones,
-  default_timezone_for_country,
-} from "std/calendar"
+import "std/calendar"
 
 pipeline default() {
-  let us = country_info("us")
+  let us: CalendarCountry = country_info("us")
+    ?? {
+    code: "US",
+    name: "missing",
+    timezones: [],
+    default_timezone_ambiguous: true,
+    currency_code: "USD",
+    currency_name: "United States dollar",
+    holiday_calendars: [],
+  }
   __io_println(us.name)
   __io_println(us.default_timezone == nil)
   __io_println(country_timezones("US")[0])
   __io_println(default_timezone_for_country("GB"))
   __io_println(default_timezone_for_country("US") == nil)
   __io_println(country_info("ZZ") == nil)
-  __io_println(countries().find({ country -> country.code == "JP" }).currency_code)
+  let all_countries: list<CalendarCountry> = countries()
+  __io_println(all_countries.find({ country -> country.code == "JP" }).currency_code)
 }

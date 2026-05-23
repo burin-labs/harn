@@ -4259,12 +4259,14 @@ previously recorded HITL response events instead of consulting a live host,
 so approval reviewer identities, signed timestamps, and signatures remain
 stable across deterministic replay.
 
-Replay-for-teaching corrections live in `corrections.records`. A
-`CorrectionRecord` captures `{ from_decision, to_decision, reason, applied_by,
-scope }`, with optional actor/action/trace/step metadata. `this_persona` and
-`all` scopes feed `CapabilityPolicy` derivation by tightening the affected
-actor to a read-only side-effect ceiling while matching correction records
-remain applicable.
+Replay-for-teaching corrections live in `corrections.records`. `std/corrections`
+accepts `CorrectionInput`, whose `from_decision` and `to_decision` fields use
+the reusable `CorrectionDecision` shape and whose optional evidence uses
+`list<CorrectionEvidenceRef>`. The stored `CorrectionRecord` captures those
+decisions plus `{ reason, applied_by, scope }`, with optional
+actor/action/trace/step metadata. `this_persona` and `all` scopes feed
+`CapabilityPolicy` derivation by tightening the affected actor to a read-only
+side-effect ceiling while matching correction records remain applicable.
 
 ### Function type annotations
 

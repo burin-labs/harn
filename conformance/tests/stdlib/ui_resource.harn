@@ -1,33 +1,15 @@
-import {
-  ui_context_update_envelope,
-  ui_host_capabilities,
-  ui_host_supports_apps,
-  ui_resource,
-  ui_resource_csp_header,
-  ui_resource_sandbox_attr,
-  ui_select_for_host,
-  ui_structured_fallback,
-  ui_tool_call_envelope,
-  ui_tool_meta,
-  ui_tool_meta_to_mcp,
-  ui_tool_result,
-  ui_tool_result_validate,
-} from "std/ui_resource"
+import "std/ui_resource"
 
 pipeline default() {
   let dashboard_html = "<!doctype html><html><head><style>.tile { padding: 12px; }</style></head><body><main><h1>KPIs</h1><pre>signups=42 churn=3</pre><script>const initial = window.openInitialData; const summary = document.getElementById('summary');</script></main></body></html>"
-  let resource = ui_resource(
-    "ui://harn-dashboard/kpis@v1",
-    "KPIs dashboard",
-    dashboard_html,
-    {
-      description: "Weekly KPI tiles",
-      permissions: ["tools/call", "context/update"],
-      capabilities: ["tools/call", "context/update", "context/read"],
-      version: "2026-05-11",
-      meta: {owner: "growth-team"},
-    },
-  )
+  let resource_options: UiResourceOptions = {
+    description: "Weekly KPI tiles",
+    permissions: ["tools/call", "context/update"],
+    capabilities: ["tools/call", "context/update", "context/read"],
+    version: "2026-05-11",
+    meta: {owner: "growth-team"},
+  }
+  let resource: UiResource = ui_resource("ui://harn-dashboard/kpis@v1", "KPIs dashboard", dashboard_html, resource_options)
   __io_println(resource.schema)
   __io_println(resource.mime_type)
   __io_println(resource.profile)
@@ -36,7 +18,8 @@ pipeline default() {
   __io_println(resource.validation.ok)
   __io_println(resource.content_sha256.starts_with("sha256:"))
   __io_println(len(resource.permissions))
-  let meta = ui_tool_meta(resource, {visibility: "app_only", initial_view: {tab: "signups"}})
+  let meta_options: UiToolMetaOptions = {visibility: "app_only", initial_view: {tab: "signups"}}
+  let meta: UiToolMeta = ui_tool_meta(resource, meta_options)
   let mcp_meta = ui_tool_meta_to_mcp(meta)
   __io_println(meta.schema)
   __io_println(mcp_meta.ui.resourceUri)
@@ -47,10 +30,8 @@ pipeline default() {
   __io_println(csp_header.contains("connect-src 'none'"))
   let sandbox_attr = ui_resource_sandbox_attr(resource.csp)
   __io_println(sandbox_attr)
-  let result = ui_tool_result(
-    resource,
-    {structured_fallback: ui_structured_fallback({signups: 42, churn: 3}, {text: "signups=42 churn=3"})},
-  )
+  let result_options: UiToolResultOptions = {structured_fallback: ui_structured_fallback({signups: 42, churn: 3}, {text: "signups=42 churn=3"})}
+  let result: UiToolResult = ui_tool_result(resource, result_options)
   __io_println(result.schema)
   __io_println(result.text_fallback.content.contains("KPIs"))
   __io_println(result.text_fallback.content.contains("signups=42 churn=3"))
@@ -70,7 +51,7 @@ pipeline default() {
   let mcp_caps = ui_host_supports_apps({apps: {enabled: true, profiles: ["mcp-app", "openai-app"]}})
   let custom_only = ui_host_supports_apps({apps: true, profiles: ["custom-app"]})
   let null_caps = ui_host_supports_apps(nil)
-  let normalized = ui_host_capabilities({apps: {enabled: true, profiles: ["mcp-app"], bridges: ["postMessage"]}})
+  let normalized: UiHostCapabilities = ui_host_capabilities({apps: {enabled: true, profiles: ["mcp-app"], bridges: ["postMessage"]}})
   __io_println(openai_caps)
   __io_println(no_apps)
   __io_println(mcp_caps)
@@ -78,12 +59,12 @@ pipeline default() {
   __io_println(null_caps)
   __io_println(normalized.profiles)
   __io_println(normalized.bridges)
-  let call = ui_tool_call_envelope("dashboard.refresh", {window: "7d"}, {id: "call-1"})
+  let call: UiToolCallEnvelope = ui_tool_call_envelope("dashboard.refresh", {window: "7d"}, {id: "call-1"})
   __io_println(call.jsonrpc)
   __io_println(call.method)
   __io_println(call.params.name)
   __io_println(call.params.arguments.window)
-  let ctx_update = ui_context_update_envelope("selection", {tile: "signups"}, {id: "ctx-1"})
+  let ctx_update: UiContextUpdateEnvelope = ui_context_update_envelope("selection", {tile: "signups"}, {id: "ctx-1"})
   __io_println(ctx_update.method)
   __io_println(ctx_update.params.key)
   __io_println(ctx_update.params.model_visible)
