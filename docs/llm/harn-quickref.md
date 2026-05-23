@@ -2864,6 +2864,18 @@ Three concentric surfaces:
   `start_span` / `log_in_span` / `end_span` for imperative flows.
   Backends include OTel, Splunk HEC, Honeycomb, pretty stderr,
   `compose([...])`, and env-driven `auto`.
+- `std/timing` is the scoped-duration primitive that replaces hand-rolled
+  `let started = harness.clock.now_ms(); work(); let dur =
+  harness.clock.now_ms() - started`. Use `timed("op", attrs, { -> work()
+  })` for callback-scoped auto-close (returns `{result, timing}` with
+  `timing.duration_ms` from the monotonic clock and
+  `timing.started_at_ms` / `timing.ended_at_ms` from the wall clock for
+  external correlation). Use `start_timing` / `timing_event` /
+  `end_timing` for flows that cross callbacks, branches, or async-ish
+  lifecycle boundaries. Duplicate `end_timing` is idempotent. Timing
+  spans are emitted under `SpanKind::UserTiming` (`kind: "user_timing"`),
+  so `trace_spans()` and `harn run --profile-json` surface them as their
+  own bucket without colliding with LLM/tool spans.
 - `std/lifecycle/on_budget` exports three named callback strategies for
   the `OnBudgetThreshold` event. Each takes `(harness, budget_state)`
   and composes with the combinators above:

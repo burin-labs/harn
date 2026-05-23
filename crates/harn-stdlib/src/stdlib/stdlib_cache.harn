@@ -13,6 +13,7 @@
 // See docs/src/stdlib/cache.md for adoption recipes (persona caller, context-pack
 // query, crystallization shadow-run fixture).
 import { agent_emit_event } from "std/agent/state"
+import { timed } from "std/timing"
 
 /**
  * cache_get returns {hit: bool, value?, backend, namespace} for key.
@@ -240,9 +241,13 @@ pub fn with_cache_envelope(key: string, compute, options = nil) -> dict {
     }
     return {value: cached.value, hit: true, key: key, metrics: metrics}
   }
-  let started_ms = harness.clock.monotonic_ms()
-  let value = compute()
-  let compute_ms = harness.clock.monotonic_ms() - started_ms
+  let outcome = timed(
+    "cache.compute",
+    {key: key, backend: cached?.backend ?? "", namespace: cached?.namespace ?? ""},
+    compute,
+  )
+  let value = outcome.result
+  let compute_ms = outcome.timing.duration_ms
   cache_put(key, value, store_opts)
   if session_id != "" {
     __with_cache_emit(

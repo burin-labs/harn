@@ -18,6 +18,8 @@
 // timing to the unified harness clock.
 //
 // Import with: import { poll_until, wait_for_status, retry_with_result } from "std/poll"
+import { end_timing, start_timing } from "std/timing"
+
 /** Polling configuration shared by `poll_until` and `wait_for_status`. */
 type PollOptions = {timeout_ms?: int, interval_ms?: int, max_attempts?: int, initial_delay_ms?: int}
 
@@ -182,18 +184,19 @@ fn __backoff_delay(base_ms: int, attempt: int, multiplier: float, cap_ms: int) -
  */
 pub fn retry_with_result(action, options: RetryOptions = {}) -> RetryReport {
   let resolved = __retry_options(options)
-  let started = harness.clock.monotonic_ms()
+  let timing = start_timing("poll.retry", {max_attempts: resolved.max_attempts})
   var attempt = 0
   var last_error = nil
   while attempt < resolved.max_attempts {
     let outcome = action(attempt)
     if is_ok(outcome) {
+      let report = end_timing(timing, {attempts: attempt + 1, outcome: "ok"})
       return {
         ok: true,
         value: unwrap(outcome),
         error: nil,
         attempts: attempt + 1,
-        elapsed_ms: harness.clock.monotonic_ms() - started,
+        elapsed_ms: report.duration_ms,
       }
     }
     last_error = unwrap_err(outcome)
@@ -203,11 +206,12 @@ pub fn retry_with_result(action, options: RetryOptions = {}) -> RetryReport {
       harness.clock.sleep_ms(delay)
     }
   }
+  let report = end_timing(timing, {attempts: resolved.max_attempts, outcome: "exhausted"})
   return {
     ok: false,
     value: nil,
     error: last_error,
     attempts: resolved.max_attempts,
-    elapsed_ms: harness.clock.monotonic_ms() - started,
+    elapsed_ms: report.duration_ms,
   }
 }
