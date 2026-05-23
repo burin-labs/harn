@@ -1529,6 +1529,35 @@ the default ranker uses keyword overlap against `query`. Workflow
 nodes may set `context_assembler: {...}` to route the stage's selected
 artifacts through this builtin before the prompt is rendered.
 
+### Compaction policies
+
+Compaction entrypoints accept a typed host/user instruction lane through
+`policy`, `compaction_policy`, `compaction_request`, or the direct fields
+`instructions`, `mode`, `scope`, `preserve`, `drop`,
+`extend_default_instructions`, and `author`.
+
+```harn
+import {compact_preserving_test_failures} from "std/agent/autocompact"
+
+let compacted = transcript_auto_compact(messages, {
+  keep_last: 1,
+  token_threshold: 1,
+  policy: compact_preserving_test_failures({author: "host"})
+})
+```
+
+Omitting `extend_default_instructions` or setting it to `true` appends the
+instructions to Harn's default summary guidance; `false` replaces it.
+Host-only instructions are kept in
+`compaction` event metadata (`instruction_mode`, `instruction_source`,
+`compaction_policy`) and are not copied into the next model-visible summary
+unless `scope` is `"model_visible"`, `"summary"`, or `"transcript"`.
+
+Helper policies in `std/agent/autocompact`:
+`compaction_policy(...)`, `compact_for_bug_fix_resumption(...)`,
+`compact_preserving_test_failures(...)`, and
+`compact_retaining_current_plan(...)`.
+
 ## Reminders
 
 System reminders are typed, ephemeral `system_reminder` transcript events
@@ -2263,7 +2292,8 @@ Lifecycle builtins (all hard-error on unknown ids except `exists`,
   `truncate_to_last`, `drop_tool_calls`, `rename_session`, `validate`,
   `provider`, `model`.
 - `agent_session_compact(id, opts)` — supports LLM/truncate/observation-mask/custom
-  compaction and errors on unknown option keys.
+  compaction, accepts the same compaction policy fields as
+  `transcript_auto_compact`, and errors on unknown option keys.
 - `agent_session_length(id)` / `_snapshot(id)` / `_ancestry(id)` for read-only inspection.
 
 ### Daemon wrappers

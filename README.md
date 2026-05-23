@@ -352,8 +352,10 @@ defaults, safe, prompts, catalog).
 - Automatic transcript compaction in agent loops: microcompaction snips oversized
   tool outputs, auto-compaction triggers at configurable token thresholds, and
   `compact_strategy` supports default LLM summarization, truncate fallback, or
-  custom Harn closure-based compaction. The same pipeline is exposed directly as
-  `transcript_auto_compact(...)`.
+  custom Harn closure-based compaction. Host/user compaction instructions flow
+  through the typed `CompactionPolicy` lane so `/compact <instructions>` style
+  commands can reuse runtime audit/events without bespoke prompt wiring. The
+  same pipeline is exposed directly as `transcript_auto_compact(...)`.
 - Daemon agent mode (`daemon: true`): agents stay alive waiting for
   host-injected messages instead of terminating on text-only responses, with
   adaptive idle backoff, persisted snapshots, timer/file-watch wakes, and

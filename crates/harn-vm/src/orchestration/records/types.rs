@@ -297,6 +297,9 @@ pub struct CompactionEventRecord {
     pub snapshot_location: String,
     pub snapshot_path: Option<String>,
     pub available: bool,
+    pub instruction_mode: String,
+    pub instruction_source: Option<String>,
+    pub compaction_policy: Option<serde_json::Value>,
 }
 
 #[derive(Clone, Copy, Debug, Default, Serialize, Deserialize, PartialEq, Eq, PartialOrd, Ord)]

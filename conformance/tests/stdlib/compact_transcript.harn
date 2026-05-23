@@ -46,6 +46,43 @@ pipeline test(task) {
   let prompt = llm_calls[0].messages[0].content
   __io_println(prompt.contains("Compact prompt from asset."))
   __io_println(prompt.contains("Archived count: 2"))
+  llm_mock_clear()
+  llm_mock({text: "policy extension summary"})
+  let policy_extended = transcript_compact(
+    base,
+    {
+      provider: "mock",
+      strategy: "llm",
+      keep_last: 1,
+      instructions: "Preserve parser TODOs.",
+      author: "host",
+    },
+  )
+  let extended_prompt = llm_mock_calls()[0].messages[0].content
+  let extended_event = transcript_events_by_kind(policy_extended, "compaction")[0]
+  __io_println(extended_prompt.contains("Additional compaction instructions"))
+  __io_println(extended_event.metadata?.instruction_mode == "extend")
+  __io_println(extended_event.metadata?.instruction_source == "host")
+  __io_println(extended_event.metadata?.compaction_policy?.instructions == "Preserve parser TODOs.")
+  llm_mock_clear()
+  llm_mock({text: "policy replacement summary"})
+  let policy_replaced = transcript_compact(
+    base,
+    {
+      provider: "mock",
+      strategy: "llm",
+      keep_last: 1,
+      instructions: "Only keep failing verification details.",
+      extend_default_instructions: false,
+    },
+  )
+  let replacement_prompt = llm_mock_calls()[0].messages[0].content
+  __io_println(replacement_prompt.contains("according to these instructions"))
+  __io_println(!replacement_prompt.contains("Preserve goals, constraints"))
+  __io_println(
+    transcript_events_by_kind(policy_replaced, "compaction")[0].metadata?.instruction_mode
+      == "replace",
+  )
   let stream_session = agent_session_open("compact-stream-session")
   agent_session_inject(stream_session, {role: "user", content: "one"})
   agent_session_inject(stream_session, {role: "assistant", content: "two"})

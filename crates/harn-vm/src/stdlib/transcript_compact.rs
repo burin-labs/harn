@@ -11,7 +11,7 @@ use crate::llm::helpers::{
 };
 use crate::orchestration::{
     auto_compact_messages, compact_strategy_name, estimate_message_tokens, AutoCompactConfig,
-    CompactStrategy,
+    CompactStrategy, CompactionPolicy,
 };
 use crate::orchestration::{HookControl, HookEvent};
 use crate::stdlib::json_to_vm_value;
@@ -40,6 +40,7 @@ struct TranscriptCompactOptions {
     summarize_prompt: Option<String>,
     summary: Option<String>,
     custom_compactor: Option<VmValue>,
+    policy: CompactionPolicy,
 }
 
 async fn compact_transcript_impl(
@@ -57,6 +58,7 @@ async fn compact_transcript_impl(
         hard_limit_strategy: options.strategy.clone(),
         summarize_prompt: options.summarize_prompt.clone(),
         custom_compactor: options.custom_compactor.clone(),
+        policy: options.policy.clone(),
         ..Default::default()
     };
     if let Some(target_tokens) = options.target_tokens {
@@ -151,7 +153,7 @@ async fn compact_transcript_impl(
     let mut assets = transcript_asset_list(transcript)?;
     assets.push(snapshot_asset);
 
-    let metadata = serde_json::json!({
+    let mut metadata = serde_json::json!({
         "mode": "manual",
         "strategy": compact_strategy_name(&options.strategy),
         "keep_last": options.keep_last,
@@ -165,6 +167,7 @@ async fn compact_transcript_impl(
         "reminders_deduped": reminder_report.deduped.len(),
         "reminders_preserved": reminder_report.preserved_count,
     });
+    add_compaction_policy_metadata(&mut metadata, &options.policy);
     let mut extra_events = reminder_report.preserved_events;
     extra_events.push(transcript_event(
         "compaction",
@@ -188,6 +191,9 @@ async fn compact_transcript_impl(
             estimated_tokens_before,
             estimated_tokens_after,
             snapshot_asset_id: Some(snapshot_asset_id.clone()),
+            instruction_mode: Some(options.policy.instruction_mode().to_string()),
+            instruction_source: options.policy.instruction_source().map(str::to_string),
+            compaction_policy: options.policy.metadata_json(),
         })
         .await;
 
@@ -241,6 +247,9 @@ fn compact_hook_payload(
     let Some(map) = payload.as_object_mut() else {
         return payload;
     };
+    for (key, value) in crate::orchestration::compaction_policy_metadata_fields(&options.policy) {
+        map.insert(key.to_string(), value);
+    }
     if let Some(value) = remaining_messages {
         map.insert("remaining_messages".to_string(), serde_json::json!(value));
     }
@@ -499,6 +508,10 @@ fn parse_options(
         summarize_prompt: None,
         summary: None,
         custom_compactor: None,
+        policy: crate::orchestration::parse_compaction_policy_options(
+            options,
+            "transcript_compact",
+        )?,
     };
     if let Some(value) = options
         .and_then(|dict| {
@@ -570,6 +583,15 @@ fn parse_options(
     Ok(parsed)
 }
 
+fn add_compaction_policy_metadata(metadata: &mut serde_json::Value, policy: &CompactionPolicy) {
+    let Some(map) = metadata.as_object_mut() else {
+        return;
+    };
+    for (key, value) in crate::orchestration::compaction_policy_metadata_fields(policy) {
+        map.insert(key.to_string(), value);
+    }
+}
+
 fn build_snapshot_asset(
     transcript: &VmValue,
     options: &TranscriptCompactOptions,
@@ -577,6 +599,40 @@ fn build_snapshot_asset(
     estimated_tokens_before: usize,
     estimated_tokens_after: usize,
 ) -> VmValue {
+    let mut asset_metadata = BTreeMap::from([
+        (
+            "strategy".to_string(),
+            VmValue::String(Rc::from(compact_strategy_name(&options.strategy))),
+        ),
+        (
+            "archived_messages".to_string(),
+            VmValue::Int(archived_messages as i64),
+        ),
+        (
+            "estimated_tokens_before".to_string(),
+            VmValue::Int(estimated_tokens_before as i64),
+        ),
+        (
+            "estimated_tokens_after".to_string(),
+            VmValue::Int(estimated_tokens_after as i64),
+        ),
+        (
+            "instruction_mode".to_string(),
+            VmValue::String(Rc::from(options.policy.instruction_mode())),
+        ),
+    ]);
+    if let Some(policy_json) = options.policy.metadata_json() {
+        asset_metadata.insert(
+            "compaction_policy".to_string(),
+            crate::stdlib::json_to_vm_value(&policy_json),
+        );
+    }
+    if let Some(source) = options.policy.instruction_source() {
+        asset_metadata.insert(
+            "instruction_source".to_string(),
+            VmValue::String(Rc::from(source)),
+        );
+    }
     let asset = VmValue::Dict(Rc::new(BTreeMap::from([
         (
             "id".to_string(),
@@ -600,24 +656,7 @@ fn build_snapshot_asset(
         ("data".to_string(), transcript.clone()),
         (
             "metadata".to_string(),
-            VmValue::Dict(Rc::new(BTreeMap::from([
-                (
-                    "strategy".to_string(),
-                    VmValue::String(Rc::from(compact_strategy_name(&options.strategy))),
-                ),
-                (
-                    "archived_messages".to_string(),
-                    VmValue::Int(archived_messages as i64),
-                ),
-                (
-                    "estimated_tokens_before".to_string(),
-                    VmValue::Int(estimated_tokens_before as i64),
-                ),
-                (
-                    "estimated_tokens_after".to_string(),
-                    VmValue::Int(estimated_tokens_after as i64),
-                ),
-            ]))),
+            VmValue::Dict(Rc::new(asset_metadata)),
         ),
     ])));
     normalize_transcript_asset(&asset)

@@ -70,7 +70,9 @@ let compacted = transcript_compact(second.transcript, {
 
 Use `transcript_summarize()` when you want Harn to create a fresh summary with
 an LLM, or `transcript_compact()` when you want the runtime compaction engine
-outside the `agent_loop` path.
+outside the `agent_loop` path. `transcript_compact()` accepts the same
+`CompactionPolicy` instruction fields as agent-loop auto-compaction, so hosts
+can route `/compact <instructions>` through one audited path.
 
 Transcript helpers also expose the canonical event model:
 
