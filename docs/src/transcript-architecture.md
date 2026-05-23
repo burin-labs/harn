@@ -59,6 +59,13 @@ Rules:
   continuations that omit all new system prompt fields.
 - Message blocks should reference assets by `asset_id` instead of embedding base64 when persistence matters.
 - Compaction should summarize archived text while retaining asset descriptors and recent multimodal turns.
+- First-class sessions enforce hard transcript retention budgets independent of
+  optional auto-compaction. The runtime caps retained message count, event count,
+  and any configured approximate byte budget; budget pressure either rejects the
+  mutation or applies the explicit session recovery policy. Recovery writes a
+  `transcript_budget` audit event, and session snapshots expose
+  `metadata.transcript_budget.last_action` so hosts can explain why context was
+  trimmed or compacted.
 
 Persistence split:
 

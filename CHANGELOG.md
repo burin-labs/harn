@@ -59,6 +59,12 @@ condensed series summaries instead of full per-patch history.
   the session's bridge without going through ACP. Returns the reminder
   id; mode defaults to `audit_only` and accepts the same delivery modes
   as `session/remind`.
+- **Hard per-session transcript budgets (#2205).** First-class agent sessions
+  now enforce retained message and event caps through the session store itself,
+  independent of optional auto-compaction. Budget pressure rejects by default or
+  applies an explicit trim/compact recovery policy, records
+  `transcript_budget` audit metadata, and exposes the last budget action in
+  session snapshots for host UIs.
 
 ### Changed
 

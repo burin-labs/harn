@@ -2296,6 +2296,10 @@ Lifecycle builtins (all hard-error on unknown ids except `exists`,
   `transcript_auto_compact`, and errors on unknown option keys.
 - `agent_session_length(id)` / `_snapshot(id)` / `_ancestry(id)` for read-only inspection.
 
+Session snapshots include `metadata.transcript_budget` after hard retention
+budget pressure. `last_action` records whether Harn rejected, trimmed, or
+compacted the transcript, along with before/after message and event counts.
+
 ### Daemon wrappers
 
 Use the daemon stdlib wrappers when you want a first-class handle around

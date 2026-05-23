@@ -52,6 +52,29 @@ fn event_count_by_kind(id: &str, expected_kind: &str) -> usize {
         .unwrap_or(0)
 }
 
+fn event_count(id: &str) -> usize {
+    snapshot(id)
+        .and_then(|snapshot| snapshot.as_dict().cloned())
+        .and_then(|dict| dict.get("events").cloned())
+        .and_then(|events| match events {
+            VmValue::List(events) => Some(events.len()),
+            _ => None,
+        })
+        .unwrap_or(0)
+}
+
+fn budget_metadata(id: &str) -> serde_json::Value {
+    snapshot(id)
+        .map(|value| crate::llm::helpers::vm_value_to_json(&value))
+        .and_then(|value| value.get("metadata").cloned())
+        .and_then(|metadata| metadata.get("transcript_budget").cloned())
+        .expect("transcript budget metadata")
+}
+
+fn simple_event(kind: &str) -> VmValue {
+    crate::llm::helpers::transcript_event(kind, "system", "internal", "", None)
+}
+
 struct CapturingSink(Arc<Mutex<Vec<AgentEvent>>>);
 
 impl AgentEventSink for CapturingSink {
@@ -61,6 +84,111 @@ impl AgentEventSink for CapturingSink {
             .expect("capture sink poisoned")
             .push(event.clone());
     }
+}
+
+#[test]
+fn transcript_budget_rejects_message_count_growth() {
+    reset_session_store();
+    set_default_transcript_budget_policy(SessionTranscriptBudgetPolicy::reject(2, 16));
+    let id = open_or_create(Some("budget-message-reject".into()));
+
+    inject_message(&id, make_msg("user", "one")).unwrap();
+    inject_message(&id, make_msg("assistant", "two")).unwrap();
+    let error = inject_message(&id, make_msg("user", "three")).unwrap_err();
+
+    assert!(error.contains("message_count"), "{error}");
+    assert_eq!(message_count(&id), 2);
+    assert_eq!(event_count_by_kind(&id, "transcript_budget"), 0);
+    let metadata = budget_metadata(&id);
+    assert_eq!(metadata["last_action"]["action"], "rejected");
+    assert_eq!(metadata["last_action"]["reason"], "message_count");
+    assert_eq!(metadata["usage"]["messages"], 2);
+
+    reset_default_transcript_budget_policy();
+    reset_session_store();
+}
+
+#[test]
+fn transcript_budget_rejects_event_count_growth() {
+    reset_session_store();
+    set_default_transcript_budget_policy(SessionTranscriptBudgetPolicy::reject(16, 2));
+    let id = open_or_create(Some("budget-event-reject".into()));
+
+    append_event(&id, simple_event("audit_one")).unwrap();
+    append_event(&id, simple_event("audit_two")).unwrap();
+    let error = append_event(&id, simple_event("audit_three")).unwrap_err();
+
+    assert!(error.contains("event_count"), "{error}");
+    assert_eq!(event_count(&id), 2);
+    let metadata = budget_metadata(&id);
+    assert_eq!(metadata["last_action"]["action"], "rejected");
+    assert_eq!(metadata["last_action"]["reason"], "event_count");
+    assert_eq!(metadata["usage"]["events"], 2);
+
+    reset_default_transcript_budget_policy();
+    reset_session_store();
+}
+
+#[test]
+fn transcript_budget_compaction_recovers_and_preserves_prompt_state() {
+    reset_session_store();
+    set_default_transcript_budget_policy(SessionTranscriptBudgetPolicy::compact(3, 4, 1));
+    let id = open_or_create(Some("budget-compact-recover".into()));
+
+    inject_message(&id, make_msg("user", "one")).unwrap();
+    inject_message(&id, make_msg("assistant", "two")).unwrap();
+    inject_message(&id, make_msg("user", "three")).unwrap();
+    inject_message(&id, make_msg("assistant", "four")).unwrap();
+
+    assert!(message_count(&id) <= 3);
+    assert!(event_count(&id) <= 4);
+    assert_eq!(event_count_by_kind(&id, "transcript_budget"), 1);
+    let snapshot = snapshot(&id).expect("session snapshot");
+    let snapshot_json = crate::llm::helpers::vm_value_to_json(&snapshot);
+    let summary = snapshot_json["summary"]
+        .as_str()
+        .expect("budget compaction summary");
+    assert!(summary.contains("auto-compacted 3 older message(s)"));
+    let metadata = budget_metadata(&id);
+    assert_eq!(metadata["last_action"]["action"], "compacted");
+    assert_eq!(metadata["last_action"]["reason"], "message_count");
+
+    let prompt = prompt_state_json(&id);
+    assert_eq!(prompt.summary.as_deref(), Some(summary));
+    assert_eq!(
+        prompt
+            .messages
+            .first()
+            .and_then(|msg| msg["content"].as_str()),
+        Some(summary)
+    );
+
+    reset_default_transcript_budget_policy();
+    reset_session_store();
+}
+
+#[test]
+fn fork_preserves_transcript_budget_metadata() {
+    reset_session_store();
+    set_default_transcript_budget_policy(SessionTranscriptBudgetPolicy::compact(3, 4, 1));
+    let parent = open_or_create(Some("budget-fork-parent".into()));
+    inject_message(&parent, make_msg("user", "one")).unwrap();
+    inject_message(&parent, make_msg("assistant", "two")).unwrap();
+    inject_message(&parent, make_msg("user", "three")).unwrap();
+    inject_message(&parent, make_msg("assistant", "four")).unwrap();
+
+    let child = fork(&parent, Some("budget-fork-child".into())).expect("fork");
+
+    assert_eq!(message_count(&child), message_count(&parent));
+    assert_eq!(event_count_by_kind(&child, "transcript_budget"), 1);
+    let metadata = budget_metadata(&child);
+    assert_eq!(metadata["policy"]["max_messages"], 3);
+    assert_eq!(metadata["policy"]["max_events"], 4);
+    assert_eq!(metadata["last_action"]["action"], "compacted");
+    assert_eq!(parent_id(&child).as_deref(), Some(parent.as_str()));
+
+    reset_default_transcript_budget_policy();
+    reset_session_store();
 }
 
 #[test]
@@ -392,7 +520,8 @@ fn truncate_to_zero_clears_messages_events_and_stale_summary() {
             serde_json::json!({"role": "assistant", "content": "after"}),
         ],
         Some("summary that mentions removed turns"),
-    );
+    )
+    .unwrap();
 
     let result = truncate(&id, 0).expect("truncate result");
     assert_eq!(result.kept_turn_count, 0);
@@ -406,6 +535,30 @@ fn truncate_to_zero_clears_messages_events_and_stale_summary() {
         !dict.contains_key("summary"),
         "truncating away summarized turns must not leave stale prompt summary"
     );
+    reset_session_store();
+}
+
+#[test]
+fn replace_messages_without_summary_clears_stale_summary() {
+    reset_session_store();
+    let id = open_or_create(Some("replace-clears-summary".into()));
+    replace_messages_with_summary(
+        &id,
+        &[serde_json::json!({"role": "user", "content": "before"})],
+        Some("old compacted summary"),
+    )
+    .unwrap();
+
+    replace_messages(
+        &id,
+        &[serde_json::json!({"role": "assistant", "content": "after"})],
+    )
+    .unwrap();
+
+    let prompt = prompt_state_json(&id);
+    assert_eq!(prompt.summary, None);
+    assert_eq!(prompt.messages.len(), 1);
+    assert_eq!(prompt.messages[0]["content"], "after");
     reset_session_store();
 }
 
@@ -499,7 +652,7 @@ fn branch_event_index_counts_non_message_events() {
             ])),
         ),
     ])));
-    store_transcript(&src, transcript);
+    store_transcript(&src, transcript).unwrap();
 
     let dst = fork_at(&src, 2, Some("branch-event-index-child".into())).expect("fork_at");
     assert_eq!(
@@ -539,7 +692,7 @@ fn prompt_state_prepends_summary_message_when_missing_from_messages() {
         Vec::new(),
         Some("active"),
     );
-    store_transcript(&session, transcript);
+    store_transcript(&session, transcript).unwrap();
 
     let prompt = prompt_state_json(&session);
     assert_eq!(

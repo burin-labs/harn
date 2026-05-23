@@ -313,7 +313,8 @@ async fn host_agent_session_init(args: Vec<VmValue>) -> Result<VmValue, VmError>
         "role": "user",
         "content": initial_user_content(&opts_map, &message),
     });
-    let _ = crate::agent_sessions::inject_message(&resolved, json_to_vm(&user_msg));
+    crate::agent_sessions::inject_message(&resolved, json_to_vm(&user_msg))
+        .map_err(VmError::Runtime)?;
 
     let session = AgentHostSession {
         session_id: resolved.clone(),
@@ -585,7 +586,8 @@ async fn host_agent_session_finalize(args: Vec<VmValue>) -> Result<VmValue, VmEr
                 "error": error,
             })),
         );
-        let _ = crate::agent_sessions::append_event(&session_id, transcript_event);
+        crate::agent_sessions::append_event(&session_id, transcript_event)
+            .map_err(VmError::Runtime)?;
     }
     let snapshot = crate::agent_sessions::transcript(&session_id);
     let transcript_json = snapshot
@@ -759,6 +761,11 @@ fn host_agent_session_record_assistant_builtin(
         .iter()
         .map(vm_to_json)
         .collect::<Vec<_>>();
+    crate::agent_sessions::inject_message(
+        &session_id,
+        assistant_message_from_llm_result(&llm_result),
+    )
+    .map_err(VmError::Runtime)?;
     let _ = with_session(&session_id, HOST_SESSION_RECORD_ASSISTANT, |session| {
         session.tool_calls.extend(calls_json);
         if !provider.is_empty() {
@@ -769,10 +776,6 @@ fn host_agent_session_record_assistant_builtin(
         }
         Ok(())
     });
-    let _ = crate::agent_sessions::inject_message(
-        &session_id,
-        assistant_message_from_llm_result(&llm_result),
-    );
     Ok(VmValue::Nil)
 }
 
@@ -908,14 +911,15 @@ fn host_agent_session_record_tool_results_builtin(
                     "",
                     Some(plan_metadata.clone()),
                 );
-                let _ = crate::agent_sessions::append_event(&session_id, event);
+                crate::agent_sessions::append_event(&session_id, event)
+                    .map_err(VmError::Runtime)?;
                 super::agent_runtime::emit_agent_event_sync(&AgentEvent::Plan {
                     session_id: session_id.clone(),
                     plan: plan_value,
                 });
             }
         }
-        let _ = crate::agent_sessions::inject_message(
+        crate::agent_sessions::inject_message(
             &session_id,
             tool_result_message_for_provider(
                 &provider,
@@ -925,7 +929,8 @@ fn host_agent_session_record_tool_results_builtin(
                 &tool_call_id,
                 &observation,
             ),
-        );
+        )
+        .map_err(VmError::Runtime)?;
     }
     let _ = with_session(&session_id, HOST_SESSION_RECORD_TOOL_RESULTS, |session| {
         session.successful_tools.extend(successful);
@@ -985,7 +990,7 @@ fn host_agent_session_record_usage_builtin(
         }
         Ok((session.tokens_used, session.cost_used))
     })?;
-    let _ = crate::agent_sessions::append_event(
+    crate::agent_sessions::append_event(
         &session_id,
         crate::llm::helpers::transcript_event(
             "llm_call",
@@ -1000,7 +1005,8 @@ fn host_agent_session_record_usage_builtin(
                 "cost_usd": cost,
             })),
         ),
-    );
+    )
+    .map_err(VmError::Runtime)?;
     let mut out = BTreeMap::new();
     out.insert("tokens_used".to_string(), VmValue::Int(totals.0));
     out.insert("cost_usd".to_string(), VmValue::Float(totals.1));
@@ -1061,10 +1067,11 @@ fn host_agent_session_inject_feedback_builtin(
     let session_id = args.first().map(|v| v.display()).unwrap_or_default();
     let kind = args.get(1).map(|v| v.display()).unwrap_or_default();
     let content = args.get(2).map(|v| v.display()).unwrap_or_default();
-    let _ = crate::agent_sessions::inject_message(
+    crate::agent_sessions::inject_message(
         &session_id,
         super::agent_config::agent_feedback_message(&kind, &content),
-    );
+    )
+    .map_err(VmError::Runtime)?;
     Ok(VmValue::Nil)
 }
 
@@ -1184,7 +1191,7 @@ fn host_agent_session_record_skill_event_builtin(
         &text,
         Some(metadata_json.clone()),
     );
-    let _ = crate::agent_sessions::append_event(&session_id, event);
+    crate::agent_sessions::append_event(&session_id, event).map_err(VmError::Runtime)?;
 
     let name = metadata_json
         .get("name")
@@ -1274,7 +1281,8 @@ fn host_agent_session_replace_messages_builtin(
         &session_id,
         &messages_json,
         summary.as_deref(),
-    );
+    )
+    .map_err(VmError::Runtime)?;
     Ok(VmValue::Nil)
 }
 
@@ -1337,7 +1345,10 @@ async fn host_agent_emit_event(args: Vec<VmValue>) -> Result<VmValue, VmError> {
         };
         let transcript_event =
             super::helpers::transcript_event(&event_type, role, "internal", "", Some(payload));
-        let _ = crate::agent_sessions::append_event(&session_id, transcript_event);
+        if crate::agent_sessions::exists(&session_id) {
+            crate::agent_sessions::append_event(&session_id, transcript_event)
+                .map_err(VmError::Runtime)?;
+        }
     }
     crate::llm::agent_runtime::emit_agent_event(&event).await;
     Ok(VmValue::Nil)
@@ -1578,7 +1589,7 @@ fn host_agent_record_native_tool_fallback_builtin(
         "",
         Some(payload_json),
     );
-    let _ = crate::agent_sessions::append_event(&session_id, event);
+    crate::agent_sessions::append_event(&session_id, event).map_err(VmError::Runtime)?;
     Ok(VmValue::Nil)
 }
 
@@ -1652,7 +1663,7 @@ fn host_agent_record_compaction_builtin(
         "",
         Some(payload_json),
     );
-    let _ = crate::agent_sessions::append_event(&session_id, event);
+    crate::agent_sessions::append_event(&session_id, event).map_err(VmError::Runtime)?;
     crate::llm::emit_live_agent_event_sync(&crate::agent_events::AgentEvent::TranscriptCompacted {
         session_id,
         mode,
@@ -1857,12 +1868,12 @@ async fn drain_bridge_injections_for_checkpoint(
     session_id: &str,
     bridge: &crate::bridge::HostBridge,
     checkpoint: crate::bridge::DeliveryCheckpoint,
-) -> (usize, Option<&'static str>) {
+) -> Result<(usize, Option<&'static str>), VmError> {
     let queued = bridge
         .take_queued_transcript_injections_for(checkpoint)
         .await;
     if queued.is_empty() {
-        return (0, None);
+        return Ok((0, None));
     }
     let mut saw_user_message = false;
     let mut saw_reminder = false;
@@ -1870,30 +1881,32 @@ async fn drain_bridge_injections_for_checkpoint(
     for injection in queued {
         match injection {
             crate::bridge::QueuedTranscriptInjection::User(message) => {
-                saw_user_message = true;
-                delivered += 1;
-                let _ = crate::agent_sessions::inject_message(
+                crate::agent_sessions::inject_message(
                     session_id,
                     json_to_vm(&serde_json::json!({
                         "role": "user",
                         "content": message.transcript_content,
                         "messageId": message.message_id,
                     })),
-                );
+                )
+                .map_err(VmError::Runtime)?;
+                saw_user_message = true;
+                delivered += 1;
             }
             crate::bridge::QueuedTranscriptInjection::Reminder(reminder) => {
+                crate::agent_sessions::inject_reminder(session_id, reminder.reminder)
+                    .map_err(VmError::Runtime)?;
                 saw_reminder = true;
                 delivered += 1;
-                let _ = crate::agent_sessions::inject_reminder(session_id, reminder.reminder);
             }
         }
     }
     if saw_user_message {
-        (delivered, Some("message"))
+        Ok((delivered, Some("message")))
     } else if saw_reminder {
-        (delivered, Some("reminder"))
+        Ok((delivered, Some("reminder")))
     } else {
-        (delivered, None)
+        Ok((delivered, None))
     }
 }
 
@@ -1908,13 +1921,13 @@ async fn daemon_checkpoint_drain(
     session_id: &str,
     bridge: &crate::bridge::HostBridge,
     kind: &'static str,
-) -> (usize, Option<&'static str>) {
+) -> Result<(usize, Option<&'static str>), VmError> {
     let (delivered, reason) = drain_bridge_injections_for_checkpoint(
         session_id,
         bridge,
         crate::bridge::DeliveryCheckpoint::InterruptImmediate,
     )
-    .await;
+    .await?;
     let event = crate::agent_events::AgentEvent::LoopCheckpoint {
         session_id: session_id.to_string(),
         iteration: 0,
@@ -1924,7 +1937,7 @@ async fn daemon_checkpoint_drain(
         dispatch_skipped: false,
     };
     super::agent_runtime::emit_agent_event(&event).await;
-    (delivered, reason)
+    Ok((delivered, reason))
 }
 
 /// Push a system-reminder onto the session's host bridge queue. The
@@ -1989,7 +2002,7 @@ async fn host_agent_session_drain_bridge_injections(
         })));
     };
     let (delivered, reason) =
-        drain_bridge_injections_for_checkpoint(&session_id, &bridge, checkpoint).await;
+        drain_bridge_injections_for_checkpoint(&session_id, &bridge, checkpoint).await?;
     Ok(json_to_vm(&serde_json::json!({
         "delivered": delivered,
         "reason": reason.unwrap_or("none"),
@@ -2015,7 +2028,7 @@ async fn host_agent_daemon_wait(args: Vec<VmValue>) -> Result<VmValue, VmError> 
             bridge.set_daemon_idle(false);
             return Ok(json_to_vm(&serde_json::json!({"reason": "resume"})));
         }
-        let (_, reason) = daemon_checkpoint_drain(&session_id, bridge, "daemon_idle_pre").await;
+        let (_, reason) = daemon_checkpoint_drain(&session_id, bridge, "daemon_idle_pre").await?;
         if let Some(reason) = reason {
             bridge.set_daemon_idle(false);
             return Ok(json_to_vm(&serde_json::json!({"reason": reason})));
@@ -2027,7 +2040,7 @@ async fn host_agent_daemon_wait(args: Vec<VmValue>) -> Result<VmValue, VmError> 
     }
 
     if let Some(bridge) = bridge.as_ref() {
-        let (_, reason) = daemon_checkpoint_drain(&session_id, bridge, "daemon_idle_post").await;
+        let (_, reason) = daemon_checkpoint_drain(&session_id, bridge, "daemon_idle_post").await?;
         if let Some(reason) = reason {
             bridge.set_daemon_idle(false);
             return Ok(json_to_vm(&serde_json::json!({"reason": reason})));

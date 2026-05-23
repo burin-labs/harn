@@ -362,8 +362,8 @@ fn agent_inject_feedback_builtin(args: &[VmValue], _out: &mut String) -> Result<
             ))
         }
     };
-    let _ =
-        crate::agent_sessions::inject_message(&session_id, agent_feedback_message(&kind, &content));
+    crate::agent_sessions::inject_message(&session_id, agent_feedback_message(&kind, &content))
+        .map_err(VmError::Runtime)?;
     Ok(VmValue::Nil)
 }
 
