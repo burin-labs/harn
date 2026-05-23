@@ -1,9 +1,14 @@
-// Regression test for iteration_budget passing through workflow stage
-// options. Without this, `workflow_stage_agent_options` silently strips
-// `model_policy.iteration_budget` because it isn't in the `loop_option_keys`
-// list, leaving the per-stage agent_loop with the static `max_iterations`
-// default and no adaptive `loop_control` policy.
 import { workflow_stage_agent_options } from "std/workflow/options"
+
+fn print_budget_error(options: dict, expected: string) {
+  let result = try {
+    agent_loop("budget validation probe", nil, options)
+    "no_error"
+  } catch (e) {
+    to_string(e)
+  }
+  __io_println(contains(result, expected))
+}
 
 pipeline default() {
   let opts = workflow_stage_agent_options(
@@ -25,13 +30,9 @@ pipeline default() {
   __io_println(budget?.initial)
   __io_println(budget?.max)
   __io_println(budget?.extend_by)
-  // The static cap remains so older agent_loop paths that haven't moved
-  // to iteration_budget still see a bound.
+  // Keep the scalar cap visible for tooling that summarizes loop limits
+  // without interpreting the structured budget.
   __io_println(opts.agent_loop_options?.max_iterations)
-  // String-form sugar should also propagate verbatim — `agent_preset`
-  // applies its kind-specific defaults and produces a dict, but callers
-  // that pass a literal "adaptive" / "fixed" still survive the
-  // round-trip without coercion.
   let sugar = workflow_stage_agent_options(
     {
       mode: "agent",
@@ -42,4 +43,28 @@ pipeline default() {
   )
   __io_println(type_of(sugar.agent_loop_options?.iteration_budget))
   __io_println(sugar.agent_loop_options?.iteration_budget)
+  let invalid_mode = workflow_stage_agent_options(
+    {
+      mode: "agent",
+      has_tools: true,
+      model_policy: {provider: "mock", iteration_budget: {mode: "unbounded", max: 4}},
+      host: {default_tool_format: "native"},
+    },
+  )
+  print_budget_error(
+    invalid_mode.agent_loop_options,
+    "agent_loop: iteration_budget.mode must be \"fixed\" or \"adaptive\"",
+  )
+  let invalid_max = workflow_stage_agent_options(
+    {
+      mode: "agent",
+      has_tools: true,
+      model_policy: {provider: "mock", iteration_budget: {mode: "adaptive", initial: 1, max: 0}},
+      host: {default_tool_format: "native"},
+    },
+  )
+  print_budget_error(
+    invalid_max.agent_loop_options,
+    "agent_loop: `iteration_budget.max` must be a positive integer; got 0",
+  )
 }
