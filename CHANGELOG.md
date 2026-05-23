@@ -6,6 +6,16 @@ Pre-0.6 highlights live in [CHANGELOG-pre-0.6.md](CHANGELOG-pre-0.6.md).
 Harn had no external users before 0.6.0, so that archive intentionally keeps
 condensed series summaries instead of full per-patch history.
 
+## Unreleased
+
+### Fixed
+
+- **Secret redaction and scanning now share one token catalog.**
+  `secret_scan`, token redaction, and provider-error sanitization now use the
+  same high-confidence secret patterns. JWTs, Bearer tokens, and full private
+  key blocks are consistently reported or scrubbed instead of drifting across
+  runtime surfaces.
+
 ## v0.8.34
 
 ### Fixed

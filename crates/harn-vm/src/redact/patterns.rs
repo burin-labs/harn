@@ -2,12 +2,10 @@
 //!
 //! Each pattern is named so the replacement placeholder is
 //! `<redacted:<pattern_name>:<len>>` and audit events can attribute the
-//! redaction to a specific provider. The [`crate::stdlib::secret_scan`]
-//! module defines the canonical set of high-confidence secret regexes
-//! that the `secret_scan` builtin reports to scripts; this module
-//! borrows from that same set so a string that scanning would flag is
-//! also a string that redaction will scrub — there is one definition,
-//! not two.
+//! redaction to a specific provider. The shared
+//! [`crate::secret_patterns`] catalog is also used by the
+//! `secret_scan` builtin, so a string that scanning reports is also a
+//! string that redaction scrubs.
 //!
 //! # Custom patterns
 //!
@@ -34,6 +32,8 @@ use std::collections::BTreeMap;
 use std::sync::LazyLock;
 
 use regex::Regex;
+
+use crate::secret_patterns::DEFAULT_SECRET_PATTERN_SPECS;
 
 /// Stable identifier emitted in audit logs for every token-redaction
 /// event. Part of the OA-06 epic's compliance contract.
@@ -75,70 +75,15 @@ impl std::fmt::Debug for NamedPattern {
 /// audit attribution when multiple patterns would match the same
 /// substring — earlier patterns win.
 pub static DEFAULT_PATTERNS: LazyLock<Vec<NamedPattern>> = LazyLock::new(|| {
-    vec![
-        // JWT — three base64url segments separated by `.`. Required
-        // prefix `eyJ` keeps the regex from chewing arbitrary
-        // dotted base64.
-        NamedPattern {
-            name: "jwt",
-            regex: Regex::new(r"\beyJ[A-Za-z0-9_-]{4,}\.[A-Za-z0-9_-]{4,}\.[A-Za-z0-9_-]{4,}\b")
-                .expect("jwt regex compiles"),
-        },
-        // GitHub OAuth / app installation tokens (ghp_, gho_, ghu_,
-        // ghs_, ghr_).
-        NamedPattern {
-            name: "github_token",
-            regex: Regex::new(r"\bgh[pousr]_[A-Za-z0-9]{36,255}\b")
-                .expect("github_token regex compiles"),
-        },
-        // GitHub fine-grained personal access token.
-        NamedPattern {
-            name: "github_pat_fine",
-            regex: Regex::new(r"\bgithub_pat_[A-Za-z0-9_]{20,255}\b")
-                .expect("github_pat_fine regex compiles"),
-        },
-        // Slack tokens (xoxb / xoxp / xoxa / xoxs / xoxr).
-        NamedPattern {
-            name: "slack_token",
-            regex: Regex::new(r"\bxox[abprs]-[A-Za-z0-9-]{10,255}\b")
-                .expect("slack_token regex compiles"),
-        },
-        // AWS access key ids (gitleaks family).
-        NamedPattern {
-            name: "aws_access_key",
-            regex: Regex::new(r"\b(?:AKIA|ASIA|AGPA|AIDA|ANPA|AROA|AIPA)[A-Z0-9]{16}\b")
-                .expect("aws_access_key regex compiles"),
-        },
-        // GitLab personal access token.
-        NamedPattern {
-            name: "gitlab_token",
-            regex: Regex::new(r"\bglpat-[A-Za-z0-9_-]{20,255}\b")
-                .expect("gitlab_token regex compiles"),
-        },
-        // npm access token.
-        NamedPattern {
-            name: "npm_token",
-            regex: Regex::new(r"\bnpm_[A-Za-z0-9]{36}\b").expect("npm_token regex compiles"),
-        },
-        // OpenAI / Anthropic-style sk- keys (long, project, etc).
-        NamedPattern {
-            name: "openai_key",
-            regex: Regex::new(r"\bsk-[A-Za-z0-9_-]{20,255}\b").expect("openai_key regex compiles"),
-        },
-        // Stripe live/test keys.
-        NamedPattern {
-            name: "stripe_key",
-            regex: Regex::new(r"\b(?:rk|sk)_(?:live|test)_[0-9A-Za-z]{16,255}\b")
-                .expect("stripe_key regex compiles"),
-        },
-        // `Authorization: Bearer <token>` header form as well as
-        // bare `Bearer xyz` substrings in free text.
-        NamedPattern {
-            name: "bearer_token",
-            regex: Regex::new(r"(?i)\bBearer\s+[A-Za-z0-9._\-+/=]{12,}")
-                .expect("bearer_token regex compiles"),
-        },
-    ]
+    DEFAULT_SECRET_PATTERN_SPECS
+        .iter()
+        .map(|spec| NamedPattern {
+            name: spec.redaction_name,
+            regex: Regex::new(spec.regex).unwrap_or_else(|error| {
+                panic!("invalid {} secret regex: {error}", spec.redaction_name)
+            }),
+        })
+        .collect()
 });
 
 thread_local! {
@@ -411,6 +356,16 @@ mod tests {
     }
 
     #[test]
+    fn replaces_private_key_blocks() {
+        run_clean();
+        let input =
+            "-----BEGIN OPENSSH PRIVATE KEY-----\nsecret-material\n-----END OPENSSH PRIVATE KEY-----";
+        let out = scan_secret_patterns(input, crate::redact::REDACTED_PLACEHOLDER);
+        assert!(out.contains("<redacted:private_key_block:"));
+        assert!(!out.contains("secret-material"));
+    }
+
+    #[test]
     fn custom_pattern_redacts_and_is_introspectable() {
         run_clean();
         register_custom_pattern("acme_token", r"\bACME-[A-Z0-9]{8}\b").unwrap();
@@ -485,6 +440,7 @@ mod tests {
         assert!(names.contains(&"github_pat_fine"));
         assert!(names.contains(&"slack_token"));
         assert!(names.contains(&"aws_access_key"));
+        assert!(names.contains(&"private_key_block"));
         assert!(names.contains(&"bearer_token"));
     }
 }

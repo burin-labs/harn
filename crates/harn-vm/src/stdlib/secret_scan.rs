@@ -6,6 +6,7 @@ use serde::{Deserialize, Serialize};
 use sha2::Digest;
 
 use crate::event_log::{active_event_log, EventLog, LogEvent, Topic};
+use crate::secret_patterns::{SecretPatternSpec, DEFAULT_SECRET_PATTERN_SPECS};
 use crate::value::{VmError, VmValue};
 use crate::vm::Vm;
 
@@ -27,69 +28,20 @@ pub struct SecretFinding {
 }
 
 struct SecretRule {
-    detector: &'static str,
-    source: &'static str,
-    title: &'static str,
+    spec: &'static SecretPatternSpec,
     regex: Regex,
 }
 
 static SECRET_RULES: LazyLock<Vec<SecretRule>> = LazyLock::new(|| {
-    vec![
-        SecretRule {
-            detector: "aws-access-key-id",
-            source: "gitleaks",
-            title: "AWS access key id",
-            regex: Regex::new(r"\b(?:AKIA|ASIA|AGPA|AIDA|ANPA|AROA|AIPA)[A-Z0-9]{16}\b").unwrap(),
-        },
-        SecretRule {
-            detector: "github-token",
-            source: "gitleaks",
-            title: "GitHub token",
-            regex: Regex::new(r"\bgh(?:p|o|u|s|r)_[A-Za-z0-9]{36,255}\b").unwrap(),
-        },
-        SecretRule {
-            detector: "github-fine-grained-token",
-            source: "gitleaks",
-            title: "GitHub fine-grained personal access token",
-            regex: Regex::new(r"\bgithub_pat_[A-Za-z0-9_]{20,255}\b").unwrap(),
-        },
-        SecretRule {
-            detector: "gitlab-token",
-            source: "detect-secrets",
-            title: "GitLab personal access token",
-            regex: Regex::new(r"\bglpat-[A-Za-z0-9_-]{20,255}\b").unwrap(),
-        },
-        SecretRule {
-            detector: "npm-token",
-            source: "detect-secrets",
-            title: "npm access token",
-            regex: Regex::new(r"\bnpm_[A-Za-z0-9]{36}\b").unwrap(),
-        },
-        SecretRule {
-            detector: "openai-api-key",
-            source: "detect-secrets",
-            title: "OpenAI API key",
-            regex: Regex::new(r"\bsk-[A-Za-z0-9_-]{20,255}\b").unwrap(),
-        },
-        SecretRule {
-            detector: "slack-token",
-            source: "trufflehog",
-            title: "Slack token",
-            regex: Regex::new(r"\bxox(?:a|b|p|r|s)-[A-Za-z0-9-]{10,255}\b").unwrap(),
-        },
-        SecretRule {
-            detector: "stripe-secret-key",
-            source: "trufflehog",
-            title: "Stripe secret or restricted key",
-            regex: Regex::new(r"\b(?:rk|sk)_(?:live|test)_[0-9A-Za-z]{16,255}\b").unwrap(),
-        },
-        SecretRule {
-            detector: "private-key-block",
-            source: "detect-secrets",
-            title: "Private key block",
-            regex: Regex::new(r"(?m)^-----BEGIN [A-Z0-9 ]*PRIVATE KEY-----$").unwrap(),
-        },
-    ]
+    DEFAULT_SECRET_PATTERN_SPECS
+        .iter()
+        .map(|spec| SecretRule {
+            spec,
+            regex: Regex::new(spec.regex).unwrap_or_else(|error| {
+                panic!("invalid {} secret scan regex: {error}", spec.detector)
+            }),
+        })
+        .collect()
 });
 
 static HIGH_ENTROPY_ASSIGNMENT_RULE: LazyLock<Regex> = LazyLock::new(|| {
@@ -108,9 +60,9 @@ pub fn scan_content(content: &str) -> Vec<SecretFinding> {
             findings.push(build_finding(
                 content,
                 &line_starts,
-                rule.detector,
-                rule.source,
-                rule.title,
+                rule.spec.detector,
+                rule.spec.source,
+                rule.spec.title,
                 mat.start(),
                 mat.end(),
                 mat.as_str(),
@@ -384,9 +336,27 @@ config = { client_secret: "QWxhZGRpbjpPcGVuU2VzYW1lQWNjZXNzVG9rZW4=" }
         assert_eq!(findings.len(), 1);
         assert_eq!(findings[0].detector, "private-key-block");
         assert_eq!(
+            findings[0].end_offset - findings[0].start_offset,
+            "-----BEGIN OPENSSH PRIVATE KEY-----\nZXhhbXBsZQ==\n-----END OPENSSH PRIVATE KEY-----"
+                .len()
+        );
+        assert_eq!(
             findings[0].redacted,
             "-----BEGIN OPENSSH PRIVATE KEY----- …"
         );
+    }
+
+    #[test]
+    fn scan_content_covers_redaction_only_token_shapes() {
+        let findings = scan_content(
+            "Authorization: Bearer abcDEFghi123_-+/=xyz\njwt=eyJabcd.eyJefgh.signature_pad\n",
+        );
+        let detectors = findings
+            .iter()
+            .map(|finding| finding.detector.as_str())
+            .collect::<BTreeSet<_>>();
+        assert!(detectors.contains("bearer-token"));
+        assert!(detectors.contains("jwt-token"));
     }
 
     #[tokio::test(flavor = "current_thread")]
