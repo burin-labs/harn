@@ -197,6 +197,13 @@ log(run.path)
 log(run.run.stages)
 ```
 
+Agent-backed stages pass `model_policy.iteration_budget` directly into the
+per-stage `agent_loop`. Treat that structured budget as the source of truth for
+adaptive or fixed loop limits; scripts no longer need to copy that cap into
+`max_iterations`. `max_iterations` remains accepted as a scalar fixed cap, and
+when both fields are present `iteration_budget.max` is the cap used by the agent
+loop. Invalid budget fields fail at loop startup instead of being ignored.
+
 `verify` nodes can also run deterministic checks without an LLM loop:
 
 ```harn,ignore

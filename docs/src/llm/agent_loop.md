@@ -385,6 +385,9 @@ Fields:
 `max_iterations: N` and `iteration_budget: {mode: "fixed", initial: N, max: N}`
 are equivalent. Passing both `iteration_budget` and `max_iterations` is allowed;
 the budget's `max` wins for the host's autonomy/ACP tracking.
+Explicit `max_iterations`, `initial`, `max`, and adaptive `extend_by` values
+must be positive integers, and `initial` must be less than or equal to `max`;
+invalid fields raise an `agent_loop` error before the first provider call.
 
 ### loop_control policy
 

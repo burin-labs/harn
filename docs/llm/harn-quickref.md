@@ -1686,6 +1686,14 @@ override the profile:
 | `verifier` | 5 | 0 | 0 | 2 | 3 |
 | `completer` | 1 | 0 | 0 | 2 | 0 |
 
+Use `iteration_budget: {mode, initial, max, extend_by}` when a loop should
+start with a small cap and extend only while making progress. `max_iterations`
+is equivalent to a fixed budget; if both are present, `iteration_budget.max`
+wins. Explicit `max_iterations`, `initial`, `max`, and adaptive `extend_by`
+values must be positive integers, and `initial <= max`. Workflow stage
+`model_policy` accepts the same `iteration_budget` shape and passes it through
+to the per-stage `agent_loop`.
+
 Pass `stop_after_successful_tools: ["name", ...]` to terminate the loop
 the moment any of those tools is dispatched successfully. Same shape as
 Vercel AI SDK's `stopWhen: hasToolCall(name)` and OpenAI Agents SDK's

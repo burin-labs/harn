@@ -201,15 +201,15 @@ fn __validate_done_judge_cadence(value) {
   }
 }
 
-fn __positive_int_default(value, fallback) {
+fn __positive_int_budget_field(value, fallback, label) {
   if value == nil {
     return fallback
   }
   if type_of(value) != "int" {
-    throw "agent_loop: iteration_budget numeric fields must be integers; got " + type_of(value)
+    throw "agent_loop: `" + label + "` must be a positive integer; got " + type_of(value)
   }
   if value < 1 {
-    return fallback
+    throw "agent_loop: `" + label + "` must be a positive integer; got " + to_string(value)
   }
   return value
 }
@@ -324,7 +324,7 @@ fn __normalize_iteration_budget(opts) {
     raw
   }
   if user_budget == nil {
-    let cap = __positive_int_default(legacy, 50)
+    let cap = __positive_int_budget_field(legacy, 50, "max_iterations")
     return {mode: "fixed", initial: cap, max: cap, extend_by: 0, expose_decisions: false}
   }
   if type_of(user_budget) != "dict" {
@@ -337,7 +337,7 @@ fn __normalize_iteration_budget(opts) {
       + to_string(mode)
   }
   let legacy_cap = if legacy != nil {
-    __positive_int_default(legacy, 50)
+    __positive_int_budget_field(legacy, 50, "max_iterations")
   } else {
     nil
   }
@@ -348,7 +348,7 @@ fn __normalize_iteration_budget(opts) {
   } else {
     50
   }
-  let max_cap = __positive_int_default(user_budget?.max, max_default)
+  let max_cap = __positive_int_budget_field(user_budget?.max, max_default, "iteration_budget.max")
   let initial_default = if mode == "adaptive" {
     let candidate = max_cap / 4
     if candidate < 1 {
@@ -359,16 +359,23 @@ fn __normalize_iteration_budget(opts) {
   } else {
     max_cap
   }
-  var initial = __positive_int_default(user_budget?.initial, initial_default)
+  let initial = __positive_int_budget_field(user_budget?.initial, initial_default, "iteration_budget.initial")
   if initial > max_cap {
-    initial = max_cap
+    throw "agent_loop: `iteration_budget.initial` must be less than or equal to `iteration_budget.max`; got initial="
+      + to_string(initial)
+      + ", max="
+      + to_string(max_cap)
   }
   let extend_by = if mode == "adaptive" {
-    __positive_int_default(user_budget?.extend_by, 2)
+    __positive_int_budget_field(user_budget?.extend_by, 2, "iteration_budget.extend_by")
   } else {
     0
   }
   let expose_decisions = if user_budget?.expose_decisions != nil {
+    if type_of(user_budget.expose_decisions) != "bool" {
+      throw "agent_loop: `iteration_budget.expose_decisions` must be a bool; got "
+        + type_of(user_budget.expose_decisions)
+    }
     user_budget.expose_decisions
   } else {
     mode == "adaptive"

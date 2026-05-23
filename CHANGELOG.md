@@ -15,6 +15,12 @@ condensed series summaries instead of full per-patch history.
   same high-confidence secret patterns. JWTs, Bearer tokens, and full private
   key blocks are consistently reported or scrubbed instead of drifting across
   runtime surfaces.
+- **Agent-loop iteration budgets now reject invalid numeric fields.**
+  Explicit `max_iterations`, `iteration_budget.initial`,
+  `iteration_budget.max`, and adaptive `iteration_budget.extend_by` values must
+  be positive integers, and `iteration_budget.initial` cannot exceed
+  `iteration_budget.max`. Invalid workflow stage budgets now fail with a clear
+  `agent_loop` diagnostic before any provider call.
 
 ## v0.8.34
 
