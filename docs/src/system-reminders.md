@@ -258,7 +258,17 @@ user-role input.
 ```
 
 `mode` accepts the same delivery values as queued user messages:
-`interrupt_immediate`, `finish_step`, and `wait_for_completion`.
+`interrupt_immediate`, `finish_step`, and `audit_only`. The mode
+determines *which* agent-loop seam drains the reminder:
+
+| Mode | Drained at | Behavior |
+|---|---|---|
+| `interrupt_immediate` | `turn_start`, `pre_tool_dispatch`, `post_tool_dispatch`, `turn_end`, `daemon_idle_pre`, `daemon_idle_post` | When it arrives at `pre_tool_dispatch` (between LLM return and tool dispatch), the pending tool batch is **skipped** and the reminder lands in the next iteration's prompt. At every other seam, the reminder is appended to the transcript and visible on the next prompt build. |
+| `finish_step` | `turn_start`, `post_tool_dispatch`, `turn_end` | Drained at iteration boundaries only. Never short-circuits a tool batch. The model sees this reminder on the *next* prompt build — including the final iteration when the loop is about to terminate. |
+| `audit_only` | `loop_exit` | Drained once the loop terminates, before finalize. The reminder lands in the transcript audit, but the model **never sees it** — no further LLM call runs after `loop_exit`. Use this for record-keeping and replay; use `finish_step` if the model must react to the reminder before the agent terminates (harn#2212). |
+
+See [steering seams](concepts/steering-seams.md) for the full seam catalog.
+
 Host-specific extension fields belong under `_meta`. Invalid reminder
 payloads fail with `HARN-RMD-002`; unknown top-level reminder options
 fail with `HARN-RMD-001`.

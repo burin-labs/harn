@@ -77,7 +77,7 @@ audit trail; `assets` are large or non-text payloads.
 resume-after-suspend and for replay.
 
 **System reminder.** A typed, turn-boundary injection into the transcript.
-Carries a `mode` (`interrupt_immediate`, `finish_step`, `wait_for_completion`),
+Carries a `mode` (`interrupt_immediate`, `finish_step`, `audit_only`),
 a `role_hint`, optional `dedupe_key`, and optional TTL. See [System
 reminders](../system-reminders.md).
 
@@ -114,18 +114,19 @@ reminder, queuing a user message, revoking a pending injection, cancelling an
 in-flight tool call. See [Steering seams](./steering-seams.md).
 
 **Inject mode.** The bridge-injection variant for system reminders. Three
-values: `interrupt_immediate` (drain at the next safe seam, currently next
-iteration boundary; see issue
-[#2211](https://github.com/burin-labs/harn/issues/2211) for the in-progress
-upgrade to true mid-step preemption), `finish_step` (drain at the next iteration
-boundary), `wait_for_completion` (drain at loop exit; note
-[#2212](https://github.com/burin-labs/harn/issues/2212) — these are not yet
-rendered to the model).
+values: `interrupt_immediate` (drain at the next safe seam, including
+`pre_tool_dispatch` — the model's pending tool batch is skipped when one
+arrives there), `finish_step` (drain at the next iteration boundary),
+`audit_only` (drain at loop exit and append to the transcript; the model
+never sees these — use `finish_step` if the model must react before the
+agent terminates). The full seam catalog lives in
+[Steering seams](./steering-seams.md).
 
 **Checkpoint.** A safe point in the loop body where the runtime checks for
-pending steering injections. Today: turn-start, turn-end, post-compact,
-daemon-idle. Tracked for unification in
-[#2211](https://github.com/burin-labs/harn/issues/2211).
+pending steering injections. Every drain in the agent loop and the daemon
+idle path routes through `__agent_loop_checkpoint(kind)`; observers
+subscribe via `register_checkpoint_hook(kinds, handler)`. See
+[Steering seams](./steering-seams.md) for the canonical catalog.
 
 ## Things Harn doesn't use as nouns
 

@@ -97,9 +97,19 @@ export interface SessionInjectReminderRequest {
    */
   roleHint?: "system" | "developer" | "user_block" | "ephemeral_cache"
   /**
-   * Delivery mode. Mirrors session/inject semantics.
+   * Delivery mode. Mirrors session/inject semantics:
+   *   - "interrupt_immediate": drain at the next safe checkpoint,
+   *     including pre-tool-dispatch (the pending tool batch is
+   *     skipped when one arrives there).
+   *   - "finish_step": drain at the next iteration boundary; the
+   *     model renders the reminder on its next prompt.
+   *   - "audit_only": drain at loop exit and append to the
+   *     transcript audit. The model never sees these reminders —
+   *     no further model call runs after loop exit. Use
+   *     "finish_step" if the model must react before the agent
+   *     terminates.
    */
-  mode?: "interrupt_immediate" | "finish_step" | "wait_for_completion"
+  mode?: "interrupt_immediate" | "finish_step" | "audit_only"
   /** Extension envelope for protocol-extension fields. */
   _meta?: Record<string, unknown>
 }
@@ -276,11 +286,14 @@ pub struct SystemReminder {
    defensible; we recommend `session/inject_reminder` so the verb
    pattern is consistent with the user-input sibling.
 2. **`mode` semantics.** Should reminders honor the same
-   `interrupt_immediate` / `finish_step` / `wait_for_completion`
-   delivery modes as `session/inject`, or always behave as
-   `finish_step` (i.e., commit at the next turn boundary)? Our
-   reference impl defers to whatever the host supplies and defaults to
-   `finish_step`.
+   `interrupt_immediate` / `finish_step` / `audit_only` delivery
+   modes as `session/inject`, or always behave as `finish_step`
+   (i.e., commit at the next turn boundary)? Our reference impl defers
+   to whatever the host supplies and defaults to `finish_step`.
+   (Note: `audit_only` was originally named `wait_for_completion`;
+   the rename happened in harn#2212 because the model never sees
+   reminders drained at loop exit, so "wait_for_completion" was
+   misleading.)
 3. **`roleHint` realism.** `user_block` and `ephemeral_cache` exist
    today because Anthropic models materially prefer a user-role
    content block with prompt-cache annotation. Should ACP standardize

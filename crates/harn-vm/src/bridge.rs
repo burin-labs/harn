@@ -225,11 +225,20 @@ impl InProcessHost {
     }
 }
 
+/// How a queued bridge injection is delivered into the agent loop.
+///
+/// `AuditOnly` was previously called `WaitForCompletion`; the rename is
+/// truth-in-advertising (harn#2212). These injections drain at
+/// `loop_exit`, *after* the last LLM call has returned — so they land in
+/// the transcript audit but are **never rendered into a model prompt**.
+/// Hosts that want the model to react to the reminder on its final
+/// iteration should use `FinishStep` instead, which drains at every
+/// `turn_start` / `post_tool_dispatch` / `turn_end` checkpoint.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum QueuedUserMessageMode {
     InterruptImmediate,
     FinishStep,
-    WaitForCompletion,
+    AuditOnly,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -244,7 +253,11 @@ impl QueuedUserMessageMode {
         match value {
             "interrupt_immediate" | "interrupt" => Self::InterruptImmediate,
             "finish_step" | "after_current_operation" => Self::FinishStep,
-            _ => Self::WaitForCompletion,
+            // Unknown / missing modes fall through to the safest option:
+            // record for audit, do not preempt the loop. Pre-#2212 hosts
+            // that send `wait_for_completion` are caught by this arm —
+            // the canonical name is `audit_only` going forward.
+            _ => Self::AuditOnly,
         }
     }
 }
@@ -611,7 +624,7 @@ fn queued_session_remind_from_params(params: &serde_json::Value) -> Result<Queue
         params
             .get("mode")
             .and_then(|value| value.as_str())
-            .unwrap_or("wait_for_completion"),
+            .unwrap_or("audit_only"),
     );
     let reminder_value = if let Some(reminder) = params.get("reminder") {
         reminder.clone()
@@ -1103,7 +1116,7 @@ impl HostBridge {
         &self,
         include_interrupt_immediate: bool,
         include_finish_step: bool,
-        include_wait_for_completion: bool,
+        include_audit_only: bool,
     ) -> Vec<QueuedUserMessage> {
         let mut state = self.queued_transcript_injections.inner.lock().await;
         let mut selected = Vec::new();
@@ -1112,7 +1125,7 @@ impl HostBridge {
             let should_take = match injection.mode() {
                 QueuedUserMessageMode::InterruptImmediate => include_interrupt_immediate,
                 QueuedUserMessageMode::FinishStep => include_finish_step,
-                QueuedUserMessageMode::WaitForCompletion => include_wait_for_completion,
+                QueuedUserMessageMode::AuditOnly => include_audit_only,
             };
             match (should_take, injection) {
                 (true, QueuedTranscriptInjection::User(message)) => {
@@ -1132,7 +1145,7 @@ impl HostBridge {
         &self,
         include_interrupt_immediate: bool,
         include_finish_step: bool,
-        include_wait_for_completion: bool,
+        include_audit_only: bool,
     ) -> Vec<QueuedTranscriptInjection> {
         let mut state = self.queued_transcript_injections.inner.lock().await;
         let mut selected = Vec::new();
@@ -1141,7 +1154,7 @@ impl HostBridge {
             let should_take = match injection.mode() {
                 QueuedUserMessageMode::InterruptImmediate => include_interrupt_immediate,
                 QueuedUserMessageMode::FinishStep => include_finish_step,
-                QueuedUserMessageMode::WaitForCompletion => include_wait_for_completion,
+                QueuedUserMessageMode::AuditOnly => include_audit_only,
             };
             if should_take {
                 if let QueuedTranscriptInjection::User(message) = &injection {
@@ -1605,7 +1618,7 @@ mod tests {
                 .push_queued_user_message("first".to_string(), "finish_step")
                 .await;
             bridge
-                .push_queued_user_message("second".to_string(), "wait_for_completion")
+                .push_queued_user_message("second".to_string(), "audit_only")
                 .await;
 
             let finish_step = bridge.take_queued_user_messages(false, true, false).await;
@@ -1630,14 +1643,14 @@ mod tests {
                 .push_pending_user_message(
                     "first".to_string(),
                     serde_json::json!("first"),
-                    "wait_for_completion",
+                    "audit_only",
                 )
                 .await;
             let second_id = bridge
                 .push_pending_user_message(
                     "second".to_string(),
                     serde_json::json!("second"),
-                    "wait_for_completion",
+                    "audit_only",
                 )
                 .await;
 
@@ -1749,14 +1762,14 @@ mod tests {
                 .push_pending_user_message(
                     "revoke me".to_string(),
                     serde_json::json!("revoke me"),
-                    "wait_for_completion",
+                    "audit_only",
                 )
                 .await;
             let delivered_id = bridge
                 .push_pending_user_message(
                     "deliver me".to_string(),
                     serde_json::json!("deliver me"),
-                    "wait_for_completion",
+                    "audit_only",
                 )
                 .await;
             assert_eq!(
@@ -1802,7 +1815,7 @@ mod tests {
                     "tags": ["host"],
                     "dedupe_key": "host-context",
                     "ttl_turns": 2,
-                    "mode": "wait_for_completion",
+                    "mode": "audit_only",
                     "_meta": {"harn": {"source": "test"}},
                 }))
                 .await
@@ -1856,7 +1869,7 @@ mod tests {
                     DeliveryCheckpoint::EndOfInteraction,
                 ),
                 (
-                    "wait_for_completion",
+                    "audit_only",
                     DeliveryCheckpoint::EndOfInteraction,
                     DeliveryCheckpoint::InterruptImmediate,
                 ),

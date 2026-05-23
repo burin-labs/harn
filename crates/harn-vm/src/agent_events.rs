@@ -738,6 +738,34 @@ pub enum AgentEvent {
         session_id: String,
         run: CompositionRunEnvelope,
     },
+    /// Emitted once per `__agent_loop_checkpoint(...)` pass. The single
+    /// named seam through which the agent loop drains queued bridge
+    /// injections and inbox feedback. Hosts use it to debug "did the
+    /// loop check for steering at the expected boundary" without having
+    /// to grep the loop body for inline drain calls.
+    ///
+    /// `kind` is one of the documented seam names: `turn_start`,
+    /// `pre_tool_dispatch`, `post_tool_dispatch`, `turn_end`,
+    /// `pre_compact`, `post_compact`, `daemon_idle_pre`,
+    /// `daemon_idle_post`, `loop_exit`. `delivered` is the count of
+    /// bridge injections drained at this seam (inbox drains are
+    /// reported separately under `inbox_delivered`). `dispatch_skipped`
+    /// is true only when an `interrupt_immediate` injection arrived at
+    /// `pre_tool_dispatch` and the pending tool batch was skipped.
+    LoopCheckpoint {
+        session_id: String,
+        iteration: usize,
+        kind: String,
+        delivered: usize,
+        #[serde(default, skip_serializing_if = "is_zero_usize")]
+        inbox_delivered: usize,
+        #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+        dispatch_skipped: bool,
+    },
+}
+
+fn is_zero_usize(value: &usize) -> bool {
+    *value == 0
 }
 
 impl AgentEvent {
@@ -781,7 +809,8 @@ impl AgentEvent {
             | Self::CompositionChildCall { session_id, .. }
             | Self::CompositionChildResult { session_id, .. }
             | Self::CompositionFinish { session_id, .. }
-            | Self::CompositionError { session_id, .. } => session_id,
+            | Self::CompositionError { session_id, .. }
+            | Self::LoopCheckpoint { session_id, .. } => session_id,
         }
     }
 }

@@ -244,6 +244,112 @@ pub(super) fn clear_session_hooks_builtin(
     Ok(VmValue::Nil)
 }
 
+/// Register a checkpoint hook covering one or more agent-loop seams.
+/// Sugar over `register_session_hook("loop_checkpoint", pattern, handler)`:
+/// `kinds` is a list of seam names (e.g. `["turn_start", "pre_tool_dispatch"]`)
+/// or the wildcard `"*"` / `nil` to subscribe to every seam. The handler
+/// receives the `LoopCheckpoint` payload `{session_id, iteration, kind,
+/// delivered, inbox_delivered, dispatch_skipped}`.
+pub(super) fn register_checkpoint_hook_builtin(
+    args: &[VmValue],
+    _out: &mut String,
+) -> Result<VmValue, VmError> {
+    if args.len() != 2 {
+        return Err(VmError::Runtime(format!(
+            "register_checkpoint_hook expects 2 arguments (kinds, handler); got {}",
+            args.len()
+        )));
+    }
+    let pattern = checkpoint_pattern_from_kinds(&args[0])?;
+    let VmValue::Closure(closure) = &args[1] else {
+        return Err(VmError::Runtime(format!(
+            "register_checkpoint_hook: handler must be a closure, got {}",
+            args[1].type_name()
+        )));
+    };
+    crate::orchestration::register_vm_hook(
+        crate::orchestration::HookEvent::LoopCheckpoint,
+        pattern,
+        "session_hook::LoopCheckpoint".to_string(),
+        closure.clone(),
+    );
+    Ok(VmValue::Nil)
+}
+
+/// Translate the `kinds` argument of `register_checkpoint_hook` into the
+/// pattern string consumed by `compile_event_pattern`. A single string is
+/// turned into `kind=="<name>"`; a list of strings into
+/// `kind=~"^(a|b|c)$"`. `nil`, an empty list, or `"*"` map to `"*"`.
+fn checkpoint_pattern_from_kinds(value: &VmValue) -> Result<String, VmError> {
+    match value {
+        VmValue::Nil => Ok("*".to_string()),
+        VmValue::String(name) => {
+            let trimmed = name.trim();
+            if trimmed.is_empty() || trimmed == "*" {
+                Ok("*".to_string())
+            } else {
+                validate_checkpoint_kind(trimmed)?;
+                Ok(format!("kind==\"{trimmed}\""))
+            }
+        }
+        VmValue::List(items) => {
+            if items.is_empty() {
+                return Ok("*".to_string());
+            }
+            let mut names = Vec::with_capacity(items.len());
+            for item in items.iter() {
+                let VmValue::String(name) = item else {
+                    return Err(VmError::Runtime(format!(
+                        "register_checkpoint_hook: kinds entries must be strings, got {}",
+                        item.type_name()
+                    )));
+                };
+                let trimmed = name.trim();
+                if trimmed.is_empty() {
+                    return Err(VmError::Runtime(
+                        "register_checkpoint_hook: kinds entries must be non-empty strings"
+                            .to_string(),
+                    ));
+                }
+                validate_checkpoint_kind(trimmed)?;
+                names.push(regex::escape(trimmed));
+            }
+            if names.len() == 1 {
+                Ok(format!("kind==\"{}\"", names[0]))
+            } else {
+                Ok(format!("kind=~\"^({})$\"", names.join("|")))
+            }
+        }
+        other => Err(VmError::Runtime(format!(
+            "register_checkpoint_hook: kinds must be a list, string, or nil; got {}",
+            other.type_name()
+        ))),
+    }
+}
+
+const CHECKPOINT_KINDS: &[&str] = &[
+    "turn_start",
+    "pre_tool_dispatch",
+    "post_tool_dispatch",
+    "turn_end",
+    "pre_compact",
+    "post_compact",
+    "daemon_idle_pre",
+    "daemon_idle_post",
+    "loop_exit",
+];
+
+fn validate_checkpoint_kind(kind: &str) -> Result<(), VmError> {
+    if CHECKPOINT_KINDS.contains(&kind) {
+        Ok(())
+    } else {
+        Err(VmError::Runtime(format!(
+            "register_checkpoint_hook: unknown kind `{kind}` (expected one of: {})",
+            CHECKPOINT_KINDS.join(", ")
+        )))
+    }
+}
+
 fn reminder_provider_event_list(
     value: Option<&VmValue>,
     builtin: &str,

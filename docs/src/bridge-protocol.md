@@ -535,7 +535,10 @@ To inject ambient context without pretending it is a user message, send
 ```
 
 `mode` accepts the same delivery values as queued user messages:
-`interrupt_immediate`, `finish_step`, and `wait_for_completion`. The reminder
+`interrupt_immediate`, `finish_step`, and `audit_only`. `audit_only`
+reminders drain at `loop_exit` and land in the transcript but are never
+rendered into a model prompt — see
+[steering seams](./concepts/steering-seams.md) for the full table. The reminder
 payload is validated as a reminder spec; non-standard host metadata belongs under
 `_meta`. Malformed reminder payloads are rejected with `HARN-RMD-002`; unknown
 top-level reminder options are rejected with `HARN-RMD-001`.

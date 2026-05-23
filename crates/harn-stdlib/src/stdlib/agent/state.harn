@@ -148,6 +148,39 @@ pub fn agent_session_drain_bridge_injections(session_id, checkpoint) {
 }
 
 /**
+ * agent_session_push_bridge_injection.
+ *
+ * Push a system-reminder onto the session's host bridge queue. The
+ * reminder is held until the agent loop's next eligible checkpoint
+ * drains it (gated by `options.mode`). Returns the reminder id.
+ *
+ * `options` mirrors the ACP `session/remind` JSON-RPC params:
+ * `{body, mode?, tags?, dedupe_key?, ttl_turns?, role_hint?,
+ * propagate?, preserve_on_compact?}`.
+ *
+ * `mode` defaults to `"audit_only"`:
+ *
+ *   - `"interrupt_immediate"` — skip the next pending tool batch at the
+ *     `pre_tool_dispatch` checkpoint.
+ *   - `"finish_step"` — drained at every iteration boundary; the
+ *     reminder renders into the model's next prompt.
+ *   - `"audit_only"` — drained only at `loop_exit`. The reminder lands
+ *     in the transcript audit but is NEVER rendered into a model
+ *     prompt (no further LLM call runs after `loop_exit`). Use this
+ *     for record-keeping; use `finish_step` if the model must see it
+ *     before the loop terminates (harn#2212).
+ *
+ * @effects: [host]
+ * @allocation: heap
+ * @errors: [HARN-RMD-002]
+ * @api_stability: experimental
+ * @example: agent_session_push_bridge_injection(session_id, {body: "stop", mode: "interrupt_immediate"})
+ */
+pub fn agent_session_push_bridge_injection(session_id, options) {
+  return __host_agent_session_push_bridge_injection(session_id, options)
+}
+
+/**
  * agent_session_totals.
  *
  * @effects: [host]

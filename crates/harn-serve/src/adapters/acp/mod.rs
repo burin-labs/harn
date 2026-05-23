@@ -80,7 +80,11 @@ fn session_id_param(params: &serde_json::Value) -> Option<String> {
 
 fn bridge_mode_for_session_inject(params: &serde_json::Value) -> Result<&'static str, String> {
     match params.get("mode").and_then(|value| value.as_str()) {
-        Some("queue") => Ok("wait_for_completion"),
+        // ACP `session/inject.mode = "queue"` is the audit/trail variant —
+        // the message ends up in the transcript on `loop_exit` but is
+        // never rendered into a model prompt. The canonical bridge name
+        // is `audit_only` (harn#2212).
+        Some("queue") => Ok("audit_only"),
         Some("steer") => Ok("finish_step"),
         Some(other) => Err(format!(
             "session/inject: unsupported mode `{other}`; expected `queue` or `steer`"

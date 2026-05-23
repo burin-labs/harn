@@ -1073,6 +1073,28 @@ impl AgentEventSink for AcpAgentEventSink {
                     Self::composition_run_to_json(run),
                 );
             }
+            AgentEvent::LoopCheckpoint {
+                session_id,
+                iteration,
+                kind,
+                delivered,
+                inbox_delivered,
+                dispatch_skipped,
+            } => {
+                let mut payload = serde_json::json!({
+                    "iteration": iteration,
+                    "kind": kind,
+                    "delivered": delivered,
+                });
+                if *inbox_delivered > 0 {
+                    payload["inboxDelivered"] =
+                        serde_json::Value::Number(serde_json::Number::from(*inbox_delivered));
+                }
+                if *dispatch_skipped {
+                    payload["dispatchSkipped"] = serde_json::Value::Bool(true);
+                }
+                self.emit_agent_event_ext("loop_checkpoint", session_id, payload);
+            }
         }
     }
 }

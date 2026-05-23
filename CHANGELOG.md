@@ -33,6 +33,47 @@ condensed series summaries instead of full per-patch history.
   and a README that calls out when to add mutating tools. `harn quickstart`
   also prefers the empirically stronger local Devstral coding preset when it is
   available.
+- **Unified steering-seam catalog and pre-tool-dispatch checkpoint
+  (#2211).** Every drain in the agent loop now routes through a single
+  `__agent_loop_checkpoint(kind)` helper covering nine named seams —
+  `turn_start`, `pre_compact`, `post_compact`, `pre_tool_dispatch`,
+  `post_tool_dispatch`, `turn_end`, `daemon_idle_pre`, `daemon_idle_post`,
+  `loop_exit`. The new `pre_tool_dispatch` seam fires between the LLM
+  returning a tool call and the dispatcher firing it: if a host pushed an
+  `interrupt_immediate` bridge injection, the pending tool batch is
+  **skipped** and the reminder lands in the next iteration's prompt. This
+  honors the ACP `session/remind` (#1829) contract that
+  `interrupt_immediate` means "stop before the next tool fires" rather
+  than "land at the next iteration boundary anyway." Plugin authors get
+  one canonical extension point — `register_checkpoint_hook(kinds,
+  handler)` — and every pass emits a `LoopCheckpoint` event for
+  debuggers/replay. The race-window described in the issue
+  ("model wants tool, host injects stop, tool fires anyway") is now
+  closed and covered by `crates/harn-vm/tests/agent_loop_steering_seams.rs`.
+- **`agent_session_push_bridge_injection(session_id, options)`.** Inverse
+  of `agent_session_drain_bridge_injections` — lets a Harn-driven host
+  (custom CLI, conformance test, trigger connector) queue a reminder onto
+  the session's bridge without going through ACP. Returns the reminder
+  id; mode defaults to `audit_only` and accepts the same delivery modes
+  as `session/remind`.
+
+### Changed
+
+- **Bridge inject mode `wait_for_completion` renamed to `audit_only`
+  (#2212).** The previous name was a footgun: reminders queued with this
+  mode drain at `loop_exit` and land in the transcript audit, but the
+  model never sees them — no further LLM call runs after `loop_exit`.
+  `audit_only` is truth-in-advertising. The internal
+  `QueuedUserMessageMode::WaitForCompletion` variant is renamed to
+  `AuditOnly`; the bridge JSON-RPC `mode` field, the
+  `agent_session_drain_bridge_injections(session_id, checkpoint)`
+  checkpoint argument, and the ACP `session/inject_reminder` and
+  `session/inject` mode mapping all use the new name. The ACP
+  `session/inject.mode = "queue"` alias now maps to `audit_only`
+  (same semantics, no client-visible change). Hosts that need the model
+  to see a reminder before the agent terminates should use
+  `finish_step`, which drains at every iteration boundary — including
+  the final `turn_end` before the loop breaks.
 
 ### Fixed
 
