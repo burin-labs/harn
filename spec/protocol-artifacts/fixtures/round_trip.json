@@ -99,9 +99,50 @@
     }
   },
   "harnAgentEventMethod": "_harn/agentEvent",
+  "mcpDiscoverResult": {
+    "capabilities": {
+      "tools": {}
+    },
+    "instructions": "Use the stable MCP version unless the RC is explicitly enabled.",
+    "resultType": "complete",
+    "serverInfo": {
+      "name": "harn",
+      "version": "0.8.34"
+    },
+    "supportedVersions": [
+      "DRAFT-2026-v1",
+      "2025-11-25"
+    ]
+  },
+  "mcpInputRequiredResult": {
+    "inputRequests": {
+      "confirm": {
+        "method": "elicitation/create",
+        "params": {
+          "message": "Confirm the action",
+          "mode": "form",
+          "requestedSchema": {
+            "$schema": "https://json-schema.org/draft/2020-12/schema",
+            "properties": {
+              "confirmed": {
+                "type": "boolean"
+              }
+            },
+            "required": [
+              "confirmed"
+            ],
+            "type": "object"
+          }
+        }
+      }
+    },
+    "requestState": "opaque-state",
+    "resultType": "input_required"
+  },
   "mcpTool": {
     "description": "Echoes input",
     "inputSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
       "properties": {
         "x": {
           "type": "string"
@@ -111,6 +152,21 @@
     },
     "name": "echo",
     "title": "Echo"
+  },
+  "mcpUnsupportedProtocolVersionError": {
+    "error": {
+      "code": -32004,
+      "data": {
+        "requested": "DRAFT-2026-v0",
+        "supported": [
+          "DRAFT-2026-v1",
+          "2025-11-25"
+        ]
+      },
+      "message": "Unsupported protocol version"
+    },
+    "id": 19,
+    "jsonrpc": "2.0"
   },
   "toolCallReceipt": {
     "args_hash": "0000000000000000000000000000000000000000000000000000000000000000",

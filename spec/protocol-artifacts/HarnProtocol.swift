@@ -7,6 +7,41 @@ public enum HarnProtocolConstants {
     public static let artifactVersion = "0.8.34"
     public static let acpSchemaCompatibility = "agentclientprotocol/agent-client-protocol schema v0.12.2"
     public static let harnAgentEventMethod = "_harn/agentEvent"
+    public static let mcpProtocolVersion = "2025-11-25"
+    public static let mcpStableProtocolVersion = "2025-11-25"
+    public static let mcpDraftProtocolVersion = "DRAFT-2026-v1"
+    public static let mcpFinal2026ProtocolVersion = "2026-07-28"
+    public static let mcpJsonSchema202012Dialect = "https://json-schema.org/draft/2020-12/schema"
+    public static let mcpUnsupportedProtocolVersionErrorCode = -32004
+    public static let mcpUnsupportedProtocolVersionErrorMessage = "Unsupported protocol version"
+    public static let mcpProtocolVersions: [String] = [
+        "DRAFT-2026-v1",
+        "2025-11-25",
+    ]
+    public static let mcpRequiredMetadataKeys: [String] = [
+        "io.modelcontextprotocol/protocolVersion",
+        "io.modelcontextprotocol/clientInfo",
+        "io.modelcontextprotocol/clientCapabilities",
+    ]
+    public static let mcpMetadataKeys: [String] = [
+        "io.modelcontextprotocol/protocolVersion",
+        "io.modelcontextprotocol/clientInfo",
+        "io.modelcontextprotocol/clientCapabilities",
+        "io.modelcontextprotocol/logLevel",
+        "progressToken",
+        "traceparent",
+        "tracestate",
+        "baggage",
+    ]
+    public static let mcpStandardHTTPHeaders: [String] = [
+        "MCP-Protocol-Version",
+        "Mcp-Method",
+        "Mcp-Name",
+    ]
+    public static let mcpCacheResultFields: [String] = [
+        "ttlMs",
+        "cacheScope",
+    ]
     public static let acpSessionUpdateExtensions: [String] = [
         "available_commands_update",
         "fs_watch",
@@ -377,6 +412,7 @@ public enum HarnA2ATaskEventType: String, Codable, Sendable, CaseIterable {
 }
 
 public enum HarnMCPMethod: String, Codable, Sendable, CaseIterable {
+    case serverDiscover = "server/discover"
     case initialize = "initialize"
     case toolsList = "tools/list"
     case toolsCall = "tools/call"
@@ -393,6 +429,7 @@ public enum HarnMCPMethod: String, Codable, Sendable, CaseIterable {
     case notificationsMessage = "notifications/message"
 
     public static let allCases: [Self] = [
+        "server/discover",
         "initialize",
         "tools/list",
         "tools/call",
@@ -407,6 +444,26 @@ public enum HarnMCPMethod: String, Codable, Sendable, CaseIterable {
         "elicitation/create",
         "notifications/initialized",
         "notifications/message",
+    ].map { Self(rawValue: $0)! }
+}
+
+public enum HarnMCPCacheScope: String, Codable, Sendable, CaseIterable {
+    case private = "private"
+    case public = "public"
+
+    public static let allCases: [Self] = [
+        "private",
+        "public",
+    ].map { Self(rawValue: $0)! }
+}
+
+public enum HarnMCPResultType: String, Codable, Sendable, CaseIterable {
+    case complete = "complete"
+    case inputRequired = "input_required"
+
+    public static let allCases: [Self] = [
+        "complete",
+        "input_required",
     ].map { Self(rawValue: $0)! }
 }
 
@@ -1053,12 +1110,104 @@ public struct HarnA2ATask: Codable, Sendable, Equatable {
     public var metadata: HarnACPObject?
 }
 
+public typealias HarnMCPJsonSchema202012 = HarnACPObject
+
+public struct HarnMCPImplementation: Codable, Sendable, Equatable {
+    public var name: String
+    public var version: String
+    public var title: String?
+    public var description: String?
+    public var websiteUrl: String?
+}
+
+public struct HarnMCPRequestMeta: Codable, Sendable, Equatable {
+    public var protocolVersion: String
+    public var clientInfo: HarnMCPImplementation
+    public var clientCapabilities: HarnACPObject
+    public var logLevel: HarnMCPLoggingLevel?
+    public var progressToken: HarnACPValue?
+    public var traceparent: String?
+    public var tracestate: String?
+    public var baggage: String?
+
+    enum CodingKeys: String, CodingKey {
+        case protocolVersion = "io.modelcontextprotocol/protocolVersion"
+        case clientInfo = "io.modelcontextprotocol/clientInfo"
+        case clientCapabilities = "io.modelcontextprotocol/clientCapabilities"
+        case logLevel = "io.modelcontextprotocol/logLevel"
+        case progressToken
+        case traceparent
+        case tracestate
+        case baggage
+    }
+}
+
+public struct HarnMCPHTTPHeaders: Codable, Sendable, Equatable {
+    public var protocolVersion: String
+    public var method: String
+    public var name: String?
+
+    enum CodingKeys: String, CodingKey {
+        case protocolVersion = "MCP-Protocol-Version"
+        case method = "Mcp-Method"
+        case name = "Mcp-Name"
+    }
+}
+
+public struct HarnMCPCacheHints: Codable, Sendable, Equatable {
+    public var ttlMs: Int
+    public var cacheScope: HarnMCPCacheScope
+}
+
+public struct HarnMCPDiscoverResult: Codable, Sendable, Equatable {
+    public var resultType: HarnMCPResultType
+    public var supportedVersions: [String]
+    public var capabilities: HarnACPObject
+    public var serverInfo: HarnMCPImplementation
+    public var instructions: String?
+    public var meta: HarnACPObject?
+
+    enum CodingKeys: String, CodingKey {
+        case resultType
+        case supportedVersions
+        case capabilities
+        case serverInfo
+        case instructions
+        case meta = "_meta"
+    }
+}
+
+public struct HarnMCPInputRequiredResult: Codable, Sendable, Equatable {
+    public var resultType: HarnMCPResultType
+    public var inputRequests: HarnACPObject?
+    public var requestState: String?
+    public var meta: HarnACPObject?
+
+    enum CodingKeys: String, CodingKey {
+        case resultType
+        case inputRequests
+        case requestState
+        case meta = "_meta"
+    }
+}
+
+public struct HarnMCPUnsupportedProtocolVersionErrorData: Codable, Sendable, Equatable {
+    public var requested: String
+    public var supported: [String]
+}
+
+public struct HarnMCPUnsupportedProtocolVersionError: Codable, Sendable, Equatable {
+    public var jsonrpc: String
+    public var id: HarnJsonRpcId?
+    public var error: HarnACPError
+}
+
 public struct HarnMCPTool: Codable, Sendable, Equatable {
     public var name: String
     public var title: String?
     public var description: String?
-    public var inputSchema: HarnACPObject
-    public var outputSchema: HarnACPObject?
+    public var inputSchema: HarnMCPJsonSchema202012
+    public var outputSchema: HarnMCPJsonSchema202012?
     public var annotations: HarnACPObject?
 }
 

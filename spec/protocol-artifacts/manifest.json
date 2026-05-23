@@ -221,6 +221,18 @@
   "checkCommand": "make check-protocol-artifacts",
   "generatedBy": "harn dump-protocol-artifacts",
   "mcp": {
+    "cacheResultFields": [
+      "ttlMs",
+      "cacheScope"
+    ],
+    "cacheScopes": [
+      "private",
+      "public"
+    ],
+    "draftProtocolVersion": "DRAFT-2026-v1",
+    "final2026ProtocolVersion": "2026-07-28",
+    "inputRequiredResultType": "input_required",
+    "jsonSchemaDialect": "https://json-schema.org/draft/2020-12/schema",
     "loggingLevels": [
       "debug",
       "info",
@@ -231,7 +243,18 @@
       "alert",
       "emergency"
     ],
+    "metadataKeys": [
+      "io.modelcontextprotocol/protocolVersion",
+      "io.modelcontextprotocol/clientInfo",
+      "io.modelcontextprotocol/clientCapabilities",
+      "io.modelcontextprotocol/logLevel",
+      "progressToken",
+      "traceparent",
+      "tracestate",
+      "baggage"
+    ],
     "methods": [
+      "server/discover",
       "initialize",
       "tools/list",
       "tools/call",
@@ -247,7 +270,30 @@
       "notifications/initialized",
       "notifications/message"
     ],
-    "protocolVersion": "2025-11-25"
+    "protocolVersion": "2025-11-25",
+    "protocolVersions": [
+      "DRAFT-2026-v1",
+      "2025-11-25"
+    ],
+    "requiredRequestMetadataKeys": [
+      "io.modelcontextprotocol/protocolVersion",
+      "io.modelcontextprotocol/clientInfo",
+      "io.modelcontextprotocol/clientCapabilities"
+    ],
+    "resultTypes": [
+      "complete",
+      "input_required"
+    ],
+    "stableProtocolVersion": "2025-11-25",
+    "standardHttpHeaders": [
+      "MCP-Protocol-Version",
+      "Mcp-Method",
+      "Mcp-Name"
+    ],
+    "unsupportedProtocolVersionError": {
+      "code": -32004,
+      "message": "Unsupported protocol version"
+    }
   },
   "receipts": {
     "toolCallReceiptExecutors": [
@@ -309,6 +355,20 @@
         "upstream_version": "2025-11-25"
       },
       "source": "conformance/protocols/schemas/mcp-2025-11-25.schema.json"
+    },
+    {
+      "artifact": "schemas/mcp-draft-2026-v1.schema.json",
+      "protocol": "mcp",
+      "provenance": {
+        "profile_note": "The upstream draft schema is definitions-only; this profile supplies a root over the DRAFT-2026-v1 request, response, notification, standard HTTP header, metadata, cache hint, input-required, and unsupported-version shapes Harn publishes for downstream implementers. The stable runtime protocol version remains 2025-11-25 unless an implementation explicitly opts into the RC.",
+        "protocol": "mcp",
+        "refresh_command": "curl -fsSL https://raw.githubusercontent.com/modelcontextprotocol/modelcontextprotocol/main/schema/draft/schema.json",
+        "retrieved_at": "2026-05-23",
+        "upstream_source_url": "https://raw.githubusercontent.com/modelcontextprotocol/modelcontextprotocol/main/schema/draft/schema.json",
+        "upstream_spec_url": "https://modelcontextprotocol.io/specification/draft",
+        "upstream_version": "DRAFT-2026-v1"
+      },
+      "source": "conformance/protocols/schemas/mcp-draft-2026-v1.schema.json"
     },
     {
       "artifact": "schemas/tool-call-receipt.schema.json",

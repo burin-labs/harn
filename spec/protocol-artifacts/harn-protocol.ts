@@ -3,6 +3,13 @@
 
 export const HARN_PROTOCOL_ARTIFACT_VERSION = "0.8.34"
 
+export const MCP_PROTOCOL_VERSION = "2025-11-25"
+export const MCP_STABLE_PROTOCOL_VERSION = "2025-11-25"
+export const MCP_DRAFT_PROTOCOL_VERSION = "DRAFT-2026-v1"
+export const MCP_FINAL_2026_PROTOCOL_VERSION = "2026-07-28"
+export const MCP_JSON_SCHEMA_2020_12_DIALECT = "https://json-schema.org/draft/2020-12/schema"
+export const MCP_UNSUPPORTED_PROTOCOL_VERSION_ERROR = { code: -32004, message: "Unsupported protocol version" } as const
+
 export const ACP_AGENT_METHODS = [
   "initialize",
   "session/inject",
@@ -226,7 +233,14 @@ export const A2A_TASK_EVENT_TYPES = [
 ] as const
 export type A2ATaskEventType = (typeof A2A_TASK_EVENT_TYPES)[number]
 
+export const MCP_PROTOCOL_VERSIONS = [
+  "DRAFT-2026-v1",
+  "2025-11-25",
+] as const
+export type MCPProtocolVersion = (typeof MCP_PROTOCOL_VERSIONS)[number]
+
 export const MCP_METHODS = [
+  "server/discover",
   "initialize",
   "tools/list",
   "tools/call",
@@ -243,6 +257,50 @@ export const MCP_METHODS = [
   "notifications/message",
 ] as const
 export type MCPMethod = (typeof MCP_METHODS)[number]
+
+export const MCP_REQUIRED_METADATA_KEYS = [
+  "io.modelcontextprotocol/protocolVersion",
+  "io.modelcontextprotocol/clientInfo",
+  "io.modelcontextprotocol/clientCapabilities",
+] as const
+export type MCPRequiredMetadataKey = (typeof MCP_REQUIRED_METADATA_KEYS)[number]
+
+export const MCP_METADATA_KEYS = [
+  "io.modelcontextprotocol/protocolVersion",
+  "io.modelcontextprotocol/clientInfo",
+  "io.modelcontextprotocol/clientCapabilities",
+  "io.modelcontextprotocol/logLevel",
+  "progressToken",
+  "traceparent",
+  "tracestate",
+  "baggage",
+] as const
+export type MCPMetadataKey = (typeof MCP_METADATA_KEYS)[number]
+
+export const MCP_STANDARD_HTTP_HEADERS = [
+  "MCP-Protocol-Version",
+  "Mcp-Method",
+  "Mcp-Name",
+] as const
+export type MCPStandardHTTPHeader = (typeof MCP_STANDARD_HTTP_HEADERS)[number]
+
+export const MCP_CACHE_RESULT_FIELDS = [
+  "ttlMs",
+  "cacheScope",
+] as const
+export type MCPCacheResultField = (typeof MCP_CACHE_RESULT_FIELDS)[number]
+
+export const MCP_CACHE_SCOPES = [
+  "private",
+  "public",
+] as const
+export type MCPCacheScope = (typeof MCP_CACHE_SCOPES)[number]
+
+export const MCP_RESULT_TYPES = [
+  "complete",
+  "input_required",
+] as const
+export type MCPResultType = (typeof MCP_RESULT_TYPES)[number]
 
 export const MCP_LOGGING_LEVELS = [
   "debug",
@@ -511,12 +569,75 @@ export type A2ATaskEvent =
   | { type: "message" | "worker_update"; taskId: string; message?: A2AMessage }
   | { statusUpdate: { taskId: string; contextId?: string | null; status: A2ATaskStatus } }
 
+export type MCPJsonSchema202012 = ACPObject
+
+export interface MCPImplementation {
+  name: string
+  version: string
+  title?: string
+  description?: string
+  websiteUrl?: string
+}
+
+export interface MCPRequestMeta {
+  "io.modelcontextprotocol/protocolVersion": MCPProtocolVersion | string
+  "io.modelcontextprotocol/clientInfo": MCPImplementation
+  "io.modelcontextprotocol/clientCapabilities": ACPObject
+  "io.modelcontextprotocol/logLevel"?: MCPLoggingLevel
+  progressToken?: string | number
+  traceparent?: string
+  tracestate?: string
+  baggage?: string
+  [key: string]: ACPValue | MCPImplementation | undefined
+}
+
+export interface MCPHTTPHeaders {
+  "MCP-Protocol-Version": MCPProtocolVersion | string
+  "Mcp-Method": MCPMethod | string
+  "Mcp-Name"?: string
+  [header: string]: string | undefined
+}
+
+export interface MCPCacheHints {
+  ttlMs: number
+  cacheScope: MCPCacheScope
+}
+
+export interface MCPDiscoverResult {
+  resultType: "complete"
+  supportedVersions: (MCPProtocolVersion | string)[]
+  capabilities: ACPObject
+  serverInfo: MCPImplementation
+  instructions?: string
+  _meta?: ACPObject
+}
+
+export interface MCPInputRequiredResult {
+  resultType: "input_required"
+  inputRequests?: Record<string, ACPObject>
+  requestState?: string
+  _meta?: ACPObject
+}
+
+export interface MCPUnsupportedProtocolVersionError {
+  jsonrpc: "2.0"
+  id?: JsonRpcId
+  error: {
+    code: typeof MCP_UNSUPPORTED_PROTOCOL_VERSION_ERROR.code
+    message: typeof MCP_UNSUPPORTED_PROTOCOL_VERSION_ERROR.message
+    data: {
+      requested: string
+      supported: (MCPProtocolVersion | string)[]
+    }
+  }
+}
+
 export interface MCPTool {
   name: string
   title?: string
   description?: string
-  inputSchema: ACPObject
-  outputSchema?: ACPObject
+  inputSchema: MCPJsonSchema202012
+  outputSchema?: MCPJsonSchema202012
   annotations?: ACPObject
 }
 

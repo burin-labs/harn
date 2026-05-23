@@ -85,3 +85,10 @@ cargo test -p harn-serve protocol_conformance_
 Adapter-generated fixture tests print the expected and actual JSON arrays when
 they drift, so CI failures should point directly at the checked-in fixture that
 needs to be refreshed or the adapter behavior that changed unexpectedly.
+
+The MCP `DRAFT-2026-v1` profile is intentionally checked in beside the stable
+`2025-11-25` profile. It covers RC artifact shapes only: per-request metadata,
+Streamable HTTP routing headers, `server/discover`, cache hints,
+input-required results, unsupported-version errors, and JSON Schema 2020-12
+tool schemas. Runtime support remains opt-in until the final `2026-07-28`
+specification lands.
