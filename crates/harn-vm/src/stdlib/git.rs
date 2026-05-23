@@ -9,12 +9,13 @@ use uuid::Uuid;
 use crate::event_log::{
     active_event_log, install_memory_for_current_thread, EventLog, LogEvent, Topic,
 };
+use crate::runtime_limits::RuntimeLimits;
 use crate::trust_graph::{AutonomyTier, TrustOutcome, TrustRecord};
 use crate::value::{VmError, VmValue};
 use crate::vm::Vm;
 
 const GIT_RECEIPTS_TOPIC: &str = "stdlib.git.receipts";
-const EVENT_LOG_QUEUE_DEPTH: usize = 128;
+const EVENT_LOG_QUEUE_DEPTH: usize = RuntimeLimits::DEFAULT.default_event_log_queue_depth;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum GitMutation {

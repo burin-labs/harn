@@ -44,6 +44,7 @@ use crate::connectors::MetricsRegistry;
 use crate::event_log::{
     active_event_log, install_memory_for_current_thread, EventLog, LogEvent, Topic,
 };
+use crate::runtime_limits::RuntimeLimits;
 use crate::triggers::inbox::InboxIndex;
 
 /// Default delivery-id retention used when callers omit the field. Matches the
@@ -51,7 +52,7 @@ use crate::triggers::inbox::InboxIndex;
 pub const DEFAULT_DEDUPE_TTL_SECS: u64 = 24 * 60 * 60;
 /// Topic the substrate appends `webhook_intake_rejected` audit events on.
 pub const REJECTION_TOPIC: &str = "triggers.webhook_intake.rejections";
-const INTAKE_EVENT_LOG_QUEUE_DEPTH: usize = 128;
+const INTAKE_EVENT_LOG_QUEUE_DEPTH: usize = RuntimeLimits::DEFAULT.default_event_log_queue_depth;
 
 /// Identifier of a registered intake. Stable for the lifetime of the process,
 /// or until `webhook_intake_deregister` is called.

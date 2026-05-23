@@ -11,6 +11,7 @@ use uuid::Uuid;
 use crate::event_log::{
     active_event_log, install_memory_for_current_thread, EventLog, LogEvent, Topic,
 };
+use crate::runtime_limits::RuntimeLimits;
 use crate::triggers::dispatcher::current_dispatch_context;
 use crate::triggers::dispatcher::DEFAULT_MAX_ATTEMPTS;
 use crate::triggers::registry::{AgentScope, TargetExpr};
@@ -36,7 +37,7 @@ use crate::TriggerPredicateBudget;
 
 const ACTION_GRAPH_TOPIC: &str = "observability.action_graph";
 const TRIGGER_EVENTS_TOPIC: &str = "triggers.events";
-const TRIGGER_EVENT_LOG_QUEUE_DEPTH: usize = 128;
+const TRIGGER_EVENT_LOG_QUEUE_DEPTH: usize = RuntimeLimits::DEFAULT.default_event_log_queue_depth;
 
 thread_local! {
     static AUTO_RESUME_TIMEOUTS: RefCell<BTreeMap<String, tokio::task::JoinHandle<()>>> =

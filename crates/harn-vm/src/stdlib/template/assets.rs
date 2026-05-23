@@ -6,8 +6,9 @@ use std::rc::Rc;
 use super::ast::Node;
 use super::error::TemplateError;
 use super::parser::parse;
+use crate::runtime_limits::RuntimeLimits;
 
-const TEMPLATE_CACHE_CAP: usize = 128;
+const TEMPLATE_CACHE_CAP: usize = RuntimeLimits::DEFAULT.max_template_parse_cache_entries;
 
 #[derive(Debug, Clone)]
 pub(crate) struct TemplateAsset {

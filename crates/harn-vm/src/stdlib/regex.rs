@@ -2,8 +2,11 @@ use std::cell::RefCell;
 use std::collections::{BTreeMap, HashMap};
 use std::rc::Rc;
 
+use crate::runtime_limits::RuntimeLimits;
 use crate::value::{VmError, VmValue};
 use crate::vm::Vm;
+
+const REGEX_CACHE_LIMIT: usize = RuntimeLimits::DEFAULT.max_regex_cache_entries;
 
 thread_local! {
     static REGEX_CACHE: RefCell<HashMap<String, regex::Regex>> = RefCell::new(HashMap::new());
@@ -19,7 +22,7 @@ fn get_cached_regex(pattern: &str, flags: &str) -> Result<regex::Regex, VmError>
         let re = build_regex(pattern, flags).map_err(|e| {
             VmError::Thrown(VmValue::String(Rc::from(format!("Invalid regex: {e}"))))
         })?;
-        if cache.len() >= 128 {
+        if cache.len() >= REGEX_CACHE_LIMIT {
             cache.clear();
         }
         cache.insert(cache_key, re.clone());

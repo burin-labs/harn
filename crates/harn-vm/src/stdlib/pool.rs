@@ -27,6 +27,7 @@ use std::sync::Arc;
 use crate::event_log::{
     active_event_log, install_memory_for_current_thread, EventLog, LogEvent, Topic,
 };
+use crate::runtime_limits::RuntimeLimits;
 use crate::stdlib::registration::{
     async_builtin, register_builtin_group, AsyncBuiltin, BuiltinGroup, SyncBuiltin,
 };
@@ -45,7 +46,7 @@ const DEFAULT_MAX_CONCURRENT: usize = 1;
 const POOL_TYPE: &str = "pool";
 const POOL_TASK_TYPE: &str = "pool_task";
 const POOL_AUDIT_TOPIC: &str = "lifecycle.pool.audit";
-const POOL_EVENT_LOG_QUEUE_DEPTH: usize = 128;
+const POOL_EVENT_LOG_QUEUE_DEPTH: usize = RuntimeLimits::DEFAULT.default_event_log_queue_depth;
 
 /// On-disk root for pipeline-scope pool state. Mirrors the channel scope
 /// convention (`.harn/...`) so durable artifacts stay co-located with the

@@ -13,6 +13,7 @@ use crate::event_log::{
     active_event_log, install_memory_for_current_thread, AnyEventLog, EventLog,
 };
 use crate::llm::vm_value_to_json;
+use crate::runtime_limits::RuntimeLimits;
 use crate::triggers::dispatcher::{current_dispatch_context, current_dispatch_wait_lease};
 use crate::value::{VmError, VmValue};
 use crate::vm::clone_async_builtin_child_vm;
@@ -24,7 +25,7 @@ use crate::waitpoints::{
     WaitpointWaitStartRecord, WaitpointWaitStatus,
 };
 
-const WAITPOINT_EVENT_LOG_QUEUE_DEPTH: usize = 128;
+const WAITPOINT_EVENT_LOG_QUEUE_DEPTH: usize = RuntimeLimits::DEFAULT.default_event_log_queue_depth;
 
 thread_local! {
     static WAITPOINT_ID_SEQUENCE: RefCell<SequenceState> = RefCell::new(SequenceState::default());

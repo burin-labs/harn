@@ -7,6 +7,7 @@ use sha2::Digest;
 
 use crate::event_log::{active_event_log, install_memory_for_current_thread, AnyEventLog};
 use crate::llm::{execute_llm_call, extract_llm_options, vm_value_to_json};
+use crate::runtime_limits::RuntimeLimits;
 use crate::stdlib::secret_scan::{audit_secret_scan_active, scan_content, SecretFinding};
 use crate::triggers::dispatcher::current_dispatch_context;
 use crate::trust_graph::{append_trust_record, AutonomyTier, TrustOutcome, TrustRecord};
@@ -15,7 +16,7 @@ use crate::vm::Vm;
 
 const DEFAULT_MAX_ROUNDS: usize = 1;
 const MAX_MAX_ROUNDS: usize = 5;
-const REVIEW_EVENT_LOG_QUEUE_DEPTH: usize = 128;
+const REVIEW_EVENT_LOG_QUEUE_DEPTH: usize = RuntimeLimits::DEFAULT.default_event_log_queue_depth;
 const REVIEW_ACTION: &str = "pr.self_review";
 const DEFAULT_MODEL_TIER: &str = "small";
 

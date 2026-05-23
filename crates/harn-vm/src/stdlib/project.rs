@@ -6,6 +6,7 @@ use ignore::gitignore::{Gitignore, GitignoreBuilder};
 use ignore::WalkBuilder;
 use sha2::{Digest, Sha256};
 
+use crate::runtime_limits::RuntimeLimits;
 use crate::value::{VmError, VmValue};
 use crate::vm::Vm;
 
@@ -40,7 +41,7 @@ const FINGERPRINT_SKIP_DIRS: &[&str] = &[
     "target",
     "venv",
 ];
-const PROJECT_FINGERPRINT_MAX_DEPTH: usize = 4;
+const PROJECT_FINGERPRINT_MAX_DEPTH: usize = RuntimeLimits::DEFAULT.max_project_fingerprint_depth;
 const PROJECT_LANGUAGE_ORDER: &[&str] = &["rust", "typescript", "python", "go", "swift", "ruby"];
 const PROJECT_FRAMEWORK_ORDER: &[&str] = &["axum", "next", "react", "django", "fastapi", "rails"];
 const PROJECT_PACKAGE_MANAGER_ORDER: &[&str] = &[

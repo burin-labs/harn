@@ -14,6 +14,7 @@ use crate::event_log::{
     active_event_log, install_memory_for_current_thread, sanitize_topic_component, AnyEventLog,
     EventLog, LogEvent, Topic,
 };
+use crate::runtime_limits::RuntimeLimits;
 use crate::triggers::dispatcher::{
     current_dispatch_context, current_dispatch_is_replay, DispatchContext,
 };
@@ -21,7 +22,7 @@ use crate::triggers::registry::{resolve_live_or_as_of, RecordedTriggerBinding};
 use crate::value::{categorized_error, ErrorCategory, VmError, VmValue};
 use crate::vm::{clone_async_builtin_child_vm, Vm};
 
-const WAITPOINT_EVENT_LOG_QUEUE_DEPTH: usize = 128;
+const WAITPOINT_EVENT_LOG_QUEUE_DEPTH: usize = RuntimeLimits::DEFAULT.default_event_log_queue_depth;
 const WAITPOINT_WAITS_TOPIC: &str = "waitpoint.waits";
 pub const WAITPOINT_RESUME_TOPIC: &str = "waitpoint.resumes";
 const TRIGGER_EVENTS_TOPIC: &str = "triggers.events";

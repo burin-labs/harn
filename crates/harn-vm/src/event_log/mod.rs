@@ -12,6 +12,8 @@ use serde::{Deserialize, Serialize};
 use tokio::sync::{broadcast, mpsc};
 use tokio_stream::wrappers::ReceiverStream;
 
+use crate::runtime_limits::RuntimeLimits;
+
 pub type EventId = u64;
 
 pub const HARN_EVENT_LOG_BACKEND_ENV: &str = "HARN_EVENT_LOG_BACKEND";
@@ -324,7 +326,7 @@ impl EventLogConfig {
         let queue_depth = std::env::var(HARN_EVENT_LOG_QUEUE_DEPTH_ENV)
             .ok()
             .and_then(|value| value.parse::<usize>().ok())
-            .unwrap_or(128)
+            .unwrap_or(RuntimeLimits::DEFAULT.default_event_log_queue_depth)
             .max(1);
 
         let file_dir = match std::env::var(HARN_EVENT_LOG_DIR_ENV) {
