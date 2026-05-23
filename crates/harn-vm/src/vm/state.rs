@@ -4,6 +4,7 @@ use std::sync::Arc;
 use std::time::Instant;
 
 use crate::chunk::{Chunk, ChunkRef, Constant};
+use crate::runtime_limits::RuntimeLimits;
 use crate::value::{
     ModuleFunctionRegistry, VmAsyncBuiltinFn, VmBuiltinFn, VmEnv, VmError, VmTaskHandle, VmValue,
 };
@@ -249,6 +250,8 @@ pub struct Vm {
     pub(crate) globals: Rc<BTreeMap<String, VmValue>>,
     /// Optional debugger hook invoked when execution advances to a new source line.
     pub(crate) debug_hook: Option<Box<DebugHook>>,
+    /// Effective runtime ceilings for this VM execution.
+    pub(crate) runtime_limits: RuntimeLimits,
 }
 
 /// Reusable VM baseline for hosts that need many clean executions with the
@@ -272,6 +275,7 @@ pub struct VmBaseline {
     project_root: Option<std::path::PathBuf>,
     globals: Rc<BTreeMap<String, VmValue>>,
     denied_builtins: Rc<HashSet<String>>,
+    runtime_limits: RuntimeLimits,
 }
 
 impl VmBaseline {
@@ -289,6 +293,7 @@ impl VmBaseline {
             project_root: vm.project_root.clone(),
             globals: Rc::clone(&vm.globals),
             denied_builtins: Rc::clone(&vm.denied_builtins),
+            runtime_limits: vm.runtime_limits,
         }
     }
 
@@ -351,6 +356,7 @@ impl VmBaseline {
             project_root: self.project_root.clone(),
             globals: Rc::clone(&self.globals),
             debug_hook: None,
+            runtime_limits: self.runtime_limits,
         };
 
         crate::stdlib::rebind_execution_state_builtins(&mut vm);
@@ -566,11 +572,22 @@ impl Vm {
             project_root: None,
             globals: Rc::new(BTreeMap::new()),
             debug_hook: None,
+            runtime_limits: RuntimeLimits::default(),
         }
     }
 
     pub fn baseline(&self) -> VmBaseline {
         VmBaseline::from_vm(self)
+    }
+
+    /// Return the effective runtime limit profile for this VM.
+    pub fn runtime_limits(&self) -> RuntimeLimits {
+        self.runtime_limits
+    }
+
+    /// Return a host/debug report describing the VM's effective runtime limits.
+    pub fn runtime_limit_report(&self) -> crate::RuntimeLimitsReport {
+        self.runtime_limits.report()
     }
 
     /// Returns true if any debugging affordance is active — DAP hook,
@@ -703,6 +720,7 @@ impl Vm {
             project_root: self.project_root.clone(),
             globals: Rc::clone(&self.globals),
             debug_hook: None,
+            runtime_limits: self.runtime_limits,
         }
     }
 
@@ -898,6 +916,22 @@ mod tests {
             .globals
             .get("stable_global")
             .is_some_and(|value| value.display() == "baseline"));
+    }
+
+    #[test]
+    fn vm_reports_effective_runtime_limits() {
+        let vm = Vm::new();
+
+        assert_eq!(vm.runtime_limits(), RuntimeLimits::default());
+        assert_eq!(
+            vm.runtime_limit_report().entries.len(),
+            crate::RUNTIME_LIMIT_DESCRIPTIONS.len()
+        );
+        assert_eq!(vm.child_vm().runtime_limits(), vm.runtime_limits());
+        assert_eq!(
+            vm.baseline().instantiate().runtime_limits(),
+            vm.runtime_limits()
+        );
     }
 
     #[tokio::test(flavor = "current_thread")]

@@ -16,6 +16,7 @@ use crate::event_log::{
     active_event_log, install_default_for_base_dir, install_memory_for_current_thread, AnyEventLog,
     EventLog, LogEvent, Topic,
 };
+use crate::runtime_limits::RuntimeLimits;
 use crate::schema::schema_expect_value;
 use crate::stdlib::host::dispatch_mock_host_call;
 use crate::stdlib::waitpoint::{
@@ -27,7 +28,7 @@ use crate::triggers::dispatcher::current_dispatch_context;
 use crate::value::{categorized_error, ErrorCategory, VmError, VmValue};
 use crate::vm::{clone_async_builtin_child_vm, Vm};
 
-const HITL_EVENT_LOG_QUEUE_DEPTH: usize = 128;
+const HITL_EVENT_LOG_QUEUE_DEPTH: usize = RuntimeLimits::DEFAULT.default_event_log_queue_depth;
 const HITL_APPROVAL_TIMEOUT_MS: u64 = 24 * 60 * 60 * 1000;
 const HITL_QUESTION_TIMEOUT_MS: u64 = 24 * 60 * 60 * 1000;
 

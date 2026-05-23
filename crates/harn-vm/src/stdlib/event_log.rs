@@ -7,10 +7,11 @@ use crate::event_log::{
     active_event_log, install_memory_for_current_thread, EventLog, LogEvent, Topic,
 };
 use crate::llm::vm_value_to_json;
+use crate::runtime_limits::RuntimeLimits;
 use crate::value::{VmError, VmStream, VmValue};
 use crate::vm::Vm;
 
-const EVENT_LOG_QUEUE_DEPTH: usize = 128;
+const EVENT_LOG_QUEUE_DEPTH: usize = RuntimeLimits::DEFAULT.default_event_log_queue_depth;
 
 pub(crate) fn register_event_log_builtins(vm: &mut Vm) {
     register_event_log_namespace(vm);

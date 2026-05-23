@@ -10,6 +10,7 @@ use rusqlite::{params, Connection, OptionalExtension};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
+use crate::runtime_limits::RuntimeLimits;
 use crate::stdlib::clock::now_wall_ms;
 use crate::stdlib::registration::{
     register_builtin_group, register_deferred_builtin_group, BuiltinGroup, SyncBuiltin,
@@ -19,7 +20,7 @@ use crate::vm::{Vm, VmBuiltinArity};
 
 const DEFAULT_NAMESPACE: &str = "default";
 const DEFAULT_TTL_SECONDS: u64 = 600;
-const DEFAULT_MAX_ENTRIES: usize = 256;
+const DEFAULT_MAX_ENTRIES: usize = RuntimeLimits::DEFAULT.max_std_cache_entries;
 const SQLITE_CREATE_TABLE: &str = concat!(
     "CREATE TABLE IF NOT EXISTS cache_entries (",
     "namespace TEXT NOT NULL,",

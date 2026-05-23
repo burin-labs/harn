@@ -12,6 +12,7 @@ use std::thread_local;
 
 use serde::{Deserialize, Serialize};
 
+use crate::runtime_limits::RuntimeLimits;
 use crate::tool_annotations::{SideEffectLevel, ToolAnnotations};
 use crate::value::{VmError, VmValue};
 use crate::workspace_path::{classify_workspace_path, WorkspacePathInfo};
@@ -574,7 +575,7 @@ pub fn builtin_ceiling() -> CapabilityPolicy {
         capabilities: BTreeMap::new(),
         workspace_roots: Vec::new(),
         side_effect_level: Some("network".to_string()),
-        recursion_limit: Some(8),
+        recursion_limit: Some(RuntimeLimits::DEFAULT.max_nested_execution_depth),
         tool_arg_constraints: Vec::new(),
         tool_annotations: BTreeMap::new(),
         sandbox_profile: SandboxProfile::Worktree,

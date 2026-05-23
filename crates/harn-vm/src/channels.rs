@@ -10,11 +10,12 @@ use crate::event_log::{
     EventId, EventLog, LogEvent, Topic,
 };
 use crate::llm::vm_value_to_json;
+use crate::runtime_limits::RuntimeLimits;
 use crate::triggers::event::{ChannelEventPayload, KnownProviderPayload};
 use crate::triggers::{ProviderId, ProviderPayload, SignatureStatus, TenantId, TriggerEvent};
 use crate::value::{VmError, VmValue};
 
-const CHANNEL_QUEUE_DEPTH: usize = 128;
+const CHANNEL_QUEUE_DEPTH: usize = RuntimeLimits::DEFAULT.default_event_log_queue_depth;
 const CHANNEL_EVENT_KIND: &str = "channel.emit";
 const IDEMPOTENCY_HEADER: &str = "harn.channel.id";
 const NAME_HEADER: &str = "harn.channel.name";

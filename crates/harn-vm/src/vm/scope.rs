@@ -5,8 +5,6 @@ use crate::value::{VmClosure, VmEnv, VmError, VmValue};
 use super::{CallArgs, CallFrame, LocalSlot, Vm};
 
 impl Vm {
-    pub(crate) const MAX_FRAMES: usize = 512;
-
     /// Build the call-time env for a closure invocation.
     ///
     /// Harn is **lexically scoped for data**: a closure sees exactly the
@@ -174,7 +172,7 @@ impl Vm {
         closure: &VmClosure,
         args: &CallArgs<'_>,
     ) -> Result<(), VmError> {
-        if self.frames.len() >= Self::MAX_FRAMES {
+        if self.frames.len() >= self.runtime_limits.max_vm_frames {
             return Err(VmError::StackOverflow);
         }
         let (local_slots, initial_local_slots) =
@@ -206,7 +204,7 @@ impl Vm {
                 "invalid call argument stack range".to_string(),
             ));
         }
-        if self.frames.len() >= Self::MAX_FRAMES {
+        if self.frames.len() >= self.runtime_limits.max_vm_frames {
             self.stack.truncate(stack_truncate_to);
             return Err(VmError::StackOverflow);
         }

@@ -3,6 +3,7 @@ use std::collections::HashMap;
 use std::rc::Rc;
 use std::sync::{Arc, Mutex, OnceLock};
 
+use crate::runtime_limits::RuntimeLimits;
 use crate::value::{values_equal, StructLayout, VmValue};
 
 use super::canonicalize::resolve_canonical_ref;
@@ -17,7 +18,7 @@ use super::{child_path, index_path, location_label, schema_bool, schema_i64, sch
 // and recompiling them on every value validated showed up as a hot-path
 // allocation cost. Cap the cache so adversarial schemas can't grow memory
 // unboundedly.
-const PATTERN_CACHE_LIMIT: usize = 256;
+const PATTERN_CACHE_LIMIT: usize = RuntimeLimits::DEFAULT.max_schema_pattern_cache_entries;
 
 #[derive(Clone)]
 enum PatternEntry {

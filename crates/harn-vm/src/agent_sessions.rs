@@ -24,11 +24,12 @@ use std::future::Future;
 use std::rc::Rc;
 use std::time::Instant;
 
+use crate::runtime_limits::RuntimeLimits;
 use crate::value::VmValue;
 
 /// Default cap on concurrent sessions per VM thread. Beyond this the
 /// least-recently-accessed session is evicted on the next `open`.
-pub const DEFAULT_SESSION_CAP: usize = 128;
+pub const DEFAULT_SESSION_CAP: usize = RuntimeLimits::DEFAULT.max_agent_sessions;
 
 pub struct SessionState {
     pub id: String,

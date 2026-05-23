@@ -5,6 +5,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::SystemTime;
 use std::{cell::RefCell, thread_local};
 
+use crate::runtime_limits::RuntimeLimits;
 use crate::stdlib::registration::{register_builtin_group, BuiltinGroup, SyncBuiltin};
 use crate::testbench::overlay_fs::helpers as overlay;
 use crate::value::{VmError, VmValue};
@@ -14,7 +15,7 @@ thread_local! {
     static FILE_TEXT_CACHE: RefCell<BTreeMap<PathBuf, FileTextCacheEntry>> = const { RefCell::new(BTreeMap::new()) };
 }
 
-const FILE_TEXT_CACHE_MAX_ENTRIES: usize = 256;
+const FILE_TEXT_CACHE_MAX_ENTRIES: usize = RuntimeLimits::DEFAULT.max_file_text_cache_entries;
 
 const FS_SYNC_PRIMITIVES: &[SyncBuiltin] = &[
     SyncBuiltin::new("read_file", read_file_builtin)

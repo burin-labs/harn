@@ -2,6 +2,7 @@ use std::cell::RefCell;
 use std::collections::BTreeMap;
 use std::rc::Rc;
 
+use crate::runtime_limits::RuntimeLimits;
 use crate::stdlib::{json_to_vm_value, schema_result_value};
 use crate::value::{VmError, VmValue};
 
@@ -250,9 +251,9 @@ pub(crate) fn build_schema_nudge(
     }
 }
 
-const SCHEMA_NUDGE_MAX_DEPTH: usize = 3;
-const SCHEMA_NUDGE_MAX_LINES: usize = 8;
-const SCHEMA_NUDGE_MAX_KEYS: usize = 16;
+const SCHEMA_NUDGE_MAX_DEPTH: usize = RuntimeLimits::DEFAULT.max_schema_nudge_depth;
+const SCHEMA_NUDGE_MAX_LINES: usize = RuntimeLimits::DEFAULT.max_schema_nudge_lines;
+const SCHEMA_NUDGE_MAX_KEYS: usize = RuntimeLimits::DEFAULT.max_schema_nudge_keys;
 
 fn collect_schema_shape_lines(
     schema: &serde_json::Value,

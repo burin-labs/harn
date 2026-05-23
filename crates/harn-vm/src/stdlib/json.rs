@@ -1,6 +1,7 @@
 use std::rc::Rc;
 use std::{cell::RefCell, collections::BTreeMap, thread_local};
 
+use crate::runtime_limits::RuntimeLimits;
 use crate::schema;
 use crate::stdlib::json_query;
 use crate::value::{VmError, VmValue};
@@ -10,7 +11,7 @@ use crate::vm::Vm;
 /// its key plus the parsed value tree, so the cache can grow large quickly
 /// when a script feeds varied JSON. Mirror the regex-cache bound so the
 /// VM's per-thread parse caches share a predictable ceiling.
-const JSON_PARSE_CACHE_LIMIT: usize = 128;
+const JSON_PARSE_CACHE_LIMIT: usize = RuntimeLimits::DEFAULT.max_json_parse_cache_entries;
 
 thread_local! {
     static JSON_PARSE_CACHE: RefCell<BTreeMap<String, VmValue>> = const { RefCell::new(BTreeMap::new()) };

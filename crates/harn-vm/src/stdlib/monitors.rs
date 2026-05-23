@@ -14,6 +14,7 @@ use crate::event_log::{
     active_event_log, install_memory_for_current_thread, AnyEventLog, EventLog, LogEvent, Topic,
 };
 use crate::llm::vm_value_to_json;
+use crate::runtime_limits::RuntimeLimits;
 use crate::triggers::dispatcher::{
     current_dispatch_context, current_dispatch_is_replay, current_dispatch_wait_lease,
 };
@@ -21,7 +22,7 @@ use crate::triggers::TRIGGER_INBOX_ENVELOPES_TOPIC;
 use crate::value::{VmClosure, VmError, VmValue};
 use crate::vm::{clone_async_builtin_child_vm, Vm};
 
-const MONITOR_EVENT_LOG_QUEUE_DEPTH: usize = 128;
+const MONITOR_EVENT_LOG_QUEUE_DEPTH: usize = RuntimeLimits::DEFAULT.default_event_log_queue_depth;
 pub(crate) const MONITOR_WAITS_TOPIC: &str = "monitor.waits";
 
 thread_local! {

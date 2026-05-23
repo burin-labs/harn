@@ -1,6 +1,7 @@
 use std::collections::BTreeMap;
 use std::rc::Rc;
 
+use crate::runtime_limits::RuntimeLimits;
 use crate::value::{values_equal, VmValue};
 
 use super::ast::{BinOp, Expr, IfBranch, Node, PathSeg, UnOp};
@@ -274,11 +275,12 @@ fn render_node(
                     format!("circular include detected: {chain} → {}", asset.id),
                 ));
             }
-            if rc.include_stack.len() >= 32 {
+            let max_depth = RuntimeLimits::DEFAULT.max_template_include_depth;
+            if rc.include_stack.len() >= max_depth {
                 return Err(TemplateError::new(
                     *line,
                     *col,
-                    "include depth exceeded (32 levels)",
+                    format!("include depth exceeded ({max_depth} levels)"),
                 ));
             }
             let mut child_bindings = scope.flatten();

@@ -3,10 +3,12 @@ use std::rc::Rc;
 
 use harn_parser::{DictEntry, Node, SNode};
 
+use crate::runtime_limits::RuntimeLimits;
 use crate::value::{compare_values, values_equal, VmValue};
 
-const MAX_FOLDED_STRING_BYTES: usize = 64 * 1024;
-const MAX_FOLDED_COLLECTION_ITEMS: usize = 4_096;
+const MAX_FOLDED_STRING_BYTES: usize = RuntimeLimits::DEFAULT.max_constant_folded_string_bytes;
+const MAX_FOLDED_COLLECTION_ITEMS: usize =
+    RuntimeLimits::DEFAULT.max_constant_folded_collection_items;
 
 pub(super) fn fold_constant_expr(expr: &SNode) -> Option<SNode> {
     if !is_constant_fold_candidate(&expr.node) {
