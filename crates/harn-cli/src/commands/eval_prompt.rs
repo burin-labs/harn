@@ -8,6 +8,25 @@
 //! tiny Harn driver and route through the existing `execute_run`
 //! pipeline so credentialed LLM calls, mock fixtures, and the
 //! `LlmRenderContext` injection all stay on the canonical path.
+//!
+//! ## .harn dispatch (W5 partial port — see harn#2305)
+//!
+//! The **aggregation layer** (fleet resolution, per-model rendering via
+//! `LlmRenderContext`, run/judge fanout, context-fixture evaluation)
+//! stays in Rust — it reaches into `harn_vm::stdlib::template`,
+//! `harn_vm::llm_config`, and `harn_vm::orchestration` internals that
+//! aren't exposed to script-land today.
+//!
+//! The **rendering layer** (terminal / JSON / HTML) is delegated to
+//! `crates/harn-stdlib/src/stdlib/cli/eval/prompt.harn`. The Rust shim
+//! serialises the assembled `PromptReport` to JSON and forwards it via
+//! [`PROMPT_REPORT_ENV`] plus a couple of mode env vars, then routes
+//! through the standard dispatch wedge. The script just reads the
+//! report, picks a formatter, and emits the payload (or writes it to
+//! `--out-file`).
+//!
+//! `HARN_CLI_IMPL=rust` keeps the legacy direct-render path for the
+//! parity-snapshot harness (#2299) until the C1 ratchet (#2314) lands.
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
@@ -24,8 +43,35 @@ use serde_json::Value as JsonValue;
 
 use crate::cli::{EvalPromptArgs, EvalPromptMode, EvalPromptOutput};
 use crate::config;
+use crate::dispatch;
+use crate::env_guard::ScopedEnvVar;
 
 use super::eval_prompt_context::{evaluate_context_fixtures, PromptContextEvalReport};
+
+/// Env var the embedded `cli/eval/prompt` script reads to pick up the
+/// pre-serialised [`PromptReport`]. The Rust shim does all of the
+/// aggregation (fleet rendering, run/judge fanout, context-fixture
+/// evaluation) and hands the script the assembled report so it only
+/// has to format it.
+const PROMPT_REPORT_ENV: &str = "HARN_EVAL_PROMPT_REPORT_JSON";
+
+/// Env var the script reads to select the output format ("terminal",
+/// "json", or "html"). Defaulted to "terminal" if unset so the script
+/// stays robust against future Rust-side bugs.
+const PROMPT_OUTPUT_ENV: &str = "HARN_EVAL_PROMPT_OUTPUT";
+
+/// Serializes the dispatch-render path so concurrent in-process callers
+/// (the existing `eval_prompt_cli` integration tests run multiple
+/// `run` invocations in parallel) don't race on the global env vars
+/// the Rust shim sets to hand the report off to the .harn script. The
+/// CLI binary itself is single-call, so this mutex is uncontended in
+/// production; in tests it serialises the dispatch window only —
+/// aggregation still parallelises freely.
+///
+/// A future iteration could pass the report through a script-local
+/// channel that doesn't go through process-global env vars, but adding
+/// that to G1's dispatch wedge is out of scope for W5.
+static DISPATCH_RENDER_LOCK: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
 
 /// Resolved per-model envelope produced by `--mode render`.
 #[derive(Debug, Clone, serde::Serialize)]
@@ -103,6 +149,41 @@ impl From<&BranchDecision> for TemplateBranch {
 }
 
 pub async fn run(args: EvalPromptArgs) -> i32 {
+    let report = match aggregate_report(&args).await {
+        Ok(report) => report,
+        Err(code) => return code,
+    };
+
+    // Compute the post-render exit code from the aggregated report —
+    // both the legacy direct-render path and the .harn dispatch path
+    // must return the same code for the same report.
+    let exit_code = post_render_exit_code(&report);
+
+    // `HARN_CLI_IMPL=rust` keeps the legacy direct-render path so the
+    // parity-snapshot harness (#2299) can compare both impls byte-for-byte
+    // (terminal/html) and structurally (json) until C1 (#2314) deletes it.
+    let use_legacy = std::env::var("HARN_CLI_IMPL").as_deref() == Ok("rust");
+
+    if use_legacy {
+        if let Err(code) = legacy_render(&report, args.output, args.out_file.as_deref()) {
+            return code;
+        }
+        return exit_code;
+    }
+
+    match dispatch_render(&report, args.output, args.out_file.as_deref()).await {
+        Ok(()) => exit_code,
+        Err(code) => code,
+    }
+}
+
+/// Build the aggregated [`PromptReport`] without rendering it.
+///
+/// Pulled out of [`run`] so both the legacy direct-render path and the
+/// new `.harn` dispatch path see the *same* report. Returns an exit
+/// code on any aggregation failure (template read, fleet resolution,
+/// context fixture parse / evaluate, run/judge dispatch).
+async fn aggregate_report(args: &EvalPromptArgs) -> Result<PromptReport, i32> {
     let template_path = match fs::canonicalize(&args.file) {
         Ok(p) => p,
         Err(error) => {
@@ -110,34 +191,34 @@ pub async fn run(args: EvalPromptArgs) -> i32 {
                 "error: cannot resolve template path {}: {error}",
                 args.file.display()
             );
-            return 1;
+            return Err(1);
         }
     };
     let template_source = match fs::read_to_string(&template_path) {
         Ok(s) => s,
         Err(error) => {
             eprintln!("error: failed to read {}: {error}", template_path.display());
-            return 1;
+            return Err(1);
         }
     };
 
-    let fleet = match resolve_fleet(&args, &template_path) {
+    let fleet = match resolve_fleet(args, &template_path) {
         Ok(f) => f,
         Err(error) => {
             eprintln!("error: {error}");
-            return 2;
+            return Err(2);
         }
     };
     if fleet.is_empty() {
         eprintln!("error: fleet is empty — supply `--fleet <models>` or `--fleet-name <name>`");
-        return 2;
+        return Err(2);
     }
 
     let bindings = match load_bindings(args.bindings.as_deref()) {
         Ok(b) => b,
         Err(error) => {
             eprintln!("error: {error}");
-            return 1;
+            return Err(1);
         }
     };
 
@@ -164,7 +245,7 @@ pub async fn run(args: EvalPromptArgs) -> i32 {
             Ok(context_eval) => report.context_eval = Some(context_eval),
             Err(error) => {
                 eprintln!("error: {error}");
-                return 1;
+                return Err(1);
             }
         }
     }
@@ -185,7 +266,7 @@ pub async fn run(args: EvalPromptArgs) -> i32 {
         .await;
         match outputs {
             Ok(map) => report.runs = map,
-            Err(code) => return code,
+            Err(code) => return Err(code),
         }
     }
 
@@ -199,21 +280,29 @@ pub async fn run(args: EvalPromptArgs) -> i32 {
         .await
         {
             Ok(judge) => report.judge = Some(judge),
-            Err(code) => return code,
+            Err(code) => return Err(code),
         }
     }
 
-    let payload = match args.output {
-        EvalPromptOutput::Terminal => render_terminal(&report),
-        EvalPromptOutput::Json => render_json(&report),
-        EvalPromptOutput::Html => render_html(&report),
+    Ok(report)
+}
+
+fn legacy_render(
+    report: &PromptReport,
+    output: EvalPromptOutput,
+    out_file: Option<&Path>,
+) -> Result<(), i32> {
+    let payload = match output {
+        EvalPromptOutput::Terminal => render_terminal(report),
+        EvalPromptOutput::Json => render_json(report),
+        EvalPromptOutput::Html => render_html(report),
     };
 
-    match args.out_file {
+    match out_file {
         Some(path) => {
-            if let Err(error) = fs::write(&path, payload) {
+            if let Err(error) = fs::write(path, &payload) {
                 eprintln!("error: failed to write {}: {error}", path.display());
-                return 1;
+                return Err(1);
             }
             eprintln!("wrote {}", path.display());
         }
@@ -222,7 +311,92 @@ pub async fn run(args: EvalPromptArgs) -> i32 {
             let _ = stdout.write_all(payload.as_bytes());
         }
     }
+    Ok(())
+}
 
+/// Dispatch to the embedded `cli/eval/prompt` script for the rendering
+/// pass. The script reads the pre-serialised report from
+/// [`PROMPT_REPORT_ENV`] and picks a formatter based on
+/// [`PROMPT_OUTPUT_ENV`], always emitting the payload to stdout.
+///
+/// `--out-file` is honored on the Rust side (capture-mode dispatch)
+/// rather than in the script: the script runs inside the standard
+/// `harn run` sandbox, where `harness.fs.write_text` is constrained to
+/// `workspace_roots`. The legacy direct-render path used `std::fs::write`
+/// which has no such restriction, so writing the captured stdout out
+/// here preserves parity with the prior `--out-file /tmp/...` flow.
+///
+/// **Concurrency.** Held under [`DISPATCH_RENDER_LOCK`] so concurrent
+/// in-process callers don't race on the global env vars that hand the
+/// report to the script. See the lock's docstring for the trade-off
+/// rationale.
+async fn dispatch_render(
+    report: &PromptReport,
+    output: EvalPromptOutput,
+    out_file: Option<&Path>,
+) -> Result<(), i32> {
+    let report_json = match serde_json::to_string(report) {
+        Ok(json) => json,
+        Err(error) => {
+            eprintln!("error: failed to serialise PromptReport for dispatch: {error}");
+            return Err(1);
+        }
+    };
+    let output_label = match output {
+        EvalPromptOutput::Terminal => "terminal",
+        EvalPromptOutput::Json => "json",
+        EvalPromptOutput::Html => "html",
+    };
+
+    let _dispatch_guard = DISPATCH_RENDER_LOCK.lock().await;
+    let _report_guard = ScopedEnvVar::set(PROMPT_REPORT_ENV, &report_json);
+    let _output_guard = ScopedEnvVar::set(PROMPT_OUTPUT_ENV, output_label);
+
+    // We intentionally don't forward `--json` to the wedge: the script
+    // already knows the output format via PROMPT_OUTPUT_ENV. The wedge's
+    // `--json` env (`HARN_OUTPUT_JSON`) is a separate convention for
+    // commands that have only two modes (human / json envelope); this
+    // script has three (terminal / json-report / html).
+    let outcome = dispatch::run_embedded_script("eval/prompt", Vec::new(), false).await;
+
+    // Always flush the script's stderr to the real terminal, regardless
+    // of out_file handling, so error/warning lines surface.
+    if !outcome.stderr.is_empty() {
+        use std::io::Write as _;
+        let _ = std::io::stderr().write_all(outcome.stderr.as_bytes());
+    }
+
+    if outcome.exit_code != 0 {
+        // Surface the script's stdout too on failure — the script's
+        // diagnostic posture is to use stderr for messages but a future
+        // contributor might trip and emit a partial payload to stdout
+        // before exiting. Better to surface that than silently drop it.
+        if !outcome.stdout.is_empty() {
+            use std::io::Write as _;
+            let _ = std::io::stdout().write_all(outcome.stdout.as_bytes());
+        }
+        return Err(outcome.exit_code);
+    }
+
+    match out_file {
+        Some(path) => {
+            if let Err(error) = fs::write(path, &outcome.stdout) {
+                eprintln!("error: failed to write {}: {error}", path.display());
+                return Err(1);
+            }
+            eprintln!("wrote {}", path.display());
+        }
+        None => {
+            use std::io::Write as _;
+            let _ = std::io::stdout().write_all(outcome.stdout.as_bytes());
+        }
+    }
+    Ok(())
+}
+
+/// Compute the post-render exit code. Extracted so both the legacy
+/// path and the dispatch path agree on what counts as a non-zero exit.
+fn post_render_exit_code(report: &PromptReport) -> i32 {
     let context_eval_active = report.context_eval.is_some();
     if !context_eval_active && report.renders.iter().any(|r| r.error.is_some()) {
         return 1;
