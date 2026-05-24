@@ -1,4 +1,4 @@
-type AgentPromptId = "agent.action_required_feedback" | "agent.action_turn_nudge" | "agent.completion_judge_feedback" | "agent.completion_judge_system" | "agent.completion_judge_user" | "agent.daemon_timer_feedback" | "agent.daemon_watch_feedback" | "agent.default_nudge" | "agent.deferred_tool_listing" | "agent.loop_contract" | "agent.native_tool_contract_feedback" | "agent.parse_guidance" | "agent.protocol_violation_feedback" | "agent.tool_contract_action_native" | "agent.tool_contract_action_text" | "agent.tool_contract_deferred_tools" | "agent.tool_contract_native" | "agent.tool_contract_task_ledger" | "agent.tool_contract_text" | "agent.tool_contract_text_response_protocol" | "agent.turn_preamble" | "agent.verification_gate_feedback"
+type AgentPromptId = "agent.action_required_feedback" | "agent.action_turn_nudge" | "agent.completion_judge_feedback" | "agent.completion_judge_system" | "agent.completion_judge_user" | "agent.daemon_timer_feedback" | "agent.daemon_watch_feedback" | "agent.default_nudge" | "agent.deferred_tool_listing" | "agent.loop_contract" | "agent.native_tool_contract_feedback" | "agent.parse_guidance" | "agent.protocol_violation_feedback" | "agent.step_judge_system" | "agent.step_judge_system_adversarial" | "agent.step_judge_user" | "agent.tool_contract_action_native" | "agent.tool_contract_action_text" | "agent.tool_contract_deferred_tools" | "agent.tool_contract_native" | "agent.tool_contract_task_ledger" | "agent.tool_contract_text" | "agent.tool_contract_text_response_protocol" | "agent.turn_preamble" | "agent.verification_gate_feedback"
 
 type AgentPromptEntry = string | {path: string} | {text: string} | fn(dict) -> string
 
@@ -16,6 +16,9 @@ type AgentPromptOverrides = {
   native_tool_contract_feedback?: AgentPromptEntry,
   parse_guidance?: AgentPromptEntry,
   protocol_violation_feedback?: AgentPromptEntry,
+  step_judge_system?: AgentPromptEntry,
+  step_judge_system_adversarial?: AgentPromptEntry,
+  step_judge_user?: AgentPromptEntry,
   tool_contract_action_native?: AgentPromptEntry,
   tool_contract_action_text?: AgentPromptEntry,
   tool_contract_deferred_tools?: AgentPromptEntry,
@@ -42,6 +45,9 @@ fn __agent_prompt_ids() {
     "agent.native_tool_contract_feedback",
     "agent.parse_guidance",
     "agent.protocol_violation_feedback",
+    "agent.step_judge_system",
+    "agent.step_judge_system_adversarial",
+    "agent.step_judge_user",
     "agent.tool_contract_action_native",
     "agent.tool_contract_action_text",
     "agent.tool_contract_deferred_tools",
@@ -69,6 +75,9 @@ fn __agent_default_prompt_catalog() {
     "agent.native_tool_contract_feedback": "native_tool_contract_feedback.harn.prompt",
     "agent.parse_guidance": "parse_guidance.harn.prompt",
     "agent.protocol_violation_feedback": "protocol_violation_feedback.harn.prompt",
+    "agent.step_judge_system": "step_judge_system_default.harn.prompt",
+    "agent.step_judge_system_adversarial": "step_judge_system_adversarial.harn.prompt",
+    "agent.step_judge_user": "step_judge_user.harn.prompt",
     "agent.tool_contract_action_native": "tool_contract_action_native.harn.prompt",
     "agent.tool_contract_action_text": "tool_contract_action_text.harn.prompt",
     "agent.tool_contract_deferred_tools": "tool_contract_deferred_tools.harn.prompt",
@@ -255,6 +264,13 @@ pub fn agent_prompt_override_map(overrides: AgentPromptOverrides) -> dict {
     "agent.protocol_violation_feedback",
     overrides.protocol_violation_feedback,
   )
+  out = __agent_add_prompt_override(out, "agent.step_judge_system", overrides.step_judge_system)
+  out = __agent_add_prompt_override(
+    out,
+    "agent.step_judge_system_adversarial",
+    overrides.step_judge_system_adversarial,
+  )
+  out = __agent_add_prompt_override(out, "agent.step_judge_user", overrides.step_judge_user)
   out = __agent_add_prompt_override(
     out,
     "agent.tool_contract_action_native",
@@ -654,4 +670,40 @@ pub fn agent_turn_preamble_prompt(options = nil) {
  */
 pub fn verification_gate_feedback_prompt(bindings, options = nil) {
   return render_agent_prompt_id("agent.verification_gate_feedback", bindings, options)
+}
+
+/**
+ * step_judge_system_prompt renders the per-step judge's system prompt.
+ * Default rubric is neutral; pass `{rubric: "adversarial"}` in options
+ * to use the adversarial variant for sycophancy-mitigation experiments.
+ *
+ * @effects: []
+ * @allocation: heap
+ * @errors: []
+ * @api_stability: experimental
+ * @example: step_judge_system_prompt(options)
+ */
+pub fn step_judge_system_prompt(options = nil) {
+  let rubric = options?.rubric ?? "default"
+  let id = if rubric == "adversarial" {
+    "agent.step_judge_system_adversarial"
+  } else {
+    "agent.step_judge_system"
+  }
+  return render_agent_prompt_id(id, {}, options)
+}
+
+/**
+ * step_judge_user_prompt renders the per-step judge's user prompt
+ * with the latest assistant response appended to the transcript view.
+ * Bindings: session_id, iteration, task, transcript, latest_response.
+ *
+ * @effects: []
+ * @allocation: heap
+ * @errors: []
+ * @api_stability: experimental
+ * @example: step_judge_user_prompt(bindings, options)
+ */
+pub fn step_judge_user_prompt(bindings, options = nil) {
+  return render_agent_prompt_id("agent.step_judge_user", bindings, options)
 }

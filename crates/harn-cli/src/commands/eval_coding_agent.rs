@@ -216,6 +216,15 @@ struct EvalSummary {
     runs: Vec<RunReport>,
     comparisons: Vec<FormatComparison>,
     followups: Vec<FollowupSuggestion>,
+    /// Step-judge preset applied to all runs in this invocation, if any.
+    /// Used by the experiment driver (experiments/step-judge/run.sh) to
+    /// group repeat invocations into cells.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    step_judge_preset: Option<String>,
+    /// Free-form label for grouping repeat invocations (e.g.
+    /// "replicate-1", "probe-rubric-adversarial"). Empty when unset.
+    #[serde(skip_serializing_if = "String::is_empty")]
+    run_label: String,
 }
 
 struct LocalRunGuard {
@@ -305,6 +314,10 @@ pub async fn run(args: EvalCodingAgentArgs) -> i32 {
         tool_formats,
         env_keys_loaded,
         reports,
+        args.step_judge
+            .clone()
+            .filter(|s| !s.is_empty() && s != "none"),
+        args.run_label.clone(),
     );
     if let Err(error) = write_outputs(&output_dir, &summary) {
         eprintln!("error: failed to write benchmark outputs: {error}");
@@ -655,7 +668,85 @@ fn script_argv(
     if selector.provider == "mock" {
         argv.push("--seed-mock".to_string());
     }
+    if let Some(json) = resolve_step_judge_json(args, selector) {
+        argv.push("--step-judge-json".to_string());
+        argv.push(json);
+    }
     argv
+}
+
+/// Translate the `--step-judge <preset>` CLI flag into a JSON object the
+/// inner `coding_agent_suite.harn` script feeds to `agent_loop({step_judge: ...})`.
+/// Returns `None` for `None` / `"none"` / empty.
+///
+/// Preset semantics (designed for the step-judge experiment in
+/// experiments/step-judge/):
+/// - `symmetric-cheap`: judge = generator model (cheap-judges-cheap)
+/// - `asymmetric`: judge = `anthropic/claude-sonnet-4-6` via OpenRouter
+/// - `symmetric-strong`: judge = generator model (caller expected to
+///   pass --model anthropic/claude-sonnet-4-6 to make this meaningful)
+/// - `custom:<json>`: literal JSON dict passed through verbatim
+fn resolve_step_judge_json(args: &EvalCodingAgentArgs, selector: &ModelSelector) -> Option<String> {
+    let raw = args.step_judge.as_deref()?.trim();
+    if raw.is_empty() || raw.eq_ignore_ascii_case("none") {
+        return None;
+    }
+    let mut obj = serde_json::Map::new();
+    if let Some(rest) = raw.strip_prefix("custom:") {
+        match serde_json::from_str::<JsonValue>(rest) {
+            Ok(JsonValue::Object(map)) => obj.extend(map),
+            _ => {
+                // Fall through to error-style emission so the eval reports
+                // a config error rather than silently disabling the judge.
+                obj.insert(
+                    "model".to_string(),
+                    JsonValue::String("__invalid_custom_step_judge__".to_string()),
+                );
+            }
+        }
+    } else {
+        match raw {
+            "symmetric-cheap" | "symmetric-strong" => {
+                obj.insert(
+                    "model".to_string(),
+                    JsonValue::String(selector.model.clone()),
+                );
+                obj.insert(
+                    "provider".to_string(),
+                    JsonValue::String(selector.provider.clone()),
+                );
+            }
+            "asymmetric" => {
+                obj.insert(
+                    "model".to_string(),
+                    JsonValue::String("anthropic/claude-sonnet-4-6".to_string()),
+                );
+                obj.insert(
+                    "provider".to_string(),
+                    JsonValue::String("openrouter".to_string()),
+                );
+            }
+            _other => {
+                obj.insert(
+                    "model".to_string(),
+                    JsonValue::String("__unknown_step_judge_preset__".to_string()),
+                );
+            }
+        }
+    }
+    if let Some(on_veto) = args.step_judge_on_veto.as_deref() {
+        obj.insert(
+            "on_veto".to_string(),
+            JsonValue::String(on_veto.to_string()),
+        );
+    }
+    if args.step_judge_adversarial {
+        obj.insert(
+            "rubric".to_string(),
+            JsonValue::String("adversarial".to_string()),
+        );
+    }
+    Some(JsonValue::Object(obj).to_string())
 }
 
 fn error_report(
@@ -926,6 +1017,8 @@ fn build_summary(
     tool_formats: Vec<String>,
     env_keys_loaded: Vec<LoadedEnvKey>,
     runs: Vec<RunReport>,
+    step_judge_preset: Option<String>,
+    run_label: String,
 ) -> EvalSummary {
     let passed_runs = runs.iter().filter(|run| run.passed).count();
     let skipped_runs = runs.iter().filter(|run| run.skipped).count();
@@ -970,6 +1063,8 @@ fn build_summary(
         runs,
         comparisons,
         followups,
+        step_judge_preset,
+        run_label,
     }
 }
 
@@ -1701,6 +1796,8 @@ mod tests {
             }],
             comparisons: Vec::new(),
             followups: Vec::new(),
+            step_judge_preset: None,
+            run_label: String::new(),
         };
         let md = render_markdown(&summary);
         assert!(md.contains("a\\|b"));

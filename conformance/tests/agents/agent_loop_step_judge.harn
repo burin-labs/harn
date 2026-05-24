@@ -1,0 +1,36 @@
+pipeline default() {
+  llm_mock_clear()
+  // Turn 1: weak assistant response → judge will veto.
+  llm_mock({text: "<user_response>idk</user_response>\n<done>##DONE##</done>"})
+  // Step judge call 1: revise with critique.
+  llm_mock(
+    {
+      text: "{\"verdict\":\"revise\",\"reasoning\":\"too terse\",\"critique\":\"Show the arithmetic explicitly.\",\"confidence\":0.9}",
+    },
+  )
+  // Turn 2: revised assistant response → judge will pass.
+  llm_mock({text: "<user_response>2 + 2 = 4</user_response>\n<done>##DONE##</done>"})
+  // Step judge call 2: pass.
+  llm_mock(
+    {text: "{\"verdict\":\"pass\",\"reasoning\":\"shows work\",\"critique\":\"\",\"confidence\":0.95}"},
+  )
+  let result = agent_loop(
+    "What is 2 + 2?",
+    nil,
+    {
+      provider: "mock",
+      loop_until_done: true,
+      max_iterations: 4,
+      step_judge: {provider: "mock", on_veto: "replace"},
+    },
+  )
+  __io_println(result.status)
+  __io_println(result.visible_text)
+  __io_println(result.llm.iterations)
+  let calls = llm_mock_calls()
+  __io_println(len(calls))
+  // After replace + regen, the regen turn (calls[2]) should NOT contain the popped weak response.
+  __io_println(!json_stringify(calls[2].messages).contains("idk"))
+  // The regen turn SHOULD contain the injected critique feedback.
+  __io_println(json_stringify(calls[2].messages).contains("Show the arithmetic explicitly."))
+}

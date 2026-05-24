@@ -30,6 +30,7 @@ const HOST_SESSION_INIT: &str = "__host_agent_session_init";
 const HOST_SESSION_FINALIZE: &str = "__host_agent_session_finalize";
 const HOST_SESSION_MESSAGES: &str = "__host_agent_session_messages";
 const HOST_SESSION_RECORD_ASSISTANT: &str = "__host_agent_session_record_assistant";
+const HOST_SESSION_POP_LAST_ASSISTANT: &str = "__host_agent_session_pop_last_assistant";
 const HOST_SESSION_RECORD_TOOL_RESULTS: &str = "__host_agent_session_record_tool_results";
 const HOST_SESSION_RECORD_USAGE: &str = "__host_agent_session_record_usage";
 const HOST_SESSION_DRAIN_FEEDBACK: &str = "__host_agent_session_drain_feedback";
@@ -795,6 +796,16 @@ fn host_agent_session_record_assistant_builtin(
     Ok(VmValue::Nil)
 }
 
+fn host_agent_session_pop_last_assistant_builtin(
+    args: &[VmValue],
+    _out: &mut String,
+) -> Result<VmValue, VmError> {
+    let session_id = args.first().map(|v| v.display()).unwrap_or_default();
+    let popped =
+        crate::agent_sessions::pop_last_if_assistant(&session_id).map_err(VmError::Runtime)?;
+    Ok(VmValue::Bool(popped))
+}
+
 fn tool_result_message_for_provider(
     provider: &str,
     model: &str,
@@ -1429,6 +1440,40 @@ fn build_agent_event(
                 .and_then(|v| v.as_u64())
                 .unwrap_or(0),
             trigger: get_opt_string("trigger"),
+        }),
+        "step_judge_decision" => Ok(AgentEvent::StepJudgeDecision {
+            session_id: session_id.to_string(),
+            iteration: get_usize("iteration"),
+            verdict: get_string("verdict"),
+            reasoning: get_string("reasoning"),
+            critique: get_string("critique"),
+            confidence: payload_obj
+                .and_then(|m| m.get("confidence"))
+                .and_then(|v| v.as_f64())
+                .unwrap_or(0.0),
+            judge_duration_ms: payload_obj
+                .and_then(|m| m.get("judge_duration_ms"))
+                .and_then(|v| v.as_u64())
+                .unwrap_or(0),
+            vetoed: payload_obj
+                .and_then(|m| m.get("vetoed"))
+                .and_then(|v| v.as_bool())
+                .unwrap_or(false),
+            on_veto: get_string("on_veto"),
+            input_tokens: payload_obj
+                .and_then(|m| m.get("input_tokens"))
+                .and_then(|v| v.as_u64())
+                .unwrap_or(0),
+            output_tokens: payload_obj
+                .and_then(|m| m.get("output_tokens"))
+                .and_then(|v| v.as_u64())
+                .unwrap_or(0),
+            cost_usd: payload_obj
+                .and_then(|m| m.get("cost_usd"))
+                .and_then(|v| v.as_f64())
+                .unwrap_or(0.0),
+            provider: get_string("provider"),
+            model: get_string("model"),
         }),
         "typed_checkpoint" => Ok(AgentEvent::TypedCheckpoint {
             session_id: session_id.to_string(),
@@ -2301,6 +2346,17 @@ const HOST_SESSION_PRIMITIVES_SYNC: &[SyncBuiltin] = &[
     .signature("__host_agent_session_record_assistant(session_id, llm_result)")
     .arity(VmBuiltinArity::Exact(2))
     .doc("Append the assistant turn from an llm_call result to the session log."),
+    SyncBuiltin::new(
+        HOST_SESSION_POP_LAST_ASSISTANT,
+        host_agent_session_pop_last_assistant_builtin,
+    )
+    .signature("__host_agent_session_pop_last_assistant(session_id)")
+    .arity(VmBuiltinArity::Exact(1))
+    .doc(
+        "Pop the trailing assistant turn from the session transcript. Used by \
+         step_judge replace mode to discard a vetoed turn before regeneration. \
+         Errors if the trailing message is not an assistant turn.",
+    ),
     SyncBuiltin::new(
         HOST_SESSION_RECORD_TOOL_RESULTS,
         host_agent_session_record_tool_results_builtin,

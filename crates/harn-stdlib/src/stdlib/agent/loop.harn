@@ -37,10 +37,12 @@ import {
   agent_session_finalize,
   agent_session_init,
   agent_session_inject_feedback,
+  agent_session_pop_last_assistant,
   agent_session_record_assistant,
   agent_session_record_tool_results,
   agent_session_record_usage,
 } from "std/agent/state"
+import { agent_step_judge } from "std/agent/step_judge"
 import {
   agent_tool_search_emit_queries,
   agent_tool_search_inject_if_needed,
@@ -1109,6 +1111,7 @@ fn __agent_loop_run(message, session, initial_opts) {
     var terminal_error = nil
     var verify_attempts = 0
     var done_judge_invocations = 0
+    var step_judge_attempts = 0
     var consecutive_text_only = 0
     var fallback_index = 0
     var successful_tools_seen = []
@@ -1263,6 +1266,37 @@ fn __agent_loop_run(message, session, initial_opts) {
           final_status = "done"
           stop_reason = "stalled_done_judge"
           break
+        }
+      }
+      if turn_opts?.step_judge != nil {
+        let step_verdict = agent_step_judge(session, llm_result, turn_opts, turn_index + 1, stall_warning, step_judge_attempts)
+        if step_verdict.vetoed {
+          step_judge_attempts = step_judge_attempts + 1
+          let on_veto = step_verdict?.on_veto ?? "replace"
+          if on_veto == "replace" {
+            agent_session_pop_last_assistant(session.session_id)
+          }
+          let critique = step_verdict?.feedback ?? step_verdict?.critique ?? ""
+          if critique != "" {
+            agent_session_inject_feedback(session.session_id, "step_judge", critique)
+          }
+          agent_emit_event(
+            session.session_id,
+            "turn_end",
+            {
+              iteration: turn_index + 1,
+              turn_info: __turn_info_payload(llm_result, 0, visible_text)
+                + {
+                dispatch_skipped: true,
+                skip_reason: "step_judge_revise",
+                on_veto: on_veto,
+                step_judge_attempts: step_judge_attempts,
+              },
+            },
+          )
+          continue
+        } else if !(step_verdict?.skipped ?? false) {
+          step_judge_attempts = 0
         }
       }
       let pre_dispatch_checkpoint = __agent_loop_checkpoint(session.session_id, "pre_tool_dispatch", {iteration: turn_index + 1})

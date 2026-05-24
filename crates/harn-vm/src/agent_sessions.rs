@@ -762,6 +762,47 @@ fn truncate_state(state: &mut SessionState, keep_first: usize) -> Option<Session
     })
 }
 
+/// Pop the trailing message iff it is an assistant message. Used by
+/// `agent_step_judge` to remove a vetoed assistant turn before
+/// regeneration (the "replace" on_veto path). Returns `true` if a
+/// message was popped, `false` if the transcript was empty, and an
+/// error if the trailing message was not an assistant turn —
+/// signalling a call-site discipline bug rather than a runtime error.
+pub fn pop_last_if_assistant(id: &str) -> Result<bool, String> {
+    SESSIONS.with(|s| {
+        let mut map = s.borrow_mut();
+        let Some(state) = map.get_mut(id) else {
+            return Err(format!(
+                "pop_last_if_assistant: unknown session id '{id}'"
+            ));
+        };
+        let messages: Vec<VmValue> = match state.transcript.as_dict() {
+            Some(dict) => match dict.get("messages") {
+                Some(VmValue::List(list)) => list.iter().cloned().collect(),
+                _ => Vec::new(),
+            },
+            None => Vec::new(),
+        };
+        if messages.is_empty() {
+            return Ok(false);
+        }
+        let trailing_role = messages
+            .last()
+            .and_then(|m| m.as_dict())
+            .and_then(|d| d.get("role"))
+            .map(|v| v.display())
+            .unwrap_or_default();
+        if trailing_role != "assistant" {
+            return Err(format!(
+                "pop_last_if_assistant: trailing message role is '{trailing_role}', expected 'assistant'"
+            ));
+        }
+        let keep = messages.len() - 1;
+        truncate_state(state, keep);
+        Ok(true)
+    })
+}
+
 /// Retain only the last `keep_last` messages in the session transcript.
 /// Returns the kept count (<= keep_last).
 pub fn trim(id: &str, keep_last: usize) -> Option<usize> {

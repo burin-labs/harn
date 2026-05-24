@@ -752,13 +752,14 @@ fn __run_fixture_agent(
   tool_format: string,
   tools,
   max_iterations: int,
+  step_judge_config,
 ) {
   let done_sentinel = if tool_format == "text" {
     "##DONE##"
   } else {
     nil
   }
-  let options = {
+  var options = {
     provider: provider,
     model: model,
     tool_format: tool_format,
@@ -769,6 +770,9 @@ fn __run_fixture_agent(
     iteration_budget: {mode: "fixed", initial: max_iterations, max: max_iterations, extend_by: 0},
     turn_policy: {allow_done_sentinel: tool_format == "text", max_prose_chars: 30000},
     llm_options: {temperature: 0, max_tokens: 1024},
+  }
+  if step_judge_config != nil {
+    options = options + {step_judge: step_judge_config}
   }
   if fixture == "read-only-audit" {
     return audit_agent(task, options)
@@ -863,6 +867,7 @@ fn main(harness: Harness) {
       {kind: "option", name: "max_iterations", flags: ["--max-iterations"], parse: "int", default: 8},
       {kind: "option", name: "python", flags: ["--python"], default: "python3"},
       {kind: "flag", name: "seed_mock", flags: ["--seed-mock"]},
+      {kind: "option", name: "step_judge_json", flags: ["--step-judge-json"], default: ""},
     ],
   )
   if len(args._errors) > 0 {
@@ -876,6 +881,11 @@ fn main(harness: Harness) {
     __seed_mock(args.fixture, args.tool_format, args.python)
   }
   let started_ms = harness.clock.now_ms()
+  let step_judge_config = if args.step_judge_json == "" {
+    nil
+  } else {
+    json_parse(args.step_judge_json)
+  }
   let result = __run_fixture_agent(
     args.fixture,
     __task_prompt(args.fixture, args.python),
@@ -884,6 +894,7 @@ fn main(harness: Harness) {
     args.tool_format,
     __fixture_tools(harness, root, args.python, args.fixture),
     args.max_iterations,
+    step_judge_config,
   )
   let duration_ms = harness.clock.now_ms() - started_ms
   let verify = __verify_fixture(harness, root, args.fixture, args.python, result)

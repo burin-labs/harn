@@ -458,6 +458,28 @@ pub enum AgentEvent {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         trigger: Option<String>,
     },
+    /// Per-step critique decision emitted by `agent_step_judge`.
+    /// Sibling of [`JudgeDecision`] but fired BEFORE tool dispatch on
+    /// every assistant turn (when configured), not just at completion.
+    /// `on_veto` carries the configured remediation shape
+    /// (`"replace"` or `"retain"`); `cost_usd` is best-effort from the
+    /// stdlib economics estimator and may be 0 when pricing is unknown.
+    StepJudgeDecision {
+        session_id: String,
+        iteration: usize,
+        verdict: String,
+        reasoning: String,
+        critique: String,
+        confidence: f64,
+        judge_duration_ms: u64,
+        vetoed: bool,
+        on_veto: String,
+        input_tokens: u64,
+        output_tokens: u64,
+        cost_usd: f64,
+        provider: String,
+        model: String,
+    },
     TypedCheckpoint {
         session_id: String,
         checkpoint: serde_json::Value,
@@ -797,6 +819,7 @@ impl AgentEvent {
             | Self::TurnEnd { session_id, .. }
             | Self::SessionClosed { session_id, .. }
             | Self::JudgeDecision { session_id, .. }
+            | Self::StepJudgeDecision { session_id, .. }
             | Self::TypedCheckpoint { session_id, .. }
             | Self::FeedbackInjected { session_id, .. }
             | Self::BudgetExhausted { session_id, .. }
