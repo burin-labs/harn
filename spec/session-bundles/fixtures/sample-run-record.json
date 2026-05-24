@@ -112,7 +112,12 @@
     "assets": [],
     "summary": "Canary health check used stale config.",
     "metadata": {
-      "system_prompt": "Use local logs and explain the deployment failure."
+      "system_prompt": "Use local logs and explain the deployment failure.",
+      "workspace_anchor": {
+        "primary": "/workspace/example",
+        "additional_roots": [],
+        "anchored_at": "2026-05-01T00:00:00Z"
+      }
     }
   },
   "usage": {
@@ -174,9 +179,6 @@
       "asked_at": "2026-05-01T00:00:05Z"
     }
   ],
-  "metadata": {
-    "workspace_id": "workspace_fixture",
-    "project_root": "/workspace/example"
-  },
+  "metadata": {},
   "persisted_path": "spec/session-bundles/fixtures/sample-run-record.json"
 }

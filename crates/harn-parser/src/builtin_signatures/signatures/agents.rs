@@ -1,10 +1,11 @@
 //! Agent / orchestration / sub-agent builtin signatures.
 
 use super::shapes::{
-    AGENT_SESSION_COMPACT_OPTS, AGENT_SESSION_SEED_OPTS, AGENT_SPAWN_CONFIG,
-    CANCEL_IN_FLIGHT_TOOL_CALL_OPTS, LLM_CALL_OPTIONS, LLM_CALL_RESULT, LLM_CALL_SAFE_RESULT,
-    RESUME_CONDITIONS_OR_NIL, SESSION_ANCESTRY, SESSION_SNAPSHOT, SUB_AGENT_OPTIONS,
-    SUB_AGENT_RESULT, TRANSCRIPT, WORKER_SUMMARY,
+    AGENT_SESSION_COMPACT_OPTS, AGENT_SESSION_OPEN_OPTS, AGENT_SESSION_SEED_OPTS,
+    AGENT_SPAWN_CONFIG, CANCEL_IN_FLIGHT_TOOL_CALL_OPTS, LLM_CALL_OPTIONS, LLM_CALL_RESULT,
+    LLM_CALL_SAFE_RESULT, RESUME_CONDITIONS_OR_NIL, SESSION_ANCESTRY, SESSION_SNAPSHOT,
+    SUB_AGENT_OPTIONS, SUB_AGENT_RESULT, TRANSCRIPT, WORKER_SUMMARY, WORKSPACE_ANCHOR_INPUT,
+    WORKSPACE_ANCHOR_OR_NIL,
 };
 use super::{
     BuiltinSignature, Param, Ty, TY_ANY, TY_BOOL, TY_CLOSURE, TY_DICT, TY_DICT_OR_NIL, TY_FLOAT,
@@ -396,8 +397,24 @@ pub(crate) const SIGNATURES: &[BuiltinSignature] = &[
     ),
     BuiltinSignature::simple(
         "agent_session_open",
-        &[Param::optional("id", TY_STRING)],
+        &[
+            Param::optional("id", TY_STRING),
+            Param::optional("opts", AGENT_SESSION_OPEN_OPTS),
+        ],
         TY_STRING,
+    ),
+    BuiltinSignature::simple(
+        "agent_session_set_workspace_anchor",
+        &[
+            Param::new("id", TY_STRING),
+            Param::new("anchor", Ty::Union(&[WORKSPACE_ANCHOR_INPUT, TY_NIL])),
+        ],
+        TY_BOOL,
+    ),
+    BuiltinSignature::simple(
+        "agent_session_workspace_anchor",
+        &[Param::new("id", TY_STRING)],
+        WORKSPACE_ANCHOR_OR_NIL,
     ),
     BuiltinSignature::simple(
         "agent_session_reset",

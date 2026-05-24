@@ -215,3 +215,130 @@ fn checked_session_bundle_fixtures_validate_and_import() {
         assert_eq!(imported["id"], "run_fixture_session_bundle");
     }
 }
+
+#[test]
+fn workspace_anchor_in_transcript_metadata_round_trips_to_bundle_workspace() {
+    use crate::workspace_anchor::{MountMode, MountedRoot, WorkspaceAnchor};
+    use std::path::PathBuf;
+
+    let mut run = fixture_run();
+    let anchor = WorkspaceAnchor {
+        primary: PathBuf::from("/workspace/example"),
+        additional_roots: vec![MountedRoot {
+            path: PathBuf::from("/workspace/lib"),
+            mount_mode: MountMode::ReadOnly,
+            mounted_at: "2026-05-01T00:00:00Z".to_string(),
+        }],
+        anchored_at: "2026-05-01T00:00:00Z".to_string(),
+    };
+    let transcript = run.transcript.as_mut().unwrap();
+    transcript["metadata"]["workspace_anchor"] = anchor.to_json();
+
+    let bundle = export_run_record_bundle(
+        &run,
+        &SessionBundleExportOptions {
+            mode: SessionBundleExportMode::Local,
+            ..SessionBundleExportOptions::default()
+        },
+    )
+    .unwrap();
+    let workspace = bundle
+        .workspace
+        .expect("workspace section should be present");
+    assert_eq!(workspace.primary.as_deref(), Some("/workspace/example"));
+    assert_eq!(workspace.additional_roots.len(), 1);
+    assert_eq!(workspace.additional_roots[0].mount_mode, "read_only");
+    assert_eq!(
+        workspace.anchored_at.as_deref(),
+        Some("2026-05-01T00:00:00Z")
+    );
+}
+
+#[test]
+fn workspace_section_absent_when_no_anchor_metadata() {
+    let bundle =
+        export_run_record_bundle(&fixture_run(), &SessionBundleExportOptions::default()).unwrap();
+    assert!(bundle.workspace.is_none());
+}
+
+/// Verifies the checked-in bundle fixtures match what `export_run_record_bundle`
+/// produces today, and (when `HARN_REGENERATE_FIXTURES=1`) rewrites them in
+/// place.
+///
+/// Pins `bundle_id`, `created_at`, and the version strings to deterministic
+/// fixture values, and sorts the redaction-entry list by path so the
+/// rendered output is stable across runs.
+///
+/// To regenerate after a schema change:
+/// `HARN_REGENERATE_FIXTURES=1 cargo test -p harn-vm checked_session_bundle_fixtures_match_export`
+#[test]
+fn checked_session_bundle_fixtures_match_export() {
+    let raw = fs::read_to_string(repo_fixture_path("sample-run-record.json"))
+        .expect("read sample-run-record.json");
+    let run: RunRecord =
+        serde_json::from_str(&raw).expect("decode sample-run-record.json as RunRecord");
+    let regenerate = std::env::var_os("HARN_REGENERATE_FIXTURES").is_some();
+
+    for (name, mode) in [
+        ("sample-local.bundle.json", SessionBundleExportMode::Local),
+        (
+            "sample-sanitized.bundle.json",
+            SessionBundleExportMode::Sanitized,
+        ),
+        (
+            "sample-replay-only.bundle.json",
+            SessionBundleExportMode::ReplayOnly,
+        ),
+    ] {
+        let options = SessionBundleExportOptions {
+            mode,
+            include_attachments: true,
+            ..SessionBundleExportOptions::default()
+        };
+        let mut bundle =
+            export_run_record_bundle(&run, &options).expect("export bundle for fixture");
+        pin_fixture_bundle_fields(&mut bundle);
+        let mut value = serde_json::to_value(&bundle).expect("encode bundle");
+        sort_redaction_entries(&mut value);
+        let rendered = format!(
+            "{}\n",
+            serde_json::to_string_pretty(&value).expect("pretty encode")
+        );
+        let path = repo_fixture_path(name);
+        if regenerate {
+            fs::write(&path, &rendered).unwrap_or_else(|err| panic!("write {name}: {err}"));
+            continue;
+        }
+        let on_disk = fs::read_to_string(&path).unwrap_or_else(|err| panic!("read {name}: {err}"));
+        // Defense-in-depth against Windows autocrlf: `.gitattributes` pins
+        // these fixtures to LF, but local clones with `core.autocrlf=true`
+        // could still surface CRLF here without the pin.
+        assert_eq!(
+            on_disk.replace("\r\n", "\n"),
+            rendered,
+            "{name} is stale; re-run with HARN_REGENERATE_FIXTURES=1 to refresh"
+        );
+    }
+}
+
+fn pin_fixture_bundle_fields(bundle: &mut SessionBundle) {
+    bundle.bundle_id = "bundle_fixture_session_bundle".to_string();
+    bundle.created_at = "2026-05-01T00:00:30Z".to_string();
+    bundle.producer.version = "fixture".to_string();
+    bundle.runtime.harn_version = "fixture".to_string();
+}
+
+fn sort_redaction_entries(value: &mut JsonValue) {
+    let Some(JsonValue::Array(entries)) = value
+        .get_mut("redaction")
+        .and_then(|r| r.get_mut("entries"))
+    else {
+        return;
+    };
+    entries.sort_by(|a, b| {
+        a.get("path")
+            .and_then(JsonValue::as_str)
+            .unwrap_or("")
+            .cmp(b.get("path").and_then(JsonValue::as_str).unwrap_or(""))
+    });
+}

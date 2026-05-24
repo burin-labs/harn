@@ -18,6 +18,7 @@ use crate::orchestration::{
     RunTraceSpanRecord, RunTransitionRecord, ToolCallRecord,
 };
 use crate::redact::{RedactionPolicy, REDACTED_PLACEHOLDER};
+use crate::workspace_anchor::{anchor_from_transcript_metadata_json, MountedRoot, WorkspaceAnchor};
 
 mod schema;
 pub use schema::{session_bundle_schema, session_bundle_schema_pretty};
@@ -161,9 +162,46 @@ pub struct BundleUsage {
 #[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(default)]
 pub struct BundleWorkspace {
-    pub identity: Option<String>,
-    pub source_root: Option<String>,
+    /// Primary workspace path the session is anchored against.
+    pub primary: Option<String>,
+    /// Additional roots mounted alongside the primary anchor.
+    #[serde(default)]
+    pub additional_roots: Vec<BundleMountedRoot>,
+    /// RFC3339 timestamp when the anchor was set.
+    pub anchored_at: Option<String>,
+    /// Bundle workspace policy label. Currently always
+    /// `"safe_identity_only"`; future revisions may tie this to mount
+    /// modes once the PathScope matcher (#2216) lands.
     pub policy: String,
+}
+
+#[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(default)]
+pub struct BundleMountedRoot {
+    pub path: String,
+    pub mount_mode: String,
+    pub mounted_at: String,
+}
+
+impl From<&MountedRoot> for BundleMountedRoot {
+    fn from(root: &MountedRoot) -> Self {
+        Self {
+            path: root.path.to_string_lossy().into_owned(),
+            mount_mode: root.mount_mode.as_str().to_string(),
+            mounted_at: root.mounted_at.clone(),
+        }
+    }
+}
+
+impl From<&WorkspaceAnchor> for BundleWorkspace {
+    fn from(anchor: &WorkspaceAnchor) -> Self {
+        Self {
+            primary: Some(anchor.primary.to_string_lossy().into_owned()),
+            additional_roots: anchor.additional_roots.iter().map(Into::into).collect(),
+            anchored_at: Some(anchor.anchored_at.clone()),
+            policy: "safe_identity_only".to_string(),
+        }
+    }
 }
 
 #[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq)]
@@ -605,37 +643,18 @@ fn raw_bundle_from_run(
 fn bundle_redaction_policy(base: &RedactionPolicy) -> RedactionPolicy {
     base.clone()
         .with_extra_field("persisted_path")
-        .with_extra_field("project_root")
+        .with_extra_field("primary")
         .with_extra_field("run_path")
         .with_extra_field("snapshot_path")
-        .with_extra_field("source_root")
-        .with_extra_field("workspace_root")
 }
 
 fn workspace_from_run(run: &RunRecord) -> Option<BundleWorkspace> {
-    let source_root = run
-        .metadata
-        .get("project_root")
-        .and_then(JsonValue::as_str)
-        .or_else(|| {
-            run.metadata
-                .get("workspace_root")
-                .and_then(JsonValue::as_str)
-        })
-        .map(str::to_string);
-    let identity = run
-        .metadata
-        .get("workspace_id")
-        .and_then(JsonValue::as_str)
-        .map(str::to_string);
-    if source_root.is_none() && identity.is_none() {
-        return None;
-    }
-    Some(BundleWorkspace {
-        identity,
-        source_root,
-        policy: "safe_identity_only".to_string(),
-    })
+    let anchor = run
+        .transcript
+        .as_ref()
+        .and_then(|transcript| transcript.get("metadata"))
+        .and_then(anchor_from_transcript_metadata_json)?;
+    Some(BundleWorkspace::from(&anchor))
 }
 
 fn transcript_from_run(run: &RunRecord) -> BundleTranscript {

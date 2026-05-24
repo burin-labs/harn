@@ -111,6 +111,7 @@ pub mod value;
 pub mod visible_text;
 mod vm;
 pub mod waitpoints;
+pub mod workspace_anchor;
 pub mod workspace_path;
 
 pub use builtin_id::BuiltinId;

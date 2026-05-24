@@ -1,0 +1,41 @@
+pipeline main(task) {
+  let session = agent_session_open(
+    "anchor-conformance",
+    {workspace_anchor: {primary: "/workspace/main", anchored_at: "2026-05-23T00:00:00Z"}},
+  )
+  let opened = agent_session_workspace_anchor(session)
+  assert(opened?.primary == "/workspace/main", "open pins the typed anchor")
+  assert(opened?.anchored_at == "2026-05-23T00:00:00Z", "open preserves the anchored_at")
+  assert(len(opened?.additional_roots) == 0, "additional_roots starts empty")
+  let snap = agent_session_snapshot(session)
+  assert(
+    snap.workspace_anchor?.primary == "/workspace/main",
+    "snapshot surfaces the workspace anchor",
+  )
+  let changed = agent_session_set_workspace_anchor(
+    session,
+    {
+      primary: "/workspace/lib",
+      additional_roots: [{path: "/workspace/extras", mount_mode: "extend", mounted_at: "2026-05-23T00:00:01Z"}],
+      anchored_at: "2026-05-23T00:00:02Z",
+    },
+  )
+  assert(changed, "setter reports change when value differs")
+  let mutated = agent_session_workspace_anchor(session)
+  assert(mutated?.primary == "/workspace/lib", "setter replaces primary")
+  assert(len(mutated?.additional_roots) == 1, "setter populates additional_roots")
+  assert(mutated?.additional_roots[0]?.mount_mode == "extend", "setter preserves mount_mode")
+  let same = agent_session_set_workspace_anchor(
+    session,
+    {
+      primary: "/workspace/lib",
+      additional_roots: [{path: "/workspace/extras", mount_mode: "extend", mounted_at: "2026-05-23T00:00:01Z"}],
+      anchored_at: "2026-05-23T00:00:02Z",
+    },
+  )
+  assert(!same, "setter reports unchanged when value matches")
+  let cleared = agent_session_set_workspace_anchor(session, nil)
+  assert(cleared, "clearing reports change")
+  assert(agent_session_workspace_anchor(session) == nil, "clearing returns nil")
+  log("agent_session_workspace_anchor tests passed")
+}

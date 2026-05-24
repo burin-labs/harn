@@ -10,6 +10,25 @@ condensed series summaries instead of full per-patch history.
 
 ### Added
 
+- **Typed workspace anchor on `SessionState` (#2215).** Sessions now carry a
+  typed `WorkspaceAnchor { primary, additional_roots, anchored_at }` field
+  instead of the soft `RunRecord.metadata.{workspace_id, project_root,
+  workspace_root}` convention. New stdlib builtins
+  `agent_session_open(id?, opts?)` (with `opts.workspace_anchor`),
+  `agent_session_workspace_anchor(id)`, and
+  `agent_session_set_workspace_anchor(id, anchor)` expose getters and setters.
+  `additional_roots` entries describe `MountedRoot { path, mount_mode,
+  mounted_at }` where `mount_mode` is `read_only` (default), `extend`, or
+  `sandboxed`. The anchor travels through `agent_session_fork`, surfaces in
+  `agent_session_snapshot`, and rides along with transcript metadata so
+  `session_bundle` exports rebuild `BundleWorkspace { primary,
+  additional_roots, anchored_at, policy }` without consulting the live
+  session store. The legacy `metadata.workspace_id` /
+  `metadata.project_root` / `metadata.workspace_root` read path is dropped;
+  hosts populating the old keys must move to
+  `agent_session_open(..., {workspace_anchor: ...})` or
+  `agent_session_set_workspace_anchor(...)`. Foundation for the
+  cross-project handoff epic (#2208).
 - **Reusable context-engineering eval primitives (#2195).** Added
   `harn eval context` plus portable `harn.context_eval.manifest.v1` and
   `harn.context_eval.report.v1` shapes for deterministic pack, projection,

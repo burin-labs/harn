@@ -329,3 +329,130 @@ pipeline main(task) {
     .unwrap_err();
     assert!(err.contains("bogus"), "got: {err}");
 }
+
+#[test]
+fn open_pins_workspace_anchor_and_surfaces_in_snapshot() {
+    let lines = out(r#"
+pipeline main(task) {
+  let s = agent_session_open(
+    "anchor-open",
+    {
+      workspace_anchor: {
+        primary: "/workspace/main",
+        anchored_at: "2026-05-23T00:00:00Z",
+      },
+    },
+  )
+  log(agent_session_workspace_anchor(s)["primary"])
+  let snap = agent_session_snapshot(s)
+  log(snap["workspace_anchor"]["primary"])
+  log(snap["workspace_anchor"]["anchored_at"])
+  log(len(snap["workspace_anchor"]["additional_roots"]))
+}
+"#);
+    assert_eq!(
+        lines,
+        vec![
+            "/workspace/main",
+            "/workspace/main",
+            "2026-05-23T00:00:00Z",
+            "0"
+        ]
+    );
+}
+
+#[test]
+fn set_workspace_anchor_replaces_and_clears() {
+    let lines = out(r#"
+pipeline main(task) {
+  let s = agent_session_open("anchor-set")
+  log(agent_session_workspace_anchor(s) == nil)
+  let changed = agent_session_set_workspace_anchor(s, {
+    primary: "/workspace/initial",
+    anchored_at: "2026-05-23T00:00:00Z",
+  })
+  log(changed)
+  log(agent_session_workspace_anchor(s)["primary"])
+  let same = agent_session_set_workspace_anchor(s, {
+    primary: "/workspace/initial",
+    anchored_at: "2026-05-23T00:00:00Z",
+  })
+  log(same)
+  let cleared = agent_session_set_workspace_anchor(s, nil)
+  log(cleared)
+  log(agent_session_workspace_anchor(s) == nil)
+}
+"#);
+    assert_eq!(
+        lines,
+        vec![
+            "true",
+            "true",
+            "/workspace/initial",
+            "false",
+            "true",
+            "true"
+        ]
+    );
+}
+
+#[test]
+fn workspace_anchor_round_trips_through_fork() {
+    let lines = out(r#"
+pipeline main(task) {
+  let src = agent_session_open("anchor-fork-src", {
+    workspace_anchor: {
+      primary: "/workspace/main",
+      additional_roots: [
+        {path: "/workspace/lib", mount_mode: "read_only", mounted_at: "2026-05-23T00:00:00Z"},
+      ],
+      anchored_at: "2026-05-23T00:00:00Z",
+    },
+  })
+  let dst = agent_session_fork(src, "anchor-fork-dst")
+  let anchor = agent_session_workspace_anchor(dst)
+  log(anchor["primary"])
+  log(len(anchor["additional_roots"]))
+  log(anchor["additional_roots"][0]["mount_mode"])
+}
+"#);
+    assert_eq!(lines, vec!["/workspace/main", "1", "read_only"]);
+}
+
+#[test]
+fn open_rejects_unknown_option_keys() {
+    let err = run(r#"
+pipeline main(task) {
+  agent_session_open(nil, {bogus: 1})
+}
+"#)
+    .unwrap_err();
+    assert!(err.contains("bogus"), "got: {err}");
+}
+
+#[test]
+fn workspace_anchor_requires_primary() {
+    let err = run(r#"
+pipeline main(task) {
+  agent_session_open(nil, {workspace_anchor: {anchored_at: "2026-05-23T00:00:00Z"}})
+}
+"#)
+    .unwrap_err();
+    assert!(err.contains("primary"), "got: {err}");
+}
+
+#[test]
+fn workspace_anchor_rejects_unknown_mount_mode() {
+    let err = run(r#"
+pipeline main(task) {
+  agent_session_open(nil, {
+    workspace_anchor: {
+      primary: "/workspace/main",
+      additional_roots: [{path: "/workspace/lib", mount_mode: "bogus"}],
+    },
+  })
+}
+"#)
+    .unwrap_err();
+    assert!(err.contains("bogus"), "got: {err}");
+}

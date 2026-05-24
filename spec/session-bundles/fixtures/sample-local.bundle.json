@@ -1,169 +1,40 @@
 {
   "_type": "harn_session_bundle",
-  "schema_version": 1,
-  "bundle_id": "bundle_019e21e9-d44d-75e0-b482-a73a9048a73f",
-  "created_at": "1778685432",
-  "producer": {
-    "name": "harn",
-    "version": "0.8.12",
-    "schema_id": "https://harnlang.com/schemas/session-bundle.v1.json"
-  },
-  "source": {
-    "kind": "run_record",
-    "run_record_id": "run_fixture_session_bundle",
-    "workflow_id": "wf_fixture_session_bundle",
-    "workflow_name": "Session bundle fixture",
-    "task": "Summarize a deploy investigation and preserve replay evidence.",
-    "status": "completed",
-    "started_at": "2026-05-01T00:00:00Z",
-    "finished_at": "2026-05-01T00:00:30Z",
-    "persisted_path": "spec/session-bundles/fixtures/sample-run-record.json",
-    "root_run_id": null,
-    "parent_run_id": null,
-    "child_run_count": 0
-  },
-  "runtime": {
-    "harn_version": "0.8.12",
-    "provider_models": [
-      "mock/deploy-investigator"
-    ],
-    "usage": {
-      "input_tokens": 42,
-      "output_tokens": 17,
-      "call_count": 1,
-      "total_duration_ms": 1200,
-      "total_cost": 0.002,
-      "models": [
-        "mock/deploy-investigator"
-      ]
-    },
-    "metadata": {}
-  },
-  "workspace": {
-    "identity": "workspace_fixture",
-    "source_root": "/workspace/example",
-    "policy": "safe_identity_only"
-  },
-  "transcript": {
-    "sections": [
-      {
-        "id": "run",
-        "label": "Run transcript",
-        "scope": "run",
-        "location": "$.transcript",
-        "summary": "Canary health check used stale config.",
-        "messages": [
-          {
-            "content": "Why did the canary deploy fail?",
-            "role": "user"
-          },
-          {
-            "content": "The canary health check used stale config.",
-            "role": "assistant"
-          }
-        ],
-        "events": [
-          {
-            "schemas": [
-              {
-                "name": "read_file"
-              }
-            ],
-            "type": "tool_schemas"
-          },
-          {
-            "agent": "deploy-investigator",
-            "arguments": {
-              "api_key": "fixture-local-key"
-            },
-            "kind": "permission_requested",
-            "request_id": "perm_fixture_1"
-          }
-        ],
-        "assets": [],
-        "metadata": {
-          "system_prompt": "Use local logs and explain the deployment failure."
-        }
+  "attachments": [
+    {
+      "data": null,
+      "id": "artifact_fixture_summary",
+      "kind": "summary",
+      "metadata": {
+        "classification": "shareable"
       },
-      {
-        "id": "stage_fixture_answer",
-        "label": "Stage answer",
-        "scope": "stage",
-        "location": "$.stages[0].transcript",
-        "summary": null,
-        "messages": [
-          {
-            "content": "The deploy failed because the canary health check used stale config.",
-            "role": "assistant"
-          }
-        ],
-        "events": [],
-        "assets": [],
-        "metadata": {
-          "tool_schemas": [
-            {
-              "input_schema": {
-                "properties": {
-                  "path": {
-                    "type": "string"
-                  }
-                },
-                "type": "object"
-              },
-              "name": "read_file"
-            }
-          ]
-        }
-      }
-    ]
-  },
-  "tools": {
-    "schemas": [
-      {
-        "source": "run.transcript",
-        "index": 0,
-        "value": {
-          "schemas": [
-            {
-              "name": "read_file"
-            }
-          ],
-          "type": "tool_schemas"
-        }
-      }
-    ],
-    "calls": [
-      {
-        "tool_name": "read_file",
-        "tool_use_id": "tool_fixture_1",
-        "args_hash": "fixture_args_hash",
-        "result": "Read deploy.log: stale config detected.",
-        "is_rejected": false,
-        "duration_ms": 8,
-        "iteration": 1,
-        "timestamp": "2026-05-01T00:00:10Z"
-      }
-    ]
+      "stage": "stage_fixture_answer",
+      "text": "Canary health checks used stale config.",
+      "title": "Deploy investigation summary"
+    }
+  ],
+  "bundle_id": "bundle_fixture_session_bundle",
+  "created_at": "2026-05-01T00:00:30Z",
+  "metadata": {
+    "format_note": "Session bundles are portable JSON envelopes; hosted share links should reference sanitized bundles rather than raw run records."
   },
   "permissions": [
     {
-      "kind": "hitl_question",
-      "source": "run.hitl_questions",
-      "request_id": "hitl_fixture_1",
       "agent": "deploy-investigator",
+      "kind": "hitl_question",
       "payload": {
         "agent": "deploy-investigator",
         "asked_at": "2026-05-01T00:00:05Z",
         "prompt": "Approve reading deploy.log?",
         "request_id": "hitl_fixture_1",
         "trace_id": null
-      }
+      },
+      "request_id": "hitl_fixture_1",
+      "source": "run.hitl_questions"
     },
     {
-      "kind": "permission_requested",
-      "source": "run.transcript",
-      "request_id": "perm_fixture_1",
       "agent": "deploy-investigator",
+      "kind": "permission_requested",
       "payload": {
         "agent": "deploy-investigator",
         "arguments": {
@@ -171,32 +42,89 @@
         },
         "kind": "permission_requested",
         "request_id": "perm_fixture_1"
-      }
+      },
+      "request_id": "perm_fixture_1",
+      "source": "run.transcript"
     }
   ],
+  "producer": {
+    "name": "harn",
+    "schema_id": "https://harnlang.com/schemas/session-bundle.v1.json",
+    "version": "fixture"
+  },
+  "redaction": {
+    "entries": [],
+    "mode": "local",
+    "placeholder": "[redacted]",
+    "policy": "none",
+    "unsafe_secret_markers_rejected": false
+  },
   "replay": {
+    "checkpoints": [
+      {
+        "completed_nodes": [
+          "answer"
+        ],
+        "id": "checkpoint_fixture_done",
+        "last_stage_id": "stage_fixture_answer",
+        "persisted_at": "2026-05-01T00:00:30Z",
+        "ready_nodes": [],
+        "reason": "completed"
+      }
+    ],
+    "deterministic_events": [
+      {
+        "index": 0,
+        "source": "run.transitions",
+        "value": {
+          "branch": null,
+          "consumed_artifact_ids": [],
+          "from_node_id": null,
+          "from_stage_id": null,
+          "id": "transition_fixture_start",
+          "produced_artifact_ids": [],
+          "timestamp": "2026-05-01T00:00:01Z",
+          "to_node_id": "answer"
+        }
+      },
+      {
+        "index": 0,
+        "source": "run.checkpoints",
+        "value": {
+          "completed_nodes": [
+            "answer"
+          ],
+          "id": "checkpoint_fixture_done",
+          "last_stage_id": "stage_fixture_answer",
+          "persisted_at": "2026-05-01T00:00:30Z",
+          "ready_nodes": [],
+          "reason": "completed"
+        }
+      }
+    ],
+    "event_log_pointers": [],
     "replay_fixture": {
       "_type": "replay_fixture",
-      "id": "replay_fixture_session_bundle",
-      "source_run_id": "run_fixture_session_bundle",
-      "workflow_id": "wf_fixture_session_bundle",
-      "workflow_name": "Session bundle fixture",
+      "clarifying_question": null,
       "created_at": "2026-05-01T00:00:31Z",
       "eval_kind": null,
-      "clarifying_question": null,
       "expected_status": "completed",
+      "id": "replay_fixture_session_bundle",
+      "source_run_id": "run_fixture_session_bundle",
       "stage_assertions": [
         {
-          "node_id": "answer",
-          "expected_status": "completed",
-          "expected_outcome": "ok",
           "expected_branch": null,
+          "expected_outcome": "ok",
+          "expected_status": "completed",
+          "node_id": "answer",
           "required_artifact_kinds": [
             "summary"
           ],
           "visible_text_contains": "stale config"
         }
-      ]
+      ],
+      "workflow_id": "wf_fixture_session_bundle",
+      "workflow_name": "Session bundle fixture"
     },
     "run_record": {
       "_type": "run_record",
@@ -250,87 +178,8 @@
         }
       ],
       "id": "run_fixture_session_bundle",
-      "metadata": {
-        "project_root": "/workspace/example",
-        "workspace_id": "workspace_fixture"
-      },
-      "observability": {
-        "action_graph_edges": [
-          {
-            "from_id": "run:run_fixture_session_bundle",
-            "kind": "transition",
-            "label": null,
-            "to_id": "stage:stage_fixture_answer"
-          }
-        ],
-        "action_graph_nodes": [
-          {
-            "id": "run:run_fixture_session_bundle",
-            "kind": "run",
-            "label": "Session bundle fixture",
-            "metadata": {
-              "workflow_id": "wf_fixture_session_bundle"
-            },
-            "node_id": null,
-            "outcome": "completed",
-            "run_id": "run_fixture_session_bundle",
-            "run_path": "spec/session-bundles/fixtures/sample-run-record.json",
-            "stage_id": null,
-            "status": "completed",
-            "trace_id": null,
-            "worker_id": null
-          },
-          {
-            "id": "stage:stage_fixture_answer",
-            "kind": "stage",
-            "label": "answer",
-            "metadata": {
-              "stage_kind": "agent"
-            },
-            "node_id": "answer",
-            "outcome": "ok",
-            "run_id": null,
-            "run_path": null,
-            "stage_id": "stage_fixture_answer",
-            "status": "completed",
-            "trace_id": null,
-            "worker_id": null
-          }
-        ],
-        "compaction_events": [],
-        "daemon_events": [],
-        "planner_rounds": [],
-        "research_fact_count": 0,
-        "schema_version": 4,
-        "transcript_pointers": [
-          {
-            "available": true,
-            "id": "stage:stage_fixture_answer:transcript",
-            "kind": "embedded_transcript",
-            "label": "Stage answer transcript",
-            "location": "run.stages[answer].transcript",
-            "path": "spec/session-bundles/fixtures/sample-run-record.json"
-          },
-          {
-            "available": true,
-            "id": "run:transcript",
-            "kind": "embedded_transcript",
-            "label": "Run transcript",
-            "location": "run.transcript",
-            "path": "spec/session-bundles/fixtures/sample-run-record.json"
-          },
-          {
-            "available": false,
-            "id": "run:llm_transcript",
-            "kind": "llm_jsonl",
-            "label": "LLM transcript sidecar",
-            "location": "run sidecar",
-            "path": "spec/session-bundles/fixtures/sample-run-record-llm/llm_transcript.jsonl"
-          }
-        ],
-        "verification_outcomes": [],
-        "worker_lineage": []
-      },
+      "metadata": {},
+      "observability": null,
       "parent_run_id": null,
       "pending_nodes": [],
       "persisted_path": "spec/session-bundles/fixtures/sample-run-record.json",
@@ -338,6 +187,7 @@
       "policy": {
         "capabilities": {},
         "recursion_limit": null,
+        "sandbox_profile": "worktree",
         "side_effect_level": null,
         "tool_annotations": {},
         "tool_arg_constraints": [],
@@ -433,11 +283,13 @@
         {
           "duration_ms": 1200,
           "kind": "stage",
+          "links": [],
           "metadata": {},
           "name": "answer",
           "parent_id": null,
           "span_id": 1,
-          "start_ms": 0
+          "start_ms": 0,
+          "trace_id": ""
         }
       ],
       "transcript": {
@@ -472,7 +324,12 @@
           }
         ],
         "metadata": {
-          "system_prompt": "Use local logs and explain the deployment failure."
+          "system_prompt": "Use local logs and explain the deployment failure.",
+          "workspace_anchor": {
+            "additional_roots": [],
+            "anchored_at": "2026-05-01T00:00:00Z",
+            "primary": "/workspace/example"
+          }
         },
         "summary": "Canary health check used stale config."
       },
@@ -501,116 +358,174 @@
       "workflow_id": "wf_fixture_session_bundle",
       "workflow_name": "Session bundle fixture"
     },
-    "event_log_pointers": [
+    "trace_spans": [
       {
-        "kind": "embedded_transcript",
-        "topic": null,
-        "path": "spec/session-bundles/fixtures/sample-run-record.json",
-        "location": "run.stages[answer].transcript",
-        "available": true
-      },
-      {
-        "kind": "embedded_transcript",
-        "topic": null,
-        "path": "spec/session-bundles/fixtures/sample-run-record.json",
-        "location": "run.transcript",
-        "available": true
-      },
-      {
-        "kind": "llm_jsonl",
-        "topic": null,
-        "path": "spec/session-bundles/fixtures/sample-run-record-llm/llm_transcript.jsonl",
-        "location": "run sidecar",
-        "available": false
+        "duration_ms": 1200,
+        "kind": "stage",
+        "links": [],
+        "metadata": {},
+        "name": "answer",
+        "parent_id": null,
+        "span_id": 1,
+        "start_ms": 0,
+        "trace_id": ""
       }
     ],
     "transitions": [
       {
-        "id": "transition_fixture_start",
-        "from_stage_id": null,
-        "from_node_id": null,
-        "to_node_id": "answer",
         "branch": null,
-        "timestamp": "2026-05-01T00:00:01Z",
         "consumed_artifact_ids": [],
-        "produced_artifact_ids": []
+        "from_node_id": null,
+        "from_stage_id": null,
+        "id": "transition_fixture_start",
+        "produced_artifact_ids": [],
+        "timestamp": "2026-05-01T00:00:01Z",
+        "to_node_id": "answer"
+      }
+    ]
+  },
+  "runtime": {
+    "harn_version": "fixture",
+    "metadata": {},
+    "provider_models": [
+      "mock/deploy-investigator"
+    ],
+    "usage": {
+      "call_count": 1,
+      "input_tokens": 42,
+      "models": [
+        "mock/deploy-investigator"
+      ],
+      "output_tokens": 17,
+      "total_cost": 0.002,
+      "total_duration_ms": 1200
+    }
+  },
+  "schema_version": 1,
+  "source": {
+    "child_run_count": 0,
+    "finished_at": "2026-05-01T00:00:30Z",
+    "kind": "run_record",
+    "parent_run_id": null,
+    "persisted_path": "spec/session-bundles/fixtures/sample-run-record.json",
+    "root_run_id": null,
+    "run_record_id": "run_fixture_session_bundle",
+    "started_at": "2026-05-01T00:00:00Z",
+    "status": "completed",
+    "task": "Summarize a deploy investigation and preserve replay evidence.",
+    "workflow_id": "wf_fixture_session_bundle",
+    "workflow_name": "Session bundle fixture"
+  },
+  "tools": {
+    "calls": [
+      {
+        "args_hash": "fixture_args_hash",
+        "duration_ms": 8,
+        "is_rejected": false,
+        "iteration": 1,
+        "result": "Read deploy.log: stale config detected.",
+        "timestamp": "2026-05-01T00:00:10Z",
+        "tool_name": "read_file",
+        "tool_use_id": "tool_fixture_1"
       }
     ],
-    "checkpoints": [
+    "schemas": [
       {
-        "id": "checkpoint_fixture_done",
-        "ready_nodes": [],
-        "completed_nodes": [
-          "answer"
-        ],
-        "last_stage_id": "stage_fixture_answer",
-        "persisted_at": "2026-05-01T00:00:30Z",
-        "reason": "completed"
-      }
-    ],
-    "trace_spans": [
-      {
-        "span_id": 1,
-        "parent_id": null,
-        "kind": "stage",
-        "name": "answer",
-        "start_ms": 0,
-        "duration_ms": 1200,
-        "metadata": {}
-      }
-    ],
-    "deterministic_events": [
-      {
-        "source": "run.transitions",
         "index": 0,
+        "source": "run.transcript",
         "value": {
-          "branch": null,
-          "consumed_artifact_ids": [],
-          "from_node_id": null,
-          "from_stage_id": null,
-          "id": "transition_fixture_start",
-          "produced_artifact_ids": [],
-          "timestamp": "2026-05-01T00:00:01Z",
-          "to_node_id": "answer"
-        }
-      },
-      {
-        "source": "run.checkpoints",
-        "index": 0,
-        "value": {
-          "completed_nodes": [
-            "answer"
+          "schemas": [
+            {
+              "name": "read_file"
+            }
           ],
-          "id": "checkpoint_fixture_done",
-          "last_stage_id": "stage_fixture_answer",
-          "persisted_at": "2026-05-01T00:00:30Z",
-          "ready_nodes": [],
-          "reason": "completed"
+          "type": "tool_schemas"
         }
       }
     ]
   },
-  "redaction": {
-    "mode": "local",
-    "policy": "none",
-    "placeholder": "[redacted]",
-    "entries": [],
-    "unsafe_secret_markers_rejected": false
-  },
-  "attachments": [
-    {
-      "id": "artifact_fixture_summary",
-      "kind": "summary",
-      "title": "Deploy investigation summary",
-      "stage": "stage_fixture_answer",
-      "text": "Canary health checks used stale config.",
-      "data": null,
-      "metadata": {
-        "classification": "shareable"
+  "transcript": {
+    "sections": [
+      {
+        "assets": [],
+        "events": [
+          {
+            "schemas": [
+              {
+                "name": "read_file"
+              }
+            ],
+            "type": "tool_schemas"
+          },
+          {
+            "agent": "deploy-investigator",
+            "arguments": {
+              "api_key": "fixture-local-key"
+            },
+            "kind": "permission_requested",
+            "request_id": "perm_fixture_1"
+          }
+        ],
+        "id": "run",
+        "label": "Run transcript",
+        "location": "$.transcript",
+        "messages": [
+          {
+            "content": "Why did the canary deploy fail?",
+            "role": "user"
+          },
+          {
+            "content": "The canary health check used stale config.",
+            "role": "assistant"
+          }
+        ],
+        "metadata": {
+          "system_prompt": "Use local logs and explain the deployment failure.",
+          "workspace_anchor": {
+            "additional_roots": [],
+            "anchored_at": "2026-05-01T00:00:00Z",
+            "primary": "/workspace/example"
+          }
+        },
+        "scope": "run",
+        "summary": "Canary health check used stale config."
+      },
+      {
+        "assets": [],
+        "events": [],
+        "id": "stage_fixture_answer",
+        "label": "Stage answer",
+        "location": "$.stages[0].transcript",
+        "messages": [
+          {
+            "content": "The deploy failed because the canary health check used stale config.",
+            "role": "assistant"
+          }
+        ],
+        "metadata": {
+          "tool_schemas": [
+            {
+              "input_schema": {
+                "properties": {
+                  "path": {
+                    "type": "string"
+                  }
+                },
+                "type": "object"
+              },
+              "name": "read_file"
+            }
+          ]
+        },
+        "scope": "stage",
+        "summary": null
       }
-    }
-  ],
-  "metadata": {
-    "format_note": "Session bundles are portable JSON envelopes; hosted share links should reference sanitized bundles rather than raw run records."
+    ]
+  },
+  "workspace": {
+    "additional_roots": [],
+    "anchored_at": "2026-05-01T00:00:00Z",
+    "policy": "safe_identity_only",
+    "primary": "/workspace/example"
   }
 }
