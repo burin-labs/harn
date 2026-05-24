@@ -1,0 +1,15 @@
+Session: {{ session_id }}
+Iteration: {{ iteration }}
+Task: {{ task }}
+
+Transcript so far:
+{{ transcript }}
+
+Latest assistant response:
+{{ latest_response }}
+
+Return JSON with:
+- `verdict`: `"pass"` if the response advances the task acceptably, `"revise"` if it should be regenerated with feedback.
+- `reasoning`: one short sentence justifying the verdict (not chain-of-thought).
+- `critique`: when `revise`, a concrete actionable instruction for what the generator should do differently. Empty string when `pass`.
+- `confidence`: float in [0.0, 1.0] reflecting how certain you are. Low confidence with `revise` will be treated as a soft warning; high confidence triggers the revision.

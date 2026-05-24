@@ -922,6 +922,42 @@ impl AgentEventSink for AcpAgentEventSink {
                     }),
                 );
             }
+            AgentEvent::StepJudgeDecision {
+                session_id,
+                iteration,
+                verdict,
+                reasoning,
+                critique,
+                confidence,
+                judge_duration_ms,
+                vetoed,
+                on_veto,
+                input_tokens,
+                output_tokens,
+                cost_usd,
+                provider,
+                model,
+            } => {
+                self.emit_agent_event_ext(
+                    "step_judge_decision",
+                    session_id,
+                    serde_json::json!({
+                        "iteration": iteration,
+                        "verdict": verdict,
+                        "reasoning": reasoning,
+                        "critique": critique,
+                        "confidence": confidence,
+                        "judgeDurationMs": judge_duration_ms,
+                        "vetoed": vetoed,
+                        "onVeto": on_veto,
+                        "inputTokens": input_tokens,
+                        "outputTokens": output_tokens,
+                        "costUsd": cost_usd,
+                        "provider": provider,
+                        "model": model,
+                    }),
+                );
+            }
             AgentEvent::TypedCheckpoint {
                 session_id,
                 checkpoint,

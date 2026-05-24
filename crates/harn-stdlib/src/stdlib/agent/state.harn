@@ -207,6 +207,25 @@ pub fn agent_session_inject_feedback(session_id, kind, content) {
 }
 
 /**
+ * agent_session_pop_last_assistant. Discard the trailing assistant
+ * turn from a session transcript. Used by `agent_step_judge` in
+ * `replace` (pop-and-regen) mode to remove a vetoed assistant
+ * response before the next iteration regenerates. Returns true if a
+ * turn was popped, false if the transcript was empty. Errors if the
+ * trailing message is not an assistant turn — signals a call-site
+ * discipline bug, not a runtime condition.
+ *
+ * @effects: [host]
+ * @allocation: heap
+ * @errors: [runtime]
+ * @api_stability: experimental
+ * @example: agent_session_pop_last_assistant(session_id)
+ */
+pub fn agent_session_pop_last_assistant(session_id) {
+  return __host_agent_session_pop_last_assistant(session_id)
+}
+
+/**
  * agent_session_post_event. Post an event into a running session's
  * inbox from outside the loop (triggers, connectors, host
  * integrations). The next turn boundary — including the post-

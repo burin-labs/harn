@@ -118,6 +118,27 @@ pub struct EvalCodingAgentArgs {
     /// Print the aggregate summary JSON to stdout.
     #[arg(long)]
     pub json: bool,
+    /// Optional step_judge config applied to every run in this invocation.
+    /// Accepts a preset name (`symmetric-cheap`, `asymmetric`,
+    /// `symmetric-strong`) which expands to a known {model, provider}
+    /// pair, or `custom:<json>` for a literal JSON object passed verbatim
+    /// to `agent_loop({step_judge: ...})`. Omit (or pass `none`) to disable.
+    /// For matrix sweeps across presets, the step-judge experiment driver
+    /// at experiments/step-judge/run.sh invokes the eval runner once per
+    /// preset and aggregates.
+    #[arg(long = "step-judge")]
+    pub step_judge: Option<String>,
+    /// Override the on_veto remediation shape for the step-judge config
+    /// (`replace` or `retain`). Default is `replace`.
+    #[arg(long = "step-judge-on-veto")]
+    pub step_judge_on_veto: Option<String>,
+    /// Use the adversarial rubric variant.
+    #[arg(long = "step-judge-adversarial")]
+    pub step_judge_adversarial: bool,
+    /// Free-form label persisted in summary.json for grouping repeat runs
+    /// (e.g. "replicate-1", "probe-judge-arch-gpt"). Defaults to empty.
+    #[arg(long = "run-label", default_value = "")]
+    pub run_label: String,
 }
 
 #[derive(Debug, Args)]

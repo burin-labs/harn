@@ -418,6 +418,10 @@ pub const STDLIB_SOURCES: &[StdlibSource] = &[
         source: include_str!("stdlib/agent/judge.harn"),
     },
     StdlibSource {
+        module: "agent/step_judge",
+        source: include_str!("stdlib/agent/step_judge.harn"),
+    },
+    StdlibSource {
         module: "agent/fact",
         source: include_str!("stdlib/agent/fact.harn"),
     },
@@ -681,6 +685,18 @@ pub const STDLIB_PROMPT_ASSETS: &[StdlibPromptAsset] = &[
     StdlibPromptAsset {
         path: "agent/prompts/completion_judge_user.harn.prompt",
         source: include_str!("stdlib/agent/prompts/completion_judge_user.harn.prompt"),
+    },
+    StdlibPromptAsset {
+        path: "agent/prompts/step_judge_system_default.harn.prompt",
+        source: include_str!("stdlib/agent/prompts/step_judge_system_default.harn.prompt"),
+    },
+    StdlibPromptAsset {
+        path: "agent/prompts/step_judge_system_adversarial.harn.prompt",
+        source: include_str!("stdlib/agent/prompts/step_judge_system_adversarial.harn.prompt"),
+    },
+    StdlibPromptAsset {
+        path: "agent/prompts/step_judge_user.harn.prompt",
+        source: include_str!("stdlib/agent/prompts/step_judge_user.harn.prompt"),
     },
     StdlibPromptAsset {
         path: "agent/prompts/parse_guidance.harn.prompt",
