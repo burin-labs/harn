@@ -162,6 +162,7 @@ jobs:
       - run: make check-language-spec
       - run: make check-trigger-quickref
       - run: make check-provider-matrix
+      - run: make check-provider-support
       - run: make check-connector-matrix
       - run: make check-trigger-examples
       - run: make check-docs-snippets

@@ -18,6 +18,8 @@ pub(crate) enum ProvidersCommand {
     Export(ProvidersExportArgs),
     /// Generate or check the provider capability matrix docs.
     Matrix(ProvidersMatrixArgs),
+    /// Generate or check provider recommendation docs and JSON support data.
+    Support(ProvidersSupportArgs),
     /// Recommend local provider/model presets from coding-agent readiness data.
     Recommend(ProvidersRecommendArgs),
 }
@@ -81,6 +83,34 @@ pub(crate) struct ProvidersMatrixArgs {
     /// Only include matrix rows that support the named feature.
     #[arg(long)]
     pub filter: Option<String>,
+}
+
+#[derive(Debug, Args)]
+pub(crate) struct ProvidersSupportArgs {
+    /// Path for the generated markdown recommendations page.
+    #[arg(long, default_value = "docs/src/provider-support.md")]
+    pub output: PathBuf,
+    /// Path for the generated JSON support data.
+    #[arg(long = "json-output", default_value = "docs/provider-support.json")]
+    pub json_output: PathBuf,
+    /// Hand-written provider support note overrides.
+    #[arg(
+        long,
+        default_value = "crates/harn-cli/data/provider_support_notes.toml"
+    )]
+    pub notes: PathBuf,
+    /// Coding-agent summary JSON to merge into empirical support rows.
+    #[arg(long = "empirical")]
+    pub empirical: Vec<PathBuf>,
+    /// Check whether markdown and JSON artifacts are up to date without writing.
+    #[arg(long)]
+    pub check: bool,
+    /// Print the generated markdown to stdout instead of writing artifacts.
+    #[arg(long, conflicts_with = "json")]
+    pub stdout: bool,
+    /// Print generated JSON to stdout instead of writing artifacts.
+    #[arg(long, conflicts_with = "stdout")]
+    pub json: bool,
 }
 
 #[derive(Debug, Args)]

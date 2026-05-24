@@ -194,6 +194,12 @@ pub fn catalog() -> Vec<SchemaEntry> {
             schema_json: None,
         },
         SchemaEntry {
+            command: "providers support",
+            schema_version: crate::commands::provider_support::PROVIDER_SUPPORT_SCHEMA_VERSION,
+            description: "Generated provider recommendation and support matrix.",
+            schema_json: None,
+        },
+        SchemaEntry {
             command: "check connector-matrix",
             schema_version: crate::commands::check::connector_matrix::CONNECTOR_MATRIX_SCHEMA_VERSION,
             description: "Connector package capability matrix rows.",

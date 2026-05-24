@@ -2949,6 +2949,48 @@ fn test_parses_providers_matrix_args() {
 }
 
 #[test]
+fn test_parses_providers_support_args() {
+    let cli = Cli::parse_from([
+        "harn",
+        "providers",
+        "support",
+        "--output",
+        "tmp/provider-support.md",
+        "--json-output",
+        "tmp/provider-support.json",
+        "--notes",
+        "provider_support_notes.toml",
+        "--empirical",
+        "summary.json",
+        "--check",
+    ]);
+
+    let Command::Providers(args) = cli.command.unwrap() else {
+        panic!("expected providers command");
+    };
+    let ProvidersCommand::Support(args) = args.command else {
+        panic!("expected providers support command");
+    };
+    assert_eq!(
+        args.output,
+        std::path::PathBuf::from("tmp/provider-support.md")
+    );
+    assert_eq!(
+        args.json_output,
+        std::path::PathBuf::from("tmp/provider-support.json")
+    );
+    assert_eq!(
+        args.notes,
+        std::path::PathBuf::from("provider_support_notes.toml")
+    );
+    assert_eq!(
+        args.empirical,
+        vec![std::path::PathBuf::from("summary.json")]
+    );
+    assert!(args.check);
+}
+
+#[test]
 fn test_parses_provider_catalog_args() {
     let cli = Cli::parse_from(["harn", "provider-catalog", "--available-only"]);
 
