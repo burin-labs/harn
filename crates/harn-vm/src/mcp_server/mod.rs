@@ -17,7 +17,7 @@ mod uri;
 #[cfg(test)]
 mod tests;
 
-const PROTOCOL_VERSION: &str = "2025-11-25";
+use crate::mcp_protocol::PROTOCOL_VERSION;
 pub use defs::{
     McpCompletionSource, McpPromptArgDef, McpPromptDef, McpResourceDef, McpResourceTemplateDef,
     McpToolDef,

@@ -2,7 +2,15 @@
 
 use serde_json::{json, Value as JsonValue};
 
+/// Stable, production MCP protocol version that Harn defaults to.
 pub const PROTOCOL_VERSION: &str = "2025-11-25";
+/// RC profile published alongside the stable version. Both clients and
+/// servers opt into this profile per request; the runtime never assumes
+/// a connection is RC-only unless the client signals it via metadata or
+/// HTTP headers.
+pub const DRAFT_PROTOCOL_VERSION: &str = "DRAFT-2026-v1";
+
+pub const METHOD_SERVER_DISCOVER: &str = "server/discover";
 pub const METHOD_TASKS_GET: &str = "tasks/get";
 pub const METHOD_TASKS_RESULT: &str = "tasks/result";
 pub const METHOD_TASKS_LIST: &str = "tasks/list";
@@ -16,9 +24,41 @@ pub const METHOD_ROOTS_LIST_CHANGED_NOTIFICATION: &str = "notifications/roots/li
 pub const METHOD_LOGGING_SET_LEVEL: &str = "logging/setLevel";
 pub const METHOD_LOGGING_MESSAGE_NOTIFICATION: &str = "notifications/message";
 pub const RELATED_TASK_META_KEY: &str = "io.modelcontextprotocol/related-task";
+
+/// RC request metadata keys carried inside `params._meta` so the server
+/// can identify the client's protocol target without a sticky session.
+pub const RC_META_KEY_PROTOCOL_VERSION: &str = "io.modelcontextprotocol/protocolVersion";
+pub const RC_META_KEY_CLIENT_INFO: &str = "io.modelcontextprotocol/clientInfo";
+pub const RC_META_KEY_CLIENT_CAPABILITIES: &str = "io.modelcontextprotocol/clientCapabilities";
+
+/// RC HTTP headers expected on streamable POSTs.
+pub const RC_HEADER_PROTOCOL_VERSION: &str = "mcp-protocol-version";
+pub const RC_HEADER_METHOD: &str = "mcp-method";
+pub const RC_HEADER_NAME: &str = "mcp-name";
+
+/// `resultType` discriminants exposed to RC clients on every response
+/// result body. Legacy clients never see this field, which preserves the
+/// pre-RC wire format byte-for-byte.
+pub const RESULT_TYPE_COMPLETE: &str = "complete";
+pub const RESULT_TYPE_INPUT_REQUIRED: &str = "input_required";
+
+/// JSON-RPC error code reserved by the RC for unsupported protocol
+/// version negotiation. Returned with `data.supported` listing the
+/// versions the peer accepts.
+pub const UNSUPPORTED_PROTOCOL_VERSION_CODE: i64 = -32004;
+
 pub const DEFAULT_TASK_POLL_INTERVAL_MS: u64 = 250;
 pub const DEFAULT_MCP_LIST_PAGE_SIZE: usize = 100;
 pub const MCP_LIST_PAGE_SIZE_ENV: &str = "HARN_MCP_LIST_PAGE_SIZE";
+
+/// Conservative cache hints emitted with list/read results when an RC
+/// client asked for them. Both surfaces fall back to these defaults so
+/// implementations can opt out per handler if a tighter or looser bound
+/// is appropriate.
+pub const DEFAULT_LIST_CACHE_TTL_MS: u64 = 5_000;
+pub const DEFAULT_LIST_CACHE_SCOPE: &str = "private";
+pub const DEFAULT_READ_CACHE_TTL_MS: u64 = 1_000;
+pub const DEFAULT_READ_CACHE_SCOPE: &str = "private";
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct McpListPage {
@@ -94,6 +134,292 @@ impl McpToolTaskSupport {
             Self::Forbidden => "forbidden",
         }
     }
+}
+
+/// Identifies which MCP profile a single request targets. The mode is
+/// negotiated per request from `_meta` or HTTP headers, never sticky.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum McpProtocolMode {
+    /// `2025-11-25` initialize/notify flow with session-id stickiness.
+    #[default]
+    Legacy,
+    /// RC profile: per-request metadata, optional cache hints, explicit
+    /// `resultType` discriminants, no session stickiness.
+    Modern,
+}
+
+impl McpProtocolMode {
+    pub fn is_modern(self) -> bool {
+        matches!(self, Self::Modern)
+    }
+
+    pub fn default_protocol_version(self) -> &'static str {
+        match self {
+            Self::Legacy => PROTOCOL_VERSION,
+            Self::Modern => DRAFT_PROTOCOL_VERSION,
+        }
+    }
+}
+
+/// Returns the protocol versions this Harn build understands when
+/// peers ask via `server/discover` or fail with `-32004`.
+pub fn supported_protocol_versions() -> &'static [&'static str] {
+    &[DRAFT_PROTOCOL_VERSION, PROTOCOL_VERSION]
+}
+
+pub fn is_supported_protocol_version(version: &str) -> bool {
+    supported_protocol_versions().contains(&version)
+}
+
+/// Parsed per-request RC metadata. All fields are optional; legacy
+/// requests yield an empty struct.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct McpRequestMetadata {
+    pub protocol_version: Option<String>,
+    pub client_info: Option<JsonValue>,
+    pub client_capabilities: Option<JsonValue>,
+}
+
+impl McpRequestMetadata {
+    pub fn mode(&self) -> McpProtocolMode {
+        match self.protocol_version.as_deref() {
+            Some(DRAFT_PROTOCOL_VERSION) => McpProtocolMode::Modern,
+            _ => McpProtocolMode::Legacy,
+        }
+    }
+}
+
+/// Extract RC metadata from a request's `params._meta` block. Unknown
+/// keys are ignored so this stays forward-compatible with future RC
+/// drafts.
+pub fn parse_request_metadata(params: &JsonValue) -> McpRequestMetadata {
+    let Some(meta) = params.get("_meta").and_then(JsonValue::as_object) else {
+        return McpRequestMetadata::default();
+    };
+    let protocol_version = meta
+        .get(RC_META_KEY_PROTOCOL_VERSION)
+        .and_then(JsonValue::as_str)
+        .map(str::to_string);
+    let client_info = meta.get(RC_META_KEY_CLIENT_INFO).cloned();
+    let client_capabilities = meta.get(RC_META_KEY_CLIENT_CAPABILITIES).cloned();
+    McpRequestMetadata {
+        protocol_version,
+        client_info,
+        client_capabilities,
+    }
+}
+
+/// Validate that a request's metadata targets a supported version.
+/// Returns an `Err(error_response)` payload ready to ship back to the
+/// client when the version is recognized but unsupported, leaving the
+/// caller to send the response. `Ok(None)` means legacy; `Ok(Some(meta))`
+/// means RC.
+pub fn enforce_request_protocol_version(
+    id: &JsonValue,
+    metadata: &McpRequestMetadata,
+) -> Result<Option<McpProtocolMode>, JsonValue> {
+    let Some(version) = metadata.protocol_version.as_deref() else {
+        return Ok(None);
+    };
+    if !is_supported_protocol_version(version) {
+        return Err(unsupported_protocol_version_response(id.clone(), version));
+    }
+    Ok(Some(metadata.mode()))
+}
+
+/// Build the `-32004 Unsupported protocol version` JSON-RPC error the
+/// RC expects so a client can retry with a mutually-supported version.
+pub fn unsupported_protocol_version_response(
+    id: impl Into<JsonValue>,
+    requested: &str,
+) -> JsonValue {
+    crate::jsonrpc::error_response_with_data(
+        id,
+        UNSUPPORTED_PROTOCOL_VERSION_CODE,
+        "Unsupported protocol version",
+        json!({
+            "supported": supported_protocol_versions(),
+            "requested": requested,
+        }),
+    )
+}
+
+/// HTTP-header validation outcome. Errors carry a JSON-RPC body so the
+/// HTTP layer can ship either an HTTP 400 with the body or a 200 with
+/// the JSON-RPC error — both paths exist in the RC spec.
+#[derive(Clone, Debug)]
+pub struct RcHttpHeaderOutcome {
+    pub mode: McpProtocolMode,
+    pub protocol_version: Option<String>,
+}
+
+/// Inspect the streamable HTTP request headers for the RC signals the
+/// server has to validate. The function is pure: it returns the
+/// negotiated mode and the version pinned by the client, or a JSON-RPC
+/// error body when the headers contradict the request body or name a
+/// version the server does not support.
+///
+/// `body_method` and `body_name` are the values pulled from the JSON-RPC
+/// body so the helper can detect a header/body mismatch.
+pub fn negotiate_rc_http_request<'a, F>(
+    headers: F,
+    body_method: Option<&str>,
+    body_name: Option<&str>,
+    request_id: &JsonValue,
+) -> Result<RcHttpHeaderOutcome, JsonValue>
+where
+    F: Fn(&str) -> Option<&'a str>,
+{
+    let mut outcome = RcHttpHeaderOutcome {
+        mode: McpProtocolMode::Legacy,
+        protocol_version: None,
+    };
+
+    if let Some(value) = headers(RC_HEADER_PROTOCOL_VERSION) {
+        if !is_supported_protocol_version(value) {
+            return Err(unsupported_protocol_version_response(
+                request_id.clone(),
+                value,
+            ));
+        }
+        outcome.protocol_version = Some(value.to_string());
+        if value == DRAFT_PROTOCOL_VERSION {
+            outcome.mode = McpProtocolMode::Modern;
+        }
+    }
+
+    if let Some(method_header) = headers(RC_HEADER_METHOD) {
+        outcome.mode = McpProtocolMode::Modern;
+        if let Some(body_method) = body_method {
+            if method_header != body_method {
+                return Err(crate::jsonrpc::error_response_with_data(
+                    request_id.clone(),
+                    -32600,
+                    "Mcp-Method header does not match request body",
+                    json!({
+                        "headerValue": method_header,
+                        "bodyMethod": body_method,
+                    }),
+                ));
+            }
+        }
+    }
+
+    if let Some(name_header) = headers(RC_HEADER_NAME) {
+        outcome.mode = McpProtocolMode::Modern;
+        let expected = body_name.unwrap_or_default();
+        if !expected.is_empty() && name_header != expected {
+            return Err(crate::jsonrpc::error_response_with_data(
+                request_id.clone(),
+                -32600,
+                "Mcp-Name header does not match request body",
+                json!({
+                    "headerValue": name_header,
+                    "bodyName": expected,
+                }),
+            ));
+        }
+    }
+
+    Ok(outcome)
+}
+
+/// Pulls the standard `Mcp-Name` header value for a request body. RC
+/// servers cross-check this against the header sent on the wire; RC
+/// clients use the same helper when authoring outbound requests.
+pub fn rc_name_header_value(method: &str, params: &JsonValue) -> Option<String> {
+    match method {
+        "tools/call" | "prompts/get" => params
+            .get("name")
+            .and_then(JsonValue::as_str)
+            .map(str::to_string),
+        "resources/read" => params
+            .get("uri")
+            .and_then(JsonValue::as_str)
+            .map(str::to_string),
+        _ => None,
+    }
+}
+
+/// Modify a JSON-RPC result body in place to include the RC's
+/// per-result discriminants when the response targets a Modern client.
+/// Legacy clients see no change.
+pub fn apply_rc_result_envelope(
+    result: &mut JsonValue,
+    mode: McpProtocolMode,
+    cache: Option<&McpCacheHint>,
+) {
+    if !mode.is_modern() {
+        return;
+    }
+    let Some(object) = result.as_object_mut() else {
+        return;
+    };
+    object
+        .entry("resultType")
+        .or_insert_with(|| JsonValue::String(RESULT_TYPE_COMPLETE.to_string()));
+    if let Some(hint) = cache {
+        if let Some(ttl) = hint.ttl_ms {
+            object.insert("ttlMs".to_string(), json!(ttl));
+        }
+        if let Some(scope) = hint.scope {
+            object.insert("cacheScope".to_string(), JsonValue::String(scope.into()));
+        }
+    }
+}
+
+/// Conservative cache hint surfaced on RC results. Servers can override
+/// the defaults per handler when they have a better answer; clients fall
+/// back to the constants in [`DEFAULT_LIST_CACHE_TTL_MS`].
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct McpCacheHint {
+    pub ttl_ms: Option<u64>,
+    pub scope: Option<&'static str>,
+}
+
+impl McpCacheHint {
+    pub const fn list_default() -> Self {
+        Self {
+            ttl_ms: Some(DEFAULT_LIST_CACHE_TTL_MS),
+            scope: Some(DEFAULT_LIST_CACHE_SCOPE),
+        }
+    }
+
+    pub const fn read_default() -> Self {
+        Self {
+            ttl_ms: Some(DEFAULT_READ_CACHE_TTL_MS),
+            scope: Some(DEFAULT_READ_CACHE_SCOPE),
+        }
+    }
+
+    pub const fn none() -> Self {
+        Self {
+            ttl_ms: None,
+            scope: None,
+        }
+    }
+}
+
+/// Build the canonical `server/discover` result both server surfaces
+/// share. Callers supply their advertised capabilities and serverInfo;
+/// the helper handles `resultType`, `supportedVersions`, instructions,
+/// and any RC-required envelope fields.
+pub fn server_discover_result(
+    capabilities: JsonValue,
+    server_info: JsonValue,
+    instructions: Option<&str>,
+) -> JsonValue {
+    let mut result = json!({
+        "resultType": RESULT_TYPE_COMPLETE,
+        "protocolVersion": DRAFT_PROTOCOL_VERSION,
+        "supportedVersions": supported_protocol_versions(),
+        "capabilities": capabilities,
+        "serverInfo": server_info,
+    });
+    if let Some(instructions) = instructions {
+        result["instructions"] = JsonValue::String(instructions.to_string());
+    }
+    result
 }
 
 pub fn unsupported_latest_spec_method(method: &str) -> Option<&'static UnsupportedMcpMethod> {
@@ -576,5 +902,181 @@ mod tests {
         let err = mcp_list_page(&json!({"cursor": "not-base64"}), 5, "resources/list")
             .expect_err("malformed cursor should fail");
         assert_eq!(err, "invalid resources/list cursor");
+    }
+
+    #[test]
+    fn rc_metadata_round_trips_through_meta_block() {
+        let params = json!({
+            "_meta": {
+                RC_META_KEY_PROTOCOL_VERSION: DRAFT_PROTOCOL_VERSION,
+                RC_META_KEY_CLIENT_INFO: {"name": "harn", "version": "x"},
+                RC_META_KEY_CLIENT_CAPABILITIES: {"roots": {}},
+            }
+        });
+        let meta = parse_request_metadata(&params);
+        assert_eq!(
+            meta.protocol_version.as_deref(),
+            Some(DRAFT_PROTOCOL_VERSION)
+        );
+        assert_eq!(
+            meta.client_info,
+            Some(json!({"name": "harn", "version": "x"}))
+        );
+        assert_eq!(meta.client_capabilities, Some(json!({"roots": {}})));
+        assert_eq!(meta.mode(), McpProtocolMode::Modern);
+    }
+
+    #[test]
+    fn rc_metadata_defaults_to_legacy_when_absent() {
+        let meta = parse_request_metadata(&json!({}));
+        assert_eq!(meta, McpRequestMetadata::default());
+        assert_eq!(meta.mode(), McpProtocolMode::Legacy);
+    }
+
+    #[test]
+    fn enforce_request_protocol_version_rejects_unknown_version() {
+        let meta = McpRequestMetadata {
+            protocol_version: Some("2099-01-01".to_string()),
+            ..Default::default()
+        };
+        let id = json!(7);
+        let err =
+            enforce_request_protocol_version(&id, &meta).expect_err("unknown version should error");
+        assert_eq!(err["id"], id);
+        assert_eq!(
+            err["error"]["code"],
+            json!(UNSUPPORTED_PROTOCOL_VERSION_CODE)
+        );
+        assert_eq!(err["error"]["data"]["requested"], json!("2099-01-01"));
+        let supported = err["error"]["data"]["supported"].as_array().unwrap();
+        assert!(supported.iter().any(|v| v == DRAFT_PROTOCOL_VERSION));
+        assert!(supported.iter().any(|v| v == PROTOCOL_VERSION));
+    }
+
+    #[test]
+    fn enforce_request_protocol_version_returns_modern_mode_for_draft() {
+        let meta = McpRequestMetadata {
+            protocol_version: Some(DRAFT_PROTOCOL_VERSION.to_string()),
+            ..Default::default()
+        };
+        let mode = enforce_request_protocol_version(&json!(1), &meta).unwrap();
+        assert_eq!(mode, Some(McpProtocolMode::Modern));
+    }
+
+    #[test]
+    fn negotiate_rc_http_headers_detects_draft_protocol_header() {
+        let headers = std::collections::HashMap::from([(
+            RC_HEADER_PROTOCOL_VERSION.to_string(),
+            DRAFT_PROTOCOL_VERSION.to_string(),
+        )]);
+        let outcome = negotiate_rc_http_request(
+            |key| headers.get(key).map(String::as_str),
+            Some("tools/list"),
+            None,
+            &json!(1),
+        )
+        .unwrap();
+        assert_eq!(outcome.mode, McpProtocolMode::Modern);
+        assert_eq!(
+            outcome.protocol_version.as_deref(),
+            Some(DRAFT_PROTOCOL_VERSION)
+        );
+    }
+
+    #[test]
+    fn negotiate_rc_http_headers_rejects_method_body_mismatch() {
+        let headers = std::collections::HashMap::from([(
+            RC_HEADER_METHOD.to_string(),
+            "tools/list".to_string(),
+        )]);
+        let err = negotiate_rc_http_request(
+            |key| headers.get(key).map(String::as_str),
+            Some("tools/call"),
+            None,
+            &json!(2),
+        )
+        .expect_err("header/body mismatch must error");
+        assert_eq!(err["error"]["code"], json!(-32600));
+        assert_eq!(err["error"]["data"]["headerValue"], json!("tools/list"));
+        assert_eq!(err["error"]["data"]["bodyMethod"], json!("tools/call"));
+    }
+
+    #[test]
+    fn negotiate_rc_http_headers_rejects_name_body_mismatch() {
+        let headers = std::collections::HashMap::from([
+            (RC_HEADER_METHOD.to_string(), "tools/call".to_string()),
+            (RC_HEADER_NAME.to_string(), "wrong".to_string()),
+        ]);
+        let err = negotiate_rc_http_request(
+            |key| headers.get(key).map(String::as_str),
+            Some("tools/call"),
+            Some("right"),
+            &json!(3),
+        )
+        .expect_err("name mismatch must error");
+        assert_eq!(err["error"]["code"], json!(-32600));
+        assert_eq!(err["error"]["data"]["bodyName"], json!("right"));
+    }
+
+    #[test]
+    fn rc_name_header_value_extracts_method_subject() {
+        assert_eq!(
+            rc_name_header_value("tools/call", &json!({"name": "demo"})),
+            Some("demo".to_string())
+        );
+        assert_eq!(
+            rc_name_header_value("prompts/get", &json!({"name": "p"})),
+            Some("p".to_string())
+        );
+        assert_eq!(
+            rc_name_header_value("resources/read", &json!({"uri": "harn://x"})),
+            Some("harn://x".to_string())
+        );
+        assert_eq!(rc_name_header_value("tools/list", &json!({})), None);
+    }
+
+    #[test]
+    fn apply_rc_result_envelope_adds_result_type_and_cache_only_for_modern() {
+        let mut modern = json!({"tools": []});
+        apply_rc_result_envelope(
+            &mut modern,
+            McpProtocolMode::Modern,
+            Some(&McpCacheHint::list_default()),
+        );
+        assert_eq!(modern["resultType"], json!(RESULT_TYPE_COMPLETE));
+        assert_eq!(modern["ttlMs"], json!(DEFAULT_LIST_CACHE_TTL_MS));
+        assert_eq!(modern["cacheScope"], json!(DEFAULT_LIST_CACHE_SCOPE));
+
+        let mut legacy = json!({"tools": []});
+        apply_rc_result_envelope(
+            &mut legacy,
+            McpProtocolMode::Legacy,
+            Some(&McpCacheHint::list_default()),
+        );
+        assert!(legacy.get("resultType").is_none());
+        assert!(legacy.get("ttlMs").is_none());
+        assert!(legacy.get("cacheScope").is_none());
+    }
+
+    #[test]
+    fn apply_rc_result_envelope_preserves_caller_provided_result_type() {
+        let mut result = json!({"resultType": RESULT_TYPE_INPUT_REQUIRED});
+        apply_rc_result_envelope(&mut result, McpProtocolMode::Modern, None);
+        assert_eq!(result["resultType"], json!(RESULT_TYPE_INPUT_REQUIRED));
+    }
+
+    #[test]
+    fn server_discover_result_advertises_both_versions() {
+        let discover = server_discover_result(
+            json!({"tools": {}}),
+            json!({"name": "harn", "version": "x"}),
+            Some("hello"),
+        );
+        assert_eq!(discover["resultType"], json!(RESULT_TYPE_COMPLETE));
+        assert_eq!(discover["protocolVersion"], json!(DRAFT_PROTOCOL_VERSION));
+        let supported = discover["supportedVersions"].as_array().unwrap();
+        assert!(supported.iter().any(|v| v == DRAFT_PROTOCOL_VERSION));
+        assert!(supported.iter().any(|v| v == PROTOCOL_VERSION));
+        assert_eq!(discover["instructions"], json!("hello"));
     }
 }

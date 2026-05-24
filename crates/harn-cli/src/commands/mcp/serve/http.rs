@@ -15,6 +15,8 @@ use futures::{stream, StreamExt};
 use serde_json::Value as JsonValue;
 use uuid::Uuid;
 
+use harn_vm::mcp_protocol;
+
 use crate::cli::McpServeArgs;
 #[cfg(test)]
 use crate::cli::OrchestratorLocalArgs;
@@ -165,12 +167,34 @@ async fn http_post_request(
         }
     };
 
+    // Validate the RC HTTP-level headers (`Mcp-Method`, `Mcp-Name`,
+    // explicit `MCP-Protocol-Version`) against the JSON-RPC body. The
+    // helper returns a JSON-RPC error body when the headers contradict
+    // the body so we can return the standard `-32004` /  `-32600` shapes
+    // rather than an opaque HTTP 400.
+    let body_method = request.get("method").and_then(JsonValue::as_str);
+    let body_params = request.get("params");
+    let body_name = body_method.and_then(|method| {
+        mcp_protocol::rc_name_header_value(method, body_params.unwrap_or(&JsonValue::Null))
+    });
+    let body_id = request.get("id").cloned().unwrap_or(JsonValue::Null);
+    let rc_outcome = match mcp_protocol::negotiate_rc_http_request(
+        |key| headers.get(key).and_then(|value| value.to_str().ok()),
+        body_method,
+        body_name.as_deref(),
+        &body_id,
+    ) {
+        Ok(outcome) => outcome,
+        Err(error_response) => return Json(error_response).into_response(),
+    };
+    let rc_session_optional = rc_outcome.mode.is_modern();
+
     let header_session = headers
         .get(MCP_SESSION_HEADER)
         .and_then(|value| value.to_str().ok())
         .map(str::to_string);
     let (session_id, session, created) =
-        match lookup_or_create_session(&state, &request, header_session) {
+        match lookup_or_create_session(&state, &request, header_session, rc_session_optional) {
             Ok(value) => value,
             Err(response) => return response,
         };
@@ -178,6 +202,17 @@ async fn http_post_request(
     let mut current = session.state.lock().expect("HTTP session poisoned").clone();
     if authenticated {
         current.authenticated = true;
+    }
+    if rc_outcome.mode.is_modern() {
+        // The RC HTTP path is stateless: the orchestrator must not lean
+        // on a sticky `MCP-Session-Id` for either initialization or
+        // capability negotiation. Stamping the session up-front keeps
+        // the per-request dispatcher's invariants intact while letting
+        // the handler return without ever advertising a session id.
+        current.protocol_mode = mcp_protocol::McpProtocolMode::Modern;
+        current.initialized = true;
+        current.authenticated = true;
+        current.protocol_version = mcp_protocol::DRAFT_PROTOCOL_VERSION.to_string();
     }
     // If the client opened a session-wide SSE (GET /mcp), wire the
     // active progress bus to it so per-request progress notifications
@@ -198,13 +233,22 @@ async fn http_post_request(
         Err(error) => return (StatusCode::INTERNAL_SERVER_ERROR, error).into_response(),
     };
     *session.state.lock().expect("HTTP session poisoned") = updated;
+    // Do not surface a session id to RC clients: the modern profile
+    // promises stateless POSTs, and the only reason we keep an internal
+    // session record is so list-change broadcasts have somewhere to
+    // attach when the client also opens a GET stream.
+    let session_id_to_emit = if rc_outcome.mode.is_modern() {
+        None
+    } else {
+        created.then_some(session_id.as_str())
+    };
+    let negotiated_version = rc_outcome
+        .protocol_version
+        .as_deref()
+        .unwrap_or(MCP_PROTOCOL_VERSION);
     if response_json.is_null() {
         let mut response = StatusCode::ACCEPTED.into_response();
-        attach_streamable_headers(
-            &mut response,
-            created.then_some(session_id.as_str()),
-            MCP_PROTOCOL_VERSION,
-        );
+        attach_streamable_headers(&mut response, session_id_to_emit, negotiated_version);
         return response;
     }
 
@@ -213,11 +257,7 @@ async fn http_post_request(
     } else {
         Json(response_json).into_response()
     };
-    attach_streamable_headers(
-        &mut response,
-        created.then_some(session_id.as_str()),
-        MCP_PROTOCOL_VERSION,
-    );
+    attach_streamable_headers(&mut response, session_id_to_emit, negotiated_version);
     response
 }
 
@@ -236,61 +276,63 @@ async fn http_get_stream(State(state): State<HttpState>, headers: HeaderMap) -> 
     if !accepts_media(&headers, "text/event-stream") {
         return StatusCode::NOT_ACCEPTABLE.into_response();
     }
-    let Some(session_id) = headers
-        .get(MCP_SESSION_HEADER)
+
+    // RC clients open a GET stream without an `MCP-Session-Id`: we mint
+    // a transient session record so the broadcast forwarders have a
+    // place to attach. Legacy clients still must look up their session
+    // by id, which preserves the existing error semantics.
+    let rc_mode = headers
+        .get(MCP_PROTOCOL_HEADER)
         .and_then(|value| value.to_str().ok())
-    else {
-        return StatusCode::BAD_REQUEST.into_response();
+        == Some(mcp_protocol::DRAFT_PROTOCOL_VERSION);
+    let header_session = headers
+        .get(MCP_SESSION_HEADER)
+        .and_then(|value| value.to_str().ok());
+    let (session, negotiated_version) = match header_session {
+        Some(session_id) => {
+            let Some(session) = state
+                .sessions
+                .lock()
+                .expect("MCP sessions poisoned")
+                .get(session_id)
+                .cloned()
+            else {
+                return StatusCode::NOT_FOUND.into_response();
+            };
+            (session, MCP_PROTOCOL_VERSION)
+        }
+        None if rc_mode => {
+            let session = Arc::new(HttpSession::default());
+            {
+                let mut guard = session.state.lock().expect("HTTP session poisoned");
+                guard.initialized = true;
+                guard.authenticated = true;
+                guard.protocol_mode = mcp_protocol::McpProtocolMode::Modern;
+                guard.protocol_version = mcp_protocol::DRAFT_PROTOCOL_VERSION.to_string();
+            }
+            // Keep the transient session reachable from the registry so
+            // resource-subscription bookkeeping in the forwarders has a
+            // stable record to mutate. The RC client never learns of an
+            // id; the registry entry exists purely for the broadcasters.
+            let session_id = Uuid::now_v7().to_string();
+            state
+                .sessions
+                .lock()
+                .expect("MCP sessions poisoned")
+                .insert(session_id, session.clone());
+            (session, mcp_protocol::DRAFT_PROTOCOL_VERSION)
+        }
+        None => return StatusCode::BAD_REQUEST.into_response(),
     };
-    let Some(session) = state
-        .sessions
-        .lock()
-        .expect("MCP sessions poisoned")
-        .get(session_id)
-        .cloned()
-    else {
-        return StatusCode::NOT_FOUND.into_response();
-    };
+
     let (tx, rx) = unbounded::<JsonValue>();
-    *session.sse_tx.lock().expect("SSE sender poisoned") = Some(tx);
-    if let Some(sender) = session
-        .sse_tx
-        .lock()
-        .expect("SSE sender poisoned")
-        .as_ref()
-        .cloned()
-    {
-        spawn_list_notification_forwarder(state.service.clone(), sender);
-    }
-    if let Some(sender) = session
-        .sse_tx
-        .lock()
-        .expect("SSE sender poisoned")
-        .as_ref()
-        .cloned()
-    {
-        spawn_resource_notification_forwarder(state.service.clone(), sender, session.clone());
-    }
-    if let Some(sender) = session
-        .sse_tx
-        .lock()
-        .expect("SSE sender poisoned")
-        .as_ref()
-        .cloned()
-    {
-        spawn_task_notification_forwarder(state.service.clone(), sender, session.clone());
-    }
-    if let Some(sender) = session
-        .sse_tx
-        .lock()
-        .expect("SSE sender poisoned")
-        .as_ref()
-        .cloned()
-    {
-        spawn_log_notification_forwarder(state.service.clone(), sender, session.clone());
-    }
+    *session.sse_tx.lock().expect("SSE sender poisoned") = Some(tx.clone());
+    spawn_list_notification_forwarder(state.service.clone(), tx.clone());
+    spawn_resource_notification_forwarder(state.service.clone(), tx.clone(), session.clone());
+    spawn_task_notification_forwarder(state.service.clone(), tx.clone(), session.clone());
+    spawn_log_notification_forwarder(state.service.clone(), tx, session.clone());
     let mut response = sse_response(rx).into_response();
-    attach_streamable_headers(&mut response, None, MCP_PROTOCOL_VERSION);
+    attach_streamable_headers(&mut response, None, negotiated_version);
     response
 }
 
@@ -515,6 +557,7 @@ fn lookup_or_create_session(
     state: &HttpState,
     request: &JsonValue,
     header_session: Option<String>,
+    session_optional: bool,
 ) -> Result<(String, Arc<HttpSession>, bool), Response> {
     let method = request
         .get("method")
@@ -525,9 +568,18 @@ fn lookup_or_create_session(
         if let Some(session) = sessions.get(&session_id).cloned() {
             return Ok((session_id, session, false));
         }
-        return Err((StatusCode::NOT_FOUND, "unknown MCP session").into_response());
+        // Modern clients are not required to mint or reuse a session;
+        // an unknown `MCP-Session-Id` quietly falls back to a fresh
+        // transient session so the same client can mix legacy and RC
+        // calls during the transition window.
+        if !session_optional {
+            return Err((StatusCode::NOT_FOUND, "unknown MCP session").into_response());
+        }
     }
-    if method != "initialize" {
+    if !session_optional
+        && method != "initialize"
+        && method != harn_vm::mcp_protocol::METHOD_SERVER_DISCOVER
+    {
         return Err((StatusCode::BAD_REQUEST, "missing MCP session").into_response());
     }
     let session_id = Uuid::now_v7().to_string();
@@ -617,7 +669,13 @@ fn validate_protocol_header(headers: &HeaderMap) -> Result<(), Box<Response>> {
     else {
         return Ok(());
     };
-    if value == MCP_PROTOCOL_VERSION || value == "2025-03-26" {
+    // Accept the stable production version, the prior `2025-03-26`
+    // shipping version (still in the wild), and the RC profile both
+    // sides opt into per request.
+    if value == MCP_PROTOCOL_VERSION
+        || value == "2025-03-26"
+        || value == mcp_protocol::DRAFT_PROTOCOL_VERSION
+    {
         Ok(())
     } else {
         Err(Box::new(StatusCode::BAD_REQUEST.into_response()))

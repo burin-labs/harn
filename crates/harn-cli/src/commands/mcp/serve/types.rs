@@ -157,6 +157,12 @@ pub(super) struct ConnectionState {
     pub(super) protocol_version: String,
     pub(super) subscribed_resources: BTreeSet<String>,
     pub(super) log_level: mcp_protocol::McpLogLevel,
+    /// RC clients negotiate per request; the orchestrator records the
+    /// last observed mode on the connection so list-change notifications
+    /// or progress streams know which envelope shape to send. Defaults
+    /// to [`McpProtocolMode::Legacy`] until the first RC-tagged request
+    /// arrives.
+    pub(super) protocol_mode: mcp_protocol::McpProtocolMode,
 }
 
 impl Default for ConnectionState {
@@ -168,6 +174,7 @@ impl Default for ConnectionState {
             protocol_version: MCP_PROTOCOL_VERSION.to_string(),
             subscribed_resources: BTreeSet::new(),
             log_level: mcp_protocol::McpLogLevel::Info,
+            protocol_mode: mcp_protocol::McpProtocolMode::Legacy,
         }
     }
 }

@@ -1,6 +1,9 @@
 use serde_json::{json, Value as JsonValue};
 
-use harn_vm::mcp_protocol;
+use harn_vm::mcp_protocol::{
+    self, apply_rc_result_envelope, enforce_request_protocol_version, parse_request_metadata,
+    server_discover_result, McpCacheHint, McpProtocolMode,
+};
 
 use super::types::{ConnectionState, McpOrchestratorService};
 use super::MCP_PROTOCOL_VERSION;
@@ -18,6 +21,32 @@ impl McpOrchestratorService {
             .unwrap_or_default();
         let params = request.get("params").cloned().unwrap_or_else(|| json!({}));
 
+        // Per-request RC negotiation: a Modern client tags every payload
+        // with `_meta.io.modelcontextprotocol/protocolVersion`. We never
+        // promote a connection to Modern based on initialize alone — the
+        // RC explicitly forbids that — but a session may still receive
+        // a mix of Legacy and Modern requests over its lifetime.
+        let metadata = parse_request_metadata(&params);
+        let request_mode = match enforce_request_protocol_version(&id, &metadata) {
+            Ok(Some(mode)) => mode,
+            Ok(None) => McpProtocolMode::Legacy,
+            Err(response) => return response,
+        };
+
+        // server/discover and initialize are the two compatibility
+        // probes: server/discover is the modern entry point, initialize
+        // is the legacy one. Both must work without prior session state.
+        if method == mcp_protocol::METHOD_SERVER_DISCOVER {
+            session.protocol_mode = McpProtocolMode::Modern;
+            // The orchestrator advertises itself as authenticated once
+            // it has accepted a discover from a peer that survived the
+            // HTTP-layer auth check; legacy clients still get the same
+            // capability negotiation through `initialize`.
+            session.authenticated = true;
+            session.initialized = true;
+            return self.handle_server_discover(id);
+        }
+
         if method == "initialize" {
             return self.handle_initialize(id, session, &params);
         }
@@ -26,9 +55,22 @@ impl McpOrchestratorService {
             return JsonValue::Null;
         }
 
+        // RC clients can skip `initialize` entirely: any RC-tagged
+        // request implicitly bootstraps the session and pins the
+        // connection mode forward. Legacy clients still get the
+        // original "server not initialized" guard.
+        if request_mode.is_modern() {
+            session.initialized = true;
+            session.authenticated = true;
+            session.protocol_mode = McpProtocolMode::Modern;
+            session.protocol_version = mcp_protocol::DRAFT_PROTOCOL_VERSION.to_string();
+        }
+
         if !session.initialized && method != "ping" {
             return harn_vm::jsonrpc::error_response(id, -32002, "server not initialized");
         }
+        let mode = session.protocol_mode;
+
         if let Some(response) =
             mcp_protocol::unsupported_client_bound_method_response(id.clone(), method)
         {
@@ -41,21 +83,39 @@ impl McpOrchestratorService {
             mcp_protocol::METHOD_LOGGING_SET_LEVEL => {
                 self.handle_logging_set_level(id, session, &params)
             }
-            "tools/list" => self.handle_tools_list(id, &params),
-            "tools/call" => self.handle_tools_call(id, session, &params).await,
+            "tools/list" => apply_envelope(self.handle_tools_list(id, &params), mode, list_hint()),
+            "tools/call" => apply_envelope(
+                self.handle_tools_call(id, session, &params).await,
+                mode,
+                None,
+            ),
             mcp_protocol::METHOD_TASKS_GET => self.handle_tasks_get(id, session, &params),
             mcp_protocol::METHOD_TASKS_RESULT => {
                 self.handle_tasks_result(id, session, &params).await
             }
             mcp_protocol::METHOD_TASKS_LIST => self.handle_tasks_list(id, session, &params),
             mcp_protocol::METHOD_TASKS_CANCEL => self.handle_tasks_cancel(id, session, &params),
-            "resources/list" => self.handle_resources_list(id, &params).await,
-            "resources/read" => self.handle_resources_read(id, &params).await,
+            "resources/list" => apply_envelope(
+                self.handle_resources_list(id, &params).await,
+                mode,
+                list_hint(),
+            ),
+            "resources/read" => apply_envelope(
+                self.handle_resources_read(id, &params).await,
+                mode,
+                read_hint(),
+            ),
             "resources/subscribe" => self.handle_resources_subscribe(id, session, &params).await,
             "resources/unsubscribe" => self.handle_resources_unsubscribe(id, session, &params),
-            "resources/templates/list" => self.handle_resource_templates_list(id, &params),
-            "prompts/list" => self.handle_prompts_list(id, &params),
-            "prompts/get" => self.handle_prompts_get(id, &params),
+            "resources/templates/list" => apply_envelope(
+                self.handle_resource_templates_list(id, &params),
+                mode,
+                list_hint(),
+            ),
+            "prompts/list" => {
+                apply_envelope(self.handle_prompts_list(id, &params), mode, list_hint())
+            }
+            "prompts/get" => apply_envelope(self.handle_prompts_get(id, &params), mode, None),
             mcp_protocol::METHOD_COMPLETION_COMPLETE => {
                 self.handle_completion_complete(id, &params).await
             }
@@ -67,6 +127,17 @@ impl McpOrchestratorService {
                 harn_vm::jsonrpc::error_response(id, -32601, &format!("Method not found: {method}"))
             }
         }
+    }
+
+    pub(super) fn handle_server_discover(&self, id: JsonValue) -> JsonValue {
+        harn_vm::jsonrpc::response(
+            id,
+            server_discover_result(
+                orchestrator_capabilities(),
+                orchestrator_server_info(),
+                Some("Expose Harn trigger and orchestrator controls over MCP."),
+            ),
+        )
     }
 
     pub(super) fn handle_initialize(
@@ -106,27 +177,20 @@ impl McpOrchestratorService {
             session.authenticated = true;
         }
         session.initialized = true;
+        session.protocol_mode = McpProtocolMode::Legacy;
 
-        harn_vm::jsonrpc::response(
-            id,
-            json!({
-                "protocolVersion": MCP_PROTOCOL_VERSION,
-                "capabilities": {
-                    "tools": { "listChanged": true },
-                    "resources": { "listChanged": true, "subscribe": true },
-                    "prompts": { "listChanged": true },
-                    "logging": mcp_protocol::logging_capability(),
-                    "tasks": mcp_protocol::tasks_capability(),
-                    "completions": mcp_protocol::completions_capability(),
-                },
-                "serverInfo": {
-                    "name": "harn-orchestrator",
-                    "title": "Harn Orchestrator MCP",
-                    "version": env!("CARGO_PKG_VERSION"),
-                },
-                "instructions": "Expose Harn trigger and orchestrator controls over MCP."
-            }),
-        )
+        let mut result = json!({
+            "protocolVersion": MCP_PROTOCOL_VERSION,
+            "capabilities": orchestrator_capabilities(),
+            "serverInfo": orchestrator_server_info(),
+            "instructions": "Expose Harn trigger and orchestrator controls over MCP."
+        });
+        // Legacy initialize never carries `resultType`, so this leaves
+        // the existing wire bytes unchanged. The branch keeps the path
+        // symmetric in case a Modern client routes through here for
+        // backwards-compat probing.
+        apply_rc_result_envelope(&mut result, session.protocol_mode, None);
+        harn_vm::jsonrpc::response(id, result)
     }
 
     pub(super) fn handle_prompts_list(&self, id: JsonValue, params: &JsonValue) -> JsonValue {
@@ -342,6 +406,51 @@ impl McpOrchestratorService {
             ],
         )
     }
+}
+
+/// Capabilities advertised by both `initialize` and `server/discover`.
+/// Kept in a single place so the two paths cannot drift apart silently.
+pub(super) fn orchestrator_capabilities() -> JsonValue {
+    json!({
+        "tools": { "listChanged": true },
+        "resources": { "listChanged": true, "subscribe": true },
+        "prompts": { "listChanged": true },
+        "logging": mcp_protocol::logging_capability(),
+        "tasks": mcp_protocol::tasks_capability(),
+        "completions": mcp_protocol::completions_capability(),
+    })
+}
+
+pub(super) fn orchestrator_server_info() -> JsonValue {
+    json!({
+        "name": "harn-orchestrator",
+        "title": "Harn Orchestrator MCP",
+        "version": env!("CARGO_PKG_VERSION"),
+    })
+}
+
+fn list_hint() -> Option<&'static McpCacheHint> {
+    const LIST: McpCacheHint = McpCacheHint::list_default();
+    Some(&LIST)
+}
+
+fn read_hint() -> Option<&'static McpCacheHint> {
+    const READ: McpCacheHint = McpCacheHint::read_default();
+    Some(&READ)
+}
+
+/// Stamp the RC `resultType`/cache-hint envelope onto a handler's
+/// response in one place. Error responses pass through untouched —
+/// the RC envelope only applies to `result` bodies.
+fn apply_envelope(
+    mut response: JsonValue,
+    mode: McpProtocolMode,
+    hint: Option<&'static McpCacheHint>,
+) -> JsonValue {
+    if let Some(result) = response.get_mut("result") {
+        apply_rc_result_envelope(result, mode, hint);
+    }
+    response
 }
 
 pub(super) fn paginated_list_response(
