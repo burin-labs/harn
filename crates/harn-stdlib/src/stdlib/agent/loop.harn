@@ -1559,6 +1559,9 @@ pub fn agent_loop(message, system_prompt = nil, options = nil) {
   if session?.done {
     return session.result
   }
+  if opts?._tool_format_capability_gap != nil {
+    agent_emit_event(session.session_id, "capability_gap", opts._tool_format_capability_gap)
+  }
   defer {
     try {
       __host_mcp_disconnect(session.session_id)

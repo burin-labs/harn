@@ -697,6 +697,19 @@ pub enum AgentEvent {
         session_id: String,
         warning: serde_json::Value,
     },
+    /// Emitted when a concrete provider/model pair lacks a catalog
+    /// recommendation for a capability and the runtime chooses a fallback.
+    CapabilityGap {
+        session_id: String,
+        level: String,
+        capability: String,
+        provider: String,
+        model: String,
+        fallback_tool_format: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        requested_tool_format: Option<String>,
+        message: String,
+    },
     /// Emitted when a `tool_caller` middleware (see std/llm/tool_middleware)
     /// attaches structured audit metadata to a tool call — typically a
     /// user-facing `summary`, a `description`, an ACP-style `kind`, an MCP
@@ -841,6 +854,7 @@ impl AgentEvent {
             | Self::HitlResolved { session_id, .. }
             | Self::LoopControlDecision { session_id, .. }
             | Self::AgentLoopStallWarning { session_id, .. }
+            | Self::CapabilityGap { session_id, .. }
             | Self::ToolCallAudit { session_id, .. }
             | Self::CacheHit { session_id, .. }
             | Self::CacheMiss { session_id, .. }

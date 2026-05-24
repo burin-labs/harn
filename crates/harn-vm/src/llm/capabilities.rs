@@ -862,7 +862,10 @@ fn defaults_to_caps(defaults: &ProviderDefaults) -> Capabilities {
         thinking_disable_directive: None,
         auto_reasoning_overrides: None,
     };
-    rule_to_caps(&empty, defaults)
+    let mut caps = rule_to_caps(&empty, defaults);
+    caps.preferred_tool_format = None;
+    caps.tool_mode_parity = None;
+    caps
 }
 
 fn rule_to_caps(rule: &ProviderRule, defaults: &ProviderDefaults) -> Capabilities {

@@ -223,6 +223,8 @@ let caps = provider_capabilities("anthropic", "claude-opus-4-7")
 // `text_tool_wire_format_supported` directly when you need to distinguish.
 // Presets use `preferred_tool_format` when it is present, which keeps known
 // native/text divergences in capability data instead of provider-name branches.
+// `agent_loop` uses the same field when `tool_format` is unset or `"auto"`;
+// missing recommendations fall back to text tools and emit `capability_gap`.
 if caps.tools && "bm25" in caps.tool_search {
   llm_call(prompt, sys, {
     tools: registry,

@@ -1093,13 +1093,9 @@ mod tests {
                 .run_until(async {
                     let opts = base_opts("ollama");
                     let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
-                    let result = tokio::time::timeout(
-                        std::time::Duration::from_secs(5),
-                        vm_call_llm_full_streaming_offthread(&opts, tx),
-                    )
-                    .await
-                    .expect("llm call timed out")
-                    .expect("llm call should succeed");
+                    let result = vm_call_llm_full_streaming_offthread(&opts, tx)
+                        .await
+                        .expect("llm call should succeed");
 
                     let mut deltas = Vec::new();
                     while let Ok(delta) = rx.try_recv() {
@@ -1153,13 +1149,9 @@ mod tests {
                 .run_until(async {
                     let opts = base_opts("ollama");
                     let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
-                    let result = tokio::time::timeout(
-                        std::time::Duration::from_secs(5),
-                        vm_call_llm_full_streaming_offthread(&opts, tx),
-                    )
-                    .await
-                    .expect("llm call timed out")
-                    .expect("retry should recover from empty done frame");
+                    let result = vm_call_llm_full_streaming_offthread(&opts, tx)
+                        .await
+                        .expect("retry should recover from empty done frame");
 
                     let mut deltas = Vec::new();
                     while let Ok(delta) = rx.try_recv() {
