@@ -3,6 +3,8 @@ use std::path::{Path, PathBuf};
 use std::process;
 
 use crate::cli::{NewArgs, ProjectTemplate};
+use crate::dispatch;
+use crate::env_guard::ScopedEnvVar;
 use crate::package::current_harn_range_example;
 
 pub(crate) fn resolve_new_args(
@@ -25,7 +27,13 @@ pub(crate) fn resolve_new_args(
     }
 }
 
-pub(crate) fn init_project(name: Option<&str>, template: ProjectTemplate) {
+/// `harn init` and `harn new` dispatch shim. Resolves the destination
+/// directory in Rust (matches the legacy behavior that errors if a
+/// non-`init` name already exists), then delegates the template render +
+/// file-write loop to `cli/scaffold/init.harn` (harn#2308 / W8 of the
+/// harn-cli self-host epic). The legacy Rust implementation stays
+/// behind `HARN_CLI_IMPL=rust` until the C1 ratchet (#2314) removes it.
+pub(crate) async fn init_project(name: Option<&str>, template: ProjectTemplate) {
     let dir = match name {
         Some(n) => {
             let dir = PathBuf::from(n);
@@ -37,18 +45,76 @@ pub(crate) fn init_project(name: Option<&str>, template: ProjectTemplate) {
                 eprintln!("Failed to create directory: {e}");
                 process::exit(1);
             });
-            println!("Creating project '{}'...", n);
             dir
         }
-        None => {
-            println!("Initializing harn project in current directory...");
-            PathBuf::from(".")
-        }
+        None => PathBuf::from("."),
     };
 
     let project_name = name
         .and_then(|value| Path::new(value).file_name().and_then(|name| name.to_str()))
-        .unwrap_or("my-project");
+        .unwrap_or("my-project")
+        .to_string();
+
+    if std::env::var("HARN_CLI_IMPL").as_deref() == Ok("rust") {
+        init_project_rust(name, &dir, &project_name, template);
+        return;
+    }
+
+    let exit = dispatch_to_script(name, &dir, &project_name, template).await;
+    if exit != 0 {
+        process::exit(exit);
+    }
+}
+
+async fn dispatch_to_script(
+    name: Option<&str>,
+    dir: &Path,
+    project_name: &str,
+    template: ProjectTemplate,
+) -> i32 {
+    let dir_str = dir.display().to_string();
+    let template_id = template_id(template);
+    let harn_range = current_harn_range_example();
+    let name_str = name.unwrap_or("");
+    let _name_env = ScopedEnvVar::set("HARN_INIT_NAME", name_str);
+    let _project_env = ScopedEnvVar::set("HARN_INIT_PROJECT_NAME", project_name);
+    let _dir_env = ScopedEnvVar::set("HARN_INIT_DIR", &dir_str);
+    let _template_env = ScopedEnvVar::set("HARN_INIT_TEMPLATE", template_id);
+    let _range_env = ScopedEnvVar::set("HARN_INIT_HARN_RANGE", &harn_range);
+    let _mode_env = ScopedEnvVar::set(
+        "HARN_INIT_MODE",
+        if name.is_some() { "new" } else { "init" },
+    );
+    dispatch::dispatch_to_embedded_script("scaffold/init", Vec::new(), /* json_mode */ false).await
+}
+
+fn template_id(template: ProjectTemplate) -> &'static str {
+    match template {
+        ProjectTemplate::Basic => "basic",
+        ProjectTemplate::Agent => "agent",
+        ProjectTemplate::Chat => "chat",
+        ProjectTemplate::McpServer => "mcp-server",
+        ProjectTemplate::Eval => "eval",
+        ProjectTemplate::PipelineLab => "pipeline-lab",
+        ProjectTemplate::Package => "package",
+        ProjectTemplate::Connector => "connector",
+    }
+}
+
+/// Legacy Rust implementation. Kept behind `HARN_CLI_IMPL=rust` for the
+/// parity harness (#2299). The C1 ratchet (#2314) removes this path
+/// once the `.harn` impl is the production default everywhere.
+fn init_project_rust(
+    name: Option<&str>,
+    dir: &Path,
+    project_name: &str,
+    template: ProjectTemplate,
+) {
+    if let Some(n) = name {
+        println!("Creating project '{}'...", n);
+    } else {
+        println!("Initializing harn project in current directory...");
+    }
     for (relative_path, content) in template_files(project_name, template) {
         write_if_new(&dir.join(relative_path), &content);
     }
