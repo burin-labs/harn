@@ -6,6 +6,7 @@ pipeline test(task) {
       id: "legacy-sha1",
       secret: "legacy-secret",
       algorithm: "sha1",
+      allow_legacy_sha1: true,
       signature_header: "x-hub-signature",
       signature_prefix: "sha1=",
       delivery_id_header: "x-legacy-delivery",

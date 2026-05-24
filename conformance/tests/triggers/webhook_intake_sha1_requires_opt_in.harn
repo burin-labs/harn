@@ -1,0 +1,13 @@
+pipeline test(task) {
+  webhook_intake_register(
+    {
+      id: "sha1-without-opt-in",
+      secret: "legacy-secret",
+      algorithm: "sha1",
+      signature_header: "x-hub-signature",
+      signature_prefix: "sha1=",
+      delivery_id_header: "x-legacy-delivery",
+      topic: "tests.intake.legacy",
+    },
+  )
+}

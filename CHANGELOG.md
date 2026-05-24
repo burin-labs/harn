@@ -193,6 +193,10 @@ condensed series summaries instead of full per-patch history.
 
 ### Fixed
 
+- **Legacy SHA-1 webhook HMACs now require explicit opt-in (#2260).**
+  `webhook_intake_register(..., algorithm: "sha1")` and
+  `std/connectors/shared::verify_hmac_signature(..., "sha1")` now require
+  `allow_legacy_sha1: true`; SHA-256 remains the default for new connectors.
 - **Secret redaction and scanning now share one token catalog.**
   `secret_scan`, token redaction, and provider-error sanitization now use the
   same high-confidence secret patterns. JWTs, Bearer tokens, and full private

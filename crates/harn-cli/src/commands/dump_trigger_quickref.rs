@@ -243,14 +243,15 @@ the connector that consumes the topic.\n\n",
     out.push_str("Builtins:\n\n");
     out.push_str(
         "- `webhook_intake_register(config) -> dict` — register an intake. Returns\n  \
-`{ id, path, topic, signature_header, signature_prefix,\n  signature_encoding, algorithm, delivery_id_header,\n  dedupe_ttl_seconds }`. Config keys:\n  \
+`{ id, path, topic, signature_header, signature_prefix,\n  signature_encoding, algorithm, allow_legacy_sha1, delivery_id_header,\n  dedupe_ttl_seconds }`. Config keys:\n  \
 - `id` (optional) — pin the intake id; one is generated if omitted.\n  \
 - `path` (optional) — HTTP path scope. When set, `webhook_intake_feed`\n    rejects deliveries on a different path.\n  \
 - `secret` (string or bytes, required) — HMAC key.\n  \
 - `signature_header` (required) — e.g. `\"x-hub-signature-256\"`.\n  \
 - `signature_prefix` — defaults to `\"<algorithm>=\"`. Pass `\"\"` to opt out.\n  \
 - `signature_encoding` — `\"hex\"` (default) or `\"base64\"`.\n  \
-- `algorithm` — `\"sha256\"` (default) or `\"sha1\"` (legacy).\n  \
+- `algorithm` — `\"sha256\"` (default) or legacy `\"sha1\"` when `allow_legacy_sha1` is true.\n  \
+- `allow_legacy_sha1` — explicit opt-in for existing providers that still sign with HMAC-SHA1.\n  \
 - `delivery_id_header` (required) — e.g. `\"x-github-delivery\"`.\n  \
 - `topic` (required) — event-log topic accepted deliveries are appended to.\n  \
 - `dedupe_ttl_seconds` — defaults to 24h.\n\

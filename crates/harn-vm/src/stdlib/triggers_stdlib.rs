@@ -2399,13 +2399,22 @@ fn parse_webhook_intake_config(
     let delivery_id_header =
         required_string(config, "delivery_id_header", "webhook_intake_register")?;
     let topic = required_string(config, "topic", "webhook_intake_register")?;
+    let allow_legacy_sha1 =
+        optional_bool(config, "allow_legacy_sha1", "webhook_intake_register")?.unwrap_or(false);
 
     let algorithm = match optional_string(config, "algorithm").as_deref() {
-        Some(raw) => HmacAlgorithm::parse(raw).ok_or_else(|| {
-            VmError::Runtime(format!(
-                "webhook_intake_register: unsupported algorithm `{raw}`, expected sha256 or sha1"
-            ))
-        })?,
+        Some(raw) if HmacAlgorithm::is_legacy_sha1_alias(raw) && !allow_legacy_sha1 => {
+            return Err(VmError::Runtime(
+                "webhook_intake_register: algorithm `sha1` is legacy; set `allow_legacy_sha1: true` to verify HMAC-SHA1 signatures".to_string(),
+            ));
+        }
+        Some(raw) => {
+            HmacAlgorithm::parse_with_legacy_sha1(raw, allow_legacy_sha1).ok_or_else(|| {
+                VmError::Runtime(format!(
+                    "webhook_intake_register: unsupported algorithm `{raw}`, expected sha256"
+                ))
+            })?
+        }
         None => HmacAlgorithm::default(),
     };
     let signature_encoding = match optional_string(config, "signature_encoding").as_deref() {
@@ -2449,6 +2458,7 @@ fn parse_webhook_intake_config(
         signature_prefix,
         signature_encoding,
         algorithm,
+        allow_legacy_sha1,
         secret,
         delivery_id_header,
         topic,

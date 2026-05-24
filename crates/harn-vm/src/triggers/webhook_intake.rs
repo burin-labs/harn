@@ -86,11 +86,22 @@ pub enum HmacAlgorithm {
 
 impl HmacAlgorithm {
     pub fn parse(raw: &str) -> Option<Self> {
+        Self::parse_with_legacy_sha1(raw, false)
+    }
+
+    pub fn parse_with_legacy_sha1(raw: &str, allow_legacy_sha1: bool) -> Option<Self> {
         match raw.trim().to_ascii_lowercase().as_str() {
             "" | "sha256" | "hmac-sha256" => Some(Self::Sha256),
-            "sha1" | "hmac-sha1" => Some(Self::Sha1),
+            "sha1" | "hmac-sha1" if allow_legacy_sha1 => Some(Self::Sha1),
             _ => None,
         }
+    }
+
+    pub fn is_legacy_sha1_alias(raw: &str) -> bool {
+        matches!(
+            raw.trim().to_ascii_lowercase().as_str(),
+            "sha1" | "hmac-sha1"
+        )
     }
 
     pub fn as_str(&self) -> &'static str {
@@ -136,6 +147,7 @@ pub struct WebhookIntakeConfig {
     pub signature_prefix: Option<String>,
     pub signature_encoding: SignatureEncoding,
     pub algorithm: HmacAlgorithm,
+    pub allow_legacy_sha1: bool,
     pub secret: Vec<u8>,
     pub delivery_id_header: String,
     pub topic: String,
@@ -191,6 +203,7 @@ pub struct WebhookIntakeSnapshot {
     pub signature_prefix: Option<String>,
     pub signature_encoding: String,
     pub algorithm: String,
+    pub allow_legacy_sha1: bool,
     pub delivery_id_header: String,
     pub dedupe_ttl_seconds: u64,
 }
@@ -299,6 +312,11 @@ pub fn register_webhook_intake(
             "secret cannot be empty".to_string(),
         ));
     }
+    if config.algorithm == HmacAlgorithm::Sha1 && !config.allow_legacy_sha1 {
+        return Err(WebhookIntakeError::Config(
+            "algorithm `sha1` is legacy; set `allow_legacy_sha1: true` to verify SHA-1 HMAC signatures for an existing provider".to_string(),
+        ));
+    }
     Topic::new(config.topic.clone())
         .map_err(|error| WebhookIntakeError::Config(format!("invalid topic: {error}")))?;
 
@@ -331,6 +349,7 @@ pub fn register_webhook_intake(
             signature_prefix: config.signature_prefix.clone(),
             signature_encoding: config.signature_encoding.as_str().to_string(),
             algorithm: config.algorithm.as_str().to_string(),
+            allow_legacy_sha1: config.allow_legacy_sha1,
             delivery_id_header: normalize_header(&config.delivery_id_header),
             dedupe_ttl_seconds: config.dedupe_ttl.as_secs(),
         };
@@ -705,6 +724,7 @@ mod tests {
             signature_prefix: Some("sha256=".to_string()),
             signature_encoding: SignatureEncoding::Hex,
             algorithm: HmacAlgorithm::Sha256,
+            allow_legacy_sha1: false,
             secret: secret.to_vec(),
             delivery_id_header: "x-test-delivery".to_string(),
             topic: "tests.webhook_intake".to_string(),
@@ -845,6 +865,7 @@ mod tests {
         let body = b"legacy".to_vec();
         let mut config = make_config(b"legacy-secret");
         config.algorithm = HmacAlgorithm::Sha1;
+        config.allow_legacy_sha1 = true;
         config.signature_prefix = Some("sha1=".to_string());
         let snapshot = register_webhook_intake(config.clone()).expect("register");
 
@@ -856,6 +877,27 @@ mod tests {
         .await
         .expect("feed");
         assert_eq!(outcome.status, "accepted");
+    }
+
+    #[test]
+    fn hmac_algorithm_parser_gates_sha1() {
+        assert_eq!(HmacAlgorithm::parse("sha256"), Some(HmacAlgorithm::Sha256));
+        assert_eq!(HmacAlgorithm::parse("sha1"), None);
+        assert_eq!(
+            HmacAlgorithm::parse_with_legacy_sha1("sha1", true),
+            Some(HmacAlgorithm::Sha1)
+        );
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn rejects_sha1_without_legacy_opt_in() {
+        reset().await;
+        let mut config = make_config(b"legacy-secret");
+        config.algorithm = HmacAlgorithm::Sha1;
+        config.signature_prefix = Some("sha1=".to_string());
+
+        let error = register_webhook_intake(config).expect_err("sha1 requires opt-in");
+        assert!(error.to_string().contains("set `allow_legacy_sha1: true`"));
     }
 
     #[tokio::test(flavor = "current_thread")]

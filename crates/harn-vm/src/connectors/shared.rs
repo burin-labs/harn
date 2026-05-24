@@ -25,14 +25,25 @@ impl<T: Connector + ?Sized> ConnectorBase for T {}
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum HmacSignatureAlgorithm {
-    Sha1,
+    LegacySha1,
     Sha256,
 }
 
 impl HmacSignatureAlgorithm {
     pub fn parse(raw: &str) -> Result<Self, ConnectorError> {
+        Self::parse_with_legacy_sha1(raw, false)
+    }
+
+    pub fn parse_with_legacy_sha1(
+        raw: &str,
+        allow_legacy_sha1: bool,
+    ) -> Result<Self, ConnectorError> {
         match raw.trim().to_ascii_lowercase().as_str() {
-            "sha1" | "hmac-sha1" => Ok(Self::Sha1),
+            "sha1" | "hmac-sha1" if allow_legacy_sha1 => Ok(Self::LegacySha1),
+            "sha1" | "hmac-sha1" => Err(ConnectorError::Unsupported(
+                "HMAC-SHA1 is legacy; set `allow_legacy_sha1: true` for an existing provider"
+                    .to_string(),
+            )),
             "sha256" | "hmac-sha256" | "" => Ok(Self::Sha256),
             other => Err(ConnectorError::Unsupported(format!(
                 "unsupported HMAC signature algorithm `{other}`"
@@ -62,7 +73,7 @@ pub fn verify_hmac_signature(
         detail: error.to_string(),
     })?;
     let expected = match algorithm {
-        HmacSignatureAlgorithm::Sha1 => hmac::hmac_sha1(secret.as_bytes(), body),
+        HmacSignatureAlgorithm::LegacySha1 => hmac::hmac_sha1(secret.as_bytes(), body),
         HmacSignatureAlgorithm::Sha256 => hmac::hmac_sha256(secret.as_bytes(), body),
     };
     Ok(hmac::secure_eq(&expected, &provided))
@@ -387,6 +398,27 @@ mod tests {
             signature,
             "It's a Secret to Everybody",
             HmacSignatureAlgorithm::Sha256,
+        )
+        .unwrap());
+    }
+
+    #[test]
+    fn hmac_signature_sha1_requires_explicit_legacy_algorithm() {
+        let parse_error = HmacSignatureAlgorithm::parse("sha1").expect_err("sha1 is gated");
+        assert!(parse_error.to_string().contains("allow_legacy_sha1"));
+        assert_eq!(
+            HmacSignatureAlgorithm::parse_with_legacy_sha1("sha1", true).unwrap(),
+            HmacSignatureAlgorithm::LegacySha1
+        );
+
+        let body = b"legacy";
+        let digest = hmac::hmac_sha1(b"legacy-secret", body);
+        let signature = format!("sha1={}", hex::encode(digest));
+        assert!(verify_hmac_signature(
+            body,
+            &signature,
+            "legacy-secret",
+            HmacSignatureAlgorithm::LegacySha1,
         )
         .unwrap());
     }

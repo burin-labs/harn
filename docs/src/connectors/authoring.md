@@ -587,6 +587,9 @@ need timestamp-window checks, audit events, or a provider-specific signed
 message format. Use `std/connectors/shared` inside Harn package exports for
 local HMAC checks, JWT/JWKS verification, outbound HTTP policy, OAuth2 token
 refresh, package-local token buckets, and cursor pagination.
+Existing providers that still sign with HMAC-SHA1 must call
+`verify_hmac_signature(..., "sha1", {allow_legacy_sha1: true})`; new
+connectors should use SHA-256 or a provider-specific verifier.
 
 ## Outbound HTTP policy
 

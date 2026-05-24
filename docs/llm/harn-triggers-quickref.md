@@ -188,7 +188,7 @@ Builtins:
 
 - `webhook_intake_register(config) -> dict` — register an intake. Returns
   `{ id, path, topic, signature_header, signature_prefix,
-  signature_encoding, algorithm, delivery_id_header,
+  signature_encoding, algorithm, allow_legacy_sha1, delivery_id_header,
   dedupe_ttl_seconds }`. Config keys:
   - `id` (optional) — pin the intake id; one is generated if omitted.
   - `path` (optional) — HTTP path scope. When set, `webhook_intake_feed`
@@ -197,7 +197,8 @@ Builtins:
   - `signature_header` (required) — e.g. `"x-hub-signature-256"`.
   - `signature_prefix` — defaults to `"<algorithm>="`. Pass `""` to opt out.
   - `signature_encoding` — `"hex"` (default) or `"base64"`.
-  - `algorithm` — `"sha256"` (default) or `"sha1"` (legacy).
+  - `algorithm` — `"sha256"` (default) or legacy `"sha1"` when `allow_legacy_sha1` is true.
+  - `allow_legacy_sha1` — explicit opt-in for existing providers that still sign with HMAC-SHA1.
   - `delivery_id_header` (required) — e.g. `"x-github-delivery"`.
   - `topic` (required) — event-log topic accepted deliveries are appended to.
   - `dedupe_ttl_seconds` — defaults to 24h.
