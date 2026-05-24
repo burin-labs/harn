@@ -169,7 +169,23 @@ name = "notion"
 transport = "http"
 url = "https://mcp.notion.com/mcp"
 scopes = "read write"
+
+[[mcp]]
+name = "modern"
+transport = "http"
+url = "https://example.com/mcp"
+protocol_mode = "rc"
+protocol_version = "DRAFT-2026-v1"
 ```
+
+`protocol_mode = "rc"` opts a server into Harn's draft MCP client profile.
+RC mode probes stdio servers with `server/discover`, sends protocol/client
+metadata on every request, uses stateless Streamable HTTP headers instead of
+requiring `MCP-Session-Id`, consumes cache hints from list/read calls, mirrors
+valid `x-mcp-header` tool-schema annotations into `Mcp-Param-*` HTTP headers,
+and resolves `input_required` tool results for roots, elicitation, and
+sampling before retrying the call. Omit `protocol_mode` for the legacy
+`2025-11-25` initialize/session behavior.
 
 ### Lazy boot
 

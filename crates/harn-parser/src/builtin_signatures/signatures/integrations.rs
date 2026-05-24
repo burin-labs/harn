@@ -493,6 +493,7 @@ pub(crate) const SIGNATURES: &[BuiltinSignature] = &[
         &[
             Param::new("command", TY_STRING),
             Param::optional("args", TY_LIST),
+            Param::optional("options", TY_DICT),
         ],
         TY_ANY,
     ),

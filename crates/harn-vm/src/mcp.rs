@@ -7,6 +7,7 @@ use std::path::{Path, PathBuf};
 use std::rc::Rc;
 use std::sync::Arc;
 
+use base64::Engine;
 use futures::StreamExt;
 use reqwest_eventsource::{Event as SseEvent, EventSource};
 use serde::Deserialize;
@@ -20,6 +21,14 @@ use crate::vm::Vm;
 
 /// MCP protocol version we negotiate by default.
 const PROTOCOL_VERSION: &str = "2025-11-25";
+const DRAFT_PROTOCOL_VERSION: &str = "DRAFT-2026-v1";
+const UNSUPPORTED_PROTOCOL_VERSION_CODE: i64 = -32004;
+const PROTOCOL_VERSION_META_KEY: &str = "io.modelcontextprotocol/protocolVersion";
+const CLIENT_INFO_META_KEY: &str = "io.modelcontextprotocol/clientInfo";
+const CLIENT_CAPABILITIES_META_KEY: &str = "io.modelcontextprotocol/clientCapabilities";
+const X_MCP_HEADER: &str = "x-mcp-header";
+const INPUT_REQUIRED_RESULT_TYPE: &str = "input_required";
+const MCP_INPUT_REQUIRED_MAX_ROUNDS: usize = 8;
 
 /// Default timeout for MCP requests (60 seconds).
 const MCP_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(60);
@@ -49,6 +58,8 @@ pub struct McpServerSpec {
     #[serde(default)]
     pub protocol_version: Option<String>,
     #[serde(default)]
+    pub protocol_mode: Option<String>,
+    #[serde(default)]
     pub proxy_server_name: Option<String>,
 }
 
@@ -67,17 +78,39 @@ struct StdioMcpClientInner {
     stdin: ChildStdin,
     reader: BufReader<ChildStdout>,
     next_id: u64,
+    protocol_mode: McpProtocolMode,
+    protocol_version: String,
 }
 
 struct HttpMcpClientInner {
     client: reqwest::Client,
     url: String,
     auth_token: Option<String>,
+    protocol_mode: McpProtocolMode,
     protocol_version: String,
     session_id: Option<String>,
     next_id: u64,
     proxy_server_name: Option<String>,
     get_stream_task: Option<tokio::task::JoinHandle<()>>,
+    tool_headers: BTreeMap<String, Vec<McpToolHeader>>,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum McpProtocolMode {
+    Legacy,
+    Modern,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct McpCacheHint {
+    ttl_ms: Option<u64>,
+    cache_scope: Option<String>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct McpToolHeader {
+    parameter: String,
+    header_name: String,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -131,6 +164,7 @@ pub struct VmMcpClientHandle {
     inner: Arc<Mutex<Option<McpClientInner>>>,
     last_roots: Arc<Mutex<Vec<McpRoot>>>,
     pub(crate) initialize_result: Arc<Mutex<Option<serde_json::Value>>>,
+    cache_hints: Arc<Mutex<BTreeMap<String, McpCacheHint>>>,
 }
 
 impl std::fmt::Debug for VmMcpClientHandle {
@@ -140,12 +174,61 @@ impl std::fmt::Debug for VmMcpClientHandle {
 }
 
 impl VmMcpClientHandle {
+    async fn protocol_mode(&self) -> Result<McpProtocolMode, VmError> {
+        let guard = self.inner.lock().await;
+        let inner = guard
+            .as_ref()
+            .ok_or_else(|| VmError::Runtime("MCP client is disconnected".into()))?;
+        Ok(match inner {
+            McpClientInner::Stdio(inner) => inner.protocol_mode,
+            McpClientInner::Http(inner) => inner.protocol_mode,
+        })
+    }
+
+    async fn protocol_version(&self) -> Result<String, VmError> {
+        let guard = self.inner.lock().await;
+        let inner = guard
+            .as_ref()
+            .ok_or_else(|| VmError::Runtime("MCP client is disconnected".into()))?;
+        Ok(match inner {
+            McpClientInner::Stdio(inner) => inner.protocol_version.clone(),
+            McpClientInner::Http(inner) => inner.protocol_version.clone(),
+        })
+    }
+
+    async fn switch_to_legacy_protocol(&self) -> Result<(), VmError> {
+        let mut guard = self.inner.lock().await;
+        let inner = guard
+            .as_mut()
+            .ok_or_else(|| VmError::Runtime("MCP client is disconnected".into()))?;
+        match inner {
+            McpClientInner::Stdio(inner) => {
+                inner.protocol_mode = McpProtocolMode::Legacy;
+                inner.protocol_version = PROTOCOL_VERSION.to_string();
+            }
+            McpClientInner::Http(inner) => {
+                inner.protocol_mode = McpProtocolMode::Legacy;
+                inner.protocol_version = PROTOCOL_VERSION.to_string();
+            }
+        }
+        Ok(())
+    }
+
     pub(crate) async fn call(
         &self,
         method: &str,
         params: serde_json::Value,
     ) -> Result<serde_json::Value, VmError> {
-        if method != "initialize" {
+        let msg = self.call_raw(method, params).await?;
+        parse_jsonrpc_result(msg)
+    }
+
+    async fn call_raw(
+        &self,
+        method: &str,
+        params: serde_json::Value,
+    ) -> Result<serde_json::Value, VmError> {
+        if method != "initialize" && method != "server/discover" {
             self.notify_roots_list_changed_if_needed().await?;
         }
         let mut guard = self.inner.lock().await;
@@ -154,8 +237,8 @@ impl VmMcpClientHandle {
             .ok_or_else(|| VmError::Runtime("MCP client is disconnected".into()))?;
 
         match inner {
-            McpClientInner::Stdio(inner) => stdio_call(inner, &self.name, method, params).await,
-            McpClientInner::Http(inner) => http_call(inner, &self.name, method, params).await,
+            McpClientInner::Stdio(inner) => stdio_call_raw(inner, &self.name, method, params).await,
+            McpClientInner::Http(inner) => http_call_raw(inner, &self.name, method, params).await,
         }
     }
 
@@ -187,6 +270,9 @@ impl VmMcpClientHandle {
     }
 
     async fn notify_roots_list_changed_if_needed(&self) -> Result<(), VmError> {
+        if self.protocol_mode().await? == McpProtocolMode::Modern {
+            return Ok(());
+        }
         let roots = current_mcp_roots();
         let mut last_roots = self.last_roots.lock().await;
         if *last_roots == roots {
@@ -201,42 +287,108 @@ impl VmMcpClientHandle {
         *last_roots = roots;
         Ok(())
     }
+
+    async fn record_cache_hint(&self, method: &str, result: &serde_json::Value) {
+        let Some(hint) = parse_cache_hint(result) else {
+            return;
+        };
+        self.cache_hints
+            .lock()
+            .await
+            .insert(method.to_string(), hint);
+    }
+
+    async fn store_http_tool_headers(&self, tools: &[serde_json::Value]) {
+        let mut valid_headers = BTreeMap::new();
+        let mut valid_tools = std::collections::BTreeSet::new();
+        for tool in tools {
+            let Some(name) = tool.get("name").and_then(|value| value.as_str()) else {
+                continue;
+            };
+            match extract_tool_headers(tool) {
+                Ok(headers) => {
+                    valid_tools.insert(name.to_string());
+                    if !headers.is_empty() {
+                        valid_headers.insert(name.to_string(), headers);
+                    }
+                }
+                Err(reason) => {
+                    tracing::warn!(tool = name, %reason, "rejecting MCP tool with invalid x-mcp-header annotation");
+                }
+            }
+        }
+
+        let mut guard = self.inner.lock().await;
+        if let Some(McpClientInner::Http(inner)) = guard.as_mut() {
+            inner
+                .tool_headers
+                .retain(|tool, _| valid_tools.contains(tool));
+            inner.tool_headers.extend(valid_headers);
+        }
+    }
 }
 
-async fn stdio_call(
+async fn stdio_call_raw(
     inner: &mut StdioMcpClientInner,
     server_name: &str,
     method: &str,
     params: serde_json::Value,
 ) -> Result<serde_json::Value, VmError> {
-    let id = inner.next_id;
-    inner.next_id += 1;
+    for _ in 0..2 {
+        let id = inner.next_id;
+        inner.next_id += 1;
 
-    let request = serde_json::json!({
-        "jsonrpc": "2.0",
-        "id": id,
-        "method": method,
-        "params": params,
-    });
+        let request = serde_json::json!({
+            "jsonrpc": "2.0",
+            "id": id,
+            "method": method,
+            "params": request_params_for_protocol(
+                inner.protocol_mode,
+                &inner.protocol_version,
+                params.clone(),
+            ),
+        });
 
-    let line = serde_json::to_string(&request)
+        write_stdio_json(&mut inner.stdin, &request).await?;
+        let msg = read_stdio_response(inner, server_name, method, id).await?;
+        if maybe_retry_unsupported_protocol(inner.protocol_mode, &mut inner.protocol_version, &msg)
+        {
+            continue;
+        }
+        return Ok(msg);
+    }
+
+    Err(VmError::Runtime(
+        "MCP request failed after protocol-version retry".into(),
+    ))
+}
+
+async fn write_stdio_json(
+    stdin: &mut ChildStdin,
+    message: &serde_json::Value,
+) -> Result<(), VmError> {
+    let line = serde_json::to_string(message)
         .map_err(|e| VmError::Runtime(format!("MCP serialization error: {e}")))?;
-    inner
-        .stdin
+    stdin
         .write_all(line.as_bytes())
         .await
         .map_err(|e| VmError::Runtime(format!("MCP write error: {e}")))?;
-    inner
-        .stdin
+    stdin
         .write_all(b"\n")
         .await
         .map_err(|e| VmError::Runtime(format!("MCP write error: {e}")))?;
-    inner
-        .stdin
+    stdin
         .flush()
         .await
-        .map_err(|e| VmError::Runtime(format!("MCP flush error: {e}")))?;
+        .map_err(|e| VmError::Runtime(format!("MCP flush error: {e}")))
+}
 
+async fn read_stdio_response(
+    inner: &mut StdioMcpClientInner,
+    server_name: &str,
+    method: &str,
+    id: u64,
+) -> Result<serde_json::Value, VmError> {
     let mut line_buf = String::new();
     loop {
         line_buf.clear();
@@ -264,11 +416,6 @@ async fn stdio_call(
             Err(_) => continue,
         };
 
-        // JSON-RPC notifications have a `method` but no `id`. Route
-        // them through `handle_inbound_client_request` so we can
-        // capture `notifications/progress`, `notifications/message`,
-        // and `*/list_changed` into the active session's inbox even
-        // while we're parked waiting for the in-flight call's reply.
         if msg.get("id").is_none() {
             let _ = handle_inbound_client_request(server_name, &msg).await;
             continue;
@@ -277,30 +424,14 @@ async fn stdio_call(
         if msg["id"].as_u64() == Some(id)
             && (msg.get("result").is_some() || msg.get("error").is_some())
         {
-            return parse_jsonrpc_result(msg);
+            return Ok(msg);
         }
 
         let response = match handle_inbound_client_request(server_name, &msg).await {
             Some(response) => response,
             None => continue,
         };
-        let line = serde_json::to_string(&response)
-            .map_err(|e| VmError::Runtime(format!("MCP serialization error: {e}")))?;
-        inner
-            .stdin
-            .write_all(line.as_bytes())
-            .await
-            .map_err(|e| VmError::Runtime(format!("MCP write error: {e}")))?;
-        inner
-            .stdin
-            .write_all(b"\n")
-            .await
-            .map_err(|e| VmError::Runtime(format!("MCP write error: {e}")))?;
-        inner
-            .stdin
-            .flush()
-            .await
-            .map_err(|e| VmError::Runtime(format!("MCP flush error: {e}")))?;
+        write_stdio_json(&mut inner.stdin, &response).await?;
     }
 }
 
@@ -445,7 +576,11 @@ async fn stdio_notify(
     let notification = serde_json::json!({
         "jsonrpc": "2.0",
         "method": method,
-        "params": params,
+        "params": request_params_for_protocol(
+            inner.protocol_mode,
+            &inner.protocol_version,
+            params,
+        ),
     });
 
     let line = serde_json::to_string(&notification)
@@ -468,7 +603,7 @@ async fn stdio_notify(
     Ok(())
 }
 
-async fn http_call(
+async fn http_call_raw(
     inner: &mut HttpMcpClientInner,
     server_name: &str,
     method: &str,
@@ -507,11 +642,18 @@ async fn send_http_request(
         {
             inner.protocol_version = protocol_version.to_string();
         }
-        if let Some(session_id) = headers.get("MCP-Session-Id").and_then(|v| v.to_str().ok()) {
-            inner.session_id = Some(session_id.to_string());
+        if inner.protocol_mode == McpProtocolMode::Legacy {
+            if let Some(session_id) = headers.get("MCP-Session-Id").and_then(|v| v.to_str().ok()) {
+                inner.session_id = Some(session_id.to_string());
+            }
         }
 
-        if status == 404 && inner.session_id.is_some() && method != "initialize" && attempt == 0 {
+        if inner.protocol_mode == McpProtocolMode::Legacy
+            && status == 404
+            && inner.session_id.is_some()
+            && method != "initialize"
+            && attempt == 0
+        {
             inner.session_id = None;
             inner.abort_get_stream();
             reinitialize_http_client(inner).await?;
@@ -530,23 +672,45 @@ async fn send_http_request(
             .map_err(|e| VmError::Runtime(format!("MCP HTTP read error: {e}")))?;
 
         if body.trim().is_empty() {
+            if should_fallback_to_legacy_http_discovery(inner.protocol_mode, method, status) {
+                return Ok(http_discovery_fallback_response(id));
+            }
+            if status >= 400 {
+                return Err(VmError::Runtime(format!(
+                    "MCP HTTP request returned {status} with an empty response body"
+                )));
+            }
             if status < 400 {
                 ensure_http_get_stream(inner, server_name);
             }
             return Ok(serde_json::Value::Null);
         }
 
-        let msg = parse_http_response_body(inner, server_name, &body, status, id).await?;
+        let msg = match parse_http_response_body(inner, server_name, &body, status, id).await {
+            Ok(msg) => msg,
+            Err(_)
+                if should_fallback_to_legacy_http_discovery(
+                    inner.protocol_mode,
+                    method,
+                    status,
+                ) =>
+            {
+                return Ok(http_discovery_fallback_response(id));
+            }
+            Err(err) => return Err(err),
+        };
 
-        if status >= 400 {
-            return Err(jsonrpc_error_to_vm_error(msg.get("error").unwrap_or(&msg)));
+        if maybe_retry_unsupported_protocol(inner.protocol_mode, &mut inner.protocol_version, &msg)
+            && attempt == 0
+        {
+            continue;
         }
 
         ensure_http_get_stream(inner, server_name);
-        if id.is_none() {
-            return Ok(msg);
+        if status >= 400 && id.is_none() {
+            return Err(jsonrpc_error_to_vm_error(msg.get("error").unwrap_or(&msg)));
         }
-        return parse_jsonrpc_result(msg);
+        return Ok(msg);
     }
 
     Err(VmError::Runtime("MCP HTTP request failed".into()))
@@ -558,10 +722,12 @@ async fn send_http_request_once(
     params: serde_json::Value,
     id: Option<u64>,
 ) -> Result<reqwest::Response, VmError> {
+    let request_params =
+        request_params_for_protocol(inner.protocol_mode, &inner.protocol_version, params);
     let mut payload = serde_json::json!({
         "jsonrpc": "2.0",
         "method": method,
-        "params": params,
+        "params": request_params,
     });
     if let Some(id) = id {
         payload["id"] = serde_json::json!(id);
@@ -577,8 +743,12 @@ async fn send_http_request_once(
     let request = apply_http_headers(
         request,
         &inner.auth_token,
+        inner.protocol_mode,
         &inner.protocol_version,
-        inner.session_id.as_deref(),
+        legacy_session_id(inner),
+        Some(method),
+        payload.get("params"),
+        &inner.tool_headers,
     );
 
     request
@@ -589,6 +759,9 @@ async fn send_http_request_once(
 }
 
 fn ensure_http_get_stream(inner: &mut HttpMcpClientInner, server_name: &str) {
+    if inner.protocol_mode == McpProtocolMode::Modern {
+        return;
+    }
     if server_name.is_empty() {
         return;
     }
@@ -604,6 +777,7 @@ fn ensure_http_get_stream(inner: &mut HttpMcpClientInner, server_name: &str) {
         client: inner.client.clone(),
         url: inner.url.clone(),
         auth_token: inner.auth_token.clone(),
+        protocol_mode: inner.protocol_mode,
         protocol_version: inner.protocol_version.clone(),
         session_id: inner.session_id.clone(),
         proxy_server_name: inner.proxy_server_name.clone(),
@@ -617,6 +791,7 @@ struct HttpStreamConfig {
     client: reqwest::Client,
     url: String,
     auth_token: Option<String>,
+    protocol_mode: McpProtocolMode,
     protocol_version: String,
     session_id: Option<String>,
     proxy_server_name: Option<String>,
@@ -630,8 +805,12 @@ async fn run_http_get_stream(config: HttpStreamConfig) {
             .get(&config.url)
             .header("Accept", "text/event-stream"),
         &config.auth_token,
+        config.protocol_mode,
         &config.protocol_version,
         config.session_id.as_deref(),
+        None,
+        None,
+        &BTreeMap::new(),
     );
     let Ok(mut stream) = EventSource::new(request) else {
         return;
@@ -678,8 +857,12 @@ async fn post_http_jsonrpc_payload(
     let request = apply_http_headers(
         request,
         &config.auth_token,
+        config.protocol_mode,
         &config.protocol_version,
         config.session_id.as_deref(),
+        None,
+        None,
+        &BTreeMap::new(),
     );
     let response = request
         .send()
@@ -698,15 +881,86 @@ async fn post_http_jsonrpc_payload(
 fn apply_http_headers(
     mut request: reqwest::RequestBuilder,
     auth_token: &Option<String>,
+    protocol_mode: McpProtocolMode,
     protocol_version: &str,
     session_id: Option<&str>,
+    method: Option<&str>,
+    params: Option<&serde_json::Value>,
+    tool_headers: &BTreeMap<String, Vec<McpToolHeader>>,
 ) -> reqwest::RequestBuilder {
     request = request.header("MCP-Protocol-Version", protocol_version);
     if let Some(token) = auth_token {
         request = request.header("Authorization", format!("Bearer {token}"));
     }
-    if let Some(session_id) = session_id {
-        request = request.header("MCP-Session-Id", session_id);
+    if protocol_mode == McpProtocolMode::Legacy {
+        if let Some(session_id) = session_id {
+            request = request.header("MCP-Session-Id", session_id);
+        }
+    }
+    if protocol_mode == McpProtocolMode::Modern {
+        if let Some(method) = method {
+            request = request.header("Mcp-Method", method);
+            if let Some(name) = mcp_standard_name_header(method, params) {
+                request = request.header("Mcp-Name", name);
+            }
+            if method == "tools/call" {
+                request = apply_mcp_tool_parameter_headers(request, params, tool_headers);
+            }
+        }
+    }
+    request
+}
+
+fn legacy_session_id(inner: &HttpMcpClientInner) -> Option<&str> {
+    (inner.protocol_mode == McpProtocolMode::Legacy)
+        .then_some(inner.session_id.as_deref())
+        .flatten()
+}
+
+fn mcp_standard_name_header(method: &str, params: Option<&serde_json::Value>) -> Option<String> {
+    let params = params?;
+    match method {
+        "tools/call" | "prompts/get" => params
+            .get("name")
+            .and_then(|value| value.as_str())
+            .map(str::to_string),
+        "resources/read" => params
+            .get("uri")
+            .and_then(|value| value.as_str())
+            .map(str::to_string),
+        _ => None,
+    }
+}
+
+fn apply_mcp_tool_parameter_headers(
+    mut request: reqwest::RequestBuilder,
+    params: Option<&serde_json::Value>,
+    tool_headers: &BTreeMap<String, Vec<McpToolHeader>>,
+) -> reqwest::RequestBuilder {
+    let Some(params) = params else {
+        return request;
+    };
+    let Some(tool_name) = params.get("name").and_then(|value| value.as_str()) else {
+        return request;
+    };
+    let Some(headers) = tool_headers.get(tool_name) else {
+        return request;
+    };
+    let Some(arguments) = params.get("arguments").and_then(|value| value.as_object()) else {
+        return request;
+    };
+
+    for header in headers {
+        let Some(value) = arguments.get(&header.parameter) else {
+            continue;
+        };
+        if value.is_null() {
+            continue;
+        }
+        let Some(encoded) = encode_mcp_header_value(value) else {
+            continue;
+        };
+        request = request.header(header.header_name.as_str(), encoded);
     }
     request
 }
@@ -735,20 +989,7 @@ async fn reinitialize_http_client(inner: &mut HttpMcpClientInner) -> Result<(), 
     let initialize = send_http_request_once(
         inner,
         "initialize",
-        serde_json::json!({
-            "protocolVersion": PROTOCOL_VERSION,
-            "capabilities": {
-                "elicitation": {},
-                "roots": {
-                    "listChanged": true,
-                },
-                "sampling": {},
-            },
-            "clientInfo": {
-                "name": "harn",
-                "version": env!("CARGO_PKG_VERSION"),
-            }
-        }),
+        legacy_initialize_params(&inner.protocol_version),
         Some(0),
     )
     .await?;
@@ -759,12 +1000,14 @@ async fn reinitialize_http_client(inner: &mut HttpMcpClientInner) -> Result<(), 
     {
         inner.protocol_version = protocol_version.to_string();
     }
-    if let Some(session_id) = initialize
-        .headers()
-        .get("MCP-Session-Id")
-        .and_then(|v| v.to_str().ok())
-    {
-        inner.session_id = Some(session_id.to_string());
+    if inner.protocol_mode == McpProtocolMode::Legacy {
+        if let Some(session_id) = initialize
+            .headers()
+            .get("MCP-Session-Id")
+            .and_then(|v| v.to_str().ok())
+        {
+            inner.session_id = Some(session_id.to_string());
+        }
     }
     let status = initialize.status().as_u16();
     let body = initialize
@@ -791,12 +1034,14 @@ async fn reinitialize_http_client(inner: &mut HttpMcpClientInner) -> Result<(), 
     {
         inner.protocol_version = protocol_version.to_string();
     }
-    if let Some(session_id) = response
-        .headers()
-        .get("MCP-Session-Id")
-        .and_then(|v| v.to_str().ok())
-    {
-        inner.session_id = Some(session_id.to_string());
+    if inner.protocol_mode == McpProtocolMode::Legacy {
+        if let Some(session_id) = response
+            .headers()
+            .get("MCP-Session-Id")
+            .and_then(|v| v.to_str().ok())
+        {
+            inner.session_id = Some(session_id.to_string());
+        }
     }
     let body = response
         .text()
@@ -855,6 +1100,7 @@ async fn parse_sse_jsonrpc_body(
         client: inner.client.clone(),
         url: inner.url.clone(),
         auth_token: inner.auth_token.clone(),
+        protocol_mode: inner.protocol_mode,
         protocol_version: inner.protocol_version.clone(),
         session_id: inner.session_id.clone(),
         proxy_server_name: inner.proxy_server_name.clone(),
@@ -1028,6 +1274,8 @@ async fn mcp_connect_stdio_impl(
     command: &str,
     args: &[String],
     env: &BTreeMap<String, String>,
+    protocol_mode: McpProtocolMode,
+    protocol_version: String,
 ) -> Result<VmMcpClientHandle, VmError> {
     let mut cmd = tokio::process::Command::new(command);
     cmd.args(args)
@@ -1060,10 +1308,13 @@ async fn mcp_connect_stdio_impl(
                 stdin,
                 reader: BufReader::new(stdout),
                 next_id: 1,
+                protocol_mode,
+                protocol_version,
             },
         )))),
         last_roots: Arc::new(Mutex::new(Vec::new())),
         initialize_result: Arc::new(Mutex::new(None)),
+        cache_hints: Arc::new(Mutex::new(BTreeMap::new())),
     };
 
     initialize_client(&handle).await?;
@@ -1074,6 +1325,14 @@ async fn mcp_connect_http_impl(spec: &McpServerSpec) -> Result<VmMcpClientHandle
     let client = reqwest::Client::builder()
         .build()
         .map_err(|e| VmError::Runtime(format!("MCP HTTP client error: {e}")))?;
+    let protocol_mode = resolve_protocol_mode(
+        spec.protocol_mode.as_deref(),
+        spec.protocol_version.as_deref(),
+    )?;
+    let protocol_version = spec
+        .protocol_version
+        .clone()
+        .unwrap_or_else(|| default_protocol_version(protocol_mode).to_string());
 
     let handle = VmMcpClientHandle {
         name: spec.name.clone(),
@@ -1081,17 +1340,17 @@ async fn mcp_connect_http_impl(spec: &McpServerSpec) -> Result<VmMcpClientHandle
             client,
             url: spec.url.clone(),
             auth_token: spec.auth_token.clone(),
-            protocol_version: spec
-                .protocol_version
-                .clone()
-                .unwrap_or_else(|| PROTOCOL_VERSION.to_string()),
+            protocol_mode,
+            protocol_version,
             session_id: None,
             next_id: 1,
             proxy_server_name: spec.proxy_server_name.clone(),
             get_stream_task: None,
+            tool_headers: BTreeMap::new(),
         })))),
         last_roots: Arc::new(Mutex::new(Vec::new())),
         initialize_result: Arc::new(Mutex::new(None)),
+        cache_hints: Arc::new(Mutex::new(BTreeMap::new())),
     };
 
     initialize_client(&handle).await?;
@@ -1099,24 +1358,26 @@ async fn mcp_connect_http_impl(spec: &McpServerSpec) -> Result<VmMcpClientHandle
 }
 
 async fn initialize_client(handle: &VmMcpClientHandle) -> Result<(), VmError> {
+    if handle.protocol_mode().await? == McpProtocolMode::Modern {
+        let discover = handle
+            .call_raw("server/discover", serde_json::json!({}))
+            .await?;
+        if is_method_not_found_response(&discover) {
+            handle.switch_to_legacy_protocol().await?;
+            return initialize_legacy_client(handle).await;
+        }
+        let discover_result = parse_jsonrpc_result(discover)?;
+        *handle.initialize_result.lock().await = Some(discover_result);
+        return Ok(());
+    }
+
+    initialize_legacy_client(handle).await
+}
+
+async fn initialize_legacy_client(handle: &VmMcpClientHandle) -> Result<(), VmError> {
+    let protocol_version = handle.protocol_version().await?;
     let initialize_result = handle
-        .call(
-            "initialize",
-            serde_json::json!({
-                "protocolVersion": PROTOCOL_VERSION,
-                "capabilities": {
-                    "elicitation": {},
-                    "roots": {
-                        "listChanged": true,
-                    },
-                    "sampling": {},
-                },
-                "clientInfo": {
-                    "name": "harn",
-                    "version": env!("CARGO_PKG_VERSION"),
-                }
-            }),
-        )
+        .call("initialize", legacy_initialize_params(&protocol_version))
         .await?;
     *handle.initialize_result.lock().await = Some(initialize_result);
 
@@ -1146,6 +1407,340 @@ pub(crate) fn vm_value_to_serde(val: &VmValue) -> serde_json::Value {
         }
         _ => serde_json::Value::Null,
     }
+}
+
+fn resolve_protocol_mode(
+    protocol_mode: Option<&str>,
+    protocol_version: Option<&str>,
+) -> Result<McpProtocolMode, VmError> {
+    let normalized = protocol_mode.map(|value| value.trim().to_ascii_lowercase());
+    match normalized.as_deref() {
+        Some("legacy") | Some("2025") | Some("2025-11-25") => Ok(McpProtocolMode::Legacy),
+        Some("rc") | Some("modern") | Some("draft") | Some("draft-2026-v1") => {
+            Ok(McpProtocolMode::Modern)
+        }
+        Some(other) => Err(VmError::Runtime(format!(
+            "mcp_connect: unsupported protocol_mode {other:?}; expected \"legacy\" or \"rc\""
+        ))),
+        None if protocol_version == Some(DRAFT_PROTOCOL_VERSION) => Ok(McpProtocolMode::Modern),
+        None => Ok(McpProtocolMode::Legacy),
+    }
+}
+
+struct McpConnectOptions {
+    protocol_mode: McpProtocolMode,
+    protocol_version: String,
+}
+
+fn mcp_connect_options(value: Option<&VmValue>) -> Result<McpConnectOptions, VmError> {
+    let Some(value) = value else {
+        return Ok(McpConnectOptions {
+            protocol_mode: McpProtocolMode::Legacy,
+            protocol_version: PROTOCOL_VERSION.to_string(),
+        });
+    };
+    let VmValue::Dict(options) = value else {
+        return Err(VmError::Runtime(format!(
+            "mcp_connect: options must be a dict, got {}",
+            value.type_name()
+        )));
+    };
+    let protocol_mode_value = options.get("protocol_mode").map(|value| value.display());
+    let protocol_version_value = options.get("protocol_version").map(|value| value.display());
+    let protocol_mode = resolve_protocol_mode(
+        protocol_mode_value.as_deref(),
+        protocol_version_value.as_deref(),
+    )?;
+    let protocol_version = protocol_version_value
+        .unwrap_or_else(|| default_protocol_version(protocol_mode).to_string());
+    Ok(McpConnectOptions {
+        protocol_mode,
+        protocol_version,
+    })
+}
+
+fn default_protocol_version(mode: McpProtocolMode) -> &'static str {
+    match mode {
+        McpProtocolMode::Legacy => PROTOCOL_VERSION,
+        McpProtocolMode::Modern => DRAFT_PROTOCOL_VERSION,
+    }
+}
+
+fn legacy_initialize_params(protocol_version: &str) -> serde_json::Value {
+    serde_json::json!({
+        "protocolVersion": protocol_version,
+        "capabilities": legacy_client_capabilities(),
+        "clientInfo": client_info(),
+    })
+}
+
+fn client_info() -> serde_json::Value {
+    serde_json::json!({
+        "name": "harn",
+        "version": env!("CARGO_PKG_VERSION"),
+    })
+}
+
+fn legacy_client_capabilities() -> serde_json::Value {
+    serde_json::json!({
+        "elicitation": {},
+        "roots": {
+            "listChanged": true,
+        },
+        "sampling": {},
+    })
+}
+
+fn modern_client_capabilities() -> serde_json::Value {
+    serde_json::json!({
+        "elicitation": {},
+        "roots": {},
+        "sampling": {},
+    })
+}
+
+fn request_params_for_protocol(
+    protocol_mode: McpProtocolMode,
+    protocol_version: &str,
+    params: serde_json::Value,
+) -> serde_json::Value {
+    if protocol_mode == McpProtocolMode::Legacy {
+        return params;
+    }
+
+    let mut object = match params {
+        serde_json::Value::Object(object) => object,
+        serde_json::Value::Null => serde_json::Map::new(),
+        other => serde_json::Map::from_iter([("value".to_string(), other)]),
+    };
+    let mut meta = object
+        .remove("_meta")
+        .and_then(|value| value.as_object().cloned())
+        .unwrap_or_default();
+    meta.insert(
+        PROTOCOL_VERSION_META_KEY.to_string(),
+        serde_json::Value::String(protocol_version.to_string()),
+    );
+    meta.insert(CLIENT_INFO_META_KEY.to_string(), client_info());
+    meta.insert(
+        CLIENT_CAPABILITIES_META_KEY.to_string(),
+        modern_client_capabilities(),
+    );
+    object.insert("_meta".to_string(), serde_json::Value::Object(meta));
+    serde_json::Value::Object(object)
+}
+
+fn maybe_retry_unsupported_protocol(
+    protocol_mode: McpProtocolMode,
+    protocol_version: &mut String,
+    msg: &serde_json::Value,
+) -> bool {
+    if protocol_mode != McpProtocolMode::Modern {
+        return false;
+    }
+    let Some(error) = msg.get("error") else {
+        return false;
+    };
+    if error.get("code").and_then(|value| value.as_i64()) != Some(UNSUPPORTED_PROTOCOL_VERSION_CODE)
+    {
+        return false;
+    }
+    let supported = error
+        .get("data")
+        .and_then(|data| data.get("supported"))
+        .and_then(|value| value.as_array())
+        .into_iter()
+        .flatten()
+        .filter_map(|value| value.as_str())
+        .collect::<Vec<_>>();
+    let Some(selected) = select_supported_protocol_version(&supported) else {
+        return false;
+    };
+    if selected == protocol_version {
+        return false;
+    }
+    *protocol_version = selected.to_string();
+    true
+}
+
+fn should_fallback_to_legacy_http_discovery(
+    protocol_mode: McpProtocolMode,
+    method: &str,
+    status: u16,
+) -> bool {
+    protocol_mode == McpProtocolMode::Modern
+        && method == "server/discover"
+        && matches!(status, 400 | 404 | 405)
+}
+
+fn http_discovery_fallback_response(id: Option<u64>) -> serde_json::Value {
+    crate::jsonrpc::error_response(
+        id.map(serde_json::Value::from)
+            .unwrap_or(serde_json::Value::Null),
+        -32601,
+        "Modern MCP discovery was not recognized",
+    )
+}
+
+fn select_supported_protocol_version(supported: &[&str]) -> Option<&'static str> {
+    [DRAFT_PROTOCOL_VERSION, PROTOCOL_VERSION]
+        .into_iter()
+        .find(|candidate| supported.iter().any(|value| value == candidate))
+}
+
+fn is_method_not_found_response(msg: &serde_json::Value) -> bool {
+    msg.get("error")
+        .and_then(|error| error.get("code"))
+        .and_then(|code| code.as_i64())
+        == Some(-32601)
+}
+
+fn parse_cache_hint(result: &serde_json::Value) -> Option<McpCacheHint> {
+    let ttl_ms = result.get("ttlMs").and_then(|value| value.as_u64());
+    let cache_scope = result
+        .get("cacheScope")
+        .and_then(|value| value.as_str())
+        .filter(|value| matches!(*value, "public" | "private"))
+        .map(str::to_string);
+    if ttl_ms.is_none() && cache_scope.is_none() {
+        return None;
+    }
+    Some(McpCacheHint {
+        ttl_ms,
+        cache_scope,
+    })
+}
+
+fn cache_hints_json(hints: &BTreeMap<String, McpCacheHint>) -> serde_json::Value {
+    let mut object = serde_json::Map::new();
+    for (method, hint) in hints {
+        let mut entry = serde_json::Map::new();
+        if let Some(ttl_ms) = hint.ttl_ms {
+            entry.insert("ttlMs".to_string(), serde_json::json!(ttl_ms));
+        }
+        if let Some(cache_scope) = hint.cache_scope.as_ref() {
+            entry.insert(
+                "cacheScope".to_string(),
+                serde_json::Value::String(cache_scope.clone()),
+            );
+        }
+        object.insert(method.clone(), serde_json::Value::Object(entry));
+    }
+    serde_json::Value::Object(object)
+}
+
+fn extract_tool_headers(tool: &serde_json::Value) -> Result<Vec<McpToolHeader>, String> {
+    let Some(properties) = tool
+        .get("inputSchema")
+        .and_then(|schema| schema.get("properties"))
+        .and_then(|value| value.as_object())
+    else {
+        return Ok(Vec::new());
+    };
+
+    let mut headers = Vec::new();
+    let mut seen = std::collections::BTreeSet::new();
+    for (parameter, schema) in properties {
+        let Some(header_name) = schema.get(X_MCP_HEADER).and_then(|value| value.as_str()) else {
+            continue;
+        };
+        validate_mcp_header_annotation(parameter, header_name, schema, &mut seen)?;
+        headers.push(McpToolHeader {
+            parameter: parameter.clone(),
+            header_name: format!("Mcp-Param-{header_name}"),
+        });
+    }
+    Ok(headers)
+}
+
+fn filter_tools_for_client(tools: &[serde_json::Value]) -> Vec<serde_json::Value> {
+    tools
+        .iter()
+        .filter_map(|tool| {
+            let name = tool
+                .get("name")
+                .and_then(|value| value.as_str())
+                .unwrap_or("<unnamed>");
+            match extract_tool_headers(tool) {
+                Ok(_) => Some(tool.clone()),
+                Err(reason) => {
+                    tracing::warn!(tool = name, %reason, "excluding MCP tool from tools/list");
+                    None
+                }
+            }
+        })
+        .collect()
+}
+
+fn validate_mcp_header_annotation(
+    parameter: &str,
+    header_name: &str,
+    schema: &serde_json::Value,
+    seen: &mut std::collections::BTreeSet<String>,
+) -> Result<(), String> {
+    if header_name.is_empty() {
+        return Err(format!("{parameter}: x-mcp-header must not be empty"));
+    }
+    if !header_name.is_ascii() || header_name.bytes().any(|byte| matches!(byte, b' ' | b':')) {
+        return Err(format!(
+            "{parameter}: x-mcp-header must be ASCII and exclude space or colon"
+        ));
+    }
+    if reqwest::header::HeaderName::from_bytes(format!("Mcp-Param-{header_name}").as_bytes())
+        .is_err()
+    {
+        return Err(format!(
+            "{parameter}: x-mcp-header does not form a valid HTTP header name"
+        ));
+    }
+    let lower = header_name.to_ascii_lowercase();
+    if !seen.insert(lower) {
+        return Err(format!(
+            "{parameter}: duplicate x-mcp-header value {header_name:?}"
+        ));
+    }
+    let is_primitive = match schema.get("type") {
+        Some(serde_json::Value::String(value)) => {
+            matches!(value.as_str(), "string" | "number" | "integer" | "boolean")
+        }
+        Some(serde_json::Value::Array(values)) => values.iter().any(|value| {
+            value
+                .as_str()
+                .is_some_and(|ty| matches!(ty, "string" | "number" | "integer" | "boolean"))
+        }),
+        _ => false,
+    };
+    if !is_primitive {
+        return Err(format!(
+            "{parameter}: x-mcp-header is only valid on primitive schema types"
+        ));
+    }
+    Ok(())
+}
+
+fn encode_mcp_header_value(value: &serde_json::Value) -> Option<String> {
+    let raw = match value {
+        serde_json::Value::String(value) => value.clone(),
+        serde_json::Value::Number(value) => value.to_string(),
+        serde_json::Value::Bool(value) => value.to_string(),
+        _ => return None,
+    };
+    if is_plain_mcp_header_value(&raw) {
+        Some(raw)
+    } else {
+        Some(format!(
+            "=?base64?{}?=",
+            base64::engine::general_purpose::STANDARD.encode(raw.as_bytes())
+        ))
+    }
+}
+
+fn is_plain_mcp_header_value(value: &str) -> bool {
+    !value.is_empty()
+        && value.trim() == value
+        && value
+            .bytes()
+            .all(|byte| matches!(byte, b'\t' | b' '..=b'~'))
 }
 
 fn extract_content_text(result: &serde_json::Value) -> String {
@@ -1266,18 +1861,39 @@ pub(crate) async fn call_mcp_tool(
         .map(|tok| client_progress::ProgressTokenGuard {
             token: tok.token.clone(),
         });
-    let params = match progress_token.as_ref() {
-        Some(tok) => serde_json::json!({
-            "name": tool_name,
-            "arguments": arguments,
-            "_meta": { "progressToken": tok.token },
-        }),
-        None => serde_json::json!({
-            "name": tool_name,
-            "arguments": arguments,
-        }),
-    };
-    let result = client.call("tools/call", params).await?;
+    let mut result = client
+        .call(
+            "tools/call",
+            tool_call_params(tool_name, arguments.clone(), progress_token.as_ref(), None),
+        )
+        .await?;
+    for _ in 0..MCP_INPUT_REQUIRED_MAX_ROUNDS {
+        if result.get("resultType").and_then(|value| value.as_str())
+            != Some(INPUT_REQUIRED_RESULT_TYPE)
+        {
+            break;
+        }
+        let Some(input_round) = resolve_input_required_result(&client.name, &result).await? else {
+            break;
+        };
+        result = client
+            .call(
+                "tools/call",
+                tool_call_params(
+                    tool_name,
+                    arguments.clone(),
+                    progress_token.as_ref(),
+                    Some(input_round),
+                ),
+            )
+            .await?;
+    }
+    if result.get("resultType").and_then(|value| value.as_str()) == Some(INPUT_REQUIRED_RESULT_TYPE)
+    {
+        return Err(VmError::Runtime(format!(
+            "MCP tool '{tool_name}' still required input after {MCP_INPUT_REQUIRED_MAX_ROUNDS} rounds"
+        )));
+    }
 
     if result.get("isError").and_then(|v| v.as_bool()) == Some(true) {
         let error_text = extract_content_text(&result);
@@ -1303,12 +1919,100 @@ pub(crate) async fn call_mcp_tool(
     }
 }
 
+#[derive(Clone, Debug)]
+struct McpInputRound {
+    input_responses: serde_json::Value,
+    request_state: Option<serde_json::Value>,
+}
+
+fn tool_call_params(
+    tool_name: &str,
+    arguments: serde_json::Value,
+    progress_token: Option<&client_progress::ProgressTokenContext>,
+    input_round: Option<McpInputRound>,
+) -> serde_json::Value {
+    let mut params = serde_json::Map::from_iter([
+        (
+            "name".to_string(),
+            serde_json::Value::String(tool_name.to_string()),
+        ),
+        ("arguments".to_string(), arguments),
+    ]);
+    if let Some(tok) = progress_token {
+        params.insert(
+            "_meta".to_string(),
+            serde_json::json!({ "progressToken": tok.token }),
+        );
+    }
+    if let Some(input_round) = input_round {
+        params.insert("inputResponses".to_string(), input_round.input_responses);
+        if let Some(request_state) = input_round.request_state {
+            params.insert("requestState".to_string(), request_state);
+        }
+    }
+    serde_json::Value::Object(params)
+}
+
+async fn resolve_input_required_result(
+    server_name: &str,
+    result: &serde_json::Value,
+) -> Result<Option<McpInputRound>, VmError> {
+    let Some(input_requests) = result
+        .get("inputRequests")
+        .and_then(|value| value.as_object())
+    else {
+        return Ok(None);
+    };
+    let mut responses = serde_json::Map::new();
+    for (key, input_request) in input_requests {
+        let Some(method) = input_request.get("method").and_then(|value| value.as_str()) else {
+            return Err(VmError::Runtime(format!(
+                "MCP input_required request {key:?} is missing method"
+            )));
+        };
+        let request = serde_json::json!({
+            "jsonrpc": "2.0",
+            "id": format!("input-{key}"),
+            "method": method,
+            "params": input_request
+                .get("params")
+                .cloned()
+                .unwrap_or_else(|| serde_json::json!({})),
+        });
+        let response = handle_inbound_client_request(server_name, &request)
+            .await
+            .ok_or_else(|| {
+                VmError::Runtime(format!(
+                    "MCP input_required request {key:?} used unsupported method {method:?}"
+                ))
+            })?;
+        if let Some(result) = response.get("result") {
+            responses.insert(key.clone(), result.clone());
+        } else if let Some(error) = response.get("error") {
+            return Err(jsonrpc_error_to_vm_error(error));
+        } else {
+            responses.insert(key.clone(), serde_json::Value::Null);
+        }
+    }
+    Ok(Some(McpInputRound {
+        input_responses: serde_json::Value::Object(responses),
+        request_state: result.get("requestState").cloned(),
+    }))
+}
+
 pub async fn connect_mcp_server(
     name: &str,
     command: &str,
     args: &[String],
 ) -> Result<VmMcpClientHandle, VmError> {
-    let mut handle = mcp_connect_stdio_impl(command, args, &BTreeMap::new()).await?;
+    let mut handle = mcp_connect_stdio_impl(
+        command,
+        args,
+        &BTreeMap::new(),
+        McpProtocolMode::Legacy,
+        PROTOCOL_VERSION.to_string(),
+    )
+    .await?;
     handle.name = name.to_string();
     Ok(handle)
 }
@@ -1317,7 +2021,24 @@ pub async fn connect_mcp_server_from_spec(
     spec: &McpServerSpec,
 ) -> Result<VmMcpClientHandle, VmError> {
     let mut handle = match spec.transport {
-        McpTransport::Stdio => mcp_connect_stdio_impl(&spec.command, &spec.args, &spec.env).await?,
+        McpTransport::Stdio => {
+            let protocol_mode = resolve_protocol_mode(
+                spec.protocol_mode.as_deref(),
+                spec.protocol_version.as_deref(),
+            )?;
+            let protocol_version = spec
+                .protocol_version
+                .clone()
+                .unwrap_or_else(|| default_protocol_version(protocol_mode).to_string());
+            mcp_connect_stdio_impl(
+                &spec.command,
+                &spec.args,
+                &spec.env,
+                protocol_mode,
+                protocol_version,
+            )
+            .await?
+        }
         McpTransport::Http => mcp_connect_http_impl(spec).await?,
     };
     handle.name = spec.name.clone();
@@ -1351,7 +2072,15 @@ pub fn register_mcp_builtins(vm: &mut Vm) {
             _ => Vec::new(),
         };
 
-        let handle = mcp_connect_stdio_impl(&command, &cmd_args, &BTreeMap::new()).await?;
+        let options = mcp_connect_options(args.get(2))?;
+        let handle = mcp_connect_stdio_impl(
+            &command,
+            &cmd_args,
+            &BTreeMap::new(),
+            options.protocol_mode,
+            options.protocol_version,
+        )
+        .await?;
         Ok(VmValue::mcp_client(handle))
     });
 
@@ -1482,11 +2211,16 @@ pub fn register_mcp_builtins(vm: &mut Vm) {
         };
 
         let result = client.call("tools/list", serde_json::json!({})).await?;
+        client.record_cache_hint("tools/list", &result).await;
         let mut tools = result
             .get("tools")
             .and_then(|t| t.as_array())
             .cloned()
             .unwrap_or_default();
+        if client.protocol_mode().await? == McpProtocolMode::Modern {
+            tools = filter_tools_for_client(&tools);
+            client.store_http_tool_headers(&tools).await;
+        }
 
         // Tag every tool with its originating server name so
         // downstream indexers (tool_search BM25) can surface them
@@ -1583,6 +2317,13 @@ pub fn register_mcp_builtins(vm: &mut Vm) {
             }
             info.insert("initialize".to_string(), json_to_vm_value(&initialize));
         }
+        let cache_hints = client.cache_hints.lock().await;
+        if !cache_hints.is_empty() {
+            info.insert(
+                "cache_hints".to_string(),
+                json_to_vm_value(&cache_hints_json(&cache_hints)),
+            );
+        }
         Ok(VmValue::Dict(Rc::new(info)))
     });
 
@@ -1611,6 +2352,7 @@ pub fn register_mcp_builtins(vm: &mut Vm) {
         };
 
         let result = client.call("resources/list", serde_json::json!({})).await?;
+        client.record_cache_hint("resources/list", &result).await;
         let resources = result
             .get("resources")
             .and_then(|r| r.as_array())
@@ -1641,6 +2383,7 @@ pub fn register_mcp_builtins(vm: &mut Vm) {
         let result = client
             .call("resources/read", serde_json::json!({ "uri": uri }))
             .await?;
+        client.record_cache_hint("resources/read", &result).await;
 
         let contents = result
             .get("contents")
@@ -1676,6 +2419,9 @@ pub fn register_mcp_builtins(vm: &mut Vm) {
         let result = client
             .call("resources/templates/list", serde_json::json!({}))
             .await?;
+        client
+            .record_cache_hint("resources/templates/list", &result)
+            .await;
 
         let templates = result
             .get("resourceTemplates")
@@ -1698,6 +2444,7 @@ pub fn register_mcp_builtins(vm: &mut Vm) {
         };
 
         let result = client.call("prompts/list", serde_json::json!({})).await?;
+        client.record_cache_hint("prompts/list", &result).await;
 
         let prompts = result
             .get("prompts")
@@ -1803,6 +2550,12 @@ mod tests {
     use tokio::net::{TcpListener, TcpStream};
     use tokio::sync::mpsc;
 
+    #[derive(Debug)]
+    struct RecordedHttpRequest {
+        headers: BTreeMap<String, String>,
+        body: serde_json::Value,
+    }
+
     #[tokio::test(flavor = "current_thread")]
     async fn http_get_stream_dispatches_inbound_elicitation_response() {
         tokio::task::LocalSet::new()
@@ -1817,6 +2570,7 @@ mod tests {
                     url: format!("{base_url}/mcp"),
                     auth_token: None,
                     protocol_version: None,
+                    protocol_mode: None,
                     proxy_server_name: None,
                 };
 
@@ -1835,6 +2589,601 @@ mod tests {
                 handle.disconnect().await.unwrap();
             })
             .await;
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn stdio_rc_connect_uses_server_discover_with_metadata() {
+        let script = r#"
+import json, sys
+request = json.loads(sys.stdin.readline())
+assert request["method"] == "server/discover"
+meta = request["params"]["_meta"]
+assert meta["io.modelcontextprotocol/protocolVersion"] == "DRAFT-2026-v1"
+assert meta["io.modelcontextprotocol/clientInfo"]["name"] == "harn"
+assert "io.modelcontextprotocol/clientCapabilities" in meta
+print(json.dumps({
+    "jsonrpc": "2.0",
+    "id": request["id"],
+    "result": {
+        "resultType": "complete",
+        "supportedVersions": ["DRAFT-2026-v1"],
+        "capabilities": {"tools": {}},
+        "serverInfo": {"name": "modern", "version": "1.0.0"}
+    }
+}), flush=True)
+"#;
+        let handle = connect_stdio_test_script(
+            script,
+            McpProtocolMode::Modern,
+            DRAFT_PROTOCOL_VERSION.to_string(),
+        )
+        .await;
+        let initialize = handle.initialize_result.lock().await.clone().unwrap();
+        assert_eq!(
+            initialize["supportedVersions"],
+            serde_json::json!([DRAFT_PROTOCOL_VERSION])
+        );
+        assert_eq!(
+            handle.protocol_mode().await.unwrap(),
+            McpProtocolMode::Modern
+        );
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn stdio_rc_connect_falls_back_to_initialize_only_on_method_not_found() {
+        let script = r#"
+import json, sys
+discover = json.loads(sys.stdin.readline())
+assert discover["method"] == "server/discover"
+print(json.dumps({
+    "jsonrpc": "2.0",
+    "id": discover["id"],
+    "error": {"code": -32601, "message": "Method not found"}
+}), flush=True)
+initialize = json.loads(sys.stdin.readline())
+assert initialize["method"] == "initialize"
+assert initialize["params"]["protocolVersion"] == "2025-11-25"
+print(json.dumps({
+    "jsonrpc": "2.0",
+    "id": initialize["id"],
+    "result": {
+        "protocolVersion": "2025-11-25",
+        "capabilities": {"tools": {}},
+        "serverInfo": {"name": "legacy", "version": "1.0.0"}
+    }
+}), flush=True)
+initialized = json.loads(sys.stdin.readline())
+assert initialized["method"] == "notifications/initialized"
+"#;
+        let handle = connect_stdio_test_script(
+            script,
+            McpProtocolMode::Modern,
+            DRAFT_PROTOCOL_VERSION.to_string(),
+        )
+        .await;
+        let initialize = handle.initialize_result.lock().await.clone().unwrap();
+        assert_eq!(
+            initialize["protocolVersion"],
+            serde_json::json!(PROTOCOL_VERSION)
+        );
+        assert_eq!(
+            handle.protocol_mode().await.unwrap(),
+            McpProtocolMode::Legacy
+        );
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn stdio_rc_connect_retries_unsupported_protocol_version() {
+        let script = r#"
+import json, sys
+first = json.loads(sys.stdin.readline())
+assert first["method"] == "server/discover"
+assert first["params"]["_meta"]["io.modelcontextprotocol/protocolVersion"] == "DRAFT-2026-v1"
+print(json.dumps({
+    "jsonrpc": "2.0",
+    "id": first["id"],
+    "error": {
+        "code": -32004,
+        "message": "Unsupported protocol version",
+        "data": {"supported": ["2025-11-25"], "requested": "DRAFT-2026-v1"}
+    }
+}), flush=True)
+second = json.loads(sys.stdin.readline())
+assert second["method"] == "server/discover"
+assert second["id"] != first["id"]
+assert second["params"]["_meta"]["io.modelcontextprotocol/protocolVersion"] == "2025-11-25"
+print(json.dumps({
+    "jsonrpc": "2.0",
+    "id": second["id"],
+    "result": {
+        "resultType": "complete",
+        "supportedVersions": ["2025-11-25"],
+        "capabilities": {"tools": {}},
+        "serverInfo": {"name": "modern-compat", "version": "1.0.0"}
+    }
+}), flush=True)
+"#;
+        let handle = connect_stdio_test_script(
+            script,
+            McpProtocolMode::Modern,
+            DRAFT_PROTOCOL_VERSION.to_string(),
+        )
+        .await;
+        assert_eq!(
+            handle.protocol_mode().await.unwrap(),
+            McpProtocolMode::Modern
+        );
+        assert_eq!(handle.protocol_version().await.unwrap(), PROTOCOL_VERSION);
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn modern_http_sends_stateless_metadata_headers_and_schema_headers() {
+        tokio::task::LocalSet::new()
+            .run_until(async {
+                let (base_url, mut requests) = spawn_modern_http_mcp_server().await;
+                let handle = modern_http_handle(&base_url).await;
+
+                let tools_result = handle
+                    .call("tools/list", serde_json::json!({}))
+                    .await
+                    .unwrap();
+                handle.record_cache_hint("tools/list", &tools_result).await;
+                let tools = filter_tools_for_client(
+                    &tools_result["tools"]
+                        .as_array()
+                        .cloned()
+                        .unwrap_or_default(),
+                );
+                handle.store_http_tool_headers(&tools).await;
+                assert_eq!(
+                    handle.cache_hints.lock().await.get("tools/list"),
+                    Some(&McpCacheHint {
+                        ttl_ms: Some(300_000),
+                        cache_scope: Some("public".to_string()),
+                    })
+                );
+
+                let call_result = call_mcp_tool(
+                    &handle,
+                    "execute_sql",
+                    serde_json::json!({"region": "us-west1", "query": "select 1"}),
+                )
+                .await
+                .unwrap();
+                assert_eq!(call_result, serde_json::json!("ok"));
+
+                let discover = recv_recorded_request(&mut requests).await;
+                assert_modern_http_request(&discover, "server/discover", None);
+                let list = recv_recorded_request(&mut requests).await;
+                assert_modern_http_request(&list, "tools/list", None);
+                let tool_call = recv_recorded_request(&mut requests).await;
+                assert_modern_http_request(&tool_call, "tools/call", Some("execute_sql"));
+                assert_eq!(
+                    tool_call
+                        .headers
+                        .get("mcp-param-region")
+                        .map(String::as_str),
+                    Some("us-west1")
+                );
+                assert!(!tool_call.headers.contains_key("mcp-session-id"));
+            })
+            .await;
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn modern_http_discovery_falls_back_to_legacy_initialize_when_endpoint_is_not_modern() {
+        tokio::task::LocalSet::new()
+            .run_until(async {
+                let (base_url, mut requests) = spawn_legacy_http_fallback_server().await;
+                let handle = modern_http_handle(&base_url).await;
+
+                let discover = recv_recorded_request(&mut requests).await;
+                assert_modern_http_request(&discover, "server/discover", None);
+                let initialize = recv_recorded_request(&mut requests).await;
+                assert_eq!(initialize.body["method"], serde_json::json!("initialize"));
+                assert!(initialize.body["params"].get("_meta").is_none());
+                assert_eq!(
+                    initialize
+                        .headers
+                        .get("mcp-protocol-version")
+                        .map(String::as_str),
+                    Some(PROTOCOL_VERSION)
+                );
+                assert!(!initialize.headers.contains_key("mcp-method"));
+
+                assert_eq!(
+                    handle.protocol_mode().await.unwrap(),
+                    McpProtocolMode::Legacy
+                );
+                let initialize_result = handle.initialize_result.lock().await.clone().unwrap();
+                assert_eq!(
+                    initialize_result["protocolVersion"],
+                    serde_json::json!(PROTOCOL_VERSION)
+                );
+            })
+            .await;
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn modern_input_required_result_dispatches_and_retries() {
+        tokio::task::LocalSet::new()
+            .run_until(async {
+                let (base_url, mut requests) = spawn_modern_http_mcp_server().await;
+                let handle = modern_http_handle(&base_url).await;
+                install_sampling_mock().await;
+                let result = call_mcp_tool(
+                    &handle,
+                    "needs_input",
+                    serde_json::json!({"prompt": "continue"}),
+                )
+                .await
+                .unwrap();
+                assert_eq!(result, serde_json::json!("done"));
+
+                let _discover = recv_recorded_request(&mut requests).await;
+                let first_call = recv_recorded_request(&mut requests).await;
+                assert_modern_http_request(&first_call, "tools/call", Some("needs_input"));
+                assert!(first_call.body["params"].get("inputResponses").is_none());
+
+                let retry_call = recv_recorded_request(&mut requests).await;
+                assert_modern_http_request(&retry_call, "tools/call", Some("needs_input"));
+                let responses = &retry_call.body["params"]["inputResponses"];
+                assert!(responses["roots"]["roots"].as_array().is_some());
+                assert_eq!(
+                    responses["elicitation"]["action"],
+                    serde_json::json!("decline")
+                );
+                assert_eq!(
+                    responses["sampling"]["content"]["text"],
+                    serde_json::json!("sampled")
+                );
+                assert_eq!(
+                    retry_call.body["params"]["requestState"],
+                    serde_json::json!("state-1")
+                );
+                clear_sampling_mock().await;
+            })
+            .await;
+    }
+
+    #[test]
+    fn x_mcp_header_validation_filters_invalid_tools_and_encodes_values() {
+        let tools = vec![
+            serde_json::json!({
+                "name": "valid",
+                "inputSchema": {
+                    "type": "object",
+                    "properties": {
+                        "region": {"type": "string", "x-mcp-header": "Region"}
+                    }
+                }
+            }),
+            serde_json::json!({
+                "name": "invalid",
+                "inputSchema": {
+                    "type": "object",
+                    "properties": {
+                        "body": {"type": "object", "x-mcp-header": "Body"}
+                    }
+                }
+            }),
+        ];
+        let filtered = filter_tools_for_client(&tools);
+        assert_eq!(filtered.len(), 1);
+        assert_eq!(filtered[0]["name"], serde_json::json!("valid"));
+        assert_eq!(
+            encode_mcp_header_value(&serde_json::json!("Hello, 世界")).unwrap(),
+            "=?base64?SGVsbG8sIOS4lueVjA==?="
+        );
+    }
+
+    async fn connect_stdio_test_script(
+        script: &str,
+        protocol_mode: McpProtocolMode,
+        protocol_version: String,
+    ) -> VmMcpClientHandle {
+        let args = vec!["-u".to_string(), "-c".to_string(), script.to_string()];
+        mcp_connect_stdio_impl(
+            "python3",
+            &args,
+            &BTreeMap::new(),
+            protocol_mode,
+            protocol_version,
+        )
+        .await
+        .expect("stdio test MCP server should connect")
+    }
+
+    async fn install_sampling_mock() {
+        execute_test_harn(
+            r#"
+llm_mock({text: "sampled", provider: "mock", model: "mock"})
+host_mock("mcp", "sample", {action: "accept", options: {provider: "mock", model: "mock"}})
+"#,
+        )
+        .await;
+    }
+
+    async fn clear_sampling_mock() {
+        execute_test_harn(
+            r#"
+host_mock_clear()
+llm_mock_clear()
+"#,
+        )
+        .await;
+    }
+
+    async fn execute_test_harn(source: &str) {
+        let chunk = crate::compile_source(source).expect("test Harn source should compile");
+        let mut vm = crate::Vm::new();
+        crate::register_vm_stdlib_with_deferred_llm(&mut vm);
+        vm.execute(&chunk)
+            .await
+            .expect("test Harn source should execute");
+    }
+
+    async fn modern_http_handle(base_url: &str) -> VmMcpClientHandle {
+        let spec = McpServerSpec {
+            name: "modern-http".to_string(),
+            transport: McpTransport::Http,
+            command: String::new(),
+            args: Vec::new(),
+            env: BTreeMap::new(),
+            url: format!("{base_url}/mcp"),
+            auth_token: None,
+            protocol_version: Some(DRAFT_PROTOCOL_VERSION.to_string()),
+            protocol_mode: Some("rc".to_string()),
+            proxy_server_name: None,
+        };
+        connect_mcp_server_from_spec(&spec)
+            .await
+            .expect("modern HTTP MCP server should connect")
+    }
+
+    fn assert_modern_http_request(request: &RecordedHttpRequest, method: &str, name: Option<&str>) {
+        assert_eq!(request.body["method"], serde_json::json!(method));
+        assert_eq!(
+            request
+                .headers
+                .get("mcp-protocol-version")
+                .map(String::as_str),
+            Some(DRAFT_PROTOCOL_VERSION)
+        );
+        assert_eq!(
+            request.headers.get("mcp-method").map(String::as_str),
+            Some(method)
+        );
+        assert_eq!(request.headers.get("mcp-name").map(String::as_str), name);
+        assert!(!request.headers.contains_key("mcp-session-id"));
+        let meta = &request.body["params"]["_meta"];
+        assert_eq!(
+            meta[PROTOCOL_VERSION_META_KEY],
+            serde_json::json!(DRAFT_PROTOCOL_VERSION)
+        );
+        assert_eq!(
+            meta[CLIENT_INFO_META_KEY]["name"],
+            serde_json::json!("harn")
+        );
+        assert_eq!(
+            meta[CLIENT_CAPABILITIES_META_KEY]["roots"],
+            serde_json::json!({})
+        );
+    }
+
+    async fn spawn_modern_http_mcp_server() -> (String, mpsc::UnboundedReceiver<RecordedHttpRequest>)
+    {
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        let (request_tx, request_rx) = mpsc::unbounded_channel();
+
+        tokio::spawn(async move {
+            loop {
+                let Ok((mut stream, _)) = listener.accept().await else {
+                    break;
+                };
+                let request_tx = request_tx.clone();
+                tokio::spawn(async move {
+                    let Ok((_request_line, headers, body)) = read_http_request(&mut stream).await
+                    else {
+                        return;
+                    };
+                    let Ok(request) = serde_json::from_slice::<serde_json::Value>(&body) else {
+                        return;
+                    };
+                    let _ = request_tx.send(RecordedHttpRequest {
+                        headers: headers.clone(),
+                        body: request.clone(),
+                    });
+                    let method = request.get("method").and_then(|value| value.as_str());
+                    let response = modern_http_response(&request, method);
+                    let _ = write_http_json(&mut stream, "200 OK", &[], response).await;
+                });
+            }
+        });
+
+        (format!("http://{addr}"), request_rx)
+    }
+
+    async fn spawn_legacy_http_fallback_server(
+    ) -> (String, mpsc::UnboundedReceiver<RecordedHttpRequest>) {
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        let (request_tx, request_rx) = mpsc::unbounded_channel();
+
+        tokio::spawn(async move {
+            loop {
+                let Ok((mut stream, _)) = listener.accept().await else {
+                    break;
+                };
+                let request_tx = request_tx.clone();
+                tokio::spawn(async move {
+                    let Ok((request_line, headers, body)) = read_http_request(&mut stream).await
+                    else {
+                        return;
+                    };
+                    if request_line.starts_with("GET ") {
+                        let _ = write_http_empty(&mut stream, "404 Not Found").await;
+                        return;
+                    }
+                    let Ok(request) = serde_json::from_slice::<serde_json::Value>(&body) else {
+                        return;
+                    };
+                    let method = request.get("method").and_then(|value| value.as_str());
+                    let _ = request_tx.send(RecordedHttpRequest {
+                        headers: headers.clone(),
+                        body: request.clone(),
+                    });
+                    match method {
+                        Some("server/discover") => {
+                            let _ = write_http_empty(&mut stream, "400 Bad Request").await;
+                        }
+                        Some("initialize") => {
+                            let response = serde_json::json!({
+                                "jsonrpc": "2.0",
+                                "id": request["id"].clone(),
+                                "result": {
+                                    "protocolVersion": PROTOCOL_VERSION,
+                                    "capabilities": {"tools": {}},
+                                    "serverInfo": {"name": "legacy-http", "version": "1.0.0"}
+                                }
+                            });
+                            let _ = write_http_json(
+                                &mut stream,
+                                "200 OK",
+                                &[("MCP-Session-Id", "legacy-session")],
+                                response,
+                            )
+                            .await;
+                        }
+                        Some("notifications/initialized") => {
+                            let _ = write_http_empty(&mut stream, "202 Accepted").await;
+                        }
+                        _ => {
+                            let _ = write_http_empty(&mut stream, "404 Not Found").await;
+                        }
+                    }
+                });
+            }
+        });
+
+        (format!("http://{addr}"), request_rx)
+    }
+
+    async fn recv_recorded_request(
+        requests: &mut mpsc::UnboundedReceiver<RecordedHttpRequest>,
+    ) -> RecordedHttpRequest {
+        tokio::time::timeout(MCP_TIMEOUT, requests.recv())
+            .await
+            .expect("timed out waiting for recorded MCP HTTP request")
+            .expect("mock server closed before recording request")
+    }
+
+    fn modern_http_response(
+        request: &serde_json::Value,
+        method: Option<&str>,
+    ) -> serde_json::Value {
+        let id = request
+            .get("id")
+            .cloned()
+            .unwrap_or(serde_json::Value::Null);
+        match method {
+            Some("server/discover") => serde_json::json!({
+                "jsonrpc": "2.0",
+                "id": id,
+                "result": {
+                    "resultType": "complete",
+                    "supportedVersions": [DRAFT_PROTOCOL_VERSION],
+                    "capabilities": {"tools": {}, "resources": {}},
+                    "serverInfo": {"name": "modern-http", "version": "1.0.0"}
+                }
+            }),
+            Some("tools/list") => serde_json::json!({
+                "jsonrpc": "2.0",
+                "id": id,
+                "result": {
+                    "resultType": "complete",
+                    "tools": [{
+                        "name": "execute_sql",
+                        "inputSchema": {
+                            "type": "object",
+                            "properties": {
+                                "region": {"type": "string", "x-mcp-header": "Region"},
+                                "query": {"type": "string"}
+                            },
+                            "required": ["region", "query"]
+                        }
+                    }],
+                    "ttlMs": 300000,
+                    "cacheScope": "public"
+                }
+            }),
+            Some("tools/call") => modern_http_tool_call_response(request, id),
+            _ => serde_json::json!({
+                "jsonrpc": "2.0",
+                "id": id,
+                "error": {"code": -32601, "message": "Method not found"}
+            }),
+        }
+    }
+
+    fn modern_http_tool_call_response(
+        request: &serde_json::Value,
+        id: serde_json::Value,
+    ) -> serde_json::Value {
+        let params = &request["params"];
+        let name = params.get("name").and_then(|value| value.as_str());
+        if name == Some("needs_input") && params.get("inputResponses").is_none() {
+            return serde_json::json!({
+                "jsonrpc": "2.0",
+                "id": id,
+                "result": {
+                    "resultType": "input_required",
+                    "requestState": "state-1",
+                    "inputRequests": {
+                        "roots": {"method": "roots/list", "params": {}},
+                        "elicitation": {
+                            "method": "elicitation/create",
+                            "params": {
+                                "mode": "form",
+                                "message": "Need input",
+                                "requestedSchema": {
+                                    "type": "object",
+                                    "properties": {"answer": {"type": "string"}}
+                                }
+                            }
+                        },
+                        "sampling": {
+                            "method": "sampling/createMessage",
+                            "params": {
+                                "messages": [{
+                                    "role": "user",
+                                    "content": {"type": "text", "text": "sample"}
+                                }],
+                                "maxTokens": 4
+                            }
+                        }
+                    }
+                }
+            });
+        }
+        let text = if name == Some("needs_input") {
+            "done"
+        } else {
+            "ok"
+        };
+        serde_json::json!({
+            "jsonrpc": "2.0",
+            "id": id,
+            "result": {
+                "resultType": "complete",
+                "content": [{
+                    "type": "text",
+                    "text": text
+                }],
+                "isError": false
+            }
+        })
     }
 
     async fn spawn_eliciting_http_mcp_server(
@@ -1906,7 +3255,6 @@ mod tests {
                 "\r\n"
             );
             stream.write_all(response.as_bytes()).await?;
-            tokio::time::sleep(std::time::Duration::from_millis(250)).await;
             return Ok(());
         }
 
@@ -2097,11 +3445,13 @@ mod tests {
             client: reqwest::Client::new(),
             url: "http://127.0.0.1/mcp".to_string(),
             auth_token: None,
+            protocol_mode: McpProtocolMode::Legacy,
             protocol_version: PROTOCOL_VERSION.to_string(),
             session_id: None,
             next_id: 1,
             proxy_server_name: None,
             get_stream_task: None,
+            tool_headers: BTreeMap::new(),
         };
         let body = "event: message\ndata: {\"jsonrpc\":\"2.0\",\"method\":\"notifications/message\"}\n\nevent: message\ndata: {\"jsonrpc\":\"2.0\",\"id\":1,\"result\":{\"tools\":[]}}\n\n";
         let parsed = parse_sse_jsonrpc_body(&inner, "mock", body, Some(1))
@@ -2196,14 +3546,17 @@ mod tests {
                         client: reqwest::Client::new(),
                         url: format!("{base_url}/mcp"),
                         auth_token: None,
+                        protocol_mode: McpProtocolMode::Legacy,
                         protocol_version: PROTOCOL_VERSION.to_string(),
                         session_id: None,
                         next_id: 1,
                         proxy_server_name: None,
                         get_stream_task: None,
+                        tool_headers: BTreeMap::new(),
                     })))),
                     last_roots: Arc::new(Mutex::new(Vec::new())),
                     initialize_result: Arc::new(Mutex::new(None)),
+                    cache_hints: Arc::new(Mutex::new(BTreeMap::new())),
                 };
 
                 handle.notify_roots_list_changed_if_needed().await.unwrap();
@@ -2217,12 +3570,7 @@ mod tests {
                 );
 
                 handle.notify_roots_list_changed_if_needed().await.unwrap();
-                assert!(
-                    tokio::time::timeout(std::time::Duration::from_millis(50), requests.recv())
-                        .await
-                        .is_err(),
-                    "unchanged roots should not send another notification"
-                );
+                assert!(requests.try_recv().is_err());
             })
             .await;
     }

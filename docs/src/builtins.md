@@ -2059,7 +2059,7 @@ MCP servers.
 | `mcp_configure(config)` / `harn.mcp.configure(config)` | config: dict | dict | Opt into experimental MCP behavior for the current VM, including draft SEP-2356 file inputs |
 | `mcp_file_input(options?)` / `harn.mcp.file_input(options?)` | options: dict | dict | Return a JSON Schema property using the draft `x-mcp-file` annotation |
 | `mcp_upload_file(server, file_path, options?)` / `harn.mcp.upload_file(server, file_path, options?)` | server: mcp\_client, file\_path: string, options: dict | string | Encode a local file as an RFC 2397 `data:` URI for an experimental MCP file input |
-| `mcp_connect(command, args?)` | command: string, args: list | mcp\_client | Spawn an MCP server and perform the initialize handshake |
+| `mcp_connect(command, args?, options?)` | command: string, args: list, options: dict | mcp\_client | Spawn an MCP server and connect with the legacy or opt-in RC client profile |
 | `mcp_list_tools(client)` | client: mcp\_client | list | List available tools from the server |
 | `mcp_call(client, name, arguments?)` | client: mcp\_client, name: string, arguments: dict | string or list | Call a tool and return the result |
 | `mcp_list_resources(client)` | client: mcp\_client | list | List available resources from the server |
@@ -2094,12 +2094,22 @@ Notes:
 - `mcp_call` returns a string when the tool produces a single text block,
   a list of content dicts for multi-block results, or nil when empty.
 - HTTP MCP clients keep the server's Streamable HTTP GET event stream open
-  after initialization. If the server sends `elicitation/create`, Harn routes
-  it to the host bridge as `host_call("mcp", "elicit", ...)` and posts the
-  JSON-RPC response back to the MCP endpoint.
+  after legacy initialization. RC clients use stateless request/response HTTP
+  with per-request metadata instead.
+- Set `options.protocol_mode` to `"rc"` for direct stdio connects, or
+  `protocol_mode = "rc"` in `harn.toml`, to opt into the draft MCP client
+  profile. Harn probes RC stdio servers with `server/discover`, attaches MCP
+  version/client/capability metadata to every request, retries a mutually
+  supported version on unsupported-version errors, and falls back to the legacy
+  initialize handshake only when `server/discover` is not implemented.
+- In RC HTTP mode Harn sends `MCP-Protocol-Version`, `Mcp-Method`, and
+  `Mcp-Name` where required, does not require `MCP-Session-Id`, mirrors
+  `x-mcp-header` tool-schema annotations into `Mcp-Param-*` headers for
+  `tools/call`, and handles `input_required` tool results by resolving roots,
+  elicitation, and sampling requests before retrying the call.
 - If the tool reports `isError: true`, `mcp_call` throws the error text.
 - `mcp_connect` throws if the command cannot be spawned or the initialize
-  handshake fails.
+  handshake or RC discovery probe fails.
 
 ### Auto-connecting MCP servers via harn.toml
 
@@ -2135,6 +2145,7 @@ Each entry requires:
 | `client_secret` | string | Optional pre-registered OAuth client secret |
 | `scopes` | string | Optional OAuth scope string for login/consent |
 | `protocol_version` | string | Optional MCP protocol version override |
+| `protocol_mode` | string | Optional MCP client profile: `legacy` (default) or `rc` |
 
 The connected clients are available as properties on the `mcp` global dict:
 

@@ -23,6 +23,13 @@ condensed series summaries instead of full per-patch history.
   reserved `fact:<kind>:<id>` keys, carry evidence/confidence/provenance,
   add canonical evidence tags for invalidation, and surface `HARN-FACT-NNN`
   validation codes.
+- **Opt-in MCP RC client profile (#2184).** `mcp_connect(..., options)` and
+  `[[mcp]] protocol_mode = "rc"` now use `server/discover`, per-request MCP
+  metadata, stateless Streamable HTTP headers, unsupported-version retry,
+  cache-hint capture, `input_required` retries for roots/elicitation/sampling,
+  and `x-mcp-header` HTTP parameter mirroring while keeping legacy
+  `2025-11-25` initialize/session behavior as the default.
+
 - **First-class compaction instructions (#2190).** Manual session compaction,
   transcript auto-compaction, host-triggered compaction, and `agent_loop`
   auto-compaction now accept a typed `CompactionPolicy` with optional

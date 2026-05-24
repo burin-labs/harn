@@ -1446,6 +1446,7 @@ pub(crate) async fn connect_mcp_servers(
                 AuthResolution::None => server.auth_token.clone(),
             },
             "protocol_version": server.protocol_version,
+            "protocol_mode": server.protocol_mode,
             "proxy_server_name": server.proxy_server_name,
         });
 
