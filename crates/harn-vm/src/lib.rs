@@ -58,6 +58,7 @@ pub mod record_filter;
 pub mod redact;
 pub mod run_events;
 pub mod runtime_context;
+pub(crate) mod runtime_guards;
 pub mod runtime_limits;
 pub mod runtime_paths;
 pub mod schema;

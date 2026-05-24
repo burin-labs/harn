@@ -1,5 +1,9 @@
+use std::cell::RefCell;
+use std::collections::HashMap;
 use std::rc::Rc;
 
+use crate::runtime_limits::RuntimeLimits;
+use crate::value::value_structural_hash_key;
 use crate::value::{VmError, VmValue};
 
 use super::canonicalize::{canonical_to_json_schema, canonicalize_schema_value};
@@ -9,6 +13,48 @@ use super::transform::{
 };
 use super::type_check::schema_is_object_like;
 use super::validate::{first_param_validation_error, validate_schema_value, ValidationOptions};
+
+const PARAM_SCHEMA_CACHE_LIMIT: usize = RuntimeLimits::DEFAULT.max_schema_guard_cache_entries;
+
+thread_local! {
+    static PARAM_SCHEMA_CACHE: RefCell<HashMap<String, Result<CanonicalParamSchema, Rc<str>>>> =
+        RefCell::new(HashMap::new());
+}
+
+#[derive(Debug, Clone)]
+pub(crate) struct CanonicalParamSchema {
+    schema: Rc<std::collections::BTreeMap<String, VmValue>>,
+    object_like: bool,
+}
+
+pub(crate) fn canonical_param_schema(schema: &VmValue) -> Result<CanonicalParamSchema, String> {
+    let normalized = canonicalize_schema_value(schema)?;
+    let VmValue::Dict(schema) = normalized else {
+        return Err("schema must be a dict".to_string());
+    };
+    let object_like = schema_is_object_like(&schema);
+    Ok(CanonicalParamSchema {
+        schema,
+        object_like,
+    })
+}
+
+fn cached_canonical_param_schema(schema: &VmValue) -> Result<CanonicalParamSchema, String> {
+    let key = value_structural_hash_key(schema);
+    PARAM_SCHEMA_CACHE.with(|cache| {
+        let mut cache = cache.borrow_mut();
+        if let Some(cached) = cache.get(&key) {
+            return cached.clone().map_err(|error| error.as_ref().to_string());
+        }
+
+        let canonical = canonical_param_schema(schema).map_err(Rc::<str>::from);
+        if cache.len() >= PARAM_SCHEMA_CACHE_LIMIT {
+            cache.clear();
+        }
+        cache.insert(key, canonical.clone());
+        canonical.map_err(|error| error.as_ref().to_string())
+    })
+}
 
 pub(crate) fn schema_result_value(
     data: &VmValue,
@@ -78,19 +124,25 @@ pub(crate) fn schema_assert_param(
     param_name: &str,
     schema: &VmValue,
 ) -> Result<(), VmError> {
-    let normalized = canonicalize_schema_value(schema)
+    let normalized = cached_canonical_param_schema(schema)
         .map_err(|error| VmError::TypeError(format!("parameter '{param_name}': {error}")))?;
-    let schema_dict = normalized.as_dict().ok_or_else(|| {
-        VmError::TypeError(format!("parameter '{param_name}': schema must be a dict"))
-    })?;
+    schema_assert_canonical_param(value, param_name, &normalized)
+}
+
+pub(crate) fn schema_assert_canonical_param(
+    value: &VmValue,
+    param_name: &str,
+    schema: &CanonicalParamSchema,
+) -> Result<(), VmError> {
     let options = ValidationOptions {
         apply_defaults: false,
         numeric_compat: true,
     };
+    let schema_dict = schema.schema.as_ref();
     if let Some(error) =
         first_param_validation_error(value, schema_dict, schema_dict, param_name, options)
     {
-        return if schema_is_object_like(schema_dict) {
+        return if schema.object_like {
             Err(VmError::TypeError(error))
         } else {
             Err(VmError::Runtime(format!("TypeError: {error}")))

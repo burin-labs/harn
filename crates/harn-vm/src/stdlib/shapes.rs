@@ -1,8 +1,17 @@
-use std::collections::BTreeMap;
+use std::cell::RefCell;
+use std::collections::{BTreeMap, HashMap};
 use std::rc::Rc;
 
+use crate::runtime_limits::RuntimeLimits;
 use crate::value::{VmError, VmValue};
 use crate::vm::Vm;
+
+const SHAPE_SPEC_CACHE_LIMIT: usize = RuntimeLimits::DEFAULT.max_shape_spec_cache_entries;
+
+thread_local! {
+    static SHAPE_SPEC_CACHE: RefCell<HashMap<String, Rc<ParsedShapeSpec>>> =
+        RefCell::new(HashMap::new());
+}
 
 pub(crate) fn register_shape_builtins(vm: &mut Vm) {
     vm.register_builtin("keys", |args, _out| {
@@ -213,15 +222,23 @@ fn assert_shape_fields(
     param_name: &str,
     spec: &str,
 ) -> Result<VmValue, VmError> {
-    let parsed = parse_shape_spec(spec);
-    for (field_name, type_spec, optional) in &parsed {
-        match fields.get(field_name.as_str()) {
+    let parsed = cached_shape_spec(spec);
+    assert_parsed_shape_fields(fields, param_name, &parsed)
+}
+
+fn assert_parsed_shape_fields(
+    fields: &BTreeMap<String, VmValue>,
+    param_name: &str,
+    spec: &ParsedShapeSpec,
+) -> Result<VmValue, VmError> {
+    for field in &spec.fields {
+        match fields.get(field.name.as_str()) {
             None => {
-                if !optional {
+                if !field.optional {
                     let actual_keys: Vec<&str> = fields.keys().map(|k| k.as_str()).collect();
-                    let max_dist = if field_name.len() <= 4 { 1 } else { 2 };
+                    let max_dist = if field.name.len() <= 4 { 1 } else { 2 };
                     let suggestion = harn_parser::diagnostic::find_closest_match(
-                        field_name,
+                        &field.name,
                         actual_keys.iter().copied(),
                         max_dist,
                     );
@@ -229,65 +246,77 @@ fn assert_shape_fields(
                     let msg = if let Some(closest) = suggestion {
                         format!(
                             "parameter '{}': missing field '{}' ({}), did you mean '{}'? — {}",
-                            param_name, field_name, type_spec, closest, actual_summary
+                            param_name, field.name, field.type_label, closest, actual_summary
                         )
                     } else {
                         format!(
                             "parameter '{}': missing field '{}' ({}) — {}",
-                            param_name, field_name, type_spec, actual_summary
+                            param_name, field.name, field.type_label, actual_summary
                         )
                     };
                     return Err(VmError::TypeError(msg));
                 }
             }
             Some(val) => {
-                if type_spec.starts_with('{') && type_spec.ends_with('}') {
-                    let inner_spec = &type_spec[1..type_spec.len() - 1];
-                    let nested_struct_fields;
-                    let nested_fields = match val {
-                        VmValue::Dict(map) => map.as_ref(),
-                        VmValue::StructInstance { .. } => {
-                            nested_struct_fields = val.struct_fields_map().unwrap_or_default();
-                            &nested_struct_fields
-                        }
-                        _ => {
-                            return Err(VmError::TypeError(format!(
-                                "parameter '{}': field '{}' expected dict or struct, got {}",
-                                param_name,
-                                field_name,
-                                val.type_name()
-                            )));
-                        }
-                    };
-                    {
-                        let nested_param = format!("{}.{}", param_name, field_name);
-                        assert_shape_fields(nested_fields, &nested_param, inner_spec)?;
-                    }
-                } else if type_spec.contains('|') {
-                    let actual_type = val.type_name();
-                    let is_nil = matches!(val, VmValue::Nil);
-                    let matches = type_spec
-                        .split('|')
-                        .any(|t| t.trim() == actual_type || (t.trim() == "nil" && is_nil));
-                    if !matches {
-                        return Err(VmError::TypeError(format!(
-                            "parameter '{}': field '{}' expected {}, got {}",
-                            param_name, field_name, type_spec, actual_type
-                        )));
-                    }
-                } else {
-                    let actual_type = val.type_name();
-                    if actual_type != type_spec.as_str() {
-                        return Err(VmError::TypeError(format!(
-                            "parameter '{}': field '{}' expected {}, got {}",
-                            param_name, field_name, type_spec, actual_type
-                        )));
-                    }
-                }
+                assert_shape_field_value(val, param_name, field)?;
             }
         }
     }
     Ok(VmValue::Nil)
+}
+
+fn assert_shape_field_value(
+    val: &VmValue,
+    param_name: &str,
+    field: &ParsedShapeField,
+) -> Result<(), VmError> {
+    match &field.kind {
+        ShapeFieldType::Nested(nested) => {
+            let nested_struct_fields;
+            let nested_fields = match val {
+                VmValue::Dict(map) => map.as_ref(),
+                VmValue::StructInstance { .. } => {
+                    nested_struct_fields = val.struct_fields_map().unwrap_or_default();
+                    &nested_struct_fields
+                }
+                _ => {
+                    return Err(VmError::TypeError(format!(
+                        "parameter '{}': field '{}' expected dict or struct, got {}",
+                        param_name,
+                        field.name,
+                        val.type_name()
+                    )));
+                }
+            };
+            let nested_param = format!("{}.{}", param_name, field.name);
+            assert_parsed_shape_fields(nested_fields, &nested_param, nested)?;
+            Ok(())
+        }
+        ShapeFieldType::Union(types) => {
+            let actual_type = val.type_name();
+            let is_nil = matches!(val, VmValue::Nil);
+            let matches = types
+                .iter()
+                .any(|ty| ty == actual_type || (ty == "nil" && is_nil));
+            if !matches {
+                return Err(VmError::TypeError(format!(
+                    "parameter '{}': field '{}' expected {}, got {}",
+                    param_name, field.name, field.type_label, actual_type
+                )));
+            }
+            Ok(())
+        }
+        ShapeFieldType::Scalar(expected) => {
+            let actual_type = val.type_name();
+            if actual_type != expected.as_str() {
+                return Err(VmError::TypeError(format!(
+                    "parameter '{}': field '{}' expected {}, got {}",
+                    param_name, field.name, field.type_label, actual_type
+                )));
+            }
+            Ok(())
+        }
+    }
 }
 
 /// Render the "available fields: …" tail used in missing-field errors.
@@ -302,9 +331,45 @@ pub(crate) fn format_available_fields(keys: &[&str]) -> String {
     }
 }
 
-/// Parse a shape spec string into a list of (field_name, type_spec, optional).
-fn parse_shape_spec(spec: &str) -> Vec<(String, String, bool)> {
-    let mut result = Vec::new();
+#[derive(Debug)]
+struct ParsedShapeSpec {
+    fields: Vec<ParsedShapeField>,
+}
+
+#[derive(Debug)]
+struct ParsedShapeField {
+    name: String,
+    type_label: String,
+    optional: bool,
+    kind: ShapeFieldType,
+}
+
+#[derive(Debug)]
+enum ShapeFieldType {
+    Scalar(String),
+    Union(Vec<String>),
+    Nested(Rc<ParsedShapeSpec>),
+}
+
+fn cached_shape_spec(spec: &str) -> Rc<ParsedShapeSpec> {
+    SHAPE_SPEC_CACHE.with(|cache| {
+        let mut cache = cache.borrow_mut();
+        if let Some(parsed) = cache.get(spec) {
+            return Rc::clone(parsed);
+        }
+
+        let parsed = Rc::new(parse_shape_spec(spec));
+        if cache.len() >= SHAPE_SPEC_CACHE_LIMIT {
+            cache.clear();
+        }
+        cache.insert(spec.to_string(), Rc::clone(&parsed));
+        parsed
+    })
+}
+
+/// Parse a shape spec string into reusable runtime validation metadata.
+fn parse_shape_spec(spec: &str) -> ParsedShapeSpec {
+    let mut fields = Vec::new();
     let chars: Vec<char> = spec.chars().collect();
     let len = chars.len();
     let mut i = 0;
@@ -360,14 +425,19 @@ fn parse_shape_spec(spec: &str) -> Vec<(String, String, bool)> {
                 }
             }
         }
-        let type_spec = chars[type_start..i]
+        let type_label = chars[type_start..i]
             .iter()
             .collect::<String>()
             .trim()
             .to_string();
 
-        if !field_name.is_empty() && !type_spec.is_empty() {
-            result.push((field_name, type_spec, optional));
+        if !field_name.is_empty() && !type_label.is_empty() {
+            fields.push(ParsedShapeField {
+                name: field_name,
+                kind: parse_shape_field_type(&type_label),
+                type_label,
+                optional,
+            });
         }
 
         if i < len && chars[i] == ',' {
@@ -375,5 +445,53 @@ fn parse_shape_spec(spec: &str) -> Vec<(String, String, bool)> {
         }
     }
 
-    result
+    ParsedShapeSpec { fields }
+}
+
+fn parse_shape_field_type(type_label: &str) -> ShapeFieldType {
+    if type_label.starts_with('{') && type_label.ends_with('}') {
+        let inner_spec = &type_label[1..type_label.len() - 1];
+        return ShapeFieldType::Nested(Rc::new(parse_shape_spec(inner_spec)));
+    }
+
+    if type_label.contains('|') {
+        return ShapeFieldType::Union(
+            type_label
+                .split('|')
+                .map(str::trim)
+                .filter(|ty| !ty.is_empty())
+                .map(str::to_string)
+                .collect(),
+        );
+    }
+
+    ShapeFieldType::Scalar(type_label.to_string())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn shape_spec_cache_reuses_parsed_specs() {
+        let first = cached_shape_spec("cache_unique_x: int, cache_unique_y?: string");
+        let second = cached_shape_spec("cache_unique_x: int, cache_unique_y?: string");
+
+        assert!(Rc::ptr_eq(&first, &second));
+    }
+
+    #[test]
+    fn parsed_shape_spec_validates_nested_and_union_fields() {
+        let spec = cached_shape_spec("user: {name: string}, mode: string|nil");
+        let user = VmValue::Dict(Rc::new(BTreeMap::from([(
+            "name".to_string(),
+            VmValue::String(Rc::from("Ada")),
+        )])));
+        let fields = BTreeMap::from([
+            ("user".to_string(), user),
+            ("mode".to_string(), VmValue::Nil),
+        ]);
+
+        assert_parsed_shape_fields(&fields, "payload", &spec).unwrap();
+    }
 }

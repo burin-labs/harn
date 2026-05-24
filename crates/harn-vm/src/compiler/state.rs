@@ -352,12 +352,14 @@ impl Compiler {
         Ok(())
     }
 
-    /// Emit runtime type checks for parameters with type annotations.
-    /// Interface types keep their dedicated runtime guard; all other supported
-    /// runtime-checkable types compile to a schema literal and call
-    /// `__assert_schema(value, param_name, schema)`.
+    /// Emit body-local type checks that call-site validation cannot cover.
+    /// Ordinary supplied arguments are validated by precomputed
+    /// [`crate::chunk::ParamSlot`] guards before the frame is entered. The
+    /// bytecode preamble still checks interface parameters, because interface
+    /// satisfaction depends on compiler-collected method metadata, and checks
+    /// defaulted schema parameters only when the caller omitted that argument.
     pub(super) fn emit_type_checks(&mut self, params: &[TypedParam]) {
-        for param in params {
+        for (param_index, param) in params.iter().enumerate() {
             if let Some(type_expr) = &param.type_expr {
                 let check_type = if param.rest {
                     harn_parser::TypeExpr::List(Box::new(type_expr.clone()))
@@ -387,22 +389,49 @@ impl Compiler {
                     }
                 }
 
-                if let Some(schema) = Self::type_expr_to_schema_value(&check_type) {
-                    let fn_idx = self
-                        .chunk
-                        .add_constant(Constant::String("__assert_schema".into()));
-                    self.chunk.emit_u16(Op::Constant, fn_idx, self.line);
-                    self.emit_get_binding(&param.name);
-                    let name_idx = self
-                        .chunk
-                        .add_constant(Constant::String(param.name.clone()));
-                    self.chunk.emit_u16(Op::Constant, name_idx, self.line);
-                    self.emit_vm_value_literal(&schema);
-                    self.chunk.emit_u8(Op::Call, 3, self.line);
-                    self.chunk.emit(Op::Pop, self.line);
+                if param.default_value.is_some() {
+                    if let Some(schema) = Self::type_expr_to_schema_value(&check_type) {
+                        self.emit_default_param_schema_check(param_index, param, &schema);
+                    }
                 }
             }
         }
+    }
+
+    fn emit_default_param_schema_check(
+        &mut self,
+        param_index: usize,
+        param: &TypedParam,
+        schema: &VmValue,
+    ) {
+        self.chunk.emit(Op::GetArgc, self.line);
+        let threshold_idx = self
+            .chunk
+            .add_constant(Constant::Int((param_index + 1) as i64));
+        self.chunk.emit_u16(Op::Constant, threshold_idx, self.line);
+        self.chunk.emit(Op::GreaterEqual, self.line);
+        let supplied_jump = self.chunk.emit_jump(Op::JumpIfTrue, self.line);
+        self.chunk.emit(Op::Pop, self.line);
+        self.emit_schema_assert_call(param, schema);
+        let end_jump = self.chunk.emit_jump(Op::Jump, self.line);
+        self.chunk.patch_jump(supplied_jump);
+        self.chunk.emit(Op::Pop, self.line);
+        self.chunk.patch_jump(end_jump);
+    }
+
+    fn emit_schema_assert_call(&mut self, param: &TypedParam, schema: &VmValue) {
+        let fn_idx = self
+            .chunk
+            .add_constant(Constant::String("__assert_schema".into()));
+        self.chunk.emit_u16(Op::Constant, fn_idx, self.line);
+        self.emit_get_binding(&param.name);
+        let name_idx = self
+            .chunk
+            .add_constant(Constant::String(param.name.clone()));
+        self.chunk.emit_u16(Op::Constant, name_idx, self.line);
+        self.emit_vm_value_literal(schema);
+        self.chunk.emit_u8(Op::Call, 3, self.line);
+        self.chunk.emit(Op::Pop, self.line);
     }
 
     pub(crate) fn type_expr_to_schema_value(type_expr: &harn_parser::TypeExpr) -> Option<VmValue> {

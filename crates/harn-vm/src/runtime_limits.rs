@@ -27,6 +27,10 @@ pub struct RuntimeLimits {
     pub max_regex_cache_entries: usize,
     /// Maximum compiled JSON-schema `pattern` regexes kept process-wide.
     pub max_schema_pattern_cache_entries: usize,
+    /// Maximum canonical parameter schemas kept per VM thread.
+    pub max_schema_guard_cache_entries: usize,
+    /// Maximum parsed runtime shape specs kept per VM thread.
+    pub max_shape_spec_cache_entries: usize,
     /// Default queue depth for memory/file/sqlite event-log subscribers.
     pub default_event_log_queue_depth: usize,
     /// Default concurrent agent-session cap per VM thread.
@@ -58,6 +62,8 @@ impl RuntimeLimits {
         max_std_cache_entries: 256,
         max_regex_cache_entries: 128,
         max_schema_pattern_cache_entries: 256,
+        max_schema_guard_cache_entries: 256,
+        max_shape_spec_cache_entries: 256,
         default_event_log_queue_depth: 128,
         max_agent_sessions: 128,
         max_project_fingerprint_depth: 4,
@@ -80,6 +86,8 @@ impl RuntimeLimits {
             "max_std_cache_entries" => self.max_std_cache_entries,
             "max_regex_cache_entries" => self.max_regex_cache_entries,
             "max_schema_pattern_cache_entries" => self.max_schema_pattern_cache_entries,
+            "max_schema_guard_cache_entries" => self.max_schema_guard_cache_entries,
+            "max_shape_spec_cache_entries" => self.max_shape_spec_cache_entries,
             "default_event_log_queue_depth" => self.default_event_log_queue_depth,
             "max_agent_sessions" => self.max_agent_sessions,
             "max_project_fingerprint_depth" => self.max_project_fingerprint_depth,
@@ -193,6 +201,18 @@ pub const RUNTIME_LIMIT_DESCRIPTIONS: &[RuntimeLimitDescription] = &[
         protects: "bounds process-wide memory held by compiled JSON-schema pattern regexes",
     },
     RuntimeLimitDescription {
+        name: "max_schema_guard_cache_entries",
+        user_visible: false,
+        host_configurable: false,
+        protects: "bounds per-thread memory held by canonical runtime parameter schemas",
+    },
+    RuntimeLimitDescription {
+        name: "max_shape_spec_cache_entries",
+        user_visible: false,
+        host_configurable: false,
+        protects: "bounds per-thread memory held by parsed runtime shape specs",
+    },
+    RuntimeLimitDescription {
         name: "default_event_log_queue_depth",
         user_visible: true,
         host_configurable: true,
@@ -263,6 +283,8 @@ mod tests {
         assert_eq!(limits.max_std_cache_entries, 256);
         assert_eq!(limits.max_regex_cache_entries, 128);
         assert_eq!(limits.max_schema_pattern_cache_entries, 256);
+        assert_eq!(limits.max_schema_guard_cache_entries, 256);
+        assert_eq!(limits.max_shape_spec_cache_entries, 256);
         assert_eq!(limits.default_event_log_queue_depth, 128);
         assert_eq!(limits.max_agent_sessions, 128);
         assert_eq!(limits.max_project_fingerprint_depth, 4);
@@ -293,6 +315,8 @@ mod tests {
                 "max_std_cache_entries",
                 "max_regex_cache_entries",
                 "max_schema_pattern_cache_entries",
+                "max_schema_guard_cache_entries",
+                "max_shape_spec_cache_entries",
                 "default_event_log_queue_depth",
                 "max_agent_sessions",
                 "max_project_fingerprint_depth",
