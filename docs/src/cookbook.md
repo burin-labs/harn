@@ -13,6 +13,8 @@ For deeper topics that need their own pages, see:
 - [Tool hooks cookbook](./cookbooks/tool-hooks.md) — `preset_run_command`
   recipes per stack
 - [OAuth client + provider cookbook](./oauth.md) — connector OAuth
+- [Extending the CLI in `.harn`](./cli-extending-in-harn.md) — add or
+  port a `harn` subcommand without writing Rust
 
 ## LLM calls
 
