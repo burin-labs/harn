@@ -947,7 +947,7 @@ async fn async_main() {
                 }
             }
             ProvidersCommand::Recommend(recommend) => {
-                if let Err(error) = commands::providers::run_recommend(&recommend) {
+                if let Err(error) = commands::providers::run_recommend(&recommend).await {
                     command_error(&error);
                 }
             }
@@ -1447,7 +1447,16 @@ async fn async_main() {
                 process::exit(1);
             }
         }
-        Command::ProviderCatalog(args) => print_provider_catalog(args.available_only),
+        Command::ProviderCatalog(args) => {
+            if std::env::var("HARN_CLI_IMPL").as_deref() == Ok("rust") {
+                print_provider_catalog(args.available_only);
+            } else {
+                let exit_code = dispatch_provider_catalog(args.available_only).await;
+                if exit_code != 0 {
+                    process::exit(exit_code);
+                }
+            }
+        }
         Command::ProviderReady(args) => {
             run_provider_ready(
                 &args.provider,
@@ -1708,7 +1717,7 @@ async fn local_openai_readiness(
     }))
 }
 
-fn print_provider_catalog(available_only: bool) {
+fn build_provider_catalog_payload(available_only: bool) -> serde_json::Value {
     let provider_names = if available_only {
         harn_vm::llm_config::available_provider_names()
     } else {
@@ -1762,20 +1771,51 @@ fn print_provider_catalog(available_only: bool) {
             })
         })
         .collect();
-    let payload = serde_json::json!({
+    serde_json::json!({
         "providers": providers,
         "known_model_names": harn_vm::llm_config::known_model_names(),
         "available_providers": harn_vm::llm_config::available_provider_names(),
         "aliases": aliases,
         "models": models,
         "qc_defaults": harn_vm::llm_config::qc_defaults(),
-    });
+    })
+}
+
+fn print_provider_catalog(available_only: bool) {
+    let payload = build_provider_catalog_payload(available_only);
     println!(
         "{}",
         serde_json::to_string(&payload).unwrap_or_else(|error| {
             command_error(&format!("failed to serialize provider catalog: {error}"))
         })
     );
+}
+
+/// Dispatch shim for `harn provider-catalog`. Aggregation stays in
+/// Rust (the script can't reach `llm_config` for the catalog walk);
+/// the .harn renderer in `stdlib/cli/providers/catalog.harn` only
+/// re-emits the JSON envelope.
+///
+/// Lock keeps concurrent in-process callers from racing on the global
+/// env var the dispatch wedge reads — same pattern as the other
+/// partial-port commands (see harn#2305 / #2309).
+async fn dispatch_provider_catalog(available_only: bool) -> i32 {
+    static DISPATCH_LOCK: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
+    let payload = build_provider_catalog_payload(available_only);
+    let payload_json = match serde_json::to_string(&payload) {
+        Ok(json) => json,
+        Err(error) => {
+            eprintln!("error: failed to serialise provider catalog payload: {error}");
+            return 1;
+        }
+    };
+    let _guard = DISPATCH_LOCK.lock().await;
+    let _payload_guard =
+        crate::env_guard::ScopedEnvVar::set("HARN_PROVIDER_CATALOG_PAYLOAD_JSON", &payload_json);
+    // `--available-only` doesn't enable JSON; the catalog dump is JSON-
+    // only on both impls, but pass `true` so the dispatch wedge sets
+    // HARN_OUTPUT_JSON for symmetry with peer scripts.
+    crate::dispatch::dispatch_to_embedded_script("providers/catalog", Vec::new(), true).await
 }
 
 async fn run_provider_ready(

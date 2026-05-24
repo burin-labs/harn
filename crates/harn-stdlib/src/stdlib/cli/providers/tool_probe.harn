@@ -1,0 +1,172 @@
+/**
+ * `harn provider-tool-probe` ported to .harn — see harn#2310 (W10).
+ *
+ * **Pragmatic partial port.** The legacy Rust impl either fires an HTTP
+ * probe through `run_tool_conformance_probe` or replays a fixture
+ * through `classify_tool_conformance_fixture`. Both stay in Rust: the
+ * probe machinery is sandbox-blocked, and the fixture classifier is a
+ * 1k-line parser tree that would be a rewrite, not a port. The Rust
+ * shim runs the aggregation and hands the JSON `ToolConformanceReport`
+ * here for rendering only.
+ *
+ * Inputs (from the dispatch shim):
+ *   HARN_PROVIDER_TOOL_PROBE_PAYLOAD_JSON — JSON envelope matching the
+ *     legacy `ToolConformanceReport` shape; see
+ *     `crates/harn-vm/src/llm/tool_conformance.rs` for the canonical
+ *     definition. Required keys:
+ *       provider, model, cases[], tool_calling{native, text,
+ *       streaming_native, fallback_mode, failure_reason?}
+ *   HARN_OUTPUT_JSON — "1" for the JSON envelope (default at the
+ *     handler level), else the human conformance summary.
+ */
+fn __safe_string(value, fallback: string) -> string {
+  if type_of(value) == "string" {
+    return value
+  }
+  return fallback
+}
+
+fn __safe_dict(value) -> dict {
+  if type_of(value) == "dict" {
+    return value
+  }
+  return {}
+}
+
+fn __safe_list(value) -> list {
+  if type_of(value) == "list" {
+    return value
+  }
+  return []
+}
+
+fn __safe_bool(value, fallback: bool) -> bool {
+  if type_of(value) == "bool" {
+    return value
+  }
+  return fallback
+}
+
+/**
+ * Mirror Rust's `Debug` format for `ToolProbeClassification`: serde
+ * emits snake_case in the JSON wire shape, but the legacy human
+ * output uses `{:?}` which prints the original `UpperCamelCase`
+ * variant name. Map back so the parity test sees identical bytes.
+ *
+ * Order matches the enum declaration. Unknown values pass through
+ * verbatim so a future variant addition doesn't silently print "?";
+ * the parity test catches the divergence and the new branch can be
+ * added here.
+ */
+fn __classification_debug(value: string) -> string {
+  if value == "structured_native_tool_call" {
+    return "StructuredNativeToolCall"
+  }
+  if value == "parseable_harn_text_tool_call" {
+    return "ParseableHarnTextToolCall"
+  }
+  if value == "raw_model_tool_tag" {
+    return "RawModelToolTag"
+  }
+  if value == "prose_only_non_tool" {
+    return "ProseOnlyNonTool"
+  }
+  if value == "malformed_json_arguments" {
+    return "MalformedJsonArguments"
+  }
+  if value == "empty_silent" {
+    return "EmptySilent"
+  }
+  if value == "http_error" {
+    return "HttpError"
+  }
+  if value == "transport_error" {
+    return "TransportError"
+  }
+  return value
+}
+
+fn __render_human(report: dict) -> string {
+  let provider = __safe_string(report["provider"], "")
+  let model = __safe_string(report["model"], "")
+  let tc = __safe_dict(report["tool_calling"])
+  let fallback = __safe_string(tc["fallback_mode"], "")
+  let native = __safe_string(tc["native"], "")
+  let text = __safe_string(tc["text"], "")
+  let streaming_native = __safe_string(tc["streaming_native"], "")
+  var out = provider + " " + model
+    + " fallback="
+    + fallback
+    + " native="
+    + native
+    + " text="
+    + text
+    + " streaming_native="
+    + streaming_native
+    + "\n"
+  let cases = __safe_list(report["cases"])
+  for c in cases {
+    if type_of(c) != "dict" {
+      continue
+    }
+    let mode = __safe_string(c["mode"], "")
+    let classification = __classification_debug(__safe_string(c["classification"], ""))
+    let ok = __safe_bool(c["ok"], false)
+    let reason = __safe_string(c["failure_reason"], "-")
+    out = out + "  " + mode + ": " + classification
+      + " ok="
+      + to_string(ok)
+      + " reason="
+      + reason
+      + "\n"
+  }
+  return out
+}
+
+fn main(harness: Harness) -> int {
+  let raw = harness.env.get_or("HARN_PROVIDER_TOOL_PROBE_PAYLOAD_JSON", "")
+  if raw == "" {
+    harness.stdio
+      .eprintln("internal error: HARN_PROVIDER_TOOL_PROBE_PAYLOAD_JSON not set by dispatch shim")
+    return 70
+  }
+  let json_mode = harness.env.get_or("HARN_OUTPUT_JSON", "0") == "1"
+  if json_mode {
+    // Forward the pre-formatted bytes so we don't lose serde's float
+    // fidelity through Harn's `json_parse`/`json_stringify` round-trip
+    // (matters for `elapsed_ms`-style fields that serde keeps typed).
+    let pretty = harness.env.get_or("HARN_PROVIDER_TOOL_PROBE_PAYLOAD_PRETTY", raw)
+    harness.stdio.println(pretty)
+  } else {
+    let report = try {
+      json_parse(raw)
+    } catch (e) {
+      harness.stdio
+        .eprintln("internal error: failed to parse provider-tool-probe payload: " + to_string(e))
+      return 70
+    }
+    let text = __render_human(report)
+    let trimmed = if len(text) > 0 && text[len(text) - 1] == "\n" {
+      text[0:len(text) - 1]
+    } else {
+      text
+    }
+    harness.stdio.println(trimmed)
+  }
+  // Compute exit code from the raw bytes via a quick parse — the
+  // float-preservation concern doesn't apply to the `fallback_mode`
+  // string field.
+  let probe = try {
+    json_parse(raw)
+  } catch (_) {
+    nil
+  }
+  if type_of(probe) == "dict" {
+    let tc = __safe_dict(probe["tool_calling"])
+    let fallback = __safe_string(tc["fallback_mode"], "")
+    if fallback == "disabled" {
+      return 1
+    }
+  }
+  return 0
+}

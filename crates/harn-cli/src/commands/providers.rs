@@ -169,7 +169,52 @@ pub(crate) fn run_matrix(args: &ProvidersMatrixArgs) -> Result<(), String> {
     Ok(())
 }
 
-pub(crate) fn run_recommend(args: &ProvidersRecommendArgs) -> Result<(), String> {
+pub(crate) async fn run_recommend(args: &ProvidersRecommendArgs) -> Result<(), String> {
+    if std::env::var("HARN_CLI_IMPL").as_deref() == Ok("rust") {
+        return run_recommend_legacy(args);
+    }
+    let exit_code = run_recommend_dispatch(args).await?;
+    if exit_code != 0 {
+        std::process::exit(exit_code);
+    }
+    Ok(())
+}
+
+async fn run_recommend_dispatch(args: &ProvidersRecommendArgs) -> Result<i32, String> {
+    let report = load_filtered_recommend_report(args)?;
+    let payload_json = serde_json::to_string(&report)
+        .map_err(|error| format!("failed to serialise recommend payload: {error}"))?;
+    // Pretty companion so the script can forward bytes verbatim in
+    // `--json` mode — Harn's JSON round-trip would otherwise normalise
+    // integer-valued floats and lose serde fidelity. The legacy impl
+    // emits `serde_json::to_string_pretty(&report)`.
+    let payload_pretty = serde_json::to_string_pretty(&report)
+        .map_err(|error| format!("failed to render recommend payload: {error}"))?;
+
+    static DISPATCH_LOCK: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
+    let _guard = DISPATCH_LOCK.lock().await;
+    let _payload_guard =
+        crate::env_guard::ScopedEnvVar::set("HARN_PROVIDERS_RECOMMEND_PAYLOAD_JSON", &payload_json);
+    let _pretty_guard = crate::env_guard::ScopedEnvVar::set(
+        "HARN_PROVIDERS_RECOMMEND_PAYLOAD_PRETTY",
+        &payload_pretty,
+    );
+    let outcome =
+        crate::dispatch::run_embedded_script("providers/recommend", Vec::new(), args.json).await;
+    if !outcome.stderr.is_empty() {
+        use std::io::Write as _;
+        let _ = std::io::stderr().write_all(outcome.stderr.as_bytes());
+    }
+    if !outcome.stdout.is_empty() {
+        use std::io::Write as _;
+        let _ = std::io::stdout().write_all(outcome.stdout.as_bytes());
+    }
+    Ok(outcome.exit_code)
+}
+
+fn load_filtered_recommend_report(
+    args: &ProvidersRecommendArgs,
+) -> Result<crate::commands::local_readiness::LocalReadinessReport, String> {
     let report = if let Some(summary) = args.summary.as_deref() {
         crate::commands::local_readiness::report_from_summary_path(summary)?
     } else if let Some(input) = args.input.as_deref() {
@@ -177,10 +222,16 @@ pub(crate) fn run_recommend(args: &ProvidersRecommendArgs) -> Result<(), String>
     } else {
         crate::commands::local_readiness::load_default_report()?
     };
-    let report = crate::commands::local_readiness::filter_report_by_provider(
+    Ok(crate::commands::local_readiness::filter_report_by_provider(
         report,
         args.provider.as_deref(),
-    );
+    ))
+}
+
+/// Legacy direct-render path. Kept verbatim for the parity-snapshot
+/// harness (#2299) until C1 (#2314) deletes it.
+fn run_recommend_legacy(args: &ProvidersRecommendArgs) -> Result<(), String> {
+    let report = load_filtered_recommend_report(args)?;
     if args.json {
         println!(
             "{}",
