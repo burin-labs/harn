@@ -1,0 +1,46 @@
+import "../_common"
+
+pipeline default() {
+  let repo_root = exec("git", "rev-parse", "--show-toplevel").stdout.trim()
+  let harn_bin = harness.env.get_or("HARN_CONFORMANCE_HARN_BIN", resolve_harn_bin(harness, repo_root))
+  let root = path_join(harness.fs.temp_dir(), "harn-durable-step-" + uuid_v7())
+  let state = path_join(root, "state")
+  let script = path_join(root, "durable_step_child.harn")
+  harness.fs.mkdir(root)
+  harness.fs
+    .write_text(
+    script,
+    "fn main(harness: Harness) {\n"
+      + "  let counter = path_join(cwd(), \"counter.txt\")\n"
+      + "  let user_id = argv[0]\n"
+      + "  let value = step.run(\"load-user\", {user_id: user_id}, { ->\n"
+      + "    let current = if harness.fs.exists(counter) { to_int(harness.fs.read_text(counter).trim()) ?? 0 } else { 0 }\n"
+      + "    let next = current + 1\n"
+      + "    harness.fs.write_text(counter, to_string(next))\n"
+      + "    return {loaded: user_id, counter: next}\n"
+      + "  }, {namespace: \"conformance-durable-step\"})\n"
+      + "  let stored = harness.fs.read_text(counter).trim()\n"
+      + "  let records = step.inspect({namespace: \"conformance-durable-step\"})\n"
+      + "  __io_println(\"loaded=\" + value.loaded)\n"
+      + "  __io_println(\"value_counter=\" + to_string(value.counter))\n"
+      + "  __io_println(\"stored_counter=\" + stored)\n"
+      + "  __io_println(\"records=\" + to_string(len(records)))\n"
+      + "}\n",
+  )
+  let first = exec_at(root, "env", "HARN_STATE_DIR=" + state, harn_bin, "run", script, "--", "alice")
+  let second = exec_at(root, "env", "HARN_STATE_DIR=" + state, harn_bin, "run", script, "--", "alice")
+  let mismatch = exec_at(root, "env", "HARN_STATE_DIR=" + state, harn_bin, "run", script, "--", "bob")
+  __io_println(first.success)
+  __io_println(contains(first.stdout, "loaded=alice"))
+  __io_println(contains(first.stdout, "value_counter=1"))
+  __io_println(contains(first.stdout, "stored_counter=1"))
+  __io_println(contains(first.stdout, "records=1"))
+  __io_println(second.success)
+  __io_println(contains(second.stdout, "loaded=alice"))
+  __io_println(contains(second.stdout, "value_counter=1"))
+  __io_println(contains(second.stdout, "stored_counter=1"))
+  __io_println(contains(second.stdout, "records=1"))
+  __io_println(!contains(second.stdout, "value_counter=2"))
+  __io_println(!mismatch.success)
+  __io_println(contains(mismatch.stderr, "step.run: deterministic input mismatch"))
+}

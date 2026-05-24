@@ -14,7 +14,7 @@ The comparison is current as of April 2026.
 | Capability | Harn | Inngest / AgentKit | Temporal | LangGraph | Cursor Automations |
 |---|---|---|---|---|---|
 | Typed DSL? | Yes. Harn programs are a typed orchestration language. | No. Workflows are written through language SDKs and AgentKit libraries. | No. Workflows are general-purpose-language code with SDK constraints. | No. Graphs are Python or JavaScript objects and functions. | No. Automations are trigger plus instruction configurations for Cursor agents. |
-| Deterministic replay? | Yes. Replay is a runtime contract around the EventLog, VM effects, transcripts, and trigger delivery. | Partial. Durable steps memoize work and resume runs, but LLM replay depends on how the application wraps model calls. | Yes for workflow state. Workflow code must remain deterministic and side effects move into Activities. | Partial. Checkpoints resume stateful graph runs; node code and model calls still need app-level discipline. | No public deterministic replay contract for arbitrary automations. |
+| Deterministic replay? | Yes. Replay is a runtime contract around the EventLog, `step.run` memoized effects, VM effects, transcripts, and trigger delivery. | Partial. Durable steps memoize work and resume runs, but LLM replay depends on how the application wraps model calls. | Yes for workflow state. Workflow code must remain deterministic and side effects move into Activities. | Partial. Checkpoints resume stateful graph runs; node code and model calls still need app-level discipline. | No public deterministic replay contract for arbitrary automations. |
 | LLM-native trigger predicates? | Yes. Flow predicates and trigger budgets are part of the runtime surface. | Partial. AI calls can be durable steps, but trigger classification is application code. | No. Temporal can orchestrate an LLM classifier Activity, but predicates are not a workflow-language primitive. | Partial. Conditional edges can use model output, but this is graph logic rather than a trigger substrate. | No. Event and schedule triggers launch instruction-driven agents; predicates are not typed public runtime objects. |
 | OSS and self-hostable? | Yes. The language, runtime, orchestrator, connectors, and docs are open and self-hostable. | Partial. SDKs are Apache-2.0, while the server/CLI use SSPL plus delayed Apache publication and can be self-hosted. | Yes. Temporal is open source and can be self-hosted, with Temporal Cloud available. | Partial. LangGraph is open source; the full managed platform/self-hosted control plane is tied to LangSmith plans. | Partial. Cursor announced self-hosted cloud agents for code/tool execution, but Automations remain a Cursor product surface. |
 | Same program, any deploy? | Yes. The same `.harn` program can run locally, in CI, in a self-hosted orchestrator, or behind Harn Cloud. | Partial. Functions deploy to app infrastructure but depend on Inngest's event/executor contract. | Partial. Workflow code is portable across Temporal deployments, but Activities, workers, and task queues are deployment-shaped. | Partial. Graph code can move between local and platform deployments, with production behavior depending on checkpointers and LangSmith deployment choices. | No. Automations are Cursor-managed agent workflows. |
@@ -59,8 +59,9 @@ Activities. Inngest and LangGraph provide durable execution and checkpointing,
 which are valuable, but they do not by themselves make arbitrary LLM calls
 replay-identical.
 
-See [Transcript architecture](./transcript-architecture.md),
-[Testing](./testing.md), and [Trigger event schema](./triggers/event-schema.md).
+See [Durable step stdlib](./stdlib/step.md),
+[Transcript architecture](./transcript-architecture.md), [Testing](./testing.md),
+and [Trigger event schema](./triggers/event-schema.md).
 
 ### LLM-native trigger predicates
 
